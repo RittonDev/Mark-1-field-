@@ -156,6 +156,19 @@ export async function listOutbox(limit = 1000, db?: DB): Promise<OutboxOp[]> {
   return rows.map(toOp);
 }
 
+export type PendingOp = OutboxOp & { ticket_code: string | null };
+
+/** Fila com o código da OS, para a tela de pendências. */
+export async function listPendingOps(): Promise<PendingOp[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<OutboxRow & { ticket_code: string | null }>(
+    `SELECT o.*, json_extract(t.json, '$.code') AS ticket_code
+       FROM outbox o LEFT JOIN tickets t ON t.id = o.ticket_id
+      ORDER BY o.seq`,
+  );
+  return rows.map((row) => ({ ...toOp(row), ticket_code: row.ticket_code }));
+}
+
 async function opsForTicket(db: DB, ticketId: UUID): Promise<OutboxOp[]> {
   const rows = await db.getAllAsync<OutboxRow>("SELECT * FROM outbox WHERE ticket_id = ? ORDER BY seq", ticketId);
   return rows.map(toOp);

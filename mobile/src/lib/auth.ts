@@ -1,4 +1,5 @@
 import { request } from "./api";
+import { notifyDataChanged } from "./changes";
 import { getKv, resetLocalData, setKv } from "./db";
 import { registerDevice, unregisterDevice, type DeviceRegistration } from "./device";
 import { session } from "./session";
@@ -14,6 +15,7 @@ export const getDeviceRegistration = () => lastRegistration;
 export async function startSession() {
   startSync();
   lastRegistration = await registerDevice();
+  notifyDataChanged();
 }
 
 export async function login(email: string, password: string, apiUrl: string) {
