@@ -1,32 +1,41 @@
-# Dependências e build
+# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+
+# dependencies
 node_modules/
+
+# Expo
 .expo/
-.expo-shared/
 dist/
 web-build/
-*.tsbuildinfo
+expo-env.d.ts
 
-# Pastas nativas geradas por `expo prebuild`
-android/
-ios/
-
-# Segredos / configuração local
-.env
-.env.*
-!.env.example
-*.keystore
+# Native
+.kotlin/
+*.orig.*
 *.jks
 *.p8
 *.p12
 *.key
 *.mobileprovision
-google-services.json
-GoogleService-Info.plist
 
-# Logs / SO
+# Metro
+.metro-health-check*
+
+# debug
 npm-debug.*
 yarn-debug.*
 yarn-error.*
-*.log
+
+# macOS
 .DS_Store
-Thumbs.db
+*.pem
+
+# local env files
+.env*.local
+
+# typescript
+*.tsbuildinfo
+
+# generated native folders
+/ios
+/android
