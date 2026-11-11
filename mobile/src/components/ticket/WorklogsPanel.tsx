@@ -27,17 +27,12 @@ export function WorklogsPanel({ ticket, user }: { ticket: LocalTicket; user: Use
   const minutesNumber = Number(minutes);
   const valid = description.trim().length > 0 && Number.isInteger(minutesNumber) && minutesNumber > 0 && minutesNumber <= 1440;
 
-  function pickQuick(value: number) {
-    setMinutes(String(value));
-    // Sem início informado, assume que a atividade acabou agora.
-    if (!startedAt) setStartedAt(new Date(Date.now() - value * 60_000));
-  }
-
   async function save() {
     if (!valid) return;
     setSaving(true);
     setError(null);
     try {
+      // Sem início informado, considera que a atividade terminou agora.
       const start = startedAt ?? new Date(Date.now() - minutesNumber * 60_000);
       await enqueueWorklog(ticket.id, {
         description: description.trim(),
@@ -93,7 +88,7 @@ export function WorklogsPanel({ ticket, user }: { ticket: LocalTicket; user: Use
               {QUICK_MINUTES.map((value) => (
                 <Pressable
                   key={value}
-                  onPress={() => pickQuick(value)}
+                  onPress={() => setMinutes(String(value))}
                   style={[styles.chip, minutesNumber === value && styles.chipActive]}
                   accessibilityRole="button"
                 >
