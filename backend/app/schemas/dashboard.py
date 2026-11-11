@@ -1,0 +1,25 @@
+import uuid
+
+from pydantic import BaseModel
+
+
+class AssigneeLoad(BaseModel):
+    user_id: uuid.UUID
+    name: str
+    open: int
+    in_progress: int
+    breached: int
+
+
+class DashboardSummary(BaseModel):
+    by_status: dict[str, int]
+    by_priority: dict[str, int]
+    open_total: int
+    unassigned: int
+    sla_breached: int
+    sla_at_risk: int
+    created_today: int
+    resolved_today: int
+    avg_resolution_minutes_30d: float | None
+    sla_compliance_30d: float | None  # % de OS resolvidas dentro do prazo nos últimos 30 dias
+    by_assignee: list[AssigneeLoad]

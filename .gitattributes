@@ -1,0 +1,7 @@
+# Quebra de linha LF no repositório e na cópia local: o código roda em containers Linux.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff2 binary
