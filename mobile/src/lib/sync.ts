@@ -179,6 +179,15 @@ function toWire(op: OutboxOp): SyncOperationIn {
   };
 }
 
+/** O backend monta erros de validação como "campo: Value error, msg" (com campo vazio no nível do modelo). */
+function cleanServerError(error: string | null): string {
+  if (!error) return "regra de negócio";
+  return error
+    .split("; ")
+    .map((part) => part.replace(/^:\s*/, "").replace(/Value error, /g, ""))
+    .join("; ");
+}
+
 export function describeOp(op: SyncOperation): string {
   switch (op.type) {
     case "transition":
@@ -214,7 +223,7 @@ async function pushOutbox() {
               ticket_id: op.ticket_id,
               ticket_code: ticket?.code ?? null,
               kind: "rejected",
-              message: `${describeOp(op)}: ${error.message}`,
+              message: `${describeOp(op)}: o servidor recusou — ${cleanServerError(error.message)}`,
             });
             await rebaseTicket(db, op.ticket_id, user);
           }
@@ -240,8 +249,8 @@ async function pushOutbox() {
           await deleteLocalDraft(db, op.client_op_id);
           const message =
             result.status === "conflict"
-              ? `${describeOp(op)} descartada: a OS foi alterada por outra pessoa. Confira o estado atual.`
-              : `${describeOp(op)} recusada: ${result.error ?? "regra de negócio"}`;
+              ? `${describeOp(op)}: descartado porque a OS foi alterada por outra pessoa. Confira o estado atual.`
+              : `${describeOp(op)}: o servidor recusou — ${cleanServerError(result.error)}`;
           await addNotice(db, { ticket_id: op.ticket_id, ticket_code: ticket?.code ?? null, kind: result.status, message });
           problems.push(`${ticket?.code ?? "OS"}: ${message}`);
         }
