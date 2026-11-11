@@ -85,6 +85,24 @@ docker cp mig:/app/alembic/versions/. backend/alembic/versions && docker rm mig
 Revise o arquivo gerado antes de commitar. Para apontar para outro PostgreSQL, troque `DATABASE_URL`
 (formato `postgresql+asyncpg://usuario:senha@host:5432/banco`).
 
+## Sincronização com o GitHub
+
+Repositório: https://github.com/RittonDev/Mark-1-field- (branch `main`, **público**).
+
+Para manter a pasta sincronizada continuamente (commit e push automáticos de cada alteração, mais
+pull do que chegar no GitHub), deixe rodando num terminal:
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts/sync-github.ps1
+```
+
+- Verifica a cada 20 s (`-IntervalSeconds 10` para mudar) e só commita quando as alterações ficam
+  estáveis por um ciclo, para não pegar um arquivo no meio do salvamento.
+- Recusa enviar `.env`, chaves (`.pem`, `.key`…) e arquivos acima de 50 MB. Como o repositório é
+  público, segredos ficam só no `.env`, que está no `.gitignore`.
+- Para no primeiro conflito com o GitHub, sem forçar nada: resolva com `git status` e rode de novo.
+- `-Once` faz uma única rodada (útil para testar).
+
 ## Documentação
 
 - [docs/API.md](docs/API.md): contrato da API e eventos WebSocket
