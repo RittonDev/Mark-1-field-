@@ -409,6 +409,18 @@ export async function dismissNotice(id: number): Promise<void> {
 
 // ─────────────────────────── geral ────────────────────────────
 
+/** OS fechadas/canceladas há mais de 30 dias saem do aparelho (o servidor continua com elas). */
+export async function pruneOld(db: DB): Promise<void> {
+  const cutoff = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
+  await db.runAsync(
+    `DELETE FROM tickets WHERE status IN ('closed', 'cancelled') AND updated_at < ?
+       AND id NOT IN (SELECT ticket_id FROM outbox)`,
+    cutoff,
+  );
+  await db.runAsync("DELETE FROM comments WHERE ticket_id NOT IN (SELECT id FROM tickets) AND local_state IS NULL");
+  await db.runAsync("DELETE FROM worklogs WHERE ticket_id NOT IN (SELECT id FROM tickets) AND local_state IS NULL");
+}
+
 /** Apaga tudo (troca de usuário no aparelho). */
 export async function resetLocalData(): Promise<void> {
   await transaction(async (db) => {
