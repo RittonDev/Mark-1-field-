@@ -376,8 +376,9 @@ export async function queuePhoto(ticketId: UUID, sourceUri: string, mimeType: st
   const id = randomUUID();
   const mime = mimeType ?? "image/jpeg";
   const ext = mime === "image/png" ? "png" : mime === "image/heic" ? "heic" : "jpg";
-  const filename = `foto-${new Date().toISOString().replace(/[:.]/g, "-")}.${ext}`;
-  const target = new File(dir, `${id}.${ext}`);
+  // O nome do arquivo local é o que chega ao servidor no multipart.
+  const filename = `foto-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}-${id.slice(0, 8)}.${ext}`;
+  const target = new File(dir, filename);
   await new File(sourceUri).copy(target);
   await insertPhoto({
     id,

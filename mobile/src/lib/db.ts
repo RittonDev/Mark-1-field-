@@ -104,10 +104,20 @@ export function getDb(): Promise<DB> {
   return dbPromise;
 }
 
-/** Transação exclusiva: nada de outra tarefa assíncrona entra no meio. */
+let writeQueue: Promise<unknown> = Promise.resolve();
+
+/**
+ * Transação exclusiva. Cada uma abre a própria conexão no expo-sqlite, então todas as
+ * escritas passam por esta fila em JS: duas transações nunca disputam o lock (SQLITE_BUSY).
+ * Não chame transaction() de dentro de outra — use o `db` recebido.
+ */
 export async function transaction(task: (db: DB) => Promise<void>): Promise<void> {
-  const db = await getDb();
-  await db.withExclusiveTransactionAsync(task);
+  const run = writeQueue.then(async () => {
+    const db = await getDb();
+    await db.withExclusiveTransactionAsync(task);
+  });
+  writeQueue = run.catch(() => undefined);
+  await run;
   notifyDataChanged();
 }
 
@@ -119,9 +129,10 @@ export async function getKv(key: string): Promise<string | null> {
   return row?.value ?? null;
 }
 
+/** Dentro de uma transação, passe o `db` dela; fora, a escrita entra na fila de transações. */
 export async function setKv(key: string, value: string | null, db?: DB): Promise<void> {
-  const conn = db ?? (await getDb());
-  await conn.runAsync("INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", key, value);
+  if (!db) return transaction((txn) => setKv(key, value, txn));
+  await db.runAsync("INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", key, value);
 }
 
 // ─────────────────────────── outbox ───────────────────────────
