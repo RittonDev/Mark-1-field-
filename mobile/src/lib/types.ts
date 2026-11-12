@@ -407,3 +407,50 @@ export interface TicketTransitionPayload {
   longitude?: number | null;
   expected_version?: number;
 }
+
+/** Atividades do dia (GET /activities/day): o previsto e o realizado na mesma linha. */
+export type ActivityState =
+  | "scheduled"
+  | "late"
+  | "en_route"
+  | "in_progress"
+  | "on_hold"
+  | "rescheduled"
+  | "done"
+  | "pending";
+
+export interface Activity {
+  ticket: TicketListItem;
+  state: ActivityState;
+  scheduled_start: ISODate | null;
+  scheduled_end: ISODate | null;
+  started_at: ISODate | null;
+  arrived_at: ISODate | null;
+  finished_at: ISODate | null;
+  start_delay_minutes: number | null;
+  start_has_gps: boolean;
+  service_type_name: string | null;
+  estimated_minutes: number | null;
+  actual_minutes: number;
+}
+
+export interface DaySummary {
+  total: number;
+  scheduled: number;
+  late: number;
+  en_route: number;
+  in_progress: number;
+  on_hold: number;
+  rescheduled: number;
+  done: number;
+  pending: number;
+  unassigned: number;
+}
+
+export interface DayActivities {
+  date: string;
+  timezone: string;
+  is_today: boolean;
+  summary: DaySummary;
+  activities: Activity[];
+}
