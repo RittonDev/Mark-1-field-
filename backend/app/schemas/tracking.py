@@ -107,3 +107,48 @@ class TrackingHistory(BaseModel):
     date: dt.date
     points: list[HistoryPoint]
     status_events: list[HistoryStatusEvent]
+
+
+# ------------------------------------------------------------------ distâncias no mapa
+
+
+class MapPoint(BaseModel):
+    latitude: float
+    longitude: float
+    label: str
+    # Medido pelo centro da cidade (o lugar não tem coordenada própria).
+    approximate: bool = False
+
+
+class DistanceLeg(BaseModel):
+    """Um trecho medido: em linha reta, a estimativa pelas ruas e o tempo de carro."""
+
+    km: float
+    road_km: float
+    minutes: int
+    approximate: bool = False
+
+
+class TechnicianHome(MapPoint):
+    # "home": endereço de casa com coordenada; "home_city": cidade de casa (centro da cidade);
+    # "base_city": sem casa no cadastro, a cidade onde mais atende (centro da cidade).
+    kind: Literal["home", "home_city", "base_city"]
+
+
+class TechnicianDistance(BaseModel):
+    id: uuid.UUID
+    name: str
+    phone: str | None = None
+    # Última posição do app (até 24 h) e há quanto tempo foi registrada.
+    live: MapPoint | None = None
+    live_at: dt.datetime | None = None
+    home: TechnicianHome | None = None
+    # Com loja escolhida: de onde ele está agora e de casa até a loja.
+    live_to_place: DistanceLeg | None = None
+    home_to_place: DistanceLeg | None = None
+    live_to_home: DistanceLeg | None = None
+
+
+class MapDistances(BaseModel):
+    place: MapPoint | None = None
+    technicians: list[TechnicianDistance]
