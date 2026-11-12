@@ -26,10 +26,10 @@ export function RouteMapPattern({ height = 300 }: { height?: number }) {
           <Path d="M338 -10 C 330 100, 346 200, 334 310" stroke={street} strokeWidth={1.2} />
           <Path d="M-10 280 L 120 170 L 210 96 L 300 20 L 360 -10" stroke={street} strokeWidth={1.2} />
           {/* rota entre os dois pinos */}
-          <Path d="M96 196 C 120 150, 150 140, 196 136 S 262 118, 290 86" stroke={route} strokeWidth={2} strokeDasharray="5 6" />
+          <Path d="M262 246 C 282 214, 300 196, 322 176 S 352 128, 344 66" stroke={route} strokeWidth={2} strokeDasharray="5 6" />
         </G>
-        <Circle cx={96} cy={196} r={5} fill={c.surface} stroke={c.primary} strokeWidth={2.5} />
-        <G transform="translate(290 86)">
+        <Circle cx={262} cy={246} r={5} fill={c.surface} stroke={c.primary} strokeWidth={2.5} />
+        <G transform="translate(344 66)">
           <Path d="M0 0 C -9 -10, -12 -16, -12 -22 A 12 12 0 1 1 12 -22 C 12 -16, 9 -10, 0 0 Z" fill={c.primary} />
           <Circle cx={0} cy={-22} r={4.5} fill={c.surface} />
         </G>

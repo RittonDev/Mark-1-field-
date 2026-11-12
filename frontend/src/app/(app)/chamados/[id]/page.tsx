@@ -14,6 +14,8 @@ import { EditTicketDialog } from "@/components/ticket/EditTicketDialog";
 import { ExpensesCard } from "@/components/ticket/ExpensesCard";
 import { FormsCard } from "@/components/ticket/FormsCard";
 import { MessagesCard } from "@/components/ticket/MessagesPanel";
+import { OwnerCard } from "@/components/ticket/OwnerCard";
+import { ReportLinkCard } from "@/components/ticket/ReportLinkCard";
 import { HistoryTab } from "@/components/ticket/HistoryTab";
 import { QuotesCard } from "@/components/ticket/QuotesCard";
 import { SlaCard } from "@/components/ticket/SlaCard";
@@ -22,6 +24,7 @@ import { TransitionDialog } from "@/components/ticket/TransitionDialog";
 import { UNPRODUCTIVE_FROM, UnproductiveDialog } from "@/components/ticket/UnproductiveDialog";
 import { WhatsAppShare } from "@/components/ticket/WhatsAppShare";
 import { WorklogsTab } from "@/components/ticket/WorklogsTab";
+import { Tabs } from "@/components/motion";
 import { Button, Card, ErrorBox, LoadingBlock } from "@/components/ui";
 import { useNow } from "@/components/useNow";
 import { api, errorMessage } from "@/lib/api";
@@ -144,7 +147,7 @@ export default function TicketDetailPage() {
                 </span>
               ) : null}
             </div>
-            <h1 className="mt-2 text-xl font-semibold tracking-tight text-ink">{ticket.title}</h1>
+            <h1 className="mt-2 text-[22px] leading-tight font-semibold tracking-[-0.015em] text-ink">{ticket.title}</h1>
             <p className="mt-1 text-sm text-ink-muted">{info.description}</p>
           </div>
           <div className="flex shrink-0 flex-col gap-1.5 rounded-lg bg-surface-2 px-4 py-3">
@@ -221,6 +224,8 @@ export default function TicketDetailPage() {
             ) : null}
           </Card>
 
+          <ReportLinkCard ticket={ticket} />
+
           {ticket.can_assign ? <MessagesCard ticketId={ticket.id} /> : null}
 
           <FormsCard ticket={ticket} />
@@ -228,22 +233,8 @@ export default function TicketDetailPage() {
           <QuotesCard ticket={ticket} />
 
           <Card>
-            <div className="flex gap-1 overflow-x-auto border-b border-line px-3">
-              {TABS.map((t) => (
-                <button
-                  key={t.key}
-                  type="button"
-                  onClick={() => setTab(t.key)}
-                  className={clsx(
-                    "-mb-px border-b-2 px-3 py-2.5 text-sm whitespace-nowrap transition-colors",
-                    tab === t.key
-                      ? "border-brand font-medium text-ink"
-                      : "border-transparent text-ink-muted hover:text-ink",
-                  )}
-                >
-                  {t.label}
-                </button>
-              ))}
+            <div className="border-b border-line px-3 pt-2">
+              <Tabs items={TABS} value={tab} onChange={setTab} ariaLabel="Seções da OS" />
             </div>
             <div className="p-4">
               {tab === "comments" ? <CommentsTab ticketId={ticket.id} /> : null}
@@ -255,6 +246,7 @@ export default function TicketDetailPage() {
         </div>
 
         <div className="flex flex-col gap-4">
+          <OwnerCard ticket={ticket} />
           <AssignmentPanel key={`${ticket.assignee?.id ?? "none"}-${ticket.version}`} ticket={ticket} />
           <SlaCard ticket={ticket} />
           <ExpensesCard ticket={ticket} />

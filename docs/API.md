@@ -98,13 +98,14 @@ Equivale ao "Tipo de OS" do Field Control. Sem `customer_id`, o tipo vale para t
 
 ### OS / Chamados
 - `GET /tickets` → `Page<TicketListItem> {items,total,page,page_size}`
-  - filtros: `status` (repetível), `priority` (repetível), `type`, `assignee_id`, `team_id`, `customer_id`, `location_id`, `service_type_id`, `violation_pending=true`, `category_id`, `asset_id`, `q` (título, descrição, número), `mine=true`, `unassigned=true`, `open_only=true`, `sla_breached=true`
+  - filtros: `status` (repetível), `priority` (repetível), `type`, `assignee_id`, `team_id`, `customer_id`, `location_id`, `service_type_id`, `violation_pending=true`, `category_id`, `asset_id`, `owner_id`, `no_owner=true`, `q` (título, descrição, número), `mine=true` (analista: executa ou é o responsável), `unassigned=true`, `open_only=true`, `sla_breached=true`
   - `page` (1..), `page_size` (1..500, padrão 25), `order_by` ∈ `updated_at, created_at, priority, resolution_due_at, number` com `-` para desc (padrão `-updated_at`)
 - `POST /tickets` `TicketCreate` → `TicketDetail` (201)
 - `GET /tickets/{id}` → `TicketDetail`
 - `PATCH /tickets/{id}` `TicketUpdate` → `TicketDetail`
 - `POST /tickets/{id}/assign` `{assignee_id|null, team_id?, note?, expected_version?}` → `TicketDetail`
-- `POST /tickets/{id}/take` → `TicketDetail` (atribui ao usuário logado)
+- `POST /tickets/{id}/take` → `TicketDetail` (atribui ao usuário logado); se a OS não tem analista responsável, ele passa a ser
+- `POST /tickets/{id}/claim` → `TicketDetail` (puxa para a fila do usuário logado: vira o `owner`; o técnico não muda)
 - `POST /tickets/{id}/transition` `{to_status, note?, resolution_notes?, scheduled_start?, scheduled_end?, latitude?, longitude?, expected_version?}` → `TicketDetail`
 - `GET /tickets/{id}/comments` → `CommentOut[]` · `POST` `{body, is_internal}` → `CommentOut`
 - `GET /tickets/{id}/events` → `EventOut[]` (histórico, mais recente primeiro)
@@ -279,4 +280,53 @@ Todos exigem analista ou gestor, salvo indicação. Valores em R$ chegam como n�
   `GET /message-templates` → `{templates: [{key, name, body}], variables: [{key, description}]}` ·
   `PUT /message-templates {templates}` · `POST /message-templates/reset`. Variáveis desconhecidas ficam como estão;
   `{chegada_prevista}` usa a última posição do técnico na jornada (até 30 min) e cai para o horário agendado.
-- **Puxar OS do colega:** `GET /tickets?assignee_id=` (fila de outra pessoa) + `POST /tickets/{id}/take` (analista/gestor, OS aberta).
+- **Puxar OS do colega:** `GET /tickets?owner_id=` (fila de outro analista) + `POST /tickets/{id}/claim` (vira o responsável; ver abaixo).
+
+## Fila do analista e relatório do cliente
+
+**Analista responsável (`owner`).** Separado de quem executa (`assignee`, técnico em campo ou analista no
+remoto): é a fila em que a OS aparece até o fim. `TicketListItem.owner: UserRef | null` (e no detalhe).
+Quem abre pela gestão vira o responsável (ou escolha `owner_id` em `POST /tickets`); OS aberta pelo
+solicitante fica sem analista. `PATCH /tickets/{id} {owner_id|null}` transfere ou tira da fila (só gestão;
+o destino precisa ser analista/supervisor/admin ativo, senão 422 "Escolha um analista ou gestor").
+`POST /tickets/{id}/claim` puxa para a minha fila (422 se já é minha ou se a OS não está em aberto).
+Assumir (`/take`) ou iniciar uma OS sem analista também coloca na fila de quem assumiu. Cada troca gera o
+evento interno `owner_changed` (`data: {from_name, to_name}`, `note` ex.: "Bruno puxou a OS de Carla").
+
+**Minha fila.** `GET /my-queue?user_id=&date=AAAA-MM-DD` (gestão; sem `user_id`, a minha; sem `date`, hoje no
+fuso `TIMEZONE`) → `{user, date, generated_at, counts, items}`. Entram as OS em aberto em que a pessoa é
+responsável ou executa, mais as concluídas no dia. Cada item é um `TicketListItem` com:
+- `section`: `in_field` (em deslocamento/atendimento) → `done` (resolvida/fechada no dia) → `attention`
+  (algum motivo `danger`/`warning`) → `today` (agendada no dia) → `waiting` (aguardando cliente/fornecedor)
+  → `upcoming` (agendada depois) → `unscheduled`. Os itens vêm nessa ordem de tela: attention (pior primeiro,
+  depois prazo), in_field (mais recente), today/upcoming (horário), waiting/unscheduled (prazo), done.
+- `reasons: [{code, label, tone}]`: `sla_violated` (danger), `sla_at_risk` (warning), `late_start` (danger,
+  agendada que passou do horário sem sair), `no_technician` (warning, sem técnico de campo), `unproductive`
+  (warning, improdutiva sem nova agenda), `violation_pending` (info, concluída com SLA a justificar).
+- `counts`: `open` (em aberto) e o tamanho de cada seção.
+
+`GET /queues` (gestão) → `{queues: [{user, role, open, attention, today, in_field}], unowned: {...}}`: a
+fila de cada analista/gestor ativo e as OS sem analista.
+
+**Relatório para o cliente.** Ao concluir (resolvida ou fechada) a OS ganha um link público com o resumo
+do atendimento, que o cliente pode salvar em PDF. O token é `<id>.<assinatura HMAC>`: só o id fica no
+banco, então o link pode ser copiado de novo a qualquer momento e trocado quando preciso.
+- `TicketDetail.report_link` (só para a gestão): `{token, path: "/relatorio/<token>", url, created_at,
+  views, last_viewed_at}` ou `null`.
+- `POST /tickets/{id}/report-link` (cria se não houver; 422 "Disponível quando a OS for concluída") ·
+  `POST /tickets/{id}/report-link/rotate` (novo link, o anterior para de funcionar) ·
+  `DELETE /tickets/{id}/report-link` (204). Nenhum dos três muda a `version` da OS.
+- Público, sem login: `GET /public/reports/{token}` → `PublicReport {code, title, description, status,
+  status_label, company_name, customer {name, document}, location {name, code, address, city, state},
+  service_address, requester_name, service_type, technician {name}, opened_at, scheduled_start,
+  scheduled_end, en_route_at, arrived_at, finished_at, closed_at, on_site_minutes, check_in_gps,
+  resolution_notes, forms [{name, completed_at, items [{label, type, value, photos [{url, filename}]}]}],
+  photos [{url, filename, taken_at}], signature {name, role, signed_at, image_url}, timeline [{at, label}],
+  generated_at}`. Respostas formatadas (Sim/Não, dd/mm/aaaa, vírgula decimal); `type: "section"` é título.
+  Fotos com URL absoluta assinada (24 h; base `API_PUBLIC_URL` ou o endereço da requisição). 404 "Link
+  inválido ou expirado" (token adulterado, trocado ou revogado); 409 quando a OS foi reaberta. Cada
+  visita soma em `views` sem mexer na OS. Nunca inclui acompanhamentos, apontamentos, custos, orçamentos,
+  notas internas nem motivos de violação.
+- Textos do WhatsApp: variável `{link_relatorio}` (o link da OS concluída; antes disso, "(disponível quando
+  a OS for concluída)"), já no texto padrão de Fechamento. `{analista}` agora é o responsável pela OS.
+- Configuração: `COMPANY_NAME` (nome no relatório, padrão "Maxx Field") e `API_PUBLIC_URL` (opcional).

@@ -39,6 +39,7 @@ export type AssetType =
   | "other";
 export type TicketEventType =
   | "created"
+  | "owner_changed"
   | "updated"
   | "status_changed"
   | "assigned"
