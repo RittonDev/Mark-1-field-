@@ -38,6 +38,7 @@ domínio `@maxxgroup.com.br`); técnicos entram no app com o e-mail e a senha qu
 - **Atribuição a analista ou técnico** (com a carga atual de cada um), "assumir OS" (analista), grupos técnicos e roteamento por categoria.
 - **SLA** de 1ª resposta e de solução por prioridade (matriz impacto × urgência), pausado nas pendências, com alertas "em risco" e "violado".
 - **Detalhe da OS:** acompanhamentos públicos e notas internas, histórico/auditoria, apontamento de horas, anexos e fotos, check-in por GPS.
+- **Anexos da OS pela web:** o analista arrasta fotos e arquivos do computador (ou escolhe vários de uma vez), com uma descrição opcional para o lote; põe ou edita a **descrição de cada foto** (legenda que aparece no relatório do cliente e no PDF); e **exclui** anexos (só a gestão, com registro no histórico; a assinatura do responsável não sai). Vale também em OS concluída. O técnico edita a legenda só das fotos que ele mesmo enviou.
 - **Quadro kanban** com arrastar e soltar, que só aceita transições válidas.
 - **Dashboard:** backlog, SLA, conformidade em 30 dias, tempo médio de solução, carga por analista.
 - **Locais como filiais** (como no Field Control): cada local tem código e CNPJ próprio, tela própria com busca e paginação, e histórico resumido (OS abertas, total, última OS). A OS aceita um **endereço do atendimento** separado do endereço do local.
