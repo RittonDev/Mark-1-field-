@@ -41,6 +41,7 @@ export type TicketEventType =
   | "created"
   | "attachment_updated"
   | "attachment_removed"
+  | "helpers_changed"
   | "owner_changed"
   | "updated"
   | "status_changed"
@@ -276,6 +277,10 @@ export interface TicketListItem {
   project: ProjectRef | null;
   /** Analista responsável (acompanha a OS); o técnico é o `assignee`. */
   owner?: UserRef | null;
+  /** Outros técnicos da visita, além do responsável. */
+  helpers?: UserRef[];
+  /** Nº do chamado no sistema do cliente (entra na busca). */
+  client_reference?: string | null;
   requester_name: string | null;
   scheduled_start: ISODate | null;
   scheduled_end: ISODate | null;
@@ -315,6 +320,8 @@ export interface TicketDetail extends TicketListItem {
   requester_contact: string | null;
   /** Endereço do atendimento quando diferente do cadastrado no local. */
   service_address: string | null;
+  /** Observação da visita: o recado para o técnico (com quem falar, acesso, o que levar). */
+  visit_note?: string | null;
   created_by: UserRef | null;
   closed_at: ISODate | null;
   cancelled_at: ISODate | null;
@@ -482,10 +489,16 @@ export interface TicketCreatePayload {
   requester_name?: string | null;
   requester_contact?: string | null;
   service_address?: string | null;
+  client_reference?: string | null;
+  visit_note?: string | null;
   service_type_id?: UUID | null;
   estimated_minutes?: number | null;
   team_id?: UUID | null;
   assignee_id?: UUID | null;
+  /** Outros técnicos da visita (só a gestão). */
+  helper_ids?: UUID[];
+  /** Analista responsável. Omitido: quem abre assume. null: fica sem analista. */
+  owner_id?: UUID | null;
   scheduled_start?: ISODate | null;
   scheduled_end?: ISODate | null;
   allow_conflict?: boolean;
@@ -495,6 +508,43 @@ export interface TicketCreatePayload {
 export type TicketUpdatePayload = Partial<
   Omit<TicketCreatePayload, "source" | "requester_id" | "assignee_id">
 > & { expected_version?: number };
+
+/** Contexto para abrir a OS: o cliente e a loja escolhidos. */
+export interface IntakeContext {
+  upcoming_days: number;
+  customer: {
+    id: UUID;
+    name: string;
+    tags: Tag[];
+    notes: string | null;
+    rating_average: number | null;
+    rating_last: number | null;
+    total_tickets: number;
+    open_tickets: number;
+    upcoming: number;
+  } | null;
+  location: {
+    id: UUID;
+    name: string;
+    code: string | null;
+    address_line: string | null;
+    district: string | null;
+    city: string | null;
+    state: string | null;
+    zip_code: string | null;
+    latitude: number | null;
+    longitude: number | null;
+    contact_name: string | null;
+    contact_phone: string | null;
+    notes: string | null;
+    total_tickets: number;
+    open_tickets: number;
+    tickets_30d: number;
+    last_visit: { ticket_id: UUID; code: string; title: string; at: ISODate; technician: string | null } | null;
+    is_capital: boolean;
+    arrival_hours: number | null;
+  } | null;
+}
 
 export interface TicketTransitionPayload {
   to_status: TicketStatus;
@@ -648,6 +698,8 @@ export interface TrackingHistory {
 
 // Calendário e conflito de horário
 export interface ConflictItem {
+  /** Quem está ocupado (o responsável ou outro técnico da visita). */
+  who?: string | null;
   id: UUID;
   code: string;
   title: string;
@@ -1101,6 +1153,12 @@ export interface TechnicianSuggestion {
   open_tickets: number;
   on_shift: boolean;
   distance_km: number | null;
+  /** Visitas a esta mesma loja. */
+  visits_at_location?: number;
+  last_visit_at_location?: ISODate | null;
+  /** Com horário informado: ocupado nele e quantas OS já tem no dia. */
+  busy?: boolean | null;
+  day_load?: number | null;
   score: number;
   reasons: string[];
 }

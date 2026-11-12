@@ -41,7 +41,8 @@ export function ConflictList({
       </p>
       <ul className="mt-1.5 space-y-1">
         {items.map((c) => (
-          <li key={c.id} className="text-xs">
+          <li key={`${c.who ?? ""}-${c.id}`} className="text-xs">
+            {c.who ? <span className="font-medium">{c.who}: </span> : null}
             <Link href={`/chamados/${c.id}`} className="font-mono font-medium underline-offset-2 hover:underline">
               {c.code}
             </Link>{" "}

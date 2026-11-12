@@ -22,6 +22,7 @@ import {
   Pencil,
   Trash2,
   UserCog,
+  Users,
 } from "lucide-react";
 import { StatusBadge } from "@/components/badges";
 import { EmptyState, ErrorBox, LoadingBlock } from "@/components/ui";
@@ -41,6 +42,7 @@ const ICONS: Record<TicketEventType, React.ComponentType<{ className?: string }>
   attachment_added: Paperclip,
   attachment_updated: Pencil,
   attachment_removed: Trash2,
+  helpers_changed: Users,
   form_added: ClipboardList,
   form_completed: ClipboardCheck,
   form_removed: ClipboardX,
@@ -110,6 +112,27 @@ function Detail({ event }: { event: TicketEvent }) {
         {name}
       </span>
     ) : null;
+  }
+  if (event.event_type === "helpers_changed" || (event.event_type === "created" && Array.isArray(data.helpers))) {
+    const names = (value: unknown) => (Array.isArray(value) ? value.map(String) : []);
+    const added = names(event.event_type === "created" ? data.helpers : data.added);
+    const removed = names(data.removed);
+    return (
+      <span className="text-ink-muted">
+        {added.length ? (
+          <>
+            {event.event_type === "created" ? "com " : "+ "}
+            <span className="font-medium text-ink">{added.join(", ")}</span>
+          </>
+        ) : null}
+        {added.length && removed.length ? " · " : null}
+        {removed.length ? (
+          <>
+            − <span className="font-medium text-ink line-through decoration-ink-subtle">{removed.join(", ")}</span>
+          </>
+        ) : null}
+      </span>
+    );
   }
   if (event.event_type === "status_changed" && isStatus(event.from_value) && isStatus(event.to_value)) {
     return (
