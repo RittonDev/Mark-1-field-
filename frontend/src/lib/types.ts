@@ -39,6 +39,8 @@ export type AssetType =
   | "other";
 export type TicketEventType =
   | "created"
+  | "attachment_updated"
+  | "attachment_removed"
   | "owner_changed"
   | "updated"
   | "status_changed"
@@ -412,6 +414,10 @@ export interface Attachment {
   uploaded_by: UserRef | null;
   created_at: ISODate;
   download_url: string | null;
+  /** Legenda (aparece no relatório do cliente). */
+  description?: string | null;
+  /** Arquivo migrado que continua no armazenamento do Field Control (sem tamanho conhecido). */
+  external?: boolean;
 }
 
 export interface AssigneeLoad {

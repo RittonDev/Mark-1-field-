@@ -20,6 +20,7 @@ import {
   MessageSquare,
   Paperclip,
   Pencil,
+  Trash2,
   UserCog,
 } from "lucide-react";
 import { StatusBadge } from "@/components/badges";
@@ -38,6 +39,8 @@ const ICONS: Record<TicketEventType, React.ComponentType<{ className?: string }>
   comment_added: MessageSquare,
   worklog_added: Clock,
   attachment_added: Paperclip,
+  attachment_updated: Pencil,
+  attachment_removed: Trash2,
   form_added: ClipboardList,
   form_completed: ClipboardCheck,
   form_removed: ClipboardX,
