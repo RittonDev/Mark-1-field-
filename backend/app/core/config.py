@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     TICKET_PREFIX: str = "OS"
     AUTO_CLOSE_RESOLVED_DAYS: int = 3
     AUTO_CLOSE_INTERVAL_SECONDS: int = 600
+    # Retenção do histórico de posições dos técnicos (LGPD).
+    TRACKING_RETENTION_DAYS: int = 90
     SLA_AT_RISK_RATIO: float = 0.75
 
     MEDIA_ROOT: str = "./media"

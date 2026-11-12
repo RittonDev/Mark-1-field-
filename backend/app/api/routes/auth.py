@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Response, status
 from sqlalchemy import func, select
 
 from app.api.deps import DB, CurrentUser
@@ -11,11 +11,12 @@ from app.core.security import (
     create_access_token,
     create_refresh_token,
     decode_token,
+    hash_password,
     verify_password,
 )
 from app.db.base import utcnow
 from app.models.user import User
-from app.schemas.auth import LoginRequest, RefreshRequest, TokenResponse
+from app.schemas.auth import ChangePasswordRequest, LoginRequest, RefreshRequest, TokenResponse
 from app.schemas.user import UserOut
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -62,3 +63,18 @@ async def refresh(body: RefreshRequest, db: DB) -> TokenResponse:
 @router.get("/me", response_model=UserOut)
 async def me(user: CurrentUser) -> User:
     return user
+
+
+@router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
+async def change_password(body: ChangePasswordRequest, db: DB, user: CurrentUser) -> Response:
+    """Troca a senha; obrigatória no primeiro acesso de quem recebeu senha provisória."""
+    if not verify_password(body.current_password, user.password_hash):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Senha atual incorreta")
+    if body.new_password == body.current_password:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "A nova senha precisa ser diferente da atual"
+        )
+    user.password_hash = hash_password(body.new_password)
+    user.must_change_password = False
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

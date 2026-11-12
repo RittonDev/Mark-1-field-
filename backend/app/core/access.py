@@ -16,7 +16,7 @@ CHANNEL_ROLES: dict[str, frozenset[UserRole]] = {
 }
 
 CHANNEL_DENIED_MESSAGE: dict[str, str] = {
-    "web": "Técnicos de campo acessam pelo app MaxxChamados no celular (Android ou iOS).",
+    "web": "Técnicos de campo acessam pelo app Maxx Field no celular (Android ou iOS).",
     "mobile": (
         "O app é exclusivo para técnicos de campo. Analistas e gestores acessam pelo navegador."
     ),

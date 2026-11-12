@@ -22,6 +22,7 @@ from app.services.errors import (
 )
 from app.services.realtime import bus, commit_and_publish, manager
 from app.services.tickets import auto_close_resolved
+from app.services.tracking import purge_old_pings
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("maxxchamados")
@@ -33,7 +34,10 @@ async def _auto_close_loop() -> None:
         try:
             async with SessionLocal() as db:
                 closed = await auto_close_resolved(db)
+                purged = await purge_old_pings(db)
                 await commit_and_publish(db)
+            if purged:
+                log.info("Retenção do rastreamento: %d posições antigas apagadas", purged)
             if closed:
                 log.info("Fechamento automático: %d OS", closed)
         except Exception:

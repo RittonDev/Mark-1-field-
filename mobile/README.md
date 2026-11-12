@@ -74,6 +74,30 @@ Se a API estiver em outro endereço, toque em **Alterar** na tela de login e inf
 `192.168.0.10:8000`. Para fixar o endereço no bundle, copie `.env.example` para `.env` e preencha
 `EXPO_PUBLIC_API_URL`.
 
+## Pré-visualização no navegador (só desenvolvimento)
+
+Para acompanhar a evolução sem celular, o mesmo `expo start` serve o app em **http://localhost:8081**
+(ou `npm run web`). No Android e no iOS nada muda: as alternativas web ficam em arquivos `.web.ts(x)`
+ou atrás de `Platform.OS === "web"`.
+
+| No aparelho | Na pré-visualização web |
+|---|---|
+| Tokens no Keychain/Keystore (`secureStorage.ts`) | `localStorage` (`secureStorage.web.ts`) |
+| SQLite nativo, transação exclusiva | SQLite do próprio SDK em WebAssembly (OPFS), transação comum; `metro.config.js` registra o `.wasm` |
+| Fotos copiadas para a pasta do app, upload nativo | Foto guardada como data URL, upload por `fetch` + `FormData` (`photoFiles.web.ts`, `fileUpload.web.ts`) |
+| Seletor nativo de data/hora | `<input type="datetime-local">` (`DateTimeField.web.tsx`) |
+| GPS do expo-location, app de mapas | `navigator.geolocation`, Google Maps numa nova aba |
+| Confirmações com `Alert` | `window.confirm` (o `Alert` do react-native-web não faz nada) |
+| Registro do aparelho para push | não existe (aparece como indisponível na tela Conta) |
+
+Requisitos:
+
+- **Use `http://localhost:8081`**, não o IP da rede: o banco web (OPFS) e `crypto.randomUUID` só funcionam
+  em contexto seguro, e `http://<IP>` não é.
+- A API precisa liberar a origem no CORS: `CORS_ORIGINS=http://localhost:3001,http://localhost:8081`
+  no `.env` da raiz. Sem isso, o login falha com "Não foi possível falar com…".
+- O endereço padrão da API na web é o mesmo host da página, porta 8000 (dá para trocar em **Alterar**).
+
 ## O que o app faz
 
 - **Login** com `/auth/login` no canal `mobile`; tokens no Keychain/Keystore; renovação automática por

@@ -6,6 +6,6 @@ import type { UserRole } from "./types";
 export const WEB_ROLES: UserRole[] = ["admin", "supervisor", "analyst", "requester"];
 
 export const WEB_DENIED_MESSAGE =
-  "Técnicos de campo acessam pelo app MaxxChamados no celular (Android ou iOS).";
+  "Técnicos de campo acessam pelo app Maxx Field no celular (Android ou iOS).";
 
 export const canUseWeb = (role: UserRole | undefined) => !!role && WEB_ROLES.includes(role);
