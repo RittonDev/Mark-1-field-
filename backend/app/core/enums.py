@@ -183,3 +183,18 @@ class ProjectStatus(StrEnum):
     PAUSED = "paused"
     DONE = "done"
     CANCELLED = "cancelled"
+
+
+class RepairStatus(StrEnum):
+    """Equipamento retirado do cliente e enviado para assistência técnica externa."""
+
+    WITHDRAWN = "withdrawn"  # retirado no cliente (a caminho da Maxx)
+    RECEIVED = "received"  # recebido na Maxx
+    SENT_TO_VENDOR = "sent_to_vendor"  # enviado à assistência
+    VENDOR_QUOTE = "vendor_quote"  # assistência mandou orçamento (aguardando aprovação)
+    IN_REPAIR = "in_repair"  # em reparo na assistência
+    READY_AT_VENDOR = "ready_at_vendor"  # pronto, aguardando retirada na assistência
+    BACK_IN_STOCK = "back_in_stock"  # de volta na Maxx, pronto para entregar
+    DELIVERED = "delivered"  # entregue ao cliente (fim)
+    UNREPAIRABLE = "unrepairable"  # sem conserto (devolver ou descartar)
+    CANCELLED = "cancelled"

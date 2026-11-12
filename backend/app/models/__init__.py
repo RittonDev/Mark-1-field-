@@ -14,6 +14,7 @@ from app.models.forms import FormTemplate, TicketForm
 from app.models.onboarding import OnboardingInvite, TechnicianApplication
 from app.models.project import Project
 from app.models.quote import Quote, QuoteItemCatalog
+from app.models.repair import RepairEvent, RepairOrder, RepairPhoto
 from app.models.sync import DeviceToken, SyncOperation
 from app.models.ticket import (
     Ticket,
@@ -36,6 +37,9 @@ __all__ = [
     "Project",
     "Quote",
     "QuoteItemCatalog",
+    "RepairEvent",
+    "RepairOrder",
+    "RepairPhoto",
     "ServiceType",
     "SlaPolicy",
     "SyncOperation",
