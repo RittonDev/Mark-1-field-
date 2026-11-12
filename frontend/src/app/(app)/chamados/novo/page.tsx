@@ -513,7 +513,6 @@ export default function NewTicketPage() {
                       type="number"
                       min={1}
                       max={10080}
-                      step={5}
                       value={form.estimated_minutes}
                       onChange={(e) => set("estimated_minutes", e.target.value)}
                       placeholder="60"
