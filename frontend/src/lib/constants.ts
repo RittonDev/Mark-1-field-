@@ -165,7 +165,7 @@ export const EVENT_TYPE: Record<TicketEventType, string> = {
   comment_added: "adicionou um acompanhamento",
   worklog_added: "registrou um apontamento",
   attachment_added: "anexou um arquivo",
-  attachment_updated: "descreveu o anexo",
+  attachment_updated: "editou a descrição do anexo",
   attachment_removed: "excluiu o anexo",
   form_added: "anexou o formulário",
   form_completed: "concluiu o formulário",

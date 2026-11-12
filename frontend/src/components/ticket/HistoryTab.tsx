@@ -86,8 +86,31 @@ function isStatus(value: string | null): value is TicketStatus {
   return value !== null && value in STATUS;
 }
 
+/** Texto do evento; anexos dizem se foi foto, arquivo ou assinatura. */
+function label(event: TicketEvent): string {
+  const kind = str(event.data?.kind);
+  if (event.event_type === "attachment_added") {
+    if (kind === "photo") return "anexou uma foto";
+    if (kind === "signature") return "anexou a assinatura";
+  }
+  if (event.event_type === "attachment_removed" && kind === "photo") return "excluiu a foto";
+  return EVENT_TYPE[event.event_type] ?? event.event_type;
+}
+
 function Detail({ event }: { event: TicketEvent }) {
   const data = event.data ?? {};
+  if (
+    event.event_type === "attachment_added" ||
+    event.event_type === "attachment_updated" ||
+    event.event_type === "attachment_removed"
+  ) {
+    const name = str(data.filename);
+    return name ? (
+      <span className="max-w-xs truncate font-medium text-ink" title={name}>
+        {name}
+      </span>
+    ) : null;
+  }
   if (event.event_type === "status_changed" && isStatus(event.from_value) && isStatus(event.to_value)) {
     return (
       <span className="inline-flex flex-wrap items-center gap-1.5">
@@ -146,7 +169,7 @@ export function HistoryTab({ ticketId }: { ticketId: UUID }) {
             </span>
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
               <span className="font-medium text-ink">{event.actor?.name ?? "Sistema"}</span>
-              <span className="text-ink-muted">{EVENT_TYPE[event.event_type] ?? event.event_type}</span>
+              <span className="text-ink-muted">{label(event)}</span>
               <Detail event={event} />
             </div>
             <p className="mt-0.5 text-xs text-ink-muted">{formatDateTime(event.created_at)}</p>

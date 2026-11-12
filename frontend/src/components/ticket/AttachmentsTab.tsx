@@ -54,50 +54,62 @@ function Caption({ attachment, canEdit, onSaved }: { attachment: Attachment; can
     },
   });
   if (editing) {
+    const submit = () => {
+      if (!save.isPending) save.mutate();
+    };
     return (
       <div className="flex flex-col gap-1.5" onClick={(e) => e.stopPropagation()}>
         <Textarea
-          rows={2}
+          rows={3}
           value={text}
           onChange={(e) => setText(e.target.value.slice(0, 500))}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.preventDefault();
+              setEditing(false);
+            } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+              e.preventDefault();
+              submit();
+            }
+          }}
           placeholder="Ex.: Rack antes da organização"
+          aria-label={`Descrição de ${attachment.filename}`}
           autoFocus
           className="text-xs"
         />
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-[11px] text-ink-subtle tabular-nums">{text.length}/500</span>
-          <span className="flex gap-1.5">
-            <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
-              Cancelar
-            </Button>
-            <Button size="sm" variant="primary" loading={save.isPending} onClick={() => save.mutate()}>
-              Salvar
-            </Button>
-          </span>
+        <div className="flex items-center justify-between gap-2 text-[11px] text-ink-subtle">
+          <span>Ctrl+Enter salva</span>
+          <span className="tabular-nums">{text.length}/500</span>
+        </div>
+        <div className="grid grid-cols-2 gap-1.5">
+          <Button size="sm" variant="secondary" className="w-full" onClick={() => setEditing(false)}>
+            Cancelar
+          </Button>
+          <Button size="sm" variant="primary" className="w-full" loading={save.isPending} onClick={submit}>
+            Salvar
+          </Button>
         </div>
         {save.error ? <ErrorBox message={errorMessage(save.error)} /> : null}
       </div>
     );
   }
   if (attachment.description) {
+    if (!canEdit) return <p className="text-xs leading-relaxed text-ink">{attachment.description}</p>;
     return (
-      <p className="group/caption text-xs leading-relaxed text-ink">
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setText(attachment.description ?? "");
+          setEditing(true);
+        }}
+        className="group/caption -mx-1 rounded-md px-1 py-0.5 text-left text-xs leading-relaxed text-ink transition-colors hover:bg-surface-2"
+        title="Editar descrição"
+        aria-label={`Editar descrição: ${attachment.description}`}
+      >
         {attachment.description}
-        {canEdit ? (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              setText(attachment.description ?? "");
-              setEditing(true);
-            }}
-            className="ml-1.5 inline-flex align-middle text-ink-subtle opacity-0 transition-opacity group-hover/caption:opacity-100 hover:text-brand"
-            aria-label="Editar descrição"
-          >
-            <Pencil className="size-3" />
-          </button>
-        ) : null}
-      </p>
+        <Pencil className="ml-1.5 inline size-3 align-[-1px] text-ink-subtle opacity-0 transition-opacity group-hover/caption:opacity-100 group-focus-visible/caption:opacity-100 [@media(hover:none)]:opacity-100" />
+      </button>
     );
   }
   return canEdit ? (
@@ -417,8 +429,9 @@ export function AttachmentsTab({
                       {canManage ? (
                         <button
                           type="button"
+                          disabled={remove.isPending && remove.variables?.id === a.id}
                           onClick={() => window.confirm(`Excluir "${a.filename}"? Não dá para desfazer.`) && remove.mutate(a)}
-                          className="rounded-md p-1.5 text-ink-subtle hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10"
+                          className="rounded-md p-1.5 text-ink-subtle hover:bg-red-50 hover:text-red-600 disabled:opacity-40 dark:hover:bg-red-500/10"
                           aria-label={`Excluir ${a.filename}`}
                           title="Excluir"
                         >
