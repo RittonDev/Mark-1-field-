@@ -1,17 +1,20 @@
 import { useState } from "react";
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Button, Card, colors, ErrorBox, Field, Input } from "../components/ui";
+import { BrandLogo } from "../components/Brand";
+import { Button, Card, ErrorBox, Field, Input } from "../components/ui";
 import { ApiError, errorMessage } from "../lib/api";
 import { login } from "../lib/auth";
 import { APP_VERSION, normalizeApiUrl } from "../lib/config";
 import { session, useSession } from "../lib/session";
+import { useStyles, type Palette } from "../theme/theme";
 
 export default function LoginScreen() {
   const { expired, notice } = useSession();
+  const styles = useStyles(makeStyles);
+  const insets = useSafeAreaInsets();
   const banner =
     notice ?? (expired ? "Sua sessão expirou. Entre novamente; o que estava pendente no aparelho será enviado." : null);
-  const insets = useSafeAreaInsets();
   const [email, setEmail] = useState(() => session.get().lastEmail ?? "");
   const [password, setPassword] = useState("");
   const [apiUrl, setApiUrl] = useState(() => session.get().apiUrl);
@@ -42,17 +45,21 @@ export default function LoginScreen() {
   }
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+    <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === "ios" ? "padding" : undefined}>
       <ScrollView
-        contentContainerStyle={[styles.container, { paddingTop: insets.top + 48, paddingBottom: insets.bottom + 24 }]}
+        contentContainerStyle={[styles.container, { paddingTop: insets.top + 56, paddingBottom: insets.bottom + 24 }]}
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.brand}>
-          <Text style={styles.logo}>MaxxChamados</Text>
-          <Text style={styles.subtitle}>App do técnico de campo</Text>
+          <BrandLogo size="lg" />
+          <Text style={styles.subtitle}>Atendimento de campo</Text>
         </View>
 
         <Card style={{ gap: 16 }}>
+          <View style={{ gap: 4 }}>
+            <Text style={styles.title}>Entrar</Text>
+            <Text style={styles.lead}>Use o e-mail e a senha que você recebeu da sua empresa.</Text>
+          </View>
           {banner && !error ? <ErrorBox message={banner} /> : null}
           <Field label="E-mail">
             <Input
@@ -81,38 +88,36 @@ export default function LoginScreen() {
 
           {editingServer ? (
             <Field label="Servidor da API" hint="IP da máquina com a API na mesma rede, ex.: 192.168.0.10:8000">
-              <Input
-                value={apiUrl}
-                onChangeText={setApiUrl}
-                autoCapitalize="none"
-                autoCorrect={false}
-                keyboardType="url"
-              />
+              <Input value={apiUrl} onChangeText={setApiUrl} autoCapitalize="none" autoCorrect={false} keyboardType="url" />
             </Field>
-          ) : (
-            <View style={styles.server}>
-              <Text style={styles.serverText} numberOfLines={1}>
-                Servidor: {apiUrl}
-              </Text>
-              <Button compact variant="ghost" title="Alterar" onPress={() => setEditingServer(true)} />
-            </View>
-          )}
+          ) : null}
 
           {error ? <ErrorBox message={error} /> : null}
           <Button title="Entrar" variant="primary" onPress={submit} loading={loading} />
         </Card>
-        <Text style={styles.version}>Versão {APP_VERSION}</Text>
+
+        <View style={styles.footer}>
+          {!editingServer ? (
+            <Button compact variant="ghost" title="Configurar servidor" onPress={() => setEditingServer(true)} />
+          ) : null}
+          <Text style={styles.meta} numberOfLines={1}>
+            {apiUrl}
+          </Text>
+          <Text style={styles.meta}>Versão {APP_VERSION} · exclusivo para técnicos de campo</Text>
+        </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { paddingHorizontal: 20, gap: 24, flexGrow: 1 },
-  brand: { alignItems: "center", gap: 4 },
-  logo: { fontSize: 28, fontWeight: "800", color: colors.brand },
-  subtitle: { fontSize: 15, color: colors.inkMuted },
-  server: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
-  serverText: { fontSize: 12, color: colors.inkMuted, flex: 1 },
-  version: { textAlign: "center", fontSize: 12, color: colors.inkMuted },
-});
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
+    screen: { flex: 1, backgroundColor: c.canvas },
+    container: { paddingHorizontal: 20, gap: 28, flexGrow: 1, maxWidth: 480, width: "100%", alignSelf: "center" },
+    brand: { gap: 10, paddingHorizontal: 4 },
+    subtitle: { fontSize: 15, color: c.inkMuted },
+    title: { fontSize: 20, fontWeight: "700", color: c.ink },
+    lead: { fontSize: 14, color: c.inkMuted, lineHeight: 20 },
+    footer: { alignItems: "center", gap: 4 },
+    meta: { fontSize: 12, color: c.inkSubtle, textAlign: "center" },
+  });

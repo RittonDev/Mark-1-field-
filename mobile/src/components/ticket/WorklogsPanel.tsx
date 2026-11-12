@@ -1,3 +1,4 @@
+import { useStyles, useTheme, type Palette } from "../../theme/theme";
 import { useCallback, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { errorMessage } from "../../lib/api";
@@ -9,11 +10,13 @@ import { enqueueWorklog } from "../../lib/sync";
 import type { LocalTicket } from "../../lib/syncTypes";
 import type { User } from "../../lib/types";
 import { DateTimeField } from "../DateTimeField";
-import { Badge, Button, Card, colors, EmptyState, ErrorBox, Field, Input } from "../ui";
+import { Badge, Button, Card, EmptyState, ErrorBox, Field, Input } from "../ui";
 
 const QUICK_MINUTES = [15, 30, 60, 90, 120];
 
 export function WorklogsPanel({ ticket, user }: { ticket: LocalTicket; user: User }) {
+  const c = useTheme();
+  const styles = useStyles(makeStyles);
   const load = useCallback(() => listWorklogs(ticket.id), [ticket.id]);
   const worklogs = useLiveQuery(load);
   const [description, setDescription] = useState("");
@@ -66,8 +69,8 @@ export function WorklogsPanel({ ticket, user }: { ticket: LocalTicket; user: Use
               <Text style={styles.minutes}>{formatMinutes(w.minutes)}</Text>
             </View>
             <Text style={styles.date}>{formatDateTime(w.started_at)}</Text>
-            {w.local_state === "pending" ? <Badge label="Aguardando envio" color={colors.warning} /> : null}
-            {w.local_state === "sent" ? <Badge label="Enviado" color={colors.success} /> : null}
+            {w.local_state === "pending" ? <Badge label="Aguardando envio" color={c.warning} /> : null}
+            {w.local_state === "sent" ? <Badge label="Enviado" color={c.success} /> : null}
             <Text style={styles.description}>{w.description}</Text>
           </Card>
         ))
@@ -109,27 +112,28 @@ export function WorklogsPanel({ ticket, user }: { ticket: LocalTicket; user: Use
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
   total: {
     flexDirection: "row",
     justifyContent: "space-between",
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.line,
+    borderColor: c.line,
   },
-  totalLabel: { color: colors.inkMuted, fontSize: 14 },
-  totalValue: { color: colors.ink, fontSize: 14, fontWeight: "700" },
+  totalLabel: { color: c.inkMuted, fontSize: 14 },
+  totalValue: { color: c.ink, fontSize: 14, fontWeight: "700" },
   row: { flexDirection: "row", justifyContent: "space-between" },
-  who: { fontSize: 14, fontWeight: "600", color: colors.ink },
-  minutes: { fontSize: 14, fontWeight: "700", color: colors.ink },
-  date: { fontSize: 12, color: colors.inkMuted },
-  description: { fontSize: 15, color: colors.ink, marginTop: 2 },
+  who: { fontSize: 14, fontWeight: "600", color: c.ink },
+  minutes: { fontSize: 14, fontWeight: "700", color: c.ink },
+  date: { fontSize: 12, color: c.inkMuted },
+  description: { fontSize: 15, color: c.ink, marginTop: 2 },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
-  chip: { borderWidth: 1, borderColor: colors.line, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: colors.surface },
-  chipActive: { borderColor: colors.brand, backgroundColor: "#eff6ff" },
-  chipText: { fontSize: 13, color: colors.ink },
-  chipTextActive: { color: colors.brand, fontWeight: "600" },
+  chip: { borderWidth: 1, borderColor: c.line, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: c.surface },
+  chipActive: { borderColor: c.primary, backgroundColor: c.primarySoft },
+  chipText: { fontSize: 13, color: c.ink },
+  chipTextActive: { color: c.primary, fontWeight: "600" },
 });

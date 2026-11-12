@@ -1,3 +1,4 @@
+import { useStyles, useTheme, type Palette } from "../../theme/theme";
 import { useCallback, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { errorMessage } from "../../lib/api";
@@ -8,9 +9,11 @@ import { formatDateTime } from "../../lib/format";
 import { enqueueComment } from "../../lib/sync";
 import type { LocalTicket } from "../../lib/syncTypes";
 import type { User } from "../../lib/types";
-import { Badge, Button, Card, colors, EmptyState, ErrorBox, Input, SwitchRow } from "../ui";
+import { Badge, Button, Card, EmptyState, ErrorBox, Input, SwitchRow } from "../ui";
 
 export function CommentsPanel({ ticket, user }: { ticket: LocalTicket; user: User }) {
+  const c = useTheme();
+  const styles = useStyles(makeStyles);
   const load = useCallback(() => listComments(ticket.id), [ticket.id]);
   const comments = useLiveQuery(load);
   const [body, setBody] = useState("");
@@ -39,19 +42,19 @@ export function CommentsPanel({ ticket, user }: { ticket: LocalTicket; user: Use
       {comments === undefined ? null : comments.length === 0 ? (
         <EmptyState title="Nenhum acompanhamento" description="Registre o que foi feito ou combinado com o cliente." />
       ) : (
-        comments.map((c) => (
-          <Card key={c.id} style={[c.is_internal && styles.internal]}>
+        comments.map((comment) => (
+          <Card key={comment.id} style={[comment.is_internal && styles.internal]}>
             <View style={styles.meta}>
-              <Text style={styles.author}>{c.author?.name ?? "Sistema"}</Text>
-              <Text style={styles.date}>{formatDateTime(c.created_at)}</Text>
+              <Text style={styles.author}>{comment.author?.name ?? "Sistema"}</Text>
+              <Text style={styles.date}>{formatDateTime(comment.created_at)}</Text>
             </View>
             <View style={styles.tags}>
-              {c.is_internal ? <Badge label="Nota interna" color="#a16207" /> : null}
-              {c.local_state === "pending" ? <Badge label="Aguardando envio" color={colors.warning} /> : null}
-              {c.local_state === "sent" ? <Badge label="Enviado" color={colors.success} /> : null}
+              {comment.is_internal ? <Badge label="Nota interna" color={c.warning} /> : null}
+              {comment.local_state === "pending" ? <Badge label="Aguardando envio" color={c.warning} /> : null}
+              {comment.local_state === "sent" ? <Badge label="Enviado" color={c.success} /> : null}
             </View>
             <Text style={styles.body} selectable>
-              {c.body}
+              {comment.body}
             </Text>
           </Card>
         ))
@@ -76,11 +79,12 @@ export function CommentsPanel({ ticket, user }: { ticket: LocalTicket; user: Use
   );
 }
 
-const styles = StyleSheet.create({
-  internal: { backgroundColor: "#fefce8", borderColor: "#fde68a" },
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
+  internal: { backgroundColor: c.warningSoft, borderColor: c.warning + "44" },
   meta: { flexDirection: "row", justifyContent: "space-between", gap: 8 },
-  author: { fontSize: 14, fontWeight: "600", color: colors.ink, flexShrink: 1 },
-  date: { fontSize: 12, color: colors.inkMuted },
+  author: { fontSize: 14, fontWeight: "600", color: c.ink, flexShrink: 1 },
+  date: { fontSize: 12, color: c.inkMuted },
   tags: { flexDirection: "row", gap: 6, marginTop: 4 },
-  body: { fontSize: 15, color: colors.ink, marginTop: 6, lineHeight: 21 },
+  body: { fontSize: 15, color: c.ink, marginTop: 6, lineHeight: 21 },
 });

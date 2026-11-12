@@ -4,18 +4,23 @@ import { useEffect } from "react";
 import { View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ToastHost } from "../components/ToastHost";
-import { colors } from "../components/ui";
+import { mustChangePassword } from "../lib/account";
 import { restoreSession, startSession } from "../lib/auth";
 import { session, useSession } from "../lib/session";
 import { stopSync } from "../lib/sync";
+import { loadThemePreference, useTheme } from "../theme/theme";
 
 void SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
-  const { status } = useSession();
+  const { status, user } = useSession();
+  const c = useTheme();
+  const signedIn = status === "signedIn";
+  // Técnico importado nasce com senha provisória: troca antes de entrar no app.
+  const mustChange = signedIn && mustChangePassword(user);
 
   useEffect(() => {
-    restoreSession()
+    Promise.all([loadThemePreference(), restoreSession()])
       .catch((error: unknown) => {
         console.warn("Falha ao ler a sessão", error);
         return session.signOut();
@@ -24,33 +29,36 @@ export default function RootLayout() {
   }, []);
 
   useEffect(() => {
-    if (status === "signedIn") {
+    if (signedIn && !mustChange) {
       startSession().catch((error: unknown) => console.warn("Falha ao iniciar a sessão", error));
     } else if (status === "signedOut") {
       stopSync();
     }
-  }, [status]);
+  }, [status, signedIn, mustChange]);
 
   if (status === "loading") return null;
-  const signedIn = status === "signedIn";
 
   return (
     <SafeAreaProvider>
-      <View style={{ flex: 1, backgroundColor: colors.canvas }}>
-        <StatusBar style="dark" />
+      <View style={{ flex: 1, backgroundColor: c.canvas }}>
+        <StatusBar style={c.scheme === "dark" ? "light" : "dark"} />
         <Stack
           screenOptions={{
-            headerStyle: { backgroundColor: colors.surface },
-            headerTintColor: colors.ink,
-            headerTitleStyle: { fontWeight: "700" },
-            contentStyle: { backgroundColor: colors.canvas },
+            headerStyle: { backgroundColor: c.surface },
+            headerTintColor: c.ink,
+            headerTitleStyle: { fontWeight: "600", color: c.ink },
+            headerShadowVisible: false,
+            contentStyle: { backgroundColor: c.canvas },
             headerBackTitle: "Voltar",
           }}
         >
-          <Stack.Protected guard={signedIn}>
-            <Stack.Screen name="index" options={{ title: "Minhas OS" }} />
+          <Stack.Protected guard={signedIn && !mustChange}>
+            <Stack.Screen name="index" options={{ title: "" }} />
             <Stack.Screen name="ticket/[id]" options={{ title: "OS" }} />
-            <Stack.Screen name="conta" options={{ title: "Conta e sincronização" }} />
+            <Stack.Screen name="conta" options={{ title: "Conta" }} />
+          </Stack.Protected>
+          <Stack.Protected guard={mustChange}>
+            <Stack.Screen name="trocar-senha" options={{ headerShown: false }} />
           </Stack.Protected>
           <Stack.Protected guard={!signedIn}>
             <Stack.Screen name="login" options={{ headerShown: false }} />

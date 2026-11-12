@@ -1,13 +1,16 @@
+import { useStyles, useTheme, type Palette } from "../../theme/theme";
 import { StyleSheet, Text, View } from "react-native";
 import { ASSET_TYPE, LEVEL, RESPONSIBILITY, SLA_STATUS, TICKET_SOURCE, TICKET_TYPE } from "../../lib/constants";
 import { addressOf, callPhone, openInMaps } from "../../lib/device-actions";
 import { formatDateTime, formatDocument, formatRelative } from "../../lib/format";
 import { computeSlaStatus } from "../../lib/sla";
 import type { LocalTicket } from "../../lib/syncTypes";
-import { Button, Card, colors, InfoRow, SectionTitle } from "../ui";
+import { Button, Card, InfoRow, SectionTitle } from "../ui";
 import { DurationCompare } from "./DurationCompare";
 
 export function InfoPanel({ ticket, now }: { ticket: LocalTicket; now: number }) {
+  const c = useTheme();
+  const styles = useStyles(makeStyles);
   const location = ticket.location;
   const asset = ticket.asset;
   const sla = SLA_STATUS[computeSlaStatus(ticket, now)];
@@ -155,18 +158,19 @@ export function InfoPanel({ ticket, now }: { ticket: LocalTicket; now: number })
   );
 }
 
-const styles = StyleSheet.create({
-  strong: { fontSize: 16, fontWeight: "600", color: colors.ink },
-  text: { fontSize: 15, color: colors.ink, lineHeight: 21 },
-  label: { fontSize: 12, color: colors.inkMuted },
-  value: { fontSize: 15, color: colors.ink },
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
+  strong: { fontSize: 16, fontWeight: "600", color: c.ink },
+  text: { fontSize: 15, color: c.ink, lineHeight: 21 },
+  label: { fontSize: 12, color: c.inkMuted },
+  value: { fontSize: 15, color: c.ink },
   serviceAddress: {
     marginTop: 8,
     padding: 10,
     gap: 2,
     borderRadius: 10,
-    backgroundColor: "#eff6ff",
+    backgroundColor: c.primarySoft,
     borderWidth: 1,
-    borderColor: "#bfdbfe",
+    borderColor: c.primary + "33",
   },
 });

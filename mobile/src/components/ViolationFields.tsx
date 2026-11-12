@@ -1,7 +1,8 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { RESPONSIBILITY } from "../lib/constants";
 import type { ViolationReason, ViolationScope } from "../lib/types";
-import { colors, Field, Input, tint } from "./ui";
+import { readable, useStyles, useTheme, type Palette } from "../theme/theme";
+import { Field, Input, tint } from "./ui";
 
 export interface ViolationValues {
   response: string;
@@ -22,6 +23,8 @@ function ReasonPicker({
   onChange: (value: string) => void;
   reasons: ViolationReason[];
 }) {
+  const c = useTheme();
+  const styles = useStyles(makeStyles);
   const options = reasons.filter((r) => r.applies_to === scope || r.applies_to === "both");
   const choices = [{ id: "", name: "Deixar para o analista justificar", responsibility: null }, ...options];
   return (
@@ -41,7 +44,7 @@ function ReasonPicker({
               <View style={{ flex: 1 }}>
                 <Text style={[styles.optionText, !choice.id && styles.optionMuted]}>{choice.name}</Text>
                 {choice.responsibility ? (
-                  <Text style={[styles.responsibility, { color: RESPONSIBILITY[choice.responsibility].color }]}>
+                  <Text style={[styles.responsibility, { color: readable(RESPONSIBILITY[choice.responsibility].color, c) }]}>
                     Responsabilidade: {RESPONSIBILITY[choice.responsibility].label}
                   </Text>
                 ) : null}
@@ -71,6 +74,7 @@ export function ViolationFields({
   onChange: (values: ViolationValues) => void;
   reasons: ViolationReason[];
 }) {
+  const styles = useStyles(makeStyles);
   if (!responseBreached && !resolutionBreached) return null;
   const clocks = [responseBreached && "1ª resposta", resolutionBreached && "solução"].filter(Boolean).join(" e ");
   return (
@@ -116,17 +120,18 @@ export function ViolationFields({
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
   box: {
     gap: 12,
     padding: 12,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: tint(colors.danger, "44"),
-    backgroundColor: tint(colors.danger, "0d"),
+    borderColor: tint(c.danger, "44"),
+    backgroundColor: tint(c.danger, "0d"),
   },
-  title: { fontSize: 14, fontWeight: "700", color: colors.danger },
-  hint: { fontSize: 12, color: colors.inkMuted },
+  title: { fontSize: 14, fontWeight: "700", color: c.danger },
+  hint: { fontSize: 12, color: c.inkMuted },
   options: { gap: 6 },
   option: {
     flexDirection: "row",
@@ -135,13 +140,13 @@ const styles = StyleSheet.create({
     padding: 10,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.surface,
+    borderColor: c.line,
+    backgroundColor: c.surface,
   },
-  optionSelected: { borderColor: colors.brand, backgroundColor: "#eff6ff" },
-  radio: { width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: "#94a3b8" },
-  radioSelected: { borderColor: colors.brand, backgroundColor: colors.brand },
-  optionText: { fontSize: 14, color: colors.ink },
-  optionMuted: { color: colors.inkMuted, fontStyle: "italic" },
+  optionSelected: { borderColor: c.primary, backgroundColor: c.primarySoft },
+  radio: { width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: c.inkSubtle },
+  radioSelected: { borderColor: c.primary, backgroundColor: c.primary },
+  optionText: { fontSize: 14, color: c.ink },
+  optionMuted: { color: c.inkMuted, fontStyle: "italic" },
   responsibility: { fontSize: 12, marginTop: 2 },
 });

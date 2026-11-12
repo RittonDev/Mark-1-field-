@@ -2,11 +2,12 @@ import DateTimePicker, { DateTimePickerAndroid } from "@react-native-community/d
 import { useState } from "react";
 import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { formatDateTime } from "../lib/format";
-import { Button, colors } from "./ui";
+import { useStyles, useTheme, type Palette } from "../theme/theme";
+import { Button } from "./ui";
 
 /**
  * Data + hora. No Android abre os diálogos nativos (data e depois hora);
- * no iOS mostra o seletor embutido ao tocar.
+ * no iOS mostra o seletor embutido ao tocar. Na web: DateTimeField.web.tsx.
  */
 export function DateTimeField({
   value,
@@ -21,6 +22,8 @@ export function DateTimeField({
   minimumDate?: Date;
   clearable?: boolean;
 }) {
+  const c = useTheme();
+  const styles = useStyles(makeStyles);
   const [iosOpen, setIosOpen] = useState(false);
 
   function openAndroid() {
@@ -50,7 +53,7 @@ export function DateTimeField({
           onPress={() => (Platform.OS === "android" ? openAndroid() : setIosOpen((open) => !open))}
           style={styles.input}
         >
-          <Text style={[styles.text, !value && { color: "#94a3b8" }]}>{label}</Text>
+          <Text style={[styles.text, !value && { color: c.placeholder }]}>{label}</Text>
         </Pressable>
         {clearable && value ? <Button compact title="Limpar" variant="ghost" onPress={() => onChange(null)} /> : null}
       </View>
@@ -59,6 +62,8 @@ export function DateTimeField({
           mode="datetime"
           display="inline"
           locale="pt-BR"
+          themeVariant={c.scheme}
+          accentColor={c.primary}
           value={value ?? new Date()}
           minimumDate={minimumDate}
           onValueChange={(_event, date) => onChange(date)}
@@ -68,17 +73,18 @@ export function DateTimeField({
   );
 }
 
-const styles = StyleSheet.create({
-  row: { flexDirection: "row", alignItems: "center", gap: 8 },
-  input: {
-    flex: 1,
-    minHeight: 44,
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    justifyContent: "center",
-    backgroundColor: colors.surface,
-  },
-  text: { fontSize: 15, color: colors.ink },
-});
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
+    row: { flexDirection: "row", alignItems: "center", gap: 8 },
+    input: {
+      flex: 1,
+      minHeight: 46,
+      borderWidth: 1,
+      borderColor: c.lineStrong,
+      borderRadius: 12,
+      paddingHorizontal: 12,
+      justifyContent: "center",
+      backgroundColor: c.surface,
+    },
+    text: { fontSize: 15, color: c.ink },
+  });

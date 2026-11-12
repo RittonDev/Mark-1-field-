@@ -7,10 +7,12 @@ import type {
   Category,
   Customer,
   DayActivities,
+  LiveTechnician,
   Location,
   Page,
   ServiceType,
   Team,
+  TrackingHistory,
   User,
   UUID,
   ViolationReason,
@@ -117,5 +119,25 @@ export function useUsers(params: { q?: string; role?: string; team_id?: string }
   return useQuery({
     queryKey: ["users", params],
     queryFn: () => api.get<User[]>("/users", params),
+  });
+}
+
+/**
+ * Técnicos no mapa ao vivo. O WebSocket atualiza as posições na hora; a releitura
+ * periódica cobre o "sem sinal", que depende só da passagem do tempo.
+ */
+export function useLiveTechnicians(teamId?: UUID | null) {
+  return useQuery({
+    queryKey: ["tracking", "live", teamId ?? ""],
+    queryFn: () => api.get<LiveTechnician[]>("/tracking/live", { team_id: teamId ?? undefined }),
+    refetchInterval: 60_000,
+  });
+}
+
+export function useTrackingHistory(userId: UUID | null, date: string) {
+  return useQuery({
+    queryKey: ["tracking", "history", userId, date],
+    queryFn: () => api.get<TrackingHistory>("/tracking/history", { user_id: userId ?? undefined, date }),
+    enabled: !!userId,
   });
 }

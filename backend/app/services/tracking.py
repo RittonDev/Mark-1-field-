@@ -212,7 +212,8 @@ async def live(db: AsyncSession, team_id: uuid.UUID | None = None) -> list[LiveT
     out: list[LiveTechnician] = []
     for tech in technicians:
         shift = shifts.get(tech.id)
-        ping = latest.get(tech.id)
+        # Fora da jornada a posição não aparece (LGPD): o trajeto fica só no histórico.
+        ping = latest.get(tech.id) if shift is not None else None
         ticket = in_field.get(tech.id)
         if shift is None:
             state = "offline"

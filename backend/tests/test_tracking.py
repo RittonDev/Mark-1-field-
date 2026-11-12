@@ -151,3 +151,16 @@ async def test_forced_password_change(
     )
     assert r.status_code == 200
     assert r.json()["user"]["must_change_password"] is False
+
+
+async def test_position_hidden_after_shift(client: AsyncClient, world: World) -> None:
+    th, an = world.tech.headers, world.analyst.headers
+    await start_shift(client, th)
+    await client.post(
+        f"{API}/tracking/pings", json={"pings": [ping(datetime.now(UTC))]}, headers=th
+    )
+    await client.post(f"{API}/tracking/shift/end", json={}, headers=th)
+    live = (await client.get(f"{API}/tracking/live", headers=an)).json()
+    me = next(r for r in live if r["id"] == str(world.tech.user.id))
+    # Fora da jornada, a posição não aparece no mapa (fica só no histórico do dia).
+    assert (me["state"], me["last_position"]) == ("offline", None)

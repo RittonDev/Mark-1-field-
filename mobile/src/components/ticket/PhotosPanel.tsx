@@ -1,3 +1,4 @@
+import { useStyles, useTheme, type Palette } from "../../theme/theme";
 import * as ImagePicker from "expo-image-picker";
 import { useCallback, useEffect, useState } from "react";
 import { Image, Linking, Pressable, StyleSheet, Text, View } from "react-native";
@@ -9,7 +10,7 @@ import { formatDateTime } from "../../lib/format";
 import { discardPhoto, isOnline, queuePhoto, useSyncStatus } from "../../lib/sync";
 import type { LocalTicket } from "../../lib/syncTypes";
 import type { Attachment } from "../../lib/types";
-import { Badge, Button, Card, colors, EmptyState, ErrorBox, SectionTitle } from "../ui";
+import { Badge, Button, Card, EmptyState, ErrorBox, SectionTitle } from "../ui";
 
 const PICKER_OPTIONS: ImagePicker.ImagePickerOptions = { mediaTypes: ["images"], quality: 0.7, exif: false };
 
@@ -18,6 +19,8 @@ const PICKER_OPTIONS: ImagePicker.ImagePickerOptions = { mediaTypes: ["images"],
  * POST /tickets/{id}/attachments (kind=photo) quando houver conexão.
  */
 export function PhotosPanel({ ticket }: { ticket: LocalTicket }) {
+  const c = useTheme();
+  const styles = useStyles(makeStyles);
   const load = useCallback(() => listPhotos(ticket.id), [ticket.id]);
   const pending = useLiveQuery(load);
   const online = isOnline(useSyncStatus());
@@ -96,7 +99,7 @@ export function PhotosPanel({ ticket }: { ticket: LocalTicket }) {
                 <Text style={styles.name} numberOfLines={1}>
                   {photo.filename}
                 </Text>
-                <Badge label={online ? "Enviando…" : "Sem conexão"} color={colors.warning} />
+                <Badge label={online ? "Enviando…" : "Sem conexão"} color={c.warning} />
                 {photo.last_error ? <Text style={styles.error}>Última tentativa: {photo.last_error}</Text> : null}
               </View>
               <Button compact title="Remover" variant="ghost" onPress={() => confirmDiscard(photo.id, photo.file_uri)} />
@@ -137,14 +140,15 @@ export function PhotosPanel({ ticket }: { ticket: LocalTicket }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
   actions: { flexDirection: "row", gap: 10 },
   pendingRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-  thumb: { width: 56, height: 56, borderRadius: 8, backgroundColor: colors.line },
-  name: { fontSize: 13, color: colors.ink },
-  error: { fontSize: 12, color: colors.danger },
+  thumb: { width: 56, height: 56, borderRadius: 8, backgroundColor: c.line },
+  name: { fontSize: 13, color: c.ink },
+  error: { fontSize: 12, color: c.danger },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   tile: { width: "48%", gap: 4 },
-  tileImage: { width: "100%", aspectRatio: 1, borderRadius: 10, backgroundColor: colors.line },
-  tileText: { fontSize: 11, color: colors.inkMuted },
+  tileImage: { width: "100%", aspectRatio: 1, borderRadius: 10, backgroundColor: c.line },
+  tileText: { fontSize: 11, color: c.inkMuted },
 });

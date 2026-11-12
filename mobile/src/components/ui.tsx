@@ -11,23 +11,26 @@ import {
   type TextInputProps,
   type ViewStyle,
 } from "react-native";
+import { LIGHT, readable, tint, useStyles, useTheme, type Palette } from "../theme/theme";
 
+export { tint };
+
+/**
+ * @deprecated Cores fixas do tema claro, só para telas ainda não migradas. Use `useTheme()`.
+ */
 export const colors = {
-  brand: "#2563eb",
-  brandStrong: "#1d4ed8",
-  canvas: "#f1f5f9",
-  surface: "#ffffff",
-  surface2: "#f8fafc",
-  line: "#e2e8f0",
-  ink: "#0f172a",
-  inkMuted: "#64748b",
-  danger: "#dc2626",
-  success: "#16a34a",
-  warning: "#d97706",
+  brand: LIGHT.primary,
+  brandStrong: LIGHT.primaryPressed,
+  canvas: LIGHT.canvas,
+  surface: LIGHT.surface,
+  surface2: LIGHT.surface2,
+  line: LIGHT.line,
+  ink: LIGHT.ink,
+  inkMuted: LIGHT.inkMuted,
+  danger: LIGHT.danger,
+  success: LIGHT.success,
+  warning: LIGHT.warning,
 };
-
-/** Cor com transparência (#rrggbb + alfa) para fundos de selos. */
-export const tint = (hex: string, alpha = "1f") => `${hex}${alpha}`;
 
 type ButtonVariant = "primary" | "secondary" | "danger" | "ghost";
 
@@ -48,11 +51,13 @@ export function Button({
   compact?: boolean;
   style?: StyleProp<ViewStyle>;
 }) {
+  const c = useTheme();
+  const styles = useStyles(makeStyles);
   const palette = {
-    primary: { bg: colors.brand, fg: "#fff", border: colors.brand },
-    secondary: { bg: colors.surface, fg: colors.ink, border: colors.line },
-    danger: { bg: colors.surface, fg: colors.danger, border: tint(colors.danger, "66") },
-    ghost: { bg: "transparent", fg: colors.brand, border: "transparent" },
+    primary: { bg: c.primary, pressed: c.primaryPressed, fg: c.onPrimary, border: c.primary },
+    secondary: { bg: c.surface, pressed: c.surface2, fg: c.ink, border: c.lineStrong },
+    danger: { bg: c.surface, pressed: c.dangerSoft, fg: c.danger, border: tint(c.danger, "66") },
+    ghost: { bg: "transparent", pressed: c.primarySoft, fg: c.primary, border: "transparent" },
   }[variant];
   const inactive = disabled || loading;
   return (
@@ -64,24 +69,33 @@ export function Button({
       style={({ pressed }) => [
         styles.button,
         compact && styles.buttonCompact,
-        { backgroundColor: palette.bg, borderColor: palette.border, opacity: inactive ? 0.55 : pressed ? 0.8 : 1 },
+        {
+          backgroundColor: pressed ? palette.pressed : palette.bg,
+          borderColor: palette.border,
+          opacity: inactive ? 0.5 : 1,
+        },
         style,
       ]}
     >
       {loading ? <ActivityIndicator color={palette.fg} /> : null}
-      <Text style={[styles.buttonText, { color: palette.fg }]}>{title}</Text>
+      <Text style={[styles.buttonText, compact && styles.buttonTextCompact, { color: palette.fg }]}>{title}</Text>
     </Pressable>
   );
 }
 
 export function Card({ children, style }: { children: ReactNode; style?: StyleProp<ViewStyle> }) {
+  const styles = useStyles(makeStyles);
   return <View style={[styles.card, style]}>{children}</View>;
 }
 
 export function Badge({ label, color }: { label: string; color: string }) {
+  const c = useTheme();
+  const styles = useStyles(makeStyles);
+  const fg = readable(color, c);
   return (
-    <View style={[styles.badge, { backgroundColor: tint(color), borderColor: tint(color, "55") }]}>
-      <Text style={[styles.badgeText, { color }]} numberOfLines={1}>
+    <View style={[styles.badge, { backgroundColor: tint(fg, c.scheme === "dark" ? "26" : "14"), borderColor: tint(fg, "40") }]}>
+      <View style={[styles.badgeDot, { backgroundColor: fg }]} />
+      <Text style={[styles.badgeText, { color: fg }]} numberOfLines={1}>
         {label}
       </Text>
     </View>
@@ -101,11 +115,12 @@ export function Field({
   error?: string | null;
   children: ReactNode;
 }) {
+  const styles = useStyles(makeStyles);
   return (
     <View style={styles.field}>
       <Text style={styles.label}>
         {label}
-        {required ? <Text style={{ color: colors.danger }}> *</Text> : null}
+        {required ? <Text style={styles.required}> *</Text> : null}
       </Text>
       {children}
       {error ? <Text style={styles.fieldError}>{error}</Text> : hint ? <Text style={styles.hint}>{hint}</Text> : null}
@@ -114,9 +129,12 @@ export function Field({
 }
 
 export function Input(props: TextInputProps) {
+  const c = useTheme();
+  const styles = useStyles(makeStyles);
   return (
     <TextInput
-      placeholderTextColor="#94a3b8"
+      placeholderTextColor={c.placeholder}
+      selectionColor={c.primary}
       {...props}
       style={[styles.input, props.multiline && styles.inputMultiline, props.style]}
     />
@@ -134,13 +152,15 @@ export function SwitchRow({
   onValueChange: (value: boolean) => void;
   hint?: string;
 }) {
+  const c = useTheme();
+  const styles = useStyles(makeStyles);
   return (
     <View style={styles.switchRow}>
       <View style={{ flex: 1 }}>
         <Text style={styles.switchLabel}>{label}</Text>
         {hint ? <Text style={styles.hint}>{hint}</Text> : null}
       </View>
-      <Switch value={value} onValueChange={onValueChange} trackColor={{ true: colors.brand }} />
+      <Switch value={value} onValueChange={onValueChange} trackColor={{ true: c.primary, false: c.lineStrong }} />
     </View>
   );
 }
@@ -160,6 +180,7 @@ export function Segmented<T extends string>({
   value: T;
   onChange: (value: T) => void;
 }) {
+  const styles = useStyles(makeStyles);
   return (
     <View style={styles.segmented} accessibilityRole="tablist">
       {options.map((option) => {
@@ -174,7 +195,7 @@ export function Segmented<T extends string>({
           >
             <Text style={[styles.segmentText, active && styles.segmentTextActive]} numberOfLines={1}>
               {option.label}
-              {option.count !== undefined ? ` ${option.count}` : ""}
+              {option.count !== undefined ? <Text style={styles.segmentCount}>{`  ${option.count}`}</Text> : null}
             </Text>
           </Pressable>
         );
@@ -184,6 +205,7 @@ export function Segmented<T extends string>({
 }
 
 export function EmptyState({ title, description }: { title: string; description?: string }) {
+  const styles = useStyles(makeStyles);
   return (
     <View style={styles.empty}>
       <Text style={styles.emptyTitle}>{title}</Text>
@@ -193,14 +215,16 @@ export function EmptyState({ title, description }: { title: string; description?
 }
 
 export function ErrorBox({ message }: { message: string }) {
+  const styles = useStyles(makeStyles);
   return (
-    <View style={styles.errorBox}>
+    <View style={styles.errorBox} accessibilityRole="alert">
       <Text style={styles.errorText}>{message}</Text>
     </View>
   );
 }
 
 export function SectionTitle({ children, right }: { children: ReactNode; right?: ReactNode }) {
+  const styles = useStyles(makeStyles);
   return (
     <View style={styles.sectionTitleRow}>
       <Text style={styles.sectionTitle}>{children}</Text>
@@ -210,11 +234,12 @@ export function SectionTitle({ children, right }: { children: ReactNode; right?:
 }
 
 export function InfoRow({ label, value, onPress }: { label: string; value: ReactNode; onPress?: () => void }) {
+  const styles = useStyles(makeStyles);
   const content = (
     <View style={styles.infoRow}>
       <Text style={styles.infoLabel}>{label}</Text>
       {typeof value === "string" ? (
-        <Text style={[styles.infoValue, onPress && { color: colors.brand }]} selectable>
+        <Text style={[styles.infoValue, onPress && styles.infoLink]} selectable>
           {value}
         </Text>
       ) : (
@@ -231,83 +256,86 @@ export function InfoRow({ label, value, onPress }: { label: string; value: React
   );
 }
 
-export const styles = StyleSheet.create({
-  button: {
-    minHeight: 44,
-    paddingHorizontal: 16,
-    borderRadius: 10,
-    borderWidth: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-  },
-  buttonCompact: { minHeight: 36, paddingHorizontal: 12 },
-  buttonText: { fontSize: 15, fontWeight: "600" },
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.line,
-    padding: 14,
-  },
-  badge: {
-    borderRadius: 999,
-    borderWidth: 1,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    alignSelf: "flex-start",
-  },
-  badgeText: { fontSize: 12, fontWeight: "600" },
-  field: { gap: 6 },
-  label: { fontSize: 13, fontWeight: "600", color: colors.ink },
-  hint: { fontSize: 12, color: colors.inkMuted },
-  fieldError: { fontSize: 12, color: colors.danger },
-  input: {
-    minHeight: 44,
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 15,
-    color: colors.ink,
-    backgroundColor: colors.surface,
-  },
-  inputMultiline: { minHeight: 88, textAlignVertical: "top" },
-  switchRow: { flexDirection: "row", alignItems: "center", gap: 12 },
-  switchLabel: { fontSize: 14, color: colors.ink },
-  segmented: {
-    flexDirection: "row",
-    backgroundColor: "#e2e8f0",
-    borderRadius: 10,
-    padding: 3,
-  },
-  segment: { flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: "center" },
-  segmentActive: {
-    backgroundColor: colors.surface,
-    shadowColor: "#000",
-    shadowOpacity: 0.08,
-    shadowRadius: 2,
-    shadowOffset: { width: 0, height: 1 },
-    elevation: 1,
-  },
-  segmentText: { fontSize: 13, fontWeight: "600", color: colors.inkMuted },
-  segmentTextActive: { color: colors.ink },
-  empty: { alignItems: "center", paddingVertical: 40, paddingHorizontal: 24, gap: 6 },
-  emptyTitle: { fontSize: 16, fontWeight: "600", color: colors.ink, textAlign: "center" },
-  emptyText: { fontSize: 14, color: colors.inkMuted, textAlign: "center" },
-  errorBox: {
-    backgroundColor: tint(colors.danger, "14"),
-    borderColor: tint(colors.danger, "44"),
-    borderWidth: 1,
-    borderRadius: 10,
-    padding: 10,
-  },
-  errorText: { color: colors.danger, fontSize: 13 },
-  sectionTitleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 },
-  sectionTitle: { fontSize: 13, fontWeight: "700", color: colors.inkMuted, textTransform: "uppercase", letterSpacing: 0.5 },
-  infoRow: { paddingVertical: 6, gap: 2 },
-  infoLabel: { fontSize: 12, color: colors.inkMuted },
-  infoValue: { fontSize: 15, color: colors.ink },
-});
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
+    button: {
+      minHeight: 46,
+      paddingHorizontal: 16,
+      borderRadius: 12,
+      borderWidth: 1,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8,
+    },
+    buttonCompact: { minHeight: 36, paddingHorizontal: 12, borderRadius: 10 },
+    buttonText: { fontSize: 15, fontWeight: "600", letterSpacing: 0.1 },
+    buttonTextCompact: { fontSize: 14 },
+    card: {
+      backgroundColor: c.surface,
+      borderRadius: 16,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: c.line,
+      padding: 16,
+      shadowColor: c.shadow,
+      shadowOpacity: c.scheme === "dark" ? 0 : 0.04,
+      shadowRadius: 6,
+      shadowOffset: { width: 0, height: 2 },
+      elevation: c.scheme === "dark" ? 0 : 1,
+    },
+    badge: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 5,
+      borderRadius: 999,
+      borderWidth: 1,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      alignSelf: "flex-start",
+    },
+    badgeDot: { width: 6, height: 6, borderRadius: 3 },
+    badgeText: { fontSize: 12, fontWeight: "600" },
+    field: { gap: 6 },
+    label: { fontSize: 13, fontWeight: "600", color: c.ink },
+    required: { color: c.danger },
+    hint: { fontSize: 12, color: c.inkMuted, lineHeight: 17 },
+    fieldError: { fontSize: 12, color: c.danger },
+    input: {
+      minHeight: 46,
+      borderWidth: 1,
+      borderColor: c.lineStrong,
+      borderRadius: 12,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      fontSize: 15,
+      color: c.ink,
+      backgroundColor: c.surface,
+    },
+    inputMultiline: { minHeight: 92, textAlignVertical: "top" },
+    switchRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+    switchLabel: { fontSize: 14, color: c.ink, fontWeight: "500" },
+    segmented: { flexDirection: "row", backgroundColor: c.segment, borderRadius: 12, padding: 3 },
+    segment: { flex: 1, paddingVertical: 9, borderRadius: 10, alignItems: "center" },
+    segmentActive: {
+      backgroundColor: c.surface,
+      shadowColor: c.shadow,
+      shadowOpacity: c.scheme === "dark" ? 0 : 0.08,
+      shadowRadius: 3,
+      shadowOffset: { width: 0, height: 1 },
+      elevation: c.scheme === "dark" ? 0 : 1,
+    },
+    segmentText: { fontSize: 13, fontWeight: "600", color: c.inkMuted },
+    segmentTextActive: { color: c.ink },
+    segmentCount: { fontWeight: "500", color: c.inkSubtle },
+    empty: { alignItems: "center", paddingVertical: 40, paddingHorizontal: 24, gap: 6 },
+    emptyTitle: { fontSize: 16, fontWeight: "600", color: c.ink, textAlign: "center" },
+    emptyText: { fontSize: 14, color: c.inkMuted, textAlign: "center", lineHeight: 20 },
+    errorBox: { backgroundColor: c.dangerSoft, borderColor: tint(c.danger, "44"), borderWidth: 1, borderRadius: 12, padding: 12 },
+    errorText: { color: c.danger, fontSize: 13, lineHeight: 18 },
+    sectionTitleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 },
+    sectionTitle: { fontSize: 12, fontWeight: "700", color: c.inkMuted, textTransform: "uppercase", letterSpacing: 0.6 },
+    infoRow: { paddingVertical: 6, gap: 2 },
+    infoLabel: { fontSize: 12, color: c.inkMuted },
+    infoValue: { fontSize: 15, color: c.ink },
+    infoLink: { color: c.primary },
+  });

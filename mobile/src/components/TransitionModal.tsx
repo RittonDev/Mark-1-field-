@@ -1,3 +1,4 @@
+import { useStyles, useTheme, type Palette } from "../theme/theme";
 import { useState } from "react";
 import { KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -15,7 +16,7 @@ import type { TicketStatus, TicketTransitionPayload } from "../lib/types";
 import { transitionRequirements } from "../lib/workflow";
 import { StatusBadge } from "./badges";
 import { DateTimeField } from "./DateTimeField";
-import { Button, colors, ErrorBox, Field, Input, SwitchRow } from "./ui";
+import { Button, ErrorBox, Field, Input, SwitchRow } from "./ui";
 import { ViolationFields, type ViolationValues } from "./ViolationFields";
 
 /**
@@ -24,6 +25,8 @@ import { ViolationFields, type ViolationValues } from "./ViolationFields";
  * A mudança entra na fila local e vale na hora, mesmo sem conexão.
  */
 export function TransitionModal({ ticket, to, onClose }: { ticket: LocalTicket; to: TicketStatus; onClose: () => void }) {
+  const c = useTheme();
+  const styles = useStyles(makeStyles);
   const req = transitionRequirements(to);
   const insets = useSafeAreaInsets();
   const online = isOnline(useSyncStatus());
@@ -93,7 +96,7 @@ export function TransitionModal({ ticket, to, onClose }: { ticket: LocalTicket; 
 
   return (
     <Modal visible animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.canvas }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      <KeyboardAvoidingView style={{ flex: 1, backgroundColor: c.canvas }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <View style={[styles.header, { paddingTop: Platform.OS === "android" ? insets.top + 12 : 20 }]}>
           <Text style={styles.title}>{TRANSITION_ACTION[to]}</Text>
           <View style={styles.flow}>
@@ -173,28 +176,29 @@ export function TransitionModal({ ticket, to, onClose }: { ticket: LocalTicket; 
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
   header: {
     paddingHorizontal: 20,
     paddingBottom: 14,
     gap: 8,
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.line,
+    borderBottomColor: c.line,
   },
-  title: { fontSize: 20, fontWeight: "700", color: colors.ink },
+  title: { fontSize: 20, fontWeight: "700", color: c.ink },
   flow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6 },
-  code: { fontSize: 12, fontWeight: "700", color: colors.inkMuted },
-  arrow: { color: colors.inkMuted },
-  description: { fontSize: 13, color: colors.inkMuted },
+  code: { fontSize: 12, fontWeight: "700", color: c.inkMuted },
+  arrow: { color: c.inkMuted },
+  description: { fontSize: 13, color: c.inkMuted },
   body: { padding: 20, gap: 16 },
   footer: {
     flexDirection: "row",
     gap: 12,
     paddingHorizontal: 20,
     paddingTop: 12,
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.line,
+    borderTopColor: c.line,
   },
 });

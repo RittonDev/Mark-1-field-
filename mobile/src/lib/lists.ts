@@ -1,4 +1,5 @@
-// Montagem das listas "Hoje", "Agenda" e "Equipe" a partir das OS locais.
+// Listas do técnico a partir das OS locais. O técnico só trabalha nas OS que o analista
+// atribuiu a ele (o backend já filtra; aqui também, por segurança, caso o aparelho tenha dados antigos).
 
 import { PRIORITY, STATUS } from "./constants";
 import { addDays, startOfDay } from "./format";
@@ -11,6 +12,8 @@ const time = (value: string | null) => (value ? new Date(value).getTime() : Numb
 
 export const isDone = (status: TicketStatus) => STATUS[status].group === "done" || STATUS[status].final;
 
+export const isMine = (ticket: LocalTicket, user: User) => ticket.assignee?.id === user.id;
+
 /** Em campo primeiro, depois pela hora da visita, prioridade e prazo de solução. */
 export function compareForToday(a: LocalTicket, b: LocalTicket): number {
   const rank = (FIELD_RANK[a.status] ?? 9) - (FIELD_RANK[b.status] ?? 9);
@@ -22,49 +25,51 @@ export function compareForToday(a: LocalTicket, b: LocalTicket): number {
   return time(a.resolution_due_at) - time(b.resolution_due_at);
 }
 
-export interface AgendaDay {
-  day: Date;
-  items: LocalTicket[];
-}
-
 export interface TicketLists {
-  /** Minhas OS para hoje: em campo, agendadas para hoje ou atrasadas e as sem agenda. */
+  /** Em campo, agendadas para hoje (ou atrasadas) e as sem agenda. */
   today: LocalTicket[];
-  /** Minhas visitas agendadas, de hoje em diante, agrupadas por dia. */
-  agenda: AgendaDay[];
-  /** OS do meu grupo ou da fila sem grupo que não estão comigo. */
-  team: LocalTicket[];
+  /** Agendadas para os próximos dias. */
+  upcoming: LocalTicket[];
+  /** Resolvidas/fechadas recentemente (últimos 7 dias). */
+  done: LocalTicket[];
 }
 
 export function buildLists(tickets: LocalTicket[], user: User, now: Date = new Date()): TicketLists {
   const today: LocalTicket[] = [];
-  const team: LocalTicket[] = [];
-  const byDay = new Map<number, LocalTicket[]>();
-  const todayStart = startOfDay(now).getTime();
+  const upcoming: LocalTicket[] = [];
+  const done: LocalTicket[] = [];
   const tomorrowStart = addDays(startOfDay(now), 1).getTime();
+  const weekAgo = addDays(startOfDay(now), -7).getTime();
 
   for (const ticket of tickets) {
-    if (isDone(ticket.status)) continue;
-    if (ticket.assignee?.id !== user.id) {
-      team.push(ticket);
+    if (!isMine(ticket, user)) continue;
+    if (isDone(ticket.status)) {
+      if (new Date(ticket.updated_at).getTime() >= weekAgo) done.push(ticket);
       continue;
     }
     const scheduled = ticket.scheduled_start ? new Date(ticket.scheduled_start).getTime() : null;
-    if (scheduled === null || scheduled < tomorrowStart || FIELD_RANK[ticket.status] !== undefined) {
-      today.push(ticket);
-    }
-    if (scheduled !== null && scheduled >= todayStart) {
-      const key = startOfDay(new Date(scheduled)).getTime();
-      const list = byDay.get(key) ?? [];
-      list.push(ticket);
-      byDay.set(key, list);
-    }
+    if (scheduled !== null && scheduled >= tomorrowStart && FIELD_RANK[ticket.status] === undefined) upcoming.push(ticket);
+    else today.push(ticket);
   }
 
   today.sort(compareForToday);
-  team.sort((a, b) => PRIORITY[a.priority].rank - PRIORITY[b.priority].rank || time(a.resolution_due_at) - time(b.resolution_due_at));
-  const agenda = [...byDay.entries()]
-    .sort(([a], [b]) => a - b)
-    .map(([day, items]) => ({ day: new Date(day), items: items.sort((a, b) => time(a.scheduled_start) - time(b.scheduled_start)) }));
-  return { today, agenda, team };
+  upcoming.sort((a, b) => time(a.scheduled_start) - time(b.scheduled_start));
+  done.sort((a, b) => time(b.updated_at) - time(a.updated_at));
+  return { today, upcoming, done };
+}
+
+/** OS do técnico que ocupam um dia: visita agendada naquele dia (ou atendimento em curso, se for hoje). */
+export function ticketsOnDay(tickets: LocalTicket[], user: User, day: Date, now: Date = new Date()): LocalTicket[] {
+  const start = startOfDay(day).getTime();
+  const end = addDays(startOfDay(day), 1).getTime();
+  const isToday = start === startOfDay(now).getTime();
+  return tickets
+    .filter((t) => isMine(t, user))
+    .filter((t) => {
+      const s = t.scheduled_start ? new Date(t.scheduled_start).getTime() : null;
+      const e = t.scheduled_end ? new Date(t.scheduled_end).getTime() : s;
+      if (s !== null && e !== null && s < end && e >= start) return true;
+      return isToday && !isDone(t.status) && (s === null || FIELD_RANK[t.status] !== undefined);
+    })
+    .sort(compareForToday);
 }

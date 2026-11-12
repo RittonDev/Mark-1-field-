@@ -1,28 +1,25 @@
 import { router, Stack } from "expo-router";
 import { useMemo, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, RefreshControl, SectionList, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
+import { BrandLogo, BrandRule } from "../components/Brand";
 import { ConnectionBar } from "../components/ConnectionBar";
 import { TicketCard } from "../components/TicketCard";
-import { colors, EmptyState, Segmented } from "../components/ui";
+import { EmptyState, Segmented } from "../components/ui";
 import { useLiveQuery, useNow } from "../lib/changes";
 import { listNotices, listTickets } from "../lib/db";
-import { addDays, formatDay, startOfDay } from "../lib/format";
+import { formatDay } from "../lib/format";
 import { buildLists } from "../lib/lists";
 import { useSession } from "../lib/session";
 import { requestSync, useSyncStatus } from "../lib/sync";
 import type { LocalTicket } from "../lib/syncTypes";
+import { useStyles, useTheme, type Palette } from "../theme/theme";
 
-type Tab = "today" | "agenda" | "team";
-
-function dayTitle(day: Date, now: number): string {
-  const today = startOfDay(new Date(now)).getTime();
-  if (day.getTime() === today) return `Hoje · ${formatDay(day)}`;
-  if (day.getTime() === addDays(new Date(today), 1).getTime()) return `Amanhã · ${formatDay(day)}`;
-  return formatDay(day);
-}
+type Tab = "today" | "agenda" | "done";
 
 export default function MyTicketsScreen() {
   const { user } = useSession();
+  const c = useTheme();
+  const styles = useStyles(makeStyles);
   const tickets = useLiveQuery(listTickets);
   const notices = useLiveQuery(listNotices);
   const sync = useSyncStatus();
@@ -39,7 +36,6 @@ export default function MyTicketsScreen() {
     setRefreshing(false);
   }
 
-  const refreshControl = <RefreshControl refreshing={refreshing} onRefresh={refresh} colors={[colors.brand]} />;
   const neverSynced = tickets !== undefined && tickets.length === 0 && !sync.lastSyncAt;
   const emptyText = neverSynced
     ? sync.network === "offline"
@@ -47,9 +43,15 @@ export default function MyTicketsScreen() {
       : "Baixando suas OS…"
     : undefined;
 
+  const data = tab === "today" ? lists.today : tab === "agenda" ? lists.upcoming : lists.done;
+
   const header = (
     <View style={styles.header}>
-      <Text style={styles.greeting}>Olá, {user.name.split(" ")[0]}</Text>
+      <View style={{ gap: 6 }}>
+        <Text style={styles.date}>{formatDay(new Date(now))}</Text>
+        <Text style={styles.greeting}>Olá, {user.name.split(" ")[0]}</Text>
+        <BrandRule width={36} />
+      </View>
       {notices && notices.length > 0 ? (
         <Pressable onPress={() => router.push("/conta")} style={styles.notice} accessibilityRole="button">
           <Text style={styles.noticeText}>
@@ -62,25 +64,29 @@ export default function MyTicketsScreen() {
         onChange={setTab}
         options={[
           { value: "today", label: "Hoje", count: lists.today.length },
-          { value: "agenda", label: "Agenda", count: lists.agenda.reduce((n, d) => n + d.items.length, 0) },
-          { value: "team", label: "Equipe", count: lists.team.length },
+          { value: "agenda", label: "Agenda", count: lists.upcoming.length },
+          { value: "done", label: "Concluídas", count: lists.done.length },
         ]}
       />
     </View>
   );
 
-  const renderTicket = ({ item }: { item: LocalTicket }) => (
-    <View style={styles.item}>
-      <TicketCard ticket={item} now={now} showDate={tab === "team"} />
-    </View>
-  );
+  const empty =
+    tab === "today" ? (
+      <EmptyState title="Nada para hoje" description={emptyText ?? "Quando o analista atribuir uma OS a você, ela aparece aqui."} />
+    ) : tab === "agenda" ? (
+      <EmptyState title="Nenhuma visita agendada" description={emptyText ?? "Suas próximas visitas aparecem aqui."} />
+    ) : (
+      <EmptyState title="Nada concluído nos últimos 7 dias" description={emptyText} />
+    );
 
   return (
     <View style={{ flex: 1 }}>
       <Stack.Screen
         options={{
+          headerTitle: () => <BrandLogo size="sm" underline={false} />,
           headerRight: () => (
-            <Pressable onPress={() => router.push("/conta")} hitSlop={12} accessibilityRole="button">
+            <Pressable onPress={() => router.push("/conta")} hitSlop={12} accessibilityRole="button" accessibilityLabel="Conta">
               <Text style={styles.headerLink}>Conta</Text>
             </Pressable>
           ),
@@ -88,38 +94,19 @@ export default function MyTicketsScreen() {
       />
       <ConnectionBar />
       {tickets === undefined ? (
-        <ActivityIndicator style={{ marginTop: 40 }} color={colors.brand} />
-      ) : tab === "agenda" ? (
-        <SectionList
-          sections={lists.agenda.map((d) => ({ title: dayTitle(d.day, now), data: d.items }))}
-          keyExtractor={(item) => item.id}
-          renderItem={renderTicket}
-          renderSectionHeader={({ section }) => <Text style={styles.sectionHeader}>{section.title}</Text>}
-          ListHeaderComponent={header}
-          ListEmptyComponent={
-            <EmptyState title="Nenhuma visita agendada" description={emptyText ?? "As OS agendadas para você aparecem aqui, por dia."} />
-          }
-          refreshControl={refreshControl}
-          contentContainerStyle={styles.list}
-          stickySectionHeadersEnabled={false}
-        />
+        <ActivityIndicator style={{ marginTop: 40 }} color={c.primary} />
       ) : (
         <FlatList
-          data={tab === "today" ? lists.today : lists.team}
-          keyExtractor={(item) => item.id}
-          renderItem={renderTicket}
+          data={data}
+          keyExtractor={(item: LocalTicket) => item.id}
+          renderItem={({ item }) => (
+            <View style={styles.item}>
+              <TicketCard ticket={item} now={now} showDate={tab !== "today"} />
+            </View>
+          )}
           ListHeaderComponent={header}
-          ListEmptyComponent={
-            tab === "today" ? (
-              <EmptyState title="Nada para hoje" description={emptyText ?? "Você não tem OS em aberto para hoje."} />
-            ) : (
-              <EmptyState
-                title="Fila da equipe vazia"
-                description={emptyText ?? "OS do seu grupo ou sem grupo que ainda não estão com você."}
-              />
-            )
-          }
-          refreshControl={refreshControl}
+          ListEmptyComponent={empty}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} colors={[c.primary]} tintColor={c.primary} />}
           contentContainerStyle={styles.list}
         />
       )}
@@ -127,21 +114,14 @@ export default function MyTicketsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  list: { paddingBottom: 32 },
-  header: { padding: 16, gap: 12 },
-  greeting: { fontSize: 22, fontWeight: "700", color: colors.ink },
-  notice: { backgroundColor: "#fef2f2", borderColor: "#fecaca", borderWidth: 1, borderRadius: 10, padding: 10 },
-  noticeText: { color: colors.danger, fontSize: 13, fontWeight: "600" },
-  item: { paddingHorizontal: 16, paddingBottom: 10 },
-  sectionHeader: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 8,
-    fontSize: 13,
-    fontWeight: "700",
-    color: colors.inkMuted,
-    textTransform: "uppercase",
-  },
-  headerLink: { color: colors.brand, fontSize: 16, fontWeight: "600" },
-});
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
+    list: { paddingBottom: 32 },
+    header: { padding: 16, paddingTop: 20, gap: 16 },
+    date: { fontSize: 13, color: c.inkMuted, textTransform: "capitalize" },
+    greeting: { fontSize: 24, fontWeight: "700", color: c.ink, letterSpacing: -0.3 },
+    notice: { backgroundColor: c.dangerSoft, borderColor: c.danger + "44", borderWidth: 1, borderRadius: 12, padding: 12 },
+    noticeText: { color: c.danger, fontSize: 13, fontWeight: "600" },
+    item: { paddingHorizontal: 16, paddingBottom: 10 },
+    headerLink: { color: c.primary, fontSize: 16, fontWeight: "600" },
+  });

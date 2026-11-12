@@ -2,47 +2,64 @@ import { router } from "expo-router";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { formatTime } from "../lib/format";
 import { useSyncStatus, type SyncStatus } from "../lib/sync";
-import { colors } from "./ui";
+import { useStyles, useTheme, type Palette } from "../theme/theme";
 
-function describe(s: SyncStatus): { text: string; color: string } {
+type Tone = "ok" | "busy" | "warn" | "error" | "off";
+
+function describe(s: SyncStatus): { text: string; tone: Tone } {
   const pending = s.pendingOps + s.pendingPhotos;
   const pendingText = pending ? ` · ${pending} ${pending === 1 ? "pendente" : "pendentes"}` : "";
-  if (s.network === "offline") {
-    return { text: `Offline — suas ações ficam salvas no aparelho${pendingText}`, color: "#475569" };
-  }
-  if (s.server === "unreachable") {
-    return { text: `Servidor inacessível${pendingText}`, color: colors.warning };
-  }
-  if (s.syncing) return { text: `Sincronizando…${pendingText}`, color: colors.brand };
-  if (s.lastError) return { text: `Falha na sincronização: ${s.lastError}`, color: colors.danger };
+  if (s.network === "offline") return { text: `Offline — suas ações ficam salvas no aparelho${pendingText}`, tone: "off" };
+  if (s.server === "unreachable") return { text: `Servidor inacessível${pendingText}`, tone: "warn" };
+  if (s.syncing) return { text: `Sincronizando…${pendingText}`, tone: "busy" };
+  if (s.lastError) return { text: `Falha na sincronização: ${s.lastError}`, tone: "error" };
   if (s.realtime === "online") {
     const last = s.lastSyncAt ? ` · atualizado ${formatTime(s.lastSyncAt)}` : "";
-    return { text: `Online · tempo real${pendingText || last}`, color: colors.success };
+    return { text: `Online · tempo real${pendingText || last}`, tone: "ok" };
   }
-  return { text: `Online · conectando tempo real…${pendingText}`, color: colors.brand };
+  return { text: `Online · conectando tempo real…${pendingText}`, tone: "busy" };
 }
 
-/** Faixa de estado: online/offline, tempo real e operações pendentes. Toque abre a tela Conta. */
+/** Estado da conexão, do tempo real e dos itens pendentes. Toque abre a tela Conta. */
 export function ConnectionBar() {
   const status = useSyncStatus();
-  const { text, color } = describe(status);
+  const c = useTheme();
+  const styles = useStyles(makeStyles);
+  const { text, tone } = describe(status);
+  const colors: Record<Tone, { bg: string; fg: string }> = {
+    ok: { bg: c.successSoft, fg: c.success },
+    busy: { bg: c.primarySoft, fg: c.primary },
+    warn: { bg: c.warningSoft, fg: c.warning },
+    error: { bg: c.dangerSoft, fg: c.danger },
+    off: { bg: c.surface2, fg: c.inkMuted },
+  };
+  const { bg, fg } = colors[tone];
   return (
     <Pressable
       onPress={() => router.push("/conta")}
       accessibilityRole="button"
-      accessibilityLabel={`${text}. Abrir sincronização`}
-      style={[styles.bar, { backgroundColor: color }]}
+      accessibilityLabel={`${text}. Abrir conta e sincronização`}
+      style={[styles.bar, { backgroundColor: bg }]}
     >
-      <View style={styles.dot} />
-      <Text style={styles.text} numberOfLines={1}>
+      <View style={[styles.dot, { backgroundColor: fg }]} />
+      <Text style={[styles.text, { color: fg }]} numberOfLines={1}>
         {text}
       </Text>
     </Pressable>
   );
 }
 
-const styles = StyleSheet.create({
-  bar: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, paddingVertical: 7 },
-  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#ffffffcc" },
-  text: { color: "#fff", fontSize: 13, fontWeight: "600", flex: 1 },
-});
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
+    bar: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.line,
+    },
+    dot: { width: 7, height: 7, borderRadius: 4 },
+    text: { fontSize: 13, fontWeight: "600", flex: 1 },
+  });

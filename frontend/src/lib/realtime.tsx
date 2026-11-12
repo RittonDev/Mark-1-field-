@@ -1,12 +1,12 @@
 "use client";
 
-import { useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { useToast } from "@/components/Toaster";
 import { refreshSession, WS_URL } from "./api";
 import { STATUS } from "./constants";
 import { sessionStore } from "./session";
-import type { RealtimeEvent } from "./types";
+import type { LiveTechnician, RealtimeEvent } from "./types";
 
 export type ConnectionState = "connecting" | "online" | "offline";
 
@@ -36,6 +36,38 @@ function describe(event: RealtimeEvent): string | null {
     default:
       return null;
   }
+}
+
+/**
+ * Posição nova de um técnico: move o marcador no cache, sem recarregar o mapa todo
+ * (chega a cada poucos segundos por técnico). Jornada aberta/encerrada recarrega.
+ */
+function applyTrackingEvent(queryClient: QueryClient, event: RealtimeEvent) {
+  const userId = event.user_id;
+  if (!userId) return;
+  if (event.type !== "technician.location" || event.latitude == null || event.longitude == null) {
+    queryClient.invalidateQueries({ queryKey: ["tracking"] });
+    return;
+  }
+  let stale = false;
+  queryClient.setQueriesData<LiveTechnician[]>({ queryKey: ["tracking", "live"] }, (rows) =>
+    rows?.map((tech) => {
+      if (tech.id !== userId) return tech;
+      // Voltou o sinal ou o primeiro ponto da jornada: o estado muda, então relê da API.
+      if (tech.state === "no_signal" || !tech.last_position) stale = true;
+      return {
+        ...tech,
+        last_position: {
+          ...(tech.last_position ?? { accuracy_m: null, speed_mps: null, heading: null, battery_pct: null, is_mock: false }),
+          latitude: event.latitude!,
+          longitude: event.longitude!,
+          recorded_at: event.recorded_at ?? new Date().toISOString(),
+        },
+      };
+    }),
+  );
+  if (stale) queryClient.invalidateQueries({ queryKey: ["tracking", "live"] });
+  queryClient.invalidateQueries({ queryKey: ["tracking", "history", userId] });
 }
 
 /**
@@ -91,7 +123,12 @@ export function RealtimeProvider({ userId, children }: { userId: string; childre
         } catch {
           return;
         }
+        if (event.type?.startsWith("technician.")) {
+          applyTrackingEvent(queryClient, event);
+          return;
+        }
         if (!event.type?.startsWith("ticket.")) return;
+        queryClient.invalidateQueries({ queryKey: ["tracking", "live"] });
         queryClient.invalidateQueries({ queryKey: ["tickets"] });
         queryClient.invalidateQueries({ queryKey: ["dashboard"] });
         queryClient.invalidateQueries({ queryKey: ["assignable"] });

@@ -2,7 +2,8 @@
 // não existe na web, então usa <input type="datetime-local">. Mesmas props do DateTimeField.tsx.
 
 import { View } from "react-native";
-import { Button, colors } from "./ui";
+import { useTheme } from "../theme/theme";
+import { Button } from "./ui";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
@@ -24,6 +25,7 @@ export function DateTimeField({
   minimumDate?: Date;
   clearable?: boolean;
 }) {
+  const colors = useTheme();
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
       <input
@@ -38,7 +40,8 @@ export function DateTimeField({
         style={{
           flex: 1,
           minHeight: 44,
-          border: `1px solid ${colors.line}`,
+          border: `1px solid ${colors.lineStrong}`,
+          colorScheme: colors.scheme,
           borderRadius: 10,
           padding: "0 12px",
           fontSize: 15,

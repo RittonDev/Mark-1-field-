@@ -25,7 +25,7 @@ export function Logo({ compact = false, size = "md" }: { compact?: boolean; size
   );
 }
 
-type Theme = "light" | "dark";
+export type Theme = "light" | "dark";
 
 function readTheme(): Theme {
   return document.documentElement.dataset.theme === "dark" ? "dark" : "light";
@@ -37,9 +37,14 @@ function subscribe(onChange: () => void) {
   return () => observer.disconnect();
 }
 
+/** Tema atual (claro/escuro), acompanhando o botão e o tema do sistema. */
+export function useTheme(): Theme {
+  return useSyncExternalStore(subscribe, readTheme, () => "light" as Theme);
+}
+
 /** Alterna claro/escuro; a escolha fica salva. Sem escolha salva, segue o tema do sistema. */
 export function ThemeToggle({ className = "" }: { className?: string }) {
-  const theme = useSyncExternalStore(subscribe, readTheme, () => "light" as Theme);
+  const theme = useTheme();
   const next: Theme = theme === "dark" ? "light" : "dark";
   return (
     <button

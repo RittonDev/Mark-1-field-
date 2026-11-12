@@ -128,6 +128,12 @@ export const session = {
     update({ accessToken: data.access_token, refreshToken: data.refresh_token, user: data.user });
   },
 
+  /** Usuário atualizado (ex.: depois da troca de senha ou do aceite do termo de rastreamento). */
+  async updateUser(user: User) {
+    await write(KEYS.user, JSON.stringify(user));
+    update({ user });
+  },
+
   async setApiUrl(value: string) {
     const apiUrl = normalizeApiUrl(value);
     await write(KEYS.apiUrl, apiUrl);

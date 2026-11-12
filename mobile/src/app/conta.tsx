@@ -1,7 +1,8 @@
+import { useStyles, useTheme, type Palette } from "../theme/theme";
 import { router } from "expo-router";
 import { useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
-import { Badge, Button, Card, colors, EmptyState, InfoRow, SectionTitle } from "../components/ui";
+import { Badge, Button, Card, EmptyState, InfoRow, SectionTitle } from "../components/ui";
 import { getDeviceRegistration, logout } from "../lib/auth";
 import { useDataVersion, useLiveQuery } from "../lib/changes";
 import { APP_VERSION } from "../lib/config";
@@ -22,6 +23,8 @@ function networkLabel(s: SyncStatus): string {
 const REALTIME_LABEL = { off: "Desligado", connecting: "Conectando…", online: "Ativo" } as const;
 
 export default function AccountScreen() {
+  const c = useTheme();
+  const styles = useStyles(makeStyles);
   const { user, apiUrl } = useSession();
   const sync = useSyncStatus();
   const pending = useLiveQuery(listPendingOps);
@@ -119,7 +122,7 @@ export default function AccountScreen() {
                 <View style={{ flexDirection: "row", gap: 6, alignItems: "center" }}>
                   <Badge
                     label={notice.kind === "conflict" ? "Conflito" : notice.kind === "photo" ? "Foto" : "Recusada"}
-                    color={notice.kind === "conflict" ? colors.warning : colors.danger}
+                    color={notice.kind === "conflict" ? c.warning : c.danger}
                   />
                   <Text style={styles.muted}>
                     {notice.ticket_code ?? ""} · {formatDateTime(notice.created_at)}
@@ -163,10 +166,11 @@ export default function AccountScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
   content: { padding: 16, gap: 14, paddingBottom: 40 },
-  name: { fontSize: 18, fontWeight: "700", color: colors.ink },
-  muted: { fontSize: 13, color: colors.inkMuted },
+  name: { fontSize: 18, fontWeight: "700", color: c.ink },
+  muted: { fontSize: 13, color: c.inkMuted },
   buttons: { flexDirection: "row", gap: 10, marginTop: 8 },
   op: {
     flexDirection: "row",
@@ -174,8 +178,8 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.line,
+    borderTopColor: c.line,
   },
-  opTitle: { fontSize: 14, color: colors.ink },
-  error: { fontSize: 12, color: colors.danger },
+  opTitle: { fontSize: 14, color: c.ink },
+  error: { fontSize: 12, color: c.danger },
 });

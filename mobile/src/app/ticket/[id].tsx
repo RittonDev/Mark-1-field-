@@ -1,3 +1,4 @@
+import { useStyles, useTheme, type Palette } from "../../theme/theme";
 import { Stack, useLocalSearchParams } from "expo-router";
 import { useCallback, useState } from "react";
 import { ActivityIndicator, KeyboardAvoidingView, Platform, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
@@ -9,7 +10,7 @@ import { InfoPanel } from "../../components/ticket/InfoPanel";
 import { PhotosPanel } from "../../components/ticket/PhotosPanel";
 import { WorklogsPanel } from "../../components/ticket/WorklogsPanel";
 import { TransitionModal } from "../../components/TransitionModal";
-import { Button, Card, colors, EmptyState, Segmented, SectionTitle } from "../../components/ui";
+import { Button, Card, EmptyState, Segmented, SectionTitle } from "../../components/ui";
 import { api, errorMessage } from "../../lib/api";
 import { useLiveQuery, useNow } from "../../lib/changes";
 import { canManageTickets, isStaff, STATUS, TRANSITION_ACTION } from "../../lib/constants";
@@ -40,6 +41,8 @@ const ACTION_ORDER: TicketStatus[] = [
 const PRIMARY: TicketStatus[] = ["en_route", "in_progress", "resolved"];
 
 export default function TicketScreen() {
+  const c = useTheme();
+  const styles = useStyles(makeStyles);
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user } = useSession();
   const load = useCallback(() => getTicket(String(id)), [id]);
@@ -54,7 +57,7 @@ export default function TicketScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   if (!user) return null;
-  if (ticket === undefined) return <ActivityIndicator style={{ marginTop: 40 }} color={colors.brand} />;
+  if (ticket === undefined) return <ActivityIndicator style={{ marginTop: 40 }} color={c.primary} />;
   if (ticket === null) {
     return (
       <View style={{ flex: 1 }}>
@@ -109,7 +112,7 @@ export default function TicketScreen() {
       <ScrollView
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} colors={[colors.brand]} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} colors={[c.primary]} />}
       >
         <Card style={{ gap: 8 }}>
           <Text style={styles.title} selectable>
@@ -183,11 +186,12 @@ export default function TicketScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
   content: { padding: 16, gap: 14, paddingBottom: 40 },
-  title: { fontSize: 19, fontWeight: "700", color: colors.ink },
+  title: { fontSize: 19, fontWeight: "700", color: c.ink },
   badges: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
-  meta: { fontSize: 13, color: colors.inkMuted },
-  pending: { fontSize: 13, fontWeight: "600", color: colors.warning },
-  violationPending: { fontSize: 12, color: colors.inkMuted, fontStyle: "italic" },
+  meta: { fontSize: 13, color: c.inkMuted },
+  pending: { fontSize: 13, fontWeight: "600", color: c.warning },
+  violationPending: { fontSize: 12, color: c.inkMuted, fontStyle: "italic" },
 });
