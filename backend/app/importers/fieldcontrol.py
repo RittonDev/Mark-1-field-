@@ -306,6 +306,116 @@ def _location_point(loc: dict[str, Any]) -> tuple[Any, Any, str | None]:
     return coords.get("latitude"), coords.get("longitude"), to_uf(address.get("state"))
 
 
+def contacts_of(raw: Any) -> list[dict[str, Any]]:
+    """Todos os contatos do Field Control: [{kind, value, name, label, primary}], sem repetidos.
+
+    Telefone fica só com dígitos, com o DDI na frente ("5511999998888"); e-mail em minúsculas.
+    """
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    raw = raw or {}
+    for item in raw.get("emails") or []:
+        value = (item.get("address") or "").strip().lower()
+        if not value or ("email", value) in seen:
+            continue
+        seen.add(("email", value))
+        out.append(
+            {
+                "kind": "email",
+                "value": value[:255],
+                "name": clip(item.get("name"), 160),
+                "label": clip(item.get("type"), 20),
+                "primary": bool(item.get("primary")),
+            }
+        )
+    for item in raw.get("phones") or []:
+        number = digits(item.get("number"))
+        if not number:
+            continue
+        country = digits(item.get("countryCode")) or "55"
+        value = number if number.startswith(country) and len(number) > 11 else country + number
+        if ("phone", value) in seen:
+            continue
+        seen.add(("phone", value))
+        out.append(
+            {
+                "kind": "phone",
+                "value": value[:40],
+                "name": clip(item.get("name"), 160),
+                "label": clip(item.get("type"), 20),
+                "primary": bool(item.get("primary")),
+            }
+        )
+    return out
+
+
+def address_parts(address: dict[str, Any]) -> dict[str, Any]:
+    """Endereço do Field Control nos nossos campos (rua, número - complemento; bairro; CEP)."""
+    street = ", ".join(p for p in (address.get("street"), address.get("number")) if p)
+    line = " - ".join(p for p in (street, address.get("complement")) if p)
+    return {
+        "line": clip(line, 255),
+        "district": clip(address.get("neighborhood"), 120),
+        "city": clip(address.get("city"), 120),
+        "state": to_uf(address.get("state")),
+        "zip": fmt_zip(address.get("zipCode") or address.get("postalCode")),
+    }
+
+
+def territories_of(record: dict[str, Any]) -> list[str]:
+    names: list[str] = []
+    for item in [*(record.get("territories") or []), *(record.get("subTerritories") or [])]:
+        name = clip((item or {}).get("name") if isinstance(item, dict) else item, 120)
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
+def customer_legacy(c: dict[str, Any]) -> dict[str, Any]:
+    stats = c.get("statistics") or {}
+    rating = stats.get("rating") or {}
+    service = stats.get("service") or {}
+    attachments = []
+    for item in c.get("attachments") or []:
+        if not item or item.get("archived"):
+            continue
+        url = absolute_file(item.get("path"))
+        if url:
+            attachments.append({"url": url, "title": item.get("title"), "type": item.get("type")})
+    return {
+        "source": SOURCE,
+        "id": c.get("id"),
+        "created_at": c.get("createdAt"),
+        "rating": {
+            "average": rating.get("averageStars") or 0,
+            "last_star": rating.get("lastStar") or 0,
+            "last_comment": rating.get("lastComment"),
+        }
+        if rating
+        else None,
+        "service": {
+            "first_at": service.get("firstAt"),
+            "last_at": service.get("lastAt"),
+            "total": service.get("total") or 0,
+        }
+        if service
+        else None,
+        "attachments": attachments,
+    }
+
+
+def work_schedule_of(raw: Any) -> dict[str, Any] | None:
+    raw = raw or {}
+    pause = raw.get("break") or {}
+    schedule = {
+        "start": raw.get("start"),
+        "end": raw.get("end"),
+        "break_start": pause.get("start"),
+        "break_end": pause.get("end"),
+    }
+    return schedule if any(schedule.values()) else None
+
+
 def tags_of(labels: Any) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -652,6 +762,8 @@ class Importer:
                         "role": role,
                         "job_title": clip(u.get("workPosition"), 120),
                         "is_active": True,
+                        "avatar_external_url": clip(u.get("avatarUrl"), 1000),
+                        "legacy": {"source": SOURCE, "id": u.get("id")},
                         "created_at": parse_ts((u.get("metadata") or {}).get("createdAt")) or now,
                         "updated_at": now,
                     }
@@ -675,6 +787,20 @@ class Importer:
             home = home_of(address, placeholders)
             if home["placeholder"]:
                 self.report.add("technicians", "home_placeholder_cleared")
+            # Ficha completa: endereço (menos o padrão do escritório), jornada, foto e origem.
+            parts = address_parts(address)
+            profile = {
+                "address_line": None if home["placeholder"] else parts["line"],
+                "address_district": None if home["placeholder"] else parts["district"],
+                "address_zip": None if home["placeholder"] else parts["zip"],
+                "work_schedule": work_schedule_of(e.get("workSchedule")),
+                "avatar_external_url": clip(e.get("avatarUrl"), 1000),
+                "legacy": {"source": SOURCE, "id": e.get("id"), "territories": territories_of(e)},
+            }
+            if profile["address_line"]:
+                self.report.add("technicians", "with_address")
+            if profile["work_schedule"]:
+                self.report.add("technicians", "with_schedule")
             if known:
                 self.report.add("technicians", "existing")
                 await self.db.execute(
@@ -687,6 +813,7 @@ class Importer:
                         home_state=home["state"],
                         home_latitude=home["latitude"],
                         home_longitude=home["longitude"],
+                        **profile,
                     )
                 )
                 uid = known
@@ -707,6 +834,7 @@ class Importer:
                         "home_state": home["state"],
                         "home_latitude": home["latitude"],
                         "home_longitude": home["longitude"],
+                        **profile,
                         "created_at": now,
                         "updated_at": now,
                     }
