@@ -81,9 +81,24 @@ if (-not $NoMobile) {
 
 $skip = '\\(node_modules|\.next|\.expo|dist|web-build|android|ios)(\\|$)'
 
-function Changed-Files($target, [datetime]$since) {
+# Arquivos temporários de editores (gravam num nome aleatório e renomeiam): não copiar.
+$tempName = '^[A-Za-z0-9_-]{8}$|~$|\.tmp$|\.swp$'
+
+# Assinatura de cada arquivo (data + tamanho). Comparar com a última assinatura, e não com a
+# hora da última volta: quem grava num temporário e renomeia mantém a data antiga, e uma
+# comparação por "mais novo que a última volta" perde essa mudança.
+function Snapshot($target) {
+    $map = @{}
     Get-ChildItem -LiteralPath $target.Source -Recurse -File -Force -ErrorAction SilentlyContinue |
-        Where-Object { $_.FullName -notmatch $skip -and $_.LastWriteTime -gt $since }
+        Where-Object { $_.FullName -notmatch $skip -and $_.Name -notmatch $tempName } |
+        ForEach-Object { $map[$_.FullName] = "$($_.LastWriteTimeUtc.Ticks):$($_.Length)" }
+    return $map
+}
+
+function Changed-Files($target, $before, $after) {
+    foreach ($path in $after.Keys) {
+        if ($before[$path] -ne $after[$path]) { Get-Item -LiteralPath $path }
+    }
 }
 
 foreach ($t in $targets) {
@@ -108,12 +123,14 @@ if (-not $NoMobile) {
     if ($qr) { $qr | ForEach-Object { Write-Host $_ } }
 }
 
-$last = Get-Date
+$snapshots = @{}
+foreach ($t in $targets) { $snapshots[$t.Name] = Snapshot $t }
 while ($true) {
     Start-Sleep -Seconds $IntervalSeconds
-    $now = Get-Date
     foreach ($t in $targets) {
-        $files = @(Changed-Files $t $last)
+        $current = Snapshot $t
+        $files = @(Changed-Files $t $snapshots[$t.Name] $current)
+        $snapshots[$t.Name] = $current
         if ($files.Count -eq 0) { continue }
         $reinstall = $false
         foreach ($f in $files) {
@@ -131,5 +148,4 @@ while ($true) {
             & docker.exe restart $t.Container | Out-Null
         }
     }
-    $last = $now
 }
