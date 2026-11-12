@@ -113,8 +113,14 @@ async def save_answers(
 ) -> TicketFormOut:
     """Salvar respostas (parcial). Com `complete: true`, valida e conclui o formulário."""
     ticket = await tickets_svc.get_visible_ticket(db, user, ticket_id)
-    form = await svc.save_answers(db, ticket, await svc.get_ticket_form(db, ticket, form_id), body, user)
+    form = await svc.get_ticket_form(db, ticket, form_id)
+    # Grava as respostas primeiro: se faltar foto ou obrigatório para concluir, o que o
+    # técnico já respondeu não se perde (a conclusão é que volta com o 422).
+    await svc.save_partial(db, ticket, form, body.answers, user)
     await commit_and_publish(db)
+    if body.complete:
+        await svc.complete(db, ticket, form, user)
+        await commit_and_publish(db)
     return TicketFormOut.model_validate(form)
 
 

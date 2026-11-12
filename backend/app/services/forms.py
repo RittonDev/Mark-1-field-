@@ -247,10 +247,25 @@ async def missing_items(db: AsyncSession, form: TicketForm) -> list[str]:
 async def save_answers(
     db: AsyncSession, ticket: Ticket, form: TicketForm, data: TicketFormAnswers, actor: User
 ) -> TicketForm:
+    """Grava as respostas (parcial). Com `complete`, tenta concluir em seguida: se faltar algo,
+    levanta FormIncomplete, mas quem chama pode gravar as respostas antes (ver a rota)."""
+    await save_partial(db, ticket, form, data.answers, actor)
+    if data.complete:
+        await complete(db, ticket, form, actor)
+    return form
+
+
+class FormIncomplete(WorkflowError):
+    """Faltam obrigatórios ou fotos para concluir (as respostas enviadas já foram aceitas)."""
+
+
+async def save_partial(
+    db: AsyncSession, ticket: Ticket, form: TicketForm, values: dict[str, Any], actor: User
+) -> TicketForm:
     _ensure_can_fill(ticket, actor)
     fields = {f["id"]: FormField.model_validate(f) for f in form.fields}
     answers = dict(form.answers or {})
-    for key, value in data.answers.items():
+    for key, value in values.items():
         field = fields.get(key)
         if field is None or field.type in ("section", "photo"):
             continue  # campo que não existe (versão antiga do app) ou foto (vai como anexo)
@@ -259,28 +274,37 @@ async def save_answers(
             answers.pop(key, None)
         else:
             answers[key] = cleaned
+    changed = answers != (form.answers or {})
     form.answers = answers
-    if data.complete:
-        missing = await missing_items(db, form)
-        if missing:
-            raise WorkflowError("Falta preencher: " + "; ".join(missing))
-        if form.status != FormStatus.COMPLETED:
-            record_event(
-                db,
-                ticket,
-                actor,
-                TicketEventType.FORM_COMPLETED,
-                to_value=form.name[:64],
-                data={"form_id": str(form.id)},
-            )
-        form.status = FormStatus.COMPLETED
-        form.completed_at = utcnow()
-        form.completed_by_id = actor.id
-    else:
+    if changed or form.status != FormStatus.COMPLETED:
+        # Mudou depois de concluído: precisa concluir de novo.
         has_photos = bool(await photo_counts(db, form.id))
         form.status = FormStatus.IN_PROGRESS if answers or has_photos else FormStatus.PENDING
         form.completed_at = None
         form.completed_by_id = None
+    await _touch(db, ticket, utcnow())  # o app recebe a mudança no próximo sync
+    queue_event(db, "updated", ticket, actor, {"fields": ["forms"]})
+    await db.flush()
+    return form
+
+
+async def complete(db: AsyncSession, ticket: Ticket, form: TicketForm, actor: User) -> TicketForm:
+    _ensure_can_fill(ticket, actor)
+    missing = await missing_items(db, form)
+    if missing:
+        raise FormIncomplete("Falta preencher: " + "; ".join(missing))
+    if form.status != FormStatus.COMPLETED:
+        record_event(
+            db,
+            ticket,
+            actor,
+            TicketEventType.FORM_COMPLETED,
+            to_value=form.name[:64],
+            data={"form_id": str(form.id)},
+        )
+    form.status = FormStatus.COMPLETED
+    form.completed_at = utcnow()
+    form.completed_by_id = actor.id
     await _touch(db, ticket, utcnow())  # o app recebe a mudança no próximo sync
     queue_event(db, "updated", ticket, actor, {"fields": ["forms"]})
     await db.flush()
