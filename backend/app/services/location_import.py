@@ -163,19 +163,24 @@ async def import_locations(
                 except ValueError:
                     errors.append("CNPJ do cliente inválido")
             customer_label = name or raw_doc
-            customer = (by_doc.get(doc) if doc else None) or by_name.get(name.lower())
-            key = doc or name.lower()
-            if customer is None and key in new_customers:
-                customer, new_customer = new_customers[key], True
-            elif customer is None and not errors:
+            keys = [k for k in (doc, name.lower()) if k]
+            customer = (by_doc.get(doc) if doc else None) or (
+                by_name.get(name.lower()) if name else None
+            )
+            if customer is None:
+                # Cliente novo criado numa linha anterior desta mesma planilha.
+                customer = next((new_customers[k] for k in keys if k in new_customers), None)
+                new_customer = customer is not None
+            if customer is None and not errors:
                 if len(name) < 2:
                     errors.append("Informe o cliente (nome ou CNPJ cadastrado)")
                 else:
                     customer = Customer(id=uuid.uuid4(), name=name, document=doc, is_active=True)
                     new_customer = True
-                    new_customers[key] = customer
-                    if not dry_run:
-                        db.add(customer)
+                    for k in keys:
+                        new_customers[k] = customer
+            if customer is not None:
+                customer_label = customer.name
 
         fields: dict[str, Any] = {}
         try:
@@ -229,6 +234,8 @@ async def import_locations(
         if dry_run:
             continue
         assert customer is not None
+        if new_customer:
+            db.add(customer)  # só entra no banco se ao menos um local dele foi aceito
         if existing is not None:
             for key, value in fields.items():
                 setattr(existing, key, value)
