@@ -1,10 +1,11 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, MapPin, Pencil, Plus, Search, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, MapPin, Pencil, Plus, Search, Upload, X } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { LocationDialog } from "@/components/LocationDialog";
+import { LocationImportDialog } from "@/components/LocationImportDialog";
 import {
   Button,
   Card,
@@ -38,6 +39,7 @@ function LocationsView() {
   const [onlyActive, setOnlyActive] = useState(true);
   const [page, setPage] = useState(1);
   const [editing, setEditing] = useState<Location | "new" | null>(null);
+  const [importing, setImporting] = useState(false);
   const q = useDebounced(search.trim(), 350);
 
   const locations = useLocationSearch({
@@ -65,10 +67,16 @@ function LocationsView() {
         }
         actions={
           canEdit ? (
-            <Button variant="primary" onClick={() => setEditing("new")}>
-              <Plus className="size-4" />
-              Novo local
-            </Button>
+            <>
+              <Button onClick={() => setImporting(true)}>
+                <Upload className="size-4" />
+                Importar planilha
+              </Button>
+              <Button variant="primary" onClick={() => setEditing("new")}>
+                <Plus className="size-4" />
+                Novo local
+              </Button>
+            </>
           ) : null
         }
       />
@@ -209,6 +217,7 @@ function LocationsView() {
         )}
       </Card>
 
+      {importing ? <LocationImportDialog customerId={customerId || null} onClose={() => setImporting(false)} /> : null}
       {editing ? (
         <LocationDialog
           location={editing === "new" ? null : editing}
