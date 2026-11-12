@@ -35,6 +35,13 @@ function Meta({ label, children, tone }: { label: string; children: React.ReactN
 /** A situação do orçamento em destaque: quem aprovou (com a assinatura), por que recusou, desde quando espera. */
 function Decision({ quote, expiredByDate }: { quote: Quote; expiredByDate: boolean }) {
   if (quote.status === "approved") {
+    const details = [
+      quote.approver_registration ? `Matrícula ${quote.approver_registration}` : null,
+      quote.approver_role,
+      quote.approver_document ? `Doc. ${quote.approver_document}` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
     return (
       <div className="flex flex-col gap-3 rounded-xl border border-emerald-200 bg-emerald-50/70 p-4 sm:flex-row sm:items-center dark:border-emerald-500/25 dark:bg-emerald-500/10">
         <CheckCircle2 className="size-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
@@ -43,15 +50,7 @@ function Decision({ quote, expiredByDate }: { quote: Quote; expiredByDate: boole
             Aprovado por {quote.approver_name ?? "cliente"}
             {quote.decided_at ? <span className="font-normal"> em {formatDateTime(quote.decided_at)}</span> : null}
           </p>
-          <p className="mt-0.5 text-xs text-emerald-900/75 dark:text-emerald-200/75">
-            {[
-              quote.approver_registration ? `Matrícula ${quote.approver_registration}` : null,
-              quote.approver_role,
-              quote.approver_document ? `Doc. ${quote.approver_document}` : null,
-            ]
-              .filter(Boolean)
-              .join(" · ") || "Aprovado pelo link, com assinatura"}
-          </p>
+          {details ? <p className="mt-0.5 text-xs text-emerald-900/75 dark:text-emerald-200/75">{details}</p> : null}
           {quote.client_comment ? (
             <p className="mt-2 border-l-2 border-emerald-300 pl-2.5 text-xs text-emerald-900/85 italic dark:border-emerald-500/40 dark:text-emerald-200/85">
               “{quote.client_comment}”
