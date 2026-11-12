@@ -98,7 +98,13 @@ function MessageList({ ticketId, compact = false }: { ticketId: string; compact?
                     </Button>
                   </a>
                   {edited[m.key] !== undefined ? (
-                    <Button size="sm" variant="ghost" onClick={() => setEdited(({ [m.key]: _, ...rest }) => rest)}>
+                    <Button size="sm" variant="ghost" onClick={() =>
+                        setEdited((ed) => {
+                          const next = { ...ed };
+                          delete next[m.key];
+                          return next;
+                        })
+                      }>
                       Voltar ao texto padrão
                     </Button>
                   ) : null}

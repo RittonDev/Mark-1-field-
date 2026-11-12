@@ -1,12 +1,14 @@
 "use client";
 
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, Plus, Search, SlidersHorizontal, TicketX, X } from "lucide-react";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronLeft, ChevronRight, Hand, Plus, Search, SlidersHorizontal, TicketX, Users, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { PriorityBadge, SlaBadge, SlaCountdown, StatusBadge } from "@/components/badges";
 import { MultiSelect } from "@/components/MultiSelect";
+import { useToast } from "@/components/Toaster";
+import { QuickEditButton } from "@/components/ticket/QuickEditButton";
 import {
   Button,
   Card,
@@ -21,7 +23,7 @@ import {
 } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { isStaff, PRIORITY, PRIORITY_ORDER, STATUS, STATUS_ORDER } from "@/lib/constants";
+import { canManageTickets, isStaff, PRIORITY, PRIORITY_ORDER, STATUS, STATUS_ORDER } from "@/lib/constants";
 import { formatShort } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
 import { useAssignable, useCustomers, useTeams } from "@/lib/queries";
@@ -97,6 +99,18 @@ function TicketsView() {
   const q = useDebounced(search.trim(), 350);
 
   const assignable = useAssignable(null, staff);
+  const manager = canManageTickets(user?.role);
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  // Puxar para si a OS de um colega (ou da fila): o analista assume na hora.
+  const take = useMutation({
+    mutationFn: (t: TicketListItem) => api.post(`/tickets/${t.id}/take`),
+    onSuccess: (_, t) => {
+      queryClient.invalidateQueries({ queryKey: ["tickets"] });
+      toast({ title: `${t.code} agora é sua`, tone: "success" });
+    },
+    onError: (e) => toast({ title: "Não foi possível assumir", description: errorMessage(e), tone: "error" }),
+  });
   const teams = useTeams();
   const customers = useCustomers();
 
@@ -178,7 +192,8 @@ function TicketsView() {
         </div>
       </div>
 
-      <div className="mb-4 flex gap-1 overflow-x-auto border-b border-line">
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-x-4 gap-y-2 border-b border-line">
+      <div className="flex gap-1 overflow-x-auto">
         {VIEWS.filter((v) => staff || !v.staffOnly).map((v) => {
           const active = view === v.key;
           return (
@@ -195,6 +210,32 @@ function TicketsView() {
             </button>
           );
         })}
+      </div>
+        {manager ? (
+          // Fila de um colega: para ver o que está com ele e, se preciso, puxar a OS para si.
+          <label className="mb-1.5 flex items-center gap-2 text-sm text-ink-muted">
+            <Users className="size-4" />
+            <span className="whitespace-nowrap">Fila de</span>
+            <select
+              value={filters.assignee_id}
+              onChange={(e) => {
+                if (view === "minhas" || view === "sem_responsavel") setView("abertos");
+                update({ assignee_id: e.target.value });
+              }}
+              className="h-8 rounded-md border border-line bg-surface px-2 text-sm text-ink"
+              aria-label="Fila de"
+            >
+              <option value="">Todos</option>
+              {(assignable.data ?? [])
+                .filter((u) => u.id !== user?.id)
+                .map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name} ({u.open_tickets})
+                  </option>
+                ))}
+            </select>
+          </label>
+        ) : null}
       </div>
 
       {showFilters ? (
@@ -324,6 +365,7 @@ function TicketsView() {
                   <Th>Responsável</Th>
                   <Th>SLA</Th>
                   <Th>Atualizado</Th>
+                  <Th className="w-px"><span className="sr-only">Ações</span></Th>
                 </tr>
               </thead>
               <tbody className={query.isFetching ? "opacity-70" : undefined}>
@@ -376,6 +418,23 @@ function TicketsView() {
                       </div>
                     </Td>
                     <Td className="text-xs whitespace-nowrap text-ink-muted">{formatShort(t.updated_at)}</Td>
+                    <Td className="w-px">
+                      <div className="flex items-center justify-end gap-0.5" onClick={(e) => e.stopPropagation()}>
+                        {manager && t.assignee?.id !== user?.id && !STATUS[t.status].final ? (
+                          <button
+                            type="button"
+                            onClick={() => take.mutate(t)}
+                            disabled={take.isPending}
+                            className="rounded-md p-1.5 text-ink-muted hover:bg-surface-2 hover:text-brand disabled:opacity-50"
+                            aria-label={`Puxar ${t.code} para mim`}
+                            title={t.assignee ? `Puxar de ${t.assignee.name} para mim` : "Assumir"}
+                          >
+                            <Hand className="size-4" />
+                          </button>
+                        ) : null}
+                        {manager ? <QuickEditButton ticketId={t.id} code={t.code} /> : null}
+                      </div>
+                    </Td>
                   </tr>
                 ))}
               </tbody>

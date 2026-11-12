@@ -10,12 +10,22 @@ import { useAuth } from "@/lib/auth";
 import { canManageTickets, computePriority, LEVEL, LEVEL_ORDER, PRIORITY, PRIORITY_ORDER, TICKET_TYPE } from "@/lib/constants";
 import { useProjects } from "@/lib/projects";
 import { useCategories, useServiceTypes, useTeams } from "@/lib/queries";
-import { formatMinutes } from "@/lib/format";
+import Link from "next/link";
+import { formatDateTime, formatMinutes } from "@/lib/format";
 import type { Level, Location, TicketDetail, TicketPriority, TicketType, TicketUpdatePayload } from "@/lib/types";
 import { useTicketErrorHandler } from "./useConflictHandler";
 
 /** Edição dos dados da OS. Monte só quando aberto para o formulário nascer com os dados atuais. */
-export function EditTicketDialog({ ticket, onClose }: { ticket: TicketDetail; onClose: () => void }) {
+export function EditTicketDialog({
+  ticket,
+  onClose,
+  headerExtra,
+}: {
+  ticket: TicketDetail;
+  onClose: () => void;
+  /** Resumo da situação (status etc.), usado quando o lápis abre a edição a partir das listas. */
+  headerExtra?: React.ReactNode;
+}) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const onError = useTicketErrorHandler(ticket.id);
@@ -90,6 +100,18 @@ export function EditTicketDialog({ ticket, onClose }: { ticket: TicketDetail; on
       onClose={onClose}
       size="lg"
       title={`Editar ${ticket.code}`}
+      description={
+        headerExtra ? (
+          <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            {headerExtra}
+            <span>{ticket.assignee ? ticket.assignee.name : "Sem responsável"}</span>
+            {ticket.scheduled_start ? <span>Agendada {formatDateTime(ticket.scheduled_start)}</span> : null}
+            <Link href={`/chamados/${ticket.id}`} className="text-brand hover:underline">
+              Abrir OS completa
+            </Link>
+          </span>
+        ) : undefined
+      }
       footer={
         <>
           <Button onClick={onClose}>Cancelar</Button>
