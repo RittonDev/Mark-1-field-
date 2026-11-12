@@ -375,6 +375,13 @@ export interface RealtimeEvent {
   version?: number;
   occurred_at?: ISODate;
   data?: Record<string, unknown> | null;
+  // Eventos do rastreamento (technician.location, technician.shift), só para a gestão.
+  user_id?: UUID;
+  name?: string;
+  latitude?: number;
+  longitude?: number;
+  recorded_at?: ISODate;
+  on_shift?: boolean;
 }
 
 export interface TicketCreatePayload {
@@ -399,6 +406,7 @@ export interface TicketCreatePayload {
   assignee_id?: UUID | null;
   scheduled_start?: ISODate | null;
   scheduled_end?: ISODate | null;
+  allow_conflict?: boolean;
 }
 
 export type TicketUpdatePayload = Partial<
@@ -417,6 +425,7 @@ export interface TicketTransitionPayload {
   response_violation_reason_id?: UUID | null;
   resolution_violation_reason_id?: UUID | null;
   violation_note?: string | null;
+  allow_conflict?: boolean;
 }
 
 /** Atividades do dia (GET /activities/day): o previsto e o realizado na mesma linha. */
@@ -502,4 +511,82 @@ export interface SlaViolationReport {
   resolution: ClockViolations;
   by_responsibility: Record<Responsibility, number>;
   pending_justification: number;
+}
+
+// Rastreamento dos técnicos (mapa ao vivo)
+export type LiveState = "offline" | "no_signal" | "available" | "en_route" | "in_progress";
+
+export interface LivePosition {
+  latitude: number;
+  longitude: number;
+  accuracy_m: number | null;
+  speed_mps: number | null;
+  heading: number | null;
+  battery_pct: number | null;
+  is_mock: boolean;
+  recorded_at: ISODate;
+}
+
+export interface LiveTicket {
+  id: UUID;
+  code: string;
+  title: string;
+  status: TicketStatus;
+  location: { name: string; city: string | null; latitude: number | null; longitude: number | null } | null;
+  service_address: string | null;
+}
+
+export interface LiveTechnician {
+  id: UUID;
+  name: string;
+  phone: string | null;
+  team: Ref | null;
+  on_shift: boolean;
+  shift_started_at: ISODate | null;
+  state: LiveState;
+  last_position: LivePosition | null;
+  current_ticket: LiveTicket | null;
+  open_tickets: number;
+}
+
+export interface TrackingHistory {
+  user_id: UUID;
+  date: string;
+  points: { latitude: number; longitude: number; recorded_at: ISODate; speed_mps: number | null }[];
+  status_events: {
+    ticket_id: UUID;
+    ticket_code: string;
+    to_status: TicketStatus;
+    at: ISODate;
+    latitude: number | null;
+    longitude: number | null;
+  }[];
+}
+
+// Calendário e conflito de horário
+export interface ConflictItem {
+  id: UUID;
+  code: string;
+  title: string;
+  customer: string | null;
+  location: string | null;
+  start: ISODate;
+  end: ISODate;
+}
+
+export interface CalendarEvent {
+  id: UUID;
+  code: string;
+  title: string;
+  status: TicketStatus;
+  priority: TicketPriority;
+  start: ISODate;
+  end: ISODate;
+  end_is_estimated: boolean;
+  assignee: Ref | null;
+  team: Ref | null;
+  customer: Ref | null;
+  location: { id: UUID; name: string; city: string | null } | null;
+  service_type: string | null;
+  conflict_with: UUID[];
 }
