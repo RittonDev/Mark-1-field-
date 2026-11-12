@@ -135,7 +135,7 @@ export default function MyTicketsScreen() {
                   </View>
                 ))}
               </View>
-            ) : null
+            ) : undefined
           }
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} colors={[c.primary]} tintColor={c.primary} />}
           contentContainerStyle={styles.list}

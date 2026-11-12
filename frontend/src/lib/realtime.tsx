@@ -127,6 +127,17 @@ export function RealtimeProvider({ userId, children }: { userId: string; childre
           applyTrackingEvent(queryClient, event);
           return;
         }
+        if (event.type === "quote.decided") {
+          queryClient.invalidateQueries({ queryKey: ["quotes"] });
+          if (event.ticket_id) queryClient.invalidateQueries({ queryKey: ["ticket", event.ticket_id] });
+          const approved = (event as { status?: string }).status === "approved";
+          toastRef.current({
+            title: `${event.ticket_code ?? "OS"}: orçamento ${approved ? "aprovado" : "recusado"} pelo cliente`,
+            description: event.name ?? undefined,
+            tone: approved ? "success" : "error",
+          });
+          return;
+        }
         if (event.type === "onboarding.submitted") {
           queryClient.invalidateQueries({ queryKey: ["onboarding"] });
           toastRef.current({ title: `Nova ficha de homologação: ${event.name ?? "técnico"}` });
