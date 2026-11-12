@@ -524,7 +524,7 @@ function EditDialog({ tech, onClose }: { tech: Technician; onClose: () => void }
         is_active: isActive,
         address_line: address.line.trim() || null,
         address_district: address.district.trim() || null,
-        address_zip: address.zip.replace(/D/g, "") || null,
+        address_zip: address.zip.replace(/\D/g, "") || null,
         work_schedule: schedule.start || schedule.end
           ? {
               start: schedule.start || null,
