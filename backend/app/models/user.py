@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.enums import UserRole
@@ -26,6 +26,7 @@ class Team(UUIDPrimaryKey, Timestamps, Base):
 
 class User(UUIDPrimaryKey, Timestamps, Base):
     __tablename__ = "users"
+    __table_args__ = (Index("ix_users_base_state_city", "base_state", "base_city"),)
 
     name: Mapped[str] = mapped_column(String(160))
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
@@ -51,6 +52,18 @@ class User(UUIDPrimaryKey, Timestamps, Base):
     # Onde o técnico mora e que região atende: base das sugestões de técnico por cidade.
     home_city: Mapped[str | None] = mapped_column(String(120))
     home_state: Mapped[str | None] = mapped_column(String(2))
+    home_latitude: Mapped[float | None] = mapped_column(Float)
+    home_longitude: Mapped[float | None] = mapped_column(Float)
+    # Região de atuação do técnico: a cidade onde mais atendeu (histórico de OS) ou, sem
+    # histórico, o endereço dele. Recalculada por services/technician_regions.refresh_bases.
+    base_city: Mapped[str | None] = mapped_column(String(120))
+    base_state: Mapped[str | None] = mapped_column(String(2))
+    base_latitude: Mapped[float | None] = mapped_column(Float)
+    base_longitude: Mapped[float | None] = mapped_column(Float)
+    base_source: Mapped[str | None] = mapped_column(String(10))  # history | home
+    base_visits: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    last_visit_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    base_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     coverage_area: Mapped[str | None] = mapped_column(Text)
     # Conta Microsoft (Entra ID) vinculada no primeiro login: "oid" do token.
     entra_oid: Mapped[str | None] = mapped_column(String(64), unique=True)
