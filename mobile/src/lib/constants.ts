@@ -29,7 +29,7 @@ export interface StatusInfo {
 export const STATUS: Record<TicketStatus, StatusInfo> = {
   new: { label: "Novo", group: "open", color: "#64748b", slaPaused: false, final: false, requiresAssignee: false, description: "Aberto, aguardando triagem" },
   triage: { label: "Em triagem", group: "open", color: "#8b5cf6", slaPaused: false, final: false, requiresAssignee: false, description: "Sendo classificado" },
-  assigned: { label: "Atribuído", group: "active", color: "#3b82f6", slaPaused: false, final: false, requiresAssignee: true, description: "Analista definido, ainda não iniciado" },
+  assigned: { label: "Atribuído", group: "active", color: "#3b82f6", slaPaused: false, final: false, requiresAssignee: true, description: "Responsável definido, ainda não iniciado" },
   scheduled: { label: "Agendado", group: "active", color: "#06b6d4", slaPaused: false, final: false, requiresAssignee: true, description: "Visita técnica agendada" },
   en_route: { label: "Em deslocamento", group: "active", color: "#0ea5e9", slaPaused: false, final: false, requiresAssignee: true, description: "Técnico a caminho do local" },
   in_progress: { label: "Em atendimento", group: "active", color: "#f59e0b", slaPaused: false, final: false, requiresAssignee: true, description: "Atendimento em execução" },
@@ -177,11 +177,13 @@ export const ATTACHMENT_KIND: Record<string, string> = {
   signature: "Assinatura",
 };
 
+/** Equipe interna: vê notas internas e apontamentos. */
 export const isStaff = (role: UserRole | undefined) =>
   role === "admin" || role === "supervisor" || role === "analyst" || role === "technician";
-export const isManager = (role: UserRole | undefined) => role === "admin" || role === "supervisor";
-/** Gestão completa das OS (TICKET_MANAGER_ROLES no backend): vê todas, edita, atribui, muda qualquer status. */
+/** Gestão completa das OS na web (espelha User.can_manage_tickets). */
 export const canManageTickets = (role: UserRole | undefined) =>
   role === "admin" || role === "supervisor" || role === "analyst";
-/** Quem assume sozinho uma OS sem responsável ao levá-la a um status de campo (SELF_ASSIGN_ROLES). */
+/** Configuração: grupos e categorias (SLA e usuários só admin). */
+export const isManager = (role: UserRole | undefined) => role === "admin" || role === "supervisor";
+/** Quem assume sozinho uma OS sem responsável ao iniciar o atendimento (SELF_ASSIGN_ROLES). */
 export const SELF_ASSIGN_ROLES: UserRole[] = ["analyst", "technician"];
