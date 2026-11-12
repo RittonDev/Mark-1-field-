@@ -98,7 +98,14 @@ export interface Team {
   is_active: boolean;
 }
 
-export interface Customer {
+/** Histórico resumido derivado das OS (calculado pela API, não digitado). */
+export interface TicketStats {
+  open_tickets: number;
+  total_tickets: number;
+  last_ticket_at: ISODate | null;
+}
+
+export interface Customer extends TicketStats {
   id: UUID;
   name: string;
   document: string | null;
@@ -107,13 +114,17 @@ export interface Customer {
   notes: string | null;
   is_active: boolean;
   created_at: ISODate;
+  locations_count: number;
 }
 
-export interface Location {
+/** Local de atendimento = filial (CNPJ próprio). É o eixo da operação, como no Field Control. */
+export interface Location extends TicketStats {
   id: UUID;
   customer_id: UUID;
   customer: Ref;
   name: string;
+  code: string | null;
+  document: string | null;
   address_line: string | null;
   district: string | null;
   city: string | null;
@@ -172,6 +183,8 @@ export interface CategoryRef {
 export interface LocationRef {
   id: UUID;
   name: string;
+  code: string | null;
+  document: string | null;
   address_line: string | null;
   city: string | null;
   state: string | null;
@@ -228,6 +241,8 @@ export interface TicketDetail extends TicketListItem {
   asset: AssetRef | null;
   requester: UserRef | null;
   requester_contact: string | null;
+  /** Endereço do atendimento quando diferente do cadastrado no local. */
+  service_address: string | null;
   created_by: UserRef | null;
   closed_at: ISODate | null;
   cancelled_at: ISODate | null;
@@ -343,6 +358,7 @@ export interface TicketCreatePayload {
   requester_id?: UUID | null;
   requester_name?: string | null;
   requester_contact?: string | null;
+  service_address?: string | null;
   team_id?: UUID | null;
   assignee_id?: UUID | null;
   scheduled_start?: ISODate | null;

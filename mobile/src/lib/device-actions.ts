@@ -2,7 +2,10 @@
 
 import * as Location from "expo-location";
 import { Linking, Platform } from "react-native";
+import { mapTarget } from "./address";
 import type { LocationRef } from "./types";
+
+export { addressOf } from "./address";
 
 export interface Position {
   latitude: number;
@@ -31,23 +34,20 @@ export async function currentPosition(): Promise<Position | null> {
   }
 }
 
-export function addressOf(location: LocationRef | null): string | null {
-  if (!location) return null;
-  const parts = [location.address_line, location.city, location.state].filter(Boolean);
-  return parts.length ? parts.join(", ") : null;
-}
-
-/** Abre o app de mapas no local da OS (coordenadas, se houver; senão o endereço). */
-export async function openInMaps(location: LocationRef) {
-  const label = encodeURIComponent(location.name);
-  const hasCoords = location.latitude !== null && location.longitude !== null;
-  const query = hasCoords
-    ? `${location.latitude},${location.longitude}`
-    : encodeURIComponent(addressOf(location) ?? location.name);
+/**
+ * Abre o app de mapas no destino do atendimento: `service_address` da OS quando houver,
+ * senão as coordenadas da filial, senão o endereço cadastrado (regra em address.ts).
+ */
+export async function openInMaps(location: LocationRef | null, serviceAddress: string | null | undefined) {
+  const target = mapTarget(location, serviceAddress);
+  if (!target) return;
+  const label = encodeURIComponent(target.label);
+  const query =
+    target.kind === "coords" ? `${target.latitude},${target.longitude}` : encodeURIComponent(target.query);
   const native =
     Platform.OS === "ios"
-      ? `maps:0,0?q=${hasCoords ? `${label}@${query}` : query}`
-      : hasCoords
+      ? `maps:0,0?q=${target.kind === "coords" ? `${label}@${query}` : query}`
+      : target.kind === "coords"
         ? `geo:${query}?q=${query}(${label})`
         : `geo:0,0?q=${query}`;
   const web = `https://www.google.com/maps/search/?api=1&query=${query}`;

@@ -1,7 +1,7 @@
 import { StyleSheet, Text, View } from "react-native";
 import { ASSET_TYPE, LEVEL, SLA_STATUS, TICKET_SOURCE, TICKET_TYPE } from "../../lib/constants";
 import { addressOf, callPhone, openInMaps } from "../../lib/device-actions";
-import { formatDateTime, formatRelative } from "../../lib/format";
+import { formatDateTime, formatDocument, formatRelative } from "../../lib/format";
 import { computeSlaStatus } from "../../lib/sla";
 import type { LocalTicket } from "../../lib/syncTypes";
 import { Button, Card, colors, InfoRow, SectionTitle } from "../ui";
@@ -11,19 +11,44 @@ export function InfoPanel({ ticket, now }: { ticket: LocalTicket; now: number })
   const asset = ticket.asset;
   const sla = SLA_STATUS[computeSlaStatus(ticket, now)];
   const requesterContact = ticket.requester_contact;
+  // OS baixadas antes da mudança no contrato não têm o campo; trata como vazio.
+  const serviceAddress = ticket.service_address?.trim() || null;
+  const registeredAddress = addressOf(location);
+  const contactPhone = location?.contact_phone;
 
   return (
     <View style={{ gap: 12 }}>
-      {location ? (
+      {location || serviceAddress ? (
         <Card>
-          <SectionTitle>Local</SectionTitle>
-          <Text style={styles.strong}>{location.name}</Text>
-          {addressOf(location) ? <Text style={styles.text}>{addressOf(location)}</Text> : null}
-          {location.contact_name ? <InfoRow label="Contato no local" value={location.contact_name} /> : null}
-          {location.contact_phone ? (
-            <InfoRow label="Telefone" value={location.contact_phone} onPress={() => void callPhone(location.contact_phone!)} />
+          <SectionTitle>Local de atendimento</SectionTitle>
+          {location ? (
+            <Text style={styles.strong}>{[location.code, location.name].filter(Boolean).join(" · ")}</Text>
           ) : null}
-          <Button title="Abrir no mapa" onPress={() => void openInMaps(location)} style={{ marginTop: 8 }} />
+          {location?.document ? (
+            <InfoRow
+              label={location.document.length === 14 ? "CNPJ da filial" : "Documento da filial"}
+              value={formatDocument(location.document)}
+            />
+          ) : null}
+          {serviceAddress ? (
+            <View style={styles.serviceAddress}>
+              <Text style={styles.label}>Endereço do atendimento</Text>
+              <Text style={[styles.text, { fontWeight: "600" }]} selectable>
+                {serviceAddress}
+              </Text>
+              <Text style={styles.label}>Diferente do endereço cadastrado da filial.</Text>
+            </View>
+          ) : null}
+          {registeredAddress ? (
+            <InfoRow label={serviceAddress ? "Endereço cadastrado da filial" : "Endereço"} value={registeredAddress} />
+          ) : null}
+          {location?.contact_name ? <InfoRow label="Contato no local" value={location.contact_name} /> : null}
+          {contactPhone ? <InfoRow label="Telefone" value={contactPhone} onPress={() => void callPhone(contactPhone)} /> : null}
+          <Button
+            title={serviceAddress ? "Rota até o endereço do atendimento" : "Abrir no mapa"}
+            onPress={() => void openInMaps(location, serviceAddress)}
+            style={{ marginTop: 8 }}
+          />
         </Card>
       ) : null}
 
@@ -109,4 +134,13 @@ const styles = StyleSheet.create({
   text: { fontSize: 15, color: colors.ink, lineHeight: 21 },
   label: { fontSize: 12, color: colors.inkMuted },
   value: { fontSize: 15, color: colors.ink },
+  serviceAddress: {
+    marginTop: 8,
+    padding: 10,
+    gap: 2,
+    borderRadius: 10,
+    backgroundColor: "#eff6ff",
+    borderWidth: 1,
+    borderColor: "#bfdbfe",
+  },
 });

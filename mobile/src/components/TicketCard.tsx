@@ -6,7 +6,8 @@ import { PriorityBadge, SlaBadge, StatusBadge } from "./badges";
 import { colors } from "./ui";
 
 export function TicketCard({ ticket, now, showDate = false }: { ticket: LocalTicket; now: number; showDate?: boolean }) {
-  const place = [ticket.customer?.name, ticket.location?.name ?? ticket.location?.city].filter(Boolean).join(" · ");
+  const site = ticket.location ? [ticket.location.code, ticket.location.name].filter(Boolean).join(" ") : null;
+  const place = [ticket.customer?.name, site].filter(Boolean).join(" · ");
   const due = ticket.resolution_due_at && !ticket.sla_paused_at ? `solução ${formatRelative(ticket.resolution_due_at, now)}` : null;
   return (
     <Pressable
