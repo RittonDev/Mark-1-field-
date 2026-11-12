@@ -416,7 +416,7 @@ function TicketsView() {
                         ) : (
                           <span className="text-xs text-amber-600 dark:text-amber-400">Sem responsável</span>
                         )}
-                        {manager && t.assignee?.id !== user?.id && !STATUS[t.status].final ? (
+                        {manager && t.assignee?.id !== user?.id && ["open", "active", "pending"].includes(STATUS[t.status].group) ? (
                           <button
                             type="button"
                             onClick={(e) => {
