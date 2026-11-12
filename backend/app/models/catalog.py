@@ -3,7 +3,7 @@ import uuid
 from sqlalchemy import Boolean, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.enums import TicketPriority
+from app.core.enums import Responsibility, TicketPriority, ViolationScope
 from app.db.base import Base, Timestamps, UUIDPrimaryKey
 from app.models._types import str_enum
 from app.models.customer import Customer
@@ -82,3 +82,17 @@ class ServiceType(UUIDPrimaryKey, Timestamps, Base):
 
     customer: Mapped[Customer | None] = relationship(lazy="selectin")
     category: Mapped[Category | None] = relationship(lazy="selectin")
+
+
+class ViolationReason(UUIDPrimaryKey, Timestamps, Base):
+    """Motivo de violação de SLA (tela "Motivos de violação" do Field Control)."""
+
+    __tablename__ = "violation_reasons"
+
+    name: Mapped[str] = mapped_column(String(160), unique=True)
+    description: Mapped[str | None] = mapped_column(Text)
+    applies_to: Mapped[ViolationScope] = mapped_column(
+        str_enum(ViolationScope), default=ViolationScope.BOTH
+    )
+    responsibility: Mapped[Responsibility] = mapped_column(str_enum(Responsibility))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")

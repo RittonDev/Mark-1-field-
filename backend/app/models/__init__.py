@@ -1,7 +1,7 @@
 """Importa todos os modelos para registrar as tabelas no metadata (usado pelo Alembic)."""
 
 from app.models.asset import Asset
-from app.models.catalog import Category, ServiceType, SlaPolicy
+from app.models.catalog import Category, ServiceType, SlaPolicy, ViolationReason
 from app.models.customer import Customer, Location
 from app.models.sync import DeviceToken, SyncOperation
 from app.models.ticket import (
@@ -29,4 +29,5 @@ __all__ = [
     "TicketEvent",
     "TicketWorklog",
     "User",
+    "ViolationReason",
 ]

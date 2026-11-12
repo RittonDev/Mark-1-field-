@@ -104,3 +104,19 @@ class SlaStatus(StrEnum):
     BREACHED = "breached"
     PAUSED = "paused"
     MET = "met"
+
+
+class ViolationScope(StrEnum):
+    """A qual relógio de SLA o motivo de violação se aplica."""
+
+    RESPONSE = "response"
+    RESOLUTION = "resolution"
+    BOTH = "both"
+
+
+class Responsibility(StrEnum):
+    """De quem é a causa da violação (é o que torna o motivo estatística útil)."""
+
+    INTERNAL = "internal"
+    CUSTOMER = "customer"
+    THIRD_PARTY = "third_party"

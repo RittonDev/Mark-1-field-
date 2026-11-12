@@ -28,7 +28,7 @@ from app.core.enums import (
 from app.db.base import Base, Timestamps, UUIDPrimaryKey, created_at_column
 from app.models._types import str_enum
 from app.models.asset import Asset
-from app.models.catalog import Category, ServiceType
+from app.models.catalog import Category, ServiceType, ViolationReason
 from app.models.customer import Customer, Location
 from app.models.user import Team, User
 
@@ -116,6 +116,15 @@ class Ticket(UUIDPrimaryKey, Timestamps, Base):
     work_seconds: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     work_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Motivo de violação de SLA, um por relógio (como no Field Control), mais uma observação.
+    response_violation_reason_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("violation_reasons.id", ondelete="SET NULL")
+    )
+    resolution_violation_reason_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("violation_reasons.id", ondelete="SET NULL")
+    )
+    violation_note: Mapped[str | None] = mapped_column(Text)
+
     # Concorrência otimista (web e mobile editando a mesma OS).
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
 
@@ -128,6 +137,12 @@ class Ticket(UUIDPrimaryKey, Timestamps, Base):
     assignee: Mapped[User | None] = relationship(foreign_keys=[assignee_id], lazy="selectin")
     team: Mapped[Team | None] = relationship(lazy="selectin")
     service_type: Mapped[ServiceType | None] = relationship(lazy="selectin")
+    response_violation_reason: Mapped[ViolationReason | None] = relationship(
+        foreign_keys=[response_violation_reason_id], lazy="selectin"
+    )
+    resolution_violation_reason: Mapped[ViolationReason | None] = relationship(
+        foreign_keys=[resolution_violation_reason_id], lazy="selectin"
+    )
 
     __mapper_args__ = {"version_id_col": version, "eager_defaults": True}
 

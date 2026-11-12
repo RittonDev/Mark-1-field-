@@ -2,7 +2,7 @@ import uuid
 
 from pydantic import BaseModel, Field
 
-from app.core.enums import TicketPriority
+from app.core.enums import Responsibility, TicketPriority, ViolationScope
 from app.schemas.common import ORMModel, Ref
 
 
@@ -74,4 +74,28 @@ class ServiceTypeUpdate(BaseModel):
     description: str | None = None
     estimated_minutes: int | None = Field(default=None, gt=0, le=60 * 24 * 7)
     category_id: uuid.UUID | None = None
+    is_active: bool | None = None
+
+
+class ViolationReasonOut(ORMModel):
+    id: uuid.UUID
+    name: str
+    description: str | None
+    applies_to: ViolationScope
+    responsibility: Responsibility
+    is_active: bool
+
+
+class ViolationReasonCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=160)
+    description: str | None = None
+    applies_to: ViolationScope = ViolationScope.BOTH
+    responsibility: Responsibility
+
+
+class ViolationReasonUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=2, max_length=160)
+    description: str | None = None
+    applies_to: ViolationScope | None = None
+    responsibility: Responsibility | None = None
     is_active: bool | None = None

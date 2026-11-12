@@ -114,3 +114,21 @@ def compute_sla_status(ticket: SlaTicket, now: datetime | None = None) -> SlaSta
     if ratios and max(ratios) >= settings.SLA_AT_RISK_RATIO:
         return SlaStatus.AT_RISK
     return SlaStatus.OK
+
+
+def response_breached(ticket: SlaTicket, now: datetime | None = None) -> bool:
+    """O relógio de 1ª resposta furou (respondida tarde, ou ainda sem resposta e vencida)."""
+    if ticket.response_due_at is None or ticket.status == TicketStatus.CANCELLED:
+        return False
+    if ticket.first_response_at is not None:
+        return ticket.first_response_at > ticket.response_due_at
+    return (ticket.sla_paused_at or now or utcnow()) > ticket.response_due_at
+
+
+def resolution_breached(ticket: SlaTicket, now: datetime | None = None) -> bool:
+    """O relógio de solução furou (resolvida tarde, ou ainda aberta e vencida)."""
+    if ticket.resolution_due_at is None or ticket.status == TicketStatus.CANCELLED:
+        return False
+    if ticket.resolved_at is not None:
+        return ticket.resolved_at > ticket.resolution_due_at
+    return (ticket.sla_paused_at or now or utcnow()) > ticket.resolution_due_at

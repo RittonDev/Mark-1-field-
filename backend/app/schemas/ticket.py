@@ -8,6 +8,7 @@ from app.core.config import settings
 from app.core.enums import (
     AssetType,
     Impact,
+    Responsibility,
     SlaStatus,
     TicketEventType,
     TicketPriority,
@@ -21,10 +22,18 @@ from app.schemas.common import ORMModel, Ref
 from app.schemas.user import UserRef
 from app.services.durations import actual_seconds
 from app.services.sla import compute_sla_status
+from app.services.sla import resolution_breached as sla_resolution_breached
+from app.services.sla import response_breached as sla_response_breached
 
 
 def format_ticket_code(number: int) -> str:
     return f"{settings.TICKET_PREFIX}-{number:06d}"
+
+
+class ViolationReasonRef(ORMModel):
+    id: uuid.UUID
+    name: str
+    responsibility: Responsibility
 
 
 class ServiceTypeRef(ORMModel):
@@ -120,6 +129,31 @@ class TicketDetail(TicketListItem):
     work_seconds: int
     work_started_at: datetime | None
 
+    # Motivo de violação, um por relógio de SLA.
+    response_violation_reason: ViolationReasonRef | None
+    resolution_violation_reason: ViolationReasonRef | None
+    violation_note: str | None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def response_breached(self) -> bool:
+        return sla_response_breached(self)  # type: ignore[arg-type]
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def resolution_breached(self) -> bool:
+        return sla_resolution_breached(self)  # type: ignore[arg-type]
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def violation_reason_pending(self) -> bool:
+        """Resolvida com prazo violado e sem motivo informado: falta justificar."""
+        if self.status not in (TicketStatus.RESOLVED, TicketStatus.CLOSED):
+            return False
+        return (self.response_breached and self.response_violation_reason is None) or (
+            self.resolution_breached and self.resolution_violation_reason is None
+        )
+
     @computed_field  # type: ignore[prop-decorator]
     @property
     def actual_minutes(self) -> int:
@@ -198,6 +232,10 @@ class TicketTransition(BaseModel):
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
     expected_version: int | None = None
+    # Ao resolver uma OS com prazo violado, o motivo de cada relógio (opcional para o técnico).
+    response_violation_reason_id: uuid.UUID | None = None
+    resolution_violation_reason_id: uuid.UUID | None = None
+    violation_note: str | None = Field(default=None, max_length=2000)
 
 
 class CommentCreate(BaseModel):
@@ -268,6 +306,14 @@ class AttachmentOut(ORMModel):
     download_url: str | None = None
 
 
+class TicketViolationUpdate(BaseModel):
+    """Justificar (ou corrigir) a violação de SLA, inclusive com a OS já fechada."""
+
+    response_violation_reason_id: uuid.UUID | None = None
+    resolution_violation_reason_id: uuid.UUID | None = None
+    violation_note: str | None = Field(default=None, max_length=2000)
+
+
 class TicketFilters(BaseModel):
     status: list[TicketStatus] | None = None
     priority: list[TicketPriority] | None = None
@@ -284,3 +330,4 @@ class TicketFilters(BaseModel):
     unassigned: bool = False
     open_only: bool = False
     sla_breached: bool = False
+    violation_pending: bool = False
