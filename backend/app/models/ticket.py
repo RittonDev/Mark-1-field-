@@ -156,6 +156,9 @@ class Ticket(UUIDPrimaryKey, Timestamps, Base):
     forms: Mapped[list["TicketForm"]] = relationship(  # noqa: F821
         lazy="selectin", order_by="TicketForm.created_at", viewonly=True
     )
+    expenses: Mapped[list["TicketExpense"]] = relationship(  # noqa: F821
+        lazy="selectin", order_by="TicketExpense.created_at", viewonly=True
+    )
 
     __mapper_args__ = {"version_id_col": version, "eager_defaults": True}
 

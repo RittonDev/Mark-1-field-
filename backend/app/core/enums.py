@@ -94,6 +94,9 @@ class TicketEventType(StrEnum):
     FORM_COMPLETED = "form_completed"
     FORM_REMOVED = "form_removed"
     SIGNATURE_COLLECTED = "signature_collected"
+    EXPENSE_ADDED = "expense_added"
+    EXPENSE_UPDATED = "expense_updated"
+    EXPENSE_REMOVED = "expense_removed"
 
 
 class DevicePlatform(StrEnum):
@@ -140,3 +143,22 @@ class FormStatus(StrEnum):
     PENDING = "pending"  # ninguém respondeu ainda
     IN_PROGRESS = "in_progress"  # respostas salvas, falta concluir
     COMPLETED = "completed"  # validado: obrigatórios respondidos e fotos mínimas enviadas
+
+
+class ExpenseKind(StrEnum):
+    """Custo extra da OS (reembolso ao técnico)."""
+
+    MATERIAL = "material"  # compra de material (ex.: velcro, conectores)
+    KM = "km"  # quilometragem rodada (km x valor por km)
+    TOLL = "toll"  # pedágio
+    PARKING = "parking"  # estacionamento
+    TRANSPORT = "transport"  # aplicativo de transporte, ônibus
+    MEAL = "meal"  # alimentação
+    OTHER = "other"
+
+
+class ExpenseStatus(StrEnum):
+    PENDING = "pending"  # lançado, aguardando aprovação
+    APPROVED = "approved"  # aprovado para reembolso
+    PAID = "paid"  # reembolsado ao técnico
+    REJECTED = "rejected"  # não será reembolsado
