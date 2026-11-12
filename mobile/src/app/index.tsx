@@ -114,7 +114,7 @@ export default function MyTicketsScreen() {
               ) : null}
             </>
           }
-          ListEmptyComponent={tab === "agenda" ? null : empty}
+          ListEmptyComponent={tab === "agenda" ? undefined : empty}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} colors={[c.primary]} tintColor={c.primary} />}
           contentContainerStyle={styles.list}
         />

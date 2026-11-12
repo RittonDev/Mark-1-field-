@@ -17,13 +17,15 @@ interface Ready {
   layers: { trail: LayerGroup; routes: LayerGroup; techs: LayerGroup };
 }
 
-// Mapa base CARTO (OpenStreetMap), com versão clara e escura que acompanha o tema.
-const TILES: Record<Theme, string> = {
-  light: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-  dark: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-};
+// Mapa base. Padrão: OpenStreetMap (sem chave; uso moderado). Em produção, configure um
+// provedor contratado (MapTiler, Stadia, Mapbox...) em NEXT_PUBLIC_MAP_TILES_URL. Sem uma
+// versão escura própria (NEXT_PUBLIC_MAP_TILES_DARK_URL), o tema escuro aplica um filtro.
+const OSM_TILES = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+const TILES_LIGHT = process.env.NEXT_PUBLIC_MAP_TILES_URL || OSM_TILES;
+const TILES_DARK = process.env.NEXT_PUBLIC_MAP_TILES_DARK_URL || "";
 const ATTRIBUTION =
-  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>';
+  process.env.NEXT_PUBLIC_MAP_ATTRIBUTION ||
+  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
 const TRAIL_COLOR: Record<Theme, string> = { light: "#2447ff", dark: "#7f95ff" };
 const DEFAULT_CENTER: LatLngTuple = [-23.55, -46.63]; // São Paulo, até chegar a primeira posição
 
@@ -90,7 +92,12 @@ export default function LiveMap({
 
   useEffect(() => {
     if (!ready) return;
-    const tiles = ready.L.tileLayer(TILES[theme], { attribution: ATTRIBUTION, subdomains: "abcd", maxZoom: 20 });
+    const dark = theme === "dark";
+    const tiles = ready.L.tileLayer(dark && TILES_DARK ? TILES_DARK : TILES_LIGHT, {
+      attribution: ATTRIBUTION,
+      maxZoom: 19,
+      className: dark && !TILES_DARK ? "mf-tiles-dim" : "",
+    });
     tiles.addTo(ready.map).bringToBack();
     return () => {
       tiles.remove();
