@@ -9,3 +9,7 @@ export const WEB_DENIED_MESSAGE =
   "Técnicos de campo acessam pelo app Maxx Field no celular (Android ou iOS).";
 
 export const canUseWeb = (role: UserRole | undefined) => !!role && WEB_ROLES.includes(role);
+
+/** Tela inicial depois do login: a fila do analista; o solicitante vai para os chamados dele. */
+export const homePath = (role: UserRole | undefined) =>
+  role === "admin" || role === "supervisor" || role === "analyst" ? "/minha-fila" : "/chamados";

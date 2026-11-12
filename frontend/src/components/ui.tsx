@@ -1,17 +1,26 @@
 "use client";
 
 import clsx from "clsx";
-import { Loader2, X } from "lucide-react";
-import { forwardRef, useEffect, useId } from "react";
+import { Loader2, TriangleAlert, X } from "lucide-react";
+import { forwardRef, useEffect, useId, useRef } from "react";
 
-type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
-type ButtonSize = "sm" | "md";
+type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "ink";
+type ButtonSize = "sm" | "md" | "lg";
 
 const buttonVariants: Record<ButtonVariant, string> = {
-  primary: "bg-brand text-white hover:bg-brand-strong shadow-sm",
-  secondary: "border border-line bg-surface text-ink hover:bg-surface-2 shadow-sm",
-  ghost: "text-ink-muted hover:bg-surface-2 hover:text-ink",
-  danger: "bg-red-600 text-white hover:bg-red-700 shadow-sm",
+  primary:
+    "bg-brand text-white hover:bg-brand-strong shadow-[inset_0_1px_0_rgb(255_255_255/0.18),0_1px_2px_rgb(16_24_40/0.14)]",
+  secondary: "border border-line bg-surface text-ink shadow-elev-1 hover:border-line-strong hover:bg-surface-2",
+  ghost: "text-ink-muted hover:bg-ink/[0.05] hover:text-ink",
+  danger: "bg-red-600 text-white hover:bg-red-700 shadow-[inset_0_1px_0_rgb(255_255_255/0.16),0_1px_2px_rgb(16_24_40/0.14)]",
+  // Neutro e forte (ex.: "Entrar com a Microsoft"): grafite no claro, claro no escuro.
+  ink: "bg-ink text-surface hover:bg-ink/90 shadow-[0_1px_2px_rgb(16_24_40/0.18)]",
+};
+
+const buttonSizes: Record<ButtonSize, string> = {
+  sm: "h-8 px-3 text-xs",
+  md: "h-9 px-3.5 text-sm",
+  lg: "h-11 px-5 text-sm",
 };
 
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
@@ -30,9 +39,11 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       type={type}
       disabled={disabled || loading}
       className={clsx(
-        "inline-flex items-center justify-center gap-1.5 rounded-md font-medium whitespace-nowrap transition-colors",
-        "focus-visible:ring-2 focus-visible:ring-brand/40 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50",
-        size === "sm" ? "h-8 px-2.5 text-xs" : "h-9 px-3.5 text-sm",
+        "inline-flex items-center justify-center gap-1.5 rounded-lg font-medium whitespace-nowrap select-none",
+        "transition-[background-color,border-color,color,box-shadow,transform] duration-150 active:translate-y-px",
+        "focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:ring-offset-2 focus-visible:ring-offset-surface focus-visible:outline-none",
+        "disabled:pointer-events-none disabled:opacity-50",
+        buttonSizes[size],
         buttonVariants[variant],
         className,
       )}
@@ -45,8 +56,9 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
 });
 
 const fieldBase =
-  "w-full rounded-md border border-line bg-surface px-3 text-sm text-ink placeholder:text-ink-muted/70 " +
-  "focus:border-brand focus:ring-2 focus:ring-brand/20 focus:outline-none disabled:opacity-60";
+  "w-full rounded-lg border border-line bg-surface px-3 text-sm text-ink shadow-elev-1 placeholder:text-ink-subtle " +
+  "transition-[border-color,box-shadow] duration-150 hover:border-line-strong " +
+  "focus:border-brand focus:ring-4 focus:ring-brand/15 focus:outline-none disabled:opacity-60";
 
 export const Input = forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(function Input(
   { className, ...props },
@@ -92,7 +104,7 @@ export function Field({
         {required ? <span className="text-red-500"> *</span> : null}
       </span>
       {children}
-      {hint ? <span className="text-xs text-ink-muted">{hint}</span> : null}
+      {hint ? <span className="text-xs text-ink-subtle">{hint}</span> : null}
     </label>
   );
 }
@@ -125,7 +137,7 @@ export function Checkbox({
 }
 
 export function Card({ className, children }: { className?: string; children: React.ReactNode }) {
-  return <div className={clsx("rounded-xl border border-line bg-surface shadow-xs", className)}>{children}</div>;
+  return <div className={clsx("rounded-xl border border-line bg-surface shadow-elev-1", className)}>{children}</div>;
 }
 
 export function CardHeader({
@@ -138,9 +150,9 @@ export function CardHeader({
   actions?: React.ReactNode;
 }) {
   return (
-    <div className="flex items-start justify-between gap-3 border-b border-line px-4 py-3">
+    <div className="flex items-start justify-between gap-3 border-b border-line px-5 py-3.5">
       <div className="min-w-0">
-        <h2 className="text-sm font-semibold text-ink">{title}</h2>
+        <h2 className="text-sm font-semibold tracking-[-0.005em] text-ink">{title}</h2>
         {description ? <p className="mt-0.5 text-xs text-ink-muted">{description}</p> : null}
       </div>
       {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
@@ -155,10 +167,23 @@ export function Pill({ color, children, className }: { color: string; children: 
         "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap",
         className,
       )}
-      style={{ color, backgroundColor: `${color}14`, borderColor: `${color}40` }}
+      style={{ color, backgroundColor: `${color}14`, borderColor: `${color}33` }}
     >
       {children}
     </span>
+  );
+}
+
+export function Kbd({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <kbd
+      className={clsx(
+        "inline-flex h-5 min-w-5 items-center justify-center rounded border border-line bg-surface-2 px-1 font-sans text-[10px] font-semibold text-ink-subtle",
+        className,
+      )}
+    >
+      {children}
+    </kbd>
   );
 }
 
@@ -166,11 +191,34 @@ export function Spinner({ className }: { className?: string }) {
   return <Loader2 className={clsx("size-5 animate-spin text-ink-muted", className)} />;
 }
 
-export function LoadingBlock({ label = "Carregando..." }: { label?: string }) {
+export function Skeleton({ className, style }: { className?: string; style?: React.CSSProperties }) {
+  return <div className={clsx("skeleton", className)} style={style} aria-hidden />;
+}
+
+const SKELETON_WIDTHS = [
+  [64, 40],
+  [48, 30],
+  [56, 44],
+  [42, 26],
+];
+
+/** Carregamento com o formato do conteúdo (linhas), no lugar do "Carregando...". */
+export function LoadingBlock({ label = "Carregando...", rows = 3 }: { label?: string; rows?: number }) {
   return (
-    <div className="flex items-center justify-center gap-2 py-12 text-sm text-ink-muted">
-      <Spinner className="size-4" />
-      {label}
+    <div role="status" aria-live="polite" className="flex flex-col gap-4 px-4 py-6">
+      <span className="sr-only">{label}</span>
+      {Array.from({ length: rows }).map((_, i) => {
+        const [a, b] = SKELETON_WIDTHS[i % SKELETON_WIDTHS.length];
+        return (
+          <div key={i} className="flex items-center gap-3" style={{ opacity: 1 - i * 0.16 }}>
+            <Skeleton className="size-8 shrink-0 rounded-lg" />
+            <div className="flex flex-1 flex-col gap-2">
+              <Skeleton className="h-3" style={{ width: `${a}%` }} />
+              <Skeleton className="h-2.5" style={{ width: `${b}%` }} />
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -187,10 +235,14 @@ export function EmptyState({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-2 px-6 py-12 text-center">
-      {icon ? <div className="text-ink-muted">{icon}</div> : null}
-      <p className="text-sm font-medium text-ink">{title}</p>
-      {description ? <p className="max-w-sm text-xs text-ink-muted">{description}</p> : null}
+    <div className="flex animate-enter flex-col items-center justify-center gap-2 px-6 py-14 text-center">
+      {icon ? (
+        <div className="mb-1 flex size-12 items-center justify-center rounded-2xl bg-brand-soft text-brand ring-1 ring-brand/10 [&_svg]:size-6">
+          {icon}
+        </div>
+      ) : null}
+      <p className="text-sm font-semibold text-ink">{title}</p>
+      {description ? <p className="max-w-sm text-xs leading-relaxed text-ink-muted">{description}</p> : null}
       {action ? <div className="mt-2">{action}</div> : null}
     </div>
   );
@@ -198,8 +250,9 @@ export function EmptyState({
 
 export function ErrorBox({ message }: { message: string }) {
   return (
-    <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
-      {message}
+    <div className="flex animate-enter items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
+      <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+      <span>{message}</span>
     </div>
   );
 }
@@ -208,20 +261,35 @@ export function PageHeader({
   title,
   description,
   actions,
+  eyebrow,
 }: {
   title: React.ReactNode;
   description?: React.ReactNode;
   actions?: React.ReactNode;
+  /** Linha pequena acima do título (ex.: data, contexto). */
+  eyebrow?: React.ReactNode;
 }) {
   return (
-    <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+    <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
       <div className="min-w-0">
-        <h1 className="text-xl font-semibold tracking-tight text-ink">{title}</h1>
+        {eyebrow ? <p className="mb-1 text-xs font-medium text-ink-subtle">{eyebrow}</p> : null}
+        <h1 className="text-[22px] leading-tight font-semibold tracking-[-0.015em] text-ink">{title}</h1>
         {description ? <p className="mt-1 text-sm text-ink-muted">{description}</p> : null}
       </div>
       {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
     </div>
   );
+}
+
+// Trava a rolagem da página enquanto houver diálogo aberto (contador para diálogos empilhados).
+let scrollLocks = 0;
+function lockScroll() {
+  scrollLocks += 1;
+  if (scrollLocks === 1) document.documentElement.style.overflow = "hidden";
+  return () => {
+    scrollLocks -= 1;
+    if (scrollLocks === 0) document.documentElement.style.overflow = "";
+  };
 }
 
 export function Dialog({
@@ -241,6 +309,9 @@ export function Dialog({
   footer?: React.ReactNode;
   size?: "md" | "lg";
 }) {
+  const panel = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -250,34 +321,49 @@ export function Dialog({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
+  useEffect(() => {
+    if (!open) return;
+    const unlock = lockScroll();
+    // Leva o foco para o diálogo, sem roubar o de um campo com autoFocus.
+    if (panel.current && !panel.current.contains(document.activeElement)) panel.current.focus();
+    return unlock;
+  }, [open]);
+
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/40 p-4 pt-[10vh] backdrop-blur-[1px]">
+    <div className="fixed inset-0 z-50 flex animate-fade items-start justify-center overflow-y-auto bg-[rgb(9_11_15/0.42)] p-4 pt-[9vh] backdrop-blur-[3px]">
       <div className="absolute inset-0" onClick={onClose} aria-hidden />
       <div
+        ref={panel}
         role="dialog"
         aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
         className={clsx(
-          "relative w-full rounded-xl border border-line bg-surface shadow-2xl",
+          "relative w-full animate-pop rounded-2xl border border-line bg-surface shadow-pop outline-none",
           size === "lg" ? "max-w-2xl" : "max-w-lg",
         )}
       >
         <div className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">
-          <div>
-            <h2 className="text-base font-semibold text-ink">{title}</h2>
-            {description ? <p className="mt-1 text-sm text-ink-muted">{description}</p> : null}
+          <div className="min-w-0">
+            <h2 id={titleId} className="text-base font-semibold tracking-[-0.01em] text-ink">
+              {title}
+            </h2>
+            {description ? <div className="mt-1 text-sm text-ink-muted">{description}</div> : null}
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md p-1 text-ink-muted hover:bg-surface-2 hover:text-ink"
+            className="-mt-0.5 -mr-1 rounded-lg p-1.5 text-ink-subtle transition-colors hover:bg-surface-2 hover:text-ink"
             aria-label="Fechar"
           >
             <X className="size-4" />
           </button>
         </div>
         <div className="px-5 py-4">{children}</div>
-        {footer ? <div className="flex justify-end gap-2 border-t border-line px-5 py-3">{footer}</div> : null}
+        {footer ? (
+          <div className="flex justify-end gap-2 rounded-b-2xl border-t border-line bg-surface-2/50 px-5 py-3">{footer}</div>
+        ) : null}
       </div>
     </div>
   );
@@ -295,7 +381,7 @@ export function Th({ children, className }: { children?: React.ReactNode; classN
   return (
     <th
       className={clsx(
-        "border-b border-line bg-surface-2 px-3 py-2 text-xs font-medium tracking-wide text-ink-muted uppercase",
+        "border-b border-line bg-surface-2/60 px-3 py-2.5 text-[11px] font-semibold tracking-[0.06em] whitespace-nowrap text-ink-subtle uppercase first:pl-4 last:pr-4",
         className,
       )}
     >
@@ -305,5 +391,9 @@ export function Th({ children, className }: { children?: React.ReactNode; classN
 }
 
 export function Td({ children, className }: { children?: React.ReactNode; className?: string }) {
-  return <td className={clsx("border-b border-line px-3 py-2.5 align-middle text-ink", className)}>{children}</td>;
+  return (
+    <td className={clsx("border-b border-line px-3 py-3 align-middle text-ink first:pl-4 last:pr-4", className)}>
+      {children}
+    </td>
+  );
 }

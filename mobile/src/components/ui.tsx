@@ -1,17 +1,24 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
   StyleSheet,
   Switch,
   TextInput,
   View,
+  type LayoutRectangle,
   type StyleProp,
+  type TextStyle,
   type TextInputProps,
   type ViewStyle,
 } from "react-native";
+import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withSpring } from "react-native-reanimated";
+import { haptic } from "../lib/haptics";
 import { brandFont } from "../theme/fonts";
-import { readable, tint, useStyles, useTheme, type Palette } from "../theme/theme";
+import { RADIUS, readable, tint, useStyles, useTheme, type Palette } from "../theme/theme";
+import { Icon, type IconName } from "./Icon";
+import { PressableScale, SPRING } from "./motion";
 import { Text } from "./Text";
 
 export { tint };
@@ -25,6 +32,7 @@ export function Button({
   loading = false,
   disabled = false,
   compact = false,
+  icon,
   style,
 }: {
   title: string;
@@ -33,6 +41,7 @@ export function Button({
   loading?: boolean;
   disabled?: boolean;
   compact?: boolean;
+  icon?: IconName;
   style?: StyleProp<ViewStyle>;
 }) {
   const c = useTheme();
@@ -40,30 +49,28 @@ export function Button({
   const palette = {
     primary: { bg: c.primary, pressed: c.primaryPressed, fg: c.onPrimary, border: c.primary },
     secondary: { bg: c.surface, pressed: c.surface2, fg: c.ink, border: c.lineStrong },
-    danger: { bg: c.surface, pressed: c.dangerSoft, fg: c.danger, border: tint(c.danger, "66") },
-    ghost: { bg: "transparent", pressed: c.primarySoft, fg: c.primary, border: "transparent" },
+    danger: { bg: c.surface, pressed: c.dangerSoft, fg: c.danger, border: tint(c.danger, "55") },
+    ghost: { bg: "transparent", pressed: c.primarySoft, fg: c.brandInk, border: "transparent" },
   }[variant];
   const inactive = disabled || loading;
   return (
-    <Pressable
+    <PressableScale
       accessibilityRole="button"
       accessibilityState={{ disabled: inactive, busy: loading }}
       onPress={onPress}
       disabled={inactive}
-      style={({ pressed }) => [
+      style={[
         styles.button,
         compact && styles.buttonCompact,
-        {
-          backgroundColor: pressed ? palette.pressed : palette.bg,
-          borderColor: palette.border,
-          opacity: inactive ? 0.5 : 1,
-        },
+        { backgroundColor: palette.bg, borderColor: palette.border, opacity: inactive ? 0.5 : 1 },
+        variant === "primary" && c.elevation ? { boxShadow: c.elevation } : null,
         style,
       ]}
+      pressedStyle={{ backgroundColor: palette.pressed }}
     >
-      {loading ? <ActivityIndicator color={palette.fg} /> : null}
+      {loading ? <ActivityIndicator color={palette.fg} size="small" /> : icon ? <Icon name={icon} size={18} color={palette.fg} /> : null}
       <Text style={[styles.buttonText, compact && styles.buttonTextCompact, { color: palette.fg }]}>{title}</Text>
-    </Pressable>
+    </PressableScale>
   );
 }
 
@@ -77,7 +84,7 @@ export function Badge({ label, color }: { label: string; color: string }) {
   const styles = useStyles(makeStyles);
   const fg = readable(color, c);
   return (
-    <View style={[styles.badge, { backgroundColor: tint(fg, c.scheme === "dark" ? "26" : "14"), borderColor: tint(fg, "40") }]}>
+    <View style={[styles.badge, { backgroundColor: tint(fg, c.scheme === "dark" ? "24" : "12"), borderColor: tint(fg, "33") }]}>
       <View style={[styles.badgeDot, { backgroundColor: fg }]} />
       <Text style={[styles.badgeText, { color: fg }]} numberOfLines={1}>
         {label}
@@ -112,17 +119,44 @@ export function Field({
   );
 }
 
-export function Input(props: TextInputProps) {
+/** Campo de texto. `icon` à esquerda e `right` (ex.: mostrar senha) à direita são opcionais. */
+export function Input({ icon, right, ...props }: TextInputProps & { icon?: IconName; right?: ReactNode }) {
   const c = useTheme();
   const styles = useStyles(makeStyles);
+  const [focused, setFocused] = useState(false);
   const fontFamily = brandFont("400");
-  return (
+  const frame = [styles.inputFrame, focused && styles.inputFocused, props.multiline && styles.inputMultiline];
+  const input = (
     <TextInput
       placeholderTextColor={c.placeholder}
       selectionColor={c.primary}
       {...props}
-      style={[styles.input, fontFamily ? { fontFamily } : null, props.multiline && styles.inputMultiline, props.style]}
+      onFocus={(e) => {
+        setFocused(true);
+        props.onFocus?.(e);
+      }}
+      onBlur={(e) => {
+        setFocused(false);
+        props.onBlur?.(e);
+      }}
+      style={[
+        styles.input,
+        fontFamily ? { fontFamily } : null,
+        icon || right ? styles.inputBare : frame,
+        // Na web o foco já aparece na moldura; sem o contorno padrão do navegador.
+        Platform.OS === "web" ? ({ outlineStyle: "none" } as unknown as TextStyle) : null,
+        props.multiline && styles.inputMultiline,
+        props.style,
+      ]}
     />
+  );
+  if (!icon && !right) return input;
+  return (
+    <View style={[frame, styles.inputRow]}>
+      {icon ? <Icon name={icon} size={18} color={focused ? c.primary : c.inkSubtle} /> : null}
+      {input}
+      {right}
+    </View>
   );
 }
 
@@ -156,6 +190,34 @@ export interface SegmentOption<T extends string> {
   count?: number;
 }
 
+/**
+ * Pílula animada atrás da opção ativa: mede cada opção e desliza (mola) até a escolhida.
+ * Usada no Segmented e na barra de abas.
+ */
+export function usePill<T extends string>(value: T) {
+  const reduced = useReducedMotion();
+  const [layouts, setLayouts] = useState<Partial<Record<T, LayoutRectangle>>>({});
+  const x = useSharedValue(0);
+  const width = useSharedValue(0);
+  const target = layouts[value];
+
+  useEffect(() => {
+    if (!target) return;
+    // Primeira medida (ou movimento reduzido): posiciona sem animar.
+    if (reduced || width.get() === 0) {
+      x.set(target.x);
+      width.set(target.width);
+    } else {
+      x.set(withSpring(target.x, SPRING));
+      width.set(withSpring(target.width, SPRING));
+    }
+  }, [target, reduced, x, width]);
+
+  const pillStyle = useAnimatedStyle(() => ({ width: width.get(), transform: [{ translateX: x.get() }] }));
+  const measure = (key: T) => (layout: LayoutRectangle) => setLayouts((prev) => ({ ...prev, [key]: layout }));
+  return { pillStyle, measure, ready: Boolean(target) };
+}
+
 export function Segmented<T extends string>({
   options,
   value,
@@ -166,8 +228,10 @@ export function Segmented<T extends string>({
   onChange: (value: T) => void;
 }) {
   const styles = useStyles(makeStyles);
+  const { pillStyle, measure, ready } = usePill(value);
   return (
     <View style={styles.segmented} accessibilityRole="tablist">
+      <Animated.View style={[styles.segmentPill, pillStyle, !ready && { opacity: 0 }]} />
       {options.map((option) => {
         const active = option.value === value;
         return (
@@ -175,8 +239,12 @@ export function Segmented<T extends string>({
             key={option.value}
             accessibilityRole="tab"
             accessibilityState={{ selected: active }}
-            onPress={() => onChange(option.value)}
-            style={[styles.segment, active && styles.segmentActive]}
+            onLayout={(e) => measure(option.value)(e.nativeEvent.layout)}
+            onPress={() => {
+              if (!active) haptic.select();
+              onChange(option.value);
+            }}
+            style={styles.segment}
           >
             <Text style={[styles.segmentText, active && styles.segmentTextActive]} numberOfLines={1}>
               {option.label}
@@ -189,10 +257,16 @@ export function Segmented<T extends string>({
   );
 }
 
-export function EmptyState({ title, description }: { title: string; description?: string }) {
+export function EmptyState({ title, description, icon }: { title: string; description?: string; icon?: IconName }) {
+  const c = useTheme();
   const styles = useStyles(makeStyles);
   return (
     <View style={styles.empty}>
+      {icon ? (
+        <View style={styles.emptyIcon}>
+          <Icon name={icon} size={22} color={c.inkMuted} />
+        </View>
+      ) : null}
       <Text style={styles.emptyTitle}>{title}</Text>
       {description ? <Text style={styles.emptyText}>{description}</Text> : null}
     </View>
@@ -200,9 +274,11 @@ export function EmptyState({ title, description }: { title: string; description?
 }
 
 export function ErrorBox({ message }: { message: string }) {
+  const c = useTheme();
   const styles = useStyles(makeStyles);
   return (
     <View style={styles.errorBox} accessibilityRole="alert">
+      <Icon name="alert" size={16} color={c.danger} />
       <Text style={styles.errorText}>{message}</Text>
     </View>
   );
@@ -244,83 +320,100 @@ export function InfoRow({ label, value, onPress }: { label: string; value: React
 const makeStyles = (c: Palette) =>
   StyleSheet.create({
     button: {
-      minHeight: 46,
+      minHeight: 48,
       paddingHorizontal: 16,
-      borderRadius: 12,
+      borderRadius: RADIUS.control,
       borderWidth: 1,
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "center",
       gap: 8,
     },
-    buttonCompact: { minHeight: 36, paddingHorizontal: 12, borderRadius: 10 },
+    buttonCompact: { minHeight: 36, paddingHorizontal: 12 },
     buttonText: { fontSize: 15, fontWeight: "600", letterSpacing: 0.1 },
     buttonTextCompact: { fontSize: 14 },
     card: {
       backgroundColor: c.surface,
-      borderRadius: 16,
+      borderRadius: RADIUS.card,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: c.line,
       padding: 16,
-      shadowColor: c.shadow,
-      shadowOpacity: c.scheme === "dark" ? 0 : 0.04,
-      shadowRadius: 6,
-      shadowOffset: { width: 0, height: 2 },
-      elevation: c.scheme === "dark" ? 0 : 1,
+      boxShadow: c.elevation,
     },
     badge: {
       flexDirection: "row",
       alignItems: "center",
-      gap: 5,
-      borderRadius: 999,
-      borderWidth: 1,
+      gap: 6,
+      borderRadius: RADIUS.chip,
+      borderWidth: StyleSheet.hairlineWidth,
       paddingHorizontal: 8,
-      paddingVertical: 3,
+      paddingVertical: 4,
       alignSelf: "flex-start",
     },
     badgeDot: { width: 6, height: 6, borderRadius: 3 },
     badgeText: { fontSize: 12, fontWeight: "600" },
-    field: { gap: 6 },
+    field: { gap: 8 },
     label: { fontSize: 13, fontWeight: "600", color: c.ink },
     required: { color: c.danger },
     hint: { fontSize: 12, color: c.inkMuted, lineHeight: 17 },
     fieldError: { fontSize: 12, color: c.danger },
-    input: {
-      minHeight: 46,
+    inputFrame: {
+      minHeight: 48,
       borderWidth: 1,
       borderColor: c.lineStrong,
-      borderRadius: 12,
-      paddingHorizontal: 12,
-      paddingVertical: 10,
-      fontSize: 15,
-      color: c.ink,
+      borderRadius: RADIUS.control,
       backgroundColor: c.surface,
     },
+    inputFocused: { borderColor: c.primary, boxShadow: `0px 0px 0px 3px ${c.primarySoft}` },
+    inputRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12 },
+    input: { paddingHorizontal: 12, paddingVertical: 12, fontSize: 15, color: c.ink },
+    inputBare: { flex: 1, paddingHorizontal: 0, borderWidth: 0, minHeight: 46 },
     inputMultiline: { minHeight: 92, textAlignVertical: "top" },
     switchRow: { flexDirection: "row", alignItems: "center", gap: 12 },
     switchLabel: { fontSize: 14, color: c.ink, fontWeight: "500" },
-    segmented: { flexDirection: "row", backgroundColor: c.segment, borderRadius: 12, padding: 3 },
-    segment: { flex: 1, paddingVertical: 9, borderRadius: 10, alignItems: "center" },
-    segmentActive: {
+    segmented: { flexDirection: "row", backgroundColor: c.segment, borderRadius: RADIUS.control + 2, padding: 4 },
+    segmentPill: {
+      position: "absolute",
+      top: 4,
+      bottom: 4,
+      left: 0,
+      borderRadius: RADIUS.control - 2,
       backgroundColor: c.surface,
-      shadowColor: c.shadow,
-      shadowOpacity: c.scheme === "dark" ? 0 : 0.08,
-      shadowRadius: 3,
-      shadowOffset: { width: 0, height: 1 },
-      elevation: c.scheme === "dark" ? 0 : 1,
+      borderWidth: c.scheme === "dark" ? StyleSheet.hairlineWidth : 0,
+      borderColor: c.lineStrong,
+      boxShadow: c.elevation,
     },
+    segment: { flex: 1, paddingVertical: 8, borderRadius: RADIUS.control - 2, alignItems: "center" },
     segmentText: { fontSize: 13, fontWeight: "600", color: c.inkMuted },
     segmentTextActive: { color: c.ink },
-    segmentCount: { fontWeight: "500", color: c.inkSubtle },
-    empty: { alignItems: "center", paddingVertical: 40, paddingHorizontal: 24, gap: 6 },
+    segmentCount: { fontWeight: "500", color: c.inkSubtle, fontVariant: ["tabular-nums"] },
+    empty: { alignItems: "center", paddingVertical: 40, paddingHorizontal: 24, gap: 8 },
+    emptyIcon: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      backgroundColor: c.surface3,
+      alignItems: "center",
+      justifyContent: "center",
+      marginBottom: 4,
+    },
     emptyTitle: { fontSize: 16, fontWeight: "600", color: c.ink, textAlign: "center" },
     emptyText: { fontSize: 14, color: c.inkMuted, textAlign: "center", lineHeight: 20 },
-    errorBox: { backgroundColor: c.dangerSoft, borderColor: tint(c.danger, "44"), borderWidth: 1, borderRadius: 12, padding: 12 },
-    errorText: { color: c.danger, fontSize: 13, lineHeight: 18 },
+    errorBox: {
+      flexDirection: "row",
+      gap: 8,
+      alignItems: "flex-start",
+      backgroundColor: c.dangerSoft,
+      borderColor: tint(c.danger, "40"),
+      borderWidth: StyleSheet.hairlineWidth,
+      borderRadius: RADIUS.control,
+      padding: 12,
+    },
+    errorText: { color: c.danger, fontSize: 13, lineHeight: 18, flex: 1 },
     sectionTitleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 },
     sectionTitle: { fontSize: 12, fontWeight: "700", color: c.inkMuted, textTransform: "uppercase", letterSpacing: 0.6 },
     infoRow: { paddingVertical: 6, gap: 2 },
     infoLabel: { fontSize: 12, color: c.inkMuted },
     infoValue: { fontSize: 15, color: c.ink },
-    infoLink: { color: c.primary },
+    infoLink: { color: c.brandInk },
   });

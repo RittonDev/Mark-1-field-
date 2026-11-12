@@ -2,86 +2,28 @@
 
 import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
-import {
-  BadgeCheck,
-  Building2,
-  CalendarClock,
-  CalendarDays,
-  ClipboardList,
-  FileText,
-  FolderKanban,
-  HardHat,
-  LayoutDashboard,
-  LogOut,
-  MessageSquareText,
-  MapPin,
-  MapPinned,
-  PackageSearch,
-  Settings,
-  SquareKanban,
-  BarChart3,
-  Receipt,
-  Ticket,
-  Timer,
-  Users,
-} from "lucide-react";
+import { LogOut, Search } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useLayoutEffect, useRef } from "react";
 import { Logo, ThemeToggle } from "@/components/Brand";
+import { openCommandPalette } from "@/components/CommandPalette";
+import { GROUPS, visibleNav } from "@/components/nav";
+import { Kbd } from "@/components/ui";
+import { homePath } from "@/lib/access";
 import { api } from "@/lib/api";
-import { canManageTickets, isManager, isStaff, ROLE } from "@/lib/constants";
+import { canManageTickets, ROLE } from "@/lib/constants";
 import { initials } from "@/lib/format";
 import { useConnectionState } from "@/lib/realtime";
-import type { User, UserRole } from "@/lib/types";
+import type { User } from "@/lib/types";
 
-interface NavItem {
-  href: string;
-  label: string;
-  icon: React.ComponentType<{ className?: string }>;
-  visible: (role: UserRole) => boolean;
-  group: NavGroup;
-}
+export { visibleNav } from "@/components/nav";
 
-type NavGroup = "main" | "operation" | "commercial" | "base" | "analysis" | "setup";
-
-// Seções do menu na ordem do dia a dia: atender, vender, cadastrar, analisar, configurar.
-const GROUPS: { key: NavGroup; label: string | null }[] = [
-  { key: "main", label: null },
-  { key: "operation", label: "Operação" },
-  { key: "commercial", label: "Comercial" },
-  { key: "base", label: "Base" },
-  { key: "analysis", label: "Análise" },
-  { key: "setup", label: "Configuração" },
-];
-
-const NAV: NavItem[] = [
-  { href: "/chamados", label: "Chamados", icon: Ticket, visible: () => true, group: "main" },
-  { href: "/agenda", label: "Calendário", icon: CalendarDays, visible: canManageTickets, group: "operation" },
-  { href: "/dia", label: "Atividades do dia", icon: CalendarClock, visible: isStaff, group: "operation" },
-  { href: "/mapa", label: "Mapa ao vivo", icon: MapPinned, visible: canManageTickets, group: "operation" },
-  { href: "/quadro", label: "Quadro", icon: SquareKanban, visible: isStaff, group: "operation" },
-  { href: "/assistencia", label: "Assistência externa", icon: PackageSearch, visible: canManageTickets, group: "operation" },
-  { href: "/orcamentos", label: "Orçamentos", icon: FileText, visible: canManageTickets, group: "commercial" },
-  { href: "/projetos", label: "Projetos", icon: FolderKanban, visible: canManageTickets, group: "commercial" },
-  { href: "/custos", label: "Custos extras", icon: Receipt, visible: canManageTickets, group: "commercial" },
-  { href: "/clientes", label: "Clientes", icon: Building2, visible: isStaff, group: "base" },
-  { href: "/locais", label: "Locais", icon: MapPin, visible: isStaff, group: "base" },
-  { href: "/tecnicos", label: "Técnicos", icon: HardHat, visible: canManageTickets, group: "base" },
-  { href: "/homologacao", label: "Homologação", icon: BadgeCheck, visible: canManageTickets, group: "base" },
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, visible: isStaff, group: "analysis" },
-  { href: "/relatorios", label: "Relatórios", icon: BarChart3, visible: canManageTickets, group: "analysis" },
-  { href: "/formularios", label: "Formulários", icon: ClipboardList, visible: canManageTickets, group: "setup" },
-  { href: "/textos", label: "Textos do WhatsApp", icon: MessageSquareText, visible: canManageTickets, group: "setup" },
-  { href: "/tipos-servico", label: "Tipos de serviço", icon: Timer, visible: canManageTickets, group: "setup" },
-  { href: "/usuarios", label: "Usuários", icon: Users, visible: canManageTickets, group: "setup" },
-  { href: "/configuracoes", label: "Configurações", icon: Settings, visible: isManager, group: "setup" },
-];
-
-export function visibleNav(role: UserRole) {
-  return NAV.filter((item) => item.visible(role));
-}
-
-export function Sidebar({ user }: { user: User }) {
+/**
+ * Menu lateral claro, integrado à moldura (grafite no tema escuro).
+ * O item ativo ganha uma "placa" branca que desliza entre os itens ao navegar.
+ */
+export function Sidebar({ user, onLogout }: { user: User; onLogout: () => void }) {
   const pathname = usePathname();
   // Fichas de homologação aguardando análise (o evento em tempo real atualiza).
   const pending = useQuery({
@@ -92,119 +34,184 @@ export function Sidebar({ user }: { user: User }) {
   });
   const badges: Record<string, number> = { "/homologacao": pending.data?.pending ?? 0 };
   const items = visibleNav(user.role);
+
+  const wrap = useRef<HTMLDivElement>(null);
+  const plate = useRef<HTMLSpanElement>(null);
+  const placed = useRef(false);
+
+  useLayoutEffect(() => {
+    const root = wrap.current;
+    const el = plate.current;
+    if (!root || !el) return;
+    const measure = () => {
+      const active = root.querySelector<HTMLElement>('a[aria-current="page"]');
+      if (!active) {
+        el.style.opacity = "0";
+        return;
+      }
+      el.style.opacity = "1";
+      el.style.height = `${active.offsetHeight}px`;
+      el.style.width = `${active.offsetWidth}px`;
+      el.style.transform = `translate(${active.offsetLeft}px, ${active.offsetTop}px)`;
+    };
+    if (!placed.current) {
+      el.style.transition = "none";
+      measure();
+      void el.offsetWidth;
+      el.style.transition = "";
+      placed.current = true;
+    } else {
+      measure();
+    }
+    const observer = new ResizeObserver(measure);
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, [pathname, items.length]);
+
   return (
-    <aside className="sticky top-0 flex h-screen w-16 shrink-0 flex-col bg-sidebar text-sidebar-ink lg:w-60">
-      <Link href="/chamados" className="flex h-14 shrink-0 items-center px-4" aria-label="Maxx Field — chamados">
+    <aside className="sticky top-0 flex h-screen w-16 shrink-0 flex-col lg:w-[248px]">
+      <Link
+        href={homePath(user.role)}
+        className="flex h-14 shrink-0 items-center px-4 lg:px-5"
+        aria-label="Maxx Field: início"
+      >
         <span className="lg:hidden">
-          <Logo compact inverse />
+          <Logo compact />
         </span>
         <span className="hidden lg:inline-flex">
-          <Logo inverse />
+          <Logo />
         </span>
       </Link>
-      <nav className="sidebar-scroll flex-1 overflow-y-auto px-2 pb-4" aria-label="Menu principal">
-        {GROUPS.map((group) => {
-          const groupItems = items.filter((i) => i.group === group.key);
-          if (!groupItems.length) return null;
-          return (
-            <div key={group.key} className={group.label ? "mt-5" : "mt-2"}>
-              {group.label ? (
-                <p className="mb-1 hidden px-3 text-[10px] font-semibold tracking-[0.12em] text-sidebar-ink/60 uppercase lg:block">
-                  {group.label}
-                </p>
-              ) : null}
-              <div className="flex flex-col gap-0.5">
-                {groupItems.map((item) => {
-                  const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
-                  const Icon = item.icon;
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      title={item.label}
-                      aria-current={active ? "page" : undefined}
-                      className={clsx(
-                        "relative flex h-9 items-center gap-3 rounded-md px-3 text-[13px] transition-colors",
-                        active
-                          ? "bg-sidebar-active font-semibold text-sidebar-ink-strong"
-                          : "hover:bg-white/5 hover:text-sidebar-ink-strong",
-                      )}
-                    >
-                      {active ? <span className="brand-gradient absolute inset-y-1.5 left-0 w-[3px] rounded-r" aria-hidden /> : null}
-                      <span className="relative shrink-0">
-                        <Icon className="size-4" />
-                        {badges[item.href] ? (
-                          <span className="absolute -top-1.5 -right-1.5 size-2 rounded-full bg-red-500 lg:hidden" aria-hidden />
-                        ) : null}
-                      </span>
-                      <span className="hidden flex-1 truncate lg:inline">{item.label}</span>
-                      {badges[item.href] ? (
-                        <span
-                          className="hidden rounded-full bg-red-500 px-1.5 text-[11px] leading-[18px] font-semibold text-white tabular-nums lg:inline"
-                          aria-label={`${badges[item.href]} pendentes`}
-                        >
-                          {badges[item.href]}
+      <nav className="flex-1 overflow-y-auto px-2.5 pb-4" aria-label="Menu principal">
+        <div ref={wrap} className="relative">
+          <span
+            ref={plate}
+            aria-hidden
+            className="pointer-events-none absolute top-0 left-0 rounded-lg bg-surface opacity-0 shadow-elev-1 ring-1 ring-line transition-[transform,height,width,opacity] duration-300 ease-out-expo"
+          />
+          {GROUPS.map((group) => {
+            const groupItems = items.filter((i) => i.group === group.key);
+            if (!groupItems.length) return null;
+            return (
+              <div key={group.key} className={group.label ? "mt-5" : "mt-1"}>
+                {group.label ? (
+                  <p className="mb-1 hidden px-2.5 text-[11px] font-medium text-ink-subtle lg:block">{group.label}</p>
+                ) : null}
+                <div className="flex flex-col gap-px">
+                  {groupItems.map((item) => {
+                    const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+                    const Icon = item.icon;
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        title={item.label}
+                        aria-current={active ? "page" : undefined}
+                        className={clsx(
+                          "group relative flex h-[34px] items-center justify-center gap-2.5 rounded-lg px-2.5 text-[13px] font-medium transition-colors lg:justify-start",
+                          active ? "text-ink" : "text-ink-muted hover:bg-ink/[0.045] hover:text-ink",
+                        )}
+                      >
+                        <span className="relative shrink-0">
+                          <Icon
+                            className={clsx(
+                              "size-[17px] transition-colors",
+                              active ? "text-brand" : "text-ink-subtle group-hover:text-ink-muted",
+                            )}
+                          />
+                          {badges[item.href] ? (
+                            <span className="absolute -top-1 -right-1 size-2 rounded-full bg-red-500 ring-2 ring-canvas lg:hidden" aria-hidden />
+                          ) : null}
                         </span>
-                      ) : null}
-                    </Link>
-                  );
-                })}
+                        <span className="hidden flex-1 truncate lg:inline">{item.label}</span>
+                        {badges[item.href] ? (
+                          <span
+                            className="hidden min-w-5 rounded-full bg-red-500 px-1.5 text-center text-[11px] leading-[18px] font-semibold text-white tabular-nums lg:inline"
+                            aria-label={`${badges[item.href]} pendentes`}
+                          >
+                            {badges[item.href]}
+                          </span>
+                        ) : null}
+                      </Link>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </nav>
-      <div className="hidden border-t border-sidebar-line px-4 py-3 text-[11px] text-sidebar-ink/60 lg:block">Maxx Field · v0.1</div>
+      <div className="shrink-0 border-t border-line/70 p-2.5">
+        <div className="flex items-center gap-2.5 rounded-lg px-1.5 py-1.5 lg:px-2">
+          <div className="hidden size-8 shrink-0 items-center justify-center rounded-full bg-linear-to-br from-brand to-brand-cyan text-[11px] font-semibold text-white ring-2 ring-surface lg:flex">
+            {initials(user.name)}
+          </div>
+          <div className="hidden min-w-0 flex-1 leading-tight lg:block">
+            <p className="truncate text-[13px] font-semibold text-ink">{user.name}</p>
+            <p className="truncate text-[11px] text-ink-subtle">
+              {ROLE[user.role]}
+              {user.team ? ` · ${user.team.name}` : ""}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onLogout}
+            className="mx-auto rounded-lg p-2 text-ink-subtle transition-colors hover:bg-ink/[0.05] hover:text-ink lg:mx-0"
+            title="Sair"
+            aria-label="Sair"
+          >
+            <LogOut className="size-4" />
+          </button>
+        </div>
+      </div>
     </aside>
   );
 }
 
 function ConnectionIndicator() {
   const state = useConnectionState();
-  const label = state === "online" ? "Tempo real ativo" : state === "connecting" ? "Conectando..." : "Offline";
+  const label = state === "online" ? "Tempo real" : state === "connecting" ? "Conectando..." : "Offline";
   return (
     <span
-      className="inline-flex items-center gap-1.5 rounded-full border border-line px-2.5 py-1 text-xs text-ink-muted"
-      title={label}
+      className="inline-flex h-8 items-center gap-2 rounded-full border border-line bg-surface px-3 text-xs font-medium text-ink-muted"
+      title={state === "online" ? "Atualizações em tempo real ativas" : label}
     >
-      <span
-        className={clsx(
-          "size-2 rounded-full",
-          state === "online" && "bg-emerald-500",
-          state === "connecting" && "animate-pulse bg-amber-500",
-          state === "offline" && "bg-red-500",
-        )}
-      />
+      <span className="relative flex size-2">
+        {state === "online" ? (
+          <span className="absolute inset-0 animate-ping rounded-full bg-emerald-400 opacity-60 [animation-duration:2.4s]" />
+        ) : null}
+        <span
+          className={clsx(
+            "relative size-2 rounded-full",
+            state === "online" && "bg-emerald-500",
+            state === "connecting" && "animate-pulse bg-amber-500",
+            state === "offline" && "bg-red-500",
+          )}
+        />
+      </span>
       <span className="hidden sm:inline">{label}</span>
     </span>
   );
 }
 
-export function Topbar({ user, onLogout }: { user: User; onLogout: () => void }) {
+export function Topbar() {
   return (
-    <header className="sticky top-0 z-30 flex h-14 items-center justify-end gap-3 border-b border-line bg-surface/90 px-4 backdrop-blur md:px-6">
-      <ThemeToggle />
-      <ConnectionIndicator />
-      <div className="flex items-center gap-2.5 border-l border-line pl-3">
-        <div className="flex size-8 items-center justify-center rounded-full bg-brand/10 text-xs font-semibold text-brand">
-          {initials(user.name)}
-        </div>
-        <div className="hidden leading-tight sm:block">
-          <p className="text-sm font-medium text-ink">{user.name}</p>
-          <p className="text-[11px] text-ink-muted">
-            {ROLE[user.role]}
-            {user.team ? ` · ${user.team.name}` : ""}
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={onLogout}
-          className="ml-1 rounded-md p-2 text-ink-muted hover:bg-surface-2 hover:text-ink"
-          title="Sair"
-          aria-label="Sair"
-        >
-          <LogOut className="size-4" />
-        </button>
+    <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-line bg-sheet/85 px-4 backdrop-blur-md md:px-6 lg:rounded-t-2xl">
+      <button
+        type="button"
+        onClick={openCommandPalette}
+        className="group inline-flex h-9 w-full max-w-md items-center gap-2.5 rounded-lg border border-line bg-surface px-3 text-sm text-ink-subtle shadow-elev-1 transition-[border-color,color] hover:border-line-strong hover:text-ink-muted"
+      >
+        <Search className="size-4 shrink-0" />
+        <span className="flex-1 truncate text-left">Buscar OS, cliente ou tela...</span>
+        <span className="hidden items-center gap-1 sm:inline-flex">
+          <Kbd>Ctrl</Kbd>
+          <Kbd>K</Kbd>
+        </span>
+      </button>
+      <div className="ml-auto flex items-center gap-2">
+        <ConnectionIndicator />
+        <ThemeToggle />
       </div>
     </header>
   );

@@ -87,6 +87,8 @@ class TicketEventType(StrEnum):
     UPDATED = "updated"
     STATUS_CHANGED = "status_changed"
     ASSIGNED = "assigned"
+    # Analista responsável pela OS (a fila dele), separado do técnico que executa.
+    OWNER_CHANGED = "owner_changed"
     COMMENT_ADDED = "comment_added"
     WORKLOG_ADDED = "worklog_added"
     ATTACHMENT_ADDED = "attachment_added"

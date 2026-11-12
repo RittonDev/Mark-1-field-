@@ -38,8 +38,12 @@ class Settings(BaseSettings):
     MEDIA_ROOT: str = "./media"
     MAX_UPLOAD_MB: int = 15
 
-    # Endereço público do site (para onde o login Microsoft volta).
+    # Endereço público do site (para onde o login Microsoft volta e base dos links do cliente).
     WEB_URL: str = "http://localhost:3001"
+    # Endereço público da API (fotos do relatório do cliente). Vazio: o endereço da requisição.
+    API_PUBLIC_URL: str | None = None
+    # Nome exibido no relatório da OS enviado ao cliente.
+    COMPANY_NAME: str = "Maxx Field"
 
     # Login Microsoft (Entra ID) para analistas e gestores. Ativo quando os três primeiros
     # estão preenchidos. Use o ID (GUID) do locatário, não "common"/"organizations": é ele

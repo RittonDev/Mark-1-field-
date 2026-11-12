@@ -56,11 +56,11 @@ def create_refresh_token(user_id: str, channel: str | None = None) -> str:
     return create_token(user_id, "refresh", timedelta(days=settings.REFRESH_TOKEN_DAYS), extra)
 
 
-def create_download_token(attachment_id: str, user_id: str) -> str:
+def create_download_token(attachment_id: str, user_id: str, minutes: int | None = None) -> str:
     return create_token(
         attachment_id,
         "download",
-        timedelta(minutes=settings.DOWNLOAD_TOKEN_MINUTES),
+        timedelta(minutes=minutes or settings.DOWNLOAD_TOKEN_MINUTES),
         {"uid": user_id},
     )
 

@@ -82,8 +82,12 @@ class Ticket(UUIDPrimaryKey, Timestamps, Base):
         ForeignKey("users.id", ondelete="SET NULL")
     )
 
-    # Analista responsável e grupo técnico.
+    # Quem executa (técnico em campo ou analista no remoto) e grupo técnico.
     assignee_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    # Analista responsável: acompanha a OS até o fim (a "fila" dele), mesmo com técnico em campo.
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), index=True
     )
     team_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -142,6 +146,13 @@ class Ticket(UUIDPrimaryKey, Timestamps, Base):
     # Anexo (kind="signature") com a imagem; sem FK para não criar ciclo tickets <-> anexos.
     signature_attachment_id: Mapped[uuid.UUID | None] = mapped_column()
 
+    # Relatório para o cliente (link público da OS concluída). Só o identificador fica no banco;
+    # o token do link leva também uma assinatura HMAC (ver services/client_report.py).
+    report_link_id: Mapped[str | None] = mapped_column(String(24), unique=True)
+    report_link_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    report_views: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    report_last_viewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     # Concorrência otimista) (web e mobile editando a mesma OS).
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
 
@@ -152,6 +163,7 @@ class Ticket(UUIDPrimaryKey, Timestamps, Base):
     requester: Mapped[User | None] = relationship(foreign_keys=[requester_id], lazy="selectin")
     created_by: Mapped[User | None] = relationship(foreign_keys=[created_by_id], lazy="selectin")
     assignee: Mapped[User | None] = relationship(foreign_keys=[assignee_id], lazy="selectin")
+    owner: Mapped[User | None] = relationship(foreign_keys=[owner_id], lazy="selectin")
     team: Mapped[Team | None] = relationship(lazy="selectin")
     project: Mapped["Project | None"] = relationship(lazy="selectin")  # noqa: F821
     service_type: Mapped[ServiceType | None] = relationship(lazy="selectin")

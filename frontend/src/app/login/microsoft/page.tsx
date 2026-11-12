@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Logo } from "@/components/Brand";
+import { homePath } from "@/lib/access";
 import { Button, ErrorBox, Spinner } from "@/components/ui";
 import { errorMessage, request } from "@/lib/api";
 import { sessionStore } from "@/lib/session";
@@ -27,7 +28,7 @@ export default function MicrosoftCallbackPage() {
     request<TokenResponse>("/auth/microsoft/exchange", { method: "POST", body: { code }, auth: false })
       .then((data) => {
         sessionStore.fromTokenResponse(data);
-        router.replace("/chamados");
+        router.replace(homePath(data.user.role));
       })
       .catch((err) => setError(errorMessage(err)));
   }, [router]);

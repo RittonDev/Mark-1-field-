@@ -53,7 +53,7 @@ from app.schemas.ticket import (
     TicketViolationUpdate,
     WorklogCreate,
 )
-from app.services import durations, schedule, sla, storage
+from app.services import client_report, durations, schedule, sla, storage
 from app.services.errors import NotFound, PermissionDenied, VersionConflict, WorkflowError
 from app.services.realtime import queue_event
 from app.services.workflow import (
@@ -151,6 +151,8 @@ def to_detail(ticket: Ticket, user: User) -> TicketDetail:
     detail.can_assign = can_assign(user, ticket)
     if not user.is_staff:
         detail.expenses = []  # custo é interno
+    if user.can_manage_tickets:
+        detail.report_link = client_report.link_out(ticket)
     return detail
 
 
@@ -383,8 +385,10 @@ def _change_status(
 
     if to == S.RESOLVED:
         ticket.resolved_at = now
+        client_report.assign_on_finish(ticket, now)
     elif to == S.CLOSED:
         ticket.closed_at = now
+        client_report.assign_on_finish(ticket, now)
     elif to == S.CANCELLED:
         ticket.cancelled_at = now
     elif to == S.REOPENED:
@@ -471,6 +475,59 @@ async def _assign(
         _change_status(db, ticket, S.ASSIGNED, actor, now=now, note="Troca de responsável")
 
 
+OWNER_INVALID = "Escolha um analista ou gestor"
+
+
+async def _owner_user(db: AsyncSession, owner_id: uuid.UUID) -> User:
+    owner = await db.get(User, owner_id)
+    if owner is None or not owner.is_active or not owner.can_manage_tickets:
+        raise WorkflowError(OWNER_INVALID)
+    return owner
+
+
+async def _set_owner(
+    db: AsyncSession,
+    ticket: Ticket,
+    owner_id: uuid.UUID | None,
+    actor: User,
+    *,
+    now: datetime,
+    note: str | None = None,
+) -> bool:
+    """Troca o analista responsável (a fila em que a OS aparece). Não mexe no técnico."""
+    if ticket.owner_id == owner_id:
+        return False
+    owner = await _owner_user(db, owner_id) if owner_id is not None else None
+    prev_id = ticket.owner_id
+    prev = await db.get(User, prev_id) if prev_id is not None else None
+    ticket.owner_id = owner_id
+    data = {"from_name": prev.name if prev else None, "to_name": owner.name if owner else None}
+    if note is None:
+        if owner is not None and owner.id == actor.id:
+            note = (
+                f"{actor.name} puxou a OS de {prev.name}"
+                if prev
+                else f"{actor.name} puxou a OS para a própria fila"
+            )
+        elif owner is not None:
+            note = f"OS passada para a fila de {owner.name}"
+        else:
+            note = "OS tirada da fila do analista"
+    record_event(
+        db,
+        ticket,
+        actor,
+        TicketEventType.OWNER_CHANGED,
+        from_value=_jsonable(prev_id),
+        to_value=_jsonable(owner_id),
+        note=note,
+        data=data,
+        now=now,
+    )
+    queue_event(db, "updated", ticket, actor, {"fields": ["owner_id"], **data}, internal=True)
+    return True
+
+
 # --------------------------------------------------------------------------- casos de uso
 
 
@@ -515,6 +572,13 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
             raise WorkflowError("Solicitante não encontrado")
         requester_name = requester_name or requester.name
 
+    # Analista responsável: quem abre pela gestão fica com a OS, salvo escolha de outro.
+    owner_id: uuid.UUID | None = None
+    if actor.can_manage_tickets:
+        owner_id = actor.id
+        if data.owner_id is not None:
+            owner_id = (await _owner_user(db, data.owner_id)).id
+
     scheduled_start = None if is_requester else data.scheduled_start
     scheduled_end = None if is_requester else data.scheduled_end
     scheduled_end = _default_end(scheduled_start, scheduled_end, estimated_minutes)
@@ -550,6 +614,7 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
         requester_contact=data.requester_contact,
         service_address=(data.service_address or "").strip() or None,
         created_by_id=actor.id,
+        owner_id=owner_id,
         team_id=team_id,
         project_id=await _check_project(db, data.project_id, actor),
         scheduled_start=scheduled_start,

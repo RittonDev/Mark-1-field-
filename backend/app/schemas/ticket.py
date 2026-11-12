@@ -98,6 +98,8 @@ class TicketListItem(ORMModel):
     customer: Ref | None
     location: LocationRef | None
     assignee: UserRef | None
+    # Analista responsável (a fila dele), separado de quem executa (assignee).
+    owner: UserRef | None = None
     team: Ref | None
     project: ProjectRef | None = None
     requester_name: str | None
@@ -125,6 +127,17 @@ class TicketListItem(ORMModel):
     @property
     def sla_status(self) -> SlaStatus:
         return compute_sla_status(self)  # type: ignore[arg-type]
+
+
+class ReportLinkOut(BaseModel):
+    """Link público do relatório da OS concluída (para o cliente)."""
+
+    token: str
+    path: str
+    url: str
+    created_at: datetime | None
+    views: int
+    last_viewed_at: datetime | None
 
 
 class TicketDetail(TicketListItem):
@@ -191,6 +204,8 @@ class TicketDetail(TicketListItem):
     allowed_transitions: list[TicketStatus] = []
     can_edit: bool = False
     can_assign: bool = False
+    # Só para a gestão: link do relatório para o cliente (existe com a OS concluída).
+    report_link: ReportLinkOut | None = None
 
 
 class TicketCreate(BaseModel):
@@ -215,6 +230,8 @@ class TicketCreate(BaseModel):
     team_id: uuid.UUID | None = None
     project_id: uuid.UUID | None = None
     assignee_id: uuid.UUID | None = None
+    # Analista responsável (só a gestão escolhe; sem informar, fica com quem abriu a OS).
+    owner_id: uuid.UUID | None = None
     scheduled_start: datetime | None = None
     scheduled_end: datetime | None = None
     # Agendar mesmo com o técnico ocupado no horário (a API recusa com 409 sem isso).
@@ -239,6 +256,8 @@ class TicketUpdate(BaseModel):
     estimated_minutes: int | None = Field(default=None, gt=0, le=60 * 24 * 7)
     team_id: uuid.UUID | None = None
     project_id: uuid.UUID | None = None
+    # Só a gestão: transfere a OS para a fila de outro analista (null tira da fila).
+    owner_id: uuid.UUID | None = None
     scheduled_start: datetime | None = None
     scheduled_end: datetime | None = None
     # Só a gestão: exigir (ou dispensar) a assinatura do responsável no local.
@@ -364,6 +383,8 @@ class TicketFilters(BaseModel):
     category_id: uuid.UUID | None = None
     asset_id: uuid.UUID | None = None
     project_id: uuid.UUID | None = None
+    owner_id: uuid.UUID | None = None
+    no_owner: bool = False
     q: str | None = None
     mine: bool = False
     unassigned: bool = False
