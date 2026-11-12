@@ -9,7 +9,7 @@ import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canManageTickets, computePriority, LEVEL, LEVEL_ORDER, PRIORITY, PRIORITY_ORDER, TICKET_TYPE } from "@/lib/constants";
 import { useProjects } from "@/lib/projects";
-import { useCategories, useServiceTypes, useTeams } from "@/lib/queries";
+import { useCategories, useServiceTypes } from "@/lib/queries";
 import Link from "next/link";
 import { formatDateTime, formatMinutes } from "@/lib/format";
 import type { Level, Location, TicketDetail, TicketPriority, TicketType, TicketUpdatePayload } from "@/lib/types";
@@ -30,23 +30,18 @@ export function EditTicketDialog({
   const { toast } = useToast();
   const onError = useTicketErrorHandler(ticket.id);
   const categories = useCategories();
-  const teams = useTeams();
   const [title, setTitle] = useState(ticket.title);
   const [description, setDescription] = useState(ticket.description);
   const [type, setType] = useState<TicketType>(ticket.type);
   const [categoryId, setCategoryId] = useState(ticket.category?.id ?? "");
-  const [teamId, setTeamId] = useState(ticket.team?.id ?? "");
   const { user } = useAuth();
   const projects = useProjects({ enabled: canManageTickets(user?.role) });
   const [projectId, setProjectId] = useState(ticket.project?.id ?? "");
-  const [impact, setImpact] = useState<Level>(ticket.impact);
   const [urgency, setUrgency] = useState<Level>(ticket.urgency);
   const [priority, setPriority] = useState<TicketPriority>(ticket.priority);
   // Troca de local: busca restrita ao cliente da OS; null = manter o atual.
   const [newLocation, setNewLocation] = useState<Location | null>(null);
   const [serviceAddress, setServiceAddress] = useState(ticket.service_address ?? "");
-  const [clientReference, setClientReference] = useState(ticket.client_reference ?? "");
-  const [visitNote, setVisitNote] = useState(ticket.visit_note ?? "");
   const serviceTypes = useServiceTypes({ customerId: ticket.customer?.id ?? null, active: true });
   const [serviceTypeId, setServiceTypeId] = useState(ticket.service_type?.id ?? "");
   const [estimated, setEstimated] = useState(ticket.estimated_minutes ? String(ticket.estimated_minutes) : "");
@@ -63,19 +58,13 @@ export function EditTicketDialog({
       if (description !== ticket.description) payload.description = description;
       if (type !== ticket.type) payload.type = type;
       if (categoryId !== (ticket.category?.id ?? "")) payload.category_id = categoryId || null;
-      if (teamId !== (ticket.team?.id ?? "")) payload.team_id = teamId || null;
       if (projectId !== (ticket.project?.id ?? "")) payload.project_id = projectId || null;
-      if (impact !== ticket.impact) payload.impact = impact;
       if (urgency !== ticket.urgency) payload.urgency = urgency;
       if (priority !== ticket.priority) payload.priority = priority;
       if (newLocation && newLocation.id !== ticket.location?.id) payload.location_id = newLocation.id;
       if (serviceAddress.trim() !== (ticket.service_address ?? "")) {
         payload.service_address = serviceAddress.trim() || null;
       }
-      if (clientReference.trim() !== (ticket.client_reference ?? "")) {
-        payload.client_reference = clientReference.trim() || null;
-      }
-      if (visitNote.trim() !== (ticket.visit_note ?? "")) payload.visit_note = visitNote.trim() || null;
       if (serviceTypeId && serviceTypeId !== (ticket.service_type?.id ?? "")) payload.service_type_id = serviceTypeId;
       const estimatedNumber = estimated ? Number(estimated) : null;
       if (estimatedNumber !== ticket.estimated_minutes) payload.estimated_minutes = estimatedNumber;
@@ -94,10 +83,10 @@ export function EditTicketDialog({
     },
   });
 
-  const onLevelChange = (nextImpact: Level, nextUrgency: Level) => {
-    setImpact(nextImpact);
+  // A urgência recalcula a prioridade pela matriz (com o impacto que a OS já tem).
+  const onUrgencyChange = (nextUrgency: Level) => {
     setUrgency(nextUrgency);
-    setPriority(computePriority(nextImpact, nextUrgency));
+    setPriority(computePriority(ticket.impact, nextUrgency));
   };
 
   return (
@@ -140,12 +129,6 @@ export function EditTicketDialog({
         </Field>
         <Field label="Descrição" className="sm:col-span-2">
           <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={5} />
-        </Field>
-        <Field label="Observação da visita" hint="Recado para o técnico: com quem falar, acesso, o que levar" className="sm:col-span-2">
-          <Textarea value={visitNote} onChange={(e) => setVisitNote(e.target.value.slice(0, 5000))} rows={2} />
-        </Field>
-        <Field label="Nº do chamado do cliente">
-          <Input value={clientReference} onChange={(e) => setClientReference(e.target.value)} maxLength={80} placeholder="Ex.: INC0012345" />
         </Field>
         <Field
           label="Local de atendimento"
@@ -216,37 +199,16 @@ export function EditTicketDialog({
             ))}
           </Select>
         </Field>
-        <Field label="Grupo técnico">
-          <Select value={teamId} onChange={(e) => setTeamId(e.target.value)}>
-            <option value="">Sem grupo</option>
-            {teams.data?.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
+        <Field label="Urgência">
+          <Select value={urgency} onChange={(e) => onUrgencyChange(e.target.value as Level)}>
+            {LEVEL_ORDER.map((l) => (
+              <option key={l} value={l}>
+                {LEVEL[l]}
               </option>
             ))}
           </Select>
         </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Impacto">
-            <Select value={impact} onChange={(e) => onLevelChange(e.target.value as Level, urgency)}>
-              {LEVEL_ORDER.map((l) => (
-                <option key={l} value={l}>
-                  {LEVEL[l]}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Urgência">
-            <Select value={urgency} onChange={(e) => onLevelChange(impact, e.target.value as Level)}>
-              {LEVEL_ORDER.map((l) => (
-                <option key={l} value={l}>
-                  {LEVEL[l]}
-                </option>
-              ))}
-            </Select>
-          </Field>
-        </div>
-        <Field label="Prioridade" hint="Recalculada pela matriz ao mudar impacto/urgência; pode ser ajustada.">
+        <Field label="Prioridade (prazo)" hint="Recalculada ao mudar a urgência; pode ser ajustada.">
           <Select value={priority} onChange={(e) => setPriority(e.target.value as TicketPriority)}>
             {PRIORITY_ORDER.map((p) => (
               <option key={p} value={p}>
