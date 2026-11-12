@@ -50,15 +50,23 @@ class ContactIn(BaseModel):
 
 
 def dedupe_contacts(contacts: list[ContactIn] | list[dict]) -> list[dict]:
-    """Lista gravável: sem repetidos (mesmo tipo e valor), na ordem recebida."""
+    """Lista gravável: sem repetidos (mesmo tipo e valor), na ordem recebida.
+
+    O repetido não se perde de todo: se ele era o principal ou tinha nome/rótulo, isso passa
+    para o que ficou.
+    """
     out: list[dict] = []
-    seen: set[tuple[str, str]] = set()
+    index: dict[tuple[str, str], int] = {}
     for item in contacts:
         data = item.model_dump() if isinstance(item, BaseModel) else dict(item)
         key = (data["kind"], data["value"])
-        if key in seen:
+        if key in index:
+            kept = out[index[key]]
+            kept["primary"] = bool(kept.get("primary") or data.get("primary"))
+            for field in ("name", "label"):
+                kept[field] = kept.get(field) or data.get(field)
             continue
-        seen.add(key)
+        index[key] = len(out)
         out.append(data)
     return out
 

@@ -72,7 +72,7 @@ from app.models import (
     ViolationReason,
 )
 from app.schemas.forms import FormField
-from app.schemas.records import primary_contact
+from app.schemas.records import dedupe_contacts, primary_contact
 from app.services import cities, geo, technician_regions
 
 log = logging.getLogger("fieldcontrol")
@@ -313,13 +313,11 @@ def contacts_of(raw: Any) -> list[dict[str, Any]]:
     Telefone fica só com dígitos, com o DDI na frente ("5511999998888"); e-mail em minúsculas.
     """
     out: list[dict[str, Any]] = []
-    seen: set[tuple[str, str]] = set()
     raw = raw or {}
     for item in raw.get("emails") or []:
         value = (item.get("address") or "").strip().lower()
-        if not value or ("email", value) in seen:
+        if not value:
             continue
-        seen.add(("email", value))
         out.append(
             {
                 "kind": "email",
@@ -335,9 +333,6 @@ def contacts_of(raw: Any) -> list[dict[str, Any]]:
             continue
         country = digits(item.get("countryCode")) or "55"
         value = number if number.startswith(country) and len(number) > 11 else country + number
-        if ("phone", value) in seen:
-            continue
-        seen.add(("phone", value))
         out.append(
             {
                 "kind": "phone",
@@ -347,7 +342,7 @@ def contacts_of(raw: Any) -> list[dict[str, Any]]:
                 "primary": bool(item.get("primary")),
             }
         )
-    return out
+    return dedupe_contacts(out)
 
 
 def address_parts(address: dict[str, Any]) -> dict[str, Any]:

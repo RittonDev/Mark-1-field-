@@ -106,8 +106,9 @@ def test_contact_input_rules() -> None:
         ]
     )
     assert [c["value"] for c in contacts] == ["558533332222", "a@b.test"]
-    # Nenhum marcado como principal: vale o primeiro do tipo.
+    assert contacts[0]["primary"] is True  # o repetido marcado como principal passa a marca
     assert primary_contact(contacts, "phone")["value"] == "558533332222"
+    # Nenhum e-mail marcado como principal: vale o primeiro do tipo.
     assert primary_contact(contacts, "email")["value"] == "a@b.test"
     assert primary_contact([], "email") is None
     assert format_phone("5511987654321") == "(11) 98765-4321"
@@ -215,9 +216,6 @@ def test_city_spelling_rules() -> None:
     assert cities.title_pt("embu-guaçu") == "Embu-Guaçu"
     assert cities.title_pt("E DOS ANJOS") == "E dos Anjos"  # conector só minúsculo no meio
 
-    def pick(**variants: int) -> str:
-        return cities.canonical(Counter(variants))
-
     # A grafia de nome próprio ganha da mais usada em maiúsculas.
     assert cities.canonical(Counter({"FORTALEZA": 10, "Fortaleza": 3})) == "Fortaleza"
     # Entre as de nome próprio, a acentuada (mesmo sendo menos usada).
@@ -241,7 +239,7 @@ def test_city_spelling_rules() -> None:
     )
     assert cities.canonical(Counter({"rio de janeiro": 2})) == "Rio de Janeiro"
     assert cities.canonical(Counter({"Sao paulo": 4, "SAO PAULO": 1})) == "Sao Paulo"
-    assert pick(Natal=1) == "Natal"
+    assert cities.canonical(Counter({"Natal": 1})) == "Natal"
 
 
 # ---------------------------------------------------------------------- importação
