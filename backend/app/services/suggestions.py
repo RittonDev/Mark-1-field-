@@ -74,7 +74,10 @@ def norm(value: str | None) -> str:
 
 def km_between(a: tuple[float, float], b: tuple[float, float]) -> float:
     lat1, lon1, lat2, lon2 = map(math.radians, (*a, *b))
-    h = math.sin((lat2 - lat1) / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2) ** 2
+    h = (
+        math.sin((lat2 - lat1) / 2) ** 2
+        + math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2) ** 2
+    )
     return 6371 * 2 * math.asin(math.sqrt(h))
 
 
@@ -92,12 +95,25 @@ class Target:
 
 def target_for(ticket: Ticket, project: Project | None) -> Target:
     loc = ticket.location
-    text = norm(" ".join(filter(None, [ticket.title, ticket.category.full_name if ticket.category else None, ticket.service_type.name if ticket.service_type else None])))
+    text = norm(
+        " ".join(
+            filter(
+                None,
+                [
+                    ticket.title,
+                    ticket.category.full_name if ticket.category else None,
+                    ticket.service_type.name if ticket.service_type else None,
+                ],
+            )
+        )
+    )
     start = ticket.scheduled_start
     return Target(
         city=loc.city if loc else None,
         state=loc.state if loc else None,
-        coords=(loc.latitude, loc.longitude) if loc and loc.latitude is not None and loc.longitude is not None else None,
+        coords=(loc.latitude, loc.longitude)
+        if loc and loc.latitude is not None and loc.longitude is not None
+        else None,
         start=start,
         end=visit_end(start, ticket.scheduled_end, ticket.estimated_minutes) if start else None,
         project_member_ids=set(project.member_ids or []) if project else set(),
@@ -135,7 +151,9 @@ async def suggest(db: AsyncSession, target: Target, limit: int = 5) -> list[dict
         p.user_id: p
         for p in await db.scalars(
             select(LocationPing)
-            .where(LocationPing.user_id.in_(ids), LocationPing.recorded_at >= utcnow() - LIVE_WINDOW)
+            .where(
+                LocationPing.user_id.in_(ids), LocationPing.recorded_at >= utcnow() - LIVE_WINDOW
+            )
             .distinct(LocationPing.user_id)
             .order_by(LocationPing.user_id, LocationPing.recorded_at.desc())
         )
@@ -183,7 +201,11 @@ async def suggest(db: AsyncSession, target: Target, limit: int = 5) -> list[dict
             reasons.append("Atende " + ", ".join(sorted(AREA_LABEL[a] for a in matched)))
         if target.start and target.end:
             busy = await find_conflicts(
-                db, assignee_id=tech.id, start=target.start, end=target.end, exclude_id=target.exclude_ticket_id
+                db,
+                assignee_id=tech.id,
+                start=target.start,
+                end=target.end,
+                exclude_id=target.exclude_ticket_id,
             )
             if busy:
                 score -= 40

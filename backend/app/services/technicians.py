@@ -196,9 +196,14 @@ async def update(db: AsyncSession, user: User, data: TechnicianUpdate) -> User:
     for key, value in fields.items():
         if key == "home_state" and isinstance(value, str):
             value = value.strip().upper()
-        if key in ("name", "phone", "job_title", "home_city", "home_state", "coverage_area") and isinstance(
-            value, str
-        ):
+        if key in (
+            "name",
+            "phone",
+            "job_title",
+            "home_city",
+            "home_state",
+            "coverage_area",
+        ) and isinstance(value, str):
             value = value.strip() or None
         if key == "name" and not value:
             continue

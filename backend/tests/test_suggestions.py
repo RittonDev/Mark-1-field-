@@ -42,5 +42,7 @@ async def test_suggests_technicians_by_city(client: AsyncClient, world: World) -
     r = await client.get(f"{API}/technicians/suggest", params={"city": "sao paulo"}, headers=an)
     assert r.json()[0]["id"] == other
     assert (
-        await client.get(f"{API}/tickets/{t['id']}/technician-suggestions", headers=world.tech.headers)
+        await client.get(
+            f"{API}/tickets/{t['id']}/technician-suggestions", headers=world.tech.headers
+        )
     ).status_code == 403

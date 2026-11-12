@@ -11,8 +11,8 @@ from app.schemas.technician import (
     ImportResult,
     TechnicianCreate,
     TechnicianOut,
-    TechnicianUpdate,
     TechnicianSuggestion,
+    TechnicianUpdate,
     TemporaryPassword,
 )
 from app.services import storage, suggestions
@@ -119,10 +119,10 @@ async def avatar(user_id: uuid.UUID, token: str, db: DB) -> Response:
     return FileResponse(storage.open_path(user.avatar_key))
 
 
-@router.get("/tickets/{ticket_id}/technician-suggestions", response_model=list[TechnicianSuggestion])
-async def ticket_suggestions(
-    ticket_id: uuid.UUID, db: DB, user: TicketManagerUser
-) -> list[dict]:
+@router.get(
+    "/tickets/{ticket_id}/technician-suggestions", response_model=list[TechnicianSuggestion]
+)
+async def ticket_suggestions(ticket_id: uuid.UUID, db: DB, user: TicketManagerUser) -> list[dict]:
     """Os 5 técnicos mais indicados para a OS (cidade, distância, agenda, skill, carga)."""
     ticket = await tickets_svc.get_visible_ticket(db, user, ticket_id)
     project = await db.get(Project, ticket.project_id) if ticket.project_id else None
