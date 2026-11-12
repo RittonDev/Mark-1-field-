@@ -11,6 +11,7 @@ import { AssignmentPanel } from "@/components/ticket/AssignmentPanel";
 import { AttachmentsTab } from "@/components/ticket/AttachmentsTab";
 import { CommentsTab } from "@/components/ticket/CommentsTab";
 import { EditTicketDialog } from "@/components/ticket/EditTicketDialog";
+import { ExpensesCard } from "@/components/ticket/ExpensesCard";
 import { FormsCard } from "@/components/ticket/FormsCard";
 import { HistoryTab } from "@/components/ticket/HistoryTab";
 import { SlaCard } from "@/components/ticket/SlaCard";
@@ -220,6 +221,7 @@ export default function TicketDetailPage() {
         <div className="flex flex-col gap-4">
           <AssignmentPanel key={`${ticket.assignee?.id ?? "none"}-${ticket.version}`} ticket={ticket} />
           <SlaCard ticket={ticket} />
+          <ExpensesCard ticket={ticket} />
           <TicketInfo ticket={ticket} />
         </div>
       </div>
