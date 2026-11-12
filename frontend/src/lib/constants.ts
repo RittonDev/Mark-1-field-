@@ -130,6 +130,7 @@ export const TICKET_SOURCE: Record<TicketSource, string> = {
   phone: "Telefone",
   whatsapp: "WhatsApp",
   monitoring: "Monitoramento",
+  portal: "Portal do cliente",
 };
 
 export const ASSET_TYPE: Record<AssetType, string> = {

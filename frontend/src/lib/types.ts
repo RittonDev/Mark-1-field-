@@ -23,7 +23,7 @@ export type TicketStatus =
 export type TicketPriority = "critical" | "high" | "medium" | "low";
 export type Level = "high" | "medium" | "low"; // impacto e urgência
 export type TicketType = "incident" | "service_request" | "preventive" | "installation";
-export type TicketSource = "web" | "mobile" | "email" | "phone" | "whatsapp" | "monitoring";
+export type TicketSource = "web" | "mobile" | "email" | "phone" | "whatsapp" | "monitoring" | "portal";
 export type AssetType =
   | "printer"
   | "desktop"
