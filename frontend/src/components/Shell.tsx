@@ -3,6 +3,7 @@
 import clsx from "clsx";
 import {
   Building2,
+  CalendarClock,
   HardDrive,
   Headset,
   LayoutDashboard,
@@ -30,6 +31,7 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, visible: isStaff },
+  { href: "/dia", label: "Atividades do dia", icon: CalendarClock, visible: isStaff },
   { href: "/chamados", label: "Chamados", icon: Ticket, visible: () => true },
   { href: "/quadro", label: "Quadro", icon: SquareKanban, visible: isStaff },
   { href: "/clientes", label: "Clientes", icon: Building2, visible: isStaff },
