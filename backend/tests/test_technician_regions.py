@@ -151,15 +151,24 @@ async def test_regions_from_history_and_filters(
 
     techs = {t["id"]: t for t in (await client.get(f"{API}/technicians", headers=an)).json()}
     tech = techs[ids["tech"]]
-    assert (tech["base_city"], tech["base_state"], tech["base_source"]) == ("Fortaleza", "CE", "history")
+    assert (tech["base_city"], tech["base_state"], tech["base_source"]) == (
+        "Fortaleza",
+        "CE",
+        "history",
+    )
     assert tech["base_visits"] == 3 and tech["last_visit_at"] is not None
     assert techs[ids["live"]]["base_source"] is None
 
     # UF pela base ou pelo endereço; cidade sem acento e sem diferença de maiúsculas.
-    in_ce = {t["id"] for t in (await client.get(f"{API}/technicians", params={"state": "ce"}, headers=an)).json()}
+    in_ce = {
+        t["id"]
+        for t in (await client.get(f"{API}/technicians", params={"state": "ce"}, headers=an)).json()
+    }
     assert in_ce == {ids["tech"], ids["other"]}
     fortaleza = (
-        await client.get(f"{API}/technicians", params={"state": "CE", "city": "FORTALEZA"}, headers=an)
+        await client.get(
+            f"{API}/technicians", params={"state": "CE", "city": "FORTALEZA"}, headers=an
+        )
     ).json()
     assert [t["id"] for t in fortaleza] == [ids["tech"]]
     sp = (await client.get(f"{API}/technicians", params={"city": "sao  paulo"}, headers=an)).json()
@@ -169,17 +178,27 @@ async def test_regions_from_history_and_filters(
     regions = (await client.get(f"{API}/technicians/regions", headers=an)).json()
     assert [s["state"] for s in regions] == ["CE", "SP"]
     ce = regions[0]
-    assert ce["total"] == 2 and {c["city"] for c in ce["cities"]} == {"Fortaleza", "Caucaia"}
-    active_only = (await client.get(f"{API}/technicians/regions", params={"active": True}, headers=an)).json()
+    # O outro técnico mora em Caucaia, mas já atendeu em Fortaleza: a base (histórico) vence.
+    assert ce["total"] == 2 and ce["cities"] == [{"city": "Fortaleza", "total": 2}]
+    active_only = (
+        await client.get(f"{API}/technicians/regions", params={"active": True}, headers=an)
+    ).json()
     assert [s["state"] for s in active_only] == ["CE"]
 
-    assert (await client.get(f"{API}/technicians/regions", headers=world.tech.headers)).status_code == 403
+    assert (
+        await client.get(f"{API}/technicians/regions", headers=world.tech.headers)
+    ).status_code == 403
 
 
-async def test_list_refreshes_stale_regions(client: AsyncClient, engine: AsyncEngine, world: World) -> None:
+async def test_list_refreshes_stale_regions(
+    client: AsyncClient, engine: AsyncEngine, world: World
+) -> None:
     ids = await _seed(engine, world)
     # Sem conta nenhuma ainda: a lista calcula sozinha antes de responder.
-    techs = {t["id"]: t for t in (await client.get(f"{API}/technicians", headers=world.analyst.headers)).json()}
+    techs = {
+        t["id"]: t
+        for t in (await client.get(f"{API}/technicians", headers=world.analyst.headers)).json()
+    }
     assert techs[ids["tech"]]["base_city"] == "Fortaleza"
 
 
@@ -188,7 +207,9 @@ async def test_nearby_orders_by_history_live_and_home(
 ) -> None:
     ids = await _seed(engine, world)
     an = world.analyst.headers
-    r = await client.get(f"{API}/technicians/nearby", params={"location_id": ids["fort1"]}, headers=an)
+    r = await client.get(
+        f"{API}/technicians/nearby", params={"location_id": ids["fort1"]}, headers=an
+    )
     assert r.status_code == 200, r.text
     body = r.json()
     assert "Loja Aldeota" in body["point"]["label"]
@@ -224,12 +245,18 @@ async def test_nearby_orders_by_history_live_and_home(
     assert ids["inactive"] not in {t["id"] for t in only_active}
     near = (
         await client.get(
-            f"{API}/technicians/nearby", params={"location_id": ids["fort1"], "max_km": 50}, headers=an
+            f"{API}/technicians/nearby",
+            params={"location_id": ids["fort1"], "max_km": 50},
+            headers=an,
         )
     ).json()["technicians"]
     assert ids["inactive"] not in {t["id"] for t in near} and len(near) == 3
     limited = (
-        await client.get(f"{API}/technicians/nearby", params={"location_id": ids["fort1"], "limit": 1}, headers=an)
+        await client.get(
+            f"{API}/technicians/nearby",
+            params={"location_id": ids["fort1"], "limit": 1},
+            headers=an,
+        )
     ).json()["technicians"]
     assert [t["id"] for t in limited] == [ids["tech"]]
 
@@ -239,38 +266,61 @@ async def test_nearby_point_options_and_errors(
 ) -> None:
     ids = await _seed(engine, world)
     an = world.analyst.headers
-    r = await client.get(f"{API}/technicians/nearby", params={"city": "fortaleza", "state": "ce"}, headers=an)
+    r = await client.get(
+        f"{API}/technicians/nearby", params={"city": "fortaleza", "state": "ce"}, headers=an
+    )
     assert r.status_code == 200, r.text
     point = r.json()["point"]
     assert abs(point["latitude"] - (FORT_1[0] + FORT_2[0]) / 2) < 1e-6
-    assert "Fortaleza-CE" in point["label"] or "fortaleza-CE" in point["label"]
+    assert "Fortaleza-CE" in point["label"]
 
     coords = (
         await client.get(
-            f"{API}/technicians/nearby", params={"latitude": SAO_PAULO[0], "longitude": SAO_PAULO[1]}, headers=an
+            f"{API}/technicians/nearby",
+            params={"latitude": SAO_PAULO[0], "longitude": SAO_PAULO[1]},
+            headers=an,
         )
     ).json()["technicians"]
     assert coords[0]["id"] == ids["inactive"] and coords[0]["visits_at_location"] == 0
 
-    r = await client.get(f"{API}/technicians/nearby", params={"city": "Recife", "state": "PE"}, headers=an)
+    r = await client.get(
+        f"{API}/technicians/nearby", params={"city": "Recife", "state": "PE"}, headers=an
+    )
     assert r.status_code == 422
     assert "Não há lojas com coordenadas em Recife-PE para calcular a distância" in r.text
-    r = await client.get(f"{API}/technicians/nearby", params={"location_id": ids["no_coords"]}, headers=an)
+    r = await client.get(
+        f"{API}/technicians/nearby", params={"location_id": ids["no_coords"]}, headers=an
+    )
     assert r.status_code == 422 and "A loja não tem coordenadas" in r.text
     assert (await client.get(f"{API}/technicians/nearby", headers=an)).status_code == 422
-    r = await client.get(f"{API}/technicians/nearby", params={"location_id": str(uuid.uuid4())}, headers=an)
+    r = await client.get(
+        f"{API}/technicians/nearby", params={"location_id": str(uuid.uuid4())}, headers=an
+    )
     assert r.status_code == 404
     r = await client.get(
-        f"{API}/technicians/nearby", params={"location_id": ids["fort1"]}, headers=world.tech.headers
+        f"{API}/technicians/nearby",
+        params={"location_id": ids["fort1"]},
+        headers=world.tech.headers,
     )
     assert r.status_code == 403
 
 
 def test_placeholder_home_is_ignored(tmp_path: Path) -> None:
-    office = {"city": "São Paulo", "state": "São Paulo", "coords": {"latitude": -23.57, "longitude": -46.7}}
+    office = {
+        "city": "São Paulo",
+        "state": "São Paulo",
+        "coords": {"latitude": -23.57, "longitude": -46.7},
+    }
     employees = [{"id": i, "address": office} for i in range(25)]
     employees.append(
-        {"id": 99, "address": {"city": "Fortaleza", "state": "Ceará", "coords": {"latitude": -3.73, "longitude": -38.52}}}
+        {
+            "id": 99,
+            "address": {
+                "city": "Fortaleza",
+                "state": "Ceará",
+                "coords": {"latitude": -3.73, "longitude": -38.52},
+            },
+        }
     )
     path = tmp_path / "colaboradores.json"
     path.write_text(json.dumps(employees, indent=1), encoding="utf-8")
@@ -278,6 +328,14 @@ def test_placeholder_home_is_ignored(tmp_path: Path) -> None:
     placeholders = placeholder_homes(path)
     assert placeholders == {(-23.57, -46.7)}
     cleared = home_of(office, placeholders)
-    assert cleared["placeholder"] is True and cleared["city"] is None and cleared["latitude"] is None
+    assert (
+        cleared["placeholder"] is True and cleared["city"] is None and cleared["latitude"] is None
+    )
     real = home_of(employees[-1]["address"], placeholders)
-    assert real == {"city": "Fortaleza", "state": "CE", "latitude": -3.73, "longitude": -38.52, "placeholder": False}
+    assert real == {
+        "city": "Fortaleza",
+        "state": "CE",
+        "latitude": -3.73,
+        "longitude": -38.52,
+        "placeholder": False,
+    }

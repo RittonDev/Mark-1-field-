@@ -78,6 +78,8 @@ async def nearby_technicians(
     max_km: Annotated[float | None, Query(gt=0)] = None,
 ) -> dict:
     """Técnicos mais próximos de uma loja, de coordenadas ou do centro de uma cidade."""
+    if await regions_svc.refresh_if_stale(db):
+        await db.commit()
     point = await regions_svc.resolve_point(
         db, location_id=location_id, latitude=latitude, longitude=longitude, city=city, state=state
     )
@@ -175,6 +177,8 @@ async def avatar(user_id: uuid.UUID, token: str, db: DB) -> Response:
 )
 async def ticket_suggestions(ticket_id: uuid.UUID, db: DB, user: TicketManagerUser) -> list[dict]:
     """Os 5 técnicos mais indicados para a OS (cidade, distância, agenda, skill, carga)."""
+    if await regions_svc.refresh_if_stale(db):
+        await db.commit()
     ticket = await tickets_svc.get_visible_ticket(db, user, ticket_id)
     project = await db.get(Project, ticket.project_id) if ticket.project_id else None
     return await suggestions.suggest(db, suggestions.target_for(ticket, project))
@@ -190,5 +194,7 @@ async def suggest_for_place(
     longitude: float | None = None,
 ) -> list[dict]:
     """Para quem ainda está abrindo a OS: sugestões só pelo lugar."""
+    if await regions_svc.refresh_if_stale(db):
+        await db.commit()
     coords = (latitude, longitude) if latitude is not None and longitude is not None else None
     return await suggestions.suggest(db, suggestions.Target(city=city, state=state, coords=coords))

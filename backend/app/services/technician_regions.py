@@ -342,10 +342,16 @@ class Point:
     state: str | None = None
 
 
-async def _city_centroid(db: AsyncSession, city: str, uf: str) -> tuple[float, float] | None:
+async def _city_centroid(db: AsyncSession, city: str, uf: str) -> tuple[float, float, str] | None:
+    """Centro das lojas com coordenadas na cidade (e o nome da cidade como está cadastrado)."""
     row = (
         await db.execute(
-            select(func.avg(Location.latitude), func.avg(Location.longitude), func.count()).where(
+            select(
+                func.avg(Location.latitude),
+                func.avg(Location.longitude),
+                func.count(),
+                func.min(Location.city),
+            ).where(
                 fold_sql(Location.city) == fold_text(city),
                 Location.state == uf,
                 Location.latitude.is_not(None),
@@ -355,7 +361,7 @@ async def _city_centroid(db: AsyncSession, city: str, uf: str) -> tuple[float, f
     ).one()
     if not row[2]:
         return None
-    return float(row[0]), float(row[1])
+    return float(row[0]), float(row[1]), row[3]
 
 
 def _location_label(loc: Location) -> str:
@@ -402,8 +408,8 @@ async def resolve_point(
         return Point(
             latitude=centroid[0],
             longitude=centroid[1],
-            label=f"{city.strip()}-{uf} (centro das lojas da cidade)",
-            city=city.strip(),
+            label=f"{centroid[2]}-{uf} (centro das lojas da cidade)",
+            city=centroid[2],
             state=uf,
         )
     raise WorkflowError("Informe a loja, as coordenadas ou a cidade com o estado")
@@ -441,7 +447,7 @@ async def point_for_place(
             return Point(
                 latitude=centroid[0],
                 longitude=centroid[1],
-                label=f"{city}-{uf}",
+                label=f"{centroid[2]}-{uf}",
                 location_id=location.id if location is not None else None,
                 city=city,
                 state=uf,
