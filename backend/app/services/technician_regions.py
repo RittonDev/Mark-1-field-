@@ -350,7 +350,7 @@ async def _city_centroid(db: AsyncSession, city: str, uf: str) -> tuple[float, f
                 func.avg(Location.latitude),
                 func.avg(Location.longitude),
                 func.count(),
-                func.min(Location.city),
+                func.mode().within_group(Location.city),
             ).where(
                 fold_sql(Location.city) == fold_text(city),
                 Location.state == uf,
@@ -384,7 +384,7 @@ async def _store_without_coords(db: AsyncSession, loc: Location) -> Point:
     return Point(
         latitude=centroid[0],
         longitude=centroid[1],
-        label=f"{name} (centro de {centroid[2]}-{uf}, a loja não tem coordenadas)",
+        label=f"{name} (centro de {loc.city.strip()}-{uf}, a loja não tem coordenadas)",
         location_id=loc.id,
         city=loc.city,
         state=uf,

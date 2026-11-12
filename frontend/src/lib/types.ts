@@ -125,6 +125,18 @@ export interface Customer extends TicketStats {
   id: UUID;
   name: string;
   tags?: Tag[];
+  /** Todos os contatos (e-mails e telefones com nome e tipo), como vieram do Field Control. */
+  contacts?: ContactEntry[];
+  /** Endereço da matriz. */
+  address_line?: string | null;
+  district?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip_code?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  logo_url?: string | null;
+  legacy?: CustomerLegacy | null;
   document: string | null;
   email: string | null;
   phone: string | null;
@@ -140,6 +152,8 @@ export interface Location extends TicketStats {
   customer_id: UUID;
   customer: Ref;
   name: string;
+  contacts?: ContactEntry[];
+  legacy?: RecordLegacy | null;
   code: string | null;
   document: string | null;
   address_line: string | null;
@@ -737,6 +751,13 @@ export interface Technician {
   base_source?: "history" | "home" | null;
   base_visits?: number;
   last_visit_at?: ISODate | null;
+  /** Ficha completa: endereço, jornada e serviços que faz. */
+  address_line?: string | null;
+  address_district?: string | null;
+  address_zip?: string | null;
+  work_schedule?: WorkSchedule | null;
+  services?: { id: UUID; name: string }[];
+  legacy?: RecordLegacy | null;
   home_city: string | null;
   home_state: string | null;
   coverage_area: string | null;
@@ -1282,4 +1303,36 @@ export interface NearbyTechnician {
 export interface NearbyResult {
   point: { latitude: number; longitude: number; label: string };
   technicians: NearbyTechnician[];
+}
+
+// ---- Fichas completas (técnico, cliente e loja) ----
+
+export interface ContactEntry {
+  kind: "email" | "phone";
+  value: string;
+  name: string | null;
+  /** work | personal | mobile | home */
+  label: string | null;
+  primary: boolean;
+}
+
+export interface WorkSchedule {
+  start: string | null;
+  end: string | null;
+  break_start: string | null;
+  break_end: string | null;
+}
+
+/** Origem do cadastro (Field Control): id, datas e dados que não têm campo próprio. */
+export interface RecordLegacy {
+  source: string;
+  id: string | number | null;
+  created_at?: ISODate | null;
+  territories?: string[];
+}
+
+export interface CustomerLegacy extends RecordLegacy {
+  rating?: { average: number; last_star: number; last_comment: string | null } | null;
+  service?: { first_at: ISODate | null; last_at: ISODate | null; total: number } | null;
+  attachments?: { url: string; title: string | null; type: string | null }[];
 }
