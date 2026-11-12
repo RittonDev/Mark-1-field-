@@ -13,6 +13,7 @@ import {
   UserX,
 } from "lucide-react";
 import Link from "next/link";
+import { SlaViolationsCard } from "@/components/SlaViolationsCard";
 import { Card, CardHeader, ErrorBox, LoadingBlock, PageHeader, Table, Td, Th } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { PRIORITY, PRIORITY_ORDER, STATUS, STATUS_ORDER } from "@/lib/constants";
@@ -201,6 +202,10 @@ export default function DashboardPage() {
           </Table>
         )}
       </Card>
+
+      <div className="mt-4">
+        <SlaViolationsCard />
+      </div>
     </div>
   );
 }

@@ -43,6 +43,7 @@ interface Filters {
   mine: boolean;
   unassigned: boolean;
   sla_breached: boolean;
+  violation_pending: boolean;
   open_only: boolean;
   order_by: string;
 }
@@ -60,6 +61,7 @@ function initialFilters(params: URLSearchParams): Filters {
     mine: params.get("mine") === "true",
     unassigned: params.get("unassigned") === "true",
     sla_breached: params.get("sla_breached") === "true",
+    violation_pending: params.get("violation_pending") === "true",
     open_only: params.get("open_only") === "true",
     order_by: params.get("order_by") ?? "-updated_at",
   };
@@ -223,6 +225,14 @@ function TicketsView() {
             <span className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2.5 py-1 text-xs text-brand">
               Filtrando por local
               <button type="button" onClick={() => update({ location_id: "" })} aria-label="Remover filtro">
+                <X className="size-3" />
+              </button>
+            </span>
+          ) : null}
+          {filters.violation_pending ? (
+            <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2.5 py-1 text-xs text-amber-700 dark:text-amber-300">
+              Pendentes de justificativa de SLA
+              <button type="button" onClick={() => update({ violation_pending: false })} aria-label="Remover filtro">
                 <X className="size-3" />
               </button>
             </span>

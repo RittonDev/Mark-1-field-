@@ -5,6 +5,7 @@ import { FolderTree, Plus, Save } from "lucide-react";
 import { useMemo, useState } from "react";
 import { PriorityBadge, StatusBadge } from "@/components/badges";
 import { useToast } from "@/components/Toaster";
+import { ViolationReasonsCard } from "@/components/ViolationReasonsCard";
 import {
   Button,
   Card,
@@ -207,7 +208,7 @@ export default function SettingsPage() {
 
   return (
     <div className="mx-auto max-w-6xl">
-      <PageHeader title="Configurações" description="SLA por prioridade, categorias e fluxo de status" />
+      <PageHeader title="Configurações" description="SLA por prioridade, categorias, motivos de violação e fluxo de status" />
 
       <div className="flex flex-col gap-4">
         <Card>
@@ -300,6 +301,8 @@ export default function SettingsPage() {
             </Table>
           )}
         </Card>
+
+        <ViolationReasonsCard />
 
         <Card>
           <CardHeader

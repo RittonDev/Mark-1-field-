@@ -8,6 +8,7 @@ import { Button, Checkbox, Dialog, ErrorBox, Field, Input, Textarea } from "@/co
 import { ApiError, api, errorMessage } from "@/lib/api";
 import { STATUS, TRANSITION_ACTION } from "@/lib/constants";
 import { formatMinutes, fromLocalInput, toLocalInput } from "@/lib/format";
+import { type ViolationValues, ViolationFields } from "./ViolationFields";
 import type { TicketDetail, TicketStatus, TicketTransitionPayload, UUID } from "@/lib/types";
 import { transitionRequirements } from "@/lib/workflow";
 
@@ -21,6 +22,12 @@ export interface TransitionTarget {
   scheduled_end: string | null;
   /** Só o detalhe tem (o quadro não): usado na dica do fim da visita. */
   estimated_minutes?: number | null;
+  /** Só o detalhe tem: ao resolver uma OS que furou o prazo, pede o motivo de cada relógio. */
+  response_breached?: boolean;
+  resolution_breached?: boolean;
+  response_violation_reason?: { id: UUID } | null;
+  resolution_violation_reason?: { id: UUID } | null;
+  violation_note?: string | null;
 }
 
 function currentPosition(): Promise<{ latitude: number; longitude: number } | null> {
@@ -58,6 +65,12 @@ export function TransitionDialog({
   const [end, setEnd] = useState("");
   const [shareLocation, setShareLocation] = useState(req.offersLocation);
   const [localError, setLocalError] = useState<string | null>(null);
+  const askViolation = req.needsResolution && Boolean(ticket.response_breached || ticket.resolution_breached);
+  const [violation, setViolation] = useState<ViolationValues>({
+    response: ticket.response_violation_reason?.id ?? "",
+    resolution: ticket.resolution_violation_reason?.id ?? "",
+    note: ticket.violation_note ?? "",
+  });
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -67,6 +80,11 @@ export function TransitionDialog({
         expected_version: ticket.version,
       };
       if (req.needsResolution) payload.resolution_notes = resolution.trim();
+      if (askViolation) {
+        if (ticket.response_breached) payload.response_violation_reason_id = violation.response || null;
+        if (ticket.resolution_breached) payload.resolution_violation_reason_id = violation.resolution || null;
+        payload.violation_note = violation.note.trim() || null;
+      }
       if (req.needsSchedule) {
         payload.scheduled_start = fromLocalInput(start);
         payload.scheduled_end = fromLocalInput(end);
@@ -166,6 +184,15 @@ export function TransitionDialog({
               autoFocus
             />
           </Field>
+        ) : null}
+        {askViolation ? (
+          <ViolationFields
+            responseBreached={Boolean(ticket.response_breached)}
+            resolutionBreached={Boolean(ticket.resolution_breached)}
+            values={violation}
+            onChange={setViolation}
+            required
+          />
         ) : null}
         <Field label={req.needsNote ? "Motivo" : "Observação"} required={req.needsNote}>
           <Textarea
