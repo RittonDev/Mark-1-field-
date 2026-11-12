@@ -4,12 +4,10 @@ import { api } from "./api";
 import { session } from "./session";
 import type { TokenResponse, User } from "./types";
 
-/** Campos novos do UserOut (primeiro acesso e termo de rastreamento); opcionais até o tipo da web trazê-los. */
-type UserExtras = { must_change_password?: boolean; location_consent_at?: string | null };
+// `?? false` / `?? null`: o usuário guardado no aparelho antes desta versão pode não ter os campos.
+export const mustChangePassword = (user: User | null) => Boolean(user?.must_change_password ?? false);
 
-export const mustChangePassword = (user: User | null) => Boolean(user && (user as User & UserExtras).must_change_password);
-
-export const locationConsentAt = (user: User | null) => (user ? ((user as User & UserExtras).location_consent_at ?? null) : null);
+export const locationConsentAt = (user: User | null) => user?.location_consent_at ?? null;
 
 /** Recarrega o usuário logado (GET /auth/me) e guarda na sessão. */
 export async function refreshMe(): Promise<User> {

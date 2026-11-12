@@ -71,6 +71,10 @@ export interface User {
   team: Ref | null;
   is_active: boolean;
   last_login_at: ISODate | null;
+  // Aceite do termo de rastreamento (LGPD); sem ele o app não inicia a jornada.
+  location_consent_at: ISODate | null;
+  // Senha provisória: o app obriga a criar uma senha nova antes de seguir.
+  must_change_password: boolean;
   created_at: ISODate;
 }
 
