@@ -1,4 +1,4 @@
-# MaxxChamados
+# Maxx Field (MaxxChamados)
 
 Gestão de chamados / ordens de serviço de T.I. com atendimento em campo: manutenção de impressoras,
 computadores, redes, CFTV e telefonia. Referências de produto: **Field Control** (a ferramenta que a
@@ -14,6 +14,15 @@ A ferramenta tem **dois acessos**, e o backend aplica essa separação no login 
 O técnico que tenta entrar pelo navegador (ou o analista pelo app) recebe a orientação de qual acesso usar.
 Os dois canais ficam sincronizados em tempo real.
 
+**Dinâmica do técnico:** o cliente abre a OS; o analista coloca o técnico nela (na própria OS ou pelo
+calendário). Só então ela aparece para ele: o técnico vê **apenas as OS atribuídas a ele**, na agenda do
+app, com as informações do cliente, o escopo e onde subir as evidências. Não existe "fila" nem "assumir"
+para o técnico.
+
+**Acesso:** analistas e gestores entram no navegador com a **conta Microsoft da empresa** (Entra ID,
+domínio `@maxxgroup.com.br`); técnicos entram no app com o e-mail e a senha que cadastraram na
+**homologação**. A gestão redefine senha, troca e-mail, nome e foto dos técnicos em **Técnicos**.
+
 | Camada | Stack |
 |---|---|
 | Frontend | Next.js 16, React 19, TypeScript, Tailwind CSS 4, TanStack Query |
@@ -26,7 +35,7 @@ Os dois canais ficam sincronizados em tempo real.
 - **OS com ciclo de vida padrão de mercado** (ITIL / ServiceNow / Jira SM + estados de campo):
   Novo, Em triagem, Atribuído, Agendado, Em deslocamento, Em atendimento, Aguardando cliente,
   Aguardando fornecedor/peça, Resolvido, Fechado, Cancelado, Reaberto. Ver [docs/STATUS_E_SLA.md](docs/STATUS_E_SLA.md).
-- **Atribuição a analista ou técnico** (com a carga atual de cada um), "assumir OS", grupos técnicos e roteamento por categoria.
+- **Atribuição a analista ou técnico** (com a carga atual de cada um), "assumir OS" (analista), grupos técnicos e roteamento por categoria.
 - **SLA** de 1ª resposta e de solução por prioridade (matriz impacto × urgência), pausado nas pendências, com alertas "em risco" e "violado".
 - **Detalhe da OS:** acompanhamentos públicos e notas internas, histórico/auditoria, apontamento de horas, anexos e fotos, check-in por GPS.
 - **Quadro kanban** com arrastar e soltar, que só aceita transições válidas.
@@ -35,6 +44,12 @@ Os dois canais ficam sincronizados em tempo real.
 - **Tipos de serviço com duração estimada × real** (o "Tipo de OS" do Field Control, inclusive por cliente). A real é medida pelo tempo em atendimento; a tela compara as duas e o catálogo sugere corrigir a estimativa pela mediana do que aconteceu (a estimativa aprende). Agendar só com o início usa a duração estimada.
 - **Atividades do dia** (tela própria, como no Field Control): as visitas do dia agrupadas por técnico, com agendado × início real × término na mesma linha, atraso, check-in com GPS, estimada × real, situações (agendada, atrasada, em deslocamento, em atendimento, pendente, reagendada, concluída) e atualização em tempo real.
 - **Motivo da violação de SLA** (como no Field Control): um motivo por relógio (resposta e solução), escolhido de um cadastro com a responsabilidade (interna, cliente, terceiro). É pedido ao resolver uma OS que furou o prazo, pode ser justificado depois (até com a OS fechada) e vira estatística no dashboard, com a lista das pendentes de justificativa.
+- **Calendário** das OS por técnico (mês, semana e dia por técnico), com filtros de técnico, grupo, cliente, local e cidade. **Conflito de horário:** a API recusa (409) agendar ou atribuir uma OS a um técnico que já tem outra no mesmo horário; quem agenda vê as OS em choque (inclusive como aviso antes de salvar) e pode confirmar mesmo assim. O calendário marca em vermelho os conflitos que existirem.
+- **Mapa ao vivo e rastreamento** (padrão Field Control): o app envia a posição do técnico **só durante a jornada** que ele inicia e encerra, e só depois do aceite do termo (LGPD). O mapa mostra cada técnico com o estado (em atendimento, em deslocamento, disponível, sem sinal, fora da jornada), bateria, velocidade, GPS simulado, a OS em campo com a linha até o destino e o trajeto do dia com os pontos de check-in. Fora da jornada a posição não aparece. Histórico apagado após `TRACKING_RETENTION_DAYS` (90).
+- **Homologação de técnicos:** o analista gera um link (uso único ou reutilizável, com validade) e envia por WhatsApp ou e-mail. O técnico preenche no celular a ficha (dados pessoais, foto, áreas de atuação, skills, região, disponibilidade, veículo) e cria o próprio acesso, aceitando o aviso de privacidade. A ficha chega em **Homologação** (com aviso em tempo real); aprovada, ele entra na base técnica e já acessa o app.
+- **Base técnica (Técnicos):** cadastro direto com senha provisória, edição de e-mail, nome, telefone, grupo e foto, desativação, **redefinição de senha** (encerra as sessões abertas) e **importação da base por planilha** CSV/XLSX, com prévia linha a linha e arquivo com as senhas provisórias.
+- **Importação de locais** por planilha CSV/XLSX (CSV do Excel brasileiro com `;` e acentos): cliente por CNPJ ou nome (criado se não existir), local por código, CNPJ ou nome (atualiza o que existe), coordenadas com vírgula, prévia antes de gravar.
+- **Login Microsoft (Entra ID)** para analistas e gestores, com locatário e domínio da empresa; pode tornar obrigatório (sem senha local) para a gestão.
 - **Cadastros:** clientes (CPF/CNPJ validado, inclusive alfanumérico), locais (com coordenadas), ativos (impressora, desktop, switch, câmera, DVR/NVR…), usuários, grupos, categorias e SLA.
 - **Tempo real:** toda mudança aparece na hora para quem pode ver a OS (web e apps).
 - **Pronto para mobile:** sync offline idempotente, revogação de OS reatribuídas, registro de aparelhos para push. Ver [docs/MOBILE_SYNC.md](docs/MOBILE_SYNC.md).
@@ -152,11 +167,38 @@ powershell -ExecutionPolicy Bypass -File scripts/sync-github.ps1
 - [docs/MOBILE_SYNC.md](docs/MOBILE_SYNC.md): como os apps iOS/Android sincronizam
 - [docs/ARQUITETURA.md](docs/ARQUITETURA.md): camadas, decisões e modelo de dados
 
+## Login Microsoft (Entra ID)
+
+1. Em **entra.microsoft.com** › Identidade › Aplicativos › Registros de aplicativo › **Novo registro**:
+   nome "Maxx Field", contas **somente deste diretório organizacional**, URI de redirecionamento
+   **Web** = `ENTRA_REDIRECT_URI` (em desenvolvimento: `http://localhost:8000/api/v1/auth/microsoft/callback`).
+2. Em **Certificados e segredos**, crie um segredo do cliente e copie o **valor**.
+3. No `.env`: `ENTRA_TENANT_ID` (ID do diretório), `ENTRA_CLIENT_ID` (ID do aplicativo),
+   `ENTRA_CLIENT_SECRET` (o valor) e `WEB_URL`. Reinicie a API: o botão **Entrar com Microsoft** aparece no login.
+4. Cadastre em **Usuários** os analistas e gestores com o e-mail corporativo (só quem está cadastrado
+   entra; o primeiro login vincula a conta Microsoft). Para criar automaticamente no primeiro login, use
+   `ENTRA_AUTO_PROVISION_ROLE=analyst`.
+5. Quando todos estiverem entrando pela Microsoft, ligue `ENTRA_ENFORCE_FOR_STAFF=true`: a gestão do
+   domínio deixa de entrar com senha local. Mantenha uma conta admin fora do domínio para emergência.
+
+A validação confere assinatura, emissor, audiência, **locatário (`tid`)**, nonce, PKCE e o domínio do e-mail.
+O site recebe só um código de uso único (60 s) e troca pelos tokens, que nunca passam pela URL.
+
+## Simular o rastreamento (desenvolvimento)
+
+```bash
+docker compose exec api python -m app.devtools.simulate_tracking --minutos 20
+```
+
+Abre a jornada dos técnicos do seed e envia posições pelo mesmo caminho do app: quem está "em
+deslocamento" anda até o cliente, quem está "em atendimento" fica parado. Não roda em produção.
+
 ## Ainda não feito
 
-- Apps iOS e Android (a API e o contrato de sync estão prontos).
+- Rastreamento em segundo plano no app (exige build de desenvolvimento do Expo, não o Expo Go).
 - Envio real de push: `LogPushProvider` só registra no log; falta ligar o Firebase Cloud Messaging.
 - SLA em horário comercial e feriados (hoje 24x7), SLA por contrato e escalonamento automático.
-- Limite de tentativas de login, recuperação de senha e SSO (Entra ID).
+- Limite de tentativas de login e "esqueci minha senha" por e-mail (hoje a gestão redefine a senha do técnico).
+- Mapa base contratado para produção (`NEXT_PUBLIC_MAP_TILES_URL`; o padrão OpenStreetMap é para uso moderado).
 - Armazenamento de anexos em S3/R2 (hoje em disco, no volume `media`).
 - Abertura de OS por e-mail/WhatsApp, base de conhecimento, pesquisa de satisfação e relatórios exportáveis.

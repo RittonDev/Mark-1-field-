@@ -1,4 +1,4 @@
-# Contrato da API — MaxxChamados
+# Contrato da API — Maxx Field (MaxxChamados)
 
 Base: `http://localhost:8000/api/v1` · JSON · datas em ISO-8601 com fuso (UTC) · IDs são UUID.
 OpenAPI interativo: `http://localhost:8000/docs`.
@@ -14,7 +14,7 @@ Autenticação: `Authorization: Bearer <access_token>`. Erros seguem `{"detail":
 | Administrador | `admin` | tudo | tudo, inclusive usuários e SLA |
 | Supervisor | `supervisor` | tudo | o mesmo do analista + grupos e categorias |
 | Analista | `analyst` | **todas as OS** (interface web) | gestão completa das OS: abrir, editar, atribuir a qualquer técnico ou analista, mudar qualquer status, comentar, apontar horas; cadastrar clientes, locais e ativos |
-| Técnico de campo | `technician` | OS atribuídas a ele, do seu grupo e a fila sem grupo (app mobile) | assumir OS sem responsável, mudar status das OS dele/do grupo, comentar, apontar horas, fotos, cadastrar ativos |
+| Técnico de campo | `technician` | **só as OS atribuídas a ele** (app mobile); grupo ou fila não bastam | mudar status, comentar, apontar horas, fotos e cadastrar ativos **nas OS dele**. Não assume nem se atribui OS: quem coloca o técnico na OS é a gestão |
 | Solicitante | `requester` | OS que abriu | abrir OS, comentar (público), cancelar enquanto nova, aceitar (fechar) ou recusar (reabrir) solução |
 
 ## Status da OS
@@ -52,6 +52,10 @@ Origem: `web`, `mobile`, `email`, `phone`, `whatsapp`, `monitoring`.
 - `POST /auth/refresh` `{refresh_token}` → `TokenResponse`. O canal vai gravado no refresh token: se o
   papel do usuário mudou e não é mais aceito no canal, responde **401** e o cliente faz logout.
 - `GET /auth/me` → `UserOut`
+- `POST /auth/change-password` `{current_password, new_password (min 8)}` → `TokenResponse` (200). Encerra as outras sessões do usuário (`sessions_revoked_at`) e devolve tokens novos para este aparelho. 422 com "Senha atual incorreta" ou "A nova senha precisa ser diferente da atual". `UserOut.must_change_password = true` (senha provisória): o app obriga a trocar antes de seguir.
+- **Sessões encerradas:** tokens emitidos antes de `sessions_revoked_at` (troca/redefinição de senha, desativação) recebem **401** "Sessão encerrada" na API, no refresh e no WebSocket (fecha com 4401). Trate como logout.
+- `GET /auth/providers` → `{microsoft, password_for_staff, microsoft_domains}` (tela de login).
+- **Login Microsoft (Entra ID), só gestão:** o navegador abre `GET /auth/microsoft/start` (302 para a Microsoft, com PKCE). A volta `GET /auth/microsoft/callback` redireciona para `WEB_URL/login/microsoft#code=<código de uso único, 60 s>` ou `WEB_URL/login?sso_error=<not_registered|domain_not_allowed|wrong_tenant|role_not_allowed|inactive|account_mismatch|cancelled|invalid_state|invalid_token|provider_error>`. O site troca o código em `POST /auth/microsoft/exchange` `{code}` → `TokenResponse`. Com `ENTRA_ENFORCE_FOR_STAFF`, analistas e gestores do domínio recebem 403 no login com senha.
 
 ### Meta
 - `GET /meta` → `{statuses:[{value,label,group,color,sla_paused,final,requires_assignee,description}], transitions:{status:[status]}, priorities:[{value,label,code,color}], priority_matrix:[{impact,urgency,priority}], ticket_types, sources, asset_types, roles, impacts, urgencies, access_channels:{web:[role], mobile:[role]}}` (`ticket_types`…`urgencies` como `[{value,label}]`)
@@ -63,7 +67,7 @@ Origem: `web`, `mobile`, `email`, `phone`, `whatsapp`, `monitoring`.
 - `GET /users/{id}` · `PATCH /users/{id}` (admin) `UserUpdate`
 - `GET /teams` → `TeamOut[]` · `POST /teams` · `PATCH /teams/{id}` (admin/supervisor)
 
-`UserOut = {id,name,email,phone,role,job_title,team_id,team:{id,name}|null,is_active,last_login_at,created_at}`
+`UserOut = {id,name,email,phone,role,job_title,team_id,team:{id,name}|null,is_active,last_login_at,location_consent_at,must_change_password,created_at}`
 
 ### Clientes, locais e ativos
 Modelo inspirado no Field Control: o eixo da operação é o **local** (filial com CNPJ próprio), não o cliente.
@@ -154,6 +158,53 @@ Ver `docs/MOBILE_SYNC.md`.
 - `POST /sync/push` `{operations:[{client_op_id, type:"transition"|"comment"|"worklog"|"update", ticket_id, payload, client_timestamp?}]}` → `{server_time, results:[{client_op_id, status:"applied"|"duplicate"|"rejected"|"conflict", error?, ticket?}]}`
 - `POST /devices` `{platform:"ios"|"android"|"web", token, app_version?}` · `DELETE /devices/{token}`
 
+### Rastreamento do técnico (jornada e GPS)
+Coleta só durante a jornada e só depois do aceite do termo (LGPD). Posições fora de uma jornada aberta
+(tolerância de 2 min no relógio do aparelho) ou no futuro são descartadas; o mesmo `(técnico, recorded_at)`
+não duplica (reenvio seguro do lote). Histórico apagado após `TRACKING_RETENTION_DAYS` (90).
+- Técnico: `POST /tracking/consent` (204, grava `location_consent_at`) · `GET /tracking/shift` → `{shift|null}` ·
+  `POST /tracking/shift/start {latitude?, longitude?}` (409 sem o aceite; idempotente) · `POST /tracking/shift/end` ·
+  `POST /tracking/pings {pings:[{recorded_at, latitude, longitude, accuracy_m?, speed_mps?, heading?, battery_pct?, is_mock}]}` (1–500) → `{accepted, discarded}`
+- Gestão: `GET /tracking/live?team_id=` → técnicos com `state` (`offline|no_signal|available|en_route|in_progress`),
+  `on_shift`, `last_position` (null fora da jornada), `current_ticket` (com o local e coordenadas) e `open_tickets`.
+  `no_signal` = em jornada sem posição há mais de 5 min. `GET /tracking/history?user_id=&date=` → pontos do dia e
+  as mudanças de status que o técnico fez, com o GPS de cada uma.
+- As transições de status aceitam `latitude`/`longitude` (check-in); o app deve mandar em deslocamento, atendimento e resolução.
+
+### Calendário e conflito de horário (gestão)
+- `GET /calendar?start=&end=&assignee_id=&assignee_id=&unassigned=&team_id=&customer_id=&location_id=&city=&status=` (até 62 dias)
+  → `[{id, code, title, status, priority, start, end, end_is_estimated, assignee, team, customer, location{id,name,city}, service_type, conflict_with:[id]}]`.
+  Sem fim, a visita dura a estimativa da OS (ou 1 h).
+- `GET /calendar/conflicts?assignee_id=&start=&end=&estimated_minutes=&exclude_id=` → `[ConflictItem]` (prévia antes de salvar).
+- Abrir, editar horário, atribuir e reagendar (transição com `scheduled_start`) feitos pela gestão respondem
+  **409** `{detail, code: "SCHEDULE_CONFLICT", conflicts: [{id, code, title, customer, location, start, end}]}` quando o
+  responsável já tem OS ativa sobreposta. Reenviar com `allow_conflict: true` confirma. A ação do técnico (sync offline) não é barrada.
+
+### Homologação de técnicos
+Público (sem login, pelo link): `GET /public/onboarding/catalog` (áreas, disponibilidade, níveis, sugestões de skill,
+versão do aviso de privacidade) · `GET /public/onboarding/{token}` → `{valid, expires_at}` ·
+`POST /public/onboarding/{token}` (ficha + `password` + `privacy_consent: true` + `photo` em data URL) → `{protocol}`;
+410 se o link expirou, foi cancelado ou já usado; 422 com CPF/UF/e-mail inválido ou e-mail já cadastrado.
+Gestão: `GET|POST /onboarding/invites` (`{label?, reusable, days_valid}`; o `token` só aparece na criação) ·
+`DELETE /onboarding/invites/{id}` · `GET /onboarding/applications?status=` · `GET /onboarding/applications/pending-count` ·
+`GET /onboarding/applications/{id}` (com `photo_url` assinado) · `POST .../{id}/approve {team_id?, job_title?}` → `UserOut`
+(o técnico entra com o e-mail e a senha da ficha) · `POST .../{id}/reject {reason}`.
+
+### Técnicos (gestão do acesso)
+Analistas e gestores, e só sobre usuários técnicos: `GET /technicians?q=&team_id=&active=` (com jornada, OS abertas,
+foto e o perfil da homologação) · `POST /technicians` → `{technician, temporary_password}` · `PATCH /technicians/{id}`
+(nome, e-mail, telefone, grupo, cargo, `is_active`; desativar encerra as sessões) ·
+`POST /technicians/{id}/reset-password` → `{technician, temporary_password}` (encerra as sessões) ·
+`POST|DELETE /technicians/{id}/photo` (JPG/PNG/WebP até 2 MB, tipo conferido pelo conteúdo) ·
+`POST /technicians/import?dry_run=true|false` (CSV/XLSX: nome, email, telefone, grupo, cargo) →
+`{rows:[{line, action: create|update|error, errors}], created, updated, errors, credentials}` (senhas provisórias só na gravação).
+
+### Importação de locais
+`POST /locations/import?dry_run=true|false&customer_id=` (CSV/XLSX) → `{rows, created, updated, errors, customers_created}`.
+Colunas: cliente, cnpj_cliente, codigo, local, cnpj, endereco, bairro, cidade, uf, cep, latitude, longitude, contato,
+telefone, observacoes. Cliente por CNPJ ou nome (criado se não existir); local por código, CNPJ ou nome (atualiza só o
+que veio preenchido). CSV em UTF-8 ou Windows-1252, separado por `;` ou `,`; coordenadas com vírgula decimal.
+
 ## Tempo real (WebSocket)
 
 `ws://localhost:8000/api/v1/ws?token=<access_token>`
@@ -179,7 +230,11 @@ Servidor envia ao conectar `{"type":"hello","user_id":"..."}` e depois um evento
 
 Tipos: `ticket.created`, `ticket.updated`, `ticket.assigned`, `ticket.status_changed`,
 `ticket.comment_added`, `ticket.worklog_added`, `ticket.attachment_added`.
-Cada usuário só recebe eventos de OS que pode ver; notas internas não chegam ao solicitante.
+Cada usuário só recebe eventos de OS que pode ver (o técnico, só das OS atribuídas a ele, inclusive a que
+acabou de sair dele); notas internas não chegam ao solicitante.
+
+Só para a gestão (analistas, supervisores, admin): `technician.location` `{user_id, name, latitude, longitude, recorded_at}`,
+`technician.shift` `{user_id, name, on_shift}` e `onboarding.submitted` `{application_id, name}` (ficha nova na homologação).
 O cliente pode mandar `{"type":"ping"}` e recebe `{"type":"pong"}`.
 Ao receber um evento, recarregue a OS/lista (o evento não carrega o objeto inteiro).
 
