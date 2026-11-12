@@ -193,7 +193,7 @@ function TicketsView() {
       </div>
 
       <div className="mb-4 flex flex-wrap items-end justify-between gap-x-4 gap-y-2 border-b border-line">
-      <div className="flex gap-1 overflow-x-auto">
+      <div className="-mb-px flex gap-1 overflow-x-auto overflow-y-hidden">
         {VIEWS.filter((v) => staff || !v.staffOnly).map((v) => {
           const active = view === v.key;
           return (
@@ -206,7 +206,7 @@ function TicketsView() {
               }`}
             >
               {v.label}
-              {active ? <span className="brand-gradient absolute inset-x-2 -bottom-px h-0.5 rounded-full" /> : null}
+              {active ? <span className="brand-gradient absolute inset-x-2 bottom-0 h-0.5 rounded-full" /> : null}
             </button>
           );
         })}
@@ -365,7 +365,6 @@ function TicketsView() {
                   <Th>Responsável</Th>
                   <Th>SLA</Th>
                   <Th>Atualizado</Th>
-                  <Th className="w-px"><span className="sr-only">Ações</span></Th>
                 </tr>
               </thead>
               <tbody className={query.isFetching ? "opacity-70" : undefined}>
@@ -376,14 +375,21 @@ function TicketsView() {
                     className="cursor-pointer hover:bg-surface-2"
                   >
                     <Td className="max-w-[22rem]">
-                      <Link
-                        href={`/chamados/${t.id}`}
-                        onClick={(e) => e.stopPropagation()}
-                        className="block font-medium text-ink hover:text-brand"
-                      >
-                        <span className="mr-1.5 font-mono text-xs text-ink-muted">{t.code}</span>
-                        {t.title}
-                      </Link>
+                      <div className="flex items-start gap-1">
+                        <Link
+                          href={`/chamados/${t.id}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="block min-w-0 flex-1 font-medium text-ink hover:text-brand"
+                        >
+                          <span className="mr-1.5 font-mono text-xs text-ink-muted">{t.code}</span>
+                          {t.title}
+                        </Link>
+                        {manager ? (
+                          <span className="-my-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                            <QuickEditButton ticketId={t.id} code={t.code} />
+                          </span>
+                        ) : null}
+                      </div>
                       {t.category ? (
                         <span className="mt-0.5 block truncate text-xs text-ink-muted">{t.category.full_name}</span>
                       ) : null}
@@ -404,11 +410,28 @@ function TicketsView() {
                       ) : null}
                     </Td>
                     <Td>
-                      {t.assignee ? (
-                        <span className="whitespace-nowrap">{t.assignee.name}</span>
-                      ) : (
-                        <span className="text-xs text-amber-600 dark:text-amber-400">Sem responsável</span>
-                      )}
+                      <div className="flex items-center gap-1">
+                        {t.assignee ? (
+                          <span className="whitespace-nowrap">{t.assignee.name}</span>
+                        ) : (
+                          <span className="text-xs text-amber-600 dark:text-amber-400">Sem responsável</span>
+                        )}
+                        {manager && t.assignee?.id !== user?.id && !STATUS[t.status].final ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              take.mutate(t);
+                            }}
+                            disabled={take.isPending}
+                            className="-my-1 shrink-0 rounded-md p-1 text-ink-muted hover:bg-surface-2 hover:text-brand disabled:opacity-50"
+                            aria-label={`Puxar ${t.code} para mim`}
+                            title={t.assignee ? `Puxar de ${t.assignee.name} para mim` : "Assumir esta OS"}
+                          >
+                            <Hand className="size-3.5" />
+                          </button>
+                        ) : null}
+                      </div>
                       {t.team ? <span className="block text-xs text-ink-muted">{t.team.name}</span> : null}
                     </Td>
                     <Td>
@@ -418,23 +441,6 @@ function TicketsView() {
                       </div>
                     </Td>
                     <Td className="text-xs whitespace-nowrap text-ink-muted">{formatShort(t.updated_at)}</Td>
-                    <Td className="w-px">
-                      <div className="flex items-center justify-end gap-0.5" onClick={(e) => e.stopPropagation()}>
-                        {manager && t.assignee?.id !== user?.id && !STATUS[t.status].final ? (
-                          <button
-                            type="button"
-                            onClick={() => take.mutate(t)}
-                            disabled={take.isPending}
-                            className="rounded-md p-1.5 text-ink-muted hover:bg-surface-2 hover:text-brand disabled:opacity-50"
-                            aria-label={`Puxar ${t.code} para mim`}
-                            title={t.assignee ? `Puxar de ${t.assignee.name} para mim` : "Assumir"}
-                          >
-                            <Hand className="size-4" />
-                          </button>
-                        ) : null}
-                        {manager ? <QuickEditButton ticketId={t.id} code={t.code} /> : null}
-                      </div>
-                    </Td>
                   </tr>
                 ))}
               </tbody>
