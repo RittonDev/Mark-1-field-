@@ -671,3 +671,37 @@ async def test_day_activities(client: AsyncClient, world: World) -> None:
     # Técnico de campo continua restrito ao próprio escopo.
     other = (await client.get(f"{API}/activities/day", headers=world.tech_other.headers)).json()
     assert other["activities"] == []
+
+
+async def test_day_activities_carry_over_and_rescheduled(
+    client: AsyncClient, world: World, engine: AsyncEngine
+) -> None:
+    tech_h, tech_id = world.tech.headers, str(world.tech.user.id)
+
+    # Em atendimento desde ontem: aparece hoje (está em campo) com o início real de ontem.
+    b = await create(client, world, title="Em campo desde ontem", assignee_id=tech_id)
+    b = await transition(client, tech_h, b, "en_route")
+    b = await transition(client, tech_h, b, "in_progress")
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "UPDATE ticket_events SET created_at = created_at - interval '1 day' "
+                "WHERE ticket_id = :i"
+            ),
+            {"i": uuid.UUID(b["id"])},
+        )
+
+    # Atendida hoje e remarcada para outro dia: "reagendada", não "na fila".
+    c = await create(client, world, title="Nova visita", assignee_id=tech_id)
+    c = await transition(client, tech_h, c, "in_progress")
+    c = await transition(
+        client, tech_h, c, "scheduled", scheduled_start="2030-01-20T10:00:00-03:00"
+    )
+
+    today = (await client.get(f"{API}/activities/day", headers=world.analyst.headers)).json()
+    by_id = {x["ticket"]["id"]: x for x in today["activities"]}
+    assert by_id[b["id"]]["state"] == "in_progress"
+    assert by_id[b["id"]]["started_at"] is not None
+    assert by_id[b["id"]]["arrived_at"] is None  # a chegada não foi hoje
+    assert by_id[c["id"]]["state"] == "rescheduled"
+    assert today["summary"]["rescheduled"] == 1

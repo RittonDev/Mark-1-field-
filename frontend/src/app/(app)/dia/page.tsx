@@ -19,6 +19,7 @@ const STATE: Record<ActivityState, { label: string; className: string }> = {
   en_route: { label: "Em deslocamento", className: "bg-sky-100 text-sky-800 dark:bg-sky-500/15 dark:text-sky-300" },
   in_progress: { label: "Em atendimento", className: "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300" },
   on_hold: { label: "Pendente", className: "bg-purple-100 text-purple-800 dark:bg-purple-500/15 dark:text-purple-300" },
+  rescheduled: { label: "Reagendada", className: "bg-indigo-100 text-indigo-800 dark:bg-indigo-500/15 dark:text-indigo-300" },
   done: { label: "Concluída", className: "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300" },
   pending: { label: "Na fila", className: "bg-slate-100 text-slate-700 dark:bg-slate-500/15 dark:text-slate-300" },
 };
@@ -29,6 +30,7 @@ const SUMMARY_ORDER: { key: keyof DaySummary; label: string; state?: ActivitySta
   { key: "en_route", label: "Em deslocamento", state: "en_route" },
   { key: "in_progress", label: "Em atendimento", state: "in_progress" },
   { key: "on_hold", label: "Pendentes", state: "on_hold" },
+  { key: "rescheduled", label: "Reagendadas", state: "rescheduled" },
   { key: "done", label: "Concluídas", state: "done" },
   { key: "unassigned", label: "Sem técnico" },
 ];
@@ -49,6 +51,14 @@ function longDate(day: string): string {
   );
 }
 
+/** Hora; com a data quando não é do dia exibido (ex.: OS em campo desde ontem). */
+function when(value: string | null, day: string): string {
+  if (!value) return "—";
+  const localDay = new Intl.DateTimeFormat("en-CA", { timeZone: OPERATION_TZ }).format(new Date(value));
+  if (localDay === day) return formatTime(value);
+  return `${localDay.slice(8, 10)}/${localDay.slice(5, 7)} ${formatTime(value)}`;
+}
+
 function Delay({ minutes }: { minutes: number | null }) {
   if (minutes === null || Math.abs(minutes) < 5) return null;
   const late = minutes > 0;
@@ -59,7 +69,7 @@ function Delay({ minutes }: { minutes: number | null }) {
   );
 }
 
-function ActivityRow({ a }: { a: Activity }) {
+function ActivityRow({ a, day }: { a: Activity; day: string }) {
   const t = a.ticket;
   const loc = t.location;
   const ratio = a.estimated_minutes && a.actual_minutes > 0 ? a.actual_minutes / a.estimated_minutes : null;
@@ -73,7 +83,7 @@ function ActivityRow({ a }: { a: Activity }) {
       <td className="px-3 py-2.5 text-sm whitespace-nowrap">
         {a.scheduled_start ? (
           <>
-            {formatTime(a.scheduled_start)}
+            {when(a.scheduled_start, day)}
             {a.scheduled_end ? <span className="text-ink-muted">–{formatTime(a.scheduled_end)}</span> : null}
           </>
         ) : (
@@ -83,20 +93,20 @@ function ActivityRow({ a }: { a: Activity }) {
       <td className="px-3 py-2.5 text-sm whitespace-nowrap">
         {a.started_at ? (
           <>
-            {formatTime(a.started_at)}
+            {when(a.started_at, day)}
             <Delay minutes={a.start_delay_minutes} />
             {a.start_has_gps ? (
               <Navigation className="ml-1 inline size-3 text-brand" aria-label="Check-in com GPS" />
             ) : null}
             {a.arrived_at && a.arrived_at !== a.started_at ? (
-              <span className="block text-xs text-ink-muted">chegou {formatTime(a.arrived_at)}</span>
+              <span className="block text-xs text-ink-muted">chegou {when(a.arrived_at, day)}</span>
             ) : null}
           </>
         ) : (
           <span className="text-ink-muted">—</span>
         )}
       </td>
-      <td className="px-3 py-2.5 text-sm whitespace-nowrap">{a.finished_at ? formatTime(a.finished_at) : <span className="text-ink-muted">—</span>}</td>
+      <td className="px-3 py-2.5 text-sm whitespace-nowrap">{a.finished_at ? when(a.finished_at, day) : <span className="text-ink-muted">—</span>}</td>
       <td className="px-3 py-2.5">
         <Link href={`/chamados/${t.id}`} className="group">
           <span className="font-mono text-xs text-ink-muted">{t.code}</span>{" "}
@@ -249,7 +259,7 @@ export default function DayPage() {
                     </thead>
                     <tbody>
                       {group.items.map((a) => (
-                        <ActivityRow key={a.ticket.id} a={a} />
+                        <ActivityRow key={a.ticket.id} a={a} day={day} />
                       ))}
                     </tbody>
                   </table>

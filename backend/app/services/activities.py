@@ -13,7 +13,7 @@ from collections import Counter
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -66,6 +66,8 @@ def _state(
         return "on_hold"
     if ticket.status in (S.RESOLVED, S.CLOSED):
         return "done"
+    if ticket.status == S.SCHEDULED and not _in_day(ticket.scheduled_start, day_start, day_end):
+        return "rescheduled"
     if _in_day(ticket.scheduled_start, day_start, day_end):
         if started is None and ticket.scheduled_start < now:  # type: ignore[operator]
             return "late"
@@ -123,6 +125,26 @@ async def day_activities(
         for ev in rows:
             events[ev.ticket_id].append(ev)
 
+    # OS em campo desde antes do dia: quando a etapa atual começou (para não ficar sem início).
+    carried: dict[uuid.UUID, datetime] = {}
+    missing = [
+        t.id
+        for t in tickets
+        if t.status in FIELD_NOW
+        and not any(e.to_value in (S.EN_ROUTE.value, S.IN_PROGRESS.value) for e in events[t.id])
+    ]
+    if missing:
+        rows = await db.execute(
+            select(TicketEvent.ticket_id, func.max(TicketEvent.created_at))
+            .where(
+                TicketEvent.ticket_id.in_(missing),
+                TicketEvent.event_type == TicketEventType.STATUS_CHANGED,
+                TicketEvent.to_value.in_((S.EN_ROUTE.value, S.IN_PROGRESS.value)),
+            )
+            .group_by(TicketEvent.ticket_id)
+        )
+        carried = dict(rows.all())
+
     activities: list[Activity] = []
     for t in tickets:
         evs = events[t.id]
@@ -131,7 +153,7 @@ async def day_activities(
         )
         arrive_ev = next((e for e in evs if e.to_value == S.IN_PROGRESS.value), None)
         finish_ev = next((e for e in reversed(evs) if e.to_value == S.RESOLVED.value), None)
-        started = start_ev.created_at if start_ev else None
+        started = start_ev.created_at if start_ev else carried.get(t.id)
         delay = None
         if started is not None and _in_day(t.scheduled_start, day_start, day_end):
             delay = int((started - t.scheduled_start).total_seconds() // 60)  # type: ignore[operator]
@@ -178,6 +200,7 @@ async def day_activities(
         en_route=counts["en_route"],
         in_progress=counts["in_progress"],
         on_hold=counts["on_hold"],
+        rescheduled=counts["rescheduled"],
         done=counts["done"],
         pending=counts["pending"],
         unassigned=sum(1 for a in activities if a.ticket.assignee is None),

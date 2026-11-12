@@ -409,7 +409,15 @@ export interface TicketTransitionPayload {
 }
 
 /** Atividades do dia (GET /activities/day): o previsto e o realizado na mesma linha. */
-export type ActivityState = "scheduled" | "late" | "en_route" | "in_progress" | "on_hold" | "done" | "pending";
+export type ActivityState =
+  | "scheduled"
+  | "late"
+  | "en_route"
+  | "in_progress"
+  | "on_hold"
+  | "rescheduled"
+  | "done"
+  | "pending";
 
 export interface Activity {
   ticket: TicketListItem;
@@ -433,6 +441,7 @@ export interface DaySummary {
   en_route: number;
   in_progress: number;
   on_hold: number;
+  rescheduled: number;
   done: number;
   pending: number;
   unassigned: number;

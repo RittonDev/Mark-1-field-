@@ -11,6 +11,7 @@ ActivityState = Literal[
     "en_route",  # em deslocamento
     "in_progress",  # em atendimento
     "on_hold",  # pendente (cliente ou fornecedor/peça)
+    "rescheduled",  # teve atividade no dia, mas a visita foi remarcada para outro dia
     "done",  # concluída no dia
     "pending",  # no dia por outro motivo (ex.: voltou para a fila)
 ]
@@ -23,7 +24,8 @@ class Activity(BaseModel):
     state: ActivityState
     scheduled_start: dt.datetime | None
     scheduled_end: dt.datetime | None
-    started_at: dt.datetime | None  # 1º deslocamento ou atendimento no dia
+    # 1º deslocamento ou atendimento no dia; para OS em campo desde antes, quando a etapa começou.
+    started_at: dt.datetime | None
     arrived_at: dt.datetime | None  # 1º "Em atendimento" no dia
     finished_at: dt.datetime | None  # resolvida no dia
     start_delay_minutes: int | None  # início real - agendado (positivo = atrasou)
@@ -40,6 +42,7 @@ class DaySummary(BaseModel):
     en_route: int
     in_progress: int
     on_hold: int
+    rescheduled: int
     done: int
     pending: int
     unassigned: int
