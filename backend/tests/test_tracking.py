@@ -144,7 +144,10 @@ async def test_forced_password_change(
         json={"current_password": "senha-teste-123", "new_password": "nova-senha-123"},
         headers=h,
     )
-    assert r.status_code == 204
+    # Devolve tokens novos (as outras sessões são encerradas).
+    assert r.status_code == 200
+    assert r.json()["user"]["must_change_password"] is False
+    assert r.json()["access_token"]
     r = await client.post(
         f"{API}/auth/login",
         json={"email": "tecnico@teste.com.br", "password": "nova-senha-123", "channel": "mobile"},

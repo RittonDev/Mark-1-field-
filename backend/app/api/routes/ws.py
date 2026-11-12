@@ -26,8 +26,8 @@ async def websocket_endpoint(websocket: WebSocket, token: str | None = None) -> 
 
     async with SessionLocal() as db:
         user = await db.get(User, user_id)
-    if user is None or not user.is_active:
-        await websocket.close(code=AUTH_FAILED, reason="usuário inativo")
+    if user is None or not user.is_active or user.token_revoked(payload):
+        await websocket.close(code=AUTH_FAILED, reason="sessão encerrada")
         return
 
     conn = Connection(

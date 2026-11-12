@@ -1,10 +1,10 @@
 import uuid
 
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import func, select
 
 from app.api.deps import DB, CurrentUser
-from app.core.access import CHANNEL_DENIED_MESSAGE, channel_allows
+from app.core.access import CHANNEL_DENIED_MESSAGE, channel_allows, home_channel
 from app.core.config import settings
 from app.core.security import (
     InvalidToken,
@@ -51,7 +51,7 @@ async def refresh(body: RefreshRequest, db: DB) -> TokenResponse:
         user = await db.get(User, uuid.UUID(payload["sub"]))
     except (InvalidToken, KeyError, ValueError) as exc:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Sessão expirada") from exc
-    if user is None or not user.is_active:
+    if user is None or not user.is_active or user.token_revoked(payload):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Sessão expirada")
     # Se o papel mudou (ex.: técnico virou analista), a sessão no canal antigo termina.
     channel = payload.get("ch")
@@ -65,9 +65,12 @@ async def me(user: CurrentUser) -> User:
     return user
 
 
-@router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
-async def change_password(body: ChangePasswordRequest, db: DB, user: CurrentUser) -> Response:
-    """Troca a senha; obrigatória no primeiro acesso de quem recebeu senha provisória."""
+@router.post("/change-password", response_model=TokenResponse)
+async def change_password(body: ChangePasswordRequest, db: DB, user: CurrentUser) -> TokenResponse:
+    """Troca a senha (obrigatória no primeiro acesso com senha provisória).
+
+    Encerra as outras sessões do usuário e devolve tokens novos para este aparelho.
+    """
     if not verify_password(body.current_password, user.password_hash):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Senha atual incorreta")
     if body.new_password == body.current_password:
@@ -76,5 +79,6 @@ async def change_password(body: ChangePasswordRequest, db: DB, user: CurrentUser
         )
     user.password_hash = hash_password(body.new_password)
     user.must_change_password = False
+    user.sessions_revoked_at = utcnow()
     await db.commit()
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return _tokens(user, home_channel(user.role))

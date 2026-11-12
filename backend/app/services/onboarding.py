@@ -26,8 +26,6 @@ from app.services.errors import NotFound, WorkflowError
 from app.services.realtime import bus
 
 MAX_PHOTO_BYTES = 2 * 1024 * 1024
-# Assinaturas dos formatos aceitos: o tipo vem do conteúdo, não do que o navegador diz.
-_IMAGE_MAGIC = {b"\xff\xd8\xff": "jpg", b"\x89PNG\r\n\x1a\n": "png"}
 
 
 class InviteUnavailable(Exception):
@@ -86,12 +84,10 @@ def _decode_photo(data_url: str) -> tuple[bytes, str]:
         raise WorkflowError("Foto inválida") from exc
     if len(raw) > MAX_PHOTO_BYTES:
         raise WorkflowError("Foto maior que 2 MB")
-    for magic, ext in _IMAGE_MAGIC.items():
-        if raw.startswith(magic):
-            return raw, ext
-    if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
-        return raw, "webp"
-    raise WorkflowError("Foto inválida: envie uma imagem JPG, PNG ou WebP")
+    ext = storage.image_extension(raw)
+    if ext is None:
+        raise WorkflowError("Foto inválida: envie uma imagem JPG, PNG ou WebP")
+    return raw, ext
 
 
 async def email_taken(db: AsyncSession, email: str, exclude_id: uuid.UUID | None = None) -> bool:

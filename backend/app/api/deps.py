@@ -37,6 +37,8 @@ async def get_current_user(
     user = await db.get(User, user_id)
     if user is None or not user.is_active:
         raise _unauthorized("Usuário inativo ou inexistente")
+    if user.token_revoked(payload):
+        raise _unauthorized("Sessão encerrada. Entre novamente.")
     return user
 
 

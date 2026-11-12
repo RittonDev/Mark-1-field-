@@ -61,3 +61,14 @@ async def save_bytes(folder: str, extension: str, data: bytes) -> str:
     await run_in_threadpool(dest.parent.mkdir, parents=True, exist_ok=True)
     await run_in_threadpool(dest.write_bytes, data)
     return key
+
+
+def image_extension(data: bytes) -> str | None:
+    """Tipo real da imagem pelo conteúdo (não pelo nome nem pelo que o navegador diz)."""
+    if data.startswith(b"\xff\xd8\xff"):
+        return "jpg"
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
+    return None

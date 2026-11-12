@@ -46,8 +46,16 @@ class User(UUIDPrimaryKey, Timestamps, Base):
     )
     # Foto do perfil (chave no armazenamento de arquivos).
     avatar_key: Mapped[str | None] = mapped_column(String(255))
+    # Tokens emitidos antes disto deixam de valer (troca/redefinição de senha, desativação).
+    sessions_revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     team: Mapped[Team | None] = relationship(lazy="selectin")
+
+    def token_revoked(self, payload: dict) -> bool:
+        """Token emitido antes da última revogação de sessões (iat em segundos inteiros)."""
+        if self.sessions_revoked_at is None:
+            return False
+        return int(payload.get("iat", 0)) < int(self.sessions_revoked_at.timestamp())
 
     @property
     def is_staff(self) -> bool:

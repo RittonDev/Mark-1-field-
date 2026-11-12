@@ -30,3 +30,8 @@ def channel_allows(channel: str | None, role: UserRole) -> bool:
 
 def channel_metadata() -> dict[str, list[str]]:
     return {channel: sorted(r.value for r in roles) for channel, roles in CHANNEL_ROLES.items()}
+
+
+def home_channel(role: UserRole) -> Channel:
+    """Canal de cada papel (cada papel usa um só): técnico no celular, o resto na web."""
+    return "mobile" if role in CHANNEL_ROLES["mobile"] else "web"
