@@ -15,7 +15,6 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import ApplicationStatus, UserRole
-from app.db.base import utcnow
 from app.models import (
     Location,
     Project,
@@ -190,8 +189,10 @@ async def suggest(db: AsyncSession, target: Target, limit: int = 5) -> list[dict
         score = 0.0
         reasons: list[str] = []
         p = prox.get(tech.id)
-        base_here = bool(city) and norm(tech.base_city) == city and (
-            not state or (tech.base_state or "").upper() == state
+        base_here = (
+            bool(city)
+            and norm(tech.base_city) == city
+            and (not state or (tech.base_state or "").upper() == state)
         )
         if p is not None:
             same_state = not state or (tech.base_state or "").upper() == state
@@ -205,7 +206,9 @@ async def suggest(db: AsyncSession, target: Target, limit: int = 5) -> list[dict
         if base_here:
             score += 20
             if p is None and tech.base_source == "history":
-                reasons.append(f"Base em {tech.base_city}-{tech.base_state} ({tech.base_visits} OS)")
+                reasons.append(
+                    f"Base em {tech.base_city}-{tech.base_state} ({tech.base_visits} OS)"
+                )
         home = norm(tech.home_city)
         if city and home == city:
             score += 20
@@ -213,9 +216,14 @@ async def suggest(db: AsyncSession, target: Target, limit: int = 5) -> list[dict
         elif city and city in norm(tech.coverage_area):
             score += 15
             reasons.append(f"Atende {target.city}")
-        elif not base_here and state and state in (
-            (tech.base_state or "").upper(),
-            (tech.home_state or "").upper(),
+        elif (
+            not base_here
+            and state
+            and state
+            in (
+                (tech.base_state or "").upper(),
+                (tech.home_state or "").upper(),
+            )
         ):
             score += 5
             reasons.append(f"Mesmo estado ({state})")

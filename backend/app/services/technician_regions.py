@@ -53,7 +53,7 @@ _FOLD_TO = "AAAAAaaaaaEEEEeeeeIIIIiiiiOOOOOoooooUUUUuuuuCcNn"
 
 
 def fold_text(value: str | None) -> str:
-    """"São  Paulo" -> "sao paulo" (sem acento, minúsculo, espaços normalizados)."""
+    """ "São  Paulo" -> "sao paulo" (sem acento, minúsculo, espaços normalizados)."""
     text = unicodedata.normalize("NFKD", value or "").encode("ascii", "ignore").decode()
     return " ".join(text.lower().split())
 
@@ -61,7 +61,9 @@ def fold_text(value: str | None) -> str:
 def fold_sql(column: ColumnElement) -> ColumnElement:
     """O mesmo de fold_text, no banco (cidade sem acento e sem diferença de maiúsculas)."""
     return func.lower(
-        func.regexp_replace(func.trim(func.translate(column, _FOLD_FROM, _FOLD_TO)), r"\s+", " ", "g")
+        func.regexp_replace(
+            func.trim(func.translate(column, _FOLD_FROM, _FOLD_TO)), r"\s+", " ", "g"
+        )
     )
 
 
@@ -190,8 +192,7 @@ async def refresh_bases(db: AsyncSession, now: datetime | None = None) -> dict[s
         func.max(per_city.c.last_at).over(partition_by=per_city.c.user_id).label("last_any"),
     ).subquery("ranked")
     history = {
-        row.user_id: row
-        for row in (await db.execute(select(ranked).where(ranked.c.rk == 1))).all()
+        row.user_id: row for row in (await db.execute(select(ranked).where(ranked.c.rk == 1))).all()
     }
 
     techs = (
@@ -430,7 +431,9 @@ async def point_for_place(
             )
         city, state = location.city, location.state
     if latitude is not None and longitude is not None:
-        return Point(latitude=latitude, longitude=longitude, label="Coordenadas", city=city, state=state)
+        return Point(
+            latitude=latitude, longitude=longitude, label="Coordenadas", city=city, state=state
+        )
     if city and state:
         uf = state.strip().upper()
         centroid = await _city_centroid(db, city, uf)
@@ -485,7 +488,10 @@ async def proximity(
     )
     has_coords = and_(Location.latitude.is_not(None), Location.longitude.is_not(None))
     distance = haversine_sql(
-        literal(point.latitude, Float), literal(point.longitude, Float), Location.latitude, Location.longitude
+        literal(point.latitude, Float),
+        literal(point.longitude, Float),
+        Location.latitude,
+        Location.longitude,
     )
     same_loc = per_loc.c.location_id == point.location_id if point.location_id else false()
     same_city = (
@@ -543,7 +549,11 @@ async def proximity(
             p.live_km = km_between((ping.latitude, ping.longitude), target)
         candidates = [
             (km, kind)
-            for km, kind in ((p.store_km, "store_history"), (p.home_km, "home"), (p.live_km, "live"))
+            for km, kind in (
+                (p.store_km, "store_history"),
+                (p.home_km, "home"),
+                (p.live_km, "live"),
+            )
             if km is not None
         ]
         if candidates:
@@ -553,7 +563,7 @@ async def proximity(
 
 
 def proximity_reasons(p: Proximity, user: User, *, include_base: bool = True) -> list[str]:
-    """Por que este técnico: atendeu a loja, está perto agora, já atendeu perto, mora perto, base."""
+    """Por que este técnico: atendeu a loja, está perto agora, atendeu perto, mora perto, base."""
     reasons: list[str] = []
     if p.visits_at_location:
         last = _date_br(p.last_visit_at_location)

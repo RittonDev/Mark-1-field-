@@ -284,7 +284,13 @@ def home_of(address: dict[str, Any], placeholders: set[tuple[float, float]]) -> 
     """Cidade, UF e coordenadas do endereço do técnico (vazio quando é o endereço padrão)."""
     point = _coords(address)
     if point is not None and point in placeholders:
-        return {"city": None, "state": None, "latitude": None, "longitude": None, "placeholder": True}
+        return {
+            "city": None,
+            "state": None,
+            "latitude": None,
+            "longitude": None,
+            "placeholder": True,
+        }
     return {
         "city": clip(address.get("city"), 120),
         "state": to_uf(address.get("state")),

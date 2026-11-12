@@ -30,9 +30,7 @@ def upgrade() -> None:
         sa.Column("base_visits", sa.Integer(), server_default="0", nullable=False),
     )
     op.add_column("users", sa.Column("last_visit_at", sa.DateTime(timezone=True), nullable=True))
-    op.add_column(
-        "users", sa.Column("base_updated_at", sa.DateTime(timezone=True), nullable=True)
-    )
+    op.add_column("users", sa.Column("base_updated_at", sa.DateTime(timezone=True), nullable=True))
     op.create_index("ix_users_base_state_city", "users", ["base_state", "base_city"])
 
 

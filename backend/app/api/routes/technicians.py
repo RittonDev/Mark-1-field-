@@ -49,7 +49,9 @@ async def list_technicians(
 
 
 @router.get("/technicians/regions", response_model=list[RegionState])
-async def technician_regions(db: DB, _: TicketManagerUser, active: bool | None = None) -> list[dict]:
+async def technician_regions(
+    db: DB, _: TicketManagerUser, active: bool | None = None
+) -> list[dict]:
     """Estados e cidades com técnicos (região: a base pelo histórico, senão o endereço)."""
     return await regions_svc.regions(db, active)
 
