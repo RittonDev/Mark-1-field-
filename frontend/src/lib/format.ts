@@ -81,3 +81,11 @@ export function formatDocument(value: string | null | undefined): string {
   }
   return value;
 }
+
+const timeFmt = new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" });
+
+/** Hora local, ex.: "14:05". */
+export function formatTime(value: string | null | undefined): string {
+  if (!value) return "—";
+  return timeFmt.format(new Date(value));
+}

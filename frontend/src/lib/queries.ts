@@ -6,6 +6,7 @@ import type {
   AssignableUser,
   Category,
   Customer,
+  DayActivities,
   Location,
   Page,
   ServiceType,
@@ -64,6 +65,18 @@ export function useLocationSearch(params: {
         page,
         page_size: pageSize,
       }),
+    placeholderData: (prev) => prev,
+  });
+}
+
+/** Atividades do dia. Chave sob ["tickets"]: o tempo real (WebSocket) já invalida. */
+export function useDayActivities(day: string | null, teamId?: UUID | null) {
+  return useQuery({
+    queryKey: ["tickets", "day", day, teamId ?? ""],
+    queryFn: () => api.get<DayActivities>("/activities/day", { date: day ?? undefined, team_id: teamId ?? undefined }),
+    enabled: Boolean(day),
+    // "Atrasada" depende do relógio: revalida a cada minuto mesmo sem eventos.
+    refetchInterval: 60_000,
     placeholderData: (prev) => prev,
   });
 }
