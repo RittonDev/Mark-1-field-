@@ -6,6 +6,7 @@
 // e uma operação rejeitada some sozinha no próximo rebase.
 
 import { SELF_ASSIGN_ROLES, STATUS, TRANSITIONS, UNTOUCHED_STATUSES } from "./constants";
+import { actualSeconds, defaultEnd } from "./duration";
 import type { LocalTicket, OutboxOp } from "./syncTypes";
 import type { TicketDetail, TicketStatus, User, UserRef } from "./types";
 import { userCanTransition } from "./workflow";
@@ -41,9 +42,21 @@ function applyTransition(ticket: TicketDetail, op: Extract<OutboxOp, { type: "tr
 
   const at = op.client_timestamp;
   const t: TicketDetail = { ...ticket };
-  if (p.scheduled_start) t.scheduled_start = p.scheduled_start;
-  if (p.scheduled_end) t.scheduled_end = p.scheduled_end;
+  if (p.scheduled_start) {
+    t.scheduled_start = p.scheduled_start;
+    // Novo início sem fim: o fim vem da estimativa, e não sobra o de um agendamento antigo.
+    t.scheduled_end = defaultEnd(p.scheduled_start, p.scheduled_end, t.estimated_minutes);
+  } else if (p.scheduled_end) {
+    t.scheduled_end = p.scheduled_end;
+  }
   if (STATUS[to].requiresAssignee && !t.assignee && selfAssigns(user)) t.assignee = userRef(user);
+
+  // Duração real: soma os trechos em "Em atendimento" (tickets.py::_change_status).
+  if (from === "in_progress" && t.work_started_at) {
+    t.work_seconds = actualSeconds(t, new Date(at).getTime());
+    t.work_started_at = null;
+  }
+  if (to === "in_progress") t.work_started_at = at;
 
   // SLA: pausa nas pendências e, ao retomar, empurra os prazos ainda abertos (sla.py::resume).
   if (STATUS[to].slaPaused) {

@@ -1,6 +1,7 @@
 import { router } from "expo-router";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { formatRelative, formatShort, formatTime } from "../lib/format";
+import { actualMinutes } from "../lib/duration";
+import { formatMinutes, formatRelative, formatShort, formatTime } from "../lib/format";
 import type { LocalTicket } from "../lib/syncTypes";
 import { PriorityBadge, SlaBadge, StatusBadge } from "./badges";
 import { colors } from "./ui";
@@ -9,6 +10,12 @@ export function TicketCard({ ticket, now, showDate = false }: { ticket: LocalTic
   const site = ticket.location ? [ticket.location.code, ticket.location.name].filter(Boolean).join(" ") : null;
   const place = [ticket.customer?.name, site].filter(Boolean).join(" · ");
   const due = ticket.resolution_due_at && !ticket.sla_paused_at ? `solução ${formatRelative(ticket.resolution_due_at, now)}` : null;
+  // Duração estimada ajuda a planejar o dia; em atendimento, mostra o tempo real correndo.
+  const duration = ticket.work_started_at
+    ? `em atendimento ${formatMinutes(actualMinutes(ticket, now))}`
+    : ticket.estimated_minutes
+      ? `${formatMinutes(ticket.estimated_minutes)} estimados`
+      : null;
   return (
     <Pressable
       onPress={() => router.push({ pathname: "/ticket/[id]", params: { id: ticket.id } })}
@@ -18,9 +25,16 @@ export function TicketCard({ ticket, now, showDate = false }: { ticket: LocalTic
     >
       <View style={styles.header}>
         <Text style={styles.code}>{ticket.code}</Text>
-        {ticket.scheduled_start ? (
-          <Text style={styles.schedule}>
-            Visita {showDate ? formatShort(ticket.scheduled_start) : formatTime(ticket.scheduled_start)}
+        {ticket.scheduled_start || duration ? (
+          <Text style={[styles.schedule, ticket.work_started_at ? { color: colors.warning } : null]}>
+            {[
+              ticket.scheduled_start
+                ? `Visita ${showDate ? formatShort(ticket.scheduled_start) : formatTime(ticket.scheduled_start)}`
+                : null,
+              duration,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
           </Text>
         ) : null}
       </View>

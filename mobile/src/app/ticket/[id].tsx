@@ -4,6 +4,7 @@ import { ActivityIndicator, KeyboardAvoidingView, Platform, RefreshControl, Scro
 import { PriorityBadge, SlaBadge, StatusBadge } from "../../components/badges";
 import { ConnectionBar } from "../../components/ConnectionBar";
 import { CommentsPanel } from "../../components/ticket/CommentsPanel";
+import { DurationCompare } from "../../components/ticket/DurationCompare";
 import { InfoPanel } from "../../components/ticket/InfoPanel";
 import { PhotosPanel } from "../../components/ticket/PhotosPanel";
 import { WorklogsPanel } from "../../components/ticket/WorklogsPanel";
@@ -45,7 +46,8 @@ export default function TicketScreen() {
   const ticket = useLiveQuery(load);
   const sync = useSyncStatus();
   const online = isOnline(sync);
-  const now = useNow();
+  // Em atendimento o relógio anda a cada 15 s para o tempo real acompanhar; fora dele, 30 s bastam para o SLA.
+  const now = useNow(ticket?.work_started_at ? 15_000 : 30_000);
   const [tab, setTab] = useState<Tab>("info");
   const [target, setTarget] = useState<TicketStatus | null>(null);
   const [taking, setTaking] = useState(false);
@@ -119,6 +121,7 @@ export default function TicketScreen() {
             <SlaBadge ticket={current} now={now} />
           </View>
           {current.scheduled_start ? <Text style={styles.meta}>Visita: {formatShort(current.scheduled_start)}</Text> : null}
+          {current.work_started_at ? <DurationCompare ticket={current} now={now} /> : null}
           {current.resolution_due_at && !current.resolved_at && !current.sla_paused_at ? (
             <Text style={styles.meta}>Prazo de solução {formatRelative(current.resolution_due_at, now)}</Text>
           ) : null}

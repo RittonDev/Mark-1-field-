@@ -174,6 +174,26 @@ export interface SlaPolicy {
   resolution_minutes: number;
 }
 
+/** Tipo de serviço (o "Tipo de OS" do Field Control) com a duração estimada. */
+export interface ServiceTypeRef {
+  id: UUID;
+  name: string;
+  estimated_minutes: number;
+}
+
+export interface ServiceType extends ServiceTypeRef {
+  description: string | null;
+  customer_id: UUID | null;
+  customer: Ref | null;
+  category_id: UUID | null;
+  is_active: boolean;
+  /** Mediana do tempo em atendimento das OS concluídas deste tipo. */
+  observed_median_minutes: number | null;
+  observed_count: number;
+  /** Sugestão de nova estimativa quando a observada se afasta muito (a estimativa aprende). */
+  suggested_minutes: number | null;
+}
+
 export interface CategoryRef {
   id: UUID;
   name: string;
@@ -248,6 +268,12 @@ export interface TicketDetail extends TicketListItem {
   cancelled_at: ISODate | null;
   reopen_count: number;
   resolution_notes: string | null;
+  service_type: ServiceTypeRef | null;
+  /** Estimada: copiada do tipo na abertura. Real: tempo somado em "Em atendimento". */
+  estimated_minutes: number | null;
+  work_seconds: number;
+  work_started_at: ISODate | null;
+  actual_minutes: number;
   allowed_transitions: TicketStatus[];
   can_edit: boolean;
   can_assign: boolean;
@@ -359,6 +385,8 @@ export interface TicketCreatePayload {
   requester_name?: string | null;
   requester_contact?: string | null;
   service_address?: string | null;
+  service_type_id?: UUID | null;
+  estimated_minutes?: number | null;
   team_id?: UUID | null;
   assignee_id?: UUID | null;
   scheduled_start?: ISODate | null;

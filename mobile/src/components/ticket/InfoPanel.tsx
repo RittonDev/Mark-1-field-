@@ -5,6 +5,7 @@ import { formatDateTime, formatDocument, formatRelative } from "../../lib/format
 import { computeSlaStatus } from "../../lib/sla";
 import type { LocalTicket } from "../../lib/syncTypes";
 import { Button, Card, colors, InfoRow, SectionTitle } from "../ui";
+import { DurationCompare } from "./DurationCompare";
 
 export function InfoPanel({ ticket, now }: { ticket: LocalTicket; now: number }) {
   const location = ticket.location;
@@ -62,6 +63,15 @@ export function InfoPanel({ ticket, now }: { ticket: LocalTicket; now: number })
           {asset.serial_number ? <InfoRow label="Nº de série" value={asset.serial_number} /> : null}
           {asset.asset_tag ? <InfoRow label="Patrimônio" value={asset.asset_tag} /> : null}
           {asset.ip_address ? <InfoRow label="IP" value={asset.ip_address} /> : null}
+        </Card>
+      ) : null}
+
+      {ticket.service_type || ticket.estimated_minutes || ticket.work_started_at || (ticket.work_seconds ?? 0) > 0 ? (
+        <Card>
+          <SectionTitle>Serviço</SectionTitle>
+          {ticket.service_type ? <Text style={styles.strong}>{ticket.service_type.name}</Text> : null}
+          <DurationCompare ticket={ticket} now={now} />
+          <Text style={styles.label}>O tempo real conta sozinho enquanto a OS está em atendimento.</Text>
         </Card>
       ) : null}
 

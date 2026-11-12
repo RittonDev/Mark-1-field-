@@ -628,3 +628,46 @@ async def test_customer_specific_service_type(client: AsyncClient, world: World)
         )
     ).json()
     assert st["id"] not in {x["id"] for x in mine}
+
+
+async def test_day_activities(client: AsyncClient, world: World) -> None:
+    from zoneinfo import ZoneInfo
+
+    h, tech_h = world.analyst.headers, world.tech.headers
+    tech_id = str(world.tech.user.id)
+
+    # Dia futuro: só a visita agendada para ele, com o horário previsto.
+    start = datetime(2030, 1, 15, 13, 0, tzinfo=ZoneInfo(settings.TIMEZONE))
+    a = await create(client, world, title="Visita agendada", assignee_id=tech_id)
+    a = await transition(client, tech_h, a, "scheduled", scheduled_start=start.isoformat())
+    day = (
+        await client.get(f"{API}/activities/day", params={"date": "2030-01-15"}, headers=h)
+    ).json()
+    assert [x["ticket"]["id"] for x in day["activities"]] == [a["id"]]
+    assert day["activities"][0]["state"] == "scheduled"
+    assert day["summary"]["scheduled"] == 1
+    assert day["is_today"] is False
+
+    # Hoje: uma em atendimento (com GPS no deslocamento) e uma concluída.
+    b = await create(client, world, title="Em atendimento", assignee_id=tech_id)
+    b = await transition(client, tech_h, b, "en_route", latitude=-23.56, longitude=-46.65)
+    b = await transition(client, tech_h, b, "in_progress")
+    c = await create(client, world, title="Concluída", assignee_id=tech_id)
+    c = await transition(client, tech_h, c, "in_progress")
+    c = await transition(client, tech_h, c, "resolved", resolution_notes="ok")
+    await create(client, world, title="Só aberta, sem agenda")
+
+    today = (await client.get(f"{API}/activities/day", headers=h)).json()
+    assert today["is_today"] is True
+    by_id = {x["ticket"]["id"]: x for x in today["activities"]}
+    assert set(by_id) == {b["id"], c["id"]}  # a agendada é de outro dia; a só aberta não entra
+    assert by_id[b["id"]]["state"] == "in_progress"
+    assert by_id[b["id"]]["started_at"] and by_id[b["id"]]["arrived_at"]
+    assert by_id[b["id"]]["start_has_gps"] is True
+    assert by_id[c["id"]]["state"] == "done"
+    assert by_id[c["id"]]["finished_at"] is not None
+    assert (today["summary"]["in_progress"], today["summary"]["done"]) == (1, 1)
+
+    # Técnico de campo continua restrito ao próprio escopo.
+    other = (await client.get(f"{API}/activities/day", headers=world.tech_other.headers)).json()
+    assert other["activities"] == []

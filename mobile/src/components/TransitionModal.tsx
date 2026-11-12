@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { errorMessage } from "../lib/api";
 import { STATUS, TRANSITION_ACTION } from "../lib/constants";
 import { currentPosition } from "../lib/device-actions";
+import { formatMinutes } from "../lib/format";
 import { enqueueTransition, isOnline, useSyncStatus } from "../lib/sync";
 import type { LocalTicket } from "../lib/syncTypes";
 import { showToast } from "../lib/toast";
@@ -25,7 +26,11 @@ export function TransitionModal({ ticket, to, onClose }: { ticket: LocalTicket; 
   const [note, setNote] = useState("");
   const [resolution, setResolution] = useState("");
   const [start, setStart] = useState<Date | null>(() => (ticket.scheduled_start ? new Date(ticket.scheduled_start) : null));
-  const [end, setEnd] = useState<Date | null>(() => (ticket.scheduled_end ? new Date(ticket.scheduled_end) : null));
+  // Com duração estimada, o fim fica em branco e a API usa início + estimada; assim um reagendamento
+  // não carrega o fim antigo (que poderia ficar antes do novo início).
+  const [end, setEnd] = useState<Date | null>(() =>
+    ticket.scheduled_end && !ticket.estimated_minutes ? new Date(ticket.scheduled_end) : null,
+  );
   const [shareLocation, setShareLocation] = useState(req.offersLocation);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -86,8 +91,21 @@ export function TransitionModal({ ticket, to, onClose }: { ticket: LocalTicket; 
               <Field label="Início da visita" required>
                 <DateTimeField value={start} onChange={setStart} />
               </Field>
-              <Field label="Fim previsto">
-                <DateTimeField value={end} onChange={setEnd} minimumDate={start ?? undefined} clearable />
+              <Field
+                label="Fim previsto"
+                hint={
+                  ticket.estimated_minutes && !end
+                    ? `Em branco, a visita dura o estimado: ${formatMinutes(ticket.estimated_minutes)}.`
+                    : undefined
+                }
+              >
+                <DateTimeField
+                  value={end}
+                  onChange={setEnd}
+                  minimumDate={start ?? undefined}
+                  clearable
+                  placeholder={ticket.estimated_minutes ? "Início + duração estimada" : undefined}
+                />
               </Field>
             </>
           ) : null}
