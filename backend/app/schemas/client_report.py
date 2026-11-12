@@ -5,6 +5,7 @@ from datetime import datetime
 from pydantic import BaseModel
 
 from app.core.enums import TicketStatus
+from app.schemas.company import CompanyProfile
 
 
 class PublicReportCustomer(BaseModel):
@@ -63,6 +64,8 @@ class PublicReport(BaseModel):
     status: TicketStatus
     status_label: str
     company_name: str
+    # Dados da empresa (Configurações) para o cabeçalho e o rodapé.
+    company: CompanyProfile | None = None
     customer: PublicReportCustomer | None = None
     location: PublicReportLocation | None = None
     service_address: str | None = None

@@ -1,16 +1,43 @@
 import datetime as dt
 import uuid
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, Field, computed_field
 
 from app.core.enums import QuoteStatus
 from app.schemas.common import ORMModel, Ref
+from app.schemas.company import CompanyProfile
 from app.schemas.expense import Money
 
 
 def format_quote_code(number: int) -> str:
     return f"ORC-{number:06d}"
+
+
+# Produto (material), serviço (mão de obra) ou despesa (deslocamento, pedágio...).
+QuoteItemKind = Literal["product", "service", "expense"]
+
+
+class KindTotals(BaseModel):
+    product: Money = Decimal("0")
+    service: Money = Decimal("0")
+    expense: Money = Decimal("0")
+
+
+def totals_by_kind(items: "list[QuoteItemOut]") -> KindTotals:
+    totals = {"product": Decimal("0"), "service": Decimal("0"), "expense": Decimal("0")}
+    for item in items:
+        totals[item.kind] += item.total
+    return KindTotals(**totals)
+
+
+class QuoteLink(BaseModel):
+    """Link do cliente (pode ser copiado de novo a qualquer momento)."""
+
+    token: str
+    path: str
+    url: str
 
 
 class QuoteItemIn(BaseModel):
@@ -19,6 +46,7 @@ class QuoteItemIn(BaseModel):
     unit: str = Field(default="un", max_length=20)
     unit_price: Decimal = Field(ge=0, max_digits=12, decimal_places=2)
     catalog_item_id: uuid.UUID | None = None
+    kind: QuoteItemKind = "product"
 
 
 class QuoteItemOut(BaseModel):
@@ -28,6 +56,8 @@ class QuoteItemOut(BaseModel):
     unit_price: Money
     total: Money
     catalog_item_id: uuid.UUID | None = None
+    # Itens antigos (antes do tipo) contam como produto.
+    kind: QuoteItemKind = "product"
 
 
 class QuoteIn(BaseModel):
@@ -55,21 +85,47 @@ class QuoteOut(ORMModel):
     approver_name: str | None
     approver_document: str | None
     approver_role: str | None
+    # Matrícula de quem aprovou (opcional) e comentário do cliente para a empresa.
+    approver_registration: str | None = None
+    client_comment: str | None = None
     rejection_reason: str | None
     created_by: Ref | None
     created_at: dt.datetime
     updated_at: dt.datetime
     signature_url: str | None = None
+    link: QuoteLink | None = None
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def code(self) -> str:
         return format_quote_code(self.number)
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def totals_by_kind(self) -> KindTotals:
+        return totals_by_kind(self.items)
+
 
 class QuoteSent(QuoteOut):
-    # Só nesta resposta: o banco guarda apenas o hash do link.
+    # Token do link do cliente (o mesmo de `link.token`; mantido por compatibilidade).
     token: str
+
+
+class PublicQuoteCustomer(BaseModel):
+    name: str
+    document: str | None = None
+    email: str | None = None
+    phone: str | None = None
+
+
+class PublicQuoteAddress(BaseModel):
+    line: str | None = None
+    district: str | None = None
+    city: str | None = None
+    state: str | None = None
+    zip_code: str | None = None
+    # Pronto para exibir: "Av. Kennedy, 700 - Jardim do Mar, São Bernardo do Campo - SP, 09726-252".
+    full: str | None = None
 
 
 class PublicQuote(BaseModel):
@@ -92,20 +148,35 @@ class PublicQuote(BaseModel):
     decided_at: dt.datetime | None
     approver_name: str | None
     rejection_reason: str | None
+    # Cabeçalho, cartões do cliente e do endereço, resumo e a resposta do cliente.
+    company: CompanyProfile | None = None
+    customer_info: PublicQuoteCustomer | None = None
+    address: PublicQuoteAddress | None = None
+    ticket_number: int | None = None
+    issued_at: dt.datetime | None = None
+    totals_by_kind: KindTotals = KindTotals()
+    approver_registration: str | None = None
+    client_comment: str | None = None
+    signature_url: str | None = None
 
 
 class QuoteApprove(BaseModel):
     name: str = Field(min_length=3, max_length=160)
-    document: str | None = Field(default=None, max_length=20)
-    role: str | None = Field(default=None, max_length=120)
+    # Matrícula (opcional) e comentário para a empresa.
+    registration: str | None = Field(default=None, max_length=40)
+    comment: str | None = Field(default=None, max_length=2000)
     # Assinatura desenhada na tela (data URL PNG).
     signature: str = Field(min_length=30, max_length=2_000_000)
     accept: bool
+    # Mantidos por compatibilidade (a tela atual não pede).
+    document: str | None = Field(default=None, max_length=20)
+    role: str | None = Field(default=None, max_length=120)
 
 
 class QuoteReject(BaseModel):
     name: str | None = Field(default=None, max_length=160)
     reason: str = Field(min_length=3, max_length=2000)
+    comment: str | None = Field(default=None, max_length=2000)
 
 
 class CatalogItemIn(BaseModel):
@@ -114,6 +185,7 @@ class CatalogItemIn(BaseModel):
     price: Decimal = Field(ge=0, max_digits=12, decimal_places=2)
     description: str | None = Field(default=None, max_length=2000)
     is_active: bool = True
+    kind: QuoteItemKind = "product"
 
 
 class CatalogItemOut(ORMModel):
@@ -123,6 +195,7 @@ class CatalogItemOut(ORMModel):
     price: Money
     description: str | None
     is_active: bool
+    kind: str = "product"
 
 
 class QuoteListRow(QuoteOut):

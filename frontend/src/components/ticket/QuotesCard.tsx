@@ -2,15 +2,21 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { Check, Copy, FileText, Mail, MessageCircle, Plus, Send, Trash2, X } from "lucide-react";
+import { Check, Copy, ExternalLink, FileText, Link2, Mail, MessageCircle, Plus, RefreshCw, Send, Share2, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { Button, Card, CardHeader, Dialog, ErrorBox, Field, Input, Textarea } from "@/components/ui";
 import { absoluteApiUrl, api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canManageTickets } from "@/lib/constants";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
-import { QUOTE_STATUS, quoteUrl } from "@/lib/quotes";
-import type { Quote, QuoteCatalogItem, TicketDetail } from "@/lib/types";
+import { QUOTE_KIND, QUOTE_STATUS, quoteUrl, totalsByKind } from "@/lib/quotes";
+import type { Quote, QuoteCatalogItem, QuoteItemKind, TicketDetail } from "@/lib/types";
+
+/** Link do cliente: o persistente da API (copiar a qualquer momento) ou o token devolvido no envio. */
+function linkOf(q: Quote): string | null {
+  if (q.link?.url) return q.link.url;
+  return q.token ? quoteUrl(q.token) : null;
+}
 
 const num = (v: string) => Number(v.replace(",", ".")) || 0;
 
@@ -19,7 +25,7 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<Quote | "new" | null>(null);
-  const [sent, setSent] = useState<Quote | null>(null);
+  const [sharing, setSharing] = useState<Quote | null>(null);
   const [opened, setOpened] = useState<Quote | null>(null);
   const quotes = useQuery({
     queryKey: ["ticket", ticket.id, "quotes"],
@@ -31,7 +37,7 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
     mutationFn: (q: Quote) => api.post<Quote>(`/quotes/${q.id}/send`),
     onSuccess: (q) => {
       refresh();
-      setSent(q);
+      setSharing(q);
     },
   });
   const cancel = useMutation({
@@ -46,7 +52,7 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
     <Card>
       <CardHeader
         title="Orçamentos"
-        description="Monte, envie o link e o cliente aprova com assinatura."
+        description="Monte, envie o link e o cliente aprova com nome, matrícula (opcional) e assinatura."
         actions={
           <Button size="sm" onClick={() => setEditing("new")}>
             <Plus className="size-4" />
@@ -77,15 +83,33 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
               <span className={clsx("rounded-full px-2 py-0.5 text-[11px] font-medium", QUOTE_STATUS[q.status].className)}>
                 {QUOTE_STATUS[q.status].label}
               </span>
+              {q.status !== "draft" && q.status !== "cancelled" && linkOf(q) ? (
+                <button
+                  type="button"
+                  onClick={() => setSharing(q)}
+                  className="rounded-md p-1.5 text-ink-muted transition-colors hover:bg-surface-2 hover:text-brand"
+                  aria-label={`Link do ${q.code} para o cliente`}
+                  title="Link para o cliente"
+                >
+                  <Link2 className="size-4" />
+                </button>
+              ) : null}
               {["draft", "sent", "expired"].includes(q.status) ? (
                 <div className="flex w-full justify-end gap-1.5 sm:w-auto">
                   <Button size="sm" variant="ghost" onClick={() => setEditing(q)}>
                     Editar
                   </Button>
-                  <Button size="sm" variant="primary" loading={send.isPending && send.variables?.id === q.id} onClick={() => send.mutate(q)}>
-                    <Send className="size-3.5" />
-                    {q.status === "draft" ? "Enviar" : "Reenviar"}
-                  </Button>
+                  {q.status === "sent" ? (
+                    <Button size="sm" variant="primary" onClick={() => setSharing(q)}>
+                      <Share2 className="size-3.5" />
+                      Enviar link
+                    </Button>
+                  ) : (
+                    <Button size="sm" variant="primary" loading={send.isPending && send.variables?.id === q.id} onClick={() => send.mutate(q)}>
+                      <Send className="size-3.5" />
+                      {q.status === "draft" ? "Enviar" : "Reenviar"}
+                    </Button>
+                  )}
                   <button
                     type="button"
                     onClick={() => window.confirm(`Cancelar ${q.code}? O link deixa de funcionar.`) && cancel.mutate(q)}
@@ -106,7 +130,7 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
         </div>
       ) : null}
       {editing ? <QuoteEditor ticket={ticket} quote={editing === "new" ? null : editing} onClose={() => setEditing(null)} onSaved={refresh} /> : null}
-      {sent?.token ? <SentDialog ticket={ticket} quote={sent} onClose={() => setSent(null)} /> : null}
+      {sharing ? <ShareDialog ticket={ticket} quote={sharing} onClose={() => setSharing(null)} onRotated={refresh} /> : null}
       {opened ? <QuoteView quote={opened} onClose={() => setOpened(null)} /> : null}
     </Card>
   );
@@ -293,51 +317,95 @@ function QuoteEditor({
   );
 }
 
-function SentDialog({ ticket, quote, onClose }: { ticket: TicketDetail; quote: Quote; onClose: () => void }) {
+/** Link do orçamento para o cliente: copiar, WhatsApp, e-mail ou gerar um novo (o anterior para de valer). */
+function ShareDialog({
+  ticket,
+  quote,
+  onClose,
+  onRotated,
+}: {
+  ticket: TicketDetail;
+  quote: Quote;
+  onClose: () => void;
+  onRotated: () => void;
+}) {
   const [copied, setCopied] = useState(false);
-  const url = quoteUrl(quote.token as string);
-  const message = `Olá! Segue o orçamento ${quote.code} (${quote.title}) referente ao chamado ${ticket.code}, no valor de ${formatMoney(quote.total)}. Para aprovar, acesse: ${url}`;
+  const [current, setCurrent] = useState(quote);
+  const rotate = useMutation({
+    mutationFn: () => api.post<Quote>(`/quotes/${quote.id}/link/rotate`),
+    onSuccess: (q) => {
+      setCurrent(q);
+      setCopied(false);
+      onRotated();
+    },
+  });
+  const url = linkOf(current);
+  const message = `Olá! Segue o orçamento ${quote.code} (${quote.title}) referente à OS ${ticket.code}, no valor de ${formatMoney(quote.total)}. Para aprovar com sua assinatura, acesse: ${url}`;
   return (
     <Dialog
       open
       onClose={onClose}
-      title={`${quote.code} enviado`}
-      description="Mande o link ao cliente. Ele aprova com nome e assinatura, ou recusa com o motivo."
+      title={`Link do ${quote.code}`}
+      description="O cliente abre pelo celular e aprova com nome, matrícula (opcional) e assinatura, ou recusa com o motivo."
       footer={
         <Button variant="primary" onClick={onClose}>
           Concluir
         </Button>
       }
     >
-      <div className="flex flex-col gap-3">
-        <div className="flex items-center gap-2 rounded-lg border border-line bg-surface-2 p-2">
-          <code className="min-w-0 flex-1 truncate text-xs text-ink">{url}</code>
-          <Button
-            onClick={async () => {
-              await navigator.clipboard.writeText(url);
-              setCopied(true);
-            }}
-          >
-            {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-            {copied ? "Copiado" : "Copiar"}
-          </Button>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <a href={`https://wa.me/?text=${encodeURIComponent(message)}`} target="_blank" rel="noreferrer">
-            <Button>
-              <MessageCircle className="size-4" />
-              WhatsApp
+      {url ? (
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center gap-2 rounded-lg border border-line bg-surface-2/60 py-1.5 pr-1.5 pl-3">
+            <code className="min-w-0 flex-1 truncate text-xs text-ink-muted">{url}</code>
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={async () => {
+                await navigator.clipboard.writeText(url);
+                setCopied(true);
+              }}
+            >
+              {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+              {copied ? "Copiado" : "Copiar"}
             </Button>
-          </a>
-          <a href={`mailto:?subject=${encodeURIComponent(`Orçamento ${quote.code} - Maxx Field`)}&body=${encodeURIComponent(message)}`}>
-            <Button>
-              <Mail className="size-4" />
-              E-mail
-            </Button>
-          </a>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <a href={`https://wa.me/?text=${encodeURIComponent(message)}`} target="_blank" rel="noreferrer">
+              <Button size="sm">
+                <MessageCircle className="size-3.5" />
+                WhatsApp
+              </Button>
+            </a>
+            <a href={`mailto:?subject=${encodeURIComponent(`Orçamento ${quote.code}`)}&body=${encodeURIComponent(message)}`}>
+              <Button size="sm">
+                <Mail className="size-3.5" />
+                E-mail
+              </Button>
+            </a>
+            <a href={current.link?.path ?? url} target="_blank" rel="noreferrer">
+              <Button size="sm">
+                <ExternalLink className="size-3.5" />
+                Ver como o cliente
+              </Button>
+            </a>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">
+            <p className="text-xs text-ink-muted">O link fica aqui para copiar de novo quando precisar.</p>
+            <button
+              type="button"
+              disabled={rotate.isPending}
+              onClick={() => window.confirm("Gerar um novo link? O link já enviado para de funcionar.") && rotate.mutate()}
+              className="inline-flex items-center gap-1 text-xs text-ink-muted transition-colors hover:text-ink disabled:opacity-50"
+            >
+              <RefreshCw className="size-3.5" />
+              Gerar novo link
+            </button>
+          </div>
+          {rotate.error ? <ErrorBox message={errorMessage(rotate.error)} /> : null}
         </div>
-        <p className="text-xs text-ink-muted">Por segurança, o link completo só aparece agora. Reenviar gera um novo e invalida este.</p>
-      </div>
+      ) : (
+        <p className="text-sm text-ink-muted">Envie o orçamento para gerar o link do cliente.</p>
+      )}
     </Dialog>
   );
 }

@@ -12,10 +12,6 @@ Nada interno entra no relatório: acompanhamentos, apontamentos, custos, orçame
 motivos de violação e eventos internos ficam de fora.
 """
 
-import base64
-import hashlib
-import hmac
-import secrets
 import uuid
 from datetime import datetime
 from typing import Any
@@ -24,6 +20,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import set_committed_value
 
+from app.core import links
 from app.core.config import settings
 from app.core.enums import TicketEventType, TicketStatus
 from app.core.security import create_download_token
@@ -42,12 +39,13 @@ from app.schemas.client_report import (
 )
 from app.schemas.forms import FormField
 from app.schemas.ticket import ReportLinkOut, format_ticket_code
+from app.services import company as company_svc
 from app.services.errors import WorkflowError
 from app.services.workflow import STATUS_INFO
 
 S = TicketStatus
 FINISHED = (S.RESOLVED, S.CLOSED)
-SIG_LENGTH = 22
+LINK_KIND = "report"
 PHOTO_LINK_MINUTES = 24 * 60
 NOT_FINISHED = "Disponível quando a OS for concluída"
 
@@ -64,28 +62,16 @@ class ReportReopened(Exception):
 
 
 def new_link_id() -> str:
-    return secrets.token_urlsafe(9)
-
-
-def _sign(link_id: str) -> str:
-    mac = hmac.new(
-        settings.JWT_SECRET.encode(), b"report:" + link_id.encode(), hashlib.sha256
-    ).digest()
-    return base64.urlsafe_b64encode(mac).rstrip(b"=").decode()[:SIG_LENGTH]
+    return links.new_link_id()
 
 
 def token_for(link_id: str) -> str:
-    return f"{link_id}.{_sign(link_id)}"
+    return links.token_for(LINK_KIND, link_id)
 
 
 def parse_token(token: str) -> str | None:
     """Id do link quando a assinatura confere; None para token inválido ou adulterado."""
-    link_id, sep, sig = token.partition(".")
-    if not sep or not link_id or len(link_id) > 24 or len(sig) != SIG_LENGTH:
-        return None
-    if not hmac.compare_digest(sig, _sign(link_id)):
-        return None
-    return link_id
+    return links.parse_token(LINK_KIND, token)
 
 
 def link_out(ticket: Ticket) -> ReportLinkOut | None:
@@ -251,6 +237,7 @@ def _last_before(
 
 async def build(db: AsyncSession, ticket: Ticket, base_url: str) -> PublicReport:
     now = utcnow()
+    company = await company_svc.profile(db)
     base_url = (settings.API_PUBLIC_URL or base_url).rstrip("/")
 
     attachments = list(
@@ -358,7 +345,8 @@ async def build(db: AsyncSession, ticket: Ticket, base_url: str) -> PublicReport
         description=ticket.description or "",
         status=ticket.status,
         status_label=STATUS_INFO[ticket.status].label,
-        company_name=settings.COMPANY_NAME,
+        company_name=company.name,
+        company=company,
         customer=(
             PublicReportCustomer(name=ticket.customer.name, document=ticket.customer.document)
             if ticket.customer

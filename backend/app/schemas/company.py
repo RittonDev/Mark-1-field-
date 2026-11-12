@@ -1,0 +1,36 @@
+"""Dados da empresa: cabeçalho dos orçamentos e relatórios que o cliente recebe."""
+
+import re
+
+from pydantic import BaseModel, Field, field_validator
+
+EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+class CompanyProfile(BaseModel):
+    name: str = Field(min_length=2, max_length=160)
+    document: str | None = Field(default=None, max_length=20)  # CNPJ
+    email: str | None = Field(default=None, max_length=255)
+    phone: str | None = Field(default=None, max_length=40)
+    address: str | None = Field(default=None, max_length=300)
+    website: str | None = Field(default=None, max_length=200)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _name(cls, value: object) -> object:
+        return " ".join(value.split()) if isinstance(value, str) else value
+
+    @field_validator("document", "email", "phone", "address", "website", mode="before")
+    @classmethod
+    def _blank_is_none(cls, value: object) -> object:
+        if isinstance(value, str):
+            value = value.strip()
+            return value or None
+        return value
+
+    @field_validator("email")
+    @classmethod
+    def _email(cls, value: str | None) -> str | None:
+        if value is not None and not EMAIL.match(value):
+            raise ValueError("E-mail inválido")
+        return value
