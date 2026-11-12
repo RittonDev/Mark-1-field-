@@ -263,10 +263,28 @@ Todos exigem analista ou gestor, salvo indicação. Valores em R$ chegam como n�
   `GET|PUT /settings/expenses {km_rate}` (PUT: supervisor/admin). `TicketDetail.expenses`.
 - **Visita improdutiva:** `GET|POST|PATCH /unproductive-reasons` · `POST /tickets/{id}/unproductive {reason_id, note?, latitude?, longitude?, expected_version?}`
   (técnico responsável ou gestão) → a OS volta para `assigned` sem agenda; `unproductive_count`. Sync: operação `unproductive`.
-- **Orçamentos:** `GET|POST /quote-items`, `PUT /quote-items/{id}` · `GET|POST /tickets/{id}/quotes` · `PUT /quotes/{id}` ·
-  `POST /quotes/{id}/send` → `{..., token}` (só nesta resposta) · `POST /quotes/{id}/cancel` · `GET /quotes?status&start&end`.
-  Público: `GET /public/quotes/{token}` · `POST /public/quotes/{token}/approve {name, document?, role?, signature (data URL), accept: true}` ·
-  `POST /public/quotes/{token}/reject {name?, reason}`. Evento WS `quote.decided` (gestão).
+- **Orçamentos:** `GET|POST /quote-items` e `PUT /quote-items/{id}` (catálogo, com `kind`) · `GET|POST /tickets/{id}/quotes` ·
+  `PUT /quotes/{id}` · `POST /quotes/{id}/send` · `POST /quotes/{id}/link/rotate` → `{token, path, url}` ·
+  `POST /quotes/{id}/cancel` · `GET /quotes?status&start&end`.
+  - Itens: `{description, quantity, unit (medida), unit_price, catalog_item_id?, kind}` com `kind` = `product` (padrão),
+    `service` ou `expense`. `QuoteOut.totals_by_kind {product, service, expense}` soma os itens por tipo.
+  - **Link do cliente persistente:** `QuoteOut.link {token, path: "/orcamento/{token}", url}` existe a partir do primeiro envio
+    (só a gestão vê) e pode ser copiado a qualquer momento. Token `<id>.<HMAC>` (só o id fica no banco). Reenviar e editar
+    mantêm o mesmo link; editar volta o orçamento a rascunho (o cliente vê o conteúdo atual "em revisão" e responde depois do
+    novo envio). Só `link/rotate` (troca; o anterior para de abrir) e `cancel` (tira do ar) mudam o link. Links antigos (só
+    hash, enviados antes desta versão) seguem abrindo até a troca. `send` ainda devolve `token` (= `link.token`).
+  - Público (sem login): `GET /public/quotes/{token}` → `PublicQuote` com, além do que já havia, `company` (dados da empresa),
+    `customer_info {name, document, email, phone}`, `address {line, district, city, state, zip_code, full}` (endereço do
+    atendimento da OS ou o do local), `ticket_number`, `issued_at`, `totals_by_kind`, `approver_registration`,
+    `client_comment` e `signature_url` (absoluta, 24 h, só aprovado). `status` pode ser `draft` (em revisão: abre, não aceita
+    resposta).
+  - `POST /public/quotes/{token}/approve {name, registration? (matrícula), comment?, signature (data URL), accept: true}`
+    (`document`/`role` seguem aceitos) · `POST /public/quotes/{token}/reject {name?, reason, comment?}`. 410 para link
+    inexistente, trocado ou cancelado; 409 com o motivo quando não aceita resposta (respondido, vencido ou em revisão).
+    Evento WS `quote.decided` (gestão).
+- **Dados da empresa:** `GET /settings/company` (gestão) · `PUT /settings/company` (supervisor/admin)
+  `{name, document?, email?, phone?, address?, website?}`. Vão no cabeçalho do orçamento e do relatório do cliente
+  (`PublicQuote.company`, `PublicReport.company`; `PublicReport.company_name` = nome do cadastro).
 - **Projetos:** `GET|POST /projects`, `GET|PUT /projects/{id}` (com `stats` e `margin`). OS: `project_id` em criar/editar (gestão)
   e filtro `GET /tickets?project_id=`; `TicketListItem.project`.
 - **Assistência externa:** `GET /repairs?status&customer_id&q&open_only` · `GET /repairs/summary` · `POST /repairs` ·
@@ -317,7 +335,7 @@ banco, então o link pode ser copiado de novo a qualquer momento e trocado quand
   `POST /tickets/{id}/report-link/rotate` (novo link, o anterior para de funcionar) ·
   `DELETE /tickets/{id}/report-link` (204). Nenhum dos três muda a `version` da OS.
 - Público, sem login: `GET /public/reports/{token}` → `PublicReport {code, title, description, status,
-  status_label, company_name, customer {name, document}, location {name, code, address, city, state},
+  status_label, company_name, company {name, document, email, phone, address, website}, customer {name, document}, location {name, code, address, city, state},
   service_address, requester_name, service_type, technician {name}, opened_at, scheduled_start,
   scheduled_end, en_route_at, arrived_at, finished_at, closed_at, on_site_minutes, check_in_gps,
   resolution_notes, forms [{name, completed_at, items [{label, type, value, photos [{url, filename}]}]}],
