@@ -465,22 +465,22 @@ export function QuoteView({ quote, onClose }: { quote: Quote; onClose: () => voi
           <thead className="text-left text-xs text-ink-muted">
             <tr>
               <th className="py-1 font-medium">Item</th>
-              <th className="py-1 font-medium">Tipo</th>
-              <th className="py-1 text-right font-medium">Qtd.</th>
-              <th className="py-1 text-right font-medium">Unit.</th>
-              <th className="py-1 text-right font-medium">Total</th>
+              <th className="py-1 pl-4 font-medium">Tipo</th>
+              <th className="py-1 pl-4 text-right font-medium whitespace-nowrap">Qtd.</th>
+              <th className="py-1 pl-4 text-right font-medium whitespace-nowrap">Unit.</th>
+              <th className="py-1 pl-4 text-right font-medium whitespace-nowrap">Total</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
             {quote.items.map((i, k) => (
               <tr key={k}>
                 <td className="py-1.5 text-ink">{i.description}</td>
-                <td className="py-1.5 text-ink-muted">{QUOTE_KIND[i.kind ?? "product"].label}</td>
-                <td className="py-1.5 text-right tabular-nums">
+                <td className="py-1.5 pl-4 text-ink-muted">{QUOTE_KIND[i.kind ?? "product"].label}</td>
+                <td className="py-1.5 pl-4 text-right whitespace-nowrap tabular-nums">
                   {i.quantity.toLocaleString("pt-BR")} {i.unit}
                 </td>
-                <td className="py-1.5 text-right tabular-nums">{formatMoney(i.unit_price)}</td>
-                <td className="py-1.5 text-right tabular-nums">{formatMoney(i.total)}</td>
+                <td className="py-1.5 pl-4 text-right whitespace-nowrap tabular-nums">{formatMoney(i.unit_price)}</td>
+                <td className="py-1.5 pl-4 text-right whitespace-nowrap tabular-nums">{formatMoney(i.total)}</td>
               </tr>
             ))}
           </tbody>
