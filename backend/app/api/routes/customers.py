@@ -5,7 +5,12 @@ from sqlalchemy import or_, select
 
 from app.api.deps import DB, CurrentUser, StaffUser, TicketManagerUser
 from app.core.enums import AssetType
+<<<<<<< Updated upstream
 from app.models import Asset, Customer, Location
+=======
+from app.models import Asset, Customer, Location, Ticket, User
+from app.schemas.common import Page
+>>>>>>> Stashed changes
 from app.schemas.customer import (
     AssetCreate,
     AssetOut,
@@ -17,6 +22,8 @@ from app.schemas.customer import (
     LocationOut,
     LocationUpdate,
 )
+from app.services.tickets import visibility_clause
+from app.services.workflow import OPEN_STATUSES
 
 router = APIRouter(tags=["customers"])
 
@@ -41,7 +48,11 @@ async def list_customers(db: DB, _: CurrentUser, q: str | None = None) -> list[C
 
 
 @router.post("/customers", response_model=CustomerOut, status_code=status.HTTP_201_CREATED)
+<<<<<<< Updated upstream
 async def create_customer(body: CustomerCreate, db: DB, _: TicketManagerUser) -> Customer:
+=======
+async def create_customer(body: CustomerCreate, db: DB, user: TicketManagerUser) -> CustomerOut:
+>>>>>>> Stashed changes
     customer = Customer(**body.model_dump(), is_active=True)
     db.add(customer)
     await db.commit()
@@ -97,8 +108,45 @@ async def list_locations(
 ) -> list[Location]:
     stmt = select(Location).order_by(Location.name)
     if customer_id is not None:
+<<<<<<< Updated upstream
         stmt = stmt.where(Location.customer_id == customer_id)
     return list(await db.scalars(stmt))
+=======
+        conds.append(Location.customer_id == customer_id)
+    if active is not None:
+        conds.append(Location.is_active.is_(active))
+    if q and q.strip():
+        like = f"%{q.strip()}%"
+        text_match = [
+            Location.name.ilike(like),
+            Location.code.ilike(like),
+            Location.city.ilike(like),
+            Location.district.ilike(like),
+            Location.address_line.ilike(like),
+            Customer.name.ilike(like),
+        ]
+        doc = re.sub(r"[^0-9A-Za-z]", "", q).upper()
+        if len(doc) >= 3:
+            text_match.append(Location.document.ilike(f"%{doc}%"))
+        conds.append(or_(*text_match))
+    base = select(Location).join(Customer, Customer.id == Location.customer_id).where(*conds)
+    total = await db.scalar(select(func.count()).select_from(base.subquery())) or 0
+    rows = await db.scalars(
+        base.order_by(Customer.name, Location.name).offset((page - 1) * page_size).limit(page_size)
+    )
+    return Page(
+        items=await _locations_out(db, user, list(rows)),
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get("/locations/{location_id}", response_model=LocationOut)
+async def get_location(location_id: uuid.UUID, db: DB, user: CurrentUser) -> LocationOut:
+    location = await _get_or_404(db, Location, location_id, "Local")
+    return (await _locations_out(db, user, [location]))[0]
+>>>>>>> Stashed changes
 
 
 @router.patch("/locations/{location_id}", response_model=LocationOut)

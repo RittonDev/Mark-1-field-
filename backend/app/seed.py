@@ -220,7 +220,55 @@ async def seed() -> None:
             contact_name="Secretaria",
             contact_phone="(31) 3300-0001",
         )
+<<<<<<< Updated upstream
         db.add_all([sede, cd, unidade, campus])
+=======
+        # Lojas: a operação gira em torno do local (no Field Control, ~55 locais por cliente).
+        lojas = [
+            Location(
+                customer_id=matriz.id,
+                name=name,
+                code=code,
+                document=cnpj(f"11222333{branch}"),
+                address_line=address,
+                city=city,
+                state="SP",
+                latitude=lat,
+                longitude=lng,
+                contact_name="Gerente da loja",
+            )
+            for name, code, branch, address, city, lat, lng in (
+                (
+                    "Loja 12 - Shopping Ibirapuera",
+                    "LJ-12",
+                    "0012",
+                    "Av. Ibirapuera, 3103",
+                    "São Paulo",
+                    -23.6106,
+                    -46.6665,
+                ),
+                (
+                    "Loja 27 - Shopping Morumbi",
+                    "LJ-27",
+                    "0027",
+                    "Av. Roque Petroni Jr., 1089",
+                    "São Paulo",
+                    -23.6228,
+                    -46.6993,
+                ),
+                (
+                    "Loja 41 - Outlet Campinas",
+                    "LJ-41",
+                    "0041",
+                    "Rod. Dom Pedro I, km 127",
+                    "Campinas",
+                    -22.8486,
+                    -47.0596,
+                ),
+            )
+        ]
+        db.add_all([sede, cd, unidade, campus, *lojas])
+>>>>>>> Stashed changes
         await db.flush()
 
         def asset(
