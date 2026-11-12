@@ -1,11 +1,12 @@
 import datetime as dt
 import uuid
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from app.schemas.common import Ref
 from app.schemas.onboarding import SkillOut
+from app.schemas.records import WorkSchedule, WorkScheduleOut
 
 
 class TechnicianOut(BaseModel):
@@ -36,6 +37,13 @@ class TechnicianOut(BaseModel):
     base_source: Literal["history", "home"] | None = None
     base_visits: int = 0
     last_visit_at: dt.datetime | None = None
+    # Ficha completa: endereço, jornada, serviços que faz e origem (Field Control).
+    address_line: str | None = None
+    address_district: str | None = None
+    address_zip: str | None = None
+    work_schedule: WorkScheduleOut | None = None
+    services: list[Ref] = []
+    legacy: dict[str, Any] | None = None
 
 
 class TechnicianCreate(BaseModel):
@@ -64,6 +72,11 @@ class TechnicianUpdate(BaseModel):
     home_state: str | None = Field(default=None, max_length=2)
     coverage_area: str | None = Field(default=None, max_length=1000)
     is_active: bool | None = None
+    address_line: str | None = Field(default=None, max_length=255)
+    address_district: str | None = Field(default=None, max_length=120)
+    address_zip: str | None = Field(default=None, max_length=10)
+    work_schedule: WorkSchedule | None = None
+    service_type_ids: list[uuid.UUID] | None = Field(default=None, max_length=300)
 
     @field_validator("email")
     @classmethod

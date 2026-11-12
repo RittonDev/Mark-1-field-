@@ -1,12 +1,13 @@
 import uuid
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 from pydantic import AfterValidator, BaseModel, Field
 
 from app.core.documents import normalize_document
 from app.core.enums import AssetType
 from app.schemas.common import ORMModel, Ref, TagOut
+from app.schemas.records import ContactIn, ContactOut
 
 # CPF ou CNPJ (inclusive alfanumérico); aceita com ou sem pontuação, guarda limpo.
 Document = Annotated[str | None, Field(max_length=20), AfterValidator(normalize_document)]
@@ -31,6 +32,17 @@ class CustomerOut(ORMModel, TicketStats):
     is_active: bool
     created_at: datetime
     locations_count: int = 0
+    # Ficha completa: todos os contatos, endereço da matriz, logo e origem (Field Control).
+    contacts: list[ContactOut] = []
+    address_line: str | None = None
+    district: str | None = None
+    city: str | None = None
+    state: str | None = None
+    zip_code: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    logo_url: str | None = None
+    legacy: dict[str, Any] | None = None
 
 
 class CustomerCreate(BaseModel):
@@ -39,6 +51,15 @@ class CustomerCreate(BaseModel):
     email: str | None = None
     phone: str | None = None
     notes: str | None = None
+    contacts: list[ContactIn] | None = Field(default=None, max_length=50)
+    address_line: str | None = Field(default=None, max_length=255)
+    district: str | None = Field(default=None, max_length=120)
+    city: str | None = Field(default=None, max_length=120)
+    state: str | None = Field(default=None, max_length=2)
+    zip_code: str | None = Field(default=None, max_length=10)
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+    logo_url: str | None = Field(default=None, max_length=1000)
 
 
 class CustomerUpdate(BaseModel):
@@ -48,6 +69,15 @@ class CustomerUpdate(BaseModel):
     phone: str | None = None
     notes: str | None = None
     is_active: bool | None = None
+    contacts: list[ContactIn] | None = Field(default=None, max_length=50)
+    address_line: str | None = Field(default=None, max_length=255)
+    district: str | None = Field(default=None, max_length=120)
+    city: str | None = Field(default=None, max_length=120)
+    state: str | None = Field(default=None, max_length=2)
+    zip_code: str | None = Field(default=None, max_length=10)
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+    logo_url: str | None = Field(default=None, max_length=1000)
 
 
 class LocationOut(ORMModel, TicketStats):
@@ -68,6 +98,8 @@ class LocationOut(ORMModel, TicketStats):
     contact_phone: str | None
     notes: str | None
     is_active: bool
+    contacts: list[ContactOut] = []
+    legacy: dict[str, Any] | None = None
 
 
 class LocationCreate(BaseModel):
@@ -84,6 +116,7 @@ class LocationCreate(BaseModel):
     contact_name: str | None = None
     contact_phone: str | None = None
     notes: str | None = None
+    contacts: list[ContactIn] | None = Field(default=None, max_length=50)
 
 
 class LocationUpdate(LocationCreate):

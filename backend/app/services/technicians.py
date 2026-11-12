@@ -3,6 +3,7 @@
 Só mexe em usuários técnicos (quem cuida de analistas e gestores é o admin, em Usuários).
 """
 
+import re
 import secrets
 import uuid
 from datetime import timedelta
@@ -16,7 +17,7 @@ from app.core.config import settings
 from app.core.enums import ApplicationStatus, UserRole
 from app.core.security import create_token, hash_password
 from app.db.base import utcnow
-from app.models import Team, TechnicianApplication, TechnicianShift, Ticket, User
+from app.models import ServiceType, Team, TechnicianApplication, TechnicianShift, Ticket, User
 from app.schemas.onboarding import SkillOut
 from app.schemas.technician import (
     Credential,
@@ -26,7 +27,7 @@ from app.schemas.technician import (
     TechnicianOut,
     TechnicianUpdate,
 )
-from app.services import storage, technician_regions
+from app.services import search, storage, technician_regions
 from app.services.errors import NotFound, WorkflowError
 from app.services.spreadsheet import read_table
 from app.services.workflow import OPEN_STATUSES
@@ -61,8 +62,9 @@ def temporary_password() -> str:
 
 
 def avatar_url(user: User) -> str | None:
+    """Foto enviada aqui (link assinado) ou, sem ela, a que veio do Field Control."""
     if not user.avatar_key:
-        return None
+        return user.avatar_external_url or None
     token = create_token(f"avatar:{user.id}", "download", timedelta(hours=12))
     return f"{settings.API_PREFIX}/users/{user.id}/avatar?token={token}"
 
@@ -115,6 +117,23 @@ async def to_out(db: AsyncSession, users: list[User]) -> list[TechnicianOut]:
             )
         )
     }
+    # Serviços que faz (ids gravados na ficha), com o nome atual do tipo de serviço.
+    wanted = {sid for u in users for sid in (u.service_type_ids or [])}
+    service_names: dict[str, str] = {}
+    if wanted:
+        valid = []
+        for sid in wanted:
+            try:
+                valid.append(uuid.UUID(str(sid)))
+            except ValueError:
+                continue
+        if valid:
+            service_names = {
+                str(sid): name
+                for sid, name in await db.execute(
+                    select(ServiceType.id, ServiceType.name).where(ServiceType.id.in_(valid))
+                )
+            }
     out = []
     for u in users:
         profile = profiles.get(u.id)
@@ -145,6 +164,16 @@ async def to_out(db: AsyncSession, users: list[User]) -> list[TechnicianOut]:
                 base_source=u.base_source,  # type: ignore[arg-type]
                 base_visits=u.base_visits or 0,
                 last_visit_at=u.last_visit_at,
+                address_line=u.address_line,
+                address_district=u.address_district,
+                address_zip=u.address_zip,
+                work_schedule=u.work_schedule or None,
+                services=[
+                    {"id": sid, "name": service_names[str(sid)]}
+                    for sid in (u.service_type_ids or [])
+                    if str(sid) in service_names
+                ],
+                legacy=u.legacy,
             )
         )
     return out
@@ -162,16 +191,16 @@ async def list_technicians(
     region = technician_regions.region_filter(state, city)
     if region is not None:
         stmt = stmt.where(region)
-    if q:
-        term = f"%{q.strip()}%"
-        stmt = stmt.where(
-            or_(User.name.ilike(term), User.email.ilike(term), User.phone.ilike(term))
-        )
+    # Busca por palavras: cada uma em nome, e-mail ou telefone, em qualquer ordem e sem acento.
+    matched = search.all_words(q, [User.name, User.email], digit_columns=[User.phone])
+    if matched is not None:
+        stmt = stmt.where(matched)
     if team_id is not None:
         stmt = stmt.where(User.team_id == team_id)
     if active is not None:
         stmt = stmt.where(User.is_active.is_(active))
-    users = list(await db.scalars(stmt.order_by(User.name).limit(1000)))
+    order = [search.rank(q, User.name), User.name] if matched is not None else [User.name]
+    users = list(await db.scalars(stmt.order_by(*order).limit(1000)))
     return await to_out(db, users)
 
 
@@ -202,6 +231,22 @@ async def create(db: AsyncSession, data: TechnicianCreate) -> tuple[User, str]:
 
 async def update(db: AsyncSession, user: User, data: TechnicianUpdate) -> User:
     fields = data.model_dump(exclude_unset=True)
+    if fields.get("service_type_ids") is not None:
+        wanted = list(dict.fromkeys(fields["service_type_ids"]))
+        found = set(await db.scalars(select(ServiceType.id).where(ServiceType.id.in_(wanted))))
+        if len(found) != len(wanted):
+            raise WorkflowError("Tipo de serviço não encontrado")
+        fields["service_type_ids"] = [str(sid) for sid in wanted]
+    elif "service_type_ids" in fields:
+        fields["service_type_ids"] = []
+    if "work_schedule" in fields and fields["work_schedule"] is not None:
+        schedule = fields["work_schedule"]
+        fields["work_schedule"] = schedule if any(schedule.values()) else None
+    if isinstance(fields.get("address_zip"), str):
+        zip_digits = re.sub(r"\D", "", fields["address_zip"])
+        fields["address_zip"] = (
+            f"{zip_digits[:5]}-{zip_digits[5:]}" if len(zip_digits) == 8 else zip_digits or None
+        )
     if fields.get("email") and await _email_in_use(db, fields["email"], exclude=user.id):
         raise WorkflowError("E-mail já cadastrado")
     if "team_id" in fields:
@@ -216,6 +261,8 @@ async def update(db: AsyncSession, user: User, data: TechnicianUpdate) -> User:
             "home_city",
             "home_state",
             "coverage_area",
+            "address_line",
+            "address_district",
         ) and isinstance(value, str):
             value = value.strip() or None
         if key == "name" and not value:
