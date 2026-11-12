@@ -554,9 +554,7 @@ async def test_service_type_estimate_learns(
     assert (st["observed_count"], st["suggested_minutes"]) == (0, None)
 
     # A OS herda a estimativa do tipo; agendar só com o início usa a estimativa para o fim.
-    t = await create(
-        client, world, service_type_id=st["id"], assignee_id=str(world.tech.user.id)
-    )
+    t = await create(client, world, service_type_id=st["id"], assignee_id=str(world.tech.user.id))
     assert t["estimated_minutes"] == 20
     assert t["service_type"]["name"] == "Impressora A4 - Instalação"
     start = datetime(2026, 12, 1, 13, 0, tzinfo=UTC)

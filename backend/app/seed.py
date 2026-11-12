@@ -27,7 +27,16 @@ from app.core.enums import (
 from app.core.security import hash_password
 from app.db.base import utcnow
 from app.db.session import SessionLocal
-from app.models import Asset, Category, Customer, Location, SlaPolicy, Team, User
+from app.models import (
+    Asset,
+    Category,
+    Customer,
+    Location,
+    ServiceType,
+    SlaPolicy,
+    Team,
+    User,
+)
 from app.schemas.ticket import CommentCreate, TicketCreate, TicketTransition, WorklogCreate
 from app.services import sla
 from app.services import tickets as svc
@@ -610,10 +619,96 @@ async def seed() -> None:
         await backdate(t11, 12)
 
         db.info.clear()  # sem bus/WebSocket no seed
+        await seed_service_types(db)
         print("Seed aplicado. Usuários de exemplo (senha = SEED_PASSWORD):")
         for u in (admin, supervisor, carlos, rafael, juliana, bruno, requester):
             print(f"  {u.role.value:<10} {u.email}")
 
 
+SERVICE_TYPES = [
+    # (nome, minutos estimados, categoria "Pai/Filha" ou None, cliente ou None = todos)
+    ("Impressora A4 - Instalação", 20, "Impressoras/Instalação e configuração", None),
+    ("Impressora - Atolamento e limpeza", 45, "Impressoras/Atolamento de papel", None),
+    ("Computador - Diagnóstico", 60, "Computadores e notebooks/Não liga", None),
+    (
+        "Formatação de computador",
+        120,
+        "Computadores e notebooks/Formatação / sistema operacional",
+        None,
+    ),
+    ("Ponto de rede - Cabeamento", 90, "Redes/Cabeamento estruturado", None),
+    ("Câmera - Instalação", 120, "CFTV/Instalação de câmera", None),
+    ("DVR/NVR - Manutenção", 60, "CFTV/DVR/NVR sem gravação", None),
+    ("Preventiva de notebook", 30, "Computadores e notebooks/Lentidão", None),
+    ("Preventiva de loja - Maxx Group", 240, None, "Maxx Group - Matriz"),
+    ("Preventiva CFTV - Clínica Vida Saudável", 90, "CFTV/Câmera offline", "Clínica Vida Saudável"),
+]
+
+# Instalações reais da "Impressora A4" (minutos): o tipo diz 20 min, como no Field Control.
+HISTORICAL_A4_MINUTES = (235, 130, 185)
+
+
+async def seed_service_types(db) -> int:  # noqa: ANN001
+    """Catálogo de tipos de serviço + histórico que faz a estimativa "aprender". Idempotente."""
+    if await db.scalar(select(ServiceType.id).limit(1)) is not None:
+        print("Tipos de serviço já existem; nada a fazer.")
+        return 0
+    categories = {c.full_name.replace(" > ", "/"): c for c in await db.scalars(select(Category))}
+    customers = {c.name: c for c in await db.scalars(select(Customer))}
+    created: dict[str, ServiceType] = {}
+    for name, minutes, category, customer in SERVICE_TYPES:
+        st = ServiceType(
+            name=name,
+            estimated_minutes=minutes,
+            category_id=categories[category].id if category in categories else None,
+            customer_id=customers[customer].id if customer in customers else None,
+            is_active=True,
+        )
+        db.add(st)
+        created[name] = st
+    await db.commit()
+
+    supervisor = await db.scalar(select(User).where(User.email == "supervisor@exemplo.com.br"))
+    carlos = await db.scalar(select(User).where(User.email == "carlos@exemplo.com.br"))
+    sede = await db.scalar(select(Location).where(Location.name == "Sede - São Paulo"))
+    if supervisor and carlos and sede:
+        a4 = created["Impressora A4 - Instalação"]
+        for i, minutes in enumerate(HISTORICAL_A4_MINUTES, start=1):
+            t = await svc.create_ticket(
+                db,
+                TicketCreate(
+                    title=f"Instalar impressora A4 - estação {i}",
+                    service_type_id=a4.id,
+                    location_id=sede.id,
+                    assignee_id=carlos.id,
+                    type=TicketType.INSTALLATION,
+                ),
+                supervisor,
+            )
+            await db.commit()
+            t = await svc.get_ticket(db, t.id)
+            for actor, to, kw in (
+                (carlos, TicketStatus.IN_PROGRESS, {}),
+                (carlos, TicketStatus.RESOLVED, {"resolution_notes": "Instalada e testada"}),
+                (supervisor, TicketStatus.CLOSED, {}),
+            ):
+                await svc.transition_ticket(db, t, TicketTransition(to_status=to, **kw), actor)
+                await db.commit()
+                t = await svc.get_ticket(db, t.id)
+            t.work_seconds = minutes * 60
+            await db.commit()
+    db.info.clear()
+    print(f"Tipos de serviço criados: {len(created)}")
+    return len(created)
+
+
+async def _catalog_only() -> None:
+    if settings.is_production:
+        sys.exit("Seed recusado: ENVIRONMENT=production")
+    async with SessionLocal() as db:
+        await seed_service_types(db)
+
+
 if __name__ == "__main__":
-    asyncio.run(seed())
+    # `python -m app.seed --catalogo` completa um banco já populado só com os tipos de serviço.
+    asyncio.run(_catalog_only() if "--catalogo" in sys.argv else seed())

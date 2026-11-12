@@ -16,9 +16,9 @@ from app.core.enums import (
     TicketType,
     Urgency,
 )
+from app.db.base import utcnow
 from app.schemas.common import ORMModel, Ref
 from app.schemas.user import UserRef
-from app.db.base import utcnow
 from app.services.durations import actual_seconds
 from app.services.sla import compute_sla_status
 

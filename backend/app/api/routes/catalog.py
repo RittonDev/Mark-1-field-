@@ -186,9 +186,7 @@ async def _check_service_type_refs(
         raise HTTPException(422, "Categoria não encontrada")
 
 
-@router.post(
-    "/service-types", response_model=ServiceTypeOut, status_code=status.HTTP_201_CREATED
-)
+@router.post("/service-types", response_model=ServiceTypeOut, status_code=status.HTTP_201_CREATED)
 async def create_service_type(
     body: ServiceTypeCreate, db: DB, _: TicketManagerUser
 ) -> ServiceTypeOut:
