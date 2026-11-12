@@ -11,26 +11,9 @@ import {
   type TextInputProps,
   type ViewStyle,
 } from "react-native";
-import { LIGHT, readable, tint, useStyles, useTheme, type Palette } from "../theme/theme";
+import { readable, tint, useStyles, useTheme, type Palette } from "../theme/theme";
 
 export { tint };
-
-/**
- * @deprecated Cores fixas do tema claro, só para telas ainda não migradas. Use `useTheme()`.
- */
-export const colors = {
-  brand: LIGHT.primary,
-  brandStrong: LIGHT.primaryPressed,
-  canvas: LIGHT.canvas,
-  surface: LIGHT.surface,
-  surface2: LIGHT.surface2,
-  line: LIGHT.line,
-  ink: LIGHT.ink,
-  inkMuted: LIGHT.inkMuted,
-  danger: LIGHT.danger,
-  success: LIGHT.success,
-  warning: LIGHT.warning,
-};
 
 type ButtonVariant = "primary" | "secondary" | "danger" | "ghost";
 

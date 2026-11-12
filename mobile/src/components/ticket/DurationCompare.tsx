@@ -1,4 +1,4 @@
-import { useStyles, useTheme, type Palette } from "../../theme/theme";
+import { useStyles, type Palette } from "../../theme/theme";
 import { StyleSheet, Text, View } from "react-native";
 import { durationSummary } from "../../lib/duration";
 import { formatMinutes } from "../../lib/format";
@@ -9,7 +9,6 @@ import type { TicketDetail } from "../../lib/types";
  * Em atendimento, o real conta com o relógio do aparelho (funciona offline).
  */
 export function DurationCompare({ ticket, now }: { ticket: TicketDetail; now: number }) {
-  const c = useTheme();
   const styles = useStyles(makeStyles);
   const d = durationSummary(ticket, now);
   return (

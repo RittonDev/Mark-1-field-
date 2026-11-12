@@ -87,3 +87,104 @@ select {
 ::selection {
   background: color-mix(in srgb, var(--brand) 25%, transparent);
 }
+
+/* Mapa ao vivo (Leaflet): marcadores dos técnicos e ajustes do tema escuro. */
+.mf-map.leaflet-container {
+  background: var(--surface-2);
+  font: inherit;
+  z-index: 0;
+}
+.mf-pin {
+  position: relative;
+  display: flex;
+  height: 34px;
+  width: 34px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  border: 3px solid var(--surface);
+  background: var(--c);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  box-shadow: 0 2px 8px rgb(16 24 40 / 0.3);
+  transition: transform 150ms ease;
+}
+.mf-pin span {
+  position: relative;
+}
+.mf-pin.is-selected {
+  transform: scale(1.15);
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--c) 35%, transparent),
+    0 2px 8px rgb(16 24 40 / 0.3);
+}
+.mf-pin.is-moving::before {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  border-radius: 9999px;
+  border: 2px solid var(--c);
+  animation: mf-pulse 2s ease-out infinite;
+}
+.mf-heading {
+  position: absolute;
+  inset: -12px;
+  pointer-events: none;
+}
+.mf-heading::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-bottom: 8px solid var(--c);
+}
+.mf-dest {
+  height: 14px;
+  width: 14px;
+  transform: rotate(45deg);
+  border-radius: 3px;
+  border: 3px solid var(--c);
+  background: var(--surface);
+  box-shadow: 0 1px 4px rgb(16 24 40 / 0.35);
+}
+@keyframes mf-pulse {
+  from {
+    opacity: 0.7;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.6);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mf-pin.is-moving::before {
+    animation: none;
+    opacity: 0.5;
+  }
+}
+[data-theme="dark"] .leaflet-tooltip {
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--ink);
+}
+[data-theme="dark"] .leaflet-tooltip-top::before {
+  border-top-color: var(--surface);
+}
+[data-theme="dark"] .leaflet-bar a {
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--ink);
+}
+[data-theme="dark"] .leaflet-control-attribution {
+  background: rgb(0 0 0 / 0.55);
+  color: #cbd5e1;
+}
+[data-theme="dark"] .leaflet-control-attribution a {
+  color: #a5b4fc;
+}

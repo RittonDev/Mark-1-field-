@@ -1,8 +1,15 @@
-import { useStyles, useTheme, type Palette } from "../theme/theme";
 import { router } from "expo-router";
 import { useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
-import { Badge, Button, Card, EmptyState, InfoRow, SectionTitle } from "../components/ui";
+import { Badge, Button, Card, EmptyState, InfoRow, SectionTitle, Segmented } from "../components/ui";
+import {
+  setThemePreference,
+  useStyles,
+  useTheme,
+  useThemePreference,
+  type Palette,
+  type ThemePreference,
+} from "../theme/theme";
 import { getDeviceRegistration, logout } from "../lib/auth";
 import { useDataVersion, useLiveQuery } from "../lib/changes";
 import { APP_VERSION } from "../lib/config";
@@ -32,6 +39,7 @@ export default function AccountScreen() {
   useDataVersion(); // re-renderiza quando o registro do aparelho termina
   const registration = getDeviceRegistration();
   const [syncing, setSyncing] = useState(false);
+  const themePreference = useThemePreference();
 
   if (!user) return null;
 
@@ -143,6 +151,20 @@ export default function AccountScreen() {
             </View>
           ))
         )}
+      </Card>
+
+      <Card style={{ gap: 10 }}>
+        <SectionTitle>Aparência</SectionTitle>
+        <Segmented<ThemePreference>
+          value={themePreference}
+          onChange={(value) => void setThemePreference(value)}
+          options={[
+            { value: "system", label: "Sistema" },
+            { value: "light", label: "Claro" },
+            { value: "dark", label: "Escuro" },
+          ]}
+        />
+        <Text style={styles.muted}>Em “Sistema”, o app acompanha o modo claro/escuro do celular.</Text>
       </Card>
 
       <Card style={{ gap: 4 }}>

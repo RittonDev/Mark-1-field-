@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   LogOut,
   MapPin,
+  MapPinned,
   Settings,
   SquareKanban,
   Ticket,
@@ -32,6 +33,7 @@ interface NavItem {
 const NAV: NavItem[] = [
   { href: "/chamados", label: "Chamados", icon: Ticket, visible: () => true },
   { href: "/dia", label: "Atividades do dia", icon: CalendarClock, visible: isStaff },
+  { href: "/mapa", label: "Mapa ao vivo", icon: MapPinned, visible: canManageTickets },
   { href: "/quadro", label: "Quadro", icon: SquareKanban, visible: isStaff },
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, visible: isStaff },
   { href: "/clientes", label: "Clientes", icon: Building2, visible: isStaff },

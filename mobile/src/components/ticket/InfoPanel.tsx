@@ -1,4 +1,4 @@
-import { useStyles, useTheme, type Palette } from "../../theme/theme";
+import { useStyles, type Palette } from "../../theme/theme";
 import { StyleSheet, Text, View } from "react-native";
 import { ASSET_TYPE, LEVEL, RESPONSIBILITY, SLA_STATUS, TICKET_SOURCE, TICKET_TYPE } from "../../lib/constants";
 import { addressOf, callPhone, openInMaps } from "../../lib/device-actions";
@@ -9,7 +9,6 @@ import { Button, Card, InfoRow, SectionTitle } from "../ui";
 import { DurationCompare } from "./DurationCompare";
 
 export function InfoPanel({ ticket, now }: { ticket: LocalTicket; now: number }) {
-  const c = useTheme();
   const styles = useStyles(makeStyles);
   const location = ticket.location;
   const asset = ticket.asset;
