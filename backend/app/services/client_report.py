@@ -384,6 +384,7 @@ async def build(db: AsyncSession, ticket: Ticket, base_url: str) -> PublicReport
         requester_name=ticket.requester_name,
         service_type=ticket.service_type.name if ticket.service_type else None,
         technician=PublicReportPerson(name=ticket.assignee.name) if ticket.assignee else None,
+        helpers=[PublicReportPerson(name=h.name) for h in ticket.helpers],
         opened_at=ticket.created_at,
         scheduled_start=ticket.scheduled_start,
         scheduled_end=ticket.scheduled_end,

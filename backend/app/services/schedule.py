@@ -148,7 +148,15 @@ async def calendar(
         Ticket.status != TicketStatus.CANCELLED,
     )
     if f.assignee_ids:
-        clauses = [Ticket.assignee_id.in_(f.assignee_ids)]
+        # A agenda de cada técnico inclui as visitas em que ele vai junto.
+        clauses = [
+            Ticket.assignee_id.in_(f.assignee_ids),
+            Ticket.id.in_(
+                select(ticket_helpers.c.ticket_id).where(
+                    ticket_helpers.c.user_id.in_(f.assignee_ids)
+                )
+            ),
+        ]
         if f.unassigned:
             clauses.append(Ticket.assignee_id.is_(None))
         stmt = stmt.where(or_(*clauses))
@@ -205,6 +213,7 @@ async def calendar(
                 end=visit_end(t.scheduled_start, t.scheduled_end, t.estimated_minutes),
                 end_is_estimated=t.scheduled_end is None,
                 assignee={"id": t.assignee.id, "name": t.assignee.name} if t.assignee else None,
+                helpers=[{"id": h.id, "name": h.name} for h in t.helpers],
                 team={"id": t.team.id, "name": t.team.name} if t.team else None,
                 customer={"id": t.customer.id, "name": t.customer.name} if t.customer else None,
                 location={

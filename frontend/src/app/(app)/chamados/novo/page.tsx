@@ -308,8 +308,8 @@ export default function NewTicketPage() {
       >
         <div className="flex min-w-0 flex-col gap-4">
           <Section step={1} title="Onde" description="A loja define o cliente, o endereço e os técnicos sugeridos">
-            <div className="grid gap-4 md:grid-cols-3">
-              <Field label="Loja (local de atendimento)" className="md:col-span-2">
+            <div className="grid gap-4 xl:grid-cols-3">
+              <Field label="Loja (local de atendimento)" className="xl:col-span-2">
                 <LocationPicker
                   customerId={form.customer_id || null}
                   value={location}
@@ -343,7 +343,7 @@ export default function NewTicketPage() {
               </Field>
 
               {form.location_id ? (
-                <div className="flex flex-col gap-2 rounded-lg border border-line bg-surface-2/60 px-3.5 py-3 md:col-span-3">
+                <div className="flex flex-col gap-2 rounded-lg border border-line bg-surface-2/60 px-3.5 py-3 xl:col-span-3">
                   <p className="text-xs font-medium text-ink-subtle">Endereço da OS</p>
                   <p className="text-sm text-ink">{address || (intake.isLoading ? "Carregando..." : "Loja sem endereço no cadastro")}</p>
                   <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-ink-muted">
@@ -369,7 +369,7 @@ export default function NewTicketPage() {
               ) : null}
 
               {openAtLocation.data && openAtLocation.data.total > 0 ? (
-                <div className="animate-enter rounded-lg border border-amber-200 bg-amber-50/70 p-3 md:col-span-3 dark:border-amber-500/30 dark:bg-amber-500/10">
+                <div className="animate-enter rounded-lg border border-amber-200 bg-amber-50/70 p-3 xl:col-span-3 dark:border-amber-500/30 dark:bg-amber-500/10">
                   <p className="flex items-center gap-1.5 text-sm font-medium text-amber-900 dark:text-amber-200">
                     <TriangleAlert className="size-4" />
                     {openAtLocation.data.total === 1

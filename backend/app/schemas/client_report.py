@@ -81,6 +81,8 @@ class PublicReport(BaseModel):
     requester_name: str | None = None
     service_type: str | None = None
     technician: PublicReportPerson | None = None
+    # Outros técnicos que foram à visita.
+    helpers: list[PublicReportPerson] = []
     opened_at: datetime
     scheduled_start: datetime | None = None
     scheduled_end: datetime | None = None

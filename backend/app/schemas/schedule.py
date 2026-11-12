@@ -37,6 +37,8 @@ class CalendarEvent(BaseModel):
     # Sem fim informado: o fim vem da estimativa do tipo de serviço (ou 1 hora).
     end_is_estimated: bool
     assignee: Ref | None
+    # Outros técnicos da visita: a OS aparece também na agenda deles.
+    helpers: list[Ref] = []
     team: Ref | None
     customer: Ref | None
     location: CalendarLocation | None

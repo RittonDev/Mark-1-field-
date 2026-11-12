@@ -719,6 +719,8 @@ export interface CalendarEvent {
   end: ISODate;
   end_is_estimated: boolean;
   assignee: Ref | null;
+  /** Outros técnicos da visita (a OS aparece também na agenda deles). */
+  helpers?: Ref[];
   team: Ref | null;
   customer: Ref | null;
   location: { id: UUID; name: string; city: string | null } | null;
@@ -1253,6 +1255,8 @@ export interface PublicReport {
   requester_name: string | null;
   service_type: string | null;
   technician: { name: string } | null;
+  /** Outros técnicos que foram à visita. */
+  helpers?: { name: string }[];
   opened_at: ISODate;
   scheduled_start: ISODate | null;
   scheduled_end: ISODate | null;

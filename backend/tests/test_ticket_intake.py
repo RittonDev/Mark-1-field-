@@ -260,6 +260,60 @@ async def test_suggestions_for_a_new_ticket(client: AsyncClient, world: World) -
     assert r.status_code == 422
 
 
+async def test_helpers_show_up_in_agenda_day_report_and_messages(
+    client: AsyncClient, engine: AsyncEngine, world: World
+) -> None:
+    an = world.analyst.headers
+    tech, other = str(world.tech.user.id), str(world.tech_other.user.id)
+    start = _tomorrow(9)
+    t = await create(
+        client,
+        world,
+        title="Rack novo",
+        assignee_id=tech,
+        helper_ids=[other],
+        scheduled_start=start.isoformat(),
+        estimated_minutes=60,
+    )
+
+    # Agenda filtrada pelo técnico que vai junto: a visita aparece, com a equipe.
+    window = {"start": (start - timedelta(hours=1)).isoformat(), "end": (start + timedelta(hours=3)).isoformat()}
+    events = (
+        await client.get(f"{API}/calendar", params={**window, "assignee_id": other}, headers=an)
+    ).json()
+    assert [e["id"] for e in events] == [t["id"]]
+    assert events[0]["helpers"] == [{"id": other, "name": "Redes"}]
+
+    # Atividades do dia dele também.
+    day = (
+        await client.get(
+            f"{API}/activities/day",
+            params={"date": start.date().isoformat(), "assignee_id": other},
+            headers=an,
+        )
+    ).json()
+    assert [a["ticket"]["id"] for a in day["activities"]] == [t["id"]]
+
+    # Texto do WhatsApp com a equipe da visita.
+    custom = {"templates": [{"name": "Equipe", "body": "Vão {equipe}"}]}
+    await client.put(f"{API}/message-templates", json=custom, headers=an)
+    msgs = (await client.get(f"{API}/tickets/{t['id']}/messages", headers=an)).json()
+    assert msgs[0]["text"] == "Vão Tecnico e Redes"
+
+    # Relatório do cliente (OS concluída): o responsável e quem foi junto.
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as db:
+        ticket = await db.get(Ticket, uuid.UUID(t["id"]))
+        assert ticket is not None
+        ticket.status = TicketStatus.CLOSED
+        ticket.resolved_at = ticket.closed_at = datetime.now(UTC)
+        await db.commit()
+    link = (await client.post(f"{API}/tickets/{t['id']}/report-link", headers=an)).json()
+    report = (await client.get(f"{API}/public/reports/{link['token']}")).json()
+    assert report["technician"]["name"] == "Tecnico"
+    assert report["helpers"] == [{"name": "Redes"}]
+
+
 def test_realtime_and_push_reach_helpers() -> None:
     helper, actor = str(uuid.uuid4()), str(uuid.uuid4())
     event = {"audience": {"assignee_id": None, "helper_ids": [helper]}}

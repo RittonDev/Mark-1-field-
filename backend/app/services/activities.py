@@ -23,6 +23,7 @@ from app.models import Ticket, TicketEvent, User
 from app.schemas.activities import Activity, ActivityState, DayActivities, DaySummary
 from app.schemas.ticket import TicketListItem
 from app.services.durations import actual_seconds
+from app.services.schedule import works_on
 from app.services.tickets import visibility_clause
 from app.services.workflow import SLA_PAUSED_STATUSES
 
@@ -105,7 +106,8 @@ async def day_activities(
     if vis is not None:
         conds.append(vis)
     if assignee_id is not None:
-        conds.append(Ticket.assignee_id == assignee_id)
+        # O dia do técnico inclui as visitas em que ele vai junto.
+        conds.append(works_on(assignee_id))
     if team_id is not None:
         conds.append(Ticket.team_id == team_id)
     tickets = list(await db.scalars(select(Ticket).where(*conds)))

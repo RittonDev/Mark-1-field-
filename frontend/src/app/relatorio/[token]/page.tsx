@@ -348,6 +348,9 @@ export default function PublicReportPage() {
                   <div className="min-w-0">
                     <p className="text-[11px] text-ink-subtle">Técnico responsável</p>
                     <p className="truncate text-sm font-semibold text-ink">{report.technician?.name ?? "Sem técnico"}</p>
+                    {report.helpers?.length ? (
+                      <p className="truncate text-xs text-ink-muted">com {report.helpers.map((h) => h.name).join(", ")}</p>
+                    ) : null}
                   </div>
                 </div>
                 <Tile icon={CalendarDays} label="Data">

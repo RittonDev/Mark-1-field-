@@ -151,6 +151,9 @@ export function ReportPdf({ report }: { report: PublicReport }) {
             <View style={s.tile}>
               <Text style={s.tileLabel}>Técnico</Text>
               <Text style={s.tileValue}>{report.technician?.name ?? "—"}</Text>
+              {report.helpers?.length ? (
+                <Text style={s.tileLabel}>com {report.helpers.map((h) => h.name).join(", ")}</Text>
+              ) : null}
             </View>
             <View style={s.tile}>
               <Text style={s.tileLabel}>Data</Text>

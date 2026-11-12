@@ -75,8 +75,9 @@ function Delay({ minutes }: { minutes: number | null }) {
   );
 }
 
-function ActivityRow({ a, day, manage }: { a: Activity; day: string; manage: boolean }) {
+function ActivityRow({ a, along, day, manage }: { a: Activity; along?: string | null; day: string; manage: boolean }) {
   const t = a.ticket;
+  const helpers = t.helpers ?? [];
   const loc = t.location;
   const ratio = a.estimated_minutes && a.actual_minutes > 0 ? a.actual_minutes / a.estimated_minutes : null;
   return (
@@ -120,6 +121,13 @@ function ActivityRow({ a, day, manage }: { a: Activity; day: string; manage: boo
           <span className="text-sm font-medium text-ink group-hover:text-brand">{t.title}</span>
         </Link>
         {a.service_type_name ? <p className="text-xs text-ink-muted">{a.service_type_name}</p> : null}
+        {along ? (
+          <p className="mt-0.5 inline-flex items-center gap-1 rounded-md bg-emerald-50 px-1.5 py-px text-[11px] font-medium text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-200">
+            Vai junto · responsável: {along}
+          </p>
+        ) : helpers.length ? (
+          <p className="text-xs text-ink-muted">Com {helpers.map((h) => h.name.split(" ")[0]).join(", ")}</p>
+        ) : null}
       </td>
       <td className="px-3 py-2.5 text-sm">
         {loc ? (
@@ -170,14 +178,17 @@ export default function DayPage() {
   const query = useDayActivities(day, teamId || null);
   const data = query.data;
 
+  // Um bloco por técnico; a visita entra também no dia de quem vai junto (marcada como tal).
   const groups = useMemo(() => {
-    const map = new Map<string, { name: string; items: Activity[] }>();
+    const map = new Map<string, { name: string; items: { a: Activity; along: string | null }[] }>();
+    const add = (key: string, name: string, a: Activity, along: string | null) => {
+      if (!map.has(key)) map.set(key, { name, items: [] });
+      map.get(key)!.items.push({ a, along });
+    };
     for (const a of data?.activities ?? []) {
       if (stateFilter && a.state !== stateFilter) continue;
-      const key = a.ticket.assignee?.id ?? "none";
-      const name = a.ticket.assignee?.name ?? "Sem técnico";
-      if (!map.has(key)) map.set(key, { name, items: [] });
-      map.get(key)!.items.push(a);
+      add(a.ticket.assignee?.id ?? "none", a.ticket.assignee?.name ?? "Sem técnico", a, null);
+      for (const h of a.ticket.helpers ?? []) add(h.id, h.name, a, a.ticket.assignee?.name ?? "sem responsável");
     }
     return [...map.entries()];
   }, [data, stateFilter]);
@@ -264,7 +275,7 @@ export default function DayPage() {
       ) : (
         <div className="space-y-4">
           {groups.map(([key, group]) => {
-            const done = group.items.filter((a) => a.state === "done").length;
+            const done = group.items.filter(({ a }) => a.state === "done").length;
             return (
               <Card key={key} className="animate-enter overflow-hidden">
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3">
@@ -307,8 +318,8 @@ export default function DayPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {group.items.map((a) => (
-                        <ActivityRow key={a.ticket.id} a={a} day={day} manage={manage} />
+                      {group.items.map(({ a, along }) => (
+                        <ActivityRow key={a.ticket.id} a={a} along={along} day={day} manage={manage} />
                       ))}
                     </tbody>
                   </table>

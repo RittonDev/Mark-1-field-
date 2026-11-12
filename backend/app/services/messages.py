@@ -33,6 +33,7 @@ LIVE_WINDOW = timedelta(minutes=30)
 
 VARIABLES: dict[str, str] = {
     "tecnico": "Nome do técnico responsável",
+    "equipe": "Técnicos da visita (o responsável e quem vai junto)",
     "tecnico_telefone": "Telefone do técnico",
     "os": "Código da OS (ex.: OS-000123)",
     "titulo": "Título da OS",
@@ -227,8 +228,14 @@ async def context(db: AsyncSession, ticket: Ticket, actor: User) -> dict[str, st
     )
     priority = PRIORITY_INFO[ticket.priority]
     local_now = _local(now)
+    team = [p.name for p in ([assignee] if assignee else []) + list(ticket.helpers)]
     values: dict[str, Any] = {
         "tecnico": assignee.name if assignee else "(técnico a definir)",
+        "equipe": (
+            " e ".join([", ".join(team[:-1]), team[-1]]) if len(team) > 1 else team[0]
+        )
+        if team
+        else "(técnico a definir)",
         "tecnico_telefone": (assignee.phone if assignee else None) or "",
         "os": format_ticket_code(ticket.number),
         "titulo": ticket.title,

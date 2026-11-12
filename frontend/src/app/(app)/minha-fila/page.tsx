@@ -165,6 +165,11 @@ function QueueRow({ item, index, compact }: { item: QueueItem; index: number; co
           <span className="inline-flex items-center gap-1">
             <HardHat className="size-3.5 shrink-0 text-ink-subtle" />
             {technician ? technician.name : <span className="text-amber-700 dark:text-amber-400">Sem técnico</span>}
+            {item.helpers?.length ? (
+              <span className="text-emerald-700 dark:text-emerald-400" title={`Junto: ${item.helpers.map((h) => h.name).join(", ")}`}>
+                +{item.helpers.length}
+              </span>
+            ) : null}
           </span>
           {item.scheduled_start && item.section !== "today" ? (
             <span className="inline-flex items-center gap-1">
@@ -255,6 +260,11 @@ function TodayTimeline({ items }: { items: QueueItem[] }) {
                 <span className="inline-flex items-center gap-1">
                   <HardHat className="size-3.5 shrink-0 text-ink-subtle" />
                   {technician ? technician.name : <span className="text-amber-700 dark:text-amber-400">Sem técnico</span>}
+            {item.helpers?.length ? (
+              <span className="text-emerald-700 dark:text-emerald-400" title={`Junto: ${item.helpers.map((h) => h.name).join(", ")}`}>
+                +{item.helpers.length}
+              </span>
+            ) : null}
                 </span>
                 {past ? (
                   <span className="inline-flex items-center gap-1 font-medium text-red-600 dark:text-red-400">

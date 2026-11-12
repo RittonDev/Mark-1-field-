@@ -422,7 +422,17 @@ function TicketsView() {
                       </Td>
                       <Td>
                         {t.assignee ? (
-                          <span className="whitespace-nowrap">{t.assignee.name}</span>
+                          <span className="whitespace-nowrap">
+                            {t.assignee.name}
+                            {t.helpers?.length ? (
+                              <span
+                                className="ml-1.5 rounded-full bg-emerald-50 px-1.5 py-px text-[11px] font-medium text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-200"
+                                title={`Junto: ${t.helpers.map((h) => h.name).join(", ")}`}
+                              >
+                                +{t.helpers.length}
+                              </span>
+                            ) : null}
+                          </span>
                         ) : (
                           <span className="text-xs font-medium text-amber-700 dark:text-amber-400">Sem atribuição</span>
                         )}

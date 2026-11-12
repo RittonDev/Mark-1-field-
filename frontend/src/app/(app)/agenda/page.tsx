@@ -376,10 +376,14 @@ function dayColumns(
   const extra = new Map<string, string>();
   onDay.forEach((e) => {
     if (e.assignee && !known.has(e.assignee.id)) extra.set(e.assignee.id, e.assignee.name);
+    // Quem vai junto também tem a visita na agenda dele.
+    e.helpers?.forEach((h) => {
+      if (!known.has(h.id)) extra.set(h.id, h.name);
+    });
   });
   const people = [...shown, ...[...extra].map(([id, name]) => ({ id, name }))];
   const cols: GridColumn[] = people.map((p) => {
-    const mine = onDay.filter((e) => e.assignee?.id === p.id);
+    const mine = onDay.filter((e) => e.assignee?.id === p.id || e.helpers?.some((h) => h.id === p.id));
     const clash = mine.some((e) => e.conflict_with.length > 0);
     return {
       key: p.id,
@@ -473,6 +477,9 @@ function EventDialog({
         <Row icon={<UserIcon className="size-4" />}>
           {event.assignee?.name ?? <span className="text-ink-muted">Sem responsável</span>}
           {event.team ? <span className="text-ink-muted"> · {event.team.name}</span> : null}
+          {event.helpers?.length ? (
+            <span className="block text-xs text-ink-muted">Junto: {event.helpers.map((h) => h.name).join(", ")}</span>
+          ) : null}
         </Row>
         {event.customer ? <Row icon={<Building2 className="size-4" />}>{event.customer.name}</Row> : null}
         {event.location ? (
