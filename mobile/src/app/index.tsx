@@ -124,6 +124,19 @@ export default function MyTicketsScreen() {
             </>
           }
           ListEmptyComponent={tab === "agenda" ? undefined : empty}
+          ListFooterComponent={
+            tab === "today" && lists.reschedule.length ? (
+              <View style={styles.footerSection}>
+                <Text style={styles.footerTitle}>Aguardando reagendamento pela central</Text>
+                <Text style={styles.footerHint}>Visita improdutiva registrada. A OS volta para a agenda quando for reagendada.</Text>
+                {lists.reschedule.map((ticket) => (
+                  <View key={ticket.id} style={styles.footerItem}>
+                    <TicketCard ticket={ticket} now={now} />
+                  </View>
+                ))}
+              </View>
+            ) : null
+          }
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} colors={[c.primary]} tintColor={c.primary} />}
           contentContainerStyle={styles.list}
         />
@@ -142,5 +155,9 @@ const makeStyles = (c: Palette) =>
     noticeText: { color: c.danger, fontSize: 13, fontWeight: "600" },
     item: { paddingHorizontal: 16, paddingBottom: 10 },
     calendar: { paddingHorizontal: 16 },
+    footerSection: { paddingHorizontal: 16, paddingTop: 12, gap: 6 },
+    footerTitle: { fontSize: 12, fontWeight: "700", color: c.inkMuted, textTransform: "uppercase", letterSpacing: 0.5 },
+    footerHint: { fontSize: 12, color: c.inkSubtle, marginBottom: 4 },
+    footerItem: { paddingBottom: 10, opacity: 0.85 },
     headerLink: { color: c.primary, fontSize: 16, fontWeight: "600" },
   });

@@ -79,6 +79,8 @@ export default function TicketScreen() {
   // O técnico só trabalha nas OS atribuídas a ele pelo analista (não há "assumir").
   const isMine = current.assignee?.id === user.id;
   const conclude = concludeBlock(current, (pendingSignatures ?? []).length > 0);
+  // Visita improdutiva: só o responsável, com a OS atribuída, agendada, em deslocamento ou em atendimento.
+  const canUnproductive = isMine && UNPRODUCTIVE_FROM.includes(current.status);
 
   async function refresh() {
     setRefreshing(true);

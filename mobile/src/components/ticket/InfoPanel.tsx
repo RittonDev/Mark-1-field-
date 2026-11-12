@@ -7,6 +7,7 @@ import { computeSlaStatus } from "../../lib/sla";
 import type { LocalTicket } from "../../lib/syncTypes";
 import { Button, Card, InfoRow, SectionTitle } from "../ui";
 import { DurationCompare } from "./DurationCompare";
+import { ExpensesCard } from "./ExpensesCard";
 
 export function InfoPanel({ ticket, now }: { ticket: LocalTicket; now: number }) {
   const styles = useStyles(makeStyles);
@@ -76,6 +77,8 @@ export function InfoPanel({ ticket, now }: { ticket: LocalTicket; now: number })
           <Text style={styles.label}>O tempo real conta sozinho enquanto a OS está em atendimento.</Text>
         </Card>
       ) : null}
+
+      <ExpensesCard expenses={ticket.expenses ?? []} />
 
       <Card>
         <SectionTitle>Descrição</SectionTitle>

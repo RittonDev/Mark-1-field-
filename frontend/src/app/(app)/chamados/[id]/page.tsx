@@ -14,6 +14,7 @@ import { EditTicketDialog } from "@/components/ticket/EditTicketDialog";
 import { ExpensesCard } from "@/components/ticket/ExpensesCard";
 import { FormsCard } from "@/components/ticket/FormsCard";
 import { HistoryTab } from "@/components/ticket/HistoryTab";
+import { QuotesCard } from "@/components/ticket/QuotesCard";
 import { SlaCard } from "@/components/ticket/SlaCard";
 import { TicketInfo } from "@/components/ticket/TicketInfo";
 import { TransitionDialog } from "@/components/ticket/TransitionDialog";
@@ -204,6 +205,8 @@ export default function TicketDetailPage() {
           </Card>
 
           <FormsCard ticket={ticket} />
+
+          <QuotesCard ticket={ticket} />
 
           <Card>
             <div className="flex gap-1 overflow-x-auto border-b border-line px-3">
