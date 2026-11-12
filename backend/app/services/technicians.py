@@ -48,6 +48,11 @@ IMPORT_ALIASES = {
     "equipe": "team",
     "cargo": "job_title",
     "funcao": "job_title",
+    "cidade": "home_city",
+    "uf": "home_state",
+    "estado": "home_state",
+    "regiao": "coverage_area",
+    "regiao_atendida": "coverage_area",
 }
 
 
@@ -121,6 +126,9 @@ async def to_out(db: AsyncSession, users: list[User]) -> list[TechnicianOut]:
                 phone=u.phone,
                 job_title=u.job_title,
                 team={"id": u.team.id, "name": u.team.name} if u.team else None,
+                home_city=u.home_city,
+                home_state=u.home_state,
+                coverage_area=u.coverage_area,
                 is_active=u.is_active,
                 last_login_at=u.last_login_at,
                 location_consent_at=u.location_consent_at,
@@ -168,6 +176,9 @@ async def create(db: AsyncSession, data: TechnicianCreate) -> tuple[User, str]:
         role=UserRole.TECHNICIAN,
         job_title=(data.job_title or "").strip() or "Técnico de campo",
         team_id=data.team_id,
+        home_city=(data.home_city or "").strip() or None,
+        home_state=(data.home_state or "").strip().upper() or None,
+        coverage_area=(data.coverage_area or "").strip() or None,
         is_active=True,
         must_change_password=True,
     )
@@ -183,7 +194,11 @@ async def update(db: AsyncSession, user: User, data: TechnicianUpdate) -> User:
     if "team_id" in fields:
         await _check_team(db, fields["team_id"])
     for key, value in fields.items():
-        if key in ("name", "phone", "job_title") and isinstance(value, str):
+        if key == "home_state" and isinstance(value, str):
+            value = value.strip().upper()
+        if key in ("name", "phone", "job_title", "home_city", "home_state", "coverage_area") and isinstance(
+            value, str
+        ):
             value = value.strip() or None
         if key == "name" and not value:
             continue
@@ -242,6 +257,9 @@ async def import_file(db: AsyncSession, filename: str, data: bytes, dry_run: boo
         phone = row.get("phone", "").strip() or None
         team_name = row.get("team", "").strip() or None
         job_title = row.get("job_title", "").strip() or None
+        home_city = row.get("home_city", "").strip() or None
+        home_state = row.get("home_state", "").strip().upper()[:2] or None
+        coverage_area = row.get("coverage_area", "").strip() or None
         errors = []
         if len(name) < 3:
             errors.append("Nome obrigatório")
@@ -285,6 +303,12 @@ async def import_file(db: AsyncSession, filename: str, data: bytes, dry_run: boo
                 current.team_id = team.id
             if job_title:
                 current.job_title = job_title
+            if home_city:
+                current.home_city = home_city
+            if home_state:
+                current.home_state = home_state
+            if coverage_area:
+                current.coverage_area = coverage_area
         else:
             password = temporary_password()
             # bcrypt é lento de propósito: fora do event loop para não travar a API.
@@ -299,6 +323,9 @@ async def import_file(db: AsyncSession, filename: str, data: bytes, dry_run: boo
                     role=UserRole.TECHNICIAN,
                     job_title=job_title or "Técnico de campo",
                     team_id=team.id if team else None,
+                    home_city=home_city,
+                    home_state=home_state,
+                    coverage_area=coverage_area,
                     is_active=True,
                     must_change_password=True,
                 )

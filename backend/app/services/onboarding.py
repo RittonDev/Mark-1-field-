@@ -188,6 +188,9 @@ async def approve(
         # Ele mesmo escolheu a senha na ficha: não precisa trocar no primeiro acesso.
         must_change_password=application.password_hash is None,
         avatar_key=application.photo_key,
+        home_city=application.city,
+        home_state=application.state,
+        coverage_area=application.coverage_area,
     )
     db.add(user)
     application.status = ApplicationStatus.APPROVED

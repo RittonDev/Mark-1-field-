@@ -15,6 +15,9 @@ class TechnicianOut(BaseModel):
     phone: str | None
     job_title: str | None
     team: Ref | None
+    home_city: str | None = None
+    home_state: str | None = None
+    coverage_area: str | None = None
     is_active: bool
     last_login_at: dt.datetime | None
     location_consent_at: dt.datetime | None
@@ -35,6 +38,9 @@ class TechnicianCreate(BaseModel):
     phone: str | None = Field(default=None, max_length=40)
     team_id: uuid.UUID | None = None
     job_title: str | None = Field(default=None, max_length=120)
+    home_city: str | None = Field(default=None, max_length=120)
+    home_state: str | None = Field(default=None, max_length=2)
+    coverage_area: str | None = Field(default=None, max_length=1000)
 
     @field_validator("email")
     @classmethod
@@ -48,6 +54,9 @@ class TechnicianUpdate(BaseModel):
     phone: str | None = Field(default=None, max_length=40)
     team_id: uuid.UUID | None = None
     job_title: str | None = Field(default=None, max_length=120)
+    home_city: str | None = Field(default=None, max_length=120)
+    home_state: str | None = Field(default=None, max_length=2)
+    coverage_area: str | None = Field(default=None, max_length=1000)
     is_active: bool | None = None
 
     @field_validator("email")

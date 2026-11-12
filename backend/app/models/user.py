@@ -48,6 +48,10 @@ class User(UUIDPrimaryKey, Timestamps, Base):
     avatar_key: Mapped[str | None] = mapped_column(String(255))
     # Tokens emitidos antes disto deixam de valer (troca/redefinição de senha, desativação).
     sessions_revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Onde o técnico mora e que região atende: base das sugestões de técnico por cidade.
+    home_city: Mapped[str | None] = mapped_column(String(120))
+    home_state: Mapped[str | None] = mapped_column(String(2))
+    coverage_area: Mapped[str | None] = mapped_column(Text)
     # Conta Microsoft (Entra ID) vinculada no primeiro login: "oid" do token.
     entra_oid: Mapped[str | None] = mapped_column(String(64), unique=True)
 
