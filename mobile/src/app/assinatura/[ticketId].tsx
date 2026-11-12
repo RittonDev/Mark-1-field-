@@ -16,12 +16,11 @@ import { exportSignature } from "../../lib/signatureImage";
 import { isOnline, queueSignature, useSyncStatus } from "../../lib/sync";
 import { haptic } from "../../lib/haptics";
 import { showSuccess } from "../../lib/success";
-import { useStyles, useTheme, type Palette } from "../../theme/theme";
+import { useStyles, type Palette } from "../../theme/theme";
 
 /** Assinatura do responsável no local (nome, cargo e o desenho). Funciona offline. */
 export default function SignatureScreen() {
   const { ticketId } = useLocalSearchParams<{ ticketId: string }>();
-  const c = useTheme();
   const styles = useStyles(makeStyles);
   const insets = useSafeAreaInsets();
   const online = isOnline(useSyncStatus());
