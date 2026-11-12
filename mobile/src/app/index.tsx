@@ -1,29 +1,42 @@
 import { router, Stack } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, View } from "react-native";
-import { Text } from "../components/Text";
-import { BrandLogo, BrandRule } from "../components/Brand";
+import { Pressable, RefreshControl, StyleSheet, View } from "react-native";
+import Animated from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { BrandLogo } from "../components/Brand";
 import { Calendar } from "../components/Calendar";
 import { ConnectionBar } from "../components/ConnectionBar";
+import { Icon } from "../components/Icon";
+import { PressableScale, useListMotion } from "../components/motion";
 import { ShiftCard } from "../components/ShiftCard";
-import { TicketCard } from "../components/TicketCard";
-import { EmptyState, Segmented } from "../components/ui";
+import { TicketListSkeleton } from "../components/Skeleton";
+import { TabBar } from "../components/TabBar";
+import { Text } from "../components/Text";
+import { TicketCard, TimelineRow } from "../components/TicketCard";
+import { EmptyState } from "../components/ui";
 import { useLiveQuery, useNow } from "../lib/changes";
 import { listNotices, listTickets } from "../lib/db";
-import { formatDay } from "../lib/format";
+import { formatDay, initials } from "../lib/format";
 import { buildLists } from "../lib/lists";
 import { useSession } from "../lib/session";
 import { requestSync, useSyncStatus } from "../lib/sync";
-import { shouldPromptConsent } from "../lib/tracking";
 import type { LocalTicket } from "../lib/syncTypes";
-import { useStyles, useTheme, type Palette } from "../theme/theme";
+import { shouldPromptConsent } from "../lib/tracking";
+import { RADIUS, tint, useStyles, useTheme, type Palette } from "../theme/theme";
 
 type Tab = "today" | "agenda" | "done";
+
+function greetingFor(date: Date) {
+  const hour = date.getHours();
+  return hour < 12 ? "Bom dia" : hour < 18 ? "Boa tarde" : "Boa noite";
+}
 
 export default function MyTicketsScreen() {
   const { user } = useSession();
   const c = useTheme();
   const styles = useStyles(makeStyles);
+  const insets = useSafeAreaInsets();
+  const motion = useListMotion();
   const tickets = useLiveQuery(listTickets);
   const notices = useLiveQuery(listNotices);
   const sync = useSyncStatus();
@@ -55,64 +68,81 @@ export default function MyTicketsScreen() {
 
   // A aba Agenda é o calendário (mês/semana); as outras são listas.
   const data = tab === "today" ? lists.today : tab === "done" ? lists.done : [];
+  const today = new Date(now);
+  const sectionTitle = tab === "today" ? "Agenda de hoje" : tab === "done" ? "Concluídas nos últimos 7 dias" : "Agenda";
 
   const header = (
     <View style={styles.header}>
-      <View style={{ gap: 6 }}>
-        <Text style={styles.date}>{formatDay(new Date(now))}</Text>
-        <Text style={styles.greeting}>Olá, {user.name.split(" ")[0]}</Text>
-        <BrandRule width={36} />
+      <View style={styles.topBar}>
+        <BrandLogo size="sm" underline={false} />
+        <PressableScale
+          onPress={() => router.push("/conta")}
+          accessibilityRole="button"
+          accessibilityLabel="Conta e sincronização"
+          hitSlop={8}
+          style={styles.avatar}
+          pressedStyle={{ backgroundColor: c.surface3 }}
+        >
+          <Text style={styles.avatarText}>{initials(user.name)}</Text>
+        </PressableScale>
+      </View>
+      <View style={{ gap: 4 }}>
+        <Text style={styles.greeting}>
+          {greetingFor(today)}, {user.name.split(" ")[0]}
+        </Text>
+        <Text style={styles.date}>{formatDay(today)}</Text>
       </View>
       <ShiftCard />
       {notices && notices.length > 0 ? (
         <Pressable onPress={() => router.push("/conta")} style={styles.notice} accessibilityRole="button">
+          <Icon name="alert" size={16} color={c.danger} />
           <Text style={styles.noticeText}>
             {notices.length === 1 ? "1 aviso de sincronização" : `${notices.length} avisos de sincronização`} — toque para ver
           </Text>
         </Pressable>
       ) : null}
-      <Segmented<Tab>
-        value={tab}
-        onChange={setTab}
-        options={[
-          { value: "today", label: "Hoje", count: lists.today.length },
-          { value: "agenda", label: "Agenda" },
-          { value: "done", label: "Concluídas", count: lists.done.length },
-        ]}
-      />
+      <View style={styles.sectionRow}>
+        <Text style={styles.sectionTitle}>{sectionTitle}</Text>
+        {tab !== "agenda" ? <Text style={styles.sectionCount}>{data.length}</Text> : null}
+      </View>
     </View>
   );
 
   const empty =
     tab === "today" ? (
-      <EmptyState title="Nada para hoje" description={emptyText ?? "Quando o analista atribuir uma OS a você, ela aparece aqui."} />
+      <EmptyState
+        icon="today"
+        title="Nada para hoje"
+        description={emptyText ?? "Quando o analista atribuir uma OS a você, ela aparece aqui."}
+      />
     ) : (
-      <EmptyState title="Nada concluído nos últimos 7 dias" description={emptyText} />
+      <EmptyState icon="checkCircle" title="Nada concluído nos últimos 7 dias" description={emptyText} />
     );
 
   return (
-    <View style={{ flex: 1 }}>
-      <Stack.Screen
-        options={{
-          headerTitle: () => <BrandLogo size="sm" underline={false} />,
-          headerRight: () => (
-            <Pressable onPress={() => router.push("/conta")} hitSlop={12} accessibilityRole="button" accessibilityLabel="Conta">
-              <Text style={styles.headerLink}>Conta</Text>
-            </Pressable>
-          ),
-        }}
-      />
+    <View style={[styles.screen, { paddingTop: insets.top }]}>
+      <Stack.Screen options={{ headerShown: false }} />
       <ConnectionBar />
       {tickets === undefined ? (
-        <ActivityIndicator style={{ marginTop: 40 }} color={c.primary} />
+        <View style={{ flex: 1 }}>
+          {header}
+          <TicketListSkeleton />
+        </View>
       ) : (
-        <FlatList
+        <Animated.FlatList
           data={data}
           keyExtractor={(item: LocalTicket) => item.id}
-          renderItem={({ item }) => (
-            <View style={styles.item}>
-              <TicketCard ticket={item} now={now} showDate={tab !== "today"} />
-            </View>
+          itemLayoutAnimation={motion.layout}
+          renderItem={({ item, index }) => (
+            <Animated.View entering={motion.entering(index)} style={styles.item}>
+              {tab === "today" ? (
+                <TimelineRow ticket={item} now={now} last={index === data.length - 1} />
+              ) : (
+                <View style={{ paddingBottom: 12 }}>
+                  <TicketCard ticket={item} now={now} showDate />
+                </View>
+              )}
+            </Animated.View>
           )}
           ListHeaderComponent={
             <>
@@ -128,12 +158,12 @@ export default function MyTicketsScreen() {
           ListFooterComponent={
             tab === "today" && lists.reschedule.length ? (
               <View style={styles.footerSection}>
-                <Text style={styles.footerTitle}>Aguardando reagendamento pela central</Text>
+                <Text style={styles.sectionTitle}>Aguardando reagendamento pela central</Text>
                 <Text style={styles.footerHint}>Visita improdutiva registrada. A OS volta para a agenda quando for reagendada.</Text>
-                {lists.reschedule.map((ticket) => (
-                  <View key={ticket.id} style={styles.footerItem}>
+                {lists.reschedule.map((ticket, i) => (
+                  <Animated.View key={ticket.id} entering={motion.entering(i)} style={styles.footerItem}>
                     <TicketCard ticket={ticket} now={now} />
-                  </View>
+                  </Animated.View>
                 ))}
               </View>
             ) : undefined
@@ -142,23 +172,55 @@ export default function MyTicketsScreen() {
           contentContainerStyle={styles.list}
         />
       )}
+      <TabBar<Tab>
+        value={tab}
+        onChange={setTab}
+        items={[
+          { value: "today", label: "Hoje", icon: "today", count: lists.today.length },
+          { value: "agenda", label: "Agenda", icon: "calendar" },
+          { value: "done", label: "Concluídas", icon: "checkCircle" },
+        ]}
+      />
     </View>
   );
 }
 
 const makeStyles = (c: Palette) =>
   StyleSheet.create({
-    list: { paddingBottom: 32 },
-    header: { padding: 16, paddingTop: 20, gap: 16 },
-    date: { fontSize: 13, color: c.inkMuted, textTransform: "capitalize" },
-    greeting: { fontSize: 24, fontWeight: "700", color: c.ink, letterSpacing: -0.3 },
-    notice: { backgroundColor: c.dangerSoft, borderColor: c.danger + "44", borderWidth: 1, borderRadius: 12, padding: 12 },
-    noticeText: { color: c.danger, fontSize: 13, fontWeight: "600" },
-    item: { paddingHorizontal: 16, paddingBottom: 10 },
+    screen: { flex: 1, backgroundColor: c.canvas },
+    list: { paddingBottom: 24 },
+    header: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4, gap: 16 },
+    topBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+    avatar: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.surface2,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: c.lineStrong,
+    },
+    avatarText: { fontSize: 13, fontWeight: "700", color: c.ink },
+    greeting: { fontSize: 26, fontWeight: "700", color: c.ink, letterSpacing: -0.4 },
+    date: { fontSize: 14, color: c.inkMuted, textTransform: "capitalize" },
+    notice: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      backgroundColor: c.dangerSoft,
+      borderColor: tint(c.danger, "40"),
+      borderWidth: StyleSheet.hairlineWidth,
+      borderRadius: RADIUS.control,
+      padding: 12,
+    },
+    noticeText: { color: c.danger, fontSize: 13, fontWeight: "600", flex: 1 },
+    sectionRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 4 },
+    sectionTitle: { fontSize: 12, fontWeight: "700", color: c.inkMuted, textTransform: "uppercase", letterSpacing: 0.6 },
+    sectionCount: { fontSize: 12, fontWeight: "700", color: c.inkSubtle, fontVariant: ["tabular-nums"] },
+    item: { paddingHorizontal: 16 },
     calendar: { paddingHorizontal: 16 },
-    footerSection: { paddingHorizontal: 16, paddingTop: 12, gap: 6 },
-    footerTitle: { fontSize: 12, fontWeight: "700", color: c.inkMuted, textTransform: "uppercase", letterSpacing: 0.5 },
+    footerSection: { paddingHorizontal: 16, paddingTop: 16, gap: 8 },
     footerHint: { fontSize: 12, color: c.inkSubtle, marginBottom: 4 },
-    footerItem: { paddingBottom: 10, opacity: 0.85 },
-    headerLink: { color: c.primary, fontSize: 16, fontWeight: "600" },
+    footerItem: { paddingBottom: 4, opacity: 0.85 },
   });

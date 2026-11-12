@@ -9,12 +9,16 @@ export function Logo({
   compact = false,
   size = "md",
   inverse = false,
+  tone,
 }: {
   compact?: boolean;
   size?: "md" | "lg";
-  /** Texto claro, para fundo escuro (menu lateral). */
+  /** Texto claro, para fundo escuro. */
   inverse?: boolean;
+  /** Cor fixa do nome (ex.: sobre um selo branco, em qualquer tema). */
+  tone?: "dark" | "light";
 }) {
+  const textColor = tone === "dark" ? "text-[#262b32]" : tone === "light" || inverse ? "text-white" : "text-ink";
   const height = size === "lg" ? 30 : 22;
   return (
     <span className="inline-flex items-center gap-2">
@@ -27,7 +31,7 @@ export function Logo({
       />
       {compact ? null : (
         <span
-          className={`leading-none tracking-tight ${inverse ? "text-white" : "text-ink"} ${size === "lg" ? "text-2xl" : "text-[17px]"}`}
+          className={`leading-none tracking-tight ${textColor} ${size === "lg" ? "text-2xl" : "text-[17px]"}`}
         >
           <span className="font-semibold">Maxx</span> <span className="font-normal">Field</span>
         </span>

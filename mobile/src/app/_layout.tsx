@@ -6,6 +6,7 @@ import { View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 // Registra a tarefa de segundo plano do rastreamento assim que o app carrega.
 import "../lib/trackingTask";
+import { SuccessHost } from "../components/SuccessHost";
 import { ToastHost } from "../components/ToastHost";
 import { mustChangePassword } from "../lib/account";
 import { restoreSession, startSession } from "../lib/auth";
@@ -73,7 +74,7 @@ export default function RootLayout() {
           }}
         >
           <Stack.Protected guard={signedIn && !mustChange}>
-            <Stack.Screen name="index" options={{ title: "" }} />
+            <Stack.Screen name="index" options={{ headerShown: false }} />
             <Stack.Screen name="ticket/[id]" options={{ title: "OS" }} />
             <Stack.Screen name="conta" options={{ title: "Conta" }} />
             <Stack.Screen name="termo-rastreamento" options={{ title: "Termo de rastreamento", presentation: "modal" }} />
@@ -88,6 +89,7 @@ export default function RootLayout() {
           </Stack.Protected>
         </Stack>
         <ToastHost />
+        <SuccessHost />
       </View>
     </SafeAreaProvider>
   );
