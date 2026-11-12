@@ -10,6 +10,7 @@ import { mustChangePassword } from "../lib/account";
 import { restoreSession, startSession } from "../lib/auth";
 import { session, useSession } from "../lib/session";
 import { stopSync } from "../lib/sync";
+import { stopTracking } from "../lib/tracking";
 import { loadThemePreference, useTheme } from "../theme/theme";
 
 void SplashScreen.preventAutoHideAsync();
@@ -35,6 +36,8 @@ export default function RootLayout() {
       startSession().catch((error: unknown) => console.warn("Falha ao iniciar a sessão", error));
     } else if (status === "signedOut" || mustChange) {
       stopSync();
+      // Sessão encerrada pelo servidor (senha redefinida, usuário desativado) ou logout: nada de coleta.
+      if (status === "signedOut") void stopTracking({ endOnServer: false });
     }
   }, [status, signedIn, mustChange]);
 

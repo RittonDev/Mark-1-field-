@@ -659,3 +659,48 @@ export interface ApplicationDetail extends ApplicationSummary {
   invite_label: string | null;
   photo_url: string | null;
 }
+
+// Base técnica (gestão de acesso dos técnicos)
+export interface Technician {
+  id: UUID;
+  name: string;
+  email: string;
+  phone: string | null;
+  job_title: string | null;
+  team: Ref | null;
+  is_active: boolean;
+  last_login_at: ISODate | null;
+  location_consent_at: ISODate | null;
+  must_change_password: boolean;
+  created_at: ISODate;
+  avatar_url: string | null;
+  on_shift: boolean;
+  open_tickets: number;
+  service_areas: string[];
+  skills: { name: string; level: string }[];
+  application_id: UUID | null;
+}
+
+export interface TemporaryPassword {
+  technician: Technician;
+  temporary_password: string;
+}
+
+export interface ImportRow {
+  line: number;
+  name: string;
+  email: string;
+  phone: string | null;
+  team: string | null;
+  action: "create" | "update" | "error";
+  errors: string[];
+}
+
+export interface ImportResult {
+  dry_run: boolean;
+  rows: ImportRow[];
+  created: number;
+  updated: number;
+  errors: number;
+  credentials: { name: string; email: string; temporary_password: string }[];
+}

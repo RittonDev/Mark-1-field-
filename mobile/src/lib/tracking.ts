@@ -251,6 +251,11 @@ export async function handleLocations(locations: Location.LocationObject[], { fo
   if (!locations.length) return;
   // A tarefa pode rodar com o app fechado: lê a sessão e a jornada do armazenamento.
   if (session.get().status === "loading") await session.load();
+  // Sessão encerrada (logout, senha redefinida, usuário desativado): para de coletar.
+  if (session.get().status !== "signedIn") {
+    await stopCollection();
+    return;
+  }
   const shift = state.shift ?? (await readShift());
   if (!shift) return; // fora da jornada nada é guardado
 
@@ -450,5 +455,7 @@ export async function stopTracking({ endOnServer }: { endOnServer: boolean }) {
     }
   }
   await stopCollection();
+  // Sem jornada local: nada mais é coletado. No próximo login, GET /tracking/shift diz se ela segue aberta.
+  await writeShift(null).catch(() => undefined);
   setState({ shift: null, mode: "off", transit: false, notice: null, lastFixAt: null, lastSentAt: null, queued: 0 });
 }
