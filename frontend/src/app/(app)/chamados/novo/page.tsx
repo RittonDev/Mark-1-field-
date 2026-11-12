@@ -24,8 +24,8 @@ import {
   TICKET_SOURCE,
   TICKET_TYPE,
 } from "@/lib/constants";
-import { fromLocalInput } from "@/lib/format";
-import { useAssignable, useCategories, useCustomers, useTeams } from "@/lib/queries";
+import { formatMinutes, fromLocalInput } from "@/lib/format";
+import { useAssignable, useCategories, useCustomers, useServiceTypes, useTeams } from "@/lib/queries";
 import type {
   Asset,
   Level,
@@ -52,6 +52,8 @@ interface FormState {
   requester_name: string;
   requester_contact: string;
   service_address: string;
+  service_type_id: string;
+  estimated_minutes: string;
   team_id: string;
   assignee_id: string;
   scheduled_start: string;
@@ -73,6 +75,8 @@ const INITIAL: FormState = {
   requester_name: "",
   requester_contact: "",
   service_address: "",
+  service_type_id: "",
+  estimated_minutes: "",
   team_id: "",
   assignee_id: "",
   scheduled_start: "",
@@ -95,6 +99,8 @@ export default function NewTicketPage() {
   const [location, setLocation] = useState<Location | null>(null);
   const teams = useTeams();
   const assignable = useAssignable(form.team_id || null, canAssign);
+  // Tipos gerais + catálogo do cliente da OS (só para quem gerencia OS).
+  const serviceTypes = useServiceTypes({ customerId: form.customer_id || null, active: true, enabled: canAssign });
   const assets = useQuery({
     queryKey: ["assets", "for-ticket", form.customer_id, form.location_id],
     queryFn: () =>
@@ -141,6 +147,8 @@ export default function NewTicketPage() {
       requester_name: form.requester_name.trim() || null,
       requester_contact: form.requester_contact.trim() || null,
       service_address: form.service_address.trim() || null,
+      service_type_id: canAssign ? form.service_type_id || null : null,
+      estimated_minutes: canAssign && form.estimated_minutes ? Number(form.estimated_minutes) : null,
     };
     if (staff) {
       payload.team_id = form.team_id || null;
@@ -213,6 +221,47 @@ export default function NewTicketPage() {
                   ))}
                 </Select>
               </Field>
+              {canAssign ? (
+                <Field
+                  label="Tipo de serviço"
+                  hint={
+                    form.estimated_minutes
+                      ? `Duração estimada: ${formatMinutes(Number(form.estimated_minutes))}. A visita agendada usa esse tempo.`
+                      : "Define a duração estimada da visita"
+                  }
+                >
+                  <Select
+                    value={form.service_type_id}
+                    onChange={(e) => {
+                      const st = serviceTypes.data?.find((t) => t.id === e.target.value);
+                      setForm((f) => ({
+                        ...f,
+                        service_type_id: e.target.value,
+                        estimated_minutes: st ? String(st.estimated_minutes) : "",
+                      }));
+                    }}
+                  >
+                    <option value="">Nenhum</option>
+                    {serviceTypes.data?.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name} · {formatMinutes(t.estimated_minutes)}
+                        {t.customer ? ` · ${t.customer.name}` : ""}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              ) : null}
+              {canAssign && form.service_type_id ? (
+                <Field label="Duração estimada (minutos)">
+                  <Input
+                    type="number"
+                    min={1}
+                    max={10080}
+                    value={form.estimated_minutes}
+                    onChange={(e) => set("estimated_minutes", e.target.value)}
+                  />
+                </Field>
+              ) : null}
               {staff ? (
                 <Field label="Origem">
                   <Select value={form.source} onChange={(e) => set("source", e.target.value as TicketSource)}>

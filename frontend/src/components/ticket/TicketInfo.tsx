@@ -15,6 +15,34 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
+/** Estimada × real (tempo em "Em atendimento"), como na OS do Field Control — com o desvio à vista. */
+function DurationCompare({ ticket }: { ticket: TicketDetail }) {
+  const estimated = ticket.estimated_minutes;
+  const actual = ticket.actual_minutes;
+  const ratio = estimated && actual > 0 ? actual / estimated : null;
+  const over = ratio !== null && ratio >= 1.25;
+  return (
+    <div className="space-y-0.5">
+      <p>
+        <span className="text-ink-muted">Estimada </span>
+        {estimated ? formatMinutes(estimated) : "—"}
+      </p>
+      <p>
+        <span className="text-ink-muted">Real </span>
+        {actual > 0 || ticket.work_started_at ? formatMinutes(actual) : "—"}
+        {ticket.work_started_at ? (
+          <span className="ml-1 text-xs text-amber-600 dark:text-amber-400">em atendimento</span>
+        ) : null}
+      </p>
+      {ratio !== null ? (
+        <p className={over ? "text-xs font-medium text-red-600 dark:text-red-400" : "text-xs text-ink-muted"}>
+          {ratio >= 1 ? `${ratio.toFixed(1).replace(".", ",")}× o estimado` : `${Math.round(ratio * 100)}% do estimado`}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 export function TicketInfo({ ticket }: { ticket: TicketDetail }) {
   const loc = ticket.location;
   const hasGeo = loc && loc.latitude !== null && loc.longitude !== null;
@@ -113,6 +141,12 @@ export function TicketInfo({ ticket }: { ticket: TicketDetail }) {
         <dl className="px-4 py-2">
           <Row label="Tipo">{TICKET_TYPE[ticket.type]}</Row>
           <Row label="Categoria">{ticket.category?.full_name}</Row>
+          {ticket.service_type ? <Row label="Tipo de serviço">{ticket.service_type.name}</Row> : null}
+          {ticket.estimated_minutes || ticket.actual_minutes > 0 || ticket.work_started_at ? (
+            <Row label="Duração">
+              <DurationCompare ticket={ticket} />
+            </Row>
+          ) : null}
           <Row label="Impacto/urgência">
             {LEVEL[ticket.impact]} / {LEVEL[ticket.urgency]}
           </Row>

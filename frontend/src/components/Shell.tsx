@@ -11,6 +11,7 @@ import {
   Settings,
   SquareKanban,
   Ticket,
+  Timer,
   Users,
 } from "lucide-react";
 import Link from "next/link";
@@ -33,6 +34,7 @@ const NAV: NavItem[] = [
   { href: "/quadro", label: "Quadro", icon: SquareKanban, visible: isStaff },
   { href: "/clientes", label: "Clientes", icon: Building2, visible: isStaff },
   { href: "/locais", label: "Locais", icon: MapPin, visible: isStaff },
+  { href: "/tipos-servico", label: "Tipos de serviço", icon: Timer, visible: canManageTickets },
   { href: "/ativos", label: "Ativos", icon: HardDrive, visible: isStaff },
   { href: "/usuarios", label: "Usuários", icon: Users, visible: canManageTickets },
   { href: "/configuracoes", label: "Configurações", icon: Settings, visible: isManager },

@@ -40,6 +40,8 @@ const FIELD_LABELS: Record<string, string> = {
   customer_id: "cliente",
   location_id: "local",
   service_address: "endereço do atendimento",
+  service_type_id: "tipo de serviço",
+  estimated_minutes: "duração estimada",
   asset_id: "equipamento",
   requester_name: "solicitante",
   requester_contact: "contato",
