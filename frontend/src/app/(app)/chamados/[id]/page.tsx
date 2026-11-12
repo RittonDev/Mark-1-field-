@@ -11,6 +11,7 @@ import { AssignmentPanel } from "@/components/ticket/AssignmentPanel";
 import { AttachmentsTab } from "@/components/ticket/AttachmentsTab";
 import { CommentsTab } from "@/components/ticket/CommentsTab";
 import { EditTicketDialog } from "@/components/ticket/EditTicketDialog";
+import { FormsCard } from "@/components/ticket/FormsCard";
 import { HistoryTab } from "@/components/ticket/HistoryTab";
 import { SlaCard } from "@/components/ticket/SlaCard";
 import { TicketInfo } from "@/components/ticket/TicketInfo";
@@ -186,6 +187,8 @@ export default function TicketDetailPage() {
               </div>
             ) : null}
           </Card>
+
+          <FormsCard ticket={ticket} />
 
           <Card>
             <div className="flex gap-1 overflow-x-auto border-b border-line px-3">

@@ -4,7 +4,11 @@ import { useQuery } from "@tanstack/react-query";
 import {
   ArrowRightLeft,
   CirclePlus,
+  ClipboardCheck,
+  ClipboardList,
+  ClipboardX,
   Clock,
+  FileSignature,
   History,
   MapPin,
   MessageSquare,
@@ -27,6 +31,10 @@ const ICONS: Record<TicketEventType, React.ComponentType<{ className?: string }>
   comment_added: MessageSquare,
   worklog_added: Clock,
   attachment_added: Paperclip,
+  form_added: ClipboardList,
+  form_completed: ClipboardCheck,
+  form_removed: ClipboardX,
+  signature_collected: FileSignature,
 };
 
 const FIELD_LABELS: Record<string, string> = {
