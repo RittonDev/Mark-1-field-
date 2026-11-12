@@ -153,7 +153,9 @@ function LocationsView() {
                     <Td className="font-mono text-xs">{l.code ?? "—"}</Td>
                     <Td>
                       <p className="font-medium text-ink">
-                        {l.name}
+                        <Link href={`/locais/${l.id}`} className="hover:text-brand hover:underline">
+                          {l.name}
+                        </Link>
                         {!l.is_active ? <span className="ml-1 text-xs font-normal text-ink-muted">(inativo)</span> : null}
                       </p>
                       <p className="text-xs text-ink-muted">
