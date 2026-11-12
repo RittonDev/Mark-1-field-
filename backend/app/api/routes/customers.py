@@ -5,7 +5,8 @@ from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import func, or_, select
 
 from app.api.deps import DB, CurrentUser, StaffUser, TicketManagerUser
-from app.core.enums import AssetType
+from app.core.enums import AssetType, TicketStatus
+from app.db.base import utcnow
 from app.models import Asset, Customer, Location, Ticket, User
 from app.schemas.common import Page
 from app.schemas.customer import (
@@ -15,12 +16,18 @@ from app.schemas.customer import (
     CustomerCreate,
     CustomerOut,
     CustomerUpdate,
+    IntakeContext,
+    IntakeCustomer,
+    IntakeLastVisit,
+    IntakeLocation,
     LocationCreate,
     LocationOut,
     LocationUpdate,
 )
 from app.schemas.records import dedupe_contacts, format_phone, primary_contact
-from app.services import location_import, search
+from app.schemas.ticket import format_ticket_code
+from app.services import field as field_rules
+from app.services import geo, location_import, search
 from app.services.location_import import LocationImportResult
 from app.services.spreadsheet import SpreadsheetError
 from app.services.tickets import visibility_clause
@@ -250,6 +257,113 @@ async def list_locations(
 async def get_location(location_id: uuid.UUID, db: DB, user: CurrentUser) -> LocationOut:
     location = await _get_or_404(db, Location, location_id, "Local")
     return (await _locations_out(db, user, [location]))[0]
+
+
+UPCOMING_DAYS = 7
+
+
+async def _last_visit(db: DB, location_id: uuid.UUID) -> IntakeLastVisit | None:
+    done_at = func.coalesce(Ticket.resolved_at, Ticket.closed_at)
+    row = (
+        await db.execute(
+            select(Ticket, done_at)
+            .where(
+                Ticket.location_id == location_id,
+                Ticket.status.in_((TicketStatus.RESOLVED, TicketStatus.CLOSED)),
+                done_at.is_not(None),
+            )
+            .order_by(done_at.desc())
+            .limit(1)
+        )
+    ).first()
+    if row is None:
+        return None
+    ticket, at = row
+    return IntakeLastVisit(
+        ticket_id=ticket.id,
+        code=format_ticket_code(ticket.number),
+        title=ticket.title,
+        at=at,
+        technician=ticket.assignee.name if ticket.assignee else None,
+    )
+
+
+@router.get("/intake/context", response_model=IntakeContext)
+async def intake_context(
+    db: DB,
+    user: TicketManagerUser,
+    customer_id: uuid.UUID | None = None,
+    location_id: uuid.UUID | None = None,
+) -> IntakeContext:
+    """Contexto para abrir a OS: o cliente (etiquetas, avaliação, OS agendadas nos próximos
+    dias) e a loja (endereço, contato, histórico, última visita e prazo de chegada)."""
+    now = utcnow()
+    location = await _get_or_404(db, Location, location_id, "Local") if location_id else None
+    if location is not None:
+        customer_id = location.customer_id
+    customer = await _get_or_404(db, Customer, customer_id, "Cliente") if customer_id else None
+    out = IntakeContext(upcoming_days=UPCOMING_DAYS)
+
+    if customer is not None:
+        stats = (await _ticket_stats(db, user, Ticket.customer_id, [customer.id])).get(
+            customer.id, {}
+        )
+        upcoming = await db.scalar(
+            select(func.count()).where(
+                Ticket.customer_id == customer.id,
+                Ticket.status.in_(OPEN_STATUSES),
+                Ticket.scheduled_start >= now,
+                Ticket.scheduled_start < now + timedelta(days=UPCOMING_DAYS),
+            )
+        )
+        rating = (customer.legacy or {}).get("rating") or {}
+        average = rating.get("average") or None
+        out.customer = IntakeCustomer(
+            id=customer.id,
+            name=customer.name,
+            tags=customer.tags or [],
+            notes=customer.notes,
+            rating_average=round(float(average), 1) if average else None,
+            rating_last=int(rating["last_star"]) if rating.get("last_star") else None,
+            total_tickets=stats.get("total_tickets", 0),
+            open_tickets=stats.get("open_tickets", 0),
+            upcoming=upcoming or 0,
+        )
+
+    if location is not None:
+        stats = (await _ticket_stats(db, user, Ticket.location_id, [location.id])).get(
+            location.id, {}
+        )
+        recent = await db.scalar(
+            select(func.count()).where(
+                Ticket.location_id == location.id,
+                Ticket.created_at >= now - timedelta(days=30),
+            )
+        )
+        rules = await field_rules.rules(db)
+        valid = geo.valid_coords(location.latitude, location.longitude)
+        out.location = IntakeLocation(
+            id=location.id,
+            name=location.name,
+            code=location.code,
+            address_line=location.address_line,
+            district=location.district,
+            city=location.city,
+            state=location.state,
+            zip_code=location.zip_code,
+            latitude=location.latitude if valid else None,
+            longitude=location.longitude if valid else None,
+            contact_name=location.contact_name,
+            contact_phone=location.contact_phone,
+            notes=location.notes,
+            total_tickets=stats.get("total_tickets", 0),
+            open_tickets=stats.get("open_tickets", 0),
+            tickets_30d=recent or 0,
+            last_visit=await _last_visit(db, location.id),
+            is_capital=field_rules.is_capital(location.city, location.state),
+            arrival_hours=field_rules.arrival_hours(rules, location.city, location.state),
+        )
+    return out
 
 
 @router.patch("/locations/{location_id}", response_model=LocationOut)
