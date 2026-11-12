@@ -95,7 +95,7 @@ export function Sidebar({ user, onLogout }: { user: User; onLogout: () => void }
             return (
               <div key={group.key} className={group.label ? "mt-5" : "mt-1"}>
                 {group.label ? (
-                  <p className="mb-1 hidden px-2.5 text-[11px] font-medium text-ink-subtle lg:block">{group.label}</p>
+                  <p className="mb-1 hidden px-2.5 text-[11px] font-semibold text-chrome-subtle lg:block">{group.label}</p>
                 ) : null}
                 <div className="flex flex-col gap-px">
                   {groupItems.map((item) => {
@@ -109,18 +109,18 @@ export function Sidebar({ user, onLogout }: { user: User; onLogout: () => void }
                         aria-current={active ? "page" : undefined}
                         className={clsx(
                           "group relative flex h-[34px] items-center justify-center gap-2.5 rounded-lg px-2.5 text-[13px] font-medium transition-colors lg:justify-start",
-                          active ? "text-ink" : "text-ink-muted hover:bg-ink/[0.045] hover:text-ink",
+                          active ? "text-ink" : "text-chrome-muted hover:bg-chrome-hover hover:text-chrome-ink",
                         )}
                       >
                         <span className="relative shrink-0">
                           <Icon
                             className={clsx(
                               "size-[17px] transition-colors",
-                              active ? "text-brand" : "text-ink-subtle group-hover:text-ink-muted",
+                              active ? "text-brand" : "text-chrome-subtle group-hover:text-chrome-muted",
                             )}
                           />
                           {badges[item.href] ? (
-                            <span className="absolute -top-1 -right-1 size-2 rounded-full bg-red-500 ring-2 ring-canvas lg:hidden" aria-hidden />
+                            <span className="absolute -top-1 -right-1 size-2 rounded-full bg-red-500 ring-2 ring-chrome lg:hidden" aria-hidden />
                           ) : null}
                         </span>
                         <span className="hidden flex-1 truncate lg:inline">{item.label}</span>
@@ -141,14 +141,14 @@ export function Sidebar({ user, onLogout }: { user: User; onLogout: () => void }
           })}
         </div>
       </nav>
-      <div className="shrink-0 border-t border-line/70 p-2.5">
+      <div className="shrink-0 border-t border-chrome-line p-2.5">
         <div className="flex items-center gap-2.5 rounded-lg px-1.5 py-1.5 lg:px-2">
           <div className="hidden size-8 shrink-0 items-center justify-center rounded-full bg-linear-to-br from-brand to-brand-cyan text-[11px] font-semibold text-white ring-2 ring-surface lg:flex">
             {initials(user.name)}
           </div>
           <div className="hidden min-w-0 flex-1 leading-tight lg:block">
-            <p className="truncate text-[13px] font-semibold text-ink">{user.name}</p>
-            <p className="truncate text-[11px] text-ink-subtle">
+            <p className="truncate text-[13px] font-semibold text-chrome-ink">{user.name}</p>
+            <p className="truncate text-[11px] text-chrome-subtle">
               {ROLE[user.role]}
               {user.team ? ` · ${user.team.name}` : ""}
             </p>
@@ -156,7 +156,7 @@ export function Sidebar({ user, onLogout }: { user: User; onLogout: () => void }
           <button
             type="button"
             onClick={onLogout}
-            className="mx-auto rounded-lg p-2 text-ink-subtle transition-colors hover:bg-ink/[0.05] hover:text-ink lg:mx-0"
+            className="mx-auto rounded-lg p-2 text-chrome-subtle transition-colors hover:bg-chrome-hover hover:text-chrome-ink lg:mx-0"
             title="Sair"
             aria-label="Sair"
           >
