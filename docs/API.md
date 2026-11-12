@@ -527,3 +527,14 @@ colaboradores.
   mesmo cálculo (distância pelo histórico/endereço/ao vivo, visitas a esta mesma loja e a base na
   cidade), somado a agenda livre, skill, equipe do projeto e carga. Só técnicos **ativos**. O formato não
   mudou; `home_city`/`home_state` passam a trazer a região efetiva (a base, senão o endereço).
+- **Coordenadas de loja inválidas** (`app/services/geo.py`): não valem para distância nem mapa o
+  `(0, 0)`, o centro do Brasil (`-14,2350, -51,9253`, ponto padrão do geocodificador quando o endereço
+  não foi achado) e qualquer ponto repetido em lojas de **2 ou mais UFs** (lojas do mesmo shopping, na
+  mesma UF, continuam valendo). A importação ignora esses pontos; `python -m app.services.geo` limpa os
+  que já estão na base e recalcula a região dos técnicos. A busca e as sugestões também filtram na hora.
+- **Loja sem coordenada** no `nearby`: mede pelo centro das lojas válidas da cidade, com o rótulo
+  "<loja> (centro de <Cidade>-<UF>, a loja não tem coordenadas)"; as visitas a essa loja continuam
+  contando. 422 só quando a cidade também não tem nenhuma loja válida ("A loja não tem coordenadas e não
+  há lojas com coordenadas em {Cidade}-{UF} para calcular a distância").
+- O mapa ao vivo, o ETA/link do mapa dos textos do WhatsApp e as sugestões da OS também ignoram
+  coordenada inválida.

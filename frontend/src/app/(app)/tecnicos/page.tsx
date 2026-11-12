@@ -41,10 +41,11 @@ import { absoluteApiUrl, api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canManageTickets } from "@/lib/constants";
 import { downloadCsv } from "@/lib/download";
-import { formatRelative, initials } from "@/lib/format";
+import { formatDate, formatRelative, initials } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
 import { labelMap, useOnboardingCatalog } from "@/lib/onboarding";
-import { useTeams } from "@/lib/queries";
+import { useServiceTypes, useTeams } from "@/lib/queries";
+import { MultiSelect } from "@/components/MultiSelect";
 import { Tabs } from "@/components/motion";
 import { NearbyFinder, UFS } from "@/components/technicians/NearbyFinder";
 import type { ImportResult, Technician, TechnicianRegion, TemporaryPassword } from "@/lib/types";
@@ -490,6 +491,20 @@ function EditDialog({ tech, onClose }: { tech: Technician; onClose: () => void }
   });
   const [isActive, setIsActive] = useState(tech.is_active);
   const [confirmReset, setConfirmReset] = useState(false);
+  // Ficha completa (endereço, jornada e serviços), como veio do Field Control.
+  const [address, setAddress] = useState({
+    line: tech.address_line ?? "",
+    district: tech.address_district ?? "",
+    zip: tech.address_zip ?? "",
+  });
+  const [schedule, setSchedule] = useState({
+    start: tech.work_schedule?.start?.slice(0, 5) ?? "",
+    end: tech.work_schedule?.end?.slice(0, 5) ?? "",
+    break_start: tech.work_schedule?.break_start?.slice(0, 5) ?? "",
+    break_end: tech.work_schedule?.break_end?.slice(0, 5) ?? "",
+  });
+  const [serviceIds, setServiceIds] = useState<string[]>(() => (tech.services ?? []).map((s) => s.id));
+  const serviceTypes = useServiceTypes({ active: true });
   const refresh = (t: Technician) => {
     setCurrent(t);
     queryClient.invalidateQueries({ queryKey: ["technicians"] });
@@ -507,6 +522,18 @@ function EditDialog({ tech, onClose }: { tech: Technician; onClose: () => void }
         home_state: form.home_state || null,
         coverage_area: form.coverage_area || null,
         is_active: isActive,
+        address_line: address.line.trim() || null,
+        address_district: address.district.trim() || null,
+        address_zip: address.zip.replace(/D/g, "") || null,
+        work_schedule: schedule.start || schedule.end
+          ? {
+              start: schedule.start || null,
+              end: schedule.end || null,
+              break_start: schedule.break_start || null,
+              break_end: schedule.break_end || null,
+            }
+          : null,
+        service_type_ids: serviceIds,
       }),
     onSuccess: (t) => {
       refresh(t);
@@ -592,6 +619,70 @@ function EditDialog({ tech, onClose }: { tech: Technician; onClose: () => void }
 
         <TechnicianFields value={form} onChange={setForm} />
         <Checkbox label="Acesso ativo (desativado, sai do app na hora)" checked={isActive} onChange={setIsActive} />
+
+        <section className="flex flex-col gap-3 rounded-lg border border-line p-3">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h3 className="text-sm font-semibold text-ink">Ficha completa</h3>
+            <p className="text-xs text-ink-subtle">
+              {current.base_city
+                ? `Atua em ${current.base_city}-${current.base_state} ${current.base_source === "history" ? `(pelo histórico, ${current.base_visits ?? 0} OS)` : "(pelo endereço)"}`
+                : "Região de atuação ainda não identificada"}
+              {current.last_visit_at ? ` · última visita ${formatDate(current.last_visit_at)}` : ""}
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem_8rem]">
+            <Field label="Endereço (rua, número, complemento)">
+              <Input value={address.line} onChange={(e) => setAddress((a) => ({ ...a, line: e.target.value }))} maxLength={255} />
+            </Field>
+            <Field label="Bairro">
+              <Input value={address.district} onChange={(e) => setAddress((a) => ({ ...a, district: e.target.value }))} maxLength={120} />
+            </Field>
+            <Field label="CEP">
+              <Input value={address.zip} onChange={(e) => setAddress((a) => ({ ...a, zip: e.target.value }))} inputMode="numeric" maxLength={9} />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {(
+              [
+                ["start", "Jornada: início"],
+                ["end", "Jornada: fim"],
+                ["break_start", "Intervalo: de"],
+                ["break_end", "Intervalo: até"],
+              ] as const
+            ).map(([key, label]) => (
+              <Field key={key} label={label}>
+                <Input type="time" value={schedule[key]} onChange={(e) => setSchedule((s) => ({ ...s, [key]: e.target.value }))} />
+              </Field>
+            ))}
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <span className="text-xs font-medium text-ink-muted">Serviços que faz</span>
+            <MultiSelect
+              label="Serviços que faz"
+              value={serviceIds}
+              onChange={setServiceIds}
+              options={(serviceTypes.data ?? []).map((s) => ({ value: s.id, label: s.name }))}
+            />
+            {(current.services ?? []).length ? (
+              <div className="flex flex-wrap gap-1">
+                {(current.services ?? []).slice(0, 12).map((s) => (
+                  <span key={s.id} className="rounded-md bg-surface-2 px-1.5 py-0.5 text-[11px] text-ink-muted ring-1 ring-line ring-inset">
+                    {s.name}
+                  </span>
+                ))}
+                {(current.services ?? []).length > 12 ? (
+                  <span className="text-[11px] text-ink-subtle">+{(current.services ?? []).length - 12}</span>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+          {current.legacy ? (
+            <p className="text-xs text-ink-subtle">
+              Importado do Field Control{current.legacy.id ? ` · ID ${current.legacy.id}` : ""}
+              {current.legacy.territories?.length ? ` · territórios: ${current.legacy.territories.join(", ")}` : ""}
+            </p>
+          ) : null}
+        </section>
 
         {current.service_areas.length || current.skills.length ? (
           <section>
