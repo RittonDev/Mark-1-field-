@@ -1,6 +1,6 @@
-# MaxxChamados — app do técnico (React Native + Expo)
+# Maxx Field — app do técnico de campo (React Native + Expo)
 
-App de campo dos técnicos do MaxxChamados: lista as OS do dia e a agenda, muda status com check-in
+App de campo dos técnicos do MaxxChamados (marca **Maxx Field**): lista as OS do dia e a agenda, muda status com check-in
 por GPS, registra acompanhamentos, horas e fotos, e **funciona sem internet**. Tudo o que o técnico
 faz entra numa fila no aparelho e é enviado quando a conexão volta, seguindo o contrato de
 [docs/MOBILE_SYNC.md](../docs/MOBILE_SYNC.md).
@@ -15,7 +15,8 @@ O login envia `channel: "mobile"` e a API recusa os outros papéis com 403.
 | Navegação | expo-router (rotas em `src/app/`) |
 | Banco local | expo-sqlite |
 | Tokens | expo-secure-store (Keychain / Keystore) |
-| Recursos do aparelho | expo-location (check-in), expo-image-picker (fotos), expo-notifications (registro do aparelho), NetInfo |
+| Recursos do aparelho | expo-location (check-in e rastreamento), expo-task-manager (segundo plano), expo-battery, expo-image-picker (fotos), expo-notifications (registro do aparelho), NetInfo |
+| Visual | tema Maxx Field claro/escuro (`src/theme/theme.ts`), expo-linear-gradient para o degradê da marca |
 
 ## Rodar no celular com o Expo Go
 
@@ -108,13 +109,20 @@ Requisitos:
   (por exemplo, de antes desta regra) é encerrada e o banco local apagado. Se o papel mudar no servidor
   (técnico promovido a analista), o refresh responde 401 com o motivo: o app encerra a sessão, apaga os
   dados locais, **inclusive operações ainda não enviadas**, e mostra o texto no login.
-- **Minhas OS** com três abas:
-  - **Hoje**: minhas OS em campo, agendadas para hoje (ou atrasadas) e as sem agenda; em campo primeiro,
+- **Primeiro acesso**: se `must_change_password` vier verdadeiro (técnicos importados), o app exige a troca
+  da senha provisória (`POST /auth/change-password`) antes de liberar o resto.
+- **Só as OS atribuídas ao técnico**: o cliente abre a OS, o analista escolhe o técnico, e o técnico vê só
+  as OS em que é o responsável (sem fila de grupo e sem "assumir"). Tela inicial com três abas:
+  - **Hoje**: em campo, agendadas para hoje (ou atrasadas) e as sem agenda; em campo primeiro,
     depois por horário, prioridade e prazo de SLA.
-  - **Agenda**: minhas visitas de hoje em diante, agrupadas por dia.
-  - **Equipe**: OS do meu grupo e da fila sem grupo que não estão comigo (com "Assumir", que precisa de conexão).
+  - **Agenda**: calendário com visão de **mês** (grade com marcadores por dia; tocar no dia lista as OS)
+    e de **semana** (dia a dia, com horário das visitas). Tocar na OS abre o detalhe.
+  - **Concluídas**: resolvidas/fechadas nos últimos 7 dias.
   - Cada cartão mostra status, prioridade, selo de SLA (recalculado no aparelho, então continua certo
-    offline) e quantas ações aguardam envio.
+    offline), duração estimada e quantas ações aguardam envio.
+- **Jornada e rastreamento** (cartão no topo da tela inicial): termo de ciência (LGPD) aceito uma vez,
+  **Iniciar/Encerrar jornada**, indicador "Rastreamento ativo" e a última posição enviada. Detalhes abaixo.
+- **Aparência**: modo claro/escuro segue o sistema; dá para fixar em Conta → Aparência.
 - **Detalhe da OS**: só os botões de `allowed_transitions`, com os mesmos diálogos da web (agendar com
   início/fim, resolver com solução obrigatória, cancelar/reabrir com motivo). Em "Iniciar deslocamento" e
   "Iniciar atendimento" o check-in por GPS vem marcado (funciona sem internet). Local com endereço,
@@ -125,6 +133,25 @@ Requisitos:
 - **Indicador de conexão** no topo: offline, servidor inacessível, sincronizando, online com tempo real,
   e o número de itens pendentes. Tocar abre a tela **Conta**, com a fila de envio (dá para descartar uma
   operação), os avisos de operações recusadas, "Sincronizar agora", "Baixar tudo" e o estado do push.
+
+## Rastreamento da jornada
+
+- **Termo** (`/termo-rastreamento`): explica o que é coletado (posição, precisão, velocidade, direção,
+  bateria, detecção de GPS falso), quando (só durante a jornada) e para quê. O aceite vai para
+  `POST /tracking/consent` e aparece em Conta.
+- **Jornada**: `POST /tracking/shift/start` / `POST /tracking/shift/end` (com a posição do momento).
+  Ao abrir o app, `GET /tracking/shift` retoma a coleta de uma jornada aberta (app fechado, aparelho
+  reiniciado). Encerrar sem rede para a coleta na hora e envia o encerramento na próxima sincronização.
+  Sair do app encerra a jornada.
+- **Coleta**: ~30 s normalmente e ~15 s quando há OS sua **Em deslocamento** (o ritmo muda sozinho, até
+  offline). Cada ponto leva bateria (`expo-battery`) e `is_mock` (`mocked` do Android).
+- **Fila**: tabela `pings` no SQLite; envio em lotes de até 500 em `POST /tracking/pings`, a cada ~20 s e
+  em toda sincronização. Sem rede, os pontos acumulam e sobem depois. Fora da jornada nada é gravado.
+- **Segundo plano**: `expo-task-manager` + `Location.startLocationUpdatesAsync`, com foreground service e
+  notificação fixa no Android e permissão "Sempre" + `UIBackgroundModes: location` no iOS (já configurado
+  no `app.json` via plugin do expo-location). **Isso exige build de desenvolvimento ou de produção.** No
+  Expo Go (e na pré-visualização web) o app cai para o primeiro plano e avisa: "só funciona com o app aberto".
+  Para gerar o build: `npx expo run:android` / `npx expo run:ios` ou `eas build --profile development`.
 
 ## Como a sincronização funciona
 
@@ -156,13 +183,18 @@ WebSocket /api/v1/ws?token= ── evento ticket.* ──► nova rodada de sync
 ```
 src/
   app/                 rotas (expo-router)
-    _layout.tsx        sessão, Stack com rotas protegidas, toasts
+    _layout.tsx        sessão, tema, Stack com rotas protegidas, tarefa de rastreamento, toasts
     login.tsx          login + servidor da API
-    index.tsx          Minhas OS (Hoje / Agenda / Equipe)
+    trocar-senha.tsx   primeiro acesso (senha provisória)
+    index.tsx          tela inicial: jornada + Hoje / Agenda (calendário) / Concluídas
     ticket/[id].tsx    detalhe, ações e abas
-    conta.tsx          sincronização, fila, avisos, push, sair
-  components/          UI (cartões, selos, diálogo de transição, abas da OS)
+    termo-rastreamento.tsx  termo de ciência do rastreamento (LGPD)
+    conta.tsx          sincronização, fila, avisos, rastreamento, aparência, sair
+  components/          UI (marca, cartões, calendário, jornada, diálogo de transição, abas da OS)
+  theme/theme.ts       paleta Maxx Field, claro/escuro, preferência do técnico
   lib/
+    tracking.ts trackingTask.ts  jornada, coleta, fila de pontos e tarefa de segundo plano
+    account.ts         /auth/me e troca de senha
     types.ts constants.ts workflow.ts   copiados de frontend/src/lib (manter iguais)
     syncTypes.ts       contrato de /sync/pull e /sync/push
     api.ts session.ts  HTTP com refresh + tokens no SecureStore
