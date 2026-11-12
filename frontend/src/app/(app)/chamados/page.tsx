@@ -370,7 +370,7 @@ function TicketsView() {
                   <Th>Atribuída a</Th>
                   {manager ? <Th>Analista</Th> : null}
                   <Th>SLA</Th>
-                  <Th className="hidden xl:table-cell">Atualizado</Th>
+                  <Th className="hidden 2xl:table-cell">Atualizado</Th>
                 </tr>
               </thead>
               <tbody className={clsx("stagger transition-opacity", query.isFetching && "opacity-70")}>
@@ -384,7 +384,7 @@ function TicketsView() {
                       onClick={() => router.push(`/chamados/${t.id}`)}
                       className="group cursor-pointer transition-colors hover:bg-surface-2/70"
                     >
-                      <Td className="max-w-[24rem]">
+                      <Td className="max-w-[20rem]">
                         <div className="flex items-start gap-1">
                           <Link
                             href={`/chamados/${t.id}`}
@@ -408,7 +408,7 @@ function TicketsView() {
                           <PriorityBadge priority={t.priority} compact />
                         </div>
                       </Td>
-                      <Td className="max-w-[14rem]">
+                      <Td className="max-w-[12rem]">
                         <span className="block truncate">{t.customer?.name ?? t.requester_name ?? "—"}</span>
                         {t.location ? (
                           <span className="block truncate text-xs text-ink-subtle">
@@ -470,7 +470,7 @@ function TicketsView() {
                           <SlaCountdown ticket={t} />
                         </div>
                       </Td>
-                      <Td className="hidden text-xs whitespace-nowrap text-ink-subtle xl:table-cell">{formatShort(t.updated_at)}</Td>
+                      <Td className="hidden text-xs whitespace-nowrap text-ink-subtle 2xl:table-cell">{formatShort(t.updated_at)}</Td>
                     </tr>
                   );
                 })}

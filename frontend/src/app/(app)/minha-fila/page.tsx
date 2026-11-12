@@ -19,7 +19,8 @@ import {
   Users,
 } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 import { PriorityBadge, SlaCountdown, StatusBadge } from "@/components/badges";
 import { CountUp } from "@/components/motion";
 import { useNow } from "@/components/useNow";
@@ -360,13 +361,19 @@ function TeamQueues({
 
 export default function MyQueuePage() {
   const { user } = useAuth();
+  const router = useRouter();
+  const allowed = canManageTickets(user?.role);
+  // Solicitante não tem fila: vai para os chamados dele.
+  useEffect(() => {
+    if (user && !allowed) router.replace("/chamados");
+  }, [user, allowed, router]);
   const [viewing, setViewing] = useState<UUID | null>(null);
   const userId = viewing ?? user?.id ?? null;
   const mine = !viewing || viewing === user?.id;
   const queue = useQuery({
     queryKey: ["tickets", "my-queue", userId],
     queryFn: () => api.get<MyQueue>("/my-queue", mine ? {} : { user_id: userId ?? undefined }),
-    enabled: Boolean(userId) && canManageTickets(user?.role),
+    enabled: Boolean(userId) && allowed,
     // "Atrasada" e prazos dependem do relógio: revalida mesmo sem eventos.
     refetchInterval: 60_000,
     placeholderData: (prev) => prev,
@@ -382,7 +389,7 @@ export default function MyQueuePage() {
     return map;
   }, [queue.data]);
 
-  if (user && !canManageTickets(user.role)) return <ErrorBox message="A fila é para analistas e gestores." />;
+  if (user && !allowed) return null;
 
   const counts = queue.data?.counts;
   const firstName = (queue.data?.user.name ?? user?.name ?? "").split(" ")[0];
