@@ -2,9 +2,10 @@
 
 O Field Control trouxe a mesma cidade de vários jeitos ("FORTALEZA" e "Fortaleza",
 "SAO BERNARDO DO CAMPO" e "São Bernardo do Campo"). Para cada (UF, cidade sem acento e sem
-diferença de maiúscula) fica a grafia mais usada entre as que têm maiúsculas e minúsculas
-(preferindo a acentuada); sem nenhuma assim, a mais usada em título pt-BR ("de", "da", "do",
-"das", "dos" e "e" em minúsculas). Vale para lojas, matriz dos clientes e técnicos.
+diferença de maiúscula) fica a grafia mais usada entre as de nome próprio com acento; sem
+nenhuma assim, o título pt-BR ("de", "da", "do", "das", "dos" e "e" em minúsculas) da mais
+usada, preferindo a acentuada (ver `canonical`). Vale para lojas, matriz dos clientes e a
+cidade de casa e de atuação dos técnicos.
 
 Uso avulso: python -m app.services.cities
 """
@@ -13,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections import Counter, defaultdict
 from typing import Any
 
@@ -35,6 +37,10 @@ CITY_COLUMNS: tuple[tuple[Any, str, str], ...] = (
 )
 
 
+# Partícula minúscula grudada na palavra: "d'Oeste", "del-Rei".
+_PARTICLE = re.compile(r"^(?:d'|del-)")
+
+
 def _cap(part: str) -> str:
     return part[:1].upper() + part[1:]
 
@@ -44,34 +50,59 @@ def title_pt(name: str) -> str:
     out: list[str] = []
     for index, word in enumerate(name.split()):
         low = word.lower()
+        particle = _PARTICLE.match(low) if index > 0 else None
         if index > 0 and low in CONNECTORS:
             out.append(low)
-        elif low.startswith("d'") and len(low) > 2:
-            out.append("d'" + _cap(low[2:]))
+        elif particle and len(low) > particle.end():
+            out.append(particle.group(0) + _cap(low[particle.end() :]))
         else:
             out.append("-".join(_cap(seg) for seg in low.split("-")))
     return " ".join(out)
 
 
 def _proper(name: str) -> bool:
-    letters = [c for c in name if c.isalpha()]
-    return any(c.isupper() for c in letters) and any(c.islower() for c in letters)
+    """Grafia de nome próprio: iniciais maiúsculas, resto minúsculo, conectores minúsculos."""
+    if not any(c.islower() for c in name):
+        return False
+    for index, word in enumerate(name.split()):
+        if index > 0 and word.lower() in CONNECTORS:
+            if word != word.lower():
+                return False
+            continue
+        letters = [c for c in _PARTICLE.sub("", word) if c.isalpha()]
+        if not letters:
+            continue
+        if not letters[0].isupper() or (len(letters) > 1 and all(c.isupper() for c in letters)):
+            return False
+    return True
 
 
 def _accented(name: str) -> bool:
     return any(ord(c) > 127 for c in name)
 
 
+def _most_used(pool: Counter[str]) -> str:
+    return max(pool.items(), key=lambda kv: (kv[1], kv[0]))[0]
+
+
 def canonical(variants: Counter[str]) -> str:
-    """A grafia escolhida para um grupo de variantes da mesma cidade (com as contagens)."""
+    """A grafia escolhida para um grupo de variantes da mesma cidade (com as contagens).
+
+    1. a mais usada com grafia de nome próprio e acento;
+    2. sem ela, a mais usada com acento, em título pt-BR ("SÃO PAULO" -> "São Paulo");
+    3. sem acento em nenhuma, a mais usada com grafia de nome próprio;
+    4. senão, a mais usada em título pt-BR.
+    """
     proper = Counter({v: n for v, n in variants.items() if _proper(v)})
-    if proper:
-        accented = Counter({v: n for v, n in proper.items() if _accented(v)})
-        pool = accented or proper
-        return max(pool.items(), key=lambda kv: (kv[1], kv[0]))[0]
+    proper_accented = Counter({v: n for v, n in proper.items() if _accented(v)})
+    if proper_accented:
+        return _most_used(proper_accented)
     accented = Counter({v: n for v, n in variants.items() if _accented(v)})
-    pool = accented or variants
-    return title_pt(max(pool.items(), key=lambda kv: (kv[1], kv[0]))[0])
+    if accented:
+        return title_pt(_most_used(accented))
+    if proper:
+        return _most_used(proper)
+    return title_pt(_most_used(variants))
 
 
 async def normalize_all(db: AsyncSession) -> dict[str, int]:
