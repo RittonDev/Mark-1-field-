@@ -731,6 +731,12 @@ export interface Technician {
   phone: string | null;
   job_title: string | null;
   team: Ref | null;
+  /** Região de atuação: calculada pelo histórico de OS (onde ele atendeu) ou pelo endereço. */
+  base_city?: string | null;
+  base_state?: string | null;
+  base_source?: "history" | "home" | null;
+  base_visits?: number;
+  last_visit_at?: ISODate | null;
   home_city: string | null;
   home_state: string | null;
   coverage_area: string | null;
@@ -1241,4 +1247,39 @@ export interface LegacyOrder {
   files?: { url: string; title: string | null; type: string | null }[];
   deadline?: { response_status: string | null; solution_status: string | null } | null;
   migration_note?: string | null;
+}
+
+// ---- Região dos técnicos e busca por proximidade ----
+
+export interface TechnicianRegion {
+  state: string;
+  total: number;
+  cities: { city: string; total: number }[];
+}
+
+export interface NearbyTechnician {
+  id: UUID;
+  name: string;
+  email: string;
+  phone: string | null;
+  is_active: boolean;
+  avatar_url: string | null;
+  base_city: string | null;
+  base_state: string | null;
+  base_source: "history" | "home" | null;
+  distance_km: number;
+  nearest_kind: "store_history" | "home" | "live";
+  visits_at_location: number;
+  last_visit_at_location: ISODate | null;
+  visits_in_city: number;
+  total_visits: number;
+  last_visit_at: ISODate | null;
+  open_tickets: number;
+  on_shift: boolean;
+  reasons: string[];
+}
+
+export interface NearbyResult {
+  point: { latitude: number; longitude: number; label: string };
+  technicians: NearbyTechnician[];
 }
