@@ -34,8 +34,8 @@ lista completa.
 
 ## Pré-condições
 
-- `assigned`, `scheduled`, `en_route`, `in_progress` exigem analista. Se um **analista** muda para
-  um desses status uma OS sem responsável, ele a assume automaticamente.
+- `assigned`, `scheduled`, `en_route`, `in_progress` exigem responsável. Se um **analista ou técnico**
+  muda para um desses status uma OS sem responsável, ele a assume automaticamente.
 - `scheduled` exige `scheduled_start`.
 - `resolved` exige `resolution_notes` (a solução aplicada).
 - `cancelled` e `reopened` exigem `note` (motivo).
@@ -53,8 +53,8 @@ lista completa.
 
 | Papel | Pode mudar status de |
 |---|---|
-| admin, supervisor | qualquer OS |
-| analista | OS atribuídas a ele ou do grupo dele |
+| admin, supervisor, analista | qualquer OS |
+| técnico de campo | OS atribuídas a ele ou do grupo dele |
 | solicitante | só as próprias: cancelar enquanto `new`/`triage`; fechar ou reabrir quando `resolved` |
 
 ## Prioridade (matriz ITIL)
@@ -65,7 +65,7 @@ lista completa.
 | **Médio** | P2 Alta | P3 Média | P4 Baixa |
 | **Baixo** | P3 Média | P4 Baixa | P4 Baixa |
 
-Analistas e supervisores podem sobrescrever a prioridade; o solicitante não.
+Analistas, técnicos e supervisores podem sobrescrever a prioridade; o solicitante não.
 
 ## SLA
 

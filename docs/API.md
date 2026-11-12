@@ -12,8 +12,9 @@ Autenticação: `Authorization: Bearer <access_token>`. Erros seguem `{"detail":
 | Papel | Valor | Vê | Pode |
 |---|---|---|---|
 | Administrador | `admin` | tudo | tudo, inclusive usuários e SLA |
-| Supervisor | `supervisor` | tudo | atribuir, mudar status, cadastros |
-| Analista/Técnico | `analyst` | OS atribuídas a ele, do seu grupo e a fila sem grupo | assumir OS, mudar status das OS dele/do grupo, comentar, apontar horas |
+| Supervisor | `supervisor` | tudo | o mesmo do analista + grupos e categorias |
+| Analista | `analyst` | **todas as OS** (interface web) | gestão completa das OS: abrir, editar, atribuir a qualquer técnico ou analista, mudar qualquer status, comentar, apontar horas; cadastrar clientes, locais e ativos |
+| Técnico de campo | `technician` | OS atribuídas a ele, do seu grupo e a fila sem grupo (app mobile) | assumir OS sem responsável, mudar status das OS dele/do grupo, comentar, apontar horas, fotos, cadastrar ativos |
 | Solicitante | `requester` | OS que abriu | abrir OS, comentar (público), cancelar enquanto nova, aceitar (fechar) ou recusar (reabrir) solução |
 
 ## Status da OS
@@ -53,7 +54,7 @@ Origem: `web`, `mobile`, `email`, `phone`, `whatsapp`, `monitoring`.
 
 ### Usuários e grupos
 - `GET /users?role=&team_id=&q=&active=` → `UserOut[]`
-- `GET /users/assignable?team_id=` → `[{id,name,role,team_id,team_name,open_tickets}]` (analistas/supervisores ativos com carga)
+- `GET /users/assignable?team_id=` → `[{id,name,role,team_id,team_name,open_tickets}]` (analistas, técnicos e supervisores ativos, com carga)
 - `POST /users` (admin) `UserCreate` → `UserOut`
 - `GET /users/{id}` · `PATCH /users/{id}` (admin) `UserUpdate`
 - `GET /teams` → `TeamOut[]` · `POST /teams` · `PATCH /teams/{id}` (admin/supervisor)

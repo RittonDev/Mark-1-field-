@@ -1,9 +1,12 @@
 # MaxxChamados
 
 Gestão de chamados / ordens de serviço de T.I. com atendimento em campo, inspirada no GLPI Field
-Service: manutenção de impressoras, computadores, redes, CFTV e telefonia. A web é usada pela gestão
-e pelo service desk. A API já expõe a sincronização em tempo real para os futuros apps iOS e Android
-dos técnicos.
+Service: manutenção de impressoras, computadores, redes, CFTV e telefonia.
+
+- **Analistas e supervisores** usam a **interface web** (navegador) para toda a gestão das OS:
+  ver, abrir, editar, atribuir, mudar status, acompanhar SLA e cadastros.
+- **Técnicos de campo** usam o **app mobile** (iOS/Android, em `mobile/`) para atender as OS deles,
+  sincronizado em tempo real com a web.
 
 | Camada | Stack |
 |---|---|
@@ -17,7 +20,7 @@ dos técnicos.
 - **OS com ciclo de vida padrão de mercado** (ITIL / ServiceNow / Jira SM + estados de campo):
   Novo, Em triagem, Atribuído, Agendado, Em deslocamento, Em atendimento, Aguardando cliente,
   Aguardando fornecedor/peça, Resolvido, Fechado, Cancelado, Reaberto. Ver [docs/STATUS_E_SLA.md](docs/STATUS_E_SLA.md).
-- **Atribuição a analista** (com a carga atual de cada um), "assumir OS", grupos técnicos e roteamento por categoria.
+- **Atribuição a analista ou técnico** (com a carga atual de cada um), "assumir OS", grupos técnicos e roteamento por categoria.
 - **SLA** de 1ª resposta e de solução por prioridade (matriz impacto × urgência), pausado nas pendências, com alertas "em risco" e "violado".
 - **Detalhe da OS:** acompanhamentos públicos e notas internas, histórico/auditoria, apontamento de horas, anexos e fotos, check-in por GPS.
 - **Quadro kanban** com arrastar e soltar, que só aceita transições válidas.
@@ -25,7 +28,7 @@ dos técnicos.
 - **Cadastros:** clientes, locais (com coordenadas), ativos (impressora, desktop, switch, câmera, DVR/NVR…), usuários, grupos, categorias e SLA.
 - **Tempo real:** toda mudança aparece na hora para quem pode ver a OS (web e apps).
 - **Pronto para mobile:** sync offline idempotente, revogação de OS reatribuídas, registro de aparelhos para push. Ver [docs/MOBILE_SYNC.md](docs/MOBILE_SYNC.md).
-- **Papéis:** administrador, supervisor, analista/técnico e solicitante.
+- **Papéis:** administrador, supervisor, analista (gestão completa na web), técnico de campo (app) e solicitante.
 
 ## Rodar localmente (Docker)
 
@@ -48,9 +51,16 @@ docker compose exec api python -m app.seed
 - PostgreSQL: `localhost:5433` (usuário/senha `chamados`)
 
 O seed cria grupos, categorias (Impressoras, Computadores, Redes, CFTV, Telefonia, Software), clientes,
-locais, ativos e 11 OS em vários status. Os usuários de exemplo (`admin@`, `supervisor@`, `carlos@`,
-`rafael@`, `juliana@`, `bruno@` e `solicitante@exemplo.com.br`) usam a senha definida em
-`SEED_PASSWORD` no `.env`.
+locais, ativos e 11 OS em vários status. Usuários de exemplo, todos com a senha de `SEED_PASSWORD`
+no `.env`:
+
+| Papel | E-mail |
+|---|---|
+| Administrador | `admin@exemplo.com.br` |
+| Supervisor | `supervisor@exemplo.com.br` |
+| Analista (web) | `bruno@exemplo.com.br` |
+| Técnicos de campo (app) | `carlos@`, `rafael@`, `juliana@exemplo.com.br` |
+| Solicitante | `solicitante@exemplo.com.br` |
 
 As portas foram escolhidas para não colidir com o ambiente local do MaxxField (3000, 5432, 8080).
 

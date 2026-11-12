@@ -35,7 +35,7 @@ Resposta: `{server_time, has_more, tickets[], comments[], worklogs[], revoked_ti
 - Faça **upsert** por `id` (pode vir repetido; é seguro).
 - Apague do aparelho os ids de `revoked_ticket_ids` (OS reatribuída a outro técnico).
 - Se `has_more = true`, chame de novo com o novo `server_time` até vir `false`.
-- O analista recebe as OS atribuídas a ele, as do grupo dele e a fila sem grupo, como na web.
+- O técnico de campo recebe as OS atribuídas a ele, as do grupo dele e a fila sem grupo. Analistas e supervisores recebem todas (como na web).
 
 ## 3. Envio (push) de operações feitas offline
 
