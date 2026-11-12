@@ -46,7 +46,7 @@ export function AssignmentPanel({ ticket }: { ticket: TicketDetail }) {
       }),
     onSuccess: (updated) => {
       setConflicts(null);
-      onSuccess(updated, updated.assignee ? `Atribuída a ${updated.assignee.name}` : "Responsável removido");
+      onSuccess(updated, updated.assignee ? `Atribuída a ${updated.assignee.name}` : "Atribuição removida");
     },
     onError: (error) => {
       const clash = scheduleConflicts(error);
@@ -71,7 +71,7 @@ export function AssignmentPanel({ ticket }: { ticket: TicketDetail }) {
 
   return (
     <Card>
-      <CardHeader title="Responsável" description={ticket.team ? `Grupo: ${ticket.team.name}` : "Sem grupo técnico"} />
+      <CardHeader title="Atribuída a (executor)" description={ticket.team ? `Grupo: ${ticket.team.name}` : "Sem grupo técnico"} />
       <div className="flex flex-col gap-3 p-4">
         {ticket.assignee ? (
           <div className="flex items-center gap-3">

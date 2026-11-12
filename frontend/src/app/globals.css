@@ -470,3 +470,17 @@ select {
     -webkit-print-color-adjust: exact;
   }
 }
+
+/* Barras que crescem ao aparecer (gráficos simples de proporção). */
+@keyframes mf-grow {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+.grow-x {
+  transform-origin: left;
+  animation: mf-grow 0.8s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}

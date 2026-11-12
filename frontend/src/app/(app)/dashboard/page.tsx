@@ -13,6 +13,7 @@ import {
   UserX,
 } from "lucide-react";
 import Link from "next/link";
+import { CountUp } from "@/components/motion";
 import { SlaViolationsCard } from "@/components/SlaViolationsCard";
 import { Card, CardHeader, ErrorBox, LoadingBlock, PageHeader, Table, Td, Th } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
@@ -48,7 +49,7 @@ function Kpi({
             tone === "default" && "text-ink",
           )}
         >
-          {value}
+          {typeof value === "number" ? <CountUp value={value} /> : value}
         </p>
         {hint ? <p className="mt-1 text-[11px] text-ink-muted">{hint}</p> : null}
       </div>
@@ -58,7 +59,7 @@ function Kpi({
     </div>
   );
   return (
-    <Card className={clsx(href && "transition-shadow hover:shadow-md")}>
+    <Card className={clsx("animate-enter", href && "transition-[box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:shadow-elev-2")}>
       {href ? <Link href={href}>{content}</Link> : content}
     </Card>
   );
@@ -68,15 +69,15 @@ function Bars({ rows }: { rows: { key: string; label: string; color: string; val
   const max = Math.max(1, ...rows.map((r) => r.value));
   return (
     <div className="flex flex-col gap-2.5 p-4">
-      {rows.map((row) => (
+      {rows.map((row, index) => (
         <div key={row.key} className="grid grid-cols-[9.5rem_1fr_2.5rem] items-center gap-3 text-sm">
           <span className="truncate text-ink-muted" title={row.label}>
             {row.label}
           </span>
           <div className="h-2.5 overflow-hidden rounded-full bg-surface-2">
             <div
-              className="h-full rounded-full transition-[width] duration-500"
-              style={{ width: `${(row.value / max) * 100}%`, backgroundColor: row.color }}
+              className="grow-x h-full rounded-full transition-[width] duration-500"
+              style={{ width: `${(row.value / max) * 100}%`, backgroundColor: row.color, animationDelay: `${index * 40}ms` }}
             />
           </div>
           <span className="text-right font-medium text-ink tabular-nums">{row.value}</span>

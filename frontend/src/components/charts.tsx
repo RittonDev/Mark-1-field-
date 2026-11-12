@@ -1,6 +1,7 @@
 "use client";
 
 import { ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
+import { CountUp } from "@/components/motion";
 import { useEffect, useRef, useState } from "react";
 
 /** Número de destaque com a comparação ao período anterior (texto neutro, seta indica o sentido). */
@@ -23,9 +24,9 @@ export function StatTile({
   const delta = previous === undefined ? null : value - previous;
   const Icon = delta === null || delta === 0 ? Minus : delta > 0 ? ArrowUpRight : ArrowDownRight;
   return (
-    <div className="rounded-xl border border-line bg-surface px-4 py-3">
+    <div className="animate-enter rounded-xl border border-line bg-surface px-4 py-3 shadow-elev-1 transition-shadow hover:shadow-elev-2">
       <p className="text-xs text-ink-muted">{label}</p>
-      <p className="mt-1 text-3xl font-semibold tracking-tight text-ink tabular-nums">{display ?? value.toLocaleString("pt-BR")}</p>
+      <p className="mt-1 text-3xl font-semibold tracking-tight text-ink tabular-nums">{display ?? <CountUp value={value} />}</p>
       {delta !== null ? (
         <p className="mt-1 inline-flex items-center gap-1 text-xs text-ink-muted tabular-nums">
           <Icon className="size-3.5" aria-hidden />
