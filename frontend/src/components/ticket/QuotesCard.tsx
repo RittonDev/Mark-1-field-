@@ -6,11 +6,11 @@ import { Check, Copy, ExternalLink, FileText, Link2, Mail, MessageCircle, Plus, 
 import { useState } from "react";
 import { useConfirm } from "@/components/Confirm";
 import { Button, Card, CardHeader, Dialog, ErrorBox, Field, Input, Select, Textarea } from "@/components/ui";
-import { absoluteApiUrl, api, errorMessage } from "@/lib/api";
+import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canManageTickets } from "@/lib/constants";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
-import { QUOTE_KIND, QUOTE_STATUS, quoteUrl, totalsByKind } from "@/lib/quotes";
+import { QUOTE_KIND, QUOTE_STATUS, quoteUrl } from "@/lib/quotes";
 import { QuoteViewer } from "@/components/quotes/QuoteViewer";
 import type { Quote, QuoteCatalogItem, QuoteItemKind, QuoteLink, Ref, TicketDetail, UUID } from "@/lib/types";
 

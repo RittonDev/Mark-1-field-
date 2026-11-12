@@ -2,17 +2,19 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { Eye, FileText, Pencil, Plus } from "lucide-react";
+import { Eye, FileText, Pencil, Plus, SquarePen } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { QuoteView } from "@/components/ticket/QuotesCard";
+import { QUOTE_EDITABLE, QuoteViewer } from "@/components/quotes/QuoteViewer";
+import { QuoteEditor, type QuoteTicketRef, ShareDialog } from "@/components/ticket/QuotesCard";
+import { useToast } from "@/components/Toaster";
 import { Button, Card, Checkbox, Dialog, EmptyState, ErrorBox, Field, Input, LoadingBlock, PageHeader, Select, Table, Td, Th } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canManageTickets } from "@/lib/constants";
 import { formatDate, formatMoney } from "@/lib/format";
 import { QUOTE_KIND, QUOTE_STATUS } from "@/lib/quotes";
-import type { QuoteCatalogItem, QuoteItemKind, QuoteListRow, QuoteStatus } from "@/lib/types";
+import type { Quote, QuoteCatalogItem, QuoteItemKind, QuoteListRow, QuoteStatus } from "@/lib/types";
 
 type Tab = "quotes" | "catalog";
 
@@ -51,12 +53,52 @@ export default function QuotesPage() {
   );
 }
 
+/** Botão quadrado das ações da linha (mesmo padrão do lápis das listas de OS). */
+function RowAction({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg border border-line bg-surface text-brand shadow-elev-1 transition-[border-color,background-color,transform] duration-150 hover:border-brand/40 hover:bg-brand-soft active:translate-y-px"
+    >
+      {children}
+    </button>
+  );
+}
+
+const ticketOf = (q: QuoteListRow): QuoteTicketRef => ({
+  id: q.ticket_id,
+  code: q.ticket_code,
+  title: q.title,
+  customer: q.customer ? { name: q.customer } : null,
+});
+
 function QuoteList() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
   const [status, setStatus] = useState<QuoteStatus | "">("");
   const [opened, setOpened] = useState<QuoteListRow | null>(null);
+  const [editing, setEditing] = useState<QuoteListRow | null>(null);
+  const [sharing, setSharing] = useState<QuoteListRow | null>(null);
   const quotes = useQuery({
     queryKey: ["quotes", status],
     queryFn: () => api.get<QuoteListRow[]>("/quotes", { status: status || undefined }),
+  });
+  const refresh = (ticketId: string) => {
+    queryClient.invalidateQueries({ queryKey: ["quotes"] });
+    queryClient.invalidateQueries({ queryKey: ["ticket", ticketId, "quotes"] });
+  };
+  // Enviar (ou gerar o link de um enviado sem link) e já abrir o compartilhamento.
+  const send = useMutation({
+    mutationFn: (q: QuoteListRow) => api.post<Quote>(`/quotes/${q.id}/send`),
+    onSuccess: (saved, q) => {
+      refresh(q.ticket_id);
+      setOpened(null);
+      setSharing({ ...q, ...saved });
+    },
+    onError: (e) => toast({ title: "Não foi possível enviar", description: errorMessage(e), tone: "error" }),
   });
   const totals = useMemo(() => {
     const rows = quotes.data ?? [];
@@ -96,7 +138,7 @@ function QuoteList() {
                 <Th className="text-right">Total</Th>
                 <Th className="hidden md:table-cell">Validade</Th>
                 <Th>Situação</Th>
-                <Th className="edit-col">Ver</Th>
+                <Th className="edit-col">Ações</Th>
               </tr>
             </thead>
             <tbody>
@@ -122,15 +164,18 @@ function QuoteList() {
                     </span>
                   </Td>
                   <Td className="edit-col">
-                    <button
-                      type="button"
-                      onClick={() => setOpened(q)}
-                      className="inline-flex size-7 items-center justify-center rounded-md border border-line bg-surface text-ink-muted transition-colors hover:border-brand hover:text-brand"
-                      aria-label={`Ver o orçamento ${q.code}`}
-                      title="Ver orçamento"
-                    >
-                      <Eye className="size-3.5" />
-                    </button>
+                    <span className="inline-flex items-center gap-1.5">
+                      <RowAction label={`Ver o orçamento ${q.code}`} onClick={() => setOpened(q)}>
+                        <Eye className="size-4" />
+                      </RowAction>
+                      {QUOTE_EDITABLE.includes(q.status) ? (
+                        <RowAction label={`Editar o orçamento ${q.code}`} onClick={() => setEditing(q)}>
+                          <SquarePen className="size-4" />
+                        </RowAction>
+                      ) : (
+                        <span className="size-8" aria-hidden />
+                      )}
+                    </span>
                   </Td>
                 </tr>
               ))}
@@ -138,7 +183,48 @@ function QuoteList() {
           </Table>
         )}
       </Card>
-      {opened ? <QuoteView quote={opened} onClose={() => setOpened(null)} /> : null}
+      {opened ? (
+        <QuoteViewer
+          quote={opened}
+          ticket={{ id: opened.ticket_id, code: opened.ticket_code, customer: opened.customer }}
+          onClose={() => setOpened(null)}
+          onEdit={() => {
+            setOpened(null);
+            setEditing(opened);
+          }}
+          onSend={() => send.mutate(opened)}
+          sending={send.isPending}
+          onShare={() => {
+            setOpened(null);
+            setSharing(opened);
+          }}
+        />
+      ) : null}
+      {editing ? (
+        <QuoteEditor
+          ticket={ticketOf(editing)}
+          quote={editing}
+          onClose={() => setEditing(null)}
+          onSaved={(saved) => {
+            refresh(editing.ticket_id);
+            toast({
+              title: `${saved.code} salvo`,
+              description: editing.status === "sent" ? "Envie de novo para o cliente responder a versão nova." : undefined,
+              tone: "success",
+            });
+            // Volta para a visualização: dali já dá para enviar ao cliente.
+            setOpened({ ...editing, ...saved });
+          }}
+        />
+      ) : null}
+      {sharing ? (
+        <ShareDialog
+          ticket={{ code: sharing.ticket_code }}
+          quote={sharing}
+          onClose={() => setSharing(null)}
+          onRotated={() => refresh(sharing.ticket_id)}
+        />
+      ) : null}
     </>
   );
 }
