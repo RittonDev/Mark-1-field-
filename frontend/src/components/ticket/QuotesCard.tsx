@@ -145,22 +145,30 @@ interface Line {
   catalog_item_id: string | null;
 }
 
-function QuoteEditor({
+/** Itens iniciais de um orçamento novo (ex.: o pedido de peça do técnico). */
+export interface QuotePrefill {
+  title?: string;
+  items: { description: string; quantity: number; unit: string; kind?: QuoteItemKind }[];
+}
+
+export function QuoteEditor({
   ticket,
   quote,
+  prefill,
   onClose,
   onSaved,
 }: {
   ticket: TicketDetail;
   quote: Quote | null;
+  prefill?: QuotePrefill;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (saved: Quote) => void;
 }) {
   const catalog = useQuery({
     queryKey: ["quote-items", "active"],
     queryFn: () => api.get<QuoteCatalogItem[]>("/quote-items", { active: true }),
   });
-  const [title, setTitle] = useState(quote?.title ?? ticket.title);
+  const [title, setTitle] = useState(quote?.title ?? prefill?.title ?? ticket.title);
   const [lines, setLines] = useState<Line[]>(
     quote?.items.map((i) => ({
       kind: i.kind ?? "product",
@@ -169,7 +177,15 @@ function QuoteEditor({
       unit: i.unit,
       unit_price: i.unit_price.toFixed(2).replace(".", ","),
       catalog_item_id: i.catalog_item_id,
-    })) ?? [{ kind: "product", description: "", quantity: "1", unit: "un", unit_price: "", catalog_item_id: null }],
+    })) ??
+      prefill?.items.map((i) => ({
+        kind: i.kind ?? "product",
+        description: i.description,
+        quantity: String(i.quantity).replace(".", ","),
+        unit: i.unit,
+        unit_price: "",
+        catalog_item_id: null,
+      })) ?? [{ kind: "product", description: "", quantity: "1", unit: "un", unit_price: "", catalog_item_id: null }],
   );
   const [discount, setDiscount] = useState(quote ? quote.discount.toFixed(2).replace(".", ",") : "0");
   // Validade padrão: 7 dias (calculada uma vez, no primeiro render).
@@ -198,10 +214,10 @@ function QuoteEditor({
         valid_until: validUntil || null,
         notes: notes || null,
       };
-      return quote ? api.put(`/quotes/${quote.id}`, body) : api.post(`/tickets/${ticket.id}/quotes`, body);
+      return quote ? api.put<Quote>(`/quotes/${quote.id}`, body) : api.post<Quote>(`/tickets/${ticket.id}/quotes`, body);
     },
-    onSuccess: () => {
-      onSaved();
+    onSuccess: (saved) => {
+      onSaved(saved);
       onClose();
     },
   });

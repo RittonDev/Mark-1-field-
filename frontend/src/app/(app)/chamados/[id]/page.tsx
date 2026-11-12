@@ -15,6 +15,9 @@ import { ExpensesCard } from "@/components/ticket/ExpensesCard";
 import { FormsCard } from "@/components/ticket/FormsCard";
 import { MessagesCard } from "@/components/ticket/MessagesPanel";
 import { OwnerCard } from "@/components/ticket/OwnerCard";
+import { PartRequestsCard } from "@/components/ticket/PartRequestsCard";
+import { AuthorizationCard } from "@/components/ticket/AuthorizationCard";
+import { ArrivalChip, AuthorizationChip, OnsiteBar, RecurrenceChip } from "@/components/ticket/FieldClock";
 import { ReportLinkCard } from "@/components/ticket/ReportLinkCard";
 import { HistoryTab } from "@/components/ticket/HistoryTab";
 import { QuotesCard } from "@/components/ticket/QuotesCard";
@@ -86,6 +89,37 @@ function DueLine({
   );
 }
 
+/** Outras OS na mesma loja nos últimos 30 dias: ajuda a ver reincidência antes de mandar o técnico. */
+function StoreHistoryCard({ ticket }: { ticket: TicketDetail }) {
+  const history = ticket.recurrence;
+  if (!history || history.count_30d === 0) return null;
+  return (
+    <Card className="p-4">
+      <p className="mb-2 flex items-center justify-between text-xs font-medium text-ink-subtle">
+        <span>Histórico da loja · 30 dias</span>
+        <span className="rounded-full bg-violet-50 px-1.5 font-semibold text-violet-700 dark:bg-violet-500/10 dark:text-violet-300">
+          {history.count_30d}
+        </span>
+      </p>
+      <ul className="flex flex-col gap-1">
+        {history.previous.map((p) => (
+          <li key={p.id}>
+            <Link href={`/chamados/${p.id}`} className="flex items-start gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors hover:bg-surface-2">
+              <span className="mt-0.5 font-mono text-[11px] text-ink-subtle">{p.code}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-ink">{p.title}</span>
+                <span className="text-[11px] text-ink-subtle">
+                  {STATUS[p.status]?.label ?? p.status} · {formatDateTime(p.created_at)}
+                </span>
+              </span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
 export default function TicketDetailPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
@@ -132,6 +166,8 @@ export default function TicketDetailPage() {
               <StatusBadge status={ticket.status} />
               <PriorityBadge priority={ticket.priority} />
               <SlaBadge status={ticket.sla_status} />
+              <AuthorizationChip status={ticket.authorization_status} />
+              <RecurrenceChip count={ticket.recurrence?.count_30d} />
               {ticket.project ? (
                 <Link
                   href={`/projetos/${ticket.project.id}`}
@@ -165,6 +201,12 @@ export default function TicketDetailPage() {
               paused={paused}
               now={now}
             />
+            {ticket.arrival_due_at || ticket.arrived_at ? (
+              <div className="mt-1 flex flex-col gap-2 border-t border-line pt-2">
+                <ArrivalChip ticket={ticket} />
+                <OnsiteBar ticket={ticket} />
+              </div>
+            ) : null}
           </div>
         </div>
         {transitions.length > 0 || ticket.can_edit ? (
@@ -204,6 +246,8 @@ export default function TicketDetailPage() {
 
       <div className="grid gap-4 lg:grid-cols-[1fr_22rem]">
         <div className="flex min-w-0 flex-col gap-4">
+          <AuthorizationCard ticket={ticket} />
+
           <Card>
             <div className="p-5">
               <h2 className="mb-2 text-xs font-medium tracking-wide text-ink-muted uppercase">Descrição</h2>
@@ -230,6 +274,8 @@ export default function TicketDetailPage() {
 
           <FormsCard ticket={ticket} />
 
+          <PartRequestsCard ticket={ticket} />
+
           <QuotesCard ticket={ticket} />
 
           <Card>
@@ -247,6 +293,7 @@ export default function TicketDetailPage() {
 
         <div className="flex flex-col gap-4">
           <OwnerCard ticket={ticket} />
+          <StoreHistoryCard ticket={ticket} />
           <AssignmentPanel key={`${ticket.assignee?.id ?? "none"}-${ticket.version}`} ticket={ticket} />
           <SlaCard ticket={ticket} />
           <ExpensesCard ticket={ticket} />
