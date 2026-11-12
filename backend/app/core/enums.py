@@ -98,6 +98,9 @@ class TicketEventType(StrEnum):
     EXPENSE_UPDATED = "expense_updated"
     EXPENSE_REMOVED = "expense_removed"
     UNPRODUCTIVE_VISIT = "unproductive_visit"
+    QUOTE_SENT = "quote_sent"
+    QUOTE_APPROVED = "quote_approved"
+    QUOTE_REJECTED = "quote_rejected"
 
 
 class DevicePlatform(StrEnum):
@@ -163,3 +166,12 @@ class ExpenseStatus(StrEnum):
     APPROVED = "approved"  # aprovado para reembolso
     PAID = "paid"  # reembolsado ao técnico
     REJECTED = "rejected"  # não será reembolsado
+
+
+class QuoteStatus(StrEnum):
+    DRAFT = "draft"  # em elaboração
+    SENT = "sent"  # link enviado ao cliente
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    EXPIRED = "expired"  # passou da validade sem resposta
+    CANCELLED = "cancelled"

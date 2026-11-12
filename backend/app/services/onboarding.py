@@ -1,7 +1,5 @@
 """Homologação de técnicos: convites, ficha pública e análise (aprovar/reprovar)."""
 
-import base64
-import binascii
 import hashlib
 import secrets
 import uuid
@@ -75,19 +73,10 @@ async def active_invite(db: AsyncSession, token: str) -> OnboardingInvite:
 
 
 def _decode_photo(data_url: str) -> tuple[bytes, str]:
-    header, _, payload = data_url.partition(",")
-    if not header.startswith("data:image/") or ";base64" not in header:
-        raise WorkflowError("Foto inválida: envie uma imagem JPG ou PNG")
     try:
-        raw = base64.b64decode(payload, validate=True)
-    except (binascii.Error, ValueError) as exc:
-        raise WorkflowError("Foto inválida") from exc
-    if len(raw) > MAX_PHOTO_BYTES:
-        raise WorkflowError("Foto maior que 2 MB")
-    ext = storage.image_extension(raw)
-    if ext is None:
-        raise WorkflowError("Foto inválida: envie uma imagem JPG, PNG ou WebP")
-    return raw, ext
+        return storage.decode_image_data_url(data_url, MAX_PHOTO_BYTES)
+    except storage.InvalidImage as exc:
+        raise WorkflowError(str(exc)) from exc
 
 
 async def email_taken(db: AsyncSession, email: str, exclude_id: uuid.UUID | None = None) -> bool:

@@ -9,6 +9,7 @@ from app.api.routes import (
     expenses,
     forms,
     onboarding,
+    quotes,
     schedule,
     sync,
     technicians,
@@ -28,6 +29,7 @@ for module in (
     tickets,
     forms,
     expenses,
+    quotes,
     activities,
     tracking,
     schedule,
@@ -38,3 +40,4 @@ for module in (
 ):
     api_router.include_router(module.router)
 api_router.include_router(onboarding.public)
+api_router.include_router(quotes.public)

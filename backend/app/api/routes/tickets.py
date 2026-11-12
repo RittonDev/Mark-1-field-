@@ -35,7 +35,13 @@ from app.services.realtime import commit_and_publish
 router = APIRouter(tags=["tickets"])
 
 # Eventos que o solicitante não vê no histórico.
-_INTERNAL_EVENT_TYPES = {"worklog_added", "expense_added", "expense_updated", "expense_removed"}
+_INTERNAL_EVENT_TYPES = {
+    "worklog_added",
+    "expense_added",
+    "expense_updated",
+    "expense_removed",
+    "quote_sent",
+}
 
 
 async def _detail(db: DB, ticket_id: uuid.UUID, user: User) -> TicketDetail:

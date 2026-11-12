@@ -72,3 +72,27 @@ def image_extension(data: bytes) -> str | None:
     if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
         return "webp"
     return None
+
+
+class InvalidImage(ValueError):
+    pass
+
+
+def decode_image_data_url(data_url: str, max_bytes: int = 2 * 1024 * 1024) -> tuple[bytes, str]:
+    """Imagem em data URL (foto ou assinatura desenhada) → (bytes, extensão real)."""
+    import base64
+    import binascii
+
+    header, _, payload = data_url.partition(",")
+    if not header.startswith("data:image/") or ";base64" not in header:
+        raise InvalidImage("Imagem inválida: envie JPG, PNG ou WebP")
+    try:
+        raw = base64.b64decode(payload, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise InvalidImage("Imagem inválida") from exc
+    if len(raw) > max_bytes:
+        raise InvalidImage(f"Imagem maior que {max_bytes // (1024 * 1024)} MB")
+    ext = image_extension(raw)
+    if ext is None:
+        raise InvalidImage("Imagem inválida: envie JPG, PNG ou WebP")
+    return raw, ext
