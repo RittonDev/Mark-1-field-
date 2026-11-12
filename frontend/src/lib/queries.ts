@@ -2,7 +2,17 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { api } from "./api";
-import type { AssignableUser, Category, Customer, Location, Page, Team, User, UUID } from "./types";
+import type {
+  AssignableUser,
+  Category,
+  Customer,
+  Location,
+  Page,
+  ServiceType,
+  Team,
+  User,
+  UUID,
+} from "./types";
 
 const LOOKUP_STALE = 60_000;
 
@@ -55,6 +65,18 @@ export function useLocationSearch(params: {
         page_size: pageSize,
       }),
     placeholderData: (prev) => prev,
+  });
+}
+
+/** Catálogo de tipos de serviço. Com cliente: os gerais + os daquele cliente. */
+export function useServiceTypes(params: { customerId?: UUID | null; active?: boolean; enabled?: boolean } = {}) {
+  const { customerId, active, enabled = true } = params;
+  return useQuery({
+    queryKey: ["service-types", customerId ?? "", active ?? ""],
+    queryFn: () =>
+      api.get<ServiceType[]>("/service-types", { customer_id: customerId ?? undefined, active }),
+    staleTime: LOOKUP_STALE,
+    enabled,
   });
 }
 
