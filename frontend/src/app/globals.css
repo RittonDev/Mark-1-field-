@@ -206,3 +206,9 @@ select {
 .mf-tiles-dim {
   filter: invert(1) hue-rotate(180deg) brightness(0.9) contrast(0.85) saturate(0.6);
 }
+
+/* Rolagem discreta no menu azul-marinho. */
+.sidebar-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(255 255 255 / 0.14) transparent;
+}

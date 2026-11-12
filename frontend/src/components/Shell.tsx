@@ -100,7 +100,7 @@ export function Sidebar({ user }: { user: User }) {
           <Logo inverse />
         </span>
       </Link>
-      <nav className="flex-1 overflow-y-auto px-2 pb-4" aria-label="Menu principal">
+      <nav className="sidebar-scroll flex-1 overflow-y-auto px-2 pb-4" aria-label="Menu principal">
         {GROUPS.map((group) => {
           const groupItems = items.filter((i) => i.group === group.key);
           if (!groupItems.length) return null;
