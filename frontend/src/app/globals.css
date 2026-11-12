@@ -226,38 +226,41 @@
   animation-delay: calc(min(var(--i, 0), 12) * 32ms);
 }
 
-html,
-body {
-  background: var(--canvas);
-  color: var(--ink);
-}
+/* Base em camada própria: os utilitários do Tailwind (ex.: outline-none) continuam valendo por cima. */
+@layer base {
+  html,
+  body {
+    background: var(--canvas);
+    color: var(--ink);
+  }
 
-body {
-  font-family: var(--font-sans);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  text-rendering: optimizeLegibility;
-}
+  body {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
 
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--line-strong) transparent;
-}
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-strong) transparent;
+  }
 
-select {
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238b93a1' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 0.6rem center;
-}
+  select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238b93a1' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.6rem center;
+  }
 
-::selection {
-  background: color-mix(in srgb, var(--brand) 22%, transparent);
-}
+  ::selection {
+    background: color-mix(in srgb, var(--brand) 22%, transparent);
+  }
 
-:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--brand) 55%, transparent);
-  outline-offset: 2px;
+  :focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--brand) 55%, transparent);
+    outline-offset: 2px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
