@@ -610,6 +610,9 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
     scheduled_end = None if is_requester else data.scheduled_end
     scheduled_end = _default_end(scheduled_start, scheduled_end, estimated_minutes)
     _check_schedule(scheduled_start, scheduled_end)
+    helpers = await _helper_users(
+        db, [] if is_requester else data.helper_ids, data.assignee_id, actor
+    )
     # Antes de gravar: uma OS barrada por conflito não pode consumir número.
     await schedule.check_slot(
         db,
@@ -621,6 +624,7 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
         status=S.NEW,
         exclude_id=None,
         allow=data.allow_conflict,
+        helper_ids=[h.id for h in helpers],
     )
 
     # Autorização do cliente: com a regra ligada, a OS nasce aguardando (a gestão pode já
@@ -652,6 +656,9 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
         requester_name=requester_name,
         requester_contact=data.requester_contact,
         service_address=(data.service_address or "").strip() or None,
+        client_reference=_clean_text(data.client_reference, single_line=True),
+        visit_note=None if is_requester else _clean_text(data.visit_note),
+        helpers=helpers,
         created_by_id=actor.id,
         owner_id=owner_id,
         team_id=team_id,
@@ -676,13 +683,16 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
     db.add(ticket)
     await db.flush()  # gera id e número
 
+    created_data: dict[str, Any] = {"priority": priority.value, "source": data.source.value}
+    if helpers:
+        created_data["helpers"] = [h.name for h in helpers]
     record_event(
         db,
         ticket,
         actor,
         TicketEventType.CREATED,
         to_value=S.NEW.value,
-        data={"priority": priority.value, "source": data.source.value},
+        data=created_data,
         now=now,
     )
     if data.authorization is not None:
@@ -690,6 +700,15 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
             db, ticket, actor, authorization_status, data.authorization, now=now
         )
     queue_event(db, "created", ticket, actor, {"title": ticket.title})
+    if helpers:
+        # Avisa (push) quem vai junto na visita.
+        queue_event(
+            db,
+            "helpers_changed",
+            ticket,
+            actor,
+            {"added": [h.name for h in helpers], "removed": [], "added_ids": [str(h.id) for h in helpers]},
+        )
 
     if data.assignee_id is not None and not is_requester:
         if not actor.can_manage_tickets and data.assignee_id != actor.id:
@@ -713,6 +732,13 @@ async def update_ticket(
             raise PermissionDenied("Só a gestão troca o analista responsável")
         if new_owner_id is not None:
             await _owner_user(db, new_owner_id)
+    # Outros técnicos da visita: lista completa, com evento próprio (null = não mexe).
+    new_helper_ids = fields.pop("helper_ids", None)
+    if new_helper_ids is not None and not actor.can_manage_tickets:
+        raise PermissionDenied("Só a gestão escolhe os outros técnicos da OS")
+    for key in ("client_reference", "visit_note"):
+        if key in fields:
+            fields[key] = _clean_text(fields[key], single_line=key == "client_reference")
     if "project_id" in fields:
         await _check_project(db, fields["project_id"], actor)
     if "signature_required" in fields:
@@ -723,6 +749,8 @@ async def update_ticket(
     if not fields:
         if owner_change:
             await _set_owner(db, ticket, new_owner_id, actor, now=utcnow())
+        if new_helper_ids is not None:
+            await _set_helpers(db, ticket, new_helper_ids, actor, allow=data.allow_conflict)
         return ticket
 
     ref_keys = {"customer_id", "location_id", "asset_id", "category_id", "team_id"}
@@ -768,6 +796,8 @@ async def update_ticket(
             setattr(ticket, key, value)
     if owner_change:
         await _set_owner(db, ticket, new_owner_id, actor, now=utcnow())
+    if new_helper_ids is not None:
+        await _set_helpers(db, ticket, new_helper_ids, actor, allow=data.allow_conflict)
     if not changes:
         return ticket
 
