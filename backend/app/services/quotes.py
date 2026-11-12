@@ -201,9 +201,7 @@ async def _decided(db: AsyncSession, ticket: Ticket, quote: Quote, approved: boo
     queue_event(db, "updated", ticket, None, {"fields": ["quotes"]}, internal=True)
 
 
-async def approve(
-    db: AsyncSession, quote: Quote, data: QuoteApprove, ip: str | None
-) -> Quote:
+async def approve(db: AsyncSession, quote: Quote, data: QuoteApprove, ip: str | None) -> Quote:
     _ensure_open(quote)
     if not data.accept:
         raise WorkflowError("Marque a concordância com o orçamento para aprovar")
@@ -225,7 +223,9 @@ async def approve(
     return quote
 
 
-async def reject(db: AsyncSession, quote: Quote, reason: str, name: str | None, ip: str | None) -> Quote:
+async def reject(
+    db: AsyncSession, quote: Quote, reason: str, name: str | None, ip: str | None
+) -> Quote:
     _ensure_open(quote)
     quote.status = QuoteStatus.REJECTED
     quote.decided_at = utcnow()

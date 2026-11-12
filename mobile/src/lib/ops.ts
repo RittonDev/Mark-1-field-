@@ -14,6 +14,9 @@ import { userCanTransition } from "./workflow";
 
 const selfAssigns = (user: User) => SELF_ASSIGN_ROLES.includes(user.role);
 
+/** Status em que o responsável pode registrar visita improdutiva (UNPRODUCTIVE_FROM no backend). */
+export const UNPRODUCTIVE_FROM: TicketStatus[] = ["assigned", "scheduled", "en_route", "in_progress"];
+
 /**
  * Espelho de backend/app/services/tickets.py::allowed_transitions.
  * Diferente do quadro da web, analista e técnico podem levar uma OS sem responsável para
@@ -118,6 +121,25 @@ export function applyOp(ticket: TicketDetail, op: OutboxOp, user: User): TicketD
     }
     case "worklog":
       return { ...ticket, updated_at: op.client_timestamp };
+    case "unproductive": {
+      // Espelho de tickets.py::register_unproductive: volta para "Atribuído" sem agenda (a central
+      // reagenda), o relógio do atendimento para e a ocorrência é contada.
+      if (!UNPRODUCTIVE_FROM.includes(ticket.status)) return ticket;
+      const at = op.client_timestamp;
+      const t: TicketDetail = { ...ticket };
+      if (t.status === "in_progress" && t.work_started_at) {
+        t.work_seconds = actualSeconds(t, new Date(at).getTime());
+        t.work_started_at = null;
+      }
+      t.status = "assigned";
+      t.scheduled_start = null;
+      t.scheduled_end = null;
+      t.unproductive_count = (t.unproductive_count ?? 0) + 1;
+      t.last_unproductive_at = at;
+      t.updated_at = at;
+      t.allowed_transitions = allowedTransitions(user, t);
+      return t;
+    }
     case "form_answers": {
       // Espelho de forms.py::save_partial/complete. A conclusão só é enfileirada depois da
       // validação local (obrigatórios e fotos); se o servidor recusar, o rebase desfaz.

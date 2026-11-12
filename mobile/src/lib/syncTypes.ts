@@ -46,12 +46,21 @@ export interface FormAnswersPayload {
   complete: boolean;
 }
 
+/** Visita improdutiva: o técnico foi ao local e não conseguiu atender (POST /tickets/{id}/unproductive). */
+export interface UnproductivePayload {
+  reason_id: UUID;
+  note?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+}
+
 export type SyncOperation =
   | { type: "transition"; payload: TicketTransitionPayload }
   | { type: "comment"; payload: CommentCreatePayload }
   | { type: "worklog"; payload: WorklogCreatePayload }
   | { type: "update"; payload: TicketUpdatePayload }
-  | { type: "form_answers"; payload: FormAnswersPayload };
+  | { type: "form_answers"; payload: FormAnswersPayload }
+  | { type: "unproductive"; payload: UnproductivePayload };
 
 export type SyncOpType = SyncOperation["type"];
 

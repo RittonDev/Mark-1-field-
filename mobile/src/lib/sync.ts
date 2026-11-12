@@ -26,6 +26,7 @@ import {
   getDb,
   getKv,
   getTicket,
+  getUnproductiveReasonsAt,
   getViolationReasonsAt,
   insertLocalComment,
   insertLocalWorklog,
@@ -47,6 +48,7 @@ import {
   saveServerComment,
   saveServerTicket,
   saveServerWorklog,
+  saveUnproductiveReasons,
   saveViolationReasons,
   setAttachmentsCache,
   setFormError,
@@ -60,6 +62,7 @@ import { session } from "./session";
 import type {
   CommentCreatePayload,
   FormAnswersPayload,
+  UnproductivePayload,
   OutboxOp,
   SyncOperation,
   SyncOperationIn,
@@ -74,6 +77,7 @@ import type {
   RealtimeEvent,
   TicketDetail,
   TicketTransitionPayload,
+  UnproductiveReason,
   User,
   UUID,
   ViolationReason,
@@ -228,6 +232,8 @@ export function describeOp(op: SyncOperation): string {
       return "Edição da OS";
     case "form_answers":
       return op.payload.complete ? "Conclusão de formulário" : "Respostas de formulário";
+    case "unproductive":
+      return "Visita improdutiva";
   }
 }
 
@@ -368,14 +374,19 @@ let forceReasons = false;
  * Muda pouco: baixa na primeira vez, a cada 6 h ou em "Baixar tudo". Falha aqui não derruba a rodada.
  */
 async function refreshViolationReasons() {
-  const at = await getViolationReasonsAt();
-  if (!forceReasons && at && Date.now() - new Date(at).getTime() < REASONS_MAX_AGE_MS) return;
+  const stale = (at: string | null) => forceReasons || !at || Date.now() - new Date(at).getTime() >= REASONS_MAX_AGE_MS;
   try {
-    await saveViolationReasons(await api.get<ViolationReason[]>("/violation-reasons?active=true"));
+    if (stale(await getViolationReasonsAt())) {
+      await saveViolationReasons(await api.get<ViolationReason[]>("/violation-reasons?active=true"));
+    }
+    // Motivos de visita improdutiva: mesmo ciclo (o técnico registra a visita offline).
+    if (stale(await getUnproductiveReasonsAt())) {
+      await saveUnproductiveReasons(await api.get<UnproductiveReason[]>("/unproductive-reasons?active=true"));
+    }
     forceReasons = false;
   } catch (error) {
     if (error instanceof ApiError && error.status === 0) throw error;
-    console.warn("Não foi possível atualizar os motivos de violação de SLA", error);
+    console.warn("Não foi possível atualizar os cadastros de motivos", error);
   }
 }
 
@@ -564,6 +575,16 @@ async function uploadSignature(signature: PendingSignature) {
   }
 }
 
+/**
+ * Visita improdutiva pela fila de sync (funciona offline). A OS volta para "Atribuído" sem agenda,
+ * sai da agenda do técnico e a central reagenda.
+ */
+export async function enqueueUnproductive(ticketId: UUID, payload: UnproductivePayload) {
+  await enqueue(ticketId, { type: "unproductive", payload });
+  // Se estava em deslocamento, o ritmo do rastreamento volta ao normal.
+  void updateTrackingMode();
+}
+
 /** Respostas de formulário (Salvar) ou conclusão (Concluir), pela fila de sync. */
 export function enqueueFormAnswers(ticketId: UUID, payload: FormAnswersPayload) {
   return enqueue(ticketId, { type: "form_answers", payload });
@@ -662,9 +683,7 @@ function describeEvent(event: RealtimeEvent, user: User): string | null {
   const code = event.ticket_code ?? "OS";
   if (event.type === "ticket.assigned" && event.assignee_id === user.id) return `${code} foi atribuída a você`;
   if (event.type === "ticket.created" && event.assignee_id === user.id) return `Nova ${code} para você`;
-  if (event.type === "ticket.comment_added" && event.assignee_id === user.id) {
-    return `Novo acompanhamento em ${code}${event.actor_name ? ` por ${event.actor_name}` : ""}`;
-  }
+  // Acompanhamentos não fazem parte do app: a central fala com o técnico pelo grupo de WhatsApp.
   return null;
 }
 

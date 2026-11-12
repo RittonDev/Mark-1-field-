@@ -57,7 +57,9 @@ async def list_catalog(
 
 
 @router.post("/quote-items", response_model=CatalogItemOut, status_code=status.HTTP_201_CREATED)
-async def create_catalog_item(body: CatalogItemIn, db: DB, _: TicketManagerUser) -> QuoteItemCatalog:
+async def create_catalog_item(
+    body: CatalogItemIn, db: DB, _: TicketManagerUser
+) -> QuoteItemCatalog:
     item = QuoteItemCatalog(id=uuid.uuid4(), **body.model_dump())
     db.add(item)
     await db.commit()
@@ -219,7 +221,11 @@ async def view_quote(token: str, db: DB) -> PublicQuote:
 
 def _ip(request: Request) -> str | None:
     forwarded = request.headers.get("x-forwarded-for")
-    return forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else None)
+    return (
+        forwarded.split(",")[0].strip()
+        if forwarded
+        else (request.client.host if request.client else None)
+    )
 
 
 @public.post("/{token}/approve", response_model=PublicQuote)
@@ -228,7 +234,9 @@ async def approve_quote(token: str, body: QuoteApprove, request: Request, db: DB
     try:
         await svc.approve(db, quote, body, _ip(request))
     except svc.QuoteUnavailable as exc:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Este orçamento já foi respondido ou venceu") from exc
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "Este orçamento já foi respondido ou venceu"
+        ) from exc
     await commit_and_publish(db)
     await svc.publish_decision(quote, format_ticket_code(ticket.number))
     return _public_view(quote, ticket)
@@ -240,7 +248,9 @@ async def reject_quote(token: str, body: QuoteReject, request: Request, db: DB) 
     try:
         await svc.reject(db, quote, body.reason, body.name, _ip(request))
     except svc.QuoteUnavailable as exc:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Este orçamento já foi respondido ou venceu") from exc
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "Este orçamento já foi respondido ou venceu"
+        ) from exc
     await commit_and_publish(db)
     await svc.publish_decision(quote, format_ticket_code(ticket.number))
     return _public_view(quote, ticket)

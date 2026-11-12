@@ -7,7 +7,7 @@ import { Platform } from "react-native";
 import { notifyDataChanged } from "./changes";
 import { rebase } from "./ops";
 import type { LocalTicket, OutboxOp, SyncOperation } from "./syncTypes";
-import type { Attachment, Comment, TicketDetail, User, UUID, ViolationReason, Worklog } from "./types";
+import type { Attachment, Comment, TicketDetail, UnproductiveReason, User, UUID, ViolationReason, Worklog } from "./types";
 
 type DB = SQLite.SQLiteDatabase;
 
@@ -202,6 +202,33 @@ export async function saveViolationReasons(reasons: ViolationReason[]): Promise<
   await transaction(async (db) => {
     await setKv(REASONS_KEY, JSON.stringify(reasons), db);
     await setKv(REASONS_AT_KEY, new Date().toISOString(), db);
+  });
+}
+
+// ─────────────────── motivos de visita improdutiva ──────────────────
+
+const UNPRODUCTIVE_KEY = "unproductive_reasons";
+const UNPRODUCTIVE_AT_KEY = "unproductive_reasons_at";
+
+/** Motivos guardados no aparelho, para registrar a visita improdutiva offline. */
+export async function getUnproductiveReasons(): Promise<UnproductiveReason[]> {
+  const raw = await getKv(UNPRODUCTIVE_KEY);
+  if (!raw) return [];
+  try {
+    return JSON.parse(raw) as UnproductiveReason[];
+  } catch {
+    return [];
+  }
+}
+
+export async function getUnproductiveReasonsAt(): Promise<string | null> {
+  return getKv(UNPRODUCTIVE_AT_KEY);
+}
+
+export async function saveUnproductiveReasons(reasons: UnproductiveReason[]): Promise<void> {
+  await transaction(async (db) => {
+    await setKv(UNPRODUCTIVE_KEY, JSON.stringify(reasons), db);
+    await setKv(UNPRODUCTIVE_AT_KEY, new Date().toISOString(), db);
   });
 }
 

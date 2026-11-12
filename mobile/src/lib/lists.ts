@@ -14,6 +14,13 @@ export const isDone = (status: TicketStatus) => STATUS[status].group === "done" 
 
 export const isMine = (ticket: LocalTicket, user: User) => ticket.assignee?.id === user.id;
 
+/**
+ * Visita improdutiva registrada e ainda sem nova agenda: a OS voltou para a central reagendar,
+ * então sai de "Hoje" e do calendário até ganhar uma nova visita.
+ */
+export const awaitingReschedule = (ticket: LocalTicket) =>
+  ticket.status === "assigned" && !ticket.scheduled_start && Boolean(ticket.last_unproductive_at);
+
 /** Em campo primeiro, depois pela hora da visita, prioridade e prazo de solução. */
 export function compareForToday(a: LocalTicket, b: LocalTicket): number {
   const rank = (FIELD_RANK[a.status] ?? 9) - (FIELD_RANK[b.status] ?? 9);
@@ -32,12 +39,15 @@ export interface TicketLists {
   upcoming: LocalTicket[];
   /** Resolvidas/fechadas recentemente (últimos 7 dias). */
   done: LocalTicket[];
+  /** Visita improdutiva, aguardando a central reagendar. */
+  reschedule: LocalTicket[];
 }
 
 export function buildLists(tickets: LocalTicket[], user: User, now: Date = new Date()): TicketLists {
   const today: LocalTicket[] = [];
   const upcoming: LocalTicket[] = [];
   const done: LocalTicket[] = [];
+  const reschedule: LocalTicket[] = [];
   const tomorrowStart = addDays(startOfDay(now), 1).getTime();
   const weekAgo = addDays(startOfDay(now), -7).getTime();
 
@@ -45,6 +55,10 @@ export function buildLists(tickets: LocalTicket[], user: User, now: Date = new D
     if (!isMine(ticket, user)) continue;
     if (isDone(ticket.status)) {
       if (new Date(ticket.updated_at).getTime() >= weekAgo) done.push(ticket);
+      continue;
+    }
+    if (awaitingReschedule(ticket)) {
+      reschedule.push(ticket);
       continue;
     }
     const scheduled = ticket.scheduled_start ? new Date(ticket.scheduled_start).getTime() : null;
@@ -55,7 +69,8 @@ export function buildLists(tickets: LocalTicket[], user: User, now: Date = new D
   today.sort(compareForToday);
   upcoming.sort((a, b) => time(a.scheduled_start) - time(b.scheduled_start));
   done.sort((a, b) => time(b.updated_at) - time(a.updated_at));
-  return { today, upcoming, done };
+  reschedule.sort((a, b) => time(b.last_unproductive_at) - time(a.last_unproductive_at));
+  return { today, upcoming, done, reschedule };
 }
 
 /** OS do técnico que ocupam um dia: visita agendada naquele dia (ou atendimento em curso, se for hoje). */
@@ -69,7 +84,7 @@ export function ticketsOnDay(tickets: LocalTicket[], user: User, day: Date, now:
       const s = t.scheduled_start ? new Date(t.scheduled_start).getTime() : null;
       const e = t.scheduled_end ? new Date(t.scheduled_end).getTime() : s;
       if (s !== null && e !== null && s < end && e >= start) return true;
-      return isToday && !isDone(t.status) && (s === null || FIELD_RANK[t.status] !== undefined);
+      return isToday && !isDone(t.status) && !awaitingReschedule(t) && (s === null || FIELD_RANK[t.status] !== undefined);
     })
     .sort(compareForToday);
 }

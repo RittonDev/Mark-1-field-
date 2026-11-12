@@ -171,6 +171,9 @@ export const EVENT_TYPE: Record<TicketEventType, string> = {
   expense_updated: "alterou um custo extra",
   expense_removed: "removeu um custo extra",
   unproductive_visit: "registrou visita improdutiva:",
+  quote_sent: "enviou o orçamento",
+  quote_approved: "Cliente aprovou o orçamento",
+  quote_rejected: "Cliente recusou o orçamento",
 };
 
 export const SLA_STATUS: Record<SlaStatus, { label: string; color: string }> = {

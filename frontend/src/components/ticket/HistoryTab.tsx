@@ -9,7 +9,10 @@ import {
   ClipboardX,
   Ban,
   Clock,
+  FileCheck2,
   FileSignature,
+  FileText,
+  FileX2,
   Receipt,
   History,
   MapPin,
@@ -41,6 +44,9 @@ const ICONS: Record<TicketEventType, React.ComponentType<{ className?: string }>
   expense_updated: Receipt,
   expense_removed: Receipt,
   unproductive_visit: Ban,
+  quote_sent: FileText,
+  quote_approved: FileCheck2,
+  quote_rejected: FileX2,
 };
 
 const FIELD_LABELS: Record<string, string> = {

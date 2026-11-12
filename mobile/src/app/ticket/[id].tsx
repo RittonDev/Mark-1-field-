@@ -4,24 +4,25 @@ import { useCallback, useState } from "react";
 import { ActivityIndicator, KeyboardAvoidingView, Platform, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { PriorityBadge, SlaBadge, StatusBadge } from "../../components/badges";
 import { ConnectionBar } from "../../components/ConnectionBar";
-import { CommentsPanel } from "../../components/ticket/CommentsPanel";
 import { DurationCompare } from "../../components/ticket/DurationCompare";
 import { FormsCard } from "../../components/ticket/FormsCard";
 import { InfoPanel } from "../../components/ticket/InfoPanel";
 import { PhotosPanel } from "../../components/ticket/PhotosPanel";
 import { WorklogsPanel } from "../../components/ticket/WorklogsPanel";
 import { TransitionModal } from "../../components/TransitionModal";
+import { UnproductiveModal } from "../../components/UnproductiveModal";
 import { Button, Card, EmptyState, Segmented, SectionTitle } from "../../components/ui";
 import { useLiveQuery, useNow } from "../../lib/changes";
 import { TRANSITION_ACTION } from "../../lib/constants";
 import { getTicket, listSignatures } from "../../lib/db";
 import { concludeBlock } from "../../lib/forms";
-import { formatRelative, formatShort } from "../../lib/format";
+import { formatDateTime, formatRelative, formatShort } from "../../lib/format";
+import { UNPRODUCTIVE_FROM } from "../../lib/ops";
 import { useSession } from "../../lib/session";
 import { isOnline, requestSync, useSyncStatus } from "../../lib/sync";
 import type { TicketStatus } from "../../lib/types";
 
-type Tab = "info" | "comments" | "worklogs" | "photos";
+type Tab = "info" | "worklogs" | "photos";
 
 /** Ordem dos botões: o próximo passo do atendimento em campo vem primeiro. */
 const ACTION_ORDER: TicketStatus[] = [
@@ -55,6 +56,7 @@ export default function TicketScreen() {
   const now = useNow(ticket?.work_started_at ? 15_000 : 30_000);
   const [tab, setTab] = useState<Tab>("info");
   const [target, setTarget] = useState<TicketStatus | null>(null);
+  const [unproductiveOpen, setUnproductiveOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
   if (!user) return null;
@@ -122,11 +124,18 @@ export default function TicketScreen() {
               {online ? "" : " (sem conexão)"}
             </Text>
           ) : null}
+          {(current.unproductive_count ?? 0) > 0 ? (
+            <Text style={styles.unproductive}>
+              {current.unproductive_count === 1 ? "1 visita improdutiva" : `${current.unproductive_count} visitas improdutivas`}
+              {current.last_unproductive_at ? ` · última em ${formatDateTime(current.last_unproductive_at)}` : ""}
+              {!current.scheduled_start && current.status === "assigned" ? " · aguardando reagendamento pela central" : ""}
+            </Text>
+          ) : null}
         </Card>
 
         {isMine ? <FormsCard ticket={current} /> : null}
 
-        {isMine && actions.length > 0 ? (
+        {isMine && (actions.length > 0 || canUnproductive) ? (
           <Card style={{ gap: 10 }}>
             <SectionTitle>Ações</SectionTitle>
             {actions.map((to) => {
@@ -144,6 +153,9 @@ export default function TicketScreen() {
                 </View>
               );
             })}
+            {canUnproductive ? (
+              <Button title="Visita improdutiva" variant="danger" onPress={() => setUnproductiveOpen(true)} />
+            ) : null}
           </Card>
         ) : !isMine ? (
           <Card>
@@ -158,19 +170,18 @@ export default function TicketScreen() {
           onChange={setTab}
           options={[
             { value: "info", label: "Detalhes" },
-            { value: "comments", label: "Acomp." },
             { value: "worklogs", label: "Horas" },
             { value: "photos", label: "Fotos" },
           ]}
         />
 
         {tab === "info" ? <InfoPanel ticket={current} now={now} /> : null}
-        {tab === "comments" ? <CommentsPanel ticket={current} user={user} /> : null}
         {tab === "worklogs" ? <WorklogsPanel ticket={current} user={user} /> : null}
         {tab === "photos" ? <PhotosPanel ticket={current} /> : null}
       </ScrollView>
 
       {target ? <TransitionModal key={target} ticket={current} to={target} onClose={() => setTarget(null)} /> : null}
+      {unproductiveOpen ? <UnproductiveModal ticket={current} onClose={() => setUnproductiveOpen(false)} /> : null}
     </KeyboardAvoidingView>
   );
 }
@@ -183,5 +194,6 @@ const makeStyles = (c: Palette) =>
   meta: { fontSize: 13, color: c.inkMuted },
   pending: { fontSize: 13, fontWeight: "600", color: c.warning },
   violationPending: { fontSize: 12, color: c.inkMuted, fontStyle: "italic" },
+    unproductive: { fontSize: 12, color: c.danger, fontWeight: "600" },
     blocked: { fontSize: 12, color: c.inkMuted, lineHeight: 17 },
 });

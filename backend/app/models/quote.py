@@ -53,7 +53,9 @@ class Quote(UUIDPrimaryKey, Timestamps, Base):
     # Link público: só o hash fica no banco; reenviar gera outro (o anterior deixa de valer).
     token_hash: Mapped[str | None] = mapped_column(String(64), unique=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    sent_by_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    sent_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
 
     # Decisão do cliente.
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
