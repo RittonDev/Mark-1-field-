@@ -148,7 +148,8 @@ export const ASSET_TYPE: Record<AssetType, string> = {
 export const ROLE: Record<UserRole, string> = {
   admin: "Administrador",
   supervisor: "Supervisor",
-  analyst: "Analista / Técnico",
+  analyst: "Analista",
+  technician: "Técnico de campo",
   requester: "Solicitante",
 };
 
@@ -176,6 +177,13 @@ export const ATTACHMENT_KIND: Record<string, string> = {
   signature: "Assinatura",
 };
 
+/** Equipe interna: vê notas internas e apontamentos. */
 export const isStaff = (role: UserRole | undefined) =>
+  role === "admin" || role === "supervisor" || role === "analyst" || role === "technician";
+/** Gestão completa das OS na web (espelha User.can_manage_tickets). */
+export const canManageTickets = (role: UserRole | undefined) =>
   role === "admin" || role === "supervisor" || role === "analyst";
+/** Configuração: grupos e categorias (SLA e usuários só admin). */
 export const isManager = (role: UserRole | undefined) => role === "admin" || role === "supervisor";
+/** Quem assume sozinho uma OS sem responsável ao iniciar o atendimento (SELF_ASSIGN_ROLES). */
+export const SELF_ASSIGN_ROLES: UserRole[] = ["analyst", "technician"];

@@ -12,12 +12,14 @@ import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import {
   ASSET_TYPE,
+  canManageTickets,
   computePriority,
   isStaff,
   LEVEL,
   LEVEL_ORDER,
   PRIORITY,
   PRIORITY_ORDER,
+  ROLE,
   TICKET_SOURCE,
   TICKET_TYPE,
 } from "@/lib/constants";
@@ -79,13 +81,15 @@ export default function NewTicketPage() {
   const { toast } = useToast();
   const { user } = useAuth();
   const staff = isStaff(user?.role);
+  // Técnico só pode atribuir a si mesmo: o campo de responsável fica para analista/supervisor.
+  const canAssign = canManageTickets(user?.role);
   const [form, setForm] = useState<FormState>(INITIAL);
 
   const categories = useCategories();
   const customers = useCustomers();
   const locations = useLocations(form.customer_id || null);
   const teams = useTeams();
-  const assignable = useAssignable(form.team_id || null, staff);
+  const assignable = useAssignable(form.team_id || null, canAssign);
   const assets = useQuery({
     queryKey: ["assets", "for-ticket", form.customer_id, form.location_id],
     queryFn: () =>
@@ -134,7 +138,7 @@ export default function NewTicketPage() {
     };
     if (staff) {
       payload.team_id = form.team_id || null;
-      payload.assignee_id = form.assignee_id || null;
+      payload.assignee_id = canAssign ? form.assignee_id || null : null;
       payload.scheduled_start = fromLocalInput(form.scheduled_start);
       payload.scheduled_end = fromLocalInput(form.scheduled_end);
     }
@@ -349,16 +353,18 @@ export default function NewTicketPage() {
                       ))}
                   </Select>
                 </Field>
-                <Field label="Analista responsável">
-                  <Select value={form.assignee_id} onChange={(e) => set("assignee_id", e.target.value)}>
-                    <option value="">Deixar na fila</option>
-                    {assignable.data?.map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.name} — {u.open_tickets} em aberto
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
+                {canAssign ? (
+                  <Field label="Responsável (analista ou técnico)">
+                    <Select value={form.assignee_id} onChange={(e) => set("assignee_id", e.target.value)}>
+                      <option value="">Deixar na fila</option>
+                      {assignable.data?.map((u) => (
+                        <option key={u.id} value={u.id}>
+                          {u.name} ({ROLE[u.role]}) — {u.open_tickets} em aberto
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                ) : null}
                 <Field label="Início da visita">
                   <Input
                     type="datetime-local"

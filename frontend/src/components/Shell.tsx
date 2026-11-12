@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { isManager, isStaff, ROLE } from "@/lib/constants";
+import { canManageTickets, isManager, isStaff, ROLE } from "@/lib/constants";
 import { initials } from "@/lib/format";
 import { useConnectionState } from "@/lib/realtime";
 import type { User, UserRole } from "@/lib/types";
@@ -32,7 +32,7 @@ const NAV: NavItem[] = [
   { href: "/quadro", label: "Quadro", icon: SquareKanban, visible: isStaff },
   { href: "/clientes", label: "Clientes", icon: Building2, visible: isStaff },
   { href: "/ativos", label: "Ativos", icon: HardDrive, visible: isStaff },
-  { href: "/usuarios", label: "Usuários", icon: Users, visible: isManager },
+  { href: "/usuarios", label: "Usuários", icon: Users, visible: canManageTickets },
   { href: "/configuracoes", label: "Configurações", icon: Settings, visible: isManager },
 ];
 

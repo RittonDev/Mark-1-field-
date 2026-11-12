@@ -7,7 +7,7 @@ import { useToast } from "@/components/Toaster";
 import { Button, Card, CardHeader, Select } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { isStaff, STATUS } from "@/lib/constants";
+import { canManageTickets, isStaff, STATUS } from "@/lib/constants";
 import { initials } from "@/lib/format";
 import { useAssignable } from "@/lib/queries";
 import type { TicketDetail } from "@/lib/types";
@@ -24,7 +24,9 @@ export function AssignmentPanel({ ticket }: { ticket: TicketDetail }) {
   const [selected, setSelected] = useState(ticket.assignee?.id ?? "");
 
   const isFinal = STATUS[ticket.status].final;
-  const canTake = staff && ticket.assignee?.id !== user?.id && !isFinal;
+  // Espelha can_take: técnico só assume OS sem responsável; analista/supervisor assume qualquer uma.
+  const canTake =
+    staff && ticket.assignee?.id !== user?.id && !isFinal && (canManageTickets(user?.role) || !ticket.assignee);
 
   const onSuccess = (updated: TicketDetail, message: string) => {
     queryClient.setQueryData(["ticket", ticket.id], updated);

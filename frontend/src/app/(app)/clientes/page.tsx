@@ -21,7 +21,7 @@ import {
 } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { isManager } from "@/lib/constants";
+import { canManageTickets } from "@/lib/constants";
 import { useDebounced } from "@/lib/hooks";
 import { useCustomers, useLocations } from "@/lib/queries";
 import type { Customer, Location, UUID } from "@/lib/types";
@@ -254,7 +254,7 @@ function LocationsPanel({ customer, canEdit }: { customer: Customer; canEdit: bo
 
 export default function CustomersPage() {
   const { user } = useAuth();
-  const canEdit = isManager(user?.role);
+  const canEdit = canManageTickets(user?.role);
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<UUID | null>(null);
   const [creating, setCreating] = useState(false);
