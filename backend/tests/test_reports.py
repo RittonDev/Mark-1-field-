@@ -19,7 +19,9 @@ async def test_daily_and_monthly(client: AsyncClient, world: World) -> None:
     tech = str(world.tech.user.id)
     reason = (
         await client.post(
-            f"{API}/unproductive-reasons", json={"name": "Loja fechada", "responsibility": "customer"}, headers=an
+            f"{API}/unproductive-reasons",
+            json={"name": "Loja fechada", "responsibility": "customer"},
+            headers=an,
         )
     ).json()
 
@@ -72,5 +74,7 @@ async def test_daily_and_monthly(client: AsyncClient, world: World) -> None:
         "cancelled": 1,
         "unproductive": 1,
     }
-    assert (await client.get(f"{API}/reports/monthly", params={"month": "2026-13"}, headers=an)).status_code == 422
+    assert (
+        await client.get(f"{API}/reports/monthly", params={"month": "2026-13"}, headers=an)
+    ).status_code == 422
     assert (await client.get(f"{API}/reports/daily", headers=th)).status_code == 403

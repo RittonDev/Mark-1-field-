@@ -84,7 +84,9 @@ async def numbers(db: AsyncSession, start: datetime, end: datetime) -> DayNumber
     )
 
 
-async def _customers(db: AsyncSession, start: datetime, end: datetime, limit: int = 5) -> list[CountRef]:
+async def _customers(
+    db: AsyncSession, start: datetime, end: datetime, limit: int = 5
+) -> list[CountRef]:
     rows = await db.execute(
         select(Customer.id, Customer.name, func.count(Ticket.id).label("n"))
         .join(Ticket, Ticket.customer_id == Customer.id)
@@ -96,7 +98,9 @@ async def _customers(db: AsyncSession, start: datetime, end: datetime, limit: in
     return [CountRef(id=i, name=n, count=c) for i, n, c in rows]
 
 
-async def _technicians(db: AsyncSession, start: datetime, end: datetime, limit: int = 10) -> list[CountRef]:
+async def _technicians(
+    db: AsyncSession, start: datetime, end: datetime, limit: int = 10
+) -> list[CountRef]:
     rows = await db.execute(
         select(User.id, User.name, func.count(func.distinct(TicketEvent.ticket_id)))
         .join(TicketEvent, TicketEvent.actor_id == User.id)
