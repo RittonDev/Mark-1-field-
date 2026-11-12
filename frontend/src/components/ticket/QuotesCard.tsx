@@ -11,7 +11,16 @@ import { useAuth } from "@/lib/auth";
 import { canManageTickets } from "@/lib/constants";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
 import { QUOTE_KIND, QUOTE_STATUS, quoteUrl, totalsByKind } from "@/lib/quotes";
-import type { Quote, QuoteCatalogItem, QuoteItemKind, QuoteLink, TicketDetail } from "@/lib/types";
+import { QuoteViewer } from "@/components/quotes/QuoteViewer";
+import type { Quote, QuoteCatalogItem, QuoteItemKind, QuoteLink, Ref, TicketDetail, UUID } from "@/lib/types";
+
+/** O que o editor e o compartilhamento precisam da OS (dá para abrir também pela tela Orçamentos). */
+export interface QuoteTicketRef {
+  id: UUID;
+  code: string;
+  title: string;
+  customer?: Pick<Ref, "name"> | null;
+}
 
 /** Link do cliente: o persistente da API (copiar a qualquer momento) ou o token devolvido no envio. */
 function linkOf(q: Quote): string | null {
@@ -141,7 +150,25 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
       ) : null}
       {editing ? <QuoteEditor ticket={ticket} quote={editing === "new" ? null : editing} onClose={() => setEditing(null)} onSaved={refresh} /> : null}
       {sharing ? <ShareDialog ticket={ticket} quote={sharing} onClose={() => setSharing(null)} onRotated={refresh} /> : null}
-      {opened ? <QuoteView quote={opened} onClose={() => setOpened(null)} /> : null}
+      {opened ? (
+        <QuoteViewer
+          quote={opened}
+          ticket={{ id: ticket.id, code: ticket.code, customer: ticket.customer?.name ?? null }}
+          onClose={() => setOpened(null)}
+          onEdit={() => {
+            setOpened(null);
+            setEditing(opened);
+          }}
+          onSend={() => {
+            setOpened(null);
+            send.mutate(opened);
+          }}
+          onShare={() => {
+            setOpened(null);
+            setSharing(opened);
+          }}
+        />
+      ) : null}
     </Card>
   );
 }
@@ -168,7 +195,7 @@ export function QuoteEditor({
   onClose,
   onSaved,
 }: {
-  ticket: TicketDetail;
+  ticket: QuoteTicketRef;
   quote: Quote | null;
   prefill?: QuotePrefill;
   onClose: () => void;
@@ -357,13 +384,13 @@ export function QuoteEditor({
 }
 
 /** Link do orçamento para o cliente: copiar, WhatsApp, e-mail ou gerar um novo (o anterior para de valer). */
-function ShareDialog({
+export function ShareDialog({
   ticket,
   quote,
   onClose,
   onRotated,
 }: {
-  ticket: TicketDetail;
+  ticket: Pick<QuoteTicketRef, "code">;
   quote: Quote;
   onClose: () => void;
   onRotated: () => void;
@@ -457,72 +484,3 @@ function ShareDialog({
   );
 }
 
-export function QuoteView({ quote, onClose }: { quote: Quote; onClose: () => void }) {
-  return (
-    <Dialog open size="lg" onClose={onClose} title={`${quote.code} · ${quote.title}`} description={QUOTE_STATUS[quote.status].label}>
-      <div className="flex flex-col gap-4 text-sm">
-        <table className="w-full">
-          <thead className="text-left text-xs text-ink-muted">
-            <tr>
-              <th className="py-1 font-medium">Item</th>
-              <th className="py-1 pl-4 font-medium">Tipo</th>
-              <th className="py-1 pl-4 text-right font-medium whitespace-nowrap">Qtd.</th>
-              <th className="py-1 pl-4 text-right font-medium whitespace-nowrap">Unit.</th>
-              <th className="py-1 pl-4 text-right font-medium whitespace-nowrap">Total</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-line">
-            {quote.items.map((i, k) => (
-              <tr key={k}>
-                <td className="py-1.5 text-ink">{i.description}</td>
-                <td className="py-1.5 pl-4 text-ink-muted">{QUOTE_KIND[i.kind ?? "product"].label}</td>
-                <td className="py-1.5 pl-4 text-right whitespace-nowrap tabular-nums">
-                  {i.quantity.toLocaleString("pt-BR")} {i.unit}
-                </td>
-                <td className="py-1.5 pl-4 text-right whitespace-nowrap tabular-nums">{formatMoney(i.unit_price)}</td>
-                <td className="py-1.5 pl-4 text-right whitespace-nowrap tabular-nums">{formatMoney(i.total)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div className="ml-auto w-64 space-y-1 text-right tabular-nums">
-          {(() => {
-            const totals = totalsByKind(quote.items, quote.totals_by_kind);
-            return (Object.keys(QUOTE_KIND) as QuoteItemKind[])
-              .filter((k) => totals[k] > 0)
-              .map((k) => (
-                <p key={k} className="text-xs text-ink-subtle">
-                  {QUOTE_KIND[k].plural} {formatMoney(totals[k])}
-                </p>
-              ));
-          })()}
-          <p className="text-ink-muted">Subtotal {formatMoney(quote.subtotal)}</p>
-          {quote.discount ? <p className="text-ink-muted">Desconto −{formatMoney(quote.discount)}</p> : null}
-          <p className="text-base font-semibold text-ink">Total {formatMoney(quote.total)}</p>
-        </div>
-        {quote.notes ? <p className="whitespace-pre-wrap text-ink-muted">{quote.notes}</p> : null}
-        {quote.status === "approved" ? (
-          <div className="flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900/60 dark:bg-emerald-950/30">
-            {quote.signature_url ? (
-              // eslint-disable-next-line @next/next/no-img-element -- link assinado da API
-              <img src={absoluteApiUrl(quote.signature_url) ?? undefined} alt="Assinatura do cliente" className="h-14 w-32 rounded border border-line bg-white object-contain" />
-            ) : null}
-            <div className="text-emerald-900 dark:text-emerald-200">
-              <p>
-                Aprovado por <strong>{quote.approver_name}</strong>
-                {quote.approver_registration ? ` · matrícula ${quote.approver_registration}` : ""}
-                {quote.approver_role ? ` (${quote.approver_role})` : ""}
-                {quote.approver_document ? ` · doc. ${quote.approver_document}` : ""} em {formatDateTime(quote.decided_at)}
-              </p>
-              {quote.client_comment ? <p className="mt-1 text-emerald-800/80 dark:text-emerald-200/80">“{quote.client_comment}”</p> : null}
-            </div>
-          </div>
-        ) : quote.status === "rejected" ? (
-          <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
-            Recusado{quote.approver_name ? ` por ${quote.approver_name}` : ""} em {formatDateTime(quote.decided_at)}: {quote.rejection_reason}
-          </p>
-        ) : null}
-      </div>
-    </Dialog>
-  );
-}
