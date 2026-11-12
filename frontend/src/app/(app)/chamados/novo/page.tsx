@@ -16,7 +16,7 @@ import { Button, Card, ErrorBox, Field, Input, Kbd, PageHeader, Select, Textarea
 import { useNow } from "@/components/useNow";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { canManageTickets, computePriority, isStaff, LEVEL, LEVEL_ORDER, PRIORITY, PRIORITY_ORDER, ROLE, TICKET_TYPE } from "@/lib/constants";
+import { canManageTickets, computePriority, isStaff, PRIORITY, PRIORITY_ORDER, ROLE } from "@/lib/constants";
 import { formatDateTime, formatMinutes, formatTime, fromLocalInput } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
 import { useProjects } from "@/lib/projects";
@@ -467,24 +467,6 @@ export default function NewTicketPage() {
                   {sortedCategories.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.full_name}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-              <Field label="Tipo" className="md:col-span-3">
-                <Select value={form.type} onChange={(e) => set("type", e.target.value as TicketType)}>
-                  {Object.entries(TICKET_TYPE).map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-              <Field label="Urgência" className="md:col-span-3">
-                <Select value={form.urgency} onChange={(e) => set("urgency", e.target.value as Level)}>
-                  {LEVEL_ORDER.map((l) => (
-                    <option key={l} value={l}>
-                      {LEVEL[l]}
                     </option>
                   ))}
                 </Select>
