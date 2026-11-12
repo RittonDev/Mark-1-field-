@@ -15,6 +15,7 @@ import type {
   ServiceType,
   Team,
   TrackingHistory,
+  UnproductiveReason,
   User,
   UUID,
   ViolationReason,
@@ -185,5 +186,13 @@ export function useScheduleConflicts(params: {
       }),
     enabled: !!assigneeId && !!start,
     staleTime: 10_000,
+  });
+}
+
+export function useUnproductiveReasons(active?: boolean) {
+  return useQuery({
+    queryKey: ["unproductive-reasons", active ?? ""],
+    queryFn: () => api.get<UnproductiveReason[]>("/unproductive-reasons", { active }),
+    staleTime: LOOKUP_STALE,
   });
 }

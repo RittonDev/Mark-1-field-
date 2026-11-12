@@ -98,6 +98,13 @@ function applyTransition(ticket: TicketDetail, op: Extract<OutboxOp, { type: "tr
   return t;
 }
 
+/** Mesmas respostas, independente da ordem das chaves (o servidor pode devolver em outra ordem). */
+function sameAnswers(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  return keys.every((k) => k in b && JSON.stringify(a[k]) === JSON.stringify(b[k]));
+}
+
 export function applyOp(ticket: TicketDetail, op: OutboxOp, user: User): TicketDetail {
   switch (op.type) {
     case "transition":
@@ -131,7 +138,7 @@ export function applyOp(ticket: TicketDetail, op: OutboxOp, user: User): TicketD
             completed_by: { id: user.id, name: user.name },
           };
         }
-        const changed = JSON.stringify(answers) !== JSON.stringify(form.answers);
+        const changed = !sameAnswers(answers, form.answers);
         if (!changed && form.status === "completed") return form;
         return {
           ...form,

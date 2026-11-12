@@ -5,6 +5,7 @@ import { FolderTree, Plus, Save } from "lucide-react";
 import { useMemo, useState } from "react";
 import { PriorityBadge, StatusBadge } from "@/components/badges";
 import { useToast } from "@/components/Toaster";
+import { UnproductiveReasonsCard } from "@/components/UnproductiveReasonsCard";
 import { ViolationReasonsCard } from "@/components/ViolationReasonsCard";
 import {
   Button,
@@ -303,6 +304,7 @@ export default function SettingsPage() {
         </Card>
 
         <ViolationReasonsCard />
+        <UnproductiveReasonsCard />
 
         <Card>
           <CardHeader

@@ -51,7 +51,8 @@ export type TicketEventType =
   | "signature_collected"
   | "expense_added"
   | "expense_updated"
-  | "expense_removed";
+  | "expense_removed"
+  | "unproductive_visit";
 export type SlaStatus = "ok" | "at_risk" | "breached" | "paused" | "met";
 export type AttachmentKind = "file" | "photo" | "signature";
 
@@ -258,6 +259,9 @@ export interface TicketListItem {
   first_response_at: ISODate | null;
   resolved_at: ISODate | null;
   sla_paused_at: ISODate | null;
+  /** Visitas improdutivas (foi ao local e não atendeu). */
+  unproductive_count: number;
+  last_unproductive_at: ISODate | null;
   sla_paused_seconds: number;
   created_at: ISODate;
   updated_at: ISODate;
@@ -810,4 +814,12 @@ export interface ExpenseReport {
   total: number;
   by_technician: { technician: Ref | null; count: number; total: number; to_pay: number }[];
   by_kind: Record<string, number>;
+}
+
+export interface UnproductiveReason {
+  id: UUID;
+  name: string;
+  description: string | null;
+  responsibility: Responsibility;
+  is_active: boolean;
 }

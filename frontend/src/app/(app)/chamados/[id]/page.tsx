@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
-import { ArrowLeft, CheckCircle2, Clock, Pencil } from "lucide-react";
+import { ArrowLeft, Ban, CheckCircle2, Clock, Pencil } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
@@ -17,6 +17,7 @@ import { HistoryTab } from "@/components/ticket/HistoryTab";
 import { SlaCard } from "@/components/ticket/SlaCard";
 import { TicketInfo } from "@/components/ticket/TicketInfo";
 import { TransitionDialog } from "@/components/ticket/TransitionDialog";
+import { UNPRODUCTIVE_FROM, UnproductiveDialog } from "@/components/ticket/UnproductiveDialog";
 import { WorklogsTab } from "@/components/ticket/WorklogsTab";
 import { Button, Card, ErrorBox, LoadingBlock } from "@/components/ui";
 import { useNow } from "@/components/useNow";
@@ -86,6 +87,7 @@ export default function TicketDetailPage() {
   const [tab, setTab] = useState<Tab>("comments");
   const [target, setTarget] = useState<TicketStatus | null>(null);
   const [editing, setEditing] = useState(false);
+  const [unproductive, setUnproductive] = useState(false);
 
   const query = useQuery({
     queryKey: ["ticket", id],
@@ -123,6 +125,12 @@ export default function TicketDetailPage() {
               <StatusBadge status={ticket.status} />
               <PriorityBadge priority={ticket.priority} />
               <SlaBadge status={ticket.sla_status} />
+              {ticket.unproductive_count ? (
+                <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-500/10 dark:text-red-300">
+                  <Ban className="size-3" />
+                  {ticket.unproductive_count} visita{ticket.unproductive_count > 1 ? "s" : ""} improdutiva{ticket.unproductive_count > 1 ? "s" : ""}
+                </span>
+              ) : null}
             </div>
             <h1 className="mt-2 text-xl font-semibold tracking-tight text-ink">{ticket.title}</h1>
             <p className="mt-1 text-sm text-ink-muted">{info.description}</p>
@@ -157,6 +165,12 @@ export default function TicketDetailPage() {
                 {TRANSITION_ACTION[to]}
               </Button>
             ))}
+            {ticket.can_edit && UNPRODUCTIVE_FROM.includes(ticket.status) && ticket.assignee ? (
+              <Button size="sm" variant="ghost" onClick={() => setUnproductive(true)}>
+                <Ban className="size-3.5" />
+                Visita improdutiva
+              </Button>
+            ) : null}
             {ticket.can_edit ? (
               <Button size="sm" variant="ghost" className="ml-auto" onClick={() => setEditing(true)}>
                 <Pencil className="size-3.5" />
@@ -228,6 +242,7 @@ export default function TicketDetailPage() {
 
       {target ? <TransitionDialog key={target} ticket={ticket} to={target} onClose={() => setTarget(null)} /> : null}
       {editing ? <EditTicketDialog ticket={ticket} onClose={() => setEditing(false)} /> : null}
+      {unproductive ? <UnproductiveDialog ticket={ticket} onClose={() => setUnproductive(false)} /> : null}
     </div>
   );
 }

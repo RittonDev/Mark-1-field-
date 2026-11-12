@@ -7,6 +7,7 @@ import {
   ClipboardCheck,
   ClipboardList,
   ClipboardX,
+  Ban,
   Clock,
   FileSignature,
   Receipt,
@@ -39,6 +40,7 @@ const ICONS: Record<TicketEventType, React.ComponentType<{ className?: string }>
   expense_added: Receipt,
   expense_updated: Receipt,
   expense_removed: Receipt,
+  unproductive_visit: Ban,
 };
 
 const FIELD_LABELS: Record<string, string> = {

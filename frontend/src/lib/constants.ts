@@ -170,6 +170,7 @@ export const EVENT_TYPE: Record<TicketEventType, string> = {
   expense_added: "lançou um custo extra",
   expense_updated: "alterou um custo extra",
   expense_removed: "removeu um custo extra",
+  unproductive_visit: "registrou visita improdutiva:",
 };
 
 export const SLA_STATUS: Record<SlaStatus, { label: string; color: string }> = {

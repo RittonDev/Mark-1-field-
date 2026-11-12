@@ -6,13 +6,11 @@ Create Date: 2026-11-12 15:24:58.383607
 
 """
 
-from collections.abc import Sequence
-
 import uuid
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
-
 
 revision: str = "363aa267a189"
 down_revision: str | None = "ee6d61663fab"
