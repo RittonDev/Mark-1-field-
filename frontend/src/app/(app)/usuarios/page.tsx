@@ -36,6 +36,7 @@ const ROLE_COLOR: Record<UserRole, string> = {
   admin: "#7c3aed",
   supervisor: "#2563eb",
   analyst: "#0891b2",
+  technician: "#ea580c",
   requester: "#64748b",
 };
 
