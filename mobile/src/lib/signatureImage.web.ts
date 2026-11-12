@@ -1,8 +1,7 @@
 // Pré-visualização no navegador: redesenha os traços num <canvas> e devolve um data URL PNG.
 
 import type { RefObject } from "react";
-import type { PadHandle } from "../components/SignaturePad";
-import { INK, STROKE_WIDTH, type Stroke } from "../components/SignaturePad";
+import { INK, STROKE_WIDTH, type PadHandle, type Stroke } from "../components/SignaturePad";
 
 export async function exportSignature(
   _view: RefObject<PadHandle | null>,

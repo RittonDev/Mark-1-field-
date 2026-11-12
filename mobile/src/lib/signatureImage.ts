@@ -2,9 +2,8 @@
 // Na pré-visualização web: signatureImage.web.ts redesenha os traços num <canvas>.
 
 import type { RefObject } from "react";
-import type { PadHandle } from "../components/SignaturePad";
 import { captureRef } from "react-native-view-shot";
-import type { Stroke } from "../components/SignaturePad";
+import type { PadHandle, Stroke } from "../components/SignaturePad";
 
 export async function exportSignature(
   view: RefObject<PadHandle | null>,

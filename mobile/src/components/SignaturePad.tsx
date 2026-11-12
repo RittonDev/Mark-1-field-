@@ -17,13 +17,14 @@ export function strokePath(stroke: Stroke): string {
   return `M ${first.x} ${first.y} ` + rest.map((p) => `L ${p.x} ${p.y}`).join(" ");
 }
 
+/** Instância nativa da View da área de assinatura (alvo da captura em PNG). */
+export type PadHandle = ComponentRef<typeof View>;
+
 /**
  * Área de assinatura: o responsável no local assina com o dedo. Fundo sempre branco e tinta
  * escura (como papel), para a imagem enviada ficar legível em qualquer tema.
  * O `ref` aponta para a View capturada como PNG; para limpar, o pai troca a `key`.
  */
-export type PadHandle = ComponentRef<typeof View>;
-
 export const SignaturePad = forwardRef<
   PadHandle,
   { onChange: (strokes: Stroke[]) => void; onSize?: (size: { width: number; height: number }) => void; height?: number }
