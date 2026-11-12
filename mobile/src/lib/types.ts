@@ -590,3 +590,117 @@ export interface CalendarEvent {
   service_type: string | null;
   conflict_with: UUID[];
 }
+
+// Homologação de técnicos
+export type ApplicationStatus = "pending" | "approved" | "rejected";
+export type InviteState = "active" | "used" | "expired" | "revoked";
+
+export interface CatalogItem {
+  key: string;
+  label: string;
+}
+
+export interface OnboardingCatalog {
+  service_areas: CatalogItem[];
+  availability: CatalogItem[];
+  skill_levels: CatalogItem[];
+  vehicle_types: CatalogItem[];
+  skill_suggestions: string[];
+  privacy_version: string;
+}
+
+export interface OnboardingInvite {
+  id: UUID;
+  label: string | null;
+  max_uses: number | null;
+  use_count: number;
+  expires_at: ISODate;
+  revoked_at: ISODate | null;
+  created_at: ISODate;
+  created_by: Ref | null;
+  state: InviteState;
+  token?: string;
+}
+
+export interface ApplicationSummary {
+  id: UUID;
+  status: ApplicationStatus;
+  full_name: string;
+  email: string;
+  phone: string;
+  city: string;
+  state: string;
+  service_areas: string[];
+  years_experience: number | null;
+  has_vehicle: boolean;
+  created_at: ISODate;
+  reviewed_at: ISODate | null;
+  user_id: UUID | null;
+}
+
+export interface ApplicationDetail extends ApplicationSummary {
+  document: string;
+  birth_date: string | null;
+  postal_code: string | null;
+  address: string | null;
+  company_document: string | null;
+  skills: { name: string; level: string }[];
+  certifications: string | null;
+  tools: string | null;
+  vehicle_type: string | null;
+  has_driver_license: boolean;
+  coverage_area: string;
+  availability: string[];
+  notes: string | null;
+  privacy_consent_at: ISODate;
+  privacy_version: string;
+  reviewed_by: Ref | null;
+  review_note: string | null;
+  invite_label: string | null;
+  photo_url: string | null;
+}
+
+// Base técnica (gestão de acesso dos técnicos)
+export interface Technician {
+  id: UUID;
+  name: string;
+  email: string;
+  phone: string | null;
+  job_title: string | null;
+  team: Ref | null;
+  is_active: boolean;
+  last_login_at: ISODate | null;
+  location_consent_at: ISODate | null;
+  must_change_password: boolean;
+  created_at: ISODate;
+  avatar_url: string | null;
+  on_shift: boolean;
+  open_tickets: number;
+  service_areas: string[];
+  skills: { name: string; level: string }[];
+  application_id: UUID | null;
+}
+
+export interface TemporaryPassword {
+  technician: Technician;
+  temporary_password: string;
+}
+
+export interface ImportRow {
+  line: number;
+  name: string;
+  email: string;
+  phone: string | null;
+  team: string | null;
+  action: "create" | "update" | "error";
+  errors: string[];
+}
+
+export interface ImportResult {
+  dry_run: boolean;
+  rows: ImportRow[];
+  created: number;
+  updated: number;
+  errors: number;
+  credentials: { name: string; email: string; temporary_password: string }[];
+}

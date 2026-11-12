@@ -6,7 +6,7 @@ import jwt
 
 from app.core.config import settings
 
-TokenKind = Literal["access", "refresh", "download"]
+TokenKind = Literal["access", "refresh", "download", "sso_state", "sso_handoff"]
 
 
 class InvalidToken(Exception):

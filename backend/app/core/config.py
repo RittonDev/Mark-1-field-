@@ -38,6 +38,32 @@ class Settings(BaseSettings):
     MEDIA_ROOT: str = "./media"
     MAX_UPLOAD_MB: int = 15
 
+    # Endereço público do site (para onde o login Microsoft volta).
+    WEB_URL: str = "http://localhost:3001"
+
+    # Login Microsoft (Entra ID) para analistas e gestores. Ativo quando os três primeiros
+    # estão preenchidos. Use o ID (GUID) do locatário, não "common"/"organizations": é ele
+    # que garante que só contas da empresa entram.
+    ENTRA_TENANT_ID: str | None = None
+    ENTRA_CLIENT_ID: str | None = None
+    ENTRA_CLIENT_SECRET: str | None = None
+    # URL de retorno cadastrada no registro do app: <API>/api/v1/auth/microsoft/callback
+    ENTRA_REDIRECT_URI: str = "http://localhost:8000/api/v1/auth/microsoft/callback"
+    # Domínios aceitos (separados por vírgula).
+    ENTRA_ALLOWED_DOMAINS: str = "maxxgroup.com.br"
+    # Analistas e gestores desses domínios só entram pela Microsoft (sem senha local).
+    ENTRA_ENFORCE_FOR_STAFF: bool = False
+    # Vazio: só entra quem já está cadastrado em Usuários. "analyst": o primeiro login cria.
+    ENTRA_AUTO_PROVISION_ROLE: str | None = None
+
+    @property
+    def entra_enabled(self) -> bool:
+        return bool(self.ENTRA_TENANT_ID and self.ENTRA_CLIENT_ID and self.ENTRA_CLIENT_SECRET)
+
+    @property
+    def entra_domains(self) -> set[str]:
+        return {d.strip().lower() for d in self.ENTRA_ALLOWED_DOMAINS.split(",") if d.strip()}
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]

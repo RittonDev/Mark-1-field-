@@ -48,6 +48,8 @@ class User(UUIDPrimaryKey, Timestamps, Base):
     avatar_key: Mapped[str | None] = mapped_column(String(255))
     # Tokens emitidos antes disto deixam de valer (troca/redefinição de senha, desativação).
     sessions_revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Conta Microsoft (Entra ID) vinculada no primeiro login: "oid" do token.
+    entra_oid: Mapped[str | None] = mapped_column(String(64), unique=True)
 
     team: Mapped[Team | None] = relationship(lazy="selectin")
 
