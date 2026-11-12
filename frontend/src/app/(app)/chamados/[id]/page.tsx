@@ -16,6 +16,8 @@ import { FormsCard } from "@/components/ticket/FormsCard";
 import { MessagesCard } from "@/components/ticket/MessagesPanel";
 import { OwnerCard } from "@/components/ticket/OwnerCard";
 import { PartRequestsCard } from "@/components/ticket/PartRequestsCard";
+import { LegacyOrderCard } from "@/components/ticket/LegacyOrderCard";
+import { TagChips } from "@/components/TagChips";
 import { AuthorizationCard } from "@/components/ticket/AuthorizationCard";
 import { ArrivalChip, AuthorizationChip, OnsiteBar, RecurrenceChip } from "@/components/ticket/FieldClock";
 import { ReportLinkCard } from "@/components/ticket/ReportLinkCard";
@@ -168,6 +170,7 @@ export default function TicketDetailPage() {
               <SlaBadge status={ticket.sla_status} />
               <AuthorizationChip status={ticket.authorization_status} />
               <RecurrenceChip count={ticket.recurrence?.count_30d} />
+              <TagChips tags={ticket.tags} max={4} />
               {ticket.project ? (
                 <Link
                   href={`/projetos/${ticket.project.id}`}
@@ -277,6 +280,8 @@ export default function TicketDetailPage() {
           <PartRequestsCard ticket={ticket} />
 
           <QuotesCard ticket={ticket} />
+
+          <LegacyOrderCard ticket={ticket} />
 
           <Card>
             <div className="border-b border-line px-3 pt-2">

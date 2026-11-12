@@ -18,6 +18,7 @@ from app.core.enums import TicketEventType, UserRole
 from app.db.base import utcnow
 from app.models import SyncOperation, Ticket, TicketComment, TicketEvent, TicketWorklog, User
 from app.schemas.forms import TicketFormAnswers
+from app.schemas.part_request import PartRequestIn
 from app.schemas.sync import (
     SyncOperationIn,
     SyncOperationResult,
@@ -34,7 +35,7 @@ from app.schemas.ticket import (
     WorklogCreate,
     WorklogOut,
 )
-from app.services import forms
+from app.services import forms, parts
 from app.services import tickets as svc
 from app.services.errors import DomainError, NotFound, VersionConflict
 from app.services.realtime import commit_and_publish, discard_pending, pending_count
@@ -129,6 +130,8 @@ async def _apply(db: AsyncSession, ticket: Ticket, op: SyncOperationIn, user: Us
         await forms.save_answers(
             db, ticket, form, TicketFormAnswers.model_validate(op.payload), user
         )
+    elif op.type == "part_request":
+        await parts.create(db, ticket, PartRequestIn.model_validate(op.payload), user)
     await db.flush()
 
 

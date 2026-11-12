@@ -18,7 +18,17 @@ export type IconName =
   | "user"
   | "building"
   | "alert"
-  | "wifiOff";
+  | "wifiOff"
+  | "phone"
+  | "copy"
+  | "package"
+  | "camera"
+  | "shield"
+  | "repeat"
+  | "hourglass"
+  | "plus"
+  | "minus"
+  | "close";
 
 function Shape({ name }: { name: IconName }) {
   switch (name) {
@@ -119,6 +129,48 @@ function Shape({ name }: { name: IconName }) {
       );
     case "wifiOff":
       return <Path d="M3 3l18 18M8.5 16.5a5 5 0 0 1 7 0M5 13a10 10 0 0 1 5-2.6M14 10.4A10 10 0 0 1 19 13M2 9.5a15 15 0 0 1 4.5-2.8M10.5 5.6A15 15 0 0 1 22 9.5M12 20h.01" />;
+    case "phone":
+      return (
+        <Path d="M6.6 3.5h2.6l1.4 4-2 1.3a10.5 10.5 0 0 0 6.6 6.6l1.3-2 4 1.4v2.6a2 2 0 0 1-2.2 2A16 16 0 0 1 4.6 5.7a2 2 0 0 1 2-2.2z" />
+      );
+    case "copy":
+      return (
+        <>
+          <Rect x={8.5} y={8.5} width={12} height={12} rx={2.2} />
+          <Path d="M15.5 8.5V5.7a2.2 2.2 0 0 0-2.2-2.2H5.7a2.2 2.2 0 0 0-2.2 2.2v7.6a2.2 2.2 0 0 0 2.2 2.2h2.8" />
+        </>
+      );
+    case "package":
+      return (
+        <>
+          <Path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z" />
+          <Path d="M4 7.5l8 4.5 8-4.5M12 12v9M8 5.3l8 4.5" />
+        </>
+      );
+    case "camera":
+      return (
+        <>
+          <Path d="M4.5 7.5h3l1.5-2.5h6l1.5 2.5h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1v-10a1 1 0 0 1 1-1z" />
+          <Circle cx={12} cy={13} r={3.6} />
+        </>
+      );
+    case "shield":
+      return (
+        <>
+          <Path d="M12 3l7.5 3v5.5c0 4.6-3.2 8.2-7.5 9.5-4.3-1.3-7.5-4.9-7.5-9.5V6L12 3z" />
+          <Path d="M8.8 12.2l2.2 2.2 4.2-4.6" />
+        </>
+      );
+    case "repeat":
+      return <Path d="M17 3.5l3 3-3 3M4 11.5v-1a4 4 0 0 1 4-4h12M7 20.5l-3-3 3-3M20 12.5v1a4 4 0 0 1-4 4H4" />;
+    case "hourglass":
+      return <Path d="M6.5 3.5h11M6.5 20.5h11M7.5 3.5v3.2a4.5 4.5 0 0 0 2 3.7L12 12l2.5-1.6a4.5 4.5 0 0 0 2-3.7V3.5M7.5 20.5v-3.2a4.5 4.5 0 0 1 2-3.7L12 12l2.5 1.6a4.5 4.5 0 0 1 2 3.7v3.2" />;
+    case "plus":
+      return <Path d="M12 5v14M5 12h14" />;
+    case "minus":
+      return <Path d="M5 12h14" />;
+    case "close":
+      return <Path d="M6 6l12 12M18 6L6 18" />;
   }
 }
 

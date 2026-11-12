@@ -120,13 +120,16 @@ Requisitos:
 - **Só as OS atribuídas ao técnico**: o cliente abre a OS, o analista escolhe o técnico, e o técnico vê só
   as OS em que é o responsável (sem fila de grupo e sem "assumir"). Tela inicial com "Bom dia, {nome}",
   a data, o cartão da jornada e três abas na barra inferior (pílula animada na aba ativa):
-  - **Hoje**: linha do tempo (horário, cliente, endereço, status) com as em campo, agendadas para hoje
-    (ou atrasadas) e as sem agenda; em campo primeiro, depois por horário, prioridade e prazo de SLA.
+  - **Hoje**: resumo "Hoje: X OS · Y em atendimento" (e chegadas atrasadas, em vermelho) e linha do tempo
+    (horário, cliente, endereço, status) com as em campo, agendadas para hoje (ou atrasadas) e as sem agenda,
+    **por urgência**: chegada atrasada primeiro, depois chegada em risco, depois em campo, horário,
+    prioridade e prazo de SLA.
   - **Agenda**: calendário com visão de **mês** (grade com marcadores por dia; tocar no dia lista as OS)
     e de **semana** (dia a dia, com horário das visitas). Tocar na OS abre o detalhe.
   - **Concluídas**: resolvidas/fechadas nos últimos 7 dias.
   - Cada cartão mostra status, prioridade, selo de SLA (recalculado no aparelho, então continua certo
-    offline), duração estimada e quantas ações aguardam envio.
+    offline), duração estimada, o relógio de campo ("Chegar até 14:35 · faltam 52 min" ou "Na loja 1h 20min ·
+    restam 2h 40min"), autorização pendente e quantas ações aguardam envio.
 - **Jornada e rastreamento** (cartão no topo da tela inicial): termo de ciência (LGPD) aceito uma vez,
   **Iniciar/Encerrar jornada**, indicador "Rastreamento ativo" e a última posição enviada. Detalhes abaixo.
 - **Aparência**: modo claro/escuro segue o sistema; dá para fixar em Conta → Aparência.
@@ -134,9 +137,13 @@ Requisitos:
   Chegada → Atendimento → Concluir e barra fixa no rodapé com o próximo passo; as demais ações de
   `allowed_transitions` (e a visita improdutiva) ficam em "Mais ações", com os mesmos diálogos da web (agendar com
   início/fim, resolver com solução obrigatória, cancelar/reabrir com motivo). Em "Iniciar deslocamento" e
-  "Iniciar atendimento" o check-in por GPS vem marcado (funciona sem internet). Local com endereço,
-  contato, ligação e **Abrir no mapa**; descrição; prazos de SLA. Não há bloco de equipamento: a operação
-  não controla ativos, e o app não lê `ticket.asset`.
+  "Iniciar atendimento" o check-in por GPS vem marcado (funciona sem internet). Atalhos no cabeçalho:
+  **Ligar** para o contato da loja (`tel:`), **Rota** no Google Maps ou no Waze (deep link; sem o app, o
+  link web do serviço) e **Copiar** o endereço. Local com endereço, contato, ligação e **Abrir no mapa**;
+  descrição; prazos de SLA. Não há bloco de equipamento: a operação não controla ativos, e o app não lê
+  `ticket.asset`.
+- **Promessa de campo** (detalhes abaixo): prazo de chegada, 4h na loja, autorização do cliente, pedidos
+  de peça e reincidência na loja.
 - **OS de projeto**: selo "Projeto PRJ-0001 · nome" no cartão e no detalhe (somente leitura).
 - **Sem acompanhamentos no app**: a central fala com os técnicos pelo grupo de WhatsApp. A observação
   opcional nas mudanças de status continua. (Os comentários seguem na web, para o portal do solicitante.)
@@ -152,6 +159,38 @@ Requisitos:
 - **Indicador de conexão** no topo: offline, servidor inacessível, sincronizando, online com tempo real,
   e o número de itens pendentes. Tocar abre a tela **Conta**, com a fila de envio (dá para descartar uma
   operação), os avisos de operações recusadas, "Sincronizar agora", "Baixar tudo" e o estado do push.
+
+## Promessa de campo (chegada, 4h na loja, autorização, peças)
+
+Regras de [src/lib/field.ts](src/lib/field.ts), espelhando `backend/app/services/field.py`:
+
+- **Chegada**: enquanto a OS está atribuída, agendada ou em deslocamento, cartão e cabeçalho mostram
+  "Chegar até 14:35 · faltam 52 min" (`arrival_due_at`), em âmbar quando faltam até 60 min (ou o servidor
+  diz `at_risk`) e em vermelho quando passou. Depois do check-in: "Chegou 13:42 · no prazo/com atraso".
+- **4h na loja**: o check-in (primeira entrada em "Em atendimento") marca `arrived_at`; o anel no cabeçalho
+  vai de `arrived_at` a `onsite_due_at` com o tempo restante. Faltando 30 min, vibra uma vez e mostra
+  "Faltam 30 min do tempo do chamado: avise o analista no grupo"; ao estourar, fica vermelho. Também agenda
+  duas **notificações locais** (expo-notifications, funcionam offline e no Expo Go): no aviso e no estouro
+  ([src/lib/onsiteAlerts.ts](src/lib/onsiteAlerts.ts)). Check-in offline prevê o limite com as regras locais;
+  o servidor confirma no próximo sync.
+- **Autorização do cliente** (`authorization_status`): pendente ou negada desabilita "Iniciar
+  deslocamento" e o check-in, com o cartão "Aguardando autorização do cliente". Se uma mudança chegar ao
+  servidor sem autorização (422 "Aguardando autorização do cliente para a visita"), ela é desfeita e o
+  técnico vê "o cliente ainda não autorizou a visita". Autorizada: "Visita autorizada por {nome} · via
+  WhatsApp · data". Quando a central autoriza, chega um aviso com vibração.
+- **Pedir peça**: folha com descrição, quantidade, unidade, observação e até 4 fotos da câmera. Vai pela fila
+  (`part_request`, funciona offline): as fotos sobem antes como anexo comum e a operação sai depois, com os
+  `attachment_ids` e um `client_id` (reenviar não duplica). A lista mostra Aguardando orçamento / Orçamento
+  enviado / Aprovada: pode instalar / Recusada; quando o cliente aprova, o app celebra com o check desenhado
+  e vibração.
+- **Reincidência**: com `recurrence.count_30d` ≥ 1, cartão "Reincidência: N OS nesta loja em 30 dias" com as
+  últimas (código, título, data e status). Ela não vem no sync (só em `GET /tickets/{id}`): o app busca ao
+  abrir a OS com rede e guarda no aparelho; offline mostra a última guardada (ou nada, se nunca abriu online).
+- **Avisos**: os eventos `ticket.authorization` e `ticket.part_request_decided` do WebSocket disparam o sync;
+  o pull compara a OS e avisa uma vez (autorizada/negada, peça aprovada com o check, peça recusada).
+- Regras da empresa: `GET /settings/field` (prazos e aviso). A rota é só da gestão; para o técnico ela
+  responde 403 e o app usa as da promessa (4h de chegada nas capitais, 4h na loja, aviso 30 min antes).
+  Os prazos de cada OS vêm calculados pelo servidor, então isso só afeta a previsão offline e o aviso local.
 
 ## Formulários (checklists) e assinatura
 
@@ -249,6 +288,8 @@ src/
     api.ts session.ts  HTTP com refresh + tokens no SecureStore
     db.ts              schema SQLite e consultas
     ops.ts             aplicação otimista e rebase; allowed_transitions igual ao backend
+    field.ts           promessa de campo: relógios de chegada e de loja, autorização, rótulos de peças
+    onsiteAlerts.ts    notificações locais do tempo na loja
     sync.ts            motor de sync, fila, fotos, gatilhos
     realtime.ts        WebSocket
     sla.ts             porta de backend/app/services/sla.py::compute_sla_status

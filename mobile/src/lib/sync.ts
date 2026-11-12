@@ -30,8 +30,11 @@ import {
   getViolationReasonsAt,
   insertLocalComment,
   insertLocalWorklog,
+  addPartAttachment,
   insertOp,
   insertPhoto,
+  insertPhotoRow,
+  partOpsWithPendingPhotos,
   insertSignature,
   listOutbox,
   listPhotos,
@@ -54,14 +57,20 @@ import {
   setFormError,
   setKv,
   transaction,
+  type PendingPhoto,
   type PendingSignature,
 } from "./db";
+import { AUTHORIZATION_ERROR, setFieldRules } from "./field";
+import { haptic } from "./haptics";
+import { syncOnsiteAlerts } from "./onsiteAlerts";
 import { userRef } from "./ops";
+import { showSuccess } from "./success";
 import { RealtimeClient, type RealtimeState } from "./realtime";
 import { session } from "./session";
 import type {
   CommentCreatePayload,
   FormAnswersPayload,
+  PartRequestPayload,
   UnproductivePayload,
   OutboxOp,
   SyncOperation,
@@ -74,6 +83,7 @@ import { showToast } from "./toast";
 import { flushPings, resumeTracking, updateTrackingMode } from "./tracking";
 import type {
   Attachment,
+  FieldRules,
   RealtimeEvent,
   TicketDetail,
   TicketTransitionPayload,
@@ -182,7 +192,10 @@ async function runOnce() {
     await uploadPhotos();
     await pushWithSignatures();
     await pullChanges();
+    await refreshFieldRules();
     await refreshViolationReasons();
+    // Alertas locais do tempo na loja (aviso faltando 30 min e no estouro das 4h).
+    void syncOnsiteAlerts();
     // Rastreamento da jornada: sobe a fila de pontos e ajusta o ritmo (deslocamento = mais frequente).
     await flushPings(true);
     await updateTrackingMode();
@@ -234,6 +247,8 @@ export function describeOp(op: SyncOperation): string {
       return op.payload.complete ? "Conclusão de formulário" : "Respostas de formulário";
     case "unproductive":
       return "Visita improdutiva";
+    case "part_request":
+      return `Pedido de peça (${op.payload.description})`;
   }
 }
 
@@ -250,7 +265,11 @@ const FORM_INCOMPLETE = /falta preencher/i;
 
 async function pushOutbox(maxSeq?: number) {
   for (let round = 0; round < 50; round++) {
-    const ops = await listOutbox(PUSH_BATCH, undefined, maxSeq);
+    // Pedido de peça com foto ainda no aparelho espera a foto subir (leva os ids dos anexos).
+    const waiting = await partOpsWithPendingPhotos();
+    const ops = (await listOutbox(PUSH_BATCH, undefined, maxSeq)).filter(
+      (op) => !(op.type === "part_request" && waiting.has(op.client_op_id)),
+    );
     if (!ops.length) return;
     const user = currentUser();
     const byId = new Map(ops.map((op) => [op.client_op_id, op]));
@@ -283,6 +302,7 @@ async function pushOutbox(maxSeq?: number) {
     }
 
     const problems: string[] = [];
+    let unauthorized = false;
     await transaction(async (db) => {
       const latest = new Map<UUID, TicketDetail | null>();
       for (const result of response.results) {
@@ -299,6 +319,11 @@ async function pushOutbox(maxSeq?: number) {
             result.status === "conflict"
               ? `${describeOp(op)}: descartado porque a OS foi alterada por outra pessoa. Confira o estado atual.`
               : `${describeOp(op)}: o servidor recusou — ${cleanServerError(result.error)}`;
+          // 422 da promessa de campo: a visita ainda não foi autorizada pelo cliente.
+          if (op.type === "transition" && AUTHORIZATION_ERROR.test(result.error ?? "")) {
+            message = `${describeOp(op)} desfeita: o cliente ainda não autorizou a visita. Aguarde a central liberar.`;
+            unauthorized = true;
+          }
           if (op.type === "form_answers") {
             await setFormError(op.payload.form_id, cleanServerError(result.error), db);
             // Conclusão recusada por falta de item: o servidor não gravou nada. Reenvia as mesmas
@@ -326,10 +351,15 @@ async function pushOutbox(maxSeq?: number) {
       }
     });
     if (problems.length) {
-      showToast(problems.length === 1 ? "Uma operação não foi aceita" : `${problems.length} operações não foram aceitas`, {
-        description: problems[0],
-        tone: "error",
-      });
+      if (unauthorized) haptic.warning();
+      showToast(
+        unauthorized && problems.length === 1
+          ? "Visita aguardando autorização"
+          : problems.length === 1
+            ? "Uma operação não foi aceita"
+            : `${problems.length} operações não foram aceitas`,
+        { description: problems[0], tone: unauthorized ? "info" : "error" },
+      );
     }
     // Resposta sem resultado para alguma operação: ela fica na fila e volta na próxima rodada.
     if (response.results.length === 0) return;
@@ -344,8 +374,13 @@ async function pullChanges() {
     const query = since ? `?since=${encodeURIComponent(since)}` : "";
     const data = await api.get<SyncPullResponse>(`/sync/pull${query}`);
     const user = currentUser();
+    const news: FieldNews[] = [];
     await transaction(async (db) => {
-      for (const ticket of data.tickets) await saveServerTicket(db, ticket, user);
+      for (const ticket of data.tickets) {
+        const before = await getTicket(ticket.id, db);
+        if (before) news.push(...fieldNews(before, ticket, user));
+        await saveServerTicket(db, ticket, user);
+      }
       for (const comment of data.comments) await saveServerComment(db, comment);
       for (const worklog of data.worklogs) await saveServerWorklog(db, worklog);
       for (const id of data.revoked_ticket_ids) await deleteTicket(db, id);
@@ -355,6 +390,7 @@ async function pullChanges() {
       }
       await setKv(SINCE_KEY, data.server_time, db);
     });
+    announceFieldNews(news);
     if (data.revoked_ticket_ids.length) {
       showToast(
         data.revoked_ticket_ids.length === 1
@@ -363,6 +399,90 @@ async function pullChanges() {
       );
     }
     if (!data.has_more) return;
+  }
+}
+
+type FieldNews =
+  | { kind: "part_approved" | "part_rejected"; code: string; description: string }
+  | { kind: "authorized" | "denied"; code: string; by: string | null };
+
+/** O que mudou entre a OS no aparelho e a recebida e merece aviso ao técnico. */
+function fieldNews(before: TicketDetail, after: TicketDetail, user: User): FieldNews[] {
+  if (after.assignee?.id !== user.id) return [];
+  const news: FieldNews[] = [];
+  const previous = new Map((before.part_requests ?? []).map((r) => [r.id, r.status]));
+  for (const request of after.part_requests ?? []) {
+    const was = previous.get(request.id);
+    if (was && was !== "approved" && request.status === "approved") {
+      news.push({ kind: "part_approved", code: after.code, description: request.description });
+    } else if (was && was !== "rejected" && request.status === "rejected") {
+      news.push({ kind: "part_rejected", code: after.code, description: request.description });
+    }
+  }
+  const auth = after.authorization_status;
+  if (before.authorization_status === "pending" && (auth === "authorized" || auth === "denied")) {
+    news.push({ kind: auth, code: after.code, by: after.authorized_by_name ?? null });
+  }
+  return news;
+}
+
+function announceFieldNews(news: FieldNews[]) {
+  const approved = news.filter((n): n is Extract<FieldNews, { description: string }> => n.kind === "part_approved");
+  if (approved.length) {
+    haptic.success();
+    showSuccess(
+      approved.length === 1 ? "Peça aprovada" : `${approved.length} peças aprovadas`,
+      approved.length === 1
+        ? `${approved[0].code} · ${approved[0].description}: pode instalar.`
+        : "O cliente aprovou o orçamento: pode instalar.",
+    );
+  }
+  for (const n of news) {
+    if (n.kind === "authorized") {
+      haptic.step();
+      showToast(`${n.code} autorizada`, {
+        tone: "success",
+        description: `${n.by ? `Autorizada por ${n.by}. ` : ""}Pode iniciar o deslocamento.`,
+      });
+    } else if (n.kind === "denied") {
+      haptic.warning();
+      showToast(`${n.code}: visita não autorizada`, { tone: "error", description: "Fale com a central no grupo." });
+    } else if (n.kind === "part_rejected") {
+      haptic.warning();
+      showToast(`${n.code}: peça recusada`, {
+        tone: "error",
+        description: `${n.description}: o cliente não aprovou o orçamento. Não instale; fale com a central no grupo.`,
+      });
+    }
+  }
+}
+
+const FIELD_RULES_KEY = "field_rules";
+
+/** Regras de campo da empresa (GET /settings/field). Enquanto a rota não existir (404), valem as da promessa. */
+let fieldRulesAt = 0;
+
+async function refreshFieldRules() {
+  if (!forceReasons && Date.now() - fieldRulesAt < 30 * 60_000) return;
+  try {
+    const rules = await api.get<FieldRules>("/settings/field");
+    setFieldRules(rules);
+    await setKv(FIELD_RULES_KEY, JSON.stringify(rules));
+    fieldRulesAt = Date.now();
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 0) throw error;
+    // 403 (a rota é da gestão) ou 404: segue com as regras guardadas/da promessa e tenta mais tarde.
+    fieldRulesAt = Date.now();
+  }
+}
+
+/** Regras guardadas no aparelho (valem offline desde a abertura do app). */
+export async function loadFieldRules() {
+  try {
+    const raw = await getKv(FIELD_RULES_KEY);
+    if (raw) setFieldRules(JSON.parse(raw) as FieldRules);
+  } catch {
+    // padrão da promessa
   }
 }
 
@@ -388,6 +508,30 @@ async function refreshViolationReasons() {
     if (error instanceof ApiError && error.status === 0) throw error;
     console.warn("Não foi possível atualizar os cadastros de motivos", error);
   }
+}
+
+type Recurrence = NonNullable<TicketDetail["recurrence"]>;
+const recurrenceKey = (ticketId: UUID) => `recurrence:${ticketId}`;
+
+/** Reincidência guardada no aparelho (a última vista online), para mostrar offline. */
+export async function cachedRecurrence(ticketId: UUID): Promise<Recurrence | null> {
+  try {
+    const raw = await getKv(recurrenceKey(ticketId));
+    return raw ? (JSON.parse(raw) as Recurrence) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A reincidência não vem no sync (é calculada só em GET /tickets/{id}): busca online ao abrir a OS
+ * e guarda no aparelho. Sem rede, fica a última guardada.
+ */
+export async function refreshRecurrence(ticketId: UUID): Promise<Recurrence | null> {
+  const detail = await api.get<TicketDetail>(`/tickets/${ticketId}`);
+  const recurrence = detail.recurrence ?? { count_30d: detail.recurrence_30d ?? 0, previous: [] };
+  await setKv(recurrenceKey(ticketId), JSON.stringify(recurrence));
+  return recurrence;
 }
 
 /** Busca uma OS direto na API (após "assumir", por exemplo) e grava localmente. */
@@ -430,6 +574,8 @@ async function uploadPhotos() {
         if (attachment?.id) {
           const cached = await getAttachmentsCache(photo.ticket_id);
           if (!cached.some((a) => a.id === attachment.id)) await setAttachmentsCache(photo.ticket_id, [...cached, attachment], db);
+          // Foto de pedido de peça: o id vai junto na operação, que só sai depois de todas as fotos.
+          if (photo.part_op_id) await addPartAttachment(db, photo.part_op_id, attachment.id);
         }
       });
       deletePhotoFile(photo.file_uri);
@@ -585,6 +731,42 @@ export async function enqueueUnproductive(ticketId: UUID, payload: UnproductiveP
   void updateTrackingMode();
 }
 
+/**
+ * Pedido de peça pela fila (funciona offline). As fotos ficam no aparelho, sobem como anexo
+ * comum da OS e só então a operação sai, levando os ids (`attachment_ids`).
+ */
+export async function enqueuePartRequest(
+  ticketId: UUID,
+  payload: PartRequestPayload,
+  photos: { uri: string; mimeType?: string | null }[],
+) {
+  const user = currentUser();
+  const clientOpId = randomUUID();
+  const createdAt = new Date().toISOString();
+  const rows: Omit<PendingPhoto, "attempts" | "last_error">[] = [];
+  for (const [i, photo] of photos.entries()) {
+    const id = randomUUID();
+    const mime = photo.mimeType ?? "image/jpeg";
+    const ext = mime === "image/png" ? "png" : mime === "image/heic" ? "heic" : "jpg";
+    const filename = `peca-${createdAt.slice(0, 19).replace(/[:T]/g, "-")}-${i + 1}-${id.slice(0, 6)}.${ext}`;
+    const fileUri = await persistPhoto(photo.uri, filename);
+    rows.push({ id, ticket_id: ticketId, file_uri: fileUri, filename, mime_type: mime, created_at: createdAt, form_id: null, field_id: null, part_op_id: clientOpId });
+  }
+  await transaction(async (db) => {
+    for (const row of rows) await insertPhotoRow(db, row);
+    await insertOp(db, {
+      type: "part_request",
+      payload: { ...payload, attachment_ids: [], client_id: clientOpId },
+      client_op_id: clientOpId,
+      ticket_id: ticketId,
+      client_timestamp: createdAt,
+    });
+    await rebaseTicket(db, ticketId, user);
+  });
+  await refreshPendingCounts();
+  void requestSync();
+}
+
 /** Respostas de formulário (Salvar) ou conclusão (Concluir), pela fila de sync. */
 export function enqueueFormAnswers(ticketId: UUID, payload: FormAnswersPayload) {
   return enqueue(ticketId, { type: "form_answers", payload });
@@ -651,6 +833,8 @@ export async function enqueueTransition(ticketId: UUID, payload: TicketTransitio
   await enqueue(ticketId, { type: "transition", payload });
   // Entrar/sair de "Em deslocamento" muda o ritmo do rastreamento, mesmo offline.
   void updateTrackingMode();
+  // Check-in agenda os alertas do tempo na loja; concluir cancela (também offline).
+  void syncOnsiteAlerts();
 }
 
 export function enqueueComment(ticketId: UUID, payload: CommentCreatePayload) {
@@ -664,11 +848,16 @@ export function enqueueWorklog(ticketId: UUID, payload: WorklogCreatePayload) {
 /** Descarta uma operação ainda não enviada (tela Conta → pendências). */
 export async function discardOp(op: OutboxOp) {
   const user = currentUser();
+  const partPhotos =
+    op.type === "part_request" ? (await listPhotos(op.ticket_id)).filter((p) => p.part_op_id === op.client_op_id) : [];
   await transaction(async (db) => {
     await deleteOp(db, op.client_op_id);
     await deleteLocalDraft(db, op.client_op_id);
+    // Fotos de um pedido descartado não sobem soltas.
+    for (const photo of partPhotos) await db.runAsync("DELETE FROM photos WHERE id = ?", photo.id);
     await rebaseTicket(db, op.ticket_id, user);
   });
+  partPhotos.forEach((p) => deletePhotoFile(p.file_uri));
   await refreshPendingCounts();
 }
 
@@ -683,6 +872,8 @@ function describeEvent(event: RealtimeEvent, user: User): string | null {
   const code = event.ticket_code ?? "OS";
   if (event.type === "ticket.assigned" && event.assignee_id === user.id) return `${code} foi atribuída a você`;
   if (event.type === "ticket.created" && event.assignee_id === user.id) return `Nova ${code} para você`;
+  // "ticket.authorization" e "ticket.part_request_decided" só disparam o sync: o pull compara a OS
+  // e avisa (autorizada/negada, peça aprovada com o check, peça recusada), sem aviso duplicado.
   // Acompanhamentos não fazem parte do app: a central fala com o técnico pelo grupo de WhatsApp.
   return null;
 }
@@ -741,7 +932,10 @@ export function startSync() {
   ];
 
   if (appState === "active") realtime.start();
-  void getDb().then(() => requestSync());
+  void getDb().then(async () => {
+    await loadFieldRules();
+    await requestSync();
+  });
 }
 
 export function stopSync() {
@@ -749,6 +943,8 @@ export function stopSync() {
   stopFns = [];
   realtime = null;
   setStatus({ realtime: "off", syncing: false });
+  // Saiu da conta: os alertas do tempo na loja deste técnico não valem mais neste aparelho.
+  setTimeout(() => void syncOnsiteAlerts(), 0);
 }
 
 /** Pede ao servidor um pull completo na próxima rodada (tela Conta). */

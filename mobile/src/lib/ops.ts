@@ -7,8 +7,9 @@
 
 import { SELF_ASSIGN_ROLES, STATUS, TRANSITIONS, UNTOUCHED_STATUSES } from "./constants";
 import { actualSeconds, defaultEnd } from "./duration";
+import { authorizationBlock, onsiteDueFrom } from "./field";
 import { resolutionBreached, responseBreached } from "./sla";
-import type { LocalTicket, OutboxOp } from "./syncTypes";
+import type { LocalPartRequest, LocalTicket, OutboxOp } from "./syncTypes";
 import type { TicketDetail, TicketStatus, User, UserRef } from "./types";
 import { userCanTransition } from "./workflow";
 
@@ -43,9 +44,18 @@ function applyTransition(ticket: TicketDetail, op: Extract<OutboxOp, { type: "tr
   const to = p.to_status;
   // Transição inválida: o servidor vai rejeitar; não fingimos que ela aconteceu.
   if (from === to || !TRANSITIONS[from].includes(to)) return ticket;
+  // Sem autorização do cliente o servidor recusa deslocamento e check-in (422).
+  if (authorizationBlock(ticket, to)) return ticket;
 
   const at = op.client_timestamp;
   const t: TicketDetail = { ...ticket };
+  // Check-in: a chegada é a primeira entrada em "Em atendimento"; dela contam as 4h na loja.
+  if (to === "in_progress" && !t.arrived_at) {
+    t.arrived_at = at;
+    t.onsite_due_at = onsiteDueFrom(at);
+    t.arrival_status = t.arrival_due_at && new Date(at).getTime() > new Date(t.arrival_due_at).getTime() ? "late" : "met";
+    t.onsite_status = "ok";
+  }
   if (p.scheduled_start) {
     t.scheduled_start = p.scheduled_start;
     // Novo início sem fim: o fim vem da estimativa, e não sobra o de um agendamento antigo.
@@ -171,6 +181,26 @@ export function applyOp(ticket: TicketDetail, op: OutboxOp, user: User): TicketD
         };
       });
       return { ...ticket, forms, updated_at: op.client_timestamp };
+    }
+    case "part_request": {
+      // Aparece na hora como "Aguardando orçamento"; o do servidor substitui no próximo sync.
+      const p = op.payload;
+      const request: LocalPartRequest = {
+        id: op.client_op_id,
+        description: p.description,
+        quantity: p.quantity,
+        unit: p.unit || "un",
+        note: p.note ?? null,
+        status: "open",
+        quote_id: null,
+        quote_code: null,
+        requested_by: { id: user.id, name: user.name },
+        attachments: [],
+        response_note: null,
+        created_at: op.client_timestamp,
+        pending: true,
+      };
+      return { ...ticket, part_requests: [...(ticket.part_requests ?? []), request], updated_at: op.client_timestamp };
     }
     case "update": {
       const p = op.payload;

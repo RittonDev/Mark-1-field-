@@ -6,7 +6,7 @@ from pydantic import AfterValidator, BaseModel, Field
 
 from app.core.documents import normalize_document
 from app.core.enums import AssetType
-from app.schemas.common import ORMModel, Ref
+from app.schemas.common import ORMModel, Ref, TagOut
 
 # CPF ou CNPJ (inclusive alfanumérico); aceita com ou sem pontuação, guarda limpo.
 Document = Annotated[str | None, Field(max_length=20), AfterValidator(normalize_document)]
@@ -23,6 +23,7 @@ class TicketStats(BaseModel):
 class CustomerOut(ORMModel, TicketStats):
     id: uuid.UUID
     name: str
+    tags: list[TagOut] = []
     document: str | None
     email: str | None
     phone: str | None

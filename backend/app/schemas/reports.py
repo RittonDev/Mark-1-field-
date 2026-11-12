@@ -20,6 +20,12 @@ class DayNumbers(BaseModel):
     scheduled_end: int = 0  # ficaram agendados ao fim do dia
     backlog_end: int = 0  # em aberto ao fim do dia
     resolved_in_sla: int = 0
+    # Regras de campo: chegadas no período e quantas dentro do prazo (4h nas capitais).
+    arrivals: int = 0
+    arrivals_on_time: int = 0
+    arrival_on_time_pct: float | None = None  # sobre as chegadas com prazo
+    avg_arrival_minutes: int | None = None  # do início do relógio até a chegada
+    avg_onsite_minutes: int | None = None  # tempo em atendimento das OS resolvidas
 
 
 class DailyReport(BaseModel):

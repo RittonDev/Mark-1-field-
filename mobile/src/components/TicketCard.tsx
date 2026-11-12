@@ -4,6 +4,7 @@ import Animated from "react-native-reanimated";
 import { PRIORITY, STATUS } from "../lib/constants";
 import { addressOf } from "../lib/device-actions";
 import { actualMinutes } from "../lib/duration";
+import { arrivalUrgency } from "../lib/field";
 import { formatMinutes, formatRelative, formatShort, formatTime } from "../lib/format";
 import type { LocalTicket } from "../lib/syncTypes";
 import { RADIUS, readable, useStyles, useTheme, type Palette } from "../theme/theme";
@@ -11,6 +12,7 @@ import { PriorityBadge, ProjectBadge, SlaBadge, StatusBadge } from "./badges";
 import { Icon } from "./Icon";
 import { PressableScale, useSwapMotion } from "./motion";
 import { Text } from "./Text";
+import { AuthorizationBadge, FieldClockLine } from "./ticket/FieldClock";
 
 const IN_FIELD = ["en_route", "in_progress"];
 
@@ -82,10 +84,12 @@ export function TicketCard({
             </Text>
           </View>
         ) : null}
+        <FieldClockLine ticket={ticket} now={now} />
         <View style={styles.badges}>
           <Animated.View key={ticket.status} entering={swap.entering} exiting={swap.exiting}>
             <StatusBadge status={ticket.status} />
           </Animated.View>
+          <AuthorizationBadge status={ticket.authorization_status} />
           <PriorityBadge priority={ticket.priority} />
           <SlaBadge ticket={ticket} now={now} />
           <ProjectBadge project={ticket.project} />
@@ -110,14 +114,16 @@ export function TimelineRow({ ticket, now, last }: { ticket: LocalTicket; now: n
   const c = useTheme();
   const styles = useStyles(makeStyles);
   const inField = IN_FIELD.includes(ticket.status);
-  const dot = inField ? c.warning : ticket.scheduled_start ? c.primary : c.lineStrong;
+  // Chegada atrasada/em risco também marca o trilho (a lista de Hoje vem por urgência).
+  const urgency = arrivalUrgency(ticket, now);
+  const dot = urgency === 0 ? c.danger : urgency === 1 || inField ? c.warning : ticket.scheduled_start ? c.primary : c.lineStrong;
   return (
     <View style={styles.timelineRow}>
       <View style={styles.rail}>
         <Text style={[styles.railTime, !ticket.scheduled_start && styles.railNoTime]}>
           {ticket.scheduled_start ? formatTime(ticket.scheduled_start) : "Sem hora"}
         </Text>
-        <View style={[styles.railDot, { borderColor: dot, backgroundColor: inField ? dot : c.canvas }]} />
+        <View style={[styles.railDot, { borderColor: dot, backgroundColor: inField || urgency === 0 ? dot : c.canvas }]} />
         {last ? null : <View style={styles.railLine} />}
       </View>
       <View style={styles.timelineCard}>

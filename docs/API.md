@@ -156,7 +156,7 @@ Tela própria da operação, como no Field Control (aquela em que, segundo o lev
 ### Sincronização mobile
 Ver `docs/MOBILE_SYNC.md`.
 - `GET /sync/pull?since=<iso>` → `{server_time, tickets:TicketDetail[], comments, worklogs, revoked_ticket_ids}`
-- `POST /sync/push` `{operations:[{client_op_id, type:"transition"|"comment"|"worklog"|"update", ticket_id, payload, client_timestamp?}]}` → `{server_time, results:[{client_op_id, status:"applied"|"duplicate"|"rejected"|"conflict", error?, ticket?}]}`
+- `POST /sync/push` `{operations:[{client_op_id, type:"transition"|"comment"|"worklog"|"update"|"form_answers"|"unproductive"|"part_request", ticket_id, payload, client_timestamp?}]}` → `{server_time, results:[{client_op_id, status:"applied"|"duplicate"|"rejected"|"conflict", error?, ticket?}]}`
 - `POST /devices` `{platform:"ios"|"android"|"web", token, app_version?}` · `DELETE /devices/{token}`
 
 ### Rastreamento do técnico (jornada e GPS)
@@ -320,11 +320,14 @@ responsável ou executa, mais as concluídas no dia. Cada item é um `TicketList
   depois prazo), in_field (mais recente), today/upcoming (horário), waiting/unscheduled (prazo), done.
 - `reasons: [{code, label, tone}]`: `sla_violated` (danger), `sla_at_risk` (warning), `late_start` (danger,
   agendada que passou do horário sem sair), `no_technician` (warning, sem técnico de campo), `unproductive`
-  (warning, improdutiva sem nova agenda), `violation_pending` (info, concluída com SLA a justificar).
+  (warning, improdutiva sem nova agenda), `violation_pending` (info, concluída com SLA a justificar) e as
+  regras de campo (ver abaixo): `authorization_pending`, `arrival_late`, `arrival_at_risk`, `onsite_over`,
+  `onsite_warning`, `part_request`. Uma OS em campo continua em `in_field`, mas com os motivos.
 - `counts`: `open` (em aberto) e o tamanho de cada seção.
 
 `GET /queues` (gestão) → `{queues: [{user, role, open, attention, today, in_field}], unowned: {...}}`: a
-fila de cada analista/gestor ativo e as OS sem analista.
+fila de cada analista/gestor ativo e as OS sem analista. `attention` conta a seção "atenção" e também as OS em campo
+com motivo `danger`/`warning` (ex.: passou do tempo na loja).
 
 **Relatório para o cliente.** Ao concluir (resolvida ou fechada) a OS ganha um link público com o resumo
 do atendimento, que o cliente pode salvar em PDF. O token é `<id>.<assinatura HMAC>`: só o id fica no
@@ -348,3 +351,137 @@ banco, então o link pode ser copiado de novo a qualquer momento e trocado quand
 - Textos do WhatsApp: variável `{link_relatorio}` (o link da OS concluída; antes disso, "(disponível quando
   a OS for concluída)"), já no texto padrão de Fechamento. `{analista}` agora é o responsável pela OS.
 - Configuração: `COMPANY_NAME` (nome no relatório, padrão "Maxx Field") e `API_PUBLIC_URL` (opcional).
+
+## Regras de campo, autorização do cliente e pedido de peça
+
+O que a Maxx Field promete ao varejo, no sistema:
+- técnico na loja em até 4h nas capitais;
+- até 4h de técnico na loja por chamado, contadas da chegada;
+- visita só com a autorização do cliente, porque cada chamado é cobrado;
+- peça só com orçamento aprovado e assinado.
+
+**Regras (Configurações).** `GET /settings/field` (gestão) e `PUT /settings/field` (supervisor/admin):
+`{arrival_hours_capital: 4, arrival_hours_interior: 24, onsite_hours: 4, onsite_warning_minutes: 30,
+require_authorization: true}`. `null` no prazo de chegada = sem prazo. Capital ou interior vem da cidade/UF
+do local (as 27 capitais, sem acento); OS sem local conta como interior.
+
+**Os dois relógios.** Campos de `TicketListItem` (listas, detalhe, fila e app):
+- `arrival_due_at`: prazo de chegada.
+  - Conta da abertura, ou da autorização quando ela é exigida.
+  - Fica `null` enquanto a autorização está pendente ou negada.
+  - Recalculado ao trocar o local antes da chegada.
+- `arrived_at`: a primeira vez "Em atendimento".
+- `onsite_due_at`: chegada + `onsite_hours`.
+- `arrival_status`: `met` | `late` | `at_risk` (falta menos de 1h) | `pending` | `null` (sem prazo, ou OS
+  concluída/cancelada sem visita).
+- `onsite_status`: `ok` | `warning` (dentro de `onsite_warning_minutes` do limite) | `over` | `null`.
+  - Ao vivo em "Em atendimento".
+  - Numa OS concluída, compara a conclusão com o limite.
+
+**Autorização do cliente.** `TicketListItem.authorization_status`: `not_required` | `pending` | `authorized` | `denied`.
+- OS novas nascem `pending` com a regra ligada. As anteriores à regra ficaram `not_required`.
+- `TicketDetail` também traz `authorized_by_name`, `authorization_channel`, `authorization_ref` (o número
+  do chamado do cliente), `authorized_at` e `authorized_by` (UserRef de quem registrou).
+- `POST /tickets/{id}/authorization` (gestão)
+  `{status: "authorized"|"denied"|"pending", by_name?, channel?: whatsapp|email|phone|portal|maxxcon|other, reference?, note?}`
+  → `TicketDetail`.
+  - "authorized" liga o relógio de chegada.
+  - Corrigir uma autorização já dada não reinicia o relógio.
+  - "pending" limpa os dados.
+  - Gera o evento interno `authorization_recorded` (o solicitante não vê).
+  - O técnico recebe push "Visita autorizada".
+- `POST /tickets` aceita o mesmo objeto em `authorization` (só a gestão; 403 para os outros).
+- Trava, com a regra ligada e a autorização `pending`/`denied`: ir para `en_route`, ou para `in_progress`
+  quando quem executa é técnico, devolve 422 "Aguardando autorização do cliente para a visita". No
+  sync, a operação volta `rejected` com o mesmo texto. Atendimento remoto do analista não é visita e
+  não trava.
+
+**Pedido de peça (técnico).**
+- `POST /tickets/{id}/part-requests` (técnico da OS ou gestão)
+  `{description, quantity=1, unit="un", note?, attachment_ids?, client_id?}` → 201.
+  - As fotos precisam ser anexos desta OS (422 se não forem).
+  - Com `client_id` repetido, devolve o pedido existente, sem duplicar.
+- `GET /tickets/{id}/part-requests` (equipe que vê a OS).
+- `PATCH /part-requests/{id}` (gestão) `{status?, quote_id?, response_note?}`.
+  - Ligar um orçamento desta OS muda o pedido aberto para `quoted`, ou para `approved`/`rejected` se o
+    orçamento já foi decidido.
+  - Orçamento de outra OS → 422.
+- Formato:
+  `PartRequestOut {id, ticket_id, description, quantity, unit, note, status (open|quoted|approved|rejected|cancelled), quote_id, quote_code, requested_by: Ref, attachment_ids, attachments: [{id, url}], response_note, created_at, updated_at}`.
+  - `url` é o link assinado de download para quem pediu.
+- `TicketDetail.part_requests` traz a mesma lista (vazia para o solicitante).
+- Quando o cliente aprova ou recusa pelo link o orçamento ligado, o pedido fica `approved`/`rejected` e o
+  técnico recebe push.
+- Eventos internos: `part_requested`, `part_request_updated`. Tempo real:
+  - `part_request.created` (só gestão: `ticket_id`, `ticket_code`, `data {description, quantity, unit, status}`);
+  - `ticket.part_request_decided` (técnico e gestão);
+  - `ticket.authorization` (técnico e gestão).
+- Sync offline: operação `part_request {description, quantity?, unit?, note?, attachment_ids?, client_id?}`.
+
+**Reincidência.**
+- `TicketListItem.recurrence_30d`: outras OS no mesmo local nos últimos 30 dias, preenchido em
+  `GET /tickets` e em `/my-queue`.
+- `TicketDetail.recurrence` (equipe) `{count_30d, previous: [{id, number, code, title, status, created_at}]}`:
+  até 5, da mais recente.
+
+**Relatórios e relatório do cliente.**
+- `DayNumbers` (diário e mensal) ganhou:
+  - `arrivals` (chegadas no período), `arrivals_on_time`;
+  - `arrival_on_time_pct`: sobre as chegadas com prazo; `null` sem chegadas;
+  - `avg_arrival_minutes`: do início do relógio até a chegada;
+  - `avg_onsite_minutes`: tempo em atendimento das OS resolvidas.
+- `PublicReport` ganhou `arrival_due_at`, `arrival_minutes` e `arrival_on_time`.
+
+**Textos do WhatsApp.**
+- Novas variáveis:
+  - `{prazo_chegada}`: HH:MM no fuso da operação, ou "(sem prazo)";
+  - `{autorizado_por}`: nome, "(aguardando autorização)" ou "(não exigida)".
+- O texto padrão de deslocamento termina em "Chegada prevista às {chegada_prevista} (prazo {prazo_chegada})."
+
+## Migração do Field Control
+
+Importação única (e repetível sem duplicar) do export do Field Control: o JSON de cada entidade,
+como vem da API GraphQL dele. O export tem dados pessoais e **nunca** entra no repositório: a
+pasta fica fora dele e é copiada só para o container na hora de rodar.
+
+```
+python -m app.importers.fieldcontrol /tmp/fc_export --dry-run
+python -m app.importers.fieldcontrol /tmp/fc_export --wipe-demo --report /tmp/fc_report.json
+```
+
+- `--dry-run`: tudo numa transação desfeita no fim (mostra as contagens).
+- `--wipe-demo`: apaga antes os dados de demonstração. Saem OS e tudo que pende delas, orçamentos, projetos, assistência externa, homologação, clientes, locais, tipos de serviço, formulários, catálogo de preços e usuários que não são admin. Ficam equipes, categorias e configurações.
+- `--stale-days 120`: OS em aberto sem atividade há mais tempo entram canceladas, com a nota "Encerrada na migração: sem atividade desde dd/mm/aaaa" em `legacy.migration_note`.
+- `--report`: relatório em JSON (contagens por entidade, itens pulados e motivo, tempos), sem dados pessoais.
+
+**Mapeamento.**
+- Usuários do escritório: admin/dono vira gestor (`supervisor`), o resto vira analista. Colaboradores viram técnicos (ativos ou inativos como no Field Control), com cidade/UF de moradia. O mesmo e-mail é uma pessoa só. Ninguém entra com senha antes de uma redefinição; a gestão também entra com a Microsoft.
+- Clientes: CNPJ só com dígitos (repetido fica vazio e vai para as observações), e-mail/telefone principal e etiquetas (`tags`).
+- Locais: o código sai do nome ("43 - Barra Salvador" vira código 43). Também vêm CNPJ, endereço, UF, CEP, coordenadas, contato e observações.
+- Tipos de serviço (com a duração) e catálogo de preços. Os produtos entram como produto; os serviços com preço que aparecem nos orçamentos entram como serviço.
+- Modelos de formulário: foto/assinatura viram fotos, número, escolha (até 30 opções, senão texto) e texto longo/curto.
+- Motivos de violação (SLA e prazo) entram juntos, pelo nome.
+- OS:
+  - o número do Field Control é mantido; identificador não numérico ganha o próximo número livre, e a sequência continua depois do maior;
+  - a situação sai das atividades (a última concluída fecha a OS; cancelada, improdutiva, agendada etc.);
+  - responsável e agenda vêm da última atividade, e o analista responsável é quem abriu;
+  - prazos de resposta/solução e motivos, tempo em atendimento e chegada;
+  - etiquetas, assinatura (anexo externo) e solicitação do portal (`source = portal`, mensagem e anexos);
+  - `legacy`: valores, itens, arquivos e situação dos prazos no Field Control.
+- Histórico:
+  - cada atividade concluída vira apontamento e eventos (em atendimento, resolvida);
+  - improdutivas viram `unproductive_visit`; canceladas viram evento de status;
+  - comentários entram como notas internas;
+  - formulários respondidos entram com as respostas, e as fotos como anexos externos ligados ao campo.
+- Orçamentos: só os que têm OS. Mantêm itens (produto/serviço, medida), desconto, total, validade, situação, quem aprovou, comentário e assinatura (em `legacy.signature_url`). O código antigo fica em `legacy.identifier`.
+
+**API.**
+- `TicketListItem.tags` e `CustomerOut.tags`: `[{name, color}]`.
+- `TicketDetail.legacy`, só para a equipe: `{source, identifier, fc_status, values {products, services, expenses, total}, items [{type, name, quantity, value, total}], request {subject, message, contact_email, contact_phone, created_at} | null, files [{url, title, type}], deadline {response_status, solution_status} | null, migration_note}`.
+- `TicketSource` ganhou `portal`.
+- Anexos: `TicketAttachment.external_url` (arquivo que continua no armazenamento do Field Control) e `storage_key` opcional.
+  - A lista de anexos devolve o link de origem em `download_url`.
+  - O link interno `/attachments/{id}/download` redireciona (307) para ele.
+  - O relatório público usa o link de origem nas fotos e na assinatura.
+- Orçamento migrado: `signature_url` cai para `legacy.signature_url` (também no link público).
+- `legacy_refs (source, kind, external_id → internal_id)` guarda a origem de cada registro. Rodar de novo atualiza clientes, locais, usuários e catálogos, e não duplica OS, formulários, comentários nem orçamentos.

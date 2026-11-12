@@ -39,6 +39,9 @@ class PendingEvent:
     data: dict[str, Any] = field(default_factory=dict)
     internal: bool = False
     previous_assignee_id: uuid.UUID | None = None
+    # Tipo completo do evento (ex.: "part_request.created"); padrão: "ticket.<kind>".
+    event_type: str | None = None
+    managers_only: bool = False
 
 
 def queue_event(
@@ -50,9 +53,20 @@ def queue_event(
     *,
     internal: bool = False,
     previous_assignee_id: uuid.UUID | None = None,
+    event_type: str | None = None,
+    managers_only: bool = False,
 ) -> None:
     db.info.setdefault(_PENDING_KEY, []).append(
-        PendingEvent(kind, ticket, actor, data or {}, internal, previous_assignee_id)
+        PendingEvent(
+            kind,
+            ticket,
+            actor,
+            data or {},
+            internal,
+            previous_assignee_id,
+            event_type,
+            managers_only,
+        )
     )
 
 
@@ -73,7 +87,7 @@ def render_event(ev: PendingEvent) -> dict[str, Any]:
     """Renderiza após o commit (a `version` da OS já está atualizada)."""
     t = ev.ticket
     return {
-        "type": f"ticket.{ev.kind}",
+        "type": ev.event_type or f"ticket.{ev.kind}",
         "ticket_id": str(t.id),
         "ticket_code": format_ticket_code(t.number),
         "status": t.status.value,
@@ -92,6 +106,7 @@ def render_event(ev: PendingEvent) -> dict[str, Any]:
             "requester_id": _s(t.requester_id),
             "created_by_id": _s(t.created_by_id),
             "internal": ev.internal,
+            "managers_only": ev.managers_only,
         },
     }
 

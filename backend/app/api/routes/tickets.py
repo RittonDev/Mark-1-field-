@@ -2,14 +2,14 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy import select
 
 from app.api.deps import DB, CurrentUser, StaffUser, TicketManagerUser
 from app.core.config import settings
 from app.core.enums import TicketPriority, TicketStatus, TicketType
 from app.core.security import InvalidToken, create_download_token, decode_token
-from app.models import TicketAttachment, TicketComment, TicketEvent, TicketWorklog, User
+from app.models import Ticket, TicketAttachment, TicketComment, TicketEvent, TicketWorklog, User
 from app.schemas.common import Page
 from app.schemas.ticket import (
     AttachmentOut,
@@ -17,6 +17,7 @@ from app.schemas.ticket import (
     CommentOut,
     EventOut,
     TicketAssign,
+    TicketAuthorizationIn,
     TicketCreate,
     TicketDetail,
     TicketFilters,
@@ -42,11 +43,21 @@ _INTERNAL_EVENT_TYPES = {
     "expense_removed",
     "quote_sent",
     "owner_changed",
+    "authorization_recorded",
+    "part_requested",
+    "part_request_updated",
 }
 
 
+async def _with_recurrence(db: DB, ticket: Ticket, user: User) -> TicketDetail:
+    detail = svc.to_detail(ticket, user)
+    if user.is_staff:
+        detail.recurrence = await svc.recurrence_for(db, ticket)
+    return detail
+
+
 async def _detail(db: DB, ticket_id: uuid.UUID, user: User) -> TicketDetail:
-    return svc.to_detail(await svc.get_ticket(db, ticket_id), user)
+    return await _with_recurrence(db, await svc.get_ticket(db, ticket_id), user)
 
 
 @router.get("/tickets", response_model=Page[TicketListItem])
@@ -100,8 +111,14 @@ async def list_tickets(
     items, total = await svc.list_tickets(
         db, user, filters, page=page, page_size=page_size, order_by=order_by
     )
+    recurrence = await svc.recurrence_counts(db, list(items))
+    page_items = []
+    for t in items:
+        item = TicketListItem.model_validate(t)
+        item.recurrence_30d = recurrence.get(t.id, 0)
+        page_items.append(item)
     return Page(
-        items=[TicketListItem.model_validate(t) for t in items],
+        items=page_items,
         total=total,
         page=page,
         page_size=page_size,
@@ -117,7 +134,18 @@ async def create_ticket(body: TicketCreate, db: DB, user: CurrentUser) -> Ticket
 
 @router.get("/tickets/{ticket_id}", response_model=TicketDetail)
 async def get_ticket(ticket_id: uuid.UUID, db: DB, user: CurrentUser) -> TicketDetail:
-    return svc.to_detail(await svc.get_visible_ticket(db, user, ticket_id), user)
+    return await _with_recurrence(db, await svc.get_visible_ticket(db, user, ticket_id), user)
+
+
+@router.post("/tickets/{ticket_id}/authorization", response_model=TicketDetail)
+async def record_authorization(
+    ticket_id: uuid.UUID, body: TicketAuthorizationIn, db: DB, user: TicketManagerUser
+) -> TicketDetail:
+    """Autorização do cliente para a visita: libera o técnico e liga o relógio de chegada."""
+    ticket = await svc.get_visible_ticket(db, user, ticket_id)
+    await svc.record_authorization(db, ticket, body, user)
+    await commit_and_publish(db)
+    return await _detail(db, ticket_id, user)
 
 
 @router.patch("/tickets/{ticket_id}", response_model=TicketDetail)
@@ -266,6 +294,10 @@ async def add_worklog(
 
 def _attachment_out(attachment: TicketAttachment, user: User) -> AttachmentOut:
     out = AttachmentOut.model_validate(attachment)
+    if attachment.external_url:
+        # Arquivo migrado que ainda está no armazenamento de origem (Field Control).
+        out.download_url = attachment.external_url
+        return out
     token = create_download_token(str(attachment.id), str(user.id))
     out.download_url = f"{settings.API_PREFIX}/attachments/{attachment.id}/download?token={token}"
     return out
@@ -301,8 +333,10 @@ async def upload_attachment(
     return _attachment_out(loaded, user)  # type: ignore[arg-type]
 
 
-@router.get("/attachments/{attachment_id}/download", include_in_schema=True)
-async def download_attachment(attachment_id: uuid.UUID, token: str, db: DB) -> FileResponse:
+@router.get("/attachments/{attachment_id}/download", include_in_schema=True, response_model=None)
+async def download_attachment(
+    attachment_id: uuid.UUID, token: str, db: DB
+) -> FileResponse | RedirectResponse:
     """Link assinado (gerado na listagem) para `<img src>` e downloads sem header."""
     try:
         payload = decode_token(token, "download")
@@ -313,6 +347,13 @@ async def download_attachment(attachment_id: uuid.UUID, token: str, db: DB) -> F
     attachment = await db.get(TicketAttachment, attachment_id)
     if attachment is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Anexo não encontrado")
+    if attachment.external_url:
+        # Migrado e ainda no armazenamento de origem: o link interno leva até lá.
+        return RedirectResponse(
+            attachment.external_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT
+        )
+    if not attachment.storage_key:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Arquivo não encontrado")
     try:
         path = storage.open_path(attachment.storage_key)
     except FileNotFoundError as exc:

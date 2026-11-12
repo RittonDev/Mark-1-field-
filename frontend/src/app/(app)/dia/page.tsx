@@ -7,6 +7,7 @@ import { useMemo, useState } from "react";
 import { Button, Card, EmptyState, ErrorBox, Input, LoadingBlock, PageHeader, Select } from "@/components/ui";
 import { CountUp } from "@/components/motion";
 import { MessagesButton } from "@/components/ticket/MessagesPanel";
+import { ArrivalChip, OnsiteBar } from "@/components/ticket/FieldClock";
 import { QuickEditButton } from "@/components/ticket/QuickEditButton";
 import { errorMessage } from "@/lib/api";
 import { useAuth, useIsClient } from "@/lib/auth";
@@ -106,9 +107,10 @@ function ActivityRow({ a, day, manage }: { a: Activity; day: string; manage: boo
             {a.arrived_at && a.arrived_at !== a.started_at ? (
               <span className="block text-xs text-ink-muted">chegou {when(a.arrived_at, day)}</span>
             ) : null}
+            {a.state === "in_progress" ? <OnsiteBar ticket={t} className="mt-1.5" /> : null}
           </>
         ) : (
-          <span className="text-ink-muted">—</span>
+          t.arrival_due_at ? <ArrivalChip ticket={t} compact /> : <span className="text-ink-muted">—</span>
         )}
       </td>
       <td className="px-3 py-2.5 text-sm whitespace-nowrap">{a.finished_at ? when(a.finished_at, day) : <span className="text-ink-muted">—</span>}</td>

@@ -74,6 +74,9 @@ class Quote(UUIDPrimaryKey, Timestamps, Base):
     decision_ip: Mapped[str | None] = mapped_column(String(64))
     rejection_reason: Mapped[str | None] = mapped_column(Text)
 
+    # Orçamento migrado (Field Control): código antigo, link da assinatura e anexos.
+    legacy: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+
     created_by_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL")
     )

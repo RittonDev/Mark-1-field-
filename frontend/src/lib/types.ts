@@ -124,6 +124,7 @@ export interface TicketStats {
 export interface Customer extends TicketStats {
   id: UUID;
   name: string;
+  tags?: Tag[];
   document: string | null;
   email: string | null;
   phone: string | null;
@@ -285,6 +286,8 @@ export interface TicketListItem {
   authorization_status?: AuthorizationStatus;
   /** Outras OS na mesma loja nos últimos 30 dias. */
   recurrence_30d?: number;
+  /** Etiquetas (ex.: "Avulso", "Faturamento Matriz"), vindas do Field Control. */
+  tags?: Tag[];
 }
 
 export interface TicketDetail extends TicketListItem {
@@ -334,6 +337,8 @@ export interface TicketDetail extends TicketListItem {
   /** Pedidos de peça do técnico (viram orçamento para o cliente aprovar). */
   part_requests?: PartRequest[];
   recurrence?: { count_30d: number; previous: { id: UUID; code: string; title: string; status: TicketStatus; created_at: ISODate }[] } | null;
+  /** Dados de origem da OS migrada do Field Control (valores, itens, solicitação, arquivos). */
+  legacy?: LegacyOrder | null;
   allowed_transitions: TicketStatus[];
   can_edit: boolean;
   can_assign: boolean;
@@ -441,6 +446,8 @@ export interface RealtimeEvent {
 
 export interface TicketCreatePayload {
   title: string;
+  /** Autorização do cliente já registrada na abertura (corre do dia a dia). */
+  authorization?: { status: "authorized" | "denied" | "pending"; by_name?: string | null; channel?: AuthorizationChannel; reference?: string | null } | null;
   description?: string;
   type?: TicketType;
   impact?: Level;
@@ -1163,6 +1170,10 @@ export interface PublicReport {
   closed_at: ISODate | null;
   on_site_minutes: number | null;
   check_in_gps: boolean;
+  /** Prazo de chegada: quanto o técnico levou desde o início do relógio e se foi no prazo. */
+  arrival_due_at?: ISODate | null;
+  arrival_minutes?: number | null;
+  arrival_on_time?: boolean | null;
   resolution_notes: string | null;
   forms: {
     name: string;
@@ -1205,4 +1216,29 @@ export interface PartRequest {
   attachments: { id: UUID; url: string }[];
   response_note: string | null;
   created_at: ISODate;
+}
+
+// ---- Migração do Field Control ----
+
+export interface Tag {
+  name: string;
+  color: string | null;
+}
+
+export interface LegacyOrder {
+  source: "fieldcontrol" | string;
+  identifier: string | null;
+  fc_status?: string | null;
+  values?: { products: number; services: number; expenses: number; total: number } | null;
+  items?: { type: string; name: string; quantity: number; value: number; total: number }[];
+  request?: {
+    subject: string | null;
+    message: string | null;
+    contact_email: string | null;
+    contact_phone: string | null;
+    created_at: ISODate | null;
+  } | null;
+  files?: { url: string; title: string | null; type: string | null }[];
+  deadline?: { response_status: string | null; solution_status: string | null } | null;
+  migration_note?: string | null;
 }

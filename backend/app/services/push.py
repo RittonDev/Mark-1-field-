@@ -41,6 +41,16 @@ def _push_target(event: dict[str, Any]) -> tuple[str, str, str] | None:
         return assignee, f"Nova OS atribuída: {code}", f"Atribuída por {event['actor_name']}"
     if event["type"] == "ticket.comment_added" and assignee and assignee != actor:
         return assignee, f"Novo acompanhamento em {code}", f"{event['actor_name']} comentou"
+    data = event.get("data") or {}
+    if event["type"] == "ticket.authorization" and assignee and data.get("status") == "authorized":
+        return assignee, f"Visita autorizada: {code}", "O cliente autorizou. Pode sair para a loja."
+    if event["type"] == "ticket.part_request_decided" and assignee:
+        approved = data.get("status") == "approved"
+        title = f"Peça {'aprovada' if approved else 'recusada'}: {code}"
+        body = data.get("description") or ""
+        if approved:
+            body = f"{body} · orçamento aprovado pelo cliente, pode trocar".strip(" ·")
+        return assignee, title, body
     return None
 
 

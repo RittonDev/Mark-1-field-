@@ -1,6 +1,7 @@
 """Textos prontos da OS para o grupo de WhatsApp: variáveis preenchidas com os dados da OS."""
 
 from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
 
 from httpx import AsyncClient
 
@@ -53,6 +54,9 @@ async def test_ticket_messages(client: AsyncClient, world: World) -> None:
     }
     trip = msgs["deslocamento"]
     assert "Técnico Tecnico em deslocamento para Loja 27 (São Paulo)" in trip
+    # Prazo de chegada: capital (São Paulo) = 4h da abertura, no fuso da operação.
+    due = datetime.fromisoformat(t["arrival_due_at"]).astimezone(ZoneInfo(settings.TIMEZONE))
+    assert trip.endswith(f"(prazo {due:%H:%M}).")
     assert t["code"] in trip and "Cliente Teste" in trip
     assert "__:__" not in trip  # tem posição ao vivo: horário calculado
     assert (await client.get(f"{API}/tickets/{t['id']}/messages", headers=th)).status_code == 403
@@ -83,3 +87,26 @@ async def test_ticket_messages(client: AsyncClient, world: World) -> None:
 
     defaults = (await client.post(f"{API}/message-templates/reset", headers=an)).json()["templates"]
     assert [d["key"] for d in defaults][:3] == ["deslocamento", "chegada", "atraso"]
+
+    # Quem autorizou a visita e o prazo de chegada também viram variáveis.
+    custom = {"templates": [{"name": "Autorização", "body": "{autorizado_por} | {prazo_chegada}"}]}
+    await client.put(f"{API}/message-templates", json=custom, headers=an)
+    text_of = lambda r: r.json()[0]["text"]  # noqa: E731
+    r = await client.get(f"{API}/tickets/{t['id']}/messages", headers=an)
+    assert text_of(r) == f"(não exigida) | {due:%H:%M}"
+    await client.put(
+        f"{API}/settings/field",
+        json={"require_authorization": True},
+        headers=world.supervisor.headers,
+    )
+    pending = await create(client, world, title="Sem autorização", location_id=loc["id"])
+    r = await client.get(f"{API}/tickets/{pending['id']}/messages", headers=an)
+    assert text_of(r) == "(aguardando autorização) | (sem prazo)"
+    await client.post(
+        f"{API}/tickets/{pending['id']}/authorization",
+        json={"status": "authorized", "by_name": "Paula Gerente", "channel": "whatsapp"},
+        headers=an,
+    )
+    r = await client.get(f"{API}/tickets/{pending['id']}/messages", headers=an)
+    assert text_of(r).startswith("Paula Gerente | ") and "(sem prazo)" not in text_of(r)
+    await client.post(f"{API}/message-templates/reset", headers=an)

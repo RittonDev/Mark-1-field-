@@ -14,7 +14,7 @@ from app.core.enums import QuoteStatus, TicketEventType
 from app.db.base import utcnow
 from app.models import Quote, QuoteItemCatalog, Ticket, User
 from app.schemas.quote import QuoteApprove, QuoteIn, QuoteLink, format_quote_code
-from app.services import storage
+from app.services import parts, storage
 from app.services.activities import local_today
 from app.services.errors import NotFound, PermissionDenied, WorkflowError
 from app.services.realtime import bus, queue_event
@@ -265,6 +265,8 @@ async def approve(db: AsyncSession, quote: Quote, data: QuoteApprove, ip: str | 
     ticket = await db.get(Ticket, quote.ticket_id)
     if ticket is not None:
         await _decided(db, ticket, quote, approved=True)
+        # Pedidos de peça ligados a este orçamento: liberados para a troca.
+        await parts.on_quote_decided(db, ticket, quote, approved=True)
     await db.flush()
     return quote
 
@@ -287,6 +289,7 @@ async def reject(
     ticket = await db.get(Ticket, quote.ticket_id)
     if ticket is not None:
         await _decided(db, ticket, quote, approved=False)
+        await parts.on_quote_decided(db, ticket, quote, approved=False)
     await db.flush()
     return quote
 

@@ -39,6 +39,7 @@ export type AssetType =
   | "other";
 export type TicketEventType =
   | "created"
+  | "owner_changed"
   | "updated"
   | "status_changed"
   | "assigned"
@@ -123,6 +124,7 @@ export interface TicketStats {
 export interface Customer extends TicketStats {
   id: UUID;
   name: string;
+  tags?: Tag[];
   document: string | null;
   email: string | null;
   phone: string | null;
@@ -256,6 +258,8 @@ export interface TicketListItem {
   team: Ref | null;
   /** OS de projeto (valores e equipe seguem o projeto). */
   project: ProjectRef | null;
+  /** Analista responsável (acompanha a OS); o técnico é o `assignee`. */
+  owner?: UserRef | null;
   requester_name: string | null;
   scheduled_start: ISODate | null;
   scheduled_end: ISODate | null;
@@ -272,6 +276,18 @@ export interface TicketListItem {
   updated_at: ISODate;
   version: number;
   sla_status: SlaStatus;
+  /** Prazos de campo: chegada (4h nas capitais) e permanência na loja (4h contadas da chegada). */
+  arrival_due_at?: ISODate | null;
+  arrived_at?: ISODate | null;
+  onsite_due_at?: ISODate | null;
+  arrival_status?: ArrivalStatus | null;
+  onsite_status?: OnsiteStatus | null;
+  /** A visita só sai com a autorização do cliente (cada chamado é cobrado). */
+  authorization_status?: AuthorizationStatus;
+  /** Outras OS na mesma loja nos últimos 30 dias. */
+  recurrence_30d?: number;
+  /** Etiquetas (ex.: "Avulso", "Faturamento Matriz"), vindas do Field Control. */
+  tags?: Tag[];
 }
 
 export interface TicketDetail extends TicketListItem {
@@ -311,6 +327,18 @@ export interface TicketDetail extends TicketListItem {
   signature_attachment_id: UUID | null;
   /** Custos extras (a gestão lança; o técnico só vê; o solicitante recebe vazio). */
   expenses: Expense[];
+  /** Link público do relatório para o cliente (só para a gestão; existe com a OS concluída). */
+  report_link?: ReportLink | null;
+  authorized_by_name?: string | null;
+  authorization_channel?: AuthorizationChannel | null;
+  authorization_ref?: string | null;
+  authorized_at?: ISODate | null;
+  authorized_by?: UserRef | null;
+  /** Pedidos de peça do técnico (viram orçamento para o cliente aprovar). */
+  part_requests?: PartRequest[];
+  recurrence?: { count_30d: number; previous: { id: UUID; code: string; title: string; status: TicketStatus; created_at: ISODate }[] } | null;
+  /** Dados de origem da OS migrada do Field Control (valores, itens, solicitação, arquivos). */
+  legacy?: LegacyOrder | null;
   allowed_transitions: TicketStatus[];
   can_edit: boolean;
   can_assign: boolean;
@@ -418,6 +446,8 @@ export interface RealtimeEvent {
 
 export interface TicketCreatePayload {
   title: string;
+  /** Autorização do cliente já registrada na abertura (corre do dia a dia). */
+  authorization?: { status: "authorized" | "denied" | "pending"; by_name?: string | null; channel?: AuthorizationChannel; reference?: string | null } | null;
   description?: string;
   type?: TicketType;
   impact?: Level;
@@ -836,6 +866,9 @@ export interface UnproductiveReason {
 // Orçamentos (enviados ao cliente por link para aprovar)
 export type QuoteStatus = "draft" | "sent" | "approved" | "rejected" | "expired" | "cancelled";
 
+/** Produto (material), serviço (mão de obra) ou despesa (deslocamento, pedágio...). */
+export type QuoteItemKind = "product" | "service" | "expense";
+
 export interface QuoteItem {
   description: string;
   quantity: number;
@@ -843,6 +876,23 @@ export interface QuoteItem {
   unit_price: number;
   total: number;
   catalog_item_id: UUID | null;
+  kind?: QuoteItemKind;
+}
+
+/** Link do orçamento para o cliente (fica disponível para copiar e reenviar). */
+export interface QuoteLink {
+  token: string;
+  path: string;
+  url: string;
+}
+
+export interface CompanyProfile {
+  name: string;
+  document: string | null;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+  website: string | null;
 }
 
 export interface Quote {
@@ -869,6 +919,10 @@ export interface Quote {
   updated_at: ISODate;
   signature_url: string | null;
   token?: string;
+  approver_registration?: string | null;
+  client_comment?: string | null;
+  link?: QuoteLink | null;
+  totals_by_kind?: Record<QuoteItemKind, number>;
 }
 
 export interface QuoteListRow extends Quote {
@@ -883,6 +937,7 @@ export interface QuoteCatalogItem {
   price: number;
   description: string | null;
   is_active: boolean;
+  kind?: QuoteItemKind;
 }
 
 export interface PublicQuote {
@@ -903,6 +958,22 @@ export interface PublicQuote {
   decided_at: ISODate | null;
   approver_name: string | null;
   rejection_reason: string | null;
+  ticket_number?: number;
+  company?: CompanyProfile;
+  customer_info?: { name: string; document: string | null; email: string | null; phone: string | null } | null;
+  address?: {
+    line: string | null;
+    district: string | null;
+    city: string | null;
+    state: string | null;
+    zip_code: string | null;
+    full: string;
+  } | null;
+  issued_at?: ISODate;
+  totals_by_kind?: Record<QuoteItemKind, number>;
+  approver_registration?: string | null;
+  client_comment?: string | null;
+  signature_url?: string | null;
 }
 
 // Projetos
@@ -999,4 +1070,175 @@ export interface TechnicianSuggestion {
   distance_km: number | null;
   score: number;
   reasons: string[];
+}
+
+// ---- Fila do analista ----
+
+export type QueueSection = "attention" | "in_field" | "today" | "waiting" | "upcoming" | "unscheduled" | "done";
+
+export interface QueueReason {
+  code: "sla_violated" | "sla_at_risk" | "no_technician" | "late_start" | "unproductive" | "violation_pending" | string;
+  label: string;
+  tone: "danger" | "warning" | "info";
+}
+
+export interface QueueItem extends TicketListItem {
+  section: QueueSection;
+  reasons: QueueReason[];
+}
+
+export interface QueueCounts {
+  open: number;
+  attention: number;
+  in_field: number;
+  today: number;
+  waiting: number;
+  upcoming: number;
+  unscheduled: number;
+  done: number;
+}
+
+export interface MyQueue {
+  user: UserRef;
+  date: string;
+  generated_at: ISODate;
+  counts: QueueCounts;
+  items: QueueItem[];
+}
+
+export interface QueueSummary {
+  user: UserRef;
+  role: UserRole;
+  open: number;
+  attention: number;
+  today: number;
+  in_field: number;
+}
+
+export interface QueuesOut {
+  queues: QueueSummary[];
+  unowned: { open: number; attention: number; today: number; in_field: number };
+}
+
+// ---- Relatório da OS para o cliente ----
+
+export interface ReportLink {
+  token: string;
+  path: string;
+  url: string;
+  created_at: ISODate;
+  views: number;
+  last_viewed_at: ISODate | null;
+}
+
+export interface PublicReportPhoto {
+  url: string;
+  filename: string;
+  taken_at?: ISODate | null;
+}
+
+export interface PublicReport {
+  code: string;
+  title: string;
+  description: string;
+  status: TicketStatus;
+  status_label: string;
+  company_name: string;
+  company?: CompanyProfile;
+  number?: number;
+  customer: { name: string; document: string | null; email?: string | null; phone?: string | null } | null;
+  location: {
+    name: string;
+    code: string | null;
+    address: string | null;
+    city: string | null;
+    state: string | null;
+    zip_code?: string | null;
+    contact_name?: string | null;
+    contact_phone?: string | null;
+  } | null;
+  service_address: string | null;
+  requester_name: string | null;
+  service_type: string | null;
+  technician: { name: string } | null;
+  opened_at: ISODate;
+  scheduled_start: ISODate | null;
+  scheduled_end: ISODate | null;
+  en_route_at: ISODate | null;
+  arrived_at: ISODate | null;
+  finished_at: ISODate | null;
+  closed_at: ISODate | null;
+  on_site_minutes: number | null;
+  check_in_gps: boolean;
+  /** Prazo de chegada: quanto o técnico levou desde o início do relógio e se foi no prazo. */
+  arrival_due_at?: ISODate | null;
+  arrival_minutes?: number | null;
+  arrival_on_time?: boolean | null;
+  resolution_notes: string | null;
+  forms: {
+    name: string;
+    completed_at: ISODate | null;
+    items: { label: string; type: string; value: string | null; photos: PublicReportPhoto[] }[];
+  }[];
+  photos: PublicReportPhoto[];
+  signature: { name: string; role: string | null; signed_at: ISODate; image_url: string } | null;
+  timeline: { at: ISODate; label: string }[];
+  generated_at: ISODate;
+}
+
+// ---- Regras de campo, autorização e pedidos de peça ----
+
+export type ArrivalStatus = "met" | "late" | "at_risk" | "pending";
+export type OnsiteStatus = "ok" | "warning" | "over";
+export type AuthorizationStatus = "not_required" | "pending" | "authorized" | "denied";
+export type AuthorizationChannel = "whatsapp" | "email" | "phone" | "portal" | "maxxcon" | "other";
+
+export interface FieldRules {
+  arrival_hours_capital: number | null;
+  arrival_hours_interior: number | null;
+  onsite_hours: number;
+  onsite_warning_minutes: number;
+  require_authorization: boolean;
+}
+
+export type PartRequestStatus = "open" | "quoted" | "approved" | "rejected" | "cancelled";
+
+export interface PartRequest {
+  id: UUID;
+  description: string;
+  quantity: number;
+  unit: string;
+  note: string | null;
+  status: PartRequestStatus;
+  quote_id: UUID | null;
+  quote_code: string | null;
+  requested_by: Ref | null;
+  attachments: { id: UUID; url: string }[];
+  response_note: string | null;
+  created_at: ISODate;
+}
+
+// ---- Migração do Field Control ----
+
+export interface Tag {
+  name: string;
+  color: string | null;
+}
+
+export interface LegacyOrder {
+  source: "fieldcontrol" | string;
+  identifier: string | null;
+  fc_status?: string | null;
+  values?: { products: number; services: number; expenses: number; total: number } | null;
+  items?: { type: string; name: string; quantity: number; value: number; total: number }[];
+  request?: {
+    subject: string | null;
+    message: string | null;
+    contact_email: string | null;
+    contact_phone: string | null;
+    created_at: ISODate | null;
+  } | null;
+  files?: { url: string; title: string | null; type: string | null }[];
+  deadline?: { response_status: string | null; solution_status: string | null } | null;
+  migration_note?: string | null;
 }

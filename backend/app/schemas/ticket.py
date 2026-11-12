@@ -1,12 +1,14 @@
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, computed_field, model_validator
 
 from app.core.config import settings
 from app.core.enums import (
     AssetType,
+    AuthorizationChannel,
+    AuthorizationStatus,
     Impact,
     Responsibility,
     SlaStatus,
@@ -18,10 +20,12 @@ from app.core.enums import (
     Urgency,
 )
 from app.db.base import utcnow
-from app.schemas.common import ORMModel, Ref
+from app.schemas.common import ORMModel, Ref, TagOut
 from app.schemas.expense import ExpenseOut
 from app.schemas.forms import TicketFormOut
+from app.schemas.part_request import PartRequestOut
 from app.schemas.user import UserRef
+from app.services import field as field_rules
 from app.services.durations import actual_seconds
 from app.services.sla import compute_sla_status
 from app.services.sla import resolution_breached as sla_resolution_breached
@@ -86,6 +90,10 @@ class AssetRef(ORMModel):
     ip_address: str | None
 
 
+ArrivalStatus = Literal["met", "late", "at_risk", "pending"]
+OnsiteStatus = Literal["ok", "warning", "over"]
+
+
 class TicketListItem(ORMModel):
     id: uuid.UUID
     number: int
@@ -117,6 +125,17 @@ class TicketListItem(ORMModel):
     created_at: datetime
     updated_at: datetime
     version: int
+    # Regras de campo: prazo de chegada (4h nas capitais) e tempo de técnico na loja (4h).
+    arrival_due_at: datetime | None = None
+    arrived_at: datetime | None = None
+    onsite_due_at: datetime | None = None
+    onsite_warning_at: datetime | None = Field(default=None, exclude=True)
+    # Autorização do cliente para a visita (o técnico só sai com ela, quando exigida).
+    authorization_status: AuthorizationStatus = AuthorizationStatus.NOT_REQUIRED
+    # Outras OS no mesmo local nos últimos 30 dias (preenchido nas listagens e na fila).
+    recurrence_30d: int = 0
+    # Etiquetas (ex.: "Avulso", "Faturamento Matriz").
+    tags: list[TagOut] = []
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -127,6 +146,36 @@ class TicketListItem(ORMModel):
     @property
     def sla_status(self) -> SlaStatus:
         return compute_sla_status(self)  # type: ignore[arg-type]
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def arrival_status(self) -> ArrivalStatus | None:
+        return field_rules.arrival_status(self, utcnow())  # type: ignore[return-value]
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def onsite_status(self) -> OnsiteStatus | None:
+        return field_rules.onsite_status(self, utcnow())  # type: ignore[return-value]
+
+
+class RecurrenceItem(ORMModel):
+    id: uuid.UUID
+    number: int
+    title: str
+    status: TicketStatus
+    created_at: datetime
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def code(self) -> str:
+        return format_ticket_code(self.number)
+
+
+class TicketRecurrence(BaseModel):
+    """Reincidência: outras OS no mesmo local nos últimos 30 dias."""
+
+    count_30d: int
+    previous: list[RecurrenceItem]
 
 
 class ReportLinkOut(BaseModel):
@@ -173,6 +222,18 @@ class TicketDetail(TicketListItem):
     signature_attachment_id: uuid.UUID | None = None
     # Custos extras: a gestão lança; o técnico só vê; o solicitante não recebe.
     expenses: list[ExpenseOut] = []
+    # Autorização do cliente para a visita.
+    authorized_by_name: str | None = None
+    authorization_channel: AuthorizationChannel | None = None
+    authorization_ref: str | None = None
+    authorized_at: datetime | None = None
+    authorized_by: UserRef | None = None
+    # Pedidos de peça do técnico (peça só entra com orçamento aprovado).
+    part_requests: list[PartRequestOut] = []
+    # Só na tela da OS: outras OS no mesmo local nos últimos 30 dias.
+    recurrence: TicketRecurrence | None = None
+    # OS migrada (Field Control): valores, itens, solicitação original e arquivos. Só a equipe.
+    legacy: dict[str, Any] | None = None
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -208,6 +269,16 @@ class TicketDetail(TicketListItem):
     report_link: ReportLinkOut | None = None
 
 
+class TicketAuthorizationIn(BaseModel):
+    """Registro da autorização do cliente (quem autorizou, por onde e o número do chamado dele)."""
+
+    status: Literal["authorized", "denied", "pending"] = "authorized"
+    by_name: str | None = Field(default=None, max_length=160)
+    channel: AuthorizationChannel | None = None
+    reference: str | None = Field(default=None, max_length=80)
+    note: str | None = Field(default=None, max_length=2000)
+
+
 class TicketCreate(BaseModel):
     title: str = Field(min_length=3, max_length=200)
     description: str = Field(default="", max_length=20000)
@@ -236,6 +307,8 @@ class TicketCreate(BaseModel):
     scheduled_end: datetime | None = None
     # Agendar mesmo com o técnico ocupado no horário (a API recusa com 409 sem isso).
     allow_conflict: bool = False
+    # Só a gestão: autorização do cliente já registrada na abertura (corre no atendimento).
+    authorization: TicketAuthorizationIn | None = None
 
 
 class TicketUpdate(BaseModel):

@@ -17,6 +17,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.enums import (
+    AuthorizationStatus,
     Impact,
     TicketEventType,
     TicketPriority,
@@ -153,6 +154,34 @@ class Ticket(UUIDPrimaryKey, Timestamps, Base):
     report_views: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     report_last_viewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Regras de campo (ver services/field.py): prazo de chegada (capital x interior) e tempo de
+    # técnico na loja, contado da primeira chegada ("Em atendimento").
+    arrival_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    arrived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    onsite_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    onsite_warning_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # Autorização do cliente para a visita (cada chamado é cobrado).
+    authorization_status: Mapped[AuthorizationStatus] = mapped_column(
+        str_enum(AuthorizationStatus),
+        default=AuthorizationStatus.NOT_REQUIRED,
+        server_default=AuthorizationStatus.NOT_REQUIRED.value,
+        index=True,
+    )
+    authorized_by_name: Mapped[str | None] = mapped_column(String(160))
+    authorization_channel: Mapped[str | None] = mapped_column(String(20))
+    authorization_ref: Mapped[str | None] = mapped_column(String(80))
+    authorized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    authorized_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+
+    # Etiquetas (ex.: "Avulso", "Faturamento Matriz", "Pendente envio PGTO"): [{name, color}].
+    tags: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list, server_default="[]")
+    # OS migrada de outro sistema (Field Control): valores, itens, solicitação original, arquivos
+    # e o número antigo. Só a equipe vê (TicketDetail.legacy).
+    legacy: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+
     # Concorrência otimista) (web e mobile editando a mesma OS).
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
 
@@ -164,6 +193,9 @@ class Ticket(UUIDPrimaryKey, Timestamps, Base):
     created_by: Mapped[User | None] = relationship(foreign_keys=[created_by_id], lazy="selectin")
     assignee: Mapped[User | None] = relationship(foreign_keys=[assignee_id], lazy="selectin")
     owner: Mapped[User | None] = relationship(foreign_keys=[owner_id], lazy="selectin")
+    authorized_by: Mapped[User | None] = relationship(
+        foreign_keys=[authorized_by_id], lazy="selectin"
+    )
     team: Mapped[Team | None] = relationship(lazy="selectin")
     project: Mapped["Project | None"] = relationship(lazy="selectin")  # noqa: F821
     service_type: Mapped[ServiceType | None] = relationship(lazy="selectin")
@@ -179,6 +211,9 @@ class Ticket(UUIDPrimaryKey, Timestamps, Base):
     )
     expenses: Mapped[list["TicketExpense"]] = relationship(  # noqa: F821
         lazy="selectin", order_by="TicketExpense.created_at", viewonly=True
+    )
+    part_requests: Mapped[list["TicketPartRequest"]] = relationship(  # noqa: F821
+        lazy="selectin", order_by="TicketPartRequest.created_at", viewonly=True
     )
 
     __mapper_args__ = {"version_id_col": version, "eager_defaults": True}
@@ -254,7 +289,10 @@ class TicketAttachment(UUIDPrimaryKey, Base):
     content_type: Mapped[str] = mapped_column(String(120))
     size_bytes: Mapped[int] = mapped_column(Integer)
     kind: Mapped[str] = mapped_column(String(20), default="file")  # file | photo | signature
-    storage_key: Mapped[str] = mapped_column(String(500))
+    # Arquivo no nosso armazenamento; vazio quando o arquivo ainda está em outro sistema.
+    storage_key: Mapped[str | None] = mapped_column(String(500))
+    # Arquivo migrado que continua no armazenamento de origem (ex.: S3 do Field Control).
+    external_url: Mapped[str | None] = mapped_column(String(1000))
     # Foto de um campo de formulário (ex.: "Foto do rack antes").
     form_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("ticket_forms.id", ondelete="CASCADE"), index=True

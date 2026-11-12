@@ -6,6 +6,7 @@ no fim do período, e não o de agora.
 
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -53,6 +54,35 @@ async def _status_changes(
     )
 
 
+async def _field_numbers(db: AsyncSession, start: datetime, end: datetime) -> dict[str, Any]:
+    """Chegadas no período (prazo de 4h nas capitais) e tempo médio de técnico na loja."""
+    arrived = and_(Ticket.arrived_at >= start, Ticket.arrived_at < end)
+    clock_start = func.coalesce(Ticket.authorized_at, Ticket.created_at)
+    row = (
+        await db.execute(
+            select(
+                func.count(),
+                func.count().filter(Ticket.arrival_due_at.is_not(None)),
+                func.count().filter(Ticket.arrived_at <= Ticket.arrival_due_at),
+                func.avg(func.extract("epoch", Ticket.arrived_at - clock_start)),
+            ).where(arrived)
+        )
+    ).one()
+    arrivals, with_due, on_time, avg_arrival = row
+    avg_onsite = await db.scalar(
+        select(func.avg(Ticket.work_seconds)).where(
+            Ticket.resolved_at >= start, Ticket.resolved_at < end, Ticket.work_seconds > 0
+        )
+    )
+    return {
+        "arrivals": arrivals or 0,
+        "arrivals_on_time": on_time or 0,
+        "arrival_on_time_pct": round(on_time * 100 / with_due, 1) if with_due else None,
+        "avg_arrival_minutes": round(float(avg_arrival) / 60) if avg_arrival is not None else None,
+        "avg_onsite_minutes": round(float(avg_onsite) / 60) if avg_onsite is not None else None,
+    }
+
+
 async def numbers(db: AsyncSession, start: datetime, end: datetime) -> DayNumbers:
     opened = await db.scalar(
         select(func.count()).where(Ticket.created_at >= start, Ticket.created_at < end)
@@ -73,7 +103,9 @@ async def numbers(db: AsyncSession, start: datetime, end: datetime) -> DayNumber
         )
     )
     at_end = await _status_counts_at(db, end)
+    field = await _field_numbers(db, start, end)
     return DayNumbers(
+        **field,
         opened=opened or 0,
         resolved=await _status_changes(db, start, end, TicketStatus.RESOLVED),
         cancelled=await _status_changes(db, start, end, TicketStatus.CANCELLED),

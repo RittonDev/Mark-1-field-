@@ -11,7 +11,9 @@ from app.models.catalog import (
 from app.models.customer import Customer, Location
 from app.models.expense import SystemSetting, TicketExpense
 from app.models.forms import FormTemplate, TicketForm
+from app.models.legacy import LegacyRef
 from app.models.onboarding import OnboardingInvite, TechnicianApplication
+from app.models.part_request import TicketPartRequest
 from app.models.project import Project
 from app.models.quote import Quote, QuoteItemCatalog
 from app.models.repair import RepairEvent, RepairOrder, RepairPhoto
@@ -32,6 +34,7 @@ __all__ = [
     "Customer",
     "DeviceToken",
     "FormTemplate",
+    "LegacyRef",
     "Location",
     "OnboardingInvite",
     "Project",
@@ -51,6 +54,7 @@ __all__ = [
     "TicketEvent",
     "TicketExpense",
     "TicketForm",
+    "TicketPartRequest",
     "TicketWorklog",
     "UnproductiveReason",
     "TechnicianApplication",

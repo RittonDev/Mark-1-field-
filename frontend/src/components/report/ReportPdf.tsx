@@ -166,6 +166,12 @@ export function ReportPdf({ report }: { report: PublicReport }) {
               <Text style={s.tileValue}>{minutes(report.on_site_minutes)}</Text>
             </View>
           </View>
+          {report.arrival_minutes != null ? (
+            <Text style={[s.small, { color: report.arrival_on_time === false ? "#b45309" : C.green }]}>
+              Técnico chegou em {minutes(report.arrival_minutes)}
+              {report.arrival_on_time ? " (dentro do prazo)" : report.arrival_on_time === false ? " (fora do prazo)" : ""}.
+            </Text>
+          ) : null}
           {report.check_in_gps ? (
             <Text style={[s.small, { color: C.green }]}>Presença no local confirmada por GPS no check-in.</Text>
           ) : null}

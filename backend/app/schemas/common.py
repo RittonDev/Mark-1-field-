@@ -24,3 +24,10 @@ class Ref(ORMModel):
 
 class Message(BaseModel):
     detail: str
+
+
+class TagOut(BaseModel):
+    """Etiqueta (ex.: "Avulso", "Faturamento Matriz") com a cor de origem."""
+
+    name: str
+    color: str | None = None

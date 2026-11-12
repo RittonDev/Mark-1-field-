@@ -40,6 +40,7 @@ from app.schemas.client_report import (
 from app.schemas.forms import FormField
 from app.schemas.ticket import ReportLinkOut, format_ticket_code
 from app.services import company as company_svc
+from app.services import field as field_rules
 from app.services.errors import WorkflowError
 from app.services.workflow import STATUS_INFO
 
@@ -215,6 +216,11 @@ def format_answer(field: FormField, value: Any) -> str | None:
 
 
 def _photo(att: TicketAttachment, base_url: str) -> PublicReportPhoto:
+    if att.external_url:
+        # Arquivo migrado (Field Control) que continua no armazenamento de origem.
+        return PublicReportPhoto(
+            url=att.external_url, filename=att.filename, taken_at=att.created_at
+        )
     token = create_download_token(str(att.id), "client-report", minutes=PHOTO_LINK_MINUTES)
     return PublicReportPhoto(
         url=f"{base_url}{settings.API_PREFIX}/attachments/{att.id}/download?token={token}",
@@ -233,6 +239,14 @@ def _last_before(
         if ev.to_value == target.value:
             found = ev
     return found
+
+
+def _arrival_minutes(ticket: Ticket) -> int | None:
+    """Da solicitação (ou da autorização do cliente) até o técnico chegar."""
+    start = field_rules.clock_start(ticket)
+    if ticket.arrived_at is None or start is None:
+        return None
+    return max(0, int((ticket.arrived_at - start).total_seconds() // 60))
 
 
 async def build(db: AsyncSession, ticket: Ticket, base_url: str) -> PublicReport:
@@ -374,6 +388,13 @@ async def build(db: AsyncSession, ticket: Ticket, base_url: str) -> PublicReport
         finished_at=finished_at,
         closed_at=ticket.closed_at,
         on_site_minutes=(ticket.work_seconds // 60) if ticket.work_seconds else None,
+        arrival_due_at=ticket.arrival_due_at,
+        arrival_minutes=_arrival_minutes(ticket),
+        arrival_on_time=(
+            ticket.arrived_at <= ticket.arrival_due_at
+            if ticket.arrived_at and ticket.arrival_due_at
+            else None
+        ),
         check_in_gps=check_in_gps,
         resolution_notes=ticket.resolution_notes,
         forms=forms,

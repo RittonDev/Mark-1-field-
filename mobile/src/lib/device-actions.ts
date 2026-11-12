@@ -1,5 +1,6 @@
 // Recursos do aparelho usados nas telas: GPS para check-in e links para mapa/telefone.
 
+import * as Clipboard from "expo-clipboard";
 import * as Location from "expo-location";
 import { Linking, Platform } from "react-native";
 import { mapTarget } from "./address";
@@ -78,4 +79,46 @@ export async function openInMaps(location: LocationRef | null, serviceAddress: s
 
 export function callPhone(phone: string) {
   return Linking.openURL(`tel:${phone.replace(/[^\d+]/g, "")}`);
+}
+
+export type NavApp = "google" | "waze";
+
+/** Links de rota (deep link do app; sem o app instalado, o link web do mesmo serviço). */
+export function navigationLinks(app: NavApp, location: LocationRef | null, serviceAddress: string | null | undefined) {
+  const target = mapTarget(location, serviceAddress);
+  if (!target) return null;
+  const coords = target.kind === "coords" ? `${target.latitude},${target.longitude}` : null;
+  const query = coords ?? encodeURIComponent(target.kind === "address" ? target.query : "");
+  if (app === "waze") {
+    const params = coords ? `ll=${coords}&navigate=yes` : `q=${query}&navigate=yes`;
+    return { native: `waze://?${params}`, web: `https://waze.com/ul?${params}` };
+  }
+  const web = `https://www.google.com/maps/dir/?api=1&destination=${query}&travelmode=driving`;
+  const native = Platform.OS === "ios" ? `comgooglemaps://?daddr=${query}&directionsmode=driving` : `google.navigation:q=${query}`;
+  return { native, web };
+}
+
+/** Abre a rota no Google Maps ou no Waze. */
+export async function navigateWith(app: NavApp, location: LocationRef | null, serviceAddress: string | null | undefined) {
+  const links = navigationLinks(app, location, serviceAddress);
+  if (!links) return;
+  if (Platform.OS === "web") {
+    await Linking.openURL(links.web);
+    return;
+  }
+  try {
+    await Linking.openURL(links.native);
+  } catch {
+    await Linking.openURL(links.web);
+  }
+}
+
+/** Copia um texto (endereço do atendimento) para colar no WhatsApp ou em outro app. */
+export async function copyText(text: string): Promise<boolean> {
+  try {
+    await Clipboard.setStringAsync(text);
+    return true;
+  } catch {
+    return false;
+  }
 }

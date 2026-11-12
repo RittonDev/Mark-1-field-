@@ -2,6 +2,7 @@
 // atribuiu a ele (o backend já filtra; aqui também, por segurança, caso o aparelho tenha dados antigos).
 
 import { PRIORITY, STATUS } from "./constants";
+import { arrivalUrgency } from "./field";
 import { addDays, startOfDay } from "./format";
 import type { LocalTicket } from "./syncTypes";
 import type { TicketStatus, User } from "./types";
@@ -21,8 +22,13 @@ export const isMine = (ticket: LocalTicket, user: User) => ticket.assignee?.id =
 export const awaitingReschedule = (ticket: LocalTicket) =>
   ticket.status === "assigned" && !ticket.scheduled_start && Boolean(ticket.last_unproductive_at);
 
-/** Em campo primeiro, depois pela hora da visita, prioridade e prazo de solução. */
-export function compareForToday(a: LocalTicket, b: LocalTicket): number {
+/**
+ * Urgência do dia: chegada atrasada primeiro, depois chegada em risco; em seguida o que está
+ * em campo, a hora da visita, a prioridade e o prazo de solução.
+ */
+export function compareForToday(a: LocalTicket, b: LocalTicket, now: number = Date.now()): number {
+  const urgency = arrivalUrgency(a, now) - arrivalUrgency(b, now);
+  if (urgency) return urgency;
   const rank = (FIELD_RANK[a.status] ?? 9) - (FIELD_RANK[b.status] ?? 9);
   if (rank) return rank;
   const sched = time(a.scheduled_start) - time(b.scheduled_start);
@@ -66,7 +72,8 @@ export function buildLists(tickets: LocalTicket[], user: User, now: Date = new D
     else today.push(ticket);
   }
 
-  today.sort(compareForToday);
+  const at = now.getTime();
+  today.sort((a, b) => compareForToday(a, b, at));
   upcoming.sort((a, b) => time(a.scheduled_start) - time(b.scheduled_start));
   done.sort((a, b) => time(b.updated_at) - time(a.updated_at));
   reschedule.sort((a, b) => time(b.last_unproductive_at) - time(a.last_unproductive_at));
@@ -86,5 +93,5 @@ export function ticketsOnDay(tickets: LocalTicket[], user: User, day: Date, now:
       if (s !== null && e !== null && s < end && e >= start) return true;
       return isToday && !isDone(t.status) && !awaitingReschedule(t) && (s === null || FIELD_RANK[t.status] !== undefined);
     })
-    .sort(compareForToday);
+    .sort((a, b) => compareForToday(a, b, now.getTime()));
 }

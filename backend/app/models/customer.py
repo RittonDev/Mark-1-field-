@@ -1,6 +1,8 @@
 import uuid
+from typing import Any
 
 from sqlalchemy import Boolean, Float, ForeignKey, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, Timestamps, UUIDPrimaryKey
@@ -17,6 +19,8 @@ class Customer(UUIDPrimaryKey, Timestamps, Base):
     phone: Mapped[str | None] = mapped_column(String(40))
     notes: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    # Etiquetas (ex.: "Avulso", "Faturamento Matriz"): [{name, color}].
+    tags: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list, server_default="[]")
 
 
 class Location(UUIDPrimaryKey, Timestamps, Base):

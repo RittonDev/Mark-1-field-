@@ -160,6 +160,7 @@ export const EVENT_TYPE: Record<TicketEventType, string> = {
   updated: "editou a OS",
   status_changed: "alterou o status",
   assigned: "alterou o responsável",
+  owner_changed: "alterou o analista responsável",
   comment_added: "adicionou um acompanhamento",
   worklog_added: "registrou um apontamento",
   attachment_added: "anexou um arquivo",

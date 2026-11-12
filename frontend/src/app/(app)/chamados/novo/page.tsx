@@ -1,11 +1,13 @@
 "use client";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Save } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, Save, ShieldCheck, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { LocationPicker } from "@/components/LocationPicker";
+import { AUTH_CHANNEL } from "@/components/ticket/AuthorizationCard";
+import { StatusBadge } from "@/components/badges";
 import { PriorityBadge } from "@/components/badges";
 import { ConflictHint, ConflictList, scheduleConflicts } from "@/components/ScheduleConflict";
 import { useToast } from "@/components/Toaster";
@@ -28,10 +30,13 @@ import { formatMinutes, fromLocalInput } from "@/lib/format";
 import { useProjects } from "@/lib/projects";
 import { useAssignable, useCategories, useCustomers, useServiceTypes, useTeams } from "@/lib/queries";
 import type {
+  AuthorizationChannel,
   ConflictItem,
   Level,
   Location,
+  Page,
   TicketCreatePayload,
+  TicketListItem,
   TicketDetail,
   TicketPriority,
   TicketSource,
@@ -105,6 +110,18 @@ export default function NewTicketPage() {
   // Tipos gerais + catálogo do cliente da OS (só para quem gerencia OS).
   const serviceTypes = useServiceTypes({ customerId: form.customer_id || null, active: true, enabled: canAssign });
 
+  // OS ainda abertas na mesma loja: evita mandar dois técnicos para o mesmo problema.
+  const openAtLocation = useQuery({
+    queryKey: ["tickets", "open-at-location", form.location_id],
+    queryFn: () => api.get<Page<TicketListItem>>("/tickets", { location_id: form.location_id, open_only: true, page_size: 5 }),
+    enabled: staff && Boolean(form.location_id),
+  });
+  // Autorização do cliente já em mãos na abertura (a visita só sai autorizada).
+  const [authorized, setAuthorized] = useState(false);
+  const [authBy, setAuthBy] = useState("");
+  const [authChannel, setAuthChannel] = useState<AuthorizationChannel>("whatsapp");
+  const [authRef, setAuthRef] = useState("");
+
   // A API barrou por conflito de agenda: o próximo envio confirma (até mudar técnico ou horário).
   const [conflicts, setConflicts] = useState<ConflictItem[] | null>(null);
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => {
@@ -156,6 +173,9 @@ export default function NewTicketPage() {
       payload.scheduled_start = fromLocalInput(form.scheduled_start);
       payload.scheduled_end = fromLocalInput(form.scheduled_end);
       if (conflicts) payload.allow_conflict = true;
+      if (canAssign && authorized) {
+        payload.authorization = { status: "authorized", by_name: authBy.trim() || null, channel: authChannel, reference: authRef.trim() || null };
+      }
     }
     mutation.mutate(payload);
   }
@@ -295,6 +315,30 @@ export default function NewTicketPage() {
                   }}
                 />
               </Field>
+              {openAtLocation.data && openAtLocation.data.total > 0 ? (
+                <div className="animate-enter rounded-lg border border-amber-200 bg-amber-50/70 p-3 md:col-span-2 dark:border-amber-500/30 dark:bg-amber-500/10">
+                  <p className="flex items-center gap-1.5 text-sm font-medium text-amber-900 dark:text-amber-200">
+                    <TriangleAlert className="size-4" />
+                    {openAtLocation.data.total === 1
+                      ? "Já existe 1 OS aberta nesta loja"
+                      : `Já existem ${openAtLocation.data.total} OS abertas nesta loja`}
+                  </p>
+                  <ul className="mt-2 flex flex-col gap-1">
+                    {openAtLocation.data.items.slice(0, 3).map((t) => (
+                      <li key={t.id} className="flex flex-wrap items-center gap-2 text-sm">
+                        <Link href={`/chamados/${t.id}`} target="_blank" className="text-ink hover:text-brand hover:underline">
+                          <span className="mr-1 font-mono text-xs text-ink-subtle">{t.code}</span>
+                          {t.title}
+                        </Link>
+                        <StatusBadge status={t.status} />
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-2 text-xs text-amber-800/80 dark:text-amber-200/80">
+                    Confira se não é o mesmo problema antes de abrir outra (evita mandar dois técnicos).
+                  </p>
+                </div>
+              ) : null}
               <Field label="Cliente">
                 <Select
                   value={form.customer_id}
@@ -338,6 +382,41 @@ export default function NewTicketPage() {
         </div>
 
         <div className="flex flex-col gap-4">
+          {canAssign ? (
+            <Card>
+              <CardHeader title="Autorização do cliente" description="Cada chamado é cobrado: a visita só sai autorizada." />
+              <div className="flex flex-col gap-3 p-4">
+                <label className="flex cursor-pointer items-start gap-2 text-sm text-ink">
+                  <input
+                    type="checkbox"
+                    checked={authorized}
+                    onChange={(e) => setAuthorized(e.target.checked)}
+                    className="mt-0.5 size-4 accent-[var(--brand)]"
+                  />
+                  <span>
+                    O cliente já autorizou a visita
+                    <span className="block text-xs text-ink-subtle">Sem isso, a OS fica aguardando autorização.</span>
+                  </span>
+                </label>
+                {authorized ? (
+                  <div className="flex animate-enter flex-col gap-2">
+                    <Input value={authBy} onChange={(e) => setAuthBy(e.target.value)} placeholder="Quem autorizou" aria-label="Quem autorizou" />
+                    <Select value={authChannel} onChange={(e) => setAuthChannel(e.target.value as AuthorizationChannel)} aria-label="Canal">
+                      {Object.entries(AUTH_CHANNEL).map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </Select>
+                    <Input value={authRef} onChange={(e) => setAuthRef(e.target.value)} placeholder="Nº do chamado do cliente" aria-label="Número do chamado do cliente" />
+                    <p className="flex items-center gap-1 text-xs text-emerald-700 dark:text-emerald-400">
+                      <ShieldCheck className="size-3.5" />O prazo de chegada começa a contar na abertura.
+                    </p>
+                  </div>
+                ) : null}
+              </div>
+            </Card>
+          ) : null}
           <Card>
             <CardHeader title="Prioridade" description="Matriz impacto × urgência (ITIL)" />
             <div className="flex flex-col gap-4 p-4">

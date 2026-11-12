@@ -116,6 +116,10 @@ const MIGRATIONS: string[] = [
     last_error TEXT
   );
   `,
+  // 4: fotos de um pedido de peça (sobem antes; os ids entram na operação `part_request`).
+  `
+  ALTER TABLE photos ADD COLUMN part_op_id TEXT;
+  `,
 ];
 
 let dbPromise: Promise<DB> | null = null;
@@ -475,23 +479,51 @@ export interface PendingPhoto {
   /** Foto de um campo de formulário (POST /tickets/{id}/forms/{form_id}/photos). */
   form_id: UUID | null;
   field_id: string | null;
+  /** Foto de um pedido de peça ainda na fila (client_op_id da operação `part_request`). */
+  part_op_id?: string | null;
+}
+
+export async function insertPhotoRow(db: DB, photo: Omit<PendingPhoto, "attempts" | "last_error">): Promise<void> {
+  await db.runAsync(
+    `INSERT INTO photos (id, ticket_id, file_uri, filename, mime_type, created_at, form_id, field_id, part_op_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    photo.id,
+    photo.ticket_id,
+    photo.file_uri,
+    photo.filename,
+    photo.mime_type,
+    photo.created_at,
+    photo.form_id,
+    photo.field_id,
+    photo.part_op_id ?? null,
+  );
 }
 
 export async function insertPhoto(photo: Omit<PendingPhoto, "attempts" | "last_error">): Promise<void> {
-  await transaction(async (db) => {
-    await db.runAsync(
-      `INSERT INTO photos (id, ticket_id, file_uri, filename, mime_type, created_at, form_id, field_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      photo.id,
-      photo.ticket_id,
-      photo.file_uri,
-      photo.filename,
-      photo.mime_type,
-      photo.created_at,
-      photo.form_id,
-      photo.field_id,
-    );
-  });
+  await transaction((db) => insertPhotoRow(db, photo));
+}
+
+/** Pedidos de peça com foto ainda por subir: a operação espera as fotos para levar os ids. */
+export async function partOpsWithPendingPhotos(db?: DB): Promise<Set<string>> {
+  const conn = db ?? (await getDb());
+  const rows = await conn.getAllAsync<{ part_op_id: string }>(
+    "SELECT DISTINCT part_op_id FROM photos WHERE part_op_id IS NOT NULL",
+  );
+  return new Set(rows.map((r) => r.part_op_id));
+}
+
+/** Foto do pedido enviada: o id do anexo entra no payload da operação ainda na fila. */
+export async function addPartAttachment(db: DB, clientOpId: string, attachmentId: UUID): Promise<void> {
+  const row = await db.getFirstAsync<{ payload: string }>("SELECT payload FROM outbox WHERE client_op_id = ?", clientOpId);
+  if (!row) return;
+  const payload = JSON.parse(row.payload) as { attachment_ids?: UUID[] };
+  const ids = payload.attachment_ids ?? [];
+  if (ids.includes(attachmentId)) return;
+  await db.runAsync(
+    "UPDATE outbox SET payload = ? WHERE client_op_id = ?",
+    JSON.stringify({ ...payload, attachment_ids: [...ids, attachmentId] }),
+    clientOpId,
+  );
 }
 
 export async function listPhotos(ticketId?: UUID): Promise<PendingPhoto[]> {

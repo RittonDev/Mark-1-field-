@@ -4,6 +4,7 @@
 import type {
   Comment,
   FormAnswer,
+  PartRequest,
   ISODate,
   TicketDetail,
   TicketTransitionPayload,
@@ -54,13 +55,28 @@ export interface UnproductivePayload {
   longitude?: number | null;
 }
 
+/**
+ * Pedido de peça em campo (POST /tickets/{id}/part-requests ou operação `part_request` do sync).
+ * As fotos sobem antes como anexo comum e entram aqui pelos ids.
+ */
+export interface PartRequestPayload {
+  description: string;
+  quantity: number;
+  unit?: string | null;
+  note?: string | null;
+  attachment_ids?: UUID[];
+  /** Id gerado no aparelho: reenviar o mesmo pedido não duplica (client_op_id). */
+  client_id?: string | null;
+}
+
 export type SyncOperation =
   | { type: "transition"; payload: TicketTransitionPayload }
   | { type: "comment"; payload: CommentCreatePayload }
   | { type: "worklog"; payload: WorklogCreatePayload }
   | { type: "update"; payload: TicketUpdatePayload }
   | { type: "form_answers"; payload: FormAnswersPayload }
-  | { type: "unproductive"; payload: UnproductivePayload };
+  | { type: "unproductive"; payload: UnproductivePayload }
+  | { type: "part_request"; payload: PartRequestPayload };
 
 export type SyncOpType = SyncOperation["type"];
 
@@ -98,3 +114,6 @@ export type OutboxOp = SyncOperation & {
 
 /** OS como o app exibe: estado do servidor + operações ainda não enviadas. */
 export type LocalTicket = TicketDetail & { pending_ops: number };
+
+/** Pedido de peça como o app exibe: `pending` = ainda na fila do aparelho (id = client_op_id). */
+export type LocalPartRequest = PartRequest & { pending?: boolean };

@@ -17,6 +17,7 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.config import settings
 from app.core.enums import (
+    AuthorizationStatus,
     FormStatus,
     TicketEventType,
     TicketPriority,
@@ -24,6 +25,7 @@ from app.core.enums import (
     UserRole,
     ViolationScope,
 )
+from app.core.security import create_download_token
 from app.db.base import utcnow
 from app.models import (
     Asset,
@@ -42,11 +44,16 @@ from app.models import (
     User,
     ViolationReason,
 )
+from app.schemas.field import FieldRules
+from app.schemas.part_request import PartRequestAttachment
 from app.schemas.ticket import (
     CommentCreate,
+    RecurrenceItem,
+    TicketAuthorizationIn,
     TicketCreate,
     TicketDetail,
     TicketFilters,
+    TicketRecurrence,
     TicketTransition,
     TicketUnproductive,
     TicketUpdate,
@@ -54,6 +61,7 @@ from app.schemas.ticket import (
     WorklogCreate,
 )
 from app.services import client_report, durations, schedule, sla, storage
+from app.services import field as field_rules
 from app.services.errors import NotFound, PermissionDenied, VersionConflict, WorkflowError
 from app.services.realtime import queue_event
 from app.services.workflow import (
@@ -151,9 +159,23 @@ def to_detail(ticket: Ticket, user: User) -> TicketDetail:
     detail.can_assign = can_assign(user, ticket)
     if not user.is_staff:
         detail.expenses = []  # custo é interno
+        detail.legacy = None  # dados de origem da migração: só a equipe
+        detail.part_requests = []  # pedido de peça é conversa interna com o técnico
+    else:
+        for request in detail.part_requests:
+            request.attachments = [
+                PartRequestAttachment(id=att_id, url=attachment_url(att_id, user))
+                for att_id in request.attachment_ids
+            ]
     if user.can_manage_tickets:
         detail.report_link = client_report.link_out(ticket)
     return detail
+
+
+def attachment_url(attachment_id: uuid.UUID, user: User) -> str:
+    """Link assinado de download de um anexo (válido por pouco tempo, para quem pediu)."""
+    token = create_download_token(str(attachment_id), str(user.id))
+    return f"{settings.API_PREFIX}/attachments/{attachment_id}/download?token={token}"
 
 
 # --------------------------------------------------------------------------- carga
@@ -596,7 +618,19 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
         allow=data.allow_conflict,
     )
 
+    # Autorização do cliente: com a regra ligada, a OS nasce aguardando (a gestão pode já
+    # registrar a autorização na abertura, na correria do atendimento).
+    rules = await field_rules.rules(db)
+    if data.authorization is not None and not actor.can_manage_tickets:
+        raise PermissionDenied("Só a gestão registra a autorização do cliente")
+    authorization_status = (
+        AuthorizationStatus.PENDING
+        if rules.require_authorization
+        else AuthorizationStatus.NOT_REQUIRED
+    )
+
     ticket = Ticket(
+        authorization_status=authorization_status,
         title=data.title.strip(),
         description=data.description,
         type=data.type,
@@ -631,6 +665,9 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
     sla.set_due_dates(
         ticket, base=now, response_minutes=response_min, resolution_minutes=resolution_min
     )
+    if data.authorization is not None:
+        _apply_authorization(ticket, data.authorization, actor, now)
+    await field_rules.recompute_arrival_due(db, ticket, rules)
     db.add(ticket)
     await db.flush()  # gera id e número
 
@@ -643,6 +680,10 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
         data={"priority": priority.value, "source": data.source.value},
         now=now,
     )
+    if data.authorization is not None:
+        _record_authorization_event(
+            db, ticket, actor, authorization_status, data.authorization, now=now
+        )
     queue_event(db, "created", ticket, actor, {"title": ticket.title})
 
     if data.assignee_id is not None and not is_requester:
@@ -733,6 +774,9 @@ async def update_ticket(
             response_minutes=response_min,
             resolution_minutes=resolution_min,
         )
+    # Trocou o local antes da chegada: o prazo segue a nova cidade (capital ou interior).
+    if "location_id" in changes and ticket.arrived_at is None:
+        await field_rules.recompute_arrival_due(db, ticket, await field_rules.rules(db))
 
     now = utcnow()
     if changes.keys() & {"scheduled_start", "scheduled_end", "estimated_minutes"}:
@@ -794,6 +838,158 @@ def _ensure_forms_and_signature(ticket: Ticket) -> None:
         raise WorkflowError("Colete a assinatura do responsável no local antes de concluir a OS")
 
 
+# --------------------------------------------------------------------------- autorização do cliente
+
+AUTHORIZATION_BLOCKED = "Aguardando autorização do cliente para a visita"
+_BLOCKED_AUTH = (AuthorizationStatus.PENDING, AuthorizationStatus.DENIED)
+
+
+def _is_field_visit(ticket: Ticket, to: TicketStatus, actor: User) -> bool:
+    """Ir ao local é visita (cobrada). Atendimento remoto do analista não é visita."""
+    if to == S.EN_ROUTE:
+        return True
+    if to != S.IN_PROGRESS:
+        return False
+    if actor.role == UserRole.TECHNICIAN:
+        return True
+    return ticket.assignee is not None and ticket.assignee.role == UserRole.TECHNICIAN
+
+
+def _ensure_visit_authorized(
+    ticket: Ticket, to: TicketStatus, actor: User, rules: FieldRules
+) -> None:
+    """Com a regra ligada, o técnico só sai (ou começa na loja) com a autorização do cliente."""
+    if (
+        rules.require_authorization
+        and ticket.authorization_status in _BLOCKED_AUTH
+        and ticket.status != to
+        and _is_field_visit(ticket, to, actor)
+    ):
+        raise WorkflowError(AUTHORIZATION_BLOCKED)
+
+
+def _apply_authorization(
+    ticket: Ticket, data: TicketAuthorizationIn, actor: User, now: datetime
+) -> None:
+    new = AuthorizationStatus(data.status)
+    if new == AuthorizationStatus.AUTHORIZED:
+        # Corrigir quem autorizou não reinicia o relógio de chegada.
+        if (
+            ticket.authorization_status != AuthorizationStatus.AUTHORIZED
+            or not ticket.authorized_at
+        ):
+            ticket.authorized_at = now
+    else:
+        ticket.authorized_at = None
+    ticket.authorization_status = new
+    if new == AuthorizationStatus.PENDING:
+        ticket.authorized_by_name = None
+        ticket.authorization_channel = None
+        ticket.authorization_ref = None
+        ticket.authorized_by_id = None
+        return
+    ticket.authorized_by_name = " ".join((data.by_name or "").split()) or ticket.authorized_by_name
+    if data.channel is not None:
+        ticket.authorization_channel = data.channel.value
+    if data.reference is not None:
+        ticket.authorization_ref = data.reference.strip() or None
+    ticket.authorized_by_id = actor.id
+
+
+def _record_authorization_event(
+    db: AsyncSession,
+    ticket: Ticket,
+    actor: User,
+    previous: AuthorizationStatus,
+    data: TicketAuthorizationIn,
+    *,
+    now: datetime,
+) -> None:
+    payload = {
+        "status": ticket.authorization_status.value,
+        "by_name": ticket.authorized_by_name,
+        "channel": ticket.authorization_channel,
+        "reference": ticket.authorization_ref,
+    }
+    record_event(
+        db,
+        ticket,
+        actor,
+        TicketEventType.AUTHORIZATION_RECORDED,
+        from_value=previous.value,
+        to_value=ticket.authorization_status.value,
+        note=data.note,
+        data=payload,
+        now=now,
+    )
+    queue_event(db, "authorization", ticket, actor, payload, internal=True)
+
+
+async def record_authorization(
+    db: AsyncSession, ticket: Ticket, data: TicketAuthorizationIn, actor: User
+) -> Ticket:
+    """Registra a autorização do cliente (ou a recusa) e liga o relógio de chegada."""
+    if not actor.can_manage_tickets:
+        raise PermissionDenied("Só a gestão registra a autorização do cliente")
+    if ticket.status in FINAL:
+        raise WorkflowError("OS encerrada não recebe autorização")
+    now = utcnow()
+    previous = ticket.authorization_status
+    _apply_authorization(ticket, data, actor, now)
+    await field_rules.recompute_arrival_due(db, ticket, await field_rules.rules(db))
+    _record_authorization_event(db, ticket, actor, previous, data, now=now)
+    return ticket
+
+
+# --------------------------------------------------------------------------- reincidência
+
+RECURRENCE_WINDOW = timedelta(days=30)
+
+
+async def recurrence_counts(
+    db: AsyncSession, tickets: list[Ticket], now: datetime | None = None
+) -> dict[uuid.UUID, int]:
+    """Outras OS no mesmo local nos últimos 30 dias, para uma página inteira (uma consulta)."""
+    since = (now or utcnow()) - RECURRENCE_WINDOW
+    location_ids = {t.location_id for t in tickets if t.location_id is not None}
+    if not location_ids:
+        return {}
+    rows = await db.execute(
+        select(Ticket.location_id, func.count())
+        .where(Ticket.location_id.in_(location_ids), Ticket.created_at >= since)
+        .group_by(Ticket.location_id)
+    )
+    per_location: dict[uuid.UUID, int] = {loc: n for loc, n in rows.all()}
+    return {
+        t.id: max(0, per_location.get(t.location_id, 0) - (1 if t.created_at >= since else 0))
+        for t in tickets
+        if t.location_id is not None
+    }
+
+
+async def recurrence_for(
+    db: AsyncSession, ticket: Ticket, now: datetime | None = None
+) -> TicketRecurrence:
+    since = (now or utcnow()) - RECURRENCE_WINDOW
+    if ticket.location_id is None:
+        return TicketRecurrence(count_30d=0, previous=[])
+    same_place = (
+        Ticket.location_id == ticket.location_id,
+        Ticket.id != ticket.id,
+        Ticket.created_at >= since,
+    )
+    count = await db.scalar(select(func.count()).where(*same_place)) or 0
+    rows = await db.execute(
+        select(Ticket.id, Ticket.number, Ticket.title, Ticket.status, Ticket.created_at)
+        .where(*same_place)
+        .order_by(Ticket.created_at.desc())
+        .limit(5)
+    )
+    return TicketRecurrence(
+        count_30d=count, previous=[RecurrenceItem.model_validate(r) for r in rows.all()]
+    )
+
+
 async def transition_ticket(
     db: AsyncSession, ticket: Ticket, payload: TicketTransition, actor: User
 ) -> Ticket:
@@ -811,6 +1007,8 @@ async def transition_ticket(
         to_status=to,
     ):
         raise PermissionDenied("Você não pode mudar o status desta OS")
+    rules = await field_rules.rules(db)
+    _ensure_visit_authorized(ticket, to, actor, rules)
 
     if payload.scheduled_start is not None:
         ticket.scheduled_start = payload.scheduled_start
@@ -862,6 +1060,8 @@ async def transition_ticket(
         data["scheduled_start"] = ticket.scheduled_start.isoformat()
     if ticket.status != to:
         _change_status(db, ticket, to, actor, now=now, note=payload.note, data=data)
+        if to == S.IN_PROGRESS:
+            field_rules.on_arrival(ticket, rules, now)  # primeira chegada: conta o tempo na loja
     if payload.scheduled_start or payload.scheduled_end or auto_assign:
         await schedule.ensure_no_conflict(db, ticket, actor, payload.allow_conflict)
     return ticket

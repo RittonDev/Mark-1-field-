@@ -10,14 +10,22 @@ import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canManageTickets } from "@/lib/constants";
 import { downloadCsv } from "@/lib/download";
-import { formatMoney } from "@/lib/format";
+import { formatMinutes, formatMoney } from "@/lib/format";
 
 interface CountRef {
   id: string | null;
   name: string;
   count: number;
 }
-interface Numbers {
+// Prazos de campo (chegada em até 4h nas capitais; até 4h de técnico na loja).
+interface FieldNumbers {
+  arrivals?: number;
+  arrivals_on_time?: number;
+  arrival_on_time_pct?: number | null;
+  avg_arrival_minutes?: number | null;
+  avg_onsite_minutes?: number | null;
+}
+interface Numbers extends FieldNumbers {
   opened: number;
   resolved: number;
   cancelled: number;
@@ -26,7 +34,7 @@ interface Numbers {
   backlog_end: number;
   resolved_in_sla: number;
 }
-interface Daily {
+interface Daily extends FieldNumbers {
   date: string;
   closed: boolean;
   numbers: Numbers;
@@ -99,6 +107,38 @@ function Tiles({ n, prev, prevLabel }: { n: Numbers; prev: Numbers; prevLabel: s
   );
 }
 
+/** Chegada no prazo e tempo na loja: a promessa do chamado, medida no período. */
+function FieldTiles({ n, data }: { n: Numbers; data: FieldNumbers }) {
+  const arrivals = n.arrivals ?? data.arrivals;
+  if (arrivals === undefined) return null;
+  const onTime = n.arrivals_on_time ?? data.arrivals_on_time ?? 0;
+  const pct = n.arrival_on_time_pct ?? data.arrival_on_time_pct ?? (arrivals ? (onTime / arrivals) * 100 : null);
+  const avgArrival = n.avg_arrival_minutes ?? data.avg_arrival_minutes ?? null;
+  const avgOnsite = n.avg_onsite_minutes ?? data.avg_onsite_minutes ?? null;
+  return (
+    <div className="grid gap-3 sm:grid-cols-3">
+      <StatTile
+        label="Chegada no prazo"
+        value={pct ?? 0}
+        display={pct === null ? "—" : `${Math.round(pct)}%`}
+        hint={arrivals ? `${onTime} de ${arrivals} chegada(s) dentro do prazo` : "Nenhuma chegada no período"}
+      />
+      <StatTile
+        label="Tempo médio até chegar"
+        value={avgArrival ?? 0}
+        display={avgArrival === null ? "—" : formatMinutes(Math.round(avgArrival))}
+        hint="Da solicitação (ou autorização) à chegada"
+      />
+      <StatTile
+        label="Tempo médio na loja"
+        value={avgOnsite ?? 0}
+        display={avgOnsite === null ? "—" : formatMinutes(Math.round(avgOnsite))}
+        hint="Por visita, contado da chegada"
+      />
+    </div>
+  );
+}
+
 function Panels({ data, period }: { data: Daily | Monthly; period: string }) {
   return (
     <div className="grid gap-4 lg:grid-cols-3">
@@ -160,6 +200,7 @@ function DailyView() {
         </div>
       </div>
       <Tiles n={data.numbers} prev={data.previous} prevLabel="vs dia anterior" />
+      <FieldTiles n={data.numbers} data={data} />
       <TopCustomer top={data.top_customer} period="do dia" />
       <Panels data={data} period="no dia" />
     </div>
@@ -209,6 +250,7 @@ function MonthlyView() {
         </div>
       </div>
       <Tiles n={data.numbers} prev={data.previous} prevLabel="vs mês anterior" />
+      <FieldTiles n={data.numbers} data={data} />
       <div className="grid gap-3 sm:grid-cols-3">
         <TopCustomer top={data.top_customer} period="do mês" />
         <StatTile label="Custos extras no mês" value={data.expenses_total} display={formatMoney(data.expenses_total)} />

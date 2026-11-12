@@ -5,6 +5,7 @@ import { FolderTree, Plus, Save } from "lucide-react";
 import { useMemo, useState } from "react";
 import { PriorityBadge, StatusBadge } from "@/components/badges";
 import { CompanyProfileCard } from "@/components/CompanyProfileCard";
+import { FieldRulesCard } from "@/components/FieldRulesCard";
 import { useToast } from "@/components/Toaster";
 import { UnproductiveReasonsCard } from "@/components/UnproductiveReasonsCard";
 import { ViolationReasonsCard } from "@/components/ViolationReasonsCard";
@@ -214,6 +215,7 @@ export default function SettingsPage() {
 
       <div className="flex flex-col gap-4">
         <CompanyProfileCard />
+        <FieldRulesCard />
 
         <Card>
           <CardHeader

@@ -16,6 +16,7 @@ import { TicketCard, TimelineRow } from "../components/TicketCard";
 import { EmptyState } from "../components/ui";
 import { useLiveQuery, useNow } from "../lib/changes";
 import { listNotices, listTickets } from "../lib/db";
+import { arrivalUrgency } from "../lib/field";
 import { formatDay, initials } from "../lib/format";
 import { buildLists } from "../lib/lists";
 import { useSession } from "../lib/session";
@@ -69,7 +70,13 @@ export default function MyTicketsScreen() {
   // A aba Agenda é o calendário (mês/semana); as outras são listas.
   const data = tab === "today" ? lists.today : tab === "done" ? lists.done : [];
   const today = new Date(now);
-  const sectionTitle = tab === "today" ? "Agenda de hoje" : tab === "done" ? "Concluídas nos últimos 7 dias" : "Agenda";
+  const sectionTitle = tab === "done" ? "Concluídas nos últimos 7 dias" : "Agenda";
+  // Resumo do dia; a lista já vem por urgência (chegada atrasada, em risco, depois a agenda).
+  const summary = {
+    total: lists.today.length,
+    working: lists.today.filter((t) => t.status === "in_progress").length,
+    late: lists.today.filter((t) => arrivalUrgency(t, now) === 0).length,
+  };
 
   const header = (
     <View style={styles.header}>
@@ -101,10 +108,26 @@ export default function MyTicketsScreen() {
           </Text>
         </Pressable>
       ) : null}
-      <View style={styles.sectionRow}>
-        <Text style={styles.sectionTitle}>{sectionTitle}</Text>
-        {tab !== "agenda" ? <Text style={styles.sectionCount}>{data.length}</Text> : null}
-      </View>
+      {tab === "today" ? (
+        <View style={styles.sectionRow} accessibilityRole="summary">
+          <Text style={styles.summary}>
+            Hoje: <Text style={styles.summaryStrong}>{summary.total === 1 ? "1 OS" : `${summary.total} OS`}</Text>
+            {" · "}
+            <Text style={styles.summaryStrong}>{summary.working} em atendimento</Text>
+            {summary.late ? (
+              <Text style={[styles.summaryStrong, { color: c.danger }]}>
+                {" · "}
+                {summary.late === 1 ? "1 chegada atrasada" : `${summary.late} chegadas atrasadas`}
+              </Text>
+            ) : null}
+          </Text>
+        </View>
+      ) : (
+        <View style={styles.sectionRow}>
+          <Text style={styles.sectionTitle}>{sectionTitle}</Text>
+          {tab !== "agenda" ? <Text style={styles.sectionCount}>{data.length}</Text> : null}
+        </View>
+      )}
     </View>
   );
 
@@ -218,6 +241,8 @@ const makeStyles = (c: Palette) =>
     sectionRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 4 },
     sectionTitle: { fontSize: 12, fontWeight: "700", color: c.inkMuted, textTransform: "uppercase", letterSpacing: 0.6 },
     sectionCount: { fontSize: 12, fontWeight: "700", color: c.inkSubtle, fontVariant: ["tabular-nums"] },
+    summary: { fontSize: 14, color: c.inkMuted, fontVariant: ["tabular-nums"] },
+    summaryStrong: { fontWeight: "700", color: c.ink },
     item: { paddingHorizontal: 16 },
     calendar: { paddingHorizontal: 16 },
     footerSection: { paddingHorizontal: 16, paddingTop: 16, gap: 8 },

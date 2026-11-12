@@ -311,12 +311,26 @@ export default function PublicReportPage() {
             <section className="border-t border-line px-6 py-6 sm:px-8">
               <SectionHead
                 aside={
-                  report.check_in_gps ? (
-                    <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400">
-                      <BadgeCheck className="size-3.5" />
-                      Presença confirmada por GPS
-                    </span>
-                  ) : null
+                  <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    {report.arrival_minutes != null ? (
+                      <span
+                        className={clsx(
+                          "inline-flex items-center gap-1",
+                          report.arrival_on_time === false ? "text-amber-700 dark:text-amber-400" : "text-emerald-700 dark:text-emerald-400",
+                        )}
+                      >
+                        <Clock3 className="size-3.5" />
+                        Técnico chegou em {formatMinutes(report.arrival_minutes)}
+                        {report.arrival_on_time ? " · dentro do prazo" : report.arrival_on_time === false ? " · fora do prazo" : ""}
+                      </span>
+                    ) : null}
+                    {report.check_in_gps ? (
+                      <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400">
+                        <BadgeCheck className="size-3.5" />
+                        Presença confirmada por GPS
+                      </span>
+                    ) : null}
+                  </span>
                 }
               >
                 Informações do atendimento

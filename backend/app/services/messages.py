@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.enums import TicketEventType
+from app.core.enums import AuthorizationStatus, TicketEventType
 from app.db.base import utcnow
 from app.models import LocationPing, SystemSetting, TechnicianShift, Ticket, TicketEvent, User
 from app.schemas.ticket import format_ticket_code
@@ -55,6 +55,8 @@ VARIABLES: dict[str, str] = {
     "projeto": "Projeto da OS",
     "analista": "Analista responsável pela OS (sem responsável: quem copia o texto)",
     "link_relatorio": "Link do relatório para o cliente (OS concluída)",
+    "prazo_chegada": "Prazo para o técnico chegar (4h nas capitais), ex.: 14:30",
+    "autorizado_por": "Quem autorizou a visita pelo cliente",
 }
 
 DEFAULT_TEMPLATES: list[dict[str, str]] = [
@@ -62,7 +64,7 @@ DEFAULT_TEMPLATES: list[dict[str, str]] = [
         "key": "deslocamento",
         "name": "Deslocamento",
         "body": "*{os}* · {cliente}\nTécnico {tecnico} em deslocamento para {local} ({cidade}). "
-        "Chegada prevista às {chegada_prevista}.",
+        "Chegada prevista às {chegada_prevista} (prazo {prazo_chegada}).",
     },
     {
         "key": "chegada",
@@ -246,6 +248,17 @@ async def context(db: AsyncSession, ticket: Ticket, actor: User) -> dict[str, st
         "analista": ticket.owner.name if ticket.owner else actor.name,
         "link_relatorio": await client_report.url_if_finished(db, ticket)
         or "(disponível quando a OS for concluída)",
+        "prazo_chegada": (
+            _local(ticket.arrival_due_at).strftime("%H:%M")
+            if ticket.arrival_due_at
+            else "(sem prazo)"
+        ),
+        "autorizado_por": ticket.authorized_by_name
+        or (
+            "(não exigida)"
+            if ticket.authorization_status == AuthorizationStatus.NOT_REQUIRED
+            else "(aguardando autorização)"
+        ),
     }
     return {k: str(v) for k, v in values.items()}
 

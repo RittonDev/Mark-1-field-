@@ -12,7 +12,10 @@ import { PressableScale, useSwapMotion } from "../../components/motion";
 import { DetailSkeleton } from "../../components/Skeleton";
 import { Text } from "../../components/Text";
 import { DurationCompare } from "../../components/ticket/DurationCompare";
+import { ArrivalResult, AuthorizationNotice, FieldClockLine, OnsiteTimer } from "../../components/ticket/FieldClock";
 import { FormsCard } from "../../components/ticket/FormsCard";
+import { PartRequestSheet, PartRequestsCard } from "../../components/ticket/PartRequests";
+import { QuickActions, RecurrenceCard } from "../../components/ticket/QuickActions";
 import { InfoPanel } from "../../components/ticket/InfoPanel";
 import { PhotosPanel } from "../../components/ticket/PhotosPanel";
 import { WorklogsPanel } from "../../components/ticket/WorklogsPanel";
@@ -23,9 +26,11 @@ import { useLiveQuery, useNow } from "../../lib/changes";
 import { TRANSITION_ACTION } from "../../lib/constants";
 import { getTicket, listSignatures } from "../../lib/db";
 import { addressOf } from "../../lib/device-actions";
+import { authorizationBlock } from "../../lib/field";
 import { concludeBlock } from "../../lib/forms";
 import { formatDateTime, formatRelative, formatShort } from "../../lib/format";
 import { haptic } from "../../lib/haptics";
+import { isDone } from "../../lib/lists";
 import { UNPRODUCTIVE_FROM } from "../../lib/ops";
 import { useSession } from "../../lib/session";
 import { isOnline, requestSync, useSyncStatus } from "../../lib/sync";
@@ -78,6 +83,7 @@ export default function TicketScreen() {
   const [target, setTarget] = useState<TicketStatus | null>(null);
   const [unproductiveOpen, setUnproductiveOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [partOpen, setPartOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
   if (!user) return null;
@@ -101,11 +107,14 @@ export default function TicketScreen() {
   // O técnico só trabalha nas OS atribuídas a ele pelo analista (não há "assumir").
   const isMine = current.assignee?.id === user.id;
   const conclude = concludeBlock(current, (pendingSignatures ?? []).length > 0);
-  const blockedFor = (to: TicketStatus) => ((to === "resolved" || to === "closed") && conclude ? conclude : null);
+  // Concluir espera formulários/assinatura; deslocamento e check-in esperam a autorização do cliente.
+  const blockedFor = (to: TicketStatus) =>
+    ((to === "resolved" || to === "closed") && conclude ? conclude : null) ?? authorizationBlock(current, to);
+  const canRequestPart = isMine && !isDone(current.status) && current.status !== "cancelled";
   // Visita improdutiva: só o responsável, com a OS atribuída, agendada, em deslocamento ou em atendimento.
   const canUnproductive = isMine && UNPRODUCTIVE_FROM.includes(current.status);
   const others = actions.filter((to) => to !== primary);
-  const showBar = isMine && (actions.length > 0 || canUnproductive);
+  const showBar = isMine && (actions.length > 0 || canUnproductive || canRequestPart);
   const primaryBlocked = primary ? blockedFor(primary) : null;
   const site = current.location ? [current.location.code, current.location.name].filter(Boolean).join(" · ") : null;
   const client = [current.customer?.name, site].filter(Boolean).join(" · ");
@@ -136,6 +145,9 @@ export default function TicketScreen() {
       right: <StatusBadge status={to} />,
       onPress: () => open(to),
     })),
+    ...(canRequestPart
+      ? [{ key: "part", label: "Pedir peça", icon: "package" as IconName, tone: "default" as const, onPress: () => setPartOpen(true) }]
+      : []),
     ...(canUnproductive
       ? [
           {
@@ -200,13 +212,18 @@ export default function TicketScreen() {
                   ) : null}
                 </View>
               ) : null}
+              <QuickActions ticket={current} />
               <View style={styles.badges}>
                 <PriorityBadge priority={current.priority} />
                 <SlaBadge ticket={current} now={now} />
                 <ProjectBadge project={current.project} />
               </View>
+              {/* Promessa de campo: autorização do cliente, prazo de chegada e resultado do check-in. */}
+              <AuthorizationNotice ticket={current} />
+              {current.arrived_at ? <ArrivalResult ticket={current} /> : <FieldClockLine ticket={current} now={now} size={14} />}
               <View style={styles.divider} />
               <FieldStepper ticket={current} />
+              <OnsiteTimer ticket={current} now={now} />
               {current.work_started_at ? <DurationCompare ticket={current} now={now} /> : null}
               {current.resolution_due_at && !current.resolved_at && !current.sla_paused_at ? (
                 <Text style={[styles.meta, styles.tabular]}>Prazo de solução {formatRelative(current.resolution_due_at, now)}</Text>
@@ -230,9 +247,12 @@ export default function TicketScreen() {
             </Card>
           </Animated.View>
 
+          <RecurrenceCard ticket={current} />
+
           {isMine ? (
-            <Animated.View entering={enter(1)}>
+            <Animated.View entering={enter(1)} style={{ gap: 12 }}>
               <FormsCard ticket={current} />
+              <PartRequestsCard ticket={current} canRequest={canRequestPart} onRequest={() => setPartOpen(true)} />
             </Animated.View>
           ) : (
             <Card>
@@ -296,6 +316,7 @@ export default function TicketScreen() {
       {sheetOpen ? <ActionSheet title={`Ações · ${current.code}`} actions={sheetActions} onClose={() => setSheetOpen(false)} /> : null}
       {target ? <TransitionModal key={target} ticket={current} to={target} onClose={() => setTarget(null)} /> : null}
       {unproductiveOpen ? <UnproductiveModal ticket={current} onClose={() => setUnproductiveOpen(false)} /> : null}
+      {partOpen ? <PartRequestSheet ticket={current} onClose={() => setPartOpen(false)} /> : null}
     </View>
   );
 }

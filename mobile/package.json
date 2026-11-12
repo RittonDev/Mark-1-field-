@@ -20,6 +20,7 @@
     "@react-native-community/netinfo": "12.0.1",
     "expo": "~58.0.24",
     "expo-battery": "~58.0.4",
+    "expo-clipboard": "~58.0.4",
     "expo-constants": "~58.0.16",
     "expo-crypto": "~58.0.8",
     "expo-device": "~58.0.5",

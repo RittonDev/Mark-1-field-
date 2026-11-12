@@ -13,7 +13,7 @@ import { QuoteEditor } from "./QuotesCard";
 
 const STATUS: Record<PartRequestStatus, { label: string; className: string }> = {
   open: { label: "Aguardando orçamento", className: "bg-amber-50 text-amber-800 ring-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-500/25" },
-  quoted: { label: "Orçamento enviado", className: "bg-sky-50 text-sky-800 ring-sky-200 dark:bg-sky-500/10 dark:text-sky-300 dark:ring-sky-500/25" },
+  quoted: { label: "Orçamento criado", className: "bg-sky-50 text-sky-800 ring-sky-200 dark:bg-sky-500/10 dark:text-sky-300 dark:ring-sky-500/25" },
   approved: { label: "Aprovada: pode instalar", className: "bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-500/25" },
   rejected: { label: "Recusada", className: "bg-red-50 text-red-700 ring-red-200 dark:bg-red-500/10 dark:text-red-300 dark:ring-red-500/25" },
   cancelled: { label: "Cancelada", className: "bg-surface-2 text-ink-muted ring-line" },

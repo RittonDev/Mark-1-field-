@@ -65,6 +65,7 @@ class TicketSource(StrEnum):
     PHONE = "phone"
     WHATSAPP = "whatsapp"
     MONITORING = "monitoring"
+    PORTAL = "portal"  # portal do cliente (solicitação aberta pelo próprio cliente)
 
 
 class AssetType(StrEnum):
@@ -103,6 +104,11 @@ class TicketEventType(StrEnum):
     QUOTE_SENT = "quote_sent"
     QUOTE_APPROVED = "quote_approved"
     QUOTE_REJECTED = "quote_rejected"
+    # Autorização do cliente para a visita (cada chamado é cobrado).
+    AUTHORIZATION_RECORDED = "authorization_recorded"
+    # Pedido de peça do técnico (peça só entra com orçamento aprovado).
+    PART_REQUESTED = "part_requested"
+    PART_REQUEST_UPDATED = "part_request_updated"
 
 
 class DevicePlatform(StrEnum):
@@ -199,4 +205,34 @@ class RepairStatus(StrEnum):
     BACK_IN_STOCK = "back_in_stock"  # de volta na Maxx, pronto para entregar
     DELIVERED = "delivered"  # entregue ao cliente (fim)
     UNREPAIRABLE = "unrepairable"  # sem conserto (devolver ou descartar)
+    CANCELLED = "cancelled"
+
+
+class AuthorizationStatus(StrEnum):
+    """Autorização do cliente para a visita: o técnico só sai com ela (quando a regra exige)."""
+
+    NOT_REQUIRED = "not_required"  # regra desligada ou OS anterior à regra
+    PENDING = "pending"  # aguardando o cliente autorizar
+    AUTHORIZED = "authorized"
+    DENIED = "denied"
+
+
+class AuthorizationChannel(StrEnum):
+    """Por onde o cliente autorizou."""
+
+    WHATSAPP = "whatsapp"
+    EMAIL = "email"
+    PHONE = "phone"
+    PORTAL = "portal"
+    MAXXCON = "maxxcon"  # central de suporte remoto do grupo
+    OTHER = "other"
+
+
+class PartRequestStatus(StrEnum):
+    """Pedido de peça feito pelo técnico em campo."""
+
+    OPEN = "open"  # aguardando a gestão montar o orçamento
+    QUOTED = "quoted"  # orçamento montado e ligado ao pedido
+    APPROVED = "approved"  # cliente aprovou o orçamento: pode trocar
+    REJECTED = "rejected"
     CANCELLED = "cancelled"

@@ -52,6 +52,9 @@ def _out(quote: Quote) -> QuoteOut:
     out = QuoteOut.model_validate(quote)
     if quote.signature_key:
         out.signature_url = _signature_path(quote, SIGNATURE_LINK)
+    elif quote.legacy and quote.legacy.get("signature_url"):
+        # Orçamento migrado: a assinatura continua no armazenamento do Field Control.
+        out.signature_url = quote.legacy["signature_url"]
     out.link = svc.link_out(quote)
     return out
 
@@ -238,6 +241,8 @@ async def _public_view(db: DB, quote: Quote, ticket: Ticket, base_url: str) -> P
     if quote.status == QuoteStatus.APPROVED and quote.signature_key:
         root = (settings.API_PUBLIC_URL or base_url).rstrip("/")
         signature_url = f"{root}{_signature_path(quote, PUBLIC_SIGNATURE_LINK)}"
+    elif quote.status == QuoteStatus.APPROVED and (quote.legacy or {}).get("signature_url"):
+        signature_url = (quote.legacy or {})["signature_url"]
     return PublicQuote(
         code=format_quote_code(quote.number),
         title=quote.title,

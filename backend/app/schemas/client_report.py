@@ -87,6 +87,10 @@ class PublicReport(BaseModel):
     finished_at: datetime | None = None
     closed_at: datetime | None = None
     on_site_minutes: int | None = None
+    # Prazo de chegada (4h nas capitais): quanto o técnico levou e se chegou no prazo.
+    arrival_due_at: datetime | None = None
+    arrival_minutes: int | None = None
+    arrival_on_time: bool | None = None
     check_in_gps: bool = False
     resolution_notes: str | None = None
     forms: list[PublicReportForm] = []

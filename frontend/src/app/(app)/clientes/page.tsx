@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Building2, MapPin, Plus, Search } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
+import { TagChips } from "@/components/TagChips";
 import { useToast } from "@/components/Toaster";
 import {
   Button,
@@ -162,7 +163,10 @@ export default function CustomersPage() {
             <tbody>
               {customers.data?.map((c) => (
                 <tr key={c.id} className="hover:bg-surface-2">
-                  <Td className="font-medium">{c.name}</Td>
+                  <Td>
+                    <span className="font-medium">{c.name}</span>
+                    <TagChips tags={c.tags} max={3} className="mt-1 flex" />
+                  </Td>
                   <Td className="font-mono text-xs whitespace-nowrap">{formatDocument(c.document)}</Td>
                   <Td className="text-right">
                     <Link
