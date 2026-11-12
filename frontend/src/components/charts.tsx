@@ -10,9 +10,12 @@ export function StatTile({
   previous,
   previousLabel,
   hint,
+  display,
 }: {
   label: string;
   value: number;
+  /** Texto no lugar do número (ex.: valor em R$). */
+  display?: string;
   previous?: number;
   previousLabel?: string;
   hint?: string;
@@ -22,7 +25,7 @@ export function StatTile({
   return (
     <div className="rounded-xl border border-line bg-surface px-4 py-3">
       <p className="text-xs text-ink-muted">{label}</p>
-      <p className="mt-1 text-3xl font-semibold tracking-tight text-ink tabular-nums">{value.toLocaleString("pt-BR")}</p>
+      <p className="mt-1 text-3xl font-semibold tracking-tight text-ink tabular-nums">{display ?? value.toLocaleString("pt-BR")}</p>
       {delta !== null ? (
         <p className="mt-1 inline-flex items-center gap-1 text-xs text-ink-muted tabular-nums">
           <Icon className="size-3.5" aria-hidden />
