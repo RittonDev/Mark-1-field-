@@ -841,6 +841,9 @@ export interface UnproductiveReason {
 // Orçamentos (enviados ao cliente por link para aprovar)
 export type QuoteStatus = "draft" | "sent" | "approved" | "rejected" | "expired" | "cancelled";
 
+/** Produto (material), serviço (mão de obra) ou despesa (deslocamento, pedágio...). */
+export type QuoteItemKind = "product" | "service" | "expense";
+
 export interface QuoteItem {
   description: string;
   quantity: number;
@@ -848,6 +851,23 @@ export interface QuoteItem {
   unit_price: number;
   total: number;
   catalog_item_id: UUID | null;
+  kind?: QuoteItemKind;
+}
+
+/** Link do orçamento para o cliente (fica disponível para copiar e reenviar). */
+export interface QuoteLink {
+  token: string;
+  path: string;
+  url: string;
+}
+
+export interface CompanyProfile {
+  name: string;
+  document: string | null;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+  website: string | null;
 }
 
 export interface Quote {
@@ -874,6 +894,10 @@ export interface Quote {
   updated_at: ISODate;
   signature_url: string | null;
   token?: string;
+  approver_registration?: string | null;
+  client_comment?: string | null;
+  link?: QuoteLink | null;
+  totals_by_kind?: Record<QuoteItemKind, number>;
 }
 
 export interface QuoteListRow extends Quote {
@@ -888,6 +912,7 @@ export interface QuoteCatalogItem {
   price: number;
   description: string | null;
   is_active: boolean;
+  kind?: QuoteItemKind;
 }
 
 export interface PublicQuote {
@@ -908,6 +933,22 @@ export interface PublicQuote {
   decided_at: ISODate | null;
   approver_name: string | null;
   rejection_reason: string | null;
+  ticket_number?: number;
+  company?: CompanyProfile;
+  customer_info?: { name: string; document: string | null; email: string | null; phone: string | null } | null;
+  address?: {
+    line: string | null;
+    district: string | null;
+    city: string | null;
+    state: string | null;
+    zip_code: string | null;
+    full: string;
+  } | null;
+  issued_at?: ISODate;
+  totals_by_kind?: Record<QuoteItemKind, number>;
+  approver_registration?: string | null;
+  client_comment?: string | null;
+  signature_url?: string | null;
 }
 
 // Projetos
@@ -1078,6 +1119,7 @@ export interface PublicReport {
   status: TicketStatus;
   status_label: string;
   company_name: string;
+  company?: CompanyProfile;
   customer: { name: string; document: string | null } | null;
   location: { name: string; code: string | null; address: string | null; city: string | null; state: string | null } | null;
   service_address: string | null;

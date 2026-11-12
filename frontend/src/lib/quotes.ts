@@ -1,4 +1,4 @@
-import type { QuoteStatus } from "./types";
+import type { QuoteItem, QuoteItemKind, QuoteStatus } from "./types";
 
 export const QUOTE_STATUS: Record<QuoteStatus, { label: string; className: string }> = {
   draft: { label: "Rascunho", className: "bg-slate-100 text-slate-700 dark:bg-slate-500/15 dark:text-slate-300" },
@@ -13,4 +13,21 @@ export const QUOTE_STATUS: Record<QuoteStatus, { label: string; className: strin
 export function quoteUrl(token: string): string {
   const base = (process.env.NEXT_PUBLIC_WEB_URL || window.location.origin).replace(/\/$/, "");
   return `${base}/orcamento/${token}`;
+}
+
+export const QUOTE_KIND: Record<QuoteItemKind, { label: string; plural: string }> = {
+  product: { label: "Produto", plural: "Produtos" },
+  service: { label: "Serviço", plural: "Serviços" },
+  expense: { label: "Despesa", plural: "Despesas" },
+};
+
+/** Soma por tipo (usa o total da API quando vier; senão calcula pelos itens). */
+export function totalsByKind(
+  items: QuoteItem[],
+  fromApi?: Record<QuoteItemKind, number> | null,
+): Record<QuoteItemKind, number> {
+  if (fromApi) return fromApi;
+  const totals: Record<QuoteItemKind, number> = { product: 0, service: 0, expense: 0 };
+  for (const item of items) totals[item.kind ?? "product"] += item.total;
+  return totals;
 }
