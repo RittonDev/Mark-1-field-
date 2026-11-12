@@ -13,6 +13,7 @@ import { CommentsTab } from "@/components/ticket/CommentsTab";
 import { EditTicketDialog } from "@/components/ticket/EditTicketDialog";
 import { ExpensesCard } from "@/components/ticket/ExpensesCard";
 import { FormsCard } from "@/components/ticket/FormsCard";
+import { MessagesCard } from "@/components/ticket/MessagesPanel";
 import { HistoryTab } from "@/components/ticket/HistoryTab";
 import { QuotesCard } from "@/components/ticket/QuotesCard";
 import { SlaCard } from "@/components/ticket/SlaCard";
@@ -219,6 +220,8 @@ export default function TicketDetailPage() {
               </div>
             ) : null}
           </Card>
+
+          {ticket.can_assign ? <MessagesCard ticketId={ticket.id} /> : null}
 
           <FormsCard ticket={ticket} />
 

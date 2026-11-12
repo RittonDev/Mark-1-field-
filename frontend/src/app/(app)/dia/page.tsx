@@ -4,8 +4,11 @@ import { CalendarClock, ChevronLeft, ChevronRight, MapPin, Navigation } from "lu
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { Button, Card, EmptyState, ErrorBox, Input, LoadingBlock, PageHeader, Select } from "@/components/ui";
+import { MessagesButton } from "@/components/ticket/MessagesPanel";
+import { QuickEditButton } from "@/components/ticket/QuickEditButton";
 import { errorMessage } from "@/lib/api";
-import { useIsClient } from "@/lib/auth";
+import { useAuth, useIsClient } from "@/lib/auth";
+import { canManageTickets } from "@/lib/constants";
 import { formatMinutes, formatTime } from "@/lib/format";
 import { useDayActivities, useTeams } from "@/lib/queries";
 import type { Activity, ActivityState, DaySummary } from "@/lib/types";
@@ -69,7 +72,7 @@ function Delay({ minutes }: { minutes: number | null }) {
   );
 }
 
-function ActivityRow({ a, day }: { a: Activity; day: string }) {
+function ActivityRow({ a, day, manage }: { a: Activity; day: string; manage: boolean }) {
   const t = a.ticket;
   const loc = t.location;
   const ratio = a.estimated_minutes && a.actual_minutes > 0 ? a.actual_minutes / a.estimated_minutes : null;
@@ -108,10 +111,18 @@ function ActivityRow({ a, day }: { a: Activity; day: string }) {
       </td>
       <td className="px-3 py-2.5 text-sm whitespace-nowrap">{a.finished_at ? when(a.finished_at, day) : <span className="text-ink-muted">—</span>}</td>
       <td className="px-3 py-2.5">
-        <Link href={`/chamados/${t.id}`} className="group">
-          <span className="font-mono text-xs text-ink-muted">{t.code}</span>{" "}
-          <span className="text-sm font-medium text-ink group-hover:text-brand group-hover:underline">{t.title}</span>
-        </Link>
+        <div className="flex items-start gap-1">
+          <Link href={`/chamados/${t.id}`} className="group min-w-0 flex-1">
+            <span className="font-mono text-xs text-ink-muted">{t.code}</span>{" "}
+            <span className="text-sm font-medium text-ink group-hover:text-brand group-hover:underline">{t.title}</span>
+          </Link>
+          {manage ? (
+            <span className="-my-1 flex shrink-0 items-center">
+              <QuickEditButton ticketId={t.id} code={t.code} />
+              <MessagesButton ticketId={t.id} code={t.code} />
+            </span>
+          ) : null}
+        </div>
         {a.service_type_name ? <p className="text-xs text-ink-muted">{a.service_type_name}</p> : null}
       </td>
       <td className="px-3 py-2.5 text-sm">
@@ -144,6 +155,8 @@ function ActivityRow({ a, day }: { a: Activity; day: string }) {
 
 export default function DayPage() {
   const isClient = useIsClient();
+  const { user } = useAuth();
+  const manage = canManageTickets(user?.role);
   const [picked, setPicked] = useState<string | null>(null);
   // Hoje é calculado só no cliente (evita divergência de hidratação perto da meia-noite).
   const day = picked ?? (isClient ? todayString() : null);
@@ -259,7 +272,7 @@ export default function DayPage() {
                     </thead>
                     <tbody>
                       {group.items.map((a) => (
-                        <ActivityRow key={a.ticket.id} a={a} day={day} />
+                        <ActivityRow key={a.ticket.id} a={a} day={day} manage={manage} />
                       ))}
                     </tbody>
                   </table>
