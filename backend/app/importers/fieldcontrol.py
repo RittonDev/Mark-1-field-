@@ -72,6 +72,7 @@ from app.models import (
     ViolationReason,
 )
 from app.schemas.forms import FormField
+from app.schemas.records import primary_contact
 from app.services import cities, geo, technician_regions
 
 log = logging.getLogger("fieldcontrol")
@@ -853,14 +854,14 @@ class Importer:
         rows: list[dict[str, Any]] = []
         for c in iter_records(self.file("clientes.json")):
             contacts = c.get("contacts") or {}
-            emails = contacts.get("emails") or []
             phones = contacts.get("phones") or []
-            email = next((e for e in emails if e.get("primary")), emails[0] if emails else None)
             phone = next((p for p in phones if p.get("primary")), phones[0] if phones else None)
             notes = clip(c.get("notes"), 5000)
             doc = digits(c.get("documentNumber"))[:20] or None
             # Ficha completa: todos os contatos, endereço da matriz, logo e origem.
             all_contacts = contacts_of(contacts)
+            # Campo único = o contato principal (e-mail em minúsculas, como na lista).
+            email = primary_contact(all_contacts, "email")
             hq = c.get("address") or {}
             hq_parts = address_parts(hq)
             hq_coords = hq.get("coords") or {}
@@ -871,7 +872,7 @@ class Importer:
                 self.report.add("customers", "with_2plus_contacts")
             values = {
                 "name": clip(c.get("name"), 200) or "Cliente sem nome",
-                "email": clip(email.get("address"), 255) if email else None,
+                "email": email["value"] if email else None,
                 "phone": fmt_phone(phone.get("countryCode"), phone.get("number"))
                 if phone
                 else None,
