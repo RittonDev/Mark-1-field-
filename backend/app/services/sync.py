@@ -119,10 +119,14 @@ async def _apply(db: AsyncSession, ticket: Ticket, op: SyncOperationIn, user: Us
     await db.flush()
 
 
-def _validation_text(exc: ValidationError) -> str:
-    return "; ".join(
-        f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}" for err in exc.errors()
-    )
+def validation_text(exc: ValidationError) -> str:
+    """Erro de validação legível para o técnico ("campo: mensagem" ou só a mensagem)."""
+    parts = []
+    for err in exc.errors():
+        msg = err["msg"].removeprefix("Value error, ")
+        loc = ".".join(str(p) for p in err["loc"])
+        parts.append(f"{loc}: {msg}" if loc else msg)
+    return "; ".join(parts)
 
 
 async def push(db: AsyncSession, user: User, request: SyncPushRequest) -> SyncPushResponse:
@@ -147,7 +151,7 @@ async def push(db: AsyncSession, user: User, request: SyncPushRequest) -> SyncPu
         except (VersionConflict, StaleDataError) as exc:
             status, error = "conflict", str(exc)
         except ValidationError as exc:
-            status, error = "rejected", _validation_text(exc)
+            status, error = "rejected", validation_text(exc)
         except NotFound as exc:
             status, error, ticket_exists = "rejected", str(exc), False
         except DomainError as exc:
