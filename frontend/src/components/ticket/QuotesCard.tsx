@@ -457,7 +457,7 @@ function ShareDialog({
   );
 }
 
-function QuoteView({ quote, onClose }: { quote: Quote; onClose: () => void }) {
+export function QuoteView({ quote, onClose }: { quote: Quote; onClose: () => void }) {
   return (
     <Dialog open size="lg" onClose={onClose} title={`${quote.code} · ${quote.title}`} description={QUOTE_STATUS[quote.status].label}>
       <div className="flex flex-col gap-4 text-sm">

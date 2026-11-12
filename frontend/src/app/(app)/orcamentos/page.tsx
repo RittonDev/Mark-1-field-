@@ -2,9 +2,10 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { FileText, Pencil, Plus } from "lucide-react";
+import { Eye, FileText, Pencil, Plus } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { QuoteView } from "@/components/ticket/QuotesCard";
 import { Button, Card, Checkbox, Dialog, EmptyState, ErrorBox, Field, Input, LoadingBlock, PageHeader, Select, Table, Td, Th } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -52,6 +53,7 @@ export default function QuotesPage() {
 
 function QuoteList() {
   const [status, setStatus] = useState<QuoteStatus | "">("");
+  const [opened, setOpened] = useState<QuoteListRow | null>(null);
   const quotes = useQuery({
     queryKey: ["quotes", status],
     queryFn: () => api.get<QuoteListRow[]>("/quotes", { status: status || undefined }),
@@ -94,14 +96,17 @@ function QuoteList() {
                 <Th className="text-right">Total</Th>
                 <Th className="hidden md:table-cell">Validade</Th>
                 <Th>Situação</Th>
+                <Th className="edit-col">Ver</Th>
               </tr>
             </thead>
             <tbody>
               {(quotes.data ?? []).map((q) => (
                 <tr key={q.id}>
                   <Td>
-                    <span className="block font-mono text-xs text-ink-muted">{q.code}</span>
-                    <span className="block max-w-72 truncate text-ink">{q.title}</span>
+                    <button type="button" onClick={() => setOpened(q)} className="block text-left">
+                      <span className="block font-mono text-xs text-ink-muted">{q.code}</span>
+                      <span className="block max-w-72 truncate text-ink hover:text-brand">{q.title}</span>
+                    </button>
                   </Td>
                   <Td>
                     <Link href={`/chamados/${q.ticket_id}`} className="font-mono text-xs text-brand hover:underline">
@@ -116,12 +121,24 @@ function QuoteList() {
                       {QUOTE_STATUS[q.status].label}
                     </span>
                   </Td>
+                  <Td className="edit-col">
+                    <button
+                      type="button"
+                      onClick={() => setOpened(q)}
+                      className="inline-flex size-7 items-center justify-center rounded-md border border-line bg-surface text-ink-muted transition-colors hover:border-brand hover:text-brand"
+                      aria-label={`Ver o orçamento ${q.code}`}
+                      title="Ver orçamento"
+                    >
+                      <Eye className="size-3.5" />
+                    </button>
+                  </Td>
                 </tr>
               ))}
             </tbody>
           </Table>
         )}
       </Card>
+      {opened ? <QuoteView quote={opened} onClose={() => setOpened(null)} /> : null}
     </>
   );
 }
