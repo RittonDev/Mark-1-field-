@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { Sidebar, Topbar } from "@/components/Shell";
 import { LoadingBlock } from "@/components/ui";
+import { canUseWeb } from "@/lib/access";
 import { useAuth } from "@/lib/auth";
 import { RealtimeProvider } from "@/lib/realtime";
 
@@ -13,14 +14,21 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const queryClient = useQueryClient();
   const { ready, user, logout } = useAuth();
 
+  // Sessão de técnico de campo aberta antes da separação de canais: encerra e orienta a usar o app.
+  const wrongChannel = !!user && !canUseWeb(user.role);
+
   useEffect(() => {
-    if (ready && !user) {
+    if (ready && wrongChannel) {
+      logout();
+      queryClient.clear();
+      router.replace("/login?acesso=app");
+    } else if (ready && !user) {
       queryClient.clear();
       router.replace("/login");
     }
-  }, [ready, user, router, queryClient]);
+  }, [ready, user, wrongChannel, logout, router, queryClient]);
 
-  if (!ready || !user) {
+  if (!ready || !user || wrongChannel) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <LoadingBlock label="Carregando sessão..." />

@@ -4,8 +4,9 @@ import { Headset, LogIn } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Button, ErrorBox, Field, Input } from "@/components/ui";
+import { WEB_DENIED_MESSAGE } from "@/lib/access";
 import { errorMessage } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
+import { useAuth, useIsClient } from "@/lib/auth";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -14,6 +15,11 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // Vindo de uma sessão de técnico encerrada pelo layout (?acesso=app). Derivado, sem setState em efeito.
+  const isClient = useIsClient();
+  const redirectedFromApp =
+    isClient && new URLSearchParams(window.location.search).get("acesso") === "app";
+  const shownError = error ?? (redirectedFromApp ? WEB_DENIED_MESSAGE : null);
 
   useEffect(() => {
     if (ready && user) router.replace("/dashboard");
@@ -65,12 +71,15 @@ export default function LoginPage() {
               required
             />
           </Field>
-          {error ? <ErrorBox message={error} /> : null}
+          {shownError ? <ErrorBox message={shownError} /> : null}
           <Button type="submit" variant="primary" loading={loading} className="w-full">
             {loading ? null : <LogIn className="size-4" />}
             Entrar
           </Button>
         </form>
+        <p className="mt-4 text-center text-xs text-ink-muted">
+          Acesso para analistas e gestores. Técnico de campo? Use o app MaxxChamados no celular.
+        </p>
       </div>
     </main>
   );

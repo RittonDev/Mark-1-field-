@@ -25,7 +25,8 @@ export function useAuth() {
   const isClient = useIsClient();
 
   const login = useCallback(async (email: string, password: string) => {
-    const data = await api.post<TokenResponse>("/auth/login", { email, password });
+    // O backend recusa (403) quem não usa o navegador: técnico de campo entra pelo app.
+    const data = await api.post<TokenResponse>("/auth/login", { email, password, channel: "web" });
     sessionStore.fromTokenResponse(data);
     return data.user;
   }, []);
