@@ -351,18 +351,39 @@ export async function acceptConsent() {
   await refreshMe();
 }
 
+let consentPrompted = false;
+
+/** O termo é oferecido sozinho uma vez por abertura do app (o técnico pode deixar para depois). */
+export function shouldPromptConsent(): boolean {
+  if (consentPrompted || hasConsent()) return false;
+  consentPrompted = true;
+  return true;
+}
+
+export interface LocationPermissions {
+  foreground: boolean;
+  /** "Sempre"/"Permitir o tempo todo"; só existe no app instalado (não no Expo Go nem na web). */
+  background: boolean | null;
+}
+
+/** Pede a permissão de localização do sistema (uso no app e, quando possível, em segundo plano). */
+export async function requestLocationPermissions(): Promise<LocationPermissions> {
+  const fg = await Location.requestForegroundPermissionsAsync();
+  if (!fg.granted) return { foreground: false, background: null };
+  if (!backgroundPossible()) return { foreground: true, background: null };
+  try {
+    const bg = await Location.requestBackgroundPermissionsAsync();
+    return { foreground: true, background: bg.granted };
+  } catch {
+    return { foreground: true, background: false };
+  }
+}
+
 /** Inicia a jornada: pede permissões, abre a jornada no servidor e começa a coletar. */
 export async function startShift() {
   if (!hasConsent()) throw new ConsentRequiredError();
-  const fg = await Location.requestForegroundPermissionsAsync();
-  if (!fg.granted) throw new Error("Permita o acesso à localização para iniciar a jornada.");
-  if (backgroundPossible()) {
-    try {
-      await Location.requestBackgroundPermissionsAsync();
-    } catch {
-      // sem "Sempre": segue em primeiro plano, com aviso
-    }
-  }
+  const permissions = await requestLocationPermissions();
+  if (!permissions.foreground) throw new Error("Permita o acesso à localização para iniciar a jornada.");
   const position = await currentPosition();
   let data: unknown;
   try {

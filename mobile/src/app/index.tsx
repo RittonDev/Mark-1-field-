@@ -1,5 +1,5 @@
 import { router, Stack } from "expo-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
 import { BrandLogo, BrandRule } from "../components/Brand";
 import { Calendar } from "../components/Calendar";
@@ -13,6 +13,7 @@ import { formatDay } from "../lib/format";
 import { buildLists } from "../lib/lists";
 import { useSession } from "../lib/session";
 import { requestSync, useSyncStatus } from "../lib/sync";
+import { shouldPromptConsent } from "../lib/tracking";
 import type { LocalTicket } from "../lib/syncTypes";
 import { useStyles, useTheme, type Palette } from "../theme/theme";
 
@@ -30,6 +31,12 @@ export default function MyTicketsScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   const lists = useMemo(() => (user ? buildLists(tickets ?? [], user, new Date(now)) : null), [tickets, user, now]);
+
+  // LGPD: no primeiro acesso sem aceite, o termo de localização abre sozinho (dá para adiar).
+  useEffect(() => {
+    if (user && shouldPromptConsent()) router.push("/termo-rastreamento");
+  }, [user]);
+
   if (!user || !lists) return null;
 
   async function refresh() {

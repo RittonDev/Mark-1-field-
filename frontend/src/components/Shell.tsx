@@ -8,6 +8,7 @@ import {
   CalendarClock,
   CalendarDays,
   HardDrive,
+  HardHat,
   LayoutDashboard,
   LogOut,
   MapPin,
@@ -46,6 +47,7 @@ const NAV: NavItem[] = [
   { href: "/tipos-servico", label: "Tipos de serviço", icon: Timer, visible: canManageTickets },
   { href: "/ativos", label: "Ativos", icon: HardDrive, visible: isStaff },
   { href: "/usuarios", label: "Usuários", icon: Users, visible: canManageTickets },
+  { href: "/tecnicos", label: "Técnicos", icon: HardHat, visible: canManageTickets },
   { href: "/homologacao", label: "Homologação", icon: BadgeCheck, visible: canManageTickets },
   { href: "/configuracoes", label: "Configurações", icon: Settings, visible: isManager },
 ];

@@ -22,7 +22,7 @@ export function ShiftCard() {
   async function start() {
     setError(null);
     if (!hasConsent()) {
-      router.push("/termo-rastreamento");
+      router.push({ pathname: "/termo-rastreamento", params: { start: "1" } });
       return;
     }
     setBusy(true);
@@ -30,7 +30,7 @@ export function ShiftCard() {
       await startShift();
       showToast("Jornada iniciada", { tone: "success" });
     } catch (e) {
-      if (e instanceof ConsentRequiredError) router.push("/termo-rastreamento");
+      if (e instanceof ConsentRequiredError) router.push({ pathname: "/termo-rastreamento", params: { start: "1" } });
       else setError(errorMessage(e));
     } finally {
       setBusy(false);

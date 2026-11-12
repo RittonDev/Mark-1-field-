@@ -58,7 +58,7 @@ export default function LoginScreen() {
         <Card style={{ gap: 16 }}>
           <View style={{ gap: 4 }}>
             <Text style={styles.title}>Entrar</Text>
-            <Text style={styles.lead}>Use o e-mail e a senha que você recebeu da sua empresa.</Text>
+            <Text style={styles.lead}>Use o e-mail e a senha do seu cadastro, ou a senha provisória enviada pela sua empresa.</Text>
           </View>
           {banner && !error ? <ErrorBox message={banner} /> : null}
           <Field label="E-mail">

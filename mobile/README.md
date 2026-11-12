@@ -109,8 +109,13 @@ Requisitos:
   (por exemplo, de antes desta regra) é encerrada e o banco local apagado. Se o papel mudar no servidor
   (técnico promovido a analista), o refresh responde 401 com o motivo: o app encerra a sessão, apaga os
   dados locais, **inclusive operações ainda não enviadas**, e mostra o texto no login.
-- **Primeiro acesso**: se `must_change_password` vier verdadeiro (técnicos importados), o app exige a troca
-  da senha provisória (`POST /auth/change-password`) antes de liberar o resto.
+- **Primeiro acesso**: técnicos criados pelo analista ou importados recebem senha provisória
+  (`must_change_password`); o app exige a troca (`POST /auth/change-password`) antes de liberar o resto e
+  confere de novo em `/auth/me` a cada abertura. A troca encerra as outras sessões do usuário, então o app
+  grava os tokens novos devolvidos pela API. Quem se cadastra pela homologação já entra com a própria senha.
+- **Sessão encerrada pelo servidor** (senha redefinida pelo analista, usuário desativado): a API, o refresh e
+  o WebSocket (4401) respondem "Sessão encerrada. Entre novamente."; o app volta ao login com esse texto e
+  para o rastreamento. A fila local fica guardada para quando o mesmo técnico entrar de novo.
 - **Só as OS atribuídas ao técnico**: o cliente abre a OS, o analista escolhe o técnico, e o técnico vê só
   as OS em que é o responsável (sem fila de grupo e sem "assumir"). Tela inicial com três abas:
   - **Hoje**: em campo, agendadas para hoje (ou atrasadas) e as sem agenda; em campo primeiro,
@@ -136,9 +141,14 @@ Requisitos:
 
 ## Rastreamento da jornada
 
-- **Termo** (`/termo-rastreamento`): explica o que é coletado (posição, precisão, velocidade, direção,
-  bateria, detecção de GPS falso), quando (só durante a jornada) e para quê. O aceite vai para
-  `POST /tracking/consent` e aparece em Conta.
+- **Termo LGPD** (`/termo-rastreamento`): abre sozinho no primeiro acesso (dá para adiar; sem aceite não se
+  inicia jornada) e antes da primeira jornada. Explica a finalidade (acompanhar o deslocamento até o
+  cliente), quando (só durante a jornada que o técnico inicia e encerra), o que é coletado (posição,
+  precisão, velocidade, direção, bateria, GPS falso) e a retenção (**90 dias**). O aceite vai para
+  `POST /tracking/consent` e na mesma tela o app pede a permissão de localização do sistema ("Permitir o
+  tempo todo"/"Sempre"). A data do aceite aparece em Conta.
+- **GPS nas mudanças de status**: deslocamento, atendimento e resolução levam latitude/longitude (mapa de
+  histórico do gestor).
 - **Jornada**: `POST /tracking/shift/start` / `POST /tracking/shift/end` (com a posição do momento).
   Ao abrir o app, `GET /tracking/shift` retoma a coleta de uma jornada aberta (app fechado, aparelho
   reiniciado). Encerrar sem rede para a coleta na hora e envia o encerramento na próxima sincronização.
