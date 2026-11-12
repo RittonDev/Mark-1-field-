@@ -329,6 +329,9 @@ async def build(db: AsyncSession, ticket: Ticket, base_url: str) -> PublicReport
             address=", ".join(p for p in (loc.address_line, loc.district) if p) or None,
             city=loc.city,
             state=loc.state,
+            zip_code=loc.zip_code,
+            contact_name=loc.contact_name,
+            contact_phone=loc.contact_phone,
         )
     signature = None
     if ticket.signed_at is not None:
@@ -341,6 +344,7 @@ async def build(db: AsyncSession, ticket: Ticket, base_url: str) -> PublicReport
 
     return PublicReport(
         code=format_ticket_code(ticket.number),
+        number=ticket.number,
         title=ticket.title,
         description=ticket.description or "",
         status=ticket.status,
@@ -348,7 +352,12 @@ async def build(db: AsyncSession, ticket: Ticket, base_url: str) -> PublicReport
         company_name=company.name,
         company=company,
         customer=(
-            PublicReportCustomer(name=ticket.customer.name, document=ticket.customer.document)
+            PublicReportCustomer(
+                name=ticket.customer.name,
+                document=ticket.customer.document,
+                email=ticket.customer.email,
+                phone=ticket.customer.phone,
+            )
             if ticket.customer
             else None
         ),

@@ -11,6 +11,8 @@ from app.schemas.company import CompanyProfile
 class PublicReportCustomer(BaseModel):
     name: str
     document: str | None = None
+    email: str | None = None
+    phone: str | None = None
 
 
 class PublicReportLocation(BaseModel):
@@ -19,6 +21,10 @@ class PublicReportLocation(BaseModel):
     address: str | None = None
     city: str | None = None
     state: str | None = None
+    zip_code: str | None = None
+    # Contato no local (ex.: gerente da loja), como aparece na OS.
+    contact_name: str | None = None
+    contact_phone: str | None = None
 
 
 class PublicReportPerson(BaseModel):
@@ -59,6 +65,7 @@ class PublicReportMilestone(BaseModel):
 
 class PublicReport(BaseModel):
     code: str
+    number: int | None = None
     title: str
     description: str
     status: TicketStatus
