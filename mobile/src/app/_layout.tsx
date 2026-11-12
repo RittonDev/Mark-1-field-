@@ -33,7 +33,7 @@ export default function RootLayout() {
   useEffect(() => {
     if (signedIn && !mustChange) {
       startSession().catch((error: unknown) => console.warn("Falha ao iniciar a sessão", error));
-    } else if (status === "signedOut") {
+    } else if (status === "signedOut" || mustChange) {
       stopSync();
     }
   }, [status, signedIn, mustChange]);

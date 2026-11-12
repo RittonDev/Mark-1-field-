@@ -83,22 +83,30 @@ def conflict_item(t: Ticket) -> ConflictItem:
     )
 
 
-async def ensure_no_conflict(db: AsyncSession, ticket: Ticket, actor: User, allow: bool) -> None:
-    """Chamado depois de mudar responsável ou horário. Só vale para quem agenda (a gestão):
-    o app do técnico sincroniza offline e não pode travar por isso; o calendário mostra."""
+async def check_slot(
+    db: AsyncSession,
+    actor: User,
+    *,
+    assignee_id: uuid.UUID | None,
+    start: datetime | None,
+    end: datetime | None,
+    estimated_minutes: int | None,
+    status: TicketStatus,
+    exclude_id: uuid.UUID | None,
+    allow: bool,
+) -> None:
+    """Barra o agendamento que choca com outra OS do mesmo responsável. Só vale para quem
+    agenda (a gestão): o app do técnico sincroniza offline e não pode travar por isso."""
     if allow or not actor.can_manage_tickets:
         return
-    if ticket.assignee_id is None or ticket.scheduled_start is None:
+    if assignee_id is None or start is None or status not in OCCUPYING:
         return
-    if ticket.status not in OCCUPYING:
-        return
-    start = ticket.scheduled_start
-    end = visit_end(start, ticket.scheduled_end, ticket.estimated_minutes)
+    finish = visit_end(start, end, estimated_minutes)
     clashes = await find_conflicts(
-        db, assignee_id=ticket.assignee_id, start=start, end=end, exclude_id=ticket.id
+        db, assignee_id=assignee_id, start=start, end=finish, exclude_id=exclude_id
     )
     if clashes:
-        assignee = await db.get(User, ticket.assignee_id)
+        assignee = await db.get(User, assignee_id)
         name = assignee.name if assignee else "O técnico"
         raise ScheduleConflict(
             f"{name} já tem {len(clashes)} OS neste horário.",
@@ -187,3 +195,18 @@ async def calendar(
             )
         )
     return out
+
+
+async def ensure_no_conflict(db: AsyncSession, ticket: Ticket, actor: User, allow: bool) -> None:
+    """Depois de mudar responsável ou horário de uma OS existente."""
+    await check_slot(
+        db,
+        actor,
+        assignee_id=ticket.assignee_id,
+        start=ticket.scheduled_start,
+        end=ticket.scheduled_end,
+        estimated_minutes=ticket.estimated_minutes,
+        status=ticket.status,
+        exclude_id=ticket.id,
+        allow=allow,
+    )

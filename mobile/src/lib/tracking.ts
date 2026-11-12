@@ -130,9 +130,10 @@ async function canUseBackground(): Promise<boolean> {
 function taskOptions(transit: boolean): Location.LocationTaskOptions {
   return {
     accuracy: transit ? Location.Accuracy.High : Location.Accuracy.Balanced,
-    // Android entrega por tempo; iOS por distância (o iOS ignora timeInterval).
+    // Entrega por tempo, mesmo parado: o mapa da gestão marca "sem sinal" após 5 min sem ponto.
+    // No iOS (que ignora timeInterval) o GPS entrega com frequência e o app limita em handleLocations.
     timeInterval: transit ? 15_000 : 30_000,
-    distanceInterval: Platform.OS === "ios" ? (transit ? 25 : 50) : 0,
+    distanceInterval: 0,
     deferredUpdatesInterval: transit ? 15_000 : 30_000,
     pausesUpdatesAutomatically: false,
     activityType: transit ? Location.ActivityType.AutomotiveNavigation : Location.ActivityType.Other,
@@ -146,7 +147,45 @@ function taskOptions(transit: boolean): Location.LocationTaskOptions {
   };
 }
 
+// ───────── ritmo: limitador de pontos e batimento com o app aberto ─────────
+
+const LAST_POINT_KEY = "tracking_last_point_at";
+const HEARTBEAT_MS = 60_000;
+let lastStoredAt = 0;
+let heartbeat: ReturnType<typeof setInterval> | undefined;
+
+/** Intervalo mínimo entre pontos guardados: ~25 s, ~10 s em deslocamento. */
+const minGapMs = () => (state.transit ? 10_000 : 25_000);
+
+async function lastStored(): Promise<number> {
+  if (!lastStoredAt) {
+    const raw = await getKv(LAST_POINT_KEY);
+    lastStoredAt = raw ? Number(raw) || 0 : 0;
+  }
+  return lastStoredAt;
+}
+
+/**
+ * Com o app aberto, garante um ponto a cada ~60 s mesmo parado (o sistema pode não entregar
+ * posição nova sem movimento). Em segundo plano quem cuida é a tarefa do sistema.
+ */
+function startHeartbeat() {
+  clearInterval(heartbeat);
+  heartbeat = setInterval(() => {
+    if (!state.shift || Date.now() - lastStoredAt < HEARTBEAT_MS - 5_000) return;
+    Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
+      .then((location) => handleLocations([location], { force: true }))
+      .catch(() => undefined);
+  }, HEARTBEAT_MS);
+}
+
+function stopHeartbeat() {
+  clearInterval(heartbeat);
+  heartbeat = undefined;
+}
+
 async function stopCollection() {
+  stopHeartbeat();
   foregroundSub?.remove();
   foregroundSub = null;
   if (!backgroundPossible()) return;
@@ -159,6 +198,7 @@ async function stopCollection() {
 
 async function startCollection(transit: boolean) {
   await stopCollection();
+  startHeartbeat();
   if (await canUseBackground()) {
     await Location.startLocationUpdatesAsync(TRACKING_TASK, taskOptions(transit));
     setState({ mode: "background", transit, notice: null });
@@ -166,7 +206,7 @@ async function startCollection(transit: boolean) {
   }
   const opts = taskOptions(transit);
   foregroundSub = await Location.watchPositionAsync(
-    { accuracy: opts.accuracy, timeInterval: opts.timeInterval, distanceInterval: transit ? 0 : 50 },
+    { accuracy: opts.accuracy, timeInterval: opts.timeInterval, distanceInterval: 0 },
     (location) => void handleLocations([location]),
   );
   setState({
@@ -207,20 +247,34 @@ async function batteryPct(): Promise<number | null> {
 }
 
 /** Recebe pontos do GPS (tarefa de segundo plano ou watch em primeiro plano) e põe na fila. */
-export async function handleLocations(locations: Location.LocationObject[]) {
+export async function handleLocations(locations: Location.LocationObject[], { force = false } = {}) {
   if (!locations.length) return;
   // A tarefa pode rodar com o app fechado: lê a sessão e a jornada do armazenamento.
   if (session.get().status === "loading") await session.load();
   const shift = state.shift ?? (await readShift());
   if (!shift) return; // fora da jornada nada é guardado
+
+  // Limitador: o GPS pode entregar a cada segundo (iOS sem filtro de distância); guarda ~1 a cada 25 s.
+  let last = await lastStored();
+  const kept: Location.LocationObject[] = [];
+  for (const l of [...locations].sort((a, b) => a.timestamp - b.timestamp)) {
+    if (force || l.timestamp - last >= minGapMs()) {
+      kept.push(l);
+      last = l.timestamp;
+    }
+  }
+  if (!kept.length) return;
+  lastStoredAt = last;
+  await setKv(LAST_POINT_KEY, String(last));
+
   const battery = await batteryPct();
-  const pings: Ping[] = locations.map((l) => ({
+  const pings: Ping[] = kept.map((l) => ({
     recorded_at: new Date(l.timestamp).toISOString(),
     latitude: l.coords.latitude,
     longitude: l.coords.longitude,
     accuracy_m: l.coords.accuracy ?? null,
     speed_mps: l.coords.speed !== null && l.coords.speed >= 0 ? l.coords.speed : null,
-    heading: l.coords.heading !== null && l.coords.heading >= 0 ? l.coords.heading : null,
+    heading: l.coords.heading !== null && l.coords.heading >= 0 && l.coords.heading <= 360 ? l.coords.heading : null,
     battery_pct: battery,
     is_mock: Boolean(l.mocked),
   }));
@@ -319,6 +373,9 @@ export async function startShift() {
   const shift = unwrapShift(data);
   if (!shift) throw new Error("O servidor não abriu a jornada.");
   await writeShift(shift);
+  // Jornada nova: o primeiro ponto entra sem esperar o intervalo mínimo.
+  lastStoredAt = 0;
+  await setKv(LAST_POINT_KEY, null);
   setState({ serverAvailable: true, error: null });
   await startCollection(await inTransit());
 }

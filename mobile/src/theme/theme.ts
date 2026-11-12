@@ -53,7 +53,7 @@ export const LIGHT: Palette = {
   primaryPressed: "#1A37D6",
   onPrimary: "#FFFFFF",
   primarySoft: "#EEF1FF",
-  canvas: "#F4F6F9",
+  canvas: "#F6F7F9",
   surface: "#FFFFFF",
   surface2: "#F8FAFC",
   line: "#E4E7EC",
@@ -78,8 +78,8 @@ export const LIGHT: Palette = {
 
 export const DARK: Palette = {
   scheme: "dark",
-  primary: "#5C7CFF",
-  primaryPressed: "#4565F2",
+  primary: "#5470FF",
+  primaryPressed: "#4360F0",
   onPrimary: "#FFFFFF",
   primarySoft: "#1A2250",
   canvas: "#0D1116",

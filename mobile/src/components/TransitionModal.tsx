@@ -28,6 +28,8 @@ export function TransitionModal({ ticket, to, onClose }: { ticket: LocalTicket; 
   const c = useTheme();
   const styles = useStyles(makeStyles);
   const req = transitionRequirements(to);
+  // GPS em deslocamento, atendimento e também ao resolver: o mapa de histórico do gestor usa esses pontos.
+  const offersLocation = req.offersLocation || to === "resolved";
   const insets = useSafeAreaInsets();
   const online = isOnline(useSyncStatus());
   const [note, setNote] = useState("");
@@ -38,7 +40,7 @@ export function TransitionModal({ ticket, to, onClose }: { ticket: LocalTicket; 
   const [end, setEnd] = useState<Date | null>(() =>
     ticket.scheduled_end && !ticket.estimated_minutes ? new Date(ticket.scheduled_end) : null,
   );
-  const [shareLocation, setShareLocation] = useState(req.offersLocation);
+  const [shareLocation, setShareLocation] = useState(offersLocation);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [violation, setViolation] = useState<ViolationValues>({ response: "", resolution: "", note: "" });
@@ -71,7 +73,7 @@ export function TransitionModal({ ticket, to, onClose }: { ticket: LocalTicket; 
         payload.scheduled_end = end ? end.toISOString() : null;
       }
       let gpsFailed = false;
-      if (req.offersLocation && shareLocation) {
+      if (offersLocation && shareLocation) {
         const position = await currentPosition();
         if (position) Object.assign(payload, position);
         else gpsFailed = true;
@@ -151,7 +153,7 @@ export function TransitionModal({ ticket, to, onClose }: { ticket: LocalTicket; 
               placeholder={req.needsNote ? "Explique o motivo" : "Opcional"}
             />
           </Field>
-          {req.offersLocation ? (
+          {offersLocation ? (
             <SwitchRow
               label="Registrar minha localização"
               hint="Check-in de campo por GPS (funciona sem internet)."
@@ -164,7 +166,7 @@ export function TransitionModal({ ticket, to, onClose }: { ticket: LocalTicket; 
         <View style={[styles.footer, { paddingBottom: insets.bottom + 12 }]}>
           <Button title="Voltar" onPress={onClose} style={{ flex: 1 }} disabled={busy} />
           <Button
-            title={busy && req.offersLocation && shareLocation ? "Obtendo GPS…" : "Confirmar"}
+            title={busy && offersLocation && shareLocation ? "Obtendo GPS…" : "Confirmar"}
             variant={to === "cancelled" ? "danger" : "primary"}
             onPress={confirm}
             loading={busy}

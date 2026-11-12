@@ -49,6 +49,8 @@ async def test_conflicts_block_unless_confirmed(client: AsyncClient, world: Worl
     # Confirmando, passa; outro técnico no mesmo horário, também; começando quando a outra
     # termina, também (sem fim informado, a visita ocupa 1 hora).
     forced = await create(client, world, **body, allow_conflict=True)
+    # A tentativa barrada não consumiu número de OS (a numeração segue sem buracos).
+    assert int(forced["code"][3:]) == int(first["code"][3:]) + 1
     other = str(world.tech_other.user.id)
     await create(client, world, title="Switch", assignee_id=other, scheduled_start=at(0))
     later = await create(client, world, title="Impressora", assignee_id=tech, scheduled_start=at(1))

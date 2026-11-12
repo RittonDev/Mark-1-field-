@@ -513,6 +513,18 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
     scheduled_end = None if is_requester else data.scheduled_end
     scheduled_end = _default_end(scheduled_start, scheduled_end, estimated_minutes)
     _check_schedule(scheduled_start, scheduled_end)
+    # Antes de gravar: uma OS barrada por conflito não pode consumir número.
+    await schedule.check_slot(
+        db,
+        actor,
+        assignee_id=None if is_requester else data.assignee_id,
+        start=scheduled_start,
+        end=scheduled_end,
+        estimated_minutes=estimated_minutes,
+        status=S.NEW,
+        exclude_id=None,
+        allow=data.allow_conflict,
+    )
 
     ticket = Ticket(
         title=data.title.strip(),
@@ -565,7 +577,6 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
         if not actor.can_manage_tickets and data.assignee_id != actor.id:
             raise PermissionDenied("Técnicos só podem atribuir a OS a si mesmos")
         await _assign(db, ticket, data.assignee_id, None, actor, now=now)
-    await schedule.ensure_no_conflict(db, ticket, actor, data.allow_conflict)
     return ticket
 
 

@@ -1,4 +1,5 @@
 import { canUseMobile, MOBILE_CHANNEL, MOBILE_DENIED_MESSAGE } from "./access";
+import { mustChangePassword, refreshMe } from "./account";
 import { request, setAccessRevokedHandler } from "./api";
 import { notifyDataChanged } from "./changes";
 import { getKv, setKv } from "./db";
@@ -36,6 +37,14 @@ export async function restoreSession() {
 
 /** Depois do login (ou ao abrir o app já logado): sync, tempo real e registro do aparelho. */
 export async function startSession() {
+  // Confere o usuário no servidor: se o analista redefiniu a senha (must_change_password),
+  // o layout leva para "Crie sua senha" e nada mais começa. Offline, segue com o usuário salvo.
+  try {
+    const me = await refreshMe();
+    if (mustChangePassword(me)) return;
+  } catch {
+    // sem rede
+  }
   startSync();
   // Jornada em andamento (app reaberto ou aparelho reiniciado): retoma a coleta.
   void resumeTracking().catch((error: unknown) => console.warn("Falha ao retomar a jornada", error));
