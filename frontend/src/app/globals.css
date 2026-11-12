@@ -16,6 +16,10 @@
   --brand-cyan: #00b7df;
   --brand-teal: #2bd4af;
   --brand-mint: #76f6c6;
+  /* Séries de gráfico (validadas: CVD e contraste contra a superfície). */
+  --viz-1: #2447ff;
+  --viz-2: #13895f;
+  --viz-grid: #e9ecf1;
   --sidebar: #ffffff;
   --sidebar-ink: #475467;
   --sidebar-active: #eef1ff;
@@ -35,6 +39,9 @@
   --brand-cyan: #19c4e8;
   --brand-teal: #3ddcbb;
   --brand-mint: #86f8cf;
+  --viz-1: #5470ff;
+  --viz-2: #199e70;
+  --viz-grid: #1f2633;
   --sidebar: #0d1119;
   --sidebar-ink: #a8b3c7;
   --sidebar-active: rgb(84 112 255 / 0.16);
