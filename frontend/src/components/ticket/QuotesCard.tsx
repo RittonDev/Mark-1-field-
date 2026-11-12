@@ -10,7 +10,7 @@ import { useAuth } from "@/lib/auth";
 import { canManageTickets } from "@/lib/constants";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
 import { QUOTE_KIND, QUOTE_STATUS, quoteUrl, totalsByKind } from "@/lib/quotes";
-import type { Quote, QuoteCatalogItem, QuoteItemKind, TicketDetail } from "@/lib/types";
+import type { Quote, QuoteCatalogItem, QuoteItemKind, QuoteLink, TicketDetail } from "@/lib/types";
 
 /** Link do cliente: o persistente da API (copiar a qualquer momento) ou o token devolvido no envio. */
 function linkOf(q: Quote): string | null {
@@ -345,9 +345,9 @@ function ShareDialog({
   const [copied, setCopied] = useState(false);
   const [current, setCurrent] = useState(quote);
   const rotate = useMutation({
-    mutationFn: () => api.post<Quote>(`/quotes/${quote.id}/link/rotate`),
-    onSuccess: (q) => {
-      setCurrent(q);
+    mutationFn: () => api.post<QuoteLink>(`/quotes/${quote.id}/link/rotate`),
+    onSuccess: (link) => {
+      setCurrent((q) => ({ ...q, link, token: link.token }));
       setCopied(false);
       onRotated();
     },

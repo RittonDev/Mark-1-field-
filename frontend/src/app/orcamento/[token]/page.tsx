@@ -14,7 +14,7 @@ import { QUOTE_KIND, QUOTE_STATUS, totalsByKind } from "@/lib/quotes";
 import type { PublicQuote, QuoteStatus } from "@/lib/types";
 
 const BANNER: Record<QuoteStatus, { label: string; className: string }> = {
-  draft: { label: "Rascunho", className: "bg-slate-500" },
+  draft: { label: "Em revisão pela empresa", className: "bg-slate-500" },
   sent: { label: "Aguardando sua aprovação", className: "bg-brand" },
   approved: { label: "Aprovado", className: "bg-emerald-500" },
   rejected: { label: "Recusado", className: "bg-red-500" },
@@ -341,7 +341,9 @@ export default function PublicQuotePage() {
                 </div>
               ) : !open ? (
                 <p className="text-sm text-ink-muted">
-                  Este orçamento não aceita mais resposta ({QUOTE_STATUS[quote.status].label.toLowerCase()}).
+                  {quote.status === "draft"
+                    ? "Este orçamento está em revisão pela empresa. Aguarde o novo envio para responder."
+                    : `Este orçamento não aceita mais resposta (${QUOTE_STATUS[quote.status].label.toLowerCase()}).`}
                 </p>
               ) : (
                 <div className="print:hidden">
