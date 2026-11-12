@@ -1,16 +1,11 @@
-import re
 import uuid
-from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Query, status
-from sqlalchemy import func, or_, select
+from fastapi import APIRouter, HTTPException, status
+from sqlalchemy import or_, select
 
 from app.api.deps import DB, CurrentUser, StaffUser, TicketManagerUser
 from app.core.enums import AssetType
-from app.models import Asset, Customer, Location, Ticket, User
-from app.schemas.common import Page
-from app.services.tickets import visibility_clause
-from app.services.workflow import OPEN_STATUSES
+from app.models import Asset, Customer, Location
 from app.schemas.customer import (
     AssetCreate,
     AssetOut,
@@ -33,115 +28,52 @@ async def _get_or_404(db: DB, model: type, obj_id: uuid.UUID, label: str):  # no
     return obj
 
 
-# ------------------------------------------------------------------ métricas derivadas
-
-
-async def _ticket_stats(
-    db: DB, user: User, column: Any, ids: list[uuid.UUID]
-) -> dict[uuid.UUID, dict[str, Any]]:
-    """OS abertas, total e data da última OS por cliente/local, no escopo visível do usuário."""
-    if not ids:
-        return {}
-    conds = [column.in_(ids)]
-    vis = visibility_clause(user)
-    if vis is not None:
-        conds.append(vis)
-    rows = await db.execute(
-        select(
-            column,
-            func.count(),
-            func.count().filter(Ticket.status.in_(OPEN_STATUSES)),
-            func.max(Ticket.created_at),
-        )
-        .where(*conds)
-        .group_by(column)
-    )
-    return {
-        key: {"total_tickets": total, "open_tickets": open_, "last_ticket_at": last}
-        for key, total, open_, last in rows
-    }
-
-
-async def _customers_out(db: DB, user: User, customers: list[Customer]) -> list[CustomerOut]:
-    ids = [c.id for c in customers]
-    stats = await _ticket_stats(db, user, Ticket.customer_id, ids)
-    counts: dict[uuid.UUID, int] = {}
-    if ids:
-        counts = dict(
-            (
-                await db.execute(
-                    select(Location.customer_id, func.count())
-                    .where(Location.customer_id.in_(ids))
-                    .group_by(Location.customer_id)
-                )
-            ).all()
-        )
-    return [
-        CustomerOut.model_validate(c).model_copy(
-            update={**stats.get(c.id, {}), "locations_count": counts.get(c.id, 0)}
-        )
-        for c in customers
-    ]
-
-
-async def _locations_out(db: DB, user: User, locations: list[Location]) -> list[LocationOut]:
-    stats = await _ticket_stats(db, user, Ticket.location_id, [loc.id for loc in locations])
-    return [
-        LocationOut.model_validate(loc).model_copy(update=stats.get(loc.id, {}))
-        for loc in locations
-    ]
-
-
 # ------------------------------------------------------------------ clientes
 
 
 @router.get("/customers", response_model=list[CustomerOut])
-async def list_customers(db: DB, user: CurrentUser, q: str | None = None) -> list[CustomerOut]:
+async def list_customers(db: DB, _: CurrentUser, q: str | None = None) -> list[Customer]:
     stmt = select(Customer).order_by(Customer.name)
     if q:
         like = f"%{q.strip()}%"
         stmt = stmt.where(or_(Customer.name.ilike(like), Customer.document.ilike(like)))
-    return await _customers_out(db, user, list(await db.scalars(stmt)))
+    return list(await db.scalars(stmt))
 
 
 @router.post("/customers", response_model=CustomerOut, status_code=status.HTTP_201_CREATED)
-async def create_customer(
-    body: CustomerCreate, db: DB, user: TicketManagerUser
-) -> CustomerOut:
+async def create_customer(body: CustomerCreate, db: DB, _: TicketManagerUser) -> Customer:
     customer = Customer(**body.model_dump(), is_active=True)
     db.add(customer)
     await db.commit()
-    return (await _customers_out(db, user, [customer]))[0]
+    return customer
 
 
 @router.get("/customers/{customer_id}", response_model=CustomerOut)
-async def get_customer(customer_id: uuid.UUID, db: DB, user: CurrentUser) -> CustomerOut:
-    customer = await _get_or_404(db, Customer, customer_id, "Cliente")
-    return (await _customers_out(db, user, [customer]))[0]
+async def get_customer(customer_id: uuid.UUID, db: DB, _: CurrentUser) -> Customer:
+    return await _get_or_404(db, Customer, customer_id, "Cliente")
 
 
 @router.patch("/customers/{customer_id}", response_model=CustomerOut)
 async def update_customer(
-    customer_id: uuid.UUID, body: CustomerUpdate, db: DB, user: TicketManagerUser
-) -> CustomerOut:
+    customer_id: uuid.UUID, body: CustomerUpdate, db: DB, _: TicketManagerUser
+) -> Customer:
     customer = await _get_or_404(db, Customer, customer_id, "Cliente")
     for key, value in body.model_dump(exclude_unset=True).items():
         setattr(customer, key, value)
     await db.commit()
-    return (await _customers_out(db, user, [customer]))[0]
+    return customer
 
 
-# ------------------------------------------------------------------ locais (filiais)
+# ------------------------------------------------------------------ locais
 
 
 @router.get("/customers/{customer_id}/locations", response_model=list[LocationOut])
-async def customer_locations(
-    customer_id: uuid.UUID, db: DB, user: CurrentUser
-) -> list[LocationOut]:
-    locations = await db.scalars(
-        select(Location).where(Location.customer_id == customer_id).order_by(Location.name)
+async def customer_locations(customer_id: uuid.UUID, db: DB, _: CurrentUser) -> list[Location]:
+    return list(
+        await db.scalars(
+            select(Location).where(Location.customer_id == customer_id).order_by(Location.name)
+        )
     )
-    return await _locations_out(db, user, list(locations))
 
 
 @router.post(
@@ -150,76 +82,34 @@ async def customer_locations(
     status_code=status.HTTP_201_CREATED,
 )
 async def create_location(
-    customer_id: uuid.UUID, body: LocationCreate, db: DB, user: TicketManagerUser
-) -> LocationOut:
+    customer_id: uuid.UUID, body: LocationCreate, db: DB, _: TicketManagerUser
+) -> Location:
     await _get_or_404(db, Customer, customer_id, "Cliente")
     location = Location(customer_id=customer_id, **body.model_dump(), is_active=True)
     db.add(location)
     await db.commit()
-    loaded = await db.get(Location, location.id, populate_existing=True)
-    return (await _locations_out(db, user, [loaded]))[0]  # type: ignore[list-item]
+    return await db.get(Location, location.id, populate_existing=True)  # type: ignore[return-value]
 
 
-@router.get("/locations", response_model=Page[LocationOut])
+@router.get("/locations", response_model=list[LocationOut])
 async def list_locations(
-    db: DB,
-    user: CurrentUser,
-    customer_id: uuid.UUID | None = None,
-    q: str | None = None,
-    active: bool | None = None,
-    page: Annotated[int, Query(ge=1)] = 1,
-    page_size: Annotated[int, Query(ge=1, le=200)] = 50,
-) -> Page[LocationOut]:
-    """Locais como cadastro próprio: busca por nome, código, CNPJ, endereço ou cliente."""
-    conds: list[Any] = []
+    db: DB, _: CurrentUser, customer_id: uuid.UUID | None = None
+) -> list[Location]:
+    stmt = select(Location).order_by(Location.name)
     if customer_id is not None:
-        conds.append(Location.customer_id == customer_id)
-    if active is not None:
-        conds.append(Location.is_active.is_(active))
-    if q and q.strip():
-        like = f"%{q.strip()}%"
-        text_match = [
-            Location.name.ilike(like),
-            Location.code.ilike(like),
-            Location.city.ilike(like),
-            Location.district.ilike(like),
-            Location.address_line.ilike(like),
-            Customer.name.ilike(like),
-        ]
-        doc = re.sub(r"[^0-9A-Za-z]", "", q).upper()
-        if len(doc) >= 3:
-            text_match.append(Location.document.ilike(f"%{doc}%"))
-        conds.append(or_(*text_match))
-    base = select(Location).join(Customer, Customer.id == Location.customer_id).where(*conds)
-    total = await db.scalar(select(func.count()).select_from(base.subquery())) or 0
-    rows = await db.scalars(
-        base.order_by(Customer.name, Location.name)
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-    )
-    return Page(
-        items=await _locations_out(db, user, list(rows)),
-        total=total,
-        page=page,
-        page_size=page_size,
-    )
-
-
-@router.get("/locations/{location_id}", response_model=LocationOut)
-async def get_location(location_id: uuid.UUID, db: DB, user: CurrentUser) -> LocationOut:
-    location = await _get_or_404(db, Location, location_id, "Local")
-    return (await _locations_out(db, user, [location]))[0]
+        stmt = stmt.where(Location.customer_id == customer_id)
+    return list(await db.scalars(stmt))
 
 
 @router.patch("/locations/{location_id}", response_model=LocationOut)
 async def update_location(
-    location_id: uuid.UUID, body: LocationUpdate, db: DB, user: TicketManagerUser
-) -> LocationOut:
+    location_id: uuid.UUID, body: LocationUpdate, db: DB, _: TicketManagerUser
+) -> Location:
     location = await _get_or_404(db, Location, location_id, "Local")
     for key, value in body.model_dump(exclude_unset=True).items():
         setattr(location, key, value)
     await db.commit()
-    return (await _locations_out(db, user, [location]))[0]
+    return location
 
 
 # ------------------------------------------------------------------ ativos

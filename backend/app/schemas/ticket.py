@@ -34,8 +34,6 @@ class CategoryRef(ORMModel):
 class LocationRef(ORMModel):
     id: uuid.UUID
     name: str
-    code: str | None
-    document: str | None
     address_line: str | None
     city: str | None
     state: str | None
@@ -100,7 +98,6 @@ class TicketDetail(TicketListItem):
     asset: AssetRef | None
     requester: UserRef | None
     requester_contact: str | None
-    service_address: str | None
     created_by: UserRef | None
     closed_at: datetime | None
     cancelled_at: datetime | None
@@ -128,7 +125,6 @@ class TicketCreate(BaseModel):
     requester_id: uuid.UUID | None = None
     requester_name: str | None = Field(default=None, max_length=160)
     requester_contact: str | None = Field(default=None, max_length=160)
-    service_address: str | None = Field(default=None, max_length=255)
     team_id: uuid.UUID | None = None
     assignee_id: uuid.UUID | None = None
     scheduled_start: datetime | None = None
@@ -148,7 +144,6 @@ class TicketUpdate(BaseModel):
     asset_id: uuid.UUID | None = None
     requester_name: str | None = Field(default=None, max_length=160)
     requester_contact: str | None = Field(default=None, max_length=160)
-    service_address: str | None = Field(default=None, max_length=255)
     team_id: uuid.UUID | None = None
     scheduled_start: datetime | None = None
     scheduled_end: datetime | None = None
@@ -251,7 +246,6 @@ class TicketFilters(BaseModel):
     assignee_id: uuid.UUID | None = None
     team_id: uuid.UUID | None = None
     customer_id: uuid.UUID | None = None
-    location_id: uuid.UUID | None = None
     category_id: uuid.UUID | None = None
     asset_id: uuid.UUID | None = None
     q: str | None = None
