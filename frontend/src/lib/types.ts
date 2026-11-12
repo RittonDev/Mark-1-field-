@@ -73,6 +73,8 @@ export interface UserRef {
   name: string;
   email: string;
   role: UserRole;
+  /** Desativado não entra no app (a OS dele precisa ser reatribuída). */
+  is_active?: boolean;
 }
 
 export interface User {

@@ -424,6 +424,14 @@ function TicketsView() {
                         {t.assignee ? (
                           <span className="whitespace-nowrap">
                             {t.assignee.name}
+                            {t.assignee.is_active === false ? (
+                              <span
+                                className="ml-1.5 rounded-full bg-red-50 px-1.5 py-px text-[11px] font-medium text-red-700 dark:bg-red-500/10 dark:text-red-300"
+                                title="Técnico desativado: não entra no app. Reatribua a OS."
+                              >
+                                inativo
+                              </span>
+                            ) : null}
                             {t.helpers?.length ? (
                               <span
                                 className="ml-1.5 rounded-full bg-emerald-50 px-1.5 py-px text-[11px] font-medium text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-200"

@@ -88,6 +88,11 @@ export function AssignmentPanel({ ticket }: { ticket: TicketDetail }) {
             Ninguém está tratando esta OS.
           </p>
         )}
+        {ticket.assignee?.is_active === false && !isFinal ? (
+          <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800 dark:bg-red-950/40 dark:text-red-300">
+            Este técnico está inativo e não entra no app. Atribua a OS a outro técnico.
+          </p>
+        ) : null}
 
         {canTake ? (
           <Button

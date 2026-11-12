@@ -6,7 +6,6 @@ from httpx import AsyncClient
 from app.core.config import settings
 from app.services import geo
 from tests.conftest import World, requires_db
-from tests.test_api import create
 
 API = settings.API_PREFIX
 
