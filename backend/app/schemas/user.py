@@ -12,6 +12,8 @@ class UserRef(ORMModel):
     name: str
     email: str
     role: UserRole
+    # Desativado não entra no app (a OS dele precisa ser reatribuída).
+    is_active: bool = True
 
 
 class UserOut(ORMModel):

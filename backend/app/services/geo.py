@@ -4,7 +4,8 @@ Quando o endereço não foi encontrado, o geocodificador do sistema antigo gravo
 o centro geográfico do Brasil (-14,2350, -51,9253). Lojas de cidades e estados diferentes ficaram
 "no mesmo lugar", e a busca por proximidade dava 0 km para quem nunca esteve perto. Regras:
 
-- inválidos sempre: (0, 0) e o centro do Brasil;
+- inválidos sempre: (0, 0), o centro do Brasil e pontos fora do Brasil (ex.: latitude e
+  longitude trocadas, ou o mesmo número nas duas);
 - inválido também: o mesmo ponto em lojas de 2 ou mais UFs (lojas do mesmo shopping repetem o
   ponto, mas na mesma UF, e continuam valendo).
 
@@ -27,13 +28,15 @@ from app.models import Location
 
 BRAZIL_CENTER = (-14.2350, -51.9253)
 CENTER_TOLERANCE = 0.001
+# Retângulo que cobre o Brasil, com as ilhas oceânicas (lat mín., lat máx., lon mín., lon máx.).
+BRAZIL_BOUNDS = (-34.0, 6.0, -74.5, -28.0)
 DUPLICATE_DECIMALS = 4  # ~11 m: o "mesmo ponto"
 
 log = logging.getLogger("geo")
 
 
 def valid_coords(latitude: float | None, longitude: float | None) -> bool:
-    """Coordenada utilizável para distância e mapa (não nula, não 0,0, não o centro do Brasil)."""
+    """Coordenada utilizável para distância e mapa: dentro do Brasil, não 0,0 nem o centro."""
     if latitude is None or longitude is None:
         return False
     try:
@@ -47,14 +50,18 @@ def valid_coords(latitude: float | None, longitude: float | None) -> bool:
         and abs(lon - BRAZIL_CENTER[1]) < CENTER_TOLERANCE
     ):
         return False
-    return -90 <= lat <= 90 and -180 <= lon <= 180
+    lat_min, lat_max, lon_min, lon_max = BRAZIL_BOUNDS
+    return lat_min <= lat <= lat_max and lon_min <= lon <= lon_max
 
 
 def valid_coords_sql(latitude: ColumnElement, longitude: ColumnElement) -> ColumnElement:
     """O mesmo de valid_coords, no banco."""
+    lat_min, lat_max, lon_min, lon_max = BRAZIL_BOUNDS
     return and_(
         latitude.is_not(None),
         longitude.is_not(None),
+        latitude.between(lat_min, lat_max),
+        longitude.between(lon_min, lon_max),
         not_(and_(latitude == 0, longitude == 0)),
         not_(
             and_(

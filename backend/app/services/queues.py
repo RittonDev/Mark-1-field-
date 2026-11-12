@@ -87,6 +87,7 @@ def reasons_for(
     *,
     rules: FieldRules | None = None,
     part_request_open: bool = False,
+    assignee_active: bool | None = None,
 ) -> list[QueueReason]:
     """Motivos de atenção da OS (serve para a OS do ORM e para linhas de consulta)."""
     reasons: list[QueueReason] = []
@@ -102,6 +103,13 @@ def reasons_for(
             reasons.append(QueueReason(code="late_start", label="Atrasada", tone="danger"))
         if t.status not in WAITING and assignee_role != UserRole.TECHNICIAN:
             reasons.append(QueueReason(code="no_technician", label="Sem técnico", tone="warning"))
+        # Técnico desativado não entra no app: a OS fica parada até alguém reatribuir.
+        if assignee_role == UserRole.TECHNICIAN and assignee_active is False:
+            reasons.append(
+                QueueReason(
+                    code="inactive_technician", label="Técnico inativo: reatribua", tone="danger"
+                )
+            )
         if t.last_unproductive_at is not None and (
             t.scheduled_start is None or t.scheduled_start < t.last_unproductive_at
         ):
@@ -188,6 +196,7 @@ async def my_queue(db: AsyncSession, target: User, day: date | None = None) -> M
             t.assignee.role if t.assignee else None,
             rules=rules,
             part_request_open=t.id in asking,
+            assignee_active=t.assignee.is_active if t.assignee else None,
         )
         item = QueueItem.model_validate(t)
         item.reasons = reasons
@@ -264,6 +273,7 @@ async def team_queues(db: AsyncSession) -> TeamQueues:
                 Ticket.sla_paused_seconds,
                 Ticket.last_unproductive_at,
                 User.role.label("assignee_role"),
+                User.is_active.label("assignee_active"),
             )
             .outerjoin(User, User.id == Ticket.assignee_id)
             .where(Ticket.status.in_(OPEN_STATUSES))
@@ -278,7 +288,12 @@ async def team_queues(db: AsyncSession) -> TeamQueues:
         if row.scheduled_start is not None and day_start <= row.scheduled_start < day_end:
             c.today += 1
         reasons = reasons_for(
-            row, now, row.assignee_role, rules=rules, part_request_open=row.id in asking
+            row,
+            now,
+            row.assignee_role,
+            rules=rules,
+            part_request_open=row.id in asking,
+            assignee_active=row.assignee_active,
         )
         if needs_attention(section_for(row, reasons, day_start, day_end), reasons):
             c.attention += 1
