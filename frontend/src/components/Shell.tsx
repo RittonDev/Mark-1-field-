@@ -1,7 +1,9 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
 import {
+  BadgeCheck,
   Building2,
   CalendarClock,
   CalendarDays,
@@ -19,6 +21,7 @@ import {
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Logo, ThemeToggle } from "@/components/Brand";
+import { api } from "@/lib/api";
 import { canManageTickets, isManager, isStaff, ROLE } from "@/lib/constants";
 import { initials } from "@/lib/format";
 import { useConnectionState } from "@/lib/realtime";
@@ -43,6 +46,7 @@ const NAV: NavItem[] = [
   { href: "/tipos-servico", label: "Tipos de serviço", icon: Timer, visible: canManageTickets },
   { href: "/ativos", label: "Ativos", icon: HardDrive, visible: isStaff },
   { href: "/usuarios", label: "Usuários", icon: Users, visible: canManageTickets },
+  { href: "/homologacao", label: "Homologação", icon: BadgeCheck, visible: canManageTickets },
   { href: "/configuracoes", label: "Configurações", icon: Settings, visible: isManager },
 ];
 
@@ -52,6 +56,14 @@ export function visibleNav(role: UserRole) {
 
 export function Sidebar({ user }: { user: User }) {
   const pathname = usePathname();
+  // Fichas de homologação aguardando análise (o evento em tempo real atualiza).
+  const pending = useQuery({
+    queryKey: ["onboarding", "pending-count"],
+    queryFn: () => api.get<{ pending: number }>("/onboarding/applications/pending-count"),
+    enabled: canManageTickets(user.role),
+    staleTime: 60_000,
+  });
+  const badges: Record<string, number> = { "/homologacao": pending.data?.pending ?? 0 };
   return (
     <aside className="sticky top-0 flex h-screen w-16 shrink-0 flex-col border-r border-sidebar-line bg-sidebar text-sidebar-ink lg:w-60">
       <Link href="/chamados" className="flex h-14 items-center px-4" aria-label="Maxx Field — chamados">
@@ -77,8 +89,21 @@ export function Sidebar({ user }: { user: User }) {
                 active ? "bg-sidebar-active font-medium text-brand" : "hover:bg-surface-2 hover:text-ink",
               )}
             >
-              <Icon className="size-4 shrink-0" />
-              <span className="hidden lg:inline">{item.label}</span>
+              <span className="relative shrink-0">
+                <Icon className="size-4" />
+                {badges[item.href] ? (
+                  <span className="absolute -top-1.5 -right-1.5 size-2 rounded-full bg-red-500 lg:hidden" aria-hidden />
+                ) : null}
+              </span>
+              <span className="hidden flex-1 lg:inline">{item.label}</span>
+              {badges[item.href] ? (
+                <span
+                  className="hidden rounded-full bg-red-500 px-1.5 text-[11px] leading-[18px] font-semibold text-white tabular-nums lg:inline"
+                  aria-label={`${badges[item.href]} pendentes`}
+                >
+                  {badges[item.href]}
+                </span>
+              ) : null}
             </Link>
           );
         })}
