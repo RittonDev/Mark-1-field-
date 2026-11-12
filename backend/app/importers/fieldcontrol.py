@@ -778,6 +778,10 @@ class Importer:
             self.office_by_name[plain(name)] = uid
 
         placeholders = placeholder_homes(self.file("colaboradores.json"))
+        # Quem já é técnico aqui (o mesmo e-mail no escritório continua no escritório).
+        technician_ids = set(
+            await self.db.scalars(select(User.id).where(User.role == UserRole.TECHNICIAN))
+        )
         for e in iter_records(self.file("colaboradores.json")):
             email = (e.get("email") or "").strip().lower()
             ids = [e.get("id"), e.get("_id")]
@@ -798,10 +802,11 @@ class Importer:
                 "avatar_external_url": clip(e.get("avatarUrl"), 1000),
                 "legacy": {"source": SOURCE, "id": e.get("id"), "territories": territories_of(e)},
             }
-            if profile["address_line"]:
-                self.report.add("technicians", "with_address")
-            if profile["work_schedule"]:
-                self.report.add("technicians", "with_schedule")
+            if not known or known in technician_ids:
+                if profile["address_line"]:
+                    self.report.add("technicians", "with_address")
+                if profile["work_schedule"]:
+                    self.report.add("technicians", "with_schedule")
             if known:
                 self.report.add("technicians", "existing")
                 await self.db.execute(
@@ -1023,12 +1028,12 @@ class Importer:
                 sid = self.ref("service_type", (skill or {}).get("serviceId"))
                 if sid and str(sid) not in ids:
                     ids.append(str(sid))
-            await self.db.execute(
+            result = await self.db.execute(
                 update(User)
                 .where(User.id == uid, User.role == UserRole.TECHNICIAN)
                 .values(service_type_ids=ids)
             )
-            if ids:
+            if ids and result.rowcount:  # type: ignore[attr-defined]
                 self.report.add("technicians", "with_services")
 
     async def import_catalogs(self) -> None:

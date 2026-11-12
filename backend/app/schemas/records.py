@@ -20,6 +20,8 @@ class ContactOut(BaseModel):
 
 
 class ContactIn(BaseModel):
+    """Contato digitado: e-mail em minúsculas; telefone só com dígitos e DDI (55 se faltar)."""
+
     kind: Literal["email", "phone"]
     value: str = Field(min_length=1, max_length=255)
     name: str | None = Field(default=None, max_length=160)
@@ -34,7 +36,11 @@ class ContactIn(BaseModel):
             if "@" not in value or " " in value:
                 raise ValueError("E-mail inválido")
         else:
+            international = value.startswith("+")
             value = re.sub(r"\D", "", value)
+            # Gravado como no import: com o DDI na frente ("(85) 3333-2222" -> "558533332222").
+            if not international and len(value) in (10, 11):
+                value = "55" + value
             if len(value) < 8:
                 raise ValueError("Telefone inválido")
         self.value = value
