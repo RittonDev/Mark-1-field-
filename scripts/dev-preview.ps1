@@ -91,8 +91,9 @@ foreach ($t in $targets) {
     if (-not (Exists $t.Container)) {
         Log "Criando $($t.Container)..." "Cyan"
         & docker.exe @($t.Create) | Out-Null
-        & docker.exe cp "$($t.Source)\." "$($t.Container):/app"
     }
+    # Cópia completa ao ligar: pega o que mudou enquanto a sincronização estava desligada.
+    & docker.exe cp "$($t.Source)\." "$($t.Container):/app"
     & docker.exe start $t.Container | Out-Null
 }
 
