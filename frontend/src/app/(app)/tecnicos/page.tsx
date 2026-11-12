@@ -516,7 +516,7 @@ function EditDialog({ tech, onClose }: { tech: Technician; onClose: () => void }
             <h3 className="mb-1.5 text-xs font-semibold tracking-wide text-ink-muted uppercase">Perfil da homologação</h3>
             <div className="flex flex-wrap gap-1.5">
               {current.service_areas.map((k) => (
-                <span key={k} className="rounded-full bg-sidebar-active px-2.5 py-0.5 text-xs font-medium text-brand">
+                <span key={k} className="rounded-full bg-nav-active px-2.5 py-0.5 text-xs font-medium text-brand">
                   {areas[k] ?? k}
                 </span>
               ))}

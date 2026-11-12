@@ -108,7 +108,7 @@ export default function LiveMapPage() {
               onClick={() => setStateFilter(active ? null : s)}
               className={clsx(
                 "inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm transition-colors",
-                active ? "border-brand bg-sidebar-active text-ink" : "border-line bg-surface text-ink-muted hover:text-ink",
+                active ? "border-brand bg-nav-active text-ink" : "border-line bg-surface text-ink-muted hover:text-ink",
               )}
             >
               <span className="size-2.5 rounded-full" style={{ background: LIVE_STATE[s].color }} />
@@ -209,7 +209,7 @@ function TechnicianRow({
         aria-pressed={selected}
         className={clsx(
           "flex w-full items-start gap-3 px-3 py-2.5 text-left transition-colors",
-          selected ? "bg-sidebar-active" : "hover:bg-surface-2",
+          selected ? "bg-nav-active" : "hover:bg-surface-2",
         )}
       >
         <span

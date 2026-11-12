@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
-import { MapPin, Sparkles } from "lucide-react";
+import { MapPin, UserSearch } from "lucide-react";
 import { api } from "@/lib/api";
 import { initials } from "@/lib/format";
 import type { TechnicianSuggestion, TicketDetail } from "@/lib/types";
@@ -29,12 +29,12 @@ export function TechnicianSuggestions({
   return (
     <div className="flex flex-col gap-2 border-t border-line pt-3">
       <p className="flex items-center gap-1.5 text-xs font-medium text-ink-muted">
-        <Sparkles className="size-3.5 text-brand" />
+        <UserSearch className="size-3.5 text-brand" />
         Sugeridos{where ? ` para ${where}` : ""}
       </p>
       <ul className="flex flex-col gap-1.5">
         {list.map((s, i) => (
-          <li key={s.id} className={clsx("rounded-lg border px-2.5 py-2", i === 0 ? "border-brand/40 bg-sidebar-active/60" : "border-line")}>
+          <li key={s.id} className={clsx("rounded-lg border px-2.5 py-2", i === 0 ? "border-brand/40 bg-nav-active/60" : "border-line")}>
             <div className="flex items-center gap-2">
               <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-brand/10 text-[11px] font-semibold text-brand">
                 {initials(s.name)}

@@ -71,7 +71,7 @@ export default function RepairsPage() {
               onClick={() => setStatus(active ? "" : s)}
               className={clsx(
                 "flex min-w-36 shrink-0 flex-col rounded-lg border px-3 py-2 text-left transition-colors",
-                active ? "border-brand bg-sidebar-active" : "border-line bg-surface hover:border-brand/50",
+                active ? "border-brand bg-nav-active" : "border-line bg-surface hover:border-brand/50",
               )}
             >
               <span className="text-[11px] text-ink-muted">{REPAIR_STATUS[s].label}</span>

@@ -122,7 +122,7 @@ function TopCustomer({ top, period }: { top: CountRef | null; period: string }) 
   if (!top) return null;
   return (
     <div className="flex items-center gap-3 rounded-xl border border-line bg-surface px-4 py-3">
-      <span className="flex size-9 items-center justify-center rounded-full bg-sidebar-active text-brand">
+      <span className="flex size-9 items-center justify-center rounded-full bg-nav-active text-brand">
         <Star className="size-4" />
       </span>
       <div>

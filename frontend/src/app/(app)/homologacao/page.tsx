@@ -565,7 +565,7 @@ function ApplicationDialog({ id, onClose }: { id: string; onClose: () => void })
           <Section title="Atuação">
             <div className="flex flex-wrap gap-1.5">
               {a.service_areas.map((k) => (
-                <span key={k} className="rounded-full bg-sidebar-active px-2.5 py-0.5 text-xs font-medium text-brand">
+                <span key={k} className="rounded-full bg-nav-active px-2.5 py-0.5 text-xs font-medium text-brand">
                   {areas[k] ?? k}
                 </span>
               ))}

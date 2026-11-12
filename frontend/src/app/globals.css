@@ -20,10 +20,13 @@
   --viz-1: #2447ff;
   --viz-2: #13895f;
   --viz-grid: #e9ecf1;
-  --sidebar: #ffffff;
-  --sidebar-ink: #475467;
-  --sidebar-active: #eef1ff;
-  --sidebar-line: #e4e7ec;
+  /* Menu lateral azul-marinho da marca (o degradê aparece só como detalhe). */
+  --sidebar: #0b1a3f;
+  --sidebar-ink: #a9b6d6;
+  --sidebar-ink-strong: #ffffff;
+  --sidebar-active: rgb(84 112 255 / 0.22);
+  --sidebar-line: rgb(255 255 255 / 0.08);
+  --nav-active: #eef1ff;
   color-scheme: light;
 }
 
@@ -42,10 +45,12 @@
   --viz-1: #5470ff;
   --viz-2: #199e70;
   --viz-grid: #1f2633;
-  --sidebar: #0d1119;
-  --sidebar-ink: #a8b3c7;
-  --sidebar-active: rgb(84 112 255 / 0.16);
-  --sidebar-line: #1d2533;
+  --sidebar: #070c18;
+  --sidebar-ink: #93a0bd;
+  --sidebar-ink-strong: #ffffff;
+  --sidebar-active: rgb(84 112 255 / 0.2);
+  --sidebar-line: rgb(255 255 255 / 0.06);
+  --nav-active: rgb(84 112 255 / 0.16);
   color-scheme: dark;
 }
 
@@ -66,10 +71,12 @@
   --color-sidebar-ink: var(--sidebar-ink);
   --color-sidebar-active: var(--sidebar-active);
   --color-sidebar-line: var(--sidebar-line);
+  --color-sidebar-ink-strong: var(--sidebar-ink-strong);
+  --color-nav-active: var(--nav-active);
   --color-brand-cyan: var(--brand-cyan);
   --color-brand-teal: var(--brand-teal);
   --color-brand-mint: var(--brand-mint);
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+  --font-sans: var(--font-brand), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
     sans-serif;
 }
 
