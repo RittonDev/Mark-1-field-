@@ -73,7 +73,8 @@ class User(UUIDPrimaryKey, Timestamps, Base):
     address_line: Mapped[str | None] = mapped_column(String(255))
     address_district: Mapped[str | None] = mapped_column(String(120))
     address_zip: Mapped[str | None] = mapped_column(String(10))
-    work_schedule: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # Sem jornada fica NULL de verdade (não o "null" do JSON).
+    work_schedule: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
     service_type_ids: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default="[]")
     avatar_external_url: Mapped[str | None] = mapped_column(String(1000))
     legacy: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
