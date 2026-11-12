@@ -1,20 +1,24 @@
 import uuid
 
 from fastapi import APIRouter, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
-from app.api.deps import DB, AdminUser, CurrentUser, ManagerUser
+from app.api.deps import DB, AdminUser, CurrentUser, ManagerUser, StaffUser, TicketManagerUser
 from app.core.access import channel_metadata
 from app.core.enums import TicketPriority
 from app.core.labels import enum_options
-from app.models import Category, SlaPolicy, Team
+from app.models import Category, Customer, ServiceType, SlaPolicy, Team
 from app.schemas.catalog import (
     CategoryCreate,
     CategoryOut,
     CategoryUpdate,
+    ServiceTypeCreate,
+    ServiceTypeOut,
+    ServiceTypeUpdate,
     SlaPolicyOut,
     SlaPolicyUpdate,
 )
+from app.services import durations
 from app.services.sla import DEFAULT_SLA_MINUTES
 from app.services.workflow import workflow_metadata
 
@@ -116,3 +120,109 @@ async def set_sla(
     policy.resolution_minutes = body.resolution_minutes
     await db.commit()
     return policy
+
+
+# ------------------------------------------------------------------ tipos de serviço
+
+
+async def _service_types_out(db: DB, types: list[ServiceType]) -> list[ServiceTypeOut]:
+    stats = await durations.observed_stats(db, [t.id for t in types])
+    out = []
+    for t in types:
+        observed = stats.get(t.id, {})
+        out.append(
+            ServiceTypeOut.model_validate(t).model_copy(
+                update={
+                    **observed,
+                    "suggested_minutes": durations.suggested_minutes(
+                        t.estimated_minutes,
+                        observed.get("observed_median_minutes"),
+                        observed.get("observed_count", 0),
+                    ),
+                }
+            )
+        )
+    return out
+
+
+async def _load_service_type(db: DB, service_type_id: uuid.UUID) -> ServiceType:
+    service_type = await db.scalar(
+        select(ServiceType)
+        .where(ServiceType.id == service_type_id)
+        .execution_options(populate_existing=True)
+    )
+    if service_type is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Tipo de serviço não encontrado")
+    return service_type
+
+
+@router.get("/service-types", response_model=list[ServiceTypeOut])
+async def list_service_types(
+    db: DB,
+    _: StaffUser,
+    customer_id: uuid.UUID | None = None,
+    q: str | None = None,
+    active: bool | None = None,
+) -> list[ServiceTypeOut]:
+    """Com `customer_id`: os tipos gerais + os do catálogo daquele cliente (para a Nova OS)."""
+    stmt = select(ServiceType).order_by(ServiceType.name)
+    if customer_id is not None:
+        stmt = stmt.where(
+            or_(ServiceType.customer_id.is_(None), ServiceType.customer_id == customer_id)
+        )
+    if active is not None:
+        stmt = stmt.where(ServiceType.is_active.is_(active))
+    if q:
+        stmt = stmt.where(ServiceType.name.ilike(f"%{q.strip()}%"))
+    return await _service_types_out(db, list(await db.scalars(stmt)))
+
+
+async def _check_service_type_refs(
+    db: DB, customer_id: uuid.UUID | None, category_id: uuid.UUID | None
+) -> None:
+    if customer_id is not None and await db.get(Customer, customer_id) is None:
+        raise HTTPException(422, "Cliente não encontrado")
+    if category_id is not None and await db.get(Category, category_id) is None:
+        raise HTTPException(422, "Categoria não encontrada")
+
+
+@router.post(
+    "/service-types", response_model=ServiceTypeOut, status_code=status.HTTP_201_CREATED
+)
+async def create_service_type(
+    body: ServiceTypeCreate, db: DB, _: TicketManagerUser
+) -> ServiceTypeOut:
+    await _check_service_type_refs(db, body.customer_id, body.category_id)
+    service_type = ServiceType(**body.model_dump(), is_active=True)
+    db.add(service_type)
+    await db.commit()
+    return (await _service_types_out(db, [await _load_service_type(db, service_type.id)]))[0]
+
+
+@router.patch("/service-types/{service_type_id}", response_model=ServiceTypeOut)
+async def update_service_type(
+    service_type_id: uuid.UUID, body: ServiceTypeUpdate, db: DB, _: TicketManagerUser
+) -> ServiceTypeOut:
+    service_type = await _load_service_type(db, service_type_id)
+    fields = body.model_dump(exclude_unset=True)
+    await _check_service_type_refs(db, None, fields.get("category_id"))
+    for key, value in fields.items():
+        setattr(service_type, key, value)
+    await db.commit()
+    return (await _service_types_out(db, [await _load_service_type(db, service_type_id)]))[0]
+
+
+@router.post("/service-types/{service_type_id}/apply-observed", response_model=ServiceTypeOut)
+async def apply_observed_duration(
+    service_type_id: uuid.UUID, db: DB, _: TicketManagerUser
+) -> ServiceTypeOut:
+    """A estimativa aprende: adota a mediana observada (arredondada a 5 min)."""
+    service_type = await _load_service_type(db, service_type_id)
+    current = (await _service_types_out(db, [service_type]))[0]
+    if current.suggested_minutes is None:
+        raise HTTPException(
+            422, "Sem sugestão: poucas OS concluídas ou a estimativa já está próxima do real"
+        )
+    service_type.estimated_minutes = current.suggested_minutes
+    await db.commit()
+    return (await _service_types_out(db, [await _load_service_type(db, service_type_id)]))[0]

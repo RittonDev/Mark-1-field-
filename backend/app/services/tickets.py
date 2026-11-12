@@ -23,6 +23,7 @@ from app.models import (
     Category,
     Customer,
     Location,
+    ServiceType,
     Team,
     Ticket,
     TicketAttachment,
@@ -40,7 +41,7 @@ from app.schemas.ticket import (
     TicketUpdate,
     WorklogCreate,
 )
-from app.services import sla, storage
+from app.services import durations, sla, storage
 from app.services.errors import NotFound, PermissionDenied, VersionConflict, WorkflowError
 from app.services.realtime import queue_event
 from app.services.workflow import (
@@ -553,6 +554,14 @@ async def update_ticket(
             team_id=refs["team_id"],
         )
 
+    if fields.get("service_type_id") is not None:
+        service_type = await _resolve_service_type(
+            db, fields["service_type_id"], fields.get("customer_id", ticket.customer_id)
+        )
+        # Trocar o tipo traz a estimativa dele, a menos que outra tenha sido informada.
+        if "estimated_minutes" not in fields:
+            fields["estimated_minutes"] = service_type.estimated_minutes
+
     if ("impact" in fields or "urgency" in fields) and "priority" not in fields:
         fields["priority"] = compute_priority(
             fields.get("impact", ticket.impact), fields.get("urgency", ticket.urgency)
@@ -632,7 +641,11 @@ async def transition_ticket(
 
     if payload.scheduled_start is not None:
         ticket.scheduled_start = payload.scheduled_start
-    if payload.scheduled_end is not None:
+        # Novo início sem fim: o fim vem da estimativa (e não sobra o fim de um agendamento antigo).
+        ticket.scheduled_end = _default_end(
+            payload.scheduled_start, payload.scheduled_end, ticket.estimated_minutes
+        )
+    elif payload.scheduled_end is not None:
         ticket.scheduled_end = payload.scheduled_end
     _check_schedule(ticket.scheduled_start, ticket.scheduled_end)
 
@@ -880,6 +893,8 @@ def filter_conditions(user: User, f: TicketFilters, now: datetime) -> list[Colum
         conds.append(Ticket.customer_id == f.customer_id)
     if f.location_id:
         conds.append(Ticket.location_id == f.location_id)
+    if f.service_type_id:
+        conds.append(Ticket.service_type_id == f.service_type_id)
     if f.asset_id:
         conds.append(Ticket.asset_id == f.asset_id)
     if f.category_id:

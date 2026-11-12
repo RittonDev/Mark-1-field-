@@ -1,10 +1,13 @@
 """Fluxo completo da OS pela API, contra PostgreSQL."""
 
+import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.config import settings
 from tests.conftest import World, requires_db
@@ -535,3 +538,95 @@ async def test_locations_are_first_class(client: AsyncClient, world: World) -> N
         headers=world.analyst.headers,
     )
     assert bad_customer.status_code == 422
+
+
+async def test_service_type_estimate_learns(
+    client: AsyncClient, world: World, engine: AsyncEngine
+) -> None:
+    h = world.analyst.headers
+    r = await client.post(
+        f"{API}/service-types",
+        json={"name": "Impressora A4 - Instalação", "estimated_minutes": 20},
+        headers=h,
+    )
+    assert r.status_code == 201, r.text
+    st = r.json()
+    assert (st["observed_count"], st["suggested_minutes"]) == (0, None)
+
+    # A OS herda a estimativa do tipo; agendar só com o início usa a estimativa para o fim.
+    t = await create(
+        client, world, service_type_id=st["id"], assignee_id=str(world.tech.user.id)
+    )
+    assert t["estimated_minutes"] == 20
+    assert t["service_type"]["name"] == "Impressora A4 - Instalação"
+    start = datetime(2026, 12, 1, 13, 0, tzinfo=UTC)
+    t = await transition(
+        client, world.tech.headers, t, "scheduled", scheduled_start=start.isoformat()
+    )
+    assert datetime.fromisoformat(t["scheduled_end"]) == start + timedelta(minutes=20)
+
+    # A duração real vem do tempo em "Em atendimento".
+    t = await transition(client, world.tech.headers, t, "in_progress")
+    assert t["work_started_at"] is not None
+    t = await transition(client, world.tech.headers, t, "resolved", resolution_notes="Instalada")
+    assert t["work_started_at"] is None
+    ids = [t["id"]]
+    for _ in range(2):
+        x = await create(
+            client, world, service_type_id=st["id"], assignee_id=str(world.tech.user.id)
+        )
+        x = await transition(client, world.tech.headers, x, "in_progress")
+        x = await transition(client, world.tech.headers, x, "resolved", resolution_notes="ok")
+        ids.append(x["id"])
+
+    # O que aconteceu de verdade: 3h55, 2h e 3h (a estimativa era 20 min).
+    async with engine.begin() as conn:
+        for ticket_id, minutes in zip(ids, (235, 120, 180), strict=True):
+            await conn.execute(
+                text("UPDATE tickets SET work_seconds = :s WHERE id = :i"),
+                {"s": minutes * 60, "i": uuid.UUID(ticket_id)},
+            )
+
+    listed = {x["id"]: x for x in (await client.get(f"{API}/service-types", headers=h)).json()}
+    st = listed[st["id"]]
+    assert st["observed_count"] == 3
+    assert st["observed_median_minutes"] == 180.0
+    assert st["suggested_minutes"] == 180
+
+    r = await client.post(f"{API}/service-types/{st['id']}/apply-observed", headers=h)
+    assert r.status_code == 200, r.text
+    assert (r.json()["estimated_minutes"], r.json()["suggested_minutes"]) == (180, None)
+
+    # A OS antiga mantém a estimativa com que foi agendada e mostra o real ao lado.
+    old = (await client.get(f"{API}/tickets/{ids[0]}", headers=h)).json()
+    assert (old["estimated_minutes"], old["actual_minutes"]) == (20, 235)
+    r = await client.get(f"{API}/tickets", params={"service_type_id": st["id"]}, headers=h)
+    assert r.json()["total"] == 3
+
+
+async def test_customer_specific_service_type(client: AsyncClient, world: World) -> None:
+    h = world.analyst.headers
+    other = (await client.post(f"{API}/customers", json={"name": "Outro"}, headers=h)).json()
+    st = (
+        await client.post(
+            f"{API}/service-types",
+            json={
+                "name": "Preventiva de loja - Outro",
+                "estimated_minutes": 240,
+                "customer_id": other["id"],
+            },
+            headers=h,
+        )
+    ).json()
+    r = await client.post(
+        f"{API}/tickets",
+        json={"title": "Preventiva", "customer_id": world.customer_id, "service_type_id": st["id"]},
+        headers=world.supervisor.headers,
+    )
+    assert r.status_code == 422
+    mine = (
+        await client.get(
+            f"{API}/service-types", params={"customer_id": world.customer_id}, headers=h
+        )
+    ).json()
+    assert st["id"] not in {x["id"] for x in mine}
