@@ -108,6 +108,10 @@ class TicketListItem(ORMModel):
     assignee: UserRef | None
     # Analista responsável (a fila dele), separado de quem executa (assignee).
     owner: UserRef | None = None
+    # Outros técnicos da visita, além do responsável.
+    helpers: list[UserRef] = []
+    # Nº do chamado no sistema do cliente.
+    client_reference: str | None = None
     team: Ref | None
     project: ProjectRef | None = None
     requester_name: str | None
@@ -197,6 +201,8 @@ class TicketDetail(TicketListItem):
     requester: UserRef | None
     requester_contact: str | None
     service_address: str | None
+    # Recado para o técnico: com quem falar, acesso, o que levar.
+    visit_note: str | None = None
     created_by: UserRef | None
     closed_at: datetime | None
     cancelled_at: datetime | None
@@ -296,11 +302,16 @@ class TicketCreate(BaseModel):
     requester_name: str | None = Field(default=None, max_length=160)
     requester_contact: str | None = Field(default=None, max_length=160)
     service_address: str | None = Field(default=None, max_length=255)
+    # Nº do chamado do cliente e o recado da visita para o técnico.
+    client_reference: str | None = Field(default=None, max_length=80)
+    visit_note: str | None = Field(default=None, max_length=5000)
     service_type_id: uuid.UUID | None = None
     estimated_minutes: int | None = Field(default=None, gt=0, le=60 * 24 * 7)
     team_id: uuid.UUID | None = None
     project_id: uuid.UUID | None = None
     assignee_id: uuid.UUID | None = None
+    # Outros técnicos da visita (só a gestão escolhe).
+    helper_ids: list[uuid.UUID] = Field(default_factory=list, max_length=6)
     # Analista responsável (só a gestão escolhe; sem informar, fica com quem abriu a OS).
     owner_id: uuid.UUID | None = None
     scheduled_start: datetime | None = None
@@ -325,10 +336,14 @@ class TicketUpdate(BaseModel):
     requester_name: str | None = Field(default=None, max_length=160)
     requester_contact: str | None = Field(default=None, max_length=160)
     service_address: str | None = Field(default=None, max_length=255)
+    client_reference: str | None = Field(default=None, max_length=80)
+    visit_note: str | None = Field(default=None, max_length=5000)
     service_type_id: uuid.UUID | None = None
     estimated_minutes: int | None = Field(default=None, gt=0, le=60 * 24 * 7)
     team_id: uuid.UUID | None = None
     project_id: uuid.UUID | None = None
+    # Só a gestão: troca os outros técnicos da visita (lista completa; [] tira todos).
+    helper_ids: list[uuid.UUID] | None = Field(default=None, max_length=6)
     # Só a gestão: transfere a OS para a fila de outro analista (null tira da fila).
     owner_id: uuid.UUID | None = None
     scheduled_start: datetime | None = None

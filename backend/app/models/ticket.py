@@ -4,6 +4,7 @@ from typing import Any
 
 from sqlalchemy import (
     Boolean,
+    Column,
     DateTime,
     Float,
     ForeignKey,
@@ -11,7 +12,9 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Table,
     Text,
+    func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -32,6 +35,16 @@ from app.models.asset import Asset
 from app.models.catalog import Category, ServiceType, ViolationReason
 from app.models.customer import Customer, Location
 from app.models.user import Team, User
+
+# Outros técnicos da visita, além do responsável: veem a OS no app e registram fotos,
+# acompanhamentos e horas. Iniciar, concluir e colher a assinatura ficam com o responsável.
+ticket_helpers = Table(
+    "ticket_helpers",
+    Base.metadata,
+    Column("ticket_id", ForeignKey("tickets.id", ondelete="CASCADE"), primary_key=True),
+    Column("user_id", ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, index=True),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+)
 
 
 class Ticket(UUIDPrimaryKey, Timestamps, Base):
@@ -70,6 +83,10 @@ class Ticket(UUIDPrimaryKey, Timestamps, Base):
     )
     # Endereço do atendimento quando diferente do cadastrado no local (como no Field Control).
     service_address: Mapped[str | None] = mapped_column(String(255))
+    # Nº do chamado no sistema do cliente (o identificador que ele passa): entra na busca.
+    client_reference: Mapped[str | None] = mapped_column(String(80), index=True)
+    # Observação da visita: o recado para o técnico (com quem falar, acesso, o que levar).
+    visit_note: Mapped[str | None] = mapped_column(Text)
     asset_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("assets.id", ondelete="SET NULL"), index=True
     )
@@ -197,6 +214,9 @@ class Ticket(UUIDPrimaryKey, Timestamps, Base):
         foreign_keys=[authorized_by_id], lazy="selectin"
     )
     team: Mapped[Team | None] = relationship(lazy="selectin")
+    helpers: Mapped[list[User]] = relationship(
+        secondary=ticket_helpers, lazy="selectin", order_by=User.name
+    )
     project: Mapped["Project | None"] = relationship(lazy="selectin")  # noqa: F821
     service_type: Mapped[ServiceType | None] = relationship(lazy="selectin")
     response_violation_reason: Mapped[ViolationReason | None] = relationship(
