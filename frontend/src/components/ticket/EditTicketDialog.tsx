@@ -6,7 +6,9 @@ import { LocationPicker } from "@/components/LocationPicker";
 import { useToast } from "@/components/Toaster";
 import { Button, Dialog, ErrorBox, Field, Input, Select, Textarea } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
-import { computePriority, LEVEL, LEVEL_ORDER, PRIORITY, PRIORITY_ORDER, TICKET_TYPE } from "@/lib/constants";
+import { useAuth } from "@/lib/auth";
+import { canManageTickets, computePriority, LEVEL, LEVEL_ORDER, PRIORITY, PRIORITY_ORDER, TICKET_TYPE } from "@/lib/constants";
+import { useProjects } from "@/lib/projects";
 import { useCategories, useServiceTypes, useTeams } from "@/lib/queries";
 import { formatMinutes } from "@/lib/format";
 import type { Level, Location, TicketDetail, TicketPriority, TicketType, TicketUpdatePayload } from "@/lib/types";
@@ -24,6 +26,9 @@ export function EditTicketDialog({ ticket, onClose }: { ticket: TicketDetail; on
   const [type, setType] = useState<TicketType>(ticket.type);
   const [categoryId, setCategoryId] = useState(ticket.category?.id ?? "");
   const [teamId, setTeamId] = useState(ticket.team?.id ?? "");
+  const { user } = useAuth();
+  const projects = useProjects({ enabled: canManageTickets(user?.role) });
+  const [projectId, setProjectId] = useState(ticket.project?.id ?? "");
   const [impact, setImpact] = useState<Level>(ticket.impact);
   const [urgency, setUrgency] = useState<Level>(ticket.urgency);
   const [priority, setPriority] = useState<TicketPriority>(ticket.priority);
@@ -47,6 +52,7 @@ export function EditTicketDialog({ ticket, onClose }: { ticket: TicketDetail; on
       if (type !== ticket.type) payload.type = type;
       if (categoryId !== (ticket.category?.id ?? "")) payload.category_id = categoryId || null;
       if (teamId !== (ticket.team?.id ?? "")) payload.team_id = teamId || null;
+      if (projectId !== (ticket.project?.id ?? "")) payload.project_id = projectId || null;
       if (impact !== ticket.impact) payload.impact = impact;
       if (urgency !== ticket.urgency) payload.urgency = urgency;
       if (priority !== ticket.priority) payload.priority = priority;
@@ -114,6 +120,21 @@ export function EditTicketDialog({ ticket, onClose }: { ticket: TicketDetail; on
         >
           <LocationPicker customerId={ticket.customer?.id ?? null} value={newLocation} onChange={setNewLocation} />
         </Field>
+        {canManageTickets(user?.role) ? (
+          <Field label="Projeto" hint="OS de projeto seguem os valores e a equipe do projeto" className="sm:col-span-2">
+            <Select value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+              <option value="">Não é de projeto (OS avulsa)</option>
+              {(projects.data ?? [])
+                .filter((p) => p.status === "active" || p.status === "planning" || p.id === projectId)
+                .map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.code} · {p.name}
+                    {p.customer ? ` (${p.customer.name})` : ""}
+                  </option>
+                ))}
+            </Select>
+          </Field>
+        ) : null}
         <Field label="Tipo de serviço">
           <Select
             value={serviceTypeId}

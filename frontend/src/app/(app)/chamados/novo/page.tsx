@@ -26,6 +26,7 @@ import {
   TICKET_TYPE,
 } from "@/lib/constants";
 import { formatMinutes, fromLocalInput } from "@/lib/format";
+import { useProjects } from "@/lib/projects";
 import { useAssignable, useCategories, useCustomers, useServiceTypes, useTeams } from "@/lib/queries";
 import type {
   Asset,
@@ -57,6 +58,7 @@ interface FormState {
   service_type_id: string;
   estimated_minutes: string;
   team_id: string;
+  project_id: string;
   assignee_id: string;
   scheduled_start: string;
   scheduled_end: string;
@@ -80,6 +82,7 @@ const INITIAL: FormState = {
   service_type_id: "",
   estimated_minutes: "",
   team_id: "",
+  project_id: "",
   assignee_id: "",
   scheduled_start: "",
   scheduled_end: "",
@@ -102,6 +105,7 @@ export default function NewTicketPage() {
   const teams = useTeams();
   const assignable = useAssignable(form.team_id || null, canAssign);
   const assigneeName = assignable.data?.find((u) => u.id === form.assignee_id)?.name;
+  const projects = useProjects({ enabled: canAssign });
   // Tipos gerais + catálogo do cliente da OS (só para quem gerencia OS).
   const serviceTypes = useServiceTypes({ customerId: form.customer_id || null, active: true, enabled: canAssign });
   const assets = useQuery({
@@ -161,6 +165,7 @@ export default function NewTicketPage() {
     };
     if (staff) {
       payload.team_id = form.team_id || null;
+      if (canAssign) payload.project_id = form.project_id || null;
       payload.assignee_id = canAssign ? form.assignee_id || null : null;
       payload.scheduled_start = fromLocalInput(form.scheduled_start);
       payload.scheduled_end = fromLocalInput(form.scheduled_end);
@@ -413,6 +418,20 @@ export default function NewTicketPage() {
             <Card>
               <CardHeader title="Atribuição e agenda" />
               <div className="flex flex-col gap-4 p-4">
+                {canAssign ? (
+                  <Field label="Projeto" hint="Marque se a OS faz parte de um projeto (valores e equipe próprios)">
+                    <Select value={form.project_id} onChange={(e) => set("project_id", e.target.value)}>
+                      <option value="">OS avulsa</option>
+                      {(projects.data ?? [])
+                        .filter((p) => p.status === "active" || p.status === "planning")
+                        .map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.code} · {p.name}
+                          </option>
+                        ))}
+                    </Select>
+                  </Field>
+                ) : null}
                 <Field label="Grupo técnico">
                   <Select
                     value={form.team_id}

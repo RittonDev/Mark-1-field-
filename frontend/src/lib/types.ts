@@ -254,6 +254,8 @@ export interface TicketListItem {
   location: LocationRef | null;
   assignee: UserRef | null;
   team: Ref | null;
+  /** OS de projeto (valores e equipe seguem o projeto). */
+  project: ProjectRef | null;
   requester_name: string | null;
   scheduled_start: ISODate | null;
   scheduled_end: ISODate | null;
@@ -437,6 +439,7 @@ export interface TicketCreatePayload {
   scheduled_start?: ISODate | null;
   scheduled_end?: ISODate | null;
   allow_conflict?: boolean;
+  project_id?: UUID | null;
 }
 
 export type TicketUpdatePayload = Partial<
@@ -897,4 +900,42 @@ export interface PublicQuote {
   decided_at: ISODate | null;
   approver_name: string | null;
   rejection_reason: string | null;
+}
+
+// Projetos
+export type ProjectStatus = "planning" | "active" | "paused" | "done" | "cancelled";
+
+export interface ProjectRef {
+  id: UUID;
+  number: number;
+  name: string;
+  code: string;
+}
+
+export interface Project {
+  id: UUID;
+  number: number;
+  code: string;
+  name: string;
+  customer: Ref | null;
+  description: string | null;
+  status: ProjectStatus;
+  start_date: string | null;
+  end_date: string | null;
+  contract_value: number | null;
+  pricing_notes: string | null;
+  manager: Ref | null;
+  team: Ref | null;
+  members: Ref[];
+  margin: number | null;
+  stats: {
+    tickets_total: number;
+    tickets_open: number;
+    tickets_done: number;
+    unproductive: number;
+    expenses_total: number;
+    quotes_approved_total: number;
+    progress: number;
+  };
+  created_at: ISODate;
 }
