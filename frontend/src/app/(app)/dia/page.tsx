@@ -1,9 +1,11 @@
 "use client";
 
+import clsx from "clsx";
 import { CalendarClock, ChevronLeft, ChevronRight, MapPin, Navigation } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { Button, Card, EmptyState, ErrorBox, Input, LoadingBlock, PageHeader, Select } from "@/components/ui";
+import { CountUp } from "@/components/motion";
 import { MessagesButton } from "@/components/ticket/MessagesPanel";
 import { QuickEditButton } from "@/components/ticket/QuickEditButton";
 import { errorMessage } from "@/lib/api";
@@ -16,15 +18,15 @@ import type { Activity, ActivityState, DaySummary } from "@/lib/types";
 // Fuso da operação (mesmo de settings.TIMEZONE na API).
 const OPERATION_TZ = "America/Sao_Paulo";
 
-const STATE: Record<ActivityState, { label: string; className: string }> = {
-  late: { label: "Atrasada", className: "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300" },
-  scheduled: { label: "Agendada", className: "bg-cyan-100 text-cyan-800 dark:bg-cyan-500/15 dark:text-cyan-300" },
-  en_route: { label: "Em deslocamento", className: "bg-sky-100 text-sky-800 dark:bg-sky-500/15 dark:text-sky-300" },
-  in_progress: { label: "Em atendimento", className: "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300" },
-  on_hold: { label: "Pendente", className: "bg-purple-100 text-purple-800 dark:bg-purple-500/15 dark:text-purple-300" },
-  rescheduled: { label: "Reagendada", className: "bg-indigo-100 text-indigo-800 dark:bg-indigo-500/15 dark:text-indigo-300" },
-  done: { label: "Concluída", className: "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300" },
-  pending: { label: "Na fila", className: "bg-slate-100 text-slate-700 dark:bg-slate-500/15 dark:text-slate-300" },
+const STATE: Record<ActivityState, { label: string; className: string; dot: string }> = {
+  late: { label: "Atrasada", className: "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300", dot: "bg-red-500" },
+  scheduled: { label: "Agendada", className: "bg-cyan-100 text-cyan-800 dark:bg-cyan-500/15 dark:text-cyan-300", dot: "bg-cyan-500" },
+  en_route: { label: "Em deslocamento", className: "bg-sky-100 text-sky-800 dark:bg-sky-500/15 dark:text-sky-300", dot: "bg-sky-500" },
+  in_progress: { label: "Em atendimento", className: "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300", dot: "bg-amber-500" },
+  on_hold: { label: "Pendente", className: "bg-purple-100 text-purple-800 dark:bg-purple-500/15 dark:text-purple-300", dot: "bg-purple-500" },
+  rescheduled: { label: "Reagendada", className: "bg-indigo-100 text-indigo-800 dark:bg-indigo-500/15 dark:text-indigo-300", dot: "bg-indigo-500" },
+  done: { label: "Concluída", className: "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300", dot: "bg-emerald-500" },
+  pending: { label: "Na fila", className: "bg-slate-100 text-slate-700 dark:bg-slate-500/15 dark:text-slate-300", dot: "bg-slate-400" },
 };
 
 const SUMMARY_ORDER: { key: keyof DaySummary; label: string; state?: ActivityState }[] = [
@@ -211,14 +213,26 @@ export default function DayPage() {
               type="button"
               disabled={!state}
               onClick={() => state && setStateFilter(active ? null : state)}
-              className={`rounded-lg border px-3 py-2 text-left transition ${
-                active ? "border-brand bg-brand/10" : "border-line bg-surface hover:bg-surface-2"
-              } ${!state ? "cursor-default" : ""} ${key === "late" && value > 0 ? "border-red-300 dark:border-red-500/40" : ""}`}
+              className={clsx(
+                "min-w-[7.5rem] rounded-xl border px-3.5 py-2.5 text-left shadow-elev-1 transition-[border-color,background-color,box-shadow,transform] duration-200",
+                active
+                  ? "border-brand bg-brand-soft ring-2 ring-brand/15"
+                  : "border-line bg-surface hover:-translate-y-0.5 hover:border-line-strong hover:shadow-elev-2",
+                !state && "cursor-default hover:translate-y-0",
+                key === "late" && value > 0 && !active && "border-red-200 dark:border-red-500/30",
+              )}
             >
-              <span className={`block text-lg font-semibold ${key === "late" && value > 0 ? "text-red-600 dark:text-red-400" : "text-ink"}`}>
-                {value}
+              <span className="flex items-center gap-1.5 text-xs text-ink-muted">
+                {state ? <span className={clsx("size-1.5 rounded-full", STATE[state].dot)} /> : null}
+                {label}
               </span>
-              <span className="text-xs text-ink-muted">{label}</span>
+              <CountUp
+                value={value}
+                className={clsx(
+                  "mt-0.5 block text-xl font-semibold tracking-tight",
+                  key === "late" && value > 0 ? "text-red-600 dark:text-red-400" : "text-ink",
+                )}
+              />
             </button>
           );
         })}
