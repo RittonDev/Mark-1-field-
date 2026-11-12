@@ -1,5 +1,6 @@
 import { LinearGradient } from "expo-linear-gradient";
-import { Image, StyleSheet, Text, View } from "react-native";
+import { Image, StyleSheet, View } from "react-native";
+import { Text } from "./Text";
 import { BRAND_GRADIENT, useTheme } from "../theme/theme";
 
 const MARK = require("../../assets/brand/maxxfield-mark.png");

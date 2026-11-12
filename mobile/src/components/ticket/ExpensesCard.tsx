@@ -1,4 +1,5 @@
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, View } from "react-native";
+import { Text } from "../Text";
 import Svg, { Path, Rect } from "react-native-svg";
 import { EXPENSE_KIND, EXPENSE_STATUS, formatBRL, formatQty } from "../../lib/expenses";
 import { formatDateTime } from "../../lib/format";

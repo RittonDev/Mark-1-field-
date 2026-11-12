@@ -2,6 +2,7 @@
 // não existe na web, então usa <input type="datetime-local">. Mesmas props do DateTimeField.tsx.
 
 import { View } from "react-native";
+import { brandFont } from "../theme/fonts";
 import { useTheme } from "../theme/theme";
 import { Button } from "./ui";
 
@@ -47,7 +48,7 @@ export function DateTimeField({
           fontSize: 15,
           color: colors.ink,
           backgroundColor: colors.surface,
-          fontFamily: "inherit",
+          fontFamily: brandFont("400") ?? "inherit",
         }}
       />
       {clearable && value ? <Button compact title="Limpar" variant="ghost" onPress={() => onChange(null)} /> : null}

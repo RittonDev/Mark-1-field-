@@ -1,7 +1,8 @@
 import { useStyles, useTheme, type Palette } from "../../theme/theme";
 import * as ImagePicker from "expo-image-picker";
 import { useCallback, useEffect, useState } from "react";
-import { Image, Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import { Image, Linking, Pressable, StyleSheet, View } from "react-native";
+import { Text } from "../Text";
 import { absoluteApiUrl, api, errorMessage } from "../../lib/api";
 import { useLiveQuery } from "../../lib/changes";
 import { confirmAction, notify } from "../../lib/dialogs";

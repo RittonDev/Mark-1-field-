@@ -1,4 +1,5 @@
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
+import { Text } from "./Text";
 import { RESPONSIBILITY } from "../lib/constants";
 import type { ViolationReason, ViolationScope } from "../lib/types";
 import { readable, useStyles, useTheme, type Palette } from "../theme/theme";

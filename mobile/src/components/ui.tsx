@@ -4,14 +4,15 @@ import {
   Pressable,
   StyleSheet,
   Switch,
-  Text,
   TextInput,
   View,
   type StyleProp,
   type TextInputProps,
   type ViewStyle,
 } from "react-native";
+import { brandFont } from "../theme/fonts";
 import { readable, tint, useStyles, useTheme, type Palette } from "../theme/theme";
+import { Text } from "./Text";
 
 export { tint };
 
@@ -114,12 +115,13 @@ export function Field({
 export function Input(props: TextInputProps) {
   const c = useTheme();
   const styles = useStyles(makeStyles);
+  const fontFamily = brandFont("400");
   return (
     <TextInput
       placeholderTextColor={c.placeholder}
       selectionColor={c.primary}
       {...props}
-      style={[styles.input, props.multiline && styles.inputMultiline, props.style]}
+      style={[styles.input, fontFamily ? { fontFamily } : null, props.multiline && styles.inputMultiline, props.style]}
     />
   );
 }

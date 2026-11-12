@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, useRef, useState, type ComponentRef } from "react";
-import { PanResponder, StyleSheet, Text, View, type LayoutChangeEvent } from "react-native";
+import { PanResponder, StyleSheet, View, type LayoutChangeEvent } from "react-native";
+import { Text } from "./Text";
 import Svg, { Path } from "react-native-svg";
 import { useTheme } from "../theme/theme";
 

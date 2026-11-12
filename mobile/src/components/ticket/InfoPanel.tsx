@@ -1,5 +1,6 @@
 import { useStyles, type Palette } from "../../theme/theme";
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, View } from "react-native";
+import { Text } from "../Text";
 import { LEVEL, RESPONSIBILITY, SLA_STATUS, TICKET_SOURCE, TICKET_TYPE } from "../../lib/constants";
 import { addressOf, callPhone, openInMaps } from "../../lib/device-actions";
 import { formatDateTime, formatDocument, formatRelative } from "../../lib/format";

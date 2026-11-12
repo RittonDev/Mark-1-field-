@@ -1,3 +1,4 @@
+import { useFonts } from "expo-font";
 import { SplashScreen, Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
@@ -11,6 +12,7 @@ import { restoreSession, startSession } from "../lib/auth";
 import { session, useSession } from "../lib/session";
 import { stopSync } from "../lib/sync";
 import { stopTracking } from "../lib/tracking";
+import { BRAND_FONTS, brandFont } from "../theme/fonts";
 import { loadThemePreference, useTheme } from "../theme/theme";
 
 void SplashScreen.preventAutoHideAsync();
@@ -18,18 +20,29 @@ void SplashScreen.preventAutoHideAsync();
 export default function RootLayout() {
   const { status, user } = useSession();
   const c = useTheme();
+  // Se a fonte não carregar, segue com a do sistema em vez de travar na abertura.
+  const [fontsLoaded, fontError] = useFonts(BRAND_FONTS);
+  const fontsSettled = fontsLoaded || Boolean(fontError);
   const signedIn = status === "signedIn";
   // Técnico importado nasce com senha provisória: troca antes de entrar no app.
   const mustChange = signedIn && mustChangePassword(user);
 
   useEffect(() => {
-    Promise.all([loadThemePreference(), restoreSession()])
-      .catch((error: unknown) => {
-        console.warn("Falha ao ler a sessão", error);
-        return session.signOut();
-      })
-      .finally(() => void SplashScreen.hideAsync());
+    Promise.all([loadThemePreference(), restoreSession()]).catch((error: unknown) => {
+      console.warn("Falha ao ler a sessão", error);
+      return session.signOut();
+    });
   }, []);
+
+  useEffect(() => {
+    if (fontError) console.warn("Falha ao carregar a fonte Manrope", fontError);
+  }, [fontError]);
+
+  // A splash só sai quando a sessão foi lida e a fonte resolvida, para não piscar texto sem estilo.
+  const ready = status !== "loading" && fontsSettled;
+  useEffect(() => {
+    if (ready) void SplashScreen.hideAsync();
+  }, [ready]);
 
   useEffect(() => {
     if (signedIn && !mustChange) {
@@ -41,7 +54,8 @@ export default function RootLayout() {
     }
   }, [status, signedIn, mustChange]);
 
-  if (status === "loading") return null;
+  if (!ready) return null;
+  const titleFont = brandFont("600");
 
   return (
     <SafeAreaProvider>
@@ -51,7 +65,8 @@ export default function RootLayout() {
           screenOptions={{
             headerStyle: { backgroundColor: c.surface },
             headerTintColor: c.ink,
-            headerTitleStyle: { fontWeight: "600", color: c.ink },
+            headerTitleStyle: titleFont ? { fontFamily: titleFont, color: c.ink } : { fontWeight: "600", color: c.ink },
+            headerBackTitleStyle: titleFont ? { fontFamily: brandFont("500") } : undefined,
             headerShadowVisible: false,
             contentStyle: { backgroundColor: c.canvas },
             headerBackTitle: "Voltar",

@@ -1,6 +1,7 @@
 import DateTimePicker, { DateTimePickerAndroid } from "@react-native-community/datetimepicker";
 import { useState } from "react";
-import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { Platform, Pressable, StyleSheet, View } from "react-native";
+import { Text } from "./Text";
 import { formatDateTime } from "../lib/format";
 import { useStyles, useTheme, type Palette } from "../theme/theme";
 import { Button } from "./ui";

@@ -1,6 +1,7 @@
 import { router, Stack } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, View } from "react-native";
+import { Text } from "../components/Text";
 import { BrandLogo, BrandRule } from "../components/Brand";
 import { Calendar } from "../components/Calendar";
 import { ConnectionBar } from "../components/ConnectionBar";

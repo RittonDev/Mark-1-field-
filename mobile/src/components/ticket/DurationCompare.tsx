@@ -1,5 +1,6 @@
 import { useStyles, type Palette } from "../../theme/theme";
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, View } from "react-native";
+import { Text } from "../Text";
 import { durationSummary } from "../../lib/duration";
 import { formatMinutes } from "../../lib/format";
 import type { TicketDetail } from "../../lib/types";

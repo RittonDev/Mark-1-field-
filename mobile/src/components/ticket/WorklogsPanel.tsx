@@ -1,6 +1,7 @@
 import { useStyles, useTheme, type Palette } from "../../theme/theme";
 import { useCallback, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
+import { Text } from "../Text";
 import { errorMessage } from "../../lib/api";
 import { useLiveQuery } from "../../lib/changes";
 import { isStaff } from "../../lib/constants";

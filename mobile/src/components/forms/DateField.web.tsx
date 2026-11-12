@@ -1,5 +1,6 @@
 // Pré-visualização no navegador: <input type="date">. Mesmas props do DateField.tsx.
 
+import { brandFont } from "../../theme/fonts";
 import { useTheme } from "../../theme/theme";
 
 export function DateField({
@@ -28,7 +29,7 @@ export function DateField({
         color: c.ink,
         backgroundColor: c.surface,
         colorScheme: c.scheme,
-        fontFamily: "inherit",
+        fontFamily: brandFont("400") ?? "inherit",
       }}
     />
   );

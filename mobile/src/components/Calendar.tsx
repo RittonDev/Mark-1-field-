@@ -4,7 +4,8 @@
 
 import { router } from "expo-router";
 import { useMemo, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
+import { Text } from "./Text";
 import { STATUS } from "../lib/constants";
 import { addDays, formatTime, startOfDay } from "../lib/format";
 import { isDone, ticketsOnDay } from "../lib/lists";

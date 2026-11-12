@@ -1,4 +1,5 @@
-import { Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { Image, Pressable, StyleSheet, View } from "react-native";
+import { Text } from "../Text";
 import { absoluteApiUrl } from "../../lib/api";
 import type { PendingPhoto } from "../../lib/db";
 import { photoNeed } from "../../lib/forms";

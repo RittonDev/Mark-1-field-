@@ -1,7 +1,8 @@
 import { useStyles, useTheme, type Palette } from "../../theme/theme";
 import { Stack, useLocalSearchParams } from "expo-router";
 import { useCallback, useState } from "react";
-import { ActivityIndicator, KeyboardAvoidingView, Platform, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, KeyboardAvoidingView, Platform, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
+import { Text } from "../../components/Text";
 import { PriorityBadge, ProjectBadge, SlaBadge, StatusBadge } from "../../components/badges";
 import { ConnectionBar } from "../../components/ConnectionBar";
 import { DurationCompare } from "../../components/ticket/DurationCompare";

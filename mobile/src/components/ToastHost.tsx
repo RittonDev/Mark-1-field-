@@ -1,4 +1,5 @@
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
+import { Text } from "./Text";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { dismissToast, useToasts } from "../lib/toast";
 import { useStyles, useTheme, type Palette } from "../theme/theme";
