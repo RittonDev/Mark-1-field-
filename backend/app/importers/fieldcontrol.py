@@ -72,7 +72,7 @@ from app.models import (
     ViolationReason,
 )
 from app.schemas.forms import FormField
-from app.services import geo, technician_regions
+from app.services import cities, geo, technician_regions
 
 log = logging.getLogger("fieldcontrol")
 
@@ -859,6 +859,16 @@ class Importer:
             phone = next((p for p in phones if p.get("primary")), phones[0] if phones else None)
             notes = clip(c.get("notes"), 5000)
             doc = digits(c.get("documentNumber"))[:20] or None
+            # Ficha completa: todos os contatos, endereço da matriz, logo e origem.
+            all_contacts = contacts_of(contacts)
+            hq = c.get("address") or {}
+            hq_parts = address_parts(hq)
+            hq_coords = hq.get("coords") or {}
+            hq_lat, hq_lng = hq_coords.get("latitude"), hq_coords.get("longitude")
+            if not geo.valid_coords(hq_lat, hq_lng):
+                hq_lat = hq_lng = None
+            if len(all_contacts) >= 2:
+                self.report.add("customers", "with_2plus_contacts")
             values = {
                 "name": clip(c.get("name"), 200) or "Cliente sem nome",
                 "email": clip(email.get("address"), 255) if email else None,
@@ -868,11 +878,24 @@ class Importer:
                 "notes": notes,
                 "is_active": not c.get("archived"),
                 "tags": tags_of(c.get("labels")),
+                "contacts": all_contacts,
+                "address_line": hq_parts["line"],
+                "district": hq_parts["district"],
+                "city": hq_parts["city"],
+                "state": hq_parts["state"],
+                "zip_code": hq_parts["zip"],
+                "latitude": hq_lat,
+                "longitude": hq_lng,
+                "logo_url": clip(c.get("avatarUrl"), 1000),
+                "legacy": customer_legacy(c),
             }
             existing = self.ref("customer", c.get("id"))
             if existing:
+                fc_created = parse_ts(c.get("createdAt"))
                 await self.db.execute(
-                    update(Customer).where(Customer.id == existing).values(**values)
+                    update(Customer)
+                    .where(Customer.id == existing)
+                    .values(**values, **({"created_at": fc_created} if fc_created else {}))
                 )
                 self.report.add("customers", "updated")
                 continue
@@ -919,7 +942,13 @@ class Importer:
             contacts = loc.get("contacts") or {}
             phones = contacts.get("phones") or []
             emails = contacts.get("emails") or []
-            contact_name = (phones[0].get("name") if phones else None) or (
+            all_contacts = contacts_of(contacts)
+            if len(all_contacts) >= 2:
+                self.report.add("locations", "with_2plus_contacts")
+            primary_phone = next(
+                (p for p in phones if p.get("primary")), phones[0] if phones else None
+            )
+            contact_name = (primary_phone.get("name") if primary_phone else None) or (
                 emails[0].get("name") if emails else None
             )
             uf = to_uf(address.get("state"))
@@ -938,16 +967,29 @@ class Importer:
                 "latitude": lat,
                 "longitude": lng,
                 "contact_name": clip(contact_name, 160),
-                "contact_phone": fmt_phone(phones[0].get("countryCode"), phones[0].get("number"))
-                if phones
+                "contact_phone": fmt_phone(
+                    primary_phone.get("countryCode"), primary_phone.get("number")
+                )
+                if primary_phone
                 else None,
                 "notes": clip(loc.get("notes"), 5000),
                 "is_active": not loc.get("archived"),
+                # Ficha completa: todos os contatos e a origem.
+                "contacts": all_contacts,
+                "legacy": {
+                    "source": SOURCE,
+                    "id": loc.get("id"),
+                    "created_at": loc.get("createdAt"),
+                    "territories": territories_of(loc),
+                },
             }
             existing = self.ref("location", loc.get("id"))
             if existing:
+                fc_created = parse_ts(loc.get("createdAt"))
                 await self.db.execute(
-                    update(Location).where(Location.id == existing).values(**values)
+                    update(Location)
+                    .where(Location.id == existing)
+                    .values(**values, **({"created_at": fc_created} if fc_created else {}))
                 )
                 self.report.add("locations", "updated")
                 continue
@@ -968,6 +1010,25 @@ class Importer:
                 rows = []
         await self.bulk(Location, rows)
         await self.flush_refs()
+
+    async def assign_technician_services(self) -> None:
+        """Serviços que cada técnico faz (skills do Field Control), já com os tipos de serviço."""
+        for e in iter_records(self.file("colaboradores.json")):
+            uid = self.user(e.get("id"), e.get("_id"))
+            if not uid:
+                continue
+            ids: list[str] = []
+            for skill in e.get("skills") or []:
+                sid = self.ref("service_type", (skill or {}).get("serviceId"))
+                if sid and str(sid) not in ids:
+                    ids.append(str(sid))
+            await self.db.execute(
+                update(User)
+                .where(User.id == uid, User.role == UserRole.TECHNICIAN)
+                .values(service_type_ids=ids)
+            )
+            if ids:
+                self.report.add("technicians", "with_services")
 
     async def import_catalogs(self) -> None:
         # Tipos de serviço (o "serviço" do Field Control).
@@ -1771,6 +1832,7 @@ async def run_import(
         ("customers", importer.import_customers),
         ("locations", importer.import_locations),
         ("catalogs", importer.import_catalogs),
+        ("technician_services", importer.assign_technician_services),
         ("tickets", importer.import_tickets),
         ("forms", importer.import_forms),
         ("comments", importer.import_comments),
@@ -1785,6 +1847,8 @@ async def run_import(
     report.counts["locations_coords"] = Counter(
         {"invalid_cleared_in_db": await geo.clear_invalid_location_coords(db)}
     )
+    # Uma grafia por cidade ("FORTALEZA" e "Fortaleza" viram "Fortaleza") antes das regiões.
+    report.counts["cities_normalized"] = Counter(await cities.normalize_all(db))
     # Região de atuação dos técnicos (a cidade onde mais atenderam), com o histórico já importado.
     started = time.monotonic()
     report.counts["technician_regions"] = Counter(await technician_regions.refresh_bases(db))
