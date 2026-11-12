@@ -38,28 +38,41 @@ interface NavItem {
   label: string;
   icon: React.ComponentType<{ className?: string }>;
   visible: (role: UserRole) => boolean;
+  group: NavGroup;
 }
 
+type NavGroup = "main" | "operation" | "commercial" | "base" | "analysis" | "setup";
+
+// Seções do menu na ordem do dia a dia: atender, vender, cadastrar, analisar, configurar.
+const GROUPS: { key: NavGroup; label: string | null }[] = [
+  { key: "main", label: null },
+  { key: "operation", label: "Operação" },
+  { key: "commercial", label: "Comercial" },
+  { key: "base", label: "Base" },
+  { key: "analysis", label: "Análise" },
+  { key: "setup", label: "Configuração" },
+];
+
 const NAV: NavItem[] = [
-  { href: "/chamados", label: "Chamados", icon: Ticket, visible: () => true },
-  { href: "/agenda", label: "Calendário", icon: CalendarDays, visible: canManageTickets },
-  { href: "/dia", label: "Atividades do dia", icon: CalendarClock, visible: isStaff },
-  { href: "/mapa", label: "Mapa ao vivo", icon: MapPinned, visible: canManageTickets },
-  { href: "/quadro", label: "Quadro", icon: SquareKanban, visible: isStaff },
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, visible: isStaff },
-  { href: "/relatorios", label: "Relatórios", icon: BarChart3, visible: canManageTickets },
-  { href: "/clientes", label: "Clientes", icon: Building2, visible: isStaff },
-  { href: "/locais", label: "Locais", icon: MapPin, visible: isStaff },
-  { href: "/tipos-servico", label: "Tipos de serviço", icon: Timer, visible: canManageTickets },
-  { href: "/formularios", label: "Formulários", icon: ClipboardList, visible: canManageTickets },
-  { href: "/projetos", label: "Projetos", icon: FolderKanban, visible: canManageTickets },
-  { href: "/orcamentos", label: "Orçamentos", icon: FileText, visible: canManageTickets },
-  { href: "/custos", label: "Custos extras", icon: Receipt, visible: canManageTickets },
-  { href: "/assistencia", label: "Assistência externa", icon: PackageSearch, visible: canManageTickets },
-  { href: "/usuarios", label: "Usuários", icon: Users, visible: canManageTickets },
-  { href: "/tecnicos", label: "Técnicos", icon: HardHat, visible: canManageTickets },
-  { href: "/homologacao", label: "Homologação", icon: BadgeCheck, visible: canManageTickets },
-  { href: "/configuracoes", label: "Configurações", icon: Settings, visible: isManager },
+  { href: "/chamados", label: "Chamados", icon: Ticket, visible: () => true, group: "main" },
+  { href: "/agenda", label: "Calendário", icon: CalendarDays, visible: canManageTickets, group: "operation" },
+  { href: "/dia", label: "Atividades do dia", icon: CalendarClock, visible: isStaff, group: "operation" },
+  { href: "/mapa", label: "Mapa ao vivo", icon: MapPinned, visible: canManageTickets, group: "operation" },
+  { href: "/quadro", label: "Quadro", icon: SquareKanban, visible: isStaff, group: "operation" },
+  { href: "/assistencia", label: "Assistência externa", icon: PackageSearch, visible: canManageTickets, group: "operation" },
+  { href: "/orcamentos", label: "Orçamentos", icon: FileText, visible: canManageTickets, group: "commercial" },
+  { href: "/projetos", label: "Projetos", icon: FolderKanban, visible: canManageTickets, group: "commercial" },
+  { href: "/custos", label: "Custos extras", icon: Receipt, visible: canManageTickets, group: "commercial" },
+  { href: "/clientes", label: "Clientes", icon: Building2, visible: isStaff, group: "base" },
+  { href: "/locais", label: "Locais", icon: MapPin, visible: isStaff, group: "base" },
+  { href: "/tecnicos", label: "Técnicos", icon: HardHat, visible: canManageTickets, group: "base" },
+  { href: "/homologacao", label: "Homologação", icon: BadgeCheck, visible: canManageTickets, group: "base" },
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, visible: isStaff, group: "analysis" },
+  { href: "/relatorios", label: "Relatórios", icon: BarChart3, visible: canManageTickets, group: "analysis" },
+  { href: "/formularios", label: "Formulários", icon: ClipboardList, visible: canManageTickets, group: "setup" },
+  { href: "/tipos-servico", label: "Tipos de serviço", icon: Timer, visible: canManageTickets, group: "setup" },
+  { href: "/usuarios", label: "Usuários", icon: Users, visible: canManageTickets, group: "setup" },
+  { href: "/configuracoes", label: "Configurações", icon: Settings, visible: isManager, group: "setup" },
 ];
 
 export function visibleNav(role: UserRole) {
@@ -76,51 +89,70 @@ export function Sidebar({ user }: { user: User }) {
     staleTime: 60_000,
   });
   const badges: Record<string, number> = { "/homologacao": pending.data?.pending ?? 0 };
+  const items = visibleNav(user.role);
   return (
-    <aside className="sticky top-0 flex h-screen w-16 shrink-0 flex-col border-r border-sidebar-line bg-sidebar text-sidebar-ink lg:w-60">
-      <Link href="/chamados" className="flex h-14 items-center px-4" aria-label="Maxx Field — chamados">
+    <aside className="sticky top-0 flex h-screen w-16 shrink-0 flex-col bg-sidebar text-sidebar-ink lg:w-60">
+      <Link href="/chamados" className="flex h-14 shrink-0 items-center px-4" aria-label="Maxx Field — chamados">
         <span className="lg:hidden">
-          <Logo compact />
+          <Logo compact inverse />
         </span>
         <span className="hidden lg:inline-flex">
-          <Logo />
+          <Logo inverse />
         </span>
       </Link>
-      <div className="brand-gradient mx-4 h-0.5 w-10 rounded-full" />
-      <nav className="mt-2 flex flex-1 flex-col gap-0.5 px-2">
-        {visibleNav(user.role).map((item) => {
-          const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
-          const Icon = item.icon;
+      <nav className="flex-1 overflow-y-auto px-2 pb-4" aria-label="Menu principal">
+        {GROUPS.map((group) => {
+          const groupItems = items.filter((i) => i.group === group.key);
+          if (!groupItems.length) return null;
           return (
-            <Link
-              key={item.href}
-              href={item.href}
-              title={item.label}
-              className={clsx(
-                "flex h-9 items-center gap-3 rounded-md px-3 text-sm transition-colors",
-                active ? "bg-sidebar-active font-medium text-brand" : "hover:bg-surface-2 hover:text-ink",
-              )}
-            >
-              <span className="relative shrink-0">
-                <Icon className="size-4" />
-                {badges[item.href] ? (
-                  <span className="absolute -top-1.5 -right-1.5 size-2 rounded-full bg-red-500 lg:hidden" aria-hidden />
-                ) : null}
-              </span>
-              <span className="hidden flex-1 lg:inline">{item.label}</span>
-              {badges[item.href] ? (
-                <span
-                  className="hidden rounded-full bg-red-500 px-1.5 text-[11px] leading-[18px] font-semibold text-white tabular-nums lg:inline"
-                  aria-label={`${badges[item.href]} pendentes`}
-                >
-                  {badges[item.href]}
-                </span>
+            <div key={group.key} className={group.label ? "mt-5" : "mt-2"}>
+              {group.label ? (
+                <p className="mb-1 hidden px-3 text-[10px] font-semibold tracking-[0.12em] text-sidebar-ink/60 uppercase lg:block">
+                  {group.label}
+                </p>
               ) : null}
-            </Link>
+              <div className="flex flex-col gap-0.5">
+                {groupItems.map((item) => {
+                  const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+                  const Icon = item.icon;
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      title={item.label}
+                      aria-current={active ? "page" : undefined}
+                      className={clsx(
+                        "relative flex h-9 items-center gap-3 rounded-md px-3 text-[13px] transition-colors",
+                        active
+                          ? "bg-sidebar-active font-semibold text-sidebar-ink-strong"
+                          : "hover:bg-white/5 hover:text-sidebar-ink-strong",
+                      )}
+                    >
+                      {active ? <span className="brand-gradient absolute inset-y-1.5 left-0 w-[3px] rounded-r" aria-hidden /> : null}
+                      <span className="relative shrink-0">
+                        <Icon className="size-4" />
+                        {badges[item.href] ? (
+                          <span className="absolute -top-1.5 -right-1.5 size-2 rounded-full bg-red-500 lg:hidden" aria-hidden />
+                        ) : null}
+                      </span>
+                      <span className="hidden flex-1 truncate lg:inline">{item.label}</span>
+                      {badges[item.href] ? (
+                        <span
+                          className="hidden rounded-full bg-red-500 px-1.5 text-[11px] leading-[18px] font-semibold text-white tabular-nums lg:inline"
+                          aria-label={`${badges[item.href]} pendentes`}
+                        >
+                          {badges[item.href]}
+                        </span>
+                      ) : null}
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
           );
         })}
       </nav>
-      <div className="hidden px-4 py-3 text-[11px] text-sidebar-ink/70 lg:block">Maxx Field · v0.1</div>
+      <div className="hidden border-t border-sidebar-line px-4 py-3 text-[11px] text-sidebar-ink/60 lg:block">Maxx Field · v0.1</div>
     </aside>
   );
 }

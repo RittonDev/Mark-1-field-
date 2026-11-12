@@ -5,7 +5,16 @@ import Image from "next/image";
 import { useSyncExternalStore } from "react";
 
 /** Logo Maxx Field: símbolo (degradê da marca) + nome em texto, que acompanha o tema. */
-export function Logo({ compact = false, size = "md" }: { compact?: boolean; size?: "md" | "lg" }) {
+export function Logo({
+  compact = false,
+  size = "md",
+  inverse = false,
+}: {
+  compact?: boolean;
+  size?: "md" | "lg";
+  /** Texto claro, para fundo escuro (menu lateral). */
+  inverse?: boolean;
+}) {
   const height = size === "lg" ? 30 : 22;
   return (
     <span className="inline-flex items-center gap-2">
@@ -17,7 +26,9 @@ export function Logo({ compact = false, size = "md" }: { compact?: boolean; size
         priority
       />
       {compact ? null : (
-        <span className={`leading-none tracking-tight text-ink ${size === "lg" ? "text-2xl" : "text-[17px]"}`}>
+        <span
+          className={`leading-none tracking-tight ${inverse ? "text-white" : "text-ink"} ${size === "lg" ? "text-2xl" : "text-[17px]"}`}
+        >
           <span className="font-semibold">Maxx</span> <span className="font-normal">Field</span>
         </span>
       )}
