@@ -557,7 +557,9 @@ async def assign_ticket(
 async def take_ticket(db: AsyncSession, ticket: Ticket, actor: User) -> Ticket:
     if not can_take(actor, ticket):
         raise PermissionDenied("Esta OS não pode ser assumida por você")
-    await _assign(db, ticket, actor.id, None, actor, now=utcnow(), note="Assumida pelo próprio usuário")
+    await _assign(
+        db, ticket, actor.id, None, actor, now=utcnow(), note="Assumida pelo próprio usuário"
+    )
     return ticket
 
 
