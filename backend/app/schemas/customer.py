@@ -1,13 +1,26 @@
 import uuid
 from datetime import datetime
+from typing import Annotated
 
-from pydantic import BaseModel, Field
+from pydantic import AfterValidator, BaseModel, Field
 
+from app.core.documents import normalize_document
 from app.core.enums import AssetType
 from app.schemas.common import ORMModel, Ref
 
+# CPF ou CNPJ (inclusive alfanumérico); aceita com ou sem pontuação, guarda limpo.
+Document = Annotated[str | None, Field(max_length=20), AfterValidator(normalize_document)]
 
-class CustomerOut(ORMModel):
+
+class TicketStats(BaseModel):
+    """Histórico resumido, derivado das OS (não é digitado)."""
+
+    open_tickets: int = 0
+    total_tickets: int = 0
+    last_ticket_at: datetime | None = None
+
+
+class CustomerOut(ORMModel, TicketStats):
     id: uuid.UUID
     name: str
     document: str | None
@@ -16,11 +29,12 @@ class CustomerOut(ORMModel):
     notes: str | None
     is_active: bool
     created_at: datetime
+    locations_count: int = 0
 
 
 class CustomerCreate(BaseModel):
     name: str = Field(min_length=2, max_length=200)
-    document: str | None = Field(default=None, max_length=20)
+    document: Document = None
     email: str | None = None
     phone: str | None = None
     notes: str | None = None
@@ -28,18 +42,20 @@ class CustomerCreate(BaseModel):
 
 class CustomerUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=200)
-    document: str | None = Field(default=None, max_length=20)
+    document: Document = None
     email: str | None = None
     phone: str | None = None
     notes: str | None = None
     is_active: bool | None = None
 
 
-class LocationOut(ORMModel):
+class LocationOut(ORMModel, TicketStats):
     id: uuid.UUID
     customer_id: uuid.UUID
     customer: Ref
     name: str
+    code: str | None
+    document: str | None
     address_line: str | None
     district: str | None
     city: str | None
@@ -55,6 +71,8 @@ class LocationOut(ORMModel):
 
 class LocationCreate(BaseModel):
     name: str = Field(min_length=2, max_length=200)
+    code: str | None = Field(default=None, max_length=40)
+    document: Document = None
     address_line: str | None = None
     district: str | None = None
     city: str | None = None

@@ -27,7 +27,11 @@ class Location(UUIDPrimaryKey, Timestamps, Base):
     customer_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("customers.id", ondelete="CASCADE"), index=True
     )
-    name: Mapped[str] = mapped_column(String(200))
+    name: Mapped[str] = mapped_column(String(200), index=True)
+    # Código interno do cliente para a filial (ex.: "Loja 41", "CD-02").
+    code: Mapped[str | None] = mapped_column(String(40), index=True)
+    # Filial é entidade fiscal: CNPJ próprio (pode repetir entre andares/salas do mesmo prédio).
+    document: Mapped[str | None] = mapped_column(String(20), index=True)
     address_line: Mapped[str | None] = mapped_column(String(255))
     district: Mapped[str | None] = mapped_column(String(120))
     city: Mapped[str | None] = mapped_column(String(120))

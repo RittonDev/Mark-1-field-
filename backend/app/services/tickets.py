@@ -442,6 +442,7 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
         requester_id=requester_id,
         requester_name=requester_name,
         requester_contact=data.requester_contact,
+        service_address=(data.service_address or "").strip() or None,
         created_by_id=actor.id,
         team_id=team_id,
         scheduled_start=scheduled_start,
@@ -829,6 +830,8 @@ def filter_conditions(user: User, f: TicketFilters, now: datetime) -> list[Colum
         conds.append(Ticket.team_id == f.team_id)
     if f.customer_id:
         conds.append(Ticket.customer_id == f.customer_id)
+    if f.location_id:
+        conds.append(Ticket.location_id == f.location_id)
     if f.asset_id:
         conds.append(Ticket.asset_id == f.asset_id)
     if f.category_id:

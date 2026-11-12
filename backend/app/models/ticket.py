@@ -65,8 +65,10 @@ class Ticket(UUIDPrimaryKey, Timestamps, Base):
         ForeignKey("customers.id", ondelete="SET NULL"), index=True
     )
     location_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("locations.id", ondelete="SET NULL")
+        ForeignKey("locations.id", ondelete="SET NULL"), index=True
     )
+    # Endereço do atendimento quando diferente do cadastrado no local (como no Field Control).
+    service_address: Mapped[str | None] = mapped_column(String(255))
     asset_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("assets.id", ondelete="SET NULL"), index=True
     )
