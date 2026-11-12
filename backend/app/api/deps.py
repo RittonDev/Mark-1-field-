@@ -51,6 +51,13 @@ def require_roles(*roles: UserRole):  # noqa: ANN201
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
 StaffUser = Annotated[
+    User,
+    Depends(
+        require_roles(UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.ANALYST, UserRole.TECHNICIAN)
+    ),
+]
+# Gestão completa das OS e dos cadastros operacionais (clientes, locais) na web.
+TicketManagerUser = Annotated[
     User, Depends(require_roles(UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.ANALYST))
 ]
 ManagerUser = Annotated[User, Depends(require_roles(UserRole.ADMIN, UserRole.SUPERVISOR))]

@@ -113,8 +113,13 @@ def test_requester_permissions() -> None:
     assert not _can(UserRole.REQUESTER, S.RESOLVED, S.CLOSED, is_requester=False)
 
 
-def test_analyst_needs_assignment_or_team() -> None:
-    assert _can(UserRole.ANALYST, S.ASSIGNED, S.IN_PROGRESS, assignee=True)
-    assert _can(UserRole.ANALYST, S.ASSIGNED, S.IN_PROGRESS, same_team=True)
-    assert not _can(UserRole.ANALYST, S.ASSIGNED, S.IN_PROGRESS)
+def test_technician_needs_assignment_or_team() -> None:
+    assert _can(UserRole.TECHNICIAN, S.ASSIGNED, S.IN_PROGRESS, assignee=True)
+    assert _can(UserRole.TECHNICIAN, S.ASSIGNED, S.IN_PROGRESS, same_team=True)
+    assert not _can(UserRole.TECHNICIAN, S.ASSIGNED, S.IN_PROGRESS)
+
+
+def test_analyst_manages_any_ticket() -> None:
+    assert _can(UserRole.ANALYST, S.ASSIGNED, S.IN_PROGRESS)
+    assert _can(UserRole.ANALYST, S.RESOLVED, S.CLOSED, is_requester=False)
     assert _can(UserRole.SUPERVISOR, S.ASSIGNED, S.IN_PROGRESS)

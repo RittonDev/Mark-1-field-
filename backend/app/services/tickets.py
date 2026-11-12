@@ -57,15 +57,17 @@ from app.services.workflow import (
 S = TicketStatus
 FIELD_ACTIVE = frozenset({S.ASSIGNED, S.SCHEDULED, S.EN_ROUTE, S.IN_PROGRESS})
 FINAL = frozenset({S.CLOSED, S.CANCELLED})
+# Quem assume sozinho uma OS sem responsável ao iniciar o atendimento.
+SELF_ASSIGN_ROLES = frozenset({UserRole.ANALYST, UserRole.TECHNICIAN})
 
 
 # --------------------------------------------------------------------------- visibilidade
 
 
 def visibility_clause(user: User) -> ColumnElement[bool] | None:
-    if user.is_manager:
+    if user.can_manage_tickets:
         return None
-    if user.role == UserRole.ANALYST:
+    if user.role == UserRole.TECHNICIAN:
         conds: list[ColumnElement[bool]] = [
             Ticket.assignee_id == user.id,
             and_(Ticket.assignee_id.is_(None), Ticket.team_id.is_(None)),
@@ -77,9 +79,9 @@ def visibility_clause(user: User) -> ColumnElement[bool] | None:
 
 
 def can_view(user: User, ticket: Ticket) -> bool:
-    if user.is_manager:
+    if user.can_manage_tickets:
         return True
-    if user.role == UserRole.ANALYST:
+    if user.role == UserRole.TECHNICIAN:
         return (
             ticket.assignee_id == user.id
             or (ticket.assignee_id is None and ticket.team_id is None)
@@ -91,9 +93,9 @@ def can_view(user: User, ticket: Ticket) -> bool:
 def can_edit(user: User, ticket: Ticket) -> bool:
     if ticket.status in FINAL:
         return False
-    if user.is_manager:
+    if user.can_manage_tickets:
         return True
-    if user.role == UserRole.ANALYST:
+    if user.role == UserRole.TECHNICIAN:
         return ticket.assignee_id == user.id or (
             user.team_id is not None and ticket.team_id == user.team_id
         )
@@ -101,7 +103,7 @@ def can_edit(user: User, ticket: Ticket) -> bool:
 
 
 def can_assign(user: User, ticket: Ticket) -> bool:
-    return user.is_manager and ticket.status not in FINAL
+    return user.can_manage_tickets and ticket.status not in FINAL
 
 
 def can_take(user: User, ticket: Ticket) -> bool:
@@ -109,7 +111,7 @@ def can_take(user: User, ticket: Ticket) -> bool:
         user.is_staff
         and ticket.status in OPEN_STATUSES
         and ticket.assignee_id != user.id
-        and (user.is_manager or ticket.assignee_id is None)
+        and (user.can_manage_tickets or ticket.assignee_id is None)
         and can_view(user, ticket)
     )
 
@@ -128,11 +130,11 @@ def allowed_transitions(user: User, ticket: Ticket) -> list[TicketStatus]:
             to_status=to,
         ):
             continue
-        # Sem analista, só um analista consegue (ele assume automaticamente).
+        # Sem responsável, só quem pode assumir a OS consegue (assume automaticamente).
         if (
             STATUS_INFO[to].requires_assignee
             and ticket.assignee_id is None
-            and user.role != UserRole.ANALYST
+            and user.role not in SELF_ASSIGN_ROLES
         ):
             continue
         result.append(to)
@@ -468,8 +470,8 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
     queue_event(db, "created", ticket, actor, {"title": ticket.title})
 
     if data.assignee_id is not None and not is_requester:
-        if not actor.is_manager and data.assignee_id != actor.id:
-            raise PermissionDenied("Somente supervisores atribuem OS a outros analistas")
+        if not actor.can_manage_tickets and data.assignee_id != actor.id:
+            raise PermissionDenied("Técnicos só podem atribuir a OS a si mesmos")
         await _assign(db, ticket, data.assignee_id, None, actor, now=now)
     return ticket
 
@@ -546,7 +548,7 @@ async def assign_ticket(
     actor: User,
 ) -> Ticket:
     if not can_assign(actor, ticket):
-        raise PermissionDenied("Somente supervisores atribuem OS")
+        raise PermissionDenied("Somente analistas e supervisores atribuem OS")
     check_version(ticket, expected_version)
     await _assign(db, ticket, assignee_id, team_id, actor, now=utcnow(), note=note)
     return ticket
@@ -584,7 +586,7 @@ async def transition_ticket(
     _check_schedule(ticket.scheduled_start, ticket.scheduled_end)
 
     auto_assign = (
-        actor.role == UserRole.ANALYST
+        actor.role in SELF_ASSIGN_ROLES
         and ticket.assignee_id is None
         and STATUS_INFO[to].requires_assignee
     )
@@ -616,7 +618,7 @@ async def transition_ticket(
 async def add_comment(
     db: AsyncSession, ticket: Ticket, data: CommentCreate, actor: User
 ) -> TicketComment:
-    if ticket.status in FINAL and not actor.is_manager:
+    if ticket.status in FINAL and not actor.can_manage_tickets:
         raise WorkflowError("OS encerrada não recebe novos acompanhamentos")
     now = utcnow()
     is_internal = data.is_internal and actor.is_staff
@@ -698,7 +700,7 @@ async def add_worklog(
 async def add_attachment(
     db: AsyncSession, ticket: Ticket, upload: UploadFile, kind: str, actor: User
 ) -> TicketAttachment:
-    if ticket.status in FINAL and not actor.is_manager:
+    if ticket.status in FINAL and not actor.can_manage_tickets:
         raise WorkflowError("OS encerrada não recebe anexos")
     if kind not in ("file", "photo", "signature"):
         raise WorkflowError("kind deve ser file, photo ou signature")

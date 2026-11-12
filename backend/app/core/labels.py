@@ -14,7 +14,8 @@ from app.core.enums import (
 ROLE_LABELS = {
     UserRole.ADMIN: "Administrador",
     UserRole.SUPERVISOR: "Supervisor",
-    UserRole.ANALYST: "Analista / Técnico",
+    UserRole.ANALYST: "Analista",
+    UserRole.TECHNICIAN: "Técnico de campo",
     UserRole.REQUESTER: "Solicitante",
 }
 

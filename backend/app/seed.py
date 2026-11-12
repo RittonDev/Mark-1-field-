@@ -109,15 +109,29 @@ async def seed() -> None:
             "Coordenadora de Service Desk",
         )
         carlos = user(
-            "Carlos Souza", "carlos@exemplo.com.br", UserRole.ANALYST, "campo", "Técnico de campo"
+            "Carlos Souza",
+            "carlos@exemplo.com.br",
+            UserRole.TECHNICIAN,
+            "campo",
+            "Técnico de campo",
         )
         rafael = user(
-            "Rafael Lima", "rafael@exemplo.com.br", UserRole.ANALYST, "redes", "Analista de redes"
+            "Rafael Lima", "rafael@exemplo.com.br", UserRole.TECHNICIAN, "redes", "Técnico de redes"
         )
         juliana = user(
-            "Juliana Alves", "juliana@exemplo.com.br", UserRole.ANALYST, "cftv", "Técnica de CFTV"
+            "Juliana Alves",
+            "juliana@exemplo.com.br",
+            UserRole.TECHNICIAN,
+            "cftv",
+            "Técnica de CFTV",
         )
-        bruno = user("Bruno Martins", "bruno@exemplo.com.br", UserRole.ANALYST, "n1", "Analista N1")
+        bruno = user(
+            "Bruno Martins",
+            "bruno@exemplo.com.br",
+            UserRole.ANALYST,
+            "n1",
+            "Analista de service desk",
+        )
         requester = user(
             "Paulo Mendes",
             "solicitante@exemplo.com.br",

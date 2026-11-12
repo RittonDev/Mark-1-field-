@@ -148,7 +148,8 @@ export const ASSET_TYPE: Record<AssetType, string> = {
 export const ROLE: Record<UserRole, string> = {
   admin: "Administrador",
   supervisor: "Supervisor",
-  analyst: "Analista / Técnico",
+  analyst: "Analista",
+  technician: "Técnico de campo",
   requester: "Solicitante",
 };
 
@@ -177,5 +178,10 @@ export const ATTACHMENT_KIND: Record<string, string> = {
 };
 
 export const isStaff = (role: UserRole | undefined) =>
-  role === "admin" || role === "supervisor" || role === "analyst";
+  role === "admin" || role === "supervisor" || role === "analyst" || role === "technician";
 export const isManager = (role: UserRole | undefined) => role === "admin" || role === "supervisor";
+/** Gestão completa das OS (TICKET_MANAGER_ROLES no backend): vê todas, edita, atribui, muda qualquer status. */
+export const canManageTickets = (role: UserRole | undefined) =>
+  role === "admin" || role === "supervisor" || role === "analyst";
+/** Quem assume sozinho uma OS sem responsável ao levá-la a um status de campo (SELF_ASSIGN_ROLES). */
+export const SELF_ASSIGN_ROLES: UserRole[] = ["analyst", "technician"];

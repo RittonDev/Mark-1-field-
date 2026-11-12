@@ -11,7 +11,7 @@ import { TransitionModal } from "../../components/TransitionModal";
 import { Button, Card, colors, EmptyState, Segmented, SectionTitle } from "../../components/ui";
 import { api, errorMessage } from "../../lib/api";
 import { useLiveQuery, useNow } from "../../lib/changes";
-import { isStaff, STATUS, TRANSITION_ACTION } from "../../lib/constants";
+import { canManageTickets, isStaff, STATUS, TRANSITION_ACTION } from "../../lib/constants";
 import { getTicket } from "../../lib/db";
 import { formatRelative, formatShort } from "../../lib/format";
 import { useSession } from "../../lib/session";
@@ -68,9 +68,11 @@ export default function TicketScreen() {
   const current = ticket;
   const actions = [...current.allowed_transitions].sort((a, b) => ACTION_ORDER.indexOf(a) - ACTION_ORDER.indexOf(b));
   const primary = actions.find((s) => PRIMARY.includes(s));
+  // Espelho de tickets.py::can_take: quem gerencia OS pode tomar de outro responsável; o técnico só pega sem responsável.
   const canTake =
     isStaff(user.role) &&
-    !current.assignee &&
+    current.assignee?.id !== user.id &&
+    (canManageTickets(user.role) || !current.assignee) &&
     (STATUS[current.status].group === "open" ||
       STATUS[current.status].group === "active" ||
       STATUS[current.status].group === "pending");

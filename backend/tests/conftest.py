@@ -90,7 +90,8 @@ class Actor:
 class World:
     admin: Actor
     supervisor: Actor
-    tech: Actor  # grupo campo
+    analyst: Actor  # gestão completa na web, sem grupo
+    tech: Actor  # técnico de campo, grupo campo
     tech_other: Actor  # grupo redes
     requester: Actor
     team_field_id: str
@@ -122,8 +123,9 @@ async def world(engine: AsyncEngine) -> World:
         users = {
             "admin": mk("Admin", UserRole.ADMIN, None),
             "supervisor": mk("Super", UserRole.SUPERVISOR, None),
-            "tech": mk("Tecnico", UserRole.ANALYST, field),
-            "tech_other": mk("Redes", UserRole.ANALYST, net),
+            "analyst": mk("Analista", UserRole.ANALYST, None),
+            "tech": mk("Tecnico", UserRole.TECHNICIAN, field),
+            "tech_other": mk("Redes", UserRole.TECHNICIAN, net),
             "requester": mk("Cliente", UserRole.REQUESTER, None),
         }
         db.add_all(users.values())

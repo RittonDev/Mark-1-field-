@@ -5,20 +5,22 @@
 // Assim um pull no meio do caminho não apaga o que o técnico fez offline,
 // e uma operação rejeitada some sozinha no próximo rebase.
 
-import { STATUS, TRANSITIONS, UNTOUCHED_STATUSES } from "./constants";
+import { SELF_ASSIGN_ROLES, STATUS, TRANSITIONS, UNTOUCHED_STATUSES } from "./constants";
 import type { LocalTicket, OutboxOp } from "./syncTypes";
 import type { TicketDetail, TicketStatus, User, UserRef } from "./types";
 import { userCanTransition } from "./workflow";
 
+const selfAssigns = (user: User) => SELF_ASSIGN_ROLES.includes(user.role);
+
 /**
  * Espelho de backend/app/services/tickets.py::allowed_transitions.
- * Diferente do quadro da web, um analista pode levar uma OS sem responsável para
- * um status de campo: o servidor o define como responsável automaticamente.
+ * Diferente do quadro da web, analista e técnico podem levar uma OS sem responsável para
+ * um status de campo: o servidor os define como responsável automaticamente (SELF_ASSIGN_ROLES).
  */
 export function allowedTransitions(user: User, ticket: TicketDetail): TicketStatus[] {
   return TRANSITIONS[ticket.status].filter((to) => {
     if (!userCanTransition(user, ticket, to)) return false;
-    if (STATUS[to].requiresAssignee && !ticket.assignee && user.role !== "analyst") return false;
+    if (STATUS[to].requiresAssignee && !ticket.assignee && !selfAssigns(user)) return false;
     return true;
   });
 }
@@ -41,7 +43,7 @@ function applyTransition(ticket: TicketDetail, op: Extract<OutboxOp, { type: "tr
   const t: TicketDetail = { ...ticket };
   if (p.scheduled_start) t.scheduled_start = p.scheduled_start;
   if (p.scheduled_end) t.scheduled_end = p.scheduled_end;
-  if (STATUS[to].requiresAssignee && !t.assignee && user.role === "analyst") t.assignee = userRef(user);
+  if (STATUS[to].requiresAssignee && !t.assignee && selfAssigns(user)) t.assignee = userRef(user);
 
   // SLA: pausa nas pendências e, ao retomar, empurra os prazos ainda abertos (sla.py::resume).
   if (STATUS[to].slaPaused) {

@@ -79,7 +79,7 @@ async def pull(db: AsyncSession, user: User, since: datetime | None) -> SyncPull
             worklogs = list(await db.scalars(wq.order_by(TicketWorklog.created_at)))
 
     revoked = []
-    if since is not None and user.role == UserRole.ANALYST:
+    if since is not None and user.role == UserRole.TECHNICIAN:
         candidates = await db.scalars(
             select(TicketEvent.ticket_id)
             .where(

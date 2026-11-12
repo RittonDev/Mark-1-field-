@@ -8,6 +8,11 @@ from app.core.enums import UserRole
 from app.db.base import Base, Timestamps, UUIDPrimaryKey
 from app.models._types import str_enum
 
+STAFF_ROLES = frozenset(
+    {UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.ANALYST, UserRole.TECHNICIAN}
+)
+TICKET_MANAGER_ROLES = frozenset({UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.ANALYST})
+
 
 class Team(UUIDPrimaryKey, Timestamps, Base):
     """Grupo técnico (ex.: Suporte N1, Campo - Infraestrutura, CFTV)."""
@@ -38,8 +43,15 @@ class User(UUIDPrimaryKey, Timestamps, Base):
 
     @property
     def is_staff(self) -> bool:
-        return self.role in (UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.ANALYST)
+        """Equipe interna (vê notas internas e apontamentos)."""
+        return self.role in STAFF_ROLES
+
+    @property
+    def can_manage_tickets(self) -> bool:
+        """Gestão completa das OS na web: vê todas, cria, edita, atribui, muda status."""
+        return self.role in TICKET_MANAGER_ROLES
 
     @property
     def is_manager(self) -> bool:
+        """Configuração: grupos, categorias (SLA e usuários só admin)."""
         return self.role in (UserRole.ADMIN, UserRole.SUPERVISOR)

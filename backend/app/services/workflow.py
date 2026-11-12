@@ -116,7 +116,7 @@ OPEN_STATUSES: frozenset[TicketStatus] = frozenset(
 SLA_PAUSED_STATUSES: frozenset[TicketStatus] = frozenset(
     s for s, info in STATUS_INFO.items() if info.sla_paused
 )
-# Sair destes estados (por ação de um analista) conta como primeira resposta.
+# Sair destes estados (por ação da equipe) conta como primeira resposta.
 UNTOUCHED_STATUSES: frozenset[TicketStatus] = frozenset({S.NEW, S.TRIAGE})
 
 PRIORITY_INFO: dict[TicketPriority, dict[str, str]] = {
@@ -187,9 +187,9 @@ def user_can_transition(
     from_status: TicketStatus,
     to_status: TicketStatus,
 ) -> bool:
-    if role in (UserRole.ADMIN, UserRole.SUPERVISOR):
+    if role in (UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.ANALYST):
         return True
-    if role == UserRole.ANALYST:
+    if role == UserRole.TECHNICIAN:
         if ticket_assignee_id == user_id:
             return True
         return ticket_team_id is not None and ticket_team_id == user_team_id

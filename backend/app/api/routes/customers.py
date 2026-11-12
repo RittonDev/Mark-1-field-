@@ -3,7 +3,7 @@ import uuid
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import or_, select
 
-from app.api.deps import DB, CurrentUser, ManagerUser, StaffUser
+from app.api.deps import DB, CurrentUser, StaffUser, TicketManagerUser
 from app.core.enums import AssetType
 from app.models import Asset, Customer, Location
 from app.schemas.customer import (
@@ -41,7 +41,7 @@ async def list_customers(db: DB, _: CurrentUser, q: str | None = None) -> list[C
 
 
 @router.post("/customers", response_model=CustomerOut, status_code=status.HTTP_201_CREATED)
-async def create_customer(body: CustomerCreate, db: DB, _: ManagerUser) -> Customer:
+async def create_customer(body: CustomerCreate, db: DB, _: TicketManagerUser) -> Customer:
     customer = Customer(**body.model_dump(), is_active=True)
     db.add(customer)
     await db.commit()
@@ -55,7 +55,7 @@ async def get_customer(customer_id: uuid.UUID, db: DB, _: CurrentUser) -> Custom
 
 @router.patch("/customers/{customer_id}", response_model=CustomerOut)
 async def update_customer(
-    customer_id: uuid.UUID, body: CustomerUpdate, db: DB, _: ManagerUser
+    customer_id: uuid.UUID, body: CustomerUpdate, db: DB, _: TicketManagerUser
 ) -> Customer:
     customer = await _get_or_404(db, Customer, customer_id, "Cliente")
     for key, value in body.model_dump(exclude_unset=True).items():
@@ -82,7 +82,7 @@ async def customer_locations(customer_id: uuid.UUID, db: DB, _: CurrentUser) -> 
     status_code=status.HTTP_201_CREATED,
 )
 async def create_location(
-    customer_id: uuid.UUID, body: LocationCreate, db: DB, _: ManagerUser
+    customer_id: uuid.UUID, body: LocationCreate, db: DB, _: TicketManagerUser
 ) -> Location:
     await _get_or_404(db, Customer, customer_id, "Cliente")
     location = Location(customer_id=customer_id, **body.model_dump(), is_active=True)
@@ -103,7 +103,7 @@ async def list_locations(
 
 @router.patch("/locations/{location_id}", response_model=LocationOut)
 async def update_location(
-    location_id: uuid.UUID, body: LocationUpdate, db: DB, _: ManagerUser
+    location_id: uuid.UUID, body: LocationUpdate, db: DB, _: TicketManagerUser
 ) -> Location:
     location = await _get_or_404(db, Location, location_id, "Local")
     for key, value in body.model_dump(exclude_unset=True).items():

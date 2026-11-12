@@ -68,7 +68,10 @@ async def assignable_users(
     stmt = (
         select(User, func.coalesce(load.c.n, 0))
         .outerjoin(load, load.c.assignee_id == User.id)
-        .where(User.is_active.is_(True), User.role.in_([UserRole.ANALYST, UserRole.SUPERVISOR]))
+        .where(
+            User.is_active.is_(True),
+            User.role.in_([UserRole.ANALYST, UserRole.TECHNICIAN, UserRole.SUPERVISOR]),
+        )
         .order_by(User.name)
     )
     if team_id is not None:

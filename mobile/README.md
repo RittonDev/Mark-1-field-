@@ -62,8 +62,9 @@ usa o mesmo IP que o Expo Go usou para baixar o app, na porta 8000.
 5. No celular, leia o QR code com o Expo Go (Android) ou com a câmera (iOS), ou digite
    `exp://<IP>:8081` no Expo Go.
 
-6. Entre com um técnico do seed: `carlos@`, `rafael@`, `juliana@` ou `bruno@exemplo.com.br`, senha
-   `SEED_PASSWORD` do `.env` da raiz.
+6. Entre com um técnico de campo do seed: `carlos@`, `rafael@` ou `juliana@exemplo.com.br`, senha
+   `SEED_PASSWORD` do `.env` da raiz. (`bruno@` é analista: também entra, mas vê todas as OS na aba
+   Equipe, porque analistas fazem a gestão completa pela web.)
 
 Se a API estiver em outro endereço, toque em **Alterar** na tela de login e informe, por exemplo,
 `192.168.0.10:8000`. Para fixar o endereço no bundle, copie `.env.example` para `.env` e preencha

@@ -4,7 +4,7 @@
 export type UUID = string;
 export type ISODate = string;
 
-export type UserRole = "admin" | "supervisor" | "analyst" | "requester";
+export type UserRole = "admin" | "supervisor" | "analyst" | "technician" | "requester";
 
 export type TicketStatus =
   | "new"

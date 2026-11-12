@@ -10,7 +10,8 @@ from enum import StrEnum
 class UserRole(StrEnum):
     ADMIN = "admin"
     SUPERVISOR = "supervisor"  # gestor / despachante
-    ANALYST = "analyst"  # analista / técnico de campo
+    ANALYST = "analyst"  # analista de service desk: gerencia todas as OS pela web
+    TECHNICIAN = "technician"  # técnico de campo: atende as OS dele/do grupo (app mobile)
     REQUESTER = "requester"  # solicitante / cliente
 
 

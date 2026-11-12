@@ -101,9 +101,9 @@ def should_deliver(
 ) -> bool:
     """Mesma regra de visibilidade da listagem de OS (services.tickets.can_view)."""
     aud = event.get("audience") or {}
-    if role in (UserRole.ADMIN, UserRole.SUPERVISOR):
+    if role in (UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.ANALYST):
         return True
-    if role == UserRole.ANALYST:
+    if role == UserRole.TECHNICIAN:
         if user_id in (aud.get("assignee_id"), aud.get("previous_assignee_id")):
             return True
         if aud.get("team_id") is None and aud.get("assignee_id") is None:

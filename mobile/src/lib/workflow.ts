@@ -1,12 +1,12 @@
 // Regras de transição espelhadas de workflow.user_can_transition / validate_transition.
 // Usadas só para pré-filtrar o arraste no quadro; a API valida de novo.
 
-import { STATUS, TRANSITIONS, UNTOUCHED_STATUSES } from "./constants";
+import { canManageTickets, STATUS, TRANSITIONS, UNTOUCHED_STATUSES } from "./constants";
 import type { TicketListItem, TicketStatus, User } from "./types";
 
 export function userCanTransition(user: User, ticket: TicketListItem, to: TicketStatus): boolean {
-  if (user.role === "admin" || user.role === "supervisor") return true;
-  if (user.role === "analyst") {
+  if (canManageTickets(user.role)) return true;
+  if (user.role === "technician") {
     if (ticket.assignee?.id === user.id) return true;
     return ticket.team !== null && ticket.team.id === user.team_id;
   }

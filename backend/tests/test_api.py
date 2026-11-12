@@ -46,7 +46,7 @@ async def test_login_and_me(client: AsyncClient, world: World) -> None:
     assert r.status_code == 200, r.text
     token = r.json()["access_token"]
     me = await client.get(f"{API}/auth/me", headers={"Authorization": f"Bearer {token}"})
-    assert me.json()["role"] == "analyst"
+    assert me.json()["role"] == "technician"
 
     bad = await client.post(
         f"{API}/auth/login", json={"email": "tecnico@teste.com.br", "password": "errada"}
@@ -149,7 +149,7 @@ async def test_version_conflict(client: AsyncClient, world: World) -> None:
     assert r.status_code == 409
 
 
-async def test_analyst_visibility_and_take(client: AsyncClient, world: World) -> None:
+async def test_technician_visibility_and_take(client: AsyncClient, world: World) -> None:
     net_ticket = await create(client, world, team_id=world.team_net_id)
     queue_ticket = await create(client, world)  # sem grupo: fila geral
 
@@ -164,7 +164,7 @@ async def test_analyst_visibility_and_take(client: AsyncClient, world: World) ->
     assert r.json()["assignee"]["id"] == str(world.tech.user.id)
     assert r.json()["status"] == "assigned"
 
-    # Analista não atribui OS para outra pessoa.
+    # Técnico não atribui OS para outra pessoa.
     r = await client.post(
         f"{API}/tickets/{queue_ticket['id']}/assign",
         json={"assignee_id": str(world.tech_other.user.id)},
@@ -173,7 +173,7 @@ async def test_analyst_visibility_and_take(client: AsyncClient, world: World) ->
     assert r.status_code == 403
 
 
-async def test_analyst_auto_assigns_when_starting(client: AsyncClient, world: World) -> None:
+async def test_technician_auto_assigns_when_starting(client: AsyncClient, world: World) -> None:
     t = await create(client, world, team_id=world.team_field_id)
     t = await transition(client, world.supervisor.headers, t, "triage")
     t = await transition(client, world.tech.headers, t, "assigned")
@@ -374,3 +374,61 @@ async def test_sync_pull_and_idempotent_push(client: AsyncClient, world: World) 
         await client.get(f"{API}/sync/pull", params={"since": cursor}, headers=world.tech.headers)
     ).json()
     assert t["id"] in delta["revoked_ticket_ids"]
+
+
+async def test_analyst_manages_everything_on_web(client: AsyncClient, world: World) -> None:
+    # OS do grupo Redes, do qual o analista não faz parte: mesmo assim ele vê e gerencia.
+    t = await create(client, world, team_id=world.team_net_id)
+    listing = (await client.get(f"{API}/tickets", headers=world.analyst.headers)).json()
+    assert t["id"] in {i["id"] for i in listing["items"]}
+
+    detail = (await client.get(f"{API}/tickets/{t['id']}", headers=world.analyst.headers)).json()
+    assert detail["can_assign"] and detail["can_edit"]
+
+    r = await client.post(
+        f"{API}/tickets/{t['id']}/assign",
+        json={"assignee_id": str(world.tech_other.user.id), "expected_version": detail["version"]},
+        headers=world.analyst.headers,
+    )
+    assert r.status_code == 200, r.text
+    t = await transition(client, world.analyst.headers, r.json(), "in_progress")
+    r = await client.patch(
+        f"{API}/tickets/{t['id']}",
+        json={"priority": "high", "expected_version": t["version"]},
+        headers=world.analyst.headers,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["priority"] == "high"
+
+    # Cadastro operacional e abertura de OS já atribuída a um técnico.
+    r = await client.post(
+        f"{API}/customers", json={"name": "Novo cliente"}, headers=world.analyst.headers
+    )
+    assert r.status_code == 201, r.text
+    r = await client.post(
+        f"{API}/tickets",
+        json={"title": "Troca de toner", "assignee_id": str(world.tech.user.id)},
+        headers=world.analyst.headers,
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["status"] == "assigned"
+
+    data = (await client.get(f"{API}/dashboard/summary", headers=world.analyst.headers)).json()
+    assert data["open_total"] == 2
+
+
+async def test_analyst_self_assigns_when_starting(client: AsyncClient, world: World) -> None:
+    t = await create(client, world)
+    t = await transition(client, world.analyst.headers, t, "assigned")
+    assert t["assignee"]["id"] == str(world.analyst.user.id)
+
+
+async def test_technician_scope_is_restricted(client: AsyncClient, world: World) -> None:
+    r = await client.post(f"{API}/customers", json={"name": "X"}, headers=world.tech.headers)
+    assert r.status_code == 403
+    t = await create(client, world, assignee_id=str(world.tech.user.id))
+    detail = (await client.get(f"{API}/tickets/{t['id']}", headers=world.tech.headers)).json()
+    assert detail["can_assign"] is False
+    assert detail["can_edit"] is True
+    users = (await client.get(f"{API}/users/assignable", headers=world.tech.headers)).json()
+    assert {u["role"] for u in users} >= {"technician", "analyst"}
