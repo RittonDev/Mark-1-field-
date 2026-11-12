@@ -32,6 +32,7 @@ Os dois canais ficam sincronizados em tempo real.
 - **Quadro kanban** com arrastar e soltar, que só aceita transições válidas.
 - **Dashboard:** backlog, SLA, conformidade em 30 dias, tempo médio de solução, carga por analista.
 - **Locais como filiais** (como no Field Control): cada local tem código e CNPJ próprio, tela própria com busca e paginação, e histórico resumido (OS abertas, total, última OS). A OS aceita um **endereço do atendimento** separado do endereço do local.
+- **Tipos de serviço com duração estimada × real** (o "Tipo de OS" do Field Control, inclusive por cliente). A real é medida pelo tempo em atendimento; a tela compara as duas e o catálogo sugere corrigir a estimativa pela mediana do que aconteceu (a estimativa aprende). Agendar só com o início usa a duração estimada.
 - **Cadastros:** clientes (CPF/CNPJ validado, inclusive alfanumérico), locais (com coordenadas), ativos (impressora, desktop, switch, câmera, DVR/NVR…), usuários, grupos, categorias e SLA.
 - **Tempo real:** toda mudança aparece na hora para quem pode ver a OS (web e apps).
 - **Pronto para mobile:** sync offline idempotente, revogação de OS reatribuídas, registro de aparelhos para push. Ver [docs/MOBILE_SYNC.md](docs/MOBILE_SYNC.md).

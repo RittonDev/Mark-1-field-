@@ -83,9 +83,18 @@ Modelo inspirado no Field Control: o eixo da operação é o **local** (filial c
 - `GET /sla-policies` → `[{priority,response_minutes,resolution_minutes}]`
 - `PUT /sla-policies/{priority}` (admin) `{response_minutes, resolution_minutes}`
 
+### Tipos de serviço (duração estimada × real)
+Equivale ao "Tipo de OS" do Field Control. Sem `customer_id`, o tipo vale para todos os clientes; com ele, entra no catálogo daquele cliente.
+
+- `GET /service-types?customer_id=&q=&active=` → `ServiceTypeOut[]`. Com `customer_id`, devolve os tipos gerais mais os daquele cliente (é o que a Nova OS usa).
+  - `ServiceTypeOut = {id, name, description, estimated_minutes, customer_id, customer, category_id, is_active, observed_median_minutes, observed_count, suggested_minutes}`
+- `POST /service-types` · `PATCH /service-types/{id}` (analista, supervisor, admin)
+- `POST /service-types/{id}/apply-observed`: adota a mediana observada como nova estimativa (arredondada a 5 min). Dá 422 se não houver sugestão.
+- **A estimativa aprende:** `observed_median_minutes` é a mediana do tempo em atendimento das OS concluídas do tipo. `suggested_minutes` aparece com 3 ou mais OS e quando a mediana fica 25% acima ou 20% abaixo da estimativa. Quem aplica é uma pessoa.
+
 ### OS / Chamados
 - `GET /tickets` → `Page<TicketListItem> {items,total,page,page_size}`
-  - filtros: `status` (repetível), `priority` (repetível), `type`, `assignee_id`, `team_id`, `customer_id`, `location_id`, `category_id`, `asset_id`, `q` (título, descrição, número), `mine=true`, `unassigned=true`, `open_only=true`, `sla_breached=true`
+  - filtros: `status` (repetível), `priority` (repetível), `type`, `assignee_id`, `team_id`, `customer_id`, `location_id`, `service_type_id`, `category_id`, `asset_id`, `q` (título, descrição, número), `mine=true`, `unassigned=true`, `open_only=true`, `sla_breached=true`
   - `page` (1..), `page_size` (1..500, padrão 25), `order_by` ∈ `updated_at, created_at, priority, resolution_due_at, number` com `-` para desc (padrão `-updated_at`)
 - `POST /tickets` `TicketCreate` → `TicketDetail` (201)
 - `GET /tickets/{id}` → `TicketDetail`
@@ -101,7 +110,7 @@ Modelo inspirado no Field Control: o eixo da operação é o **local** (filial c
 
 `TicketListItem = {id, number, code:"OS-000123", title, status, priority, type, source, category:{id,name,full_name}|null, customer:{id,name}|null, location:{id,name,code,document,address_line,city,state,latitude,longitude,contact_name,contact_phone}|null, assignee:{id,name,email,role}|null, team:{id,name}|null, requester_name, scheduled_start, scheduled_end, response_due_at, resolution_due_at, first_response_at, resolved_at, sla_paused_at, sla_paused_seconds, created_at, updated_at, version, sla_status}`
 
-`TicketDetail = TicketListItem + {description, impact, urgency, asset:{id,name,asset_type,brand,model,serial_number,asset_tag,ip_address}|null, requester:UserRef|null, requester_contact, service_address, created_by:UserRef|null, closed_at, cancelled_at, reopen_count, resolution_notes, allowed_transitions:[status], can_edit, can_assign}`
+`TicketDetail = TicketListItem + {description, impact, urgency, asset:{id,name,asset_type,brand,model,serial_number,asset_tag,ip_address}|null, requester:UserRef|null, requester_contact, service_address, service_type:{id,name,estimated_minutes}|null, estimated_minutes, work_seconds, work_started_at, actual_minutes, created_by:UserRef|null, closed_at, cancelled_at, reopen_count, resolution_notes, allowed_transitions:[status], can_edit, can_assign}`
 
 `CommentOut = {id, ticket_id, author:UserRef|null, body, is_internal, created_at}`
 `EventOut = {id, ticket_id, actor:UserRef|null, event_type, from_value, to_value, note, data, created_at}` — `event_type` ∈ `created, updated, status_changed, assigned, comment_added, worklog_added, attachment_added`
@@ -148,3 +157,10 @@ Tipos: `ticket.created`, `ticket.updated`, `ticket.assigned`, `ticket.status_cha
 Cada usuário só recebe eventos de OS que pode ver; notas internas não chegam ao solicitante.
 O cliente pode mandar `{"type":"ping"}` e recebe `{"type":"pong"}`.
 Ao receber um evento, recarregue a OS/lista (o evento não carrega o objeto inteiro).
+
+## Duração da OS
+
+- `estimated_minutes`: copiada do tipo de serviço na abertura (ou informada) e gravada na OS. Corrigir o catálogo depois não muda as OS antigas.
+- `work_seconds` / `work_started_at`: a API soma o tempo em `in_progress` a cada mudança de status. O técnico não digita nada.
+- `actual_minutes`: duração real, calculada na leitura e incluindo o atendimento em andamento.
+- Ao agendar (`scheduled`) só com `scheduled_start`, a API preenche `scheduled_end = início + estimated_minutes`.
