@@ -94,7 +94,7 @@ Equivale ao "Tipo de OS" do Field Control. Sem `customer_id`, o tipo vale para t
 
 ### OS / Chamados
 - `GET /tickets` → `Page<TicketListItem> {items,total,page,page_size}`
-  - filtros: `status` (repetível), `priority` (repetível), `type`, `assignee_id`, `team_id`, `customer_id`, `location_id`, `service_type_id`, `category_id`, `asset_id`, `q` (título, descrição, número), `mine=true`, `unassigned=true`, `open_only=true`, `sla_breached=true`
+  - filtros: `status` (repetível), `priority` (repetível), `type`, `assignee_id`, `team_id`, `customer_id`, `location_id`, `service_type_id`, `violation_pending=true`, `category_id`, `asset_id`, `q` (título, descrição, número), `mine=true`, `unassigned=true`, `open_only=true`, `sla_breached=true`
   - `page` (1..), `page_size` (1..500, padrão 25), `order_by` ∈ `updated_at, created_at, priority, resolution_due_at, number` com `-` para desc (padrão `-updated_at`)
 - `POST /tickets` `TicketCreate` → `TicketDetail` (201)
 - `GET /tickets/{id}` → `TicketDetail`
@@ -119,6 +119,22 @@ Equivale ao "Tipo de OS" do Field Control. Sem `customer_id`, o tipo vale para t
 
 **Concorrência:** toda OS tem `version`. Envie `expected_version` em PATCH/assign/transition;
 se outra pessoa (web ou app) alterou antes, a API responde **409** e o cliente recarrega.
+
+### Motivos de violação de SLA
+O "Motivo da violação" do Field Control: um campo por relógio, escolhido de um cadastro. Assim o motivo vira estatística em vez de texto solto.
+
+- `GET /violation-reasons?active=` → `[{id, name, description, applies_to, responsibility, is_active}]`.
+  - `applies_to` ∈ `response`, `resolution`, `both`.
+  - `responsibility` ∈ `internal`, `customer`, `third_party`.
+  - `POST` e `PATCH /violation-reasons/{id}`: supervisor e admin.
+- Na OS:
+  - os campos `response_violation_reason`, `resolution_violation_reason` (`{id, name, responsibility}`) e `violation_note`;
+  - os calculados `response_breached`, `resolution_breached` e `violation_reason_pending` (resolvida ou fechada com prazo violado e sem o motivo correspondente).
+- Para informar o motivo:
+  - ao resolver: `POST /tickets/{id}/transition` com `response_violation_reason_id`, `resolution_violation_reason_id` e `violation_note`. O motivo precisa valer para aquele relógio; se não valer, a resposta é 422;
+  - depois, inclusive com a OS fechada: `PATCH /tickets/{id}/violation` (analista ou supervisor; técnico só nas OS dele ou do grupo).
+- O técnico pode resolver sem informar o motivo. A OS fica pendente, e `GET /tickets?violation_pending=true` lista as que faltam justificar.
+- `GET /reports/sla-violations?days=30` → `{period_days, tickets_total, response, resolution, by_responsibility, pending_justification}`. Cada relógio vem como `{breached, justified, by_reason:[{reason_id, name, responsibility, count}]}`.
 
 ### Atividades do dia
 Tela própria da operação, como no Field Control (aquela em que, segundo o levantamento, quem opera passa o dia).
