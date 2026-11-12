@@ -45,6 +45,8 @@ export function EditTicketDialog({
   // Troca de local: busca restrita ao cliente da OS; null = manter o atual.
   const [newLocation, setNewLocation] = useState<Location | null>(null);
   const [serviceAddress, setServiceAddress] = useState(ticket.service_address ?? "");
+  const [clientReference, setClientReference] = useState(ticket.client_reference ?? "");
+  const [visitNote, setVisitNote] = useState(ticket.visit_note ?? "");
   const serviceTypes = useServiceTypes({ customerId: ticket.customer?.id ?? null, active: true });
   const [serviceTypeId, setServiceTypeId] = useState(ticket.service_type?.id ?? "");
   const [estimated, setEstimated] = useState(ticket.estimated_minutes ? String(ticket.estimated_minutes) : "");
@@ -70,6 +72,10 @@ export function EditTicketDialog({
       if (serviceAddress.trim() !== (ticket.service_address ?? "")) {
         payload.service_address = serviceAddress.trim() || null;
       }
+      if (clientReference.trim() !== (ticket.client_reference ?? "")) {
+        payload.client_reference = clientReference.trim() || null;
+      }
+      if (visitNote.trim() !== (ticket.visit_note ?? "")) payload.visit_note = visitNote.trim() || null;
       if (serviceTypeId && serviceTypeId !== (ticket.service_type?.id ?? "")) payload.service_type_id = serviceTypeId;
       const estimatedNumber = estimated ? Number(estimated) : null;
       if (estimatedNumber !== ticket.estimated_minutes) payload.estimated_minutes = estimatedNumber;
@@ -134,6 +140,12 @@ export function EditTicketDialog({
         </Field>
         <Field label="Descrição" className="sm:col-span-2">
           <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={5} />
+        </Field>
+        <Field label="Observação da visita" hint="Recado para o técnico: com quem falar, acesso, o que levar" className="sm:col-span-2">
+          <Textarea value={visitNote} onChange={(e) => setVisitNote(e.target.value.slice(0, 5000))} rows={2} />
+        </Field>
+        <Field label="Nº do chamado do cliente">
+          <Input value={clientReference} onChange={(e) => setClientReference(e.target.value)} maxLength={80} placeholder="Ex.: INC0012345" />
         </Field>
         <Field
           label="Local de atendimento"

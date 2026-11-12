@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
-import { ArrowLeft, Ban, CheckCircle2, Clock, MessageCircle, Pencil } from "lucide-react";
+import { ArrowLeft, Ban, CheckCircle2, Clock, MessageCircle, Pencil, StickyNote } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
@@ -26,6 +26,7 @@ import { QuotesCard } from "@/components/ticket/QuotesCard";
 import { SlaCard } from "@/components/ticket/SlaCard";
 import { TicketInfo } from "@/components/ticket/TicketInfo";
 import { TransitionDialog } from "@/components/ticket/TransitionDialog";
+import { VisitTeamCard } from "@/components/ticket/VisitTeamCard";
 import { UNPRODUCTIVE_FROM, UnproductiveDialog } from "@/components/ticket/UnproductiveDialog";
 import { WhatsAppShare } from "@/components/ticket/WhatsAppShare";
 import { WorklogsTab } from "@/components/ticket/WorklogsTab";
@@ -167,6 +168,14 @@ export default function TicketDetailPage() {
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-mono text-sm text-ink-muted">{ticket.code}</span>
+              {ticket.client_reference ? (
+                <span
+                  className="inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-xs text-ink-muted"
+                  title="Nº do chamado no sistema do cliente"
+                >
+                  Chamado do cliente <span className="font-mono font-medium text-ink">{ticket.client_reference}</span>
+                </span>
+              ) : null}
               <StatusBadge status={ticket.status} />
               <PriorityBadge priority={ticket.priority} />
               <SlaBadge status={ticket.sla_status} />
@@ -262,6 +271,15 @@ export default function TicketDetailPage() {
                 <p className="text-sm text-ink-muted">Sem descrição.</p>
               )}
             </div>
+            {ticket.visit_note ? (
+              <div className="border-t border-line bg-amber-50/50 p-5 dark:bg-amber-500/5">
+                <h2 className="mb-2 flex items-center gap-1.5 text-xs font-medium tracking-wide text-amber-800 uppercase dark:text-amber-300">
+                  <StickyNote className="size-3.5" />
+                  Observação da visita
+                </h2>
+                <p className="text-sm whitespace-pre-wrap text-ink">{ticket.visit_note}</p>
+              </div>
+            ) : null}
             {ticket.resolution_notes ? (
               <div className="border-t border-line bg-emerald-50/60 p-5 dark:bg-emerald-950/20">
                 <h2 className="mb-2 flex items-center gap-1.5 text-xs font-medium tracking-wide text-emerald-700 uppercase dark:text-emerald-400">
@@ -304,6 +322,7 @@ export default function TicketDetailPage() {
           <OwnerCard ticket={ticket} />
           <StoreHistoryCard ticket={ticket} />
           <AssignmentPanel key={`${ticket.assignee?.id ?? "none"}-${ticket.version}`} ticket={ticket} />
+          <VisitTeamCard ticket={ticket} />
           <SlaCard ticket={ticket} />
           <ExpensesCard ticket={ticket} />
           <TicketInfo ticket={ticket} />
