@@ -154,7 +154,8 @@ async def test_version_conflict(client: AsyncClient, world: World) -> None:
 
 async def test_technician_sees_only_assigned(client: AsyncClient, world: World) -> None:
     # Dinâmica: o cliente abre a OS, o analista coloca o técnico nela, e só então ele a vê.
-    team_ticket = await create(client, world, team_id=world.team_field_id)  # grupo dele, sem responsável
+    # Do grupo dele, mas sem responsável: continua invisível para ele.
+    team_ticket = await create(client, world, team_id=world.team_field_id)
     queue_ticket = await create(client, world)  # fila geral
     mine = await create(client, world, assignee_id=str(world.tech.user.id))
 

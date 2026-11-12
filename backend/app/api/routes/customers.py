@@ -259,7 +259,7 @@ async def _check_asset_location(
     location = await db.get(Location, location_id)
     if location is None or location.customer_id != customer_id:
         raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY, "O local não pertence ao cliente do ativo"
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "O local não pertence ao cliente do ativo"
         )
 
 

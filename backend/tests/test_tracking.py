@@ -93,9 +93,10 @@ async def test_live_map_states_and_history(
     assert find(live, tech_id)["state"] == "en_route"
     assert find(live, tech_id)["current_ticket"]["code"] == t["code"]
     t = await transition(client, th, t, "in_progress")
-    assert find((await client.get(f"{API}/tracking/live", headers=an)).json(), tech_id)[
-        "state"
-    ] == "in_progress"
+    assert (
+        find((await client.get(f"{API}/tracking/live", headers=an)).json(), tech_id)["state"]
+        == "in_progress"
+    )
 
     # Sem posição recente durante a jornada: "sem sinal".
     async with engine.begin() as conn:
@@ -106,9 +107,10 @@ async def test_live_map_states_and_history(
             ),
             {"u": uuid.UUID(tech_id)},
         )
-    assert find((await client.get(f"{API}/tracking/live", headers=an)).json(), tech_id)[
-        "state"
-    ] == "no_signal"
+    assert (
+        find((await client.get(f"{API}/tracking/live", headers=an)).json(), tech_id)["state"]
+        == "no_signal"
+    )
 
     # O técnico não vê o mapa de ninguém.
     assert (await client.get(f"{API}/tracking/live", headers=th)).status_code == 403

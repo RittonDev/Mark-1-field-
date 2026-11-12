@@ -45,8 +45,8 @@ class LocationPing(Base):
 
     __tablename__ = "location_pings"
     __table_args__ = (
+        # A unicidade (dedupe do reenvio) já cria o índice usado pelo mapa e pelo histórico.
         UniqueConstraint("user_id", "recorded_at", name="uq_location_pings_user_recorded"),
-        Index("ix_location_pings_user_recorded", "user_id", "recorded_at"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)

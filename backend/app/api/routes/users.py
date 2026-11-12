@@ -30,7 +30,7 @@ async def _email_taken(db: DB, email: str, exclude: uuid.UUID | None = None) -> 
 
 async def _check_team(db: DB, team_id: uuid.UUID | None) -> None:
     if team_id is not None and await db.get(Team, team_id) is None:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Grupo não encontrado")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Grupo não encontrado")
 
 
 @router.get("/users", response_model=list[UserOut])
@@ -141,7 +141,7 @@ async def update_user(user_id: uuid.UUID, body: UserUpdate, db: DB, admin: Admin
         )
     ):
         raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY, "Você não pode remover o próprio acesso de admin"
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "Você não pode remover o próprio acesso de admin"
         )
     password = fields.pop("password", None)
     if password:

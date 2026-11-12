@@ -69,10 +69,10 @@ async def me(user: CurrentUser) -> User:
 async def change_password(body: ChangePasswordRequest, db: DB, user: CurrentUser) -> Response:
     """Troca a senha; obrigatória no primeiro acesso de quem recebeu senha provisória."""
     if not verify_password(body.current_password, user.password_hash):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Senha atual incorreta")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Senha atual incorreta")
     if body.new_password == body.current_password:
         raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY, "A nova senha precisa ser diferente da atual"
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "A nova senha precisa ser diferente da atual"
         )
     user.password_hash = hash_password(body.new_password)
     user.must_change_password = False
