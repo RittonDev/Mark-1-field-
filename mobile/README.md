@@ -5,6 +5,10 @@ por GPS, registra acompanhamentos, horas e fotos, e **funciona sem internet**. T
 faz entra numa fila no aparelho e é enviado quando a conexão volta, seguindo o contrato de
 [docs/MOBILE_SYNC.md](../docs/MOBILE_SYNC.md).
 
+**O app é só para técnicos de campo** (papel `technician`), no Android e no iOS. Analistas e gestores
+(analista, supervisor, administrador) fazem a gestão das OS pelo navegador; solicitantes usam o portal web.
+O login envia `channel: "mobile"` e a API recusa os outros papéis com 403.
+
 | | |
 |---|---|
 | Expo SDK | 58 (React Native 0.88, React 19.3) |
@@ -63,8 +67,8 @@ usa o mesmo IP que o Expo Go usou para baixar o app, na porta 8000.
    `exp://<IP>:8081` no Expo Go.
 
 6. Entre com um técnico de campo do seed: `carlos@`, `rafael@` ou `juliana@exemplo.com.br`, senha
-   `SEED_PASSWORD` do `.env` da raiz. (`bruno@` é analista: também entra, mas vê todas as OS na aba
-   Equipe, porque analistas fazem a gestão completa pela web.)
+   `SEED_PASSWORD` do `.env` da raiz. Analistas e gestores do seed (`bruno@`, `supervisor@`, `admin@`)
+   não entram no app: veem "O app é exclusivo para técnicos de campo…" e usam a web em http://localhost:3001.
 
 Se a API estiver em outro endereço, toque em **Alterar** na tela de login e informe, por exemplo,
 `192.168.0.10:8000`. Para fixar o endereço no bundle, copie `.env.example` para `.env` e preencha
@@ -72,9 +76,14 @@ Se a API estiver em outro endereço, toque em **Alterar** na tela de login e inf
 
 ## O que o app faz
 
-- **Login** com `/auth/login`; tokens no Keychain/Keystore; renovação automática por `/auth/refresh`
-  ao receber 401. Se o refresh for recusado, volta ao login sem apagar a fila (o mesmo técnico entra de
-  novo e o que estava pendente é enviado). Se **outro** usuário entrar no aparelho, os dados locais são apagados.
+- **Login** com `/auth/login` no canal `mobile`; tokens no Keychain/Keystore; renovação automática por
+  `/auth/refresh` ao receber 401. Se o refresh for recusado por expiração, volta ao login sem apagar a
+  fila (o mesmo técnico entra de novo e o que estava pendente é enviado). Se **outro** usuário entrar no
+  aparelho, os dados locais são apagados.
+- **Só técnicos**: o 403 do login aparece na tela. Ao abrir o app, uma sessão salva de quem não é técnico
+  (por exemplo, de antes desta regra) é encerrada e o banco local apagado. Se o papel mudar no servidor
+  (técnico promovido a analista), o refresh responde 401 com o motivo: o app encerra a sessão, apaga os
+  dados locais, **inclusive operações ainda não enviadas**, e mostra o texto no login.
 - **Minhas OS** com três abas:
   - **Hoje**: minhas OS em campo, agendadas para hoje (ou atrasadas) e as sem agenda; em campo primeiro,
     depois por horário, prioridade e prazo de SLA.

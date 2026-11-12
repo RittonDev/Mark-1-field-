@@ -36,6 +36,7 @@ import {
   pruneOld,
   purgeSentDrafts,
   rebaseTicket,
+  resetLocalData,
   saveServerComment,
   saveServerTicket,
   saveServerWorklog,
@@ -389,6 +390,18 @@ export async function queuePhoto(ticketId: UUID, sourceUri: string, mimeType: st
     created_at: new Date().toISOString(),
   });
   void requestSync();
+}
+
+/** Apaga banco local e fotos pendentes (troca de usuário ou usuário sem acesso ao app). */
+export async function wipeLocalData() {
+  await resetLocalData();
+  try {
+    const dir = photosDir();
+    if (dir.exists) dir.delete();
+  } catch {
+    // pasta já removida
+  }
+  await refreshPendingCounts();
 }
 
 export async function discardPhoto(id: string, fileUri: string) {

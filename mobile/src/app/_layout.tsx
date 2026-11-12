@@ -5,7 +5,7 @@ import { View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ToastHost } from "../components/ToastHost";
 import { colors } from "../components/ui";
-import { startSession } from "../lib/auth";
+import { restoreSession, startSession } from "../lib/auth";
 import { session, useSession } from "../lib/session";
 import { stopSync } from "../lib/sync";
 
@@ -15,8 +15,7 @@ export default function RootLayout() {
   const { status } = useSession();
 
   useEffect(() => {
-    session
-      .load()
+    restoreSession()
       .catch((error: unknown) => {
         console.warn("Falha ao ler a sessão", error);
         return session.signOut();

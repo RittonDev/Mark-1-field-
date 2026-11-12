@@ -45,12 +45,16 @@ Origem: `web`, `mobile`, `email`, `phone`, `whatsapp`, `monitoring`.
 ## Endpoints
 
 ### Auth
-- `POST /auth/login` `{email, password}` → `TokenResponse {access_token, refresh_token, token_type, expires_in, user: UserOut}`
-- `POST /auth/refresh` `{refresh_token}` → `TokenResponse`
+- `POST /auth/login` `{email, password, channel?: "web" | "mobile"}` → `TokenResponse {access_token, refresh_token, token_type, expires_in, user: UserOut}`
+  - **Canais de acesso:** `web` aceita `admin`, `supervisor`, `analyst` e `requester`; `mobile` aceita só `technician`.
+    Papel fora do canal → **403** com a orientação em `detail`. Senha errada é sempre 401.
+    Sem `channel` (integrações e scripts), não há restrição.
+- `POST /auth/refresh` `{refresh_token}` → `TokenResponse`. O canal vai gravado no refresh token: se o
+  papel do usuário mudou e não é mais aceito no canal, responde **401** e o cliente faz logout.
 - `GET /auth/me` → `UserOut`
 
 ### Meta
-- `GET /meta` → `{statuses:[{value,label,group,color,sla_paused,final,requires_assignee,description}], transitions:{status:[status]}, priorities:[{value,label,code,color}], priority_matrix:[{impact,urgency,priority}], ticket_types, sources, asset_types, roles, impacts, urgencies}` (os últimos como `[{value,label}]`)
+- `GET /meta` → `{statuses:[{value,label,group,color,sla_paused,final,requires_assignee,description}], transitions:{status:[status]}, priorities:[{value,label,code,color}], priority_matrix:[{impact,urgency,priority}], ticket_types, sources, asset_types, roles, impacts, urgencies, access_channels:{web:[role], mobile:[role]}}` (`ticket_types`…`urgencies` como `[{value,label}]`)
 
 ### Usuários e grupos
 - `GET /users?role=&team_id=&q=&active=` → `UserOut[]`

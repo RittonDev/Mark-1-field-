@@ -2,6 +2,7 @@
 // com timeout (rede móvel instável) e refresh automático do access token.
 
 import { File, UploadType } from "expo-file-system";
+import { MOBILE_DENIED_MESSAGE } from "./access";
 import { apiOrigin } from "./config";
 import { session } from "./session";
 import type { TokenResponse } from "./types";
@@ -81,6 +82,17 @@ function detailOf(data: unknown): unknown {
 export type RefreshResult = "ok" | "invalid" | "offline";
 let refreshing: Promise<RefreshResult> | null = null;
 
+/**
+ * Chamado quando o servidor diz que este usuário não pode mais usar o app
+ * (ex.: técnico promovido a analista). auth.ts registra o handler que apaga os dados locais.
+ */
+let accessRevokedHandler: ((message: string) => Promise<void>) | null = null;
+export function setAccessRevokedHandler(handler: (message: string) => Promise<void>) {
+  accessRevokedHandler = handler;
+}
+
+const GENERIC_EXPIRED = /^sess[aã]o expirada/i;
+
 /** Troca o refresh token por um novo par. Chamadas concorrentes compartilham a mesma tentativa. */
 export function refreshSession(): Promise<RefreshResult> {
   if (refreshing) return refreshing;
@@ -94,7 +106,10 @@ export function refreshSession(): Promise<RefreshResult> {
         body: JSON.stringify({ refresh_token: refreshToken }),
       });
       if (res.status === 401 || res.status === 403 || res.status === 422) {
-        await session.signOut(true);
+        const detail = detailOf(await parseBody(res).catch(() => null));
+        const message = typeof detail === "string" && detail && !GENERIC_EXPIRED.test(detail) ? detail : null;
+        if (message === MOBILE_DENIED_MESSAGE && accessRevokedHandler) await accessRevokedHandler(message);
+        else await session.signOut(true, message);
         return "invalid";
       }
       if (!res.ok) return "offline";
@@ -139,8 +154,11 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     if (res.status === 401 && options.auth !== false) {
       const refreshed = await refreshSession();
       if (refreshed === "offline") throw new ApiError(0, null);
-      if (refreshed === "ok") res = await send();
-      if (res.status === 401) await session.signOut(true);
+      // "invalid": refreshSession já encerrou a sessão (com o motivo do servidor).
+      if (refreshed === "ok") {
+        res = await send();
+        if (res.status === 401) await session.signOut(true);
+      }
     }
   } catch (error) {
     if (error instanceof ApiError) throw error;

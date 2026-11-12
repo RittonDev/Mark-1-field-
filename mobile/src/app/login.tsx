@@ -8,7 +8,9 @@ import { APP_VERSION, normalizeApiUrl } from "../lib/config";
 import { session, useSession } from "../lib/session";
 
 export default function LoginScreen() {
-  const { expired } = useSession();
+  const { expired, notice } = useSession();
+  const banner =
+    notice ?? (expired ? "Sua sessão expirou. Entre novamente; o que estava pendente no aparelho será enviado." : null);
   const insets = useSafeAreaInsets();
   const [email, setEmail] = useState(() => session.get().lastEmail ?? "");
   const [password, setPassword] = useState("");
@@ -51,7 +53,7 @@ export default function LoginScreen() {
         </View>
 
         <Card style={{ gap: 16 }}>
-          {expired ? <ErrorBox message="Sua sessão expirou. Entre novamente; o que estava pendente no aparelho será enviado." /> : null}
+          {banner && !error ? <ErrorBox message={banner} /> : null}
           <Field label="E-mail">
             <Input
               value={email}

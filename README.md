@@ -1,12 +1,18 @@
 # MaxxChamados
 
-Gestão de chamados / ordens de serviço de T.I. com atendimento em campo, inspirada no GLPI Field
-Service: manutenção de impressoras, computadores, redes, CFTV e telefonia.
+Gestão de chamados / ordens de serviço de T.I. com atendimento em campo: manutenção de impressoras,
+computadores, redes, CFTV e telefonia. Referências de produto: **Field Control** (a ferramenta que a
+operação usa hoje) e o **GLPI** (Field Service, ITIL). Em caso de dúvida, seguir o Field Control.
 
-- **Analistas e supervisores** usam a **interface web** (navegador) para toda a gestão das OS:
-  ver, abrir, editar, atribuir, mudar status, acompanhar SLA e cadastros.
-- **Técnicos de campo** usam o **app mobile** (iOS/Android, em `mobile/`) para atender as OS deles,
-  sincronizado em tempo real com a web.
+A ferramenta tem **dois acessos**, e o backend aplica essa separação no login (`channel`):
+
+| Acesso | Quem | Para quê |
+|---|---|---|
+| **Navegador** (`frontend/`) | Analistas, supervisores e administradores. O solicitante também, no portal dele. | Toda a gestão das OS: ver, abrir, editar, atribuir, mudar status, SLA, dashboard e cadastros |
+| **Celular** (`mobile/`, Android e iOS) | **Técnicos de campo**, e só eles | Atender as OS dele: agenda, deslocamento, check-in GPS, fotos, apontamentos, offline |
+
+O técnico que tenta entrar pelo navegador (ou o analista pelo app) recebe a orientação de qual acesso usar.
+Os dois canais ficam sincronizados em tempo real.
 
 | Camada | Stack |
 |---|---|

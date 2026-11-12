@@ -16,6 +16,8 @@ export interface SessionState {
   user: User | null;
   /** true quando o refresh token foi recusado (30 dias sem uso ou usuário desativado). */
   expired: boolean;
+  /** Motivo do encerramento para mostrar no login (ex.: papel sem acesso ao app). */
+  notice: string | null;
   /** Último e-mail usado, para preencher o login. */
   lastEmail: string | null;
 }
@@ -35,6 +37,7 @@ let state: SessionState = {
   refreshToken: null,
   user: null,
   expired: false,
+  notice: null,
   lastEmail: null,
 };
 const listeners = new Set<() => void>();
@@ -68,7 +71,11 @@ export const session = {
     };
   },
 
-  async load() {
+  /**
+   * Lê a sessão salva. Se `allowUser` recusar o usuário salvo, a sessão não é aberta
+   * (status continua "loading") e a função devolve false para quem chamou encerrá-la.
+   */
+  async load(allowUser: (user: User) => boolean = () => true): Promise<boolean> {
     const [access, refresh, user, apiUrl, lastEmail] = await Promise.all([
       SecureStore.getItemAsync(KEYS.access),
       SecureStore.getItemAsync(KEYS.refresh),
@@ -77,14 +84,20 @@ export const session = {
       SecureStore.getItemAsync(KEYS.lastEmail),
     ]);
     const parsed = parseUser(user);
+    const hasSession = Boolean(access && refresh && parsed);
+    if (hasSession && parsed && !allowUser(parsed)) {
+      update({ apiUrl: apiUrl ?? defaultApiUrl(), lastEmail, accessToken: access, refreshToken: refresh, user: parsed });
+      return false;
+    }
     update({
-      status: access && refresh && parsed ? "signedIn" : "signedOut",
+      status: hasSession ? "signedIn" : "signedOut",
       accessToken: access,
       refreshToken: refresh,
       user: parsed,
       apiUrl: apiUrl ?? defaultApiUrl(),
       lastEmail,
     });
+    return true;
   },
 
   async signIn(data: TokenResponse) {
@@ -100,6 +113,7 @@ export const session = {
       refreshToken: data.refresh_token,
       user: data.user,
       expired: false,
+      notice: null,
       lastEmail: data.user.email,
     });
   },
@@ -123,10 +137,11 @@ export const session = {
   /**
    * Encerra a sessão. Os dados locais e a fila de operações ficam no aparelho:
    * se o mesmo técnico entrar de novo, o que estava pendente é enviado.
+   * `notice` aparece na tela de login.
    */
-  async signOut(expired = false) {
+  async signOut(expired = false, notice: string | null = null) {
     await Promise.all([write(KEYS.access, null), write(KEYS.refresh, null), write(KEYS.user, null)]);
-    update({ status: "signedOut", accessToken: null, refreshToken: null, user: null, expired });
+    update({ status: "signedOut", accessToken: null, refreshToken: null, user: null, expired, notice });
   },
 };
 
