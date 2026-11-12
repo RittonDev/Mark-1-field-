@@ -395,7 +395,7 @@ export default function NewTicketPage() {
                     setForm((f) => ({ ...f, customer_id: e.target.value, location_id: "" }));
                   }}
                 >
-                  <option value="">Selecione... (ou escolha a loja acima)</option>
+                  <option value="">Selecione o cliente...</option>
                   {customers.data?.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
@@ -403,7 +403,7 @@ export default function NewTicketPage() {
                   ))}
                 </Select>
               </Field>
-              <Field label="Nº do chamado do cliente" hint="Opcional · o número que o cliente passou; entra na busca">
+              <Field label="Nº do chamado do cliente" hint="Opcional · entra na busca">
                 <Input
                   value={form.client_reference}
                   onChange={(e) => set("client_reference", e.target.value)}
@@ -508,7 +508,7 @@ export default function NewTicketPage() {
                       ))}
                     </Select>
                   </Field>
-                  <Field label="Duração estimada (min)" hint={minutes ? formatMinutes(minutes) : "Sem informar, a agenda reserva 1h"}>
+                  <Field label="Duração estimada (min)" hint={minutes ? formatMinutes(minutes) : "Vazio: a agenda reserva 1h"}>
                     <Input
                       type="number"
                       min={1}
