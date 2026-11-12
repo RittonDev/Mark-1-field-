@@ -6,6 +6,7 @@ import { PriorityBadge, SlaBadge, StatusBadge } from "../../components/badges";
 import { ConnectionBar } from "../../components/ConnectionBar";
 import { CommentsPanel } from "../../components/ticket/CommentsPanel";
 import { DurationCompare } from "../../components/ticket/DurationCompare";
+import { FormsCard } from "../../components/ticket/FormsCard";
 import { InfoPanel } from "../../components/ticket/InfoPanel";
 import { PhotosPanel } from "../../components/ticket/PhotosPanel";
 import { WorklogsPanel } from "../../components/ticket/WorklogsPanel";
@@ -13,7 +14,8 @@ import { TransitionModal } from "../../components/TransitionModal";
 import { Button, Card, EmptyState, Segmented, SectionTitle } from "../../components/ui";
 import { useLiveQuery, useNow } from "../../lib/changes";
 import { TRANSITION_ACTION } from "../../lib/constants";
-import { getTicket } from "../../lib/db";
+import { getTicket, listSignatures } from "../../lib/db";
+import { concludeBlock } from "../../lib/forms";
 import { formatRelative, formatShort } from "../../lib/format";
 import { useSession } from "../../lib/session";
 import { isOnline, requestSync, useSyncStatus } from "../../lib/sync";
@@ -45,6 +47,8 @@ export default function TicketScreen() {
   const { user } = useSession();
   const load = useCallback(() => getTicket(String(id)), [id]);
   const ticket = useLiveQuery(load);
+  const loadSignatures = useCallback(() => listSignatures(String(id)), [id]);
+  const pendingSignatures = useLiveQuery(loadSignatures);
   const sync = useSyncStatus();
   const online = isOnline(sync);
   // Em atendimento o relógio anda a cada 15 s para o tempo real acompanhar; fora dele, 30 s bastam para o SLA.
@@ -72,6 +76,7 @@ export default function TicketScreen() {
   const primary = actions.find((s) => PRIMARY.includes(s));
   // O técnico só trabalha nas OS atribuídas a ele pelo analista (não há "assumir").
   const isMine = current.assignee?.id === user.id;
+  const conclude = concludeBlock(current, (pendingSignatures ?? []).length > 0);
 
   async function refresh() {
     setRefreshing(true);
@@ -119,17 +124,26 @@ export default function TicketScreen() {
           ) : null}
         </Card>
 
+        {isMine ? <FormsCard ticket={current} /> : null}
+
         {isMine && actions.length > 0 ? (
           <Card style={{ gap: 10 }}>
             <SectionTitle>Ações</SectionTitle>
-            {actions.map((to) => (
-              <Button
-                key={to}
-                title={TRANSITION_ACTION[to]}
-                variant={to === "cancelled" ? "danger" : to === primary ? "primary" : "secondary"}
-                onPress={() => setTarget(to)}
-              />
-            ))}
+            {actions.map((to) => {
+              // Concluir exige formulários obrigatórios e, se pedida, a assinatura (o servidor também bloqueia).
+              const blocked = (to === "resolved" || to === "closed") && Boolean(conclude);
+              return (
+                <View key={to} style={{ gap: 6 }}>
+                  <Button
+                    title={TRANSITION_ACTION[to]}
+                    variant={to === "cancelled" ? "danger" : to === primary ? "primary" : "secondary"}
+                    onPress={() => setTarget(to)}
+                    disabled={blocked}
+                  />
+                  {blocked ? <Text style={styles.blocked}>{conclude}</Text> : null}
+                </View>
+              );
+            })}
           </Card>
         ) : !isMine ? (
           <Card>
@@ -169,4 +183,5 @@ const makeStyles = (c: Palette) =>
   meta: { fontSize: 13, color: c.inkMuted },
   pending: { fontSize: 13, fontWeight: "600", color: c.warning },
   violationPending: { fontSize: 12, color: c.inkMuted, fontStyle: "italic" },
+    blocked: { fontSize: 12, color: c.inkMuted, lineHeight: 17 },
 });

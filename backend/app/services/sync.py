@@ -29,6 +29,7 @@ from app.schemas.ticket import (
     CommentCreate,
     CommentOut,
     TicketTransition,
+    TicketUnproductive,
     TicketUpdate,
     WorklogCreate,
     WorklogOut,
@@ -119,6 +120,10 @@ async def _apply(db: AsyncSession, ticket: Ticket, op: SyncOperationIn, user: Us
         await svc.add_worklog(db, ticket, WorklogCreate.model_validate(op.payload), user)
     elif op.type == "update":
         await svc.update_ticket(db, ticket, TicketUpdate.model_validate(op.payload), user)
+    elif op.type == "unproductive":
+        await svc.register_unproductive(
+            db, ticket, TicketUnproductive.model_validate(op.payload), user
+        )
     elif op.type == "form_answers":
         form = await forms.get_ticket_form(db, ticket, uuid.UUID(str(op.payload.get("form_id"))))
         await forms.save_answers(

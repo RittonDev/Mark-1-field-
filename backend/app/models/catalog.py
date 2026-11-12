@@ -96,3 +96,14 @@ class ViolationReason(UUIDPrimaryKey, Timestamps, Base):
     )
     responsibility: Mapped[Responsibility] = mapped_column(str_enum(Responsibility))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+
+
+class UnproductiveReason(UUIDPrimaryKey, Timestamps, Base):
+    """Motivo de visita improdutiva (o técnico foi e não conseguiu atender)."""
+
+    __tablename__ = "unproductive_reasons"
+
+    name: Mapped[str] = mapped_column(String(160), unique=True)
+    description: Mapped[str | None] = mapped_column(Text)
+    responsibility: Mapped[Responsibility] = mapped_column(str_enum(Responsibility))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")

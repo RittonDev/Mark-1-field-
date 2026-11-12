@@ -22,6 +22,7 @@ from app.schemas.ticket import (
     TicketFilters,
     TicketListItem,
     TicketTransition,
+    TicketUnproductive,
     TicketUpdate,
     TicketViolationUpdate,
     WorklogCreate,
@@ -303,3 +304,14 @@ async def download_attachment(attachment_id: uuid.UUID, token: str, db: DB) -> F
         filename=attachment.filename,
         content_disposition_type=disposition,
     )
+
+
+@router.post("/tickets/{ticket_id}/unproductive", response_model=TicketDetail)
+async def register_unproductive(
+    ticket_id: uuid.UUID, body: TicketUnproductive, db: DB, user: CurrentUser
+) -> TicketDetail:
+    """Visita improdutiva: a OS volta para "Atribuído", sem agenda, para reagendar."""
+    ticket = await svc.get_visible_ticket(db, user, ticket_id)
+    await svc.register_unproductive(db, ticket, body, user)
+    await commit_and_publish(db)
+    return await _detail(db, ticket_id, user)

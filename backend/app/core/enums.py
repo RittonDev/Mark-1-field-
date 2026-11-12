@@ -97,6 +97,7 @@ class TicketEventType(StrEnum):
     EXPENSE_ADDED = "expense_added"
     EXPENSE_UPDATED = "expense_updated"
     EXPENSE_REMOVED = "expense_removed"
+    UNPRODUCTIVE_VISIT = "unproductive_visit"
 
 
 class DevicePlatform(StrEnum):

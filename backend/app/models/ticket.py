@@ -125,6 +125,10 @@ class Ticket(UUIDPrimaryKey, Timestamps, Base):
     )
     violation_note: Mapped[str | None] = mapped_column(Text)
 
+    # Visitas improdutivas (foi ao local e não atendeu): a OS volta para reagendar.
+    unproductive_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    last_unproductive_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     # Assinatura do responsável no local, coletada pelo técnico ao finalizar. Fica exigida
     # quando a gestão anexa um formulário obrigatório que pede assinatura.
     signature_required: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")

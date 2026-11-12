@@ -96,6 +96,9 @@ class TicketListItem(ORMModel):
     first_response_at: datetime | None
     resolved_at: datetime | None
     sla_paused_at: datetime | None
+    # Visitas improdutivas: a OS voltou para reagendar (contador para relatórios e a lista).
+    unproductive_count: int = 0
+    last_unproductive_at: datetime | None = None
     sla_paused_seconds: int
     created_at: datetime
     updated_at: datetime
@@ -352,3 +355,13 @@ class TicketFilters(BaseModel):
     open_only: bool = False
     sla_breached: bool = False
     violation_pending: bool = False
+
+
+class TicketUnproductive(BaseModel):
+    """Visita improdutiva: o técnico foi e não conseguiu atender. A OS volta para reagendar."""
+
+    reason_id: uuid.UUID
+    note: str | None = Field(default=None, max_length=2000)
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+    expected_version: int | None = None

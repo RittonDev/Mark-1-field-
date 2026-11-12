@@ -99,3 +99,24 @@ class ViolationReasonUpdate(BaseModel):
     applies_to: ViolationScope | None = None
     responsibility: Responsibility | None = None
     is_active: bool | None = None
+
+
+class UnproductiveReasonOut(ORMModel):
+    id: uuid.UUID
+    name: str
+    description: str | None
+    responsibility: Responsibility
+    is_active: bool
+
+
+class UnproductiveReasonCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=160)
+    description: str | None = None
+    responsibility: Responsibility
+
+
+class UnproductiveReasonUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=2, max_length=160)
+    description: str | None = None
+    responsibility: Responsibility | None = None
+    is_active: bool | None = None

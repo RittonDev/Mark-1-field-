@@ -22,7 +22,8 @@ class SyncPullResponse(BaseModel):
 
 
 # form_answers: {form_id, answers, complete} (respostas do formulário, offline no app).
-SyncOpType = Literal["transition", "comment", "worklog", "update", "form_answers"]
+# unproductive: {reason_id, note?, latitude?, longitude?, expected_version?} (visita improdutiva).
+SyncOpType = Literal["transition", "comment", "worklog", "update", "form_answers", "unproductive"]
 
 
 class SyncOperationIn(BaseModel):

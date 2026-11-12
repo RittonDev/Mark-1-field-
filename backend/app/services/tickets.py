@@ -37,6 +37,7 @@ from app.models import (
     TicketComment,
     TicketEvent,
     TicketWorklog,
+    UnproductiveReason,
     User,
     ViolationReason,
 )
@@ -46,6 +47,7 @@ from app.schemas.ticket import (
     TicketDetail,
     TicketFilters,
     TicketTransition,
+    TicketUnproductive,
     TicketUpdate,
     TicketViolationUpdate,
     WorklogCreate,
@@ -1078,3 +1080,66 @@ async def list_tickets(
         .limit(page_size)
     )
     return list(await db.scalars(stmt)), total
+
+
+# ------------------------------------------------------------------ improdutiva
+
+UNPRODUCTIVE_FROM = (S.ASSIGNED, S.SCHEDULED, S.EN_ROUTE, S.IN_PROGRESS)
+
+
+async def register_unproductive(
+    db: AsyncSession, ticket: Ticket, payload: TicketUnproductive, actor: User
+) -> Ticket:
+    """O técnico foi e não atendeu (cliente ausente, sem acesso...). A OS volta para
+    "Atribuído" sem agenda, para ser reagendada, e a ocorrência fica contada e no histórico."""
+    check_version(ticket, payload.expected_version)
+    is_assignee = actor.role == UserRole.TECHNICIAN and ticket.assignee_id == actor.id
+    if not (actor.can_manage_tickets or is_assignee):
+        raise PermissionDenied("Só o técnico responsável ou a gestão registra a visita improdutiva")
+    if ticket.status not in UNPRODUCTIVE_FROM:
+        raise WorkflowError(
+            "Só uma OS atribuída, agendada, em deslocamento ou em atendimento "
+            "tem visita improdutiva"
+        )
+    reason = await db.get(UnproductiveReason, payload.reason_id)
+    if reason is None or not reason.is_active:
+        raise WorkflowError("Motivo de visita improdutiva inválido")
+    now = utcnow()
+    data: dict[str, Any] = {
+        "reason_id": str(reason.id),
+        "reason": reason.name,
+        "responsibility": reason.responsibility.value,
+        "from_status": ticket.status.value,
+    }
+    if ticket.scheduled_start is not None:
+        data["previous_schedule"] = ticket.scheduled_start.isoformat()
+    if payload.latitude is not None and payload.longitude is not None:
+        data.update(latitude=payload.latitude, longitude=payload.longitude)
+    record_event(
+        db,
+        ticket,
+        actor,
+        TicketEventType.UNPRODUCTIVE_VISIT,
+        from_value=ticket.status.value,
+        to_value=reason.name[:64],
+        note=payload.note,
+        data=data,
+        now=now,
+    )
+    ticket.unproductive_count = (ticket.unproductive_count or 0) + 1
+    ticket.last_unproductive_at = now
+    ticket.scheduled_start = None
+    ticket.scheduled_end = None
+    if ticket.status != S.ASSIGNED:
+        _change_status(
+            db,
+            ticket,
+            S.ASSIGNED,
+            actor,
+            now=now,
+            note=f"Visita improdutiva: {reason.name}",
+            data={"unproductive": True},
+        )
+    else:
+        queue_event(db, "updated", ticket, actor, {"fields": ["unproductive"]})
+    return ticket
