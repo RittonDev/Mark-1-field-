@@ -244,3 +244,34 @@ Ao receber um evento, recarregue a OS/lista (o evento não carrega o objeto inte
 - `work_seconds` / `work_started_at`: a API soma o tempo em `in_progress` a cada mudança de status. O técnico não digita nada.
 - `actual_minutes`: duração real, calculada na leitura e incluindo o atendimento em andamento.
 - Ao agendar (`scheduled`) só com `scheduled_start`, a API preenche `scheduled_end = início + estimated_minutes`.
+
+## Módulos de operação (2026-11)
+
+Todos exigem analista ou gestor, salvo indicação. Valores em R$ chegam como número.
+
+- **Formulários:** `GET|POST /form-templates`, `GET|PUT /form-templates/{id}`, `GET /form-templates/catalog`.
+  Na OS: `GET /tickets/{id}/forms/suggestions` · `POST /tickets/{id}/forms {template_id, required}` ·
+  `PATCH|DELETE /tickets/{id}/forms/{form_id}` · `PUT /tickets/{id}/forms/{form_id}/answers {answers, complete}`
+  (técnico responsável ou gestão; respostas gravadas mesmo quando a conclusão falha) ·
+  `POST|DELETE /tickets/{id}/forms/{form_id}/photos[/{attachment_id}]` (multipart `file` + `field_id`) ·
+  `POST /tickets/{id}/signature` (multipart `file`, `signer_name`, `signer_role?`, `latitude?`, `longitude?`).
+  `TicketDetail.forms`, `signature_required`, `signer_*`, `signed_at`. Concluir a OS (resolved/closed) devolve 422 sem os
+  obrigatórios ou sem a assinatura exigida. Sync offline: operação `form_answers {form_id, answers, complete}`.
+- **Custos extras:** `GET|POST /tickets/{id}/expenses` (técnico só lê; solicitante recebe vazio) · `PATCH|DELETE /expenses/{id}` ·
+  `GET /expenses?start&end&technician_id&status&customer_id` (relatório) · `POST /expenses/mark-paid {ids}` ·
+  `GET|PUT /settings/expenses {km_rate}` (PUT: supervisor/admin). `TicketDetail.expenses`.
+- **Visita improdutiva:** `GET|POST|PATCH /unproductive-reasons` · `POST /tickets/{id}/unproductive {reason_id, note?, latitude?, longitude?, expected_version?}`
+  (técnico responsável ou gestão) → a OS volta para `assigned` sem agenda; `unproductive_count`. Sync: operação `unproductive`.
+- **Orçamentos:** `GET|POST /quote-items`, `PUT /quote-items/{id}` · `GET|POST /tickets/{id}/quotes` · `PUT /quotes/{id}` ·
+  `POST /quotes/{id}/send` → `{..., token}` (só nesta resposta) · `POST /quotes/{id}/cancel` · `GET /quotes?status&start&end`.
+  Público: `GET /public/quotes/{token}` · `POST /public/quotes/{token}/approve {name, document?, role?, signature (data URL), accept: true}` ·
+  `POST /public/quotes/{token}/reject {name?, reason}`. Evento WS `quote.decided` (gestão).
+- **Projetos:** `GET|POST /projects`, `GET|PUT /projects/{id}` (com `stats` e `margin`). OS: `project_id` em criar/editar (gestão)
+  e filtro `GET /tickets?project_id=`; `TicketListItem.project`.
+- **Assistência externa:** `GET /repairs?status&customer_id&q&open_only` · `GET /repairs/summary` · `POST /repairs` ·
+  `GET|PUT /repairs/{id}` · `POST /repairs/{id}/status {to_status, note?, vendor_quote_value?, expected_return_date?}` ·
+  `POST /repairs/{id}/photos`. Etapas: withdrawn → received → sent_to_vendor → vendor_quote → in_repair → ready_at_vendor →
+  back_in_stock → delivered (e unrepairable/cancelled).
+- **Relatórios:** `GET /reports/daily?date=` (sem data: o dia anterior, já fechado) · `GET /reports/monthly?month=AAAA-MM`.
+- **Sugestão de técnicos:** `GET /tickets/{id}/technician-suggestions` · `GET /technicians/suggest?city&state&latitude&longitude`
+  → `[{id, name, home_city, home_state, open_tickets, on_shift, distance_km, score, reasons[]}]`.

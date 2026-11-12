@@ -1,6 +1,6 @@
 import { useStyles, type Palette } from "../../theme/theme";
 import { StyleSheet, Text, View } from "react-native";
-import { ASSET_TYPE, LEVEL, RESPONSIBILITY, SLA_STATUS, TICKET_SOURCE, TICKET_TYPE } from "../../lib/constants";
+import { LEVEL, RESPONSIBILITY, SLA_STATUS, TICKET_SOURCE, TICKET_TYPE } from "../../lib/constants";
 import { addressOf, callPhone, openInMaps } from "../../lib/device-actions";
 import { formatDateTime, formatDocument, formatRelative } from "../../lib/format";
 import { computeSlaStatus } from "../../lib/sla";
@@ -12,7 +12,6 @@ import { ExpensesCard } from "./ExpensesCard";
 export function InfoPanel({ ticket, now }: { ticket: LocalTicket; now: number }) {
   const styles = useStyles(makeStyles);
   const location = ticket.location;
-  const asset = ticket.asset;
   const sla = SLA_STATUS[computeSlaStatus(ticket, now)];
   const requesterContact = ticket.requester_contact;
   // OS baixadas antes da mudança no contrato não têm o campo; trata como vazio.
@@ -53,19 +52,6 @@ export function InfoPanel({ ticket, now }: { ticket: LocalTicket; now: number })
             onPress={() => void openInMaps(location, serviceAddress)}
             style={{ marginTop: 8 }}
           />
-        </Card>
-      ) : null}
-
-      {asset ? (
-        <Card>
-          <SectionTitle>Equipamento</SectionTitle>
-          <Text style={styles.strong}>{asset.name}</Text>
-          <Text style={styles.text}>
-            {[ASSET_TYPE[asset.asset_type], asset.brand, asset.model].filter(Boolean).join(" · ")}
-          </Text>
-          {asset.serial_number ? <InfoRow label="Nº de série" value={asset.serial_number} /> : null}
-          {asset.asset_tag ? <InfoRow label="Patrimônio" value={asset.asset_tag} /> : null}
-          {asset.ip_address ? <InfoRow label="IP" value={asset.ip_address} /> : null}
         </Card>
       ) : null}
 

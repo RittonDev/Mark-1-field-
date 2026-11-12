@@ -254,6 +254,8 @@ export interface TicketListItem {
   location: LocationRef | null;
   assignee: UserRef | null;
   team: Ref | null;
+  /** OS de projeto (valores e equipe seguem o projeto). */
+  project: ProjectRef | null;
   requester_name: string | null;
   scheduled_start: ISODate | null;
   scheduled_end: ISODate | null;
@@ -437,6 +439,7 @@ export interface TicketCreatePayload {
   scheduled_start?: ISODate | null;
   scheduled_end?: ISODate | null;
   allow_conflict?: boolean;
+  project_id?: UUID | null;
 }
 
 export type TicketUpdatePayload = Partial<
@@ -698,6 +701,9 @@ export interface Technician {
   phone: string | null;
   job_title: string | null;
   team: Ref | null;
+  home_city: string | null;
+  home_state: string | null;
+  coverage_area: string | null;
   is_active: boolean;
   last_login_at: ISODate | null;
   location_consent_at: ISODate | null;
@@ -897,4 +903,100 @@ export interface PublicQuote {
   decided_at: ISODate | null;
   approver_name: string | null;
   rejection_reason: string | null;
+}
+
+// Projetos
+export type ProjectStatus = "planning" | "active" | "paused" | "done" | "cancelled";
+
+export interface ProjectRef {
+  id: UUID;
+  number: number;
+  name: string;
+  code: string;
+}
+
+export interface Project {
+  id: UUID;
+  number: number;
+  code: string;
+  name: string;
+  customer: Ref | null;
+  description: string | null;
+  status: ProjectStatus;
+  start_date: string | null;
+  end_date: string | null;
+  contract_value: number | null;
+  pricing_notes: string | null;
+  manager: Ref | null;
+  team: Ref | null;
+  members: Ref[];
+  margin: number | null;
+  stats: {
+    tickets_total: number;
+    tickets_open: number;
+    tickets_done: number;
+    unproductive: number;
+    expenses_total: number;
+    quotes_approved_total: number;
+    progress: number;
+  };
+  created_at: ISODate;
+}
+
+// Assistência externa
+export type RepairStatus =
+  | "withdrawn"
+  | "received"
+  | "sent_to_vendor"
+  | "vendor_quote"
+  | "in_repair"
+  | "ready_at_vendor"
+  | "back_in_stock"
+  | "delivered"
+  | "unrepairable"
+  | "cancelled";
+
+export interface Repair {
+  id: UUID;
+  number: number;
+  code: string;
+  status: RepairStatus;
+  status_changed_at: ISODate;
+  customer: Ref | null;
+  location: Ref | null;
+  ticket: Ref | null;
+  equipment_type: string;
+  brand: string | null;
+  model: string | null;
+  serial_number: string | null;
+  asset_tag: string | null;
+  problem: string;
+  accessories: string | null;
+  vendor_name: string | null;
+  vendor_contact: string | null;
+  vendor_protocol: string | null;
+  vendor_quote_value: number | null;
+  expected_return_date: string | null;
+  notes: string | null;
+  created_at: ISODate;
+  events: { id: UUID; from_status: RepairStatus | null; to_status: RepairStatus; note: string | null; actor: Ref | null; created_at: ISODate }[];
+  photos: { id: UUID; caption: string | null; created_at: ISODate; url: string }[];
+  allowed_next: RepairStatus[];
+  days_open: number;
+  days_in_status: number;
+  overdue: boolean;
+}
+
+export interface TechnicianSuggestion {
+  id: UUID;
+  name: string;
+  phone: string | null;
+  home_city: string | null;
+  home_state: string | null;
+  team: Ref | null;
+  open_tickets: number;
+  on_shift: boolean;
+  distance_km: number | null;
+  score: number;
+  reasons: string[];
 }

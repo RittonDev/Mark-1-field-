@@ -2,7 +2,7 @@ import { useStyles, useTheme, type Palette } from "../../theme/theme";
 import { Stack, useLocalSearchParams } from "expo-router";
 import { useCallback, useState } from "react";
 import { ActivityIndicator, KeyboardAvoidingView, Platform, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
-import { PriorityBadge, SlaBadge, StatusBadge } from "../../components/badges";
+import { PriorityBadge, ProjectBadge, SlaBadge, StatusBadge } from "../../components/badges";
 import { ConnectionBar } from "../../components/ConnectionBar";
 import { DurationCompare } from "../../components/ticket/DurationCompare";
 import { FormsCard } from "../../components/ticket/FormsCard";
@@ -109,6 +109,7 @@ export default function TicketScreen() {
             <StatusBadge status={current.status} />
             <PriorityBadge priority={current.priority} />
             <SlaBadge ticket={current} now={now} />
+            <ProjectBadge project={current.project} />
           </View>
           {current.scheduled_start ? <Text style={styles.meta}>Visita: {formatShort(current.scheduled_start)}</Text> : null}
           {current.work_started_at ? <DurationCompare ticket={current} now={now} /> : null}

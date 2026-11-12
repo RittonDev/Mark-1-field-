@@ -5,7 +5,7 @@ import { actualMinutes } from "../lib/duration";
 import { formatMinutes, formatRelative, formatShort, formatTime } from "../lib/format";
 import type { LocalTicket } from "../lib/syncTypes";
 import { readable, useStyles, useTheme, type Palette } from "../theme/theme";
-import { PriorityBadge, SlaBadge, StatusBadge } from "./badges";
+import { PriorityBadge, ProjectBadge, SlaBadge, StatusBadge } from "./badges";
 
 export function TicketCard({ ticket, now, showDate = false }: { ticket: LocalTicket; now: number; showDate?: boolean }) {
   const c = useTheme();
@@ -54,6 +54,7 @@ export function TicketCard({ ticket, now, showDate = false }: { ticket: LocalTic
           <StatusBadge status={ticket.status} />
           <PriorityBadge priority={ticket.priority} />
           <SlaBadge ticket={ticket} now={now} />
+          <ProjectBadge project={ticket.project} />
         </View>
         {due || ticket.pending_ops ? (
           <View style={styles.footer}>
