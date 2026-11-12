@@ -342,15 +342,6 @@ def _pending_required(ticket: Ticket) -> list[str]:
     return [f.name for f in ticket.forms if f.required and f.status != FormStatus.COMPLETED]
 
 
-def ensure_can_conclude(ticket: Ticket) -> None:
-    """Chamado ao resolver/fechar a OS."""
-    pending = _pending_required(ticket)
-    if pending:
-        raise WorkflowError("Conclua o formulário obrigatório antes: " + ", ".join(pending))
-    if ticket.signature_required and ticket.signed_at is None:
-        raise WorkflowError("Colete a assinatura do responsável no local antes de concluir a OS")
-
-
 async def collect_signature(
     db: AsyncSession,
     ticket: Ticket,

@@ -19,6 +19,7 @@ from app.core.enums import (
 )
 from app.db.base import utcnow
 from app.schemas.common import ORMModel, Ref
+from app.schemas.forms import TicketFormOut
 from app.schemas.user import UserRef
 from app.services.durations import actual_seconds
 from app.services.sla import compute_sla_status
@@ -134,6 +135,14 @@ class TicketDetail(TicketListItem):
     resolution_violation_reason: ViolationReasonRef | None
     violation_note: str | None
 
+    # Formulários anexados pela gestão e assinatura do responsável no local.
+    forms: list[TicketFormOut] = []
+    signature_required: bool = False
+    signer_name: str | None = None
+    signer_role: str | None = None
+    signed_at: datetime | None = None
+    signature_attachment_id: uuid.UUID | None = None
+
     @computed_field  # type: ignore[prop-decorator]
     @property
     def response_breached(self) -> bool:
@@ -212,6 +221,8 @@ class TicketUpdate(BaseModel):
     team_id: uuid.UUID | None = None
     scheduled_start: datetime | None = None
     scheduled_end: datetime | None = None
+    # Só a gestão: exigir (ou dispensar) a assinatura do responsável no local.
+    signature_required: bool | None = None
     expected_version: int | None = None
     allow_conflict: bool = False
 
@@ -306,6 +317,8 @@ class AttachmentOut(ORMModel):
     content_type: str
     size_bytes: int
     kind: str
+    form_id: uuid.UUID | None = None
+    field_id: str | None = None
     uploaded_by: UserRef | None
     created_at: datetime
     download_url: str | None = None

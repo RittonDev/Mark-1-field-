@@ -6,6 +6,7 @@ cada operação roda num SAVEPOINT, então uma rejeitada não derruba as outras.
 """
 
 import contextlib
+import uuid
 from datetime import datetime, timedelta
 
 from pydantic import ValidationError
@@ -16,6 +17,7 @@ from sqlalchemy.orm.exc import StaleDataError
 from app.core.enums import TicketEventType, UserRole
 from app.db.base import utcnow
 from app.models import SyncOperation, Ticket, TicketComment, TicketEvent, TicketWorklog, User
+from app.schemas.forms import TicketFormAnswers
 from app.schemas.sync import (
     SyncOperationIn,
     SyncOperationResult,
@@ -31,6 +33,7 @@ from app.schemas.ticket import (
     WorklogCreate,
     WorklogOut,
 )
+from app.services import forms
 from app.services import tickets as svc
 from app.services.errors import DomainError, NotFound, VersionConflict
 from app.services.realtime import commit_and_publish, discard_pending, pending_count
@@ -116,6 +119,9 @@ async def _apply(db: AsyncSession, ticket: Ticket, op: SyncOperationIn, user: Us
         await svc.add_worklog(db, ticket, WorklogCreate.model_validate(op.payload), user)
     elif op.type == "update":
         await svc.update_ticket(db, ticket, TicketUpdate.model_validate(op.payload), user)
+    elif op.type == "form_answers":
+        form = await forms.get_ticket_form(db, ticket, uuid.UUID(str(op.payload.get("form_id"))))
+        await forms.save_answers(db, ticket, form, TicketFormAnswers.model_validate(op.payload), user)
     await db.flush()
 
 

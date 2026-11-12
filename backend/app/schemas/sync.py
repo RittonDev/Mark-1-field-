@@ -21,7 +21,8 @@ class SyncPullResponse(BaseModel):
     revoked_ticket_ids: list[uuid.UUID]
 
 
-SyncOpType = Literal["transition", "comment", "worklog", "update"]
+# form_answers: {form_id, answers, complete} (respostas do formulário, offline no app).
+SyncOpType = Literal["transition", "comment", "worklog", "update", "form_answers"]
 
 
 class SyncOperationIn(BaseModel):

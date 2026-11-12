@@ -17,6 +17,7 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.config import settings
 from app.core.enums import (
+    FormStatus,
     TicketEventType,
     TicketPriority,
     TicketStatus,
@@ -587,6 +588,11 @@ async def update_ticket(
         raise PermissionDenied("Você não pode editar esta OS")
     check_version(ticket, data.expected_version)
     fields = data.model_dump(exclude_unset=True, exclude={"expected_version", "allow_conflict"})
+    if "signature_required" in fields:
+        if not actor.can_manage_tickets:
+            raise PermissionDenied("Só a gestão decide se a OS exige assinatura")
+        if fields["signature_required"] is None:
+            fields.pop("signature_required")
     if not fields:
         return ticket
 
@@ -681,6 +687,15 @@ async def take_ticket(db: AsyncSession, ticket: Ticket, actor: User) -> Ticket:
     return ticket
 
 
+def _ensure_forms_and_signature(ticket: Ticket) -> None:
+    """Concluir a OS exige os formulários obrigatórios concluídos e, se pedida, a assinatura."""
+    pending = [f.name for f in ticket.forms if f.required and f.status != FormStatus.COMPLETED]
+    if pending:
+        raise WorkflowError("Conclua o formulário obrigatório antes: " + ", ".join(pending))
+    if ticket.signature_required and ticket.signed_at is None:
+        raise WorkflowError("Colete a assinatura do responsável no local antes de concluir a OS")
+
+
 async def transition_ticket(
     db: AsyncSession, ticket: Ticket, payload: TicketTransition, actor: User
 ) -> Ticket:
@@ -722,6 +737,8 @@ async def transition_ticket(
         note=payload.note,
         resolution_notes=payload.resolution_notes,
     )
+    if to in (S.RESOLVED, S.CLOSED) and ticket.status not in (S.RESOLVED, S.CLOSED):
+        _ensure_forms_and_signature(ticket)
     if auto_assign:
         await _assign(db, ticket, actor.id, None, actor, now=now, note="Assumida ao mudar o status")
 
