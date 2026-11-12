@@ -11,7 +11,7 @@ import { QuickEditButton } from "@/components/ticket/QuickEditButton";
 import { errorMessage } from "@/lib/api";
 import { useAuth, useIsClient } from "@/lib/auth";
 import { canManageTickets } from "@/lib/constants";
-import { formatMinutes, formatTime } from "@/lib/format";
+import { formatMinutes, formatTime, initials } from "@/lib/format";
 import { useDayActivities, useTeams } from "@/lib/queries";
 import type { Activity, ActivityState, DaySummary } from "@/lib/types";
 
@@ -264,12 +264,31 @@ export default function DayPage() {
           {groups.map(([key, group]) => {
             const done = group.items.filter((a) => a.state === "done").length;
             return (
-              <Card key={key}>
-                <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
-                  <h2 className="text-sm font-semibold text-ink">{group.name}</h2>
-                  <span className="text-xs text-ink-muted">
-                    {group.items.length} atividade(s) · {done} concluída(s)
-                  </span>
+              <Card key={key} className="animate-enter overflow-hidden">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3">
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <span
+                      className={clsx(
+                        "flex size-8 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold",
+                        key === "none" ? "border border-dashed border-line-strong text-ink-subtle" : "bg-brand-soft text-brand-ink",
+                      )}
+                    >
+                      {key === "none" ? "?" : initials(group.name)}
+                    </span>
+                    <h2 className="truncate text-sm font-semibold text-ink">{group.name}</h2>
+                  </div>
+                  {/* Progresso do dia do técnico: concluídas sobre o total. */}
+                  <div className="flex items-center gap-2.5">
+                    <span className="text-xs text-ink-muted tabular-nums">
+                      {done}/{group.items.length} concluída(s)
+                    </span>
+                    <span className="h-1.5 w-28 overflow-hidden rounded-full bg-surface-3">
+                      <span
+                        className="grow-x block h-full rounded-full bg-emerald-500"
+                        style={{ width: `${group.items.length ? (done / group.items.length) * 100 : 0}%` }}
+                      />
+                    </span>
+                  </div>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[56rem] text-left">
