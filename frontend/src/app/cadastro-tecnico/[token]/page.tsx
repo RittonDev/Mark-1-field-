@@ -349,7 +349,7 @@ export default function TechnicianSignupPage() {
                         </Chip>
                       ))}
                     </div>
-                  </Field>
+                  </Group>
                   <div className="grid gap-4 sm:grid-cols-2">
                     <Field label="Anos de experiência">
                       <Input
