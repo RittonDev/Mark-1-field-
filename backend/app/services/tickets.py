@@ -475,6 +475,9 @@ async def _assign(
         prev_name = prev_user.name if prev_user else None
 
     ticket.assignee_id = assignee_id
+    # Quem passa a responsável deixa de ser "outro técnico" da mesma visita.
+    if assignee_id is not None and any(h.id == assignee_id for h in ticket.helpers):
+        ticket.helpers = [h for h in ticket.helpers if h.id != assignee_id]
     data = {
         "from_name": prev_name,
         "to_name": assignee.name if assignee else None,
@@ -552,6 +555,71 @@ async def _set_owner(
         now=now,
     )
     queue_event(db, "updated", ticket, actor, {"fields": ["owner_id"], **data}, internal=True)
+    return True
+
+
+def _clean_text(value: str | None, *, single_line: bool = False) -> str | None:
+    """Texto livre opcional: sem espaços nas pontas; vazio vira null."""
+    if value is None:
+        return None
+    text = " ".join(value.split()) if single_line else value.strip()
+    return text or None
+
+
+async def _helper_users(
+    db: AsyncSession, ids: list[uuid.UUID], assignee_id: uuid.UUID | None, actor: User
+) -> list[User]:
+    """Outros técnicos da visita: ativos, da equipe, sem repetir o responsável."""
+    wanted = [i for i in dict.fromkeys(ids) if i != assignee_id]
+    if not wanted:
+        return []
+    if not actor.can_manage_tickets:
+        raise PermissionDenied("Só a gestão escolhe os outros técnicos da OS")
+    found = {u.id: u for u in await db.scalars(select(User).where(User.id.in_(wanted)))}
+    for user_id in wanted:
+        user = found.get(user_id)
+        if user is None or not user.is_active or not user.is_staff:
+            raise WorkflowError("Técnico auxiliar inválido ou inativo")
+    return [found[i] for i in wanted]
+
+
+async def _set_helpers(
+    db: AsyncSession, ticket: Ticket, ids: list[uuid.UUID], actor: User, *, allow: bool
+) -> bool:
+    users = await _helper_users(db, ids, ticket.assignee_id, actor)
+    before = {h.id: h for h in ticket.helpers}
+    after = {u.id: u for u in users}
+    added = [u for user_id, u in after.items() if user_id not in before]
+    removed = [h for user_id, h in before.items() if user_id not in after]
+    if not added and not removed:
+        return False
+    if added:
+        # Quem entra na visita precisa estar livre no horário (como o responsável).
+        await schedule.check_slot(
+            db,
+            actor,
+            assignee_id=None,
+            start=ticket.scheduled_start,
+            end=ticket.scheduled_end,
+            estimated_minutes=ticket.estimated_minutes,
+            status=ticket.status,
+            exclude_id=ticket.id,
+            allow=allow,
+            helper_ids=[u.id for u in added],
+        )
+    ticket.helpers = users
+    now = utcnow()
+    data = {"added": [u.name for u in added], "removed": [h.name for h in removed]}
+    record_event(db, ticket, actor, TicketEventType.HELPERS_CHANGED, data=data, now=now)
+    await _touch(db, ticket, now)
+    queue_event(
+        db,
+        "helpers_changed",
+        ticket,
+        actor,
+        {**data, "added_ids": [str(u.id) for u in added]},
+        previous_helper_ids=[h.id for h in removed],
+    )
     return True
 
 

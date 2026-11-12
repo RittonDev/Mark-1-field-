@@ -16,7 +16,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from fastapi import WebSocket
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.base import NO_VALUE
 
 from app.core.config import settings
 from app.core.enums import UserRole
@@ -42,6 +44,8 @@ class PendingEvent:
     # Tipo completo do evento (ex.: "part_request.created"); padrão: "ticket.<kind>".
     event_type: str | None = None
     managers_only: bool = False
+    # Técnicos que saíram da visita (para o app deles tirar a OS da lista).
+    previous_helper_ids: list[uuid.UUID] = field(default_factory=list)
 
 
 def queue_event(
@@ -55,6 +59,7 @@ def queue_event(
     previous_assignee_id: uuid.UUID | None = None,
     event_type: str | None = None,
     managers_only: bool = False,
+    previous_helper_ids: list[uuid.UUID] | None = None,
 ) -> None:
     db.info.setdefault(_PENDING_KEY, []).append(
         PendingEvent(
@@ -66,6 +71,7 @@ def queue_event(
             previous_assignee_id,
             event_type,
             managers_only,
+            list(previous_helper_ids or []),
         )
     )
 
@@ -81,6 +87,14 @@ def discard_pending(db: AsyncSession, keep: int = 0) -> None:
 
 def _s(value: uuid.UUID | None) -> str | None:
     return str(value) if value is not None else None
+
+
+def _helper_ids(ticket: Ticket) -> list[str]:
+    """Outros técnicos da visita, sem ir ao banco (o evento é renderizado depois do commit)."""
+    value = sa_inspect(ticket).attrs.helpers.loaded_value
+    if value is NO_VALUE or not value:
+        return []
+    return [str(u.id) for u in value]
 
 
 def render_event(ev: PendingEvent) -> dict[str, Any]:
@@ -102,6 +116,8 @@ def render_event(ev: PendingEvent) -> dict[str, Any]:
         "audience": {
             "assignee_id": _s(t.assignee_id),
             "previous_assignee_id": _s(ev.previous_assignee_id),
+            "helper_ids": _helper_ids(t),
+            "previous_helper_ids": [str(i) for i in ev.previous_helper_ids],
             "team_id": _s(t.team_id),
             "requester_id": _s(t.requester_id),
             "created_by_id": _s(t.created_by_id),
@@ -121,8 +137,13 @@ def should_deliver(
     if aud.get("managers_only"):
         return False
     if role == UserRole.TECHNICIAN:
-        # Só as OS dele (e a que acabou de sair dele, para o app tirá-la da lista).
-        return user_id in (aud.get("assignee_id"), aud.get("previous_assignee_id"))
+        # Só as OS dele, como responsável ou outro técnico da visita (e a que acabou de sair
+        # dele, para o app tirá-la da lista).
+        return (
+            user_id in (aud.get("assignee_id"), aud.get("previous_assignee_id"))
+            or user_id in (aud.get("helper_ids") or [])
+            or user_id in (aud.get("previous_helper_ids") or [])
+        )
     if aud.get("internal"):
         return False
     return user_id in (aud.get("requester_id"), aud.get("created_by_id"))

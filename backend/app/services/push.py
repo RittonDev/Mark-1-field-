@@ -54,19 +54,31 @@ def _push_target(event: dict[str, Any]) -> tuple[str, str, str] | None:
     return None
 
 
+def _push_targets(event: dict[str, Any]) -> list[tuple[str, str, str]]:
+    """Todos que recebem push pelo evento (o responsável e quem entrou na visita)."""
+    if event["type"] == "ticket.helpers_changed":
+        actor = event.get("actor_id")
+        code = event["ticket_code"]
+        added = (event.get("data") or {}).get("added_ids") or []
+        return [
+            (user_id, f"Você vai na visita da {code}", f"Incluído por {event['actor_name']}")
+            for user_id in added
+            if user_id != actor
+        ]
+    target = _push_target(event)
+    return [target] if target is not None else []
+
+
 async def notify_for_events(db: AsyncSession, events: list[dict[str, Any]]) -> None:
     provider = get_provider()
     for event in events:
-        target = _push_target(event)
-        if target is None:
-            continue
-        user_id, title, body = target
-        tokens = list(
-            await db.scalars(
-                select(DeviceToken.token).where(DeviceToken.user_id == uuid.UUID(user_id))
+        for user_id, title, body in _push_targets(event):
+            tokens = list(
+                await db.scalars(
+                    select(DeviceToken.token).where(DeviceToken.user_id == uuid.UUID(user_id))
+                )
             )
-        )
-        if tokens:
-            await provider.send(
-                tokens, title, body, {"ticket_id": event["ticket_id"], "type": event["type"]}
-            )
+            if tokens:
+                await provider.send(
+                    tokens, title, body, {"ticket_id": event["ticket_id"], "type": event["type"]}
+                )
