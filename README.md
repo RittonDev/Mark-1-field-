@@ -105,6 +105,28 @@ docker cp mig:/app/alembic/versions/. backend/alembic/versions && docker rm mig
 Revise o arquivo gerado antes de commitar. Para apontar para outro PostgreSQL, troque `DATABASE_URL`
 (formato `postgresql+asyncpg://usuario:senha@host:5432/banco`).
 
+## Pré-visualização ao vivo (web e app)
+
+Para ver as mudanças aparecerem enquanto o código é editado, deixe rodando num terminal:
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts/dev-preview.ps1
+```
+
+| O quê | Onde |
+|---|---|
+| Web (analistas e gestores) | http://localhost:3001: recarrega sozinho a cada alteração em `frontend/` |
+| App dos técnicos no celular | **Expo Go** (Play Store ou App Store) → ler o QR code ou digitar `exp://<IP da máquina>:8081`. O celular precisa estar no mesmo Wi-Fi |
+| App dos técnicos no navegador | http://localhost:8081 (sem celular) |
+
+- O script troca o web de produção da porta 3001 por um servidor de desenvolvimento (`mc-web-dev`) e sobe o Expo (`mc-expo`).
+- A cada 2 s ele copia para dentro dos containers os arquivos alterados, porque o Docker daqui não monta pastas do drive D:.
+- Mudou `package.json`? O script reinstala as dependências e reinicia o container.
+- A API continua vindo do `docker compose` (porta 8000).
+- `-Stop` desliga a pré-visualização e volta o web de produção.
+
+Se o celular não abrir o app: o Windows bloqueia conexões vindas de outros aparelhos quando o Wi-Fi está marcado como **rede pública**. Em *Configurações → Rede e Internet → Wi-Fi → (sua rede)*, marque **Rede privada**, ou libere o Docker Desktop no firewall.
+
 ## Sincronização com o GitHub
 
 Repositório: https://github.com/RittonDev/Mark-1-field- (branch `main`, **público**).
