@@ -84,7 +84,10 @@ function Photos({ photos }: { photos: PublicReportPhoto[] }) {
   return (
     <View style={s.photos}>
       {photos.map((p, i) => (
-        <Image key={`${p.url}-${i}`} src={p.url} style={s.photo} />
+        <View key={`${p.url}-${i}`} style={{ width: 166 }} wrap={false}>
+          <Image src={p.url} style={s.photo} />
+          {p.caption ? <Text style={{ fontSize: 7, color: C.muted, marginTop: 2 }}>{p.caption}</Text> : null}
+        </View>
       ))}
     </View>
   );

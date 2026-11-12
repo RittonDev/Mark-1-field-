@@ -1168,6 +1168,7 @@ export interface PublicReportPhoto {
   url: string;
   filename: string;
   taken_at?: ISODate | null;
+  caption?: string | null;
 }
 
 export interface PublicReport {

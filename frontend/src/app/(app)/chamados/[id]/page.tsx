@@ -291,7 +291,9 @@ export default function TicketDetailPage() {
               {tab === "comments" ? <CommentsTab ticketId={ticket.id} /> : null}
               {tab === "history" ? <HistoryTab ticketId={ticket.id} /> : null}
               {tab === "worklogs" ? <WorklogsTab ticketId={ticket.id} closed={info.final} /> : null}
-              {tab === "attachments" ? <AttachmentsTab ticketId={ticket.id} closed={info.final} /> : null}
+              {tab === "attachments" ? (
+                <AttachmentsTab ticketId={ticket.id} closed={info.final} canManage={ticket.can_assign} signatureId={ticket.signature_attachment_id} />
+              ) : null}
             </div>
           </Card>
         </div>

@@ -74,7 +74,12 @@ function PhotoGrid({ photos, onOpen }: { photos: PublicReportPhoto[]; onOpen: (p
               className="aspect-[4/3] w-full object-cover transition-transform duration-500 ease-out-expo group-hover:scale-[1.03]"
             />
           </button>
-          {p.taken_at ? <figcaption className="mt-1 text-[11px] text-ink-subtle">{formatDateTime(p.taken_at)}</figcaption> : null}
+          {p.caption || p.taken_at ? (
+            <figcaption className="mt-1">
+              {p.caption ? <span className="block text-xs text-ink">{p.caption}</span> : null}
+              {p.taken_at ? <span className="block text-[11px] text-ink-subtle">{formatDateTime(p.taken_at)}</span> : null}
+            </figcaption>
+          ) : null}
         </figure>
       ))}
     </div>
