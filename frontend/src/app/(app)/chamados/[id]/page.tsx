@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
-import { ArrowLeft, Ban, CheckCircle2, Clock, Pencil } from "lucide-react";
+import { ArrowLeft, Ban, CheckCircle2, Clock, MessageCircle, Pencil } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
@@ -19,6 +19,7 @@ import { SlaCard } from "@/components/ticket/SlaCard";
 import { TicketInfo } from "@/components/ticket/TicketInfo";
 import { TransitionDialog } from "@/components/ticket/TransitionDialog";
 import { UNPRODUCTIVE_FROM, UnproductiveDialog } from "@/components/ticket/UnproductiveDialog";
+import { WhatsAppShare } from "@/components/ticket/WhatsAppShare";
 import { WorklogsTab } from "@/components/ticket/WorklogsTab";
 import { Button, Card, ErrorBox, LoadingBlock } from "@/components/ui";
 import { useNow } from "@/components/useNow";
@@ -89,6 +90,7 @@ export default function TicketDetailPage() {
   const [target, setTarget] = useState<TicketStatus | null>(null);
   const [editing, setEditing] = useState(false);
   const [unproductive, setUnproductive] = useState(false);
+  const [sharing, setSharing] = useState(false);
 
   const query = useQuery({
     queryKey: ["ticket", id],
@@ -174,6 +176,12 @@ export default function TicketDetailPage() {
                 {TRANSITION_ACTION[to]}
               </Button>
             ))}
+            {ticket.can_assign ? (
+              <Button size="sm" variant="ghost" onClick={() => setSharing(true)}>
+                <MessageCircle className="size-3.5" />
+                WhatsApp
+              </Button>
+            ) : null}
             {ticket.can_edit && UNPRODUCTIVE_FROM.includes(ticket.status) && ticket.assignee ? (
               <Button size="sm" variant="ghost" onClick={() => setUnproductive(true)}>
                 <Ban className="size-3.5" />
@@ -254,6 +262,7 @@ export default function TicketDetailPage() {
       {target ? <TransitionDialog key={target} ticket={ticket} to={target} onClose={() => setTarget(null)} /> : null}
       {editing ? <EditTicketDialog ticket={ticket} onClose={() => setEditing(false)} /> : null}
       {unproductive ? <UnproductiveDialog ticket={ticket} onClose={() => setUnproductive(false)} /> : null}
+      {sharing ? <WhatsAppShare ticket={ticket} onClose={() => setSharing(false)} /> : null}
     </div>
   );
 }
