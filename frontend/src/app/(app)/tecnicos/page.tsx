@@ -45,7 +45,9 @@ import { formatRelative, initials } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
 import { labelMap, useOnboardingCatalog } from "@/lib/onboarding";
 import { useTeams } from "@/lib/queries";
-import type { ImportResult, Technician, TemporaryPassword } from "@/lib/types";
+import { Tabs } from "@/components/motion";
+import { NearbyFinder, UFS } from "@/components/technicians/NearbyFinder";
+import type { ImportResult, Technician, TechnicianRegion, TemporaryPassword } from "@/lib/types";
 
 type Active = "true" | "false" | "";
 
@@ -73,7 +75,11 @@ export default function TechniciansPage() {
   const now = useNow(60_000);
   const [qInput, setQInput] = useState("");
   const [teamId, setTeamId] = useState("");
-  const [active, setActive] = useState<Active>("true");
+  // Depois da migração, quem está "inativo" no Field Control continua na rede (só sem licença): mostra todos.
+  const [active, setActive] = useState<Active>("");
+  const [view, setView] = useState<"list" | "nearby">("list");
+  const [uf, setUf] = useState("");
+  const [city, setCity] = useState("");
   const [editing, setEditing] = useState<Technician | null>(null);
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -81,11 +87,24 @@ export default function TechniciansPage() {
   const teams = useTeams();
 
   const list = useQuery({
-    queryKey: ["technicians", q, teamId, active],
+    queryKey: ["technicians", q, teamId, active, uf, city],
     queryFn: () =>
-      api.get<Technician[]>("/technicians", { q: q || undefined, team_id: teamId || undefined, active: active || undefined }),
+      api.get<Technician[]>("/technicians", {
+        q: q || undefined,
+        team_id: teamId || undefined,
+        active: active || undefined,
+        state: uf || undefined,
+        city: city || undefined,
+      }),
     placeholderData: (previous) => previous,
   });
+  // Estados e cidades onde a base técnica está (pela região de atuação).
+  const regions = useQuery({
+    queryKey: ["technicians", "regions", active],
+    queryFn: () => api.get<TechnicianRegion[]>("/technicians/regions", { active: active || undefined }),
+    staleTime: 60_000,
+  });
+  const cities = regions.data?.find((r) => r.state === uf)?.cities ?? [];
 
   if (user && !canManageTickets(user.role)) {
     return <ErrorBox message="A base técnica é exclusiva para analistas e gestores." />;
@@ -116,7 +135,55 @@ export default function TechniciansPage() {
         }
       />
 
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <Tabs
+          variant="segmented"
+          items={[
+            { key: "list" as const, label: "Base técnica" },
+            { key: "nearby" as const, label: "Mais próximos de uma loja" },
+          ]}
+          value={view}
+          onChange={setView}
+          ariaLabel="Visão"
+        />
+        {view === "list" && list.data ? (
+          <span className="text-xs text-ink-subtle">{list.data.length} técnico(s)</span>
+        ) : null}
+      </div>
+
+      {view === "nearby" ? (
+        <NearbyFinder />
+      ) : (
+      <>
       <div className="mb-4 flex flex-wrap gap-2">
+        <div className="w-full sm:w-28">
+          <Select
+            value={uf}
+            onChange={(e) => {
+              setUf(e.target.value);
+              setCity("");
+            }}
+            aria-label="Estado"
+          >
+            <option value="">Todos os UF</option>
+            {(regions.data?.length ? regions.data.map((r) => r.state) : UFS).map((s) => (
+              <option key={s} value={s}>
+                {s}
+                {regions.data ? ` (${regions.data.find((r) => r.state === s)?.total ?? 0})` : ""}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <div className="w-full sm:w-56">
+          <Select value={city} onChange={(e) => setCity(e.target.value)} disabled={!uf} aria-label="Cidade">
+            <option value="">{uf ? "Todas as cidades" : "Escolha o UF"}</option>
+            {cities.map((c) => (
+              <option key={c.city} value={c.city}>
+                {c.city} ({c.total})
+              </option>
+            ))}
+          </Select>
+        </div>
         <div className="relative min-w-56 flex-1">
           <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-muted" />
           <Input
@@ -165,7 +232,7 @@ export default function TechniciansPage() {
               <tr>
                 <Th>Técnico</Th>
                 <Th className="hidden md:table-cell">Grupo</Th>
-                <Th className="hidden xl:table-cell">Cidade</Th>
+                <Th className="hidden lg:table-cell">Região de atuação</Th>
                 <Th className="hidden lg:table-cell">Telefone</Th>
                 <Th>App</Th>
                 <Th className="hidden sm:table-cell">OS abertas</Th>
@@ -184,8 +251,21 @@ export default function TechniciansPage() {
                     </button>
                   </Td>
                   <Td className="hidden md:table-cell">{t.team?.name ?? <span className="text-ink-muted">—</span>}</Td>
-                  <Td className="hidden xl:table-cell">
-                    {t.home_city ? `${t.home_city}${t.home_state ? `-${t.home_state}` : ""}` : <span className="text-ink-muted">—</span>}
+                  <Td className="hidden lg:table-cell">
+                    {t.base_city || t.home_city ? (
+                      <span className="block">
+                        <span className="whitespace-nowrap text-ink">
+                          {t.base_city ?? t.home_city}-{t.base_state ?? t.home_state}
+                        </span>
+                        <span className="block text-xs text-ink-subtle">
+                          {t.base_source === "history"
+                            ? `pelo histórico · ${t.base_visits ?? 0} OS`
+                            : "pelo endereço"}
+                        </span>
+                      </span>
+                    ) : (
+                      <span className="text-xs text-ink-subtle">Sem região</span>
+                    )}
                   </Td>
                   <Td className="hidden lg:table-cell">{t.phone ?? <span className="text-ink-muted">—</span>}</Td>
                   <Td>
@@ -198,6 +278,8 @@ export default function TechniciansPage() {
           </Table>
         )}
       </Card>
+      </>
+      )}
 
       {editing ? <EditDialog tech={editing} onClose={() => setEditing(null)} /> : null}
       {creating ? <CreateDialog onClose={() => setCreating(false)} /> : null}
