@@ -156,7 +156,7 @@ export default function TechniciansPage() {
       ) : (
       <>
       <div className="mb-4 flex flex-wrap gap-2">
-        <div className="w-full sm:w-28">
+        <div className="w-full sm:w-40">
           <Select
             value={uf}
             onChange={(e) => {

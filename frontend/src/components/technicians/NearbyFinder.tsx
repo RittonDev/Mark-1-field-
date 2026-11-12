@@ -87,7 +87,7 @@ function ResultRow({ tech, rank }: { tech: NearbyTechnician; rank: number }) {
         </p>
         {tech.reasons.length ? (
           <div className="mt-1.5 flex flex-wrap gap-1">
-            {tech.reasons.slice(0, 4).map((r) => (
+            {tech.reasons.filter((r) => !/^inativo/i.test(r)).slice(0, 4).map((r) => (
               <span key={r} className="rounded-md bg-surface-2 px-1.5 py-0.5 text-[11px] text-ink-muted ring-1 ring-line ring-inset">
                 {r}
               </span>
