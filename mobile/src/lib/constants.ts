@@ -188,7 +188,7 @@ export const canManageTickets = (role: UserRole | undefined) =>
 /** Configuração: grupos e categorias (SLA e usuários só admin). */
 export const isManager = (role: UserRole | undefined) => role === "admin" || role === "supervisor";
 /** Quem assume sozinho uma OS sem responsável ao iniciar o atendimento (SELF_ASSIGN_ROLES). */
-export const SELF_ASSIGN_ROLES: UserRole[] = ["analyst", "technician"];
+export const SELF_ASSIGN_ROLES: UserRole[] = ["analyst"];
 
 export const RESPONSIBILITY: Record<Responsibility, { label: string; color: string }> = {
   internal: { label: "Interna", color: "#dc2626" },
