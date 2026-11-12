@@ -79,9 +79,7 @@ def start() -> StartData:
     }
     if domain:
         params["domain_hint"] = domain
-    cookie = create_token(
-        state, "sso_state", STATE_TTL, {"nonce": nonce, "verifier": verifier}
-    )
+    cookie = create_token(state, "sso_state", STATE_TTL, {"nonce": nonce, "verifier": verifier})
     return StartData(url=f"{_authority()}/oauth2/v2.0/authorize?{urlencode(params)}", cookie=cookie)
 
 
@@ -197,7 +195,9 @@ async def resolve_user(db: AsyncSession, claims: dict[str, Any]) -> User:
 
 
 def handoff_token(user: User) -> str:
-    return create_token(str(user.id), "sso_handoff", HANDOFF_TTL, {"jti": secrets.token_urlsafe(16)})
+    return create_token(
+        str(user.id), "sso_handoff", HANDOFF_TTL, {"jti": secrets.token_urlsafe(16)}
+    )
 
 
 def staff_must_use_microsoft(user: User) -> bool:

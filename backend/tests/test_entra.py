@@ -23,7 +23,11 @@ API = settings.API_PREFIX
 TENANT = "11111111-2222-3333-4444-555555555555"
 CLIENT = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-JWK = {**jwt.algorithms.RSAAlgorithm.to_jwk(KEY.public_key(), as_dict=True), "kid": "k1", "use": "sig"}
+JWK = {
+    **jwt.algorithms.RSAAlgorithm.to_jwk(KEY.public_key(), as_dict=True),
+    "kid": "k1",
+    "use": "sig",
+}
 
 
 @pytest.fixture
