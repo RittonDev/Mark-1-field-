@@ -101,15 +101,16 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
                   <Button size="sm" variant="ghost" onClick={() => setEditing(q)}>
                     Editar
                   </Button>
-                  {q.status === "sent" ? (
+                  {q.status === "sent" && linkOf(q) ? (
                     <Button size="sm" variant="primary" onClick={() => setSharing(q)}>
                       <Share2 className="size-3.5" />
                       Enviar link
                     </Button>
                   ) : (
+                    // Rascunho, vencido ou enviado sem link (veio do Field Control): o envio cria o link.
                     <Button size="sm" variant="primary" loading={send.isPending && send.variables?.id === q.id} onClick={() => send.mutate(q)}>
                       <Send className="size-3.5" />
-                      {q.status === "draft" ? "Enviar" : "Reenviar"}
+                      {q.status === "draft" ? "Enviar" : q.status === "sent" ? "Gerar link" : "Reenviar"}
                     </Button>
                   )}
                   <button
