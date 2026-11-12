@@ -212,7 +212,7 @@ async def suggest_for_place(
     category = await db.get(Category, category_id) if category_id else None
     project = await db.get(Project, project_id) if project_id else None
     if start is not None and start.tzinfo is None:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Informe o fuso do horário")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Informe o fuso do horário")
     coords = (latitude, longitude) if latitude is not None and longitude is not None else None
     target = suggestions.target_from(
         location=location,
