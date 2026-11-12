@@ -69,11 +69,11 @@ function Detail({ event }: { event: TicketEvent }) {
   if (event.event_type === "assigned") {
     const to = str(data.to_name) ?? str(data.assignee_name);
     const from = str(data.from_name) ?? str(data.previous_assignee_name);
-    if (!event.to_value && !to) return <span className="text-ink-muted">removeu o analista{from ? ` ${from}` : ""}</span>;
+    if (!event.to_value && !to) return <span className="text-ink-muted">removeu o responsável{from ? ` ${from}` : ""}</span>;
     return (
       <span className="text-ink-muted">
         {from ? `${from} → ` : "para "}
-        <span className="font-medium text-ink">{to ?? "outro analista"}</span>
+        <span className="font-medium text-ink">{to ?? "outro responsável"}</span>
       </span>
     );
   }

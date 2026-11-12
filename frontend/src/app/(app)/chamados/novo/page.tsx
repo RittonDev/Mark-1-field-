@@ -151,7 +151,7 @@ export default function NewTicketPage() {
         <ArrowLeft className="size-4" />
         Chamados
       </Link>
-      <PageHeader title="Nova ordem de serviço" description="Registre o chamado e, se já souber, defina o analista" />
+      <PageHeader title="Nova ordem de serviço" description="Registre o chamado e, se já souber, defina o responsável" />
 
       <form onSubmit={onSubmit} className="grid gap-4 lg:grid-cols-[1fr_20rem]">
         <div className="flex flex-col gap-4">

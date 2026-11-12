@@ -35,7 +35,7 @@ export function useLocations(customerId: UUID | null | undefined) {
   });
 }
 
-/** Analistas para atribuição (só equipe técnica pode listar). */
+/** Analistas, técnicos e supervisores para atribuição (só a equipe interna pode listar). */
 export function useAssignable(teamId?: UUID | null, enabled = true) {
   return useQuery({
     queryKey: ["assignable", teamId ?? ""],

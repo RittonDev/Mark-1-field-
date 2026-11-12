@@ -341,7 +341,7 @@ async def _assign(
     if assignee_id is not None:
         assignee = await db.get(User, assignee_id)
         if assignee is None or not assignee.is_active or not assignee.is_staff:
-            raise WorkflowError("Analista inválido ou inativo")
+            raise WorkflowError("Responsável inválido ou inativo")
 
     team_changed = False
     if team_id is not None and team_id != ticket.team_id:
@@ -382,11 +382,11 @@ async def _assign(
 
     if assignee_id is None:
         if ticket.status in FIELD_ACTIVE:
-            _change_status(db, ticket, S.NEW, actor, now=now, note="Analista removido")
+            _change_status(db, ticket, S.NEW, actor, now=now, note="Responsável removido")
     elif ticket.status in (S.NEW, S.TRIAGE, S.REOPENED):
         _change_status(db, ticket, S.ASSIGNED, actor, now=now)
     elif ticket.status in (S.EN_ROUTE, S.IN_PROGRESS) and prev_id not in (None, assignee_id):
-        _change_status(db, ticket, S.ASSIGNED, actor, now=now, note="Troca de analista")
+        _change_status(db, ticket, S.ASSIGNED, actor, now=now, note="Troca de responsável")
 
 
 # --------------------------------------------------------------------------- casos de uso
@@ -557,7 +557,7 @@ async def assign_ticket(
 async def take_ticket(db: AsyncSession, ticket: Ticket, actor: User) -> Ticket:
     if not can_take(actor, ticket):
         raise PermissionDenied("Esta OS não pode ser assumida por você")
-    await _assign(db, ticket, actor.id, None, actor, now=utcnow(), note="Assumida pelo analista")
+    await _assign(db, ticket, actor.id, None, actor, now=utcnow(), note="Assumida pelo próprio usuário")
     return ticket
 
 

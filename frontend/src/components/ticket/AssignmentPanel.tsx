@@ -41,7 +41,7 @@ export function AssignmentPanel({ ticket }: { ticket: TicketDetail }) {
         expected_version: ticket.version,
       }),
     onSuccess: (updated) =>
-      onSuccess(updated, updated.assignee ? `Atribuída a ${updated.assignee.name}` : "Analista removido"),
+      onSuccess(updated, updated.assignee ? `Atribuída a ${updated.assignee.name}` : "Responsável removido"),
     onError,
   });
 
@@ -74,7 +74,7 @@ export function AssignmentPanel({ ticket }: { ticket: TicketDetail }) {
           </div>
         ) : (
           <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
-            Nenhum analista tratando esta OS.
+            Ninguém está tratando esta OS.
           </p>
         )}
 
@@ -87,8 +87,8 @@ export function AssignmentPanel({ ticket }: { ticket: TicketDetail }) {
 
         {ticket.can_assign && !isFinal ? (
           <div className="flex flex-col gap-2 border-t border-line pt-3">
-            <Select value={selected} onChange={(e) => setSelected(e.target.value)} aria-label="Analista">
-              <option value="">Selecione o analista...</option>
+            <Select value={selected} onChange={(e) => setSelected(e.target.value)} aria-label="Responsável">
+              <option value="">Selecione o responsável...</option>
               {options.map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.name} — {u.open_tickets} em aberto{u.team_name ? ` · ${u.team_name}` : ""}
@@ -110,7 +110,7 @@ export function AssignmentPanel({ ticket }: { ticket: TicketDetail }) {
                   variant="ghost"
                   onClick={() => assign.mutate(null)}
                   loading={assign.isPending && assign.variables === null}
-                  title="Remover analista (OS volta para a fila)"
+                  title="Remover responsável (OS volta para a fila)"
                 >
                   <UserMinus className="size-4" />
                   Remover

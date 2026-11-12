@@ -75,7 +75,7 @@ function BoardCard({
           )}
         >
           <UserRound className="size-3 shrink-0" />
-          <span className="truncate">{ticket.assignee?.name ?? "Sem analista"}</span>
+          <span className="truncate">{ticket.assignee?.name ?? "Sem responsável"}</span>
         </span>
         <SlaBadge status={ticket.sla_status} />
       </div>

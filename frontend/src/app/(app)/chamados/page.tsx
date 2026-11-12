@@ -152,7 +152,7 @@ function TicketsView() {
           {staff ? (
             <>
               <Select value={filters.assignee_id} onChange={(e) => update({ assignee_id: e.target.value })}>
-                <option value="">Todos os analistas</option>
+                <option value="">Todos os responsáveis</option>
                 {assignable.data?.map((u) => (
                   <option key={u.id} value={u.id}>
                     {u.name}
@@ -191,7 +191,7 @@ function TicketsView() {
             <>
               <Checkbox label="Minhas OS" checked={filters.mine} onChange={(mine) => update({ mine })} />
               <Checkbox
-                label="Sem analista"
+                label="Sem responsável"
                 checked={filters.unassigned}
                 onChange={(unassigned) => update({ unassigned })}
               />
@@ -246,7 +246,7 @@ function TicketsView() {
                   <Th>Status</Th>
                   <Th>Prioridade</Th>
                   <Th>Cliente / local</Th>
-                  <Th>Analista</Th>
+                  <Th>Responsável</Th>
                   <Th>SLA</Th>
                   <Th>Atualizado</Th>
                 </tr>
@@ -290,7 +290,7 @@ function TicketsView() {
                       {t.assignee ? (
                         <span className="whitespace-nowrap">{t.assignee.name}</span>
                       ) : (
-                        <span className="text-xs text-amber-600 dark:text-amber-400">Sem analista</span>
+                        <span className="text-xs text-amber-600 dark:text-amber-400">Sem responsável</span>
                       )}
                       {t.team ? <span className="block text-xs text-ink-muted">{t.team.name}</span> : null}
                     </Td>

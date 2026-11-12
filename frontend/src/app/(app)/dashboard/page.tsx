@@ -116,7 +116,7 @@ export default function DashboardPage() {
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <Kpi label="Chamados abertos" value={data.open_total} icon={Inbox} href="/chamados?open_only=true" />
         <Kpi
-          label="Sem analista"
+          label="Sem responsável"
           value={data.unassigned}
           icon={UserX}
           tone={data.unassigned > 0 ? "warning" : "default"}
@@ -164,14 +164,14 @@ export default function DashboardPage() {
       </div>
 
       <Card className="mt-4">
-        <CardHeader title="Carga por analista" description="Distribuição das OS em aberto" />
+        <CardHeader title="Carga por responsável" description="Distribuição das OS em aberto" />
         {data.by_assignee.length === 0 ? (
           <p className="px-4 py-6 text-sm text-ink-muted">Nenhum chamado atribuído no momento.</p>
         ) : (
           <Table>
             <thead>
               <tr>
-                <Th>Analista</Th>
+                <Th>Responsável</Th>
                 <Th className="text-right">Em aberto</Th>
                 <Th className="text-right">Em atendimento</Th>
                 <Th className="text-right">SLA violado</Th>

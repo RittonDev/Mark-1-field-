@@ -32,7 +32,7 @@ STATUS_INFO: dict[TicketStatus, StatusInfo] = {
         "active",
         "#3b82f6",
         requires_assignee=True,
-        description="Analista definido, ainda não iniciado",
+        description="Responsável definido, ainda não iniciado",
     ),
     S.SCHEDULED: StatusInfo(
         "Agendado",
@@ -167,7 +167,7 @@ def validate_transition(
             f"'{STATUS_INFO[to_status].label}'"
         )
     if STATUS_INFO[to_status].requires_assignee and not has_assignee:
-        raise WorkflowError("Atribua um analista antes de mudar para este status")
+        raise WorkflowError("Atribua um responsável antes de mudar para este status")
     if to_status == S.SCHEDULED and not has_schedule:
         raise WorkflowError("Informe a data/hora da visita (scheduled_start) para agendar")
     if to_status == S.RESOLVED and not (resolution_notes and resolution_notes.strip()):
