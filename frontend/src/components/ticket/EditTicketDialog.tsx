@@ -7,12 +7,12 @@ import { useToast } from "@/components/Toaster";
 import { Button, Dialog, ErrorBox, Field, Input, Select, Textarea } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { canManageTickets, computePriority, LEVEL, LEVEL_ORDER, PRIORITY, PRIORITY_ORDER, TICKET_TYPE } from "@/lib/constants";
+import { canManageTickets, PRIORITY, PRIORITY_ORDER } from "@/lib/constants";
 import { useProjects } from "@/lib/projects";
 import { useCategories, useServiceTypes } from "@/lib/queries";
 import Link from "next/link";
 import { formatDateTime, formatMinutes } from "@/lib/format";
-import type { Level, Location, TicketDetail, TicketPriority, TicketType, TicketUpdatePayload } from "@/lib/types";
+import type { Location, TicketDetail, TicketPriority, TicketUpdatePayload } from "@/lib/types";
 import { useTicketErrorHandler } from "./useConflictHandler";
 
 /** Edição dos dados da OS. Monte só quando aberto para o formulário nascer com os dados atuais. */
@@ -32,12 +32,10 @@ export function EditTicketDialog({
   const categories = useCategories();
   const [title, setTitle] = useState(ticket.title);
   const [description, setDescription] = useState(ticket.description);
-  const [type, setType] = useState<TicketType>(ticket.type);
   const [categoryId, setCategoryId] = useState(ticket.category?.id ?? "");
   const { user } = useAuth();
   const projects = useProjects({ enabled: canManageTickets(user?.role) });
   const [projectId, setProjectId] = useState(ticket.project?.id ?? "");
-  const [urgency, setUrgency] = useState<Level>(ticket.urgency);
   const [priority, setPriority] = useState<TicketPriority>(ticket.priority);
   // Troca de local: busca restrita ao cliente da OS; null = manter o atual.
   const [newLocation, setNewLocation] = useState<Location | null>(null);
@@ -56,10 +54,8 @@ export function EditTicketDialog({
       const payload: TicketUpdatePayload = { expected_version: ticket.version };
       if (title.trim() !== ticket.title) payload.title = title.trim();
       if (description !== ticket.description) payload.description = description;
-      if (type !== ticket.type) payload.type = type;
       if (categoryId !== (ticket.category?.id ?? "")) payload.category_id = categoryId || null;
       if (projectId !== (ticket.project?.id ?? "")) payload.project_id = projectId || null;
-      if (urgency !== ticket.urgency) payload.urgency = urgency;
       if (priority !== ticket.priority) payload.priority = priority;
       if (newLocation && newLocation.id !== ticket.location?.id) payload.location_id = newLocation.id;
       if (serviceAddress.trim() !== (ticket.service_address ?? "")) {
@@ -83,11 +79,6 @@ export function EditTicketDialog({
     },
   });
 
-  // A urgência recalcula a prioridade pela matriz (com o impacto que a OS já tem).
-  const onUrgencyChange = (nextUrgency: Level) => {
-    setUrgency(nextUrgency);
-    setPriority(computePriority(ticket.impact, nextUrgency));
-  };
 
   return (
     <Dialog
@@ -180,15 +171,6 @@ export function EditTicketDialog({
             maxLength={255}
           />
         </Field>
-        <Field label="Tipo">
-          <Select value={type} onChange={(e) => setType(e.target.value as TicketType)}>
-            {Object.entries(TICKET_TYPE).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </Select>
-        </Field>
         <Field label="Categoria">
           <Select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
             <option value="">Sem categoria</option>
@@ -199,16 +181,7 @@ export function EditTicketDialog({
             ))}
           </Select>
         </Field>
-        <Field label="Urgência">
-          <Select value={urgency} onChange={(e) => onUrgencyChange(e.target.value as Level)}>
-            {LEVEL_ORDER.map((l) => (
-              <option key={l} value={l}>
-                {LEVEL[l]}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Field label="Prioridade (prazo)" hint="Recalculada ao mudar a urgência; pode ser ajustada.">
+        <Field label="Prioridade (prazo)">
           <Select value={priority} onChange={(e) => setPriority(e.target.value as TicketPriority)}>
             {PRIORITY_ORDER.map((p) => (
               <option key={p} value={p}>
