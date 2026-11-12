@@ -1,9 +1,10 @@
 "use client";
 
-import { Headset, LogIn } from "lucide-react";
+import { LogIn } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Button, ErrorBox, Field, Input } from "@/components/ui";
+import { Logo, ThemeToggle } from "@/components/Brand";
 import { WEB_DENIED_MESSAGE } from "@/lib/access";
 import { errorMessage } from "@/lib/api";
 import { useAuth, useIsClient } from "@/lib/auth";
@@ -22,7 +23,7 @@ export default function LoginPage() {
   const shownError = error ?? (redirectedFromApp ? WEB_DENIED_MESSAGE : null);
 
   useEffect(() => {
-    if (ready && user) router.replace("/dashboard");
+    if (ready && user) router.replace("/chamados");
   }, [ready, user, router]);
 
   async function onSubmit(e: React.FormEvent) {
@@ -31,7 +32,7 @@ export default function LoginPage() {
     setLoading(true);
     try {
       await login(email.trim(), password);
-      router.replace("/dashboard");
+      router.replace("/chamados");
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -40,16 +41,13 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-canvas p-4">
+    <main className="relative flex min-h-screen items-center justify-center bg-canvas p-4">
+      <ThemeToggle className="absolute top-4 right-4" />
       <div className="w-full max-w-sm">
-        <div className="mb-6 flex flex-col items-center gap-3 text-center">
-          <div className="flex size-11 items-center justify-center rounded-xl bg-brand text-white shadow-md">
-            <Headset className="size-6" />
-          </div>
-          <div>
-            <h1 className="text-xl font-semibold text-ink">MaxxChamados</h1>
-            <p className="text-sm text-ink-muted">Gestão de chamados e OS de T.I.</p>
-          </div>
+        <div className="mb-7 flex flex-col items-center gap-3 text-center">
+          <Logo size="lg" />
+          <div className="brand-gradient h-0.5 w-12 rounded-full" />
+          <p className="text-sm text-ink-muted">Gestão de chamados e ordens de serviço de T.I.</p>
         </div>
         <form onSubmit={onSubmit} className="flex flex-col gap-4 rounded-xl border border-line bg-surface p-6 shadow-sm">
           <Field label="E-mail">
@@ -78,7 +76,7 @@ export default function LoginPage() {
           </Button>
         </form>
         <p className="mt-4 text-center text-xs text-ink-muted">
-          Acesso para analistas e gestores. Técnico de campo? Use o app MaxxChamados no celular.
+          Acesso para analistas e gestores. Técnico de campo? Use o app Maxx Field no celular.
         </p>
       </div>
     </main>

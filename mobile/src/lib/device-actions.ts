@@ -19,6 +19,7 @@ const GPS_TIMEOUT_MS = 12_000;
  * Sem permissão ou sem sinal, devolve null e a ação segue sem coordenadas.
  */
 export async function currentPosition(): Promise<Position | null> {
+  if (Platform.OS === "web") return browserPosition();
   try {
     const permission = await Location.requestForegroundPermissionsAsync();
     if (!permission.granted) return null;
@@ -32,6 +33,18 @@ export async function currentPosition(): Promise<Position | null> {
   } catch {
     return null;
   }
+}
+
+/** Pré-visualização web: geolocalização do navegador (pede permissão na primeira vez). */
+function browserPosition(): Promise<Position | null> {
+  if (typeof navigator === "undefined" || !navigator.geolocation) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
+      () => resolve(null),
+      { enableHighAccuracy: true, timeout: GPS_TIMEOUT_MS, maximumAge: 5 * 60_000 },
+    );
+  });
 }
 
 /**
@@ -51,6 +64,11 @@ export async function openInMaps(location: LocationRef | null, serviceAddress: s
         ? `geo:${query}?q=${query}(${label})`
         : `geo:0,0?q=${query}`;
   const web = `https://www.google.com/maps/search/?api=1&query=${query}`;
+  // No navegador não há app de mapas: abre o Google Maps numa nova aba.
+  if (Platform.OS === "web") {
+    await Linking.openURL(web);
+    return;
+  }
   try {
     await Linking.openURL(native);
   } catch {

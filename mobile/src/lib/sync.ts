@@ -9,7 +9,7 @@
 
 import NetInfo from "@react-native-community/netinfo";
 import { randomUUID } from "expo-crypto";
-import { Directory, File, Paths } from "expo-file-system";
+import { deleteAllPhotoFiles, deletePhotoFile, persistPhoto, photoExists } from "./photoFiles";
 import { useSyncExternalStore } from "react";
 import { AppState, type AppStateStatus } from "react-native";
 import { api, ApiError, errorMessage, uploadFile } from "./api";
@@ -342,28 +342,11 @@ export async function storeServerTicket(ticket: TicketDetail) {
 
 // ───────────────────────────── fotos ─────────────────────────────
 
-const photosDir = () => new Directory(Paths.document, "pending-photos");
-
-function deleteFileQuietly(uri: string) {
-  try {
-    const file = new File(uri);
-    if (file.exists) file.delete();
-  } catch {
-    // arquivo já removido
-  }
-}
-
 async function uploadPhotos() {
   const photos = await listPhotos();
   for (const photo of photos) {
     if (session.get().status !== "signedIn") return;
-    let exists = false;
-    try {
-      exists = new File(photo.file_uri).exists;
-    } catch {
-      exists = false;
-    }
-    if (!exists) {
+    if (!photoExists(photo.file_uri)) {
       await transaction(async (db) => {
         const ticket = await getTicket(photo.ticket_id, db);
         await addNotice(db, {
@@ -377,9 +360,15 @@ async function uploadPhotos() {
       continue;
     }
     try {
-      await uploadFile<Attachment>(`/tickets/${photo.ticket_id}/attachments`, photo.file_uri, { kind: "photo" }, photo.mime_type);
+      await uploadFile<Attachment>(
+        `/tickets/${photo.ticket_id}/attachments`,
+        photo.file_uri,
+        { kind: "photo" },
+        photo.mime_type,
+        photo.filename,
+      );
       await deletePhoto(photo.id);
-      deleteFileQuietly(photo.file_uri);
+      deletePhotoFile(photo.file_uri);
     } catch (error) {
       if (error instanceof ApiError && (error.retryable || error.status === 401)) {
         await markPhotoError(photo.id, error.message);
@@ -395,26 +384,23 @@ async function uploadPhotos() {
         });
         await db.runAsync("DELETE FROM photos WHERE id = ?", photo.id);
       });
-      deleteFileQuietly(photo.file_uri);
+      deletePhotoFile(photo.file_uri);
     }
   }
 }
 
-/** Copia a foto para a pasta do app (o cache do picker pode ser limpo) e coloca na fila. */
+/** Guarda a foto no app (o cache do picker pode ser limpo) e coloca na fila de upload. */
 export async function queuePhoto(ticketId: UUID, sourceUri: string, mimeType: string | null | undefined) {
-  const dir = photosDir();
-  if (!dir.exists) dir.create({ intermediates: true, idempotent: true });
   const id = randomUUID();
   const mime = mimeType ?? "image/jpeg";
   const ext = mime === "image/png" ? "png" : mime === "image/heic" ? "heic" : "jpg";
-  // O nome do arquivo local é o que chega ao servidor no multipart.
+  // O nome do arquivo é o que chega ao servidor no multipart.
   const filename = `foto-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}-${id.slice(0, 8)}.${ext}`;
-  const target = new File(dir, filename);
-  await new File(sourceUri).copy(target);
+  const fileUri = await persistPhoto(sourceUri, filename);
   await insertPhoto({
     id,
     ticket_id: ticketId,
-    file_uri: target.uri,
+    file_uri: fileUri,
     filename,
     mime_type: mime,
     created_at: new Date().toISOString(),
@@ -425,18 +411,13 @@ export async function queuePhoto(ticketId: UUID, sourceUri: string, mimeType: st
 /** Apaga banco local e fotos pendentes (troca de usuário ou usuário sem acesso ao app). */
 export async function wipeLocalData() {
   await resetLocalData();
-  try {
-    const dir = photosDir();
-    if (dir.exists) dir.delete();
-  } catch {
-    // pasta já removida
-  }
+  deleteAllPhotoFiles();
   await refreshPendingCounts();
 }
 
 export async function discardPhoto(id: string, fileUri: string) {
   await deletePhoto(id);
-  deleteFileQuietly(fileUri);
+  deletePhotoFile(fileUri);
   await refreshPendingCounts();
 }
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, Plus, Search, TicketX, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Search, SlidersHorizontal, TicketX, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
@@ -10,12 +10,10 @@ import { MultiSelect } from "@/components/MultiSelect";
 import {
   Button,
   Card,
-  Checkbox,
   EmptyState,
   ErrorBox,
   Input,
   LoadingBlock,
-  PageHeader,
   Select,
   Table,
   Td,
@@ -40,12 +38,34 @@ interface Filters {
   asset_id: string;
   location_id: string;
   service_type_id: string;
-  mine: boolean;
-  unassigned: boolean;
-  sla_breached: boolean;
   violation_pending: boolean;
-  open_only: boolean;
   order_by: string;
+}
+
+// Visões rápidas (abas): a tela inicial é a lista de chamados, limpa, com o essencial à vista.
+type View = "abertos" | "minhas" | "sem_responsavel" | "sla" | "todas";
+const VIEWS: { key: View; label: string; staffOnly?: boolean }[] = [
+  { key: "abertos", label: "Em aberto" },
+  { key: "minhas", label: "Minhas", staffOnly: true },
+  { key: "sem_responsavel", label: "Sem responsável", staffOnly: true },
+  { key: "sla", label: "SLA violado", staffOnly: true },
+  { key: "todas", label: "Todas" },
+];
+const VIEW_FLAGS: Record<View, Record<string, boolean>> = {
+  abertos: { open_only: true },
+  minhas: { mine: true, open_only: true },
+  sem_responsavel: { unassigned: true, open_only: true },
+  sla: { sla_breached: true },
+  todas: {},
+};
+
+function initialView(params: URLSearchParams): View {
+  if (params.get("sla_breached") === "true") return "sla";
+  if (params.get("unassigned") === "true") return "sem_responsavel";
+  if (params.get("mine") === "true") return "minhas";
+  if (params.get("open_only") === "true") return "abertos";
+  // Link com filtro específico (cliente, local, responsável...) mostra todas as OS daquele filtro.
+  return [...params.keys()].some((k) => k !== "q") ? "todas" : "abertos";
 }
 
 function initialFilters(params: URLSearchParams): Filters {
@@ -58,11 +78,7 @@ function initialFilters(params: URLSearchParams): Filters {
     asset_id: params.get("asset_id") ?? "",
     location_id: params.get("location_id") ?? "",
     service_type_id: params.get("service_type_id") ?? "",
-    mine: params.get("mine") === "true",
-    unassigned: params.get("unassigned") === "true",
-    sla_breached: params.get("sla_breached") === "true",
     violation_pending: params.get("violation_pending") === "true",
-    open_only: params.get("open_only") === "true",
     order_by: params.get("order_by") ?? "-updated_at",
   };
 }
@@ -75,6 +91,7 @@ function TicketsView() {
   const { user } = useAuth();
   const staff = isStaff(user?.role);
   const [filters, setFilters] = useState<Filters>(() => initialFilters(searchParams));
+  const [view, setView] = useState<View>(() => initialView(searchParams));
   const [search, setSearch] = useState(() => searchParams.get("q") ?? "");
   const [page, setPage] = useState(1);
   const q = useDebounced(search.trim(), 350);
@@ -84,10 +101,11 @@ function TicketsView() {
   const customers = useCustomers();
 
   const query = useQuery({
-    queryKey: ["tickets", "list", filters, q, page],
+    queryKey: ["tickets", "list", filters, view, q, page],
     queryFn: () =>
       api.get<Page<TicketListItem>>("/tickets", {
         ...filters,
+        ...VIEW_FLAGS[view],
         q,
         page,
         page_size: PAGE_SIZE,
@@ -99,6 +117,12 @@ function TicketsView() {
     setFilters((f) => ({ ...f, ...patch }));
     setPage(1);
   };
+  const advancedCount =
+    filters.status.length +
+    filters.priority.length +
+    [filters.assignee_id, filters.team_id, filters.customer_id].filter(Boolean).length +
+    (filters.order_by !== "-updated_at" ? 1 : 0);
+  const [showFilters, setShowFilters] = useState(() => advancedCount > 0);
   const hasFilters = JSON.stringify(filters) !== JSON.stringify(EMPTY) || search !== "";
   const clear = () => {
     setFilters(EMPTY);
@@ -106,28 +130,25 @@ function TicketsView() {
     setPage(1);
     router.replace("/chamados");
   };
+  const chooseView = (next: View) => {
+    setView(next);
+    setPage(1);
+  };
 
   const data = query.data;
   const totalPages = data ? Math.max(1, Math.ceil(data.total / data.page_size)) : 1;
 
   return (
     <div className="mx-auto max-w-7xl">
-      <PageHeader
-        title="Chamados"
-        description={data ? `${data.total} ordem(ns) de serviço encontrada(s)` : "Ordens de serviço"}
-        actions={
-          <Link href="/chamados/novo">
-            <Button variant="primary">
-              <Plus className="size-4" />
-              Nova OS
-            </Button>
-          </Link>
-        }
-      />
-
-      <Card className="mb-4 p-3">
-        <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
-          <div className="relative col-span-2 md:col-span-3 xl:col-span-2">
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight text-ink">Chamados</h1>
+          <p className="mt-0.5 text-sm text-ink-muted">
+            {data ? `${data.total} ordem(ns) de serviço` : "Ordens de serviço"}
+          </p>
+        </div>
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+          <div className="relative min-w-0 flex-1 sm:w-80 sm:flex-none">
             <Search className="pointer-events-none absolute top-2.5 left-3 size-4 text-ink-muted" />
             <Input
               value={search}
@@ -139,80 +160,104 @@ function TicketsView() {
               className="pl-9"
             />
           </div>
-          <MultiSelect
-            label="Status"
-            value={filters.status}
-            onChange={(status) => update({ status })}
-            options={STATUS_ORDER.map((s) => ({ value: s, label: STATUS[s].label, color: STATUS[s].color }))}
-          />
-          <MultiSelect
-            label="Prioridade"
-            value={filters.priority}
-            onChange={(priority) => update({ priority })}
-            options={PRIORITY_ORDER.map((p) => ({
-              value: p,
-              label: `${PRIORITY[p].code} · ${PRIORITY[p].label}`,
-              color: PRIORITY[p].color,
-            }))}
-          />
-          {staff ? (
-            <>
-              <Select value={filters.assignee_id} onChange={(e) => update({ assignee_id: e.target.value })}>
-                <option value="">Todos os responsáveis</option>
-                {assignable.data?.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name}
-                  </option>
-                ))}
-              </Select>
-              <Select value={filters.team_id} onChange={(e) => update({ team_id: e.target.value })}>
-                <option value="">Todos os grupos</option>
-                {teams.data?.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </Select>
-              <Select value={filters.customer_id} onChange={(e) => update({ customer_id: e.target.value })}>
-                <option value="">Todos os clientes</option>
-                {customers.data?.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </Select>
-            </>
-          ) : null}
-          <Select value={filters.order_by} onChange={(e) => update({ order_by: e.target.value })}>
-            <option value="-updated_at">Atualizados recentemente</option>
-            <option value="-created_at">Mais novos</option>
-            <option value="created_at">Mais antigos</option>
-            <option value="priority">Maior prioridade</option>
-            <option value="resolution_due_at">Prazo de solução mais próximo</option>
-            <option value="-number">Número (desc.)</option>
-          </Select>
+          <Button onClick={() => setShowFilters((v) => !v)} aria-expanded={showFilters}>
+            <SlidersHorizontal className="size-4" />
+            Filtros
+            {advancedCount > 0 ? (
+              <span className="ml-0.5 rounded-full bg-brand px-1.5 text-[11px] font-semibold text-white">
+                {advancedCount}
+              </span>
+            ) : null}
+          </Button>
+          <Link href="/chamados/novo">
+            <Button variant="primary">
+              <Plus className="size-4" />
+              Nova OS
+            </Button>
+          </Link>
         </div>
-        <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2">
-          {staff ? (
-            <>
-              <Checkbox label="Minhas OS" checked={filters.mine} onChange={(mine) => update({ mine })} />
-              <Checkbox
-                label="Sem responsável"
-                checked={filters.unassigned}
-                onChange={(unassigned) => update({ unassigned })}
-              />
-              <Checkbox
-                label="SLA violado"
-                checked={filters.sla_breached}
-                onChange={(sla_breached) => update({ sla_breached })}
-              />
-            </>
-          ) : null}
-          <Checkbox
-            label="Somente em aberto"
-            checked={filters.open_only}
-            onChange={(open_only) => update({ open_only })}
-          />
+      </div>
+
+      <div className="mb-4 flex gap-1 overflow-x-auto border-b border-line">
+        {VIEWS.filter((v) => staff || !v.staffOnly).map((v) => {
+          const active = view === v.key;
+          return (
+            <button
+              key={v.key}
+              type="button"
+              onClick={() => chooseView(v.key)}
+              className={`relative px-3 pt-1 pb-2.5 text-sm whitespace-nowrap transition-colors ${
+                active ? "font-medium text-ink" : "text-ink-muted hover:text-ink"
+              }`}
+            >
+              {v.label}
+              {active ? <span className="brand-gradient absolute inset-x-2 -bottom-px h-0.5 rounded-full" /> : null}
+            </button>
+          );
+        })}
+      </div>
+
+      {showFilters ? (
+        <Card className="mb-4 p-3">
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
+            <MultiSelect
+              label="Status"
+              value={filters.status}
+              onChange={(status) => update({ status })}
+              options={STATUS_ORDER.map((s) => ({ value: s, label: STATUS[s].label, color: STATUS[s].color }))}
+            />
+            <MultiSelect
+              label="Prioridade"
+              value={filters.priority}
+              onChange={(priority) => update({ priority })}
+              options={PRIORITY_ORDER.map((p) => ({
+                value: p,
+                label: `${PRIORITY[p].code} · ${PRIORITY[p].label}`,
+                color: PRIORITY[p].color,
+              }))}
+            />
+            {staff ? (
+              <>
+                <Select value={filters.assignee_id} onChange={(e) => update({ assignee_id: e.target.value })}>
+                  <option value="">Todos os responsáveis</option>
+                  {assignable.data?.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name}
+                    </option>
+                  ))}
+                </Select>
+                <Select value={filters.team_id} onChange={(e) => update({ team_id: e.target.value })}>
+                  <option value="">Todos os grupos</option>
+                  {teams.data?.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </Select>
+                <Select value={filters.customer_id} onChange={(e) => update({ customer_id: e.target.value })}>
+                  <option value="">Todos os clientes</option>
+                  {customers.data?.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </Select>
+              </>
+            ) : null}
+            <Select value={filters.order_by} onChange={(e) => update({ order_by: e.target.value })}>
+              <option value="-updated_at">Atualizados recentemente</option>
+              <option value="-created_at">Mais novos</option>
+              <option value="created_at">Mais antigos</option>
+              <option value="priority">Maior prioridade</option>
+              <option value="resolution_due_at">Prazo de solução mais próximo</option>
+              <option value="-number">Número (desc.)</option>
+            </Select>
+          </div>
+        </Card>
+      ) : null}
+
+      {filters.asset_id || filters.location_id || filters.violation_pending || filters.service_type_id || hasFilters ? (
+        <div className="mb-3 flex flex-wrap items-center gap-2">
           {filters.asset_id ? (
             <span className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2.5 py-1 text-xs text-brand">
               Filtrando por equipamento
@@ -246,13 +291,13 @@ function TicketsView() {
             </span>
           ) : null}
           {hasFilters ? (
-            <Button variant="ghost" size="sm" onClick={clear} className="ml-auto">
+            <Button variant="ghost" size="sm" onClick={clear}>
               <X className="size-3.5" />
               Limpar filtros
             </Button>
           ) : null}
         </div>
-      </Card>
+      ) : null}
 
       <Card>
         {query.isLoading ? (

@@ -1,7 +1,7 @@
 // Sessão (tokens + usuário + servidor) guardada no Keychain/Keystore via expo-secure-store
 // e exposta como store externo para useSyncExternalStore.
 
-import * as SecureStore from "expo-secure-store";
+import { secureStorage } from "./secureStorage";
 import { useSyncExternalStore } from "react";
 import { defaultApiUrl, normalizeApiUrl } from "./config";
 import type { TokenResponse, User } from "./types";
@@ -48,8 +48,8 @@ function update(patch: Partial<SessionState>) {
 }
 
 async function write(key: string, value: string | null) {
-  if (value === null) await SecureStore.deleteItemAsync(key);
-  else await SecureStore.setItemAsync(key, value);
+  if (value === null) await secureStorage.removeItem(key);
+  else await secureStorage.setItem(key, value);
 }
 
 function parseUser(raw: string | null): User | null {
@@ -77,11 +77,11 @@ export const session = {
    */
   async load(allowUser: (user: User) => boolean = () => true): Promise<boolean> {
     const [access, refresh, user, apiUrl, lastEmail] = await Promise.all([
-      SecureStore.getItemAsync(KEYS.access),
-      SecureStore.getItemAsync(KEYS.refresh),
-      SecureStore.getItemAsync(KEYS.user),
-      SecureStore.getItemAsync(KEYS.apiUrl),
-      SecureStore.getItemAsync(KEYS.lastEmail),
+      secureStorage.getItem(KEYS.access),
+      secureStorage.getItem(KEYS.refresh),
+      secureStorage.getItem(KEYS.user),
+      secureStorage.getItem(KEYS.apiUrl),
+      secureStorage.getItem(KEYS.lastEmail),
     ]);
     const parsed = parseUser(user);
     const hasSession = Boolean(access && refresh && parsed);

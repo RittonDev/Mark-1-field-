@@ -1,4 +1,5 @@
 import Constants from "expo-constants";
+import { Platform } from "react-native";
 
 /**
  * Endereço padrão da API, em ordem:
@@ -10,6 +11,10 @@ import Constants from "expo-constants";
 export function defaultApiUrl(): string {
   const fromEnv = process.env.EXPO_PUBLIC_API_URL;
   if (fromEnv) return normalizeApiUrl(fromEnv);
+  // Pré-visualização web: mesma máquina que serve a página, porta 8000.
+  if (Platform.OS === "web" && typeof window !== "undefined" && window.location?.hostname) {
+    return `${window.location.protocol}//${window.location.hostname}:8000/api/v1`;
+  }
   const host = Constants.expoConfig?.hostUri?.split(":")[0];
   if (host) return `http://${host}:8000/api/v1`;
   return "http://10.0.2.2:8000/api/v1";

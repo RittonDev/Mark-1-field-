@@ -1,8 +1,9 @@
 import * as ImagePicker from "expo-image-picker";
 import { useCallback, useEffect, useState } from "react";
-import { Alert, Image, Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import { Image, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { absoluteApiUrl, api, errorMessage } from "../../lib/api";
 import { useLiveQuery } from "../../lib/changes";
+import { confirmAction, notify } from "../../lib/dialogs";
 import { listPhotos } from "../../lib/db";
 import { formatDateTime } from "../../lib/format";
 import { discardPhoto, isOnline, queuePhoto, useSyncStatus } from "../../lib/sync";
@@ -51,7 +52,7 @@ export function PhotosPanel({ ticket }: { ticket: LocalTicket }) {
       if (source === "camera") {
         const permission = await ImagePicker.requestCameraPermissionsAsync();
         if (!permission.granted) {
-          Alert.alert("Câmera bloqueada", "Libere o acesso à câmera nas configurações do aparelho para fotografar o atendimento.");
+          notify("Câmera bloqueada", "Libere o acesso à câmera nas configurações do aparelho para fotografar o atendimento.");
           return;
         }
         result = await ImagePicker.launchCameraAsync(PICKER_OPTIONS);
@@ -61,17 +62,19 @@ export function PhotosPanel({ ticket }: { ticket: LocalTicket }) {
       if (result.canceled) return;
       for (const asset of result.assets) await queuePhoto(ticket.id, asset.uri, asset.mimeType);
     } catch (error) {
-      Alert.alert("Não foi possível adicionar a foto", errorMessage(error));
+      notify("Não foi possível adicionar a foto", errorMessage(error));
     } finally {
       setBusy(false);
     }
   }
 
   function confirmDiscard(id: string, uri: string) {
-    Alert.alert("Remover foto?", "Ela ainda não foi enviada e será apagada do aparelho.", [
-      { text: "Cancelar", style: "cancel" },
-      { text: "Remover", style: "destructive", onPress: () => void discardPhoto(id, uri) },
-    ]);
+    void confirmAction("Remover foto?", "Ela ainda não foi enviada e será apagada do aparelho.", {
+      confirmText: "Remover",
+      destructive: true,
+    }).then((ok) => {
+      if (ok) void discardPhoto(id, uri);
+    });
   }
 
   const photos = remote?.ticketId === ticket.id ? remote.items.filter((a) => a.kind === "photo") : [];

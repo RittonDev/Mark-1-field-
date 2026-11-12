@@ -3,12 +3,23 @@
 // de operações recusadas pelo servidor.
 
 import * as SQLite from "expo-sqlite";
+import { Platform } from "react-native";
 import { notifyDataChanged } from "./changes";
 import { rebase } from "./ops";
 import type { LocalTicket, OutboxOp, SyncOperation } from "./syncTypes";
 import type { Comment, TicketDetail, User, UUID, ViolationReason, Worklog } from "./types";
 
 type DB = SQLite.SQLiteDatabase;
+
+const IS_WEB = Platform.OS === "web";
+
+/**
+ * Android/iOS: transação exclusiva (conexão própria). Na pré-visualização web o expo-sqlite
+ * não tem transação exclusiva; usa a comum na mesma conexão (a fila de escrita abaixo já serializa).
+ */
+function inTransaction(db: DB, task: (db: DB) => Promise<void>): Promise<void> {
+  return IS_WEB ? db.withTransactionAsync(() => task(db)) : db.withExclusiveTransactionAsync(task);
+}
 
 const MIGRATIONS: string[] = [
   `
@@ -84,7 +95,7 @@ async function migrate(db: DB) {
   while (version < MIGRATIONS.length) {
     const sql = MIGRATIONS[version];
     const next = version + 1;
-    await db.withExclusiveTransactionAsync(async (txn) => {
+    await inTransaction(db, async (txn) => {
       await txn.execAsync(sql);
       await txn.execAsync(`PRAGMA user_version = ${next}`);
     });
@@ -96,7 +107,8 @@ export function getDb(): Promise<DB> {
   if (!dbPromise) {
     dbPromise = (async () => {
       const db = await SQLite.openDatabaseAsync("maxxchamados.db");
-      await db.execAsync("PRAGMA journal_mode = WAL;");
+      // Na web (pré-visualização, OPFS) o WAL não se aplica.
+      if (!IS_WEB) await db.execAsync("PRAGMA journal_mode = WAL;");
       await migrate(db);
       return db;
     })();
@@ -114,7 +126,7 @@ let writeQueue: Promise<unknown> = Promise.resolve();
 export async function transaction(task: (db: DB) => Promise<void>): Promise<void> {
   const run = writeQueue.then(async () => {
     const db = await getDb();
-    await db.withExclusiveTransactionAsync(task);
+    await inTransaction(db, task);
   });
   writeQueue = run.catch(() => undefined);
   await run;

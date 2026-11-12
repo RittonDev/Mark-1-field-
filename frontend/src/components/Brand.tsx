@@ -1,0 +1,63 @@
+"use client";
+
+import { Moon, Sun } from "lucide-react";
+import Image from "next/image";
+import { useSyncExternalStore } from "react";
+
+/** Logo Maxx Field: símbolo (degradê da marca) + nome em texto, que acompanha o tema. */
+export function Logo({ compact = false, size = "md" }: { compact?: boolean; size?: "md" | "lg" }) {
+  const height = size === "lg" ? 30 : 22;
+  return (
+    <span className="inline-flex items-center gap-2">
+      <Image
+        src="/brand/maxxfield-mark.png"
+        alt={compact ? "Maxx Field" : ""}
+        width={Math.round(height * 2.03)}
+        height={height}
+        priority
+      />
+      {compact ? null : (
+        <span className={`leading-none tracking-tight text-ink ${size === "lg" ? "text-2xl" : "text-[17px]"}`}>
+          <span className="font-semibold">Maxx</span> <span className="font-normal">Field</span>
+        </span>
+      )}
+    </span>
+  );
+}
+
+type Theme = "light" | "dark";
+
+function readTheme(): Theme {
+  return document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+}
+
+function subscribe(onChange: () => void) {
+  const observer = new MutationObserver(onChange);
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  return () => observer.disconnect();
+}
+
+/** Alterna claro/escuro; a escolha fica salva. Sem escolha salva, segue o tema do sistema. */
+export function ThemeToggle({ className = "" }: { className?: string }) {
+  const theme = useSyncExternalStore(subscribe, readTheme, () => "light" as Theme);
+  const next: Theme = theme === "dark" ? "light" : "dark";
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        document.documentElement.dataset.theme = next;
+        try {
+          localStorage.setItem("theme", next);
+        } catch {
+          // Armazenamento bloqueado: o tema vale só para esta página.
+        }
+      }}
+      className={`inline-flex size-8 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink ${className}`}
+      aria-label={next === "dark" ? "Ativar modo escuro" : "Ativar modo claro"}
+      title={next === "dark" ? "Modo escuro" : "Modo claro"}
+    >
+      {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
+    </button>
+  );
+}
+

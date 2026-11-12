@@ -1,22 +1,28 @@
 import type { Metadata, Viewport } from "next";
+import { THEME_BOOT_SCRIPT } from "@/lib/theme";
 import "./globals.css";
 import { Providers } from "./providers";
 
 export const metadata: Metadata = {
-  title: { default: "MaxxChamados", template: "%s · MaxxChamados" },
+  title: { default: "Maxx Field", template: "%s · Maxx Field" },
   description: "Gestão de chamados e ordens de serviço de T.I. em campo",
+  icons: { icon: "/brand/maxxfield-mark.png" },
 };
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#f5f6f8" },
-    { media: "(prefers-color-scheme: dark)", color: "#0b0f17" },
+    { media: "(prefers-color-scheme: light)", color: "#f6f7f9" },
+    { media: "(prefers-color-scheme: dark)", color: "#0a0d14" },
   ],
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="pt-BR">
+    // O script define data-theme antes da hidratação; o aviso de diferença no <html> é esperado.
+    <html lang="pt-BR" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
+      </head>
       <body>
         <Providers>{children}</Providers>
       </body>

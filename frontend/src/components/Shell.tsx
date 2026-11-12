@@ -5,7 +5,6 @@ import {
   Building2,
   CalendarClock,
   HardDrive,
-  Headset,
   LayoutDashboard,
   LogOut,
   MapPin,
@@ -17,6 +16,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { Logo, ThemeToggle } from "@/components/Brand";
 import { canManageTickets, isManager, isStaff, ROLE } from "@/lib/constants";
 import { initials } from "@/lib/format";
 import { useConnectionState } from "@/lib/realtime";
@@ -30,10 +30,10 @@ interface NavItem {
 }
 
 const NAV: NavItem[] = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, visible: isStaff },
-  { href: "/dia", label: "Atividades do dia", icon: CalendarClock, visible: isStaff },
   { href: "/chamados", label: "Chamados", icon: Ticket, visible: () => true },
+  { href: "/dia", label: "Atividades do dia", icon: CalendarClock, visible: isStaff },
   { href: "/quadro", label: "Quadro", icon: SquareKanban, visible: isStaff },
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, visible: isStaff },
   { href: "/clientes", label: "Clientes", icon: Building2, visible: isStaff },
   { href: "/locais", label: "Locais", icon: MapPin, visible: isStaff },
   { href: "/tipos-servico", label: "Tipos de serviço", icon: Timer, visible: canManageTickets },
@@ -49,16 +49,16 @@ export function visibleNav(role: UserRole) {
 export function Sidebar({ user }: { user: User }) {
   const pathname = usePathname();
   return (
-    <aside className="sticky top-0 flex h-screen w-16 shrink-0 flex-col bg-sidebar text-sidebar-ink lg:w-60">
-      <div className="flex h-14 items-center gap-2.5 px-4">
-        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand text-white">
-          <Headset className="size-4.5" />
-        </div>
-        <div className="hidden min-w-0 lg:block">
-          <p className="truncate text-sm font-semibold text-white">MaxxChamados</p>
-          <p className="truncate text-[11px] text-sidebar-ink/70">Field Service de T.I.</p>
-        </div>
-      </div>
+    <aside className="sticky top-0 flex h-screen w-16 shrink-0 flex-col border-r border-sidebar-line bg-sidebar text-sidebar-ink lg:w-60">
+      <Link href="/chamados" className="flex h-14 items-center px-4" aria-label="Maxx Field — chamados">
+        <span className="lg:hidden">
+          <Logo compact />
+        </span>
+        <span className="hidden lg:inline-flex">
+          <Logo />
+        </span>
+      </Link>
+      <div className="brand-gradient mx-4 h-0.5 w-10 rounded-full" />
       <nav className="mt-2 flex flex-1 flex-col gap-0.5 px-2">
         {visibleNav(user.role).map((item) => {
           const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
@@ -70,7 +70,7 @@ export function Sidebar({ user }: { user: User }) {
               title={item.label}
               className={clsx(
                 "flex h-9 items-center gap-3 rounded-md px-3 text-sm transition-colors",
-                active ? "bg-white/10 font-medium text-white" : "hover:bg-white/5 hover:text-white",
+                active ? "bg-sidebar-active font-medium text-brand" : "hover:bg-surface-2 hover:text-ink",
               )}
             >
               <Icon className="size-4 shrink-0" />
@@ -79,7 +79,7 @@ export function Sidebar({ user }: { user: User }) {
           );
         })}
       </nav>
-      <div className="hidden px-4 py-3 text-[11px] text-sidebar-ink/60 lg:block">v0.1 · tempo real</div>
+      <div className="hidden px-4 py-3 text-[11px] text-sidebar-ink/70 lg:block">Maxx Field · v0.1</div>
     </aside>
   );
 }
@@ -108,6 +108,7 @@ function ConnectionIndicator() {
 export function Topbar({ user, onLogout }: { user: User; onLogout: () => void }) {
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center justify-end gap-3 border-b border-line bg-surface/90 px-4 backdrop-blur md:px-6">
+      <ThemeToggle />
       <ConnectionIndicator />
       <div className="flex items-center gap-2.5 border-l border-line pl-3">
         <div className="flex size-8 items-center justify-center rounded-full bg-brand/10 text-xs font-semibold text-brand">

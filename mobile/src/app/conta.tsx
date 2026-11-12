@@ -1,10 +1,11 @@
 import { router } from "expo-router";
 import { useState } from "react";
-import { Alert, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { Badge, Button, Card, colors, EmptyState, InfoRow, SectionTitle } from "../components/ui";
 import { getDeviceRegistration, logout } from "../lib/auth";
 import { useDataVersion, useLiveQuery } from "../lib/changes";
 import { APP_VERSION } from "../lib/config";
+import { confirmAction } from "../lib/dialogs";
 import { ROLE } from "../lib/constants";
 import { dismissNotice, listNotices, listPendingOps, type PendingOp } from "../lib/db";
 import { formatDateTime } from "../lib/format";
@@ -38,10 +39,13 @@ export default function AccountScreen() {
   }
 
   function confirmDiscard(op: PendingOp) {
-    Alert.alert("Descartar operação?", `${describeOp(op)} em ${op.ticket_code ?? "OS"} não será enviada ao servidor.`, [
-      { text: "Manter", style: "cancel" },
-      { text: "Descartar", style: "destructive", onPress: () => void discardOp(op) },
-    ]);
+    void confirmAction("Descartar operação?", `${describeOp(op)} em ${op.ticket_code ?? "OS"} não será enviada ao servidor.`, {
+      confirmText: "Descartar",
+      cancelText: "Manter",
+      destructive: true,
+    }).then((ok) => {
+      if (ok) void discardOp(op);
+    });
   }
 
   function confirmLogout() {
@@ -49,11 +53,10 @@ export default function AccountScreen() {
     const warning = count
       ? `Há ${count} ${count === 1 ? "item" : "itens"} ainda não enviados. Eles ficam guardados e serão enviados quando você entrar de novo neste aparelho. Se outro usuário entrar aqui, serão descartados.`
       : "Você precisará da senha para entrar de novo.";
-    Alert.alert("Sair do app?", warning, [
-      { text: "Cancelar", style: "cancel" },
-      // Com a sessão encerrada, o Stack.Protected do layout leva para o login.
-      { text: "Sair", style: "destructive", onPress: () => void logout() },
-    ]);
+    // Com a sessão encerrada, o Stack.Protected do layout leva para o login.
+    void confirmAction("Sair do app?", warning, { confirmText: "Sair", destructive: true }).then((ok) => {
+      if (ok) void logout();
+    });
   }
 
   return (

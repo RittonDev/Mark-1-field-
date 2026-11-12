@@ -1,9 +1,9 @@
 // Cliente HTTP da API. Mesmo contrato de erros de frontend/src/lib/api.ts,
 // com timeout (rede móvel instável) e refresh automático do access token.
 
-import { File, UploadType } from "expo-file-system";
 import { MOBILE_DENIED_MESSAGE } from "./access";
 import { apiOrigin } from "./config";
+import { sendFile } from "./fileUpload";
 import { session } from "./session";
 import type { TokenResponse } from "./types";
 
@@ -177,27 +177,26 @@ export const api = {
 };
 
 /**
- * Envia um arquivo local como multipart (`file` + campos extras) usando o upload nativo
- * do expo-file-system, que lê do disco sem carregar a imagem inteira na memória do JS.
+ * Envia um arquivo local como multipart (`file` + campos extras). No aparelho usa o upload
+ * nativo do expo-file-system (fileUpload.ts); na pré-visualização web, fetch + FormData.
  */
 export async function uploadFile<T>(
   path: string,
   fileUri: string,
   fields: Record<string, string>,
   mimeType: string,
+  filename: string,
 ): Promise<T> {
-  const file = new File(fileUri);
   const send = async () => {
     const { accessToken, apiUrl } = session.get();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
     try {
-      return await file.upload(`${apiUrl}${path}`, {
-        httpMethod: "POST",
-        uploadType: UploadType.MULTIPART,
-        fieldName: "file",
+      return await sendFile(`${apiUrl}${path}`, {
+        fileUri,
+        filename,
         mimeType,
-        parameters: fields,
+        fields,
         headers: accessToken ? { Authorization: `Bearer ${accessToken}`, Accept: "application/json" } : {},
         signal: controller.signal,
       });
