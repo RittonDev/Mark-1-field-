@@ -367,6 +367,11 @@ async def _city_centroid(db: AsyncSession, city: str, uf: str) -> tuple[float, f
     return float(row[0]), float(row[1]), row[3]
 
 
+async def city_centroid(db: AsyncSession, city: str, uf: str) -> tuple[float, float, str] | None:
+    """(latitude, longitude, nome da cidade) do centro das lojas com coordenada na cidade."""
+    return await _city_centroid(db, city, uf)
+
+
 def _location_label(loc: Location) -> str:
     name = f"{loc.code} - {loc.name}" if loc.code else loc.name
     place = "-".join(p for p in (loc.city, loc.state) if p)

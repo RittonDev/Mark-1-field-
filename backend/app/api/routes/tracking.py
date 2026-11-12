@@ -10,6 +10,7 @@ from app.db.base import utcnow
 from app.models import User
 from app.schemas.tracking import (
     LiveTechnician,
+    MapDistances,
     PingBatch,
     PingResult,
     ShiftAction,
@@ -17,7 +18,7 @@ from app.schemas.tracking import (
     ShiftState,
     TrackingHistory,
 )
-from app.services import tracking
+from app.services import map_distances, tracking
 from app.services.activities import local_today
 
 router = APIRouter(prefix="/tracking", tags=["tracking"])
@@ -78,6 +79,18 @@ async def add_pings(body: PingBatch, db: DB, user: TechnicianUser) -> PingResult
 async def live(db: DB, _: TicketManagerUser, team_id: uuid.UUID | None = None) -> list:
     """Mapa ao vivo: onde está cada técnico, o estado e a OS em campo."""
     return await tracking.live(db, team_id)
+
+
+@router.get("/distances", response_model=MapDistances)
+async def distances(
+    db: DB,
+    _: TicketManagerUser,
+    location_id: uuid.UUID | None = None,
+    team_id: uuid.UUID | None = None,
+) -> MapDistances:
+    """Para o mapa: posição de agora e casa de cada técnico e, com uma loja, as distâncias de
+    onde ele está e de casa até ela (do mais perto para o mais longe)."""
+    return await map_distances.distances(db, location_id=location_id, team_id=team_id)
 
 
 @router.get("/history", response_model=TrackingHistory)
