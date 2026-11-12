@@ -16,7 +16,7 @@ O login envia `channel: "mobile"` e a API recusa os outros papéis com 403.
 | Banco local | expo-sqlite |
 | Tokens | expo-secure-store (Keychain / Keystore) |
 | Recursos do aparelho | expo-location (check-in e rastreamento), expo-task-manager (segundo plano), expo-battery, expo-image-picker (fotos), expo-notifications (registro do aparelho), NetInfo |
-| Visual | tema Maxx Field claro/escuro (`src/theme/theme.ts`), expo-linear-gradient para o degradê da marca |
+| Visual | tema Maxx Field claro/escuro (`src/theme/theme.ts`), fonte Manrope (`@expo-google-fonts/manrope` 0.4.3 via expo-font, `src/theme/fonts.ts`), expo-linear-gradient só no detalhe da marca |
 
 ## Rodar no celular com o Expo Go
 
@@ -131,7 +131,9 @@ Requisitos:
 - **Detalhe da OS**: só os botões de `allowed_transitions`, com os mesmos diálogos da web (agendar com
   início/fim, resolver com solução obrigatória, cancelar/reabrir com motivo). Em "Iniciar deslocamento" e
   "Iniciar atendimento" o check-in por GPS vem marcado (funciona sem internet). Local com endereço,
-  contato, ligação e **Abrir no mapa**; equipamento; descrição; prazos de SLA.
+  contato, ligação e **Abrir no mapa**; descrição; prazos de SLA. Não há bloco de equipamento: a operação
+  não controla ativos, e o app não lê `ticket.asset`.
+- **OS de projeto**: selo "Projeto PRJ-0001 · nome" no cartão e no detalhe (somente leitura).
 - **Sem acompanhamentos no app**: a central fala com os técnicos pelo grupo de WhatsApp. A observação
   opcional nas mudanças de status continua. (Os comentários seguem na web, para o portal do solicitante.)
 - **Visita improdutiva** (foi ao local e não atendeu): ação em vermelho na OS atribuída, agendada, em
@@ -230,7 +232,9 @@ src/
     termo-rastreamento.tsx  termo de ciência do rastreamento (LGPD)
     conta.tsx          sincronização, fila, avisos, rastreamento, aparência, sair
   components/          UI (marca, cartões, calendário, jornada, diálogo de transição, abas da OS)
+    Text.tsx           Text do app: aplica a Manrope no peso do estilo (use este, não o do react-native)
   theme/theme.ts       paleta Maxx Field, claro/escuro, preferência do técnico
+  theme/fonts.ts       Manrope (pesos 400–800) e o mapeamento de fontWeight para a família
   lib/
     tracking.ts trackingTask.ts  jornada, coleta, fila de pontos e tarefa de segundo plano
     account.ts         /auth/me e troca de senha
