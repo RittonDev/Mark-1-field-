@@ -14,6 +14,7 @@ from datetime import timedelta
 from sqlalchemy import select
 
 from app.core.config import settings
+from app.core.documents import cnpj_with_check_digits as cnpj
 from app.core.enums import (
     AssetType,
     Impact,
@@ -161,15 +162,15 @@ async def seed() -> None:
 
         matriz = Customer(
             name="Maxx Group - Matriz",
-            document="00000000000100",
+            document=cnpj("112223330001"),
             email="ti@exemplo.com.br",
             phone="(11) 3000-0000",
         )
         clinica = Customer(
-            name="Clínica Vida Saudável", document="00000000000200", phone="(19) 3200-0000"
+            name="Clínica Vida Saudável", document=cnpj("445556660001"), phone="(19) 3200-0000"
         )
         escola = Customer(
-            name="Colégio Horizonte", document="00000000000300", phone="(31) 3300-0000"
+            name="Colégio Horizonte", document=cnpj("778889990001"), phone="(31) 3300-0000"
         )
         db.add_all([matriz, clinica, escola])
         await db.flush()
@@ -177,6 +178,8 @@ async def seed() -> None:
         sede = Location(
             customer_id=matriz.id,
             name="Sede - São Paulo",
+            code="SP-SEDE",
+            document=cnpj("112223330001"),
             address_line="Av. Paulista, 1000 - 12º andar",
             district="Bela Vista",
             city="São Paulo",
@@ -190,6 +193,8 @@ async def seed() -> None:
         cd = Location(
             customer_id=matriz.id,
             name="Centro de Distribuição",
+            code="CD-GRU",
+            document=cnpj("112223330002"),
             address_line="Rod. Presidente Dutra, km 210",
             city="Guarulhos",
             state="SP",
@@ -201,6 +206,8 @@ async def seed() -> None:
         unidade = Location(
             customer_id=clinica.id,
             name="Unidade Centro",
+            code="UN-CENTRO",
+            document=cnpj("445556660001"),
             address_line="Rua Barão de Jaguara, 500",
             city="Campinas",
             state="SP",
@@ -212,6 +219,8 @@ async def seed() -> None:
         campus = Location(
             customer_id=escola.id,
             name="Campus Norte",
+            code="CAMPUS-N",
+            document=cnpj("778889990002"),
             address_line="Av. Cristiano Machado, 4000",
             city="Belo Horizonte",
             state="MG",
@@ -220,7 +229,30 @@ async def seed() -> None:
             contact_name="Secretaria",
             contact_phone="(31) 3300-0001",
         )
-        db.add_all([sede, cd, unidade, campus])
+        # Lojas: a operação gira em torno do local (no Field Control, ~55 locais por cliente).
+        lojas = [
+            Location(
+                customer_id=matriz.id,
+                name=name,
+                code=code,
+                document=cnpj(f"11222333{branch}"),
+                address_line=address,
+                city=city,
+                state="SP",
+                latitude=lat,
+                longitude=lng,
+                contact_name="Gerente da loja",
+            )
+            for name, code, branch, address, city, lat, lng in (
+                ("Loja 12 - Shopping Ibirapuera", "LJ-12", "0012", "Av. Ibirapuera, 3103",
+                 "São Paulo", -23.6106, -46.6665),
+                ("Loja 27 - Shopping Morumbi", "LJ-27", "0027", "Av. Roque Petroni Jr., 1089",
+                 "São Paulo", -23.6228, -46.6993),
+                ("Loja 41 - Outlet Campinas", "LJ-41", "0041", "Rod. Dom Pedro I, km 127",
+                 "Campinas", -22.8486, -47.0596),
+            )
+        ]
+        db.add_all([sede, cd, unidade, campus, *lojas])
         await db.flush()
 
         def asset(
