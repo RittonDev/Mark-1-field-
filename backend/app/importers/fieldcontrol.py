@@ -72,6 +72,7 @@ from app.models import (
     ViolationReason,
 )
 from app.schemas.forms import FormField
+from app.services import technician_regions
 
 log = logging.getLogger("fieldcontrol")
 
@@ -83,6 +84,9 @@ LOCAL_TZ = ZoneInfo(settings.TIMEZONE)
 ONSITE_HOURS = 4
 ONSITE_WARNING_MINUTES = 30
 BATCH = 400
+# Coordenada repetida por mais que isto de colaboradores = endereço padrão (o do escritório),
+# não o endereço real do técnico: vira "sem endereço".
+PLACEHOLDER_HOME_SHARE = 20
 
 UF_BY_NAME = {
     "acre": "AC",
@@ -253,6 +257,41 @@ def split_location_code(name: str) -> tuple[str | None, str]:
     if match and any(c.isdigit() for c in match.group(1)):
         return match.group(1), match.group(2).strip()
     return None, (name or "").strip()
+
+
+def _coords(address: dict[str, Any]) -> tuple[float, float] | None:
+    c = address.get("coords") or {}
+    try:
+        lat, lon = float(c.get("latitude")), float(c.get("longitude"))
+    except (TypeError, ValueError):
+        return None
+    if lat == 0 and lon == 0:
+        return None
+    return round(lat, 5), round(lon, 5)
+
+
+def placeholder_homes(path: Path) -> set[tuple[float, float]]:
+    """Coordenadas compartilhadas por muitos colaboradores: o endereço padrão, não o real."""
+    counts: Counter[tuple[float, float]] = Counter()
+    for e in iter_records(path):
+        point = _coords(e.get("address") or {})
+        if point is not None:
+            counts[point] += 1
+    return {point for point, n in counts.items() if n > PLACEHOLDER_HOME_SHARE}
+
+
+def home_of(address: dict[str, Any], placeholders: set[tuple[float, float]]) -> dict[str, Any]:
+    """Cidade, UF e coordenadas do endereço do técnico (vazio quando é o endereço padrão)."""
+    point = _coords(address)
+    if point is not None and point in placeholders:
+        return {"city": None, "state": None, "latitude": None, "longitude": None, "placeholder": True}
+    return {
+        "city": clip(address.get("city"), 120),
+        "state": to_uf(address.get("state")),
+        "latitude": point[0] if point else None,
+        "longitude": point[1] if point else None,
+        "placeholder": False,
+    }
 
 
 def tags_of(labels: Any) -> list[dict[str, Any]]:
@@ -613,6 +652,7 @@ class Importer:
             self.user_names[uid] = name
             self.office_by_name[plain(name)] = uid
 
+        placeholders = placeholder_homes(self.file("colaboradores.json"))
         for e in iter_records(self.file("colaboradores.json")):
             email = (e.get("email") or "").strip().lower()
             ids = [e.get("id"), e.get("_id")]
@@ -620,6 +660,9 @@ class Importer:
             name = clip(e.get("name"), 160) or email or "Técnico"
             active = not e.get("isInactivatedOrFired")
             address = e.get("address") or {}
+            home = home_of(address, placeholders)
+            if home["placeholder"]:
+                self.report.add("technicians", "home_placeholder_cleared")
             if known:
                 self.report.add("technicians", "existing")
                 await self.db.execute(
@@ -628,8 +671,10 @@ class Importer:
                     .values(
                         name=name,
                         is_active=active,
-                        home_city=clip(address.get("city"), 120),
-                        home_state=to_uf(address.get("state")),
+                        home_city=home["city"],
+                        home_state=home["state"],
+                        home_latitude=home["latitude"],
+                        home_longitude=home["longitude"],
                     )
                 )
                 uid = known
@@ -646,8 +691,10 @@ class Importer:
                         "password_hash": UNUSABLE_PASSWORD,
                         "role": UserRole.TECHNICIAN,
                         "is_active": active,
-                        "home_city": clip(address.get("city"), 120),
-                        "home_state": to_uf(address.get("state")),
+                        "home_city": home["city"],
+                        "home_state": home["state"],
+                        "home_latitude": home["latitude"],
+                        "home_longitude": home["longitude"],
                         "created_at": now,
                         "updated_at": now,
                     }
@@ -1587,6 +1634,10 @@ async def run_import(
         await step()
         await db.flush()
         report.timings[name] = time.monotonic() - started
+    # Região de atuação dos técnicos (a cidade onde mais atenderam), com o histórico já importado.
+    started = time.monotonic()
+    report.counts["technician_regions"] = Counter(await technician_regions.refresh_bases(db))
+    report.timings["technician_regions"] = time.monotonic() - started
     totals = await db.execute(
         select(Ticket.status, func.count()).group_by(Ticket.status)  # type: ignore[arg-type]
     )

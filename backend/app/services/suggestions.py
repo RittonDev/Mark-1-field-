@@ -17,13 +17,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.enums import ApplicationStatus, UserRole
 from app.db.base import utcnow
 from app.models import (
-    LocationPing,
+    Location,
     Project,
     TechnicianApplication,
     TechnicianShift,
     Ticket,
     User,
 )
+from app.services import technician_regions
 from app.services.schedule import find_conflicts, visit_end
 from app.services.workflow import OPEN_STATUSES
 
@@ -91,6 +92,8 @@ class Target:
     project_member_ids: set[str] = field(default_factory=set)
     areas: set[str] = field(default_factory=set)
     exclude_ticket_id: uuid.UUID | None = None
+    # Loja da OS: dá a distância pelo histórico e as visitas a esta mesma loja.
+    location: Location | None = None
 
 
 def target_for(ticket: Ticket, project: Project | None) -> Target:
@@ -119,10 +122,25 @@ def target_for(ticket: Ticket, project: Project | None) -> Target:
         project_member_ids=set(project.member_ids or []) if project else set(),
         areas={area for word, area in AREA_KEYWORDS.items() if word in text},
         exclude_ticket_id=ticket.id,
+        location=loc,
     )
 
 
+def _distance_points(km: float | None) -> float:
+    if km is None:
+        return 0
+    for limit, points in ((5, 40), (15, 32), (30, 24), (60, 14), (150, 6)):
+        if km <= limit:
+            return points
+    return 0
+
+
 async def suggest(db: AsyncSession, target: Target, limit: int = 5) -> list[dict]:
+    """Ranking para atribuir: distância (histórico, endereço, ao vivo) e o que mais ajuda.
+
+    Só técnicos ativos (a OS só pode ir para quem está no app). A distância e as visitas a
+    esta mesma loja vêm do mesmo cálculo de "técnicos mais próximos".
+    """
     techs = list(
         await db.scalars(
             select(User).where(User.role == UserRole.TECHNICIAN, User.is_active.is_(True))
@@ -147,17 +165,6 @@ async def suggest(db: AsyncSession, target: Target, limit: int = 5) -> list[dict
             )
         )
     )
-    pings = {
-        p.user_id: p
-        for p in await db.scalars(
-            select(LocationPing)
-            .where(
-                LocationPing.user_id.in_(ids), LocationPing.recorded_at >= utcnow() - LIVE_WINDOW
-            )
-            .distinct(LocationPing.user_id)
-            .order_by(LocationPing.user_id, LocationPing.recorded_at.desc())
-        )
-    }
     areas = {
         a.user_id: set(a.service_areas or [])
         for a in await db.scalars(
@@ -167,31 +174,51 @@ async def suggest(db: AsyncSession, target: Target, limit: int = 5) -> list[dict
             )
         )
     }
-    city, state = norm(target.city), (target.state or "").upper()
+    point = await technician_regions.point_for_place(
+        db,
+        location=target.location,
+        latitude=target.coords[0] if target.coords else None,
+        longitude=target.coords[1] if target.coords else None,
+        city=target.city,
+        state=target.state,
+    )
+    prox = await technician_regions.proximity(db, point, techs) if point else {}
+    city, state = norm(target.city), (target.state or "").strip().upper()
 
     ranked = []
     for tech in techs:
         score = 0.0
         reasons: list[str] = []
+        p = prox.get(tech.id)
+        base_here = bool(city) and norm(tech.base_city) == city and (
+            not state or (tech.base_state or "").upper() == state
+        )
+        if p is not None:
+            same_state = not state or (tech.base_state or "").upper() == state
+            reasons.extend(technician_regions.proximity_reasons(p, tech, include_base=same_state))
+            score += _distance_points(p.distance_km)
+            if p.visits_at_location:
+                score += 20 + min(p.visits_at_location, 5) * 2
+            if p.visits_in_city and not base_here:
+                score += 10
+                reasons.append(f"Já atendeu {p.visits_in_city} OS em {target.city}")
+        if base_here:
+            score += 20
+            if p is None and tech.base_source == "history":
+                reasons.append(f"Base em {tech.base_city}-{tech.base_state} ({tech.base_visits} OS)")
         home = norm(tech.home_city)
         if city and home == city:
-            score += 50
+            score += 20
             reasons.append(f"Mora em {tech.home_city}")
         elif city and city in norm(tech.coverage_area):
-            score += 30
+            score += 15
             reasons.append(f"Atende {target.city}")
-        elif state and (tech.home_state or "").upper() == state:
-            score += 10
+        elif not base_here and state and state in (
+            (tech.base_state or "").upper(),
+            (tech.home_state or "").upper(),
+        ):
+            score += 5
             reasons.append(f"Mesmo estado ({state})")
-        distance = None
-        ping = pings.get(tech.id) if tech.id in on_shift else None
-        if ping is not None and target.coords is not None:
-            distance = km_between((ping.latitude, ping.longitude), target.coords)
-            if distance <= 10:
-                score += 25
-            elif distance <= 30:
-                score += 10
-            reasons.append(f"A {distance:.0f} km agora")
         if str(tech.id) in target.project_member_ids:
             score += 20
             reasons.append("Equipe do projeto")
@@ -216,13 +243,16 @@ async def suggest(db: AsyncSession, target: Target, limit: int = 5) -> list[dict
         load = loads.get(tech.id, 0)
         score -= min(load, 10) * 2
         reasons.append(f"{load} OS em aberto")
+        has_base = tech.base_source is not None
+        distance = p.distance_km if p is not None else None
         ranked.append(
             {
                 "id": tech.id,
                 "name": tech.name,
                 "phone": tech.phone,
-                "home_city": tech.home_city,
-                "home_state": tech.home_state,
+                # Região efetiva: a base pelo histórico; sem ela, o endereço.
+                "home_city": tech.base_city if has_base else tech.home_city,
+                "home_state": tech.base_state if has_base else tech.home_state,
                 "team": {"id": tech.team.id, "name": tech.team.name} if tech.team else None,
                 "open_tickets": load,
                 "on_shift": tech.id in on_shift,
@@ -231,5 +261,12 @@ async def suggest(db: AsyncSession, target: Target, limit: int = 5) -> list[dict
                 "reasons": reasons,
             }
         )
-    ranked.sort(key=lambda r: (-r["score"], r["open_tickets"], r["name"]))
+    ranked.sort(
+        key=lambda r: (
+            -r["score"],
+            r["distance_km"] if r["distance_km"] is not None else float("inf"),
+            r["open_tickets"],
+            r["name"],
+        )
+    )
     return ranked[:limit]

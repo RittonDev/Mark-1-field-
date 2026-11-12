@@ -552,7 +552,7 @@ async def proximity(
     return out
 
 
-def proximity_reasons(p: Proximity, user: User) -> list[str]:
+def proximity_reasons(p: Proximity, user: User, *, include_base: bool = True) -> list[str]:
     """Por que este técnico: atendeu a loja, está perto agora, já atendeu perto, mora perto, base."""
     reasons: list[str] = []
     if p.visits_at_location:
@@ -566,7 +566,7 @@ def proximity_reasons(p: Proximity, user: User) -> list[str]:
         reasons.append(f"Já atendeu a {km_text(p.store_km)} km daqui")
     if p.home_km is not None:
         reasons.append(f"Mora a {km_text(p.home_km)} km")
-    if user.base_source == "history" and user.base_city:
+    if include_base and user.base_source == "history" and user.base_city:
         place = f"{user.base_city}-{user.base_state}" if user.base_state else user.base_city
         reasons.append(f"Base em {place} ({user.base_visits} OS)")
     return reasons
