@@ -10,6 +10,7 @@ import type {
   Customer,
   DayActivities,
   LiveTechnician,
+  MapDistances,
   Location,
   Page,
   ServiceType,
@@ -134,6 +135,20 @@ export function useLiveTechnicians(teamId?: UUID | null) {
     queryKey: ["tracking", "live", teamId ?? ""],
     queryFn: () => api.get<LiveTechnician[]>("/tracking/live", { team_id: teamId ?? undefined }),
     refetchInterval: 60_000,
+  });
+}
+
+/** Posição de agora e casa de cada técnico; com loja, as distâncias até ela (mais perto primeiro). */
+export function useMapDistances(locationId: UUID | null, teamId?: UUID | null, enabled = true) {
+  return useQuery({
+    queryKey: ["tracking", "distances", locationId ?? "", teamId ?? ""],
+    queryFn: () =>
+      api.get<MapDistances>("/tracking/distances", {
+        location_id: locationId ?? undefined,
+        team_id: teamId ?? undefined,
+      }),
+    refetchInterval: 60_000,
+    enabled,
   });
 }
 

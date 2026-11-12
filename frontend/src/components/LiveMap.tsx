@@ -11,10 +11,25 @@ import type { LiveTechnician, TrackingHistory } from "@/lib/types";
 
 type Leaflet = typeof import("leaflet");
 
+/** O que comparar no mapa: a loja do filtro, a casa e a posição de agora do técnico escolhido. */
+export interface MapFocus {
+  place: { latitude: number; longitude: number; label: string; approximate: boolean } | null;
+  home: { latitude: number; longitude: number; label: string } | null;
+  live: { latitude: number; longitude: number } | null;
+  name?: string;
+}
+
+// Ícones (Lucide "store" e "house"), em HTML porque o marcador do Leaflet é HTML.
+const STORE_SVG =
+  '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9l1.5-5h15L21 9"/><path d="M4 9v11h16V9"/><path d="M9 20v-6h6v6"/></svg>';
+const HOME_SVG =
+  '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg>';
+const HOME_COLOR = "#64748b";
+
 interface Ready {
   L: Leaflet;
   map: LeafletMap;
-  layers: { trail: LayerGroup; routes: LayerGroup; techs: LayerGroup };
+  layers: { trail: LayerGroup; routes: LayerGroup; techs: LayerGroup; focus: LayerGroup };
   /** Vira false na hora em que o mapa é desmontado. O estado `ready` só muda no próximo render,
    *  e nesse meio-tempo nenhum efeito pode desenhar no mapa removido (o Leaflet quebra). */
   alive: { current: boolean };
@@ -56,18 +71,25 @@ export default function LiveMap({
   onSelect,
   history,
   theme,
+  focus = null,
+  focusKey = null,
 }: {
   technicians: LiveTechnician[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   history: TrackingHistory | null;
   theme: Theme;
+  /** Loja do filtro, casa e posição do técnico escolhido (com as linhas entre eles). */
+  focus?: MapFocus | null;
+  /** Muda quando a escolha muda (loja ou técnico): só então o mapa reenquadra. */
+  focusKey?: string | null;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [ready, setReady] = useState<Ready | null>(null);
   const onSelectRef = useRef(onSelect);
   const techniciansRef = useRef(technicians);
   const fittedRef = useRef(false);
+  const focusFitRef = useRef<string | null>(null);
 
   useEffect(() => {
     onSelectRef.current = onSelect;
@@ -87,7 +109,12 @@ export default function LiveMap({
       setReady({
         L,
         map,
-        layers: { trail: L.layerGroup().addTo(map), routes: L.layerGroup().addTo(map), techs: L.layerGroup().addTo(map) },
+        layers: {
+          trail: L.layerGroup().addTo(map),
+          routes: L.layerGroup().addTo(map),
+          focus: L.layerGroup().addTo(map),
+          techs: L.layerGroup().addTo(map),
+        },
         alive,
       });
     });
@@ -207,6 +234,54 @@ export default function LiveMap({
     const live = techniciansRef.current.find((t) => t.id === history.user_id)?.last_position;
     if (!live && line.length > 0) map.fitBounds(L.latLngBounds(line), { padding: [48, 48], maxZoom: 15 });
   }, [ready, history, theme]);
+
+  // Loja do filtro, casa do técnico escolhido e as linhas: de onde ele está e de casa até a loja
+  // (sem loja: de onde ele está até a casa).
+  useEffect(() => {
+    if (!usable(ready)) return;
+    const { L, layers, map } = ready;
+    layers.focus.clearLayers();
+    if (!focus) {
+      focusFitRef.current = null;
+      return;
+    }
+    const { place, home, live } = focus;
+    const points: LatLngTuple[] = [];
+    if (place) {
+      L.marker([place.latitude, place.longitude], {
+        icon: L.divIcon({ className: "", html: `<div class="mf-place">${STORE_SVG}</div>`, iconSize: [30, 30] }),
+        keyboard: false,
+        zIndexOffset: 500,
+      })
+        .bindTooltip(
+          textNode(place.label, place.approximate ? "Centro da cidade (a loja não tem coordenada)" : "Loja escolhida"),
+          { direction: "top", offset: [0, -14] },
+        )
+        .addTo(layers.focus);
+      points.push([place.latitude, place.longitude]);
+    }
+    if (home) {
+      L.marker([home.latitude, home.longitude], {
+        icon: L.divIcon({ className: "", html: `<div class="mf-home">${HOME_SVG}</div>`, iconSize: [30, 30] }),
+        keyboard: false,
+      })
+        .bindTooltip(textNode(focus.name ? `Casa de ${focus.name}` : "Casa", home.label), { direction: "top", offset: [0, -14] })
+        .addTo(layers.focus);
+      points.push([home.latitude, home.longitude]);
+    }
+    if (live) points.push([live.latitude, live.longitude]);
+    const line = (a: LatLngTuple, b: LatLngTuple, color: string, dashArray: string) =>
+      L.polyline([a, b], { color, weight: 3, opacity: 0.85, dashArray, interactive: false }).addTo(layers.focus);
+    if (place && live) line([live.latitude, live.longitude], [place.latitude, place.longitude], TRAIL_COLOR[theme], "8 6");
+    if (place && home) line([home.latitude, home.longitude], [place.latitude, place.longitude], HOME_COLOR, "2 7");
+    if (!place && live && home) line([live.latitude, live.longitude], [home.latitude, home.longitude], HOME_COLOR, "2 7");
+    // Reenquadra quando a escolha muda, não a cada posição nova.
+    if (focusKey && focusFitRef.current !== focusKey && points.length) {
+      focusFitRef.current = focusKey;
+      if (points.length === 1) map.flyTo(points[0], Math.max(map.getZoom(), 13), { duration: 0.6 });
+      else map.fitBounds(L.latLngBounds(points), { padding: [56, 56], maxZoom: 15 });
+    }
+  }, [ready, focus, focusKey, theme]);
 
   return <div ref={containerRef} className="mf-map h-full w-full" role="region" aria-label="Mapa dos técnicos" />;
 }

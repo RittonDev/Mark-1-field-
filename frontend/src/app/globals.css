@@ -369,6 +369,26 @@
   background: var(--surface);
   box-shadow: 0 1px 4px rgb(16 24 40 / 0.35);
 }
+/* Loja escolhida no filtro (grafite) e a casa do técnico (cinza): fora da paleta dos técnicos. */
+.mf-place,
+.mf-home {
+  display: flex;
+  height: 30px;
+  width: 30px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  border: 3px solid var(--surface);
+  box-shadow: 0 2px 8px rgb(16 24 40 / 0.3);
+}
+.mf-place {
+  background: var(--ink);
+  color: var(--surface);
+}
+.mf-home {
+  background: #64748b;
+  color: #fff;
+}
 @keyframes mf-pulse {
   from {
     opacity: 0.7;

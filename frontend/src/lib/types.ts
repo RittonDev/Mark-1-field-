@@ -684,6 +684,44 @@ export interface LiveTechnician {
   open_tickets: number;
 }
 
+/** Um ponto do mapa; `approximate` = medido pelo centro da cidade. */
+export interface MapPoint {
+  latitude: number;
+  longitude: number;
+  label: string;
+  approximate: boolean;
+}
+
+/** Um trecho: linha reta, estimativa pelas ruas e minutos de carro. */
+export interface DistanceLeg {
+  km: number;
+  road_km: number;
+  minutes: number;
+  approximate: boolean;
+}
+
+export interface TechnicianHome extends MapPoint {
+  /** home: endereço com coordenada; home_city: cidade de casa; base_city: onde mais atende. */
+  kind: "home" | "home_city" | "base_city";
+}
+
+export interface TechnicianDistance {
+  id: UUID;
+  name: string;
+  phone: string | null;
+  live: MapPoint | null;
+  live_at: ISODate | null;
+  home: TechnicianHome | null;
+  live_to_place: DistanceLeg | null;
+  home_to_place: DistanceLeg | null;
+  live_to_home: DistanceLeg | null;
+}
+
+export interface MapDistances {
+  place: MapPoint | null;
+  technicians: TechnicianDistance[];
+}
+
 export interface TrackingHistory {
   user_id: UUID;
   date: string;
