@@ -132,7 +132,15 @@ Requisitos:
   início/fim, resolver com solução obrigatória, cancelar/reabrir com motivo). Em "Iniciar deslocamento" e
   "Iniciar atendimento" o check-in por GPS vem marcado (funciona sem internet). Local com endereço,
   contato, ligação e **Abrir no mapa**; equipamento; descrição; prazos de SLA.
-- **Acompanhamentos** (públicos ou nota interna), **apontamento de horas** (atalhos de 15 min a 2 h) e
+- **Sem acompanhamentos no app**: a central fala com os técnicos pelo grupo de WhatsApp. A observação
+  opcional nas mudanças de status continua. (Os comentários seguem na web, para o portal do solicitante.)
+- **Visita improdutiva** (foi ao local e não atendeu): ação em vermelho na OS atribuída, agendada, em
+  deslocamento ou em atendimento → motivo (cadastro guardado no aparelho), observação e GPS. Vai pela fila
+  (`unproductive`), funciona offline: a OS volta para "Atribuído" sem agenda, o relógio do atendimento para,
+  e ela sai de Hoje e do calendário para a seção "Aguardando reagendamento pela central".
+- **Custos extras** (Detalhes da OS): lista com tipo, valor, situação (Lançado / Aprovado / Reembolsado /
+  Recusado) e total. **Somente leitura**: a gestão lança e altera; o técnico só acompanha o reembolso.
+- **Apontamento de horas** (atalhos de 15 min a 2 h) e
   **fotos** da câmera ou da galeria. As fotos são copiadas para a pasta do app e enviadas por
   `POST /tickets/{id}/attachments` com `kind=photo` quando houver conexão.
 - **Indicador de conexão** no topo: offline, servidor inacessível, sincronizando, online com tempo real,

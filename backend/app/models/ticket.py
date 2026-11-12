@@ -89,6 +89,10 @@ class Ticket(UUIDPrimaryKey, Timestamps, Base):
     team_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("teams.id", ondelete="SET NULL"), index=True
     )
+    # OS de projeto: valores e equipe seguem o projeto.
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("projects.id", ondelete="SET NULL"), index=True
+    )
 
     # Agenda da visita.
     scheduled_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -149,6 +153,7 @@ class Ticket(UUIDPrimaryKey, Timestamps, Base):
     created_by: Mapped[User | None] = relationship(foreign_keys=[created_by_id], lazy="selectin")
     assignee: Mapped[User | None] = relationship(foreign_keys=[assignee_id], lazy="selectin")
     team: Mapped[Team | None] = relationship(lazy="selectin")
+    project: Mapped["Project | None"] = relationship(lazy="selectin")  # noqa: F821
     service_type: Mapped[ServiceType | None] = relationship(lazy="selectin")
     response_violation_reason: Mapped[ViolationReason | None] = relationship(
         foreign_keys=[response_violation_reason_id], lazy="selectin"

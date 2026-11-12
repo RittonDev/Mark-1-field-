@@ -175,3 +175,11 @@ class QuoteStatus(StrEnum):
     REJECTED = "rejected"
     EXPIRED = "expired"  # passou da validade sem resposta
     CANCELLED = "cancelled"
+
+
+class ProjectStatus(StrEnum):
+    PLANNING = "planning"
+    ACTIVE = "active"
+    PAUSED = "paused"
+    DONE = "done"
+    CANCELLED = "cancelled"

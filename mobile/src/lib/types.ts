@@ -52,7 +52,10 @@ export type TicketEventType =
   | "expense_added"
   | "expense_updated"
   | "expense_removed"
-  | "unproductive_visit";
+  | "unproductive_visit"
+  | "quote_sent"
+  | "quote_approved"
+  | "quote_rejected";
 export type SlaStatus = "ok" | "at_risk" | "breached" | "paused" | "met";
 export type AttachmentKind = "file" | "photo" | "signature";
 
@@ -822,4 +825,76 @@ export interface UnproductiveReason {
   description: string | null;
   responsibility: Responsibility;
   is_active: boolean;
+}
+
+// Orçamentos (enviados ao cliente por link para aprovar)
+export type QuoteStatus = "draft" | "sent" | "approved" | "rejected" | "expired" | "cancelled";
+
+export interface QuoteItem {
+  description: string;
+  quantity: number;
+  unit: string;
+  unit_price: number;
+  total: number;
+  catalog_item_id: UUID | null;
+}
+
+export interface Quote {
+  id: UUID;
+  number: number;
+  code: string;
+  ticket_id: UUID;
+  status: QuoteStatus;
+  title: string;
+  items: QuoteItem[];
+  subtotal: number;
+  discount: number;
+  total: number;
+  valid_until: string | null;
+  notes: string | null;
+  sent_at: ISODate | null;
+  decided_at: ISODate | null;
+  approver_name: string | null;
+  approver_document: string | null;
+  approver_role: string | null;
+  rejection_reason: string | null;
+  created_by: Ref | null;
+  created_at: ISODate;
+  updated_at: ISODate;
+  signature_url: string | null;
+  token?: string;
+}
+
+export interface QuoteListRow extends Quote {
+  ticket_code: string;
+  customer: string | null;
+}
+
+export interface QuoteCatalogItem {
+  id: UUID;
+  name: string;
+  unit: string;
+  price: number;
+  description: string | null;
+  is_active: boolean;
+}
+
+export interface PublicQuote {
+  code: string;
+  title: string;
+  status: QuoteStatus;
+  customer: string | null;
+  location: string | null;
+  ticket_code: string;
+  ticket_title: string;
+  items: QuoteItem[];
+  subtotal: number;
+  discount: number;
+  total: number;
+  valid_until: string | null;
+  notes: string | null;
+  sent_at: ISODate | null;
+  decided_at: ISODate | null;
+  approver_name: string | null;
+  rejection_reason: string | null;
 }

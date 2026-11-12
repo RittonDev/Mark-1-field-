@@ -30,6 +30,7 @@ from app.models import (
     Category,
     Customer,
     Location,
+    Project,
     ServiceType,
     Team,
     Ticket,
@@ -550,6 +551,7 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
         service_address=(data.service_address or "").strip() or None,
         created_by_id=actor.id,
         team_id=team_id,
+        project_id=await _check_project(db, data.project_id, actor),
         scheduled_start=scheduled_start,
         scheduled_end=scheduled_end,
         service_type_id=service_type.id if service_type else None,
@@ -592,6 +594,8 @@ async def update_ticket(
         raise PermissionDenied("Você não pode editar esta OS")
     check_version(ticket, data.expected_version)
     fields = data.model_dump(exclude_unset=True, exclude={"expected_version", "allow_conflict"})
+    if "project_id" in fields:
+        await _check_project(db, fields["project_id"], actor)
     if "signature_required" in fields:
         if not actor.can_manage_tickets:
             raise PermissionDenied("Só a gestão decide se a OS exige assinatura")
@@ -1022,6 +1026,8 @@ def filter_conditions(user: User, f: TicketFilters, now: datetime) -> list[Colum
         conds.append(Ticket.assignee_id == f.assignee_id)
     if f.team_id:
         conds.append(Ticket.team_id == f.team_id)
+    if f.project_id:
+        conds.append(Ticket.project_id == f.project_id)
     if f.customer_id:
         conds.append(Ticket.customer_id == f.customer_id)
     if f.location_id:
@@ -1143,3 +1149,16 @@ async def register_unproductive(
     else:
         queue_event(db, "updated", ticket, actor, {"fields": ["unproductive"]})
     return ticket
+
+
+async def _check_project(
+    db: AsyncSession, project_id: uuid.UUID | None, actor: User
+) -> uuid.UUID | None:
+    """Marcar a OS como de projeto é decisão da gestão (muda valores e equipe)."""
+    if project_id is None:
+        return None
+    if not actor.can_manage_tickets:
+        raise PermissionDenied("Só a gestão vincula a OS a um projeto")
+    if await db.get(Project, project_id) is None:
+        raise WorkflowError("Projeto não encontrado")
+    return project_id

@@ -50,6 +50,17 @@ class CategoryRef(ORMModel):
     full_name: str
 
 
+class ProjectRef(ORMModel):
+    id: uuid.UUID
+    number: int
+    name: str
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def code(self) -> str:
+        return f"PRJ-{self.number:04d}"
+
+
 class LocationRef(ORMModel):
     id: uuid.UUID
     name: str
@@ -88,6 +99,7 @@ class TicketListItem(ORMModel):
     location: LocationRef | None
     assignee: UserRef | None
     team: Ref | None
+    project: ProjectRef | None = None
     requester_name: str | None
     scheduled_start: datetime | None
     scheduled_end: datetime | None
@@ -201,6 +213,7 @@ class TicketCreate(BaseModel):
     service_type_id: uuid.UUID | None = None
     estimated_minutes: int | None = Field(default=None, gt=0, le=60 * 24 * 7)
     team_id: uuid.UUID | None = None
+    project_id: uuid.UUID | None = None
     assignee_id: uuid.UUID | None = None
     scheduled_start: datetime | None = None
     scheduled_end: datetime | None = None
@@ -225,6 +238,7 @@ class TicketUpdate(BaseModel):
     service_type_id: uuid.UUID | None = None
     estimated_minutes: int | None = Field(default=None, gt=0, le=60 * 24 * 7)
     team_id: uuid.UUID | None = None
+    project_id: uuid.UUID | None = None
     scheduled_start: datetime | None = None
     scheduled_end: datetime | None = None
     # Só a gestão: exigir (ou dispensar) a assinatura do responsável no local.
@@ -349,6 +363,7 @@ class TicketFilters(BaseModel):
     service_type_id: uuid.UUID | None = None
     category_id: uuid.UUID | None = None
     asset_id: uuid.UUID | None = None
+    project_id: uuid.UUID | None = None
     q: str | None = None
     mine: bool = False
     unassigned: bool = False
