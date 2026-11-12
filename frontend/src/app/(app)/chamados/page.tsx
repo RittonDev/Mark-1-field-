@@ -38,6 +38,7 @@ interface Filters {
   team_id: string;
   customer_id: string;
   asset_id: string;
+  location_id: string;
   mine: boolean;
   unassigned: boolean;
   sla_breached: boolean;
@@ -53,6 +54,7 @@ function initialFilters(params: URLSearchParams): Filters {
     team_id: params.get("team_id") ?? "",
     customer_id: params.get("customer_id") ?? "",
     asset_id: params.get("asset_id") ?? "",
+    location_id: params.get("location_id") ?? "",
     mine: params.get("mine") === "true",
     unassigned: params.get("unassigned") === "true",
     sla_breached: params.get("sla_breached") === "true",
@@ -211,6 +213,14 @@ function TicketsView() {
             <span className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2.5 py-1 text-xs text-brand">
               Filtrando por equipamento
               <button type="button" onClick={() => update({ asset_id: "" })} aria-label="Remover filtro">
+                <X className="size-3" />
+              </button>
+            </span>
+          ) : null}
+          {filters.location_id ? (
+            <span className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2.5 py-1 text-xs text-brand">
+              Filtrando por local
+              <button type="button" onClick={() => update({ location_id: "" })} aria-label="Remover filtro">
                 <X className="size-3" />
               </button>
             </span>

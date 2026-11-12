@@ -69,3 +69,15 @@ export function initials(name: string | null | undefined): string {
   const parts = name.trim().split(/\s+/);
   return ((parts[0]?.[0] ?? "") + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
 }
+
+/** CPF (000.000.000-00) ou CNPJ, inclusive alfanumérico (00.000.000/0000-00). A API guarda sem pontuação. */
+export function formatDocument(value: string | null | undefined): string {
+  if (!value) return "—";
+  if (value.length === 14) {
+    return `${value.slice(0, 2)}.${value.slice(2, 5)}.${value.slice(5, 8)}/${value.slice(8, 12)}-${value.slice(12)}`;
+  }
+  if (value.length === 11) {
+    return `${value.slice(0, 3)}.${value.slice(3, 6)}.${value.slice(6, 9)}-${value.slice(9)}`;
+  }
+  return value;
+}
