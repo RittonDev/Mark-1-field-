@@ -139,6 +139,27 @@ Requisitos:
   e o número de itens pendentes. Tocar abre a tela **Conta**, com a fila de envio (dá para descartar uma
   operação), os avisos de operações recusadas, "Sincronizar agora", "Baixar tudo" e o estado do push.
 
+## Formulários (checklists) e assinatura
+
+- O analista decide se a OS tem formulário e se ele é obrigatório. No detalhe da OS, o cartão
+  **Formulários e assinatura** lista cada formulário com status e progresso (itens obrigatórios cumpridos).
+- **Preenchimento** (`/formulario/<OS>/<form>`): texto, número, Sim/Não em botões grandes, opções, data,
+  "Confirmo" e fotos por campo (câmera/galeria, com a contagem contra o mínimo e o máximo). **Salvar**
+  envia as respostas; **Concluir** valida antes, com as mesmas regras e textos do servidor ("Falta
+  preencher: …"). Tudo vai pela fila de sync (`form_answers`), então funciona offline.
+- Se o servidor recusar uma conclusão por falta de item (ele não grava nada nesse caso), o app reenvia as
+  mesmas respostas sem concluir, para não perder o que o técnico preencheu, e mostra o motivo no formulário.
+- **Fotos de campo** vão para `POST /tickets/{id}/forms/{form}/photos` (fila offline como as outras fotos);
+  uma foto já enviada sai com toque longo (online). A lista de anexos fica guardada no aparelho para
+  contar as fotos de cada campo offline.
+- **Assinatura** (`/assinatura/<OS>`): o responsável assina com o dedo (canvas próprio com
+  `react-native-svg`, enviado como PNG via `react-native-view-shot`) e informa nome e cargo. Só fica
+  disponível com os formulários obrigatórios concluídos; depois dela os formulários ficam travados. Pode ser
+  refeita até a OS ser concluída. Funciona offline: a fila é enviada em ordem (fotos → respostas →
+  assinatura → "Resolver").
+- **Concluir a OS** ("Resolver"/"Fechar") fica desabilitado, com o motivo na tela, até cumprir os
+  formulários obrigatórios e, se pedida, a assinatura (o servidor também bloqueia).
+
 ## Rastreamento da jornada
 
 - **Termo LGPD** (`/termo-rastreamento`): abre sozinho no primeiro acesso (dá para adiar; sem aceite não se
