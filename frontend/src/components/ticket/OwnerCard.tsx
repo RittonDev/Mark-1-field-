@@ -86,7 +86,7 @@ export function OwnerCard({ ticket }: { ticket: TicketDetail }) {
                   {q.user.name} ({q.open} abertas)
                 </option>
               ))}
-            {owner ? <option value="none">Ninguém (volta para "Sem analista")</option> : null}
+            {owner ? <option value="none">Ninguém (volta para Sem analista)</option> : null}
           </select>
         </label>
       ) : null}

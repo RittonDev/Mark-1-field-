@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowRightLeft,
+  Hand,
   CirclePlus,
   ClipboardCheck,
   ClipboardList,
@@ -33,6 +34,7 @@ const ICONS: Record<TicketEventType, React.ComponentType<{ className?: string }>
   updated: Pencil,
   status_changed: ArrowRightLeft,
   assigned: UserCog,
+  owner_changed: Hand,
   comment_added: MessageSquare,
   worklog_added: Clock,
   attachment_added: Paperclip,

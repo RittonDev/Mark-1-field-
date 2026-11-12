@@ -1,11 +1,13 @@
 "use client";
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import clsx from "clsx";
 import { ChevronLeft, ChevronRight, Hand, Plus, Search, SlidersHorizontal, TicketX, Users, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { PriorityBadge, SlaBadge, SlaCountdown, StatusBadge } from "@/components/badges";
+import { Tabs } from "@/components/motion";
 import { MultiSelect } from "@/components/MultiSelect";
 import { useToast } from "@/components/Toaster";
 import { QuickEditButton } from "@/components/ticket/QuickEditButton";
@@ -16,6 +18,7 @@ import {
   ErrorBox,
   Input,
   LoadingBlock,
+  PageHeader,
   Select,
   Table,
   Td,
@@ -24,10 +27,10 @@ import {
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canManageTickets, isStaff, PRIORITY, PRIORITY_ORDER, STATUS, STATUS_ORDER } from "@/lib/constants";
-import { formatShort } from "@/lib/format";
+import { formatShort, initials } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
 import { useAssignable, useCustomers, useTeams } from "@/lib/queries";
-import type { Page, TicketListItem } from "@/lib/types";
+import type { Page, QueuesOut, TicketListItem } from "@/lib/types";
 
 const PAGE_SIZE = 25;
 
@@ -35,6 +38,8 @@ interface Filters {
   status: string[];
   priority: string[];
   assignee_id: string;
+  owner_id: string;
+  no_owner: boolean;
   team_id: string;
   customer_id: string;
   asset_id: string;
@@ -44,12 +49,12 @@ interface Filters {
   order_by: string;
 }
 
-// Visões rápidas (abas): a tela inicial é a lista de chamados, limpa, com o essencial à vista.
+// Visões rápidas (abas): a tela de chamados limpa, com o essencial à vista.
 type View = "abertos" | "minhas" | "sem_responsavel" | "sla" | "todas";
 const VIEWS: { key: View; label: string; staffOnly?: boolean }[] = [
   { key: "abertos", label: "Em aberto" },
   { key: "minhas", label: "Minhas", staffOnly: true },
-  { key: "sem_responsavel", label: "Sem responsável", staffOnly: true },
+  { key: "sem_responsavel", label: "Sem atribuição", staffOnly: true },
   { key: "sla", label: "SLA violado", staffOnly: true },
   { key: "todas", label: "Todas" },
 ];
@@ -66,6 +71,8 @@ function initialView(params: URLSearchParams): View {
   if (params.get("unassigned") === "true") return "sem_responsavel";
   if (params.get("mine") === "true") return "minhas";
   if (params.get("open_only") === "true") return "abertos";
+  // Fila de um analista (ou sem analista): mostra as abertas dela.
+  if (params.get("owner_id") || params.get("no_owner") === "true") return "abertos";
   // Link com filtro específico (cliente, local, responsável...) mostra todas as OS daquele filtro.
   return [...params.keys()].some((k) => k !== "q") ? "todas" : "abertos";
 }
@@ -75,6 +82,8 @@ function initialFilters(params: URLSearchParams): Filters {
     status: params.getAll("status"),
     priority: params.getAll("priority"),
     assignee_id: params.get("assignee_id") ?? "",
+    owner_id: params.get("owner_id") ?? "",
+    no_owner: params.get("no_owner") === "true",
     team_id: params.get("team_id") ?? "",
     customer_id: params.get("customer_id") ?? "",
     asset_id: params.get("asset_id") ?? "",
@@ -86,6 +95,22 @@ function initialFilters(params: URLSearchParams): Filters {
 }
 
 const EMPTY: Filters = initialFilters(new URLSearchParams());
+
+function Chip({ children, onClear, tone = "brand" }: { children: React.ReactNode; onClear: () => void; tone?: "brand" | "amber" }) {
+  return (
+    <span
+      className={clsx(
+        "inline-flex animate-enter items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium",
+        tone === "brand" ? "bg-brand-soft text-brand-ink" : "bg-amber-500/10 text-amber-700 dark:text-amber-300",
+      )}
+    >
+      {children}
+      <button type="button" onClick={onClear} aria-label="Remover filtro" className="rounded-full p-0.5 hover:bg-black/5">
+        <X className="size-3" />
+      </button>
+    </span>
+  );
+}
 
 function TicketsView() {
   const router = useRouter();
@@ -102,14 +127,22 @@ function TicketsView() {
   const manager = canManageTickets(user?.role);
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  // Puxar para si a OS de um colega (ou da fila): o analista assume na hora.
-  const take = useMutation({
-    mutationFn: (t: TicketListItem) => api.post(`/tickets/${t.id}/take`),
+  // Filas dos analistas (quem acompanha cada OS), com quantas estão abertas.
+  const queues = useQuery({
+    queryKey: ["tickets", "queues"],
+    queryFn: () => api.get<QueuesOut>("/queues"),
+    enabled: manager,
+    staleTime: 30_000,
+  });
+  // Puxar para a própria fila a OS de um colega (o técnico continua o mesmo).
+  const claim = useMutation({
+    mutationFn: (t: TicketListItem) => api.post(`/tickets/${t.id}/claim`),
     onSuccess: (_, t) => {
       queryClient.invalidateQueries({ queryKey: ["tickets"] });
-      toast({ title: `${t.code} agora é sua`, tone: "success" });
+      queryClient.invalidateQueries({ queryKey: ["ticket", t.id] });
+      toast({ title: `${t.code} está na sua fila`, tone: "success" });
     },
-    onError: (e) => toast({ title: "Não foi possível assumir", description: errorMessage(e), tone: "error" }),
+    onError: (e) => toast({ title: "Não foi possível puxar a OS", description: errorMessage(e), tone: "error" }),
   });
   const teams = useTeams();
   const customers = useCustomers();
@@ -119,6 +152,8 @@ function TicketsView() {
     queryFn: () =>
       api.get<Page<TicketListItem>>("/tickets", {
         ...filters,
+        owner_id: filters.owner_id || undefined,
+        no_owner: filters.no_owner || undefined,
         ...VIEW_FLAGS[view],
         q,
         page,
@@ -148,98 +183,85 @@ function TicketsView() {
     setView(next);
     setPage(1);
   };
+  const queueValue = filters.no_owner ? "none" : filters.owner_id;
+  const ownerName = queues.data?.queues.find((x) => x.user.id === filters.owner_id)?.user.name;
 
   const data = query.data;
   const totalPages = data ? Math.max(1, Math.ceil(data.total / data.page_size)) : 1;
 
   return (
     <div className="mx-auto max-w-7xl">
-      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight text-ink">Chamados</h1>
-          <p className="mt-0.5 text-sm text-ink-muted">
-            {data ? `${data.total} ordem(ns) de serviço` : "Ordens de serviço"}
-          </p>
-        </div>
-        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
-          <div className="relative min-w-0 flex-1 sm:w-80 sm:flex-none">
-            <Search className="pointer-events-none absolute top-2.5 left-3 size-4 text-ink-muted" />
-            <Input
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setPage(1);
-              }}
-              placeholder="Buscar por número, título ou descrição"
-              className="pl-9"
-            />
-          </div>
-          <Button onClick={() => setShowFilters((v) => !v)} aria-expanded={showFilters}>
-            <SlidersHorizontal className="size-4" />
-            Filtros
-            {advancedCount > 0 ? (
-              <span className="ml-0.5 rounded-full bg-brand px-1.5 text-[11px] font-semibold text-white">
-                {advancedCount}
-              </span>
-            ) : null}
-          </Button>
-          <Link href="/chamados/novo">
-            <Button variant="primary">
-              <Plus className="size-4" />
-              Nova OS
+      <PageHeader
+        title="Chamados"
+        description={data ? `${data.total} ordem(ns) de serviço` : "Ordens de serviço"}
+        actions={
+          <>
+            <div className="relative min-w-0 flex-1 sm:w-80 sm:flex-none">
+              <Search className="pointer-events-none absolute top-2.5 left-3 size-4 text-ink-subtle" />
+              <Input
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setPage(1);
+                }}
+                placeholder="Buscar por número, título ou descrição"
+                className="pl-9"
+              />
+            </div>
+            <Button onClick={() => setShowFilters((v) => !v)} aria-expanded={showFilters}>
+              <SlidersHorizontal className="size-4" />
+              Filtros
+              {advancedCount > 0 ? (
+                <span className="ml-0.5 rounded-full bg-brand px-1.5 text-[11px] font-semibold text-white">{advancedCount}</span>
+              ) : null}
             </Button>
-          </Link>
-        </div>
-      </div>
+            <Link href="/chamados/novo">
+              <Button variant="primary">
+                <Plus className="size-4" />
+                Nova OS
+              </Button>
+            </Link>
+          </>
+        }
+      />
 
       <div className="mb-4 flex flex-wrap items-end justify-between gap-x-4 gap-y-2 border-b border-line">
-      <div className="-mb-px flex gap-1 overflow-x-auto overflow-y-hidden">
-        {VIEWS.filter((v) => staff || !v.staffOnly).map((v) => {
-          const active = view === v.key;
-          return (
-            <button
-              key={v.key}
-              type="button"
-              onClick={() => chooseView(v.key)}
-              className={`relative px-3 pt-1 pb-2.5 text-sm whitespace-nowrap transition-colors ${
-                active ? "font-medium text-ink" : "text-ink-muted hover:text-ink"
-              }`}
-            >
-              {v.label}
-              {active ? <span className="brand-gradient absolute inset-x-2 bottom-0 h-0.5 rounded-full" /> : null}
-            </button>
-          );
-        })}
-      </div>
+        <Tabs
+          className="-mb-px"
+          items={VIEWS.filter((v) => staff || !v.staffOnly)}
+          value={view}
+          onChange={chooseView}
+          ariaLabel="Visões dos chamados"
+        />
         {manager ? (
-          // Fila de um colega: para ver o que está com ele e, se preciso, puxar a OS para si.
+          // Fila de um analista: para ver o que está com ele e, se preciso, puxar a OS para si.
           <label className="mb-1.5 flex items-center gap-2 text-sm text-ink-muted">
-            <Users className="size-4" />
+            <Users className="size-4 text-ink-subtle" />
             <span className="whitespace-nowrap">Fila de</span>
             <select
-              value={filters.assignee_id}
+              value={queueValue}
               onChange={(e) => {
-                if (view === "minhas" || view === "sem_responsavel") setView("abertos");
-                update({ assignee_id: e.target.value });
+                const value = e.target.value;
+                if (view === "minhas") setView("abertos");
+                update({ owner_id: value === "none" ? "" : value, no_owner: value === "none" });
               }}
-              className="h-8 rounded-md border border-line bg-surface px-2 text-sm text-ink"
+              className="h-8 rounded-lg border border-line bg-surface px-2.5 pr-8 text-sm text-ink shadow-elev-1"
               aria-label="Fila de"
             >
-              <option value="">Todos</option>
-              {(assignable.data ?? [])
-                .filter((u) => u.id !== user?.id)
-                .map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name} ({u.open_tickets})
-                  </option>
-                ))}
+              <option value="">Todos os analistas</option>
+              {(queues.data?.queues ?? []).map((x) => (
+                <option key={x.user.id} value={x.user.id}>
+                  {x.user.id === user?.id ? "Minha fila" : x.user.name} ({x.open})
+                </option>
+              ))}
+              <option value="none">Sem analista ({queues.data?.unowned.open ?? 0})</option>
             </select>
           </label>
         ) : null}
       </div>
 
       {showFilters ? (
-        <Card className="mb-4 p-3">
+        <Card className="mb-4 animate-enter p-3">
           <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
             <MultiSelect
               label="Status"
@@ -260,7 +282,7 @@ function TicketsView() {
             {staff ? (
               <>
                 <Select value={filters.assignee_id} onChange={(e) => update({ assignee_id: e.target.value })}>
-                  <option value="">Todos os responsáveis</option>
+                  <option value="">Atribuídas a qualquer um</option>
                   {assignable.data?.map((u) => (
                     <option key={u.id} value={u.id}>
                       {u.name}
@@ -299,37 +321,21 @@ function TicketsView() {
 
       {filters.asset_id || filters.location_id || filters.violation_pending || filters.service_type_id || hasFilters ? (
         <div className="mb-3 flex flex-wrap items-center gap-2">
-          {filters.asset_id ? (
-            <span className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2.5 py-1 text-xs text-brand">
-              Filtrando por equipamento
-              <button type="button" onClick={() => update({ asset_id: "" })} aria-label="Remover filtro">
-                <X className="size-3" />
-              </button>
-            </span>
+          {filters.owner_id ? (
+            <Chip onClear={() => update({ owner_id: "" })}>
+              Fila de {filters.owner_id === user?.id ? "você" : (ownerName ?? "um analista")}
+            </Chip>
           ) : null}
-          {filters.location_id ? (
-            <span className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2.5 py-1 text-xs text-brand">
-              Filtrando por local
-              <button type="button" onClick={() => update({ location_id: "" })} aria-label="Remover filtro">
-                <X className="size-3" />
-              </button>
-            </span>
-          ) : null}
+          {filters.no_owner ? <Chip onClear={() => update({ no_owner: false })}>Sem analista responsável</Chip> : null}
+          {filters.asset_id ? <Chip onClear={() => update({ asset_id: "" })}>Filtrando por equipamento</Chip> : null}
+          {filters.location_id ? <Chip onClear={() => update({ location_id: "" })}>Filtrando por local</Chip> : null}
           {filters.violation_pending ? (
-            <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2.5 py-1 text-xs text-amber-700 dark:text-amber-300">
+            <Chip tone="amber" onClear={() => update({ violation_pending: false })}>
               Pendentes de justificativa de SLA
-              <button type="button" onClick={() => update({ violation_pending: false })} aria-label="Remover filtro">
-                <X className="size-3" />
-              </button>
-            </span>
+            </Chip>
           ) : null}
           {filters.service_type_id ? (
-            <span className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2.5 py-1 text-xs text-brand">
-              Filtrando por tipo de serviço
-              <button type="button" onClick={() => update({ service_type_id: "" })} aria-label="Remover filtro">
-                <X className="size-3" />
-              </button>
-            </span>
+            <Chip onClear={() => update({ service_type_id: "" })}>Filtrando por tipo de serviço</Chip>
           ) : null}
           {hasFilters ? (
             <Button variant="ghost" size="sm" onClick={clear}>
@@ -340,16 +346,16 @@ function TicketsView() {
         </div>
       ) : null}
 
-      <Card>
+      <Card className="overflow-hidden">
         {query.isLoading ? (
-          <LoadingBlock />
+          <LoadingBlock rows={5} />
         ) : query.error ? (
           <div className="p-4">
             <ErrorBox message={errorMessage(query.error)} />
           </div>
         ) : !data || data.items.length === 0 ? (
           <EmptyState
-            icon={<TicketX className="size-8" />}
+            icon={<TicketX />}
             title="Nenhum chamado encontrado"
             description="Ajuste os filtros ou abra uma nova ordem de serviço."
           />
@@ -360,89 +366,114 @@ function TicketsView() {
                 <tr>
                   <Th>OS</Th>
                   <Th>Status</Th>
-                  <Th>Prioridade</Th>
                   <Th>Cliente / local</Th>
-                  <Th>Responsável</Th>
+                  <Th>Atribuída a</Th>
+                  {manager ? <Th>Analista</Th> : null}
                   <Th>SLA</Th>
-                  <Th>Atualizado</Th>
+                  <Th className="hidden xl:table-cell">Atualizado</Th>
                 </tr>
               </thead>
-              <tbody className={query.isFetching ? "opacity-70" : undefined}>
-                {data.items.map((t) => (
-                  <tr
-                    key={t.id}
-                    onClick={() => router.push(`/chamados/${t.id}`)}
-                    className="cursor-pointer hover:bg-surface-2"
-                  >
-                    <Td className="max-w-[22rem]">
-                      <div className="flex items-start gap-1">
-                        <Link
-                          href={`/chamados/${t.id}`}
-                          onClick={(e) => e.stopPropagation()}
-                          className="block min-w-0 flex-1 font-medium text-ink hover:text-brand"
-                        >
-                          <span className="mr-1.5 font-mono text-xs text-ink-muted">{t.code}</span>
-                          {t.title}
-                        </Link>
-                        {manager ? (
-                          <span className="-my-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-                            <QuickEditButton ticketId={t.id} code={t.code} />
+              <tbody className={clsx("stagger transition-opacity", query.isFetching && "opacity-70")}>
+                {data.items.map((t, index) => {
+                  const open = ["open", "active", "pending"].includes(STATUS[t.status].group);
+                  const owner = t.owner ?? null;
+                  return (
+                    <tr
+                      key={t.id}
+                      style={{ ["--i" as string]: index }}
+                      onClick={() => router.push(`/chamados/${t.id}`)}
+                      className="group cursor-pointer transition-colors hover:bg-surface-2/70"
+                    >
+                      <Td className="max-w-[24rem]">
+                        <div className="flex items-start gap-1">
+                          <Link
+                            href={`/chamados/${t.id}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="block min-w-0 flex-1 font-medium text-ink hover:text-brand"
+                          >
+                            <span className="mr-1.5 font-mono text-xs font-normal text-ink-subtle">{t.code}</span>
+                            {t.title}
+                          </Link>
+                          {manager ? (
+                            <span className="-my-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                              <QuickEditButton ticketId={t.id} code={t.code} />
+                            </span>
+                          ) : null}
+                        </div>
+                        {t.category ? <span className="mt-0.5 block truncate text-xs text-ink-subtle">{t.category.full_name}</span> : null}
+                      </Td>
+                      <Td>
+                        <div className="flex flex-col items-start gap-1">
+                          <StatusBadge status={t.status} />
+                          <PriorityBadge priority={t.priority} compact />
+                        </div>
+                      </Td>
+                      <Td className="max-w-[14rem]">
+                        <span className="block truncate">{t.customer?.name ?? t.requester_name ?? "—"}</span>
+                        {t.location ? (
+                          <span className="block truncate text-xs text-ink-subtle">
+                            {t.location.name}
+                            {t.location.city ? ` · ${t.location.city}` : ""}
                           </span>
                         ) : null}
-                      </div>
-                      {t.category ? (
-                        <span className="mt-0.5 block truncate text-xs text-ink-muted">{t.category.full_name}</span>
-                      ) : null}
-                    </Td>
-                    <Td>
-                      <StatusBadge status={t.status} />
-                    </Td>
-                    <Td>
-                      <PriorityBadge priority={t.priority} compact />
-                    </Td>
-                    <Td className="max-w-[14rem]">
-                      <span className="block truncate">{t.customer?.name ?? t.requester_name ?? "—"}</span>
-                      {t.location ? (
-                        <span className="block truncate text-xs text-ink-muted">
-                          {t.location.name}
-                          {t.location.city ? ` · ${t.location.city}` : ""}
-                        </span>
-                      ) : null}
-                    </Td>
-                    <Td>
-                      <div className="flex items-center gap-1">
+                      </Td>
+                      <Td>
                         {t.assignee ? (
                           <span className="whitespace-nowrap">{t.assignee.name}</span>
                         ) : (
-                          <span className="text-xs text-amber-600 dark:text-amber-400">Sem responsável</span>
+                          <span className="text-xs font-medium text-amber-700 dark:text-amber-400">Sem atribuição</span>
                         )}
-                        {manager && t.assignee?.id !== user?.id && ["open", "active", "pending"].includes(STATUS[t.status].group) ? (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              take.mutate(t);
-                            }}
-                            disabled={take.isPending}
-                            className="-my-1 shrink-0 rounded-md p-1 text-ink-muted hover:bg-surface-2 hover:text-brand disabled:opacity-50"
-                            aria-label={`Puxar ${t.code} para mim`}
-                            title={t.assignee ? `Puxar de ${t.assignee.name} para mim` : "Assumir esta OS"}
-                          >
-                            <Hand className="size-3.5" />
-                          </button>
-                        ) : null}
-                      </div>
-                      {t.team ? <span className="block text-xs text-ink-muted">{t.team.name}</span> : null}
-                    </Td>
-                    <Td>
-                      <div className="flex flex-col items-start gap-1">
-                        <SlaBadge status={t.sla_status} />
-                        <SlaCountdown ticket={t} />
-                      </div>
-                    </Td>
-                    <Td className="text-xs whitespace-nowrap text-ink-muted">{formatShort(t.updated_at)}</Td>
-                  </tr>
-                ))}
+                        {t.team ? <span className="block text-xs text-ink-subtle">{t.team.name}</span> : null}
+                      </Td>
+                      {manager ? (
+                        <Td>
+                          <div className="flex items-center gap-1.5">
+                            {owner ? (
+                              <>
+                                <span
+                                  className={clsx(
+                                    "flex size-6 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold",
+                                    owner.id === user?.id ? "bg-brand text-white" : "bg-surface-3 text-ink-muted",
+                                  )}
+                                  title={owner.name}
+                                >
+                                  {initials(owner.name)}
+                                </span>
+                                <span className="max-w-[8rem] truncate text-xs text-ink-muted">
+                                  {owner.id === user?.id ? "Você" : owner.name.split(" ")[0]}
+                                </span>
+                              </>
+                            ) : (
+                              <span className="text-xs text-ink-subtle">—</span>
+                            )}
+                            {open && owner?.id !== user?.id ? (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  claim.mutate(t);
+                                }}
+                                disabled={claim.isPending}
+                                className="-my-1 shrink-0 rounded-md p-1 text-ink-subtle opacity-60 transition-[opacity,color,background-color] group-hover:opacity-100 hover:bg-surface-3 hover:text-brand disabled:opacity-40"
+                                aria-label={`Puxar ${t.code} para a minha fila`}
+                                title={owner ? `Puxar da fila de ${owner.name} para a sua` : "Puxar para a minha fila"}
+                              >
+                                <Hand className="size-3.5" />
+                              </button>
+                            ) : null}
+                          </div>
+                        </Td>
+                      ) : null}
+                      <Td>
+                        <div className="flex flex-col items-start gap-1">
+                          <SlaBadge status={t.sla_status} />
+                          <SlaCountdown ticket={t} />
+                        </div>
+                      </Td>
+                      <Td className="hidden text-xs whitespace-nowrap text-ink-subtle xl:table-cell">{formatShort(t.updated_at)}</Td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </Table>
             <div className="flex items-center justify-between px-4 py-3 text-sm text-ink-muted">
