@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Check, Copy, ExternalLink, FileCheck2, Link2Off, MessageCircle, RefreshCw } from "lucide-react";
+import { Check, Copy, Download, ExternalLink, FileCheck2, Link2Off, MessageCircle, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { useToast } from "@/components/Toaster";
 import { Button, Card, CardHeader, ErrorBox } from "@/components/ui";
@@ -79,6 +79,12 @@ export function ReportLinkCard({ ticket }: { ticket: TicketDetail }) {
                 <Button size="sm">
                   <ExternalLink className="size-3.5" />
                   Ver como o cliente
+                </Button>
+              </a>
+              <a href={`${link.path}?pdf=1`} target="_blank" rel="noreferrer">
+                <Button size="sm">
+                  <Download className="size-3.5" />
+                  Baixar PDF
                 </Button>
               </a>
               <a

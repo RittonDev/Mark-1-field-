@@ -3,62 +3,54 @@
 import clsx from "clsx";
 import {
   BadgeCheck,
-  Building2,
-  CalendarClock,
+  CalendarDays,
   CheckCircle2,
   ClipboardCheck,
+  Clock3,
   Download,
   FileWarning,
-  HardHat,
+  Flag,
   Images,
+  Loader2,
   MapPin,
-  Navigation,
   PenLine,
+  Printer,
   Timer,
-  Wrench,
   X,
 } from "lucide-react";
+import Image from "next/image";
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Logo, ThemeToggle } from "@/components/Brand";
 import { Button, Skeleton } from "@/components/ui";
 import { ApiError, errorMessage, request } from "@/lib/api";
-import { formatDateTime, formatMinutes } from "@/lib/format";
+import { formatDate, formatDateTime, formatDocument, formatMinutes, formatTime, initials } from "@/lib/format";
 import type { PublicReport, PublicReportPhoto } from "@/lib/types";
 
-function Fact({ icon: Icon, label, children }: { icon: React.ComponentType<{ className?: string }>; label: string; children: React.ReactNode }) {
+const LONG_TEXT = 320;
+
+function SectionHead({ children, aside }: { children: React.ReactNode; aside?: React.ReactNode }) {
   return (
-    <div className="flex min-w-0 gap-3">
-      <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-ink-subtle print:hidden">
-        <Icon className="size-4" />
-      </span>
-      <div className="min-w-0">
-        <p className="text-[11px] font-medium tracking-[0.04em] text-ink-subtle uppercase">{label}</p>
-        <div className="mt-0.5 text-sm text-ink">{children}</div>
-      </div>
+    <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+      <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-ink">{children}</h2>
+      {aside ? <div className="text-xs text-ink-muted">{aside}</div> : null}
     </div>
   );
 }
 
-function Section({
-  icon: Icon,
-  title,
-  children,
-  className,
-}: {
-  icon: React.ComponentType<{ className?: string }>;
-  title: string;
-  children: React.ReactNode;
-  className?: string;
-}) {
+function Panel({ children, className }: { children: React.ReactNode; className?: string }) {
+  return <div className={clsx("rounded-xl border border-line bg-surface p-4 print:break-inside-avoid", className)}>{children}</div>;
+}
+
+function Tile({ icon: Icon, label, children }: { icon: React.ComponentType<{ className?: string }>; label: string; children: React.ReactNode }) {
   return (
-    <section className={clsx("border-t border-line px-6 py-6 sm:px-8 print:break-inside-avoid", className)}>
-      <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-ink">
-        <Icon className="size-4 text-brand" />
-        {title}
-      </h2>
-      {children}
-    </section>
+    <div className="flex flex-col items-center justify-center gap-1 rounded-xl border border-line bg-surface px-3 py-4 text-center print:break-inside-avoid">
+      <span className="flex items-center gap-1.5 text-xs text-ink-subtle">
+        <Icon className="size-3.5" />
+        {label}
+      </span>
+      <span className="text-sm font-semibold text-ink tabular-nums">{children}</span>
+    </div>
   );
 }
 
@@ -92,21 +84,25 @@ function PhotoGrid({ photos, onOpen }: { photos: PublicReportPhoto[]; onOpen: (p
 function ReportSkeleton() {
   return (
     <div className="overflow-hidden rounded-2xl border border-line bg-surface p-8 shadow-elev-2">
-      <Skeleton className="h-3 w-40" />
-      <Skeleton className="mt-4 h-7 w-2/3" />
-      <Skeleton className="mt-2 h-3 w-1/3" />
-      <div className="mt-8 grid grid-cols-2 gap-6">
-        {[0, 1, 2, 3].map((i) => (
-          <div key={i} className="flex gap-3">
-            <Skeleton className="size-8 rounded-lg" />
-            <div className="flex-1 space-y-2">
-              <Skeleton className="h-2.5 w-1/3" />
-              <Skeleton className="h-3 w-2/3" />
-            </div>
+      <div className="flex justify-between">
+        <div className="flex gap-3">
+          <Skeleton className="size-12 rounded-xl" />
+          <div className="space-y-2">
+            <Skeleton className="h-4 w-40" />
+            <Skeleton className="h-3 w-56" />
           </div>
+        </div>
+        <Skeleton className="h-10 w-36" />
+      </div>
+      <div className="mt-8 grid grid-cols-2 gap-4">
+        <Skeleton className="h-28 rounded-xl" />
+        <Skeleton className="h-28 rounded-xl" />
+      </div>
+      <div className="mt-6 grid grid-cols-4 gap-3">
+        {[0, 1, 2, 3].map((i) => (
+          <Skeleton key={i} className="h-20 rounded-xl" />
         ))}
       </div>
-      <Skeleton className="mt-8 h-24 w-full rounded-xl" />
     </div>
   );
 }
@@ -116,6 +112,9 @@ export default function PublicReportPage() {
   const [report, setReport] = useState<PublicReport | null>(null);
   const [problem, setProblem] = useState<{ title: string; text: string } | null>(null);
   const [zoom, setZoom] = useState<PublicReportPhoto | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [building, setBuilding] = useState(false);
+  const autoPdf = useRef(false);
 
   useEffect(() => {
     request<PublicReport>(`/public/reports/${encodeURIComponent(token)}`, { auth: false })
@@ -123,7 +122,7 @@ export default function PublicReportPage() {
       .catch((e) => {
         if (e instanceof ApiError && e.status === 409) {
           setProblem({ title: "Relatório temporariamente indisponível", text: errorMessage(e) });
-        } else if (e instanceof ApiError && e.status === 404) {
+        } else if (e instanceof ApiError && (e.status === 404 || e.status === 410)) {
           setProblem({ title: "Link inválido ou expirado", text: "Peça um novo link a quem enviou o relatório." });
         } else {
           setProblem({ title: "Não foi possível abrir o relatório", text: "Verifique a conexão e tente de novo." });
@@ -138,38 +137,67 @@ export default function PublicReportPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [zoom]);
 
-  // "Baixar PDF": a impressão do navegador gera o PDF; o nome do arquivo sai do título da página.
-  const savePdf = () => {
+  // PDF de verdade, gerado no navegador (A4, com fotos e assinatura); se falhar, cai na impressão.
+  const downloadPdf = useCallback(async () => {
     if (!report) return;
-    const previous = document.title;
-    document.title = `Relatorio-${report.code}`;
-    window.print();
-    document.title = previous;
-  };
+    setBuilding(true);
+    try {
+      const [{ pdf }, { ReportPdf }] = await Promise.all([import("@react-pdf/renderer"), import("@/components/report/ReportPdf")]);
+      const blob = await pdf(<ReportPdf report={report} />).toBlob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Relatorio-${report.code}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 15_000);
+    } catch {
+      window.print();
+    } finally {
+      setBuilding(false);
+    }
+  }, [report]);
 
-  const place = report?.location;
+  // Link com ?pdf=1 (botão "Baixar PDF" da OS): baixa assim que o relatório carrega.
+  useEffect(() => {
+    if (!report || autoPdf.current) return;
+    if (new URLSearchParams(window.location.search).get("pdf") === "1") {
+      autoPdf.current = true;
+      void downloadPdf();
+    }
+  }, [report, downloadPdf]);
+
+  const loc = report?.location;
   const address =
     report?.service_address ||
-    [place?.address, [place?.city, place?.state].filter(Boolean).join("-")].filter(Boolean).join(", ") ||
+    [loc?.address, [loc?.city, loc?.state].filter(Boolean).join("-"), loc?.zip_code].filter(Boolean).join(", ") ||
     null;
   const formPhotos = report?.forms.reduce((n, f) => n + f.items.reduce((m, i) => m + i.photos.length, 0), 0) ?? 0;
+  const number = report?.number !== undefined ? String(report.number).padStart(6, "0") : report?.code;
+  const longDescription = (report?.description.length ?? 0) > LONG_TEXT;
 
   return (
     <div className="min-h-screen bg-canvas print:bg-white">
-      <header className="mx-auto flex max-w-4xl items-center justify-between px-4 pt-6 print:hidden">
+      <header className="mx-auto flex max-w-5xl items-center justify-between px-4 pt-6 print:hidden">
         <Logo />
         <div className="flex items-center gap-2">
           {report ? (
-            <Button variant="primary" onClick={savePdf}>
-              <Download className="size-4" />
-              Baixar PDF
-            </Button>
+            <>
+              <Button variant="ghost" onClick={() => window.print()} aria-label="Imprimir">
+                <Printer className="size-4" />
+              </Button>
+              <Button variant="primary" onClick={downloadPdf} loading={building}>
+                {building ? null : <Download className="size-4" />}
+                {building ? "Gerando PDF..." : "Baixar PDF"}
+              </Button>
+            </>
           ) : null}
           <ThemeToggle />
         </div>
       </header>
 
-      <main className="mx-auto max-w-4xl px-4 py-6 print:max-w-none print:p-0">
+      <main className="mx-auto max-w-5xl px-4 py-6 print:max-w-none print:p-0">
         {problem ? (
           <div className="mx-auto flex max-w-md animate-rise flex-col items-center gap-3 rounded-2xl border border-line bg-surface px-6 py-12 text-center shadow-elev-2">
             <span className="flex size-12 items-center justify-center rounded-2xl bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400">
@@ -183,117 +211,172 @@ export default function PublicReportPage() {
         ) : (
           <article className="animate-rise overflow-hidden rounded-2xl border border-line bg-surface shadow-elev-2 print:rounded-none print:border-0 print:shadow-none">
             <div className="brand-gradient h-1" />
-            {/* Cabeçalho */}
-            <div className="px-6 pt-7 pb-6 sm:px-8">
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <p className="text-xs font-medium tracking-[0.06em] text-brand uppercase">Relatório de atendimento</p>
-                  <h1 className="mt-2 text-2xl leading-tight font-semibold tracking-[-0.02em] text-ink sm:text-[28px]">
-                    {report.title}
-                  </h1>
-                  <p className="mt-1.5 text-sm text-ink-muted">
-                    <span className="font-mono">{report.code}</span>
-                    {report.finished_at ? ` · concluída em ${formatDateTime(report.finished_at)}` : null}
-                  </p>
-                </div>
-                <div className="flex flex-col items-end gap-2">
-                  <span className="hidden print:block">
-                    <Logo />
-                  </span>
-                  <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200 ring-inset dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-500/25">
-                    <CheckCircle2 className="size-3.5" />
-                    {report.status_label}
-                  </span>
-                  <span className="text-xs text-ink-subtle">{report.company_name}</span>
-                </div>
-              </div>
 
-              <div className="mt-7 grid gap-5 sm:grid-cols-2">
-                <Fact icon={Building2} label="Cliente">
-                  {report.customer?.name ?? report.requester_name ?? "—"}
-                  {report.requester_name && report.customer ? (
-                    <span className="block text-xs text-ink-muted">Solicitante: {report.requester_name}</span>
+            {/* Empresa · número da OS */}
+            <div className="flex flex-wrap items-start justify-between gap-6 border-b border-line px-6 py-6 sm:px-8">
+              <div className="flex min-w-0 items-center gap-4">
+                <span className="flex size-14 shrink-0 items-center justify-center rounded-xl border border-line bg-white">
+                  <Image src="/brand/maxxfield-mark.png" alt="" width={36} height={18} />
+                </span>
+                <div className="min-w-0 text-xs leading-relaxed text-ink-muted">
+                  <p className="text-base font-semibold text-ink">{report.company?.name ?? report.company_name}</p>
+                  {report.company?.email || report.company?.phone ? (
+                    <p>{[report.company?.email, report.company?.phone].filter(Boolean).join(" · ")}</p>
                   ) : null}
-                </Fact>
-                <Fact icon={MapPin} label="Local do atendimento">
-                  {place ? (
-                    <>
-                      {place.code ? <span className="mr-1 font-mono text-xs text-ink-subtle">{place.code}</span> : null}
-                      {place.name}
-                    </>
-                  ) : (
-                    "—"
-                  )}
-                  {address ? <span className="block text-xs text-ink-muted">{address}</span> : null}
-                </Fact>
-                <Fact icon={HardHat} label="Técnico responsável">
-                  {report.technician?.name ?? "—"}
-                </Fact>
-                <Fact icon={Wrench} label="Serviço">
-                  {report.service_type ?? "Atendimento técnico"}
-                </Fact>
+                  {report.company?.address ? <p>{report.company.address}</p> : null}
+                </div>
               </div>
-
-              <div className="mt-6 grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-line bg-line sm:grid-cols-4">
-                {[
-                  { label: "Agendado", value: report.scheduled_start ? formatDateTime(report.scheduled_start) : "—", icon: CalendarClock },
-                  { label: "Chegada ao local", value: report.arrived_at ? formatDateTime(report.arrived_at) : "—", icon: Navigation },
-                  { label: "Conclusão", value: report.finished_at ? formatDateTime(report.finished_at) : "—", icon: CheckCircle2 },
-                  {
-                    label: "Tempo no local",
-                    value: report.on_site_minutes ? formatMinutes(report.on_site_minutes) : "—",
-                    icon: Timer,
-                  },
-                ].map((s) => (
-                  <div key={s.label} className="bg-surface px-4 py-3">
-                    <p className="flex items-center gap-1.5 text-[11px] text-ink-subtle">
-                      <s.icon className="size-3.5" />
-                      {s.label}
-                    </p>
-                    <p className="mt-1 text-sm font-semibold text-ink tabular-nums">{s.value}</p>
-                  </div>
-                ))}
+              <div className="text-right">
+                <p className="text-[11px] font-medium tracking-[0.06em] text-ink-subtle uppercase">Relatório de atendimento</p>
+                <p className="mt-0.5 font-mono text-2xl font-semibold tracking-tight text-ink">OS {number}</p>
+                {report.service_type ? <p className="text-xs text-ink-muted">{report.service_type}</p> : null}
               </div>
-              {report.check_in_gps ? (
-                <p className="mt-3 inline-flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-400">
-                  <BadgeCheck className="size-3.5" />
-                  Presença no local confirmada por GPS no check-in
-                </p>
-              ) : null}
             </div>
 
-            {report.resolution_notes ? (
-              <Section icon={CheckCircle2} title="O que foi feito">
-                <div className="rounded-xl border-l-4 border-brand bg-brand-soft/60 px-4 py-3.5 text-sm leading-relaxed whitespace-pre-wrap text-ink">
-                  {report.resolution_notes}
+            {/* Título e situação */}
+            <div className="flex flex-wrap items-center justify-between gap-3 px-6 pt-6 sm:px-8">
+              <div className="min-w-0">
+                <h1 className="text-xl leading-tight font-semibold tracking-[-0.015em] text-ink sm:text-2xl">{report.title}</h1>
+                <p className="mt-1 text-xs text-ink-muted">OS aberta em {formatDateTime(report.opened_at)}</p>
+              </div>
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200 ring-inset dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-500/25">
+                <CheckCircle2 className="size-3.5" />
+                {report.status_label}
+              </span>
+            </div>
+
+            {/* Cliente e local */}
+            <section className="px-6 py-6 sm:px-8">
+              <SectionHead>Dados do cliente</SectionHead>
+              <div className="grid gap-4 md:grid-cols-2">
+                <Panel>
+                  <div className="flex items-start gap-3">
+                    <span className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-brand-soft text-sm font-semibold text-brand-ink">
+                      {initials(report.customer?.name ?? report.requester_name ?? "?")}
+                    </span>
+                    <div className="min-w-0 text-xs leading-relaxed text-ink-muted">
+                      <p className="text-sm font-semibold text-ink">{report.customer?.name ?? report.requester_name ?? "—"}</p>
+                      {report.customer?.document ? <p>CPF/CNPJ: {formatDocument(report.customer.document)}</p> : null}
+                      {report.customer?.phone ? <p>Telefone: {report.customer.phone}</p> : null}
+                      {report.customer?.email ? <p>E-mail: {report.customer.email}</p> : null}
+                      {report.requester_name && report.customer ? <p>Solicitante: {report.requester_name}</p> : null}
+                    </div>
+                  </div>
+                </Panel>
+                <Panel>
+                  <p className="mb-1 flex items-center gap-1.5 text-xs font-medium text-ink-subtle">
+                    <MapPin className="size-3.5" />
+                    Local do atendimento
+                  </p>
+                  <p className="text-sm font-semibold text-ink">
+                    {loc ? (
+                      <>
+                        {loc.code ? <span className="mr-1 font-mono text-xs font-normal text-ink-subtle">{loc.code}</span> : null}
+                        {loc.name}
+                      </>
+                    ) : (
+                      "—"
+                    )}
+                  </p>
+                  {address ? <p className="mt-0.5 text-xs text-ink-muted">{address}</p> : null}
+                  {loc?.contact_name ? (
+                    <p className="mt-0.5 text-xs text-ink-muted">
+                      Contato: {loc.contact_name}
+                      {loc.contact_phone ? ` · ${loc.contact_phone}` : ""}
+                    </p>
+                  ) : null}
+                </Panel>
+              </div>
+              {report.description ? (
+                <Panel className="mt-4">
+                  <p className="mb-1 text-xs font-medium text-ink-subtle">Descrição do serviço</p>
+                  <p
+                    className={clsx(
+                      "text-sm leading-relaxed whitespace-pre-wrap text-ink-muted print:line-clamp-none",
+                      longDescription && !expanded && "line-clamp-4",
+                    )}
+                  >
+                    {report.description}
+                  </p>
+                  {longDescription ? (
+                    <button
+                      type="button"
+                      onClick={() => setExpanded((v) => !v)}
+                      className="mt-2 text-xs font-medium text-brand hover:underline print:hidden"
+                    >
+                      {expanded ? "Ver menos" : "Ver mais"}
+                    </button>
+                  ) : null}
+                </Panel>
+              ) : null}
+            </section>
+
+            {/* Atendimento */}
+            <section className="border-t border-line px-6 py-6 sm:px-8">
+              <SectionHead
+                aside={
+                  report.check_in_gps ? (
+                    <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400">
+                      <BadgeCheck className="size-3.5" />
+                      Presença confirmada por GPS
+                    </span>
+                  ) : null
+                }
+              >
+                Informações do atendimento
+              </SectionHead>
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-[1.4fr_1fr_1fr_1fr_1fr]">
+                <div className="col-span-2 flex items-center gap-3 rounded-xl border border-line bg-surface px-4 py-3 md:col-span-1 print:break-inside-avoid">
+                  <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-linear-to-br from-brand to-brand-cyan text-xs font-semibold text-white">
+                    {report.technician ? initials(report.technician.name) : "?"}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-[11px] text-ink-subtle">Técnico responsável</p>
+                    <p className="truncate text-sm font-semibold text-ink">{report.technician?.name ?? "Sem técnico"}</p>
+                  </div>
                 </div>
-              </Section>
-            ) : null}
+                <Tile icon={CalendarDays} label="Data">
+                  {formatDate(report.arrived_at ?? report.scheduled_start ?? report.finished_at)}
+                </Tile>
+                <Tile icon={Clock3} label="Início">
+                  {report.arrived_at ? formatTime(report.arrived_at) : "—"}
+                </Tile>
+                <Tile icon={Flag} label="Fim">
+                  {report.finished_at ? formatTime(report.finished_at) : "—"}
+                </Tile>
+                <Tile icon={Timer} label="Tempo no local">
+                  {report.on_site_minutes ? formatMinutes(report.on_site_minutes) : "—"}
+                </Tile>
+              </div>
 
-            {report.description ? (
-              <Section icon={FileWarning} title="Problema relatado">
-                <p className="text-sm leading-relaxed whitespace-pre-wrap text-ink-muted">{report.description}</p>
-              </Section>
-            ) : null}
+              {report.resolution_notes ? (
+                <div className="mt-4 rounded-xl border-l-4 border-brand bg-brand-soft/60 px-4 py-3.5 print:break-inside-avoid">
+                  <p className="mb-1 text-xs font-semibold text-brand-ink">Solução aplicada</p>
+                  <p className="text-sm leading-relaxed whitespace-pre-wrap text-ink">{report.resolution_notes}</p>
+                </div>
+              ) : null}
 
-            {report.timeline.length ? (
-              <Section icon={CalendarClock} title="Linha do tempo">
-                <ol className="relative grid gap-4 sm:grid-cols-[repeat(auto-fit,minmax(130px,1fr))]">
+              {report.timeline.length ? (
+                <ol className="mt-5 grid gap-3 sm:grid-cols-[repeat(auto-fit,minmax(120px,1fr))] print:break-inside-avoid">
                   {report.timeline.map((step, i) => (
-                    <li key={`${step.label}-${i}`} className="relative flex gap-3 sm:block">
-                      <span className="relative z-10 mt-1 flex size-3 shrink-0 items-center justify-center rounded-full bg-brand ring-4 ring-brand-soft sm:mt-0" />
-                      <div className="sm:mt-3">
-                        <p className="text-sm font-medium text-ink">{step.label}</p>
-                        <p className="text-xs text-ink-muted tabular-nums">{formatDateTime(step.at)}</p>
-                      </div>
+                    <li key={`${step.label}-${i}`} className="border-t-2 border-brand/70 pt-2">
+                      <p className="text-xs font-semibold text-ink">{step.label}</p>
+                      <p className="text-[11px] text-ink-muted tabular-nums">{formatDateTime(step.at)}</p>
                     </li>
                   ))}
                 </ol>
-              </Section>
-            ) : null}
+              ) : null}
+            </section>
 
+            {/* Checklists */}
             {report.forms.map((form) => (
-              <Section key={form.name} icon={ClipboardCheck} title={form.name}>
+              <section key={form.name} className="border-t border-line px-6 py-6 sm:px-8">
+                <SectionHead aside={form.completed_at ? `Preenchido em ${formatDateTime(form.completed_at)}` : null}>
+                  <span className="inline-flex items-center gap-2">
+                    <ClipboardCheck className="size-4 text-brand" />
+                    {form.name}
+                  </span>
+                </SectionHead>
                 <dl className="divide-y divide-line rounded-xl border border-line">
                   {form.items.map((item, i) =>
                     item.type === "section" ? (
@@ -304,65 +387,70 @@ export default function PublicReportPage() {
                         {item.label}
                       </dt>
                     ) : (
-                    <div key={`${item.label}-${i}`} className="px-4 py-3 print:break-inside-avoid">
-                      <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
-                        <dt className="text-sm text-ink-muted">{item.label}</dt>
-                        {item.photos.length === 0 ? (
-                          <dd className="text-sm font-medium text-ink">{item.value || "—"}</dd>
+                      <div key={`${item.label}-${i}`} className="px-4 py-3 print:break-inside-avoid">
+                        <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
+                          <dt className="text-sm text-ink-muted">{item.label}</dt>
+                          {item.photos.length === 0 ? <dd className="text-sm font-medium text-ink">{item.value || "—"}</dd> : null}
+                        </div>
+                        {item.photos.length ? (
+                          <dd className="mt-3">
+                            <PhotoGrid photos={item.photos} onOpen={setZoom} />
+                          </dd>
                         ) : null}
                       </div>
-                      {item.photos.length ? (
-                        <dd className="mt-3">
-                          <PhotoGrid photos={item.photos} onOpen={setZoom} />
-                        </dd>
-                      ) : null}
-                    </div>
                     ),
                   )}
                 </dl>
-                {form.completed_at ? (
-                  <p className="mt-2 text-xs text-ink-subtle">Preenchido em {formatDateTime(form.completed_at)}</p>
-                ) : null}
-              </Section>
+              </section>
             ))}
 
             {report.photos.length ? (
-              <Section icon={Images} title={`Evidências (${report.photos.length + formPhotos} fotos)`}>
+              <section className="border-t border-line px-6 py-6 sm:px-8">
+                <SectionHead>
+                  <span className="inline-flex items-center gap-2">
+                    <Images className="size-4 text-brand" />
+                    Evidências ({report.photos.length + formPhotos} fotos)
+                  </span>
+                </SectionHead>
                 <PhotoGrid photos={report.photos} onOpen={setZoom} />
-              </Section>
+              </section>
             ) : null}
 
             {report.signature ? (
-              <Section icon={PenLine} title="Assinatura do responsável no local">
+              <section className="border-t border-line px-6 py-6 sm:px-8 print:break-inside-avoid">
+                <SectionHead>
+                  <span className="inline-flex items-center gap-2">
+                    <PenLine className="size-4 text-brand" />
+                    Assinatura do responsável no local
+                  </span>
+                </SectionHead>
                 <div className="flex flex-wrap items-end gap-6">
                   <div className="rounded-xl border border-line bg-white px-6 py-3">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={report.signature.image_url} alt={`Assinatura de ${report.signature.name}`} className="h-24 w-auto" />
+                    {report.signature.image_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={report.signature.image_url} alt={`Assinatura de ${report.signature.name ?? "responsável"}`} className="h-24 w-auto" />
+                    ) : (
+                      <PenLine className="size-6 text-slate-300" />
+                    )}
                   </div>
                   <div className="text-sm">
-                    <p className="font-semibold text-ink">{report.signature.name}</p>
+                    <p className="font-semibold text-ink uppercase">{report.signature.name}</p>
                     {report.signature.role ? <p className="text-ink-muted">{report.signature.role}</p> : null}
                     <p className="mt-1 text-xs text-ink-subtle">Assinado no local em {formatDateTime(report.signature.signed_at)}</p>
                   </div>
                 </div>
-              </Section>
+              </section>
             ) : null}
 
-            <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-line bg-surface-2/60 px-6 py-4 text-[11px] text-ink-subtle sm:px-8">
-              <span>
+            <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-line bg-surface-2/60 px-6 py-4 text-[11px] text-ink-subtle sm:px-8">
+              <span className="inline-flex items-center gap-2">
+                <Image src="/brand/maxxfield-mark.png" alt="" width={22} height={11} />
                 Relatório gerado em {formatDateTime(report.generated_at)} · {report.company?.name ?? report.company_name}
-                {report.company?.phone ? ` · ${report.company.phone}` : ""}
-                {report.company?.email ? ` · ${report.company.email}` : ""}
               </span>
               <span className="font-mono">{report.code}</span>
             </footer>
           </article>
         )}
-        {report ? (
-          <p className="mt-4 text-center text-xs text-ink-subtle print:hidden">
-            Para guardar, use &quot;Baixar PDF&quot; e escolha &quot;Salvar como PDF&quot; na janela que abrir.
-          </p>
-        ) : null}
       </main>
 
       {zoom ? (
@@ -380,6 +468,12 @@ export default function PublicReportPage() {
           </button>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={zoom.url} alt={zoom.filename} className="max-h-[90vh] max-w-full animate-pop rounded-xl object-contain shadow-pop" />
+        </div>
+      ) : null}
+      {building ? (
+        <div className="fixed right-4 bottom-4 z-50 inline-flex animate-toast items-center gap-2 rounded-xl border border-line bg-surface px-4 py-3 text-sm text-ink shadow-pop print:hidden">
+          <Loader2 className="size-4 animate-spin text-brand" />
+          Preparando o PDF com as fotos...
         </div>
       ) : null}
     </div>
