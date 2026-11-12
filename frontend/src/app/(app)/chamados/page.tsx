@@ -371,6 +371,7 @@ function TicketsView() {
                   {manager ? <Th>Analista</Th> : null}
                   <Th>SLA</Th>
                   <Th className="hidden 2xl:table-cell">Atualizado</Th>
+                  {manager ? <Th className="edit-col">Editar</Th> : null}
                 </tr>
               </thead>
               <tbody className={clsx("stagger transition-opacity", query.isFetching && "opacity-70")}>
@@ -382,24 +383,17 @@ function TicketsView() {
                       key={t.id}
                       style={{ ["--i" as string]: index }}
                       onClick={() => router.push(`/chamados/${t.id}`)}
-                      className="group cursor-pointer transition-colors hover:bg-surface-2/70"
+                      className="group cursor-pointer transition-colors hover:bg-[var(--row-hover)]"
                     >
                       <Td className="max-w-[20rem]">
-                        <div className="flex items-start gap-1">
-                          <Link
-                            href={`/chamados/${t.id}`}
-                            onClick={(e) => e.stopPropagation()}
-                            className="block min-w-0 flex-1 font-medium text-ink hover:text-brand"
-                          >
-                            <span className="mr-1.5 font-mono text-xs font-normal text-ink-subtle">{t.code}</span>
-                            {t.title}
-                          </Link>
-                          {manager ? (
-                            <span className="-my-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-                              <QuickEditButton ticketId={t.id} code={t.code} />
-                            </span>
-                          ) : null}
-                        </div>
+                        <Link
+                          href={`/chamados/${t.id}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="block font-medium text-ink hover:text-brand"
+                        >
+                          <span className="mr-1.5 font-mono text-xs font-normal text-ink-subtle">{t.code}</span>
+                          {t.title}
+                        </Link>
                         {t.category ? <span className="mt-0.5 block truncate text-xs text-ink-subtle">{t.category.full_name}</span> : null}
                       </Td>
                       <Td>
@@ -471,6 +465,11 @@ function TicketsView() {
                         </div>
                       </Td>
                       <Td className="hidden text-xs whitespace-nowrap text-ink-subtle 2xl:table-cell">{formatShort(t.updated_at)}</Td>
+                      {manager ? (
+                        <Td className="edit-col">
+                          <QuickEditButton ticketId={t.id} code={t.code} />
+                        </Td>
+                      ) : null}
                     </tr>
                   );
                 })}

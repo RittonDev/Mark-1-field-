@@ -196,9 +196,10 @@ function QueueRow({ item, index, compact }: { item: QueueItem; index: number; co
         </div>
         {item.section === "done" ? null : <SlaCountdown ticket={item} />}
       </div>
-      <div className="-my-1 flex shrink-0 items-center opacity-70 transition-opacity group-hover:opacity-100">
-        <QuickEditButton ticketId={item.id} code={item.code} />
+      {/* Ações sempre no canto direito, alinhadas em coluna (como "Editar" nas tabelas). */}
+      <div className="flex shrink-0 items-center gap-1 self-center border-l border-line pl-3">
         <MessagesButton ticketId={item.id} code={item.code} />
+        <QuickEditButton ticketId={item.id} code={item.code} />
       </div>
     </li>
   );
@@ -232,7 +233,8 @@ function TodayTimeline({ items }: { items: QueueItem[] }) {
               />
               <span className="absolute top-3 bottom-[-12px] w-px bg-line group-last:hidden" />
             </div>
-            <div className="min-w-0 flex-1 rounded-xl border border-line bg-surface px-3.5 py-2.5 transition-[border-color,box-shadow] group-hover:border-line-strong group-hover:shadow-elev-1">
+            <div className="flex min-w-0 flex-1 items-center gap-3 rounded-xl border border-line bg-surface py-2.5 pr-2.5 pl-3.5 transition-[border-color,box-shadow] group-hover:border-line-strong group-hover:shadow-elev-1">
+              <div className="min-w-0 flex-1">
               <div className="flex items-start gap-2">
                 <Link href={`/chamados/${item.id}`} className="min-w-0 flex-1 text-sm font-medium text-ink hover:text-brand">
                   <span className="mr-1.5 font-mono text-xs font-normal text-ink-subtle">{item.code}</span>
@@ -257,10 +259,11 @@ function TodayTimeline({ items }: { items: QueueItem[] }) {
                     Ainda não começou
                   </span>
                 ) : null}
-                <span className="ml-auto flex items-center opacity-70 transition-opacity group-hover:opacity-100">
-                  <QuickEditButton ticketId={item.id} code={item.code} />
-                  <MessagesButton ticketId={item.id} code={item.code} />
-                </span>
+              </div>
+              </div>
+              <div className="flex shrink-0 items-center gap-1 self-stretch border-l border-line pl-2.5">
+                <MessagesButton ticketId={item.id} code={item.code} />
+                <QuickEditButton ticketId={item.id} code={item.code} />
               </div>
             </div>
           </li>

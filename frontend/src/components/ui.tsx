@@ -384,7 +384,7 @@ export function Th({ children, className }: { children?: React.ReactNode; classN
   return (
     <th
       className={clsx(
-        "border-b border-line bg-surface-2/60 px-3 py-2.5 text-[11px] font-semibold tracking-[0.06em] whitespace-nowrap text-ink-subtle uppercase first:pl-4 last:pr-4",
+        "border-b border-line bg-[var(--table-head)] px-3 py-2.5 text-[11px] font-semibold tracking-[0.06em] whitespace-nowrap text-ink-subtle uppercase first:pl-4 last:pr-4",
         className,
       )}
     >

@@ -33,6 +33,13 @@
   --viz-grid: #eceef1;
   /* Seleção dentro das páginas (filtros ativos, item escolhido). */
   --nav-active: var(--brand-soft);
+  /* Moldura do app (menu lateral e borda da área de trabalho): cinza 15% mais escuro que o fundo. */
+  --chrome: #c8cdd5;
+  --chrome-ink: #1f242c;
+  --chrome-muted: #414956;
+  --chrome-subtle: #4f5763;
+  --chrome-hover: rgb(255 255 255 / 0.4);
+  --chrome-line: rgb(16 24 40 / 0.12);
   /* Elevação: sombras curtas e frias, nada de "brilho". */
   --elev-1: 0 1px 2px rgb(16 24 40 / 0.05);
   --elev-2: 0 1px 2px rgb(16 24 40 / 0.04), 0 6px 16px -4px rgb(16 24 40 / 0.08);
@@ -62,6 +69,12 @@
   --viz-1: #5470ff;
   --viz-2: #199e70;
   --viz-grid: #23262c;
+  --chrome: #08090b;
+  --chrome-ink: #ececf0;
+  --chrome-muted: #9ba1ac;
+  --chrome-subtle: #6c727d;
+  --chrome-hover: rgb(255 255 255 / 0.045);
+  --chrome-line: rgb(255 255 255 / 0.06);
   --elev-1: 0 1px 2px rgb(0 0 0 / 0.35);
   --elev-2: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 20px -6px rgb(0 0 0 / 0.45);
   --elev-pop: 0 0 0 1px rgb(255 255 255 / 0.06), 0 20px 48px -12px rgb(0 0 0 / 0.7);
@@ -89,6 +102,12 @@
   --color-brand-soft: var(--brand-soft);
   --color-brand-ink: var(--brand-ink);
   --color-nav-active: var(--nav-active);
+  --color-chrome: var(--chrome);
+  --color-chrome-ink: var(--chrome-ink);
+  --color-chrome-muted: var(--chrome-muted);
+  --color-chrome-subtle: var(--chrome-subtle);
+  --color-chrome-hover: var(--chrome-hover);
+  --color-chrome-line: var(--chrome-line);
   --color-brand-cyan: var(--brand-cyan);
   --color-brand-teal: var(--brand-teal);
   --color-brand-mint: var(--brand-mint);
@@ -486,4 +505,30 @@
 .grow-x {
   transform-origin: left;
   animation: mf-grow 0.8s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+
+/* Tabelas: cabeçalho e hover opacos (servem de fundo para a coluna fixa "Editar"). */
+:root {
+  --table-head: color-mix(in srgb, var(--surface-2) 60%, var(--surface));
+  --row-hover: color-mix(in srgb, var(--surface-2) 80%, var(--surface));
+}
+/* Coluna "Editar" presa à direita: sempre visível, mesmo com a tabela rolando para o lado. */
+.edit-col {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  width: 1%;
+  white-space: nowrap;
+  text-align: center;
+  background: var(--surface);
+  box-shadow:
+    -8px 0 10px -8px rgb(16 24 40 / 0.14),
+    inset 1px 0 0 var(--line);
+}
+th.edit-col {
+  z-index: 2;
+  background: var(--table-head);
+}
+tr:hover > td.edit-col {
+  background: var(--row-hover);
 }

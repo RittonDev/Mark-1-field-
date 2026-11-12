@@ -77,7 +77,7 @@ function ActivityRow({ a, day, manage }: { a: Activity; day: string; manage: boo
   const loc = t.location;
   const ratio = a.estimated_minutes && a.actual_minutes > 0 ? a.actual_minutes / a.estimated_minutes : null;
   return (
-    <tr className="border-t border-line align-top hover:bg-surface-2">
+    <tr className="border-t border-line align-top transition-colors hover:bg-[var(--row-hover)]">
       <td className="px-3 py-2.5">
         <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap ${STATE[a.state].className}`}>
           {STATE[a.state].label}
@@ -111,18 +111,10 @@ function ActivityRow({ a, day, manage }: { a: Activity; day: string; manage: boo
       </td>
       <td className="px-3 py-2.5 text-sm whitespace-nowrap">{a.finished_at ? when(a.finished_at, day) : <span className="text-ink-muted">—</span>}</td>
       <td className="px-3 py-2.5">
-        <div className="flex items-start gap-1">
-          <Link href={`/chamados/${t.id}`} className="group min-w-0 flex-1">
-            <span className="font-mono text-xs text-ink-muted">{t.code}</span>{" "}
-            <span className="text-sm font-medium text-ink group-hover:text-brand group-hover:underline">{t.title}</span>
-          </Link>
-          {manage ? (
-            <span className="-my-1 flex shrink-0 items-center">
-              <QuickEditButton ticketId={t.id} code={t.code} />
-              <MessagesButton ticketId={t.id} code={t.code} />
-            </span>
-          ) : null}
-        </div>
+        <Link href={`/chamados/${t.id}`} className="group block">
+          <span className="font-mono text-xs text-ink-subtle">{t.code}</span>{" "}
+          <span className="text-sm font-medium text-ink group-hover:text-brand">{t.title}</span>
+        </Link>
         {a.service_type_name ? <p className="text-xs text-ink-muted">{a.service_type_name}</p> : null}
       </td>
       <td className="px-3 py-2.5 text-sm">
@@ -149,6 +141,14 @@ function ActivityRow({ a, day, manage }: { a: Activity; day: string; manage: boo
           </span>
         ) : null}
       </td>
+      {manage ? (
+        <td className="edit-col px-3 py-2.5">
+          <span className="inline-flex items-center gap-1">
+            <MessagesButton ticketId={t.id} code={t.code} />
+            <QuickEditButton ticketId={t.id} code={t.code} />
+          </span>
+        </td>
+      ) : null}
     </tr>
   );
 }
@@ -260,7 +260,7 @@ export default function DayPage() {
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[56rem] text-left">
                     <thead>
-                      <tr className="text-xs tracking-wide text-ink-muted uppercase">
+                      <tr className="text-[11px] font-semibold tracking-[0.06em] text-ink-subtle uppercase [&>th]:border-b [&>th]:border-line [&>th]:bg-[var(--table-head)]">
                         <th className="px-3 py-2 font-medium">Situação</th>
                         <th className="px-3 py-2 font-medium">Agendado</th>
                         <th className="px-3 py-2 font-medium">Início real</th>
@@ -268,6 +268,7 @@ export default function DayPage() {
                         <th className="px-3 py-2 font-medium">OS</th>
                         <th className="px-3 py-2 font-medium">Local</th>
                         <th className="px-3 py-2 text-right font-medium">Estimada / real</th>
+                        {manage ? <th className="edit-col px-3 py-2 font-medium">Editar</th> : null}
                       </tr>
                     </thead>
                     <tbody>
