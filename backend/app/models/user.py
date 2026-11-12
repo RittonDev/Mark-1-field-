@@ -44,6 +44,8 @@ class User(UUIDPrimaryKey, Timestamps, Base):
     must_change_password: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false"
     )
+    # Foto do perfil (chave no armazenamento de arquivos).
+    avatar_key: Mapped[str | None] = mapped_column(String(255))
 
     team: Mapped[Team | None] = relationship(lazy="selectin")
 

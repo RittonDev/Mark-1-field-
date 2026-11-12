@@ -120,3 +120,11 @@ class Responsibility(StrEnum):
     INTERNAL = "internal"
     CUSTOMER = "customer"
     THIRD_PARTY = "third_party"
+
+
+class ApplicationStatus(StrEnum):
+    """Ficha de homologação de técnico."""
+
+    PENDING = "pending"  # aguardando análise
+    APPROVED = "approved"  # virou técnico da base
+    REJECTED = "rejected"

@@ -6,6 +6,7 @@ from app.api.routes import (
     catalog,
     customers,
     dashboard,
+    onboarding,
     schedule,
     sync,
     tickets,
@@ -24,8 +25,10 @@ for module in (
     activities,
     tracking,
     schedule,
+    onboarding,
     dashboard,
     sync,
     ws,
 ):
     api_router.include_router(module.router)
+api_router.include_router(onboarding.public)

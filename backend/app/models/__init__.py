@@ -3,6 +3,7 @@
 from app.models.asset import Asset
 from app.models.catalog import Category, ServiceType, SlaPolicy, ViolationReason
 from app.models.customer import Customer, Location
+from app.models.onboarding import OnboardingInvite, TechnicianApplication
 from app.models.sync import DeviceToken, SyncOperation
 from app.models.ticket import (
     Ticket,
@@ -20,6 +21,7 @@ __all__ = [
     "Customer",
     "DeviceToken",
     "Location",
+    "OnboardingInvite",
     "ServiceType",
     "SlaPolicy",
     "SyncOperation",
@@ -29,6 +31,7 @@ __all__ = [
     "TicketComment",
     "TicketEvent",
     "TicketWorklog",
+    "TechnicianApplication",
     "TechnicianShift",
     "LocationPing",
     "User",

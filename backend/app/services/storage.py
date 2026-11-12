@@ -52,3 +52,12 @@ def open_path(storage_key: str) -> Path:
     if _root() not in path.parents:
         raise FileNotFoundError(storage_key)
     return path
+
+
+async def save_bytes(folder: str, extension: str, data: bytes) -> str:
+    """Grava um arquivo já em memória (ex.: foto em base64) e devolve a storage_key."""
+    key = f"{folder}/{uuid.uuid4().hex}.{extension}"
+    dest = _root() / key
+    await run_in_threadpool(dest.parent.mkdir, parents=True, exist_ok=True)
+    await run_in_threadpool(dest.write_bytes, data)
+    return key
