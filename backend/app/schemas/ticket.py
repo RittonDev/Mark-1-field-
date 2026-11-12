@@ -312,7 +312,8 @@ class TicketCreate(BaseModel):
     assignee_id: uuid.UUID | None = None
     # Outros técnicos da visita (só a gestão escolhe).
     helper_ids: list[uuid.UUID] = Field(default_factory=list, max_length=6)
-    # Analista responsável (só a gestão escolhe; sem informar, fica com quem abriu a OS).
+    # Analista responsável (só a gestão escolhe). Sem informar: quem abre assume (vai para a
+    # fila dele). null explícito: fica sem analista, para alguém assumir depois.
     owner_id: uuid.UUID | None = None
     scheduled_start: datetime | None = None
     scheduled_end: datetime | None = None

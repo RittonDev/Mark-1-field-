@@ -667,11 +667,13 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
             raise WorkflowError("Solicitante não encontrado")
         requester_name = requester_name or requester.name
 
-    # Analista responsável: quem abre pela gestão fica com a OS, salvo escolha de outro.
+    # Analista responsável: quem abre pela gestão assume a OS (vai para a fila dele), salvo
+    # escolha de outro analista ou null explícito (fica sem analista, para alguém assumir).
     owner_id: uuid.UUID | None = None
     if actor.can_manage_tickets:
-        owner_id = actor.id
-        if data.owner_id is not None:
+        if "owner_id" not in data.model_fields_set:
+            owner_id = actor.id
+        elif data.owner_id is not None:
             owner_id = (await _owner_user(db, data.owner_id)).id
 
     scheduled_start = None if is_requester else data.scheduled_start
@@ -915,7 +917,8 @@ async def take_ticket(db: AsyncSession, ticket: Ticket, actor: User) -> Ticket:
         raise PermissionDenied("Esta OS não pode ser assumida por você")
     now = utcnow()
     await _assign(db, ticket, actor.id, None, actor, now=now, note="Assumida pelo próprio usuário")
-    if ticket.owner_id is None:
+    # Quem assume leva a OS para a própria fila (mesmo que estivesse na de outro analista).
+    if ticket.owner_id != actor.id:
         await _set_owner(db, ticket, actor.id, actor, now=now)
     return ticket
 
