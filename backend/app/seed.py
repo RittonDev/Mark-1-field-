@@ -652,12 +652,20 @@ VIOLATION_REASONS = [
     # (nome, relógio, responsabilidade)
     ("Falta de técnico disponível", ViolationScope.BOTH, Responsibility.INTERNAL),
     ("Triagem ou atribuição demorada", ViolationScope.RESPONSE, Responsibility.INTERNAL),
-    ("Chamado aberto fora do horário de atendimento", ViolationScope.RESPONSE, Responsibility.INTERNAL),
+    (
+        "Chamado aberto fora do horário de atendimento",
+        ViolationScope.RESPONSE,
+        Responsibility.INTERNAL,
+    ),
     ("Atraso no deslocamento", ViolationScope.RESOLUTION, Responsibility.INTERNAL),
     ("Problema mais complexo que o previsto", ViolationScope.RESOLUTION, Responsibility.INTERNAL),
     ("Cliente ausente ou local fechado", ViolationScope.RESOLUTION, Responsibility.CUSTOMER),
     ("Aguardando aprovação do cliente", ViolationScope.RESOLUTION, Responsibility.CUSTOMER),
-    ("Peça ou equipamento em falta no fornecedor", ViolationScope.RESOLUTION, Responsibility.THIRD_PARTY),
+    (
+        "Peça ou equipamento em falta no fornecedor",
+        ViolationScope.RESOLUTION,
+        Responsibility.THIRD_PARTY,
+    ),
     ("Falha da operadora / link", ViolationScope.BOTH, Responsibility.THIRD_PARTY),
 ]
 
