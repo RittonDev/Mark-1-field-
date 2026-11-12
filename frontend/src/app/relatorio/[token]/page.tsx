@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Logo, ThemeToggle } from "@/components/Brand";
 import { Button, Skeleton } from "@/components/ui";
 import { ApiError, errorMessage, request } from "@/lib/api";
@@ -114,40 +114,16 @@ export default function PublicReportPage() {
   const [zoom, setZoom] = useState<PublicReportPhoto | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [building, setBuilding] = useState(false);
-  const autoPdf = useRef(false);
-
-  useEffect(() => {
-    request<PublicReport>(`/public/reports/${encodeURIComponent(token)}`, { auth: false })
-      .then(setReport)
-      .catch((e) => {
-        if (e instanceof ApiError && e.status === 409) {
-          setProblem({ title: "Relatório temporariamente indisponível", text: errorMessage(e) });
-        } else if (e instanceof ApiError && (e.status === 404 || e.status === 410)) {
-          setProblem({ title: "Link inválido ou expirado", text: "Peça um novo link a quem enviou o relatório." });
-        } else {
-          setProblem({ title: "Não foi possível abrir o relatório", text: "Verifique a conexão e tente de novo." });
-        }
-      });
-  }, [token]);
-
-  useEffect(() => {
-    if (!zoom) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setZoom(null);
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [zoom]);
-
   // PDF de verdade, gerado no navegador (A4, com fotos e assinatura); se falhar, cai na impressão.
-  const downloadPdf = useCallback(async () => {
-    if (!report) return;
+  const buildPdf = useCallback(async (data: PublicReport) => {
     setBuilding(true);
     try {
       const [{ pdf }, { ReportPdf }] = await Promise.all([import("@react-pdf/renderer"), import("@/components/report/ReportPdf")]);
-      const blob = await pdf(<ReportPdf report={report} />).toBlob();
+      const blob = await pdf(<ReportPdf report={data} />).toBlob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `Relatorio-${report.code}.pdf`;
+      a.download = `Relatorio-${data.code}.pdf`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -157,16 +133,36 @@ export default function PublicReportPage() {
     } finally {
       setBuilding(false);
     }
-  }, [report]);
+  }, []);
 
-  // Link com ?pdf=1 (botão "Baixar PDF" da OS): baixa assim que o relatório carrega.
   useEffect(() => {
-    if (!report || autoPdf.current) return;
-    if (new URLSearchParams(window.location.search).get("pdf") === "1") {
-      autoPdf.current = true;
-      void downloadPdf();
-    }
-  }, [report, downloadPdf]);
+    request<PublicReport>(`/public/reports/${encodeURIComponent(token)}`, { auth: false })
+      .then((data) => {
+        setReport(data);
+        // Link com ?pdf=1 (botão "Baixar PDF" da OS): baixa assim que o relatório carrega.
+        if (new URLSearchParams(window.location.search).get("pdf") === "1") void buildPdf(data);
+      })
+      .catch((e) => {
+        if (e instanceof ApiError && e.status === 409) {
+          setProblem({ title: "Relatório temporariamente indisponível", text: errorMessage(e) });
+        } else if (e instanceof ApiError && (e.status === 404 || e.status === 410)) {
+          setProblem({ title: "Link inválido ou expirado", text: "Peça um novo link a quem enviou o relatório." });
+        } else {
+          setProblem({ title: "Não foi possível abrir o relatório", text: "Verifique a conexão e tente de novo." });
+        }
+      });
+  }, [token, buildPdf]);
+
+  useEffect(() => {
+    if (!zoom) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setZoom(null);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [zoom]);
+
+  const downloadPdf = () => {
+    if (report) void buildPdf(report);
+  };
 
   const loc = report?.location;
   const address =
