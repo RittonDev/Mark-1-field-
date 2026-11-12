@@ -3,6 +3,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Hand, UserMinus, UserPlus } from "lucide-react";
 import { useState } from "react";
+import { ConflictHint, ConflictList, scheduleConflicts } from "@/components/ScheduleConflict";
 import { useToast } from "@/components/Toaster";
 import { Button, Card, CardHeader, Select } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -10,7 +11,7 @@ import { useAuth } from "@/lib/auth";
 import { canManageTickets, isStaff, STATUS } from "@/lib/constants";
 import { initials } from "@/lib/format";
 import { useAssignable } from "@/lib/queries";
-import type { TicketDetail } from "@/lib/types";
+import type { ConflictItem, TicketDetail } from "@/lib/types";
 import { useInvalidateTicket, useTicketErrorHandler } from "./useConflictHandler";
 
 export function AssignmentPanel({ ticket }: { ticket: TicketDetail }) {
@@ -22,6 +23,7 @@ export function AssignmentPanel({ ticket }: { ticket: TicketDetail }) {
   const staff = isStaff(user?.role);
   const assignable = useAssignable(null, staff && ticket.can_assign);
   const [selected, setSelected] = useState(ticket.assignee?.id ?? "");
+  const [conflicts, setConflicts] = useState<ConflictItem[] | null>(null);
 
   const isFinal = STATUS[ticket.status].final;
   // Espelha can_take: técnico só assume OS sem responsável; analista/supervisor assume qualquer uma.
@@ -35,14 +37,21 @@ export function AssignmentPanel({ ticket }: { ticket: TicketDetail }) {
   };
 
   const assign = useMutation({
-    mutationFn: (assigneeId: string | null) =>
+    mutationFn: ({ assigneeId, allowConflict = false }: { assigneeId: string | null; allowConflict?: boolean }) =>
       api.post<TicketDetail>(`/tickets/${ticket.id}/assign`, {
         assignee_id: assigneeId,
         expected_version: ticket.version,
+        allow_conflict: allowConflict,
       }),
-    onSuccess: (updated) =>
-      onSuccess(updated, updated.assignee ? `Atribuída a ${updated.assignee.name}` : "Responsável removido"),
-    onError,
+    onSuccess: (updated) => {
+      setConflicts(null);
+      onSuccess(updated, updated.assignee ? `Atribuída a ${updated.assignee.name}` : "Responsável removido");
+    },
+    onError: (error) => {
+      const clash = scheduleConflicts(error);
+      if (clash) setConflicts(clash);
+      else onError(error);
+    },
   });
 
   const take = useMutation({
@@ -57,6 +66,7 @@ export function AssignmentPanel({ ticket }: { ticket: TicketDetail }) {
     const bTeam = b.team_id === ticket.team?.id ? 0 : 1;
     return aTeam - bTeam || a.open_tickets - b.open_tickets || a.name.localeCompare(b.name);
   });
+  const selectedName = options.find((u) => u.id === selected)?.name;
 
   return (
     <Card>
@@ -87,7 +97,14 @@ export function AssignmentPanel({ ticket }: { ticket: TicketDetail }) {
 
         {ticket.can_assign && !isFinal ? (
           <div className="flex flex-col gap-2 border-t border-line pt-3">
-            <Select value={selected} onChange={(e) => setSelected(e.target.value)} aria-label="Responsável">
+            <Select
+              value={selected}
+              onChange={(e) => {
+                setSelected(e.target.value);
+                setConflicts(null);
+              }}
+              aria-label="Responsável"
+            >
               <option value="">Selecione o responsável...</option>
               {options.map((u) => (
                 <option key={u.id} value={u.id}>
@@ -95,21 +112,37 @@ export function AssignmentPanel({ ticket }: { ticket: TicketDetail }) {
                 </option>
               ))}
             </Select>
+            {conflicts ? (
+              <ConflictList
+                tone="error"
+                items={conflicts}
+                title={`${selectedName ?? "O técnico"} já está ocupado no horário desta OS.`}
+              />
+            ) : selected && selected !== ticket.assignee?.id && ticket.scheduled_start ? (
+              <ConflictHint
+                assigneeId={selected}
+                assigneeName={selectedName}
+                start={ticket.scheduled_start}
+                end={ticket.scheduled_end}
+                estimatedMinutes={ticket.estimated_minutes}
+                excludeId={ticket.id}
+              />
+            ) : null}
             <div className="flex gap-2">
               <Button
                 className="flex-1"
-                onClick={() => assign.mutate(selected)}
+                onClick={() => assign.mutate({ assigneeId: selected, allowConflict: conflicts !== null })}
                 disabled={!selected || selected === ticket.assignee?.id}
-                loading={assign.isPending && assign.variables !== null}
+                loading={assign.isPending && assign.variables?.assigneeId !== null}
               >
                 <UserPlus className="size-4" />
-                Atribuir
+                {conflicts ? "Atribuir mesmo assim" : "Atribuir"}
               </Button>
               {ticket.assignee ? (
                 <Button
                   variant="ghost"
-                  onClick={() => assign.mutate(null)}
-                  loading={assign.isPending && assign.variables === null}
+                  onClick={() => assign.mutate({ assigneeId: null })}
+                  loading={assign.isPending && assign.variables?.assigneeId === null}
                   title="Remover responsável (OS volta para a fila)"
                 >
                   <UserMinus className="size-4" />

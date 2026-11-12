@@ -1,10 +1,12 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { api } from "./api";
+import { api, type Query } from "./api";
 import type {
   AssignableUser,
+  CalendarEvent,
   Category,
+  ConflictItem,
   Customer,
   DayActivities,
   LiveTechnician,
@@ -139,5 +141,49 @@ export function useTrackingHistory(userId: UUID | null, date: string) {
     queryKey: ["tracking", "history", userId, date],
     queryFn: () => api.get<TrackingHistory>("/tracking/history", { user_id: userId ?? undefined, date }),
     enabled: !!userId,
+  });
+}
+
+export interface CalendarQuery {
+  start: string;
+  end: string;
+  assignee_id?: UUID[];
+  unassigned?: boolean;
+  team_id?: UUID;
+  customer_id?: UUID;
+  location_id?: UUID;
+  city?: string;
+  status?: string[];
+}
+
+export function useCalendar(params: CalendarQuery) {
+  return useQuery({
+    queryKey: ["tickets", "calendar", params],
+    queryFn: () => api.get<CalendarEvent[]>("/calendar", params as unknown as Query),
+    placeholderData: (previous) => previous,
+  });
+}
+
+/** Prévia de conflito ao escolher técnico e horário (antes de salvar). */
+export function useScheduleConflicts(params: {
+  assigneeId: UUID | null | undefined;
+  start: string | null;
+  end?: string | null;
+  estimatedMinutes?: number | null;
+  excludeId?: UUID;
+}) {
+  const { assigneeId, start, end, estimatedMinutes, excludeId } = params;
+  return useQuery({
+    queryKey: ["tickets", "conflicts", assigneeId, start, end, estimatedMinutes, excludeId],
+    queryFn: () =>
+      api.get<ConflictItem[]>("/calendar/conflicts", {
+        assignee_id: assigneeId ?? undefined,
+        start: start ?? undefined,
+        end: end ?? undefined,
+        estimated_minutes: estimatedMinutes ?? undefined,
+        exclude_id: excludeId,
+      }),
+    enabled: !!assigneeId && !!start,
+    staleTime: 10_000,
   });
 }

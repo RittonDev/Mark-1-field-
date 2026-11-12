@@ -189,6 +189,8 @@ class TicketCreate(BaseModel):
     assignee_id: uuid.UUID | None = None
     scheduled_start: datetime | None = None
     scheduled_end: datetime | None = None
+    # Agendar mesmo com o técnico ocupado no horário (a API recusa com 409 sem isso).
+    allow_conflict: bool = False
 
 
 class TicketUpdate(BaseModel):
@@ -211,6 +213,7 @@ class TicketUpdate(BaseModel):
     scheduled_start: datetime | None = None
     scheduled_end: datetime | None = None
     expected_version: int | None = None
+    allow_conflict: bool = False
 
 
 class TicketAssign(BaseModel):
@@ -220,6 +223,7 @@ class TicketAssign(BaseModel):
     team_id: uuid.UUID | None = None
     note: str | None = Field(default=None, max_length=2000)
     expected_version: int | None = None
+    allow_conflict: bool = False
 
 
 class TicketTransition(BaseModel):
@@ -236,6 +240,7 @@ class TicketTransition(BaseModel):
     response_violation_reason_id: uuid.UUID | None = None
     resolution_violation_reason_id: uuid.UUID | None = None
     violation_note: str | None = Field(default=None, max_length=2000)
+    allow_conflict: bool = False
 
 
 class CommentCreate(BaseModel):

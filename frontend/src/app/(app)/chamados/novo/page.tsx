@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { LocationPicker } from "@/components/LocationPicker";
 import { PriorityBadge } from "@/components/badges";
+import { ConflictHint, ConflictList, scheduleConflicts } from "@/components/ScheduleConflict";
 import { useToast } from "@/components/Toaster";
 import { Button, Card, CardHeader, ErrorBox, Field, Input, PageHeader, Select, Textarea } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
@@ -28,6 +29,7 @@ import { formatMinutes, fromLocalInput } from "@/lib/format";
 import { useAssignable, useCategories, useCustomers, useServiceTypes, useTeams } from "@/lib/queries";
 import type {
   Asset,
+  ConflictItem,
   Level,
   Location,
   TicketCreatePayload,
@@ -99,6 +101,7 @@ export default function NewTicketPage() {
   const [location, setLocation] = useState<Location | null>(null);
   const teams = useTeams();
   const assignable = useAssignable(form.team_id || null, canAssign);
+  const assigneeName = assignable.data?.find((u) => u.id === form.assignee_id)?.name;
   // Tipos gerais + catálogo do cliente da OS (só para quem gerencia OS).
   const serviceTypes = useServiceTypes({ customerId: form.customer_id || null, active: true, enabled: canAssign });
   const assets = useQuery({
@@ -111,7 +114,12 @@ export default function NewTicketPage() {
     enabled: Boolean(form.customer_id),
   });
 
-  const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm((f) => ({ ...f, [key]: value }));
+  // A API barrou por conflito de agenda: o próximo envio confirma (até mudar técnico ou horário).
+  const [conflicts, setConflicts] = useState<ConflictItem[] | null>(null);
+  const set = <K extends keyof FormState>(key: K, value: FormState[K]) => {
+    if (key === "assignee_id" || key === "scheduled_start" || key === "scheduled_end") setConflicts(null);
+    setForm((f) => ({ ...f, [key]: value }));
+  };
   const computed = computePriority(form.impact, form.urgency);
   const effectivePriority = form.priority || computed;
 
@@ -128,6 +136,7 @@ export default function NewTicketPage() {
       toast({ title: `${ticket.code} aberta`, description: ticket.title, tone: "success" });
       router.push(`/chamados/${ticket.id}`);
     },
+    onError: (error) => setConflicts(scheduleConflicts(error)),
   });
 
   function onSubmit(e: React.FormEvent) {
@@ -155,6 +164,7 @@ export default function NewTicketPage() {
       payload.assignee_id = canAssign ? form.assignee_id || null : null;
       payload.scheduled_start = fromLocalInput(form.scheduled_start);
       payload.scheduled_end = fromLocalInput(form.scheduled_end);
+      if (conflicts) payload.allow_conflict = true;
     }
     mutation.mutate(payload);
   }
@@ -406,7 +416,10 @@ export default function NewTicketPage() {
                 <Field label="Grupo técnico">
                   <Select
                     value={form.team_id}
-                    onChange={(e) => setForm((f) => ({ ...f, team_id: e.target.value, assignee_id: "" }))}
+                    onChange={(e) => {
+                      setConflicts(null);
+                      setForm((f) => ({ ...f, team_id: e.target.value, assignee_id: "" }));
+                    }}
                   >
                     <option value="">Sem grupo</option>
                     {teams.data
@@ -445,14 +458,29 @@ export default function NewTicketPage() {
                     onChange={(e) => set("scheduled_end", e.target.value)}
                   />
                 </Field>
+                {conflicts ? (
+                  <ConflictList
+                    tone="error"
+                    items={conflicts}
+                    title={`${assigneeName ?? "O técnico"} já está ocupado neste horário. Envie de novo para abrir mesmo assim.`}
+                  />
+                ) : form.assignee_id && form.scheduled_start ? (
+                  <ConflictHint
+                    assigneeId={form.assignee_id}
+                    assigneeName={assigneeName}
+                    start={fromLocalInput(form.scheduled_start)}
+                    end={fromLocalInput(form.scheduled_end)}
+                    estimatedMinutes={form.estimated_minutes ? Number(form.estimated_minutes) : null}
+                  />
+                ) : null}
               </div>
             </Card>
           ) : null}
 
-          {mutation.error ? <ErrorBox message={errorMessage(mutation.error)} /> : null}
+          {mutation.error && !conflicts ? <ErrorBox message={errorMessage(mutation.error)} /> : null}
           <Button type="submit" variant="primary" loading={mutation.isPending} className="w-full">
             {mutation.isPending ? null : <Save className="size-4" />}
-            Abrir OS
+            {conflicts ? "Abrir OS mesmo assim" : "Abrir OS"}
           </Button>
         </div>
       </form>

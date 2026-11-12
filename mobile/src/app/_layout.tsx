@@ -3,6 +3,8 @@ import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
 import { View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+// Registra a tarefa de segundo plano do rastreamento assim que o app carrega.
+import "../lib/trackingTask";
 import { ToastHost } from "../components/ToastHost";
 import { mustChangePassword } from "../lib/account";
 import { restoreSession, startSession } from "../lib/auth";
@@ -56,6 +58,7 @@ export default function RootLayout() {
             <Stack.Screen name="index" options={{ title: "" }} />
             <Stack.Screen name="ticket/[id]" options={{ title: "OS" }} />
             <Stack.Screen name="conta" options={{ title: "Conta" }} />
+            <Stack.Screen name="termo-rastreamento" options={{ title: "Termo de rastreamento", presentation: "modal" }} />
           </Stack.Protected>
           <Stack.Protected guard={mustChange}>
             <Stack.Screen name="trocar-senha" options={{ headerShown: false }} />

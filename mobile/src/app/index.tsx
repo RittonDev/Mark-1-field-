@@ -4,6 +4,7 @@ import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Tex
 import { BrandLogo, BrandRule } from "../components/Brand";
 import { Calendar } from "../components/Calendar";
 import { ConnectionBar } from "../components/ConnectionBar";
+import { ShiftCard } from "../components/ShiftCard";
 import { TicketCard } from "../components/TicketCard";
 import { EmptyState, Segmented } from "../components/ui";
 import { useLiveQuery, useNow } from "../lib/changes";
@@ -54,6 +55,7 @@ export default function MyTicketsScreen() {
         <Text style={styles.greeting}>Olá, {user.name.split(" ")[0]}</Text>
         <BrandRule width={36} />
       </View>
+      <ShiftCard />
       {notices && notices.length > 0 ? (
         <Pressable onPress={() => router.push("/conta")} style={styles.notice} accessibilityRole="button">
           <Text style={styles.noticeText}>

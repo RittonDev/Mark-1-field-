@@ -10,7 +10,9 @@ import {
   type Palette,
   type ThemePreference,
 } from "../theme/theme";
+import { locationConsentAt } from "../lib/account";
 import { getDeviceRegistration, logout } from "../lib/auth";
+import { useTracking } from "../lib/tracking";
 import { useDataVersion, useLiveQuery } from "../lib/changes";
 import { APP_VERSION } from "../lib/config";
 import { confirmAction } from "../lib/dialogs";
@@ -40,6 +42,8 @@ export default function AccountScreen() {
   const registration = getDeviceRegistration();
   const [syncing, setSyncing] = useState(false);
   const themePreference = useThemePreference();
+  const tracking = useTracking();
+  const consentAt = locationConsentAt(user);
 
   if (!user) return null;
 
@@ -151,6 +155,28 @@ export default function AccountScreen() {
             </View>
           ))
         )}
+      </Card>
+
+      <Card style={{ gap: 4 }}>
+        <SectionTitle>Rastreamento da jornada</SectionTitle>
+        <InfoRow
+          label="Termo de rastreamento"
+          value={consentAt ? `Aceito em ${formatDateTime(consentAt)}` : "Ainda não aceito"}
+          onPress={() => router.push("/termo-rastreamento")}
+        />
+        <InfoRow
+          label="Situação"
+          value={
+            !tracking.shift
+              ? "Jornada não iniciada"
+              : tracking.mode === "background"
+                ? "Ativo, inclusive em segundo plano"
+                : "Ativo só com o app aberto"
+          }
+        />
+        <InfoRow label="Pontos aguardando envio" value={String(tracking.queued)} />
+        {tracking.lastSentAt ? <InfoRow label="Último envio" value={formatDateTime(tracking.lastSentAt)} /> : null}
+        {tracking.error ? <InfoRow label="Último erro" value={tracking.error} /> : null}
       </Card>
 
       <Card style={{ gap: 10 }}>

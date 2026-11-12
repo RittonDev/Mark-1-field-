@@ -32,7 +32,11 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "O MaxxChamados usa sua localização para registrar o check-in nas ordens de serviço."
+          "locationWhenInUsePermission": "O Maxx Field usa sua localização para o check-in nas ordens de serviço e, durante a jornada, para a central acompanhar os atendimentos.",
+          "locationAlwaysAndWhenInUsePermission": "Durante a jornada de trabalho, o Maxx Field registra sua localização também com o app em segundo plano, para a central acompanhar os deslocamentos e atendimentos. Fora da jornada nada é coletado.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
         }
       ],
       [

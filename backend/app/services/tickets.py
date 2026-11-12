@@ -49,7 +49,7 @@ from app.schemas.ticket import (
     TicketViolationUpdate,
     WorklogCreate,
 )
-from app.services import durations, sla, storage
+from app.services import durations, schedule, sla, storage
 from app.services.errors import NotFound, PermissionDenied, VersionConflict, WorkflowError
 from app.services.realtime import queue_event
 from app.services.workflow import (
@@ -565,6 +565,7 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
         if not actor.can_manage_tickets and data.assignee_id != actor.id:
             raise PermissionDenied("Técnicos só podem atribuir a OS a si mesmos")
         await _assign(db, ticket, data.assignee_id, None, actor, now=now)
+    await schedule.ensure_no_conflict(db, ticket, actor, data.allow_conflict)
     return ticket
 
 
@@ -574,7 +575,7 @@ async def update_ticket(
     if not can_edit(actor, ticket):
         raise PermissionDenied("Você não pode editar esta OS")
     check_version(ticket, data.expected_version)
-    fields = data.model_dump(exclude_unset=True, exclude={"expected_version"})
+    fields = data.model_dump(exclude_unset=True, exclude={"expected_version", "allow_conflict"})
     if not fields:
         return ticket
 
@@ -632,6 +633,8 @@ async def update_ticket(
         )
 
     now = utcnow()
+    if changes.keys() & {"scheduled_start", "scheduled_end", "estimated_minutes"}:
+        await schedule.ensure_no_conflict(db, ticket, actor, data.allow_conflict)
     record_event(db, ticket, actor, TicketEventType.UPDATED, data={"changes": changes}, now=now)
     queue_event(db, "updated", ticket, actor, {"fields": sorted(changes)})
     return ticket
@@ -646,11 +649,15 @@ async def assign_ticket(
     note: str | None,
     expected_version: int | None,
     actor: User,
+    allow_conflict: bool = False,
 ) -> Ticket:
     if not can_assign(actor, ticket):
         raise PermissionDenied("Somente analistas e supervisores atribuem OS")
     check_version(ticket, expected_version)
+    previous = ticket.assignee_id
     await _assign(db, ticket, assignee_id, team_id, actor, now=utcnow(), note=note)
+    if ticket.assignee_id != previous:
+        await schedule.ensure_no_conflict(db, ticket, actor, allow_conflict)
     return ticket
 
 
@@ -727,6 +734,8 @@ async def transition_ticket(
         data["scheduled_start"] = ticket.scheduled_start.isoformat()
     if ticket.status != to:
         _change_status(db, ticket, to, actor, now=now, note=payload.note, data=data)
+    if payload.scheduled_start or payload.scheduled_end or auto_assign:
+        await schedule.ensure_no_conflict(db, ticket, actor, payload.allow_conflict)
     return ticket
 
 

@@ -58,6 +58,7 @@ import type {
   WorklogCreatePayload,
 } from "./syncTypes";
 import { showToast } from "./toast";
+import { flushPings, resumeTracking, updateTrackingMode } from "./tracking";
 import type {
   Attachment,
   RealtimeEvent,
@@ -166,6 +167,9 @@ async function runOnce() {
     await pullChanges();
     await refreshViolationReasons();
     await uploadPhotos();
+    // Rastreamento da jornada: sobe a fila de pontos e ajusta o ritmo (deslocamento = mais frequente).
+    await flushPings(true);
+    await updateTrackingMode();
     setStatus({ server: "reachable", lastSyncAt: new Date().toISOString(), lastError: null });
   } catch (error) {
     if (error instanceof ApiError && error.status === 0) {
@@ -465,8 +469,10 @@ async function enqueue(ticketId: UUID, operation: SyncOperation) {
  * Mudança de status. Sem `expected_version`: para ações do próprio técnico em campo,
  * a última ação vale (docs/MOBILE_SYNC.md §3).
  */
-export function enqueueTransition(ticketId: UUID, payload: TicketTransitionPayload) {
-  return enqueue(ticketId, { type: "transition", payload });
+export async function enqueueTransition(ticketId: UUID, payload: TicketTransitionPayload) {
+  await enqueue(ticketId, { type: "transition", payload });
+  // Entrar/sair de "Em deslocamento" muda o ritmo do rastreamento, mesmo offline.
+  void updateTrackingMode();
 }
 
 export function enqueueComment(ticketId: UUID, payload: CommentCreatePayload) {
@@ -539,6 +545,8 @@ export function startSync() {
       realtime?.start();
       realtime?.reconnectNow();
       void requestSync();
+      // Garante a coleta da jornada (o sistema pode ter encerrado o app em segundo plano).
+      void resumeTracking();
     } else if (next !== "active" && wasActive) {
       realtime?.stop();
     }

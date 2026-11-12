@@ -17,6 +17,7 @@ from app.services.errors import (
     DomainError,
     NotFound,
     PermissionDenied,
+    ScheduleConflict,
     VersionConflict,
     WorkflowError,
 )
@@ -93,6 +94,11 @@ async def _workflow(_: Request, exc: WorkflowError) -> JSONResponse:
 @app.exception_handler(VersionConflict)
 async def _conflict(_: Request, exc: VersionConflict) -> JSONResponse:
     return _error(409, str(exc), current_version=exc.current_version)
+
+
+@app.exception_handler(ScheduleConflict)
+async def _schedule_conflict(_: Request, exc: ScheduleConflict) -> JSONResponse:
+    return _error(409, str(exc), code="SCHEDULE_CONFLICT", conflicts=exc.conflicts)
 
 
 @app.exception_handler(StaleDataError)

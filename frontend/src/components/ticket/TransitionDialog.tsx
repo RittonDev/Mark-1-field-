@@ -3,13 +3,14 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { StatusBadge } from "@/components/badges";
+import { ConflictHint, ConflictList, scheduleConflicts } from "@/components/ScheduleConflict";
 import { useToast } from "@/components/Toaster";
 import { Button, Checkbox, Dialog, ErrorBox, Field, Input, Textarea } from "@/components/ui";
 import { ApiError, api, errorMessage } from "@/lib/api";
 import { STATUS, TRANSITION_ACTION } from "@/lib/constants";
 import { formatMinutes, fromLocalInput, toLocalInput } from "@/lib/format";
 import { type ViolationValues, ViolationFields } from "./ViolationFields";
-import type { TicketDetail, TicketStatus, TicketTransitionPayload, UUID } from "@/lib/types";
+import type { ConflictItem, TicketDetail, TicketStatus, TicketTransitionPayload, UUID } from "@/lib/types";
 import { transitionRequirements } from "@/lib/workflow";
 
 export interface TransitionTarget {
@@ -20,6 +21,7 @@ export interface TransitionTarget {
   version: number;
   scheduled_start: string | null;
   scheduled_end: string | null;
+  assignee?: { id: UUID; name: string } | null;
   /** Só o detalhe tem (o quadro não): usado na dica do fim da visita. */
   estimated_minutes?: number | null;
   /** Só o detalhe tem: ao resolver uma OS que furou o prazo, pede o motivo de cada relógio. */
@@ -65,6 +67,8 @@ export function TransitionDialog({
   const [end, setEnd] = useState("");
   const [shareLocation, setShareLocation] = useState(req.offersLocation);
   const [localError, setLocalError] = useState<string | null>(null);
+  // A API barrou por conflito de agenda: mostra as OS em choque e o próximo envio confirma.
+  const [conflicts, setConflicts] = useState<ConflictItem[] | null>(null);
   const askViolation = req.needsResolution && Boolean(ticket.response_breached || ticket.resolution_breached);
   const [violation, setViolation] = useState<ViolationValues>({
     response: ticket.response_violation_reason?.id ?? "",
@@ -88,6 +92,7 @@ export function TransitionDialog({
       if (req.needsSchedule) {
         payload.scheduled_start = fromLocalInput(start);
         payload.scheduled_end = fromLocalInput(end);
+        if (conflicts) payload.allow_conflict = true;
       }
       if (req.offersLocation && shareLocation) {
         const pos = await currentPosition();
@@ -104,6 +109,11 @@ export function TransitionDialog({
       onClose();
     },
     onError: (error) => {
+      const clash = scheduleConflicts(error);
+      if (clash) {
+        setConflicts(clash);
+        return;
+      }
       if (error instanceof ApiError && error.status === 409) {
         queryClient.invalidateQueries({ queryKey: ["ticket", ticket.id] });
         queryClient.invalidateQueries({ queryKey: ["tickets"] });
@@ -126,7 +136,7 @@ export function TransitionDialog({
     mutation.mutate();
   }
 
-  const error = localError ?? (mutation.error ? errorMessage(mutation.error) : null);
+  const error = localError ?? (mutation.error && !conflicts ? errorMessage(mutation.error) : null);
 
   return (
     <Dialog
@@ -150,7 +160,7 @@ export function TransitionDialog({
             type="submit"
             form="transition-form"
           >
-            Confirmar
+            {conflicts ? "Agendar mesmo assim" : "Confirmar"}
           </Button>
         </>
       }
@@ -160,7 +170,15 @@ export function TransitionDialog({
         {req.needsSchedule ? (
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Início da visita" required>
-              <Input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} required />
+              <Input
+                type="datetime-local"
+                value={start}
+                onChange={(e) => {
+                  setStart(e.target.value);
+                  setConflicts(null);
+                }}
+                required
+              />
             </Field>
             <Field
               label="Fim previsto"
@@ -170,9 +188,33 @@ export function TransitionDialog({
                   : "Opcional"
               }
             >
-              <Input type="datetime-local" value={end} min={start || undefined} onChange={(e) => setEnd(e.target.value)} />
+              <Input
+                type="datetime-local"
+                value={end}
+                min={start || undefined}
+                onChange={(e) => {
+                  setEnd(e.target.value);
+                  setConflicts(null);
+                }}
+              />
             </Field>
           </div>
+        ) : null}
+        {req.needsSchedule && conflicts ? (
+          <ConflictList
+            tone="error"
+            items={conflicts}
+            title={`${ticket.assignee?.name ?? "O técnico"} já está ocupado neste horário. Confirme para agendar mesmo assim.`}
+          />
+        ) : req.needsSchedule && start ? (
+          <ConflictHint
+            assigneeId={ticket.assignee?.id}
+            assigneeName={ticket.assignee?.name}
+            start={fromLocalInput(start)}
+            end={fromLocalInput(end)}
+            estimatedMinutes={ticket.estimated_minutes}
+            excludeId={ticket.id}
+          />
         ) : null}
         {req.needsResolution ? (
           <Field label="Solução aplicada" required hint="Fica visível para o solicitante e no histórico da OS.">

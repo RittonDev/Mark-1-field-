@@ -16,12 +16,15 @@ export const API_ORIGIN = (() => {
 export class ApiError extends Error {
   status: number;
   detail: unknown;
+  // Corpo completo da resposta (ex.: code e conflicts no 409 de conflito de agenda).
+  body: unknown;
 
-  constructor(status: number, detail: unknown) {
+  constructor(status: number, detail: unknown, body: unknown = null) {
     super(formatDetail(detail, status));
     this.name = "ApiError";
     this.status = status;
     this.detail = detail;
+    this.body = body;
   }
 }
 
@@ -150,7 +153,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   }
   if (!res.ok) {
     const detail = data && typeof data === "object" && "detail" in data ? (data as { detail: unknown }).detail : data;
-    throw new ApiError(res.status, detail);
+    throw new ApiError(res.status, detail, data);
   }
   return data as T;
 }

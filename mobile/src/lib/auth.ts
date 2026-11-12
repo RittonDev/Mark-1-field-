@@ -5,6 +5,7 @@ import { getKv, setKv } from "./db";
 import { registerDevice, unregisterDevice, type DeviceRegistration } from "./device";
 import { session } from "./session";
 import { startSync, stopSync, wipeLocalData } from "./sync";
+import { resumeTracking, stopTracking } from "./tracking";
 import type { TokenResponse } from "./types";
 
 const OWNER_KEY = "owner_user_id";
@@ -18,6 +19,7 @@ export const getDeviceRegistration = () => lastRegistration;
  */
 async function revokeAccess(message: string) {
   stopSync();
+  await stopTracking({ endOnServer: false });
   lastRegistration = null;
   await wipeLocalData();
   await session.signOut(false, message);
@@ -35,6 +37,8 @@ export async function restoreSession() {
 /** Depois do login (ou ao abrir o app já logado): sync, tempo real e registro do aparelho. */
 export async function startSession() {
   startSync();
+  // Jornada em andamento (app reaberto ou aparelho reiniciado): retoma a coleta.
+  void resumeTracking().catch((error: unknown) => console.warn("Falha ao retomar a jornada", error));
   lastRegistration = await registerDevice();
   notifyDataChanged();
 }
@@ -60,6 +64,8 @@ export async function login(email: string, password: string, apiUrl: string) {
 }
 
 export async function logout() {
+  // Sair encerra a jornada: nada é coletado depois do logout.
+  await stopTracking({ endOnServer: true });
   await unregisterDevice();
   stopSync();
   lastRegistration = null;

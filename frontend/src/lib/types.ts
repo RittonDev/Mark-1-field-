@@ -406,6 +406,7 @@ export interface TicketCreatePayload {
   assignee_id?: UUID | null;
   scheduled_start?: ISODate | null;
   scheduled_end?: ISODate | null;
+  allow_conflict?: boolean;
 }
 
 export type TicketUpdatePayload = Partial<
@@ -424,6 +425,7 @@ export interface TicketTransitionPayload {
   response_violation_reason_id?: UUID | null;
   resolution_violation_reason_id?: UUID | null;
   violation_note?: string | null;
+  allow_conflict?: boolean;
 }
 
 /** Atividades do dia (GET /activities/day): o previsto e o realizado na mesma linha. */
@@ -559,4 +561,32 @@ export interface TrackingHistory {
     latitude: number | null;
     longitude: number | null;
   }[];
+}
+
+// Calendário e conflito de horário
+export interface ConflictItem {
+  id: UUID;
+  code: string;
+  title: string;
+  customer: string | null;
+  location: string | null;
+  start: ISODate;
+  end: ISODate;
+}
+
+export interface CalendarEvent {
+  id: UUID;
+  code: string;
+  title: string;
+  status: TicketStatus;
+  priority: TicketPriority;
+  start: ISODate;
+  end: ISODate;
+  end_is_estimated: boolean;
+  assignee: Ref | null;
+  team: Ref | null;
+  customer: Ref | null;
+  location: { id: UUID; name: string; city: string | null } | null;
+  service_type: string | null;
+  conflict_with: UUID[];
 }

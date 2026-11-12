@@ -129,6 +129,7 @@ async def assign_ticket(
         note=body.note,
         expected_version=body.expected_version,
         actor=user,
+        allow_conflict=body.allow_conflict,
     )
     await commit_and_publish(db)
     return await _detail(db, ticket_id, user)

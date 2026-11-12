@@ -85,6 +85,19 @@ const MIGRATIONS: string[] = [
     created_at TEXT NOT NULL
   );
   `,
+  // 2: fila de pontos do rastreamento da jornada (POST /tracking/pings em lote).
+  `
+  CREATE TABLE pings (
+    recorded_at TEXT PRIMARY KEY NOT NULL,   -- ISO do fix do GPS; o servidor ignora duplicados
+    latitude REAL NOT NULL,
+    longitude REAL NOT NULL,
+    accuracy_m REAL,
+    speed_mps REAL,
+    heading REAL,
+    battery_pct REAL,
+    is_mock INTEGER NOT NULL DEFAULT 0
+  );
+  `,
 ];
 
 let dbPromise: Promise<DB> | null = null;
@@ -470,6 +483,61 @@ export async function dismissNotice(id: number): Promise<void> {
   });
 }
 
+// ───────────────────────── rastreamento ─────────────────────────
+
+export interface Ping {
+  recorded_at: string;
+  latitude: number;
+  longitude: number;
+  accuracy_m: number | null;
+  speed_mps: number | null;
+  heading: number | null;
+  battery_pct: number | null;
+  is_mock: boolean;
+}
+
+export async function insertPings(pings: Ping[]): Promise<void> {
+  if (!pings.length) return;
+  await transaction(async (db) => {
+    for (const p of pings) {
+      await db.runAsync(
+        `INSERT OR IGNORE INTO pings (recorded_at, latitude, longitude, accuracy_m, speed_mps, heading, battery_pct, is_mock)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        p.recorded_at,
+        p.latitude,
+        p.longitude,
+        p.accuracy_m,
+        p.speed_mps,
+        p.heading,
+        p.battery_pct,
+        p.is_mock ? 1 : 0,
+      );
+    }
+  });
+}
+
+export async function listPings(limit: number): Promise<Ping[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<Omit<Ping, "is_mock"> & { is_mock: number }>(
+    "SELECT * FROM pings ORDER BY recorded_at LIMIT ?",
+    limit,
+  );
+  return rows.map((r) => ({ ...r, is_mock: r.is_mock === 1 }));
+}
+
+export async function deletePings(recordedAts: string[]): Promise<void> {
+  if (!recordedAts.length) return;
+  await transaction(async (db) => {
+    for (const at of recordedAts) await db.runAsync("DELETE FROM pings WHERE recorded_at = ?", at);
+  });
+}
+
+export async function countPings(): Promise<number> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ n: number }>("SELECT COUNT(*) AS n FROM pings");
+  return row?.n ?? 0;
+}
+
 // ─────────────────────────── geral ────────────────────────────
 
 /** OS fechadas/canceladas há mais de 30 dias saem do aparelho (o servidor continua com elas). */
@@ -487,7 +555,7 @@ export async function pruneOld(db: DB): Promise<void> {
 /** Apaga tudo (troca de usuário no aparelho). */
 export async function resetLocalData(): Promise<void> {
   await transaction(async (db) => {
-    for (const table of ["kv", "tickets", "comments", "worklogs", "outbox", "photos", "notices"]) {
+    for (const table of ["kv", "tickets", "comments", "worklogs", "outbox", "photos", "notices", "pings"]) {
       await db.runAsync(`DELETE FROM ${table}`);
     }
   });

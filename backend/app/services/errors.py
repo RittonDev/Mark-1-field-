@@ -20,3 +20,11 @@ class VersionConflict(DomainError):
     def __init__(self, current_version: int | None = None) -> None:
         self.current_version = current_version
         super().__init__("A OS foi alterada por outra pessoa. Recarregue e tente de novo.")
+
+
+class ScheduleConflict(DomainError):
+    """O responsável já tem OS no horário (HTTP 409, code SCHEDULE_CONFLICT)."""
+
+    def __init__(self, message: str, conflicts: list[dict]) -> None:
+        self.conflicts = conflicts
+        super().__init__(message)
