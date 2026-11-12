@@ -52,7 +52,11 @@ async def test_import_locations(client: AsyncClient, world: World) -> None:
     assert mine["Loja Centro"]["latitude"] == -23.5505  # vírgula decimal do Excel
     assert mine["Loja Centro"]["state"] == "SP"
     assert mine["Matriz"]["city"] == "Campinas"  # atualizou o local que já existia
-    nova = next(c for c in (await client.get(f"{API}/customers", headers=an)).json() if c["name"] == "Rede Nova")
+    nova = next(
+        c
+        for c in (await client.get(f"{API}/customers", headers=an)).json()
+        if c["name"] == "Rede Nova"
+    )
     assert nova["locations_count"] == 2  # o mesmo cliente novo nas duas linhas
 
     # Importando direto para um cliente: a planilha nem precisa das colunas de cliente.
