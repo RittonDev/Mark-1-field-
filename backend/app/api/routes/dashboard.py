@@ -1,17 +1,26 @@
-from collections import defaultdict
+import uuid
+from collections import Counter, defaultdict
+from collections.abc import Callable
 from datetime import datetime, timedelta
+from typing import Annotated
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from sqlalchemy import func, select
 
-from app.api.deps import DB, CurrentUser
+from app.api.deps import DB, CurrentUser, StaffUser
 from app.core.config import settings
-from app.core.enums import SlaStatus, TicketPriority, TicketStatus
+from app.core.enums import Responsibility, SlaStatus, TicketPriority, TicketStatus
 from app.db.base import utcnow
-from app.models import Ticket, User
-from app.schemas.dashboard import AssigneeLoad, DashboardSummary
-from app.services.sla import compute_sla_status
+from app.models import Ticket, User, ViolationReason
+from app.schemas.dashboard import (
+    AssigneeLoad,
+    ClockViolations,
+    DashboardSummary,
+    SlaViolationReport,
+    ViolationReasonCount,
+)
+from app.services.sla import compute_sla_status, resolution_breached, response_breached
 from app.services.tickets import visibility_clause
 from app.services.workflow import OPEN_STATUSES
 
@@ -121,4 +130,66 @@ async def summary(db: DB, user: CurrentUser) -> DashboardSummary:
         avg_resolution_minutes_30d=round(float(avg_seconds) / 60, 1) if avg_seconds else None,
         sla_compliance_30d=round(100 * within_30d / resolved_30d, 1) if resolved_30d else None,
         by_assignee=by_assignee,
+    )
+
+
+@router.get("/reports/sla-violations", response_model=SlaViolationReport)
+async def sla_violations(
+    db: DB, user: StaffUser, days: Annotated[int, Query(ge=1, le=365)] = 30
+) -> SlaViolationReport:
+    """Motivos de violação viram estatística: por motivo, por responsabilidade e pendências."""
+    now = utcnow()
+    vis = visibility_clause(user)
+    conds = [
+        Ticket.created_at >= now - timedelta(days=days),
+        Ticket.status != TicketStatus.CANCELLED,
+    ]
+    if vis is not None:
+        conds.append(vis)
+    tickets = list(await db.scalars(select(Ticket).where(*conds)))
+
+    responsibility: Counter[str] = Counter()
+
+    def clock(is_breached: Callable[..., bool], attr: str) -> ClockViolations:
+        counts: Counter[uuid.UUID] = Counter()
+        reasons: dict[uuid.UUID, ViolationReason] = {}
+        breached = [t for t in tickets if is_breached(t, now)]
+        for t in breached:
+            reason = getattr(t, attr)
+            if reason is not None:
+                counts[reason.id] += 1
+                reasons[reason.id] = reason
+                responsibility[reason.responsibility.value] += 1
+        return ClockViolations(
+            breached=len(breached),
+            justified=sum(counts.values()),
+            by_reason=[
+                ViolationReasonCount(
+                    reason_id=rid,
+                    name=reasons[rid].name,
+                    responsibility=reasons[rid].responsibility,
+                    count=n,
+                )
+                for rid, n in counts.most_common()
+            ],
+        )
+
+    response = clock(response_breached, "response_violation_reason")
+    resolution = clock(resolution_breached, "resolution_violation_reason")
+    pending = sum(
+        1
+        for t in tickets
+        if t.status in (TicketStatus.RESOLVED, TicketStatus.CLOSED)
+        and (
+            (response_breached(t, now) and t.response_violation_reason_id is None)
+            or (resolution_breached(t, now) and t.resolution_violation_reason_id is None)
+        )
+    )
+    return SlaViolationReport(
+        period_days=days,
+        tickets_total=len(tickets),
+        response=response,
+        resolution=resolution,
+        by_responsibility={r.value: responsibility[r.value] for r in Responsibility},
+        pending_justification=pending,
     )

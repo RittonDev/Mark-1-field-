@@ -16,7 +16,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.config import settings
-from app.core.enums import TicketEventType, TicketPriority, TicketStatus, UserRole
+from app.core.enums import (
+    TicketEventType,
+    TicketPriority,
+    TicketStatus,
+    UserRole,
+    ViolationScope,
+)
 from app.db.base import utcnow
 from app.models import (
     Asset,
@@ -31,6 +37,7 @@ from app.models import (
     TicketEvent,
     TicketWorklog,
     User,
+    ViolationReason,
 )
 from app.schemas.ticket import (
     CommentCreate,
@@ -39,6 +46,7 @@ from app.schemas.ticket import (
     TicketFilters,
     TicketTransition,
     TicketUpdate,
+    TicketViolationUpdate,
     WorklogCreate,
 )
 from app.services import durations, sla, storage
@@ -264,6 +272,50 @@ async def _resolve_refs(
         "category": category,
         "team_id": team_id,
     }
+
+
+async def _resolve_violation_reason(
+    db: AsyncSession, reason_id: uuid.UUID, scope: ViolationScope
+) -> ViolationReason:
+    reason = await db.get(ViolationReason, reason_id)
+    if reason is None or not reason.is_active:
+        raise WorkflowError("Motivo de violação não encontrado ou inativo")
+    if reason.applies_to not in (scope, ViolationScope.BOTH):
+        clock = "resposta" if scope == ViolationScope.RESPONSE else "solução"
+        raise WorkflowError(f"O motivo '{reason.name}' não se aplica ao prazo de {clock}")
+    return reason
+
+
+async def _apply_violation(
+    db: AsyncSession,
+    ticket: Ticket,
+    *,
+    response_reason_id: uuid.UUID | None,
+    resolution_reason_id: uuid.UUID | None,
+    note: str | None,
+) -> dict[str, list[Any]]:
+    """Grava os motivos informados (valida o relógio) e devolve o que mudou."""
+    changes: dict[str, list[Any]] = {}
+    if response_reason_id is not None:
+        await _resolve_violation_reason(db, response_reason_id, ViolationScope.RESPONSE)
+        if ticket.response_violation_reason_id != response_reason_id:
+            changes["response_violation_reason_id"] = [
+                _jsonable(ticket.response_violation_reason_id),
+                str(response_reason_id),
+            ]
+            ticket.response_violation_reason_id = response_reason_id
+    if resolution_reason_id is not None:
+        await _resolve_violation_reason(db, resolution_reason_id, ViolationScope.RESOLUTION)
+        if ticket.resolution_violation_reason_id != resolution_reason_id:
+            changes["resolution_violation_reason_id"] = [
+                _jsonable(ticket.resolution_violation_reason_id),
+                str(resolution_reason_id),
+            ]
+            ticket.resolution_violation_reason_id = resolution_reason_id
+    if note is not None and (note.strip() or None) != ticket.violation_note:
+        changes["violation_note"] = [ticket.violation_note, note.strip() or None]
+        ticket.violation_note = note.strip() or None
+    return changes
 
 
 async def _resolve_service_type(
@@ -665,6 +717,15 @@ async def transition_ticket(
     if auto_assign:
         await _assign(db, ticket, actor.id, None, actor, now=now, note="Assumida ao mudar o status")
 
+    # Motivo da violação informado junto (normalmente ao resolver uma OS que furou o prazo).
+    await _apply_violation(
+        db,
+        ticket,
+        response_reason_id=payload.response_violation_reason_id,
+        resolution_reason_id=payload.resolution_violation_reason_id,
+        note=payload.violation_note,
+    )
+
     if to == S.RESOLVED and payload.resolution_notes:
         ticket.resolution_notes = payload.resolution_notes.strip()
 
@@ -799,6 +860,33 @@ async def add_attachment(
     return attachment
 
 
+async def set_violation(
+    db: AsyncSession, ticket: Ticket, data: TicketViolationUpdate, actor: User
+) -> Ticket:
+    """Justifica a violação de SLA. Vale com a OS fechada (é quando o analista revisa)."""
+    allowed = actor.can_manage_tickets or (
+        actor.role == UserRole.TECHNICIAN
+        and (
+            ticket.assignee_id == actor.id
+            or (actor.team_id is not None and ticket.team_id == actor.team_id)
+        )
+    )
+    if not allowed:
+        raise PermissionDenied("Você não pode justificar a violação desta OS")
+    changes = await _apply_violation(
+        db,
+        ticket,
+        response_reason_id=data.response_violation_reason_id,
+        resolution_reason_id=data.resolution_violation_reason_id,
+        note=data.violation_note,
+    )
+    if changes:
+        now = utcnow()
+        record_event(db, ticket, actor, TicketEventType.UPDATED, data={"changes": changes}, now=now)
+        queue_event(db, "updated", ticket, actor, {"fields": sorted(changes)})
+    return ticket
+
+
 async def auto_close_resolved(db: AsyncSession, now: datetime | None = None) -> int:
     """Fecha OS resolvidas há mais de AUTO_CLOSE_RESOLVED_DAYS (aceite tácito)."""
     now = now or utcnow()
@@ -823,6 +911,24 @@ async def auto_close_resolved(db: AsyncSession, now: datetime | None = None) -> 
 
 
 # --------------------------------------------------------------------------- listagem
+
+
+def violation_pending_clause(now: datetime) -> ColumnElement[bool]:
+    """Resolvida/fechada com prazo violado e sem o motivo correspondente."""
+    response_late = or_(
+        Ticket.first_response_at > Ticket.response_due_at,
+        and_(Ticket.first_response_at.is_(None), Ticket.response_due_at < now),
+    )
+    return and_(
+        Ticket.status.in_((S.RESOLVED, S.CLOSED)),
+        or_(
+            and_(response_late, Ticket.response_violation_reason_id.is_(None)),
+            and_(
+                Ticket.resolved_at > Ticket.resolution_due_at,
+                Ticket.resolution_violation_reason_id.is_(None),
+            ),
+        ),
+    )
 
 
 def breached_clause(now: datetime) -> ColumnElement[bool]:
@@ -911,6 +1017,8 @@ def filter_conditions(user: User, f: TicketFilters, now: datetime) -> list[Colum
         conds.append(Ticket.assignee_id.is_(None))
     if f.sla_breached:
         conds.append(breached_clause(now))
+    if f.violation_pending:
+        conds.append(violation_pending_clause(now))
     if f.q and f.q.strip():
         q = f.q.strip()
         like = f"%{q}%"

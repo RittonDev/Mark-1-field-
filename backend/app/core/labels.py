@@ -5,10 +5,12 @@ from enum import StrEnum
 from app.core.enums import (
     AssetType,
     Impact,
+    Responsibility,
     TicketSource,
     TicketType,
     Urgency,
     UserRole,
+    ViolationScope,
 )
 
 ROLE_LABELS = {
@@ -50,6 +52,18 @@ ASSET_TYPE_LABELS = {
     AssetType.OTHER: "Outro",
 }
 
+RESPONSIBILITY_LABELS = {
+    Responsibility.INTERNAL: "Interna",
+    Responsibility.CUSTOMER: "Cliente",
+    Responsibility.THIRD_PARTY: "Terceiro / fornecedor",
+}
+
+VIOLATION_SCOPE_LABELS = {
+    ViolationScope.RESPONSE: "1ª resposta",
+    ViolationScope.RESOLUTION: "Solução",
+    ViolationScope.BOTH: "Resposta e solução",
+}
+
 LEVEL_LABELS = {"high": "Alta", "medium": "Média", "low": "Baixa"}
 
 
@@ -63,6 +77,8 @@ def enum_options() -> dict[str, list[dict[str, str]]]:
         "sources": as_options(SOURCE_LABELS),  # type: ignore[arg-type]
         "asset_types": as_options(ASSET_TYPE_LABELS),  # type: ignore[arg-type]
         "roles": as_options(ROLE_LABELS),  # type: ignore[arg-type]
+        "responsibilities": as_options(RESPONSIBILITY_LABELS),  # type: ignore[arg-type]
+        "violation_scopes": as_options(VIOLATION_SCOPE_LABELS),  # type: ignore[arg-type]
         "impacts": [{"value": i.value, "label": LEVEL_LABELS[i.value]} for i in Impact],
         "urgencies": [{"value": u.value, "label": LEVEL_LABELS[u.value]} for u in Urgency],
     }

@@ -23,6 +23,7 @@ from app.schemas.ticket import (
     TicketListItem,
     TicketTransition,
     TicketUpdate,
+    TicketViolationUpdate,
     WorklogCreate,
     WorklogOut,
 )
@@ -59,6 +60,7 @@ async def list_tickets(
     unassigned: bool = False,
     open_only: bool = False,
     sla_breached: bool = False,
+    violation_pending: bool = False,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=500)] = 25,
     order_by: str = "-updated_at",
@@ -79,6 +81,7 @@ async def list_tickets(
         unassigned=unassigned,
         open_only=open_only,
         sla_breached=sla_breached,
+        violation_pending=violation_pending,
     )
     items, total = await svc.list_tickets(
         db, user, filters, page=page, page_size=page_size, order_by=order_by
@@ -135,6 +138,17 @@ async def assign_ticket(
 async def take_ticket(ticket_id: uuid.UUID, db: DB, user: StaffUser) -> TicketDetail:
     ticket = await svc.get_visible_ticket(db, user, ticket_id)
     await svc.take_ticket(db, ticket, user)
+    await commit_and_publish(db)
+    return await _detail(db, ticket_id, user)
+
+
+@router.patch("/tickets/{ticket_id}/violation", response_model=TicketDetail)
+async def justify_violation(
+    ticket_id: uuid.UUID, body: TicketViolationUpdate, db: DB, user: CurrentUser
+) -> TicketDetail:
+    """Motivo da violação de SLA (resposta e/ou solução), inclusive com a OS fechada."""
+    ticket = await svc.get_visible_ticket(db, user, ticket_id)
+    await svc.set_violation(db, ticket, body, user)
     await commit_and_publish(db)
     return await _detail(db, ticket_id, user)
 

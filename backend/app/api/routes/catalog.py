@@ -7,7 +7,7 @@ from app.api.deps import DB, AdminUser, CurrentUser, ManagerUser, StaffUser, Tic
 from app.core.access import channel_metadata
 from app.core.enums import TicketPriority
 from app.core.labels import enum_options
-from app.models import Category, Customer, ServiceType, SlaPolicy, Team
+from app.models import Category, Customer, ServiceType, SlaPolicy, Team, ViolationReason
 from app.schemas.catalog import (
     CategoryCreate,
     CategoryOut,
@@ -17,6 +17,9 @@ from app.schemas.catalog import (
     ServiceTypeUpdate,
     SlaPolicyOut,
     SlaPolicyUpdate,
+    ViolationReasonCreate,
+    ViolationReasonOut,
+    ViolationReasonUpdate,
 )
 from app.services import durations
 from app.services.sla import DEFAULT_SLA_MINUTES
@@ -224,3 +227,41 @@ async def apply_observed_duration(
     service_type.estimated_minutes = current.suggested_minutes
     await db.commit()
     return (await _service_types_out(db, [await _load_service_type(db, service_type_id)]))[0]
+
+
+# ------------------------------------------------------------------ motivos de violação
+
+
+@router.get("/violation-reasons", response_model=list[ViolationReasonOut])
+async def list_violation_reasons(
+    db: DB, _: StaffUser, active: bool | None = None
+) -> list[ViolationReason]:
+    stmt = select(ViolationReason).order_by(ViolationReason.name)
+    if active is not None:
+        stmt = stmt.where(ViolationReason.is_active.is_(active))
+    return list(await db.scalars(stmt))
+
+
+@router.post(
+    "/violation-reasons", response_model=ViolationReasonOut, status_code=status.HTTP_201_CREATED
+)
+async def create_violation_reason(
+    body: ViolationReasonCreate, db: DB, _: ManagerUser
+) -> ViolationReason:
+    reason = ViolationReason(**body.model_dump(), is_active=True)
+    db.add(reason)
+    await db.commit()
+    return reason
+
+
+@router.patch("/violation-reasons/{reason_id}", response_model=ViolationReasonOut)
+async def update_violation_reason(
+    reason_id: uuid.UUID, body: ViolationReasonUpdate, db: DB, _: ManagerUser
+) -> ViolationReason:
+    reason = await db.get(ViolationReason, reason_id)
+    if reason is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Motivo não encontrado")
+    for key, value in body.model_dump(exclude_unset=True).items():
+        setattr(reason, key, value)
+    await db.commit()
+    return reason

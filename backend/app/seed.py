@@ -18,11 +18,13 @@ from app.core.documents import cnpj_with_check_digits as cnpj
 from app.core.enums import (
     AssetType,
     Impact,
+    Responsibility,
     TicketSource,
     TicketStatus,
     TicketType,
     Urgency,
     UserRole,
+    ViolationScope,
 )
 from app.core.security import hash_password
 from app.db.base import utcnow
@@ -36,6 +38,7 @@ from app.models import (
     SlaPolicy,
     Team,
     User,
+    ViolationReason,
 )
 from app.schemas.ticket import CommentCreate, TicketCreate, TicketTransition, WorklogCreate
 from app.services import sla
@@ -620,6 +623,7 @@ async def seed() -> None:
 
         db.info.clear()  # sem bus/WebSocket no seed
         await seed_service_types(db)
+        await seed_violation_reasons(db)
         print("Seed aplicado. Usuários de exemplo (senha = SEED_PASSWORD):")
         for u in (admin, supervisor, carlos, rafael, juliana, bruno, requester):
             print(f"  {u.role.value:<10} {u.email}")
@@ -643,6 +647,36 @@ SERVICE_TYPES = [
     ("Preventiva de loja - Maxx Group", 240, None, "Maxx Group - Matriz"),
     ("Preventiva CFTV - Clínica Vida Saudável", 90, "CFTV/Câmera offline", "Clínica Vida Saudável"),
 ]
+
+VIOLATION_REASONS = [
+    # (nome, relógio, responsabilidade)
+    ("Falta de técnico disponível", ViolationScope.BOTH, Responsibility.INTERNAL),
+    ("Triagem ou atribuição demorada", ViolationScope.RESPONSE, Responsibility.INTERNAL),
+    ("Chamado aberto fora do horário de atendimento", ViolationScope.RESPONSE, Responsibility.INTERNAL),
+    ("Atraso no deslocamento", ViolationScope.RESOLUTION, Responsibility.INTERNAL),
+    ("Problema mais complexo que o previsto", ViolationScope.RESOLUTION, Responsibility.INTERNAL),
+    ("Cliente ausente ou local fechado", ViolationScope.RESOLUTION, Responsibility.CUSTOMER),
+    ("Aguardando aprovação do cliente", ViolationScope.RESOLUTION, Responsibility.CUSTOMER),
+    ("Peça ou equipamento em falta no fornecedor", ViolationScope.RESOLUTION, Responsibility.THIRD_PARTY),
+    ("Falha da operadora / link", ViolationScope.BOTH, Responsibility.THIRD_PARTY),
+]
+
+
+async def seed_violation_reasons(db) -> int:  # noqa: ANN001
+    """Cadastro inicial de motivos de violação de SLA. Idempotente."""
+    if await db.scalar(select(ViolationReason.id).limit(1)) is not None:
+        print("Motivos de violação já existem; nada a fazer.")
+        return 0
+    for name, scope, responsibility in VIOLATION_REASONS:
+        db.add(
+            ViolationReason(
+                name=name, applies_to=scope, responsibility=responsibility, is_active=True
+            )
+        )
+    await db.commit()
+    print(f"Motivos de violação criados: {len(VIOLATION_REASONS)}")
+    return len(VIOLATION_REASONS)
+
 
 # Instalações reais da "Impressora A4" (minutos): o tipo diz 20 min, como no Field Control.
 HISTORICAL_A4_MINUTES = (235, 130, 185)
@@ -707,6 +741,7 @@ async def _catalog_only() -> None:
         sys.exit("Seed recusado: ENVIRONMENT=production")
     async with SessionLocal() as db:
         await seed_service_types(db)
+        await seed_violation_reasons(db)
 
 
 if __name__ == "__main__":

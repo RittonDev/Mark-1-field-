@@ -705,3 +705,85 @@ async def test_day_activities_carry_over_and_rescheduled(
     assert by_id[b["id"]]["arrived_at"] is None  # a chegada não foi hoje
     assert by_id[c["id"]]["state"] == "rescheduled"
     assert today["summary"]["rescheduled"] == 1
+
+
+async def test_violation_reasons(client: AsyncClient, world: World, engine: AsyncEngine) -> None:
+    sup, an, tech_h = world.supervisor.headers, world.analyst.headers, world.tech.headers
+
+    async def reason(name: str, scope: str, responsibility: str) -> str:
+        r = await client.post(
+            f"{API}/violation-reasons",
+            json={"name": name, "applies_to": scope, "responsibility": responsibility},
+            headers=sup,
+        )
+        assert r.status_code == 201, r.text
+        return r.json()["id"]
+
+    slow_triage = await reason("Triagem demorada", "response", "internal")
+    no_part = await reason("Peça em falta no fornecedor", "resolution", "third_party")
+
+    t = await create(client, world, assignee_id=str(world.tech.user.id))
+    # Os dois prazos já venceram (simula uma OS que furou resposta e solução).
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "UPDATE tickets SET response_due_at = created_at - interval '1 minute', "
+                "resolution_due_at = created_at - interval '1 minute' WHERE id = :i"
+            ),
+            {"i": uuid.UUID(t["id"])},
+        )
+    t = await transition(client, tech_h, t, "in_progress")
+
+    # O relógio errado é recusado.
+    r = await client.post(
+        f"{API}/tickets/{t['id']}/transition",
+        json={
+            "to_status": "resolved",
+            "resolution_notes": "Peça trocada",
+            "resolution_violation_reason_id": slow_triage,
+        },
+        headers=tech_h,
+    )
+    assert r.status_code == 422
+
+    # O técnico resolve informando só o motivo da solução: fica pendente o da resposta.
+    t = await transition(
+        client,
+        tech_h,
+        t,
+        "resolved",
+        resolution_notes="Peça trocada",
+        resolution_violation_reason_id=no_part,
+    )
+    assert (t["response_breached"], t["resolution_breached"]) == (True, True)
+    assert t["resolution_violation_reason"]["name"] == "Peça em falta no fornecedor"
+    assert t["violation_reason_pending"] is True
+    pending = await client.get(f"{API}/tickets", params={"violation_pending": "true"}, headers=an)
+    assert pending.json()["total"] == 1
+
+    # Fechada pelo supervisor e justificada depois pelo analista.
+    t = await transition(client, sup, t, "closed")
+    r = await client.patch(
+        f"{API}/tickets/{t['id']}/violation",
+        json={"response_violation_reason_id": slow_triage, "violation_note": "Fila acumulada"},
+        headers=an,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["violation_reason_pending"] is False
+    assert r.json()["violation_note"] == "Fila acumulada"
+    pending = await client.get(f"{API}/tickets", params={"violation_pending": "true"}, headers=an)
+    assert pending.json()["total"] == 0
+
+    report = (await client.get(f"{API}/reports/sla-violations", headers=an)).json()
+    assert (report["response"]["breached"], report["response"]["justified"]) == (1, 1)
+    assert report["resolution"]["by_reason"][0]["name"] == "Peça em falta no fornecedor"
+    assert report["by_responsibility"] == {"internal": 1, "customer": 0, "third_party": 1}
+    assert report["pending_justification"] == 0
+
+    # Técnico de outro grupo não justifica OS que não é dele.
+    r = await client.patch(
+        f"{API}/tickets/{t['id']}/violation",
+        json={"violation_note": "x"},
+        headers=world.tech_other.headers,
+    )
+    assert r.status_code in (403, 404)
