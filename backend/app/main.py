@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -27,6 +28,26 @@ from app.services.tracking import purge_old_pings
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("maxxchamados")
+
+
+class RedactTokens(logging.Filter):
+    """Tira tokens dos logs: o WebSocket e os links de anexo levam o token na URL, e o log de
+    acesso do uvicorn gravaria a sessão de quem acessou."""
+
+    _pattern = re.compile(r"((?:token|access_token|refresh_token)=)[^&\s\"']+")
+
+    def _clean(self, value: object) -> object:
+        return self._pattern.sub(r"\1***", value) if isinstance(value, str) else value
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.msg = self._clean(record.msg)
+        if isinstance(record.args, tuple):
+            record.args = tuple(self._clean(a) for a in record.args)
+        return True
+
+
+for _name in ("uvicorn.access", "uvicorn.error"):
+    logging.getLogger(_name).addFilter(RedactTokens())
 
 
 async def _auto_close_loop() -> None:
@@ -70,6 +91,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def _security_headers(request: Request, call_next):  # noqa: ANN001, ANN202
+    """Cabeçalhos básicos em toda resposta da API (sem sobrescrever os de quem já definiu)."""
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    return response
 
 
 def _error(status_code: int, detail: str, **extra: object) -> JSONResponse:

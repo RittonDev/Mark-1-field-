@@ -394,12 +394,19 @@ async def download_attachment(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Arquivo não encontrado") from exc
     if not path.exists():
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Arquivo não encontrado")
-    disposition = "inline" if attachment.content_type.startswith("image/") else "attachment"
+    # Foto abre na tela; o resto baixa. SVG pode carregar script: baixa também. E nada que o
+    # navegador abrir daqui roda código (nosniff + CSP sandbox), mesmo um HTML disfarçado.
+    content_type = attachment.content_type or "application/octet-stream"
+    inline = content_type.startswith("image/") and "svg" not in content_type
     return FileResponse(
         path,
-        media_type=attachment.content_type,
+        media_type=content_type,
         filename=attachment.filename,
-        content_disposition_type=disposition,
+        content_disposition_type="inline" if inline else "attachment",
+        headers={
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; img-src 'self' data:; sandbox",
+        },
     )
 
 

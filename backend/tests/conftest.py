@@ -22,10 +22,17 @@ from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
 from app.models import Customer, Location, SystemSetting, Team, User
+from app.services import login_guard
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 
 requires_db = pytest.mark.skipif(not TEST_DATABASE_URL, reason="TEST_DATABASE_URL não definido")
+
+
+@pytest.fixture(autouse=True)
+def _fresh_login_guard() -> None:
+    """Cada teste começa sem senhas erradas contadas (o controle de login fica na memória)."""
+    login_guard.reset_memory()
 
 
 async def _ensure_database(url: str) -> None:

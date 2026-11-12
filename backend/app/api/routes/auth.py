@@ -26,9 +26,12 @@ from app.schemas.auth import (
     TokenResponse,
 )
 from app.schemas.user import UserOut
-from app.services import entra
+from app.services import entra, login_guard
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+# Hash qualquer, só para o login de e-mail inexistente gastar o mesmo tempo do bcrypt.
+_TIMING_HASH = hash_password("maxxchamados-tempo-constante")
 
 MICROSOFT_REQUIRED = "Analistas e gestores entram com a conta Microsoft da empresa."
 
@@ -43,10 +46,24 @@ def _tokens(user: User, channel: str | None) -> TokenResponse:
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(body: LoginRequest, db: DB) -> TokenResponse:
-    user = await db.scalar(select(User).where(func.lower(User.email) == body.email.strip().lower()))
+async def login(body: LoginRequest, db: DB, request: Request) -> TokenResponse:
+    email = body.email.strip().lower()
+    # IP já resolvido pelo uvicorn (--proxy-headers só confia no proxy configurado).
+    ip = request.client.host if request.client else None
+    try:
+        await login_guard.check(email, ip)
+    except login_guard.LoginBlocked as exc:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS, str(exc), headers={"Retry-After": str(exc.retry_after)}
+        ) from exc
+    user = await db.scalar(select(User).where(func.lower(User.email) == email))
+    if user is None:
+        # Mesmo tempo de resposta de uma senha errada: não revela quais e-mails existem.
+        verify_password(body.password, _TIMING_HASH)
     if user is None or not user.is_active or not verify_password(body.password, user.password_hash):
+        await login_guard.failed(email, ip)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "E-mail ou senha inválidos")
+    await login_guard.succeeded(email)
     # Só depois da senha correta, para não revelar o papel de quem errou a senha.
     if not channel_allows(body.channel, user.role):
         raise HTTPException(status.HTTP_403_FORBIDDEN, CHANNEL_DENIED_MESSAGE[body.channel or ""])
