@@ -117,6 +117,7 @@ function Caption({ attachment, canEdit, onSaved }: { attachment: Attachment; can
       type="button"
       onClick={(e) => {
         e.stopPropagation();
+        setText("");
         setEditing(true);
       }}
       className="inline-flex items-center gap-1 text-xs text-ink-subtle hover:text-brand"
