@@ -7,7 +7,7 @@ import { useToast } from "@/components/Toaster";
 import { Button, Checkbox, Dialog, ErrorBox, Field, Input, Textarea } from "@/components/ui";
 import { ApiError, api, errorMessage } from "@/lib/api";
 import { STATUS, TRANSITION_ACTION } from "@/lib/constants";
-import { fromLocalInput, toLocalInput } from "@/lib/format";
+import { formatMinutes, fromLocalInput, toLocalInput } from "@/lib/format";
 import type { TicketDetail, TicketStatus, TicketTransitionPayload, UUID } from "@/lib/types";
 import { transitionRequirements } from "@/lib/workflow";
 
@@ -19,6 +19,8 @@ export interface TransitionTarget {
   version: number;
   scheduled_start: string | null;
   scheduled_end: string | null;
+  /** Só o detalhe tem (o quadro não): usado na dica do fim da visita. */
+  estimated_minutes?: number | null;
 }
 
 function currentPosition(): Promise<{ latitude: number; longitude: number } | null> {
@@ -51,7 +53,9 @@ export function TransitionDialog({
   const [note, setNote] = useState("");
   const [resolution, setResolution] = useState("");
   const [start, setStart] = useState(() => toLocalInput(ticket.scheduled_start));
-  const [end, setEnd] = useState(() => toLocalInput(ticket.scheduled_end));
+  // Fim em branco por padrão: num reagendamento, o fim antigo ficaria antes do novo início.
+  // Em branco, a API usa início + duração estimada.
+  const [end, setEnd] = useState("");
   const [shareLocation, setShareLocation] = useState(req.offersLocation);
   const [localError, setLocalError] = useState<string | null>(null);
 
@@ -140,7 +144,14 @@ export function TransitionDialog({
             <Field label="Início da visita" required>
               <Input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} required />
             </Field>
-            <Field label="Fim previsto">
+            <Field
+              label="Fim previsto"
+              hint={
+                ticket.estimated_minutes
+                  ? `Em branco, a visita dura o estimado: ${formatMinutes(ticket.estimated_minutes)}`
+                  : "Opcional"
+              }
+            >
               <Input type="datetime-local" value={end} min={start || undefined} onChange={(e) => setEnd(e.target.value)} />
             </Field>
           </div>
