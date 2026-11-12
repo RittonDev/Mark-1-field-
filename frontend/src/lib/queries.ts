@@ -13,6 +13,7 @@ import type {
   Team,
   User,
   UUID,
+  ViolationReason,
 } from "./types";
 
 const LOOKUP_STALE = 60_000;
@@ -66,6 +67,15 @@ export function useLocationSearch(params: {
         page_size: pageSize,
       }),
     placeholderData: (prev) => prev,
+  });
+}
+
+/** Motivos de violação de SLA (cadastro). */
+export function useViolationReasons(active?: boolean) {
+  return useQuery({
+    queryKey: ["violation-reasons", active ?? ""],
+    queryFn: () => api.get<ViolationReason[]>("/violation-reasons", { active }),
+    staleTime: LOOKUP_STALE,
   });
 }
 

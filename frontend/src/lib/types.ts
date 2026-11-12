@@ -274,6 +274,14 @@ export interface TicketDetail extends TicketListItem {
   work_seconds: number;
   work_started_at: ISODate | null;
   actual_minutes: number;
+  /** Motivo da violação de SLA, um por relógio (como no Field Control). */
+  response_violation_reason: ViolationReasonRef | null;
+  resolution_violation_reason: ViolationReasonRef | null;
+  violation_note: string | null;
+  response_breached: boolean;
+  resolution_breached: boolean;
+  /** Resolvida com prazo violado e sem motivo informado. */
+  violation_reason_pending: boolean;
   allowed_transitions: TicketStatus[];
   can_edit: boolean;
   can_assign: boolean;
@@ -406,6 +414,9 @@ export interface TicketTransitionPayload {
   latitude?: number | null;
   longitude?: number | null;
   expected_version?: number;
+  response_violation_reason_id?: UUID | null;
+  resolution_violation_reason_id?: UUID | null;
+  violation_note?: string | null;
 }
 
 /** Atividades do dia (GET /activities/day): o previsto e o realizado na mesma linha. */
@@ -453,4 +464,42 @@ export interface DayActivities {
   is_today: boolean;
   summary: DaySummary;
   activities: Activity[];
+}
+
+/** Motivos de violação de SLA (cadastro) e o relatório que os transforma em estatística. */
+export type ViolationScope = "response" | "resolution" | "both";
+export type Responsibility = "internal" | "customer" | "third_party";
+
+export interface ViolationReasonRef {
+  id: UUID;
+  name: string;
+  responsibility: Responsibility;
+}
+
+export interface ViolationReason extends ViolationReasonRef {
+  description: string | null;
+  applies_to: ViolationScope;
+  is_active: boolean;
+}
+
+export interface ViolationReasonCount {
+  reason_id: UUID;
+  name: string;
+  responsibility: Responsibility;
+  count: number;
+}
+
+export interface ClockViolations {
+  breached: number;
+  justified: number;
+  by_reason: ViolationReasonCount[];
+}
+
+export interface SlaViolationReport {
+  period_days: number;
+  tickets_total: number;
+  response: ClockViolations;
+  resolution: ClockViolations;
+  by_responsibility: Record<Responsibility, number>;
+  pending_justification: number;
 }

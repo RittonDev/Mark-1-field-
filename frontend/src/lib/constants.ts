@@ -5,6 +5,7 @@
 import type {
   AssetType,
   Level,
+  Responsibility,
   SlaStatus,
   TicketEventType,
   TicketPriority,
@@ -12,6 +13,7 @@ import type {
   TicketStatus,
   TicketType,
   UserRole,
+  ViolationScope,
 } from "./types";
 
 export type StatusGroup = "open" | "active" | "pending" | "done" | "final";
@@ -187,3 +189,15 @@ export const canManageTickets = (role: UserRole | undefined) =>
 export const isManager = (role: UserRole | undefined) => role === "admin" || role === "supervisor";
 /** Quem assume sozinho uma OS sem responsável ao iniciar o atendimento (SELF_ASSIGN_ROLES). */
 export const SELF_ASSIGN_ROLES: UserRole[] = ["analyst", "technician"];
+
+export const RESPONSIBILITY: Record<Responsibility, { label: string; color: string }> = {
+  internal: { label: "Interna", color: "#dc2626" },
+  customer: { label: "Cliente", color: "#2563eb" },
+  third_party: { label: "Terceiro / fornecedor", color: "#d97706" },
+};
+
+export const VIOLATION_SCOPE: Record<ViolationScope, string> = {
+  response: "1ª resposta",
+  resolution: "Solução",
+  both: "Resposta e solução",
+};
