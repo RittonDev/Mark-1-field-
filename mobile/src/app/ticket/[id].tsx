@@ -16,6 +16,7 @@ import { ArrivalResult, AuthorizationNotice, FieldClockLine, OnsiteTimer } from 
 import { FormsCard } from "../../components/ticket/FormsCard";
 import { PartRequestSheet, PartRequestsCard } from "../../components/ticket/PartRequests";
 import { QuickActions, RecurrenceCard } from "../../components/ticket/QuickActions";
+import { HelperBadge, VisitNoteCard, VisitTeamCard } from "../../components/ticket/VisitInfo";
 import { InfoPanel } from "../../components/ticket/InfoPanel";
 import { PhotosPanel } from "../../components/ticket/PhotosPanel";
 import { WorklogsPanel } from "../../components/ticket/WorklogsPanel";
@@ -30,7 +31,7 @@ import { authorizationBlock } from "../../lib/field";
 import { concludeBlock } from "../../lib/forms";
 import { formatDateTime, formatRelative, formatShort } from "../../lib/format";
 import { haptic } from "../../lib/haptics";
-import { isDone } from "../../lib/lists";
+import { isDone, isHelper } from "../../lib/lists";
 import { UNPRODUCTIVE_FROM } from "../../lib/ops";
 import { useSession } from "../../lib/session";
 import { isOnline, requestSync, useSyncStatus } from "../../lib/sync";
@@ -106,6 +107,9 @@ export default function TicketScreen() {
   const primary = actions.find((s) => PRIMARY.includes(s));
   // O técnico só trabalha nas OS atribuídas a ele pelo analista (não há "assumir").
   const isMine = current.assignee?.id === user.id;
+  // Auxiliar da visita: vê a OS, aponta horas e manda fotos; status, formulários e assinatura são do responsável.
+  const helping = isHelper(current, user);
+  const clientRef = current.client_reference?.trim() || null;
   const conclude = concludeBlock(current, (pendingSignatures ?? []).length > 0);
   // Concluir espera formulários/assinatura; deslocamento e check-in esperam a autorização do cliente.
   const blockedFor = (to: TicketStatus) =>
@@ -178,7 +182,10 @@ export default function TicketScreen() {
           <Animated.View entering={enter(0)}>
             <Card style={{ gap: 12 }}>
               <View style={styles.topRow}>
-                <Text style={styles.code}>{current.code}</Text>
+                <Text style={[styles.code, { flexShrink: 1 }]} numberOfLines={1}>
+                  {current.code}
+                  {clientRef ? <Text style={styles.clientRef}> · Ref. cliente {clientRef}</Text> : null}
+                </Text>
                 <Animated.View key={current.status} entering={swap.entering} exiting={swap.exiting}>
                   <StatusBadge status={current.status} />
                 </Animated.View>
@@ -214,6 +221,7 @@ export default function TicketScreen() {
               ) : null}
               <QuickActions ticket={current} />
               <View style={styles.badges}>
+                {helping ? <HelperBadge /> : null}
                 <PriorityBadge priority={current.priority} />
                 <SlaBadge ticket={current} now={now} />
                 <ProjectBadge project={current.project} />
@@ -247,6 +255,9 @@ export default function TicketScreen() {
             </Card>
           </Animated.View>
 
+          {/* Recado do analista para o técnico: antes de tudo o que vem depois do cabeçalho. */}
+          <VisitNoteCard note={current.visit_note} />
+          <VisitTeamCard ticket={current} userId={user.id} />
           <RecurrenceCard ticket={current} />
 
           {isMine ? (
@@ -254,6 +265,16 @@ export default function TicketScreen() {
               <FormsCard ticket={current} />
               <PartRequestsCard ticket={current} canRequest={canRequestPart} onRequest={() => setPartOpen(true)} />
             </Animated.View>
+          ) : helping ? (
+            <>
+              <Card>
+                <Text style={styles.meta}>
+                  Você vai junto nesta visita. Iniciar, concluir, formulários e assinatura ficam com{" "}
+                  {current.assignee?.name ?? "o responsável"}. Aqui você aponta suas horas e manda fotos.
+                </Text>
+              </Card>
+              <PartRequestsCard ticket={current} canRequest={false} onRequest={() => undefined} />
+            </>
           ) : (
             <Card>
               <Text style={styles.meta}>Esta OS não está atribuída a você. Só o responsável definido pelo analista pode atualizá-la.</Text>
@@ -327,6 +348,7 @@ const makeStyles = (c: Palette) =>
     content: { padding: 16, gap: 12 },
     topRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
     code: { fontSize: 13, fontWeight: "700", color: c.inkMuted, fontVariant: ["tabular-nums"], letterSpacing: 0.3 },
+    clientRef: { fontSize: 12, fontWeight: "500", color: c.inkSubtle, letterSpacing: 0 },
     title: { fontSize: 20, fontWeight: "700", color: c.ink, lineHeight: 26, letterSpacing: -0.2 },
     line: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
     lineStrong: { fontSize: 14, fontWeight: "600", color: c.ink, flex: 1, lineHeight: 20 },

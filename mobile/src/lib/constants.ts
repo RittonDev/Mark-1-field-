@@ -130,6 +130,7 @@ export const TICKET_SOURCE: Record<TicketSource, string> = {
   phone: "Telefone",
   whatsapp: "WhatsApp",
   monitoring: "Monitoramento",
+  portal: "Portal do cliente",
 };
 
 export const ASSET_TYPE: Record<AssetType, string> = {
@@ -164,6 +165,9 @@ export const EVENT_TYPE: Record<TicketEventType, string> = {
   comment_added: "adicionou um acompanhamento",
   worklog_added: "registrou um apontamento",
   attachment_added: "anexou um arquivo",
+  attachment_updated: "editou a descrição do anexo",
+  attachment_removed: "excluiu o anexo",
+  helpers_changed: "alterou os técnicos da visita",
   form_added: "anexou o formulário",
   form_completed: "concluiu o formulário",
   form_removed: "removeu o formulário",

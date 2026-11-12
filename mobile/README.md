@@ -145,6 +145,14 @@ Requisitos:
 - **Promessa de campo** (detalhes abaixo): prazo de chegada, 4h na loja, autorização do cliente, pedidos
   de peça e reincidência na loja.
 - **OS de projeto**: selo "Projeto PRJ-0001 · nome" no cartão e no detalhe (somente leitura).
+- **Observação da visita** (`visit_note`): o recado do analista aparece em destaque logo abaixo do cabeçalho
+  da OS. O nº do chamado no sistema do cliente (`client_reference`) aparece discreto ao lado do código.
+- **Equipe da visita** (`helpers`): cartão com o responsável e quem vai junto. Quem vai junto recebe a OS em
+  Hoje/Agenda/Concluídas com o selo "Você vai junto", aponta horas e manda fotos, mas não vê os botões de
+  status, formulários, assinatura, visita improdutiva nem "Pedir peça" (a API devolve `allowed_transitions: []`).
+  O evento `ticket.helpers_changed` avisa "Você vai na visita da OS-…"; quem sai da visita tem a OS conferida
+  em `GET /tickets/{id}` e, sem acesso, ela sai do aparelho (o `revoked_ticket_ids` do pull não cobre esse caso;
+  há também uma conferência a cada 10 min).
 - **Sem acompanhamentos no app**: a central fala com os técnicos pelo grupo de WhatsApp. A observação
   opcional nas mudanças de status continua. (Os comentários seguem na web, para o portal do solicitante.)
 - **Visita improdutiva** (foi ao local e não atendeu): ação em vermelho na OS atribuída, agendada, em

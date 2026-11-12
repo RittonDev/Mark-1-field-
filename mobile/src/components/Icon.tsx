@@ -28,7 +28,9 @@ export type IconName =
   | "hourglass"
   | "plus"
   | "minus"
-  | "close";
+  | "close"
+  | "note"
+  | "users";
 
 function Shape({ name }: { name: IconName }) {
   switch (name) {
@@ -171,6 +173,21 @@ function Shape({ name }: { name: IconName }) {
       return <Path d="M5 12h14" />;
     case "close":
       return <Path d="M6 6l12 12M18 6L6 18" />;
+    case "note":
+      return (
+        <>
+          <Rect x={5} y={3.5} width={14} height={17} rx={2.2} />
+          <Path d="M8.5 8h7M8.5 11.5h7M8.5 15h4.5" />
+        </>
+      );
+    case "users":
+      return (
+        <>
+          <Circle cx={9} cy={8.5} r={3.3} />
+          <Path d="M2.8 19.5a6.2 6.2 0 0 1 12.4 0" />
+          <Path d="M15.5 5.6a3.2 3.2 0 0 1 0 6M17.5 14.2a6.2 6.2 0 0 1 3.7 5.3" />
+        </>
+      );
   }
 }
 

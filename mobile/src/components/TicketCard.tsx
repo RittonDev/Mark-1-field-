@@ -5,6 +5,8 @@ import { PRIORITY, STATUS } from "../lib/constants";
 import { addressOf } from "../lib/device-actions";
 import { actualMinutes } from "../lib/duration";
 import { arrivalUrgency } from "../lib/field";
+import { isHelper } from "../lib/lists";
+import { useSession } from "../lib/session";
 import { formatMinutes, formatRelative, formatShort, formatTime } from "../lib/format";
 import type { LocalTicket } from "../lib/syncTypes";
 import { RADIUS, readable, useStyles, useTheme, type Palette } from "../theme/theme";
@@ -13,6 +15,7 @@ import { Icon } from "./Icon";
 import { PressableScale, useSwapMotion } from "./motion";
 import { Text } from "./Text";
 import { AuthorizationBadge, FieldClockLine } from "./ticket/FieldClock";
+import { HelperBadge } from "./ticket/VisitInfo";
 
 const IN_FIELD = ["en_route", "in_progress"];
 
@@ -31,6 +34,8 @@ export function TicketCard({
   const c = useTheme();
   const styles = useStyles(makeStyles);
   const swap = useSwapMotion();
+  const { user } = useSession();
+  const helping = Boolean(user && isHelper(ticket, user));
   const site = ticket.location ? [ticket.location.code, ticket.location.name].filter(Boolean).join(" ") : null;
   const client = [ticket.customer?.name, site].filter(Boolean).join(" · ");
   const address = ticket.service_address?.trim() || addressOf(ticket.location);
@@ -58,7 +63,10 @@ export function TicketCard({
       <View style={[styles.accent, { backgroundColor: readable(PRIORITY[ticket.priority].color, c) }]} />
       <View style={styles.body}>
         <View style={styles.header}>
-          <Text style={styles.code}>{ticket.code}</Text>
+          <Text style={[styles.code, { flexShrink: 1 }]} numberOfLines={1}>
+            {ticket.code}
+            {ticket.client_reference ? <Text style={styles.clientRef}> · Ref. {ticket.client_reference}</Text> : null}
+          </Text>
           {when ? (
             <Text style={[styles.schedule, ticket.work_started_at ? { color: c.warning } : null]} numberOfLines={1}>
               {when}
@@ -89,6 +97,7 @@ export function TicketCard({
           <Animated.View key={ticket.status} entering={swap.entering} exiting={swap.exiting}>
             <StatusBadge status={ticket.status} />
           </Animated.View>
+          {helping ? <HelperBadge /> : null}
           <AuthorizationBadge status={ticket.authorization_status} />
           <PriorityBadge priority={ticket.priority} />
           <SlaBadge ticket={ticket} now={now} />
@@ -148,6 +157,7 @@ const makeStyles = (c: Palette) =>
     body: { flex: 1, padding: 16, paddingLeft: 14, gap: 6 },
     header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 },
     code: { fontSize: 12, fontWeight: "700", color: c.inkMuted, fontVariant: ["tabular-nums"], letterSpacing: 0.3 },
+    clientRef: { fontWeight: "500", color: c.inkSubtle, letterSpacing: 0 },
     schedule: { fontSize: 12, fontWeight: "600", color: c.brandInk, flexShrink: 1, fontVariant: ["tabular-nums"] },
     title: { fontSize: 16, fontWeight: "600", color: c.ink, lineHeight: 22 },
     line: { flexDirection: "row", alignItems: "center", gap: 6 },

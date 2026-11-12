@@ -23,7 +23,7 @@ export type TicketStatus =
 export type TicketPriority = "critical" | "high" | "medium" | "low";
 export type Level = "high" | "medium" | "low"; // impacto e urgência
 export type TicketType = "incident" | "service_request" | "preventive" | "installation";
-export type TicketSource = "web" | "mobile" | "email" | "phone" | "whatsapp" | "monitoring";
+export type TicketSource = "web" | "mobile" | "email" | "phone" | "whatsapp" | "monitoring" | "portal";
 export type AssetType =
   | "printer"
   | "desktop"
@@ -39,6 +39,9 @@ export type AssetType =
   | "other";
 export type TicketEventType =
   | "created"
+  | "attachment_updated"
+  | "attachment_removed"
+  | "helpers_changed"
   | "owner_changed"
   | "updated"
   | "status_changed"
@@ -125,6 +128,18 @@ export interface Customer extends TicketStats {
   id: UUID;
   name: string;
   tags?: Tag[];
+  /** Todos os contatos (e-mails e telefones com nome e tipo), como vieram do Field Control. */
+  contacts?: ContactEntry[];
+  /** Endereço da matriz. */
+  address_line?: string | null;
+  district?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip_code?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  logo_url?: string | null;
+  legacy?: CustomerLegacy | null;
   document: string | null;
   email: string | null;
   phone: string | null;
@@ -140,6 +155,8 @@ export interface Location extends TicketStats {
   customer_id: UUID;
   customer: Ref;
   name: string;
+  contacts?: ContactEntry[];
+  legacy?: RecordLegacy | null;
   code: string | null;
   document: string | null;
   address_line: string | null;
@@ -260,6 +277,10 @@ export interface TicketListItem {
   project: ProjectRef | null;
   /** Analista responsável (acompanha a OS); o técnico é o `assignee`. */
   owner?: UserRef | null;
+  /** Outros técnicos da visita, além do responsável. */
+  helpers?: UserRef[];
+  /** Nº do chamado no sistema do cliente (entra na busca). */
+  client_reference?: string | null;
   requester_name: string | null;
   scheduled_start: ISODate | null;
   scheduled_end: ISODate | null;
@@ -299,6 +320,8 @@ export interface TicketDetail extends TicketListItem {
   requester_contact: string | null;
   /** Endereço do atendimento quando diferente do cadastrado no local. */
   service_address: string | null;
+  /** Observação da visita: o recado para o técnico (com quem falar, acesso, o que levar). */
+  visit_note?: string | null;
   created_by: UserRef | null;
   closed_at: ISODate | null;
   cancelled_at: ISODate | null;
@@ -398,6 +421,10 @@ export interface Attachment {
   uploaded_by: UserRef | null;
   created_at: ISODate;
   download_url: string | null;
+  /** Legenda (aparece no relatório do cliente). */
+  description?: string | null;
+  /** Arquivo migrado que continua no armazenamento do Field Control (sem tamanho conhecido). */
+  external?: boolean;
 }
 
 export interface AssigneeLoad {
@@ -462,10 +489,16 @@ export interface TicketCreatePayload {
   requester_name?: string | null;
   requester_contact?: string | null;
   service_address?: string | null;
+  client_reference?: string | null;
+  visit_note?: string | null;
   service_type_id?: UUID | null;
   estimated_minutes?: number | null;
   team_id?: UUID | null;
   assignee_id?: UUID | null;
+  /** Outros técnicos da visita (só a gestão). */
+  helper_ids?: UUID[];
+  /** Analista responsável. Omitido: quem abre assume. null: fica sem analista. */
+  owner_id?: UUID | null;
   scheduled_start?: ISODate | null;
   scheduled_end?: ISODate | null;
   allow_conflict?: boolean;
@@ -475,6 +508,43 @@ export interface TicketCreatePayload {
 export type TicketUpdatePayload = Partial<
   Omit<TicketCreatePayload, "source" | "requester_id" | "assignee_id">
 > & { expected_version?: number };
+
+/** Contexto para abrir a OS: o cliente e a loja escolhidos. */
+export interface IntakeContext {
+  upcoming_days: number;
+  customer: {
+    id: UUID;
+    name: string;
+    tags: Tag[];
+    notes: string | null;
+    rating_average: number | null;
+    rating_last: number | null;
+    total_tickets: number;
+    open_tickets: number;
+    upcoming: number;
+  } | null;
+  location: {
+    id: UUID;
+    name: string;
+    code: string | null;
+    address_line: string | null;
+    district: string | null;
+    city: string | null;
+    state: string | null;
+    zip_code: string | null;
+    latitude: number | null;
+    longitude: number | null;
+    contact_name: string | null;
+    contact_phone: string | null;
+    notes: string | null;
+    total_tickets: number;
+    open_tickets: number;
+    tickets_30d: number;
+    last_visit: { ticket_id: UUID; code: string; title: string; at: ISODate; technician: string | null } | null;
+    is_capital: boolean;
+    arrival_hours: number | null;
+  } | null;
+}
 
 export interface TicketTransitionPayload {
   to_status: TicketStatus;
@@ -628,6 +698,8 @@ export interface TrackingHistory {
 
 // Calendário e conflito de horário
 export interface ConflictItem {
+  /** Quem está ocupado (o responsável ou outro técnico da visita). */
+  who?: string | null;
   id: UUID;
   code: string;
   title: string;
@@ -731,6 +803,19 @@ export interface Technician {
   phone: string | null;
   job_title: string | null;
   team: Ref | null;
+  /** Região de atuação: calculada pelo histórico de OS (onde ele atendeu) ou pelo endereço. */
+  base_city?: string | null;
+  base_state?: string | null;
+  base_source?: "history" | "home" | null;
+  base_visits?: number;
+  last_visit_at?: ISODate | null;
+  /** Ficha completa: endereço, jornada e serviços que faz. */
+  address_line?: string | null;
+  address_district?: string | null;
+  address_zip?: string | null;
+  work_schedule?: WorkSchedule | null;
+  services?: { id: UUID; name: string }[];
+  legacy?: RecordLegacy | null;
   home_city: string | null;
   home_state: string | null;
   coverage_area: string | null;
@@ -1068,6 +1153,12 @@ export interface TechnicianSuggestion {
   open_tickets: number;
   on_shift: boolean;
   distance_km: number | null;
+  /** Visitas a esta mesma loja. */
+  visits_at_location?: number;
+  last_visit_at_location?: ISODate | null;
+  /** Com horário informado: ocupado nele e quantas OS já tem no dia. */
+  busy?: boolean | null;
+  day_load?: number | null;
   score: number;
   reasons: string[];
 }
@@ -1135,6 +1226,7 @@ export interface PublicReportPhoto {
   url: string;
   filename: string;
   taken_at?: ISODate | null;
+  caption?: string | null;
 }
 
 export interface PublicReport {
@@ -1241,4 +1333,71 @@ export interface LegacyOrder {
   files?: { url: string; title: string | null; type: string | null }[];
   deadline?: { response_status: string | null; solution_status: string | null } | null;
   migration_note?: string | null;
+}
+
+// ---- Região dos técnicos e busca por proximidade ----
+
+export interface TechnicianRegion {
+  state: string;
+  total: number;
+  cities: { city: string; total: number }[];
+}
+
+export interface NearbyTechnician {
+  id: UUID;
+  name: string;
+  email: string;
+  phone: string | null;
+  is_active: boolean;
+  avatar_url: string | null;
+  base_city: string | null;
+  base_state: string | null;
+  base_source: "history" | "home" | null;
+  distance_km: number;
+  nearest_kind: "store_history" | "home" | "live";
+  visits_at_location: number;
+  last_visit_at_location: ISODate | null;
+  visits_in_city: number;
+  total_visits: number;
+  last_visit_at: ISODate | null;
+  open_tickets: number;
+  on_shift: boolean;
+  reasons: string[];
+}
+
+export interface NearbyResult {
+  point: { latitude: number; longitude: number; label: string };
+  technicians: NearbyTechnician[];
+}
+
+// ---- Fichas completas (técnico, cliente e loja) ----
+
+export interface ContactEntry {
+  kind: "email" | "phone";
+  value: string;
+  name: string | null;
+  /** work | personal | mobile | home */
+  label: string | null;
+  primary: boolean;
+}
+
+export interface WorkSchedule {
+  start: string | null;
+  end: string | null;
+  break_start: string | null;
+  break_end: string | null;
+}
+
+/** Origem do cadastro (Field Control): id, datas e dados que não têm campo próprio. */
+export interface RecordLegacy {
+  source: string;
+  id: string | number | null;
+  created_at?: ISODate | null;
+  territories?: string[];
+}
+
+export interface CustomerLegacy extends RecordLegacy {
+  rating?: { average: number; last_star: number; last_comment: string | null } | null;
+  service?: { first_at: ISODate | null; last_at: ISODate | null; total: number } | null;
+  attachments?: { url: string; title: string | null; type: string | null }[];
 }

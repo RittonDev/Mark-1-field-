@@ -13,7 +13,15 @@ const time = (value: string | null) => (value ? new Date(value).getTime() : Numb
 
 export const isDone = (status: TicketStatus) => STATUS[status].group === "done" || STATUS[status].final;
 
+/** Responsável pela OS (inicia, conclui, preenche formulários e colhe a assinatura). */
 export const isMine = (ticket: LocalTicket, user: User) => ticket.assignee?.id === user.id;
+
+/** Outro técnico da visita: vê a OS, aponta horas e manda fotos; o resto fica com o responsável. */
+export const isHelper = (ticket: Pick<LocalTicket, "assignee" | "helpers">, user: Pick<User, "id">) =>
+  ticket.assignee?.id !== user.id && (ticket.helpers ?? []).some((h) => h.id === user.id);
+
+/** Na visita: responsável ou auxiliar. É o que entra em Hoje, Agenda e Concluídas. */
+export const onVisit = (ticket: LocalTicket, user: User) => isMine(ticket, user) || isHelper(ticket, user);
 
 /**
  * Visita improdutiva registrada e ainda sem nova agenda: a OS voltou para a central reagendar,
@@ -58,7 +66,7 @@ export function buildLists(tickets: LocalTicket[], user: User, now: Date = new D
   const weekAgo = addDays(startOfDay(now), -7).getTime();
 
   for (const ticket of tickets) {
-    if (!isMine(ticket, user)) continue;
+    if (!onVisit(ticket, user)) continue;
     if (isDone(ticket.status)) {
       if (new Date(ticket.updated_at).getTime() >= weekAgo) done.push(ticket);
       continue;
@@ -86,7 +94,7 @@ export function ticketsOnDay(tickets: LocalTicket[], user: User, day: Date, now:
   const end = addDays(startOfDay(day), 1).getTime();
   const isToday = start === startOfDay(now).getTime();
   return tickets
-    .filter((t) => isMine(t, user))
+    .filter((t) => onVisit(t, user))
     .filter((t) => {
       const s = t.scheduled_start ? new Date(t.scheduled_start).getTime() : null;
       const e = t.scheduled_end ? new Date(t.scheduled_end).getTime() : s;

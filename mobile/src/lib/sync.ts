@@ -38,6 +38,7 @@ import {
   insertSignature,
   listOutbox,
   listPhotos,
+  listTickets,
   listSignatures,
   markLocalSent,
   markOpsAttempt,
@@ -61,6 +62,7 @@ import {
   type PendingSignature,
 } from "./db";
 import { AUTHORIZATION_ERROR, setFieldRules } from "./field";
+import { isDone, isHelper } from "./lists";
 import { haptic } from "./haptics";
 import { syncOnsiteAlerts } from "./onsiteAlerts";
 import { userRef } from "./ops";
@@ -192,6 +194,7 @@ async function runOnce() {
     await uploadPhotos();
     await pushWithSignatures();
     await pullChanges();
+    await revalidateHelperTickets();
     await refreshFieldRules();
     await refreshViolationReasons();
     // Alertas locais do tempo na loja (aviso faltando 30 min e no estouro das 4h).
@@ -534,6 +537,33 @@ export async function refreshRecurrence(ticketId: UUID): Promise<Recurrence | nu
   return recurrence;
 }
 
+/**
+ * Confere uma OS direto na API. Sem acesso (o técnico saiu da visita ou ela foi reatribuída), sai do
+ * aparelho: o `revoked_ticket_ids` do pull só cobre reatribuição, não a saída da equipe da visita.
+ */
+async function revalidateTicket(ticketId: UUID): Promise<void> {
+  try {
+    await storeServerTicket(await api.get<TicketDetail>(`/tickets/${ticketId}`));
+  } catch (error) {
+    if (!(error instanceof ApiError) || (error.status !== 403 && error.status !== 404)) return;
+    const local = await getTicket(ticketId);
+    await transaction((db) => deleteTicket(db, ticketId));
+    if (local) showToast(`${local.code} saiu da sua lista`, { description: "Você não está mais na visita desta OS." });
+  }
+}
+
+let helpersCheckedAt = 0;
+
+/** Rede de segurança (a cada 10 min): as OS em que o técnico vai junto ainda são dele? */
+async function revalidateHelperTickets() {
+  if (Date.now() - helpersCheckedAt < 10 * 60_000) return;
+  helpersCheckedAt = Date.now();
+  const user = currentUser();
+  for (const ticket of await listTickets()) {
+    if (isHelper(ticket, user) && !isDone(ticket.status)) await revalidateTicket(ticket.id);
+  }
+}
+
 /** Busca uma OS direto na API (após "assumir", por exemplo) e grava localmente. */
 export async function storeServerTicket(ticket: TicketDetail) {
   const user = currentUser();
@@ -872,6 +902,8 @@ function describeEvent(event: RealtimeEvent, user: User): string | null {
   const code = event.ticket_code ?? "OS";
   if (event.type === "ticket.assigned" && event.assignee_id === user.id) return `${code} foi atribuída a você`;
   if (event.type === "ticket.created" && event.assignee_id === user.id) return `Nova ${code} para você`;
+  const addedIds = (event.data?.added_ids as string[] | undefined) ?? [];
+  if (event.type === "ticket.helpers_changed" && addedIds.includes(user.id)) return `Você vai na visita da ${code}`;
   // "ticket.authorization" e "ticket.part_request_decided" só disparam o sync: o pull compara a OS
   // e avisa (autorizada/negada, peça aprovada com o check, peça recusada), sem aviso duplicado.
   // Acompanhamentos não fazem parte do app: a central fala com o técnico pelo grupo de WhatsApp.
@@ -892,6 +924,12 @@ export function startSync() {
       if (text) showToast(text);
       clearTimeout(wsDebounce);
       wsDebounce = setTimeout(() => void requestSync(), 400);
+      // Mudou a equipe da visita: quem saiu não recebe mais a OS no pull; confere direto na API.
+      const removedMe = user && event.ticket_id && !((event.data?.added_ids as string[] | undefined) ?? []).includes(user.id);
+      if (event.type === "ticket.helpers_changed" && removedMe && event.ticket_id) {
+        const ticketId = event.ticket_id;
+        void getTicket(ticketId).then((local) => (local && user && isHelper(local, user) ? revalidateTicket(ticketId) : undefined));
+      }
     },
   });
 
