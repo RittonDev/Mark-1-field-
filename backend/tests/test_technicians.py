@@ -42,7 +42,7 @@ async def test_access_management(client: AsyncClient, world: World) -> None:
 
     # Só técnicos: o analista não edita outro analista por aqui.
     other = await client.patch(
-        f"{API}/technicians/{world.analyst.user.id}", json={"name": "X"}, headers=an
+        f"{API}/technicians/{world.analyst.user.id}", json={"name": "Xavier"}, headers=an
     )
     assert other.status_code == 404
 
