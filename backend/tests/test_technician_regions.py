@@ -170,7 +170,8 @@ async def test_regions_from_history_and_filters(
             f"{API}/technicians", params={"state": "CE", "city": "FORTALEZA"}, headers=an
         )
     ).json()
-    assert [t["id"] for t in fortaleza] == [ids["tech"]]
+    # Os dois atuam em Fortaleza (o outro pelo apontamento na loja do centro).
+    assert {t["id"] for t in fortaleza} == {ids["tech"], ids["other"]}
     sp = (await client.get(f"{API}/technicians", params={"city": "sao  paulo"}, headers=an)).json()
     # O inativo atua em São Paulo; o técnico só "mora" lá (endereço) e também aparece.
     assert {t["id"] for t in sp} == {ids["inactive"], ids["tech"]}
