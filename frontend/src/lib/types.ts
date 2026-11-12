@@ -44,7 +44,11 @@ export type TicketEventType =
   | "assigned"
   | "comment_added"
   | "worklog_added"
-  | "attachment_added";
+  | "attachment_added"
+  | "form_added"
+  | "form_completed"
+  | "form_removed"
+  | "signature_collected";
 export type SlaStatus = "ok" | "at_risk" | "breached" | "paused" | "met";
 export type AttachmentKind = "file" | "photo" | "signature";
 
@@ -286,6 +290,13 @@ export interface TicketDetail extends TicketListItem {
   resolution_breached: boolean;
   /** Resolvida com prazo violado e sem motivo informado. */
   violation_reason_pending: boolean;
+  /** Formulários anexados pela gestão e assinatura do responsável no local. */
+  forms: TicketForm[];
+  signature_required: boolean;
+  signer_name: string | null;
+  signer_role: string | null;
+  signed_at: ISODate | null;
+  signature_attachment_id: UUID | null;
   allowed_transitions: TicketStatus[];
   can_edit: boolean;
   can_assign: boolean;
@@ -339,6 +350,9 @@ export interface Attachment {
   content_type: string;
   size_bytes: number;
   kind: AttachmentKind | string;
+  /** Foto de um campo de formulário. */
+  form_id: UUID | null;
+  field_id: string | null;
   uploaded_by: UserRef | null;
   created_at: ISODate;
   download_url: string | null;
@@ -707,4 +721,59 @@ export interface ImportResult {
   updated: number;
   errors: number;
   credentials: { name: string; email: string; temporary_password: string }[];
+}
+
+// Formulários (checklists) da OS
+export type FormFieldType =
+  | "section"
+  | "text"
+  | "textarea"
+  | "number"
+  | "yes_no"
+  | "choice"
+  | "multi_choice"
+  | "date"
+  | "confirm"
+  | "photo";
+
+export interface FormField {
+  id: string;
+  type: FormFieldType;
+  label: string;
+  help: string | null;
+  required: boolean;
+  options: string[];
+  min_photos: number;
+  max_photos: number;
+}
+
+export interface FormTemplate {
+  id: UUID;
+  name: string;
+  description: string | null;
+  fields: FormField[];
+  service_type_ids: UUID[];
+  requires_signature: boolean;
+  is_active: boolean;
+  version: number;
+  created_at: ISODate;
+  updated_at: ISODate;
+}
+
+export type FormStatus = "pending" | "in_progress" | "completed";
+export type FormAnswer = string | number | boolean | string[];
+
+export interface TicketForm {
+  id: UUID;
+  ticket_id: UUID;
+  template_id: UUID | null;
+  name: string;
+  fields: FormField[];
+  required: boolean;
+  status: FormStatus;
+  answers: Record<string, FormAnswer>;
+  completed_at: ISODate | null;
+  completed_by: Ref | null;
+  created_at: ISODate;
+  updated_at: ISODate;
 }

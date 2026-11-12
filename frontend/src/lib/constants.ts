@@ -163,6 +163,10 @@ export const EVENT_TYPE: Record<TicketEventType, string> = {
   comment_added: "adicionou um acompanhamento",
   worklog_added: "registrou um apontamento",
   attachment_added: "anexou um arquivo",
+  form_added: "anexou o formulário",
+  form_completed: "concluiu o formulário",
+  form_removed: "removeu o formulário",
+  signature_collected: "colheu a assinatura de",
 };
 
 export const SLA_STATUS: Record<SlaStatus, { label: string; color: string }> = {
