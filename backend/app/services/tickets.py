@@ -265,6 +265,30 @@ async def _resolve_refs(
     }
 
 
+async def _resolve_service_type(
+    db: AsyncSession, service_type_id: uuid.UUID, customer_id: uuid.UUID | None
+) -> ServiceType:
+    service_type = await db.get(ServiceType, service_type_id)
+    if service_type is None or not service_type.is_active:
+        raise WorkflowError("Tipo de serviço não encontrado ou inativo")
+    if (
+        service_type.customer_id is not None
+        and customer_id is not None
+        and service_type.customer_id != customer_id
+    ):
+        raise WorkflowError("Este tipo de serviço é do catálogo de outro cliente")
+    return service_type
+
+
+def _default_end(
+    start: datetime | None, end: datetime | None, estimated_minutes: int | None
+) -> datetime | None:
+    """Sem fim informado, a visita dura o estimado pelo tipo de serviço."""
+    if start is not None and end is None and estimated_minutes:
+        return start + timedelta(minutes=estimated_minutes)
+    return end
+
+
 def _check_schedule(start: datetime | None, end: datetime | None) -> None:
     if start is not None and end is not None and end <= start:
         raise WorkflowError("O fim da visita deve ser depois do início")
@@ -289,6 +313,15 @@ def _change_status(
         sla.pause(ticket, now)
     elif from_status in SLA_PAUSED_STATUSES and to not in SLA_PAUSED_STATUSES:
         sla.resume(ticket, now)
+
+    # Duração real: soma os trechos em "Em atendimento" (o técnico não digita nada).
+    if from_status == S.IN_PROGRESS and ticket.work_started_at is not None:
+        ticket.work_seconds = durations.actual_seconds(
+            ticket.work_seconds, ticket.work_started_at, now
+        )
+        ticket.work_started_at = None
+    if to == S.IN_PROGRESS:
+        ticket.work_started_at = now
 
     if (
         ticket.first_response_at is None
@@ -404,6 +437,17 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
         team_id=None if is_requester else data.team_id,
     )
     category: Category | None = refs["category"]
+    customer_id = refs["customer_id"]
+    service_type: ServiceType | None = None
+    if data.service_type_id is not None and not is_requester:
+        service_type = await _resolve_service_type(db, data.service_type_id, customer_id)
+        customer_id = customer_id or service_type.customer_id
+        if category is None:
+            category = service_type.category
+    estimated_minutes = data.estimated_minutes if not is_requester else None
+    if estimated_minutes is None and service_type is not None:
+        estimated_minutes = service_type.estimated_minutes
+
     team_id = refs["team_id"]
     if team_id is None and category is not None:
         team_id = category.default_team_id
@@ -424,6 +468,7 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
 
     scheduled_start = None if is_requester else data.scheduled_start
     scheduled_end = None if is_requester else data.scheduled_end
+    scheduled_end = _default_end(scheduled_start, scheduled_end, estimated_minutes)
     _check_schedule(scheduled_start, scheduled_end)
 
     ticket = Ticket(
@@ -436,7 +481,7 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
         priority=priority,
         source=data.source,
         category_id=category.id if category else None,
-        customer_id=refs["customer_id"],
+        customer_id=customer_id,
         location_id=refs["location_id"],
         asset_id=refs["asset_id"],
         requester_id=requester_id,
@@ -447,6 +492,9 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
         team_id=team_id,
         scheduled_start=scheduled_start,
         scheduled_end=scheduled_end,
+        service_type_id=service_type.id if service_type else None,
+        estimated_minutes=estimated_minutes,
+        work_seconds=0,
         sla_paused_seconds=0,
         reopen_count=0,
         created_at=now,

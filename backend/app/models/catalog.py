@@ -6,6 +6,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.enums import TicketPriority
 from app.db.base import Base, Timestamps, UUIDPrimaryKey
 from app.models._types import str_enum
+from app.models.customer import Customer
 from app.models.user import Team
 
 
@@ -53,3 +54,31 @@ class SlaPolicy(UUIDPrimaryKey, Timestamps, Base):
     priority: Mapped[TicketPriority] = mapped_column(str_enum(TicketPriority), unique=True)
     response_minutes: Mapped[int] = mapped_column(Integer)
     resolution_minutes: Mapped[int] = mapped_column(Integer)
+
+
+class ServiceType(UUIDPrimaryKey, Timestamps, Base):
+    """Tipo de serviço (o "Tipo de OS" do Field Control) com a duração estimada.
+
+    Sem `customer_id`, vale para todos os clientes; com, é o catálogo daquele cliente
+    (ex.: "Preventiva de loja - Shoulder"). A duração observada é derivada das OS concluídas
+    (mediana do tempo em atendimento) e sugere correções da estimativa.
+    """
+
+    __tablename__ = "service_types"
+    __table_args__ = (
+        UniqueConstraint("customer_id", "name", name="uq_service_types_customer_name"),
+    )
+
+    name: Mapped[str] = mapped_column(String(160), index=True)
+    description: Mapped[str | None] = mapped_column(Text)
+    estimated_minutes: Mapped[int] = mapped_column(Integer)
+    customer_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("customers.id", ondelete="CASCADE"), index=True
+    )
+    category_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("categories.id", ondelete="SET NULL")
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+
+    customer: Mapped[Customer | None] = relationship(lazy="selectin")
+    category: Mapped[Category | None] = relationship(lazy="selectin")

@@ -28,7 +28,7 @@ from app.core.enums import (
 from app.db.base import Base, Timestamps, UUIDPrimaryKey, created_at_column
 from app.models._types import str_enum
 from app.models.asset import Asset
-from app.models.catalog import Category
+from app.models.catalog import Category, ServiceType
 from app.models.customer import Customer, Location
 from app.models.user import Team, User
 
@@ -107,6 +107,15 @@ class Ticket(UUIDPrimaryKey, Timestamps, Base):
     reopen_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     resolution_notes: Mapped[str | None] = mapped_column(Text)
 
+    # Tipo de serviço e duração: a estimativa é copiada do tipo na abertura (a OS guarda a
+    # estimativa com que foi agendada); a real é o tempo somado em "Em atendimento".
+    service_type_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("service_types.id", ondelete="SET NULL"), index=True
+    )
+    estimated_minutes: Mapped[int | None] = mapped_column(Integer)
+    work_seconds: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    work_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     # Concorrência otimista (web e mobile editando a mesma OS).
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
 
@@ -118,6 +127,7 @@ class Ticket(UUIDPrimaryKey, Timestamps, Base):
     created_by: Mapped[User | None] = relationship(foreign_keys=[created_by_id], lazy="selectin")
     assignee: Mapped[User | None] = relationship(foreign_keys=[assignee_id], lazy="selectin")
     team: Mapped[Team | None] = relationship(lazy="selectin")
+    service_type: Mapped[ServiceType | None] = relationship(lazy="selectin")
 
     __mapper_args__ = {"version_id_col": version, "eager_defaults": True}
 

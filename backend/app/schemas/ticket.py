@@ -18,11 +18,19 @@ from app.core.enums import (
 )
 from app.schemas.common import ORMModel, Ref
 from app.schemas.user import UserRef
+from app.db.base import utcnow
+from app.services.durations import actual_seconds
 from app.services.sla import compute_sla_status
 
 
 def format_ticket_code(number: int) -> str:
     return f"{settings.TICKET_PREFIX}-{number:06d}"
+
+
+class ServiceTypeRef(ORMModel):
+    id: uuid.UUID
+    name: str
+    estimated_minutes: int
 
 
 class CategoryRef(ORMModel):
@@ -106,6 +114,18 @@ class TicketDetail(TicketListItem):
     cancelled_at: datetime | None
     reopen_count: int
     resolution_notes: str | None
+    service_type: ServiceTypeRef | None
+    # Estimada: copiada do tipo na abertura (ou informada). Real: tempo em "Em atendimento".
+    estimated_minutes: int | None
+    work_seconds: int
+    work_started_at: datetime | None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def actual_minutes(self) -> int:
+        """Duração real em minutos (inclui o atendimento em andamento)."""
+        return actual_seconds(self.work_seconds, self.work_started_at, utcnow()) // 60
+
     # Preenchido pela API conforme o papel do usuário logado.
     allowed_transitions: list[TicketStatus] = []
     can_edit: bool = False
@@ -129,6 +149,8 @@ class TicketCreate(BaseModel):
     requester_name: str | None = Field(default=None, max_length=160)
     requester_contact: str | None = Field(default=None, max_length=160)
     service_address: str | None = Field(default=None, max_length=255)
+    service_type_id: uuid.UUID | None = None
+    estimated_minutes: int | None = Field(default=None, gt=0, le=60 * 24 * 7)
     team_id: uuid.UUID | None = None
     assignee_id: uuid.UUID | None = None
     scheduled_start: datetime | None = None
@@ -149,6 +171,8 @@ class TicketUpdate(BaseModel):
     requester_name: str | None = Field(default=None, max_length=160)
     requester_contact: str | None = Field(default=None, max_length=160)
     service_address: str | None = Field(default=None, max_length=255)
+    service_type_id: uuid.UUID | None = None
+    estimated_minutes: int | None = Field(default=None, gt=0, le=60 * 24 * 7)
     team_id: uuid.UUID | None = None
     scheduled_start: datetime | None = None
     scheduled_end: datetime | None = None
@@ -252,6 +276,7 @@ class TicketFilters(BaseModel):
     team_id: uuid.UUID | None = None
     customer_id: uuid.UUID | None = None
     location_id: uuid.UUID | None = None
+    service_type_id: uuid.UUID | None = None
     category_id: uuid.UUID | None = None
     asset_id: uuid.UUID | None = None
     q: str | None = None
