@@ -90,6 +90,10 @@ class TicketEventType(StrEnum):
     COMMENT_ADDED = "comment_added"
     WORKLOG_ADDED = "worklog_added"
     ATTACHMENT_ADDED = "attachment_added"
+    FORM_ADDED = "form_added"
+    FORM_COMPLETED = "form_completed"
+    FORM_REMOVED = "form_removed"
+    SIGNATURE_COLLECTED = "signature_collected"
 
 
 class DevicePlatform(StrEnum):
@@ -128,3 +132,11 @@ class ApplicationStatus(StrEnum):
     PENDING = "pending"  # aguardando análise
     APPROVED = "approved"  # virou técnico da base
     REJECTED = "rejected"
+
+
+class FormStatus(StrEnum):
+    """Formulário (checklist) anexado à OS."""
+
+    PENDING = "pending"  # ninguém respondeu ainda
+    IN_PROGRESS = "in_progress"  # respostas salvas, falta concluir
+    COMPLETED = "completed"  # validado: obrigatórios respondidos e fotos mínimas enviadas

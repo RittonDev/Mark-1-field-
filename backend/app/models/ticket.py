@@ -125,7 +125,18 @@ class Ticket(UUIDPrimaryKey, Timestamps, Base):
     )
     violation_note: Mapped[str | None] = mapped_column(Text)
 
-    # Concorrência otimista (web e mobile editando a mesma OS).
+    # Assinatura do responsável no local, coletada pelo técnico ao finalizar. Fica exigida
+    # quando a gestão anexa um formulário obrigatório que pede assinatura.
+    signature_required: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
+    signer_name: Mapped[str | None] = mapped_column(String(160))
+    signer_role: Mapped[str | None] = mapped_column(String(120))
+    signed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Anexo (kind="signature") com a imagem; sem FK para não criar ciclo tickets <-> anexos.
+    signature_attachment_id: Mapped[uuid.UUID | None] = mapped_column()
+
+    # Concorrência otimista) (web e mobile editando a mesma OS).
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
 
     category: Mapped[Category | None] = relationship(lazy="selectin")
@@ -142,6 +153,10 @@ class Ticket(UUIDPrimaryKey, Timestamps, Base):
     )
     resolution_violation_reason: Mapped[ViolationReason | None] = relationship(
         foreign_keys=[resolution_violation_reason_id], lazy="selectin"
+    )
+
+    forms: Mapped[list["TicketForm"]] = relationship(  # noqa: F821
+        lazy="selectin", order_by="TicketForm.created_at", viewonly=True
     )
 
     __mapper_args__ = {"version_id_col": version, "eager_defaults": True}
@@ -218,6 +233,11 @@ class TicketAttachment(UUIDPrimaryKey, Base):
     size_bytes: Mapped[int] = mapped_column(Integer)
     kind: Mapped[str] = mapped_column(String(20), default="file")  # file | photo | signature
     storage_key: Mapped[str] = mapped_column(String(500))
+    # Foto de um campo de formulário (ex.: "Foto do rack antes").
+    form_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("ticket_forms.id", ondelete="CASCADE"), index=True
+    )
+    field_id: Mapped[str | None] = mapped_column(String(40))
     created_at: Mapped[datetime] = created_at_column()
 
     uploaded_by: Mapped[User | None] = relationship(lazy="selectin")
