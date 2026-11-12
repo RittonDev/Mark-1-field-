@@ -26,7 +26,7 @@ from app.schemas.technician import (
     TechnicianOut,
     TechnicianUpdate,
 )
-from app.services import storage
+from app.services import storage, technician_regions
 from app.services.errors import NotFound, WorkflowError
 from app.services.spreadsheet import read_table
 from app.services.workflow import OPEN_STATUSES
@@ -140,15 +140,28 @@ async def to_out(db: AsyncSession, users: list[User]) -> list[TechnicianOut]:
                 service_areas=profile.service_areas if profile else [],
                 skills=[SkillOut(**s) for s in profile.skills] if profile else [],
                 application_id=profile.id if profile else None,
+                base_city=u.base_city,
+                base_state=u.base_state,
+                base_source=u.base_source,  # type: ignore[arg-type]
+                base_visits=u.base_visits or 0,
+                last_visit_at=u.last_visit_at,
             )
         )
     return out
 
 
 async def list_technicians(
-    db: AsyncSession, q: str | None, team_id: uuid.UUID | None, active: bool | None
+    db: AsyncSession,
+    q: str | None,
+    team_id: uuid.UUID | None,
+    active: bool | None,
+    state: str | None = None,
+    city: str | None = None,
 ) -> list[TechnicianOut]:
     stmt = select(User).where(User.role == UserRole.TECHNICIAN)
+    region = technician_regions.region_filter(state, city)
+    if region is not None:
+        stmt = stmt.where(region)
     if q:
         term = f"%{q.strip()}%"
         stmt = stmt.where(

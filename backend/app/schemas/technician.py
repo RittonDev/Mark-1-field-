@@ -30,6 +30,12 @@ class TechnicianOut(BaseModel):
     service_areas: list[str] = []
     skills: list[SkillOut] = []
     application_id: uuid.UUID | None = None
+    # Região de atuação: a cidade onde mais atendeu (history) ou o endereço (home).
+    base_city: str | None = None
+    base_state: str | None = None
+    base_source: Literal["history", "home"] | None = None
+    base_visits: int = 0
+    last_visit_at: dt.datetime | None = None
 
 
 class TechnicianCreate(BaseModel):
@@ -110,3 +116,55 @@ class TechnicianSuggestion(BaseModel):
     score: float
     # Por que foi sugerido: "Mora em Santos", "A 4 km agora", "Livre no horário"...
     reasons: list[str]
+
+
+class RegionCity(BaseModel):
+    city: str
+    total: int
+
+
+class RegionState(BaseModel):
+    state: str
+    total: int
+    cities: list[RegionCity]
+
+
+class RegionRefresh(BaseModel):
+    technicians: int
+    history: int
+    home: int
+    none: int
+
+
+class NearbyPoint(BaseModel):
+    latitude: float
+    longitude: float
+    label: str
+
+
+class NearbyTechnician(BaseModel):
+    id: uuid.UUID
+    name: str
+    email: str
+    phone: str | None
+    is_active: bool
+    avatar_url: str | None
+    base_city: str | None
+    base_state: str | None
+    base_source: Literal["history", "home"] | None
+    distance_km: float
+    # De onde veio a menor distância: loja que já atendeu, endereço ou posição ao vivo.
+    nearest_kind: Literal["store_history", "home", "live"]
+    visits_at_location: int
+    last_visit_at_location: dt.datetime | None
+    visits_in_city: int
+    total_visits: int
+    last_visit_at: dt.datetime | None
+    open_tickets: int
+    on_shift: bool
+    reasons: list[str]
+
+
+class NearbyOut(BaseModel):
+    point: NearbyPoint
+    technicians: list[NearbyTechnician]

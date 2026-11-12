@@ -1,7 +1,7 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, File, HTTPException, Response, UploadFile, status
+from fastapi import APIRouter, File, HTTPException, Query, Response, UploadFile, status
 from fastapi.responses import FileResponse
 
 from app.api.deps import DB, TicketManagerUser
@@ -9,6 +9,9 @@ from app.core.security import InvalidToken, decode_token
 from app.models import Project, User
 from app.schemas.technician import (
     ImportResult,
+    NearbyOut,
+    RegionRefresh,
+    RegionState,
     TechnicianCreate,
     TechnicianOut,
     TechnicianSuggestion,
@@ -16,6 +19,7 @@ from app.schemas.technician import (
     TemporaryPassword,
 )
 from app.services import storage, suggestions
+from app.services import technician_regions as regions_svc
 from app.services import technicians as svc
 from app.services import tickets as tickets_svc
 from app.services.spreadsheet import SpreadsheetError
@@ -35,8 +39,53 @@ async def list_technicians(
     q: str | None = None,
     team_id: uuid.UUID | None = None,
     active: bool | None = None,
+    state: str | None = None,
+    city: str | None = None,
 ) -> list[TechnicianOut]:
-    return await svc.list_technicians(db, q, team_id, active)
+    """Base técnica. `state`/`city` filtram pela região de atuação (histórico) ou pelo endereço."""
+    if await regions_svc.refresh_if_stale(db):
+        await db.commit()
+    return await svc.list_technicians(db, q, team_id, active, state, city)
+
+
+@router.get("/technicians/regions", response_model=list[RegionState])
+async def technician_regions(db: DB, _: TicketManagerUser, active: bool | None = None) -> list[dict]:
+    """Estados e cidades com técnicos (região: a base pelo histórico, senão o endereço)."""
+    return await regions_svc.regions(db, active)
+
+
+@router.post("/technicians/regions/refresh", response_model=RegionRefresh)
+async def refresh_technician_regions(db: DB, _: TicketManagerUser) -> dict:
+    """Recalcula agora a região de atuação de todos os técnicos."""
+    counts = await regions_svc.refresh_bases(db)
+    await db.commit()
+    return counts
+
+
+@router.get("/technicians/nearby", response_model=NearbyOut)
+async def nearby_technicians(
+    db: DB,
+    _: TicketManagerUser,
+    location_id: uuid.UUID | None = None,
+    latitude: float | None = None,
+    longitude: float | None = None,
+    city: str | None = None,
+    state: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=50)] = 15,
+    include_inactive: bool = True,
+    max_km: Annotated[float | None, Query(gt=0)] = None,
+) -> dict:
+    """Técnicos mais próximos de uma loja, de coordenadas ou do centro de uma cidade."""
+    point = await regions_svc.resolve_point(
+        db, location_id=location_id, latitude=latitude, longitude=longitude, city=city, state=state
+    )
+    rows = await regions_svc.nearby(
+        db, point, limit=limit, include_inactive=include_inactive, max_km=max_km
+    )
+    return {
+        "point": {"latitude": point.latitude, "longitude": point.longitude, "label": point.label},
+        "technicians": rows,
+    }
 
 
 @router.post("/technicians", response_model=TemporaryPassword, status_code=status.HTTP_201_CREATED)
