@@ -15,6 +15,24 @@ function elapsedRatio(createdAt: number, due: number, pausedS: number, now: numb
   return elapsed / total;
 }
 
+/** Relógio de 1ª resposta furou: respondida tarde, ou ainda sem resposta e vencida (sla.py::response_breached). */
+export function responseBreached(ticket: TicketListItem, now: number = Date.now()): boolean {
+  const due = ms(ticket.response_due_at);
+  if (due === null || ticket.status === "cancelled") return false;
+  const answered = ms(ticket.first_response_at);
+  if (answered !== null) return answered > due;
+  return (ms(ticket.sla_paused_at) ?? now) > due;
+}
+
+/** Relógio de solução furou: resolvida tarde, ou ainda aberta e vencida (sla.py::resolution_breached). */
+export function resolutionBreached(ticket: TicketListItem, now: number = Date.now()): boolean {
+  const due = ms(ticket.resolution_due_at);
+  if (due === null || ticket.status === "cancelled") return false;
+  const resolved = ms(ticket.resolved_at);
+  if (resolved !== null) return resolved > due;
+  return (ms(ticket.sla_paused_at) ?? now) > due;
+}
+
 export function computeSlaStatus(ticket: TicketListItem, now: number = Date.now()): SlaStatus {
   if (ticket.status === "cancelled") return "ok";
   const resolvedAt = ms(ticket.resolved_at);

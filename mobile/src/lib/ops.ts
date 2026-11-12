@@ -7,6 +7,7 @@
 
 import { SELF_ASSIGN_ROLES, STATUS, TRANSITIONS, UNTOUCHED_STATUSES } from "./constants";
 import { actualSeconds, defaultEnd } from "./duration";
+import { resolutionBreached, responseBreached } from "./sla";
 import type { LocalTicket, OutboxOp } from "./syncTypes";
 import type { TicketDetail, TicketStatus, User, UserRef } from "./types";
 import { userCanTransition } from "./workflow";
@@ -82,6 +83,18 @@ function applyTransition(ticket: TicketDetail, op: Extract<OutboxOp, { type: "tr
   t.status = to;
   t.updated_at = at;
   t.allowed_transitions = allowedTransitions(user, t);
+
+  // Violação de SLA (schemas/ticket.py): flags pelos prazos e pendência quando resolvida sem motivo.
+  // O nome do motivo escolhido só chega no próximo sync; aqui basta saber que foi informado.
+  const atMs = new Date(at).getTime();
+  if (p.violation_note !== undefined) t.violation_note = p.violation_note?.trim() || null;
+  t.response_breached = responseBreached(t, atMs);
+  t.resolution_breached = resolutionBreached(t, atMs);
+  const hasResponseReason = Boolean(p.response_violation_reason_id || t.response_violation_reason);
+  const hasResolutionReason = Boolean(p.resolution_violation_reason_id || t.resolution_violation_reason);
+  t.violation_reason_pending =
+    (to === "resolved" || to === "closed") &&
+    ((t.response_breached && !hasResponseReason) || (t.resolution_breached && !hasResolutionReason));
   return t;
 }
 

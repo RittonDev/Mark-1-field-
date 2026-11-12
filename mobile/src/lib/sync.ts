@@ -24,6 +24,7 @@ import {
   getDb,
   getKv,
   getTicket,
+  getViolationReasonsAt,
   insertLocalComment,
   insertLocalWorklog,
   insertOp,
@@ -40,6 +41,7 @@ import {
   saveServerComment,
   saveServerTicket,
   saveServerWorklog,
+  saveViolationReasons,
   setKv,
   transaction,
 } from "./db";
@@ -56,7 +58,15 @@ import type {
   WorklogCreatePayload,
 } from "./syncTypes";
 import { showToast } from "./toast";
-import type { Attachment, RealtimeEvent, TicketDetail, TicketTransitionPayload, User, UUID } from "./types";
+import type {
+  Attachment,
+  RealtimeEvent,
+  TicketDetail,
+  TicketTransitionPayload,
+  User,
+  UUID,
+  ViolationReason,
+} from "./types";
 
 const PUSH_BATCH = 100; // a API aceita até 200 por lote
 const SAFETY_INTERVAL_MS = 90_000;
@@ -154,6 +164,7 @@ async function runOnce() {
   try {
     await pushOutbox();
     await pullChanges();
+    await refreshViolationReasons();
     await uploadPhotos();
     setStatus({ server: "reachable", lastSyncAt: new Date().toISOString(), lastError: null });
   } catch (error) {
@@ -301,6 +312,25 @@ async function pullChanges() {
       );
     }
     if (!data.has_more) return;
+  }
+}
+
+const REASONS_MAX_AGE_MS = 6 * 3600_000;
+let forceReasons = false;
+
+/**
+ * Cadastro de motivos de violação de SLA (GET /violation-reasons?active=true), guardado no SQLite.
+ * Muda pouco: baixa na primeira vez, a cada 6 h ou em "Baixar tudo". Falha aqui não derruba a rodada.
+ */
+async function refreshViolationReasons() {
+  const at = await getViolationReasonsAt();
+  if (!forceReasons && at && Date.now() - new Date(at).getTime() < REASONS_MAX_AGE_MS) return;
+  try {
+    await saveViolationReasons(await api.get<ViolationReason[]>("/violation-reasons?active=true"));
+    forceReasons = false;
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 0) throw error;
+    console.warn("Não foi possível atualizar os motivos de violação de SLA", error);
   }
 }
 
@@ -559,6 +589,7 @@ export function stopSync() {
 /** Pede ao servidor um pull completo na próxima rodada (tela Conta). */
 export async function resetCursor() {
   await setKv(SINCE_KEY, null);
+  forceReasons = true;
   await requestSync();
 }
 

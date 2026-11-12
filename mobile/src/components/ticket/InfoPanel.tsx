@@ -1,5 +1,5 @@
 import { StyleSheet, Text, View } from "react-native";
-import { ASSET_TYPE, LEVEL, SLA_STATUS, TICKET_SOURCE, TICKET_TYPE } from "../../lib/constants";
+import { ASSET_TYPE, LEVEL, RESPONSIBILITY, SLA_STATUS, TICKET_SOURCE, TICKET_TYPE } from "../../lib/constants";
 import { addressOf, callPhone, openInMaps } from "../../lib/device-actions";
 import { formatDateTime, formatDocument, formatRelative } from "../../lib/format";
 import { computeSlaStatus } from "../../lib/sla";
@@ -108,6 +108,22 @@ export function InfoPanel({ ticket, now }: { ticket: LocalTicket; now: number })
           />
         ) : null}
         {ticket.sla_paused_at ? <InfoRow label="Pausado desde" value={formatDateTime(ticket.sla_paused_at)} /> : null}
+        {ticket.response_violation_reason ? (
+          <InfoRow
+            label="Motivo da violação — 1ª resposta"
+            value={`${ticket.response_violation_reason.name} · ${RESPONSIBILITY[ticket.response_violation_reason.responsibility]?.label ?? ""}`}
+          />
+        ) : null}
+        {ticket.resolution_violation_reason ? (
+          <InfoRow
+            label="Motivo da violação — solução"
+            value={`${ticket.resolution_violation_reason.name} · ${RESPONSIBILITY[ticket.resolution_violation_reason.responsibility]?.label ?? ""}`}
+          />
+        ) : null}
+        {ticket.violation_note ? <InfoRow label="Detalhe da violação" value={ticket.violation_note} /> : null}
+        {ticket.violation_reason_pending ? (
+          <Text style={styles.label}>Prazo violado sem motivo informado: o analista justifica pela web.</Text>
+        ) : null}
       </Card>
 
       <Card>

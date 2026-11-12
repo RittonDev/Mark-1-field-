@@ -2,9 +2,12 @@ import { useState } from "react";
 import { KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { errorMessage } from "../lib/api";
+import { useLiveQuery } from "../lib/changes";
 import { STATUS, TRANSITION_ACTION } from "../lib/constants";
+import { getViolationReasons } from "../lib/db";
 import { currentPosition } from "../lib/device-actions";
 import { formatMinutes } from "../lib/format";
+import { resolutionBreached, responseBreached } from "../lib/sla";
 import { enqueueTransition, isOnline, useSyncStatus } from "../lib/sync";
 import type { LocalTicket } from "../lib/syncTypes";
 import { showToast } from "../lib/toast";
@@ -13,6 +16,7 @@ import { transitionRequirements } from "../lib/workflow";
 import { StatusBadge } from "./badges";
 import { DateTimeField } from "./DateTimeField";
 import { Button, colors, ErrorBox, Field, Input, SwitchRow } from "./ui";
+import { ViolationFields, type ViolationValues } from "./ViolationFields";
 
 /**
  * Confirma a mudança de status pedindo só o que o destino exige
@@ -34,6 +38,12 @@ export function TransitionModal({ ticket, to, onClose }: { ticket: LocalTicket; 
   const [shareLocation, setShareLocation] = useState(req.offersLocation);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [violation, setViolation] = useState<ViolationValues>({ response: "", resolution: "", note: "" });
+  const reasons = useLiveQuery(getViolationReasons) ?? [];
+  // Prazos conferidos no aparelho também: pode ter vencido offline, depois do último sync.
+  const [openedAt] = useState(() => Date.now());
+  const askResponse = to === "resolved" && (ticket.response_breached || responseBreached(ticket, openedAt));
+  const askResolution = to === "resolved" && (ticket.resolution_breached || resolutionBreached(ticket, openedAt));
 
   async function confirm() {
     setError(null);
@@ -46,6 +56,13 @@ export function TransitionModal({ ticket, to, onClose }: { ticket: LocalTicket; 
     try {
       const payload: TicketTransitionPayload = { to_status: to, note: note.trim() || null };
       if (req.needsResolution) payload.resolution_notes = resolution.trim();
+      // Motivo de violação: opcional no app; o servidor valida se o motivo vale para o relógio.
+      if (askResponse && violation.response) payload.response_violation_reason_id = violation.response;
+      if (askResolution && violation.resolution) payload.resolution_violation_reason_id = violation.resolution;
+      if ((askResponse || askResolution) && violation.note.trim()) payload.violation_note = violation.note.trim();
+      const leftPending =
+        (askResponse && !violation.response && !ticket.response_violation_reason) ||
+        (askResolution && !violation.resolution && !ticket.resolution_violation_reason);
       if (req.needsSchedule && start) {
         payload.scheduled_start = start.toISOString();
         payload.scheduled_end = end ? end.toISOString() : null;
@@ -61,9 +78,11 @@ export function TransitionModal({ ticket, to, onClose }: { ticket: LocalTicket; 
         tone: "success",
         description: gpsFailed
           ? "Sem localização (permissão negada ou sem sinal de GPS)."
-          : online
-            ? undefined
-            : "Salvo no aparelho; será enviado quando houver conexão.",
+          : leftPending
+            ? "Prazo violado sem motivo: fica pendente para o analista justificar."
+            : online
+              ? undefined
+              : "Salvo no aparelho; será enviado quando houver conexão.",
       });
       onClose();
     } catch (e) {
@@ -114,6 +133,13 @@ export function TransitionModal({ ticket, to, onClose }: { ticket: LocalTicket; 
               <Input value={resolution} onChangeText={setResolution} multiline placeholder="O que foi feito para resolver?" />
             </Field>
           ) : null}
+          <ViolationFields
+            responseBreached={askResponse}
+            resolutionBreached={askResolution}
+            values={violation}
+            onChange={setViolation}
+            reasons={reasons}
+          />
           <Field label={req.needsNote ? "Motivo" : "Observação"} required={req.needsNote}>
             <Input
               value={note}

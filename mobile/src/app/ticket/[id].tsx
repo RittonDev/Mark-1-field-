@@ -122,6 +122,11 @@ export default function TicketScreen() {
           </View>
           {current.scheduled_start ? <Text style={styles.meta}>Visita: {formatShort(current.scheduled_start)}</Text> : null}
           {current.work_started_at ? <DurationCompare ticket={current} now={now} /> : null}
+          {current.violation_reason_pending ? (
+            <Text style={styles.violationPending} accessibilityRole="text">
+              Pendente de justificativa de SLA
+            </Text>
+          ) : null}
           {current.resolution_due_at && !current.resolved_at && !current.sla_paused_at ? (
             <Text style={styles.meta}>Prazo de solução {formatRelative(current.resolution_due_at, now)}</Text>
           ) : null}
@@ -184,4 +189,5 @@ const styles = StyleSheet.create({
   badges: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   meta: { fontSize: 13, color: colors.inkMuted },
   pending: { fontSize: 13, fontWeight: "600", color: colors.warning },
+  violationPending: { fontSize: 12, color: colors.inkMuted, fontStyle: "italic" },
 });
