@@ -20,17 +20,17 @@ def test_managers_and_analysts_receive_everything() -> None:
         assert should_deliver(user_id="x", role=role, team_id=None, event=event(team_id="t9"))
 
 
-def test_technician_gets_own_team_and_open_queue() -> None:
+def test_technician_gets_only_own_tickets() -> None:
     def deliver(**aud: object) -> bool:
         return should_deliver(
             user_id="me", role=UserRole.TECHNICIAN, team_id="t1", event=event(**aud)
         )
 
     assert deliver(assignee_id="me", team_id="t2")
-    assert deliver(team_id="t1", assignee_id="other")
-    assert deliver()  # fila geral: sem grupo e sem analista
     assert deliver(previous_assignee_id="me", assignee_id="other", team_id="t2")
-    assert not deliver(team_id="t2", assignee_id="other")
+    assert not deliver(team_id="t1", assignee_id="other")  # mesmo grupo, de outro técnico
+    assert not deliver()  # fila sem responsável
+    assert not deliver(managers_only=True, assignee_id="me")  # rastreamento é só para gestores
 
 
 def test_requester_never_sees_internal() -> None:

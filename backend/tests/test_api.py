@@ -152,35 +152,39 @@ async def test_version_conflict(client: AsyncClient, world: World) -> None:
     assert r.status_code == 409
 
 
-async def test_technician_visibility_and_take(client: AsyncClient, world: World) -> None:
-    net_ticket = await create(client, world, team_id=world.team_net_id)
-    queue_ticket = await create(client, world)  # sem grupo: fila geral
+async def test_technician_sees_only_assigned(client: AsyncClient, world: World) -> None:
+    # Dinâmica: o cliente abre a OS, o analista coloca o técnico nela, e só então ele a vê.
+    team_ticket = await create(client, world, team_id=world.team_field_id)  # grupo dele, sem responsável
+    queue_ticket = await create(client, world)  # fila geral
+    mine = await create(client, world, assignee_id=str(world.tech.user.id))
 
-    r = await client.get(f"{API}/tickets/{net_ticket['id']}", headers=world.tech.headers)
-    assert r.status_code == 404
     listing = (await client.get(f"{API}/tickets", headers=world.tech.headers)).json()
-    ids = {i["id"] for i in listing["items"]}
-    assert queue_ticket["id"] in ids and net_ticket["id"] not in ids
+    assert {i["id"] for i in listing["items"]} == {mine["id"]}
+    for other in (team_ticket, queue_ticket):
+        r = await client.get(f"{API}/tickets/{other['id']}", headers=world.tech.headers)
+        assert r.status_code == 404
 
+    # Não assume da fila nem atribui a outra pessoa.
     r = await client.post(f"{API}/tickets/{queue_ticket['id']}/take", headers=world.tech.headers)
-    assert r.status_code == 200, r.text
-    assert r.json()["assignee"]["id"] == str(world.tech.user.id)
-    assert r.json()["status"] == "assigned"
-
-    # Técnico não atribui OS para outra pessoa.
+    assert r.status_code in (403, 404)
     r = await client.post(
-        f"{API}/tickets/{queue_ticket['id']}/assign",
+        f"{API}/tickets/{mine['id']}/assign",
         json={"assignee_id": str(world.tech_other.user.id)},
         headers=world.tech.headers,
     )
     assert r.status_code == 403
 
-
-async def test_technician_auto_assigns_when_starting(client: AsyncClient, world: World) -> None:
-    t = await create(client, world, team_id=world.team_field_id)
-    t = await transition(client, world.supervisor.headers, t, "triage")
-    t = await transition(client, world.tech.headers, t, "assigned")
-    assert t["assignee"]["id"] == str(world.tech.user.id)
+    # O analista o coloca na OS do grupo: agora ela aparece e ele pode atender.
+    r = await client.post(
+        f"{API}/tickets/{team_ticket['id']}/assign",
+        json={"assignee_id": str(world.tech.user.id)},
+        headers=world.analyst.headers,
+    )
+    assert r.status_code == 200, r.text
+    detail = (
+        await client.get(f"{API}/tickets/{team_ticket['id']}", headers=world.tech.headers)
+    ).json()
+    assert "in_progress" in detail["allowed_transitions"]
 
 
 async def test_requester_flow_and_internal_notes(client: AsyncClient, world: World) -> None:

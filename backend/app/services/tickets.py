@@ -67,7 +67,7 @@ S = TicketStatus
 FIELD_ACTIVE = frozenset({S.ASSIGNED, S.SCHEDULED, S.EN_ROUTE, S.IN_PROGRESS})
 FINAL = frozenset({S.CLOSED, S.CANCELLED})
 # Quem assume sozinho uma OS sem responsável ao iniciar o atendimento.
-SELF_ASSIGN_ROLES = frozenset({UserRole.ANALYST, UserRole.TECHNICIAN})
+SELF_ASSIGN_ROLES = frozenset({UserRole.ANALYST})
 
 
 # --------------------------------------------------------------------------- visibilidade
@@ -77,13 +77,8 @@ def visibility_clause(user: User) -> ColumnElement[bool] | None:
     if user.can_manage_tickets:
         return None
     if user.role == UserRole.TECHNICIAN:
-        conds: list[ColumnElement[bool]] = [
-            Ticket.assignee_id == user.id,
-            and_(Ticket.assignee_id.is_(None), Ticket.team_id.is_(None)),
-        ]
-        if user.team_id is not None:
-            conds.append(Ticket.team_id == user.team_id)
-        return or_(*conds)
+        # O técnico só vê as OS em que o analista o colocou como responsável.
+        return Ticket.assignee_id == user.id
     return or_(Ticket.requester_id == user.id, Ticket.created_by_id == user.id)
 
 
@@ -91,11 +86,7 @@ def can_view(user: User, ticket: Ticket) -> bool:
     if user.can_manage_tickets:
         return True
     if user.role == UserRole.TECHNICIAN:
-        return (
-            ticket.assignee_id == user.id
-            or (ticket.assignee_id is None and ticket.team_id is None)
-            or (user.team_id is not None and ticket.team_id == user.team_id)
-        )
+        return ticket.assignee_id == user.id
     return user.id in (ticket.requester_id, ticket.created_by_id)
 
 
@@ -105,9 +96,7 @@ def can_edit(user: User, ticket: Ticket) -> bool:
     if user.can_manage_tickets:
         return True
     if user.role == UserRole.TECHNICIAN:
-        return ticket.assignee_id == user.id or (
-            user.team_id is not None and ticket.team_id == user.team_id
-        )
+        return ticket.assignee_id == user.id
     return False
 
 
@@ -116,8 +105,9 @@ def can_assign(user: User, ticket: Ticket) -> bool:
 
 
 def can_take(user: User, ticket: Ticket) -> bool:
+    """Assumir a OS é coisa de analista/supervisor: o técnico recebe a OS atribuída."""
     return (
-        user.is_staff
+        user.can_manage_tickets
         and ticket.status in OPEN_STATUSES
         and ticket.assignee_id != user.id
         and (user.can_manage_tickets or ticket.assignee_id is None)
@@ -865,11 +855,7 @@ async def set_violation(
 ) -> Ticket:
     """Justifica a violação de SLA. Vale com a OS fechada (é quando o analista revisa)."""
     allowed = actor.can_manage_tickets or (
-        actor.role == UserRole.TECHNICIAN
-        and (
-            ticket.assignee_id == actor.id
-            or (actor.team_id is not None and ticket.team_id == actor.team_id)
-        )
+        actor.role == UserRole.TECHNICIAN and ticket.assignee_id == actor.id
     )
     if not allowed:
         raise PermissionDenied("Você não pode justificar a violação desta OS")

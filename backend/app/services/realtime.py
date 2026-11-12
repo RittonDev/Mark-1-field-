@@ -103,12 +103,11 @@ def should_deliver(
     aud = event.get("audience") or {}
     if role in (UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.ANALYST):
         return True
+    if aud.get("managers_only"):
+        return False
     if role == UserRole.TECHNICIAN:
-        if user_id in (aud.get("assignee_id"), aud.get("previous_assignee_id")):
-            return True
-        if aud.get("team_id") is None and aud.get("assignee_id") is None:
-            return True
-        return team_id is not None and aud.get("team_id") == team_id
+        # Só as OS dele (e a que acabou de sair dele, para o app tirá-la da lista).
+        return user_id in (aud.get("assignee_id"), aud.get("previous_assignee_id"))
     if aud.get("internal"):
         return False
     return user_id in (aud.get("requester_id"), aud.get("created_by_id"))

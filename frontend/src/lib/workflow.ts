@@ -12,10 +12,8 @@ import type { TicketListItem, TicketStatus, User } from "./types";
 
 export function userCanTransition(user: User, ticket: TicketListItem, to: TicketStatus): boolean {
   if (canManageTickets(user.role)) return true;
-  if (user.role === "technician") {
-    if (ticket.assignee?.id === user.id) return true;
-    return ticket.team !== null && ticket.team.id === user.team_id;
-  }
+  // Técnico de campo: só nas OS em que o analista o colocou como responsável.
+  if (user.role === "technician") return ticket.assignee?.id === user.id;
   // Solicitante: a lista não traz requester_id; o quadro não é usado por solicitantes.
   if (to === "cancelled") return UNTOUCHED_STATUSES.includes(ticket.status);
   return ticket.status === "resolved" && (to === "closed" || to === "reopened");

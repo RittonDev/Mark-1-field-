@@ -190,9 +190,8 @@ def user_can_transition(
     if role in (UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.ANALYST):
         return True
     if role == UserRole.TECHNICIAN:
-        if ticket_assignee_id == user_id:
-            return True
-        return ticket_team_id is not None and ticket_team_id == user_team_id
+        # Só nas OS em que é o responsável (o analista o coloca na OS).
+        return ticket_assignee_id == user_id
     # Solicitante: cancela enquanto ninguém pegou; aceita (fecha) ou recusa (reabre) a solução.
     if ticket_requester_id != user_id:
         return False
