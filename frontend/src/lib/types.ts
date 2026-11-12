@@ -939,3 +939,47 @@ export interface Project {
   };
   created_at: ISODate;
 }
+
+// Assistência externa
+export type RepairStatus =
+  | "withdrawn"
+  | "received"
+  | "sent_to_vendor"
+  | "vendor_quote"
+  | "in_repair"
+  | "ready_at_vendor"
+  | "back_in_stock"
+  | "delivered"
+  | "unrepairable"
+  | "cancelled";
+
+export interface Repair {
+  id: UUID;
+  number: number;
+  code: string;
+  status: RepairStatus;
+  status_changed_at: ISODate;
+  customer: Ref | null;
+  location: Ref | null;
+  ticket: Ref | null;
+  equipment_type: string;
+  brand: string | null;
+  model: string | null;
+  serial_number: string | null;
+  asset_tag: string | null;
+  problem: string;
+  accessories: string | null;
+  vendor_name: string | null;
+  vendor_contact: string | null;
+  vendor_protocol: string | null;
+  vendor_quote_value: number | null;
+  expected_return_date: string | null;
+  notes: string | null;
+  created_at: ISODate;
+  events: { id: UUID; from_status: RepairStatus | null; to_status: RepairStatus; note: string | null; actor: Ref | null; created_at: ISODate }[];
+  photos: { id: UUID; caption: string | null; created_at: ISODate; url: string }[];
+  allowed_next: RepairStatus[];
+  days_open: number;
+  days_in_status: number;
+  overdue: boolean;
+}
