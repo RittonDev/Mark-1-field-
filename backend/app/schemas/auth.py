@@ -26,3 +26,14 @@ class TokenResponse(BaseModel):
 class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str = Field(min_length=8, max_length=128)
+
+
+class AuthProviders(BaseModel):
+    microsoft: bool
+    # Falso quando analistas e gestores só podem entrar pela Microsoft.
+    password_for_staff: bool
+    microsoft_domains: list[str]
+
+
+class SsoExchange(BaseModel):
+    code: str = Field(max_length=2048)
