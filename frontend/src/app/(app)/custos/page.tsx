@@ -105,7 +105,9 @@ export default function ExpensesPage() {
       />
 
       <div className="mb-4 flex flex-wrap gap-2">
-        <Input type="month" value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} className="w-44" aria-label="Mês" />
+        <div className="w-44">
+          <Input type="month" value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} aria-label="Mês" />
+        </div>
         <div className="w-full sm:w-56">
           <Select value={technicianId} onChange={(e) => setTechnicianId(e.target.value)} aria-label="Técnico">
             <option value="">Todos os técnicos</option>

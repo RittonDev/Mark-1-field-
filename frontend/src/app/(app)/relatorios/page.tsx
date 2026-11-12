@@ -155,7 +155,9 @@ function DailyView() {
             {data.closed ? "Dia fechado à meia-noite" : "Hoje: parcial, fecha à meia-noite"}
           </p>
         </div>
-        <Input type="date" value={data.date} onChange={(e) => e.target.value && setDate(e.target.value)} className="w-44" aria-label="Dia" />
+        <div className="w-44">
+          <Input type="date" value={data.date} onChange={(e) => e.target.value && setDate(e.target.value)} aria-label="Dia" />
+        </div>
       </div>
       <Tiles n={data.numbers} prev={data.previous} prevLabel="vs dia anterior" />
       <TopCustomer top={data.top_customer} period="do dia" />
@@ -190,7 +192,9 @@ function MonthlyView() {
           <p className="text-xs text-ink-muted">{data.closed ? "Mês fechado" : "Mês em andamento (até hoje)"}</p>
         </div>
         <div className="flex gap-2">
-          <Input type="month" value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} className="w-44" aria-label="Mês" />
+          <div className="w-44">
+            <Input type="month" value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} aria-label="Mês" />
+          </div>
           <Button
             onClick={() =>
               downloadCsv(`relatorio-${data.month}.csv`, [

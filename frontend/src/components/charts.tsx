@@ -89,6 +89,17 @@ export function TrendChart({ labels, series, height = 240 }: { labels: string[];
   const x = (i: number) => pad.left + (n <= 1 ? w / 2 : (i / (n - 1)) * w);
   const y = (v: number) => pad.top + h - (v / max) * h;
   const every = Math.ceil(n / Math.max(2, Math.floor(w / 46)));
+  // Rótulos no fim das linhas: afasta os que ficariam sobrepostos (mín. 13 px).
+  const endY: Record<string, number> = {};
+  if (n > 0) {
+    const placed = series
+      .map((s) => ({ key: s.key, y: y(s.values[n - 1]) }))
+      .sort((a, b) => a.y - b.y);
+    for (let i = 1; i < placed.length; i++) {
+      if (placed[i].y - placed[i - 1].y < 13) placed[i].y = placed[i - 1].y + 13;
+    }
+    placed.forEach((p) => (endY[p.key] = p.y));
+  }
 
   return (
     <div ref={wrap} className="relative w-full" onMouseLeave={() => setHover(null)}>
@@ -120,7 +131,7 @@ export function TrendChart({ labels, series, height = 240 }: { labels: string[];
               points={s.values.map((v, i) => `${x(i)},${y(v)}`).join(" ")}
             />
             {n > 0 ? (
-              <text x={x(n - 1) + 8} y={y(s.values[n - 1])} dy="0.32em" className="fill-ink text-[11px] font-medium">
+              <text x={x(n - 1) + 8} y={endY[s.key]} dy="0.32em" className="fill-ink text-[11px] font-medium">
                 {s.label} {s.values[n - 1]}
               </text>
             ) : null}
