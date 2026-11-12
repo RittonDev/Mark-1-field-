@@ -136,7 +136,7 @@ function QuoteList() {
                 <Th>Orçamento</Th>
                 <Th>OS / cliente</Th>
                 <Th className="text-right">Total</Th>
-                <Th className="hidden md:table-cell">Validade</Th>
+                <Th className="hidden xl:table-cell">Validade</Th>
                 <Th>Situação</Th>
                 <Th className="edit-col">Ações</Th>
               </tr>
@@ -147,17 +147,17 @@ function QuoteList() {
                   <Td>
                     <button type="button" onClick={() => setOpened(q)} className="block text-left">
                       <span className="block font-mono text-xs text-ink-muted">{q.code}</span>
-                      <span className="block max-w-72 truncate text-ink hover:text-brand">{q.title}</span>
+                      <span className="block max-w-[15rem] truncate text-ink hover:text-brand xl:max-w-72">{q.title}</span>
                     </button>
                   </Td>
                   <Td>
                     <Link href={`/chamados/${q.ticket_id}`} className="font-mono text-xs text-brand hover:underline">
                       {q.ticket_code}
                     </Link>
-                    <span className="block max-w-56 truncate text-xs text-ink-muted">{q.customer ?? "—"}</span>
+                    <span className="block max-w-44 truncate text-xs text-ink-muted xl:max-w-56">{q.customer ?? "—"}</span>
                   </Td>
                   <Td className="text-right font-medium tabular-nums">{formatMoney(q.total)}</Td>
-                  <Td className="hidden text-xs text-ink-muted md:table-cell">{q.valid_until ? formatDate(q.valid_until) : "—"}</Td>
+                  <Td className="hidden text-xs text-ink-muted xl:table-cell">{q.valid_until ? formatDate(q.valid_until) : "—"}</Td>
                   <Td>
                     <span className={clsx("rounded-full px-2 py-0.5 text-[11px] font-medium", QUOTE_STATUS[q.status].className)}>
                       {QUOTE_STATUS[q.status].label}
