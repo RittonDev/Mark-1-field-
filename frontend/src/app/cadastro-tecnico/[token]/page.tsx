@@ -341,7 +341,7 @@ export default function TechnicianSignupPage() {
 
               {step === 1 && cat ? (
                 <>
-                  <Field label="Em que você atende?" required hint="Escolha todas as áreas em que tem experiência.">
+                  <Group label="Em que você atende?" required hint="Escolha todas as áreas em que tem experiência.">
                     <div className="flex flex-wrap gap-2">
                       {cat.service_areas.map((a) => (
                         <Chip key={a.key} active={form.service_areas.includes(a.key)} onClick={() => toggle("service_areas", a.key)}>
@@ -364,7 +364,7 @@ export default function TechnicianSignupPage() {
                       <Input value={form.company_document} onChange={(e) => set("company_document", e.target.value)} />
                     </Field>
                   </div>
-                  <Field label="Skills" hint="Equipamentos, marcas e sistemas que você domina.">
+                  <Group label="Skills" hint="Equipamentos, marcas e sistemas que você domina.">
                     <div className="flex flex-col gap-2">
                       <datalist id="skill-suggestions">
                         {cat.skill_suggestions.map((s) => (
@@ -372,8 +372,9 @@ export default function TechnicianSignupPage() {
                         ))}
                       </datalist>
                       {form.skills.map((skill, i) => (
-                        <div key={i} className="flex gap-2">
+                        <div key={i} className="grid grid-cols-[1fr_auto] gap-2 sm:grid-cols-[1fr_10rem_auto]">
                           <Input
+                            className="col-span-2 sm:col-span-1"
                             list="skill-suggestions"
                             value={skill.name}
                             placeholder="Ex.: DVR/NVR Intelbras"
@@ -386,7 +387,6 @@ export default function TechnicianSignupPage() {
                             }
                           />
                           <Select
-                            className="w-40 shrink-0"
                             value={skill.level}
                             aria-label={`Nível da skill ${i + 1}`}
                             onChange={(e) =>
@@ -422,7 +422,7 @@ export default function TechnicianSignupPage() {
                         </Button>
                       ) : null}
                     </div>
-                  </Field>
+                  </Group>
                   <Field label="Certificações e cursos">
                     <Textarea rows={2} value={form.certifications} onChange={(e) => set("certifications", e.target.value)} />
                   </Field>
@@ -442,7 +442,7 @@ export default function TechnicianSignupPage() {
                       placeholder="Ex.: Guarulhos, Zona Leste e Centro de São Paulo"
                     />
                   </Field>
-                  <Field label="Disponibilidade">
+                  <Group label="Disponibilidade">
                     <div className="flex flex-wrap gap-2">
                       {cat.availability.map((a) => (
                         <Chip key={a.key} active={form.availability.includes(a.key)} onClick={() => toggle("availability", a.key)}>
@@ -450,7 +450,7 @@ export default function TechnicianSignupPage() {
                         </Chip>
                       ))}
                     </div>
-                  </Field>
+                  </Group>
                   <div className="flex flex-col gap-3 rounded-lg border border-line p-3">
                     <Checkbox label="Tenho veículo próprio para os atendimentos" checked={form.has_vehicle} onChange={(v) => set("has_vehicle", v)} />
                     {form.has_vehicle ? (
@@ -603,5 +603,29 @@ function PhotoPicker({ value, onChange, name }: { value: string | null; onChange
         {error ? <span className="text-xs text-red-600">{error}</span> : null}
       </div>
     </div>
+  );
+}
+
+/** Como o Field, mas para grupos de controles (chips, listas): um <label> ativaria o primeiro. */
+function Group({
+  label,
+  hint,
+  required,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  required?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <fieldset className="flex flex-col gap-1.5">
+      <legend className="mb-1.5 text-xs font-medium text-ink-muted">
+        {label}
+        {required ? <span className="text-red-500"> *</span> : null}
+      </legend>
+      {children}
+      {hint ? <span className="text-xs text-ink-muted">{hint}</span> : null}
+    </fieldset>
   );
 }
