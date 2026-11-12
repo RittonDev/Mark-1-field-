@@ -13,9 +13,16 @@ export function formatDateTime(value: string | null | undefined): string {
   return dateTimeFmt.format(new Date(value));
 }
 
+/** Data sem hora ("2026-11-19", ex.: validade) é dia do calendário: lida como UTC, no Brasil
+ *  (UTC-3) viraria 21h do dia anterior e a tela mostraria 18/11. */
+function parseDate(value: string): Date {
+  const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  return day ? new Date(Number(day[1]), Number(day[2]) - 1, Number(day[3])) : new Date(value);
+}
+
 export function formatDate(value: string | null | undefined): string {
   if (!value) return "—";
-  return dateFmt.format(new Date(value));
+  return dateFmt.format(parseDate(value));
 }
 
 export function formatShort(value: string | null | undefined): string {
