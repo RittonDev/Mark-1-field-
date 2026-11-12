@@ -127,6 +127,11 @@ export function RealtimeProvider({ userId, children }: { userId: string; childre
           applyTrackingEvent(queryClient, event);
           return;
         }
+        if (event.type === "onboarding.submitted") {
+          queryClient.invalidateQueries({ queryKey: ["onboarding"] });
+          toastRef.current({ title: `Nova ficha de homologação: ${event.name ?? "técnico"}` });
+          return;
+        }
         if (!event.type?.startsWith("ticket.")) return;
         queryClient.invalidateQueries({ queryKey: ["tracking", "live"] });
         queryClient.invalidateQueries({ queryKey: ["tickets"] });
