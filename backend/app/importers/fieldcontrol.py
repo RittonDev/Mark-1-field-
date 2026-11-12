@@ -768,7 +768,7 @@ class Importer:
 
     async def import_locations(self) -> None:
         rows: list[dict[str, Any]] = []
-        # Ponto padrão do geocodificador (centro do Brasil; mesmo ponto em várias UFs): sem coordenada.
+        # Ponto padrão do geocodificador (centro do Brasil, mesmo ponto em várias UFs): ignorado.
         bad_points = geo.cross_state_pairs(
             _location_point(item) for item in iter_records(self.file("localizacoes.json"))
         )
