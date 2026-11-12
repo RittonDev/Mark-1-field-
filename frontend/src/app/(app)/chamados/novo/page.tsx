@@ -13,7 +13,6 @@ import { Button, Card, CardHeader, ErrorBox, Field, Input, PageHeader, Select, T
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import {
-  ASSET_TYPE,
   canManageTickets,
   computePriority,
   isStaff,
@@ -29,7 +28,6 @@ import { formatMinutes, fromLocalInput } from "@/lib/format";
 import { useProjects } from "@/lib/projects";
 import { useAssignable, useCategories, useCustomers, useServiceTypes, useTeams } from "@/lib/queries";
 import type {
-  Asset,
   ConflictItem,
   Level,
   Location,
@@ -51,7 +49,6 @@ interface FormState {
   priority: "" | TicketPriority;
   customer_id: string;
   location_id: string;
-  asset_id: string;
   requester_name: string;
   requester_contact: string;
   service_address: string;
@@ -75,7 +72,6 @@ const INITIAL: FormState = {
   priority: "",
   customer_id: "",
   location_id: "",
-  asset_id: "",
   requester_name: "",
   requester_contact: "",
   service_address: "",
@@ -108,15 +104,6 @@ export default function NewTicketPage() {
   const projects = useProjects({ enabled: canAssign });
   // Tipos gerais + catálogo do cliente da OS (só para quem gerencia OS).
   const serviceTypes = useServiceTypes({ customerId: form.customer_id || null, active: true, enabled: canAssign });
-  const assets = useQuery({
-    queryKey: ["assets", "for-ticket", form.customer_id, form.location_id],
-    queryFn: () =>
-      api.get<Asset[]>("/assets", {
-        customer_id: form.customer_id,
-        location_id: form.location_id || undefined,
-      }),
-    enabled: Boolean(form.customer_id),
-  });
 
   // A API barrou por conflito de agenda: o próximo envio confirma (até mudar técnico ou horário).
   const [conflicts, setConflicts] = useState<ConflictItem[] | null>(null);
@@ -156,7 +143,6 @@ export default function NewTicketPage() {
       category_id: form.category_id || null,
       customer_id: form.customer_id || null,
       location_id: form.location_id || null,
-      asset_id: form.asset_id || null,
       requester_name: form.requester_name.trim() || null,
       requester_contact: form.requester_contact.trim() || null,
       service_address: form.service_address.trim() || null,
@@ -305,7 +291,6 @@ export default function NewTicketPage() {
                       ...f,
                       location_id: loc?.id ?? "",
                       customer_id: loc ? loc.customer_id : f.customer_id,
-                      asset_id: "",
                     }));
                   }}
                 />
@@ -315,7 +300,7 @@ export default function NewTicketPage() {
                   value={form.customer_id}
                   onChange={(e) => {
                     setLocation(null);
-                    setForm((f) => ({ ...f, customer_id: e.target.value, location_id: "", asset_id: "" }));
+                    setForm((f) => ({ ...f, customer_id: e.target.value, location_id: "" }));
                   }}
                 >
                   <option value="">Selecione... (ou escolha o local acima)</option>
@@ -333,22 +318,6 @@ export default function NewTicketPage() {
                   placeholder="Ex.: Doca 3, entrada pelos fundos"
                   maxLength={255}
                 />
-              </Field>
-              <Field label="Equipamento (ativo)" className="md:col-span-2">
-                <Select
-                  value={form.asset_id}
-                  disabled={!form.customer_id}
-                  onChange={(e) => set("asset_id", e.target.value)}
-                >
-                  <option value="">{form.customer_id ? "Nenhum / não identificado" : "Escolha o cliente primeiro"}</option>
-                  {assets.data?.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {ASSET_TYPE[a.asset_type]} · {a.name}
-                      {a.asset_tag ? ` · Pat. ${a.asset_tag}` : ""}
-                      {a.serial_number ? ` · S/N ${a.serial_number}` : ""}
-                    </option>
-                  ))}
-                </Select>
               </Field>
               <Field label="Solicitante">
                 <Input

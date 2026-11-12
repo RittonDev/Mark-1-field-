@@ -2,7 +2,7 @@
 
 import { ExternalLink, MapPin } from "lucide-react";
 import { Card, CardHeader } from "@/components/ui";
-import { ASSET_TYPE, LEVEL, TICKET_SOURCE, TICKET_TYPE } from "@/lib/constants";
+import { LEVEL, TICKET_SOURCE, TICKET_TYPE } from "@/lib/constants";
 import { formatDateTime, formatDocument, formatMinutes } from "@/lib/format";
 import type { TicketDetail } from "@/lib/types";
 
@@ -115,26 +115,6 @@ export function TicketInfo({ ticket }: { ticket: TicketDetail }) {
           </Row>
         </dl>
       </Card>
-
-      {ticket.asset ? (
-        <Card>
-          <CardHeader title="Equipamento" />
-          <dl className="px-4 py-2">
-            <Row label="Nome">{ticket.asset.name}</Row>
-            <Row label="Tipo">{ASSET_TYPE[ticket.asset.asset_type]}</Row>
-            {ticket.asset.brand || ticket.asset.model ? (
-              <Row label="Marca/modelo">{[ticket.asset.brand, ticket.asset.model].filter(Boolean).join(" ")}</Row>
-            ) : null}
-            {ticket.asset.serial_number ? <Row label="Nº de série">{ticket.asset.serial_number}</Row> : null}
-            {ticket.asset.asset_tag ? <Row label="Patrimônio">{ticket.asset.asset_tag}</Row> : null}
-            {ticket.asset.ip_address ? (
-              <Row label="IP">
-                <span className="font-mono text-xs">{ticket.asset.ip_address}</span>
-              </Row>
-            ) : null}
-          </dl>
-        </Card>
-      ) : null}
 
       <Card>
         <CardHeader title="Classificação e datas" />
