@@ -220,7 +220,7 @@ const makeStyles = (c: Palette) =>
     title: { flex: 1, textAlign: "center", fontSize: 16, fontWeight: "700", color: c.ink },
     card: {
       backgroundColor: c.surface,
-      borderRadius: 16,
+      borderRadius: 14,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: c.line,
       padding: 12,

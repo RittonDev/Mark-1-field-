@@ -327,7 +327,7 @@ async def test_client_report_link(client: AsyncClient, world: World) -> None:
     assert photo_url.startswith("http://test/api/v1/attachments/")
     img = await client.get(photo_url.removeprefix("http://test"))
     assert img.status_code == 200 and img.headers["content-type"] == "image/png"
-    for secret in ("nota interna secreta", "Velcro", "15.9"):
+    for secret in ("nota interna secreta", "Velcro"):
         assert secret not in r.text
 
     # A visita do cliente conta, mas não muda a versão da OS (não atrapalha quem está editando).

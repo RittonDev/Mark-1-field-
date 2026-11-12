@@ -65,7 +65,7 @@ const makeStyles = (c: Palette) =>
       minHeight: 46,
       borderWidth: 1,
       borderColor: c.lineStrong,
-      borderRadius: 12,
+      borderRadius: 10,
       paddingHorizontal: 12,
       justifyContent: "center",
       backgroundColor: c.surface,

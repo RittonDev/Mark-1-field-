@@ -257,7 +257,7 @@ const makeStyles = (c: Palette) =>
       alignItems: "center",
       gap: 12,
       padding: 14,
-      borderRadius: 12,
+      borderRadius: 10,
       borderWidth: 1,
       borderColor: c.lineStrong,
       backgroundColor: c.surface,

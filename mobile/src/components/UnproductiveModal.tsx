@@ -148,7 +148,7 @@ const makeStyles = (c: Palette) =>
       alignItems: "flex-start",
       gap: 10,
       padding: 12,
-      borderRadius: 12,
+      borderRadius: 10,
       borderWidth: 1,
       borderColor: c.line,
       backgroundColor: c.surface,

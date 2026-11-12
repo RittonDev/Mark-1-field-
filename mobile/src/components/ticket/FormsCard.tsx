@@ -95,7 +95,7 @@ export function FormsCard({ ticket }: { ticket: LocalTicket }) {
 
 const makeStyles = (c: Palette) =>
   StyleSheet.create({
-    row: { flexDirection: "row", alignItems: "center", gap: 10, padding: 10, borderRadius: 12, backgroundColor: c.surface2 },
+    row: { flexDirection: "row", alignItems: "center", gap: 10, padding: 10, borderRadius: 10, backgroundColor: c.surface2 },
     dot: { width: 8, height: 8, borderRadius: 4 },
     name: { fontSize: 15, fontWeight: "600", color: c.ink },
     badges: { flexDirection: "row", gap: 6, flexWrap: "wrap" },
@@ -106,7 +106,7 @@ const makeStyles = (c: Palette) =>
       alignItems: "center",
       gap: 10,
       padding: 10,
-      borderRadius: 12,
+      borderRadius: 10,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: c.line,
     },

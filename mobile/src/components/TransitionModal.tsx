@@ -12,6 +12,8 @@ import { formatMinutes } from "../lib/format";
 import { resolutionBreached, responseBreached } from "../lib/sla";
 import { enqueueTransition, isOnline, useSyncStatus } from "../lib/sync";
 import type { LocalTicket } from "../lib/syncTypes";
+import { haptic } from "../lib/haptics";
+import { showSuccess } from "../lib/success";
 import { showToast } from "../lib/toast";
 import type { TicketStatus, TicketTransitionPayload } from "../lib/types";
 import { transitionRequirements } from "../lib/workflow";
@@ -80,16 +82,22 @@ export function TransitionModal({ ticket, to, onClose }: { ticket: LocalTicket; 
         else gpsFailed = true;
       }
       await enqueueTransition(ticket.id, payload);
-      showToast(`${ticket.code} → ${STATUS[to].label}`, {
-        tone: "success",
-        description: gpsFailed
-          ? "Sem localização (permissão negada ou sem sinal de GPS)."
-          : leftPending
-            ? "Prazo violado sem motivo: fica pendente para o analista justificar."
-            : online
-              ? undefined
-              : "Salvo no aparelho; será enviado quando houver conexão.",
-      });
+      const warning = gpsFailed
+        ? "Sem localização (permissão negada ou sem sinal de GPS)."
+        : leftPending
+          ? "Prazo violado sem motivo: fica pendente para o analista justificar."
+          : null;
+      const offline = online ? undefined : "Salvo no aparelho; será enviado quando houver conexão.";
+      if (to === "resolved" || to === "closed") {
+        // Fim do atendimento: o check animado no lugar do aviso comum.
+        haptic.success();
+        showSuccess(to === "resolved" ? "OS concluída" : "OS fechada", offline ?? `${ticket.code} enviada para a central.`);
+        if (warning) showToast(ticket.code, { tone: "info", description: warning });
+      } else {
+        // Iniciar deslocamento e o check-in (iniciar atendimento) vibram como passo do atendimento.
+        if (to === "en_route" || to === "in_progress") haptic.step();
+        showToast(`${ticket.code} → ${STATUS[to].label}`, { tone: "success", description: warning ?? offline });
+      }
       onClose();
     } catch (e) {
       setError(errorMessage(e));

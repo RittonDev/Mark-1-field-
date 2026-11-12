@@ -126,7 +126,7 @@ const makeStyles = (c: Palette) =>
   box: {
     gap: 12,
     padding: 12,
-    borderRadius: 12,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: tint(c.danger, "44"),
     backgroundColor: tint(c.danger, "0d"),

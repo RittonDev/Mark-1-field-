@@ -256,6 +256,8 @@ export interface TicketListItem {
   team: Ref | null;
   /** OS de projeto (valores e equipe seguem o projeto). */
   project: ProjectRef | null;
+  /** Analista responsável (acompanha a OS); o técnico é o `assignee`. */
+  owner?: UserRef | null;
   requester_name: string | null;
   scheduled_start: ISODate | null;
   scheduled_end: ISODate | null;
@@ -311,6 +313,8 @@ export interface TicketDetail extends TicketListItem {
   signature_attachment_id: UUID | null;
   /** Custos extras (a gestão lança; o técnico só vê; o solicitante recebe vazio). */
   expenses: Expense[];
+  /** Link público do relatório para o cliente (só para a gestão; existe com a OS concluída). */
+  report_link?: ReportLink | null;
   allowed_transitions: TicketStatus[];
   can_edit: boolean;
   can_assign: boolean;
@@ -999,4 +1003,103 @@ export interface TechnicianSuggestion {
   distance_km: number | null;
   score: number;
   reasons: string[];
+}
+
+// ---- Fila do analista ----
+
+export type QueueSection = "attention" | "in_field" | "today" | "waiting" | "upcoming" | "unscheduled" | "done";
+
+export interface QueueReason {
+  code: "sla_violated" | "sla_at_risk" | "no_technician" | "late_start" | "unproductive" | "violation_pending" | string;
+  label: string;
+  tone: "danger" | "warning" | "info";
+}
+
+export interface QueueItem extends TicketListItem {
+  section: QueueSection;
+  reasons: QueueReason[];
+}
+
+export interface QueueCounts {
+  open: number;
+  attention: number;
+  in_field: number;
+  today: number;
+  waiting: number;
+  upcoming: number;
+  unscheduled: number;
+  done: number;
+}
+
+export interface MyQueue {
+  user: UserRef;
+  date: string;
+  generated_at: ISODate;
+  counts: QueueCounts;
+  items: QueueItem[];
+}
+
+export interface QueueSummary {
+  user: UserRef;
+  role: UserRole;
+  open: number;
+  attention: number;
+  today: number;
+  in_field: number;
+}
+
+export interface QueuesOut {
+  queues: QueueSummary[];
+  unowned: { open: number; attention: number; today: number; in_field: number };
+}
+
+// ---- Relatório da OS para o cliente ----
+
+export interface ReportLink {
+  token: string;
+  path: string;
+  url: string;
+  created_at: ISODate;
+  views: number;
+  last_viewed_at: ISODate | null;
+}
+
+export interface PublicReportPhoto {
+  url: string;
+  filename: string;
+  taken_at?: ISODate | null;
+}
+
+export interface PublicReport {
+  code: string;
+  title: string;
+  description: string;
+  status: TicketStatus;
+  status_label: string;
+  company_name: string;
+  customer: { name: string; document: string | null } | null;
+  location: { name: string; code: string | null; address: string | null; city: string | null; state: string | null } | null;
+  service_address: string | null;
+  requester_name: string | null;
+  service_type: string | null;
+  technician: { name: string } | null;
+  opened_at: ISODate;
+  scheduled_start: ISODate | null;
+  scheduled_end: ISODate | null;
+  en_route_at: ISODate | null;
+  arrived_at: ISODate | null;
+  finished_at: ISODate | null;
+  closed_at: ISODate | null;
+  on_site_minutes: number | null;
+  check_in_gps: boolean;
+  resolution_notes: string | null;
+  forms: {
+    name: string;
+    completed_at: ISODate | null;
+    items: { label: string; type: string; value: string | null; photos: PublicReportPhoto[] }[];
+  }[];
+  photos: PublicReportPhoto[];
+  signature: { name: string; role: string | null; signed_at: ISODate; image_url: string } | null;
+  timeline: { at: ISODate; label: string }[];
+  generated_at: ISODate;
 }

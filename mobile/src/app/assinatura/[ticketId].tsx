@@ -1,6 +1,7 @@
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useCallback, useRef, useState } from "react";
-import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from "react-native";
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from "react-native";
+import { DetailSkeleton } from "../../components/Skeleton";
 import { Text } from "../../components/Text";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SignaturePad, type PadHandle, type Stroke } from "../../components/SignaturePad";
@@ -13,7 +14,8 @@ import { formatDateTime } from "../../lib/format";
 import { signatureBlock } from "../../lib/forms";
 import { exportSignature } from "../../lib/signatureImage";
 import { isOnline, queueSignature, useSyncStatus } from "../../lib/sync";
-import { showToast } from "../../lib/toast";
+import { haptic } from "../../lib/haptics";
+import { showSuccess } from "../../lib/success";
 import { useStyles, useTheme, type Palette } from "../../theme/theme";
 
 /** Assinatura do responsável no local (nome, cargo e o desenho). Funciona offline. */
@@ -37,7 +39,7 @@ export default function SignatureScreen() {
   const [busy, setBusy] = useState(false);
   const [drawing, setDrawing] = useState(false);
 
-  if (ticket === undefined) return <ActivityIndicator style={{ marginTop: 40 }} color={c.primary} />;
+  if (ticket === undefined) return <DetailSkeleton />;
   if (!ticket) return <EmptyState title="OS não encontrada neste aparelho" />;
 
   const block = signatureBlock(ticket);
@@ -60,10 +62,8 @@ export default function SignatureScreen() {
         latitude: position?.latitude ?? null,
         longitude: position?.longitude ?? null,
       });
-      showToast("Assinatura colhida", {
-        tone: "success",
-        description: online ? "Agora você já pode concluir a OS." : "Salva no aparelho; será enviada quando houver conexão.",
-      });
+      haptic.success();
+      showSuccess("Assinatura salva", online ? "Agora você já pode concluir a OS." : "Salva no aparelho; será enviada quando houver conexão.");
       router.back();
     } catch (e) {
       setError(errorMessage(e));

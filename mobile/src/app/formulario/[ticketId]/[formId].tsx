@@ -1,7 +1,8 @@
 import * as ImagePicker from "expo-image-picker";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from "react-native";
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from "react-native";
+import { DetailSkeleton } from "../../../components/Skeleton";
 import { Text } from "../../../components/Text";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { FieldInput } from "../../../components/forms/FieldInput";
@@ -29,11 +30,10 @@ const STATUS_LABEL = { pending: "Não iniciado", in_progress: "Em preenchimento"
 
 export default function FormScreen() {
   const { ticketId, formId } = useLocalSearchParams<{ ticketId: string; formId: string }>();
-  const c = useTheme();
   const load = useCallback(() => getTicket(String(ticketId)), [ticketId]);
   const ticket = useLiveQuery(load);
 
-  if (ticket === undefined) return <ActivityIndicator style={{ marginTop: 40 }} color={c.primary} />;
+  if (ticket === undefined) return <DetailSkeleton />;
   const form = ticket?.forms?.find((f) => f.id === formId);
   if (!ticket || !form) {
     return <EmptyState title="Formulário não encontrado" description="Ele pode ter sido removido da OS pelo analista." />;
