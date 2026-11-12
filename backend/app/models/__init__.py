@@ -4,6 +4,7 @@ from app.models.asset import Asset
 from app.models.catalog import Category, ServiceType, SlaPolicy, ViolationReason
 from app.models.customer import Customer, Location
 from app.models.sync import DeviceToken, SyncOperation
+from app.models.tracking import LocationPing, TechnicianShift
 from app.models.ticket import (
     Ticket,
     TicketAttachment,
@@ -28,6 +29,8 @@ __all__ = [
     "TicketComment",
     "TicketEvent",
     "TicketWorklog",
+    "TechnicianShift",
+    "LocationPing",
     "User",
     "ViolationReason",
 ]

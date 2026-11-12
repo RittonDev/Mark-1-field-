@@ -25,6 +25,8 @@ class UserOut(ORMModel):
     team: Ref | None
     is_active: bool
     last_login_at: datetime | None
+    location_consent_at: datetime | None = None
+    must_change_password: bool = False
     created_at: datetime
 
 

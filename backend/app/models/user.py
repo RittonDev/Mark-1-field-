@@ -38,6 +38,12 @@ class User(UUIDPrimaryKey, Timestamps, Base):
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Aceite do termo de ciência do rastreamento (LGPD); sem ele a jornada não começa.
+    location_consent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Senha provisória (técnico importado): o app obriga a trocar no primeiro acesso.
+    must_change_password: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
 
     team: Mapped[Team | None] = relationship(lazy="selectin")
 
