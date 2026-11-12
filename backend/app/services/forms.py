@@ -56,7 +56,9 @@ async def create_template(db: AsyncSession, data: FormTemplateIn, actor: User) -
     return template
 
 
-async def update_template(db: AsyncSession, template: FormTemplate, data: FormTemplateIn) -> FormTemplate:
+async def update_template(
+    db: AsyncSession, template: FormTemplate, data: FormTemplateIn
+) -> FormTemplate:
     values = _dump(data)
     if values["fields"] != template.fields:
         template.version += 1  # as OS já anexadas guardam a versão antiga
@@ -146,7 +148,9 @@ async def set_required(
     return form
 
 
-async def remove_from_ticket(db: AsyncSession, ticket: Ticket, form: TicketForm, actor: User) -> None:
+async def remove_from_ticket(
+    db: AsyncSession, ticket: Ticket, form: TicketForm, actor: User
+) -> None:
     _require_manager(actor)
     record_event(
         db,
@@ -382,7 +386,9 @@ async def collect_signature(
         raise WorkflowError("A OS já foi concluída")
     pending = _pending_required(ticket)
     if pending:
-        raise WorkflowError("Preencha o formulário antes de colher a assinatura: " + ", ".join(pending))
+        raise WorkflowError(
+            "Preencha o formulário antes de colher a assinatura: " + ", ".join(pending)
+        )
     name = " ".join(signer_name.split())
     if len(name) < 3:
         raise WorkflowError("Informe o nome de quem assina")

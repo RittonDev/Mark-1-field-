@@ -20,7 +20,13 @@ PREVENTIVA = {
     "name": "Preventiva de rack",
     "fields": [
         {"id": "s1", "type": "section", "label": "Antes"},
-        {"id": "rack_antes", "type": "photo", "label": "Foto do rack antes", "min_photos": 2, "max_photos": 4},
+        {
+            "id": "rack_antes",
+            "type": "photo",
+            "label": "Foto do rack antes",
+            "min_photos": 2,
+            "max_photos": 4,
+        },
         {"id": "obs", "type": "textarea", "label": "Observações", "required": True},
         {"id": "s2", "type": "section", "label": "Depois"},
         {"id": "rack_depois", "type": "photo", "label": "Foto do rack depois", "required": True},
@@ -42,7 +48,10 @@ async def photo(client: AsyncClient, h: dict, ticket_id: str, form_id: str, fiel
 
 async def test_required_form_gates_signature_and_closing(client: AsyncClient, world: World) -> None:
     an, th = world.analyst.headers, world.tech.headers
-    bad = {**PREVENTIVA, "fields": [{"id": "x", "type": "choice", "label": "X", "options": ["Só uma"]}]}
+    bad = {
+        **PREVENTIVA,
+        "fields": [{"id": "x", "type": "choice", "label": "X", "options": ["Só uma"]}],
+    }
     assert (await client.post(f"{API}/form-templates", json=bad, headers=an)).status_code == 422
     tpl = (await client.post(f"{API}/form-templates", json=PREVENTIVA, headers=an)).json()
     assert tpl["fields"][1]["min_photos"] == 2
@@ -56,7 +65,9 @@ async def test_required_form_gates_signature_and_closing(client: AsyncClient, wo
         await client.post(f"{API}/tickets/{tid}/forms", json={"template_id": tpl["id"]}, headers=an)
     ).json()
     fid = form["id"]
-    dup = await client.post(f"{API}/tickets/{tid}/forms", json={"template_id": tpl["id"]}, headers=an)
+    dup = await client.post(
+        f"{API}/tickets/{tid}/forms", json={"template_id": tpl["id"]}, headers=an
+    )
     assert dup.status_code == 422
     detail = (await client.get(f"{API}/tickets/{tid}", headers=th)).json()
     assert detail["signature_required"] is True and detail["forms"][0]["status"] == "pending"
@@ -71,15 +82,22 @@ async def test_required_form_gates_signature_and_closing(client: AsyncClient, wo
     assert blocked.status_code == 422 and "Preventiva de rack" in blocked.json()["detail"]
     sig = {"file": ("assinatura.png", PNG, "image/png")}
     early = await client.post(
-        f"{API}/tickets/{tid}/signature", files=sig, data={"signer_name": "Paulo Gerente"}, headers=th
+        f"{API}/tickets/{tid}/signature",
+        files=sig,
+        data={"signer_name": "Paulo Gerente"},
+        headers=th,
     )
     assert early.status_code == 422  # sem o formulário, não colhe assinatura
 
     answers = f"{API}/tickets/{tid}/forms/{fid}/answers"
     r = await client.put(answers, json={"answers": {"obs": "Rack sem etiqueta"}}, headers=th)
     assert r.json()["status"] == "in_progress"
-    assert (await client.put(answers, json={"answers": {"tipo": "Teto"}}, headers=th)).status_code == 422
-    r = await client.put(answers, json={"answers": {"organizado": True}, "complete": True}, headers=th)
+    assert (
+        await client.put(answers, json={"answers": {"tipo": "Teto"}}, headers=th)
+    ).status_code == 422
+    r = await client.put(
+        answers, json={"answers": {"organizado": True}, "complete": True}, headers=th
+    )
     assert r.status_code == 422
     assert "Foto do rack antes (2 fotos)" in r.json()["detail"]
 
@@ -87,7 +105,9 @@ async def test_required_form_gates_signature_and_closing(client: AsyncClient, wo
     assert await photo(client, th, tid, fid, "rack_antes") == 201
     assert await photo(client, th, tid, fid, "rack_depois") == 201
     assert await photo(client, th, tid, fid, "obs") == 422  # campo que não é de foto
-    r = await client.put(answers, json={"answers": {"tipo": "Parede"}, "complete": True}, headers=th)
+    r = await client.put(
+        answers, json={"answers": {"tipo": "Parede"}, "complete": True}, headers=th
+    )
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "completed"
     assert r.json()["answers"] == {"obs": "Rack sem etiqueta", "organizado": True, "tipo": "Parede"}
@@ -107,7 +127,10 @@ async def test_required_form_gates_signature_and_closing(client: AsyncClient, wo
         headers=th,
     )
     assert r.status_code == 200, r.text
-    assert (r.json()["signer_name"], r.json()["signer_role"]) == ("Paulo Gerente", "Gerente da loja")
+    assert (r.json()["signer_name"], r.json()["signer_role"]) == (
+        "Paulo Gerente",
+        "Gerente da loja",
+    )
     # Assinado: o técnico não muda mais o formulário.
     locked = await client.put(answers, json={"answers": {"obs": "mudou"}}, headers=th)
     assert locked.status_code == 422
@@ -149,7 +172,10 @@ async def test_form_answers_offline_and_optional_forms(client: AsyncClient, worl
         "client_op_id": uuid.uuid4().hex,
         "type": "form_answers",
         "ticket_id": t["id"],
-        "payload": {"form_id": form["id"], "answers": {"obs": "Feito offline", "organizado": False}},
+        "payload": {
+            "form_id": form["id"],
+            "answers": {"obs": "Feito offline", "organizado": False},
+        },
     }
     r = await client.post(f"{API}/sync/push", json={"operations": [op]}, headers=th)
     assert r.json()["results"][0]["status"] == "applied", r.text
@@ -166,7 +192,9 @@ async def test_form_answers_offline_and_optional_forms(client: AsyncClient, worl
     # A gestão remove formulário (e as fotos dele) e pode dispensar a assinatura.
     t2 = await create(client, world, title="Outra", assignee_id=str(world.tech.user.id))
     f2 = (
-        await client.post(f"{API}/tickets/{t2['id']}/forms", json={"template_id": tpl["id"]}, headers=an)
+        await client.post(
+            f"{API}/tickets/{t2['id']}/forms", json={"template_id": tpl["id"]}, headers=an
+        )
     ).json()
     assert await photo(client, th, t2["id"], f2["id"], "rack_depois") == 201
     r = await client.delete(f"{API}/tickets/{t2['id']}/forms/{f2['id']}", headers=th)

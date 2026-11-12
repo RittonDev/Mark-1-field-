@@ -89,10 +89,16 @@ async def add_form(
 
 @router.patch("/tickets/{ticket_id}/forms/{form_id}", response_model=TicketFormOut)
 async def update_form(
-    ticket_id: uuid.UUID, form_id: uuid.UUID, body: TicketFormUpdate, db: DB, user: TicketManagerUser
+    ticket_id: uuid.UUID,
+    form_id: uuid.UUID,
+    body: TicketFormUpdate,
+    db: DB,
+    user: TicketManagerUser,
 ) -> TicketFormOut:
     ticket = await tickets_svc.get_visible_ticket(db, user, ticket_id)
-    form = await svc.set_required(db, ticket, await svc.get_ticket_form(db, ticket, form_id), body.required, user)
+    form = await svc.set_required(
+        db, ticket, await svc.get_ticket_form(db, ticket, form_id), body.required, user
+    )
     await commit_and_publish(db)
     return TicketFormOut.model_validate(form)
 
@@ -173,6 +179,8 @@ async def collect_signature(
 ) -> TicketDetail:
     """Assinatura do responsável no local (imagem). Exige os formulários obrigatórios concluídos."""
     ticket = await tickets_svc.get_visible_ticket(db, user, ticket_id)
-    await svc.collect_signature(db, ticket, file, signer_name, signer_role, latitude, longitude, user)
+    await svc.collect_signature(
+        db, ticket, file, signer_name, signer_role, latitude, longitude, user
+    )
     await commit_and_publish(db)
     return await _detail(db, ticket_id, user)

@@ -143,9 +143,7 @@ class FormCatalog(BaseModel):
 
 
 def field_type_catalog() -> FormCatalog:
-    return FormCatalog(
-        field_types=[{"key": k, "label": v} for k, v in FIELD_TYPE_LABEL.items()]
-    )
+    return FormCatalog(field_types=[{"key": k, "label": v} for k, v in FIELD_TYPE_LABEL.items()])
 
 
 SignatureState = Literal["not_required", "pending", "blocked", "collected"]
