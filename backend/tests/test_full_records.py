@@ -789,7 +789,11 @@ async def test_normalize_cities_in_db(world: World, engine: AsyncEngine) -> None
     }
     async with maker() as db:
         rows = dict(
-            (await db.execute(select(Location.name, Location.city).where(Location.name != "Matriz")))
+            (
+                await db.execute(
+                    select(Location.name, Location.city).where(Location.name != "Matriz")
+                )
+            )
             .tuples()
             .all()
         )
