@@ -58,7 +58,9 @@ def _clean(data: RepairIn) -> dict:
     values = data.model_dump()
     for key, value in values.items():
         if isinstance(value, str):
-            values[key] = value.strip() or (None if key not in ("problem", "equipment_type") else value)
+            values[key] = value.strip() or (
+                None if key not in ("problem", "equipment_type") else value
+            )
     return values
 
 
@@ -73,7 +75,17 @@ async def create(db: AsyncSession, data: RepairIn, actor: User) -> RepairOrder:
         **_clean(data),
     )
     db.add(repair)
-    db.add(RepairEvent(id=uuid.uuid4(), repair_id=repair.id, from_status=None, to_status=R.WITHDRAWN, actor_id=actor.id, created_at=now))
+    await db.flush()  # o registro precisa existir antes da 1ª linha do tempo
+    db.add(
+        RepairEvent(
+            id=uuid.uuid4(),
+            repair_id=repair.id,
+            from_status=None,
+            to_status=R.WITHDRAWN,
+            actor_id=actor.id,
+            created_at=now,
+        )
+    )
     await db.flush()
     return repair
 
@@ -139,11 +151,15 @@ def _photo_url(photo: RepairPhoto) -> str:
     return f"{settings.API_PREFIX}/repair-photos/{photo.id}?token={token}"
 
 
-async def to_out(db: AsyncSession, repairs: list[RepairOrder], full: bool = False) -> list[RepairOut]:
+async def to_out(
+    db: AsyncSession, repairs: list[RepairOrder], full: bool = False
+) -> list[RepairOut]:
     ticket_ids = {r.ticket_id for r in repairs if r.ticket_id}
     tickets = {}
     if ticket_ids:
-        tickets = {t.id: t for t in await db.scalars(select(Ticket).where(Ticket.id.in_(ticket_ids)))}
+        tickets = {
+            t.id: t for t in await db.scalars(select(Ticket).where(Ticket.id.in_(ticket_ids)))
+        }
     today = local_today()
     now = utcnow()
     out = []
@@ -158,7 +174,9 @@ async def to_out(db: AsyncSession, repairs: list[RepairOrder], full: bool = Fals
                 status_changed_at=r.status_changed_at,
                 customer={"id": r.customer.id, "name": r.customer.name} if r.customer else None,
                 location={"id": r.location.id, "name": r.location.name} if r.location else None,
-                ticket={"id": ticket.id, "name": format_ticket_code(ticket.number)} if ticket else None,
+                ticket={"id": ticket.id, "name": format_ticket_code(ticket.number)}
+                if ticket
+                else None,
                 equipment_type=r.equipment_type,
                 brand=r.brand,
                 model=r.model,
@@ -175,7 +193,12 @@ async def to_out(db: AsyncSession, repairs: list[RepairOrder], full: bool = Fals
                 created_at=r.created_at,
                 events=r.events if full else [],
                 photos=[
-                    {"id": p.id, "caption": p.caption, "created_at": p.created_at, "url": _photo_url(p)}
+                    {
+                        "id": p.id,
+                        "caption": p.caption,
+                        "created_at": p.created_at,
+                        "url": _photo_url(p),
+                    }
                     for p in r.photos
                 ]
                 if full
@@ -183,7 +206,9 @@ async def to_out(db: AsyncSession, repairs: list[RepairOrder], full: bool = Fals
                 allowed_next=list(NEXT[r.status]),
                 days_open=((now if open_ else r.status_changed_at) - r.created_at).days,
                 days_in_status=(now - r.status_changed_at).days,
-                overdue=open_ and r.expected_return_date is not None and r.expected_return_date < today,
+                overdue=open_
+                and r.expected_return_date is not None
+                and r.expected_return_date < today,
             )
         )
     return out
@@ -218,7 +243,11 @@ async def list_repairs(
 
 
 async def summary(db: AsyncSession) -> RepairSummary:
-    rows = dict((await db.execute(select(RepairOrder.status, func.count()).group_by(RepairOrder.status))).all())
+    rows = dict(
+        (
+            await db.execute(select(RepairOrder.status, func.count()).group_by(RepairOrder.status))
+        ).all()
+    )
     overdue = await db.scalar(
         select(func.count()).where(
             RepairOrder.status.not_in(FINAL),
