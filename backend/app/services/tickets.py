@@ -777,7 +777,11 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
             "helpers_changed",
             ticket,
             actor,
-            {"added": [h.name for h in helpers], "removed": [], "added_ids": [str(h.id) for h in helpers]},
+            {
+                "added": [h.name for h in helpers],
+                "removed": [],
+                "added_ids": [str(h.id) for h in helpers],
+            },
         )
 
     if data.assignee_id is not None and not is_requester:

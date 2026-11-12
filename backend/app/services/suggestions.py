@@ -309,9 +309,7 @@ async def suggest(db: AsyncSession, target: Target, limit: int = 5) -> list[dict
         if day_load is not None:
             # Agenda do dia equilibrada: quem já está cheio no dia perde um pouco de pontos.
             score -= min(day_load, 6) * 1.5
-            reasons.append(
-                "Sem OS no dia" if day_load == 0 else f"{day_load} OS no dia"
-            )
+            reasons.append("Sem OS no dia" if day_load == 0 else f"{day_load} OS no dia")
         load = loads.get(tech.id, 0)
         score -= min(load, 10) * 2
         reasons.append(f"{load} OS em aberto")

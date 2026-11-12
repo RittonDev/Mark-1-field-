@@ -68,7 +68,11 @@ async def test_create_with_reference_note_and_helpers(client: AsyncClient, world
     assert r.status_code == 201, r.text
     r = await client.post(
         f"{API}/tickets/{t['id']}/worklogs",
-        json={"description": "Cabeamento", "started_at": datetime.now(UTC).isoformat(), "minutes": 30},
+        json={
+            "description": "Cabeamento",
+            "started_at": datetime.now(UTC).isoformat(),
+            "minutes": 30,
+        },
         headers=helper,
     )
     assert r.status_code == 201, r.text
@@ -216,7 +220,9 @@ async def test_intake_context(client: AsyncClient, engine: AsyncEngine, world: W
     )
     assert r.json()["location"] is None and r.json()["customer"]["name"] == "Cliente Teste"
     r = await client.get(
-        f"{API}/intake/context", params={"customer_id": world.customer_id}, headers=world.tech.headers
+        f"{API}/intake/context",
+        params={"customer_id": world.customer_id},
+        headers=world.tech.headers,
     )
     assert r.status_code == 403
 
@@ -259,7 +265,9 @@ def test_realtime_and_push_reach_helpers() -> None:
     gone = {"audience": {"helper_ids": [], "previous_helper_ids": [helper]}}
     assert should_deliver(user_id=helper, role=UserRole.TECHNICIAN, team_id=None, event=gone)
     stranger = {"audience": {"helper_ids": [actor]}}
-    assert not should_deliver(user_id=helper, role=UserRole.TECHNICIAN, team_id=None, event=stranger)
+    assert not should_deliver(
+        user_id=helper, role=UserRole.TECHNICIAN, team_id=None, event=stranger
+    )
 
     push = {
         "type": "ticket.helpers_changed",
