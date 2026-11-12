@@ -31,7 +31,9 @@ def _cell(value: Any) -> str:
     return str(value).strip()
 
 
-def _rows(header: list[Any], body: list[list[Any]], aliases: dict[str, str]) -> list[dict[str, str]]:
+def _rows(
+    header: list[Any], body: list[list[Any]], aliases: dict[str, str]
+) -> list[dict[str, str]]:
     keys = [aliases.get(normalize_header(h), normalize_header(h)) for h in header]
     out = []
     for raw in body:

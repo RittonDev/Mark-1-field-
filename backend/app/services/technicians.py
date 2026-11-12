@@ -143,7 +143,9 @@ async def list_technicians(
     stmt = select(User).where(User.role == UserRole.TECHNICIAN)
     if q:
         term = f"%{q.strip()}%"
-        stmt = stmt.where(or_(User.name.ilike(term), User.email.ilike(term), User.phone.ilike(term)))
+        stmt = stmt.where(
+            or_(User.name.ilike(term), User.email.ilike(term), User.phone.ilike(term))
+        )
     if team_id is not None:
         stmt = stmt.where(User.team_id == team_id)
     if active is not None:
@@ -216,9 +218,7 @@ async def set_photo(db: AsyncSession, user: User, upload: UploadFile) -> User:
     return user
 
 
-async def import_file(
-    db: AsyncSession, filename: str, data: bytes, dry_run: bool
-) -> ImportResult:
+async def import_file(db: AsyncSession, filename: str, data: bytes, dry_run: bool) -> ImportResult:
     """Importa a base de técnicos (nome, e-mail, telefone, grupo, cargo).
 
     E-mail novo cria o técnico com senha provisória; e-mail de técnico existente atualiza
