@@ -1,3 +1,4 @@
+import datetime as dt
 import uuid
 from typing import Annotated
 
@@ -6,7 +7,7 @@ from fastapi.responses import FileResponse
 
 from app.api.deps import DB, TicketManagerUser
 from app.core.security import InvalidToken, decode_token
-from app.models import Project, User
+from app.models import Category, Location, Project, ServiceType, User
 from app.schemas.technician import (
     ImportResult,
     NearbyOut,
@@ -192,9 +193,41 @@ async def suggest_for_place(
     state: str | None = None,
     latitude: float | None = None,
     longitude: float | None = None,
+    location_id: uuid.UUID | None = None,
+    service_type_id: uuid.UUID | None = None,
+    category_id: uuid.UUID | None = None,
+    project_id: uuid.UUID | None = None,
+    title: Annotated[str | None, Query(max_length=200)] = None,
+    start: dt.datetime | None = None,
+    end: dt.datetime | None = None,
+    estimated_minutes: Annotated[int | None, Query(gt=0, le=60 * 24 * 7)] = None,
+    limit: Annotated[int, Query(ge=1, le=10)] = 5,
 ) -> list[dict]:
-    """Para quem ainda está abrindo a OS: sugestões só pelo lugar."""
+    """Para quem ainda está abrindo a OS: a loja (ou o lugar), o serviço e o horário da visita
+    dão o mesmo ranking de uma OS já aberta (distância, histórico na loja, skill, agenda)."""
     if await regions_svc.refresh_if_stale(db):
         await db.commit()
+    location = await db.get(Location, location_id) if location_id else None
+    service_type = await db.get(ServiceType, service_type_id) if service_type_id else None
+    category = await db.get(Category, category_id) if category_id else None
+    project = await db.get(Project, project_id) if project_id else None
+    if start is not None and start.tzinfo is None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Informe o fuso do horário")
     coords = (latitude, longitude) if latitude is not None and longitude is not None else None
-    return await suggestions.suggest(db, suggestions.Target(city=city, state=state, coords=coords))
+    target = suggestions.target_from(
+        location=location,
+        city=city,
+        state=state,
+        coords=coords,
+        texts=[
+            title,
+            category.full_name if category else None,
+            service_type.name if service_type else None,
+        ],
+        start=start,
+        end=end,
+        estimated_minutes=estimated_minutes
+        or (service_type.estimated_minutes if service_type else None),
+        project=project,
+    )
+    return await suggestions.suggest(db, target, limit=limit)

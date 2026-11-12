@@ -126,6 +126,12 @@ class TechnicianSuggestion(BaseModel):
     open_tickets: int
     on_shift: bool
     distance_km: float | None
+    # Visitas a esta mesma loja (pelo histórico de OS).
+    visits_at_location: int = 0
+    last_visit_at_location: dt.datetime | None = None
+    # Com horário informado: ocupado nele (outra OS) e quantas OS já tem no dia.
+    busy: bool | None = None
+    day_load: int | None = None
     score: float
     # Por que foi sugerido: "Mora em Santos", "A 4 km agora", "Livre no horário"...
     reasons: list[str]
