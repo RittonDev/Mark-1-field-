@@ -33,7 +33,8 @@ import { Tabs } from "@/components/motion";
 import { Button, Card, ErrorBox, LoadingBlock } from "@/components/ui";
 import { useNow } from "@/components/useNow";
 import { api, errorMessage } from "@/lib/api";
-import { STATUS, STATUS_ORDER, TRANSITION_ACTION } from "@/lib/constants";
+import { useAuth } from "@/lib/auth";
+import { canManageTickets, STATUS, STATUS_ORDER, TRANSITION_ACTION } from "@/lib/constants";
 import { formatDateTime, formatRelative } from "@/lib/format";
 import type { TicketDetail, TicketStatus } from "@/lib/types";
 
@@ -126,6 +127,7 @@ export default function TicketDetailPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
   const now = useNow(30_000);
+  const { user } = useAuth();
   const [tab, setTab] = useState<Tab>("comments");
   const [target, setTarget] = useState<TicketStatus | null>(null);
   const [editing, setEditing] = useState(false);
@@ -292,7 +294,7 @@ export default function TicketDetailPage() {
               {tab === "history" ? <HistoryTab ticketId={ticket.id} /> : null}
               {tab === "worklogs" ? <WorklogsTab ticketId={ticket.id} closed={info.final} /> : null}
               {tab === "attachments" ? (
-                <AttachmentsTab ticketId={ticket.id} closed={info.final} canManage={ticket.can_assign} signatureId={ticket.signature_attachment_id} />
+                <AttachmentsTab ticketId={ticket.id} closed={info.final} canManage={canManageTickets(user?.role)} signatureId={ticket.signature_attachment_id} />
               ) : null}
             </div>
           </Card>
