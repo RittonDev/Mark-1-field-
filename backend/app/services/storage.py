@@ -96,3 +96,12 @@ def decode_image_data_url(data_url: str, max_bytes: int = 2 * 1024 * 1024) -> tu
     if ext is None:
         raise InvalidImage("Imagem inválida: envie JPG, PNG ou WebP")
     return raw, ext
+
+
+def delete(storage_key: str) -> None:
+    """Apaga o arquivo do disco (anexo excluído). Sem erro se já não existir."""
+    try:
+        path = open_path(storage_key)
+    except FileNotFoundError:
+        return
+    path.unlink(missing_ok=True)

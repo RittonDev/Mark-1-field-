@@ -93,6 +93,8 @@ class TicketEventType(StrEnum):
     COMMENT_ADDED = "comment_added"
     WORKLOG_ADDED = "worklog_added"
     ATTACHMENT_ADDED = "attachment_added"
+    ATTACHMENT_UPDATED = "attachment_updated"
+    ATTACHMENT_REMOVED = "attachment_removed"
     FORM_ADDED = "form_added"
     FORM_COMPLETED = "form_completed"
     FORM_REMOVED = "form_removed"

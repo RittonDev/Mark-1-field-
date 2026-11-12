@@ -1149,13 +1149,26 @@ async def add_worklog(
     return worklog
 
 
+def _clean_description(description: str | None) -> str | None:
+    text = (description or "").strip()
+    if len(text) > 500:
+        raise WorkflowError("A descrição do anexo tem no máximo 500 caracteres")
+    return text or None
+
+
 async def add_attachment(
-    db: AsyncSession, ticket: Ticket, upload: UploadFile, kind: str, actor: User
+    db: AsyncSession,
+    ticket: Ticket,
+    upload: UploadFile,
+    kind: str,
+    actor: User,
+    description: str | None = None,
 ) -> TicketAttachment:
     if ticket.status in FINAL and not actor.can_manage_tickets:
         raise WorkflowError("OS encerrada não recebe anexos")
     if kind not in ("file", "photo", "signature"):
         raise WorkflowError("kind deve ser file, photo ou signature")
+    caption = _clean_description(description)
     now = utcnow()
     try:
         key, size = await storage.save_upload(ticket.id, upload)
@@ -1170,6 +1183,7 @@ async def add_attachment(
         size_bytes=size,
         kind=kind,
         storage_key=key,
+        description=caption,
         created_at=now,
     )
     db.add(attachment)
@@ -1185,6 +1199,58 @@ async def add_attachment(
     queue_event(db, "attachment_added", ticket, actor, {"filename": attachment.filename})
     await db.flush()
     return attachment
+
+
+async def update_attachment(
+    db: AsyncSession,
+    ticket: Ticket,
+    attachment: TicketAttachment,
+    description: str | None,
+    actor: User,
+) -> TicketAttachment:
+    """Descrição (legenda) do anexo: a gestão em qualquer anexo; o técnico só nos que enviou."""
+    if not (actor.can_manage_tickets or attachment.uploaded_by_id == actor.id):
+        raise PermissionDenied("Você não pode editar este anexo")
+    now = utcnow()
+    attachment.description = _clean_description(description)
+    record_event(
+        db,
+        ticket,
+        actor,
+        TicketEventType.ATTACHMENT_UPDATED,
+        data={"attachment_id": str(attachment.id), "filename": attachment.filename},
+        now=now,
+    )
+    await _touch(db, ticket, now)
+    queue_event(db, "attachment_updated", ticket, actor, {"filename": attachment.filename})
+    await db.flush()
+    return attachment
+
+
+async def remove_attachment(
+    db: AsyncSession, ticket: Ticket, attachment: TicketAttachment, actor: User
+) -> None:
+    """Exclui o anexo (só analistas e gestores). A assinatura do responsável fica protegida."""
+    if not actor.can_manage_tickets:
+        raise PermissionDenied("Só analistas e gestores excluem anexos")
+    if ticket.signature_attachment_id == attachment.id:
+        raise WorkflowError("A assinatura do responsável não pode ser excluída")
+    now = utcnow()
+    key = attachment.storage_key
+    record_event(
+        db,
+        ticket,
+        actor,
+        TicketEventType.ATTACHMENT_REMOVED,
+        data={"filename": attachment.filename, "kind": attachment.kind},
+        now=now,
+    )
+    await db.delete(attachment)
+    await _touch(db, ticket, now)
+    queue_event(db, "attachment_removed", ticket, actor, {"filename": attachment.filename})
+    await db.flush()
+    if key:
+        storage.delete(key)
 
 
 async def set_violation(

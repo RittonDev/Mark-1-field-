@@ -35,6 +35,8 @@ class PublicReportPhoto(BaseModel):
     url: str
     filename: str
     taken_at: datetime | None = None
+    # Legenda escrita pelo analista (ou técnico) no anexo.
+    caption: str | None = None
 
 
 class PublicReportFormItem(BaseModel):

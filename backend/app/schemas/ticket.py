@@ -429,11 +429,20 @@ class AttachmentOut(ORMModel):
     content_type: str
     size_bytes: int
     kind: str
+    description: str | None = None
+    # Arquivo migrado ainda no armazenamento de origem (Field Control): sem tamanho conhecido.
+    external: bool = False
     form_id: uuid.UUID | None = None
     field_id: str | None = None
     uploaded_by: UserRef | None
     created_at: datetime
     download_url: str | None = None
+
+
+class AttachmentUpdate(BaseModel):
+    """Legenda do anexo (vazio apaga)."""
+
+    description: str | None = Field(default=None, max_length=500)
 
 
 class TicketViolationUpdate(BaseModel):

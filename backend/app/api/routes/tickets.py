@@ -13,6 +13,7 @@ from app.models import Ticket, TicketAttachment, TicketComment, TicketEvent, Tic
 from app.schemas.common import Page
 from app.schemas.ticket import (
     AttachmentOut,
+    AttachmentUpdate,
     CommentCreate,
     CommentOut,
     EventOut,
@@ -46,6 +47,7 @@ _INTERNAL_EVENT_TYPES = {
     "authorization_recorded",
     "part_requested",
     "part_request_updated",
+    "attachment_removed",
 }
 
 
@@ -297,6 +299,7 @@ def _attachment_out(attachment: TicketAttachment, user: User) -> AttachmentOut:
     if attachment.external_url:
         # Arquivo migrado que ainda está no armazenamento de origem (Field Control).
         out.download_url = attachment.external_url
+        out.external = True
         return out
     token = create_download_token(str(attachment.id), str(user.id))
     out.download_url = f"{settings.API_PREFIX}/attachments/{attachment.id}/download?token={token}"
@@ -325,12 +328,43 @@ async def upload_attachment(
     user: CurrentUser,
     file: Annotated[UploadFile, File()],
     kind: Annotated[str, Form()] = "file",
+    description: Annotated[str | None, Form()] = None,
 ) -> AttachmentOut:
     ticket = await svc.get_visible_ticket(db, user, ticket_id)
-    attachment = await svc.add_attachment(db, ticket, file, kind, user)
+    attachment = await svc.add_attachment(db, ticket, file, kind, user, description=description)
     await commit_and_publish(db)
     loaded = await db.get(TicketAttachment, attachment.id, populate_existing=True)
     return _attachment_out(loaded, user)  # type: ignore[arg-type]
+
+
+async def _attachment_with_ticket(
+    db: DB, user: User, attachment_id: uuid.UUID
+) -> tuple[Ticket, TicketAttachment]:
+    attachment = await db.get(TicketAttachment, attachment_id)
+    if attachment is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Anexo não encontrado")
+    ticket = await svc.get_visible_ticket(db, user, attachment.ticket_id)
+    return ticket, attachment
+
+
+@router.patch("/attachments/{attachment_id}", response_model=AttachmentOut)
+async def update_attachment(
+    attachment_id: uuid.UUID, body: AttachmentUpdate, db: DB, user: StaffUser
+) -> AttachmentOut:
+    """Legenda do anexo (a gestão em qualquer um; o técnico nos que ele enviou)."""
+    ticket, attachment = await _attachment_with_ticket(db, user, attachment_id)
+    await svc.update_attachment(db, ticket, attachment, body.description, user)
+    await commit_and_publish(db)
+    loaded = await db.get(TicketAttachment, attachment_id, populate_existing=True)
+    return _attachment_out(loaded, user)  # type: ignore[arg-type]
+
+
+@router.delete("/attachments/{attachment_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_attachment(attachment_id: uuid.UUID, db: DB, user: TicketManagerUser) -> None:
+    """Exclui o anexo (analistas e gestores). A assinatura do responsável não sai."""
+    ticket, attachment = await _attachment_with_ticket(db, user, attachment_id)
+    await svc.remove_attachment(db, ticket, attachment, user)
+    await commit_and_publish(db)
 
 
 @router.get("/attachments/{attachment_id}/download", include_in_schema=True, response_model=None)

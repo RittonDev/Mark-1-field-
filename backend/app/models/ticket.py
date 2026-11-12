@@ -298,6 +298,8 @@ class TicketAttachment(UUIDPrimaryKey, Base):
         ForeignKey("ticket_forms.id", ondelete="CASCADE"), index=True
     )
     field_id: Mapped[str | None] = mapped_column(String(40))
+    # Legenda do anexo (o analista descreve a foto; aparece no relatório do cliente).
+    description: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = created_at_column()
 
     uploaded_by: Mapped[User | None] = relationship(lazy="selectin")

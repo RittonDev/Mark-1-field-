@@ -219,13 +219,17 @@ def _photo(att: TicketAttachment, base_url: str) -> PublicReportPhoto:
     if att.external_url:
         # Arquivo migrado (Field Control) que continua no armazenamento de origem.
         return PublicReportPhoto(
-            url=att.external_url, filename=att.filename, taken_at=att.created_at
+            url=att.external_url,
+            filename=att.filename,
+            taken_at=att.created_at,
+            caption=att.description,
         )
     token = create_download_token(str(att.id), "client-report", minutes=PHOTO_LINK_MINUTES)
     return PublicReportPhoto(
         url=f"{base_url}{settings.API_PREFIX}/attachments/{att.id}/download?token={token}",
         filename=att.filename,
         taken_at=att.created_at,
+        caption=att.description,
     )
 
 
