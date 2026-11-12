@@ -35,7 +35,11 @@ async def test_distances_from_now_and_from_home(
     # Técnico 1: em jornada no centro de SP (~2,6 km da loja) e com a casa cadastrada (~7 km).
     assert (await client.post(f"{API}/tracking/consent", headers=th)).status_code == 204
     await client.post(f"{API}/tracking/shift/start", json={}, headers=th)
-    ping = {"recorded_at": datetime.now(UTC).isoformat(), "latitude": -23.5505, "longitude": -46.6333}
+    ping = {
+        "recorded_at": datetime.now(UTC).isoformat(),
+        "latitude": -23.5505,
+        "longitude": -46.6333,
+    }
     await client.post(f"{API}/tracking/pings", json={"pings": [ping]}, headers=th)
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as db:
@@ -49,7 +53,9 @@ async def test_distances_from_now_and_from_home(
         other.base_latitude, other.base_longitude = -22.9056, -47.0608
         await db.commit()
 
-    r = await client.get(f"{API}/tracking/distances", params={"location_id": store["id"]}, headers=an)
+    r = await client.get(
+        f"{API}/tracking/distances", params={"location_id": store["id"]}, headers=an
+    )
     assert r.status_code == 200, r.text
     data = r.json()
     assert data["place"]["approximate"] is False
@@ -60,7 +66,9 @@ async def test_distances_from_now_and_from_home(
     assert 2 < first["live_to_place"]["km"] < 3.5
     assert 6 < first["home_to_place"]["km"] < 9
     assert first["live_to_home"]["km"] > 0
-    assert first["home"]["kind"] == "home" and first["home"]["label"].startswith("Casa · Rua das Flores")
+    assert first["home"]["kind"] == "home" and first["home"]["label"].startswith(
+        "Casa · Rua das Flores"
+    )
     assert first["live_to_place"]["road_km"] > first["live_to_place"]["km"]
     assert first["live_at"] is not None
 
@@ -80,7 +88,9 @@ async def test_distances_from_now_and_from_home(
     # Loja sem coordenada: mede pelo centro das lojas da cidade (aproximado).
     loose = await _store(client, world, "Loja sem mapa")
     data = (
-        await client.get(f"{API}/tracking/distances", params={"location_id": loose["id"]}, headers=an)
+        await client.get(
+            f"{API}/tracking/distances", params={"location_id": loose["id"]}, headers=an
+        )
     ).json()
     assert data["place"]["approximate"] is True
 
