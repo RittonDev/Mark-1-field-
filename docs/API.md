@@ -485,3 +485,45 @@ python -m app.importers.fieldcontrol /tmp/fc_export --wipe-demo --report /tmp/fc
   - O relatório público usa o link de origem nas fotos e na assinatura.
 - Orçamento migrado: `signature_url` cai para `legacy.signature_url` (também no link público).
 - `legacy_refs (source, kind, external_id → internal_id)` guarda a origem de cada registro. Rodar de novo atualiza clientes, locais, usuários e catálogos, e não duplica OS, formulários, comentários nem orçamentos.
+
+## Região de atuação dos técnicos e técnicos mais próximos
+
+O endereço que veio do Field Control não é confiável para a maioria dos técnicos (muitos ficaram com o
+endereço padrão do escritório). Por isso a **região de atuação** (`base_*`) sai principalmente do
+histórico: a cidade onde o técnico mais atendeu nos últimos 36 meses (OS em que ele é o responsável,
+não canceladas, e OS em que ele apontou trabalho). Sem histórico, vale o endereço dele, se tiver
+coordenadas de verdade. A importação limpa o endereço quando a mesma coordenada é usada por mais de 20
+colaboradores.
+
+- **Usuário (técnico):** `home_latitude`/`home_longitude` e a base: `base_city`, `base_state`,
+  `base_source` (`history` | `home` | null), `base_visits`, `last_visit_at`, `base_updated_at`.
+  `TechnicianOut` traz `base_city`, `base_state`, `base_source`, `base_visits`, `last_visit_at`.
+- **Recalcular:** automático no fim da importação e quando a conta tem mais de 6 h (a lista, a busca e
+  as sugestões verificam antes de responder); manual: `POST /technicians/regions/refresh` (gestão)
+  -> `{technicians, history, home, none}`.
+- **Filtros da lista:** `GET /technicians?state=CE&city=fortaleza` (além de `q`, `team_id`, `active`).
+  A UF e a cidade batem com a base **ou** com o endereço; cidade sem acento e sem diferença de
+  maiúsculas.
+- **Estados e cidades:** `GET /technicians/regions?active=` ->
+  `[{state, total, cities: [{city, total}]}]` (região efetiva: a base, senão o endereço; ordenado pelo
+  total).
+- **Mais próximos:** `GET /technicians/nearby` com **um** destes pontos: `location_id` (a loja),
+  `latitude`+`longitude` (coordenadas coladas) ou `city`+`state` (centro das lojas da cidade). Opcionais:
+  `limit` (1-50, padrão 15), `include_inactive` (padrão `true`) e `max_km`.
+  - Distância = a menor entre: as lojas que ele atendeu nos últimos 36 meses, o endereço e a posição ao
+    vivo (em jornada, sinal dos últimos 30 min). Calculada no banco (haversine), sem uma consulta por
+    técnico.
+  - Resposta: `{point: {latitude, longitude, label}, technicians: [{id, name, email, phone, is_active,
+    avatar_url, base_city, base_state, base_source, distance_km, nearest_kind (store_history | home |
+    live), visits_at_location, last_visit_at_location, visits_in_city, total_visits, last_visit_at,
+    open_tickets, on_shift, reasons[]}]}`, do mais perto para o mais longe (empate: mais visitas à loja).
+  - `reasons`, por exemplo: "Atendeu esta loja 5x (última em 03/10/2026)", "Em jornada agora a 4 km",
+    "Já atendeu a 1,2 km daqui", "Mora a 3 km", "Base em Fortaleza-CE (128 OS)", "3 OS abertas agora",
+    "Inativo no app".
+  - Erros (422): "A loja não tem coordenadas"; "Não há lojas com coordenadas em {cidade}-{UF} para
+    calcular a distância"; sem ponto: "Informe a loja, as coordenadas ou a cidade com o estado". Loja
+    inexistente: 404.
+- **Sugestões da OS** (`GET /tickets/{id}/technician-suggestions` e `GET /technicians/suggest`): usam o
+  mesmo cálculo (distância pelo histórico/endereço/ao vivo, visitas a esta mesma loja e a base na
+  cidade), somado a agenda livre, skill, equipe do projeto e carga. Só técnicos **ativos**. O formato não
+  mudou; `home_city`/`home_state` passam a trazer a região efetiva (a base, senão o endereço).
