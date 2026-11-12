@@ -1,4 +1,3 @@
-import re
 import uuid
 from typing import Annotated, Any
 
@@ -238,9 +237,7 @@ async def list_locations(
     if matched is not None:
         # Código exato e nome que começa com a busca vêm primeiro.
         order.insert(0, search.rank(q, Location.name, exact=[Location.code, Location.document]))
-    rows = await db.scalars(
-        base.order_by(*order).offset((page - 1) * page_size).limit(page_size)
-    )
+    rows = await db.scalars(base.order_by(*order).offset((page - 1) * page_size).limit(page_size))
     return Page(
         items=await _locations_out(db, user, list(rows)),
         total=total,

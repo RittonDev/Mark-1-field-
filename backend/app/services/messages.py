@@ -155,7 +155,11 @@ def _local(value: datetime) -> datetime:
 async def _eta(db: AsyncSession, ticket: Ticket, now: datetime) -> tuple[str | None, str | None]:
     """(hora prevista de chegada, distância) pela última posição do técnico em jornada."""
     loc = ticket.location
-    if ticket.assignee_id is None or loc is None or not geo.valid_coords(loc.latitude, loc.longitude):
+    if (
+        ticket.assignee_id is None
+        or loc is None
+        or not geo.valid_coords(loc.latitude, loc.longitude)
+    ):
         return None, None
     on_shift = await db.scalar(
         select(TechnicianShift.id).where(

@@ -40,7 +40,7 @@ def _cap(part: str) -> str:
 
 
 def title_pt(name: str) -> str:
-    """ "SAO BERNARDO DO CAMPO" -> "Sao Bernardo do Campo"; "SANTA BARBARA D'OESTE" -> "... d'Oeste"."""
+    """Título pt-BR: "SAO BERNARDO DO CAMPO" -> "Sao Bernardo do Campo"; "D'OESTE" -> "d'Oeste"."""
     out: list[str] = []
     for index, word in enumerate(name.split()):
         low = word.lower()

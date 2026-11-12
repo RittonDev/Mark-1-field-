@@ -18,7 +18,7 @@ MAX_WORDS = 8
 
 
 def words(q: str | None) -> list[str]:
-    """Palavras da busca, sem acento e em minúsculas (pontuação separa: CNPJ com pontos vira pedaços)."""
+    """Palavras da busca, sem acento e em minúsculas (pontuação separa as palavras)."""
     return _WORD.findall(fold_text(q))[:MAX_WORDS]
 
 
@@ -50,7 +50,7 @@ def rank(
     name: ColumnElement,
     exact: Sequence[ColumnElement] = (),
 ) -> ColumnElement:
-    """Ordem de relevância: código/documento exato, nome que começa com a busca, com a 1ª palavra."""
+    """Relevância: código/documento exato, nome começando pela busca, pela 1ª palavra."""
     terms = words(q)
     text = " ".join(terms)
     first = terms[0] if terms else ""

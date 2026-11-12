@@ -425,7 +425,9 @@ def test_coordinate_rules() -> None:
     assert not geo.valid_coords(-14.23500, -51.92528)  # como o geocodificador grava
     assert not geo.valid_coords(0, 0) and not geo.valid_coords(None, -38.5)
     assert geo.valid_coords(*FORT_1)
-    pairs = geo.cross_state_pairs([(-22.9068, -43.1729, "RJ"), (-22.90681, -43.17289, "PE"), (*FORT_1, "CE"), (*FORT_1, "CE")])
+    pairs = geo.cross_state_pairs(
+        [(-22.9068, -43.1729, "RJ"), (-22.90681, -43.17289, "PE"), (*FORT_1, "CE"), (*FORT_1, "CE")]
+    )
     assert pairs == {geo.coord_key(-22.9068, -43.1729)}
 
 
@@ -435,7 +437,9 @@ async def test_store_without_coords_uses_city_centroid_and_no_false_zero_km(
     ids = await _seed_placeholder(engine, world)
     an = world.analyst.headers
     # Sem rodar a limpeza: a regra de validade já vale na hora da busca.
-    r = await client.get(f"{API}/technicians/nearby", params={"location_id": ids["target"]}, headers=an)
+    r = await client.get(
+        f"{API}/technicians/nearby", params={"location_id": ids["target"]}, headers=an
+    )
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["point"]["label"] == (
@@ -449,7 +453,9 @@ async def test_store_without_coords_uses_city_centroid_and_no_false_zero_km(
     assert all(t["distance_km"] > 0 or t["visits_at_location"] for t in body["technicians"])
 
     # Loja sem coordenada numa cidade sem nenhuma loja válida: aí sim 422.
-    r = await client.get(f"{API}/technicians/nearby", params={"location_id": ids["far"]}, headers=an)
+    r = await client.get(
+        f"{API}/technicians/nearby", params={"location_id": ids["far"]}, headers=an
+    )
     assert r.status_code == 422
     assert "A loja não tem coordenadas e não há lojas com coordenadas em Jequié-BA" in r.text
 

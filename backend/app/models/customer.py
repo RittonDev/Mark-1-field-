@@ -23,9 +23,7 @@ class Customer(UUIDPrimaryKey, Timestamps, Base):
     tags: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list, server_default="[]")
     # Todos os contatos: [{kind: email|phone, value, name, label, primary}] (o principal também
     # fica em email/phone).
-    contacts: Mapped[list[dict[str, Any]]] = mapped_column(
-        JSONB, default=list, server_default="[]"
-    )
+    contacts: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list, server_default="[]")
     # Endereço da matriz.
     address_line: Mapped[str | None] = mapped_column(String(255))
     district: Mapped[str | None] = mapped_column(String(120))
@@ -64,9 +62,7 @@ class Location(UUIDPrimaryKey, Timestamps, Base):
     notes: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     # Todos os contatos da filial (o principal também fica em contact_name/contact_phone).
-    contacts: Mapped[list[dict[str, Any]]] = mapped_column(
-        JSONB, default=list, server_default="[]"
-    )
+    contacts: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list, server_default="[]")
     # Origem (Field Control): id, data de cadastro, territórios.
     legacy: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 

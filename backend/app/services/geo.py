@@ -42,7 +42,10 @@ def valid_coords(latitude: float | None, longitude: float | None) -> bool:
         return False
     if lat == 0 and lon == 0:
         return False
-    if abs(lat - BRAZIL_CENTER[0]) < CENTER_TOLERANCE and abs(lon - BRAZIL_CENTER[1]) < CENTER_TOLERANCE:
+    if (
+        abs(lat - BRAZIL_CENTER[0]) < CENTER_TOLERANCE
+        and abs(lon - BRAZIL_CENTER[1]) < CENTER_TOLERANCE
+    ):
         return False
     return -90 <= lat <= 90 and -180 <= lon <= 180
 
@@ -66,7 +69,9 @@ def coord_key(latitude: float, longitude: float) -> tuple[float, float]:
     return round(float(latitude), DUPLICATE_DECIMALS), round(float(longitude), DUPLICATE_DECIMALS)
 
 
-def cross_state_pairs(points: Iterable[tuple[float | None, float | None, str | None]]) -> set[tuple[float, float]]:
+def cross_state_pairs(
+    points: Iterable[tuple[float | None, float | None, str | None]],
+) -> set[tuple[float, float]]:
     """Pontos repetidos em lojas de 2+ UFs (lista de (lat, lon, UF)): ponto padrão, não endereço."""
     states: dict[tuple[float, float], set[str]] = defaultdict(set)
     for lat, lon, uf in points:
@@ -89,7 +94,8 @@ async def invalid_location_ids(db: AsyncSession) -> list[uuid.UUID]:
     )
     stmt = select(Location.id).where(
         has_coords,
-        (tuple_(key_lat, key_lon).in_(shared)) | not_(valid_coords_sql(Location.latitude, Location.longitude)),
+        (tuple_(key_lat, key_lon).in_(shared))
+        | not_(valid_coords_sql(Location.latitude, Location.longitude)),
     )
     return list(await db.scalars(stmt))
 
