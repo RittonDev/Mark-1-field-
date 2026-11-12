@@ -34,7 +34,9 @@ class Project(UUIDPrimaryKey, Timestamps, Base):
     contract_value: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
     # Condições do projeto: valor por visita, por loja, regras de cobrança...
     pricing_notes: Mapped[str | None] = mapped_column(Text)
-    manager_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    manager_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
     team_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("teams.id", ondelete="SET NULL"))
     # Técnicos dedicados ao projeto (sugeridos primeiro ao atribuir as OS dele).
     member_ids: Mapped[list[str]] = mapped_column(JSONB, default=list)

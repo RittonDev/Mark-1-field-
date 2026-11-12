@@ -30,7 +30,9 @@ async def test_project_tracking(client: AsyncClient, world: World) -> None:
     assert p["code"].startswith("PRJ-") and p["members"][0]["name"] == "Tecnico"
 
     # Só a gestão vincula OS ao projeto.
-    t1 = await create(client, world, title="Loja 1", project_id=p["id"], assignee_id=str(world.tech.user.id))
+    t1 = await create(
+        client, world, title="Loja 1", project_id=p["id"], assignee_id=str(world.tech.user.id)
+    )
     assert t1["project"]["name"] == "Recabeamento lojas Zona Sul"
     t2 = await create(client, world, title="Loja 2")
     r = await client.patch(f"{API}/tickets/{t2['id']}", json={"project_id": p["id"]}, headers=an)
@@ -48,7 +50,12 @@ async def test_project_tracking(client: AsyncClient, world: World) -> None:
 
     p = (await client.get(f"{API}/projects/{p['id']}", headers=an)).json()
     s = p["stats"]
-    assert (s["tickets_total"], s["tickets_done"], s["tickets_open"], s["progress"]) == (2, 1, 1, 0.5)
+    assert (s["tickets_total"], s["tickets_done"], s["tickets_open"], s["progress"]) == (
+        2,
+        1,
+        1,
+        0.5,
+    )
     assert (s["expenses_total"], p["margin"]) == (350.0, 11650.0)
     listed = (await client.get(f"{API}/tickets", params={"project_id": p["id"]}, headers=an)).json()
     assert {i["title"] for i in listed["items"]} == {"Loja 1", "Loja 2"}

@@ -74,7 +74,12 @@ async def stats(db: AsyncSession, ids: list[uuid.UUID]) -> dict[uuid.UUID, Proje
         .group_by(Ticket.project_id)
     ):
         s = out[pid]
-        s.tickets_total, s.tickets_open, s.tickets_done, s.unproductive = total, open_, done, unproductive
+        s.tickets_total, s.tickets_open, s.tickets_done, s.unproductive = (
+            total,
+            open_,
+            done,
+            unproductive,
+        )
     for pid, total in await db.execute(
         select(Ticket.project_id, func.sum(TicketExpense.total))
         .join(Ticket, Ticket.id == TicketExpense.ticket_id)
@@ -97,7 +102,9 @@ async def to_out(db: AsyncSession, projects: list[Project]) -> list[ProjectOut]:
     member_ids = {uuid.UUID(m) for p in projects for m in (p.member_ids or [])}
     names = {}
     if member_ids:
-        names = {u.id: u.name for u in await db.scalars(select(User).where(User.id.in_(member_ids)))}
+        names = {
+            u.id: u.name for u in await db.scalars(select(User).where(User.id.in_(member_ids)))
+        }
     ref = lambda o: {"id": o.id, "name": o.name} if o else None  # noqa: E731
     return [
         ProjectOut(
