@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 import { Check, Copy, ExternalLink, FileText, Link2, Mail, MessageCircle, Plus, RefreshCw, Send, Share2, Trash2, X } from "lucide-react";
 import { useState } from "react";
-import { Button, Card, CardHeader, Dialog, ErrorBox, Field, Input, Textarea } from "@/components/ui";
+import { Button, Card, CardHeader, Dialog, ErrorBox, Field, Input, Select, Textarea } from "@/components/ui";
 import { absoluteApiUrl, api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canManageTickets } from "@/lib/constants";
@@ -137,6 +137,7 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
 }
 
 interface Line {
+  kind: QuoteItemKind;
   description: string;
   quantity: string;
   unit: string;
@@ -162,12 +163,13 @@ function QuoteEditor({
   const [title, setTitle] = useState(quote?.title ?? ticket.title);
   const [lines, setLines] = useState<Line[]>(
     quote?.items.map((i) => ({
+      kind: i.kind ?? "product",
       description: i.description,
       quantity: String(i.quantity).replace(".", ","),
       unit: i.unit,
       unit_price: i.unit_price.toFixed(2).replace(".", ","),
       catalog_item_id: i.catalog_item_id,
-    })) ?? [{ description: "", quantity: "1", unit: "un", unit_price: "", catalog_item_id: null }],
+    })) ?? [{ kind: "product", description: "", quantity: "1", unit: "un", unit_price: "", catalog_item_id: null }],
   );
   const [discount, setDiscount] = useState(quote ? quote.discount.toFixed(2).replace(".", ",") : "0");
   // Validade padrão: 7 dias (calculada uma vez, no primeiro render).
@@ -185,6 +187,7 @@ function QuoteEditor({
         items: lines
           .filter((l) => l.description.trim())
           .map((l) => ({
+            kind: l.kind,
             description: l.description,
             quantity: l.quantity.replace(",", "."),
             unit: l.unit,
@@ -209,7 +212,7 @@ function QuoteEditor({
       size="lg"
       onClose={onClose}
       title={quote ? `Editar ${quote.code}` : "Novo orçamento"}
-      description={quote?.status === "sent" ? "Ao salvar, o link enviado deixa de valer: envie de novo." : `${ticket.code} · ${ticket.customer?.name ?? "sem cliente"}`}
+      description={quote?.status === "sent" ? "O link continua o mesmo: depois de salvar, envie de novo para o cliente responder." : `${ticket.code} · ${ticket.customer?.name ?? "sem cliente"}`}
       footer={
         <>
           <Button onClick={onClose}>Cancelar</Button>
@@ -231,10 +234,11 @@ function QuoteEditor({
           ))}
         </datalist>
         <div className="overflow-x-auto rounded-lg border border-line">
-          <table className="w-full min-w-[34rem] text-sm">
+          <table className="w-full min-w-[42rem] text-sm">
             <thead className="bg-surface-2 text-left text-xs text-ink-muted">
               <tr>
                 <th className="px-2 py-1.5 font-medium">Item</th>
+                <th className="w-28 px-2 py-1.5 font-medium">Tipo</th>
                 <th className="w-20 px-2 py-1.5 font-medium">Qtd.</th>
                 <th className="w-20 px-2 py-1.5 font-medium">Unid.</th>
                 <th className="w-28 px-2 py-1.5 font-medium">Valor unit.</th>
@@ -256,11 +260,20 @@ function QuoteEditor({
                         setLine(
                           i,
                           match
-                            ? { description: match.name, unit: match.unit, unit_price: match.price.toFixed(2).replace(".", ","), catalog_item_id: match.id }
+                            ? { description: match.name, unit: match.unit, unit_price: match.price.toFixed(2).replace(".", ","), catalog_item_id: match.id, kind: match.kind ?? "product" }
                             : { description: e.target.value, catalog_item_id: null },
                         );
                       }}
                     />
+                  </td>
+                  <td className="p-1.5">
+                    <Select value={l.kind} onChange={(e) => setLine(i, { kind: e.target.value as QuoteItemKind })} aria-label="Tipo do item">
+                      {(Object.keys(QUOTE_KIND) as QuoteItemKind[]).map((k) => (
+                        <option key={k} value={k}>
+                          {QUOTE_KIND[k].label}
+                        </option>
+                      ))}
+                    </Select>
                   </td>
                   <td className="p-1.5">
                     <Input value={l.quantity} onChange={(e) => setLine(i, { quantity: e.target.value })} inputMode="decimal" aria-label="Quantidade" />
@@ -291,7 +304,7 @@ function QuoteEditor({
         <Button
           size="sm"
           className="self-start"
-          onClick={() => setLines((ls) => [...ls, { description: "", quantity: "1", unit: "un", unit_price: "", catalog_item_id: null }])}
+          onClick={() => setLines((ls) => [...ls, { kind: "product", description: "", quantity: "1", unit: "un", unit_price: "", catalog_item_id: null }])}
         >
           <Plus className="size-4" />
           Adicionar item
@@ -418,6 +431,7 @@ function QuoteView({ quote, onClose }: { quote: Quote; onClose: () => void }) {
           <thead className="text-left text-xs text-ink-muted">
             <tr>
               <th className="py-1 font-medium">Item</th>
+              <th className="py-1 font-medium">Tipo</th>
               <th className="py-1 text-right font-medium">Qtd.</th>
               <th className="py-1 text-right font-medium">Unit.</th>
               <th className="py-1 text-right font-medium">Total</th>
@@ -427,6 +441,7 @@ function QuoteView({ quote, onClose }: { quote: Quote; onClose: () => void }) {
             {quote.items.map((i, k) => (
               <tr key={k}>
                 <td className="py-1.5 text-ink">{i.description}</td>
+                <td className="py-1.5 text-ink-muted">{QUOTE_KIND[i.kind ?? "product"].label}</td>
                 <td className="py-1.5 text-right tabular-nums">
                   {i.quantity.toLocaleString("pt-BR")} {i.unit}
                 </td>
@@ -436,7 +451,17 @@ function QuoteView({ quote, onClose }: { quote: Quote; onClose: () => void }) {
             ))}
           </tbody>
         </table>
-        <div className="ml-auto w-56 space-y-1 text-right tabular-nums">
+        <div className="ml-auto w-64 space-y-1 text-right tabular-nums">
+          {(() => {
+            const totals = totalsByKind(quote.items, quote.totals_by_kind);
+            return (Object.keys(QUOTE_KIND) as QuoteItemKind[])
+              .filter((k) => totals[k] > 0)
+              .map((k) => (
+                <p key={k} className="text-xs text-ink-subtle">
+                  {QUOTE_KIND[k].plural} {formatMoney(totals[k])}
+                </p>
+              ));
+          })()}
           <p className="text-ink-muted">Subtotal {formatMoney(quote.subtotal)}</p>
           {quote.discount ? <p className="text-ink-muted">Desconto −{formatMoney(quote.discount)}</p> : null}
           <p className="text-base font-semibold text-ink">Total {formatMoney(quote.total)}</p>
@@ -448,11 +473,15 @@ function QuoteView({ quote, onClose }: { quote: Quote; onClose: () => void }) {
               // eslint-disable-next-line @next/next/no-img-element -- link assinado da API
               <img src={absoluteApiUrl(quote.signature_url) ?? undefined} alt="Assinatura do cliente" className="h-14 w-32 rounded border border-line bg-white object-contain" />
             ) : null}
-            <p className="text-emerald-900 dark:text-emerald-200">
-              Aprovado por <strong>{quote.approver_name}</strong>
-              {quote.approver_role ? ` (${quote.approver_role})` : ""}
-              {quote.approver_document ? ` · doc. ${quote.approver_document}` : ""} em {formatDateTime(quote.decided_at)}
-            </p>
+            <div className="text-emerald-900 dark:text-emerald-200">
+              <p>
+                Aprovado por <strong>{quote.approver_name}</strong>
+                {quote.approver_registration ? ` · matrícula ${quote.approver_registration}` : ""}
+                {quote.approver_role ? ` (${quote.approver_role})` : ""}
+                {quote.approver_document ? ` · doc. ${quote.approver_document}` : ""} em {formatDateTime(quote.decided_at)}
+              </p>
+              {quote.client_comment ? <p className="mt-1 text-emerald-800/80 dark:text-emerald-200/80">“{quote.client_comment}”</p> : null}
+            </div>
           </div>
         ) : quote.status === "rejected" ? (
           <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">

@@ -350,7 +350,9 @@ export default function PublicReportPage() {
 
             <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-line bg-surface-2/60 px-6 py-4 text-[11px] text-ink-subtle sm:px-8">
               <span>
-                Relatório gerado em {formatDateTime(report.generated_at)} · {report.company_name}
+                Relatório gerado em {formatDateTime(report.generated_at)} · {report.company?.name ?? report.company_name}
+                {report.company?.phone ? ` · ${report.company.phone}` : ""}
+                {report.company?.email ? ` · ${report.company.email}` : ""}
               </span>
               <span className="font-mono">{report.code}</span>
             </footer>

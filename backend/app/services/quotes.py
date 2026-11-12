@@ -1,7 +1,6 @@
 """Orçamentos da OS: montar, enviar o link ao cliente e registrar a decisão dele."""
 
 import hashlib
-import secrets
 import uuid
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
@@ -9,10 +8,12 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import links
+from app.core.config import settings
 from app.core.enums import QuoteStatus, TicketEventType
 from app.db.base import utcnow
 from app.models import Quote, QuoteItemCatalog, Ticket, User
-from app.schemas.quote import QuoteApprove, QuoteIn, format_quote_code
+from app.schemas.quote import QuoteApprove, QuoteIn, QuoteLink, format_quote_code
 from app.services import storage
 from app.services.activities import local_today
 from app.services.errors import NotFound, PermissionDenied, WorkflowError
@@ -21,10 +22,17 @@ from app.services.tickets import _touch, record_event
 
 CENT = Decimal("0.01")
 EDITABLE = (QuoteStatus.DRAFT, QuoteStatus.SENT, QuoteStatus.EXPIRED)
+LINK_KIND = "quote"
+ANSWERED = "Este orçamento já foi respondido ou venceu"
+IN_REVIEW = "Este orçamento está em revisão pela empresa. Aguarde o novo envio para responder."
 
 
 class QuoteUnavailable(Exception):
-    """Link inexistente, cancelado, já respondido ou vencido."""
+    """Link inexistente, trocado, adulterado ou de orçamento cancelado."""
+
+
+class QuoteNotOpen(Exception):
+    """O link abre, mas o orçamento não aceita resposta agora (respondido, vencido, em revisão)."""
 
 
 def _hash(token: str) -> str:
@@ -54,6 +62,7 @@ def _compute(data: QuoteIn) -> tuple[list[dict[str, Any]], Decimal, Decimal]:
                 "unit_price": str(item.unit_price),
                 "total": str(line),
                 "catalog_item_id": str(item.catalog_item_id) if item.catalog_item_id else None,
+                "kind": item.kind,
             }
         )
     if data.discount > subtotal:
@@ -124,11 +133,20 @@ async def update(db: AsyncSession, quote: Quote, data: QuoteIn, actor: User) -> 
     quote.total = total
     quote.valid_until = data.valid_until
     quote.notes = (data.notes or "").strip() or None
-    # Mudou o que o cliente vai aprovar: o link antigo deixa de valer.
+    # Mudou o que o cliente vai aprovar: volta a rascunho. O link continua o mesmo: o cliente
+    # vê o conteúdo atual "em revisão" e pode responder de novo quando for reenviado.
     quote.status = QuoteStatus.DRAFT
-    quote.token_hash = None
     await db.flush()
     return quote
+
+
+def link_out(quote: Quote) -> QuoteLink | None:
+    """Link do cliente para copiar e enviar (existe a partir do primeiro envio)."""
+    if not quote.link_id or quote.status == QuoteStatus.CANCELLED:
+        return None
+    token = links.token_for(LINK_KIND, quote.link_id)
+    path = f"/orcamento/{token}"
+    return QuoteLink(token=token, path=path, url=f"{settings.WEB_URL.rstrip('/')}{path}")
 
 
 async def send(db: AsyncSession, ticket: Ticket, quote: Quote, actor: User) -> str:
@@ -137,8 +155,9 @@ async def send(db: AsyncSession, ticket: Ticket, quote: Quote, actor: User) -> s
         raise WorkflowError("Orçamento já respondido ou cancelado")
     if quote.valid_until is not None and quote.valid_until < local_today():
         raise WorkflowError("A validade já passou: ajuste a data antes de enviar")
-    token = secrets.token_urlsafe(32)
-    quote.token_hash = _hash(token)
+    # Reenviar mantém o mesmo link (o cliente usa o que já recebeu).
+    if quote.link_id is None:
+        quote.link_id = links.new_link_id()
     quote.status = QuoteStatus.SENT
     quote.sent_at = utcnow()
     quote.sent_by_id = actor.id
@@ -153,7 +172,20 @@ async def send(db: AsyncSession, ticket: Ticket, quote: Quote, actor: User) -> s
     await _touch(db, ticket, utcnow())
     queue_event(db, "updated", ticket, actor, {"fields": ["quotes"]}, internal=True)
     await db.flush()
-    return token
+    return links.token_for(LINK_KIND, quote.link_id)
+
+
+async def rotate_link(db: AsyncSession, quote: Quote, actor: User) -> QuoteLink:
+    """Troca o link (o anterior, inclusive um antigo só com hash, para de abrir)."""
+    _require_manager(actor)
+    if quote.status == QuoteStatus.CANCELLED or (quote.link_id is None and quote.token_hash is None):
+        raise WorkflowError("Envie o orçamento para gerar o link do cliente")
+    quote.link_id = links.new_link_id()
+    quote.token_hash = None
+    await db.flush()
+    out = link_out(quote)
+    assert out is not None
+    return out
 
 
 async def cancel(db: AsyncSession, quote: Quote, actor: User) -> Quote:
@@ -161,6 +193,7 @@ async def cancel(db: AsyncSession, quote: Quote, actor: User) -> Quote:
     if quote.status in (QuoteStatus.APPROVED, QuoteStatus.REJECTED):
         raise WorkflowError("Orçamento já respondido pelo cliente")
     quote.status = QuoteStatus.CANCELLED
+    quote.link_id = None
     quote.token_hash = None
     await db.flush()
     return quote
@@ -170,16 +203,25 @@ async def cancel(db: AsyncSession, quote: Quote, actor: User) -> Quote:
 
 
 async def by_token(db: AsyncSession, token: str) -> Quote:
-    quote = await db.scalar(select(Quote).where(Quote.token_hash == _hash(token)))
-    if quote is None:
+    if "." in token:
+        link_id = links.parse_token(LINK_KIND, token)
+        if link_id is None:
+            raise QuoteUnavailable
+        quote = await db.scalar(select(Quote).where(Quote.link_id == link_id))
+    else:
+        # Link enviado antes do link_id (só o hash no banco).
+        quote = await db.scalar(select(Quote).where(Quote.token_hash == _hash(token)))
+    if quote is None or quote.status == QuoteStatus.CANCELLED:
         raise QuoteUnavailable
     refresh_expiry(quote)
     return quote
 
 
 def _ensure_open(quote: Quote) -> None:
+    if quote.status == QuoteStatus.DRAFT:
+        raise QuoteNotOpen(IN_REVIEW)
     if quote.status != QuoteStatus.SENT:
-        raise QuoteUnavailable
+        raise QuoteNotOpen(ANSWERED)
 
 
 async def _decided(db: AsyncSession, ticket: Ticket, quote: Quote, approved: bool) -> None:
@@ -213,6 +255,8 @@ async def approve(db: AsyncSession, quote: Quote, data: QuoteApprove, ip: str | 
     quote.status = QuoteStatus.APPROVED
     quote.decided_at = utcnow()
     quote.approver_name = " ".join(data.name.split())
+    quote.approver_registration = (data.registration or "").strip() or None
+    quote.client_comment = (data.comment or "").strip() or None
     quote.approver_document = (data.document or "").strip() or None
     quote.approver_role = (data.role or "").strip() or None
     quote.decision_ip = ip  # o link segue abrindo, só para consulta (o status impede 2ª resposta)
@@ -224,12 +268,18 @@ async def approve(db: AsyncSession, quote: Quote, data: QuoteApprove, ip: str | 
 
 
 async def reject(
-    db: AsyncSession, quote: Quote, reason: str, name: str | None, ip: str | None
+    db: AsyncSession,
+    quote: Quote,
+    reason: str,
+    name: str | None,
+    ip: str | None,
+    comment: str | None = None,
 ) -> Quote:
     _ensure_open(quote)
     quote.status = QuoteStatus.REJECTED
     quote.decided_at = utcnow()
     quote.rejection_reason = reason.strip()
+    quote.client_comment = (comment or "").strip() or None
     quote.approver_name = " ".join((name or "").split()) or None
     quote.decision_ip = ip
     ticket = await db.get(Ticket, quote.ticket_id)

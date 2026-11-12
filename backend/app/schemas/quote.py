@@ -25,7 +25,7 @@ class KindTotals(BaseModel):
     expense: Money = Decimal("0")
 
 
-def totals_by_kind(items: "list[QuoteItemOut]") -> KindTotals:
+def sum_by_kind(items: "list[QuoteItemOut]") -> KindTotals:
     totals = {"product": Decimal("0"), "service": Decimal("0"), "expense": Decimal("0")}
     for item in items:
         totals[item.kind] += item.total
@@ -103,7 +103,7 @@ class QuoteOut(ORMModel):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def totals_by_kind(self) -> KindTotals:
-        return totals_by_kind(self.items)
+        return sum_by_kind(self.items)
 
 
 class QuoteSent(QuoteOut):
@@ -154,7 +154,7 @@ class PublicQuote(BaseModel):
     address: PublicQuoteAddress | None = None
     ticket_number: int | None = None
     issued_at: dt.datetime | None = None
-    totals_by_kind: KindTotals = KindTotals()
+    totals_by_kind: KindTotals = Field(default_factory=KindTotals)
     approver_registration: str | None = None
     client_comment: str | None = None
     signature_url: str | None = None

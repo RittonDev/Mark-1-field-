@@ -1,7 +1,8 @@
 """Orçamentos da OS, enviados ao cliente por link para aprovar (com assinatura) ou recusar.
 
 Ex.: OS "organizar rack": a gestão já sabe que vai precisar de velcro, monta o orçamento com
-os itens do catálogo e manda o link; o cliente aprova com nome, documento e assinatura.
+os itens do catálogo e manda o link; o cliente aprova com nome, matrícula (opcional) e
+assinatura, e pode deixar um comentário para a empresa.
 """
 
 import uuid
@@ -29,6 +30,8 @@ class QuoteItemCatalog(UUIDPrimaryKey, Timestamps, Base):
     price: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     description: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    # product (material) | service (mão de obra) | expense (deslocamento, pedágio...)
+    kind: Mapped[str] = mapped_column(String(20), default="product", server_default="product")
 
 
 class Quote(UUIDPrimaryKey, Timestamps, Base):
@@ -50,7 +53,10 @@ class Quote(UUIDPrimaryKey, Timestamps, Base):
     valid_until: Mapped[date | None] = mapped_column(Date)
     notes: Mapped[str | None] = mapped_column(Text)  # condições, prazo, pagamento
 
-    # Link público: só o hash fica no banco; reenviar gera outro (o anterior deixa de valer).
+    # Link público do cliente: só o id fica no banco (o token leva um HMAC); dá para copiar
+    # de novo a qualquer momento. Editar ou reenviar mantém o link; trocar ou cancelar muda.
+    link_id: Mapped[str | None] = mapped_column(String(24), unique=True)
+    # Links enviados antes do link_id (só o hash): seguem abrindo até a próxima edição.
     token_hash: Mapped[str | None] = mapped_column(String(64), unique=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     sent_by_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -62,6 +68,8 @@ class Quote(UUIDPrimaryKey, Timestamps, Base):
     approver_name: Mapped[str | None] = mapped_column(String(160))
     approver_document: Mapped[str | None] = mapped_column(String(20))
     approver_role: Mapped[str | None] = mapped_column(String(120))
+    approver_registration: Mapped[str | None] = mapped_column(String(40))  # matrícula
+    client_comment: Mapped[str | None] = mapped_column(Text)  # comentário para a empresa
     signature_key: Mapped[str | None] = mapped_column(String(255))
     decision_ip: Mapped[str | None] = mapped_column(String(64))
     rejection_reason: Mapped[str | None] = mapped_column(Text)

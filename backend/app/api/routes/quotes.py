@@ -15,8 +15,11 @@ from app.schemas.quote import (
     CatalogItemIn,
     CatalogItemOut,
     PublicQuote,
+    PublicQuoteAddress,
+    PublicQuoteCustomer,
     QuoteApprove,
     QuoteIn,
+    QuoteLink,
     QuoteListRow,
     QuoteOut,
     QuoteReject,
@@ -24,6 +27,7 @@ from app.schemas.quote import (
     format_quote_code,
 )
 from app.schemas.ticket import format_ticket_code
+from app.services import company as company_svc
 from app.services import quotes as svc
 from app.services import storage
 from app.services import tickets as tickets_svc
@@ -35,11 +39,20 @@ public = APIRouter(prefix="/public/quotes", tags=["quotes"])
 LINK_GONE = "Este orçamento não está mais disponível. Fale com a Maxx Field."
 
 
+SIGNATURE_LINK = timedelta(minutes=30)
+PUBLIC_SIGNATURE_LINK = timedelta(hours=24)
+
+
+def _signature_path(quote: Quote, ttl: timedelta) -> str:
+    token = create_token(f"quote-signature:{quote.id}", "download", ttl)
+    return f"{settings.API_PREFIX}/quotes/{quote.id}/signature?token={token}"
+
+
 def _out(quote: Quote) -> QuoteOut:
     out = QuoteOut.model_validate(quote)
     if quote.signature_key:
-        token = create_token(f"quote-signature:{quote.id}", "download", timedelta(minutes=30))
-        out.signature_url = f"{settings.API_PREFIX}/quotes/{quote.id}/signature?token={token}"
+        out.signature_url = _signature_path(quote, SIGNATURE_LINK)
+    out.link = svc.link_out(quote)
     return out
 
 
@@ -111,12 +124,20 @@ async def update_quote(
 
 @router.post("/quotes/{quote_id}/send", response_model=QuoteSent)
 async def send_quote(quote_id: uuid.UUID, db: DB, user: TicketManagerUser) -> QuoteSent:
-    """Gera o link para o cliente (reenviar gera outro; o anterior deixa de valer)."""
+    """Marca como enviado e devolve o link do cliente (reenviar mantém o mesmo link)."""
     quote = await svc.get(db, quote_id)
     ticket = await tickets_svc.get_ticket(db, quote.ticket_id)
     token = await svc.send(db, ticket, quote, user)
     await commit_and_publish(db)
     return QuoteSent(**_out(quote).model_dump(exclude={"code"}), token=token)
+
+
+@router.post("/quotes/{quote_id}/link/rotate", response_model=QuoteLink)
+async def rotate_quote_link(quote_id: uuid.UUID, db: DB, user: TicketManagerUser) -> QuoteLink:
+    """Troca o link do cliente: o anterior para de abrir."""
+    link = await svc.rotate_link(db, await svc.get(db, quote_id), user)
+    await db.commit()
+    return link
 
 
 @router.post("/quotes/{quote_id}/cancel", response_model=QuoteOut)
@@ -189,13 +210,39 @@ async def _public(db: DB, token: str) -> tuple[Quote, Ticket]:
     return quote, ticket
 
 
-def _public_view(quote: Quote, ticket: Ticket) -> PublicQuote:
+def _address(ticket: Ticket) -> PublicQuoteAddress | None:
+    """Endereço do atendimento: o informado na OS ou o do local (com bairro, cidade e CEP)."""
+    loc = ticket.location
+    if ticket.service_address:
+        line, district, zip_code = ticket.service_address, None, None
+    elif loc is not None:
+        line, district, zip_code = loc.address_line, loc.district, loc.zip_code
+    else:
+        return None
+    city = loc.city if loc else None
+    state = loc.state if loc else None
+    head = " - ".join(p for p in (line, district) if p)
+    city_state = " - ".join(p for p in (city, state) if p)
+    full = ", ".join(p for p in (head, city_state, zip_code) if p) or None
+    if full is None:
+        return None
+    return PublicQuoteAddress(
+        line=line, district=district, city=city, state=state, zip_code=zip_code, full=full
+    )
+
+
+async def _public_view(db: DB, quote: Quote, ticket: Ticket, base_url: str) -> PublicQuote:
     out = _out(quote)
+    customer = ticket.customer
+    signature_url = None
+    if quote.status == QuoteStatus.APPROVED and quote.signature_key:
+        root = (settings.API_PUBLIC_URL or base_url).rstrip("/")
+        signature_url = f"{root}{_signature_path(quote, PUBLIC_SIGNATURE_LINK)}"
     return PublicQuote(
         code=format_quote_code(quote.number),
         title=quote.title,
         status=quote.status,
-        customer=ticket.customer.name if ticket.customer else None,
+        customer=customer.name if customer else None,
         location=ticket.location.name if ticket.location else None,
         ticket_code=format_ticket_code(ticket.number),
         ticket_title=ticket.title,
@@ -209,14 +256,32 @@ def _public_view(quote: Quote, ticket: Ticket) -> PublicQuote:
         decided_at=quote.decided_at,
         approver_name=quote.approver_name,
         rejection_reason=quote.rejection_reason,
+        company=await company_svc.profile(db),
+        customer_info=(
+            PublicQuoteCustomer(
+                name=customer.name,
+                document=customer.document,
+                email=customer.email,
+                phone=customer.phone,
+            )
+            if customer
+            else None
+        ),
+        address=_address(ticket),
+        ticket_number=ticket.number,
+        issued_at=quote.sent_at or quote.created_at,
+        totals_by_kind=out.totals_by_kind,
+        approver_registration=quote.approver_registration,
+        client_comment=quote.client_comment,
+        signature_url=signature_url,
     )
 
 
 @public.get("/{token}", response_model=PublicQuote)
-async def view_quote(token: str, db: DB) -> PublicQuote:
+async def view_quote(token: str, request: Request, db: DB) -> PublicQuote:
     quote, ticket = await _public(db, token)
     await db.commit()
-    return _public_view(quote, ticket)
+    return await _public_view(db, quote, ticket, str(request.base_url))
 
 
 def _ip(request: Request) -> str | None:
@@ -233,24 +298,20 @@ async def approve_quote(token: str, body: QuoteApprove, request: Request, db: DB
     quote, ticket = await _public(db, token)
     try:
         await svc.approve(db, quote, body, _ip(request))
-    except svc.QuoteUnavailable as exc:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT, "Este orçamento já foi respondido ou venceu"
-        ) from exc
+    except svc.QuoteNotOpen as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     await commit_and_publish(db)
     await svc.publish_decision(quote, format_ticket_code(ticket.number))
-    return _public_view(quote, ticket)
+    return await _public_view(db, quote, ticket, str(request.base_url))
 
 
 @public.post("/{token}/reject", response_model=PublicQuote)
 async def reject_quote(token: str, body: QuoteReject, request: Request, db: DB) -> PublicQuote:
     quote, ticket = await _public(db, token)
     try:
-        await svc.reject(db, quote, body.reason, body.name, _ip(request))
-    except svc.QuoteUnavailable as exc:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT, "Este orçamento já foi respondido ou venceu"
-        ) from exc
+        await svc.reject(db, quote, body.reason, body.name, _ip(request), comment=body.comment)
+    except svc.QuoteNotOpen as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     await commit_and_publish(db)
     await svc.publish_decision(quote, format_ticket_code(ticket.number))
-    return _public_view(quote, ticket)
+    return await _public_view(db, quote, ticket, str(request.base_url))

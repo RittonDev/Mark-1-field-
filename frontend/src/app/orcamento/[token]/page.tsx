@@ -176,7 +176,7 @@ export default function PublicQuotePage() {
               </div>
               <dl className="grid grid-cols-[auto_auto] items-baseline gap-x-3 gap-y-1 text-right">
                 <dt className="text-sm text-ink-subtle">OS</dt>
-                <dd className="font-mono text-lg font-semibold text-ink">{quote.ticket_number ?? quote.ticket_code}</dd>
+                <dd className="font-mono text-lg font-semibold text-ink">{quote.ticket_number !== undefined ? String(quote.ticket_number).padStart(6, "0") : quote.ticket_code}</dd>
                 <dt className="text-sm text-ink-subtle">Orçamento</dt>
                 <dd className="font-mono text-lg font-semibold text-ink">{quote.code}</dd>
               </dl>

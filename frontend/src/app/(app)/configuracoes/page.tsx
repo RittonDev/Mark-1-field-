@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FolderTree, Plus, Save } from "lucide-react";
 import { useMemo, useState } from "react";
 import { PriorityBadge, StatusBadge } from "@/components/badges";
+import { CompanyProfileCard } from "@/components/CompanyProfileCard";
 import { useToast } from "@/components/Toaster";
 import { UnproductiveReasonsCard } from "@/components/UnproductiveReasonsCard";
 import { ViolationReasonsCard } from "@/components/ViolationReasonsCard";
@@ -209,9 +210,11 @@ export default function SettingsPage() {
 
   return (
     <div className="mx-auto max-w-6xl">
-      <PageHeader title="Configurações" description="SLA por prioridade, categorias, motivos de violação e fluxo de status" />
+      <PageHeader title="Configurações" description="Dados da empresa, SLA por prioridade, categorias, motivos e fluxo de status" />
 
       <div className="flex flex-col gap-4">
+        <CompanyProfileCard />
+
         <Card>
           <CardHeader
             title="Acordos de nível de serviço (SLA)"

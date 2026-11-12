@@ -10,8 +10,8 @@ import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canManageTickets } from "@/lib/constants";
 import { formatDate, formatMoney } from "@/lib/format";
-import { QUOTE_STATUS } from "@/lib/quotes";
-import type { QuoteCatalogItem, QuoteListRow, QuoteStatus } from "@/lib/types";
+import { QUOTE_KIND, QUOTE_STATUS } from "@/lib/quotes";
+import type { QuoteCatalogItem, QuoteItemKind, QuoteListRow, QuoteStatus } from "@/lib/types";
 
 type Tab = "quotes" | "catalog";
 
@@ -147,6 +147,7 @@ function Catalog() {
           <thead>
             <tr>
               <Th>Item</Th>
+              <Th>Tipo</Th>
               <Th>Unidade</Th>
               <Th className="text-right">Preço</Th>
               <Th />
@@ -156,6 +157,7 @@ function Catalog() {
             {(items.data ?? []).map((i) => (
               <tr key={i.id} className={i.is_active ? undefined : "opacity-60"}>
                 <Td className="font-medium">{i.name}</Td>
+                <Td className="text-ink-muted">{QUOTE_KIND[i.kind ?? "product"].label}</Td>
                 <Td>{i.unit}</Td>
                 <Td className="text-right tabular-nums">{formatMoney(i.price)}</Td>
                 <Td className="text-right">
@@ -178,11 +180,12 @@ function ItemDialog({ item, onClose }: { item: QuoteCatalogItem | null; onClose:
   const queryClient = useQueryClient();
   const [name, setName] = useState(item?.name ?? "");
   const [unit, setUnit] = useState(item?.unit ?? "un");
+  const [kind, setKind] = useState<QuoteItemKind>(item?.kind ?? "product");
   const [price, setPrice] = useState(item ? item.price.toFixed(2).replace(".", ",") : "");
   const [active, setActive] = useState(item?.is_active ?? true);
   const save = useMutation({
     mutationFn: () => {
-      const body = { name, unit, price: price.replace(",", ".") || "0", is_active: active };
+      const body = { name, kind, unit, price: price.replace(",", ".") || "0", is_active: active };
       return item ? api.put(`/quote-items/${item.id}`, body) : api.post("/quote-items", body);
     },
     onSuccess: () => {
@@ -208,10 +211,19 @@ function ItemDialog({ item, onClose }: { item: QuoteCatalogItem | null; onClose:
         <Field label="Nome" required className="sm:col-span-3">
           <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex.: Velcro 3 m" />
         </Field>
-        <Field label="Unidade">
+        <Field label="Tipo">
+          <Select value={kind} onChange={(e) => setKind(e.target.value as QuoteItemKind)}>
+            {(Object.keys(QUOTE_KIND) as QuoteItemKind[]).map((k) => (
+              <option key={k} value={k}>
+                {QUOTE_KIND[k].label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Unidade (medida)">
           <Input value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="un, m, rolo, h" />
         </Field>
-        <Field label="Preço (R$)" className="sm:col-span-2">
+        <Field label="Preço (R$)">
           <Input value={price} onChange={(e) => setPrice(e.target.value)} inputMode="decimal" placeholder="0,00" />
         </Field>
         <div className="sm:col-span-3">
