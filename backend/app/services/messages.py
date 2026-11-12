@@ -231,9 +231,7 @@ async def context(db: AsyncSession, ticket: Ticket, actor: User) -> dict[str, st
     team = [p.name for p in ([assignee] if assignee else []) + list(ticket.helpers)]
     values: dict[str, Any] = {
         "tecnico": assignee.name if assignee else "(técnico a definir)",
-        "equipe": (
-            " e ".join([", ".join(team[:-1]), team[-1]]) if len(team) > 1 else team[0]
-        )
+        "equipe": (" e ".join([", ".join(team[:-1]), team[-1]]) if len(team) > 1 else team[0])
         if team
         else "(técnico a definir)",
         "tecnico_telefone": (assignee.phone if assignee else None) or "",

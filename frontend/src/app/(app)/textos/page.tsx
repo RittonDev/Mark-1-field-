@@ -58,6 +58,7 @@ export default function TemplatesPage() {
 function Editor({ initial }: { initial: TemplatesOut }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const confirm = useConfirm();
   const [items, setItems] = useState<Template[]>(initial.templates);
   const [focused, setFocused] = useState(0);
   const areas = useRef<(HTMLTextAreaElement | null)[]>([]);
@@ -106,7 +107,15 @@ function Editor({ initial }: { initial: TemplatesOut }) {
         description="Avisos que o analista copia na OS para o grupo dos técnicos. As palavras entre chaves são trocadas pelos dados da OS."
         actions={
           <>
-            <Button variant="ghost" loading={reset.isPending} onClick={() => window.confirm("Voltar aos textos padrão? Os seus serão substituídos.") && reset.mutate()}>
+            <Button variant="ghost" loading={reset.isPending} onClick={async () =>
+                (await confirm({
+                  title: "Voltar aos textos padrão?",
+                  description: "Os textos que você editou serão substituídos pelos originais.",
+                  confirmLabel: "Voltar ao padrão",
+                  tone: "danger",
+                })) && reset.mutate()
+              }
+            >
               <RotateCcw className="size-4" />
               Restaurar padrão
             </Button>

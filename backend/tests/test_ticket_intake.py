@@ -277,7 +277,10 @@ async def test_helpers_show_up_in_agenda_day_report_and_messages(
     )
 
     # Agenda filtrada pelo técnico que vai junto: a visita aparece, com a equipe.
-    window = {"start": (start - timedelta(hours=1)).isoformat(), "end": (start + timedelta(hours=3)).isoformat()}
+    window = {
+        "start": (start - timedelta(hours=1)).isoformat(),
+        "end": (start + timedelta(hours=3)).isoformat(),
+    }
     events = (
         await client.get(f"{API}/calendar", params={**window, "assignee_id": other}, headers=an)
     ).json()

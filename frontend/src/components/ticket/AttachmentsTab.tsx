@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useConfirm } from "@/components/Confirm";
 import { Tabs } from "@/components/motion";
 import { useToast } from "@/components/Toaster";
 import { Button, EmptyState, ErrorBox, Input, LoadingBlock, Textarea } from "@/components/ui";
@@ -200,6 +201,7 @@ export function AttachmentsTab({
   const queryClient = useQueryClient();
   const invalidate = useInvalidateTicket(ticketId);
   const { toast } = useToast();
+  const confirm = useConfirm();
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [caption, setCaption] = useState("");
@@ -225,6 +227,15 @@ export function AttachmentsTab({
     },
     onError: (e) => toast({ title: "Não foi possível excluir", description: errorMessage(e), tone: "error" }),
   });
+  const askRemove = async (a: Attachment) => {
+    const ok = await confirm({
+      title: "Excluir este anexo?",
+      description: `“${a.filename}” sai da OS e do relatório do cliente. Não dá para desfazer.`,
+      confirmLabel: "Excluir",
+      tone: "danger",
+    });
+    if (ok) remove.mutate(a);
+  };
 
   // Envia os arquivos um por um (fotos viram "Foto"; o resto, "Arquivo"), com a mesma descrição opcional.
   const sendFiles = async (files: File[]) => {
@@ -388,7 +399,7 @@ export function AttachmentsTab({
                           <button
                             type="button"
                             disabled={remove.isPending && remove.variables?.id === a.id}
-                            onClick={() => window.confirm(`Excluir "${a.filename}"? Não dá para desfazer.`) && remove.mutate(a)}
+                            onClick={() => askRemove(a)}
                             className="rounded-md p-1.5 text-ink-subtle hover:bg-red-50 hover:text-red-600 disabled:opacity-40 dark:hover:bg-red-500/10"
                             aria-label={`Excluir ${a.filename}`}
                             title="Excluir"
@@ -431,7 +442,7 @@ export function AttachmentsTab({
                         <button
                           type="button"
                           disabled={remove.isPending && remove.variables?.id === a.id}
-                          onClick={() => window.confirm(`Excluir "${a.filename}"? Não dá para desfazer.`) && remove.mutate(a)}
+                          onClick={() => askRemove(a)}
                           className="rounded-md p-1.5 text-ink-subtle hover:bg-red-50 hover:text-red-600 disabled:opacity-40 dark:hover:bg-red-500/10"
                           aria-label={`Excluir ${a.filename}`}
                           title="Excluir"
