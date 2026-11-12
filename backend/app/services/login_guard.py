@@ -19,7 +19,10 @@ log = logging.getLogger(__name__)
 
 WINDOW_SECONDS = 15 * 60
 MAX_PER_ACCOUNT = 5
-MAX_PER_IP = 30
+# Alto de propósito: atrás de um proxy que o uvicorn não reconhece (FORWARDED_ALLOW_IPS), todo
+# mundo chega com o mesmo IP, e um limite baixo trancaria a empresa inteira. A proteção de cada
+# conta é o limite por e-mail; o do IP só segura ataque em massa.
+MAX_PER_IP = 100
 _PREFIX = "maxxchamados:login-fail:"
 
 
