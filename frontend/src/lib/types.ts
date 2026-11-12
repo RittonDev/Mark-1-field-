@@ -1120,8 +1120,18 @@ export interface PublicReport {
   status_label: string;
   company_name: string;
   company?: CompanyProfile;
-  customer: { name: string; document: string | null } | null;
-  location: { name: string; code: string | null; address: string | null; city: string | null; state: string | null } | null;
+  number?: number;
+  customer: { name: string; document: string | null; email?: string | null; phone?: string | null } | null;
+  location: {
+    name: string;
+    code: string | null;
+    address: string | null;
+    city: string | null;
+    state: string | null;
+    zip_code?: string | null;
+    contact_name?: string | null;
+    contact_phone?: string | null;
+  } | null;
   service_address: string | null;
   requester_name: string | null;
   service_type: string | null;
