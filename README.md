@@ -211,6 +211,20 @@ powershell -ExecutionPolicy Bypass -File scripts/sync-github.ps1
 A validação confere assinatura, emissor, audiência, **locatário (`tid`)**, nonce, PKCE e o domínio do e-mail.
 O site recebe só um código de uso único (60 s) e troca pelos tokens, que nunca passam pela URL.
 
+## Segurança
+
+- **Login com limite de tentativas:** 5 senhas erradas no mesmo e-mail em 15 minutos bloqueiam aquele
+  login por 15 minutos (HTTP 429, com o tempo de espera), mesmo com a senha certa; acertar antes zera a
+  contagem. E-mails que não existem contam igual e respondem no mesmo tempo, para não revelar quem tem conta.
+  Por IP o limite é 100 em 15 minutos (só segura ataque em massa). A contagem fica no Redis.
+- **Em produção, atrás de proxy:** configure `FORWARDED_ALLOW_IPS` com o IP do proxy (Nginx, Caddy...), para a
+  API enxergar o IP real de cada pessoa; sem isso, todos chegam com o IP do proxy.
+- **Anexos:** foto abre na tela; SVG e demais arquivos baixam. Todo download sai com `nosniff` e CSP
+  `sandbox`, então nem um HTML disfarçado de imagem roda código.
+- **Cabeçalhos:** a API e o site mandam `X-Content-Type-Options`, `X-Frame-Options` (não abrem dentro de outro
+  site) e `Referrer-Policy`; o site libera só a localização (check-in), nunca câmera ou microfone.
+- **Logs sem tokens:** o WebSocket e os links de anexo levam o token na URL; o log da API grava `token=***`.
+
 ## Simular o rastreamento (desenvolvimento)
 
 ```bash
@@ -225,7 +239,7 @@ deslocamento" anda até o cliente, quem está "em atendimento" fica parado. Não
 - Rastreamento em segundo plano no app (exige build de desenvolvimento do Expo, não o Expo Go).
 - Envio real de push: `LogPushProvider` só registra no log; falta ligar o Firebase Cloud Messaging.
 - SLA em horário comercial e feriados (hoje 24x7), SLA por contrato e escalonamento automático.
-- Limite de tentativas de login e "esqueci minha senha" por e-mail (hoje a gestão redefine a senha do técnico).
+- "Esqueci minha senha" por e-mail (hoje a gestão redefine a senha do técnico).
 - Mapa base contratado para produção (`NEXT_PUBLIC_MAP_TILES_URL`; o padrão OpenStreetMap é para uso moderado).
 - Armazenamento de anexos em S3/R2 (hoje em disco, no volume `media`).
 - Abertura de OS por e-mail/WhatsApp, base de conhecimento, pesquisa de satisfação e relatórios exportáveis.
