@@ -295,7 +295,15 @@ export default function PublicReportPage() {
             {report.forms.map((form) => (
               <Section key={form.name} icon={ClipboardCheck} title={form.name}>
                 <dl className="divide-y divide-line rounded-xl border border-line">
-                  {form.items.map((item, i) => (
+                  {form.items.map((item, i) =>
+                    item.type === "section" ? (
+                      <dt
+                        key={`${item.label}-${i}`}
+                        className="bg-surface-2/70 px-4 py-2 text-[11px] font-semibold tracking-[0.06em] text-ink-subtle uppercase first:rounded-t-xl"
+                      >
+                        {item.label}
+                      </dt>
+                    ) : (
                     <div key={`${item.label}-${i}`} className="px-4 py-3 print:break-inside-avoid">
                       <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
                         <dt className="text-sm text-ink-muted">{item.label}</dt>
@@ -309,7 +317,8 @@ export default function PublicReportPage() {
                         </dd>
                       ) : null}
                     </div>
-                  ))}
+                    ),
+                  )}
                 </dl>
                 {form.completed_at ? (
                   <p className="mt-2 text-xs text-ink-subtle">Preenchido em {formatDateTime(form.completed_at)}</p>
