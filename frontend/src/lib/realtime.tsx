@@ -143,6 +143,15 @@ export function RealtimeProvider({ userId, children }: { userId: string; childre
           toastRef.current({ title: `Nova ficha de homologação: ${event.name ?? "técnico"}` });
           return;
         }
+        if (event.type === "part_request.created") {
+          queryClient.invalidateQueries({ queryKey: ["tickets"] });
+          if (event.ticket_id) queryClient.invalidateQueries({ queryKey: ["ticket", event.ticket_id] });
+          toastRef.current({
+            title: `${event.ticket_code ?? "OS"}: o técnico pediu peça`,
+            description: "Monte o orçamento para o cliente aprovar.",
+          });
+          return;
+        }
         if (!event.type?.startsWith("ticket.")) return;
         queryClient.invalidateQueries({ queryKey: ["tracking", "live"] });
         queryClient.invalidateQueries({ queryKey: ["tickets"] });

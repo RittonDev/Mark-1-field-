@@ -275,6 +275,16 @@ export interface TicketListItem {
   updated_at: ISODate;
   version: number;
   sla_status: SlaStatus;
+  /** Prazos de campo: chegada (4h nas capitais) e permanência na loja (4h contadas da chegada). */
+  arrival_due_at?: ISODate | null;
+  arrived_at?: ISODate | null;
+  onsite_due_at?: ISODate | null;
+  arrival_status?: ArrivalStatus | null;
+  onsite_status?: OnsiteStatus | null;
+  /** A visita só sai com a autorização do cliente (cada chamado é cobrado). */
+  authorization_status?: AuthorizationStatus;
+  /** Outras OS na mesma loja nos últimos 30 dias. */
+  recurrence_30d?: number;
 }
 
 export interface TicketDetail extends TicketListItem {
@@ -316,6 +326,14 @@ export interface TicketDetail extends TicketListItem {
   expenses: Expense[];
   /** Link público do relatório para o cliente (só para a gestão; existe com a OS concluída). */
   report_link?: ReportLink | null;
+  authorized_by_name?: string | null;
+  authorization_channel?: AuthorizationChannel | null;
+  authorization_ref?: string | null;
+  authorized_at?: ISODate | null;
+  authorized_by?: UserRef | null;
+  /** Pedidos de peça do técnico (viram orçamento para o cliente aprovar). */
+  part_requests?: PartRequest[];
+  recurrence?: { count_30d: number; previous: { id: UUID; code: string; title: string; status: TicketStatus; created_at: ISODate }[] } | null;
   allowed_transitions: TicketStatus[];
   can_edit: boolean;
   can_assign: boolean;
@@ -1155,4 +1173,36 @@ export interface PublicReport {
   signature: { name: string; role: string | null; signed_at: ISODate; image_url: string } | null;
   timeline: { at: ISODate; label: string }[];
   generated_at: ISODate;
+}
+
+// ---- Regras de campo, autorização e pedidos de peça ----
+
+export type ArrivalStatus = "met" | "late" | "at_risk" | "pending";
+export type OnsiteStatus = "ok" | "warning" | "over";
+export type AuthorizationStatus = "not_required" | "pending" | "authorized" | "denied";
+export type AuthorizationChannel = "whatsapp" | "email" | "phone" | "portal" | "maxxcon" | "other";
+
+export interface FieldRules {
+  arrival_hours_capital: number | null;
+  arrival_hours_interior: number | null;
+  onsite_hours: number;
+  onsite_warning_minutes: number;
+  require_authorization: boolean;
+}
+
+export type PartRequestStatus = "open" | "quoted" | "approved" | "rejected" | "cancelled";
+
+export interface PartRequest {
+  id: UUID;
+  description: string;
+  quantity: number;
+  unit: string;
+  note: string | null;
+  status: PartRequestStatus;
+  quote_id: UUID | null;
+  quote_code: string | null;
+  requested_by: Ref | null;
+  attachments: { id: UUID; url: string }[];
+  response_note: string | null;
+  created_at: ISODate;
 }
