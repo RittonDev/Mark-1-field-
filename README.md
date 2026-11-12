@@ -31,7 +31,8 @@ Os dois canais ficam sincronizados em tempo real.
 - **Detalhe da OS:** acompanhamentos públicos e notas internas, histórico/auditoria, apontamento de horas, anexos e fotos, check-in por GPS.
 - **Quadro kanban** com arrastar e soltar, que só aceita transições válidas.
 - **Dashboard:** backlog, SLA, conformidade em 30 dias, tempo médio de solução, carga por analista.
-- **Cadastros:** clientes, locais (com coordenadas), ativos (impressora, desktop, switch, câmera, DVR/NVR…), usuários, grupos, categorias e SLA.
+- **Locais como filiais** (como no Field Control): cada local tem código e CNPJ próprio, tela própria com busca e paginação, e histórico resumido (OS abertas, total, última OS). A OS aceita um **endereço do atendimento** separado do endereço do local.
+- **Cadastros:** clientes (CPF/CNPJ validado, inclusive alfanumérico), locais (com coordenadas), ativos (impressora, desktop, switch, câmera, DVR/NVR…), usuários, grupos, categorias e SLA.
 - **Tempo real:** toda mudança aparece na hora para quem pode ver a OS (web e apps).
 - **Pronto para mobile:** sync offline idempotente, revogação de OS reatribuídas, registro de aparelhos para push. Ver [docs/MOBILE_SYNC.md](docs/MOBILE_SYNC.md).
 - **Papéis:** administrador, supervisor, analista (gestão completa na web), técnico de campo (app) e solicitante.
