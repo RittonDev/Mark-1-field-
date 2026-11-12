@@ -281,7 +281,9 @@ async def build(db: AsyncSession, ticket: Ticket, base_url: str) -> PublicReport
                 items.append(PublicReportFormItem(label=field.label, type="section"))
                 continue
             photos = [_photo(a, base_url) for a in by_field.get((form.id, field.id), [])]
-            value = None if field.type == "photo" else format_answer(field, form.answers.get(field.id))
+            value = (
+                None if field.type == "photo" else format_answer(field, form.answers.get(field.id))
+            )
             has_content = has_content or bool(photos) or value is not None
             items.append(
                 PublicReportFormItem(label=field.label, type=field.type, value=value, photos=photos)

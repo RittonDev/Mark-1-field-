@@ -61,18 +61,18 @@ def reasons_for(t: Any, now: datetime, assignee_role: UserRole | None) -> list[Q
                 QueueReason(code="unproductive", label="Improdutiva: reagendar", tone="warning")
             )
     elif t.status in DONE:
-        pending = (
-            sla.response_breached(t, now) and t.response_violation_reason_id is None
-        ) or (sla.resolution_breached(t, now) and t.resolution_violation_reason_id is None)
+        pending = (sla.response_breached(t, now) and t.response_violation_reason_id is None) or (
+            sla.resolution_breached(t, now) and t.resolution_violation_reason_id is None
+        )
         if pending:
-            reasons.append(QueueReason(code="violation_pending", label="Justificar SLA", tone="info"))
+            reasons.append(
+                QueueReason(code="violation_pending", label="Justificar SLA", tone="info")
+            )
     reasons.sort(key=lambda r: TONE_RANK[r.tone])
     return reasons
 
 
-def section_for(
-    t: Any, reasons: list[QueueReason], day_start: datetime, day_end: datetime
-) -> str:
+def section_for(t: Any, reasons: list[QueueReason], day_start: datetime, day_end: datetime) -> str:
     if t.status in FIELD:
         return "in_field"
     if t.status in DONE:

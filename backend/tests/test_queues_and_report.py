@@ -155,14 +155,17 @@ async def test_my_queue_sections_and_team_queues(client: AsyncClient, world: Wor
     await transition(client, world.tech_other.headers, done, "resolved", resolution_notes="ok")
     # Do supervisor e sem analista: não entram na fila do analista.
     await create(client, world, title="Do supervisor")
-    await client.post(f"{API}/tickets", json={"title": "Do solicitante"}, headers=world.requester.headers)
+    await client.post(
+        f"{API}/tickets", json={"title": "Do solicitante"}, headers=world.requester.headers
+    )
 
     q = (await client.get(f"{API}/my-queue", headers=an)).json()
     assert q["user"]["id"] == str(world.analyst.user.id)
     by_id = {i["id"]: i for i in q["items"]}
-    sections = {by_id[t["id"]]["title"]: by_id[t["id"]]["section"] for t in (
-        field, late, today, upcoming, waiting, loose, no_tech, bounced, done
-    )}
+    sections = {
+        by_id[t["id"]]["title"]: by_id[t["id"]]["section"]
+        for t in (field, late, today, upcoming, waiting, loose, no_tech, bounced, done)
+    }
     assert sections == {
         "Em campo": "in_field",
         "Atrasada": "attention",
@@ -199,7 +202,9 @@ async def test_my_queue_sections_and_team_queues(client: AsyncClient, world: Wor
     assert q["items"][0]["reasons"][0]["tone"] == "danger"
 
     # Outro dia: a agendada para ele vira "hoje"; a concluída hoje sai.
-    q2 = (await client.get(f"{API}/my-queue", params={"date": in_two.isoformat()}, headers=an)).json()
+    q2 = (
+        await client.get(f"{API}/my-queue", params={"date": in_two.isoformat()}, headers=an)
+    ).json()
     by_title = {i["title"]: i["section"] for i in q2["items"]}
     assert by_title["Daqui a dois dias"] == "today"
     assert by_title["Daqui a cinco dias"] == "upcoming"
@@ -249,7 +254,10 @@ async def test_client_report_link(client: AsyncClient, world: World) -> None:
     t = await transition(client, th, t, "in_progress", latitude=-23.51, longitude=-46.61)
     png = {"file": ("rack.png", PNG, "image/png")}
     r = await client.post(
-        f"{API}/tickets/{tid}/forms/{form['id']}/photos", files=png, data={"field_id": "foto"}, headers=th
+        f"{API}/tickets/{tid}/forms/{form['id']}/photos",
+        files=png,
+        data={"field_id": "foto"},
+        headers=th,
     )
     assert r.status_code == 201, r.text
     answers = {"ok": True, "dia": "2026-11-12", "metros": "2,5", "tipo": "Parede"}
@@ -303,7 +311,11 @@ async def test_client_report_link(client: AsyncClient, world: World) -> None:
     r = await client.get(f"{public}/{link['token']}")
     assert r.status_code == 200, r.text
     rep = r.json()
-    assert (rep["code"], rep["status"], rep["company_name"]) == (t["code"], "resolved", "Maxx Field")
+    assert (rep["code"], rep["status"], rep["company_name"]) == (
+        t["code"],
+        "resolved",
+        "Maxx Field",
+    )
     assert rep["technician"] == {"name": "Tecnico"}
     assert rep["customer"]["name"] == "Cliente Teste" and rep["location"]["name"] == "Matriz"
     assert rep["resolution_notes"] == "Rack organizado" and rep["check_in_gps"] is True

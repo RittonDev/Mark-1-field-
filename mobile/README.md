@@ -16,7 +16,8 @@ O login envia `channel: "mobile"` e a API recusa os outros papéis com 403.
 | Banco local | expo-sqlite |
 | Tokens | expo-secure-store (Keychain / Keystore) |
 | Recursos do aparelho | expo-location (check-in e rastreamento), expo-task-manager (segundo plano), expo-battery, expo-image-picker (fotos), expo-notifications (registro do aparelho), NetInfo |
-| Visual | tema Maxx Field claro/escuro (`src/theme/theme.ts`), fonte Manrope (`@expo-google-fonts/manrope` 0.4.3 via expo-font, `src/theme/fonts.ts`), expo-linear-gradient só no detalhe da marca |
+| Visual | tokens da web (claro e grafite no escuro, sem azul-marinho) em `src/theme/theme.ts`, Manrope 400–700 (`@expo-google-fonts/manrope` 0.4.3 via expo-font), ícones de traço próprios em react-native-svg, degradê só em detalhes |
+| Movimento | react-native-reanimated 4.7.1 + react-native-worklets 0.13.0, expo-haptics; respeita "Reduzir movimento" |
 
 ## Rodar no celular com o Expo Go
 
@@ -117,9 +118,10 @@ Requisitos:
   o WebSocket (4401) respondem "Sessão encerrada. Entre novamente."; o app volta ao login com esse texto e
   para o rastreamento. A fila local fica guardada para quando o mesmo técnico entrar de novo.
 - **Só as OS atribuídas ao técnico**: o cliente abre a OS, o analista escolhe o técnico, e o técnico vê só
-  as OS em que é o responsável (sem fila de grupo e sem "assumir"). Tela inicial com três abas:
-  - **Hoje**: em campo, agendadas para hoje (ou atrasadas) e as sem agenda; em campo primeiro,
-    depois por horário, prioridade e prazo de SLA.
+  as OS em que é o responsável (sem fila de grupo e sem "assumir"). Tela inicial com "Bom dia, {nome}",
+  a data, o cartão da jornada e três abas na barra inferior (pílula animada na aba ativa):
+  - **Hoje**: linha do tempo (horário, cliente, endereço, status) com as em campo, agendadas para hoje
+    (ou atrasadas) e as sem agenda; em campo primeiro, depois por horário, prioridade e prazo de SLA.
   - **Agenda**: calendário com visão de **mês** (grade com marcadores por dia; tocar no dia lista as OS)
     e de **semana** (dia a dia, com horário das visitas). Tocar na OS abre o detalhe.
   - **Concluídas**: resolvidas/fechadas nos últimos 7 dias.
@@ -128,7 +130,9 @@ Requisitos:
 - **Jornada e rastreamento** (cartão no topo da tela inicial): termo de ciência (LGPD) aceito uma vez,
   **Iniciar/Encerrar jornada**, indicador "Rastreamento ativo" e a última posição enviada. Detalhes abaixo.
 - **Aparência**: modo claro/escuro segue o sistema; dá para fixar em Conta → Aparência.
-- **Detalhe da OS**: só os botões de `allowed_transitions`, com os mesmos diálogos da web (agendar com
+- **Detalhe da OS**: cartão de cabeçalho (código, status, cliente, endereço), stepper Deslocamento →
+  Chegada → Atendimento → Concluir e barra fixa no rodapé com o próximo passo; as demais ações de
+  `allowed_transitions` (e a visita improdutiva) ficam em "Mais ações", com os mesmos diálogos da web (agendar com
   início/fim, resolver com solução obrigatória, cancelar/reabrir com motivo). Em "Iniciar deslocamento" e
   "Iniciar atendimento" o check-in por GPS vem marcado (funciona sem internet). Local com endereço,
   contato, ligação e **Abrir no mapa**; descrição; prazos de SLA. Não há bloco de equipamento: a operação
@@ -233,8 +237,10 @@ src/
     conta.tsx          sincronização, fila, avisos, rastreamento, aparência, sair
   components/          UI (marca, cartões, calendário, jornada, diálogo de transição, abas da OS)
     Text.tsx           Text do app: aplica a Manrope no peso do estilo (use este, não o do react-native)
+    motion.tsx         entrada em cascata, transição de layout, PressableScale (0,97 com mola), Pulse
+    Skeleton.tsx FieldStepper.tsx SuccessHost.tsx TabBar.tsx ActionSheet.tsx Icon.tsx RouteMapPattern.tsx
   theme/theme.ts       paleta Maxx Field, claro/escuro, preferência do técnico
-  theme/fonts.ts       Manrope (pesos 400–800) e o mapeamento de fontWeight para a família
+  theme/fonts.ts       Manrope (pesos 400–700) e o mapeamento de fontWeight para a família
   lib/
     tracking.ts trackingTask.ts  jornada, coleta, fila de pontos e tarefa de segundo plano
     account.ts         /auth/me e troca de senha

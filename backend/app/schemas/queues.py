@@ -9,7 +9,9 @@ from app.core.enums import UserRole
 from app.schemas.ticket import TicketListItem
 from app.schemas.user import UserRef
 
-QueueSection = Literal["in_field", "attention", "today", "waiting", "upcoming", "unscheduled", "done"]
+QueueSection = Literal[
+    "in_field", "attention", "today", "waiting", "upcoming", "unscheduled", "done"
+]
 ReasonTone = Literal["danger", "warning", "info"]
 
 
