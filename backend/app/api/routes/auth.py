@@ -54,7 +54,9 @@ async def login(body: LoginRequest, db: DB, request: Request) -> TokenResponse:
         await login_guard.check(email, ip)
     except login_guard.LoginBlocked as exc:
         raise HTTPException(
-            status.HTTP_429_TOO_MANY_REQUESTS, str(exc), headers={"Retry-After": str(exc.retry_after)}
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            str(exc),
+            headers={"Retry-After": str(exc.retry_after)},
         ) from exc
     user = await db.scalar(select(User).where(func.lower(User.email) == email))
     if user is None:

@@ -23,7 +23,9 @@ async def _login(client: AsyncClient, email: str, password: str) -> int:
 
 
 @requires_db
-async def test_login_blocks_after_repeated_wrong_passwords(client: AsyncClient, world: World) -> None:
+async def test_login_blocks_after_repeated_wrong_passwords(
+    client: AsyncClient, world: World
+) -> None:
     email = "tecnico@teste.com.br"
     # Acertar antes do limite zera a contagem.
     for _ in range(login_guard.MAX_PER_ACCOUNT - 1):
@@ -98,4 +100,6 @@ def test_tokens_are_redacted_from_logs() -> None:
         None,
     )
     assert RedactTokens().filter(record)
-    assert record.getMessage() == '172.19.0.1:6099 - "WebSocket /api/v1/ws?token=***&x=1" [accepted]'
+    assert (
+        record.getMessage() == '172.19.0.1:6099 - "WebSocket /api/v1/ws?token=***&x=1" [accepted]'
+    )
