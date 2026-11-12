@@ -316,6 +316,7 @@ async def test_client_report_link(client: AsyncClient, world: World) -> None:
         "resolved",
         "Maxx Field",
     )
+    assert rep["company"]["name"] == "Maxx Field"
     assert rep["technician"] == {"name": "Tecnico"}
     assert rep["customer"]["name"] == "Cliente Teste" and rep["location"]["name"] == "Matriz"
     assert rep["resolution_notes"] == "Rack organizado" and rep["check_in_gps"] is True
@@ -367,6 +368,18 @@ async def test_client_report_link(client: AsyncClient, world: World) -> None:
     msgs = (await client.get(f"{API}/tickets/{tid}/messages", headers=an)).json()
     assert msgs[0]["text"] == f"Super | {new['url']}"
     await client.post(f"{API}/message-templates/reset", headers=an)
+
+    # Dados da empresa (Configurações) aparecem no cabeçalho do relatório.
+    profile = {"name": "Maxx Field Serviços", "phone": "(11) 4000-0000"}
+    put = await client.put(
+        f"{API}/settings/company", json=profile, headers=world.supervisor.headers
+    )
+    assert put.status_code == 200, put.text
+    rep = (await client.get(f"{public}/{new['token']}")).json()
+    assert (rep["company_name"], rep["company"]["phone"]) == (
+        "Maxx Field Serviços",
+        "(11) 4000-0000",
+    )
 
     # Reaberta: o link continua, mas a página avisa até concluir de novo.
     detail = (await client.get(f"{API}/tickets/{tid}", headers=an)).json()

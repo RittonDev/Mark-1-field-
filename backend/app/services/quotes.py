@@ -178,7 +178,9 @@ async def send(db: AsyncSession, ticket: Ticket, quote: Quote, actor: User) -> s
 async def rotate_link(db: AsyncSession, quote: Quote, actor: User) -> QuoteLink:
     """Troca o link (o anterior, inclusive um antigo só com hash, para de abrir)."""
     _require_manager(actor)
-    if quote.status == QuoteStatus.CANCELLED or (quote.link_id is None and quote.token_hash is None):
+    if quote.status == QuoteStatus.CANCELLED or (
+        quote.link_id is None and quote.token_hash is None
+    ):
         raise WorkflowError("Envie o orçamento para gerar o link do cliente")
     quote.link_id = links.new_link_id()
     quote.token_hash = None
