@@ -126,6 +126,14 @@ export default function TicketDetailPage() {
               <StatusBadge status={ticket.status} />
               <PriorityBadge priority={ticket.priority} />
               <SlaBadge status={ticket.sla_status} />
+              {ticket.project ? (
+                <Link
+                  href={`/projetos/${ticket.project.id}`}
+                  className="inline-flex items-center gap-1 rounded-full bg-sidebar-active px-2 py-0.5 text-xs font-medium text-brand hover:underline"
+                >
+                  Projeto {ticket.project.code} · {ticket.project.name}
+                </Link>
+              ) : null}
               {ticket.unproductive_count ? (
                 <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-500/10 dark:text-red-300">
                   <Ban className="size-3" />
