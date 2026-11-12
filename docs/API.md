@@ -275,3 +275,8 @@ Todos exigem analista ou gestor, salvo indicação. Valores em R$ chegam como n�
 - **Relatórios:** `GET /reports/daily?date=` (sem data: o dia anterior, já fechado) · `GET /reports/monthly?month=AAAA-MM`.
 - **Sugestão de técnicos:** `GET /tickets/{id}/technician-suggestions` · `GET /technicians/suggest?city&state&latitude&longitude`
   → `[{id, name, home_city, home_state, open_tickets, on_shift, distance_km, score, reasons[]}]`.
+- **Textos do WhatsApp:** `GET /tickets/{id}/messages` → `[{key, name, text}]` já preenchidos com os dados da OS ·
+  `GET /message-templates` → `{templates: [{key, name, body}], variables: [{key, description}]}` ·
+  `PUT /message-templates {templates}` · `POST /message-templates/reset`. Variáveis desconhecidas ficam como estão;
+  `{chegada_prevista}` usa a última posição do técnico na jornada (até 30 min) e cai para o horário agendado.
+- **Puxar OS do colega:** `GET /tickets?assignee_id=` (fila de outra pessoa) + `POST /tickets/{id}/take` (analista/gestor, OS aberta).
