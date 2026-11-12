@@ -51,6 +51,14 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3001}
       MEDIA_ROOT: /data/media
       SEED_PASSWORD: ${SEED_PASSWORD:-}
+      WEB_URL: ${WEB_URL:-http://localhost:3001}
+      ENTRA_TENANT_ID: ${ENTRA_TENANT_ID:-}
+      ENTRA_CLIENT_ID: ${ENTRA_CLIENT_ID:-}
+      ENTRA_CLIENT_SECRET: ${ENTRA_CLIENT_SECRET:-}
+      ENTRA_REDIRECT_URI: ${ENTRA_REDIRECT_URI:-http://localhost:8000/api/v1/auth/microsoft/callback}
+      ENTRA_ALLOWED_DOMAINS: ${ENTRA_ALLOWED_DOMAINS:-maxxgroup.com.br}
+      ENTRA_ENFORCE_FOR_STAFF: ${ENTRA_ENFORCE_FOR_STAFF:-false}
+      ENTRA_AUTO_PROVISION_ROLE: ${ENTRA_AUTO_PROVISION_ROLE:-}
     ports:
       - "8000:8000"
     volumes:
@@ -70,6 +78,7 @@ services:
         NEXT_PUBLIC_MAP_TILES_URL: ${NEXT_PUBLIC_MAP_TILES_URL:-}
         NEXT_PUBLIC_MAP_TILES_DARK_URL: ${NEXT_PUBLIC_MAP_TILES_DARK_URL:-}
         NEXT_PUBLIC_MAP_ATTRIBUTION: ${NEXT_PUBLIC_MAP_ATTRIBUTION:-}
+        NEXT_PUBLIC_WEB_URL: ${NEXT_PUBLIC_WEB_URL:-}
     ports:
       - "3001:3001"
     depends_on:
