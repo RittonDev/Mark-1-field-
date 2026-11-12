@@ -23,7 +23,7 @@ from app.models import (
     Ticket,
     User,
 )
-from app.services import technician_regions
+from app.services import geo, technician_regions
 from app.services.schedule import find_conflicts, visit_end
 from app.services.workflow import OPEN_STATUSES
 
@@ -114,7 +114,7 @@ def target_for(ticket: Ticket, project: Project | None) -> Target:
         city=loc.city if loc else None,
         state=loc.state if loc else None,
         coords=(loc.latitude, loc.longitude)
-        if loc and loc.latitude is not None and loc.longitude is not None
+        if loc and geo.valid_coords(loc.latitude, loc.longitude)
         else None,
         start=start,
         end=visit_end(start, ticket.scheduled_end, ticket.estimated_minutes) if start else None,

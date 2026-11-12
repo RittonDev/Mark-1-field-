@@ -24,7 +24,7 @@ from app.db.base import utcnow
 from app.db.session import SessionLocal
 from app.models import Ticket, User
 from app.schemas.tracking import PingIn
-from app.services import tracking
+from app.services import geo, tracking
 from app.services.realtime import bus
 
 SPEED_MPS = 11.0  # ~40 km/h no trânsito
@@ -79,7 +79,11 @@ async def _walkers() -> list[Walker]:
                 in_field[0] if in_field else None,
             )
             loc = ticket.location if ticket else None
-            dest = (loc.latitude, loc.longitude) if loc and loc.latitude is not None else None
+            dest = (
+                (loc.latitude, loc.longitude)
+                if loc and geo.valid_coords(loc.latitude, loc.longitude)
+                else None
+            )
             if ticket and ticket.status == TicketStatus.IN_PROGRESS and dest:
                 walkers.append(Walker(tech, dest[0] + 0.0002, dest[1] + 0.0002, None))
             elif dest:

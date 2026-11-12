@@ -16,6 +16,7 @@ from app.core.enums import TicketStatus, UserRole
 from app.db.base import utcnow
 from app.importers.fieldcontrol import home_of, placeholder_homes
 from app.models import Location, LocationPing, TechnicianShift, Ticket, TicketWorklog, User
+from app.services import geo
 from tests.conftest import World, requires_db
 
 pytestmark = requires_db
@@ -340,3 +341,119 @@ def test_placeholder_home_is_ignored(tmp_path: Path) -> None:
         "longitude": -38.52,
         "placeholder": False,
     }
+
+
+BRAZIL_CENTER = (-14.2350, -51.9253)
+
+
+async def _seed_placeholder(engine: AsyncEngine, world: World) -> dict[str, str]:
+    """Lojas com o ponto padrão do geocodificador (centro do Brasil) e um shopping com o mesmo
+    ponto em duas lojas da mesma UF (esse vale)."""
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    now = utcnow()
+    async with maker() as db:
+        cust = uuid.UUID(world.customer_id)
+
+        def loc(name: str, city: str, state: str, point: tuple[float, float] | None) -> Location:
+            item = Location(
+                customer_id=cust,
+                name=name,
+                city=city,
+                state=state,
+                latitude=point[0] if point else None,
+                longitude=point[1] if point else None,
+                is_active=True,
+            )
+            db.add(item)
+            return item
+
+        target = loc("Iguatemi Fortaleza", "Fortaleza", "CE", BRAZIL_CENTER)
+        loc("Loja Aldeota", "Fortaleza", "CE", FORT_1)
+        loc("Loja Centro", "Fortaleza", "CE", FORT_2)
+        far = loc("Loja Jequié", "Jequié", "BA", BRAZIL_CENTER)
+        rio_a = loc("Loja Rio A", "Rio de Janeiro", "RJ", (-22.9068, -43.1729))
+        rio_b = loc("Loja Recife B", "Recife", "PE", (-22.9068, -43.1729))  # mesmo ponto, outra UF
+        mall_a = loc("Shopping Loja 1", "Fortaleza", "CE", (-3.7550, -38.4890))
+        mall_b = loc("Shopping Loja 2", "Fortaleza", "CE", (-3.7550, -38.4890))
+        zero = loc("Loja Zero", "Natal", "RN", (0.0, 0.0))
+        tech = await db.get(User, world.tech.user.id)
+        assert tech is not None
+        # Único histórico do técnico: uma loja na Bahia com o ponto padrão.
+        db.add(
+            Ticket(
+                title="Visita",
+                status=TicketStatus.CLOSED,
+                customer_id=cust,
+                location_id=far.id,
+                assignee_id=tech.id,
+                resolved_at=now - timedelta(days=3),
+                created_at=now - timedelta(days=3),
+                updated_at=now - timedelta(days=3),
+            )
+        )
+        await db.commit()
+        return {
+            "target": str(target.id),
+            "far": str(far.id),
+            "rio_a": str(rio_a.id),
+            "rio_b": str(rio_b.id),
+            "mall_a": str(mall_a.id),
+            "mall_b": str(mall_b.id),
+            "zero": str(zero.id),
+            "tech": str(tech.id),
+        }
+
+
+async def test_cross_state_duplicates_are_cleared(engine: AsyncEngine, world: World) -> None:
+    ids = await _seed_placeholder(engine, world)
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as db:
+        found = {str(i) for i in await geo.invalid_location_ids(db)}
+        # Centro do Brasil (2 lojas), o mesmo ponto em RJ e PE e o (0,0); o shopping fica.
+        assert found == {ids["target"], ids["far"], ids["rio_a"], ids["rio_b"], ids["zero"]}
+        assert await geo.clear_invalid_location_coords(db) == 5
+        await db.commit()
+        mall = await db.get(Location, uuid.UUID(ids["mall_a"]))
+        cleared = await db.get(Location, uuid.UUID(ids["rio_a"]))
+        assert mall is not None and mall.latitude is not None
+        assert cleared is not None and cleared.latitude is None and cleared.longitude is None
+        assert await geo.invalid_location_ids(db) == []
+
+
+def test_coordinate_rules() -> None:
+    assert not geo.valid_coords(*BRAZIL_CENTER)
+    assert not geo.valid_coords(-14.23500, -51.92528)  # como o geocodificador grava
+    assert not geo.valid_coords(0, 0) and not geo.valid_coords(None, -38.5)
+    assert geo.valid_coords(*FORT_1)
+    pairs = geo.cross_state_pairs([(-22.9068, -43.1729, "RJ"), (-22.90681, -43.17289, "PE"), (*FORT_1, "CE"), (*FORT_1, "CE")])
+    assert pairs == {geo.coord_key(-22.9068, -43.1729)}
+
+
+async def test_store_without_coords_uses_city_centroid_and_no_false_zero_km(
+    client: AsyncClient, engine: AsyncEngine, world: World
+) -> None:
+    ids = await _seed_placeholder(engine, world)
+    an = world.analyst.headers
+    # Sem rodar a limpeza: a regra de validade já vale na hora da busca.
+    r = await client.get(f"{API}/technicians/nearby", params={"location_id": ids["target"]}, headers=an)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["point"]["label"] == (
+        "Iguatemi Fortaleza (centro de Fortaleza-CE, a loja não tem coordenadas)"
+    )
+    # Centro das lojas válidas de Fortaleza (as duas do centro e as duas do shopping).
+    expected_lat = (FORT_1[0] + FORT_2[0] + 2 * -3.7550) / 4
+    assert abs(body["point"]["latitude"] - expected_lat) < 1e-6
+    # O técnico só esteve na Bahia, numa loja com o ponto padrão: não aparece a "0 km".
+    assert ids["tech"] not in {t["id"] for t in body["technicians"]}
+    assert all(t["distance_km"] > 0 or t["visits_at_location"] for t in body["technicians"])
+
+    # Loja sem coordenada numa cidade sem nenhuma loja válida: aí sim 422.
+    r = await client.get(f"{API}/technicians/nearby", params={"location_id": ids["far"]}, headers=an)
+    assert r.status_code == 422
+    assert "A loja não tem coordenadas e não há lojas com coordenadas em Jequié-BA" in r.text
+
+    # A região do técnico também não usa o ponto padrão.
+    await client.post(f"{API}/technicians/regions/refresh", headers=an)
+    techs = {t["id"]: t for t in (await client.get(f"{API}/technicians", headers=an)).json()}
+    assert techs[ids["tech"]]["base_source"] is None

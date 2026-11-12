@@ -23,6 +23,7 @@ from app.schemas.tracking import (
     PingResult,
     TrackingHistory,
 )
+from app.services import geo
 from app.services.activities import day_bounds
 from app.services.realtime import bus
 from app.services.workflow import OPEN_STATUSES
@@ -254,8 +255,13 @@ async def live(db: AsyncSession, team_id: uuid.UUID | None = None) -> list[LiveT
                     location=LiveTicketLocation(
                         name=ticket.location.name,
                         city=ticket.location.city,
-                        latitude=ticket.location.latitude,
-                        longitude=ticket.location.longitude,
+                        # Ponto padrão (centro do Brasil etc.) não vira destino no mapa.
+                        latitude=ticket.location.latitude
+                        if geo.valid_coords(ticket.location.latitude, ticket.location.longitude)
+                        else None,
+                        longitude=ticket.location.longitude
+                        if geo.valid_coords(ticket.location.latitude, ticket.location.longitude)
+                        else None,
                     )
                     if ticket.location
                     else None,

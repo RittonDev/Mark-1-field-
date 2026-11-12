@@ -37,6 +37,7 @@ from app.core.config import settings
 from app.core.enums import TicketStatus, UserRole
 from app.db.base import utcnow
 from app.models import Location, LocationPing, TechnicianShift, Ticket, TicketWorklog, User
+from app.services import geo
 from app.services.errors import NotFound, WorkflowError
 from app.services.workflow import OPEN_STATUSES
 
@@ -161,8 +162,7 @@ async def refresh_bases(db: AsyncSession, now: datetime | None = None) -> dict[s
         .join(User, User.id == fp.c.user_id)
         .where(
             User.role == UserRole.TECHNICIAN,
-            Location.latitude.is_not(None),
-            Location.longitude.is_not(None),
+            geo.valid_coords_sql(Location.latitude, Location.longitude),
         )
         .subquery("joined")
     )
@@ -354,8 +354,7 @@ async def _city_centroid(db: AsyncSession, city: str, uf: str) -> tuple[float, f
             ).where(
                 fold_sql(Location.city) == fold_text(city),
                 Location.state == uf,
-                Location.latitude.is_not(None),
-                Location.longitude.is_not(None),
+                geo.valid_coords_sql(Location.latitude, Location.longitude),
             )
         )
     ).one()
@@ -368,6 +367,28 @@ def _location_label(loc: Location) -> str:
     name = f"{loc.code} - {loc.name}" if loc.code else loc.name
     place = "-".join(p for p in (loc.city, loc.state) if p)
     return f"{name} ({place})" if place else name
+
+
+async def _store_without_coords(db: AsyncSession, loc: Location) -> Point:
+    """Loja sem coordenada (ou com o ponto padrão): mede pelo centro das lojas da cidade."""
+    name = f"{loc.code} - {loc.name}" if loc.code else loc.name
+    uf = (loc.state or "").strip().upper()
+    if not loc.city or not uf:
+        raise WorkflowError("A loja não tem coordenadas")
+    centroid = await _city_centroid(db, loc.city, uf)
+    if centroid is None:
+        raise WorkflowError(
+            f"A loja não tem coordenadas e não há lojas com coordenadas em {loc.city}-{uf} "
+            "para calcular a distância"
+        )
+    return Point(
+        latitude=centroid[0],
+        longitude=centroid[1],
+        label=f"{name} (centro de {centroid[2]}-{uf}, a loja não tem coordenadas)",
+        location_id=loc.id,
+        city=loc.city,
+        state=uf,
+    )
 
 
 async def resolve_point(
@@ -384,8 +405,8 @@ async def resolve_point(
         loc = await db.get(Location, location_id)
         if loc is None:
             raise NotFound("Loja não encontrada")
-        if loc.latitude is None or loc.longitude is None:
-            raise WorkflowError("A loja não tem coordenadas")
+        if not geo.valid_coords(loc.latitude, loc.longitude):
+            return await _store_without_coords(db, loc)
         return Point(
             latitude=loc.latitude,
             longitude=loc.longitude,
@@ -395,7 +416,7 @@ async def resolve_point(
             state=loc.state,
         )
     if latitude is not None and longitude is not None:
-        if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
+        if not geo.valid_coords(latitude, longitude):
             raise WorkflowError("Coordenadas inválidas")
         return Point(latitude=latitude, longitude=longitude, label="Coordenadas informadas")
     if city and state:
@@ -426,7 +447,7 @@ async def point_for_place(
 ) -> Point | None:
     """Versão sem erro (sugestões da OS): sem coordenadas, tenta o centro da cidade."""
     if location is not None:
-        if location.latitude is not None and location.longitude is not None:
+        if geo.valid_coords(location.latitude, location.longitude):
             return Point(
                 latitude=location.latitude,
                 longitude=location.longitude,
@@ -436,7 +457,7 @@ async def point_for_place(
                 state=location.state,
             )
         city, state = location.city, location.state
-    if latitude is not None and longitude is not None:
+    if geo.valid_coords(latitude, longitude):
         return Point(
             latitude=latitude, longitude=longitude, label="Coordenadas", city=city, state=state
         )
@@ -492,7 +513,7 @@ async def proximity(
         .group_by(fp.c.user_id, fp.c.location_id)
         .subquery("per_loc")
     )
-    has_coords = and_(Location.latitude.is_not(None), Location.longitude.is_not(None))
+    has_coords = geo.valid_coords_sql(Location.latitude, Location.longitude)
     distance = haversine_sql(
         literal(point.latitude, Float),
         literal(point.longitude, Float),
@@ -548,10 +569,10 @@ async def proximity(
             p.visits_at_location = int(row.at_loc or 0)
             p.last_visit_at_location = row.last_at_loc
             p.visits_in_city = int(row.in_city or 0)
-        if u.home_latitude is not None and u.home_longitude is not None:
+        if geo.valid_coords(u.home_latitude, u.home_longitude):
             p.home_km = km_between((u.home_latitude, u.home_longitude), target)
         ping = pings.get(u.id) if u.id in on_shift else None
-        if ping is not None:
+        if ping is not None and geo.valid_coords(ping.latitude, ping.longitude):
             p.live_km = km_between((ping.latitude, ping.longitude), target)
         candidates = [
             (km, kind)

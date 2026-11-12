@@ -72,7 +72,7 @@ from app.models import (
     ViolationReason,
 )
 from app.schemas.forms import FormField
-from app.services import technician_regions
+from app.services import geo, technician_regions
 
 log = logging.getLogger("fieldcontrol")
 
@@ -298,6 +298,12 @@ def home_of(address: dict[str, Any], placeholders: set[tuple[float, float]]) -> 
         "longitude": point[1] if point else None,
         "placeholder": False,
     }
+
+
+def _location_point(loc: dict[str, Any]) -> tuple[Any, Any, str | None]:
+    address = loc.get("address") or {}
+    coords = address.get("coords") or {}
+    return coords.get("latitude"), coords.get("longitude"), to_uf(address.get("state"))
 
 
 def tags_of(labels: Any) -> list[dict[str, Any]]:
@@ -762,6 +768,10 @@ class Importer:
 
     async def import_locations(self) -> None:
         rows: list[dict[str, Any]] = []
+        # Ponto padrão do geocodificador (centro do Brasil; mesmo ponto em várias UFs): sem coordenada.
+        bad_points = geo.cross_state_pairs(
+            _location_point(item) for item in iter_records(self.file("localizacoes.json"))
+        )
         for loc in iter_records(self.file("localizacoes.json")):
             customer_id = self.ref("customer", (loc.get("customer") or {}).get("id"))
             if not customer_id:
@@ -775,6 +785,9 @@ class Importer:
             lat, lng = coords.get("latitude"), coords.get("longitude")
             if not lat and not lng:
                 lat = lng = None
+            elif not geo.valid_coords(lat, lng) or geo.coord_key(lat, lng) in bad_points:
+                lat = lng = None
+                self.report.add("locations", "coords_invalid_cleared")
             contacts = loc.get("contacts") or {}
             phones = contacts.get("phones") or []
             emails = contacts.get("emails") or []
@@ -1640,6 +1653,10 @@ async def run_import(
         await step()
         await db.flush()
         report.timings[name] = time.monotonic() - started
+    # Coordenadas inválidas que já estavam no banco (de outra origem) também saem.
+    report.counts["locations_coords"] = Counter(
+        {"invalid_cleared_in_db": await geo.clear_invalid_location_coords(db)}
+    )
     # Região de atuação dos técnicos (a cidade onde mais atenderam), com o histórico já importado.
     started = time.monotonic()
     report.counts["technician_regions"] = Counter(await technician_regions.refresh_bases(db))

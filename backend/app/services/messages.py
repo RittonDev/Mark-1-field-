@@ -21,7 +21,7 @@ from app.core.enums import AuthorizationStatus, TicketEventType
 from app.db.base import utcnow
 from app.models import LocationPing, SystemSetting, TechnicianShift, Ticket, TicketEvent, User
 from app.schemas.ticket import format_ticket_code
-from app.services import client_report
+from app.services import client_report, geo
 from app.services.errors import WorkflowError
 from app.services.suggestions import km_between
 from app.services.workflow import PRIORITY_INFO, STATUS_INFO
@@ -155,7 +155,7 @@ def _local(value: datetime) -> datetime:
 async def _eta(db: AsyncSession, ticket: Ticket, now: datetime) -> tuple[str | None, str | None]:
     """(hora prevista de chegada, distância) pela última posição do técnico em jornada."""
     loc = ticket.location
-    if ticket.assignee_id is None or loc is None or loc.latitude is None or loc.longitude is None:
+    if ticket.assignee_id is None or loc is None or not geo.valid_coords(loc.latitude, loc.longitude):
         return None, None
     on_shift = await db.scalar(
         select(TechnicianShift.id).where(
@@ -200,7 +200,7 @@ async def context(db: AsyncSession, ticket: Ticket, actor: User) -> dict[str, st
         ]
         if p
     )
-    if loc and loc.latitude is not None and loc.longitude is not None:
+    if loc and geo.valid_coords(loc.latitude, loc.longitude):
         maps = f"https://maps.google.com/?q={loc.latitude},{loc.longitude}"
     else:
         maps = f"https://maps.google.com/?q={address.replace(' ', '+')}" if address else ""
