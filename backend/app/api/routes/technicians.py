@@ -6,16 +6,18 @@ from fastapi.responses import FileResponse
 
 from app.api.deps import DB, TicketManagerUser
 from app.core.security import InvalidToken, decode_token
-from app.models import User
+from app.models import Project, User
 from app.schemas.technician import (
     ImportResult,
     TechnicianCreate,
     TechnicianOut,
     TechnicianUpdate,
+    TechnicianSuggestion,
     TemporaryPassword,
 )
-from app.services import storage
+from app.services import storage, suggestions
 from app.services import technicians as svc
+from app.services import tickets as tickets_svc
 from app.services.spreadsheet import SpreadsheetError
 
 router = APIRouter(tags=["technicians"])
@@ -115,3 +117,27 @@ async def avatar(user_id: uuid.UUID, token: str, db: DB) -> Response:
     if user is None or not user.avatar_key:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Sem foto")
     return FileResponse(storage.open_path(user.avatar_key))
+
+
+@router.get("/tickets/{ticket_id}/technician-suggestions", response_model=list[TechnicianSuggestion])
+async def ticket_suggestions(
+    ticket_id: uuid.UUID, db: DB, user: TicketManagerUser
+) -> list[dict]:
+    """Os 5 técnicos mais indicados para a OS (cidade, distância, agenda, skill, carga)."""
+    ticket = await tickets_svc.get_visible_ticket(db, user, ticket_id)
+    project = await db.get(Project, ticket.project_id) if ticket.project_id else None
+    return await suggestions.suggest(db, suggestions.target_for(ticket, project))
+
+
+@router.get("/technicians/suggest", response_model=list[TechnicianSuggestion])
+async def suggest_for_place(
+    db: DB,
+    _: TicketManagerUser,
+    city: str | None = None,
+    state: str | None = None,
+    latitude: float | None = None,
+    longitude: float | None = None,
+) -> list[dict]:
+    """Para quem ainda está abrindo a OS: sugestões só pelo lugar."""
+    coords = (latitude, longitude) if latitude is not None and longitude is not None else None
+    return await suggestions.suggest(db, suggestions.Target(city=city, state=state, coords=coords))

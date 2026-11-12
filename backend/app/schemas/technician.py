@@ -95,3 +95,18 @@ class ImportResult(BaseModel):
     errors: int
     # Só na importação confirmada, e só nesta resposta: senhas provisórias dos novos.
     credentials: list[Credential] = []
+
+
+class TechnicianSuggestion(BaseModel):
+    id: uuid.UUID
+    name: str
+    phone: str | None
+    home_city: str | None
+    home_state: str | None
+    team: Ref | None
+    open_tickets: int
+    on_shift: bool
+    distance_km: float | None
+    score: float
+    # Por que foi sugerido: "Mora em Santos", "A 4 km agora", "Livre no horário"...
+    reasons: list[str]
