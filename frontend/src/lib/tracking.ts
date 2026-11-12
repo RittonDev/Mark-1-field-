@@ -1,5 +1,6 @@
 // Estados do técnico no mapa ao vivo (espelha LiveState em backend/app/schemas/tracking.py).
 
+import { formatMinutes } from "./format";
 import type { LiveState } from "./types";
 
 export const LIVE_STATE: Record<LiveState, { label: string; color: string; hint: string }> = {
@@ -16,4 +17,11 @@ export const LIVE_STATE_ORDER: LiveState[] = ["in_progress", "en_route", "availa
 export function formatSpeed(mps: number | null | undefined): string | null {
   if (mps == null) return null;
   return `${Math.round(mps * 3.6)} km/h`;
+}
+
+/** "agora" / "há 3min" — tolera alguns segundos de diferença entre o relógio do celular e o do navegador. */
+export function formatAgo(value: string | null | undefined, now: number): string {
+  if (!value) return "—";
+  const minutes = (now - new Date(value).getTime()) / 60_000;
+  return minutes < 1 ? "agora" : `há ${formatMinutes(minutes)}`;
 }

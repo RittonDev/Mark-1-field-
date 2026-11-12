@@ -66,7 +66,7 @@ export default function MyTicketsScreen() {
         onChange={setTab}
         options={[
           { value: "today", label: "Hoje", count: lists.today.length },
-          { value: "agenda", label: "Agenda", count: lists.upcoming.length },
+          { value: "agenda", label: "Agenda" },
           { value: "done", label: "Concluídas", count: lists.done.length },
         ]}
       />

@@ -24,9 +24,9 @@ import { useNow } from "@/components/useNow";
 import { errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canManageTickets, STATUS } from "@/lib/constants";
-import { formatRelative, formatTime, initials } from "@/lib/format";
+import { formatTime, initials } from "@/lib/format";
 import { useLiveTechnicians, useTeams, useTrackingHistory } from "@/lib/queries";
-import { formatSpeed, LIVE_STATE, LIVE_STATE_ORDER } from "@/lib/tracking";
+import { formatAgo, formatSpeed, LIVE_STATE, LIVE_STATE_ORDER } from "@/lib/tracking";
 import type { LiveState, LiveTechnician } from "@/lib/types";
 
 const LiveMap = dynamic(() => import("@/components/LiveMap"), {
@@ -223,7 +223,7 @@ function TechnicianRow({
           <span className="flex items-center justify-between gap-2">
             <span className="truncate text-sm font-medium text-ink">{tech.name}</span>
             {pos ? (
-              <span className="shrink-0 text-xs text-ink-muted tabular-nums">{formatRelative(pos.recorded_at, now)}</span>
+              <span className="shrink-0 text-xs text-ink-muted tabular-nums">{formatAgo(pos.recorded_at, now)}</span>
             ) : null}
           </span>
           <span className="mt-0.5 flex items-center gap-1.5 text-xs" style={{ color: state.color }}>
@@ -287,7 +287,7 @@ function TechnicianDetail({
           {tech.shift_started_at ? `Jornada desde ${formatTime(tech.shift_started_at)}` : "Fora da jornada"}
         </Fact>
         <Fact icon={<Navigation className="size-3.5" />}>
-          {pos ? `Posição ${formatRelative(pos.recorded_at, now)}` : "Sem posição"}
+          {pos ? `Posição ${formatAgo(pos.recorded_at, now)}` : "Sem posição"}
         </Fact>
         {battery != null ? (
           <Fact icon={battery <= 20 ? <BatteryLow className="size-3.5 text-red-500" /> : <BatteryMedium className="size-3.5" />}>
