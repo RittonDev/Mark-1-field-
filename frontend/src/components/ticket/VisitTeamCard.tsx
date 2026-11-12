@@ -59,6 +59,7 @@ export function VisitTeamCard({ ticket }: { ticket: TicketDetail }) {
           helperIds={clash?.ids ?? helpers.map((h) => h.id)}
           names={names}
           onChange={(ids) => save.mutate({ ids, allow: false })}
+          hideLabel
         />
       ) : (
         <ul className="flex flex-col gap-2">
