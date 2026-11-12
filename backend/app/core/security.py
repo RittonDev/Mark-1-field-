@@ -50,8 +50,10 @@ def create_access_token(user_id: str, role: str) -> str:
     )
 
 
-def create_refresh_token(user_id: str) -> str:
-    return create_token(user_id, "refresh", timedelta(days=settings.REFRESH_TOKEN_DAYS))
+def create_refresh_token(user_id: str, channel: str | None = None) -> str:
+    """O canal (web/mobile) vai no token para ser revalidado a cada renovação."""
+    extra = {"ch": channel} if channel else None
+    return create_token(user_id, "refresh", timedelta(days=settings.REFRESH_TOKEN_DAYS), extra)
 
 
 def create_download_token(attachment_id: str, user_id: str) -> str:

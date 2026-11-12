@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
 from app.api.deps import DB, AdminUser, CurrentUser, ManagerUser
+from app.core.access import channel_metadata
 from app.core.enums import TicketPriority
 from app.core.labels import enum_options
 from app.models import Category, SlaPolicy, Team
@@ -23,7 +24,11 @@ router = APIRouter(tags=["catalog"])
 @router.get("/meta")
 async def meta() -> dict:
     """Status, transições, prioridades e rótulos. Público (o app lê antes do login)."""
-    return {**workflow_metadata(), **enum_options()}
+    return {
+        **workflow_metadata(),
+        **enum_options(),
+        "access_channels": channel_metadata(),
+    }
 
 
 async def _load_category(db: DB, category_id: uuid.UUID) -> Category:

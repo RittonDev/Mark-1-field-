@@ -1,11 +1,14 @@
 from pydantic import BaseModel
 
+from app.core.access import Channel
 from app.schemas.user import UserOut
 
 
 class LoginRequest(BaseModel):
     email: str
     password: str
+    # "web" (analistas e gestores) ou "mobile" (técnicos de campo). Omitido = sem restrição.
+    channel: Channel | None = None
 
 
 class RefreshRequest(BaseModel):

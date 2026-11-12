@@ -432,3 +432,38 @@ async def test_technician_scope_is_restricted(client: AsyncClient, world: World)
     assert detail["can_edit"] is True
     users = (await client.get(f"{API}/users/assignable", headers=world.tech.headers)).json()
     assert {u["role"] for u in users} >= {"technician", "analyst"}
+
+
+async def test_access_channels(client: AsyncClient, world: World) -> None:
+    async def login(email: str, channel: str, password: str = "senha-teste-123"):  # noqa: ANN202
+        return await client.post(
+            f"{API}/auth/login", json={"email": email, "password": password, "channel": channel}
+        )
+
+    # Navegador: analistas, gestores e o portal do solicitante. Celular: técnicos de campo.
+    r = await login("tecnico@teste.com.br", "web")
+    assert r.status_code == 403
+    assert "app" in r.json()["detail"]
+    r = await login("analista@teste.com.br", "mobile")
+    assert r.status_code == 403
+    assert "navegador" in r.json()["detail"]
+    assert (await login("analista@teste.com.br", "web")).status_code == 200
+    assert (await login("super@teste.com.br", "web")).status_code == 200
+    assert (await login("cliente@teste.com.br", "web")).status_code == 200
+    r = await login("tecnico@teste.com.br", "mobile")
+    assert r.status_code == 200
+    refresh_token = r.json()["refresh_token"]
+
+    # Senha errada é 401 em qualquer canal: não revela o papel de ninguém.
+    assert (await login("tecnico@teste.com.br", "web", password="errada")).status_code == 401
+
+    # Técnico promovido a analista: a sessão do app termina na próxima renovação.
+    r = await client.patch(
+        f"{API}/users/{world.tech.user.id}", json={"role": "analyst"}, headers=world.admin.headers
+    )
+    assert r.status_code == 200, r.text
+    r = await client.post(f"{API}/auth/refresh", json={"refresh_token": refresh_token})
+    assert r.status_code == 401
+
+    meta = (await client.get(f"{API}/meta")).json()
+    assert meta["access_channels"]["mobile"] == ["technician"]
