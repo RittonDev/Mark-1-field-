@@ -13,25 +13,37 @@ export const BRAND = {
   cyan: "#00B7DF",
   aqua: "#2BD4AF",
   mint: "#76F6C6",
-  graphite: "#262B32",
+  graphite: "#1B1F26",
 } as const;
 
+/** Degradê da marca: só em detalhes (logo, barra ativa fina, progresso), nunca como fundo. */
 export const BRAND_GRADIENT = [BRAND.blue, BRAND.cyan, BRAND.aqua, BRAND.mint] as const;
 
+/** Raios e grade de 4 pt, iguais aos tokens da web. */
+export const RADIUS = { card: 14, control: 10, chip: 999 } as const;
+export const SPACE = (n: number) => n * 4;
+
+/**
+ * Tokens compartilhados com a web. `backdrop` é o fundo atrás da tela (login, áreas de destaque);
+ * `canvas` é o fundo das telas; superfícies 1–3 para cartões e camadas.
+ */
 export interface Palette {
   scheme: "light" | "dark";
-  primary: string;
-  primaryPressed: string;
-  onPrimary: string;
-  primarySoft: string;
+  backdrop: string;
   canvas: string;
   surface: string;
   surface2: string;
+  surface3: string;
   line: string;
   lineStrong: string;
   ink: string;
   inkMuted: string;
   inkSubtle: string;
+  primary: string;
+  primaryPressed: string;
+  primarySoft: string;
+  brandInk: string;
+  onPrimary: string;
   placeholder: string;
   danger: string;
   dangerSoft: string;
@@ -45,23 +57,28 @@ export interface Palette {
   toastInk: string;
   toastMuted: string;
   shadow: string;
+  /** Sombra muito leve (y1, blur 3, ~5%); vazia no modo escuro, onde a borda basta. */
+  elevation: string | undefined;
 }
 
 export const LIGHT: Palette = {
   scheme: "light",
-  primary: BRAND.blue,
-  primaryPressed: "#1A37D6",
-  onPrimary: "#FFFFFF",
-  primarySoft: "#EEF1FF",
-  canvas: "#F6F7F9",
+  backdrop: "#F0F2F5",
+  canvas: "#F9FAFB",
   surface: "#FFFFFF",
-  surface2: "#F8FAFC",
-  line: "#E4E7EC",
-  lineStrong: "#D0D5DD",
-  ink: BRAND.graphite,
-  inkMuted: "#5D6673",
-  inkSubtle: "#98A2B3",
-  placeholder: "#98A2B3",
+  surface2: "#F4F5F7",
+  surface3: "#ECEEF1",
+  line: "#E5E7EB",
+  lineStrong: "#D4D8DE",
+  ink: "#1B1F26",
+  inkMuted: "#5D6676",
+  inkSubtle: "#8B93A1",
+  primary: "#2447FF",
+  primaryPressed: "#1A36D6",
+  primarySoft: "#EEF1FF",
+  brandInk: "#1F3BE0",
+  onPrimary: "#FFFFFF",
+  placeholder: "#8B93A1",
   danger: "#D92D20",
   dangerSoft: "#FEF3F2",
   success: "#0E9384",
@@ -69,40 +86,45 @@ export const LIGHT: Palette = {
   warning: "#DC6803",
   warningSoft: "#FFF7E8",
   info: "#0086C9",
-  segment: "#EAECF0",
-  toast: BRAND.graphite,
+  segment: "#ECEEF1",
+  toast: "#1B1F26",
   toastInk: "#FFFFFF",
-  toastMuted: "#C9CED6",
-  shadow: "#101828",
+  toastMuted: "#C4C9D1",
+  shadow: "#000000",
+  elevation: "0px 1px 3px rgba(0, 0, 0, 0.05)",
 };
 
 export const DARK: Palette = {
   scheme: "dark",
+  backdrop: "#08090B",
+  canvas: "#0D0E11",
+  surface: "#141519",
+  surface2: "#1A1C20",
+  surface3: "#222429",
+  line: "#24262C",
+  lineStrong: "#31343B",
+  ink: "#ECECF0",
+  inkMuted: "#9BA1AC",
+  inkSubtle: "#6C727D",
   primary: "#5470FF",
-  primaryPressed: "#4360F0",
+  primaryPressed: "#3D5AF7",
+  primarySoft: "rgba(84, 112, 255, 0.14)",
+  brandInk: "#9FB0FF",
   onPrimary: "#FFFFFF",
-  primarySoft: "#1A2250",
-  canvas: "#0D1116",
-  surface: "#151A21",
-  surface2: "#1B2129",
-  line: "#262D37",
-  lineStrong: "#343C48",
-  ink: "#E7EAF0",
-  inkMuted: "#A1AAB7",
-  inkSubtle: "#6C7685",
-  placeholder: "#6C7685",
+  placeholder: "#6C727D",
   danger: "#F97066",
-  dangerSoft: "#2B1517",
+  dangerSoft: "rgba(249, 112, 102, 0.12)",
   success: BRAND.aqua,
-  successSoft: "#0F2A26",
+  successSoft: "rgba(43, 212, 175, 0.12)",
   warning: "#FDB022",
-  warningSoft: "#2A2111",
+  warningSoft: "rgba(253, 176, 34, 0.12)",
   info: "#36BFFA",
-  segment: "#1B2129",
-  toast: "#232A34",
-  toastInk: "#F2F4F7",
-  toastMuted: "#A1AAB7",
+  segment: "#1A1C20",
+  toast: "#222429",
+  toastInk: "#ECECF0",
+  toastMuted: "#9BA1AC",
   shadow: "#000000",
+  elevation: undefined,
 };
 
 // ─────────────────────────── preferência ───────────────────────────

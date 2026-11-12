@@ -3,54 +3,69 @@
 /* Tema claro/escuro controlado por data-theme no <html> (definido antes da pintura em app/layout.tsx). */
 @custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
 
-/* Paleta da marca Maxx Field: azul elétrico -> ciano -> verde-água -> menta; texto em grafite. */
+/*
+ * Identidade Maxx Field.
+ * Base neutra (cinza frio no claro, grafite no escuro) e a marca como acento:
+ * azul elétrico nas ações e na seleção; o degradê azul -> ciano -> verde-água -> menta só em detalhes.
+ * Camadas: canvas (moldura e menu) < sheet (área de trabalho) < surface (cartões e diálogos).
+ */
 :root {
-  --canvas: #f6f7f9;
+  --canvas: #f0f2f5;
+  --sheet: #f9fafb;
   --surface: #ffffff;
-  --surface-2: #f3f5f9;
-  --line: #e4e7ec;
-  --ink: #262b32;
-  --ink-muted: #667085;
+  --surface-2: #f4f5f7;
+  --surface-3: #eceef1;
+  --line: #e5e7eb;
+  --line-strong: #d4d8de;
+  --ink: #1b1f26;
+  --ink-muted: #5d6676;
+  --ink-subtle: #8b93a1;
   --brand: #2447ff;
   --brand-strong: #1a36d6;
+  --brand-soft: #eef1ff;
+  --brand-ink: #1f3be0;
   --brand-cyan: #00b7df;
   --brand-teal: #2bd4af;
   --brand-mint: #76f6c6;
-  /* Séries de gráfico (validadas: CVD e contraste contra a superfície). */
+  /* Séries de gráfico (validadas: CVD e contraste contra a superfície dos cartões). */
   --viz-1: #2447ff;
   --viz-2: #13895f;
-  --viz-grid: #e9ecf1;
-  /* Menu lateral azul-marinho da marca (o degradê aparece só como detalhe). */
-  --sidebar: #0b1a3f;
-  --sidebar-ink: #a9b6d6;
-  --sidebar-ink-strong: #ffffff;
-  --sidebar-active: rgb(84 112 255 / 0.22);
-  --sidebar-line: rgb(255 255 255 / 0.08);
-  --nav-active: #eef1ff;
+  --viz-grid: #eceef1;
+  /* Seleção dentro das páginas (filtros ativos, item escolhido). */
+  --nav-active: var(--brand-soft);
+  /* Elevação: sombras curtas e frias, nada de "brilho". */
+  --elev-1: 0 1px 2px rgb(16 24 40 / 0.05);
+  --elev-2: 0 1px 2px rgb(16 24 40 / 0.04), 0 6px 16px -4px rgb(16 24 40 / 0.08);
+  --elev-pop: 0 0 0 1px rgb(16 24 40 / 0.05), 0 18px 40px -12px rgb(16 24 40 / 0.22), 0 4px 10px -4px rgb(16 24 40 / 0.08);
+  --elev-sheet: 0 0 0 1px rgb(16 24 40 / 0.04), 0 1px 3px rgb(16 24 40 / 0.05);
   color-scheme: light;
 }
 
 :root[data-theme="dark"] {
-  --canvas: #0a0d14;
-  --surface: #11161f;
-  --surface-2: #171e2a;
-  --line: #242d3c;
-  --ink: #e7eaf0;
-  --ink-muted: #95a1b5;
+  --canvas: #08090b;
+  --sheet: #0d0e11;
+  --surface: #141519;
+  --surface-2: #1a1c20;
+  --surface-3: #222429;
+  --line: #24262c;
+  --line-strong: #31343b;
+  --ink: #ececf0;
+  --ink-muted: #9ba1ac;
+  --ink-subtle: #6c727d;
   --brand: #5470ff;
   --brand-strong: #3d5af7;
+  --brand-soft: rgb(84 112 255 / 0.14);
+  --brand-ink: #9fb0ff;
   --brand-cyan: #19c4e8;
   --brand-teal: #3ddcbb;
   --brand-mint: #86f8cf;
   --viz-1: #5470ff;
   --viz-2: #199e70;
-  --viz-grid: #1f2633;
-  --sidebar: #070c18;
-  --sidebar-ink: #93a0bd;
-  --sidebar-ink-strong: #ffffff;
-  --sidebar-active: rgb(84 112 255 / 0.2);
-  --sidebar-line: rgb(255 255 255 / 0.06);
-  --nav-active: rgb(84 112 255 / 0.16);
+  --viz-grid: #23262c;
+  --elev-1: 0 1px 2px rgb(0 0 0 / 0.35);
+  --elev-2: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 20px -6px rgb(0 0 0 / 0.45);
+  --elev-pop: 0 0 0 1px rgb(255 255 255 / 0.06), 0 20px 48px -12px rgb(0 0 0 / 0.7);
+  --elev-sheet: 0 0 0 1px rgb(255 255 255 / 0.035);
   color-scheme: dark;
 }
 
@@ -60,24 +75,155 @@
 
 @theme inline {
   --color-canvas: var(--canvas);
+  --color-sheet: var(--sheet);
   --color-surface: var(--surface);
   --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
   --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
   --color-ink: var(--ink);
   --color-ink-muted: var(--ink-muted);
+  --color-ink-subtle: var(--ink-subtle);
   --color-brand: var(--brand);
   --color-brand-strong: var(--brand-strong);
-  --color-sidebar: var(--sidebar);
-  --color-sidebar-ink: var(--sidebar-ink);
-  --color-sidebar-active: var(--sidebar-active);
-  --color-sidebar-line: var(--sidebar-line);
-  --color-sidebar-ink-strong: var(--sidebar-ink-strong);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-ink: var(--brand-ink);
   --color-nav-active: var(--nav-active);
   --color-brand-cyan: var(--brand-cyan);
   --color-brand-teal: var(--brand-teal);
   --color-brand-mint: var(--brand-mint);
+  --shadow-elev-1: var(--elev-1);
+  --shadow-elev-2: var(--elev-2);
+  --shadow-pop: var(--elev-pop);
+  --shadow-sheet: var(--elev-sheet);
   --font-sans: var(--font-brand), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
     sans-serif;
+}
+
+/* Movimento: curto, com desaceleração suave; some com "reduzir movimento" do sistema. */
+@theme {
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --animate-enter: mf-enter 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-rise: mf-rise 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-fade: mf-fade 0.2s ease-out both;
+  --animate-pop: mf-pop 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-toast: mf-toast 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-float: mf-float 5s ease-in-out infinite alternate;
+  --animate-draw: mf-draw 2.6s cubic-bezier(0.65, 0, 0.35, 1) both;
+}
+
+@keyframes mf-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes mf-rise {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes mf-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes mf-pop {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes mf-toast {
+  from {
+    opacity: 0;
+    transform: translateX(28px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes mf-float {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-8px);
+  }
+}
+@keyframes mf-draw {
+  from {
+    stroke-dashoffset: var(--len, 1200);
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes mf-shimmer {
+  from {
+    background-position: 160% 0;
+  }
+  to {
+    background-position: -60% 0;
+  }
+}
+@keyframes mf-progress {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+@keyframes mf-travel {
+  from {
+    offset-distance: 0%;
+  }
+  to {
+    offset-distance: 100%;
+  }
+}
+@keyframes mf-ring {
+  from {
+    opacity: 0.55;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 0;
+    transform: scale(2.2);
+  }
+}
+
+/* Esqueleto de carregamento (no lugar do "Carregando..."). */
+.skeleton {
+  border-radius: 6px;
+  background-image: linear-gradient(90deg, var(--surface-2) 20%, var(--surface-3) 50%, var(--surface-2) 80%);
+  background-size: 220% 100%;
+  animation: mf-shimmer 1.5s ease-in-out infinite;
+}
+
+/* Entrada em sequência: cada filho recebe --i (índice) e entra um pouco depois do anterior. */
+.stagger > * {
+  animation: mf-enter 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: calc(min(var(--i, 0), 12) * 32ms);
 }
 
 html,
@@ -89,17 +235,52 @@ body {
 body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
 }
 
 select {
   appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23667085' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238b93a1' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 0.6rem center;
 }
 
 ::selection {
-  background: color-mix(in srgb, var(--brand) 25%, transparent);
+  background: color-mix(in srgb, var(--brand) 22%, transparent);
+}
+
+:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--brand) 55%, transparent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Relatórios e orçamentos impressos / salvos em PDF. */
+@page {
+  size: A4;
+  margin: 12mm 12mm 14mm;
+}
+@media print {
+  html,
+  body {
+    background: #ffffff !important;
+  }
 }
 
 /* Mapa ao vivo (Leaflet): marcadores dos técnicos e ajustes do tema escuro. */
@@ -205,10 +386,4 @@ select {
 /* Tema escuro sem mapa escuro próprio: inverte o mapa claro mantendo as cores legíveis. */
 .mf-tiles-dim {
   filter: invert(1) hue-rotate(180deg) brightness(0.9) contrast(0.85) saturate(0.6);
-}
-
-/* Rolagem discreta no menu azul-marinho. */
-.sidebar-scroll {
-  scrollbar-width: thin;
-  scrollbar-color: rgb(255 255 255 / 0.14) transparent;
 }
