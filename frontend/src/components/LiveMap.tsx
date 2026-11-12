@@ -15,7 +15,12 @@ interface Ready {
   L: Leaflet;
   map: LeafletMap;
   layers: { trail: LayerGroup; routes: LayerGroup; techs: LayerGroup };
+  /** Vira false na hora em que o mapa é desmontado. O estado `ready` só muda no próximo render,
+   *  e nesse meio-tempo nenhum efeito pode desenhar no mapa removido (o Leaflet quebra). */
+  alive: { current: boolean };
 }
+
+const usable = (ready: Ready | null): ready is Ready => ready !== null && ready.alive.current;
 
 // Mapa base. Padrão: OpenStreetMap (sem chave; uso moderado). Em produção, configure um
 // provedor contratado (MapTiler, Stadia, Mapbox...) em NEXT_PUBLIC_MAP_TILES_URL. Sem uma
@@ -73,6 +78,7 @@ export default function LiveMap({
   useEffect(() => {
     let cancelled = false;
     let map: LeafletMap | null = null;
+    const alive = { current: true };
     import("leaflet").then((mod) => {
       const L = ((mod as unknown as { default?: Leaflet }).default ?? mod) as Leaflet;
       if (cancelled || !containerRef.current) return;
@@ -82,16 +88,18 @@ export default function LiveMap({
         L,
         map,
         layers: { trail: L.layerGroup().addTo(map), routes: L.layerGroup().addTo(map), techs: L.layerGroup().addTo(map) },
+        alive,
       });
     });
     return () => {
       cancelled = true;
+      alive.current = false;
       map?.remove();
     };
   }, []);
 
   useEffect(() => {
-    if (!ready) return;
+    if (!usable(ready)) return;
     const dark = theme === "dark";
     const tiles = ready.L.tileLayer(dark && TILES_DARK ? TILES_DARK : TILES_LIGHT, {
       attribution: ATTRIBUTION,
@@ -106,7 +114,7 @@ export default function LiveMap({
 
   // Técnicos, destino da OS em campo e a linha até ele enquanto está a caminho.
   useEffect(() => {
-    if (!ready) return;
+    if (!usable(ready)) return;
     const { L, layers } = ready;
     layers.techs.clearLayers();
     layers.routes.clearLayers();
@@ -157,7 +165,7 @@ export default function LiveMap({
 
   // Primeiro carregamento: enquadra todos que estão com posição.
   useEffect(() => {
-    if (!ready || fittedRef.current) return;
+    if (!usable(ready) || fittedRef.current) return;
     const points = technicians.flatMap((t) =>
       t.last_position ? [[t.last_position.latitude, t.last_position.longitude] as LatLngTuple] : [],
     );
@@ -168,14 +176,14 @@ export default function LiveMap({
 
   // Ao escolher um técnico na lista, o mapa vai até ele.
   useEffect(() => {
-    if (!ready || !selectedId) return;
+    if (!usable(ready) || !selectedId) return;
     const pos = techniciansRef.current.find((t) => t.id === selectedId)?.last_position;
     if (pos) ready.map.flyTo([pos.latitude, pos.longitude], Math.max(ready.map.getZoom(), 14), { duration: 0.6 });
   }, [ready, selectedId]);
 
   // Trajeto do dia do técnico escolhido, com os pontos em que ele mudou o status da OS.
   useEffect(() => {
-    if (!ready) return;
+    if (!usable(ready)) return;
     const { L, layers, map } = ready;
     layers.trail.clearLayers();
     if (!history) return;
