@@ -3,6 +3,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, Download, ExternalLink, FileCheck2, Link2Off, MessageCircle, RefreshCw } from "lucide-react";
 import { useState } from "react";
+import { useConfirm } from "@/components/Confirm";
 import { useToast } from "@/components/Toaster";
 import { Button, Card, CardHeader, ErrorBox } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
@@ -13,6 +14,7 @@ import type { ReportLink, TicketDetail } from "@/lib/types";
 export function ReportLinkCard({ ticket }: { ticket: TicketDetail }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const confirm = useConfirm();
   const [copied, setCopied] = useState(false);
   const finished = ticket.status === "resolved" || ticket.status === "closed";
   const link = ticket.report_link ?? null;
@@ -107,7 +109,14 @@ export function ReportLinkCard({ ticket }: { ticket: TicketDetail }) {
               <button
                 type="button"
                 disabled={rotate.isPending}
-                onClick={() => window.confirm("Gerar um novo link? O link já enviado para de funcionar.") && rotate.mutate()}
+                onClick={async () =>
+                  (await confirm({
+                    title: "Gerar um novo link do relatório?",
+                    description: "O link já enviado ao cliente para de funcionar.",
+                    confirmLabel: "Gerar novo link",
+                    tone: "danger",
+                  })) && rotate.mutate()
+                }
                 className="inline-flex items-center gap-1 text-ink-muted transition-colors hover:text-ink disabled:opacity-50"
               >
                 <RefreshCw className="size-3.5" />
@@ -116,7 +125,14 @@ export function ReportLinkCard({ ticket }: { ticket: TicketDetail }) {
               <button
                 type="button"
                 disabled={revoke.isPending}
-                onClick={() => window.confirm("Desativar o link do relatório?") && revoke.mutate()}
+                onClick={async () =>
+                  (await confirm({
+                    title: "Desativar o link do relatório?",
+                    description: "O cliente deixa de conseguir abrir o relatório por esse link.",
+                    confirmLabel: "Desativar",
+                    tone: "danger",
+                  })) && revoke.mutate()
+                }
                 className="inline-flex items-center gap-1 text-ink-muted transition-colors hover:text-red-600 disabled:opacity-50"
               >
                 <Link2Off className="size-3.5" />

@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 import { Check, Copy, ExternalLink, FileText, Link2, Mail, MessageCircle, Plus, RefreshCw, Send, Share2, Trash2, X } from "lucide-react";
 import { useState } from "react";
+import { useConfirm } from "@/components/Confirm";
 import { Button, Card, CardHeader, Dialog, ErrorBox, Field, Input, Select, Textarea } from "@/components/ui";
 import { absoluteApiUrl, api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -23,6 +24,7 @@ const num = (v: string) => Number(v.replace(",", ".")) || 0;
 /** Orçamentos da OS: montar, enviar o link e acompanhar a decisão do cliente. */
 export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
   const { user } = useAuth();
+  const confirm = useConfirm();
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<Quote | "new" | null>(null);
   const [sharing, setSharing] = useState<Quote | null>(null);
@@ -112,7 +114,14 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
                   )}
                   <button
                     type="button"
-                    onClick={() => window.confirm(`Cancelar ${q.code}? O link deixa de funcionar.`) && cancel.mutate(q)}
+                    onClick={async () =>
+                      (await confirm({
+                        title: `Cancelar o orçamento ${q.code}?`,
+                        description: "O link enviado ao cliente deixa de funcionar.",
+                        confirmLabel: "Cancelar orçamento",
+                        tone: "danger",
+                      })) && cancel.mutate(q)
+                    }
                     className="rounded-md p-1 text-ink-muted hover:bg-surface-2 hover:text-red-600"
                     aria-label="Cancelar orçamento"
                   >
@@ -358,6 +367,7 @@ function ShareDialog({
   onClose: () => void;
   onRotated: () => void;
 }) {
+  const confirm = useConfirm();
   const [copied, setCopied] = useState(false);
   const [current, setCurrent] = useState(quote);
   const rotate = useMutation({
@@ -423,7 +433,14 @@ function ShareDialog({
             <button
               type="button"
               disabled={rotate.isPending}
-              onClick={() => window.confirm("Gerar um novo link? O link já enviado para de funcionar.") && rotate.mutate()}
+              onClick={async () =>
+                (await confirm({
+                  title: "Gerar um novo link?",
+                  description: "O link já enviado ao cliente para de funcionar.",
+                  confirmLabel: "Gerar novo link",
+                  tone: "danger",
+                })) && rotate.mutate()
+              }
               className="inline-flex items-center gap-1 text-xs text-ink-muted transition-colors hover:text-ink disabled:opacity-50"
             >
               <RefreshCw className="size-3.5" />

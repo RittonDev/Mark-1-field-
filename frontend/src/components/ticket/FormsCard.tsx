@@ -4,6 +4,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
 import { Camera, CheckCircle2, ClipboardList, FileSignature, Lock, Plus, Trash2, X } from "lucide-react";
 import { useState } from "react";
+import { useConfirm } from "@/components/Confirm";
 import { Button, Card, CardHeader, Checkbox, Dialog, ErrorBox, Field, Input, Select, Textarea } from "@/components/ui";
 import { absoluteApiUrl, api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -36,6 +37,7 @@ function useAttachments(ticketId: string) {
 /** Formulários anexados à OS (a gestão decide) e a assinatura do responsável no local. */
 export function FormsCard({ ticket }: { ticket: TicketDetail }) {
   const { user } = useAuth();
+  const confirm = useConfirm();
   const manager = canManageTickets(user?.role);
   const invalidate = useInvalidateTicket(ticket.id);
   const onError = useTicketErrorHandler(ticket.id);
@@ -121,9 +123,14 @@ export function FormsCard({ ticket }: { ticket: TicketDetail }) {
                 {manager && !final ? (
                   <button
                     type="button"
-                    onClick={() => {
-                      if (window.confirm(`Remover "${form.name}" desta OS? As respostas e fotos dele saem junto.`))
-                        remove.mutate(form);
+                    onClick={async () => {
+                      const ok = await confirm({
+                        title: "Remover este formulário da OS?",
+                        description: `“${form.name}” sai desta OS, com as respostas e as fotos dele.`,
+                        confirmLabel: "Remover",
+                        tone: "danger",
+                      });
+                      if (ok) remove.mutate(form);
                     }}
                     className="rounded-md p-1 text-ink-muted hover:bg-surface-2 hover:text-red-600"
                     aria-label={`Remover ${form.name}`}

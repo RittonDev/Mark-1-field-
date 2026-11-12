@@ -4,6 +4,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
 import { Lock, Paperclip, Pencil, Plus, Receipt, Trash2 } from "lucide-react";
 import { useState } from "react";
+import { useConfirm } from "@/components/Confirm";
 import { Button, Card, CardHeader, Dialog, ErrorBox, Field, Input, Select, Textarea } from "@/components/ui";
 import { absoluteApiUrl, api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -17,6 +18,7 @@ import { useInvalidateTicket, useTicketErrorHandler } from "./useConflictHandler
 /** Custos extras da OS: material, km rodado, pedágio... Só a gestão lança e altera. */
 export function ExpensesCard({ ticket }: { ticket: TicketDetail }) {
   const { user } = useAuth();
+  const confirm = useConfirm();
   const manager = canManageTickets(user?.role);
   const invalidate = useInvalidateTicket(ticket.id);
   const onError = useTicketErrorHandler(ticket.id);
@@ -102,7 +104,14 @@ export function ExpensesCard({ ticket }: { ticket: TicketDetail }) {
                     </button>
                     <button
                       type="button"
-                      onClick={() => window.confirm(`Remover "${e.description}"?`) && remove.mutate(e.id)}
+                      onClick={async () =>
+                        (await confirm({
+                          title: "Remover este custo?",
+                          description: `“${e.description}” sai dos custos extras da OS.`,
+                          confirmLabel: "Remover",
+                          tone: "danger",
+                        })) && remove.mutate(e.id)
+                      }
                       className="rounded-md p-1 text-ink-muted hover:bg-surface-2 hover:text-red-600"
                       aria-label="Remover custo"
                     >
