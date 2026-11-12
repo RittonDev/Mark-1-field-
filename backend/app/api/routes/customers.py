@@ -2,7 +2,7 @@ import re
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import func, or_, select
 
 from app.api.deps import DB, CurrentUser, StaffUser, TicketManagerUser
@@ -20,6 +20,9 @@ from app.schemas.customer import (
     LocationOut,
     LocationUpdate,
 )
+from app.services import location_import
+from app.services.location_import import LocationImportResult
+from app.services.spreadsheet import SpreadsheetError
 from app.services.tickets import visibility_clause
 from app.services.workflow import OPEN_STATUSES
 
@@ -288,3 +291,27 @@ async def update_asset(asset_id: uuid.UUID, body: AssetUpdate, db: DB, _: StaffU
         setattr(asset, key, value)
     await db.commit()
     return await db.get(Asset, asset.id, populate_existing=True)  # type: ignore[return-value]
+
+
+# ------------------------------------------------------- importação de locais
+
+
+@router.post("/locations/import", response_model=LocationImportResult)
+async def import_locations(
+    db: DB,
+    _: TicketManagerUser,
+    file: Annotated[UploadFile, File()],
+    dry_run: bool = True,
+    customer_id: uuid.UUID | None = None,
+) -> LocationImportResult:
+    """Base de locais por planilha CSV ou XLSX. Por padrão só a prévia; dry_run=false grava."""
+    data = await file.read()
+    try:
+        result = await location_import.import_locations(
+            db, file.filename or "", data, dry_run, customer_id
+        )
+    except SpreadsheetError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    if not dry_run:
+        await db.commit()
+    return result
