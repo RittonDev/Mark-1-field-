@@ -2,6 +2,7 @@ import { router, Stack } from "expo-router";
 import { useMemo, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
 import { BrandLogo, BrandRule } from "../components/Brand";
+import { Calendar } from "../components/Calendar";
 import { ConnectionBar } from "../components/ConnectionBar";
 import { TicketCard } from "../components/TicketCard";
 import { EmptyState, Segmented } from "../components/ui";
@@ -43,7 +44,8 @@ export default function MyTicketsScreen() {
       : "Baixando suas OS…"
     : undefined;
 
-  const data = tab === "today" ? lists.today : tab === "agenda" ? lists.upcoming : lists.done;
+  // A aba Agenda é o calendário (mês/semana); as outras são listas.
+  const data = tab === "today" ? lists.today : tab === "done" ? lists.done : [];
 
   const header = (
     <View style={styles.header}>
@@ -74,8 +76,6 @@ export default function MyTicketsScreen() {
   const empty =
     tab === "today" ? (
       <EmptyState title="Nada para hoje" description={emptyText ?? "Quando o analista atribuir uma OS a você, ela aparece aqui."} />
-    ) : tab === "agenda" ? (
-      <EmptyState title="Nenhuma visita agendada" description={emptyText ?? "Suas próximas visitas aparecem aqui."} />
     ) : (
       <EmptyState title="Nada concluído nos últimos 7 dias" description={emptyText} />
     );
@@ -104,8 +104,17 @@ export default function MyTicketsScreen() {
               <TicketCard ticket={item} now={now} showDate={tab !== "today"} />
             </View>
           )}
-          ListHeaderComponent={header}
-          ListEmptyComponent={empty}
+          ListHeaderComponent={
+            <>
+              {header}
+              {tab === "agenda" ? (
+                <View style={styles.calendar}>
+                  <Calendar tickets={tickets} user={user} now={now} />
+                </View>
+              ) : null}
+            </>
+          }
+          ListEmptyComponent={tab === "agenda" ? null : empty}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} colors={[c.primary]} tintColor={c.primary} />}
           contentContainerStyle={styles.list}
         />
@@ -123,5 +132,6 @@ const makeStyles = (c: Palette) =>
     notice: { backgroundColor: c.dangerSoft, borderColor: c.danger + "44", borderWidth: 1, borderRadius: 12, padding: 12 },
     noticeText: { color: c.danger, fontSize: 13, fontWeight: "600" },
     item: { paddingHorizontal: 16, paddingBottom: 10 },
+    calendar: { paddingHorizontal: 16 },
     headerLink: { color: c.primary, fontSize: 16, fontWeight: "600" },
   });
