@@ -42,11 +42,12 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "O MaxxChamados precisa acessar suas fotos para anexá-las às ordens de serviço.",
-          "cameraPermission": "O MaxxChamados usa a câmera para fotografar o equipamento atendido."
+          "photosPermission": "O Maxx Field precisa acessar suas fotos para anexá-las às ordens de serviço.",
+          "cameraPermission": "O Maxx Field usa a câmera para registrar fotos do atendimento e dos formulários da OS."
         }
       ],
-      "expo-notifications"
+      "expo-notifications",
+      "expo-font"
     ]
   }
 }
