@@ -104,10 +104,14 @@ def _slug(name: str) -> str:
 
 async def templates(db: AsyncSession) -> list[dict[str, str]]:
     setting = await db.get(SystemSetting, TEMPLATES_KEY)
-    return list(setting.value) if setting and setting.value else [dict(t) for t in DEFAULT_TEMPLATES]
+    return (
+        list(setting.value) if setting and setting.value else [dict(t) for t in DEFAULT_TEMPLATES]
+    )
 
 
-async def save_templates(db: AsyncSession, items: list[dict[str, str]], actor: User) -> list[dict[str, str]]:
+async def save_templates(
+    db: AsyncSession, items: list[dict[str, str]], actor: User
+) -> list[dict[str, str]]:
     clean: list[dict[str, str]] = []
     seen: set[str] = set()
     for item in items:
@@ -186,7 +190,9 @@ async def context(db: AsyncSession, ticket: Ticket, actor: User) -> dict[str, st
             ticket.service_address,
             loc.address_line if loc else None,
             loc.district if loc else None,
-            f"{loc.city}-{loc.state}" if loc and loc.city and loc.state else (loc.city if loc else None),
+            f"{loc.city}-{loc.state}"
+            if loc and loc.city and loc.state
+            else (loc.city if loc else None),
         ]
         if p
     )

@@ -35,7 +35,9 @@ async def get_templates(db: DB, _: TicketManagerUser) -> MessageTemplatesOut:
 
 
 @router.put("/message-templates", response_model=MessageTemplatesOut)
-async def put_templates(body: MessageTemplates, db: DB, user: TicketManagerUser) -> MessageTemplatesOut:
+async def put_templates(
+    body: MessageTemplates, db: DB, user: TicketManagerUser
+) -> MessageTemplatesOut:
     items = await svc.save_templates(db, [t.model_dump() for t in body.templates], user)
     await db.commit()
     return _out(items)

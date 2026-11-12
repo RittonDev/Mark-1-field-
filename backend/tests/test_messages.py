@@ -18,12 +18,22 @@ async def test_ticket_messages(client: AsyncClient, world: World) -> None:
     loc = (
         await client.post(
             f"{API}/customers/{world.customer_id}/locations",
-            json={"name": "Loja 27", "city": "São Paulo", "state": "SP", "latitude": -23.62, "longitude": -46.70},
+            json={
+                "name": "Loja 27",
+                "city": "São Paulo",
+                "state": "SP",
+                "latitude": -23.62,
+                "longitude": -46.70,
+            },
             headers=an,
         )
     ).json()
     t = await create(
-        client, world, title="PDV parado", location_id=loc["id"], assignee_id=str(world.tech.user.id)
+        client,
+        world,
+        title="PDV parado",
+        location_id=loc["id"],
+        assignee_id=str(world.tech.user.id),
     )
 
     # Técnico em jornada, a ~5 km do local: a chegada prevista sai da posição ao vivo.
@@ -37,7 +47,10 @@ async def test_ticket_messages(client: AsyncClient, world: World) -> None:
     )
     await transition(client, th, t, "en_route")
 
-    msgs = {m["key"]: m["text"] for m in (await client.get(f"{API}/tickets/{t['id']}/messages", headers=an)).json()}
+    msgs = {
+        m["key"]: m["text"]
+        for m in (await client.get(f"{API}/tickets/{t['id']}/messages", headers=an)).json()
+    }
     trip = msgs["deslocamento"]
     assert "Técnico Tecnico em deslocamento para Loja 27 (São Paulo)" in trip
     assert t["code"] in trip and "Cliente Teste" in trip
@@ -45,14 +58,28 @@ async def test_ticket_messages(client: AsyncClient, world: World) -> None:
     assert (await client.get(f"{API}/tickets/{t['id']}/messages", headers=th)).status_code == 403
 
     # A gestão edita os modelos; variável que não existe fica visível para corrigir.
-    custom = {"templates": [{"name": "Saída da base", "body": "{tecnico} saiu para {local} {inexistente}"}]}
+    custom = {
+        "templates": [
+            {"name": "Saída da base", "body": "{tecnico} saiu para {local} {inexistente}"}
+        ]
+    }
     r = await client.put(f"{API}/message-templates", json=custom, headers=an)
     assert r.json()["templates"] == [
-        {"key": "saida_da_base", "name": "Saída da base", "body": "{tecnico} saiu para {local} {inexistente}"}
+        {
+            "key": "saida_da_base",
+            "name": "Saída da base",
+            "body": "{tecnico} saiu para {local} {inexistente}",
+        }
     ]
     assert any(v["key"] == "chegada_prevista" for v in r.json()["variables"])
     msgs = (await client.get(f"{API}/tickets/{t['id']}/messages", headers=an)).json()
-    assert msgs == [{"key": "saida_da_base", "name": "Saída da base", "text": "Tecnico saiu para Loja 27 {inexistente}"}]
+    assert msgs == [
+        {
+            "key": "saida_da_base",
+            "name": "Saída da base",
+            "text": "Tecnico saiu para Loja 27 {inexistente}",
+        }
+    ]
 
     defaults = (await client.post(f"{API}/message-templates/reset", headers=an)).json()["templates"]
     assert [d["key"] for d in defaults][:3] == ["deslocamento", "chegada", "atraso"]
