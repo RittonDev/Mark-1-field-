@@ -12,6 +12,7 @@ import { canManageTickets, isStaff, STATUS } from "@/lib/constants";
 import { initials } from "@/lib/format";
 import { useAssignable } from "@/lib/queries";
 import type { ConflictItem, TicketDetail } from "@/lib/types";
+import { TechnicianSuggestions } from "./TechnicianSuggestions";
 import { useInvalidateTicket, useTicketErrorHandler } from "./useConflictHandler";
 
 export function AssignmentPanel({ ticket }: { ticket: TicketDetail }) {
@@ -150,6 +151,17 @@ export function AssignmentPanel({ ticket }: { ticket: TicketDetail }) {
                 </Button>
               ) : null}
             </div>
+            {canManageTickets(user?.role) ? (
+              <TechnicianSuggestions
+                ticket={ticket}
+                picking={assign.isPending ? (assign.variables?.assigneeId ?? null) : null}
+                onPick={(id) => {
+                  setSelected(id);
+                  setConflicts(null);
+                  assign.mutate({ assigneeId: id });
+                }}
+              />
+            ) : null}
           </div>
         ) : null}
       </div>

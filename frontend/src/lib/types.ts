@@ -701,6 +701,9 @@ export interface Technician {
   phone: string | null;
   job_title: string | null;
   team: Ref | null;
+  home_city: string | null;
+  home_state: string | null;
+  coverage_area: string | null;
   is_active: boolean;
   last_login_at: ISODate | null;
   location_consent_at: ISODate | null;
@@ -982,4 +985,18 @@ export interface Repair {
   days_open: number;
   days_in_status: number;
   overdue: boolean;
+}
+
+export interface TechnicianSuggestion {
+  id: UUID;
+  name: string;
+  phone: string | null;
+  home_city: string | null;
+  home_state: string | null;
+  team: Ref | null;
+  open_tickets: number;
+  on_shift: boolean;
+  distance_km: number | null;
+  score: number;
+  reasons: string[];
 }

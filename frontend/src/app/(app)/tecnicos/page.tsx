@@ -165,6 +165,7 @@ export default function TechniciansPage() {
               <tr>
                 <Th>Técnico</Th>
                 <Th className="hidden md:table-cell">Grupo</Th>
+                <Th className="hidden xl:table-cell">Cidade</Th>
                 <Th className="hidden lg:table-cell">Telefone</Th>
                 <Th>App</Th>
                 <Th className="hidden sm:table-cell">OS abertas</Th>
@@ -183,6 +184,9 @@ export default function TechniciansPage() {
                     </button>
                   </Td>
                   <Td className="hidden md:table-cell">{t.team?.name ?? <span className="text-ink-muted">—</span>}</Td>
+                  <Td className="hidden xl:table-cell">
+                    {t.home_city ? `${t.home_city}${t.home_state ? `-${t.home_state}` : ""}` : <span className="text-ink-muted">—</span>}
+                  </Td>
                   <Td className="hidden lg:table-cell">{t.phone ?? <span className="text-ink-muted">—</span>}</Td>
                   <Td>
                     <AppStatus tech={t} now={now} />
@@ -265,7 +269,16 @@ function TechnicianFields({
   value,
   onChange,
 }: {
-  value: { name: string; email: string; phone: string; team_id: string; job_title: string };
+  value: {
+    name: string;
+    email: string;
+    phone: string;
+    team_id: string;
+    job_title: string;
+    home_city: string;
+    home_state: string;
+    coverage_area: string;
+  };
   onChange: (v: typeof value) => void;
 }) {
   const teams = useTeams();
@@ -296,13 +309,38 @@ function TechnicianFields({
       <Field label="Cargo">
         <Input value={value.job_title} onChange={(e) => set("job_title", e.target.value)} maxLength={120} />
       </Field>
+      <div className="grid grid-cols-[1fr_5rem] gap-4 sm:col-span-2">
+        <Field label="Cidade onde mora" hint="Base das sugestões de técnico por cidade">
+          <Input value={value.home_city} onChange={(e) => set("home_city", e.target.value)} maxLength={120} />
+        </Field>
+        <Field label="UF">
+          <Input value={value.home_state} onChange={(e) => set("home_state", e.target.value.toUpperCase().slice(0, 2))} maxLength={2} />
+        </Field>
+      </div>
+      <Field label="Região que atende" className="sm:col-span-2">
+        <Input
+          value={value.coverage_area}
+          onChange={(e) => set("coverage_area", e.target.value)}
+          placeholder="Ex.: Santos, São Vicente e Guarujá"
+          maxLength={1000}
+        />
+      </Field>
     </div>
   );
 }
 
 function CreateDialog({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient();
-  const [form, setForm] = useState({ name: "", email: "", phone: "", team_id: "", job_title: "Técnico de campo" });
+  const [form, setForm] = useState({
+    name: "",
+    email: "",
+    phone: "",
+    team_id: "",
+    job_title: "Técnico de campo",
+    home_city: "",
+    home_state: "",
+    coverage_area: "",
+  });
   const create = useMutation({
     mutationFn: () =>
       api.post<TemporaryPassword>("/technicians", {
@@ -311,6 +349,9 @@ function CreateDialog({ onClose }: { onClose: () => void }) {
         phone: form.phone || null,
         team_id: form.team_id || null,
         job_title: form.job_title || null,
+        home_city: form.home_city || null,
+        home_state: form.home_state || null,
+        coverage_area: form.coverage_area || null,
       }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["technicians"] }),
   });
@@ -361,6 +402,9 @@ function EditDialog({ tech, onClose }: { tech: Technician; onClose: () => void }
     phone: tech.phone ?? "",
     team_id: tech.team?.id ?? "",
     job_title: tech.job_title ?? "",
+    home_city: tech.home_city ?? "",
+    home_state: tech.home_state ?? "",
+    coverage_area: tech.coverage_area ?? "",
   });
   const [isActive, setIsActive] = useState(tech.is_active);
   const [confirmReset, setConfirmReset] = useState(false);
@@ -377,6 +421,9 @@ function EditDialog({ tech, onClose }: { tech: Technician; onClose: () => void }
         phone: form.phone || null,
         team_id: form.team_id || null,
         job_title: form.job_title || null,
+        home_city: form.home_city || null,
+        home_state: form.home_state || null,
+        coverage_area: form.coverage_area || null,
         is_active: isActive,
       }),
     onSuccess: (t) => {
@@ -519,8 +566,8 @@ function EditDialog({ tech, onClose }: { tech: Technician; onClose: () => void }
 }
 
 const TEMPLATE: string[][] = [
-  ["nome", "email", "telefone", "grupo", "cargo"],
-  ["Maria Exemplo", "maria@exemplo.com.br", "(11) 90000-0000", "Campo - Infraestrutura", "Técnico de campo"],
+  ["nome", "email", "telefone", "grupo", "cargo", "cidade", "uf", "regiao"],
+  ["Maria Exemplo", "maria@exemplo.com.br", "(11) 90000-0000", "Campo - Infraestrutura", "Técnico de campo", "Santos", "SP", "Santos, São Vicente e Guarujá"],
 ];
 
 function ImportDialog({ onClose }: { onClose: () => void }) {
