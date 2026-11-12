@@ -146,6 +146,8 @@ def to_detail(ticket: Ticket, user: User) -> TicketDetail:
     detail.allowed_transitions = allowed_transitions(user, ticket)
     detail.can_edit = can_edit(user, ticket)
     detail.can_assign = can_assign(user, ticket)
+    if not user.is_staff:
+        detail.expenses = []  # custo é interno
     return detail
 
 

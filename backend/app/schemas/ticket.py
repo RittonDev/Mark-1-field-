@@ -19,6 +19,7 @@ from app.core.enums import (
 )
 from app.db.base import utcnow
 from app.schemas.common import ORMModel, Ref
+from app.schemas.expense import ExpenseOut
 from app.schemas.forms import TicketFormOut
 from app.schemas.user import UserRef
 from app.services.durations import actual_seconds
@@ -142,6 +143,8 @@ class TicketDetail(TicketListItem):
     signer_role: str | None = None
     signed_at: datetime | None = None
     signature_attachment_id: uuid.UUID | None = None
+    # Custos extras: a gestão lança; o técnico só vê; o solicitante não recebe.
+    expenses: list[ExpenseOut] = []
 
     @computed_field  # type: ignore[prop-decorator]
     @property
