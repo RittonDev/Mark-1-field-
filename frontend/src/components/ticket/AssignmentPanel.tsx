@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Hand, UserMinus, UserPlus } from "lucide-react";
+import { Headset, UserMinus, UserPlus } from "lucide-react";
 import { useState } from "react";
 import { ConflictHint, ConflictList, scheduleConflicts } from "@/components/ScheduleConflict";
 import { useToast } from "@/components/Toaster";
@@ -27,9 +27,9 @@ export function AssignmentPanel({ ticket }: { ticket: TicketDetail }) {
   const [conflicts, setConflicts] = useState<ConflictItem[] | null>(null);
 
   const isFinal = STATUS[ticket.status].final;
-  // Espelha can_take: técnico só assume OS sem responsável; analista/supervisor assume qualquer uma.
-  const canTake =
-    staff && ticket.assignee?.id !== user?.id && !isFinal && (canManageTickets(user?.role) || !ticket.assignee);
+  // Atender eu mesmo (remoto): só analista/gestor e só em OS sem técnico, para não tirar quem já
+  // está escalado (trocar o técnico é pelo seletor abaixo). A OS vai junto para a fila de quem atende.
+  const canTake = staff && canManageTickets(user?.role) && !ticket.assignee && !isFinal;
 
   const onSuccess = (updated: TicketDetail, message: string) => {
     queryClient.setQueryData(["ticket", ticket.id], updated);
@@ -57,7 +57,7 @@ export function AssignmentPanel({ ticket }: { ticket: TicketDetail }) {
 
   const take = useMutation({
     mutationFn: () => api.post<TicketDetail>(`/tickets/${ticket.id}/take`),
-    onSuccess: (updated) => onSuccess(updated, "Você assumiu esta OS"),
+    onSuccess: (updated) => onSuccess(updated, "Você vai atender esta OS: ela está na sua fila"),
     onError,
   });
 
@@ -90,9 +90,14 @@ export function AssignmentPanel({ ticket }: { ticket: TicketDetail }) {
         )}
 
         {canTake ? (
-          <Button variant="primary" onClick={() => take.mutate()} loading={take.isPending}>
-            {take.isPending ? null : <Hand className="size-4" />}
-            Assumir OS
+          <Button
+            variant="secondary"
+            onClick={() => take.mutate()}
+            loading={take.isPending}
+            title="Você vira o executor (atendimento remoto) e a OS vai para a sua fila"
+          >
+            {take.isPending ? null : <Headset className="size-4" />}
+            Atender eu mesmo (remoto)
           </Button>
         ) : null}
 

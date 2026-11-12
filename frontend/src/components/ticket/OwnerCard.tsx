@@ -30,7 +30,7 @@ export function OwnerCard({ ticket }: { ticket: TicketDetail }) {
   };
   const claim = useMutation({
     mutationFn: () => api.post<TicketDetail>(`/tickets/${ticket.id}/claim`),
-    onSuccess: () => done(`${ticket.code} está na sua fila`),
+    onSuccess: () => done(`Você assumiu a ${ticket.code}: está na sua fila`),
   });
   const transfer = useMutation({
     mutationFn: (ownerId: string | null) =>
@@ -61,9 +61,15 @@ export function OwnerCard({ ticket }: { ticket: TicketDetail }) {
         </div>
       </div>
       {open && !mine ? (
-        <Button variant="primary" className="mt-3 w-full" loading={claim.isPending} onClick={() => claim.mutate()}>
+        <Button
+          variant="primary"
+          className="mt-3 w-full"
+          loading={claim.isPending}
+          onClick={() => claim.mutate()}
+          title={owner ? `Tira da fila de ${owner.name} e coloca na sua (o técnico continua o mesmo)` : "Coloca na sua fila (o técnico continua o mesmo)"}
+        >
           <Hand className="size-4" />
-          Puxar para minha fila
+          Assumir OS
         </Button>
       ) : null}
       {open ? (

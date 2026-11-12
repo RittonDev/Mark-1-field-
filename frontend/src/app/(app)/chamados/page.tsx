@@ -136,15 +136,15 @@ function TicketsView() {
     enabled: manager,
     staleTime: 30_000,
   });
-  // Puxar para a própria fila a OS de um colega (o técnico continua o mesmo).
+  // Assumir: a OS vai para a fila de quem assumiu (o técnico continua o mesmo).
   const claim = useMutation({
     mutationFn: (t: TicketListItem) => api.post(`/tickets/${t.id}/claim`),
     onSuccess: (_, t) => {
       queryClient.invalidateQueries({ queryKey: ["tickets"] });
       queryClient.invalidateQueries({ queryKey: ["ticket", t.id] });
-      toast({ title: `${t.code} está na sua fila`, tone: "success" });
+      toast({ title: `Você assumiu a ${t.code}: está na sua fila`, tone: "success" });
     },
-    onError: (e) => toast({ title: "Não foi possível puxar a OS", description: errorMessage(e), tone: "error" }),
+    onError: (e) => toast({ title: "Não foi possível assumir a OS", description: errorMessage(e), tone: "error" }),
   });
   const teams = useTeams();
   const customers = useCustomers();
@@ -458,8 +458,8 @@ function TicketsView() {
                                 }}
                                 disabled={claim.isPending}
                                 className="-my-1 shrink-0 rounded-md p-1 text-ink-subtle opacity-60 transition-[opacity,color,background-color] group-hover:opacity-100 hover:bg-surface-3 hover:text-brand disabled:opacity-40"
-                                aria-label={`Puxar ${t.code} para a minha fila`}
-                                title={owner ? `Puxar da fila de ${owner.name} para a sua` : "Puxar para a minha fila"}
+                                aria-label={`Assumir ${t.code}`}
+                                title={owner ? `Assumir OS: sai da fila de ${owner.name} e vai para a sua` : "Assumir OS: vai para a sua fila"}
                               >
                                 <Hand className="size-3.5" />
                               </button>

@@ -341,7 +341,6 @@ export default function NewTicketPage() {
   }
 
   const endLabel = startIso ? formatTime(new Date(new Date(startIso).getTime() + (minutes ?? 60) * 60_000).toISOString()) : null;
-  const today = ymd(new Date(now));
   const ctx = intake.data;
   const address = ctx?.location
     ? [ctx.location.address_line, ctx.location.district, [ctx.location.city, ctx.location.state].filter(Boolean).join("-")]
@@ -645,7 +644,7 @@ export default function NewTicketPage() {
                         ))}
                       </span>
                     </span>
-                    <Input type="date" value={form.date} min={today} onChange={(e) => set("date", e.target.value)} aria-label="Data da visita" />
+                    <Input type="date" value={form.date} onChange={(e) => set("date", e.target.value)} aria-label="Data da visita" />
                   </div>
                   <Field label="Hora">
                     <Input type="time" step={300} value={form.time} required={Boolean(form.date)} onChange={(e) => set("time", e.target.value)} />
