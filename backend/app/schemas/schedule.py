@@ -9,6 +9,8 @@ from app.schemas.common import Ref
 
 
 class ConflictItem(BaseModel):
+    # Quem está ocupado (o responsável ou outro técnico da visita).
+    who: str | None = None
     id: uuid.UUID
     code: str
     title: str

@@ -89,16 +89,21 @@ def visibility_clause(user: User) -> ColumnElement[bool] | None:
     if user.can_manage_tickets:
         return None
     if user.role == UserRole.TECHNICIAN:
-        # O técnico só vê as OS em que o analista o colocou como responsável.
-        return Ticket.assignee_id == user.id
+        # O técnico só vê as OS em que o analista o colocou (responsável ou outro técnico).
+        return schedule.works_on(user.id)
     return or_(Ticket.requester_id == user.id, Ticket.created_by_id == user.id)
+
+
+def is_helper(user: User, ticket: Ticket) -> bool:
+    """Outro técnico da visita (não o responsável)."""
+    return any(h.id == user.id for h in ticket.helpers)
 
 
 def can_view(user: User, ticket: Ticket) -> bool:
     if user.can_manage_tickets:
         return True
     if user.role == UserRole.TECHNICIAN:
-        return ticket.assignee_id == user.id
+        return ticket.assignee_id == user.id or is_helper(user, ticket)
     return user.id in (ticket.requester_id, ticket.created_by_id)
 
 
@@ -1116,7 +1121,9 @@ async def add_comment(
 async def add_worklog(
     db: AsyncSession, ticket: Ticket, data: WorklogCreate, actor: User
 ) -> TicketWorklog:
-    if not (actor.is_staff and can_edit(actor, ticket)):
+    # Os outros técnicos da visita também apontam as horas deles.
+    helper_can = ticket.status not in FINAL and is_helper(actor, ticket)
+    if not (actor.is_staff and (can_edit(actor, ticket) or helper_can)):
         raise PermissionDenied("Você não pode apontar horas nesta OS")
     now = utcnow()
     minutes = data.minutes
@@ -1408,7 +1415,7 @@ def filter_conditions(user: User, f: TicketFilters, now: datetime) -> list[Colum
             # Do analista: as que ele executa e as da fila dele (responsável).
             conds.append(or_(Ticket.assignee_id == user.id, Ticket.owner_id == user.id))
         elif user.is_staff:
-            conds.append(Ticket.assignee_id == user.id)
+            conds.append(schedule.works_on(user.id))
         else:
             conds.append(Ticket.requester_id == user.id)
     if f.unassigned:
@@ -1424,6 +1431,7 @@ def filter_conditions(user: User, f: TicketFilters, now: datetime) -> list[Colum
             Ticket.title.ilike(like),
             Ticket.description.ilike(like),
             Ticket.requester_name.ilike(like),
+            Ticket.client_reference.ilike(like),
         ]
         number = _parse_number(q)
         if number is not None:

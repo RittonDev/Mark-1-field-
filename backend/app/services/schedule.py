@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import TicketStatus
 from app.models import Location, Ticket, User
+from app.models.ticket import ticket_helpers
 from app.schemas.schedule import CalendarEvent, CalendarFilters, ConflictItem
 from app.schemas.ticket import format_ticket_code
 from app.services.errors import ScheduleConflict
@@ -50,6 +51,16 @@ def _end_expr() -> ColumnElement[datetime]:
     )
 
 
+def works_on(user_id: uuid.UUID) -> ColumnElement[bool]:
+    """OS em que a pessoa trabalha: responsável ou outro técnico da visita."""
+    return or_(
+        Ticket.assignee_id == user_id,
+        Ticket.id.in_(
+            select(ticket_helpers.c.ticket_id).where(ticket_helpers.c.user_id == user_id)
+        ),
+    )
+
+
 async def find_conflicts(
     db: AsyncSession,
     *,
@@ -59,7 +70,7 @@ async def find_conflicts(
     exclude_id: uuid.UUID | None = None,
 ) -> list[Ticket]:
     stmt = select(Ticket).where(
-        Ticket.assignee_id == assignee_id,
+        works_on(assignee_id),
         Ticket.status.in_(OCCUPYING),
         Ticket.scheduled_start.is_not(None),
         Ticket.scheduled_start < end,
@@ -70,9 +81,10 @@ async def find_conflicts(
     return list(await db.scalars(stmt.order_by(Ticket.scheduled_start)))
 
 
-def conflict_item(t: Ticket) -> ConflictItem:
+def conflict_item(t: Ticket, who: str | None = None) -> ConflictItem:
     assert t.scheduled_start is not None
     return ConflictItem(
+        who=who,
         id=t.id,
         code=format_ticket_code(t.number),
         title=t.title,
@@ -94,24 +106,36 @@ async def check_slot(
     status: TicketStatus,
     exclude_id: uuid.UUID | None,
     allow: bool,
+    helper_ids: list[uuid.UUID] | tuple[uuid.UUID, ...] = (),
 ) -> None:
-    """Barra o agendamento que choca com outra OS do mesmo responsável. Só vale para quem
-    agenda (a gestão): o app do técnico sincroniza offline e não pode travar por isso."""
+    """Barra o agendamento que choca com outra OS de quem vai à visita (responsável e outros
+    técnicos). Só vale para quem agenda (a gestão): o app do técnico sincroniza offline e não
+    pode travar por isso."""
     if allow or not actor.can_manage_tickets:
         return
-    if assignee_id is None or start is None or status not in OCCUPYING:
+    if start is None or status not in OCCUPYING:
         return
+    people = [p for p in dict.fromkeys([assignee_id, *helper_ids]) if p is not None]
     finish = visit_end(start, end, estimated_minutes)
-    clashes = await find_conflicts(
-        db, assignee_id=assignee_id, start=start, end=finish, exclude_id=exclude_id
-    )
-    if clashes:
-        assignee = await db.get(User, assignee_id)
-        name = assignee.name if assignee else "O técnico"
-        raise ScheduleConflict(
-            f"{name} já tem {len(clashes)} OS neste horário.",
-            [conflict_item(t).model_dump(mode="json") for t in clashes],
+    names: list[str] = []
+    items: list[dict] = []
+    for person_id in people:
+        clashes = await find_conflicts(
+            db, assignee_id=person_id, start=start, end=finish, exclude_id=exclude_id
         )
+        if not clashes:
+            continue
+        person = await db.get(User, person_id)
+        name = person.name if person else "O técnico"
+        names.append(name)
+        items.extend(conflict_item(t, name).model_dump(mode="json") for t in clashes)
+    if not items:
+        return
+    if len(names) == 1:
+        message = f"{names[0]} já tem {len(items)} OS neste horário."
+    else:
+        message = f"{', '.join(names[:-1])} e {names[-1]} já têm OS neste horário."
+    raise ScheduleConflict(message, items)
 
 
 async def calendar(
@@ -209,4 +233,5 @@ async def ensure_no_conflict(db: AsyncSession, ticket: Ticket, actor: User, allo
         status=ticket.status,
         exclude_id=ticket.id,
         allow=allow,
+        helper_ids=[h.id for h in ticket.helpers],
     )
