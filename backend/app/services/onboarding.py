@@ -106,7 +106,9 @@ async def email_taken(db: AsyncSession, email: str, exclude_id: uuid.UUID | None
     return (await db.scalar(stmt)) is not None
 
 
-async def submit(db: AsyncSession, invite: OnboardingInvite, data: ApplicationIn) -> TechnicianApplication:
+async def submit(
+    db: AsyncSession, invite: OnboardingInvite, data: ApplicationIn
+) -> TechnicianApplication:
     if await email_taken(db, data.email):
         raise WorkflowError(
             "Já existe um cadastro com este e-mail. Se você já enviou a ficha, aguarde a análise."

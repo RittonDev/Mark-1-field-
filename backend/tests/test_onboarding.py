@@ -55,7 +55,9 @@ async def test_invite_form_and_approval(
     assert {"cftv", "impressoras"} <= {a["key"] for a in catalog["service_areas"]}
 
     # Validações do lado do servidor (o formulário também valida, mas não basta).
-    bad = await client.post(f"{API}/public/onboarding/{token}", json=ficha(document="111.111.111-11"))
+    bad = await client.post(
+        f"{API}/public/onboarding/{token}", json=ficha(document="111.111.111-11")
+    )
     assert bad.status_code == 422
     bad = await client.post(f"{API}/public/onboarding/{token}", json=ficha(privacy_consent=False))
     assert bad.status_code == 422
@@ -76,15 +78,17 @@ async def test_invite_form_and_approval(
     assert dup.status_code == 422
 
     # Gestão vê a ficha em "Homologação" (o técnico não).
-    assert (await client.get(f"{API}/onboarding/applications", headers=world.tech.headers)).status_code == 403
+    assert (
+        await client.get(f"{API}/onboarding/applications", headers=world.tech.headers)
+    ).status_code == 403
     pending = (
         await client.get(f"{API}/onboarding/applications", params={"status": "pending"}, headers=an)
     ).json()
     assert len(pending) == 1
     app_id = pending[0]["id"]
-    assert (await client.get(f"{API}/onboarding/applications/pending-count", headers=an)).json() == {
-        "pending": 1
-    }
+    assert (
+        await client.get(f"{API}/onboarding/applications/pending-count", headers=an)
+    ).json() == {"pending": 1}
     detail = (await client.get(f"{API}/onboarding/applications/{app_id}", headers=an)).json()
     assert detail["full_name"] == "Marcos Pereira da Silva"
     assert (detail["email"], detail["state"], detail["document"]) == (
@@ -96,7 +100,9 @@ async def test_invite_form_and_approval(
     assert "password" not in str(detail)
     photo = await client.get(detail["photo_url"])
     assert photo.status_code == 200 and photo.content.startswith(b"\x89PNG")
-    forged = await client.get(f"{API}/onboarding/applications/{app_id}/photo", params={"token": "x"})
+    forged = await client.get(
+        f"{API}/onboarding/applications/{app_id}/photo", params={"token": "x"}
+    )
     assert forged.status_code == 401
 
     # Aprovada: vira técnico e entra no app com o e-mail e a senha que ele cadastrou.
@@ -123,7 +129,9 @@ async def test_invite_form_and_approval(
         )
     assert leftover is None  # a senha fica só no usuário
 
-    again = await client.post(f"{API}/onboarding/applications/{app_id}/reject", json={"reason": "x" * 5}, headers=an)
+    again = await client.post(
+        f"{API}/onboarding/applications/{app_id}/reject", json={"reason": "x" * 5}, headers=an
+    )
     assert again.status_code == 422  # já analisada
 
 
@@ -154,5 +162,7 @@ async def test_reject_and_revoke(client: AsyncClient, world: World) -> None:
     invites = (await client.get(f"{API}/onboarding/invites", headers=an)).json()
     assert await client.delete(f"{API}/onboarding/invites/{invites[0]['id']}", headers=an)
     assert (await client.get(f"{API}/public/onboarding/{token}")).json()["valid"] is False
-    states = {i["state"] for i in (await client.get(f"{API}/onboarding/invites", headers=an)).json()}
+    states = {
+        i["state"] for i in (await client.get(f"{API}/onboarding/invites", headers=an)).json()
+    }
     assert states == {"revoked"}

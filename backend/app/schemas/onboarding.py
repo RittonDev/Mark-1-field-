@@ -61,8 +61,11 @@ SKILL_SUGGESTIONS = [
 VEHICLE_TYPES: dict[str, str] = {"carro": "Carro", "moto": "Moto", "outro": "Outro"}
 
 UFS = frozenset(
-    "AC AL AP AM BA CE DF ES GO MA MT MS MG PA PB PR PE PI RJ RN RS RO RR SC SP SE TO".split()
-)
+    {
+        "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", "PA",
+        "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO",
+    }
+)  # fmt: skip
 
 # Versão do aviso de privacidade exibido no formulário (muda quando o texto mudar).
 PRIVACY_VERSION = "2026-11"
