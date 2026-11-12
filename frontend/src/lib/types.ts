@@ -48,7 +48,10 @@ export type TicketEventType =
   | "form_added"
   | "form_completed"
   | "form_removed"
-  | "signature_collected";
+  | "signature_collected"
+  | "expense_added"
+  | "expense_updated"
+  | "expense_removed";
 export type SlaStatus = "ok" | "at_risk" | "breached" | "paused" | "met";
 export type AttachmentKind = "file" | "photo" | "signature";
 
@@ -297,6 +300,8 @@ export interface TicketDetail extends TicketListItem {
   signer_role: string | null;
   signed_at: ISODate | null;
   signature_attachment_id: UUID | null;
+  /** Custos extras (a gestão lança; o técnico só vê; o solicitante recebe vazio). */
+  expenses: Expense[];
   allowed_transitions: TicketStatus[];
   can_edit: boolean;
   can_assign: boolean;
@@ -776,4 +781,33 @@ export interface TicketForm {
   completed_by: Ref | null;
   created_at: ISODate;
   updated_at: ISODate;
+}
+
+// Custos extras da OS (reembolso ao técnico)
+export type ExpenseKind = "material" | "km" | "toll" | "parking" | "transport" | "meal" | "other";
+export type ExpenseStatus = "pending" | "approved" | "paid" | "rejected";
+
+export interface Expense {
+  id: UUID;
+  ticket_id: UUID;
+  kind: ExpenseKind;
+  description: string;
+  quantity: number;
+  unit_value: number;
+  total: number;
+  technician: Ref | null;
+  status: ExpenseStatus;
+  paid_at: ISODate | null;
+  receipt_attachment_id: UUID | null;
+  notes: string | null;
+  created_by: Ref | null;
+  created_at: ISODate;
+  updated_at: ISODate;
+}
+
+export interface ExpenseReport {
+  items: (Expense & { ticket: { id: UUID; code: string; title: string; customer: Ref | null } })[];
+  total: number;
+  by_technician: { technician: Ref | null; count: number; total: number; to_pay: number }[];
+  by_kind: Record<string, number>;
 }

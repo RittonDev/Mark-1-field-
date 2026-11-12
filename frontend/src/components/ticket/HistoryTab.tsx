@@ -9,6 +9,7 @@ import {
   ClipboardX,
   Clock,
   FileSignature,
+  Receipt,
   History,
   MapPin,
   MessageSquare,
@@ -35,6 +36,9 @@ const ICONS: Record<TicketEventType, React.ComponentType<{ className?: string }>
   form_completed: ClipboardCheck,
   form_removed: ClipboardX,
   signature_collected: FileSignature,
+  expense_added: Receipt,
+  expense_updated: Receipt,
+  expense_removed: Receipt,
 };
 
 const FIELD_LABELS: Record<string, string> = {

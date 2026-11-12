@@ -167,6 +167,9 @@ export const EVENT_TYPE: Record<TicketEventType, string> = {
   form_completed: "concluiu o formulário",
   form_removed: "removeu o formulário",
   signature_collected: "colheu a assinatura de",
+  expense_added: "lançou um custo extra",
+  expense_updated: "alterou um custo extra",
+  expense_removed: "removeu um custo extra",
 };
 
 export const SLA_STATUS: Record<SlaStatus, { label: string; color: string }> = {

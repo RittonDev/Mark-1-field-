@@ -115,6 +115,7 @@ async def create(db: AsyncSession, ticket: Ticket, data: ExpenseIn, actor: User)
     await _touch(db, ticket, utcnow())
     _changed(db, ticket, actor)
     await db.flush()
+    await db.refresh(expense, ["technician", "created_by"])
     return expense
 
 
@@ -146,6 +147,7 @@ async def update(
     await _touch(db, ticket, utcnow())
     _changed(db, ticket, actor)
     await db.flush()
+    await db.refresh(expense, ["technician", "created_by"])
     return expense
 
 
@@ -201,11 +203,11 @@ async def report(
         row = ExpenseReportRow(
             **ExpenseOut.model_validate(expense).model_dump(),
             ticket=ExpenseTicketRef(
-                    id=ticket.id,
-                    code=format_ticket_code(ticket.number),
-                    title=ticket.title,
-                    customer={"id": ticket.customer.id, "name": ticket.customer.name}
-                    if ticket.customer
+                id=ticket.id,
+                code=format_ticket_code(ticket.number),
+                title=ticket.title,
+                customer={"id": ticket.customer.id, "name": ticket.customer.name}
+                if ticket.customer
                 else None,
             ),
         )
@@ -216,7 +218,12 @@ async def report(
         by_kind[EXPENSE_KIND_LABEL[expense.kind.value]] += expense.total
         bucket = per_tech.setdefault(
             expense.technician_id,
-            {"technician": expense.technician, "count": 0, "total": Decimal("0"), "to_pay": Decimal("0")},
+            {
+                "technician": expense.technician,
+                "count": 0,
+                "total": Decimal("0"),
+                "to_pay": Decimal("0"),
+            },
         )
         bucket["count"] += 1
         bucket["total"] += expense.total
@@ -233,4 +240,6 @@ async def report(
         )
         for b in sorted(per_tech.values(), key=lambda b: b["total"], reverse=True)
     ]
-    return ExpenseReport(items=items, total=total, by_technician=by_technician, by_kind=dict(by_kind))
+    return ExpenseReport(
+        items=items, total=total, by_technician=by_technician, by_kind=dict(by_kind)
+    )

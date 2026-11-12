@@ -111,6 +111,38 @@ export function applyOp(ticket: TicketDetail, op: OutboxOp, user: User): TicketD
     }
     case "worklog":
       return { ...ticket, updated_at: op.client_timestamp };
+    case "form_answers": {
+      // Espelho de forms.py::save_partial/complete. A conclusão só é enfileirada depois da
+      // validação local (obrigatórios e fotos); se o servidor recusar, o rebase desfaz.
+      const p = op.payload;
+      const forms = (ticket.forms ?? []).map((form) => {
+        if (form.id !== p.form_id) return form;
+        const answers = { ...form.answers };
+        for (const [key, value] of Object.entries(p.answers)) {
+          if (value === null || value === "" || (Array.isArray(value) && value.length === 0)) delete answers[key];
+          else answers[key] = value;
+        }
+        if (p.complete) {
+          return {
+            ...form,
+            answers,
+            status: "completed" as const,
+            completed_at: op.client_timestamp,
+            completed_by: { id: user.id, name: user.name },
+          };
+        }
+        const changed = JSON.stringify(answers) !== JSON.stringify(form.answers);
+        if (!changed && form.status === "completed") return form;
+        return {
+          ...form,
+          answers,
+          status: Object.keys(answers).length || form.status === "in_progress" ? ("in_progress" as const) : ("pending" as const),
+          completed_at: null,
+          completed_by: null,
+        };
+      });
+      return { ...ticket, forms, updated_at: op.client_timestamp };
+    }
     case "update": {
       const p = op.payload;
       const t = { ...ticket, updated_at: op.client_timestamp };

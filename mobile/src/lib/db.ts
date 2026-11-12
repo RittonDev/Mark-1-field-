@@ -7,7 +7,7 @@ import { Platform } from "react-native";
 import { notifyDataChanged } from "./changes";
 import { rebase } from "./ops";
 import type { LocalTicket, OutboxOp, SyncOperation } from "./syncTypes";
-import type { Comment, TicketDetail, User, UUID, ViolationReason, Worklog } from "./types";
+import type { Attachment, Comment, TicketDetail, User, UUID, ViolationReason, Worklog } from "./types";
 
 type DB = SQLite.SQLiteDatabase;
 
@@ -96,6 +96,24 @@ const MIGRATIONS: string[] = [
     heading REAL,
     battery_pct REAL,
     is_mock INTEGER NOT NULL DEFAULT 0
+  );
+  `,
+  // 3: formulários da OS (foto de campo) e assinatura do responsável no local.
+  `
+  ALTER TABLE photos ADD COLUMN form_id TEXT;
+  ALTER TABLE photos ADD COLUMN field_id TEXT;
+  CREATE TABLE signatures (
+    id TEXT PRIMARY KEY NOT NULL,
+    ticket_id TEXT NOT NULL,
+    file_uri TEXT NOT NULL,
+    signer_name TEXT NOT NULL,
+    signer_role TEXT,
+    latitude REAL,
+    longitude REAL,
+    after_seq INTEGER NOT NULL,     -- operações da fila até aqui vão antes da assinatura
+    created_at TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT
   );
   `,
 ];
@@ -213,10 +231,20 @@ function toOp(row: OutboxRow): OutboxOp {
   } as OutboxOp;
 }
 
-export async function listOutbox(limit = 1000, db?: DB): Promise<OutboxOp[]> {
+/** Fila em ordem; `maxSeq` limita às operações feitas até um ponto (ex.: antes de uma assinatura). */
+export async function listOutbox(limit = 1000, db?: DB, maxSeq?: number): Promise<OutboxOp[]> {
   const conn = db ?? (await getDb());
-  const rows = await conn.getAllAsync<OutboxRow>("SELECT * FROM outbox ORDER BY seq LIMIT ?", limit);
+  const rows =
+    maxSeq === undefined
+      ? await conn.getAllAsync<OutboxRow>("SELECT * FROM outbox ORDER BY seq LIMIT ?", limit)
+      : await conn.getAllAsync<OutboxRow>("SELECT * FROM outbox WHERE seq <= ? ORDER BY seq LIMIT ?", maxSeq, limit);
   return rows.map(toOp);
+}
+
+export async function maxOutboxSeq(): Promise<number> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ m: number | null }>("SELECT MAX(seq) AS m FROM outbox");
+  return row?.m ?? 0;
 }
 
 export type PendingOp = OutboxOp & { ticket_code: string | null };
@@ -264,8 +292,11 @@ export async function markOpsAttempt(db: DB, clientOpIds: string[], error: strin
 export async function countPending(): Promise<{ ops: number; photos: number }> {
   const db = await getDb();
   const ops = await db.getFirstAsync<{ n: number }>("SELECT COUNT(*) AS n FROM outbox");
-  const photos = await db.getFirstAsync<{ n: number }>("SELECT COUNT(*) AS n FROM photos");
-  return { ops: ops?.n ?? 0, photos: photos?.n ?? 0 };
+  // Fotos e assinaturas aguardando upload contam juntas como "arquivos".
+  const files = await db.getFirstAsync<{ n: number }>(
+    "SELECT (SELECT COUNT(*) FROM photos) + (SELECT COUNT(*) FROM signatures) AS n",
+  );
+  return { ops: ops?.n ?? 0, photos: files?.n ?? 0 };
 }
 
 // ─────────────────────────── tickets ──────────────────────────
@@ -414,18 +445,24 @@ export interface PendingPhoto {
   created_at: string;
   attempts: number;
   last_error: string | null;
+  /** Foto de um campo de formulário (POST /tickets/{id}/forms/{form_id}/photos). */
+  form_id: UUID | null;
+  field_id: string | null;
 }
 
 export async function insertPhoto(photo: Omit<PendingPhoto, "attempts" | "last_error">): Promise<void> {
   await transaction(async (db) => {
     await db.runAsync(
-      "INSERT INTO photos (id, ticket_id, file_uri, filename, mime_type, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      `INSERT INTO photos (id, ticket_id, file_uri, filename, mime_type, created_at, form_id, field_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       photo.id,
       photo.ticket_id,
       photo.file_uri,
       photo.filename,
       photo.mime_type,
       photo.created_at,
+      photo.form_id,
+      photo.field_id,
     );
   });
 }
@@ -480,6 +517,92 @@ export async function listNotices(): Promise<Notice[]> {
 export async function dismissNotice(id: number): Promise<void> {
   await transaction(async (db) => {
     await db.runAsync("DELETE FROM notices WHERE id = ?", id);
+  });
+}
+
+// ─────────────────── anexos, formulários e assinatura ───────────────────
+
+const attachmentsKey = (ticketId: UUID) => `attachments:${ticketId}`;
+const formErrorKey = (formId: UUID) => `form_error:${formId}`;
+
+/** Última lista de anexos vista online (conta as fotos de cada campo de formulário offline). */
+export async function getAttachmentsCache(ticketId: UUID): Promise<Attachment[]> {
+  const raw = await getKv(attachmentsKey(ticketId));
+  if (!raw) return [];
+  try {
+    return JSON.parse(raw) as Attachment[];
+  } catch {
+    return [];
+  }
+}
+
+export async function setAttachmentsCache(ticketId: UUID, attachments: Attachment[], db?: DB): Promise<void> {
+  await setKv(attachmentsKey(ticketId), JSON.stringify(attachments), db);
+}
+
+/** Motivo da última conclusão recusada do formulário (ex.: "Falta preencher: …"). */
+export async function getFormError(formId: UUID): Promise<string | null> {
+  return getKv(formErrorKey(formId));
+}
+
+export async function setFormError(formId: UUID, message: string | null, db?: DB): Promise<void> {
+  await setKv(formErrorKey(formId), message, db);
+}
+
+export interface PendingSignature {
+  id: string;
+  ticket_id: UUID;
+  file_uri: string;
+  signer_name: string;
+  signer_role: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  after_seq: number;
+  created_at: string;
+  attempts: number;
+  last_error: string | null;
+}
+
+/** Assinatura colhida no aparelho; substitui uma anterior ainda não enviada da mesma OS. */
+export async function insertSignature(sig: Omit<PendingSignature, "attempts" | "last_error">): Promise<string[]> {
+  let replaced: string[] = [];
+  await transaction(async (db) => {
+    const old = await db.getAllAsync<{ file_uri: string }>("SELECT file_uri FROM signatures WHERE ticket_id = ?", sig.ticket_id);
+    replaced = old.map((o) => o.file_uri);
+    await db.runAsync("DELETE FROM signatures WHERE ticket_id = ?", sig.ticket_id);
+    await db.runAsync(
+      `INSERT INTO signatures (id, ticket_id, file_uri, signer_name, signer_role, latitude, longitude, after_seq, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      sig.id,
+      sig.ticket_id,
+      sig.file_uri,
+      sig.signer_name,
+      sig.signer_role,
+      sig.latitude,
+      sig.longitude,
+      sig.after_seq,
+      sig.created_at,
+    );
+  });
+  return replaced;
+}
+
+export async function listSignatures(ticketId?: UUID): Promise<PendingSignature[]> {
+  const db = await getDb();
+  if (ticketId) {
+    return db.getAllAsync<PendingSignature>("SELECT * FROM signatures WHERE ticket_id = ? ORDER BY created_at", ticketId);
+  }
+  return db.getAllAsync<PendingSignature>("SELECT * FROM signatures ORDER BY after_seq, created_at");
+}
+
+export async function deleteSignature(id: string, db?: DB): Promise<void> {
+  if (!db) return transaction((txn) => deleteSignature(id, txn));
+  await db.runAsync("DELETE FROM signatures WHERE id = ?", id);
+}
+
+export async function markSignatureError(id: string, error: string): Promise<void> {
+  await transaction(async (db) => {
+    await db.runAsync("UPDATE signatures SET attempts = attempts + 1, last_error = ? WHERE id = ?", error, id);
   });
 }
 
@@ -555,7 +678,7 @@ export async function pruneOld(db: DB): Promise<void> {
 /** Apaga tudo (troca de usuário no aparelho). */
 export async function resetLocalData(): Promise<void> {
   await transaction(async (db) => {
-    for (const table of ["kv", "tickets", "comments", "worklogs", "outbox", "photos", "notices", "pings"]) {
+    for (const table of ["kv", "tickets", "comments", "worklogs", "outbox", "photos", "notices", "pings", "signatures"]) {
       await db.runAsync(`DELETE FROM ${table}`);
     }
   });

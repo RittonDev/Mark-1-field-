@@ -89,3 +89,9 @@ export function formatTime(value: string | null | undefined): string {
   if (!value) return "—";
   return timeFmt.format(new Date(value));
 }
+
+const BRL = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+
+export function formatMoney(value: number | null | undefined): string {
+  return BRL.format(value ?? 0);
+}

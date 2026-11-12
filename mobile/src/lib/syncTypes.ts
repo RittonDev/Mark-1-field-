@@ -1,7 +1,16 @@
 // Contrato de sincronização mobile (backend/app/schemas/sync.py, docs/MOBILE_SYNC.md).
 // Os tipos de domínio vêm de ./types.ts, copiado de frontend/src/lib/types.ts.
 
-import type { Comment, ISODate, TicketDetail, TicketTransitionPayload, TicketUpdatePayload, UUID, Worklog } from "./types";
+import type {
+  Comment,
+  FormAnswer,
+  ISODate,
+  TicketDetail,
+  TicketTransitionPayload,
+  TicketUpdatePayload,
+  UUID,
+  Worklog,
+} from "./types";
 
 export interface SyncPullResponse {
   server_time: ISODate;
@@ -26,11 +35,23 @@ export interface WorklogCreatePayload {
   longitude?: number | null;
 }
 
+/**
+ * Respostas de um formulário da OS (merge parcial; null ou "" remove a resposta).
+ * Com `complete`, o servidor valida obrigatórios e fotos mínimas; se faltar algo a operação é
+ * recusada e NADA é gravado (o app então reenvia as respostas sem `complete`).
+ */
+export interface FormAnswersPayload {
+  form_id: UUID;
+  answers: Record<string, FormAnswer | null>;
+  complete: boolean;
+}
+
 export type SyncOperation =
   | { type: "transition"; payload: TicketTransitionPayload }
   | { type: "comment"; payload: CommentCreatePayload }
   | { type: "worklog"; payload: WorklogCreatePayload }
-  | { type: "update"; payload: TicketUpdatePayload };
+  | { type: "update"; payload: TicketUpdatePayload }
+  | { type: "form_answers"; payload: FormAnswersPayload };
 
 export type SyncOpType = SyncOperation["type"];
 

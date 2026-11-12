@@ -163,10 +163,12 @@ async function runOnce() {
   }
   setStatus({ syncing: true });
   try {
-    await pushOutbox();
+    // Ordem causal: fotos (inclusive de campos de formulário) → respostas/conclusões →
+    // assinatura → o restante (ex.: "Resolver"), que o servidor só aceita depois dela.
+    await uploadPhotos();
+    await pushWithSignatures();
     await pullChanges();
     await refreshViolationReasons();
-    await uploadPhotos();
     // Rastreamento da jornada: sobe a fila de pontos e ajusta o ritmo (deslocamento = mais frequente).
     await flushPings(true);
     await updateTrackingMode();
@@ -214,12 +216,25 @@ export function describeOp(op: SyncOperation): string {
       return "Apontamento de horas";
     case "update":
       return "Edição da OS";
+    case "form_answers":
+      return op.payload.complete ? "Conclusão de formulário" : "Respostas de formulário";
   }
 }
 
-async function pushOutbox() {
+/** Envia a fila em fases: tudo até cada assinatura pendente, a assinatura, e então o resto. */
+async function pushWithSignatures() {
+  for (const signature of await listSignatures()) {
+    await pushOutbox(signature.after_seq);
+    await uploadSignature(signature);
+  }
+  await pushOutbox();
+}
+
+const FORM_INCOMPLETE = /falta preencher/i;
+
+async function pushOutbox(maxSeq?: number) {
   for (let round = 0; round < 50; round++) {
-    const ops = await listOutbox(PUSH_BATCH);
+    const ops = await listOutbox(PUSH_BATCH, undefined, maxSeq);
     if (!ops.length) return;
     const user = currentUser();
     const byId = new Map(ops.map((op) => [op.client_op_id, op]));
@@ -260,13 +275,29 @@ async function pushOutbox() {
         await deleteOp(db, op.client_op_id);
         if (result.status === "applied" || result.status === "duplicate") {
           await markLocalSent(db, op.client_op_id);
+          if (op.type === "form_answers" && op.payload.complete) await setFormError(op.payload.form_id, null, db);
         } else {
           const ticket = result.ticket ?? (await getTicket(op.ticket_id, db));
           await deleteLocalDraft(db, op.client_op_id);
-          const message =
+          let message =
             result.status === "conflict"
               ? `${describeOp(op)}: descartado porque a OS foi alterada por outra pessoa. Confira o estado atual.`
               : `${describeOp(op)}: o servidor recusou — ${cleanServerError(result.error)}`;
+          if (op.type === "form_answers") {
+            await setFormError(op.payload.form_id, cleanServerError(result.error), db);
+            // Conclusão recusada por falta de item: o servidor não gravou nada. Reenvia as mesmas
+            // respostas sem concluir, para o técnico não perder o que preencheu.
+            if (op.payload.complete && FORM_INCOMPLETE.test(result.error ?? "")) {
+              await insertOp(db, {
+                type: "form_answers",
+                payload: { ...op.payload, complete: false },
+                client_op_id: randomUUID(),
+                ticket_id: op.ticket_id,
+                client_timestamp: new Date().toISOString(),
+              });
+              message = `Formulário não concluído — ${cleanServerError(result.error)}. As respostas foram mantidas.`;
+            }
+          }
           await addNotice(db, { ticket_id: op.ticket_id, ticket_code: ticket?.code ?? null, kind: result.status, message });
           problems.push(`${ticket?.code ?? "OS"}: ${message}`);
         }
@@ -364,14 +395,22 @@ async function uploadPhotos() {
       continue;
     }
     try {
-      await uploadFile<Attachment>(
-        `/tickets/${photo.ticket_id}/attachments`,
+      const isFormPhoto = Boolean(photo.form_id && photo.field_id);
+      const attachment = await uploadFile<Attachment>(
+        isFormPhoto ? `/tickets/${photo.ticket_id}/forms/${photo.form_id}/photos` : `/tickets/${photo.ticket_id}/attachments`,
         photo.file_uri,
-        { kind: "photo" },
+        isFormPhoto ? { field_id: photo.field_id! } : { kind: "photo" },
         photo.mime_type,
         photo.filename,
       );
-      await deletePhoto(photo.id);
+      // A foto sai da fila e entra no cache de anexos na mesma transação (a contagem do campo não pisca).
+      await transaction(async (db) => {
+        await db.runAsync("DELETE FROM photos WHERE id = ?", photo.id);
+        if (attachment?.id) {
+          const cached = await getAttachmentsCache(photo.ticket_id);
+          if (!cached.some((a) => a.id === attachment.id)) await setAttachmentsCache(photo.ticket_id, [...cached, attachment], db);
+        }
+      });
       deletePhotoFile(photo.file_uri);
     } catch (error) {
       if (error instanceof ApiError && (error.retryable || error.status === 401)) {
@@ -393,8 +432,16 @@ async function uploadPhotos() {
   }
 }
 
-/** Guarda a foto no app (o cache do picker pode ser limpo) e coloca na fila de upload. */
-export async function queuePhoto(ticketId: UUID, sourceUri: string, mimeType: string | null | undefined) {
+/**
+ * Guarda a foto no app (o cache do picker pode ser limpo) e coloca na fila de upload.
+ * Com `target`, é a foto de um campo de formulário.
+ */
+export async function queuePhoto(
+  ticketId: UUID,
+  sourceUri: string,
+  mimeType: string | null | undefined,
+  target?: { formId: UUID; fieldId: string },
+) {
   const id = randomUUID();
   const mime = mimeType ?? "image/jpeg";
   const ext = mime === "image/png" ? "png" : mime === "image/heic" ? "heic" : "jpg";
@@ -408,8 +455,108 @@ export async function queuePhoto(ticketId: UUID, sourceUri: string, mimeType: st
     filename,
     mime_type: mime,
     created_at: new Date().toISOString(),
+    form_id: target?.formId ?? null,
+    field_id: target?.fieldId ?? null,
   });
   void requestSync();
+}
+
+/** Remove uma foto de campo já enviada (online; só quem enviou ou a gestão). */
+export async function deleteFormPhoto(ticketId: UUID, formId: UUID, attachmentId: UUID) {
+  await api.delete(`/tickets/${ticketId}/forms/${formId}/photos/${attachmentId}`);
+  const cached = await getAttachmentsCache(ticketId);
+  await setAttachmentsCache(
+    ticketId,
+    cached.filter((a) => a.id !== attachmentId),
+  );
+}
+
+/** Busca os anexos da OS (online) e guarda no cache para contar as fotos dos campos offline. */
+export async function refreshAttachments(ticketId: UUID): Promise<Attachment[]> {
+  const list = await api.get<Attachment[]>(`/tickets/${ticketId}/attachments`);
+  await setAttachmentsCache(ticketId, list);
+  return list;
+}
+
+// ───────────────────────────── assinatura ─────────────────────────────
+
+/**
+ * Assinatura do responsável no local, colhida no aparelho (funciona offline). Entra na fila
+ * depois de tudo o que já estava pendente (formulários), e antes do que vier depois ("Resolver").
+ */
+export async function queueSignature(
+  ticketId: UUID,
+  sourceUri: string,
+  signer: { name: string; role: string | null; latitude: number | null; longitude: number | null },
+) {
+  const id = randomUUID();
+  const filename = `assinatura-${id.slice(0, 8)}.png`;
+  const fileUri = await persistPhoto(sourceUri, filename);
+  const replaced = await insertSignature({
+    id,
+    ticket_id: ticketId,
+    file_uri: fileUri,
+    signer_name: signer.name,
+    signer_role: signer.role,
+    latitude: signer.latitude,
+    longitude: signer.longitude,
+    after_seq: await maxOutboxSeq(),
+    created_at: new Date().toISOString(),
+  });
+  replaced.forEach(deletePhotoFile);
+  await refreshPendingCounts();
+  void requestSync();
+}
+
+async function uploadSignature(signature: PendingSignature) {
+  if (!photoExists(signature.file_uri)) {
+    await deleteSignature(signature.id);
+    return;
+  }
+  const fields: Record<string, string> = { signer_name: signature.signer_name };
+  if (signature.signer_role) fields.signer_role = signature.signer_role;
+  if (signature.latitude !== null && signature.longitude !== null) {
+    fields.latitude = String(signature.latitude);
+    fields.longitude = String(signature.longitude);
+  }
+  try {
+    const ticket = await uploadFile<TicketDetail>(
+      `/tickets/${signature.ticket_id}/signature`,
+      signature.file_uri,
+      fields,
+      "image/png",
+      `assinatura-${signature.id.slice(0, 8)}.png`,
+    );
+    const user = currentUser();
+    await transaction(async (db) => {
+      await deleteSignature(signature.id, db);
+      if (ticket?.id) await saveServerTicket(db, ticket, user);
+    });
+    deletePhotoFile(signature.file_uri);
+  } catch (error) {
+    if (error instanceof ApiError && (error.retryable || error.status === 401)) {
+      await markSignatureError(signature.id, error.message);
+      throw error;
+    }
+    // Recusada (ex.: formulário obrigatório incompleto): sai da fila e o técnico colhe de novo.
+    await transaction(async (db) => {
+      const ticket = await getTicket(signature.ticket_id, db);
+      await addNotice(db, {
+        ticket_id: signature.ticket_id,
+        ticket_code: ticket?.code ?? null,
+        kind: "rejected",
+        message: `Assinatura de ${signature.signer_name}: o servidor recusou — ${errorMessage(error)}`,
+      });
+      await deleteSignature(signature.id, db);
+    });
+    deletePhotoFile(signature.file_uri);
+    showToast("Assinatura não aceita", { description: errorMessage(error), tone: "error" });
+  }
+}
+
+/** Respostas de formulário (Salvar) ou conclusão (Concluir), pela fila de sync. */
+export function enqueueFormAnswers(ticketId: UUID, payload: FormAnswersPayload) {
+  return enqueue(ticketId, { type: "form_answers", payload });
 }
 
 /** Apaga banco local e fotos pendentes (troca de usuário ou usuário sem acesso ao app). */
