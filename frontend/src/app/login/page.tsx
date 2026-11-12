@@ -170,9 +170,9 @@ export default function LoginPage() {
                         <span className="sr-only">E-mail</span>
                         <Mail className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-ink-subtle" />
                         <input
-                          type="email"
+                          type="text"
                           autoComplete="username"
-                          placeholder="voce@empresa.com.br"
+                          placeholder="E-mail ou usuário"
                           value={email}
                           onChange={(e) => setEmail(e.target.value)}
                           required
