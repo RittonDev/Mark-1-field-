@@ -249,6 +249,8 @@ async def test_suggestions_for_a_new_ticket(client: AsyncClient, world: World) -
     by_id = {s["id"]: s for s in r.json()}
     assert by_id[tech]["busy"] is True and by_id[tech]["day_load"] == 1
     assert "Ocupado no horário" in by_id[tech]["reasons"]
+    # A OS de amanhã nesta loja ainda não é visita (não conta como "atendeu esta loja").
+    assert by_id[tech]["visits_at_location"] == 0 and by_id[tech]["last_visit_at_location"] is None
     assert by_id[other]["busy"] is False and by_id[other]["day_load"] == 0
     assert r.json()[0]["id"] == other  # livre no horário vem antes
     # Sem fuso no horário: recusa (evita agenda deslocada).

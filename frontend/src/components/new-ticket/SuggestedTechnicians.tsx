@@ -7,7 +7,14 @@ import { formatDate, initials } from "@/lib/format";
 import type { TechnicianSuggestion, UUID } from "@/lib/types";
 
 // Motivos que já aparecem nos números do cartão (não repetir como etiqueta).
-const SHOWN_AS_NUMBERS = [/^Livre no horário$/, /^Ocupado no horário$/, /OS no dia$/, /^Sem OS no dia$/, /OS em aberto$/];
+const SHOWN_AS_NUMBERS = [
+  /^Livre no horário$/,
+  /^Ocupado no horário$/,
+  /OS no dia$/,
+  /^Sem OS no dia$/,
+  /OS em aberto$/,
+  /^Atendeu esta loja/,
+];
 
 function km(value: number | null) {
   if (value == null) return null;

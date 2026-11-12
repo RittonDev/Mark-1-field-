@@ -102,11 +102,12 @@ def _since(now: datetime) -> datetime:
     return now - timedelta(days=30 * HISTORY_MONTHS)
 
 
-def footprint(since: datetime):
+def footprint(since: datetime, until: datetime | None = None):
     """Visitas de cada técnico: (técnico, OS, loja, quando), uma por técnico e OS.
 
     Conta a OS em que ele é o responsável (não cancelada) e a OS em que ele apontou trabalho
-    (visitas anteriores de outra pessoa ficam com quem foi).
+    (visitas anteriores de outra pessoa ficam com quem foi). Com `until`, só o que já
+    aconteceu (uma OS agendada para amanhã ainda não é visita).
     """
     assigned = select(
         Ticket.assignee_id.label("user_id"),
@@ -139,7 +140,10 @@ def footprint(since: datetime):
         .group_by(both.c.user_id, both.c.ticket_id, both.c.location_id)
         .subquery("visits_pairs")
     )
-    return select(pairs).where(pairs.c.at >= since).subquery("footprint")
+    conds = [pairs.c.at >= since]
+    if until is not None:
+        conds.append(pairs.c.at <= until)
+    return select(pairs).where(*conds).subquery("footprint")
 
 
 # ------------------------------------------------------------------ base (região de atuação)
@@ -501,7 +505,7 @@ async def proximity(
     ids = [u.id for u in users]
     if not ids:
         return {}
-    fp = footprint(_since(now))
+    fp = footprint(_since(now), until=now)
     per_loc = (
         select(
             fp.c.user_id,
