@@ -1,7 +1,9 @@
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.enums import UserRole
@@ -65,6 +67,16 @@ class User(UUIDPrimaryKey, Timestamps, Base):
     last_visit_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     base_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     coverage_area: Mapped[str | None] = mapped_column(Text)
+    # Ficha completa: endereço (rua, número, complemento; bairro; CEP), jornada de trabalho
+    # {start, end, break_start, break_end} ("HH:MM:SS"), serviços que faz (ids de service_types),
+    # foto que veio de fora (Field Control) e dados de origem.
+    address_line: Mapped[str | None] = mapped_column(String(255))
+    address_district: Mapped[str | None] = mapped_column(String(120))
+    address_zip: Mapped[str | None] = mapped_column(String(10))
+    work_schedule: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    service_type_ids: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default="[]")
+    avatar_external_url: Mapped[str | None] = mapped_column(String(1000))
+    legacy: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     # Conta Microsoft (Entra ID) vinculada no primeiro login: "oid" do token.
     entra_oid: Mapped[str | None] = mapped_column(String(64), unique=True)
 

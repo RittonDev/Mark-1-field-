@@ -21,6 +21,22 @@ class Customer(UUIDPrimaryKey, Timestamps, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     # Etiquetas (ex.: "Avulso", "Faturamento Matriz"): [{name, color}].
     tags: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list, server_default="[]")
+    # Todos os contatos: [{kind: email|phone, value, name, label, primary}] (o principal também
+    # fica em email/phone).
+    contacts: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, default=list, server_default="[]"
+    )
+    # Endereço da matriz.
+    address_line: Mapped[str | None] = mapped_column(String(255))
+    district: Mapped[str | None] = mapped_column(String(120))
+    city: Mapped[str | None] = mapped_column(String(120))
+    state: Mapped[str | None] = mapped_column(String(2))
+    zip_code: Mapped[str | None] = mapped_column(String(10))
+    latitude: Mapped[float | None] = mapped_column(Float)
+    longitude: Mapped[float | None] = mapped_column(Float)
+    logo_url: Mapped[str | None] = mapped_column(String(1000))
+    # Origem (Field Control): id, data de cadastro, avaliação, totais de atendimento, anexos.
+    legacy: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
 
 class Location(UUIDPrimaryKey, Timestamps, Base):
@@ -47,5 +63,11 @@ class Location(UUIDPrimaryKey, Timestamps, Base):
     contact_phone: Mapped[str | None] = mapped_column(String(40))
     notes: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    # Todos os contatos da filial (o principal também fica em contact_name/contact_phone).
+    contacts: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, default=list, server_default="[]"
+    )
+    # Origem (Field Control): id, data de cadastro, territórios.
+    legacy: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
     customer: Mapped[Customer] = relationship(lazy="selectin")
