@@ -26,6 +26,7 @@ import { CountUp } from "@/components/motion";
 import { useNow } from "@/components/useNow";
 import { MessagesButton } from "@/components/ticket/MessagesPanel";
 import { QuickEditButton } from "@/components/ticket/QuickEditButton";
+import { ArrivalChip, OnsiteBar } from "@/components/ticket/FieldClock";
 import { Button, Card, EmptyState, ErrorBox, LoadingBlock, PageHeader, Skeleton } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -195,6 +196,8 @@ function QueueRow({ item, index, compact }: { item: QueueItem; index: number; co
           <StatusBadge status={item.status} />
         </div>
         {item.section === "done" ? null : <SlaCountdown ticket={item} />}
+        {item.section !== "done" && !item.arrived_at ? <ArrivalChip ticket={item} compact /> : null}
+        {item.section === "in_field" ? <OnsiteBar ticket={item} /> : null}
       </div>
       {/* Ações sempre no canto direito, alinhadas em coluna (como "Editar" nas tabelas). */}
       <div className="flex shrink-0 items-center gap-1 self-center border-l border-line pl-3">
@@ -259,6 +262,7 @@ function TodayTimeline({ items }: { items: QueueItem[] }) {
                     Ainda não começou
                   </span>
                 ) : null}
+                {!item.arrived_at ? <ArrivalChip ticket={item} compact /> : null}
               </div>
               </div>
               <div className="flex shrink-0 items-center gap-1 self-stretch border-l border-line pl-2.5">
