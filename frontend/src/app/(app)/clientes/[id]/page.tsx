@@ -52,7 +52,8 @@ export default function CustomerDetailPage() {
   const c = customer.data;
   const legacy = c.legacy;
   const address = [c.address_line, c.district, [c.city, c.state].filter(Boolean).join("-"), c.zip_code].filter(Boolean).join(", ");
-  const stores = locations.data ?? [];
+  // Lojas com mais OS primeiro (as mais movimentadas do cliente).
+  const stores = [...(locations.data ?? [])].sort((a, b) => b.total_tickets - a.total_tickets);
   const since = legacy?.created_at ?? c.created_at;
 
   return (
