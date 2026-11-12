@@ -7,27 +7,31 @@ import {
   BatteryMedium,
   Clock,
   Gauge,
+  House,
   MapPinned,
   Navigation,
   Phone,
   Route,
   Search,
   ShieldCheck,
+  Store,
   Wrench,
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useTheme } from "@/components/Brand";
+import type { MapFocus } from "@/components/LiveMap";
+import { LocationPicker } from "@/components/LocationPicker";
 import { Card, EmptyState, ErrorBox, Input, LoadingBlock, PageHeader, Select } from "@/components/ui";
 import { useNow } from "@/components/useNow";
 import { errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canManageTickets, STATUS } from "@/lib/constants";
-import { formatTime, initials } from "@/lib/format";
-import { useLiveTechnicians, useTeams, useTrackingHistory } from "@/lib/queries";
+import { formatMinutes, formatTime, initials } from "@/lib/format";
+import { useLiveTechnicians, useMapDistances, useTeams, useTrackingHistory } from "@/lib/queries";
 import { formatAgo, formatSpeed, LIVE_STATE, LIVE_STATE_ORDER } from "@/lib/tracking";
-import type { LiveState, LiveTechnician } from "@/lib/types";
+import type { DistanceLeg, LiveState, LiveTechnician, Location, TechnicianDistance } from "@/lib/types";
 
 const LiveMap = dynamic(() => import("@/components/LiveMap"), {
   ssr: false,
@@ -43,6 +47,8 @@ function todayString(): string {
 
 const rank = (state: LiveState) => LIVE_STATE_ORDER.indexOf(state);
 
+const km = (value: number) => `${value.toLocaleString("pt-BR", { maximumFractionDigits: value < 10 ? 1 : 0 })} km`;
+
 export default function LiveMapPage() {
   const { user } = useAuth();
   const theme = useTheme();
@@ -52,14 +58,26 @@ export default function LiveMapPage() {
   const [stateFilter, setStateFilter] = useState<LiveState | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [day, setDay] = useState(todayString);
+  // Loja do cliente: o mapa mostra a loja e mede de onde cada técnico está e de casa até ela.
+  const [place, setPlace] = useState<Location | null>(null);
   const teams = useTeams();
   const live = useLiveTechnicians(teamId || null);
   const history = useTrackingHistory(selectedId, day);
-
-  const technicians = useMemo(
-    () => [...(live.data ?? [])].sort((a, b) => rank(a.state) - rank(b.state) || a.name.localeCompare(b.name)),
-    [live.data],
+  const distances = useMapDistances(place?.id ?? null, teamId || null, canManageTickets(user?.role));
+  const distanceById = useMemo(
+    () => new Map((distances.data?.technicians ?? []).map((d, index) => [d.id, { d, index }])),
+    [distances.data],
   );
+
+  const technicians = useMemo(() => {
+    const list = [...(live.data ?? [])];
+    // Com loja escolhida: do mais perto para o mais longe (agora, ou de casa).
+    if (place && distances.data) {
+      const at = (id: string) => distanceById.get(id)?.index ?? Number.MAX_SAFE_INTEGER;
+      return list.sort((a, b) => at(a.id) - at(b.id));
+    }
+    return list.sort((a, b) => rank(a.state) - rank(b.state) || a.name.localeCompare(b.name));
+  }, [live.data, place, distances.data, distanceById]);
   const counts = useMemo(() => {
     const c = Object.fromEntries(LIVE_STATE_ORDER.map((s) => [s, 0])) as Record<LiveState, number>;
     technicians.forEach((t) => (c[t.state] += 1));
@@ -74,6 +92,19 @@ export default function LiveMapPage() {
     );
   }, [technicians, q, stateFilter]);
   const selected = technicians.find((t) => t.id === selectedId) ?? null;
+  const selectedDistance = selectedId ? distanceById.get(selectedId)?.d : undefined;
+  const placePoint = place ? (distances.data?.place ?? null) : null;
+  const selectedPos = selected?.last_position;
+  const focus = useMemo<MapFocus | null>(() => {
+    if (!placePoint && !selectedDistance) return null;
+    return {
+      place: placePoint,
+      home: selectedDistance?.home ?? null,
+      // A posição do mapa ao vivo é a mais recente; a do cálculo de distância, a reserva.
+      live: selectedPos ? { latitude: selectedPos.latitude, longitude: selectedPos.longitude } : (selectedDistance?.live ?? null),
+      name: selectedDistance?.name,
+    };
+  }, [placePoint, selectedDistance, selectedPos]);
 
   if (user && !canManageTickets(user.role)) {
     return <ErrorBox message="O mapa ao vivo é exclusivo para analistas e gestores." />;
@@ -134,6 +165,22 @@ export default function LiveMapPage() {
                 aria-label="Buscar técnico ou OS"
               />
             </div>
+            <div className="mt-2.5">
+              <p className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-ink-subtle">
+                <Store className="size-3.5" />
+                Loja do cliente
+              </p>
+              <LocationPicker customerId={null} value={place} onChange={setPlace} />
+              {place ? (
+                <p className="mt-1.5 text-[11px] text-ink-muted">
+                  {distances.data?.place?.approximate
+                    ? "A loja não tem coordenada: medindo pelo centro da cidade. "
+                    : ""}
+                  Técnicos do mais perto para o mais longe: de onde estão agora ou, sem posição recente, de casa.
+                </p>
+              ) : null}
+              {distances.error && place ? <ErrorBox message={errorMessage(distances.error)} /> : null}
+            </div>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
             {live.isLoading ? (
@@ -157,6 +204,7 @@ export default function LiveMapPage() {
                     now={now}
                     selected={t.id === selectedId}
                     onSelect={() => setSelectedId(t.id === selectedId ? null : t.id)}
+                    distance={place ? distanceById.get(t.id)?.d : undefined}
                   />
                 ))}
               </ul>
@@ -170,6 +218,8 @@ export default function LiveMapPage() {
               onDay={setDay}
               trailPoints={history.data?.points.length ?? null}
               trailLoading={history.isFetching && !history.data}
+              distance={selectedDistance}
+              placeName={place?.name ?? null}
             />
           ) : null}
         </Card>
@@ -181,6 +231,8 @@ export default function LiveMapPage() {
             onSelect={setSelectedId}
             history={selectedId ? (history.data ?? null) : null}
             theme={theme}
+            focus={focus}
+            focusKey={`${place?.id ?? ""}|${selectedId ?? ""}`}
           />
         </Card>
       </div>
@@ -193,11 +245,14 @@ function TechnicianRow({
   now,
   selected,
   onSelect,
+  distance,
 }: {
   tech: LiveTechnician;
   now: number;
   selected: boolean;
   onSelect: () => void;
+  /** Com loja escolhida: de onde ele está e de casa até a loja. */
+  distance?: TechnicianDistance;
 }) {
   const state = LIVE_STATE[tech.state];
   const pos = tech.last_position;
@@ -242,9 +297,55 @@ function TechnicianRow({
           ) : tech.team ? (
             <span className="mt-0.5 block truncate text-xs text-ink-muted">{tech.team.name}</span>
           ) : null}
+          {distance && (distance.live_to_place || distance.home_to_place) ? (
+            <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs tabular-nums">
+              {distance.live_to_place ? (
+                <span className="inline-flex items-center gap-1 font-medium text-ink" title="De onde ele está agora até a loja (linha reta)">
+                  <Navigation className="size-3 text-brand" />
+                  agora {km(distance.live_to_place.km)}
+                </span>
+              ) : null}
+              {distance.home_to_place ? (
+                <span
+                  className="inline-flex items-center gap-1 text-ink-muted"
+                  title={`${distance.home?.label ?? "Casa"} até a loja (linha reta)`}
+                >
+                  <House className="size-3" />
+                  {distance.home?.kind === "base_city" ? "base" : "casa"} {km(distance.home_to_place.km)}
+                  {distance.home_to_place.approximate ? <span className="text-ink-subtle">≈</span> : null}
+                </span>
+              ) : null}
+            </span>
+          ) : null}
         </span>
       </button>
     </li>
+  );
+}
+
+/** Um trecho: linha reta, pelas ruas e tempo de carro (estimativas). */
+function LegRow({ icon, label, leg }: { icon: React.ReactNode; label: string; leg: DistanceLeg | null }) {
+  return (
+    <div className="flex items-start gap-2 text-xs">
+      <span className="mt-px shrink-0 text-ink-muted">{icon}</span>
+      <span className="w-[5.5rem] shrink-0 text-ink-muted">{label}</span>
+      {leg ? (
+        <span className="min-w-0 text-ink">
+          <span className="font-semibold tabular-nums">{km(leg.km)}</span>
+          <span className="text-ink-muted">
+            {" "}
+            em linha reta · ~{km(leg.road_km)} pelas ruas · ~{formatMinutes(leg.minutes)} de carro
+          </span>
+          {leg.approximate ? (
+            <span className="ml-1 rounded bg-amber-50 px-1 text-[10px] font-medium text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
+              aprox.
+            </span>
+          ) : null}
+        </span>
+      ) : (
+        <span className="text-ink-subtle">—</span>
+      )}
+    </div>
   );
 }
 
@@ -264,6 +365,8 @@ function TechnicianDetail({
   onDay,
   trailPoints,
   trailLoading,
+  distance,
+  placeName,
 }: {
   tech: LiveTechnician;
   now: number;
@@ -271,6 +374,8 @@ function TechnicianDetail({
   onDay: (day: string) => void;
   trailPoints: number | null;
   trailLoading: boolean;
+  distance?: TechnicianDistance;
+  placeName: string | null;
 }) {
   const pos = tech.last_position;
   const battery = pos?.battery_pct;
@@ -322,6 +427,33 @@ function TechnicianDetail({
             </span>
           </span>
         </Link>
+      ) : null}
+      {distance ? (
+        <div className="space-y-1.5 rounded-lg border border-line bg-surface p-2.5">
+          <p className="truncate text-xs font-medium text-ink">
+            {placeName ? `Distâncias até ${placeName}` : "Distâncias"}
+          </p>
+          {placeName ? (
+            <>
+              <LegRow icon={<Navigation className="size-3.5" />} label="Agora → loja" leg={distance.live_to_place} />
+              <LegRow
+                icon={<House className="size-3.5" />}
+                label={distance.home?.kind === "base_city" ? "Base → loja" : "Casa → loja"}
+                leg={distance.home_to_place}
+              />
+            </>
+          ) : null}
+          <LegRow
+            icon={<Route className="size-3.5" />}
+            label={distance.home?.kind === "base_city" ? "Agora → base" : "Agora → casa"}
+            leg={distance.live_to_home}
+          />
+          <p className="flex items-start gap-1.5 text-[11px] text-ink-subtle">
+            <House className="mt-px size-3 shrink-0" />
+            {distance.home ? distance.home.label : "Sem endereço de casa no cadastro (complete em Técnicos)."}
+          </p>
+          {!distance.live ? <p className="text-[11px] text-ink-subtle">Sem posição do app nas últimas 24 h.</p> : null}
+        </div>
       ) : null}
       <label className="flex items-center gap-2 text-xs text-ink-muted">
         <Route className="size-3.5 shrink-0" />
