@@ -5,7 +5,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, sta
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 
-from app.api.deps import DB, CurrentUser, StaffUser
+from app.api.deps import DB, CurrentUser, StaffUser, TicketManagerUser
 from app.core.config import settings
 from app.core.enums import TicketPriority, TicketStatus, TicketType
 from app.core.security import InvalidToken, create_download_token, decode_token
@@ -41,6 +41,7 @@ _INTERNAL_EVENT_TYPES = {
     "expense_updated",
     "expense_removed",
     "quote_sent",
+    "owner_changed",
 }
 
 
@@ -63,6 +64,8 @@ async def list_tickets(
     category_id: uuid.UUID | None = None,
     asset_id: uuid.UUID | None = None,
     project_id: uuid.UUID | None = None,
+    owner_id: uuid.UUID | None = None,
+    no_owner: bool = False,
     q: str | None = None,
     mine: bool = False,
     unassigned: bool = False,
@@ -85,6 +88,8 @@ async def list_tickets(
         category_id=category_id,
         asset_id=asset_id,
         project_id=project_id,
+        owner_id=owner_id,
+        no_owner=no_owner,
         q=q,
         mine=mine,
         unassigned=unassigned,
@@ -148,6 +153,15 @@ async def assign_ticket(
 async def take_ticket(ticket_id: uuid.UUID, db: DB, user: StaffUser) -> TicketDetail:
     ticket = await svc.get_visible_ticket(db, user, ticket_id)
     await svc.take_ticket(db, ticket, user)
+    await commit_and_publish(db)
+    return await _detail(db, ticket_id, user)
+
+
+@router.post("/tickets/{ticket_id}/claim", response_model=TicketDetail)
+async def claim_ticket(ticket_id: uuid.UUID, db: DB, user: TicketManagerUser) -> TicketDetail:
+    """Puxar a OS para a minha fila (vira o analista responsável; o técnico não muda)."""
+    ticket = await svc.get_visible_ticket(db, user, ticket_id)
+    await svc.claim_ticket(db, ticket, user)
     await commit_and_publish(db)
     return await _detail(db, ticket_id, user)
 

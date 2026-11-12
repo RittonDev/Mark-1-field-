@@ -659,6 +659,14 @@ async def update_ticket(
         raise PermissionDenied("Você não pode editar esta OS")
     check_version(ticket, data.expected_version)
     fields = data.model_dump(exclude_unset=True, exclude={"expected_version", "allow_conflict"})
+    # Analista responsável: evento próprio (a fila muda), validado antes de qualquer alteração.
+    owner_change = "owner_id" in fields
+    new_owner_id = fields.pop("owner_id", None)
+    if owner_change:
+        if not actor.can_manage_tickets:
+            raise PermissionDenied("Só a gestão troca o analista responsável")
+        if new_owner_id is not None:
+            await _owner_user(db, new_owner_id)
     if "project_id" in fields:
         await _check_project(db, fields["project_id"], actor)
     if "signature_required" in fields:
@@ -667,6 +675,8 @@ async def update_ticket(
         if fields["signature_required"] is None:
             fields.pop("signature_required")
     if not fields:
+        if owner_change:
+            await _set_owner(db, ticket, new_owner_id, actor, now=utcnow())
         return ticket
 
     ref_keys = {"customer_id", "location_id", "asset_id", "category_id", "team_id"}
@@ -710,6 +720,8 @@ async def update_ticket(
         if old != value:
             changes[key] = [_jsonable(old), _jsonable(value)]
             setattr(ticket, key, value)
+    if owner_change:
+        await _set_owner(db, ticket, new_owner_id, actor, now=utcnow())
     if not changes:
         return ticket
 
@@ -754,9 +766,22 @@ async def assign_ticket(
 async def take_ticket(db: AsyncSession, ticket: Ticket, actor: User) -> Ticket:
     if not can_take(actor, ticket):
         raise PermissionDenied("Esta OS não pode ser assumida por você")
-    await _assign(
-        db, ticket, actor.id, None, actor, now=utcnow(), note="Assumida pelo próprio usuário"
-    )
+    now = utcnow()
+    await _assign(db, ticket, actor.id, None, actor, now=now, note="Assumida pelo próprio usuário")
+    if ticket.owner_id is None:
+        await _set_owner(db, ticket, actor.id, actor, now=now)
+    return ticket
+
+
+async def claim_ticket(db: AsyncSession, ticket: Ticket, actor: User) -> Ticket:
+    """Puxar para a minha fila: vira o analista responsável (o técnico continua o mesmo)."""
+    if not actor.can_manage_tickets:
+        raise PermissionDenied("Só analistas e gestores têm fila de OS")
+    if ticket.owner_id == actor.id:
+        raise WorkflowError("Esta OS já está na sua fila")
+    if ticket.status not in OPEN_STATUSES:
+        raise WorkflowError("Só uma OS em aberto pode ser puxada para a sua fila")
+    await _set_owner(db, ticket, actor.id, actor, now=utcnow())
     return ticket
 
 
@@ -814,6 +839,8 @@ async def transition_ticket(
         _ensure_forms_and_signature(ticket)
     if auto_assign:
         await _assign(db, ticket, actor.id, None, actor, now=now, note="Assumida ao mudar o status")
+        if ticket.owner_id is None:
+            await _set_owner(db, ticket, actor.id, actor, now=now)
 
     # Motivo da violação informado junto (normalmente ao resolver uma OS que furou o prazo).
     await _apply_violation(
@@ -1106,8 +1133,15 @@ def filter_conditions(user: User, f: TicketFilters, now: datetime) -> list[Colum
             or_(Category.id == f.category_id, Category.parent_id == f.category_id)
         )
         conds.append(Ticket.category_id.in_(subcats))
+    if f.owner_id:
+        conds.append(Ticket.owner_id == f.owner_id)
+    if f.no_owner:
+        conds.append(Ticket.owner_id.is_(None))
     if f.mine:
-        if user.is_staff:
+        if user.can_manage_tickets:
+            # Do analista: as que ele executa e as da fila dele (responsável).
+            conds.append(or_(Ticket.assignee_id == user.id, Ticket.owner_id == user.id))
+        elif user.is_staff:
             conds.append(Ticket.assignee_id == user.id)
         else:
             conds.append(Ticket.requester_id == user.id)

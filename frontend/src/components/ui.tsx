@@ -3,6 +3,7 @@
 import clsx from "clsx";
 import { Loader2, TriangleAlert, X } from "lucide-react";
 import { forwardRef, useEffect, useId, useRef } from "react";
+import { createPortal } from "react-dom";
 
 type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "ink";
 type ButtonSize = "sm" | "md" | "lg";
@@ -330,7 +331,8 @@ export function Dialog({
   }, [open]);
 
   if (!open) return null;
-  return (
+  // No <body>: fora das animações e recortes da página (o evento continua subindo pela árvore do React).
+  return createPortal(
     <div className="fixed inset-0 z-50 flex animate-fade items-start justify-center overflow-y-auto bg-[rgb(9_11_15/0.42)] p-4 pt-[9vh] backdrop-blur-[3px]">
       <div className="absolute inset-0" onClick={onClose} aria-hidden />
       <div
@@ -365,7 +367,8 @@ export function Dialog({
           <div className="flex justify-end gap-2 rounded-b-2xl border-t border-line bg-surface-2/50 px-5 py-3">{footer}</div>
         ) : null}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

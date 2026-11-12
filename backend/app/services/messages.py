@@ -21,6 +21,7 @@ from app.core.enums import TicketEventType
 from app.db.base import utcnow
 from app.models import LocationPing, SystemSetting, TechnicianShift, Ticket, TicketEvent, User
 from app.schemas.ticket import format_ticket_code
+from app.services import client_report
 from app.services.errors import WorkflowError
 from app.services.suggestions import km_between
 from app.services.workflow import PRIORITY_INFO, STATUS_INFO
@@ -52,7 +53,8 @@ VARIABLES: dict[str, str] = {
     "solucao": "Solução registrada ao concluir",
     "motivo_improdutiva": "Motivo da última visita improdutiva",
     "projeto": "Projeto da OS",
-    "analista": "Seu nome (quem copia o texto)",
+    "analista": "Analista responsável pela OS (sem responsável: quem copia o texto)",
+    "link_relatorio": "Link do relatório para o cliente (OS concluída)",
 }
 
 DEFAULT_TEMPLATES: list[dict[str, str]] = [
@@ -84,7 +86,7 @@ DEFAULT_TEMPLATES: list[dict[str, str]] = [
         "key": "fechamento",
         "name": "Fechamento",
         "body": "*{os}* · {cliente}\nAtendimento concluído por {tecnico} em {local} às {agora}.\n"
-        "Solução: {solucao}",
+        "Solução: {solucao}\nRelatório: {link_relatorio}",
     },
     {
         "key": "improdutiva",
@@ -241,7 +243,9 @@ async def context(db: AsyncSession, ticket: Ticket, actor: User) -> dict[str, st
         "solucao": ticket.resolution_notes or "",
         "motivo_improdutiva": reason or "",
         "projeto": ticket.project.name if ticket.project else "",
-        "analista": actor.name,
+        "analista": ticket.owner.name if ticket.owner else actor.name,
+        "link_relatorio": await client_report.url_if_finished(db, ticket)
+        or "(disponível quando a OS for concluída)",
     }
     return {k: str(v) for k, v in values.items()}
 

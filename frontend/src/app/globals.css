@@ -104,13 +104,13 @@
 @theme {
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
-  --animate-enter: mf-enter 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
-  --animate-rise: mf-rise 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
-  --animate-fade: mf-fade 0.2s ease-out both;
-  --animate-pop: mf-pop 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
-  --animate-toast: mf-toast 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-enter: mf-enter 0.42s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  --animate-rise: mf-rise 0.55s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  --animate-fade: mf-fade 0.2s ease-out backwards;
+  --animate-pop: mf-pop 0.28s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  --animate-toast: mf-toast 0.42s cubic-bezier(0.16, 1, 0.3, 1) backwards;
   --animate-float: mf-float 5s ease-in-out infinite alternate;
-  --animate-draw: mf-draw 2.6s cubic-bezier(0.65, 0, 0.35, 1) both;
+  --animate-draw: mf-draw 2.6s cubic-bezier(0.65, 0, 0.35, 1) backwards;
 }
 
 @keyframes mf-enter {
@@ -222,7 +222,7 @@
 
 /* Entrada em sequência: cada filho recebe --i (índice) e entra um pouco depois do anterior. */
 .stagger > * {
-  animation: mf-enter 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: mf-enter 0.42s cubic-bezier(0.16, 1, 0.3, 1) backwards;
   animation-delay: calc(min(var(--i, 0), 12) * 32ms);
 }
 
@@ -386,4 +386,61 @@ select {
 /* Tema escuro sem mapa escuro próprio: inverte o mapa claro mantendo as cores legíveis. */
 .mf-tiles-dim {
   filter: invert(1) hue-rotate(180deg) brightness(0.9) contrast(0.85) saturate(0.6);
+}
+
+/* Arte da tela de login: rotas que se desenham e pinos que pulsam. */
+@keyframes mf-route {
+  0% {
+    stroke-dashoffset: var(--len);
+    opacity: 1;
+  }
+  45% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  85% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
+}
+.mf-route {
+  stroke-dasharray: var(--len);
+  stroke-dashoffset: var(--len);
+  animation: mf-route 7s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
+.mf-ring {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: mf-ring 2.6s ease-out infinite;
+}
+@keyframes mf-eta {
+  0% {
+    transform: scaleX(0.28);
+  }
+  70%,
+  100% {
+    transform: scaleX(0.82);
+  }
+}
+.mf-eta {
+  transform-origin: left;
+  animation: mf-eta 7s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mf-route {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+  .mf-eta {
+    animation: none;
+    transform: scaleX(0.7);
+  }
+  .mf-ring {
+    animation: none;
+    opacity: 0;
+  }
 }

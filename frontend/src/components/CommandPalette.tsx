@@ -5,7 +5,9 @@ import clsx from "clsx";
 import { Building2, CornerDownLeft, FilePlus2, MoonStar, Search, Ticket } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { StatusBadge } from "@/components/badges";
+import { toggleTheme } from "@/components/Brand";
 import { visibleNav } from "@/components/nav";
 import { Kbd } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -131,13 +133,7 @@ function Palette({ user, onClose }: { user: User; onClose: () => void }) {
         label: "Alternar tema claro / escuro",
         icon: <MoonStar className="size-4" />,
         run: () => {
-          const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
-          document.documentElement.dataset.theme = next;
-          try {
-            localStorage.setItem("theme", next);
-          } catch {
-            // Armazenamento bloqueado: vale só para esta página.
-          }
+          toggleTheme();
           onClose();
         },
       },
@@ -173,7 +169,7 @@ function Palette({ user, onClose }: { user: User; onClose: () => void }) {
   const loading = searching && (tickets.isFetching || customers.isFetching);
   let lastGroup = "";
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[60] flex animate-fade items-start justify-center bg-[rgb(9_11_15/0.42)] p-4 pt-[12vh] backdrop-blur-[3px]">
       <div className="absolute inset-0" onClick={onClose} aria-hidden />
       <div
@@ -249,6 +245,7 @@ function Palette({ user, onClose }: { user: User; onClose: () => void }) {
           </span>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

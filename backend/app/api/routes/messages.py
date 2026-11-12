@@ -26,7 +26,9 @@ def _out(items: list[dict[str, str]]) -> MessageTemplatesOut:
 async def ticket_messages(ticket_id: uuid.UUID, db: DB, user: TicketManagerUser) -> list[dict]:
     """Textos prontos para o grupo de WhatsApp, já preenchidos com os dados da OS."""
     ticket = await tickets_svc.get_visible_ticket(db, user, ticket_id)
-    return await svc.for_ticket(db, ticket, user)
+    rendered = await svc.for_ticket(db, ticket, user)
+    await db.commit()  # o link do relatório pode ter sido criado agora (OS concluída antiga)
+    return rendered
 
 
 @router.get("/message-templates", response_model=MessageTemplatesOut)

@@ -4,6 +4,7 @@ from app.api.routes import (
     activities,
     auth,
     catalog,
+    client_report,
     customers,
     dashboard,
     expenses,
@@ -11,6 +12,7 @@ from app.api.routes import (
     messages,
     onboarding,
     projects,
+    queues,
     quotes,
     repairs,
     reports,
@@ -31,6 +33,8 @@ for module in (
     technicians,
     customers,
     tickets,
+    queues,
+    client_report,
     forms,
     expenses,
     quotes,
@@ -49,3 +53,4 @@ for module in (
     api_router.include_router(module.router)
 api_router.include_router(onboarding.public)
 api_router.include_router(quotes.public)
+api_router.include_router(client_report.public)

@@ -38,6 +38,20 @@ export function Logo({
 
 export type Theme = "light" | "dark";
 
+/** Aplica e guarda o tema (sem escolha salva, o app segue o tema do sistema). */
+export function applyTheme(next: Theme) {
+  document.documentElement.dataset.theme = next;
+  try {
+    localStorage.setItem("theme", next);
+  } catch {
+    // Armazenamento bloqueado: o tema vale só para esta página.
+  }
+}
+
+export function toggleTheme() {
+  applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+}
+
 function readTheme(): Theme {
   return document.documentElement.dataset.theme === "dark" ? "dark" : "light";
 }
@@ -60,14 +74,7 @@ export function ThemeToggle({ className = "" }: { className?: string }) {
   return (
     <button
       type="button"
-      onClick={() => {
-        document.documentElement.dataset.theme = next;
-        try {
-          localStorage.setItem("theme", next);
-        } catch {
-          // Armazenamento bloqueado: o tema vale só para esta página.
-        }
-      }}
+      onClick={() => applyTheme(next)}
       className={`inline-flex size-8 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink ${className}`}
       aria-label={next === "dark" ? "Ativar modo escuro" : "Ativar modo claro"}
       title={next === "dark" ? "Modo escuro" : "Modo claro"}

@@ -196,7 +196,7 @@ function ConnectionIndicator() {
 
 export function Topbar() {
   return (
-    <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-line bg-sheet/85 px-4 backdrop-blur-md md:px-6 lg:rounded-t-2xl">
+    <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-line bg-sheet/85 px-4 backdrop-blur-md md:px-6">
       <button
         type="button"
         onClick={openCommandPalette}

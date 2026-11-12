@@ -19,6 +19,9 @@ interface ToastApi {
 
 const ToastContext = createContext<ToastApi | null>(null);
 
+const TOAST_MS = 5000;
+const ERROR_MS = 8000;
+
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const nextId = useRef(1);
@@ -31,7 +34,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     ({ title, description, tone = "info" }) => {
       const id = nextId.current++;
       setToasts((list) => [...list.slice(-4), { id, title, description, tone }]);
-      window.setTimeout(() => dismiss(id), tone === "error" ? 8000 : 5000);
+      window.setTimeout(() => dismiss(id), tone === "error" ? ERROR_MS : TOAST_MS);
     },
     [dismiss],
   );
@@ -47,10 +50,19 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
             key={t.id}
             role="status"
             className={clsx(
-              "pointer-events-auto flex items-start gap-3 rounded-lg border bg-surface p-3 shadow-lg",
+              "pointer-events-auto relative flex animate-toast items-start gap-3 overflow-hidden rounded-xl border bg-surface p-3.5 shadow-pop",
               t.tone === "error" ? "border-red-300 dark:border-red-900" : "border-line",
             )}
           >
+            {/* Tempo até sumir sozinho. */}
+            <span
+              aria-hidden
+              className={clsx(
+                "absolute inset-x-0 bottom-0 h-0.5 origin-left",
+                t.tone === "success" ? "bg-emerald-500/70" : t.tone === "error" ? "bg-red-500/70" : "bg-brand/70",
+              )}
+              style={{ animation: `mf-progress ${t.tone === "error" ? ERROR_MS : TOAST_MS}ms linear forwards` }}
+            />
             {t.tone === "success" ? (
               <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-500" />
             ) : t.tone === "error" ? (
