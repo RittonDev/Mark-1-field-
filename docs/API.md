@@ -72,11 +72,11 @@ Origem: `web`, `mobile`, `email`, `phone`, `whatsapp`, `monitoring`.
 ### Clientes, locais e ativos
 Modelo inspirado no Field Control: o eixo da operação é o **local** (filial com CNPJ próprio), não o cliente.
 
-- `GET /customers?q=` → `CustomerOut[]` · `POST /customers` · `GET/PATCH /customers/{id}`
-  - `CustomerOut = {id, name, document, email, phone, notes, is_active, created_at, locations_count, open_tickets, total_tickets, last_ticket_at}`
-- `GET /locations?q=&customer_id=&active=&page=&page_size=` → `Page<LocationOut>` (até 200 por página). `q` busca em nome, código, CNPJ (com ou sem pontuação), endereço, cidade e nome do cliente
+- `GET /customers?q=` → `CustomerOut[]` · `POST /customers` · `GET/PATCH /customers/{id}`. `q` busca por palavras em nome e CNPJ/CPF (ver "Busca por palavras")
+  - `CustomerOut = {id, name, document, email, phone, notes, is_active, created_at, locations_count, open_tickets, total_tickets, last_ticket_at, tags, contacts, address_line, district, city, state, zip_code, latitude, longitude, logo_url, legacy}` (ficha completa: ver "Fichas completas")
+- `GET /locations?q=&customer_id=&active=&page=&page_size=` → `Page<LocationOut>` (até 200 por página). `q` busca por palavras em nome, código, CNPJ (com ou sem pontuação), endereço, bairro, cidade e nome do cliente
 - `GET /locations/{id}` · `PATCH /locations/{id}` · `GET/POST /customers/{id}/locations` (lista sem paginação, para um cliente)
-  - `LocationOut = {id, customer_id, customer:{id,name}, name, code, document, address_line, district, city, state, zip_code, latitude, longitude, contact_name, contact_phone, notes, is_active, open_tickets, total_tickets, last_ticket_at}`
+  - `LocationOut = {id, customer_id, customer:{id,name}, name, code, document, address_line, district, city, state, zip_code, latitude, longitude, contact_name, contact_phone, notes, is_active, open_tickets, total_tickets, last_ticket_at, contacts, legacy}`
 - **Métricas derivadas:** `open_tickets`, `total_tickets` e `last_ticket_at` são calculadas a partir das OS, no escopo que o usuário pode ver. Não são digitadas.
 - **CPF/CNPJ** (`document`): aceita com ou sem pontuação e valida os dígitos verificadores, inclusive o **CNPJ alfanumérico** (Receita, jul/2026). Guardado sem pontuação e em maiúsculas. Inválido → 422.
 - `GET /assets?customer_id=&location_id=&asset_type=&q=` → `AssetOut[]` · `POST /assets` · `GET/PATCH /assets/{id}`
@@ -193,8 +193,9 @@ Gestão: `GET|POST /onboarding/invites` (`{label?, reusable, days_valid}`; o `to
 
 ### Técnicos (gestão do acesso)
 Analistas e gestores, e só sobre usuários técnicos: `GET /technicians?q=&team_id=&active=` (com jornada, OS abertas,
-foto e o perfil da homologação) · `POST /technicians` → `{technician, temporary_password}` · `PATCH /technicians/{id}`
-(nome, e-mail, telefone, grupo, cargo, `is_active`; desativar encerra as sessões) ·
+foto e o perfil da homologação; `q` busca por palavras em nome, e-mail e telefone) · `POST /technicians` →
+`{technician, temporary_password}` · `PATCH /technicians/{id}` (nome, e-mail, telefone, grupo, cargo, `is_active`;
+desativar encerra as sessões; e a ficha completa: endereço, jornada e serviços, ver "Fichas completas") ·
 `POST /technicians/{id}/reset-password` → `{technician, temporary_password}` (encerra as sessões) ·
 `POST|DELETE /technicians/{id}/photo` (JPG/PNG/WebP até 2 MB, tipo conferido pelo conteúdo) ·
 `POST /technicians/import?dry_run=true|false` (CSV/XLSX: nome, email, telefone, grupo, cargo) →
@@ -538,3 +539,79 @@ colaboradores.
   há lojas com coordenadas em {Cidade}-{UF} para calcular a distância").
 - O mapa ao vivo, o ETA/link do mapa dos textos do WhatsApp e as sugestões da OS também ignoram
   coordenada inválida.
+
+## Fichas completas (técnico, cliente e loja)
+
+Tudo o que o Field Control tinha de cada cadastro fica guardado aqui. A importação preenche a ficha e, ao rodar de novo,
+atualiza os dados de cadastro.
+
+**Contatos** (`contacts` em cliente e loja): `[{kind: "email" | "phone", value, name, label, primary}]`.
+- Telefone só com dígitos e com o DDI na frente (`"5585999991111"`). Na entrada, um número com DDD e sem DDI
+  (10 ou 11 dígitos) ganha o 55; começando com `+`, fica como veio. Mínimo de 8 dígitos.
+- E-mail em minúsculas, com `@`. `label` (`work`, `personal`, `mobile`, `home`, como no Field Control, ou livre) também
+  em minúsculas.
+- Sem repetidos (mesmo tipo e valor). Se o repetido era o principal ou tinha nome/rótulo, isso passa para o que ficou.
+- **Os campos únicos seguem a lista:** ao gravar `contacts`, o principal de cada tipo (ou o primeiro, se nenhum estiver
+  marcado) vai para `email`/`phone` do cliente e para `contact_phone`/`contact_name` da loja. O telefone fica legível:
+  `"(85) 3333-2222"`. Um campo único enviado no mesmo pedido vale mais que a lista. Até 50 contatos.
+
+**Cliente** (`CustomerOut`, `POST /customers`, `PATCH /customers/{id}`):
+- `contacts`, endereço da matriz (`address_line`, `district`, `city`, `state`, `zip_code`, `latitude`, `longitude`) e
+  `logo_url`. `created_at` é a data de cadastro no Field Control.
+- `legacy` (só leitura, só para a equipe interna; `null` para os outros): `{source, id, created_at, rating: {average,
+  last_star, last_comment} | null, service: {first_at, last_at, total} | null, attachments: [{url, title, type}]}`.
+
+**Loja** (`LocationOut`, `POST /customers/{id}/locations`, `PATCH /locations/{id}`): `contacts` e `legacy` (só para a
+equipe: `{source, id, created_at, territories: [nome]}`). `created_at` é a data de cadastro no Field Control.
+
+**Técnico** (`TechnicianOut`):
+- `address_line`, `address_district`, `address_zip` (o endereço padrão do escritório, usado por mais de 20
+  colaboradores, não entra).
+- `work_schedule: {start, end, break_start, break_end} | null`, com horários em `"HH:MM:SS"`.
+- `services: [{id, name}]`: os tipos de serviço que ele faz (as skills do Field Control).
+- `legacy: {source, id, territories: [nome]} | null`.
+- `avatar_url`: a foto enviada aqui (link assinado) ou, sem ela, a foto que veio do Field Control.
+
+`PATCH /technicians/{id}` aceita também:
+- `address_line`, `address_district` e `address_zip` (o CEP é gravado como `00000-000`);
+- `work_schedule`: horários em `HH:MM` ou `HH:MM:SS`. Horário inválido → 422 ("Horário inválido: use HH:MM"). Jornada
+  toda em branco ou `null` limpa;
+- `service_type_ids: [uuid]`: ids repetidos contam uma vez; id que não existe → 422 ("Tipo de serviço não encontrado");
+  `[]` ou `null` limpa.
+
+**Importação** (relatório em `counts`): `customers.with_2plus_contacts`, `locations.with_2plus_contacts`,
+`technicians.with_address`, `technicians.with_schedule`, `technicians.with_services` e `cities_normalized`
+(`{"tabela.coluna": registros alterados}`).
+
+## Busca por palavras
+
+`GET /locations?q=`, `GET /customers?q=` e `GET /technicians?q=` separam a busca em palavras (até 8). Cada palavra
+precisa aparecer em algum dos campos, em qualquer ordem, sem diferença de acento ou de maiúscula. Pontuação separa
+palavras, então CNPJ e telefone acham com ou sem pontuação. "Le Biscuit Iguatemi Fortaleza" acha "Le Biscuit - Shopping
+Iguatemi Fortaleza".
+
+| Rota | Campos |
+| --- | --- |
+| `/locations` | nome, código, CNPJ, endereço, bairro, cidade e nome do cliente |
+| `/customers` | nome e CNPJ/CPF |
+| `/technicians` | nome, e-mail e telefone |
+
+Ordem: primeiro o código ou o documento igual à busca (só lojas e clientes), depois o nome que começa com a busca
+inteira, depois o nome que começa com a primeira palavra, e o resto pelo nome.
+
+## Cidades padronizadas
+
+A mesma cidade vinha escrita de vários jeitos ("FORTALEZA" e "Fortaleza"; "SAO BERNARDO DO CAMPO" e "São Bernardo do
+Campo"). Agora cada cidade tem uma grafia só, por UF. Vale para as lojas, a matriz dos clientes, a cidade de casa e a
+de atuação dos técnicos, e por isso também para as regiões (`GET /technicians/regions`).
+
+Para escolher a grafia, as variantes são comparadas sem acento e sem maiúsculas. Fica, nesta ordem:
+1. a mais usada com grafia de nome próprio e acento ("São Paulo");
+2. sem nenhuma assim, a mais usada com grafia de nome próprio ("Aracaju" ganha de "ARACAJÚ");
+3. sem nenhuma de nome próprio, a mais usada (a acentuada, se houver) em título pt-BR, com "de", "da", "do", "das",
+   "dos" e "e" em minúsculas ("SAO JOAO DEL-REI" vira "Sao Joao del-Rei").
+
+Grafia de nome próprio = iniciais maiúsculas, o resto minúsculo e os conectores em minúsculas.
+
+A importação padroniza no fim, antes de recalcular a região dos técnicos. Para rodar avulso (padroniza e recalcula as
+bases): `python -m app.services.cities`.

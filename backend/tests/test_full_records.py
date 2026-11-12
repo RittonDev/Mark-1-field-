@@ -231,8 +231,10 @@ def test_city_spelling_rules() -> None:
         )
         == "São Bernardo do Campo"
     )
-    # Só em maiúsculas tem acento: vira título pt-BR dela.
-    assert cities.canonical(Counter({"Sao Paulo": 500, "SÃO PAULO": 3})) == "São Paulo"
+    # Acento só na grafia em maiúsculas não ganha da grafia de nome próprio ("ARACAJÚ" é erro).
+    assert cities.canonical(Counter({"Aracaju": 37, "ARACAJÚ": 19, "ARACAJU": 2})) == "Aracaju"
+    # Nenhuma de nome próprio: título pt-BR, preferindo a acentuada.
+    assert cities.canonical(Counter({"SAO JOSE": 2, "SÃO JOSÉ": 1})) == "São José"
     # Conector maiúsculo ou palavra toda minúscula não é grafia de nome próprio.
     assert cities.canonical(Counter({"Rio De Janeiro": 9, "RIO DE JANEIRO": 1})) == (
         "Rio de Janeiro"

@@ -3,9 +3,9 @@
 O Field Control trouxe a mesma cidade de vários jeitos ("FORTALEZA" e "Fortaleza",
 "SAO BERNARDO DO CAMPO" e "São Bernardo do Campo"). Para cada (UF, cidade sem acento e sem
 diferença de maiúscula) fica a grafia mais usada entre as de nome próprio com acento; sem
-nenhuma assim, o título pt-BR ("de", "da", "do", "das", "dos" e "e" em minúsculas) da mais
-usada, preferindo a acentuada (ver `canonical`). Vale para lojas, matriz dos clientes e a
-cidade de casa e de atuação dos técnicos.
+nenhuma assim, a mais usada de nome próprio; sem nenhuma de nome próprio, o título pt-BR ("de",
+"da", "do", "das", "dos" e "e" em minúsculas) da mais usada, preferindo a acentuada (ver
+`canonical`). Vale para lojas, matriz dos clientes e a cidade de casa e de atuação dos técnicos.
 
 Uso avulso: python -m app.services.cities
 """
@@ -88,21 +88,19 @@ def _most_used(pool: Counter[str]) -> str:
 def canonical(variants: Counter[str]) -> str:
     """A grafia escolhida para um grupo de variantes da mesma cidade (com as contagens).
 
-    1. a mais usada com grafia de nome próprio e acento;
-    2. sem ela, a mais usada com acento, em título pt-BR ("SÃO PAULO" -> "São Paulo");
-    3. sem acento em nenhuma, a mais usada com grafia de nome próprio;
-    4. senão, a mais usada em título pt-BR.
+    1. a mais usada com grafia de nome próprio e acento ("São Paulo");
+    2. sem ela, a mais usada com grafia de nome próprio ("Aracaju" ganha de "ARACAJÚ");
+    3. sem nenhuma de nome próprio, o título pt-BR da mais usada, preferindo a acentuada
+       ("SÃO JOSÉ" e "SAO JOSE" -> "São José").
     """
     proper = Counter({v: n for v, n in variants.items() if _proper(v)})
     proper_accented = Counter({v: n for v, n in proper.items() if _accented(v)})
     if proper_accented:
         return _most_used(proper_accented)
-    accented = Counter({v: n for v, n in variants.items() if _accented(v)})
-    if accented:
-        return title_pt(_most_used(accented))
     if proper:
         return _most_used(proper)
-    return title_pt(_most_used(variants))
+    accented = Counter({v: n for v, n in variants.items() if _accented(v)})
+    return title_pt(_most_used(accented or variants))
 
 
 async def normalize_all(db: AsyncSession) -> dict[str, int]:
