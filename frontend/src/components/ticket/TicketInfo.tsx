@@ -3,7 +3,7 @@
 import { ExternalLink, MapPin } from "lucide-react";
 import { Card, CardHeader } from "@/components/ui";
 import { ASSET_TYPE, LEVEL, TICKET_SOURCE, TICKET_TYPE } from "@/lib/constants";
-import { formatDateTime, formatMinutes } from "@/lib/format";
+import { formatDateTime, formatDocument, formatMinutes } from "@/lib/format";
 import type { TicketDetail } from "@/lib/types";
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
@@ -18,13 +18,16 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 export function TicketInfo({ ticket }: { ticket: TicketDetail }) {
   const loc = ticket.location;
   const hasGeo = loc && loc.latitude !== null && loc.longitude !== null;
-  const mapsUrl = hasGeo
-    ? `https://www.google.com/maps?q=${loc.latitude},${loc.longitude}`
-    : loc && (loc.address_line || loc.city)
-      ? `https://www.google.com/maps/search/${encodeURIComponent(
-          [loc.address_line, loc.city, loc.state].filter(Boolean).join(", "),
-        )}`
-      : null;
+  const search = (parts: (string | null | undefined)[]) =>
+    `https://www.google.com/maps/search/${encodeURIComponent(parts.filter(Boolean).join(", "))}`;
+  // Endereço do atendimento, quando informado, vale mais que o cadastro do local.
+  const mapsUrl = ticket.service_address
+    ? search([ticket.service_address, loc?.city, loc?.state])
+    : hasGeo
+      ? `https://www.google.com/maps?q=${loc.latitude},${loc.longitude}`
+      : loc && (loc.address_line || loc.city)
+        ? search([loc.address_line, loc.city, loc.state])
+        : null;
 
   return (
     <>
@@ -35,7 +38,13 @@ export function TicketInfo({ ticket }: { ticket: TicketDetail }) {
           <Row label="Local">
             {loc ? (
               <div>
-                <p>{loc.name}</p>
+                <p>
+                  {loc.code ? <span className="font-mono text-xs text-ink-muted">{loc.code} · </span> : null}
+                  {loc.name}
+                </p>
+                {loc.document ? (
+                  <p className="font-mono text-xs text-ink-muted">CNPJ {formatDocument(loc.document)}</p>
+                ) : null}
                 {loc.address_line ? <p className="text-xs text-ink-muted">{loc.address_line}</p> : null}
                 {loc.city ? (
                   <p className="text-xs text-ink-muted">
@@ -58,6 +67,12 @@ export function TicketInfo({ ticket }: { ticket: TicketDetail }) {
               </div>
             ) : null}
           </Row>
+          {ticket.service_address ? (
+            <Row label="Endereço do atendimento">
+              <span className="font-medium">{ticket.service_address}</span>
+              <span className="block text-xs text-ink-muted">diferente do cadastro do local</span>
+            </Row>
+          ) : null}
           {loc?.contact_name || loc?.contact_phone ? (
             <Row label="Contato local">
               {loc.contact_name}

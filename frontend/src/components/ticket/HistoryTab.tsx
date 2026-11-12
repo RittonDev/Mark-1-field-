@@ -39,6 +39,7 @@ const FIELD_LABELS: Record<string, string> = {
   category_id: "categoria",
   customer_id: "cliente",
   location_id: "local",
+  service_address: "endereço do atendimento",
   asset_id: "equipamento",
   requester_name: "solicitante",
   requester_contact: "contato",

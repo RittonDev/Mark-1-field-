@@ -2,12 +2,13 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
+import { LocationPicker } from "@/components/LocationPicker";
 import { useToast } from "@/components/Toaster";
 import { Button, Dialog, ErrorBox, Field, Input, Select, Textarea } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { computePriority, LEVEL, LEVEL_ORDER, PRIORITY, PRIORITY_ORDER, TICKET_TYPE } from "@/lib/constants";
 import { useCategories, useTeams } from "@/lib/queries";
-import type { Level, TicketDetail, TicketPriority, TicketType, TicketUpdatePayload } from "@/lib/types";
+import type { Level, Location, TicketDetail, TicketPriority, TicketType, TicketUpdatePayload } from "@/lib/types";
 import { useTicketErrorHandler } from "./useConflictHandler";
 
 /** Edição dos dados da OS. Monte só quando aberto para o formulário nascer com os dados atuais. */
@@ -25,6 +26,9 @@ export function EditTicketDialog({ ticket, onClose }: { ticket: TicketDetail; on
   const [impact, setImpact] = useState<Level>(ticket.impact);
   const [urgency, setUrgency] = useState<Level>(ticket.urgency);
   const [priority, setPriority] = useState<TicketPriority>(ticket.priority);
+  // Troca de local: busca restrita ao cliente da OS; null = manter o atual.
+  const [newLocation, setNewLocation] = useState<Location | null>(null);
+  const [serviceAddress, setServiceAddress] = useState(ticket.service_address ?? "");
 
   const sortedCategories = useMemo(
     () => [...(categories.data ?? [])].sort((a, b) => a.full_name.localeCompare(b.full_name)),
@@ -42,6 +46,10 @@ export function EditTicketDialog({ ticket, onClose }: { ticket: TicketDetail; on
       if (impact !== ticket.impact) payload.impact = impact;
       if (urgency !== ticket.urgency) payload.urgency = urgency;
       if (priority !== ticket.priority) payload.priority = priority;
+      if (newLocation && newLocation.id !== ticket.location?.id) payload.location_id = newLocation.id;
+      if (serviceAddress.trim() !== (ticket.service_address ?? "")) {
+        payload.service_address = serviceAddress.trim() || null;
+      }
       return api.patch<TicketDetail>(`/tickets/${ticket.id}`, payload);
     },
     onSuccess: (updated) => {
@@ -91,6 +99,21 @@ export function EditTicketDialog({ ticket, onClose }: { ticket: TicketDetail; on
         </Field>
         <Field label="Descrição" className="sm:col-span-2">
           <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={5} />
+        </Field>
+        <Field
+          label="Local de atendimento"
+          hint={`Atual: ${ticket.location ? ticket.location.name : "nenhum"}. Busque para trocar.`}
+          className="sm:col-span-2"
+        >
+          <LocationPicker customerId={ticket.customer?.id ?? null} value={newLocation} onChange={setNewLocation} />
+        </Field>
+        <Field label="Endereço do atendimento (se diferente do local)" className="sm:col-span-2">
+          <Input
+            value={serviceAddress}
+            onChange={(e) => setServiceAddress(e.target.value)}
+            placeholder="Ex.: Doca 3, entrada pelos fundos"
+            maxLength={255}
+          />
         </Field>
         <Field label="Tipo">
           <Select value={type} onChange={(e) => setType(e.target.value as TicketType)}>

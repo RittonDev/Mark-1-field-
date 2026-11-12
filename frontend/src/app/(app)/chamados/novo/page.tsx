@@ -5,6 +5,7 @@ import { ArrowLeft, Save } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
+import { LocationPicker } from "@/components/LocationPicker";
 import { PriorityBadge } from "@/components/badges";
 import { useToast } from "@/components/Toaster";
 import { Button, Card, CardHeader, ErrorBox, Field, Input, PageHeader, Select, Textarea } from "@/components/ui";
@@ -24,10 +25,11 @@ import {
   TICKET_TYPE,
 } from "@/lib/constants";
 import { fromLocalInput } from "@/lib/format";
-import { useAssignable, useCategories, useCustomers, useLocations, useTeams } from "@/lib/queries";
+import { useAssignable, useCategories, useCustomers, useTeams } from "@/lib/queries";
 import type {
   Asset,
   Level,
+  Location,
   TicketCreatePayload,
   TicketDetail,
   TicketPriority,
@@ -49,6 +51,7 @@ interface FormState {
   asset_id: string;
   requester_name: string;
   requester_contact: string;
+  service_address: string;
   team_id: string;
   assignee_id: string;
   scheduled_start: string;
@@ -69,6 +72,7 @@ const INITIAL: FormState = {
   asset_id: "",
   requester_name: "",
   requester_contact: "",
+  service_address: "",
   team_id: "",
   assignee_id: "",
   scheduled_start: "",
@@ -87,7 +91,8 @@ export default function NewTicketPage() {
 
   const categories = useCategories();
   const customers = useCustomers();
-  const locations = useLocations(form.customer_id || null);
+  // Local escolhido no seletor com busca (o form guarda só o id).
+  const [location, setLocation] = useState<Location | null>(null);
   const teams = useTeams();
   const assignable = useAssignable(form.team_id || null, canAssign);
   const assets = useQuery({
@@ -135,6 +140,7 @@ export default function NewTicketPage() {
       asset_id: form.asset_id || null,
       requester_name: form.requester_name.trim() || null,
       requester_contact: form.requester_contact.trim() || null,
+      service_address: form.service_address.trim() || null,
     };
     if (staff) {
       payload.team_id = form.team_id || null;
@@ -224,14 +230,31 @@ export default function NewTicketPage() {
           <Card>
             <CardHeader title="Cliente, local e equipamento" />
             <div className="grid gap-4 p-4 md:grid-cols-2">
+              <Field label="Local de atendimento (filial)" className="md:col-span-2">
+                <LocationPicker
+                  customerId={form.customer_id || null}
+                  value={location}
+                  onChange={(loc) => {
+                    setLocation(loc);
+                    // O local define o cliente (a filial pertence a um cliente).
+                    setForm((f) => ({
+                      ...f,
+                      location_id: loc?.id ?? "",
+                      customer_id: loc ? loc.customer_id : f.customer_id,
+                      asset_id: "",
+                    }));
+                  }}
+                />
+              </Field>
               <Field label="Cliente">
                 <Select
                   value={form.customer_id}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, customer_id: e.target.value, location_id: "", asset_id: "" }))
-                  }
+                  onChange={(e) => {
+                    setLocation(null);
+                    setForm((f) => ({ ...f, customer_id: e.target.value, location_id: "", asset_id: "" }));
+                  }}
                 >
-                  <option value="">Selecione...</option>
+                  <option value="">Selecione... (ou escolha o local acima)</option>
                   {customers.data?.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
@@ -239,20 +262,13 @@ export default function NewTicketPage() {
                   ))}
                 </Select>
               </Field>
-              <Field label="Local de atendimento">
-                <Select
-                  value={form.location_id}
-                  disabled={!form.customer_id}
-                  onChange={(e) => setForm((f) => ({ ...f, location_id: e.target.value, asset_id: "" }))}
-                >
-                  <option value="">{form.customer_id ? "Selecione..." : "Escolha o cliente primeiro"}</option>
-                  {locations.data?.map((l) => (
-                    <option key={l.id} value={l.id}>
-                      {l.name}
-                      {l.city ? ` · ${l.city}` : ""}
-                    </option>
-                  ))}
-                </Select>
+              <Field label="Endereço do atendimento (se diferente do local)">
+                <Input
+                  value={form.service_address}
+                  onChange={(e) => set("service_address", e.target.value)}
+                  placeholder="Ex.: Doca 3, entrada pelos fundos"
+                  maxLength={255}
+                />
               </Field>
               <Field label="Equipamento (ativo)" className="md:col-span-2">
                 <Select
