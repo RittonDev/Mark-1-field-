@@ -314,6 +314,21 @@ export async function deleteOp(db: DB, clientOpId: string): Promise<void> {
   await db.runAsync("DELETE FROM outbox WHERE client_op_id = ?", clientOpId);
 }
 
+/**
+ * Tira da fila os rascunhos (respostas sem concluir) de um formulário. Cada envio leva todas as
+ * respostas, então o novo substitui os anteriores; a conclusão fica, porque muda o status.
+ */
+export async function dropFormDrafts(db: DB, ticketId: UUID, formId: UUID): Promise<void> {
+  await db.runAsync(
+    `DELETE FROM outbox
+      WHERE ticket_id = ? AND type = 'form_answers'
+        AND json_extract(payload, '$.form_id') = ?
+        AND json_extract(payload, '$.complete') = 0`,
+    ticketId,
+    formId,
+  );
+}
+
 export async function markOpsAttempt(db: DB, clientOpIds: string[], error: string | null): Promise<void> {
   for (const id of clientOpIds) {
     await db.runAsync("UPDATE outbox SET attempts = attempts + 1, last_error = ? WHERE client_op_id = ?", error, id);

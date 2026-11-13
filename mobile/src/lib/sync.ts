@@ -19,6 +19,7 @@ import {
   countPending,
   deleteLocalDraft,
   deleteOp,
+  dropFormDrafts,
   deleteSignature,
   deletePhoto,
   deleteTicket,
@@ -822,6 +823,8 @@ async function enqueue(ticketId: UUID, operation: SyncOperation) {
   const clientOpId = randomUUID();
   const clientTimestamp = new Date().toISOString();
   await transaction(async (db) => {
+    // O formulário salva sozinho a cada pergunta: a fila guarda só o rascunho mais recente.
+    if (operation.type === "form_answers") await dropFormDrafts(db, ticketId, operation.payload.form_id);
     await insertOp(db, { ...operation, client_op_id: clientOpId, ticket_id: ticketId, client_timestamp: clientTimestamp });
     if (operation.type === "comment") {
       await insertLocalComment(db, {

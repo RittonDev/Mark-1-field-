@@ -133,3 +133,80 @@ export function signatureBlock(ticket: Pick<TicketDetail, "forms" | "status">): 
   if (pending.length) return `Preencha o formulário antes de colher a assinatura: ${pending.map((f) => f.name).join(", ")}`;
   return null;
 }
+
+// ─────────────── uma pergunta por tela (como o "passo a passo" do Field Control) ───────────────
+
+/** Cada campo que se responde (texto, escolha, foto…) vira um passo; a seção vira o título dele. */
+export interface FormStep {
+  field: FormField;
+  section: string | null;
+}
+
+export function buildSteps(fields: FormField[]): FormStep[] {
+  const steps: FormStep[] = [];
+  let section: string | null = null;
+  for (const field of fields) {
+    if (field.type === "section") section = field.label;
+    else steps.push({ field, section });
+  }
+  return steps;
+}
+
+/** O campo conta para concluir: obrigatório, ou foto com mínimo. */
+export const isRequiredItem = (f: FormField) => f.type !== "section" && (f.required || (f.type === "photo" && photoNeed(f) > 0));
+
+/** Número digitado que não é número (ex.: "12a"): seria descartado ao salvar. */
+export function invalidNumber(field: FormField, raw: FormAnswer | null | undefined): boolean {
+  if (field.type !== "number" || raw === null || raw === undefined) return false;
+  return String(raw).trim() !== "" && normalizeAnswer(field, raw) === null;
+}
+
+/** O que falta neste passo para o formulário poder ser concluído, ou null. `value` já normalizado. */
+export function stepProblem(field: FormField, value: FormAnswer | null | undefined, photos: number): string | null {
+  if (field.type === "section") return null;
+  if (field.type === "photo") {
+    const left = photoNeed(field) - photos;
+    if (left <= 0) return null;
+    return left === 1 ? "Falta 1 foto" : `Faltam ${left} fotos`;
+  }
+  return field.required && !isAnswered(field, value) ? "Pergunta obrigatória" : null;
+}
+
+/** Passo com resposta (ou com ao menos uma foto). */
+export function stepAnswered(field: FormField, value: FormAnswer | null | undefined, photos: number): boolean {
+  return field.type === "photo" ? photos > 0 : isAnswered(field, value);
+}
+
+/**
+ * Onde retomar o preenchimento: logo depois da última pergunta respondida; se a última já foi
+ * respondida, a primeira obrigatória pendente; com tudo em ordem, a revisão (= steps.length).
+ */
+export function resumeStep(count: number, answered: (index: number) => boolean, pending: (index: number) => boolean): number {
+  let last = -1;
+  for (let i = 0; i < count; i++) if (answered(i)) last = i;
+  if (last < count - 1) return last + 1;
+  for (let i = 0; i < count; i++) if (pending(i)) return i;
+  return count;
+}
+
+/** Resposta em texto curto para a revisão ("Sim", "12,5", "19/11/2026", "3 fotos"). `value` já normalizado. */
+export function answerText(field: FormField, value: FormAnswer | null | undefined, photos: number): string | null {
+  if (field.type === "photo") return photos ? `${photos} foto${photos > 1 ? "s" : ""}` : null;
+  if (!isAnswered(field, value)) return null;
+  switch (field.type) {
+    case "yes_no":
+      return value ? "Sim" : "Não";
+    case "confirm":
+      return "Confirmado";
+    case "multi_choice":
+      return Array.isArray(value) ? value.join(", ") : String(value);
+    case "number":
+      return String(value).replace(".", ",");
+    case "date": {
+      const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value));
+      return day ? `${day[3]}/${day[2]}/${day[1]}` : String(value);
+    }
+    default:
+      return String(value);
+  }
+}
