@@ -380,7 +380,7 @@ function FormDialog({
           const fieldPhotos = photos.filter((p) => p.field_id === field.id);
           return (
             <div key={field.id} className="flex flex-col gap-1.5">
-              <span className="text-xs font-semibold text-ink/80">
+              <span className="text-sm font-semibold text-ink">
                 {field.label}
                 {field.required || (field.type === "photo" && field.min_photos > 0) ? (
                   <span className="text-red-500"> *</span>

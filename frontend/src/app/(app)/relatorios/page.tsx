@@ -5,7 +5,7 @@ import clsx from "clsx";
 import { Download, Moon, Star, Table2 } from "lucide-react";
 import { useState } from "react";
 import { Legend, RankBars, StatTile, TrendChart } from "@/components/charts";
-import { Button, Card, ErrorBox, Input, LoadingBlock, PageHeader } from "@/components/ui";
+import { Button, Card, ErrorBox, Input, LoadingBlock, PageHeader, SectionTitle } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canManageTickets } from "@/lib/constants";
@@ -143,15 +143,21 @@ function Panels({ data, period }: { data: Daily | Monthly; period: string }) {
   return (
     <div className="grid gap-4 lg:grid-cols-3">
       <Card className="p-4">
-        <h2 className="mb-3 text-sm font-bold text-ink">Clientes com mais chamados {period}</h2>
+        <SectionTitle as="h2" wrap className="mb-3">
+          Clientes com mais chamados {period}
+        </SectionTitle>
         <RankBars items={data.customers} empty="Nenhum chamado aberto." />
       </Card>
       <Card className="p-4">
-        <h2 className="mb-3 text-sm font-bold text-ink">OS resolvidas por técnico</h2>
+        <SectionTitle as="h2" wrap className="mb-3">
+          OS resolvidas por técnico
+        </SectionTitle>
         <RankBars items={data.technicians} empty="Nenhuma OS resolvida." />
       </Card>
       <Card className="p-4">
-        <h2 className="mb-3 text-sm font-bold text-ink">Motivos das visitas improdutivas</h2>
+        <SectionTitle as="h2" wrap className="mb-3">
+          Motivos das visitas improdutivas
+        </SectionTitle>
         <RankBars items={data.unproductive_reasons} empty="Nenhuma visita improdutiva." />
       </Card>
     </div>
@@ -259,7 +265,7 @@ function MonthlyView() {
       <Card className="p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h2 className="text-sm font-bold text-ink">Chamados por dia</h2>
+            <SectionTitle as="h2">Chamados por dia</SectionTitle>
             <Legend series={series} />
           </div>
           <Button size="sm" variant="ghost" onClick={() => setTable((v) => !v)}>

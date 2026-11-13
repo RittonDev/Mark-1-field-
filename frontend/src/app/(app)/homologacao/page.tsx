@@ -113,8 +113,8 @@ export default function OnboardingPage() {
             aria-selected={tab === t.key}
             onClick={() => setTab(t.key)}
             className={clsx(
-              "relative shrink-0 px-3 pt-1 pb-2.5 text-sm font-medium transition-colors",
-              tab === t.key ? "text-ink" : "text-ink-muted hover:text-ink",
+              "relative shrink-0 px-3 pt-1 pb-2.5 text-sm transition-colors",
+              tab === t.key ? "font-semibold text-ink" : "font-medium text-ink-muted hover:text-ink",
             )}
           >
             {t.label}

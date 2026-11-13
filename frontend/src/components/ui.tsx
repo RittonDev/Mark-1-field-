@@ -160,7 +160,8 @@ export function CardHeader({
   actions?: React.ReactNode;
 }) {
   return (
-    <div className="flex items-start justify-between gap-3 border-b border-line px-5 py-3.5">
+    // Sem descrição, as ações (botão, legenda) ficam centradas na linha do título; com descrição, no topo.
+    <div className={clsx("flex justify-between gap-3 border-b border-line px-5 py-3.5", description ? "items-start" : "items-center")}>
       <div className="flex min-w-0 gap-2.5">
         {/* Marca da seção nas cores da logo (azul -> ciano): ajuda a achar cada bloco na tela. */}
         <span aria-hidden className="mt-[3px] h-3.5 w-[3px] shrink-0 rounded-full bg-linear-to-b from-brand to-brand-cyan" />
@@ -182,18 +183,29 @@ export function SectionTitle({
   children,
   aside,
   className,
+  as: Heading = "h3",
+  wrap = false,
 }: {
   children: React.ReactNode;
   /** Ação ou informação à direita (ex.: "Copiar convite", contador). */
   aside?: React.ReactNode;
   className?: string;
+  /** Nível do título na página (h2 quando não há outro título de seção acima). */
+  as?: "h2" | "h3" | "h4";
+  /** Título longo quebra a linha em vez de cortar com reticências (e a ação desce se não couber). */
+  wrap?: boolean;
 }) {
   return (
-    <div className={clsx("flex items-center justify-between gap-3", className)}>
-      <h3 className="flex min-w-0 items-center gap-2 text-[13px] leading-5 font-bold tracking-[-0.005em] text-ink">
-        <span aria-hidden className="h-3 w-[3px] shrink-0 rounded-full bg-linear-to-b from-brand to-brand-cyan" />
-        <span className="min-w-0 truncate">{children}</span>
-      </h3>
+    <div className={clsx("flex justify-between gap-x-3 gap-y-1.5", wrap ? "flex-wrap items-start" : "items-center", className)}>
+      <Heading
+        className={clsx(
+          "flex min-w-0 gap-2 text-[13px] leading-5 font-bold tracking-[-0.005em] text-ink",
+          wrap ? "items-start" : "items-center",
+        )}
+      >
+        <span aria-hidden className={clsx("h-3 w-[3px] shrink-0 rounded-full bg-linear-to-b from-brand to-brand-cyan", wrap && "mt-1")} />
+        <span className={clsx("min-w-0", wrap ? "text-pretty" : "truncate")}>{children}</span>
+      </Heading>
       {aside ? <div className="flex shrink-0 items-center gap-2">{aside}</div> : null}
     </div>
   );
