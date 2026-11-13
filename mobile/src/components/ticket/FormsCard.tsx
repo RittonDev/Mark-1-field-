@@ -1,11 +1,11 @@
 import { router } from "expo-router";
-import { memo, useCallback } from "react";
+import { memo } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
-import { useLiveQuery } from "../../lib/changes";
-import { getAttachmentsCache, listPhotos, listSignatures } from "../../lib/db";
+import type { PendingPhoto, PendingSignature } from "../../lib/db";
 import { formatDateTime } from "../../lib/format";
 import { formProgress, pendingRequiredForms, photoCounts, signatureBlock } from "../../lib/forms";
 import type { LocalTicket } from "../../lib/syncTypes";
+import type { Attachment } from "../../lib/types";
 import { RADIUS, useStyles, useTheme, type Palette } from "../../theme/theme";
 import { Icon } from "../Icon";
 import { Text } from "../Text";
@@ -30,17 +30,23 @@ export function openSignature(ticketId: string) {
   openOnce(() => router.push({ pathname: "/assinatura/[ticketId]", params: { ticketId } }));
 }
 
-/** Formulários anexados pela central e a assinatura do responsável no local. */
-export const FormsCard = memo(function FormsCard({ ticket }: { ticket: LocalTicket }) {
+/**
+ * Formulários anexados pela central e a assinatura do responsável no local. A tela da OS passa o que
+ * já leu do aparelho (anexos, fotos e assinatura na fila): o cartão não repete as consultas.
+ */
+export const FormsCard = memo(function FormsCard({
+  ticket,
+  attachments,
+  pendingPhotos,
+  pendingSignature,
+}: {
+  ticket: LocalTicket;
+  attachments: Attachment[];
+  pendingPhotos: PendingPhoto[];
+  pendingSignature: PendingSignature | null;
+}) {
   const c = useTheme();
   const styles = useStyles(makeStyles);
-  const loadAttachments = useCallback(() => getAttachmentsCache(ticket.id), [ticket.id]);
-  const loadPhotos = useCallback(() => listPhotos(ticket.id), [ticket.id]);
-  const loadSignatures = useCallback(() => listSignatures(ticket.id), [ticket.id]);
-  const attachments = useLiveQuery(loadAttachments) ?? [];
-  const pendingPhotos = useLiveQuery(loadPhotos) ?? [];
-  const pendingSignature = useLiveQuery(loadSignatures)?.[0] ?? null;
-
   const forms = ticket.forms ?? [];
   if (!forms.length && !ticket.signature_required && !ticket.signed_at) return null;
   const done = ["resolved", "closed", "cancelled"].includes(ticket.status);
@@ -53,7 +59,7 @@ export const FormsCard = memo(function FormsCard({ ticket }: { ticket: LocalTick
 
   return (
     <Card style={{ gap: 10 }}>
-      <SectionTitle>Formulários e assinatura</SectionTitle>
+      <SectionTitle accent>Formulários e assinatura</SectionTitle>
       {forms.map((form) => {
         const progress = formProgress(form, photoCounts(form.id, attachments, pendingPhotos));
         const completed = form.status === "completed";

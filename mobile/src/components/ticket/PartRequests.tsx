@@ -65,6 +65,7 @@ export const PartRequestsCard = memo(function PartRequestsCard({
   return (
     <Card style={{ gap: 12 }}>
       <SectionTitle
+        accent
         right={
           canRequest ? <Button title="Pedir peça" icon="plus" compact variant="ghost" onPress={onRequest} /> : undefined
         }

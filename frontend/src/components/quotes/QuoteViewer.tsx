@@ -11,7 +11,7 @@ import { useNow } from "@/components/useNow";
 import { absoluteApiUrl, api, errorMessage } from "@/lib/api";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
 import { localDateISO, QUOTE_KIND, QUOTE_STATUS, totalsByKind } from "@/lib/quotes";
-import type { CompanyProfile, PublicQuote, Quote, QuoteItemKind, QuoteStatus, UUID } from "@/lib/types";
+import type { CompanyProfile, PublicQuote, Quote, QuoteItemKind, QuoteStatus, TicketDetail, UUID } from "@/lib/types";
 
 /** Situações em que o orçamento ainda pode ser alterado (o mesmo do backend). */
 export const QUOTE_EDITABLE: QuoteStatus[] = ["draft", "sent", "expired"];
@@ -20,16 +20,43 @@ const qty = (value: number) => value.toLocaleString("pt-BR", { maximumFractionDi
 
 type ViewerTicket = { id: UUID; code: string; customer?: string | null; title?: string | null };
 
-/** O orçamento no formato do documento do cliente, para o PDF baixado pela central. */
-function asDocument(quote: Quote, ticket: ViewerTicket | null | undefined, company: CompanyProfile | null): PublicQuote {
+/** Endereço do atendimento como o cliente vê: o da OS, quando informado; senão, o da loja. */
+function serviceAddress(detail: TicketDetail | null): PublicQuote["address"] {
+  if (!detail) return null;
+  const loc = detail.location;
+  const cityState = [loc?.city, loc?.state].filter(Boolean).join(" - ");
+  const full = detail.service_address?.trim() || [loc?.address_line, cityState].filter(Boolean).join(", ");
+  if (!full) return null;
+  return {
+    line: detail.service_address || loc?.address_line || null,
+    district: null,
+    city: loc?.city ?? null,
+    state: loc?.state ?? null,
+    zip_code: null,
+    full,
+  };
+}
+
+/**
+ * O orçamento no formato do documento do cliente, para o PDF baixado pela central (com a loja e o
+ * endereço da OS, quando ela está à mão).
+ */
+function asDocument(
+  quote: Quote,
+  ticket: ViewerTicket | null | undefined,
+  company: CompanyProfile | null,
+  detail: TicketDetail | null,
+): PublicQuote {
   return {
     code: quote.code,
     title: quote.title,
     status: quote.status,
-    customer: ticket?.customer ?? null,
-    location: null,
-    ticket_code: ticket?.code ?? "",
-    ticket_title: ticket?.title ?? "",
+    customer: detail?.customer?.name ?? ticket?.customer ?? null,
+    location: detail?.location?.name ?? null,
+    address: serviceAddress(detail),
+    ticket_number: detail?.number,
+    ticket_code: ticket?.code ?? detail?.code ?? "",
+    ticket_title: ticket?.title ?? detail?.title ?? "",
     items: quote.items,
     subtotal: quote.subtotal,
     discount: quote.discount,
@@ -205,15 +232,27 @@ export function QuoteViewer({
   const downloadPdf = async () => {
     setPdfBusy(true);
     try {
-      const company = await queryClient
-        .fetchQuery({
-          queryKey: ["settings", "company"],
-          queryFn: () => api.get<CompanyProfile>("/settings/company"),
-          staleTime: 5 * 60_000,
-        })
-        .catch(() => null);
+      const [company, detail] = await Promise.all([
+        queryClient
+          .fetchQuery({
+            queryKey: ["settings", "company"],
+            queryFn: () => api.get<CompanyProfile>("/settings/company"),
+            staleTime: 5 * 60_000,
+          })
+          .catch(() => null),
+        // A OS (loja e endereço do atendimento): já carregada quando o orçamento é aberto de dentro dela.
+        ticket
+          ? queryClient
+              .fetchQuery({
+                queryKey: ["ticket", ticket.id],
+                queryFn: () => api.get<TicketDetail>(`/tickets/${ticket.id}`),
+                staleTime: 60_000,
+              })
+              .catch(() => null)
+          : Promise.resolve(null),
+      ]);
       const { downloadQuotePdf } = await import("./QuotePdf");
-      await downloadQuotePdf(asDocument(quote, ticket, company));
+      await downloadQuotePdf(asDocument(quote, ticket, company, detail));
     } catch (e) {
       toast({ title: "Não foi possível gerar o PDF", description: errorMessage(e), tone: "error" });
     } finally {

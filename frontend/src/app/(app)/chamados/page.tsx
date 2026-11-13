@@ -332,11 +332,14 @@ function TicketsView() {
   const total = data?.total ?? 0;
   const totalPages = data ? Math.max(1, Math.ceil(data.total / data.page_size)) : 1;
   const first = data ? (data.page - 1) * data.page_size + 1 : 0;
+  // "312 OS em aberto", "28 OS em aberto com os filtros", "15.351 OS no total", "40 OS na busca".
+  const suffix = anyFilter ? " com os filtros" : urlQ ? " na busca" : "";
+  const phrase = view === "todas" && suffix ? "" : ` ${viewInfo.phrase}`;
   const description = !data
     ? "Ordens de serviço"
     : numberSearch
       ? `Busca pelo nº em todas as OS: ${countOs(total)}`
-      : `${countOs(total)} ${viewInfo.phrase}${anyFilter ? " com os filtros" : urlQ ? " na busca" : ""}`;
+      : `${countOs(total)}${phrase}${suffix}`;
   const rowClass = compact ? "[&>td]:py-1.5" : undefined;
 
   return (
@@ -456,7 +459,8 @@ function TicketsView() {
           </div>
         </div>
 
-        {query.isLoading ? (
+        {/* Página vazia de uma lista que encolheu: carrega enquanto vai para a última página com OS. */}
+        {query.isLoading || (data && data.items.length === 0 && data.total > 0 && page > 1) ? (
           <LoadingBlock rows={6} />
         ) : !data ? (
           <div className="p-4">

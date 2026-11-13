@@ -18,6 +18,7 @@ export function ExpensesCard({ expenses, userId }: { expenses: Expense[]; userId
   return (
     <Card style={{ gap: 10 }}>
       <SectionTitle
+        accent
         right={
           <View style={styles.readonly} accessible accessibilityLabel="Somente leitura">
             <Icon name="lock" size={14} color={c.inkMuted} />

@@ -35,6 +35,7 @@ import type {
   UUID,
 } from "@/lib/types";
 import { copyText } from "@/lib/whatsapp";
+import { DISCARD_CONFIRM } from "./useUnsavedGuard";
 
 /** Prefixo do id do formulário (o editor soma um id próprio: página e painel podem estar abertos juntos). */
 export const GENERAL_FORM_ID = "ticket-general";
@@ -736,7 +737,14 @@ export function GeneralTab({
             Suas alterações continuam aqui; o resto já mostra a versão nova.
             {notice.length ? ` Também mudaram por fora: ${notice.join(", ")}.` : ""}
           </p>
-          <button type="button" onClick={discard} className="mt-1.5 text-xs font-semibold underline underline-offset-2 hover:no-underline">
+          <button
+            type="button"
+            onClick={async () => {
+              if (await confirm(DISCARD_CONFIRM)) discard();
+            }}
+            disabled={save.isPending}
+            className="mt-1.5 text-xs font-semibold underline underline-offset-2 hover:no-underline disabled:opacity-50"
+          >
             Descartar minhas alterações
           </button>
         </div>

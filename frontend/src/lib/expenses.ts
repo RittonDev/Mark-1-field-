@@ -22,3 +22,14 @@ export const EXPENSE_STATUS: Record<ExpenseStatus, { label: string; className: s
   paid: { label: "Reembolsado", className: "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300", color: "#10b981" },
   rejected: { label: "Recusado", className: "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300", color: "#dc2626" },
 };
+
+/**
+ * Trocas de situação que a API aceita (espelha TRANSITIONS em backend/app/services/expenses.py): só o
+ * aprovado vira reembolsado, e o reembolsado só volta para aprovado (estorno).
+ */
+export const EXPENSE_TRANSITIONS: Record<ExpenseStatus, ExpenseStatus[]> = {
+  pending: ["approved", "rejected"],
+  approved: ["pending", "rejected", "paid"],
+  rejected: ["pending", "approved"],
+  paid: ["approved"],
+};

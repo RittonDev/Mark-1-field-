@@ -112,6 +112,8 @@ export function PayoutsDialog({ ticket, onClose }: { ticket: TicketDetail; onClo
     <Dialog
       open
       onClose={onClose}
+      dirty={changed.length > 0}
+      busy={save.isPending}
       title="Valor do técnico"
       description="Os técnicos são parceiros e recebem por chamado. O pagamento é feito em Pagamentos."
       footer={

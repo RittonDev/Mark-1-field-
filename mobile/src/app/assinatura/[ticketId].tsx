@@ -213,7 +213,7 @@ function SignatureEditor({ ticket }: { ticket: LocalTicket }) {
           </Field>
         </Card>
         <Card style={{ gap: 6 }}>
-          <SectionTitle>O que está sendo assinado</SectionTitle>
+          <SectionTitle accent>O que está sendo assinado</SectionTitle>
           <Text style={styles.summaryTitle}>{ticket.title}</Text>
           {client ? <Text style={styles.summaryLine}>{client}</Text> : null}
           {ticket.service_type ? <Text style={styles.summaryLine}>{ticket.service_type.name}</Text> : null}

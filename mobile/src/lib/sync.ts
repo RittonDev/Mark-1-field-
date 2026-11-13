@@ -30,6 +30,7 @@ import {
   deleteSignature,
   deleteTicket,
   dropFormDrafts,
+  formAnswersQueued,
   getAttachmentsCache,
   getDb,
   getKv,
@@ -137,7 +138,10 @@ export interface SyncStatus {
   lastError: string | null;
   pendingOps: number;
   pendingPhotos: number;
-  /** Ações que o servidor falhou em processar várias vezes seguidas: o técnico decide (Conta → Descartar). */
+  /**
+   * Ações que o servidor falhou em processar sozinhas várias vezes seguidas: seguem tentando (com
+   * espera), não seguram as outras OS e pedem atenção (avisar a central; em Conta, dá para descartar).
+   */
   stuckOps: number;
 }
 
@@ -648,15 +652,18 @@ async function applyResults(round: Round, ops: OutboxOp[], response: SyncPushRes
         if (op.type === "form_answers") {
           await setFormError(op.payload.form_id, cleanServerError(result.error), db);
           // Conclusão recusada por falta de item: o servidor não gravou nada. Reenvia as mesmas
-          // respostas sem concluir, para o técnico não perder o que preencheu.
+          // respostas sem concluir, para o técnico não perder o que preencheu — a não ser que já haja
+          // na fila respostas mais novas deste formulário (elas levam tudo; as antigas as desfariam).
           if (op.payload.complete && FORM_INCOMPLETE.test(result.error ?? "")) {
-            await insertOp(db, {
-              type: "form_answers",
-              payload: { ...op.payload, complete: false },
-              client_op_id: randomUUID(),
-              ticket_id: op.ticket_id,
-              client_timestamp: new Date().toISOString(),
-            });
+            if (!(await formAnswersQueued(db, op.ticket_id, op.payload.form_id))) {
+              await insertOp(db, {
+                type: "form_answers",
+                payload: { ...op.payload, complete: false },
+                client_op_id: randomUUID(),
+                ticket_id: op.ticket_id,
+                client_timestamp: new Date().toISOString(),
+              });
+            }
             message = `Formulário não concluído — ${cleanServerError(result.error)}. As respostas foram mantidas.`;
           }
         }

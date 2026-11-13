@@ -145,9 +145,7 @@ async def recompute_arrival_due(db: AsyncSession, ticket: Ticket, r: FieldRules)
     ticket.arrival_due_at = arrival_due(clock_start(ticket), hours, ticket.scheduled_start)
 
 
-def start_onsite_clock(
-    ticket: Ticket, r: FieldRules, start: datetime, *, used_s: int = 0
-) -> None:
+def start_onsite_clock(ticket: Ticket, r: FieldRules, start: datetime, *, used_s: int = 0) -> None:
     """Limite de tempo na loja para o trecho que começa em `start`: o que sobra das horas do
     chamado depois dos `used_s` segundos já usados em visitas anteriores."""
     left = max(0, r.onsite_hours * 3600 - used_s)

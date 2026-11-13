@@ -43,7 +43,8 @@ class CalendarEvent(BaseModel):
     customer: Ref | None
     location: CalendarLocation | None
     service_type: str | None
-    # OS do mesmo responsável com horário sobreposto (no período consultado).
+    # OS com horário sobreposto de alguém da visita (o responsável ou outro técnico), no período
+    # consultado.
     conflict_with: list[uuid.UUID]
 
 

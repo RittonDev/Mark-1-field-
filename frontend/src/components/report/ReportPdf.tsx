@@ -11,11 +11,11 @@ import {
   brTime,
   captionText,
   FILE_KIND_LABEL,
-  fileKind,
   groupByPhase,
   PHASE_LABEL,
   progressLine,
   progressSteps,
+  reportPhotoKind,
   reportStage,
 } from "./shared";
 
@@ -125,7 +125,7 @@ function Photos({ photos, images, grouped = false }: { photos: PublicReportPhoto
   return (
     <View style={s.photos}>
       {photos.map((p, i) => {
-        const kind = fileKind(p.filename);
+        const kind = reportPhotoKind(p.filename);
         const src = kind === "image" ? source(p.url, images) : null;
         // Dentro do grupo "Antes"/"Depois" o marcador da legenda já está no título do grupo.
         const caption = grouped ? captionText(p.caption) : (p.caption ?? "").trim();
@@ -393,7 +393,7 @@ export function ReportPdf({ report, images, logo = null }: { report: PublicRepor
 /** Fotos do relatório que entram no PDF (só imagens; PDF, vídeo e HEIC viram aviso). */
 function pdfPhotoUrls(report: PublicReport): string[] {
   const photos = [...report.forms.flatMap((f) => f.items.flatMap((i) => i.photos)), ...report.photos];
-  const urls = photos.filter((p) => fileKind(p.filename) === "image").map((p) => p.url);
+  const urls = photos.filter((p) => reportPhotoKind(p.filename) === "image").map((p) => p.url);
   if (report.signature?.image_url) urls.push(report.signature.image_url);
   return urls;
 }

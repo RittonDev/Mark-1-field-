@@ -121,7 +121,7 @@ export function OnsiteTimer({ ticket }: { ticket: Clockable & Pick<TicketDetail,
     void getKv(key).then((done) => {
       if (!alive || done) return;
       haptic.warning();
-      void setKv(key, new Date().toISOString());
+      void setKv(key, new Date().toISOString(), undefined, { notify: false });
     });
     return () => {
       alive = false;

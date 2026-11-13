@@ -203,6 +203,15 @@ export function fileKind(filename: string, contentType?: string | null): FileKin
   return "other";
 }
 
+/**
+ * Tipo de uma foto do relatório (que só traz fotos, sem o tipo do arquivo): sem extensão conhecida
+ * conta como imagem; HEIC, PDF e vídeo guardados como foto, não.
+ */
+export function reportPhotoKind(filename: string): FileKind {
+  const kind = fileKind(filename);
+  return kind === "other" ? "image" : kind;
+}
+
 export const FILE_KIND_LABEL: Record<Exclude<FileKind, "image">, string> = {
   heic: "Foto HEIC",
   pdf: "PDF",

@@ -154,6 +154,8 @@ export default function PublicQuotePage() {
   const answerTitleId = useId();
   const commentId = useId();
   const commentCountId = useId();
+  const reasonId = useId();
+  const reasonCountId = useId();
   const path = `/public/quotes/${encodeURIComponent(token)}`;
 
   useEffect(() => {
@@ -628,42 +630,47 @@ export default function PublicQuotePage() {
                   </div>
 
                   <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-                    {mode === "approve" ? (
-                      <div className="flex flex-col gap-3 rounded-xl border border-line p-4">
-                        <p className="text-xs font-semibold text-ink/80">
-                          Assinatura <span className="text-red-600 dark:text-red-400">*</span>
-                        </p>
-                        <SignaturePad onChange={setSignature} />
-                        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem]">
-                          <label className="flex flex-col gap-1.5">
-                            <span className="text-xs font-semibold text-ink/80">
-                              Nome completo <span className="text-red-600 dark:text-red-400">*</span>
-                            </span>
-                            <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={NAME_MAX} autoComplete="name" />
-                          </label>
-                          <label className="flex flex-col gap-1.5">
-                            <span className="text-xs font-semibold text-ink/80">Matrícula (opcional)</span>
-                            <Input value={registration} onChange={(e) => setRegistration(e.target.value)} maxLength={REGISTRATION_MAX} />
-                          </label>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex flex-col gap-3 rounded-xl border border-line p-4">
+                    {/* Os dois quadros ficam montados: ir a "Recusar" e voltar não apaga a assinatura desenhada. */}
+                    <div className={clsx("flex flex-col gap-3 rounded-xl border border-line p-4", mode !== "approve" && "hidden")}>
+                      <p className="text-xs font-semibold text-ink/80">
+                        Assinatura <span className="text-red-600 dark:text-red-400">*</span>
+                      </p>
+                      <SignaturePad onChange={setSignature} />
+                      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem]">
                         <label className="flex flex-col gap-1.5">
                           <span className="text-xs font-semibold text-ink/80">
-                            Motivo da recusa <span className="text-red-600 dark:text-red-400">*</span>
+                            Nome completo <span className="text-red-600 dark:text-red-400">*</span>
                           </span>
-                          <Textarea rows={4} value={reason} onChange={(e) => setReason(e.target.value)} maxLength={TEXT_MAX} />
-                          <span className="text-xs text-ink-subtle tabular-nums">
-                            {reason.length}/{TEXT_MAX} · pelo menos 3 letras
-                          </span>
-                        </label>
-                        <label className="flex flex-col gap-1.5">
-                          <span className="text-xs font-semibold text-ink/80">Seu nome</span>
                           <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={NAME_MAX} autoComplete="name" />
                         </label>
+                        <label className="flex flex-col gap-1.5">
+                          <span className="text-xs font-semibold text-ink/80">Matrícula (opcional)</span>
+                          <Input value={registration} onChange={(e) => setRegistration(e.target.value)} maxLength={REGISTRATION_MAX} />
+                        </label>
                       </div>
-                    )}
+                    </div>
+                    <div className={clsx("flex flex-col gap-3 rounded-xl border border-line p-4", mode !== "reject" && "hidden")}>
+                      <div className="flex flex-col gap-1.5">
+                        <label htmlFor={reasonId} className="text-xs font-semibold text-ink/80">
+                          Motivo da recusa <span className="text-red-600 dark:text-red-400">*</span>
+                        </label>
+                        <Textarea
+                          id={reasonId}
+                          rows={4}
+                          value={reason}
+                          onChange={(e) => setReason(e.target.value)}
+                          maxLength={TEXT_MAX}
+                          aria-describedby={reasonCountId}
+                        />
+                        <span id={reasonCountId} className="text-xs text-ink-subtle tabular-nums">
+                          {reason.length}/{TEXT_MAX} · pelo menos 3 letras
+                        </span>
+                      </div>
+                      <label className="flex flex-col gap-1.5">
+                        <span className="text-xs font-semibold text-ink/80">Seu nome</span>
+                        <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={NAME_MAX} autoComplete="name" />
+                      </label>
+                    </div>
                     <div className="flex flex-col rounded-xl border border-line p-4 transition-[border-color,box-shadow] duration-150 focus-within:border-brand focus-within:ring-4 focus-within:ring-brand/15">
                       <label htmlFor={commentId} className="mb-2 inline-flex items-center gap-1.5 text-xs font-semibold text-ink/80">
                         <MessageSquareText className="size-3.5" />

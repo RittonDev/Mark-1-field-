@@ -49,7 +49,7 @@ let modeLoaded = false;
 
 function rememberMode(mode: Mode) {
   preferredMode = mode;
-  void setKv(MODE_KEY, mode).catch(() => undefined);
+  void setKv(MODE_KEY, mode, undefined, { notify: false }).catch(() => undefined);
 }
 
 export default function FormScreen() {

@@ -80,7 +80,11 @@ async def test_editor_saves_agenda_and_technician_together(
         return (day + timedelta(hours=hours)).isoformat()
 
     await create(
-        client, world, title="Ocupa o atual", assignee_id=tech, scheduled_start=at(0),
+        client,
+        world,
+        title="Ocupa o atual",
+        assignee_id=tech,
+        scheduled_start=at(0),
         scheduled_end=at(1),
     )
     x = await create(client, world, title="Troca de técnico", assignee_id=tech)
@@ -101,12 +105,17 @@ async def test_editor_saves_agenda_and_technician_together(
 
     # O técnico novo está ocupado: 409 com o nome dele.
     await create(
-        client, world, title="Ocupa o novo", assignee_id=other, scheduled_start=at(3),
+        client,
+        world,
+        title="Ocupa o novo",
+        assignee_id=other,
+        scheduled_start=at(3),
         scheduled_end=at(4),
     )
     y = await create(client, world, title="Outra troca", assignee_id=tech)
     r = await client.patch(
-        f"{API}/tickets/{y['id']}", json={"scheduled_start": at(3.5), "assignee_id": other},
+        f"{API}/tickets/{y['id']}",
+        json={"scheduled_start": at(3.5), "assignee_id": other},
         headers=an,
     )
     assert r.status_code == 409 and r.json()["code"] == "SCHEDULE_CONFLICT"
@@ -169,9 +178,7 @@ async def test_agenda_never_leaves_scheduled_without_a_date(
 # ------------------------------------------------------------------ relógios de campo
 
 
-async def test_arrival_deadline_follows_the_agreed_visit(
-    client: AsyncClient, world: World
-) -> None:
+async def test_arrival_deadline_follows_the_agreed_visit(client: AsyncClient, world: World) -> None:
     an = world.analyst.headers
     store = await _store(client, world, name="Loja Paulista", city="São Paulo", state="SP")
     later = (datetime.now(UTC) + timedelta(days=3)).replace(microsecond=0)
@@ -519,9 +526,7 @@ async def test_each_technician_sees_only_his_own_reimbursement(
 ) -> None:
     an = world.analyst.headers
     tech, helper = world.tech, world.tech_other
-    t = await create(
-        client, world, assignee_id=str(tech.user.id), helper_ids=[str(helper.user.id)]
-    )
+    t = await create(client, world, assignee_id=str(tech.user.id), helper_ids=[str(helper.user.id)])
     url = f"{API}/tickets/{t['id']}/expenses"
     mine = await client.post(
         url, json={"kind": "km", "description": "Ida e volta", "quantity": 10}, headers=an

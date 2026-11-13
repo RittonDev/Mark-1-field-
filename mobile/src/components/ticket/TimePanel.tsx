@@ -24,7 +24,7 @@ export const TimePanel = memo(function TimePanel({ ticket }: { ticket: LocalTick
   return (
     <View style={{ gap: 12 }}>
       <Card style={{ gap: 6 }}>
-        <SectionTitle>Tempo de atendimento</SectionTitle>
+        <SectionTitle accent>Tempo de atendimento</SectionTitle>
         <View style={styles.totalRow}>
           <Text style={styles.total}>{started ? formatMinutes(minutes) : "Não iniciado"}</Text>
           {running ? <Text style={styles.running}>em andamento</Text> : null}

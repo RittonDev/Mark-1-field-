@@ -4,6 +4,7 @@ A chave (`storage_key`) é relativa, então trocar por um bucket S3/R2 depois
 exige só outra implementação de `save`/`open_path`, sem migrar o banco.
 """
 
+import logging
 import uuid
 from pathlib import Path
 
@@ -11,6 +12,8 @@ from fastapi import UploadFile
 from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
+
+log = logging.getLogger(__name__)
 
 CHUNK = 1024 * 1024
 
@@ -36,14 +39,17 @@ async def save_upload(ticket_id: uuid.UUID, upload: UploadFile) -> tuple[str, in
     await run_in_threadpool(dest.parent.mkdir, parents=True, exist_ok=True)
     limit = settings.MAX_UPLOAD_MB * 1024 * 1024
     size = 0
-    with dest.open("wb") as fh:
-        while chunk := await upload.read(CHUNK):
-            size += len(chunk)
-            if size > limit:
-                fh.close()
-                dest.unlink(missing_ok=True)
-                raise UploadTooLarge(f"Arquivo maior que {settings.MAX_UPLOAD_MB} MB")
-            await run_in_threadpool(fh.write, chunk)
+    try:
+        with dest.open("wb") as fh:
+            while chunk := await upload.read(CHUNK):
+                size += len(chunk)
+                if size > limit:
+                    raise UploadTooLarge(f"Arquivo maior que {settings.MAX_UPLOAD_MB} MB")
+                await run_in_threadpool(fh.write, chunk)
+    except BaseException:
+        # Grande demais, envio interrompido ou disco cheio: não sobra arquivo pela metade.
+        dest.unlink(missing_ok=True)
+        raise
     return key, size
 
 
@@ -119,9 +125,15 @@ def decode_image_data_url(data_url: str, max_bytes: int = 2 * 1024 * 1024) -> tu
 
 
 def delete(storage_key: str) -> None:
-    """Apaga o arquivo do disco (anexo excluído). Sem erro se já não existir."""
+    """Apaga o arquivo do disco (anexo excluído). Sem erro se já não existir.
+
+    Roda depois do commit: uma falha do disco aqui não pode virar erro para quem excluiu (o
+    registro já saiu); o arquivo que sobrar fica no log para limpar."""
     try:
         path = open_path(storage_key)
     except FileNotFoundError:
         return
-    path.unlink(missing_ok=True)
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        log.warning("Arquivo excluído no sistema, mas não apagado do disco: %s", storage_key)

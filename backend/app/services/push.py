@@ -47,7 +47,7 @@ def _visit_people(event: dict[str, Any]) -> list[str]:
 
 
 def _when(value: Any) -> str | None:
-    """"2026-11-14T13:00:00+00:00" -> "14/11 às 10:00" (fuso da operação)."""
+    """Data ISO do evento na hora da operação: "2026-11-14T13:00:00+00:00" -> "14/11 às 10:00"."""
     if not isinstance(value, str):
         return None
     try:

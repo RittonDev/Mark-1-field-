@@ -145,9 +145,12 @@ function PanelFromUrl() {
   // OS do painel com alteração não salva. Trocou de OS (ou fechou): começa limpo.
   const [dirtyId, setDirtyId] = useState<string | null>(null);
   const [seenId, setSeenId] = useState(ticketId);
+  // Trocando de uma OS para outra o painel já está aberto: ele não desliza de novo.
+  const [entering, setEntering] = useState(true);
   if (seenId !== ticketId) {
     setSeenId(ticketId);
     setDirtyId(null);
+    setEntering(seenId === null);
   }
   const dirty = ticketId !== null && dirtyId === ticketId;
   const onDirtyChange = useCallback((value: boolean) => setDirtyId(value ? ticketId : null), [ticketId]);
@@ -171,6 +174,6 @@ function PanelFromUrl() {
   }, [ticketId, queryClient]);
 
   return ticketId ? (
-    <TicketEditorDialog key={ticketId} ticketId={ticketId} onClose={panel.close} onDirtyChange={onDirtyChange} />
+    <TicketEditorDialog key={ticketId} ticketId={ticketId} onClose={panel.close} onDirtyChange={onDirtyChange} entering={entering} />
   ) : null;
 }

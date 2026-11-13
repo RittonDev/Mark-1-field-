@@ -221,7 +221,7 @@ export default function AccountScreen() {
         <SectionTitle accent>Sincronização</SectionTitle>
         <InfoRow label="Conexão" value={networkLabel(sync)} />
         <InfoRow label="Atualização automática" value={REALTIME_LABEL[sync.realtime]} />
-        <InfoRow label="Última sincronização" value={sync.lastSyncAt ? formatDateTime(sync.lastSyncAt) : "Ainda não nesta abertura do app"} />
+        <InfoRow label="Última sincronização" value={sync.lastSyncAt ? formatDateTime(sync.lastSyncAt) : "Ainda não sincronizado"} />
         <InfoRow label="Ações para enviar" value={String(sync.pendingOps)} />
         <InfoRow label="Fotos e assinaturas para enviar" value={String(sync.pendingPhotos)} />
         {sync.lastError ? <InfoRow label="Último erro" value={sync.lastError} /> : null}

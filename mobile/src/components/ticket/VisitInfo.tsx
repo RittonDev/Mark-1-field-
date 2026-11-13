@@ -37,7 +37,9 @@ export function VisitTeamCard({ ticket, userId }: { ticket: LocalTicket; userId:
   ];
   return (
     <Card style={{ gap: 10 }}>
-      <SectionTitle right={<Icon name="users" size={18} color={c.inkMuted} />}>Equipe da visita</SectionTitle>
+      <SectionTitle accent right={<Icon name="users" size={18} color={c.inkMuted} />}>
+        Equipe da visita
+      </SectionTitle>
       {people.map((p) => {
         const me = p.id === userId;
         return (

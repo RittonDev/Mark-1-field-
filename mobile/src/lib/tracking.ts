@@ -281,6 +281,8 @@ const HEALTH_EVERY = 5;
 let lastStoredAt = 0;
 let heartbeat: ReturnType<typeof setInterval> | undefined;
 let beats = 0;
+/** Pedido de posição do batimento ainda sem resposta (sem céu aberto o GPS demora): não empilha outro. */
+let beatFixPending = false;
 
 /** Intervalo mínimo entre pontos guardados: ~25 s, ~10 s em deslocamento, ~1 min economizando bateria. */
 const minGapMs = () => (pace === "saver" ? 55_000 : pace === "transit" ? 10_000 : 25_000);
@@ -316,12 +318,15 @@ async function beat() {
     void exclusive(checkCollection).catch((error: unknown) => console.warn("Falha ao conferir o rastreamento", error));
   }
   // Relógio que voltou para trás deixa a diferença negativa: vale o valor absoluto.
-  if (state.mode === "off" || Math.abs(Date.now() - lastStoredAt) < HEARTBEAT_MS - 5_000) return;
+  if (state.mode === "off" || beatFixPending || Math.abs(Date.now() - lastStoredAt) < HEARTBEAT_MS - 5_000) return;
+  beatFixPending = true;
   try {
     const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
     await handleLocations([location], { force: true });
   } catch {
     // sem posição agora: a próxima batida tenta de novo
+  } finally {
+    beatFixPending = false;
   }
 }
 

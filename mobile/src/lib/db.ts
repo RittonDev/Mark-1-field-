@@ -431,6 +431,18 @@ export async function dropFormDrafts(db: DB, ticketId: UUID, formId: UUID): Prom
   );
 }
 
+/** Já há na fila respostas deste formulário? Cada envio leva todas as respostas: a mais nova vale. */
+export async function formAnswersQueued(db: DB, ticketId: UUID, formId: UUID): Promise<boolean> {
+  const row = await db.getFirstAsync<{ found: number }>(
+    `SELECT 1 AS found FROM outbox
+      WHERE ticket_id = ? AND type = 'form_answers' AND json_extract(payload, '$.form_id') = ?
+      LIMIT 1`,
+    ticketId,
+    formId,
+  );
+  return Boolean(row);
+}
+
 export async function markOpsAttempt(db: DB, clientOpIds: string[], error: string | null): Promise<void> {
   if (!clientOpIds.length) return;
   await db.runAsync(

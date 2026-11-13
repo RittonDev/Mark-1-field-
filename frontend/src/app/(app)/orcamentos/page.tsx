@@ -121,6 +121,16 @@ function shiftDays(day: string, days: number): string {
 const needsRenew = (q: QuoteListRow, today: string) =>
   QUOTE_EDITABLE.includes(q.status) && (q.status === "expired" || Boolean(q.valid_until && q.valid_until < today));
 
+/** Quantidade e valor por situação somados na lista que veio (sem o resumo da API). */
+function countByStatus(rows: QuoteListRow[]): Record<QuoteStatus, QuoteStatusTotal> {
+  const by = Object.fromEntries(CHIPS.map(({ key }) => [key, { count: 0, total: 0 }])) as Record<QuoteStatus, QuoteStatusTotal>;
+  for (const q of rows) {
+    by[q.status].count += 1;
+    by[q.status].total += q.total;
+  }
+  return by;
+}
+
 /** O cliente já recebeu o link alguma vez (o rascunho em revisão também já foi enviado). */
 const sentBefore = (q: QuoteListRow) => q.status !== "draft" || Boolean(q.sent_at);
 
@@ -362,16 +372,8 @@ function QuoteList() {
   const serverRows = capped && status && ofStatus.data && !ofStatus.isPlaceholderData ? ofStatus.data : null;
   const rows = serverRows ?? quotes.data;
   const summary = useMemo(() => {
-    let by = totals.data?.by_status;
-    if (!by) {
-      const local = Object.fromEntries(CHIPS.map(({ key }) => [key, { count: 0, total: 0 }])) as Record<QuoteStatus, QuoteStatusTotal>;
-      for (const q of quotes.data ?? []) {
-        local[q.status].count += 1;
-        local[q.status].total += q.total;
-      }
-      by = local;
-    }
-    const count = CHIPS.reduce((n, { key }) => n + (by[key]?.count ?? 0), 0);
+    const by = totals.data?.by_status ?? countByStatus(quotes.data ?? []);
+    const count = CHIPS.reduce((n, { key }) => n + by[key].count, 0);
     // Taxa de aprovação: aprovados sobre os que tiveram desfecho (aprovado, recusado ou vencido).
     const decided = by.approved.count + by.rejected.count + by.expired.count;
     return { by, count, exact: Boolean(totals.data), rate: decided ? Math.round((by.approved.count / decided) * 100) : null };

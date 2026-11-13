@@ -10,7 +10,7 @@ import { Button, Card, CardHeader, Dialog, ErrorBox, Field, Input, Pill, Select,
 import { absoluteApiUrl, api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canManageTickets } from "@/lib/constants";
-import { EXPENSE_KIND, EXPENSE_STATUS } from "@/lib/expenses";
+import { EXPENSE_KIND, EXPENSE_STATUS, EXPENSE_TRANSITIONS } from "@/lib/expenses";
 import { formatDate, formatMoney, formatShort, moneyInput } from "@/lib/format";
 import { useAssignable } from "@/lib/queries";
 import { lineTotalCents, quantityInput, readDecimal } from "@/lib/quotes";
@@ -140,6 +140,11 @@ export function ExpensesCard({ ticket }: { ticket: TicketDetail }) {
                         Marcar reembolsado
                       </Button>
                     ) : null}
+                    {e.status === "rejected" ? (
+                      <Button size="sm" variant="ghost" loading={busy(e, "pending")} disabled={setStatus.isPending} onClick={() => setStatus.mutate({ expense: e, status: "pending" })}>
+                        Reabrir
+                      </Button>
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => setEditing(e)}
@@ -229,6 +234,13 @@ function ExpenseDialog({ ticket, expense, onClose }: { ticket: TicketDetail; exp
   const [uploaded, setUploaded] = useState<Attachment | null>(null);
   const [tried, setTried] = useState(false);
   const kmRate = settings.data?.km_rate;
+  // Reembolsado fica travado (a API recusa mudar valor, técnico e comprovante): só volta a abrir com o
+  // estorno, trocando a situação para Aprovado.
+  const locked = initial.status === "paid" && status === "paid";
+  // Situações que a API aceita a partir da atual (no custo novo, qualquer uma).
+  const statusOptions = (Object.keys(EXPENSE_STATUS) as ExpenseStatus[]).filter(
+    (s) => !expense || s === initial.status || EXPENSE_TRANSITIONS[initial.status].includes(s),
+  );
 
   const qty = readDecimal(quantity, { decimals: 3, emptyMessage: "Informe a quantidade" });
   // Km em branco usa o valor do km das Configurações.
@@ -325,7 +337,7 @@ function ExpenseDialog({ ticket, expense, onClose }: { ticket: TicketDetail; exp
     >
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Tipo">
-          <Select value={kind} onChange={(e) => setKind(e.target.value as ExpenseKind)}>
+          <Select value={kind} onChange={(e) => setKind(e.target.value as ExpenseKind)} disabled={locked}>
             {Object.entries(EXPENSE_KIND).map(([k, v]) => (
               <option key={k} value={k}>
                 {v.label}
@@ -333,11 +345,11 @@ function ExpenseDialog({ ticket, expense, onClose }: { ticket: TicketDetail; exp
             ))}
           </Select>
         </Field>
-        <Field label="Situação">
+        <Field label="Situação" hint={locked ? "Reembolsado: para mudar valores, volte para Aprovado (estorno)." : undefined}>
           <Select value={status} onChange={(e) => setStatus(e.target.value as ExpenseStatus)}>
-            {Object.entries(EXPENSE_STATUS).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v.label}
+            {statusOptions.map((s) => (
+              <option key={s} value={s}>
+                {EXPENSE_STATUS[s].label}
               </option>
             ))}
           </Select>
@@ -348,6 +360,7 @@ function ExpenseDialog({ ticket, expense, onClose }: { ticket: TicketDetail; exp
             onChange={(e) => setDescription(e.target.value)}
             placeholder={kind === "km" ? "Ex.: Base → Loja 12 (ida e volta)" : "Ex.: Velcro 3 m"}
             maxLength={200}
+            disabled={locked}
             aria-invalid={(tried && Boolean(descriptionError)) || undefined}
             className={tried && descriptionError ? invalidInput : undefined}
           />
@@ -358,6 +371,7 @@ function ExpenseDialog({ ticket, expense, onClose }: { ticket: TicketDetail; exp
             value={quantity}
             onChange={(e) => setQuantity(e.target.value)}
             inputMode="decimal"
+            disabled={locked}
             aria-invalid={Boolean(qtyError) || undefined}
             className={qtyError ? invalidInput : undefined}
           />
@@ -371,6 +385,7 @@ function ExpenseDialog({ ticket, expense, onClose }: { ticket: TicketDetail; exp
             value={unitValue}
             onChange={(e) => setUnitValue(e.target.value)}
             inputMode="decimal"
+            disabled={locked}
             placeholder={kind === "km" && kmRate !== undefined ? moneyInput(kmRate) : "0,00"}
             aria-invalid={Boolean(unitError) || undefined}
             className={unitError ? invalidInput : undefined}
@@ -378,7 +393,7 @@ function ExpenseDialog({ ticket, expense, onClose }: { ticket: TicketDetail; exp
           {unitError ? <span className={fieldError}>{unitError}</span> : null}
         </Field>
         <Field label="Reembolsar a" hint={technicianId ? undefined : "Custo da empresa: não entra no reembolso de ninguém."}>
-          <Select value={technicianId} onChange={(e) => setTechnicianId(e.target.value)}>
+          <Select value={technicianId} onChange={(e) => setTechnicianId(e.target.value)} disabled={locked}>
             <option value="">Ninguém (custo da empresa)</option>
             {(people.data ?? []).map((p) => (
               <option key={p.id} value={p.id}>
@@ -392,7 +407,7 @@ function ExpenseDialog({ ticket, expense, onClose }: { ticket: TicketDetail; exp
         </Field>
         <div className="flex flex-col gap-1.5">
           <Field label="Comprovante (anexo da OS)">
-            <Select value={receiptId} onChange={(e) => setReceiptId(e.target.value)}>
+            <Select value={receiptId} onChange={(e) => setReceiptId(e.target.value)} disabled={locked}>
               <option value="">Sem comprovante</option>
               {receiptOptions.map((a) => (
                 <option key={a.id} value={a.id}>
@@ -415,7 +430,14 @@ function ExpenseDialog({ ticket, expense, onClose }: { ticket: TicketDetail; exp
               else uploadReceipt.mutate(file);
             }}
           />
-          <Button size="sm" variant="ghost" className="self-start" loading={uploadReceipt.isPending} onClick={() => fileInput.current?.click()}>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="self-start"
+            loading={uploadReceipt.isPending}
+            disabled={locked}
+            onClick={() => fileInput.current?.click()}
+          >
             {uploadReceipt.isPending ? null : <Upload className="size-3.5" />}
             Enviar comprovante
           </Button>

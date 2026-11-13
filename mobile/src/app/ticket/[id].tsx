@@ -11,6 +11,7 @@ import { Icon, type IconName } from "../../components/Icon";
 import { PressableScale, useListMotion, useSwapMotion } from "../../components/motion";
 import { DetailSkeleton } from "../../components/Skeleton";
 import { Text } from "../../components/Text";
+import { reloadAttachments } from "../../components/ticket/attachments";
 import { ArrivalResult, FieldClockLine, OnsiteTimer } from "../../components/ticket/FieldClock";
 import { FormsCard, openForm, openSignature } from "../../components/ticket/FormsCard";
 import { InfoPanel, ScopeCard, visitWindow } from "../../components/ticket/InfoPanel";
@@ -141,12 +142,22 @@ function TicketView({ ticket: current, user }: { ticket: LocalTicket; user: User
   useFocusEffect(
     useCallback(() => {
       if (!takeConcludeIntent(ticketId)) return;
-      setConcludeAsked(true);
-      // A tela leva um instante para enxergar a assinatura na fila; se ainda faltar algo, desiste.
-      const timer = setTimeout(() => setConcludeAsked(false), 2000);
-      return () => clearTimeout(timer);
+      // Espera a volta da tela de assinatura terminar antes de abrir a folha; a tela leva um instante
+      // para enxergar a assinatura na fila e, se ainda faltar algo, desiste.
+      const start = setTimeout(() => setConcludeAsked(true), 400);
+      const stop = setTimeout(() => setConcludeAsked(false), 2400);
+      return () => {
+        clearTimeout(start);
+        clearTimeout(stop);
+      };
     }, [ticketId]),
   );
+
+  // Anexos da OS atualizados ao abrir (e quando a conexão volta): a contagem de fotos dos formulários
+  // e da aba Fotos fica certa mesmo com fotos enviadas por outro aparelho.
+  useEffect(() => {
+    if (online) reloadAttachments(ticketId).catch(() => undefined);
+  }, [online, ticketId]);
 
   // Foto tirada antes de o Android fechar o app com a câmera aberta (aparelho com pouca memória).
   useEffect(() => {

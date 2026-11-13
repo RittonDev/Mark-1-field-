@@ -36,7 +36,7 @@ export const ScopeCard = memo(function ScopeCard({ ticket }: { ticket: LocalTick
   const long = description.length > LONG_SCOPE || description.split("\n").length > 4;
   return (
     <Card style={{ gap: 6 }}>
-      <SectionTitle>Escopo do serviço</SectionTitle>
+      <SectionTitle accent>Escopo do serviço</SectionTitle>
       {ticket.service_type ? <Text style={styles.strong}>{ticket.service_type.name}</Text> : null}
       <Text style={styles.text} selectable numberOfLines={long && !expanded ? 4 : undefined}>
         {description || "Sem descrição."}
@@ -81,7 +81,7 @@ export const InfoPanel = memo(function InfoPanel({ ticket, userId }: { ticket: L
     <View style={{ gap: 12 }}>
       {payout ? (
         <Card>
-          <SectionTitle>Valor desta OS</SectionTitle>
+          <SectionTitle accent>Valor desta OS</SectionTitle>
           <Text style={styles.strong}>{formatBRL(payout.amount)}</Text>
           <Text style={styles.label}>
             {payout.status === "paid"
@@ -93,14 +93,14 @@ export const InfoPanel = memo(function InfoPanel({ ticket, userId }: { ticket: L
 
       {when ? null : (
         <Card>
-          <SectionTitle>Agendamento</SectionTitle>
+          <SectionTitle accent>Agendamento</SectionTitle>
           <Text style={styles.strong}>Sem data marcada: aguarde a central agendar.</Text>
         </Card>
       )}
 
       {serviceAddress ? (
         <Card>
-          <SectionTitle>Local de atendimento</SectionTitle>
+          <SectionTitle accent>Local de atendimento</SectionTitle>
           {ticket.customer ? <Text style={styles.label}>{ticket.customer.name}</Text> : null}
           {location ? (
             <Text style={styles.strong}>{[location.code, location.name].filter(Boolean).join(" · ")}</Text>

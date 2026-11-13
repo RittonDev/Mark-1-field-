@@ -136,9 +136,7 @@ async def preview_conflicts(
     """Prévia antes de agendar: o que cada pessoa da visita já tem no horário (com o nome)."""
     if not people:
         return []
-    names = {
-        u.id: u.name for u in await db.scalars(select(User).where(User.id.in_(people)))
-    }
+    names = {u.id: u.name for u in await db.scalars(select(User).where(User.id.in_(people)))}
     items: list[ConflictItem] = []
     for person_id in people:
         clashes = await find_conflicts(

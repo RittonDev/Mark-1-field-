@@ -116,7 +116,10 @@ export function TransitionModal({
       cancelled.current = true;
       skipWait.current?.();
     }
-    if (concluding && resolution.trim()) resolutionDrafts.set(ticket.id, resolution);
+    if (concluding) {
+      if (resolution.trim()) resolutionDrafts.set(ticket.id, resolution);
+      else resolutionDrafts.delete(ticket.id);
+    }
     setOpen(false);
   }
 

@@ -303,7 +303,7 @@ function Reports() {
             filter={filter}
           />
         ) : (
-          <SlaView days={slaDays} onDays={(d) => setParams({ dias: d === 30 ? null : String(d) })} />
+          <SlaView days={slaDays} onDays={(d) => setParams({ dias: d === 30 ? null : String(d) })} scope={scope} />
         )}
       </div>
     </>
@@ -757,13 +757,17 @@ function MonthlyView({
   );
 }
 
-function SlaView({ days, onDays }: { days: number; onDays: (days: number) => void }) {
+function SlaView({ days, onDays, scope }: { days: number; onDays: (days: number) => void; scope: CustomerScope | null }) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
           <h2 className="text-lg font-bold text-ink">Últimos {days} dias</h2>
-          <p className="text-xs text-ink-muted">OS criadas no período: o motivo de cada prazo estourado e de quem foi a responsabilidade.</p>
+          <p className="text-xs text-ink-muted">
+            OS criadas no período: o motivo de cada prazo estourado e de quem foi a responsabilidade.
+            {/* O cliente escolhido no Diário ou no Mensal não recorta esta aba: o aviso evita ler como dele. */}
+            {scope ? <span className="font-semibold text-ink"> Todos os clientes (o filtro de {scope.name} vale no Diário e no Mensal).</span> : null}
+          </p>
         </div>
         <Select value={String(days)} onChange={(e) => onDays(Number(e.target.value))} className="w-48" aria-label="Período">
           {SLA_DAYS.map((d) => (

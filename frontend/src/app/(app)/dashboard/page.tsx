@@ -57,8 +57,9 @@ function Bars({ rows, label }: { rows: BarRow[]; label: string }) {
 }
 
 /**
- * "Hoje até agora": o fechamento do dia em andamento (fecha à meia-noite), o mesmo dos Relatórios.
- * Fora da chave "dashboard": o tempo real não recalcula o relatório a cada evento de OS.
+ * "Hoje até agora": o fechamento do dia em andamento (fecha à meia-noite), o mesmo dos Relatórios (e
+ * na mesma chave: o Diário de hoje aproveita o que já veio). Atualiza com os eventos das OS (o tempo
+ * real agrupa as mudanças antes de buscar de novo) e, sem eventos, a cada 2 minutos.
  */
 function TodaySoFar({ today }: { today: string }) {
   const report = useQuery({

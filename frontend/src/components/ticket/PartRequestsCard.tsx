@@ -70,6 +70,8 @@ function RejectDialog({ request, onClose, onDone }: { request: PartRequest; onCl
     <Dialog
       open
       onClose={onClose}
+      dirty={reason.trim().length > 0}
+      busy={reject.isPending}
       title="Recusar pedido de peça"
       description={amount(request)}
       footer={

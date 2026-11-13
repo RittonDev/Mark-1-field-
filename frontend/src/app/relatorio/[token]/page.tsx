@@ -34,7 +34,6 @@ import {
   arrivedOnSite,
   captionText,
   FILE_KIND_LABEL,
-  fileKind,
   formAnchor,
   groupByPhase,
   PHASE_LABEL,
@@ -42,6 +41,7 @@ import {
   type ProgressStep,
   progressLine,
   progressSteps,
+  reportPhotoKind,
   reportStage,
 } from "@/components/report/shared";
 import { Button, isTopLayer, lockScroll, Pill, restoreFocus, SectionTitle, Skeleton, trapTab } from "@/components/ui";
@@ -125,7 +125,7 @@ function PhotoGrid({
   return (
     <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
       {photos.map((p, i) => {
-        const kind = fileKind(p.filename);
+        const kind = reportPhotoKind(p.filename);
         const caption = photoCaption(p, grouped);
         const alt = photoAlt(p, i, context);
         return (
@@ -501,7 +501,7 @@ export default function PublicReportPage() {
   // Fotos que abrem ampliadas, na ordem da página: as dos checklists e depois as evidências.
   const viewable = report
     ? [...report.forms.flatMap((f) => f.items.flatMap((i) => i.photos)), ...evidence.flatMap((g) => g.photos)].filter(
-        (p) => fileKind(p.filename) === "image",
+        (p) => reportPhotoKind(p.filename) === "image",
       )
     : [];
   const openPhoto = (p: PublicReportPhoto) => {

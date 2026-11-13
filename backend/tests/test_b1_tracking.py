@@ -27,9 +27,7 @@ def _row(rows: list[dict], user_id: object) -> dict:
 async def _open_shifts(engine: AsyncEngine, user_id: uuid.UUID) -> int:
     async with engine.connect() as conn:
         count = await conn.scalar(
-            text(
-                "SELECT count(*) FROM technician_shifts WHERE user_id = :u AND ended_at IS NULL"
-            ),
+            text("SELECT count(*) FROM technician_shifts WHERE user_id = :u AND ended_at IS NULL"),
             {"u": user_id},
         )
     return int(count or 0)
@@ -91,9 +89,7 @@ async def test_only_one_shift_stays_open(
     assert await _open_shifts(engine, tech) == 0
 
 
-async def test_technician_withdraws_the_tracking_consent(
-    client: AsyncClient, world: World
-) -> None:
+async def test_technician_withdraws_the_tracking_consent(client: AsyncClient, world: World) -> None:
     th = world.tech.headers
     await start_shift(client, th)
     office = await client.delete(f"{API}/tracking/consent", headers=world.analyst.headers)

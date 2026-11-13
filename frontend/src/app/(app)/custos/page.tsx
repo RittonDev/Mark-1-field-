@@ -317,9 +317,10 @@ export default function ExpensesPage() {
       });
     }
   };
+  // `row`: aprovação pelo botão da própria linha (o carregamento fica nela, não na barra de seleção).
   const approve = useMutation({
-    mutationFn: (rows: Row[]) => settle(rows, () => ({ status: "approved" })),
-    onSuccess: (result, rows) => {
+    mutationFn: ({ rows }: { rows: Row[]; row?: UUID }) => settle(rows, () => ({ status: "approved" })),
+    onSuccess: (result, { rows }) => {
       forget(rows.map((r) => r.id));
       announce(result, "aprovado", "aprovados");
     },
@@ -412,8 +413,7 @@ export default function ExpensesPage() {
 
   const stale = report.isPlaceholderData;
   const busy = approve.isPending || markPaid.isPending || restore.isPending;
-  // Aprovação de uma linha só (pelo botão dela): o carregamento fica no botão da linha.
-  const approvingRow = (id: UUID) => approve.isPending && approve.variables?.length === 1 && approve.variables[0].id === id;
+  const approvingBulk = approve.isPending && !approve.variables?.row;
   const filtered = Boolean(technician || customerId || status);
   const pickable = visible.filter((r) => r.status === "pending" || r.status === "approved");
   const chosen = pickable.filter((r) => selected.includes(r.id));
@@ -660,7 +660,12 @@ export default function ExpensesPage() {
                   </span>
                   <div className="flex flex-wrap items-center gap-2">
                     {chosenPending.length ? (
-                      <Button size="sm" disabled={stale || (busy && !approve.isPending)} loading={approve.isPending} onClick={() => approve.mutate(chosenPending)}>
+                      <Button
+                        size="sm"
+                        disabled={stale || (busy && !approvingBulk)}
+                        loading={approvingBulk}
+                        onClick={() => approve.mutate({ rows: chosenPending })}
+                      >
                         <Check className="size-4" />
                         Aprovar {chosenPending.length}
                       </Button>
@@ -789,8 +794,8 @@ export default function ExpensesPage() {
                                   <RowAction
                                     label={`Aprovar: ${r.description}`}
                                     disabled={busy || stale}
-                                    loading={approvingRow(r.id)}
-                                    onClick={() => approve.mutate([r])}
+                                    loading={approve.isPending && approve.variables?.row === r.id}
+                                    onClick={() => approve.mutate({ rows: [r], row: r.id })}
                                   >
                                     <Check className="size-4" />
                                   </RowAction>

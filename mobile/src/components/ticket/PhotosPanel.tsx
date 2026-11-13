@@ -122,6 +122,7 @@ export const PhotosPanel = memo(function PhotosPanel({ ticket }: { ticket: Local
       {queue.length > 0 ? (
         <Card style={{ gap: 12 }}>
           <SectionTitle
+            accent
             right={
               <Button
                 title="Enviar agora"

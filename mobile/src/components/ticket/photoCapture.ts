@@ -21,14 +21,18 @@ const RECOVER_WINDOW_MS = 30 * 60_000;
 /** Qualidade 0,5: a foto fica bem menor e continua servindo de evidência. */
 const OPTIONS: ImagePicker.ImagePickerOptions = { mediaTypes: ["images"], quality: 0.5, exif: false };
 
+// Nenhuma tela mostra o alvo guardado: a escrita não avisa as telas (não redesenha nada).
+const QUIET = { notify: false } as const;
+
 async function remember(target: CaptureTarget) {
   if (Platform.OS !== "android") return;
-  await setKv(TARGET_KEY, JSON.stringify({ ...target, at: new Date().toISOString() } satisfies StoredTarget)).catch(() => undefined);
+  const stored: StoredTarget = { ...target, at: new Date().toISOString() };
+  await setKv(TARGET_KEY, JSON.stringify(stored), undefined, QUIET).catch(() => undefined);
 }
 
 async function forget() {
   if (Platform.OS !== "android") return;
-  await setKv(TARGET_KEY, null).catch(() => undefined);
+  await setKv(TARGET_KEY, null, undefined, QUIET).catch(() => undefined);
 }
 
 async function cameraAllowed(): Promise<boolean> {

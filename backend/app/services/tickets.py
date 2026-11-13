@@ -736,9 +736,7 @@ async def _set_helpers(
     data = {"added": [u.name for u in added], "removed": [h.name for h in removed]}
     # Os ids ficam no histórico: o sync do app avisa quem saiu (revoked_ticket_ids).
     ids = {"added_ids": [str(u.id) for u in added], "removed_ids": [str(h.id) for h in removed]}
-    record_event(
-        db, ticket, actor, TicketEventType.HELPERS_CHANGED, data={**data, **ids}, now=now
-    )
+    record_event(db, ticket, actor, TicketEventType.HELPERS_CHANGED, data={**data, **ids}, now=now)
     await _touch(db, ticket, now)
     queue_event(
         db,
@@ -1030,9 +1028,7 @@ async def update_ticket(
     if changes.keys() & agenda or ticket.assignee_id != previous_assignee:
         await schedule.ensure_no_conflict(db, ticket, actor, data.allow_conflict)
     if changes:
-        record_event(
-            db, ticket, actor, TicketEventType.UPDATED, data={"changes": changes}, now=now
-        )
+        record_event(db, ticket, actor, TicketEventType.UPDATED, data={"changes": changes}, now=now)
         queue_event(db, "updated", ticket, actor, {"fields": sorted(changes)})
     return ticket
 

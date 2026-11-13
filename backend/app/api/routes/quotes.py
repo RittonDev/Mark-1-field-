@@ -45,8 +45,8 @@ public = APIRouter(prefix="/public/quotes", tags=["quotes"])
 LINK_GONE = "Este orçamento não está mais disponível. Fale com a Maxx Field."
 TICKET_CANCELLED = "A OS foi cancelada: reabra a OS antes de mexer no orçamento"
 TICKET_CANCELLED_PUBLIC = "Esta OS foi cancelada. Fale com a Maxx Field."
-# "ORC-000123", "OS 123", "#123", "123": número do orçamento ou da OS.
-_CODE = re.compile(r"^(?:orc|os)?[\s#-]*0*(\d{1,9})$", re.IGNORECASE)
+# "ORC-000123" (orçamento), "OS 123" (OS), "#123" ou "123" (qualquer um dos dois).
+_CODE = re.compile(r"^(?P<prefix>orc|os)?[\s#-]*0*(?P<number>\d{1,9})$", re.IGNORECASE)
 
 
 SIGNATURE_LINK = timedelta(minutes=30)
@@ -195,8 +195,11 @@ def _search(q: str | None) -> ColumnElement[bool] | None:
     options: list[Any] = []
     code = _CODE.match(q.strip())
     if code:
-        number = int(code.group(1))
-        options += [Quote.number == number, Ticket.number == number]
+        number, prefix = int(code.group("number")), (code.group("prefix") or "").lower()
+        if prefix != "os":
+            options.append(Quote.number == number)
+        if prefix != "orc":
+            options.append(Ticket.number == number)
     words = search.all_words(q, [Quote.title, Ticket.title, Customer.name, Location.name])
     if words is not None:
         options.append(words)
