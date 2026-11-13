@@ -17,8 +17,8 @@ import { EmptyState } from "../components/ui";
 import { useLiveQuery, useNow } from "../lib/changes";
 import { listNotices, listTickets } from "../lib/db";
 import { arrivalUrgency } from "../lib/field";
-import { formatDay, initials } from "../lib/format";
-import { buildLists } from "../lib/lists";
+import { addDays, formatDay, initials, startOfDay } from "../lib/format";
+import { buildLists, ticketsOnDay } from "../lib/lists";
 import { useSession } from "../lib/session";
 import { requestSync, useSyncStatus } from "../lib/sync";
 import type { LocalTicket } from "../lib/syncTypes";
@@ -44,8 +44,15 @@ export default function MyTicketsScreen() {
   const now = useNow();
   const [tab, setTab] = useState<Tab>("today");
   const [refreshing, setRefreshing] = useState(false);
+  // Dia da lista "Hoje": dá para voltar e avançar os dias (como no app que a equipe já usa).
+  const [dayOffset, setDayOffset] = useState(0);
 
   const lists = useMemo(() => (user ? buildLists(tickets ?? [], user, new Date(now)) : null), [tickets, user, now]);
+  const selectedDay = useMemo(() => addDays(startOfDay(new Date(now)), dayOffset), [now, dayOffset]);
+  const otherDay = useMemo(
+    () => (user && tickets && dayOffset !== 0 ? ticketsOnDay(tickets, user, selectedDay, new Date(now)) : null),
+    [tickets, user, selectedDay, dayOffset, now],
+  );
 
   // LGPD: no primeiro acesso sem aceite, o termo de localização abre sozinho (dá para adiar).
   useEffect(() => {
@@ -68,8 +75,10 @@ export default function MyTicketsScreen() {
     : undefined;
 
   // A aba Agenda é o calendário (mês/semana); as outras são listas.
-  const data = tab === "today" ? lists.today : tab === "done" ? lists.done : [];
+  const dayList = dayOffset === 0 ? lists.today : (otherDay ?? []);
+  const data = tab === "today" ? dayList : tab === "done" ? lists.done : [];
   const today = new Date(now);
+  const relativeDay = dayOffset === 0 ? "Hoje" : dayOffset === 1 ? "Amanhã" : dayOffset === -1 ? "Ontem" : null;
   const sectionTitle = tab === "done" ? "Concluídas nos últimos 7 dias" : "Agenda";
   // Resumo do dia; a lista já vem por urgência (chegada atrasada, em risco, depois a agenda).
   const summary = {
@@ -109,18 +118,66 @@ export default function MyTicketsScreen() {
         </Pressable>
       ) : null}
       {tab === "today" ? (
-        <View style={styles.sectionRow} accessibilityRole="summary">
-          <Text style={styles.summary}>
-            Hoje: <Text style={styles.summaryStrong}>{summary.total === 1 ? "1 OS" : `${summary.total} OS`}</Text>
-            {" · "}
-            <Text style={styles.summaryStrong}>{summary.working} em atendimento</Text>
-            {summary.late ? (
-              <Text style={[styles.summaryStrong, { color: c.danger }]}>
-                {" · "}
-                {summary.late === 1 ? "1 chegada atrasada" : `${summary.late} chegadas atrasadas`}
+        <View style={{ gap: 10 }}>
+          <View style={styles.dayNav}>
+            <PressableScale
+              onPress={() => setDayOffset((d) => d - 1)}
+              accessibilityRole="button"
+              accessibilityLabel="Dia anterior"
+              hitSlop={6}
+              style={styles.dayButton}
+              pressedStyle={{ backgroundColor: c.surface3 }}
+            >
+              <Icon name="chevronLeft" size={20} color={c.ink} />
+            </PressableScale>
+            <Pressable
+              onPress={() => setDayOffset(0)}
+              disabled={dayOffset === 0}
+              accessibilityRole="button"
+              accessibilityLabel={dayOffset === 0 ? "Hoje" : "Voltar para hoje"}
+              style={styles.dayCenter}
+            >
+              <Text style={styles.dayTitle}>{relativeDay ?? formatDay(selectedDay)}</Text>
+              <Text style={styles.daySubtitle}>
+                {relativeDay ? formatDay(selectedDay) : "toque para voltar a hoje"}
               </Text>
-            ) : null}
-          </Text>
+            </Pressable>
+            <PressableScale
+              onPress={() => setDayOffset((d) => d + 1)}
+              accessibilityRole="button"
+              accessibilityLabel="Próximo dia"
+              hitSlop={6}
+              style={styles.dayButton}
+              pressedStyle={{ backgroundColor: c.surface3 }}
+            >
+              <Icon name="chevronRight" size={20} color={c.ink} />
+            </PressableScale>
+          </View>
+          {dayOffset === 0 ? (
+            <View style={styles.sectionRow} accessibilityRole="summary">
+              <Text style={styles.summary}>
+                <Text style={styles.summaryStrong}>{summary.total === 1 ? "1 OS" : `${summary.total} OS`}</Text>
+                {" · "}
+                <Text style={styles.summaryStrong}>{summary.working} em atendimento</Text>
+                {summary.late ? (
+                  <Text style={[styles.summaryStrong, { color: c.danger }]}>
+                    {" · "}
+                    {summary.late === 1 ? "1 chegada atrasada" : `${summary.late} chegadas atrasadas`}
+                  </Text>
+                ) : null}
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.sectionRow}>
+              <Text style={styles.summary}>
+                <Text style={styles.summaryStrong}>{dayList.length === 1 ? "1 OS" : `${dayList.length} OS`}</Text>
+                {dayOffset > 0 ? " agendadas" : " no dia"}
+              </Text>
+              <Pressable onPress={() => setDayOffset(0)} accessibilityRole="button" hitSlop={8} style={{ marginLeft: "auto" }}>
+                <Text style={styles.backToday}>Voltar para hoje</Text>
+              </Pressable>
+            </View>
+          )}
         </View>
       ) : (
         <View style={styles.sectionRow}>
@@ -133,11 +190,23 @@ export default function MyTicketsScreen() {
 
   const empty =
     tab === "today" ? (
-      <EmptyState
-        icon="today"
-        title="Nada para hoje"
-        description={emptyText ?? "Quando o analista atribuir uma OS a você, ela aparece aqui."}
-      />
+      dayOffset === 0 ? (
+        <EmptyState
+          icon="today"
+          title="Nada para hoje"
+          description={emptyText ?? "Quando o analista atribuir uma OS a você, ela aparece aqui."}
+        />
+      ) : (
+        <EmptyState
+          icon="calendar"
+          title={
+            dayOffset > 0
+              ? `Nenhuma OS agendada para ${relativeDay ? relativeDay.toLowerCase() : formatDay(selectedDay)}`
+              : `Nenhuma OS ${relativeDay ? relativeDay.toLowerCase() : `em ${formatDay(selectedDay)}`}`
+          }
+          description={dayOffset > 0 ? "Quando a central agendar uma visita para este dia, ela aparece aqui." : undefined}
+        />
+      )
     ) : (
       <EmptyState icon="checkCircle" title="Nada concluído nos últimos 7 dias" description={emptyText} />
     );
@@ -158,8 +227,12 @@ export default function MyTicketsScreen() {
           itemLayoutAnimation={motion.layout}
           renderItem={({ item, index }) => (
             <Animated.View entering={motion.entering(index)} style={styles.item}>
-              {tab === "today" ? (
+              {tab === "today" && dayOffset === 0 ? (
                 <TimelineRow ticket={item} now={now} last={index === data.length - 1} />
+              ) : tab === "today" ? (
+                <View style={{ paddingBottom: 12 }}>
+                  <TicketCard ticket={item} now={now} />
+                </View>
               ) : (
                 <View style={{ paddingBottom: 12 }}>
                   <TicketCard ticket={item} now={now} showDate />
@@ -179,7 +252,7 @@ export default function MyTicketsScreen() {
           }
           ListEmptyComponent={tab === "agenda" ? undefined : empty}
           ListFooterComponent={
-            tab === "today" && lists.reschedule.length ? (
+            tab === "today" && dayOffset === 0 && lists.reschedule.length ? (
               <View style={styles.footerSection}>
                 <Text style={styles.sectionTitle}>Aguardando reagendamento pela central</Text>
                 <Text style={styles.footerHint}>Visita improdutiva registrada. A OS volta para a agenda quando for reagendada.</Text>
@@ -243,6 +316,28 @@ const makeStyles = (c: Palette) =>
     sectionCount: { fontSize: 12, fontWeight: "700", color: c.inkSubtle, fontVariant: ["tabular-nums"] },
     summary: { fontSize: 14, color: c.inkMuted, fontVariant: ["tabular-nums"] },
     summaryStrong: { fontWeight: "700", color: c.ink },
+    dayNav: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      backgroundColor: c.surface,
+      borderColor: c.line,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderRadius: RADIUS.card,
+      padding: 6,
+    },
+    dayButton: {
+      width: 40,
+      height: 40,
+      borderRadius: RADIUS.control,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.surface2,
+    },
+    dayCenter: { flex: 1, alignItems: "center", paddingVertical: 2 },
+    dayTitle: { fontSize: 16, fontWeight: "700", color: c.ink, textTransform: "capitalize" },
+    daySubtitle: { fontSize: 12, color: c.inkMuted, textTransform: "capitalize" },
+    backToday: { fontSize: 13, fontWeight: "700", color: c.primary },
     item: { paddingHorizontal: 16 },
     calendar: { paddingHorizontal: 16 },
     footerSection: { paddingHorizontal: 16, paddingTop: 16, gap: 8 },
