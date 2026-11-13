@@ -16,7 +16,7 @@ export function reportMessage(ticket: Pick<LocalTicket, "code" | "location">, ur
   const contact = ticket.location?.contact_name?.trim().split(/\s+/)[0];
   const place = ticket.location?.name?.trim();
   return [
-    `Olá${contact ? `, ${contact}` : ""}! O atendimento da OS ${ticket.code}${place ? ` em ${place}` : ""} foi concluído.`,
+    `Olá${contact ? `, ${contact}` : ""}! O atendimento ${ticket.code}${place ? ` em ${place}` : ""} foi concluído.`,
     `Relatório com fotos, checklist e assinatura: ${url}`,
   ].join("\n");
 }
@@ -92,7 +92,7 @@ export function ReportShareCard({ ticket }: { ticket: LocalTicket }) {
           <Button title="Compartilhar" icon="share" onPress={() => void share(url)} style={{ flex: 1 }} />
         </View>
         <Text style={styles.hint}>
-          {storeWhatsapp ? `Abre a conversa com ${contact} (${phone}).` : "No WhatsApp, escolha o contato do cliente."}
+          {storeWhatsapp ? `Abre a conversa com ${contact} · ${phone}` : "No WhatsApp, escolha o contato do cliente."}
         </Text>
         <View style={styles.links}>
           <Pressable onPress={() => void copy(url)} hitSlop={8} accessibilityRole="button" style={styles.link}>
