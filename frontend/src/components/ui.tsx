@@ -175,6 +175,31 @@ export function CardHeader({
 }
 
 /**
+ * Título de um bloco dentro de cartão, aba ou formulário (ex.: "Técnicos mais indicados", "Contato").
+ * Mesmo padrão em todas as telas: negrito, com a marca da seção nas cores da logo.
+ */
+export function SectionTitle({
+  children,
+  aside,
+  className,
+}: {
+  children: React.ReactNode;
+  /** Ação ou informação à direita (ex.: "Copiar convite", contador). */
+  aside?: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={clsx("flex items-center justify-between gap-3", className)}>
+      <h3 className="flex min-w-0 items-center gap-2 text-[13px] leading-5 font-bold tracking-[-0.005em] text-ink">
+        <span aria-hidden className="h-3 w-[3px] shrink-0 rounded-full bg-linear-to-b from-brand to-brand-cyan" />
+        <span className="min-w-0 truncate">{children}</span>
+      </h3>
+      {aside ? <div className="flex shrink-0 items-center gap-2">{aside}</div> : null}
+    </div>
+  );
+}
+
+/**
  * Etiqueta de estado (status, prioridade, SLA). O texto mistura a cor com a tinta do tema: no claro fica
  * mais escuro e no escuro mais claro, então âmbar, ciano e verde continuam legíveis (a cor pura sobre
  * fundo claro não passava de ~2,5:1). Fundo e borda são a mesma cor bem diluída na superfície.
