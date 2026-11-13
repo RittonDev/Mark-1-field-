@@ -98,9 +98,11 @@ async def test_mark_paid_only_approved(client: AsyncClient, world: World) -> Non
     assert after[ids["approved"]]["status"] == "paid" and after[ids["approved"]]["paid_at"]
     for status in ("pending", "rejected"):
         assert (after[ids[status]]["status"], after[ids[status]]["paid_at"]) == (status, None)
-    # Já reembolsado não é marcado de novo.
+    # Já reembolsado não é marcado de novo (nem perde a data do reembolso).
     again = await client.post(mark, json={"ids": [ids["approved"]]}, headers=an)
     assert again.json() == {"updated": 0}
+    still = {e["id"]: e for e in (await client.get(url, headers=an)).json()}
+    assert still[ids["approved"]]["paid_at"] == after[ids["approved"]]["paid_at"]
 
 
 async def test_requester_never_sees_costs(client: AsyncClient, world: World) -> None:
