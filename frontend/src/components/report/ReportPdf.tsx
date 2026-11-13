@@ -6,7 +6,7 @@ import type { PublicReport, PublicReportPhoto } from "@/lib/types";
 const C = {
   ink: "#1b1f26",
   muted: "#5d6676",
-  subtle: "#8b93a1",
+  subtle: "#7a8290",
   line: "#e5e7eb",
   soft: "#f4f5f7",
   brand: "#2447ff",

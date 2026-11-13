@@ -19,7 +19,7 @@
   --line-strong: #d4d8de;
   --ink: #1b1f26;
   --ink-muted: #5d6676;
-  --ink-subtle: #8b93a1;
+  --ink-subtle: #7a8290;
   --brand: #2447ff;
   --brand-strong: #1a36d6;
   --brand-soft: #eef1ff;
@@ -58,7 +58,7 @@
   --line-strong: #31343b;
   --ink: #ececf0;
   --ink-muted: #9ba1ac;
-  --ink-subtle: #6c727d;
+  --ink-subtle: #7b818c;
   --brand: #5470ff;
   --brand-strong: #3d5af7;
   --brand-soft: rgb(84 112 255 / 0.14);
@@ -72,7 +72,7 @@
   --chrome: #08090b;
   --chrome-ink: #ececf0;
   --chrome-muted: #9ba1ac;
-  --chrome-subtle: #6c727d;
+  --chrome-subtle: #7b818c;
   --chrome-hover: rgb(255 255 255 / 0.045);
   --chrome-line: rgb(255 255 255 / 0.06);
   --elev-1: 0 1px 2px rgb(0 0 0 / 0.35);
@@ -273,7 +273,7 @@
 
   select {
     appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238b93a1' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237a8290' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-position: right 0.6rem center;
   }
@@ -506,7 +506,7 @@
     --line-strong: #d4d8de;
     --ink: #1b1f26;
     --ink-muted: #5d6676;
-    --ink-subtle: #8b93a1;
+    --ink-subtle: #7a8290;
     --brand: #2447ff;
     --brand-strong: #1a36d6;
     --brand-soft: #eef1ff;
