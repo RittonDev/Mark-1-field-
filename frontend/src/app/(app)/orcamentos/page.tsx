@@ -3,12 +3,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 import { Eye, FileText, Pencil, Plus, SquarePen } from "lucide-react";
-import Link from "next/link";
 import { useMemo, useState } from "react";
 import { QUOTE_EDITABLE, QuoteViewer } from "@/components/quotes/QuoteViewer";
 import { QuoteEditor, type QuoteTicketRef, ShareDialog } from "@/components/ticket/QuotesCard";
 import { useToast } from "@/components/Toaster";
 import { Button, Card, Checkbox, Dialog, EmptyState, ErrorBox, Field, Input, LoadingBlock, PageHeader, Select, Table, Td, Th } from "@/components/ui";
+import { TicketLink } from "@/components/ticket/TicketLink";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canManageTickets } from "@/lib/constants";
@@ -151,9 +151,9 @@ function QuoteList() {
                     </button>
                   </Td>
                   <Td>
-                    <Link href={`/chamados/${q.ticket_id}`} className="font-mono text-xs text-brand hover:underline">
+                    <TicketLink ticketId={q.ticket_id} className="font-mono text-xs text-brand hover:underline">
                       {q.ticket_code}
-                    </Link>
+                    </TicketLink>
                     <span className="block max-w-44 truncate text-xs text-ink-muted xl:max-w-56">{q.customer ?? "—"}</span>
                   </Td>
                   <Td className="text-right font-medium tabular-nums">{formatMoney(q.total)}</Td>

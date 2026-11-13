@@ -3,10 +3,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 import { Check, Download, Receipt } from "lucide-react";
-import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useToast } from "@/components/Toaster";
 import { Button, Card, CardHeader, EmptyState, ErrorBox, Input, LoadingBlock, PageHeader, Select, Table, Td, Th } from "@/components/ui";
+import { TicketLink } from "@/components/ticket/TicketLink";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canManageTickets, isManager } from "@/lib/constants";
@@ -191,9 +191,9 @@ export default function ExpensesPage() {
                         />
                       </Td>
                       <Td>
-                        <Link href={`/chamados/${i.ticket.id}`} className="font-mono text-xs text-brand hover:underline">
+                        <TicketLink ticketId={i.ticket.id} className="font-mono text-xs text-brand hover:underline">
                           {i.ticket.code}
-                        </Link>
+                        </TicketLink>
                         <span className="block max-w-48 truncate text-xs text-ink-muted">{i.ticket.customer?.name ?? i.ticket.title}</span>
                       </Td>
                       <Td>

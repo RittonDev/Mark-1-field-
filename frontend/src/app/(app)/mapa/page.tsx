@@ -18,13 +18,13 @@ import {
   Wrench,
 } from "lucide-react";
 import dynamic from "next/dynamic";
-import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useTheme } from "@/components/Brand";
 import type { MapFocus } from "@/components/LiveMap";
 import { LocationPicker } from "@/components/LocationPicker";
 import { Card, EmptyState, ErrorBox, Input, LoadingBlock, PageHeader, SectionTitle, Select } from "@/components/ui";
 import { useNow } from "@/components/useNow";
+import { TicketLink } from "@/components/ticket/TicketLink";
 import { errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canManageTickets, STATUS } from "@/lib/constants";
@@ -412,8 +412,8 @@ function TechnicianDetail({
         ) : null}
       </div>
       {ticket ? (
-        <Link
-          href={`/chamados/${ticket.id}`}
+        <TicketLink
+          ticketId={ticket.id}
           className="flex items-start gap-2 rounded-lg border border-line bg-surface p-2 text-xs hover:border-brand"
         >
           <Wrench className="mt-0.5 size-3.5 shrink-0 text-ink-muted" />
@@ -426,7 +426,7 @@ function TechnicianDetail({
                 ticket.title}
             </span>
           </span>
-        </Link>
+        </TicketLink>
       ) : null}
       {distance ? (
         <div className="space-y-1.5 rounded-lg border border-line bg-surface p-2.5">

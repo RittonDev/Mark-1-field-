@@ -9,6 +9,7 @@ import { useState } from "react";
 import { StatusBadge } from "@/components/badges";
 import { ProjectDialog } from "@/components/ProjectDialog";
 import { Button, Card, CardHeader, ErrorBox, LoadingBlock, SectionTitle, Table, Td, Th } from "@/components/ui";
+import { TicketLink } from "@/components/ticket/TicketLink";
 import { api, errorMessage } from "@/lib/api";
 import { formatDate, formatMoney } from "@/lib/format";
 import { PROJECT_STATUS } from "@/lib/projects";
@@ -103,9 +104,9 @@ export default function ProjectPage() {
                 {(tickets.data?.items ?? []).map((t) => (
                   <tr key={t.id}>
                     <Td>
-                      <Link href={`/chamados/${t.id}`} className="font-mono text-xs text-brand hover:underline">
+                      <TicketLink ticketId={t.id} className="font-mono text-xs text-brand hover:underline">
                         {t.code}
-                      </Link>
+                      </TicketLink>
                       <span className="block max-w-72 truncate font-semibold text-ink">{t.title}</span>
                     </Td>
                     <Td className="hidden text-sm md:table-cell">{t.location?.name ?? "—"}</Td>

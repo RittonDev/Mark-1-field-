@@ -26,6 +26,7 @@ import { MessagesButton } from "@/components/ticket/MessagesPanel";
 import { QuickEditButton } from "@/components/ticket/QuickEditButton";
 import { ArrivalChip, OnsiteBar } from "@/components/ticket/FieldClock";
 import { Button, Card, CardHeader, EmptyState, ErrorBox, LoadingBlock, PageHeader, SectionTitle, Skeleton } from "@/components/ui";
+import { TicketLink } from "@/components/ticket/TicketLink";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canManageTickets } from "@/lib/constants";
@@ -149,10 +150,10 @@ function QueueRow({ item, index, compact }: { item: QueueItem; index: number; co
     >
       <div className="min-w-0 flex-1">
         <div className="flex items-start gap-2">
-          <Link href={`/chamados/${item.id}`} className="min-w-0 flex-1 text-sm font-semibold text-ink hover:text-brand">
+          <TicketLink ticketId={item.id} className="min-w-0 flex-1 text-sm font-semibold text-ink hover:text-brand">
             <span className="mr-1.5 font-mono text-xs font-normal text-ink-subtle">{item.code}</span>
             {item.title}
-          </Link>
+          </TicketLink>
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-muted">
           {place ? (
@@ -243,10 +244,10 @@ function TodayTimeline({ items }: { items: QueueItem[] }) {
             <div className="flex min-w-0 flex-1 items-center gap-3 rounded-xl border border-line bg-surface py-2.5 pr-2.5 pl-3.5 transition-[border-color,box-shadow] group-hover:border-line-strong group-hover:shadow-elev-1">
               <div className="min-w-0 flex-1">
               <div className="flex items-start gap-2">
-                <Link href={`/chamados/${item.id}`} className="min-w-0 flex-1 text-sm font-semibold text-ink hover:text-brand">
+                <TicketLink ticketId={item.id} className="min-w-0 flex-1 text-sm font-semibold text-ink hover:text-brand">
                   <span className="mr-1.5 font-mono text-xs font-normal text-ink-subtle">{item.code}</span>
                   {item.title}
-                </Link>
+                </TicketLink>
                 <StatusBadge status={item.status} />
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-muted">

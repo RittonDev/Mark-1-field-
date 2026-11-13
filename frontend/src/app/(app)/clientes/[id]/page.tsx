@@ -9,6 +9,7 @@ import { ContactList } from "@/components/ContactList";
 import { CountUp } from "@/components/motion";
 import { TagChips } from "@/components/TagChips";
 import { Button, Card, CardHeader, ErrorBox, LoadingBlock, SectionTitle } from "@/components/ui";
+import { TicketLink } from "@/components/ticket/TicketLink";
 import { api, errorMessage } from "@/lib/api";
 import { formatDate, formatDocument, initials } from "@/lib/format";
 import type { Customer, Location, Page, TicketListItem } from "@/lib/types";
@@ -169,7 +170,7 @@ export default function CustomerDetailPage() {
               <ul className="divide-y divide-line">
                 {(recent.data?.items ?? []).map((t) => (
                   <li key={t.id}>
-                    <Link href={`/chamados/${t.id}`} className="flex items-center gap-3 px-5 py-2.5 transition-colors hover:bg-[var(--row-hover)]">
+                    <TicketLink ticketId={t.id} className="flex items-center gap-3 px-5 py-2.5 transition-colors hover:bg-[var(--row-hover)]">
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm font-semibold text-ink">
                           <span className="mr-1.5 font-mono text-xs font-normal text-ink-subtle">{t.code}</span>
@@ -180,7 +181,7 @@ export default function CustomerDetailPage() {
                         </span>
                       </span>
                       <StatusBadge status={t.status} />
-                    </Link>
+                    </TicketLink>
                   </li>
                 ))}
               </ul>

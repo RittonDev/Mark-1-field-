@@ -3,11 +3,11 @@
 import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
 import { CalendarClock, MapPin, UserRound } from "lucide-react";
-import Link from "next/link";
 import { useMemo, useState } from "react";
 import { PriorityBadge, SlaBadge } from "@/components/badges";
 import { TransitionDialog } from "@/components/ticket/TransitionDialog";
 import { Checkbox, ErrorBox, LoadingBlock, PageHeader, Select } from "@/components/ui";
+import { TicketLink } from "@/components/ticket/TicketLink";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { FINAL_STATUSES, STATUS, STATUS_ORDER } from "@/lib/constants";
@@ -45,14 +45,14 @@ function BoardCard({
       )}
     >
       <div className="mb-1.5 flex items-center justify-between gap-2">
-        <Link href={`/chamados/${ticket.id}`} className="font-mono text-xs text-ink-muted hover:text-brand">
+        <TicketLink ticketId={ticket.id} className="font-mono text-xs text-ink-muted hover:text-brand">
           {ticket.code}
-        </Link>
+        </TicketLink>
         <PriorityBadge priority={ticket.priority} compact />
       </div>
-      <Link href={`/chamados/${ticket.id}`} className="line-clamp-2 text-sm font-semibold text-ink hover:text-brand">
+      <TicketLink ticketId={ticket.id} className="line-clamp-2 text-sm font-semibold text-ink hover:text-brand">
         {ticket.title}
-      </Link>
+      </TicketLink>
       {ticket.customer || ticket.location ? (
         <p className="mt-1.5 flex items-center gap-1 truncate text-xs text-ink-muted">
           <MapPin className="size-3 shrink-0" />
