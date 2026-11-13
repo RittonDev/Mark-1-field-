@@ -11,7 +11,7 @@ from decimal import Decimal
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -67,6 +67,17 @@ def _event(
             created_at=utcnow(),
         )
     )
+
+
+async def _touch(db: AsyncSession, ticket_ids: list[uuid.UUID]) -> None:
+    """Marca a OS como alterada (o app do técnico baixa de novo), sem mexer na versão."""
+    if ticket_ids:
+        await db.execute(
+            update(Ticket)
+            .where(Ticket.id.in_(ticket_ids))
+            .values(updated_at=utcnow())
+            .execution_options(synchronize_session=False)
+        )
 
 
 def _bounds(
@@ -134,6 +145,7 @@ async def set_payout(
         to_value=str(data.amount),
         data={"technician": technician.name if technician else None, "amount": _money(data.amount)},
     )
+    await _touch(db, [ticket.id])
     await db.flush()
     return payout
 
@@ -159,6 +171,7 @@ async def remove_payout(
             "amount": _money(payout.amount),
         },
     )
+    await _touch(db, [ticket.id])
     await db.flush()
 
 
@@ -313,6 +326,7 @@ async def mark_paid(db: AsyncSession, ids: list[uuid.UUID], actor: User, *, paid
             payout.paid_at = None
             payout.paid_by_id = None
             changed += 1
+    await _touch(db, list({p.ticket_id for p in payouts}))
     await db.flush()
     return changed
 

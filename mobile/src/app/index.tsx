@@ -184,7 +184,7 @@ export default function MyTicketsScreen() {
       ) : (
         <View style={styles.sectionRow}>
           <Text style={styles.sectionTitle}>{sectionTitle}</Text>
-          {tab !== "agenda" ? <Text style={styles.sectionCount}>{data.length}</Text> : null}
+          {tab === "today" || tab === "done" ? <Text style={styles.sectionCount}>{data.length}</Text> : null}
         </View>
       )}
     </View>
