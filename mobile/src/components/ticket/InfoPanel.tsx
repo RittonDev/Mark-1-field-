@@ -1,6 +1,7 @@
 import { StyleSheet, View } from "react-native";
 import { addressOf } from "../../lib/device-actions";
-import { formatDay, formatTime } from "../../lib/format";
+import { formatBRL } from "../../lib/expenses";
+import { formatDay, formatShort, formatTime } from "../../lib/format";
 import type { LocalTicket } from "../../lib/syncTypes";
 import { useStyles, type Palette } from "../../theme/theme";
 import { Text } from "../Text";
@@ -34,8 +35,22 @@ export function InfoPanel({ ticket }: { ticket: LocalTicket }) {
   const registeredAddress = addressOf(location);
   const when = visitWindow(ticket);
 
+  const payout = ticket.my_payout ?? null;
+
   return (
     <View style={{ gap: 12 }}>
+      {payout ? (
+        <Card>
+          <SectionTitle>Valor desta OS</SectionTitle>
+          <Text style={styles.strong}>{formatBRL(payout.amount)}</Text>
+          <Text style={styles.label}>
+            {payout.status === "paid"
+              ? `Pago${payout.paid_at ? ` em ${formatShort(payout.paid_at).split(",")[0]}` : ""}. Veja em Ganhos.`
+              : "A central paga depois que a OS for concluída. Acompanhe em Ganhos."}
+          </Text>
+        </Card>
+      ) : null}
+
       {when ? null : (
         <Card>
           <SectionTitle>Agendamento</SectionTitle>

@@ -39,7 +39,8 @@ export type IconName =
   | "minus"
   | "close"
   | "note"
-  | "users";
+  | "users"
+  | "wallet";
 
 function Shape({ name }: { name: IconName }) {
   switch (name) {
@@ -206,6 +207,14 @@ function Shape({ name }: { name: IconName }) {
           <Circle cx={9} cy={8.5} r={3.3} />
           <Path d="M2.8 19.5a6.2 6.2 0 0 1 12.4 0" />
           <Path d="M15.5 5.6a3.2 3.2 0 0 1 0 6M17.5 14.2a6.2 6.2 0 0 1 3.7 5.3" />
+        </>
+      );
+    case "wallet":
+      return (
+        <>
+          <Rect x={3} y={6.5} width={18} height={13.5} rx={2.5} />
+          <Path d="M6 6.5l8.6-2.8a1.6 1.6 0 0 1 2.1 1.5v1.3" />
+          <Path d="M21 11.5h-4a1.75 1.75 0 0 0 0 3.5h4" />
         </>
       );
   }

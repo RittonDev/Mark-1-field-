@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BrandLogo } from "../components/Brand";
 import { Calendar } from "../components/Calendar";
 import { ConnectionBar } from "../components/ConnectionBar";
+import { EarningsView } from "../components/EarningsView";
 import { Icon } from "../components/Icon";
 import { PressableScale, useListMotion } from "../components/motion";
 import { ShiftCard } from "../components/ShiftCard";
@@ -25,7 +26,7 @@ import type { LocalTicket } from "../lib/syncTypes";
 import { shouldPromptConsent } from "../lib/tracking";
 import { RADIUS, tint, useStyles, useTheme, type Palette } from "../theme/theme";
 
-type Tab = "today" | "agenda" | "done";
+type Tab = "today" | "agenda" | "done" | "earnings";
 
 function greetingFor(date: Date) {
   const hour = date.getHours();
@@ -77,9 +78,10 @@ export default function MyTicketsScreen() {
   // A aba Agenda é o calendário (mês/semana); as outras são listas.
   const dayList = dayOffset === 0 ? lists.today : (otherDay ?? []);
   const data = tab === "today" ? dayList : tab === "done" ? lists.done : [];
+  // Ganhos e Agenda não são listas de OS (a lista fica vazia e o conteúdo vem no cabeçalho).
   const today = new Date(now);
   const relativeDay = dayOffset === 0 ? "Hoje" : dayOffset === 1 ? "Amanhã" : dayOffset === -1 ? "Ontem" : null;
-  const sectionTitle = tab === "done" ? "Concluídas nos últimos 7 dias" : "Agenda";
+  const sectionTitle = tab === "done" ? "Concluídas nos últimos 7 dias" : tab === "earnings" ? "Meus ganhos" : "Agenda";
   // Resumo do dia; a lista já vem por urgência (chegada atrasada, em risco, depois a agenda).
   const summary = {
     total: lists.today.length,
@@ -248,9 +250,10 @@ export default function MyTicketsScreen() {
                   <Calendar tickets={tickets} user={user} now={now} />
                 </View>
               ) : null}
+              {tab === "earnings" ? <EarningsView /> : null}
             </>
           }
-          ListEmptyComponent={tab === "agenda" ? undefined : empty}
+          ListEmptyComponent={tab === "agenda" || tab === "earnings" ? undefined : empty}
           ListFooterComponent={
             tab === "today" && dayOffset === 0 && lists.reschedule.length ? (
               <View style={styles.footerSection}>
@@ -275,6 +278,7 @@ export default function MyTicketsScreen() {
           { value: "today", label: "Hoje", icon: "today", count: lists.today.length },
           { value: "agenda", label: "Agenda", icon: "calendar" },
           { value: "done", label: "Concluídas", icon: "checkCircle" },
+          { value: "earnings", label: "Ganhos", icon: "wallet" },
         ]}
       />
     </View>
