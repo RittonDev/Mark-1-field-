@@ -14,8 +14,19 @@ Autenticação: `Authorization: Bearer <access_token>`. Erros seguem `{"detail":
 | Administrador | `admin` | tudo | tudo, inclusive usuários e SLA |
 | Supervisor | `supervisor` | tudo | o mesmo do analista + grupos e categorias |
 | Analista | `analyst` | **todas as OS** (interface web) | gestão completa das OS: abrir, editar, atribuir a qualquer técnico ou analista, mudar qualquer status, comentar, apontar horas; cadastrar clientes, locais e ativos |
-| Técnico de campo | `technician` | **só as OS atribuídas a ele** (app mobile); grupo ou fila não bastam | mudar status, comentar, apontar horas, fotos e cadastrar ativos **nas OS dele**. Não assume nem se atribui OS: quem coloca o técnico na OS é a gestão |
+| Técnico de campo (terceiro) | `technician` | **só as OS atribuídas a ele** (app mobile), e delas **só o básico**: cliente, local (endereço e contato da loja), agenda e escopo; grupo ou fila não bastam | mudar status, formulários, fotos, assinatura, horas e pedir peça **nas OS dele**. Não assume nem se atribui OS: quem coloca o técnico na OS é a gestão. Sem acompanhamentos (a central fala com ele pelo WhatsApp) |
 | Solicitante | `requester` | OS que abriu | abrir OS, comentar (público), cancelar enquanto nova, aceitar (fechar) ou recusar (reabrir) solução |
+
+**Técnico é terceiro: só o básico.** Na OS (detalhe, sync e respostas do push) o servidor zera para o
+técnico: prazos e motivos de SLA, analista (`owner`), grupo, projeto, categoria, etiquetas, solicitante,
+quem abriu, nº do chamado do cliente, detalhes da autorização (quem, canal, quando, referência), CNPJ da
+loja, reincidência e dados migrados (`services/tickets.py::field_view`). E-mail dos colegas e de quem
+lançou custos também sai. Anexos: só fotos, fotos dos formulários, assinatura e o que ele mesmo enviou
+(documentos do escritório ficam fora). Horas: só as dele. Comentários: nem lê nem escreve (403; no sync,
+`comments` vem vazio e a operação `comment` é recusada). Rotas de cadastro, usuários, grupos, painel,
+relatórios de SLA, atividades do dia, catálogo (exceto motivos de violação e de visita improdutiva),
+listagem de OS e histórico da OS respondem 403 para ele (`NoTechnicianUser` / `TicketManagerUser`). No
+WebSocket ele recebe só que a OS mudou (tipo, OS, status, versão e, na equipe da visita, `added_ids`).
 
 ## Status da OS
 

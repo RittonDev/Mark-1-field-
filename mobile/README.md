@@ -102,6 +102,12 @@ Requisitos:
 
 ## O que o app faz
 
+- **O técnico é terceiro: só o básico.** A OS mostra cliente, local (endereço e contato da loja), data e
+  hora da visita e o escopo (título, tipo de serviço, descrição e recado da central), mais o fluxo de campo
+  (deslocamento, chegada, atendimento, conclusão), formulários, fotos, assinatura, horas, peças e o
+  relatório para o cliente. Prioridade, SLA, projeto, analista, solicitante, classificação interna da OS e
+  reincidência não aparecem (e o servidor nem manda). A migração 5 do banco local tira do aparelho o que
+  tinha vindo antes (notas da central, horas de colegas, prazos) sem apagar as OS, e refaz o sync.
 - **Login** com `/auth/login` no canal `mobile`; tokens no Keychain/Keystore; renovação automática por
   `/auth/refresh` ao receber 401. Se o refresh for recusado por expiração, volta ao login sem apagar a
   fila (o mesmo técnico entra de novo e o que estava pendente é enviado). Se **outro** usuário entrar no
