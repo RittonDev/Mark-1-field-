@@ -15,7 +15,7 @@ import { ErrorBox, Field, Input, Select, Textarea } from "@/components/ui";
 import { api, ApiError, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { PRIORITY, PRIORITY_ORDER, STATUS, STATUS_ORDER } from "@/lib/constants";
-import { formatMinutes, fromLocalInput, toLocalInput } from "@/lib/format";
+import { formatDateTime, formatMinutes, formatMoney, fromLocalInput, toLocalInput } from "@/lib/format";
 import { useProjects } from "@/lib/projects";
 import { useAssignable, useCategories, useCustomers, useServiceTypes } from "@/lib/queries";
 import type {
@@ -325,6 +325,23 @@ export function GeneralTab({
 
   const intakeCustomer = intake.data?.customer ?? null;
   const intakeLocation = intake.data?.location ?? null;
+  // Convite pelo WhatsApp: só o básico (o técnico é parceiro), o bastante para ele topar ou não.
+  const chosenType = serviceTypes.data?.find((s) => s.id === form.serviceTypeId) ?? null;
+  const invite = (name?: string) => {
+    const city = [intakeLocation?.city, intakeLocation?.state].filter(Boolean).join(" - ");
+    const place = [intakeLocation?.district, city].filter(Boolean).join(", ");
+    const fee = chosenType?.technician_fee ?? null;
+    return [
+      name ? `Olá, ${name.split(" ")[0]}! Temos um chamado da Maxx para você:` : "Pessoal, temos um chamado da Maxx:",
+      `• ${chosenType?.name ?? form.title.trim()}`,
+      `• ${place || "local a confirmar"}`,
+      `• ${startIso ? formatDateTime(startIso) : "data a combinar"}`,
+      fee != null ? `• Valor: ${formatMoney(fee)}` : null,
+      name ? "Topa? Responda aqui que eu te coloco na OS." : "Quem pega? Responda aqui.",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  };
   const address =
     form.serviceAddress.trim() ||
     (intakeLocation
@@ -542,7 +559,21 @@ export function GeneralTab({
       ) : null}
 
       <div className="col-span-12 rounded-xl border border-line bg-surface-2/40 p-3">
-        <p className="mb-2 text-xs font-semibold text-ink">Técnicos mais indicados para esta loja</p>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <p className="text-xs font-semibold text-ink">Técnicos mais indicados para esta loja</p>
+          {form.locationId ? (
+            <button
+              type="button"
+              onClick={async () => {
+                await navigator.clipboard.writeText(invite());
+                toast({ title: "Convite copiado: cole no grupo de técnicos do WhatsApp", tone: "success" });
+              }}
+              className="text-xs font-medium text-brand hover:underline"
+            >
+              Copiar convite para o grupo
+            </button>
+          ) : null}
+        </div>
         <SuggestedTechnicians
           items={suggestions.data}
           loading={suggestions.isLoading}
@@ -554,6 +585,7 @@ export function GeneralTab({
           onToggleHelper={(t) =>
             set("helperIds", form.helperIds.includes(t.id) ? form.helperIds.filter((h) => h !== t.id) : [...form.helperIds, t.id])
           }
+          invite={(t) => invite(t.name)}
         />
       </div>
       {conflicts ? (

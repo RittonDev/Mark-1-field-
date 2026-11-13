@@ -1,9 +1,10 @@
 "use client";
 
 import clsx from "clsx";
-import { Check, MapPinned, Plus, Sparkles, UserPlus, X } from "lucide-react";
+import { Check, MapPinned, MessageCircle, Plus, Star, UserPlus, X } from "lucide-react";
 import { Skeleton } from "@/components/ui";
 import { formatDate, initials } from "@/lib/format";
+import { whatsappUrl } from "@/lib/whatsapp";
 import type { TechnicianSuggestion, UUID } from "@/lib/types";
 
 // Motivos que já aparecem nos números do cartão (não repetir como etiqueta).
@@ -32,6 +33,7 @@ export function SuggestedTechnicians({
   helperIds,
   onAssign,
   onToggleHelper,
+  invite,
 }: {
   items: TechnicianSuggestion[] | undefined;
   loading: boolean;
@@ -41,6 +43,8 @@ export function SuggestedTechnicians({
   helperIds: UUID[];
   onAssign: (t: TechnicianSuggestion | null) => void;
   onToggleHelper: (t: TechnicianSuggestion) => void;
+  /** Texto do convite pelo WhatsApp (a central chama o técnico parceiro e, se ele topar, coloca na OS). */
+  invite?: (t: TechnicianSuggestion) => string;
 }) {
   if (!hasPlace) {
     return (
@@ -91,7 +95,7 @@ export function SuggestedTechnicians({
               {initials(t.name)}
               {i === 0 && !isAssignee ? (
                 <span className="absolute -top-1 -right-1 flex size-4 items-center justify-center rounded-full bg-brand text-white" title="Mais indicado">
-                  <Sparkles className="size-2.5" />
+                  <Star className="size-2.5 fill-current" />
                 </span>
               ) : null}
             </span>
@@ -127,6 +131,18 @@ export function SuggestedTechnicians({
               ) : null}
             </div>
             <div className="flex shrink-0 flex-col items-stretch gap-1 sm:flex-row sm:items-center">
+              {invite && t.phone ? (
+                <a
+                  href={whatsappUrl(t.phone, invite(t))}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex h-7 items-center justify-center gap-1 rounded-lg border border-line bg-surface px-2.5 text-xs font-medium text-ink transition-colors hover:border-emerald-500 hover:text-emerald-700 dark:hover:text-emerald-300"
+                  title={`Convidar ${t.name} pelo WhatsApp: se topar, ponha como responsável`}
+                >
+                  <MessageCircle className="size-3.5" />
+                  Convidar
+                </a>
+              ) : null}
               <button
                 type="button"
                 onClick={() => onAssign(isAssignee ? null : t)}
