@@ -221,7 +221,7 @@ export function HelpersField({
           </select>
         </span>
       </div>
-      <span className="text-xs text-ink-subtle">Eles veem a OS no app e registram fotos, acompanhamentos e horas; iniciar e concluir fica com o responsável.</span>
+      <span className="text-xs text-ink-subtle">Eles veem a OS no app e mandam fotos; iniciar e concluir fica com o responsável.</span>
     </div>
   );
 }
