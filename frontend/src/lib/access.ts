@@ -10,6 +10,6 @@ export const WEB_DENIED_MESSAGE =
 
 export const canUseWeb = (role: UserRole | undefined) => !!role && WEB_ROLES.includes(role);
 
-/** Tela inicial depois do login: a fila do analista; o solicitante vai para os chamados dele. */
+/** Tela inicial depois do login: a fila do analista; o usuário do cliente vai para o portal. */
 export const homePath = (role: UserRole | undefined) =>
-  role === "admin" || role === "supervisor" || role === "analyst" ? "/minha-fila" : "/chamados";
+  role === "requester" ? "/portal" : "/minha-fila";
