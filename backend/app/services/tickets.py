@@ -1068,6 +1068,8 @@ async def correct_times(
         raise WorkflowError("A saída para o local deve ser antes do início do atendimento")
     if arrived_at and resolved_at and arrived_at > resolved_at:
         raise WorkflowError("O início do atendimento deve ser antes do término")
+    if resolved_at and ticket.closed_at and resolved_at > ticket.closed_at + _CLOCK_SKEW:
+        raise WorkflowError("O término não pode ser depois do fechamento da OS")
     if (
         data.work_minutes is not None
         and arrived_at is not None

@@ -106,6 +106,18 @@ async def test_office_corrects_real_times(
     # Sem motivo não corrige.
     assert (await client.put(url, json={"work_minutes": 60}, headers=an)).status_code == 422
 
+    # Fechada: o término não pode passar do fechamento.
+    current = (await client.get(f"{API}/tickets/{t['id']}", headers=an)).json()
+    await transition(client, world.supervisor.headers, current, "closed")
+    async with engine.begin() as conn:  # fechada 2 h atrás (depois do término, 3 h atrás)
+        await conn.execute(
+            text("UPDATE tickets SET closed_at = :c WHERE id = :i"),
+            {"c": now - timedelta(hours=2), "i": uuid.UUID(t["id"])},
+        )
+    after_close = (now - timedelta(hours=1)).isoformat()
+    r = await client.put(url, json={"resolved_at": after_close, "reason": "teste"}, headers=an)
+    assert r.status_code == 422 and "fechamento" in r.json()["detail"]
+
 
 async def test_times_need_a_started_os(client: AsyncClient, world: World) -> None:
     an = world.analyst.headers
