@@ -100,7 +100,14 @@ async def test_full_lifecycle(client: AsyncClient, world: World) -> None:
     # o técnico (terceiro) recebe a OS sem eles.
     assert t["resolution_due_at"] is None and t["response_due_at"] is None
     due_before = datetime.fromisoformat((await office())["resolution_due_at"])
-    t = await transition(client, world.tech.headers, t, "on_hold_vendor", note="Peça")
+    # O técnico não pausa (o tempo dele só para ao concluir): a pendência é da central.
+    r = await client.post(
+        f"{API}/tickets/{t['id']}/transition",
+        json={"to_status": "on_hold_vendor", "note": "Peça"},
+        headers=world.tech.headers,
+    )
+    assert r.status_code == 403
+    t = await transition(client, world.analyst.headers, t, "on_hold_vendor", note="Peça")
     assert (await office())["sla_status"] == "paused"
     t = await transition(client, world.tech.headers, t, "in_progress")
     seen = await office()
@@ -248,7 +255,7 @@ async def test_requester_reply_resumes_on_hold(client: AsyncClient, world: World
         json={"assignee_id": str(world.tech.user.id)},
         headers=world.supervisor.headers,
     )
-    t = await transition(client, world.tech.headers, r.json(), "on_hold_customer")
+    t = await transition(client, world.supervisor.headers, r.json(), "on_hold_customer")
     await client.post(
         f"{API}/tickets/{t['id']}/comments",
         json={"body": "Pode vir amanhã às 9h"},
@@ -272,10 +279,17 @@ async def test_worklog_and_attachment(
             "started_at": start.isoformat(),
             "ended_at": (start + timedelta(minutes=35)).isoformat(),
         },
-        headers=world.tech.headers,
+        headers=world.analyst.headers,
     )
     assert r.status_code == 201, r.text
     assert r.json()["minutes"] == 35
+    # Horas só a gestão aponta: o tempo do técnico é o da OS (do início à conclusão).
+    r = await client.post(
+        f"{API}/tickets/{t['id']}/worklogs",
+        json={"description": "x", "started_at": start.isoformat(), "minutes": 10},
+        headers=world.tech.headers,
+    )
+    assert r.status_code == 403 and "horário" in r.json()["detail"]
 
     r = await client.post(
         f"{API}/tickets/{t['id']}/attachments",
@@ -447,11 +461,24 @@ async def test_technician_scope_is_restricted(client: AsyncClient, world: World)
     t = await create(client, world, assignee_id=str(world.tech.user.id))
     detail = (await client.get(f"{API}/tickets/{t['id']}", headers=world.tech.headers)).json()
     assert detail["can_assign"] is False
-    assert detail["can_edit"] is True
+    # Editar a OS (escopo, agenda) é da central; no app ele só anda com a visita.
+    assert detail["can_edit"] is False
+    assert set(detail["allowed_transitions"]) <= {"en_route", "in_progress", "resolved"}
+    th = world.tech.headers
+    url = f"{API}/tickets/{t['id']}"
+    edit = await client.patch(url, json={"scheduled_start": "2030-01-01T10:00:00Z"}, headers=th)
+    assert edit.status_code == 403
+    # Nem pela mudança de status ele mexe no horário (agendar, ou mandar a hora junto).
+    for body in (
+        {"to_status": "scheduled", "scheduled_start": "2030-01-01T10:00:00Z"},
+        {"to_status": "en_route", "scheduled_start": "2030-01-01T10:00:00Z"},
+        {"to_status": "on_hold_customer"},
+        {"to_status": "cancelled", "note": "x"},
+    ):
+        assert (await client.post(f"{url}/transition", json=body, headers=th)).status_code == 403
 
     # O técnico é terceiro: fora das OS dele (pelo app) não vê cadastros, usuários, painéis,
     # relatórios nem as notas e o histórico das OS.
-    th = world.tech.headers
     blocked = (
         "/users",
         "/users/assignable",
@@ -608,7 +635,7 @@ async def test_service_type_estimate_learns(
     assert t["service_type"]["name"] == "Impressora A4 - Instalação"
     start = datetime(2026, 12, 1, 13, 0, tzinfo=UTC)
     t = await transition(
-        client, world.tech.headers, t, "scheduled", scheduled_start=start.isoformat()
+        client, world.analyst.headers, t, "scheduled", scheduled_start=start.isoformat()
     )
     assert datetime.fromisoformat(t["scheduled_end"]) == start + timedelta(minutes=20)
 
@@ -688,7 +715,7 @@ async def test_day_activities(client: AsyncClient, world: World) -> None:
     # Dia futuro: só a visita agendada para ele, com o horário previsto.
     start = datetime(2030, 1, 15, 13, 0, tzinfo=ZoneInfo(settings.TIMEZONE))
     a = await create(client, world, title="Visita agendada", assignee_id=tech_id)
-    a = await transition(client, tech_h, a, "scheduled", scheduled_start=start.isoformat())
+    a = await transition(client, h, a, "scheduled", scheduled_start=start.isoformat())
     day = (
         await client.get(f"{API}/activities/day", params={"date": "2030-01-15"}, headers=h)
     ).json()
@@ -744,7 +771,7 @@ async def test_day_activities_carry_over_and_rescheduled(
     c = await create(client, world, title="Nova visita", assignee_id=tech_id)
     c = await transition(client, tech_h, c, "in_progress")
     c = await transition(
-        client, tech_h, c, "scheduled", scheduled_start="2030-01-20T10:00:00-03:00"
+        client, world.analyst.headers, c, "scheduled", scheduled_start="2030-01-20T10:00:00-03:00"
     )
 
     today = (await client.get(f"{API}/activities/day", headers=world.analyst.headers)).json()
