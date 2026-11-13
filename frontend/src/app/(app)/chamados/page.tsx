@@ -372,7 +372,7 @@ function TicketsView() {
                   <Th>Atribuída a</Th>
                   {manager ? <Th>Analista</Th> : null}
                   <Th>SLA</Th>
-                  <Th className="hidden 2xl:table-cell">Atualizado</Th>
+                  <Th className="hidden min-[1800px]:table-cell">Atualizado</Th>
                   {manager ? <Th className="edit-col">Editar</Th> : null}
                 </tr>
               </thead>
@@ -420,7 +420,7 @@ function TicketsView() {
                           </span>
                         ) : null}
                       </Td>
-                      <Td className="max-w-[14rem]">
+                      <Td className="max-w-[12rem]">
                         {t.assignee ? (
                           <span className="flex min-w-0 items-center">
                             {/* Nome longo não empurra a coluna da OS: corta com reticências (nome inteiro no título). */}
@@ -488,7 +488,7 @@ function TicketsView() {
                           </div>
                         </Td>
                       ) : null}
-                      <Td>
+                      <Td className="max-w-[13rem]">
                         <div className="flex flex-col items-start gap-1">
                           <SlaBadge status={t.sla_status} />
                           <SlaCountdown ticket={t} />
@@ -496,7 +496,7 @@ function TicketsView() {
                           {t.status === "in_progress" ? <OnsiteBar ticket={t} className="mt-0.5" /> : null}
                         </div>
                       </Td>
-                      <Td className="hidden text-xs whitespace-nowrap text-ink-subtle 2xl:table-cell">{formatShort(t.updated_at)}</Td>
+                      <Td className="hidden text-xs whitespace-nowrap text-ink-subtle min-[1800px]:table-cell">{formatShort(t.updated_at)}</Td>
                       {manager ? (
                         <Td className="edit-col">
                           <QuickEditButton ticketId={t.id} code={t.code} />
