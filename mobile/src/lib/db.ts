@@ -7,7 +7,7 @@ import { Platform } from "react-native";
 import { notifyDataChanged } from "./changes";
 import { rebase } from "./ops";
 import type { LocalTicket, OutboxOp, SyncOperation } from "./syncTypes";
-import type { Attachment, Comment, TicketDetail, UnproductiveReason, User, UUID, ViolationReason, Worklog } from "./types";
+import type { Attachment, Comment, TicketDetail, UnproductiveReason, User, UUID, Worklog } from "./types";
 
 type DB = SQLite.SQLiteDatabase;
 
@@ -225,33 +225,6 @@ export async function getKv(key: string): Promise<string | null> {
 export async function setKv(key: string, value: string | null, db?: DB): Promise<void> {
   if (!db) return transaction((txn) => setKv(key, value, txn));
   await db.runAsync("INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", key, value);
-}
-
-// ─────────────────── motivos de violação de SLA ──────────────────
-
-const REASONS_KEY = "violation_reasons";
-const REASONS_AT_KEY = "violation_reasons_at";
-
-/** Cadastro de motivos guardado no aparelho, para o diálogo de resolver funcionar offline. */
-export async function getViolationReasons(): Promise<ViolationReason[]> {
-  const raw = await getKv(REASONS_KEY);
-  if (!raw) return [];
-  try {
-    return JSON.parse(raw) as ViolationReason[];
-  } catch {
-    return [];
-  }
-}
-
-export async function getViolationReasonsAt(): Promise<string | null> {
-  return getKv(REASONS_AT_KEY);
-}
-
-export async function saveViolationReasons(reasons: ViolationReason[]): Promise<void> {
-  await transaction(async (db) => {
-    await setKv(REASONS_KEY, JSON.stringify(reasons), db);
-    await setKv(REASONS_AT_KEY, new Date().toISOString(), db);
-  });
 }
 
 // ─────────────────── motivos de visita improdutiva ──────────────────

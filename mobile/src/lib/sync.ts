@@ -28,7 +28,6 @@ import {
   getKv,
   getTicket,
   getUnproductiveReasonsAt,
-  getViolationReasonsAt,
   insertLocalComment,
   insertLocalWorklog,
   addPartAttachment,
@@ -54,7 +53,6 @@ import {
   saveServerTicket,
   saveServerWorklog,
   saveUnproductiveReasons,
-  saveViolationReasons,
   setAttachmentsCache,
   setFormError,
   setKv,
@@ -80,7 +78,6 @@ import type {
   SyncOperationIn,
   SyncPullResponse,
   SyncPushResponse,
-  WorklogCreatePayload,
 } from "./syncTypes";
 import { showToast } from "./toast";
 import { flushPings, resumeTracking, updateTrackingMode } from "./tracking";
@@ -93,7 +90,6 @@ import type {
   UnproductiveReason,
   User,
   UUID,
-  ViolationReason,
 } from "./types";
 
 const PUSH_BATCH = 100; // a API aceita até 200 por lote
@@ -197,7 +193,7 @@ async function runOnce() {
     await pullChanges();
     await revalidateHelperTickets();
     await refreshFieldRules();
-    await refreshViolationReasons();
+    await refreshReasons();
     // Alertas locais do tempo na loja (aviso faltando 30 min e no estouro das 4h).
     void syncOnsiteAlerts();
     // Rastreamento da jornada: sobe a fila de pontos e ajusta o ritmo (deslocamento = mais frequente).
@@ -468,16 +464,13 @@ const REASONS_MAX_AGE_MS = 6 * 3600_000;
 let forceReasons = false;
 
 /**
- * Cadastro de motivos de violação de SLA (GET /violation-reasons?active=true), guardado no SQLite.
- * Muda pouco: baixa na primeira vez, a cada 6 h ou em "Baixar tudo". Falha aqui não derruba a rodada.
+ * Cadastro de motivos de visita improdutiva (GET /unproductive-reasons?active=true), guardado no
+ * SQLite para o técnico registrar a visita offline. Muda pouco: baixa na primeira vez, a cada 6 h
+ * ou em "Baixar tudo". Falha aqui não derruba a rodada. (Motivo de atraso de SLA é da central.)
  */
-async function refreshViolationReasons() {
+async function refreshReasons() {
   const stale = (at: string | null) => forceReasons || !at || Date.now() - new Date(at).getTime() >= REASONS_MAX_AGE_MS;
   try {
-    if (stale(await getViolationReasonsAt())) {
-      await saveViolationReasons(await api.get<ViolationReason[]>("/violation-reasons?active=true"));
-    }
-    // Motivos de visita improdutiva: mesmo ciclo (o técnico registra a visita offline).
     if (stale(await getUnproductiveReasonsAt())) {
       await saveUnproductiveReasons(await api.get<UnproductiveReason[]>("/unproductive-reasons?active=true"));
     }
@@ -822,10 +815,6 @@ export async function enqueueTransition(ticketId: UUID, payload: TicketTransitio
 
 export function enqueueComment(ticketId: UUID, payload: CommentCreatePayload) {
   return enqueue(ticketId, { type: "comment", payload });
-}
-
-export function enqueueWorklog(ticketId: UUID, payload: WorklogCreatePayload) {
-  return enqueue(ticketId, { type: "worklog", payload });
 }
 
 /** Descarta uma operação ainda não enviada (tela Conta → pendências). */
