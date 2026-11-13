@@ -119,7 +119,7 @@ function Kpi({
           value={value}
           className={clsx("block text-2xl leading-none font-semibold tracking-tight", alert ? "text-red-600 dark:text-red-400" : "text-ink")}
         />
-        <span className="mt-1 block truncate text-xs text-ink-muted">{label}</span>
+        <span className="mt-1 block text-xs leading-snug text-ink-muted">{label}</span>
       </span>
     </button>
   );
@@ -461,7 +461,7 @@ export default function MyQueuePage() {
             <Kpi index={4} label="Concluídas hoje" value={counts?.done ?? 0} icon={CheckCircle2} tone="text-emerald-600" onClick={() => scrollTo("done")} />
           </div>
 
-          <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
+          <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_300px]">
             <div className="flex flex-col gap-5">
               {queue.isLoading || !queue.data ? (
                 <Card>
@@ -519,7 +519,7 @@ export default function MyQueuePage() {
               )}
             </div>
 
-            <aside className="flex flex-col gap-4 lg:sticky lg:top-20">
+            <aside className="flex flex-col gap-4 xl:sticky xl:top-20">
               {user ? <TeamQueues meId={user.id} viewing={userId ?? user.id} onPick={(id) => setViewing(id === user.id ? null : id)} /> : null}
               <Card className="p-4">
                 <p className="flex items-center gap-2 text-sm font-semibold text-ink">

@@ -67,7 +67,7 @@ export function OnsiteBar({ ticket, className }: { ticket: Clockable; className?
   const over = left < 0 || ticket.onsite_status === "over";
   const warning = !over && ticket.onsite_status === "warning";
   return (
-    <div className={clsx("min-w-36", className)} title="Tempo do técnico na loja (limite do chamado)">
+    <div className={clsx("min-w-28", className)} title="Tempo do técnico na loja (limite do chamado)">
       {/* Em coluna estreita quebra entre as duas partes, nunca no meio de um tempo. */}
       <div
         className={clsx(

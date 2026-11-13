@@ -387,7 +387,7 @@ function TicketsView() {
                       onClick={() => router.push(`/chamados/${t.id}`)}
                       className="group cursor-pointer transition-colors hover:bg-[var(--row-hover)]"
                     >
-                      <Td className="max-w-[22rem] min-w-[15rem]">
+                      <Td className="max-w-[22rem] min-w-[13rem] 2xl:min-w-[15rem]">
                         <Link
                           href={`/chamados/${t.id}`}
                           onClick={(e) => e.stopPropagation()}
@@ -411,7 +411,7 @@ function TicketsView() {
                           <PriorityBadge priority={t.priority} compact />
                         </div>
                       </Td>
-                      <Td className="max-w-[11rem]">
+                      <Td className="max-w-[9.5rem] 2xl:max-w-[11rem]">
                         <span className="block truncate">{t.customer?.name ?? t.requester_name ?? "—"}</span>
                         {t.location ? (
                           <span className="block truncate text-xs text-ink-subtle">
@@ -420,7 +420,7 @@ function TicketsView() {
                           </span>
                         ) : null}
                       </Td>
-                      <Td className="max-w-[11rem]">
+                      <Td className="max-w-[9.5rem] 2xl:max-w-[11rem]">
                         {t.assignee ? (
                           <span className="flex min-w-0 items-center">
                             {/* Nome longo não empurra a coluna da OS: corta com reticências (nome inteiro no título). */}
