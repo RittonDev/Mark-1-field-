@@ -182,38 +182,62 @@ function formContext(a: Attachment, forms: TicketForm[]): { form: TicketForm | n
   return { form, label: field ? `${form.name} · ${field.label}` : form.name };
 }
 
-/** Vai para o relatório do cliente (e o técnico vê no app) ou fica só com a central. */
-function inReport(a: Attachment): boolean {
+/** Foto do problema que o próprio cliente mandou pelo portal (o relatório mostra só o atendimento). */
+const fromClient = (a: Attachment) => a.uploaded_by?.role === "requester";
+
+/**
+ * Vai para o relatório do cliente (e o técnico vê no app) ou fica só com a central. Como a API monta o
+ * relatório: o comprovante de um custo extra e a foto mandada pelo cliente no portal ficam de fora.
+ */
+function inReport(a: Attachment, receipts: UUID[]): boolean {
+  if (fromClient(a) || receipts.includes(a.id)) return false;
   return a.form_id !== null || a.kind === "photo" || a.kind === "signature";
 }
 
-function VisibilityChip({ attachment }: { attachment: Attachment }) {
-  return inReport(attachment) ? (
-    <span
-      className="rounded-md bg-brand-soft px-1.5 py-0.5 text-[11px] font-semibold text-brand-ink"
-      title="O cliente vê no relatório e o técnico vê no app"
-    >
+function VisibilityChip({ attachment, receipts }: { attachment: Attachment; receipts: UUID[] }) {
+  const chip = "rounded-md px-1.5 py-0.5 text-[11px] font-semibold";
+  if (fromClient(attachment)) {
+    return (
+      <span className={clsx(chip, "bg-surface-2 text-ink-muted")} title="Enviado pelo cliente no portal: não entra no relatório do atendimento">
+        Do cliente
+      </span>
+    );
+  }
+  return inReport(attachment, receipts) ? (
+    <span className={clsx(chip, "bg-brand-soft text-brand-ink")} title="O cliente vê no relatório e o técnico vê no app">
       No relatório
     </span>
   ) : (
     <span
-      className="rounded-md bg-surface-2 px-1.5 py-0.5 text-[11px] font-semibold text-ink-muted"
-      title="Fica só com a central: fora do relatório do cliente e do app do técnico"
+      className={clsx(chip, "bg-surface-2 text-ink-muted")}
+      title={
+        receipts.includes(attachment.id)
+          ? "Comprovante de custo extra: fica só com a central, fora do relatório do cliente"
+          : "Fica só com a central: fora do relatório do cliente e do app do técnico"
+      }
     >
       Interno
     </span>
   );
 }
 
-/** Formulários da OS (para dizer de qual campo é cada foto), do que a OS aberta já carregou. */
-function useTicketForms(ticketId: UUID): TicketForm[] {
+const NO_RECEIPTS: UUID[] = [];
+
+/**
+ * O que a aba precisa da OS aberta (já carregada): os formulários, para dizer de qual campo é cada foto,
+ * e os comprovantes dos custos extras, que não vão para o relatório do cliente.
+ */
+function useTicketContext(ticketId: UUID): { forms: TicketForm[]; receipts: UUID[] } {
   const ticket = useQuery({
     queryKey: ["ticket", ticketId],
     queryFn: () => api.get<TicketDetail>(`/tickets/${ticketId}`),
-    select: (t: TicketDetail) => t.forms,
     staleTime: Infinity,
   });
-  return ticket.data ?? [];
+  const detail = ticket.data;
+  return {
+    forms: detail?.forms ?? [],
+    receipts: detail ? detail.expenses.flatMap((e) => (e.receipt_attachment_id ? [e.receipt_attachment_id] : [])) : NO_RECEIPTS,
+  };
 }
 
 /** A aba está na camada de cima (nenhum diálogo ou menu aberto por cima da OS). */
@@ -562,7 +586,7 @@ export function AttachmentsTab({
   const canUpload = !closed || canManage;
 
   const attachments = useTicketAttachments(ticketId);
-  const forms = useTicketForms(ticketId);
+  const { forms, receipts } = useTicketContext(ticketId);
 
   const remove = useMutation({
     // Foto de formulário sai pelo formulário: ele volta para "Em preenchimento" se estava concluído.
@@ -584,7 +608,7 @@ export function AttachmentsTab({
         (context.form.status === "completed" ? " e ele volta para Em preenchimento: precisa ser concluído de novo." : ".") +
         " Não dá para desfazer.";
     } else {
-      description = `“${a.filename}” sai da OS${inReport(a) ? " e do relatório do cliente" : ""}. Não dá para desfazer.`;
+      description = `“${a.filename}” sai da OS${inReport(a, receipts) ? " e do relatório do cliente" : ""}. Não dá para desfazer.`;
     }
     const ok = await confirm({ title: "Excluir este anexo?", description, confirmLabel: "Excluir", tone: "danger" });
     if (ok) remove.mutate(a);
@@ -866,7 +890,7 @@ export function AttachmentsTab({
                         {meta(a)}
                       </p>
                       <div className="mt-auto flex items-center justify-between gap-1">
-                        <VisibilityChip attachment={a} />
+                        <VisibilityChip attachment={a} receipts={receipts} />
                         <span className="flex items-center gap-0.5">
                           {url ? (
                             <a
@@ -926,7 +950,7 @@ export function AttachmentsTab({
                       </div>
                     </div>
                     <span className="flex shrink-0 items-center gap-1">
-                      <VisibilityChip attachment={a} />
+                      <VisibilityChip attachment={a} receipts={receipts} />
                       {url ? (
                         <a
                           href={url}

@@ -3,7 +3,8 @@
 import clsx from "clsx";
 import { ChevronDown, Lock } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { STATUS, STATUS_ORDER, TRANSITION_ACTION } from "@/lib/constants";
+import { transitionLabel } from "@/components/ticket/TransitionDialog";
+import { STATUS, STATUS_ORDER } from "@/lib/constants";
 import type { TicketStatus } from "@/lib/types";
 
 /**
@@ -138,7 +139,7 @@ export function StatusMenu({
               )}
             >
               <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: STATUS[to].color }} aria-hidden />
-              {TRANSITION_ACTION[to]}
+              {transitionLabel(to)}
             </button>
           ))}
         </div>

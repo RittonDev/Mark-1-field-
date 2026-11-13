@@ -716,7 +716,7 @@ export function GeneralTab({
   const assigneeName = form.assigneeId ? (names[form.assigneeId] ?? null) : null;
   const unscheduledWarning = schedChanged && !form.date && !form.time && (base.date || base.time) && server.status === "scheduled";
   const conflictsTitle = conflicts
-    ? `${busyTitle(conflicts, assigneeName ?? "O técnico")}. Para agendar assim mesmo, use "Salvar mesmo assim".`
+    ? `${busyTitle(conflicts, assigneeName ?? "O técnico")}.${partial ? " O restante das alterações já foi salvo." : ""} Para agendar assim mesmo, use "Salvar mesmo assim".`
     : "";
   const saveError = save.error
     ? `${isVersionConflict(save.error) ? "Esta OS mudou enquanto você salvava. Atualizamos os dados e suas alterações continuam aqui: confira e salve de novo." : errorMessage(save.error)}${partial ? " O restante das alterações já foi salvo." : ""}`

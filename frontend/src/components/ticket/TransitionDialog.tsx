@@ -48,6 +48,11 @@ const WHAT_HAPPENS: Partial<Record<TicketStatus, string>> = {
   reopened: "A OS volta para a fila; as datas de conclusão, fechamento e cancelamento são apagadas.",
 };
 
+/** Verbo da mudança no menu, no título e no botão ("Fechar", sozinho, parece fechar a janela). */
+export function transitionLabel(to: TicketStatus): string {
+  return to === "closed" ? "Fechar a OS" : TRANSITION_ACTION[to];
+}
+
 /**
  * Confirma a mudança de status pedindo só o que o destino exige (agenda, solução, motivo). Monte
  * com `key={destino}` para zerar o formulário. Na web quem muda é a central: a localização do
@@ -163,6 +168,7 @@ export function TransitionDialog({
 
   // Texto digitado (motivo, solução): o Esc ou o clique fora perguntam antes de descartar.
   const typed = Boolean(note.trim()) || (req.needsResolution && resolution.trim() !== (given.resolution_notes ?? "").trim());
+  const action = transitionLabel(to);
 
   return (
     <Dialog
@@ -170,7 +176,7 @@ export function TransitionDialog({
       onClose={onClose}
       dirty={typed}
       busy={mutation.isPending}
-      title={TRANSITION_ACTION[to]}
+      title={action}
       description={
         <span className="flex flex-wrap items-center gap-1.5">
           <span className="font-mono text-xs">{ticket.code}</span>
@@ -189,7 +195,7 @@ export function TransitionDialog({
             type="submit"
             form="transition-form"
           >
-            {conflicts ? "Agendar mesmo assim" : TRANSITION_ACTION[to]}
+            {conflicts ? "Agendar mesmo assim" : action}
           </Button>
         </>
       }

@@ -98,8 +98,16 @@ async def test_live_map_states_and_history(
         == "in_progress"
     )
 
-    # Sem posição recente durante a jornada: "sem sinal".
+    # Sem posição recente durante a jornada: "sem sinal" (a jornada começou há 15 min e o último
+    # ponto dela é de 10 min atrás).
     async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "UPDATE technician_shifts SET started_at = started_at - interval '15 minutes' "
+                "WHERE user_id = :u"
+            ),
+            {"u": uuid.UUID(tech_id)},
+        )
         await conn.execute(
             text(
                 "UPDATE location_pings SET recorded_at = recorded_at - interval '10 minutes' "
