@@ -127,7 +127,7 @@ function FieldTiles({ n, data }: { n: Numbers; data: FieldNumbers }) {
         label="Tempo médio até chegar"
         value={avgArrival ?? 0}
         display={avgArrival === null ? "—" : formatMinutes(Math.round(avgArrival))}
-        hint="Da solicitação (ou autorização) à chegada"
+        hint="Da solicitação à chegada"
       />
       <StatTile
         label="Tempo médio na loja"

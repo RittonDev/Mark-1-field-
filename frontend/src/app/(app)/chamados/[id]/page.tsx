@@ -18,8 +18,7 @@ import { OwnerCard } from "@/components/ticket/OwnerCard";
 import { PartRequestsCard } from "@/components/ticket/PartRequestsCard";
 import { LegacyOrderCard } from "@/components/ticket/LegacyOrderCard";
 import { TagChips } from "@/components/TagChips";
-import { AuthorizationCard } from "@/components/ticket/AuthorizationCard";
-import { ArrivalChip, AuthorizationChip, OnsiteBar, RecurrenceChip } from "@/components/ticket/FieldClock";
+import { ArrivalChip, OnsiteBar, RecurrenceChip } from "@/components/ticket/FieldClock";
 import { ReportLinkCard } from "@/components/ticket/ReportLinkCard";
 import { HistoryTab } from "@/components/ticket/HistoryTab";
 import { QuotesCard } from "@/components/ticket/QuotesCard";
@@ -179,7 +178,6 @@ export default function TicketDetailPage() {
               <StatusBadge status={ticket.status} />
               <PriorityBadge priority={ticket.priority} />
               <SlaBadge status={ticket.sla_status} />
-              <AuthorizationChip status={ticket.authorization_status} />
               <RecurrenceChip count={ticket.recurrence?.count_30d} />
               <TagChips tags={ticket.tags} max={4} />
               {ticket.project ? (
@@ -260,8 +258,6 @@ export default function TicketDetailPage() {
 
       <div className="grid gap-4 lg:grid-cols-[1fr_22rem]">
         <div className="flex min-w-0 flex-col gap-4">
-          <AuthorizationCard ticket={ticket} />
-
           <Card>
             <div className="p-5">
               <h2 className="mb-2 text-xs font-medium tracking-wide text-ink-muted uppercase">Descrição</h2>

@@ -11,7 +11,7 @@ import { Tabs } from "@/components/motion";
 import { MultiSelect } from "@/components/MultiSelect";
 import { useToast } from "@/components/Toaster";
 import { QuickEditButton } from "@/components/ticket/QuickEditButton";
-import { ArrivalChip, AuthorizationChip, OnsiteBar, RecurrenceChip } from "@/components/ticket/FieldClock";
+import { ArrivalChip, OnsiteBar, RecurrenceChip } from "@/components/ticket/FieldClock";
 import { TagChips } from "@/components/TagChips";
 import {
   Button,
@@ -397,9 +397,8 @@ function TicketsView() {
                           {t.title}
                         </Link>
                         {t.category ? <span className="mt-0.5 block truncate text-xs text-ink-subtle">{t.category.full_name}</span> : null}
-                        {t.authorization_status === "pending" || t.authorization_status === "denied" || t.recurrence_30d || t.tags?.length ? (
+                        {t.recurrence_30d || t.tags?.length ? (
                           <span className="mt-1.5 flex flex-wrap gap-1">
-                            <AuthorizationChip status={t.authorization_status} hideAuthorized />
                             <RecurrenceChip count={t.recurrence_30d} />
                             <TagChips tags={t.tags} max={2} />
                           </span>

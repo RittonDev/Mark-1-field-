@@ -1,10 +1,10 @@
 "use client";
 
 import clsx from "clsx";
-import { Ban, Clock3, Hourglass, MapPinCheck, RotateCcw, ShieldAlert, ShieldCheck } from "lucide-react";
+import { Clock3, Hourglass, MapPinCheck, RotateCcw } from "lucide-react";
 import { useNow } from "@/components/useNow";
 import { formatMinutes, formatTime } from "@/lib/format";
-import type { AuthorizationStatus, TicketListItem } from "@/lib/types";
+import type { TicketListItem } from "@/lib/types";
 
 type Clockable = Pick<
   TicketListItem,
@@ -89,37 +89,6 @@ export function OnsiteBar({ ticket, className }: { ticket: Clockable; className?
         />
       </div>
     </div>
-  );
-}
-
-const AUTH: Record<Exclude<AuthorizationStatus, "not_required">, { label: string; className: string; icon: typeof ShieldCheck }> = {
-  pending: {
-    label: "Aguardando autorização",
-    className: "bg-amber-50 text-amber-800 ring-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-500/25",
-    icon: ShieldAlert,
-  },
-  denied: {
-    label: "Visita não autorizada",
-    className: "bg-red-50 text-red-700 ring-red-200 dark:bg-red-500/10 dark:text-red-300 dark:ring-red-500/25",
-    icon: Ban,
-  },
-  authorized: {
-    label: "Autorizada",
-    className: "bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-500/25",
-    icon: ShieldCheck,
-  },
-};
-
-/** Situação da autorização do cliente (some quando não é exigida). */
-export function AuthorizationChip({ status, hideAuthorized = false }: { status?: AuthorizationStatus; hideAuthorized?: boolean }) {
-  if (!status || status === "not_required" || (hideAuthorized && status === "authorized")) return null;
-  const info = AUTH[status];
-  const Icon = info.icon;
-  return (
-    <span className={clsx("inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium whitespace-nowrap ring-1 ring-inset", info.className)}>
-      <Icon className="size-3" />
-      {info.label}
-    </span>
   );
 }
 
