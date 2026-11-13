@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, FileText, ImageOff, Link2, PackageOpen, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { QuoteViewer } from "@/components/quotes/QuoteViewer";
 import { useToast } from "@/components/Toaster";
 import { Button, Card, CardHeader, Dialog, ErrorBox, Field, isTopLayer, lockScroll, Pill, restoreFocus, Select, Textarea, trapTab } from "@/components/ui";
@@ -201,41 +202,8 @@ export function PartRequestsCard({ ticket }: { ticket: TicketDetail }) {
     refresh();
   };
 
-  // Foto ampliada como camada: foco no Fechar ao abrir, Tab preso nela, Esc fecha só ela (o
-  // preventDefault avisa o painel da OS) e o foco volta para a miniatura. Uma tecla que a camada de
-  // cima já tratou (a busca Ctrl+K aberta sobre a foto) fica com ela.
-  const zoomBox = useRef<HTMLDivElement>(null);
-  const zoomClose = useRef<HTMLButtonElement>(null);
-  const zoomOpen = zoom !== null;
-  useEffect(() => {
-    if (!zoomOpen) return;
-    const opener = document.activeElement;
-    const unlock = lockScroll();
-    zoomClose.current?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      const node = zoomBox.current;
-      if (e.defaultPrevented || !node || !isTopLayer(node)) return;
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setZoom(null);
-      } else if (e.key === "Tab") {
-        trapTab(e, node);
-      } else if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
-        const step = e.key === "ArrowRight" ? 1 : -1;
-        setZoom((z) => (z ? { ...z, index: Math.min(z.request.attachments.length - 1, Math.max(0, z.index + step)) } : z));
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      unlock();
-      restoreFocus(opener);
-    };
-  }, [zoomOpen]);
-
   // Orçamentos em que o pedido pode entrar: os ainda abertos e os já aprovados pelo cliente.
   const linkable = (quotes.data ?? []).filter((q) => q.status === "draft" || q.status === "sent" || q.status === "approved");
-  const zoomed = zoom ? zoom.request.attachments[zoom.index] : null;
 
   return (
     <Card className="overflow-hidden">
@@ -382,62 +350,126 @@ export function PartRequestsCard({ ticket }: { ticket: TicketDetail }) {
         />
       ) : null}
       {sharing ? <ShareDialog ticket={ticket} quote={sharing} onClose={() => setSharing(null)} onRotated={refresh} /> : null}
-      {zoom && zoomed ? (
-        <div
-          ref={zoomBox}
-          role="dialog"
-          aria-modal="true"
-          aria-label={`Foto ${zoom.index + 1} de ${zoom.request.attachments.length} do pedido: ${zoom.request.description}`}
-          className="fixed inset-0 z-50 flex animate-fade items-center justify-center bg-black/80 p-4"
-          onClick={() => setZoom(null)}
-        >
-          <button
-            ref={zoomClose}
-            type="button"
-            onClick={() => setZoom(null)}
-            className="absolute top-4 right-4 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
-            aria-label="Fechar"
-          >
-            <X className="size-5" />
-          </button>
-          {zoom.index > 0 ? (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setZoom({ ...zoom, index: zoom.index - 1 });
-              }}
-              className="absolute top-1/2 left-4 -translate-y-1/2 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
-              aria-label="Foto anterior"
-            >
-              <ChevronLeft className="size-6" />
-            </button>
-          ) : null}
-          {zoom.index < zoom.request.attachments.length - 1 ? (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setZoom({ ...zoom, index: zoom.index + 1 });
-              }}
-              className="absolute top-1/2 right-4 -translate-y-1/2 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
-              aria-label="Próxima foto"
-            >
-              <ChevronRight className="size-6" />
-            </button>
-          ) : null}
-          <div onClick={(e) => e.stopPropagation()} className="flex max-h-full max-w-full">
-            <PartPhoto
-              key={zoomed.id}
-              url={zoomed.url}
-              alt={`Foto ${zoom.index + 1} do pedido: ${zoom.request.description}`}
-              ticketId={ticket.id}
-              className="max-h-[90vh] max-w-full animate-pop rounded-xl object-contain"
-            />
-          </div>
-        </div>
+      {zoom ? (
+        <PhotoZoom
+          request={zoom.request}
+          index={zoom.index}
+          ticketId={ticket.id}
+          onMove={(index) => setZoom({ ...zoom, index })}
+          onClose={() => setZoom(null)}
+        />
       ) : null}
     </Card>
+  );
+}
+
+/**
+ * Foto do pedido ampliada, como camada: foco no Fechar ao abrir, Tab preso nela, Esc fecha só ela (o
+ * preventDefault avisa o painel da OS) e o foco volta para a miniatura. Uma tecla que a camada de cima
+ * já tratou (a busca Ctrl+K aberta sobre a foto) fica com ela. Vai no <body>: o cartão (overflow-hidden)
+ * e o painel da OS (com transform) cortariam a camada fixa.
+ */
+function PhotoZoom({
+  request,
+  index,
+  ticketId,
+  onMove,
+  onClose,
+}: {
+  request: PartRequest;
+  index: number;
+  ticketId: string;
+  onMove: (index: number) => void;
+  onClose: () => void;
+}) {
+  const box = useRef<HTMLDivElement>(null);
+  const closeButton = useRef<HTMLButtonElement>(null);
+  const count = request.attachments.length;
+  const photo = request.attachments[index];
+  useEffect(() => {
+    const opener = document.activeElement;
+    const unlock = lockScroll();
+    closeButton.current?.focus();
+    return () => {
+      unlock();
+      restoreFocus(opener);
+    };
+  }, []);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const node = box.current;
+      if (e.defaultPrevented || !node || !isTopLayer(node)) return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      } else if (e.key === "Tab") {
+        trapTab(e, node);
+      } else if (e.key === "ArrowRight" && index < count - 1) {
+        onMove(index + 1);
+      } else if (e.key === "ArrowLeft" && index > 0) {
+        onMove(index - 1);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [index, count, onMove, onClose]);
+  if (!photo) return null;
+  const arrow = "absolute top-1/2 -translate-y-1/2 rounded-full bg-white/10 p-2 text-white hover:bg-white/20";
+  return createPortal(
+    <div
+      ref={box}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Foto ${index + 1} de ${count} do pedido: ${request.description}`}
+      className="fixed inset-0 z-50 flex animate-fade items-center justify-center bg-black/80 p-4"
+      onClick={onClose}
+    >
+      <button
+        ref={closeButton}
+        type="button"
+        onClick={onClose}
+        className="absolute top-4 right-4 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
+        aria-label="Fechar"
+      >
+        <X className="size-5" />
+      </button>
+      {index > 0 ? (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onMove(index - 1);
+          }}
+          className={`${arrow} left-4`}
+          aria-label="Foto anterior"
+        >
+          <ChevronLeft className="size-6" />
+        </button>
+      ) : null}
+      {index < count - 1 ? (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onMove(index + 1);
+          }}
+          className={`${arrow} right-4`}
+          aria-label="Próxima foto"
+        >
+          <ChevronRight className="size-6" />
+        </button>
+      ) : null}
+      <div onClick={(e) => e.stopPropagation()} className="flex max-h-full max-w-full">
+        <PartPhoto
+          key={photo.id}
+          url={photo.url}
+          alt={`Foto ${index + 1} do pedido: ${request.description}`}
+          ticketId={ticketId}
+          className="max-h-[90vh] max-w-full animate-pop rounded-xl object-contain"
+        />
+      </div>
+    </div>,
+    document.body,
   );
 }
 

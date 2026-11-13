@@ -5,8 +5,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "./api";
 import { STATUS } from "./constants";
-import { formatDateTime, formatTime } from "./format";
-import type { Level, PortalLocation, PortalMe, TicketStatus, UUID } from "./types";
+import { dayKey, formatDateTime, formatTime } from "./format";
+import type { Level, PortalLocation, PortalMe, PortalRequestDetail, TicketStatus, UUID } from "./types";
 
 export const CLIENT_STATUS: Record<TicketStatus, string> = {
   new: "Recebida",
@@ -35,17 +35,36 @@ export const TIMELINE_LABEL: Record<TicketStatus | "created", string> = {
   ...CLIENT_STATUS,
 };
 
+type Timeline = PortalRequestDetail["timeline"];
+
+/**
+ * Andamento como o cliente lê: etapas seguidas com o mesmo nome aparecem uma vez só, com a hora da
+ * primeira (resolvida e depois fechada são as duas "Concluída").
+ */
+export function clientTimeline(timeline: Timeline): Timeline {
+  return timeline.filter((entry, i) => i === 0 || TIMELINE_LABEL[entry.status] !== TIMELINE_LABEL[timeline[i - 1].status]);
+}
+
+/** Empresa desativada (sem contrato): o histórico continua no portal, abrir solicitação não. */
+export const PORTAL_SUSPENDED = "O acesso da sua empresa para abrir solicitações está suspenso. Fale com a central da Maxx.";
+
+export const canOpenRequests = (me: PortalMe | undefined) => me?.can_open_requests !== false;
+
 export const URGENCY_OPTIONS: { value: Level; label: string; hint: string }[] = [
   { value: "low", label: "Pode esperar", hint: "Não atrapalha o atendimento da loja" },
   { value: "medium", label: "Normal", hint: "Atrapalha, mas a loja segue funcionando" },
   { value: "high", label: "Urgente", hint: "Parou o caixa, a rede ou as vendas" },
 ];
 
-/** Janela da visita: "14/11/2026, 14:00–16:00" no mesmo dia; início e fim completos se passar do dia. */
+/**
+ * Janela da visita: "14/11/2026, 14:00–16:00" no mesmo dia; início e fim completos se passar do dia.
+ * O dia é o do fuso da operação, o mesmo das horas mostradas.
+ */
 export function visitWindow(start: string, end: string | null | undefined): string {
   if (!end) return formatDateTime(start);
-  const sameDay = new Date(start).toDateString() === new Date(end).toDateString();
-  return sameDay ? `${formatDateTime(start)}–${formatTime(end)}` : `${formatDateTime(start)} até ${formatDateTime(end)}`;
+  return dayKey(start) === dayKey(end)
+    ? `${formatDateTime(start)}–${formatTime(end)}`
+    : `${formatDateTime(start)} até ${formatDateTime(end)}`;
 }
 
 /** A empresa do usuário e quantas lojas ativas ela tem (o cabeçalho e a nova solicitação usam). */

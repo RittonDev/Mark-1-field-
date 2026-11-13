@@ -59,7 +59,7 @@ import { useNow } from "@/components/useNow";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { PRIORITY, PRIORITY_ORDER, ROLE, TICKET_TYPE } from "@/lib/constants";
-import { formatMinutes, formatMoney, formatTime, fromLocalInput } from "@/lib/format";
+import { dayKey, formatMinutes, formatMoney, formatTime, fromLocalInput, toLocalInput } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
 import { useProjects } from "@/lib/projects";
 import { useAssignable, useCategories, useCustomers } from "@/lib/queries";
@@ -136,15 +136,23 @@ function readPrefill(params: { get(name: string): string | null }) {
   return { locationId: id("location_id"), customerId: id("customer_id"), serviceTypeId: id("service_type_id") };
 }
 
-const pad = (n: number) => String(n).padStart(2, "0");
-const ymd = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const iso = (ms: number) => new Date(ms).toISOString();
+const SLOT_MS = 30 * 60_000;
 
-/** Próximo horário redondo (meia hora) daqui a pelo menos 1h; à noite, passa para amanhã sozinho. */
-function nextSlot(now: number): Date {
-  const start = new Date(now + 60 * 60_000);
-  start.setMinutes(Math.ceil(start.getMinutes() / 30) * 30, 0, 0);
-  return start;
+/**
+ * Próximo horário redondo (meia hora) daqui a pelo menos 1h, no fuso da operação, como os campos de
+ * data e hora: à noite passa para amanhã sozinho. Ex.: { date: "2026-11-13", time: "14:30" }.
+ */
+function nextSlot(now: number): { date: string; time: string } {
+  // O fuso de São Paulo é de horas inteiras: a meia hora redonda em UTC é a mesma de lá.
+  const value = toLocalInput(iso(Math.ceil((now + 60 * 60_000) / SLOT_MS) * SLOT_MS));
+  return { date: value.slice(0, 10), time: value.slice(11, 16) };
+}
+
+/** O dia seguinte no calendário ("2026-11-13" -> "2026-11-14"). */
+function nextDay(key: string): string {
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
 }
 
 interface Filled {
@@ -529,21 +537,16 @@ function NewTicket() {
     }));
 
   function pickDay(offset: 0 | 1) {
+    // Dias e horas no fuso da operação (o mesmo dos campos), mesmo num computador em outro fuso.
     let date: string;
     let time = f.time;
-    if (offset === 0) {
-      if (time) {
-        date = ymd(new Date(now));
-      } else {
-        const slot = nextSlot(now);
-        date = ymd(slot);
-        time = `${pad(slot.getHours())}:${pad(slot.getMinutes())}`;
-      }
-    } else {
-      const day = new Date(now);
-      day.setDate(day.getDate() + 1);
-      date = ymd(day);
+    if (offset === 1) {
+      date = nextDay(dayKey(now));
       time = time || "08:00";
+    } else if (time) {
+      date = dayKey(now);
+    } else {
+      ({ date, time } = nextSlot(now));
     }
     setConflicts(null);
     setD((x) => ({ ...x, form: { ...x.form, date, time } }));
@@ -785,7 +788,8 @@ function NewTicket() {
           submit();
         }}
         onKeyDown={(e) => {
-          if (e.key !== "Enter") return;
+          // Já tratado pelo campo (busca com lista, etiqueta, mensagem do cliente): não é com o formulário.
+          if (e.key !== "Enter" || e.defaultPrevented) return;
           if (e.ctrlKey || e.metaKey) {
             e.preventDefault();
             submit();
@@ -1430,11 +1434,8 @@ function NewTicket() {
 
         {/* Barra fixa no rodapé: o botão fica à vista em qualquer tela, com o resumo da OS. */}
         <div className="sticky bottom-3 z-20 flex flex-col gap-2 rounded-xl border border-line bg-surface/95 px-4 py-3 shadow-elev-2 backdrop-blur lg:col-span-2">
-          {create.error && !conflicts ? (
-            <div role="alert">
-              <ErrorBox message={errorMessage(create.error)} />
-            </div>
-          ) : null}
+          {/* O ErrorBox já é anunciado (role="alert") ao aparecer. */}
+          {create.error && !conflicts ? <ErrorBox message={errorMessage(create.error)} /> : null}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             {missing.length ? (
               <p className="min-w-0 flex-1 text-sm font-medium text-red-600 dark:text-red-400" role="alert">

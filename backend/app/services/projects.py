@@ -6,8 +6,8 @@ from decimal import Decimal
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.enums import ExpenseStatus, ProjectStatus, QuoteStatus, TicketStatus
-from app.models import Customer, Project, Quote, Team, Ticket, TicketExpense, User
+from app.core.enums import ExpenseStatus, PayoutStatus, ProjectStatus, QuoteStatus, TicketStatus
+from app.models import Customer, Project, Quote, Team, Ticket, TicketExpense, TicketPayout, User
 from app.schemas.project import ProjectIn, ProjectOut, ProjectStats
 from app.services.errors import NotFound, WorkflowError
 from app.services.workflow import OPEN_STATUSES
@@ -62,24 +62,21 @@ async def stats(db: AsyncSession, ids: list[uuid.UUID]) -> dict[uuid.UUID, Proje
     out = {i: ProjectStats() for i in ids}
     if not ids:
         return out
-    for pid, total, open_, done, unproductive in await db.execute(
+    for pid, total, open_, done, cancelled, unproductive in await db.execute(
         select(
             Ticket.project_id,
             func.count(),
             func.count().filter(Ticket.status.in_(OPEN_STATUSES)),
             func.count().filter(Ticket.status.in_(DONE)),
+            func.count().filter(Ticket.status == TicketStatus.CANCELLED),
             func.coalesce(func.sum(Ticket.unproductive_count), 0),
         )
         .where(Ticket.project_id.in_(ids))
         .group_by(Ticket.project_id)
     ):
         s = out[pid]
-        s.tickets_total, s.tickets_open, s.tickets_done, s.unproductive = (
-            total,
-            open_,
-            done,
-            unproductive,
-        )
+        s.tickets_total, s.tickets_open, s.tickets_done = total, open_, done
+        s.tickets_cancelled, s.unproductive = cancelled, unproductive
     for pid, total in await db.execute(
         select(Ticket.project_id, func.sum(TicketExpense.total))
         .join(Ticket, Ticket.id == TicketExpense.ticket_id)
@@ -87,6 +84,21 @@ async def stats(db: AsyncSession, ids: list[uuid.UUID]) -> dict[uuid.UUID, Proje
         .group_by(Ticket.project_id)
     ):
         out[pid].expenses_total = total or Decimal("0")
+    # Valor dos técnicos: o pago e o que ainda vai ser pago (pendente de OS cancelada não conta,
+    # como em Pagamentos).
+    for pid, total in await db.execute(
+        select(Ticket.project_id, func.sum(TicketPayout.amount))
+        .join(Ticket, Ticket.id == TicketPayout.ticket_id)
+        .where(
+            Ticket.project_id.in_(ids),
+            or_(
+                TicketPayout.status == PayoutStatus.PAID,
+                Ticket.status != TicketStatus.CANCELLED,
+            ),
+        )
+        .group_by(Ticket.project_id)
+    ):
+        out[pid].payouts_total = total or Decimal("0")
     for pid, total in await db.execute(
         select(Ticket.project_id, func.sum(Quote.total))
         .join(Ticket, Ticket.id == Quote.ticket_id)

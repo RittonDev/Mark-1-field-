@@ -34,6 +34,11 @@ export function MessageIntake({
 }) {
   const titleId = useId();
   const [text, setText] = useState("");
+  const fill = () => {
+    if (!text.trim()) return;
+    onFill(text);
+    setText("");
+  };
   return (
     <Card>
       <div className="flex items-start gap-3 px-5 py-4">
@@ -52,19 +57,19 @@ export function MessageIntake({
             rows={3}
             value={text}
             onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              // Ctrl+Enter aqui preenche os campos (no resto da tela, abre a OS).
+              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                fill();
+              }
+            }}
             aria-labelledby={titleId}
             placeholder="[09:41, 13/11/2026] Cliente: A loja 41 está sem sistema desde ontem..."
             className="mt-2.5"
           />
           <div className="mt-2 flex flex-wrap items-center gap-2">
-            <Button
-              size="sm"
-              disabled={!text.trim()}
-              onClick={() => {
-                onFill(text);
-                setText("");
-              }}
-            >
+            <Button size="sm" disabled={!text.trim()} onClick={fill}>
               Preencher campos
             </Button>
             {text ? (

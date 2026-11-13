@@ -825,6 +825,8 @@ export interface OnboardingInvite {
   created_by: Ref | null;
   state: InviteState;
   token?: string;
+  /** Link para copiar de novo (só links ativos; os antigos, de antes desta versão, não têm). */
+  url?: string | null;
 }
 
 export interface ApplicationSummary {
@@ -1547,6 +1549,8 @@ export interface PortalLocation {
 export interface PortalMe {
   customer: Ref;
   locations: number;
+  /** Falso com a empresa desativada (sem contrato): o histórico continua visível, abrir solicitação não. */
+  can_open_requests?: boolean;
 }
 
 export interface PortalRequestItem {

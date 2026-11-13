@@ -27,14 +27,20 @@ class ProjectStats(BaseModel):
     tickets_total: int = 0
     tickets_open: int = 0
     tickets_done: int = 0
+    # OS canceladas contam no total, mas não no progresso (não vão ser feitas).
+    tickets_cancelled: int = 0
     unproductive: int = 0
     expenses_total: Money = Decimal("0")
+    # Valores por chamado dos técnicos parceiros (pagos ou não): o principal custo do projeto.
+    payouts_total: Money = Decimal("0")
     quotes_approved_total: Money = Decimal("0")
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def progress(self) -> float:
-        return round(self.tickets_done / self.tickets_total, 3) if self.tickets_total else 0.0
+        """Concluídas sobre as que ainda valem (o total sem as canceladas)."""
+        planned = self.tickets_total - self.tickets_cancelled
+        return round(self.tickets_done / planned, 3) if planned > 0 else 0.0
 
 
 class ProjectOut(BaseModel):
@@ -62,7 +68,7 @@ class ProjectOut(BaseModel):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def margin(self) -> float | None:
-        """Valor do contrato menos os custos extras lançados nas OS do projeto."""
+        """Valor do contrato menos os custos extras e os valores dos técnicos nas OS do projeto."""
         if self.contract_value is None:
             return None
-        return float(self.contract_value - self.stats.expenses_total)
+        return float(self.contract_value - self.stats.expenses_total - self.stats.payouts_total)

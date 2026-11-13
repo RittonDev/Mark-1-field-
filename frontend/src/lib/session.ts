@@ -9,8 +9,13 @@ export interface Session {
   user: User;
 }
 
-/** Por que a sessão desta aba terminou: venceu (a API recusou a renovação) ou a pessoa saiu. */
-export type SessionEndReason = "expired" | "logout";
+/**
+ * Por que a sessão desta aba terminou: venceu (a API recusou a renovação), a pessoa saiu ou o perfil
+ * não usa o navegador (técnico de campo entra pelo app).
+ */
+export type SessionEndReason = "expired" | "logout" | "channel";
+
+const END_REASONS: SessionEndReason[] = ["expired", "logout", "channel"];
 
 const STORAGE_KEY = "maxxchamados.session";
 // Por aba (sessionStorage): a tela de login explica "sua sessão terminou" só a quem teve a sessão vencida.
@@ -58,7 +63,7 @@ export const sessionStore = {
   endReason(): SessionEndReason | null {
     try {
       const value = window.sessionStorage.getItem(END_KEY);
-      return value === "expired" || value === "logout" ? value : null;
+      return END_REASONS.find((reason) => reason === value) ?? null;
     } catch {
       return null;
     }

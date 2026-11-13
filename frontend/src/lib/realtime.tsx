@@ -98,8 +98,20 @@ const NOTICE_STATUSES: TicketStatus[] = ["resolved", "on_hold_customer", "on_hol
 const text = (value: unknown) => (typeof value === "string" && value ? value : undefined);
 
 /**
+ * Analista responsável pela OS, quando o evento traz (`owner_id` no evento ou nos dados): undefined se
+ * não traz, null se a OS está sem responsável.
+ */
+function ownerOf(event: RealtimeEvent): string | null | undefined {
+  const raw = (event as { owner_id?: unknown }).owner_id ?? event.data?.owner_id;
+  if (raw === null) return null;
+  return typeof raw === "string" ? raw : undefined;
+}
+
+/**
  * Curadoria: só vira aviso o que alguém da central precisa ver. Salvar formulário, foto, assinatura,
  * apontamento, troca de técnico e o que o Sistema faz sozinho (fechamento automático) só atualizam a tela.
+ * Quando o evento diz quem é o analista responsável, status e acompanhamento avisam só ele (a OS dos
+ * colegas atualiza as listas sem aviso); OS sem responsável avisa a central toda.
  */
 function noticeFor(event: RealtimeEvent, userId: string): NoticeDraft | null {
   const code = event.ticket_code ?? "OS";
@@ -108,12 +120,28 @@ function noticeFor(event: RealtimeEvent, userId: string): NoticeDraft | null {
   // Sem autor é o Sistema; o que eu mesmo fiz não precisa de aviso.
   const byOther = !!event.actor_id && event.actor_id !== userId;
   const by = event.actor_name ? ` por ${event.actor_name}` : "";
+  const owner = ownerOf(event);
+  const othersTicket = !!owner && owner !== userId;
   switch (event.type) {
-    case "ticket.created":
-      return byOther ? { ticketId, code, title: `${code} aberta${by}`, description: text(data.title) } : null;
+    case "ticket.created": {
+      if (!byOther) return null;
+      // Com a origem no evento: só a solicitação do portal e a OS aberta direto na minha fila (as que os
+      // colegas abrem para si entram nas listas sem aviso). Sem a origem, avisa todas.
+      const source = text(data.source);
+      if (source === "portal") {
+        return { ticketId, code, title: `Nova solicitação do portal: ${code}`, description: text(data.title) };
+      }
+      if (source && owner !== userId) return null;
+      return {
+        ticketId,
+        code,
+        title: owner === userId ? `${code} aberta na sua fila${by}` : `${code} aberta${by}`,
+        description: text(data.title),
+      };
+    }
     case "ticket.status_changed": {
       const status = event.status;
-      if (!byOther || !status || !NOTICE_STATUSES.includes(status)) return null;
+      if (!byOther || othersTicket || !status || !NOTICE_STATUSES.includes(status)) return null;
       return {
         ticketId,
         code,
@@ -122,7 +150,7 @@ function noticeFor(event: RealtimeEvent, userId: string): NoticeDraft | null {
       };
     }
     case "ticket.comment_added":
-      if (!byOther || data.internal === true) return null;
+      if (!byOther || othersTicket || data.internal === true) return null;
       return { ticketId, code, title: `Novo acompanhamento em ${code}${by}`, description: text(data.preview) };
     case "ticket.updated": {
       // Só a OS que outra pessoa passou para a minha fila (o analista responsável).
@@ -163,6 +191,7 @@ function noticeFor(event: RealtimeEvent, userId: string): NoticeDraft | null {
 const ALL_EXTRA = ["expenses", "payouts", "quotes", "repairs", "reports", "projects", "project", "customer", "location", "technicians"];
 const EXTRA_BY_FIELD: Record<string, string[]> = {
   expenses: ["expenses", "reports"],
+  payouts: ["payouts", "reports"],
   quotes: ["quotes"],
   part_requests: ["quotes"],
   times: ["reports", "payouts"],
@@ -285,6 +314,14 @@ function writeFeed(userId: string, feed: StoredFeed) {
   }
 }
 
+function clearFeed(userId: string) {
+  try {
+    window.sessionStorage.removeItem(feedKey(userId));
+  } catch {
+    // Sem storage não havia o que apagar.
+  }
+}
+
 /** "OS-000231, OS-000232 e OS-000240" ou "OS-000231, OS-000232, OS-000240 e mais 3". */
 function listCodes(codes: string[]): string {
   if (codes.length <= 3) return codes.length === 1 ? codes[0] : `${codes.slice(0, -1).join(", ")} e ${codes[codes.length - 1]}`;
@@ -324,6 +361,15 @@ export function RealtimeProvider({
   useEffect(() => {
     writeFeed(userId, feed);
   }, [userId, feed]);
+
+  // A sessão terminou (Sair ou vencida): os avisos eram "desta sessão" e não ficam guardados na aba
+  // (computador compartilhado).
+  useEffect(
+    () => () => {
+      if (!sessionStore.get()) clearFeed(userId);
+    },
+    [userId],
+  );
 
   // Avisos: entram na lista do sino e viram toast, agrupados e no máximo um por OS a cada 10 s.
   useEffect(() => {
@@ -379,6 +425,7 @@ export function RealtimeProvider({
   useEffect(() => {
     let socket: WebSocket | null = null;
     let pingTimer: number | undefined;
+    let probeTimer: number | undefined;
     let retryTimer: number | undefined;
     let attempt = 0;
     let stopped = false;
@@ -453,7 +500,8 @@ export function RealtimeProvider({
     // ---- conexão
     const setDown = () => setState(attempt >= OFFLINE_AFTER_ATTEMPTS ? "offline" : "connecting");
 
-    const scheduleReconnect = (authFailed: boolean) => {
+    /** `refusedToken`: token que o servidor recusou (4401); renova antes de tentar de novo. */
+    const scheduleReconnect = (refusedToken: string | null) => {
       if (stopped) return;
       window.clearTimeout(retryTimer);
       // Backoff exponencial com sorteio: as abas não voltam todas no mesmo segundo depois de um deploy.
@@ -461,17 +509,18 @@ export function RealtimeProvider({
       attempt += 1;
       retryTimer = window.setTimeout(async () => {
         retryTimer = undefined;
-        if (authFailed) {
+        // Outra requisição da tela já pode ter renovado o token: aí basta conectar com o novo.
+        if (refusedToken && sessionStore.get()?.accessToken === refusedToken) {
           const result = await refreshSessionResult();
           if (stopped) return;
           if (result === "denied") {
             // A sessão acabou de verdade: o layout leva ao login, que explica.
-            sessionStore.set(null, "expired");
+            if (sessionStore.get()) sessionStore.set(null, "expired");
             return;
           }
           if (result === "unavailable") {
             // Rede ou API fora: a sessão continua e a renovação é tentada de novo depois.
-            scheduleReconnect(true);
+            scheduleReconnect(refusedToken);
             setDown();
             return;
           }
@@ -480,12 +529,20 @@ export function RealtimeProvider({
       }, delay);
     };
 
-    const lost = (ws: WebSocket, authFailed: boolean) => {
+    const lost = (ws: WebSocket, refusedToken: string | null) => {
       window.clearInterval(pingTimer);
+      window.clearTimeout(probeTimer);
       if (socket === ws) socket = null;
       if (stopped) return;
-      scheduleReconnect(authFailed);
+      scheduleReconnect(refusedToken);
       setDown();
+    };
+
+    /** Derruba a conexão "meio aberta" (Wi-Fi trocou, notebook acordou) sem esperar o fechamento educado. */
+    const drop = (ws: WebSocket) => {
+      ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null;
+      ws.close();
+      lost(ws, null);
     };
 
     const connect = () => {
@@ -503,10 +560,7 @@ export function RealtimeProvider({
         pingTimer = window.setInterval(() => {
           if (ws.readyState !== WebSocket.OPEN) return;
           if (Date.now() - lastMessageAt > PING_MS + PONG_GRACE_MS) {
-            // Conexão "meio aberta" (Wi-Fi trocou, notebook acordou): não espera o fechamento educado.
-            ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null;
-            ws.close();
-            lost(ws, false);
+            drop(ws);
             return;
           }
           ws.send(JSON.stringify({ type: "ping" }));
@@ -534,7 +588,7 @@ export function RealtimeProvider({
       };
 
       // 4401/1008: token recusado pelo servidor (vencido ou revogado).
-      ws.onclose = (closeEvent) => lost(ws, closeEvent.code === 4401 || closeEvent.code === 1008);
+      ws.onclose = (closeEvent) => lost(ws, closeEvent.code === 4401 || closeEvent.code === 1008 ? token : null);
       ws.onerror = () => ws.close();
     };
 
@@ -543,8 +597,22 @@ export function RealtimeProvider({
       if (stopped || (socket && (socket.readyState === WebSocket.CONNECTING || socket.readyState === WebSocket.OPEN))) return;
       connect();
     };
+    // Aba visível de novo com a conexão "aberta": confere na hora se ela ainda responde (depois de o
+    // notebook dormir, o socket parece aberto mas está morto e só cairia no próximo ping).
+    const probe = () => {
+      const ws = socket;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const sentAt = Date.now();
+      ws.send(JSON.stringify({ type: "ping" }));
+      window.clearTimeout(probeTimer);
+      probeTimer = window.setTimeout(() => {
+        if (socket === ws && lastMessageAt < sentAt) drop(ws);
+      }, PONG_GRACE_MS);
+    };
     const onVisible = () => {
-      if (document.visibilityState === "visible") reconnectNow();
+      if (document.visibilityState !== "visible") return;
+      reconnectNow();
+      probe();
     };
     reconnectRef.current = () => {
       attempt = 0;
@@ -558,6 +626,7 @@ export function RealtimeProvider({
     return () => {
       stopped = true;
       window.clearInterval(pingTimer);
+      window.clearTimeout(probeTimer);
       window.clearTimeout(retryTimer);
       window.clearTimeout(flushTimer);
       window.clearTimeout(followUpTimer);

@@ -1,9 +1,28 @@
 "use client";
 
 import { useCallback, useSyncExternalStore } from "react";
-import { api } from "./api";
-import { sessionStore } from "./session";
+import { api, API_URL } from "./api";
+import { type SessionEndReason, sessionStore } from "./session";
 import type { TokenResponse } from "./types";
+
+/**
+ * Encerra a sessão também no servidor: o refresh token deixa de valer (num computador compartilhado,
+ * ninguém reaproveita a sessão copiando o token). Não espera a resposta: quem sai não fica preso à
+ * rede, e `keepalive` deixa o pedido terminar mesmo se a aba fechar logo depois. Se falhar, o token
+ * vence sozinho.
+ */
+function endServerSession(refreshToken: string) {
+  try {
+    void fetch(`${API_URL}/auth/logout`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+      keepalive: true,
+    }).catch(() => {});
+  } catch {
+    // Navegador sem fetch com keepalive: a sessão termina quando o token vencer.
+  }
+}
 
 const noopSubscribe = () => () => {};
 
@@ -31,8 +50,11 @@ export function useAuth() {
     return data.user;
   }, []);
 
-  const logout = useCallback(() => {
-    sessionStore.set(null, "logout");
+  /** Sai (`reason` "channel": técnico que abriu a central no navegador; o login orienta a usar o app). */
+  const logout = useCallback((reason: SessionEndReason = "logout") => {
+    const refreshToken = sessionStore.get()?.refreshToken;
+    sessionStore.set(null, reason);
+    if (refreshToken) endServerSession(refreshToken);
   }, []);
 
   return {

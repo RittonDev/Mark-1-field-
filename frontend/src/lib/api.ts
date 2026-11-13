@@ -286,16 +286,19 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     res = sent.res;
     // 401 com token: o acesso venceu. Sem token (ex.: senha errada no login) a resposta vale como veio.
     if (res.status === 401 && sent.token) {
-      // Outra requisição pode ter renovado enquanto esta ia e voltava: aí basta reenviar.
       const current = sessionStore.get()?.accessToken;
-      if (!current || current === sent.token) {
+      // A sessão terminou enquanto esta ia e voltava (Sair, outra aba): nada a renovar nem a encerrar.
+      if (!current) throw new ApiError(401, null);
+      // Outra requisição pode ter renovado nesse meio-tempo: aí basta reenviar.
+      if (current === sent.token) {
         const result = await refreshSessionResult();
         if (result === "unavailable") {
           // Falha passageira (rede, deploy): a sessão e o que está aberto na tela continuam.
           throw new ApiError(503, "Sem conexão com o servidor. Tente de novo em instantes.");
         }
         if (result === "denied") {
-          sessionStore.set(null, "expired");
+          // Só marca "venceu" se ninguém encerrou antes (quem clicou em Sair não vê "sessão expirada").
+          if (sessionStore.get()) sessionStore.set(null, "expired");
           throw new ApiError(401, null);
         }
       }

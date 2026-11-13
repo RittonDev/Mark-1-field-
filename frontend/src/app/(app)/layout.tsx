@@ -8,11 +8,10 @@ import { CommandPalette } from "@/components/CommandPalette";
 import { navLabelFor } from "@/components/nav";
 import { MobileNav, Sidebar, Topbar } from "@/components/Shell";
 import { TicketPanelProvider } from "@/components/ticket/TicketPanel";
-import { canUseWeb, homePath } from "@/lib/access";
+import { canUseWeb, homePath, loginPath } from "@/lib/access";
 import { useAuth } from "@/lib/auth";
 import { useDocumentTitle } from "@/lib/hooks";
 import { RealtimeProvider } from "@/lib/realtime";
-import { sessionStore } from "@/lib/session";
 
 /** Abertura enquanto a sessão carrega: o símbolo da marca "respirando". */
 function SplashLoader() {
@@ -22,25 +21,9 @@ function SplashLoader() {
         <span className="absolute inset-0 animate-ping rounded-2xl bg-brand/10 [animation-duration:1.8s]" />
         <BrandMark height={16} />
       </span>
-      <span className="text-xs font-medium text-ink-subtle">Carregando sua sessão...</span>
+      <span className="text-xs font-medium text-ink-muted">Carregando sua sessão...</span>
     </div>
   );
-}
-
-/**
- * Endereço do login sem sessão. Quem abriu um link (a OS mandada no WhatsApp, uma lista filtrada) volta
- * para ele depois de entrar; quem clicou em Sair, não. Sessão vencida: o login explica o que houve.
- */
-function loginUrl(): string {
-  const reason = sessionStore.endReason();
-  const params = new URLSearchParams();
-  if (reason !== "logout") {
-    const here = `${window.location.pathname}${window.location.search}`;
-    if (here !== "/" && here !== "/minha-fila") params.set("next", here);
-    if (reason === "expired") params.set("motivo", "expirou");
-  }
-  const query = params.toString();
-  return query ? `/login?${query}` : "/login";
 }
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -63,12 +46,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (ready && wrongChannel) {
-      logout();
-      queryClient.clear();
-      router.replace("/login?acesso=app");
+      // Sem sessão, o ramo de baixo limpa o cache e leva ao login, que orienta a usar o app.
+      logout("channel");
     } else if (ready && !user) {
       queryClient.clear();
-      router.replace(loginUrl());
+      router.replace(loginPath());
     } else if (ready && isClient) {
       router.replace("/portal");
     }
