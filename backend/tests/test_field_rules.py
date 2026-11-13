@@ -96,7 +96,9 @@ async def test_settings_and_arrival_due(client: AsyncClient, world: World) -> No
 async def test_no_client_authorization(client: AsyncClient, world: World) -> None:
     """A autorização do cliente antes da visita saiu: o técnico sai sem esperar registro."""
     an, th, sup = world.analyst.headers, world.tech.headers, world.supervisor.headers
-    await client.put(f"{API}/settings/field", json={**RULES, "require_authorization": True}, headers=sup)
+    await client.put(
+        f"{API}/settings/field", json={**RULES, "require_authorization": True}, headers=sup
+    )
     capital = await _location(client, world, "Loja Centro", "Recife", "PE")
     t = await create(
         client,
@@ -184,7 +186,6 @@ async def test_onsite_clock_and_queue_reasons(
     q = (await client.get(f"{API}/my-queue", headers=an)).json()
     item = next(i for i in q["items"] if i["id"] == waiting["id"])
     assert item["arrival_status"] == "late" and item["reasons"][0]["code"] == "arrival_late"
-
 
 
 @requires_db

@@ -132,18 +132,15 @@ async def test_technician_gets_only_the_basics(
         a["id"] for a in (await client.get(url, headers=world.analyst.headers)).json()
     }
 
-    # Horas: cada técnico da visita vê só as dele.
-    for headers, desc in ((tech, "Cabeamento"), (helper, "Ajudante")):
-        r = await client.post(
-            f"{API}/tickets/{t['id']}/worklogs",
-            json={"description": desc, "started_at": datetime.now(UTC).isoformat(), "minutes": 30},
-            headers=headers,
-        )
-        assert r.status_code == 201, r.text
-    logs = (await client.get(f"{API}/tickets/{t['id']}/worklogs", headers=tech)).json()
-    assert [w["description"] for w in logs] == ["Cabeamento"]
+    # Horas: só a central aponta (o tempo do técnico é o da OS) e o técnico vê só as dele.
+    worklog = {"description": "Ajuste", "started_at": datetime.now(UTC).isoformat(), "minutes": 30}
+    url = f"{API}/tickets/{t['id']}/worklogs"
+    assert (await client.post(url, json=worklog, headers=tech)).status_code == 403
+    r = await client.post(url, json=worklog, headers=world.analyst.headers)
+    assert r.status_code == 201, r.text
+    assert (await client.get(url, headers=tech)).json() == []
     pulled = (await client.get(f"{API}/sync/pull", headers=helper)).json()
-    assert [w["description"] for w in pulled["worklogs"]] == ["Ajudante"]
+    assert pulled["worklogs"] == []
     assert pulled["comments"] == []
 
 

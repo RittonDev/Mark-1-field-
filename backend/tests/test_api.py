@@ -749,6 +749,30 @@ async def test_day_activities(client: AsyncClient, world: World) -> None:
     assert other.status_code == 403
 
 
+async def test_day_activities_follow_the_clock(client: AsyncClient, world: World) -> None:
+    """Atividades do dia pela hora de atuação, a manhã primeiro (não pelo nome do técnico)."""
+    from zoneinfo import ZoneInfo
+
+    h = world.analyst.headers
+    tz = ZoneInfo(settings.TIMEZONE)
+    plan = (  # "Redes" vem antes de "Tecnico" no alfabeto, mas a visita dele é mais tarde
+        ("Tarde", str(world.tech_other.user.id), datetime(2030, 2, 4, 14, 0, tzinfo=tz)),
+        ("Manhã cedo", str(world.tech.user.id), datetime(2030, 2, 4, 8, 0, tzinfo=tz)),
+        ("Fim da manhã", str(world.tech_other.user.id), datetime(2030, 2, 4, 11, 30, tzinfo=tz)),
+    )
+    for title, tech_id, start in plan:
+        t = await create(client, world, title=title, assignee_id=tech_id)
+        await transition(client, h, t, "scheduled", scheduled_start=start.isoformat())
+    day = (
+        await client.get(f"{API}/activities/day", params={"date": "2030-02-04"}, headers=h)
+    ).json()
+    assert [a["ticket"]["title"] for a in day["activities"]] == [
+        "Manhã cedo",
+        "Fim da manhã",
+        "Tarde",
+    ]
+
+
 async def test_day_activities_carry_over_and_rescheduled(
     client: AsyncClient, world: World, engine: AsyncEngine
 ) -> None:
