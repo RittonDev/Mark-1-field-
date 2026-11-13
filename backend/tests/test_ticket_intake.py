@@ -53,19 +53,23 @@ async def test_create_with_reference_note_and_helpers(client: AsyncClient, world
     created = next(e for e in events if e["event_type"] == "created")
     assert created["data"]["helpers"] == ["Redes"]
 
-    # O outro técnico vê a OS no app (lista "minhas" e detalhe), comenta e aponta horas...
+    # O outro técnico vê a OS no app (sync e detalhe) e aponta horas...
     helper = world.tech_other.headers
-    mine = (await client.get(f"{API}/tickets", params={"mine": "true"}, headers=helper)).json()
-    assert [item["id"] for item in mine["items"]] == [t["id"]]
+    pulled = (await client.get(f"{API}/sync/pull", headers=helper)).json()
+    assert [item["id"] for item in pulled["tickets"]] == [t["id"]]
     detail = (await client.get(f"{API}/tickets/{t['id']}", headers=helper)).json()
     assert detail["visit_note"].startswith("Falar com o gerente")
-    # ...mas iniciar, concluir e editar a OS ficam com o responsável.
+    # Terceiro: o app não recebe o nº do chamado do cliente nem o e-mail dos colegas.
+    assert detail["client_reference"] is None
+    assert {h["email"] for h in detail["helpers"]} == {""}
+    # ...mas iniciar, concluir e editar a OS ficam com o responsável, e acompanhamento não é
+    # pelo app (a central fala com o técnico pelo WhatsApp).
     assert detail["allowed_transitions"] == []
     assert detail["can_edit"] is False
     r = await client.post(
         f"{API}/tickets/{t['id']}/comments", json={"body": "Cheguei junto"}, headers=helper
     )
-    assert r.status_code == 201, r.text
+    assert r.status_code == 403, r.text
     r = await client.post(
         f"{API}/tickets/{t['id']}/worklogs",
         json={

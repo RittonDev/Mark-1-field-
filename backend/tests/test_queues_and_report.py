@@ -89,8 +89,11 @@ async def test_owner_claim_and_filters(client: AsyncClient, world: World) -> Non
     assert _ids(unowned) == {t1["id"]}
     mine = (await client.get(listing, params={"mine": "true"}, headers=an)).json()
     assert _ids(mine) == {t3["id"], r1["id"]}  # executa (r1) ou é o responsável (t3, r1)
-    tech_mine = (await client.get(listing, params={"mine": "true"}, headers=th)).json()
-    assert _ids(tech_mine) == {t3["id"]}
+    # O técnico não lista pela API (é terceiro): o app recebe pelo sync só as OS dele.
+    assert (await client.get(listing, params={"mine": "true"}, headers=th)).status_code == 403
+    pulled = (await client.get(f"{API}/sync/pull", headers=th)).json()
+    assert {x["id"] for x in pulled["tickets"]} == {t3["id"]}
+    assert all(x["owner"] is None for x in pulled["tickets"])  # o analista não vai para o app
 
 
 async def test_my_queue_sections_and_team_queues(client: AsyncClient, world: World) -> None:
