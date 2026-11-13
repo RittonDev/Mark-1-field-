@@ -133,7 +133,8 @@ function Lightbox({ items, index, onClose, onMove }: { items: Attachment[]; inde
   const a = items[index];
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+      // Um Esc que a camada de cima já tratou (a busca Ctrl+K aberta sobre a foto) fica com ela.
+      if (e.key === "Escape" && !e.defaultPrevented) {
         e.preventDefault();
         onClose();
       }

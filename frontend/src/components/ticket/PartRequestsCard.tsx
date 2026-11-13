@@ -36,11 +36,12 @@ export function PartRequestsCard({ ticket }: { ticket: TicketDetail }) {
     onSuccess: refresh,
   });
 
-  // Esc fecha só o zoom; o preventDefault avisa o painel da OS que a tecla já foi tratada.
+  // Esc fecha só o zoom; o preventDefault avisa o painel da OS que a tecla já foi tratada. Um Esc que
+  // a camada de cima já tratou (a busca Ctrl+K aberta sobre a foto) fica com ela.
   useEffect(() => {
     if (!zoom) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
+      if (e.key !== "Escape" || e.defaultPrevented) return;
       e.preventDefault();
       setZoom(null);
     };
