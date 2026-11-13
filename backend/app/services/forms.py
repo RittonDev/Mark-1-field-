@@ -23,7 +23,7 @@ from app.models import FormTemplate, Ticket, TicketAttachment, TicketForm, User
 from app.schemas.forms import FormField, FormTemplateIn, TicketFormAdd, TicketFormAnswers
 from app.services.errors import NotFound, PermissionDenied, WorkflowError
 from app.services.realtime import queue_event
-from app.services.tickets import _touch, add_attachment, can_edit, record_event
+from app.services.tickets import _touch, add_attachment, can_work, record_event
 
 CLOSED_STATES = (TicketStatus.RESOLVED, TicketStatus.CLOSED, TicketStatus.CANCELLED)
 
@@ -174,7 +174,7 @@ def locked_for(ticket: Ticket, actor: User) -> bool:
 
 
 def _ensure_can_fill(ticket: Ticket, actor: User) -> None:
-    if not can_edit(actor, ticket):
+    if not can_work(actor, ticket):
         raise PermissionDenied("Só o técnico responsável ou a gestão preenche o formulário")
     if locked_for(ticket, actor):
         raise WorkflowError("A assinatura já foi colhida: o formulário não pode mais ser alterado")
@@ -380,7 +380,7 @@ async def collect_signature(
     longitude: float | None,
     actor: User,
 ) -> Ticket:
-    if not can_edit(actor, ticket):
+    if not can_work(actor, ticket):
         raise PermissionDenied("Só o técnico responsável ou a gestão colhe a assinatura")
     if ticket.status in CLOSED_STATES:
         raise WorkflowError("A OS já foi concluída")

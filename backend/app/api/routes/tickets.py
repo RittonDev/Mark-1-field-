@@ -18,7 +18,6 @@ from app.schemas.ticket import (
     CommentOut,
     EventOut,
     TicketAssign,
-    TicketAuthorizationIn,
     TicketCreate,
     TicketDetail,
     TicketFilters,
@@ -138,17 +137,6 @@ async def create_ticket(body: TicketCreate, db: DB, user: NoTechnicianUser) -> T
 @router.get("/tickets/{ticket_id}", response_model=TicketDetail)
 async def get_ticket(ticket_id: uuid.UUID, db: DB, user: CurrentUser) -> TicketDetail:
     return await _with_recurrence(db, await svc.get_visible_ticket(db, user, ticket_id), user)
-
-
-@router.post("/tickets/{ticket_id}/authorization", response_model=TicketDetail)
-async def record_authorization(
-    ticket_id: uuid.UUID, body: TicketAuthorizationIn, db: DB, user: TicketManagerUser
-) -> TicketDetail:
-    """Autorização do cliente para a visita: libera o técnico e liga o relógio de chegada."""
-    ticket = await svc.get_visible_ticket(db, user, ticket_id)
-    await svc.record_authorization(db, ticket, body, user)
-    await commit_and_publish(db)
-    return await _detail(db, ticket_id, user)
 
 
 @router.patch("/tickets/{ticket_id}", response_model=TicketDetail)

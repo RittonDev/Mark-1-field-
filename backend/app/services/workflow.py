@@ -118,6 +118,8 @@ SLA_PAUSED_STATUSES: frozenset[TicketStatus] = frozenset(
 )
 # Sair destes estados (por ação da equipe) conta como primeira resposta.
 UNTOUCHED_STATUSES: frozenset[TicketStatus] = frozenset({S.NEW, S.TRIAGE})
+# O que o técnico pode fazer com a visita (o resto do fluxo é da central).
+TECHNICIAN_TARGETS: frozenset[TicketStatus] = frozenset({S.EN_ROUTE, S.IN_PROGRESS, S.RESOLVED})
 
 PRIORITY_INFO: dict[TicketPriority, dict[str, str]] = {
     TicketPriority.CRITICAL: {"label": "Crítica", "code": "P1", "color": "#dc2626"},
@@ -190,8 +192,10 @@ def user_can_transition(
     if role in (UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.ANALYST):
         return True
     if role == UserRole.TECHNICIAN:
-        # Só nas OS em que é o responsável (o analista o coloca na OS).
-        return ticket_assignee_id == user_id
+        # Só nas OS em que é o responsável (o analista o coloca na OS), e só andando com a
+        # visita: sair, iniciar (chegada) e concluir. Agendar, pausar, devolver e cancelar são da
+        # central — o técnico nunca mexe no horário; o tempo dele corre do início à conclusão.
+        return ticket_assignee_id == user_id and to_status in TECHNICIAN_TARGETS
     # Solicitante: cancela enquanto ninguém pegou; aceita (fecha) ou recusa (reabre) a solução.
     if ticket_requester_id != user_id:
         return False

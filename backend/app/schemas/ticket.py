@@ -7,8 +7,6 @@ from pydantic import BaseModel, Field, computed_field, model_validator
 from app.core.config import settings
 from app.core.enums import (
     AssetType,
-    AuthorizationChannel,
-    AuthorizationStatus,
     Impact,
     Responsibility,
     SlaStatus,
@@ -134,8 +132,6 @@ class TicketListItem(ORMModel):
     arrived_at: datetime | None = None
     onsite_due_at: datetime | None = None
     onsite_warning_at: datetime | None = Field(default=None, exclude=True)
-    # Autorização do cliente para a visita (o técnico só sai com ela, quando exigida).
-    authorization_status: AuthorizationStatus = AuthorizationStatus.NOT_REQUIRED
     # Outras OS no mesmo local nos últimos 30 dias (preenchido nas listagens e na fila).
     recurrence_30d: int = 0
     # Etiquetas (ex.: "Avulso", "Faturamento Matriz").
@@ -228,12 +224,6 @@ class TicketDetail(TicketListItem):
     signature_attachment_id: uuid.UUID | None = None
     # Custos extras: a gestão lança; o técnico só vê; o solicitante não recebe.
     expenses: list[ExpenseOut] = []
-    # Autorização do cliente para a visita.
-    authorized_by_name: str | None = None
-    authorization_channel: AuthorizationChannel | None = None
-    authorization_ref: str | None = None
-    authorized_at: datetime | None = None
-    authorized_by: UserRef | None = None
     # Pedidos de peça do técnico (peça só entra com orçamento aprovado).
     part_requests: list[PartRequestOut] = []
     # Só na tela da OS: outras OS no mesmo local nos últimos 30 dias.
@@ -275,16 +265,6 @@ class TicketDetail(TicketListItem):
     report_link: ReportLinkOut | None = None
 
 
-class TicketAuthorizationIn(BaseModel):
-    """Registro da autorização do cliente (quem autorizou, por onde e o número do chamado dele)."""
-
-    status: Literal["authorized", "denied", "pending"] = "authorized"
-    by_name: str | None = Field(default=None, max_length=160)
-    channel: AuthorizationChannel | None = None
-    reference: str | None = Field(default=None, max_length=80)
-    note: str | None = Field(default=None, max_length=2000)
-
-
 class TicketCreate(BaseModel):
     title: str = Field(min_length=3, max_length=200)
     description: str = Field(default="", max_length=20000)
@@ -319,8 +299,6 @@ class TicketCreate(BaseModel):
     scheduled_end: datetime | None = None
     # Agendar mesmo com o técnico ocupado no horário (a API recusa com 409 sem isso).
     allow_conflict: bool = False
-    # Só a gestão: autorização do cliente já registrada na abertura (corre no atendimento).
-    authorization: TicketAuthorizationIn | None = None
 
 
 class TicketUpdate(BaseModel):

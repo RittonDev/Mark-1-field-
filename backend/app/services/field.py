@@ -109,13 +109,11 @@ def arrival_hours(r: FieldRules, city: str | None, state: str | None) -> int | N
 
 
 def clock_start(ticket: Any) -> datetime | None:
-    """Início do relógio de chegada: a autorização (quando exigida) ou a abertura da OS."""
-    status = ticket.authorization_status
-    if status == AuthorizationStatus.AUTHORIZED:
-        return ticket.authorized_at or ticket.created_at
-    if status == AuthorizationStatus.NOT_REQUIRED or status is None:
-        return ticket.created_at
-    return None  # pendente ou negada: o relógio não começou
+    """Início do relógio de chegada: a abertura da OS. Nas OS antigas que tiveram a autorização do
+    cliente registrada (função retirada em 2026-11-12), vale a hora da autorização."""
+    if ticket.authorization_status == AuthorizationStatus.AUTHORIZED and ticket.authorized_at:
+        return ticket.authorized_at
+    return ticket.created_at
 
 
 async def recompute_arrival_due(db: AsyncSession, ticket: Ticket, r: FieldRules) -> None:

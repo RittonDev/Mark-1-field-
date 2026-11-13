@@ -17,7 +17,6 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.config import settings
 from app.core.enums import (
-    AuthorizationStatus,
     FormStatus,
     TicketEventType,
     TicketPriority,
@@ -44,12 +43,10 @@ from app.models import (
     User,
     ViolationReason,
 )
-from app.schemas.field import FieldRules
 from app.schemas.part_request import PartRequestAttachment
 from app.schemas.ticket import (
     CommentCreate,
     RecurrenceItem,
-    TicketAuthorizationIn,
     TicketCreate,
     TicketDetail,
     TicketFilters,
@@ -119,14 +116,24 @@ def can_view(user: User, ticket: Ticket) -> bool:
     return user.id in (ticket.requester_id, ticket.created_by_id)
 
 
+TECHNICIAN_TIME = (
+    "Só a central mexe no horário da OS: o seu tempo começa ao iniciar e termina ao concluir"
+)
+
+
 def can_edit(user: User, ticket: Ticket) -> bool:
+    """Editar os dados da OS (escopo, local, agenda...): só a gestão. O técnico é terceiro e
+    nunca mexe no horário; ele trabalha na OS (formulários, fotos, assinatura) via `can_work`."""
+    return ticket.status not in FINAL and user.can_manage_tickets
+
+
+def can_work(user: User, ticket: Ticket) -> bool:
+    """Trabalhar na OS em campo (formulários, fotos, assinatura): a gestão ou o responsável."""
     if ticket.status in FINAL:
         return False
     if user.can_manage_tickets:
         return True
-    if user.role == UserRole.TECHNICIAN:
-        return ticket.assignee_id == user.id
-    return False
+    return user.role == UserRole.TECHNICIAN and ticket.assignee_id == user.id
 
 
 def can_assign(user: User, ticket: Ticket) -> bool:
@@ -199,11 +206,11 @@ def field_view(detail: TicketDetail) -> TicketDetail:
     """O técnico é terceiro: recebe só o necessário para a visita.
 
     Fica: cliente, local (nome e endereço da loja), agenda, escopo (título, descrição, tipo de
-    serviço, recado), o fluxo de campo (status, chegada, permanência, autorização sim/não) e o
-    próprio trabalho (formulários, fotos, assinatura, horas, peças, solução). Sai o que é da
-    gestão: prazos e motivos de SLA, analista, equipe, projeto, etiquetas, solicitante, quem abriu,
-    nº do chamado do cliente, detalhes da autorização, CNPJ e contato da loja (nome e telefone:
-    quem fala com a loja é a central), reincidência e dados migrados.
+    serviço, recado), o fluxo de campo (status, chegada, permanência) e o
+    próprio trabalho (formulários, fotos, assinatura, peças, solução). Sai o que é da gestão:
+    prazos e motivos de SLA, analista, equipe, projeto, etiquetas, solicitante, quem abriu, nº do
+    chamado do cliente, CNPJ e contato da loja (nome e telefone: quem fala com a loja é a
+    central), reincidência e dados migrados.
     """
     blank: dict[str, Any] = {
         "owner": None,
@@ -229,11 +236,6 @@ def field_view(detail: TicketDetail) -> TicketDetail:
         "recurrence_30d": 0,
         "recurrence": None,
         "legacy": None,
-        "authorized_by_name": None,
-        "authorization_channel": None,
-        "authorization_ref": None,
-        "authorized_by": None,
-        "authorized_at": None,
     }
     for key, value in blank.items():
         setattr(detail, key, value)
@@ -770,19 +772,9 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
         helper_ids=[h.id for h in helpers],
     )
 
-    # Autorização do cliente: com a regra ligada, a OS nasce aguardando (a gestão pode já
-    # registrar a autorização na abertura, na correria do atendimento).
     rules = await field_rules.rules(db)
-    if data.authorization is not None and not actor.can_manage_tickets:
-        raise PermissionDenied("Só a gestão registra a autorização do cliente")
-    authorization_status = (
-        AuthorizationStatus.PENDING
-        if rules.require_authorization
-        else AuthorizationStatus.NOT_REQUIRED
-    )
 
     ticket = Ticket(
-        authorization_status=authorization_status,
         title=data.title.strip(),
         description=data.description,
         type=data.type,
@@ -820,8 +812,6 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
     sla.set_due_dates(
         ticket, base=now, response_minutes=response_min, resolution_minutes=resolution_min
     )
-    if data.authorization is not None:
-        _apply_authorization(ticket, data.authorization, actor, now)
     await field_rules.recompute_arrival_due(db, ticket, rules)
     db.add(ticket)
     await db.flush()  # gera id e número
@@ -838,10 +828,6 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
         data=created_data,
         now=now,
     )
-    if data.authorization is not None:
-        _record_authorization_event(
-            db, ticket, actor, authorization_status, data.authorization, now=now
-        )
     queue_event(db, "created", ticket, actor, {"title": ticket.title})
     if helpers:
         # Avisa (push) quem vai junto na visita.
@@ -1021,109 +1007,6 @@ def _ensure_forms_and_signature(ticket: Ticket) -> None:
         raise WorkflowError("Colete a assinatura do responsável no local antes de concluir a OS")
 
 
-# --------------------------------------------------------------------------- autorização do cliente
-
-AUTHORIZATION_BLOCKED = "Aguardando autorização do cliente para a visita"
-_BLOCKED_AUTH = (AuthorizationStatus.PENDING, AuthorizationStatus.DENIED)
-
-
-def _is_field_visit(ticket: Ticket, to: TicketStatus, actor: User) -> bool:
-    """Ir ao local é visita (cobrada). Atendimento remoto do analista não é visita."""
-    if to == S.EN_ROUTE:
-        return True
-    if to != S.IN_PROGRESS:
-        return False
-    if actor.role == UserRole.TECHNICIAN:
-        return True
-    return ticket.assignee is not None and ticket.assignee.role == UserRole.TECHNICIAN
-
-
-def _ensure_visit_authorized(
-    ticket: Ticket, to: TicketStatus, actor: User, rules: FieldRules
-) -> None:
-    """Com a regra ligada, o técnico só sai (ou começa na loja) com a autorização do cliente."""
-    if (
-        rules.require_authorization
-        and ticket.authorization_status in _BLOCKED_AUTH
-        and ticket.status != to
-        and _is_field_visit(ticket, to, actor)
-    ):
-        raise WorkflowError(AUTHORIZATION_BLOCKED)
-
-
-def _apply_authorization(
-    ticket: Ticket, data: TicketAuthorizationIn, actor: User, now: datetime
-) -> None:
-    new = AuthorizationStatus(data.status)
-    if new == AuthorizationStatus.AUTHORIZED:
-        # Corrigir quem autorizou não reinicia o relógio de chegada.
-        if (
-            ticket.authorization_status != AuthorizationStatus.AUTHORIZED
-            or not ticket.authorized_at
-        ):
-            ticket.authorized_at = now
-    else:
-        ticket.authorized_at = None
-    ticket.authorization_status = new
-    if new == AuthorizationStatus.PENDING:
-        ticket.authorized_by_name = None
-        ticket.authorization_channel = None
-        ticket.authorization_ref = None
-        ticket.authorized_by_id = None
-        return
-    ticket.authorized_by_name = " ".join((data.by_name or "").split()) or ticket.authorized_by_name
-    if data.channel is not None:
-        ticket.authorization_channel = data.channel.value
-    if data.reference is not None:
-        ticket.authorization_ref = data.reference.strip() or None
-    ticket.authorized_by_id = actor.id
-
-
-def _record_authorization_event(
-    db: AsyncSession,
-    ticket: Ticket,
-    actor: User,
-    previous: AuthorizationStatus,
-    data: TicketAuthorizationIn,
-    *,
-    now: datetime,
-) -> None:
-    payload = {
-        "status": ticket.authorization_status.value,
-        "by_name": ticket.authorized_by_name,
-        "channel": ticket.authorization_channel,
-        "reference": ticket.authorization_ref,
-    }
-    record_event(
-        db,
-        ticket,
-        actor,
-        TicketEventType.AUTHORIZATION_RECORDED,
-        from_value=previous.value,
-        to_value=ticket.authorization_status.value,
-        note=data.note,
-        data=payload,
-        now=now,
-    )
-    queue_event(db, "authorization", ticket, actor, payload, internal=True)
-
-
-async def record_authorization(
-    db: AsyncSession, ticket: Ticket, data: TicketAuthorizationIn, actor: User
-) -> Ticket:
-    """Registra a autorização do cliente (ou a recusa) e liga o relógio de chegada."""
-    if not actor.can_manage_tickets:
-        raise PermissionDenied("Só a gestão registra a autorização do cliente")
-    if ticket.status in FINAL:
-        raise WorkflowError("OS encerrada não recebe autorização")
-    now = utcnow()
-    previous = ticket.authorization_status
-    _apply_authorization(ticket, data, actor, now)
-    await field_rules.recompute_arrival_due(db, ticket, await field_rules.rules(db))
-    _record_authorization_event(db, ticket, actor, previous, data, now=now)
-    return ticket
-
-
 # --------------------------------------------------------------------------- reincidência
 
 RECURRENCE_WINDOW = timedelta(days=30)
@@ -1190,8 +1073,13 @@ async def transition_ticket(
         to_status=to,
     ):
         raise PermissionDenied("Você não pode mudar o status desta OS")
+    # O técnico nunca mexe no horário: a agenda é da central e o relógio dele corre sozinho,
+    # do início à conclusão da OS.
+    if actor.role == UserRole.TECHNICIAN and (
+        payload.scheduled_start is not None or payload.scheduled_end is not None
+    ):
+        raise PermissionDenied(TECHNICIAN_TIME)
     rules = await field_rules.rules(db)
-    _ensure_visit_authorized(ticket, to, actor, rules)
 
     if payload.scheduled_start is not None:
         ticket.scheduled_start = payload.scheduled_start
@@ -1299,9 +1187,10 @@ async def add_comment(
 async def add_worklog(
     db: AsyncSession, ticket: Ticket, data: WorklogCreate, actor: User
 ) -> TicketWorklog:
-    # Os outros técnicos da visita também apontam as horas deles.
-    helper_can = ticket.status not in FINAL and is_helper(actor, ticket)
-    if not (actor.is_staff and (can_edit(actor, ticket) or helper_can)):
+    # Horas só a gestão aponta. O tempo do técnico é o da OS: corre do início à conclusão.
+    if actor.role == UserRole.TECHNICIAN:
+        raise PermissionDenied(TECHNICIAN_TIME)
+    if not can_edit(actor, ticket):
         raise PermissionDenied("Você não pode apontar horas nesta OS")
     now = utcnow()
     minutes = data.minutes

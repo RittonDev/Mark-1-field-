@@ -10,10 +10,15 @@ import {
 } from "./constants";
 import type { TicketListItem, TicketStatus, User } from "./types";
 
+/** Espelho de workflow.TECHNICIAN_TARGETS. */
+const TECHNICIAN_TARGETS: TicketStatus[] = ["en_route", "in_progress", "resolved"];
+
 export function userCanTransition(user: User, ticket: TicketListItem, to: TicketStatus): boolean {
   if (canManageTickets(user.role)) return true;
-  // Técnico de campo: só nas OS em que o analista o colocou como responsável.
-  if (user.role === "technician") return ticket.assignee?.id === user.id;
+  // Técnico de campo: só nas OS em que o analista o colocou como responsável, e só andando com a
+  // visita (sair, iniciar, concluir). Agenda, pausa e cancelamento são da central: o técnico nunca
+  // mexe no horário.
+  if (user.role === "technician") return ticket.assignee?.id === user.id && TECHNICIAN_TARGETS.includes(to);
   // Solicitante: a lista não traz requester_id; o quadro não é usado por solicitantes.
   if (to === "cancelled") return UNTOUCHED_STATUSES.includes(ticket.status);
   return ticket.status === "resolved" && (to === "closed" || to === "reopened");

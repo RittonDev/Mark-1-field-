@@ -12,12 +12,11 @@ from typing import Any
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.enums import AuthorizationStatus, PartRequestStatus, SlaStatus, TicketStatus, UserRole
+from app.core.enums import PartRequestStatus, SlaStatus, TicketStatus, UserRole
 from app.db.base import utcnow
 from app.models import Ticket, User
 from app.models.part_request import TicketPartRequest
 from app.models.user import TICKET_MANAGER_ROLES
-from app.schemas.field import FieldRules
 from app.schemas.queues import (
     MyQueue,
     MyQueueCounts,
@@ -44,21 +43,9 @@ TONE_RANK = {"danger": 0, "warning": 1, "info": 2}
 LIMIT = 500
 
 
-def _field_reasons(
-    t: Any, now: datetime, rules: FieldRules | None, part_request_open: bool
-) -> list[QueueReason]:
-    """Regras de campo: autorização, os dois relógios de 4h e pedido de peça do técnico."""
+def _field_reasons(t: Any, now: datetime, part_request_open: bool) -> list[QueueReason]:
+    """Regras de campo: os dois relógios de 4h e pedido de peça do técnico."""
     reasons: list[QueueReason] = []
-    if (
-        rules is not None
-        and rules.require_authorization
-        and t.authorization_status == AuthorizationStatus.PENDING
-    ):
-        reasons.append(
-            QueueReason(
-                code="authorization_pending", label="Aguardando autorização", tone="warning"
-            )
-        )
     arrival = field_rules.arrival_status(t, now)
     if arrival == "late" and t.arrived_at is None:
         reasons.append(QueueReason(code="arrival_late", label="Chegada atrasada", tone="danger"))
@@ -85,7 +72,6 @@ def reasons_for(
     now: datetime,
     assignee_role: UserRole | None,
     *,
-    rules: FieldRules | None = None,
     part_request_open: bool = False,
     assignee_active: bool | None = None,
 ) -> list[QueueReason]:
@@ -93,7 +79,7 @@ def reasons_for(
     reasons: list[QueueReason] = []
     is_open = t.status in OPEN_STATUSES
     if is_open:
-        reasons.extend(_field_reasons(t, now, rules, part_request_open))
+        reasons.extend(_field_reasons(t, now, part_request_open))
         status = sla.compute_sla_status(t, now)
         if status == SlaStatus.BREACHED:
             reasons.append(QueueReason(code="sla_violated", label="SLA violado", tone="danger"))
@@ -185,7 +171,6 @@ async def my_queue(db: AsyncSession, target: User, day: date | None = None) -> M
             .limit(LIMIT)
         )
     )
-    rules = await field_rules.rules(db)
     asking = await open_part_requests(db, [t.id for t in tickets])
     recurrence = await recurrence_counts(db, tickets, now)
     items: list[QueueItem] = []
@@ -194,7 +179,6 @@ async def my_queue(db: AsyncSession, target: User, day: date | None = None) -> M
             t,
             now,
             t.assignee.role if t.assignee else None,
-            rules=rules,
             part_request_open=t.id in asking,
             assignee_active=t.assignee.is_active if t.assignee else None,
         )
@@ -243,7 +227,6 @@ async def team_queues(db: AsyncSession) -> TeamQueues:
     """Tamanho da fila de cada analista/gestor (e das OS sem analista) para hoje."""
     now = utcnow()
     day_start, day_end = day_bounds(local_today())
-    rules = await field_rules.rules(db)
     asking = await open_part_requests(db)
     managers = list(
         await db.scalars(
@@ -262,7 +245,6 @@ async def team_queues(db: AsyncSession) -> TeamQueues:
                 Ticket.arrived_at,
                 Ticket.onsite_due_at,
                 Ticket.onsite_warning_at,
-                Ticket.authorization_status,
                 Ticket.scheduled_start,
                 Ticket.created_at,
                 Ticket.response_due_at,
@@ -291,7 +273,6 @@ async def team_queues(db: AsyncSession) -> TeamQueues:
             row,
             now,
             row.assignee_role,
-            rules=rules,
             part_request_open=row.id in asking,
             assignee_active=row.assignee_active,
         )
