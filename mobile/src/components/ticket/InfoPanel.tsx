@@ -1,38 +1,50 @@
-import { useStyles, type Palette } from "../../theme/theme";
 import { StyleSheet, View } from "react-native";
-import { Text } from "../Text";
-import { LEVEL, RESPONSIBILITY, SLA_STATUS, TICKET_SOURCE, TICKET_TYPE } from "../../lib/constants";
 import { addressOf, callPhone, openInMaps } from "../../lib/device-actions";
-import { formatDateTime, formatDocument, formatRelative } from "../../lib/format";
-import { computeSlaStatus } from "../../lib/sla";
+import { formatDay, formatTime } from "../../lib/format";
 import type { LocalTicket } from "../../lib/syncTypes";
+import { useStyles, type Palette } from "../../theme/theme";
+import { Text } from "../Text";
 import { Button, Card, InfoRow, SectionTitle } from "../ui";
-import { DurationCompare } from "./DurationCompare";
 import { ExpensesCard } from "./ExpensesCard";
 
-export function InfoPanel({ ticket, now }: { ticket: LocalTicket; now: number }) {
+/** "Qui., 12/11 · 21:30 às 22:10" (o fim só quando é no mesmo dia). */
+export function visitWindow(ticket: Pick<LocalTicket, "scheduled_start" | "scheduled_end">): string | null {
+  if (!ticket.scheduled_start) return null;
+  const start = new Date(ticket.scheduled_start);
+  const end = ticket.scheduled_end ? new Date(ticket.scheduled_end) : null;
+  const day = formatDay(start);
+  const sameDay = end && end.toDateString() === start.toDateString();
+  const dayLabel = day.charAt(0).toUpperCase() + day.slice(1);
+  return `${dayLabel} · ${formatTime(start)}${sameDay ? ` às ${formatTime(end)}` : ""}`;
+}
+
+/**
+ * Detalhes da OS para o técnico. Ele é terceiro: só o básico para fazer a visita — quando, onde
+ * (com o contato da loja) e o escopo. Prazos de SLA, analista, solicitante e a classificação
+ * interna da OS ficam com a gestão (e o servidor nem manda).
+ */
+export function InfoPanel({ ticket }: { ticket: LocalTicket }) {
   const styles = useStyles(makeStyles);
   const location = ticket.location;
-  const sla = SLA_STATUS[computeSlaStatus(ticket, now)];
-  const requesterContact = ticket.requester_contact;
   // OS baixadas antes da mudança no contrato não têm o campo; trata como vazio.
   const serviceAddress = ticket.service_address?.trim() || null;
   const registeredAddress = addressOf(location);
   const contactPhone = location?.contact_phone;
+  const when = visitWindow(ticket);
 
   return (
     <View style={{ gap: 12 }}>
+      <Card>
+        <SectionTitle>Agendamento</SectionTitle>
+        <Text style={styles.strong}>{when ?? "Sem data marcada: aguarde a central agendar."}</Text>
+      </Card>
+
       {location || serviceAddress ? (
         <Card>
           <SectionTitle>Local de atendimento</SectionTitle>
+          {ticket.customer ? <Text style={styles.label}>{ticket.customer.name}</Text> : null}
           {location ? (
             <Text style={styles.strong}>{[location.code, location.name].filter(Boolean).join(" · ")}</Text>
-          ) : null}
-          {location?.document ? (
-            <InfoRow
-              label={location.document.length === 14 ? "CNPJ da filial" : "Documento da filial"}
-              value={formatDocument(location.document)}
-            />
           ) : null}
           {serviceAddress ? (
             <View style={styles.serviceAddress}>
@@ -40,11 +52,11 @@ export function InfoPanel({ ticket, now }: { ticket: LocalTicket; now: number })
               <Text style={[styles.text, { fontWeight: "600" }]} selectable>
                 {serviceAddress}
               </Text>
-              <Text style={styles.label}>Diferente do endereço cadastrado da filial.</Text>
+              <Text style={styles.label}>Diferente do endereço cadastrado da loja.</Text>
             </View>
           ) : null}
           {registeredAddress ? (
-            <InfoRow label={serviceAddress ? "Endereço cadastrado da filial" : "Endereço"} value={registeredAddress} />
+            <InfoRow label={serviceAddress ? "Endereço cadastrado da loja" : "Endereço"} value={registeredAddress} />
           ) : null}
           {location?.contact_name ? <InfoRow label="Contato no local" value={location.contact_name} /> : null}
           {contactPhone ? <InfoRow label="Telefone" value={contactPhone} onPress={() => void callPhone(contactPhone)} /> : null}
@@ -56,19 +68,9 @@ export function InfoPanel({ ticket, now }: { ticket: LocalTicket; now: number })
         </Card>
       ) : null}
 
-      {ticket.service_type || ticket.estimated_minutes || ticket.work_started_at || (ticket.work_seconds ?? 0) > 0 ? (
-        <Card>
-          <SectionTitle>Serviço</SectionTitle>
-          {ticket.service_type ? <Text style={styles.strong}>{ticket.service_type.name}</Text> : null}
-          <DurationCompare ticket={ticket} now={now} />
-          <Text style={styles.label}>O tempo real conta sozinho enquanto a OS está em atendimento.</Text>
-        </Card>
-      ) : null}
-
-      <ExpensesCard expenses={ticket.expenses ?? []} />
-
       <Card>
-        <SectionTitle>Descrição</SectionTitle>
+        <SectionTitle>Escopo do serviço</SectionTitle>
+        {ticket.service_type ? <Text style={styles.strong}>{ticket.service_type.name}</Text> : null}
         <Text style={styles.text} selectable>
           {ticket.description?.trim() || "Sem descrição."}
         </Text>
@@ -82,84 +84,23 @@ export function InfoPanel({ ticket, now }: { ticket: LocalTicket; now: number })
         ) : null}
       </Card>
 
-      <Card>
-        <SectionTitle>SLA</SectionTitle>
-        <InfoRow label="Situação" value={<Text style={[styles.value, { color: sla.color, fontWeight: "600" }]}>{sla.label}</Text>} />
-        {ticket.first_response_at ? (
-          <InfoRow label="1ª resposta" value={formatDateTime(ticket.first_response_at)} />
-        ) : ticket.response_due_at ? (
-          <InfoRow
-            label="Prazo da 1ª resposta"
-            value={`${formatDateTime(ticket.response_due_at)} (${formatRelative(ticket.response_due_at, now)})`}
-          />
-        ) : null}
-        {ticket.resolution_due_at ? (
-          <InfoRow
-            label="Prazo de solução"
-            value={`${formatDateTime(ticket.resolution_due_at)}${ticket.resolved_at ? "" : ` (${formatRelative(ticket.resolution_due_at, now)})`}`}
-          />
-        ) : null}
-        {ticket.sla_paused_at ? <InfoRow label="Pausado desde" value={formatDateTime(ticket.sla_paused_at)} /> : null}
-        {ticket.response_violation_reason ? (
-          <InfoRow
-            label="Motivo da violação — 1ª resposta"
-            value={`${ticket.response_violation_reason.name} · ${RESPONSIBILITY[ticket.response_violation_reason.responsibility]?.label ?? ""}`}
-          />
-        ) : null}
-        {ticket.resolution_violation_reason ? (
-          <InfoRow
-            label="Motivo da violação — solução"
-            value={`${ticket.resolution_violation_reason.name} · ${RESPONSIBILITY[ticket.resolution_violation_reason.responsibility]?.label ?? ""}`}
-          />
-        ) : null}
-        {ticket.violation_note ? <InfoRow label="Detalhe da violação" value={ticket.violation_note} /> : null}
-        {ticket.violation_reason_pending ? (
-          <Text style={styles.label}>Prazo violado sem motivo informado: o analista justifica pela web.</Text>
-        ) : null}
-      </Card>
-
-      <Card>
-        <SectionTitle>Ordem de serviço</SectionTitle>
-        <InfoRow label="Tipo" value={TICKET_TYPE[ticket.type]} />
-        {ticket.category ? <InfoRow label="Categoria" value={ticket.category.full_name} /> : null}
-        <InfoRow label="Impacto / urgência" value={`${LEVEL[ticket.impact]} / ${LEVEL[ticket.urgency]}`} />
-        {ticket.customer ? <InfoRow label="Cliente" value={ticket.customer.name} /> : null}
-        <InfoRow label="Solicitante" value={ticket.requester?.name ?? ticket.requester_name ?? "—"} />
-        {requesterContact ? (
-          <InfoRow
-            label="Contato do solicitante"
-            value={requesterContact}
-            onPress={/\d{8,}/.test(requesterContact.replace(/\D/g, "")) ? () => void callPhone(requesterContact) : undefined}
-          />
-        ) : null}
-        <InfoRow label="Responsável" value={ticket.assignee?.name ?? "Sem responsável"} />
-        {ticket.team ? <InfoRow label="Grupo" value={ticket.team.name} /> : null}
-        <InfoRow label="Origem" value={TICKET_SOURCE[ticket.source]} />
-        <InfoRow label="Aberta em" value={formatDateTime(ticket.created_at)} />
-        {ticket.scheduled_start ? (
-          <InfoRow
-            label="Visita"
-            value={`${formatDateTime(ticket.scheduled_start)}${ticket.scheduled_end ? ` até ${formatDateTime(ticket.scheduled_end)}` : ""}`}
-          />
-        ) : null}
-      </Card>
+      <ExpensesCard expenses={ticket.expenses ?? []} />
     </View>
   );
 }
 
 const makeStyles = (c: Palette) =>
   StyleSheet.create({
-  strong: { fontSize: 16, fontWeight: "600", color: c.ink },
-  text: { fontSize: 15, color: c.ink, lineHeight: 21 },
-  label: { fontSize: 12, color: c.inkMuted },
-  value: { fontSize: 15, color: c.ink },
-  serviceAddress: {
-    marginTop: 8,
-    padding: 10,
-    gap: 2,
-    borderRadius: 10,
-    backgroundColor: c.primarySoft,
-    borderWidth: 1,
-    borderColor: c.primary + "33",
-  },
-});
+    strong: { fontSize: 16, fontWeight: "600", color: c.ink, marginBottom: 4 },
+    text: { fontSize: 15, color: c.ink, lineHeight: 21 },
+    label: { fontSize: 12, color: c.inkMuted },
+    serviceAddress: {
+      marginTop: 8,
+      padding: 10,
+      gap: 2,
+      borderRadius: 10,
+      backgroundColor: c.primarySoft,
+      borderWidth: 1,
+      borderColor: c.primary + "33",
+    },
+  });
