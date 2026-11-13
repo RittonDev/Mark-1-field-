@@ -384,6 +384,15 @@ do início do atendimento até a conclusão (`work_seconds`). Mudança de status
 (`POST /tickets/{id}/worklogs` e a operação `worklog` do sync) também são só da gestão. `can_edit` é só
 da gestão; o técnico responsável trabalha na OS (formulários, fotos, assinatura) por `can_work`.
 
+**Editar a OS (gestão), a qualquer momento.** `can_edit` e `can_assign` valem para a gestão mesmo com a OS
+concluída, fechada ou cancelada (como no Field Control): `PATCH /tickets/{id}` troca cliente, loja, escopo,
+agenda, analista, projeto, outros técnicos, `resolution_notes` (descrição da conclusão) e `tags`
+(`[{name, color}]`, até 20, sem repetir); `POST /tickets/{id}/assign` troca o técnico. Editar não muda o status.
+`GET /ticket-tags` (gestão) lista as etiquetas já usadas, as mais usadas primeiro. Na web a OS abre no formato
+do "Editar atividade" do Field Control (abas Geral, Prazos, Localização, Vínculos, Orçamentos, Peças e custos,
+Formulários, Anexos, Acompanhamentos e Histórico), na página e por cima das listas; a aba Geral traz os 5
+técnicos mais indicados para a loja.
+
 **Correção dos horários reais (gestão).** `PUT /tickets/{id}/times`
 `{en_route_at?, arrived_at?, resolved_at?, work_minutes?, reason, expected_version?}` → `TicketDetail`
 (403 para técnico e solicitante). Para quando o técnico esqueceu de iniciar ou concluir no app. Só os
