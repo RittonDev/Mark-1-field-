@@ -23,6 +23,7 @@ import {
   Trash2,
   UserCog,
   Users,
+  Wallet,
 } from "lucide-react";
 import { StatusBadge } from "@/components/badges";
 import { EmptyState, ErrorBox, LoadingBlock } from "@/components/ui";
@@ -55,6 +56,8 @@ const ICONS: Record<TicketEventType, React.ComponentType<{ className?: string }>
   quote_approved: FileCheck2,
   quote_rejected: FileX2,
   times_corrected: Clock,
+  payout_set: Wallet,
+  payout_removed: Wallet,
 };
 
 const FIELD_LABELS: Record<string, string> = {

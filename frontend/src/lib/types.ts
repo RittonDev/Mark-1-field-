@@ -60,7 +60,9 @@ export type TicketEventType =
   | "quote_sent"
   | "quote_approved"
   | "quote_rejected"
-  | "times_corrected";
+  | "times_corrected"
+  | "payout_set"
+  | "payout_removed";
 export type SlaStatus = "ok" | "at_risk" | "breached" | "paused" | "met";
 export type AttachmentKind = "file" | "photo" | "signature";
 
@@ -87,6 +89,9 @@ export interface User {
   job_title: string | null;
   team_id: UUID | null;
   team: Ref | null;
+  /** Usuário do cliente: a empresa (o portal mostra as solicitações de todas as lojas dela). */
+  customer_id?: UUID | null;
+  customer?: Ref | null;
   is_active: boolean;
   last_login_at: ISODate | null;
   // Aceite do termo de rastreamento (LGPD); sem ele o app não inicia a jornada.
@@ -220,6 +225,8 @@ export interface ServiceTypeRef {
 
 export interface ServiceType extends ServiceTypeRef {
   description: string | null;
+  /** Quanto o técnico parceiro recebe por uma OS deste tipo (padrão ao colocá-lo na OS). */
+  technician_fee?: number | null;
   customer_id: UUID | null;
   customer: Ref | null;
   category_id: UUID | null;
@@ -355,6 +362,10 @@ export interface TicketDetail extends TicketListItem {
   report_link?: ReportLink | null;
   /** Pedidos de peça do técnico (viram orçamento para o cliente aprovar). */
   part_requests?: PartRequest[];
+  /** Valor de cada técnico na OS (só a gestão recebe). */
+  payouts?: Payout[];
+  /** O valor do próprio técnico (só no app dele). */
+  my_payout?: MyPayout | null;
   recurrence?: { count_30d: number; previous: { id: UUID; code: string; title: string; status: TicketStatus; created_at: ISODate }[] } | null;
   /** Dados de origem da OS migrada do Field Control (valores, itens, solicitação, arquivos). */
   legacy?: LegacyOrder | null;
@@ -1441,4 +1452,106 @@ export interface CustomerLegacy extends RecordLegacy {
   rating?: { average: number; last_star: number; last_comment: string | null } | null;
   service?: { first_at: ISODate | null; last_at: ISODate | null; total: number } | null;
   attachments?: { url: string; title: string | null; type: string | null }[];
+}
+
+// --------------------------------------------------------------------------- valor por chamado
+
+/** Os técnicos são parceiros e recebem por OS: a pagar ou pago. */
+export type PayoutStatus = "pending" | "paid";
+
+export interface Payout {
+  id: UUID;
+  ticket_id: UUID;
+  technician: Ref;
+  amount: number;
+  status: PayoutStatus;
+  note: string | null;
+  paid_at: ISODate | null;
+  created_at: ISODate;
+}
+
+export interface MyPayout {
+  amount: number;
+  status: PayoutStatus;
+  paid_at: ISODate | null;
+}
+
+export interface PayoutLine {
+  id: UUID;
+  technician: Ref;
+  amount: number;
+  status: PayoutStatus;
+  note: string | null;
+  paid_at: ISODate | null;
+  /** OS concluída entra no "a pagar"; aberta ainda é previsão. */
+  concluded: boolean;
+  ticket: {
+    id: UUID;
+    code: string;
+    title: string;
+    status: TicketStatus;
+    customer: string | null;
+    location: string | null;
+    city: string | null;
+    resolved_at: ISODate | null;
+  };
+}
+
+export interface PayoutSummary {
+  to_pay: number;
+  expected: number;
+  paid: number;
+}
+
+export interface PayoutList {
+  items: PayoutLine[];
+  summary: PayoutSummary;
+}
+
+export interface MyEarnings extends PayoutList {
+  reimbursement_to_receive: number;
+  reimbursement_paid: number;
+}
+
+// --------------------------------------------------------------------------- portal do cliente
+
+export interface PortalLocation {
+  id: UUID;
+  code: string | null;
+  name: string;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+}
+
+export interface PortalMe {
+  customer: Ref;
+  locations: number;
+}
+
+export interface PortalRequestItem {
+  id: UUID;
+  code: string;
+  title: string;
+  status: TicketStatus;
+  location: PortalLocation | null;
+  requester_name: string | null;
+  created_at: ISODate;
+  updated_at: ISODate;
+  scheduled_start: ISODate | null;
+  scheduled_end: ISODate | null;
+  technician: string | null;
+  arrived_at: ISODate | null;
+  resolved_at: ISODate | null;
+  cancelled_at: ISODate | null;
+}
+
+export interface PortalRequestDetail extends PortalRequestItem {
+  description: string;
+  client_reference: string | null;
+  contact: string | null;
+  resolution_notes: string | null;
+  report_url: string | null;
+  can_cancel: boolean;
+  timeline: { status: TicketStatus | "created"; at: ISODate }[];
 }

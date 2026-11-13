@@ -181,6 +181,8 @@ export const EVENT_TYPE: Record<TicketEventType, string> = {
   quote_approved: "Cliente aprovou o orçamento",
   quote_rejected: "Cliente recusou o orçamento",
   times_corrected: "corrigiu os horários",
+  payout_set: "definiu o valor do técnico",
+  payout_removed: "tirou o valor do técnico",
 };
 
 export const SLA_STATUS: Record<SlaStatus, { label: string; color: string }> = {
@@ -218,4 +220,10 @@ export const VIOLATION_SCOPE: Record<ViolationScope, string> = {
   response: "1ª resposta",
   resolution: "Solução",
   both: "Resposta e solução",
+};
+
+/** Pagamento do técnico pela OS (parceiro pago por chamado). */
+export const PAYOUT_STATUS: Record<"pending" | "paid", { label: string; color: string }> = {
+  pending: { label: "A pagar", color: "#DC6803" },
+  paid: { label: "Pago", color: "#0E9384" },
 };
