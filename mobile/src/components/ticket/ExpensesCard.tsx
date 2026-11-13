@@ -1,36 +1,27 @@
 import { StyleSheet, View } from "react-native";
-import { Text } from "../Text";
-import Svg, { Path, Rect } from "react-native-svg";
-import { SVG_HIDDEN } from "../Icon";
 import { EXPENSE_KIND, EXPENSE_STATUS, formatBRL, formatQty } from "../../lib/expenses";
 import { formatDateTime } from "../../lib/format";
 import type { Expense } from "../../lib/types";
 import { useStyles, useTheme, type Palette } from "../../theme/theme";
+import { Icon } from "../Icon";
+import { Text } from "../Text";
 import { Badge, Card, SectionTitle } from "../ui";
-
-function LockIcon({ color }: { color: string }) {
-  return (
-    <Svg width={12} height={14} viewBox="0 0 12 14" {...SVG_HIDDEN}>
-      <Rect x={1} y={6} width={10} height={7.5} rx={1.6} fill={color} />
-      <Path d="M3.5 6V4.2a2.5 2.5 0 0 1 5 0V6" stroke={color} strokeWidth={1.5} fill="none" />
-    </Svg>
-  );
-}
+import { toneInk } from "./tones";
 
 /** Custos extras da OS: o técnico vê (para acompanhar o reembolso), mas não lança nem altera. */
-export function ExpensesCard({ expenses }: { expenses: Expense[] }) {
+export function ExpensesCard({ expenses, userId }: { expenses: Expense[]; userId?: string }) {
   const c = useTheme();
   const styles = useStyles(makeStyles);
   if (!expenses.length) return null;
-  const tone = { muted: c.inkMuted, info: c.info, success: c.success, danger: c.danger };
+  const tone = { muted: c.inkMuted, info: toneInk(c, "info"), success: toneInk(c, "success"), danger: c.danger };
   const total = expenses.filter((e) => e.status !== "rejected").reduce((sum, e) => sum + (e.total ?? 0), 0);
 
   return (
     <Card style={{ gap: 10 }}>
       <SectionTitle
         right={
-          <View style={styles.readonly} accessibilityLabel="Somente leitura">
-            <LockIcon color={c.inkSubtle} />
+          <View style={styles.readonly} accessible accessibilityLabel="Somente leitura">
+            <Icon name="lock" size={14} color={c.inkMuted} />
             <Text style={styles.readonlyText}>Somente leitura</Text>
           </View>
         }
@@ -39,6 +30,11 @@ export function ExpensesCard({ expenses }: { expenses: Expense[] }) {
       </SectionTitle>
       {expenses.map((expense) => {
         const status = EXPENSE_STATUS[expense.status];
+        const refund = expense.technician
+          ? expense.technician.id === userId
+            ? " · reembolso para você"
+            : ` · reembolso a ${expense.technician.name}`
+          : "";
         return (
           <View key={expense.id} style={styles.item}>
             <View style={styles.row}>
@@ -48,7 +44,7 @@ export function ExpensesCard({ expenses }: { expenses: Expense[] }) {
             {expense.description ? <Text style={styles.description}>{expense.description}</Text> : null}
             <Text style={styles.meta}>
               {formatQty(expense.quantity)} × {formatBRL(expense.unit_value)}
-              {expense.technician ? ` · reembolso a ${expense.technician.name}` : ""}
+              {refund}
             </Text>
             <View style={styles.row}>
               <Badge label={status?.label ?? expense.status} color={tone[status?.tone ?? "muted"]} />
@@ -69,7 +65,7 @@ export function ExpensesCard({ expenses }: { expenses: Expense[] }) {
 const makeStyles = (c: Palette) =>
   StyleSheet.create({
     readonly: { flexDirection: "row", alignItems: "center", gap: 5 },
-    readonlyText: { fontSize: 11, color: c.inkSubtle, fontWeight: "600" },
+    readonlyText: { fontSize: 12, color: c.inkMuted, fontWeight: "600" },
     item: {
       gap: 4,
       paddingVertical: 10,
@@ -79,9 +75,9 @@ const makeStyles = (c: Palette) =>
     row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 },
     kind: { fontSize: 15, fontWeight: "600", color: c.ink },
     value: { fontSize: 15, fontWeight: "700", color: c.ink, fontVariant: ["tabular-nums"] },
-    struck: { textDecorationLine: "line-through", color: c.inkSubtle },
+    struck: { textDecorationLine: "line-through", color: c.inkMuted },
     description: { fontSize: 14, color: c.ink },
-    meta: { fontSize: 12, color: c.inkMuted },
+    meta: { fontSize: 13, color: c.inkMuted, lineHeight: 18 },
     totalRow: { paddingTop: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.lineStrong },
     totalLabel: { fontSize: 13, color: c.inkMuted, fontWeight: "600" },
     totalValue: { fontSize: 17, fontWeight: "800", color: c.ink, fontVariant: ["tabular-nums"] },

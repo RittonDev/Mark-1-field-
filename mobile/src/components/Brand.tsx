@@ -26,7 +26,8 @@ export function BrandLogo({ size = "md", underline = true }: { size?: "sm" | "md
     <View accessibilityRole="header" accessibilityLabel="Maxx Field" style={{ alignItems: "flex-start" }}>
       <View style={[styles.row, { gap: 8 * scale }]}>
         <Image source={MARK} style={{ height: markHeight, width: markHeight * 1.85 }} resizeMode="contain" />
-        <Text style={[styles.word, { fontSize: 20 * scale, color: c.ink }]}>
+        {/* A marca é desenho: cresce pouco com a fonte ampliada do sistema. */}
+        <Text style={[styles.word, { fontSize: 20 * scale, color: c.ink }]} maxFontSizeMultiplier={1.2}>
           <Text style={styles.strong}>Maxx</Text> Field
         </Text>
       </View>

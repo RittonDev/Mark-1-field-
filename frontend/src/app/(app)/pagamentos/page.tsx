@@ -193,10 +193,18 @@ export default function PayoutsPage() {
     staleTime: 60_000,
   });
 
-  const all = useMemo(
-    () => [...(toPayQuery.data?.items ?? []), ...(expectedQuery.data?.items ?? []), ...(paidQuery.data?.items ?? [])],
-    [toPayQuery.data, expectedQuery.data, paidQuery.data],
-  );
+  const all = useMemo(() => {
+    // Logo depois de pagar, a mesma linha pode vir em duas consultas (uma já recarregou, a outra não):
+    // vale a da consulta mais recente.
+    const sources = [
+      { at: toPayQuery.dataUpdatedAt, items: toPayQuery.data?.items ?? [] },
+      { at: expectedQuery.dataUpdatedAt, items: expectedQuery.data?.items ?? [] },
+      { at: paidQuery.dataUpdatedAt, items: paidQuery.data?.items ?? [] },
+    ].sort((a, b) => a.at - b.at);
+    const byId = new Map<UUID, PayoutLine>();
+    for (const source of sources) for (const line of source.items) byId.set(line.id, line);
+    return [...byId.values()];
+  }, [toPayQuery.data, toPayQuery.dataUpdatedAt, expectedQuery.data, expectedQuery.dataUpdatedAt, paidQuery.data, paidQuery.dataUpdatedAt]);
   const technicianId = technician?.id ?? "";
   const lines = useMemo(() => (technicianId ? all.filter((l) => l.technician.id === technicianId) : all), [all, technicianId]);
   // Os cartões somam pela mesma regra da API, só com o técnico escolhido.

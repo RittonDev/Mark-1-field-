@@ -259,7 +259,6 @@ export function TrendChart({
             onKeyDown={onKey}
             onFocus={() => setPointer(hover ?? n - 1)}
             onBlur={() => setPointer(null)}
-            className="rounded-md outline-none focus-visible:ring-2 focus-visible:ring-brand/45"
           >
             {ticks.map((t) => (
               <g key={t}>
@@ -301,6 +300,8 @@ export function TrendChart({
                       points={points.slice(-2).join(" ")}
                     />
                   ) : null}
+                  {/* Um dia só (o 1º do mês): sem linha para traçar, o ponto. */}
+                  {n === 1 && hover === null ? <circle cx={x(0)} cy={y(s.values[0])} r={4} fill={s.color} /> : null}
                   {endLabels ? (
                     <text x={x(n - 1) + 8} y={y(s.values[n - 1])} dy="0.32em" className="fill-ink text-[11px] font-medium">
                       {s.label} {intFmt(s.values[n - 1])}

@@ -14,10 +14,9 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.documents import is_valid_cpf, normalize_document
-from app.core.messages import line_messages
 from app.models import Customer, Location
 from app.schemas.customer import LocationCreate
-from app.services import cities
+from app.services import cities, validation_messages
 from app.services.errors import NotFound
 from app.services.spreadsheet import read_table
 
@@ -135,14 +134,26 @@ LABELS = {
     "name": "Nome do local",
     "code": "Código",
     "document": "CNPJ",
+    "address_line": "Endereço",
+    "district": "Bairro",
+    "city": "Cidade",
     "state": "UF",
+    "zip_code": "CEP",
     "latitude": "Latitude",
     "longitude": "Longitude",
+    "contact_name": "Contato",
+    "contact_phone": "Telefone",
 }
 
 
 def _messages(exc: ValidationError) -> list[str]:
-    return line_messages(exc.errors(), LABELS)
+    """Os erros da linha em português ("UF: no máximo 2 caracteres")."""
+    out = []
+    for err in exc.errors():
+        field = str(err["loc"][-1]) if err.get("loc") else ""
+        text = validation_messages.message(err)
+        out.append(f"{LABELS.get(field, field)}: {text}" if field else text)
+    return out
 
 
 async def import_locations(

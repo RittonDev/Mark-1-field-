@@ -3,21 +3,20 @@ import { memo, useRef, useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import Animated from "react-native-reanimated";
 import { STATUS } from "../lib/constants";
-import { addressOf, copyText, navigateWith } from "../lib/device-actions";
+import { addressOf } from "../lib/device-actions";
 import { actualMinutes } from "../lib/duration";
 import { arrivalUrgency } from "../lib/field";
 import { finishedAt, isDone, isHelper } from "../lib/lists";
 import { formatDate, formatMinutes, formatShort, formatTime, isSameDay, startOfDay } from "../lib/format";
 import { haptic } from "../lib/haptics";
 import type { LocalTicket } from "../lib/syncTypes";
-import { showToast } from "../lib/toast";
 import { RADIUS, statusFill, useStyles, useTheme, type Palette } from "../theme/theme";
-import { ActionSheet } from "./ActionSheet";
 import { StatusBadge } from "./badges";
-import { Icon, type IconName } from "./Icon";
+import { Icon } from "./Icon";
 import { PressableScale, useSwapMotion } from "./motion";
 import { Text } from "./Text";
 import { FieldClockLine } from "./ticket/FieldClock";
+import { hasRoute, RouteSheet } from "./ticket/QuickActions";
 import { HelperBadge } from "./ticket/VisitInfo";
 
 const IN_FIELD = ["en_route", "in_progress"];
@@ -47,7 +46,7 @@ function scheduleText(ticket: LocalTicket, now: number, showTime: boolean, showD
   if (showTime && start) {
     const range = end && isSameDay(end, start) ? `–${formatTime(end)}` : "";
     parts.push(`${showDate ? formatShort(start) : formatTime(start)}${range}`);
-  } else if (!showTime && end && isSameDay(end, now) && !ticket.work_started_at) {
+  } else if (!showTime && end && isSameDay(end, new Date(now)) && !ticket.work_started_at) {
     // Na linha do tempo o início já está no trilho: aqui só o fim, se for hoje.
     parts.push(`até ${formatTime(end)}`);
   }
@@ -73,8 +72,7 @@ function TicketCardBase({ ticket, now, userId, showDate = false, showTime = true
   const site = ticket.location ? [ticket.location.code, ticket.location.name].filter(Boolean).join(" · ") : null;
   const address = ticket.service_address?.trim() || addressOf(ticket.location);
   const meta = [ticket.customer?.name, ticket.service_type?.name].filter(Boolean).join(" · ");
-  const hasTarget = Boolean(address || (ticket.location?.latitude !== null && ticket.location?.latitude !== undefined));
-  const route = showRoute && hasTarget;
+  const route = showRoute && hasRoute(ticket);
   const done = variant === "done";
   const corner = done ? doneText(ticket) : scheduleText(ticket, now, showTime, showDate);
   const workMinutes = done && ticket.work_seconds > 0 ? Math.round(ticket.work_seconds / 60) : 0;
@@ -103,12 +101,6 @@ function TicketCardBase({ ticket, now, userId, showDate = false, showTime = true
     if (at - lastPress.current < DOUBLE_TAP_MS) return;
     lastPress.current = at;
     router.push({ pathname: "/ticket/[id]", params: { id: ticket.id } });
-  }
-
-  async function copyAddress() {
-    if (!address) return;
-    const ok = await copyText(address);
-    showToast(ok ? "Endereço copiado" : "Não foi possível copiar", { tone: ok ? "success" : "error", description: ok ? address : undefined });
   }
 
   return (
@@ -209,17 +201,7 @@ function TicketCardBase({ ticket, now, userId, showDate = false, showTime = true
           ) : null}
         </View>
       </PressableScale>
-      {routeOpen ? (
-        <ActionSheet
-          title="Rota até a loja"
-          onClose={() => setRouteOpen(false)}
-          actions={[
-            { key: "google", label: "Google Maps", icon: "navigate", onPress: () => void navigateWith("google", ticket.location, ticket.service_address) },
-            { key: "waze", label: "Waze", icon: "navigate", onPress: () => void navigateWith("waze", ticket.location, ticket.service_address) },
-            ...(address ? [{ key: "copy", label: "Copiar endereço", icon: "copy" as IconName, onPress: () => void copyAddress() }] : []),
-          ]}
-        />
-      ) : null}
+      {route ? <RouteSheet ticket={ticket} visible={routeOpen} onClose={() => setRouteOpen(false)} /> : null}
     </>
   );
 }
@@ -294,7 +276,7 @@ function TimelineRowBase({
   const styles = useStyles(makeStyles);
   const inField = IN_FIELD.includes(ticket.status);
   const start = ticket.scheduled_start;
-  const otherDay = start && !isSameDay(start, now) ? start : null;
+  const otherDay = start && !isSameDay(start, new Date(now)) ? start : null;
   // Visita de um dia que já passou e a OS segue aberta (e ainda não foi a campo).
   const overdue = Boolean(otherDay && new Date(otherDay).getTime() < startOfDay(new Date(now)).getTime() && !inField && !isDone(ticket.status));
   // O ponto só ganha cor de alerta com chegada atrasada (vermelho) ou em risco (âmbar); em campo, a marca.

@@ -96,6 +96,8 @@ class FormTemplateOut(ORMModel):
     version: int
     created_at: dt.datetime
     updated_at: dt.datetime
+    # Só ao salvar com "aplicar às OS que não começaram": quantas OS receberam a versão nova.
+    applied_to: int | None = None
 
 
 class TicketFormAdd(BaseModel):
@@ -120,6 +122,8 @@ class TicketFormOut(ORMModel):
     id: uuid.UUID
     ticket_id: uuid.UUID
     template_id: uuid.UUID | None
+    # Versão do modelo que a OS usa (o modelo pode ter sido corrigido depois de anexar).
+    template_version: int = 1
     name: str
     fields: list[FormField]
     required: bool

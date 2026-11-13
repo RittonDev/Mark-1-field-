@@ -298,8 +298,9 @@ export default function ExpensesPage() {
     void queryClient.invalidateQueries({ queryKey: ["expenses"] });
     void queryClient.invalidateQueries({ queryKey: ["ticket"] });
   };
+  // Tira da seleção só o que foi alterado (o resto continua marcado para a próxima ação).
+  const forget = (ids: UUID[]) => setSelected((s) => s.filter((id) => !ids.includes(id)));
   const announce = (result: Settled, one: string, many: string) => {
-    setSelected([]);
     if (result.failed === 0) {
       toast({ title: plural(result.ok, `custo ${one}`, `custos ${many}`), tone: "success" });
     } else {
@@ -314,7 +315,10 @@ export default function ExpensesPage() {
   };
   const approve = useMutation({
     mutationFn: (rows: Row[]) => settle(rows, () => ({ status: "approved" })),
-    onSuccess: (result) => announce(result, "aprovado", "aprovados"),
+    onSuccess: (result, rows) => {
+      forget(rows.map((r) => r.id));
+      announce(result, "aprovado", "aprovados");
+    },
     onError: (e) => toast({ title: errorMessage(e), tone: "error" }),
     onSettled: refresh,
   });
@@ -326,8 +330,8 @@ export default function ExpensesPage() {
       }
       return updated;
     },
-    onSuccess: (updated) => {
-      setSelected([]);
+    onSuccess: (updated, ids) => {
+      forget(ids);
       toast(
         updated
           ? { title: plural(updated, "custo marcado como reembolsado", "custos marcados como reembolsados"), tone: "success" }
@@ -840,6 +844,7 @@ export default function ExpensesPage() {
           rows={rejecting}
           onClose={() => setRejecting(null)}
           onDone={(result) => {
+            forget(rejecting.map((r) => r.id));
             setRejecting(null);
             announce(result, "recusado", "recusados");
             refresh();

@@ -451,6 +451,7 @@ async def test_technician_scope_is_restricted(client: AsyncClient, world: World)
         "/categories",
         "/sla-policies",
         "/service-types",
+        "/violation-reasons",  # SLA é da gestão
         "/tickets",
         f"/tickets/{t['id']}/comments",
         f"/tickets/{t['id']}/events",
@@ -459,7 +460,6 @@ async def test_technician_scope_is_restricted(client: AsyncClient, world: World)
         assert (await client.get(f"{API}{path}", headers=th)).status_code == 403, path
     # O que o app usa continua liberado.
     for path in (
-        "/violation-reasons",
         "/unproductive-reasons",
         "/settings/field",
         f"/tickets/{t['id']}/attachments",

@@ -245,60 +245,128 @@ function countStuck(): number {
 
 // ───────────────────────────── rodada ─────────────────────────────
 
+interface Round extends Ctx {
+  /** OS cujo restante fica para a próxima rodada (item travado, em espera ou aguardando foto). */
+  blocked: Set<UUID>;
+  /** Primeiro problema de envio que não é falta de rede: vira o "último erro" da rodada. */
+  error: string | null;
+  /** Anexos da OS no servidor, buscados no máximo uma vez por rodada (reenvio sem duplicar). */
+  attachments: Map<UUID, Attachment[] | null>;
+}
+
+export interface SyncRequest {
+  /**
+   * Pedido do técnico (puxar para atualizar, "Sincronizar agora"): acende a faixa, tenta mesmo com
+   * o sistema dizendo que não há rede e não espera o intervalo entre tentativas.
+   */
+  manual?: boolean;
+}
+
 let running: Promise<void> | null = null;
+let runningEpoch = -1;
 let again = false;
+let pendingManual = false;
+let lastRoundAt = 0;
 
 /** Pede uma sincronização. Resolve quando a rodada (e as que forem pedidas durante ela) terminar. */
-export function requestSync(): Promise<void> {
+export function requestSync({ manual = false }: SyncRequest = {}): Promise<void> {
   if (session.get().status !== "signedIn") return Promise.resolve();
-  if (running) {
+  if (manual) {
+    retries.clear();
+    pendingManual = true;
+  }
+  // A rodada de uma sessão que já terminou não segura a da sessão nova (ela não grava mais nada).
+  if (running && runningEpoch === epoch) {
     again = true;
     return running;
   }
-  running = (async () => {
+  const myEpoch = epoch;
+  const loop = (async () => {
     try {
       do {
         again = false;
-        await runOnce();
-      } while (again && session.get().status === "signedIn");
+        const isManual = pendingManual;
+        pendingManual = false;
+        await runOnce(myEpoch, isManual);
+      } while (again && myEpoch === epoch && session.get().status === "signedIn");
     } finally {
-      running = null;
+      if (running === loop) running = null;
     }
   })();
-  return running;
+  running = loop;
+  runningEpoch = myEpoch;
+  return loop;
 }
 
-async function runOnce() {
-  if (status.network === "offline") {
-    await refreshPendingCounts();
+async function runOnce(myEpoch: number, manual: boolean) {
+  const user = session.get().user;
+  if (!user || myEpoch !== epoch) return;
+  // Sem Wi-Fi e sem dados não adianta tentar, a menos que o técnico peça.
+  if (status.network === "offline" && !manual) {
+    await refreshPendingCounts().catch(() => undefined);
     return;
   }
-  setStatus({ syncing: true });
+  const round: Round = { epoch: myEpoch, user, blocked: new Set(), error: null, attachments: new Map() };
+  lastRoundAt = Date.now();
+  const pending = await countPending().catch(() => ({ ops: 0, photos: 0 }));
+  // A faixa "Sincronizando…" só acende quando há o que enviar ou o técnico pediu: a rotina
+  // silenciosa (intervalo, eventos do tempo real) não pisca a tela o dia todo.
+  if (manual || pending.ops + pending.photos > 0) setStatus({ syncing: true });
   try {
-    // Ordem causal: fotos (inclusive de campos de formulário) → respostas/conclusões →
+    // Ordem causal por OS: fotos (inclusive de campos de formulário) → respostas/conclusões →
     // assinatura → o restante (ex.: "Resolver"), que o servidor só aceita depois dela.
-    await uploadPhotos();
-    await pushWithSignatures();
-    await pullChanges();
-    await revalidateHelperTickets();
-    await refreshFieldRules();
-    await refreshReasons();
+    await sendPhase(round, () => uploadPhotos(round));
+    await sendPhase(round, () => pushWithSignatures(round));
+    await pullChanges(round);
+    await revalidateHelperTickets(round);
+    await refreshFieldRules(round);
+    await refreshReasons(round);
     // Alertas locais do tempo na loja (aviso faltando 30 min e no estouro das 4h).
     void syncOnsiteAlerts();
-    // Rastreamento da jornada: sobe a fila de pontos e ajusta o ritmo (deslocamento = mais frequente).
-    await flushPings(true);
-    await updateTrackingMode();
-    setStatus({ server: "reachable", lastSyncAt: new Date().toISOString(), lastError: null });
+    await syncTracking();
+    await flushDeviceRegistration().catch((error: unknown) => console.warn("Falha ao registrar o aparelho", error));
+    const at = new Date().toISOString();
+    setStatus({ server: "reachable", lastSyncAt: at, lastError: round.error });
+    await write(round, (db) => setKv(LAST_SYNC_KEY, at, db), false);
   } catch (error) {
+    if (error instanceof WriteCancelled) return; // a sessão mudou: nada a registrar
     if (error instanceof ApiError && error.status === 0) {
       setStatus({ server: "unreachable", lastError: error.message });
     } else {
       setStatus({ server: "reachable", lastError: errorMessage(error) });
     }
   } finally {
-    await refreshPendingCounts().catch(() => undefined);
-    setStatus({ syncing: false });
+    if (myEpoch === epoch) {
+      await refreshPendingCounts().catch(() => undefined);
+      setStatus({ syncing: false, stuckOps: countStuck() });
+    }
   }
+}
+
+/**
+ * Fase de envio: falta de rede (ou sessão encerrada) para a rodada; outro problema fica anotado e
+ * o download segue, para o técnico continuar recebendo OS novas, reagendamentos e cancelamentos.
+ */
+async function sendPhase(round: Round, phase: () => Promise<void>) {
+  try {
+    await phase();
+  } catch (error) {
+    if (error instanceof WriteCancelled || (error instanceof ApiError && (error.status === 0 || error.status === 401))) {
+      throw error;
+    }
+    console.warn("Falha no envio da fila", error);
+    round.error ??= errorMessage(error);
+  }
+}
+
+/**
+ * Rastreamento da jornada: sobe a fila de pontos, envia um encerramento feito sem sinal e ajusta o
+ * ritmo (deslocamento = mais frequente). Problema aqui nunca vira falha da sincronização.
+ */
+async function syncTracking() {
+  await flushPings(true);
+  await flushPendingShiftEnd();
+  await updateTrackingMode();
 }
 
 // ───────────────────────────── push ─────────────────────────────
@@ -341,151 +409,311 @@ export function describeOp(op: SyncOperation): string {
   }
 }
 
-/** Envia a fila em fases: tudo até cada assinatura pendente, a assinatura, e então o resto. */
-async function pushWithSignatures() {
-  for (const signature of await listSignatures()) {
-    await pushOutbox(signature.after_seq);
-    await uploadSignature(signature);
+/**
+ * Envia a fila em fases, por OS: com assinatura pendente, primeiro o que foi feito até ela (e os
+ * formulários, sempre antes dela), depois a assinatura e então o resto ("Resolver"). As OS sem
+ * assinatura pendente seguem direto.
+ */
+async function pushWithSignatures(round: Round) {
+  const signatures = await listSignatures();
+  const gates = new Map(signatures.map((s) => [s.ticket_id, s.after_seq]));
+  await pushOutbox(round, gates);
+  for (const signature of signatures) {
+    if (round.blocked.has(signature.ticket_id)) continue;
+    ensureAlive(round);
+    if (await uploadSignature(round, signature)) gates.delete(signature.ticket_id);
+    else round.blocked.add(signature.ticket_id);
   }
-  await pushOutbox();
+  await pushOutbox(round, gates);
 }
 
 const FORM_INCOMPLETE = /falta preencher/i;
 
-async function pushOutbox(maxSeq?: number) {
-  for (let round = 0; round < 50; round++) {
-    // Pedido de peça com foto ainda no aparelho espera a foto subir (leva os ids dos anexos).
-    const waiting = await partOpsWithPendingPhotos();
-    const ops = (await listOutbox(PUSH_BATCH, undefined, maxSeq)).filter(
-      (op) => !(op.type === "part_request" && waiting.has(op.client_op_id)),
-    );
+async function pushOutbox(round: Round, gates: Map<UUID, number>) {
+  for (let page = 0; page < 200; page++) {
+    const ops = await nextBatch(round, gates);
     if (!ops.length) return;
-    const user = currentUser();
-    const byId = new Map(ops.map((op) => [op.client_op_id, op]));
+    if (!(await pushBatch(round, ops))) return;
+  }
+}
 
-    let response: SyncPushResponse;
-    try {
-      response = await api.post<SyncPushResponse>("/sync/push", { operations: ops.map(toWire) });
-    } catch (error) {
-      if (error instanceof ApiError && !error.retryable && error.status !== 401) {
-        // O lote inteiro foi recusado (validação do envelope): reenviar igual não adianta.
-        await transaction(async (db) => {
-          for (const op of ops) {
-            const ticket = await getTicket(op.ticket_id, db);
-            await deleteOp(db, op.client_op_id);
-            await deleteLocalDraft(db, op.client_op_id);
-            await addNotice(db, {
-              ticket_id: op.ticket_id,
-              ticket_code: ticket?.code ?? null,
-              kind: "rejected",
-              message: `${describeOp(op)}: o servidor recusou — ${cleanServerError(error.message)}`,
-            });
-            await rebaseTicket(db, op.ticket_id, user);
-          }
-        });
+/**
+ * Próximo lote, em ordem. Uma operação em espera (falhou há pouco) ou um pedido de peça com foto
+ * ainda no aparelho (leva os ids dos anexos) seguram as seguintes da mesma OS; as das outras seguem.
+ */
+async function nextBatch(round: Round, gates: Map<UUID, number>): Promise<OutboxOp[]> {
+  const waiting = await partOpsWithPendingPhotos();
+  for (let pass = 0; pass < 100; pass++) {
+    const rows = await listOutbox(PUSH_BATCH, undefined, { excludeTickets: round.blocked, gates });
+    const batch: OutboxOp[] = [];
+    let held = false;
+    for (const op of rows) {
+      if (round.blocked.has(op.ticket_id)) continue;
+      if ((op.type === "part_request" && waiting.has(op.client_op_id)) || !isDue(op.client_op_id)) {
+        round.blocked.add(op.ticket_id);
+        held = true;
         continue;
       }
-      const message = errorMessage(error);
-      await transaction((db) => markOpsAttempt(db, ops.map((op) => op.client_op_id), message));
-      throw error;
+      batch.push(op);
     }
-
-    const problems: string[] = [];
-    await transaction(async (db) => {
-      const latest = new Map<UUID, TicketDetail | null>();
-      for (const result of response.results) {
-        const op = byId.get(result.client_op_id);
-        if (!op) continue;
-        await deleteOp(db, op.client_op_id);
-        if (result.status === "applied" || result.status === "duplicate") {
-          await markLocalSent(db, op.client_op_id);
-          if (op.type === "form_answers" && op.payload.complete) await setFormError(op.payload.form_id, null, db);
-        } else {
-          const ticket = result.ticket ?? (await getTicket(op.ticket_id, db));
-          await deleteLocalDraft(db, op.client_op_id);
-          let message =
-            result.status === "conflict"
-              ? `${describeOp(op)}: descartado porque a OS foi alterada por outra pessoa. Confira o estado atual.`
-              : `${describeOp(op)}: o servidor recusou — ${cleanServerError(result.error)}`;
-          if (op.type === "form_answers") {
-            await setFormError(op.payload.form_id, cleanServerError(result.error), db);
-            // Conclusão recusada por falta de item: o servidor não gravou nada. Reenvia as mesmas
-            // respostas sem concluir, para o técnico não perder o que preencheu.
-            if (op.payload.complete && FORM_INCOMPLETE.test(result.error ?? "")) {
-              await insertOp(db, {
-                type: "form_answers",
-                payload: { ...op.payload, complete: false },
-                client_op_id: randomUUID(),
-                ticket_id: op.ticket_id,
-                client_timestamp: new Date().toISOString(),
-              });
-              message = `Formulário não concluído — ${cleanServerError(result.error)}. As respostas foram mantidas.`;
-            }
-          }
-          await addNotice(db, { ticket_id: op.ticket_id, ticket_code: ticket?.code ?? null, kind: result.status, message });
-          problems.push(`${ticket?.code ?? "OS"}: ${message}`);
-        }
-        if (result.ticket) latest.set(op.ticket_id, result.ticket);
-        else if (!latest.has(op.ticket_id)) latest.set(op.ticket_id, null);
-      }
-      for (const [ticketId, ticket] of latest) {
-        if (ticket) await saveServerTicket(db, ticket, user);
-        else await rebaseTicket(db, ticketId, user);
-      }
-    });
-    if (problems.length) {
-      showToast(problems.length === 1 ? "Uma operação não foi aceita" : `${problems.length} operações não foram aceitas`, {
-        description: problems[0],
-        tone: "error",
-      });
-    }
-    // Resposta sem resultado para alguma operação: ela fica na fila e volta na próxima rodada.
-    if (response.results.length === 0) return;
+    // Vazio só porque tudo o que veio ficou para depois: busca de novo, já sem essas OS.
+    if (batch.length || !held) return batch;
   }
+  return [];
+}
+
+/** Envia um lote e trata o resultado. Devolve false quando o envio deve parar nesta rodada. */
+async function pushBatch(round: Round, candidates: OutboxOp[]): Promise<boolean> {
+  // Uma OS que travou no meio da divisão de um lote segura as operações seguintes dela.
+  const ops = candidates.filter((op) => !round.blocked.has(op.ticket_id));
+  if (!ops.length) return true;
+  ensureAlive(round);
+  let response: SyncPushResponse;
+  try {
+    const body: SyncPushRequest = { operations: ops.map(toWire), sent_at: new Date().toISOString() };
+    response = await api.post<SyncPushResponse>("/sync/push", body, { timeoutMs: SYNC_TIMEOUT_MS });
+  } catch (error) {
+    return pushFailed(round, ops, error);
+  }
+  await applyResults(round, ops, response);
+  return true;
+}
+
+/**
+ * O lote inteiro falhou. Só uma operação que o servidor recusou na validação sai da fila; nos
+ * outros casos (proxy, servidor fora, envio anterior ainda em processamento) nada foi aplicado ou
+ * já foi aplicado e volta como "duplicate": as operações ficam e esperam para tentar de novo.
+ */
+async function pushFailed(round: Round, ops: OutboxOp[], error: unknown): Promise<boolean> {
+  if (!(error instanceof ApiError)) throw error;
+  const ids = ops.map((op) => op.client_op_id);
+  // Sem rede ou sessão encerrada: a rodada para; a fila fica como está, sem espera extra.
+  if (error.status === 0 || error.status === 401) {
+    await write(round, (db) => markOpsAttempt(db, ids, error.message));
+    throw error;
+  }
+  // Lote recusado na validação (ex.: tipo de operação que este servidor ainda não conhece) ou grande
+  // demais para um proxy: divide ao meio até isolar a operação que causa a recusa.
+  if ((error.status === 422 || error.status === 413) && ops.length > 1) {
+    const half = Math.ceil(ops.length / 2);
+    return (await pushBatch(round, ops.slice(0, half))) && (await pushBatch(round, ops.slice(half)));
+  }
+  if (error.status === 422) {
+    await rejectOps(round, ops, cleanServerError(error.message));
+    return true;
+  }
+  // Erro do servidor que pode vir de uma operação só (500, ou 409 que se repete). Depois de duas
+  // falhas do lote, manda uma a uma: a que derruba fica esperando e as outras passam.
+  const suspect = error.status === 409 || (error.status >= 500 && ![502, 503, 504].includes(error.status));
+  if (suspect && ops.length > 1 && Math.max(...ids.map(failuresOf)) >= 2) {
+    for (const op of ops) {
+      if (!(await pushBatch(round, [op]))) return false;
+    }
+    return true;
+  }
+  const alone = ops.length === 1 && (suspect || error.status === 413);
+  const message = alone
+    ? `O servidor falhou ao processar esta ação (erro ${error.status}). Toque em Descartar se continuar.`
+    : error.status === 409
+      ? "O servidor ainda processava o envio anterior. Vamos tentar de novo."
+      : error.retryable
+        ? `O servidor está com problema (erro ${error.status}). Vamos tentar de novo.`
+        : `O servidor não aceitou o envio (erro ${error.status}). Vamos tentar de novo.`;
+  await write(round, (db) => markOpsAttempt(db, ids, message));
+  for (const id of ids) scheduleRetry(id, alone);
+  for (const op of ops) round.blocked.add(op.ticket_id);
+  round.error ??= message;
+  // Uma ação travada sozinha não para as das outras OS; problema no envio inteiro para a rodada.
+  return alone;
+}
+
+/** Recusa definitiva: sai da fila, o rascunho local some e o técnico é avisado. */
+async function rejectOps(round: Round, ops: OutboxOp[], reason: string) {
+  const problems: string[] = [];
+  await write(round, async (db) => {
+    for (const op of ops) {
+      const ticket = await getTicket(op.ticket_id, db);
+      await deleteOp(db, op.client_op_id);
+      await deleteLocalDraft(db, op.client_op_id);
+      const message = `${describeOp(op)}: o servidor recusou — ${reason}`;
+      await addNotice(db, { ticket_id: op.ticket_id, ticket_code: ticket?.code ?? null, kind: "rejected", message });
+      problems.push(`${ticket?.code ?? "OS"}: ${message}`);
+    }
+    for (const ticketId of new Set(ops.map((op) => op.ticket_id))) await rebaseTicket(db, ticketId, round.user);
+  });
+  for (const op of ops) retries.delete(op.client_op_id);
+  announceProblems(problems);
+}
+
+async function applyResults(round: Round, ops: OutboxOp[], response: SyncPushResponse) {
+  const byId = new Map(ops.map((op) => [op.client_op_id, op]));
+  const answered = new Set<string>();
+  const problems: string[] = [];
+  await write(round, async (db) => {
+    const latest = new Map<UUID, TicketDetail | null>();
+    for (const result of response.results) {
+      const op = byId.get(result.client_op_id);
+      if (!op) continue;
+      answered.add(op.client_op_id);
+      await deleteOp(db, op.client_op_id);
+      // "duplicate" com erro: o envio anterior (cuja resposta se perdeu) tinha sido recusado.
+      const refused =
+        result.status === "rejected" || result.status === "conflict" || (result.status === "duplicate" && Boolean(result.error));
+      if (!refused) {
+        await markLocalSent(db, op.client_op_id);
+        if (op.type === "form_answers" && op.payload.complete) await setFormError(op.payload.form_id, null, db);
+      } else {
+        const ticket = result.ticket ?? (await getTicket(op.ticket_id, db));
+        await deleteLocalDraft(db, op.client_op_id);
+        let message =
+          result.status === "conflict"
+            ? `${describeOp(op)}: descartado porque a OS foi alterada por outra pessoa. Confira o estado atual.`
+            : `${describeOp(op)}: o servidor recusou — ${cleanServerError(result.error)}`;
+        if (op.type === "form_answers") {
+          await setFormError(op.payload.form_id, cleanServerError(result.error), db);
+          // Conclusão recusada por falta de item: o servidor não gravou nada. Reenvia as mesmas
+          // respostas sem concluir, para o técnico não perder o que preencheu.
+          if (op.payload.complete && FORM_INCOMPLETE.test(result.error ?? "")) {
+            await insertOp(db, {
+              type: "form_answers",
+              payload: { ...op.payload, complete: false },
+              client_op_id: randomUUID(),
+              ticket_id: op.ticket_id,
+              client_timestamp: new Date().toISOString(),
+            });
+            message = `Formulário não concluído — ${cleanServerError(result.error)}. As respostas foram mantidas.`;
+          }
+        }
+        await addNotice(db, {
+          ticket_id: op.ticket_id,
+          ticket_code: ticket?.code ?? null,
+          kind: result.status === "conflict" ? "conflict" : "rejected",
+          message,
+        });
+        problems.push(`${ticket?.code ?? "OS"}: ${message}`);
+      }
+      if (result.ticket) latest.set(op.ticket_id, result.ticket);
+      else if (!latest.has(op.ticket_id)) latest.set(op.ticket_id, null);
+    }
+    for (const [ticketId, ticket] of latest) {
+      if (ticket) await saveServerTicket(db, ticket, round.user);
+      else await rebaseTicket(db, ticketId, round.user);
+    }
+  });
+  for (const id of answered) retries.delete(id);
+  // Operação sem resultado na resposta: fica na fila para a próxima rodada (sem repetir agora).
+  for (const op of ops) if (!answered.has(op.client_op_id)) round.blocked.add(op.ticket_id);
+  announceProblems(problems);
+}
+
+function announceProblems(problems: string[]) {
+  if (!problems.length) return;
+  showToast(problems.length === 1 ? "Uma operação não foi aceita" : `${problems.length} operações não foram aceitas`, {
+    description: problems[0],
+    tone: "error",
+  });
 }
 
 // ───────────────────────────── pull ─────────────────────────────
 
-async function pullChanges() {
+/**
+ * "Baixar tudo" pedido (ou download completo interrompido no meio): o próximo download começa do
+ * zero. Só zera depois da última página, então uma rodada em andamento não engole o pedido.
+ */
+let forceFull = false;
+
+async function pullChanges(round: Round) {
+  let full = false;
+  const received = new Set<UUID>();
   for (let page = 0; page < 100; page++) {
-    const since = await getKv(SINCE_KEY);
-    const query = since ? `?since=${encodeURIComponent(since)}` : "";
-    const data = await api.get<SyncPullResponse>(`/sync/pull${query}`);
-    const user = currentUser();
-    const news: FieldNews[] = [];
-    await transaction(async (db) => {
-      for (const ticket of data.tickets) {
-        const before = await getTicket(ticket.id, db);
-        if (before) news.push(...fieldNews(before, ticket, user));
-        await saveServerTicket(db, ticket, user);
-      }
-      for (const comment of data.comments) await saveServerComment(db, comment);
-      for (const worklog of data.worklogs) await saveServerWorklog(db, worklog);
-      for (const id of data.revoked_ticket_ids) await deleteTicket(db, id);
-      if (!data.has_more) {
-        await purgeSentDrafts(db);
-        await pruneOld(db);
-      }
-      await setKv(SINCE_KEY, data.server_time, db);
-    });
-    announceFieldNews(news);
-    if (data.revoked_ticket_ids.length) {
-      showToast(
-        data.revoked_ticket_ids.length === 1
-          ? "Uma OS foi reatribuída e saiu da sua lista"
-          : `${data.revoked_ticket_ids.length} OS foram reatribuídas e saíram da sua lista`,
-      );
+    ensureAlive(round);
+    const stored = await getKv(SINCE_KEY);
+    const since = page === 0 && forceFull ? null : stored;
+    if (page === 0) {
+      full = since === null;
+      if (full) forceFull = true;
     }
-    if (!data.has_more) return;
+    const query = since ? `?since=${encodeURIComponent(since)}` : "";
+    const data = await api.get<SyncPullResponse>(`/sync/pull${query}`, { timeoutMs: SYNC_TIMEOUT_MS });
+    const last = !data.has_more;
+    const news: FieldNews[] = [];
+    const revoked: string[] = [];
+    let removed = 0;
+    // Página sem novidade não acorda as telas (o intervalo e os eventos rodam o dia todo).
+    const changed = full || data.tickets.length + data.comments.length + data.worklogs.length + data.revoked_ticket_ids.length > 0;
+    await write(
+      round,
+      async (db) => {
+        for (const ticket of data.tickets) {
+          received.add(ticket.id);
+          // Avisos só no delta: o download completo (primeiro acesso, "Baixar tudo") não é novidade.
+          if (!full) news.push(...fieldNews(await getServerTicket(ticket.id, db), ticket, round.user));
+          await saveServerTicket(db, ticket, round.user);
+        }
+        for (const comment of data.comments) await saveServerComment(db, comment);
+        for (const worklog of data.worklogs) await saveServerWorklog(db, worklog);
+        for (const id of data.revoked_ticket_ids) {
+          const local = await getTicket(id, db);
+          if (local) revoked.push(local.code);
+          await deleteTicket(db, id);
+        }
+        if (last) {
+          // Download completo: a OS aberta que não veio mais não é do técnico (perdeu o acesso com o app fechado).
+          if (full) removed = await deleteMissingOpenTickets(db, received);
+          await purgeSentDrafts(db);
+          await pruneOld(db);
+        }
+        await setKv(SINCE_KEY, data.server_time, db);
+      },
+      changed,
+    );
+    if (last && full) forceFull = false;
+    announceFieldNews(news);
+    announceRemoved(revoked, removed);
+    if (last) return;
   }
 }
 
-type FieldNews = { kind: "part_approved" | "part_rejected"; code: string; description: string };
+/** OS que saíram da lista: reatribuídas (o código vem do aparelho) ou que sumiram no download completo. */
+function announceRemoved(codes: string[], removed: number) {
+  announceGroup(
+    codes,
+    (code) => `${code} foi reatribuída e saiu da sua lista`,
+    (count) => `${count} OS foram reatribuídas e saíram da sua lista`,
+  );
+  if (removed > 0) {
+    showToast(removed === 1 ? "Uma OS que não é mais sua saiu da lista" : `${removed} OS que não são mais suas saíram da lista`);
+  }
+}
 
-/** O que mudou entre a OS no aparelho e a recebida e merece aviso ao técnico. */
-function fieldNews(before: TicketDetail, after: TicketDetail, user: User): FieldNews[] {
-  if (after.assignee?.id !== user.id) return [];
+/** Até dois avisos do mesmo tipo saem um a um; mais que isso, um resumo só. */
+function announceGroup(codes: string[], one: (code: string) => string, many: (count: number) => string, options: ToastOptions = {}) {
+  if (codes.length > 2) showToast(many(codes.length), options);
+  else for (const code of codes) showToast(one(code), options);
+}
+
+type FieldNews =
+  | { kind: "part_approved" | "part_rejected"; code: string; description: string }
+  | { kind: "assigned" | "helper" | "cancelled"; code: string }
+  | { kind: "rescheduled"; code: string; at: string; first: boolean };
+
+/**
+ * O que mudou entre a última versão do servidor guardada no aparelho e a recebida, e merece aviso
+ * ao técnico (também quando o app estava fechado e o tempo real não avisou).
+ */
+function fieldNews(before: TicketDetail | null, after: TicketDetail, user: User): FieldNews[] {
+  const mine = after.assignee?.id === user.id;
+  if (!mine && !isHelper(after, user)) return [];
+  if (!before) {
+    return isDone(after.status) ? [] : [{ kind: mine ? "assigned" : "helper", code: after.code }];
+  }
   const news: FieldNews[] = [];
+  if (before.status !== "cancelled" && after.status === "cancelled") {
+    news.push({ kind: "cancelled", code: after.code });
+  } else if (after.scheduled_start && after.scheduled_start !== before.scheduled_start && !isDone(after.status)) {
+    news.push({ kind: "rescheduled", code: after.code, at: after.scheduled_start, first: !before.scheduled_start });
+  }
+  if (!mine) return news;
   const previous = new Map((before.part_requests ?? []).map((r) => [r.id, r.status]));
   for (const request of after.part_requests ?? []) {
     const was = previous.get(request.id);
@@ -499,7 +727,30 @@ function fieldNews(before: TicketDetail, after: TicketDetail, user: User): Field
 }
 
 function announceFieldNews(news: FieldNews[]) {
-  const approved = news.filter((n) => n.kind === "part_approved");
+  const codes = (kind: FieldNews["kind"]) => news.filter((n) => n.kind === kind).map((n) => n.code);
+  announceGroup(codes("assigned"), (code) => `Nova OS para você: ${code}`, (count) => `${count} OS novas para você`);
+  announceGroup(codes("helper"), (code) => `Você vai na visita da ${code}`, (count) => `Você entrou em ${count} visitas`);
+  const cancelled = codes("cancelled");
+  if (cancelled.length) {
+    haptic.warning();
+    announceGroup(
+      cancelled,
+      (code) => `${code} foi cancelada pela central`,
+      (count) => `${count} OS foram canceladas pela central`,
+      { tone: "error", description: "Não precisa ir ao local." },
+    );
+  }
+  const rescheduled = news.filter((n): n is Extract<FieldNews, { kind: "rescheduled" }> => n.kind === "rescheduled");
+  if (rescheduled.length > 2) {
+    showToast(`${rescheduled.length} OS foram reagendadas`, { description: "Confira a agenda." });
+  } else {
+    for (const n of rescheduled) showToast(`${n.code} ${n.first ? "agendada" : "reagendada"} para ${formatShort(n.at)}`);
+  }
+
+  const parts = news.filter((n): n is Extract<FieldNews, { kind: "part_approved" | "part_rejected" }> =>
+    n.kind === "part_approved" || n.kind === "part_rejected",
+  );
+  const approved = parts.filter((n) => n.kind === "part_approved");
   if (approved.length) {
     haptic.success();
     showSuccess(
@@ -509,7 +760,7 @@ function announceFieldNews(news: FieldNews[]) {
         : "O cliente aprovou o orçamento: pode instalar.",
     );
   }
-  for (const n of news) {
+  for (const n of parts) {
     if (n.kind === "part_rejected") {
       haptic.warning();
       showToast(`${n.code}: peça recusada`, {
@@ -525,15 +776,16 @@ const FIELD_RULES_KEY = "field_rules";
 /** Regras de campo da empresa (GET /settings/field). Enquanto a rota não existir (404), valem as da promessa. */
 let fieldRulesAt = 0;
 
-async function refreshFieldRules() {
+async function refreshFieldRules(round: Round) {
   if (!forceReasons && Date.now() - fieldRulesAt < 30 * 60_000) return;
   try {
+    ensureAlive(round);
     const rules = await api.get<FieldRules>("/settings/field");
+    await write(round, (db) => setKv(FIELD_RULES_KEY, JSON.stringify(rules), db));
     setFieldRules(rules);
-    await setKv(FIELD_RULES_KEY, JSON.stringify(rules));
     fieldRulesAt = Date.now();
   } catch (error) {
-    if (error instanceof ApiError && error.status === 0) throw error;
+    if (error instanceof WriteCancelled || (error instanceof ApiError && error.status === 0)) throw error;
     // 404 (servidor antigo) ou outro erro: segue com as regras guardadas/da promessa e tenta mais tarde.
     fieldRulesAt = Date.now();
   }
@@ -557,15 +809,17 @@ let forceReasons = false;
  * SQLite para o técnico registrar a visita offline. Muda pouco: baixa na primeira vez, a cada 6 h
  * ou em "Baixar tudo". Falha aqui não derruba a rodada. (Motivo de atraso de SLA é da central.)
  */
-async function refreshReasons() {
+async function refreshReasons(round: Round) {
   const stale = (at: string | null) => forceReasons || !at || Date.now() - new Date(at).getTime() >= REASONS_MAX_AGE_MS;
   try {
     if (stale(await getUnproductiveReasonsAt())) {
-      await saveUnproductiveReasons(await api.get<UnproductiveReason[]>("/unproductive-reasons?active=true"));
+      ensureAlive(round);
+      const reasons = await api.get<UnproductiveReason[]>("/unproductive-reasons?active=true");
+      await write(round, (db) => saveUnproductiveReasons(reasons, db));
     }
     forceReasons = false;
   } catch (error) {
-    if (error instanceof ApiError && error.status === 0) throw error;
+    if (error instanceof WriteCancelled || (error instanceof ApiError && error.status === 0)) throw error;
     console.warn("Não foi possível atualizar os cadastros de motivos", error);
   }
 }
@@ -574,43 +828,54 @@ async function refreshReasons() {
  * Confere uma OS direto na API. Sem acesso (o técnico saiu da visita ou ela foi reatribuída), sai do
  * aparelho: o `revoked_ticket_ids` do pull só cobre reatribuição, não a saída da equipe da visita.
  */
-async function revalidateTicket(ticketId: UUID): Promise<void> {
+async function revalidateTicket(ctx: Ctx, ticketId: UUID): Promise<void> {
+  ensureAlive(ctx);
+  let ticket: TicketDetail;
   try {
-    await storeServerTicket(await api.get<TicketDetail>(`/tickets/${ticketId}`));
+    ticket = await api.get<TicketDetail>(`/tickets/${ticketId}`);
   } catch (error) {
     if (!(error instanceof ApiError) || (error.status !== 403 && error.status !== 404)) return;
     const local = await getTicket(ticketId);
-    await transaction((db) => deleteTicket(db, ticketId));
+    await write(ctx, (db) => deleteTicket(db, ticketId));
     if (local) showToast(`${local.code} saiu da sua lista`, { description: "Você não está mais na visita desta OS." });
+    return;
   }
+  await write(ctx, (db) => saveServerTicket(db, ticket, ctx.user));
 }
 
 let helpersCheckedAt = 0;
 
 /** Rede de segurança (a cada 10 min): as OS em que o técnico vai junto ainda são dele? */
-async function revalidateHelperTickets() {
+async function revalidateHelperTickets(round: Round) {
   if (Date.now() - helpersCheckedAt < 10 * 60_000) return;
   helpersCheckedAt = Date.now();
-  const user = currentUser();
   for (const ticket of await listTickets()) {
-    if (isHelper(ticket, user) && !isDone(ticket.status)) await revalidateTicket(ticket.id);
+    if (isHelper(ticket, round.user) && !isDone(ticket.status)) await revalidateTicket(round, ticket.id);
   }
 }
 
 /** Busca uma OS direto na API (após "assumir", por exemplo) e grava localmente. */
 export async function storeServerTicket(ticket: TicketDetail) {
-  const user = currentUser();
-  await transaction((db) => saveServerTicket(db, ticket, user));
+  const ctx = sessionCtx();
+  await write(ctx, (db) => saveServerTicket(db, ticket, ctx.user));
 }
 
 // ───────────────────────────── fotos ─────────────────────────────
 
-async function uploadPhotos() {
-  const photos = await listPhotos();
-  for (const photo of photos) {
-    if (session.get().status !== "signedIn") return;
+/**
+ * Sobe as fotos, uma OS não segurando a outra: foto que falhou (ou que ainda espera a vez de tentar
+ * de novo) segura só o que vem depois na mesma OS (conclusão de formulário, pedido de peça).
+ */
+async function uploadPhotos(round: Round) {
+  for (const photo of await listPhotos()) {
+    ensureAlive(round);
+    if (round.blocked.has(photo.ticket_id)) continue;
+    if (!isDue(photo.id)) {
+      round.blocked.add(photo.ticket_id);
+      continue;
+    }
     if (!photoExists(photo.file_uri)) {
-      await transaction(async (db) => {
+      await write(round, async (db) => {
         const ticket = await getTicket(photo.ticket_id, db);
         await addNotice(db, {
           ticket_id: photo.ticket_id,
@@ -622,44 +887,93 @@ async function uploadPhotos() {
       });
       continue;
     }
+    await uploadPhoto(round, photo);
+  }
+}
+
+/**
+ * Arquivo que este técnico já enviou e cuja resposta se perdeu (tempo esgotado, conexão caiu, app
+ * fechado no meio): já está no servidor? A lista de anexos da OS é buscada uma vez por rodada.
+ */
+async function findUploaded(round: Round, ticketId: UUID, match: (a: Attachment) => boolean): Promise<Attachment | null> {
+  if (!round.attachments.has(ticketId)) {
+    ensureAlive(round);
     try {
-      const isFormPhoto = Boolean(photo.form_id && photo.field_id);
-      const attachment = await uploadFile<Attachment>(
+      round.attachments.set(ticketId, await api.get<Attachment[]>(`/tickets/${ticketId}/attachments`));
+    } catch (error) {
+      if (error instanceof ApiError && (error.status === 0 || error.status === 401)) throw error;
+      // Sem a lista (ex.: OS que saiu do técnico): o próprio envio decide.
+      round.attachments.set(ticketId, null);
+    }
+  }
+  return round.attachments.get(ticketId)?.find((a) => a.uploaded_by?.id === round.user.id && match(a)) ?? null;
+}
+
+async function uploadPhoto(round: Round, photo: PendingPhoto) {
+  const isFormPhoto = Boolean(photo.form_id && photo.field_id);
+  // O nome do arquivo leva o id da foto: um reenvio acha a foto que já chegou e não duplica.
+  let attachment =
+    photo.attempts > 0
+      ? await findUploaded(
+          round,
+          photo.ticket_id,
+          (a) =>
+            a.filename === photo.filename &&
+            (isFormPhoto ? a.form_id === photo.form_id && a.field_id === photo.field_id : a.kind === "photo"),
+        )
+      : null;
+  if (!attachment) {
+    // A tentativa conta antes do envio: se o app morrer no meio, o próximo envio confere primeiro.
+    await write(round, (db) => markPhotoAttempt(db, photo.id), false);
+    ensureAlive(round);
+    try {
+      attachment = await uploadFile<Attachment>(
         isFormPhoto ? `/tickets/${photo.ticket_id}/forms/${photo.form_id}/photos` : `/tickets/${photo.ticket_id}/attachments`,
         photo.file_uri,
         isFormPhoto ? { field_id: photo.field_id! } : { kind: "photo" },
         photo.mime_type,
         photo.filename,
       );
-      // A foto sai da fila e entra no cache de anexos na mesma transação (a contagem do campo não pisca).
-      await transaction(async (db) => {
-        await db.runAsync("DELETE FROM photos WHERE id = ?", photo.id);
-        if (attachment?.id) {
-          const cached = await getAttachmentsCache(photo.ticket_id);
-          if (!cached.some((a) => a.id === attachment.id)) await setAttachmentsCache(photo.ticket_id, [...cached, attachment], db);
-          // Foto de pedido de peça: o id vai junto na operação, que só sai depois de todas as fotos.
-          if (photo.part_op_id) await addPartAttachment(db, photo.part_op_id, attachment.id);
-        }
-      });
-      deletePhotoFile(photo.file_uri);
     } catch (error) {
-      if (error instanceof ApiError && (error.retryable || error.status === 401)) {
-        await markPhotoError(photo.id, error.message);
-        throw error;
+      if (!(error instanceof ApiError)) throw error;
+      if (error.retryable || error.status === 401) {
+        await write(round, (db) => markPhotoError(photo.id, error.message, db));
+        // Sem rede ou sessão encerrada: para a rodada. Servidor com problema: só esta OS espera.
+        if (error.status === 0 || error.status === 401) throw error;
+        scheduleRetry(photo.id);
+        round.blocked.add(photo.ticket_id);
+        round.error ??= `Foto ${photo.filename}: ${error.message}`;
+        return;
       }
-      await transaction(async (db) => {
+      // Recusada (ex.: campo já com o máximo de fotos, arquivo grande demais): sai da fila com aviso.
+      await write(round, async (db) => {
         const ticket = await getTicket(photo.ticket_id, db);
         await addNotice(db, {
           ticket_id: photo.ticket_id,
           ticket_code: ticket?.code ?? null,
           kind: "photo",
-          message: `Foto recusada pelo servidor: ${errorMessage(error)}`,
+          message: `Foto recusada pelo servidor: ${error.message}`,
         });
         await db.runAsync("DELETE FROM photos WHERE id = ?", photo.id);
       });
+      retries.delete(photo.id);
       deletePhotoFile(photo.file_uri);
+      return;
     }
   }
+  retries.delete(photo.id);
+  const uploaded = attachment;
+  // A foto sai da fila e entra no cache de anexos na mesma transação (a contagem do campo não pisca).
+  await write(round, async (db) => {
+    await db.runAsync("DELETE FROM photos WHERE id = ?", photo.id);
+    if (uploaded?.id) {
+      const cached = await getAttachmentsCache(photo.ticket_id, db);
+      if (!cached.some((a) => a.id === uploaded.id)) await setAttachmentsCache(photo.ticket_id, [...cached, uploaded], db);
+      // Foto de pedido de peça: o id vai junto na operação, que só sai depois de todas as fotos.
+      if (photo.part_op_id) await addPartAttachment(db, photo.part_op_id, uploaded.id);
+    }
+  });
+  deletePhotoFile(photo.file_uri);
 }
 
 /**

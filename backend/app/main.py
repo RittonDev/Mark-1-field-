@@ -18,11 +18,10 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from app.api.router import api_router
 from app.core.config import settings
 from app.core.enums import QuoteStatus
-from app.core.messages import translate_errors
 from app.db.session import SessionLocal
 from app.models import Quote
 from app.services import onboarding as onboarding_svc
-from app.services import technician_regions
+from app.services import technician_regions, validation_messages
 from app.services.activities import local_today
 from app.services.errors import (
     DomainError,
@@ -250,10 +249,39 @@ def _error(status_code: int, detail: str, **extra: object) -> JSONResponse:
     return JSONResponse(status_code=status_code, content={"detail": detail, **extra})
 
 
+def _plain(value: Any) -> Any:
+    return value if value is None or isinstance(value, bool | int | float | str) else str(value)
+
+
+def validation_issue(error: dict[str, Any]) -> dict[str, Any]:
+    """Um erro do pydantic no formato de sempre ({loc, msg, type, ctx}), com o texto em
+    português. O `loc` segue com o nome técnico do campo (as telas acham o rótulo por ele) e
+    `label` traz o nome que a pessoa vê. O valor enviado (`input`) não volta: não ecoa senha
+    nem arquivo."""
+    loc = list(error.get("loc") or ())
+    text = validation_messages.message(error)
+    if text.startswith("value is not a valid email address"):
+        text = "e-mail inválido"
+    issue: dict[str, Any] = {
+        "loc": loc,
+        "msg": text[:1].upper() + text[1:],
+        "type": str(error.get("type") or ""),
+    }
+    ctx = error.get("ctx")
+    if isinstance(ctx, dict) and ctx:
+        issue["ctx"] = {str(k): _plain(v) for k, v in ctx.items()}
+    label = validation_messages.field_label(loc)
+    if label and label not in loc:
+        issue["label"] = label
+    return issue
+
+
 @app.exception_handler(RequestValidationError)
 async def _validation(_: Request, exc: RequestValidationError) -> JSONResponse:
-    """422 de validação em português, no formato de sempre ({loc, msg, type, ctx})."""
-    return JSONResponse(status_code=422, content={"detail": translate_errors(exc.errors())})
+    """422 de validação em português (a web e o app mostram o `msg`)."""
+    return JSONResponse(
+        status_code=422, content={"detail": [validation_issue(e) for e in exc.errors()]}
+    )
 
 
 @app.exception_handler(DataError)

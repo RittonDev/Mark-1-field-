@@ -1,18 +1,18 @@
 "use client";
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Building2, LogOut } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { Building2, LogOut, RotateCw } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { Logo, ThemeToggle } from "@/components/Brand";
 import { InstallAppButton, useServiceWorker } from "@/components/portal/InstallApp";
-import { EmptyState, Spinner } from "@/components/ui";
+import { Button, EmptyState, Spinner } from "@/components/ui";
 import { homePath } from "@/lib/access";
-import { api, errorMessage } from "@/lib/api";
+import { errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { initials } from "@/lib/format";
-import type { PortalMe } from "@/lib/types";
+import { portalMemory, usePortalMe } from "@/lib/portal";
 
 /**
  * Portal do cliente: em vez de mandar mensagem no WhatsApp ou e-mail, o cliente abre a solicitação
@@ -36,18 +36,13 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
     }
   }, [ready, user, isClient, router, queryClient]);
 
-  const me = useQuery({
-    queryKey: ["portal", "me"],
-    queryFn: () => api.get<PortalMe>("/portal/me"),
-    enabled: ready && isClient,
-    retry: false,
-    staleTime: 5 * 60_000,
-  });
+  const me = usePortalMe(ready && isClient);
 
   if (!ready || !user || !isClient) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-canvas" role="status">
         <Spinner />
+        <span className="sr-only">Carregando o portal...</span>
       </div>
     );
   }
@@ -66,17 +61,20 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
             </span>
           ) : null}
           <div className="ml-auto flex items-center gap-1.5">
-            <InstallAppButton className="hidden sm:inline-flex" />
+            <InstallAppButton />
             <ThemeToggle />
             <span
               className="ml-1 flex size-8 items-center justify-center rounded-full bg-surface-3 text-[11px] font-semibold text-ink-muted"
               title={user.name}
             >
-              {initials(user.name)}
+              <span aria-hidden>{initials(user.name)}</span>
+              <span className="sr-only">Conectado como {user.name}</span>
             </span>
             <button
               type="button"
               onClick={() => {
+                // Sai e apaga o que o portal lembrava neste navegador (computador da loja é compartilhado).
+                portalMemory.clear();
                 logout();
                 queryClient.clear();
                 router.replace("/login");
@@ -89,10 +87,26 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
             </button>
           </div>
         </div>
+        {me.data ? (
+          <p className="flex items-center gap-1.5 border-t border-line px-4 py-1.5 text-xs font-medium text-ink-muted sm:hidden">
+            <Building2 className="size-3.5 shrink-0" />
+            <span className="truncate">{me.data.customer.name}</span>
+          </p>
+        ) : null}
       </header>
       <main className="mx-auto max-w-3xl animate-enter px-4 py-6 sm:py-8">
         {me.error ? (
-          <EmptyState icon={<Building2 />} title="Acesso ao portal" description={errorMessage(me.error)} />
+          <EmptyState
+            icon={<Building2 />}
+            title="Acesso ao portal"
+            description={errorMessage(me.error)}
+            action={
+              <Button onClick={() => void me.refetch()} loading={me.isFetching}>
+                {me.isFetching ? null : <RotateCw className="size-4" />}
+                Tentar de novo
+              </Button>
+            }
+          />
         ) : (
           children
         )}

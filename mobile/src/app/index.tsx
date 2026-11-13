@@ -202,13 +202,7 @@ export default function MyTicketsScreen() {
           <TimelineRow ticket={item} now={now} last={index === count - 1} userId={userId} showRoute={routeIds.has(item.id)} />
         ) : (
           <View style={styles.cardGap}>
-            <TicketCard
-              ticket={item}
-              now={now}
-              userId={userId}
-              showDate={tab === "done"}
-              variant={tab === "done" ? "done" : "default"}
-            />
+            <TicketCard ticket={item} now={now} userId={userId} variant={tab === "done" ? "done" : "default"} />
           </View>
         )}
       </Animated.View>

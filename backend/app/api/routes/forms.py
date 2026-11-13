@@ -58,11 +58,20 @@ async def get_template(template_id: uuid.UUID, db: DB, _: TicketManagerUser) -> 
 
 @router.put("/form-templates/{template_id}", response_model=FormTemplateOut)
 async def update_template(
-    template_id: uuid.UUID, body: FormTemplateIn, db: DB, _: TicketManagerUser
-) -> FormTemplate:
+    template_id: uuid.UUID,
+    body: FormTemplateIn,
+    db: DB,
+    _: TicketManagerUser,
+    apply_to_pending: bool = False,
+) -> FormTemplateOut:
+    """Salva o modelo. Com `apply_to_pending`, a correção chega também às OS em que o formulário
+    ainda não começou (`applied_to` diz quantas)."""
     template = await svc.update_template(db, await svc.get_template(db, template_id), body)
+    applied = await svc.apply_to_pending(db, template) if apply_to_pending else None
     await db.commit()
-    return template
+    out = FormTemplateOut.model_validate(template)
+    out.applied_to = applied
+    return out
 
 
 # ------------------------------------------------------------- formulário na OS

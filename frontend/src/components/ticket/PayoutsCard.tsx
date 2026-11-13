@@ -2,11 +2,14 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Wallet } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
+import { useToast } from "@/components/Toaster";
 import { Button, Card, CardHeader, Dialog, ErrorBox, Input, Pill } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { PAYOUT_STATUS } from "@/lib/constants";
-import { formatDate, formatMoney, moneyInput, parseMoney } from "@/lib/format";
+import { formatDate, formatMoney, moneyInput } from "@/lib/format";
+import { readDecimal } from "@/lib/quotes";
 import type { Payout, TicketDetail, UUID } from "@/lib/types";
 
 interface Person {
@@ -25,9 +28,19 @@ function people(ticket: TicketDetail): Person[] {
   return list;
 }
 
+/**
+ * Valores de quem já saiu da OS: o pago continua registrado (a API não apaga na troca de técnico) e
+ * entra no total da equipe, então aparece aqui, só para consulta.
+ */
+function former(ticket: TicketDetail, team: Person[]): Payout[] {
+  return (ticket.payouts ?? []).filter((p) => !team.some((t) => t.id === p.technician.id));
+}
+
 function payoutOf(ticket: TicketDetail, technicianId: UUID): Payout | undefined {
   return (ticket.payouts ?? []).find((p) => p.technician.id === technicianId);
 }
+
+const cents = (value: number) => Math.round(value * 100);
 
 function StatusPill({ payout }: { payout: Payout }) {
   const info = PAYOUT_STATUS[payout.status];
@@ -39,34 +52,58 @@ function StatusPill({ payout }: { payout: Payout }) {
   );
 }
 
+/** Valor digitado: vazio tira o valor (null); inválido traz a mensagem para mostrar no campo. */
+function readAmount(text: string) {
+  if (!text.trim()) return { value: null, error: null };
+  return readDecimal(text, { decimals: 2, allowZero: true });
+}
+
 /** Valor de cada técnico na OS. Pago fica travado (desfaça em Pagamentos para mudar). */
 export function PayoutsDialog({ ticket, onClose }: { ticket: TicketDetail; onClose: () => void }) {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
   const team = people(ticket);
+  const left = former(ticket, team);
   const [values, setValues] = useState<Record<UUID, string>>(() =>
     Object.fromEntries(team.map((p) => [p.id, moneyInput(payoutOf(ticket, p.id)?.amount)])),
   );
+  const read = (id: UUID) => readAmount(values[id] ?? "");
   const changed = team.filter((p) => {
     const current = payoutOf(ticket, p.id);
     if (current?.status === "paid") return false;
-    return (values[p.id] ?? "") !== moneyInput(current?.amount);
+    const { value, error } = read(p.id);
+    if (error) return true;
+    return value === null ? current !== undefined : current === undefined || cents(value) !== cents(current.amount);
   });
-  const invalid = changed.some((p) => {
-    const value = parseMoney(values[p.id] ?? "");
-    return value !== null && (!Number.isFinite(value) || value < 0);
-  });
+  const invalid = changed.some((p) => read(p.id).error !== null);
+  const totalCents =
+    team.reduce((sum, p) => {
+      const current = payoutOf(ticket, p.id);
+      if (current?.status === "paid") return sum + cents(current.amount);
+      const { value } = read(p.id);
+      return sum + (value === null ? 0 : cents(value));
+    }, 0) + left.reduce((sum, p) => sum + cents(p.amount), 0);
 
+  // Um técnico por vez: se um falhar, os anteriores já foram gravados. A OS é relida de qualquer jeito
+  // (onSettled), então a tela mostra o que ficou salvo e o erro diz o que faltou.
   const save = useMutation({
     mutationFn: async () => {
       for (const p of changed) {
-        const value = parseMoney(values[p.id] ?? "");
-        if (value === null) await api.delete(`/tickets/${ticket.id}/payouts/${p.id}`);
-        else await api.put(`/tickets/${ticket.id}/payouts/${p.id}`, { amount: value });
+        const { value } = read(p.id);
+        try {
+          if (value === null) await api.delete(`/tickets/${ticket.id}/payouts/${p.id}`);
+          else await api.put(`/tickets/${ticket.id}/payouts/${p.id}`, { amount: value.toFixed(2) });
+        } catch (e) {
+          throw new Error(`${p.name}: ${errorMessage(e)}`);
+        }
       }
     },
-    onSuccess: () => {
+    onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: ["ticket", ticket.id] });
       void queryClient.invalidateQueries({ queryKey: ["payouts"] });
+    },
+    onSuccess: () => {
+      toast({ title: "Valores salvos", tone: "success" });
       onClose();
     },
   });
@@ -91,29 +128,65 @@ export function PayoutsDialog({ ticket, onClose }: { ticket: TicketDetail; onClo
           {team.map((p) => {
             const current = payoutOf(ticket, p.id);
             const paid = current?.status === "paid";
-            const value = parseMoney(values[p.id] ?? "");
-            const bad = value !== null && (!Number.isFinite(value) || value < 0);
+            const { error } = read(p.id);
+            const hintId = `payout-${p.id}`;
             return (
-              <li key={p.id} className="flex items-center gap-3">
-                <div className="min-w-0 flex-1">
+              <li key={p.id} className="flex flex-wrap items-start gap-x-3 gap-y-1">
+                <div className="min-w-0 flex-1 pt-1">
                   <p className="truncate text-sm font-semibold text-ink">{p.name}</p>
                   <p className="text-xs text-ink-muted">{p.role}</p>
                 </div>
-                {current ? <StatusPill payout={current} /> : null}
-                <div className="w-36">
+                {current ? (
+                  <span className="pt-1.5">
+                    <StatusPill payout={current} />
+                  </span>
+                ) : null}
+                <div className="flex w-36 flex-col gap-1">
                   <Input
                     inputMode="decimal"
                     aria-label={`Valor de ${p.name}`}
+                    aria-invalid={Boolean(error) || undefined}
+                    aria-describedby={error || paid ? hintId : undefined}
                     placeholder="R$ 0,00"
                     value={values[p.id] ?? ""}
                     disabled={paid}
                     onChange={(e) => setValues((v) => ({ ...v, [p.id]: e.target.value }))}
-                    className={bad ? "border-red-400" : undefined}
+                    className={error ? "border-red-400 dark:border-red-500/60" : undefined}
                   />
+                  {error ? (
+                    <span id={hintId} className="text-xs text-red-700 dark:text-red-400">
+                      Valor inválido: {error.toLowerCase()}
+                    </span>
+                  ) : null}
                 </div>
+                {paid ? (
+                  <p id={hintId} className="w-full text-right text-xs text-ink-muted">
+                    Pago{current?.paid_at ? ` em ${formatDate(current.paid_at)}` : ""}. Para mudar, desfaça o pagamento em{" "}
+                    <Link href="/pagamentos" className="font-medium text-brand hover:underline">
+                      Pagamentos
+                    </Link>
+                    .
+                  </p>
+                ) : null}
               </li>
             );
           })}
+          {left.map((p) => (
+            <li key={p.id} className="flex items-center gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold text-ink">{p.technician.name}</p>
+                <p className="text-xs text-ink-muted">Saiu da OS</p>
+              </div>
+              <StatusPill payout={p} />
+              <span className="w-36 text-right text-sm font-medium text-ink tabular-nums">{formatMoney(p.amount)}</span>
+            </li>
+          ))}
+          {team.length + left.length > 1 ? (
+            <li className="flex items-center justify-between border-t border-line pt-3 text-sm">
+              <span className="text-ink-muted">Total da equipe</span>
+              <span className="font-semibold text-ink tabular-nums">{formatMoney(totalCents / 100)}</span>
+            </li>
+          ) : null}
         </ul>
       ) : (
         <p className="text-sm text-ink-muted">Coloque o técnico na OS (aba Geral) para definir o valor dele.</p>
@@ -121,7 +194,7 @@ export function PayoutsDialog({ ticket, onClose }: { ticket: TicketDetail; onClo
       <p className="mt-4 text-xs text-ink-muted">Vazio tira o valor. Reembolsos (km, material) ficam em Custos extras.</p>
       {save.error ? (
         <div className="mt-3">
-          <ErrorBox message={errorMessage(save.error)} />
+          <ErrorBox message={`Não foi possível salvar tudo. ${errorMessage(save.error)}`} />
         </div>
       ) : null}
     </Dialog>
@@ -132,17 +205,17 @@ export function PayoutsDialog({ ticket, onClose }: { ticket: TicketDetail; onClo
 export function PayoutLine({ ticket }: { ticket: TicketDetail }) {
   const [open, setOpen] = useState(false);
   if (!ticket.assignee) return null;
-  const team = people(ticket);
-  const total = (ticket.payouts ?? []).reduce((sum, p) => sum + p.amount, 0);
+  const payouts = ticket.payouts ?? [];
+  const total = payouts.reduce((sum, p) => sum + cents(p.amount), 0) / 100;
   const mine = payoutOf(ticket, ticket.assignee.id);
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-line bg-surface-2/60 px-3 py-2 text-sm">
       <Wallet className="size-4 text-ink-subtle" />
       <span className="text-ink-muted">Valor do técnico</span>
       <span className="font-medium text-ink tabular-nums">{mine ? formatMoney(mine.amount) : "não definido"}</span>
-      {team.length > 1 && total ? <span className="text-xs text-ink-muted">· equipe {formatMoney(total)}</span> : null}
+      {payouts.length > 1 ? <span className="text-xs text-ink-muted">· equipe {formatMoney(total)}</span> : null}
       {mine ? <StatusPill payout={mine} /> : null}
-      <button type="button" onClick={() => setOpen(true)} className="ml-auto text-xs font-medium text-brand hover:underline">
+      <button type="button" onClick={() => setOpen(true)} className="ml-auto rounded px-1 text-xs font-medium text-brand hover:underline">
         {mine ? "Alterar" : "Definir valor"}
       </button>
       {open ? <PayoutsDialog ticket={ticket} onClose={() => setOpen(false)} /> : null}
@@ -154,6 +227,8 @@ export function PayoutLine({ ticket }: { ticket: TicketDetail }) {
 export function PayoutsCard({ ticket }: { ticket: TicketDetail }) {
   const [open, setOpen] = useState(false);
   const team = people(ticket);
+  const left = former(ticket, team);
+  const total = (ticket.payouts ?? []).reduce((sum, p) => sum + cents(p.amount), 0) / 100;
   return (
     <Card>
       <CardHeader
@@ -168,7 +243,7 @@ export function PayoutsCard({ ticket }: { ticket: TicketDetail }) {
         }
       />
       <div className="px-5 py-3">
-        {team.length ? (
+        {team.length || left.length ? (
           <ul className="divide-y divide-line">
             {team.map((p) => {
               const payout = payoutOf(ticket, p.id);
@@ -180,11 +255,27 @@ export function PayoutsCard({ ticket }: { ticket: TicketDetail }) {
                   </div>
                   {payout ? <StatusPill payout={payout} /> : null}
                   <span className="w-28 text-right text-sm font-medium text-ink tabular-nums">
-                    {payout ? formatMoney(payout.amount) : <span className="font-normal text-ink-subtle">sem valor</span>}
+                    {payout ? formatMoney(payout.amount) : <span className="font-normal text-ink-muted">sem valor</span>}
                   </span>
                 </li>
               );
             })}
+            {left.map((p) => (
+              <li key={p.id} className="flex items-center gap-3 py-2.5">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-ink">{p.technician.name}</p>
+                  <p className="text-xs text-ink-muted">Saiu da OS</p>
+                </div>
+                <StatusPill payout={p} />
+                <span className="w-28 text-right text-sm font-medium text-ink tabular-nums">{formatMoney(p.amount)}</span>
+              </li>
+            ))}
+            {(ticket.payouts ?? []).length > 1 ? (
+              <li className="flex items-center justify-between py-2.5 text-sm">
+                <span className="text-ink-muted">Total da equipe</span>
+                <span className="w-28 text-right font-semibold text-ink tabular-nums">{formatMoney(total)}</span>
+              </li>
+            ) : null}
           </ul>
         ) : (
           <p className="py-2 text-sm text-ink-muted">Sem técnico na OS ainda.</p>

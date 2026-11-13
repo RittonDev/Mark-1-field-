@@ -55,6 +55,11 @@ export interface Palette {
   warning: string;
   warningSoft: string;
   info: string;
+  /** Texto de erro, sucesso, alerta e informação com contraste AA no fundo do tema e no fundo suave do tom. */
+  dangerInk: string;
+  successInk: string;
+  warningInk: string;
+  infoInk: string;
   segment: string;
   toast: string;
   toastInk: string;
@@ -93,6 +98,10 @@ export const LIGHT: Palette = {
   warning: "#B54708",
   warningSoft: "#FFF7E8",
   info: "#0086C9",
+  dangerInk: "#B42318",
+  successInk: "#0B7A6F",
+  warningInk: "#B54708",
+  infoInk: "#026AA2",
   segment: "#ECEEF1",
   toast: "#1B1F26",
   toastInk: "#FFFFFF",
@@ -129,6 +138,10 @@ export const DARK: Palette = {
   warning: "#FDB022",
   warningSoft: "rgba(253, 176, 34, 0.12)",
   info: "#36BFFA",
+  dangerInk: "#F97066",
+  successInk: BRAND.aqua,
+  warningInk: "#FDB022",
+  infoInk: "#36BFFA",
   segment: "#1A1C20",
   toast: "#222429",
   toastInk: "#ECECF0",

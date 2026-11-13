@@ -549,13 +549,118 @@ function Info({ label, children, wide }: { label: string; children: React.ReactN
   );
 }
 
-function RepairForm({ repair, onClose }: { repair: Repair | null; onClose: () => void }) {
-  const queryClient = useQueryClient();
-  const customers = useCustomers();
-  const [form, setForm] = useState({
+/** A OS de origem escolhida (na edição de um registro antigo, só o código é conhecido). */
+type TicketChoice = { id: UUID; code: string; title: string | null };
+
+/**
+ * Escolha da OS de origem: as mais recentes da loja (ou do cliente) e busca pelo nº ou pelo assunto.
+ * Sem loja escolhida, a busca pelo nº acha a OS e ela traz o cliente e a loja.
+ */
+function TicketPicker({
+  value,
+  onChange,
+  locationId,
+  customerId,
+  labelledBy,
+}: {
+  value: TicketChoice | null;
+  onChange: (ticket: TicketListItem | null) => void;
+  locationId: string;
+  customerId: string;
+  labelledBy: string;
+}) {
+  const [search, setSearch] = useState("");
+  const q = useDebounced(search.trim(), 300);
+  const scoped = Boolean(locationId || customerId);
+  const tickets = useQuery({
+    queryKey: ["tickets", "for-repair", locationId, locationId ? "" : customerId, q],
+    queryFn: () =>
+      api.get<Page<TicketListItem>>("/tickets", {
+        location_id: locationId || undefined,
+        customer_id: locationId ? undefined : customerId || undefined,
+        q: q || undefined,
+        page_size: 20,
+        order_by: "-created_at",
+      }),
+    enabled: value === null && (scoped || q.length > 0),
+    placeholderData: (previous) => previous,
+  });
+
+  if (value) {
+    return (
+      <div role="group" aria-labelledby={labelledBy} className="flex items-start justify-between gap-2 rounded-lg border border-line bg-surface-2 px-3 py-2 text-sm">
+        <p className="min-w-0 truncate">
+          <span className="font-mono text-xs text-ink-muted">{value.code}</span>
+          {value.title ? <span className="ml-1.5 font-semibold text-ink">{value.title}</span> : null}
+        </p>
+        <Button size="sm" variant="ghost" onClick={() => onChange(null)} aria-label="Trocar a OS de origem">
+          <X className="size-3.5" />
+          Trocar
+        </Button>
+      </div>
+    );
+  }
+
+  const items = tickets.data?.items ?? [];
+  return (
+    <div role="group" aria-labelledby={labelledBy} className="flex flex-col gap-2">
+      <div className="relative">
+        <Search className="pointer-events-none absolute top-2.5 left-3 size-4 text-ink-muted" />
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          // Enter aqui busca; não envia o formulário da retirada.
+          onKeyDown={(e) => {
+            if (e.key === "Enter") e.preventDefault();
+          }}
+          placeholder="Nº da OS ou assunto"
+          aria-label="Buscar a OS de origem"
+          className="pl-9"
+        />
+      </div>
+      {scoped || q ? (
+        <div className="max-h-48 overflow-y-auto rounded-lg border border-line">
+          {tickets.isLoading ? (
+            <div className="flex justify-center py-4">
+              <Spinner />
+            </div>
+          ) : tickets.error && !tickets.data ? (
+            <p className="px-3 py-3 text-sm text-red-600 dark:text-red-400">{errorMessage(tickets.error)}</p>
+          ) : items.length ? (
+            <ul className="divide-y divide-line">
+              {items.map((t) => (
+                <li key={t.id}>
+                  <button
+                    type="button"
+                    onClick={() => onChange(t)}
+                    className="block w-full px-3 py-2 text-left transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-none"
+                  >
+                    <span className="block truncate text-sm font-semibold text-ink">
+                      <span className="mr-1.5 font-mono text-xs font-normal text-ink-muted">{t.code}</span>
+                      {t.title}
+                    </span>
+                    <span className="block truncate text-xs text-ink-muted">
+                      {[t.location?.name ?? t.customer?.name, formatDate(t.created_at)].filter(Boolean).join(" · ")}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="px-3 py-3 text-center text-sm text-ink-muted">Nenhuma OS encontrada.</p>
+          )}
+        </div>
+      ) : (
+        <p className="text-xs text-ink-subtle">Escolha a loja (ou o cliente) para ver as OS dela, ou digite o nº da OS.</p>
+      )}
+    </div>
+  );
+}
+
+function repairForm(repair: Repair | null) {
+  return {
     customer_id: repair?.customer?.id ?? "",
     location_id: repair?.location?.id ?? "",
-    ticket_id: repair?.ticket?.id ?? "",
     equipment_type: repair?.equipment_type ?? "Impressora",
     brand: repair?.brand ?? "",
     model: repair?.model ?? "",
@@ -568,117 +673,260 @@ function RepairForm({ repair, onClose }: { repair: Repair | null; onClose: () =>
     vendor_protocol: repair?.vendor_protocol ?? "",
     expected_return_date: repair?.expected_return_date ?? "",
     notes: repair?.notes ?? "",
-  });
+  };
+}
+
+function FieldError({ children }: { children: React.ReactNode }) {
+  return <span className="text-xs font-medium text-red-600 dark:text-red-400">{children}</span>;
+}
+
+function RepairForm({ repair, vendors, onClose }: { repair: Repair | null; vendors: string[]; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const confirm = useConfirm();
+  const ids = useId();
+  const customers = useCustomers();
+  const [initial] = useState(() => repairForm(repair));
+  const [form, setForm] = useState(initial);
+  const [initialTicket] = useState<TicketChoice | null>(() =>
+    repair?.ticket ? { id: repair.ticket.id, code: repair.ticket.name, title: null } : null,
+  );
+  const [ticket, setTicket] = useState<TicketChoice | null>(initialTicket);
+  // A loja recém-escolhida (o cadastro inteiro, para mostrar); a já gravada é buscada pelo id.
+  const [picked, setPicked] = useState<Location | null>(null);
+  const [tried, setTried] = useState(false);
   const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
-  const locations = useLocations(form.customer_id || null);
-  const tickets = useQuery({
-    queryKey: ["tickets", "for-repair", form.customer_id],
-    queryFn: () => api.get<Page<TicketListItem>>("/tickets", { customer_id: form.customer_id, page_size: 50, order_by: "-created_at" }),
-    enabled: Boolean(form.customer_id),
+
+  const storeQuery = useQuery({
+    queryKey: ["location", form.location_id],
+    queryFn: () => api.get<Location>(`/locations/${form.location_id}`),
+    enabled: Boolean(form.location_id) && picked?.id !== form.location_id,
+    staleTime: 60_000,
   });
+  const store = !form.location_id ? null : picked?.id === form.location_id ? picked : (storeQuery.data ?? null);
+
+  const errors = {
+    equipment: form.equipment_type.trim().length < 2 ? "Diga qual é o equipamento (ex.: Impressora)." : null,
+    problem: form.problem.trim().length < 3 ? "Descreva o defeito (pelo menos 3 letras)." : null,
+  };
+  const invalid = Object.values(errors).some(Boolean);
+  const dirty = JSON.stringify(form) !== JSON.stringify(initial) || ticket?.id !== initialTicket?.id;
+
   const save = useMutation({
     mutationFn: () => {
       const body = {
         ...form,
         customer_id: form.customer_id || null,
         location_id: form.location_id || null,
-        ticket_id: form.ticket_id || null,
+        ticket_id: ticket?.id ?? null,
         expected_return_date: form.expected_return_date || null,
-        vendor_quote_value: repair?.vendor_quote_value ?? null,
+        vendor_quote_value: repair?.vendor_quote_value != null ? repair.vendor_quote_value.toFixed(2) : null,
       };
-      return repair ? api.put(`/repairs/${repair.id}`, body) : api.post("/repairs", body);
+      return repair ? api.put<Repair>(`/repairs/${repair.id}`, body) : api.post<Repair>("/repairs", body);
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["repairs"] });
+    onSuccess: (saved) => {
+      queryClient.setQueryData(["repairs", "detail", saved.id], saved);
+      void queryClient.invalidateQueries({ queryKey: ["repairs"] });
+      toast({ title: repair ? `${saved.code}: dados salvos` : `Retirada ${saved.code} registrada`, tone: "success" });
       onClose();
     },
   });
+
+  const requestClose = async () => {
+    if (
+      dirty &&
+      !(await confirm({
+        title: "Descartar alterações?",
+        description: "O que você preencheu nesta retirada não será salvo.",
+        tone: "danger",
+        confirmLabel: "Descartar",
+        cancelLabel: "Continuar editando",
+      }))
+    ) {
+      return;
+    }
+    onClose();
+  };
+
+  const pickStore = (location: Location | null) => {
+    setPicked(location);
+    setForm((f) => ({ ...f, location_id: location?.id ?? "", customer_id: location ? location.customer_id : f.customer_id }));
+  };
+
+  const pickTicket = (t: TicketListItem | null) => {
+    setTicket(t ? { id: t.id, code: t.code, title: t.title } : null);
+    // Sem loja escolhida, a OS traz o cliente e a loja.
+    if (t && !form.location_id) {
+      setForm((f) => ({ ...f, customer_id: t.customer?.id ?? f.customer_id, location_id: t.location?.id ?? "" }));
+    }
+  };
 
   return (
     <Dialog
       open
       size="lg"
-      onClose={onClose}
+      onClose={() => void requestClose()}
       title={repair ? `Editar ${repair.code}` : "Registrar retirada de equipamento"}
+      description={repair ? undefined : "O equipamento que o técnico trouxe do cliente para consertar fora."}
       footer={
         <>
-          <Button onClick={onClose}>Cancelar</Button>
-          <Button variant="primary" loading={save.isPending} onClick={() => save.mutate()}>
+          <Button onClick={() => void requestClose()}>Cancelar</Button>
+          <Button variant="primary" type="submit" form="repair-form" loading={save.isPending}>
             Salvar
           </Button>
         </>
       }
     >
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Cliente">
-          <Select value={form.customer_id} onChange={(e) => setForm((f) => ({ ...f, customer_id: e.target.value, location_id: "", ticket_id: "" }))}>
-            <option value="">—</option>
-            {(customers.data ?? []).map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Field label="Local">
-          <Select value={form.location_id} onChange={(e) => set("location_id", e.target.value)} disabled={!form.customer_id}>
-            <option value="">—</option>
-            {(locations.data ?? []).map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Field label="OS de origem" className="sm:col-span-2">
-          <Select value={form.ticket_id} onChange={(e) => set("ticket_id", e.target.value)} disabled={!form.customer_id}>
-            <option value="">Sem OS</option>
-            {(tickets.data?.items ?? []).map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.code} · {t.title}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Field label="Equipamento">
-          <Input value={form.equipment_type} onChange={(e) => set("equipment_type", e.target.value)} />
-        </Field>
-        <Field label="Marca">
-          <Input value={form.brand} onChange={(e) => set("brand", e.target.value)} placeholder="Ex.: HP, Brother, Ricoh" />
-        </Field>
-        <Field label="Modelo">
-          <Input value={form.model} onChange={(e) => set("model", e.target.value)} />
-        </Field>
-        <Field label="Nº de série">
-          <Input value={form.serial_number} onChange={(e) => set("serial_number", e.target.value)} />
-        </Field>
-        <Field label="Patrimônio do cliente">
-          <Input value={form.asset_tag} onChange={(e) => set("asset_tag", e.target.value)} />
-        </Field>
-        <Field label="Previsão de retorno">
-          <Input type="date" value={form.expected_return_date} onChange={(e) => set("expected_return_date", e.target.value)} />
-        </Field>
-        <Field label="Defeito" required className="sm:col-span-2">
-          <Textarea rows={2} value={form.problem} onChange={(e) => set("problem", e.target.value)} />
-        </Field>
-        <Field label="Acompanha" hint="Cabos, toner, bandejas..." className="sm:col-span-2">
-          <Input value={form.accessories} onChange={(e) => set("accessories", e.target.value)} />
-        </Field>
-        <Field label="Assistência técnica">
-          <Input value={form.vendor_name} onChange={(e) => set("vendor_name", e.target.value)} />
-        </Field>
-        <Field label="Protocolo na assistência">
-          <Input value={form.vendor_protocol} onChange={(e) => set("vendor_protocol", e.target.value)} />
-        </Field>
-        <Field label="Contato da assistência" className="sm:col-span-2">
-          <Input value={form.vendor_contact} onChange={(e) => set("vendor_contact", e.target.value)} />
-        </Field>
-        {save.error ? (
-          <div className="sm:col-span-2">
-            <ErrorBox message={errorMessage(save.error)} />
+      <form
+        id="repair-form"
+        noValidate
+        onSubmit={(e) => {
+          e.preventDefault();
+          setTried(true);
+          if (!invalid) save.mutate();
+        }}
+        className="flex flex-col gap-6"
+      >
+        <section className="flex flex-col gap-3">
+          <SectionTitle>Origem</SectionTitle>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Cliente" hint="Sem loja: escolha só o cliente.">
+              <Select
+                value={form.customer_id}
+                onChange={(e) => {
+                  const customerId = e.target.value;
+                  if (customerId === form.customer_id) return;
+                  setForm((f) => ({
+                    ...f,
+                    customer_id: customerId,
+                    location_id: store && store.customer_id === customerId ? f.location_id : "",
+                  }));
+                  setTicket(null);
+                }}
+              >
+                <option value="">—</option>
+                {(customers.data ?? []).map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            {/* Loja e OS são buscas (com botões e listas): rótulo fora de <label>, ligado ao grupo. */}
+            <div
+              className="flex flex-col gap-1.5 sm:col-span-2"
+              onKeyDown={(e) => {
+                // Enter na busca da loja escolhe/busca; não envia o formulário da retirada.
+                if (e.key === "Enter" && e.target instanceof HTMLInputElement) e.preventDefault();
+              }}
+            >
+              <span id={`${ids}-store`} className="text-xs font-semibold text-ink/80">
+                Loja
+              </span>
+              <div role="group" aria-labelledby={`${ids}-store`}>
+                {form.location_id && !store ? (
+                  storeQuery.error ? (
+                    <ErrorBox message={errorMessage(storeQuery.error)} />
+                  ) : (
+                    <p className="flex h-9 items-center gap-2 text-sm text-ink-muted">
+                      <Spinner className="size-4" />
+                      Carregando a loja...
+                    </p>
+                  )
+                ) : (
+                  <LocationPicker customerId={form.customer_id || null} value={store} onChange={pickStore} />
+                )}
+              </div>
+            </div>
+            <div className="flex flex-col gap-1.5 sm:col-span-2">
+              <span id={`${ids}-ticket`} className="text-xs font-semibold text-ink/80">
+                OS de origem
+              </span>
+              <TicketPicker
+                value={ticket}
+                onChange={pickTicket}
+                locationId={form.location_id}
+                customerId={form.customer_id}
+                labelledBy={`${ids}-ticket`}
+              />
+            </div>
           </div>
-        ) : null}
-      </div>
+        </section>
+
+        <section className="flex flex-col gap-3">
+          <SectionTitle>Equipamento</SectionTitle>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Equipamento" required>
+              <Input
+                value={form.equipment_type}
+                onChange={(e) => set("equipment_type", e.target.value)}
+                maxLength={60}
+                aria-invalid={tried && errors.equipment ? true : undefined}
+              />
+              {tried && errors.equipment ? <FieldError>{errors.equipment}</FieldError> : null}
+            </Field>
+            <Field label="Marca">
+              <Input value={form.brand} onChange={(e) => set("brand", e.target.value)} placeholder="Ex.: HP, Brother, Ricoh" maxLength={80} />
+            </Field>
+            <Field label="Modelo">
+              <Input value={form.model} onChange={(e) => set("model", e.target.value)} maxLength={120} />
+            </Field>
+            <Field label="Nº de série">
+              <Input value={form.serial_number} onChange={(e) => set("serial_number", e.target.value)} maxLength={120} />
+            </Field>
+            <Field label="Patrimônio do cliente">
+              <Input value={form.asset_tag} onChange={(e) => set("asset_tag", e.target.value)} maxLength={80} />
+            </Field>
+            <Field label="Acompanha" hint="Cabos, toner, bandejas...">
+              <Input value={form.accessories} onChange={(e) => set("accessories", e.target.value)} maxLength={2000} />
+            </Field>
+            <Field label="Defeito" required className="sm:col-span-2">
+              <Textarea
+                rows={2}
+                value={form.problem}
+                onChange={(e) => set("problem", e.target.value)}
+                maxLength={5000}
+                aria-invalid={tried && errors.problem ? true : undefined}
+              />
+              {tried && errors.problem ? <FieldError>{errors.problem}</FieldError> : null}
+            </Field>
+          </div>
+        </section>
+
+        <section className="flex flex-col gap-3">
+          <SectionTitle>Assistência técnica</SectionTitle>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Assistência técnica">
+              <Input
+                value={form.vendor_name}
+                onChange={(e) => set("vendor_name", e.target.value)}
+                list={`${ids}-vendors`}
+                maxLength={160}
+              />
+              <datalist id={`${ids}-vendors`}>
+                {vendors.map((v) => (
+                  <option key={v} value={v} />
+                ))}
+              </datalist>
+            </Field>
+            <Field label="Protocolo na assistência">
+              <Input value={form.vendor_protocol} onChange={(e) => set("vendor_protocol", e.target.value)} maxLength={80} />
+            </Field>
+            <Field label="Contato da assistência">
+              <Input value={form.vendor_contact} onChange={(e) => set("vendor_contact", e.target.value)} maxLength={160} />
+            </Field>
+            <Field label="Previsão de retorno">
+              <Input type="date" value={form.expected_return_date} onChange={(e) => set("expected_return_date", e.target.value)} />
+            </Field>
+          </div>
+        </section>
+
+        <Field label="Observações internas" hint="Só a central vê.">
+          <Textarea rows={2} value={form.notes} onChange={(e) => set("notes", e.target.value)} maxLength={5000} />
+        </Field>
+
+        {save.error ? <ErrorBox message={errorMessage(save.error)} /> : null}
+      </form>
     </Dialog>
   );
 }

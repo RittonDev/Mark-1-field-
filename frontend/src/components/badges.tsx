@@ -2,7 +2,7 @@
 
 import { Pause } from "lucide-react";
 import { PRIORITY, SLA_STATUS, STATUS } from "@/lib/constants";
-import { formatRelative } from "@/lib/format";
+import { formatDateTime, formatMinutes } from "@/lib/format";
 import type { SlaStatus, TicketListItem, TicketPriority, TicketStatus } from "@/lib/types";
 import { useNow } from "./useNow";
 import { Pill } from "./ui";
@@ -50,10 +50,20 @@ export function SlaCountdown({ ticket }: { ticket: TicketListItem }) {
   const due = nextDue(ticket);
   if (!due) return null; // sem prazo pendente: nada embaixo do selo (um traço solto era ruído)
   if (ticket.sla_paused_at) return <span className="text-xs text-ink-muted">pausado</span>;
-  const late = new Date(due.at).getTime() < now;
+  const diffMin = (new Date(due.at).getTime() - now) / 60_000;
+  const late = diffMin < 0;
+  // Atrasado diz "vencida" com todas as letras ("Solução há 35min" lia-se como resolvida há 35 min).
+  const text = late
+    ? `${due.label} vencida há ${formatMinutes(Math.max(1, -diffMin))}`
+    : diffMin < 1
+      ? `${due.label} vence agora`
+      : `${due.label} em ${formatMinutes(diffMin)}`;
   return (
-    <span className={late ? "text-xs font-medium text-red-600 dark:text-red-400" : "text-xs text-ink-muted"}>
-      {due.label} {formatRelative(due.at, now)}
+    <span
+      className={late ? "text-xs font-medium text-red-600 dark:text-red-400" : "text-xs text-ink-muted"}
+      title={`Prazo: ${formatDateTime(due.at)}`}
+    >
+      {text}
     </span>
   );
 }

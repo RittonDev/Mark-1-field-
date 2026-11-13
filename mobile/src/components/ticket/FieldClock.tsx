@@ -114,10 +114,10 @@ export function OnsiteTimer({ ticket }: { ticket: Clockable & Pick<TicketDetail,
 
   // Vibra uma vez ao entrar no aviso (faltando 30 min) e uma vez no estouro, mesmo reabrindo a tela.
   // A chave leva o limite: numa revisita (janela nova) o aviso vale de novo.
-  const window = ticket.onsite_due_at ?? "";
+  const windowEnd = ticket.onsite_due_at ?? "";
   useEffect(() => {
     if (state === "ok") return;
-    const key = `onsite_alert:${ticket.id}:${window}:${state}`;
+    const key = `onsite_alert:${ticket.id}:${windowEnd}:${state}`;
     let alive = true;
     void getKv(key).then((done) => {
       if (!alive || done) return;
@@ -127,7 +127,7 @@ export function OnsiteTimer({ ticket }: { ticket: Clockable & Pick<TicketDetail,
     return () => {
       alive = false;
     };
-  }, [state, ticket.id, window]);
+  }, [state, ticket.id, windowEnd]);
 
   const ringProps = useAnimatedProps(() => ({ strokeDashoffset: CIRC * (1 - progress.get()) }));
   if (!clock) return null;

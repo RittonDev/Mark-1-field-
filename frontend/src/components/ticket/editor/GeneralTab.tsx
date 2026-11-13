@@ -198,6 +198,21 @@ function FieldError({ id, message }: { id: string; message?: string }) {
   ) : null;
 }
 
+/** Aviso do que vai acontecer ao salvar (ex.: a OS volta para Novo). */
+function Caution({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <p
+      className={clsx(
+        "flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200",
+        className,
+      )}
+    >
+      <AlertTriangle className="mt-px size-3.5 shrink-0" />
+      <span>{children}</span>
+    </p>
+  );
+}
+
 /** Etiquetas da OS (ex.: "Adicional Noturno"): tira com o ×, inclui escolhendo ou digitando. */
 function TagsField({ value, onChange }: { value: Tag[]; onChange: (tags: Tag[]) => void }) {
   const [draft, setDraft] = useState("");
@@ -402,13 +417,15 @@ export function GeneralTab({
     return map;
   }, [people, server.helpers, server.assignee]);
   const analysts = useMemo(() => {
-    const owner = server.owner;
     const list = (staff.data ?? [])
       .filter((u) => u.role === "admin" || u.role === "supervisor" || u.role === "analyst")
       .map((u) => ({ id: u.id, name: u.name }));
-    if (owner && !list.some((u) => u.id === owner.id)) list.push({ id: owner.id, name: owner.name });
+    // O analista atual (mesmo desativado) e quem está logado (o "Assumir") sempre aparecem.
+    for (const person of [server.owner, user]) {
+      if (person && !list.some((u) => u.id === person.id)) list.push({ id: person.id, name: person.name });
+    }
     return list.sort((a, b) => a.name.localeCompare(b.name));
-  }, [staff.data, server.owner]);
+  }, [staff.data, server.owner, user]);
 
   // ── o que mudou ──
   const schedChanged = !sameGroup(SCHEDULE_KEYS, form, base);
@@ -703,359 +720,533 @@ export function GeneralTab({
     : null;
 
   return (
-    <form
-      id={GENERAL_FORM_ID}
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (dirty && !timesInvalid && form.title.trim().length >= 3) save.mutate();
-      }}
-      className="grid grid-cols-12 gap-x-4 gap-y-4"
-    >
-      <Field label="Identificador" className="col-span-12 sm:col-span-3">
-        <Input value={ticket.code} readOnly className="bg-surface-2 font-mono text-ink-muted" />
-      </Field>
-      <Field label="Tipo de OS" className="col-span-12 sm:col-span-6">
-        <Select
-          value={form.serviceTypeId}
-          onChange={(e) => {
-            const st = serviceTypes.data?.find((t) => t.id === e.target.value);
-            set("serviceTypeId", e.target.value);
-            if (st) set("estimated", String(st.estimated_minutes));
-          }}
+    <form ref={formRef} id={formId} onSubmit={onSubmit} noValidate className="@container flex flex-col gap-4">
+      {notice && dirty ? (
+        <div
+          role="status"
+          className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200"
         >
-          <option value="">Sem tipo de serviço</option>
-          {serviceTypes.data?.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name} - {t.estimated_minutes} minutos
-            </option>
-          ))}
-        </Select>
-      </Field>
-      <Field label="Categoria" className="col-span-12 sm:col-span-3">
-        <Select value={form.categoryId} onChange={(e) => set("categoryId", e.target.value)}>
-          <option value="">Sem categoria</option>
-          {(categories.data ?? [])
-            .filter((c) => c.is_active || c.id === form.categoryId)
-            .sort((a, b) => a.full_name.localeCompare(b.full_name))
-            .map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.full_name}
-              </option>
-            ))}
-        </Select>
-      </Field>
+          <p className="flex items-center gap-1.5 font-semibold">
+            <AlertTriangle className="size-4 shrink-0" />
+            Esta OS foi atualizada enquanto você editava.
+          </p>
+          <p className="mt-0.5">
+            Suas alterações continuam aqui; o resto já mostra a versão nova.
+            {notice.length ? ` Também mudaram por fora: ${notice.join(", ")}.` : ""}
+          </p>
+          <button type="button" onClick={discard} className="mt-1.5 text-xs font-semibold underline underline-offset-2 hover:no-underline">
+            Descartar minhas alterações
+          </button>
+        </div>
+      ) : null}
+      {saveError && !conflicts ? (
+        <div ref={errorRef}>
+          <ErrorBox message={saveError} />
+        </div>
+      ) : null}
 
-      <div className="col-span-12">
-        <TagsField value={form.tags} onChange={(tags) => set("tags", tags)} />
-      </div>
+      <Card>
+        <CardHeader title="Dados da OS" />
+        <div className="grid grid-cols-12 gap-4 p-5">
+          <Field label="Identificador" className="col-span-12 @xl:col-span-3">
+            <Input value={ticket.code} readOnly className="bg-surface-2 font-mono text-ink-muted" />
+          </Field>
+          <Field label="Tipo de OS" className="col-span-12 @xl:col-span-6">
+            <Select
+              value={form.serviceTypeId}
+              onChange={(e) => {
+                const st = serviceTypes.data?.find((t) => t.id === e.target.value);
+                set("serviceTypeId", e.target.value);
+                if (st) set("estimated", String(st.estimated_minutes));
+              }}
+            >
+              <option value="">Sem tipo de serviço</option>
+              {serviceTypes.data?.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name} · {formatMinutes(t.estimated_minutes)}
+                </option>
+              ))}
+              {missingType ? (
+                <option value={missingType}>
+                  {typeName ?? "Tipo escolhido"}
+                  {serviceTypes.data ? " (inativo ou de outro cliente)" : ""}
+                </option>
+              ) : null}
+            </Select>
+          </Field>
+          <Field label="Categoria" className="col-span-12 @xl:col-span-3">
+            <Select value={form.categoryId} onChange={(e) => set("categoryId", e.target.value)}>
+              <option value="">Sem categoria</option>
+              {(categories.data ?? [])
+                .filter((c) => c.is_active || c.id === form.categoryId)
+                .sort((a, b) => a.full_name.localeCompare(b.full_name))
+                .map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.full_name}
+                  </option>
+                ))}
+            </Select>
+          </Field>
+          <Field label="Título" required className="col-span-12 @xl:col-span-8">
+            <Input
+              value={form.title}
+              onChange={(e) => set("title", e.target.value)}
+              maxLength={200}
+              aria-required="true"
+              aria-invalid={errors.title ? true : undefined}
+              aria-describedby={shown("title") ? errorId("title") : undefined}
+            />
+            <FieldError id={errorId("title")} message={shown("title")} />
+          </Field>
+          <Field label="Contrato de prazo (prioridade)" className="col-span-12 @xl:col-span-4">
+            <Select value={form.priority} onChange={(e) => set("priority", e.target.value as TicketPriority)}>
+              {PRIORITY_ORDER.map((p) => (
+                <option key={p} value={p}>
+                  {PRIORITY[p].code} - {PRIORITY[p].label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <div className="col-span-12">
+            <TagsField value={form.tags} onChange={(tags) => set("tags", tags)} />
+          </div>
+          <div className="col-span-12 flex flex-col gap-1">
+            <Field label="Descrição da ordem de serviço">
+              <Textarea rows={3} value={form.description} onChange={(e) => set("description", e.target.value)} maxLength={20000} />
+            </Field>
+            <Counter value={form.description} max={20000} />
+          </div>
+        </div>
+      </Card>
 
-      <Field label="Título" required className="col-span-12">
-        <Input value={form.title} onChange={(e) => set("title", e.target.value)} minLength={3} maxLength={200} required />
-      </Field>
+      <Card>
+        <CardHeader title="Cliente e local" />
+        <div className="grid grid-cols-12 gap-4 p-5">
+          <div className="col-span-12 flex flex-col gap-1.5">
+            <Field label="Cliente">
+              <Select
+                value={form.customerId}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  setForm((f) => ({ ...f, customerId: id, locationId: "", locationLabel: "" }));
+                  setChangingLocation(Boolean(id));
+                }}
+              >
+                <option value="">Sem cliente</option>
+                {(customers.data ?? []).map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            {intakeCustomer ? (
+              <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-muted">
+                <span>
+                  Total de OS: <b className="text-ink">{intakeCustomer.total_tickets}</b>
+                </span>
+                {intakeCustomer.rating_average != null ? (
+                  <span className="inline-flex items-center gap-1">
+                    <Star className="size-3" /> Média de avaliação: <b className="text-ink">{intakeCustomer.rating_average}</b>
+                  </span>
+                ) : null}
+                {intakeCustomer.rating_last != null ? (
+                  <span className="inline-flex items-center gap-1">
+                    <ThumbsUp className="size-3" /> Última avaliação: <b className="text-ink">{intakeCustomer.rating_last}</b>
+                  </span>
+                ) : null}
+                {intakeLocation?.contact_phone ? (
+                  <span className="inline-flex items-center gap-1">
+                    <Phone className="size-3" /> {intakeLocation.contact_phone}
+                    {intakeLocation.contact_name ? ` · ${intakeLocation.contact_name}` : ""}
+                  </span>
+                ) : null}
+                <Link href={`/clientes/${intakeCustomer.id}`} className="font-medium text-brand hover:underline">
+                  Ver cliente
+                </Link>
+              </p>
+            ) : null}
+          </div>
 
-      <div className="col-span-12 flex flex-col gap-1.5">
-        <Field label="Cliente">
-          <Select
-            value={form.customerId}
-            onChange={(e) => {
-              const id = e.target.value;
-              setForm((f) => ({ ...f, customerId: id, locationId: "", locationLabel: "" }));
-              setChangingLocation(Boolean(id));
+          {/* A busca de loja é um campo dentro do formulário: Enter não salva a OS e Esc fecha só os
+              resultados (o painel continua aberto). */}
+          <div
+            className="col-span-12 flex flex-col gap-1.5"
+            onKeyDown={(e) => {
+              if (!(e.target instanceof HTMLInputElement)) return;
+              if (e.key === "Enter") e.preventDefault();
+              if (e.key === "Escape") {
+                e.preventDefault();
+                e.target.blur();
+              }
             }}
           >
-            <option value="">Sem cliente</option>
-            {(customers.data ?? []).map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        {intakeCustomer ? (
-          <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-muted">
-            <span>
-              Total de OS: <b className="text-ink">{intakeCustomer.total_tickets}</b>
-            </span>
-            {intakeCustomer.rating_average != null ? (
-              <span className="inline-flex items-center gap-1">
-                <Star className="size-3 fill-amber-400 text-amber-400" /> Média de avaliação: <b className="text-ink">{intakeCustomer.rating_average}</b>
-              </span>
-            ) : null}
-            {intakeCustomer.rating_last != null ? (
-              <span className="inline-flex items-center gap-1">
-                <ThumbsUp className="size-3" /> Última avaliação: <b className="text-ink">{intakeCustomer.rating_last}</b>
-              </span>
-            ) : null}
-            {intakeLocation?.contact_phone ? (
-              <span className="inline-flex items-center gap-1">
-                <Phone className="size-3" /> {intakeLocation.contact_phone}
-                {intakeLocation.contact_name ? ` · ${intakeLocation.contact_name}` : ""}
-              </span>
-            ) : null}
-            <Link href={`/clientes/${intakeCustomer.id}`} className="font-medium text-brand hover:underline">
-              + Ver mais
-            </Link>
-          </p>
-        ) : null}
-      </div>
+            <span className="text-xs font-semibold text-ink/80">Localização</span>
+            {changingLocation || !form.locationId ? (
+              <>
+                <LocationPicker
+                  customerId={form.customerId || null}
+                  value={null}
+                  onChange={(loc: Location | null) => {
+                    if (!loc) return;
+                    setForm((f) => ({
+                      ...f,
+                      locationId: loc.id,
+                      locationLabel: [loc.name, loc.code].filter(Boolean).join(" - "),
+                      customerId: loc.customer_id ?? f.customerId,
+                    }));
+                    setChangingLocation(false);
+                  }}
+                />
+                {form.locationId ? (
+                  <button type="button" onClick={() => setChangingLocation(false)} className={buttonClassName("ghost", "sm", "self-start")}>
+                    Manter {form.locationLabel}
+                  </button>
+                ) : null}
+              </>
+            ) : (
+              <div className="flex h-9 items-center gap-2 rounded-lg border border-line bg-surface pr-1 pl-3 text-sm shadow-elev-1">
+                <MapPin className="size-4 shrink-0 text-ink-subtle" />
+                <span className="min-w-0 flex-1 truncate text-ink">{form.locationLabel}</span>
+                <button
+                  type="button"
+                  onClick={() => setChangingLocation(true)}
+                  className={buttonClassName("ghost", "sm", "h-7 px-2")}
+                  aria-label={`Trocar a loja (${form.locationLabel})`}
+                >
+                  Trocar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setForm((f) => ({ ...f, locationId: "", locationLabel: "" }))}
+                  className="inline-flex size-7 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
+                  aria-label="Tirar a loja"
+                >
+                  <X className="size-4" />
+                </button>
+              </div>
+            )}
+          </div>
 
-      <div className="col-span-12">
-        <Field label="Localização">
-          {changingLocation || !form.locationId ? (
-            <LocationPicker
-              customerId={form.customerId || null}
-              value={null}
-              onChange={(loc: Location | null) => {
-                if (!loc) return;
-                setForm((f) => ({
-                  ...f,
-                  locationId: loc.id,
-                  locationLabel: [loc.name, loc.code].filter(Boolean).join(" - "),
-                  customerId: loc.customer_id ?? f.customerId,
-                }));
-                setChangingLocation(false);
-              }}
+          <div className="col-span-12 rounded-lg border border-line px-3 py-2.5">
+            <p className="text-xs font-semibold text-ink/80">Endereço da ordem de serviço</p>
+            <p className="mt-1 flex items-start gap-1.5 text-sm text-ink">
+              <MapPin className="mt-0.5 size-4 shrink-0 text-ink-subtle" />
+              {address || <span className="text-ink-subtle">Sem endereço (escolha a loja)</span>}
+            </p>
+            <Input
+              value={form.serviceAddress}
+              onChange={(e) => set("serviceAddress", e.target.value)}
+              placeholder="Outro endereço para este atendimento (opcional)"
+              aria-label="Outro endereço para este atendimento"
+              maxLength={255}
+              className="mt-2"
             />
-          ) : (
-            <div className="flex h-10 items-center gap-2 rounded-lg border border-line bg-surface px-3 text-sm">
-              <span className="min-w-0 flex-1 truncate text-ink">{form.locationLabel}</span>
-              <button type="button" onClick={() => setChangingLocation(true)} className="text-xs font-medium text-brand hover:underline">
-                Trocar
-              </button>
-              <button
-                type="button"
-                onClick={() => setForm((f) => ({ ...f, locationId: "", locationLabel: "" }))}
-                className="rounded-full p-0.5 text-ink-subtle hover:bg-surface-2 hover:text-ink"
-                aria-label="Tirar a loja"
-              >
-                <X className="size-4" />
-              </button>
+          </div>
+        </div>
+      </Card>
+
+      <Card>
+        <CardHeader title="Agenda e técnicos" />
+        <div className="grid grid-cols-12 gap-4 p-5">
+          <Field
+            label="Duração estimada (min)"
+            className="col-span-12 @xl:col-span-4"
+            hint={!shown("estimated") && minutes ? formatMinutes(minutes) : undefined}
+          >
+            <Input
+              type="number"
+              inputMode="numeric"
+              step="any"
+              value={form.estimated}
+              onChange={(e) => set("estimated", e.target.value)}
+              aria-invalid={errors.estimated ? true : undefined}
+              aria-describedby={shown("estimated") ? errorId("estimated") : undefined}
+            />
+            <FieldError id={errorId("estimated")} message={shown("estimated")} />
+          </Field>
+          <Field label="Data do agendamento" className="col-span-6 @xl:col-span-4">
+            <Input
+              type="date"
+              value={form.date}
+              onChange={(e) => set("date", e.target.value)}
+              aria-invalid={errors.schedule && !form.date ? true : undefined}
+              aria-describedby={shown("schedule") ? errorId("schedule") : undefined}
+            />
+          </Field>
+          <Field label="Hora do agendamento" className="col-span-6 @xl:col-span-4">
+            <Input
+              type="time"
+              value={form.time}
+              onChange={(e) => set("time", e.target.value)}
+              aria-invalid={errors.schedule && !form.time ? true : undefined}
+              aria-describedby={shown("schedule") ? errorId("schedule") : undefined}
+            />
+          </Field>
+          {shown("schedule") ? (
+            <p id={errorId("schedule")} className="col-span-12 -mt-2 text-xs font-medium text-red-700 dark:text-red-300">
+              {errors.schedule}
+            </p>
+          ) : null}
+          {unscheduledWarning ? <Caution className="col-span-12">A OS fica Agendado sem data: mude a situação para Atribuído.</Caution> : null}
+
+          <Field label="Colaborador" className="col-span-12 @xl:col-span-6">
+            <Select value={form.assigneeId} onChange={(e) => setAssignee(e.target.value)}>
+              <option value="">Sem colaborador</option>
+              {technicians.length ? (
+                <optgroup label="Técnicos">
+                  {technicians.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} · {p.open_tickets} em aberto
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null}
+              {internal.length ? (
+                <optgroup label="Equipe interna">
+                  {internal.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({ROLE[p.role]}) · {p.open_tickets} em aberto
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null}
+              {form.assigneeId && !assigneeListed ? <option value={form.assigneeId}>{assigneeName ?? "Técnico atual"}</option> : null}
+            </Select>
+          </Field>
+          <div className="col-span-12 flex flex-col gap-1.5 @xl:col-span-6">
+            <span className="text-xs font-semibold text-ink/80">Outros colaboradores</span>
+            <HelpersField
+              hideLabel
+              options={technicians.map((p) => ({ id: p.id, name: p.name }))}
+              assigneeId={form.assigneeId as UUID | ""}
+              helperIds={form.helperIds}
+              names={names}
+              onChange={(ids) => set("helperIds", ids)}
+            />
+          </div>
+          {assigneeWarning ? <Caution className="col-span-12">{assigneeWarning.text}</Caution> : null}
+          {server.assignee ? (
+            <div className="col-span-12">
+              <PayoutLine ticket={server} />
             </div>
-          )}
-        </Field>
-      </div>
-
-      <div className="col-span-12 rounded-lg border border-line px-3 py-2.5">
-        <p className="text-xs font-semibold text-ink/80">Endereço da ordem de serviço</p>
-        <p className="mt-1 flex items-start gap-1.5 text-sm text-ink">
-          <MapPin className="mt-0.5 size-4 shrink-0 text-ink-subtle" />
-          {address || <span className="text-ink-subtle">Sem endereço (escolha a loja)</span>}
-        </p>
-        <Input
-          value={form.serviceAddress}
-          onChange={(e) => set("serviceAddress", e.target.value)}
-          placeholder="Outro endereço para este atendimento (opcional)"
-          maxLength={255}
-          className="mt-2"
-        />
-      </div>
-
-      <Field label="Contrato de prazo (prioridade)" className="col-span-12">
-        <Select value={form.priority} onChange={(e) => set("priority", e.target.value as TicketPriority)}>
-          {PRIORITY_ORDER.map((p) => (
-            <option key={p} value={p}>
-              {PRIORITY[p].code} - {PRIORITY[p].label}
-            </option>
-          ))}
-        </Select>
-      </Field>
-
-      <div className="col-span-12 flex flex-col gap-1">
-        <Field label="Descrição da ordem de serviço">
-          <Textarea rows={3} value={form.description} onChange={(e) => set("description", e.target.value)} maxLength={20000} />
-        </Field>
-        <Counter value={form.description} max={20000} />
-      </div>
-
-      <Field label="Duração estimada (min)" required className="col-span-12 sm:col-span-4" hint={minutes ? formatMinutes(minutes) : undefined}>
-        <Input type="number" min={1} max={10080} value={form.estimated} onChange={(e) => set("estimated", e.target.value)} />
-      </Field>
-      <Field label="Data do agendamento" className="col-span-6 sm:col-span-4">
-        <Input type="date" value={form.date} onChange={(e) => set("date", e.target.value)} />
-      </Field>
-      <Field label="Hora do agendamento" className="col-span-6 sm:col-span-4">
-        <Input type="time" value={form.time} onChange={(e) => set("time", e.target.value)} />
-      </Field>
-
-      <Field label="Colaborador" className="col-span-12 sm:col-span-6">
-        <Select value={form.assigneeId} onChange={(e) => set("assigneeId", e.target.value)}>
-          <option value="">Sem colaborador</option>
-          {people.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-              {p.role === "technician" ? "" : " (analista)"} · {p.open_tickets} em aberto
-            </option>
-          ))}
-          {ticket.assignee && !people.some((p) => p.id === ticket.assignee!.id) ? (
-            <option value={ticket.assignee.id}>{ticket.assignee.name}</option>
           ) : null}
-        </Select>
-      </Field>
-      <div className="col-span-12 sm:col-span-6">
-        <span className="mb-1.5 block text-xs font-semibold text-ink/80">Outros colaboradores</span>
-        <HelpersField
-          hideLabel
-          options={people.filter((p) => p.role === "technician").map((p) => ({ id: p.id, name: p.name }))}
-          assigneeId={form.assigneeId as UUID | ""}
-          helperIds={form.helperIds}
-          names={names}
-          onChange={(ids) => set("helperIds", ids)}
-        />
-      </div>
-      {ticket.assignee ? (
-        <div className="col-span-12">
-          <PayoutLine ticket={ticket} />
-        </div>
-      ) : null}
 
-      <div className="col-span-12 rounded-xl border border-line bg-surface-2/40 p-3">
-        <SectionTitle
-          wrap
-          className="mb-2"
-          aside={
-            form.locationId ? (
-              <button
-                type="button"
-                onClick={async () => {
-                  await navigator.clipboard.writeText(invite());
-                  toast({ title: "Convite copiado: cole no grupo de técnicos do WhatsApp", tone: "success" });
-                }}
-                className="text-xs font-medium text-brand hover:underline"
-              >
-                Copiar convite para o grupo
+          <div className="col-span-12">
+            {suggestionsShown ? (
+              <div className="rounded-xl border border-line bg-surface-2/40 p-3">
+                <SectionTitle
+                  wrap
+                  className="mb-2"
+                  aside={
+                    <>
+                      {form.locationId ? (
+                        <button type="button" onClick={() => void copyInvite()} className={buttonClassName("ghost", "sm", "h-7 px-2")}>
+                          Copiar convite para o grupo
+                        </button>
+                      ) : null}
+                      {suggestOpen ? (
+                        <button type="button" onClick={() => setSuggestOpen(false)} className={buttonClassName("ghost", "sm", "h-7 px-2")}>
+                          Recolher
+                        </button>
+                      ) : null}
+                    </>
+                  }
+                >
+                  Técnicos mais indicados para esta loja
+                </SectionTitle>
+                <SuggestedTechnicians
+                  items={suggestions.data}
+                  loading={suggestions.isLoading}
+                  hasPlace={Boolean(form.locationId)}
+                  scheduled={Boolean(lazyStart)}
+                  assigneeId={form.assigneeId as UUID | ""}
+                  helperIds={form.helperIds}
+                  onAssign={(t) => setAssignee(t?.id ?? "")}
+                  onToggleHelper={toggleHelper}
+                  invite={(t) => invite(t.name, t.id)}
+                />
+                {suggestions.error ? (
+                  <p className="mt-2 text-xs text-red-700 dark:text-red-300">
+                    Não foi possível carregar as sugestões: {errorMessage(suggestions.error)}
+                  </p>
+                ) : null}
+              </div>
+            ) : (
+              <button type="button" onClick={() => setSuggestOpen(true)} className={buttonClassName("secondary", "sm")}>
+                <Users className="size-3.5" />
+                Ver técnicos indicados para esta loja
               </button>
-            ) : null
-          }
-        >
-          Técnicos mais indicados para esta loja
-        </SectionTitle>
-        <SuggestedTechnicians
-          items={suggestions.data}
-          loading={suggestions.isLoading}
-          hasPlace={Boolean(form.locationId)}
-          scheduled={Boolean(startIso)}
-          assigneeId={form.assigneeId as UUID | ""}
-          helperIds={form.helperIds}
-          onAssign={(t) => set("assigneeId", t?.id ?? "")}
-          onToggleHelper={(t) =>
-            set("helperIds", form.helperIds.includes(t.id) ? form.helperIds.filter((h) => h !== t.id) : [...form.helperIds, t.id])
-          }
-          invite={(t) => invite(t.name)}
-        />
-      </div>
-      {conflicts ? (
-        <div className="col-span-12">
-          <ConflictList tone="error" items={conflicts} title="Há técnico ocupado neste horário. Salve de novo para confirmar mesmo assim." />
-        </div>
-      ) : startIso && (form.assigneeId || form.helperIds.length) && (assigneeChanged || schedChanged || !sameList(form.helperIds, base.helperIds)) ? (
-        <div className="col-span-12 flex flex-col gap-2">
-          {form.assigneeId ? (
-            <ConflictHint
-              assigneeId={form.assigneeId}
-              assigneeName={names[form.assigneeId]}
-              start={startIso}
-              estimatedMinutes={minutes}
-              excludeId={ticket.id}
-            />
-          ) : null}
-          {form.helperIds.map((id) => (
-            <ConflictHint key={id} assigneeId={id} assigneeName={names[id]} start={startIso} estimatedMinutes={minutes} excludeId={ticket.id} />
-          ))}
-        </div>
-      ) : null}
+            )}
+          </div>
 
-      <Field label="Analista responsável" className="col-span-12 sm:col-span-6">
-        <div className="flex items-center gap-2">
-          <Select value={form.ownerId} onChange={(e) => set("ownerId", e.target.value)} className="flex-1">
-            <option value="">Sem analista (fila geral)</option>
-            {analysts.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.name}
-              </option>
-            ))}
-          </Select>
-          {user && form.ownerId !== user.id ? (
-            <button
-              type="button"
-              onClick={() => set("ownerId", user.id)}
-              className="inline-flex h-10 items-center gap-1.5 rounded-lg border border-line px-3 text-xs font-medium text-ink hover:bg-surface-2"
+          {conflicts ? (
+            <div ref={conflictRef} className="col-span-12">
+              <ConflictList tone="error" items={conflicts} title={conflictsTitle} />
+            </div>
+          ) : lazyStart && (form.assigneeId || form.helperIds.length) && (assigneeChanged || schedChanged || helpersChanged) ? (
+            <div className="col-span-12 flex flex-col gap-2">
+              {form.assigneeId ? (
+                <ConflictHint
+                  assigneeId={form.assigneeId}
+                  assigneeName={names[form.assigneeId]}
+                  start={lazyStart}
+                  estimatedMinutes={lazyMinutes}
+                  excludeId={ticket.id}
+                />
+              ) : null}
+              {form.helperIds.map((id) => (
+                <ConflictHint key={id} assigneeId={id} assigneeName={names[id]} start={lazyStart} estimatedMinutes={lazyMinutes} excludeId={ticket.id} />
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </Card>
+
+      <Card>
+        <CardHeader title="Central" description="Quem acompanha a OS na central e o recado para o técnico." />
+        <div className="grid grid-cols-12 gap-4 p-5">
+          <div className="col-span-12 flex flex-col gap-1.5 @xl:col-span-6">
+            <span id={errorId("owner")} className="text-xs font-semibold text-ink/80">
+              Analista responsável
+            </span>
+            <div className="flex items-center gap-2">
+              <Select value={form.ownerId} onChange={(e) => set("ownerId", e.target.value)} className="flex-1" aria-labelledby={errorId("owner")}>
+                <option value="">Sem analista (fila geral)</option>
+                {analysts.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name}
+                  </option>
+                ))}
+              </Select>
+              {user && form.ownerId !== user.id ? (
+                <Button onClick={() => set("ownerId", user.id)}>
+                  <Hand className="size-3.5" />
+                  Assumir
+                </Button>
+              ) : null}
+            </div>
+          </div>
+          <Field label="Projeto" className="col-span-12 @xl:col-span-6">
+            <Select value={form.projectId} onChange={(e) => set("projectId", e.target.value)}>
+              <option value="">Não é de projeto (OS avulsa)</option>
+              {(projects.data ?? [])
+                .filter((p) => p.status === "active" || p.status === "planning" || p.id === form.projectId)
+                .map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.code} · {p.name}
+                  </option>
+                ))}
+            </Select>
+          </Field>
+          <div className="col-span-12 flex flex-col gap-1">
+            <Field label="Observação da visita" hint="Recado para o técnico (aparece em destaque no app)">
+              <Textarea rows={2} value={form.visitNote} onChange={(e) => set("visitNote", e.target.value)} maxLength={5000} />
+            </Field>
+            <Counter value={form.visitNote} max={5000} />
+          </div>
+        </div>
+      </Card>
+
+      <Card>
+        <CardHeader title="Situação e horários" description="Os horários reais vêm do app do técnico; aqui a central corrige, com o motivo." />
+        <div className="grid grid-cols-12 gap-4 p-5">
+          <Field
+            label="Situação"
+            className="col-span-12 @xl:col-span-4"
+            hint={dirty && statusOptions.length > 1 ? "Salve as alterações para mudar a situação" : undefined}
+          >
+            <Select
+              value={server.status}
+              onChange={(e) => e.target.value !== server.status && onTransition(e.target.value as TicketStatus)}
+              disabled={statusOptions.length <= 1 || dirty}
             >
-              <Hand className="size-3.5" />
-              Assumir
-            </button>
+              {statusOptions.map((s) => (
+                <option key={s} value={s}>
+                  {STATUS[s].label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Data de início" className="col-span-6 @xl:col-span-2">
+            <Input
+              type="date"
+              value={form.startDate}
+              max={today}
+              disabled={!server.arrived_at}
+              onChange={(e) => set("startDate", e.target.value)}
+              aria-invalid={errors.start ? true : undefined}
+              aria-describedby={shown("start") ? errorId("start") : undefined}
+            />
+          </Field>
+          <Field label="Hora de início" className="col-span-6 @xl:col-span-2">
+            <Input
+              type="time"
+              value={form.startTime}
+              disabled={!server.arrived_at}
+              onChange={(e) => set("startTime", e.target.value)}
+              aria-invalid={errors.start ? true : undefined}
+              aria-describedby={shown("start") ? errorId("start") : undefined}
+            />
+          </Field>
+          <Field label="Data de conclusão" className="col-span-6 @xl:col-span-2">
+            <Input
+              type="date"
+              value={form.endDate}
+              max={today}
+              disabled={!server.resolved_at}
+              onChange={(e) => set("endDate", e.target.value)}
+              aria-invalid={errors.end ? true : undefined}
+              aria-describedby={shown("end") ? errorId("end") : undefined}
+            />
+          </Field>
+          <Field label="Hora de conclusão" className="col-span-6 @xl:col-span-2">
+            <Input
+              type="time"
+              value={form.endTime}
+              disabled={!server.resolved_at}
+              onChange={(e) => set("endTime", e.target.value)}
+              aria-invalid={errors.end ? true : undefined}
+              aria-describedby={shown("end") ? errorId("end") : undefined}
+            />
+          </Field>
+          {shown("start") || shown("end") ? (
+            <div className="col-span-12 -mt-2 flex flex-col gap-0.5">
+              <FieldError id={errorId("start")} message={shown("start") ? `Início: ${errors.start}` : undefined} />
+              <FieldError id={errorId("end")} message={shown("end") ? `Conclusão: ${errors.end}` : undefined} />
+            </div>
+          ) : null}
+          {timesChanged ? (
+            <Field
+              label="Motivo da correção do horário"
+              required
+              className="col-span-12"
+              hint={shown("reason") ? undefined : "Fica no histórico da OS (o técnico não vê)"}
+            >
+              <Input
+                value={form.timesReason}
+                onChange={(e) => set("timesReason", e.target.value)}
+                placeholder="Ex.: técnico esqueceu de concluir no app; confirmado com a loja"
+                maxLength={500}
+                aria-required="true"
+                aria-invalid={errors.reason ? true : undefined}
+                aria-describedby={shown("reason") ? errorId("reason") : undefined}
+              />
+              <FieldError id={errorId("reason")} message={shown("reason")} />
+            </Field>
           ) : null}
         </div>
-      </Field>
-      <Field label="Projeto" className="col-span-12 sm:col-span-6">
-        <Select value={form.projectId} onChange={(e) => set("projectId", e.target.value)}>
-          <option value="">Não é de projeto (OS avulsa)</option>
-          {(projects.data ?? [])
-            .filter((p) => p.status === "active" || p.status === "planning" || p.id === form.projectId)
-            .map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.code} · {p.name}
-              </option>
-            ))}
-        </Select>
-      </Field>
+      </Card>
 
-      <div className="col-span-12 flex flex-col gap-1">
-        <Field label="Observação da visita" hint="Recado para o técnico (aparece em destaque no app)">
-          <Textarea rows={2} value={form.visitNote} onChange={(e) => set("visitNote", e.target.value)} maxLength={5000} />
-        </Field>
-        <Counter value={form.visitNote} max={5000} />
-      </div>
-
-      <Field label="Situação" className="col-span-12 sm:col-span-4">
-        <Select
-          value={ticket.status}
-          onChange={(e) => e.target.value !== ticket.status && setTarget(e.target.value as TicketStatus)}
-          disabled={statusOptions.length <= 1 || dirty}
-          title={dirty ? "Salve as alterações antes de mudar a situação" : undefined}
-        >
-          {statusOptions.map((s) => (
-            <option key={s} value={s}>
-              {STATUS[s].label}
-            </option>
-          ))}
-        </Select>
-      </Field>
-      <Field label="Data de início" className="col-span-6 sm:col-span-2">
-        <Input type="date" value={form.startDate} disabled={!ticket.arrived_at} onChange={(e) => set("startDate", e.target.value)} />
-      </Field>
-      <Field label="Hora de início" className="col-span-6 sm:col-span-2">
-        <Input type="time" value={form.startTime} disabled={!ticket.arrived_at} onChange={(e) => set("startTime", e.target.value)} />
-      </Field>
-      <Field label="Data de conclusão" className="col-span-6 sm:col-span-2">
-        <Input type="date" value={form.endDate} disabled={!ticket.resolved_at} onChange={(e) => set("endDate", e.target.value)} />
-      </Field>
-      <Field label="Hora de conclusão" className="col-span-6 sm:col-span-2">
-        <Input type="time" value={form.endTime} disabled={!ticket.resolved_at} onChange={(e) => set("endTime", e.target.value)} />
-      </Field>
-      {timesChanged ? (
-        <Field label="Motivo da correção do horário" required className="col-span-12" hint="Fica no histórico da OS (o técnico não vê)">
-          <Input
-            value={form.timesReason}
-            onChange={(e) => set("timesReason", e.target.value)}
-            placeholder="Ex.: técnico esqueceu de concluir no app; confirmado com a loja"
-            maxLength={500}
-          />
-        </Field>
-      ) : null}
-
-      <div className="col-span-12 flex flex-col gap-1">
-        <Field label="Descrição da conclusão">
-          <Textarea rows={5} value={form.resolutionNotes} onChange={(e) => set("resolutionNotes", e.target.value)} maxLength={20000} />
-        </Field>
-        <Counter value={form.resolutionNotes} max={20000} />
-      </div>
-
-      {save.error && !conflicts ? (
-        <div className="col-span-12">
-          <ErrorBox message={errorMessage(save.error)} />
+      <Card>
+        <CardHeader title="Conclusão" />
+        <div className="flex flex-col gap-1 p-5">
+          <Field label="Descrição da conclusão" hint="O que foi feito. Aparece no relatório do cliente.">
+            <Textarea rows={5} value={form.resolutionNotes} onChange={(e) => set("resolutionNotes", e.target.value)} maxLength={20000} />
+          </Field>
+          <Counter value={form.resolutionNotes} max={20000} />
         </div>
-      ) : null}
-      {target ? <TransitionDialog key={target} ticket={ticket} to={target} onClose={() => setTarget(null)} /> : null}
+      </Card>
     </form>
   );
 }

@@ -6,12 +6,15 @@ import { FIELD_STEPS, fieldProgress } from "../lib/progress";
 import type { TicketDetail } from "../lib/types";
 import { BRAND_GRADIENT, useStyles, useTheme, type Palette } from "../theme/theme";
 import { Icon } from "./Icon";
-import { Pulse } from "./motion";
 import { Text } from "./Text";
+import { toneInk } from "./ticket/tones";
 
 const DOT = 22;
 
-/** Deslocamento → Chegada → Atendimento → Concluir, com a trilha preenchendo até a etapa atual. */
+/**
+ * Deslocamento → Chegada → Atendimento → Concluir, com a trilha preenchendo até a etapa atual.
+ * A etapa em curso é um ponto fixo (anel e miolo): nada pulsando o dia inteiro.
+ */
 export function FieldStepper({ ticket }: { ticket: Pick<TicketDetail, "status" | "work_started_at" | "work_seconds"> }) {
   const c = useTheme();
   const styles = useStyles(makeStyles);
@@ -22,7 +25,7 @@ export function FieldStepper({ ticket }: { ticket: Pick<TicketDetail, "status" |
   const fill = useSharedValue(0);
 
   useEffect(() => {
-    fill.set(reduced ? target : withTiming(target, { duration: 650, easing: Easing.out(Easing.cubic) }));
+    fill.set(reduced ? target : withTiming(target, { duration: 250, easing: Easing.out(Easing.cubic) }));
   }, [target, reduced, fill]);
 
   const fillStyle = useAnimatedStyle(() => ({ width: trackWidth * fill.get() }));
@@ -45,7 +48,7 @@ export function FieldStepper({ ticket }: { ticket: Pick<TicketDetail, "status" |
       {FIELD_STEPS.map((step, i) => {
         const done = i < reached || (i === reached && !active && !paused);
         const current = i === reached && (active || paused);
-        const tone = paused && current ? c.warning : c.primary;
+        const tone = paused && current ? toneInk(c, "warning") : c.primary;
         return (
           <View key={step} style={styles.node}>
             <View
@@ -59,9 +62,9 @@ export function FieldStepper({ ticket }: { ticket: Pick<TicketDetail, "status" |
               ]}
             >
               {done ? <Icon name="check" size={13} color={c.onPrimary} strokeWidth={2.6} /> : null}
-              {current ? <Pulse color={tone} size={8} active={active} /> : null}
+              {current ? <View style={[styles.core, { backgroundColor: tone }]} /> : null}
             </View>
-            <Text style={[styles.step, done && styles.stepDone, current && { color: paused ? c.warning : c.brandInk, fontWeight: "700" }]}>
+            <Text style={[styles.step, done && styles.stepDone, current && { color: paused ? tone : c.brandInk, fontWeight: "700" }]}>
               {step}
             </Text>
             <Text style={styles.state}>{label(i)}</Text>
@@ -96,7 +99,8 @@ const makeStyles = (c: Palette) =>
       alignItems: "center",
       justifyContent: "center",
     },
-    step: { fontSize: 12, fontWeight: "500", color: c.inkSubtle, textAlign: "center" },
+    core: { width: 8, height: 8, borderRadius: 4 },
+    step: { fontSize: 12, fontWeight: "600", color: c.inkMuted, textAlign: "center" },
     stepDone: { color: c.ink, fontWeight: "600" },
-    state: { fontSize: 11, color: c.inkSubtle, minHeight: 14 },
+    state: { fontSize: 12, color: c.inkMuted, minHeight: 16 },
   });

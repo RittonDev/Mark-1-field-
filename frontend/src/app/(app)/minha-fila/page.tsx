@@ -620,8 +620,6 @@ function MyQueueView() {
         : "Carregando...";
   const description = mine ? (
     <>Suas OS, pelo que pede ação primeiro · {live}</>
-  ) : unowned ? (
-    <>Abertas e sem analista responsável, o prazo mais perto primeiro. Use Puxar para trazer uma OS para a sua fila · {live}</>
   ) : (
     <>Use Puxar para trazer uma OS para a sua fila · {live}</>
   );
@@ -638,7 +636,7 @@ function MyQueueView() {
             {orphans.data ? <CountPill value={orphans.data.total} /> : null}
           </span>
         }
-        description="O prazo de solução mais perto primeiro"
+        description="Abertas e sem analista responsável, o prazo de solução mais perto primeiro"
         actions={
           <Link href="/chamados?no_owner=true" className="text-xs font-medium text-ink-muted hover:text-brand">
             Ver em Chamados
@@ -753,7 +751,7 @@ function MyQueueView() {
         <RefreshFailed at={active.errorAt} onRetry={refresh} retrying={active.fetching} className="mb-4" />
       ) : null}
 
-      {unowned ? null : (
+      {unowned || (active.error && !active.hasData) ? null : (
         <div className="stagger mb-6 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
           <Kpi
             index={0}

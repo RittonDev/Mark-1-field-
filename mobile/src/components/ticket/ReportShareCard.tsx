@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { Linking, Pressable, Share, StyleSheet, View } from "react-native";
 import { api, errorMessage } from "../../lib/api";
 import { copyText, openWhatsApp } from "../../lib/device-actions";
@@ -21,11 +21,19 @@ export function reportMessage(ticket: Pick<LocalTicket, "code" | "location">, ur
 }
 
 /**
+ * Prévia do técnico: `preview=1` pede ao relatório para não contar como visualização do cliente
+ * (a central lê esse número como "o cliente abriu").
+ */
+function previewUrl(url: string): string {
+  return `${url}${url.includes("?") ? "&" : "?"}preview=1`;
+}
+
+/**
  * OS concluída: o técnico responsável envia ao cliente o link do relatório (resumo, fotos,
  * checklist e assinatura), como no fechamento do Field Control: no WhatsApp ele escolhe o contato
  * (o app não recebe o contato da loja), compartilha por outro app ou copia o link.
  */
-export function ReportShareCard({ ticket }: { ticket: LocalTicket }) {
+export const ReportShareCard = memo(function ReportShareCard({ ticket }: { ticket: LocalTicket }) {
   const c = useTheme();
   const styles = useStyles(makeStyles);
   const online = isOnline(useSyncStatus());
@@ -93,7 +101,7 @@ export function ReportShareCard({ ticket }: { ticket: LocalTicket }) {
             <Text style={styles.linkText}>Copiar link</Text>
           </Pressable>
           <Pressable
-            onPress={() => void Linking.openURL(url).catch(() => undefined)}
+            onPress={() => void Linking.openURL(previewUrl(url)).catch(() => undefined)}
             hitSlop={8}
             accessibilityRole="link"
             style={styles.link}
@@ -112,7 +120,7 @@ export function ReportShareCard({ ticket }: { ticket: LocalTicket }) {
     body = (
       <View style={{ gap: 10 }}>
         <Text style={[styles.status, { color: c.danger }]}>Não foi possível gerar o link: {error}</Text>
-        <Button title="Tentar de novo" compact onPress={() => setError(null)} style={{ alignSelf: "flex-start" }} />
+        <Button title="Tentar de novo" icon="repeat" compact onPress={() => setError(null)} style={{ alignSelf: "flex-start" }} />
       </View>
     );
   } else {
@@ -133,7 +141,7 @@ export function ReportShareCard({ ticket }: { ticket: LocalTicket }) {
       {body}
     </Card>
   );
-}
+});
 
 const makeStyles = (c: Palette) =>
   StyleSheet.create({
@@ -149,9 +157,9 @@ const makeStyles = (c: Palette) =>
     title: { fontSize: 16, fontWeight: "700", color: c.ink },
     subtitle: { fontSize: 13, color: c.inkMuted, lineHeight: 18 },
     row: { flexDirection: "row", gap: 10 },
-    hint: { fontSize: 12, color: c.inkSubtle, lineHeight: 17 },
+    hint: { fontSize: 13, color: c.inkMuted, lineHeight: 18 },
     links: { flexDirection: "row", flexWrap: "wrap", gap: 18 },
-    link: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 2 },
+    link: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 6 },
     linkText: { fontSize: 14, fontWeight: "600", color: c.brandInk },
     status: { fontSize: 13, color: c.inkMuted, lineHeight: 19 },
   });

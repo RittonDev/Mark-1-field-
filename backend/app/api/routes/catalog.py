@@ -1,7 +1,8 @@
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 
 from app.api.deps import DB, AdminUser, ManagerUser, StaffUser, TicketManagerUser
 from app.core.access import channel_metadata
@@ -58,16 +59,54 @@ async def _load_category(db: DB, category_id: uuid.UUID) -> Category:
     return category
 
 
+MAX_CATEGORY_DEPTH = 10
+CATEGORY_CYCLE = "A categoria não pode ficar dentro de uma subcategoria dela mesma"
+
+
+def _clean(fields: dict[str, Any], required: tuple[str, ...]) -> dict[str, Any]:
+    """null num campo obrigatório não apaga nada (o formulário mandou vazio); nome sem espaços
+    sobrando."""
+    for key in required:
+        if key in fields and fields[key] is None:
+            fields.pop(key)
+    if isinstance(fields.get("name"), str):
+        fields["name"] = " ".join(fields["name"].split())
+    return fields
+
+
 async def _check_category_refs(
     db: DB, parent_id: uuid.UUID | None, team_id: uuid.UUID | None, self_id: uuid.UUID | None
 ) -> None:
     if parent_id is not None:
         if parent_id == self_id:
             raise HTTPException(422, "Uma categoria não pode ser pai dela mesma")
-        if await db.get(Category, parent_id) is None:
+        parent = await db.get(Category, parent_id)
+        if parent is None:
             raise HTTPException(422, "Categoria pai não encontrada")
+        # Subindo a cadeia de pais do novo pai, a própria categoria não pode aparecer (ciclo:
+        # "A > B > A" no nome completo).
+        node, depth = parent, 0
+        while self_id is not None and node is not None and depth < MAX_CATEGORY_DEPTH:
+            if node.parent_id == self_id:
+                raise HTTPException(422, CATEGORY_CYCLE)
+            node = await db.get(Category, node.parent_id) if node.parent_id else None
+            depth += 1
     if team_id is not None and await db.get(Team, team_id) is None:
         raise HTTPException(422, "Grupo não encontrado")
+
+
+async def _check_category_name(
+    db: DB, name: str, parent_id: uuid.UUID | None, self_id: uuid.UUID | None
+) -> None:
+    """Nome repetido no mesmo nível (inclusive na raiz, que o banco não pega: pai nulo)."""
+    stmt = select(Category.id).where(
+        func.lower(Category.name) == name.lower(),
+        Category.parent_id.is_(None) if parent_id is None else Category.parent_id == parent_id,
+    )
+    if self_id is not None:
+        stmt = stmt.where(Category.id != self_id)
+    if await db.scalar(stmt.limit(1)) is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Já existe uma categoria com este nome aqui")
 
 
 @router.get("/categories", response_model=list[CategoryOut])
@@ -78,8 +117,10 @@ async def list_categories(db: DB, _: TicketManagerUser) -> list[Category]:
 
 @router.post("/categories", response_model=CategoryOut, status_code=status.HTTP_201_CREATED)
 async def create_category(body: CategoryCreate, db: DB, _: ManagerUser) -> Category:
+    fields = _clean(body.model_dump(), ())
     await _check_category_refs(db, body.parent_id, body.default_team_id, None)
-    category = Category(**body.model_dump(), is_active=True)
+    await _check_category_name(db, fields["name"], body.parent_id, None)
+    category = Category(**fields, is_active=True)
     db.add(category)
     await db.commit()
     return await _load_category(db, category.id)
@@ -90,13 +131,13 @@ async def update_category(
     category_id: uuid.UUID, body: CategoryUpdate, db: DB, _: ManagerUser
 ) -> Category:
     category = await _load_category(db, category_id)
-    fields = body.model_dump(exclude_unset=True)
+    fields = _clean(body.model_dump(exclude_unset=True), ("name", "is_active"))
+    parent_id = fields.get("parent_id", category.parent_id)
     await _check_category_refs(
-        db,
-        fields.get("parent_id", category.parent_id),
-        fields.get("default_team_id", category.default_team_id),
-        category.id,
+        db, parent_id, fields.get("default_team_id", category.default_team_id), category.id
     )
+    if "name" in fields or "parent_id" in fields:
+        await _check_category_name(db, fields.get("name", category.name), parent_id, category.id)
     for key, value in fields.items():
         setattr(category, key, value)
     await db.commit()
@@ -200,12 +241,31 @@ async def _check_service_type_refs(
         raise HTTPException(422, "Categoria não encontrada")
 
 
+async def _check_service_type_name(
+    db: DB, name: str, customer_id: uuid.UUID | None, self_id: uuid.UUID | None
+) -> None:
+    """Nome repetido no catálogo do cliente ou entre os gerais (cliente nulo, que o banco não
+    pega), sem diferença de maiúsculas."""
+    stmt = select(ServiceType.id).where(
+        func.lower(ServiceType.name) == name.lower(),
+        ServiceType.customer_id.is_(None)
+        if customer_id is None
+        else ServiceType.customer_id == customer_id,
+    )
+    if self_id is not None:
+        stmt = stmt.where(ServiceType.id != self_id)
+    if await db.scalar(stmt.limit(1)) is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Já existe um tipo de serviço com este nome")
+
+
 @router.post("/service-types", response_model=ServiceTypeOut, status_code=status.HTTP_201_CREATED)
 async def create_service_type(
     body: ServiceTypeCreate, db: DB, _: TicketManagerUser
 ) -> ServiceTypeOut:
+    fields = _clean(body.model_dump(), ())
     await _check_service_type_refs(db, body.customer_id, body.category_id)
-    service_type = ServiceType(**body.model_dump(), is_active=True)
+    await _check_service_type_name(db, fields["name"], body.customer_id, None)
+    service_type = ServiceType(**fields, is_active=True)
     db.add(service_type)
     await db.commit()
     return (await _service_types_out(db, [await _load_service_type(db, service_type.id)]))[0]
@@ -216,8 +276,14 @@ async def update_service_type(
     service_type_id: uuid.UUID, body: ServiceTypeUpdate, db: DB, _: TicketManagerUser
 ) -> ServiceTypeOut:
     service_type = await _load_service_type(db, service_type_id)
-    fields = body.model_dump(exclude_unset=True)
+    fields = _clean(
+        body.model_dump(exclude_unset=True), ("name", "estimated_minutes", "is_active")
+    )
     await _check_service_type_refs(db, None, fields.get("category_id"))
+    if "name" in fields:
+        await _check_service_type_name(
+            db, fields["name"], service_type.customer_id, service_type.id
+        )
     for key, value in fields.items():
         setattr(service_type, key, value)
     await db.commit()
@@ -245,8 +311,9 @@ async def apply_observed_duration(
 
 @router.get("/violation-reasons", response_model=list[ViolationReasonOut])
 async def list_violation_reasons(
-    db: DB, _: StaffUser, active: bool | None = None
+    db: DB, _: TicketManagerUser, active: bool | None = None
 ) -> list[ViolationReason]:
+    """Motivos de violação de SLA: só a gestão (o técnico é terceiro e não vê nada de SLA)."""
     stmt = select(ViolationReason).order_by(ViolationReason.name)
     if active is not None:
         stmt = stmt.where(ViolationReason.is_active.is_(active))
@@ -259,7 +326,7 @@ async def list_violation_reasons(
 async def create_violation_reason(
     body: ViolationReasonCreate, db: DB, _: ManagerUser
 ) -> ViolationReason:
-    reason = ViolationReason(**body.model_dump(), is_active=True)
+    reason = ViolationReason(**_clean(body.model_dump(), ()), is_active=True)
     db.add(reason)
     await db.commit()
     return reason
@@ -272,7 +339,10 @@ async def update_violation_reason(
     reason = await db.get(ViolationReason, reason_id)
     if reason is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Motivo não encontrado")
-    for key, value in body.model_dump(exclude_unset=True).items():
+    fields = _clean(
+        body.model_dump(exclude_unset=True), ("name", "applies_to", "responsibility", "is_active")
+    )
+    for key, value in fields.items():
         setattr(reason, key, value)
     await db.commit()
     return reason
@@ -299,7 +369,7 @@ async def list_unproductive_reasons(
 async def create_unproductive_reason(
     body: UnproductiveReasonCreate, db: DB, _: TicketManagerUser
 ) -> UnproductiveReason:
-    reason = UnproductiveReason(**body.model_dump(), is_active=True)
+    reason = UnproductiveReason(**_clean(body.model_dump(), ()), is_active=True)
     db.add(reason)
     await db.commit()
     return reason
@@ -312,7 +382,8 @@ async def update_unproductive_reason(
     reason = await db.get(UnproductiveReason, reason_id)
     if reason is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Motivo não encontrado")
-    for key, value in body.model_dump(exclude_unset=True).items():
+    fields = _clean(body.model_dump(exclude_unset=True), ("name", "responsibility", "is_active"))
+    for key, value in fields.items():
         setattr(reason, key, value)
     await db.commit()
     return reason

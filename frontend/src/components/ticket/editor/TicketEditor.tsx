@@ -1,17 +1,18 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { ArrowLeft, Ban, Clock, ExternalLink, MessageCircle, Navigation, SquarePen, X } from "lucide-react";
+import { ArrowLeft, Ban, Clock, Copy, ExternalLink, Eye, FileText, MapPin, MessageCircle, Navigation, RotateCcw, SquarePen, X } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useState } from "react";
-import { StatusBadge } from "@/components/badges";
+import { useCallback, useEffect, useEffectEvent, useId, useLayoutEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { Tabs } from "@/components/motion";
 import { AttachmentsTab } from "@/components/ticket/AttachmentsTab";
 import { CommentsTab } from "@/components/ticket/CommentsTab";
 import { ExpensesCard } from "@/components/ticket/ExpensesCard";
 import { ArrivalChip, OnsiteBar } from "@/components/ticket/FieldClock";
 import { FormsCard } from "@/components/ticket/FormsCard";
+import { distance, eventPoint, FAR_FROM_STORE_M, km } from "@/components/ticket/geo";
 import { HistoryTab } from "@/components/ticket/HistoryTab";
 import { LegacyOrderCard } from "@/components/ticket/LegacyOrderCard";
 import { PartRequestsCard } from "@/components/ticket/PartRequestsCard";
@@ -20,16 +21,22 @@ import { QuotesCard } from "@/components/ticket/QuotesCard";
 import { ReportMenu } from "@/components/ticket/ReportMenu";
 import { SlaCard } from "@/components/ticket/SlaCard";
 import { TicketInfo } from "@/components/ticket/TicketInfo";
-import { TimesDialog } from "@/components/ticket/TimesDialog";
+import { TicketLink } from "@/components/ticket/TicketLink";
+import { hasRealTimes, TimesDialog } from "@/components/ticket/TimesDialog";
+import { TransitionDialog } from "@/components/ticket/TransitionDialog";
 import { UNPRODUCTIVE_FROM, UnproductiveDialog } from "@/components/ticket/UnproductiveDialog";
 import { WhatsAppShare } from "@/components/ticket/WhatsAppShare";
 import { WorklogsTab } from "@/components/ticket/WorklogsTab";
-import { Button, Card, SectionTitle } from "@/components/ui";
-import { api } from "@/lib/api";
+import { useToast } from "@/components/Toaster";
+import { Button, buttonClassName, Card, isTopLayer, Kbd, SectionTitle } from "@/components/ui";
+import { api, errorMessage } from "@/lib/api";
 import { STATUS } from "@/lib/constants";
-import { formatDateTime, formatMinutes } from "@/lib/format";
-import type { TicketDetail, TicketEvent } from "@/lib/types";
-import { GENERAL_FORM_ID, GeneralTab } from "./GeneralTab";
+import { formatDateTime, formatMinutes, formatShort } from "@/lib/format";
+import type { Attachment, Comment, Quote, ReportLink, TicketDetail, TicketEvent, TicketStatus } from "@/lib/types";
+import { copyText, whatsappUrl } from "@/lib/whatsapp";
+import { GENERAL_FORM_ID, GeneralTab, type SaveState } from "./GeneralTab";
+import { StatusChip, StatusMenu } from "./StatusMenu";
+import { useUnsavedGuard } from "./useUnsavedGuard";
 
 type TabKey = "geral" | "prazos" | "localizacao" | "vinculos" | "orcamentos" | "pecas" | "formularios" | "anexos" | "acompanhamentos" | "historico";
 
@@ -46,19 +53,15 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "historico", label: "Histórico" },
 ];
 
-function km(meters: number) {
-  return meters < 1000 ? `${Math.round(meters)} m` : `${(meters / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} km`;
-}
-
-function distance(a: [number, number], b: [number, number]) {
-  const rad = (d: number) => (d * Math.PI) / 180;
-  const dLat = rad(b[0] - a[0]);
-  const dLng = rad(b[1] - a[1]);
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a[0])) * Math.cos(rad(b[0])) * Math.sin(dLng / 2) ** 2;
-  return 2 * 6371000 * Math.asin(Math.sqrt(h));
-}
+/** Abas em que se muda algo ali mesmo (salva na hora); Localização, Vínculos e Histórico só mostram. */
+const INLINE_TABS: TabKey[] = ["prazos", "orcamentos", "pecas", "formularios", "anexos", "acompanhamentos"];
 
 const GPS_LABEL: Record<string, string> = { en_route: "Saída para o local", in_progress: "Início do atendimento", resolved: "Conclusão" };
+
+const eventsQuery = (ticketId: string) => ({
+  queryKey: ["ticket", ticketId, "events"],
+  queryFn: () => api.get<TicketEvent[]>(`/tickets/${ticketId}/events`),
+});
 
 /** Loja no mapa e os pontos de GPS registrados pelo técnico (saída, início e conclusão). */
 function LocationTab({ ticket }: { ticket: TicketDetail }) {

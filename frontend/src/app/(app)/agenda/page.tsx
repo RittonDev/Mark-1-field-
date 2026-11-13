@@ -249,7 +249,7 @@ function AgendaView() {
               onChange={(e) => setTechSearch(e.target.value)}
               placeholder="Buscar técnico"
               aria-label="Buscar técnico"
-              className="mb-2 h-8 text-xs"
+              className="mb-2 h-8! text-xs"
             />
             <ul className="max-h-64 space-y-0.5 overflow-y-auto">
               {visibleTechs.map((t) => {
@@ -456,9 +456,7 @@ function AgendaView() {
                 icon={<CalendarDays />}
                 title="Nenhuma visita neste dia"
                 description={
-                  showIdle || !techList.length
-                    ? "Os filtros não deixaram nenhum técnico com visita."
-                    : "Mostre os técnicos sem visita para achar quem está livre."
+                  !showIdle && techList.length ? "Mostre os técnicos sem visita para achar quem está livre." : undefined
                 }
                 action={
                   !showIdle && techList.length ? (

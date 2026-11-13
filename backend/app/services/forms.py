@@ -10,22 +10,42 @@ Regras:
 """
 
 import datetime as dt
+import math
 import uuid
 from typing import Any
 
 from fastapi import UploadFile
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import FormStatus, TicketEventType, TicketStatus
 from app.db.base import utcnow
 from app.models import FormTemplate, Ticket, TicketAttachment, TicketForm, User
 from app.schemas.forms import FormField, FormTemplateIn, TicketFormAdd, TicketFormAnswers
+from app.services import storage
 from app.services.errors import NotFound, PermissionDenied, WorkflowError
 from app.services.realtime import queue_event
 from app.services.tickets import _touch, add_attachment, can_work, record_event
 
 CLOSED_STATES = (TicketStatus.RESOLVED, TicketStatus.CLOSED, TicketStatus.CANCELLED)
+FINISHED_STATES = (TicketStatus.RESOLVED, TicketStatus.CLOSED)
+# Fotos do iPhone (HEIC/HEIF): a marca do formato vem logo depois de "ftyp".
+_HEIF_BRANDS = (b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis", b"mif1", b"msf1")
+
+
+async def _image_head(upload: UploadFile) -> bytes:
+    """Primeiros bytes do arquivo (o tipo real), sem consumir o upload."""
+    head = await upload.read(16)
+    await upload.seek(0)
+    return head
+
+
+def _is_photo(head: bytes) -> bool:
+    """Foto de verdade pelo conteúdo: JPG, PNG, WebP ou HEIC do iPhone (a foto do técnico não se
+    perde). Arquivo qualquer enviado como "image/*" não passa."""
+    if storage.image_extension(head) is not None:
+        return True
+    return head[4:8] == b"ftyp" and head[8:12] in _HEIF_BRANDS
 
 
 # ------------------------------------------------------------------ modelos
@@ -68,6 +88,60 @@ async def update_template(
     return template
 
 
+async def apply_to_pending(db: AsyncSession, template: FormTemplate) -> int:
+    """Leva o modelo corrigido às OS em que o formulário nem começou: pendente, sem resposta e
+    sem foto, em OS não encerrada. As outras ficam com a versão que o técnico já está usando.
+    Devolve quantas mudaram."""
+    has_photos = exists().where(TicketAttachment.form_id == TicketForm.id)
+    forms = list(
+        await db.scalars(
+            select(TicketForm)
+            .join(Ticket, Ticket.id == TicketForm.ticket_id)
+            .where(
+                TicketForm.template_id == template.id,
+                TicketForm.status == FormStatus.PENDING,
+                Ticket.status.not_in(CLOSED_STATES),
+                ~has_photos,
+            )
+        )
+    )
+    changed = [
+        f
+        for f in forms
+        if not f.answers
+        and (
+            f.template_version != template.version
+            or f.fields != template.fields
+            or f.name != template.name
+        )
+    ]
+    for form in changed:
+        form.fields = template.fields
+        form.name = template.name
+        form.template_version = template.version
+    ticket_ids = list({f.ticket_id for f in changed})
+    if ticket_ids:
+        now = utcnow()
+        required_ids = [f.ticket_id for f in changed if f.required]
+        if template.requires_signature and required_ids:
+            # Modelo que passou a pedir assinatura: a OS (ainda sem assinatura) passa a exigir.
+            await db.execute(
+                update(Ticket)
+                .where(Ticket.id.in_(required_ids), Ticket.signed_at.is_(None))
+                .values(signature_required=True, updated_at=now)
+                .execution_options(synchronize_session=False)
+            )
+        # O app baixa as OS de novo pelo "atualizado em" (sem mexer na versão).
+        await db.execute(
+            update(Ticket)
+            .where(Ticket.id.in_(ticket_ids))
+            .values(updated_at=now)
+            .execution_options(synchronize_session=False)
+        )
+    await db.flush()
+    return len(changed)
+
+
 # ------------------------------------------------------------- formulário na OS
 
 
@@ -100,14 +174,17 @@ async def suggestions(db: AsyncSession, ticket: Ticket) -> list[FormTemplate]:
 async def add_to_ticket(
     db: AsyncSession, ticket: Ticket, data: TicketFormAdd, actor: User
 ) -> TicketForm:
+    """Anexa o formulário. Na OS concluída a central ainda registra o checklist que chegou depois
+    (ex.: pelo WhatsApp), sempre como opcional; OS cancelada não recebe."""
     _require_manager(actor)
-    if ticket.status in CLOSED_STATES:
-        raise WorkflowError("OS concluída ou cancelada não recebe formulário")
+    if ticket.status == TicketStatus.CANCELLED:
+        raise WorkflowError("OS cancelada não recebe formulário")
     template = await get_template(db, data.template_id)
     if not template.is_active:
         raise WorkflowError("Modelo de formulário inativo")
     if any(f.template_id == template.id for f in ticket.forms):
         raise WorkflowError("Este formulário já está na OS")
+    required = data.required and ticket.status not in FINISHED_STATES
     form = TicketForm(
         id=uuid.uuid4(),
         ticket_id=ticket.id,
@@ -115,13 +192,13 @@ async def add_to_ticket(
         template_version=template.version,
         name=template.name,
         fields=template.fields,
-        required=data.required,
+        required=required,
         status=FormStatus.PENDING,
         answers={},
         added_by_id=actor.id,
     )
     db.add(form)
-    if data.required and template.requires_signature:
+    if required and template.requires_signature:
         ticket.signature_required = True
     record_event(
         db,
@@ -129,7 +206,7 @@ async def add_to_ticket(
         actor,
         TicketEventType.FORM_ADDED,
         to_value=template.name[:64],
-        data={"form_id": str(form.id), "required": data.required},
+        data={"form_id": str(form.id), "required": required},
     )
     await _touch(db, ticket, utcnow())  # o app recebe a mudança no próximo sync
     queue_event(db, "updated", ticket, actor, {"fields": ["forms"]})
@@ -137,11 +214,56 @@ async def add_to_ticket(
     return form
 
 
+async def _template_of(db: AsyncSession, form: TicketForm) -> FormTemplate | None:
+    return await db.get(FormTemplate, form.template_id) if form.template_id else None
+
+
+async def _release_signature(
+    db: AsyncSession, ticket: Ticket, form: TicketForm, template: FormTemplate | None
+) -> None:
+    """O formulário que pedia a assinatura deixou de ser obrigatório (ou saiu da OS): sem outro
+    obrigatório que peça, a OS deixa de exigir a assinatura (o técnico consegue concluir)."""
+    if ticket.signed_at is not None or not ticket.signature_required:
+        return
+    if template is None or not template.requires_signature:
+        return  # a exigência não veio deste formulário
+    others = [f.template_id for f in ticket.forms if f.required and f.id != form.id]
+    others = [t for t in others if t is not None]
+    if others and await db.scalar(
+        select(func.count())
+        .select_from(FormTemplate)
+        .where(FormTemplate.id.in_(others), FormTemplate.requires_signature.is_(True))
+    ):
+        return
+    ticket.signature_required = False
+
+
 async def set_required(
     db: AsyncSession, ticket: Ticket, form: TicketForm, required: bool, actor: User
 ) -> TicketForm:
+    """Torna obrigatório ou opcional, com a assinatura acompanhando o modelo e o registro no
+    histórico (tornar opcional libera o fechamento: precisa ficar rastreado)."""
     _require_manager(actor)
+    if form.required == required:
+        return form
     form.required = required
+    template = await _template_of(db, form)
+    before = ticket.signature_required
+    if required and template is not None and template.requires_signature:
+        ticket.signature_required = True
+    elif not required:
+        await _release_signature(db, ticket, form, template)
+    data: dict[str, Any] = {"form_id": str(form.id), "form": form.name, "required": required}
+    if ticket.signature_required != before:
+        data["changes"] = {"signature_required": [before, ticket.signature_required]}
+    record_event(
+        db,
+        ticket,
+        actor,
+        TicketEventType.UPDATED,
+        note=f'Formulário "{form.name}" agora é {"obrigatório" if required else "opcional"}',
+        data=data,
+    )
     await _touch(db, ticket, utcnow())  # o app recebe a mudança no próximo sync
     queue_event(db, "updated", ticket, actor, {"fields": ["forms"]})
     await db.flush()
@@ -152,6 +274,8 @@ async def remove_from_ticket(
     db: AsyncSession, ticket: Ticket, form: TicketForm, actor: User
 ) -> None:
     _require_manager(actor)
+    if form.required:
+        await _release_signature(db, ticket, form, await _template_of(db, form))
     record_event(
         db,
         ticket,
@@ -180,6 +304,26 @@ def _ensure_can_fill(ticket: Ticket, actor: User) -> None:
         raise WorkflowError("A assinatura já foi colhida: o formulário não pode mais ser alterado")
 
 
+def _number(label: str, value: Any) -> float:
+    """Número digitado do jeito brasileiro ("1.234,56", "2,5") ou com ponto ("2.5"). "NaN" e
+    "1e999" não valem: o banco (JSON) não guarda e o relatório mostraria lixo."""
+    if isinstance(value, bool):
+        raise WorkflowError(f'"{label}": informe um número')
+    if isinstance(value, int | float):
+        number = float(value)
+    else:
+        text = str(value).strip().replace(" ", "")
+        if "," in text:
+            text = text.replace(".", "").replace(",", ".")
+        try:
+            number = float(text)
+        except ValueError as exc:
+            raise WorkflowError(f'"{label}": informe um número') from exc
+    if not math.isfinite(number):
+        raise WorkflowError(f'"{label}": informe um número')
+    return number
+
+
 def _clean_value(field: FormField, value: Any) -> Any:
     """Valida o tipo da resposta; vazio volta None (remove a resposta)."""
     if value is None or value == "" or value == []:
@@ -193,10 +337,7 @@ def _clean_value(field: FormField, value: Any) -> Any:
             raise WorkflowError(f'"{label}": texto muito longo')
         return text or None
     if field.type == "number":
-        try:
-            return float(str(value).replace(",", "."))
-        except ValueError as exc:
-            raise WorkflowError(f'"{label}": informe um número') from exc
+        return _number(label, value)
     if field.type in ("yes_no", "confirm"):
         if not isinstance(value, bool):
             raise WorkflowError(f'"{label}": resposta deve ser sim ou não')
@@ -263,6 +404,15 @@ class FormIncomplete(WorkflowError):
     """Faltam obrigatórios ou fotos para concluir (as respostas enviadas já foram aceitas)."""
 
 
+async def _still_complete(db: AsyncSession, form: TicketForm, actor: User) -> bool:
+    """Formulário concluído que a gestão corrigiu e em que nada obrigatório ficou faltando."""
+    return (
+        form.status == FormStatus.COMPLETED
+        and actor.can_manage_tickets
+        and not await missing_items(db, form)
+    )
+
+
 async def save_partial(
     db: AsyncSession, ticket: Ticket, form: TicketForm, values: dict[str, Any], actor: User
 ) -> TicketForm:
@@ -281,11 +431,14 @@ async def save_partial(
     changed = answers != (form.answers or {})
     form.answers = answers
     if changed or form.status != FormStatus.COMPLETED:
-        # Mudou depois de concluído: precisa concluir de novo.
-        has_photos = bool(await photo_counts(db, form.id))
-        form.status = FormStatus.IN_PROGRESS if answers or has_photos else FormStatus.PENDING
-        form.completed_at = None
-        form.completed_by_id = None
+        # Correção da central num formulário concluído, sem faltar nada: continua concluído
+        # (o relatório mantém a data da conclusão). Mudança do técnico: precisa concluir de novo.
+        keep = await _still_complete(db, form, actor)
+        if not keep:
+            has_photos = bool(await photo_counts(db, form.id))
+            form.status = FormStatus.IN_PROGRESS if answers or has_photos else FormStatus.PENDING
+            form.completed_at = None
+            form.completed_by_id = None
     await _touch(db, ticket, utcnow())  # o app recebe a mudança no próximo sync
     queue_event(db, "updated", ticket, actor, {"fields": ["forms"]})
     await db.flush()
@@ -331,8 +484,8 @@ async def add_photo(
         raise WorkflowError("Campo de foto não encontrado no formulário")
     if (await photo_counts(db, form.id)).get(field_id, 0) >= field.max_photos:
         raise WorkflowError(f'"{field.label}": no máximo {field.max_photos} foto(s)')
-    if not (upload.content_type or "").startswith("image/"):
-        raise WorkflowError("Envie uma imagem")
+    if not _is_photo(await _image_head(upload)):
+        raise WorkflowError("Envie uma foto (JPG, PNG, WebP ou HEIC)")
     attachment = await add_attachment(db, ticket, upload, "photo", actor)
     attachment.form_id = form.id
     attachment.field_id = field_id
@@ -355,7 +508,12 @@ async def remove_photo(
         raise PermissionDenied("Você só remove as fotos que enviou")
     form = await db.get(TicketForm, attachment.form_id)
     await db.delete(attachment)
-    if form is not None and form.status == FormStatus.COMPLETED:
+    await db.flush()  # a contagem de fotos já sem a removida
+    if (
+        form is not None
+        and form.status == FormStatus.COMPLETED
+        and not await _still_complete(db, form, actor)
+    ):
         form.status = FormStatus.IN_PROGRESS
         form.completed_at = None
     await _touch(db, ticket, utcnow())  # o app recebe a mudança no próximo sync
@@ -392,7 +550,11 @@ async def collect_signature(
     name = " ".join(signer_name.split())
     if len(name) < 3:
         raise WorkflowError("Informe o nome de quem assina")
-    if (upload.content_type or "") not in ("image/png", "image/jpeg", "image/webp"):
+    if (upload.content_type or "") not in (
+        "image/png",
+        "image/jpeg",
+        "image/webp",
+    ) or storage.image_extension(await _image_head(upload)) is None:
         raise WorkflowError("A assinatura deve ser uma imagem PNG ou JPG")
     attachment = await add_attachment(db, ticket, upload, "signature", actor)
     ticket.signer_name = name[:160]

@@ -37,7 +37,7 @@ export function VisitTeamCard({ ticket, userId }: { ticket: LocalTicket; userId:
   ];
   return (
     <Card style={{ gap: 10 }}>
-      <SectionTitle right={<Icon name="users" size={18} color={c.inkSubtle} />}>Equipe da visita</SectionTitle>
+      <SectionTitle right={<Icon name="users" size={18} color={c.inkMuted} />}>Equipe da visita</SectionTitle>
       {people.map((p) => {
         const me = p.id === userId;
         return (
@@ -92,5 +92,5 @@ const makeStyles = (c: Palette) =>
     avatarText: { fontSize: 12, fontWeight: "700", color: c.ink },
     name: { fontSize: 15, fontWeight: "600", color: c.ink },
     me: { fontWeight: "500", color: c.inkMuted },
-    role: { fontSize: 12, color: c.inkSubtle },
+    role: { fontSize: 13, color: c.inkMuted },
   });
