@@ -73,8 +73,11 @@ async def test_settings_and_arrival_due(client: AsyncClient, world: World) -> No
         f"{API}/settings/field", json={**RULES_ON, "require_authorization": False}, headers=sup
     )
     assert saved.status_code == 200 and saved.json()["onsite_warning_minutes"] == 30
+    # O técnico lê as regras (o app usa nos avisos de permanência), mas não altera.
+    tech_rules = await client.get(f"{API}/settings/field", headers=world.tech.headers)
+    assert tech_rules.status_code == 200 and tech_rules.json()["onsite_warning_minutes"] == 30
     assert (
-        await client.get(f"{API}/settings/field", headers=world.tech.headers)
+        await client.put(f"{API}/settings/field", json=RULES_ON, headers=world.tech.headers)
     ).status_code == 403
 
     capital = await _location(client, world, "Loja Paulista", "São Paulo", "SP")

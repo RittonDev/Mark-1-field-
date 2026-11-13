@@ -475,7 +475,7 @@ async function refreshFieldRules() {
     fieldRulesAt = Date.now();
   } catch (error) {
     if (error instanceof ApiError && error.status === 0) throw error;
-    // 403 (a rota é da gestão) ou 404: segue com as regras guardadas/da promessa e tenta mais tarde.
+    // 404 (servidor antigo) ou outro erro: segue com as regras guardadas/da promessa e tenta mais tarde.
     fieldRulesAt = Date.now();
   }
 }

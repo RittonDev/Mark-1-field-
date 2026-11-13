@@ -1,6 +1,7 @@
 import { StyleSheet, View } from "react-native";
 import { Text } from "../Text";
 import Svg, { Path, Rect } from "react-native-svg";
+import { SVG_HIDDEN } from "../Icon";
 import { EXPENSE_KIND, EXPENSE_STATUS, formatBRL, formatQty } from "../../lib/expenses";
 import { formatDateTime } from "../../lib/format";
 import type { Expense } from "../../lib/types";
@@ -9,7 +10,7 @@ import { Badge, Card, SectionTitle } from "../ui";
 
 function LockIcon({ color }: { color: string }) {
   return (
-    <Svg width={12} height={14} viewBox="0 0 12 14" accessibilityElementsHidden>
+    <Svg width={12} height={14} viewBox="0 0 12 14" {...SVG_HIDDEN}>
       <Rect x={1} y={6} width={10} height={7.5} rx={1.6} fill={color} />
       <Path d="M3.5 6V4.2a2.5 2.5 0 0 1 5 0V6" stroke={color} strokeWidth={1.5} fill="none" />
     </Svg>

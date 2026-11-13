@@ -1,4 +1,11 @@
+import { Platform } from "react-native";
 import Svg, { Circle, Path, Rect } from "react-native-svg";
+
+// Ícone é decorativo: o leitor de tela lê o texto ao lado. Na web o react-native-svg repassa as
+// props ao <svg> do DOM, que não conhece as de acessibilidade do Android/iOS: lá vai aria-hidden.
+export const SVG_HIDDEN = Platform.OS === "web"
+  ? ({ "aria-hidden": true } as const)
+  : ({ accessibilityElementsHidden: true, importantForAccessibility: "no-hide-descendants" } as const);
 
 // Ícones de traço simples (24×24, traço 1,8), desenhados para o app.
 export type IconName =
@@ -215,8 +222,7 @@ export function Icon({ name, size = 20, color, strokeWidth = 1.8 }: { name: Icon
       strokeWidth={strokeWidth}
       strokeLinecap="round"
       strokeLinejoin="round"
-      accessibilityElementsHidden
-      importantForAccessibility="no-hide-descendants"
+      {...SVG_HIDDEN}
     >
       <Shape name={name} />
     </Svg>
