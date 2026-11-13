@@ -131,13 +131,17 @@ export function SuggestedTechnicians({
               ) : null}
             </div>
             <div className="flex shrink-0 flex-col items-stretch gap-1 sm:flex-row sm:items-center">
-              {invite && t.phone ? (
+              {invite ? (
                 <a
                   href={whatsappUrl(t.phone, invite(t))}
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex h-7 items-center justify-center gap-1 rounded-lg border border-line bg-surface px-2.5 text-xs font-medium text-ink transition-colors hover:border-emerald-500 hover:text-emerald-700 dark:hover:text-emerald-300"
-                  title={`Convidar ${t.name} pelo WhatsApp: se topar, ponha como responsável`}
+                  title={
+                    t.phone
+                      ? `Convidar ${t.name} pelo WhatsApp: se topar, ponha como responsável`
+                      : `${t.name} está sem telefone no cadastro: o WhatsApp abre para você escolher o contato`
+                  }
                 >
                   <MessageCircle className="size-3.5" />
                   Convidar
