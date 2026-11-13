@@ -41,7 +41,7 @@ export function TicketEditorDialog({ ticketId, onClose }: { ticketId: UUID; onCl
         aria-modal="true"
         aria-label={ticket.data ? `OS ${ticket.data.code}` : "OS"}
         data-drawer
-        className="relative flex h-full w-full animate-drawer flex-col bg-surface shadow-pop outline-none sm:w-[min(100vw,60rem)] sm:border-l sm:border-line"
+        className="relative flex h-full w-full animate-drawer flex-col bg-surface shadow-pop outline-none sm:w-[min(100vw,56rem)] sm:border-l sm:border-line"
       >
         {ticket.data ? (
           <TicketEditor ticket={ticket.data} variant="dialog" onClose={onClose} />
