@@ -1,23 +1,13 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
 import { SquarePen } from "lucide-react";
 import { useState } from "react";
-import { StatusBadge } from "@/components/badges";
-import { Spinner } from "@/components/ui";
-import { api } from "@/lib/api";
-import type { TicketDetail } from "@/lib/types";
-import { EditTicketDialog } from "./EditTicketDialog";
+import { TicketEditorDialog } from "./editor/TicketEditorDialog";
 
-/** Botão "Editar" das listas (coluna fixa à direita): abre a edição da OS ali mesmo, sem sair da tela. */
+/** Botão "Editar" das listas (coluna fixa à direita): abre a OS completa ali mesmo, sem sair da tela. */
 export function QuickEditButton({ ticketId, code, className }: { ticketId: string; code: string; className?: string }) {
   const [open, setOpen] = useState(false);
-  const ticket = useQuery({
-    queryKey: ["ticket", ticketId],
-    queryFn: () => api.get<TicketDetail>(`/tickets/${ticketId}`),
-    enabled: open,
-  });
   return (
     <>
       <button
@@ -35,15 +25,30 @@ export function QuickEditButton({ ticketId, code, className }: { ticketId: strin
         aria-label={`Editar ${code}`}
         title={`Editar ${code}`}
       >
-        {open && ticket.isLoading ? <Spinner className="size-4" /> : <SquarePen className="size-4" />}
+        <SquarePen className="size-4" />
       </button>
-      {open && ticket.data ? (
-        <EditTicketDialog
-          ticket={ticket.data}
-          headerExtra={<StatusBadge status={ticket.data.status} />}
-          onClose={() => setOpen(false)}
-        />
-      ) : null}
+      {open ? <TicketEditorDialog ticketId={ticketId} onClose={() => setOpen(false)} /> : null}
+    </>
+  );
+}
+
+/** Texto clicável (ex.: o nº da OS no cartão do dia) que abre a OS por cima da lista. */
+export function OpenTicketButton({ ticketId, className, children }: { ticketId: string; className?: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setOpen(true);
+        }}
+        className={clsx("text-left underline-offset-2 hover:underline", className)}
+      >
+        {children}
+      </button>
+      {open ? <TicketEditorDialog ticketId={ticketId} onClose={() => setOpen(false)} /> : null}
     </>
   );
 }

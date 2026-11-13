@@ -284,7 +284,7 @@ export function PageHeader({
 
 // Trava a rolagem da página enquanto houver diálogo aberto (contador para diálogos empilhados).
 let scrollLocks = 0;
-function lockScroll() {
+export function lockScroll() {
   scrollLocks += 1;
   if (scrollLocks === 1) document.documentElement.style.overflow = "hidden";
   return () => {
