@@ -123,22 +123,25 @@ TECHNICIAN_TIME = (
 
 
 def can_edit(user: User, ticket: Ticket) -> bool:
-    """Editar os dados da OS (escopo, local, agenda...): só a gestão. O técnico é terceiro e
+    """Editar os dados da OS (cliente, local, escopo, agenda, técnico...): só a gestão, e a
+    qualquer momento, inclusive com a OS concluída, fechada ou cancelada. O técnico é terceiro e
     nunca mexe no horário; ele trabalha na OS (formulários, fotos, assinatura) via `can_work`."""
-    return ticket.status not in FINAL and user.can_manage_tickets
+    return user.can_manage_tickets
 
 
 def can_work(user: User, ticket: Ticket) -> bool:
-    """Trabalhar na OS em campo (formulários, fotos, assinatura): a gestão ou o responsável."""
-    if ticket.status in FINAL:
-        return False
+    """Trabalhar na OS (formulários, fotos, assinatura): a gestão a qualquer momento; o técnico
+    responsável enquanto a OS não foi encerrada."""
     if user.can_manage_tickets:
         return True
+    if ticket.status in FINAL:
+        return False
     return user.role == UserRole.TECHNICIAN and ticket.assignee_id == user.id
 
 
 def can_assign(user: User, ticket: Ticket) -> bool:
-    return user.can_manage_tickets and ticket.status not in FINAL
+    """Trocar o técnico: só a gestão, a qualquer momento (corrigir quem atendeu uma OS fechada)."""
+    return user.can_manage_tickets
 
 
 def can_take(user: User, ticket: Ticket) -> bool:
@@ -634,6 +637,20 @@ async def _set_owner(
     return True
 
 
+def _clean_tags(tags: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Etiquetas da OS (ex.: "Adicional Noturno"): sem repetição nem vazias, até 20."""
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for tag in tags or []:
+        name = " ".join(str(tag.get("name") or "").split())[:60]
+        if not name or name.lower() in seen:
+            continue
+        seen.add(name.lower())
+        color = tag.get("color")
+        out.append({"name": name, "color": color if isinstance(color, str) and color else None})
+    return out[:20]
+
+
 def _clean_text(value: str | None, *, single_line: bool = False) -> str | None:
     """Texto livre opcional: sem espaços nas pontas; vazio vira null."""
     if value is None:
@@ -873,6 +890,10 @@ async def update_ticket(
     for key in ("client_reference", "visit_note"):
         if key in fields:
             fields[key] = _clean_text(fields[key], single_line=key == "client_reference")
+    if "resolution_notes" in fields:
+        fields["resolution_notes"] = (fields["resolution_notes"] or "").strip() or None
+    if "tags" in fields:
+        fields["tags"] = _clean_tags(fields["tags"])
     if "project_id" in fields:
         await _check_project(db, fields["project_id"], actor)
     if "signature_required" in fields:

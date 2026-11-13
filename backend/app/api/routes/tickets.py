@@ -3,14 +3,14 @@ from typing import Annotated
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse, RedirectResponse
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.api.deps import DB, CurrentUser, NoTechnicianUser, StaffUser, TicketManagerUser
 from app.core.config import settings
 from app.core.enums import TicketPriority, TicketStatus, TicketType, UserRole
 from app.core.security import InvalidToken, create_download_token, decode_token
 from app.models import Ticket, TicketAttachment, TicketComment, TicketEvent, TicketWorklog, User
-from app.schemas.common import Page
+from app.schemas.common import Page, TagOut
 from app.schemas.ticket import (
     AttachmentOut,
     AttachmentUpdate,
@@ -134,6 +134,20 @@ async def create_ticket(body: TicketCreate, db: DB, user: NoTechnicianUser) -> T
     ticket = await svc.create_ticket(db, body, user)
     await commit_and_publish(db)
     return await _detail(db, ticket.id, user)
+
+
+@router.get("/ticket-tags", response_model=list[TagOut])
+async def ticket_tags(db: DB, _: TicketManagerUser) -> list[TagOut]:
+    """Etiquetas já usadas nas OS (as mais usadas primeiro), para escolher na edição."""
+    rows = await db.execute(
+        text(
+            "SELECT t->>'name' AS name, max(t->>'color') AS color, count(*) AS uses"
+            " FROM tickets, jsonb_array_elements(tickets.tags) AS t"
+            " WHERE coalesce(t->>'name', '') <> ''"
+            " GROUP BY t->>'name' ORDER BY uses DESC, name LIMIT 200"
+        )
+    )
+    return [TagOut(name=r.name, color=r.color) for r in rows]
 
 
 @router.get("/tickets/{ticket_id}", response_model=TicketDetail)

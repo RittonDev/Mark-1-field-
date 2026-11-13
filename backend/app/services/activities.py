@@ -180,6 +180,7 @@ async def day_activities(
                     e is not None and "latitude" in (e.data or {}) for e in (start_ev, arrive_ev)
                 ),
                 service_type_name=t.service_type.name if t.service_type else None,
+                description=(t.description or "")[:500],
                 estimated_minutes=t.estimated_minutes,
                 actual_minutes=actual_seconds(t.work_seconds, t.work_started_at, now) // 60,
             )

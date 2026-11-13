@@ -329,6 +329,9 @@ class TicketUpdate(BaseModel):
     scheduled_end: datetime | None = None
     # Só a gestão: exigir (ou dispensar) a assinatura do responsável no local.
     signature_required: bool | None = None
+    # Só a gestão: o que foi feito (descrição da conclusão) e as etiquetas, a qualquer momento.
+    resolution_notes: str | None = Field(default=None, max_length=20000)
+    tags: list[TagOut] | None = Field(default=None, max_length=20)
     expected_version: int | None = None
     allow_conflict: bool = False
 

@@ -33,6 +33,8 @@ class Activity(BaseModel):
     service_type_name: str | None
     estimated_minutes: int | None
     actual_minutes: int
+    # Escopo da OS (o cartão do dia mostra a primeira linha, como no Field Control).
+    description: str = ""
 
 
 class DaySummary(BaseModel):

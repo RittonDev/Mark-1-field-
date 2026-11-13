@@ -139,3 +139,55 @@ async def test_times_need_a_started_os(client: AsyncClient, world: World) -> Non
     assert (
         await client.put(url, json={"work_minutes": 5, "reason": "teste"}, headers=an)
     ).status_code == 422
+
+
+async def test_office_edits_everything_on_a_closed_os(client: AsyncClient, world: World) -> None:
+    """Como no Field Control: a central altera tudo a qualquer momento, mesmo com a OS fechada."""
+    an, th, sup = world.analyst.headers, world.tech.headers, world.supervisor.headers
+    t = await create(client, world, title="PDV parado", assignee_id=str(world.tech.user.id))
+    t = await transition(client, th, t, "in_progress")
+    t = await transition(client, th, t, "resolved", resolution_notes="Troquei o cabo")
+    t = await transition(client, sup, t, "closed")
+    detail = (await client.get(f"{API}/tickets/{t['id']}", headers=an)).json()
+    assert detail["status"] == "closed" and detail["can_edit"] and detail["can_assign"]
+
+    # Outro cliente e loja, agenda, conclusão, etiquetas e recado: tudo pela edição.
+    other = (await client.post(f"{API}/customers", json={"name": "Loja Nova SA"}, headers=an)).json()
+    loc = await client.post(
+        f"{API}/customers/{other['id']}/locations", json={"name": "Filial 9"}, headers=an
+    )
+    assert loc.status_code == 201, loc.text
+    body = {
+        "customer_id": other["id"],
+        "location_id": loc.json()["id"],
+        "scheduled_start": "2026-11-10T13:00:00Z",
+        "scheduled_end": "2026-11-10T15:00:00Z",
+        "resolution_notes": "  Troquei o cabo e organizei o rack  ",
+        "tags": [{"name": "Adicional Noturno", "color": "#3f51b5"}, {"name": " adicional noturno "}, {"name": ""}],
+        "visit_note": "Falar com a gerente",
+        "expected_version": detail["version"],
+    }
+    r = await client.patch(f"{API}/tickets/{t['id']}", json=body, headers=an)
+    assert r.status_code == 200, r.text
+    edited = r.json()
+    assert (edited["customer"]["id"], edited["location"]["name"]) == (other["id"], "Filial 9")
+    assert edited["resolution_notes"] == "Troquei o cabo e organizei o rack"
+    assert edited["tags"] == [{"name": "Adicional Noturno", "color": "#3f51b5"}]
+    assert edited["scheduled_start"].startswith("2026-11-10T13:00")
+    assert edited["status"] == "closed"  # editar não muda o status
+
+    # Corrigir quem atendeu, mesmo fechada.
+    r = await client.post(
+        f"{API}/tickets/{t['id']}/assign",
+        json={"assignee_id": str(world.tech_other.user.id), "expected_version": edited["version"]},
+        headers=an,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["assignee"]["id"] == str(world.tech_other.user.id)
+
+    # As etiquetas usadas aparecem para escolher; o técnico continua sem editar.
+    tags = (await client.get(f"{API}/ticket-tags", headers=an)).json()
+    assert {"name": "Adicional Noturno", "color": "#3f51b5"} in tags
+    assert (await client.get(f"{API}/ticket-tags", headers=th)).status_code == 403
+    r = await client.patch(f"{API}/tickets/{t['id']}", json={"title": "Outro"}, headers=th)
+    assert r.status_code in (403, 404)
