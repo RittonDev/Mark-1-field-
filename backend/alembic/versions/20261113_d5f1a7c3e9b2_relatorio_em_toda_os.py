@@ -15,7 +15,6 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 
 import sqlalchemy as sa
-
 from alembic import op
 
 revision: str = "d5f1a7c3e9b2"
@@ -28,7 +27,10 @@ BATCH = 1000
 
 def upgrade() -> None:
     conn = op.get_bind()
-    ids = [row[0] for row in conn.execute(sa.text("SELECT id FROM tickets WHERE report_link_id IS NULL"))]
+    ids = [
+        row[0]
+        for row in conn.execute(sa.text("SELECT id FROM tickets WHERE report_link_id IS NULL"))
+    ]
     now = datetime.now(UTC)
     update = sa.text(
         "UPDATE tickets SET report_link_id = :link, report_link_created_at = :now WHERE id = :id"

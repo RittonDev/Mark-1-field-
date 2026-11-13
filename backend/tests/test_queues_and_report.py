@@ -300,9 +300,10 @@ async def test_client_report_link(client: AsyncClient, world: World) -> None:
     )
     assert r.status_code == 200, r.text
     detail = (await client.get(f"{API}/tickets/{tid}", headers=an)).json()
-    assert detail["report_link"] is None  # ainda em atendimento
+    # Toda OS tem relatório desde a abertura (a gestão já vê o link; o técnico, só ao concluir).
+    opening_token = detail["report_link"]["token"]
 
-    # Concluída: o link nasce sozinho; a gestão e o técnico responsável (envia pelo app) recebem.
+    # Concluída: o mesmo link passa a mostrar o resultado; o técnico responsável também recebe.
     msgs = (await client.get(f"{API}/tickets/{tid}/messages", headers=an)).json()
     closing = next(m["text"] for m in msgs if m["key"] == "fechamento")
     assert "Relatório: (disponível quando a OS for concluída)" in closing
@@ -310,6 +311,7 @@ async def test_client_report_link(client: AsyncClient, world: World) -> None:
     detail = (await client.get(f"{API}/tickets/{tid}", headers=an)).json()
     link = detail["report_link"]
     assert link["path"] == f"/relatorio/{link['token']}"
+    assert link["token"] == opening_token
     assert link["url"] == f"{settings.WEB_URL}{link['path']}" and link["views"] == 0
     tech_view = (await client.get(f"{API}/tickets/{tid}", headers=th)).json()["report_link"]
     assert tech_view["token"] == link["token"]
