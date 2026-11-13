@@ -19,11 +19,12 @@ export function ArrivalChip({ ticket, compact = false }: { ticket: Clockable; co
   if (!ticket.arrival_due_at && !ticket.arrived_at) return null;
   if (ticket.arrived_at) {
     const late = ticket.arrival_status === "late";
+    // Cor só no atraso: chegar no prazo é o normal e fica neutro.
     return (
       <span
         className={clsx(
           "inline-flex items-center gap-1 text-xs whitespace-nowrap",
-          late ? "text-red-600 dark:text-red-400" : "text-emerald-700 dark:text-emerald-400",
+          late ? "font-medium text-red-600 dark:text-red-400" : "text-ink-muted",
         )}
         title={ticket.arrival_due_at ? `Prazo de chegada: ${formatTime(ticket.arrival_due_at)}` : undefined}
       >
@@ -85,7 +86,7 @@ export function OnsiteBar({ ticket, className }: { ticket: Clockable; className?
       <div className="h-1.5 overflow-hidden rounded-full bg-surface-3">
         <div
           className={clsx(
-            "h-full rounded-full transition-[width] duration-700",
+            "h-full rounded-full transition-[width] duration-300 motion-reduce:transition-none",
             over ? "bg-red-500" : warning ? "bg-amber-500" : "bg-brand",
           )}
           style={{ width: `${Math.max(4, ratio * 100)}%` }}
@@ -95,12 +96,20 @@ export function OnsiteBar({ ticket, className }: { ticket: Clockable; className?
   );
 }
 
-/** Reincidência: outras OS na mesma loja nos últimos 30 dias. */
+/**
+ * Reincidência: outras OS na mesma loja nos últimos 30 dias. Uma é comum (fica neutra); duas ou
+ * mais indicam problema que volta, e aí o selo fica em âmbar.
+ */
 export function RecurrenceChip({ count }: { count?: number }) {
   if (!count) return null;
   return (
     <span
-      className="inline-flex items-center gap-1 rounded-md bg-violet-50 px-1.5 py-0.5 text-[11px] font-medium whitespace-nowrap text-violet-700 ring-1 ring-violet-200 ring-inset dark:bg-violet-500/10 dark:text-violet-300 dark:ring-violet-500/25"
+      className={clsx(
+        "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium whitespace-nowrap ring-1 ring-inset",
+        count >= 2
+          ? "bg-amber-50 text-amber-800 ring-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-500/25"
+          : "bg-surface-2 text-ink-muted ring-line",
+      )}
       title="Outras OS nesta loja nos últimos 30 dias"
     >
       <RotateCcw className="size-3" />

@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 function reducedMotion(): boolean {
   return typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -9,11 +9,15 @@ function reducedMotion(): boolean {
 
 const defaultFormat = (n: number) => Math.round(n).toLocaleString("pt-BR");
 
-/** Número que "conta" até o valor (indicadores). Atualiza o texto direto no DOM, sem re-render. */
+/**
+ * Indicador que muda: ao abrir a tela mostra o valor direto (sem contar do zero a cada visita); quando
+ * o número muda com a tela aberta, anda até o novo valor em 0,3 s, para o olho notar a mudança.
+ * Atualiza o texto direto no DOM, sem re-render.
+ */
 export function CountUp({
   value,
   format,
-  duration = 500,
+  duration = 300,
   className,
 }: {
   value: number;
@@ -22,7 +26,9 @@ export function CountUp({
   className?: string;
 }) {
   const ref = useRef<HTMLSpanElement>(null);
-  const shown = useRef(0);
+  // O texto do React fica com o valor da abertura; dali em diante quem escreve é o efeito.
+  const [initial] = useState(value);
+  const shown = useRef(value);
   const fmt = useRef(format ?? defaultFormat);
   useEffect(() => {
     fmt.current = format ?? defaultFormat;
@@ -54,7 +60,7 @@ export function CountUp({
 
   return (
     <span ref={ref} className={clsx("tabular-nums", className)}>
-      {(format ?? defaultFormat)(0)}
+      {(format ?? defaultFormat)(initial)}
     </span>
   );
 }
@@ -69,6 +75,7 @@ export interface TabItem<K extends string> {
 /**
  * Abas com indicador que desliza até a aba ativa.
  * "underline": linha da marca embaixo (vistas de uma página). "segmented": pílula sobre trilho cinza.
+ * Teclado no padrão de abas: só a ativa entra no Tab; setas, Home e End trocam de aba.
  */
 export function Tabs<K extends string>({
   items,
@@ -77,6 +84,7 @@ export function Tabs<K extends string>({
   variant = "underline",
   className,
   ariaLabel,
+  idPrefix,
 }: {
   items: TabItem<K>[];
   value: K;
@@ -84,6 +92,8 @@ export function Tabs<K extends string>({
   variant?: "underline" | "segmented";
   className?: string;
   ariaLabel?: string;
+  /** Liga cada aba ao seu painel: a aba recebe id "<prefixo>-tab-<chave>" e aponta para "<prefixo>-panel-<chave>". */
+  idPrefix?: string;
 }) {
   const list = useRef<HTMLDivElement>(null);
   const indicator = useRef<HTMLSpanElement>(null);
@@ -115,17 +125,45 @@ export function Tabs<K extends string>({
     } else {
       measure();
     }
+    // Aba ativa fora da área visível (celular, muitas abas): rola só a fileira de abas, nunca a página.
+    const active = root.querySelector<HTMLElement>(`[data-tab="${CSS.escape(value)}"]`);
+    if (active && root.scrollWidth > root.clientWidth) {
+      if (active.offsetLeft < root.scrollLeft) root.scrollLeft = Math.max(0, active.offsetLeft - 8);
+      else if (active.offsetLeft + active.offsetWidth > root.scrollLeft + root.clientWidth) {
+        root.scrollLeft = active.offsetLeft + active.offsetWidth - root.clientWidth + 8;
+      }
+    }
+    // A lista e cada aba: o contador que chega depois alarga a aba sem mudar o tamanho da lista.
     const observer = new ResizeObserver(measure);
     observer.observe(root);
+    root.querySelectorAll<HTMLElement>("[data-tab]").forEach((el) => observer.observe(el));
     return () => observer.disconnect();
   }, [value, keys, variant]);
 
+  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (items.length === 0) return;
+    const index = items.findIndex((i) => i.key === value);
+    let next: number;
+    if (e.key === "ArrowRight") next = (index + 1) % items.length;
+    else if (e.key === "ArrowLeft") next = index <= 0 ? items.length - 1 : index - 1;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = items.length - 1;
+    else return;
+    e.preventDefault();
+    const key = items[next].key;
+    if (key !== value) onChange(key);
+    list.current?.querySelector<HTMLElement>(`[data-tab="${CSS.escape(key)}"]`)?.focus();
+  };
+
+  // Sem aba ativa na lista, a primeira recebe o Tab.
+  const focusKey = items.some((i) => i.key === value) ? value : items[0]?.key;
   const segmented = variant === "segmented";
   return (
     <div
       ref={list}
       role="tablist"
       aria-label={ariaLabel}
+      onKeyDown={onKeyDown}
       className={clsx(
         "relative flex",
         segmented ? "gap-0.5 rounded-lg bg-surface-3/70 p-0.5" : "gap-1 overflow-x-auto overflow-y-hidden",
@@ -149,7 +187,10 @@ export function Tabs<K extends string>({
             key={item.key}
             type="button"
             role="tab"
+            id={idPrefix ? `${idPrefix}-tab-${item.key}` : undefined}
+            aria-controls={idPrefix ? `${idPrefix}-panel-${item.key}` : undefined}
             aria-selected={active}
+            tabIndex={item.key === focusKey ? 0 : -1}
             data-tab={item.key}
             onClick={() => onChange(item.key)}
             className={clsx(

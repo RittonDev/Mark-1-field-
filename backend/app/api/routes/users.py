@@ -1,11 +1,13 @@
+import logging
 import uuid
 
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import func, or_, select
 
-from app.api.deps import DB, AdminUser, ManagerUser, NoTechnicianUser, TicketManagerUser
+from app.api.deps import DB, ManagerUser, NoTechnicianUser, TicketManagerUser
 from app.core.enums import UserRole
-from app.core.security import hash_password
+from app.core.security import hash_password_async
+from app.db.base import utcnow
 from app.models import Customer, Team, Ticket, User
 from app.schemas.user import (
     AssignableUser,
@@ -18,7 +20,23 @@ from app.schemas.user import (
 )
 from app.services.workflow import OPEN_STATUSES
 
+log = logging.getLogger(__name__)
+
 router = APIRouter(tags=["users"])
+
+# O supervisor cuida da equipe de analistas e dos acessos do portal; administradores e
+# supervisores só o admin cria, promove ou edita. Técnicos ficam em Técnicos (analistas também).
+SUPERVISOR_MANAGES = frozenset({UserRole.ANALYST, UserRole.REQUESTER})
+ONLY_ADMIN = "Só o administrador cria ou altera usuários com este papel"
+# Mudanças que encerram as sessões abertas do usuário (o token antigo deixa de valer).
+REVOKING_FIELDS = frozenset({"password", "email", "role"})
+REQUIRED_FIELDS = ("name", "email", "role", "is_active")
+
+
+def _can_manage(actor: User, role: UserRole) -> bool:
+    return actor.role == UserRole.ADMIN or (
+        actor.role == UserRole.SUPERVISOR and role in SUPERVISOR_MANAGES
+    )
 
 
 async def _email_taken(db: DB, email: str, exclude: uuid.UUID | None = None) -> bool:
@@ -108,7 +126,9 @@ async def assignable_users(
 
 
 @router.post("/users", response_model=UserOut, status_code=status.HTTP_201_CREATED)
-async def create_user(body: UserCreate, db: DB, _: AdminUser) -> User:
+async def create_user(body: UserCreate, db: DB, actor: ManagerUser) -> User:
+    if not _can_manage(actor, body.role):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, ONLY_ADMIN)
     if await _email_taken(db, body.email):
         raise HTTPException(status.HTTP_409_CONFLICT, "E-mail já cadastrado")
     await _check_team(db, body.team_id)
@@ -116,16 +136,19 @@ async def create_user(body: UserCreate, db: DB, _: AdminUser) -> User:
     user = User(
         name=body.name.strip(),
         email=body.email.lower(),
-        password_hash=hash_password(body.password),
+        password_hash=await hash_password_async(body.password),
         role=body.role,
-        phone=body.phone,
-        job_title=body.job_title,
+        phone=(body.phone or "").strip() or None,
+        job_title=(body.job_title or "").strip() or None,
         team_id=body.team_id,
         customer_id=customer_id,
         is_active=True,
+        # Técnico com senha escolhida pela central troca no primeiro acesso ao app.
+        must_change_password=body.role == UserRole.TECHNICIAN,
     )
     db.add(user)
     await db.commit()
+    log.info("Usuários: %s criou %s (%s)", actor.id, user.id, body.role.value)
     return await db.get(User, user.id, populate_existing=True)  # type: ignore[return-value]
 
 
@@ -140,38 +163,57 @@ async def get_user(user_id: uuid.UUID, db: DB, current: NoTechnicianUser) -> Use
 
 
 @router.patch("/users/{user_id}", response_model=UserOut)
-async def update_user(user_id: uuid.UUID, body: UserUpdate, db: DB, admin: AdminUser) -> User:
+async def update_user(user_id: uuid.UUID, body: UserUpdate, db: DB, actor: ManagerUser) -> User:
     user = await db.get(User, user_id)
     if user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Usuário não encontrado")
     fields = body.model_dump(exclude_unset=True)
-    if "email" in fields and fields["email"]:
-        if await _email_taken(db, fields["email"], exclude=user_id):
-            raise HTTPException(status.HTTP_409_CONFLICT, "E-mail já cadastrado")
+    # null num campo obrigatório não apaga nada (o formulário mandou vazio): fica como está.
+    for key in REQUIRED_FIELDS:
+        if key in fields and fields[key] is None:
+            fields.pop(key)
+    if not _can_manage(actor, user.role) or not _can_manage(actor, fields.get("role", user.role)):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, ONLY_ADMIN)
+    if "email" in fields:
         fields["email"] = fields["email"].lower()
+        if fields["email"] == user.email.lower():
+            fields.pop("email")
+        elif await _email_taken(db, fields["email"], exclude=user_id):
+            raise HTTPException(status.HTTP_409_CONFLICT, "E-mail já cadastrado")
+    if fields.get("role") == user.role:
+        fields.pop("role")
     if "team_id" in fields:
         await _check_team(db, fields["team_id"])
     if "customer_id" in fields or "role" in fields:
         fields["customer_id"] = await _check_customer(
-            db, fields.get("role") or user.role, fields.get("customer_id", user.customer_id)
+            db, fields.get("role", user.role), fields.get("customer_id", user.customer_id)
         )
-    if user.id == admin.id and (
-        fields.get("is_active") is False
-        or fields.get("role")
-        not in (
-            None,
-            UserRole.ADMIN,
-        )
+    if user.id == actor.id and (
+        fields.get("is_active") is False or fields.get("role") not in (None, UserRole.ADMIN)
     ):
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT, "Você não pode remover o próprio acesso de admin"
         )
+    for key in ("phone", "job_title"):
+        if key in fields:
+            fields[key] = (fields[key] or "").strip() or None
     password = fields.pop("password", None)
+    changed = sorted([*fields, *(["password"] if password else [])])
     if password:
-        user.password_hash = hash_password(password)
+        user.password_hash = await hash_password_async(password)
+        # Técnico com senha definida pela central troca no próximo acesso ao app.
+        if fields.get("role", user.role) == UserRole.TECHNICIAN:
+            user.must_change_password = True
+    deactivated = fields.get("is_active") is False and user.is_active
     for key, value in fields.items():
         setattr(user, key, value)
+    # Senha, e-mail ou papel trocados, ou acesso desativado: quem estava logado sai na hora
+    # (ex.: a conta vazou e o admin trocou a senha).
+    if deactivated or REVOKING_FIELDS.intersection(changed):
+        user.sessions_revoked_at = utcnow()
     await db.commit()
+    if changed:
+        log.info("Usuários: %s alterou %s (%s)", actor.id, user.id, ", ".join(changed))
     return await db.get(User, user.id, populate_existing=True)  # type: ignore[return-value]
 
 

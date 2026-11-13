@@ -1,7 +1,7 @@
 // Movimento do app: entrada das listas, transições de layout e o "aperto" dos toques.
 // Tudo respeita o "Reduzir movimento" do sistema (useReducedMotion).
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Pressable, View, type PressableProps, type StyleProp, type ViewStyle } from "react-native";
 import Animated, {
   cancelAnimation,
@@ -27,19 +27,25 @@ const MAX_STAGGER = 4;
 /** Deslocamento das entradas: curto (8 pt), só para dar direção. */
 export const ENTER_OFFSET = 8;
 
-/** Entrada em cascata curta (sobe 8 pt e aparece, 30 ms por item, 200 ms) e transição de layout para listas. */
+/**
+ * Entrada em cascata curta (sobe 8 pt e aparece, 30 ms por item, 200 ms) e transição de layout para
+ * listas. O objeto é estável enquanto a preferência de movimento não muda (pode entrar em useCallback).
+ */
 export function useListMotion() {
   const reduced = useReducedMotion();
-  return {
-    reduced,
-    entering: (index: number) =>
-      reduced
-        ? undefined
-        : FadeInDown.delay(Math.min(index, MAX_STAGGER) * STAGGER_MS)
-            .duration(200)
-            .withInitialValues({ opacity: 0, transform: [{ translateY: ENTER_OFFSET }] }),
-    layout: reduced ? undefined : LinearTransition.duration(220),
-  };
+  return useMemo(
+    () => ({
+      reduced,
+      entering: (index: number) =>
+        reduced
+          ? undefined
+          : FadeInDown.delay(Math.min(index, MAX_STAGGER) * STAGGER_MS)
+              .duration(200)
+              .withInitialValues({ opacity: 0, transform: [{ translateY: ENTER_OFFSET }] }),
+      layout: reduced ? undefined : LinearTransition.duration(220),
+    }),
+    [reduced],
+  );
 }
 
 /** Troca suave de conteúdo (ex.: o selo de status quando a OS muda). */

@@ -1,15 +1,16 @@
 """Agenda dos técnicos: calendário e conflito de horário.
 
-Conflito = o mesmo responsável com duas OS ativas cujos horários se sobrepõem. Ao agendar
-pela web (analista/gestor), a API recusa com 409 SCHEDULE_CONFLICT; quem agenda vê as OS
-em choque e pode confirmar mesmo assim (allow_conflict), por exemplo duas visitas curtas
-no mesmo prédio. O calendário marca os conflitos que já existem.
+Conflito = a mesma pessoa (o responsável ou outro técnico da visita) com duas OS ativas cujos
+horários se sobrepõem. Ao agendar pela web (analista/gestor), a API recusa com 409
+SCHEDULE_CONFLICT; quem agenda vê as OS em choque e pode confirmar mesmo assim
+(allow_conflict), por exemplo duas visitas curtas no mesmo prédio. O calendário marca os
+conflitos que já existem.
 """
 
 import uuid
 from datetime import datetime, timedelta
 
-from sqlalchemy import ColumnElement, func, or_, select
+from sqlalchemy import ColumnElement, func, or_, select, union
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import TicketStatus
@@ -61,6 +62,21 @@ def works_on(user_id: uuid.UUID) -> ColumnElement[bool]:
     )
 
 
+def _occupied(
+    start: datetime, end: datetime, exclude_id: uuid.UUID | None
+) -> list[ColumnElement[bool]]:
+    """OS que ainda ocupam a agenda e cujo horário se sobrepõe a [start, end)."""
+    conds = [
+        Ticket.status.in_(OCCUPYING),
+        Ticket.scheduled_start.is_not(None),
+        Ticket.scheduled_start < end,
+        _end_expr() > start,
+    ]
+    if exclude_id is not None:
+        conds.append(Ticket.id != exclude_id)
+    return conds
+
+
 async def find_conflicts(
     db: AsyncSession,
     *,
@@ -69,16 +85,30 @@ async def find_conflicts(
     end: datetime,
     exclude_id: uuid.UUID | None = None,
 ) -> list[Ticket]:
-    stmt = select(Ticket).where(
-        works_on(assignee_id),
-        Ticket.status.in_(OCCUPYING),
-        Ticket.scheduled_start.is_not(None),
-        Ticket.scheduled_start < end,
-        _end_expr() > start,
-    )
-    if exclude_id is not None:
-        stmt = stmt.where(Ticket.id != exclude_id)
+    stmt = select(Ticket).where(works_on(assignee_id), *_occupied(start, end, exclude_id))
     return list(await db.scalars(stmt.order_by(Ticket.scheduled_start)))
+
+
+async def busy_people(
+    db: AsyncSession,
+    people: list[uuid.UUID],
+    *,
+    start: datetime,
+    end: datetime,
+    exclude_id: uuid.UUID | None = None,
+) -> set[uuid.UUID]:
+    """Quem, entre `people`, já tem OS no horário (como responsável ou outro técnico da visita).
+    Uma consulta para todos: a sugestão de técnicos olha a base inteira."""
+    if not people:
+        return set()
+    overlapping = _occupied(start, end, exclude_id)
+    as_assignee = select(Ticket.assignee_id).where(Ticket.assignee_id.in_(people), *overlapping)
+    as_helper = (
+        select(ticket_helpers.c.user_id)
+        .join(Ticket, Ticket.id == ticket_helpers.c.ticket_id)
+        .where(ticket_helpers.c.user_id.in_(people), *overlapping)
+    )
+    return set(await db.scalars(union(as_assignee, as_helper)))
 
 
 def conflict_item(t: Ticket, who: str | None = None) -> ConflictItem:
@@ -93,6 +123,29 @@ def conflict_item(t: Ticket, who: str | None = None) -> ConflictItem:
         start=t.scheduled_start,
         end=visit_end(t.scheduled_start, t.scheduled_end, t.estimated_minutes),
     )
+
+
+async def preview_conflicts(
+    db: AsyncSession,
+    people: list[uuid.UUID],
+    *,
+    start: datetime,
+    end: datetime,
+    exclude_id: uuid.UUID | None = None,
+) -> list[ConflictItem]:
+    """Prévia antes de agendar: o que cada pessoa da visita já tem no horário (com o nome)."""
+    if not people:
+        return []
+    names = {
+        u.id: u.name for u in await db.scalars(select(User).where(User.id.in_(people)))
+    }
+    items: list[ConflictItem] = []
+    for person_id in people:
+        clashes = await find_conflicts(
+            db, assignee_id=person_id, start=start, end=end, exclude_id=exclude_id
+        )
+        items.extend(conflict_item(t, names.get(person_id)) for t in clashes)
+    return items
 
 
 async def check_slot(
@@ -178,19 +231,24 @@ async def calendar(
         stmt = stmt.where(Ticket.status.in_(f.statuses))
     tickets = list(await db.scalars(stmt.order_by(Ticket.scheduled_start)))
 
-    # Conflitos entre as OS do período, por responsável (só as que ainda ocupam a agenda).
+    # Conflitos entre as OS do período, por pessoa: o responsável e os outros técnicos da visita
+    # (só as OS que ainda ocupam a agenda). Ao salvar, a API barra o mesmo choque.
     clashes: dict[uuid.UUID, set[uuid.UUID]] = {t.id: set() for t in tickets}
-    by_assignee: dict[uuid.UUID, list[tuple[datetime, datetime, Ticket]]] = {}
+    by_person: dict[uuid.UUID, list[tuple[datetime, datetime, Ticket]]] = {}
     for t in tickets:
-        if t.assignee_id is None or t.status not in OCCUPYING:
+        if t.status not in OCCUPYING:
             continue
         assert t.scheduled_start is not None
         span = (
             t.scheduled_start,
             visit_end(t.scheduled_start, t.scheduled_end, t.estimated_minutes),
         )
-        by_assignee.setdefault(t.assignee_id, []).append((*span, t))
-    for spans in by_assignee.values():
+        people = {h.id for h in t.helpers}
+        if t.assignee_id is not None:
+            people.add(t.assignee_id)
+        for person_id in people:
+            by_person.setdefault(person_id, []).append((*span, t))
+    for spans in by_person.values():
         for i, (s1, e1, t1) in enumerate(spans):
             for s2, e2, t2 in spans[i + 1 :]:
                 if s2 >= e1:

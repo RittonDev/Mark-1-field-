@@ -7,26 +7,61 @@
 // - Segundo plano: expo-task-manager + Location.startLocationUpdatesAsync (foreground service no
 //   Android, "Sempre" no iOS). Exige build de desenvolvimento/produção; no Expo Go e na web o app
 //   cai para o primeiro plano (watchPositionAsync) e avisa na tela.
-// - Ritmo: ~30 s parado/normal; ~15 s quando há OS minha "Em deslocamento".
+// - Ritmo: ~30 s parado/normal; ~15 s quando há OS minha "Em deslocamento"; 1 por minuto com a
+//   bateria abaixo de 15% e fora da tomada. No Android o serviço de localização só pode ser
+//   reconfigurado com o app na tela: a troca de ritmo pedida em segundo plano espera o app voltar.
+// - Iniciar, encerrar, retomar, sair e trocar o ritmo passam por uma fila única (nunca correm juntos).
+// - Jornada esquecida aberta: lembrete depois de 10 h e encerramento automático depois de 14 h.
 
 import { isRunningInExpoGo } from "expo";
 import * as Battery from "expo-battery";
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
 import { useSyncExternalStore } from "react";
-import { Platform } from "react-native";
+import { AppState, Platform } from "react-native";
 import { locationConsentAt, refreshMe } from "./account";
-import { api, ApiError, errorMessage } from "./api";
-import { countPings, deletePings, getKv, insertPings, listPings, listTickets, setKv, type Ping } from "./db";
-import { currentPosition } from "./device-actions";
+import { api, ApiError, errorMessage, getServerOffsetMs, serverNow } from "./api";
+import {
+  countPings,
+  deletePings,
+  getKv,
+  hasTicketInTransit,
+  insertPingRows,
+  listPings,
+  oldestPingAt,
+  setKv,
+  transaction,
+  WriteCancelled,
+  type Ping,
+} from "./db";
+import { currentPosition, type Position } from "./device-actions";
 import { session } from "./session";
+import { showToast } from "./toast";
 
 export const TRACKING_TASK = "maxxfield-tracking";
 
 const SHIFT_KEY = "tracking_shift";
 const END_PENDING_KEY = "tracking_end_pending";
+const PACE_KEY = "tracking_pace";
 const BATCH = 500;
 const FLUSH_MIN_INTERVAL_MS = 20_000;
+/** Jornada aberta há mais que isto foi esquecida: é encerrada sozinha (nada de coletar a noite toda). */
+const MAX_SHIFT_MS = 14 * 3600_000;
+/** Lembrete local para encerrar a jornada. */
+const REMINDER_AFTER_MS = 10 * 3600_000;
+const REMINDER_ID = "jornada-aberta";
+const REMINDER_CHANNEL = "jornada";
+/** Diferença de relógio que faz o servidor descartar os pontos (ele tolera 2 min). */
+const CLOCK_LIMIT_MS = 90_000;
+
+const CLOCK_NOTICE =
+  "O relógio do celular está diferente do horário oficial. Ative “Data e hora automáticas” para a central ver sua posição.";
+const GPS_FAILED = "Não foi possível ligar o GPS. Ative a localização do celular: o rastreamento volta sozinho com o app aberto.";
+const SERVICES_OFF = "A localização do celular está desligada. Ligue para a central ver sua posição.";
+const noPermissionNotice = () =>
+  Platform.OS === "ios"
+    ? "Sem permissão de localização: libere em Ajustes > Maxx Field > Localização."
+    : "Sem permissão de localização: libere em Configurações > Apps > Maxx Field > Localização.";
 
 export interface Shift {
   id: string;
@@ -36,16 +71,21 @@ export interface Shift {
 
 export type TrackingMode = "off" | "background" | "foreground";
 
+/** Ritmo da coleta: normal, em deslocamento (mais frequente) ou economia de bateria. */
+type Pace = "normal" | "transit" | "saver";
+
 export interface TrackingState {
   shift: Shift | null;
   mode: TrackingMode;
   /** Há OS minha em deslocamento: coleta mais frequente. */
   transit: boolean;
+  /** Bateria abaixo de 15% e fora da tomada: um ponto por minuto, com precisão menor. */
+  batterySaver: boolean;
   lastFixAt: string | null;
   lastSentAt: string | null;
   queued: number;
   error: string | null;
-  /** Aviso fixo sobre o modo (ex.: Expo Go só em primeiro plano). */
+  /** Aviso fixo (permissão, GPS, relógio do celular ou o modo, ex.: só com o app aberto). */
   notice: string | null;
   /** false quando a API ainda não tem os endpoints /tracking (404). */
   serverAvailable: boolean | null;
@@ -55,6 +95,7 @@ let state: TrackingState = {
   shift: null,
   mode: "off",
   transit: false,
+  batterySaver: false,
   lastFixAt: null,
   lastSentAt: null,
   queued: 0,
@@ -91,6 +132,48 @@ export class ConsentRequiredError extends Error {
 
 export const hasConsent = () => Boolean(locationConsentAt(session.get().user));
 
+// ───────────────────────────── avisos do cartão ─────────────────────────────
+
+/** Problemas do momento, do mais grave para o mais leve; sem nenhum, vale o aviso do modo. */
+const problems: { location: string | null; gps: string | null; clock: string | null } = {
+  location: null,
+  gps: null,
+  clock: null,
+};
+/** Aviso fixo do modo de coleta (ex.: só com o app aberto). */
+let modeNotice: string | null = null;
+
+function refreshNotice() {
+  setState({ notice: problems.location ?? problems.gps ?? problems.clock ?? modeNotice });
+}
+
+function setProblem(kind: keyof typeof problems, text: string | null) {
+  problems[kind] = text;
+  refreshNotice();
+}
+
+function clearNotices() {
+  problems.location = null;
+  problems.gps = null;
+  problems.clock = null;
+  modeNotice = null;
+  refreshNotice();
+}
+
+// ───────────────────────────── fila das ações da jornada ─────────────────────────────
+
+let lock: Promise<unknown> = Promise.resolve();
+
+/**
+ * Iniciar, encerrar, retomar, sair e trocar o ritmo correm um de cada vez: intercalados, um podia
+ * religar o GPS depois do encerramento ou apagar a jornada que acabou de ser aberta.
+ */
+function exclusive<T>(fn: () => Promise<T>): Promise<T> {
+  const run = lock.then(fn, fn);
+  lock = run.catch(() => undefined);
+  return run;
+}
+
 // ───────────────────────────── jornada local ─────────────────────────────
 
 async function readShift(): Promise<Shift | null> {
@@ -104,18 +187,24 @@ async function readShift(): Promise<Shift | null> {
 }
 
 async function writeShift(shift: Shift | null) {
-  await setKv(SHIFT_KEY, shift ? JSON.stringify(shift) : null);
+  await setKv(SHIFT_KEY, shift ? JSON.stringify(shift) : null, undefined, { notify: false });
   setState({ shift });
 }
 
 const unwrapShift = (data: unknown): Shift | null =>
   data && typeof data === "object" && "shift" in data ? ((data as { shift: Shift | null }).shift ?? null) : ((data as Shift) ?? null);
 
+/** Aberta há mais de 14 h pelo relógio do servidor (o do celular pode estar errado). */
+const shiftExpired = (shift: Shift) => serverNow() - new Date(shift.started_at).getTime() > MAX_SHIFT_MS;
+
 // ───────────────────────────── coleta ─────────────────────────────
 
 let foregroundSub: Location.LocationSubscription | null = null;
+/** Ritmo configurado agora (null: desconhecido, ex.: app reaberto com a tarefa já rodando). */
+let pace: Pace | null = null;
 
 const backgroundPossible = () => Platform.OS !== "web" && !isRunningInExpoGo();
+const appActive = () => AppState.currentState === "active";
 
 async function canUseBackground(): Promise<boolean> {
   if (!backgroundPossible()) return false;

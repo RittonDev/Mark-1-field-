@@ -1,10 +1,11 @@
-"""Regras de campo da Maxx Field: dois relógios de 4 horas e a autorização do cliente.
+"""Regras de campo da Maxx Field: dois relógios de 4 horas.
 
 - Chegada: nas capitais o técnico chega em até 4 horas da solicitação (no interior, o prazo
-  configurado). Quando a autorização do cliente é exigida, o relógio começa na autorização
-  (antes dela a visita nem pode sair).
-- Permanência: cada chamado inclui até 4 horas de técnico na loja, contadas da chegada
-  (a primeira vez em "Em atendimento").
+  configurado). Visita combinada com o cliente para depois desse prazo (agenda) muda o prazo
+  para o horário combinado, com 30 minutos de tolerância. Nas OS antigas que tiveram a
+  autorização do cliente registrada (função retirada), o relógio começa na autorização.
+- Permanência: cada chamado inclui até 4 horas de técnico na loja, somando as visitas (o tempo
+  em "Em atendimento"). A cada entrada o limite é o que sobrou dessas horas.
 """
 
 import unicodedata
@@ -20,6 +21,9 @@ from app.schemas.field import FieldRules
 
 RULES_KEY = "field.rules"
 AT_RISK = timedelta(minutes=60)
+# Visita agendada para depois do prazo de chegada: o prazo passa a ser o horário combinado mais
+# esta tolerância (trânsito, estacionamento, portaria).
+SCHEDULE_TOLERANCE = timedelta(minutes=30)
 S = TicketStatus
 FINISHED = (S.RESOLVED, S.CLOSED, S.CANCELLED)
 
@@ -116,16 +120,39 @@ def clock_start(ticket: Any) -> datetime | None:
     return ticket.created_at
 
 
+def arrival_due(
+    start: datetime | None, hours: int | None, scheduled_start: datetime | None
+) -> datetime | None:
+    """Prazo de chegada: início do relógio + horas da cidade; com a visita combinada para depois
+    disso, o horário combinado + tolerância (sem "Chegada atrasada" falsa em toda preventiva)."""
+    if start is None or not hours:
+        return None
+    due = start + timedelta(hours=hours)
+    if scheduled_start is not None:
+        due = max(due, scheduled_start + SCHEDULE_TOLERANCE)
+    return due
+
+
 async def recompute_arrival_due(db: AsyncSession, ticket: Ticket, r: FieldRules) -> None:
-    """Prazo de chegada a partir do início do relógio e do local (capital ou interior)."""
+    """Prazo de chegada a partir do início do relógio, do local (capital ou interior) e da
+    agenda. Depois da chegada o prazo não muda mais."""
     if ticket.arrived_at is not None:
         return
-    start = clock_start(ticket)
     location = await db.get(Location, ticket.location_id) if ticket.location_id else None
     hours = arrival_hours(
         r, location.city if location else None, location.state if location else None
     )
-    ticket.arrival_due_at = start + timedelta(hours=hours) if start and hours else None
+    ticket.arrival_due_at = arrival_due(clock_start(ticket), hours, ticket.scheduled_start)
+
+
+def start_onsite_clock(
+    ticket: Ticket, r: FieldRules, start: datetime, *, used_s: int = 0
+) -> None:
+    """Limite de tempo na loja para o trecho que começa em `start`: o que sobra das horas do
+    chamado depois dos `used_s` segundos já usados em visitas anteriores."""
+    left = max(0, r.onsite_hours * 3600 - used_s)
+    ticket.onsite_due_at = start + timedelta(seconds=left)
+    ticket.onsite_warning_at = ticket.onsite_due_at - timedelta(minutes=r.onsite_warning_minutes)
 
 
 def on_arrival(ticket: Ticket, r: FieldRules, now: datetime) -> None:
@@ -133,8 +160,13 @@ def on_arrival(ticket: Ticket, r: FieldRules, now: datetime) -> None:
     if ticket.arrived_at is not None:
         return
     ticket.arrived_at = now
-    ticket.onsite_due_at = now + timedelta(hours=r.onsite_hours)
-    ticket.onsite_warning_at = ticket.onsite_due_at - timedelta(minutes=r.onsite_warning_minutes)
+    start_onsite_clock(ticket, r, now)
+
+
+def on_reentry(ticket: Ticket, r: FieldRules, now: datetime) -> None:
+    """Volta para "Em atendimento" (nova visita ou retomada depois de uma pausa): o limite é o
+    que sobrou das horas do chamado, não o relógio corrido desde a primeira chegada."""
+    start_onsite_clock(ticket, r, now, used_s=ticket.work_seconds or 0)
 
 
 # ------------------------------------------------------------------ situação (para listas e filas)

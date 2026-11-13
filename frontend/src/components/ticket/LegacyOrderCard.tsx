@@ -1,9 +1,11 @@
 "use client";
 
-import { ExternalLink, FileText, History } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { Archive, ExternalLink, FileText } from "lucide-react";
 import { Card, CardHeader, SectionTitle } from "@/components/ui";
+import { api } from "@/lib/api";
 import { formatDateTime, formatMoney } from "@/lib/format";
-import type { TicketDetail } from "@/lib/types";
+import type { Attachment, TicketDetail } from "@/lib/types";
 
 const DEADLINE: Record<string, string> = {
   completedOnSchedule: "cumprido no prazo",
@@ -12,26 +14,51 @@ const DEADLINE: Record<string, string> = {
   onSchedule: "no prazo",
 };
 
+/** Situação da ordem no Field Control (como veio na migração). */
+const FC_STATUS: Record<string, string> = {
+  pending: "pendente",
+  in_progress: "em andamento",
+  reported: "reportada",
+  done: "concluída",
+  canceled: "cancelada",
+};
+
 const isImage = (type: string | null, url: string) => (type ?? "").startsWith("image/") || /\.(jpe?g|png|webp|gif)(\?|$)/i.test(url);
 
 /** O que veio do Field Control na migração: valores, itens, a solicitação original do cliente e os arquivos. */
 export function LegacyOrderCard({ ticket }: { ticket: TicketDetail }) {
   const legacy = ticket.legacy;
+  // Os mesmos anexos da aba Anexos (a consulta é compartilhada): arquivo que já está lá não se repete aqui.
+  const attachments = useQuery({
+    queryKey: ["ticket", ticket.id, "attachments"],
+    queryFn: () => api.get<Attachment[]>(`/tickets/${ticket.id}/attachments`),
+    enabled: Boolean(legacy?.files?.length),
+  });
   if (!legacy) return null;
   const values = legacy.values;
   const items = legacy.items ?? [];
-  const files = legacy.files ?? [];
+  const inAttachments = new Set((attachments.data ?? []).map((a) => a.download_url).filter(Boolean));
+  const allFiles = legacy.files ?? [];
+  const files = allFiles.filter((f) => !inAttachments.has(f.url));
+  const repeated = allFiles.length - files.length;
   const hasValues = values && (values.total || values.products || values.services || values.expenses);
+  const fcStatus = legacy.fc_status ? (FC_STATUS[legacy.fc_status] ?? legacy.fc_status) : null;
   return (
     <Card className="overflow-hidden">
       <CardHeader
         title={
           <span className="inline-flex items-center gap-2">
-            <History className="size-4 text-ink-subtle" />
-            Histórico do Field Control
+            <Archive className="size-4 text-ink-subtle" />
+            Dados do Field Control
           </span>
         }
-        description={`OS migrada${legacy.identifier ? ` · nº ${legacy.identifier} no Field Control` : ""}`}
+        description={[
+          "OS migrada",
+          legacy.identifier ? `nº ${legacy.identifier} no Field Control` : null,
+          fcStatus ? `situação lá: ${fcStatus}` : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")}
       />
       <div className="flex flex-col gap-4 p-5">
         {legacy.migration_note ? (
@@ -103,6 +130,12 @@ export function LegacyOrderCard({ ticket }: { ticket: TicketDetail }) {
           <p className="text-xs text-ink-muted">
             Prazo no Field Control: resposta {DEADLINE[legacy.deadline.response_status ?? ""] ?? "—"} · solução{" "}
             {DEADLINE[legacy.deadline.solution_status ?? ""] ?? "—"}
+          </p>
+        ) : null}
+
+        {repeated > 0 ? (
+          <p className="text-xs text-ink-muted">
+            {repeated === 1 ? "1 arquivo do Field Control está na aba Anexos." : `${repeated} arquivos do Field Control estão na aba Anexos.`}
           </p>
         ) : null}
 

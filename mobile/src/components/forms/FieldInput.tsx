@@ -1,11 +1,12 @@
+import { LinearGradient } from "expo-linear-gradient";
 import { Image, Pressable, StyleSheet, View } from "react-native";
-import { Text } from "../Text";
-import { Icon } from "../Icon";
 import { absoluteApiUrl } from "../../lib/api";
 import type { PendingPhoto } from "../../lib/db";
 import { photoNeed } from "../../lib/forms";
 import type { Attachment, FormAnswer, FormField } from "../../lib/types";
-import { tint, useStyles, useTheme, type Palette } from "../../theme/theme";
+import { BRAND, useStyles, useTheme, type Palette } from "../../theme/theme";
+import { Icon } from "../Icon";
+import { Text } from "../Text";
 import { Badge, Button, Input } from "../ui";
 import { DateField } from "./DateField";
 
@@ -14,9 +15,23 @@ export interface FieldPhotos {
   pending: PendingPhoto[];
 }
 
+/** Título de seção do formulário: rótulo forte com a barrinha da marca à esquerda. */
+export function SectionLabel({ children }: { children: string }) {
+  const styles = useStyles(makeStyles);
+  return (
+    <View style={styles.sectionHead}>
+      <LinearGradient colors={[BRAND.blue, BRAND.cyan]} style={styles.sectionBar} />
+      <Text style={styles.sectionTitle} accessibilityRole="header">
+        {children}
+      </Text>
+    </View>
+  );
+}
+
 /**
  * Um campo do formulário da OS, pelo tipo (section, text, yes_no, photo…).
  * `prominent`: modo uma pergunta por tela — pergunta grande e opções em linhas largas, fáceis de tocar.
+ * `onAnswered`: Sim/Não ou escolha única acabou de receber um valor (a tela avança sozinha).
  */
 export function FieldInput({
   field,
@@ -27,10 +42,14 @@ export function FieldInput({
   onAddPhoto,
   onRemoveServerPhoto,
   onRemovePendingPhoto,
+  onOpenPhoto,
+  userId,
   photoBusy,
   prominent = false,
   autoFocus = false,
+  error,
   onSubmit,
+  onAnswered,
 }: {
   field: FormField;
   value: FormAnswer | null | undefined;
@@ -40,11 +59,18 @@ export function FieldInput({
   onAddPhoto?: (source: "camera" | "library") => void;
   onRemoveServerPhoto?: (attachment: Attachment) => void;
   onRemovePendingPhoto?: (photo: PendingPhoto) => void;
+  /** Toque numa miniatura: posição na lista (enviadas primeiro, depois as da fila). */
+  onOpenPhoto?: (index: number) => void;
+  /** Quem está preenchendo: só remove as fotos que ele mesmo enviou (regra do servidor). */
+  userId?: string;
   photoBusy?: boolean;
   prominent?: boolean;
   autoFocus?: boolean;
+  /** Pendência mostrada sob a pergunta (ex.: "Obrigatória"). */
+  error?: string | null;
   /** Tecla "próximo" do teclado nos campos de uma linha. */
   onSubmit?: () => void;
+  onAnswered?: (value: FormAnswer) => void;
 }) {
   const c = useTheme();
   const styles = useStyles(makeStyles);
@@ -52,7 +78,7 @@ export function FieldInput({
   if (field.type === "section") {
     return (
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>{field.label}</Text>
+        <SectionLabel>{field.label}</SectionLabel>
         {field.help ? <Text style={styles.help}>{field.help}</Text> : null}
       </View>
     );
@@ -66,6 +92,11 @@ export function FieldInput({
         {required ? <Text style={{ color: c.danger }}> *</Text> : null}
       </Text>
       {field.help ? <Text style={prominent ? styles.helpBig : styles.help}>{field.help}</Text> : null}
+      {error ? (
+        <Text style={styles.error} accessibilityRole="alert">
+          {error}
+        </Text>
+      ) : null}
     </View>
   );
 
@@ -92,27 +123,28 @@ export function FieldInput({
       break;
     }
     case "yes_no":
+      // Resposta não é certo ou errado: as duas opções têm a mesma marcação da seleção.
       control = (
-        <View style={styles.row}>
+        <View style={styles.row} accessibilityRole="radiogroup" accessibilityLabel={field.label}>
           {[
-            { v: true, label: "Sim", color: c.success },
-            { v: false, label: "Não", color: c.danger },
+            { v: true, label: "Sim" },
+            { v: false, label: "Não" },
           ].map((opt) => {
             const selected = value === opt.v;
             return (
               <Pressable
                 key={opt.label}
                 disabled={disabled}
-                onPress={() => onChange(selected ? null : opt.v)}
+                onPress={() => {
+                  if (selected) return onChange(null);
+                  onChange(opt.v);
+                  onAnswered?.(opt.v);
+                }}
                 accessibilityRole="radio"
-                accessibilityState={{ selected, disabled }}
-                style={[
-                  styles.bigChoice,
-                  prominent && styles.bigChoiceTall,
-                  selected && { backgroundColor: tint(opt.color, c.scheme === "dark" ? "33" : "1a"), borderColor: opt.color },
-                ]}
+                accessibilityState={{ checked: selected, disabled }}
+                style={[styles.bigChoice, prominent && styles.bigChoiceTall, selected && styles.bigChoiceSelected]}
               >
-                <Text style={[styles.bigChoiceText, selected && { color: opt.color }]}>{opt.label}</Text>
+                <Text style={[styles.bigChoiceText, selected && styles.bigChoiceTextSelected]}>{opt.label}</Text>
               </Pressable>
             );
           })}
@@ -123,10 +155,14 @@ export function FieldInput({
     case "multi_choice": {
       const multi = field.type === "multi_choice";
       const list = multi ? (Array.isArray(value) ? value : []) : [];
-      const toggle = (option: string, selected: boolean) =>
-        multi ? onChange(selected ? list.filter((o) => o !== option) : [...list, option]) : onChange(selected ? null : option);
+      const toggle = (option: string, selected: boolean) => {
+        if (multi) return onChange(selected ? list.filter((o) => o !== option) : [...list, option]);
+        if (selected) return onChange(null);
+        onChange(option);
+        onAnswered?.(option);
+      };
       control = prominent ? (
-        <View style={{ gap: 10 }}>
+        <View style={{ gap: 10 }} accessibilityRole={multi ? undefined : "radiogroup"} accessibilityLabel={field.label}>
           {multi ? <Text style={styles.help}>Pode marcar mais de uma.</Text> : null}
           {field.options.map((option) => {
             const selected = multi ? list.includes(option) : value === option;
@@ -154,7 +190,7 @@ export function FieldInput({
           })}
         </View>
       ) : (
-        <View style={styles.chips}>
+        <View style={styles.chips} accessibilityRole={multi ? undefined : "radiogroup"} accessibilityLabel={field.label}>
           {field.options.map((option) => {
             const selected = multi ? list.includes(option) : value === option;
             return (
@@ -178,7 +214,7 @@ export function FieldInput({
       break;
     }
     case "date":
-      control = <DateField value={typeof value === "string" ? value : null} onChange={onChange} disabled={disabled} />;
+      control = <DateField value={typeof value === "string" ? value : null} onChange={onChange} disabled={disabled} label={field.label} />;
       break;
     case "confirm":
       control = (
@@ -197,7 +233,9 @@ export function FieldInput({
       );
       break;
     case "photo": {
-      const count = (photos?.server.length ?? 0) + (photos?.pending.length ?? 0);
+      const sent = photos?.server ?? [];
+      const queued = photos?.pending ?? [];
+      const count = sent.length + queued.length;
       const need = photoNeed(field);
       const max = field.max_photos > 0 ? field.max_photos : null;
       const full = max !== null && count >= max;
@@ -207,35 +245,37 @@ export function FieldInput({
           <View style={styles.row}>
             <Badge
               label={need ? `${count} de ${need} foto${need > 1 ? "s" : ""}` : `${count} foto${count === 1 ? "" : "s"}`}
-              color={need && count >= need ? c.success : need ? c.warning : c.inkMuted}
+              color={c.inkMuted}
             />
             {max !== null ? <Text style={styles.help}>máx. {max}</Text> : null}
           </View>
           {count ? (
             <View style={styles.thumbs}>
-              {photos?.server.map((a) => {
+              {sent.map((a, i) => {
                 const url = absoluteApiUrl(a.download_url);
+                // O servidor só deixa remover as fotos que a própria pessoa enviou.
+                const removable = !disabled && Boolean(userId) && a.uploaded_by?.id === userId;
                 return (
                   <View key={a.id}>
                     <Pressable
-                      disabled={disabled}
-                      onLongPress={() => onRemoveServerPhoto?.(a)}
-                      accessibilityLabel={`Foto enviada${disabled ? "" : ". Toque e segure para remover"}`}
+                      onPress={() => onOpenPhoto?.(i)}
+                      accessibilityRole="imagebutton"
+                      accessibilityLabel={`Foto ${i + 1} enviada. Toque para ampliar`}
                     >
-                      {url ? <Image source={{ uri: url }} style={thumb} /> : <View style={thumb} />}
+                      {url ? <Image source={{ uri: url }} style={thumb} resizeMethod="resize" /> : <View style={thumb} />}
                     </Pressable>
-                    {!disabled ? <RemoveBadge onPress={() => onRemoveServerPhoto?.(a)} /> : null}
+                    {removable ? <RemoveBadge onPress={() => onRemoveServerPhoto?.(a)} /> : null}
                   </View>
                 );
               })}
-              {photos?.pending.map((p) => (
+              {queued.map((p, j) => (
                 <View key={p.id}>
                   <Pressable
-                    disabled={disabled}
-                    onLongPress={() => onRemovePendingPhoto?.(p)}
-                    accessibilityLabel="Foto aguardando envio. Toque e segure para remover"
+                    onPress={() => onOpenPhoto?.(sent.length + j)}
+                    accessibilityRole="imagebutton"
+                    accessibilityLabel={`Foto ${sent.length + j + 1} aguardando envio. Toque para ampliar`}
                   >
-                    <Image source={{ uri: p.file_uri }} style={[thumb, styles.thumbPending]} />
+                    <Image source={{ uri: p.file_uri }} style={[thumb, styles.thumbPending]} resizeMethod="resize" />
                     <Text style={styles.pendingTag}>na fila</Text>
                   </Pressable>
                   {!disabled ? <RemoveBadge onPress={() => onRemovePendingPhoto?.(p)} /> : null}
@@ -279,12 +319,12 @@ export function FieldInput({
   );
 }
 
-/** "×" no canto da miniatura: remover a foto sem precisar descobrir o toque longo. */
+/** "×" no canto da miniatura para remover a foto (28 px, com área de toque maior). */
 function RemoveBadge({ onPress }: { onPress: () => void }) {
   const styles = useStyles(makeStyles);
   return (
-    <Pressable onPress={onPress} hitSlop={8} accessibilityRole="button" accessibilityLabel="Remover foto" style={styles.removeBadge}>
-      <Icon name="close" size={12} color="#fff" strokeWidth={2.6} />
+    <Pressable onPress={onPress} hitSlop={10} accessibilityRole="button" accessibilityLabel="Remover foto" style={styles.removeBadge}>
+      <Icon name="close" size={14} color="#fff" strokeWidth={2.6} />
     </Pressable>
   );
 }
@@ -294,11 +334,14 @@ const makeStyles = (c: Palette) =>
     field: { gap: 10 },
     fieldBig: { gap: 18 },
     section: { gap: 4, paddingTop: 6 },
-    sectionTitle: { fontSize: 13, fontWeight: "700", color: c.primary, textTransform: "uppercase", letterSpacing: 0.5 },
+    sectionHead: { flexDirection: "row", alignItems: "center", gap: 8 },
+    sectionBar: { width: 3, height: 14, borderRadius: 2 },
+    sectionTitle: { flex: 1, fontSize: 13, fontWeight: "700", color: c.inkMuted, textTransform: "uppercase", letterSpacing: 0.5 },
     label: { fontSize: 15, fontWeight: "600", color: c.ink },
     labelBig: { fontSize: 20, fontWeight: "700", color: c.ink, lineHeight: 27 },
-    help: { fontSize: 12, color: c.inkMuted, lineHeight: 17 },
+    help: { fontSize: 13, color: c.inkMuted, lineHeight: 18 },
     helpBig: { fontSize: 14, color: c.inkMuted, lineHeight: 20 },
+    error: { fontSize: 13, fontWeight: "600", color: c.danger, lineHeight: 18 },
     row: { flexDirection: "row", alignItems: "center", gap: 10 },
     bigChoice: {
       flex: 1,
@@ -311,7 +354,9 @@ const makeStyles = (c: Palette) =>
       justifyContent: "center",
     },
     bigChoiceTall: { minHeight: 72 },
+    bigChoiceSelected: { borderColor: c.primary, backgroundColor: c.primarySoft },
     bigChoiceText: { fontSize: 17, fontWeight: "700", color: c.ink },
+    bigChoiceTextSelected: { color: c.brandInk },
     chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
     chip: {
       borderWidth: 1,
@@ -323,7 +368,7 @@ const makeStyles = (c: Palette) =>
     },
     chipSelected: { borderColor: c.primary, backgroundColor: c.primarySoft },
     chipText: { fontSize: 14, color: c.ink },
-    chipTextSelected: { color: c.primary, fontWeight: "600" },
+    chipTextSelected: { color: c.brandInk, fontWeight: "600" },
     option: {
       flexDirection: "row",
       alignItems: "center",
@@ -342,7 +387,7 @@ const makeStyles = (c: Palette) =>
       height: 22,
       borderRadius: 11,
       borderWidth: 2,
-      borderColor: c.inkSubtle,
+      borderColor: c.inkMuted,
       alignItems: "center",
       justifyContent: "center",
     },
@@ -351,7 +396,7 @@ const makeStyles = (c: Palette) =>
       height: 22,
       borderRadius: 6,
       borderWidth: 2,
-      borderColor: c.inkSubtle,
+      borderColor: c.inkMuted,
       alignItems: "center",
       justifyContent: "center",
     },
@@ -370,22 +415,33 @@ const makeStyles = (c: Palette) =>
       backgroundColor: c.surface,
     },
     confirmTall: { minHeight: 64, borderRadius: 12, borderWidth: 1.5 },
-    confirmOn: { borderColor: c.success, backgroundColor: c.successSoft },
-    box: { width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: c.inkSubtle, alignItems: "center", justifyContent: "center" },
-    boxOn: { borderColor: c.success, backgroundColor: c.success },
+    confirmOn: { borderColor: c.primary, backgroundColor: c.primarySoft },
+    box: { width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: c.inkMuted, alignItems: "center", justifyContent: "center" },
+    boxOn: { borderColor: c.primary, backgroundColor: c.primary },
     confirmText: { fontSize: 15, fontWeight: "600", color: c.ink },
-    thumbs: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+    thumbs: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
     thumb: { width: 76, height: 76, borderRadius: 10, backgroundColor: c.line },
     thumbBig: { width: 96, height: 96, borderRadius: 12, backgroundColor: c.line },
-    thumbPending: { opacity: 0.75 },
-    pendingTag: { position: "absolute", bottom: 4, left: 4, fontSize: 10, fontWeight: "700", color: "#fff", backgroundColor: "#0008", paddingHorizontal: 4, borderRadius: 4, overflow: "hidden" },
+    thumbPending: { opacity: 0.8 },
+    pendingTag: {
+      position: "absolute",
+      bottom: 4,
+      left: 4,
+      fontSize: 12,
+      fontWeight: "700",
+      color: "#fff",
+      backgroundColor: "#000000A6",
+      paddingHorizontal: 5,
+      borderRadius: 4,
+      overflow: "hidden",
+    },
     removeBadge: {
       position: "absolute",
-      top: -6,
-      right: -6,
-      width: 22,
-      height: 22,
-      borderRadius: 11,
+      top: -8,
+      right: -8,
+      width: 28,
+      height: 28,
+      borderRadius: 14,
       backgroundColor: "#1B1F26E6",
       borderWidth: 1.5,
       borderColor: c.surface,

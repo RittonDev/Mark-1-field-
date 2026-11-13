@@ -30,6 +30,9 @@ export function TicketLink({
       href={`/chamados/${ticketId}`}
       className={className}
       title={title}
+      // Marca o link que abre no painel (não sai da tela): o aviso de alterações não salvas da página
+      // da OS deixa ele passar.
+      data-ticket-link={panel ? "" : undefined}
       onClick={(e) => {
         // A linha ou o cartão em volta pode ter o próprio clique: o do link vale sozinho.
         e.stopPropagation();

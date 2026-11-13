@@ -351,7 +351,13 @@ async def upload_attachment(
     kind: Annotated[str, Form()] = "file",
     description: Annotated[str | None, Form()] = None,
 ) -> AttachmentOut:
+    """Foto ou arquivo da OS. A assinatura do responsável tem rota própria
+    (POST /tickets/{id}/signature), com nome de quem assina e a hora."""
     ticket = await svc.get_visible_ticket(db, user, ticket_id)
+    if kind == "signature":
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "A assinatura é colhida na tela de assinatura"
+        )
     attachment = await svc.add_attachment(db, ticket, file, kind, user, description=description)
     await commit_and_publish(db)
     loaded = await db.get(TicketAttachment, attachment.id, populate_existing=True)
@@ -384,8 +390,11 @@ async def update_attachment(
 async def delete_attachment(attachment_id: uuid.UUID, db: DB, user: TicketManagerUser) -> None:
     """Exclui o anexo (analistas e gestores). A assinatura do responsável não sai."""
     ticket, attachment = await _attachment_with_ticket(db, user, attachment_id)
-    await svc.remove_attachment(db, ticket, attachment, user)
+    key = await svc.remove_attachment(db, ticket, attachment, user)
     await commit_and_publish(db)
+    # O arquivo só sai do disco com a exclusão gravada.
+    if key:
+        storage.delete(key)
 
 
 @router.get("/attachments/{attachment_id}/download", include_in_schema=True, response_model=None)

@@ -64,7 +64,16 @@ if (typeof window !== "undefined") {
 const panel: TicketPanel = {
   open(ticketId) {
     closing = false;
-    if (currentId() === ticketId) return;
+    const current = currentId();
+    if (current === ticketId) return;
+    if (current) {
+      // Trocando de OS dentro do painel (ex.: "Outras OS desta loja"): a entrada é substituída, e o
+      // Fechar volta direto para a lista em vez de reabrir a OS anterior. Aberto por link direto, o
+      // painel continua sem entrada própria (o Fechar só tira o ?os).
+      const ours = (window.history.state as { mfPanel?: string } | null)?.mfPanel === current;
+      window.history.replaceState(ours ? { mfPanel: ticketId } : null, "", hrefWith(ticketId));
+      return;
+    }
     window.history.pushState({ mfPanel: ticketId }, "", hrefWith(ticketId));
   },
   close() {

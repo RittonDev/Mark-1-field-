@@ -97,7 +97,7 @@ class Settings(BaseSettings):
         if self.is_production and (self.JWT_SECRET == _DEV_SECRET or len(self.JWT_SECRET) < 32):
             raise ValueError("JWT_SECRET precisa ser definido (>= 32 caracteres) em produção")
         if self.is_production and "*" in self.cors_origin_list:
-            raise ValueError("CORS_ORIGINS não pode ser '*' em produção: liste os endereços do site")
+            raise ValueError("CORS_ORIGINS não aceita '*' em produção: liste os endereços do site")
         return self
 
 

@@ -37,6 +37,7 @@ from app.core.config import settings
 from app.core.enums import TicketStatus, UserRole
 from app.db.base import utcnow
 from app.models import Location, LocationPing, TechnicianShift, Ticket, TicketWorklog, User
+from app.models.ticket import ticket_helpers
 from app.services import geo
 from app.services.errors import NotFound, WorkflowError
 from app.services.workflow import OPEN_STATUSES
@@ -111,19 +112,32 @@ def _since(now: datetime) -> datetime:
 def footprint(since: datetime, until: datetime | None = None):
     """Visitas de cada técnico: (técnico, OS, loja, quando), uma por técnico e OS.
 
-    Conta a OS em que ele é o responsável (não cancelada) e a OS em que ele apontou trabalho
-    (visitas anteriores de outra pessoa ficam com quem foi). Com `until`, só o que já
-    aconteceu (uma OS agendada para amanhã ainda não é visita).
+    Conta a OS em que ele foi à loja como responsável ou como outro técnico da visita (houve
+    chegada, ou a OS foi concluída) e a OS em que ele apontou trabalho (visitas anteriores de
+    outra pessoa ficam com quem foi). OS só atribuída, ainda não atendida, não é visita. Com
+    `until`, só o que já aconteceu.
     """
+    visited = (
+        Ticket.location_id.is_not(None),
+        Ticket.status != TicketStatus.CANCELLED,
+        or_(
+            Ticket.arrived_at.is_not(None),
+            Ticket.status.in_((TicketStatus.RESOLVED, TicketStatus.CLOSED)),
+        ),
+    )
+    visit_at = func.coalesce(
+        Ticket.arrived_at, Ticket.resolved_at, Ticket.scheduled_start, Ticket.created_at
+    )
     assigned = select(
         Ticket.assignee_id.label("user_id"),
         Ticket.id.label("ticket_id"),
         Ticket.location_id.label("location_id"),
-        func.coalesce(Ticket.resolved_at, Ticket.scheduled_start, Ticket.created_at).label("at"),
-    ).where(
-        Ticket.assignee_id.is_not(None),
-        Ticket.location_id.is_not(None),
-        Ticket.status != TicketStatus.CANCELLED,
+        visit_at.label("at"),
+    ).where(Ticket.assignee_id.is_not(None), *visited)
+    helped = (
+        select(ticket_helpers.c.user_id, Ticket.id, Ticket.location_id, visit_at)
+        .join(Ticket, Ticket.id == ticket_helpers.c.ticket_id)
+        .where(*visited)
     )
     worked = (
         select(
@@ -135,7 +149,7 @@ def footprint(since: datetime, until: datetime | None = None):
         .join(Ticket, Ticket.id == TicketWorklog.ticket_id)
         .where(TicketWorklog.user_id.is_not(None), Ticket.location_id.is_not(None))
     )
-    both = union_all(assigned, worked).subquery("visits_raw")
+    both = union_all(assigned, helped, worked).subquery("visits_raw")
     pairs = (
         select(
             both.c.user_id,

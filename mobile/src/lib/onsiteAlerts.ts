@@ -1,7 +1,11 @@
 // Alertas locais do tempo na loja (cada chamado inclui até 4h de técnico, contadas da chegada).
 // Agenda duas notificações por OS em atendimento: faltando `onsite_warning_minutes` e no estouro.
 // São locais (expo-notifications já instalado): funcionam offline e no Expo Go. Na web não há.
+// Tocar no alerta abre a OS.
 
+import type * as NotificationsApi from "expo-notifications";
+import type { NotificationResponse } from "expo-notifications";
+import { router } from "expo-router";
 import { Platform } from "react-native";
 import { listTickets } from "./db";
 import { getFieldRules, ONSITE_STATUSES } from "./field";
@@ -12,13 +16,66 @@ const PREFIX = "onsite-";
 const CHANNEL = "campo";
 
 interface Wanted {
+  ticketId: string;
   date: Date;
   title: string;
   body: string;
 }
 
+type NotificationsModule = typeof NotificationsApi;
+
 let running: Promise<void> | null = null;
 let handlerReady = false;
+
+/** OS do alerta: vem no `data` (alertas novos) ou no identificador "onsite-warning-<id>". */
+function ticketOf(response: NotificationResponse): string | null {
+  const { identifier, content } = response.notification.request;
+  if (!identifier.startsWith(PREFIX)) return null;
+  const fromData = content.data?.ticketId;
+  if (typeof fromData === "string" && fromData) return fromData;
+  const match = /^onsite-(?:warning|over)-(.+)$/.exec(identifier);
+  return match ? match[1] : null;
+}
+
+function openTicket(response: NotificationResponse) {
+  const id = ticketOf(response);
+  if (!id || !session.get().user) return;
+  try {
+    router.push({ pathname: "/ticket/[id]", params: { id } });
+  } catch (error) {
+    console.warn("Não foi possível abrir a OS do alerta", error);
+  }
+}
+
+/**
+ * Mostra os alertas também com o app aberto (no Expo Go ninguém mais registra o handler), cria o
+ * canal do Android e liga o toque na notificação à OS, inclusive quando o toque abriu o app.
+ */
+async function ensureHandler(Notifications: NotificationsModule) {
+  if (handlerReady) return;
+  handlerReady = true;
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+      shouldShowBanner: true,
+      shouldShowList: true,
+    }),
+  });
+  if (Platform.OS === "android") {
+    await Notifications.setNotificationChannelAsync(CHANNEL, {
+      name: "Tempo na loja",
+      importance: Notifications.AndroidImportance.HIGH,
+      vibrationPattern: [0, 250, 150, 250],
+    });
+  }
+  Notifications.addNotificationResponseReceivedListener(openTicket);
+  const last = await Notifications.getLastNotificationResponseAsync().catch(() => null);
+  if (last && ticketOf(last)) {
+    openTicket(last);
+    await Notifications.clearLastNotificationResponseAsync().catch(() => undefined);
+  }
+}
 
 /** Reconcilia os alertas agendados com as OS do técnico. Idempotente; chamada depois de cada sync e ação. */
 export function syncOnsiteAlerts(): Promise<void> {
@@ -45,6 +102,7 @@ async function reconcile() {
       const warnAt = due - warnMin * 60_000;
       if (warnAt > now) {
         wanted.set(`${PREFIX}warning-${t.id}`, {
+          ticketId: t.id,
           date: new Date(warnAt),
           title: `${t.code}: faltam ${formatMinutes(warnMin)} na loja`,
           body: `Faltam ${formatMinutes(warnMin)} do tempo do chamado: avise o analista no grupo.`,
@@ -52,6 +110,7 @@ async function reconcile() {
       }
       if (due > now) {
         wanted.set(`${PREFIX}over-${t.id}`, {
+          ticketId: t.id,
           date: new Date(due),
           title: `${t.code}: tempo do chamado esgotado`,
           body: "As horas incluídas no chamado acabaram. Avise o analista no grupo antes de continuar.",
@@ -61,11 +120,14 @@ async function reconcile() {
   }
 
   const Notifications = await import("expo-notifications");
+  // Antes de qualquer retorno: alertas agendados numa sessão anterior também aparecem com o app aberto.
+  await ensureHandler(Notifications);
   const scheduled = (await Notifications.getAllScheduledNotificationsAsync()).filter((n) => n.identifier.startsWith(PREFIX));
   const kept = new Set<string>();
   for (const n of scheduled) {
     const want = wanted.get(n.identifier);
-    if (want && n.content.data?.at === want.date.toISOString()) kept.add(n.identifier);
+    const same = want && n.content.data?.at === want.date.toISOString() && n.content.data?.ticketId === want.ticketId;
+    if (same) kept.add(n.identifier);
     else await Notifications.cancelScheduledNotificationAsync(n.identifier);
   }
   const toSchedule = [...wanted].filter(([id]) => !kept.has(id));
@@ -75,29 +137,10 @@ async function reconcile() {
   if (!permission.granted && permission.canAskAgain) permission = await Notifications.requestPermissionsAsync();
   if (!permission.granted) return; // segue só com o aviso dentro do app
 
-  if (!handlerReady) {
-    handlerReady = true;
-    Notifications.setNotificationHandler({
-      handleNotification: async () => ({
-        shouldPlaySound: true,
-        shouldSetBadge: false,
-        shouldShowBanner: true,
-        shouldShowList: true,
-      }),
-    });
-    if (Platform.OS === "android") {
-      await Notifications.setNotificationChannelAsync(CHANNEL, {
-        name: "Tempo na loja",
-        importance: Notifications.AndroidImportance.HIGH,
-        vibrationPattern: [0, 250, 150, 250],
-      });
-    }
-  }
-
   for (const [identifier, want] of toSchedule) {
     await Notifications.scheduleNotificationAsync({
       identifier,
-      content: { title: want.title, body: want.body, data: { at: want.date.toISOString() } },
+      content: { title: want.title, body: want.body, data: { at: want.date.toISOString(), ticketId: want.ticketId } },
       trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: want.date, channelId: CHANNEL },
     });
   }

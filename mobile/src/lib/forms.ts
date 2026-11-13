@@ -103,7 +103,7 @@ export function formProgress(form: TicketForm, counts: Record<string, number>): 
 
 const CLOSED: TicketStatus[] = ["resolved", "closed", "cancelled"];
 
-/** Formulários travados para o técnico: assinatura colhida (ou na fila) ou OS concluída. */
+/** Formulários travados para o técnico: assinatura colhida (ou na fila) ou OS concluída ou cancelada. */
 export const formsLocked = (ticket: Pick<TicketDetail, "signed_at" | "status">, pendingSignature: boolean) =>
   Boolean(ticket.signed_at) || pendingSignature || CLOSED.includes(ticket.status);
 
@@ -126,9 +126,31 @@ export function concludeBlock(
   return null;
 }
 
-/** A assinatura só pode ser colhida com os formulários obrigatórios concluídos. */
+/**
+ * O que ainda falta para concluir, na ordem do atendimento: formulários obrigatórios e, se pedida,
+ * a assinatura (que só vem depois dos formulários).
+ */
+export function missingForConclusion(
+  ticket: Pick<TicketDetail, "forms" | "signature_required" | "signed_at">,
+  pendingSignature: boolean,
+): { forms: TicketForm[]; signature: boolean } {
+  return {
+    forms: pendingRequiredForms(ticket),
+    signature: Boolean(ticket.signature_required && !ticket.signed_at && !pendingSignature),
+  };
+}
+
+/** Antes do check-in não há o que assinar (a OS ainda não foi atendida). */
+const BEFORE_VISIT: TicketStatus[] = ["new", "triage", "assigned", "scheduled", "en_route", "reopened"];
+
+/**
+ * A assinatura só pode ser colhida com o atendimento iniciado e os formulários obrigatórios
+ * concluídos (o servidor confere os formulários de novo).
+ */
 export function signatureBlock(ticket: Pick<TicketDetail, "forms" | "status">): string | null {
+  if (ticket.status === "cancelled") return "A OS foi cancelada";
   if (CLOSED.includes(ticket.status)) return "A OS já foi concluída";
+  if (BEFORE_VISIT.includes(ticket.status)) return "Inicie o atendimento antes de colher a assinatura";
   const pending = pendingRequiredForms(ticket);
   if (pending.length) return `Preencha o formulário antes de colher a assinatura: ${pending.map((f) => f.name).join(", ")}`;
   return null;

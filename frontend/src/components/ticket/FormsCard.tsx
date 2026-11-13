@@ -2,22 +2,29 @@
 
 import { useMutation, useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
-import { Camera, CheckCircle2, ClipboardList, FileSignature, Lock, Plus, Trash2, X } from "lucide-react";
-import { useState } from "react";
+import { Camera, CheckCircle2, ClipboardList, ExternalLink, FileSignature, FileText, Lock, Plus, Trash2, X } from "lucide-react";
+import { useId, useState } from "react";
 import { useConfirm } from "@/components/Confirm";
-import { Button, Card, CardHeader, Checkbox, Dialog, ErrorBox, Field, Input, Select, Textarea } from "@/components/ui";
+import { FILE_KIND_LABEL, fileKind, formAnchor } from "@/components/report/shared";
+import { useToast } from "@/components/Toaster";
+import { Button, buttonClassName, Card, CardHeader, Checkbox, Dialog, ErrorBox, Field, Input, Pill, Select, Textarea } from "@/components/ui";
 import { absoluteApiUrl, api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canManageTickets, STATUS } from "@/lib/constants";
 import { formatDateTime } from "@/lib/format";
 import type { Attachment, FormAnswer, FormField, FormTemplate, TicketDetail, TicketForm } from "@/lib/types";
+import { AttachmentImage, uploadProblem, useTicketAttachments } from "./AttachmentsTab";
 import { useInvalidateTicket, useTicketErrorHandler } from "./useConflictHandler";
 
-const FORM_STATUS: Record<TicketForm["status"], { label: string; className: string }> = {
-  pending: { label: "Não iniciado", className: "bg-slate-100 text-slate-700 dark:bg-slate-500/15 dark:text-slate-300" },
-  in_progress: { label: "Em preenchimento", className: "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300" },
-  completed: { label: "Concluído", className: "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300" },
+// Cinza: ninguém começou; azul: em preenchimento; verde: concluído.
+const FORM_STATUS: Record<TicketForm["status"], { label: string; color: string }> = {
+  pending: { label: "Não iniciado", color: "#64748b" },
+  in_progress: { label: "Em preenchimento", color: "#2447ff" },
+  completed: { label: "Concluído", color: "#10b981" },
 };
+
+/** Limite de texto da resposta (o mesmo da API). */
+const TEXT_MAX = 5000;
 
 const questions = (form: TicketForm) => form.fields.filter((f) => f.type !== "section");
 
@@ -27,11 +34,45 @@ function answered(field: FormField, value: FormAnswer | undefined, photos: numbe
   return value !== undefined && value !== "" && !(Array.isArray(value) && value.length === 0);
 }
 
-function useAttachments(ticketId: string) {
-  return useQuery({
-    queryKey: ["ticket", ticketId, "attachments"],
-    queryFn: () => api.get<Attachment[]>(`/tickets/${ticketId}/attachments`),
-  });
+/** Fotos que o campo exige para concluir (a mesma regra da API). */
+const photosNeeded = (field: FormField) => Math.max(field.min_photos, field.required ? 1 : 0);
+
+type Answers = Record<string, FormAnswer>;
+
+const empty = (v: FormAnswer | undefined) => v === undefined || v === "" || (Array.isArray(v) && v.length === 0);
+
+/** Mesma resposta: texto sem os espaços das pontas (como a API guarda) e múltipla escolha em qualquer ordem. */
+function same(a: FormAnswer | undefined, b: FormAnswer | undefined): boolean {
+  const norm = (v: FormAnswer | undefined) => (empty(v) ? undefined : typeof v === "string" ? v.trim() || undefined : v);
+  const x = norm(a);
+  const y = norm(b);
+  if (Array.isArray(x) && Array.isArray(y)) return x.length === y.length && x.every((v) => y.includes(v));
+  return x === y;
+}
+
+/**
+ * Só o que mudou desde a leitura. A API mexe apenas nas respostas enviadas: mandar tudo apagaria o que o
+ * técnico respondeu no app enquanto o diálogo estava aberto; e a resposta apagada aqui vai como null.
+ */
+function changesOf(base: Answers, current: Answers): Record<string, FormAnswer | null> {
+  const out: Record<string, FormAnswer | null> = {};
+  for (const key of new Set([...Object.keys(base), ...Object.keys(current)])) {
+    if (same(base[key], current[key])) continue;
+    const value = current[key];
+    out[key] = empty(value) ? null : typeof value === "string" ? value.trim() : value;
+  }
+  return out;
+}
+
+/** O que não foi mexido na tela passa a seguir o servidor; o que foi mexido continua como está. */
+function rebase(current: Answers, base: Answers, server: Answers): Answers {
+  const next = { ...current };
+  for (const key of new Set([...Object.keys(base), ...Object.keys(server)])) {
+    if (!same(current[key], base[key])) continue;
+    if (server[key] === undefined) delete next[key];
+    else next[key] = server[key];
+  }
+  return next;
 }
 
 /** Formulários anexados à OS (a gestão decide) e a assinatura do responsável no local. */
@@ -41,7 +82,7 @@ export function FormsCard({ ticket }: { ticket: TicketDetail }) {
   const manager = canManageTickets(user?.role);
   const invalidate = useInvalidateTicket(ticket.id);
   const onError = useTicketErrorHandler(ticket.id);
-  const attachments = useAttachments(ticket.id);
+  const attachments = useTicketAttachments(ticket.id);
   const [adding, setAdding] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
   const final = STATUS[ticket.status].final || ticket.status === "resolved";
@@ -97,23 +138,26 @@ export function FormsCard({ ticket }: { ticket: TicketDetail }) {
             return (
               <li key={form.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
                 <ClipboardList className="size-4 shrink-0 text-ink-muted" />
-                <button type="button" onClick={() => setOpenId(form.id)} className="min-w-0 flex-1 text-left">
-                  <span className="block truncate text-sm font-semibold text-ink hover:text-brand">{form.name}</span>
+                <button type="button" onClick={() => setOpenId(form.id)} className="group min-w-0 flex-1 text-left">
+                  <span className="block truncate text-sm font-semibold text-ink group-hover:text-brand">{form.name}</span>
                   <span className="text-xs text-ink-muted">
-                    {done}/{qs.length} respondidas · {photos.length} foto(s)
+                    {done}/{qs.length} respondidas · {photos.length} {photos.length === 1 ? "foto" : "fotos"}
                     {form.completed_by ? ` · concluído por ${form.completed_by.name} em ${formatDateTime(form.completed_at)}` : ""}
                   </span>
                 </button>
-                <span className={clsx("rounded-full px-2 py-0.5 text-xs font-medium", status.className)}>{status.label}</span>
+                <Pill color={status.color}>{status.label}</Pill>
                 {manager && !final ? (
                   <button
                     type="button"
                     onClick={() => toggleRequired.mutate(form)}
+                    disabled={toggleRequired.isPending && toggleRequired.variables?.id === form.id}
+                    aria-pressed={form.required}
+                    aria-label={`${form.name}: obrigatório`}
                     className={clsx(
-                      "rounded-full border px-2 py-0.5 text-xs font-medium",
-                      form.required ? "border-brand/40 text-brand" : "border-line text-ink-muted",
+                      "rounded-full border px-2 py-0.5 text-xs font-medium transition-colors disabled:opacity-60",
+                      form.required ? "border-brand/40 text-brand-ink" : "border-line text-ink-muted hover:border-line-strong hover:text-ink",
                     )}
-                    title="Clique para alternar"
+                    title={form.required ? "Obrigatório: clique para deixar opcional" : "Opcional: clique para tornar obrigatório"}
                   >
                     {form.required ? "Obrigatório" : "Opcional"}
                   </button>
@@ -149,10 +193,9 @@ export function FormsCard({ ticket }: { ticket: TicketDetail }) {
         {ticket.signed_at ? (
           <div className="flex min-w-0 flex-1 items-center gap-3">
             {signature?.download_url ? (
-              // eslint-disable-next-line @next/next/no-img-element -- link assinado da API
-              <img
-                src={absoluteApiUrl(signature.download_url) ?? undefined}
-                alt={`Assinatura de ${ticket.signer_name}`}
+              <AttachmentImage
+                attachment={signature}
+                alt={`Assinatura de ${ticket.signer_name ?? "responsável"}`}
                 className="h-12 w-28 rounded border border-line bg-white object-contain"
               />
             ) : null}
@@ -175,6 +218,7 @@ export function FormsCard({ ticket }: { ticket: TicketDetail }) {
           <Checkbox
             label="Exigir assinatura"
             checked={ticket.signature_required}
+            disabled={signatureRule.isPending}
             onChange={(v) => signatureRule.mutate(v)}
           />
         ) : null}
@@ -243,9 +287,14 @@ function AddFormDialog({ ticket, onClose }: { ticket: TicketDetail; onClose: () 
                   key={t.id}
                   type="button"
                   onClick={() => setTemplateId(t.id)}
+                  aria-pressed={templateId === t.id}
+                  disabled={attached.has(t.id)}
+                  title={attached.has(t.id) ? "Já está nesta OS" : undefined}
                   className={clsx(
-                    "rounded-full border px-3 py-1 text-sm",
-                    templateId === t.id ? "border-brand bg-brand text-white" : "border-line text-ink hover:border-brand",
+                    "rounded-full border px-3 py-1 text-sm transition-colors disabled:opacity-50",
+                    templateId === t.id
+                      ? "border-brand bg-brand text-white dark:border-brand-strong dark:bg-brand-strong"
+                      : "border-line text-ink hover:border-brand",
                   )}
                 >
                   {t.name}
@@ -294,18 +343,53 @@ function FormDialog({
   onClose: () => void;
 }) {
   const invalidate = useInvalidateTicket(ticket.id);
-  const [answers, setAnswers] = useState<Record<string, FormAnswer>>(form.answers);
+  const confirm = useConfirm();
+  const { toast } = useToast();
+  const uid = useId();
+  // `base`: as respostas como estavam no servidor na última leitura; `answers`: o que está na tela.
+  const [base, setBase] = useState<Answers>(form.answers);
+  const [answers, setAnswers] = useState<Answers>(form.answers);
   const [error, setError] = useState<string | null>(null);
+  // Depois da primeira tentativa de concluir, os campos que faltam ficam marcados (e saem ao preencher).
+  const [checked, setChecked] = useState(false);
+  const [uploading, setUploading] = useState<Record<string, number>>({});
+  const serverKey = JSON.stringify(form.answers);
+  const [seenKey, setSeenKey] = useState(serverKey);
+  if (serverKey !== seenKey) {
+    // O técnico (ou outra pessoa) respondeu com o diálogo aberto: o que não foi mexido aqui segue o servidor.
+    setSeenKey(serverKey);
+    setAnswers(rebase(answers, base, form.answers));
+    setBase(form.answers);
+  }
+  const changes = changesOf(base, answers);
+  const dirty = Object.keys(changes).length > 0;
+  const fieldPhotos = (fieldId: string) => photos.filter((p) => p.field_id === fieldId);
+  // O que falta para concluir (a mesma regra da API): obrigatórios sem resposta e fotos abaixo do mínimo.
+  const missingNow = () =>
+    form.fields.filter((f) =>
+      f.type === "section" ? false : f.type === "photo" ? fieldPhotos(f.id).length < photosNeeded(f) : f.required && !answered(f, answers[f.id], 0),
+    );
+  const lackingIds = new Set(checked ? missingNow().map((f) => f.id) : []);
+  const domId = (fieldId: string) => `${uid}-${fieldId}`;
+
   const save = useMutation({
-    mutationFn: (complete: boolean) =>
-      api.put<TicketForm>(`/tickets/${ticket.id}/forms/${form.id}/answers`, { answers, complete }),
-    onSuccess: (_, complete) => {
+    mutationFn: ({ complete }: { complete: boolean; partial?: boolean }) =>
+      api.put<TicketForm>(`/tickets/${ticket.id}/forms/${form.id}/answers`, { answers: changes, complete }),
+    onSuccess: (saved, { complete, partial }) => {
       invalidate();
       setError(null);
-      if (complete) onClose();
+      if (complete) {
+        toast({ title: `${form.name} concluído`, tone: "success" });
+        onClose();
+        return;
+      }
+      setAnswers((current) => rebase(current, base, saved.answers));
+      setBase(saved.answers);
+      setSeenKey(JSON.stringify(saved.answers));
+      if (!partial) toast({ title: "Respostas salvas", tone: "success" });
     },
     onError: (e) => {
-      invalidate(); // as respostas foram gravadas mesmo quando falta algo para concluir
+      invalidate(); // ao concluir, as respostas são gravadas mesmo quando falta algo: a releitura acerta a tela
       setError(errorMessage(e));
     },
   });
@@ -316,6 +400,8 @@ function FormDialog({
       body.append("field_id", fieldId);
       return api.upload(`/tickets/${ticket.id}/forms/${form.id}/photos`, body);
     },
+    onMutate: ({ fieldId }) => setUploading((u) => ({ ...u, [fieldId]: (u[fieldId] ?? 0) + 1 })),
+    onSettled: (_data, _error, { fieldId }) => setUploading((u) => ({ ...u, [fieldId]: Math.max(0, (u[fieldId] ?? 1) - 1) })),
     onSuccess: invalidate,
     onError: (e) => setError(errorMessage(e)),
   });
@@ -324,25 +410,71 @@ function FormDialog({
     onSuccess: invalidate,
     onError: (e) => setError(errorMessage(e)),
   });
-  const set = (id: string, value: FormAnswer | undefined) =>
+  const set = (field: FormField, value: FormAnswer | undefined) =>
     setAnswers((a) => {
       const next = { ...a };
-      if (value === undefined || value === "") delete next[id];
-      else next[id] = value;
+      if (empty(value)) delete next[field.id];
+      // Múltipla escolha na ordem das opções (a mesma da API).
+      else next[field.id] = Array.isArray(value) ? field.options.filter((o) => value.includes(o)) : (value as FormAnswer);
       return next;
     });
+
+  const requestClose = async () => {
+    if (
+      dirty &&
+      !(await confirm({
+        title: "Descartar as alterações?",
+        description: "O que você respondeu aqui ainda não foi salvo.",
+        confirmLabel: "Descartar",
+        tone: "danger",
+      }))
+    ) {
+      return;
+    }
+    onClose();
+  };
+
+  const askRemovePhoto = async (photo: Attachment, field: FormField, index: number) => {
+    const ok = await confirm({
+      title: "Remover esta foto?",
+      description: `A foto ${index + 1} de “${field.label}” sai do formulário${form.status === "completed" ? ", que volta para Em preenchimento" : ""}. Não dá para desfazer.`,
+      confirmLabel: "Remover",
+      tone: "danger",
+    });
+    if (ok) removePhoto.mutate(photo.id);
+  };
+
+  // Concluir: confere aqui o que falta (marca os campos e leva até o primeiro); a API confere de novo.
+  const finish = () => {
+    const missing = missingNow();
+    if (!missing.length) {
+      save.mutate({ complete: true });
+      return;
+    }
+    setChecked(true);
+    setError(`Falta preencher: ${missing.map((f) => f.label).join("; ")}`);
+    const first = document.getElementById(domId(missing[0].id));
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    first?.scrollIntoView({ block: "center", behavior: reduce ? "auto" : "smooth" });
+    first?.querySelector<HTMLElement>("input, select, textarea, button")?.focus({ preventScroll: true });
+    // O que já foi respondido não se perde: grava agora, sem concluir.
+    if (dirty) {
+      save.mutate({ complete: false, partial: true });
+      toast({ title: "Respostas salvas", description: "Complete o que falta para concluir o formulário.", tone: "info" });
+    }
+  };
+
+  const reportHref = ticket.report_link ? `${ticket.report_link.path}?preview=1#${formAnchor(form.name)}` : null;
 
   return (
     <Dialog
       open
       size="lg"
-      onClose={onClose}
+      onClose={requestClose}
       title={form.name}
       description={
-        <span className="inline-flex items-center gap-2">
-          <span className={clsx("rounded-full px-2 py-0.5 text-xs font-medium", FORM_STATUS[form.status].className)}>
-            {FORM_STATUS[form.status].label}
-          </span>
+        <span className="inline-flex flex-wrap items-center gap-2">
+          <Pill color={FORM_STATUS[form.status].color}>{FORM_STATUS[form.status].label}</Pill>
           {form.required ? "Obrigatório" : "Opcional"}
           {!canFill ? (
             <span className="inline-flex items-center gap-1 text-xs">
@@ -352,20 +484,28 @@ function FormDialog({
         </span>
       }
       footer={
-        canFill ? (
-          <>
+        <div className="flex w-full flex-wrap items-center justify-end gap-2">
+          {reportHref ? (
+            <a href={reportHref} target="_blank" rel="noreferrer" className={buttonClassName("ghost", "md", "mr-auto")}>
+              <ExternalLink className="size-4" />
+              Ver no relatório do cliente
+            </a>
+          ) : null}
+          {canFill ? (
+            <>
+              <Button onClick={requestClose}>Fechar</Button>
+              <Button disabled={!dirty} loading={save.isPending && !save.variables?.complete} onClick={() => save.mutate({ complete: false })}>
+                Salvar
+              </Button>
+              <Button variant="primary" loading={save.isPending && save.variables?.complete === true} onClick={finish}>
+                <CheckCircle2 className="size-4" />
+                Concluir formulário
+              </Button>
+            </>
+          ) : (
             <Button onClick={onClose}>Fechar</Button>
-            <Button loading={save.isPending && save.variables === false} onClick={() => save.mutate(false)}>
-              Salvar
-            </Button>
-            <Button variant="primary" loading={save.isPending && save.variables === true} onClick={() => save.mutate(true)}>
-              <CheckCircle2 className="size-4" />
-              Concluir formulário
-            </Button>
-          </>
-        ) : (
-          <Button onClick={onClose}>Fechar</Button>
-        )
+          )}
+        </div>
       }
     >
       <div className="flex flex-col gap-4">
@@ -377,30 +517,37 @@ function FormDialog({
               </h3>
             );
           }
-          const fieldPhotos = photos.filter((p) => p.field_id === field.id);
+          const invalid = lackingIds.has(field.id);
           return (
-            <div key={field.id} className="flex flex-col gap-1.5">
+            <div
+              key={field.id}
+              id={domId(field.id)}
+              className={clsx(
+                "flex flex-col gap-1.5 rounded-lg",
+                invalid && "-mx-2 bg-red-50/70 px-2 py-2 ring-1 ring-red-300 dark:bg-red-500/10 dark:ring-red-500/40",
+              )}
+            >
               <span className="text-sm font-semibold text-ink">
                 {field.label}
-                {field.required || (field.type === "photo" && field.min_photos > 0) ? (
-                  <span className="text-red-500"> *</span>
-                ) : null}
+                {field.required || (field.type === "photo" && field.min_photos > 0) ? <span className="text-red-500"> *</span> : null}
               </span>
               {field.help ? <span className="-mt-1 text-xs text-ink-muted">{field.help}</span> : null}
               {field.type === "photo" ? (
                 <PhotoField
                   field={field}
-                  photos={fieldPhotos}
+                  photos={fieldPhotos(field.id)}
                   canFill={canFill}
-                  uploading={upload.isPending && upload.variables?.fieldId === field.id}
+                  uploading={(uploading[field.id] ?? 0) > 0}
                   onAdd={(file) => upload.mutate({ fieldId: field.id, file })}
-                  onRemove={(id) => removePhoto.mutate(id)}
+                  onRemove={(photo, index) => askRemovePhoto(photo, field, index)}
+                  onProblem={setError}
                 />
               ) : canFill ? (
-                <AnswerInput field={field} value={answers[field.id]} onChange={(v) => set(field.id, v)} />
+                <AnswerInput field={field} value={answers[field.id]} invalid={invalid} onChange={(v) => set(field, v)} />
               ) : (
                 <p className="text-sm text-ink">{formatAnswer(field, form.answers[field.id])}</p>
               )}
+              {invalid ? <span className="text-xs font-semibold text-red-700 dark:text-red-400">Obrigatório</span> : null}
             </div>
           );
         })}
@@ -421,29 +568,54 @@ function formatAnswer(field: FormField, value: FormAnswer | undefined): string {
   return String(value);
 }
 
+const chipOn = "border-brand bg-brand text-white dark:border-brand-strong dark:bg-brand-strong";
+const chipOff = "border-line text-ink hover:border-brand";
+
 function AnswerInput({
   field,
   value,
+  invalid,
   onChange,
 }: {
   field: FormField;
   value: FormAnswer | undefined;
+  invalid: boolean;
   onChange: (v: FormAnswer | undefined) => void;
 }) {
+  const invalidClass = invalid ? "border-red-400 dark:border-red-500/60" : undefined;
   switch (field.type) {
     case "textarea":
-      return <Textarea rows={3} value={(value as string) ?? ""} onChange={(e) => onChange(e.target.value)} />;
+      return (
+        <Textarea
+          rows={3}
+          maxLength={TEXT_MAX}
+          aria-invalid={invalid || undefined}
+          className={invalidClass}
+          value={(value as string) ?? ""}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      );
     case "number":
       return (
         <Input
           type="number"
-          className="w-40"
+          inputMode="decimal"
+          aria-invalid={invalid || undefined}
+          className={clsx("w-40", invalidClass)}
           value={value === undefined ? "" : String(value)}
           onChange={(e) => onChange(e.target.value === "" ? undefined : Number(e.target.value))}
         />
       );
     case "date":
-      return <Input type="date" className="w-48" value={(value as string) ?? ""} onChange={(e) => onChange(e.target.value)} />;
+      return (
+        <Input
+          type="date"
+          aria-invalid={invalid || undefined}
+          className={clsx("w-48", invalidClass)}
+          value={(value as string) ?? ""}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      );
     case "yes_no":
       return (
         <div className="flex gap-2">
@@ -453,10 +625,7 @@ function AnswerInput({
               type="button"
               aria-pressed={value === v}
               onClick={() => onChange(value === v ? undefined : v)}
-              className={clsx(
-                "rounded-lg border px-4 py-1.5 text-sm",
-                value === v ? "border-brand bg-brand text-white" : "border-line text-ink hover:border-brand",
-              )}
+              className={clsx("rounded-lg border px-4 py-1.5 text-sm transition-colors", value === v ? chipOn : chipOff)}
             >
               {v ? "Sim" : "Não"}
             </button>
@@ -467,7 +636,12 @@ function AnswerInput({
       return <Checkbox label="Confirmo" checked={value === true} onChange={(v) => onChange(v ? true : undefined)} />;
     case "choice":
       return (
-        <Select value={(value as string) ?? ""} onChange={(e) => onChange(e.target.value || undefined)}>
+        <Select
+          aria-invalid={invalid || undefined}
+          className={invalidClass}
+          value={(value as string) ?? ""}
+          onChange={(e) => onChange(e.target.value || undefined)}
+        >
           <option value="">Selecione...</option>
           {field.options.map((o) => (
             <option key={o} value={o}>
@@ -488,10 +662,7 @@ function AnswerInput({
                 type="button"
                 aria-pressed={on}
                 onClick={() => onChange(on ? selected.filter((s) => s !== o) : [...selected, o])}
-                className={clsx(
-                  "rounded-full border px-3 py-1 text-sm",
-                  on ? "border-brand bg-brand text-white" : "border-line text-ink hover:border-brand",
-                )}
+                className={clsx("rounded-full border px-3 py-1 text-sm transition-colors", on ? chipOn : chipOff)}
               >
                 {o}
               </button>
@@ -501,7 +672,15 @@ function AnswerInput({
       );
     }
     default:
-      return <Input value={(value as string) ?? ""} onChange={(e) => onChange(e.target.value)} />;
+      return (
+        <Input
+          maxLength={TEXT_MAX}
+          aria-invalid={invalid || undefined}
+          className={invalidClass}
+          value={(value as string) ?? ""}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      );
   }
 }
 
@@ -512,51 +691,76 @@ function PhotoField({
   uploading,
   onAdd,
   onRemove,
+  onProblem,
 }: {
   field: FormField;
   photos: Attachment[];
   canFill: boolean;
   uploading: boolean;
   onAdd: (file: File) => void;
-  onRemove: (id: string) => void;
+  onRemove: (photo: Attachment, index: number) => void;
+  /** Arquivo recusado aqui mesmo (tamanho, formato, campo cheio). */
+  onProblem: (message: string) => void;
 }) {
-  const need = Math.max(field.min_photos, field.required ? 1 : 0);
+  const need = photosNeeded(field);
+  const room = field.max_photos - photos.length;
   return (
     <div className="flex flex-wrap items-center gap-2">
-      {photos.map((p) => (
-        <div key={p.id} className="group relative">
-          <a href={absoluteApiUrl(p.download_url) ?? undefined} target="_blank" rel="noreferrer">
-            {/* eslint-disable-next-line @next/next/no-img-element -- link assinado da API */}
-            <img
-              src={absoluteApiUrl(p.download_url) ?? undefined}
-              alt={field.label}
-              className="size-20 rounded-lg border border-line object-cover"
-            />
-          </a>
-          {canFill ? (
-            <button
-              type="button"
-              onClick={() => onRemove(p.id)}
-              className="absolute -top-1.5 -right-1.5 hidden rounded-full bg-surface p-0.5 text-ink-muted shadow group-hover:block hover:text-red-600"
-              aria-label="Remover foto"
+      {photos.map((p, i) => {
+        const url = absoluteApiUrl(p.download_url) ?? undefined;
+        const kind = fileKind(p.filename, p.content_type);
+        return (
+          <div key={p.id} className="relative">
+            <a
+              href={url}
+              target="_blank"
+              rel="noreferrer"
+              className="block rounded-lg focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
+              aria-label={`Abrir a foto ${i + 1} de ${field.label} em outra aba`}
             >
-              <X className="size-3.5" />
-            </button>
-          ) : null}
-        </div>
-      ))}
-      {canFill && photos.length < field.max_photos ? (
-        <label className="flex size-20 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-line text-xs text-ink-muted hover:border-brand hover:text-brand">
+              {kind === "image" ? (
+                <AttachmentImage attachment={p} alt={`Foto ${i + 1} de ${field.label}`} className="size-20 rounded-lg border border-line object-cover" />
+              ) : (
+                // PDF, vídeo ou HEIC guardados no campo de foto: o navegador não mostra como miniatura.
+                <span className="flex size-20 flex-col items-center justify-center gap-1 rounded-lg border border-line bg-surface-2 text-[11px] font-semibold text-ink-muted">
+                  <FileText className="size-5" />
+                  {FILE_KIND_LABEL[kind]}
+                </span>
+              )}
+            </a>
+            {canFill ? (
+              <button
+                type="button"
+                onClick={() => onRemove(p, i)}
+                className="absolute -top-2 -right-2 flex size-6 items-center justify-center rounded-full border border-line bg-surface text-ink-muted opacity-80 shadow-elev-1 transition-opacity hover:text-red-600 hover:opacity-100 focus-visible:opacity-100"
+                aria-label={`Remover a foto ${i + 1} de ${field.label}`}
+              >
+                <X className="size-3.5" />
+              </button>
+            ) : null}
+          </div>
+        );
+      })}
+      {canFill && room > 0 ? (
+        <label className="flex size-20 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-line text-xs text-ink-muted transition-colors focus-within:ring-2 focus-within:ring-brand/45 hover:border-brand hover:text-brand">
           <Camera className="size-5" />
           {uploading ? "Enviando..." : "Adicionar"}
           <input
             type="file"
             accept="image/*"
+            multiple={room > 1}
             className="sr-only"
+            aria-label={`Adicionar foto em ${field.label}`}
             onChange={(e) => {
-              const file = e.target.files?.[0];
+              const picked = Array.from(e.target.files ?? []);
               e.target.value = "";
-              if (file) onAdd(file);
+              if (picked.length > room) onProblem(`“${field.label}” aceita mais ${room} ${room === 1 ? "foto" : "fotos"}: as demais não foram enviadas.`);
+              for (const file of picked.slice(0, room)) {
+                const problem = uploadProblem(file);
+                if (problem) onProblem(`${file.name}: ${problem}.`);
+                else if (fileKind(file.name, file.type) !== "image") onProblem(`${file.name}: envie a foto em JPG ou PNG (HEIC não abre no navegador).`);
+                else onAdd(file);
+              }
             }}
           />
         </label>

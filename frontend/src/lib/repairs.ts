@@ -1,4 +1,4 @@
-import type { RepairStatus } from "./types";
+import type { Repair, RepairStatus } from "./types";
 
 // Etapas na ordem do fluxo (espelha REPAIR_STATUS_LABEL em backend/app/schemas/repair.py).
 export const REPAIR_STATUS: Record<RepairStatus, { label: string; color: string }> = {
@@ -23,3 +23,37 @@ export const REPAIR_FLOW: RepairStatus[] = [
   "ready_at_vendor",
   "back_in_stock",
 ];
+
+/** Etapas em aberto fora do fluxo normal: o equipamento sem conserto ainda precisa voltar ao cliente. */
+export const REPAIR_OPEN_EXTRA: RepairStatus[] = ["unrepairable"];
+
+/** Ir para estas etapas pede o motivo (a observação vira obrigatória). */
+export const REPAIR_REASON_REQUIRED: RepairStatus[] = ["cancelled", "unrepairable"];
+
+/** Com quem o equipamento está agora, pela etapa (a pergunta da tela: "cadê a impressora da loja X?"). */
+export function repairWhere(r: Pick<Repair, "status" | "vendor_name">): string {
+  switch (r.status) {
+    case "withdrawn":
+      return "Com o técnico";
+    case "received":
+    case "back_in_stock":
+      return "Na Maxx";
+    case "sent_to_vendor":
+    case "vendor_quote":
+    case "in_repair":
+    case "ready_at_vendor":
+      return r.vendor_name ? `Na assistência ${r.vendor_name}` : "Na assistência";
+    case "unrepairable":
+      return "Sem conserto, devolver ao cliente";
+    case "delivered":
+      return "Com o cliente";
+    case "cancelled":
+      return "—";
+  }
+}
+
+/** Há quanto tempo, em dias inteiros: "desde hoje", "há 1 dia", "há 5 dias". */
+export function daysAgo(days: number): string {
+  if (days <= 0) return "desde hoje";
+  return days === 1 ? "há 1 dia" : `há ${days} dias`;
+}

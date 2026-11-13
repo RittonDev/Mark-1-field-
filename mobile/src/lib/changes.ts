@@ -4,10 +4,18 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 
 let version = 0;
 const listeners = new Set<() => void>();
+let pending: ReturnType<typeof setTimeout> | null = null;
+
+/** Rajadas de escritas (uma página do download, várias fotos) viram um aviso só a cada ~50 ms. */
+const COALESCE_MS = 50;
 
 export function notifyDataChanged() {
-  version += 1;
-  listeners.forEach((listener) => listener());
+  if (pending) return;
+  pending = setTimeout(() => {
+    pending = null;
+    version += 1;
+    listeners.forEach((listener) => listener());
+  }, COALESCE_MS);
 }
 
 function subscribe(listener: () => void) {

@@ -6,12 +6,18 @@ import { getKv, setKv } from "./db";
 import { registerDevice, unregisterDevice, type DeviceRegistration } from "./device";
 import { session } from "./session";
 import { startSync, stopSync, wipeLocalData } from "./sync";
-import { resumeTracking, stopTracking } from "./tracking";
+import { hasConsent, resumeTracking, stopTracking } from "./tracking";
 import type { TokenResponse } from "./types";
 
 const OWNER_KEY = "owner_user_id";
+/** No logout com sinal ruim, quanto esperar o fim da jornada e o descadastro do push antes de sair. */
+const LOGOUT_TRACKING_WAIT_MS = 8_000;
+const LOGOUT_DEVICE_WAIT_MS = 5_000;
+
+const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 let lastRegistration: DeviceRegistration | null = null;
+let pushRequested = false;
 export const getDeviceRegistration = () => lastRegistration;
 
 /**
@@ -22,6 +28,7 @@ async function revokeAccess(message: string) {
   stopSync();
   await stopTracking({ endOnServer: false });
   lastRegistration = null;
+  pushRequested = false;
   await wipeLocalData();
   await session.signOut(false, message);
 }
@@ -48,6 +55,15 @@ export async function startSession() {
   startSync();
   // Jornada em andamento (app reaberto ou aparelho reiniciado): retoma a coleta.
   void resumeTracking().catch((error: unknown) => console.warn("Falha ao retomar a jornada", error));
+  // Sem o termo de localização aceito, o push espera o termo ser visto (tela inicial): o celular não
+  // pede as permissões de localização e de notificações ao mesmo tempo no primeiro acesso.
+  if (hasConsent()) await ensurePushRegistration();
+}
+
+/** Registro do aparelho para push (pede a permissão de notificações). Uma vez por sessão. */
+export async function ensurePushRegistration() {
+  if (pushRequested || session.get().status !== "signedIn") return;
+  pushRequested = true;
   lastRegistration = await registerDevice();
   notifyDataChanged();
 }
@@ -73,10 +89,14 @@ export async function login(email: string, password: string, apiUrl: string) {
 }
 
 export async function logout() {
-  // Sair encerra a jornada: nada é coletado depois do logout.
-  await stopTracking({ endOnServer: true });
-  await unregisterDevice();
+  // Sair encerra a jornada: nada é coletado depois do logout. Com sinal ruim, não espera mais que
+  // alguns segundos: o fim da jornada que não chegou ao servidor fica guardado e vai no próximo login,
+  // e a coleta para sozinha quando a sessão é encerrada (layout e handleLocations).
+  await Promise.race([stopTracking({ endOnServer: true }), delay(LOGOUT_TRACKING_WAIT_MS)]);
+  // Sem rede, o servidor reatribui o token de push no próximo login neste aparelho.
+  await Promise.race([unregisterDevice(), delay(LOGOUT_DEVICE_WAIT_MS)]);
   stopSync();
   lastRegistration = null;
+  pushRequested = false;
   await session.signOut();
 }

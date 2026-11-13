@@ -18,11 +18,11 @@ import re
 from collections import Counter, defaultdict
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Customer, Location, User
-from app.services.technician_regions import fold_text
+from app.services.technician_regions import fold_sql, fold_text
 
 log = logging.getLogger(__name__)
 
@@ -101,6 +101,45 @@ def canonical(variants: Counter[str]) -> str:
         return _most_used(proper)
     accented = Counter({v: n for v, n in variants.items() if _accented(v)})
     return title_pt(_most_used(accented or variants))
+
+
+async def canonical_city(
+    db: AsyncSession,
+    state: str | None,
+    city: str | None,
+    cache: dict[tuple[str, str], str] | None = None,
+) -> str | None:
+    """Grafia para gravar uma cidade digitada ou importada agora ("SAO PAULO" -> "São Paulo").
+
+    Junta as grafias já gravadas para a mesma UF e cidade (sem acento e sem diferença de
+    maiúscula) com a que chegou e escolhe como `canonical`; sem nenhuma gravada, a que chegou em
+    título pt-BR. `cache` evita repetir a consulta numa importação (uma por cidade da planilha).
+    """
+    spaced = " ".join((city or "").split())
+    if not spaced:
+        return None
+    uf = (state or "").strip().upper()
+    key = (uf, fold_text(spaced))
+    if cache is not None and key in cache:
+        return cache[key]
+    variants: Counter[str] = Counter({spaced: 1})
+    for model, city_col, state_col in CITY_COLUMNS:
+        col, state_column = getattr(model, city_col), getattr(model, state_col)
+        rows = await db.execute(
+            select(col, func.count())
+            .where(
+                state_column == uf if uf else state_column.is_(None),
+                fold_sql(col) == key[1],
+            )
+            .group_by(col)
+        )
+        for name, count in rows:
+            variants[" ".join((name or "").split())] += count
+    variants.pop("", None)
+    chosen = canonical(variants)
+    if cache is not None:
+        cache[key] = chosen
+    return chosen
 
 
 async def normalize_all(db: AsyncSession) -> dict[str, int]:

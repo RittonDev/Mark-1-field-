@@ -9,6 +9,7 @@ instâncias entregam aos seus sockets (escala horizontal). Sem Redis, entrega lo
 """
 
 import asyncio
+import contextlib
 import json
 import logging
 import uuid
@@ -171,6 +172,20 @@ def field_event(event: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+# Cliente (solicitante): só que a solicitação dele mudou. Nada de quem fez, técnico, equipe,
+# prioridade nem dados do evento (o GPS do check-in vai no `data`): o portal mostra só a lista
+# fechada de campos dele.
+_CLIENT_EVENT_KEYS = ("type", "ticket_id", "ticket_code", "status", "version", "occurred_at")
+
+
+def client_event(event: dict[str, Any]) -> dict[str, Any]:
+    return {k: event.get(k) for k in _CLIENT_EVENT_KEYS}
+
+
+# Envio que demora mais que isto (aparelho com rede ruim) derruba aquele socket, e não os outros.
+SEND_TIMEOUT = 5.0
+
+
 @dataclass(eq=False)
 class Connection:
     ws: WebSocket
@@ -193,18 +208,37 @@ class ConnectionManager:
     def remove(self, conn: Connection) -> None:
         self._conns.discard(conn)
 
+    def _payload_for(
+        self, conn: Connection, event: dict[str, Any], public: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        if not should_deliver(
+            user_id=conn.user_id, role=conn.role, team_id=conn.team_id, event=event
+        ):
+            return None
+        if conn.role == UserRole.TECHNICIAN:
+            return field_event(public)
+        if conn.role == UserRole.REQUESTER:
+            return client_event(public)
+        return public
+
+    async def _send(self, conn: Connection, payload: dict[str, Any]) -> None:
+        try:
+            await asyncio.wait_for(conn.ws.send_json(payload), timeout=SEND_TIMEOUT)
+        except Exception:  # socket fechado no meio do envio, ou lento demais
+            self.remove(conn)
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(conn.ws.close(), timeout=1.0)
+
     async def dispatch(self, event: dict[str, Any]) -> None:
+        """Entrega a todos em paralelo: um celular lento não segura o evento dos outros."""
         public = {k: v for k, v in event.items() if k != "audience"}
-        field = field_event(public)
+        sends = []
         for conn in list(self._conns):
-            if not should_deliver(
-                user_id=conn.user_id, role=conn.role, team_id=conn.team_id, event=event
-            ):
-                continue
-            try:
-                await conn.ws.send_json(field if conn.role == UserRole.TECHNICIAN else public)
-            except Exception:  # socket fechado no meio do envio
-                self.remove(conn)
+            payload = self._payload_for(conn, event, public)
+            if payload is not None:
+                sends.append(self._send(conn, payload))
+        if sends:
+            await asyncio.gather(*sends)
 
 
 class EventBus:

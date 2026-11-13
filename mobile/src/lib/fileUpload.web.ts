@@ -1,4 +1,5 @@
 // Pré-visualização no navegador: multipart com fetch + FormData (a foto está como data URL).
+// O fetch não informa o progresso do envio: `onProgress` existe só para manter o mesmo contrato.
 
 export interface SendFileOptions {
   fileUri: string;
@@ -7,6 +8,7 @@ export interface SendFileOptions {
   fields: Record<string, string>;
   headers: Record<string, string>;
   signal: AbortSignal;
+  onProgress?: (sent: number, total: number) => void;
 }
 
 export async function sendFile(url: string, options: SendFileOptions): Promise<{ status: number; body: string }> {

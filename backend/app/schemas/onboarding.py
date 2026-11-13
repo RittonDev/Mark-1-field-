@@ -1,4 +1,5 @@
 import datetime as dt
+import re
 import uuid
 from typing import Literal
 
@@ -7,6 +8,7 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 from app.core.documents import is_valid_cnpj, is_valid_cpf, normalize_document
 from app.core.enums import ApplicationStatus
 from app.schemas.common import ORMModel, Ref
+from app.schemas.records import format_phone
 
 # ----------------------------------------------------------------- catálogo
 # Fonte única dos rótulos: o formulário público e a tela de análise leem daqui.
@@ -107,6 +109,8 @@ class InviteCreate(BaseModel):
     # Reutilizável: vale para várias pessoas até expirar (ex.: grupo de técnicos parceiros).
     reusable: bool = False
     days_valid: int = Field(default=7, ge=1, le=90)
+    # Só no reutilizável: quantas fichas o link aceita no máximo (vazio: até expirar).
+    max_uses: int | None = Field(default=None, ge=1, le=5000)
 
 
 InviteState = Literal["active", "used", "expired", "revoked"]
@@ -122,6 +126,8 @@ class InviteOut(ORMModel):
     created_at: dt.datetime
     created_by: Ref | None
     state: InviteState = "active"
+    # Link para copiar de novo (só links ativos criados depois desta versão).
+    url: str | None = None
 
 
 class InviteCreated(InviteOut):
@@ -178,6 +184,37 @@ class ApplicationIn(BaseModel):
     @classmethod
     def _lower(cls, v: str) -> str:
         return v.strip().lower()
+
+    @field_validator("phone")
+    @classmethod
+    def _phone(cls, v: str) -> str:
+        digits = re.sub(r"\D", "", v)
+        if not 10 <= len(digits) <= 13:
+            raise ValueError("Informe o celular com DDD")
+        return format_phone(digits) or digits
+
+    @field_validator("birth_date")
+    @classmethod
+    def _age(cls, v: dt.date | None) -> dt.date | None:
+        if v is None:
+            return None
+        today = dt.date.today()
+        age = today.year - v.year - ((today.month, today.day) < (v.month, v.day))
+        if age < 18:
+            raise ValueError("O cadastro é para maiores de 18 anos: confira a data de nascimento")
+        if age > 90:
+            raise ValueError("Confira a data de nascimento")
+        return v
+
+    @field_validator("postal_code")
+    @classmethod
+    def _cep(cls, v: str | None) -> str | None:
+        digits = re.sub(r"\D", "", v or "")
+        if not digits:
+            return None
+        if len(digits) != 8:
+            raise ValueError("CEP com 8 dígitos")
+        return f"{digits[:5]}-{digits[5:]}"
 
     @field_validator("document")
     @classmethod

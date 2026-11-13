@@ -13,9 +13,11 @@ from pydantic import BaseModel, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.documents import normalize_document
+from app.core.documents import is_valid_cpf, normalize_document
+from app.core.messages import line_messages
 from app.models import Customer, Location
 from app.schemas.customer import LocationCreate
+from app.services import cities
 from app.services.errors import NotFound
 from app.services.spreadsheet import read_table
 
@@ -101,6 +103,17 @@ def _number(value: str) -> float | None:
     return float(value)
 
 
+def doc_digits(raw: str) -> str:
+    """CNPJ/CPF digitado como número no Excel perde os zeros da frente (01.234.567/0001-89 vira
+    1234567000189): completa. Com 9 a 11 dígitos, vira CPF se o CPF completado for válido."""
+    value = raw.strip()
+    if not value.isdigit() or len(value) >= 14:
+        return value
+    if 9 <= len(value) <= 11 and is_valid_cpf(value.zfill(11)):
+        return value.zfill(11)
+    return value.zfill(14)
+
+
 def _fields(row: dict[str, str]) -> dict[str, Any]:
     data: dict[str, Any] = {}
     for key in LOCATION_FIELDS:
@@ -111,19 +124,25 @@ def _fields(row: dict[str, str]) -> dict[str, Any]:
             data[key] = _number(value)
         elif key == "state":
             data[key] = value.upper()
+        elif key == "document":
+            data[key] = doc_digits(value)
         else:
             data[key] = " ".join(value.split()) if key == "name" else value
     return data
 
 
+LABELS = {
+    "name": "Nome do local",
+    "code": "Código",
+    "document": "CNPJ",
+    "state": "UF",
+    "latitude": "Latitude",
+    "longitude": "Longitude",
+}
+
+
 def _messages(exc: ValidationError) -> list[str]:
-    labels = {"name": "Nome do local", "document": "CNPJ", "state": "UF", "latitude": "Latitude"}
-    out = []
-    for err in exc.errors():
-        field = str(err["loc"][-1]) if err.get("loc") else ""
-        msg = err.get("msg", "inválido").replace("Value error, ", "")
-        out.append(f"{labels.get(field, field)}: {msg}" if field else msg)
-    return out
+    return line_messages(exc.errors(), LABELS)
 
 
 async def import_locations(
@@ -145,6 +164,7 @@ async def import_locations(
     by_name = {c.name.strip().lower(): c for c in customers}
     new_customers: dict[str, Customer] = {}  # chave: documento ou nome em minúsculas
     seen: set[tuple[str, str]] = set()
+    city_cache: dict[tuple[str, str], str] = {}
     result = LocationImportResult(dry_run=dry_run, rows=[])
 
     for index, row in enumerate(rows, start=2):
@@ -154,12 +174,12 @@ async def import_locations(
         customer_label = fixed_customer.name if fixed_customer else ""
 
         if customer is None:
-            name = " ".join((row.get("customer_name") or "").split())
+            name = " ".join((row.get("customer_name") or "").split())[:200]
             raw_doc = (row.get("customer_document") or "").strip()
             doc = None
             if raw_doc:
                 try:
-                    doc = normalize_document(raw_doc)
+                    doc = normalize_document(doc_digits(raw_doc))
                 except ValueError:
                     errors.append("CNPJ do cliente inválido")
             customer_label = name or raw_doc
@@ -209,6 +229,10 @@ async def import_locations(
             if dedupe in seen:
                 errors.append("Local repetido na planilha")
             seen.add(dedupe)
+        if fields.get("city") and not errors:
+            # Uma grafia só por cidade ("SAO PAULO" vira "São Paulo", como o resto da base).
+            state = fields.get("state") or (existing.state if existing is not None else None)
+            fields["city"] = await cities.canonical_city(db, state, fields["city"], city_cache)
 
         action: Literal["create", "update", "error"] = (
             "error" if errors else ("update" if existing else "create")

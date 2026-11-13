@@ -1,15 +1,18 @@
-import * as ImagePicker from "expo-image-picker";
-import { router, Stack, useLocalSearchParams } from "expo-router";
+import { router, Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View, type ScrollViewInstance } from "react-native";
-import { DetailSkeleton } from "../../../components/Skeleton";
-import { Text } from "../../../components/Text";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { FieldInput } from "../../../components/forms/FieldInput";
+import { FieldInput, SectionLabel } from "../../../components/forms/FieldInput";
 import { ReviewList, StepProgress, StepSlide, type StepDirection, type StepState } from "../../../components/forms/FormSteps";
 import { Icon } from "../../../components/Icon";
+import { DetailSkeleton } from "../../../components/Skeleton";
+import { Text } from "../../../components/Text";
+import { attachmentsStale, reloadAttachments } from "../../../components/ticket/attachments";
+import { capturePhotos, recoverCapture } from "../../../components/ticket/photoCapture";
+import { PhotoViewer, type ViewerPhoto } from "../../../components/ticket/PhotoViewer";
+import { toneInk } from "../../../components/ticket/tones";
 import { Badge, Button, Card, EmptyState, ErrorBox } from "../../../components/ui";
-import { errorMessage } from "../../../lib/api";
+import { absoluteApiUrl, errorMessage } from "../../../lib/api";
 import { useLiveQuery } from "../../../lib/changes";
 import { getAttachmentsCache, getFormError, getKv, getTicket, listPhotos, listSignatures, setKv, type PendingPhoto } from "../../../lib/db";
 import { confirmAction, notify } from "../../../lib/dialogs";
@@ -30,18 +33,11 @@ import {
   stepProblem,
 } from "../../../lib/forms";
 import { haptic } from "../../../lib/haptics";
-import {
-  deleteFormPhoto,
-  discardPhoto,
-  enqueueFormAnswers,
-  isOnline,
-  queuePhoto,
-  refreshAttachments,
-  useSyncStatus,
-} from "../../../lib/sync";
+import { useSession } from "../../../lib/session";
+import { deleteFormPhoto, discardPhoto, enqueueFormAnswers, isOnline, queuePhoto, useSyncStatus } from "../../../lib/sync";
 import type { LocalTicket } from "../../../lib/syncTypes";
 import { showToast } from "../../../lib/toast";
-import type { Attachment, FormAnswer, TicketForm } from "../../../lib/types";
+import type { Attachment, FormAnswer, FormField, TicketForm } from "../../../lib/types";
 import { useStyles, useTheme, type Palette } from "../../../theme/theme";
 
 const STATUS_LABEL = { pending: "Não iniciado", in_progress: "Em preenchimento", completed: "Concluído" } as const;
@@ -80,9 +76,23 @@ export default function FormScreen() {
   if (ticket === undefined || !modeReady) return <DetailSkeleton />;
   const form = ticket?.forms?.find((f) => f.id === formId);
   if (!ticket || !form) {
-    return <EmptyState title="Formulário não encontrado" description="Ele pode ter sido removido da OS pelo analista." />;
+    return (
+      <View style={{ flex: 1, padding: 16 }}>
+        <EmptyState icon="alert" title="Formulário não encontrado" description="Ele pode ter sido removido da OS pela central." />
+        <Button
+          title={ticket ? "Voltar para a OS" : "Voltar para a lista"}
+          onPress={() => (ticket ? backToTicket(ticket.id) : router.replace("/"))}
+        />
+      </View>
+    );
   }
   return <FormEditor key={form.id} ticket={ticket} form={form} />;
+}
+
+function backToTicket(ticketId: string) {
+  // Aberto por link direto (sem histórico), volta para a OS.
+  if (router.canGoBack()) router.back();
+  else router.replace({ pathname: "/ticket/[id]", params: { id: ticketId } });
 }
 
 function FormEditor({ ticket, form }: { ticket: LocalTicket; form: TicketForm }) {
@@ -90,6 +100,7 @@ function FormEditor({ ticket, form }: { ticket: LocalTicket; form: TicketForm })
   const styles = useStyles(makeStyles);
   const insets = useSafeAreaInsets();
   const online = isOnline(useSyncStatus());
+  const { user } = useSession();
   const scrollRef = useRef<ScrollViewInstance>(null);
   const [draft, setDraft] = useState<Record<string, FormAnswer | null>>(() => ({ ...form.answers }));
   const [error, setError] = useState<string | null>(null);
@@ -100,6 +111,15 @@ function FormEditor({ ticket, form }: { ticket: LocalTicket; form: TicketForm })
   const [direction, setDirection] = useState<StepDirection>("none");
   /** Tentou avançar com a pergunta atual pendente: mostra o aviso e o "Responder depois". */
   const [attempted, setAttempted] = useState(false);
+  /** Lista: tentou concluir com obrigatórios faltando (cada um mostra o aviso sob a pergunta). */
+  const [showMissing, setShowMissing] = useState(false);
+  const [viewer, setViewer] = useState<{ fieldId: string; index: number } | null>(null);
+  /** Esta tela mexeu nas respostas: só então ela salva sozinha (outra cópia aberta não sobrescreve). */
+  const touched = useRef(false);
+  const advanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Posição de cada pergunta no modo lista, para rolar até a primeira pendente. */
+  const fieldY = useRef<Record<string, number>>({});
+  const listY = useRef(0);
 
   const loadPhotos = useCallback(() => listPhotos(ticket.id), [ticket.id]);
   const loadAttachments = useCallback(() => getAttachmentsCache(ticket.id), [ticket.id]);
@@ -111,12 +131,44 @@ function FormEditor({ ticket, form }: { ticket: LocalTicket; form: TicketForm })
   const attachments = (attachmentRows ?? []).filter((a) => a.form_id === form.id);
   const pendingSignature = (useLiveQuery(loadSignatures) ?? []).length > 0;
   const serverError = useLiveQuery(loadError);
-  const locked = formsLocked(ticket, pendingSignature);
+  // Só o responsável preenche (o auxiliar que abre por link vê as respostas, sem alterar).
+  const canFill = ticket.assignee?.id === user?.id;
+  const locked = formsLocked(ticket, pendingSignature) || !canFill;
 
-  // Online, atualiza a lista de anexos (fotos já enviadas de cada campo) e guarda para usar offline.
+  // Online, atualiza a lista de anexos (fotos já enviadas de cada campo) e guarda para usar offline:
+  // ao abrir, ao voltar para a tela e quando a conexão volta.
+  useFocusEffect(
+    useCallback(() => {
+      if (online) reloadAttachments(ticket.id).catch(() => undefined);
+    }, [online, ticket.id]),
+  );
+
+  // Uma foto acabou de subir: a lista do servidor passa a trazê-la (a busca anterior pode ter
+  // respondido antes do envio terminar e deixado o campo com uma foto a menos).
+  const pendingCount = pendingPhotos.length;
+  const previousPending = useRef(pendingCount);
   useEffect(() => {
-    if (online) refreshAttachments(ticket.id).catch(() => undefined);
-  }, [online, ticket.id]);
+    const before = previousPending.current;
+    previousPending.current = pendingCount;
+    if (online && pendingCount < before) reloadAttachments(ticket.id).catch(() => undefined);
+  }, [pendingCount, online, ticket.id]);
+
+  // Foto tirada antes de o Android fechar o app com a câmera aberta.
+  useEffect(() => {
+    void recoverCapture((t) => t.kind === "form" && t.ticketId === ticket.id && t.formId === form.id).then(async (found) => {
+      if (!found || found.target.kind !== "form") return;
+      const { fieldId } = found.target;
+      for (const asset of found.assets) await queuePhoto(ticket.id, asset.uri, asset.mimeType, { formId: form.id, fieldId });
+      showToast("Foto recuperada", { tone: "success", description: "A foto tirada antes de o app fechar foi guardada no formulário." });
+    });
+  }, [ticket.id, form.id]);
+
+  useEffect(
+    () => () => {
+      if (advanceTimer.current) clearTimeout(advanceTimer.current);
+    },
+    [],
+  );
 
   const steps = useMemo(() => buildSteps(form.fields), [form.fields]);
   const counts = photoCounts(form.id, attachments, pendingPhotos);

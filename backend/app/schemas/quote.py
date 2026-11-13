@@ -201,3 +201,16 @@ class CatalogItemOut(ORMModel):
 class QuoteListRow(QuoteOut):
     ticket_code: str
     customer: str | None
+    # Local (loja) da OS do orçamento.
+    location: str | None = None
+
+
+class QuoteStatusTotal(BaseModel):
+    count: int = 0
+    total: Money = Decimal("0")
+
+
+class QuoteSummary(BaseModel):
+    """Totais por situação (draft, sent, approved, rejected, expired, cancelled)."""
+
+    by_status: dict[str, QuoteStatusTotal]

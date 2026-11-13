@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from app.schemas.common import ORMModel, Ref
+from app.schemas.ticket import LocalDatetime
 
 
 class ShiftOut(ORMModel):
@@ -23,7 +24,7 @@ class ShiftAction(BaseModel):
 
 
 class PingIn(BaseModel):
-    recorded_at: dt.datetime
+    recorded_at: LocalDatetime
     latitude: float = Field(ge=-90, le=90)
     longitude: float = Field(ge=-180, le=180)
     accuracy_m: float | None = Field(default=None, ge=0)
@@ -39,7 +40,8 @@ class PingBatch(BaseModel):
 
 class PingResult(BaseModel):
     accepted: int
-    # Fora de uma jornada aberta, no futuro ou repetidos: não são gravados.
+    # Fora de uma jornada aberta (ou depois do limite dela), no futuro ou repetidos: não são
+    # gravados.
     discarded: int
 
 
@@ -139,7 +141,7 @@ class TechnicianDistance(BaseModel):
     id: uuid.UUID
     name: str
     phone: str | None = None
-    # Última posição do app (até 24 h) e há quanto tempo foi registrada.
+    # Última posição do app na jornada aberta (fora dela, nada) e quando foi registrada.
     live: MapPoint | None = None
     live_at: dt.datetime | None = None
     home: TechnicianHome | None = None

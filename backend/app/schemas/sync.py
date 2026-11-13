@@ -5,7 +5,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from app.core.enums import DevicePlatform
-from app.schemas.ticket import CommentOut, TicketDetail, WorklogOut
+from app.schemas.ticket import CommentOut, LocalDatetime, TicketDetail, WorklogOut
 
 
 class SyncPullResponse(BaseModel):
@@ -17,7 +17,8 @@ class SyncPullResponse(BaseModel):
     tickets: list[TicketDetail]
     comments: list[CommentOut]
     worklogs: list[WorklogOut]
-    # OS que saíram do escopo do usuário (reatribuídas a outro analista) desde `since`.
+    # OS que saíram do técnico desde `since` (reatribuídas, ou ele saiu da lista de outros
+    # técnicos da visita): o app tira da lista.
     revoked_ticket_ids: list[uuid.UUID]
 
 
@@ -34,7 +35,9 @@ class SyncOperationIn(BaseModel):
     type: SyncOpType
     ticket_id: uuid.UUID
     payload: dict[str, Any]
-    client_timestamp: datetime | None = None
+    # Quando o técnico fez a ação no aparelho. Fica no histórico como evidência (ação feita
+    # offline); o horário da OS é o do servidor.
+    client_timestamp: LocalDatetime | None = None
 
 
 class SyncPushRequest(BaseModel):

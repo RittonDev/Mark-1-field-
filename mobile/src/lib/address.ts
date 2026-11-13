@@ -22,6 +22,37 @@ export function serviceAddressQuery(serviceAddress: string, location: LocationRe
   return [text, ...extra].join(", ");
 }
 
+export interface Coords {
+  latitude: number;
+  longitude: number;
+}
+
+/** Distância em metros entre dois pontos (fórmula de haversine). */
+export function distanceMeters(a: Coords, b: Coords): number {
+  const rad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = rad(b.latitude - a.latitude);
+  const dLon = rad(b.longitude - a.longitude);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.latitude)) * Math.cos(rad(b.latitude)) * Math.sin(dLon / 2) ** 2;
+  return 2 * 6_371_000 * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+/** "120 m", "3,2 km", "15 km". */
+export function formatDistance(meters: number): string {
+  if (meters < 1000) return `${Math.max(10, Math.round(meters / 10) * 10)} m`;
+  const km = meters / 1000;
+  return `${km < 10 ? km.toFixed(1).replace(".", ",") : Math.round(km)} km`;
+}
+
+/**
+ * Coordenadas do local do atendimento, para conferir a chegada. Só a filial cadastrada tem; quando a
+ * OS traz um endereço de atendimento próprio (texto), não há com o que comparar.
+ */
+export function siteCoords(location: LocationRef | null, serviceAddress: string | null | undefined): Coords | null {
+  if (serviceAddress?.trim() || !location) return null;
+  if (location.latitude === null || location.longitude === null) return null;
+  return { latitude: location.latitude, longitude: location.longitude };
+}
+
 export type MapTarget =
   | { kind: "coords"; latitude: number; longitude: number; label: string }
   | { kind: "address"; query: string; label: string };

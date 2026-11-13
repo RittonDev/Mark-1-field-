@@ -92,7 +92,8 @@ async def test_closing_payments_and_my_earnings(client: AsyncClient, world: Worl
     listing = (
         await client.get(f"{API}/payouts", params={"technician_id": tech_id}, headers=an)
     ).json()
-    assert listing["summary"] == {"to_pay": 200.0, "expected": 90.0, "paid": 0.0}
+    assert listing["summary"] == {"to_pay": 200.0, "expected": 90.0, "paid": 0.0, "cancelled": 0.0}
+    assert listing["total_count"] == 2
     line = next(i for i in listing["items"] if i["ticket"]["id"] == done["id"])
     assert line["concluded"] is True and line["ticket"]["code"] == done["code"]
     paid = await client.post(f"{API}/payouts/pay", json={"ids": [line["id"]]}, headers=an)
@@ -102,7 +103,7 @@ async def test_closing_payments_and_my_earnings(client: AsyncClient, world: Worl
 
     # Meus ganhos: só o técnico, só os dele.
     mine = (await client.get(f"{API}/me/earnings", headers=th)).json()
-    assert mine["summary"] == {"to_pay": 0.0, "expected": 90.0, "paid": 200.0}
+    assert mine["summary"] == {"to_pay": 0.0, "expected": 90.0, "paid": 200.0, "cancelled": 0.0}
     assert {i["ticket"]["title"] for i in mine["items"]} == {"Concluída", "Em aberto"}
     assert (await client.get(f"{API}/me/earnings", headers=an)).status_code == 403
     assert (await client.get(f"{API}/me/earnings?month=2026-13", headers=th)).status_code == 422

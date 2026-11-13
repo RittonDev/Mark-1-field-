@@ -1,39 +1,50 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
-import { Copy, Home, Mail, MapPin, MessageCircle, Navigation, Phone, Store } from "lucide-react";
-import { useState } from "react";
+import { Copy, Home, MapPin, MessageCircle, Navigation, Phone, Store } from "lucide-react";
+import Link from "next/link";
+import { useId, useState } from "react";
 import { LocationPicker } from "@/components/LocationPicker";
 import { Tabs } from "@/components/motion";
-import { useToast } from "@/components/Toaster";
 import { Card, Checkbox, EmptyState, ErrorBox, Input, LoadingBlock, Select } from "@/components/ui";
 import { absoluteApiUrl, api, errorMessage } from "@/lib/api";
-import { formatDate, initials } from "@/lib/format";
-import type { Location, NearbyResult, NearbyTechnician } from "@/lib/types";
-
-export const UFS = [
-  "AC", "AL", "AM", "AP", "BA", "CE", "DF", "ES", "GO", "MA", "MG", "MS", "MT", "PA", "PB",
-  "PE", "PI", "PR", "RJ", "RN", "RO", "RR", "RS", "SC", "SE", "SP", "TO",
-];
+import { formatDate, formatMinutes, initials } from "@/lib/format";
+import { useDebounced } from "@/lib/hooks";
+import { UFS } from "@/lib/onboarding";
+import { estimateDrive, formatKm } from "@/lib/tracking";
+import type { Location, NearbyResult, NearbyTechnician, TechnicianRegion } from "@/lib/types";
+import { whatsappUrl } from "@/lib/whatsapp";
+import { useCopy } from "./useCopy";
 
 type Mode = "store" | "city" | "coords";
 
-/** Lê coordenadas coladas ("-3,73, -38,52"?) ou de um link do Google Maps (@lat,lng / !3d...!4d... / ?q=lat,lng). */
+/**
+ * Lê coordenadas coladas ("-23.5505, -46.6333", "-23,5505; -46,6333" das planilhas) ou de um link do
+ * Google Maps (@lat,lng / !3d...!4d... / ?q=lat,lng).
+ */
 export function parseCoordinates(text: string): { latitude: number; longitude: number } | null {
-  const raw = decodeURIComponent(text.trim());
-  const patterns = [
-    /@(-?\d+\.\d+),(-?\d+\.\d+)/,
-    /!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/,
-    /[?&](?:q|query|ll|center|destination)=(-?\d+\.\d+),\s*(-?\d+\.\d+)/,
-    /(-?\d{1,2}\.\d{3,})\s*[,;\s]\s*(-?\d{1,3}\.\d{3,})/,
+  let raw = text.trim();
+  try {
+    raw = decodeURIComponent(raw);
+  } catch {
+    // "%" solto (ex.: "50% da loja" ou um link cortado): usa o texto como veio.
+  }
+  const patterns: [RegExp, boolean][] = [
+    [/@(-?\d+\.\d+),(-?\d+\.\d+)/, false],
+    [/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/, false],
+    [/[?&](?:q|query|ll|center|destination)=(-?\d+\.\d+),\s*(-?\d+\.\d+)/, false],
+    [/(-?\d{1,2}\.\d{3,})\s*[,;\s]\s*(-?\d{1,3}\.\d{3,})/, false],
+    // Vírgula decimal: separadas por ";", por espaço ou por ", " (vírgula seguida de espaço).
+    [/(-?\d{1,2},\d{2,})\s*(?:;|,\s|\s)\s*(-?\d{1,3},\d{2,})/, true],
   ];
-  for (const p of patterns) {
-    const m = raw.match(p);
-    if (m) {
-      const latitude = Number(m[1]);
-      const longitude = Number(m[2]);
-      if (Math.abs(latitude) <= 90 && Math.abs(longitude) <= 180) return { latitude, longitude };
+  for (const [pattern, comma] of patterns) {
+    const m = raw.match(pattern);
+    if (!m) continue;
+    const latitude = Number(comma ? m[1].replace(",", ".") : m[1]);
+    const longitude = Number(comma ? m[2].replace(",", ".") : m[2]);
+    if (Number.isFinite(latitude) && Number.isFinite(longitude) && Math.abs(latitude) <= 90 && Math.abs(longitude) <= 180) {
+      return { latitude, longitude };
     }
   }
   return null;
@@ -45,98 +56,144 @@ const KIND: Record<NearbyTechnician["nearest_kind"], { label: string; icon: type
   live: { label: "posição agora (em jornada)", icon: Navigation },
 };
 
-const km = (value: number) => `${value.toLocaleString("pt-BR", { maximumFractionDigits: value < 10 ? 1 : 0 })} km`;
+const ICON_LINK =
+  "inline-flex size-8 items-center justify-center rounded-lg border border-line bg-surface text-ink-muted shadow-elev-1 transition-colors hover:text-ink focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none";
 
-function ResultRow({ tech, rank }: { tech: NearbyTechnician; rank: number }) {
-  const { toast } = useToast();
-  const phone = tech.phone?.replace(/\D/g, "");
+function ResultRow({
+  tech,
+  rank,
+  placeLabel,
+  onOpen,
+}: {
+  tech: NearbyTechnician;
+  rank: number;
+  placeLabel: string;
+  onOpen?: (tech: NearbyTechnician) => void;
+}) {
+  const copy = useCopy();
   const kind = KIND[tech.nearest_kind];
   const KindIcon = kind.icon;
   const avatar = absoluteApiUrl(tech.avatar_url);
+  const drive = estimateDrive(tech.distance_km);
+  const first = tech.name.trim().split(/\s+/)[0];
+  // Convite pronto: os parceiros são chamados por atendimento, pelo WhatsApp (sem telefone, o WhatsApp
+  // abre para escolher o contato).
+  const invite = whatsappUrl(
+    tech.phone,
+    `Olá, ${first}! Temos um atendimento em ${placeLabel}. Você tem disponibilidade?`,
+  );
   return (
-    <li style={{ ["--i" as string]: rank }} className="flex flex-wrap items-start gap-3 px-4 py-3.5 transition-colors hover:bg-[var(--row-hover)] sm:px-5">
+    <li className="flex flex-wrap items-start gap-3 px-4 py-3.5 transition-colors hover:bg-[var(--row-hover)] sm:px-5">
       <span className="mt-1 w-5 shrink-0 text-right text-xs font-semibold text-ink-subtle tabular-nums">{rank + 1}</span>
-      <span className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-brand-soft text-xs font-semibold text-brand-ink">
-        {avatar ? (
-          // eslint-disable-next-line @next/next/no-img-element -- link assinado da API
-          <img src={avatar} alt="" className="size-full object-cover" />
-        ) : (
-          initials(tech.name)
-        )}
-      </span>
+      <Avatar name={tech.name} src={avatar} />
       <div className="min-w-0 flex-1">
         <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-ink">
-          {tech.name}
+          {onOpen ? (
+            <button
+              type="button"
+              onClick={() => onOpen(tech)}
+              className="rounded text-left underline-offset-2 hover:text-brand hover:underline focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
+              title="Abrir o cadastro do técnico"
+            >
+              {tech.name}
+            </button>
+          ) : (
+            tech.name
+          )}
           {tech.is_active ? null : (
             <span className="rounded-md bg-surface-2 px-1.5 py-0.5 text-[11px] font-medium text-ink-muted ring-1 ring-line ring-inset">
               sem acesso ao app
             </span>
           )}
           {tech.on_shift ? (
-            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-400">
-              <span className="size-1.5 rounded-full bg-emerald-500" />
+            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-ink-muted">
+              <span aria-hidden className="size-1.5 rounded-full bg-emerald-600" />
               em jornada
             </span>
           ) : null}
         </p>
         <p className="mt-0.5 text-xs text-ink-muted">
-          {tech.base_city ? `${tech.base_city}-${tech.base_state}` : "Região não informada"}
-          {tech.total_visits ? ` · ${tech.total_visits} OS atendidas` : ""}
-          {tech.last_visit_at ? ` · última em ${formatDate(tech.last_visit_at)}` : ""}
-          {tech.open_tickets ? ` · ${tech.open_tickets} aberta(s) agora` : ""}
+          {[
+            tech.base_city ? [tech.base_city, tech.base_state].filter(Boolean).join("-") : "Região não informada",
+            tech.total_visits ? `${tech.total_visits} OS atendidas` : null,
+            tech.last_visit_at ? `última em ${formatDate(tech.last_visit_at)}` : null,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+          {tech.open_tickets ? (
+            <>
+              {" · "}
+              <Link
+                href={`/chamados?assignee_id=${tech.id}&open_only=true`}
+                className="underline-offset-2 hover:text-brand hover:underline"
+              >
+                {tech.open_tickets} {tech.open_tickets === 1 ? "OS aberta agora" : "OS abertas agora"}
+              </Link>
+            </>
+          ) : null}
         </p>
         {tech.reasons.length ? (
           <div className="mt-1.5 flex flex-wrap gap-1">
-            {tech.reasons.filter((r) => !/^inativo/i.test(r)).slice(0, 4).map((r) => (
-              <span key={r} className="rounded-md bg-surface-2 px-1.5 py-0.5 text-[11px] text-ink-muted ring-1 ring-line ring-inset">
-                {r}
-              </span>
-            ))}
+            {tech.reasons
+              .filter((r) => !/^inativo/i.test(r))
+              .slice(0, 4)
+              .map((r) => (
+                <span key={r} className="rounded-md bg-surface-2 px-1.5 py-0.5 text-[11px] text-ink-muted ring-1 ring-line ring-inset">
+                  {r}
+                </span>
+              ))}
           </div>
         ) : null}
       </div>
       <div className="flex shrink-0 flex-col items-end gap-2">
         <span className="text-right">
-          <span className="block text-lg leading-none font-semibold text-ink tabular-nums">{km(tech.distance_km)}</span>
-          <span className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-ink-subtle" title={kind.label}>
-            <KindIcon className="size-3" />
+          <span className="block text-lg leading-none font-semibold text-ink tabular-nums">{formatKm(tech.distance_km)}</span>
+          <span className="mt-0.5 block text-[11px] text-ink-muted">
+            em linha reta · ~{formatMinutes(drive.minutes)} de carro
+          </span>
+          <span className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-ink-muted" title={kind.label}>
+            <KindIcon className="size-3" aria-hidden />
             {kind.label}
           </span>
         </span>
         <span className="flex items-center gap-1">
-          {phone ? (
-            <>
-              <a
-                href={`https://wa.me/55${phone}`}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex size-8 items-center justify-center rounded-lg border border-line bg-surface text-emerald-600 shadow-elev-1 hover:bg-emerald-50 dark:hover:bg-emerald-500/10"
-                aria-label={`Chamar ${tech.name} no WhatsApp`}
-                title="WhatsApp"
-              >
-                <MessageCircle className="size-4" />
-              </a>
-              <a
-                href={`tel:${phone}`}
-                className="inline-flex size-8 items-center justify-center rounded-lg border border-line bg-surface text-ink-muted shadow-elev-1 hover:text-ink"
-                aria-label={`Ligar para ${tech.name}`}
-                title={tech.phone ?? "Ligar"}
-              >
-                <Phone className="size-4" />
-              </a>
-            </>
+          <a
+            href={invite}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-line bg-surface px-2.5 text-xs font-medium text-ink shadow-elev-1 transition-colors hover:border-line-strong hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
+            title={
+              tech.phone
+                ? `Convidar ${tech.name} pelo WhatsApp para este atendimento`
+                : `${tech.name} está sem celular no cadastro: o WhatsApp abre para você escolher o contato`
+            }
+          >
+            <MessageCircle className="size-3.5" />
+            Convidar
+          </a>
+          {tech.phone ? (
+            <a
+              href={`tel:${tech.phone.replace(/[^\d+]/g, "")}`}
+              className={ICON_LINK}
+              aria-label={`Ligar para ${tech.name}`}
+              title={tech.phone}
+            >
+              <Phone className="size-4" />
+            </a>
           ) : null}
           <button
             type="button"
-            onClick={async () => {
-              await navigator.clipboard.writeText(`${tech.name}\n${tech.email}${tech.phone ? `\n${tech.phone}` : ""}`);
-              toast({ title: "Contato copiado", description: tech.name, tone: "success" });
-            }}
-            className="inline-flex size-8 items-center justify-center rounded-lg border border-line bg-surface text-ink-muted shadow-elev-1 hover:text-ink"
+            onClick={() =>
+              copy(`${tech.name}\n${tech.email}${tech.phone ? `\n${tech.phone}` : ""}`, {
+                title: "Contato copiado",
+                description: tech.name,
+              })
+            }
+            className={ICON_LINK}
             aria-label={`Copiar contato de ${tech.name}`}
             title="Copiar contato"
           >
-            {phone ? <Copy className="size-4" /> : <Mail className="size-4" />}
+            <Copy className="size-4" />
           </button>
         </span>
       </div>
@@ -144,29 +201,60 @@ function ResultRow({ tech, rank }: { tech: NearbyTechnician; rank: number }) {
   );
 }
 
+/** Foto do técnico; sem foto (ou link quebrado), as iniciais. */
+function Avatar({ name, src }: { name: string; src: string | null }) {
+  const [broken, setBroken] = useState(false);
+  return (
+    <span className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-brand-soft text-xs font-semibold text-brand-ink">
+      {src && !broken ? (
+        // eslint-disable-next-line @next/next/no-img-element -- link assinado da API
+        <img src={src} alt="" loading="lazy" decoding="async" onError={() => setBroken(true)} className="size-full object-cover" />
+      ) : (
+        initials(name)
+      )}
+    </span>
+  );
+}
+
 /** Joga a localização da loja e vê quem está mais perto (histórico de atendimentos, endereço e jornada ao vivo). */
-export function NearbyFinder() {
+export function NearbyFinder({
+  regions,
+  onOpenTechnician,
+}: {
+  /** Estados e cidades da base técnica (sugestões de cidade). */
+  regions?: TechnicianRegion[];
+  /** Abre o cadastro do técnico (o nome vira botão). */
+  onOpenTechnician?: (tech: NearbyTechnician) => void;
+} = {}) {
+  const cityListId = useId();
   const [mode, setMode] = useState<Mode>("store");
   const [store, setStore] = useState<Location | null>(null);
   const [uf, setUf] = useState("");
   const [city, setCity] = useState("");
   const [coordsText, setCoordsText] = useState("");
   const [includeInactive, setIncludeInactive] = useState(true);
+  // A busca por cidade espera a pessoa parar de digitar (cada consulta mede a base inteira).
+  const cityQuery = useDebounced(city.trim(), 500);
   const coords = mode === "coords" ? parseCoordinates(coordsText) : null;
+  const knownCities = regions?.find((r) => r.state === uf)?.cities ?? [];
 
-  const params: Record<string, string | number | boolean> | null =
+  const params: Record<string, string | number> | null =
     mode === "store" && store
       ? { location_id: store.id }
-      : mode === "city" && uf && city.trim().length >= 2
-        ? { city: city.trim(), state: uf }
+      : mode === "city" && uf && cityQuery.length >= 2
+        ? { city: cityQuery, state: uf }
         : mode === "coords" && coords
           ? { latitude: coords.latitude, longitude: coords.longitude }
           : null;
 
   const result = useQuery({
-    queryKey: ["technicians", "nearby", params, includeInactive],
-    queryFn: () => api.get<NearbyResult>("/technicians/nearby", { ...params, include_inactive: includeInactive, limit: 20 }),
+    // O limite entra na chave: a ficha da loja usa a mesma rota com outro limite.
+    queryKey: ["technicians", "nearby", params, includeInactive, 20],
+    // "false" vai como texto: o valor booleano false some da URL e a API entende o padrão (incluir).
+    queryFn: () =>
+      api.get<NearbyResult>("/technicians/nearby", { ...params, include_inactive: includeInactive ? "true" : "false", limit: 20 }),
     enabled: params !== null,
+    placeholderData: keepPreviousData,
   });
 
   return (
@@ -199,7 +287,21 @@ export function NearbyFinder() {
                   </option>
                 ))}
               </Select>
-              <Input value={city} onChange={(e) => setCity(e.target.value)} placeholder="Cidade da loja (ex.: Santos)" aria-label="Cidade" />
+              <Input
+                value={city}
+                onChange={(e) => setCity(e.target.value)}
+                placeholder={uf ? "Cidade da loja (ex.: Santos)" : "Escolha a UF e digite a cidade"}
+                aria-label="Cidade"
+                list={knownCities.length ? cityListId : undefined}
+                autoComplete="off"
+              />
+              {knownCities.length ? (
+                <datalist id={cityListId}>
+                  {knownCities.map((c) => (
+                    <option key={c.city} value={c.city} />
+                  ))}
+                </datalist>
+              ) : null}
             </div>
           ) : (
             <div className="flex flex-col gap-1.5">
@@ -234,10 +336,11 @@ export function NearbyFinder() {
       ) : result.error ? (
         <ErrorBox message={errorMessage(result.error)} />
       ) : result.data ? (
-        <Card className="overflow-hidden">
+        <Card className={clsx("overflow-hidden transition-opacity", result.isPlaceholderData && "opacity-70")}>
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-3 sm:px-5">
             <p className="text-sm font-bold text-ink">
               Mais próximos de <span className="text-brand-ink">{result.data.point.label}</span>
+              {result.isPlaceholderData ? <span className="ml-2 text-xs font-normal text-ink-muted">Atualizando…</span> : null}
             </p>
             <a
               href={`https://www.google.com/maps/search/?api=1&query=${result.data.point.latitude},${result.data.point.longitude}`}
@@ -250,11 +353,15 @@ export function NearbyFinder() {
             </a>
           </div>
           {result.data.technicians.length === 0 ? (
-            <EmptyState icon={<MapPin />} title="Nenhum técnico encontrado" description="Tente incluir os técnicos sem acesso ao app." />
+            <EmptyState
+              icon={<MapPin />}
+              title="Nenhum técnico encontrado"
+              description={includeInactive ? "Nenhum técnico com região ou endereço perto deste ponto." : "Tente incluir os técnicos sem acesso ao app."}
+            />
           ) : (
-            <ul className="stagger divide-y divide-line">
+            <ul className="divide-y divide-line">
               {result.data.technicians.map((t, i) => (
-                <ResultRow key={t.id} tech={t} rank={i} />
+                <ResultRow key={t.id} tech={t} rank={i} placeLabel={result.data.point.label} onOpen={onOpenTechnician} />
               ))}
             </ul>
           )}

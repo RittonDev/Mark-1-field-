@@ -18,8 +18,10 @@ import {
   History,
   MapPin,
   MessageSquare,
+  Package,
   Paperclip,
   Pencil,
+  ShieldCheck,
   Trash2,
   UserCog,
   Users,
@@ -28,11 +30,14 @@ import {
 import { StatusBadge } from "@/components/badges";
 import { EmptyState, ErrorBox, LoadingBlock } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
-import { EVENT_TYPE, STATUS } from "@/lib/constants";
-import { formatDateTime, formatMinutes } from "@/lib/format";
-import type { TicketEvent, TicketEventType, TicketStatus, UUID } from "@/lib/types";
+import { EVENT_TYPE, LEVEL, PRIORITY, RESPONSIBILITY, STATUS, TICKET_TYPE } from "@/lib/constants";
+import { formatDateTime, formatMinutes, formatMoney } from "@/lib/format";
+import type { Level, Responsibility, TicketEvent, TicketEventType, TicketPriority, TicketStatus, TicketType, UUID } from "@/lib/types";
+import { distance, eventPoint, km } from "./geo";
 
-const ICONS: Record<TicketEventType, React.ComponentType<{ className?: string }>> = {
+type Icon = React.ComponentType<{ className?: string }>;
+
+const ICONS: Record<TicketEventType, Icon> = {
   created: CirclePlus,
   updated: Pencil,
   status_changed: ArrowRightLeft,
@@ -60,6 +65,27 @@ const ICONS: Record<TicketEventType, React.ComponentType<{ className?: string }>
   payout_removed: Wallet,
 };
 
+/** Eventos que a API grava e o tipo do front ainda não lista (pedido de peça, autorização antiga). */
+const EXTRA_ICONS: Record<string, Icon> = {
+  part_requested: Package,
+  part_request_updated: Package,
+  authorization_recorded: ShieldCheck,
+};
+
+const EXTRA_LABELS: Record<string, string> = {
+  part_requested: "pediu uma peça",
+  part_request_updated: "atualizou o pedido de peça",
+  authorization_recorded: "registrou a autorização do cliente",
+};
+
+const PART_STATUS: Record<string, string> = {
+  open: "aberto",
+  quoted: "orçado",
+  approved: "aprovado",
+  rejected: "recusado",
+  cancelled: "cancelado",
+};
+
 const FIELD_LABELS: Record<string, string> = {
   title: "título",
   description: "descrição",
@@ -82,7 +108,58 @@ const FIELD_LABELS: Record<string, string> = {
   team_id: "grupo",
   scheduled_start: "início da visita",
   scheduled_end: "fim previsto",
+  visit_note: "observação da visita",
+  tags: "etiquetas",
+  project_id: "projeto",
+  resolution_notes: "descrição da conclusão",
+  client_reference: "nº do chamado do cliente",
+  signature_required: "exige assinatura",
 };
+
+/** Campos que o histórico mostra com o valor antigo e o novo; os demais (textos longos, ids), só o nome. */
+const VALUE_FIELDS = new Set([
+  "title",
+  "service_address",
+  "client_reference",
+  "requester_name",
+  "requester_contact",
+  "priority",
+  "type",
+  "impact",
+  "urgency",
+  "scheduled_start",
+  "scheduled_end",
+  "estimated_minutes",
+  "signature_required",
+]);
+
+/** Valor antigo ou novo de um campo editado, já legível ("P2", "14/11/2026 10:00", "2h"). */
+function fieldValue(key: string, value: unknown): string {
+  if (value === null || value === undefined || value === "") return "vazio";
+  if (key === "priority") return PRIORITY[value as TicketPriority]?.code ?? String(value);
+  if (key === "type") return TICKET_TYPE[value as TicketType] ?? String(value);
+  if (key === "impact" || key === "urgency") return LEVEL[value as Level] ?? String(value);
+  if (key === "scheduled_start" || key === "scheduled_end") return formatDateTime(String(value));
+  if (key === "estimated_minutes") return formatMinutes(Number(value));
+  if (key === "signature_required") return value ? "sim" : "não";
+  const text = String(value);
+  return text.length > 60 ? `${text.slice(0, 60)}…` : text;
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Nome de quem saiu ou entrou na troca de técnico. As OS migradas guardam o nome no próprio valor. */
+function personName(name: unknown, value: string | null): string | null {
+  return str(name) ?? (value && !UUID_RE.test(value) ? value : null);
+}
+
+/** Quantia gravada no evento: número ("120.00") ou já em reais ("R$ 120,00"). */
+function money(value: unknown): string | null {
+  if (typeof value === "number") return formatMoney(value);
+  if (typeof value !== "string" || !value) return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? formatMoney(n) : value;
+}
 
 /** Horários corrigidos pela central (evento times_corrected). */
 const TIME_LABELS: Record<string, string> = {
@@ -100,19 +177,134 @@ function isStatus(value: string | null): value is TicketStatus {
   return value !== null && value in STATUS;
 }
 
+/** A troca tirou o técnico da OS (sem ninguém no lugar). */
+function technicianRemoved(event: TicketEvent) {
+  return !event.to_value && !str(event.data?.to_name) && !str(event.data?.assignee_name);
+}
+
 /** Texto do evento; anexos dizem se foi foto, arquivo ou assinatura. */
 function label(event: TicketEvent): string {
-  const kind = str(event.data?.kind);
-  if (event.event_type === "attachment_added") {
-    if (kind === "photo") return "anexou uma foto";
-    if (kind === "signature") return "anexou a assinatura";
+  const data = event.data ?? {};
+  const kind = str(data.kind);
+  switch (event.event_type) {
+    case "attachment_added":
+      if (kind === "photo") return "anexou uma foto";
+      if (kind === "signature") return "anexou a assinatura";
+      break;
+    case "attachment_removed":
+      if (kind === "photo") return "excluiu a foto";
+      break;
+    case "assigned":
+      if (technicianRemoved(event)) return "tirou o técnico";
+      return event.from_value || str(data.from_name) ? "trocou o técnico" : "definiu o técnico";
+    case "unproductive_visit":
+      return "registrou visita improdutiva";
+    case "quote_approved":
+      return "aprovou o orçamento";
+    case "quote_rejected":
+      return "recusou o orçamento";
+    case "signature_collected":
+      if (!event.to_value) return "colheu a assinatura";
+      break;
   }
-  if (event.event_type === "attachment_removed" && kind === "photo") return "excluiu a foto";
-  return EVENT_TYPE[event.event_type] ?? event.event_type;
+  return EXTRA_LABELS[event.event_type] ?? EVENT_TYPE[event.event_type] ?? event.event_type;
+}
+
+/** Quem fez: o usuário; no orçamento, quem aprovou pelo link; nas OS migradas, o Field Control. */
+function actorName(event: TicketEvent): string {
+  if (event.actor) return event.actor.name;
+  const data = event.data ?? {};
+  if (event.event_type === "quote_approved" || event.event_type === "quote_rejected") {
+    const by = str(data.by);
+    return by ? `${by} (cliente)` : "Cliente";
+  }
+  return str(data.source) === "fieldcontrol" ? "Field Control" : "Sistema";
+}
+
+/** "Valor principal · detalhe · detalhe": o primeiro em destaque. */
+function Joined({ parts }: { parts: (string | null | undefined)[] }) {
+  const [first, ...rest] = parts.filter((p): p is string => Boolean(p));
+  if (!first) return null;
+  return (
+    <span className="min-w-0 text-ink-muted">
+      <span className="font-medium text-ink">{first}</span>
+      {rest.length ? ` · ${rest.join(" · ")}` : null}
+    </span>
+  );
 }
 
 function Detail({ event }: { event: TicketEvent }) {
   const data = event.data ?? {};
+  switch (event.event_type) {
+    case "status_changed": {
+      const to = isStatus(event.to_value) ? event.to_value : null;
+      if (!to) return null;
+      const from = isStatus(event.from_value) ? event.from_value : null;
+      const when = to === "scheduled" ? str(data.scheduled_start) : null;
+      return (
+        <span className="inline-flex flex-wrap items-center gap-1.5">
+          {from ? (
+            <>
+              <StatusBadge status={from} />
+              <span className="text-ink-muted">→</span>
+            </>
+          ) : (
+            <span className="text-ink-muted">para</span>
+          )}
+          <StatusBadge status={to} />
+          {when ? <span className="text-ink-muted">para {formatDateTime(when)}</span> : null}
+        </span>
+      );
+    }
+    case "assigned": {
+      const to = personName(data.to_name ?? data.assignee_name, event.to_value);
+      const from = personName(data.from_name ?? data.previous_assignee_name, event.from_value);
+      if (technicianRemoved(event)) return from ? <Joined parts={[from]} /> : null;
+      return (
+        <span className="text-ink-muted">
+          {from ? `${from} → ` : null}
+          <span className="font-medium text-ink">{to ?? "outro técnico"}</span>
+        </span>
+      );
+    }
+    case "owner_changed":
+      return (
+        <span className="text-ink-muted">
+          {str(data.from_name) ?? "sem analista"} → <span className="font-medium text-ink">{str(data.to_name) ?? "sem analista"}</span>
+        </span>
+      );
+    case "unproductive_visit": {
+      const responsibility = RESPONSIBILITY[str(data.responsibility) as Responsibility];
+      return <Joined parts={[event.to_value, responsibility ? `responsabilidade: ${responsibility.label}` : null]} />;
+    }
+    case "signature_collected":
+    case "form_added":
+    case "form_completed":
+      return <Joined parts={[event.to_value]} />;
+    case "form_removed":
+      return <Joined parts={[event.from_value]} />;
+    case "quote_sent":
+    case "quote_approved":
+    case "quote_rejected":
+      return <Joined parts={[event.to_value, money(data.total)]} />;
+    case "expense_added":
+    case "expense_updated":
+    case "expense_removed":
+      return <Joined parts={[str(data.description), money(data.total)]} />;
+    case "payout_set":
+    case "payout_removed":
+      return <Joined parts={[str(data.technician), money(data.amount)]} />;
+    case "worklog_added":
+      return typeof data.minutes === "number" ? <Joined parts={[formatMinutes(data.minutes)]} /> : null;
+  }
+  // Tipos que a API grava e o tipo do front não lista: comparados como texto.
+  const type: string = event.event_type;
+  if (type === "part_requested" || type === "part_request_updated") {
+    const quantity = [str(data.quantity), str(data.unit)].filter(Boolean).join(" ");
+    const status = type === "part_request_updated" && event.to_value ? PART_STATUS[event.to_value] : null;
+    return <Joined parts={[str(data.description), quantity, status]} />;
+  }
+  if (type === "authorization_recorded") return <Joined parts={[str(data.by_name), str(data.channel)]} />;
   if (
     event.event_type === "attachment_added" ||
     event.event_type === "attachment_updated" ||
@@ -156,41 +348,28 @@ function Detail({ event }: { event: TicketEvent }) {
     });
     return parts.length ? <span className="text-ink-muted">{parts.join(" · ")}</span> : null;
   }
-  if (event.event_type === "status_changed" && isStatus(event.from_value) && isStatus(event.to_value)) {
-    return (
-      <span className="inline-flex flex-wrap items-center gap-1.5">
-        <StatusBadge status={event.from_value} />
-        <span className="text-ink-muted">→</span>
-        <StatusBadge status={event.to_value} />
-      </span>
-    );
-  }
-  if (event.event_type === "assigned") {
-    const to = str(data.to_name) ?? str(data.assignee_name);
-    const from = str(data.from_name) ?? str(data.previous_assignee_name);
-    if (!event.to_value && !to) return <span className="text-ink-muted">removeu o responsável{from ? ` ${from}` : ""}</span>;
-    return (
-      <span className="text-ink-muted">
-        {from ? `${from} → ` : "para "}
-        <span className="font-medium text-ink">{to ?? "outro responsável"}</span>
-      </span>
-    );
-  }
   if (event.event_type === "updated") {
     const changes = data.changes ?? data.fields;
-    const keys = Array.isArray(changes)
-      ? changes.map(String)
-      : changes && typeof changes === "object"
-        ? Object.keys(changes as Record<string, unknown>)
-        : [];
-    if (keys.length) {
-      return <span className="text-ink-muted">campos: {keys.map((k) => FIELD_LABELS[k] ?? k).join(", ")}</span>;
+    if (Array.isArray(changes)) {
+      return changes.length ? <span className="text-ink-muted">campos: {changes.map((k) => FIELD_LABELS[String(k)] ?? String(k)).join(", ")}</span> : null;
+    }
+    if (changes && typeof changes === "object") {
+      const parts = Object.entries(changes as Record<string, unknown>).map(([key, change]) => {
+        const name = FIELD_LABELS[key] ?? key;
+        if (!VALUE_FIELDS.has(key) || !Array.isArray(change) || change.length !== 2) return name;
+        return `${name}: ${fieldValue(key, change[0])} → ${fieldValue(key, change[1])}`;
+      });
+      return parts.length ? <span className="min-w-0 text-ink-muted">{parts.join(" · ")}</span> : null;
     }
   }
   return null;
 }
 
-export function HistoryTab({ ticketId }: { ticketId: UUID }) {
+/**
+ * Linha do tempo da OS. O ponto de GPS só aparece quando foi o técnico que registrou no app (é a
+ * prova de presença); com a loja no mapa, diz a que distância ele estava, como no Field Control.
+ */
+export function HistoryTab({ ticketId, store = null }: { ticketId: UUID; store?: [number, number] | null }) {
   const events = useQuery({
     queryKey: ["ticket", ticketId, "events"],
     queryFn: () => api.get<TicketEvent[]>(`/tickets/${ticketId}/events`),
@@ -204,16 +383,15 @@ export function HistoryTab({ ticketId }: { ticketId: UUID }) {
   return (
     <ol className="relative ml-3 border-l border-line">
       {items.map((event) => {
-        const Icon = ICONS[event.event_type] ?? History;
-        const lat = typeof event.data?.latitude === "number" ? event.data.latitude : null;
-        const lng = typeof event.data?.longitude === "number" ? event.data.longitude : null;
+        const Icon = ICONS[event.event_type] ?? EXTRA_ICONS[event.event_type] ?? History;
+        const point = event.actor?.role === "technician" ? eventPoint(event.data) : null;
         return (
           <li key={event.id} className="mb-5 ml-5 last:mb-0">
             <span className="absolute -left-3 flex size-6 items-center justify-center rounded-full border border-line bg-surface text-ink-muted">
               <Icon className="size-3.5" />
             </span>
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-              <span className="font-semibold text-ink">{event.actor?.name ?? "Sistema"}</span>
+              <span className="font-semibold text-ink">{actorName(event)}</span>
               <span className="text-ink-muted">{label(event)}</span>
               <Detail event={event} />
             </div>
@@ -223,15 +401,15 @@ export function HistoryTab({ ticketId }: { ticketId: UUID }) {
                 {event.note}
               </p>
             ) : null}
-            {lat !== null && lng !== null ? (
+            {point ? (
               <a
-                href={`https://www.google.com/maps?q=${lat},${lng}`}
+                href={`https://www.google.com/maps?q=${point[0]},${point[1]}`}
                 target="_blank"
                 rel="noreferrer"
                 className="mt-1 inline-flex items-center gap-1 text-xs text-brand hover:underline"
               >
                 <MapPin className="size-3" />
-                Localização registrada
+                Localização registrada{store ? ` · a ${km(distance(store, point))} da loja` : ""}
               </a>
             ) : null}
           </li>

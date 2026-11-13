@@ -19,17 +19,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.enums import TicketEventType
 from app.db.base import utcnow
-from app.models import LocationPing, SystemSetting, TechnicianShift, Ticket, TicketEvent, User
+from app.models import SystemSetting, Ticket, TicketEvent, User
 from app.schemas.ticket import format_ticket_code
-from app.services import client_report, geo
+from app.services import client_report, geo, tracking
 from app.services.errors import WorkflowError
+from app.services.map_distances import ROAD_FACTOR, travel_minutes
 from app.services.suggestions import km_between
 from app.services.workflow import PRIORITY_INFO, STATUS_INFO
 
 TEMPLATES_KEY = "messages.templates"
-URBAN_KMH = 25.0  # velocidade média urbana para a previsão de chegada
-ROAD_FACTOR = 1.3  # distância em linha reta -> pelas ruas
+# Posição mais velha que isto não serve para prever a chegada.
 LIVE_WINDOW = timedelta(minutes=30)
+MIN_ETA_MINUTES = 5
 
 VARIABLES: dict[str, str] = {
     "tecnico": "Nome do técnico responsável",
@@ -153,7 +154,8 @@ def _local(value: datetime) -> datetime:
 
 
 async def _eta(db: AsyncSession, ticket: Ticket, now: datetime) -> tuple[str | None, str | None]:
-    """(hora prevista de chegada, distância) pela última posição do técnico em jornada."""
+    """(hora prevista de chegada, distância) pela última posição do técnico na jornada aberta,
+    com o mesmo tempo de carro do mapa (cidade, estrada)."""
     loc = ticket.location
     if (
         ticket.assignee_id is None
@@ -161,27 +163,15 @@ async def _eta(db: AsyncSession, ticket: Ticket, now: datetime) -> tuple[str | N
         or not geo.valid_coords(loc.latitude, loc.longitude)
     ):
         return None, None
-    on_shift = await db.scalar(
-        select(TechnicianShift.id).where(
-            TechnicianShift.user_id == ticket.assignee_id, TechnicianShift.ended_at.is_(None)
-        )
-    )
-    if on_shift is None:
+    shifts = await tracking.active_shifts(db, [ticket.assignee_id], now)
+    ping = (await tracking.latest_pings(db, shifts)).get(ticket.assignee_id)
+    if ping is None or ping.recorded_at < now - LIVE_WINDOW:
         return None, None
-    ping = await db.scalar(
-        select(LocationPing)
-        .where(
-            LocationPing.user_id == ticket.assignee_id,
-            LocationPing.recorded_at >= now - LIVE_WINDOW,
-        )
-        .order_by(LocationPing.recorded_at.desc())
-        .limit(1)
+    road_km = (
+        km_between((ping.latitude, ping.longitude), (loc.latitude, loc.longitude)) * ROAD_FACTOR
     )
-    if ping is None:
-        return None, None
-    km = km_between((ping.latitude, ping.longitude), (loc.latitude, loc.longitude)) * ROAD_FACTOR
-    minutes = max(5, round(km / URBAN_KMH * 60))
-    return _local(now + timedelta(minutes=minutes)).strftime("%H:%M"), f"{km:.0f} km"
+    minutes = max(MIN_ETA_MINUTES, travel_minutes(road_km))
+    return _local(now + timedelta(minutes=minutes)).strftime("%H:%M"), f"{road_km:.0f} km"
 
 
 async def context(db: AsyncSession, ticket: Ticket, actor: User) -> dict[str, str]:

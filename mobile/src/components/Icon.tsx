@@ -21,6 +21,8 @@ export type IconName =
   | "checkCircle"
   | "chevronRight"
   | "chevronLeft"
+  | "chevronDown"
+  | "chevronUp"
   | "share"
   | "navigate"
   | "more"
@@ -115,6 +117,10 @@ function Shape({ name }: { name: IconName }) {
       return <Path d="M9.5 6l6 6-6 6" />;
     case "chevronLeft":
       return <Path d="M14.5 6l-6 6 6 6" />;
+    case "chevronDown":
+      return <Path d="M6 9.5l6 6 6-6" />;
+    case "chevronUp":
+      return <Path d="M6 14.5l6-6 6 6" />;
     case "share":
       return (
         <>

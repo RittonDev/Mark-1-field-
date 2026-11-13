@@ -11,11 +11,12 @@ segredo da API. Dá para copiar o link de novo a qualquer momento e trocar (revo
 preciso, e um vazamento do banco não entrega links válidos.
 
 Nada interno entra no relatório: acompanhamentos, apontamentos, custos, orçamentos, notas,
-motivos de violação e eventos internos ficam de fora.
+motivos de violação e eventos internos ficam de fora (inclusive a foto do comprovante de um
+custo extra, que é um anexo da OS).
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select, update
@@ -27,7 +28,7 @@ from app.core.config import settings
 from app.core.enums import TicketEventType, TicketStatus
 from app.core.security import create_download_token
 from app.db.base import utcnow
-from app.models import Ticket, TicketAttachment, TicketEvent
+from app.models import Ticket, TicketAttachment, TicketEvent, TicketExpense, User
 from app.schemas.client_report import (
     PublicReport,
     PublicReportCustomer,
@@ -50,6 +51,8 @@ FINISHED = (S.RESOLVED, S.CLOSED)
 LINK_KIND = "report"
 PHOTO_LINK_MINUTES = 24 * 60
 NOT_FINISHED = "Disponível quando a OS for concluída"
+# A mesma pessoa recarregando a página (ou baixando o PDF) não conta como outra visualização.
+VIEW_DEDUPE = timedelta(minutes=10)
 
 
 class ReportUnavailable(Exception):
@@ -163,15 +166,25 @@ async def ticket_for_token(db: AsyncSession, token: str) -> Ticket:
     return ticket
 
 
+def counts_as_client_view(ticket: Ticket, viewer: User | None) -> bool:
+    """A gestão e os técnicos da OS abrindo o link (conferir, baixar o PDF) não são o cliente."""
+    if viewer is None:
+        return True
+    if viewer.can_manage_tickets or viewer.id == ticket.assignee_id:
+        return False
+    return not any(h.id == viewer.id for h in ticket.helpers)
+
+
 async def register_view(db: AsyncSession, ticket: Ticket, now: datetime) -> None:
+    """Conta a visualização do cliente; de novo em menos de 10 min só atualiza a hora."""
+    last = ticket.report_last_viewed_at
+    values: dict[str, Any] = {"report_last_viewed_at": now, "updated_at": Ticket.updated_at}
+    if last is None or now - last >= VIEW_DEDUPE:
+        values["report_views"] = Ticket.report_views + 1
     await db.execute(
         update(Ticket)
         .where(Ticket.id == ticket.id)
-        .values(
-            report_views=Ticket.report_views + 1,
-            report_last_viewed_at=now,
-            updated_at=Ticket.updated_at,
-        )
+        .values(**values)
         .execution_options(synchronize_session=False)
     )
 
@@ -256,12 +269,24 @@ async def build(db: AsyncSession, ticket: Ticket, base_url: str) -> PublicReport
             .order_by(TicketAttachment.created_at)
         )
     )
+    # Foto de recibo (pedágio, estacionamento, nota do material) ligada a um custo extra: é
+    # custo, e o cliente nunca vê custo.
+    receipts = set(
+        await db.scalars(
+            select(TicketExpense.receipt_attachment_id).where(
+                TicketExpense.ticket_id == ticket.id,
+                TicketExpense.receipt_attachment_id.is_not(None),
+            )
+        )
+    )
     by_field: dict[tuple[uuid.UUID, str], list[TicketAttachment]] = {}
     loose: list[TicketAttachment] = []
     signature_att: TicketAttachment | None = None
     for att in attachments:
         if ticket.signature_attachment_id is not None and att.id == ticket.signature_attachment_id:
             signature_att = att
+        elif att.id in receipts:
+            continue
         elif att.form_id is not None and att.field_id:
             by_field.setdefault((att.form_id, att.field_id), []).append(att)
         elif att.kind == "photo" and att.form_id is None:
@@ -299,9 +324,17 @@ async def build(db: AsyncSession, ticket: Ticket, base_url: str) -> PublicReport
             .order_by(TicketEvent.created_at)
         )
     )
+    # OS reaberta: vale só o atendimento depois da última reabertura (a conclusão antiga não é
+    # mais o resultado, e a chegada nova não pode ficar de fora).
+    reopened = [i for i, ev in enumerate(events) if ev.to_value == S.REOPENED.value]
+    if reopened:
+        events = events[reopened[-1] + 1 :]
     # A última visita é a que concluiu a OS (antes dela pode ter havido improdutivas).
-    finished_ev = _last_before(events, S.RESOLVED, None)
-    finished_at = ticket.resolved_at or (finished_ev.created_at if finished_ev else None)
+    finished = ticket.status in FINISHED
+    finished_ev = _last_before(events, S.RESOLVED, None) if finished else None
+    finished_at = None
+    if finished:
+        finished_at = ticket.resolved_at or (finished_ev.created_at if finished_ev else None)
     arrive_ev = _last_before(events, S.IN_PROGRESS, finished_at)
     en_route_ev = _last_before(
         events, S.EN_ROUTE, arrive_ev.created_at if arrive_ev else finished_at

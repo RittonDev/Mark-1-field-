@@ -7,10 +7,11 @@ import { formatDateTime, formatDocument, formatMinutes } from "@/lib/format";
 import type { TicketDetail } from "@/lib/types";
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  const empty = children === null || children === undefined || children === "";
   return (
     <div className="grid grid-cols-[7.5rem_1fr] gap-2 py-1.5 text-sm">
       <dt className="text-ink-muted">{label}</dt>
-      <dd className="min-w-0 break-words text-ink">{children ?? "—"}</dd>
+      <dd className="min-w-0 break-words text-ink">{empty ? "—" : children}</dd>
     </div>
   );
 }
@@ -30,9 +31,7 @@ function DurationCompare({ ticket }: { ticket: TicketDetail }) {
       <p>
         <span className="text-ink-muted">Real </span>
         {actual > 0 || ticket.work_started_at ? formatMinutes(actual) : "—"}
-        {ticket.work_started_at ? (
-          <span className="ml-1 text-xs text-amber-600 dark:text-amber-400">em atendimento</span>
-        ) : null}
+        {ticket.work_started_at ? <span className="ml-1 text-xs text-ink-muted">em atendimento</span> : null}
       </p>
       {ratio !== null ? (
         <p className={over ? "text-xs font-medium text-red-600 dark:text-red-400" : "text-xs text-ink-muted"}>
@@ -45,6 +44,11 @@ function DurationCompare({ ticket }: { ticket: TicketDetail }) {
 
 export function TicketInfo({ ticket }: { ticket: TicketDetail }) {
   const loc = ticket.location;
+  const requester = ticket.requester?.name ?? ticket.requester_name;
+  // Tipo e impacto/urgência vêm do modelo ITIL: a operação escolhe a prioridade direto. Só aparecem
+  // quando fogem do padrão (corretiva, média/média), por exemplo numa OS migrada.
+  const customType = ticket.type !== "incident";
+  const customLevels = ticket.impact !== "medium" || ticket.urgency !== "medium";
   const hasGeo = loc && loc.latitude !== null && loc.longitude !== null;
   const search = (parts: (string | null | undefined)[]) =>
     `https://www.google.com/maps/search/${encodeURIComponent(parts.filter(Boolean).join(", "))}`;
@@ -108,9 +112,11 @@ export function TicketInfo({ ticket }: { ticket: TicketDetail }) {
             </Row>
           ) : null}
           <Row label="Solicitante">
-            {ticket.requester?.name ?? ticket.requester_name}
-            {ticket.requester_contact ? (
-              <span className="block text-xs text-ink-muted">{ticket.requester_contact}</span>
+            {requester || ticket.requester_contact ? (
+              <>
+                {requester}
+                {ticket.requester_contact ? <span className="block text-xs text-ink-muted">{ticket.requester_contact}</span> : null}
+              </>
             ) : null}
           </Row>
         </dl>
@@ -119,7 +125,7 @@ export function TicketInfo({ ticket }: { ticket: TicketDetail }) {
       <Card>
         <CardHeader title="Classificação e datas" />
         <dl className="px-4 py-2">
-          <Row label="Tipo">{TICKET_TYPE[ticket.type]}</Row>
+          {customType ? <Row label="Tipo">{TICKET_TYPE[ticket.type]}</Row> : null}
           <Row label="Categoria">{ticket.category?.full_name}</Row>
           {ticket.service_type ? <Row label="Tipo de serviço">{ticket.service_type.name}</Row> : null}
           {ticket.estimated_minutes || ticket.actual_minutes > 0 || ticket.work_started_at ? (
@@ -127,9 +133,11 @@ export function TicketInfo({ ticket }: { ticket: TicketDetail }) {
               <DurationCompare ticket={ticket} />
             </Row>
           ) : null}
-          <Row label="Impacto/urgência">
-            {LEVEL[ticket.impact]} / {LEVEL[ticket.urgency]}
-          </Row>
+          {customLevels ? (
+            <Row label="Impacto/urgência">
+              {LEVEL[ticket.impact]} / {LEVEL[ticket.urgency]}
+            </Row>
+          ) : null}
           <Row label="Origem">{TICKET_SOURCE[ticket.source]}</Row>
           <Row label="Aberta em">{formatDateTime(ticket.created_at)}</Row>
           {ticket.created_by ? <Row label="Aberta por">{ticket.created_by.name}</Row> : null}

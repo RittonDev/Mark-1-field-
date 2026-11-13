@@ -56,7 +56,8 @@ export default function RootLayout() {
   }, [status, signedIn, mustChange]);
 
   if (!ready) return null;
-  const titleFont = brandFont("600");
+  // Títulos em negrito, como os da web.
+  const titleFont = brandFont("700");
 
   return (
     <SafeAreaProvider>
@@ -66,7 +67,7 @@ export default function RootLayout() {
           screenOptions={{
             headerStyle: { backgroundColor: c.surface },
             headerTintColor: c.ink,
-            headerTitleStyle: titleFont ? { fontFamily: titleFont, color: c.ink } : { fontWeight: "600", color: c.ink },
+            headerTitleStyle: titleFont ? { fontFamily: titleFont, color: c.ink } : { fontWeight: "700", color: c.ink },
             headerBackTitleStyle: titleFont ? { fontFamily: brandFont("500") } : undefined,
             headerShadowVisible: false,
             contentStyle: { backgroundColor: c.canvas },
@@ -77,12 +78,13 @@ export default function RootLayout() {
             <Stack.Screen name="index" options={{ headerShown: false }} />
             <Stack.Screen name="ticket/[id]" options={{ title: "OS" }} />
             <Stack.Screen name="conta" options={{ title: "Conta" }} />
-            <Stack.Screen name="termo-rastreamento" options={{ title: "Termo de rastreamento", presentation: "modal" }} />
+            <Stack.Screen name="termo-rastreamento" options={{ title: "Uso da localização", presentation: "modal" }} />
             <Stack.Screen name="formulario/[ticketId]/[formId]" options={{ title: "Formulário" }} />
             <Stack.Screen name="assinatura/[ticketId]" options={{ title: "Assinatura" }} />
           </Stack.Protected>
-          <Stack.Protected guard={mustChange}>
-            <Stack.Screen name="trocar-senha" options={{ headerShown: false }} />
+          {/* Senha provisória: é a única tela até trocar. Depois, o técnico troca quando quiser (Conta). */}
+          <Stack.Protected guard={signedIn}>
+            <Stack.Screen name="trocar-senha" options={{ headerShown: !mustChange, title: "Trocar senha" }} />
           </Stack.Protected>
           <Stack.Protected guard={!signedIn}>
             <Stack.Screen name="login" options={{ headerShown: false }} />

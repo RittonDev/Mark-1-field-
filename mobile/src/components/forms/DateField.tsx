@@ -10,20 +10,27 @@ const toIso = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.
 const fromIso = (s: string | null) => (s && /^\d{4}-\d{2}-\d{2}$/.test(s) ? new Date(`${s}T12:00:00`) : null);
 const label = (s: string) => s.split("-").reverse().join("/");
 
-/** Data sem hora ("YYYY-MM-DD"), para campos de formulário. Na web: DateField.web.tsx. */
+/**
+ * Data sem hora ("YYYY-MM-DD"), para campos de formulário. Quase sempre é o dia da visita: o atalho
+ * "Hoje" preenche com um toque. Na web: DateField.web.tsx.
+ */
 export function DateField({
   value,
   onChange,
   disabled = false,
+  label: fieldLabel,
 }: {
   value: string | null;
   onChange: (value: string | null) => void;
   disabled?: boolean;
+  /** Pergunta do campo, para o leitor de tela. */
+  label?: string;
 }) {
   const c = useTheme();
   const styles = useStyles(makeStyles);
   const [iosOpen, setIosOpen] = useState(false);
   const current = fromIso(value);
+  const today = toIso(new Date());
 
   function open() {
     if (disabled) return;
@@ -34,12 +41,30 @@ export function DateField({
     }
   }
 
+  const spoken = value ? `${fieldLabel ? `${fieldLabel}: ` : "Data: "}${label(value)}` : `${fieldLabel ? `${fieldLabel}: ` : ""}selecionar data`;
+
   return (
     <View style={{ gap: 8 }}>
       <View style={styles.row}>
-        <Pressable accessibilityRole="button" onPress={open} style={[styles.input, disabled && { opacity: 0.6 }]}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={spoken}
+          accessibilityState={{ disabled, expanded: Platform.OS === "ios" ? iosOpen : undefined }}
+          onPress={open}
+          style={[styles.input, disabled && { opacity: 0.6 }]}
+        >
           <Text style={[styles.text, !value && { color: c.placeholder }]}>{value ? label(value) : "Selecionar data"}</Text>
         </Pressable>
+        {!disabled && value !== today ? (
+          <Button
+            compact
+            title="Hoje"
+            onPress={() => {
+              setIosOpen(false);
+              onChange(today);
+            }}
+          />
+        ) : null}
         {value && !disabled ? <Button compact title="Limpar" variant="ghost" onPress={() => onChange(null)} /> : null}
       </View>
       {Platform.OS === "ios" && iosOpen ? (
@@ -50,7 +75,10 @@ export function DateField({
           themeVariant={c.scheme}
           accentColor={c.primary}
           value={current ?? new Date()}
-          onValueChange={(_e, d) => onChange(toIso(d))}
+          onValueChange={(_e, d) => {
+            onChange(toIso(d));
+            setIosOpen(false);
+          }}
         />
       ) : null}
     </View>

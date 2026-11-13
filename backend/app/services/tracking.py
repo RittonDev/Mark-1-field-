@@ -1,9 +1,15 @@
-"""Rastreamento em tempo real dos técnicos (jornada, posições, estado para o mapa)."""
+"""Rastreamento em tempo real dos técnicos (jornada, posições, estado para o mapa).
+
+A posição só vale dentro de uma jornada aberta (termo de ciência, LGPD): fora dela, nenhum ponto
+é gravado nem mostrado. Jornada esquecida aberta fecha sozinha em MAX_SHIFT, para a coleta não
+seguir de madrugada nem em casa.
+"""
 
 import uuid
+from collections.abc import Iterable
 from datetime import date, datetime, timedelta
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,6 +17,7 @@ from app.core.config import settings
 from app.core.enums import TicketEventType, TicketStatus, UserRole
 from app.db.base import utcnow
 from app.models import LocationPing, TechnicianShift, Ticket, TicketEvent, User
+from app.models.ticket import ticket_helpers
 from app.schemas.ticket import format_ticket_code
 from app.schemas.tracking import (
     HistoryPoint,
@@ -26,25 +33,110 @@ from app.schemas.tracking import (
 from app.services import geo
 from app.services.activities import day_bounds
 from app.services.realtime import bus
+from app.services.tickets import LIST_NOLOAD
 from app.services.workflow import OPEN_STATUSES
 
 # Tolerância entre o relógio do aparelho e o início/fim da jornada.
 CLOCK_TOLERANCE = timedelta(minutes=2)
 # Sem posição há mais que isto durante a jornada: "sem sinal".
 NO_SIGNAL_AFTER = timedelta(minutes=5)
+# Jornada mais longa que isto foi esquecida aberta: fecha sozinha e não aceita mais pontos.
+MAX_SHIFT = timedelta(hours=14)
+
+
+def shift_limit(shift: TechnicianShift) -> datetime:
+    """Até quando a jornada aceita pontos (o fim, ou o limite se ficou aberta)."""
+    limit = shift.started_at + MAX_SHIFT
+    return min(shift.ended_at, limit) if shift.ended_at is not None else limit
+
+
+def shift_active(shift: TechnicianShift, now: datetime) -> bool:
+    return shift.ended_at is None and now < shift.started_at + MAX_SHIFT
+
+
+async def _close_left_open(
+    db: AsyncSession, shift: TechnicianShift, newer: TechnicianShift | None
+) -> None:
+    """Fecha a jornada que ficou aberta: repetida (dois "iniciar" juntos), no começo da que a
+    substituiu; esquecida, no último ponto dela ou no limite."""
+    if newer is not None:
+        shift.ended_at = max(shift.started_at, min(newer.started_at, shift_limit(shift)))
+        return
+    last = await db.scalar(
+        select(func.max(LocationPing.recorded_at)).where(LocationPing.shift_id == shift.id)
+    )
+    limit = shift_limit(shift)
+    shift.ended_at = min(last, limit) if last is not None and last > shift.started_at else limit
 
 
 async def open_shift(db: AsyncSession, user: User) -> TechnicianShift | None:
-    return await db.scalar(
-        select(TechnicianShift).where(
-            TechnicianShift.user_id == user.id, TechnicianShift.ended_at.is_(None)
-        )
+    """A jornada aberta do técnico. Esquecida (passou do limite) ou repetida é fechada aqui:
+    quem chama grava (commit)."""
+    now = utcnow()
+    current: TechnicianShift | None = None
+    shifts = await db.scalars(
+        select(TechnicianShift)
+        .where(TechnicianShift.user_id == user.id, TechnicianShift.ended_at.is_(None))
+        .order_by(TechnicianShift.started_at.desc())
     )
+    for shift in list(shifts):
+        if current is None and shift_active(shift, now):
+            current = shift
+        else:
+            await _close_left_open(db, shift, current)
+    return current
+
+
+async def active_shifts(
+    db: AsyncSession, user_ids: Iterable[uuid.UUID], now: datetime | None = None
+) -> dict[uuid.UUID, TechnicianShift]:
+    """Jornada aberta e dentro do limite de cada técnico (a mais recente, se houver duas).
+    Só leitura: o mapa não fecha jornada de ninguém."""
+    ids = list(user_ids)
+    if not ids:
+        return {}
+    now = now or utcnow()
+    rows = await db.scalars(
+        select(TechnicianShift)
+        .where(
+            TechnicianShift.user_id.in_(ids),
+            TechnicianShift.ended_at.is_(None),
+            TechnicianShift.started_at > now - MAX_SHIFT,
+        )
+        .order_by(TechnicianShift.started_at)
+    )
+    return {s.user_id: s for s in rows}
+
+
+async def latest_pings(
+    db: AsyncSession, shifts: dict[uuid.UUID, TechnicianShift]
+) -> dict[uuid.UUID, LocationPing]:
+    """Último ponto de cada técnico dentro da jornada aberta dele. O ponto da jornada anterior
+    (ontem à noite, em casa) não conta, e a consulta não lê o histórico inteiro."""
+    if not shifts:
+        return {}
+    oldest = min(s.started_at for s in shifts.values()) - CLOCK_TOLERANCE
+    rows = await db.scalars(
+        select(LocationPing)
+        .where(LocationPing.user_id.in_(list(shifts)), LocationPing.recorded_at >= oldest)
+        .distinct(LocationPing.user_id)
+        .order_by(LocationPing.user_id, LocationPing.recorded_at.desc())
+    )
+    return {
+        p.user_id: p
+        for p in rows
+        if p.recorded_at >= shifts[p.user_id].started_at - CLOCK_TOLERANCE
+    }
 
 
 async def start_shift(
     db: AsyncSession, user: User, latitude: float | None, longitude: float | None
 ) -> TechnicianShift:
+    # Dois "iniciar" ao mesmo tempo (toque duplo, reenvio) abrem uma jornada só.
+    await db.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+        {"key": f"shift:{user.id}"},
+    )
     current = await open_shift(db, user)
     if current is not None:
         return current  # idempotente: o app pode reenviar
@@ -63,8 +155,10 @@ async def start_shift(
 async def end_shift(
     db: AsyncSession, user: User, latitude: float | None, longitude: float | None
 ) -> TechnicianShift | None:
+    """Encerra a jornada aberta (e fecha qualquer outra que tenha ficado aberta)."""
     shift = await open_shift(db, user)
     if shift is None:
+        await db.flush()
         return None
     shift.ended_at = utcnow()
     shift.end_latitude = latitude
@@ -89,9 +183,9 @@ async def add_pings(db: AsyncSession, user: User, pings: list[PingIn]) -> tuple[
     )
 
     def shift_for(at: datetime) -> TechnicianShift | None:
+        # Jornada esquecida aberta não aceita ponto depois do limite (MAX_SHIFT).
         for s in shifts:
-            end = s.ended_at or now
-            if s.started_at - CLOCK_TOLERANCE <= at <= end + CLOCK_TOLERANCE:
+            if s.started_at - CLOCK_TOLERANCE <= at <= shift_limit(s) + CLOCK_TOLERANCE:
                 return s
         return None
 
@@ -170,36 +264,36 @@ async def live(db: AsyncSession, team_id: uuid.UUID | None = None) -> list[LiveT
     if not ids:
         return []
 
-    shifts = {
-        s.user_id: s
-        for s in await db.scalars(
-            select(TechnicianShift).where(
-                TechnicianShift.user_id.in_(ids), TechnicianShift.ended_at.is_(None)
-            )
-        )
-    }
-    latest = {
-        p.user_id: p
-        for p in await db.scalars(
-            select(LocationPing)
-            .where(LocationPing.user_id.in_(ids))
-            .distinct(LocationPing.user_id)
-            .order_by(LocationPing.user_id, LocationPing.recorded_at.desc())
-        )
-    }
+    # Fora da jornada a posição não aparece (LGPD): o trajeto fica só no histórico.
+    shifts = await active_shifts(db, ids, now)
+    latest = await latest_pings(db, shifts)
+    # OS em campo de cada um, como responsável ou como outro técnico da visita.
+    wanted = set(ids)
     in_field: dict[uuid.UUID, Ticket] = {}
-    for t in await db.scalars(
-        select(Ticket).where(
-            Ticket.assignee_id.in_(ids),
+    field_tickets = await db.scalars(
+        select(Ticket)
+        .options(*LIST_NOLOAD)
+        .where(
             Ticket.status.in_((TicketStatus.IN_PROGRESS, TicketStatus.EN_ROUTE)),
+            or_(
+                Ticket.assignee_id.in_(ids),
+                Ticket.id.in_(
+                    select(ticket_helpers.c.ticket_id).where(ticket_helpers.c.user_id.in_(ids))
+                ),
+            ),
         )
-    ):
-        current = in_field.get(t.assignee_id)  # type: ignore[arg-type]
-        # Em atendimento tem prioridade sobre em deslocamento.
-        if current is None or (
-            t.status == TicketStatus.IN_PROGRESS and current.status != TicketStatus.IN_PROGRESS
-        ):
-            in_field[t.assignee_id] = t  # type: ignore[index]
+    )
+    for t in field_tickets:
+        people = {h.id for h in t.helpers}
+        if t.assignee_id is not None:
+            people.add(t.assignee_id)
+        for person in people & wanted:
+            current = in_field.get(person)
+            # Em atendimento tem prioridade sobre em deslocamento.
+            if current is None or (
+                t.status == TicketStatus.IN_PROGRESS and current.status != TicketStatus.IN_PROGRESS
+            ):
+                in_field[person] = t
     open_counts = dict(
         (
             await db.execute(
@@ -213,12 +307,13 @@ async def live(db: AsyncSession, team_id: uuid.UUID | None = None) -> list[LiveT
     out: list[LiveTechnician] = []
     for tech in technicians:
         shift = shifts.get(tech.id)
-        # Fora da jornada a posição não aparece (LGPD): o trajeto fica só no histórico.
         ping = latest.get(tech.id) if shift is not None else None
         ticket = in_field.get(tech.id)
+        # Jornada que acabou de abrir ainda não mandou ponto: não é "sem sinal".
+        last_signal = ping.recorded_at if ping is not None else (shift.started_at if shift else None)
         if shift is None:
             state = "offline"
-        elif ping is None or ping.recorded_at < now - NO_SIGNAL_AFTER:
+        elif last_signal is None or last_signal < now - NO_SIGNAL_AFTER:
             state = "no_signal"
         elif ticket is not None and ticket.status == TicketStatus.IN_PROGRESS:
             state = "in_progress"

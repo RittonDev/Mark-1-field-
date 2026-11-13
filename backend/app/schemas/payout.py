@@ -55,6 +55,8 @@ class PayoutLine(BaseModel):
     paid_at: datetime | None
     # OS concluída (resolvida ou fechada) entra no "a pagar"; aberta ainda é previsão.
     concluded: bool
+    # OS cancelada: o valor pendente não é previsão (só sai se a central decidir pagar).
+    cancelled: bool = False
     ticket: PayoutTicketRef
 
 
@@ -62,11 +64,15 @@ class PayoutSummary(BaseModel):
     to_pay: Money = Decimal("0")
     expected: Money = Decimal("0")
     paid: Money = Decimal("0")
+    # Pendente de OS cancelada (fora do "a pagar" e do "previsto").
+    cancelled: Money = Decimal("0")
 
 
 class PayoutList(BaseModel):
     items: list[PayoutLine]
     summary: PayoutSummary
+    # Quantos valores batem com o filtro (a lista mostra até o limite; o resumo soma todos).
+    total_count: int = 0
 
 
 class MyEarnings(PayoutList):

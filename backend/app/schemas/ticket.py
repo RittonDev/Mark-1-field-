@@ -1,8 +1,9 @@
 import uuid
-from datetime import datetime
-from typing import Any, Literal
+from datetime import UTC, datetime
+from typing import Annotated, Any, Literal
+from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, Field, computed_field, model_validator
+from pydantic import AfterValidator, BaseModel, Field, computed_field, model_validator
 
 from app.core.config import settings
 from app.core.enums import (
@@ -33,6 +34,19 @@ from app.services.sla import response_breached as sla_response_breached
 
 def format_ticket_code(number: int) -> str:
     return f"{settings.TICKET_PREFIX}-{number:06d}"
+
+
+def assume_local(value: datetime) -> datetime:
+    """Data e hora sem fuso (integração, planilha, script) é a hora da operação (Brasília), não
+    UTC: sem isso o horário ficava 3 h deslocado ou a comparação com o banco dava erro 500.
+    Tudo sai em UTC."""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=ZoneInfo(settings.TIMEZONE))
+    return value.astimezone(UTC)
+
+
+# Data e hora recebida pela API (a web e o app mandam com fuso; sem fuso, vale Brasília).
+LocalDatetime = Annotated[datetime, AfterValidator(assume_local)]
 
 
 class ViolationReasonRef(ORMModel):
@@ -131,8 +145,12 @@ class TicketListItem(ORMModel):
     # Regras de campo: prazo de chegada (4h nas capitais) e tempo de técnico na loja (4h).
     arrival_due_at: datetime | None = None
     arrived_at: datetime | None = None
+    # Fim do trecho atual na loja (a cada entrada em atendimento, o que sobrou das horas).
     onsite_due_at: datetime | None = None
     onsite_warning_at: datetime | None = Field(default=None, exclude=True)
+    # Base do tempo na loja já usado (a OS completa traz os dois na resposta).
+    work_seconds: int = Field(default=0, exclude=True)
+    work_started_at: datetime | None = Field(default=None, exclude=True)
     # Outras OS no mesmo local nos últimos 30 dias (preenchido nas listagens e na fila).
     recurrence_30d: int = 0
     # Etiquetas (ex.: "Avulso", "Faturamento Matriz").
@@ -142,6 +160,14 @@ class TicketListItem(ORMModel):
     @property
     def code(self) -> str:
         return format_ticket_code(self.number)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def onsite_used_minutes(self) -> int | None:
+        """Tempo de técnico na loja já usado no chamado, somando as visitas (em minutos)."""
+        if self.arrived_at is None:
+            return None
+        return actual_seconds(self.work_seconds, self.work_started_at, utcnow()) // 60
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -299,10 +325,20 @@ class TicketCreate(BaseModel):
     # Analista responsável (só a gestão escolhe). Sem informar: quem abre assume (vai para a
     # fila dele). null explícito: fica sem analista, para alguém assumir depois.
     owner_id: uuid.UUID | None = None
-    scheduled_start: datetime | None = None
-    scheduled_end: datetime | None = None
+    scheduled_start: LocalDatetime | None = None
+    scheduled_end: LocalDatetime | None = None
     # Agendar mesmo com o técnico ocupado no horário (a API recusa com 409 sem isso).
     allow_conflict: bool = False
+
+
+# Campos que a OS sempre tem: null na edição é recusado com uma mensagem clara.
+_REQUIRED_ON_UPDATE = {
+    "title": "O título não pode ficar vazio",
+    "type": "O tipo não pode ficar vazio",
+    "impact": "O impacto não pode ficar vazio",
+    "urgency": "A urgência não pode ficar vazia",
+    "priority": "A prioridade não pode ficar vazia",
+}
 
 
 class TicketUpdate(BaseModel):
@@ -329,8 +365,12 @@ class TicketUpdate(BaseModel):
     helper_ids: list[uuid.UUID] | None = Field(default=None, max_length=6)
     # Só a gestão: transfere a OS para a fila de outro analista (null tira da fila).
     owner_id: uuid.UUID | None = None
-    scheduled_start: datetime | None = None
-    scheduled_end: datetime | None = None
+    # Só a gestão: troca o técnico no mesmo salvamento da agenda (null tira o técnico). O
+    # conflito de horário é conferido uma vez, com o técnico e a agenda finais.
+    assignee_id: uuid.UUID | None = None
+    # Novo início sem fim: o fim vem da estimativa da OS.
+    scheduled_start: LocalDatetime | None = None
+    scheduled_end: LocalDatetime | None = None
     # Só a gestão: exigir (ou dispensar) a assinatura do responsável no local.
     signature_required: bool | None = None
     # Só a gestão: o que foi feito (descrição da conclusão) e as etiquetas, a qualquer momento.
@@ -338,6 +378,17 @@ class TicketUpdate(BaseModel):
     tags: list[TagOut] | None = Field(default=None, max_length=20)
     expected_version: int | None = None
     allow_conflict: bool = False
+
+    @model_validator(mode="after")
+    def _required_stay_filled(self) -> "TicketUpdate":
+        """null em campo que a OS sempre tem é recusado (antes virava erro 500 ou um 409 que não
+        dizia o que houve); descrição null vira texto vazio."""
+        for name, text in _REQUIRED_ON_UPDATE.items():
+            if name in self.model_fields_set and getattr(self, name) is None:
+                raise ValueError(text)
+        if "description" in self.model_fields_set and self.description is None:
+            self.description = ""
+        return self
 
 
 class TicketAssign(BaseModel):
@@ -354,13 +405,13 @@ class TicketTransition(BaseModel):
     to_status: TicketStatus
     note: str | None = Field(default=None, max_length=5000)
     resolution_notes: str | None = Field(default=None, max_length=20000)
-    scheduled_start: datetime | None = None
-    scheduled_end: datetime | None = None
+    scheduled_start: LocalDatetime | None = None
+    scheduled_end: LocalDatetime | None = None
     # Geolocalização do técnico no momento da mudança (check-in de campo).
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
     expected_version: int | None = None
-    # Ao resolver uma OS com prazo violado, o motivo de cada relógio (opcional para o técnico).
+    # Ao resolver uma OS com prazo violado, o motivo de cada relógio (só a central informa).
     response_violation_reason_id: uuid.UUID | None = None
     resolution_violation_reason_id: uuid.UUID | None = None
     violation_note: str | None = Field(default=None, max_length=2000)
@@ -371,12 +422,13 @@ class TicketTimesIn(BaseModel):
     """Correção dos horários reais pela central (o técnico nunca mexe no horário).
 
     Só os campos informados mudam. `work_minutes` é o tempo de atendimento; sem ele, ao mexer no
-    início ou no término, vale o intervalo entre os dois. O motivo fica no histórico.
+    início ou no término, vale a soma dos trechos em "Em atendimento" (pausas e o tempo entre
+    visitas ficam de fora). O motivo fica no histórico.
     """
 
-    en_route_at: datetime | None = None  # saída para o local
-    arrived_at: datetime | None = None  # início do atendimento (chegada)
-    resolved_at: datetime | None = None  # término (conclusão)
+    en_route_at: LocalDatetime | None = None  # saída para o local
+    arrived_at: LocalDatetime | None = None  # início do atendimento (chegada)
+    resolved_at: LocalDatetime | None = None  # término (conclusão)
     work_minutes: int | None = Field(default=None, ge=0, le=60 * 24 * 14)
     reason: str = Field(min_length=3, max_length=500)
     expected_version: int | None = None
@@ -410,8 +462,8 @@ class EventOut(ORMModel):
 
 class WorklogCreate(BaseModel):
     description: str = Field(min_length=1, max_length=5000)
-    started_at: datetime
-    ended_at: datetime | None = None
+    started_at: LocalDatetime
+    ended_at: LocalDatetime | None = None
     minutes: int | None = Field(default=None, gt=0, le=24 * 60)
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
@@ -419,9 +471,9 @@ class WorklogCreate(BaseModel):
     @model_validator(mode="after")
     def _duration(self) -> "WorklogCreate":
         if self.ended_at is None and self.minutes is None:
-            raise ValueError("Informe ended_at ou minutes")
+            raise ValueError("Informe o fim ou a duração")
         if self.ended_at is not None and self.ended_at <= self.started_at:
-            raise ValueError("ended_at deve ser posterior a started_at")
+            raise ValueError("O fim deve ser depois do início")
         return self
 
 

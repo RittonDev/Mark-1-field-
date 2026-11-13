@@ -1,116 +1,153 @@
 "use client";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Building2, MapPin, Plus, Search } from "lucide-react";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import clsx from "clsx";
+import { ArrowDown, ArrowUp, ArrowUpDown, Building2, MapPin, Plus, Search, SquarePen, Star } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { TagChips } from "@/components/TagChips";
-import { useToast } from "@/components/Toaster";
-import {
-  Button,
-  Card,
-  Dialog,
-  EmptyState,
-  ErrorBox,
-  Field,
-  Input,
-  LoadingBlock,
-  PageHeader,
-  Table,
-  Td,
-  Textarea,
-  Th,
-} from "@/components/ui";
+import { Button, Card, Checkbox, EmptyState, ErrorBox, Input, LoadingBlock, PageHeader, Table, Td, Th } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canManageTickets } from "@/lib/constants";
 import { formatDate, formatDocument } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
-import { useCustomers } from "@/lib/queries";
 import type { Customer } from "@/lib/types";
+import { CustomerDialog } from "./CustomerDialog";
 
-function NewCustomerDialog({ onClose }: { onClose: () => void }) {
-  const queryClient = useQueryClient();
-  const { toast } = useToast();
-  const [form, setForm] = useState({ name: "", document: "", email: "", phone: "", notes: "" });
-  const set = (key: keyof typeof form, value: string) => setForm((f) => ({ ...f, [key]: value }));
+type SortKey = "name" | "locations" | "open" | "total" | "last" | "first" | "rating";
+type Sort = { key: SortKey; desc: boolean } | null;
 
-  const mutation = useMutation({
-    mutationFn: () =>
-      api.post<Customer>("/customers", {
-        name: form.name.trim(),
-        document: form.document.trim() || null,
-        email: form.email.trim() || null,
-        phone: form.phone.trim() || null,
-        notes: form.notes.trim() || null,
-      }),
-    onSuccess: (customer) => {
-      queryClient.invalidateQueries({ queryKey: ["customers"] });
-      toast({ title: `Cliente ${customer.name} cadastrado`, tone: "success" });
-      onClose();
-    },
+const SORT_VALUE: Record<SortKey, (c: Customer) => string | number> = {
+  name: (c) => c.name,
+  locations: (c) => c.locations_count,
+  open: (c) => c.open_tickets,
+  total: (c) => c.total_tickets,
+  last: (c) => c.last_ticket_at ?? "",
+  first: (c) => c.legacy?.service?.first_at ?? "",
+  rating: (c) => c.legacy?.rating?.average ?? 0,
+};
+
+/** No primeiro clique, o nome vai de A a Z; números e datas, do maior (ou mais recente) para o menor. */
+const ASCENDING_FIRST: SortKey[] = ["name"];
+
+function parseSort(value: string | null): Sort {
+  if (!value) return null;
+  const desc = value.startsWith("-");
+  const key = (desc ? value.slice(1) : value) as SortKey;
+  return key in SORT_VALUE ? { key, desc } : null;
+}
+
+function sortCustomers(list: Customer[], sort: Sort): Customer[] {
+  if (!sort) return list;
+  const valueOf = SORT_VALUE[sort.key];
+  return [...list].sort((a, b) => {
+    const x = valueOf(a);
+    const y = valueOf(b);
+    const diff = typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y), "pt-BR");
+    return (sort.desc ? -diff : diff) || a.name.localeCompare(b.name, "pt-BR");
   });
+}
 
-  return (
-    <Dialog
-      open
-      onClose={onClose}
-      title="Novo cliente"
-      description="A empresa (matriz). As filiais e lojas são cadastradas em Locais."
-      footer={
-        <>
-          <Button onClick={onClose}>Cancelar</Button>
-          <Button variant="primary" type="submit" form="new-customer" loading={mutation.isPending}>
-            Salvar
-          </Button>
-        </>
+/** Busca, filtro e ordem na URL: ao voltar da ficha do cliente, a lista está como foi deixada. */
+function useUrlParams() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const update = useCallback(
+    (changes: Record<string, string | null>) => {
+      // Parte da URL de agora: o painel da OS (?os=) e o que mais estiver nela continuam.
+      const params = new URLSearchParams(window.location.search);
+      for (const [key, value] of Object.entries(changes)) {
+        if (value) params.set(key, value);
+        else params.delete(key);
       }
-    >
-      <form
-        id="new-customer"
-        onSubmit={(e) => {
-          e.preventDefault();
-          mutation.mutate();
-        }}
-        className="grid gap-4 sm:grid-cols-2"
+      const qs = params.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    },
+    [router, pathname],
+  );
+  return [useSearchParams(), update] as const;
+}
+
+// Mesmas classes do <Th> de components/ui, com o aria-sort que o cabeçalho ordenável precisa.
+const TH_CLASS =
+  "border-b border-line bg-[var(--table-head)] px-3 py-2.5 text-[11px] font-bold tracking-[0.06em] whitespace-nowrap text-ink-muted uppercase first:pl-4 last:pr-4";
+
+function SortTh({
+  label,
+  sortKey,
+  sort,
+  onSort,
+  right = false,
+  className,
+}: {
+  label: string;
+  sortKey: SortKey;
+  sort: Sort;
+  onSort: (key: SortKey) => void;
+  right?: boolean;
+  className?: string;
+}) {
+  const direction = sort && sort.key === sortKey ? (sort.desc ? "descending" : "ascending") : undefined;
+  const Icon = direction === "descending" ? ArrowDown : direction === "ascending" ? ArrowUp : ArrowUpDown;
+  return (
+    <th aria-sort={direction} className={clsx(TH_CLASS, right && "text-right", className)}>
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        className={clsx(
+          "inline-flex items-center gap-1 rounded uppercase transition-colors hover:text-ink focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none",
+          direction && "text-ink",
+          right && "flex-row-reverse",
+        )}
       >
-        <Field label="Razão social / nome" required className="sm:col-span-2">
-          <Input value={form.name} onChange={(e) => set("name", e.target.value)} required minLength={2} />
-        </Field>
-        <Field label="CNPJ / CPF">
-          <Input
-            value={form.document}
-            onChange={(e) => set("document", e.target.value)}
-            placeholder="00.000.000/0000-00"
-            maxLength={20}
-          />
-        </Field>
-        <Field label="Telefone">
-          <Input value={form.phone} onChange={(e) => set("phone", e.target.value)} />
-        </Field>
-        <Field label="E-mail" className="sm:col-span-2">
-          <Input type="email" value={form.email} onChange={(e) => set("email", e.target.value)} />
-        </Field>
-        <Field label="Observações" className="sm:col-span-2">
-          <Textarea rows={3} value={form.notes} onChange={(e) => set("notes", e.target.value)} />
-        </Field>
-        {mutation.error ? (
-          <div className="sm:col-span-2">
-            <ErrorBox message={errorMessage(mutation.error)} />
-          </div>
-        ) : null}
-      </form>
-    </Dialog>
+        {label}
+        <Icon aria-hidden className={clsx("size-3 shrink-0", !direction && "opacity-60")} />
+      </button>
+    </th>
   );
 }
 
-export default function CustomersPage() {
+const plural = (n: number, one: string, many: string) => `${n.toLocaleString("pt-BR")} ${n === 1 ? one : many}`;
+
+function CustomersView() {
   const { user } = useAuth();
   const canEdit = canManageTickets(user?.role);
-  const [search, setSearch] = useState("");
-  const [creating, setCreating] = useState(false);
-  const q = useDebounced(search.trim());
-  const customers = useCustomers(q || undefined);
+  const [params, setParams] = useUrlParams();
+  const urlQ = params.get("q") ?? "";
+  const showInactive = params.get("inativos") === "1";
+  const sort = parseSort(params.get("ordem"));
+  const [search, setSearch] = useState(urlQ);
+  const [syncedQ, setSyncedQ] = useState(urlQ);
+  const [editing, setEditing] = useState<Customer | "new" | null>(null);
+  const debounced = useDebounced(search.trim(), 300);
+
+  // Voltar/avançar no navegador trocou a busca da URL: o campo acompanha (a busca que saiu daqui, não).
+  if (urlQ !== syncedQ) {
+    setSyncedQ(urlQ);
+    if (urlQ !== debounced) setSearch(urlQ);
+  }
+  // A busca digitada vai para a URL quando a digitação para.
+  useEffect(() => {
+    if (debounced !== search.trim() || debounced === urlQ) return;
+    setParams({ q: debounced || null });
+  }, [debounced, search, urlQ, setParams]);
+
+  const customers = useQuery({
+    queryKey: ["customers", urlQ],
+    queryFn: () => api.get<Customer[]>("/customers", { q: urlQ || undefined }),
+    staleTime: 60_000,
+    // Trocar a busca mantém a tabela (esmaecida) até a resposta, sem piscar o esqueleto.
+    placeholderData: keepPreviousData,
+  });
+  const all = customers.data ?? [];
+  const hidden = showInactive ? 0 : all.filter((c) => !c.is_active).length;
+  const rows = sortCustomers(showInactive ? all : all.filter((c) => c.is_active), sort);
+  const onSort = (key: SortKey) => {
+    const desc = sort?.key === key ? !sort.desc : !ASCENDING_FIRST.includes(key);
+    setParams({ ordem: `${desc ? "-" : ""}${key}` });
+  };
 
   return (
     <div className="mx-auto max-w-7xl">
@@ -119,7 +156,7 @@ export default function CustomersPage() {
         description="Empresas atendidas, com o histórico resumido das OS. Filiais e lojas ficam em Locais."
         actions={
           canEdit ? (
-            <Button variant="primary" onClick={() => setCreating(true)}>
+            <Button variant="primary" onClick={() => setEditing("new")}>
               <Plus className="size-4" />
               Novo cliente
             </Button>
@@ -127,87 +164,145 @@ export default function CustomersPage() {
         }
       />
       <Card>
-        <div className="border-b border-line p-3">
-          <div className="relative max-w-sm">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line p-3">
+          <div className="relative w-full max-w-sm">
             <Search className="pointer-events-none absolute top-2.5 left-3 size-4 text-ink-muted" />
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Buscar por nome ou CNPJ"
+              aria-label="Buscar clientes"
               className="pl-9"
             />
           </div>
+          <Checkbox
+            label="Somente ativos"
+            checked={!showInactive}
+            onChange={(only) => setParams({ inativos: only ? null : "1" })}
+          />
+          {customers.data ? (
+            <span className="text-xs text-ink-muted sm:ml-auto">
+              {plural(rows.length, "cliente", "clientes")}
+              {hidden ? ` · ${plural(hidden, "inativo oculto", "inativos ocultos")}` : ""}
+            </span>
+          ) : null}
         </div>
         {customers.isLoading ? (
           <LoadingBlock />
-        ) : customers.error ? (
+        ) : customers.error && !customers.data ? (
           <div className="p-4">
             <ErrorBox message={errorMessage(customers.error)} />
           </div>
-        ) : (customers.data ?? []).length === 0 ? (
-          <EmptyState icon={<Building2 className="size-8" />} title="Nenhum cliente encontrado" />
+        ) : rows.length === 0 ? (
+          <EmptyState
+            icon={<Building2 className="size-8" />}
+            title="Nenhum cliente encontrado"
+            description={hidden ? `Há ${plural(hidden, "cliente inativo", "clientes inativos")}: desmarque “Somente ativos” para ver.` : undefined}
+          />
         ) : (
           <Table>
             <thead>
               <tr>
-                <Th>Cliente</Th>
+                <SortTh label="Cliente" sortKey="name" sort={sort} onSort={onSort} />
                 <Th>CNPJ / CPF</Th>
-                <Th className="text-right">Locais</Th>
-                <Th className="text-right">OS abertas</Th>
-                <Th className="text-right">Total de OS</Th>
-                <Th>Última OS</Th>
-                <Th>Contato</Th>
-                <Th>Situação</Th>
+                <SortTh label="Locais" sortKey="locations" sort={sort} onSort={onSort} right />
+                <SortTh label="OS abertas" sortKey="open" sort={sort} onSort={onSort} right />
+                <SortTh label="Total de OS" sortKey="total" sort={sort} onSort={onSort} right />
+                <SortTh label="Última OS" sortKey="last" sort={sort} onSort={onSort} />
+                <SortTh label="Primeira visita" sortKey="first" sort={sort} onSort={onSort} className="hidden lg:table-cell" />
+                <SortTh label="Avaliação" sortKey="rating" sort={sort} onSort={onSort} right className="hidden lg:table-cell" />
+                <Th className="hidden xl:table-cell">Contato</Th>
+                {canEdit ? <Th className="edit-col">Editar</Th> : null}
               </tr>
             </thead>
-            <tbody>
-              {customers.data?.map((c) => (
-                <tr key={c.id} className="hover:bg-surface-2">
-                  <Td>
-                    <Link href={`/clientes/${c.id}`} className="font-semibold text-ink hover:text-brand hover:underline">
-                      {c.name}
-                    </Link>
-                    <TagChips tags={c.tags} max={3} className="mt-1 flex" />
-                  </Td>
-                  <Td className="font-mono text-xs whitespace-nowrap">{formatDocument(c.document)}</Td>
-                  <Td className="text-right">
-                    <Link
-                      href={`/locais?customer_id=${c.id}`}
-                      className="inline-flex items-center gap-1 text-brand hover:underline"
-                    >
-                      <MapPin className="size-3.5" />
-                      {c.locations_count}
-                    </Link>
-                  </Td>
-                  <Td className="text-right">
-                    {c.open_tickets > 0 ? (
-                      <Link
-                        href={`/chamados?customer_id=${c.id}&open_only=true`}
-                        className="font-medium text-brand hover:underline"
-                      >
-                        {c.open_tickets}
+            {/* Linhas sem entrada animada; enquanto a busca nova chega, a tabela anterior fica esmaecida. */}
+            <tbody className={clsx("transition-opacity duration-150", customers.isPlaceholderData && "opacity-60")}>
+              {rows.map((c) => {
+                const rating = c.legacy?.rating?.average ?? 0;
+                return (
+                  <tr key={c.id} className="transition-colors hover:bg-[var(--row-hover)]">
+                    <Td className="min-w-[14rem]">
+                      <Link href={`/clientes/${c.id}`} className="font-semibold text-ink hover:text-brand hover:underline">
+                        {c.name}
                       </Link>
-                    ) : (
-                      <span className="text-ink-muted">0</span>
-                    )}
-                  </Td>
-                  <Td className="text-right">{c.total_tickets}</Td>
-                  <Td className="text-xs whitespace-nowrap text-ink-muted">{formatDate(c.last_ticket_at)}</Td>
-                  <Td className="text-xs text-ink-muted">{[c.email, c.phone].filter(Boolean).join(" · ") || "—"}</Td>
-                  <Td>
-                    {c.is_active ? (
-                      <span className="text-xs text-emerald-600 dark:text-emerald-400">Ativo</span>
-                    ) : (
-                      <span className="text-xs text-ink-muted">Inativo</span>
-                    )}
-                  </Td>
-                </tr>
-              ))}
+                      {c.is_active ? null : (
+                        <span className="ml-1.5 rounded-md bg-surface-2 px-1.5 py-0.5 align-middle text-[11px] font-medium text-ink-muted ring-1 ring-line ring-inset">
+                          Inativo
+                        </span>
+                      )}
+                      <TagChips tags={c.tags} max={3} className="mt-1 flex" />
+                    </Td>
+                    <Td className="font-mono text-xs whitespace-nowrap">{formatDocument(c.document)}</Td>
+                    <Td className="text-right">
+                      <Link
+                        href={`/locais?customer_id=${c.id}`}
+                        className="inline-flex items-center gap-1 text-brand hover:underline"
+                        aria-label={`${plural(c.locations_count, "local", "locais")} de ${c.name}`}
+                      >
+                        <MapPin className="size-3.5" />
+                        {c.locations_count.toLocaleString("pt-BR")}
+                      </Link>
+                    </Td>
+                    <Td className="text-right tabular-nums">
+                      {c.open_tickets > 0 ? (
+                        <Link
+                          href={`/chamados?customer_id=${c.id}&open_only=true`}
+                          className="font-medium text-brand hover:underline"
+                          aria-label={`${plural(c.open_tickets, "OS aberta", "OS abertas")} de ${c.name}`}
+                        >
+                          {c.open_tickets.toLocaleString("pt-BR")}
+                        </Link>
+                      ) : (
+                        <span className="text-ink-muted">0</span>
+                      )}
+                    </Td>
+                    <Td className="text-right tabular-nums">{c.total_tickets.toLocaleString("pt-BR")}</Td>
+                    <Td className="text-xs whitespace-nowrap text-ink-muted">{formatDate(c.last_ticket_at)}</Td>
+                    <Td className="hidden text-xs whitespace-nowrap text-ink-muted lg:table-cell">
+                      {formatDate(c.legacy?.service?.first_at ?? null)}
+                    </Td>
+                    <Td className="hidden text-right text-xs whitespace-nowrap lg:table-cell">
+                      {rating > 0 ? (
+                        <span className="inline-flex items-center gap-1 text-ink tabular-nums">
+                          {rating.toFixed(1).replace(".", ",")}
+                          <Star className="size-3 fill-current text-ink-subtle" aria-hidden />
+                        </span>
+                      ) : (
+                        <span className="text-ink-muted">—</span>
+                      )}
+                    </Td>
+                    <Td className="hidden max-w-[16rem] truncate text-xs text-ink-muted xl:table-cell">
+                      {[c.email, c.phone].filter(Boolean).join(" · ") || "—"}
+                    </Td>
+                    {canEdit ? (
+                      <Td className="edit-col">
+                        <button
+                          type="button"
+                          onClick={() => setEditing(c)}
+                          className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg border border-line bg-surface text-brand shadow-elev-1 transition-[border-color,background-color,transform] duration-150 hover:border-brand/40 hover:bg-brand-soft active:translate-y-px"
+                          aria-label={`Editar ${c.name}`}
+                          title={`Editar ${c.name}`}
+                        >
+                          <SquarePen className="size-4" />
+                        </button>
+                      </Td>
+                    ) : null}
+                  </tr>
+                );
+              })}
             </tbody>
           </Table>
         )}
       </Card>
-      {creating ? <NewCustomerDialog onClose={() => setCreating(false)} /> : null}
+      {editing ? <CustomerDialog customer={editing === "new" ? null : editing} onClose={() => setEditing(null)} /> : null}
     </div>
+  );
+}
+
+export default function CustomersPage() {
+  return (
+    <Suspense fallback={<LoadingBlock />}>
+      <CustomersView />
+    </Suspense>
   );
 }

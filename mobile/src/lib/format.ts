@@ -10,6 +10,7 @@ const dateTimeFmt = new Intl.DateTimeFormat("pt-BR", {
 const shortFmt = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 const timeFmt = new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" });
 const dayFmt = new Intl.DateTimeFormat("pt-BR", { weekday: "short", day: "2-digit", month: "2-digit" });
+const dateFmt = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit" });
 
 export function formatDateTime(value: string | null | undefined): string {
   if (!value) return "—";
@@ -29,6 +30,17 @@ export function formatTime(value: string | Date | null | undefined): string {
 /** "qua., 12/11" */
 export function formatDay(value: Date): string {
   return dayFmt.format(value);
+}
+
+/** "12/11" (dia e mês, sem depender da pontuação do Intl de cada aparelho). */
+export function formatDate(value: string | Date | null | undefined): string {
+  if (!value) return "—";
+  return dateFmt.format(typeof value === "string" ? new Date(value) : value);
+}
+
+/** Mesmo dia do calendário (no fuso do aparelho). */
+export function isSameDay(a: string | Date, b: string | Date): boolean {
+  return startOfDay(new Date(a)).getTime() === startOfDay(new Date(b)).getTime();
 }
 
 /** "2h 15min", "3d 4h", "45min". */

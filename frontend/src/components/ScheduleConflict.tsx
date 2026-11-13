@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { ApiError } from "@/lib/api";
 import { formatShort, formatTime } from "@/lib/format";
@@ -19,15 +19,51 @@ function span(item: ConflictItem): string {
   return `${formatShort(item.start)} – ${sameDay ? formatTime(item.end) : formatShort(item.end)}`;
 }
 
+const linkClass = "inline-flex items-center gap-0.5 font-mono font-semibold underline-offset-2 hover:underline";
+
+/**
+ * Nº da OS em conflito. Por padrão abre em outra aba: o aviso aparece no meio de um formulário (Nova OS,
+ * painel da OS) e sair da tela perderia o que foi digitado. Com `onOpenTicket`, o clique abre a OS no
+ * painel lateral, por cima da tela (Ctrl+clique continua abrindo outra aba).
+ */
+function ConflictLink({ item, onOpenTicket }: { item: ConflictItem; onOpenTicket?: (ticketId: UUID) => void }) {
+  if (onOpenTicket) {
+    return (
+      <Link
+        href={`/chamados/${item.id}`}
+        onClick={(e) => {
+          if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+          e.preventDefault();
+          onOpenTicket(item.id);
+        }}
+        className={linkClass}
+        title="Abre a OS no painel (Ctrl+clique: outra aba)"
+      >
+        {item.code}
+      </Link>
+    );
+  }
+  return (
+    <Link href={`/chamados/${item.id}`} target="_blank" rel="noreferrer" className={linkClass} title="Abre em outra aba">
+      {item.code}
+      <ExternalLink aria-hidden className="size-3" />
+      <span className="sr-only"> (abre em outra aba)</span>
+    </Link>
+  );
+}
+
 /** Lista das OS em choque de horário (aviso amarelo antes de salvar, vermelho quando a API barrou). */
 export function ConflictList({
   items,
   tone = "warning",
   title,
+  onOpenTicket,
 }: {
   items: ConflictItem[];
   tone?: "warning" | "error";
   title: string;
+  /** Abre a OS em conflito no painel lateral (sem ele, o nº abre em outra aba). */
+  onOpenTicket?: (ticketId: UUID) => void;
 }) {
   const box =
     tone === "error"
@@ -43,10 +79,8 @@ export function ConflictList({
         {items.map((c) => (
           <li key={`${c.who ?? ""}-${c.id}`} className="text-xs">
             {c.who ? <span className="font-semibold">{c.who}: </span> : null}
-            <Link href={`/chamados/${c.id}`} className="font-mono font-semibold underline-offset-2 hover:underline">
-              {c.code}
-            </Link>{" "}
-            · {span(c)} · {[c.customer, c.location].filter(Boolean).join(" · ") || c.title}
+            <ConflictLink item={c} onOpenTicket={onOpenTicket} /> · {span(c)} ·{" "}
+            {[c.customer, c.location].filter(Boolean).join(" · ") || c.title}
           </li>
         ))}
       </ul>
@@ -62,6 +96,7 @@ export function ConflictHint({
   end,
   estimatedMinutes,
   excludeId,
+  onOpenTicket,
 }: {
   assigneeId: UUID | null | undefined;
   assigneeName?: string | null;
@@ -69,6 +104,8 @@ export function ConflictHint({
   end?: string | null;
   estimatedMinutes?: number | null;
   excludeId?: UUID;
+  /** Abre a OS em conflito no painel lateral (sem ele, o nº abre em outra aba). */
+  onOpenTicket?: (ticketId: UUID) => void;
 }) {
   const { data } = useScheduleConflicts({ assigneeId, start, end, estimatedMinutes, excludeId });
   if (!data || data.length === 0) return null;
@@ -77,6 +114,7 @@ export function ConflictHint({
     <ConflictList
       items={data}
       title={`${who} já tem ${data.length === 1 ? "uma OS" : `${data.length} OS`} neste horário`}
+      onOpenTicket={onOpenTicket}
     />
   );
 }

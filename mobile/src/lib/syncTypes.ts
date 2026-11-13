@@ -88,6 +88,20 @@ export interface SyncOperationIn {
   client_timestamp?: ISODate;
 }
 
+/**
+ * Corpo de POST /sync/push. `sent_at` é o relógio do aparelho na hora do envio: com ele o servidor
+ * acha a hora real de uma ação feita sem sinal mesmo com o relógio do celular errado
+ * (hora real ≈ recebido_em − (sent_at − client_timestamp)). Servidor sem suporte ignora o campo.
+ */
+export interface SyncPushRequest {
+  operations: SyncOperationIn[];
+  sent_at?: ISODate;
+}
+
+/**
+ * `duplicate`: o `client_op_id` já tinha sido processado (reenvio depois de uma resposta perdida).
+ * Com `error`, aquele processamento tinha sido recusado: para o app é uma recusa, não um sucesso.
+ */
 export type SyncResultStatus = "applied" | "duplicate" | "rejected" | "conflict";
 
 export interface SyncOperationResult {

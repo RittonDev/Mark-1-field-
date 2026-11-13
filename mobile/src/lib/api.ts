@@ -1,14 +1,18 @@
 // Cliente HTTP da API. Mesmo contrato de erros de frontend/src/lib/api.ts,
-// com timeout (rede móvel instável) e refresh automático do access token.
+// com timeout (rede móvel instável), refresh automático do access token e o relógio do servidor.
 
+import { Platform } from "react-native";
 import { MOBILE_DENIED_MESSAGE } from "./access";
-import { apiOrigin } from "./config";
+import { apiOrigin, APP_VERSION } from "./config";
 import { sendFile } from "./fileUpload";
 import { session } from "./session";
 import type { TokenResponse } from "./types";
 
 const TIMEOUT_MS = 20_000;
 const UPLOAD_TIMEOUT_MS = 120_000;
+
+/** Versão e sistema do app em toda requisição: o servidor sabe quem ainda roda uma versão antiga. */
+const APP_HEADERS: Record<string, string> = { "X-App-Version": APP_VERSION, "X-App-Platform": Platform.OS };
 
 export class ApiError extends Error {
   status: number;
@@ -33,7 +37,8 @@ interface ValidationIssue {
 }
 
 function formatDetail(detail: unknown, status: number): string {
-  if (typeof detail === "string" && detail) return detail;
+  // Texto da API. A página HTML de um proxy (502, 413…) não vira mensagem para o técnico.
+  if (typeof detail === "string" && detail && !/^\s*</.test(detail)) return detail;
   if (Array.isArray(detail)) {
     const parts = (detail as ValidationIssue[]).map((issue) => {
       const field = (issue.loc ?? []).filter((p) => p !== "body" && p !== "query").join(".");
@@ -47,6 +52,10 @@ function formatDetail(detail: unknown, status: number): string {
   if (status === 403) return "Você não tem permissão para esta ação";
   if (status === 404) return "Registro não encontrado";
   if (status === 409) return "Esta OS foi alterada por outra pessoa.";
+  if (status === 413) return "O envio é grande demais para o servidor.";
+  if (status === 426) return "Atualize o app para continuar.";
+  if (status === 429) return "Muitas tentativas seguidas. Aguarde um pouco e tente de novo.";
+  if (status >= 500) return `O servidor está com problema (erro ${status}). Tente de novo em instantes.`;
   return `Erro inesperado (${status})`;
 }
 
@@ -55,11 +64,52 @@ export function errorMessage(error: unknown): string {
   return "Erro inesperado";
 }
 
-async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = TIMEOUT_MS): Promise<Response> {
+// ───────────────────────────── relógio do servidor ─────────────────────────────
+
+const clockSamples: number[] = [];
+let serverOffsetMs = 0;
+
+/** Cabeçalho Date de cada resposta: mediana das 5 últimas diferenças para o relógio do aparelho. */
+function sampleServerClock(res: Response) {
+  const header = res.headers.get("date");
+  const at = header ? Date.parse(header) : Number.NaN;
+  if (!Number.isFinite(at)) return;
+  clockSamples.push(at - Date.now());
+  if (clockSamples.length > 5) clockSamples.shift();
+  const sorted = [...clockSamples].sort((a, b) => a - b);
+  serverOffsetMs = sorted[Math.floor(sorted.length / 2)];
+}
+
+/** Quanto o relógio do servidor está à frente (positivo) ou atrás (negativo) do relógio do aparelho. */
+export const getServerOffsetMs = () => serverOffsetMs;
+
+/** Agora pelo relógio do servidor: o do celular pode ter sido acertado à mão. */
+export const serverNow = () => Date.now() + serverOffsetMs;
+
+// ───────────────────────────── requisições ─────────────────────────────
+
+interface RawResponse {
+  status: number;
+  ok: boolean;
+  data: unknown;
+}
+
+/** fetch com tempo limite que cobre também o download do corpo (pull grande em rede lenta). */
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = TIMEOUT_MS): Promise<RawResponse> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    const res = await fetch(url, { ...init, signal: controller.signal });
+    sampleServerClock(res);
+    const data = res.status === 204 ? null : await parseBody(res);
+    return { status: res.status, ok: res.ok, data };
+  } catch (error) {
+    if (timedOut) throw new ApiError(0, "O servidor demorou para responder.");
+    throw error;
   } finally {
     clearTimeout(timer);
   }
@@ -80,7 +130,8 @@ function detailOf(data: unknown): unknown {
 }
 
 export type RefreshResult = "ok" | "invalid" | "offline";
-let refreshing: Promise<RefreshResult> | null = null;
+/** Renovação em andamento, pelo refresh token usado: chamadas concorrentes da mesma sessão compartilham. */
+let refreshing: { token: string; promise: Promise<RefreshResult> } | null = null;
 
 /**
  * Chamado quando o servidor diz que este usuário não pode mais usar o app
@@ -93,35 +144,47 @@ export function setAccessRevokedHandler(handler: (message: string) => Promise<vo
 
 const GENERIC_EXPIRED = /^sess[aã]o expirada/i;
 
-/** Troca o refresh token por um novo par. Chamadas concorrentes compartilham a mesma tentativa. */
+/**
+ * Troca o refresh token por um novo par. Chamadas concorrentes da mesma sessão compartilham a
+ * mesma tentativa. Só um 401 encerra a sessão; e nada é gravado se, durante a renovação, o técnico
+ * saiu ou outro entrou no aparelho (o "Sair" não pode ser desfeito por uma resposta atrasada).
+ */
 export function refreshSession(): Promise<RefreshResult> {
-  if (refreshing) return refreshing;
   const { refreshToken, apiUrl } = session.get();
   if (!refreshToken) return Promise.resolve("invalid");
-  refreshing = (async (): Promise<RefreshResult> => {
+  if (refreshing?.token === refreshToken) return refreshing.promise;
+  const used = refreshToken;
+  const sameSession = () => session.get().status === "signedIn" && session.get().refreshToken === used;
+  const promise = (async (): Promise<RefreshResult> => {
     try {
       const res = await fetchWithTimeout(`${apiUrl}/auth/refresh`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ refresh_token: refreshToken }),
+        headers: { "Content-Type": "application/json", Accept: "application/json", ...APP_HEADERS },
+        body: JSON.stringify({ refresh_token: used }),
       });
-      if (res.status === 401 || res.status === 403 || res.status === 422) {
-        const detail = detailOf(await parseBody(res).catch(() => null));
+      // 401 = token inválido, expirado, revogado ou papel sem acesso ao app. Outro erro (proxy,
+      // firewall, servidor fora do ar) não tira o técnico do app no meio do dia: tenta depois.
+      if (res.status === 401) {
+        if (!sameSession()) return "invalid";
+        const detail = detailOf(res.data);
         const message = typeof detail === "string" && detail && !GENERIC_EXPIRED.test(detail) ? detail : null;
         if (message === MOBILE_DENIED_MESSAGE && accessRevokedHandler) await accessRevokedHandler(message);
         else await session.signOut(true, message);
         return "invalid";
       }
-      if (!res.ok) return "offline";
-      await session.setTokens((await res.json()) as TokenResponse);
+      const tokens = res.data as TokenResponse | null;
+      if (!res.ok || !tokens?.access_token || !tokens.refresh_token) return "offline";
+      if (!sameSession()) return "invalid";
+      await session.setTokens(tokens);
       return "ok";
     } catch {
       return "offline";
     } finally {
-      refreshing = null;
+      if (refreshing?.promise === promise) refreshing = null;
     }
   })();
-  return refreshing;
+  refreshing = { token: used, promise };
+  return promise;
 }
 
 interface RequestOptions {
@@ -132,8 +195,10 @@ interface RequestOptions {
 }
 
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  // Quem fez o pedido: depois de renovar o token, só repete se ainda for a mesma pessoa logada.
+  const userId = session.get().user?.id ?? null;
   const send = () => {
-    const headers: Record<string, string> = { Accept: "application/json" };
+    const headers: Record<string, string> = { Accept: "application/json", ...APP_HEADERS };
     if (options.body !== undefined) headers["Content-Type"] = "application/json";
     const { accessToken, apiUrl } = session.get();
     if (options.auth !== false && accessToken) headers.Authorization = `Bearer ${accessToken}`;
@@ -148,16 +213,17 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     );
   };
 
-  let res: Response;
+  let res: RawResponse;
   try {
     res = await send();
     if (res.status === 401 && options.auth !== false) {
       const refreshed = await refreshSession();
       if (refreshed === "offline") throw new ApiError(0, null);
-      // "invalid": refreshSession já encerrou a sessão (com o motivo do servidor).
-      if (refreshed === "ok") {
+      // "invalid": refreshSession já encerrou a sessão (com o motivo do servidor) ou ela mudou.
+      if (refreshed === "ok" && session.get().user?.id === userId) {
+        const token = session.get().accessToken;
         res = await send();
-        if (res.status === 401) await session.signOut(true);
+        if (res.status === 401 && session.get().accessToken === token) await session.signOut(true);
       }
     }
   } catch (error) {
@@ -165,15 +231,19 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     throw new ApiError(0, null);
   }
   if (res.status === 204) return undefined as T;
-  const data = await parseBody(res);
-  if (!res.ok) throw new ApiError(res.status, detailOf(data));
-  return data as T;
+  if (!res.ok) throw new ApiError(res.status, detailOf(res.data));
+  return res.data as T;
+}
+
+export interface CallOptions {
+  /** Tempo limite próprio (ex.: envio e download do sync, maiores que uma consulta comum). */
+  timeoutMs?: number;
 }
 
 export const api = {
-  get: <T>(path: string) => request<T>(path),
-  post: <T>(path: string, body?: unknown) => request<T>(path, { method: "POST", body }),
-  delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
+  get: <T>(path: string, options: CallOptions = {}) => request<T>(path, options),
+  post: <T>(path: string, body?: unknown, options: CallOptions = {}) => request<T>(path, { ...options, method: "POST", body }),
+  delete: <T>(path: string, options: CallOptions = {}) => request<T>(path, { ...options, method: "DELETE" }),
 };
 
 /**
@@ -187,17 +257,26 @@ export async function uploadFile<T>(
   mimeType: string,
   filename: string,
 ): Promise<T> {
+  const userId = session.get().user?.id ?? null;
+  let timedOut = false;
   const send = async () => {
     const { accessToken, apiUrl } = session.get();
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, UPLOAD_TIMEOUT_MS);
     try {
       return await sendFile(`${apiUrl}${path}`, {
         fileUri,
         filename,
         mimeType,
         fields,
-        headers: accessToken ? { Authorization: `Bearer ${accessToken}`, Accept: "application/json" } : {},
+        headers: {
+          Accept: "application/json",
+          ...APP_HEADERS,
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        },
         signal: controller.signal,
       });
     } finally {
@@ -211,11 +290,11 @@ export async function uploadFile<T>(
     if (result.status === 401) {
       const refreshed = await refreshSession();
       if (refreshed === "offline") throw new ApiError(0, null);
-      if (refreshed === "ok") result = await send();
+      if (refreshed === "ok" && session.get().user?.id === userId) result = await send();
     }
   } catch (error) {
     if (error instanceof ApiError) throw error;
-    throw new ApiError(0, null);
+    throw new ApiError(0, timedOut ? "O envio demorou demais e foi interrompido. Vamos tentar de novo." : null);
   }
   let data: unknown = null;
   try {

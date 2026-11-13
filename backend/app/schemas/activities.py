@@ -35,6 +35,16 @@ class Activity(BaseModel):
     actual_minutes: int
     # Escopo da OS (o cartão do dia mostra a primeira linha, como no Field Control).
     description: str = ""
+    # Feito offline: a hora que o aparelho marcou no botão (o envio chegou depois). O horário
+    # acima é o do servidor; este é a evidência para o "Corrigir horários".
+    started_declared_at: dt.datetime | None = None
+    arrived_declared_at: dt.datetime | None = None
+    # Distância (metros) do GPS do técnico até a loja na saída e no início do atendimento.
+    start_distance_m: int | None = None
+    arrival_distance_m: int | None = None
+    # Visita improdutiva registrada no dia: quando e o motivo.
+    unproductive_at: dt.datetime | None = None
+    unproductive_reason: str | None = None
 
 
 class DaySummary(BaseModel):
@@ -48,6 +58,8 @@ class DaySummary(BaseModel):
     done: int
     pending: int
     unassigned: int
+    # Visitas improdutivas registradas no dia (a OS aparece com o motivo).
+    unproductive: int = 0
 
 
 class DayActivities(BaseModel):

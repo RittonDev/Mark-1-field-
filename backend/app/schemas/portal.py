@@ -26,6 +26,8 @@ class PortalLocation(BaseModel):
 class PortalMe(BaseModel):
     customer: Ref
     locations: int
+    # Falso com a empresa desativada (sem contrato): o portal esconde "Nova solicitação".
+    can_open_requests: bool = True
 
 
 class PortalRequestItem(BaseModel):

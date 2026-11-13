@@ -2,7 +2,8 @@
 
 Entram no dia D, no fuso de settings.TIMEZONE:
 - OS agendadas para D;
-- OS que tiveram deslocamento, atendimento ou conclusão em D (pelo histórico);
+- OS que tiveram deslocamento, atendimento, conclusão ou visita improdutiva em D (pelo
+  histórico), mesmo que a visita tenha sido remarcada;
 - se D é hoje, as OS que estão em campo agora (em deslocamento ou em atendimento).
 
 Os horários reais vêm do histórico de status, então o agendado e o realizado ficam lado a lado.
@@ -11,6 +12,7 @@ Os horários reais vêm do histórico de status, então o agendado e o realizado
 import uuid
 from collections import Counter
 from datetime import date, datetime, time, timedelta
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, func, or_, select
@@ -24,12 +26,13 @@ from app.schemas.activities import Activity, ActivityState, DayActivities, DaySu
 from app.schemas.ticket import TicketListItem
 from app.services.durations import actual_seconds
 from app.services.schedule import works_on
-from app.services.tickets import visibility_clause
+from app.services.tickets import list_noload, visibility_clause
 from app.services.workflow import SLA_PAUSED_STATUSES
 
 S = TicketStatus
 FIELD_NOW = (S.EN_ROUTE, S.IN_PROGRESS)
 WORK_TARGETS = (S.EN_ROUTE.value, S.IN_PROGRESS.value, S.RESOLVED.value)
+DAY_EVENTS = (TicketEventType.STATUS_CHANGED, TicketEventType.UNPRODUCTIVE_VISIT)
 
 
 def day_bounds(day: date) -> tuple[datetime, datetime]:
@@ -44,6 +47,22 @@ def local_today() -> date:
 
 def _in_day(value: datetime | None, start: datetime, end: datetime) -> bool:
     return value is not None and start <= value < end
+
+
+def _declared_at(ev: TicketEvent | None) -> datetime | None:
+    """Hora que o aparelho marcou no botão (ação feita offline), guardada no evento."""
+    raw = (ev.data or {}).get("declared_at") if ev is not None else None
+    if not isinstance(raw, str):
+        return None
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+
+
+def _distance_m(ev: TicketEvent | None) -> int | None:
+    value: Any = (ev.data or {}).get("distance_m") if ev is not None else None
+    return int(value) if isinstance(value, int | float) else None
 
 
 def _state(
@@ -89,11 +108,17 @@ async def day_activities(
     day = day or today
     day_start, day_end = day_bounds(day)
 
+    in_day = (TicketEvent.created_at >= day_start, TicketEvent.created_at < day_end)
     worked_in_day = select(TicketEvent.ticket_id).where(
-        TicketEvent.event_type == TicketEventType.STATUS_CHANGED,
-        TicketEvent.to_value.in_(WORK_TARGETS),
-        TicketEvent.created_at >= day_start,
-        TicketEvent.created_at < day_end,
+        or_(
+            and_(
+                TicketEvent.event_type == TicketEventType.STATUS_CHANGED,
+                TicketEvent.to_value.in_(WORK_TARGETS),
+            ),
+            # Improdutiva tira a OS da agenda: sem isto ela sumia do dia em que deu errado.
+            TicketEvent.event_type == TicketEventType.UNPRODUCTIVE_VISIT,
+        ),
+        *in_day,
     )
     belongs = [
         and_(Ticket.scheduled_start >= day_start, Ticket.scheduled_start < day_end),
@@ -110,22 +135,27 @@ async def day_activities(
         conds.append(works_on(assignee_id))
     if team_id is not None:
         conds.append(Ticket.team_id == team_id)
-    tickets = list(await db.scalars(select(Ticket).where(*conds)))
+    tickets = list(
+        await db.scalars(select(Ticket).options(*list_noload("service_type")).where(*conds))
+    )
 
     events: dict[uuid.UUID, list[TicketEvent]] = {t.id: [] for t in tickets}
+    bounced: dict[uuid.UUID, TicketEvent] = {}
     if tickets:
         rows = await db.scalars(
             select(TicketEvent)
             .where(
                 TicketEvent.ticket_id.in_(events.keys()),
-                TicketEvent.event_type == TicketEventType.STATUS_CHANGED,
-                TicketEvent.created_at >= day_start,
-                TicketEvent.created_at < day_end,
+                TicketEvent.event_type.in_(DAY_EVENTS),
+                *in_day,
             )
             .order_by(TicketEvent.created_at)
         )
         for ev in rows:
-            events[ev.ticket_id].append(ev)
+            if ev.event_type == TicketEventType.UNPRODUCTIVE_VISIT:
+                bounced[ev.ticket_id] = ev  # a última do dia
+            else:
+                events[ev.ticket_id].append(ev)
 
     # OS em campo desde antes do dia: quando a etapa atual começou (para não ficar sem início).
     carried: dict[uuid.UUID, datetime] = {}
@@ -159,6 +189,7 @@ async def day_activities(
         delay = None
         if started is not None and _in_day(t.scheduled_start, day_start, day_end):
             delay = int((started - t.scheduled_start).total_seconds() // 60)  # type: ignore[operator]
+        bounce = bounced.get(t.id)
         activities.append(
             Activity(
                 ticket=TicketListItem.model_validate(t),
@@ -183,16 +214,31 @@ async def day_activities(
                 description=(t.description or "")[:500],
                 estimated_minutes=t.estimated_minutes,
                 actual_minutes=actual_seconds(t.work_seconds, t.work_started_at, now) // 60,
+                started_declared_at=_declared_at(start_ev),
+                arrived_declared_at=_declared_at(arrive_ev),
+                start_distance_m=_distance_m(start_ev),
+                arrival_distance_m=_distance_m(arrive_ev),
+                unproductive_at=bounce.created_at if bounce else None,
+                unproductive_reason=(
+                    (bounce.data or {}).get("reason") or bounce.to_value if bounce else None
+                ),
             )
         )
 
-    # Pela hora de atuação (a manhã primeiro): a prevista ou, sem agenda, a realizada; as sem hora
-    # vão por último. A tela agrupa por técnico na ordem em que aparecem, então quem começa mais
-    # cedo vem em cima e, dentro do técnico, as OS seguem o relógio.
+    # Pela hora de atuação no dia (a manhã primeiro): a agendada, se cai no dia; senão a
+    # realizada (início ou improdutiva). Uma OS remarcada para outro dia fica onde atuou hoje.
+    # As sem hora vão por último. A tela agrupa por técnico na ordem em que aparecem, então quem
+    # começa mais cedo vem em cima e, dentro do técnico, as OS seguem o relógio.
     far = datetime.max.replace(tzinfo=day_start.tzinfo)
+
+    def acting_at(a: Activity) -> datetime:
+        if _in_day(a.scheduled_start, day_start, day_end):
+            return a.scheduled_start  # type: ignore[return-value]
+        return a.started_at or a.unproductive_at or far
+
     activities.sort(
         key=lambda a: (
-            a.scheduled_start or a.started_at or far,
+            acting_at(a),
             a.ticket.assignee is None,
             a.ticket.assignee.name if a.ticket.assignee else "",
         )
@@ -209,6 +255,7 @@ async def day_activities(
         done=counts["done"],
         pending=counts["pending"],
         unassigned=sum(1 for a in activities if a.ticket.assignee is None),
+        unproductive=sum(1 for a in activities if a.unproductive_at is not None),
     )
     return DayActivities(
         date=day,

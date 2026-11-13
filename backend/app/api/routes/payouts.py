@@ -71,15 +71,15 @@ async def list_payouts(
 @router.post("/payouts/pay", response_model=PayoutChanged)
 async def pay(body: PayoutIds, db: DB, user: TicketManagerUser) -> PayoutChanged:
     changed = await svc.mark_paid(db, body.ids, user, paid=True)
-    await db.commit()
+    await commit_and_publish(db)
     return PayoutChanged(changed=changed)
 
 
 @router.post("/payouts/unpay", response_model=PayoutChanged)
 async def unpay(body: PayoutIds, db: DB, user: TicketManagerUser) -> PayoutChanged:
-    """Desfaz um pagamento marcado por engano."""
+    """Desfaz um pagamento marcado por engano (fica no histórico da OS)."""
     changed = await svc.mark_paid(db, body.ids, user, paid=False)
-    await db.commit()
+    await commit_and_publish(db)
     return PayoutChanged(changed=changed)
 
 

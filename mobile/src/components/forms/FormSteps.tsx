@@ -1,10 +1,12 @@
 import type { ReactNode } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
-import Animated, { FadeInLeft, FadeInRight, useReducedMotion } from "react-native-reanimated";
+import Animated, { Easing, Keyframe, useReducedMotion } from "react-native-reanimated";
 import type { FormStep } from "../../lib/forms";
 import { tint, useStyles, useTheme, type Palette } from "../../theme/theme";
 import { Icon } from "../Icon";
 import { Text } from "../Text";
+import { toneInk } from "../ticket/tones";
+import { SectionLabel } from "./FieldInput";
 
 // Peças do formulário "uma pergunta por tela": barra de passos, troca de pergunta e revisão final.
 
@@ -47,11 +49,19 @@ export function StepProgress({ index, states, onReview }: { index: number; state
   );
 }
 
+/** Entrada curta (200 ms, 6 px), sem quique: a pergunta desliza de leve no sentido da navegação. */
+const slideFrom = (dx: number) =>
+  new Keyframe({
+    0: { opacity: 0, transform: [{ translateX: dx }] },
+    100: { opacity: 1, transform: [{ translateX: 0 }], easing: Easing.out(Easing.cubic) },
+  }).duration(200);
+const FROM_RIGHT = slideFrom(6);
+const FROM_LEFT = slideFrom(-6);
+
 /** Entrada da pergunta: vem da direita ao avançar e da esquerda ao voltar. O pai troca a `key`. */
 export function StepSlide({ direction, children }: { direction: StepDirection; children: ReactNode }) {
   const reduced = useReducedMotion();
-  const entering =
-    reduced || direction === "none" ? undefined : direction === "back" ? FadeInLeft.duration(220) : FadeInRight.duration(220);
+  const entering = reduced || direction === "none" ? undefined : direction === "back" ? FROM_LEFT : FROM_RIGHT;
   return <Animated.View entering={entering}>{children}</Animated.View>;
 }
 
@@ -61,7 +71,10 @@ export interface ReviewRow {
   required: boolean;
 }
 
-/** Revisão antes de concluir: cada pergunta com a resposta; tocar abre a pergunta. */
+/**
+ * Revisão antes de concluir: cada pergunta com a resposta; tocar abre a pergunta. Sem `onOpen`
+ * (formulário travado), só leitura.
+ */
 export function ReviewList({
   steps,
   rows,
@@ -69,64 +82,78 @@ export function ReviewList({
 }: {
   steps: FormStep[];
   rows: ReviewRow[];
-  onOpen: (index: number) => void;
+  onOpen?: (index: number) => void;
 }) {
   const c = useTheme();
   const styles = useStyles(makeStyles);
   if (!steps.length) return <Text style={styles.emptyReview}>Este formulário não tem perguntas para responder.</Text>;
+  const warning = toneInk(c, "warning");
   return (
     <View>
       {steps.map((step, i) => {
         const row = rows[i];
         const showSection = step.section && step.section !== steps[i - 1]?.section;
         const done = Boolean(row.answer) && !row.problem;
+        const answer = row.problem && row.answer ? `${row.answer} · ${row.problem}` : (row.answer ?? row.problem ?? "Sem resposta");
+        const content = (
+          <>
+            <View
+              style={[
+                styles.mark,
+                done && { backgroundColor: c.successSoft, borderColor: c.success },
+                row.problem && { backgroundColor: c.warningSoft, borderColor: c.warning },
+              ]}
+            >
+              {done ? (
+                <Icon name="check" size={13} color={toneInk(c, "success")} strokeWidth={2.8} />
+              ) : row.problem ? (
+                <Text style={[styles.markText, { color: warning }]}>!</Text>
+              ) : (
+                <Text style={styles.markText}>{i + 1}</Text>
+              )}
+            </View>
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={styles.reviewLabel} numberOfLines={onOpen ? 2 : undefined}>
+                {step.field.label}
+                {row.required ? <Text style={{ color: c.danger }}> *</Text> : null}
+              </Text>
+              <Text
+                style={[styles.reviewAnswer, !row.answer && styles.reviewEmpty, row.problem && { color: warning }]}
+                numberOfLines={onOpen ? 2 : undefined}
+                selectable={!onOpen}
+              >
+                {answer}
+              </Text>
+            </View>
+            {onOpen ? <Icon name="chevronRight" size={18} color={c.inkMuted} /> : null}
+          </>
+        );
         return (
           <View key={step.field.id}>
-            {showSection ? <Text style={[styles.reviewSection, i === 0 && { paddingTop: 0 }]}>{step.section}</Text> : null}
-            <Pressable
-              onPress={() => onOpen(i)}
-              accessibilityRole="button"
-              accessibilityHint="Abre a pergunta para responder ou alterar"
-              style={({ pressed }) => [styles.reviewRow, i > 0 && !showSection && styles.reviewDivider, pressed && styles.reviewPressed]}
-            >
-              <View
-                style={[
-                  styles.mark,
-                  done && { backgroundColor: c.successSoft, borderColor: c.success },
-                  row.problem && { backgroundColor: c.warningSoft, borderColor: c.warning },
-                ]}
+            {showSection ? (
+              <View style={[styles.reviewSection, i === 0 && { paddingTop: 0 }]}>
+                <SectionLabel>{step.section ?? ""}</SectionLabel>
+              </View>
+            ) : null}
+            {onOpen ? (
+              <Pressable
+                onPress={() => onOpen(i)}
+                accessibilityRole="button"
+                accessibilityLabel={`${step.field.label}: ${answer}`}
+                accessibilityHint="Abre a pergunta para responder ou alterar"
+                style={({ pressed }) => [styles.reviewRow, i > 0 && !showSection && styles.reviewDivider, pressed && styles.reviewPressed]}
               >
-                {done ? (
-                  <Icon name="check" size={13} color={c.success} strokeWidth={2.8} />
-                ) : row.problem ? (
-                  <Text style={[styles.markText, { color: c.warning }]}>!</Text>
-                ) : (
-                  <Text style={styles.markText}>{i + 1}</Text>
-                )}
-              </View>
-              <View style={{ flex: 1, gap: 2 }}>
-                <Text style={styles.reviewLabel} numberOfLines={2}>
-                  {step.field.label}
-                  {row.required ? <Text style={{ color: c.danger }}> *</Text> : null}
-                </Text>
-                <Text
-                  style={[styles.reviewAnswer, !row.answer && styles.reviewEmpty, row.problem && { color: readableWarning(c) }]}
-                  numberOfLines={2}
-                >
-                  {row.problem && row.answer ? `${row.answer} · ${row.problem}` : (row.answer ?? row.problem ?? "Sem resposta")}
-                </Text>
-              </View>
-              <Icon name="chevronRight" size={18} color={c.inkSubtle} />
-            </Pressable>
+                {content}
+              </Pressable>
+            ) : (
+              <View style={[styles.reviewRow, i > 0 && !showSection && styles.reviewDivider]}>{content}</View>
+            )}
           </View>
         );
       })}
     </View>
   );
 }
-
-/** Laranja de alerta legível como texto (no claro, o tom puro fica fraco sobre branco). */
-const readableWarning = (c: Palette) => (c.scheme === "dark" ? c.warning : "#B54708");
 
 const makeStyles = (c: Palette) =>
   StyleSheet.create({
@@ -141,15 +168,7 @@ const makeStyles = (c: Palette) =>
     track: { height: 5, borderRadius: 3, backgroundColor: c.segment, overflow: "hidden" },
     fill: { height: 5, borderRadius: 3, backgroundColor: c.primary },
     emptyReview: { fontSize: 14, color: c.inkMuted, lineHeight: 20 },
-    reviewSection: {
-      fontSize: 12,
-      fontWeight: "700",
-      color: c.primary,
-      textTransform: "uppercase",
-      letterSpacing: 0.5,
-      paddingTop: 16,
-      paddingBottom: 4,
-    },
+    reviewSection: { paddingTop: 16, paddingBottom: 4 },
     reviewRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 12, borderRadius: 8 },
     reviewDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.line },
     reviewPressed: { backgroundColor: c.surface2 },
@@ -165,5 +184,5 @@ const makeStyles = (c: Palette) =>
     markText: { fontSize: 12, fontWeight: "700", color: c.inkMuted },
     reviewLabel: { fontSize: 15, fontWeight: "600", color: c.ink, lineHeight: 20 },
     reviewAnswer: { fontSize: 14, color: c.ink, lineHeight: 19 },
-    reviewEmpty: { color: c.inkSubtle },
+    reviewEmpty: { color: c.inkMuted },
   });

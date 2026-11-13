@@ -73,7 +73,11 @@ async def _other_company(client: AsyncClient, world: World) -> tuple[str, str, d
 async def test_client_opens_and_follows_requests(client: AsyncClient, world: World) -> None:
     req, an = world.requester.headers, world.analyst.headers
     me = (await client.get(f"{API}/portal/me", headers=req)).json()
-    assert me == {"customer": {"id": world.customer_id, "name": "Cliente Teste"}, "locations": 1}
+    assert me == {
+        "customer": {"id": world.customer_id, "name": "Cliente Teste"},
+        "locations": 1,
+        "can_open_requests": True,
+    }
     stores = (await client.get(f"{API}/portal/locations", headers=req)).json()
     assert [s["name"] for s in stores] == ["Matriz"]
 

@@ -40,9 +40,22 @@ async def give_consent(db: DB, user: TechnicianUser) -> Response:
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.delete("/consent", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_consent(db: DB, user: TechnicianUser) -> Response:
+    """Retira o aceite do termo (LGPD, a qualquer momento e sem custo): a jornada aberta é
+    encerrada na hora e a próxima só começa com um novo aceite."""
+    shift = await tracking.end_shift(db, user, None, None)
+    user.location_consent_at = None
+    await db.commit()
+    if shift is not None:
+        await tracking.publish_shift(user, False)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get("/shift", response_model=ShiftState)
 async def current_shift(db: DB, user: TechnicianUser) -> ShiftState:
     shift = await tracking.open_shift(db, user)
+    await db.commit()  # jornada esquecida aberta (passou do limite) é fechada na consulta
     return ShiftState(shift=ShiftOut.model_validate(shift) if shift else None)
 
 
@@ -68,7 +81,8 @@ async def end_shift(body: ShiftAction, db: DB, user: TechnicianUser) -> ShiftOut
 
 @router.post("/pings", response_model=PingResult)
 async def add_pings(body: PingBatch, db: DB, user: TechnicianUser) -> PingResult:
-    """Lote de posições (o app guarda offline e envia quando tem rede)."""
+    """Lote de posições (o app guarda offline e envia quando tem rede). Só entram os pontos de
+    dentro de uma jornada (e antes do limite dela)."""
     result, latest = await tracking.add_pings(db, user, body.pings)
     await db.commit()
     await tracking.publish_location(user, latest)

@@ -8,12 +8,14 @@ O cliente vê só a empresa dele, e só uma lista fechada de campos (schemas.por
 etiquetas internas, analista, prazos de SLA, custos ou valores do técnico.
 """
 
+import re
 import uuid
 from datetime import datetime
 from typing import Literal
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import raiseload, selectinload
 
 from app.core.enums import (
     Impact,
@@ -43,6 +45,17 @@ from app.services.errors import NotFound, PermissionDenied, WorkflowError
 S = TicketStatus
 NO_COMPANY = "Seu usuário ainda não está ligado a uma empresa. Fale com a central da Maxx."
 ONLY_CLIENTS = "O portal de solicitações é para os usuários dos clientes."
+COMPANY_SUSPENDED = (
+    "O acesso da sua empresa para abrir solicitações está suspenso. Fale com a central da Maxx."
+)
+# Busca pelo número da OS: o termo inteiro precisa ser o código ("OS-000123", "#123", "123").
+_TICKET_CODE = re.compile(r"^(?:os)?[\s#-]*0*(\d{1,9})$", re.IGNORECASE)
+
+
+def _like(term: str) -> str:
+    """Termo para ILIKE com % e _ escapados (o cliente busca o texto, não um padrão)."""
+    escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
 # O cliente cancela enquanto ninguém começou a tratar; depois, fala com a central.
 CANCELLABLE = (S.NEW, S.TRIAGE)
 DONE = (S.RESOLVED, S.CLOSED)
@@ -84,7 +97,11 @@ async def me(db: AsyncSession, user: User) -> PortalMe:
         .select_from(Location)
         .where(Location.customer_id == customer_id, Location.is_active.is_(True))
     )
-    return PortalMe(customer=Ref(id=customer.id, name=customer.name), locations=count or 0)
+    return PortalMe(
+        customer=Ref(id=customer.id, name=customer.name),
+        locations=count or 0,
+        can_open_requests=customer.is_active,
+    )
 
 
 async def locations(
@@ -98,9 +115,13 @@ async def locations(
         .limit(limit)
     )
     if q and q.strip():
-        term = f"%{q.strip()}%"
+        term = _like(q.strip())
         stmt = stmt.where(
-            or_(Location.name.ilike(term), Location.code.ilike(term), Location.city.ilike(term))
+            or_(
+                Location.name.ilike(term, escape="\\"),
+                Location.code.ilike(term, escape="\\"),
+                Location.city.ilike(term, escape="\\"),
+            )
         )
     return [location_out(loc) for loc in await db.scalars(stmt)]
 
@@ -144,14 +165,24 @@ async def list_requests(
         stmt = stmt.where(Ticket.location_id == location_id)
     if q and q.strip():
         term = q.strip()
-        digits = "".join(ch for ch in term if ch.isdigit())
-        conditions = [Ticket.title.ilike(f"%{term}%"), Ticket.client_reference.ilike(f"%{term}%")]
-        if digits:
-            conditions.append(Ticket.number == int(digits))
+        like = _like(term)
+        conditions = [
+            Ticket.title.ilike(like, escape="\\"),
+            Ticket.client_reference.ilike(like, escape="\\"),
+        ]
+        # Número só quando o termo inteiro é o código da OS: o nº do chamado do cliente
+        # (INC20261113001) ou "Loja 41 caixa 2" não viram número de OS.
+        code = _TICKET_CODE.match(term)
+        if code:
+            conditions.append(Ticket.number == int(code.group(1)))
         stmt = stmt.where(or_(*conditions))
     total = await db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    # A lista mostra só a loja e o técnico: as outras relações da OS não são carregadas.
     rows = await db.scalars(
-        stmt.order_by(Ticket.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
+        stmt.options(raiseload("*"), selectinload(Ticket.location), selectinload(Ticket.assignee))
+        .order_by(Ticket.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
     )
     return list(rows), total
 
@@ -201,6 +232,10 @@ async def to_detail(db: AsyncSession, ticket: Ticket) -> PortalRequestDetail:
 
 async def create_request(db: AsyncSession, user: User, data: PortalRequestCreate) -> Ticket:
     customer_id = customer_id_of(user)
+    customer = await db.get(Customer, customer_id)
+    # Contrato encerrado (cliente desativado): o histórico continua visível, abrir não.
+    if customer is None or not customer.is_active:
+        raise WorkflowError(COMPANY_SUSPENDED)
     location = await db.get(Location, data.location_id)
     if location is None or location.customer_id != customer_id or not location.is_active:
         raise WorkflowError("Loja não encontrada. Escolha uma das lojas da sua empresa.")

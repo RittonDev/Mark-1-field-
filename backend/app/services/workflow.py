@@ -173,11 +173,11 @@ def validate_transition(
     if STATUS_INFO[to_status].requires_assignee and not has_assignee:
         raise WorkflowError("Atribua um responsável antes de mudar para este status")
     if to_status == S.SCHEDULED and not has_schedule:
-        raise WorkflowError("Informe a data/hora da visita (scheduled_start) para agendar")
+        raise WorkflowError("Informe a data e a hora da visita")
     if to_status == S.RESOLVED and not (resolution_notes and resolution_notes.strip()):
-        raise WorkflowError("Descreva a solução aplicada (resolution_notes) para resolver")
+        raise WorkflowError("Descreva a solução aplicada")
     if to_status in (S.CANCELLED, S.REOPENED) and not (note and note.strip()):
-        raise WorkflowError("Informe o motivo (note)")
+        raise WorkflowError("Informe o motivo")
 
 
 def user_can_transition(
@@ -197,7 +197,11 @@ def user_can_transition(
         # Só nas OS em que é o responsável (o analista o coloca na OS), e só andando com a
         # visita: sair, iniciar (chegada) e concluir. Agendar, pausar, devolver e cancelar são da
         # central — o técnico nunca mexe no horário; o tempo dele corre do início à conclusão.
-        return ticket_assignee_id == user_id and to_status in TECHNICIAN_TARGETS
+        if ticket_assignee_id != user_id or to_status not in TECHNICIAN_TARGETS:
+            return False
+        # Concluir só em atendimento: uma OS pausada ou reaberta pela central volta a correr
+        # (iniciar) antes, para a chegada e o tempo da visita ficarem medidos.
+        return to_status != S.RESOLVED or from_status == S.IN_PROGRESS
     # Solicitante: cancela enquanto ninguém pegou; aceita (fecha) ou recusa (reabre) a solução.
     if ticket_requester_id != user_id:
         return False

@@ -7,16 +7,18 @@ export function DateField({
   value,
   onChange,
   disabled = false,
+  label,
 }: {
   value: string | null;
   onChange: (value: string | null) => void;
   disabled?: boolean;
+  label?: string;
 }) {
   const c = useTheme();
   return (
     <input
       type="date"
-      aria-label="Data"
+      aria-label={label ?? "Data"}
       value={value ?? ""}
       disabled={disabled}
       onChange={(event) => onChange(event.target.value || null)}

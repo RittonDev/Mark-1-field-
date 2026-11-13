@@ -1,56 +1,87 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { type UseQueryResult, useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
 import {
   AlarmClock,
   Building2,
   CalendarClock,
-  CalendarRange,
   CheckCircle2,
   Coffee,
   HardHat,
-  Hourglass,
   Inbox,
   Navigation,
   Plus,
   TriangleAlert,
 } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { PriorityBadge, SlaCountdown, StatusBadge } from "@/components/badges";
 import { CountUp } from "@/components/motion";
-import { useNow } from "@/components/useNow";
+import {
+  isOpenStatus,
+  isUuid,
+  OPERATION_TZ,
+  operationDay,
+  replaceSearch,
+  revealSection,
+  useClaim,
+} from "@/components/operacao/hooks";
+import { ClaimButton, InactiveChip, LiveStatus, RefreshFailed } from "@/components/operacao/status";
+import { ArrivalChip, OnsiteBar } from "@/components/ticket/FieldClock";
 import { MessagesButton } from "@/components/ticket/MessagesPanel";
 import { QuickEditButton } from "@/components/ticket/QuickEditButton";
-import { ArrivalChip, OnsiteBar } from "@/components/ticket/FieldClock";
-import { Button, Card, CardHeader, EmptyState, ErrorBox, LoadingBlock, PageHeader, SectionTitle, Skeleton } from "@/components/ui";
 import { TicketLink } from "@/components/ticket/TicketLink";
+import {
+  Button,
+  buttonClassName,
+  Card,
+  CardHeader,
+  EmptyState,
+  ErrorBox,
+  LoadingBlock,
+  PageHeader,
+  SectionTitle,
+  Skeleton,
+} from "@/components/ui";
+import { useNow } from "@/components/useNow";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canManageTickets } from "@/lib/constants";
-import { formatShort, formatTime, initials } from "@/lib/format";
-import type { MyQueue, QueueItem, QueueReason, QueueSection, QueuesOut, UUID } from "@/lib/types";
+import { formatTime, initials } from "@/lib/format";
+import type {
+  MyQueue,
+  Page,
+  QueueItem,
+  QueueReason,
+  QueueSection,
+  QueuesOut,
+  TicketListItem,
+  TicketStatus,
+  UUID,
+} from "@/lib/types";
 
-const OPERATION_TZ = "America/Sao_Paulo";
+/** As OS sem analista responsável (na URL: ?analista=sem). */
+const UNOWNED = "sem";
+const UNOWNED_LIMIT = 100;
 
-const SECTIONS: {
-  key: QueueSection;
-  title: string;
-  hint: string;
-  icon: React.ComponentType<{ className?: string }>;
-  tone: string;
-  compact?: boolean;
-}[] = [
-  { key: "attention", title: "Precisa de atenção", hint: "Prazo estourando, sem técnico ou atrasada para começar", icon: TriangleAlert, tone: "text-red-600 dark:text-red-400" },
-  { key: "in_field", title: "Em campo agora", hint: "Técnico a caminho ou atendendo", icon: Navigation, tone: "text-sky-600 dark:text-sky-400" },
-  { key: "today", title: "Agenda de hoje", hint: "Visitas marcadas para hoje", icon: CalendarClock, tone: "text-brand" },
-  { key: "waiting", title: "Aguardando", hint: "Pendente do cliente ou de fornecedor", icon: Hourglass, tone: "text-purple-600 dark:text-purple-400" },
-  { key: "unscheduled", title: "Sem agenda", hint: "Abertas, ainda sem visita marcada", icon: Inbox, tone: "text-ink-muted" },
-  { key: "upcoming", title: "Próximos dias", hint: "Já agendadas", icon: CalendarRange, tone: "text-ink-muted", compact: true },
-  { key: "done", title: "Concluídas hoje", hint: "Resolvidas ou encerradas hoje", icon: CheckCircle2, tone: "text-emerald-600 dark:text-emerald-400", compact: true },
+const SECTIONS: { key: QueueSection; title: string; hint: string }[] = [
+  { key: "attention", title: "Precisa de atenção", hint: "Prazo estourando, sem técnico, atrasada para começar ou improdutiva" },
+  { key: "in_field", title: "Em campo agora", hint: "Técnico a caminho ou atendendo" },
+  { key: "today", title: "Agenda de hoje", hint: "Visitas marcadas para hoje, pela hora" },
+  { key: "waiting", title: "Aguardando", hint: "Pendente do cliente ou de fornecedor" },
+  { key: "unscheduled", title: "Sem agenda", hint: "Abertas, ainda sem visita marcada" },
+  { key: "upcoming", title: "Próximos dias", hint: "Já agendadas" },
+  { key: "done", title: "Concluídas hoje", hint: "Resolvidas ou encerradas hoje" },
 ];
+
+/** Antes de começar a visita: só aí o horário vencido é atraso (pausada ou em campo não conta). */
+const NOT_STARTED: TicketStatus[] = ["new", "triage", "assigned", "scheduled", "reopened"];
+
+/** Linha da fila: a OS da fila (com seção e motivos) ou uma OS da lista "sem analista". */
+type Row = TicketListItem & Partial<Pick<QueueItem, "section" | "reasons">>;
+type Claim = { busy: boolean; onClaim: () => void } | null;
 
 const REASON_TONE: Record<QueueReason["tone"], string> = {
   danger: "bg-red-50 text-red-700 ring-red-200 dark:bg-red-500/10 dark:text-red-300 dark:ring-red-500/25",
@@ -78,50 +109,147 @@ function shortDay(value: string): string {
     .replace(".", "");
 }
 
+/**
+ * Indicador do topo. Com valor, leva ao que conta (rola até a seção ou abre a lista); com zero, é só
+ * o número, sem cara de botão. Vermelho só quando sinaliza problema.
+ */
 function Kpi({
   label,
   value,
   icon: Icon,
-  tone,
   alert,
   index,
   onClick,
+  href,
 }: {
   label: string;
-  value: number;
+  /** null enquanto carrega. */
+  value: number | null;
   icon: React.ComponentType<{ className?: string }>;
-  /** Fundo e cor do ícone (ex.: "bg-brand-soft text-brand"). */
-  tone: string;
   alert?: boolean;
   index: number;
   onClick?: () => void;
+  href?: string;
 }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{ ["--i" as string]: index }}
-      className={clsx(
-        "group flex items-center gap-3 rounded-xl border bg-surface p-4 text-left shadow-elev-1 transition-[border-color,box-shadow] duration-150 hover:shadow-elev-2",
-        alert ? "border-red-200 dark:border-red-500/30" : "border-line hover:border-line-strong",
-      )}
-    >
+  const interactive = value !== null && value > 0 && Boolean(onClick || href);
+  const className = clsx(
+    "group flex items-center gap-3 rounded-xl border bg-surface p-4 text-left shadow-elev-1",
+    interactive && "transition-[border-color,box-shadow] duration-150 hover:border-line-strong hover:shadow-elev-2",
+    alert ? "border-red-200 dark:border-red-500/30" : "border-line",
+  );
+  const style = { ["--i" as string]: index };
+  const body = (
+    <>
       <span
         className={clsx(
           "flex size-10 shrink-0 items-center justify-center rounded-xl",
-          alert ? "bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400" : tone,
+          alert ? "bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400" : "bg-surface-2 text-ink-muted",
         )}
       >
         <Icon className="size-5" />
       </span>
       <span className="min-w-0">
-        <CountUp
-          value={value}
-          className={clsx("block text-2xl leading-none font-semibold tracking-tight", alert ? "text-red-600 dark:text-red-400" : "text-ink")}
-        />
+        {value === null ? (
+          <Skeleton className="h-6 w-10" />
+        ) : (
+          <CountUp
+            value={value}
+            duration={300}
+            className={clsx(
+              "block text-2xl leading-none font-semibold tracking-tight",
+              alert ? "text-red-600 dark:text-red-400" : "text-ink",
+            )}
+          />
+        )}
         <span className="mt-1 block text-xs leading-snug font-medium text-ink-muted">{label}</span>
       </span>
-    </button>
+    </>
+  );
+  if (interactive && href) {
+    return (
+      <Link href={href} className={className} style={style}>
+        {body}
+      </Link>
+    );
+  }
+  if (interactive && onClick) {
+    return (
+      <button type="button" onClick={onClick} className={className} style={style}>
+        {body}
+      </button>
+    );
+  }
+  return (
+    <div className={className} style={style}>
+      {body}
+    </div>
+  );
+}
+
+function CountPill({ value, danger }: { value: number; danger?: boolean }) {
+  return (
+    <span
+      className={clsx(
+        "rounded-full px-1.5 text-[11px] leading-[18px] font-semibold tabular-nums",
+        danger && value > 0 ? "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300" : "bg-surface-2 text-ink-muted",
+      )}
+    >
+      {value}
+    </span>
+  );
+}
+
+/** Motivos de atenção. "Justificar SLA" abre a OS, onde o cartão de SLA pede o motivo. */
+function Reasons({ ticketId, reasons }: { ticketId: UUID; reasons: QueueReason[] }) {
+  return (
+    <div className="mt-2 flex flex-wrap gap-1.5">
+      {reasons.map((r) => {
+        const className = clsx("rounded-md px-1.5 py-0.5 text-[11px] font-medium ring-1 ring-inset", REASON_TONE[r.tone]);
+        return r.code === "violation_pending" ? (
+          <TicketLink
+            key={r.code}
+            ticketId={ticketId}
+            className={clsx(className, "underline-offset-2 hover:underline")}
+            title="Abrir a OS para informar o motivo da violação"
+          >
+            {r.label}
+          </TicketLink>
+        ) : (
+          <span key={r.code} className={className}>
+            {r.label}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Técnico da visita (quem vai junto como +N). Sem os motivos da fila, avisa do técnico inativo. */
+function Technician({ item, flagInactive }: { item: TicketListItem; flagInactive: boolean }) {
+  const technician = item.assignee && item.assignee.role === "technician" ? item.assignee : null;
+  return (
+    <span className="inline-flex min-w-0 items-center gap-1">
+      <HardHat className="size-3.5 shrink-0 text-ink-subtle" />
+      {technician ? (
+        <span className="truncate">{technician.name}</span>
+      ) : (
+        <span className="font-medium text-amber-700 dark:text-amber-400">Sem técnico</span>
+      )}
+      {item.helpers?.length ? (
+        <span title={`Vai junto: ${item.helpers.map((h) => h.name).join(", ")}`}>+{item.helpers.length}</span>
+      ) : null}
+      {flagInactive && technician?.is_active === false ? <InactiveChip /> : null}
+    </span>
+  );
+}
+
+function Actions({ item, claim, className }: { item: TicketListItem; claim: Claim; className?: string }) {
+  return (
+    <div className={clsx("flex shrink-0 items-center gap-1 border-l border-line", className)}>
+      {claim ? <ClaimButton code={item.code} busy={claim.busy} onClaim={claim.onClaim} /> : null}
+      <MessagesButton ticketId={item.id} code={item.code} />
+      <QuickEditButton ticketId={item.id} code={item.code} />
+    </div>
   );
 }
 
@@ -139,91 +267,76 @@ function Avatar({ name, className }: { name: string; className?: string }) {
   );
 }
 
-function QueueRow({ item, index, compact }: { item: QueueItem; index: number; compact?: boolean }) {
+function QueueRow({ item, today, claim }: { item: Row; today: string; claim: Claim }) {
   const loc = item.location;
-  const technician = item.assignee && item.assignee.role === "technician" ? item.assignee : null;
   const place = [item.customer?.name, loc?.name, loc?.city].filter(Boolean).join(" · ");
+  const done = item.section === "done" || !isOpenStatus(item.status);
+  const inField = item.section === "in_field" || item.status === "en_route" || item.status === "in_progress";
+  // Cor só quando sinaliza problema: P1 e P2 aparecem, P3 e P4 não.
+  const urgent = item.priority === "critical" || item.priority === "high";
   return (
-    <li
-      style={{ ["--i" as string]: index }}
-      className="group relative flex items-start gap-3 px-4 py-3 transition-colors hover:bg-surface-2/60 sm:px-5"
-    >
+    <li className="group relative flex items-start gap-3 px-4 py-3 transition-colors hover:bg-surface-2/60 sm:px-5">
       <div className="min-w-0 flex-1">
-        <div className="flex items-start gap-2">
-          <TicketLink ticketId={item.id} className="min-w-0 flex-1 text-sm font-semibold text-ink hover:text-brand">
-            <span className="mr-1.5 font-mono text-xs font-normal text-ink-subtle">{item.code}</span>
-            {item.title}
-          </TicketLink>
-        </div>
+        <TicketLink ticketId={item.id} className="block text-sm font-semibold text-ink hover:text-brand">
+          <span className="mr-1.5 font-mono text-xs font-normal text-ink-subtle">{item.code}</span>
+          {item.title}
+        </TicketLink>
         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-muted">
+          {/* No celular a coluna da direita some: o status vem para a linha de detalhes. */}
+          <span className="sm:hidden">
+            <StatusBadge status={item.status} />
+          </span>
           {place ? (
             <span className="inline-flex min-w-0 items-center gap-1">
               <Building2 className="size-3.5 shrink-0 text-ink-subtle" />
               <span className="truncate">{place}</span>
             </span>
           ) : null}
-          <span className="inline-flex items-center gap-1">
-            <HardHat className="size-3.5 shrink-0 text-ink-subtle" />
-            {technician ? technician.name : <span className="text-amber-700 dark:text-amber-400">Sem técnico</span>}
-            {item.helpers?.length ? (
-              <span className="text-emerald-700 dark:text-emerald-400" title={`Junto: ${item.helpers.map((h) => h.name).join(", ")}`}>
-                +{item.helpers.length}
-              </span>
-            ) : null}
-          </span>
+          <Technician item={item} flagInactive={!item.reasons} />
           {item.scheduled_start && item.section !== "today" ? (
-            <span className="inline-flex items-center gap-1">
+            <span className="inline-flex items-center gap-1 tabular-nums">
               <CalendarClock className="size-3.5 shrink-0 text-ink-subtle" />
-              {item.section === "upcoming" ? shortDay(item.scheduled_start) + " " : ""}
-              {formatTime(item.scheduled_start)}
+              {/* Fora de hoje (atrasada de ontem, próximos dias), com o dia junto da hora. */}
+              {operationDay(item.scheduled_start) === today
+                ? formatTime(item.scheduled_start)
+                : `${shortDay(item.scheduled_start)} ${formatTime(item.scheduled_start)}`}
             </span>
           ) : null}
-          {item.section === "done" && item.resolved_at ? (
-            <span className="inline-flex items-center gap-1">
-              <CheckCircle2 className="size-3.5 text-emerald-500" />
-              {formatTime(item.resolved_at)}
+          {done && item.resolved_at ? (
+            <span className="inline-flex items-center gap-1 tabular-nums">
+              <CheckCircle2 className="size-3.5 shrink-0 text-ink-subtle" />
+              Concluída {formatTime(item.resolved_at)}
             </span>
           ) : null}
         </div>
-        {!compact && item.reasons.length ? (
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {item.reasons.map((r) => (
-              <span key={r.code} className={clsx("rounded-md px-1.5 py-0.5 text-[11px] font-medium ring-1 ring-inset", REASON_TONE[r.tone])}>
-                {r.label}
-              </span>
-            ))}
-          </div>
-        ) : null}
+        {item.reasons?.length ? <Reasons ticketId={item.id} reasons={item.reasons} /> : null}
       </div>
       <div className="hidden shrink-0 flex-col items-end gap-1.5 sm:flex">
         <div className="flex items-center gap-1.5">
-          <PriorityBadge priority={item.priority} compact />
+          {urgent ? <PriorityBadge priority={item.priority} compact /> : null}
           <StatusBadge status={item.status} />
         </div>
-        {item.section === "done" ? null : <SlaCountdown ticket={item} />}
-        {item.section !== "done" && !item.arrived_at ? <ArrivalChip ticket={item} compact /> : null}
-        {item.section === "in_field" ? <OnsiteBar ticket={item} /> : null}
+        {done ? null : <SlaCountdown ticket={item} />}
+        {!done && !item.arrived_at ? <ArrivalChip ticket={item} compact /> : null}
+        {inField ? <OnsiteBar ticket={item} /> : null}
       </div>
       {/* Ações sempre no canto direito, alinhadas em coluna (como "Editar" nas tabelas). */}
-      <div className="flex shrink-0 items-center gap-1 self-center border-l border-line pl-3">
-        <MessagesButton ticketId={item.id} code={item.code} />
-        <QuickEditButton ticketId={item.id} code={item.code} />
-      </div>
+      <Actions item={item} claim={claim} className="self-center pl-3" />
     </li>
   );
 }
 
 /** Agenda do dia como linha do tempo: hora à esquerda, marcador e a OS. */
-function TodayTimeline({ items }: { items: QueueItem[] }) {
+function TodayTimeline({ items, claimFor }: { items: QueueItem[]; claimFor: (item: TicketListItem) => Claim }) {
   const now = useNow(60_000);
   return (
-    <ol className="stagger relative px-4 py-3 sm:px-5">
-      {items.map((item, index) => {
+    <ol className="relative px-4 py-3 sm:px-5">
+      {items.map((item) => {
         const start = item.scheduled_start ? new Date(item.scheduled_start).getTime() : null;
-        const past = start !== null && start < now;
-        const technician = item.assignee && item.assignee.role === "technician" ? item.assignee : null;
+        // Atraso só antes de começar: a OS já atendida e pausada (aguardando) não está "atrasada".
+        const past = start !== null && start < now && NOT_STARTED.includes(item.status) && !item.arrived_at;
         return (
-          <li key={item.id} style={{ ["--i" as string]: index }} className="group relative flex gap-4 pb-4 last:pb-0">
+          <li key={item.id} className="group relative flex gap-4 pb-4 last:pb-0">
             <div className="w-12 shrink-0 pt-0.5 text-right">
               <span className={clsx("text-sm font-semibold tabular-nums", past ? "text-red-600 dark:text-red-400" : "text-ink")}>
                 {formatTime(item.scheduled_start)}
@@ -243,42 +356,32 @@ function TodayTimeline({ items }: { items: QueueItem[] }) {
             </div>
             <div className="flex min-w-0 flex-1 items-center gap-3 rounded-xl border border-line bg-surface py-2.5 pr-2.5 pl-3.5 transition-[border-color,box-shadow] group-hover:border-line-strong group-hover:shadow-elev-1">
               <div className="min-w-0 flex-1">
-              <div className="flex items-start gap-2">
-                <TicketLink ticketId={item.id} className="min-w-0 flex-1 text-sm font-semibold text-ink hover:text-brand">
-                  <span className="mr-1.5 font-mono text-xs font-normal text-ink-subtle">{item.code}</span>
-                  {item.title}
-                </TicketLink>
-                <StatusBadge status={item.status} />
-              </div>
-              <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-muted">
-                <span className="inline-flex min-w-0 items-center gap-1">
-                  <Building2 className="size-3.5 shrink-0 text-ink-subtle" />
-                  <span className="truncate">
-                    {[item.customer?.name, item.location?.name, item.location?.city].filter(Boolean).join(" · ") || "—"}
+                <div className="flex items-start gap-2">
+                  <TicketLink ticketId={item.id} className="min-w-0 flex-1 text-sm font-semibold text-ink hover:text-brand">
+                    <span className="mr-1.5 font-mono text-xs font-normal text-ink-subtle">{item.code}</span>
+                    {item.title}
+                  </TicketLink>
+                  <StatusBadge status={item.status} />
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-muted">
+                  <span className="inline-flex min-w-0 items-center gap-1">
+                    <Building2 className="size-3.5 shrink-0 text-ink-subtle" />
+                    <span className="truncate">
+                      {[item.customer?.name, item.location?.name, item.location?.city].filter(Boolean).join(" · ") || "—"}
+                    </span>
                   </span>
-                </span>
-                <span className="inline-flex items-center gap-1">
-                  <HardHat className="size-3.5 shrink-0 text-ink-subtle" />
-                  {technician ? technician.name : <span className="text-amber-700 dark:text-amber-400">Sem técnico</span>}
-            {item.helpers?.length ? (
-              <span className="text-emerald-700 dark:text-emerald-400" title={`Junto: ${item.helpers.map((h) => h.name).join(", ")}`}>
-                +{item.helpers.length}
-              </span>
-            ) : null}
-                </span>
-                {past ? (
-                  <span className="inline-flex items-center gap-1 font-medium text-red-600 dark:text-red-400">
-                    <AlarmClock className="size-3.5" />
-                    Ainda não começou
-                  </span>
-                ) : null}
-                {!item.arrived_at ? <ArrivalChip ticket={item} compact /> : null}
+                  <Technician item={item} flagInactive={false} />
+                  {past ? (
+                    <span className="inline-flex items-center gap-1 font-medium text-red-600 dark:text-red-400">
+                      <AlarmClock className="size-3.5" />
+                      Ainda não começou
+                    </span>
+                  ) : null}
+                  {!item.arrived_at ? <ArrivalChip ticket={item} compact /> : null}
+                </div>
+                {item.reasons.length ? <Reasons ticketId={item.id} reasons={item.reasons} /> : null}
               </div>
-              </div>
-              <div className="flex shrink-0 items-center gap-1 self-stretch border-l border-line pl-2.5">
-                <MessagesButton ticketId={item.id} code={item.code} />
-                <QuickEditButton ticketId={item.id} code={item.code} />
-              </div>
+              <Actions item={item} claim={claimFor(item)} className="self-stretch pl-2.5" />
             </div>
           </li>
         );
@@ -287,30 +390,44 @@ function TodayTimeline({ items }: { items: QueueItem[] }) {
   );
 }
 
+function AttentionCount({ value }: { value: number }) {
+  return (
+    <span
+      title="Precisam de atenção"
+      className={clsx(
+        "min-w-6 rounded-full px-1.5 text-center text-[11px] leading-5 font-semibold tabular-nums",
+        value ? "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300" : "bg-surface-2 text-ink-muted",
+      )}
+    >
+      {value}
+    </span>
+  );
+}
+
+/** Filas dos analistas (abertas e alertas de cada um) e as OS sem analista. Um clique abre a fila. */
 function TeamQueues({
   meId,
   viewing,
+  queues,
   onPick,
 }: {
   meId: UUID;
-  viewing: UUID;
-  onPick: (id: UUID) => void;
+  /** O id da fila aberta, ou UNOWNED. */
+  viewing: string;
+  queues: UseQueryResult<QueuesOut>;
+  onPick: (id: string) => void;
 }) {
-  const queues = useQuery({
-    queryKey: ["tickets", "queues"],
-    queryFn: () => api.get<QueuesOut>("/queues"),
-    staleTime: 30_000,
-  });
+  const unowned = queues.data?.unowned;
   return (
     <Card>
-      <CardHeader title="Filas da equipe" actions={<span className="text-[11px] text-ink-subtle">abertas · atenção</span>} />
+      <CardHeader title="Filas da equipe" actions={<span className="text-[11px] text-ink-muted">abertas · atenção</span>} />
       {queues.isLoading ? (
         <div className="space-y-3 p-4">
           {[0, 1, 2].map((i) => (
             <Skeleton key={i} className="h-8" />
           ))}
         </div>
-      ) : queues.error ? (
+      ) : queues.error && !queues.data ? (
         <div className="p-3">
           <ErrorBox message={errorMessage(queues.error)} />
         </div>
@@ -318,11 +435,14 @@ function TeamQueues({
         <ul className="p-1.5">
           {(queues.data?.queues ?? []).map((q) => {
             const selected = q.user.id === viewing;
+            const me = q.user.id === meId;
             return (
               <li key={q.user.id}>
                 <button
                   type="button"
                   onClick={() => onPick(q.user.id)}
+                  aria-pressed={selected}
+                  aria-label={`Fila de ${me ? "você" : q.user.name}: ${q.open} abertas, ${q.attention} precisam de atenção, ${q.today} hoje, ${q.in_field} em campo`}
                   className={clsx(
                     "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors",
                     selected ? "bg-brand-soft" : "hover:bg-surface-2",
@@ -331,37 +451,48 @@ function TeamQueues({
                   <Avatar name={q.user.name} className="size-7 text-[10px]" />
                   <span className="min-w-0 flex-1">
                     <span className={clsx("block truncate text-[13px] text-ink", selected ? "font-bold" : "font-semibold")}>
-                      {q.user.id === meId ? "Você" : q.user.name}
+                      {me ? "Você" : q.user.name}
                     </span>
-                    <span className="block text-[11px] text-ink-subtle">
+                    <span className="block text-[11px] text-ink-muted">
                       {q.today} hoje · {q.in_field} em campo
                     </span>
                   </span>
-                  <span className="text-sm font-semibold text-ink tabular-nums">{q.open}</span>
-                  <span
-                    className={clsx(
-                      "min-w-6 rounded-full px-1.5 text-center text-[11px] leading-5 font-semibold tabular-nums",
-                      q.attention ? "bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400" : "bg-surface-2 text-ink-subtle",
-                    )}
-                  >
-                    {q.attention}
+                  <span className="text-sm font-semibold text-ink tabular-nums" title="Abertas">
+                    {q.open}
                   </span>
+                  <AttentionCount value={q.attention} />
                 </button>
               </li>
             );
           })}
-          {queues.data ? (
+          {unowned ? (
             <li className="mt-1 border-t border-line pt-1">
-              <Link
-                href="/chamados?no_owner=true"
-                className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
+              <button
+                type="button"
+                onClick={() => onPick(UNOWNED)}
+                aria-pressed={viewing === UNOWNED}
+                aria-label={`OS sem analista: ${unowned.open} abertas, ${unowned.attention} precisam de atenção, ${unowned.today} hoje, ${unowned.in_field} em campo`}
+                className={clsx(
+                  "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors",
+                  viewing === UNOWNED ? "bg-brand-soft" : "hover:bg-surface-2",
+                )}
               >
-                <span className="flex size-7 items-center justify-center rounded-full border border-dashed border-line-strong text-ink-subtle">
+                <span className="flex size-7 shrink-0 items-center justify-center rounded-full border border-dashed border-line-strong text-ink-muted">
                   <Inbox className="size-3.5" />
                 </span>
-                <span className="flex-1 font-semibold">Sem analista</span>
-                <span className="text-sm font-semibold text-ink tabular-nums">{queues.data.unowned.open}</span>
-              </Link>
+                <span className="min-w-0 flex-1">
+                  <span className={clsx("block text-[13px] text-ink", viewing === UNOWNED ? "font-bold" : "font-semibold")}>
+                    Sem analista
+                  </span>
+                  <span className="block text-[11px] text-ink-muted">
+                    {unowned.today} hoje · {unowned.in_field} em campo
+                  </span>
+                </span>
+                <span className="text-sm font-semibold text-ink tabular-nums" title="Abertas">
+                  {unowned.open}
+                </span>
+                <AttentionCount value={unowned.attention} />
+              </button>
             </li>
           ) : null}
         </ul>
@@ -370,25 +501,64 @@ function TeamQueues({
   );
 }
 
-export default function MyQueuePage() {
+/** Seções candidatas de cada indicador: rola até a primeira que estiver na tela. */
+function reveal(keys: QueueSection[]) {
+  for (const key of keys) {
+    const el = document.getElementById(`fila-${key}`);
+    if (el) {
+      revealSection(el);
+      return;
+    }
+  }
+}
+
+function MyQueueView() {
   const { user } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const allowed = canManageTickets(user?.role);
   // Solicitante não tem fila: vai para os chamados dele.
   useEffect(() => {
     if (user && !allowed) router.replace("/chamados");
   }, [user, allowed, router]);
-  const [viewing, setViewing] = useState<UUID | null>(null);
-  const userId = viewing ?? user?.id ?? null;
-  const mine = !viewing || viewing === user?.id;
+  // A fila aberta fica na URL (?analista=<id> ou ?analista=sem): recarregar ou mandar o link mantém.
+  const [viewing, setViewing] = useState<string | null>(() => {
+    const param = searchParams.get("analista");
+    return param === UNOWNED || isUuid(param) ? param : null;
+  });
+  const now = useNow(60_000);
+  const meId = user?.id ?? null;
+  const unowned = viewing === UNOWNED;
+  const mine = !unowned && (!viewing || viewing === meId);
+  const ownerId = unowned ? null : mine ? meId : viewing;
+
+  const queues = useQuery({
+    queryKey: ["tickets", "queues"],
+    queryFn: () => api.get<QueuesOut>("/queues"),
+    staleTime: 30_000,
+    enabled: allowed,
+  });
+  // Sem dados de reserva: ao trocar de fila, a tela não mostra a fila anterior com o nome novo.
   const queue = useQuery({
-    queryKey: ["tickets", "my-queue", userId],
-    queryFn: () => api.get<MyQueue>("/my-queue", mine ? {} : { user_id: userId ?? undefined }),
-    enabled: Boolean(userId) && allowed,
+    queryKey: ["tickets", "my-queue", ownerId],
+    queryFn: () => api.get<MyQueue>("/my-queue", mine ? {} : { user_id: ownerId ?? undefined }),
+    enabled: Boolean(ownerId) && allowed,
     // "Atrasada" e prazos dependem do relógio: revalida mesmo sem eventos.
     refetchInterval: 60_000,
-    placeholderData: (prev) => prev,
   });
+  const orphans = useQuery({
+    queryKey: ["tickets", "unowned-queue"],
+    queryFn: () =>
+      api.get<Page<TicketListItem>>("/tickets", {
+        no_owner: true,
+        open_only: true,
+        order_by: "resolution_due_at",
+        page_size: UNOWNED_LIMIT,
+      }),
+    enabled: unowned && allowed,
+    refetchInterval: 60_000,
+  });
+  const { claim, isClaiming } = useClaim();
 
   const grouped = useMemo(() => {
     const map = new Map<QueueSection, QueueItem[]>();
@@ -400,135 +570,254 @@ export default function MyQueuePage() {
     return map;
   }, [queue.data]);
 
+  // Mesmas regras das filas da equipe (services/queues.py): "hoje" conta toda OS do dia que não foi
+  // concluída (inclusive atrasada ou em campo), e "atenção" soma as em campo com alerta.
+  const kpis = useMemo(() => {
+    const data = queue.data;
+    if (!data) return null;
+    let attention = 0;
+    let today = 0;
+    for (const item of data.items) {
+      if (item.section === "attention" || (item.section === "in_field" && item.reasons.some((r) => r.tone !== "info"))) {
+        attention += 1;
+      }
+      if (item.section !== "done" && item.scheduled_start && operationDay(item.scheduled_start) === data.date) today += 1;
+    }
+    return { open: data.counts.open, attention, today, inField: data.counts.in_field, done: data.counts.done };
+  }, [queue.data]);
+
   if (user && !allowed) return null;
 
-  const counts = queue.data?.counts;
-  const firstName = (queue.data?.user.name ?? user?.name ?? "").split(" ")[0];
-  const scrollTo = (key: QueueSection) =>
-    document.getElementById(`fila-${key}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
-  const empty = queue.data && queue.data.items.length === 0;
+  const pick = (next: string | null) => {
+    const value = next === meId ? null : next;
+    setViewing(value);
+    replaceSearch({ analista: value });
+  };
+  const claimFor = (item: TicketListItem): Claim =>
+    meId && isOpenStatus(item.status) && item.owner?.id !== meId
+      ? { busy: isClaiming(item.id), onClaim: () => claim(item) }
+      : null;
+  const today = queue.data?.date ?? operationDay(now);
+  const colleague =
+    !mine && !unowned
+      ? (queues.data?.queues.find((q) => q.user.id === viewing)?.user ??
+        (queue.data?.user.id === viewing ? queue.data.user : null))
+      : null;
+  const active = unowned
+    ? { updatedAt: orphans.dataUpdatedAt, error: orphans.error, errorAt: orphans.errorUpdatedAt, hasData: Boolean(orphans.data), fetching: orphans.isFetching }
+    : { updatedAt: queue.dataUpdatedAt, error: queue.error, errorAt: queue.errorUpdatedAt, hasData: Boolean(queue.data), fetching: queue.isFetching };
+  const refresh = () => {
+    void (unowned ? orphans.refetch() : queue.refetch());
+    void queues.refetch();
+  };
+  const live = <LiveStatus updatedAt={active.updatedAt} every="a cada minuto" onRefresh={refresh} refreshing={active.fetching} />;
+  const title = mine
+    ? `${greeting()}, ${(user?.name ?? "").split(" ")[0]}`
+    : unowned
+      ? "OS sem analista"
+      : colleague
+        ? `Fila de ${colleague.name}`
+        : "Carregando...";
+  const description = mine ? (
+    <>Suas OS, pelo que pede ação primeiro · {live}</>
+  ) : unowned ? (
+    <>Abertas e sem analista responsável, o prazo mais perto primeiro. Use Puxar para trazer uma OS para a sua fila · {live}</>
+  ) : (
+    <>Use Puxar para trazer uma OS para a sua fila · {live}</>
+  );
+
+  const orphanItems = orphans.data?.items ?? [];
+  const main = active.error && !active.hasData ? (
+    <ErrorBox message={errorMessage(active.error)} />
+  ) : unowned ? (
+    <Card className="overflow-hidden">
+      <CardHeader
+        title={
+          <span className="inline-flex items-center gap-2">
+            OS sem analista
+            {orphans.data ? <CountPill value={orphans.data.total} /> : null}
+          </span>
+        }
+        description="O prazo de solução mais perto primeiro"
+        actions={
+          <Link href="/chamados?no_owner=true" className="text-xs font-medium text-ink-muted hover:text-brand">
+            Ver em Chamados
+          </Link>
+        }
+      />
+      {orphans.isLoading ? (
+        <LoadingBlock rows={4} label="Carregando as OS sem analista..." />
+      ) : orphanItems.length === 0 ? (
+        <EmptyState icon={<Coffee />} title="Nenhuma OS sem analista" description="Todas as OS abertas têm um analista responsável." />
+      ) : (
+        <ul className="divide-y divide-line">
+          {orphanItems.map((item) => (
+            <QueueRow key={item.id} item={item} today={today} claim={claimFor(item)} />
+          ))}
+        </ul>
+      )}
+      {orphans.data && orphans.data.total > orphanItems.length ? (
+        <p className="border-t border-line px-5 py-2.5 text-xs text-ink-muted">
+          Mostrando {orphanItems.length} de {orphans.data.total}.{" "}
+          <Link href="/chamados?no_owner=true" className="font-semibold text-brand-ink underline-offset-2 hover:underline">
+            Ver todas em Chamados
+          </Link>
+        </p>
+      ) : null}
+    </Card>
+  ) : !queue.data ? (
+    <Card>
+      <LoadingBlock rows={4} label="Carregando a fila..." />
+    </Card>
+  ) : queue.data.items.length === 0 ? (
+    <Card>
+      <EmptyState
+        icon={<Coffee />}
+        title="Fila zerada"
+        description={
+          mine
+            ? "Nenhuma OS aberta com você. Novas OS atribuídas a você aparecem aqui na hora."
+            : `Nenhuma OS aberta na fila de ${colleague?.name ?? "quem você escolheu"}.`
+        }
+        action={
+          mine ? (
+            <Button onClick={() => pick(UNOWNED)}>
+              <Inbox className="size-4" />
+              Ver OS sem analista
+            </Button>
+          ) : null
+        }
+      />
+    </Card>
+  ) : (
+    SECTIONS.map((section) => {
+      const items = grouped.get(section.key) ?? [];
+      if (!items.length) return null;
+      return (
+        // O id fica no bloco que rola (com a margem da barra do topo) e recebe o foco ao chegar.
+        <section key={section.key} id={`fila-${section.key}`} tabIndex={-1} aria-label={section.title} className="scroll-mt-20 rounded-xl">
+          <Card className="animate-enter overflow-hidden">
+            <CardHeader
+              title={
+                <span className="inline-flex items-center gap-2">
+                  {section.title}
+                  <CountPill value={items.length} danger={section.key === "attention"} />
+                </span>
+              }
+              description={section.hint}
+              actions={
+                section.key === "today" ? (
+                  <Link href="/dia" className="text-xs font-medium text-ink-muted hover:text-brand">
+                    Atividades do dia
+                  </Link>
+                ) : null
+              }
+            />
+            {section.key === "today" ? (
+              <TodayTimeline items={items} claimFor={claimFor} />
+            ) : (
+              <ul className="divide-y divide-line">
+                {items.map((item) => (
+                  <QueueRow key={item.id} item={item} today={today} claim={claimFor(item)} />
+                ))}
+              </ul>
+            )}
+          </Card>
+        </section>
+      );
+    })
+  );
 
   return (
     <div className="mx-auto max-w-7xl">
       <PageHeader
         eyebrow={longToday()}
-        title={mine ? `${greeting()}, ${firstName}` : `Fila de ${queue.data?.user.name ?? "..."}`}
-        description={
-          mine
-            ? "Suas OS organizadas pelo que pede ação primeiro. Atualiza em tempo real."
-            : "Você está vendo a fila de um colega. Abra a OS para puxar para a sua fila."
-        }
+        title={title}
+        description={description}
         actions={
           <>
             {!mine ? (
-              <Button variant="ghost" onClick={() => setViewing(null)}>
+              <Button variant="ghost" onClick={() => pick(null)}>
                 Voltar para a minha fila
               </Button>
             ) : null}
-            <Link href="/chamados/novo">
-              <Button variant="primary">
-                <Plus className="size-4" />
-                Nova OS
-              </Button>
+            <Link href="/chamados/novo" className={buttonClassName("primary")}>
+              <Plus className="size-4" />
+              Nova OS
             </Link>
           </>
         }
       />
 
-      {queue.error ? (
-        <ErrorBox message={errorMessage(queue.error)} />
-      ) : (
-        <>
-          <div className="stagger mb-6 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
-            <Kpi index={0} label="Na fila" value={counts?.open ?? 0} icon={Inbox} tone="bg-brand-soft text-brand" />
-            <Kpi
-              index={1}
-              label="Precisam de atenção"
-              value={counts?.attention ?? 0}
-              icon={TriangleAlert}
-              tone="bg-surface-2 text-red-600 dark:text-red-400"
-              alert={(counts?.attention ?? 0) > 0}
-              onClick={() => scrollTo("attention")}
-            />
-            <Kpi index={2} label="Agendadas hoje" value={counts?.today ?? 0} icon={CalendarClock} tone="bg-brand-soft text-brand" onClick={() => scrollTo("today")} />
-            <Kpi index={3} label="Em campo agora" value={counts?.in_field ?? 0} icon={Navigation} tone="bg-surface-2 text-sky-600 dark:text-sky-400" onClick={() => scrollTo("in_field")} />
-            <Kpi index={4} label="Concluídas hoje" value={counts?.done ?? 0} icon={CheckCircle2} tone="bg-surface-2 text-emerald-600 dark:text-emerald-400" onClick={() => scrollTo("done")} />
-          </div>
+      {active.error && active.hasData ? (
+        <RefreshFailed at={active.errorAt} onRetry={refresh} retrying={active.fetching} className="mb-4" />
+      ) : null}
 
-          <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_300px]">
-            <div className="flex flex-col gap-5">
-              {queue.isLoading || !queue.data ? (
-                <Card>
-                  <LoadingBlock rows={4} label="Carregando sua fila..." />
-                </Card>
-              ) : empty ? (
-                <Card>
-                  <EmptyState
-                    icon={<Coffee />}
-                    title="Fila zerada"
-                    description="Nenhuma OS aberta com você. Novas OS atribuídas a você aparecem aqui na hora."
-                    action={
-                      <Link href="/chamados?no_owner=true">
-                        <Button>Ver OS sem analista</Button>
-                      </Link>
-                    }
-                  />
-                </Card>
-              ) : (
-                SECTIONS.map((section) => {
-                  const items = grouped.get(section.key) ?? [];
-                  if (!items.length) return null;
-                  const Icon = section.icon;
-                  return (
-                    <Card key={section.key} className="animate-enter scroll-mt-20 overflow-hidden">
-                      <div id={`fila-${section.key}`} className="flex items-center gap-3 border-b border-line px-4 py-3 sm:px-5">
-                        <Icon className={clsx("size-4 shrink-0", section.tone)} />
-                        <div className="min-w-0 flex-1">
-                          <h2 className="text-sm font-bold text-ink">
-                            {section.title}
-                            <span className="ml-2 rounded-full bg-surface-2 px-1.5 text-[11px] leading-[18px] font-semibold text-ink-muted tabular-nums">
-                              {items.length}
-                            </span>
-                          </h2>
-                          <p className="truncate text-xs text-ink-muted">{section.hint}</p>
-                        </div>
-                        {section.key === "today" ? (
-                          <Link href="/dia" className="shrink-0 text-xs text-ink-muted hover:text-brand">
-                            Atividades do dia
-                          </Link>
-                        ) : null}
-                      </div>
-                      {section.key === "today" ? (
-                        <TodayTimeline items={items} />
-                      ) : (
-                        <ul className="stagger divide-y divide-line">
-                          {items.map((item, index) => (
-                            <QueueRow key={item.id} item={item} index={index} compact={section.compact} />
-                          ))}
-                        </ul>
-                      )}
-                    </Card>
-                  );
-                })
-              )}
-            </div>
-
-            <aside className="flex flex-col gap-4 xl:sticky xl:top-20">
-              {user ? <TeamQueues meId={user.id} viewing={userId ?? user.id} onPick={(id) => setViewing(id === user.id ? null : id)} /> : null}
-              <Card className="p-4">
-                <SectionTitle>Como a fila se organiza</SectionTitle>
-                <p className="mt-2 text-xs leading-relaxed text-ink-muted">
-                  Entram aqui as OS em que você é o analista responsável ou o executor. Primeiro o que está em campo,
-                  depois o que precisa de ação (prazo, técnico, atraso), a agenda do dia e o restante.
-                </p>
-                {queue.data ? (
-                  <p className="mt-3 text-[11px] text-ink-subtle">Atualizado {formatShort(queue.data.generated_at)}</p>
-                ) : null}
-              </Card>
-            </aside>
-          </div>
-        </>
+      {unowned ? null : (
+        <div className="stagger mb-6 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+          <Kpi
+            index={0}
+            label="Na fila"
+            value={kpis?.open ?? null}
+            icon={Inbox}
+            href={mine ? "/chamados?mine=true" : `/chamados?owner_id=${ownerId}`}
+          />
+          <Kpi
+            index={1}
+            label="Precisam de atenção"
+            value={kpis?.attention ?? null}
+            icon={TriangleAlert}
+            alert={(kpis?.attention ?? 0) > 0}
+            onClick={() => reveal(["attention", "in_field"])}
+          />
+          <Kpi
+            index={2}
+            label="Agendadas hoje"
+            value={kpis?.today ?? null}
+            icon={CalendarClock}
+            onClick={() => reveal(["today", "attention", "in_field"])}
+          />
+          <Kpi
+            index={3}
+            label="Em campo agora"
+            value={kpis?.inField ?? null}
+            icon={Navigation}
+            onClick={() => reveal(["in_field"])}
+          />
+          <Kpi
+            index={4}
+            label="Concluídas hoje"
+            value={kpis?.done ?? null}
+            icon={CheckCircle2}
+            onClick={() => reveal(["done"])}
+          />
+        </div>
       )}
+
+      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="flex flex-col gap-5">{main}</div>
+
+        <aside className="flex flex-col gap-4 xl:sticky xl:top-20">
+          {meId ? <TeamQueues meId={meId} viewing={viewing ?? meId} queues={queues} onPick={pick} /> : null}
+          <Card className="p-4">
+            <SectionTitle>Como a fila se organiza</SectionTitle>
+            <p className="mt-2 text-xs leading-relaxed text-ink-muted">
+              Entram na fila as OS em que o analista é o responsável ou o executor. Primeiro o que precisa de ação (prazo,
+              técnico, atraso), depois o que está em campo, a agenda de hoje, o que aguarda, o que está sem agenda, os
+              próximos dias e as concluídas hoje.
+            </p>
+          </Card>
+        </aside>
+      </div>
     </div>
+  );
+}
+
+export default function MyQueuePage() {
+  // useSearchParams pede um Suspense em volta.
+  return (
+    <Suspense fallback={<LoadingBlock />}>
+      <MyQueueView />
+    </Suspense>
   );
 }

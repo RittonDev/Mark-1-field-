@@ -789,30 +789,31 @@ async def test_violation_reasons(client: AsyncClient, world: World, engine: Asyn
         )
     t = await transition(client, tech_h, t, "in_progress")
 
-    # O relógio errado é recusado.
+    # Motivo de SLA é da central: o técnico não informa (nem vê os prazos).
     r = await client.post(
         f"{API}/tickets/{t['id']}/transition",
         json={
             "to_status": "resolved",
             "resolution_notes": "Peça trocada",
-            "resolution_violation_reason_id": slow_triage,
+            "resolution_violation_reason_id": no_part,
         },
         headers=tech_h,
     )
-    assert r.status_code == 422
-
-    # O técnico resolve informando só o motivo da solução: fica pendente o da resposta.
-    t = await transition(
-        client,
-        tech_h,
-        t,
-        "resolved",
-        resolution_notes="Peça trocada",
-        resolution_violation_reason_id=no_part,
-    )
+    assert r.status_code == 403
+    t = await transition(client, tech_h, t, "resolved", resolution_notes="Peça trocada")
     # O técnico não recebe os prazos nem os motivos (são da gestão); a gestão vê tudo.
     assert (t["response_breached"], t["resolution_breached"]) == (False, False)
     assert t["resolution_violation_reason"] is None
+    url = f"{API}/tickets/{t['id']}/violation"
+    # O relógio errado é recusado.
+    r = await client.patch(url, json={"resolution_violation_reason_id": slow_triage}, headers=an)
+    assert r.status_code == 422
+    # A central informa o motivo da solução: fica pendente o da resposta.
+    r = await client.patch(url, json={"resolution_violation_reason_id": no_part}, headers=an)
+    assert r.status_code == 200, r.text
+    # O técnico responsável também não justifica pela rota própria.
+    denied = await client.patch(url, json={"violation_note": "x"}, headers=tech_h)
+    assert denied.status_code == 403
     t = (await client.get(f"{API}/tickets/{t['id']}", headers=an)).json()
     assert (t["response_breached"], t["resolution_breached"]) == (True, True)
     assert t["resolution_violation_reason"]["name"] == "Peça em falta no fornecedor"

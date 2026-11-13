@@ -61,7 +61,7 @@ def test_field_statuses_require_assignee() -> None:
 
 
 def test_schedule_requires_date() -> None:
-    with pytest.raises(WorkflowError, match="scheduled_start"):
+    with pytest.raises(WorkflowError, match="data e a hora da visita"):
         _validate(S.ASSIGNED, S.SCHEDULED, has_schedule=False)
 
 
@@ -130,6 +130,15 @@ def test_technician_only_on_own_tickets() -> None:
     assert not _can(UserRole.TECHNICIAN, S.ASSIGNED, S.IN_PROGRESS, same_team=True)
     assert not _can(UserRole.TECHNICIAN, S.ASSIGNED, S.IN_PROGRESS)
     assert not _can(UserRole.TECHNICIAN, S.CLOSED, S.REOPENED, assignee=True)
+
+
+def test_technician_resolves_only_while_working() -> None:
+    """Concluir só a partir de "Em atendimento": pausada ou reaberta, ele inicia antes."""
+    assert _can(UserRole.TECHNICIAN, S.IN_PROGRESS, S.RESOLVED, assignee=True)
+    for paused in (S.ON_HOLD_CUSTOMER, S.ON_HOLD_VENDOR, S.REOPENED):
+        assert not _can(UserRole.TECHNICIAN, paused, S.RESOLVED, assignee=True), paused
+        assert _can(UserRole.TECHNICIAN, paused, S.IN_PROGRESS, assignee=True), paused
+        assert _can(UserRole.ANALYST, paused, S.RESOLVED, is_requester=False), paused
 
 
 def test_office_reopens_closed_and_cancelled() -> None:

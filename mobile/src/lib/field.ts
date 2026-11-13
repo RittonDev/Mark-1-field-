@@ -3,6 +3,7 @@
 // - cada chamado inclui até 4h de técnico na loja, contadas da chegada (`arrived_at` → `onsite_due_at`);
 // - peça só entra com orçamento aprovado e assinado pelo cliente (pedidos de peça).
 
+import { formatTime } from "./format";
 import type { FieldRules, PartRequestStatus, TicketListItem, TicketStatus } from "./types";
 
 /** Regras de campo (GET /settings/field). Valores da promessa enquanto o aparelho não baixou as da empresa. */
@@ -73,11 +74,16 @@ export interface OnsiteClock {
   total: number;
 }
 
-/** Permanência na loja: da chegada até o limite do chamado (4h). */
+/**
+ * Permanência na loja: da chegada até o limite do chamado (4h). O início é a chegada desta visita:
+ * numa revisita (OS reaberta ou depois de uma visita improdutiva) a janela é nova e a chegada
+ * guardada continua sendo a primeira, então vale o mais recente entre a chegada e o limite menos
+ * as horas do chamado.
+ */
 export function onsiteClock(ticket: Clockable, now: number): OnsiteClock | null {
   if (!ticket.arrived_at || !ticket.onsite_due_at || !ONSITE_STATUSES.includes(ticket.status)) return null;
-  const start = new Date(ticket.arrived_at).getTime();
   const end = new Date(ticket.onsite_due_at).getTime();
+  const start = Math.max(new Date(ticket.arrived_at).getTime(), end - rules.onsite_hours * 3600_000);
   const total = Math.max(1, minutesBetween(start, end));
   const elapsed = Math.max(0, minutesBetween(start, now));
   const left = minutesBetween(now, end);
@@ -107,6 +113,43 @@ export function arrivalUrgency(ticket: Clockable, now: number): number {
   const clock = arrivalClock(ticket, now);
   if (!clock) return 2;
   return clock.tone === "late" ? 0 : clock.tone === "risk" ? 1 : 2;
+}
+
+// ───────────── dia relativo nos relógios de campo ("hoje", "amanhã", "13/11") ─────────────
+
+const pad2 = (n: number) => String(n).padStart(2, "0");
+
+function startOfDayMs(ms: number): number {
+  const d = new Date(ms);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+/** Dias de calendário entre `now` e `value` (0 = hoje, 1 = amanhã, -1 = ontem). */
+export function dayOffset(value: string | Date, now: number): number {
+  const ms = typeof value === "string" ? new Date(value).getTime() : value.getTime();
+  return Math.round((startOfDayMs(ms) - startOfDayMs(now)) / 86_400_000);
+}
+
+/** "13/11" */
+export function dayMonth(value: string | Date): string {
+  const d = typeof value === "string" ? new Date(value) : value;
+  return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}`;
+}
+
+/** "hoje", "amanhã", "ontem" ou "13/11". */
+export function relativeDay(value: string | Date, now: number): string {
+  const offset = dayOffset(value, now);
+  if (offset === 0) return "hoje";
+  if (offset === 1) return "amanhã";
+  if (offset === -1) return "ontem";
+  return dayMonth(value);
+}
+
+/** Hora com o dia quando não é hoje: "14:35", "amanhã 09:00", "ontem 18:10", "13/11 09:00". */
+export function whenLabel(value: string, now: number): string {
+  const time = formatTime(value);
+  return dayOffset(value, now) === 0 ? time : `${relativeDay(value, now)} ${time}`;
 }
 
 /** Previsão do limite na loja para o check-in feito offline (o servidor confirma no próximo sync). */

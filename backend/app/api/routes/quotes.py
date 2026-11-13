@@ -1,16 +1,19 @@
+import re
 import uuid
 from datetime import datetime, timedelta
-from typing import Annotated
+from decimal import Decimal
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from fastapi.responses import FileResponse
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, and_, func, or_, select
 
 from app.api.deps import DB, TicketManagerUser
+from app.api.files import stored_file
 from app.core.config import settings
-from app.core.enums import QuoteStatus
+from app.core.enums import QuoteStatus, TicketStatus
 from app.core.security import InvalidToken, create_token, decode_token
-from app.models import Quote, QuoteItemCatalog, Ticket
+from app.models import Customer, Location, Quote, QuoteItemCatalog, Ticket
 from app.schemas.quote import (
     CatalogItemIn,
     CatalogItemOut,
@@ -24,19 +27,26 @@ from app.schemas.quote import (
     QuoteOut,
     QuoteReject,
     QuoteSent,
+    QuoteStatusTotal,
+    QuoteSummary,
     format_quote_code,
 )
 from app.schemas.ticket import format_ticket_code
 from app.services import company as company_svc
 from app.services import quotes as svc
-from app.services import storage
+from app.services import search
 from app.services import tickets as tickets_svc
+from app.services.activities import local_today
 from app.services.realtime import commit_and_publish
 
 router = APIRouter(tags=["quotes"])
 public = APIRouter(prefix="/public/quotes", tags=["quotes"])
 
 LINK_GONE = "Este orçamento não está mais disponível. Fale com a Maxx Field."
+TICKET_CANCELLED = "A OS foi cancelada: reabra a OS antes de mexer no orçamento"
+TICKET_CANCELLED_PUBLIC = "Esta OS foi cancelada. Fale com a Maxx Field."
+# "ORC-000123", "OS 123", "#123", "123": número do orçamento ou da OS.
+_CODE = re.compile(r"^(?:orc|os)?[\s#-]*0*(\d{1,9})$", re.IGNORECASE)
 
 
 SIGNATURE_LINK = timedelta(minutes=30)
@@ -104,6 +114,17 @@ async def ticket_quotes(ticket_id: uuid.UUID, db: DB, user: TicketManagerUser) -
     return [_out(q) for q in quotes]
 
 
+async def _ticket_status(db: DB, ticket_id: uuid.UUID) -> TicketStatus | None:
+    return await db.scalar(select(Ticket.status).where(Ticket.id == ticket_id))
+
+
+async def _ensure_not_cancelled(db: DB, ticket_id: uuid.UUID) -> None:
+    """OS cancelada não recebe orçamento novo nem envio (a aprovação liberaria peças e avisaria o
+    técnico de uma OS que não existe mais). Reaberta, volta a valer."""
+    if await _ticket_status(db, ticket_id) == TicketStatus.CANCELLED:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, TICKET_CANCELLED)
+
+
 @router.post(
     "/tickets/{ticket_id}/quotes", response_model=QuoteOut, status_code=status.HTTP_201_CREATED
 )
@@ -111,6 +132,7 @@ async def create_quote(
     ticket_id: uuid.UUID, body: QuoteIn, db: DB, user: TicketManagerUser
 ) -> QuoteOut:
     ticket = await tickets_svc.get_visible_ticket(db, user, ticket_id)
+    await _ensure_not_cancelled(db, ticket.id)
     quote = await svc.create(db, ticket, body, user)
     await db.commit()
     return _out(quote)
@@ -120,7 +142,9 @@ async def create_quote(
 async def update_quote(
     quote_id: uuid.UUID, body: QuoteIn, db: DB, user: TicketManagerUser
 ) -> QuoteOut:
-    quote = await svc.update(db, await svc.get(db, quote_id), body, user)
+    quote = await svc.get(db, quote_id)
+    await _ensure_not_cancelled(db, quote.ticket_id)
+    quote = await svc.update(db, quote, body, user)
     await db.commit()
     return _out(quote)
 
@@ -129,6 +153,7 @@ async def update_quote(
 async def send_quote(quote_id: uuid.UUID, db: DB, user: TicketManagerUser) -> QuoteSent:
     """Marca como enviado e devolve o link do cliente (reenviar mantém o mesmo link)."""
     quote = await svc.get(db, quote_id)
+    await _ensure_not_cancelled(db, quote.ticket_id)
     ticket = await tickets_svc.get_ticket(db, quote.ticket_id)
     token = await svc.send(db, ticket, quote, user)
     await commit_and_publish(db)
@@ -150,39 +175,135 @@ async def cancel_quote(quote_id: uuid.UUID, db: DB, user: TicketManagerUser) -> 
     return _out(quote)
 
 
+def _overdue() -> ColumnElement[bool]:
+    """Enviado e com a validade vencida: já é "vencido", mesmo antes da rotina gravar."""
+    return and_(Quote.status == QuoteStatus.SENT, Quote.valid_until < local_today())
+
+
+def _status_condition(wanted: QuoteStatus) -> ColumnElement[bool]:
+    if wanted == QuoteStatus.SENT:
+        return and_(Quote.status == QuoteStatus.SENT, ~_overdue())
+    if wanted == QuoteStatus.EXPIRED:
+        return or_(Quote.status == QuoteStatus.EXPIRED, _overdue())
+    return Quote.status == wanted
+
+
+def _search(q: str | None) -> ColumnElement[bool] | None:
+    """Código do orçamento ou da OS ("ORC-000123", "OS 123"), título, cliente ou loja."""
+    if not q or not q.strip():
+        return None
+    options: list[Any] = []
+    code = _CODE.match(q.strip())
+    if code:
+        number = int(code.group(1))
+        options += [Quote.number == number, Ticket.number == number]
+    words = search.all_words(q, [Quote.title, Ticket.title, Customer.name, Location.name])
+    if words is not None:
+        options.append(words)
+    return or_(*options) if options else None
+
+
+def _list_conditions(
+    start: datetime | None,
+    end: datetime | None,
+    customer_id: uuid.UUID | None,
+    q: str | None,
+) -> list[Any]:
+    conds: list[Any] = []
+    if start is not None:
+        conds.append(Quote.created_at >= start)
+    if end is not None:
+        conds.append(Quote.created_at < end)
+    if customer_id is not None:
+        conds.append(Ticket.customer_id == customer_id)
+    matched = _search(q)
+    if matched is not None:
+        conds.append(matched)
+    return conds
+
+
+def _joined(stmt: Any) -> Any:
+    return (
+        stmt.join(Ticket, Ticket.id == Quote.ticket_id)
+        .outerjoin(Customer, Customer.id == Ticket.customer_id)
+        .outerjoin(Location, Location.id == Ticket.location_id)
+    )
+
+
 @router.get("/quotes", response_model=list[QuoteListRow])
 async def list_quotes(
     db: DB,
     _: TicketManagerUser,
+    response: Response,
     start: datetime | None = None,
     end: datetime | None = None,
     status_: Annotated[QuoteStatus | None, Query(alias="status")] = None,
+    customer_id: uuid.UUID | None = None,
+    q: Annotated[str | None, Query(max_length=200)] = None,
+    limit: Annotated[int, Query(ge=1, le=2000)] = 500,
 ) -> list[QuoteListRow]:
-    stmt = (
-        select(Quote, Ticket)
-        .join(Ticket, Ticket.id == Quote.ticket_id)
-        .order_by(Quote.created_at.desc())
-        .limit(500)
-    )
-    if start is not None:
-        stmt = stmt.where(Quote.created_at >= start)
-    if end is not None:
-        stmt = stmt.where(Quote.created_at < end)
-    rows = (await db.execute(stmt)).all()
+    """Orçamentos (mais novos primeiro). Os filtros valem no banco, antes do limite; o total que
+    bate com eles vai no cabeçalho X-Total-Count."""
+    conds = _list_conditions(start, end, customer_id, q)
+    if status_ is not None:
+        conds.append(_status_condition(status_))
+    total = await db.scalar(_joined(select(func.count()).select_from(Quote)).where(*conds))
+    response.headers["X-Total-Count"] = str(total or 0)
+    # Só as colunas da OS que a lista mostra (a OS inteira traria as ~19 relações dela).
+    stmt = _joined(select(Quote, Ticket.number, Customer.name, Location.name)).where(*conds)
+    rows = (await db.execute(stmt.order_by(Quote.created_at.desc()).limit(limit))).all()
     out = []
-    for quote, ticket in rows:
+    for quote, ticket_number, customer, location in rows:
         svc.refresh_expiry(quote)
-        if status_ is not None and quote.status != status_:
-            continue
         out.append(
             QuoteListRow(
                 **_out(quote).model_dump(exclude={"code"}),
-                ticket_code=format_ticket_code(ticket.number),
-                customer=ticket.customer.name if ticket.customer else None,
+                ticket_code=format_ticket_code(ticket_number),
+                customer=customer,
+                location=location,
             )
         )
-    await db.commit()
+    await db.commit()  # grava os que venceram
     return out
+
+
+@router.get("/quotes/summary", response_model=QuoteSummary)
+async def quotes_summary(
+    db: DB,
+    _: TicketManagerUser,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    customer_id: uuid.UUID | None = None,
+    q: Annotated[str | None, Query(max_length=200)] = None,
+) -> QuoteSummary:
+    """Quantidade e valor por situação, somados no banco sobre todos os orçamentos do filtro
+    (os totais do topo da tela não dependem do limite da lista)."""
+    conds = _list_conditions(start, end, customer_id, q)
+    by_status = {s.value: QuoteStatusTotal() for s in QuoteStatus}
+    rows = await db.execute(
+        _joined(select(Quote.status, func.count(), func.coalesce(func.sum(Quote.total), 0)))
+        .where(*conds)
+        .group_by(Quote.status)
+    )
+    for quote_status, count, total in rows:
+        by_status[quote_status.value] = QuoteStatusTotal(count=count, total=Decimal(total))
+    # Enviados com a validade vencida contam como vencidos.
+    count, total = (
+        await db.execute(
+            _joined(select(func.count(), func.coalesce(func.sum(Quote.total), 0))).where(
+                *conds, _overdue()
+            )
+        )
+    ).one()
+    if count:
+        sent, expired = by_status[QuoteStatus.SENT.value], by_status[QuoteStatus.EXPIRED.value]
+        by_status[QuoteStatus.SENT.value] = QuoteStatusTotal(
+            count=sent.count - count, total=sent.total - Decimal(total)
+        )
+        by_status[QuoteStatus.EXPIRED.value] = QuoteStatusTotal(
+            count=expired.count + count, total=expired.total + Decimal(total)
+        )
+    return QuoteSummary(by_status=by_status)
 
 
 @router.get("/quotes/{quote_id}/signature", include_in_schema=False)
@@ -196,7 +317,7 @@ async def quote_signature(quote_id: uuid.UUID, token: str, db: DB) -> FileRespon
     quote = await svc.get(db, quote_id)
     if not quote.signature_key:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Sem assinatura")
-    return FileResponse(storage.open_path(quote.signature_key))
+    return stored_file(quote.signature_key)
 
 
 # ------------------------------------------------------------ link do cliente
@@ -290,17 +411,26 @@ async def view_quote(token: str, request: Request, db: DB) -> PublicQuote:
 
 
 def _ip(request: Request) -> str | None:
-    forwarded = request.headers.get("x-forwarded-for")
-    return (
-        forwarded.split(",")[0].strip()
-        if forwarded
-        else (request.client.host if request.client else None)
-    )
+    """IP de quem respondeu, para o registro da aprovação eletrônica. É o que o uvicorn resolveu
+    (--proxy-headers só confia no proxy de FORWARDED_ALLOW_IPS): o X-Forwarded-For que o próprio
+    cliente escreve não entra. Cabe na coluna (64)."""
+    return request.client.host[:64] if request.client else None
+
+
+async def _lock_for_answer(db: DB, quote: Quote, ticket: Ticket) -> None:
+    """Trava a linha do orçamento até o fim da transação e relê: dois cliques (ou aprovar numa
+    aba e recusar em outra) não passam juntos; o segundo vê "já respondido"."""
+    await db.execute(select(Quote.id).where(Quote.id == quote.id).with_for_update())
+    await db.refresh(quote)
+    svc.refresh_expiry(quote)
+    if await _ticket_status(db, ticket.id) == TicketStatus.CANCELLED:
+        raise HTTPException(status.HTTP_409_CONFLICT, TICKET_CANCELLED_PUBLIC)
 
 
 @public.post("/{token}/approve", response_model=PublicQuote)
 async def approve_quote(token: str, body: QuoteApprove, request: Request, db: DB) -> PublicQuote:
     quote, ticket = await _public(db, token)
+    await _lock_for_answer(db, quote, ticket)
     try:
         await svc.approve(db, quote, body, _ip(request))
     except svc.QuoteNotOpen as exc:
@@ -313,6 +443,7 @@ async def approve_quote(token: str, body: QuoteApprove, request: Request, db: DB
 @public.post("/{token}/reject", response_model=PublicQuote)
 async def reject_quote(token: str, body: QuoteReject, request: Request, db: DB) -> PublicQuote:
     quote, ticket = await _public(db, token)
+    await _lock_for_answer(db, quote, ticket)
     try:
         await svc.reject(db, quote, body.reason, body.name, _ip(request), comment=body.comment)
     except svc.QuoteNotOpen as exc:

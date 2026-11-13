@@ -3,9 +3,11 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, File, HTTPException, Query, Response, UploadFile, status
-from fastapi.responses import FileResponse
+from sqlalchemy import func, select
 
 from app.api.deps import DB, TicketManagerUser
+from app.api.files import stored_file
+from app.core.enums import UserRole
 from app.core.security import InvalidToken, decode_token
 from app.models import Category, Location, Project, ServiceType, User
 from app.schemas.technician import (
@@ -19,11 +21,11 @@ from app.schemas.technician import (
     TechnicianUpdate,
     TemporaryPassword,
 )
-from app.services import storage, suggestions
+from app.services import suggestions
 from app.services import technician_regions as regions_svc
 from app.services import technicians as svc
 from app.services import tickets as tickets_svc
-from app.services.spreadsheet import SpreadsheetError
+from app.services.spreadsheet import MAX_BYTES, SpreadsheetError, read_upload
 
 router = APIRouter(tags=["technicians"])
 
@@ -33,20 +35,39 @@ async def _one(db: DB, user: User) -> TechnicianOut:
     return (await svc.to_out(db, [user]))[0]
 
 
+async def _ensure_regions(db: DB) -> None:
+    """Regiões de atuação calculadas ao menos uma vez antes de responder. Depois disso, a rotina
+    periódica (app.main) mantém em dia: a requisição não recalcula 15 mil OS a cada 6 h."""
+    computed = await db.scalar(
+        select(func.count())
+        .select_from(User)
+        .where(User.role == UserRole.TECHNICIAN, User.base_updated_at.is_not(None))
+    )
+    if not computed and await regions_svc.refresh_if_stale(db):
+        await db.commit()
+
+
 @router.get("/technicians", response_model=list[TechnicianOut])
 async def list_technicians(
     db: DB,
     _: TicketManagerUser,
+    response: Response,
     q: str | None = None,
     team_id: uuid.UUID | None = None,
     active: bool | None = None,
     state: str | None = None,
     city: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=5000)] = 2000,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[TechnicianOut]:
-    """Base técnica. `state`/`city` filtram pela região de atuação (histórico) ou pelo endereço."""
-    if await regions_svc.refresh_if_stale(db):
-        await db.commit()
-    return await svc.list_technicians(db, q, team_id, active, state, city)
+    """Base técnica. `state`/`city` filtram pela região de atuação (histórico) ou pelo endereço.
+    O total que bate com os filtros vai no cabeçalho X-Total-Count (a lista é paginada)."""
+    await _ensure_regions(db)
+    items, total = await svc.list_technicians(
+        db, q, team_id, active, state, city, limit=limit, offset=offset
+    )
+    response.headers["X-Total-Count"] = str(total)
+    return items
 
 
 @router.get("/technicians/regions", response_model=list[RegionState])
@@ -79,8 +100,7 @@ async def nearby_technicians(
     max_km: Annotated[float | None, Query(gt=0)] = None,
 ) -> dict:
     """Técnicos mais próximos de uma loja, de coordenadas ou do centro de uma cidade."""
-    if await regions_svc.refresh_if_stale(db):
-        await db.commit()
+    await _ensure_regions(db)
     point = await regions_svc.resolve_point(
         db, location_id=location_id, latitude=latitude, longitude=longitude, city=city, state=state
     )
@@ -147,9 +167,9 @@ async def import_technicians(
     file: Annotated[UploadFile, File()],
     dry_run: bool = True,
 ) -> ImportResult:
-    """Planilha CSV ou XLSX. Por padrão só mostra a prévia; dry_run=false grava."""
-    data = await file.read()
+    """Planilha CSV ou XLSX (até 5 MB). Por padrão só mostra a prévia; dry_run=false grava."""
     try:
+        data = await read_upload(file, MAX_BYTES)
         result = await svc.import_file(db, file.filename or "", data, dry_run)
     except SpreadsheetError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
@@ -170,7 +190,7 @@ async def avatar(user_id: uuid.UUID, token: str, db: DB) -> Response:
     user = await db.get(User, user_id)
     if user is None or not user.avatar_key:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Sem foto")
-    return FileResponse(storage.open_path(user.avatar_key))
+    return stored_file(user.avatar_key)
 
 
 @router.get(
@@ -178,8 +198,7 @@ async def avatar(user_id: uuid.UUID, token: str, db: DB) -> Response:
 )
 async def ticket_suggestions(ticket_id: uuid.UUID, db: DB, user: TicketManagerUser) -> list[dict]:
     """Os 5 técnicos mais indicados para a OS (cidade, distância, agenda, skill, carga)."""
-    if await regions_svc.refresh_if_stale(db):
-        await db.commit()
+    await _ensure_regions(db)
     ticket = await tickets_svc.get_visible_ticket(db, user, ticket_id)
     project = await db.get(Project, ticket.project_id) if ticket.project_id else None
     return await suggestions.suggest(db, suggestions.target_for(ticket, project))
@@ -205,14 +224,17 @@ async def suggest_for_place(
 ) -> list[dict]:
     """Para quem ainda está abrindo a OS: a loja (ou o lugar), o serviço e o horário da visita
     dão o mesmo ranking de uma OS já aberta (distância, histórico na loja, skill, agenda)."""
-    if await regions_svc.refresh_if_stale(db):
-        await db.commit()
+    if any(t is not None and t.tzinfo is None for t in (start, end)):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Informe o fuso do horário")
+    if start is not None and end is not None and end <= start:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "O fim da visita precisa ser depois do início"
+        )
+    await _ensure_regions(db)
     location = await db.get(Location, location_id) if location_id else None
     service_type = await db.get(ServiceType, service_type_id) if service_type_id else None
     category = await db.get(Category, category_id) if category_id else None
     project = await db.get(Project, project_id) if project_id else None
-    if start is not None and start.tzinfo is None:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Informe o fuso do horário")
     coords = (latitude, longitude) if latitude is not None and longitude is not None else None
     target = suggestions.target_from(
         location=location,

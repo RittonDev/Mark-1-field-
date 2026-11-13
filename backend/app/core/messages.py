@@ -1,9 +1,11 @@
 """Mensagens de validação em português.
 
 O pydantic responde em inglês ("String should have at least 3 characters", "Field required").
-`translate_errors` mantém o formato que a web e o app já tratam ({loc, msg, type}) e troca o
-texto (e o nome do campo no loc) por português simples. Serve às respostas 422 da API e a quem
-mais valida dados recebidos (sync do app, importações).
+`translate_errors` mantém o formato que a web e o app já tratam ({loc, msg, type, ctx}: o `loc`
+continua com o nome técnico do campo, que as telas usam para achar o rótulo) e troca o texto por
+português simples; quando o campo é conhecido, `label` traz o nome dele em português. O valor
+enviado (`input`) não volta na resposta: não ecoa senha nem arquivo. Serve às respostas 422 da
+API e a quem mais valida dados recebidos (sync do app, importações).
 """
 
 from collections.abc import Iterable, Mapping
@@ -135,32 +137,55 @@ def message_for(error: Mapping[str, Any]) -> str:
     return "Valor inválido"
 
 
-def label_for(loc: Iterable[Any]) -> list[Any]:
-    """O loc com o último nome de campo traduzido (índices e prefixos ficam como estão)."""
-    out = list(loc)
-    for index in range(len(out) - 1, -1, -1):
-        part = out[index]
+def field_of(loc: Iterable[Any]) -> str | None:
+    """O nome técnico do campo no loc (o último texto que não é body/query)."""
+    for part in reversed(list(loc)):
         if isinstance(part, str) and part not in _NOT_FIELDS:
-            out[index] = FIELD_LABELS.get(part, part)
-            break
+            return part
+    return None
+
+
+def _safe_ctx(ctx: Any) -> dict[str, Any]:
+    """Limites do erro (min_length, ge...) em tipos que viram JSON; o resto vira texto."""
+    if not isinstance(ctx, Mapping):
+        return {}
+    out: dict[str, Any] = {}
+    for key, value in ctx.items():
+        if value is None or isinstance(value, bool | int | float | str):
+            out[str(key)] = value
+        else:
+            out[str(key)] = str(value)
     return out
 
 
 def translate_errors(errors: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """Erros do pydantic em português, no formato {loc, msg, type}."""
-    return [
-        {
-            "loc": label_for(err.get("loc") or ()),
+    """Erros do pydantic em português, no formato {loc, msg, type, ctx, label}."""
+    out = []
+    for err in errors:
+        loc = list(err.get("loc") or ())
+        item: dict[str, Any] = {
+            "loc": loc,
             "msg": message_for(err),
             "type": str(err.get("type") or ""),
         }
-        for err in errors
-    ]
+        ctx = _safe_ctx(err.get("ctx"))
+        if ctx:
+            item["ctx"] = ctx
+        field = field_of(loc)
+        if field in FIELD_LABELS:
+            item["label"] = FIELD_LABELS[field]
+        out.append(item)
+    return out
 
 
-def first_message(errors: Iterable[Mapping[str, Any]]) -> str:
-    """Uma frase só (ex.: "Nome: Use pelo menos 2 caracteres") para mensagens de linha."""
+def line_messages(
+    errors: Iterable[Mapping[str, Any]], labels: Mapping[str, str] | None = None
+) -> list[str]:
+    """Uma frase por erro (ex.: "UF: Use no máximo 2 caracteres") para mensagens de linha."""
+    names = {**FIELD_LABELS, **(labels or {})}
+    out = []
     for err in translate_errors(errors):
-        field = next((p for p in reversed(err["loc"]) if isinstance(p, str)), "")
-        return f"{field}: {err['msg']}" if field and field not in _NOT_FIELDS else err["msg"]
-    return "Valor inválido"
+        field = field_of(err["loc"])
+        label = names.get(field or "", field)
+        out.append(f"{label}: {err['msg']}" if label else err["msg"])
+    return out

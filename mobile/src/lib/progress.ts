@@ -1,7 +1,36 @@
+import { TRANSITION_ACTION } from "./constants";
 import type { TicketDetail, TicketStatus } from "./types";
 
 /** Etapas do atendimento em campo mostradas no stepper da OS. */
 export const FIELD_STEPS = ["Deslocamento", "Chegada", "Atendimento", "Concluir"] as const;
+
+/**
+ * Verbo das ações do técnico no app: "A caminho" → "Iniciar atendimento" → "Concluir OS".
+ * A web segue com TRANSITION_ACTION (que fala "Resolver"); no campo a palavra é "concluir".
+ */
+export const FIELD_ACTION: Partial<Record<TicketStatus, string>> = {
+  en_route: "A caminho",
+  in_progress: "Iniciar atendimento",
+  resolved: "Concluir OS",
+};
+
+/** Rótulo da ação para o técnico. Voltar a atender depois de uma pausa da central é "retomar". */
+export function fieldActionLabel(to: TicketStatus, ticket?: Pick<TicketDetail, "arrived_at" | "work_seconds">): string {
+  if (to === "in_progress" && ticket && (ticket.arrived_at || (ticket.work_seconds ?? 0) > 0)) return "Retomar atendimento";
+  return FIELD_ACTION[to] ?? TRANSITION_ACTION[to];
+}
+
+// Assinatura colhida com a OS em atendimento: ao voltar para a OS, a conclusão abre direto.
+const concludeIntent = new Set<string>();
+
+export function requestConclude(ticketId: string) {
+  concludeIntent.add(ticketId);
+}
+
+/** Consome o pedido de conclusão da OS (vale uma vez). */
+export function takeConcludeIntent(ticketId: string): boolean {
+  return concludeIntent.delete(ticketId);
+}
 
 export interface FieldProgress {
   /** Última etapa alcançada (-1 = nenhuma). */

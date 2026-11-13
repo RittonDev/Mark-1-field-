@@ -1,8 +1,9 @@
 """Base técnica: analistas e gestores cuidam do acesso dos técnicos ao app.
 
-Só mexe em usuários técnicos (quem cuida de analistas e gestores é o admin, em Usuários).
+Só mexe em usuários técnicos (analistas e clientes do portal ficam em Usuários).
 """
 
+import asyncio
 import re
 import secrets
 import uuid
@@ -11,11 +12,10 @@ from datetime import timedelta
 from fastapi import UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
 from app.core.enums import ApplicationStatus, UserRole
-from app.core.security import create_token, hash_password
+from app.core.security import create_token, hash_password_async
 from app.db.base import utcnow
 from app.models import ServiceType, Team, TechnicianApplication, TechnicianShift, Ticket, User
 from app.schemas.onboarding import SkillOut
@@ -27,7 +27,7 @@ from app.schemas.technician import (
     TechnicianOut,
     TechnicianUpdate,
 )
-from app.services import search, storage, technician_regions
+from app.services import cities, search, storage, technician_regions
 from app.services.errors import NotFound, WorkflowError
 from app.services.spreadsheet import read_table
 from app.services.workflow import OPEN_STATUSES
@@ -35,6 +35,8 @@ from app.services.workflow import OPEN_STATUSES
 # Sem letras e números que se confundem (O/0, l/1/I) para ditar por telefone.
 _ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"
 MAX_PHOTO_BYTES = 2 * 1024 * 1024
+# Senhas provisórias calculadas ao mesmo tempo na importação (bcrypt em threads).
+HASH_CONCURRENCY = 4
 
 IMPORT_ALIASES = {
     "nome": "name",
@@ -186,22 +188,28 @@ async def list_technicians(
     active: bool | None,
     state: str | None = None,
     city: str | None = None,
-) -> list[TechnicianOut]:
-    stmt = select(User).where(User.role == UserRole.TECHNICIAN)
+    *,
+    limit: int = 2000,
+    offset: int = 0,
+) -> tuple[list[TechnicianOut], int]:
+    """Uma página da base técnica e o total que bate com os filtros."""
+    conds = [User.role == UserRole.TECHNICIAN]
     region = technician_regions.region_filter(state, city)
     if region is not None:
-        stmt = stmt.where(region)
+        conds.append(region)
     # Busca por palavras: cada uma em nome, e-mail ou telefone, em qualquer ordem e sem acento.
     matched = search.all_words(q, [User.name, User.email], digit_columns=[User.phone])
     if matched is not None:
-        stmt = stmt.where(matched)
+        conds.append(matched)
     if team_id is not None:
-        stmt = stmt.where(User.team_id == team_id)
+        conds.append(User.team_id == team_id)
     if active is not None:
-        stmt = stmt.where(User.is_active.is_(active))
+        conds.append(User.is_active.is_(active))
+    total = await db.scalar(select(func.count()).select_from(User).where(*conds)) or 0
     order = [search.rank(q, User.name), User.name] if matched is not None else [User.name]
-    users = list(await db.scalars(stmt.order_by(*order).limit(1000)))
-    return await to_out(db, users)
+    stmt = select(User).where(*conds).order_by(*order, User.id).offset(offset).limit(limit)
+    users = list(await db.scalars(stmt))
+    return await to_out(db, users), total
 
 
 async def create(db: AsyncSession, data: TechnicianCreate) -> tuple[User, str]:
@@ -209,17 +217,18 @@ async def create(db: AsyncSession, data: TechnicianCreate) -> tuple[User, str]:
         raise WorkflowError("E-mail já cadastrado")
     await _check_team(db, data.team_id)
     password = temporary_password()
+    home_state = (data.home_state or "").strip().upper() or None
     user = User(
         id=uuid.uuid4(),
         name=data.name.strip(),
         email=data.email,
         phone=(data.phone or "").strip() or None,
-        password_hash=hash_password(password),
+        password_hash=await hash_password_async(password),
         role=UserRole.TECHNICIAN,
         job_title=(data.job_title or "").strip() or "Técnico de campo",
         team_id=data.team_id,
-        home_city=(data.home_city or "").strip() or None,
-        home_state=(data.home_state or "").strip().upper() or None,
+        home_city=await cities.canonical_city(db, home_state, data.home_city),
+        home_state=home_state,
         coverage_area=(data.coverage_area or "").strip() or None,
         is_active=True,
         must_change_password=True,
@@ -270,6 +279,9 @@ async def update(db: AsyncSession, user: User, data: TechnicianUpdate) -> User:
         if key == "email" and not value:
             continue
         setattr(user, key, value)
+    if "home_city" in fields or "home_state" in fields:
+        # Uma grafia só por cidade ("SAO PAULO" vira "São Paulo"), como no resto da base.
+        user.home_city = await cities.canonical_city(db, user.home_state, user.home_city)
     if fields.get("is_active") is False:
         user.sessions_revoked_at = utcnow()  # desativado: sai do app na hora
     await db.flush()
@@ -279,7 +291,7 @@ async def update(db: AsyncSession, user: User, data: TechnicianUpdate) -> User:
 async def reset_password(db: AsyncSession, user: User) -> str:
     """Senha provisória nova; o técnico troca no próximo acesso e as sessões abertas caem."""
     password = temporary_password()
-    user.password_hash = hash_password(password)
+    user.password_hash = await hash_password_async(password)
     user.must_change_password = True
     user.sessions_revoked_at = utcnow()
     await db.flush()
@@ -315,20 +327,24 @@ async def import_file(db: AsyncSession, filename: str, data: bytes, dry_run: boo
         )
     }
     seen: set[str] = set()
+    city_cache: dict[tuple[str, str], str] = {}
+    new_users: list[tuple[User, str]] = []
     result = ImportResult(dry_run=dry_run, rows=[], created=0, updated=0, errors=0)
     for index, row in enumerate(rows, start=2):  # linha 1 = cabeçalho
-        name = " ".join(row.get("name", "").split())
+        name = " ".join(row.get("name", "").split())[:160]
         email = row.get("email", "").strip().lower()
-        phone = row.get("phone", "").strip() or None
+        phone = row.get("phone", "").strip()[:40] or None
         team_name = row.get("team", "").strip() or None
-        job_title = row.get("job_title", "").strip() or None
-        home_city = row.get("home_city", "").strip() or None
+        job_title = row.get("job_title", "").strip()[:120] or None
         home_state = row.get("home_state", "").strip().upper()[:2] or None
+        home_city = await cities.canonical_city(
+            db, home_state, row.get("home_city", "")[:120], city_cache
+        )
         coverage_area = row.get("coverage_area", "").strip() or None
         errors = []
         if len(name) < 3:
             errors.append("Nome obrigatório")
-        if "@" not in email or "." not in email.split("@")[-1]:
+        if "@" not in email or "." not in email.split("@")[-1] or len(email) > 255:
             errors.append("E-mail inválido")
         elif email in seen:
             errors.append("E-mail repetido na planilha")
@@ -376,28 +392,36 @@ async def import_file(db: AsyncSession, filename: str, data: bytes, dry_run: boo
                 current.coverage_area = coverage_area
         else:
             password = temporary_password()
-            # bcrypt é lento de propósito: fora do event loop para não travar a API.
-            password_hash = await run_in_threadpool(hash_password, password)
-            db.add(
-                User(
-                    id=uuid.uuid4(),
-                    name=name,
-                    email=email,
-                    phone=phone,
-                    password_hash=password_hash,
-                    role=UserRole.TECHNICIAN,
-                    job_title=job_title or "Técnico de campo",
-                    team_id=team.id if team else None,
-                    home_city=home_city,
-                    home_state=home_state,
-                    coverage_area=coverage_area,
-                    is_active=True,
-                    must_change_password=True,
-                )
+            user = User(
+                id=uuid.uuid4(),
+                name=name,
+                email=email,
+                phone=phone,
+                role=UserRole.TECHNICIAN,
+                job_title=job_title or "Técnico de campo",
+                team_id=team.id if team else None,
+                home_city=home_city,
+                home_state=home_state,
+                coverage_area=coverage_area,
+                is_active=True,
+                must_change_password=True,
             )
+            new_users.append((user, password))
             result.credentials.append(
                 Credential(name=name, email=email, temporary_password=password)
             )
     if not dry_run:
+        # bcrypt é lento de propósito (~0,2 s): as senhas provisórias são calculadas em paralelo,
+        # fora do laço de eventos, para a planilha grande não estourar o tempo da requisição.
+        limiter = asyncio.Semaphore(HASH_CONCURRENCY)
+
+        async def hashed(password: str) -> str:
+            async with limiter:
+                return await hash_password_async(password)
+
+        hashes = await asyncio.gather(*(hashed(password) for _, password in new_users))
+        for (user, _), password_hash in zip(new_users, hashes, strict=True):
+            user.password_hash = password_hash
+            db.add(user)
         await db.flush()
     return result

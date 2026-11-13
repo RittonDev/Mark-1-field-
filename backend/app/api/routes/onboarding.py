@@ -2,11 +2,12 @@ import uuid
 from datetime import timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, Response, status
+from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from fastapi.responses import FileResponse
 from sqlalchemy import func, select
 
-from app.api.deps import DB, TicketManagerUser
+from app.api.deps import DB, ManagerUser, TicketManagerUser
+from app.api.files import stored_file
 from app.core.config import settings
 from app.core.enums import ApplicationStatus
 from app.core.security import InvalidToken, create_token, decode_token
@@ -27,8 +28,8 @@ from app.schemas.onboarding import (
     catalog,
 )
 from app.schemas.user import UserOut
+from app.services import login_guard
 from app.services import onboarding as svc
-from app.services import storage
 
 # Formulário que o técnico abre pelo link, sem login.
 public = APIRouter(prefix="/public/onboarding", tags=["onboarding"])
@@ -36,6 +37,11 @@ public = APIRouter(prefix="/public/onboarding", tags=["onboarding"])
 router = APIRouter(prefix="/onboarding", tags=["onboarding"])
 
 INVITE_GONE = "Este link de cadastro expirou ou já foi usado. Peça um novo link à Maxx Field."
+TOO_MANY = "Muitas fichas enviadas por este link. Tente mais tarde."
+# Fichas por IP (uma pessoa manda uma; um escritório com vários técnicos, poucas) e por link
+# reutilizável (o que circula em grupo de WhatsApp) por dia.
+MAX_PER_IP_HOUR = 5
+MAX_PER_INVITE_DAY = 100
 
 
 @public.get("/catalog", response_model=OnboardingCatalog)
@@ -53,11 +59,24 @@ async def check_invite(token: str, db: DB) -> InviteCheck:
 
 
 @public.post("/{token}", response_model=ApplicationReceived, status_code=status.HTTP_201_CREATED)
-async def submit_application(token: str, body: ApplicationIn, db: DB) -> ApplicationReceived:
+async def submit_application(
+    token: str, body: ApplicationIn, db: DB, request: Request
+) -> ApplicationReceived:
     try:
-        invite = await svc.active_invite(db, token)
+        # Trava a linha do convite: duas fichas juntas no link de uso único não passam as duas.
+        invite = await svc.active_invite(db, token, lock=True)
     except svc.InviteUnavailable as exc:
         raise HTTPException(status.HTTP_410_GONE, INVITE_GONE) from exc
+    ip = request.client.host if request.client else "sem-ip"
+    try:
+        await login_guard.hit("onboarding-ip", ip, MAX_PER_IP_HOUR, 3600)
+        await login_guard.hit("onboarding-invite", str(invite.id), MAX_PER_INVITE_DAY, 86400)
+    except login_guard.RateLimited as exc:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            TOO_MANY,
+            headers={"Retry-After": str(exc.retry_after)},
+        ) from exc
     application = await svc.submit(db, invite, body)
     await db.commit()
     await svc.publish_submitted(application)
@@ -70,6 +89,7 @@ async def submit_application(token: str, body: ApplicationIn, db: DB) -> Applica
 def _invite_out(invite: OnboardingInvite) -> InviteOut:
     out = InviteOut.model_validate(invite)
     out.state = svc.invite_state(invite)
+    out.url = svc.invite_url(invite) if out.state == "active" else None
     return out
 
 
@@ -152,7 +172,16 @@ async def application_photo(application_id: uuid.UUID, token: str, db: DB) -> Fi
     application = await svc.get_application(db, application_id)
     if not application.photo_key:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Sem foto")
-    return FileResponse(storage.open_path(application.photo_key))
+    return stored_file(application.photo_key)
+
+
+@router.delete("/applications/{application_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_application(application_id: uuid.UUID, db: DB, _: ManagerUser) -> Response:
+    """Pedido de exclusão do titular (LGPD): apaga a ficha pendente ou reprovada e a foto."""
+    application = await svc.get_application(db, application_id)
+    await svc.delete_application(db, application)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/applications/{application_id}/approve", response_model=UserOut)

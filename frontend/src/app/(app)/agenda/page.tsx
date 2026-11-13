@@ -1,13 +1,16 @@
 "use client";
 
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 import {
   AlertTriangle,
   Building2,
+  CalendarClock,
   CalendarDays,
   ChevronLeft,
   ChevronRight,
   Clock,
+  Globe,
   MapPin,
   PanelRightOpen,
   SlidersHorizontal,
@@ -15,38 +18,91 @@ import {
   Wrench,
 } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { type GridColumn, MonthView, TimeGrid } from "@/components/calendar/CalendarViews";
 import { PriorityBadge, StatusBadge } from "@/components/badges";
+import { LocationPicker } from "@/components/LocationPicker";
+import { fold, isUuid, replaceSearch, useActiveTechnicians } from "@/components/operacao/hooks";
+import { RefreshFailed } from "@/components/operacao/status";
+import { ConflictHint, ConflictList, scheduleConflicts } from "@/components/ScheduleConflict";
+import { useToast } from "@/components/Toaster";
 import { isPlainClick } from "@/components/ticket/TicketLink";
 import { useTicketPanel } from "@/components/ticket/TicketPanel";
-import { Button, buttonClassName, Card, Checkbox, Dialog, ErrorBox, Field, Input, PageHeader, SectionTitle, Select } from "@/components/ui";
-import { errorMessage } from "@/lib/api";
+import {
+  Button,
+  buttonClassName,
+  Card,
+  Checkbox,
+  Dialog,
+  EmptyState,
+  ErrorBox,
+  Field,
+  Input,
+  LoadingBlock,
+  PageHeader,
+  SectionTitle,
+  Select,
+} from "@/components/ui";
+import { ApiError, api, errorMessage, type Query } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import {
   ACTIVE_STATUSES,
   type CalendarView,
   colorMap,
+  dayKey,
   eventsOnDay,
   hhmm,
+  OPERATION_TIMEZONE,
+  parseDayKey,
   rangeTitle,
   sameDay,
   shiftAnchor,
+  technicianColor,
   UNASSIGNED_COLOR,
   visibleRange,
   WEEKDAYS_SHORT,
 } from "@/lib/calendar";
 import { canManageTickets } from "@/lib/constants";
-import { formatShort, initials } from "@/lib/format";
+import { formatMinutes, formatShort, fromLocalInput, toLocalInput } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
-import { useCalendar, useCustomers, useLocations, useTeams, useUsers } from "@/lib/queries";
-import type { CalendarEvent } from "@/lib/types";
+import { useCustomers, useTeams } from "@/lib/queries";
+import type { CalendarEvent, ConflictItem, Location, TicketDetail, TicketStatus } from "@/lib/types";
 
-const VIEWS: { key: CalendarView; label: string }[] = [
-  { key: "month", label: "Mês" },
-  { key: "week", label: "Semana" },
-  { key: "day", label: "Dia por técnico" },
+const VIEWS: { key: CalendarView; label: string; previous: string; next: string }[] = [
+  { key: "month", label: "Mês", previous: "Mês anterior", next: "Próximo mês" },
+  { key: "week", label: "Semana", previous: "Semana anterior", next: "Próxima semana" },
+  { key: "day", label: "Dia por técnico", previous: "Dia anterior", next: "Próximo dia" },
 ];
+
+/** Reagendar pelo calendário só antes de a visita começar (em campo, os horários reais se corrigem na OS). */
+const RESCHEDULABLE: TicketStatus[] = [
+  "new",
+  "triage",
+  "assigned",
+  "scheduled",
+  "on_hold_customer",
+  "on_hold_vendor",
+  "reopened",
+];
+
+/** O fuso do computador quando o relógio dele difere do da operação (senão null). */
+function foreignTimeZone(): string | null {
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (!zone || zone === OPERATION_TIMEZONE) return null;
+  const now = new Date();
+  const clock = (timeZone: string) =>
+    new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).format(now);
+  return clock(zone) === clock(OPERATION_TIMEZONE) ? null : zone;
+}
 
 export default function AgendaPage() {
   const { user } = useAuth();

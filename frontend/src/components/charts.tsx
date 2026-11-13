@@ -4,13 +4,14 @@ import clsx from "clsx";
 import { ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { CountUp } from "@/components/motion";
+import { Skeleton } from "@/components/ui";
 
 const intFmt = (n: number) => n.toLocaleString("pt-BR");
 
 /**
  * Número de destaque com a comparação ao período anterior (texto neutro: a seta indica o sentido).
- * O número só ganha cor quando sinaliza problema (`tone`), como no resto do sistema.
+ * O número só ganha cor quando sinaliza problema (`tone`), como no resto do sistema. Algarismos
+ * proporcionais (número grande e sozinho); `tabular-nums` fica para colunas que se alinham.
  */
 export function StatTile({
   label,
@@ -23,6 +24,9 @@ export function StatTile({
   tone,
   compact = false,
   href,
+  onSelect,
+  selected = false,
+  loading = false,
 }: {
   label: string;
   value: number;
@@ -31,57 +35,79 @@ export function StatTile({
   previous?: number;
   /** Complemento da diferença, ex.: "vs dia anterior". */
   previousLabel?: string;
-  /** Texto quando o número não mudou, ex.: "igual ao dia anterior". */
+  /** Texto quando o número não mudou, ex.: "igual ao dia anterior" (sem ele: "sem variação"). */
   sameLabel?: string;
-  hint?: string;
+  hint?: React.ReactNode;
   /** Só quando o número indica problema (abaixo da meta, atraso). */
   tone?: "warning" | "danger";
   /** Valor em texto menor, cortado com reticências (ex.: nome do cliente destaque). */
   compact?: boolean;
   /** Leva ao detalhe (ex.: a lista de OS do cliente). */
   href?: string;
+  /** Cartão que filtra a lista logo abaixo (ex.: "A pagar"): vira botão, marcado quando `selected`. */
+  onSelect?: () => void;
+  selected?: boolean;
+  /** Ainda carregando: o lugar do número fica reservado (nada de "R$ 0,00" provisório). */
+  loading?: boolean;
 }) {
-  const delta = previous === undefined ? null : value - previous;
+  const delta = previous === undefined || loading ? null : value - previous;
   const Icon = delta === null || delta === 0 ? Minus : delta > 0 ? ArrowUpRight : ArrowDownRight;
+  // Só elementos de frase (span): o cartão pode ser um botão.
   const body = (
     <>
-      <p className="text-xs font-semibold text-ink/80">{label}</p>
-      <p
-        className={clsx(
-          "mt-1 font-semibold tracking-tight",
-          compact ? "truncate text-lg leading-8" : display !== undefined ? "text-2xl leading-9" : "text-3xl leading-9",
-          tone === "danger" ? "text-red-600 dark:text-red-400" : tone === "warning" ? "text-amber-700 dark:text-amber-400" : "text-ink",
-        )}
-        title={compact ? display : undefined}
-      >
-        {display ?? <CountUp value={value} duration={250} />}
-      </p>
+      <span className="block text-xs font-semibold text-ink/80">{label}</span>
+      {loading ? (
+        <Skeleton className="mt-2 mb-1 h-7 w-24 rounded-md" />
+      ) : (
+        <span
+          className={clsx(
+            "mt-1 block font-semibold tracking-tight",
+            compact ? "truncate text-lg leading-8" : display !== undefined ? "text-2xl leading-9" : "text-3xl leading-9",
+            tone === "danger" ? "text-red-600 dark:text-red-400" : tone === "warning" ? "text-amber-700 dark:text-amber-400" : "text-ink",
+          )}
+          title={compact ? display : undefined}
+        >
+          {display ?? intFmt(value)}
+        </span>
+      )}
       {delta !== null ? (
-        <p className="mt-1 flex items-center gap-1 text-xs text-ink-muted tabular-nums">
+        <span className="mt-1 flex items-center gap-1 text-xs text-ink-muted tabular-nums">
           <Icon className="size-3.5 shrink-0" aria-hidden />
           <span className="min-w-0">
             {delta === 0
-              ? (sameLabel ?? `sem variação ${previousLabel ?? ""}`.trim())
+              ? (sameLabel ?? "sem variação")
               : `${delta > 0 ? "+" : "−"}${intFmt(Math.abs(delta))} ${previousLabel ?? ""}`.trim()}
           </span>
-        </p>
+        </span>
       ) : null}
-      {hint ? <p className="mt-1 text-xs text-ink-muted">{hint}</p> : null}
+      {hint ? <span className="mt-1 block text-xs text-ink-muted">{hint}</span> : null}
     </>
   );
-  const box = "block min-w-0 rounded-xl border border-line bg-surface px-4 py-3 shadow-elev-1";
+  const box = "block min-w-0 rounded-xl border bg-surface px-4 py-3 text-left shadow-elev-1";
+  const interactive =
+    "transition-[border-color,background-color] duration-150 focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none";
+  if (onSelect) {
+    return (
+      <button
+        type="button"
+        aria-pressed={selected}
+        onClick={onSelect}
+        className={clsx(
+          box,
+          interactive,
+          selected ? "border-brand bg-brand-soft ring-2 ring-brand/15" : "border-line hover:border-line-strong",
+        )}
+      >
+        {body}
+      </button>
+    );
+  }
   return href ? (
-    <Link
-      href={href}
-      className={clsx(
-        box,
-        "transition-colors duration-150 hover:border-line-strong focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none",
-      )}
-    >
+    <Link href={href} className={clsx(box, interactive, "border-line hover:border-line-strong")}>
       {body}
     </Link>
   ) : (
-    <div className={box}>{body}</div>
+    <div className={clsx(box, "border-line")}>{body}</div>
   );
 }
 
@@ -142,118 +168,198 @@ export interface TrendSeries {
   values: number[];
 }
 
-/** Linhas por dia, um eixo só, com cruz e tooltip ao passar o mouse e rótulo direto no fim. */
-export function TrendChart({ labels, series, height = 240 }: { labels: string[]; series: TrendSeries[]; height?: number }) {
+const TOOLTIP_WIDTH = 176;
+/** Distância mínima entre dois rótulos no fim das linhas; mais perto que isso, eles saem (legenda e tooltip bastam). */
+const END_LABEL_GAP = 14;
+
+/**
+ * Linhas por dia, um eixo só. A cruz acompanha o ponteiro (mouse ou dedo) até o dia mais próximo e o
+ * tooltip lista todas as séries; pelo teclado, as setas andam de dia em dia (com leitura para o leitor
+ * de tela). O nome e o último valor vão direto no fim de cada linha quando há espaço e não se encostam.
+ */
+export function TrendChart({
+  labels,
+  series,
+  height = 240,
+  formatLabel,
+  partialLast = false,
+}: {
+  /** Rótulo curto de cada ponto no eixo (ex.: "12"). */
+  labels: string[];
+  series: TrendSeries[];
+  height?: number;
+  /** Título do ponto no tooltip e na leitura por teclado (ex.: "qui., 12/11"); sem ele, o rótulo do eixo. */
+  formatLabel?: (index: number) => string;
+  /** O último ponto ainda está em andamento (hoje): o trecho final fica tracejado. */
+  partialLast?: boolean;
+}) {
   const wrap = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(640);
-  const [hover, setHover] = useState<number | null>(null);
+  const [pointer, setPointer] = useState<number | null>(null);
 
   useEffect(() => {
     const el = wrap.current;
     if (!el) return;
-    const ro = new ResizeObserver(([entry]) => setWidth(Math.max(280, entry.contentRect.width)));
+    const ro = new ResizeObserver(([entry]) => setWidth(Math.max(240, entry.contentRect.width)));
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
 
-  const pad = { top: 12, right: 88, bottom: 26, left: 32 };
-  const w = width - pad.left - pad.right;
-  const h = height - pad.top - pad.bottom;
   const n = labels.length;
+  // Trocou de período com a cruz num dia que não existe mais (31 -> 13 dias): some.
+  const hover = pointer !== null && pointer < n ? pointer : null;
+  const titleOf = (i: number) => formatLabel?.(i) ?? labels[i];
+  const top = 12;
+  const bottom = 26;
+  const left = 36;
+  const h = height - top - bottom;
   const rawMax = Math.max(1, ...series.flatMap((s) => s.values));
   const step = rawMax <= 5 ? 1 : rawMax <= 10 ? 2 : Math.ceil(rawMax / 5 / 5) * 5;
   const max = Math.ceil(rawMax / step) * step;
   const ticks = Array.from({ length: max / step + 1 }, (_, i) => i * step);
-  const x = (i: number) => pad.left + (n <= 1 ? w / 2 : (i / (n - 1)) * w);
-  const y = (v: number) => pad.top + h - (v / max) * h;
+  const y = (v: number) => top + h - (v / max) * h;
+  // Rótulos diretos só quando cabem (tela larga) e não se encostam: empurrar um para longe da própria
+  // linha confunde mais do que ajuda.
+  const ends = n > 0 ? series.map((s) => y(s.values[n - 1])).sort((a, b) => a - b) : [];
+  const endLabels = width >= 420 && ends.length > 0 && ends.every((v, i) => i === 0 || v - ends[i - 1] >= END_LABEL_GAP);
+  const right = endLabels ? 96 : 14;
+  const w = width - left - right;
+  const x = (i: number) => left + (n <= 1 ? w / 2 : (i / (n - 1)) * w);
   const every = Math.ceil(n / Math.max(2, Math.floor(w / 46)));
-  // Rótulos no fim das linhas: afasta os que ficariam sobrepostos (mín. 13 px).
-  const endY: Record<string, number> = {};
-  if (n > 0) {
-    const placed = series
-      .map((s) => ({ key: s.key, y: y(s.values[n - 1]) }))
-      .sort((a, b) => a.y - b.y);
-    for (let i = 1; i < placed.length; i++) {
-      if (placed[i].y - placed[i - 1].y < 13) placed[i].y = placed[i - 1].y + 13;
-    }
-    placed.forEach((p) => (endY[p.key] = p.y));
-  }
+  const dashed = partialLast && n >= 2;
+
+  const pick = (e: React.PointerEvent<SVGRectElement>) => {
+    const box = e.currentTarget.getBoundingClientRect();
+    const ratio = box.width > 0 ? (e.clientX - box.left) / box.width : 0;
+    setPointer(Math.min(n - 1, Math.max(0, Math.round(ratio * (n - 1)))));
+  };
+  const onKey = (e: React.KeyboardEvent<SVGSVGElement>) => {
+    const current = hover ?? n - 1;
+    const next =
+      e.key === "ArrowLeft" ? current - 1 : e.key === "ArrowRight" ? current + 1 : e.key === "Home" ? 0 : e.key === "End" ? n - 1 : null;
+    if (next === null) return;
+    e.preventDefault();
+    setPointer(Math.min(n - 1, Math.max(0, next)));
+  };
+  const reading = hover === null ? "" : `${titleOf(hover)}: ${series.map((s) => `${s.label} ${intFmt(s.values[hover])}`).join(", ")}`;
+  const tipLeft = hover === null ? 0 : x(hover) + 12 + TOOLTIP_WIDTH <= width ? x(hover) + 12 : Math.max(0, x(hover) - 12 - TOOLTIP_WIDTH);
 
   return (
-    <div ref={wrap} className="relative w-full" onMouseLeave={() => setHover(null)}>
-      <svg width={width} height={height} role="img" aria-label={`Gráfico: ${series.map((s) => s.label).join(" e ")} por dia`}>
-        {ticks.map((t) => (
-          <g key={t}>
-            <line x1={pad.left} x2={pad.left + w} y1={y(t)} y2={y(t)} stroke="var(--viz-grid)" strokeWidth={1} />
-            <text x={pad.left - 8} y={y(t)} dy="0.32em" textAnchor="end" className="fill-ink-muted text-[11px] tabular-nums">
-              {t}
-            </text>
-          </g>
-        ))}
-        {labels.map((l, i) =>
-          i % every === 0 || i === n - 1 ? (
-            <text key={l} x={x(i)} y={height - 8} textAnchor="middle" className="fill-ink-muted text-[11px] tabular-nums">
-              {l}
-            </text>
-          ) : null,
-        )}
-        {hover !== null ? <line x1={x(hover)} x2={x(hover)} y1={pad.top} y2={pad.top + h} stroke="var(--ink-muted)" strokeWidth={1} strokeDasharray="3 3" /> : null}
-        {series.map((s) => (
-          <g key={s.key}>
-            <polyline
-              fill="none"
-              stroke={s.color}
-              strokeWidth={2}
-              strokeLinejoin="round"
-              strokeLinecap="round"
-              points={s.values.map((v, i) => `${x(i)},${y(v)}`).join(" ")}
-            />
-            {n > 0 ? (
-              <text x={x(n - 1) + 8} y={endY[s.key]} dy="0.32em" className="fill-ink text-[11px] font-medium">
-                {s.label} {s.values[n - 1]}
-              </text>
-            ) : null}
+    <div ref={wrap} className="relative w-full">
+      {n === 0 ? (
+        <p className="py-16 text-center text-sm text-ink-muted">Sem dados no período.</p>
+      ) : (
+        <>
+          <svg
+            width={width}
+            height={height}
+            role="img"
+            tabIndex={0}
+            aria-label={`Gráfico: ${series.map((s) => s.label).join(" e ")} por dia. Use as setas para ler dia a dia.`}
+            onKeyDown={onKey}
+            onFocus={() => setPointer(hover ?? n - 1)}
+            onBlur={() => setPointer(null)}
+            className="rounded-md outline-none focus-visible:ring-2 focus-visible:ring-brand/45"
+          >
+            {ticks.map((t) => (
+              <g key={t}>
+                <line x1={left} x2={left + w} y1={y(t)} y2={y(t)} stroke="var(--viz-grid)" strokeWidth={1} />
+                <text x={left - 8} y={y(t)} dy="0.32em" textAnchor="end" className="fill-ink-muted text-[11px] tabular-nums">
+                  {intFmt(t)}
+                </text>
+              </g>
+            ))}
+            {labels.map((l, i) =>
+              i % every === 0 || i === n - 1 ? (
+                <text key={i} x={x(i)} y={height - 8} textAnchor="middle" className="fill-ink-muted text-[11px] tabular-nums">
+                  {l}
+                </text>
+              ) : null,
+            )}
             {hover !== null ? (
-              <circle cx={x(hover)} cy={y(s.values[hover])} r={4.5} fill={s.color} stroke="var(--surface)" strokeWidth={2} />
+              <line x1={x(hover)} x2={x(hover)} y1={top} y2={top + h} stroke="var(--ink-subtle)" strokeOpacity={0.55} strokeWidth={1} />
             ) : null}
-          </g>
-        ))}
-        {labels.map((l, i) => (
-          <rect
-            key={`hit-${l}`}
-            x={x(i) - (n <= 1 ? w / 2 : w / (n - 1) / 2)}
-            y={pad.top}
-            width={n <= 1 ? w : w / (n - 1)}
-            height={h}
-            fill="transparent"
-            onMouseEnter={() => setHover(i)}
-          />
-        ))}
-      </svg>
-      {hover !== null ? (
-        <div
-          className="pointer-events-none absolute top-2 z-10 min-w-36 rounded-lg border border-line bg-surface px-3 py-2 text-xs shadow-md"
-          style={{ left: Math.min(Math.max(x(hover) + 12, 0), width - 160) }}
-        >
-          <p className="mb-1 font-semibold text-ink">{labels[hover]}</p>
-          {series.map((s) => (
-            <p key={s.key} className="flex items-center justify-between gap-4 text-ink-muted">
-              <span className="inline-flex items-center gap-1.5">
-                <span className="size-2 rounded-full" style={{ background: s.color }} />
-                {s.label}
-              </span>
-              <span className="font-medium text-ink tabular-nums">{s.values[hover]}</span>
-            </p>
-          ))}
-        </div>
-      ) : null}
+            {series.map((s) => {
+              const points = s.values.map((v, i) => `${x(i)},${y(v)}`);
+              return (
+                <g key={s.key}>
+                  <polyline
+                    fill="none"
+                    stroke={s.color}
+                    strokeWidth={2}
+                    strokeLinejoin="round"
+                    strokeLinecap="round"
+                    points={(dashed ? points.slice(0, -1) : points).join(" ")}
+                  />
+                  {dashed ? (
+                    <polyline
+                      fill="none"
+                      stroke={s.color}
+                      strokeWidth={2}
+                      strokeLinecap="round"
+                      strokeDasharray="3 4"
+                      points={points.slice(-2).join(" ")}
+                    />
+                  ) : null}
+                  {endLabels ? (
+                    <text x={x(n - 1) + 8} y={y(s.values[n - 1])} dy="0.32em" className="fill-ink text-[11px] font-medium">
+                      {s.label} {intFmt(s.values[n - 1])}
+                    </text>
+                  ) : null}
+                  {hover !== null ? (
+                    <circle cx={x(hover)} cy={y(s.values[hover])} r={4.5} fill={s.color} stroke="var(--surface)" strokeWidth={2} />
+                  ) : null}
+                </g>
+              );
+            })}
+            {/* Uma área só para o ponteiro (mouse ou toque): a cruz vai para o dia mais perto. */}
+            <rect
+              x={left}
+              y={top}
+              width={Math.max(0, w)}
+              height={h}
+              fill="transparent"
+              onPointerMove={pick}
+              onPointerDown={pick}
+              onPointerLeave={(e) => {
+                if (e.pointerType === "mouse") setPointer(null);
+              }}
+            />
+          </svg>
+          <p className="sr-only" aria-live="polite">
+            {reading}
+          </p>
+          {hover !== null ? (
+            <div
+              className="pointer-events-none absolute top-2 z-10 rounded-lg border border-line bg-surface px-3 py-2 text-xs shadow-elev-2"
+              style={{ left: tipLeft, width: TOOLTIP_WIDTH }}
+              aria-hidden
+            >
+              <p className="mb-1 font-semibold text-ink">
+                {titleOf(hover)}
+                {dashed && hover === n - 1 ? <span className="font-normal text-ink-muted"> · parcial</span> : null}
+              </p>
+              {series.map((s) => (
+                <p key={s.key} className="flex items-center justify-between gap-3">
+                  <span className="inline-flex items-center gap-1.5 text-ink-muted">
+                    <span className="h-0.5 w-3 rounded-full" style={{ background: s.color }} />
+                    {s.label}
+                  </span>
+                  <span className="font-semibold text-ink tabular-nums">{intFmt(s.values[hover])}</span>
+                </p>
+              ))}
+            </div>
+          ) : null}
+          {dashed ? <p className="mt-1 text-xs text-ink-muted">Trecho tracejado: hoje, ainda em andamento.</p> : null}
+        </>
+      )}
     </div>
   );
 }
 
 export function Legend({ series }: { series: { label: string; color: string }[] }) {
   return (
-    <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-muted">
+    <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-muted" aria-label="Legenda">
       {series.map((s) => (
         <li key={s.label} className="inline-flex items-center gap-1.5">
           <span className="h-0.5 w-4 rounded" style={{ background: s.color }} />

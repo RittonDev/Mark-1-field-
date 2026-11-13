@@ -12,7 +12,7 @@ from enum import Enum
 from typing import Any
 
 from fastapi import UploadFile
-from sqlalchemy import DateTime, and_, case, false, func, literal, or_, select, update
+from sqlalchemy import DateTime, Select, and_, case, false, func, literal, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import noload
 from sqlalchemy.sql.elements import ColumnElement
@@ -130,6 +130,7 @@ def can_view(user: User, ticket: Ticket) -> bool:
 TECHNICIAN_TIME = (
     "Só a central mexe no horário da OS: o seu tempo começa ao iniciar e termina ao concluir"
 )
+VIOLATION_IS_OFFICE = "Só a central justifica a violação de SLA"
 
 
 def can_edit(user: User, ticket: Ticket) -> bool:
@@ -1025,8 +1026,8 @@ async def update_ticket(
     if ticket.status == S.SCHEDULED and ticket.scheduled_start is None:
         _change_status(db, ticket, S.ASSIGNED, actor, now=now, note="Agenda removida")
 
-    schedule_moved = bool(changes.keys() & {"scheduled_start", "scheduled_end", "estimated_minutes"})
-    if schedule_moved or ticket.assignee_id != previous_assignee:
+    agenda = {"scheduled_start", "scheduled_end", "estimated_minutes"}
+    if changes.keys() & agenda or ticket.assignee_id != previous_assignee:
         await schedule.ensure_no_conflict(db, ticket, actor, data.allow_conflict)
     if changes:
         record_event(
@@ -1092,6 +1093,23 @@ def _ensure_forms_and_signature(ticket: Ticket) -> None:
 # --------------------------------------------------------------------------- horários reais
 
 _CLOCK_SKEW = timedelta(minutes=1)
+
+
+def _work_from_timeline(events: list[TicketEvent], resolved_at: datetime | None) -> int:
+    """Segundos em "Em atendimento" pela linha do tempo de status: cada entrada conta até a
+    mudança seguinte e a última, até o término. Tolera a ordem mexida por uma correção."""
+    total = 0.0
+    started: datetime | None = None
+    for ev in sorted(events, key=lambda e: e.created_at):
+        if ev.to_value == S.IN_PROGRESS.value:
+            if started is None:
+                started = ev.created_at
+        elif started is not None:
+            total += max(0.0, (ev.created_at - started).total_seconds())
+            started = None
+    if started is not None and resolved_at is not None:
+        total += max(0.0, (resolved_at - started).total_seconds())
+    return int(total)
 
 
 async def correct_times(
@@ -1169,12 +1187,7 @@ async def correct_times(
         en_route_ev.created_at = data.en_route_at
     if data.arrived_at is not None and data.arrived_at != ticket.arrived_at:
         changes["arrived_at"] = [_jsonable(ticket.arrived_at), _jsonable(data.arrived_at)]
-        rules = await field_rules.rules(db)
         ticket.arrived_at = data.arrived_at
-        ticket.onsite_due_at = data.arrived_at + timedelta(hours=rules.onsite_hours)
-        ticket.onsite_warning_at = ticket.onsite_due_at - timedelta(
-            minutes=rules.onsite_warning_minutes
-        )
         if arrive_ev is not None:
             arrive_ev.created_at = data.arrived_at
         # Atendimento correndo desde a primeira chegada: o relógio passa a contar do novo início.
@@ -1189,7 +1202,13 @@ async def correct_times(
         if data.work_minutes is not None:
             work = data.work_minutes * 60
         elif "arrived_at" in changes or "resolved_at" in changes:
-            work = int((ticket.resolved_at - ticket.arrived_at).total_seconds())
+            # Soma os trechos em "Em atendimento" da linha do tempo corrigida: pausas e o tempo
+            # entre visitas não contam. OS sem esse histórico (migrada): o intervalo todo.
+            work = (
+                _work_from_timeline(events, ticket.resolved_at)
+                if arrive_ev is not None
+                else int((ticket.resolved_at - ticket.arrived_at).total_seconds())
+            )
         else:
             work = ticket.work_seconds
         if work != ticket.work_seconds:
@@ -1197,6 +1216,19 @@ async def correct_times(
             ticket.work_seconds = work
     if not changes:
         return ticket
+
+    # Limite de tempo na loja com os horários corrigidos (o que o chamado já usou conta).
+    rules = await field_rules.rules(db)
+    if running and ticket.work_started_at is not None:
+        field_rules.start_onsite_clock(
+            ticket, rules, ticket.work_started_at, used_s=ticket.work_seconds or 0
+        )
+    elif ticket.resolved_at is not None and ticket.arrived_at is not None:
+        field_rules.start_onsite_clock(
+            ticket, rules, ticket.resolved_at - timedelta(seconds=ticket.work_seconds or 0)
+        )
+    elif "arrived_at" in changes and ticket.arrived_at is not None:
+        field_rules.start_onsite_clock(ticket, rules, ticket.arrived_at)
 
     ticket.updated_at = now  # muda a versão: quem estava com a OS aberta recarrega
     record_event(
@@ -1220,19 +1252,28 @@ RECURRENCE_WINDOW = timedelta(days=30)
 async def recurrence_counts(
     db: AsyncSession, tickets: list[Ticket], now: datetime | None = None
 ) -> dict[uuid.UUID, int]:
-    """Outras OS no mesmo local nos últimos 30 dias, para uma página inteira (uma consulta)."""
+    """Outras OS no mesmo local nos últimos 30 dias, para uma página inteira (uma consulta).
+    Cancelada (duplicada, aberta por engano) não é reincidência."""
     since = (now or utcnow()) - RECURRENCE_WINDOW
     location_ids = {t.location_id for t in tickets if t.location_id is not None}
     if not location_ids:
         return {}
     rows = await db.execute(
         select(Ticket.location_id, func.count())
-        .where(Ticket.location_id.in_(location_ids), Ticket.created_at >= since)
+        .where(
+            Ticket.location_id.in_(location_ids),
+            Ticket.created_at >= since,
+            Ticket.status != S.CANCELLED,
+        )
         .group_by(Ticket.location_id)
     )
     per_location: dict[uuid.UUID, int] = {loc: n for loc, n in rows.all()}
+
+    def counted(t: Ticket) -> int:
+        return 1 if t.created_at >= since and t.status != S.CANCELLED else 0
+
     return {
-        t.id: max(0, per_location.get(t.location_id, 0) - (1 if t.created_at >= since else 0))
+        t.id: max(0, per_location.get(t.location_id, 0) - counted(t))
         for t in tickets
         if t.location_id is not None
     }
@@ -1248,6 +1289,7 @@ async def recurrence_for(
         Ticket.location_id == ticket.location_id,
         Ticket.id != ticket.id,
         Ticket.created_at >= since,
+        Ticket.status != S.CANCELLED,
     )
     count = await db.scalar(select(func.count()).where(*same_place)) or 0
     rows = await db.execute(
@@ -1261,8 +1303,44 @@ async def recurrence_for(
     )
 
 
+# Envio que chega mais de 2 minutos depois do botão: a hora do aparelho fica como evidência.
+DECLARED_MIN_DELAY = timedelta(minutes=2)
+
+
+def _declared(declared_at: datetime | None, ticket: Ticket, now: datetime) -> dict[str, Any]:
+    """Hora em que o técnico apertou o botão no aparelho (ação feita offline), para a central ver
+    no histórico e usar no "Corrigir horários". O horário da OS continua sendo o do servidor.
+    Relógio do aparelho no futuro ou antes da abertura da OS: ignorado."""
+    if declared_at is None:
+        return {}
+    if declared_at > now + _CLOCK_SKEW or declared_at < ticket.created_at - _CLOCK_SKEW:
+        return {}
+    delay = now - declared_at
+    if delay <= DECLARED_MIN_DELAY:
+        return {}
+    return {"declared_at": declared_at.isoformat(), "sync_delay_s": int(delay.total_seconds())}
+
+
+def _distance_to_store(
+    ticket: Ticket, latitude: float | None, longitude: float | None
+) -> dict[str, Any]:
+    """Distância (em metros) do ponto do técnico até a loja: responde "ele estava lá?"."""
+    loc = ticket.location
+    if latitude is None or longitude is None or loc is None:
+        return {}
+    if not geo.valid_coords(loc.latitude, loc.longitude):
+        return {}
+    km = km_between((latitude, longitude), (loc.latitude, loc.longitude))  # type: ignore[arg-type]
+    return {"distance_m": round(km * 1000)}
+
+
 async def transition_ticket(
-    db: AsyncSession, ticket: Ticket, payload: TicketTransition, actor: User
+    db: AsyncSession,
+    ticket: Ticket,
+    payload: TicketTransition,
+    actor: User,
+    *,
+    declared_at: datetime | None = None,
 ) -> Ticket:
     now = utcnow()
     check_version(ticket, payload.expected_version)
@@ -1278,13 +1356,20 @@ async def transition_ticket(
         to_status=to,
     ):
         raise PermissionDenied("Você não pode mudar o status desta OS")
-    # O técnico nunca mexe no horário: a agenda é da central e o relógio dele corre sozinho,
-    # do início à conclusão da OS.
-    if actor.role == UserRole.TECHNICIAN and (
-        payload.scheduled_start is not None or payload.scheduled_end is not None
-    ):
-        raise PermissionDenied(TECHNICIAN_TIME)
+    if actor.role == UserRole.TECHNICIAN:
+        # O técnico nunca mexe no horário: a agenda é da central e o relógio dele corre sozinho,
+        # do início à conclusão da OS.
+        if payload.scheduled_start is not None or payload.scheduled_end is not None:
+            raise PermissionDenied(TECHNICIAN_TIME)
+        # Prazo e motivo de SLA são da central (o técnico nem vê o SLA).
+        if (
+            payload.response_violation_reason_id is not None
+            or payload.resolution_violation_reason_id is not None
+            or (payload.violation_note or "").strip()
+        ):
+            raise PermissionDenied(VIOLATION_IS_OFFICE)
     rules = await field_rules.rules(db)
+    from_status = ticket.status
 
     if payload.scheduled_start is not None:
         ticket.scheduled_start = payload.scheduled_start
@@ -1302,15 +1387,23 @@ async def transition_ticket(
         and STATUS_INFO[to].requires_assignee
     )
     validate_transition(
-        from_status=ticket.status,
+        from_status=from_status,
         to_status=to,
         has_assignee=ticket.assignee_id is not None or auto_assign,
         has_schedule=ticket.scheduled_start is not None,
         note=payload.note,
         resolution_notes=payload.resolution_notes,
     )
-    if to in (S.RESOLVED, S.CLOSED) and ticket.status not in (S.RESOLVED, S.CLOSED):
+    if to in (S.RESOLVED, S.CLOSED) and from_status not in (S.RESOLVED, S.CLOSED):
         _ensure_forms_and_signature(ticket)
+    # "Desmarcar" (Agendado -> Atribuído) sem nova data: a visita sai da agenda, de Atividades do
+    # dia e da conferência de conflito do técnico.
+    unscheduled = (
+        from_status == S.SCHEDULED and to == S.ASSIGNED and payload.scheduled_start is None
+    )
+    if unscheduled:
+        ticket.scheduled_start = None
+        ticket.scheduled_end = None
     if auto_assign:
         await _assign(db, ticket, actor.id, None, actor, now=now, note="Assumida ao mudar o status")
         if ticket.owner_id is None:
@@ -1327,17 +1420,26 @@ async def transition_ticket(
 
     if to == S.RESOLVED and payload.resolution_notes:
         ticket.resolution_notes = payload.resolution_notes.strip()
+    # Antes da chegada, o prazo segue a visita combinada (ou volta ao prazo da cidade).
+    if (payload.scheduled_start is not None or unscheduled) and ticket.arrived_at is None:
+        await field_rules.recompute_arrival_due(db, ticket, rules)
 
     data: dict[str, Any] = {}
     if payload.latitude is not None and payload.longitude is not None:
         data["latitude"] = payload.latitude
         data["longitude"] = payload.longitude
+        data.update(_distance_to_store(ticket, payload.latitude, payload.longitude))
     if to == S.SCHEDULED and ticket.scheduled_start is not None:
         data["scheduled_start"] = ticket.scheduled_start.isoformat()
-    if ticket.status != to:
+    data.update(_declared(declared_at, ticket, now))
+    if from_status != to:
         _change_status(db, ticket, to, actor, now=now, note=payload.note, data=data)
         if to == S.IN_PROGRESS:
-            field_rules.on_arrival(ticket, rules, now)  # primeira chegada: conta o tempo na loja
+            if ticket.arrived_at is None:
+                field_rules.on_arrival(ticket, rules, now)  # 1ª chegada: conta o tempo na loja
+            else:
+                # Nova visita (ou retomada): o limite é o que sobrou das horas do chamado.
+                field_rules.on_reentry(ticket, rules, now)
     if payload.scheduled_start or payload.scheduled_end or auto_assign:
         await schedule.ensure_no_conflict(db, ticket, actor, payload.allow_conflict)
     return ticket
@@ -1446,8 +1548,21 @@ async def add_attachment(
     if ticket.status in FINAL and not actor.can_manage_tickets:
         raise WorkflowError("OS encerrada não recebe anexos")
     if kind not in ("file", "photo", "signature"):
-        raise WorkflowError("kind deve ser file, photo ou signature")
+        raise WorkflowError("Tipo de anexo inválido")
     caption = _clean_description(description)
+    content_type = upload.content_type or "application/octet-stream"
+    if kind in ("photo", "signature"):
+        # Foto e assinatura aparecem na tela e no relatório do cliente: só imagem de verdade
+        # (pelo conteúdo, não pelo nome nem pelo tipo que o navegador declarou). PDF, SVG ou
+        # HTML enviado como "foto" fica como arquivo comum.
+        real_type = storage.sniff_image(await upload.read(16))
+        await upload.seek(0)
+        if real_type is not None:
+            content_type = real_type
+        elif kind == "signature":
+            raise WorkflowError("A assinatura deve ser uma imagem PNG ou JPG")
+        else:
+            kind = "file"
     now = utcnow()
     try:
         key, size = await storage.save_upload(ticket.id, upload)
@@ -1458,7 +1573,7 @@ async def add_attachment(
         ticket_id=ticket.id,
         uploaded_by_id=actor.id,
         filename=(upload.filename or "arquivo")[:255],
-        content_type=upload.content_type or "application/octet-stream",
+        content_type=content_type[:120],
         size_bytes=size,
         kind=kind,
         storage_key=key,
@@ -1508,14 +1623,24 @@ async def update_attachment(
 
 async def remove_attachment(
     db: AsyncSession, ticket: Ticket, attachment: TicketAttachment, actor: User
-) -> None:
-    """Exclui o anexo (só analistas e gestores). A assinatura do responsável fica protegida."""
+) -> str | None:
+    """Exclui o anexo (só analistas e gestores). A assinatura do responsável fica protegida.
+
+    Foto de formulário concluído: se o formulário deixa de ter o mínimo de fotos, volta para
+    "em andamento" (o formulário obrigatório trava a conclusão da OS de novo).
+
+    Devolve a chave do arquivo: quem chama apaga do disco só depois do commit (se o commit
+    falhar, o anexo volta e o arquivo continua lá).
+    """
+    from app.services import forms as forms_svc  # forms usa este módulo: import tardio
+
     if not actor.can_manage_tickets:
         raise PermissionDenied("Só analistas e gestores excluem anexos")
     if ticket.signature_attachment_id == attachment.id:
         raise WorkflowError("A assinatura do responsável não pode ser excluída")
     now = utcnow()
     key = attachment.storage_key
+    form_id = attachment.form_id
     record_event(
         db,
         ticket,
@@ -1525,22 +1650,30 @@ async def remove_attachment(
         now=now,
     )
     await db.delete(attachment)
+    await db.flush()
+    form = await db.get(TicketForm, form_id) if form_id is not None else None
+    if (
+        form is not None
+        and form.status == FormStatus.COMPLETED
+        and await forms_svc.missing_items(db, form)
+    ):
+        form.status = FormStatus.IN_PROGRESS
+        form.completed_at = None
+        form.completed_by_id = None
+        queue_event(db, "updated", ticket, actor, {"fields": ["forms"]})
     await _touch(db, ticket, now)
     queue_event(db, "attachment_removed", ticket, actor, {"filename": attachment.filename})
     await db.flush()
-    if key:
-        storage.delete(key)
+    return key
 
 
 async def set_violation(
     db: AsyncSession, ticket: Ticket, data: TicketViolationUpdate, actor: User
 ) -> Ticket:
-    """Justifica a violação de SLA. Vale com a OS fechada (é quando o analista revisa)."""
-    allowed = actor.can_manage_tickets or (
-        actor.role == UserRole.TECHNICIAN and ticket.assignee_id == actor.id
-    )
-    if not allowed:
-        raise PermissionDenied("Você não pode justificar a violação desta OS")
+    """Justifica a violação de SLA. Vale com a OS fechada (é quando o analista revisa). Só a
+    central: o técnico nem vê os prazos de SLA."""
+    if not actor.can_manage_tickets:
+        raise PermissionDenied(VIOLATION_IS_OFFICE)
     changes = await _apply_violation(
         db,
         ticket,
@@ -1641,9 +1774,84 @@ def _ordering(order_by: str) -> list[Any]:
     return [primary.nulls_last(), Ticket.number.desc()]
 
 
+# Nº da OS como a pessoa digita: "123", "OS-000123", "os 123", "OS123", "#123".
+_NUMBER = re.compile(
+    rf"(?P<prefix>{re.escape(settings.TICKET_PREFIX)}|#)?[\s#-]*0*(?P<n>\d+)", re.IGNORECASE
+)
+_MAX_NUMBER = 2**31 - 1  # coluna integer: número maior que isto não é OS (e daria erro no banco)
+
+# Listas (TicketListItem) não usam estes relacionamentos: não carregar poupa ~11 consultas a cada
+# página (e toda mudança de OS recarrega as listas abertas).
+_LIST_UNUSED = (
+    "forms",
+    "expenses",
+    "part_requests",
+    "payouts",
+    "requester",
+    "created_by",
+    "authorized_by",
+    "asset",
+    "service_type",
+    "response_violation_reason",
+    "resolution_violation_reason",
+)
+
+
+def list_noload(*keep: str) -> tuple[Any, ...]:
+    """Opções para carregar OS de lista sem o que a lista não mostra (`keep`: os que ela usa)."""
+    return tuple(noload(getattr(Ticket, name)) for name in _LIST_UNUSED if name not in keep)
+
+
+LIST_NOLOAD = list_noload()
+
+
 def _parse_number(q: str) -> int | None:
-    digits = q.upper().removeprefix(f"{settings.TICKET_PREFIX}-").lstrip("#")
-    return int(digits) if digits.isdigit() else None
+    match = _NUMBER.fullmatch(q.strip())
+    if match is None:
+        return None
+    number = int(match.group("n"))
+    return number if number <= _MAX_NUMBER else None
+
+
+def _word_clause(word: str) -> ColumnElement[bool]:
+    """Uma palavra da busca (sem acento, minúscula) em algum dado da OS."""
+    like = f"%{word}%"
+    stores = select(Location.id).where(
+        or_(
+            fold_words_sql(Location.name).like(like),
+            fold_words_sql(Location.code).like(like),
+            fold_words_sql(Location.city).like(like),
+        )
+    )
+    customers = select(Customer.id).where(fold_words_sql(Customer.name).like(like))
+    people = select(User.id).where(fold_words_sql(User.name).like(like))
+    return or_(
+        fold_words_sql(Ticket.title).like(like),
+        fold_words_sql(Ticket.requester_name).like(like),
+        fold_words_sql(Ticket.client_reference).like(like),
+        Ticket.location_id.in_(stores),
+        Ticket.customer_id.in_(customers),
+        Ticket.assignee_id.in_(people),
+        Ticket.id.in_(
+            select(ticket_helpers.c.ticket_id).where(ticket_helpers.c.user_id.in_(people))
+        ),
+        fold_words_sql(Ticket.description).like(like),
+    )
+
+
+def search_clause(q: str) -> ColumnElement[bool]:
+    """Busca das listas e da paleta: o nº da OS ou, palavra por palavra (sem acento, em qualquer
+    ordem), título, solicitante, nº do chamado do cliente, loja (nome, código e cidade), cliente,
+    técnicos e descrição. "OS-123" e "#123" procuram só o número."""
+    options: list[ColumnElement[bool]] = []
+    number = _parse_number(q)
+    if number is not None:
+        options.append(Ticket.number == number)
+    match = _NUMBER.fullmatch(q.strip())
+    terms = [] if match is not None and match.group("prefix") else search.words(q)
+    if terms:
+        options.append(and_(*(_word_clause(term) for term in terms)))
+    return or_(*options) if options else false()
 
 
 def filter_conditions(user: User, f: TicketFilters, now: datetime) -> list[ColumnElement[bool]]:
@@ -1683,7 +1891,9 @@ def filter_conditions(user: User, f: TicketFilters, now: datetime) -> list[Colum
     if f.owner_id:
         conds.append(Ticket.owner_id == f.owner_id)
     if f.no_owner:
-        conds.append(Ticket.owner_id.is_(None))
+        # Sem analista de verdade: sem responsável ou com um que saiu da gestão (desativado ou
+        # mudou de papel). Essas OS não aparecem em fila nenhuma e precisam de alguém.
+        conds.append(or_(Ticket.owner_id.is_(None), Ticket.owner_id.in_(orphan_owner_ids())))
     if f.mine:
         if user.can_manage_tickets:
             # Do analista: as que ele executa e as da fila dele (responsável).
@@ -1699,19 +1909,15 @@ def filter_conditions(user: User, f: TicketFilters, now: datetime) -> list[Colum
     if f.violation_pending:
         conds.append(violation_pending_clause(now))
     if f.q and f.q.strip():
-        q = f.q.strip()
-        like = f"%{q}%"
-        text_match = [
-            Ticket.title.ilike(like),
-            Ticket.description.ilike(like),
-            Ticket.requester_name.ilike(like),
-            Ticket.client_reference.ilike(like),
-        ]
-        number = _parse_number(q)
-        if number is not None:
-            text_match.append(Ticket.number == number)
-        conds.append(or_(*text_match))
+        conds.append(search_clause(f.q))
     return conds
+
+
+def orphan_owner_ids() -> Select[tuple[uuid.UUID]]:
+    """Analistas responsáveis que não são mais da gestão (desativados ou com outro papel)."""
+    return select(User.id).where(
+        or_(User.is_active.is_(False), User.role.not_in(TICKET_MANAGER_ROLES))
+    )
 
 
 async def list_tickets(
@@ -1725,10 +1931,16 @@ async def list_tickets(
 ) -> tuple[list[Ticket], int]:
     conds = filter_conditions(user, f, utcnow())
     total = await db.scalar(select(func.count()).select_from(Ticket).where(*conds)) or 0
+    ordering = _ordering(order_by)
+    number = _parse_number(f.q) if f.q else None
+    if number is not None:
+        # Na busca pelo número, a própria OS vem primeiro (a paleta mostra só as primeiras).
+        ordering.insert(0, case((Ticket.number == number, 0), else_=1))
     stmt = (
         select(Ticket)
+        .options(*LIST_NOLOAD)
         .where(*conds)
-        .order_by(*_ordering(order_by))
+        .order_by(*ordering)
         .offset((page - 1) * page_size)
         .limit(page_size)
     )
@@ -1740,11 +1952,39 @@ async def list_tickets(
 UNPRODUCTIVE_FROM = (S.ASSIGNED, S.SCHEDULED, S.EN_ROUTE, S.IN_PROGRESS)
 
 
+async def _rescheduled_after(db: AsyncSession, ticket: Ticket, moment: datetime) -> bool:
+    """A central mexeu na agenda da OS depois de `moment` (agendou ou trocou a data)."""
+    events = await db.scalars(
+        select(TicketEvent).where(
+            TicketEvent.ticket_id == ticket.id,
+            TicketEvent.created_at > moment,
+            TicketEvent.event_type.in_((TicketEventType.STATUS_CHANGED, TicketEventType.UPDATED)),
+        )
+    )
+    for ev in events:
+        if ev.event_type == TicketEventType.STATUS_CHANGED and ev.to_value == S.SCHEDULED.value:
+            return True
+        if ev.event_type == TicketEventType.UPDATED and "scheduled_start" in (
+            (ev.data or {}).get("changes") or {}
+        ):
+            return True
+    return False
+
+
 async def register_unproductive(
-    db: AsyncSession, ticket: Ticket, payload: TicketUnproductive, actor: User
+    db: AsyncSession,
+    ticket: Ticket,
+    payload: TicketUnproductive,
+    actor: User,
+    *,
+    declared_at: datetime | None = None,
 ) -> Ticket:
     """O técnico foi e não atendeu (cliente ausente, sem acesso...). A OS volta para
-    "Atribuído" sem agenda, para ser reagendada, e a ocorrência fica contada e no histórico."""
+    "Atribuído" sem agenda, para ser reagendada, e a ocorrência fica contada e no histórico.
+
+    Registrada offline e enviada depois que a central já remarcou (avisada pelo grupo): a nova
+    data fica e a OS segue "Agendado"; só a ocorrência é contada.
+    """
     check_version(ticket, payload.expected_version)
     is_assignee = actor.role == UserRole.TECHNICIAN and ticket.assignee_id == actor.id
     if not (actor.can_manage_tickets or is_assignee):
@@ -1758,6 +1998,7 @@ async def register_unproductive(
     if reason is None or not reason.is_active:
         raise WorkflowError("Motivo de visita improdutiva inválido")
     now = utcnow()
+    evidence = _declared(declared_at, ticket, now)
     data: dict[str, Any] = {
         "reason_id": str(reason.id),
         "reason": reason.name,
@@ -1768,6 +2009,14 @@ async def register_unproductive(
         data["previous_schedule"] = ticket.scheduled_start.isoformat()
     if payload.latitude is not None and payload.longitude is not None:
         data.update(latitude=payload.latitude, longitude=payload.longitude)
+        data.update(_distance_to_store(ticket, payload.latitude, payload.longitude))
+    data.update(evidence)
+    keep_schedule = (
+        bool(evidence)
+        and ticket.scheduled_start is not None
+        and ticket.scheduled_start > now
+        and await _rescheduled_after(db, ticket, declared_at)  # type: ignore[arg-type]
+    )
     record_event(
         db,
         ticket,
@@ -1781,13 +2030,17 @@ async def register_unproductive(
     )
     ticket.unproductive_count = (ticket.unproductive_count or 0) + 1
     ticket.last_unproductive_at = now
-    ticket.scheduled_start = None
-    ticket.scheduled_end = None
-    if ticket.status != S.ASSIGNED:
+    if not keep_schedule:
+        ticket.scheduled_start = None
+        ticket.scheduled_end = None
+    if ticket.arrived_at is None:
+        await field_rules.recompute_arrival_due(db, ticket, await field_rules.rules(db))
+    target = S.SCHEDULED if keep_schedule else S.ASSIGNED
+    if ticket.status != target:
         _change_status(
             db,
             ticket,
-            S.ASSIGNED,
+            target,
             actor,
             now=now,
             note=f"Visita improdutiva: {reason.name}",

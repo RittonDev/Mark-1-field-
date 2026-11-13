@@ -107,12 +107,15 @@ async def refresh(body: RefreshRequest, db: DB) -> TokenResponse:
         user = await db.get(User, uuid.UUID(payload["sub"]))
     except (InvalidToken, KeyError, ValueError) as exc:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, SESSION_EXPIRED) from exc
-    if user is None or not user.is_active or user.token_revoked(payload):
+    if user is None or not user.is_active:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, SESSION_EXPIRED)
-    # Se o papel mudou (ex.: técnico virou analista), a sessão no canal antigo termina.
+    # Se o papel mudou (ex.: técnico virou analista), a sessão no canal antigo termina. Vem antes
+    # da revogação: com essa mensagem o app apaga os dados locais do técnico.
     channel = payload.get("ch")
     if not channel_allows(channel, user.role):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, CHANNEL_DENIED_MESSAGE[channel])
+    if user.token_revoked(payload):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, SESSION_EXPIRED)
     session_id = payload.get("sid")
     if await sessions.is_revoked(session_id):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, SESSION_ENDED)

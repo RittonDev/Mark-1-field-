@@ -37,22 +37,22 @@ class UserOut(ORMModel):
 
 class UserCreate(BaseModel):
     name: str = Field(min_length=2, max_length=160)
-    email: EmailStr
+    email: EmailStr = Field(max_length=255)
     password: str = Field(min_length=8, max_length=128)
     role: UserRole = UserRole.ANALYST
-    phone: str | None = None
-    job_title: str | None = None
+    phone: str | None = Field(default=None, max_length=40)
+    job_title: str | None = Field(default=None, max_length=120)
     team_id: uuid.UUID | None = None
     customer_id: uuid.UUID | None = None
 
 
 class UserUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=160)
-    email: EmailStr | None = None
+    email: EmailStr | None = Field(default=None, max_length=255)
     password: str | None = Field(default=None, min_length=8, max_length=128)
     role: UserRole | None = None
-    phone: str | None = None
-    job_title: str | None = None
+    phone: str | None = Field(default=None, max_length=40)
+    job_title: str | None = Field(default=None, max_length=120)
     team_id: uuid.UUID | None = None
     customer_id: uuid.UUID | None = None
     is_active: bool | None = None

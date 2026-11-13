@@ -27,7 +27,7 @@ from app.models import (
 )
 from app.models.ticket import ticket_helpers
 from app.services import geo, technician_regions
-from app.services.schedule import find_conflicts, visit_end
+from app.services.schedule import busy_people, visit_end
 from app.services.workflow import OPEN_STATUSES
 
 # Palavras do tipo de serviço/categoria da OS -> área de atuação da homologação.
@@ -238,6 +238,14 @@ async def suggest(db: AsyncSession, target: Target, limit: int = 5) -> list[dict
     day_loads = (
         await _day_loads(db, ids, target.start, target.exclude_ticket_id) if target.start else {}
     )
+    # Quem está ocupado no horário: uma consulta para a base toda (era uma por técnico).
+    busy = (
+        await busy_people(
+            db, ids, start=target.start, end=target.end, exclude_id=target.exclude_ticket_id
+        )
+        if target.start and target.end
+        else set()
+    )
 
     ranked = []
     for tech in techs:
@@ -291,15 +299,8 @@ async def suggest(db: AsyncSession, target: Target, limit: int = 5) -> list[dict
             score += 15
             reasons.append("Atende " + ", ".join(sorted(AREA_LABEL[a] for a in matched)))
         if target.start and target.end:
-            busy = await find_conflicts(
-                db,
-                assignee_id=tech.id,
-                start=target.start,
-                end=target.end,
-                exclude_id=target.exclude_ticket_id,
-            )
-            is_busy = bool(busy)
-            if busy:
+            is_busy = tech.id in busy
+            if is_busy:
                 score -= 40
                 reasons.append("Ocupado no horário")
             else:

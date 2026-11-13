@@ -1,9 +1,10 @@
+import re
 import uuid
 from datetime import timedelta
 from typing import Annotated, Any
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import ColumnElement, func, or_, select
 
 from app.api.deps import DB, TicketManagerUser
 from app.core.enums import AssetType, TicketStatus
@@ -27,14 +28,38 @@ from app.schemas.customer import (
 )
 from app.schemas.records import dedupe_contacts, format_phone, primary_contact
 from app.schemas.ticket import format_ticket_code
+from app.services import cities, geo, location_import, search
 from app.services import field as field_rules
-from app.services import geo, location_import, search
 from app.services.location_import import LocationImportResult
-from app.services.spreadsheet import SpreadsheetError
+from app.services.spreadsheet import MAX_BYTES, SpreadsheetError, read_upload
 from app.services.tickets import visibility_clause
 from app.services.workflow import OPEN_STATUSES
 
 router = APIRouter(tags=["customers"])
+
+
+def _document_term(q: str | None) -> str | None:
+    """CPF/CNPJ (inclusive o alfanumérico) digitado com pontuação, como "12.ABC.345/01DE-35":
+    a busca por palavras quebraria nas letras; aqui ele é comparado inteiro com o documento."""
+    compact = re.sub(r"[^0-9A-Za-z]", "", q or "").upper()
+    if len(compact) in (11, 14) and any(c.isdigit() for c in compact):
+        return compact
+    return None
+
+
+def _with_document(
+    matched: ColumnElement | None, q: str | None, column: Any
+) -> ColumnElement | None:
+    doc = _document_term(q)
+    if doc is None:
+        return matched
+    return column == doc if matched is None else or_(matched, column == doc)
+
+
+async def _canonical_city(db: DB, target: Customer | Location, fields: dict[str, Any]) -> None:
+    """Grava a cidade com a grafia de sempre ("SAO PAULO" vira "São Paulo")."""
+    if "city" in fields or "state" in fields:
+        target.city = await cities.canonical_city(db, target.state, target.city)
 
 
 async def _get_or_404(db: DB, model: type, obj_id: uuid.UUID, label: str):  # noqa: ANN202
@@ -131,17 +156,30 @@ async def _locations_out(db: DB, user: User, locations: list[Location]) -> list[
 
 @router.get("/customers", response_model=list[CustomerOut])
 async def list_customers(
-    db: DB, user: TicketManagerUser, q: str | None = None
+    db: DB,
+    user: TicketManagerUser,
+    q: str | None = None,
+    active: bool | None = None,
+    limit: Annotated[int | None, Query(ge=1, le=5000)] = None,
 ) -> list[CustomerOut]:
+    """Clientes. `active=true` deixa de fora os sem contrato (seletores); `limit` corta a lista."""
     stmt = select(Customer)
+    if active is not None:
+        stmt = stmt.where(Customer.is_active.is_(active))
     # Busca por palavras (nome ou CNPJ/CPF), em qualquer ordem e sem acento.
-    matched = search.all_words(q, [Customer.name], digit_columns=[Customer.document])
+    matched = _with_document(
+        search.all_words(q, [Customer.name], digit_columns=[Customer.document]),
+        q,
+        Customer.document,
+    )
     if matched is not None:
         stmt = stmt.where(matched).order_by(
             search.rank(q, Customer.name, exact=[Customer.document]), Customer.name
         )
     else:
         stmt = stmt.order_by(Customer.name)
+    if limit is not None:
+        stmt = stmt.limit(limit)
     return await _customers_out(db, user, list(await db.scalars(stmt)))
 
 
@@ -152,6 +190,7 @@ async def create_customer(body: CustomerCreate, db: DB, user: TicketManagerUser)
     _apply_contacts(customer, fields)
     for key, value in fields.items():
         setattr(customer, key, value)
+    await _canonical_city(db, customer, fields)
     db.add(customer)
     await db.commit()
     return (await _customers_out(db, user, [customer]))[0]
@@ -169,9 +208,14 @@ async def update_customer(
 ) -> CustomerOut:
     customer = await _get_or_404(db, Customer, customer_id, "Cliente")
     fields = body.model_dump(exclude_unset=True)
+    # null num campo obrigatório não apaga nada.
+    for key in ("name", "is_active"):
+        if key in fields and fields[key] is None:
+            fields.pop(key)
     _apply_contacts(customer, fields)
     for key, value in fields.items():
         setattr(customer, key, value)
+    await _canonical_city(db, customer, fields)
     await db.commit()
     return (await _customers_out(db, user, [customer]))[0]
 
@@ -181,12 +225,36 @@ async def update_customer(
 
 @router.get("/customers/{customer_id}/locations", response_model=list[LocationOut])
 async def customer_locations(
-    customer_id: uuid.UUID, db: DB, user: TicketManagerUser
+    customer_id: uuid.UUID,
+    db: DB,
+    user: TicketManagerUser,
+    active: bool | None = None,
+    q: str | None = None,
+    limit: Annotated[int | None, Query(ge=1, le=5000)] = None,
 ) -> list[LocationOut]:
-    locations = await db.scalars(
-        select(Location).where(Location.customer_id == customer_id).order_by(Location.name)
+    """Lojas do cliente. `active=true` só as ativas (seletores), `q` busca por nome, código,
+    cidade ou CNPJ e `limit` corta a lista (cliente grande tem mais de mil lojas)."""
+    stmt = select(Location).where(Location.customer_id == customer_id)
+    if active is not None:
+        stmt = stmt.where(Location.is_active.is_(active))
+    matched = _with_document(
+        search.all_words(
+            q,
+            [Location.name, Location.code, Location.city, Location.district],
+            digit_columns=[Location.document],
+        ),
+        q,
+        Location.document,
     )
-    return await _locations_out(db, user, list(locations))
+    if matched is not None:
+        stmt = stmt.where(matched).order_by(
+            search.rank(q, Location.name, exact=[Location.code, Location.document]), Location.name
+        )
+    else:
+        stmt = stmt.order_by(Location.name)
+    if limit is not None:
+        stmt = stmt.limit(limit)
+    return await _locations_out(db, user, list(await db.scalars(stmt)))
 
 
 @router.post(
@@ -203,6 +271,7 @@ async def create_location(
     _apply_contacts(location, fields)
     for key, value in fields.items():
         setattr(location, key, value)
+    await _canonical_city(db, location, fields)
     db.add(location)
     await db.commit()
     loaded = await db.get(Location, location.id, populate_existing=True)
@@ -226,18 +295,23 @@ async def list_locations(
     if active is not None:
         conds.append(Location.is_active.is_(active))
     # Busca por palavras: cada uma em nome, código, cidade, bairro, endereço ou cliente (ou nos
-    # dígitos do CNPJ), em qualquer ordem e sem acento ("Le Biscuit Iguatemi Fortaleza").
-    matched = search.all_words(
+    # dígitos do CNPJ), em qualquer ordem e sem acento ("Le Biscuit Iguatemi Fortaleza"); CNPJ
+    # com pontuação (inclusive o alfanumérico) também é comparado inteiro.
+    matched = _with_document(
+        search.all_words(
+            q,
+            [
+                Location.name,
+                Location.code,
+                Location.city,
+                Location.district,
+                Location.address_line,
+                Customer.name,
+            ],
+            digit_columns=[Location.document],
+        ),
         q,
-        [
-            Location.name,
-            Location.code,
-            Location.city,
-            Location.district,
-            Location.address_line,
-            Customer.name,
-        ],
-        digit_columns=[Location.document],
+        Location.document,
     )
     if matched is not None:
         conds.append(matched)
@@ -266,10 +340,12 @@ UPCOMING_DAYS = 7
 
 
 async def _last_visit(db: DB, location_id: uuid.UUID) -> IntakeLastVisit | None:
+    # Só as colunas da linha: carregar a OS inteira traria as ~19 relações dela.
     done_at = func.coalesce(Ticket.resolved_at, Ticket.closed_at)
     row = (
         await db.execute(
-            select(Ticket, done_at)
+            select(Ticket.id, Ticket.number, Ticket.title, done_at, User.name)
+            .outerjoin(User, User.id == Ticket.assignee_id)
             .where(
                 Ticket.location_id == location_id,
                 Ticket.status.in_((TicketStatus.RESOLVED, TicketStatus.CLOSED)),
@@ -281,13 +357,13 @@ async def _last_visit(db: DB, location_id: uuid.UUID) -> IntakeLastVisit | None:
     ).first()
     if row is None:
         return None
-    ticket, at = row
+    ticket_id, number, title, at, technician = row
     return IntakeLastVisit(
-        ticket_id=ticket.id,
-        code=format_ticket_code(ticket.number),
-        title=ticket.title,
+        ticket_id=ticket_id,
+        code=format_ticket_code(number),
+        title=title,
         at=at,
-        technician=ticket.assignee.name if ticket.assignee else None,
+        technician=technician,
     )
 
 
@@ -375,9 +451,13 @@ async def update_location(
 ) -> LocationOut:
     location = await _get_or_404(db, Location, location_id, "Local")
     fields = body.model_dump(exclude_unset=True)
+    for key in ("name", "is_active"):
+        if key in fields and fields[key] is None:
+            fields.pop(key)
     _apply_contacts(location, fields)
     for key, value in fields.items():
         setattr(location, key, value)
+    await _canonical_city(db, location, fields)
     await db.commit()
     return (await _locations_out(db, user, [location]))[0]
 
@@ -467,9 +547,10 @@ async def import_locations(
     dry_run: bool = True,
     customer_id: uuid.UUID | None = None,
 ) -> LocationImportResult:
-    """Base de locais por planilha CSV ou XLSX. Por padrão só a prévia; dry_run=false grava."""
-    data = await file.read()
+    """Base de locais por planilha CSV ou XLSX (até 5 MB). Por padrão só a prévia; dry_run=false
+    grava."""
     try:
+        data = await read_upload(file, MAX_BYTES)
         result = await location_import.import_locations(
             db, file.filename or "", data, dry_run, customer_id
         )

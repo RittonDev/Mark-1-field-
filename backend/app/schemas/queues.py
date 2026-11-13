@@ -45,6 +45,10 @@ class MyQueue(BaseModel):
     generated_at: datetime
     counts: MyQueueCounts
     items: list[QueueItem]
+    # Quantas OS a fila tem de verdade. Acima do limite da lista (500), `truncated` avisa que
+    # ficaram de fora as menos urgentes (as em aberto de prazo mais apertado vêm primeiro).
+    total: int = 0
+    truncated: bool = False
 
 
 class QueueCounts(BaseModel):
@@ -61,4 +65,5 @@ class TeamQueue(QueueCounts):
 
 class TeamQueues(BaseModel):
     queues: list[TeamQueue]
+    # Sem analista, incluindo as OS de analista que saiu da gestão (desativado ou outro papel).
     unowned: QueueCounts

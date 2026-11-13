@@ -74,6 +74,26 @@ def image_extension(data: bytes) -> str | None:
     return None
 
 
+# Os primeiros bytes de cada tipo de foto que o navegador e o relatório mostram.
+_PHOTO_SIGNATURES: tuple[tuple[bytes, str], ...] = (
+    (b"\xff\xd8", "image/jpeg"),
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+)
+
+
+def sniff_image(head: bytes) -> str | None:
+    """Tipo (MIME) da foto pelo começo do arquivo (16 bytes bastam): JPEG, PNG, WebP ou GIF.
+    Qualquer outra coisa (PDF, SVG, HTML, HEIC...) não é foto para a tela."""
+    for prefix, mime in _PHOTO_SIGNATURES:
+        if head.startswith(prefix):
+            return mime
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
 class InvalidImage(ValueError):
     pass
 

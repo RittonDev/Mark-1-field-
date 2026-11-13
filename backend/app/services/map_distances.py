@@ -4,6 +4,9 @@ Para decidir quem mandar: quanto falta de onde ele está agora até a loja, quan
 loja (amanhã cedo, por exemplo) e quanto ele está longe de casa. As distâncias são em linha reta,
 com uma estimativa pelas ruas (x1,3) e do tempo de carro. Sem coordenada própria, a loja e a casa
 usam o centro da cidade e voltam marcadas como aproximadas.
+
+A posição de agora só existe com a jornada aberta (termo de ciência, LGPD): quem encerrou a
+jornada aparece só com a casa.
 """
 
 import uuid
@@ -14,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import UserRole
 from app.db.base import utcnow
-from app.models import Location, LocationPing, User
+from app.models import Location, User
 from app.schemas.tracking import (
     DistanceLeg,
     MapDistances,
@@ -22,11 +25,10 @@ from app.schemas.tracking import (
     TechnicianDistance,
     TechnicianHome,
 )
-from app.services import geo, technician_regions
+from app.services import geo, technician_regions, tracking
 from app.services.suggestions import km_between
 
 ROAD_FACTOR = 1.3
-LIVE_MAX_AGE = timedelta(hours=24)
 
 
 def travel_minutes(road_km: float) -> int:
@@ -109,16 +111,10 @@ async def distances(
     if team_id is not None:
         stmt = stmt.where(User.team_id == team_id)
     technicians = list(await db.scalars(stmt.order_by(User.name)))
-    ids = [t.id for t in technicians]
-    latest = {
-        p.user_id: p
-        for p in await db.scalars(
-            select(LocationPing)
-            .where(LocationPing.user_id.in_(ids), LocationPing.recorded_at >= now - LIVE_MAX_AGE)
-            .distinct(LocationPing.user_id)
-            .order_by(LocationPing.user_id, LocationPing.recorded_at.desc())
-        )
-    }
+    # Posição de agora: só o último ponto da jornada aberta de cada um.
+    latest = await tracking.latest_pings(
+        db, await tracking.active_shifts(db, [t.id for t in technicians], now)
+    )
 
     centroids: dict[tuple[str, str], tuple[float, float, str] | None] = {}
     rows: list[TechnicianDistance] = []

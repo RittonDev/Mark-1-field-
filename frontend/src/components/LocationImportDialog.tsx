@@ -2,9 +2,9 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { Download, FileSpreadsheet } from "lucide-react";
+import { Download, FileDown, FileSpreadsheet } from "lucide-react";
 import { useState } from "react";
-import { Button, Dialog, ErrorBox, Field, Select } from "@/components/ui";
+import { Button, Checkbox, Dialog, ErrorBox, Field, Select } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { downloadCsv } from "@/lib/download";
 import { useCustomers } from "@/lib/queries";
@@ -28,10 +28,37 @@ interface Result {
   customers_created: number;
 }
 
+/** Colunas da planilha de locais (o modelo para baixar e a exportação da tela Locais usam as mesmas). */
+export const LOCATION_COLUMNS = [
+  "cliente",
+  "cnpj_cliente",
+  "codigo",
+  "local",
+  "cnpj",
+  "endereco",
+  "bairro",
+  "cidade",
+  "uf",
+  "cep",
+  "latitude",
+  "longitude",
+  "contato",
+  "telefone",
+  "observacoes",
+];
+
 const TEMPLATE = [
-  ["cliente", "cnpj_cliente", "codigo", "local", "cnpj", "endereco", "bairro", "cidade", "uf", "cep", "latitude", "longitude", "contato", "telefone", "observacoes"],
+  LOCATION_COLUMNS,
   ["Rede Exemplo", "11.222.333/0001-81", "L012", "Loja 12 - Centro", "", "Rua Exemplo, 100", "Centro", "São Paulo", "SP", "01001-000", "-23,5505", "-46,6333", "Gerente da loja", "(11) 3000-0000", "Acesso pela doca"],
 ];
+
+const ACTION_LABEL: Record<Row["action"], [string, string]> = {
+  create: ["Novo", "Criado"],
+  update: ["Atualizar", "Atualizado"],
+  error: ["Erro", "Erro"],
+};
+
+const plural = (n: number) => `${n.toLocaleString("pt-BR")} ${n === 1 ? "local" : "locais"}`;
 
 /** Importa a base de locais por planilha, com prévia linha a linha antes de gravar. */
 export function LocationImportDialog({
@@ -45,6 +72,8 @@ export function LocationImportDialog({
   const customers = useCustomers();
   const [customerId, setCustomerId] = useState(initialCustomer ?? "");
   const [file, setFile] = useState<File | null>(null);
+  // null: o padrão (só os erros quando houver erro); depois, a escolha de quem está conferindo.
+  const [onlyErrors, setOnlyErrors] = useState<boolean | null>(null);
   const run = useMutation({
     mutationFn: (dryRun: boolean) => {
       const body = new FormData();
@@ -54,14 +83,42 @@ export function LocationImportDialog({
       return api.upload<Result>(`/locations/import?${qs}`, body);
     },
     onSuccess: (r) => {
+      setOnlyErrors(null);
       if (r.dry_run) return;
-      queryClient.invalidateQueries({ queryKey: ["locations"] });
-      queryClient.invalidateQueries({ queryKey: ["customers"] });
+      // Listas, fichas de loja e de cliente abertas mostram a base nova.
+      void queryClient.invalidateQueries({ queryKey: ["locations"] });
+      void queryClient.invalidateQueries({ queryKey: ["location"] });
+      void queryClient.invalidateQueries({ queryKey: ["customers"] });
+      void queryClient.invalidateQueries({ queryKey: ["customer"] });
     },
   });
   const result = run.data;
   const done = result && !result.dry_run;
   const total = result ? result.created + result.updated : 0;
+  const showOnlyErrors = Boolean(result && result.errors > 0 && (onlyErrors ?? true));
+  // Linhas com erro primeiro: com centenas de linhas, elas não ficam escondidas no meio.
+  const rows = result
+    ? [...result.rows]
+        .filter((r) => !showOnlyErrors || r.action === "error")
+        .sort((a, b) => Number(b.action === "error") - Number(a.action === "error") || a.line - b.line)
+    : [];
+
+  const downloadReport = () => {
+    if (!result) return;
+    const column = result.dry_run ? 0 : 1;
+    downloadCsv(`importacao-locais-${result.dry_run ? "previa" : "resultado"}.csv`, [
+      ["linha", "cliente", "local", "cidade", "resultado"],
+      ...[...result.rows]
+        .sort((a, b) => a.line - b.line)
+        .map((r) => [
+          r.line,
+          r.customer,
+          r.name,
+          r.city,
+          r.action === "error" ? r.errors.join(" · ") : ACTION_LABEL[r.action][column],
+        ]),
+    ]);
+  };
 
   return (
     <Dialog
@@ -80,7 +137,7 @@ export function LocationImportDialog({
             <Button onClick={onClose}>Cancelar</Button>
             {result?.dry_run ? (
               <Button variant="primary" loading={run.isPending} disabled={total === 0} onClick={() => run.mutate(false)}>
-                Importar {total} local(is)
+                Importar {plural(total)}
               </Button>
             ) : (
               <Button variant="primary" loading={run.isPending} disabled={!file} onClick={() => run.mutate(true)}>
@@ -111,7 +168,7 @@ export function LocationImportDialog({
               </Select>
             </Field>
             <div className="flex flex-wrap items-center gap-2">
-              <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-line bg-surface px-3 py-1.5 text-sm font-medium text-ink hover:bg-surface-2">
+              <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-line bg-surface px-3 py-1.5 text-sm font-medium text-ink focus-within:ring-2 focus-within:ring-brand/45 hover:bg-surface-2">
                 <FileSpreadsheet className="size-4" />
                 {file ? file.name : "Escolher arquivo"}
                 <input
@@ -133,18 +190,31 @@ export function LocationImportDialog({
               O local é reconhecido pelo código, depois pelo CNPJ, depois pelo nome: se já existir, é atualizado só com o que
               veio preenchido. Coordenadas aceitam vírgula (Excel). Nada é gravado antes de você confirmar a prévia.
             </p>
+            <p className="text-xs text-ink-muted">
+              No Excel, formate as colunas de CNPJ e CEP como Texto antes de salvar: como número, o zero da frente some e o
+              documento fica inválido.
+            </p>
           </>
         ) : null}
 
         {result ? (
           <>
             <div className="flex flex-wrap gap-2 text-sm">
-              <Count label={result.dry_run ? "Novos" : "Criados"} value={result.created} className="bg-emerald-50 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300" />
-              <Count label={result.dry_run ? "Serão atualizados" : "Atualizados"} value={result.updated} className="bg-sky-50 text-sky-800 dark:bg-sky-500/10 dark:text-sky-300" />
-              {result.customers_created ? (
-                <Count label="Clientes novos" value={result.customers_created} className="bg-violet-50 text-violet-800 dark:bg-violet-500/10 dark:text-violet-300" />
-              ) : null}
-              <Count label="Com erro (ignorados)" value={result.errors} className="bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300" />
+              <Count label={result.dry_run ? "Novos" : "Criados"} value={result.created} />
+              <Count label={result.dry_run ? "Serão atualizados" : "Atualizados"} value={result.updated} />
+              {result.customers_created ? <Count label="Clientes novos" value={result.customers_created} /> : null}
+              <Count label="Com erro (ignorados)" value={result.errors} problem={result.errors > 0} />
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              {result.errors > 0 ? (
+                <Checkbox label="Só as linhas com erro" checked={showOnlyErrors} onChange={setOnlyErrors} />
+              ) : (
+                <span className="text-xs text-ink-muted">Nenhuma linha com erro.</span>
+              )}
+              <Button size="sm" variant="ghost" onClick={downloadReport}>
+                <FileDown className="size-4" />
+                Baixar relatório (CSV)
+              </Button>
             </div>
             <div className="max-h-72 overflow-auto rounded-lg border border-line">
               <table className="w-full text-left text-xs">
@@ -157,12 +227,12 @@ export function LocationImportDialog({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line">
-                  {result.rows.map((r) => (
+                  {rows.map((r) => (
                     <tr key={r.line}>
                       <td className="px-2 py-1.5 text-ink-muted tabular-nums">{r.line}</td>
                       <td className="px-2 py-1.5 text-ink">
                         {r.customer || "—"}
-                        {r.new_customer ? <span className="ml-1 text-violet-700 dark:text-violet-300">(novo)</span> : null}
+                        {r.new_customer ? <span className="ml-1 text-ink-muted">(novo)</span> : null}
                       </td>
                       <td className="px-2 py-1.5">
                         <span className="block font-semibold text-ink">{r.name || "—"}</span>
@@ -170,11 +240,9 @@ export function LocationImportDialog({
                       </td>
                       <td className="px-2 py-1.5">
                         {r.action === "error" ? (
-                          <span className="text-red-600 dark:text-red-400">{r.errors.join(" · ")}</span>
-                        ) : r.action === "create" ? (
-                          <span className="text-emerald-700 dark:text-emerald-400">Novo</span>
+                          <span className="font-medium text-red-600 dark:text-red-400">{r.errors.join(" · ")}</span>
                         ) : (
-                          <span className="text-sky-700 dark:text-sky-400">Atualizar</span>
+                          <span className="text-ink-muted">{ACTION_LABEL[r.action][result.dry_run ? 0 : 1]}</span>
                         )}
                       </td>
                     </tr>
@@ -190,10 +258,16 @@ export function LocationImportDialog({
   );
 }
 
-function Count({ label, value, className }: { label: string; value: number; className: string }) {
+/** Contador da prévia: neutro; vermelho só quando aponta um problema (linhas com erro). */
+function Count({ label, value, problem = false }: { label: string; value: number; problem?: boolean }) {
   return (
-    <span className={clsx("rounded-lg px-3 py-1.5", className)}>
-      {label}: <strong className="tabular-nums">{value}</strong>
+    <span
+      className={clsx(
+        "rounded-lg px-3 py-1.5",
+        problem ? "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300" : "bg-surface-2 text-ink",
+      )}
+    >
+      {label}: <strong className="tabular-nums">{value.toLocaleString("pt-BR")}</strong>
     </span>
   );
 }

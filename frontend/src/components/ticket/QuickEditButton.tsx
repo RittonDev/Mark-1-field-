@@ -3,6 +3,7 @@
 import clsx from "clsx";
 import { SquarePen } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { TicketLink } from "./TicketLink";
 import { useTicketPanel } from "./TicketPanel";
 
 /** Abre a OS no painel lateral da tela (fora da área da central, onde não há painel, abre a página). */
@@ -36,20 +37,14 @@ export function QuickEditButton({ ticketId, code, className }: { ticketId: strin
   );
 }
 
-/** Texto clicável (ex.: o nº da OS no cartão do dia) que abre a OS por cima da lista. */
+/**
+ * Texto clicável (ex.: o nº da OS no cartão do dia) que abre a OS por cima da lista. É um link: o
+ * clique abre no painel e Ctrl+clique ou o botão do meio abrem a página da OS em outra aba.
+ */
 export function OpenTicketButton({ ticketId, className, children }: { ticketId: string; className?: string; children: React.ReactNode }) {
-  const openTicket = useOpenTicket();
   return (
-    <button
-      type="button"
-      onClick={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        openTicket(ticketId);
-      }}
-      className={clsx("text-left underline-offset-2 hover:underline", className)}
-    >
+    <TicketLink ticketId={ticketId} className={clsx("text-left underline-offset-2 hover:underline", className)}>
       {children}
-    </button>
+    </TicketLink>
   );
 }

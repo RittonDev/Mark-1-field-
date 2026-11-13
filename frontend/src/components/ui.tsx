@@ -1,9 +1,10 @@
 "use client";
 
 import clsx from "clsx";
-import { Loader2, TriangleAlert, X } from "lucide-react";
-import { forwardRef, useEffect, useId, useRef, useState } from "react";
+import { Loader2, RotateCcw, TriangleAlert, X } from "lucide-react";
+import { forwardRef, useEffect, useEffectEvent, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useDocumentTitle } from "@/lib/hooks";
 
 type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "ink";
 type ButtonSize = "sm" | "md" | "lg";
@@ -30,7 +31,8 @@ export function buttonClassName(variant: ButtonVariant = "secondary", size: Butt
   return clsx(
     "inline-flex items-center justify-center gap-1.5 rounded-lg font-medium whitespace-nowrap select-none",
     "transition-[background-color,border-color,color,box-shadow,transform] duration-150 active:translate-y-px",
-    "focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:ring-offset-2 focus-visible:ring-offset-surface focus-visible:outline-none",
+    // Anel de foco no tom --focus (3:1 ou mais em qualquer fundo do app, como pede a WCAG).
+    "focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface focus-visible:outline-none",
     "disabled:pointer-events-none disabled:opacity-50",
     buttonSizes[size],
     buttonVariants[variant],
@@ -49,17 +51,29 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   ref,
 ) {
   return (
-    <button ref={ref} type={type} disabled={disabled || loading} className={buttonClassName(variant, size, className)} {...props}>
-      {loading ? <Loader2 className="size-4 animate-spin" /> : null}
+    <button
+      ref={ref}
+      type={type}
+      disabled={disabled || loading}
+      aria-busy={loading || undefined}
+      className={buttonClassName(variant, size, className)}
+      {...props}
+    >
+      {loading ? <Loader2 aria-hidden className="size-4 animate-spin" /> : null}
       {children}
     </button>
   );
 });
 
+// Campo inválido: aria-invalid="true" pinta a borda de vermelho (também no hover e no foco) e chega ao
+// leitor de tela. No escuro o campo fica um tom acima do cartão, com borda visível.
 const fieldBase =
   "rounded-lg border border-line bg-surface px-3 text-sm text-ink shadow-elev-1 placeholder:text-ink-subtle " +
   "transition-[border-color,box-shadow] duration-150 hover:border-line-strong " +
-  "focus:border-brand focus:ring-4 focus:ring-brand/15 focus:outline-none disabled:opacity-60";
+  "focus:border-brand focus:ring-4 focus:ring-brand/15 focus:outline-none disabled:opacity-60 " +
+  "dark:border-line-strong dark:bg-surface-2 dark:hover:border-[#4a4f58] " +
+  "aria-[invalid=true]:border-red-500 aria-[invalid=true]:hover:border-red-500 " +
+  "aria-[invalid=true]:focus:border-red-500 aria-[invalid=true]:focus:ring-red-500/15";
 
 /**
  * Campo ocupa a largura toda, a menos que a tela passe uma largura própria (ex.: "w-40"). Com as duas
@@ -67,6 +81,11 @@ const fieldBase =
  */
 function fieldWidth(className?: string) {
   return className && /(^|\s)w-/.test(className) ? null : "w-full";
+}
+
+/** Classes de campo (borda, foco, estado inválido), para um controle próprio com a cara dos campos. */
+export function fieldClassName(className?: string) {
+  return clsx(fieldBase, fieldWidth(className), className);
 }
 
 export const Input = forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(function Input(
@@ -78,7 +97,7 @@ export const Input = forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTML
 
 export const Textarea = forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement>>(
   function Textarea({ className, rows = 4, ...props }, ref) {
-    return <textarea ref={ref} rows={rows} className={clsx(fieldBase, fieldWidth(className), "py-2", className)} {...props} />;
+    return <textarea ref={ref} rows={rows} className={clsx(fieldBase, fieldWidth(className), "resize-y py-2", className)} {...props} />;
   },
 );
 
@@ -96,12 +115,15 @@ export const Select = forwardRef<HTMLSelectElement, React.SelectHTMLAttributes<H
 export function Field({
   label,
   hint,
+  error,
   required,
   children,
   className,
 }: {
   label: string;
   hint?: string;
+  /** Erro do campo: aparece no lugar da dica, em vermelho, e é anunciado. Marque o campo com aria-invalid. */
+  error?: string | null;
   required?: boolean;
   children: React.ReactNode;
   className?: string;
@@ -111,10 +133,16 @@ export function Field({
       {/* Rótulo em negrito e mais escuro: o formulário se lê pelos rótulos. */}
       <span className="text-xs font-semibold text-ink/80">
         {label}
-        {required ? <span className="text-red-500"> *</span> : null}
+        {required ? <span className="text-red-600 dark:text-red-400"> *</span> : null}
       </span>
       {children}
-      {hint ? <span className="text-xs text-ink-subtle">{hint}</span> : null}
+      {error ? (
+        <span role="alert" className="text-xs font-medium text-red-600 dark:text-red-400">
+          {error}
+        </span>
+      ) : hint ? (
+        <span className="text-xs text-ink-subtle">{hint}</span>
+      ) : null}
     </label>
   );
 }
@@ -302,31 +330,68 @@ export function EmptyState({
   title,
   description,
   action,
+  size = "md",
 }: {
   icon?: React.ReactNode;
   title: string;
-  description?: string;
+  description?: React.ReactNode;
   action?: React.ReactNode;
+  /** "sm": vazio dentro de um cartão ou coluna (sem o quadro do ícone). */
+  size?: "md" | "sm";
 }) {
+  const small = size === "sm";
   return (
-    <div className="flex animate-enter flex-col items-center justify-center gap-2 px-6 py-14 text-center">
+    <div
+      className={clsx(
+        "flex animate-enter flex-col items-center justify-center text-center",
+        small ? "gap-1 px-4 py-6" : "gap-2 px-6 py-14",
+      )}
+    >
       {icon ? (
-        <div className="mb-1 flex size-12 items-center justify-center rounded-2xl bg-brand-soft text-brand ring-1 ring-brand/10 [&_svg]:size-6">
-          {icon}
-        </div>
+        small ? (
+          <span aria-hidden className="mb-0.5 text-ink-subtle [&_svg]:size-5">
+            {icon}
+          </span>
+        ) : (
+          <div
+            aria-hidden
+            className="mb-1 flex size-12 items-center justify-center rounded-2xl bg-brand-soft text-brand ring-1 ring-brand/10 [&_svg]:size-6"
+          >
+            {icon}
+          </div>
+        )
       ) : null}
-      <p className="text-sm font-bold text-ink">{title}</p>
-      {description ? <p className="max-w-sm text-xs leading-relaxed text-ink-muted">{description}</p> : null}
-      {action ? <div className="mt-2">{action}</div> : null}
+      <p className={small ? "text-xs font-semibold text-ink" : "text-sm font-bold text-ink"}>{title}</p>
+      {description ? (
+        <div className={clsx("text-xs leading-relaxed text-ink-muted", small ? "max-w-xs" : "max-w-sm")}>{description}</div>
+      ) : null}
+      {action ? <div className={small ? "mt-1.5" : "mt-2"}>{action}</div> : null}
     </div>
   );
 }
 
-export function ErrorBox({ message }: { message: string }) {
+/** Erro na tela: anunciado ao aparecer; com `onRetry`, oferece "Tentar de novo" sem recarregar a página. */
+export function ErrorBox({ message, title, onRetry }: { message: string; title?: string; onRetry?: () => void }) {
   return (
-    <div className="flex animate-enter items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
-      <TriangleAlert className="mt-0.5 size-4 shrink-0" />
-      <span>{message}</span>
+    <div
+      role="alert"
+      className="flex animate-enter items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300"
+    >
+      <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
+      <div className="min-w-0 flex-1">
+        {title ? <p className="font-semibold">{title}</p> : null}
+        <p className={clsx("break-words", title && "mt-0.5")}>{message}</p>
+      </div>
+      {onRetry ? (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="-my-1 inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-xs font-semibold transition-colors hover:bg-red-100 dark:hover:bg-red-900/40"
+        >
+          <RotateCcw aria-hidden className="size-3.5" />
+          Tentar de novo
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -336,13 +401,17 @@ export function PageHeader({
   description,
   actions,
   eyebrow,
+  documentTitle,
 }: {
   title: React.ReactNode;
   description?: React.ReactNode;
   actions?: React.ReactNode;
   /** Linha pequena acima do título (ex.: data, contexto). */
   eyebrow?: React.ReactNode;
+  /** Nome da tela na aba do navegador, quando o do menu não basta (ex.: "Nova OS"). */
+  documentTitle?: string;
 }) {
+  useDocumentTitle(documentTitle);
   // Ações sempre à direita do título (no celular, embaixo): uma descrição longa quebra dentro do
   // próprio bloco em vez de empurrar os botões para a linha de baixo.
   return (
@@ -362,11 +431,23 @@ export function PageHeader({
 // Trava a rolagem da página enquanto houver diálogo aberto (contador para diálogos empilhados).
 let scrollLocks = 0;
 export function lockScroll() {
+  const root = document.documentElement;
   scrollLocks += 1;
-  if (scrollLocks === 1) document.documentElement.style.overflow = "hidden";
+  if (scrollLocks === 1) {
+    // No Windows a barra de rolagem ocupa espaço: sem ela a tela "andaria" para o lado a cada diálogo.
+    const gap = window.innerWidth - root.clientWidth;
+    if (gap > 0) root.style.paddingRight = `${gap}px`;
+    root.style.overflow = "hidden";
+  }
+  let released = false;
   return () => {
+    if (released) return;
+    released = true;
     scrollLocks -= 1;
-    if (scrollLocks === 0) document.documentElement.style.overflow = "";
+    if (scrollLocks === 0) {
+      root.style.overflow = "";
+      root.style.paddingRight = "";
+    }
   };
 }
 
@@ -417,6 +498,13 @@ export function restoreFocus(el: Element | null) {
   if (el instanceof HTMLElement && el.isConnected && el !== document.body) el.focus({ preventScroll: true });
 }
 
+const DIALOG_WIDTH = { sm: "max-w-md", md: "max-w-lg", lg: "max-w-2xl", xl: "max-w-4xl" } as const;
+
+// Fundo opaco do rodapé (o conteúdo rola por baixo dele).
+const DIALOG_FOOTER =
+  "sticky bottom-0 z-10 flex flex-wrap items-center justify-end gap-2 rounded-b-2xl border-t border-line " +
+  "bg-[color-mix(in_srgb,var(--surface-2)_60%,var(--surface))] px-5 py-3";
+
 export function Dialog({
   open,
   onClose,
@@ -425,38 +513,65 @@ export function Dialog({
   children,
   footer,
   size = "md",
+  role = "dialog",
+  dirty = false,
+  busy = false,
 }: {
   open: boolean;
   onClose: () => void;
   title: React.ReactNode;
   description?: React.ReactNode;
-  children: React.ReactNode;
+  children?: React.ReactNode;
   footer?: React.ReactNode;
-  size?: "md" | "lg";
+  /** sm: confirmação; md: formulário curto; lg: formulário longo; xl: tabela ou editor largo. */
+  size?: "sm" | "md" | "lg" | "xl";
+  /** "alertdialog": confirmação que interrompe a tarefa (excluir, cancelar). */
+  role?: "dialog" | "alertdialog";
+  /** Formulário com alterações: clique fora, Esc e o X perguntam antes de descartar. */
+  dirty?: boolean;
+  /** Salvando: clique fora e Esc não fecham, e o X fica desabilitado. */
+  busy?: boolean;
 }) {
   const panel = useRef<HTMLDivElement>(null);
   const titleId = useId();
+  const descriptionId = useId();
   // Quem tinha o foco quando o diálogo abriu, lido no render: o autoFocus de um campo roda antes dos
   // efeitos e já teria levado o foco para dentro.
   const [opener, setOpener] = useState<Element | null>(null);
   const [wasOpen, setWasOpen] = useState(false);
+  const [askDiscard, setAskDiscard] = useState(false);
   if (open !== wasOpen) {
     setWasOpen(open);
     setOpener(open && typeof document !== "undefined" ? document.activeElement : null);
+    setAskDiscard(false);
   }
+  // A pergunta some sozinha se as alterações forem desfeitas.
+  const discarding = askDiscard && dirty;
+
+  const requestClose = () => {
+    if (busy) return;
+    if (dirty) setAskDiscard(true);
+    else onClose();
+  };
+
+  const onKey = useEffectEvent((e: KeyboardEvent) => {
+    const node = panel.current;
+    // Já tratado (busca, legenda, foto) ou com outra camada por cima: não é com este diálogo.
+    if (e.defaultPrevented || !node) return;
+    if (e.key === "Escape" && isTopLayer(node)) {
+      if (discarding) setAskDiscard(false);
+      else requestClose();
+    } else if (e.key === "Tab" && isTopLayer(node, false)) {
+      trapTab(e, node);
+    }
+  });
 
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      const node = panel.current;
-      // Já tratado (busca, legenda, foto) ou com outra camada por cima: não é com este diálogo.
-      if (e.defaultPrevented || !node) return;
-      if (e.key === "Escape" && isTopLayer(node)) onClose();
-      else if (e.key === "Tab" && isTopLayer(node, false)) trapTab(e, node);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+    const listener = (e: KeyboardEvent) => onKey(e);
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -470,52 +585,78 @@ export function Dialog({
   }, [open, opener]);
 
   if (!open) return null;
+  const hasBody = children !== undefined && children !== null && children !== false;
   // No <body>: fora das animações e recortes da página. Mesmo no <body>, o clique "sobe" pela árvore do
   // React até quem abriu o diálogo (ex.: a linha clicável de uma lista, que abriria a OS em página);
-  // o stopPropagation para o clique aqui.
+  // o stopPropagation para o clique aqui. Quem rola é o fundo; título e rodapé (Salvar) ficam grudados
+  // nas bordas da tela, então um formulário longo nunca esconde o Salvar nem o X.
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex animate-fade items-start justify-center overflow-y-auto bg-[rgb(9_11_15/0.42)] p-4 pt-[9vh] backdrop-blur-[3px]"
+      className="fixed inset-0 z-50 flex animate-fade items-start justify-center overflow-y-auto bg-[rgb(9_11_15/0.42)] p-4 pt-[6vh] pb-6 backdrop-blur-[3px]"
       onClick={(e) => e.stopPropagation()}
     >
       <div
         className="absolute inset-0"
         // Num duplo clique, o 2º clique (detail 2) cairia no fundo e fecharia o diálogo recém-aberto.
         onClick={(e) => {
-          if (e.detail <= 1) onClose();
+          if (e.detail <= 1) requestClose();
         }}
         aria-hidden
       />
       <div
         ref={panel}
-        role="dialog"
+        role={role}
         aria-modal="true"
         aria-labelledby={titleId}
+        aria-describedby={description ? descriptionId : undefined}
         tabIndex={-1}
         className={clsx(
           "relative w-full animate-pop rounded-2xl border border-line bg-surface shadow-pop outline-none",
-          size === "lg" ? "max-w-2xl" : "max-w-lg",
+          DIALOG_WIDTH[size],
         )}
       >
-        <div className="flex items-start justify-between gap-3 border-b border-line px-5 py-4">
+        <div
+          className={clsx(
+            "sticky top-0 z-10 flex items-start justify-between gap-3 rounded-t-2xl bg-surface px-5 py-4",
+            hasBody && "border-b border-line",
+            !hasBody && !footer && !discarding && "rounded-b-2xl",
+          )}
+        >
           <div className="min-w-0">
             <h2 id={titleId} className="text-base font-bold tracking-[-0.01em] text-ink">
               {title}
             </h2>
-            {description ? <div className="mt-1 text-sm text-ink-muted">{description}</div> : null}
+            {description ? (
+              <div id={descriptionId} className="mt-1 text-sm text-ink-muted">
+                {description}
+              </div>
+            ) : null}
           </div>
           <button
             type="button"
-            onClick={onClose}
-            className="-mt-0.5 -mr-1 rounded-lg p-1.5 text-ink-subtle transition-colors hover:bg-surface-2 hover:text-ink"
+            onClick={requestClose}
+            disabled={busy}
+            className="-mt-0.5 -mr-1 rounded-lg p-1.5 text-ink-subtle transition-colors hover:bg-surface-2 hover:text-ink disabled:pointer-events-none disabled:opacity-50"
             aria-label="Fechar"
           >
             <X className="size-4" />
           </button>
         </div>
-        <div className="px-5 py-4">{children}</div>
-        {footer ? (
-          <div className="flex justify-end gap-2 rounded-b-2xl border-t border-line bg-surface-2/50 px-5 py-3">{footer}</div>
+        {hasBody ? <div className="px-5 py-4">{children}</div> : null}
+        {discarding ? (
+          <div className={DIALOG_FOOTER}>
+            <p role="alert" className="mr-auto text-sm font-medium text-ink">
+              Há alterações não salvas.
+            </p>
+            <Button autoFocus onClick={() => setAskDiscard(false)}>
+              Continuar editando
+            </Button>
+            <Button variant="danger" onClick={onClose}>
+              Descartar
+            </Button>
+          </div>
+        ) : footer ? (
+          <div className={DIALOG_FOOTER}>{footer}</div>
         ) : null}
       </div>
     </div>,
@@ -523,30 +664,67 @@ export function Dialog({
   );
 }
 
-export function Table({ children }: { children: React.ReactNode }) {
+/**
+ * Tabela que rola para o lado em telas estreitas. Com `label`, a área de rolagem ganha nome e foco:
+ * dá para rolar pelo teclado até as colunas escondidas, e o leitor de tela distingue as tabelas da página.
+ */
+export function Table({ children, label }: { children: React.ReactNode; label?: string }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-left text-sm">{children}</table>
+    <div
+      className={clsx("overflow-x-auto", label && "focus-visible:-outline-offset-2")}
+      role={label ? "region" : undefined}
+      aria-label={label}
+      tabIndex={label ? 0 : undefined}
+    >
+      <table aria-label={label} className="w-full text-left text-sm">
+        {children}
+      </table>
     </div>
   );
 }
 
-export function Th({ children, className }: { children?: React.ReactNode; className?: string }) {
+type CellOptions = {
+  /** Coluna "Editar" presa à direita (padrão das listas). */
+  edit?: boolean;
+  /** Número: alinhado à direita, com algarismos de mesma largura. */
+  numeric?: boolean;
+};
+
+export function Th({
+  children,
+  className,
+  edit,
+  numeric,
+  scope = "col",
+  ...props
+}: React.ThHTMLAttributes<HTMLTableCellElement> & CellOptions) {
   return (
     <th
+      scope={scope}
       className={clsx(
         "border-b border-line bg-[var(--table-head)] px-3 py-2.5 text-[11px] font-bold tracking-[0.06em] whitespace-nowrap text-ink-muted uppercase first:pl-4 last:pr-4",
+        numeric && "text-right",
+        edit && "edit-col",
         className,
       )}
+      {...props}
     >
       {children}
     </th>
   );
 }
 
-export function Td({ children, className }: { children?: React.ReactNode; className?: string }) {
+export function Td({ children, className, edit, numeric, ...props }: React.TdHTMLAttributes<HTMLTableCellElement> & CellOptions) {
   return (
-    <td className={clsx("border-b border-line px-3 py-3 align-middle text-ink first:pl-4 last:pr-4", className)}>
+    <td
+      className={clsx(
+        "border-b border-line px-3 py-3 align-middle text-ink first:pl-4 last:pr-4",
+        numeric && "text-right tabular-nums",
+        edit && "edit-col",
+        className,
+      )}
+      {...props}
+    >
       {children}
     </td>
   );

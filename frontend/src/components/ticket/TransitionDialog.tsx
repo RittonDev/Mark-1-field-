@@ -1,16 +1,18 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { AlertTriangle, ClipboardList } from "lucide-react";
 import { useState } from "react";
 import { StatusBadge } from "@/components/badges";
 import { ConflictHint, ConflictList, scheduleConflicts } from "@/components/ScheduleConflict";
 import { useToast } from "@/components/Toaster";
-import { Button, Checkbox, Dialog, ErrorBox, Field, Input, Textarea } from "@/components/ui";
-import { ApiError, api, errorMessage } from "@/lib/api";
+import { Button, Dialog, ErrorBox, Field, Input, Textarea } from "@/components/ui";
+import { api, errorMessage } from "@/lib/api";
 import { STATUS, TRANSITION_ACTION } from "@/lib/constants";
 import { formatMinutes, fromLocalInput, toLocalInput } from "@/lib/format";
-import { type ViolationValues, ViolationFields } from "./ViolationFields";
-import type { ConflictItem, TicketDetail, TicketStatus, TicketTransitionPayload, UUID } from "@/lib/types";
+import { changedViolation, type ViolationValues, ViolationFields } from "./ViolationFields";
+import { busyTitle, isVersionConflict } from "./useConflictHandler";
+import type { ConflictItem, TicketDetail, TicketForm, TicketStatus, TicketTransitionPayload, UUID, ViolationReasonRef } from "@/lib/types";
 import { transitionRequirements } from "@/lib/workflow";
 
 export interface TransitionTarget {
@@ -27,36 +29,39 @@ export interface TransitionTarget {
   /** Só o detalhe tem: ao resolver uma OS que furou o prazo, pede o motivo de cada relógio. */
   response_breached?: boolean;
   resolution_breached?: boolean;
-  response_violation_reason?: { id: UUID } | null;
-  resolution_violation_reason?: { id: UUID } | null;
+  response_violation_reason?: ViolationReasonRef | null;
+  resolution_violation_reason?: ViolationReasonRef | null;
   violation_note?: string | null;
   /** Só o detalhe tem: numa OS reaberta, a solução anterior já vem preenchida para ajustar. */
   resolution_notes?: string | null;
+  /** Só o detalhe tem: o que ainda trava a conclusão (formulários obrigatórios e assinatura). */
+  forms?: TicketForm[];
+  signature_required?: boolean;
+  signed_at?: string | null;
 }
 
-function currentPosition(): Promise<{ latitude: number; longitude: number } | null> {
-  if (typeof navigator === "undefined" || !navigator.geolocation) return Promise.resolve(null);
-  return new Promise((resolve) => {
-    navigator.geolocation.getCurrentPosition(
-      (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
-      () => resolve(null),
-      { enableHighAccuracy: true, timeout: 8000, maximumAge: 60_000 },
-    );
-  });
-}
+/** Texto do destino quando o de STATUS não diz o que acontece com a OS. */
+const WHAT_HAPPENS: Partial<Record<TicketStatus, string>> = {
+  closed: "A OS sai das filas; o relatório do cliente mostra o resultado final.",
+  reopened: "A OS volta para a fila; as datas de conclusão, fechamento e cancelamento são apagadas.",
+};
 
 /**
- * Confirma a mudança de status pedindo só o que o destino exige
- * (agenda, solução, motivo). Monte com `key={destino}` para zerar o formulário.
+ * Confirma a mudança de status pedindo só o que o destino exige (agenda, solução, motivo). Monte
+ * com `key={destino}` para zerar o formulário. Na web quem muda é a central: a localização do
+ * navegador nunca vai junto (o ponto de GPS da OS é a prova de presença do técnico, pelo app).
  */
 export function TransitionDialog({
   ticket,
   to,
   onClose,
+  onOpenForms,
 }: {
   ticket: TransitionTarget;
   to: TicketStatus;
   onClose: () => void;
+  /** Leva para a aba Formulários quando eles travam a conclusão (no editor da OS). */
+  onOpenForms?: () => void;
 }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -67,19 +72,26 @@ export function TransitionDialog({
   // Fim em branco por padrão: num reagendamento, o fim antigo ficaria antes do novo início.
   // Em branco, a API usa início + duração estimada.
   const [end, setEnd] = useState("");
-  const [shareLocation, setShareLocation] = useState(req.offersLocation);
   const [localError, setLocalError] = useState<string | null>(null);
   // A API barrou por conflito de agenda: mostra as OS em choque e o próximo envio confirma.
   const [conflicts, setConflicts] = useState<ConflictItem[] | null>(null);
   const askViolation = req.needsResolution && Boolean(ticket.response_breached || ticket.resolution_breached);
+  const currentViolation = { response: ticket.response_violation_reason, resolution: ticket.resolution_violation_reason };
   const [violation, setViolation] = useState<ViolationValues>({
     response: ticket.response_violation_reason?.id ?? "",
     resolution: ticket.resolution_violation_reason?.id ?? "",
     note: ticket.violation_note ?? "",
   });
+  // Concluir exige os formulários obrigatórios concluídos e, se pedida, a assinatura (a API barra).
+  const closing = (to === "resolved" || to === "closed") && ticket.status !== "resolved" && ticket.status !== "closed";
+  const pendingForms = closing ? (ticket.forms ?? []).filter((f) => f.required && f.status !== "completed").map((f) => f.name) : [];
+  const missingSignature = closing && Boolean(ticket.signature_required) && !ticket.signed_at;
+  const blocked = pendingForms.length > 0 || missingSignature;
+  // Sem técnico, quem confirma (analista) vira o responsável pela visita.
+  const selfAssign = STATUS[to].requiresAssignee && !ticket.assignee;
 
   const mutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: () => {
       const payload: TicketTransitionPayload = {
         to_status: to,
         note: note.trim() || null,
@@ -87,18 +99,15 @@ export function TransitionDialog({
       };
       if (req.needsResolution) payload.resolution_notes = resolution.trim();
       if (askViolation) {
-        if (ticket.response_breached) payload.response_violation_reason_id = violation.response || null;
-        if (ticket.resolution_breached) payload.resolution_violation_reason_id = violation.resolution || null;
+        const changed = changedViolation(violation, currentViolation);
+        if (ticket.response_breached) payload.response_violation_reason_id = changed.response;
+        if (ticket.resolution_breached) payload.resolution_violation_reason_id = changed.resolution;
         payload.violation_note = violation.note.trim() || null;
       }
       if (req.needsSchedule) {
         payload.scheduled_start = fromLocalInput(start);
         payload.scheduled_end = fromLocalInput(end);
         if (conflicts) payload.allow_conflict = true;
-      }
-      if (req.offersLocation && shareLocation) {
-        const pos = await currentPosition();
-        if (pos) Object.assign(payload, pos);
       }
       return api.post<TicketDetail>(`/tickets/${ticket.id}/transition`, payload);
     },
@@ -116,7 +125,7 @@ export function TransitionDialog({
         setConflicts(clash);
         return;
       }
-      if (error instanceof ApiError && error.status === 409) {
+      if (isVersionConflict(error)) {
         queryClient.invalidateQueries({ queryKey: ["ticket", ticket.id] });
         queryClient.invalidateQueries({ queryKey: ["tickets"] });
         toast({
@@ -132,6 +141,7 @@ export function TransitionDialog({
   function submit(e: React.FormEvent) {
     e.preventDefault();
     setLocalError(null);
+    if (blocked) return;
     if (req.needsSchedule && !start) return setLocalError("Informe a data e hora da visita.");
     if (req.needsResolution && !resolution.trim()) return setLocalError("Descreva a solução aplicada.");
     if (req.needsNote && !note.trim()) return setLocalError("Informe o motivo.");
@@ -159,16 +169,45 @@ export function TransitionDialog({
           <Button
             variant={to === "cancelled" ? "danger" : "primary"}
             loading={mutation.isPending}
+            disabled={blocked}
             type="submit"
             form="transition-form"
           >
-            {conflicts ? "Agendar mesmo assim" : "Confirmar"}
+            {conflicts ? "Agendar mesmo assim" : TRANSITION_ACTION[to]}
           </Button>
         </>
       }
     >
       <form id="transition-form" onSubmit={submit} className="flex flex-col gap-4">
-        <p className="text-sm text-ink-muted">{STATUS[to].description}</p>
+        <p className="text-sm text-ink-muted">{WHAT_HAPPENS[to] ?? STATUS[to].description}</p>
+        {blocked ? (
+          <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200">
+            <p className="flex items-center gap-1.5 font-semibold">
+              <ClipboardList className="size-4 shrink-0" />
+              Falta para concluir a OS
+            </p>
+            <ul className="mt-1 list-disc space-y-0.5 pl-5">
+              {pendingForms.map((name) => (
+                <li key={name}>Formulário obrigatório: {name}</li>
+              ))}
+              {missingSignature ? <li>Assinatura do responsável no local</li> : null}
+            </ul>
+            {onOpenForms && pendingForms.length ? (
+              <button type="button" onClick={onOpenForms} className="mt-1.5 text-xs font-semibold underline underline-offset-2">
+                Preencher na aba Formulários
+              </button>
+            ) : (
+              <p className="mt-1.5 text-xs">Preencha na aba Formulários da OS.</p>
+            )}
+          </div>
+        ) : null}
+        {selfAssign && !blocked ? (
+          <p className="flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200">
+            <AlertTriangle className="mt-px size-3.5 shrink-0" />
+            Esta OS está sem técnico: ao confirmar, você fica como responsável pela visita. Para pôr um técnico, escolha o
+            Colaborador na aba Geral.
+          </p>
+        ) : null}
         {req.needsSchedule ? (
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Início da visita" required>
@@ -206,7 +245,7 @@ export function TransitionDialog({
           <ConflictList
             tone="error"
             items={conflicts}
-            title={`${ticket.assignee?.name ?? "O técnico"} já está ocupado neste horário. Confirme para agendar mesmo assim.`}
+            title={`${busyTitle(conflicts, ticket.assignee?.name ?? "O técnico")}. Confirme para agendar mesmo assim.`}
           />
         ) : req.needsSchedule && start ? (
           <ConflictHint
@@ -219,13 +258,14 @@ export function TransitionDialog({
           />
         ) : null}
         {req.needsResolution ? (
-          <Field label="Solução aplicada" required hint="Fica visível para o solicitante e no histórico da OS.">
+          <Field label="Solução aplicada" required hint="Aparece no relatório do cliente e no histórico da OS.">
             <Textarea
               value={resolution}
               onChange={(e) => setResolution(e.target.value)}
               rows={4}
+              maxLength={20000}
               placeholder="O que foi feito para resolver?"
-              autoFocus
+              autoFocus={!blocked}
             />
           </Field>
         ) : null}
@@ -235,25 +275,20 @@ export function TransitionDialog({
             resolutionBreached={Boolean(ticket.resolution_breached)}
             values={violation}
             onChange={setViolation}
+            current={currentViolation}
             required
           />
         ) : null}
-        <Field label={req.needsNote ? "Motivo" : "Observação"} required={req.needsNote}>
+        <Field label={req.needsNote ? "Motivo" : "Observação"} required={req.needsNote} hint="Fica no histórico da OS.">
           <Textarea
             value={note}
             onChange={(e) => setNote(e.target.value)}
             rows={3}
+            maxLength={5000}
             placeholder={req.needsNote ? "Explique o motivo" : "Opcional"}
-            autoFocus={!req.needsResolution && !req.needsSchedule}
+            autoFocus={!blocked && !req.needsResolution && !req.needsSchedule}
           />
         </Field>
-        {req.offersLocation ? (
-          <Checkbox
-            label="Registrar minha localização (check-in de campo)"
-            checked={shareLocation}
-            onChange={setShareLocation}
-          />
-        ) : null}
         {error ? <ErrorBox message={error} /> : null}
       </form>
     </Dialog>

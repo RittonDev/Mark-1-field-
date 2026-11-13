@@ -2,7 +2,8 @@
 
 import clsx from "clsx";
 import { Check, MapPinned, MessageCircle, Plus, Star, UserPlus, X } from "lucide-react";
-import { Skeleton } from "@/components/ui";
+import { Button, ErrorBox, Skeleton } from "@/components/ui";
+import { errorMessage } from "@/lib/api";
 import { formatDate, initials } from "@/lib/format";
 import { whatsappUrl } from "@/lib/whatsapp";
 import type { TechnicianSuggestion, UUID } from "@/lib/types";
@@ -16,6 +17,10 @@ const SHOWN_AS_NUMBERS = [
   /OS em aberto$/,
   /^Atendeu esta loja/,
 ];
+
+// Botões de cada cartão (Convidar, Responsável, Junto), com o foco visível do sistema.
+const ACTION =
+  "inline-flex h-7 items-center justify-center gap-1 rounded-lg px-2.5 text-xs font-medium transition-colors focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none";
 
 function km(value: number | null) {
   if (value == null) return null;
@@ -34,6 +39,8 @@ export function SuggestedTechnicians({
   onAssign,
   onToggleHelper,
   invite,
+  error,
+  onRetry,
 }: {
   items: TechnicianSuggestion[] | undefined;
   loading: boolean;
@@ -45,13 +52,28 @@ export function SuggestedTechnicians({
   onToggleHelper: (t: TechnicianSuggestion) => void;
   /** Texto do convite pelo WhatsApp (a central chama o técnico parceiro e, se ele topar, coloca na OS). */
   invite?: (t: TechnicianSuggestion) => string;
+  /** Falha ao buscar as sugestões (não é o mesmo que "nenhum técnico na região"). */
+  error?: unknown;
+  onRetry?: () => void;
 }) {
   if (!hasPlace) {
     return (
       <p className="flex items-center gap-2 rounded-lg border border-dashed border-line-strong px-3 py-3 text-xs text-ink-muted">
-        <MapPinned className="size-4 shrink-0 text-ink-subtle" />
+        <MapPinned aria-hidden className="size-4 shrink-0 text-ink-subtle" />
         Escolha a loja para ver os técnicos mais indicados para ela.
       </p>
+    );
+  }
+  if (error && !items?.length) {
+    return (
+      <div className="flex flex-col items-start gap-2">
+        <ErrorBox message={`Não deu para buscar os técnicos indicados: ${errorMessage(error)}`} />
+        {onRetry ? (
+          <Button size="sm" onClick={onRetry}>
+            Tentar de novo
+          </Button>
+        ) : null}
+      </div>
     );
   }
   if (loading && !items) {
@@ -64,7 +86,11 @@ export function SuggestedTechnicians({
     );
   }
   if (!items?.length) {
-    return <p className="rounded-lg bg-surface-2 px-3 py-3 text-xs text-ink-muted">Nenhum técnico ativo encontrado para esta região.</p>;
+    return (
+      <p className="rounded-lg bg-surface-2 px-3 py-3 text-xs text-ink-muted">
+        Nenhum técnico ativo encontrado para esta região. Use “Copiar convite para o grupo” para chamar um parceiro no WhatsApp.
+      </p>
+    );
   }
 
   return (
@@ -87,15 +113,16 @@ export function SuggestedTechnicians({
               isAssignee
                 ? "border-brand/50 bg-brand-soft/60 dark:bg-brand/10"
                 : isHelper
-                  ? "border-emerald-300/70 bg-emerald-50/60 dark:border-emerald-500/30 dark:bg-emerald-500/10"
+                  ? "border-brand/30 bg-brand-soft/40 dark:bg-brand/5"
                   : "border-line bg-surface hover:border-line-strong",
             )}
           >
             <span className="relative mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full bg-surface-3 text-xs font-semibold text-ink-muted">
               {initials(t.name)}
               {i === 0 && !isAssignee ? (
-                <span className="absolute -top-1 -right-1 flex size-4 items-center justify-center rounded-full bg-brand text-white" title="Mais indicado">
-                  <Star className="size-2.5 fill-current" />
+                <span className="absolute -top-1 -right-1 flex size-4 items-center justify-center rounded-full bg-brand text-white dark:bg-brand-strong" title="Mais indicado">
+                  <Star aria-hidden className="size-2.5 fill-current" />
+                  <span className="sr-only">Mais indicado</span>
                 </span>
               ) : null}
             </span>
@@ -106,15 +133,19 @@ export function SuggestedTechnicians({
                   <span
                     className={clsx(
                       "rounded-full px-1.5 py-px text-[11px] font-medium",
-                      t.busy
-                        ? "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300"
-                        : "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300",
+                      // Cor só para o problema: livre no horário é o esperado.
+                      t.busy ? "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300" : "bg-surface-2 text-ink-muted",
                     )}
                   >
                     {t.busy ? "Ocupado no horário" : "Livre no horário"}
                   </span>
                 ) : null}
-                {t.on_shift ? <span className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400">● em turno</span> : null}
+                {t.on_shift ? (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-medium text-ink-muted">
+                    <span aria-hidden className="size-1.5 rounded-full bg-ink-subtle" />
+                    em turno
+                  </span>
+                ) : null}
               </p>
               <p className="mt-0.5 text-xs text-ink-muted">
                 {facts.join(" · ")}
@@ -136,14 +167,15 @@ export function SuggestedTechnicians({
                   href={whatsappUrl(t.phone, invite(t))}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex h-7 items-center justify-center gap-1 rounded-lg border border-line bg-surface px-2.5 text-xs font-medium text-ink transition-colors hover:border-emerald-500 hover:text-emerald-700 dark:hover:text-emerald-300"
+                  className={clsx(ACTION, "border border-line bg-surface text-ink hover:border-line-strong hover:bg-surface-2")}
+                  aria-label={`Convidar ${t.name} pelo WhatsApp`}
                   title={
                     t.phone
                       ? `Convidar ${t.name} pelo WhatsApp: se topar, ponha como responsável`
                       : `${t.name} está sem telefone no cadastro: o WhatsApp abre para você escolher o contato`
                   }
                 >
-                  <MessageCircle className="size-3.5" />
+                  <MessageCircle aria-hidden className="size-3.5" />
                   Convidar
                 </a>
               ) : null}
@@ -151,13 +183,16 @@ export function SuggestedTechnicians({
                 type="button"
                 onClick={() => onAssign(isAssignee ? null : t)}
                 aria-pressed={isAssignee}
+                aria-label={isAssignee ? `Tirar ${t.name} de responsável` : `Definir ${t.name} como responsável`}
                 className={clsx(
-                  "inline-flex h-7 items-center justify-center gap-1 rounded-lg px-2.5 text-xs font-medium transition-colors",
-                  isAssignee ? "bg-brand text-white hover:bg-brand-ink" : "border border-line bg-surface text-ink hover:border-brand hover:text-brand",
+                  ACTION,
+                  isAssignee
+                    ? "bg-brand text-white hover:bg-brand-strong dark:bg-brand-strong dark:hover:bg-brand-strong/85"
+                    : "border border-line bg-surface text-ink hover:border-brand hover:text-brand-ink",
                 )}
                 title={isAssignee ? "Tirar como responsável" : "Definir como técnico responsável"}
               >
-                {isAssignee ? <Check className="size-3.5" /> : null}
+                {isAssignee ? <Check aria-hidden className="size-3.5" /> : null}
                 Responsável
               </button>
               {!isAssignee ? (
@@ -165,15 +200,16 @@ export function SuggestedTechnicians({
                   type="button"
                   onClick={() => onToggleHelper(t)}
                   aria-pressed={isHelper}
+                  aria-label={isHelper ? `Tirar ${t.name} da visita` : `Incluir ${t.name} na visita`}
                   className={clsx(
-                    "inline-flex h-7 items-center justify-center gap-1 rounded-lg px-2.5 text-xs font-medium transition-colors",
+                    ACTION,
                     isHelper
-                      ? "bg-emerald-600 text-white hover:bg-emerald-700"
-                      : "border border-line bg-surface text-ink-muted hover:border-emerald-500 hover:text-emerald-700 dark:hover:text-emerald-300",
+                      ? "border border-brand/40 bg-brand-soft text-brand-ink hover:border-brand/60"
+                      : "border border-line bg-surface text-ink-muted hover:border-line-strong hover:text-ink",
                   )}
                   title={isHelper ? "Tirar da visita" : "Incluir como outro técnico da visita"}
                 >
-                  {isHelper ? <X className="size-3.5" /> : <Plus className="size-3.5" />}
+                  {isHelper ? <X aria-hidden className="size-3.5" /> : <Plus aria-hidden className="size-3.5" />}
                   Junto
                 </button>
               ) : null}
@@ -206,22 +242,23 @@ export function HelpersField({
   return (
     <div className="flex flex-col gap-1.5">
       {hideLabel ? null : <span className="text-xs font-semibold text-ink/80">Outros técnicos da visita</span>}
-      <div className="flex min-h-10 flex-wrap items-center gap-1.5 rounded-lg border border-line bg-surface px-2 py-1.5">
+      {/* O foco no seletor aparece no contorno da caixa toda (o seletor em si não tem borda). */}
+      <div className="flex min-h-10 flex-wrap items-center gap-1.5 rounded-lg border border-line bg-surface px-2 py-1.5 transition-[border-color,box-shadow] focus-within:border-brand focus-within:ring-4 focus-within:ring-brand/15">
         {helperIds.map((id) => (
-          <span key={id} className="inline-flex animate-pop items-center gap-1 rounded-md bg-emerald-50 py-0.5 pr-1 pl-2 text-xs font-medium text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-200">
+          <span key={id} className="inline-flex animate-pop items-center gap-1 rounded-md bg-brand-soft py-0.5 pr-1 pl-2 text-xs font-medium text-brand-ink">
             {names[id] ?? "Técnico"}
             <button
               type="button"
               onClick={() => onChange(helperIds.filter((h) => h !== id))}
-              className="rounded p-0.5 hover:bg-emerald-100 dark:hover:bg-emerald-500/20"
+              className="rounded p-0.5 hover:bg-brand/15"
               aria-label={`Tirar ${names[id] ?? "técnico"} da visita`}
             >
-              <X className="size-3" />
+              <X aria-hidden className="size-3" />
             </button>
           </span>
         ))}
         <span className="relative inline-flex min-w-40 flex-1 items-center">
-          <UserPlus className="pointer-events-none absolute left-1.5 size-3.5 text-ink-subtle" />
+          <UserPlus aria-hidden className="pointer-events-none absolute left-1.5 size-3.5 text-ink-subtle" />
           <select
             value=""
             onChange={(e) => {

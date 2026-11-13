@@ -20,7 +20,10 @@ const GPS_TIMEOUT_MS = 12_000;
  * Sem permissão ou sem sinal, devolve null e a ação segue sem coordenadas.
  */
 export async function currentPosition(): Promise<Position | null> {
-  if (Platform.OS === "web") return browserPosition();
+  if (Platform.OS === "web") {
+    const position = await browserPosition();
+    return position ? { latitude: position.latitude, longitude: position.longitude } : null;
+  }
   try {
     const permission = await Location.requestForegroundPermissionsAsync();
     if (!permission.granted) return null;
@@ -37,15 +40,82 @@ export async function currentPosition(): Promise<Position | null> {
 }
 
 /** Pré-visualização web: geolocalização do navegador (pede permissão na primeira vez). */
-function browserPosition(): Promise<Position | null> {
+function browserPosition(timeout = GPS_TIMEOUT_MS): Promise<(Position & { accuracy: number | null }) | null> {
   if (typeof navigator === "undefined" || !navigator.geolocation) return Promise.resolve(null);
   return new Promise((resolve) => {
     navigator.geolocation.getCurrentPosition(
-      (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
+      (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude, accuracy: pos.coords.accuracy ?? null }),
       () => resolve(null),
-      { enableHighAccuracy: true, timeout: GPS_TIMEOUT_MS, maximumAge: 5 * 60_000 },
+      { enableHighAccuracy: true, timeout, maximumAge: 5 * 60_000 },
     );
   });
+}
+
+/** Posição para registrar uma ação da OS: pronta, sem permissão ou sem sinal de GPS. */
+export type PositionFix =
+  | { status: "ok"; latitude: number; longitude: number; accuracy: number | null }
+  | { status: "denied" }
+  | { status: "unavailable" };
+
+const QUICK_TIMEOUT_MS = 6_000;
+
+function fixOf(position: Location.LocationObject): PositionFix {
+  const { latitude, longitude, accuracy } = position.coords;
+  return { status: "ok", latitude, longitude, accuracy: accuracy ?? null };
+}
+
+/** Última posição conhecida (sem esperar o GPS). */
+async function lastKnown(maxAge: number, requiredAccuracy?: number): Promise<PositionFix | null> {
+  const position = await Location.getLastKnownPositionAsync({ maxAge, requiredAccuracy }).catch(() => null);
+  return position ? fixOf(position) : null;
+}
+
+/**
+ * Posição rápida para saída, chegada, conclusão, visita improdutiva e assinatura: usa a última
+ * posição recente (até 2 min, ±150 m) na hora; senão pede uma leitura equilibrada por até 6 s; no fim
+ * aceita a última de até 10 min. Dentro de loja ou subsolo não prende o técnico esperando o GPS.
+ * Só pede a permissão quando o técnico ainda não decidiu (quem negou recebe o atalho "Permitir").
+ * A coleta da jornada continua com `currentPosition`.
+ */
+export async function quickPosition(): Promise<PositionFix> {
+  if (Platform.OS === "web") {
+    const position = await browserPosition(QUICK_TIMEOUT_MS);
+    return position ? { status: "ok", ...position } : { status: "unavailable" };
+  }
+  try {
+    let permission = await Location.getForegroundPermissionsAsync();
+    if (!permission.granted && permission.status === Location.PermissionStatus.UNDETERMINED) {
+      permission = await Location.requestForegroundPermissionsAsync();
+    }
+    if (!permission.granted) return { status: "denied" };
+    const recent = await lastKnown(120_000, 150);
+    if (recent) return recent;
+    const current = await Promise.race([
+      Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }).then(fixOf, () => null),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), QUICK_TIMEOUT_MS)),
+    ]);
+    return current ?? (await lastKnown(10 * 60_000)) ?? { status: "unavailable" };
+  } catch {
+    // GPS desligado ou serviço indisponível: a última posição conhecida ainda serve.
+    return (await lastKnown(10 * 60_000)) ?? { status: "unavailable" };
+  }
+}
+
+/**
+ * "Permitir" a localização: pede de novo quando o sistema ainda deixa; senão abre as configurações
+ * do app. Devolve true se a permissão ficou concedida.
+ */
+export async function requestLocationPermission(): Promise<boolean> {
+  if (Platform.OS === "web") return true;
+  try {
+    const current = await Location.getForegroundPermissionsAsync();
+    if (current.granted) return true;
+    if (current.canAskAgain) return (await Location.requestForegroundPermissionsAsync()).granted;
+  } catch {
+    // segue para as configurações
+  }
+  await Linking.openSettings().catch(() => undefined);
+  return false;
 }
 
 /**
