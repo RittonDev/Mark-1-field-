@@ -80,6 +80,29 @@ async def test_extra_costs(client: AsyncClient, world: World) -> None:
     assert [i["id"] for i in pending["items"]] == [eid]
 
 
+async def test_mark_paid_only_approved(client: AsyncClient, world: World) -> None:
+    """Lista desatualizada: só o aprovado vira reembolsado; pendente e rejeitado não mudam."""
+    an = world.analyst.headers
+    url = f"{API}/tickets/{(await create(client, world))['id']}/expenses"
+    ids: dict[str, str] = {}
+    for status in ("approved", "pending", "rejected"):
+        body = {"kind": "toll", "description": "Pedágio", "quantity": 1, "unit_value": 10}
+        r = await client.post(url, json={**body, "status": status}, headers=an)
+        assert r.status_code == 201, r.text
+        ids[status] = r.json()["id"]
+
+    mark = f"{API}/expenses/mark-paid"
+    paid = await client.post(mark, json={"ids": list(ids.values())}, headers=an)
+    assert paid.json() == {"updated": 1}  # conta só os marcados
+    after = {e["id"]: e for e in (await client.get(url, headers=an)).json()}
+    assert after[ids["approved"]]["status"] == "paid" and after[ids["approved"]]["paid_at"]
+    for status in ("pending", "rejected"):
+        assert (after[ids[status]]["status"], after[ids[status]]["paid_at"]) == (status, None)
+    # Já reembolsado não é marcado de novo.
+    again = await client.post(mark, json={"ids": [ids["approved"]]}, headers=an)
+    assert again.json() == {"updated": 0}
+
+
 async def test_requester_never_sees_costs(client: AsyncClient, world: World) -> None:
     r = await client.post(
         f"{API}/portal/requests",

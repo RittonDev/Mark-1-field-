@@ -144,13 +144,14 @@ export default function PublicQuotePage() {
             <span className="flex size-12 items-center justify-center rounded-2xl bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400">
               <FileWarning className="size-6" />
             </span>
-            <p className="text-base font-bold text-ink">Orçamento indisponível</p>
+            <h1 className="text-base font-bold text-ink">Orçamento indisponível</h1>
             <p className="text-sm text-ink-muted">{gone}</p>
           </div>
         ) : !quote ? (
           <QuoteSkeleton />
         ) : (
           <article className="animate-rise overflow-hidden rounded-2xl border border-line bg-surface shadow-elev-2 print:rounded-none print:border-0 print:shadow-none">
+            <h1 className="sr-only">Orçamento {quote.code} · {quote.title}</h1>
             {/* Empresa e números */}
             <div className="flex flex-wrap items-start justify-between gap-6 px-6 py-6 sm:px-8">
               <div className="flex min-w-0 items-start gap-4">

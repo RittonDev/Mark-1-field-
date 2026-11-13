@@ -5,12 +5,10 @@ import {
   BadgeCheck,
   CalendarDays,
   CheckCircle2,
-  ClipboardCheck,
   Clock3,
   Download,
   FileWarning,
   Flag,
-  Images,
   Loader2,
   MapPin,
   PenLine,
@@ -211,7 +209,7 @@ export default function PublicReportPage() {
             <span className="flex size-12 items-center justify-center rounded-2xl bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400">
               <FileWarning className="size-6" />
             </span>
-            <p className="text-base font-bold text-ink">{problem.title}</p>
+            <h1 className="text-base font-bold text-ink">{problem.title}</h1>
             <p className="text-sm text-ink-muted">{problem.text}</p>
           </div>
         ) : !report ? (
@@ -412,10 +410,7 @@ export default function PublicReportPage() {
             {report.forms.map((form) => (
               <section key={form.name} className="border-t border-line px-6 py-6 sm:px-8">
                 <SectionHead aside={form.completed_at ? `Preenchido em ${formatDateTime(form.completed_at)}` : null}>
-                  <span className="inline-flex items-center gap-2">
-                    <ClipboardCheck className="size-4 text-brand" />
-                    {form.name}
-                  </span>
+                  {form.name}
                 </SectionHead>
                 <dl className="divide-y divide-line rounded-xl border border-line">
                   {form.items.map((item, i) =>
@@ -446,24 +441,14 @@ export default function PublicReportPage() {
 
             {report.photos.length ? (
               <section className="border-t border-line px-6 py-6 sm:px-8">
-                <SectionHead>
-                  <span className="inline-flex items-center gap-2">
-                    <Images className="size-4 text-brand" />
-                    Evidências ({report.photos.length + formPhotos} fotos)
-                  </span>
-                </SectionHead>
+                <SectionHead>Evidências ({report.photos.length + formPhotos} fotos)</SectionHead>
                 <PhotoGrid photos={report.photos} onOpen={setZoom} />
               </section>
             ) : null}
 
             {report.signature ? (
               <section className="border-t border-line px-6 py-6 sm:px-8 print:break-inside-avoid">
-                <SectionHead>
-                  <span className="inline-flex items-center gap-2">
-                    <PenLine className="size-4 text-brand" />
-                    Assinatura do responsável no local
-                  </span>
-                </SectionHead>
+                <SectionHead>Assinatura do responsável no local</SectionHead>
                 <div className="flex flex-wrap items-end gap-6">
                   <div className="rounded-xl border border-line bg-white px-6 py-3">
                     {report.signature.image_url ? (

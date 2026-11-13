@@ -14,11 +14,13 @@ import {
   User as UserIcon,
   Wrench,
 } from "lucide-react";
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { type GridColumn, MonthView, TimeGrid } from "@/components/calendar/CalendarViews";
 import { PriorityBadge, StatusBadge } from "@/components/badges";
-import { TicketEditorDialog } from "@/components/ticket/editor/TicketEditorDialog";
-import { Button, Card, Checkbox, Dialog, ErrorBox, Field, Input, PageHeader, SectionTitle, Select } from "@/components/ui";
+import { isPlainClick } from "@/components/ticket/TicketLink";
+import { useTicketPanel } from "@/components/ticket/TicketPanel";
+import { Button, buttonClassName, Card, Checkbox, Dialog, ErrorBox, Field, Input, PageHeader, SectionTitle, Select } from "@/components/ui";
 import { errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import {
@@ -62,7 +64,7 @@ export default function AgendaPage() {
   const [showFilters, setShowFilters] = useState(false);
   const [opened, setOpened] = useState<CalendarEvent | null>(null);
   // "Abrir OS" fecha a prévia e abre a OS no painel lateral, com o calendário à vista.
-  const [panelId, setPanelId] = useState<string | null>(null);
+  const ticketPanel = useTicketPanel();
   const city = useDebounced(cityInput.trim());
 
   const technicians = useUsers({ role: "technician" });
@@ -349,14 +351,17 @@ export default function AgendaPage() {
           related={opened.conflict_with.map((id) => byId.get(id)).filter((e): e is CalendarEvent => !!e)}
           color={(opened.assignee && colors.get(opened.assignee.id)) || UNASSIGNED_COLOR}
           onOpen={setOpened}
-          onOpenTicket={(id) => {
-            setOpened(null);
-            setPanelId(id);
-          }}
+          onOpenTicket={
+            ticketPanel
+              ? (id) => {
+                  setOpened(null);
+                  ticketPanel.open(id);
+                }
+              : undefined
+          }
           onClose={() => setOpened(null)}
         />
       ) : null}
-      {panelId ? <TicketEditorDialog key={panelId} ticketId={panelId} onClose={() => setPanelId(null)} /> : null}
     </div>
   );
 }
@@ -455,7 +460,8 @@ function EventDialog({
   related: CalendarEvent[];
   color: string;
   onOpen: (event: CalendarEvent) => void;
-  onOpenTicket: (ticketId: string) => void;
+  /** Abre a OS no painel lateral; sem ele, "Abrir OS" vai para a página da OS. */
+  onOpenTicket?: (ticketId: string) => void;
   onClose: () => void;
 }) {
   const start = new Date(event.start);
@@ -474,10 +480,19 @@ function EventDialog({
       footer={
         <>
           <Button onClick={onClose}>Fechar</Button>
-          <Button variant="primary" onClick={() => onOpenTicket(event.id)}>
+          {/* Link de verdade: clique abre no painel; Ctrl+clique ou botão do meio, a página em outra aba. */}
+          <Link
+            href={`/chamados/${event.id}`}
+            className={buttonClassName("primary")}
+            onClick={(e) => {
+              if (!onOpenTicket || !isPlainClick(e)) return;
+              e.preventDefault();
+              onOpenTicket(event.id);
+            }}
+          >
             <PanelRightOpen className="size-4" />
             Abrir OS
-          </Button>
+          </Link>
         </>
       }
     >

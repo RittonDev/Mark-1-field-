@@ -161,12 +161,20 @@ async def remove(db: AsyncSession, ticket: Ticket, expense: TicketExpense, actor
 
 
 async def mark_paid(db: AsyncSession, ids: list[uuid.UUID], actor: User) -> int:
+    """Reembolsa só os custos aprovados; os demais ids (lista desatualizada) ficam como estão.
+
+    Devolve quantos foram marcados.
+    """
     _require_manager(actor)
-    expenses = list(await db.scalars(select(TicketExpense).where(TicketExpense.id.in_(ids))))
+    expenses = list(
+        await db.scalars(
+            select(TicketExpense).where(
+                TicketExpense.id.in_(ids), TicketExpense.status == ExpenseStatus.APPROVED
+            )
+        )
+    )
     now = utcnow()
     for expense in expenses:
-        if expense.status == ExpenseStatus.REJECTED:
-            continue
         expense.status = ExpenseStatus.PAID
         expense.paid_at = now
     await db.flush()

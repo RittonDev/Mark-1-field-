@@ -180,7 +180,7 @@ export default function LocationDetailPage() {
 
         <aside className="flex flex-col gap-5">
           <Card className="p-5">
-            <SectionTitle className="mb-2">Endereço</SectionTitle>
+            <SectionTitle as="h2" className="mb-2">Endereço</SectionTitle>
             <p className="text-sm text-ink-muted">{address || "Sem endereço cadastrado."}</p>
             {!hasCoords ? (
               <p className="mt-2 flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
@@ -195,13 +195,13 @@ export default function LocationDetailPage() {
           </Card>
 
           <Card className="p-5">
-            <SectionTitle className="mb-3">Contatos da loja</SectionTitle>
+            <SectionTitle as="h2" className="mb-3">Contatos da loja</SectionTitle>
             <ContactList contacts={contacts} />
           </Card>
 
           {l.notes ? (
             <Card className="p-5">
-              <SectionTitle className="mb-2">Observações</SectionTitle>
+              <SectionTitle as="h2" className="mb-2">Observações</SectionTitle>
               <p className="text-sm whitespace-pre-wrap text-ink-muted">{l.notes}</p>
             </Card>
           ) : null}

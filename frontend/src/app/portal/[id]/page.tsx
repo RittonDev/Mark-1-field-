@@ -162,7 +162,7 @@ export default function PortalRequestPage() {
           </Card>
 
           <Card className="p-5">
-            <SectionTitle className="mb-2">O que aconteceu</SectionTitle>
+            <SectionTitle as="h2" className="mb-2">O que aconteceu</SectionTitle>
             <p className="text-sm leading-relaxed whitespace-pre-line text-ink">{r.description || r.title}</p>
           </Card>
 
@@ -177,7 +177,7 @@ export default function PortalRequestPage() {
         </div>
 
         <Card className="h-fit p-5">
-          <SectionTitle className="mb-3">Andamento</SectionTitle>
+          <SectionTitle as="h2" className="mb-3">Andamento</SectionTitle>
           <ol className="relative flex flex-col gap-4">
             {r.timeline.map((entry, i) => {
               const last = i === r.timeline.length - 1;

@@ -83,8 +83,8 @@ export default function ProjectPage() {
         ))}
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_20rem]">
-        <Card>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
+        <Card className="min-w-0">
           <CardHeader title="OS do projeto" />
           {tickets.isLoading ? (
             <LoadingBlock />
@@ -122,7 +122,7 @@ export default function ProjectPage() {
         </Card>
         <div className="flex flex-col gap-4">
           <Card className="p-4 text-sm">
-            <SectionTitle className="mb-2">Equipe</SectionTitle>
+            <SectionTitle as="h2" className="mb-2">Equipe</SectionTitle>
             <p className="text-ink-muted">Responsável: {p.manager?.name ?? "—"}</p>
             <p className="text-ink-muted">Grupo: {p.team?.name ?? "—"}</p>
             {p.members.length ? (
@@ -139,7 +139,7 @@ export default function ProjectPage() {
             <Card className="p-4 text-sm">
               {p.pricing_notes ? (
                 <>
-                  <SectionTitle className="mb-1">Condições e valores</SectionTitle>
+                  <SectionTitle as="h2" className="mb-1">Condições e valores</SectionTitle>
                   <p className="whitespace-pre-wrap text-ink-muted">{p.pricing_notes}</p>
                 </>
               ) : null}

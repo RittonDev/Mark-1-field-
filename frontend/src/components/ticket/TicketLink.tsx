@@ -1,9 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
 import type { UUID } from "@/lib/types";
-import { TicketEditorDialog } from "./editor/TicketEditorDialog";
+import { useTicketPanel } from "./TicketPanel";
 
 /** Clique simples com o botão esquerdo. Com Ctrl, Cmd, Shift ou Alt o navegador segue o link (nova aba, nova janela). */
 export function isPlainClick(e: React.MouseEvent) {
@@ -25,24 +24,21 @@ export function TicketLink({
   title?: string;
   children: React.ReactNode;
 }) {
-  const [open, setOpen] = useState(false);
+  const panel = useTicketPanel();
   return (
-    <>
-      <Link
-        href={`/chamados/${ticketId}`}
-        className={className}
-        title={title}
-        onClick={(e) => {
-          // A linha ou o cartão em volta pode ter o próprio clique: o do link vale sozinho.
-          e.stopPropagation();
-          if (!isPlainClick(e)) return;
-          e.preventDefault();
-          setOpen(true);
-        }}
-      >
-        {children}
-      </Link>
-      {open ? <TicketEditorDialog ticketId={ticketId} onClose={() => setOpen(false)} /> : null}
-    </>
+    <Link
+      href={`/chamados/${ticketId}`}
+      className={className}
+      title={title}
+      onClick={(e) => {
+        // A linha ou o cartão em volta pode ter o próprio clique: o do link vale sozinho.
+        e.stopPropagation();
+        if (!panel || !isPlainClick(e)) return;
+        e.preventDefault();
+        panel.open(ticketId);
+      }}
+    >
+      {children}
+    </Link>
   );
 }

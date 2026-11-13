@@ -274,7 +274,8 @@ Todos exigem analista ou gestor, salvo indicação. Valores em R$ chegam como n�
   `TicketDetail.forms`, `signature_required`, `signer_*`, `signed_at`. Concluir a OS (resolved/closed) devolve 422 sem os
   obrigatórios ou sem a assinatura exigida. Sync offline: operação `form_answers {form_id, answers, complete}`.
 - **Custos extras:** `GET|POST /tickets/{id}/expenses` (técnico só lê; solicitante recebe vazio) · `PATCH|DELETE /expenses/{id}` ·
-  `GET /expenses?start&end&technician_id&status&customer_id` (relatório) · `POST /expenses/mark-paid {ids}` ·
+  `GET /expenses?start&end&technician_id&status&customer_id` (relatório) · `POST /expenses/mark-paid {ids}` → `{updated}`
+  (marca como reembolsados só os aprovados; os demais ids são ignorados, sem erro, e não entram em `updated`) ·
   `GET|PUT /settings/expenses {km_rate}` (PUT: supervisor/admin). `TicketDetail.expenses`.
 - **Visita improdutiva:** `GET|POST|PATCH /unproductive-reasons` · `POST /tickets/{id}/unproductive {reason_id, note?, latitude?, longitude?, expected_version?}`
   (técnico responsável ou gestão) → a OS volta para `assigned` sem agenda; `unproductive_count`. Sync: operação `unproductive`.

@@ -147,8 +147,8 @@ export default function ExpensesPage() {
             <Stat label="Aguardando aprovação" value={formatMoney(sums.pending)} />
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-[1fr_20rem]">
-            <Card>
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
+            <Card className="min-w-0">
               <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-2.5">
                 <span className="text-sm text-ink-muted">
                   {selected.length ? `${selected.length} selecionado(s)` : `${data.items.length} lançamento(s)`}

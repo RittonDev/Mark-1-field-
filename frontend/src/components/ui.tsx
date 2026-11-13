@@ -2,15 +2,16 @@
 
 import clsx from "clsx";
 import { Loader2, TriangleAlert, X } from "lucide-react";
-import { forwardRef, useEffect, useId, useRef } from "react";
+import { forwardRef, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "ink";
 type ButtonSize = "sm" | "md" | "lg";
 
 const buttonVariants: Record<ButtonVariant, string> = {
+  // No escuro o azul da marca (#5470ff) deixa o texto branco em 4,1:1; o tom forte (#3d5af7) passa de 5:1.
   primary:
-    "bg-brand text-white hover:bg-brand-strong shadow-[inset_0_1px_0_rgb(255_255_255/0.18),0_1px_2px_rgb(16_24_40/0.14)]",
+    "bg-brand text-white hover:bg-brand-strong dark:bg-brand-strong dark:hover:bg-brand-strong/85 shadow-[inset_0_1px_0_rgb(255_255_255/0.18),0_1px_2px_rgb(16_24_40/0.14)]",
   secondary: "border border-line bg-surface text-ink shadow-elev-1 hover:border-line-strong hover:bg-surface-2",
   ghost: "text-ink-muted hover:bg-ink/[0.05] hover:text-ink",
   danger: "bg-red-600 text-white hover:bg-red-700 shadow-[inset_0_1px_0_rgb(255_255_255/0.16),0_1px_2px_rgb(16_24_40/0.14)]",
@@ -24,6 +25,19 @@ const buttonSizes: Record<ButtonSize, string> = {
   lg: "h-11 px-5 text-sm",
 };
 
+/** Classes do Button, para um link com cara de botão (ex.: <Link className={buttonClassName("primary")}>). */
+export function buttonClassName(variant: ButtonVariant = "secondary", size: ButtonSize = "md", className?: string) {
+  return clsx(
+    "inline-flex items-center justify-center gap-1.5 rounded-lg font-medium whitespace-nowrap select-none",
+    "transition-[background-color,border-color,color,box-shadow,transform] duration-150 active:translate-y-px",
+    "focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:ring-offset-2 focus-visible:ring-offset-surface focus-visible:outline-none",
+    "disabled:pointer-events-none disabled:opacity-50",
+    buttonSizes[size],
+    buttonVariants[variant],
+    className,
+  );
+}
+
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
   size?: ButtonSize;
@@ -35,21 +49,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   ref,
 ) {
   return (
-    <button
-      ref={ref}
-      type={type}
-      disabled={disabled || loading}
-      className={clsx(
-        "inline-flex items-center justify-center gap-1.5 rounded-lg font-medium whitespace-nowrap select-none",
-        "transition-[background-color,border-color,color,box-shadow,transform] duration-150 active:translate-y-px",
-        "focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:ring-offset-2 focus-visible:ring-offset-surface focus-visible:outline-none",
-        "disabled:pointer-events-none disabled:opacity-50",
-        buttonSizes[size],
-        buttonVariants[variant],
-        className,
-      )}
-      {...props}
-    >
+    <button ref={ref} type={type} disabled={disabled || loading} className={buttonClassName(variant, size, className)} {...props}>
       {loading ? <Loader2 className="size-4 animate-spin" /> : null}
       {children}
     </button>
@@ -369,6 +369,53 @@ export function lockScroll() {
   };
 }
 
+/** Camadas por cima da página: diálogos e o painel da OS (aria-modal) e menus suspensos. */
+const LAYERS = '[aria-modal="true"], [role="menu"]';
+
+/**
+ * A camada aberta por último é a de cima: os portais entram no fim do <body> na ordem em que abrem, e
+ * um menu dentro de um diálogo vem depois dele no documento. Só ela responde ao Esc e prende o Tab
+ * (`menus: false` olha só os diálogos, para o Tab).
+ */
+export function isTopLayer(node: Element | null, menus = true) {
+  if (!node) return false;
+  const layers = document.querySelectorAll(menus ? LAYERS : '[aria-modal="true"]');
+  return layers[layers.length - 1] === node;
+}
+
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), ' +
+  'textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"]), [contenteditable="true"]';
+
+/** Prende o Tab no diálogo: do último campo volta ao primeiro, e Shift+Tab do primeiro vai ao último. */
+export function trapTab(e: KeyboardEvent, node: HTMLElement) {
+  const items = Array.from(node.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => el.getClientRects().length > 0);
+  const active = document.activeElement;
+  if (items.length === 0) {
+    e.preventDefault();
+    node.focus();
+    return;
+  }
+  const first = items[0];
+  const last = items[items.length - 1];
+  if (!node.contains(active)) {
+    // O foco tinha saído (ex.: um diálogo por cima fechou e o deixou no <body>): volta para dentro.
+    e.preventDefault();
+    (e.shiftKey ? last : first).focus();
+  } else if (e.shiftKey && (active === first || active === node)) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && active === last) {
+    e.preventDefault();
+    first.focus();
+  }
+}
+
+/** Devolve o foco a quem abriu a camada (o botão ou link da lista), se ele ainda estiver na tela. */
+export function restoreFocus(el: Element | null) {
+  if (el instanceof HTMLElement && el.isConnected && el !== document.body) el.focus({ preventScroll: true });
+}
+
 export function Dialog({
   open,
   onClose,
@@ -388,11 +435,23 @@ export function Dialog({
 }) {
   const panel = useRef<HTMLDivElement>(null);
   const titleId = useId();
+  // Quem tinha o foco quando o diálogo abriu, lido no render: o autoFocus de um campo roda antes dos
+  // efeitos e já teria levado o foco para dentro.
+  const [opener, setOpener] = useState<Element | null>(null);
+  const [wasOpen, setWasOpen] = useState(false);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    setOpener(open && typeof document !== "undefined" ? document.activeElement : null);
+  }
 
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      const node = panel.current;
+      // Já tratado (busca, legenda, foto) ou com outra camada por cima: não é com este diálogo.
+      if (e.defaultPrevented || !node) return;
+      if (e.key === "Escape" && isTopLayer(node)) onClose();
+      else if (e.key === "Tab" && isTopLayer(node, false)) trapTab(e, node);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -403,8 +462,11 @@ export function Dialog({
     const unlock = lockScroll();
     // Leva o foco para o diálogo, sem roubar o de um campo com autoFocus.
     if (panel.current && !panel.current.contains(document.activeElement)) panel.current.focus();
-    return unlock;
-  }, [open]);
+    return () => {
+      unlock();
+      restoreFocus(opener);
+    };
+  }, [open, opener]);
 
   if (!open) return null;
   // No <body>: fora das animações e recortes da página. Mesmo no <body>, o clique "sobe" pela árvore do
@@ -415,7 +477,14 @@ export function Dialog({
       className="fixed inset-0 z-50 flex animate-fade items-start justify-center overflow-y-auto bg-[rgb(9_11_15/0.42)] p-4 pt-[9vh] backdrop-blur-[3px]"
       onClick={(e) => e.stopPropagation()}
     >
-      <div className="absolute inset-0" onClick={onClose} aria-hidden />
+      <div
+        className="absolute inset-0"
+        // Num duplo clique, o 2º clique (detail 2) cairia no fundo e fecharia o diálogo recém-aberto.
+        onClick={(e) => {
+          if (e.detail <= 1) onClose();
+        }}
+        aria-hidden
+      />
       <div
         ref={panel}
         role="dialog"

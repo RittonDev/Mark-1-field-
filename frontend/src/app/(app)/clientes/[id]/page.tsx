@@ -191,7 +191,7 @@ export default function CustomerDetailPage() {
 
         <aside className="flex flex-col gap-5">
           <Card className="p-5">
-            <SectionTitle className="mb-3">Contatos</SectionTitle>
+            <SectionTitle as="h2" className="mb-3">Contatos</SectionTitle>
             <ContactList
               contacts={
                 c.contacts?.length
@@ -205,7 +205,7 @@ export default function CustomerDetailPage() {
           </Card>
 
           <Card className="p-5">
-            <SectionTitle className="mb-2">Endereço da matriz</SectionTitle>
+            <SectionTitle as="h2" className="mb-2">Endereço da matriz</SectionTitle>
             {address ? (
               <>
                 <p className="text-sm text-ink-muted">{address}</p>
@@ -230,14 +230,14 @@ export default function CustomerDetailPage() {
 
           {c.notes ? (
             <Card className="p-5">
-              <SectionTitle className="mb-2">Observações</SectionTitle>
+              <SectionTitle as="h2" className="mb-2">Observações</SectionTitle>
               <p className="text-sm whitespace-pre-wrap text-ink-muted">{c.notes}</p>
             </Card>
           ) : null}
 
           {legacy?.attachments?.length ? (
             <Card className="p-5">
-              <SectionTitle className="mb-2">Arquivos</SectionTitle>
+              <SectionTitle as="h2" className="mb-2">Arquivos</SectionTitle>
               <ul className="flex flex-col gap-1">
                 {legacy.attachments.map((a, i) => (
                   <li key={i}>

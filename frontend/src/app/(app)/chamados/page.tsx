@@ -10,10 +10,10 @@ import { PriorityBadge, SlaBadge, SlaCountdown, StatusBadge } from "@/components
 import { Tabs } from "@/components/motion";
 import { MultiSelect } from "@/components/MultiSelect";
 import { useToast } from "@/components/Toaster";
-import { TicketEditorDialog } from "@/components/ticket/editor/TicketEditorDialog";
 import { QuickEditButton } from "@/components/ticket/QuickEditButton";
 import { ArrivalChip, OnsiteBar, RecurrenceChip } from "@/components/ticket/FieldClock";
 import { isPlainClick } from "@/components/ticket/TicketLink";
+import { useTicketPanel } from "@/components/ticket/TicketPanel";
 import { TagChips } from "@/components/TagChips";
 import {
   Button,
@@ -126,7 +126,8 @@ function TicketsView() {
   const [search, setSearch] = useState(() => searchParams.get("q") ?? "");
   const [page, setPage] = useState(1);
   // OS aberta no painel lateral (clique na linha), como no Field Control: a lista continua à vista.
-  const [panelId, setPanelId] = useState<string | null>(null);
+  const ticketPanel = useTicketPanel();
+  const openTicket = (id: string) => (ticketPanel ? ticketPanel.open(id) : router.push(`/chamados/${id}`));
   const q = useDebounced(search.trim(), 350);
 
   const assignable = useAssignable(null, staff);
@@ -390,7 +391,7 @@ function TicketsView() {
                       key={t.id}
                       onClick={(e) => {
                         // Só o clique na própria linha (não o que vem de uma janela aberta a partir dela).
-                        if (e.currentTarget.contains(e.target as Node)) setPanelId(t.id);
+                        if (e.currentTarget.contains(e.target as Node)) openTicket(t.id);
                       }}
                       className="group cursor-pointer transition-colors hover:bg-[var(--row-hover)]"
                     >
@@ -400,9 +401,9 @@ function TicketsView() {
                           onClick={(e) => {
                             // Clique simples abre no painel; Ctrl+clique ou botão do meio abrem a página em outra aba.
                             e.stopPropagation();
-                            if (!isPlainClick(e)) return;
+                            if (!ticketPanel || !isPlainClick(e)) return;
                             e.preventDefault();
-                            setPanelId(t.id);
+                            ticketPanel.open(t.id);
                           }}
                           className="block font-semibold text-ink hover:text-brand"
                         >
@@ -538,7 +539,6 @@ function TicketsView() {
           </>
         )}
       </Card>
-      {panelId ? <TicketEditorDialog key={panelId} ticketId={panelId} onClose={() => setPanelId(null)} /> : null}
     </div>
   );
 }

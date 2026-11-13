@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { CommandPalette } from "@/components/CommandPalette";
 import { Sidebar, Topbar } from "@/components/Shell";
+import { TicketPanelProvider } from "@/components/ticket/TicketPanel";
 import { canUseWeb } from "@/lib/access";
 import { useAuth } from "@/lib/auth";
 import { RealtimeProvider } from "@/lib/realtime";
@@ -51,20 +52,23 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <RealtimeProvider userId={user.id}>
-      <div className="flex min-h-screen bg-chrome">
-        <Sidebar user={user} onLogout={logout} />
-        <div className="flex min-w-0 flex-1 flex-col lg:py-2 lg:pr-2">
-          {/* Área de trabalho em "folha" sobre a moldura. */}
-          <div className="flex flex-1 flex-col border-l border-chrome-line bg-sheet [overflow:clip] lg:rounded-2xl lg:border lg:shadow-sheet">
-            <Topbar />
-            {/* A chave pela rota refaz a entrada suave a cada troca de tela. */}
-            <main key={pathname} className="flex-1 animate-enter px-4 py-6 md:px-8">
-              {children}
-            </main>
+      {/* A OS aberta no painel lateral (?os=<id>) vale para todas as telas da central. */}
+      <TicketPanelProvider>
+        <div className="flex min-h-screen bg-chrome">
+          <Sidebar user={user} onLogout={logout} />
+          <div className="flex min-w-0 flex-1 flex-col lg:py-2 lg:pr-2">
+            {/* Área de trabalho em "folha" sobre a moldura. */}
+            <div className="flex flex-1 flex-col border-l border-chrome-line bg-sheet [overflow:clip] lg:rounded-2xl lg:border lg:shadow-sheet">
+              <Topbar />
+              {/* A chave pela rota refaz a entrada suave a cada troca de tela. */}
+              <main key={pathname} className="flex-1 animate-enter px-4 py-6 md:px-8">
+                {children}
+              </main>
+            </div>
           </div>
         </div>
-      </div>
-      <CommandPalette user={user} />
+        <CommandPalette user={user} />
+      </TicketPanelProvider>
     </RealtimeProvider>
   );
 }

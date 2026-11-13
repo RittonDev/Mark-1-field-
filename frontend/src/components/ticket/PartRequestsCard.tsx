@@ -3,7 +3,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 import { FileText, PackageOpen, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useToast } from "@/components/Toaster";
 import { Button, Card, CardHeader, ErrorBox } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
@@ -35,6 +35,18 @@ export function PartRequestsCard({ ticket }: { ticket: TicketDetail }) {
       api.patch(`/part-requests/${id}`, body),
     onSuccess: refresh,
   });
+
+  // Esc fecha só o zoom; o preventDefault avisa o painel da OS que a tecla já foi tratada.
+  useEffect(() => {
+    if (!zoom) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      setZoom(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [zoom]);
 
   if (requests.length === 0) return null;
   const openCount = requests.filter((r) => r.status === "open").length;
@@ -134,7 +146,13 @@ export function PartRequestsCard({ ticket }: { ticket: TicketDetail }) {
         />
       ) : null}
       {zoom ? (
-        <div className="fixed inset-0 z-50 flex animate-fade items-center justify-center bg-black/80 p-4" onClick={() => setZoom(null)}>
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Foto da peça"
+          className="fixed inset-0 z-50 flex animate-fade items-center justify-center bg-black/80 p-4"
+          onClick={() => setZoom(null)}
+        >
           <button type="button" className="absolute top-4 right-4 rounded-full bg-white/10 p-2 text-white" aria-label="Fechar">
             <X className="size-5" />
           </button>

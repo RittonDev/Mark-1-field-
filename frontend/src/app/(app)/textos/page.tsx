@@ -184,7 +184,7 @@ function Editor({ initial }: { initial: TemplatesOut }) {
         </div>
         <aside className="lg:sticky lg:top-20 lg:self-start">
           <Card className="p-3">
-            <SectionTitle className="mb-2">Variáveis</SectionTitle>
+            <SectionTitle as="h2" className="mb-2">Variáveis</SectionTitle>
             <p className="mb-2 text-xs text-ink-muted">Clique para inserir no texto que está em edição.</p>
             <ul className="flex flex-col gap-1">
               {initial.variables.map((v) => (

@@ -133,7 +133,10 @@ function Lightbox({ items, index, onClose, onMove }: { items: Attachment[]; inde
   const a = items[index];
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      }
       if (e.key === "ArrowRight") onMove(Math.min(items.length - 1, index + 1));
       if (e.key === "ArrowLeft") onMove(Math.max(0, index - 1));
     };
@@ -142,7 +145,13 @@ function Lightbox({ items, index, onClose, onMove }: { items: Attachment[]; inde
   }, [index, items.length, onClose, onMove]);
   if (!a) return null;
   return createPortal(
-    <div className="fixed inset-0 z-50 flex animate-fade flex-col items-center justify-center bg-black/85 p-4 backdrop-blur-sm" onClick={onClose}>
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Foto: ${a.description || a.filename}`}
+      className="fixed inset-0 z-50 flex animate-fade flex-col items-center justify-center bg-black/85 p-4 backdrop-blur-sm"
+      onClick={onClose}
+    >
       <button type="button" onClick={onClose} className="absolute top-4 right-4 rounded-full bg-white/10 p-2 text-white hover:bg-white/20" aria-label="Fechar">
         <X className="size-5" />
       </button>
