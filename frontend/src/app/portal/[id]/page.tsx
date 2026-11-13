@@ -18,7 +18,7 @@ function Info({ icon: Icon, label, children }: { icon: typeof Store; label: stri
     <div className="flex items-start gap-2.5">
       <Icon className="mt-0.5 size-4 shrink-0 text-ink-subtle" />
       <div className="min-w-0">
-        <p className="text-xs text-ink-muted">{label}</p>
+        <p className="text-xs font-semibold text-ink/80">{label}</p>
         <div className="text-sm text-ink">{children}</div>
       </div>
     </div>

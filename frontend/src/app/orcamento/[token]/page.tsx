@@ -246,7 +246,7 @@ export default function PublicQuotePage() {
                   <tbody className="divide-y divide-line">
                     {quote.items.map((item, i) => (
                       <tr key={i} className="print:break-inside-avoid">
-                        <td className="px-4 py-3 font-medium text-ink">{item.description}</td>
+                        <td className="px-4 py-3 font-semibold text-ink">{item.description}</td>
                         <td className="px-4 py-3 text-ink-muted">{QUOTE_KIND[item.kind ?? "product"].label}</td>
                         <td className="px-4 py-3 text-ink-muted">{item.unit}</td>
                         <td className="px-4 py-3 text-right tabular-nums">{item.quantity.toLocaleString("pt-BR")}</td>
@@ -324,7 +324,7 @@ export default function PublicQuotePage() {
                 <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200">
                   <XCircle className="mt-0.5 size-5 shrink-0" />
                   <div>
-                    <p className="font-semibold">
+                    <p className="font-bold">
                       Recusado{quote.approver_name ? ` por ${quote.approver_name}` : ""} em {formatDateTime(quote.decided_at)}
                     </p>
                     <p className="mt-1">{quote.rejection_reason}</p>
