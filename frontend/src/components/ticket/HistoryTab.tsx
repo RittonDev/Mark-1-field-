@@ -28,7 +28,7 @@ import { StatusBadge } from "@/components/badges";
 import { EmptyState, ErrorBox, LoadingBlock } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { EVENT_TYPE, STATUS } from "@/lib/constants";
-import { formatDateTime } from "@/lib/format";
+import { formatDateTime, formatMinutes } from "@/lib/format";
 import type { TicketEvent, TicketEventType, TicketStatus, UUID } from "@/lib/types";
 
 const ICONS: Record<TicketEventType, React.ComponentType<{ className?: string }>> = {
@@ -54,6 +54,7 @@ const ICONS: Record<TicketEventType, React.ComponentType<{ className?: string }>
   quote_sent: FileText,
   quote_approved: FileCheck2,
   quote_rejected: FileX2,
+  times_corrected: Clock,
 };
 
 const FIELD_LABELS: Record<string, string> = {
@@ -78,6 +79,14 @@ const FIELD_LABELS: Record<string, string> = {
   team_id: "grupo",
   scheduled_start: "início da visita",
   scheduled_end: "fim previsto",
+};
+
+/** Horários corrigidos pela central (evento times_corrected). */
+const TIME_LABELS: Record<string, string> = {
+  en_route_at: "saída",
+  arrived_at: "início",
+  resolved_at: "término",
+  work_minutes: "tempo",
 };
 
 function str(value: unknown): string | null {
@@ -133,6 +142,16 @@ function Detail({ event }: { event: TicketEvent }) {
         ) : null}
       </span>
     );
+  }
+  if (event.event_type === "times_corrected") {
+    const changes = (data.changes ?? {}) as Record<string, [unknown, unknown]>;
+    const at = (v: unknown) => (typeof v === "string" ? formatDateTime(v) : "—");
+    const parts = Object.entries(changes).map(([key, [from, to]]) => {
+      const name = TIME_LABELS[key] ?? key;
+      const text = key === "work_minutes" ? `${formatMinutes(Number(from))} → ${formatMinutes(Number(to))}` : `${at(from)} → ${at(to)}`;
+      return `${name} ${text}`;
+    });
+    return parts.length ? <span className="text-ink-muted">{parts.join(" · ")}</span> : null;
   }
   if (event.event_type === "status_changed" && isStatus(event.from_value) && isStatus(event.to_value)) {
     return (

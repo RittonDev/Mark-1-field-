@@ -59,7 +59,8 @@ export type TicketEventType =
   | "unproductive_visit"
   | "quote_sent"
   | "quote_approved"
-  | "quote_rejected";
+  | "quote_rejected"
+  | "times_corrected";
 export type SlaStatus = "ok" | "at_risk" | "breached" | "paused" | "met";
 export type AttachmentKind = "file" | "photo" | "signature";
 

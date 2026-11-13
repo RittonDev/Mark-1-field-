@@ -11,6 +11,7 @@ import { AssignmentPanel } from "@/components/ticket/AssignmentPanel";
 import { AttachmentsTab } from "@/components/ticket/AttachmentsTab";
 import { CommentsTab } from "@/components/ticket/CommentsTab";
 import { EditTicketDialog } from "@/components/ticket/EditTicketDialog";
+import { TimesDialog } from "@/components/ticket/TimesDialog";
 import { ExpensesCard } from "@/components/ticket/ExpensesCard";
 import { FormsCard } from "@/components/ticket/FormsCard";
 import { MessagesCard } from "@/components/ticket/MessagesPanel";
@@ -133,6 +134,7 @@ export default function TicketDetailPage() {
   const [editing, setEditing] = useState(false);
   const [unproductive, setUnproductive] = useState(false);
   const [sharing, setSharing] = useState(false);
+  const [timesOpen, setTimesOpen] = useState(false);
 
   const query = useQuery({
     queryKey: ["ticket", id],
@@ -217,6 +219,16 @@ export default function TicketDetailPage() {
               <div className="mt-1 flex flex-col gap-2 border-t border-line pt-2">
                 <ArrivalChip ticket={ticket} />
                 <OnsiteBar ticket={ticket} />
+                {ticket.arrived_at && canManageTickets(user?.role) ? (
+                  <button
+                    type="button"
+                    onClick={() => setTimesOpen(true)}
+                    className="inline-flex items-center gap-1.5 self-start text-xs font-medium text-brand-ink hover:underline"
+                  >
+                    <Clock className="size-3.5" />
+                    Corrigir horários
+                  </button>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -327,6 +339,7 @@ export default function TicketDetailPage() {
 
       {target ? <TransitionDialog key={target} ticket={ticket} to={target} onClose={() => setTarget(null)} /> : null}
       {editing ? <EditTicketDialog ticket={ticket} onClose={() => setEditing(false)} /> : null}
+      {timesOpen ? <TimesDialog ticket={ticket} onClose={() => setTimesOpen(false)} /> : null}
       {unproductive ? <UnproductiveDialog ticket={ticket} onClose={() => setUnproductive(false)} /> : null}
       {sharing ? <WhatsAppShare ticket={ticket} onClose={() => setSharing(false)} /> : null}
     </div>

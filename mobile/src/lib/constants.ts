@@ -179,6 +179,7 @@ export const EVENT_TYPE: Record<TicketEventType, string> = {
   quote_sent: "enviou o orçamento",
   quote_approved: "Cliente aprovou o orçamento",
   quote_rejected: "Cliente recusou o orçamento",
+  times_corrected: "corrigiu os horários",
 };
 
 export const SLA_STATUS: Record<SlaStatus, { label: string; color: string }> = {

@@ -9,6 +9,7 @@ import { CountUp } from "@/components/motion";
 import { MessagesButton } from "@/components/ticket/MessagesPanel";
 import { ArrivalChip, OnsiteBar } from "@/components/ticket/FieldClock";
 import { QuickEditButton } from "@/components/ticket/QuickEditButton";
+import { TimesButton } from "@/components/ticket/TimesDialog";
 import { errorMessage } from "@/lib/api";
 import { useAuth, useIsClient } from "@/lib/auth";
 import { canManageTickets } from "@/lib/constants";
@@ -157,6 +158,7 @@ function ActivityRow({ a, along, day, manage }: { a: Activity; along?: string | 
         <td className="edit-col px-3 py-2.5">
           <span className="inline-flex items-center gap-1">
             <MessagesButton ticketId={t.id} code={t.code} />
+            {a.started_at || a.arrived_at ? <TimesButton ticketId={t.id} code={t.code} /> : null}
             <QuickEditButton ticketId={t.id} code={t.code} />
           </span>
         </td>
