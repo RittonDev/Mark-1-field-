@@ -7,7 +7,7 @@ from sqlalchemy import select, text
 
 from app.api.deps import DB, CurrentUser, StaffUser, TicketManagerUser
 from app.core.config import settings
-from app.core.enums import TicketPriority, TicketStatus, TicketType, UserRole
+from app.core.enums import TicketPriority, TicketSource, TicketStatus, TicketType, UserRole
 from app.core.security import InvalidToken, create_download_token, decode_token
 from app.models import Ticket, TicketAttachment, TicketComment, TicketEvent, TicketWorklog, User
 from app.schemas.common import Page, TagOut
@@ -73,6 +73,7 @@ async def list_tickets(
     status_: Annotated[list[TicketStatus] | None, Query(alias="status")] = None,
     priority: Annotated[list[TicketPriority] | None, Query()] = None,
     type_: Annotated[TicketType | None, Query(alias="type")] = None,
+    source: TicketSource | None = None,
     assignee_id: uuid.UUID | None = None,
     team_id: uuid.UUID | None = None,
     customer_id: uuid.UUID | None = None,
@@ -97,6 +98,7 @@ async def list_tickets(
         status=status_,
         priority=priority,
         type=type_,
+        source=source,
         assignee_id=assignee_id,
         team_id=team_id,
         customer_id=customer_id,

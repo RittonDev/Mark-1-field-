@@ -31,6 +31,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   // Sessão de técnico de campo aberta antes da separação de canais: encerra e orienta a usar o app.
   const wrongChannel = !!user && !canUseWeb(user.role);
+  // Usuário do cliente: o lugar dele é o portal de solicitações (sem o menu da central).
+  const isClient = user?.role === "requester";
 
   useEffect(() => {
     if (ready && wrongChannel) {
@@ -40,10 +42,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     } else if (ready && !user) {
       queryClient.clear();
       router.replace("/login");
+    } else if (ready && isClient) {
+      router.replace("/portal");
     }
-  }, [ready, user, wrongChannel, logout, router, queryClient]);
+  }, [ready, user, wrongChannel, isClient, logout, router, queryClient]);
 
-  if (!ready || !user || wrongChannel) return <SplashLoader />;
+  if (!ready || !user || wrongChannel || isClient) return <SplashLoader />;
 
   return (
     <RealtimeProvider userId={user.id}>

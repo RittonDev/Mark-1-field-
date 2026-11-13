@@ -155,6 +155,7 @@ export function RealtimeProvider({ userId, children }: { userId: string; childre
         if (!event.type?.startsWith("ticket.")) return;
         queryClient.invalidateQueries({ queryKey: ["tracking", "live"] });
         queryClient.invalidateQueries({ queryKey: ["tickets"] });
+        queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
         queryClient.invalidateQueries({ queryKey: ["dashboard"] });
         queryClient.invalidateQueries({ queryKey: ["assignable"] });
         if (event.ticket_id) queryClient.invalidateQueries({ queryKey: ["ticket", event.ticket_id] });

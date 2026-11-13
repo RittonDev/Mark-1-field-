@@ -4,6 +4,7 @@ import {
   Building2,
   CalendarClock,
   CalendarDays,
+  ClipboardPlus,
   ClipboardList,
   FileText,
   FolderKanban,
@@ -20,6 +21,7 @@ import {
   Ticket,
   Timer,
   Users,
+  Wallet,
 } from "lucide-react";
 import { canManageTickets, isManager, isStaff } from "@/lib/constants";
 import type { UserRole } from "@/lib/types";
@@ -46,6 +48,8 @@ export const GROUPS: { key: NavGroup; label: string | null }[] = [
 
 export const NAV: NavItem[] = [
   { href: "/minha-fila", label: "Minha fila", icon: Inbox, visible: canManageTickets, group: "main" },
+  // Pedidos que os clientes abrem no portal (antes chegavam pelo WhatsApp ou e-mail).
+  { href: "/solicitacoes", label: "Solicitações", icon: ClipboardPlus, visible: canManageTickets, group: "main" },
   { href: "/chamados", label: "Chamados", icon: Ticket, visible: () => true, group: "main" },
   { href: "/agenda", label: "Calendário", icon: CalendarDays, visible: canManageTickets, group: "operation" },
   { href: "/dia", label: "Atividades do dia", icon: CalendarClock, visible: isStaff, group: "operation" },
@@ -55,6 +59,8 @@ export const NAV: NavItem[] = [
   { href: "/orcamentos", label: "Orçamentos", icon: FileText, visible: canManageTickets, group: "commercial" },
   { href: "/projetos", label: "Projetos", icon: FolderKanban, visible: canManageTickets, group: "commercial" },
   { href: "/custos", label: "Custos extras", icon: Receipt, visible: canManageTickets, group: "commercial" },
+  // Técnicos parceiros recebem por chamado: o fechamento dos pagamentos.
+  { href: "/pagamentos", label: "Pagamentos", icon: Wallet, visible: canManageTickets, group: "commercial" },
   { href: "/clientes", label: "Clientes", icon: Building2, visible: isStaff, group: "base" },
   { href: "/locais", label: "Locais", icon: MapPin, visible: isStaff, group: "base" },
   { href: "/tecnicos", label: "Técnicos", icon: HardHat, visible: canManageTickets, group: "base" },

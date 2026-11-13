@@ -1618,6 +1618,8 @@ def filter_conditions(user: User, f: TicketFilters, now: datetime) -> list[Colum
         conds.append(Ticket.priority.in_(f.priority))
     if f.type:
         conds.append(Ticket.type == f.type)
+    if f.source:
+        conds.append(Ticket.source == f.source)
     if f.assignee_id:
         conds.append(Ticket.assignee_id == f.assignee_id)
     if f.team_id:

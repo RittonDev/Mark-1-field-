@@ -32,7 +32,18 @@ export function Sidebar({ user, onLogout }: { user: User; onLogout: () => void }
     enabled: canManageTickets(user.role),
     staleTime: 60_000,
   });
-  const badges: Record<string, number> = { "/homologacao": pending.data?.pending ?? 0 };
+  // Solicitações do portal esperando a central (o evento em tempo real atualiza).
+  const requests = useQuery({
+    queryKey: ["solicitacoes", "count"],
+    queryFn: () => api.get<{ pending: number }>("/portal/inbox-count"),
+    enabled: canManageTickets(user.role),
+    staleTime: 30_000,
+    refetchInterval: 120_000,
+  });
+  const badges: Record<string, number> = {
+    "/homologacao": pending.data?.pending ?? 0,
+    "/solicitacoes": requests.data?.pending ?? 0,
+  };
   const items = visibleNav(user.role);
 
   const wrap = useRef<HTMLDivElement>(null);

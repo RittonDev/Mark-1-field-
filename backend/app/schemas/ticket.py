@@ -473,6 +473,7 @@ class TicketFilters(BaseModel):
     status: list[TicketStatus] | None = None
     priority: list[TicketPriority] | None = None
     type: TicketType | None = None
+    source: TicketSource | None = None
     assignee_id: uuid.UUID | None = None
     team_id: uuid.UUID | None = None
     customer_id: uuid.UUID | None = None

@@ -1,7 +1,7 @@
 // Portal do cliente: rótulos na língua do cliente (ele não conhece o fluxo interno da OS).
 
 import { STATUS } from "./constants";
-import type { Level, TicketStatus } from "./types";
+import type { Level, PortalLocation, TicketStatus } from "./types";
 
 export const CLIENT_STATUS: Record<TicketStatus, string> = {
   new: "Recebida",
@@ -53,10 +53,19 @@ function write(key: string, value: string) {
 
 /** A última loja e o último contato usados, para a próxima solicitação sair em segundos. */
 export const portalMemory = {
-  lastLocation: () => read(LAST_LOCATION),
+  lastLocation: (): PortalLocation | null => {
+    const raw = read(LAST_LOCATION);
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw) as PortalLocation;
+      return parsed && typeof parsed.id === "string" ? parsed : null;
+    } catch {
+      return null;
+    }
+  },
   lastContact: () => read(LAST_CONTACT) ?? "",
-  remember: (locationId: string, contact: string) => {
-    write(LAST_LOCATION, locationId);
+  remember: (location: PortalLocation, contact: string) => {
+    write(LAST_LOCATION, JSON.stringify(location));
     if (contact.trim()) write(LAST_CONTACT, contact.trim());
   },
 };
