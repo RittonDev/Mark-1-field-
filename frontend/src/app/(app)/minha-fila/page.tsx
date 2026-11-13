@@ -8,7 +8,6 @@ import {
   CalendarClock,
   CalendarRange,
   CheckCircle2,
-  Clock3,
   Coffee,
   HardHat,
   Hourglass,
@@ -16,7 +15,6 @@ import {
   Navigation,
   Plus,
   TriangleAlert,
-  Users,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -27,7 +25,7 @@ import { useNow } from "@/components/useNow";
 import { MessagesButton } from "@/components/ticket/MessagesPanel";
 import { QuickEditButton } from "@/components/ticket/QuickEditButton";
 import { ArrivalChip, OnsiteBar } from "@/components/ticket/FieldClock";
-import { Button, Card, EmptyState, ErrorBox, LoadingBlock, PageHeader, Skeleton } from "@/components/ui";
+import { Button, Card, CardHeader, EmptyState, ErrorBox, LoadingBlock, PageHeader, SectionTitle, Skeleton } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canManageTickets } from "@/lib/constants";
@@ -91,6 +89,7 @@ function Kpi({
   label: string;
   value: number;
   icon: React.ComponentType<{ className?: string }>;
+  /** Fundo e cor do ícone (ex.: "bg-brand-soft text-brand"). */
   tone: string;
   alert?: boolean;
   index: number;
@@ -109,7 +108,7 @@ function Kpi({
       <span
         className={clsx(
           "flex size-10 shrink-0 items-center justify-center rounded-xl",
-          alert ? "bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400" : "bg-surface-2 " + tone,
+          alert ? "bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400" : tone,
         )}
       >
         <Icon className="size-5" />
@@ -119,7 +118,7 @@ function Kpi({
           value={value}
           className={clsx("block text-2xl leading-none font-semibold tracking-tight", alert ? "text-red-600 dark:text-red-400" : "text-ink")}
         />
-        <span className="mt-1 block text-xs leading-snug text-ink-muted">{label}</span>
+        <span className="mt-1 block text-xs leading-snug font-medium text-ink-muted">{label}</span>
       </span>
     </button>
   );
@@ -150,7 +149,7 @@ function QueueRow({ item, index, compact }: { item: QueueItem; index: number; co
     >
       <div className="min-w-0 flex-1">
         <div className="flex items-start gap-2">
-          <Link href={`/chamados/${item.id}`} className="min-w-0 flex-1 text-sm font-medium text-ink hover:text-brand">
+          <Link href={`/chamados/${item.id}`} className="min-w-0 flex-1 text-sm font-semibold text-ink hover:text-brand">
             <span className="mr-1.5 font-mono text-xs font-normal text-ink-subtle">{item.code}</span>
             {item.title}
           </Link>
@@ -244,7 +243,7 @@ function TodayTimeline({ items }: { items: QueueItem[] }) {
             <div className="flex min-w-0 flex-1 items-center gap-3 rounded-xl border border-line bg-surface py-2.5 pr-2.5 pl-3.5 transition-[border-color,box-shadow] group-hover:border-line-strong group-hover:shadow-elev-1">
               <div className="min-w-0 flex-1">
               <div className="flex items-start gap-2">
-                <Link href={`/chamados/${item.id}`} className="min-w-0 flex-1 text-sm font-medium text-ink hover:text-brand">
+                <Link href={`/chamados/${item.id}`} className="min-w-0 flex-1 text-sm font-semibold text-ink hover:text-brand">
                   <span className="mr-1.5 font-mono text-xs font-normal text-ink-subtle">{item.code}</span>
                   {item.title}
                 </Link>
@@ -303,13 +302,7 @@ function TeamQueues({
   });
   return (
     <Card>
-      <div className="flex items-center justify-between border-b border-line px-4 py-3">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
-          <Users className="size-4 text-ink-subtle" />
-          Filas da equipe
-        </h2>
-        <span className="text-[11px] text-ink-subtle">abertas · atenção</span>
-      </div>
+      <CardHeader title="Filas da equipe" actions={<span className="text-[11px] text-ink-subtle">abertas · atenção</span>} />
       {queues.isLoading ? (
         <div className="space-y-3 p-4">
           {[0, 1, 2].map((i) => (
@@ -336,7 +329,7 @@ function TeamQueues({
                 >
                   <Avatar name={q.user.name} className="size-7 text-[10px]" />
                   <span className="min-w-0 flex-1">
-                    <span className={clsx("block truncate text-[13px]", selected ? "font-semibold text-ink" : "text-ink")}>
+                    <span className={clsx("block truncate text-[13px] text-ink", selected ? "font-bold" : "font-semibold")}>
                       {q.user.id === meId ? "Você" : q.user.name}
                     </span>
                     <span className="block text-[11px] text-ink-subtle">
@@ -365,7 +358,7 @@ function TeamQueues({
                 <span className="flex size-7 items-center justify-center rounded-full border border-dashed border-line-strong text-ink-subtle">
                   <Inbox className="size-3.5" />
                 </span>
-                <span className="flex-1">Sem analista</span>
+                <span className="flex-1 font-semibold">Sem analista</span>
                 <span className="text-sm font-semibold text-ink tabular-nums">{queues.data.unowned.open}</span>
               </Link>
             </li>
@@ -446,19 +439,19 @@ export default function MyQueuePage() {
       ) : (
         <>
           <div className="stagger mb-6 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
-            <Kpi index={0} label="Na fila" value={counts?.open ?? 0} icon={Inbox} tone="text-brand" />
+            <Kpi index={0} label="Na fila" value={counts?.open ?? 0} icon={Inbox} tone="bg-brand-soft text-brand" />
             <Kpi
               index={1}
               label="Precisam de atenção"
               value={counts?.attention ?? 0}
               icon={TriangleAlert}
-              tone="text-red-600"
+              tone="bg-surface-2 text-red-600"
               alert={(counts?.attention ?? 0) > 0}
               onClick={() => scrollTo("attention")}
             />
-            <Kpi index={2} label="Agendadas hoje" value={counts?.today ?? 0} icon={CalendarClock} tone="text-brand" onClick={() => scrollTo("today")} />
-            <Kpi index={3} label="Em campo agora" value={counts?.in_field ?? 0} icon={Navigation} tone="text-sky-600" onClick={() => scrollTo("in_field")} />
-            <Kpi index={4} label="Concluídas hoje" value={counts?.done ?? 0} icon={CheckCircle2} tone="text-emerald-600" onClick={() => scrollTo("done")} />
+            <Kpi index={2} label="Agendadas hoje" value={counts?.today ?? 0} icon={CalendarClock} tone="bg-brand-soft text-brand" onClick={() => scrollTo("today")} />
+            <Kpi index={3} label="Em campo agora" value={counts?.in_field ?? 0} icon={Navigation} tone="bg-surface-2 text-sky-600" onClick={() => scrollTo("in_field")} />
+            <Kpi index={4} label="Concluídas hoje" value={counts?.done ?? 0} icon={CheckCircle2} tone="bg-surface-2 text-emerald-600" onClick={() => scrollTo("done")} />
           </div>
 
           <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_300px]">
@@ -490,13 +483,13 @@ export default function MyQueuePage() {
                       <div id={`fila-${section.key}`} className="flex items-center gap-3 border-b border-line px-4 py-3 sm:px-5">
                         <Icon className={clsx("size-4 shrink-0", section.tone)} />
                         <div className="min-w-0 flex-1">
-                          <h2 className="text-sm font-semibold text-ink">
+                          <h2 className="text-sm font-bold text-ink">
                             {section.title}
                             <span className="ml-2 rounded-full bg-surface-2 px-1.5 text-[11px] leading-[18px] font-semibold text-ink-muted tabular-nums">
                               {items.length}
                             </span>
                           </h2>
-                          <p className="truncate text-xs text-ink-subtle">{section.hint}</p>
+                          <p className="truncate text-xs text-ink-muted">{section.hint}</p>
                         </div>
                         {section.key === "today" ? (
                           <Link href="/dia" className="shrink-0 text-xs text-ink-muted hover:text-brand">
@@ -522,10 +515,7 @@ export default function MyQueuePage() {
             <aside className="flex flex-col gap-4 xl:sticky xl:top-20">
               {user ? <TeamQueues meId={user.id} viewing={userId ?? user.id} onPick={(id) => setViewing(id === user.id ? null : id)} /> : null}
               <Card className="p-4">
-                <p className="flex items-center gap-2 text-sm font-semibold text-ink">
-                  <Clock3 className="size-4 text-ink-subtle" />
-                  Como a fila se organiza
-                </p>
+                <SectionTitle>Como a fila se organiza</SectionTitle>
                 <p className="mt-2 text-xs leading-relaxed text-ink-muted">
                   Entram aqui as OS em que você é o analista responsável ou o executor. Primeiro o que está em campo,
                   depois o que precisa de ação (prazo, técnico, atraso), a agenda do dia e o restante.

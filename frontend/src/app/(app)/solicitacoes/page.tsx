@@ -95,11 +95,11 @@ export default function RequestsInboxPage() {
                     <OpenTicketButton ticketId={t.id} className="font-mono text-xs text-ink-subtle hover:text-brand">
                       {t.code}
                     </OpenTicketButton>
-                    <span className="text-sm font-medium text-ink">{t.customer?.name ?? "Sem cliente"}</span>
+                    <span className="text-sm font-semibold text-ink">{t.customer?.name ?? "Sem cliente"}</span>
                     <StatusBadge status={t.status} />
                     <PriorityBadge priority={t.priority} compact />
                   </div>
-                  <OpenTicketButton ticketId={t.id} className="mt-1 block text-left font-medium text-ink hover:text-brand">
+                  <OpenTicketButton ticketId={t.id} className="mt-1 block text-left font-semibold text-ink hover:text-brand">
                     {t.title}
                   </OpenTicketButton>
                   <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-muted">

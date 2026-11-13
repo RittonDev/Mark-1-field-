@@ -55,7 +55,7 @@ function textNode(...lines: string[]): HTMLElement {
   lines.forEach((line, i) => {
     const row = document.createElement("div");
     row.textContent = line;
-    if (i === 0) row.style.fontWeight = "600";
+    if (i === 0) row.style.fontWeight = "700";
     el.appendChild(row);
   });
   return el;

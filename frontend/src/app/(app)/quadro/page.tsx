@@ -50,7 +50,7 @@ function BoardCard({
         </Link>
         <PriorityBadge priority={ticket.priority} compact />
       </div>
-      <Link href={`/chamados/${ticket.id}`} className="line-clamp-2 text-sm font-medium text-ink hover:text-brand">
+      <Link href={`/chamados/${ticket.id}`} className="line-clamp-2 text-sm font-semibold text-ink hover:text-brand">
         {ticket.title}
       </Link>
       {ticket.customer || ticket.location ? (
@@ -178,7 +178,7 @@ export default function BoardPage() {
                 <header className="flex items-center justify-between gap-2 px-3 py-2.5">
                   <div className="flex items-center gap-2">
                     <span className="size-2 rounded-full" style={{ backgroundColor: info.color }} />
-                    <h2 className="text-sm font-semibold text-ink">{info.label}</h2>
+                    <h2 className="text-sm font-bold text-ink">{info.label}</h2>
                   </div>
                   <span className="rounded-full bg-surface px-2 py-0.5 text-xs text-ink-muted tabular-nums">
                     {items.length}

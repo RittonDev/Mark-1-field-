@@ -45,7 +45,7 @@ export function MonthView({
   const today = new Date();
   return (
     <div className="flex h-full flex-col">
-      <div className="grid grid-cols-7 border-b border-line text-center text-xs font-medium tracking-wide text-ink-muted uppercase">
+      <div className="grid grid-cols-7 border-b border-line text-center text-xs font-bold tracking-wide text-ink-muted uppercase">
         {WEEKDAYS_SHORT.map((d) => (
           <div key={d} className="py-2">
             {d}

@@ -207,7 +207,7 @@ function Palette({ user, onClose }: { user: User; onClose: () => void }) {
               return (
                 <div key={entry.id}>
                   {header ? (
-                    <p className="px-3 pt-3 pb-1 text-[11px] font-medium text-ink-subtle first:pt-1">{header}</p>
+                    <p className="px-3 pt-3 pb-1 text-[11px] font-semibold text-ink-muted first:pt-1">{header}</p>
                   ) : null}
                   <button
                     type="button"
@@ -222,7 +222,7 @@ function Palette({ user, onClose }: { user: User; onClose: () => void }) {
                     )}
                   >
                     <span className={clsx("shrink-0", selected ? "text-brand" : "text-ink-subtle")}>{entry.icon}</span>
-                    <span className={clsx("min-w-0 flex-1 truncate", selected && "font-medium")}>{entry.label}</span>
+                    <span className={clsx("min-w-0 flex-1 truncate", selected ? "font-semibold" : "font-medium")}>{entry.label}</span>
                     {entry.hint ? <span className="shrink-0">{entry.hint}</span> : null}
                     {selected ? <CornerDownLeft className="size-3.5 shrink-0 text-ink-subtle" /> : null}
                   </button>
