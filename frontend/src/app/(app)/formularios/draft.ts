@@ -2,6 +2,7 @@
 // limites da API, com mensagens em português e o número da pergunta da tela) e o rascunho guardado
 // na aba, que sobrevive a recarregar, ao Voltar do navegador e a um clique no menu.
 
+import type { QueryClient } from "@tanstack/react-query";
 import { fold } from "@/components/settings/shared";
 import type { FormField, FormFieldType, FormTemplate } from "@/lib/types";
 
@@ -209,51 +210,72 @@ export function sameDraft(a: Draft, b: Draft): boolean {
   return canon(a) === canon(b);
 }
 
+/** O que falta corrigir numa pergunta, por campo (cada mensagem aparece embaixo do seu campo). */
+export interface FieldProblems {
+  label?: string;
+  options?: string;
+  photos?: string;
+}
+
 export interface Problems {
   name?: string;
   general: string[];
   /** Por identificador da pergunta. */
-  fields: Record<string, string[]>;
+  fields: Record<string, FieldProblems>;
 }
 
 export function hasProblems(p: Problems): boolean {
   return Boolean(p.name) || p.general.length > 0 || Object.keys(p.fields).length > 0;
 }
 
+function optionProblem(f: FormField): string | undefined {
+  const options = f.options.map((o) => o.trim()).filter(Boolean);
+  const list: string[] = [];
+  if (options.length < 2) list.push("Informe pelo menos duas opções, uma por linha.");
+  if (options.length > LIMITS.options) list.push(`No máximo ${LIMITS.options} opções (hoje são ${options.length}).`);
+  // Opção repetida confunde o técnico e o relatório ("Sim" e "sim" contam como a mesma).
+  const seen = new Set<string>();
+  const repeated = new Set<string>();
+  for (const option of options) {
+    const key = fold(option);
+    if (seen.has(key)) repeated.add(option);
+    seen.add(key);
+  }
+  if (repeated.size) list.push(`Opção repetida: ${[...repeated].map((o) => `“${o}”`).join(", ")}.`);
+  return list.length ? list.join(" ") : undefined;
+}
+
 export function validate(d: Draft): Problems {
-  const fields: Record<string, string[]> = {};
+  const fields: Record<string, FieldProblems> = {};
   const general: string[] = [];
   const nameLength = d.name.trim().length;
   const name =
     nameLength === 0 ? "Dê um nome ao formulário." : nameLength < 3 ? "O nome precisa de pelo menos 3 letras." : undefined;
   if (d.fields.length > LIMITS.fields) {
-    general.push(`No máximo ${LIMITS.fields} perguntas e seções (hoje são ${d.fields.length}).`);
+    general.push(`Use no máximo ${LIMITS.fields} perguntas e seções (hoje são ${d.fields.length}).`);
   }
   if (!d.fields.some((f) => f.type !== "section")) {
     general.push("Inclua pelo menos uma pergunta: só seções não formam um formulário.");
   }
   for (const f of d.fields) {
-    const list: string[] = [];
-    if (!f.label.trim()) list.push(f.type === "section" ? "Escreva o título da seção." : "Escreva a pergunta.");
-    if (isChoice(f.type)) {
-      const options = f.options.map((o) => o.trim()).filter(Boolean);
-      if (options.length < 2) list.push("Informe pelo menos duas opções, uma por linha.");
-      if (options.length > LIMITS.options) list.push(`No máximo ${LIMITS.options} opções (hoje são ${options.length}).`);
-      const seen = new Set<string>();
-      const repeated = new Set<string>();
-      for (const option of options) {
-        const key = fold(option);
-        if (seen.has(key)) repeated.add(option);
-        seen.add(key);
-      }
-      if (repeated.size) list.push(`Opção repetida: ${[...repeated].map((o) => `“${o}”`).join(", ")}.`);
-    }
+    const problem: FieldProblems = {};
+    if (!f.label.trim()) problem.label = f.type === "section" ? "Escreva o título da seção." : "Escreva a pergunta.";
+    if (isChoice(f.type)) problem.options = optionProblem(f);
     if (f.type === "photo" && f.min_photos > f.max_photos) {
-      list.push(`O mínimo (${f.min_photos}) passa do máximo de fotos (${f.max_photos}).`);
+      problem.photos = `O mínimo (${f.min_photos}) passa do máximo de fotos (${f.max_photos}).`;
     }
-    if (list.length) fields[f.id] = list;
+    if (problem.label || problem.options || problem.photos) fields[f.id] = problem;
   }
   return { name, general, fields };
+}
+
+/** Depois de salvar: a lista e as sugestões de formulário das OS abertas no painel. */
+export function invalidateForms(queryClient: QueryClient) {
+  queryClient.invalidateQueries({ queryKey: ["form-templates"] });
+  // Modelo desativado ou desligado do tipo não pode continuar sugerido numa OS aberta.
+  queryClient.invalidateQueries({
+    predicate: (q) => q.queryKey[0] === "ticket" && q.queryKey[2] === "form-suggestions",
+  });
 }
 
 // ------------------------------------------------------------ rascunho guardado na aba
@@ -298,4 +320,19 @@ export function writeStored(value: StoredDraft | null) {
 export function storedChanges(): StoredDraft | null {
   const stored = readStored();
   return stored && !sameDraft(stored.draft, stored.initial) ? stored : null;
+}
+
+/**
+ * Ponto de partida do editor: o rascunho guardado desta mesma chave (recarregou a página, usou o
+ * Voltar ou o menu no meio da edição) ou, sem ele, o modelo salvo / um formulário em branco.
+ */
+export function resumeDraft(key: string, template: FormTemplate | null): { initial: Draft; draft: Draft; restored: boolean } {
+  const saved = template ? fromTemplate(template) : null;
+  const stored = readStored();
+  if (stored && stored.key === key) {
+    const initial = saved ?? stored.initial;
+    return { initial, draft: stored.draft, restored: !sameDraft(stored.draft, initial) };
+  }
+  const initial = saved ?? emptyDraft();
+  return { initial, draft: initial, restored: false };
 }
