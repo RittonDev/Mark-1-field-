@@ -244,10 +244,15 @@ export function TicketEditor({ ticket, variant, onClose }: { ticket: TicketDetai
         variant === "dialog" ? "h-full" : "min-h-[calc(100vh-7rem)] rounded-2xl border border-line shadow-elev-2",
       )}
     >
-      {/* Azul forte no escuro: o branco fica em 5,2:1 (no brand, 4,1:1). Texto no mínimo white/90 e, no escuro, hover do link mais leve: tudo acima de 4,5:1. */}
+      {/* Azul forte no escuro: o branco fica em 5,2:1 (no brand, 4,1:1). Texto no mínimo white/90 e, no escuro, hover do link mais
+          leve (o sublinhado é que marca o hover): tudo acima de 4,5:1. Foco em branco: o anel padrão é azul e sumiria aqui. */}
       <div className="flex items-center gap-3 bg-brand dark:bg-brand-strong px-5 py-3 text-white">
         {variant === "page" ? (
-          <Link href="/chamados" className="rounded-md p-1 text-white/80 hover:bg-white/10 hover:text-white" aria-label="Voltar para Chamados">
+          <Link
+            href="/chamados"
+            className="rounded-md p-1 text-white/80 hover:bg-white/10 hover:text-white focus-visible:outline-white"
+            aria-label="Voltar para Chamados"
+          >
             <ArrowLeft className="size-4" />
           </Link>
         ) : (
@@ -266,11 +271,16 @@ export function TicketEditor({ ticket, variant, onClose }: { ticket: TicketDetai
           <>
             <Link
               href={`/chamados/${ticket.id}`}
-              className="hidden rounded-md px-2 py-1 text-xs font-medium text-white hover:bg-white/10 dark:hover:bg-white/5 sm:inline-flex"
+              className="hidden rounded-md px-2 py-1 text-xs font-medium text-white hover:bg-white/10 hover:underline focus-visible:outline-white dark:hover:bg-white/5 sm:inline-flex"
             >
               Abrir em página
             </Link>
-            <button type="button" onClick={onClose} className="rounded-md p-1 text-white/85 hover:bg-white/10 hover:text-white" aria-label="Fechar">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md p-1 text-white/85 hover:bg-white/10 hover:text-white focus-visible:outline-white"
+              aria-label="Fechar"
+            >
               <X className="size-5" />
             </button>
           </>
