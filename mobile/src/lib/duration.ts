@@ -1,4 +1,4 @@
-// Duração estimada × real da OS (backend/app/services/durations.py e o DurationCompare da web).
+// Duração estimada × real da OS (backend/app/services/durations.py).
 //
 // O backend soma sozinho o tempo em "Em atendimento": grava `work_started_at` ao entrar
 // e acumula em `work_seconds` ao sair. O `actual_minutes` da API vale para o instante da
