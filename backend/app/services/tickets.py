@@ -11,7 +11,7 @@ from enum import Enum
 from typing import Any
 
 from fastapi import UploadFile
-from sqlalchemy import DateTime, and_, case, func, literal, or_, select, update
+from sqlalchemy import DateTime, and_, case, false, func, literal, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -59,6 +59,7 @@ from app.schemas.ticket import (
     WorklogCreate,
 )
 from app.services import client_report, durations, schedule, sla, storage
+from app.services import payouts as payouts_svc
 from app.services import field as field_rules
 from app.services.errors import NotFound, PermissionDenied, VersionConflict, WorkflowError
 from app.services.realtime import queue_event
@@ -89,7 +90,9 @@ def visibility_clause(user: User) -> ColumnElement[bool] | None:
     if user.role == UserRole.TECHNICIAN:
         # O técnico só vê as OS em que o analista o colocou (responsável ou outro técnico).
         return schedule.works_on(user.id)
-    return or_(Ticket.requester_id == user.id, Ticket.created_by_id == user.id)
+    # Cliente (solicitante): só pelo portal (services/portal), que devolve uma lista fechada de
+    # campos. As rotas internas da OS não mostram nada a ele.
+    return false()
 
 
 def is_helper(user: User, ticket: Ticket) -> bool:
@@ -114,7 +117,7 @@ def can_view(user: User, ticket: Ticket) -> bool:
         return True
     if user.role == UserRole.TECHNICIAN:
         return ticket.assignee_id == user.id or is_helper(user, ticket)
-    return user.id in (ticket.requester_id, ticket.created_by_id)
+    return False  # cliente: só pelo portal
 
 
 TECHNICIAN_TIME = (
@@ -201,7 +204,11 @@ def to_detail(ticket: Ticket, user: User) -> TicketDetail:
         ticket.assignee_id == user.id and ticket.status in client_report.FINISHED
     ):
         detail.report_link = client_report.link_out(ticket)
+    # Valores dos técnicos: a gestão vê todos; o técnico só o dele (o do colega, não).
+    if not user.can_manage_tickets:
+        detail.payouts = []
     if user.role == UserRole.TECHNICIAN:
+        detail.my_payout = payouts_svc.my_payout(ticket, user)
         field_view(detail)
     return detail
 
@@ -520,6 +527,10 @@ def _change_status(
     queue_event(db, "status_changed", ticket, actor, payload)
 
 
+# Usado também pelo portal do cliente (cancelamento pelo próprio cliente).
+change_status = _change_status
+
+
 async def _assign(
     db: AsyncSession,
     ticket: Ticket,
@@ -576,6 +587,10 @@ async def _assign(
         now=now,
     )
     queue_event(db, "assigned", ticket, actor, data, previous_assignee_id=prev_id)
+    # Técnico parceiro recebe por chamado: o valor não pago acompanha o novo responsável (ou
+    # entra o padrão do tipo de serviço).
+    if prev_id != assignee_id:
+        await payouts_svc.on_assignee_changed(db, ticket, prev_id, assignee_id, actor)
 
     if assignee_id is None:
         if ticket.status in FIELD_ACTIVE:
@@ -703,6 +718,8 @@ async def _set_helpers(
             helper_ids=[u.id for u in added],
         )
     ticket.helpers = users
+    if removed:
+        await payouts_svc.on_helpers_removed(db, ticket, [h.id for h in removed])
     now = utcnow()
     data = {"added": [u.name for u in added], "removed": [h.name for h in removed]}
     record_event(db, ticket, actor, TicketEventType.HELPERS_CHANGED, data=data, now=now)

@@ -1,0 +1,238 @@
+"""Portal do cliente: o usuário do cliente abre e acompanha as solicitações da empresa dele.
+
+Antes o cliente mandava tudo pelo WhatsApp ou e-mail e o analista abria a OS à mão. Pelo portal
+(navegador ou app instalado no Windows) ele abre direto: escolhe a loja, descreve o problema e
+acompanha a visita. A central analisa, combina com um técnico e segue pelo fluxo normal.
+
+O cliente vê só a empresa dele, e só uma lista fechada de campos (schemas.portal): nada de
+etiquetas internas, analista, prazos de SLA, custos ou valores do técnico.
+"""
+
+import uuid
+from datetime import datetime
+from typing import Literal
+
+from sqlalchemy import func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.enums import (
+    Impact,
+    TicketEventType,
+    TicketSource,
+    TicketStatus,
+    UserRole,
+)
+from app.db.base import utcnow
+from app.models.customer import Customer, Location
+from app.models.ticket import Ticket, TicketEvent
+from app.models.user import User
+from app.schemas.common import Ref
+from app.schemas.portal import (
+    PortalLocation,
+    PortalMe,
+    PortalRequestCreate,
+    PortalRequestDetail,
+    PortalRequestItem,
+    PortalTimelineEntry,
+)
+from app.schemas.ticket import TicketCreate, format_ticket_code
+from app.services import client_report
+from app.services import tickets as tickets_svc
+from app.services.errors import NotFound, PermissionDenied, WorkflowError
+
+S = TicketStatus
+NO_COMPANY = "Seu usuário ainda não está ligado a uma empresa. Fale com a central da Maxx."
+ONLY_CLIENTS = "O portal de solicitações é para os usuários dos clientes."
+# O cliente cancela enquanto ninguém começou a tratar; depois, fala com a central.
+CANCELLABLE = (S.NEW, S.TRIAGE)
+DONE = (S.RESOLVED, S.CLOSED)
+FINAL = (S.RESOLVED, S.CLOSED, S.CANCELLED)
+
+Scope = Literal["open", "done", "all"]
+
+
+def customer_id_of(user: User) -> uuid.UUID:
+    if user.role != UserRole.REQUESTER:
+        raise PermissionDenied(ONLY_CLIENTS)
+    if user.customer_id is None:
+        raise PermissionDenied(NO_COMPANY)
+    return user.customer_id
+
+
+def _address(location: Location) -> str | None:
+    return ", ".join(part for part in (location.address_line, location.district) if part) or None
+
+
+def location_out(location: Location) -> PortalLocation:
+    return PortalLocation(
+        id=location.id,
+        code=location.code,
+        name=location.name,
+        address=_address(location),
+        city=location.city,
+        state=location.state,
+    )
+
+
+async def me(db: AsyncSession, user: User) -> PortalMe:
+    customer_id = customer_id_of(user)
+    customer = await db.get(Customer, customer_id)
+    if customer is None:
+        raise PermissionDenied(NO_COMPANY)
+    count = await db.scalar(
+        select(func.count())
+        .select_from(Location)
+        .where(Location.customer_id == customer_id, Location.is_active.is_(True))
+    )
+    return PortalMe(customer=Ref(id=customer.id, name=customer.name), locations=count or 0)
+
+
+async def locations(db: AsyncSession, user: User, q: str | None = None, limit: int = 50) -> list[PortalLocation]:
+    customer_id = customer_id_of(user)
+    stmt = (
+        select(Location)
+        .where(Location.customer_id == customer_id, Location.is_active.is_(True))
+        .order_by(Location.name)
+        .limit(limit)
+    )
+    if q and q.strip():
+        term = f"%{q.strip()}%"
+        stmt = stmt.where(
+            or_(Location.name.ilike(term), Location.code.ilike(term), Location.city.ilike(term))
+        )
+    return [location_out(loc) for loc in await db.scalars(stmt)]
+
+
+def to_item(ticket: Ticket) -> PortalRequestItem:
+    return PortalRequestItem(
+        id=ticket.id,
+        code=format_ticket_code(ticket.number),
+        title=ticket.title,
+        status=ticket.status,
+        location=location_out(ticket.location) if ticket.location else None,
+        requester_name=ticket.requester_name,
+        created_at=ticket.created_at,
+        updated_at=ticket.updated_at,
+        scheduled_start=ticket.scheduled_start,
+        scheduled_end=ticket.scheduled_end,
+        technician=ticket.assignee.name if ticket.assignee else None,
+        arrived_at=ticket.arrived_at,
+        resolved_at=ticket.resolved_at,
+        cancelled_at=ticket.cancelled_at,
+    )
+
+
+async def list_requests(
+    db: AsyncSession,
+    user: User,
+    *,
+    scope: Scope = "open",
+    location_id: uuid.UUID | None = None,
+    q: str | None = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> tuple[list[Ticket], int]:
+    customer_id = customer_id_of(user)
+    stmt = select(Ticket).where(Ticket.customer_id == customer_id)
+    if scope == "open":
+        stmt = stmt.where(Ticket.status.not_in(FINAL))
+    elif scope == "done":
+        stmt = stmt.where(Ticket.status.in_(FINAL))
+    if location_id is not None:
+        stmt = stmt.where(Ticket.location_id == location_id)
+    if q and q.strip():
+        term = q.strip()
+        digits = "".join(ch for ch in term if ch.isdigit())
+        conditions = [Ticket.title.ilike(f"%{term}%"), Ticket.client_reference.ilike(f"%{term}%")]
+        if digits:
+            conditions.append(Ticket.number == int(digits))
+        stmt = stmt.where(or_(*conditions))
+    total = await db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    rows = await db.scalars(
+        stmt.order_by(Ticket.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
+    )
+    return list(rows), total
+
+
+async def get_request(db: AsyncSession, user: User, request_id: uuid.UUID) -> Ticket:
+    customer_id = customer_id_of(user)
+    ticket = await db.get(Ticket, request_id)
+    # OS de outra empresa: para o cliente ela simplesmente não existe.
+    if ticket is None or ticket.customer_id != customer_id:
+        raise NotFound("Solicitação não encontrada")
+    return ticket
+
+
+async def to_detail(db: AsyncSession, ticket: Ticket) -> PortalRequestDetail:
+    events = await db.scalars(
+        select(TicketEvent)
+        .where(
+            TicketEvent.ticket_id == ticket.id,
+            TicketEvent.event_type.in_([TicketEventType.CREATED, TicketEventType.STATUS_CHANGED]),
+        )
+        .order_by(TicketEvent.created_at)
+    )
+    timeline: list[PortalTimelineEntry] = []
+    for event in events:
+        if event.event_type == TicketEventType.CREATED:
+            timeline.append(PortalTimelineEntry(status="created", at=event.created_at))
+        elif event.to_value:
+            try:
+                timeline.append(PortalTimelineEntry(status=S(event.to_value), at=event.created_at))
+            except ValueError:
+                continue
+    link = client_report.link_out(ticket) if ticket.status in DONE else None
+    return PortalRequestDetail(
+        **to_item(ticket).model_dump(),
+        description=ticket.description or "",
+        client_reference=ticket.client_reference,
+        contact=ticket.requester_contact,
+        resolution_notes=ticket.resolution_notes if ticket.status in DONE else None,
+        report_url=link.url if link else None,
+        can_cancel=ticket.status in CANCELLABLE,
+        timeline=timeline,
+    )
+
+
+async def create_request(db: AsyncSession, user: User, data: PortalRequestCreate) -> Ticket:
+    customer_id = customer_id_of(user)
+    location = await db.get(Location, data.location_id)
+    if location is None or location.customer_id != customer_id or not location.is_active:
+        raise WorkflowError("Loja não encontrada. Escolha uma das lojas da sua empresa.")
+    payload = TicketCreate(
+        title=data.title.strip(),
+        description=data.description.strip(),
+        impact=Impact.MEDIUM,
+        urgency=data.urgency,
+        source=TicketSource.PORTAL,
+        customer_id=customer_id,
+        location_id=location.id,
+        requester_contact=(data.contact or "").strip() or None,
+        client_reference=(data.client_reference or "").strip() or None,
+    )
+    return await tickets_svc.create_ticket(db, payload, user)
+
+
+async def cancel_request(db: AsyncSession, user: User, ticket: Ticket, reason: str) -> Ticket:
+    """Qualquer usuário da empresa cancela enquanto a central ainda não começou a tratar."""
+    if ticket.status not in CANCELLABLE:
+        raise WorkflowError(
+            "A central já está cuidando desta solicitação. Para cancelar, fale com a Maxx."
+        )
+    now: datetime = utcnow()
+    tickets_svc.change_status(db, ticket, S.CANCELLED, user, now=now, note=reason.strip())
+    ticket.updated_at = now
+    await db.flush()
+    return ticket
+
+
+async def inbox_count(db: AsyncSession) -> int:
+    """Solicitações do portal esperando a central (novas ou em triagem)."""
+    return (
+        await db.scalar(
+            select(func.count())
+            .select_from(Ticket)
+            .where(Ticket.source == TicketSource.PORTAL, Ticket.status.in_(CANCELLABLE))
+        )
+        or 0
+    )
