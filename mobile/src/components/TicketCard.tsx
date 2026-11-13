@@ -1,16 +1,16 @@
 import { router } from "expo-router";
 import { StyleSheet, View } from "react-native";
 import Animated from "react-native-reanimated";
-import { PRIORITY, STATUS } from "../lib/constants";
+import { STATUS } from "../lib/constants";
 import { addressOf } from "../lib/device-actions";
 import { actualMinutes } from "../lib/duration";
 import { arrivalUrgency } from "../lib/field";
 import { isHelper } from "../lib/lists";
 import { useSession } from "../lib/session";
-import { formatMinutes, formatRelative, formatShort, formatTime } from "../lib/format";
+import { formatMinutes, formatShort, formatTime } from "../lib/format";
 import type { LocalTicket } from "../lib/syncTypes";
 import { RADIUS, readable, useStyles, useTheme, type Palette } from "../theme/theme";
-import { PriorityBadge, ProjectBadge, SlaBadge, StatusBadge } from "./badges";
+import { StatusBadge } from "./badges";
 import { Icon } from "./Icon";
 import { PressableScale, useSwapMotion } from "./motion";
 import { Text } from "./Text";
@@ -39,13 +39,9 @@ export function TicketCard({
   const site = ticket.location ? [ticket.location.code, ticket.location.name].filter(Boolean).join(" ") : null;
   const client = [ticket.customer?.name, site].filter(Boolean).join(" · ");
   const address = ticket.service_address?.trim() || addressOf(ticket.location);
-  const due = ticket.resolution_due_at && !ticket.sla_paused_at ? `solução ${formatRelative(ticket.resolution_due_at, now)}` : null;
-  // Duração estimada ajuda a planejar o dia; em atendimento, mostra o tempo real correndo.
-  const duration = ticket.work_started_at
-    ? `em atendimento ${formatMinutes(actualMinutes(ticket, now))}`
-    : ticket.estimated_minutes
-      ? `${formatMinutes(ticket.estimated_minutes)} estimados`
-      : null;
+  // Em atendimento, o tempo dele correndo; antes, o horário da visita (até que horas).
+  const until = ticket.scheduled_end ? `até ${formatTime(ticket.scheduled_end)}` : null;
+  const duration = ticket.work_started_at ? `em atendimento ${formatMinutes(actualMinutes(ticket, now))}` : until;
   const when = [
     showTime && ticket.scheduled_start ? (showDate ? formatShort(ticket.scheduled_start) : formatTime(ticket.scheduled_start)) : null,
     duration,
@@ -60,12 +56,11 @@ export function TicketCard({
       style={styles.card}
       pressedStyle={{ backgroundColor: c.surface2 }}
     >
-      <View style={[styles.accent, { backgroundColor: readable(PRIORITY[ticket.priority].color, c) }]} />
+      <View style={[styles.accent, { backgroundColor: readable(STATUS[ticket.status]?.color ?? c.primary, c) }]} />
       <View style={styles.body}>
         <View style={styles.header}>
           <Text style={[styles.code, { flexShrink: 1 }]} numberOfLines={1}>
             {ticket.code}
-            {ticket.client_reference ? <Text style={styles.clientRef}> · Ref. {ticket.client_reference}</Text> : null}
           </Text>
           {when ? (
             <Text style={[styles.schedule, ticket.work_started_at ? { color: c.warning } : null]} numberOfLines={1}>
@@ -99,18 +94,13 @@ export function TicketCard({
           </Animated.View>
           {helping ? <HelperBadge /> : null}
           <AuthorizationBadge status={ticket.authorization_status} />
-          <PriorityBadge priority={ticket.priority} />
-          <SlaBadge ticket={ticket} now={now} />
-          <ProjectBadge project={ticket.project} />
         </View>
-        {due || ticket.pending_ops ? (
+        {ticket.pending_ops ? (
           <View style={styles.footer}>
-            {due ? <Text style={styles.due}>{due}</Text> : <View />}
-            {ticket.pending_ops ? (
-              <Text style={styles.pending}>
-                {ticket.pending_ops === 1 ? "1 ação aguardando envio" : `${ticket.pending_ops} ações aguardando envio`}
-              </Text>
-            ) : null}
+            <View />
+            <Text style={styles.pending}>
+              {ticket.pending_ops === 1 ? "1 ação aguardando envio" : `${ticket.pending_ops} ações aguardando envio`}
+            </Text>
           </View>
         ) : null}
       </View>
@@ -157,14 +147,12 @@ const makeStyles = (c: Palette) =>
     body: { flex: 1, padding: 16, paddingLeft: 14, gap: 6 },
     header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 },
     code: { fontSize: 12, fontWeight: "700", color: c.inkMuted, fontVariant: ["tabular-nums"], letterSpacing: 0.3 },
-    clientRef: { fontWeight: "500", color: c.inkSubtle, letterSpacing: 0 },
     schedule: { fontSize: 12, fontWeight: "600", color: c.brandInk, flexShrink: 1, fontVariant: ["tabular-nums"] },
     title: { fontSize: 16, fontWeight: "600", color: c.ink, lineHeight: 22 },
     line: { flexDirection: "row", alignItems: "center", gap: 6 },
     lineText: { fontSize: 13, color: c.inkMuted, flex: 1 },
     badges: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 4 },
     footer: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 2 },
-    due: { fontSize: 12, color: c.inkMuted, fontVariant: ["tabular-nums"] },
     pending: { fontSize: 12, fontWeight: "600", color: c.warning },
     timelineRow: { flexDirection: "row", gap: 12 },
     rail: { width: 52, alignItems: "center", paddingTop: 16 },

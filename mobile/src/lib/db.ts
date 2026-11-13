@@ -120,6 +120,43 @@ const MIGRATIONS: string[] = [
   `
   ALTER TABLE photos ADD COLUMN part_op_id TEXT;
   `,
+  // 5: o técnico é terceiro e o servidor passou a mandar só o básico da OS. Tira do aparelho o
+  // que veio antes (notas da central, horas de colegas, prazos de SLA, analista, solicitante,
+  // documentos do escritório) sem apagar as OS — o técnico pode estar sem rede — e zera o
+  // cursor, para o próximo sync trazer tudo de novo já na versão enxuta.
+  `
+  DELETE FROM comments WHERE local_state IS NULL OR local_state = 'sent';
+  DELETE FROM worklogs WHERE local_state IS NULL;
+  UPDATE tickets SET
+    server_json = json_set(server_json,
+      '$.owner', NULL, '$.team', NULL, '$.project', NULL, '$.category', NULL, '$.tags', json('[]'),
+      '$.client_reference', NULL, '$.requester_name', NULL, '$.requester', NULL,
+      '$.requester_contact', NULL, '$.created_by', NULL, '$.response_due_at', NULL,
+      '$.resolution_due_at', NULL, '$.first_response_at', NULL, '$.sla_paused_at', NULL,
+      '$.response_violation_reason', NULL, '$.resolution_violation_reason', NULL,
+      '$.violation_note', NULL, '$.recurrence', NULL, '$.recurrence_30d', 0, '$.legacy', NULL,
+      '$.authorized_by_name', NULL, '$.authorization_channel', NULL, '$.authorization_ref', NULL,
+      '$.authorized_by', NULL, '$.authorized_at', NULL, '$.location.document', NULL,
+      '$.response_breached', json('false'), '$.resolution_breached', json('false'),
+      '$.violation_reason_pending', json('false')),
+    json = json_set(json,
+      '$.owner', NULL, '$.team', NULL, '$.project', NULL, '$.category', NULL, '$.tags', json('[]'),
+      '$.client_reference', NULL, '$.requester_name', NULL, '$.requester', NULL,
+      '$.requester_contact', NULL, '$.created_by', NULL, '$.response_due_at', NULL,
+      '$.resolution_due_at', NULL, '$.first_response_at', NULL, '$.sla_paused_at', NULL,
+      '$.response_violation_reason', NULL, '$.resolution_violation_reason', NULL,
+      '$.violation_note', NULL, '$.recurrence', NULL, '$.recurrence_30d', 0, '$.legacy', NULL,
+      '$.authorized_by_name', NULL, '$.authorization_channel', NULL, '$.authorization_ref', NULL,
+      '$.authorized_by', NULL, '$.authorized_at', NULL, '$.location.document', NULL,
+      '$.response_breached', json('false'), '$.resolution_breached', json('false'),
+      '$.violation_reason_pending', json('false'));
+  UPDATE kv SET value = (
+    SELECT json_group_array(json(each.value)) FROM json_each(kv.value) AS each
+     WHERE json_extract(each.value, '$.kind') IN ('photo', 'signature')
+        OR json_extract(each.value, '$.form_id') IS NOT NULL
+  ) WHERE key LIKE 'attachments:%' AND json_valid(value);
+  DELETE FROM kv WHERE key = 'sync_since';
+  `,
 ];
 
 let dbPromise: Promise<DB> | null = null;

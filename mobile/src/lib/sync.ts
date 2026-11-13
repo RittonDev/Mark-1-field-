@@ -514,30 +514,6 @@ async function refreshViolationReasons() {
   }
 }
 
-type Recurrence = NonNullable<TicketDetail["recurrence"]>;
-const recurrenceKey = (ticketId: UUID) => `recurrence:${ticketId}`;
-
-/** Reincidência guardada no aparelho (a última vista online), para mostrar offline. */
-export async function cachedRecurrence(ticketId: UUID): Promise<Recurrence | null> {
-  try {
-    const raw = await getKv(recurrenceKey(ticketId));
-    return raw ? (JSON.parse(raw) as Recurrence) : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * A reincidência não vem no sync (é calculada só em GET /tickets/{id}): busca online ao abrir a OS
- * e guarda no aparelho. Sem rede, fica a última guardada.
- */
-export async function refreshRecurrence(ticketId: UUID): Promise<Recurrence | null> {
-  const detail = await api.get<TicketDetail>(`/tickets/${ticketId}`);
-  const recurrence = detail.recurrence ?? { count_30d: detail.recurrence_30d ?? 0, previous: [] };
-  await setKv(recurrenceKey(ticketId), JSON.stringify(recurrence));
-  return recurrence;
-}
-
 /**
  * Confere uma OS direto na API. Sem acesso (o técnico saiu da visita ou ela foi reatribuída), sai do
  * aparelho: o `revoked_ticket_ids` do pull só cobre reatribuição, não a saída da equipe da visita.

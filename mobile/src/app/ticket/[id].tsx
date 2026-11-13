@@ -4,21 +4,20 @@ import { KeyboardAvoidingView, Platform, RefreshControl, ScrollView, StyleSheet,
 import Animated, { FadeInDown, useReducedMotion } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ActionSheet, type SheetAction } from "../../components/ActionSheet";
-import { PriorityBadge, ProjectBadge, SlaBadge, StatusBadge } from "../../components/badges";
+import { StatusBadge } from "../../components/badges";
 import { ConnectionBar } from "../../components/ConnectionBar";
 import { FieldStepper } from "../../components/FieldStepper";
 import { Icon, type IconName } from "../../components/Icon";
 import { PressableScale, useSwapMotion } from "../../components/motion";
 import { DetailSkeleton } from "../../components/Skeleton";
 import { Text } from "../../components/Text";
-import { DurationCompare } from "../../components/ticket/DurationCompare";
 import { ArrivalResult, AuthorizationNotice, FieldClockLine, OnsiteTimer } from "../../components/ticket/FieldClock";
 import { FormsCard } from "../../components/ticket/FormsCard";
 import { PartRequestSheet, PartRequestsCard } from "../../components/ticket/PartRequests";
-import { QuickActions, RecurrenceCard } from "../../components/ticket/QuickActions";
+import { QuickActions } from "../../components/ticket/QuickActions";
 import { ReportShareCard } from "../../components/ticket/ReportShareCard";
 import { HelperBadge, VisitNoteCard, VisitTeamCard } from "../../components/ticket/VisitInfo";
-import { InfoPanel } from "../../components/ticket/InfoPanel";
+import { InfoPanel, visitWindow } from "../../components/ticket/InfoPanel";
 import { PhotosPanel } from "../../components/ticket/PhotosPanel";
 import { WorklogsPanel } from "../../components/ticket/WorklogsPanel";
 import { TransitionModal } from "../../components/TransitionModal";
@@ -30,9 +29,8 @@ import { getTicket, listSignatures } from "../../lib/db";
 import { addressOf } from "../../lib/device-actions";
 import { authorizationBlock } from "../../lib/field";
 import { concludeBlock } from "../../lib/forms";
-import { formatDateTime, formatRelative, formatShort } from "../../lib/format";
 import { haptic } from "../../lib/haptics";
-import { isDone, isHelper } from "../../lib/lists";
+import { awaitingReschedule, isDone, isHelper } from "../../lib/lists";
 import { UNPRODUCTIVE_FROM } from "../../lib/ops";
 import { useSession } from "../../lib/session";
 import { isOnline, requestSync, useSyncStatus } from "../../lib/sync";
@@ -110,7 +108,6 @@ export default function TicketScreen() {
   const isMine = current.assignee?.id === user.id;
   // Auxiliar da visita: vê a OS, aponta horas e manda fotos; status, formulários e assinatura são do responsável.
   const helping = isHelper(current, user);
-  const clientRef = current.client_reference?.trim() || null;
   const conclude = concludeBlock(current, (pendingSignatures ?? []).length > 0);
   // Concluir espera formulários/assinatura; deslocamento e check-in esperam a autorização do cliente.
   const blockedFor = (to: TicketStatus) =>
@@ -185,7 +182,6 @@ export default function TicketScreen() {
               <View style={styles.topRow}>
                 <Text style={[styles.code, { flexShrink: 1 }]} numberOfLines={1}>
                   {current.code}
-                  {clientRef ? <Text style={styles.clientRef}> · Ref. cliente {clientRef}</Text> : null}
                 </Text>
                 <Animated.View key={current.status} entering={swap.entering} exiting={swap.exiting}>
                   <StatusBadge status={current.status} />
@@ -215,43 +211,31 @@ export default function TicketScreen() {
                   {current.scheduled_start ? (
                     <View style={styles.line}>
                       <Icon name="clock" size={16} color={c.inkSubtle} />
-                      <Text style={[styles.lineText, styles.tabular]}>Visita {formatShort(current.scheduled_start)}</Text>
+                      <Text style={[styles.lineText, styles.tabular]}>{visitWindow(current)}</Text>
                     </View>
                   ) : null}
                 </View>
               ) : null}
               <QuickActions ticket={current} />
-              <View style={styles.badges}>
-                {helping ? <HelperBadge /> : null}
-                <PriorityBadge priority={current.priority} />
-                <SlaBadge ticket={current} now={now} />
-                <ProjectBadge project={current.project} />
-              </View>
+              {helping ? (
+                <View style={styles.badges}>
+                  <HelperBadge />
+                </View>
+              ) : null}
               {/* Promessa de campo: autorização do cliente, prazo de chegada e resultado do check-in. */}
               <AuthorizationNotice ticket={current} />
               {current.arrived_at ? <ArrivalResult ticket={current} /> : <FieldClockLine ticket={current} now={now} size={14} />}
               <View style={styles.divider} />
               <FieldStepper ticket={current} />
               <OnsiteTimer ticket={current} now={now} />
-              {current.work_started_at ? <DurationCompare ticket={current} now={now} /> : null}
-              {current.resolution_due_at && !current.resolved_at && !current.sla_paused_at ? (
-                <Text style={[styles.meta, styles.tabular]}>Prazo de solução {formatRelative(current.resolution_due_at, now)}</Text>
-              ) : null}
-              {current.violation_reason_pending ? (
-                <Text style={styles.violationPending}>Pendente de justificativa de SLA</Text>
-              ) : null}
               {current.pending_ops > 0 ? (
                 <Text style={styles.pending}>
                   {current.pending_ops === 1 ? "1 ação aguardando envio" : `${current.pending_ops} ações aguardando envio`}
                   {online ? "" : " (sem conexão)"}
                 </Text>
               ) : null}
-              {(current.unproductive_count ?? 0) > 0 ? (
-                <Text style={styles.unproductive}>
-                  {current.unproductive_count === 1 ? "1 visita improdutiva" : `${current.unproductive_count} visitas improdutivas`}
-                  {current.last_unproductive_at ? ` · última em ${formatDateTime(current.last_unproductive_at)}` : ""}
-                  {!current.scheduled_start && current.status === "assigned" ? " · aguardando reagendamento pela central" : ""}
-                </Text>
+              {awaitingReschedule(current) ? (
+                <Text style={styles.unproductive}>Visita improdutiva: aguardando a central reagendar.</Text>
               ) : null}
             </Card>
           </Animated.View>
@@ -266,7 +250,6 @@ export default function TicketScreen() {
           {/* Recado do analista para o técnico: antes de tudo o que vem depois do cabeçalho. */}
           <VisitNoteCard note={current.visit_note} />
           <VisitTeamCard ticket={current} userId={user.id} />
-          <RecurrenceCard ticket={current} />
 
           {isMine ? (
             <Animated.View entering={enter(1)} style={{ gap: 12 }}>
@@ -299,7 +282,7 @@ export default function TicketScreen() {
                 { value: "photos", label: "Fotos" },
               ]}
             />
-            {tab === "info" ? <InfoPanel ticket={current} now={now} /> : null}
+            {tab === "info" ? <InfoPanel ticket={current} /> : null}
             {tab === "worklogs" ? <WorklogsPanel ticket={current} user={user} /> : null}
             {tab === "photos" ? <PhotosPanel ticket={current} /> : null}
           </Animated.View>
@@ -356,7 +339,6 @@ const makeStyles = (c: Palette) =>
     content: { padding: 16, gap: 12 },
     topRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
     code: { fontSize: 13, fontWeight: "700", color: c.inkMuted, fontVariant: ["tabular-nums"], letterSpacing: 0.3 },
-    clientRef: { fontSize: 12, fontWeight: "500", color: c.inkSubtle, letterSpacing: 0 },
     title: { fontSize: 20, fontWeight: "700", color: c.ink, lineHeight: 26, letterSpacing: -0.2 },
     line: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
     lineStrong: { fontSize: 14, fontWeight: "600", color: c.ink, flex: 1, lineHeight: 20 },
@@ -366,7 +348,6 @@ const makeStyles = (c: Palette) =>
     divider: { height: StyleSheet.hairlineWidth, backgroundColor: c.line, marginVertical: 4 },
     meta: { fontSize: 13, color: c.inkMuted },
     pending: { fontSize: 13, fontWeight: "600", color: c.warning },
-    violationPending: { fontSize: 12, color: c.inkMuted, fontStyle: "italic" },
     unproductive: { fontSize: 12, color: c.danger, fontWeight: "600" },
     bar: {
       position: "absolute",

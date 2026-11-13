@@ -6,12 +6,11 @@ import { getKv, setKv } from "../../lib/db";
 import {
   arrivalClock,
   arrivalResult,
-  AUTH_CHANNEL,
   onsiteClock,
   type ClockTone,
   type OnsiteState,
 } from "../../lib/field";
-import { formatMinutes, formatShort, formatTime } from "../../lib/format";
+import { formatMinutes, formatTime } from "../../lib/format";
 import { haptic } from "../../lib/haptics";
 import type { TicketDetail, TicketListItem } from "../../lib/types";
 import { RADIUS, tint, useStyles, useTheme, type Palette } from "../../theme/theme";
@@ -179,18 +178,14 @@ export function AuthorizationNotice({ ticket }: { ticket: TicketDetail }) {
   const status = ticket.authorization_status;
   if (!status || status === "not_required") return null;
   if (status === "authorized") {
-    const details = [
-      ticket.authorized_by_name ? `por ${ticket.authorized_by_name}` : null,
-      ticket.authorization_channel ? `via ${AUTH_CHANNEL[ticket.authorization_channel] ?? ticket.authorization_channel}` : null,
-      ticket.authorized_at ? formatShort(ticket.authorized_at) : null,
-    ].filter(Boolean);
+    // Quem autorizou, por onde e quando ficam com a central (o técnico é terceiro).
     return (
       <View style={[styles.line, { alignItems: "flex-start" }]}>
         <View style={{ paddingTop: 1 }}>
           <Icon name="shield" size={16} color={c.success} strokeWidth={2} />
         </View>
         <Text style={[styles.lineText, { color: c.success, fontWeight: "600", lineHeight: 18 }]}>
-          Autorizada{details.length ? ` ${details.join(" · ")}` : ""}
+          Visita autorizada pelo cliente
         </Text>
       </View>
     );
