@@ -149,6 +149,19 @@ def should_deliver(
     return user_id in (aud.get("requester_id"), aud.get("created_by_id"))
 
 
+# Técnico é terceiro: o app só precisa saber que a OS mudou (e dispara o sync); o conteúdo do
+# evento (quem fez, dados internos, prioridade, equipe) fica com a gestão.
+_FIELD_EVENT_KEYS = ("type", "ticket_id", "ticket_code", "status", "assignee_id", "actor_id", "version", "occurred_at")
+
+
+def field_event(event: dict[str, Any]) -> dict[str, Any]:
+    out = {k: event.get(k) for k in _FIELD_EVENT_KEYS}
+    data = event.get("data") or {}
+    # Mudança na equipe da visita: o app confere se entrou ou saiu dela.
+    out["data"] = {"added_ids": data["added_ids"]} if "added_ids" in data else {}
+    return out
+
+
 @dataclass(eq=False)
 class Connection:
     ws: WebSocket
@@ -173,13 +186,14 @@ class ConnectionManager:
 
     async def dispatch(self, event: dict[str, Any]) -> None:
         public = {k: v for k, v in event.items() if k != "audience"}
+        field = field_event(public)
         for conn in list(self._conns):
             if not should_deliver(
                 user_id=conn.user_id, role=conn.role, team_id=conn.team_id, event=event
             ):
                 continue
             try:
-                await conn.ws.send_json(public)
+                await conn.ws.send_json(field if conn.role == UserRole.TECHNICIAN else public)
             except Exception:  # socket fechado no meio do envio
                 self.remove(conn)
 

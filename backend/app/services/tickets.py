@@ -178,6 +178,60 @@ def to_detail(ticket: Ticket, user: User) -> TicketDetail:
         ticket.assignee_id == user.id and ticket.status in client_report.FINISHED
     ):
         detail.report_link = client_report.link_out(ticket)
+    if user.role == UserRole.TECHNICIAN:
+        field_view(detail)
+    return detail
+
+
+def field_view(detail: TicketDetail) -> TicketDetail:
+    """O técnico é terceiro: recebe só o necessário para a visita.
+
+    Fica: cliente, local (endereço e contato da loja), agenda, escopo (título, descrição, tipo de
+    serviço, recado), o fluxo de campo (status, chegada, permanência, autorização sim/não) e o
+    próprio trabalho (formulários, fotos, assinatura, horas, peças, solução). Sai o que é da
+    gestão: prazos e motivos de SLA, analista, equipe, projeto, etiquetas, solicitante, quem abriu,
+    nº do chamado do cliente, detalhes da autorização, CNPJ da loja, reincidência e dados migrados.
+    """
+    blank: dict[str, Any] = {
+        "owner": None,
+        "team": None,
+        "project": None,
+        "category": None,
+        "tags": [],
+        "client_reference": None,
+        "requester_name": None,
+        "requester": None,
+        "requester_contact": None,
+        "created_by": None,
+        "asset": None,
+        "response_due_at": None,
+        "resolution_due_at": None,
+        "first_response_at": None,
+        "sla_paused_at": None,
+        "sla_paused_seconds": 0,
+        "response_violation_reason": None,
+        "resolution_violation_reason": None,
+        "violation_note": None,
+        "reopen_count": 0,
+        "recurrence_30d": 0,
+        "recurrence": None,
+        "legacy": None,
+        "authorized_by_name": None,
+        "authorization_channel": None,
+        "authorization_ref": None,
+        "authorized_by": None,
+        "authorized_at": None,
+    }
+    for key, value in blank.items():
+        setattr(detail, key, value)
+    if detail.location is not None:
+        detail.location = detail.location.model_copy(update={"document": None})
+    # Colegas da visita: só o nome (sem e-mail).
+    detail.helpers = [h.model_copy(update={"email": ""}) for h in detail.helpers]
+    if detail.assignee is not None:
+        detail.assignee = detail.assignee.model_copy(update={"email": ""})
+    for expense in detail.expenses:
+        expense.created_by = None
     return detail
 
 

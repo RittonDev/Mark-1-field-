@@ -63,4 +63,16 @@ TicketManagerUser = Annotated[
     User, Depends(require_roles(UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.ANALYST))
 ]
 ManagerUser = Annotated[User, Depends(require_roles(UserRole.ADMIN, UserRole.SUPERVISOR))]
+
+
+async def _not_technician(user: Annotated[User, Depends(get_current_user)]) -> User:
+    """O técnico é terceiro: no app ele só vê as OS dele (cliente, local, agenda e escopo).
+    Cadastros, usuários, painéis, notas e histórico das OS ficam fora do alcance dele."""
+    if user.role == UserRole.TECHNICIAN:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Sem permissão para esta ação")
+    return user
+
+
+# Qualquer usuário logado, menos o técnico (ex.: rotas que o solicitante também usa).
+NoTechnicianUser = Annotated[User, Depends(_not_technician)]
 AdminUser = Annotated[User, Depends(require_roles(UserRole.ADMIN))]
