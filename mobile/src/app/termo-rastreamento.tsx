@@ -93,7 +93,8 @@ export default function TrackingConsentScreen() {
               : "Inicie a jornada quando começar o trabalho.",
         });
       }
-      router.back();
+      if (router.canGoBack()) router.back();
+      else router.replace("/");
     } catch (e) {
       setError(errorMessage(e));
       setBusy(false);
@@ -141,7 +142,7 @@ export default function TrackingConsentScreen() {
           loading={busy}
         />
       )}
-      <Button title={acceptedAt ? "Fechar" : "Agora não"} variant="ghost" onPress={() => router.back()} disabled={busy} />
+      <Button title={acceptedAt ? "Fechar" : "Agora não"} variant="ghost" onPress={() => (router.canGoBack() ? router.back() : router.replace("/"))} disabled={busy} />
       {!acceptedAt ? (
         <Text style={styles.footnote}>Sem o aceite você usa o app normalmente, mas não consegue iniciar a jornada.</Text>
       ) : null}

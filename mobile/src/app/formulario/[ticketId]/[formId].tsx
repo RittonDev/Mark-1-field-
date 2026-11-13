@@ -245,7 +245,11 @@ function FormEditor({ ticket, form }: { ticket: LocalTicket; form: TicketForm })
         tone: "success",
         description: online ? undefined : "Salvo no aparelho; será enviado quando houver conexão.",
       });
-      if (complete) router.back();
+      // Aberto por link direto (sem histórico), volta para a OS.
+      if (complete) {
+        if (router.canGoBack()) router.back();
+        else router.replace({ pathname: "/ticket/[id]", params: { id: ticket.id } });
+      }
     } catch (e) {
       savedKey.current = null;
       setError(errorMessage(e));

@@ -63,7 +63,8 @@ export default function SignatureScreen() {
       });
       haptic.success();
       showSuccess("Assinatura salva", online ? "Agora você já pode concluir a OS." : "Salva no aparelho; será enviada quando houver conexão.");
-      router.back();
+      if (router.canGoBack()) router.back();
+      else router.replace({ pathname: "/ticket/[id]", params: { id: String(ticketId) } });
     } catch (e) {
       setError(errorMessage(e));
       setBusy(false);
