@@ -15,7 +15,7 @@ Autenticação: `Authorization: Bearer <access_token>`. Erros seguem `{"detail":
 | Supervisor | `supervisor` | tudo | o mesmo do analista + grupos e categorias |
 | Analista | `analyst` | **todas as OS** (interface web) | gestão completa das OS: abrir, editar, atribuir a qualquer técnico ou analista, mudar qualquer status, comentar, apontar horas; cadastrar clientes, locais e ativos |
 | Técnico de campo (terceiro) | `technician` | **só as OS atribuídas a ele** (app mobile), e delas **só o básico**: cliente, local (nome e endereço da loja), agenda e escopo; grupo ou fila não bastam | sair, iniciar e concluir a visita, formulários, fotos, assinatura e pedir peça **nas OS dele**. Nunca mexe no horário (agenda, pausa e horas são da central; o tempo dele corre do início à conclusão). Não assume nem se atribui OS: quem coloca o técnico na OS é a gestão. Sem acompanhamentos (a central fala com ele pelo WhatsApp) |
-| Solicitante | `requester` | OS que abriu | abrir OS, comentar (público), cancelar enquanto nova, aceitar (fechar) ou recusar (reabrir) solução |
+| Cliente (portal) | `requester` | **pelo portal**, as solicitações de todas as lojas da empresa dele (`users.customer_id`), com lista fechada de campos | abrir solicitação e acompanhar a visita; cancelar enquanto a central não começou (nova ou em triagem). Não usa as rotas internas: `/tickets`, cadastros, painel e grupos respondem 403 (ou 404 por id) |
 
 **Técnico é terceiro: só o básico.** Na OS (detalhe, sync e respostas do push) o servidor zera para o
 técnico: prazos e motivos de SLA, analista (`owner`), grupo, projeto, categoria, etiquetas, solicitante,
@@ -649,3 +649,46 @@ Grafia de nome próprio = iniciais maiúsculas, o resto minúsculo e os conector
 
 A importação padroniza no fim, antes de recalcular a região dos técnicos. Para rodar avulso (padroniza e recalcula as
 bases): `python -m app.services.cities`.
+
+## Portal do cliente e valor por chamado (2026-11-13)
+
+**Por quê.** Os chamados chegavam pelo WhatsApp e por e-mail e o analista digitava a OS. Pelo portal o
+próprio cliente abre (no navegador ou no app instalado no Windows), a central analisa, chama um técnico
+parceiro pelo WhatsApp e, quando ele topa, coloca na OS. Os técnicos não têm vínculo: recebem por chamado.
+
+### Portal (papel `requester`, ligado à empresa por `users.customer_id`)
+- `GET /portal/me` → `{customer: {id, name}, locations}`. Sem empresa → 403 com a orientação.
+- `GET /portal/locations?q=` → lojas ativas da empresa (`id, code, name, address, city, state`).
+- `GET /portal/requests?scope=open|done|all&location_id=&q=&page=&page_size=` → `Page[PortalRequestItem]`
+  (todas da empresa; `q` busca no assunto, no nº da OS e no nº do chamado do cliente).
+- `POST /portal/requests` `{location_id, title, description?, urgency: low|medium|high, contact?, client_reference?}`
+  → 201 `PortalRequestDetail`. Vira OS `source=portal`, `status=new`, prioridade pela matriz (impacto médio ×
+  urgência), sem analista e sem técnico. Loja de outra empresa → 422.
+- `GET /portal/requests/{id}` → `PortalRequestDetail` (`timeline` de status, `technician`, visita,
+  `resolution_notes` e `report_url` quando concluída, `can_cancel`). De outra empresa → 404.
+- `POST /portal/requests/{id}/cancel` `{reason}` → só com a OS `new`/`triage` (depois, 422: fala com a central).
+- `GET /portal/inbox-count` (gestão) → `{pending}`: OS do portal esperando a central (menu "Solicitações").
+- O portal devolve só os campos acima: nada de etiquetas, analista, grupo, prazos de SLA, custos, pedidos de
+  peça ou valores do técnico.
+- `GET /tickets?source=portal` filtra a lista interna pela origem (a tela "Solicitações" usa isso).
+- Usuários: `POST/PATCH /users` aceitam `customer_id`; para `role=requester` é obrigatório (422 sem ele) e para
+  os outros papéis é limpo.
+
+### App instalável (Windows)
+`/manifest.webmanifest` (ícone oficial, `start_url=/`, atalho "Nova solicitação") e `/sw.js` (só mostra um
+aviso quando a página abre sem internet; não guarda dados em cache). No Edge/Chrome aparece "Instalar no
+computador" no portal: vira app com ícone na área de trabalho e no menu Iniciar.
+
+### Valor por chamado (técnicos parceiros)
+- `ServiceType.technician_fee` (opcional): valor padrão ao colocar o técnico na OS.
+- `PUT /tickets/{id}/payouts/{technician_id}` `{amount, note?}` (gestão) → `Payout[]`. O técnico precisa estar
+  na OS (responsável ou junto); pago não muda (422: desfaça antes). `DELETE` tira o valor ainda não pago.
+- Regras automáticas: ao colocar o responsável, entra o padrão do tipo de serviço; trocar o responsável leva o
+  valor ainda não pago para o novo técnico; quem sai da visita perde o valor não pago (o pago fica).
+- `TicketDetail.payouts` (só a gestão) e `TicketDetail.my_payout` (só o técnico, o dele).
+- `GET /payouts?technician_id=&status=pending|paid&concluded=&date_from=&date_to=` (gestão) → `{items, summary}`
+  com `summary = {to_pay (OS concluídas), expected (OS abertas), paid}`; o período vale pela conclusão da OS.
+- `POST /payouts/pay` e `POST /payouts/unpay` `{ids}` → `{changed}`.
+- `GET /me/earnings?month=AAAA-MM` (técnico) → os chamados dele, o resumo e os reembolsos (custos extras
+  aprovados a receber e pagos no mês).
+- Mudar o valor ou pagar marca a OS como alterada (`updated_at`), para o app do técnico baixar de novo.

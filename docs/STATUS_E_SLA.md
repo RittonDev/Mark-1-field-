@@ -58,7 +58,7 @@ uma OS fechada ou cancelada (`closed`/`cancelled → reopened`). A tabela abaixo
 |---|---|
 | admin, supervisor, analista | qualquer OS, inclusive reabrir fechada ou cancelada |
 | técnico de campo | só as OS em que é o responsável, e só sair, iniciar e concluir (`en_route`, `in_progress`, `resolved`) |
-| solicitante | só as próprias: cancelar enquanto `new`/`triage`; fechar ou reabrir quando `resolved` (depois de fechada, só a central reabre) |
+| cliente (portal) | pelo portal: abrir e cancelar enquanto `new`/`triage` (as rotas internas não atendem o cliente) |
 
 ## Prioridade (matriz ITIL)
 
