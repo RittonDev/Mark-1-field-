@@ -28,7 +28,7 @@ import { useAuth } from "@/lib/auth";
 import { isManager, ROLE } from "@/lib/constants";
 import { formatDateTime, initials } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
-import { useTeams, useUsers } from "@/lib/queries";
+import { useCustomers, useTeams, useUsers } from "@/lib/queries";
 import { sessionStore } from "@/lib/session";
 import type { Team, User, UserRole } from "@/lib/types";
 
@@ -54,8 +54,12 @@ function UserDialog({ user, onClose }: { user: User | null; onClose: () => void 
     phone: user?.phone ?? "",
     job_title: user?.job_title ?? "",
     team_id: user?.team_id ?? "",
+    customer_id: user?.customer_id ?? "",
     is_active: user?.is_active ?? true,
   });
+  // Usuário do cliente fica ligado à empresa (o portal mostra as solicitações de todas as lojas dela).
+  const isClient = form.role === "requester";
+  const customers = useCustomers();
   const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) =>
     setForm((f) => ({ ...f, [key]: value }));
 
@@ -67,7 +71,8 @@ function UserDialog({ user, onClose }: { user: User | null; onClose: () => void 
         role: form.role,
         phone: form.phone.trim() || null,
         job_title: form.job_title.trim() || null,
-        team_id: form.team_id || null,
+        team_id: isClient ? null : form.team_id || null,
+        customer_id: isClient ? form.customer_id || null : null,
       };
       if (form.password) body.password = form.password;
       if (editing) {
@@ -137,6 +142,18 @@ function UserDialog({ user, onClose }: { user: User | null; onClose: () => void 
             ))}
           </Select>
         </Field>
+        {isClient ? (
+          <Field label="Empresa do cliente" required hint="No portal ele vê e abre as solicitações de todas as lojas dela.">
+            <Select value={form.customer_id} onChange={(e) => set("customer_id", e.target.value)} required>
+              <option value="">Escolha a empresa</option>
+              {customers.data?.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        ) : (
         <Field label="Grupo técnico">
           <Select value={form.team_id} onChange={(e) => set("team_id", e.target.value)}>
             <option value="">Sem grupo</option>
@@ -147,6 +164,7 @@ function UserDialog({ user, onClose }: { user: User | null; onClose: () => void 
             ))}
           </Select>
         </Field>
+        )}
         <Field label="Cargo">
           <Input value={form.job_title} onChange={(e) => set("job_title", e.target.value)} />
         </Field>
@@ -284,7 +302,7 @@ export default function UsersPage() {
                 <tr>
                   <Th>Usuário</Th>
                   <Th>Papel</Th>
-                  <Th>Grupo</Th>
+                  <Th>Grupo / empresa</Th>
                   <Th>Último acesso</Th>
                   <Th />
                 </tr>
@@ -312,7 +330,7 @@ export default function UsersPage() {
                     <Td>
                       <Pill color={ROLE_COLOR[u.role]}>{ROLE[u.role]}</Pill>
                     </Td>
-                    <Td>{u.team?.name ?? "—"}</Td>
+                    <Td>{u.role === "requester" ? (u.customer?.name ?? "Sem empresa") : (u.team?.name ?? "—")}</Td>
                     <Td className="text-xs text-ink-muted">{formatDateTime(u.last_login_at)}</Td>
                     <Td className="text-right">
                       {isAdmin ? (

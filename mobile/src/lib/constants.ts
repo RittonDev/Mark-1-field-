@@ -154,7 +154,7 @@ export const ROLE: Record<UserRole, string> = {
   supervisor: "Supervisor",
   analyst: "Analista",
   technician: "Técnico de campo",
-  requester: "Solicitante",
+  requester: "Cliente (portal)",
 };
 
 export const EVENT_TYPE: Record<TicketEventType, string> = {
