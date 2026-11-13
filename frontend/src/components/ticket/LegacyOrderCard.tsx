@@ -71,7 +71,7 @@ export function LegacyOrderCard({ ticket }: { ticket: TicketDetail }) {
               <tbody className="divide-y divide-line">
                 {items.map((i, k) => (
                   <tr key={k}>
-                    <td className="px-3 py-2 text-ink">{i.name}</td>
+                    <td className="px-3 py-2 font-semibold text-ink">{i.name}</td>
                     <td className="px-3 py-2 text-ink-muted">{i.type === "service" ? "Serviço" : "Produto"}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{i.quantity.toLocaleString("pt-BR")}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{formatMoney(i.value)}</td>

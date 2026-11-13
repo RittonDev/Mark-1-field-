@@ -560,7 +560,7 @@ export function GeneralTab({
 
       <div className="col-span-12 rounded-xl border border-line bg-surface-2/40 p-3">
         <SectionTitle
-          className="mb-2"
+          className="mb-2 flex-wrap"
           aside={
             form.locationId ? (
               <button

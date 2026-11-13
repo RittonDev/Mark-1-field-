@@ -72,7 +72,7 @@ export function WorklogsTab({ ticketId, closed }: { ticketId: UUID; closed: bool
             <tbody>
               {items.map((w) => (
                 <tr key={w.id}>
-                  <Td className="whitespace-nowrap">{w.user?.name ?? "—"}</Td>
+                  <Td className="font-semibold whitespace-nowrap">{w.user?.name ?? "—"}</Td>
                   <Td className="whitespace-pre-wrap">{w.description}</Td>
                   <Td className="text-xs whitespace-nowrap text-ink-muted">{formatDateTime(w.started_at)}</Td>
                   <Td className="text-right tabular-nums">{formatMinutes(w.minutes)}</Td>
