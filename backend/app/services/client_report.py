@@ -1,8 +1,9 @@
 """Relatório da OS para o cliente: link público com o resumo do atendimento.
 
-Quando a OS é concluída (resolvida ou fechada), ganha um link que o analista envia ao cliente
-(WhatsApp/e-mail). A página mostra o que foi feito, as evidências (fotos dos formulários e da
-OS), a assinatura e a linha do tempo, e pode ser salva em PDF pelo navegador.
+Quando a OS é concluída (resolvida ou fechada), ganha um link que o analista ou o técnico
+responsável (pelo app) envia ao cliente (WhatsApp/e-mail). A página mostra o que foi feito, as
+evidências (fotos dos formulários e da OS), a assinatura e a linha do tempo, e pode ser salva
+em PDF pelo navegador.
 
 O token do link é `<id>.<assinatura>`: só o id fica no banco e a assinatura é um HMAC com o
 segredo da API. Dá para copiar o link de novo a qualquer momento e trocar (revogar) quando

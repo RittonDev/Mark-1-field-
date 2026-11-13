@@ -1,10 +1,10 @@
-"""Relatório da OS para o cliente: o link (gestão) e a página pública."""
+"""Relatório da OS para o cliente: o link (gestão e técnico responsável) e a página pública."""
 
 import uuid
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
 
-from app.api.deps import DB, TicketManagerUser
+from app.api.deps import DB, CurrentUser, TicketManagerUser
 from app.db.base import utcnow
 from app.schemas.client_report import PublicReport
 from app.schemas.ticket import ReportLinkOut
@@ -16,14 +16,18 @@ public = APIRouter(prefix="/public/reports", tags=["client-report"])
 
 LINK_GONE = "Link inválido ou expirado"
 REOPENED = "Esta OS foi reaberta. O relatório volta quando ela for concluída."
+ONLY_ASSIGNEE = "Só a gestão ou o técnico responsável pela OS enviam o relatório"
 
 
 @router.post("/tickets/{ticket_id}/report-link", response_model=ReportLinkOut)
-async def create_report_link(
-    ticket_id: uuid.UUID, db: DB, user: TicketManagerUser
-) -> ReportLinkOut:
-    """Link do relatório para o cliente (cria se ainda não houver; a OS precisa estar concluída)."""
+async def create_report_link(ticket_id: uuid.UUID, db: DB, user: CurrentUser) -> ReportLinkOut:
+    """Link do relatório para o cliente (cria se ainda não houver; a OS precisa estar concluída).
+
+    A gestão e o técnico responsável (que envia pelo app). Trocar ou revogar: só a gestão.
+    """
     ticket = await tickets_svc.get_visible_ticket(db, user, ticket_id)
+    if not user.can_manage_tickets and ticket.assignee_id != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, ONLY_ASSIGNEE)
     out = await svc.ensure_link(db, ticket)
     await db.commit()
     return out

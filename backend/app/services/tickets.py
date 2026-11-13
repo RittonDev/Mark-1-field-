@@ -172,7 +172,11 @@ def to_detail(ticket: Ticket, user: User) -> TicketDetail:
                 PartRequestAttachment(id=att_id, url=attachment_url(att_id, user))
                 for att_id in request.attachment_ids
             ]
-    if user.can_manage_tickets:
+    # Link do relatório: a gestão sempre; o técnico responsável, com a OS concluída, para enviar
+    # ao cliente pelo app (WhatsApp).
+    if user.can_manage_tickets or (
+        ticket.assignee_id == user.id and ticket.status in client_report.FINISHED
+    ):
         detail.report_link = client_report.link_out(ticket)
     return detail
 

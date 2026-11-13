@@ -295,7 +295,7 @@ async def test_client_report_link(client: AsyncClient, world: World) -> None:
     detail = (await client.get(f"{API}/tickets/{tid}", headers=an)).json()
     assert detail["report_link"] is None  # ainda em atendimento
 
-    # Concluída: o link nasce sozinho; só a gestão recebe.
+    # Concluída: o link nasce sozinho; a gestão e o técnico responsável (envia pelo app) recebem.
     msgs = (await client.get(f"{API}/tickets/{tid}/messages", headers=an)).json()
     closing = next(m["text"] for m in msgs if m["key"] == "fechamento")
     assert "Relatório: (disponível quando a OS for concluída)" in closing
@@ -304,7 +304,8 @@ async def test_client_report_link(client: AsyncClient, world: World) -> None:
     link = detail["report_link"]
     assert link["path"] == f"/relatorio/{link['token']}"
     assert link["url"] == f"{settings.WEB_URL}{link['path']}" and link["views"] == 0
-    assert (await client.get(f"{API}/tickets/{tid}", headers=th)).json()["report_link"] is None
+    tech_view = (await client.get(f"{API}/tickets/{tid}", headers=th)).json()["report_link"]
+    assert tech_view["token"] == link["token"]
     version = detail["version"]
 
     public = f"{API}/public/reports"
@@ -360,7 +361,13 @@ async def test_client_report_link(client: AsyncClient, world: World) -> None:
     assert (await client.get(f"{public}/{new['token']}")).status_code == 200
     same = (await client.post(f"{API}/tickets/{tid}/report-link", headers=an)).json()
     assert same["token"] == new["token"] and same["views"] == 1
-    assert (await client.post(f"{API}/tickets/{tid}/report-link", headers=th)).status_code == 403
+    # O técnico responsável pega o mesmo link (para mandar ao cliente); trocar e revogar, não.
+    mine = await client.post(f"{API}/tickets/{tid}/report-link", headers=th)
+    assert mine.status_code == 200 and mine.json()["token"] == new["token"]
+    assert (await client.post(f"{API}/tickets/{tid}/report-link/rotate", headers=th)).status_code == 403
+    assert (await client.delete(f"{API}/tickets/{tid}/report-link", headers=th)).status_code == 403
+    other = await client.post(f"{API}/tickets/{tid}/report-link", headers=world.tech_other.headers)
+    assert other.status_code in (403, 404)
 
     # O texto de fechamento leva o link; {analista} é o responsável pela OS.
     custom = {"templates": [{"name": "Teste", "body": "{analista} | {link_relatorio}"}]}
@@ -387,6 +394,8 @@ async def test_client_report_link(client: AsyncClient, world: World) -> None:
     r = await client.get(f"{public}/{new['token']}")
     assert r.status_code == 409 and "reaberta" in r.json()["detail"]
     assert detail["report_link"]["token"] == new["token"]
+    # Reaberta: o técnico não vê o link até concluir de novo.
+    assert (await client.get(f"{API}/tickets/{tid}", headers=th)).json()["report_link"] is None
     blocked = await client.post(f"{API}/tickets/{tid}/report-link", headers=an)
     assert blocked.status_code == 422
     assert blocked.json()["detail"] == "Disponível quando a OS for concluída"
@@ -397,10 +406,10 @@ async def test_client_report_link(client: AsyncClient, world: World) -> None:
     assert detail["report_link"] is None
     detail = await transition(client, th, detail, "in_progress")
     detail = await transition(client, th, detail, "resolved", resolution_notes="Trocado o patch")
-    again = detail["report_link"]
-    assert again is None  # o técnico concluiu: a resposta dele não traz o link
-    again = (await client.get(f"{API}/tickets/{tid}", headers=an)).json()["report_link"]
+    again = detail["report_link"]  # o técnico concluiu: a resposta dele já traz o link novo
     assert again["token"] not in (token, new["token"])
+    office = (await client.get(f"{API}/tickets/{tid}", headers=an)).json()["report_link"]
+    assert office["token"] == again["token"]
     assert (await client.get(f"{public}/{again['token']}")).status_code == 200
 
     # OS concluída sem link (ex.: antiga): o texto de fechamento cria na hora.
