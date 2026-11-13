@@ -102,3 +102,16 @@ const BRL = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" 
 export function formatMoney(value: number | null | undefined): string {
   return BRL.format(value ?? 0);
 }
+
+/** Valor digitado ("1.234,56", "120,5", "R$ 80" ou "120.50") em número; vazio = null; inválido = NaN. */
+export function parseMoney(text: string): number | null {
+  const raw = text.trim().replace(/^R\$\s*/, "");
+  if (!raw) return null;
+  const normalized = raw.includes(",") ? raw.replace(/\./g, "").replace(",", ".") : raw;
+  return Number(normalized);
+}
+
+/** Número para o campo de valor ("120,50"). */
+export function moneyInput(value: number | null | undefined): string {
+  return value == null ? "" : value.toFixed(2).replace(".", ",");
+}

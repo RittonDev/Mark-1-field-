@@ -25,7 +25,7 @@ import {
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canManageTickets } from "@/lib/constants";
-import { formatMinutes } from "@/lib/format";
+import { formatMinutes, formatMoney, moneyInput, parseMoney } from "@/lib/format";
 import { useCategories, useCustomers, useServiceTypes } from "@/lib/queries";
 import type { ServiceType } from "@/lib/types";
 
@@ -39,6 +39,7 @@ function ServiceTypeDialog({ serviceType, onClose }: { serviceType: ServiceType 
     name: serviceType?.name ?? "",
     description: serviceType?.description ?? "",
     estimated_minutes: String(serviceType?.estimated_minutes ?? 60),
+    technician_fee: moneyInput(serviceType?.technician_fee),
     customer_id: serviceType?.customer_id ?? "",
     category_id: serviceType?.category_id ?? "",
     is_active: serviceType?.is_active ?? true,
@@ -49,6 +50,9 @@ function ServiceTypeDialog({ serviceType, onClose }: { serviceType: ServiceType 
     [categories.data],
   );
   const minutes = Number(form.estimated_minutes);
+  // Valor em reais ("120" ou "120,50"); vazio = sem padrão.
+  const fee = parseMoney(form.technician_fee);
+  const feeInvalid = fee !== null && (!Number.isFinite(fee) || fee < 0);
 
   const mutation = useMutation({
     mutationFn: () => {
@@ -56,6 +60,7 @@ function ServiceTypeDialog({ serviceType, onClose }: { serviceType: ServiceType 
         name: form.name.trim(),
         description: form.description.trim() || null,
         estimated_minutes: minutes,
+        technician_fee: fee,
         category_id: form.category_id || null,
       };
       return editing
@@ -88,7 +93,7 @@ function ServiceTypeDialog({ serviceType, onClose }: { serviceType: ServiceType 
         id="service-type-form"
         onSubmit={(e) => {
           e.preventDefault();
-          mutation.mutate();
+          if (!feeInvalid) mutation.mutate();
         }}
         className="grid gap-4 sm:grid-cols-2"
       >
@@ -113,6 +118,17 @@ function ServiceTypeDialog({ serviceType, onClose }: { serviceType: ServiceType 
             value={form.estimated_minutes}
             onChange={(e) => set("estimated_minutes", e.target.value)}
             required
+          />
+        </Field>
+        <Field
+          label="Valor do técnico (R$)"
+          hint={feeInvalid ? "Valor inválido" : "Quanto o parceiro recebe por uma OS deste tipo. Vazio = a central define na OS."}
+        >
+          <Input
+            inputMode="decimal"
+            value={form.technician_fee}
+            onChange={(e) => set("technician_fee", e.target.value)}
+            placeholder="Ex.: 120,00"
           />
         </Field>
         <Field label="Cliente" hint={editing ? "Não muda depois de criado" : "Vazio = vale para todos"}>
@@ -250,6 +266,7 @@ export default function ServiceTypesPage() {
                 <Th>Tipo de serviço</Th>
                 <Th>Cliente</Th>
                 <Th className="text-right">Estimada</Th>
+                <Th className="text-right">Valor técnico</Th>
                 <Th className="text-right">Observada</Th>
                 <Th className="text-right">Real ÷ estimada</Th>
                 <Th>Sugestão</Th>
@@ -268,6 +285,9 @@ export default function ServiceTypesPage() {
                   </Td>
                   <Td className="text-sm">{t.customer?.name ?? <span className="text-ink-muted">Todos</span>}</Td>
                   <Td className="text-right whitespace-nowrap">{formatMinutes(t.estimated_minutes)}</Td>
+                  <Td className="text-right whitespace-nowrap tabular-nums">
+                    {t.technician_fee != null ? formatMoney(t.technician_fee) : <span className="text-ink-subtle">—</span>}
+                  </Td>
                   <Td className="text-right whitespace-nowrap">
                     {t.observed_median_minutes !== null ? (
                       <Link href={`/chamados?service_type_id=${t.id}`} className="hover:underline">
