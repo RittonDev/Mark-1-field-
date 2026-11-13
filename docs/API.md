@@ -333,11 +333,12 @@ com motivo `danger`/`warning` (ex.: passou do tempo na loja).
 **Relatório para o cliente.** Ao concluir (resolvida ou fechada) a OS ganha um link público com o resumo
 do atendimento, que o cliente pode salvar em PDF. O token é `<id>.<assinatura HMAC>`: só o id fica no
 banco, então o link pode ser copiado de novo a qualquer momento e trocado quando preciso.
-- `TicketDetail.report_link` (só para a gestão): `{token, path: "/relatorio/<token>", url, created_at,
-  views, last_viewed_at}` ou `null`.
-- `POST /tickets/{id}/report-link` (cria se não houver; 422 "Disponível quando a OS for concluída") ·
-  `POST /tickets/{id}/report-link/rotate` (novo link, o anterior para de funcionar) ·
-  `DELETE /tickets/{id}/report-link` (204). Nenhum dos três muda a `version` da OS.
+- `TicketDetail.report_link` (a gestão sempre; o técnico responsável, com a OS concluída, para enviar
+  pelo app): `{token, path: "/relatorio/<token>", url, created_at, views, last_viewed_at}` ou `null`.
+- `POST /tickets/{id}/report-link` (gestão ou técnico responsável; cria se não houver; 422 "Disponível
+  quando a OS for concluída") ·
+  `POST /tickets/{id}/report-link/rotate` (gestão; novo link, o anterior para de funcionar) ·
+  `DELETE /tickets/{id}/report-link` (gestão; 204). Nenhum dos três muda a `version` da OS.
 - Público, sem login: `GET /public/reports/{token}` → `PublicReport {code, title, description, status,
   status_label, company_name, company {name, document, email, phone, address, website}, customer {name, document}, location {name, code, address, city, state},
   service_address, requester_name, service_type, technician {name}, opened_at, scheduled_start,
@@ -361,7 +362,8 @@ O que a Maxx Field promete ao varejo, no sistema:
 - visita só com a autorização do cliente, porque cada chamado é cobrado;
 - peça só com orçamento aprovado e assinado.
 
-**Regras (Configurações).** `GET /settings/field` (gestão) e `PUT /settings/field` (supervisor/admin):
+**Regras (Configurações).** `GET /settings/field` (qualquer usuário logado; o app do técnico usa nos avisos)
+e `PUT /settings/field` (supervisor/admin):
 `{arrival_hours_capital: 4, arrival_hours_interior: 24, onsite_hours: 4, onsite_warning_minutes: 30,
 require_authorization: true}`. `null` no prazo de chegada = sem prazo. Capital ou interior vem da cidade/UF
 do local (as 27 capitais, sem acento); OS sem local conta como interior.

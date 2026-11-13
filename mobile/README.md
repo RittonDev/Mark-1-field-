@@ -196,23 +196,32 @@ Regras de [src/lib/field.ts](src/lib/field.ts), espelhando `backend/app/services
   abrir a OS com rede e guarda no aparelho; offline mostra a última guardada (ou nada, se nunca abriu online).
 - **Avisos**: os eventos `ticket.authorization` e `ticket.part_request_decided` do WebSocket disparam o sync;
   o pull compara a OS e avisa uma vez (autorizada/negada, peça aprovada com o check, peça recusada).
-- Regras da empresa: `GET /settings/field` (prazos e aviso). A rota é só da gestão; para o técnico ela
-  responde 403 e o app usa as da promessa (4h de chegada nas capitais, 4h na loja, aviso 30 min antes).
-  Os prazos de cada OS vêm calculados pelo servidor, então isso só afeta a previsão offline e o aviso local.
+- Regras da empresa: `GET /settings/field` (prazos e aviso), baixadas a cada 30 min e guardadas no aparelho.
+  Sem elas (nunca abriu online) valem as da promessa (4h de chegada nas capitais, 4h na loja, aviso 30 min
+  antes). Os prazos de cada OS vêm calculados pelo servidor, então isso só afeta a previsão offline e o aviso
+  local.
 
 ## Formulários (checklists) e assinatura
 
 - O analista decide se a OS tem formulário e se ele é obrigatório. No detalhe da OS, o cartão
   **Formulários e assinatura** lista cada formulário com status e progresso (itens obrigatórios cumpridos).
 - **Preenchimento** (`/formulario/<OS>/<form>`): texto, número, Sim/Não em botões grandes, opções, data,
-  "Confirmo" e fotos por campo (câmera/galeria, com a contagem contra o mínimo e o máximo). **Salvar**
-  envia as respostas; **Concluir** valida antes, com as mesmas regras e textos do servidor ("Falta
-  preencher: …"). Tudo vai pela fila de sync (`form_answers`), então funciona offline.
+  "Confirmo" e fotos por campo (câmera/galeria, com a contagem contra o mínimo e o máximo).
+- **Uma pergunta por tela** (padrão, como o passo a passo do Field Control): "Pergunta 3 de 12", um traço
+  por pergunta (respondida, pendente, em branco), **Anterior**/**Próxima** e a seção como título. Pergunta
+  obrigatória sem resposta segura o "Próxima" com o aviso e a opção **Responder depois**; número inválido
+  ("12a") não passa. No fim, a **Revisão** lista as respostas (tocar abre a pergunta) e **Concluir** valida;
+  com item faltando, leva direto à primeira pergunta pendente. Ao reabrir, retoma de onde parou. "Ver todas as
+  perguntas numa tela" volta à lista completa (com **Salvar**/**Concluir**); a escolha fica guardada.
+- **Salva sozinho**: a cada troca de pergunta, ao sair da tela e com o app indo para segundo plano. Tudo vai
+  pela fila de sync (`form_answers`), então funciona offline; a fila guarda só o rascunho mais recente de
+  cada formulário (a conclusão nunca é descartada). **Concluir** valida antes, com as mesmas regras e textos
+  do servidor ("Falta preencher: …").
 - Se o servidor recusar uma conclusão por falta de item (ele não grava nada nesse caso), o app reenvia as
   mesmas respostas sem concluir, para não perder o que o técnico preencheu, e mostra o motivo no formulário.
 - **Fotos de campo** vão para `POST /tickets/{id}/forms/{form}/photos` (fila offline como as outras fotos);
-  uma foto já enviada sai com toque longo (online). A lista de anexos fica guardada no aparelho para
-  contar as fotos de cada campo offline.
+  uma foto sai pelo "×" da miniatura ou com toque longo (a já enviada, só online). A lista de anexos fica
+  guardada no aparelho para contar as fotos de cada campo offline.
 - **Assinatura** (`/assinatura/<OS>`): o responsável assina com o dedo (canvas próprio com
   `react-native-svg`, enviado como PNG via `react-native-view-shot`) e informa nome e cargo. Só fica
   disponível com os formulários obrigatórios concluídos; depois dela os formulários ficam travados. Pode ser
@@ -220,6 +229,10 @@ Regras de [src/lib/field.ts](src/lib/field.ts), espelhando `backend/app/services
   assinatura → "Resolver").
 - **Concluir a OS** ("Resolver"/"Fechar") fica desabilitado, com o motivo na tela, até cumprir os
   formulários obrigatórios e, se pedida, a assinatura (o servidor também bloqueia).
+- **Relatório para o cliente**: com a OS concluída, o técnico responsável vê o cartão **Relatório para o
+  cliente** no topo da OS: **WhatsApp** (abre a conversa com o contato da loja quando é celular; senão escolhe
+  o contato), **Compartilhar** (outros apps; sem folha de compartilhamento, copia), **Copiar link** e **Ver
+  como o cliente vê**. O link vem na OS (`report_link`); OS antiga sem link pede `POST /tickets/{id}/report-link`.
 
 ## Rastreamento da jornada
 
