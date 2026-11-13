@@ -473,7 +473,7 @@ export function GeneralTab({
   const invalid = Object.values(errors).some(Boolean);
   // A mensagem aparece depois da primeira tentativa de salvar; o aria-invalid vale sempre.
   const shown = (key: keyof typeof errors) => (tried ? errors[key] : undefined);
-  const errorId = (key: string) => `${formId}-${key}`;
+  const fieldId = (key: string) => `${formId}-${key}`;
   const today = toLocalInput(new Date(now).toISOString()).slice(0, 10);
 
   function buildPatch(): TicketUpdatePayload {
@@ -624,6 +624,8 @@ export function GeneralTab({
   };
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+    // O envio de um diálogo aberto daqui (portal no <body>) também "sobe" pela árvore do React: não é o Salvar da OS.
+    if (e.target !== e.currentTarget) return;
     e.preventDefault();
     if (!dirty || save.isPending) return;
     if (invalid) {
@@ -794,9 +796,9 @@ export function GeneralTab({
               maxLength={200}
               aria-required="true"
               aria-invalid={errors.title ? true : undefined}
-              aria-describedby={shown("title") ? errorId("title") : undefined}
+              aria-describedby={shown("title") ? fieldId("title") : undefined}
             />
-            <FieldError id={errorId("title")} message={shown("title")} />
+            <FieldError id={fieldId("title")} message={shown("title")} />
           </Field>
           <Field label="Contrato de prazo (prioridade)" className="col-span-12 @xl:col-span-4">
             <Select value={form.priority} onChange={(e) => set("priority", e.target.value as TicketPriority)}>
@@ -868,23 +870,16 @@ export function GeneralTab({
             ) : null}
           </div>
 
-          {/* A busca de loja é um campo dentro do formulário: Enter não salva a OS e Esc fecha só os
-              resultados (o painel continua aberto). */}
-          <div
-            className="col-span-12 flex flex-col gap-1.5"
-            onKeyDown={(e) => {
-              if (!(e.target instanceof HTMLInputElement)) return;
-              if (e.key === "Enter") e.preventDefault();
-              if (e.key === "Escape") {
-                e.preventDefault();
-                e.target.blur();
-              }
-            }}
-          >
-            <span className="text-xs font-semibold text-ink/80">Localização</span>
+          {/* Rótulo fora de <label>: dentro dele, o clique no texto acionaria o "Trocar". A busca já
+              trata Enter (escolhe a loja, não salva a OS) e Esc (fecha só a lista). */}
+          <div className="col-span-12 flex flex-col gap-1.5">
+            <span id={fieldId("location")} className="text-xs font-semibold text-ink/80">
+              Localização
+            </span>
             {changingLocation || !form.locationId ? (
               <>
                 <LocationPicker
+                  labelledBy={fieldId("location")}
                   customerId={form.customerId || null}
                   value={null}
                   onChange={(loc: Location | null) => {
@@ -961,9 +956,9 @@ export function GeneralTab({
               value={form.estimated}
               onChange={(e) => set("estimated", e.target.value)}
               aria-invalid={errors.estimated ? true : undefined}
-              aria-describedby={shown("estimated") ? errorId("estimated") : undefined}
+              aria-describedby={shown("estimated") ? fieldId("estimated") : undefined}
             />
-            <FieldError id={errorId("estimated")} message={shown("estimated")} />
+            <FieldError id={fieldId("estimated")} message={shown("estimated")} />
           </Field>
           <Field label="Data do agendamento" className="col-span-6 @xl:col-span-4">
             <Input
@@ -971,7 +966,7 @@ export function GeneralTab({
               value={form.date}
               onChange={(e) => set("date", e.target.value)}
               aria-invalid={errors.schedule && !form.date ? true : undefined}
-              aria-describedby={shown("schedule") ? errorId("schedule") : undefined}
+              aria-describedby={shown("schedule") ? fieldId("schedule") : undefined}
             />
           </Field>
           <Field label="Hora do agendamento" className="col-span-6 @xl:col-span-4">
@@ -980,15 +975,17 @@ export function GeneralTab({
               value={form.time}
               onChange={(e) => set("time", e.target.value)}
               aria-invalid={errors.schedule && !form.time ? true : undefined}
-              aria-describedby={shown("schedule") ? errorId("schedule") : undefined}
+              aria-describedby={shown("schedule") ? fieldId("schedule") : undefined}
             />
           </Field>
           {shown("schedule") ? (
-            <p id={errorId("schedule")} className="col-span-12 -mt-2 text-xs font-medium text-red-700 dark:text-red-300">
+            <p id={fieldId("schedule")} className="col-span-12 -mt-2 text-xs font-medium text-red-700 dark:text-red-300">
               {errors.schedule}
             </p>
           ) : null}
-          {unscheduledWarning ? <Caution className="col-span-12">A OS fica Agendado sem data: mude a situação para Atribuído.</Caution> : null}
+          {unscheduledWarning ? (
+            <Caution className="col-span-12">Sem data e hora, a OS sai de Agendado e volta para Atribuído (fora da agenda do técnico).</Caution>
+          ) : null}
 
           <Field label="Colaborador" className="col-span-12 @xl:col-span-6">
             <Select value={form.assigneeId} onChange={(e) => setAssignee(e.target.value)}>
@@ -1065,12 +1062,9 @@ export function GeneralTab({
                   onAssign={(t) => setAssignee(t?.id ?? "")}
                   onToggleHelper={toggleHelper}
                   invite={(t) => invite(t.name, t.id)}
+                  error={suggestions.error}
+                  onRetry={() => void suggestions.refetch()}
                 />
-                {suggestions.error ? (
-                  <p className="mt-2 text-xs text-red-700 dark:text-red-300">
-                    Não foi possível carregar as sugestões: {errorMessage(suggestions.error)}
-                  </p>
-                ) : null}
               </div>
             ) : (
               <button type="button" onClick={() => setSuggestOpen(true)} className={buttonClassName("secondary", "sm")}>
@@ -1107,11 +1101,11 @@ export function GeneralTab({
         <CardHeader title="Central" description="Quem acompanha a OS na central e o recado para o técnico." />
         <div className="grid grid-cols-12 gap-4 p-5">
           <div className="col-span-12 flex flex-col gap-1.5 @xl:col-span-6">
-            <span id={errorId("owner")} className="text-xs font-semibold text-ink/80">
+            <span id={fieldId("owner")} className="text-xs font-semibold text-ink/80">
               Analista responsável
             </span>
             <div className="flex items-center gap-2">
-              <Select value={form.ownerId} onChange={(e) => set("ownerId", e.target.value)} className="flex-1" aria-labelledby={errorId("owner")}>
+              <Select value={form.ownerId} onChange={(e) => set("ownerId", e.target.value)} className="flex-1" aria-labelledby={fieldId("owner")}>
                 <option value="">Sem analista (fila geral)</option>
                 {analysts.map((u) => (
                   <option key={u.id} value={u.id}>
@@ -1176,7 +1170,7 @@ export function GeneralTab({
               disabled={!server.arrived_at}
               onChange={(e) => set("startDate", e.target.value)}
               aria-invalid={errors.start ? true : undefined}
-              aria-describedby={shown("start") ? errorId("start") : undefined}
+              aria-describedby={shown("start") ? fieldId("start") : undefined}
             />
           </Field>
           <Field label="Hora de início" className="col-span-6 @xl:col-span-2">
@@ -1186,7 +1180,7 @@ export function GeneralTab({
               disabled={!server.arrived_at}
               onChange={(e) => set("startTime", e.target.value)}
               aria-invalid={errors.start ? true : undefined}
-              aria-describedby={shown("start") ? errorId("start") : undefined}
+              aria-describedby={shown("start") ? fieldId("start") : undefined}
             />
           </Field>
           <Field label="Data de conclusão" className="col-span-6 @xl:col-span-2">
@@ -1197,7 +1191,7 @@ export function GeneralTab({
               disabled={!server.resolved_at}
               onChange={(e) => set("endDate", e.target.value)}
               aria-invalid={errors.end ? true : undefined}
-              aria-describedby={shown("end") ? errorId("end") : undefined}
+              aria-describedby={shown("end") ? fieldId("end") : undefined}
             />
           </Field>
           <Field label="Hora de conclusão" className="col-span-6 @xl:col-span-2">
@@ -1207,13 +1201,13 @@ export function GeneralTab({
               disabled={!server.resolved_at}
               onChange={(e) => set("endTime", e.target.value)}
               aria-invalid={errors.end ? true : undefined}
-              aria-describedby={shown("end") ? errorId("end") : undefined}
+              aria-describedby={shown("end") ? fieldId("end") : undefined}
             />
           </Field>
           {shown("start") || shown("end") ? (
             <div className="col-span-12 -mt-2 flex flex-col gap-0.5">
-              <FieldError id={errorId("start")} message={shown("start") ? `Início: ${errors.start}` : undefined} />
-              <FieldError id={errorId("end")} message={shown("end") ? `Conclusão: ${errors.end}` : undefined} />
+              <FieldError id={fieldId("start")} message={shown("start") ? `Início: ${errors.start}` : undefined} />
+              <FieldError id={fieldId("end")} message={shown("end") ? `Conclusão: ${errors.end}` : undefined} />
             </div>
           ) : null}
           {timesChanged ? (
@@ -1230,9 +1224,9 @@ export function GeneralTab({
                 maxLength={500}
                 aria-required="true"
                 aria-invalid={errors.reason ? true : undefined}
-                aria-describedby={shown("reason") ? errorId("reason") : undefined}
+                aria-describedby={shown("reason") ? fieldId("reason") : undefined}
               />
-              <FieldError id={errorId("reason")} message={shown("reason")} />
+              <FieldError id={fieldId("reason")} message={shown("reason")} />
             </Field>
           ) : null}
         </div>

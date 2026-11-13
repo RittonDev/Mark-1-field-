@@ -64,7 +64,8 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
                 <button type="button" onClick={reset}>
                   Tentar de novo
                 </button>
-                {/* Link comum (não o do Next): recarrega a página inteira a partir do início. */}
+                {/* Link comum (não o do Next): o layout raiz quebrou, então recarrega a página inteira. */}
+                {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
                 <a href="/">Voltar ao início</a>
               </div>
               {error.digest ? <p className="code">código {error.digest}</p> : null}

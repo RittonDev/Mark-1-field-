@@ -85,7 +85,9 @@ export function InviteDialog({ onClose, preset }: { onClose: () => void; preset?
           </Button>
         ) : (
           <>
-            <Button onClick={onClose}>Cancelar</Button>
+            <Button onClick={onClose} disabled={create.isPending}>
+              Cancelar
+            </Button>
             <Button variant="primary" type="submit" form="invite-form" loading={create.isPending}>
               Gerar link
             </Button>

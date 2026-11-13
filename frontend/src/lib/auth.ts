@@ -12,16 +12,18 @@ import type { TokenResponse } from "./types";
  * vence sozinho.
  */
 function endServerSession(refreshToken: string) {
-  try {
-    void fetch(`${API_URL}/auth/logout`, {
+  const send = (keepalive: boolean) =>
+    fetch(`${API_URL}/auth/logout`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ refresh_token: refreshToken }),
-      keepalive: true,
-    }).catch(() => {});
-  } catch {
-    // Navegador sem fetch com keepalive: a sessão termina quando o token vencer.
-  }
+      keepalive,
+    });
+  // Navegador que recusa keepalive com CORS: manda de novo como pedido comum (encerrar duas vezes não
+  // tem efeito). Sem rede, a sessão termina quando o token vencer.
+  send(true)
+    .catch(() => send(false))
+    .catch(() => {});
 }
 
 const noopSubscribe = () => () => {};

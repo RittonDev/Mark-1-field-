@@ -102,5 +102,6 @@ async def hit(scope: str, key: str, limit: int, window: int) -> None:
 
 
 def reset_memory() -> None:
-    """Para os testes: começa cada um sem contagem (login, envios, sessões e marcas de uso)."""
+    """Para os testes: começa cada um sem contagem (login, envios, sessões e marcas de uso), só
+    na memória do processo (ver core/ephemeral.reset_memory)."""
     ephemeral.reset_memory()

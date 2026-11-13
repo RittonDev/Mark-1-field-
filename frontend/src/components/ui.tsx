@@ -4,7 +4,7 @@ import clsx from "clsx";
 import { Loader2, RotateCcw, TriangleAlert, X } from "lucide-react";
 import { forwardRef, useEffect, useEffectEvent, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useDocumentTitle } from "@/lib/hooks";
+import { useDocumentTitle, useUnsavedChanges } from "@/lib/hooks";
 
 type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "ink";
 type ButtonSize = "sm" | "md" | "lg";
@@ -527,7 +527,10 @@ export function Dialog({
   size?: "sm" | "md" | "lg" | "xl";
   /** "alertdialog": confirmação que interrompe a tarefa (excluir, cancelar). */
   role?: "dialog" | "alertdialog";
-  /** Formulário com alterações: clique fora, Esc e o X perguntam antes de descartar. */
+  /**
+   * Formulário com alterações: clique fora, Esc e o X perguntam antes de descartar; fechar a aba e o
+   * Sair da central também pedem confirmação.
+   */
   dirty?: boolean;
   /** Salvando: clique fora e Esc não fecham, e o X fica desabilitado. */
   busy?: boolean;
@@ -547,6 +550,8 @@ export function Dialog({
   }
   // A pergunta some sozinha se as alterações forem desfeitas.
   const discarding = askDiscard && dirty;
+  // Formulário aberto com alterações: fechar a aba pede confirmação e o Sair da central pergunta antes.
+  useUnsavedChanges(open && dirty);
 
   const requestClose = () => {
     if (busy) return;

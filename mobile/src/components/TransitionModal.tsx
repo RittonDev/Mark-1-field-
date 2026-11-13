@@ -23,7 +23,6 @@ import { Text } from "./Text";
 import { LocationLine, useLocationFix } from "./ticket/LocationLine";
 import { capturePhotos } from "./ticket/photoCapture";
 import { SheetScaffold } from "./ticket/SheetScaffold";
-import { toneInk } from "./ticket/tones";
 import { Button, ErrorBox, Field, Input } from "./ui";
 
 /** O que a ação faz, em uma frase para o técnico. */
@@ -340,7 +339,7 @@ function Notice({ icon, children }: { icon: IconName; children: ReactNode }) {
   const styles = useStyles(makeStyles);
   return (
     <View style={styles.notice}>
-      <Icon name={icon} size={18} color={toneInk(c, "warning")} strokeWidth={2} />
+      <Icon name={icon} size={18} color={c.warningInk} strokeWidth={2} />
       <View style={{ flex: 1, gap: 8 }}>{children}</View>
     </View>
   );
@@ -349,7 +348,7 @@ function Notice({ icon, children }: { icon: IconName; children: ReactNode }) {
 function SummaryRow({ icon, text, tone }: { icon: IconName; text: string; tone?: "warning" }) {
   const c = useTheme();
   const styles = useStyles(makeStyles);
-  const color = tone ? toneInk(c, tone) : c.inkMuted;
+  const color = tone ? c.warningInk : c.inkMuted;
   return (
     <View style={styles.summaryRow}>
       <Icon name={icon} size={18} color={color} strokeWidth={2} />

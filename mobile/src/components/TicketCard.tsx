@@ -5,7 +5,7 @@ import Animated from "react-native-reanimated";
 import { STATUS } from "../lib/constants";
 import { addressOf } from "../lib/device-actions";
 import { actualMinutes } from "../lib/duration";
-import { arrivalUrgency } from "../lib/field";
+import { arrivalClock, arrivalUrgency, onsiteClock } from "../lib/field";
 import { finishedAt, isDone, isHelper } from "../lib/lists";
 import { formatDate, formatMinutes, formatShort, formatTime, isSameDay, startOfDay } from "../lib/format";
 import { haptic } from "../lib/haptics";
@@ -38,8 +38,11 @@ export interface TicketCardProps {
   showRoute?: boolean;
 }
 
-/** Texto do canto do cartão: horário da visita (ou fim dela, na linha do tempo) e o tempo em atendimento. */
-function scheduleText(ticket: LocalTicket, now: number, showTime: boolean, showDate: boolean): string {
+/**
+ * Texto do canto do cartão: horário da visita (ou fim dela, na linha do tempo) e o tempo em atendimento.
+ * Com o relógio da loja na tela ("Na loja 1h 20min · restam…"), o tempo em atendimento não se repete.
+ */
+function scheduleText(ticket: LocalTicket, now: number, showTime: boolean, showDate: boolean, onsiteShown: boolean): string {
   const start = ticket.scheduled_start;
   const end = ticket.scheduled_end;
   const parts: string[] = [];
@@ -50,8 +53,24 @@ function scheduleText(ticket: LocalTicket, now: number, showTime: boolean, showD
     // Na linha do tempo o início já está no trilho: aqui só o fim, se for hoje.
     parts.push(`até ${formatTime(end)}`);
   }
-  if (ticket.work_started_at) parts.push(`em atendimento ${formatMinutes(actualMinutes(ticket, now))}`);
+  if (ticket.work_started_at && !onsiteShown) parts.push(`em atendimento ${formatMinutes(actualMinutes(ticket, now))}`);
   return parts.join(" · ");
+}
+
+/** O relógio de campo dito pelo leitor de tela (a linha do relógio fica dentro do botão do cartão). */
+function spokenClock(ticket: LocalTicket, now: number): string | null {
+  const arrival = arrivalClock(ticket, now);
+  if (arrival) {
+    if (arrival.left < 0) return `chegada atrasada ${formatMinutes(-arrival.left)}`;
+    return `chegar em até ${formatMinutes(arrival.left)}${arrival.tone === "normal" ? "" : ", chegada em risco"}`;
+  }
+  const onsite = onsiteClock(ticket, now);
+  if (onsite) {
+    return onsite.left <= 0
+      ? `passou ${formatMinutes(-onsite.left)} do tempo na loja`
+      : `na loja há ${formatMinutes(onsite.elapsed)}, restam ${formatMinutes(onsite.left)}`;
+  }
+  return null;
 }
 
 function doneText(ticket: LocalTicket): string {
@@ -74,9 +93,10 @@ function TicketCardBase({ ticket, now, userId, showDate = false, showTime = true
   const meta = [ticket.customer?.name, ticket.service_type?.name].filter(Boolean).join(" · ");
   const route = showRoute && hasRoute(ticket);
   const done = variant === "done";
-  const corner = done ? doneText(ticket) : scheduleText(ticket, now, showTime, showDate);
+  // A linha do relógio mostra a chegada antes do check-in e a permanência na loja depois dele.
+  const onsiteShown = !done && !arrivalClock(ticket, now) && onsiteClock(ticket, now) !== null;
+  const corner = done ? doneText(ticket) : scheduleText(ticket, now, showTime, showDate, onsiteShown);
   const workMinutes = done && ticket.work_seconds > 0 ? Math.round(ticket.work_seconds / 60) : 0;
-  const urgency = done ? 2 : arrivalUrgency(ticket, now);
   const pending = ticket.pending_ops
     ? ticket.pending_ops === 1
       ? "1 ação aguardando envio"
@@ -89,7 +109,7 @@ function TicketCardBase({ ticket, now, userId, showDate = false, showTime = true
     site,
     address,
     status?.label ?? ticket.status,
-    urgency === 0 ? "chegada atrasada" : urgency === 1 ? "chegada em risco" : null,
+    done ? null : spokenClock(ticket, now),
     helping ? "você vai junto" : null,
     pending,
   ]

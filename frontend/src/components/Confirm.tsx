@@ -56,9 +56,9 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
             </span>
           }
           description={pending.description}
+          // Ação que destrói (excluir, cancelar) não começa com o foco: um Enter a mais não confirma.
           footer={
             <>
-              {/* Ação que destrói (excluir, cancelar) não começa com o foco: um Enter a mais não confirma. */}
               <Button onClick={() => close(false)} autoFocus={danger}>
                 {pending.cancelLabel ?? "Voltar"}
               </Button>

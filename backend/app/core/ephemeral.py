@@ -25,11 +25,13 @@ class _Entry:
 
 _memory: dict[str, _Entry] = {}
 _redis: Any = None
+# Ligado por reset_memory (testes): tudo na memória, sem o Redis compartilhado.
+_memory_only = False
 
 
 def _client() -> Any:
     global _redis
-    if not settings.REDIS_URL:
+    if _memory_only or not settings.REDIS_URL:
         return None
     if _redis is None:
         from redis import asyncio as aioredis
@@ -151,5 +153,9 @@ async def delete(*keys: str) -> None:
 
 
 def reset_memory() -> None:
-    """Para os testes: cada um começa sem contagens nem marcas."""
+    """Para os testes: cada um começa sem contagens nem marcas, e o estado fica só na memória do
+    processo. No Redis compartilhado, as contagens de um teste (senhas erradas, fichas por IP)
+    passariam para o seguinte e para a próxima execução da suíte."""
+    global _memory_only
+    _memory_only = True
     _memory.clear()

@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { Camera, PackageSearch, Pencil, Plus, Search, SquarePen, TriangleAlert, X } from "lucide-react";
+import { Camera, PackageSearch, Pencil, Plus, Search, SquarePen, TriangleAlert, Undo2, X } from "lucide-react";
 import { useId, useState } from "react";
 import { LocationPicker } from "@/components/LocationPicker";
 import { useToast } from "@/components/Toaster";
@@ -118,10 +118,11 @@ export default function RepairsPage() {
             >
               {/* A cor da etapa fica no ponto; o número em tinta neutra (zero colorido parecia alerta). */}
               <span className="flex items-center gap-1.5 text-[11px] font-medium text-ink-muted">
-                <span className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: REPAIR_STATUS[s].color }} />
+                <span aria-hidden className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: REPAIR_STATUS[s].color }} />
                 {REPAIR_STATUS[s].label}
               </span>
-              <span className="text-lg font-semibold text-ink tabular-nums">{summary.data?.by_status[s] ?? 0}</span>
+              {/* Sem o resumo (carregando ou com erro), "—": zero diria que não há nada na etapa. */}
+              <span className="text-lg font-semibold text-ink tabular-nums">{summary.data ? (summary.data.by_status[s] ?? 0) : "—"}</span>
             </button>
           );
         })}
@@ -141,12 +142,17 @@ export default function RepairsPage() {
             )}
           >
             <span className="flex items-center gap-1 text-[11px] font-medium text-red-700 dark:text-red-300">
-              <TriangleAlert className="size-3" /> Retorno atrasado
+              <TriangleAlert aria-hidden className="size-3" /> Retorno atrasado
             </span>
             <span className="text-lg font-semibold text-red-700 tabular-nums dark:text-red-300">{overdue}</span>
           </button>
         ) : null}
       </div>
+      {summary.error && !summary.data ? (
+        <div className="mb-4">
+          <ErrorBox title="Não deu para contar as etapas" message={errorMessage(summary.error)} onRetry={() => void summary.refetch()} />
+        </div>
+      ) : null}
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <div className="relative min-w-60 flex-1">
@@ -154,7 +160,7 @@ export default function RepairsPage() {
           <Input
             value={qInput}
             onChange={(e) => setQInput(e.target.value)}
-            placeholder="Nº de série, modelo, marca, patrimônio ou protocolo"
+            placeholder="Código AE, nº de série, modelo, marca, patrimônio ou protocolo"
             className="pl-9"
             aria-label="Buscar equipamentos"
           />
@@ -167,7 +173,7 @@ export default function RepairsPage() {
           <LoadingBlock />
         ) : list.error && !list.data ? (
           <div className="p-4">
-            <ErrorBox message={errorMessage(list.error)} />
+            <ErrorBox message={errorMessage(list.error)} onRetry={() => void list.refetch()} />
           </div>
         ) : rows.length === 0 ? (
           <EmptyState
@@ -294,25 +300,31 @@ function RepairDetail({ id, onEdit, onClose }: { id: string; onEdit: (r: Repair)
   const [quoteValue, setQuoteValue] = useState("");
   const [returnDate, setReturnDate] = useState("");
   const [photoError, setPhotoError] = useState<string | null>(null);
-  const refresh = (r: Repair) => {
-    queryClient.setQueryData(["repairs", "detail", id], r);
+  const refresh = (saved: Repair) => {
+    queryClient.setQueryData(["repairs", "detail", id], saved);
     void queryClient.invalidateQueries({ queryKey: ["repairs"] });
   };
-  const quote = next === "vendor_quote" ? parseMoney(quoteValue) : null;
+  const r = repair.data;
+  // "Voltar etapa": a etapa anterior, para a que foi marcada por engano (pede o motivo).
+  const previous = r?.previous_status && !r.allowed_next.includes(r.previous_status) ? r.previous_status : null;
+  const back = next !== null && next === previous;
+  const quote = next === "vendor_quote" && !back ? parseMoney(quoteValue) : null;
   const quoteError = quote !== null && invalidMoney(quote) ? "Valor inválido. Ex.: 350,00" : null;
-  const reasonRequired = next !== null && REPAIR_REASON_REQUIRED.includes(next);
+  const askReturnDate = next !== null && !back && RETURN_DATE_STAGES.includes(next);
+  const reasonRequired = next !== null && (back || REPAIR_REASON_REQUIRED.includes(next));
   const reasonMissing = reasonRequired && note.trim().length < 3;
   const move = useMutation({
-    mutationFn: (to: RepairStatus) =>
+    mutationFn: (change: { to: RepairStatus; back: boolean }) =>
       api.post<Repair>(`/repairs/${id}/status`, {
-        to_status: to,
+        to_status: change.to,
         note: note.trim() || null,
         vendor_quote_value: quote === null ? null : quote.toFixed(2),
-        expected_return_date: RETURN_DATE_STAGES.includes(to) ? returnDate || null : null,
+        expected_return_date: askReturnDate ? returnDate || null : null,
       }),
-    onSuccess: (r) => {
-      refresh(r);
-      toast({ title: `${r.code}: ${REPAIR_STATUS[r.status].label}`, tone: "success" });
+    onSuccess: (saved, change) => {
+      refresh(saved);
+      const label = REPAIR_STATUS[saved.status].label;
+      toast({ title: change.back ? `${saved.code}: voltou para ${label}` : `${saved.code}: ${label}`, tone: "success" });
       setNext(null);
       setNote("");
       setQuoteValue("");
@@ -325,12 +337,11 @@ function RepairDetail({ id, onEdit, onClose }: { id: string; onEdit: (r: Repair)
       body.append("file", file);
       return api.upload<Repair>(`/repairs/${id}/photos`, body);
     },
-    onSuccess: (r) => {
-      refresh(r);
+    onSuccess: (saved) => {
+      refresh(saved);
       toast({ title: "Foto adicionada", tone: "success" });
     },
   });
-  const r = repair.data;
   const photoMessage = photoError ?? (photo.error ? errorMessage(photo.error) : null);
 
   return (
@@ -355,7 +366,7 @@ function RepairDetail({ id, onEdit, onClose }: { id: string; onEdit: (r: Repair)
       {repair.isLoading ? (
         <LoadingBlock />
       ) : !r ? (
-        <ErrorBox message={errorMessage(repair.error)} />
+        <ErrorBox message={errorMessage(repair.error)} onRetry={() => void repair.refetch()} />
       ) : (
         <div className="flex flex-col gap-5 text-sm">
           <div className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
@@ -404,10 +415,10 @@ function RepairDetail({ id, onEdit, onClose }: { id: string; onEdit: (r: Repair)
             ) : null}
           </div>
 
-          {r.allowed_next.length ? (
+          {r.allowed_next.length || previous ? (
             <div className="rounded-lg border border-line p-3">
               <p id={`next-${id}`} className="mb-2 text-xs font-bold tracking-wide text-ink-muted uppercase">
-                Próxima etapa
+                {r.allowed_next.length ? "Próxima etapa" : "Corrigir etapa"}
               </p>
               <div className="flex flex-wrap gap-2" role="group" aria-labelledby={`next-${id}`}>
                 {r.allowed_next.map((s) => (
@@ -424,6 +435,21 @@ function RepairDetail({ id, onEdit, onClose }: { id: string; onEdit: (r: Repair)
                     {REPAIR_STATUS[s].label}
                   </button>
                 ))}
+                {previous ? (
+                  <button
+                    type="button"
+                    aria-pressed={back}
+                    onClick={() => setNext(back ? null : previous)}
+                    title="Para a etapa marcada por engano (pede o motivo)"
+                    className={clsx(
+                      "inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm transition-colors",
+                      back ? "border-ink/40 bg-surface-2 text-ink" : "border-dashed border-line text-ink-muted hover:border-ink/40 hover:text-ink",
+                    )}
+                  >
+                    <Undo2 aria-hidden className="size-3.5" />
+                    Voltar para “{REPAIR_STATUS[previous].label}”
+                  </button>
+                ) : null}
               </div>
               {next ? (
                 <form
@@ -431,10 +457,10 @@ function RepairDetail({ id, onEdit, onClose }: { id: string; onEdit: (r: Repair)
                   noValidate
                   onSubmit={(e) => {
                     e.preventDefault();
-                    if (!reasonMissing && !quoteError) move.mutate(next);
+                    if (!reasonMissing && !quoteError) move.mutate({ to: next, back });
                   }}
                 >
-                  {next === "vendor_quote" ? (
+                  {next === "vendor_quote" && !back ? (
                     <Field label="Valor do orçamento (R$)">
                       <Input
                         value={quoteValue}
@@ -450,7 +476,7 @@ function RepairDetail({ id, onEdit, onClose }: { id: string; onEdit: (r: Repair)
                       {quoteError ? <span className="text-xs font-medium text-red-600 dark:text-red-400">{quoteError}</span> : null}
                     </Field>
                   ) : null}
-                  {RETURN_DATE_STAGES.includes(next) ? (
+                  {askReturnDate ? (
                     <Field label="Previsão de retorno">
                       <Input type="date" value={returnDate} onChange={(e) => setReturnDate(e.target.value)} />
                     </Field>
@@ -458,7 +484,13 @@ function RepairDetail({ id, onEdit, onClose }: { id: string; onEdit: (r: Repair)
                   <Field
                     label={reasonRequired ? "Motivo" : "Observação"}
                     required={reasonRequired}
-                    hint={reasonRequired ? "Obrigatório para cancelar ou marcar sem conserto." : undefined}
+                    hint={
+                      back
+                        ? "Obrigatório para voltar a etapa (fica na linha do tempo)."
+                        : reasonRequired
+                          ? "Obrigatório para cancelar ou marcar sem conserto."
+                          : undefined
+                    }
                     className="sm:col-span-2"
                   >
                     <Textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} maxLength={2000} />
@@ -475,7 +507,7 @@ function RepairDetail({ id, onEdit, onClose }: { id: string; onEdit: (r: Repair)
                     loading={move.isPending}
                     disabled={reasonMissing || Boolean(quoteError)}
                   >
-                    Mover para “{REPAIR_STATUS[next].label}”
+                    {back ? "Voltar" : "Mover"} para “{REPAIR_STATUS[next].label}”
                   </Button>
                 </form>
               ) : null}

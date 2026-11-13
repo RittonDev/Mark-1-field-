@@ -9,7 +9,13 @@ import { session } from "./session";
 import type { TokenResponse } from "./types";
 
 const TIMEOUT_MS = 20_000;
+/**
+ * Upload: depois de 2 min, é interrompido se ficar 1 min sem avançar. Foto grande em rede lenta que
+ * segue subindo não é cortada no meio (e repetida para sempre); o teto absoluto é 15 min.
+ */
 const UPLOAD_TIMEOUT_MS = 120_000;
+const UPLOAD_STALL_MS = 60_000;
+const UPLOAD_MAX_MS = 15 * 60_000;
 
 /** Versão e sistema do app em toda requisição: o servidor sabe quem ainda roda uma versão antiga. */
 const APP_HEADERS: Record<string, string> = { "X-App-Version": APP_VERSION, "X-App-Platform": Platform.OS };
@@ -153,38 +159,41 @@ export function refreshSession(): Promise<RefreshResult> {
   const { refreshToken, apiUrl } = session.get();
   if (!refreshToken) return Promise.resolve("invalid");
   if (refreshing?.token === refreshToken) return refreshing.promise;
-  const used = refreshToken;
-  const sameSession = () => session.get().status === "signedIn" && session.get().refreshToken === used;
-  const promise = (async (): Promise<RefreshResult> => {
-    try {
-      const res = await fetchWithTimeout(`${apiUrl}/auth/refresh`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json", ...APP_HEADERS },
-        body: JSON.stringify({ refresh_token: used }),
-      });
-      // 401 = token inválido, expirado, revogado ou papel sem acesso ao app. Outro erro (proxy,
-      // firewall, servidor fora do ar) não tira o técnico do app no meio do dia: tenta depois.
-      if (res.status === 401) {
-        if (!sameSession()) return "invalid";
-        const detail = detailOf(res.data);
-        const message = typeof detail === "string" && detail && !GENERIC_EXPIRED.test(detail) ? detail : null;
-        if (message === MOBILE_DENIED_MESSAGE && accessRevokedHandler) await accessRevokedHandler(message);
-        else await session.signOut(true, message);
-        return "invalid";
-      }
-      const tokens = res.data as TokenResponse | null;
-      if (!res.ok || !tokens?.access_token || !tokens.refresh_token) return "offline";
-      if (!sameSession()) return "invalid";
-      await session.setTokens(tokens);
-      return "ok";
-    } catch {
-      return "offline";
-    } finally {
-      if (refreshing?.promise === promise) refreshing = null;
-    }
-  })();
-  refreshing = { token: used, promise };
+  const promise = renew(refreshToken, apiUrl);
+  refreshing = { token: refreshToken, promise };
+  const settle = () => {
+    if (refreshing?.promise === promise) refreshing = null;
+  };
+  promise.then(settle, settle);
   return promise;
+}
+
+async function renew(used: string, apiUrl: string): Promise<RefreshResult> {
+  const sameSession = () => session.get().status === "signedIn" && session.get().refreshToken === used;
+  try {
+    const res = await fetchWithTimeout(`${apiUrl}/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json", ...APP_HEADERS },
+      body: JSON.stringify({ refresh_token: used }),
+    });
+    // 401 = token inválido, expirado, revogado ou papel sem acesso ao app. Outro erro (proxy,
+    // firewall, servidor fora do ar) não tira o técnico do app no meio do dia: tenta depois.
+    if (res.status === 401) {
+      if (!sameSession()) return "invalid";
+      const detail = detailOf(res.data);
+      const message = typeof detail === "string" && detail && !GENERIC_EXPIRED.test(detail) ? detail : null;
+      if (message === MOBILE_DENIED_MESSAGE && accessRevokedHandler) await accessRevokedHandler(message);
+      else await session.signOut(true, message);
+      return "invalid";
+    }
+    const tokens = res.data as TokenResponse | null;
+    if (!res.ok || !tokens?.access_token || !tokens.refresh_token) return "offline";
+    if (!sameSession()) return "invalid";
+    await session.setTokens(tokens);
+    return "ok";
+  } catch {
+    return "offline";
+  }
 }
 
 interface RequestOptions {
@@ -262,10 +271,16 @@ export async function uploadFile<T>(
   const send = async () => {
     const { accessToken, apiUrl } = session.get();
     const controller = new AbortController();
-    const timer = setTimeout(() => {
-      timedOut = true;
-      controller.abort();
-    }, UPLOAD_TIMEOUT_MS);
+    const started = Date.now();
+    let movedAt = started;
+    const watchdog = setInterval(() => {
+      const now = Date.now();
+      const stalled = now - started > UPLOAD_TIMEOUT_MS && now - movedAt > UPLOAD_STALL_MS;
+      if (stalled || now - started > UPLOAD_MAX_MS) {
+        timedOut = true;
+        controller.abort();
+      }
+    }, 5_000);
     try {
       return await sendFile(`${apiUrl}${path}`, {
         fileUri,
@@ -278,9 +293,12 @@ export async function uploadFile<T>(
           ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         },
         signal: controller.signal,
+        onProgress: () => {
+          movedAt = Date.now();
+        },
       });
     } finally {
-      clearTimeout(timer);
+      clearInterval(watchdog);
     }
   };
 
@@ -294,7 +312,10 @@ export async function uploadFile<T>(
     }
   } catch (error) {
     if (error instanceof ApiError) throw error;
-    throw new ApiError(0, timedOut ? "O envio demorou demais e foi interrompido. Vamos tentar de novo." : null);
+    // Envio interrompido por demora não é falta de rede: só este arquivo espera para tentar de novo,
+    // o resto da sincronização (inclusive o download das OS) segue.
+    if (timedOut) throw new ApiError(408, "O envio demorou demais e foi interrompido. Vamos tentar de novo.");
+    throw new ApiError(0, null);
   }
   let data: unknown = null;
   try {

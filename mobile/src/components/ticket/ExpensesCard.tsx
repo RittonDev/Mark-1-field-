@@ -6,14 +6,13 @@ import { useStyles, useTheme, type Palette } from "../../theme/theme";
 import { Icon } from "../Icon";
 import { Text } from "../Text";
 import { Badge, Card, SectionTitle } from "../ui";
-import { toneInk } from "./tones";
 
 /** Custos extras da OS: o técnico vê (para acompanhar o reembolso), mas não lança nem altera. */
 export function ExpensesCard({ expenses, userId }: { expenses: Expense[]; userId?: string }) {
   const c = useTheme();
   const styles = useStyles(makeStyles);
   if (!expenses.length) return null;
-  const tone = { muted: c.inkMuted, info: toneInk(c, "info"), success: toneInk(c, "success"), danger: c.danger };
+  const tone = { muted: c.inkMuted, info: c.info, success: c.success, danger: c.danger };
   const total = expenses.filter((e) => e.status !== "rejected").reduce((sum, e) => sum + (e.total ?? 0), 0);
 
   return (

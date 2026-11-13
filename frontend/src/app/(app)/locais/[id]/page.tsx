@@ -65,7 +65,7 @@ export default function LocationDetailPage() {
     return (
       <div className="mx-auto max-w-7xl">
         {back}
-        <ErrorBox message={errorMessage(loc.error)} />
+        <ErrorBox message={errorMessage(loc.error)} onRetry={() => void loc.refetch()} />
       </div>
     );
   }
@@ -241,7 +241,7 @@ export default function LocationDetailPage() {
               <LoadingBlock rows={3} />
             ) : recent.error ? (
               <div className="p-4">
-                <ErrorBox message={errorMessage(recent.error)} />
+                <ErrorBox message={errorMessage(recent.error)} onRetry={() => void recent.refetch()} />
               </div>
             ) : (recent.data?.items ?? []).length === 0 ? (
               <p className="px-5 py-4 text-sm text-ink-subtle">Nenhuma OS nesta loja.</p>

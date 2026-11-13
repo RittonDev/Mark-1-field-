@@ -1,10 +1,10 @@
-import { canUseMobile, MOBILE_CHANNEL, MOBILE_DENIED_MESSAGE } from "./access";
+import { ACCESS_DISABLED_MESSAGE, canUseMobile, MOBILE_CHANNEL, MOBILE_DENIED_MESSAGE } from "./access";
 import { mustChangePassword, refreshMe } from "./account";
 import { request, setAccessRevokedHandler } from "./api";
 import { notifyDataChanged } from "./changes";
 import { getKv, setKv } from "./db";
-import { registerDevice, unregisterDevice, type DeviceRegistration } from "./device";
-import { session } from "./session";
+import { deviceRegistration, registerDevice, unregisterDevice } from "./device";
+import { session, type SessionStatus } from "./session";
 import { startSync, stopSync, wipeLocalData } from "./sync";
 import { hasConsent, resumeTracking, stopTracking } from "./tracking";
 import type { TokenResponse } from "./types";
@@ -16,9 +16,11 @@ const LOGOUT_DEVICE_WAIT_MS = 5_000;
 
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-let lastRegistration: DeviceRegistration | null = null;
-let pushRequested = false;
-export const getDeviceRegistration = () => lastRegistration;
+/** Técnico cujo aparelho já foi registrado para o push nesta sessão. */
+let pushRequestedFor: string | null = null;
+
+/** Estado do registro do push (vale também o reenvio que deu certo depois, na sincronização). */
+export const getDeviceRegistration = () => deviceRegistration();
 
 /**
  * O usuário não pode usar o app (não é técnico de campo, ou deixou de ser):
@@ -27,14 +29,33 @@ export const getDeviceRegistration = () => lastRegistration;
 async function revokeAccess(message: string) {
   stopSync();
   await stopTracking({ endOnServer: false });
-  lastRegistration = null;
-  pushRequested = false;
   await wipeLocalData();
   await session.signOut(false, message);
 }
 
 // 401 do /auth/refresh com a mensagem de canal (papel mudou no servidor).
 setAccessRevokedHandler(revokeAccess);
+
+/** Técnico desativado: os dados de clientes não ficam no aparelho (LGPD) e o pendente não tem mais destino. */
+async function forgetDisabledAccess() {
+  stopSync();
+  await stopTracking({ endOnServer: false }).catch(() => undefined);
+  await wipeLocalData().catch((error: unknown) => console.warn("Falha ao apagar os dados do aparelho", error));
+}
+
+let previousStatus: SessionStatus = session.get().status;
+
+// Qualquer saída da conta (Sair, sessão expirada, acesso retirado): o próximo login registra o aparelho
+// de novo para o push, mesmo sem reabrir o app. Se o servidor encerrou a sessão porque a central
+// desativou o técnico, apaga também os dados locais.
+session.subscribe(() => {
+  const { status, notice } = session.get();
+  const ended = previousStatus === "signedIn" && status === "signedOut";
+  previousStatus = status;
+  if (!ended) return;
+  pushRequestedFor = null;
+  if (notice === ACCESS_DISABLED_MESSAGE) void forgetDisabledAccess();
+});
 
 /** Abertura do app: lê a sessão salva e barra quem não é técnico (ex.: login antigo de analista). */
 export async function restoreSession() {
@@ -62,9 +83,11 @@ export async function startSession() {
 
 /** Registro do aparelho para push (pede a permissão de notificações). Uma vez por sessão. */
 export async function ensurePushRegistration() {
-  if (pushRequested || session.get().status !== "signedIn") return;
-  pushRequested = true;
-  lastRegistration = await registerDevice();
+  const { status, user } = session.get();
+  if (status !== "signedIn" || !user || pushRequestedFor === user.id) return;
+  pushRequestedFor = user.id;
+  await registerDevice();
+  // A Conta mostra o estado do registro: redesenha quando ele termina.
   notifyDataChanged();
 }
 
@@ -96,7 +119,5 @@ export async function logout() {
   // Sem rede, o servidor reatribui o token de push no próximo login neste aparelho.
   await Promise.race([unregisterDevice(), delay(LOGOUT_DEVICE_WAIT_MS)]);
   stopSync();
-  lastRegistration = null;
-  pushRequested = false;
   await session.signOut();
 }

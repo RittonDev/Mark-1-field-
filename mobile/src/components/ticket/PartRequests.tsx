@@ -17,7 +17,6 @@ import { Text } from "../Text";
 import { Badge, Button, Card, ErrorBox, Field, Input, SectionTitle } from "../ui";
 import { capturePhotos } from "./photoCapture";
 import { SheetScaffold } from "./SheetScaffold";
-import { toneInk } from "./tones";
 
 const MAX_PHOTOS = 4;
 /** Até 9.999 com 3 casas (o servidor guarda decimal). */
@@ -25,9 +24,17 @@ const MAX_QTY = 9999;
 
 type PartTone = (typeof PART_STATUS)[keyof typeof PART_STATUS]["tone"];
 
+/** Cor do status do pedido (texto e ícone): os tokens de texto do tema, AA também no sol. */
 function useToneColor() {
   const c = useTheme();
-  return (tone: PartTone) => (tone === "muted" ? c.inkMuted : toneInk(c, tone));
+  const ink: Record<PartTone, string> = {
+    warning: c.warningInk,
+    info: c.infoInk,
+    success: c.successInk,
+    danger: c.dangerInk,
+    muted: c.inkMuted,
+  };
+  return (tone: PartTone) => ink[tone];
 }
 
 /** "2,5" → 2.5; vazio, zero ou inválido → null. */

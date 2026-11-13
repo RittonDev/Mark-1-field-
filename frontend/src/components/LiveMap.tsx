@@ -146,10 +146,15 @@ function onActivate(marker: Marker, action: () => void) {
   });
 }
 
-function techIcon(L: Leaflet, opts: { color: string; selected: boolean; name: string; heading: number | null; stale: boolean }): DivIcon {
+function techIcon(
+  L: Leaflet,
+  opts: { color: string; selected: boolean; name: string; heading: number | null; stale: boolean; moving: boolean },
+): DivIcon {
   const style = `--c:${opts.color}${opts.stale ? ";opacity:.7;border-style:dashed" : ""}`;
+  // A caminho do cliente: anel fixo em volta do pino (nada pisca; o mapa fica aberto o dia todo).
+  const classes = ["mf-pin", opts.selected ? "is-selected" : "", opts.moving ? "is-moving" : ""].filter(Boolean).join(" ");
   const html =
-    `<div class="mf-pin${opts.selected ? " is-selected" : ""}" style="${style}">` +
+    `<div class="${classes}" style="${style}">` +
     (opts.heading != null ? `<i class="mf-heading" style="transform:rotate(${opts.heading}deg)"></i>` : "") +
     `<span aria-hidden="true">${escapeHtml(initials(opts.name))}</span></div>`;
   return L.divIcon({ className: "", html, iconSize: [34, 34] });
@@ -394,7 +399,8 @@ export default function LiveMap({
       const at: LatLngTuple = [pos.latitude, pos.longitude];
       const stale = tech.state === "no_signal" || isStale(pos.recorded_at, now);
       const heading = !stale && pos.heading != null && (pos.speed_mps ?? 0) > 1 ? Math.round(pos.heading / 15) * 15 : null;
-      const look = [color, selected, initials(tech.name), heading ?? "-", stale].join("|");
+      const moving = !stale && tech.state === "en_route";
+      const look = [color, selected, initials(tech.name), heading ?? "-", stale, moving].join("|");
       const precision = pos.accuracy_m != null ? ` · ±${Math.round(pos.accuracy_m)} m` : "";
       const lines = [tech.name, ticket ? `${label} · ${ticket.code}` : label];
       if (stale) lines.push(`Última posição ${formatAgo(pos.recorded_at, now)}${precision}`);
@@ -405,7 +411,7 @@ export default function LiveMap({
       if (!entry) {
         const id = tech.id;
         const marker = L.marker(at, {
-          icon: techIcon(L, { color, selected, name: tech.name, heading, stale }),
+          icon: techIcon(L, { color, selected, name: tech.name, heading, stale, moving }),
           zIndexOffset: selected ? 1000 : 0,
           riseOnHover: true,
         })
@@ -417,7 +423,7 @@ export default function LiveMap({
       } else {
         entry.marker.setLatLng(at);
         if (entry.look !== look) {
-          entry.marker.setIcon(techIcon(L, { color, selected, name: tech.name, heading, stale }));
+          entry.marker.setIcon(techIcon(L, { color, selected, name: tech.name, heading, stale, moving }));
           entry.look = look;
         }
         entry.marker.setZIndexOffset(selected ? 1000 : 0);
@@ -756,6 +762,10 @@ function MapLegend() {
       </summary>
       <ul className="flex flex-col gap-1.5 border-t border-line px-2.5 py-2">
         {item(<span className="size-3.5 rounded-full border-2 border-surface bg-ink-subtle shadow-elev-1" />, "Técnico (a cor é o estado)")}
+        {item(
+          <span className="size-3.5 rounded-full border-2 border-surface bg-ink-subtle shadow-elev-1 outline-2 outline-offset-1 outline-ink-subtle/40" />,
+          "A caminho do cliente (anel)",
+        )}
         {item(
           <span className="size-3.5 rounded-full border-2 border-dashed border-surface bg-ink-subtle opacity-70 shadow-elev-1" />,
           "Posição antiga (sem sinal)",

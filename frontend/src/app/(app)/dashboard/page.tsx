@@ -11,16 +11,13 @@ import { useNow } from "@/components/useNow";
 import { Card, CardHeader, ErrorBox, LoadingBlock, PageHeader, SectionTitle, Skeleton, Table, Td, Th } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { PRIORITY, PRIORITY_ORDER, STATUS, STATUS_ORDER } from "@/lib/constants";
-import { formatMinutes, formatTime } from "@/lib/format";
+import { dayKey, formatMinutes, formatTime } from "@/lib/format";
 import type { DailyReport, DashboardSummary, Page, TicketListItem } from "@/lib/types";
 
-const OPERATION_TZ = "America/Sao_Paulo";
 /** Meta de prazo: abaixo dela o número fica âmbar; abaixo do piso, vermelho. */
 const SLA_TARGET = 90;
 const SLA_FLOOR = 75;
 
-/** Dia no fuso da operação ("2026-11-13"): o fechamento do dia vira à meia-noite de lá. */
-const dayISO = (ms: number) => new Intl.DateTimeFormat("en-CA", { timeZone: OPERATION_TZ }).format(new Date(ms));
 const intFmt = (n: number) => n.toLocaleString("pt-BR");
 
 interface BarRow {
@@ -111,7 +108,7 @@ function TodaySoFar({ today }: { today: string }) {
         </div>
       ) : report.error ? (
         <div className="mt-3">
-          <ErrorBox message={errorMessage(report.error)} />
+          <ErrorBox message={errorMessage(report.error)} onRetry={() => void report.refetch()} />
         </div>
       ) : (
         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6" role="status" aria-label="Carregando o dia de hoje">
@@ -147,7 +144,9 @@ export default function DashboardPage() {
 
   const data = summary.data;
   // Uma falha ao atualizar mantém os números na tela (com o aviso abaixo do título).
-  if (!data) return summary.error ? <ErrorBox message={errorMessage(summary.error)} /> : <LoadingBlock />;
+  if (!data) {
+    return summary.error ? <ErrorBox message={errorMessage(summary.error)} onRetry={() => void summary.refetch()} /> : <LoadingBlock />;
+  }
 
   const openStatuses = STATUS_ORDER.filter((s) => ["open", "active", "pending"].includes(STATUS[s].group));
   const statusRows = openStatuses.map((s) => ({
@@ -211,7 +210,8 @@ export default function DashboardPage() {
         />
       </div>
 
-      <TodaySoFar today={dayISO(now)} />
+      {/* O dia no fuso da operação: o fechamento vira à meia-noite de lá. */}
+      <TodaySoFar today={dayKey(now)} />
 
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
         <Card>
@@ -229,7 +229,7 @@ export default function DashboardPage() {
         {data.by_assignee.length === 0 ? (
           <p className="px-4 py-6 text-sm text-ink-muted">Nenhuma OS em aberto com técnico no momento.</p>
         ) : (
-          <Table>
+          <Table label="Carga por técnico">
             <thead>
               <tr>
                 <Th>Técnico</Th>

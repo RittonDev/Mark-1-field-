@@ -5,7 +5,6 @@ import type { FormStep } from "../../lib/forms";
 import { tint, useStyles, useTheme, type Palette } from "../../theme/theme";
 import { Icon } from "../Icon";
 import { Text } from "../Text";
-import { toneInk } from "../ticket/tones";
 import { SectionLabel } from "./FieldInput";
 
 // Peças do formulário "uma pergunta por tela": barra de passos, troca de pergunta e revisão final.
@@ -87,7 +86,7 @@ export function ReviewList({
   const c = useTheme();
   const styles = useStyles(makeStyles);
   if (!steps.length) return <Text style={styles.emptyReview}>Este formulário não tem perguntas para responder.</Text>;
-  const warning = toneInk(c, "warning");
+  const warning = c.warningInk;
   return (
     <View>
       {steps.map((step, i) => {
@@ -97,15 +96,16 @@ export function ReviewList({
         const answer = row.problem && row.answer ? `${row.answer} · ${row.problem}` : (row.answer ?? row.problem ?? "Sem resposta");
         const content = (
           <>
+            {/* Respondida fica com a marca da etapa (azul, como o stepper); só a pendência ganha cor de alerta. */}
             <View
               style={[
                 styles.mark,
-                done && { backgroundColor: c.successSoft, borderColor: c.success },
+                done && { backgroundColor: c.primarySoft, borderColor: c.primary },
                 row.problem && { backgroundColor: c.warningSoft, borderColor: c.warning },
               ]}
             >
               {done ? (
-                <Icon name="check" size={13} color={toneInk(c, "success")} strokeWidth={2.8} />
+                <Icon name="check" size={13} color={c.brandInk} strokeWidth={2.8} />
               ) : row.problem ? (
                 <Text style={[styles.markText, { color: warning }]}>!</Text>
               ) : (

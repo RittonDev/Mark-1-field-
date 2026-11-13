@@ -10,7 +10,6 @@ import { RADIUS, useStyles, useTheme, type Palette } from "../../theme/theme";
 import { Icon } from "../Icon";
 import { Text } from "../Text";
 import { Badge, Button, Card, SectionTitle } from "../ui";
-import { toneInk } from "./tones";
 
 const STATUS_LABEL = { pending: "Não iniciado", in_progress: "Em preenchimento", completed: "Concluído" } as const;
 
@@ -78,7 +77,7 @@ export const FormsCard = memo(function FormsCard({ ticket }: { ticket: LocalTick
             <View style={{ flex: 1, gap: 4 }}>
               <Text style={styles.name}>{form.name}</Text>
               <View style={styles.badges}>
-                <Badge label={STATUS_LABEL[form.status]} color={completed ? toneInk(c, "success") : c.inkMuted} />
+                <Badge label={STATUS_LABEL[form.status]} color={completed ? c.success : c.inkMuted} />
                 {form.required ? <Badge label="Obrigatório" color={c.inkMuted} /> : null}
               </View>
               {progress.total ? (

@@ -177,6 +177,7 @@ function noticeFor(event: RealtimeEvent, userId: string): NoticeDraft | null {
       };
     }
     case "part_request.created":
+      if (othersTicket) return null;
       return { ticketId, code, title: `${code}: o técnico pediu peça`, description: "Monte o orçamento para o cliente aprovar." };
     case "onboarding.submitted":
       return { title: `Nova ficha de homologação: ${event.name ?? "técnico"}`, href: "/homologacao" };
@@ -192,6 +193,7 @@ const ALL_EXTRA = ["expenses", "payouts", "quotes", "repairs", "reports", "proje
 const EXTRA_BY_FIELD: Record<string, string[]> = {
   expenses: ["expenses", "reports"],
   payouts: ["payouts", "reports"],
+  repairs: ["repairs"],
   quotes: ["quotes"],
   part_requests: ["quotes"],
   times: ["reports", "payouts"],

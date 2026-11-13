@@ -124,7 +124,16 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 
   const toast = useCallback<ToastApi["toast"]>(({ title, description, tone = "info", action }) => {
     const id = nextId.current++;
-    setToasts((list) => [...list.slice(-4), { id, title, description, tone, action }]);
+    const item: Toast = { id, title, description, tone, action };
+    setToasts((list) => {
+      // O mesmo aviso de novo (ex.: o mesmo erro a cada clique): substitui o anterior e recomeça o tempo,
+      // em vez de empilhar cópias.
+      const last = list[list.length - 1];
+      if (last && last.title === title && last.description === description && last.tone === tone) {
+        return [...list.slice(0, -1), item];
+      }
+      return [...list.slice(-4), item];
+    });
     // O id no fim (invisível) faz o mesmo texto ser anunciado de novo.
     const message = `${description ? `${title}. ${description}` : title}${"​".repeat(id % 2)}`;
     setAnnounce((current) => (tone === "error" ? { ...current, assertive: message } : { ...current, polite: message }));

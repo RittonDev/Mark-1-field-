@@ -183,6 +183,8 @@ export class RealtimeClient {
   }
 
   private scheduleReconnect(authFailed: boolean) {
+    // Parado (app em segundo plano, logout) enquanto renovava o token: nada de reconectar.
+    if (!this.wanted) return;
     if (authFailed) {
       this.authFailures += 1;
       if (this.authFailures >= MAX_AUTH_FAILURES) {
@@ -200,6 +202,7 @@ export class RealtimeClient {
       this.retryTimer = undefined;
       if (authFailed) {
         const result = await refreshSession();
+        if (!this.wanted) return;
         if (result === "invalid") {
           this.stop();
           return;
@@ -209,6 +212,8 @@ export class RealtimeClient {
           return;
         }
       }
+      // Outro caminho (app voltou à tela, rede voltou) já reconectou enquanto esperava.
+      if (this.socket || this.retryTimer !== undefined) return;
       this.connect();
     }, delay);
   }

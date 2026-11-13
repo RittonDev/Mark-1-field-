@@ -551,14 +551,16 @@ async function pushFailed(round: Round, ops: OutboxOp[], error: unknown): Promis
     await write(round, (db) => markOpsAttempt(db, ids, error.message));
     throw error;
   }
-  // Lote recusado na validação (ex.: tipo de operação que este servidor ainda não conhece) ou grande
-  // demais para um proxy: divide ao meio até isolar a operação que causa a recusa.
-  if ((error.status === 422 || error.status === 413) && ops.length > 1) {
+  // Lote recusado na validação de uma operação (ex.: tipo que este servidor ainda não conhece) ou
+  // grande demais para um proxy: divide ao meio até isolar a operação que causa a recusa.
+  const opRefused = error.status === 422 && blamesOperations(error);
+  if ((opRefused || error.status === 413) && ops.length > 1) {
     const half = Math.ceil(ops.length / 2);
     return (await pushBatch(round, ops.slice(0, half))) && (await pushBatch(round, ops.slice(half)));
   }
-  if (error.status === 422) {
-    await rejectOps(round, ops, cleanServerError(error.message));
+  if (opRefused) {
+    console.warn("Operação recusada na validação do servidor", error.detail);
+    await rejectOps(round, ops, "o servidor não aceitou os dados desta ação. Avise a central no grupo.");
     return true;
   }
   // Erro do servidor que pode vir de uma operação só (500, ou 409 que se repete). Depois de duas
@@ -578,6 +580,18 @@ async function pushFailed(round: Round, ops: OutboxOp[], error: unknown): Promis
   round.error ??= message;
   // Uma ação travada sozinha não para as das outras OS; problema no envio inteiro para a rodada.
   return alone;
+}
+
+/**
+ * A recusa de validação aponta para as operações (e não para o envelope do envio)? Só então uma
+ * operação pode ser culpada; recusa sem esse detalhe (proxy, firewall) nunca tira nada da fila.
+ */
+function blamesOperations(error: ApiError): boolean {
+  if (!Array.isArray(error.detail)) return false;
+  return error.detail.some((issue: unknown) => {
+    const loc = issue && typeof issue === "object" ? (issue as { loc?: unknown }).loc : null;
+    return Array.isArray(loc) && loc.includes("operations");
+  });
 }
 
 /** Texto do problema no envio (aparece na faixa e ao lado da ação na tela Conta). */
@@ -679,27 +693,28 @@ function announceProblems(problems: string[]) {
 // ───────────────────────────── pull ─────────────────────────────
 
 /**
- * "Baixar tudo" pedido (ou download completo interrompido no meio): o próximo download começa do
- * zero. Só zera depois da última página, então uma rodada em andamento não engole o pedido.
+ * Pedidos de download completo ("Baixar tudo", ou banco sem cursor): o completo que termina atende
+ * os pedidos feitos antes de ele começar. Um pedido feito no meio de uma rodada não se perde, e um
+ * download completo interrompido recomeça do zero na rodada seguinte.
  */
-let forceFull = false;
+let fullRequested = 0;
+let fullDone = 0;
 
 async function pullChanges(round: Round) {
-  let full = false;
+  const stored = await getKv(SINCE_KEY);
+  // Sem cursor (primeiro acesso ou banco refeito por uma atualização do app) vale como "Baixar tudo".
+  if (stored === null && fullRequested <= fullDone) fullRequested = fullDone + 1;
+  const wanted = fullRequested;
+  const full = wanted > fullDone;
+  let since = full ? null : stored;
   const received = new Set<UUID>();
   for (let page = 0; page < 100; page++) {
     ensureAlive(round);
-    const stored = await getKv(SINCE_KEY);
-    const since = page === 0 && forceFull ? null : stored;
-    if (page === 0) {
-      full = since === null;
-      if (full) forceFull = true;
-    }
     const query = since ? `?since=${encodeURIComponent(since)}` : "";
     const data = await api.get<SyncPullResponse>(`/sync/pull${query}`, { timeoutMs: SYNC_TIMEOUT_MS });
     const last = !data.has_more;
     const news: FieldNews[] = [];
-    const revoked: string[] = [];
+    const revoked: TicketRef[] = [];
     let removed = 0;
     // Página sem novidade não acorda as telas (o intervalo e os eventos rodam o dia todo).
     const changed = full || data.tickets.length + data.comments.length + data.worklogs.length + data.revoked_ticket_ids.length > 0;
@@ -716,7 +731,7 @@ async function pullChanges(round: Round) {
         for (const worklog of data.worklogs) await saveServerWorklog(db, worklog);
         for (const id of data.revoked_ticket_ids) {
           const local = await getTicket(id, db);
-          if (local) revoked.push(local.code);
+          if (local) revoked.push({ code: local.code });
           await deleteTicket(db, id);
         }
         if (last) {
@@ -729,35 +744,42 @@ async function pullChanges(round: Round) {
       },
       changed,
     );
-    if (last && full) forceFull = false;
+    since = data.server_time;
     announceFieldNews(news);
     announceRemoved(revoked, removed);
-    if (last) return;
+    if (last) {
+      if (full) fullDone = Math.max(fullDone, wanted);
+      return;
+    }
   }
 }
 
-/** OS que saíram da lista: reatribuídas (o código vem do aparelho) ou que sumiram no download completo. */
-function announceRemoved(codes: string[], removed: number) {
-  announceGroup(
-    codes,
-    (code) => `${code} foi reatribuída e saiu da sua lista`,
-    (count) => `${count} OS foram reatribuídas e saíram da sua lista`,
-  );
+/** OS que saíram da lista: tiradas do técnico (o código vem do aparelho) ou que sumiram no download completo. */
+function announceRemoved(refs: TicketRef[], removed: number) {
+  announceGroup(refs, (code) => `${code} saiu da sua lista`, (count) => `${count} OS saíram da sua lista`, {
+    description: "A central mudou quem atende.",
+  });
   if (removed > 0) {
     showToast(removed === 1 ? "Uma OS que não é mais sua saiu da lista" : `${removed} OS que não são mais suas saíram da lista`);
   }
 }
 
+/** OS de um aviso. Com `id`, tocar no aviso abre a OS. */
+interface TicketRef {
+  id?: UUID;
+  code: string;
+}
+
 /** Até dois avisos do mesmo tipo saem um a um; mais que isso, um resumo só. */
-function announceGroup(codes: string[], one: (code: string) => string, many: (count: number) => string, options: ToastOptions = {}) {
-  if (codes.length > 2) showToast(many(codes.length), options);
-  else for (const code of codes) showToast(one(code), options);
+function announceGroup(refs: TicketRef[], one: (code: string) => string, many: (count: number) => string, options: ToastOptions = {}) {
+  if (refs.length > 2) showToast(many(refs.length), options);
+  else for (const ref of refs) showToast(one(ref.code), { ...options, ticketId: ref.id });
 }
 
 type FieldNews =
-  | { kind: "part_approved" | "part_rejected"; code: string; description: string }
-  | { kind: "assigned" | "helper" | "cancelled"; code: string }
-  | { kind: "rescheduled"; code: string; at: string; first: boolean };
+  | { kind: "part_approved" | "part_rejected"; id: UUID; code: string; description: string }
+  | { kind: "assigned" | "helper" | "cancelled"; id: UUID; code: string }
+  | { kind: "rescheduled"; id: UUID; code: string; at: string; first: boolean };
 
 /**
  * O que mudou entre a última versão do servidor guardada no aparelho e a recebida, e merece aviso
@@ -766,33 +788,34 @@ type FieldNews =
 function fieldNews(before: TicketDetail | null, after: TicketDetail, user: User): FieldNews[] {
   const mine = after.assignee?.id === user.id;
   if (!mine && !isHelper(after, user)) return [];
+  const ref = { id: after.id, code: after.code };
   if (!before) {
-    return isDone(after.status) ? [] : [{ kind: mine ? "assigned" : "helper", code: after.code }];
+    return isDone(after.status) ? [] : [{ kind: mine ? "assigned" : "helper", ...ref }];
   }
   const news: FieldNews[] = [];
   if (before.status !== "cancelled" && after.status === "cancelled") {
-    news.push({ kind: "cancelled", code: after.code });
+    news.push({ kind: "cancelled", ...ref });
   } else if (after.scheduled_start && after.scheduled_start !== before.scheduled_start && !isDone(after.status)) {
-    news.push({ kind: "rescheduled", code: after.code, at: after.scheduled_start, first: !before.scheduled_start });
+    news.push({ kind: "rescheduled", ...ref, at: after.scheduled_start, first: !before.scheduled_start });
   }
   if (!mine) return news;
   const previous = new Map((before.part_requests ?? []).map((r) => [r.id, r.status]));
   for (const request of after.part_requests ?? []) {
     const was = previous.get(request.id);
     if (was && was !== "approved" && request.status === "approved") {
-      news.push({ kind: "part_approved", code: after.code, description: request.description });
+      news.push({ kind: "part_approved", ...ref, description: request.description });
     } else if (was && was !== "rejected" && request.status === "rejected") {
-      news.push({ kind: "part_rejected", code: after.code, description: request.description });
+      news.push({ kind: "part_rejected", ...ref, description: request.description });
     }
   }
   return news;
 }
 
 function announceFieldNews(news: FieldNews[]) {
-  const codes = (kind: FieldNews["kind"]) => news.filter((n) => n.kind === kind).map((n) => n.code);
-  announceGroup(codes("assigned"), (code) => `Nova OS para você: ${code}`, (count) => `${count} OS novas para você`);
-  announceGroup(codes("helper"), (code) => `Você vai na visita da ${code}`, (count) => `Você entrou em ${count} visitas`);
-  const cancelled = codes("cancelled");
+  const refs = (kind: FieldNews["kind"]) => news.filter((n) => n.kind === kind);
+  announceGroup(refs("assigned"), (code) => `Nova OS para você: ${code}`, (count) => `${count} OS novas para você`);
+  announceGroup(refs("helper"), (code) => `Você vai na visita da ${code}`, (count) => `Você entrou em ${count} visitas`);
+  const cancelled = refs("cancelled");
   if (cancelled.length) {
     haptic.warning();
     announceGroup(
@@ -806,7 +829,9 @@ function announceFieldNews(news: FieldNews[]) {
   if (rescheduled.length > 2) {
     showToast(`${rescheduled.length} OS foram reagendadas`, { description: "Confira a agenda." });
   } else {
-    for (const n of rescheduled) showToast(`${n.code} ${n.first ? "agendada" : "reagendada"} para ${formatShort(n.at)}`);
+    for (const n of rescheduled) {
+      showToast(`${n.code} ${n.first ? "agendada" : "reagendada"} para ${formatShort(n.at)}`, { ticketId: n.id });
+    }
   }
 
   const parts = news.filter((n): n is Extract<FieldNews, { kind: "part_approved" | "part_rejected" }> =>
@@ -828,6 +853,7 @@ function announceFieldNews(news: FieldNews[]) {
       showToast(`${n.code}: peça recusada`, {
         tone: "error",
         description: `${n.description}: o cliente não aprovou o orçamento. Não instale; fale com a central no grupo.`,
+        ticketId: n.id,
       });
     }
   }
@@ -835,11 +861,14 @@ function announceFieldNews(news: FieldNews[]) {
 
 const FIELD_RULES_KEY = "field_rules";
 
-/** Regras de campo da empresa (GET /settings/field). Enquanto a rota não existir (404), valem as da promessa. */
+/**
+ * Regras de campo da empresa (GET /settings/field), a cada 30 min ou em "Baixar tudo". Enquanto a
+ * rota não existir (404), valem as da promessa.
+ */
 let fieldRulesAt = 0;
 
 async function refreshFieldRules(round: Round) {
-  if (!forceReasons && Date.now() - fieldRulesAt < 30 * 60_000) return;
+  if (Date.now() - fieldRulesAt < 30 * 60_000) return;
   try {
     ensureAlive(round);
     const rules = await api.get<FieldRules>("/settings/field");
@@ -888,7 +917,8 @@ async function refreshReasons(round: Round) {
 
 /**
  * Confere uma OS direto na API. Sem acesso (o técnico saiu da visita ou ela foi reatribuída), sai do
- * aparelho: o `revoked_ticket_ids` do pull só cobre reatribuição, não a saída da equipe da visita.
+ * aparelho: em servidores anteriores o `revoked_ticket_ids` do pull só cobria a reatribuição, não a
+ * saída da equipe da visita.
  */
 async function revalidateTicket(ctx: Ctx, ticketId: UUID): Promise<void> {
   ensureAlive(ctx);
@@ -899,7 +929,7 @@ async function revalidateTicket(ctx: Ctx, ticketId: UUID): Promise<void> {
     if (!(error instanceof ApiError) || (error.status !== 403 && error.status !== 404)) return;
     const local = await getTicket(ticketId);
     await write(ctx, (db) => deleteTicket(db, ticketId));
-    if (local) showToast(`${local.code} saiu da sua lista`, { description: "Você não está mais na visita desta OS." });
+    if (local) showToast(`${local.code} saiu da sua lista`, { description: "A central mudou quem atende." });
     return;
   }
   await write(ctx, (db) => saveServerTicket(db, ticket, ctx.user));
@@ -933,7 +963,7 @@ async function uploadPhotos(round: Round) {
     ensureAlive(round);
     if (round.blocked.has(photo.ticket_id)) continue;
     if (!isDue(photo.id)) {
-      round.blocked.add(photo.ticket_id);
+      holdTicket(round, photo.ticket_id, photo.id);
       continue;
     }
     if (!photoExists(photo.file_uri)) {
@@ -943,7 +973,7 @@ async function uploadPhotos(round: Round) {
           ticket_id: photo.ticket_id,
           ticket_code: ticket?.code ?? null,
           kind: "photo",
-          message: `A foto ${photo.filename} não está mais no aparelho e não foi enviada.`,
+          message: "Uma foto não está mais no aparelho e não foi enviada. Tire de novo se ela for necessária.",
         });
         await db.runAsync("DELETE FROM photos WHERE id = ?", photo.id);
       });
@@ -981,7 +1011,7 @@ async function uploadPhoto(round: Round, photo: PendingPhoto) {
           photo.ticket_id,
           (a) =>
             a.filename === photo.filename &&
-            (isFormPhoto ? a.form_id === photo.form_id && a.field_id === photo.field_id : a.kind === "photo"),
+            (isFormPhoto ? a.form_id === photo.form_id && a.field_id === photo.field_id : !a.form_id),
         )
       : null;
   if (!attachment) {
@@ -1000,11 +1030,11 @@ async function uploadPhoto(round: Round, photo: PendingPhoto) {
       if (!(error instanceof ApiError)) throw error;
       if (error.retryable || error.status === 401) {
         await write(round, (db) => markPhotoError(photo.id, error.message, db));
-        // Sem rede ou sessão encerrada: para a rodada. Servidor com problema: só esta OS espera.
+        // Sem rede ou sessão encerrada: para a rodada. Servidor com problema ou envio lento demais:
+        // só esta OS espera (com intervalo crescente) e o resto da sincronização segue.
         if (error.status === 0 || error.status === 401) throw error;
-        scheduleRetry(photo.id);
-        round.blocked.add(photo.ticket_id);
-        round.error ??= `Foto ${photo.filename}: ${error.message}`;
+        scheduleRetry(photo.id, `Foto da ${await ticketCode(photo.ticket_id)}: ${error.message}`);
+        holdTicket(round, photo.ticket_id, photo.id);
         return;
       }
       // Recusada (ex.: campo já com o máximo de fotos, arquivo grande demais): sai da fila com aviso.
@@ -1096,8 +1126,7 @@ export async function queueSignature(
   signer: { name: string; role: string | null; latitude: number | null; longitude: number | null },
 ) {
   const id = randomUUID();
-  const filename = `assinatura-${id.slice(0, 8)}.png`;
-  const fileUri = await persistPhoto(sourceUri, filename);
+  const fileUri = await persistPhoto(sourceUri, signatureFilename(id));
   const replaced = await insertSignature({
     id,
     ticket_id: ticketId,
@@ -1114,10 +1143,39 @@ export async function queueSignature(
   void requestSync();
 }
 
-async function uploadSignature(signature: PendingSignature) {
+/** Nome do arquivo (no aparelho e no servidor): leva o id, para um reenvio achar a que já chegou. */
+const signatureFilename = (id: string) => `assinatura-${id.slice(0, 8)}.png`;
+
+/** Recusa porque o formulário obrigatório ainda não está concluído no servidor. */
+const FORM_PENDING = /formul[aá]rio/i;
+
+/**
+ * Envia uma assinatura. Devolve true quando ela não segura mais o resto da OS (enviada, recusada
+ * com aviso ou guardada esperando o formulário) e false quando o resto da OS espera a próxima rodada.
+ */
+async function uploadSignature(round: Round, signature: PendingSignature): Promise<boolean> {
   if (!photoExists(signature.file_uri)) {
-    await deleteSignature(signature.id);
-    return;
+    // Sem o arquivo não há o que enviar: o "Resolver" segue e o servidor pede a assinatura de novo.
+    await write(round, async (db) => {
+      await addNotice(db, {
+        ticket_id: signature.ticket_id,
+        ticket_code: await ticketCode(signature.ticket_id, db),
+        kind: "rejected",
+        message: `A assinatura de ${signature.signer_name} não está mais no aparelho. Colha de novo antes de concluir.`,
+      });
+      await deleteSignature(signature.id, db);
+    });
+    retries.delete(signature.id);
+    return true;
+  }
+  const filename = signatureFilename(signature.id);
+  // Reenvio depois de uma resposta perdida (tempo esgotado, app fechado no meio): ela pode já ter chegado.
+  if (signature.attempts > 0) {
+    const uploaded = await findUploaded(round, signature.ticket_id, (a) => a.kind === "signature" && a.filename === filename);
+    if (uploaded) {
+      await finishSignature(round, signature, await fetchTicket(round, signature.ticket_id));
+      return true;
+    }
   }
   const fields: Record<string, string> = { signer_name: signature.signer_name };
   if (signature.signer_role) fields.signer_role = signature.signer_role;
@@ -1125,39 +1183,76 @@ async function uploadSignature(signature: PendingSignature) {
     fields.latitude = String(signature.latitude);
     fields.longitude = String(signature.longitude);
   }
+  // A tentativa conta antes do envio: se o app morrer no meio, o próximo envio confere primeiro.
+  await write(round, (db) => markSignatureAttempt(db, signature.id), false);
+  ensureAlive(round);
+  let ticket: TicketDetail | null;
   try {
-    const ticket = await uploadFile<TicketDetail>(
-      `/tickets/${signature.ticket_id}/signature`,
-      signature.file_uri,
-      fields,
-      "image/png",
-      `assinatura-${signature.id.slice(0, 8)}.png`,
-    );
-    const user = currentUser();
-    await transaction(async (db) => {
-      await deleteSignature(signature.id, db);
-      if (ticket?.id) await saveServerTicket(db, ticket, user);
-    });
-    deletePhotoFile(signature.file_uri);
+    ticket = await uploadFile<TicketDetail>(`/tickets/${signature.ticket_id}/signature`, signature.file_uri, fields, "image/png", filename);
   } catch (error) {
-    if (error instanceof ApiError && (error.retryable || error.status === 401)) {
-      await markSignatureError(signature.id, error.message);
-      throw error;
+    if (!(error instanceof ApiError)) throw error;
+    if (error.retryable || error.status === 401) {
+      await write(round, (db) => markSignatureError(signature.id, error.message, db));
+      if (error.status === 0 || error.status === 401) throw error;
+      scheduleRetry(signature.id, `Assinatura da ${await ticketCode(signature.ticket_id)}: ${error.message}`);
+      holdTicket(round, signature.ticket_id, signature.id);
+      return false;
     }
-    // Recusada (ex.: formulário obrigatório incompleto): sai da fila e o técnico colhe de novo.
-    await transaction(async (db) => {
-      const ticket = await getTicket(signature.ticket_id, db);
+    if (error.status === 422 && FORM_PENDING.test(error.message)) {
+      // O formulário não está concluído no servidor (a conclusão foi recusada ou a central incluiu um
+      // obrigatório). Quem assinou já foi embora: a assinatura fica guardada e sai depois da conclusão.
+      const reason = error.message;
+      await write(round, async (db) => {
+        await markSignatureBlocked(db, signature.id, reason);
+        if (signature.blocked_reason === reason) return; // já avisado
+        await addNotice(db, {
+          ticket_id: signature.ticket_id,
+          ticket_code: await ticketCode(signature.ticket_id, db),
+          kind: "rejected",
+          message: `Assinatura de ${signature.signer_name} guardada: vai quando o formulário for concluído — ${reason}`,
+        });
+      });
+      retries.delete(signature.id);
+      return true;
+    }
+    // Recusada de vez (OS já concluída, sem permissão, imagem inválida): sai da fila com aviso.
+    await write(round, async (db) => {
       await addNotice(db, {
         ticket_id: signature.ticket_id,
-        ticket_code: ticket?.code ?? null,
+        ticket_code: await ticketCode(signature.ticket_id, db),
         kind: "rejected",
-        message: `Assinatura de ${signature.signer_name}: o servidor recusou — ${errorMessage(error)}`,
+        message: `Assinatura de ${signature.signer_name}: o servidor recusou — ${error.message}`,
       });
       await deleteSignature(signature.id, db);
     });
+    retries.delete(signature.id);
     deletePhotoFile(signature.file_uri);
-    showToast("Assinatura não aceita", { description: errorMessage(error), tone: "error" });
+    showToast("Assinatura não aceita", { description: error.message, tone: "error", ticketId: signature.ticket_id });
+    return true;
   }
+  await finishSignature(round, signature, ticket);
+  return true;
+}
+
+/** OS atual no servidor (null se o técnico não a vê mais); falta de rede para a rodada. */
+async function fetchTicket(round: Round, ticketId: UUID): Promise<TicketDetail | null> {
+  ensureAlive(round);
+  try {
+    return await api.get<TicketDetail>(`/tickets/${ticketId}`);
+  } catch (error) {
+    if (error instanceof ApiError && (error.status === 0 || error.status === 401)) throw error;
+    return null;
+  }
+}
+
+/** Assinatura no servidor: sai da fila e do aparelho, e a OS fica com a versão que já tem a assinatura. */
+async function finishSignature(round: Round, signature: PendingSignature, ticket: TicketDetail | null) {
+  await write(round, async (db) => {
+    await deleteSignature(signature.id, db);
+    if (ticket?.id) await saveServerTicket(db, ticket, round.user);
+  });
+  retries.delete(signature.id);
+  deletePhotoFile(signature.file_uri);
 }
 
 /**
@@ -1213,8 +1308,11 @@ export function enqueueFormAnswers(ticketId: UUID, payload: FormAnswersPayload) 
 
 /** Apaga banco local e fotos pendentes (troca de usuário ou usuário sem acesso ao app). */
 export async function wipeLocalData() {
+  // O que a sessão anterior ainda tinha em andamento (download, envio) não grava nada depois da limpeza.
+  resetSessionState();
   await resetLocalData();
   deleteAllPhotoFiles();
+  setStatus({ lastSyncAt: null, lastError: null, stuckOps: 0 });
   await refreshPendingCounts();
 }
 
@@ -1234,6 +1332,8 @@ async function enqueue(ticketId: UUID, operation: SyncOperation) {
     // O formulário salva sozinho a cada pergunta: a fila guarda só o rascunho mais recente.
     if (operation.type === "form_answers") await dropFormDrafts(db, ticketId, operation.payload.form_id);
     await insertOp(db, { ...operation, client_op_id: clientOpId, ticket_id: ticketId, client_timestamp: clientTimestamp });
+    // Conclusão de formulário na fila: a assinatura guardada esperando por ela volta a sair, depois dela.
+    if (operation.type === "form_answers" && operation.payload.complete) await clearSignatureBlock(db, ticketId);
     if (operation.type === "comment") {
       await insertLocalComment(db, {
         id: clientOpId,
@@ -1304,48 +1404,71 @@ let stopFns: (() => void)[] = [];
 let realtime: RealtimeClient | null = null;
 let wsDebounce: ReturnType<typeof setTimeout> | undefined;
 
-function describeEvent(event: RealtimeEvent, user: User): string | null {
-  if (event.actor_id && event.actor_id === user.id) return null;
-  const code = event.ticket_code ?? "OS";
-  if (event.type === "ticket.assigned" && event.assignee_id === user.id) return `${code} foi atribuída a você`;
-  if (event.type === "ticket.created" && event.assignee_id === user.id) return `Nova ${code} para você`;
-  const addedIds = (event.data?.added_ids as string[] | undefined) ?? [];
-  if (event.type === "ticket.helpers_changed" && addedIds.includes(user.id)) return `Você vai na visita da ${code}`;
-  // "ticket.part_request_decided" só dispara o sync: o pull compara a OS e avisa (peça aprovada com
-  // o check, peça recusada), sem aviso duplicado.
-  // Acompanhamentos não fazem parte do app: a central fala com o técnico pelo grupo de WhatsApp.
-  return null;
+/**
+ * Evento do tempo real: só dispara o sync, e o pull compara a OS e avisa o que importa (OS nova,
+ * reagendada, cancelada, peça decidida), também quando o app estava fechado. O eco do que o
+ * aparelho já tem (a própria ação do técnico, gravada com a resposta do envio) não dispara nada.
+ */
+async function handleRealtimeEvent(event: RealtimeEvent) {
+  const user = session.get().user;
+  if (!user) return;
+  const ticketId = event.ticket_id;
+  if (ticketId && typeof event.version === "number") {
+    const known = await getServerVersion(ticketId).catch(() => null);
+    if (known !== null && event.version <= known) return;
+  }
+  clearTimeout(wsDebounce);
+  wsDebounce = setTimeout(() => void requestSync(), 400);
+  // Mudou a equipe da visita e o técnico não entrou: confere direto na API se ainda está nela.
+  const added = (event.data?.added_ids as string[] | undefined) ?? [];
+  if (event.type === "ticket.helpers_changed" && ticketId && !added.includes(user.id)) {
+    const local = await getTicket(ticketId);
+    if (local && isHelper(local, user)) await revalidateTicket(sessionCtx(), ticketId);
+  }
+}
+
+/** Estado em memória da sessão. Muda o `epoch`: o que estava em andamento não grava mais nada. */
+function resetSessionState() {
+  epoch += 1;
+  retries.clear();
+  again = false;
+  pendingManual = false;
+  lastRoundAt = 0;
+  fieldRulesAt = 0;
+  helpersCheckedAt = 0;
+  forceReasons = false;
+  fullRequested = 0;
+  fullDone = 0;
+  clearTimeout(wsDebounce);
 }
 
 /** Liga rede, ciclo do app, WebSocket e o intervalo de segurança. Idempotente. */
 export function startSync() {
   if (stopFns.length) return;
+  const myEpoch = epoch;
   let appState: AppStateStatus | string = AppState.currentState ?? "active";
+  let netType: string | null = null;
 
   realtime = new RealtimeClient({
     onState: (state) => setStatus({ realtime: state }),
     onOpen: () => void requestSync(),
     onEvent: (event) => {
-      const user = session.get().user;
-      const text = user ? describeEvent(event, user) : null;
-      if (text) showToast(text);
-      clearTimeout(wsDebounce);
-      wsDebounce = setTimeout(() => void requestSync(), 400);
-      // Mudou a equipe da visita: quem saiu não recebe mais a OS no pull; confere direto na API.
-      const removedMe = user && event.ticket_id && !((event.data?.added_ids as string[] | undefined) ?? []).includes(user.id);
-      if (event.type === "ticket.helpers_changed" && removedMe && event.ticket_id) {
-        const ticketId = event.ticket_id;
-        void getTicket(ticketId).then((local) => (local && user && isHelper(local, user) ? revalidateTicket(ticketId) : undefined));
-      }
+      handleRealtimeEvent(event).catch((error: unknown) => console.warn("Falha ao tratar evento do tempo real", error));
     },
   });
 
   const unsubscribeNet = NetInfo.addEventListener((net) => {
-    const online = net.isConnected !== false && net.isInternetReachable !== false;
-    const wasOffline = status.network !== "online";
+    // Só "sem conexão" de fato é offline. O "sem internet" do sistema (verificação bloqueada pela rede,
+    // Wi-Fi da loja ainda validando, servidor na rede local) não impede de tentar: quem diz se o
+    // servidor responde é a própria requisição.
+    const online = net.isConnected !== false;
+    const wasOffline = status.network === "offline";
+    const switched = online && netType !== null && net.type !== netType;
+    netType = net.type;
     setStatus({ network: online ? "online" : "offline", ...(online ? {} : { server: "unknown" }) });
-    if (online && wasOffline) {
-      realtime?.reconnectNow();
+    if (online && (wasOffline || switched)) {
+      // Rede voltou ou trocou (Wi-Fi ↔ dados): a conexão de tempo real pode ter morrido sem avisar.
+      realtime?.reconnectNow({ force: true });
       void requestSync();
     }
   });
@@ -1364,9 +1487,15 @@ export function startSync() {
     }
   });
 
+  // Rodada de segurança com o app na tela: a cada 90 s, ou 5 min com o tempo real no ar e nada para
+  // enviar; e quando um item que falhou termina a espera para tentar de novo.
   const interval = setInterval(() => {
-    if (appState === "active") void requestSync();
-  }, SAFETY_INTERVAL_MS);
+    if (appState !== "active") return;
+    const now = Date.now();
+    const pending = status.pendingOps + status.pendingPhotos > 0;
+    const every = status.realtime === "online" && !pending ? REALTIME_INTERVAL_MS : SAFETY_INTERVAL_MS;
+    if (now - lastRoundAt >= every || retryDue(now)) void requestSync();
+  }, TICK_MS);
 
   stopFns = [
     unsubscribeNet,
@@ -1377,26 +1506,34 @@ export function startSync() {
   ];
 
   if (appState === "active") realtime.start();
-  void getDb().then(async () => {
+  void (async () => {
+    await getDb();
+    // "Última sincronização" sobrevive ao app fechado: sem rede na abertura, a lista não parece nunca baixada.
+    const last = await getKv(LAST_SYNC_KEY);
+    if (myEpoch !== epoch) return;
+    if (last && !status.lastSyncAt) setStatus({ lastSyncAt: last });
     await loadFieldRules();
     await requestSync();
-  });
+  })().catch((error: unknown) => console.warn("Falha ao abrir o banco local", error));
 }
 
 export function stopSync() {
   stopFns.forEach((fn) => fn());
   stopFns = [];
   realtime = null;
-  setStatus({ realtime: "off", syncing: false });
+  // O que estava em andamento (rodada, envio, download) não grava mais nada desta sessão.
+  resetSessionState();
+  setStatus({ realtime: "off", syncing: false, server: "unknown", lastSyncAt: null, lastError: null, stuckOps: 0 });
   // Saiu da conta: os alertas do tempo na loja deste técnico não valem mais neste aparelho.
   setTimeout(() => void syncOnsiteAlerts(), 0);
 }
 
-/** Pede ao servidor um pull completo na próxima rodada (tela Conta). */
+/** "Baixar tudo de novo" (tela Conta): download completo, com os cadastros, na próxima rodada. */
 export async function resetCursor() {
-  await setKv(SINCE_KEY, null);
+  fullRequested += 1;
   forceReasons = true;
-  await requestSync();
+  fieldRulesAt = 0;
+  await requestSync({ manual: true });
 }
 
 export { refreshPendingCounts };

@@ -204,7 +204,8 @@ export default function NewRequestPage() {
           </h1>
           <p className="mt-1 font-mono text-sm text-ink-muted">{created.code}</p>
           <p className="mx-auto mt-3 max-w-sm text-sm leading-relaxed text-ink-muted">
-            A central da Maxx vai analisar e combinar a visita na loja. Você acompanha tudo por aqui.
+            A central da Maxx vai analisar e combinar a visita na loja. Em “Acompanhar” você vê o andamento e pode
+            mandar fotos do problema.
           </p>
         </div>
         <div className="mt-6 flex flex-col justify-center gap-2 sm:flex-row">

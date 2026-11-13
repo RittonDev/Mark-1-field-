@@ -196,8 +196,7 @@ export function LocationImportDialog({
               veio preenchido. Coordenadas aceitam vírgula (Excel). Nada é gravado antes de você confirmar a prévia.
             </p>
             <p className="text-xs text-ink-muted">
-              No Excel, formate as colunas de CNPJ e CEP como Texto antes de salvar: como número, o zero da frente some e o
-              documento fica inválido.
+              CNPJ e CEP que o Excel guardou como número (sem o zero da frente) são completados na importação.
             </p>
           </>
         ) : null}

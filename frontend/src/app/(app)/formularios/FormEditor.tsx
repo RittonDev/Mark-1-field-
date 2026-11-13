@@ -31,7 +31,9 @@ import {
   writeStored,
 } from "./draft";
 
-type FocusTarget = "label" | "up" | "down";
+// Campos e botões de uma pergunta que recebem o foco de volta depois de mover (data-focus).
+type FocusTarget = "label" | "help" | "options" | "up" | "down";
+const FOCUS_TARGETS: readonly string[] = ["label", "help", "options", "up", "down"];
 
 /** Modelo salvo. Com "levar às OS que não começaram", `applied_to` diz quantas OS receberam a mudança. */
 type SavedTemplate = FormTemplate & { applied_to?: number | null };
@@ -160,12 +162,21 @@ export function FormEditor({
   };
   const insert = (index: number, field: FormField) =>
     reshape([...draft.fields.slice(0, index), field, ...draft.fields.slice(index)], { id: field.id, target: "label" });
-  const move = (index: number, delta: -1 | 1) => {
+  const move = (index: number, delta: -1 | 1, target: FocusTarget = delta < 0 ? "up" : "down") => {
     const j = index + delta;
     if (j < 0 || j >= draft.fields.length) return;
     const fields = [...draft.fields];
     [fields[index], fields[j]] = [fields[j], fields[index]];
-    reshape(fields, { id: fields[j].id, target: delta < 0 ? "up" : "down" });
+    reshape(fields, { id: fields[j].id, target });
+  };
+  // Alt + seta para cima/baixo move a pergunta em que o foco está (o foco vai junto). No seletor de
+  // tipo fica de fora: lá, Alt + seta abre a lista de tipos.
+  const moveByKey = (index: number, e: React.KeyboardEvent<HTMLLIElement>) => {
+    if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
+    if (!(e.target instanceof HTMLElement) || e.target instanceof HTMLSelectElement) return;
+    e.preventDefault();
+    const focused = e.target.dataset.focus ?? "";
+    move(index, e.key === "ArrowUp" ? -1 : 1, FOCUS_TARGETS.includes(focused) ? (focused as FocusTarget) : "label");
   };
   const remove = (index: number) => {
     const field = draft.fields[index];
@@ -320,6 +331,7 @@ export function FormEditor({
                       if (el) rows.current.set(f.id, el);
                       else rows.current.delete(f.id);
                     }}
+                    onKeyDown={(e) => moveByKey(i, e)}
                     before={
                       removed && removed.index === i ? (
                         <RemovedNotice field={removed.field} onUndo={undo} buttonRef={undoButton} />
@@ -360,6 +372,7 @@ export function FormEditor({
                       </div>
                       {p?.label ? <FieldError id={`${errId}-texto`}>{p.label}</FieldError> : null}
                       <Input
+                        data-focus="help"
                         value={f.help ?? ""}
                         maxLength={LIMITS.help}
                         onChange={(e) => setField(f.id, { help: e.target.value || null })}
@@ -370,6 +383,7 @@ export function FormEditor({
                       {isChoice(f.type) ? (
                         <>
                           <Textarea
+                            data-focus="options"
                             rows={Math.min(8, Math.max(3, f.options.length + 1))}
                             value={f.options.join("\n")}
                             onChange={(e) => setField(f.id, { options: e.target.value.split("\n") })}
@@ -481,7 +495,7 @@ export function FormEditor({
               <p className="mt-1 w-full text-xs text-ink-muted">
                 {full
                   ? `Chegou ao limite de ${LIMITS.fields} perguntas e seções.`
-                  : "Para pôr uma pergunta no meio, use o + da pergunta de cima. Depois é só trocar o tipo."}
+                  : "Para pôr uma pergunta no meio, use o + da pergunta de cima e depois troque o tipo. Para mover pelo teclado: Alt + seta para cima ou para baixo."}
               </p>
             </div>
           </Card>
@@ -515,11 +529,13 @@ export function FormEditor({
 
 function FieldRow({
   rowRef,
+  onKeyDown,
   before,
   section,
   children,
 }: {
   rowRef: (el: HTMLLIElement | null) => void;
+  onKeyDown: (e: React.KeyboardEvent<HTMLLIElement>) => void;
   before: React.ReactNode;
   section: boolean;
   children: React.ReactNode;
@@ -527,7 +543,7 @@ function FieldRow({
   return (
     <>
       {before ? <li>{before}</li> : null}
-      <li ref={rowRef} className={clsx("flex gap-3 p-3", section && "bg-surface-2/60")}>
+      <li ref={rowRef} onKeyDown={onKeyDown} className={clsx("flex gap-3 p-3", section && "bg-surface-2/60")}>
         {children}
       </li>
     </>

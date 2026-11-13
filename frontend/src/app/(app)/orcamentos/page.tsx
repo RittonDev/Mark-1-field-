@@ -37,7 +37,17 @@ import { downloadCsv } from "@/lib/download";
 import { dayKey, formatDate, formatMoney, moneyInput, OPERATION_TZ, todayISO } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
 import { QUOTE_KIND, QUOTE_STATUS, QUOTE_VALID_DAYS, readDecimal } from "@/lib/quotes";
-import type { Page, Quote, QuoteCatalogItem, QuoteItemKind, QuoteListRow, QuoteStatus, TicketListItem } from "@/lib/types";
+import type {
+  Page,
+  Quote,
+  QuoteCatalogItem,
+  QuoteItemKind,
+  QuoteListRow,
+  QuoteStatus,
+  QuoteStatusTotal,
+  QuoteSummary,
+  TicketListItem,
+} from "@/lib/types";
 
 type Tab = "quotes" | "catalog";
 
@@ -318,6 +328,22 @@ function QuoteList() {
     queryFn: ({ signal }) => api.get<QuoteListRow[]>("/quotes", periodRange(period), { signal }),
     placeholderData: keepPreviousData,
   });
+  // O período passou do limite da lista (ex.: "Todo o período"): os contadores vêm somados pela API e
+  // a situação escolhida é filtrada lá, para chegar também aos orçamentos mais antigos.
+  const capped = !quotes.isPlaceholderData && (quotes.data?.length ?? 0) >= LIST_LIMIT;
+  const totals = useQuery({
+    queryKey: ["quotes", "summary", period],
+    queryFn: ({ signal }) => api.get<QuoteSummary>("/quotes/summary", periodRange(period), { signal }),
+    enabled: capped,
+    // Sem o resumo (servidor antigo, falha passageira), os contadores somam a lista que veio.
+    retry: false,
+  });
+  const ofStatus = useQuery({
+    queryKey: ["quotes", period, status],
+    queryFn: ({ signal }) => api.get<QuoteListRow[]>("/quotes", { ...periodRange(period), status }, { signal }),
+    enabled: capped && Boolean(status),
+    placeholderData: keepPreviousData,
+  });
   const refresh = (ticketId: string) => {
     void queryClient.invalidateQueries({ queryKey: ["quotes"] });
     void queryClient.invalidateQueries({ queryKey: ["ticket", ticketId, "quotes"] });
@@ -332,17 +358,24 @@ function QuoteList() {
     },
     onError: (e) => toast({ title: "Não foi possível enviar", description: errorMessage(e), tone: "error" }),
   });
-  const rows = quotes.data;
+  // A situação filtrada pela API vale quando já chegou (enquanto carrega, o recorte da lista do período).
+  const serverRows = capped && status && ofStatus.data && !ofStatus.isPlaceholderData ? ofStatus.data : null;
+  const rows = serverRows ?? quotes.data;
   const summary = useMemo(() => {
-    const by = Object.fromEntries(CHIPS.map(({ key }) => [key, { count: 0, total: 0 }])) as Record<QuoteStatus, { count: number; total: number }>;
-    for (const q of rows ?? []) {
-      by[q.status].count += 1;
-      by[q.status].total += q.total;
+    let by = totals.data?.by_status;
+    if (!by) {
+      const local = Object.fromEntries(CHIPS.map(({ key }) => [key, { count: 0, total: 0 }])) as Record<QuoteStatus, QuoteStatusTotal>;
+      for (const q of quotes.data ?? []) {
+        local[q.status].count += 1;
+        local[q.status].total += q.total;
+      }
+      by = local;
     }
+    const count = CHIPS.reduce((n, { key }) => n + (by[key]?.count ?? 0), 0);
     // Taxa de aprovação: aprovados sobre os que tiveram desfecho (aprovado, recusado ou vencido).
     const decided = by.approved.count + by.rejected.count + by.expired.count;
-    return { by, count: rows?.length ?? 0, rate: decided ? Math.round((by.approved.count / decided) * 100) : null };
-  }, [rows]);
+    return { by, count, exact: Boolean(totals.data), rate: decided ? Math.round((by.approved.count / decided) * 100) : null };
+  }, [quotes.data, totals.data]);
   const visible = useMemo(
     () =>
       (rows ?? []).filter(
@@ -352,6 +385,8 @@ function QuoteList() {
       ),
     [rows, status, term],
   );
+  // Trocou de período, ou a situação ainda vem da API: a lista na tela é a anterior (fica apagada).
+  const listStale = quotes.isPlaceholderData || (capped && Boolean(status) && !serverRows && ofStatus.isFetching);
   const latest = (q: QuoteListRow | null) => (q ? (rows?.find((r) => r.id === q.id) ?? q) : null);
   const openedQuote = latest(opened);
   const sharingQuote = latest(sharing);
@@ -432,9 +467,11 @@ function QuoteList() {
           </span>
         ) : null}
       </div>
-      {rows && rows.length >= LIST_LIMIT ? (
+      {capped && !(serverRows && serverRows.length < LIST_LIMIT) ? (
         <p className="mb-3 text-xs text-ink-muted">
-          Mostrando os {intFmt(LIST_LIMIT)} orçamentos mais recentes do período: escolha um mês para ver todos.
+          {status && serverRows
+            ? `Mostrando os ${intFmt(LIST_LIMIT)} orçamentos mais recentes nesta situação: escolha um mês para ver todos.`
+            : `A lista traz os ${intFmt(LIST_LIMIT)} orçamentos mais recentes do período${summary.exact ? " (os números acima somam todos)" : ""}: escolha um mês para ver todos.`}
         </p>
       ) : null}
       <Card>
@@ -473,7 +510,7 @@ function QuoteList() {
                 <ErrorBox message={errorMessage(quotes.error)} onRetry={() => void quotes.refetch()} />
               </div>
             ) : null}
-            <div className={clsx("transition-opacity duration-150", quotes.isPlaceholderData && "opacity-60")} aria-busy={quotes.isFetching}>
+            <div className={clsx("transition-opacity duration-150", listStale && "opacity-60")} aria-busy={quotes.isFetching || ofStatus.isFetching}>
               <Table label="Orçamentos do período">
                 <thead>
                   <tr>

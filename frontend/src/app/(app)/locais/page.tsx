@@ -229,7 +229,7 @@ function LocationsView() {
           <LoadingBlock />
         ) : locations.error && !data ? (
           <div className="p-4">
-            <ErrorBox message={errorMessage(locations.error)} />
+            <ErrorBox message={errorMessage(locations.error)} onRetry={() => void locations.refetch()} />
           </div>
         ) : !data || data.items.length === 0 ? (
           <EmptyState icon={<MapPin className="size-8" />} title="Nenhum local encontrado" />

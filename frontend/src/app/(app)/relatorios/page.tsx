@@ -268,6 +268,13 @@ function Reports() {
   const month = mes && MONTH_RE.test(mes) && mes <= currentMonth ? mes : currentMonth;
   const dias = Number(params.get("dias"));
   const slaDays = SLA_DAYS.includes(dias) ? dias : 30;
+  // Cliente do recorte (?cliente=): o nome vem do cadastro; enquanto carrega, o filtro já vale.
+  const customerId = params.get("cliente") ?? "";
+  const customers = useCustomers();
+  const scope: CustomerScope | null = customerId
+    ? { id: customerId, name: customers.data?.find((c) => c.id === customerId)?.name ?? "Cliente" }
+    : null;
+  const filter = <CustomerFilter value={customerId} onChange={(id) => setParams({ cliente: id || null })} />;
   return (
     <>
       <div className="mb-5 border-b border-line">
@@ -281,16 +288,53 @@ function Reports() {
           value={tab}
           onChange={(key) => setParams({ aba: key === "diario" ? null : key })}
           ariaLabel="Relatórios"
+          idPrefix="relatorios"
         />
       </div>
-      {tab === "diario" ? (
-        <DailyView day={day} today={today} onDay={(d) => setParams({ dia: d })} />
-      ) : tab === "mensal" ? (
-        <MonthlyView month={month} today={today} onMonth={(m) => setParams({ mes: m === currentMonth ? null : m })} />
-      ) : (
-        <SlaView days={slaDays} onDays={(d) => setParams({ dias: d === 30 ? null : String(d) })} />
-      )}
+      <div role="tabpanel" id={`relatorios-panel-${tab}`} aria-labelledby={`relatorios-tab-${tab}`}>
+        {tab === "diario" ? (
+          <DailyView day={day} today={today} onDay={(d) => setParams({ dia: d })} scope={scope} filter={filter} />
+        ) : tab === "mensal" ? (
+          <MonthlyView
+            month={month}
+            today={today}
+            onMonth={(m) => setParams({ mes: m === currentMonth ? null : m })}
+            scope={scope}
+            filter={filter}
+          />
+        ) : (
+          <SlaView days={slaDays} onDays={(d) => setParams({ dias: d === 30 ? null : String(d) })} />
+        )}
+      </div>
     </>
+  );
+}
+
+/** Filtro de cliente do diário e do mensal (nomes repetidos ganham o CNPJ ou a cidade). */
+function CustomerFilter({ value, onChange }: { value: string; onChange: (id: string) => void }) {
+  const customers = useCustomers();
+  const options = useMemo(() => {
+    const list = customers.data ?? [];
+    const repeated = new Map<string, number>();
+    for (const c of list) repeated.set(c.name, (repeated.get(c.name) ?? 0) + 1);
+    return list
+      .map((c) => ({
+        id: c.id,
+        label: (repeated.get(c.name) ?? 0) > 1 ? `${c.name} · ${c.document ? formatDocument(c.document) : (c.city ?? "sem CNPJ")}` : c.name,
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
+  }, [customers.data]);
+  return (
+    <Select value={value} onChange={(e) => onChange(e.target.value)} className="w-full sm:w-56" aria-label="Cliente">
+      <option value="">Todos os clientes</option>
+      {/* O cliente do link ainda não carregou (ou saiu do cadastro): o filtro continua visível. */}
+      {value && !options.some((o) => o.id === value) ? <option value={value}>Cliente selecionado</option> : null}
+      {options.map((o) => (
+        <option key={o.id} value={o.id}>
+          {o.label}
+        </option>
+      ))}
+    </Select>
   );
 }
 
@@ -314,32 +358,39 @@ function Tiles({ n, prev, partial, period }: { n: DayNumbers; prev: DayNumbers; 
   );
 }
 
-/** O cliente destaque e as promessas do chamado (solução, chegada e tempo na loja), medidas no período. */
+/**
+ * O cliente destaque e as promessas do chamado (solução, chegada e tempo na loja), medidas no período.
+ * Com o recorte por cliente, o destaque sai (seria o próprio cliente).
+ */
 function DeadlineTiles({
   n,
   prev,
   partial,
   period,
   top,
+  scoped,
 }: {
   n: DayNumbers;
   prev: DayNumbers;
   partial: boolean;
   period: "day" | "month";
   top: ReportCountRef | null;
+  scoped: boolean;
 }) {
   const { flow } = comparison(period, partial);
   const pct = n.arrival_on_time_pct;
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
-      <StatTile
-        label={period === "day" ? "Cliente destaque do dia" : "Cliente destaque do mês"}
-        value={top?.count ?? 0}
-        display={top?.name ?? "—"}
-        compact
-        hint={top ? plural(top.count, "chamado aberto", "chamados abertos") : "Nenhum chamado aberto"}
-        href={top?.id ? `/chamados?customer_id=${top.id}` : undefined}
-      />
+    <div className={clsx("grid grid-cols-2 gap-3 sm:grid-cols-3", scoped ? "xl:grid-cols-4" : "xl:grid-cols-5")}>
+      {scoped ? null : (
+        <StatTile
+          label={period === "day" ? "Cliente destaque do dia" : "Cliente destaque do mês"}
+          value={top?.count ?? 0}
+          display={top?.name ?? "—"}
+          compact
+          hint={top ? plural(top.count, "chamado aberto", "chamados abertos") : "Nenhum chamado aberto"}
+          href={top?.id ? `/chamados?customer_id=${top.id}` : undefined}
+        />
+      )}
       <StatTile
         label="Resolvidos no prazo"
         value={n.resolved_in_sla}
@@ -376,26 +427,33 @@ function DeadlineTiles({
   );
 }
 
-function Panels({ data, period }: { data: DailyReport | MonthlyReport; period: string }) {
+function Panels({ data, period, scoped }: { data: DailyReport | MonthlyReport; period: string; scoped: boolean }) {
   return (
-    <div className="grid gap-4 lg:grid-cols-3">
+    <div className={clsx("grid gap-4", scoped ? "lg:grid-cols-2" : "lg:grid-cols-3")}>
+      {scoped ? null : (
+        <Card className="p-4">
+          <SectionTitle wrap className="mb-3">
+            Clientes com mais chamados {period}
+          </SectionTitle>
+          <RankBars
+            items={data.customers}
+            empty="Nenhum chamado aberto."
+            label={`Clientes com mais chamados ${period}`}
+            href={(item) => (item.id ? `/chamados?customer_id=${item.id}` : undefined)}
+          />
+        </Card>
+      )}
       <Card className="p-4">
+        {/* Conta para o técnico da OS, mesmo quando foi a central que marcou como resolvida. */}
         <SectionTitle wrap className="mb-3">
-          Clientes com mais chamados {period}
+          OS resolvidas por técnico
         </SectionTitle>
         <RankBars
-          items={data.customers}
-          empty="Nenhum chamado aberto."
-          label={`Clientes com mais chamados ${period}`}
-          href={(item) => (item.id ? `/chamados?customer_id=${item.id}` : undefined)}
+          items={data.technicians}
+          empty="Nenhuma OS resolvida."
+          label="OS resolvidas por técnico"
+          href={(item) => (item.id ? `/chamados?assignee_id=${item.id}` : undefined)}
         />
-      </Card>
-      <Card className="p-4">
-        {/* Quem mudou a OS para resolvida: o técnico pelo app ou o analista pela central. */}
-        <SectionTitle wrap className="mb-3">
-          OS resolvidas por pessoa
-        </SectionTitle>
-        <RankBars items={data.technicians} empty="Nenhuma OS resolvida." label="OS resolvidas por pessoa" />
       </Card>
       <Card className="p-4">
         <SectionTitle wrap className="mb-3">
@@ -407,11 +465,24 @@ function Panels({ data, period }: { data: DailyReport | MonthlyReport; period: s
   );
 }
 
-function DailyView({ day, today, onDay }: { day: string; today: string; onDay: (day: string | null) => void }) {
+function DailyView({
+  day,
+  today,
+  onDay,
+  scope,
+  filter,
+}: {
+  day: string;
+  today: string;
+  onDay: (day: string | null) => void;
+  scope: CustomerScope | null;
+  filter: React.ReactNode;
+}) {
   const { toast } = useToast();
   const report = useQuery({
-    queryKey: ["reports", "daily", day],
-    queryFn: () => api.get<DailyReport>("/reports/daily", { date: day }),
+    // Sem recorte, a mesma chave do "Hoje até agora" do dashboard (aproveita o que já veio).
+    queryKey: scope ? ["reports", "daily", day, scope.id] : ["reports", "daily", day],
+    queryFn: ({ signal }) => api.get<DailyReport>("/reports/daily", { date: day, customer_id: scope?.id }, { signal }),
     placeholderData: keepPreviousData,
   });
   // O campo guarda o que está sendo digitado (o ano, dígito a dígito, passa por 0002, 0020...): o dia
@@ -426,7 +497,7 @@ function DailyView({ day, today, onDay }: { day: string; today: string; onDay: (
   const copySummary = async () => {
     if (!data) return;
     const time = new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: OPERATION_TZ }).format(new Date());
-    const copied = await copyText(dailyText(data, partial, time));
+    const copied = await copyText(dailyText(data, partial, time, scope));
     toast(
       copied
         ? { title: "Resumo copiado: cole no grupo do WhatsApp", tone: "success" }
@@ -442,9 +513,11 @@ function DailyView({ day, today, onDay }: { day: string; today: string; onDay: (
           <p className="inline-flex items-center gap-1.5 text-xs text-ink-muted">
             <Moon className="size-3.5" aria-hidden />
             {isToday ? "Hoje: parcial, fecha à meia-noite" : "Dia fechado à meia-noite"}
+            {scope ? <span className="font-semibold text-ink"> · {scope.name}</span> : null}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {filter}
           <Button onClick={() => onDay(shiftDay(day, -1))} aria-label="Dia anterior" title="Dia anterior">
             <ChevronLeft className="size-4" />
           </Button>
@@ -474,18 +547,18 @@ function DailyView({ day, today, onDay }: { day: string; today: string; onDay: (
             <Copy className="size-4" />
             Copiar resumo
           </Button>
-          <Button disabled={!data || stale} onClick={() => data && exportDaily(data, partial)}>
+          <Button disabled={!data || stale} onClick={() => data && exportDaily(data, partial, scope)}>
             <Download className="size-4" />
             Exportar CSV
           </Button>
         </div>
       </div>
-      {report.error ? <ErrorBox message={errorMessage(report.error)} /> : null}
+      {report.error ? <ErrorBox message={errorMessage(report.error)} onRetry={() => void report.refetch()} /> : null}
       {data ? (
         <div className={clsx("flex flex-col gap-4 transition-opacity duration-150", stale && "opacity-60")} aria-busy={report.isFetching}>
           <Tiles n={data.numbers} prev={data.previous} partial={partial} period="day" />
-          <DeadlineTiles n={data.numbers} prev={data.previous} partial={partial} period="day" top={data.top_customer} />
-          <Panels data={data} period="no dia" />
+          <DeadlineTiles n={data.numbers} prev={data.previous} partial={partial} period="day" top={data.top_customer} scoped={Boolean(scope)} />
+          <Panels data={data} period="no dia" scoped={Boolean(scope)} />
         </div>
       ) : report.isLoading ? (
         <LoadingBlock />
@@ -552,18 +625,32 @@ function DaysTable({ days }: { days: ReportDayPoint[] }) {
   );
 }
 
-function MonthlyView({ month, today, onMonth }: { month: string; today: string; onMonth: (month: string) => void }) {
+function MonthlyView({
+  month,
+  today,
+  onMonth,
+  scope,
+  filter,
+}: {
+  month: string;
+  today: string;
+  onMonth: (month: string) => void;
+  scope: CustomerScope | null;
+  filter: React.ReactNode;
+}) {
   const [table, setTable] = useState(false);
   const report = useQuery({
-    queryKey: ["reports", "monthly", month],
-    queryFn: () => api.get<MonthlyReport>("/reports/monthly", { month }),
+    queryKey: scope ? ["reports", "monthly", month, scope.id] : ["reports", "monthly", month],
+    queryFn: ({ signal }) => api.get<MonthlyReport>("/reports/monthly", { month, customer_id: scope?.id }, { signal }),
     placeholderData: keepPreviousData,
   });
-  // Valor por chamado das OS concluídas no mês (o mesmo período do fechamento em Pagamentos).
+  // Valor por chamado das OS concluídas no mês (o mesmo período do fechamento em Pagamentos). Não
+  // tem recorte por cliente: com um cliente escolhido, o cartão sai.
   const payouts = useQuery({
     queryKey: ["payouts", "month", month],
-    queryFn: () => api.get<PayoutList>("/payouts", monthDays(month)),
+    queryFn: ({ signal }) => api.get<PayoutList>("/payouts", monthDays(month), { signal }),
     placeholderData: keepPreviousData,
+    enabled: !scope,
   });
   const options = useMemo(() => monthOptions(today.slice(0, 7), month), [today, month]);
   const data = report.data;
@@ -574,7 +661,8 @@ function MonthlyView({ month, today, onMonth }: { month: string; today: string; 
     { key: "opened", label: "Entraram", color: "var(--viz-1)", values: days.map((d) => d.opened) },
     { key: "resolved", label: "Resolvidos", color: "var(--viz-2)", values: days.map((d) => d.resolved) },
   ];
-  const summary = payouts.data?.summary;
+  // Com um cliente escolhido, o valor dos técnicos (de todos os clientes) não entra.
+  const summary = scope ? undefined : payouts.data?.summary;
   const techniciansTotal = summary ? summary.paid + summary.to_pay : 0;
 
   return (
@@ -582,28 +670,39 @@ function MonthlyView({ month, today, onMonth }: { month: string; today: string; 
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
           <h2 className="text-lg font-bold text-ink">{monthName(month)}</h2>
-          <p className="text-xs text-ink-muted">{month === today.slice(0, 7) ? "Mês em andamento (até hoje)" : "Mês fechado"}</p>
+          <p className="text-xs text-ink-muted">
+            {month === today.slice(0, 7) ? "Mês em andamento (até hoje)" : "Mês fechado"}
+            {scope ? <span className="font-semibold text-ink"> · {scope.name}</span> : null}
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Select value={month} onChange={(e) => onMonth(e.target.value)} className="w-52" aria-label="Mês">
+          {filter}
+          <Select value={month} onChange={(e) => onMonth(e.target.value)} className="w-full sm:w-52" aria-label="Mês">
             {options.map((m) => (
               <option key={m} value={m}>
                 {monthName(m)}
               </option>
             ))}
           </Select>
-          <Button disabled={!data || stale} onClick={() => data && exportMonthly(data, partial, summary)}>
+          <Button disabled={!data || stale} onClick={() => data && exportMonthly(data, partial, summary, scope)}>
             <Download className="size-4" />
             Exportar CSV
           </Button>
         </div>
       </div>
-      {report.error ? <ErrorBox message={errorMessage(report.error)} /> : null}
+      {report.error ? <ErrorBox message={errorMessage(report.error)} onRetry={() => void report.refetch()} /> : null}
       {data ? (
         <div className={clsx("flex flex-col gap-4 transition-opacity duration-150", stale && "opacity-60")} aria-busy={report.isFetching}>
           <Tiles n={data.numbers} prev={data.previous} partial={partial} period="month" />
-          <DeadlineTiles n={data.numbers} prev={data.previous} partial={partial} period="month" top={data.top_customer} />
-          <div className="grid gap-3 sm:grid-cols-3">
+          <DeadlineTiles
+            n={data.numbers}
+            prev={data.previous}
+            partial={partial}
+            period="month"
+            top={data.top_customer}
+            scoped={Boolean(scope)}
+          />
+          <div className={clsx("grid gap-3", scope ? "sm:grid-cols-2" : "sm:grid-cols-3")}>
             <StatTile
               label="Custos extras no mês"
               value={data.expenses_total}
@@ -616,14 +715,16 @@ function MonthlyView({ month, today, onMonth }: { month: string; today: string; 
               display={formatMoney(data.quotes_approved_total)}
               hint="Aprovados pelo cliente no mês"
             />
-            <StatTile
-              label="Valor dos técnicos"
-              value={techniciansTotal}
-              display={payouts.error ? "—" : formatMoney(techniciansTotal)}
-              loading={payouts.isLoading}
-              hint={summary ? `pago ${formatMoney(summary.paid)} · a pagar ${formatMoney(summary.to_pay)}` : "OS concluídas no mês"}
-              href="/pagamentos"
-            />
+            {scope ? null : (
+              <StatTile
+                label="Valor dos técnicos"
+                value={techniciansTotal}
+                display={payouts.error ? "—" : formatMoney(techniciansTotal)}
+                loading={payouts.isLoading}
+                hint={summary ? `pago ${formatMoney(summary.paid)} · a pagar ${formatMoney(summary.to_pay)}` : "OS concluídas no mês"}
+                href="/pagamentos"
+              />
+            )}
           </div>
           <Card className="p-4">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -647,7 +748,7 @@ function MonthlyView({ month, today, onMonth }: { month: string; today: string; 
               />
             )}
           </Card>
-          <Panels data={data} period="no mês" />
+          <Panels data={data} period="no mês" scoped={Boolean(scope)} />
         </div>
       ) : report.isLoading ? (
         <LoadingBlock />

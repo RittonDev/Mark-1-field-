@@ -261,7 +261,9 @@ async def test_times_correction_keeps_the_pause_between_visits(
     client: AsyncClient, world: World, engine: AsyncEngine
 ) -> None:
     an, th = world.analyst.headers, world.tech.headers
-    t = await create(client, world, title="Rack em duas visitas", assignee_id=str(world.tech.user.id))
+    t = await create(
+        client, world, title="Rack em duas visitas", assignee_id=str(world.tech.user.id)
+    )
     t = await transition(client, th, t, "in_progress")
     t = await transition(client, an, t, "on_hold_vendor", note="Aguardando peça")
     t = await transition(client, th, t, "in_progress")
@@ -464,7 +466,9 @@ async def test_deleting_a_form_photo_reopens_the_required_form(
     template = {
         "name": "Fachada da loja",
         "requires_signature": False,
-        "fields": [{"id": "fachada", "type": "photo", "label": "Foto da fachada", "required": True}],
+        "fields": [
+            {"id": "fachada", "type": "photo", "label": "Foto da fachada", "required": True}
+        ],
     }
     tpl = (await client.post(f"{API}/form-templates", json=template, headers=an)).json()
     t = await create(client, world, title="Letreiro", assignee_id=str(world.tech.user.id))

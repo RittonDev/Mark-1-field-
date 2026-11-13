@@ -72,7 +72,12 @@ export function ContactList({ contacts, empty = "Nenhum contato cadastrado." }: 
             <div className="min-w-0 flex-1">
               <p className="flex items-center gap-1.5 truncate text-sm font-semibold text-ink">
                 <span className="truncate">{shown}</span>
-                {c.primary ? <Star className="size-3 shrink-0 fill-amber-400 text-amber-400" aria-label="principal" /> : null}
+                {c.primary ? (
+                  <>
+                    <Star aria-hidden className="size-3 shrink-0 fill-amber-400 text-amber-400" />
+                    <span className="sr-only">(principal)</span>
+                  </>
+                ) : null}
               </p>
               <p className="truncate text-xs text-ink-subtle">
                 {[c.name, c.label ? LABEL[c.label] ?? c.label : null].filter(Boolean).join(" · ") || (isPhone ? "telefone" : "e-mail")}

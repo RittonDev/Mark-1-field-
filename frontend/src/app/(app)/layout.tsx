@@ -16,7 +16,7 @@ import { RealtimeProvider } from "@/lib/realtime";
 /** Abertura enquanto a sessão carrega: o símbolo da marca "respirando". */
 function SplashLoader() {
   return (
-    <div className="flex min-h-screen animate-fade flex-col items-center justify-center gap-4 bg-canvas" role="status">
+    <div className="flex min-h-dvh animate-fade flex-col items-center justify-center gap-4 bg-canvas" role="status">
       <span className="relative flex size-14 items-center justify-center rounded-2xl bg-surface shadow-elev-2 ring-1 ring-line">
         <span className="absolute inset-0 animate-ping rounded-2xl bg-brand/10 [animation-duration:1.8s]" />
         <BrandMark height={16} />

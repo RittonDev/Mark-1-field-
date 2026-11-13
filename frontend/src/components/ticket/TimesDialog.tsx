@@ -1,9 +1,8 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import clsx from "clsx";
 import { Clock } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useToast } from "@/components/Toaster";
 import { Button, Dialog, ErrorBox, Field, Input, Spinner, Textarea } from "@/components/ui";
 import { useNow } from "@/components/useNow";
@@ -207,7 +206,6 @@ export function TimesDialog({ ticket, onClose }: { ticket: TicketDetail; onClose
                 inputMode="numeric"
                 value={shownMinutes}
                 onChange={(e) => setMinutes(e.target.value.replace(/\D/g, ""))}
-                className={clsx(errors.minutes && "border-red-400")}
                 aria-invalid={errors.minutes ? true : undefined}
               />
               {errors.minutes ? <span className="text-xs font-medium text-red-700 dark:text-red-300">{errors.minutes}</span> : null}
@@ -220,6 +218,7 @@ export function TimesDialog({ ticket, onClose }: { ticket: TicketDetail; onClose
           <div className="sm:col-span-2">
             <Field label="Motivo" required hint={errors.reason ? undefined : "Fica no histórico da OS (o técnico não vê)."}>
               <Textarea
+                ref={reasonRef}
                 rows={2}
                 value={reason}
                 maxLength={500}

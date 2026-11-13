@@ -10,7 +10,6 @@ import { Text } from "../../../components/Text";
 import { attachmentsStale, reloadAttachments } from "../../../components/ticket/attachments";
 import { capturePhotos, recoverCapture } from "../../../components/ticket/photoCapture";
 import { PhotoViewer, type ViewerPhoto } from "../../../components/ticket/PhotoViewer";
-import { toneInk } from "../../../components/ticket/tones";
 import { Badge, Button, Card, EmptyState, ErrorBox } from "../../../components/ui";
 import { absoluteApiUrl, errorMessage } from "../../../lib/api";
 import { useLiveQuery } from "../../../lib/changes";
@@ -463,7 +462,7 @@ function FormEditor({ ticket, form }: { ticket: LocalTicket; form: TicketForm })
         {form.name}
       </Text>
       <View style={styles.badges}>
-        <Badge label={STATUS_LABEL[form.status]} color={completed ? toneInk(c, "success") : c.inkMuted} />
+        <Badge label={STATUS_LABEL[form.status]} color={completed ? c.success : c.inkMuted} />
         <Badge label={form.required ? "Obrigatório" : "Opcional"} color={c.inkMuted} />
       </View>
       {requiredCount ? (

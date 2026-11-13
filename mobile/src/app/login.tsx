@@ -69,6 +69,12 @@ export default function LoginScreen() {
     // No app publicado vale sempre o servidor configurado no build (mesmo que outro tenha ficado salvo).
     // Fora do desenvolvimento, servidor digitado à mão só com https: a senha não pode ir em texto aberto.
     const server = canEditServer ? normalizeApiUrl(apiUrl) : defaultApiUrl();
+    if (!server) {
+      // Build sem servidor configurado: sem endereço não há para onde mandar o login.
+      setError("Informe o endereço do servidor.");
+      if (canEditServer) setEditingServer(true);
+      return;
+    }
     if (!__DEV__ && server !== defaultApiUrl() && !/^https:\/\//i.test(server)) {
       setError("Use um endereço de servidor seguro, começando com https://.");
       return;
@@ -195,7 +201,7 @@ export default function LoginScreen() {
           {canEditServer && !editingServer ? (
             <Pressable onPress={() => setEditingServer(true)} accessibilityRole="button" hitSlop={8}>
               <Text style={styles.meta}>
-                Servidor: <Text style={styles.metaStrong}>{apiUrl}</Text>
+                Servidor: <Text style={styles.metaStrong}>{apiUrl || "não configurado"}</Text>
               </Text>
             </Pressable>
           ) : null}

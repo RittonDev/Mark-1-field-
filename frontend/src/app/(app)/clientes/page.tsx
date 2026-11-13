@@ -188,7 +188,7 @@ function CustomersView() {
           <LoadingBlock />
         ) : customers.error && !customers.data ? (
           <div className="p-4">
-            <ErrorBox message={errorMessage(customers.error)} />
+            <ErrorBox message={errorMessage(customers.error)} onRetry={() => void customers.refetch()} />
           </div>
         ) : rows.length === 0 ? (
           <EmptyState

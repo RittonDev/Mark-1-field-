@@ -73,7 +73,7 @@ export default function ProjectsPage() {
       {projects.isLoading ? (
         <LoadingBlock />
       ) : projects.error && !projects.data ? (
-        <ErrorBox message={errorMessage(projects.error)} />
+        <ErrorBox message={errorMessage(projects.error)} onRetry={() => void projects.refetch()} />
       ) : list.length === 0 ? (
         <Card>
           <EmptyState

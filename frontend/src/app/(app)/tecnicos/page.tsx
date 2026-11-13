@@ -794,7 +794,10 @@ function CreateDialog({ onClose }: { onClose: () => void }) {
           </Button>
         ) : (
           <>
-            <Button onClick={onClose}>Cancelar</Button>
+            {/* Cadastrando: sair agora perderia a senha provisória da resposta. */}
+            <Button onClick={onClose} disabled={create.isPending}>
+              Cancelar
+            </Button>
             <Button variant="primary" type="submit" form="tech-create-form" loading={create.isPending}>
               Cadastrar
             </Button>
@@ -999,12 +1002,15 @@ function EditDialog({ tech, onClose }: { tech: Technician; onClose: () => void }
       open
       size="lg"
       onClose={requestClose}
-      busy={save.isPending}
+      // Salvando ou gerando a senha provisória (que só aparece uma vez): o diálogo espera terminar.
+      busy={save.isPending || reset.isPending}
       title={current.name}
       description={current.job_title ?? "Técnico"}
       footer={
         <>
-          <Button onClick={requestClose}>Cancelar</Button>
+          <Button onClick={requestClose} disabled={save.isPending || reset.isPending}>
+            Cancelar
+          </Button>
           <Button variant="primary" type="submit" form="tech-edit-form" loading={save.isPending}>
             Salvar
           </Button>
@@ -1374,6 +1380,8 @@ function ImportDialog({ onClose }: { onClose: () => void }) {
       open
       size="lg"
       onClose={requestClose}
+      // Importando: fechar no meio perderia as senhas provisórias da resposta.
+      busy={run.isPending}
       title="Importar técnicos"
       description="Planilha CSV ou Excel (XLSX) com nome, e-mail, telefone, grupo, cargo, cidade, UF e região."
       footer={
@@ -1383,7 +1391,9 @@ function ImportDialog({ onClose }: { onClose: () => void }) {
           </Button>
         ) : (
           <>
-            <Button onClick={onClose}>Cancelar</Button>
+            <Button onClick={onClose} disabled={run.isPending}>
+              Cancelar
+            </Button>
             {result?.dry_run ? (
               <Button
                 variant="primary"

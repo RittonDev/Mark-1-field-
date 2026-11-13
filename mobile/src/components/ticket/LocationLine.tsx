@@ -5,7 +5,6 @@ import { useStyles, useTheme, type Palette } from "../../theme/theme";
 import { Icon } from "../Icon";
 import { Text } from "../Text";
 import { Button } from "../ui";
-import { toneInk } from "./tones";
 
 /**
  * Posição para registrar a ação, buscada assim que a tela abre: no toque de Confirmar ela já está
@@ -51,7 +50,7 @@ export function LocationLine({ fix, place, onAllow }: { fix: PositionFix | null;
   const c = useTheme();
   const styles = useStyles(makeStyles);
   if (fix?.status === "denied") {
-    const color = toneInk(c, "warning");
+    const color = c.warningInk;
     return (
       <View style={styles.row}>
         <Icon name="pin" size={18} color={color} strokeWidth={2} />

@@ -11,7 +11,6 @@ import type { TicketDetail, TicketListItem } from "../../lib/types";
 import { RADIUS, tint, useStyles, useTheme, type Palette } from "../../theme/theme";
 import { Icon } from "../Icon";
 import { Text } from "../Text";
-import { toneInk } from "./tones";
 
 type Clockable = Pick<
   TicketListItem,
@@ -20,7 +19,7 @@ type Clockable = Pick<
 
 /** Cor só quando há problema: atraso/estouro em vermelho, risco/aviso em laranja; o resto neutro. */
 function toneColor(c: Palette, tone: ClockTone | OnsiteState) {
-  return tone === "late" || tone === "over" ? c.danger : tone === "risk" || tone === "warning" ? toneInk(c, "warning") : c.inkMuted;
+  return tone === "late" || tone === "over" ? c.dangerInk : tone === "risk" || tone === "warning" ? c.warningInk : c.inkMuted;
 }
 
 /** O relógio anda a cada 15 s: o tempo na loja e o prazo de chegada acompanham sem pesar a tela. */
@@ -132,7 +131,7 @@ export function OnsiteTimer({ ticket }: { ticket: Clockable & Pick<TicketDetail,
   const ringProps = useAnimatedProps(() => ({ strokeDashoffset: CIRC * (1 - progress.get()) }));
   if (!clock) return null;
   // O anel é estrutura (azul da marca); só aviso e estouro mudam a cor.
-  const color = state === "over" ? c.danger : state === "warning" ? toneInk(c, "warning") : c.primary;
+  const color = state === "over" ? c.dangerInk : state === "warning" ? c.warningInk : c.primary;
   const center = clock.left <= 0 ? `+${formatMinutes(-clock.left)}` : formatMinutes(clock.left);
   const spoken =
     clock.left <= 0 ? `Tempo na loja: passou ${formatMinutes(-clock.left)} do limite` : `Tempo na loja: restam ${formatMinutes(clock.left)}`;

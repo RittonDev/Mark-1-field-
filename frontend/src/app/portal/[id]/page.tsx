@@ -2,13 +2,39 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { ArrowLeft, CalendarClock, CircleAlert, ExternalLink, MapPinCheck, Phone, Plus, Store, UserRound, XCircle } from "lucide-react";
+import {
+  ArrowLeft,
+  CalendarClock,
+  CircleAlert,
+  ExternalLink,
+  FileImage,
+  FileText,
+  MapPinCheck,
+  Paperclip,
+  Phone,
+  Plus,
+  Store,
+  UserRound,
+  XCircle,
+} from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 import { Badge } from "@/components/portal/Badge";
 import { useToast } from "@/components/Toaster";
-import { Button, buttonClassName, Card, Dialog, ErrorBox, Field, LoadingBlock, PageHeader, SectionTitle, Textarea } from "@/components/ui";
+import {
+  Button,
+  buttonClassName,
+  Card,
+  Dialog,
+  ErrorBox,
+  Field,
+  LoadingBlock,
+  PageHeader,
+  SectionTitle,
+  Spinner,
+  Textarea,
+} from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import { canOpenRequests, clientStatusColor, clientTimeline, TIMELINE_LABEL, usePortalMe, visitWindow } from "@/lib/portal";
@@ -36,6 +62,116 @@ function Outcome({ title, at, children, action }: { title: string; at: string | 
         {children}
       </div>
       {action}
+    </Card>
+  );
+}
+
+const FILE_TYPES = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+
+/** O que a API recusa, avisado antes de enviar (a foto do iPhone, em HEIC, não é aceita). */
+function fileProblem(file: File): string | null {
+  const okType = file.type ? FILE_TYPES.includes(file.type) : /\.(jpe?g|png|webp|pdf)$/i.test(file.name);
+  if (!okType) return `${file.name}: envie uma foto (JPG, PNG ou WebP) ou um PDF. A foto do iPhone (HEIC) precisa ser convertida antes.`;
+  if (file.size > MAX_FILE_BYTES) return `${file.name}: arquivo maior que 10 MB.`;
+  return null;
+}
+
+/**
+ * Fotos do problema e PDFs que a empresa mandou (antes iam soltos pelo WhatsApp): viram anexos da OS,
+ * que a central e o técnico veem. Aqui aparecem só o nome e a data; com a solicitação em aberto, dá
+ * para mandar mais.
+ */
+function ClientFiles({ request }: { request: PortalRequestDetail }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [sending, setSending] = useState<{ done: number; total: number } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const files = request.attachments ?? [];
+  if (!files.length && !request.can_attach) return null;
+
+  const send = async (picked: File[]) => {
+    const problem = picked.map(fileProblem).find(Boolean) ?? null;
+    setError(problem);
+    if (problem || !picked.length) return;
+    setSending({ done: 0, total: picked.length });
+    try {
+      // Um por vez: cada resposta já traz a lista atualizada (e o limite por solicitação).
+      for (const [i, file] of picked.entries()) {
+        const body = new FormData();
+        body.append("file", file);
+        const data = await api.upload<PortalRequestDetail>(`/portal/requests/${request.id}/attachments`, body);
+        queryClient.setQueryData(["portal", "request", request.id], data);
+        setSending({ done: i + 1, total: picked.length });
+      }
+      toast({ title: picked.length === 1 ? "Arquivo enviado" : `${picked.length} arquivos enviados`, tone: "success" });
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setSending(null);
+    }
+  };
+
+  return (
+    <Card className="p-5">
+      <SectionTitle as="h2">Fotos e arquivos</SectionTitle>
+      <p className="mt-1 mb-3 text-xs text-ink-muted">
+        {request.can_attach
+          ? "Fotos do problema (JPG, PNG ou WebP) ou PDF, até 10 MB cada. A central e o técnico recebem."
+          : "Enviados pela sua empresa nesta solicitação."}
+      </p>
+      {files.length ? (
+        <ul className="mb-3 divide-y divide-line">
+          {files.map((f) => {
+            const Icon = /\.pdf$/i.test(f.filename) ? FileText : FileImage;
+            return (
+              <li key={f.id} className="flex items-center gap-2.5 py-2 text-sm first:pt-0 last:pb-0">
+                <Icon aria-hidden className="size-4 shrink-0 text-ink-subtle" />
+                <span className="min-w-0 flex-1 truncate text-ink" title={f.filename}>
+                  {f.filename}
+                </span>
+                <span className="shrink-0 text-xs text-ink-subtle">{formatDateTime(f.created_at)}</span>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+      {request.can_attach ? (
+        <label
+          className={buttonClassName(
+            "secondary",
+            "md",
+            clsx(
+              "cursor-pointer has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-focus has-[:focus-visible]:ring-offset-2 has-[:focus-visible]:ring-offset-surface",
+              sending && "pointer-events-none opacity-60",
+            ),
+          )}
+        >
+          {sending ? <Spinner className="size-4" /> : <Paperclip aria-hidden className="size-4" />}
+          {sending
+            ? sending.total > 1
+              ? `Enviando ${Math.min(sending.done + 1, sending.total)} de ${sending.total}...`
+              : "Enviando..."
+            : "Enviar foto ou PDF"}
+          <input
+            type="file"
+            multiple
+            accept={FILE_TYPES.join(",")}
+            className="sr-only"
+            disabled={sending !== null}
+            onChange={(e) => {
+              const picked = Array.from(e.target.files ?? []);
+              e.target.value = "";
+              void send(picked);
+            }}
+          />
+        </label>
+      ) : null}
+      {error ? (
+        <div className="mt-3">
+          <ErrorBox message={error} />
+        </div>
+      ) : null}
     </Card>
   );
 }
@@ -227,6 +363,8 @@ export default function PortalRequestPage() {
             <SectionTitle as="h2" className="mb-2">O que aconteceu</SectionTitle>
             <p className="text-sm leading-relaxed whitespace-pre-line text-ink">{r.description || r.title}</p>
           </Card>
+
+          <ClientFiles request={r} />
 
           {r.can_cancel ? (
             <div>

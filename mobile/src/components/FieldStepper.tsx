@@ -7,7 +7,6 @@ import type { TicketDetail } from "../lib/types";
 import { BRAND_GRADIENT, useStyles, useTheme, type Palette } from "../theme/theme";
 import { Icon } from "./Icon";
 import { Text } from "./Text";
-import { toneInk } from "./ticket/tones";
 
 const DOT = 22;
 
@@ -48,7 +47,7 @@ export function FieldStepper({ ticket }: { ticket: Pick<TicketDetail, "status" |
       {FIELD_STEPS.map((step, i) => {
         const done = i < reached || (i === reached && !active && !paused);
         const current = i === reached && (active || paused);
-        const tone = paused && current ? toneInk(c, "warning") : c.primary;
+        const tone = paused && current ? c.warningInk : c.primary;
         return (
           <View key={step} style={styles.node}>
             <View

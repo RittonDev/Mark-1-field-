@@ -35,7 +35,7 @@ export async function markConsentPrompted(now: Date = new Date()): Promise<void>
 /**
  * Retira o aceite do termo (LGPD: a qualquer momento, sem custo). O servidor encerra a jornada aberta e
  * apaga o aceite; o usuário guardado no aparelho é atualizado na hora, mesmo que a releitura falhe.
- * Quem chama para a coleta local (stopTracking) depois do sucesso.
+ * Depois do sucesso, quem chama encerra a coleta local (stopTracking).
  */
 export async function revokeLocationConsent(): Promise<void> {
   await api.delete("/tracking/consent");

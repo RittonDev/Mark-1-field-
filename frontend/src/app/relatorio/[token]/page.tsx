@@ -16,7 +16,6 @@ import {
   FileWarning,
   Flag,
   ImageOff,
-  Loader2,
   MapPin,
   PenLine,
   Printer,
@@ -30,6 +29,7 @@ import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Logo, ThemeToggle } from "@/components/Brand";
+import { PdfFailed, PdfProgress } from "@/components/report/PdfStatus";
 import {
   arrivedOnSite,
   captionText,
@@ -890,47 +890,8 @@ export default function PublicReportPage() {
       </main>
 
       {zoom !== null ? <PhotoViewer photos={viewable} index={zoom} onMove={setZoom} onClose={() => setZoom(null)} /> : null}
-      {building !== null ? (
-        <div
-          role="status"
-          aria-live="polite"
-          className="fixed right-4 bottom-4 left-4 z-50 flex animate-toast items-center gap-2 rounded-xl border border-line bg-surface px-4 py-3 text-sm text-ink shadow-pop sm:left-auto print:hidden"
-        >
-          <Loader2 className="size-4 shrink-0 animate-spin text-ink-muted" />
-          {building}
-        </div>
-      ) : null}
-      {pdfFailed ? (
-        <div
-          role="alert"
-          className="fixed right-4 bottom-4 left-4 z-50 flex animate-toast items-start gap-3 rounded-xl border border-line bg-surface px-4 py-3 text-sm text-ink shadow-pop sm:left-auto sm:max-w-sm print:hidden"
-        >
-          <FileWarning className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
-          <div className="min-w-0 flex-1">
-            <p className="font-semibold">Não foi possível gerar o PDF aqui.</p>
-            <p className="mt-0.5 text-xs text-ink-muted">Use Imprimir e escolha “Salvar como PDF”.</p>
-            <Button
-              size="sm"
-              className="mt-2"
-              onClick={() => {
-                setPdfFailed(false);
-                window.print();
-              }}
-            >
-              <Printer className="size-3.5" />
-              Imprimir
-            </Button>
-          </div>
-          <button
-            type="button"
-            onClick={() => setPdfFailed(false)}
-            className="rounded-md p-1 text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
-            aria-label="Fechar aviso"
-          >
-            <X className="size-4" />
-          </button>
-        </div>
-      ) : null}
+      <PdfProgress text={building} />
+      <PdfFailed open={pdfFailed} onClose={() => setPdfFailed(false)} />
     </div>
   );
 }
