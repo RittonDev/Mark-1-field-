@@ -1,59 +1,136 @@
 "use client";
 
+import clsx from "clsx";
 import { ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
-import { CountUp } from "@/components/motion";
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { CountUp } from "@/components/motion";
 
-/** Número de destaque com a comparação ao período anterior (texto neutro, seta indica o sentido). */
+const intFmt = (n: number) => n.toLocaleString("pt-BR");
+
+/**
+ * Número de destaque com a comparação ao período anterior (texto neutro: a seta indica o sentido).
+ * O número só ganha cor quando sinaliza problema (`tone`), como no resto do sistema.
+ */
 export function StatTile({
   label,
   value,
+  display,
   previous,
   previousLabel,
+  sameLabel,
   hint,
-  display,
+  tone,
+  compact = false,
+  href,
 }: {
   label: string;
   value: number;
-  /** Texto no lugar do número (ex.: valor em R$). */
+  /** Texto no lugar do número (ex.: valor em R$, percentual, nome do cliente). */
   display?: string;
   previous?: number;
+  /** Complemento da diferença, ex.: "vs dia anterior". */
   previousLabel?: string;
+  /** Texto quando o número não mudou, ex.: "igual ao dia anterior". */
+  sameLabel?: string;
   hint?: string;
+  /** Só quando o número indica problema (abaixo da meta, atraso). */
+  tone?: "warning" | "danger";
+  /** Valor em texto menor, cortado com reticências (ex.: nome do cliente destaque). */
+  compact?: boolean;
+  /** Leva ao detalhe (ex.: a lista de OS do cliente). */
+  href?: string;
 }) {
   const delta = previous === undefined ? null : value - previous;
   const Icon = delta === null || delta === 0 ? Minus : delta > 0 ? ArrowUpRight : ArrowDownRight;
-  return (
-    <div className="animate-enter rounded-xl border border-line bg-surface px-4 py-3 shadow-elev-1 transition-shadow hover:shadow-elev-2">
+  const body = (
+    <>
       <p className="text-xs font-semibold text-ink/80">{label}</p>
-      <p className="mt-1 text-3xl font-semibold tracking-tight text-ink tabular-nums">{display ?? <CountUp value={value} />}</p>
+      <p
+        className={clsx(
+          "mt-1 font-semibold tracking-tight",
+          compact ? "truncate text-lg leading-8" : display !== undefined ? "text-2xl leading-9" : "text-3xl leading-9",
+          tone === "danger" ? "text-red-600 dark:text-red-400" : tone === "warning" ? "text-amber-700 dark:text-amber-400" : "text-ink",
+        )}
+        title={compact ? display : undefined}
+      >
+        {display ?? <CountUp value={value} duration={250} />}
+      </p>
       {delta !== null ? (
-        <p className="mt-1 inline-flex items-center gap-1 text-xs text-ink-muted tabular-nums">
-          <Icon className="size-3.5" aria-hidden />
-          {delta === 0 ? "igual" : `${delta > 0 ? "+" : ""}${delta.toLocaleString("pt-BR")}`} {previousLabel}
+        <p className="mt-1 flex items-center gap-1 text-xs text-ink-muted tabular-nums">
+          <Icon className="size-3.5 shrink-0" aria-hidden />
+          <span className="min-w-0">
+            {delta === 0
+              ? (sameLabel ?? `sem variação ${previousLabel ?? ""}`.trim())
+              : `${delta > 0 ? "+" : "−"}${intFmt(Math.abs(delta))} ${previousLabel ?? ""}`.trim()}
+          </span>
         </p>
-      ) : hint ? (
-        <p className="mt-1 text-xs text-ink-muted">{hint}</p>
       ) : null}
-    </div>
+      {hint ? <p className="mt-1 text-xs text-ink-muted">{hint}</p> : null}
+    </>
+  );
+  const box = "block min-w-0 rounded-xl border border-line bg-surface px-4 py-3 shadow-elev-1";
+  return href ? (
+    <Link
+      href={href}
+      className={clsx(
+        box,
+        "transition-colors duration-150 hover:border-line-strong focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none",
+      )}
+    >
+      {body}
+    </Link>
+  ) : (
+    <div className={box}>{body}</div>
   );
 }
 
+export interface RankItem {
+  /** Cliente ou técnico; o motivo de visita improdutiva vem sem id. */
+  id?: string | null;
+  name: string;
+  count: number;
+}
+
 /** Ranking em barras horizontais finas (uma cor: é magnitude, não identidade). */
-export function RankBars({ items, empty }: { items: { name: string; count: number }[]; empty: string }) {
+export function RankBars({
+  items,
+  empty,
+  href,
+  label,
+}: {
+  items: RankItem[];
+  empty: string;
+  /** Leva ao detalhe do item (ex.: as OS do cliente). */
+  href?: (item: RankItem) => string | undefined;
+  /** Nome da lista para o leitor de tela. */
+  label?: string;
+}) {
   if (items.length === 0) return <p className="text-sm text-ink-muted">{empty}</p>;
   const max = Math.max(...items.map((i) => i.count), 1);
   return (
-    <ol className="flex flex-col gap-2.5">
-      {items.map((i) => (
-        <li key={i.name} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1">
-          <span className="truncate text-sm font-semibold text-ink">{i.name}</span>
-          <span className="text-sm font-medium text-ink tabular-nums">{i.count}</span>
-          <span className="col-span-2 h-2 overflow-hidden rounded-r bg-surface-2" aria-hidden>
-            <span className="block h-full rounded-r" style={{ width: `${(i.count / max) * 100}%`, background: "var(--viz-1)" }} />
-          </span>
-        </li>
-      ))}
+    <ol className="flex flex-col gap-2.5" aria-label={label}>
+      {items.map((item, index) => {
+        const to = href?.(item);
+        return (
+          // Nomes repetidos acontecem (dois clientes ou técnicos com o mesmo nome): a chave é o id.
+          <li key={item.id ?? `${item.name}-${index}`} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1">
+            {to ? (
+              <Link href={to} className="block truncate text-sm font-semibold text-ink hover:text-brand hover:underline" title={item.name}>
+                {item.name}
+              </Link>
+            ) : (
+              <span className="truncate text-sm font-semibold text-ink" title={item.name}>
+                {item.name}
+              </span>
+            )}
+            <span className="text-sm font-medium text-ink tabular-nums">{intFmt(item.count)}</span>
+            <span className="col-span-2 h-2 overflow-hidden rounded-r bg-surface-2" aria-hidden>
+              <span className="block h-full rounded-r" style={{ width: `${(item.count / max) * 100}%`, background: "var(--viz-1)" }} />
+            </span>
+          </li>
+        );
+      })}
     </ol>
   );
 }
