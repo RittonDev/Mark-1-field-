@@ -24,7 +24,7 @@ import { TimesDialog } from "@/components/ticket/TimesDialog";
 import { UNPRODUCTIVE_FROM, UnproductiveDialog } from "@/components/ticket/UnproductiveDialog";
 import { WhatsAppShare } from "@/components/ticket/WhatsAppShare";
 import { WorklogsTab } from "@/components/ticket/WorklogsTab";
-import { Button, Card } from "@/components/ui";
+import { Button, Card, SectionTitle } from "@/components/ui";
 import { api } from "@/lib/api";
 import { STATUS } from "@/lib/constants";
 import { formatDateTime, formatMinutes } from "@/lib/format";
@@ -89,7 +89,7 @@ function LocationTab({ ticket }: { ticket: TicketDetail }) {
       </Card>
       <div className="flex flex-col gap-3">
         <Card className="p-4 text-sm">
-          <p className="text-xs font-medium text-ink-muted">Loja</p>
+          <SectionTitle>Loja</SectionTitle>
           <p className="mt-1 font-semibold text-ink">{loc ? [loc.name, loc.code].filter(Boolean).join(" - ") : "Sem loja"}</p>
           {loc ? (
             <p className="mt-0.5 text-ink-muted">
@@ -99,7 +99,7 @@ function LocationTab({ ticket }: { ticket: TicketDetail }) {
           {ticket.service_address ? <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-300">Atendimento em: {ticket.service_address}</p> : null}
         </Card>
         <Card className="p-4">
-          <p className="mb-2 text-xs font-medium text-ink-muted">GPS do técnico</p>
+          <SectionTitle className="mb-2">GPS do técnico</SectionTitle>
           {points.length === 0 ? (
             <p className="text-sm text-ink-subtle">Nenhum ponto de GPS registrado.</p>
           ) : (
@@ -108,7 +108,7 @@ function LocationTab({ ticket }: { ticket: TicketDetail }) {
                 <li key={p.id} className="flex items-start gap-2">
                   <Navigation className="mt-0.5 size-3.5 shrink-0 text-brand" />
                   <span className="min-w-0 flex-1">
-                    <span className="block font-medium text-ink">{GPS_LABEL[p.to] ?? STATUS[p.to as keyof typeof STATUS]?.label ?? p.to}</span>
+                    <span className="block font-semibold text-ink">{GPS_LABEL[p.to] ?? STATUS[p.to as keyof typeof STATUS]?.label ?? p.to}</span>
                     <span className="text-xs text-ink-muted">
                       {formatDateTime(p.at)}
                       {store ? ` · a ${km(distance(store, p.at2))} da loja` : ""}
@@ -138,7 +138,7 @@ function LinksTab({ ticket }: { ticket: TicketDetail }) {
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <Card className="p-4">
-        <p className="text-xs font-medium text-ink-muted">Projeto</p>
+        <SectionTitle>Projeto</SectionTitle>
         {ticket.project ? (
           <Link href={`/projetos/${ticket.project.id}`} className="mt-1 inline-flex items-center gap-1 text-sm font-semibold text-brand hover:underline">
             {ticket.project.code} · {ticket.project.name}
@@ -149,10 +149,12 @@ function LinksTab({ ticket }: { ticket: TicketDetail }) {
         )}
       </Card>
       <Card className="p-4">
-        <p className="mb-2 flex items-center justify-between text-xs font-medium text-ink-muted">
-          <span>Outras OS desta loja · 30 dias</span>
-          <span className="rounded-full bg-surface-2 px-1.5 font-semibold text-ink">{history?.count_30d ?? 0}</span>
-        </p>
+        <SectionTitle
+          className="mb-2"
+          aside={<span className="rounded-full bg-surface-2 px-1.5 text-xs font-semibold text-ink">{history?.count_30d ?? 0}</span>}
+        >
+          Outras OS desta loja · 30 dias
+        </SectionTitle>
         {history && history.previous.length ? (
           <ul className="flex flex-col gap-1">
             {history.previous.map((p) => (
@@ -160,7 +162,7 @@ function LinksTab({ ticket }: { ticket: TicketDetail }) {
                 <Link href={`/chamados/${p.id}`} className="flex items-start gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors hover:bg-surface-2">
                   <span className="mt-0.5 font-mono text-[11px] text-ink-subtle">{p.code}</span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-ink">{p.title}</span>
+                    <span className="block truncate font-semibold text-ink">{p.title}</span>
                     <span className="text-[11px] text-ink-subtle">
                       {STATUS[p.status]?.label ?? p.status} · {formatDateTime(p.created_at)}
                     </span>
@@ -186,7 +188,7 @@ function DeadlinesTab({ ticket, onFixTimes }: { ticket: TicketDetail; onFixTimes
     <div className="grid gap-4 lg:grid-cols-2">
       <SlaCard ticket={ticket} />
       <Card className="p-4">
-        <p className="text-xs font-medium text-ink-muted">Atendimento em campo</p>
+        <SectionTitle>Atendimento em campo</SectionTitle>
         <div className="mt-2 flex flex-col gap-2">
           <ArrivalChip ticket={ticket} />
           <OnsiteBar ticket={ticket} />
@@ -209,7 +211,7 @@ function DeadlinesTab({ ticket, onFixTimes }: { ticket: TicketDetail; onFixTimes
         ) : null}
       </Card>
       <Card className="p-4 lg:col-span-2">
-        <p className="mb-2 text-xs font-medium text-ink-muted">Apontamentos de horas</p>
+        <SectionTitle className="mb-2">Apontamentos de horas</SectionTitle>
         <WorklogsTab ticketId={ticket.id} closed={false} />
       </Card>
     </div>
@@ -231,6 +233,8 @@ export function TicketEditor({ ticket, variant, onClose }: { ticket: TicketDetai
 
   const iconButton =
     "inline-flex size-9 items-center justify-center rounded-lg text-ink-muted transition-colors hover:bg-surface-3 hover:text-ink disabled:opacity-40";
+  // Na página a OS é o título principal; no painel lateral, o título do diálogo.
+  const Heading = variant === "page" ? "h1" : "h2";
 
   return (
     <div
@@ -249,10 +253,10 @@ export function TicketEditor({ ticket, variant, onClose }: { ticket: TicketDetai
           <SquarePen className="size-4 text-white/80" />
         )}
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[15px] font-semibold">
+          <Heading className="truncate text-[15px] font-bold tracking-[-0.01em]">
             Editar OS <span className="font-mono">#{ticket.number}</span>
             <span className="ml-2 font-normal text-white/80">{ticket.title}</span>
-          </p>
+          </Heading>
         </div>
         <span className="rounded-full bg-white/95 px-0.5 py-0.5">
           <StatusBadge status={ticket.status} />

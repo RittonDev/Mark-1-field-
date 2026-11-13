@@ -154,7 +154,7 @@ export default function PortalRequestsPage() {
                     <Badge status={item.status} />
                     <span className="font-mono text-[11px] text-ink-subtle">{item.code}</span>
                   </div>
-                  <p className="mt-1.5 line-clamp-2 font-medium text-ink">{item.title}</p>
+                  <p className="mt-1.5 line-clamp-2 font-semibold text-ink">{item.title}</p>
                   <p className="mt-1 flex min-w-0 items-center gap-1 text-xs text-ink-muted">
                     <Store className="size-3.5 shrink-0" />
                     <span className="truncate">

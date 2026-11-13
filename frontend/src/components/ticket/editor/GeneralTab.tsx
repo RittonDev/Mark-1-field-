@@ -11,7 +11,7 @@ import { useToast } from "@/components/Toaster";
 import { HelpersField, SuggestedTechnicians } from "@/components/new-ticket/SuggestedTechnicians";
 import { PayoutLine } from "@/components/ticket/PayoutsCard";
 import { TransitionDialog } from "@/components/ticket/TransitionDialog";
-import { ErrorBox, Field, Input, Select, Textarea } from "@/components/ui";
+import { ErrorBox, Field, Input, SectionTitle, Select, Textarea } from "@/components/ui";
 import { api, ApiError, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { PRIORITY, PRIORITY_ORDER, STATUS, STATUS_ORDER } from "@/lib/constants";
@@ -486,7 +486,7 @@ export function GeneralTab({
       </div>
 
       <div className="col-span-12 rounded-lg border border-line px-3 py-2.5">
-        <p className="text-xs font-medium text-ink-muted">Endereço da ordem de serviço</p>
+        <p className="text-xs font-semibold text-ink/80">Endereço da ordem de serviço</p>
         <p className="mt-1 flex items-start gap-1.5 text-sm text-ink">
           <MapPin className="mt-0.5 size-4 shrink-0 text-ink-subtle" />
           {address || <span className="text-ink-subtle">Sem endereço (escolha a loja)</span>}
@@ -542,7 +542,7 @@ export function GeneralTab({
         </Select>
       </Field>
       <div className="col-span-12 sm:col-span-6">
-        <span className="mb-1.5 block text-xs font-medium text-ink-muted">Outros colaboradores</span>
+        <span className="mb-1.5 block text-xs font-semibold text-ink/80">Outros colaboradores</span>
         <HelpersField
           hideLabel
           options={people.filter((p) => p.role === "technician").map((p) => ({ id: p.id, name: p.name }))}
@@ -559,21 +559,25 @@ export function GeneralTab({
       ) : null}
 
       <div className="col-span-12 rounded-xl border border-line bg-surface-2/40 p-3">
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <p className="text-xs font-semibold text-ink">Técnicos mais indicados para esta loja</p>
-          {form.locationId ? (
-            <button
-              type="button"
-              onClick={async () => {
-                await navigator.clipboard.writeText(invite());
-                toast({ title: "Convite copiado: cole no grupo de técnicos do WhatsApp", tone: "success" });
-              }}
-              className="text-xs font-medium text-brand hover:underline"
-            >
-              Copiar convite para o grupo
-            </button>
-          ) : null}
-        </div>
+        <SectionTitle
+          className="mb-2"
+          aside={
+            form.locationId ? (
+              <button
+                type="button"
+                onClick={async () => {
+                  await navigator.clipboard.writeText(invite());
+                  toast({ title: "Convite copiado: cole no grupo de técnicos do WhatsApp", tone: "success" });
+                }}
+                className="text-xs font-medium text-brand hover:underline"
+              >
+                Copiar convite para o grupo
+              </button>
+            ) : null
+          }
+        >
+          Técnicos mais indicados para esta loja
+        </SectionTitle>
         <SuggestedTechnicians
           items={suggestions.data}
           loading={suggestions.isLoading}

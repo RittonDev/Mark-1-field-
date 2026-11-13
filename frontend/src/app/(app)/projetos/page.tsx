@@ -59,7 +59,7 @@ export default function ProjectsPage() {
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <p className="font-mono text-xs text-ink-muted">{p.code}</p>
-                    <h2 className="truncate font-medium text-ink">{p.name}</h2>
+                    <h2 className="truncate font-bold text-ink">{p.name}</h2>
                     <p className="truncate text-sm text-ink-muted">{p.customer?.name ?? "Sem cliente"}</p>
                   </div>
                   <span className={clsx("shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium", PROJECT_STATUS[p.status].className)}>

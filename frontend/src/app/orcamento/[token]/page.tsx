@@ -7,7 +7,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Logo, ThemeToggle } from "@/components/Brand";
 import { SignaturePad } from "@/components/SignaturePad";
-import { Button, ErrorBox, Input, Skeleton, Textarea } from "@/components/ui";
+import { Button, ErrorBox, Input, SectionTitle, Skeleton, Textarea } from "@/components/ui";
 import { ApiError, errorMessage, request } from "@/lib/api";
 import { formatDate, formatDateTime, formatDocument, formatMoney, initials } from "@/lib/format";
 import { QUOTE_KIND, QUOTE_STATUS, totalsByKind } from "@/lib/quotes";
@@ -27,17 +27,8 @@ const COMMENT_MAX = 2000;
 function Box({ title, children, className }: { title?: string; children: React.ReactNode; className?: string }) {
   return (
     <div className={clsx("rounded-xl border border-line bg-surface p-4 print:break-inside-avoid", className)}>
-      {title ? <p className="mb-2 text-xs font-medium text-ink-subtle">{title}</p> : null}
+      {title ? <p className="mb-2 text-xs font-semibold text-ink/80">{title}</p> : null}
       {children}
-    </div>
-  );
-}
-
-function SectionTitle({ children, aside }: { children: React.ReactNode; aside?: React.ReactNode }) {
-  return (
-    <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
-      <h2 className="text-sm font-semibold text-ink">{children}</h2>
-      {aside}
     </div>
   );
 }
@@ -153,7 +144,7 @@ export default function PublicQuotePage() {
             <span className="flex size-12 items-center justify-center rounded-2xl bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400">
               <FileWarning className="size-6" />
             </span>
-            <p className="text-base font-semibold text-ink">Orçamento indisponível</p>
+            <p className="text-base font-bold text-ink">Orçamento indisponível</p>
             <p className="text-sm text-ink-muted">{gone}</p>
           </div>
         ) : !quote ? (
@@ -175,9 +166,9 @@ export default function PublicQuotePage() {
                 </div>
               </div>
               <dl className="grid grid-cols-[auto_auto] items-baseline gap-x-3 gap-y-1 text-right">
-                <dt className="text-sm text-ink-subtle">OS</dt>
+                <dt className="text-sm text-ink-muted">OS</dt>
                 <dd className="font-mono text-lg font-semibold text-ink">{quote.ticket_number !== undefined ? String(quote.ticket_number).padStart(6, "0") : quote.ticket_code}</dd>
-                <dt className="text-sm text-ink-subtle">Orçamento</dt>
+                <dt className="text-sm text-ink-muted">Orçamento</dt>
                 <dd className="font-mono text-lg font-semibold text-ink">{quote.code}</dd>
               </dl>
             </div>
@@ -189,6 +180,7 @@ export default function PublicQuotePage() {
             {/* Dados do orçamento */}
             <section className="px-6 py-6 sm:px-8">
               <SectionTitle
+                className="mb-3 flex-wrap"
                 aside={
                   <dl className="grid grid-cols-[auto_auto] gap-x-2 text-right text-[11px] text-ink-muted">
                     <dt className="font-semibold text-ink">Data de emissão:</dt>
@@ -229,7 +221,7 @@ export default function PublicQuotePage() {
                 </Box>
               </div>
               <Box title="Nome do orçamento" className="mt-4">
-                <p className="text-sm font-medium text-ink">{quote.title}</p>
+                <p className="text-sm font-semibold text-ink">{quote.title}</p>
                 <p className="mt-1 text-xs text-ink-muted">
                   Referente à OS {quote.ticket_code} · {quote.ticket_title}
                 </p>
@@ -238,10 +230,10 @@ export default function PublicQuotePage() {
 
             {/* Itens */}
             <section className="border-t border-line px-6 py-6 sm:px-8">
-              <SectionTitle>Itens</SectionTitle>
+              <SectionTitle className="mb-3">Itens</SectionTitle>
               <div className="overflow-x-auto rounded-xl border border-line">
                 <table className="w-full min-w-[40rem] text-sm">
-                  <thead className="bg-surface-2/70 text-left text-[11px] font-semibold tracking-[0.05em] text-ink-subtle uppercase">
+                  <thead className="bg-surface-2/70 text-left text-[11px] font-bold tracking-[0.05em] text-ink-muted uppercase">
                     <tr>
                       <th className="px-4 py-2.5">Nome</th>
                       <th className="px-4 py-2.5">Tipo</th>
@@ -254,7 +246,7 @@ export default function PublicQuotePage() {
                   <tbody className="divide-y divide-line">
                     {quote.items.map((item, i) => (
                       <tr key={i} className="print:break-inside-avoid">
-                        <td className="px-4 py-3 text-ink">{item.description}</td>
+                        <td className="px-4 py-3 font-medium text-ink">{item.description}</td>
                         <td className="px-4 py-3 text-ink-muted">{QUOTE_KIND[item.kind ?? "product"].label}</td>
                         <td className="px-4 py-3 text-ink-muted">{item.unit}</td>
                         <td className="px-4 py-3 text-right tabular-nums">{item.quantity.toLocaleString("pt-BR")}</td>
@@ -269,7 +261,7 @@ export default function PublicQuotePage() {
 
             {/* Resumo */}
             <section className="border-t border-line px-6 py-6 sm:px-8 print:break-inside-avoid">
-              <SectionTitle>Resumo do orçamento</SectionTitle>
+              <SectionTitle className="mb-3">Resumo do orçamento</SectionTitle>
               <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-line bg-line sm:grid-cols-3 lg:grid-cols-6">
                 {[
                   { label: "Total em produtos", value: totals?.product ?? 0 },
@@ -279,7 +271,7 @@ export default function PublicQuotePage() {
                   { label: "Descontos", value: quote.discount },
                 ].map((cell) => (
                   <div key={cell.label} className="bg-surface px-4 py-3">
-                    <p className="text-[11px] text-ink-subtle">{cell.label}</p>
+                    <p className="text-[11px] font-medium text-ink-muted">{cell.label}</p>
                     <p className="mt-1 text-sm font-medium text-ink tabular-nums">{formatMoney(cell.value)}</p>
                   </div>
                 ))}
@@ -297,7 +289,7 @@ export default function PublicQuotePage() {
 
             {/* Resposta do cliente */}
             <section className="border-t border-line px-6 py-6 sm:px-8 print:break-inside-avoid">
-              <SectionTitle>{open ? "Responder orçamento" : "Resposta do cliente"}</SectionTitle>
+              <SectionTitle className="mb-3">{open ? "Responder orçamento" : "Resposta do cliente"}</SectionTitle>
 
               {quote.status === "approved" ? (
                 <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
@@ -372,13 +364,13 @@ export default function PublicQuotePage() {
                         <SignaturePad onChange={setSignature} />
                         <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem]">
                           <label className="flex flex-col gap-1.5">
-                            <span className="text-xs font-medium text-ink-muted">
+                            <span className="text-xs font-semibold text-ink/80">
                               Nome completo <span className="text-red-500">*</span>
                             </span>
                             <Input value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" />
                           </label>
                           <label className="flex flex-col gap-1.5">
-                            <span className="text-xs font-medium text-ink-muted">Matrícula (opcional)</span>
+                            <span className="text-xs font-semibold text-ink/80">Matrícula (opcional)</span>
                             <Input value={registration} onChange={(e) => setRegistration(e.target.value)} maxLength={40} />
                           </label>
                         </div>
@@ -386,19 +378,19 @@ export default function PublicQuotePage() {
                     ) : (
                       <div className="flex flex-col gap-3 rounded-xl border border-line p-4">
                         <label className="flex flex-col gap-1.5">
-                          <span className="text-xs font-medium text-ink-muted">
+                          <span className="text-xs font-semibold text-ink/80">
                             Motivo da recusa <span className="text-red-500">*</span>
                           </span>
                           <Textarea rows={4} value={reason} onChange={(e) => setReason(e.target.value)} />
                         </label>
                         <label className="flex flex-col gap-1.5">
-                          <span className="text-xs font-medium text-ink-muted">Seu nome</span>
+                          <span className="text-xs font-semibold text-ink/80">Seu nome</span>
                           <Input value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" />
                         </label>
                       </div>
                     )}
                     <label className="flex flex-col rounded-xl border border-line p-4">
-                      <span className="mb-2 inline-flex items-center gap-1.5 text-xs font-medium text-ink-muted">
+                      <span className="mb-2 inline-flex items-center gap-1.5 text-xs font-semibold text-ink/80">
                         <MessageSquareText className="size-3.5" />
                         Comentário para a empresa (opcional)
                       </span>

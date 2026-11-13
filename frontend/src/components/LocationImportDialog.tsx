@@ -150,10 +150,10 @@ export function LocationImportDialog({
               <table className="w-full text-left text-xs">
                 <thead className="sticky top-0 bg-surface-2 text-ink-muted">
                   <tr>
-                    <th className="px-2 py-1.5 font-medium">Linha</th>
-                    <th className="px-2 py-1.5 font-medium">Cliente</th>
-                    <th className="px-2 py-1.5 font-medium">Local</th>
-                    <th className="px-2 py-1.5 font-medium">Resultado</th>
+                    <th className="px-2 py-1.5 font-semibold">Linha</th>
+                    <th className="px-2 py-1.5 font-semibold">Cliente</th>
+                    <th className="px-2 py-1.5 font-semibold">Local</th>
+                    <th className="px-2 py-1.5 font-semibold">Resultado</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line">
@@ -165,7 +165,7 @@ export function LocationImportDialog({
                         {r.new_customer ? <span className="ml-1 text-violet-700 dark:text-violet-300">(novo)</span> : null}
                       </td>
                       <td className="px-2 py-1.5">
-                        <span className="block text-ink">{r.name || "—"}</span>
+                        <span className="block font-semibold text-ink">{r.name || "—"}</span>
                         {r.city ? <span className="text-ink-muted">{r.city}</span> : null}
                       </td>
                       <td className="px-2 py-1.5">

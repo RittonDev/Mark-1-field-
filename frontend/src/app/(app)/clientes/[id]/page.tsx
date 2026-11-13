@@ -8,7 +8,7 @@ import { StatusBadge } from "@/components/badges";
 import { ContactList } from "@/components/ContactList";
 import { CountUp } from "@/components/motion";
 import { TagChips } from "@/components/TagChips";
-import { Button, Card, CardHeader, ErrorBox, LoadingBlock } from "@/components/ui";
+import { Button, Card, CardHeader, ErrorBox, LoadingBlock, SectionTitle } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { formatDate, formatDocument, initials } from "@/lib/format";
 import type { Customer, Location, Page, TicketListItem } from "@/lib/types";
@@ -26,7 +26,7 @@ function Stars({ value }: { value: number }) {
 function Stat({ label, value, display }: { label: string; value?: number; display?: string }) {
   return (
     <div className="rounded-xl border border-line bg-surface px-4 py-3 shadow-elev-1">
-      <p className="text-xs text-ink-muted">{label}</p>
+      <p className="text-xs font-medium text-ink-muted">{label}</p>
       <p className="mt-1 text-xl font-semibold tracking-tight text-ink">
         {display ?? <CountUp value={value ?? 0} />}
       </p>
@@ -75,7 +75,7 @@ export default function CustomerDetailPage() {
               )}
             </span>
             <div className="min-w-0">
-              <h1 className="text-[22px] leading-tight font-semibold tracking-[-0.015em] text-ink">{c.name}</h1>
+              <h1 className="text-[22px] leading-tight font-bold tracking-[-0.02em] text-ink">{c.name}</h1>
               <p className="mt-1 text-sm text-ink-muted">
                 {c.document ? `CNPJ/CPF ${formatDocument(c.document)} · ` : ""}cliente desde {formatDate(since)}
                 {c.is_active ? "" : " · inativo"}
@@ -111,7 +111,7 @@ export default function CustomerDetailPage() {
 
           {legacy?.rating && legacy.rating.average > 0 ? (
             <Card className="p-4">
-              <p className="text-xs text-ink-muted">Avaliação dos atendimentos (Field Control)</p>
+              <p className="text-xs font-medium text-ink-muted">Avaliação dos atendimentos (Field Control)</p>
               <div className="mt-1 flex items-center gap-3">
                 <span className="text-2xl font-semibold text-ink">{legacy.rating.average.toFixed(1).replace(".", ",")}</span>
                 <Stars value={legacy.rating.average} />
@@ -143,8 +143,8 @@ export default function CustomerDetailPage() {
                     <Link href={`/locais/${l.id}`} className="flex items-center gap-3 px-5 py-2.5 transition-colors hover:bg-[var(--row-hover)]">
                       <MapPin className="size-4 shrink-0 text-ink-subtle" />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm text-ink">
-                          {l.code ? <span className="mr-1.5 font-mono text-xs text-ink-subtle">{l.code}</span> : null}
+                        <span className="block truncate text-sm font-semibold text-ink">
+                          {l.code ? <span className="mr-1.5 font-mono text-xs font-normal text-ink-subtle">{l.code}</span> : null}
                           {l.name}
                         </span>
                         <span className="block truncate text-xs text-ink-subtle">{[l.city, l.state].filter(Boolean).join("-")}</span>
@@ -169,8 +169,8 @@ export default function CustomerDetailPage() {
                   <li key={t.id}>
                     <Link href={`/chamados/${t.id}`} className="flex items-center gap-3 px-5 py-2.5 transition-colors hover:bg-[var(--row-hover)]">
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm text-ink">
-                          <span className="mr-1.5 font-mono text-xs text-ink-subtle">{t.code}</span>
+                        <span className="block truncate text-sm font-semibold text-ink">
+                          <span className="mr-1.5 font-mono text-xs font-normal text-ink-subtle">{t.code}</span>
                           {t.title}
                         </span>
                         <span className="block truncate text-xs text-ink-subtle">
@@ -188,7 +188,7 @@ export default function CustomerDetailPage() {
 
         <aside className="flex flex-col gap-5">
           <Card className="p-5">
-            <p className="mb-3 text-sm font-semibold text-ink">Contatos</p>
+            <SectionTitle className="mb-3">Contatos</SectionTitle>
             <ContactList
               contacts={
                 c.contacts?.length
@@ -202,10 +202,12 @@ export default function CustomerDetailPage() {
           </Card>
 
           <Card className="p-5">
-            <p className="mb-2 flex items-center gap-2 text-sm font-semibold text-ink">
-              <Building2 className="size-4 text-ink-subtle" />
-              Endereço da matriz
-            </p>
+            <SectionTitle className="mb-2">
+              <span className="flex items-center gap-2">
+                <Building2 className="size-4 text-ink-subtle" />
+                Endereço da matriz
+              </span>
+            </SectionTitle>
             {address ? (
               <>
                 <p className="text-sm text-ink-muted">{address}</p>
@@ -230,14 +232,14 @@ export default function CustomerDetailPage() {
 
           {c.notes ? (
             <Card className="p-5">
-              <p className="mb-2 text-sm font-semibold text-ink">Observações</p>
+              <SectionTitle className="mb-2">Observações</SectionTitle>
               <p className="text-sm whitespace-pre-wrap text-ink-muted">{c.notes}</p>
             </Card>
           ) : null}
 
           {legacy?.attachments?.length ? (
             <Card className="p-5">
-              <p className="mb-2 text-sm font-semibold text-ink">Arquivos</p>
+              <SectionTitle className="mb-2">Arquivos</SectionTitle>
               <ul className="flex flex-col gap-1">
                 {legacy.attachments.map((a, i) => (
                   <li key={i}>

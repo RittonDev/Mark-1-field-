@@ -143,15 +143,15 @@ function Panels({ data, period }: { data: Daily | Monthly; period: string }) {
   return (
     <div className="grid gap-4 lg:grid-cols-3">
       <Card className="p-4">
-        <h2 className="mb-3 text-sm font-semibold text-ink">Clientes com mais chamados {period}</h2>
+        <h2 className="mb-3 text-sm font-bold text-ink">Clientes com mais chamados {period}</h2>
         <RankBars items={data.customers} empty="Nenhum chamado aberto." />
       </Card>
       <Card className="p-4">
-        <h2 className="mb-3 text-sm font-semibold text-ink">OS resolvidas por técnico</h2>
+        <h2 className="mb-3 text-sm font-bold text-ink">OS resolvidas por técnico</h2>
         <RankBars items={data.technicians} empty="Nenhuma OS resolvida." />
       </Card>
       <Card className="p-4">
-        <h2 className="mb-3 text-sm font-semibold text-ink">Motivos das visitas improdutivas</h2>
+        <h2 className="mb-3 text-sm font-bold text-ink">Motivos das visitas improdutivas</h2>
         <RankBars items={data.unproductive_reasons} empty="Nenhuma visita improdutiva." />
       </Card>
     </div>
@@ -166,7 +166,7 @@ function TopCustomer({ top, period }: { top: CountRef | null; period: string }) 
         <Star className="size-4" />
       </span>
       <div>
-        <p className="text-xs text-ink-muted">Cliente destaque {period}</p>
+        <p className="text-xs font-semibold text-ink/80">Cliente destaque {period}</p>
         <p className="text-sm text-ink">
           <strong className="font-semibold">{top.name}</strong> · {top.count} chamado{top.count > 1 ? "s" : ""}
         </p>
@@ -189,7 +189,7 @@ function DailyView() {
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-ink first-letter:uppercase">{longDate(data.date)}</h2>
+          <h2 className="text-lg font-bold text-ink first-letter:uppercase">{longDate(data.date)}</h2>
           <p className="inline-flex items-center gap-1.5 text-xs text-ink-muted">
             <Moon className="size-3.5" />
             {data.closed ? "Dia fechado à meia-noite" : "Hoje: parcial, fecha à meia-noite"}
@@ -229,7 +229,7 @@ function MonthlyView() {
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-ink first-letter:uppercase">{monthName(data.month)}</h2>
+          <h2 className="text-lg font-bold text-ink first-letter:uppercase">{monthName(data.month)}</h2>
           <p className="text-xs text-ink-muted">{data.closed ? "Mês fechado" : "Mês em andamento (até hoje)"}</p>
         </div>
         <div className="flex gap-2">
@@ -259,7 +259,7 @@ function MonthlyView() {
       <Card className="p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h2 className="text-sm font-semibold text-ink">Chamados por dia</h2>
+            <h2 className="text-sm font-bold text-ink">Chamados por dia</h2>
             <Legend series={series} />
           </div>
           <Button size="sm" variant="ghost" onClick={() => setTable((v) => !v)}>
@@ -272,11 +272,11 @@ function MonthlyView() {
             <table className="w-full text-sm tabular-nums">
               <thead className="sticky top-0 bg-surface text-left text-xs text-ink-muted">
                 <tr>
-                  <th className="py-1.5 font-medium">Dia</th>
-                  <th className="py-1.5 text-right font-medium">Entraram</th>
-                  <th className="py-1.5 text-right font-medium">Resolvidos</th>
-                  <th className="py-1.5 text-right font-medium">Cancelados</th>
-                  <th className="py-1.5 text-right font-medium">Improdutivos</th>
+                  <th className="py-1.5 font-semibold">Dia</th>
+                  <th className="py-1.5 text-right font-semibold">Entraram</th>
+                  <th className="py-1.5 text-right font-semibold">Resolvidos</th>
+                  <th className="py-1.5 text-right font-semibold">Cancelados</th>
+                  <th className="py-1.5 text-right font-semibold">Improdutivos</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line">

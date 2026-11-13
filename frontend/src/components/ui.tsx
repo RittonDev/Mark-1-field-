@@ -382,9 +382,14 @@ export function Dialog({
   }, [open]);
 
   if (!open) return null;
-  // No <body>: fora das animações e recortes da página (o evento continua subindo pela árvore do React).
+  // No <body>: fora das animações e recortes da página. Mesmo no <body>, o clique "sobe" pela árvore do
+  // React até quem abriu o diálogo (ex.: a linha clicável de uma lista, que abriria a OS em página);
+  // o stopPropagation para o clique aqui.
   return createPortal(
-    <div className="fixed inset-0 z-50 flex animate-fade items-start justify-center overflow-y-auto bg-[rgb(9_11_15/0.42)] p-4 pt-[9vh] backdrop-blur-[3px]">
+    <div
+      className="fixed inset-0 z-50 flex animate-fade items-start justify-center overflow-y-auto bg-[rgb(9_11_15/0.42)] p-4 pt-[9vh] backdrop-blur-[3px]"
+      onClick={(e) => e.stopPropagation()}
+    >
       <div className="absolute inset-0" onClick={onClose} aria-hidden />
       <div
         ref={panel}

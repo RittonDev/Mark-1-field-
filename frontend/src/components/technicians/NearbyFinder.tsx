@@ -7,7 +7,7 @@ import { useState } from "react";
 import { LocationPicker } from "@/components/LocationPicker";
 import { Tabs } from "@/components/motion";
 import { useToast } from "@/components/Toaster";
-import { Card, Checkbox, EmptyState, ErrorBox, Input, LoadingBlock, Select } from "@/components/ui";
+import { Card, CardHeader, Checkbox, EmptyState, ErrorBox, Input, LoadingBlock, Select } from "@/components/ui";
 import { absoluteApiUrl, api, errorMessage } from "@/lib/api";
 import { formatDate, initials } from "@/lib/format";
 import type { Location, NearbyResult, NearbyTechnician } from "@/lib/types";
@@ -235,20 +235,24 @@ export function NearbyFinder() {
         <ErrorBox message={errorMessage(result.error)} />
       ) : result.data ? (
         <Card className="overflow-hidden">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-3 sm:px-5">
-            <p className="text-sm font-semibold text-ink">
-              Mais próximos de <span className="text-brand-ink">{result.data.point.label}</span>
-            </p>
-            <a
-              href={`https://www.google.com/maps/search/?api=1&query=${result.data.point.latitude},${result.data.point.longitude}`}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1 text-xs text-ink-muted hover:text-brand"
-            >
-              <MapPin className="size-3.5" />
-              Ver o ponto no mapa
-            </a>
-          </div>
+          <CardHeader
+            title={
+              <>
+                Mais próximos de <span className="text-brand-ink">{result.data.point.label}</span>
+              </>
+            }
+            actions={
+              <a
+                href={`https://www.google.com/maps/search/?api=1&query=${result.data.point.latitude},${result.data.point.longitude}`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 text-xs text-ink-muted hover:text-brand"
+              >
+                <MapPin className="size-3.5" />
+                Ver o ponto no mapa
+              </a>
+            }
+          />
           {result.data.technicians.length === 0 ? (
             <EmptyState icon={<MapPin />} title="Nenhum técnico encontrado" description="Tente incluir os técnicos sem acesso ao app." />
           ) : (

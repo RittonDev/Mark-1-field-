@@ -191,7 +191,7 @@ export default function FormsPage() {
               return (
                 <Card key={t.id} className={clsx("flex flex-col p-4", !t.is_active && "opacity-60")}>
                   <div className="flex items-start justify-between gap-2">
-                    <h2 className="font-medium text-ink">{t.name}</h2>
+                    <h2 className="font-bold text-ink">{t.name}</h2>
                     {!t.is_active ? <span className="text-xs text-ink-muted">Inativo</span> : null}
                   </div>
                   {t.description ? <p className="mt-1 line-clamp-2 text-sm text-ink-muted">{t.description}</p> : null}
@@ -396,7 +396,7 @@ function Editor({ initial, onDone }: { initial: Draft; onDone: () => void }) {
                       {f.type === "photo" ? (
                         <>
                           <label className="inline-flex items-center gap-1.5">
-                            Mínimo
+                            <span className="font-semibold text-ink/80">Mínimo</span>
                             <Input
                               type="number"
                               min={0}
@@ -407,7 +407,7 @@ function Editor({ initial, onDone }: { initial: Draft; onDone: () => void }) {
                             />
                           </label>
                           <label className="inline-flex items-center gap-1.5">
-                            Máximo
+                            <span className="font-semibold text-ink/80">Máximo</span>
                             <Input
                               type="number"
                               min={1}
@@ -444,7 +444,7 @@ function Editor({ initial, onDone }: { initial: Draft; onDone: () => void }) {
               ))}
             </ol>
             <div className="flex flex-wrap gap-1.5 border-t border-line p-3">
-              <span className="mr-1 self-center text-xs text-ink-muted">Adicionar:</span>
+              <span className="mr-1 self-center text-xs font-semibold text-ink/80">Adicionar:</span>
               {ADD_ORDER.map((t) => (
                 <button
                   key={t}
@@ -462,19 +462,19 @@ function Editor({ initial, onDone }: { initial: Draft; onDone: () => void }) {
         </div>
 
         <aside className="lg:sticky lg:top-20 lg:self-start">
-          <p className="mb-2 text-xs font-medium tracking-wide text-ink-muted uppercase">Como o técnico vê</p>
+          <p className="mb-2 text-xs font-bold tracking-wide text-ink-muted uppercase">Como o técnico vê</p>
           <div className="rounded-[1.75rem] border-8 border-ink/85 bg-canvas p-3 shadow-sm dark:border-black">
             <div className="max-h-[32rem] overflow-y-auto rounded-xl bg-surface p-3">
-              <p className="text-sm font-semibold text-ink">{draft.name || "Sem nome"}</p>
+              <p className="text-sm font-bold text-ink">{draft.name || "Sem nome"}</p>
               <div className="mt-3 flex flex-col gap-3">
                 {draft.fields.map((f) =>
                   f.type === "section" ? (
-                    <p key={f.id} className="border-b border-line pb-1 text-[11px] font-semibold tracking-wide text-ink-muted uppercase">
+                    <p key={f.id} className="border-b border-line pb-1 text-[11px] font-bold tracking-wide text-ink-muted uppercase">
                       {f.label}
                     </p>
                   ) : (
                     <div key={f.id}>
-                      <p className="text-xs font-medium text-ink">
+                      <p className="text-xs font-semibold text-ink">
                         {f.label}
                         {f.required || (f.type === "photo" && f.min_photos > 0) ? <span className="text-red-500"> *</span> : null}
                       </p>

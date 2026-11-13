@@ -98,7 +98,7 @@ export function FormsCard({ ticket }: { ticket: TicketDetail }) {
               <li key={form.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
                 <ClipboardList className="size-4 shrink-0 text-ink-muted" />
                 <button type="button" onClick={() => setOpenId(form.id)} className="min-w-0 flex-1 text-left">
-                  <span className="block truncate text-sm font-medium text-ink hover:text-brand">{form.name}</span>
+                  <span className="block truncate text-sm font-semibold text-ink hover:text-brand">{form.name}</span>
                   <span className="text-xs text-ink-muted">
                     {done}/{qs.length} respondidas · {photos.length} foto(s)
                     {form.completed_by ? ` · concluído por ${form.completed_by.name} em ${formatDateTime(form.completed_at)}` : ""}
@@ -157,7 +157,7 @@ export function FormsCard({ ticket }: { ticket: TicketDetail }) {
               />
             ) : null}
             <div className="min-w-0 text-sm">
-              <p className="truncate font-medium text-ink">
+              <p className="truncate font-semibold text-ink">
                 {ticket.signer_name}
                 {ticket.signer_role ? <span className="font-normal text-ink-muted"> · {ticket.signer_role}</span> : null}
               </p>
@@ -234,7 +234,7 @@ function AddFormDialog({ ticket, onClose }: { ticket: TicketDetail; onClose: () 
       <div className="flex flex-col gap-4">
         {(suggested.data ?? []).length ? (
           <div>
-            <p className="mb-1.5 text-xs font-medium text-ink-muted">
+            <p className="mb-1.5 text-xs font-semibold text-ink/80">
               Sugeridos para {ticket.service_type?.name ?? "este tipo de serviço"}
             </p>
             <div className="flex flex-wrap gap-2">
@@ -372,7 +372,7 @@ function FormDialog({
         {form.fields.map((field) => {
           if (field.type === "section") {
             return (
-              <h3 key={field.id} className="border-b border-line pb-1 text-xs font-semibold tracking-wide text-ink-muted uppercase">
+              <h3 key={field.id} className="border-b border-line pb-1 text-xs font-bold tracking-wide text-ink-muted uppercase">
                 {field.label}
               </h3>
             );
@@ -380,7 +380,7 @@ function FormDialog({
           const fieldPhotos = photos.filter((p) => p.field_id === field.id);
           return (
             <div key={field.id} className="flex flex-col gap-1.5">
-              <span className="text-sm font-medium text-ink">
+              <span className="text-xs font-semibold text-ink/80">
                 {field.label}
                 {field.required || (field.type === "photo" && field.min_photos > 0) ? (
                   <span className="text-red-500"> *</span>

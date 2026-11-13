@@ -295,7 +295,7 @@ export function AttachmentsTab({
               <ImagePlus className="size-5" />
             </span>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-ink">{dragging ? "Solte para enviar" : "Arraste fotos e arquivos do computador para cá"}</p>
+              <p className="text-sm font-semibold text-ink">{dragging ? "Solte para enviar" : "Arraste fotos e arquivos do computador para cá"}</p>
               <p className="text-xs text-ink-muted">Pode enviar vários de uma vez. Fotos entram como foto; PDF e outros, como arquivo.</p>
             </div>
             <input
@@ -425,7 +425,7 @@ export function AttachmentsTab({
                       <FileText className="size-4" />
                     </span>
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-ink">{a.filename}</p>
+                      <p className="truncate text-sm font-semibold text-ink">{a.filename}</p>
                       <p className="text-xs text-ink-subtle">{meta(a)}</p>
                       <div className="mt-1">
                         <Caption attachment={a} canEdit={canManage} onSaved={refresh} />

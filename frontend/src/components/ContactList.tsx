@@ -46,7 +46,7 @@ export function ContactList({ contacts, empty = "Nenhum contato cadastrado." }: 
               <Icon className="size-4" />
             </span>
             <div className="min-w-0 flex-1">
-              <p className="flex items-center gap-1.5 truncate text-sm text-ink">
+              <p className="flex items-center gap-1.5 truncate text-sm font-semibold text-ink">
                 <span className="truncate">{shown}</span>
                 {c.primary ? <Star className="size-3 shrink-0 fill-amber-400 text-amber-400" aria-label="principal" /> : null}
               </p>

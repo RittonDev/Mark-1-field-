@@ -39,7 +39,7 @@ function Kpi({
   const content = (
     <div className="flex h-full items-start justify-between gap-3 p-4">
       <div className="min-w-0">
-        <p className="text-xs font-medium text-ink-muted">{label}</p>
+        <p className="text-xs font-semibold text-ink/80">{label}</p>
         <p
           className={clsx(
             "mt-1.5 text-2xl font-semibold tracking-tight tabular-nums",
@@ -53,7 +53,7 @@ function Kpi({
         </p>
         {hint ? <p className="mt-1 text-[11px] text-ink-muted">{hint}</p> : null}
       </div>
-      <div className="rounded-lg bg-surface-2 p-2 text-ink-muted">
+      <div className="rounded-lg bg-brand-soft p-2 text-brand">
         <Icon className="size-4" />
       </div>
     </div>
@@ -183,7 +183,7 @@ export default function DashboardPage() {
               {data.by_assignee.map((row) => (
                 <tr key={row.user_id} className="hover:bg-surface-2">
                   <Td>
-                    <Link href={`/chamados?assignee_id=${row.user_id}`} className="font-medium hover:text-brand">
+                    <Link href={`/chamados?assignee_id=${row.user_id}`} className="font-semibold hover:text-brand">
                       {row.name}
                     </Link>
                   </Td>

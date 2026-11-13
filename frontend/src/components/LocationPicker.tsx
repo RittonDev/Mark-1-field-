@@ -38,10 +38,10 @@ export function LocationPicker({
     return (
       <div className="flex items-start justify-between gap-2 rounded-lg border border-line bg-surface-2 px-3 py-2 text-sm">
         <div className="min-w-0">
-          <p className="flex items-center gap-1.5 font-medium text-ink">
+          <p className="flex items-center gap-1.5 font-semibold text-ink">
             <MapPin className="size-3.5 shrink-0 text-ink-muted" />
             <span className="truncate">
-              {value.code ? <span className="font-mono text-xs text-ink-muted">{value.code} · </span> : null}
+              {value.code ? <span className="font-mono text-xs font-normal text-ink-muted">{value.code} · </span> : null}
               {value.name}
             </span>
           </p>
@@ -92,8 +92,8 @@ export function LocationPicker({
                   }}
                   className="w-full px-3 py-2 text-left hover:bg-surface-2"
                 >
-                  <p className="text-sm font-medium text-ink">
-                    {l.code ? <span className="font-mono text-xs text-ink-muted">{l.code} · </span> : null}
+                  <p className="text-sm font-semibold text-ink">
+                    {l.code ? <span className="font-mono text-xs font-normal text-ink-muted">{l.code} · </span> : null}
                     {l.name}
                   </p>
                   <p className="text-xs text-ink-muted">{describe(l)}</p>

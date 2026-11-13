@@ -284,7 +284,7 @@ export default function SettingsPage() {
                 {sortedCategories.map((c) => (
                   <tr key={c.id} className={c.is_active ? undefined : "opacity-60"}>
                     <Td>
-                      <span className={c.parent_id ? "pl-4 text-ink" : "font-medium text-ink"}>
+                      <span className={c.parent_id ? "pl-4 font-semibold text-ink" : "font-bold text-ink"}>
                         {c.parent_id ? `↳ ${c.name}` : c.name}
                       </span>
                       {c.parent_id ? <span className="ml-2 text-xs text-ink-muted">{c.full_name}</span> : null}

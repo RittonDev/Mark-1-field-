@@ -68,7 +68,7 @@ export function ExpensesCard({ ticket }: { ticket: TicketDetail }) {
                 <Receipt className="mt-0.5 size-4 shrink-0 text-ink-muted" />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm text-ink">
-                    <span className="font-medium">{kind.label}</span> · {e.description}
+                    <span className="font-semibold">{kind.label}</span> · {e.description}
                   </p>
                   <p className="text-xs text-ink-muted tabular-nums">
                     {e.quantity.toLocaleString("pt-BR")} {kind.unit} × {formatMoney(e.unit_value)}

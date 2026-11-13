@@ -5,7 +5,7 @@ import { ArrowDown, ArrowUp, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
 import { useConfirm } from "@/components/Confirm";
 import { useToast } from "@/components/Toaster";
-import { Button, Card, ErrorBox, Field, Input, LoadingBlock, PageHeader, Textarea } from "@/components/ui";
+import { Button, Card, ErrorBox, Field, Input, LoadingBlock, PageHeader, SectionTitle, Textarea } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canManageTickets } from "@/lib/constants";
@@ -153,7 +153,7 @@ function Editor({ initial }: { initial: TemplatesOut }) {
                     />
                   </Field>
                   <div className="rounded-lg bg-surface-2 px-3 py-2 text-sm whitespace-pre-wrap text-ink">
-                    <span className="mb-1 block text-[11px] tracking-wide text-ink-muted uppercase">Prévia</span>
+                    <span className="mb-1 block text-[11px] font-bold tracking-wide text-ink-muted uppercase">Prévia</span>
                     {preview(t.body)}
                   </div>
                 </div>
@@ -184,7 +184,7 @@ function Editor({ initial }: { initial: TemplatesOut }) {
         </div>
         <aside className="lg:sticky lg:top-20 lg:self-start">
           <Card className="p-3">
-            <p className="mb-2 text-xs font-semibold text-ink">Variáveis</p>
+            <SectionTitle className="mb-2">Variáveis</SectionTitle>
             <p className="mb-2 text-xs text-ink-muted">Clique para inserir no texto que está em edição.</p>
             <ul className="flex flex-col gap-1">
               {initial.variables.map((v) => (

@@ -312,11 +312,11 @@ export default function UsersPage() {
                   <tr key={u.id} className={u.is_active ? "hover:bg-surface-2" : "opacity-60 hover:bg-surface-2"}>
                     <Td>
                       <div className="flex items-center gap-2.5">
-                        <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-surface-2 text-xs font-semibold text-ink-muted">
+                        <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-brand-soft text-xs font-semibold text-brand-ink">
                           {initials(u.name)}
                         </div>
                         <div className="min-w-0">
-                          <p className="truncate font-medium">
+                          <p className="truncate font-semibold">
                             {u.name}
                             {!u.is_active ? <span className="ml-1 text-xs font-normal text-ink-muted">(inativo)</span> : null}
                           </p>
@@ -369,7 +369,7 @@ export default function UsersPage() {
               {teams.data?.map((t) => (
                 <li key={t.id} className="flex items-start justify-between gap-2 px-4 py-3">
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-ink">
+                    <p className="text-sm font-semibold text-ink">
                       {t.name}
                       {!t.is_active ? <span className="ml-1 text-xs font-normal text-ink-muted">(inativo)</span> : null}
                     </p>

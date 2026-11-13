@@ -147,7 +147,7 @@ function QuoteList() {
                   <Td>
                     <button type="button" onClick={() => setOpened(q)} className="block text-left">
                       <span className="block font-mono text-xs text-ink-muted">{q.code}</span>
-                      <span className="block max-w-[15rem] truncate text-ink hover:text-brand xl:max-w-72">{q.title}</span>
+                      <span className="block max-w-[15rem] truncate font-semibold text-ink hover:text-brand xl:max-w-72">{q.title}</span>
                     </button>
                   </Td>
                   <Td>
@@ -259,7 +259,7 @@ function Catalog() {
           <tbody>
             {(items.data ?? []).map((i) => (
               <tr key={i.id} className={i.is_active ? undefined : "opacity-60"}>
-                <Td className="font-medium">{i.name}</Td>
+                <Td className="font-semibold">{i.name}</Td>
                 <Td className="text-ink-muted">{QUOTE_KIND[i.kind ?? "product"].label}</Td>
                 <Td>{i.unit}</Td>
                 <Td className="text-right tabular-nums">{formatMoney(i.price)}</Td>

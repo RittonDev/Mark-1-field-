@@ -31,6 +31,7 @@ import {
   Input,
   LoadingBlock,
   PageHeader,
+  SectionTitle,
   Select,
   Table,
   Td,
@@ -246,7 +247,7 @@ export default function TechniciansPage() {
                     <button type="button" className="flex items-center gap-2.5 text-left" onClick={() => setEditing(t)}>
                       <Avatar tech={t} />
                       <span className="min-w-0">
-                        <span className="block truncate font-medium text-ink">{t.name}</span>
+                        <span className="block truncate font-semibold text-ink">{t.name}</span>
                         <span className="block truncate text-xs text-ink-muted">{t.email}</span>
                       </span>
                     </button>
@@ -621,8 +622,8 @@ function EditDialog({ tech, onClose }: { tech: Technician; onClose: () => void }
         <Checkbox label="Acesso ativo (desativado, sai do app na hora)" checked={isActive} onChange={setIsActive} />
 
         <section className="flex flex-col gap-3 rounded-lg border border-line p-3">
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <h3 className="text-sm font-semibold text-ink">Ficha completa</h3>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <SectionTitle>Ficha completa</SectionTitle>
             <p className="text-xs text-ink-subtle">
               {current.base_city
                 ? `Atua em ${current.base_city}-${current.base_state} ${current.base_source === "history" ? `(pelo histórico, ${current.base_visits ?? 0} OS)` : "(pelo endereço)"}`
@@ -656,7 +657,7 @@ function EditDialog({ tech, onClose }: { tech: Technician; onClose: () => void }
             ))}
           </div>
           <div className="flex flex-col gap-1.5">
-            <span className="text-xs font-medium text-ink-muted">Serviços que faz</span>
+            <span className="text-xs font-semibold text-ink/80">Serviços que faz</span>
             <MultiSelect
               label="Serviços que faz"
               value={serviceIds}
@@ -686,7 +687,7 @@ function EditDialog({ tech, onClose }: { tech: Technician; onClose: () => void }
 
         {current.service_areas.length || current.skills.length ? (
           <section>
-            <h3 className="mb-1.5 text-xs font-semibold tracking-wide text-ink-muted uppercase">Perfil da homologação</h3>
+            <h3 className="mb-1.5 text-xs font-bold tracking-wide text-ink-muted uppercase">Perfil da homologação</h3>
             <div className="flex flex-wrap gap-1.5">
               {current.service_areas.map((k) => (
                 <span key={k} className="rounded-full bg-nav-active px-2.5 py-0.5 text-xs font-medium text-brand">
@@ -703,10 +704,12 @@ function EditDialog({ tech, onClose }: { tech: Technician; onClose: () => void }
         ) : null}
 
         <section className="rounded-lg border border-line p-3">
-          <h3 className="flex items-center gap-1.5 text-sm font-semibold text-ink">
-            <KeyRound className="size-4 text-ink-muted" />
-            Acesso ao app
-          </h3>
+          <SectionTitle>
+            <span className="flex items-center gap-1.5">
+              <KeyRound className="size-4 text-ink-muted" />
+              Acesso ao app
+            </span>
+          </SectionTitle>
           <p className="mt-1 text-xs text-ink-muted">
             {current.location_consent_at ? (
               <span className="inline-flex items-center gap-1">
@@ -828,7 +831,7 @@ function ImportDialog({ onClose }: { onClose: () => void }) {
             </div>
             {done && result.credentials.length ? (
               <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200">
-                <p className="font-medium">Baixe agora as senhas provisórias dos novos técnicos.</p>
+                <p className="font-semibold">Baixe agora as senhas provisórias dos novos técnicos.</p>
                 <p className="mt-0.5 text-xs">Por segurança, elas não aparecem de novo. Guarde o arquivo em local seguro e apague depois de enviar.</p>
                 <Button
                   className="mt-2"
@@ -848,10 +851,10 @@ function ImportDialog({ onClose }: { onClose: () => void }) {
               <table className="w-full text-left text-xs">
                 <thead className="sticky top-0 bg-surface-2 text-ink-muted">
                   <tr>
-                    <th className="px-2 py-1.5 font-medium">Linha</th>
-                    <th className="px-2 py-1.5 font-medium">Técnico</th>
-                    <th className="px-2 py-1.5 font-medium">Grupo</th>
-                    <th className="px-2 py-1.5 font-medium">Resultado</th>
+                    <th className="px-2 py-1.5 font-semibold">Linha</th>
+                    <th className="px-2 py-1.5 font-semibold">Técnico</th>
+                    <th className="px-2 py-1.5 font-semibold">Grupo</th>
+                    <th className="px-2 py-1.5 font-semibold">Resultado</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line">
@@ -859,7 +862,7 @@ function ImportDialog({ onClose }: { onClose: () => void }) {
                     <tr key={r.line}>
                       <td className="px-2 py-1.5 tabular-nums text-ink-muted">{r.line}</td>
                       <td className="px-2 py-1.5">
-                        <span className="block text-ink">{r.name || "—"}</span>
+                        <span className="block font-semibold text-ink">{r.name || "—"}</span>
                         <span className="text-ink-muted">{r.email}</span>
                       </td>
                       <td className="px-2 py-1.5 text-ink-muted">{r.team ?? "—"}</td>

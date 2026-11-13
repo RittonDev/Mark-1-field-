@@ -51,7 +51,7 @@ export function UnproductiveReasonsCard() {
           <tbody>
             {reasons.data?.map((r) => (
               <tr key={r.id} className={r.is_active ? undefined : "opacity-60"}>
-                <Td className="font-medium">{r.name}</Td>
+                <Td className="font-semibold">{r.name}</Td>
                 <Td>
                   <Pill color={RESPONSIBILITY[r.responsibility].color}>{RESPONSIBILITY[r.responsibility].label}</Pill>
                 </Td>

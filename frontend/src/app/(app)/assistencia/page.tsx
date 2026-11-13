@@ -75,7 +75,7 @@ export default function RepairsPage() {
               )}
             >
               {/* A cor da etapa fica no ponto; o número em tinta neutra (zero colorido parecia alerta). */}
-              <span className="flex items-center gap-1.5 text-[11px] text-ink-muted">
+              <span className="flex items-center gap-1.5 text-[11px] font-medium text-ink-muted">
                 <span className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: REPAIR_STATUS[s].color }} />
                 {REPAIR_STATUS[s].label}
               </span>
@@ -85,7 +85,7 @@ export default function RepairsPage() {
         })}
         {summary.data?.overdue ? (
           <div className="flex min-w-36 shrink-0 flex-col justify-center rounded-lg border border-red-200 bg-red-50 px-3 py-2 dark:border-red-900/60 dark:bg-red-950/40">
-            <span className="flex items-center gap-1 text-[11px] text-red-700 dark:text-red-300">
+            <span className="flex items-center gap-1 text-[11px] font-medium text-red-700 dark:text-red-300">
               <AlertTriangle className="size-3" /> Retorno atrasado
             </span>
             <span className="text-lg font-semibold text-red-700 tabular-nums dark:text-red-300">{summary.data.overdue}</span>
@@ -122,7 +122,7 @@ export default function RepairsPage() {
                 <tr key={r.id} className="cursor-pointer hover:bg-surface-2" onClick={() => setOpened(r.id)}>
                   <Td>
                     <span className="block font-mono text-xs text-ink-muted">{r.code}</span>
-                    <span className="block text-ink">{[r.equipment_type, r.brand, r.model].filter(Boolean).join(" · ")}</span>
+                    <span className="block font-semibold text-ink">{[r.equipment_type, r.brand, r.model].filter(Boolean).join(" · ")}</span>
                     {r.serial_number ? <span className="block text-xs text-ink-muted">S/N {r.serial_number}</span> : null}
                   </Td>
                   <Td className="hidden md:table-cell">
@@ -245,7 +245,7 @@ function RepairDetail({ id, onEdit, onClose }: { id: string; onEdit: (r: Repair)
 
           {r.allowed_next.length ? (
             <div className="rounded-lg border border-line p-3">
-              <p className="mb-2 text-xs font-semibold tracking-wide text-ink-muted uppercase">Próxima etapa</p>
+              <p className="mb-2 text-xs font-bold tracking-wide text-ink-muted uppercase">Próxima etapa</p>
               <div className="flex flex-wrap gap-2">
                 {r.allowed_next.map((s) => (
                   <button
@@ -290,7 +290,7 @@ function RepairDetail({ id, onEdit, onClose }: { id: string; onEdit: (r: Repair)
           ) : null}
 
           <div>
-            <p className="mb-2 text-xs font-semibold tracking-wide text-ink-muted uppercase">Fotos</p>
+            <p className="mb-2 text-xs font-bold tracking-wide text-ink-muted uppercase">Fotos</p>
             <div className="flex flex-wrap gap-2">
               {r.photos.map((p) => (
                 <a key={p.id} href={absoluteApiUrl(p.url) ?? undefined} target="_blank" rel="noreferrer" title={p.caption ?? undefined}>
@@ -316,12 +316,12 @@ function RepairDetail({ id, onEdit, onClose }: { id: string; onEdit: (r: Repair)
           </div>
 
           <div>
-            <p className="mb-2 text-xs font-semibold tracking-wide text-ink-muted uppercase">Linha do tempo</p>
+            <p className="mb-2 text-xs font-bold tracking-wide text-ink-muted uppercase">Linha do tempo</p>
             <ol className="relative border-l border-line pl-4">
               {r.events.map((e) => (
                 <li key={e.id} className="mb-3 last:mb-0">
                   <span className="absolute -left-1.5 mt-1 size-3 rounded-full border-2 border-surface" style={{ background: REPAIR_STATUS[e.to_status].color }} />
-                  <p className="text-ink">{REPAIR_STATUS[e.to_status].label}</p>
+                  <p className="font-semibold text-ink">{REPAIR_STATUS[e.to_status].label}</p>
                   <p className="text-xs text-ink-muted">
                     {formatDateTime(e.created_at)}
                     {e.actor ? ` · ${e.actor.name}` : ""}
@@ -340,7 +340,7 @@ function RepairDetail({ id, onEdit, onClose }: { id: string; onEdit: (r: Repair)
 function Info({ label, children, wide }: { label: string; children: React.ReactNode; wide?: boolean }) {
   return (
     <div className={wide ? "sm:col-span-2" : undefined}>
-      <p className="text-xs text-ink-muted">{label}</p>
+      <p className="text-xs font-semibold text-ink/80">{label}</p>
       <div className="text-ink">{children}</div>
     </div>
   );

@@ -109,7 +109,7 @@ function ProfileForm({ initial }: { initial: CompanyProfile }) {
       </form>
       {/* Prévia de como sai no topo do orçamento. */}
       <div className="rounded-xl border border-dashed border-line-strong p-4">
-        <p className="mb-3 text-[11px] font-medium text-ink-subtle">Prévia no orçamento</p>
+        <p className="mb-3 text-[11px] font-semibold text-ink-muted">Prévia no orçamento</p>
         <div className="flex items-start gap-3">
           <span className="flex size-11 shrink-0 items-center justify-center rounded-lg border border-line bg-white">
             <Image src="/brand/maxxfield-mark.png" alt="" width={28} height={14} />

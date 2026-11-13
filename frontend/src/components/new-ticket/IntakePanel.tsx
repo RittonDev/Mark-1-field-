@@ -15,7 +15,7 @@ function Metric({ value, label, tone }: { value: number; label: string; tone?: "
       <span className={tone === "warn" && value > 0 ? "text-base font-semibold text-amber-700 tabular-nums dark:text-amber-300" : "text-base font-semibold text-ink tabular-nums"}>
         {num(value)}
       </span>
-      <span className="text-[11px] leading-tight text-ink-subtle">{label}</span>
+      <span className="text-[11px] leading-tight text-ink-muted">{label}</span>
     </div>
   );
 }
@@ -47,10 +47,10 @@ export function IntakePanel({ context, loading }: { context: IntakeContext | und
   if (!customer && !location) {
     return (
       <div className="flex flex-col items-center gap-2 px-5 py-8 text-center">
-        <span className="flex size-10 items-center justify-center rounded-full bg-surface-2 text-ink-subtle">
+        <span className="flex size-10 items-center justify-center rounded-full bg-brand-soft text-brand">
           <Store className="size-5" />
         </span>
-        <p className="text-sm font-medium text-ink">Escolha a loja</p>
+        <p className="text-sm font-bold text-ink">Escolha a loja</p>
         <p className="text-xs text-ink-muted">Aqui aparecem o histórico, a avaliação do cliente, o contato e o prazo de chegada.</p>
       </div>
     );

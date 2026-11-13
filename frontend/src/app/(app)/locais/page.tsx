@@ -152,7 +152,7 @@ function LocationsView() {
                   <tr key={l.id} className="hover:bg-surface-2">
                     <Td className="font-mono text-xs">{l.code ?? "—"}</Td>
                     <Td>
-                      <p className="font-medium text-ink">
+                      <p className="font-semibold text-ink">
                         <Link href={`/locais/${l.id}`} className="hover:text-brand hover:underline">
                           {l.name}
                         </Link>

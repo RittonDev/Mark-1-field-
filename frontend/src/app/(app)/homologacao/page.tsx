@@ -174,7 +174,7 @@ export default function OnboardingPage() {
                           {initials(a.full_name)}
                         </span>
                         <span className="min-w-0">
-                          <span className="block truncate font-medium text-ink">{a.full_name}</span>
+                          <span className="block truncate font-semibold text-ink">{a.full_name}</span>
                           <span className="block truncate text-xs text-ink-muted">{a.email}</span>
                         </span>
                       </button>
@@ -248,7 +248,7 @@ function InvitesTab({ onCreate }: { onCreate: () => void }) {
             {(invites.data ?? []).map((i) => (
               <tr key={i.id}>
                 <Td>
-                  <span className="block font-medium text-ink">{i.label ?? "Sem identificação"}</span>
+                  <span className="block font-semibold text-ink">{i.label ?? "Sem identificação"}</span>
                   <span className="text-xs text-ink-muted">{i.max_uses == null ? "Reutilizável" : "Uso único"}</span>
                 </Td>
                 <Td>
@@ -384,7 +384,7 @@ function CreateInviteDialog({ onClose }: { onClose: () => void }) {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section>
-      <h3 className="mb-1.5 text-xs font-semibold tracking-wide text-ink-muted uppercase">{title}</h3>
+      <h3 className="mb-1.5 text-xs font-bold tracking-wide text-ink-muted uppercase">{title}</h3>
       <div className="flex flex-col gap-1.5 text-sm text-ink">{children}</div>
     </section>
   );

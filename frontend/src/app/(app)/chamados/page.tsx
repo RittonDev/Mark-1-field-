@@ -391,7 +391,7 @@ function TicketsView() {
                         <Link
                           href={`/chamados/${t.id}`}
                           onClick={(e) => e.stopPropagation()}
-                          className="block font-medium text-ink hover:text-brand"
+                          className="block font-semibold text-ink hover:text-brand"
                         >
                           {/* O nº nunca quebra no meio ("OS-" numa linha e o número na outra). */}
                           <span className="block font-mono text-[11px] font-normal whitespace-nowrap text-ink-subtle">{t.code}</span>

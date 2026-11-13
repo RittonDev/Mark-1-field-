@@ -8,7 +8,7 @@ import { useParams } from "next/navigation";
 import { useState } from "react";
 import { StatusBadge } from "@/components/badges";
 import { ProjectDialog } from "@/components/ProjectDialog";
-import { Button, Card, ErrorBox, LoadingBlock, Table, Td, Th } from "@/components/ui";
+import { Button, Card, CardHeader, ErrorBox, LoadingBlock, Table, Td, Th } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { formatDate, formatMoney } from "@/lib/format";
 import { PROJECT_STATUS } from "@/lib/projects";
@@ -47,7 +47,7 @@ export default function ProjectPage() {
                 {PROJECT_STATUS[p.status].label}
               </span>
             </p>
-            <h1 className="mt-1 text-xl font-semibold tracking-tight text-ink">{p.name}</h1>
+            <h1 className="mt-1 text-xl font-bold tracking-[-0.02em] text-ink">{p.name}</h1>
             <p className="mt-1 text-sm text-ink-muted">
               {[p.customer?.name, p.start_date && `de ${formatDate(p.start_date)}`, p.end_date && `até ${formatDate(p.end_date)}`]
                 .filter(Boolean)
@@ -76,7 +76,7 @@ export default function ProjectPage() {
       <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {kpis.map(([label, value, tone]) => (
           <Card key={label} className="px-4 py-3">
-            <p className="text-xs text-ink-muted">{label}</p>
+            <p className="text-xs font-semibold text-ink/80">{label}</p>
             <p className={clsx("mt-1 text-xl font-semibold text-ink tabular-nums", tone)}>{value}</p>
           </Card>
         ))}
@@ -84,7 +84,7 @@ export default function ProjectPage() {
 
       <div className="grid gap-4 lg:grid-cols-[1fr_20rem]">
         <Card>
-          <h2 className="border-b border-line px-4 py-2.5 text-sm font-semibold text-ink">OS do projeto</h2>
+          <CardHeader title="OS do projeto" />
           {tickets.isLoading ? (
             <LoadingBlock />
           ) : (tickets.data?.items ?? []).length === 0 ? (
@@ -106,7 +106,7 @@ export default function ProjectPage() {
                       <Link href={`/chamados/${t.id}`} className="font-mono text-xs text-brand hover:underline">
                         {t.code}
                       </Link>
-                      <span className="block max-w-72 truncate text-ink">{t.title}</span>
+                      <span className="block max-w-72 truncate font-semibold text-ink">{t.title}</span>
                     </Td>
                     <Td className="hidden text-sm md:table-cell">{t.location?.name ?? "—"}</Td>
                     <Td className="hidden text-sm sm:table-cell">{t.assignee?.name ?? "—"}</Td>
@@ -121,7 +121,7 @@ export default function ProjectPage() {
         </Card>
         <div className="flex flex-col gap-4">
           <Card className="p-4 text-sm">
-            <h2 className="mb-2 font-semibold text-ink">Equipe</h2>
+            <h2 className="mb-2 font-bold text-ink">Equipe</h2>
             <p className="text-ink-muted">Responsável: {p.manager?.name ?? "—"}</p>
             <p className="text-ink-muted">Grupo: {p.team?.name ?? "—"}</p>
             {p.members.length ? (
@@ -138,7 +138,7 @@ export default function ProjectPage() {
             <Card className="p-4 text-sm">
               {p.pricing_notes ? (
                 <>
-                  <h2 className="mb-1 font-semibold text-ink">Condições e valores</h2>
+                  <h2 className="mb-1 font-bold text-ink">Condições e valores</h2>
                   <p className="whitespace-pre-wrap text-ink-muted">{p.pricing_notes}</p>
                 </>
               ) : null}

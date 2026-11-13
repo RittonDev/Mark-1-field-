@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle } from "lucide-react";
 import Link from "next/link";
-import { Card, CardHeader, ErrorBox, LoadingBlock } from "@/components/ui";
+import { Card, CardHeader, ErrorBox, LoadingBlock, SectionTitle } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { RESPONSIBILITY } from "@/lib/constants";
 import type { ClockViolations, Responsibility, SlaViolationReport } from "@/lib/types";
@@ -12,9 +12,9 @@ function Clock({ title, data }: { title: string; data: ClockViolations }) {
   const max = Math.max(1, ...data.by_reason.map((r) => r.count));
   return (
     <div>
-      <p className="text-sm font-medium text-ink">
-        {title}: {data.breached} violação(ões)
-        <span className="ml-1 text-xs font-normal text-ink-muted">· {data.justified} com motivo</span>
+      <SectionTitle>{title}</SectionTitle>
+      <p className="mt-0.5 text-xs text-ink-muted">
+        <span className="font-semibold text-ink">{data.breached} violação(ões)</span> · {data.justified} com motivo
       </p>
       {data.by_reason.length === 0 ? (
         <p className="mt-2 text-xs text-ink-muted">Nenhum motivo registrado no período.</p>
@@ -76,7 +76,7 @@ export function SlaViolationsCard() {
           <Clock title="1ª resposta" data={data.response} />
           <Clock title="Solução" data={data.resolution} />
           <div>
-            <p className="text-sm font-medium text-ink">Por responsabilidade</p>
+            <SectionTitle>Por responsabilidade</SectionTitle>
             {totalByResp === 0 ? (
               <p className="mt-2 text-xs text-ink-muted">Sem motivos registrados ainda.</p>
             ) : (

@@ -164,7 +164,7 @@ export default function CustomersPage() {
               {customers.data?.map((c) => (
                 <tr key={c.id} className="hover:bg-surface-2">
                   <Td>
-                    <Link href={`/clientes/${c.id}`} className="font-medium text-ink hover:text-brand hover:underline">
+                    <Link href={`/clientes/${c.id}`} className="font-semibold text-ink hover:text-brand hover:underline">
                       {c.name}
                     </Link>
                     <TagChips tags={c.tags} max={3} className="mt-1 flex" />

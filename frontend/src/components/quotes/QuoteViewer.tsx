@@ -3,7 +3,7 @@
 import clsx from "clsx";
 import { CalendarClock, CheckCircle2, Clock, ExternalLink, FileText, Pencil, Send, Share2, XCircle } from "lucide-react";
 import Link from "next/link";
-import { Button, Dialog } from "@/components/ui";
+import { Button, Dialog, SectionTitle } from "@/components/ui";
 import { useNow } from "@/components/useNow";
 import { absoluteApiUrl } from "@/lib/api";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
@@ -24,7 +24,7 @@ const qty = (value: number) => value.toLocaleString("pt-BR", { maximumFractionDi
 function Meta({ label, children, tone }: { label: string; children: React.ReactNode; tone?: "danger" }) {
   return (
     <div className="min-w-0 bg-surface px-3.5 py-2.5">
-      <dt className="text-[11px] font-medium text-ink-subtle">{label}</dt>
+      <dt className="text-[11px] font-semibold text-ink-muted">{label}</dt>
       <dd className={clsx("mt-0.5 truncate text-sm font-medium", tone === "danger" ? "text-red-600 dark:text-red-400" : "text-ink")}>
         {children}
       </dd>
@@ -233,7 +233,7 @@ export function QuoteViewer({
               return (
                 <section key={kind} aria-label={QUOTE_KIND[kind].plural}>
                   <div className="mb-1.5 flex items-center justify-between gap-2">
-                    <span className={clsx("rounded-md px-2 py-0.5 text-[11px] font-semibold tracking-wide uppercase", KIND_STYLE[kind])}>
+                    <span className={clsx("rounded-md px-2 py-0.5 text-[11px] font-bold tracking-wide uppercase", KIND_STYLE[kind])}>
                       {QUOTE_KIND[kind].plural} · {items.length}
                     </span>
                     <span className="text-xs font-medium text-ink-muted tabular-nums">{formatMoney(totals[kind])}</span>
@@ -241,7 +241,7 @@ export function QuoteViewer({
                   <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line">
                     {items.map((item, index) => (
                       <li key={`${kind}-${index}`} className="flex items-start gap-4 bg-surface px-3.5 py-3">
-                        <p className="min-w-0 flex-1 text-sm leading-relaxed text-ink">{item.description}</p>
+                        <p className="min-w-0 flex-1 text-sm leading-relaxed font-semibold text-ink">{item.description}</p>
                         <div className="shrink-0 text-right">
                           <p className="text-sm font-semibold text-ink tabular-nums">{formatMoney(item.total)}</p>
                           <p className="text-[11px] whitespace-nowrap text-ink-muted tabular-nums">
@@ -263,7 +263,7 @@ export function QuoteViewer({
           <div className="min-w-0">
             {quote.notes ? (
               <>
-                <p className="text-xs font-medium text-ink-subtle">Condições</p>
+                <SectionTitle>Condições</SectionTitle>
                 <p className="mt-1 text-sm leading-relaxed whitespace-pre-wrap text-ink-muted">{quote.notes}</p>
               </>
             ) : null}
@@ -280,7 +280,7 @@ export function QuoteViewer({
               </div>
             ) : null}
             <div className="mt-2.5 flex items-baseline justify-between border-t border-line pt-2.5">
-              <span className="text-sm font-medium text-ink">Total</span>
+              <span className="text-sm font-semibold text-ink">Total</span>
               <span className="text-xl font-semibold tracking-[-0.01em] text-ink">{formatMoney(quote.total)}</span>
             </div>
           </div>

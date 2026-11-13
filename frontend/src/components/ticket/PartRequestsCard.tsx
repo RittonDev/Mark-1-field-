@@ -59,7 +59,7 @@ export function PartRequestsCard({ ticket }: { ticket: TicketDetail }) {
         {requests.map((r) => (
           <li key={r.id} className="flex flex-wrap items-start gap-3 px-5 py-3.5">
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-ink">
+              <p className="text-sm font-semibold text-ink">
                 {r.quantity.toLocaleString("pt-BR")} {r.unit} · {r.description}
               </p>
               <p className="mt-0.5 text-xs text-ink-muted">

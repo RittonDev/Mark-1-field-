@@ -140,7 +140,7 @@ export function SlaCard({ ticket }: { ticket: TicketDetail }) {
           const s = situation(c);
           return (
             <dl key={c.label} className="grid grid-cols-[7.5rem_1fr] gap-x-2 gap-y-1 py-2.5 text-sm">
-              <dt className="col-span-2 text-xs font-semibold tracking-wide text-ink-muted uppercase">{c.label}</dt>
+              <dt className="col-span-2 text-xs font-bold tracking-wide text-ink-muted uppercase">{c.label}</dt>
               <dt className="text-ink-muted">Limite</dt>
               <dd>{formatDateTime(c.due)}</dd>
               <dt className="text-ink-muted">Concluído em</dt>

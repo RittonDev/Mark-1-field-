@@ -23,7 +23,7 @@ import { useMemo, useState } from "react";
 import { useTheme } from "@/components/Brand";
 import type { MapFocus } from "@/components/LiveMap";
 import { LocationPicker } from "@/components/LocationPicker";
-import { Card, EmptyState, ErrorBox, Input, LoadingBlock, PageHeader, Select } from "@/components/ui";
+import { Card, EmptyState, ErrorBox, Input, LoadingBlock, PageHeader, SectionTitle, Select } from "@/components/ui";
 import { useNow } from "@/components/useNow";
 import { errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -166,7 +166,7 @@ export default function LiveMapPage() {
               />
             </div>
             <div className="mt-2.5">
-              <p className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-ink-subtle">
+              <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-ink/80">
                 <Store className="size-3.5" />
                 Loja do cliente
               </p>
@@ -276,7 +276,7 @@ function TechnicianRow({
         </span>
         <span className="min-w-0 flex-1">
           <span className="flex items-center justify-between gap-2">
-            <span className="truncate text-sm font-medium text-ink">{tech.name}</span>
+            <span className="truncate text-sm font-semibold text-ink">{tech.name}</span>
             {pos ? (
               <span className="shrink-0 text-xs text-ink-muted tabular-nums">{formatAgo(pos.recorded_at, now)}</span>
             ) : null}
@@ -384,7 +384,7 @@ function TechnicianDetail({
   return (
     <div className="space-y-2 border-t border-line bg-surface-2/60 p-3">
       <div className="flex items-center justify-between gap-2">
-        <p className="truncate text-sm font-semibold text-ink">{tech.name}</p>
+        <p className="truncate text-sm font-bold text-ink">{tech.name}</p>
         <span className="text-xs text-ink-muted">{tech.open_tickets} OS abertas</span>
       </div>
       <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
@@ -418,7 +418,7 @@ function TechnicianDetail({
         >
           <Wrench className="mt-0.5 size-3.5 shrink-0 text-ink-muted" />
           <span className="min-w-0">
-            <span className="block font-medium text-ink">
+            <span className="block font-semibold text-ink">
               {ticket.code} · {STATUS[ticket.status]?.label ?? ticket.status}
             </span>
             <span className="block truncate text-ink-muted">
@@ -430,9 +430,7 @@ function TechnicianDetail({
       ) : null}
       {distance ? (
         <div className="space-y-1.5 rounded-lg border border-line bg-surface p-2.5">
-          <p className="truncate text-xs font-medium text-ink">
-            {placeName ? `Distâncias até ${placeName}` : "Distâncias"}
-          </p>
+          <SectionTitle>{placeName ? `Distâncias até ${placeName}` : "Distâncias"}</SectionTitle>
           {placeName ? (
             <>
               <LegRow icon={<Navigation className="size-3.5" />} label="Agora → loja" leg={distance.live_to_place} />

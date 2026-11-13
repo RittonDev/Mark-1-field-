@@ -247,7 +247,7 @@ export default function DayPage() {
                 key === "late" && value > 0 && !active && "border-red-200 dark:border-red-500/30",
               )}
             >
-              <span className="flex items-center gap-1.5 text-xs text-ink-muted">
+              <span className="flex items-center gap-1.5 text-xs font-medium text-ink-muted">
                 {state ? <span className={clsx("size-1.5 rounded-full", STATE[state].dot)} /> : null}
                 {label}
               </span>
@@ -277,7 +277,7 @@ export default function DayPage() {
       ) : (
         <Card className="animate-enter overflow-hidden">
           <div className="flex items-center justify-between border-b border-line bg-[var(--table-head)] px-4 py-2.5 text-xs text-ink-muted">
-            <span className="font-medium text-ink">{longDate(day)}</span>
+            <span className="font-bold text-ink">{longDate(day)}</span>
             <span className="tabular-nums">
               {items.length} atividade{items.length === 1 ? "" : "s"}
               {stateFilter ? ` · ${STATE[stateFilter].label.toLowerCase()}` : ""}

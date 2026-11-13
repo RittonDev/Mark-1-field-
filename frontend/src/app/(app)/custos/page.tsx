@@ -6,7 +6,7 @@ import { Check, Download, Receipt } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useToast } from "@/components/Toaster";
-import { Button, Card, EmptyState, ErrorBox, Input, LoadingBlock, PageHeader, Select, Table, Td, Th } from "@/components/ui";
+import { Button, Card, CardHeader, EmptyState, ErrorBox, Input, LoadingBlock, PageHeader, Select, Table, Td, Th } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canManageTickets, isManager } from "@/lib/constants";
@@ -197,7 +197,7 @@ export default function ExpensesPage() {
                         <span className="block max-w-48 truncate text-xs text-ink-muted">{i.ticket.customer?.name ?? i.ticket.title}</span>
                       </Td>
                       <Td>
-                        <span className="block text-ink">{EXPENSE_KIND[i.kind].label}</span>
+                        <span className="block font-semibold text-ink">{EXPENSE_KIND[i.kind].label}</span>
                         <span className="block max-w-56 truncate text-xs text-ink-muted">{i.description}</span>
                       </Td>
                       <Td className="hidden md:table-cell">{i.technician?.name ?? <span className="text-ink-muted">—</span>}</Td>
@@ -215,12 +215,12 @@ export default function ExpensesPage() {
 
             <div className="flex flex-col gap-4">
               <Card>
-                <h2 className="border-b border-line px-4 py-2.5 text-sm font-semibold text-ink">Por técnico</h2>
+                <CardHeader title="Por técnico" />
                 <ul className="divide-y divide-line">
                   {data.by_technician.map((t) => (
                     <li key={t.technician?.id ?? "none"} className="flex items-center justify-between gap-2 px-4 py-2 text-sm">
                       <span className="min-w-0">
-                        <span className="block truncate text-ink">{t.technician?.name ?? "Custo da empresa"}</span>
+                        <span className="block truncate font-semibold text-ink">{t.technician?.name ?? "Custo da empresa"}</span>
                         <span className="text-xs text-ink-muted">
                           {t.count} lançamento(s){t.to_pay ? ` · a reembolsar ${formatMoney(t.to_pay)}` : ""}
                         </span>
@@ -231,13 +231,13 @@ export default function ExpensesPage() {
                 </ul>
               </Card>
               <Card>
-                <h2 className="border-b border-line px-4 py-2.5 text-sm font-semibold text-ink">Por tipo</h2>
+                <CardHeader title="Por tipo" />
                 <ul className="divide-y divide-line">
                   {Object.entries(data.by_kind)
                     .sort((a, b) => b[1] - a[1])
                     .map(([kind, total]) => (
                       <li key={kind} className="flex justify-between px-4 py-2 text-sm">
-                        <span className="text-ink">{kind}</span>
+                        <span className="font-semibold text-ink">{kind}</span>
                         <span className="tabular-nums">{formatMoney(total)}</span>
                       </li>
                     ))}
@@ -254,7 +254,7 @@ export default function ExpensesPage() {
 function Stat({ label, value, tone }: { label: string; value: string; tone?: string }) {
   return (
     <Card className="px-4 py-3">
-      <p className="text-xs text-ink-muted">{label}</p>
+      <p className="text-xs font-semibold text-ink/80">{label}</p>
       <p className={clsx("mt-1 text-xl font-semibold tabular-nums text-ink", tone)}>{value}</p>
     </Card>
   );
@@ -293,7 +293,7 @@ function KmRate({ canEdit }: { canEdit: boolean }) {
         save.mutate(value);
       }}
     >
-      <span className="text-sm text-ink-muted">R$/km</span>
+      <span className="text-xs font-semibold text-ink/80">R$/km</span>
       <Input value={value} onChange={(e) => setValue(e.target.value)} className="w-20" inputMode="decimal" autoFocus />
       <Button size="sm" type="submit" variant="primary" loading={save.isPending}>
         Salvar

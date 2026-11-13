@@ -256,7 +256,7 @@ export default function TechnicianSignupPage() {
         ) : (
           <div className="rounded-xl border border-line bg-surface shadow-xs">
             <div className="border-b border-line px-5 py-4">
-              <h1 className="text-lg font-semibold text-ink">Cadastro de técnico parceiro</h1>
+              <h1 className="text-lg font-bold tracking-[-0.02em] text-ink">Cadastro de técnico parceiro</h1>
               <p className="mt-0.5 text-sm text-ink-muted">
                 Etapa {step + 1} de {STEPS.length}: {STEPS[step]}
               </p>
@@ -495,14 +495,14 @@ export default function TechnicianSignupPage() {
                     </Field>
                   </div>
                   <section className="rounded-lg border border-line" aria-labelledby="privacy-title">
-                    <h2 id="privacy-title" className="flex items-center gap-2 border-b border-line px-3 py-2 text-sm font-semibold text-ink">
+                    <h2 id="privacy-title" className="flex items-center gap-2 border-b border-line px-3 py-2 text-sm font-bold text-ink">
                       <ShieldCheck className="size-4 text-brand" />
                       Aviso de privacidade (LGPD)
                     </h2>
                     <dl className="max-h-64 space-y-2 overflow-y-auto px-3 py-2 text-sm">
                       {PRIVACY_NOTICE.map((item) => (
                         <div key={item.title}>
-                          <dt className="font-medium text-ink">{item.title}</dt>
+                          <dt className="font-semibold text-ink">{item.title}</dt>
                           <dd className="text-ink-muted">{item.body}</dd>
                         </div>
                       ))}
@@ -548,7 +548,7 @@ function Panel({ icon, title, text }: { icon: React.ReactNode; title: string; te
   return (
     <div className="flex flex-col items-center gap-3 rounded-xl border border-line bg-surface px-6 py-10 text-center shadow-xs">
       {icon}
-      <h1 className="text-lg font-semibold text-ink">{title}</h1>
+      <h1 className="text-lg font-bold tracking-[-0.02em] text-ink">{title}</h1>
       <p className="max-w-md text-sm text-ink-muted">{text}</p>
     </div>
   );
@@ -620,7 +620,7 @@ function Group({
 }) {
   return (
     <fieldset className="flex flex-col gap-1.5">
-      <legend className="mb-1.5 text-xs font-medium text-ink-muted">
+      <legend className="mb-1.5 text-xs font-semibold text-ink/80">
         {label}
         {required ? <span className="text-red-500"> *</span> : null}
       </legend>

@@ -63,7 +63,7 @@ export function ViolationFields({
   if (!responseBreached && !resolutionBreached) return null;
   return (
     <div className="space-y-3 rounded-lg border border-red-200 bg-red-50/60 p-3 dark:border-red-500/30 dark:bg-red-500/5">
-      <p className="text-sm font-medium text-red-700 dark:text-red-300">
+      <p className="text-sm font-semibold text-red-700 dark:text-red-300">
         Esta OS violou o prazo de {[responseBreached && "1ª resposta", resolutionBreached && "solução"].filter(Boolean).join(" e ")}.
         Qual foi o motivo?
       </p>

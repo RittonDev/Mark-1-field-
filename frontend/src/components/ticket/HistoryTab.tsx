@@ -213,7 +213,7 @@ export function HistoryTab({ ticketId }: { ticketId: UUID }) {
               <Icon className="size-3.5" />
             </span>
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-              <span className="font-medium text-ink">{event.actor?.name ?? "Sistema"}</span>
+              <span className="font-semibold text-ink">{event.actor?.name ?? "Sistema"}</span>
               <span className="text-ink-muted">{label(event)}</span>
               <Detail event={event} />
             </div>

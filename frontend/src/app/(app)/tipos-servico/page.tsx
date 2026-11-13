@@ -277,7 +277,7 @@ export default function ServiceTypesPage() {
               {rows.map((t) => (
                 <tr key={t.id} className="hover:bg-surface-2">
                   <Td>
-                    <p className="font-medium text-ink">
+                    <p className="font-semibold text-ink">
                       {t.name}
                       {!t.is_active ? <span className="ml-1 text-xs font-normal text-ink-muted">(inativo)</span> : null}
                     </p>

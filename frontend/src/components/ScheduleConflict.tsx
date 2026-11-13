@@ -35,15 +35,15 @@ export function ConflictList({
       : "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200";
   return (
     <div className={`rounded-lg border px-3 py-2 text-sm ${box}`} role={tone === "error" ? "alert" : "status"}>
-      <p className="flex items-center gap-1.5 font-medium">
+      <p className="flex items-center gap-1.5 font-semibold">
         <AlertTriangle className="size-4 shrink-0" />
         {title}
       </p>
       <ul className="mt-1.5 space-y-1">
         {items.map((c) => (
           <li key={`${c.who ?? ""}-${c.id}`} className="text-xs">
-            {c.who ? <span className="font-medium">{c.who}: </span> : null}
-            <Link href={`/chamados/${c.id}`} className="font-mono font-medium underline-offset-2 hover:underline">
+            {c.who ? <span className="font-semibold">{c.who}: </span> : null}
+            <Link href={`/chamados/${c.id}`} className="font-mono font-semibold underline-offset-2 hover:underline">
               {c.code}
             </Link>{" "}
             · {span(c)} · {[c.customer, c.location].filter(Boolean).join(" · ") || c.title}

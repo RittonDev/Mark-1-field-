@@ -25,7 +25,7 @@ export function StatTile({
   const Icon = delta === null || delta === 0 ? Minus : delta > 0 ? ArrowUpRight : ArrowDownRight;
   return (
     <div className="animate-enter rounded-xl border border-line bg-surface px-4 py-3 shadow-elev-1 transition-shadow hover:shadow-elev-2">
-      <p className="text-xs text-ink-muted">{label}</p>
+      <p className="text-xs font-semibold text-ink/80">{label}</p>
       <p className="mt-1 text-3xl font-semibold tracking-tight text-ink tabular-nums">{display ?? <CountUp value={value} />}</p>
       {delta !== null ? (
         <p className="mt-1 inline-flex items-center gap-1 text-xs text-ink-muted tabular-nums">
@@ -47,7 +47,7 @@ export function RankBars({ items, empty }: { items: { name: string; count: numbe
     <ol className="flex flex-col gap-2.5">
       {items.map((i) => (
         <li key={i.name} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1">
-          <span className="truncate text-sm text-ink">{i.name}</span>
+          <span className="truncate text-sm font-semibold text-ink">{i.name}</span>
           <span className="text-sm font-medium text-ink tabular-nums">{i.count}</span>
           <span className="col-span-2 h-2 overflow-hidden rounded-r bg-surface-2" aria-hidden>
             <span className="block h-full rounded-r" style={{ width: `${(i.count / max) * 100}%`, background: "var(--viz-1)" }} />
@@ -158,7 +158,7 @@ export function TrendChart({ labels, series, height = 240 }: { labels: string[];
           className="pointer-events-none absolute top-2 z-10 min-w-36 rounded-lg border border-line bg-surface px-3 py-2 text-xs shadow-md"
           style={{ left: Math.min(Math.max(x(hover) + 12, 0), width - 160) }}
         >
-          <p className="mb-1 font-medium text-ink">{labels[hover]}</p>
+          <p className="mb-1 font-semibold text-ink">{labels[hover]}</p>
           {series.map((s) => (
             <p key={s.key} className="flex items-center justify-between gap-4 text-ink-muted">
               <span className="inline-flex items-center gap-1.5">

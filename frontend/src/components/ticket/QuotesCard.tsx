@@ -79,7 +79,7 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
             <li key={q.id} className="flex flex-wrap items-center gap-2 px-4 py-2.5">
               <FileText className="size-4 shrink-0 text-ink-muted" />
               <button type="button" onClick={() => setOpened(q)} className="min-w-0 flex-1 text-left">
-                <span className="block truncate text-sm font-medium text-ink hover:text-brand">
+                <span className="block truncate text-sm font-semibold text-ink hover:text-brand">
                   {q.code} · {q.title}
                 </span>
                 <span className="text-xs text-ink-muted">
@@ -288,14 +288,14 @@ export function QuoteEditor({
         </datalist>
         <div className="overflow-x-auto rounded-lg border border-line">
           <table className="w-full min-w-[42rem] text-sm">
-            <thead className="bg-surface-2 text-left text-xs text-ink-muted">
+            <thead className="bg-surface-2 text-left text-xs text-ink/80">
               <tr>
-                <th className="px-2 py-1.5 font-medium">Item</th>
-                <th className="w-28 px-2 py-1.5 font-medium">Tipo</th>
-                <th className="w-20 px-2 py-1.5 font-medium">Qtd.</th>
-                <th className="w-20 px-2 py-1.5 font-medium">Unid.</th>
-                <th className="w-28 px-2 py-1.5 font-medium">Valor unit.</th>
-                <th className="w-24 px-2 py-1.5 text-right font-medium">Total</th>
+                <th className="px-2 py-1.5 font-semibold">Item</th>
+                <th className="w-28 px-2 py-1.5 font-semibold">Tipo</th>
+                <th className="w-20 px-2 py-1.5 font-semibold">Qtd.</th>
+                <th className="w-20 px-2 py-1.5 font-semibold">Unid.</th>
+                <th className="w-28 px-2 py-1.5 font-semibold">Valor unit.</th>
+                <th className="w-24 px-2 py-1.5 text-right font-semibold">Total</th>
                 <th className="w-8" />
               </tr>
             </thead>

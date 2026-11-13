@@ -156,7 +156,7 @@ export default function PayoutsPage() {
               view === key ? "border-brand bg-brand-soft ring-2 ring-brand/15" : "border-line bg-surface hover:border-line-strong",
             )}
           >
-            <span className="text-xs text-ink-muted">{label}</span>
+            <span className="text-xs font-semibold text-ink/80">{label}</span>
             <span className="mt-0.5 block text-xl font-semibold tracking-tight text-ink tabular-nums">{formatMoney(value)}</span>
             <span className="text-xs text-ink-subtle">{hint}</span>
           </button>
@@ -201,7 +201,7 @@ export default function PayoutsPage() {
               <Card key={group.id} className="overflow-hidden">
                 <div className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-3">
                   <div className="min-w-0 flex-1">
-                    <p className="font-semibold text-ink">{group.name}</p>
+                    <p className="font-bold text-ink">{group.name}</p>
                     <p className="text-xs text-ink-muted">
                       {group.lines.length} OS · {formatMoney(total)}
                     </p>
@@ -245,8 +245,8 @@ export default function PayoutsPage() {
                         aria-label={`Selecionar ${line.ticket.code}`}
                       />
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm text-ink">
-                          <OpenTicketButton ticketId={line.ticket.id} className="mr-1.5 font-mono text-xs text-ink-subtle hover:text-brand">
+                        <p className="truncate text-sm font-semibold text-ink">
+                          <OpenTicketButton ticketId={line.ticket.id} className="mr-1.5 font-mono text-xs font-normal text-ink-subtle hover:text-brand">
                             {line.ticket.code}
                           </OpenTicketButton>
                           {line.ticket.title}

@@ -2,7 +2,8 @@
 
 import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
-import { MapPin, UserSearch } from "lucide-react";
+import { MapPin } from "lucide-react";
+import { SectionTitle } from "@/components/ui";
 import { api } from "@/lib/api";
 import { initials } from "@/lib/format";
 import type { TechnicianSuggestion, TicketDetail } from "@/lib/types";
@@ -28,10 +29,7 @@ export function TechnicianSuggestions({
 
   return (
     <div className="flex flex-col gap-2 border-t border-line pt-3">
-      <p className="flex items-center gap-1.5 text-xs font-medium text-ink-muted">
-        <UserSearch className="size-3.5 text-brand" />
-        Sugeridos{where ? ` para ${where}` : ""}
-      </p>
+      <SectionTitle>Sugeridos{where ? ` para ${where}` : ""}</SectionTitle>
       <ul className="flex flex-col gap-1.5">
         {list.map((s, i) => (
           <li key={s.id} className={clsx("rounded-lg border px-2.5 py-2", i === 0 ? "border-brand/40 bg-nav-active/60" : "border-line")}>
@@ -40,7 +38,7 @@ export function TechnicianSuggestions({
                 {initials(s.name)}
               </span>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-ink">{s.name}</p>
+                <p className="truncate text-sm font-semibold text-ink">{s.name}</p>
                 <p className="flex items-center gap-1 truncate text-[11px] text-ink-muted">
                   <MapPin className="size-3 shrink-0" />
                   {[s.home_city, s.home_state].filter(Boolean).join("-") || "cidade não informada"}

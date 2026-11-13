@@ -18,7 +18,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { type GridColumn, MonthView, TimeGrid } from "@/components/calendar/CalendarViews";
 import { PriorityBadge, StatusBadge } from "@/components/badges";
-import { Button, Card, Checkbox, Dialog, ErrorBox, Field, Input, PageHeader, Select } from "@/components/ui";
+import { Button, Card, Checkbox, Dialog, ErrorBox, Field, Input, PageHeader, SectionTitle, Select } from "@/components/ui";
 import { errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import {
@@ -134,16 +134,20 @@ export default function AgendaPage() {
       <div className="grid gap-4 lg:grid-cols-[272px_1fr]">
         <aside className={clsx("flex-col gap-4", showFilters ? "flex" : "hidden lg:flex")}>
           <Card className="p-3">
-            <div className="mb-2 flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-ink">Técnicos</h2>
-              {techIds.length ? (
-                <button type="button" className="text-xs text-brand hover:underline" onClick={() => setTechIds([])}>
-                  Mostrar todos
-                </button>
-              ) : (
-                <span className="text-xs text-ink-muted">Todos</span>
-              )}
-            </div>
+            <SectionTitle
+              className="mb-2"
+              aside={
+                techIds.length ? (
+                  <button type="button" className="text-xs text-brand hover:underline" onClick={() => setTechIds([])}>
+                    Mostrar todos
+                  </button>
+                ) : (
+                  <span className="text-xs text-ink-muted">Todos</span>
+                )
+              }
+            >
+              Técnicos
+            </SectionTitle>
             <Input
               value={techSearch}
               onChange={(e) => setTechSearch(e.target.value)}
@@ -221,20 +225,24 @@ export default function AgendaPage() {
           </Card>
 
           <Card className="p-3">
-            <div className="flex items-center justify-between gap-2">
-              <h2 className="flex items-center gap-1.5 text-sm font-semibold text-ink">
-                <AlertTriangle className={clsx("size-4", conflicted.length ? "text-red-500" : "text-ink-muted")} />
-                Conflitos de horário
-              </h2>
-              <span
-                className={clsx(
-                  "rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums",
-                  conflicted.length ? "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300" : "bg-surface-2 text-ink-muted",
-                )}
-              >
-                {conflicted.length}
-              </span>
-            </div>
+            {/* O alerta fica junto do contador: vermelho só quando há conflito. */}
+            <SectionTitle
+              aside={
+                <>
+                  <AlertTriangle className={clsx("size-4", conflicted.length ? "text-red-500" : "text-ink-muted")} />
+                  <span
+                    className={clsx(
+                      "rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums",
+                      conflicted.length ? "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300" : "bg-surface-2 text-ink-muted",
+                    )}
+                  >
+                    {conflicted.length}
+                  </span>
+                </>
+              }
+            >
+              Conflitos de horário
+            </SectionTitle>
             {conflicted.length === 0 ? (
               <p className="mt-1.5 text-xs text-ink-muted">Nenhum técnico com duas OS no mesmo horário neste período.</p>
             ) : (
@@ -247,7 +255,7 @@ export default function AgendaPage() {
                         onClick={() => setOpened(e)}
                         className="w-full rounded-md px-1.5 py-1 text-left text-xs hover:bg-surface-2"
                       >
-                        <span className="block font-medium text-ink">
+                        <span className="block font-semibold text-ink">
                           {e.assignee?.name} · {formatShort(e.start)}
                         </span>
                         <span className="block truncate text-ink-muted">
@@ -286,7 +294,7 @@ export default function AgendaPage() {
                 <ChevronRight className="size-4" />
               </button>
             </div>
-            <h2 className="text-sm font-semibold text-ink first-letter:uppercase">{rangeTitle(view, anchor)}</h2>
+            <h2 className="text-sm font-bold text-ink first-letter:uppercase">{rangeTitle(view, anchor)}</h2>
             {calendar.isFetching ? <span className="text-xs text-ink-muted">Atualizando...</span> : null}
             <div className="ml-auto flex rounded-lg border border-line p-0.5" role="tablist" aria-label="Visão">
               {VIEWS.map((v) => (
@@ -348,11 +356,11 @@ function DayHeader({ day }: { day: Date }) {
   const today = sameDay(day, new Date());
   return (
     <span className="flex flex-col items-center leading-tight">
-      <span className="text-[11px] tracking-wide text-ink-muted uppercase">{WEEKDAYS_SHORT[day.getDay()]}</span>
+      <span className="text-[11px] font-bold tracking-wide text-ink-muted uppercase">{WEEKDAYS_SHORT[day.getDay()]}</span>
       <span
         className={clsx(
-          "mt-0.5 flex size-7 items-center justify-center rounded-full text-sm tabular-nums",
-          today ? "bg-brand font-semibold text-white" : "text-ink",
+          "mt-0.5 flex size-7 items-center justify-center rounded-full text-sm font-semibold tabular-nums",
+          today ? "bg-brand text-white" : "text-ink",
         )}
       >
         {day.getDate()}
@@ -397,7 +405,7 @@ function dayColumns(
           >
             {initials(p.name)}
           </span>
-          <span className="truncate font-medium text-ink">{p.name}</span>
+          <span className="truncate font-semibold text-ink">{p.name}</span>
           <span className={clsx("tabular-nums", clash ? "font-semibold text-red-600 dark:text-red-400" : "text-ink-muted")}>
             {mine.length}
           </span>
@@ -411,7 +419,7 @@ function dayColumns(
       key: "unassigned",
       day,
       events: orphan,
-      header: <span className="text-xs font-medium text-ink-muted">Sem responsável · {orphan.length}</span>,
+      header: <span className="text-xs font-semibold text-ink-muted">Sem responsável · {orphan.length}</span>,
     });
   }
   return cols;
@@ -491,7 +499,7 @@ function EventDialog({
         {event.service_type ? <Row icon={<Wrench className="size-4" />}>{event.service_type}</Row> : null}
         {related.length ? (
           <div className="rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-900/60 dark:bg-red-950/40">
-            <p className="flex items-center gap-1.5 text-sm font-medium text-red-800 dark:text-red-200">
+            <p className="flex items-center gap-1.5 text-sm font-semibold text-red-800 dark:text-red-200">
               <AlertTriangle className="size-4" />
               Conflito: {event.assignee?.name ?? "o técnico"} tem outra OS no mesmo horário
             </p>

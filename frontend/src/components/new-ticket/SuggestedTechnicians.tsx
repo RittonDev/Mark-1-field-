@@ -205,7 +205,7 @@ export function HelpersField({
   const available = options.filter((o) => o.id !== assigneeId && !helperIds.includes(o.id));
   return (
     <div className="flex flex-col gap-1.5">
-      {hideLabel ? null : <span className="text-sm font-medium text-ink">Outros técnicos da visita</span>}
+      {hideLabel ? null : <span className="text-xs font-semibold text-ink/80">Outros técnicos da visita</span>}
       <div className="flex min-h-10 flex-wrap items-center gap-1.5 rounded-lg border border-line bg-surface px-2 py-1.5">
         {helperIds.map((id) => (
           <span key={id} className="inline-flex animate-pop items-center gap-1 rounded-md bg-emerald-50 py-0.5 pr-1 pl-2 text-xs font-medium text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-200">

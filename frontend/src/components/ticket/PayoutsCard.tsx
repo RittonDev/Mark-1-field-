@@ -96,7 +96,7 @@ export function PayoutsDialog({ ticket, onClose }: { ticket: TicketDetail; onClo
             return (
               <li key={p.id} className="flex items-center gap-3">
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-ink">{p.name}</p>
+                  <p className="truncate text-sm font-semibold text-ink">{p.name}</p>
                   <p className="text-xs text-ink-muted">{p.role}</p>
                 </div>
                 {current ? <StatusPill payout={current} /> : null}
@@ -175,7 +175,7 @@ export function PayoutsCard({ ticket }: { ticket: TicketDetail }) {
               return (
                 <li key={p.id} className="flex items-center gap-3 py-2.5">
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm text-ink">{p.name}</p>
+                    <p className="truncate text-sm font-semibold text-ink">{p.name}</p>
                     <p className="text-xs text-ink-muted">{p.role}</p>
                   </div>
                   {payout ? <StatusPill payout={payout} /> : null}

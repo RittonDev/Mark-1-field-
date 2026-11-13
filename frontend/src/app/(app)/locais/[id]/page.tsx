@@ -9,7 +9,7 @@ import { StatusBadge } from "@/components/badges";
 import { ContactList } from "@/components/ContactList";
 import { LocationDialog } from "@/components/LocationDialog";
 import { CountUp } from "@/components/motion";
-import { Button, Card, CardHeader, ErrorBox, LoadingBlock } from "@/components/ui";
+import { Button, Card, CardHeader, ErrorBox, LoadingBlock, SectionTitle } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { formatDate, formatDocument, initials } from "@/lib/format";
 import type { Location, NearbyResult, Page, TicketListItem } from "@/lib/types";
@@ -61,7 +61,7 @@ export default function LocationDetailPage() {
                 {l.customer.name}
               </Link>
             </p>
-            <h1 className="mt-1 text-[22px] leading-tight font-semibold tracking-[-0.015em] text-ink">
+            <h1 className="mt-1 text-[22px] leading-tight font-bold tracking-[-0.02em] text-ink">
               {l.code ? <span className="mr-2 rounded-md bg-surface-2 px-1.5 py-0.5 font-mono text-base text-ink-muted">{l.code}</span> : null}
               {l.name}
             </h1>
@@ -94,14 +94,14 @@ export default function LocationDetailPage() {
               { label: "Em aberto", value: l.open_tickets },
             ].map((s) => (
               <div key={s.label} className="rounded-xl border border-line bg-surface px-4 py-3 shadow-elev-1">
-                <p className="text-xs text-ink-muted">{s.label}</p>
+                <p className="text-xs font-medium text-ink-muted">{s.label}</p>
                 <p className="mt-1 text-xl font-semibold text-ink">
                   <CountUp value={s.value} />
                 </p>
               </div>
             ))}
             <div className="rounded-xl border border-line bg-surface px-4 py-3 shadow-elev-1">
-              <p className="text-xs text-ink-muted">Última OS</p>
+              <p className="text-xs font-medium text-ink-muted">Última OS</p>
               <p className="mt-1 text-xl font-semibold text-ink">{formatDate(l.last_ticket_at)}</p>
             </div>
           </div>
@@ -132,7 +132,7 @@ export default function LocationDetailPage() {
                         {initials(t.name)}
                       </span>
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm text-ink">{t.name}</span>
+                        <span className="block truncate text-sm font-semibold text-ink">{t.name}</span>
                         <span className="block truncate text-xs text-ink-subtle">
                           {t.base_city ? `${t.base_city}-${t.base_state}` : "Região não informada"}
                           {t.is_active ? "" : " · sem acesso ao app"}
@@ -160,8 +160,8 @@ export default function LocationDetailPage() {
                   <li key={t.id}>
                     <Link href={`/chamados/${t.id}`} className="flex items-center gap-3 px-5 py-2.5 transition-colors hover:bg-[var(--row-hover)]">
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm text-ink">
-                          <span className="mr-1.5 font-mono text-xs text-ink-subtle">{t.code}</span>
+                        <span className="block truncate text-sm font-semibold text-ink">
+                          <span className="mr-1.5 font-mono text-xs font-normal text-ink-subtle">{t.code}</span>
                           {t.title}
                         </span>
                         <span className="block truncate text-xs text-ink-subtle">
@@ -179,10 +179,12 @@ export default function LocationDetailPage() {
 
         <aside className="flex flex-col gap-5">
           <Card className="p-5">
-            <p className="mb-2 flex items-center gap-2 text-sm font-semibold text-ink">
-              <MapPin className="size-4 text-ink-subtle" />
-              Endereço
-            </p>
+            <SectionTitle className="mb-2">
+              <span className="flex items-center gap-2">
+                <MapPin className="size-4 text-ink-subtle" />
+                Endereço
+              </span>
+            </SectionTitle>
             <p className="text-sm text-ink-muted">{address || "Sem endereço cadastrado."}</p>
             {!hasCoords ? (
               <p className="mt-2 flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
@@ -197,13 +199,13 @@ export default function LocationDetailPage() {
           </Card>
 
           <Card className="p-5">
-            <p className="mb-3 text-sm font-semibold text-ink">Contatos da loja</p>
+            <SectionTitle className="mb-3">Contatos da loja</SectionTitle>
             <ContactList contacts={contacts} />
           </Card>
 
           {l.notes ? (
             <Card className="p-5">
-              <p className="mb-2 text-sm font-semibold text-ink">Observações</p>
+              <SectionTitle className="mb-2">Observações</SectionTitle>
               <p className="text-sm whitespace-pre-wrap text-ink-muted">{l.notes}</p>
             </Card>
           ) : null}

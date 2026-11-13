@@ -6,7 +6,7 @@ import { ArrowLeft, CheckCircle2, MapPin, Search, Send, Store } from "lucide-rea
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useDeferredValue, useState } from "react";
-import { Button, Card, ErrorBox, Field, Input, Spinner, Textarea } from "@/components/ui";
+import { Button, Card, ErrorBox, Field, Input, PageHeader, Spinner, Textarea } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { portalMemory, URGENCY_OPTIONS } from "@/lib/portal";
 import type { Level, PortalLocation, PortalRequestDetail } from "@/lib/types";
@@ -31,8 +31,8 @@ function StorePicker({ value, onChange }: { value: PortalLocation | null; onChan
       <div className="flex items-start gap-3 rounded-lg border border-brand/30 bg-brand-soft/60 px-3 py-2.5">
         <Store className="mt-0.5 size-4 shrink-0 text-brand" />
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-ink">
-            {value.code ? <span className="mr-1.5 font-mono text-xs text-ink-muted">{value.code}</span> : null}
+          <p className="text-sm font-semibold text-ink">
+            {value.code ? <span className="mr-1.5 font-mono text-xs font-normal text-ink-muted">{value.code}</span> : null}
             {value.name}
           </p>
           {storeLine(value) ? <p className="truncate text-xs text-ink-muted">{storeLine(value)}</p> : null}
@@ -73,8 +73,8 @@ function StorePicker({ value, onChange }: { value: PortalLocation | null; onChan
                 >
                   <MapPin className="mt-0.5 size-4 shrink-0 text-ink-subtle" />
                   <span className="min-w-0">
-                    <span className="block text-sm text-ink">
-                      {s.code ? <span className="mr-1.5 font-mono text-xs text-ink-muted">{s.code}</span> : null}
+                    <span className="block text-sm font-semibold text-ink">
+                      {s.code ? <span className="mr-1.5 font-mono text-xs font-normal text-ink-muted">{s.code}</span> : null}
                       {s.name}
                     </span>
                     {storeLine(s) ? <span className="block truncate text-xs text-ink-muted">{storeLine(s)}</span> : null}
@@ -127,7 +127,7 @@ export default function NewRequestPage() {
     return (
       <Card className="animate-rise px-6 py-10 text-center">
         <CheckCircle2 className="mx-auto size-12 text-emerald-600 dark:text-emerald-400" />
-        <h1 className="mt-4 text-xl font-semibold text-ink">Solicitação enviada</h1>
+        <h1 className="mt-4 text-xl font-bold tracking-[-0.02em] text-ink">Solicitação enviada</h1>
         <p className="mt-1 font-mono text-sm text-ink-muted">{created.code}</p>
         <p className="mx-auto mt-3 max-w-sm text-sm leading-relaxed text-ink-muted">
           A central da Maxx vai analisar e combinar a visita na loja. Você acompanha tudo por aqui.
@@ -158,8 +158,7 @@ export default function NewRequestPage() {
         <ArrowLeft className="size-4" />
         Solicitações
       </Link>
-      <h1 className="text-[22px] leading-tight font-semibold tracking-[-0.015em] text-ink">Nova solicitação</h1>
-      <p className="mt-1 mb-6 text-sm text-ink-muted">Conte o que aconteceu. A central analisa e envia um técnico.</p>
+      <PageHeader title="Nova solicitação" description="Conte o que aconteceu. A central analisa e envia um técnico." />
 
       <Card className="p-5 sm:p-6">
         <form
@@ -215,7 +214,7 @@ export default function NewRequestPage() {
                         : "border-line bg-surface hover:border-line-strong",
                     )}
                   >
-                    <span className={clsx("block text-sm font-medium", active && option.value === "high" ? "text-red-700 dark:text-red-300" : "text-ink")}>
+                    <span className={clsx("block text-sm font-semibold", active && option.value === "high" ? "text-red-700 dark:text-red-300" : "text-ink")}>
                       {option.label}
                     </span>
                     <span className="mt-0.5 block text-xs text-ink-muted">{option.hint}</span>

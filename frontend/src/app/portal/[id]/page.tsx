@@ -7,7 +7,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 import { Badge } from "@/components/portal/Badge";
-import { Button, Card, Dialog, ErrorBox, Field, LoadingBlock, Textarea } from "@/components/ui";
+import { Button, Card, Dialog, ErrorBox, Field, LoadingBlock, PageHeader, SectionTitle, Textarea } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import { clientStatusColor, TIMELINE_LABEL } from "@/lib/portal";
@@ -94,23 +94,27 @@ export default function PortalRequestPage() {
   return (
     <div>
       {back}
-      <div className="mb-5">
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge status={r.status} />
-          <span className="font-mono text-xs text-ink-subtle">{r.code}</span>
-        </div>
-        <h1 className="mt-2 text-[22px] leading-tight font-semibold tracking-[-0.015em] text-ink">{r.title}</h1>
-        <p className="mt-1 text-sm text-ink-muted">
-          Aberta {formatDateTime(r.created_at)}
-          {r.requester_name ? ` por ${r.requester_name}` : ""}
-        </p>
-      </div>
+      <PageHeader
+        eyebrow={
+          <span className="flex flex-wrap items-center gap-2 pb-1">
+            <Badge status={r.status} />
+            <span className="font-mono text-xs text-ink-subtle">{r.code}</span>
+          </span>
+        }
+        title={r.title}
+        description={
+          <>
+            Aberta {formatDateTime(r.created_at)}
+            {r.requester_name ? ` por ${r.requester_name}` : ""}
+          </>
+        }
+      />
 
       {finished && r.report_url ? (
         <Card className="mb-4 flex flex-col gap-3 border-emerald-200 bg-emerald-50/60 p-4 sm:flex-row sm:items-center dark:border-emerald-500/30 dark:bg-emerald-500/10">
           <FileText className="size-5 shrink-0 text-emerald-700 dark:text-emerald-300" />
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium text-ink">Atendimento concluído</p>
+            <p className="text-sm font-bold text-ink">Atendimento concluído</p>
             {r.resolution_notes ? <p className="mt-0.5 text-sm text-ink-muted">{r.resolution_notes}</p> : null}
           </div>
           <a
@@ -158,7 +162,7 @@ export default function PortalRequestPage() {
           </Card>
 
           <Card className="p-5">
-            <p className="mb-2 text-xs font-medium text-ink-muted">O que aconteceu</p>
+            <SectionTitle className="mb-2">O que aconteceu</SectionTitle>
             <p className="text-sm leading-relaxed whitespace-pre-line text-ink">{r.description || r.title}</p>
           </Card>
 
@@ -173,7 +177,7 @@ export default function PortalRequestPage() {
         </div>
 
         <Card className="h-fit p-5">
-          <p className="mb-3 text-xs font-medium text-ink-muted">Andamento</p>
+          <SectionTitle className="mb-3">Andamento</SectionTitle>
           <ol className="relative flex flex-col gap-4">
             {r.timeline.map((entry, i) => {
               const last = i === r.timeline.length - 1;

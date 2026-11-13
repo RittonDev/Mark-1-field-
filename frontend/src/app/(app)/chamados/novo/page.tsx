@@ -12,7 +12,7 @@ import { HelpersField, SuggestedTechnicians } from "@/components/new-ticket/Sugg
 import { PriorityBadge, StatusBadge } from "@/components/badges";
 import { ConflictHint, ConflictList, scheduleConflicts } from "@/components/ScheduleConflict";
 import { useToast } from "@/components/Toaster";
-import { Button, Card, ErrorBox, Field, Input, Kbd, PageHeader, Select, Textarea } from "@/components/ui";
+import { Button, Card, ErrorBox, Field, Input, Kbd, PageHeader, SectionTitle, Select, Textarea } from "@/components/ui";
 import { useNow } from "@/components/useNow";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -95,11 +95,12 @@ function Section({
   return (
     <Card>
       <div className="flex items-start gap-3 border-b border-line px-5 py-3.5">
-        <span className="mt-px flex size-6 shrink-0 items-center justify-center rounded-full bg-ink text-[11px] font-semibold text-surface tabular-nums">
+        {/* Número da etapa nas cores da logo (faz o papel da marca do CardHeader). */}
+        <span className="mt-px flex size-6 shrink-0 items-center justify-center rounded-full bg-brand-soft text-[11px] font-bold text-brand-ink tabular-nums">
           {step}
         </span>
         <div className="min-w-0">
-          <h2 className="text-sm font-semibold tracking-[-0.005em] text-ink">{title}</h2>
+          <h2 className="text-[15px] leading-5 font-bold tracking-[-0.01em] text-ink">{title}</h2>
           {description ? <p className="mt-0.5 text-xs text-ink-muted">{description}</p> : null}
         </div>
       </div>
@@ -344,7 +345,7 @@ export default function NewTicketPage() {
 
               {form.location_id ? (
                 <div className="flex flex-col gap-2 rounded-lg border border-line bg-surface-2/60 px-3.5 py-3 xl:col-span-3">
-                  <p className="text-xs font-medium text-ink-subtle">Endereço da OS</p>
+                  <p className="text-xs font-semibold text-ink/80">Endereço da OS</p>
                   <p className="text-sm text-ink">{address || (intake.isLoading ? "Carregando..." : "Loja sem endereço no cadastro")}</p>
                   <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-ink-muted">
                     <input
@@ -370,7 +371,7 @@ export default function NewTicketPage() {
 
               {openAtLocation.data && openAtLocation.data.total > 0 ? (
                 <div className="animate-enter rounded-lg border border-amber-200 bg-amber-50/70 p-3 xl:col-span-3 dark:border-amber-500/30 dark:bg-amber-500/10">
-                  <p className="flex items-center gap-1.5 text-sm font-medium text-amber-900 dark:text-amber-200">
+                  <p className="flex items-center gap-1.5 text-sm font-semibold text-amber-900 dark:text-amber-200">
                     <TriangleAlert className="size-4" />
                     {openAtLocation.data.total === 1
                       ? "Já existe 1 OS aberta nesta loja"
@@ -379,8 +380,8 @@ export default function NewTicketPage() {
                   <ul className="mt-2 flex flex-col gap-1">
                     {openAtLocation.data.items.slice(0, 3).map((t) => (
                       <li key={t.id} className="flex flex-wrap items-center gap-2 text-sm">
-                        <Link href={`/chamados/${t.id}`} target="_blank" className="text-ink hover:text-brand hover:underline">
-                          <span className="mr-1 font-mono text-xs text-ink-subtle">{t.code}</span>
+                        <Link href={`/chamados/${t.id}`} target="_blank" className="font-semibold text-ink hover:text-brand hover:underline">
+                          <span className="mr-1 font-mono text-xs font-normal text-ink-subtle">{t.code}</span>
                           {t.title}
                         </Link>
                         <StatusBadge status={t.status} />
@@ -495,7 +496,7 @@ export default function NewTicketPage() {
               <div className="flex flex-col gap-5">
                 <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_9rem_minmax(0,1fr)]">
                   <div className="flex flex-col gap-1.5">
-                    <span className="flex items-center justify-between text-sm font-medium text-ink">
+                    <span className="flex items-center justify-between text-xs font-semibold text-ink/80">
                       Data da visita
                       <span className="flex gap-1">
                         {([0, 1] as const).map((offset) => (
@@ -540,10 +541,11 @@ export default function NewTicketPage() {
                 {canAssign ? (
                   <>
                     <div className="flex flex-col gap-2">
-                      <p className="flex items-center justify-between text-sm font-medium text-ink">
+                      <SectionTitle
+                        aside={suggestions.isFetching ? <span className="text-xs text-ink-subtle">atualizando...</span> : null}
+                      >
                         Técnicos sugeridos para a loja
-                        {suggestions.isFetching ? <span className="text-xs font-normal text-ink-subtle">atualizando...</span> : null}
-                      </p>
+                      </SectionTitle>
                       <SuggestedTechnicians
                         items={suggestions.data}
                         loading={suggestions.isLoading}
@@ -631,7 +633,7 @@ export default function NewTicketPage() {
         <aside className="flex flex-col gap-4 lg:sticky lg:top-4">
           {canAssign ? (
             <Card className="p-4">
-              <p className="mb-2.5 text-xs font-medium text-ink-subtle">Analista responsável</p>
+              <SectionTitle className="mb-2.5">Analista responsável</SectionTitle>
               <div className="grid grid-cols-3 gap-1 rounded-lg bg-surface-2 p-1" role="radiogroup" aria-label="Analista responsável">
                 {(
                   [
@@ -685,10 +687,7 @@ export default function NewTicketPage() {
           ) : null}
 
           <Card className="p-4">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-ink-subtle">Prazos desta OS</span>
-              <PriorityBadge priority={effectivePriority} />
-            </div>
+            <SectionTitle aside={<PriorityBadge priority={effectivePriority} />}>Prazos desta OS</SectionTitle>
             {policy ? (
               <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-xs">
                 <dt className="text-ink-muted">1ª resposta</dt>

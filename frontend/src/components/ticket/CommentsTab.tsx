@@ -60,7 +60,7 @@ export function CommentsTab({ ticketId }: { ticketId: UUID }) {
                 <div className="flex size-6 items-center justify-center rounded-full bg-surface-2 text-[10px] font-semibold text-ink-muted">
                   {initials(c.author?.name)}
                 </div>
-                <span className="text-sm font-medium text-ink">{c.author?.name ?? "Sistema"}</span>
+                <span className="text-sm font-semibold text-ink">{c.author?.name ?? "Sistema"}</span>
                 {c.is_internal ? (
                   <span className="inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 dark:bg-amber-900/50 dark:text-amber-300">
                     <Lock className="size-3" />

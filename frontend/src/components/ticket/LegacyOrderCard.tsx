@@ -1,7 +1,7 @@
 "use client";
 
-import { ExternalLink, FileText, History, Inbox } from "lucide-react";
-import { Card, CardHeader } from "@/components/ui";
+import { ExternalLink, FileText, History } from "lucide-react";
+import { Card, CardHeader, SectionTitle } from "@/components/ui";
 import { formatDateTime, formatMoney } from "@/lib/format";
 import type { TicketDetail } from "@/lib/types";
 
@@ -40,11 +40,13 @@ export function LegacyOrderCard({ ticket }: { ticket: TicketDetail }) {
 
         {legacy.request ? (
           <div>
-            <p className="mb-1 flex items-center gap-1.5 text-xs font-medium text-ink-subtle">
-              <Inbox className="size-3.5" />
-              Solicitação do cliente{legacy.request.created_at ? ` · ${formatDateTime(legacy.request.created_at)}` : ""}
-            </p>
-            {legacy.request.subject ? <p className="text-sm font-medium text-ink">{legacy.request.subject}</p> : null}
+            <SectionTitle className="mb-1">
+              Solicitação do cliente
+              {legacy.request.created_at ? (
+                <span className="font-normal text-ink-muted"> · {formatDateTime(legacy.request.created_at)}</span>
+              ) : null}
+            </SectionTitle>
+            {legacy.request.subject ? <p className="text-sm font-semibold text-ink">{legacy.request.subject}</p> : null}
             {legacy.request.message ? <p className="mt-0.5 text-sm whitespace-pre-wrap text-ink-muted">{legacy.request.message}</p> : null}
             {legacy.request.contact_email || legacy.request.contact_phone ? (
               <p className="mt-1 text-xs text-ink-subtle">
@@ -57,7 +59,7 @@ export function LegacyOrderCard({ ticket }: { ticket: TicketDetail }) {
         {items.length ? (
           <div className="overflow-x-auto rounded-xl border border-line">
             <table className="w-full min-w-[30rem] text-sm">
-              <thead className="bg-[var(--table-head)] text-left text-[11px] font-semibold tracking-[0.05em] text-ink-subtle uppercase">
+              <thead className="bg-[var(--table-head)] text-left text-[11px] font-bold tracking-[0.05em] text-ink-muted uppercase">
                 <tr>
                   <th className="px-3 py-2">Item</th>
                   <th className="px-3 py-2">Tipo</th>
@@ -90,7 +92,7 @@ export function LegacyOrderCard({ ticket }: { ticket: TicketDetail }) {
               ["Total da OS", values.total],
             ].map(([label, value]) => (
               <div key={label as string} className="bg-surface px-3 py-2.5">
-                <p className="text-[11px] text-ink-subtle">{label}</p>
+                <p className="text-[11px] text-ink-muted">{label}</p>
                 <p className="text-sm font-semibold text-ink tabular-nums">{formatMoney(value as number)}</p>
               </div>
             ))}
@@ -106,7 +108,7 @@ export function LegacyOrderCard({ ticket }: { ticket: TicketDetail }) {
 
         {files.length ? (
           <div>
-            <p className="mb-2 text-xs font-medium text-ink-subtle">Arquivos ({files.length})</p>
+            <SectionTitle className="mb-2">Arquivos ({files.length})</SectionTitle>
             <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
               {files.map((f, k) =>
                 isImage(f.type, f.url) ? (
