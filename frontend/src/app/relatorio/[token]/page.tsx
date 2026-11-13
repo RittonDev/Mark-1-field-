@@ -24,6 +24,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Logo, ThemeToggle } from "@/components/Brand";
 import { Button, Skeleton } from "@/components/ui";
 import { ApiError, errorMessage, request } from "@/lib/api";
+import { STATUS } from "@/lib/constants";
 import { formatDate, formatDateTime, formatDocument, formatMinutes, formatTime, initials } from "@/lib/format";
 import type { PublicReport, PublicReportPhoto } from "@/lib/types";
 
@@ -237,13 +238,28 @@ export default function PublicReportPage() {
             {/* Título e situação */}
             <div className="flex flex-wrap items-center justify-between gap-3 px-6 pt-6 sm:px-8">
               <div className="min-w-0">
-                <h1 className="text-xl leading-tight font-semibold tracking-[-0.015em] text-ink sm:text-2xl">{report.title}</h1>
+                <h1 className="text-xl leading-tight font-bold tracking-[-0.02em] text-ink sm:text-2xl">{report.title}</h1>
                 <p className="mt-1 text-xs text-ink-muted">OS aberta em {formatDateTime(report.opened_at)}</p>
               </div>
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200 ring-inset dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-500/25">
-                <CheckCircle2 className="size-3.5" />
-                {report.status_label}
-              </span>
+              {/* Toda OS tem relatório: verde só com a OS concluída; antes, a situação atual na cor dela. */}
+              {report.status === "resolved" || report.status === "closed" ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200 ring-inset dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-500/25">
+                  <CheckCircle2 className="size-3.5" />
+                  {report.status_label}
+                </span>
+              ) : (
+                <span
+                  className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold"
+                  style={{
+                    color: `color-mix(in oklab, ${STATUS[report.status]?.color ?? "#64748b"} 64%, var(--ink))`,
+                    backgroundColor: `color-mix(in oklab, ${STATUS[report.status]?.color ?? "#64748b"} 9%, var(--surface))`,
+                    borderColor: `color-mix(in oklab, ${STATUS[report.status]?.color ?? "#64748b"} 22%, var(--surface))`,
+                  }}
+                >
+                  <Clock3 className="size-3.5" />
+                  {report.status === "cancelled" ? report.status_label : `Em andamento · ${report.status_label}`}
+                </span>
+              )}
             </div>
 
             {/* Cliente e local */}
