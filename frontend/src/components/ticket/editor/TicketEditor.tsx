@@ -17,7 +17,7 @@ import { LegacyOrderCard } from "@/components/ticket/LegacyOrderCard";
 import { PartRequestsCard } from "@/components/ticket/PartRequestsCard";
 import { PayoutsCard } from "@/components/ticket/PayoutsCard";
 import { QuotesCard } from "@/components/ticket/QuotesCard";
-import { ReportLinkCard } from "@/components/ticket/ReportLinkCard";
+import { ReportMenu } from "@/components/ticket/ReportMenu";
 import { SlaCard } from "@/components/ticket/SlaCard";
 import { TicketInfo } from "@/components/ticket/TicketInfo";
 import { TimesDialog } from "@/components/ticket/TimesDialog";
@@ -225,7 +225,6 @@ export function TicketEditor({ ticket, variant, onClose }: { ticket: TicketDetai
   const [saveState, setSaveState] = useState({ dirty: false, pending: false });
   const onSaveState = useCallback((state: { dirty: boolean; pending: boolean }) => setSaveState(state), []);
   const [sharing, setSharing] = useState(false);
-  const [report, setReport] = useState(false);
   const [unproductive, setUnproductive] = useState(false);
   const [timesOpen, setTimesOpen] = useState(false);
   const canUnproductive = UNPRODUCTIVE_FROM.includes(ticket.status) && Boolean(ticket.assignee);
@@ -316,9 +315,7 @@ export function TicketEditor({ ticket, variant, onClose }: { ticket: TicketDetai
           <button type="button" className={iconButton} onClick={() => setSharing(true)} title="Mensagens de WhatsApp" aria-label="Mensagens de WhatsApp">
             <MessageCircle className="size-[18px]" />
           </button>
-          <button type="button" className={iconButton} onClick={() => setReport(true)} title="Relatório do cliente (PDF e link)" aria-label="Relatório do cliente">
-            <FileText className="size-[18px]" />
-          </button>
+          <ReportMenu ticket={ticket} buttonClassName={iconButton} />
           <button
             type="button"
             className={iconButton}
@@ -338,11 +335,6 @@ export function TicketEditor({ ticket, variant, onClose }: { ticket: TicketDetai
       </div>
 
       {sharing ? <WhatsAppShare ticket={ticket} onClose={() => setSharing(false)} /> : null}
-      {report ? (
-        <Dialog open onClose={() => setReport(false)} title={`Relatório do cliente · ${ticket.code}`}>
-          <ReportLinkCard ticket={ticket} />
-        </Dialog>
-      ) : null}
       {timesOpen ? <TimesDialog ticket={ticket} onClose={() => setTimesOpen(false)} /> : null}
       {unproductive ? <UnproductiveDialog ticket={ticket} onClose={() => setUnproductive(false)} /> : null}
     </div>

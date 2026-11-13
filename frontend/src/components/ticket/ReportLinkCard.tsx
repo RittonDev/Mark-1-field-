@@ -10,7 +10,7 @@ import { api, errorMessage } from "@/lib/api";
 import { formatShort } from "@/lib/format";
 import type { ReportLink, TicketDetail } from "@/lib/types";
 
-/** Link público do relatório da OS concluída: o cliente vê o resumo, as evidências e baixa o PDF. */
+/** Link público do relatório da OS (toda OS tem): o cliente vê o andamento e, concluída, o resultado e o PDF. */
 export function ReportLinkCard({ ticket }: { ticket: TicketDetail }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -39,7 +39,7 @@ export function ReportLinkCard({ ticket }: { ticket: TicketDetail }) {
     },
   });
 
-  if (!ticket.can_assign || (!finished && !link)) return null;
+  if (!ticket.can_assign) return null;
 
   const copy = async () => {
     if (!link) return;
@@ -59,11 +59,14 @@ export function ReportLinkCard({ ticket }: { ticket: TicketDetail }) {
             Relatório para o cliente
           </span>
         }
-        description="Resumo do atendimento com a solução, as fotos, o checklist e a assinatura. O cliente abre pelo link e baixa em PDF."
+        description="O andamento e, concluída, a solução, as fotos, o checklist e a assinatura. O cliente abre pelo link e baixa em PDF."
       />
       <div className="flex flex-col gap-3 p-4">
         {!finished ? (
-          <p className="text-sm text-ink-muted">A OS foi reaberta: o link volta a mostrar o relatório quando ela for concluída.</p>
+          <p className="text-sm text-ink-muted">
+            A OS ainda não foi concluída: o cliente vê o andamento (agendada, técnico a caminho, em atendimento) e, ao
+            concluir, o resultado com fotos, checklist e assinatura.
+          </p>
         ) : null}
         {link ? (
           <>

@@ -22,7 +22,7 @@ export function TicketEditorDialog({ ticketId, onClose }: { ticketId: UUID; onCl
     panel.current?.focus();
     const onKey = (e: KeyboardEvent) => {
       // Esc fecha, menos quando outro diálogo (horários, transição, valor) está aberto por cima.
-      if (e.key === "Escape" && document.querySelectorAll('[role="dialog"]:not([data-drawer])').length === 0) onClose();
+      if (e.key === "Escape" && document.querySelectorAll('[role="dialog"]:not([data-drawer]), [role="menu"]').length === 0) onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => {
