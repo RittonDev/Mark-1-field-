@@ -207,10 +207,10 @@ function GridEvent({ placed, colors, onOpen }: Omit<ViewProps, "events"> & { pla
   const conflict = event.conflict_with.length > 0;
   const top = (start.getHours() + start.getMinutes() / 60) * HOUR_PX;
   const height = Math.max(22, ((end.getTime() - start.getTime()) / 3_600_000) * HOUR_PX - 2);
-  // Até 2 OS no mesmo horário: lado a lado. Com 3 ou mais, lado a lado viraria tiras ilegíveis
-  // ("0... S..."); em cascata cada uma entra 14 px à direita e por cima da anterior, a de cima fica
+  // OS no mesmo horário: lado a lado viravam tiras ilegíveis numa coluna de ~100 px
+  // ("0... S..."). Em cascata cada uma entra 14 px à direita e por cima da anterior: a de cima fica
   // inteira e passar o mouse traz qualquer uma para a frente.
-  const cascade = lanes > 2;
+  const cascade = lanes > 1;
   const width = 100 / lanes;
   const position = cascade
     ? { left: `${lane * 14 + 2}px`, width: `calc(100% - ${lane * 14 + 4}px)` }
