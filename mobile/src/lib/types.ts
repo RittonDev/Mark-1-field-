@@ -501,7 +501,13 @@ export interface TicketCreatePayload {
 
 export type TicketUpdatePayload = Partial<
   Omit<TicketCreatePayload, "source" | "requester_id" | "assignee_id">
-> & { expected_version?: number };
+> & {
+  expected_version?: number;
+  /** Só a gestão, a qualquer momento (inclusive OS fechada). */
+  resolution_notes?: string | null;
+  tags?: Tag[] | null;
+  signature_required?: boolean | null;
+};
 
 /** Contexto para abrir a OS: o cliente e a loja escolhidos. */
 export interface IntakeContext {
@@ -579,6 +585,8 @@ export interface Activity {
   service_type_name: string | null;
   estimated_minutes: number | null;
   actual_minutes: number;
+  /** Escopo da OS (o cartão mostra a primeira linha). */
+  description?: string;
 }
 
 export interface DaySummary {
