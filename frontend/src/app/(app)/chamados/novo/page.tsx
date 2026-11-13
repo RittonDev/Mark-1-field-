@@ -496,7 +496,8 @@ export default function NewTicketPage() {
               <div className="flex flex-col gap-5">
                 <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_9rem_minmax(0,1fr)]">
                   <div className="flex flex-col gap-1.5">
-                    <span className="flex items-center justify-between text-xs font-semibold text-ink/80">
+                    {/* h-4: mesma altura do rótulo do Field ("Hora"); os botões Hoje/Amanhã não empurram o campo. */}
+                    <span className="flex h-4 items-center justify-between text-xs font-semibold text-ink/80">
                       Data da visita
                       <span className="flex gap-1">
                         {([0, 1] as const).map((offset) => (

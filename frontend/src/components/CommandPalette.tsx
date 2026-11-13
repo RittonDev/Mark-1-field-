@@ -207,7 +207,8 @@ function Palette({ user, onClose }: { user: User; onClose: () => void }) {
               return (
                 <div key={entry.id}>
                   {header ? (
-                    <p className="px-3 pt-3 pb-1 text-[11px] font-semibold text-ink-muted first:pt-1">{header}</p>
+                    // Cada cabeçalho é o 1º filho do próprio <div>: "first:" valia para todos e colava os grupos.
+                    <p className={clsx("px-3 pb-1 text-[11px] font-semibold text-ink-muted", index === 0 ? "pt-1" : "pt-3")}>{header}</p>
                   ) : null}
                   <button
                     type="button"
