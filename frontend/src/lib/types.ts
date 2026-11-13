@@ -1555,3 +1555,64 @@ export interface PortalRequestDetail extends PortalRequestItem {
   can_cancel: boolean;
   timeline: { status: TicketStatus | "created"; at: ISODate }[];
 }
+
+// --------------------------------------------------------------------------- relatórios (fechamento do dia e do mês)
+
+/** Item dos rankings dos relatórios (cliente, técnico ou motivo de improdutiva; o motivo vem sem id). */
+export interface ReportCountRef {
+  id: UUID | null;
+  name: string;
+  count: number;
+}
+
+/** Números de um período (dia ou mês), contados pela trilha de eventos das OS. */
+export interface DayNumbers {
+  opened: number;
+  resolved: number;
+  cancelled: number;
+  /** Visitas improdutivas registradas no período. */
+  unproductive: number;
+  /** Agendadas e em aberto no fim do período (o estado de cada OS naquele instante). */
+  scheduled_end: number;
+  backlog_end: number;
+  /** Resolvidas no período dentro do prazo (só as OS com prazo de solução). */
+  resolved_in_sla: number;
+  /** Chegadas do técnico no período e quantas dentro do prazo (4h nas capitais). */
+  arrivals: number;
+  arrivals_on_time: number;
+  /** Percentual sobre as chegadas que tinham prazo. */
+  arrival_on_time_pct: number | null;
+  avg_arrival_minutes: number | null;
+  /** Tempo em atendimento das OS resolvidas no período (soma das visitas de cada OS). */
+  avg_onsite_minutes: number | null;
+}
+
+/** Fechamento do dia (o dia fecha à meia-noite, no fuso da operação). */
+export interface DailyReport {
+  date: string;
+  /** Dia já fechado (passou da meia-noite) ou parcial (hoje). */
+  closed: boolean;
+  numbers: DayNumbers;
+  /** Período anterior inteiro, para comparar. */
+  previous: DayNumbers;
+  top_customer: ReportCountRef | null;
+  customers: ReportCountRef[];
+  technicians: ReportCountRef[];
+  unproductive_reasons: ReportCountRef[];
+}
+
+export interface ReportDayPoint {
+  date: string;
+  opened: number;
+  resolved: number;
+  cancelled: number;
+  unproductive: number;
+}
+
+/** Relatório do mês (AAAA-MM): os números do mês, o mês anterior e um ponto por dia (até hoje). */
+export interface MonthlyReport extends Omit<DailyReport, "date"> {
+  month: string;
+  days: ReportDayPoint[];
+  expenses_total: number;
+  quotes_approved_total: number;
+}
