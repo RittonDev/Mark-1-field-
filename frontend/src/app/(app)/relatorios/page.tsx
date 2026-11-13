@@ -78,7 +78,7 @@ export default function ReportsPage() {
             role="tab"
             aria-selected={tab === key}
             onClick={() => setTab(key)}
-            className={clsx("relative px-3 pt-1 pb-2.5 text-sm font-medium", tab === key ? "text-ink" : "text-ink-muted hover:text-ink")}
+            className={clsx("relative px-3 pt-1 pb-2.5 text-sm", tab === key ? "font-semibold text-ink" : "font-medium text-ink-muted hover:text-ink")}
           >
             {label}
             {tab === key ? <span className="brand-gradient absolute inset-x-2 -bottom-px h-0.5 rounded-full" /> : null}

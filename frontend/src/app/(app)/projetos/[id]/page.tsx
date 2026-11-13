@@ -8,7 +8,7 @@ import { useParams } from "next/navigation";
 import { useState } from "react";
 import { StatusBadge } from "@/components/badges";
 import { ProjectDialog } from "@/components/ProjectDialog";
-import { Button, Card, CardHeader, ErrorBox, LoadingBlock, Table, Td, Th } from "@/components/ui";
+import { Button, Card, CardHeader, ErrorBox, LoadingBlock, SectionTitle, Table, Td, Th } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { formatDate, formatMoney } from "@/lib/format";
 import { PROJECT_STATUS } from "@/lib/projects";
@@ -121,7 +121,7 @@ export default function ProjectPage() {
         </Card>
         <div className="flex flex-col gap-4">
           <Card className="p-4 text-sm">
-            <h2 className="mb-2 font-bold text-ink">Equipe</h2>
+            <SectionTitle className="mb-2">Equipe</SectionTitle>
             <p className="text-ink-muted">Responsável: {p.manager?.name ?? "—"}</p>
             <p className="text-ink-muted">Grupo: {p.team?.name ?? "—"}</p>
             {p.members.length ? (
@@ -138,7 +138,7 @@ export default function ProjectPage() {
             <Card className="p-4 text-sm">
               {p.pricing_notes ? (
                 <>
-                  <h2 className="mb-1 font-bold text-ink">Condições e valores</h2>
+                  <SectionTitle className="mb-1">Condições e valores</SectionTitle>
                   <p className="whitespace-pre-wrap text-ink-muted">{p.pricing_notes}</p>
                 </>
               ) : null}

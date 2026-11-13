@@ -39,8 +39,8 @@ export default function QuotesPage() {
             aria-selected={tab === key}
             onClick={() => setTab(key)}
             className={clsx(
-              "relative px-3 pt-1 pb-2.5 text-sm font-medium",
-              tab === key ? "text-ink" : "text-ink-muted hover:text-ink",
+              "relative px-3 pt-1 pb-2.5 text-sm",
+              tab === key ? "font-semibold text-ink" : "font-medium text-ink-muted hover:text-ink",
             )}
           >
             {label}
