@@ -364,7 +364,9 @@ async def test_client_report_link(client: AsyncClient, world: World) -> None:
     # O técnico responsável pega o mesmo link (para mandar ao cliente); trocar e revogar, não.
     mine = await client.post(f"{API}/tickets/{tid}/report-link", headers=th)
     assert mine.status_code == 200 and mine.json()["token"] == new["token"]
-    assert (await client.post(f"{API}/tickets/{tid}/report-link/rotate", headers=th)).status_code == 403
+    assert (
+        await client.post(f"{API}/tickets/{tid}/report-link/rotate", headers=th)
+    ).status_code == 403
     assert (await client.delete(f"{API}/tickets/{tid}/report-link", headers=th)).status_code == 403
     other = await client.post(f"{API}/tickets/{tid}/report-link", headers=world.tech_other.headers)
     assert other.status_code in (403, 404)
