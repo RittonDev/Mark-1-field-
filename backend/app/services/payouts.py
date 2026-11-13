@@ -7,9 +7,9 @@ técnico acompanha no app ("Meus ganhos"). Reembolsos (km, material) seguem nos 
 
 import uuid
 from datetime import date, datetime, time, timedelta
+from decimal import Decimal
 from typing import Any
 from zoneinfo import ZoneInfo
-from decimal import Decimal
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -69,7 +69,9 @@ def _event(
     )
 
 
-def _bounds(date_from: date | None, date_to: date | None) -> tuple[datetime | None, datetime | None]:
+def _bounds(
+    date_from: date | None, date_to: date | None
+) -> tuple[datetime | None, datetime | None]:
     """Dias no fuso da operação (a conclusão às 22h do dia 30 conta no dia 30)."""
     tz = ZoneInfo(settings.TIMEZONE)
     start = datetime.combine(date_from, time.min, tzinfo=tz) if date_from else None
@@ -81,7 +83,9 @@ def works_on(ticket: Ticket, technician_id: uuid.UUID) -> bool:
     return ticket.assignee_id == technician_id or any(h.id == technician_id for h in ticket.helpers)
 
 
-async def _find(db: AsyncSession, ticket_id: uuid.UUID, technician_id: uuid.UUID) -> TicketPayout | None:
+async def _find(
+    db: AsyncSession, ticket_id: uuid.UUID, technician_id: uuid.UUID
+) -> TicketPayout | None:
     return await db.scalar(
         select(TicketPayout).where(
             TicketPayout.ticket_id == ticket_id, TicketPayout.technician_id == technician_id
@@ -134,7 +138,9 @@ async def set_payout(
     return payout
 
 
-async def remove_payout(db: AsyncSession, ticket: Ticket, technician_id: uuid.UUID, actor: User) -> None:
+async def remove_payout(
+    db: AsyncSession, ticket: Ticket, technician_id: uuid.UUID, actor: User
+) -> None:
     payout = await _find(db, ticket.id, technician_id)
     if payout is None:
         return
@@ -148,7 +154,10 @@ async def remove_payout(db: AsyncSession, ticket: Ticket, technician_id: uuid.UU
         actor,
         TicketEventType.PAYOUT_REMOVED,
         from_value=str(payout.amount),
-        data={"technician": technician.name if technician else None, "amount": _money(payout.amount)},
+        data={
+            "technician": technician.name if technician else None,
+            "amount": _money(payout.amount),
+        },
     )
     await db.flush()
 
@@ -161,7 +170,7 @@ async def on_assignee_changed(
     actor: User,
 ) -> None:
     """Troca de responsável: o valor ainda não pago acompanha o novo técnico; sem valor nenhum,
-    entra o padrão do tipo de serviço. Quem saiu da OS deixa de ter valor a receber (o já pago fica).
+    entra o padrão do tipo de serviço. Quem saiu da OS deixa de ter valor a receber (o pago fica).
     """
     previous = await _find(db, ticket.id, previous_id) if previous_id else None
     if previous is not None and previous.status == PayoutStatus.PAID:
@@ -191,7 +200,9 @@ async def on_assignee_changed(
             await db.flush()
 
 
-async def on_helpers_removed(db: AsyncSession, ticket: Ticket, removed_ids: list[uuid.UUID]) -> None:
+async def on_helpers_removed(
+    db: AsyncSession, ticket: Ticket, removed_ids: list[uuid.UUID]
+) -> None:
     """Quem deixou de ir junto perde o valor ainda não pago (o pago fica registrado)."""
     for technician_id in removed_ids:
         if technician_id == ticket.assignee_id:
@@ -212,7 +223,9 @@ def my_payout(ticket: Ticket, user: User) -> MyPayout | None:
 # --------------------------------------------------------------------------- fechamento
 
 
-def _line(payout: TicketPayout, ticket: Ticket, customer: str | None, location: Location | None) -> PayoutLine:
+def _line(
+    payout: TicketPayout, ticket: Ticket, customer: str | None, location: Location | None
+) -> PayoutLine:
     return PayoutLine(
         id=payout.id,
         technician=Ref(id=payout.technician.id, name=payout.technician.name),
@@ -256,7 +269,7 @@ async def list_payouts(
     date_to: date | None = None,
     limit: int = 1000,
 ) -> PayoutList:
-    """Pagamentos para a gestão. O período vale pela conclusão da OS (ou pelo lançamento, se aberta)."""
+    """Pagamentos para a gestão. O período vale pela conclusão da OS (aberta: pelo lançamento)."""
     when = func.coalesce(Ticket.resolved_at, TicketPayout.created_at)
     stmt = (
         select(TicketPayout, Ticket, Customer.name, Location)

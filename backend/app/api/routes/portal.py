@@ -48,8 +48,12 @@ async def list_requests(
     return Page(items=[svc.to_item(t) for t in items], total=total, page=page, page_size=page_size)
 
 
-@router.post("/portal/requests", response_model=PortalRequestDetail, status_code=status.HTTP_201_CREATED)
-async def create_request(body: PortalRequestCreate, db: DB, user: CurrentUser) -> PortalRequestDetail:
+@router.post(
+    "/portal/requests", response_model=PortalRequestDetail, status_code=status.HTTP_201_CREATED
+)
+async def create_request(
+    body: PortalRequestCreate, db: DB, user: CurrentUser
+) -> PortalRequestDetail:
     ticket = await svc.create_request(db, user, body)
     await commit_and_publish(db)
     return await svc.to_detail(db, await svc.get_request(db, user, ticket.id))

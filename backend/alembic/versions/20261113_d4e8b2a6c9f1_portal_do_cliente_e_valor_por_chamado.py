@@ -12,9 +12,8 @@ Create Date: 2026-11-13
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
-
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
 revision: str = "d4e8b2a6c9f1"
 down_revision: str | None = "c3f8a1d6e4b2"
@@ -26,7 +25,12 @@ def upgrade() -> None:
     op.add_column("users", sa.Column("customer_id", postgresql.UUID(as_uuid=True), nullable=True))
     op.create_index("ix_users_customer_id", "users", ["customer_id"])
     op.create_foreign_key(
-        "fk_users_customer_id_customers", "users", "customers", ["customer_id"], ["id"], ondelete="SET NULL"
+        "fk_users_customer_id_customers",
+        "users",
+        "customers",
+        ["customer_id"],
+        ["id"],
+        ondelete="SET NULL",
     )
 
     op.add_column("service_types", sa.Column("technician_fee", sa.Numeric(12, 2), nullable=True))
@@ -41,7 +45,10 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column(
-            "technician_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False
+            "technician_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("users.id"),
+            nullable=False,
         ),
         sa.Column("amount", sa.Numeric(12, 2), nullable=False),
         sa.Column("status", sa.String(length=32), server_default="pending", nullable=False),
@@ -59,8 +66,12 @@ def upgrade() -> None:
             sa.ForeignKey("users.id", ondelete="SET NULL"),
             nullable=True,
         ),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
         sa.UniqueConstraint("ticket_id", "technician_id", name="uq_ticket_payouts_ticket_tech"),
     )
     op.create_index("ix_ticket_payouts_ticket_id", "ticket_payouts", ["ticket_id"])

@@ -21,7 +21,9 @@ from app.models.user import User
 
 class TicketPayout(UUIDPrimaryKey, Timestamps, Base):
     __tablename__ = "ticket_payouts"
-    __table_args__ = (UniqueConstraint("ticket_id", "technician_id", name="uq_ticket_payouts_ticket_tech"),)
+    __table_args__ = (
+        UniqueConstraint("ticket_id", "technician_id", name="uq_ticket_payouts_ticket_tech"),
+    )
 
     ticket_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("tickets.id", ondelete="CASCADE"), index=True
@@ -29,11 +31,15 @@ class TicketPayout(UUIDPrimaryKey, Timestamps, Base):
     technician_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     status: Mapped[PayoutStatus] = mapped_column(
-        str_enum(PayoutStatus), default=PayoutStatus.PENDING, server_default=PayoutStatus.PENDING.value
+        str_enum(PayoutStatus),
+        default=PayoutStatus.PENDING,
+        server_default=PayoutStatus.PENDING.value,
     )
     note: Mapped[str | None] = mapped_column(Text)
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    paid_by_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    paid_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
     created_by_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL")
     )

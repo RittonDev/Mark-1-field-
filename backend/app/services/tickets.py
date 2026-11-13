@@ -59,8 +59,8 @@ from app.schemas.ticket import (
     WorklogCreate,
 )
 from app.services import client_report, durations, schedule, sla, storage
-from app.services import payouts as payouts_svc
 from app.services import field as field_rules
+from app.services import payouts as payouts_svc
 from app.services.errors import NotFound, PermissionDenied, VersionConflict, WorkflowError
 from app.services.realtime import queue_event
 from app.services.workflow import (

@@ -87,7 +87,9 @@ async def me(db: AsyncSession, user: User) -> PortalMe:
     return PortalMe(customer=Ref(id=customer.id, name=customer.name), locations=count or 0)
 
 
-async def locations(db: AsyncSession, user: User, q: str | None = None, limit: int = 50) -> list[PortalLocation]:
+async def locations(
+    db: AsyncSession, user: User, q: str | None = None, limit: int = 50
+) -> list[PortalLocation]:
     customer_id = customer_id_of(user)
     stmt = (
         select(Location)

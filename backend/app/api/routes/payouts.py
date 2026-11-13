@@ -36,7 +36,9 @@ async def set_payout(
     return await _ticket_payouts(db, ticket_id)
 
 
-@router.delete("/tickets/{ticket_id}/payouts/{technician_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/tickets/{ticket_id}/payouts/{technician_id}", status_code=status.HTTP_204_NO_CONTENT
+)
 async def remove_payout(
     ticket_id: uuid.UUID, technician_id: uuid.UUID, db: DB, user: TicketManagerUser
 ) -> Response:
@@ -92,5 +94,7 @@ async def my_earnings(db: DB, user: CurrentUser, month: str | None = None) -> My
             year, mon = (int(part) for part in month.split("-", 1))
             when = date(year, mon, 1)
         except ValueError as exc:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Mês inválido (use AAAA-MM)") from exc
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY, "Mês inválido (use AAAA-MM)"
+            ) from exc
     return await svc.my_earnings(db, user, when)

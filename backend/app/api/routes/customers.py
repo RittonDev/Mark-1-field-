@@ -130,7 +130,9 @@ async def _locations_out(db: DB, user: User, locations: list[Location]) -> list[
 
 
 @router.get("/customers", response_model=list[CustomerOut])
-async def list_customers(db: DB, user: TicketManagerUser, q: str | None = None) -> list[CustomerOut]:
+async def list_customers(
+    db: DB, user: TicketManagerUser, q: str | None = None
+) -> list[CustomerOut]:
     stmt = select(Customer)
     # Busca por palavras (nome ou CNPJ/CPF), em qualquer ordem e sem acento.
     matched = search.all_words(q, [Customer.name], digit_columns=[Customer.document])
