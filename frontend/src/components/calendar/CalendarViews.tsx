@@ -207,7 +207,14 @@ function GridEvent({ placed, colors, onOpen }: Omit<ViewProps, "events"> & { pla
   const conflict = event.conflict_with.length > 0;
   const top = (start.getHours() + start.getMinutes() / 60) * HOUR_PX;
   const height = Math.max(22, ((end.getTime() - start.getTime()) / 3_600_000) * HOUR_PX - 2);
+  // Até 2 OS no mesmo horário: lado a lado. Com 3 ou mais, lado a lado viraria tiras ilegíveis
+  // ("0... S..."); em cascata cada uma entra 14 px à direita e por cima da anterior, a de cima fica
+  // inteira e passar o mouse traz qualquer uma para a frente.
+  const cascade = lanes > 2;
   const width = 100 / lanes;
+  const position = cascade
+    ? { left: `${lane * 14 + 2}px`, width: `calc(100% - ${lane * 14 + 4}px)` }
+    : { left: `calc(${lane * width}% + 2px)`, width: `calc(${width}% - 4px)` };
   return (
     <button
       type="button"
@@ -215,18 +222,21 @@ function GridEvent({ placed, colors, onOpen }: Omit<ViewProps, "events"> & { pla
       title={label(event)}
       aria-label={label(event)}
       className={clsx(
-        "absolute z-[5] overflow-hidden rounded-md border-l-[3px] px-1.5 py-1 text-left text-[11px] leading-tight shadow-xs transition-shadow hover:z-10 hover:shadow-md",
+        "absolute z-(--z) overflow-hidden rounded-md border-l-[3px] px-1.5 py-1 text-left text-[11px] leading-tight shadow-xs transition-shadow hover:z-50 hover:shadow-md",
+        cascade && lane > 0 && "ring-1 ring-surface",
         conflict ? "bg-red-50 text-red-900 ring-2 ring-red-500 dark:bg-red-950/70 dark:text-red-100" : "text-ink",
         isDone(event) && "opacity-60",
       )}
-      style={{
-        top,
-        height,
-        left: `calc(${lane * width}% + 2px)`,
-        width: `calc(${width}% - 4px)`,
-        borderLeftColor: color,
-        backgroundColor: conflict ? undefined : `color-mix(in srgb, ${color} 14%, var(--surface))`,
-      }}
+      style={
+        {
+          "--z": 5 + lane,
+          top,
+          height,
+          ...position,
+          borderLeftColor: color,
+          backgroundColor: conflict ? undefined : `color-mix(in srgb, ${color} 14%, var(--surface))`,
+        } as React.CSSProperties
+      }
     >
       <span className="flex items-center gap-1 font-semibold">
         {conflict ? <AlertTriangle className="size-3 shrink-0 text-red-600 dark:text-red-400" /> : null}
