@@ -38,7 +38,9 @@ async def test_fee_per_technician_on_the_os(client: AsyncClient, world: World) -
     assert r.status_code == 200, r.text
     assert [(p["amount"], p["note"]) for p in r.json()] == [(180.0, "Loja longe")]
     assert (await client.put(url, json={"amount": 999}, headers=th)).status_code == 403
-    assert (await client.put(url, json={"amount": 9}, headers=world.requester.headers)).status_code == 403
+    assert (
+        await client.put(url, json={"amount": 9}, headers=world.requester.headers)
+    ).status_code == 403
 
     # O colega precisa estar na OS para ter valor; saindo dela, perde o que não foi pago.
     other_url = f"{API}/tickets/{t['id']}/payouts/{other_id}"

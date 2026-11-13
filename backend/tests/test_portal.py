@@ -124,7 +124,12 @@ async def test_client_opens_and_follows_requests(client: AsyncClient, world: Wor
     done = (await client.get(f"{API}/portal/requests/{t['id']}", headers=req)).json()
     assert done["status"] == "resolved" and done["resolution_notes"] == "Cabo trocado"
     assert done["report_url"] and "/relatorio/" in done["report_url"]
-    assert [e["status"] for e in done["timeline"]] == ["created", "assigned", "in_progress", "resolved"]
+    assert [e["status"] for e in done["timeline"]] == [
+        "created",
+        "assigned",
+        "in_progress",
+        "resolved",
+    ]
 
     # Listas: abertas, concluídas e busca pelo nº do cliente.
     open_items = (await client.get(f"{API}/portal/requests", headers=req)).json()
@@ -134,7 +139,9 @@ async def test_client_opens_and_follows_requests(client: AsyncClient, world: Wor
     ).json()
     assert t["id"] in {i["id"] for i in finished["items"]}
     found = (
-        await client.get(f"{API}/portal/requests", params={"scope": "all", "q": "INC-778"}, headers=req)
+        await client.get(
+            f"{API}/portal/requests", params={"scope": "all", "q": "INC-778"}, headers=req
+        )
     ).json()
     assert [i["id"] for i in found["items"]] == [t["id"]]
 
@@ -151,10 +158,18 @@ async def test_company_wide_and_isolated(client: AsyncClient, world: World) -> N
         )
     ).json()
 
-    mine = (await client.get(f"{API}/portal/requests", params={"scope": "all"}, headers=world.requester.headers)).json()
+    mine = (
+        await client.get(
+            f"{API}/portal/requests", params={"scope": "all"}, headers=world.requester.headers
+        )
+    ).json()
     assert {i["id"] for i in mine["items"]} == {ours["id"]}
-    assert (await client.get(f"{API}/portal/requests/{theirs['id']}", headers=world.requester.headers)).status_code == 404
-    assert (await client.get(f"{API}/portal/requests/{ours['id']}", headers=other_headers)).status_code == 404
+    assert (
+        await client.get(f"{API}/portal/requests/{theirs['id']}", headers=world.requester.headers)
+    ).status_code == 404
+    assert (
+        await client.get(f"{API}/portal/requests/{ours['id']}", headers=other_headers)
+    ).status_code == 404
     # Loja de outra empresa não serve para abrir solicitação.
     wrong = await client.post(
         f"{API}/portal/requests",
@@ -172,7 +187,9 @@ async def test_cancel_only_before_the_office_starts(client: AsyncClient, world: 
     body = {"location_id": world.location_id, "title": "Era engano"}
     first = (await client.post(f"{API}/portal/requests", json=body, headers=req)).json()
     r = await client.post(
-        f"{API}/portal/requests/{first['id']}/cancel", json={"reason": "Resolvemos aqui"}, headers=req
+        f"{API}/portal/requests/{first['id']}/cancel",
+        json={"reason": "Resolvemos aqui"},
+        headers=req,
     )
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "cancelled" and r.json()["can_cancel"] is False
@@ -207,4 +224,6 @@ async def test_portal_is_only_for_linked_clients(client: AsyncClient, world: Wor
     )
     assert r.status_code == 422 and "empresa" in r.json()["detail"]
     # O contador do menu é só da central.
-    assert (await client.get(f"{API}/portal/inbox-count", headers=world.requester.headers)).status_code == 403
+    assert (
+        await client.get(f"{API}/portal/inbox-count", headers=world.requester.headers)
+    ).status_code == 403

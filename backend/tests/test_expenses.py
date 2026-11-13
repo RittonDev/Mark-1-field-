@@ -83,7 +83,11 @@ async def test_extra_costs(client: AsyncClient, world: World) -> None:
 async def test_requester_never_sees_costs(client: AsyncClient, world: World) -> None:
     r = await client.post(
         f"{API}/portal/requests",
-        json={"title": "Impressora sem toner", "description": "Sala 3", "location_id": world.location_id},
+        json={
+            "title": "Impressora sem toner",
+            "description": "Sala 3",
+            "location_id": world.location_id,
+        },
         headers=world.requester.headers,
     )
     tid = r.json()["id"]
