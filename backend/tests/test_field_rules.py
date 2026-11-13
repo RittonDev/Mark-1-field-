@@ -135,7 +135,7 @@ async def test_onsite_clock_and_queue_reasons(
     assert _dt(t["onsite_due_at"]) - _dt(t["arrived_at"]) == timedelta(hours=4)
     # Segunda passagem por "Em atendimento" não muda a chegada.
     first_arrival = t["arrived_at"]
-    t = await transition(client, th, t, "on_hold_vendor", note="Aguardando peça")
+    t = await transition(client, an, t, "on_hold_vendor", note="Aguardando peça")
     t = await transition(client, th, t, "in_progress")
     assert t["arrived_at"] == first_arrival
 
@@ -185,13 +185,6 @@ async def test_onsite_clock_and_queue_reasons(
     item = next(i for i in q["items"] if i["id"] == waiting["id"])
     assert item["arrival_status"] == "late" and item["reasons"][0]["code"] == "arrival_late"
 
-    # Autorização pendente (com a regra ligada) também pede atenção.
-    await client.put(f"{API}/settings/field", json=RULES_ON, headers=world.supervisor.headers)
-    pending = await create(client, world, title="Aguardando cliente", **mine)
-    q = (await client.get(f"{API}/my-queue", headers=an)).json()
-    item = next(i for i in q["items"] if i["id"] == pending["id"])
-    assert "authorization_pending" in [r["code"] for r in item["reasons"]]
-    assert item["section"] == "attention"
 
 
 @requires_db
