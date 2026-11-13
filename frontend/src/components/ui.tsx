@@ -218,8 +218,9 @@ export function SectionTitle({
         />
         <span className={clsx("min-w-0", wrap ? "text-pretty" : "truncate")}>{children}</span>
       </Heading>
-      {/* min-h-5: uma legenda curta fica centrada na linha do título, mesmo com o título quebrando. */}
-      {aside ? <div className="flex min-h-5 shrink-0 items-center gap-2">{aside}</div> : null}
+      {/* min-h-5: uma legenda curta fica centrada na linha do título. Com wrap, a legenda que desce para a
+          própria linha fica na largura do bloco e quebra por dentro (no celular não sai do cartão). */}
+      {aside ? <div className={clsx("flex min-h-5 items-center gap-2", wrap ? "max-w-full" : "shrink-0")}>{aside}</div> : null}
     </div>
   );
 }

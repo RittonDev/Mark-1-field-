@@ -50,20 +50,34 @@ function hrefWith(ticketId: UUID | null) {
   return `${url.pathname}${url.search}${url.hash}`;
 }
 
+// Fechando pelo Voltar: até o popstate chegar, a URL ainda tem ?os. Um segundo Esc ou clique nesse
+// meio-tempo não pode voltar mais uma entrada (sairia da tela).
+let closing = false;
+if (typeof window !== "undefined") {
+  window.addEventListener("popstate", () => {
+    closing = false;
+  });
+}
+
 // O Next acompanha o pushState/replaceState nativo (useSearchParams recebe a URL nova sem ir ao
 // servidor), desde que o estado passado não traga as chaves internas dele (__NA): por isso só o nosso.
 const panel: TicketPanel = {
   open(ticketId) {
+    closing = false;
     if (currentId() === ticketId) return;
     window.history.pushState({ mfPanel: ticketId }, "", hrefWith(ticketId));
   },
   close() {
     const id = currentId();
-    if (!id) return;
+    if (!id || closing) return;
     // Aberto daqui: volta a entrada do histórico (o Avançar reabre). Aberto por link direto ou depois
     // de recarregar: só tira o ?os da URL.
-    if ((window.history.state as { mfPanel?: string } | null)?.mfPanel === id) window.history.back();
-    else window.history.replaceState(null, "", hrefWith(null));
+    if ((window.history.state as { mfPanel?: string } | null)?.mfPanel === id) {
+      closing = true;
+      window.history.back();
+    } else {
+      window.history.replaceState(null, "", hrefWith(null));
+    }
   },
 };
 
