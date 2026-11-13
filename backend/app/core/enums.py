@@ -114,6 +114,9 @@ class TicketEventType(StrEnum):
     PART_REQUEST_UPDATED = "part_request_updated"
     # Horários reais corrigidos pela central (o técnico nunca mexe no horário).
     TIMES_CORRECTED = "times_corrected"
+    # Valor do técnico na OS (parceiro pago por chamado): só a gestão vê.
+    PAYOUT_SET = "payout_set"
+    PAYOUT_REMOVED = "payout_removed"
 
 
 class DevicePlatform(StrEnum):
