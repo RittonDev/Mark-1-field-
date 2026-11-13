@@ -5,7 +5,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, sta
 from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy import select, text
 
-from app.api.deps import DB, CurrentUser, NoTechnicianUser, StaffUser, TicketManagerUser
+from app.api.deps import DB, CurrentUser, StaffUser, TicketManagerUser
 from app.core.config import settings
 from app.core.enums import TicketPriority, TicketStatus, TicketType, UserRole
 from app.core.security import InvalidToken, create_download_token, decode_token
@@ -49,6 +49,8 @@ _INTERNAL_EVENT_TYPES = {
     "part_request_updated",
     "attachment_removed",
     "times_corrected",
+    "payout_set",
+    "payout_removed",
 }
 
 
@@ -67,7 +69,7 @@ async def _detail(db: DB, ticket_id: uuid.UUID, user: User) -> TicketDetail:
 @router.get("/tickets", response_model=Page[TicketListItem])
 async def list_tickets(
     db: DB,
-    user: NoTechnicianUser,
+    user: TicketManagerUser,
     status_: Annotated[list[TicketStatus] | None, Query(alias="status")] = None,
     priority: Annotated[list[TicketPriority] | None, Query()] = None,
     type_: Annotated[TicketType | None, Query(alias="type")] = None,
@@ -130,7 +132,7 @@ async def list_tickets(
 
 
 @router.post("/tickets", response_model=TicketDetail, status_code=status.HTTP_201_CREATED)
-async def create_ticket(body: TicketCreate, db: DB, user: NoTechnicianUser) -> TicketDetail:
+async def create_ticket(body: TicketCreate, db: DB, user: TicketManagerUser) -> TicketDetail:
     ticket = await svc.create_ticket(db, body, user)
     await commit_and_publish(db)
     return await _detail(db, ticket.id, user)
@@ -238,7 +240,7 @@ async def correct_times(
 
 @router.get("/tickets/{ticket_id}/comments", response_model=list[CommentOut])
 async def list_comments(
-    ticket_id: uuid.UUID, db: DB, user: NoTechnicianUser
+    ticket_id: uuid.UUID, db: DB, user: TicketManagerUser
 ) -> list[TicketComment]:
     await svc.get_visible_ticket(db, user, ticket_id)
     stmt = select(TicketComment).where(TicketComment.ticket_id == ticket_id)
@@ -253,7 +255,7 @@ async def list_comments(
     status_code=status.HTTP_201_CREATED,
 )
 async def add_comment(
-    ticket_id: uuid.UUID, body: CommentCreate, db: DB, user: NoTechnicianUser
+    ticket_id: uuid.UUID, body: CommentCreate, db: DB, user: TicketManagerUser
 ) -> TicketComment:
     ticket = await svc.get_visible_ticket(db, user, ticket_id)
     comment = await svc.add_comment(db, ticket, body, user)
@@ -262,7 +264,7 @@ async def add_comment(
 
 
 @router.get("/tickets/{ticket_id}/events", response_model=list[EventOut])
-async def list_events(ticket_id: uuid.UUID, db: DB, user: NoTechnicianUser) -> list[TicketEvent]:
+async def list_events(ticket_id: uuid.UUID, db: DB, user: TicketManagerUser) -> list[TicketEvent]:
     await svc.get_visible_ticket(db, user, ticket_id)
     events = list(
         await db.scalars(

@@ -156,7 +156,10 @@ async def list_requests(
 
 async def get_request(db: AsyncSession, user: User, request_id: uuid.UUID) -> Ticket:
     customer_id = customer_id_of(user)
-    ticket = await db.get(Ticket, request_id)
+    try:
+        ticket = await tickets_svc.get_ticket(db, request_id)
+    except NotFound:
+        ticket = None
     # OS de outra empresa: para o cliente ela simplesmente não existe.
     if ticket is None or ticket.customer_id != customer_id:
         raise NotFound("Solicitação não encontrada")

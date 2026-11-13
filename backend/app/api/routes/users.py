@@ -6,7 +6,7 @@ from sqlalchemy import func, or_, select
 from app.api.deps import DB, AdminUser, ManagerUser, NoTechnicianUser, TicketManagerUser
 from app.core.enums import UserRole
 from app.core.security import hash_password
-from app.models import Team, Ticket, User
+from app.models import Customer, Team, Ticket, User
 from app.schemas.user import (
     AssignableUser,
     TeamCreate,
@@ -31,6 +31,23 @@ async def _email_taken(db: DB, email: str, exclude: uuid.UUID | None = None) -> 
 async def _check_team(db: DB, team_id: uuid.UUID | None) -> None:
     if team_id is not None and await db.get(Team, team_id) is None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Grupo não encontrado")
+
+
+async def _check_customer(
+    db: DB, role: UserRole, customer_id: uuid.UUID | None
+) -> uuid.UUID | None:
+    """Usuário do cliente fica ligado à empresa dele (o portal mostra as solicitações dela).
+    Os outros papéis não têm empresa."""
+    if role != UserRole.REQUESTER:
+        return None
+    if customer_id is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Escolha a empresa do cliente: no portal ele vê as solicitações dela",
+        )
+    if await db.get(Customer, customer_id) is None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Cliente não encontrado")
+    return customer_id
 
 
 @router.get("/users", response_model=list[UserOut])
@@ -95,6 +112,7 @@ async def create_user(body: UserCreate, db: DB, _: AdminUser) -> User:
     if await _email_taken(db, body.email):
         raise HTTPException(status.HTTP_409_CONFLICT, "E-mail já cadastrado")
     await _check_team(db, body.team_id)
+    customer_id = await _check_customer(db, body.role, body.customer_id)
     user = User(
         name=body.name.strip(),
         email=body.email.lower(),
@@ -103,6 +121,7 @@ async def create_user(body: UserCreate, db: DB, _: AdminUser) -> User:
         phone=body.phone,
         job_title=body.job_title,
         team_id=body.team_id,
+        customer_id=customer_id,
         is_active=True,
     )
     db.add(user)
@@ -132,6 +151,10 @@ async def update_user(user_id: uuid.UUID, body: UserUpdate, db: DB, admin: Admin
         fields["email"] = fields["email"].lower()
     if "team_id" in fields:
         await _check_team(db, fields["team_id"])
+    if "customer_id" in fields or "role" in fields:
+        fields["customer_id"] = await _check_customer(
+            db, fields.get("role") or user.role, fields.get("customer_id", user.customer_id)
+        )
     if user.id == admin.id and (
         fields.get("is_active") is False
         or fields.get("role")
@@ -153,7 +176,7 @@ async def update_user(user_id: uuid.UUID, body: UserUpdate, db: DB, admin: Admin
 
 
 @router.get("/teams", response_model=list[TeamOut])
-async def list_teams(db: DB, _: NoTechnicianUser) -> list[Team]:
+async def list_teams(db: DB, _: TicketManagerUser) -> list[Team]:
     return list(await db.scalars(select(Team).order_by(Team.name)))
 
 
