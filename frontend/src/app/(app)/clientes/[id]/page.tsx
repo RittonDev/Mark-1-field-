@@ -15,7 +15,7 @@ import type { Customer, Location, Page, TicketListItem } from "@/lib/types";
 
 function Stars({ value }: { value: number }) {
   return (
-    <span className="inline-flex items-center gap-0.5" aria-label={`${value.toFixed(1)} de 5`}>
+    <span className="inline-flex items-center gap-0.5" aria-label={`${value.toFixed(1).replace(".", ",")} de 5`}>
       {[1, 2, 3, 4, 5].map((n) => (
         <Star key={n} className={n <= Math.round(value) ? "size-4 fill-amber-400 text-amber-400" : "size-4 text-line-strong"} />
       ))}
@@ -113,7 +113,7 @@ export default function CustomerDetailPage() {
             <Card className="p-4">
               <p className="text-xs text-ink-muted">Avaliação dos atendimentos (Field Control)</p>
               <div className="mt-1 flex items-center gap-3">
-                <span className="text-2xl font-semibold text-ink">{legacy.rating.average.toFixed(1)}</span>
+                <span className="text-2xl font-semibold text-ink">{legacy.rating.average.toFixed(1).replace(".", ",")}</span>
                 <Stars value={legacy.rating.average} />
               </div>
               {legacy.rating.last_comment ? (

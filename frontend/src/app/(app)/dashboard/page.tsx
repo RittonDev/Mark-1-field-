@@ -138,10 +138,10 @@ export default function DashboardPage() {
           tone={data.sla_at_risk > 0 ? "warning" : "default"}
         />
         <Kpi label="Criados hoje" value={data.created_today} icon={PlusCircle} />
-        <Kpi label="Resolvidos hoje" value={data.resolved_today} icon={CheckCheck} tone="success" />
+        <Kpi label="Resolvidos hoje" value={data.resolved_today} icon={CheckCheck} tone={data.resolved_today > 0 ? "success" : "default"} />
         <Kpi
           label="Conformidade SLA (30d)"
-          value={compliance === null ? "—" : `${compliance.toFixed(1)}%`}
+          value={compliance === null ? "—" : `${compliance.toFixed(1).replace(".", ",")}%`}
           icon={Gauge}
           tone={compliance === null ? "default" : compliance >= 90 ? "success" : compliance >= 75 ? "warning" : "danger"}
           hint="OS resolvidas dentro do prazo"
