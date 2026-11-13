@@ -73,9 +73,11 @@ const actingAt = (a: Activity) => {
 
 /** "18:52 até 00:05": o realizado quando começou; antes disso, a janela agendada. */
 function timeRange(a: Activity, day: string): { text: string; real: boolean } | null {
-  const start = a.arrived_at ?? a.started_at;
+  // OS migradas do Field Control não têm o histórico de status: valem o início e o fim da própria OS.
+  const start = a.arrived_at ?? a.started_at ?? a.ticket.arrived_at ?? null;
+  const finished = a.finished_at ?? a.ticket.resolved_at ?? null;
   if (start) {
-    const end = a.finished_at ? when(a.finished_at, day) : a.state === "in_progress" || a.state === "en_route" ? "agora" : null;
+    const end = finished ? when(finished, day) : a.state === "in_progress" || a.state === "en_route" ? "agora" : null;
     return { text: end ? `${when(start, day)} até ${end}` : when(start, day), real: true };
   }
   if (a.scheduled_start) {
