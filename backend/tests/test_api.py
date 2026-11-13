@@ -205,66 +205,20 @@ async def test_technician_sees_only_assigned(client: AsyncClient, world: World) 
     assert "in_progress" in detail["allowed_transitions"]
 
 
-async def test_requester_flow_and_internal_notes(client: AsyncClient, world: World) -> None:
-    r = await client.post(
-        f"{API}/tickets",
-        json={
-            "title": "PC sem rede",
-            "priority": "critical",
-            "assignee_id": str(world.tech.user.id),
-        },
-        headers=world.requester.headers,
-    )
-    assert r.status_code == 201, r.text
-    t = r.json()
-    assert t["priority"] == "medium"  # solicitante não escolhe prioridade
-    assert t["assignee"] is None
-    assert t["requester"]["id"] == str(world.requester.user.id)
-
-    await client.post(
-        f"{API}/tickets/{t['id']}/comments",
-        json={"body": "nota interna", "is_internal": True},
-        headers=world.supervisor.headers,
-    )
-    await client.post(
-        f"{API}/tickets/{t['id']}/comments",
-        json={"body": "Estamos verificando"},
-        headers=world.supervisor.headers,
-    )
-    seen = (
-        await client.get(f"{API}/tickets/{t['id']}/comments", headers=world.requester.headers)
-    ).json()
-    assert [c["body"] for c in seen] == ["Estamos verificando"]
-
-    # Solicitante cancela enquanto ninguém pegou.
-    r = await client.post(
-        f"{API}/tickets/{t['id']}/transition",
-        json={"to_status": "cancelled", "note": "Resolvi sozinho"},
-        headers=world.requester.headers,
-    )
-    assert r.status_code == 200, r.text
-    assert r.json()["status"] == "cancelled"
-
-
-async def test_requester_reply_resumes_on_hold(client: AsyncClient, world: World) -> None:
-    r = await client.post(
-        f"{API}/tickets", json={"title": "Câmera offline"}, headers=world.requester.headers
-    )
-    t = r.json()
-    r = await client.post(
-        f"{API}/tickets/{t['id']}/assign",
-        json={"assignee_id": str(world.tech.user.id)},
-        headers=world.supervisor.headers,
-    )
-    t = await transition(client, world.supervisor.headers, r.json(), "on_hold_customer")
-    await client.post(
-        f"{API}/tickets/{t['id']}/comments",
-        json={"body": "Pode vir amanhã às 9h"},
-        headers=world.requester.headers,
-    )
-    t = (await client.get(f"{API}/tickets/{t['id']}", headers=world.tech.headers)).json()
-    assert t["status"] == "assigned"
-    assert t["sla_paused_at"] is None
+async def test_clients_only_use_the_portal(client: AsyncClient, world: World) -> None:
+    """O cliente abre e acompanha pelo portal; as rotas internas não mostram nada a ele."""
+    req = world.requester.headers
+    t = await create(client, world, title="PC sem rede")  # da empresa dele, aberta pela central
+    assert (await client.get(f"{API}/tickets", headers=req)).status_code == 403
+    by_internal = await client.post(f"{API}/tickets", json={"title": "Pelo atalho"}, headers=req)
+    assert by_internal.status_code == 403
+    for path in (f"/tickets/{t['id']}", f"/tickets/{t['id']}/expenses"):
+        assert (await client.get(f"{API}{path}", headers=req)).status_code == 404, path
+    for path in ("/customers", "/locations", "/teams", "/categories", "/dashboard/summary"):
+        assert (await client.get(f"{API}{path}", headers=req)).status_code == 403, path
+    # Pelo portal ele acompanha a OS da empresa dele.
+    seen = await client.get(f"{API}/portal/requests/{t['id']}", headers=req)
+    assert seen.status_code == 200 and seen.json()["code"] == t["code"]
 
 
 async def test_worklog_and_attachment(

@@ -337,7 +337,8 @@ async def test_recurrence_reports_and_client_report(
 @requires_db
 async def test_requester_does_not_see_part_requests(client: AsyncClient, world: World) -> None:
     req, th = world.requester.headers, world.tech.headers
-    mine = (await client.post(f"{API}/tickets", json={"title": "Impressora"}, headers=req)).json()
+    body = {"title": "Impressora", "location_id": world.location_id}
+    mine = (await client.post(f"{API}/portal/requests", json=body, headers=req)).json()
     await client.post(
         f"{API}/tickets/{mine['id']}/assign",
         json={"assignee_id": str(world.tech.user.id)},
@@ -347,7 +348,7 @@ async def test_requester_does_not_see_part_requests(client: AsyncClient, world: 
         f"{API}/tickets/{mine['id']}/part-requests", json={"description": "Rolo fusor"}, headers=th
     )
     assert r.status_code == 201, r.text
-    seen = (await client.get(f"{API}/tickets/{mine['id']}", headers=req)).json()
-    assert seen["part_requests"] == []
-    events = (await client.get(f"{API}/tickets/{mine['id']}/events", headers=req)).json()
-    assert all(e["event_type"] not in ("part_requested", "part_request_updated") for e in events)
+    # O pedido de peça é conversa interna com o técnico: o portal não mostra.
+    seen = (await client.get(f"{API}/portal/requests/{mine['id']}", headers=req)).json()
+    assert "part_requests" not in seen
+    assert all(entry["status"] != "part_requested" for entry in seen["timeline"])

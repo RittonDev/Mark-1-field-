@@ -657,10 +657,11 @@ async def test_contacts_keep_single_fields_in_sync(
         await db.commit()
     staff = await client.get(f"{API}/customers/{world.customer_id}", headers=an)
     assert staff.json()["legacy"]["id"] == 10
+    # O cliente nem chega ao cadastro (no portal ele só vê as lojas da empresa dele).
     outside = await client.get(
         f"{API}/customers/{world.customer_id}", headers=world.requester.headers
     )
-    assert outside.status_code == 200 and outside.json()["legacy"] is None
+    assert outside.status_code == 403
 
 
 @requires_db

@@ -45,10 +45,12 @@ async def test_owner_claim_and_filters(client: AsyncClient, world: World) -> Non
         f"{API}/tickets", json={**body, "owner_id": str(world.tech.user.id)}, headers=an
     )
     assert bad.status_code == 422 and bad.json()["detail"] == "Escolha um analista ou gestor"
-    # Aberta pelo solicitante: fica sem analista até alguém puxar.
-    r1 = await client.post(f"{API}/tickets", json={"title": "Sem acesso ao ERP"}, headers=req)
-    assert r1.status_code == 201 and r1.json()["owner"] is None
-    r1 = r1.json()
+    # Aberta pelo cliente no portal: fica sem analista até alguém puxar.
+    body_portal = {"title": "Sem acesso ao ERP", "location_id": world.location_id}
+    opened = await client.post(f"{API}/portal/requests", json=body_portal, headers=req)
+    assert opened.status_code == 201, opened.text
+    r1 = (await client.get(f"{API}/tickets/{opened.json()['id']}", headers=an)).json()
+    assert r1["owner"] is None and r1["source"] == "portal"
 
     # Puxar para a minha fila: o técnico não muda, só o analista responsável.
     t3 = await create(client, world, title="Câmera offline", assignee_id=str(world.tech.user.id))
@@ -78,9 +80,9 @@ async def test_owner_claim_and_filters(client: AsyncClient, world: World) -> Non
     # Assumir (técnico = eu) também coloca na minha fila quando a OS não tem analista.
     took = (await client.post(f"{API}/tickets/{r1['id']}/take", headers=an)).json()
     assert took["assignee"]["id"] == analyst_id and took["owner"]["id"] == analyst_id
-    # O solicitante não vê a troca de fila no histórico.
-    seen = (await client.get(f"{API}/tickets/{r1['id']}/events", headers=req)).json()
-    assert all(e["event_type"] != "owner_changed" for e in seen)
+    # O cliente não vê a troca de fila: o portal nem tem o analista.
+    seen = (await client.get(f"{API}/portal/requests/{r1['id']}", headers=req)).json()
+    assert "owner" not in seen
 
     listing = f"{API}/tickets"
     owned = (await client.get(listing, params={"owner_id": analyst_id}, headers=an)).json()
@@ -159,7 +161,9 @@ async def test_my_queue_sections_and_team_queues(client: AsyncClient, world: Wor
     # Do supervisor e sem analista: não entram na fila do analista.
     await create(client, world, title="Do supervisor")
     await client.post(
-        f"{API}/tickets", json={"title": "Do solicitante"}, headers=world.requester.headers
+        f"{API}/portal/requests",
+        json={"title": "Do solicitante", "location_id": world.location_id},
+        headers=world.requester.headers,
     )
 
     q = (await client.get(f"{API}/my-queue", headers=an)).json()

@@ -82,8 +82,8 @@ async def test_extra_costs(client: AsyncClient, world: World) -> None:
 
 async def test_requester_never_sees_costs(client: AsyncClient, world: World) -> None:
     r = await client.post(
-        f"{API}/tickets",
-        json={"title": "Impressora sem toner", "description": "Sala 3"},
+        f"{API}/portal/requests",
+        json={"title": "Impressora sem toner", "description": "Sala 3", "location_id": world.location_id},
         headers=world.requester.headers,
     )
     tid = r.json()["id"]
@@ -93,7 +93,7 @@ async def test_requester_never_sees_costs(client: AsyncClient, world: World) -> 
         headers=world.analyst.headers,
     )
     rh = world.requester.headers
-    assert (await client.get(f"{API}/tickets/{tid}", headers=rh)).json()["expenses"] == []
-    assert (await client.get(f"{API}/tickets/{tid}/expenses", headers=rh)).json() == []
-    events = (await client.get(f"{API}/tickets/{tid}/events", headers=rh)).json()
-    assert not any(e["event_type"].startswith("expense") for e in events)
+    # Pelo caminho interno a OS nem existe para ele; no portal não há custos nem valores.
+    assert (await client.get(f"{API}/tickets/{tid}/expenses", headers=rh)).status_code == 404
+    seen = (await client.get(f"{API}/portal/requests/{tid}", headers=rh)).json()
+    assert "expenses" not in seen and "payouts" not in seen

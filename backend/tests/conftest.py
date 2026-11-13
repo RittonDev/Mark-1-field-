@@ -141,6 +141,8 @@ async def world(engine: AsyncEngine) -> World:
         await db.flush()
         location = Location(customer_id=customer.id, name="Matriz", is_active=True)
         db.add(location)
+        # O usuário do cliente fica ligado à empresa (portal: solicitações de todas as lojas).
+        users["requester"].customer_id = customer.id
         await db.commit()
 
     def actor(u: User) -> Actor:
