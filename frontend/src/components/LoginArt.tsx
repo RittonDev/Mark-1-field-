@@ -151,7 +151,7 @@ export function LoginArt() {
       </div>
 
       <div className="relative p-8 pt-4">
-        <h2 className="max-w-md text-[28px] leading-[1.15] font-semibold tracking-[-0.02em]">
+        <h2 className="max-w-md text-[28px] leading-[1.15] font-bold tracking-[-0.02em]">
           Do chamado à assinatura do cliente, em tempo real.
         </h2>
         <p className="mt-3 max-w-md text-sm leading-relaxed text-white/80">

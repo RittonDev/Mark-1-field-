@@ -111,7 +111,7 @@ export default function LoginPage() {
             <p className="text-sm font-medium text-brand" style={{ ["--i" as string]: 0 }}>
               Central de operações de campo
             </p>
-            <h1 className="mt-2 text-[30px] leading-tight font-semibold tracking-[-0.025em] text-ink" style={{ ["--i" as string]: 1 }}>
+            <h1 className="mt-2 text-[30px] leading-tight font-bold tracking-[-0.02em] text-ink" style={{ ["--i" as string]: 1 }}>
               Bem-vindo de volta
             </h1>
             <p className="mt-2 text-sm leading-relaxed text-ink-muted" style={{ ["--i" as string]: 2 }}>
@@ -223,7 +223,7 @@ export default function LoginPage() {
             >
               <Smartphone className="mt-0.5 size-4 shrink-0 text-ink-subtle" />
               <span>
-                <span className="font-medium text-ink">Técnico de campo?</span> Use o app Maxx Field no celular
+                <span className="font-semibold text-ink">Técnico de campo?</span> Use o app Maxx Field no celular
                 (Android ou iOS) com o e-mail do seu cadastro.
               </span>
             </div>

@@ -24,7 +24,7 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
         }}
       >
         <div style={{ maxWidth: 420, textAlign: "center" }}>
-          <h1 style={{ fontSize: 18, margin: "0 0 6px" }}>O Maxx Field não carregou</h1>
+          <h1 style={{ fontSize: 18, fontWeight: 700, letterSpacing: "-0.02em", margin: "0 0 6px" }}>O Maxx Field não carregou</h1>
           <p style={{ fontSize: 14, color: "#5d6676", margin: "0 0 16px" }}>
             Nada do que já foi salvo se perdeu. Tente de novo em instantes.
           </p>

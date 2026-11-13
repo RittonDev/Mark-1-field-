@@ -344,15 +344,20 @@ responsável ou executa, mais as concluídas no dia. Cada item é um `TicketList
 fila de cada analista/gestor ativo e as OS sem analista. `attention` conta a seção "atenção" e também as OS em campo
 com motivo `danger`/`warning` (ex.: passou do tempo na loja).
 
-**Relatório para o cliente.** Ao concluir (resolvida ou fechada) a OS ganha um link público com o resumo
-do atendimento, que o cliente pode salvar em PDF. O token é `<id>.<assinatura HMAC>`: só o id fica no
-banco, então o link pode ser copiado de novo a qualquer momento e trocado quando preciso.
-- `TicketDetail.report_link` (a gestão sempre; o técnico responsável, com a OS concluída, para enviar
-  pelo app): `{token, path: "/relatorio/<token>", url, created_at, views, last_viewed_at}` ou `null`.
-- `POST /tickets/{id}/report-link` (gestão ou técnico responsável; cria se não houver; 422 "Disponível
-  quando a OS for concluída") ·
+**Relatório para o cliente.** Como no Field Control, toda OS tem o link público do relatório desde a
+abertura (as OS antigas ganharam o link na migração `d5f1a7c3e9b2`). Antes de concluir, a página mostra o
+andamento (agendada, técnico a caminho, em atendimento, reaberta); concluída, o resumo do atendimento,
+que o cliente pode salvar em PDF. O token é `<id>.<assinatura HMAC>`: só o id fica no banco, então o
+link pode ser copiado de novo a qualquer momento e trocado quando preciso.
+- `TicketDetail.report_link` (a gestão sempre; o técnico responsável só com a OS concluída, para enviar
+  pelo app): `{token, path: "/relatorio/<token>", url, created_at, views, last_viewed_at}` ou `null`
+  (link desativado).
+- `POST /tickets/{id}/report-link` (cria se não houver; a gestão em qualquer status; o técnico responsável
+  só com a OS concluída, senão 422 "Disponível quando a OS for concluída"; outro técnico, 403) ·
   `POST /tickets/{id}/report-link/rotate` (gestão; novo link, o anterior para de funcionar) ·
   `DELETE /tickets/{id}/report-link` (gestão; 204). Nenhum dos três muda a `version` da OS.
+- Na web, o botão "Link do relatório da atividade" (rodapé da OS) compartilha por e-mail, WhatsApp, copia
+  o link, abre o relatório, baixa o PDF e gerencia o link (trocar ou desativar).
 - Público, sem login: `GET /public/reports/{token}` → `PublicReport {code, title, description, status,
   status_label, company_name, company {name, document, email, phone, address, website}, customer {name, document}, location {name, code, address, city, state},
   service_address, requester_name, service_type, technician {name}, opened_at, scheduled_start,
@@ -361,8 +366,8 @@ banco, então o link pode ser copiado de novo a qualquer momento e trocado quand
   photos [{url, filename, taken_at}], signature {name, role, signed_at, image_url}, timeline [{at, label}],
   generated_at}`. Respostas formatadas (Sim/Não, dd/mm/aaaa, vírgula decimal); `type: "section"` é título.
   Fotos com URL absoluta assinada (24 h; base `API_PUBLIC_URL` ou o endereço da requisição). 404 "Link
-  inválido ou expirado" (token adulterado, trocado ou revogado); 409 quando a OS foi reaberta. Cada
-  visita soma em `views` sem mexer na OS. Nunca inclui acompanhamentos, apontamentos, custos, orçamentos,
+  inválido ou expirado" (token adulterado, trocado ou revogado). Vale em qualquer status: a OS reaberta
+  aparece como "reaberta" até ser concluída de novo. Cada visita soma em `views` sem mexer na OS. Nunca inclui acompanhamentos, apontamentos, custos, orçamentos,
   notas internas nem motivos de violação.
 - Textos do WhatsApp: variável `{link_relatorio}` (o link da OS concluída; antes disso, "(disponível quando
   a OS for concluída)"), já no texto padrão de Fechamento. `{analista}` agora é o responsável pela OS.

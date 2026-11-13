@@ -17,7 +17,7 @@ export default function AppError({ error, reset }: { error: Error & { digest?: s
         <TriangleAlert className="size-6" />
       </span>
       <div>
-        <h1 className="text-lg font-semibold text-ink">Esta tela não carregou</h1>
+        <h1 className="text-lg font-bold tracking-[-0.02em] text-ink">Esta tela não carregou</h1>
         <p className="mt-1 text-sm text-ink-muted">
           Nada do que já foi salvo se perdeu. Tente de novo; se continuar, avise o suporte com o código abaixo.
         </p>

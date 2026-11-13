@@ -33,7 +33,7 @@ const LONG_TEXT = 320;
 function SectionHead({ children, aside }: { children: React.ReactNode; aside?: React.ReactNode }) {
   return (
     <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
-      <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-ink">{children}</h2>
+      <h2 className="text-[15px] font-bold tracking-[-0.01em] text-ink">{children}</h2>
       {aside ? <div className="text-xs text-ink-muted">{aside}</div> : null}
     </div>
   );
@@ -46,7 +46,7 @@ function Panel({ children, className }: { children: React.ReactNode; className?:
 function Tile({ icon: Icon, label, children }: { icon: React.ComponentType<{ className?: string }>; label: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col items-center justify-center gap-1 rounded-xl border border-line bg-surface px-3 py-4 text-center print:break-inside-avoid">
-      <span className="flex items-center gap-1.5 text-xs text-ink-subtle">
+      <span className="flex items-center gap-1.5 text-xs font-medium text-ink-muted">
         <Icon className="size-3.5" />
         {label}
       </span>
@@ -205,7 +205,7 @@ export default function PublicReportPage() {
             <span className="flex size-12 items-center justify-center rounded-2xl bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400">
               <FileWarning className="size-6" />
             </span>
-            <p className="text-base font-semibold text-ink">{problem.title}</p>
+            <p className="text-base font-bold text-ink">{problem.title}</p>
             <p className="text-sm text-ink-muted">{problem.text}</p>
           </div>
         ) : !report ? (
@@ -229,7 +229,7 @@ export default function PublicReportPage() {
                 </div>
               </div>
               <div className="text-right">
-                <p className="text-[11px] font-medium tracking-[0.06em] text-ink-subtle uppercase">Relatório de atendimento</p>
+                <p className="text-[11px] font-bold tracking-[0.06em] text-ink-muted uppercase">Relatório de atendimento</p>
                 <p className="mt-0.5 font-mono text-2xl font-semibold tracking-tight text-ink">OS {number}</p>
                 {report.service_type ? <p className="text-xs text-ink-muted">{report.service_type}</p> : null}
               </div>
@@ -281,7 +281,7 @@ export default function PublicReportPage() {
                   </div>
                 </Panel>
                 <Panel>
-                  <p className="mb-1 flex items-center gap-1.5 text-xs font-medium text-ink-subtle">
+                  <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-ink/80">
                     <MapPin className="size-3.5" />
                     Local do atendimento
                   </p>
@@ -306,7 +306,7 @@ export default function PublicReportPage() {
               </div>
               {report.description ? (
                 <Panel className="mt-4">
-                  <p className="mb-1 text-xs font-medium text-ink-subtle">Descrição do serviço</p>
+                  <p className="mb-1 text-xs font-semibold text-ink/80">Descrição do serviço</p>
                   <p
                     className={clsx(
                       "text-sm leading-relaxed whitespace-pre-wrap text-ink-muted print:line-clamp-none",
@@ -362,7 +362,7 @@ export default function PublicReportPage() {
                     {report.technician ? initials(report.technician.name) : "?"}
                   </span>
                   <div className="min-w-0">
-                    <p className="text-[11px] text-ink-subtle">Técnico responsável</p>
+                    <p className="text-[11px] font-medium text-ink-muted">Técnico responsável</p>
                     <p className="truncate text-sm font-semibold text-ink">{report.technician?.name ?? "Sem técnico"}</p>
                     {report.helpers?.length ? (
                       <p className="truncate text-xs text-ink-muted">com {report.helpers.map((h) => h.name).join(", ")}</p>
@@ -385,7 +385,7 @@ export default function PublicReportPage() {
 
               {report.resolution_notes ? (
                 <div className="mt-4 rounded-xl border-l-4 border-brand bg-brand-soft/60 px-4 py-3.5 print:break-inside-avoid">
-                  <p className="mb-1 text-xs font-semibold text-brand-ink">Solução aplicada</p>
+                  <p className="mb-1 text-xs font-bold text-brand-ink">Solução aplicada</p>
                   <p className="text-sm leading-relaxed whitespace-pre-wrap text-ink">{report.resolution_notes}</p>
                 </div>
               ) : null}
@@ -416,7 +416,7 @@ export default function PublicReportPage() {
                     item.type === "section" ? (
                       <dt
                         key={`${item.label}-${i}`}
-                        className="bg-surface-2/70 px-4 py-2 text-[11px] font-semibold tracking-[0.06em] text-ink-subtle uppercase first:rounded-t-xl"
+                        className="bg-surface-2/70 px-4 py-2 text-[11px] font-bold tracking-[0.06em] text-ink-muted uppercase first:rounded-t-xl"
                       >
                         {item.label}
                       </dt>
