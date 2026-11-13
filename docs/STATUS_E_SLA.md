@@ -15,8 +15,8 @@ new → triage → assigned → scheduled → en_route → in_progress → resol
 ```
 
 Desvios: pendências (`on_hold_customer`, `on_hold_vendor`, com SLA pausado), cancelamento
-(`cancelled`) e recusa da solução (`resolved → reopened`, que volta ao fluxo). A tabela abaixo é a
-lista completa.
+(`cancelled`), recusa da solução (`resolved → reopened`, que volta ao fluxo) e a central reabrindo
+uma OS fechada ou cancelada (`closed`/`cancelled → reopened`). A tabela abaixo é a lista completa.
 
 | De | Para |
 |---|---|
@@ -30,7 +30,7 @@ lista completa.
 | `on_hold_vendor` | `scheduled`, `in_progress`, `resolved`, `cancelled` |
 | `resolved` | `closed`, `reopened` |
 | `reopened` | `assigned`, `scheduled`, `en_route`, `in_progress`, `on_hold_*`, `resolved` |
-| `closed`, `cancelled` | — (finais) |
+| `closed`, `cancelled` | `reopened` (só a central, com motivo, a qualquer momento) |
 
 ## Pré-condições
 
@@ -48,14 +48,17 @@ lista completa.
 - Comentário do solicitante numa OS `on_hold_customer` volta para `assigned` (como no ServiceNow).
 - OS `resolved` há mais de `AUTO_CLOSE_RESOLVED_DAYS` (padrão 3) fecha sozinha (aceite tácito).
 - Ao atribuir, se a OS não tem grupo, herda o grupo do analista. A categoria pode definir o grupo padrão.
+- Reabrir limpa `resolved_at`, `closed_at` e `cancelled_at` e soma 1 em `reopen_count`. O prazo de SLA
+  continua o original (se já venceu, a OS aparece estourada) e o relatório do cliente fica suspenso até
+  a OS ser concluída de novo. Ao resolver de novo, a solução anterior vem preenchida para ajustar.
 
 ## Permissões de transição
 
 | Papel | Pode mudar status de |
 |---|---|
-| admin, supervisor, analista | qualquer OS |
-| técnico de campo | OS atribuídas a ele ou do grupo dele |
-| solicitante | só as próprias: cancelar enquanto `new`/`triage`; fechar ou reabrir quando `resolved` |
+| admin, supervisor, analista | qualquer OS, inclusive reabrir fechada ou cancelada |
+| técnico de campo | só as OS em que é o responsável, e só sair, iniciar e concluir (`en_route`, `in_progress`, `resolved`) |
+| solicitante | só as próprias: cancelar enquanto `new`/`triage`; fechar ou reabrir quando `resolved` (depois de fechada, só a central reabre) |
 
 ## Prioridade (matriz ITIL)
 

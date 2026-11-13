@@ -498,9 +498,11 @@ def _change_status(
     elif to == S.CANCELLED:
         ticket.cancelled_at = now
     elif to == S.REOPENED:
+        # Vale para a solução recusada e para a central reabrindo uma OS fechada ou cancelada.
         ticket.reopen_count = (ticket.reopen_count or 0) + 1
         ticket.resolved_at = None
         ticket.closed_at = None
+        ticket.cancelled_at = None
 
     ticket.status = to
     payload = {"from": from_status.value, "to": to.value, **(data or {})}

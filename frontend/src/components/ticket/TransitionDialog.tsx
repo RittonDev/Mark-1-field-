@@ -30,6 +30,8 @@ export interface TransitionTarget {
   response_violation_reason?: { id: UUID } | null;
   resolution_violation_reason?: { id: UUID } | null;
   violation_note?: string | null;
+  /** Só o detalhe tem: numa OS reaberta, a solução anterior já vem preenchida para ajustar. */
+  resolution_notes?: string | null;
 }
 
 function currentPosition(): Promise<{ latitude: number; longitude: number } | null> {
@@ -60,7 +62,7 @@ export function TransitionDialog({
   const { toast } = useToast();
   const req = transitionRequirements(to);
   const [note, setNote] = useState("");
-  const [resolution, setResolution] = useState("");
+  const [resolution, setResolution] = useState(ticket.resolution_notes ?? "");
   const [start, setStart] = useState(() => toLocalInput(ticket.scheduled_start));
   // Fim em branco por padrão: num reagendamento, o fim antigo ficaria antes do novo início.
   // Em branco, a API usa início + duração estimada.

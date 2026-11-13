@@ -133,7 +133,8 @@ async def test_full_lifecycle(client: AsyncClient, world: World) -> None:
         headers=world.supervisor.headers,
     )
     assert r.json()["status"] == "closed"
-    assert r.json()["allowed_transitions"] == []
+    # Fechada: a central só pode reabrir (com motivo).
+    assert r.json()["allowed_transitions"] == ["reopened"]
 
     events = (
         await client.get(f"{API}/tickets/{t['id']}/events", headers=world.admin.headers)

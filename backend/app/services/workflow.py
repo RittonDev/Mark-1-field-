@@ -75,7 +75,7 @@ STATUS_INFO: dict[TicketStatus, StatusInfo] = {
     S.CLOSED: StatusInfo("Fechado", "final", "#334155", final=True, description="Encerrado"),
     S.CANCELLED: StatusInfo("Cancelado", "final", "#ef4444", final=True, description="Cancelado"),
     S.REOPENED: StatusInfo(
-        "Reaberto", "open", "#f97316", description="Solução recusada, voltou para a fila"
+        "Reaberto", "open", "#f97316", description="Reaberta, voltou para a fila"
     ),
 }
 
@@ -96,8 +96,10 @@ TRANSITIONS: dict[TicketStatus, tuple[TicketStatus, ...]] = {
     S.ON_HOLD_CUSTOMER: (S.ASSIGNED, S.SCHEDULED, S.IN_PROGRESS, S.RESOLVED, S.CANCELLED),
     S.ON_HOLD_VENDOR: (S.SCHEDULED, S.IN_PROGRESS, S.RESOLVED, S.CANCELLED),
     S.RESOLVED: (S.CLOSED, S.REOPENED),
-    S.CLOSED: (),
-    S.CANCELLED: (),
+    # Fechada ou cancelada só volta reabrindo, com motivo, e só pela central (user_can_transition):
+    # corrigir um fechamento ou cancelamento feito por engano, ou o problema voltou.
+    S.CLOSED: (S.REOPENED,),
+    S.CANCELLED: (S.REOPENED,),
     S.REOPENED: (
         S.ASSIGNED,
         S.SCHEDULED,

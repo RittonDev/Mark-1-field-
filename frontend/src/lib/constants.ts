@@ -40,7 +40,7 @@ export const STATUS: Record<TicketStatus, StatusInfo> = {
   resolved: { label: "Resolvido", group: "done", color: "#10b981", slaPaused: false, final: false, requiresAssignee: false, description: "Solução aplicada, aguardando aceite" },
   closed: { label: "Fechado", group: "final", color: "#334155", slaPaused: false, final: true, requiresAssignee: false, description: "Encerrado" },
   cancelled: { label: "Cancelado", group: "final", color: "#ef4444", slaPaused: false, final: true, requiresAssignee: false, description: "Cancelado" },
-  reopened: { label: "Reaberto", group: "open", color: "#f97316", slaPaused: false, final: false, requiresAssignee: false, description: "Solução recusada, voltou para a fila" },
+  reopened: { label: "Reaberto", group: "open", color: "#f97316", slaPaused: false, final: false, requiresAssignee: false, description: "Reaberta, voltou para a fila" },
 };
 
 export const STATUS_ORDER: TicketStatus[] = [
@@ -70,8 +70,9 @@ export const TRANSITIONS: Record<TicketStatus, TicketStatus[]> = {
   on_hold_customer: ["assigned", "scheduled", "in_progress", "resolved", "cancelled"],
   on_hold_vendor: ["scheduled", "in_progress", "resolved", "cancelled"],
   resolved: ["closed", "reopened"],
-  closed: [],
-  cancelled: [],
+  // Fechada ou cancelada: só a central reabre, com motivo.
+  closed: ["reopened"],
+  cancelled: ["reopened"],
   reopened: ["assigned", "scheduled", "en_route", "in_progress", "on_hold_customer", "on_hold_vendor", "resolved"],
 };
 

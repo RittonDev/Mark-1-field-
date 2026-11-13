@@ -22,10 +22,11 @@ def test_every_status_has_metadata_and_transitions() -> None:
         assert set(targets) <= set(TicketStatus)
 
 
-def test_final_statuses_are_terminal() -> None:
+def test_final_statuses_only_reopen() -> None:
+    """Fechada ou cancelada só sai reabrindo (a central, com motivo)."""
     for status, info in STATUS_INFO.items():
         if info.final:
-            assert TRANSITIONS[status] == ()
+            assert TRANSITIONS[status] == (S.REOPENED,)
 
 
 def test_every_status_reachable_from_new() -> None:
@@ -69,11 +70,19 @@ def test_resolve_requires_solution() -> None:
         _validate(S.IN_PROGRESS, S.RESOLVED, resolution_notes="  ")
 
 
-@pytest.mark.parametrize("to", [S.CANCELLED, S.REOPENED])
-def test_cancel_and_reopen_require_reason(to: S) -> None:
-    frm = S.NEW if to == S.CANCELLED else S.RESOLVED
+@pytest.mark.parametrize(
+    ("frm", "to"),
+    [
+        (S.NEW, S.CANCELLED),
+        (S.RESOLVED, S.REOPENED),
+        (S.CLOSED, S.REOPENED),
+        (S.CANCELLED, S.REOPENED),
+    ],
+)
+def test_cancel_and_reopen_require_reason(frm: S, to: S) -> None:
     with pytest.raises(WorkflowError, match="motivo"):
         _validate(frm, to, note=None)
+    _validate(frm, to)  # com motivo, passa
 
 
 def test_priority_matrix() -> None:
@@ -111,12 +120,22 @@ def test_requester_permissions() -> None:
     assert _can(UserRole.REQUESTER, S.RESOLVED, S.REOPENED)
     assert not _can(UserRole.REQUESTER, S.ASSIGNED, S.IN_PROGRESS)
     assert not _can(UserRole.REQUESTER, S.RESOLVED, S.CLOSED, is_requester=False)
+    # Depois de fechada (ou cancelada), só a central reabre.
+    assert not _can(UserRole.REQUESTER, S.CLOSED, S.REOPENED)
+    assert not _can(UserRole.REQUESTER, S.CANCELLED, S.REOPENED)
 
 
 def test_technician_only_on_own_tickets() -> None:
     assert _can(UserRole.TECHNICIAN, S.ASSIGNED, S.IN_PROGRESS, assignee=True)
     assert not _can(UserRole.TECHNICIAN, S.ASSIGNED, S.IN_PROGRESS, same_team=True)
     assert not _can(UserRole.TECHNICIAN, S.ASSIGNED, S.IN_PROGRESS)
+    assert not _can(UserRole.TECHNICIAN, S.CLOSED, S.REOPENED, assignee=True)
+
+
+def test_office_reopens_closed_and_cancelled() -> None:
+    for role in (UserRole.ANALYST, UserRole.SUPERVISOR, UserRole.ADMIN):
+        assert _can(role, S.CLOSED, S.REOPENED, is_requester=False)
+        assert _can(role, S.CANCELLED, S.REOPENED, is_requester=False)
 
 
 def test_analyst_manages_any_ticket() -> None:

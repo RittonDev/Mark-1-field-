@@ -388,6 +388,9 @@ da gestão; o técnico responsável trabalha na OS (formulários, fotos, assinat
 concluída, fechada ou cancelada (como no Field Control): `PATCH /tickets/{id}` troca cliente, loja, escopo,
 agenda, analista, projeto, outros técnicos, `resolution_notes` (descrição da conclusão) e `tags`
 (`[{name, color}]`, até 20, sem repetir); `POST /tickets/{id}/assign` troca o técnico. Editar não muda o status.
+**Reabrir** uma OS fechada ou cancelada: `POST /tickets/{id}/transition` `{to_status: "reopened", note}`, só a
+gestão e com motivo (técnico 403; sem motivo 422). Limpa `resolved_at`, `closed_at` e `cancelled_at`, soma 1 em
+`reopen_count` e a OS volta ao fluxo; o prazo de SLA continua o original.
 `GET /ticket-tags` (gestão) lista as etiquetas já usadas, as mais usadas primeiro. Na web a OS abre no formato
 do "Editar atividade" do Field Control (abas Geral, Prazos, Localização, Vínculos, Orçamentos, Peças e custos,
 Formulários, Anexos, Acompanhamentos e Histórico), na página e por cima das listas; a aba Geral traz os 5
