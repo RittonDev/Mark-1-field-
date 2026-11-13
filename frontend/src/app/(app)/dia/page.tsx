@@ -203,7 +203,16 @@ export default function DayPage() {
         description={day ? `${longDate(day)}${data?.is_today ? " · hoje" : ""} · atualiza em tempo real` : "Carregando..."}
         actions={
           day ? (
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Filtro de grupo junto da data: a faixa de números abaixo fica numa linha só. */}
+              <Select value={teamId} onChange={(e) => setTeamId(e.target.value)} aria-label="Grupo técnico" className="w-48">
+                <option value="">Todos os grupos</option>
+                {teams.data?.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </Select>
               <Button size="sm" onClick={() => setPicked(shiftDay(day, -1))} aria-label="Dia anterior">
                 <ChevronLeft className="size-4" />
               </Button>
@@ -252,16 +261,6 @@ export default function DayPage() {
             </button>
           );
         })}
-        <div className="ml-auto w-56">
-          <Select value={teamId} onChange={(e) => setTeamId(e.target.value)} aria-label="Grupo técnico">
-            <option value="">Todos os grupos</option>
-            {teams.data?.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
-          </Select>
-        </div>
       </div>
 
       {query.isLoading || !day ? (

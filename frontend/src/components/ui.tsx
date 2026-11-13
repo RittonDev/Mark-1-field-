@@ -279,14 +279,16 @@ export function PageHeader({
   /** Linha pequena acima do título (ex.: data, contexto). */
   eyebrow?: React.ReactNode;
 }) {
+  // Ações sempre à direita do título (no celular, embaixo): uma descrição longa quebra dentro do
+  // próprio bloco em vez de empurrar os botões para a linha de baixo.
   return (
-    <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+    <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
       <div className="min-w-0">
         {eyebrow ? <p className="mb-1 text-xs font-medium text-ink-subtle">{eyebrow}</p> : null}
         <h1 className="text-[22px] leading-tight font-semibold tracking-[-0.015em] text-ink">{title}</h1>
-        {description ? <p className="mt-1 text-sm text-ink-muted">{description}</p> : null}
+        {description ? <p className="mt-1 max-w-3xl text-sm text-ink-muted">{description}</p> : null}
       </div>
-      {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+      {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
     </div>
   );
 }

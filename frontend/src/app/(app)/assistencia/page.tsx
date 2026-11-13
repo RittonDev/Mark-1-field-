@@ -74,10 +74,12 @@ export default function RepairsPage() {
                 active ? "border-brand bg-nav-active" : "border-line bg-surface hover:border-brand/50",
               )}
             >
-              <span className="text-[11px] text-ink-muted">{REPAIR_STATUS[s].label}</span>
-              <span className="text-lg font-semibold tabular-nums" style={{ color: REPAIR_STATUS[s].color }}>
-                {summary.data?.by_status[s] ?? 0}
+              {/* A cor da etapa fica no ponto; o número em tinta neutra (zero colorido parecia alerta). */}
+              <span className="flex items-center gap-1.5 text-[11px] text-ink-muted">
+                <span className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: REPAIR_STATUS[s].color }} />
+                {REPAIR_STATUS[s].label}
               </span>
+              <span className="text-lg font-semibold text-ink tabular-nums">{summary.data?.by_status[s] ?? 0}</span>
             </button>
           );
         })}

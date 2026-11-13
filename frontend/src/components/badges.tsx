@@ -48,7 +48,7 @@ export function nextDue(ticket: TicketListItem): { label: string; at: string } |
 export function SlaCountdown({ ticket }: { ticket: TicketListItem }) {
   const now = useNow(30_000);
   const due = nextDue(ticket);
-  if (!due) return <span className="text-xs text-ink-muted">—</span>;
+  if (!due) return null; // sem prazo pendente: nada embaixo do selo (um traço solto era ruído)
   if (ticket.sla_paused_at) return <span className="text-xs text-ink-muted">pausado</span>;
   const late = new Date(due.at).getTime() < now;
   return (
