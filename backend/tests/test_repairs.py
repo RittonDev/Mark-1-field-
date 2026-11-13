@@ -1,11 +1,12 @@
 """Assistência externa: o equipamento passa pelas etapas, da retirada no cliente à devolução."""
 
 import base64
-from datetime import date, timedelta
+from datetime import timedelta
 
 from httpx import AsyncClient
 
 from app.core.config import settings
+from app.services.activities import local_today
 from tests.conftest import World, requires_db
 from tests.test_api import create
 
@@ -49,7 +50,9 @@ async def test_repair_lifecycle(client: AsyncClient, world: World) -> None:
     )
     assert bad.status_code == 422  # não pula etapas
     await move("received")
-    late = (date.today() - timedelta(days=1)).isoformat()
+    # "Hoje" do servidor é o de São Paulo: com date.today() (UTC no container) o teste falhava
+    # entre 21h e meia-noite.
+    late = (local_today() - timedelta(days=1)).isoformat()
     await move("sent_to_vendor", note="Coleta da transportadora", expected_return_date=late)
     out = await move("vendor_quote", vendor_quote_value="480.00")
     assert (out["vendor_quote_value"], out["overdue"]) == (480.0, True)
