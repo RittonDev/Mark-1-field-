@@ -198,11 +198,12 @@ def to_detail(ticket: Ticket, user: User) -> TicketDetail:
 def field_view(detail: TicketDetail) -> TicketDetail:
     """O técnico é terceiro: recebe só o necessário para a visita.
 
-    Fica: cliente, local (endereço e contato da loja), agenda, escopo (título, descrição, tipo de
+    Fica: cliente, local (nome e endereço da loja), agenda, escopo (título, descrição, tipo de
     serviço, recado), o fluxo de campo (status, chegada, permanência, autorização sim/não) e o
     próprio trabalho (formulários, fotos, assinatura, horas, peças, solução). Sai o que é da
     gestão: prazos e motivos de SLA, analista, equipe, projeto, etiquetas, solicitante, quem abriu,
-    nº do chamado do cliente, detalhes da autorização, CNPJ da loja, reincidência e dados migrados.
+    nº do chamado do cliente, detalhes da autorização, CNPJ e contato da loja (nome e telefone:
+    quem fala com a loja é a central), reincidência e dados migrados.
     """
     blank: dict[str, Any] = {
         "owner": None,
@@ -237,7 +238,9 @@ def field_view(detail: TicketDetail) -> TicketDetail:
     for key, value in blank.items():
         setattr(detail, key, value)
     if detail.location is not None:
-        detail.location = detail.location.model_copy(update={"document": None})
+        detail.location = detail.location.model_copy(
+            update={"document": None, "contact_name": None, "contact_phone": None}
+        )
     # Colegas da visita: só o nome (sem e-mail).
     detail.helpers = [h.model_copy(update={"email": ""}) for h in detail.helpers]
     if detail.assignee is not None:
