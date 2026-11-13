@@ -1,9 +1,11 @@
 import uuid
+from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
 from app.core.enums import Responsibility, TicketPriority, ViolationScope
 from app.schemas.common import ORMModel, Ref
+from app.schemas.expense import Money
 
 
 class CategoryOut(ORMModel):
@@ -50,6 +52,7 @@ class ServiceTypeOut(ORMModel):
     name: str
     description: str | None
     estimated_minutes: int
+    technician_fee: Money | None = None
     customer_id: uuid.UUID | None
     customer: Ref | None
     category_id: uuid.UUID | None
@@ -64,6 +67,8 @@ class ServiceTypeCreate(BaseModel):
     name: str = Field(min_length=2, max_length=160)
     description: str | None = None
     estimated_minutes: int = Field(gt=0, le=60 * 24 * 7)
+    # Quanto o técnico parceiro recebe por uma OS deste tipo (padrão ao colocar o técnico).
+    technician_fee: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
     # Sem cliente: vale para todos. Com cliente: catálogo daquele cliente.
     customer_id: uuid.UUID | None = None
     category_id: uuid.UUID | None = None
@@ -73,6 +78,7 @@ class ServiceTypeUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=160)
     description: str | None = None
     estimated_minutes: int | None = Field(default=None, gt=0, le=60 * 24 * 7)
+    technician_fee: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
     category_id: uuid.UUID | None = None
     is_active: bool | None = None
 

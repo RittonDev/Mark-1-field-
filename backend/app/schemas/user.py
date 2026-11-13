@@ -25,6 +25,9 @@ class UserOut(ORMModel):
     job_title: str | None
     team_id: uuid.UUID | None
     team: Ref | None
+    # Usuário do cliente: a empresa (o portal mostra as solicitações de todas as lojas dela).
+    customer_id: uuid.UUID | None = None
+    customer: Ref | None = None
     is_active: bool
     last_login_at: datetime | None
     location_consent_at: datetime | None = None
@@ -40,6 +43,7 @@ class UserCreate(BaseModel):
     phone: str | None = None
     job_title: str | None = None
     team_id: uuid.UUID | None = None
+    customer_id: uuid.UUID | None = None
 
 
 class UserUpdate(BaseModel):
@@ -50,6 +54,7 @@ class UserUpdate(BaseModel):
     phone: str | None = None
     job_title: str | None = None
     team_id: uuid.UUID | None = None
+    customer_id: uuid.UUID | None = None
     is_active: bool | None = None
 
 

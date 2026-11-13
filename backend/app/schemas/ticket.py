@@ -22,6 +22,7 @@ from app.schemas.common import ORMModel, Ref, TagOut
 from app.schemas.expense import ExpenseOut
 from app.schemas.forms import TicketFormOut
 from app.schemas.part_request import PartRequestOut
+from app.schemas.payout import MyPayout, PayoutOut
 from app.schemas.user import UserRef
 from app.services import field as field_rules
 from app.services.durations import actual_seconds
@@ -226,6 +227,9 @@ class TicketDetail(TicketListItem):
     expenses: list[ExpenseOut] = []
     # Pedidos de peça do técnico (peça só entra com orçamento aprovado).
     part_requests: list[PartRequestOut] = []
+    # Valor de cada técnico na OS: a gestão vê todos; o técnico, só o dele (my_payout).
+    payouts: list[PayoutOut] = []
+    my_payout: MyPayout | None = None
     # Só na tela da OS: outras OS no mesmo local nos últimos 30 dias.
     recurrence: TicketRecurrence | None = None
     # OS migrada (Field Control): valores, itens, solicitação original e arquivos. Só a equipe.
