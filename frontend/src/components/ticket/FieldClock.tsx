@@ -68,16 +68,19 @@ export function OnsiteBar({ ticket, className }: { ticket: Clockable; className?
   const warning = !over && ticket.onsite_status === "warning";
   return (
     <div className={clsx("min-w-36", className)} title="Tempo do técnico na loja (limite do chamado)">
+      {/* Em coluna estreita quebra entre as duas partes, nunca no meio de um tempo. */}
       <div
         className={clsx(
-          "mb-1 flex items-center gap-1 text-[11px] font-medium whitespace-nowrap",
+          "mb-1 flex flex-wrap items-center gap-x-1 text-[11px] font-medium",
           over ? "text-red-600 dark:text-red-400" : warning ? "text-amber-700 dark:text-amber-400" : "text-ink-muted",
         )}
       >
-        <Hourglass className="size-3" />
-        {formatMinutes(Math.round(elapsed / 60_000))} na loja
+        <span className="inline-flex items-center gap-1 whitespace-nowrap">
+          <Hourglass className="size-3" />
+          {formatMinutes(Math.round(elapsed / 60_000))} na loja
+        </span>
         <span className="text-ink-subtle">·</span>
-        {over ? `passou ${formatMinutes(-left)}` : `restam ${formatMinutes(left)}`}
+        <span className="whitespace-nowrap">{over ? `passou ${formatMinutes(-left)}` : `restam ${formatMinutes(left)}`}</span>
       </div>
       <div className="h-1.5 overflow-hidden rounded-full bg-surface-3">
         <div

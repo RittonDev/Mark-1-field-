@@ -411,7 +411,7 @@ function TicketsView() {
                           <PriorityBadge priority={t.priority} compact />
                         </div>
                       </Td>
-                      <Td className="max-w-[12rem]">
+                      <Td className="max-w-[11rem]">
                         <span className="block truncate">{t.customer?.name ?? t.requester_name ?? "—"}</span>
                         {t.location ? (
                           <span className="block truncate text-xs text-ink-subtle">
@@ -420,7 +420,7 @@ function TicketsView() {
                           </span>
                         ) : null}
                       </Td>
-                      <Td className="max-w-[12rem]">
+                      <Td className="max-w-[11rem]">
                         {t.assignee ? (
                           <span className="flex min-w-0 items-center">
                             {/* Nome longo não empurra a coluna da OS: corta com reticências (nome inteiro no título). */}
@@ -463,7 +463,7 @@ function TicketsView() {
                                 >
                                   {initials(owner.name)}
                                 </span>
-                                <span className="max-w-[8rem] truncate text-xs text-ink-muted">
+                                <span className="hidden max-w-[6rem] truncate text-xs text-ink-muted 2xl:inline">
                                   {owner.id === user?.id ? "Você" : owner.name.split(" ")[0]}
                                 </span>
                               </>
@@ -488,7 +488,7 @@ function TicketsView() {
                           </div>
                         </Td>
                       ) : null}
-                      <Td className="max-w-[13rem]">
+                      <Td className="max-w-[11rem]">
                         <div className="flex flex-col items-start gap-1">
                           <SlaBadge status={t.sla_status} />
                           <SlaCountdown ticket={t} />
