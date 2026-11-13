@@ -1,6 +1,7 @@
 import uuid
+from decimal import Decimal
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.enums import Responsibility, TicketPriority, ViolationScope
@@ -72,6 +73,8 @@ class ServiceType(UUIDPrimaryKey, Timestamps, Base):
     name: Mapped[str] = mapped_column(String(160), index=True)
     description: Mapped[str | None] = mapped_column(Text)
     estimated_minutes: Mapped[int] = mapped_column(Integer)
+    # Quanto o técnico parceiro recebe por uma OS deste tipo (padrão; a central ajusta em cada OS).
+    technician_fee: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
     customer_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("customers.id", ondelete="CASCADE"), index=True
     )

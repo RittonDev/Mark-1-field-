@@ -174,6 +174,13 @@ class ExpenseKind(StrEnum):
     OTHER = "other"
 
 
+class PayoutStatus(StrEnum):
+    """Pagamento do técnico pela OS (os técnicos são parceiros e recebem por chamado)."""
+
+    PENDING = "pending"  # a pagar
+    PAID = "paid"  # pago
+
+
 class ExpenseStatus(StrEnum):
     PENDING = "pending"  # lançado, aguardando aprovação
     APPROVED = "approved"  # aprovado para reembolso

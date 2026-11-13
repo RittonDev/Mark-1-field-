@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.enums import UserRole
 from app.db.base import Base, Timestamps, UUIDPrimaryKey
 from app.models._types import str_enum
+from app.models.customer import Customer
 
 STAFF_ROLES = frozenset(
     {UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.ANALYST, UserRole.TECHNICIAN}
@@ -38,6 +39,11 @@ class User(UUIDPrimaryKey, Timestamps, Base):
     job_title: Mapped[str | None] = mapped_column(String(120))
     team_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("teams.id", ondelete="SET NULL"), index=True
+    )
+    # Usuário do cliente (solicitante): a empresa dele. No portal ele abre e acompanha as
+    # solicitações de todas as lojas dessa empresa.
+    customer_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("customers.id", ondelete="SET NULL"), index=True
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -82,6 +88,7 @@ class User(UUIDPrimaryKey, Timestamps, Base):
     entra_oid: Mapped[str | None] = mapped_column(String(64), unique=True)
 
     team: Mapped[Team | None] = relationship(lazy="selectin")
+    customer: Mapped[Customer | None] = relationship(lazy="selectin")
 
     def token_revoked(self, payload: dict) -> bool:
         """Token emitido antes da última revogação de sessões (iat em segundos inteiros)."""

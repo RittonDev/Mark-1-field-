@@ -14,6 +14,7 @@ from app.models.forms import FormTemplate, TicketForm
 from app.models.legacy import LegacyRef
 from app.models.onboarding import OnboardingInvite, TechnicianApplication
 from app.models.part_request import TicketPartRequest
+from app.models.payout import TicketPayout
 from app.models.project import Project
 from app.models.quote import Quote, QuoteItemCatalog
 from app.models.repair import RepairEvent, RepairOrder, RepairPhoto
@@ -55,6 +56,7 @@ __all__ = [
     "TicketExpense",
     "TicketForm",
     "TicketPartRequest",
+    "TicketPayout",
     "TicketWorklog",
     "UnproductiveReason",
     "TechnicianApplication",

@@ -235,6 +235,9 @@ class Ticket(UUIDPrimaryKey, Timestamps, Base):
     part_requests: Mapped[list["TicketPartRequest"]] = relationship(  # noqa: F821
         lazy="selectin", order_by="TicketPartRequest.created_at", viewonly=True
     )
+    payouts: Mapped[list["TicketPayout"]] = relationship(  # noqa: F821
+        lazy="selectin", order_by="TicketPayout.created_at", viewonly=True
+    )
 
     __mapper_args__ = {"version_id_col": version, "eager_defaults": True}
 
