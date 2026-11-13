@@ -112,6 +112,8 @@ class TicketEventType(StrEnum):
     # Pedido de peça do técnico (peça só entra com orçamento aprovado).
     PART_REQUESTED = "part_requested"
     PART_REQUEST_UPDATED = "part_request_updated"
+    # Horários reais corrigidos pela central (o técnico nunca mexe no horário).
+    TIMES_CORRECTED = "times_corrected"
 
 
 class DevicePlatform(StrEnum):

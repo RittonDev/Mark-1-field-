@@ -51,6 +51,7 @@ from app.schemas.ticket import (
     TicketDetail,
     TicketFilters,
     TicketRecurrence,
+    TicketTimesIn,
     TicketTransition,
     TicketUnproductive,
     TicketUpdate,
@@ -1005,6 +1006,127 @@ def _ensure_forms_and_signature(ticket: Ticket) -> None:
         raise WorkflowError("Conclua o formulário obrigatório antes: " + ", ".join(pending))
     if ticket.signature_required and ticket.signed_at is None:
         raise WorkflowError("Colete a assinatura do responsável no local antes de concluir a OS")
+
+
+# --------------------------------------------------------------------------- horários reais
+
+_CLOCK_SKEW = timedelta(minutes=1)
+
+
+async def correct_times(
+    db: AsyncSession, ticket: Ticket, data: TicketTimesIn, actor: User
+) -> Ticket:
+    """A central corrige os horários reais (ex.: o técnico esqueceu de iniciar ou concluir no app).
+
+    Ajusta a OS (início, término, tempo de atendimento e o limite na loja) e o histórico de status,
+    para Atividades do dia, relatórios e o relatório do cliente mostrarem o mesmo horário. O motivo
+    e os valores antigos ficam num evento próprio (só a gestão vê).
+    """
+    if not actor.can_manage_tickets:
+        raise PermissionDenied(TECHNICIAN_TIME)
+    check_version(ticket, data.expected_version)
+    now = utcnow()
+    events = list(
+        await db.scalars(
+            select(TicketEvent)
+            .where(
+                TicketEvent.ticket_id == ticket.id,
+                TicketEvent.event_type == TicketEventType.STATUS_CHANGED,
+            )
+            .order_by(TicketEvent.created_at)
+        )
+    )
+    arrive_ev = next((e for e in events if e.to_value == S.IN_PROGRESS.value), None)
+    finish_ev = next((e for e in reversed(events) if e.to_value == S.RESOLVED.value), None)
+    before_arrival = [
+        e
+        for e in events
+        if e.to_value == S.EN_ROUTE.value
+        and (arrive_ev is None or e.created_at <= arrive_ev.created_at)
+    ]
+    en_route_ev = before_arrival[-1] if before_arrival else None
+
+    if data.en_route_at is not None and en_route_ev is None:
+        raise WorkflowError("A OS não teve deslocamento registrado")
+    if data.arrived_at is not None and ticket.arrived_at is None:
+        raise WorkflowError("O atendimento desta OS ainda não começou")
+    if data.resolved_at is not None and ticket.resolved_at is None:
+        raise WorkflowError("A OS ainda não foi concluída")
+    running = ticket.work_started_at is not None
+    if data.work_minutes is not None and (running or ticket.resolved_at is None):
+        raise WorkflowError("O tempo de atendimento só é corrigido com a OS concluída")
+
+    en_route_at = data.en_route_at or (en_route_ev.created_at if en_route_ev else None)
+    arrived_at = data.arrived_at or ticket.arrived_at
+    resolved_at = data.resolved_at or ticket.resolved_at
+    moments = [m for m in (en_route_at, arrived_at, resolved_at) if m is not None]
+    if any(m > now + _CLOCK_SKEW for m in moments):
+        raise WorkflowError("O horário não pode ficar no futuro")
+    if any(m < ticket.created_at - _CLOCK_SKEW for m in moments):
+        raise WorkflowError("O horário não pode ser antes da abertura da OS")
+    if en_route_at and arrived_at and en_route_at > arrived_at:
+        raise WorkflowError("A saída para o local deve ser antes do início do atendimento")
+    if arrived_at and resolved_at and arrived_at > resolved_at:
+        raise WorkflowError("O início do atendimento deve ser antes do término")
+    if (
+        data.work_minutes is not None
+        and arrived_at is not None
+        and resolved_at is not None
+        and data.work_minutes * 60 > (resolved_at - arrived_at).total_seconds() + 59
+    ):
+        raise WorkflowError("O tempo de atendimento passa do intervalo entre o início e o término")
+
+    changes: dict[str, list[Any]] = {}
+    if (
+        data.en_route_at is not None
+        and en_route_ev is not None
+        and en_route_ev.created_at != data.en_route_at
+    ):
+        changes["en_route_at"] = [_jsonable(en_route_ev.created_at), _jsonable(data.en_route_at)]
+        en_route_ev.created_at = data.en_route_at
+    if data.arrived_at is not None and data.arrived_at != ticket.arrived_at:
+        changes["arrived_at"] = [_jsonable(ticket.arrived_at), _jsonable(data.arrived_at)]
+        rules = await field_rules.rules(db)
+        ticket.arrived_at = data.arrived_at
+        ticket.onsite_due_at = data.arrived_at + timedelta(hours=rules.onsite_hours)
+        ticket.onsite_warning_at = ticket.onsite_due_at - timedelta(
+            minutes=rules.onsite_warning_minutes
+        )
+        if arrive_ev is not None:
+            arrive_ev.created_at = data.arrived_at
+        # Atendimento correndo desde a primeira chegada: o relógio passa a contar do novo início.
+        if running and not ticket.work_seconds:
+            ticket.work_started_at = data.arrived_at
+    if data.resolved_at is not None and data.resolved_at != ticket.resolved_at:
+        changes["resolved_at"] = [_jsonable(ticket.resolved_at), _jsonable(data.resolved_at)]
+        ticket.resolved_at = data.resolved_at
+        if finish_ev is not None:
+            finish_ev.created_at = data.resolved_at
+    if not running and ticket.arrived_at is not None and ticket.resolved_at is not None:
+        if data.work_minutes is not None:
+            work = data.work_minutes * 60
+        elif "arrived_at" in changes or "resolved_at" in changes:
+            work = int((ticket.resolved_at - ticket.arrived_at).total_seconds())
+        else:
+            work = ticket.work_seconds
+        if work != ticket.work_seconds:
+            changes["work_minutes"] = [ticket.work_seconds // 60, work // 60]
+            ticket.work_seconds = work
+    if not changes:
+        return ticket
+
+    ticket.updated_at = now  # muda a versão: quem estava com a OS aberta recarrega
+    record_event(
+        db,
+        ticket,
+        actor,
+        TicketEventType.TIMES_CORRECTED,
+        note=" ".join(data.reason.split()),
+        data={"changes": changes},
+        now=now,
+    )
+    queue_event(db, "updated", ticket, actor, {"fields": ["times"]})
+    return ticket
 
 
 # --------------------------------------------------------------------------- reincidência

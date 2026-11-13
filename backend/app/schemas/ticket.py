@@ -360,6 +360,21 @@ class TicketTransition(BaseModel):
     allow_conflict: bool = False
 
 
+class TicketTimesIn(BaseModel):
+    """Correção dos horários reais pela central (o técnico nunca mexe no horário).
+
+    Só os campos informados mudam. `work_minutes` é o tempo de atendimento; sem ele, ao mexer no
+    início ou no término, vale o intervalo entre os dois. O motivo fica no histórico.
+    """
+
+    en_route_at: datetime | None = None  # saída para o local
+    arrived_at: datetime | None = None  # início do atendimento (chegada)
+    resolved_at: datetime | None = None  # término (conclusão)
+    work_minutes: int | None = Field(default=None, ge=0, le=60 * 24 * 14)
+    reason: str = Field(min_length=3, max_length=500)
+    expected_version: int | None = None
+
+
 class CommentCreate(BaseModel):
     body: str = Field(min_length=1, max_length=10000)
     is_internal: bool = False

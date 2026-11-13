@@ -22,6 +22,7 @@ from app.schemas.ticket import (
     TicketDetail,
     TicketFilters,
     TicketListItem,
+    TicketTimesIn,
     TicketTransition,
     TicketUnproductive,
     TicketUpdate,
@@ -47,6 +48,7 @@ _INTERNAL_EVENT_TYPES = {
     "part_requested",
     "part_request_updated",
     "attachment_removed",
+    "times_corrected",
 }
 
 
@@ -202,6 +204,17 @@ async def transition_ticket(
 ) -> TicketDetail:
     ticket = await svc.get_visible_ticket(db, user, ticket_id)
     await svc.transition_ticket(db, ticket, body, user)
+    await commit_and_publish(db)
+    return await _detail(db, ticket_id, user)
+
+
+@router.put("/tickets/{ticket_id}/times", response_model=TicketDetail)
+async def correct_times(
+    ticket_id: uuid.UUID, body: TicketTimesIn, db: DB, user: TicketManagerUser
+) -> TicketDetail:
+    """Corrige os horários reais (saída, início, término, tempo de atendimento): só a central."""
+    ticket = await svc.get_visible_ticket(db, user, ticket_id)
+    await svc.correct_times(db, ticket, body, user)
     await commit_and_publish(db)
     return await _detail(db, ticket_id, user)
 
