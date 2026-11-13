@@ -15,6 +15,7 @@ import { FormsCard } from "@/components/ticket/FormsCard";
 import { HistoryTab } from "@/components/ticket/HistoryTab";
 import { LegacyOrderCard } from "@/components/ticket/LegacyOrderCard";
 import { PartRequestsCard } from "@/components/ticket/PartRequestsCard";
+import { PayoutsCard } from "@/components/ticket/PayoutsCard";
 import { QuotesCard } from "@/components/ticket/QuotesCard";
 import { ReportLinkCard } from "@/components/ticket/ReportLinkCard";
 import { SlaCard } from "@/components/ticket/SlaCard";
@@ -284,6 +285,7 @@ export function TicketEditor({ ticket, variant, onClose }: { ticket: TicketDetai
         {tab === "pecas" ? (
           <div className="flex flex-col gap-4">
             <PartRequestsCard ticket={ticket} />
+            <PayoutsCard ticket={ticket} />
             <ExpensesCard ticket={ticket} />
           </div>
         ) : null}

@@ -9,6 +9,7 @@ import { LocationPicker } from "@/components/LocationPicker";
 import { ConflictHint, ConflictList, scheduleConflicts } from "@/components/ScheduleConflict";
 import { useToast } from "@/components/Toaster";
 import { HelpersField, SuggestedTechnicians } from "@/components/new-ticket/SuggestedTechnicians";
+import { PayoutLine } from "@/components/ticket/PayoutsCard";
 import { TransitionDialog } from "@/components/ticket/TransitionDialog";
 import { ErrorBox, Field, Input, Select, Textarea } from "@/components/ui";
 import { api, ApiError, errorMessage } from "@/lib/api";
@@ -534,6 +535,11 @@ export function GeneralTab({
           onChange={(ids) => set("helperIds", ids)}
         />
       </div>
+      {ticket.assignee ? (
+        <div className="col-span-12">
+          <PayoutLine ticket={ticket} />
+        </div>
+      ) : null}
 
       <div className="col-span-12 rounded-xl border border-line bg-surface-2/40 p-3">
         <p className="mb-2 text-xs font-semibold text-ink">Técnicos mais indicados para esta loja</p>
