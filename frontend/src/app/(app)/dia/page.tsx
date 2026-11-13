@@ -1,14 +1,13 @@
 "use client";
 
 import clsx from "clsx";
-import { CalendarClock, ChevronLeft, ChevronRight, MapPin, Navigation } from "lucide-react";
-import Link from "next/link";
+import { CalendarClock, ChevronLeft, ChevronRight, Navigation } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Button, Card, EmptyState, ErrorBox, Input, LoadingBlock, PageHeader, Select } from "@/components/ui";
 import { CountUp } from "@/components/motion";
+import { TagChips } from "@/components/TagChips";
 import { MessagesButton } from "@/components/ticket/MessagesPanel";
-import { ArrivalChip, OnsiteBar } from "@/components/ticket/FieldClock";
-import { QuickEditButton } from "@/components/ticket/QuickEditButton";
+import { OpenTicketButton, QuickEditButton } from "@/components/ticket/QuickEditButton";
 import { TimesButton } from "@/components/ticket/TimesDialog";
 import { errorMessage } from "@/lib/api";
 import { useAuth, useIsClient } from "@/lib/auth";
@@ -21,14 +20,14 @@ import type { Activity, ActivityState, DaySummary } from "@/lib/types";
 const OPERATION_TZ = "America/Sao_Paulo";
 
 const STATE: Record<ActivityState, { label: string; className: string; dot: string }> = {
-  late: { label: "Atrasada", className: "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300", dot: "bg-red-500" },
-  scheduled: { label: "Agendada", className: "bg-cyan-100 text-cyan-800 dark:bg-cyan-500/15 dark:text-cyan-300", dot: "bg-cyan-500" },
-  en_route: { label: "Em deslocamento", className: "bg-sky-100 text-sky-800 dark:bg-sky-500/15 dark:text-sky-300", dot: "bg-sky-500" },
-  in_progress: { label: "Em atendimento", className: "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300", dot: "bg-amber-500" },
-  on_hold: { label: "Pendente", className: "bg-purple-100 text-purple-800 dark:bg-purple-500/15 dark:text-purple-300", dot: "bg-purple-500" },
-  rescheduled: { label: "Reagendada", className: "bg-indigo-100 text-indigo-800 dark:bg-indigo-500/15 dark:text-indigo-300", dot: "bg-indigo-500" },
-  done: { label: "Concluída", className: "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300", dot: "bg-emerald-500" },
-  pending: { label: "Na fila", className: "bg-slate-100 text-slate-700 dark:bg-slate-500/15 dark:text-slate-300", dot: "bg-slate-400" },
+  late: { label: "Atrasada", className: "bg-red-50 text-red-700 ring-red-200 dark:bg-red-500/15 dark:text-red-300 dark:ring-red-500/30", dot: "bg-red-500" },
+  scheduled: { label: "Agendada", className: "bg-cyan-50 text-cyan-800 ring-cyan-200 dark:bg-cyan-500/15 dark:text-cyan-300 dark:ring-cyan-500/30", dot: "bg-cyan-500" },
+  en_route: { label: "Em deslocamento", className: "bg-sky-50 text-sky-800 ring-sky-200 dark:bg-sky-500/15 dark:text-sky-300 dark:ring-sky-500/30", dot: "bg-sky-500" },
+  in_progress: { label: "Em atendimento", className: "bg-amber-50 text-amber-800 ring-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-500/30", dot: "bg-amber-500" },
+  on_hold: { label: "Pendente", className: "bg-purple-50 text-purple-800 ring-purple-200 dark:bg-purple-500/15 dark:text-purple-300 dark:ring-purple-500/30", dot: "bg-purple-500" },
+  rescheduled: { label: "Reagendada", className: "bg-indigo-50 text-indigo-800 ring-indigo-200 dark:bg-indigo-500/15 dark:text-indigo-300 dark:ring-indigo-500/30", dot: "bg-indigo-500" },
+  done: { label: "Concluída", className: "bg-emerald-50 text-emerald-800 ring-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-500/30", dot: "bg-emerald-500" },
+  pending: { label: "Na fila", className: "bg-slate-50 text-slate-700 ring-slate-200 dark:bg-slate-500/15 dark:text-slate-300 dark:ring-slate-500/30", dot: "bg-slate-400" },
 };
 
 const SUMMARY_ORDER: { key: keyof DaySummary; label: string; state?: ActivityState }[] = [
@@ -66,104 +65,113 @@ function when(value: string | null, day: string): string {
   return `${localDay.slice(8, 10)}/${localDay.slice(5, 7)} ${formatTime(value)}`;
 }
 
-function Delay({ minutes }: { minutes: number | null }) {
-  if (minutes === null || Math.abs(minutes) < 5) return null;
-  const late = minutes > 0;
-  return (
-    <span className={late ? "ml-1 text-xs font-medium text-red-600 dark:text-red-400" : "ml-1 text-xs text-emerald-600"}>
-      {late ? `+${formatMinutes(minutes)}` : `-${formatMinutes(-minutes)}`}
-    </span>
-  );
+/** Hora de atuação para ordenar: a agendada ou, sem agenda, a de início (sem hora vai para o fim). */
+const actingAt = (a: Activity) => {
+  const value = a.scheduled_start ?? a.started_at;
+  return value ? new Date(value).getTime() : Number.MAX_SAFE_INTEGER;
+};
+
+/** "18:52 até 00:05": o realizado quando começou; antes disso, a janela agendada. */
+function timeRange(a: Activity, day: string): { text: string; real: boolean } | null {
+  const start = a.arrived_at ?? a.started_at;
+  if (start) {
+    const end = a.finished_at ? when(a.finished_at, day) : a.state === "in_progress" || a.state === "en_route" ? "agora" : null;
+    return { text: end ? `${when(start, day)} até ${end}` : when(start, day), real: true };
+  }
+  if (a.scheduled_start) {
+    return {
+      text: a.scheduled_end ? `${when(a.scheduled_start, day)} até ${when(a.scheduled_end, day)}` : when(a.scheduled_start, day),
+      real: false,
+    };
+  }
+  return null;
 }
 
-function ActivityRow({ a, along, day, manage }: { a: Activity; along?: string | null; day: string; manage: boolean }) {
+/**
+ * Um cartão por OS, com as informações do Field Control: nº e cliente com a situação; tipo de
+ * serviço, loja e endereço; a descrição; etiquetas, técnico e o horário (realizado ou agendado).
+ */
+function ActivityCard({ a, day, manage }: { a: Activity; day: string; manage: boolean }) {
   const t = a.ticket;
-  const helpers = t.helpers ?? [];
   const loc = t.location;
-  const ratio = a.estimated_minutes && a.actual_minutes > 0 ? a.actual_minutes / a.estimated_minutes : null;
+  const helpers = t.helpers ?? [];
+  const address = loc ? [loc.address_line, [loc.city, loc.state].filter(Boolean).join(" - ")].filter(Boolean).join(", ") : null;
+  const range = timeRange(a, day);
+  const description = (a.description ?? "").trim() || t.title;
+  const late = a.start_delay_minutes !== null && a.start_delay_minutes >= 5 && range?.real;
   return (
-    <tr className="border-t border-line align-top transition-colors hover:bg-[var(--row-hover)]">
-      <td className="px-3 py-2.5">
-        <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap ${STATE[a.state].className}`}>
-          {STATE[a.state].label}
-        </span>
-      </td>
-      <td className="px-3 py-2.5 text-sm whitespace-nowrap">
-        {a.scheduled_start ? (
-          <>
-            {when(a.scheduled_start, day)}
-            {a.scheduled_end ? <span className="text-ink-muted">–{formatTime(a.scheduled_end)}</span> : null}
-          </>
-        ) : (
-          <span className="text-ink-muted">sem horário</span>
-        )}
-      </td>
-      <td className="px-3 py-2.5 text-sm whitespace-nowrap">
-        {a.started_at ? (
-          <>
-            {when(a.started_at, day)}
-            <Delay minutes={a.start_delay_minutes} />
-            {a.start_has_gps ? (
-              <Navigation className="ml-1 inline size-3 text-brand" aria-label="Check-in com GPS" />
-            ) : null}
-            {a.arrived_at && a.arrived_at !== a.started_at ? (
-              <span className="block text-xs text-ink-muted">chegou {when(a.arrived_at, day)}</span>
-            ) : null}
-            {a.state === "in_progress" ? <OnsiteBar ticket={t} className="mt-1.5" /> : null}
-          </>
-        ) : (
-          t.arrival_due_at ? <ArrivalChip ticket={t} compact /> : <span className="text-ink-muted">—</span>
-        )}
-      </td>
-      <td className="px-3 py-2.5 text-sm whitespace-nowrap">{a.finished_at ? when(a.finished_at, day) : <span className="text-ink-muted">—</span>}</td>
-      <td className="px-3 py-2.5">
-        <Link href={`/chamados/${t.id}`} className="group block">
-          <span className="font-mono text-xs text-ink-subtle">{t.code}</span>{" "}
-          <span className="text-sm font-medium text-ink group-hover:text-brand">{t.title}</span>
-        </Link>
-        {a.service_type_name ? <p className="text-xs text-ink-muted">{a.service_type_name}</p> : null}
-        {along ? (
-          <p className="mt-0.5 inline-flex items-center gap-1 rounded-md bg-emerald-50 px-1.5 py-px text-[11px] font-medium text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-200">
-            Vai junto · responsável: {along}
+    <li className="group relative border-b border-line last:border-b-0">
+      <div className="flex gap-3 px-4 py-3.5 transition-colors hover:bg-[var(--row-hover)]">
+        <div className="min-w-0 flex-1 space-y-1">
+          <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+            <OpenTicketButton ticketId={t.id} className="font-mono text-ink-muted hover:text-brand">
+              {t.code}
+            </OpenTicketButton>
+            <span className="text-ink-subtle">-</span>
+            <span className="font-semibold text-ink">{t.customer?.name ?? "Sem cliente"}</span>
+            <span className={clsx("inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset", STATE[a.state].className)}>
+              <span className={clsx("size-1.5 rounded-full", STATE[a.state].dot)} />
+              {STATE[a.state].label}
+            </span>
           </p>
-        ) : helpers.length ? (
-          <p className="text-xs text-ink-muted">Com {helpers.map((h) => h.name.split(" ")[0]).join(", ")}</p>
-        ) : null}
-      </td>
-      <td className="px-3 py-2.5 text-sm">
-        {loc ? (
-          <>
-            <p className="flex items-center gap-1">
-              <MapPin className="size-3 shrink-0 text-ink-muted" />
-              {loc.code ? <span className="font-mono text-xs text-ink-muted">{loc.code}</span> : null}
-              <span>{loc.name}</span>
-            </p>
-            <p className="text-xs text-ink-muted">
-              {[t.customer?.name, loc.city].filter(Boolean).join(" · ")}
-            </p>
-          </>
-        ) : (
-          <span className="text-ink-muted">{t.customer?.name ?? "—"}</span>
-        )}
-      </td>
-      <td className="px-3 py-2.5 text-right text-sm whitespace-nowrap">
-        {a.estimated_minutes ? <span className="text-ink-muted">{formatMinutes(a.estimated_minutes)}</span> : "—"}
-        {a.actual_minutes > 0 ? (
-          <span className={ratio !== null && ratio >= 1.25 ? "block font-medium text-red-600 dark:text-red-400" : "block"}>
-            {formatMinutes(a.actual_minutes)}
-          </span>
-        ) : null}
-      </td>
-      {manage ? (
-        <td className="edit-col px-3 py-2.5">
-          <span className="inline-flex items-center gap-1">
+          <p className="truncate text-sm">
+            <span className="font-semibold text-ink">{a.service_type_name ?? t.title}</span>
+            {loc ? (
+              <>
+                <span className="mx-2 text-line-strong">|</span>
+                <span className="font-semibold text-ink">{[loc.name, loc.code].filter(Boolean).join(" - ")}</span>
+                {address ? <span className="text-ink-muted"> - {address}</span> : null}
+              </>
+            ) : null}
+          </p>
+          <p className="truncate text-sm text-ink-muted" title={description}>
+            {description}
+          </p>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 pt-1 text-sm">
+            <TagChips tags={t.tags} max={4} />
+            <span className="inline-flex items-center gap-2">
+              <span
+                className={clsx(
+                  "flex size-6 items-center justify-center rounded-full text-[10px] font-semibold",
+                  t.assignee ? "bg-brand-soft text-brand-ink" : "border border-dashed border-line-strong text-ink-subtle",
+                )}
+              >
+                {t.assignee ? initials(t.assignee.name) : "?"}
+              </span>
+              <span className="font-medium text-ink">{t.assignee?.name ?? "Sem técnico"}</span>
+              {helpers.length ? (
+                <span className="text-xs text-ink-muted" title={helpers.map((h) => h.name).join(", ")}>
+                  +{helpers.length}
+                </span>
+              ) : null}
+            </span>
+            {range ? (
+              <span className="inline-flex items-center gap-1.5 border-l border-line pl-3 text-ink-muted tabular-nums">
+                {range.text}
+                {late ? <span className="text-xs font-medium text-red-600 dark:text-red-400">+{formatMinutes(a.start_delay_minutes!)}</span> : null}
+                {a.start_has_gps ? <Navigation className="size-3 text-brand" aria-label="Check-in com GPS" /> : null}
+                {!range.real ? <span className="text-xs">(agendado)</span> : null}
+              </span>
+            ) : (
+              <span className="border-l border-line pl-3 text-ink-subtle">sem horário</span>
+            )}
+            {a.actual_minutes > 0 ? (
+              <span className="text-xs text-ink-subtle">
+                atendimento {formatMinutes(a.actual_minutes)}
+                {a.estimated_minutes ? ` de ${formatMinutes(a.estimated_minutes)}` : ""}
+              </span>
+            ) : null}
+          </div>
+        </div>
+        {manage ? (
+          <div className="flex shrink-0 items-start gap-1 pt-0.5">
             <MessagesButton ticketId={t.id} code={t.code} />
             {a.started_at || a.arrived_at ? <TimesButton ticketId={t.id} code={t.code} /> : null}
             <QuickEditButton ticketId={t.id} code={t.code} />
-          </span>
-        </td>
-      ) : null}
-    </tr>
+          </div>
+        ) : null}
+      </div>
+    </li>
   );
 }
 
@@ -180,28 +188,11 @@ export default function DayPage() {
   const query = useDayActivities(day, teamId || null);
   const data = query.data;
 
-  // Um bloco por técnico; a visita entra também no dia de quem vai junto (marcada como tal).
-  // Tudo pela hora de atuação, a manhã primeiro: a agendada ou, sem agenda, a de início (sem hora
-  // vai para o fim). Os blocos seguem a primeira OS de cada técnico, então quem começa mais cedo
-  // aparece em cima e, dentro do bloco, as OS seguem o relógio.
-  const groups = useMemo(() => {
-    const map = new Map<string, { name: string; items: { a: Activity; along: string | null }[] }>();
-    const add = (key: string, name: string, a: Activity, along: string | null) => {
-      if (!map.has(key)) map.set(key, { name, items: [] });
-      map.get(key)!.items.push({ a, along });
-    };
-    const at = (a: Activity) => {
-      const value = a.scheduled_start ?? a.started_at;
-      return value ? new Date(value).getTime() : Number.MAX_SAFE_INTEGER;
-    };
-    const ordered = [...(data?.activities ?? [])].sort((x, y) => at(x) - at(y));
-    for (const a of ordered) {
-      if (stateFilter && a.state !== stateFilter) continue;
-      add(a.ticket.assignee?.id ?? "none", a.ticket.assignee?.name ?? "Sem técnico", a, null);
-      for (const h of a.ticket.helpers ?? []) add(h.id, h.name, a, a.ticket.assignee?.name ?? "sem responsável");
-    }
-    return [...map.entries()];
-  }, [data, stateFilter]);
+  // Lista única pela hora de atuação, a manhã primeiro (como pedido pela operação).
+  const items = useMemo(
+    () => [...(data?.activities ?? [])].filter((a) => !stateFilter || a.state === stateFilter).sort((x, y) => actingAt(x) - actingAt(y)),
+    [data, stateFilter],
+  );
 
   return (
     <div className="mx-auto max-w-7xl">
@@ -275,7 +266,7 @@ export default function DayPage() {
         <LoadingBlock />
       ) : query.error ? (
         <ErrorBox message={errorMessage(query.error)} />
-      ) : groups.length === 0 ? (
+      ) : items.length === 0 ? (
         <Card>
           <EmptyState
             icon={<CalendarClock className="size-8" />}
@@ -283,61 +274,20 @@ export default function DayPage() {
           />
         </Card>
       ) : (
-        <div className="space-y-4">
-          {groups.map(([key, group]) => {
-            const done = group.items.filter(({ a }) => a.state === "done").length;
-            return (
-              <Card key={key} className="animate-enter overflow-hidden">
-                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3">
-                  <div className="flex min-w-0 items-center gap-2.5">
-                    <span
-                      className={clsx(
-                        "flex size-8 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold",
-                        key === "none" ? "border border-dashed border-line-strong text-ink-subtle" : "bg-brand-soft text-brand-ink",
-                      )}
-                    >
-                      {key === "none" ? "?" : initials(group.name)}
-                    </span>
-                    <h2 className="truncate text-sm font-semibold text-ink">{group.name}</h2>
-                  </div>
-                  {/* Progresso do dia do técnico: concluídas sobre o total. */}
-                  <div className="flex items-center gap-2.5">
-                    <span className="text-xs text-ink-muted tabular-nums">
-                      {done}/{group.items.length} concluída(s)
-                    </span>
-                    <span className="h-1.5 w-28 overflow-hidden rounded-full bg-surface-3">
-                      <span
-                        className="grow-x block h-full rounded-full bg-emerald-500"
-                        style={{ width: `${group.items.length ? (done / group.items.length) * 100 : 0}%` }}
-                      />
-                    </span>
-                  </div>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[56rem] text-left">
-                    <thead>
-                      <tr className="text-[11px] font-semibold tracking-[0.06em] text-ink-subtle uppercase [&>th]:border-b [&>th]:border-line [&>th]:bg-[var(--table-head)]">
-                        <th className="px-3 py-2 font-medium">Situação</th>
-                        <th className="px-3 py-2 font-medium">Agendado</th>
-                        <th className="px-3 py-2 font-medium">Início real</th>
-                        <th className="px-3 py-2 font-medium">Término</th>
-                        <th className="px-3 py-2 font-medium">OS</th>
-                        <th className="px-3 py-2 font-medium">Local</th>
-                        <th className="px-3 py-2 text-right font-medium">Estimada / real</th>
-                        {manage ? <th className="edit-col px-3 py-2 font-medium">Editar</th> : null}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {group.items.map(({ a, along }) => (
-                        <ActivityRow key={a.ticket.id} a={a} along={along} day={day} manage={manage} />
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </Card>
-            );
-          })}
-        </div>
+        <Card className="animate-enter overflow-hidden">
+          <div className="flex items-center justify-between border-b border-line bg-[var(--table-head)] px-4 py-2.5 text-xs text-ink-muted">
+            <span className="font-medium text-ink">{longDate(day)}</span>
+            <span className="tabular-nums">
+              {items.length} atividade{items.length === 1 ? "" : "s"}
+              {stateFilter ? ` · ${STATE[stateFilter].label.toLowerCase()}` : ""}
+            </span>
+          </div>
+          <ul>
+            {items.map((a) => (
+              <ActivityCard key={a.ticket.id} a={a} day={day} manage={manage} />
+            ))}
+          </ul>
+        </Card>
       )}
     </div>
   );
