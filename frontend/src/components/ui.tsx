@@ -57,20 +57,28 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
 });
 
 const fieldBase =
-  "w-full rounded-lg border border-line bg-surface px-3 text-sm text-ink shadow-elev-1 placeholder:text-ink-subtle " +
+  "rounded-lg border border-line bg-surface px-3 text-sm text-ink shadow-elev-1 placeholder:text-ink-subtle " +
   "transition-[border-color,box-shadow] duration-150 hover:border-line-strong " +
   "focus:border-brand focus:ring-4 focus:ring-brand/15 focus:outline-none disabled:opacity-60";
+
+/**
+ * Campo ocupa a largura toda, a menos que a tela passe uma largura própria (ex.: "w-40"). Com as duas
+ * classes juntas, "w-full" ganhava no CSS e o campo estourava a linha (data e grupo empilhados no Dia).
+ */
+function fieldWidth(className?: string) {
+  return className && /(^|\s)w-/.test(className) ? null : "w-full";
+}
 
 export const Input = forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(function Input(
   { className, ...props },
   ref,
 ) {
-  return <input ref={ref} className={clsx(fieldBase, "h-9", className)} {...props} />;
+  return <input ref={ref} className={clsx(fieldBase, fieldWidth(className), "h-9", className)} {...props} />;
 });
 
 export const Textarea = forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement>>(
   function Textarea({ className, rows = 4, ...props }, ref) {
-    return <textarea ref={ref} rows={rows} className={clsx(fieldBase, "py-2", className)} {...props} />;
+    return <textarea ref={ref} rows={rows} className={clsx(fieldBase, fieldWidth(className), "py-2", className)} {...props} />;
   },
 );
 
@@ -79,7 +87,7 @@ export const Select = forwardRef<HTMLSelectElement, React.SelectHTMLAttributes<H
   ref,
 ) {
   return (
-    <select ref={ref} className={clsx(fieldBase, "h-9 pr-8", className)} {...props}>
+    <select ref={ref} className={clsx(fieldBase, fieldWidth(className), "h-9 pr-8", className)} {...props}>
       {children}
     </select>
   );
