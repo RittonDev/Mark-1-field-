@@ -1,13 +1,13 @@
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { Image, Pressable, StyleSheet, View } from "react-native";
 import { absoluteApiUrl, errorMessage } from "../../lib/api";
-import { useLiveQuery } from "../../lib/changes";
-import { getAttachmentsCache, listPhotos, type PendingPhoto } from "../../lib/db";
+import type { PendingPhoto } from "../../lib/db";
 import { confirmAction, notify } from "../../lib/dialogs";
 import { dayMonth } from "../../lib/field";
 import { formatTime } from "../../lib/format";
 import { discardPhoto, isOnline, queuePhoto, requestSync, useSyncStatus } from "../../lib/sync";
 import type { LocalTicket } from "../../lib/syncTypes";
+import type { Attachment } from "../../lib/types";
 import { RADIUS, useStyles, useTheme, type Palette } from "../../theme/theme";
 import { Icon } from "../Icon";
 import { Text } from "../Text";
@@ -33,16 +33,21 @@ function origin(ticket: LocalTicket, photo: PendingPhoto): string {
  * Fotos do atendimento. As tiradas em campo ficam numa fila no aparelho e sobem por
  * POST /tickets/{id}/attachments (kind=photo) quando houver conexão; as já enviadas vêm da lista
  * guardada no aparelho (aparecem também offline). Tocar abre a foto no próprio app.
+ * A tela da OS passa a fila (`pending`) e a lista guardada (`cached`); undefined = ainda lendo.
  */
-export const PhotosPanel = memo(function PhotosPanel({ ticket }: { ticket: LocalTicket }) {
+export const PhotosPanel = memo(function PhotosPanel({
+  ticket,
+  pending,
+  cached,
+}: {
+  ticket: LocalTicket;
+  pending: PendingPhoto[] | undefined;
+  cached: Attachment[] | undefined;
+}) {
   const c = useTheme();
   const styles = useStyles(makeStyles);
   const sync = useSyncStatus();
   const online = isOnline(sync);
-  const loadPending = useCallback(() => listPhotos(ticket.id), [ticket.id]);
-  const loadSent = useCallback(() => getAttachmentsCache(ticket.id), [ticket.id]);
-  const pending = useLiveQuery(loadPending);
-  const cached = useLiveQuery(loadSent);
   const [busy, setBusy] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [viewer, setViewer] = useState<{ list: "sent" | "queue"; index: number } | null>(null);
@@ -88,7 +93,9 @@ export const PhotosPanel = memo(function PhotosPanel({ ticket }: { ticket: Local
   function confirmDiscard(photo: PendingPhoto) {
     const message = photo.form_id
       ? "Ela ainda não foi enviada e será apagada do aparelho. O formulário pode voltar a ficar incompleto."
-      : "Ela ainda não foi enviada e será apagada do aparelho.";
+      : photo.part_op_id
+        ? "Ela ainda não foi enviada e será apagada do aparelho. O pedido de peça segue sem ela."
+        : "Ela ainda não foi enviada e será apagada do aparelho.";
     void confirmAction("Remover foto?", message, { confirmText: "Remover", destructive: true }).then((ok) => {
       if (ok) void discardPhoto(photo.id, photo.file_uri);
     });

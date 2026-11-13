@@ -202,10 +202,8 @@ export function FieldInput({
                 accessibilityState={{ checked: selected, disabled }}
                 style={[styles.chip, selected && styles.chipSelected]}
               >
-                <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
-                  {multi ? (selected ? "✓ " : "") : ""}
-                  {option}
-                </Text>
+                {multi && selected ? <Icon name="check" size={14} color={c.brandInk} strokeWidth={2.6} /> : null}
+                <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{option}</Text>
               </Pressable>
             );
           })}
@@ -359,6 +357,10 @@ const makeStyles = (c: Palette) =>
     bigChoiceTextSelected: { color: c.brandInk },
     chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
     chip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      minHeight: 44,
       borderWidth: 1,
       borderColor: c.lineStrong,
       borderRadius: 999,

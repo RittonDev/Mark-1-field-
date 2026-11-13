@@ -122,8 +122,11 @@ function TicketView({ ticket: current, user }: { ticket: LocalTicket; user: User
   const loadSignatures = useCallback(() => listSignatures(ticketId), [ticketId]);
   const loadPhotos = useCallback(() => listPhotos(ticketId), [ticketId]);
   const loadAttachments = useCallback(() => getAttachmentsCache(ticketId), [ticketId]);
+  // Lidos uma vez aqui e repassados aos cartões (formulários, fotos): cada mudança no aparelho não
+  // repete as mesmas consultas em cada cartão.
   const pendingSignature = useLiveQuery(loadSignatures)?.[0] ?? null;
-  const queued = useLiveQuery(loadPhotos) ?? [];
+  const queuedRows = useLiveQuery(loadPhotos);
+  const queued = queuedRows ?? [];
   const attachments = useLiveQuery(loadAttachments);
   const notices = (useLiveQuery(listNotices) ?? []).filter((n) => n.ticket_id === ticketId);
   const [tab, setTab] = useState<Tab>("info");
@@ -455,7 +458,7 @@ function TicketView({ ticket: current, user }: { ticket: LocalTicket; user: User
 
         {isMine ? (
           <Animated.View entering={motion.entering(2)} style={{ gap: 12 }}>
-            <FormsCard ticket={current} />
+            <FormsCard ticket={current} attachments={attachments ?? []} pendingPhotos={queued} pendingSignature={pendingSignature} />
             <PartRequestsCard ticket={current} canRequest={canRequestPart} onRequest={() => setPart([])} />
           </Animated.View>
         ) : helping ? (
@@ -486,7 +489,7 @@ function TicketView({ ticket: current, user }: { ticket: LocalTicket; user: User
           />
           {tab === "info" ? <InfoPanel ticket={current} userId={user.id} /> : null}
           {tab === "time" ? <TimePanel ticket={current} /> : null}
-          {tab === "photos" ? <PhotosPanel ticket={current} /> : null}
+          {tab === "photos" ? <PhotosPanel ticket={current} pending={queuedRows} cached={attachments} /> : null}
         </Animated.View>
       </ScrollView>
 

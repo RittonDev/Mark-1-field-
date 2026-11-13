@@ -663,7 +663,7 @@ export default function PayoutsPage() {
                                 </p>
                                 <p className="truncate text-xs text-ink-muted">{subtitle(line)}</p>
                               </div>
-                              <div className="flex w-full items-center justify-end gap-3 sm:w-auto">
+                              <div className="flex w-full flex-wrap items-center justify-end gap-x-3 gap-y-1.5 sm:w-auto sm:flex-nowrap">
                                 <StatePill line={line} />
                                 {state === "cancelled" ? (
                                   <span className="flex items-center gap-1">
