@@ -63,7 +63,7 @@ export function ReportMenu({ ticket, buttonClassName }: { ticket: TicketDetail; 
     if (!current) return;
     if (action === "email") {
       const subject = `Relatório da ${ticket.code} · ${ticket.title}`;
-      window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(message(current.url))}`;
+      window.location.assign(`mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(message(current.url))}`);
     } else if (action === "whatsapp") {
       window.open(whatsappUrl(null, message(current.url)), "_blank", "noopener");
     } else if (action === "copy") {

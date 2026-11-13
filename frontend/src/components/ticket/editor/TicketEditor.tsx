@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
-import { ArrowLeft, Ban, Clock, ExternalLink, FileText, MessageCircle, Navigation, SquarePen, X } from "lucide-react";
+import { ArrowLeft, Ban, Clock, ExternalLink, MessageCircle, Navigation, SquarePen, X } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useState } from "react";
 import { StatusBadge } from "@/components/badges";
@@ -24,7 +24,7 @@ import { TimesDialog } from "@/components/ticket/TimesDialog";
 import { UNPRODUCTIVE_FROM, UnproductiveDialog } from "@/components/ticket/UnproductiveDialog";
 import { WhatsAppShare } from "@/components/ticket/WhatsAppShare";
 import { WorklogsTab } from "@/components/ticket/WorklogsTab";
-import { Button, Card, Dialog } from "@/components/ui";
+import { Button, Card } from "@/components/ui";
 import { api } from "@/lib/api";
 import { STATUS } from "@/lib/constants";
 import { formatDateTime, formatMinutes } from "@/lib/format";
