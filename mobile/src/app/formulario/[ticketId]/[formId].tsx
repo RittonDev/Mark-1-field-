@@ -1,7 +1,7 @@
 import * as ImagePicker from "expo-image-picker";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AppState, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { AppState, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View, type ScrollViewInstance } from "react-native";
 import { DetailSkeleton } from "../../../components/Skeleton";
 import { Text } from "../../../components/Text";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -90,7 +90,7 @@ function FormEditor({ ticket, form }: { ticket: LocalTicket; form: TicketForm })
   const styles = useStyles(makeStyles);
   const insets = useSafeAreaInsets();
   const online = isOnline(useSyncStatus());
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<ScrollViewInstance>(null);
   const [draft, setDraft] = useState<Record<string, FormAnswer | null>>(() => ({ ...form.answers }));
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState<"save" | "complete" | null>(null);
