@@ -272,12 +272,14 @@ function TicketsView() {
           <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
             <MultiSelect
               label="Status"
+              ariaLabel="Filtro de status"
               value={filters.status}
               onChange={(status) => update({ status })}
               options={STATUS_ORDER.map((s) => ({ value: s, label: STATUS[s].label, color: STATUS[s].color }))}
             />
             <MultiSelect
               label="Prioridade"
+              ariaLabel="Filtro de prioridade"
               value={filters.priority}
               onChange={(priority) => update({ priority })}
               options={PRIORITY_ORDER.map((p) => ({

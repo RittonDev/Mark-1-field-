@@ -316,7 +316,7 @@ function Editor({ initial, onDone }: { initial: Draft; onDone: () => void }) {
         </div>
       ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_20rem]">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="flex flex-col gap-4">
           <Card className="grid gap-4 p-4 sm:grid-cols-2">
             <Field label="Nome" required className="sm:col-span-2">
@@ -328,6 +328,7 @@ function Editor({ initial, onDone }: { initial: Draft; onDone: () => void }) {
             <div className="sm:col-span-2">
               <MultiSelect
                 label="Sugerir nas OS destes tipos de serviço"
+                ariaLabel="Sugerir nas OS destes tipos de serviço"
                 options={(serviceTypes.data ?? []).map((t) => ({ value: t.id, label: t.name }))}
                 value={draft.service_type_ids}
                 onChange={(v) => setDraft({ ...draft, service_type_ids: v })}

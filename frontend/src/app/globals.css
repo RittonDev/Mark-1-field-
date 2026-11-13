@@ -18,8 +18,10 @@
   --line: #e5e7eb;
   --line-strong: #d4d8de;
   --ink: #1b1f26;
-  --ink-muted: #5d6676;
-  --ink-subtle: #7a8290;
+  /* Cinzas de texto com contraste AA (4,5:1) para letra pequena: muted 6,9:1 e subtle 5,0:1 no branco,
+     4,55:1 no cinza dos cartões (surface-2). */
+  --ink-muted: #525a68;
+  --ink-subtle: #687080;
   --brand: #2447ff;
   --brand-strong: #1a36d6;
   --brand-soft: #eef1ff;
@@ -60,7 +62,8 @@
   --line-strong: #31343b;
   --ink: #ececf0;
   --ink-muted: #9ba1ac;
-  --ink-subtle: #7b818c;
+  /* 5,2:1 na superfície e 4,8:1 no cinza dos cartões. */
+  --ink-subtle: #838995;
   --brand: #5470ff;
   --brand-strong: #3d5af7;
   --brand-soft: rgb(84 112 255 / 0.14);
@@ -519,8 +522,8 @@
     --line: #e5e7eb;
     --line-strong: #d4d8de;
     --ink: #1b1f26;
-    --ink-muted: #5d6676;
-    --ink-subtle: #7a8290;
+    --ink-muted: #525a68;
+    --ink-subtle: #687080;
     --brand: #2447ff;
     --brand-strong: #1a36d6;
     --brand-soft: #eef1ff;

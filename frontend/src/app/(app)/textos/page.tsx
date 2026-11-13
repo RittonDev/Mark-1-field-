@@ -131,7 +131,7 @@ function Editor({ initial }: { initial: TemplatesOut }) {
           <ErrorBox message={errorMessage(save.error)} />
         </div>
       ) : null}
-      <div className="grid gap-4 lg:grid-cols-[1fr_18rem]">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
         <div className="flex flex-col gap-3">
           {items.map((t, i) => (
             <Card key={i} className="p-4">

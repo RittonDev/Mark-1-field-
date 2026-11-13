@@ -74,7 +74,7 @@ function LocationTab({ ticket }: { ticket: TicketDetail }) {
     .sort((a, b) => a.at.localeCompare(b.at));
   const bbox = store ? `${store[1] - 0.012},${store[0] - 0.007},${store[1] + 0.012},${store[0] + 0.007}` : null;
   return (
-    <div className="grid gap-4 lg:grid-cols-[1fr_20rem]">
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
       <Card className="overflow-hidden">
         {store && bbox ? (
           <iframe
@@ -308,7 +308,7 @@ export function TicketEditor({ ticket, variant, onClose }: { ticket: TicketDetai
         {tab === "anexos" ? <AttachmentsTab ticketId={ticket.id} closed={false} canManage signatureId={ticket.signature_attachment_id} /> : null}
         {tab === "acompanhamentos" ? <CommentsTab ticketId={ticket.id} /> : null}
         {tab === "historico" ? (
-          <div className="grid gap-4 lg:grid-cols-[1fr_20rem]">
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
             <Card className="p-4">
               <HistoryTab ticketId={ticket.id} />
             </Card>

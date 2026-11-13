@@ -660,6 +660,7 @@ function EditDialog({ tech, onClose }: { tech: Technician; onClose: () => void }
             <span className="text-xs font-semibold text-ink/80">Serviços que faz</span>
             <MultiSelect
               label="Serviços que faz"
+              ariaLabel="Serviços que faz"
               value={serviceIds}
               onChange={setServiceIds}
               options={(serviceTypes.data ?? []).map((s) => ({ value: s.id, label: s.name }))}
