@@ -384,6 +384,18 @@ do início do atendimento até a conclusão (`work_seconds`). Mudança de status
 (`POST /tickets/{id}/worklogs` e a operação `worklog` do sync) também são só da gestão. `can_edit` é só
 da gestão; o técnico responsável trabalha na OS (formulários, fotos, assinatura) por `can_work`.
 
+**Correção dos horários reais (gestão).** `PUT /tickets/{id}/times`
+`{en_route_at?, arrived_at?, resolved_at?, work_minutes?, reason, expected_version?}` → `TicketDetail`
+(403 para técnico e solicitante). Para quando o técnico esqueceu de iniciar ou concluir no app. Só os
+campos informados mudam: a saída move o último deslocamento antes da chegada; o início move a chegada
+(`arrived_at`, o primeiro "Em atendimento") e recalcula o limite na loja; o término move a conclusão
+(`resolved_at`, o último "Resolvido"). O histórico de status acompanha (Atividades do dia e o relatório
+do cliente leem dele). `work_minutes` é o tempo de atendimento (menor que o intervalo quando houve
+pausa); sem ele, ao mexer no início ou no término, vale o intervalo. Valida: só horários que existem,
+saída ≤ início ≤ término, nada no futuro nem antes da abertura; com o atendimento correndo, só o início.
+O motivo e os valores antigos ficam no evento `times_corrected` (interno). Na web: "Corrigir horários"
+na OS (perto do relógio de chegada) e o botão de relógio em Atividades do dia.
+
 **Autorização do cliente: retirada (2026-11-12).** A central combina a visita com o cliente; o técnico
 não espera registro nenhum. Saíram `POST /tickets/{id}/authorization`, o objeto `authorization` da
 abertura, os campos `authorization_status` e `authorized_*` da OS, a regra `require_authorization` (valor
