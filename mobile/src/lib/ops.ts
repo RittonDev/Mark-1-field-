@@ -7,7 +7,7 @@
 
 import { SELF_ASSIGN_ROLES, STATUS, TRANSITIONS, UNTOUCHED_STATUSES } from "./constants";
 import { actualSeconds, defaultEnd } from "./duration";
-import { authorizationBlock, onsiteDueFrom } from "./field";
+import { onsiteDueFrom } from "./field";
 import { resolutionBreached, responseBreached } from "./sla";
 import type { LocalPartRequest, LocalTicket, OutboxOp } from "./syncTypes";
 import type { TicketDetail, TicketStatus, User, UserRef } from "./types";
@@ -44,8 +44,6 @@ function applyTransition(ticket: TicketDetail, op: Extract<OutboxOp, { type: "tr
   const to = p.to_status;
   // Transição inválida: o servidor vai rejeitar; não fingimos que ela aconteceu.
   if (from === to || !TRANSITIONS[from].includes(to)) return ticket;
-  // Sem autorização do cliente o servidor recusa deslocamento e check-in (422).
-  if (authorizationBlock(ticket, to)) return ticket;
 
   const at = op.client_timestamp;
   const t: TicketDetail = { ...ticket };

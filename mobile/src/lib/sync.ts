@@ -62,7 +62,7 @@ import {
   type PendingPhoto,
   type PendingSignature,
 } from "./db";
-import { AUTHORIZATION_ERROR, setFieldRules } from "./field";
+import { setFieldRules } from "./field";
 import { isDone, isHelper } from "./lists";
 import { haptic } from "./haptics";
 import { syncOnsiteAlerts } from "./onsiteAlerts";
@@ -306,7 +306,6 @@ async function pushOutbox(maxSeq?: number) {
     }
 
     const problems: string[] = [];
-    let unauthorized = false;
     await transaction(async (db) => {
       const latest = new Map<UUID, TicketDetail | null>();
       for (const result of response.results) {
@@ -323,11 +322,6 @@ async function pushOutbox(maxSeq?: number) {
             result.status === "conflict"
               ? `${describeOp(op)}: descartado porque a OS foi alterada por outra pessoa. Confira o estado atual.`
               : `${describeOp(op)}: o servidor recusou — ${cleanServerError(result.error)}`;
-          // 422 da promessa de campo: a visita ainda não foi autorizada pelo cliente.
-          if (op.type === "transition" && AUTHORIZATION_ERROR.test(result.error ?? "")) {
-            message = `${describeOp(op)} desfeita: o cliente ainda não autorizou a visita. Aguarde a central liberar.`;
-            unauthorized = true;
-          }
           if (op.type === "form_answers") {
             await setFormError(op.payload.form_id, cleanServerError(result.error), db);
             // Conclusão recusada por falta de item: o servidor não gravou nada. Reenvia as mesmas
@@ -355,15 +349,10 @@ async function pushOutbox(maxSeq?: number) {
       }
     });
     if (problems.length) {
-      if (unauthorized) haptic.warning();
-      showToast(
-        unauthorized && problems.length === 1
-          ? "Visita aguardando autorização"
-          : problems.length === 1
-            ? "Uma operação não foi aceita"
-            : `${problems.length} operações não foram aceitas`,
-        { description: problems[0], tone: unauthorized ? "info" : "error" },
-      );
+      showToast(problems.length === 1 ? "Uma operação não foi aceita" : `${problems.length} operações não foram aceitas`, {
+        description: problems[0],
+        tone: "error",
+      });
     }
     // Resposta sem resultado para alguma operação: ela fica na fila e volta na próxima rodada.
     if (response.results.length === 0) return;
@@ -406,9 +395,7 @@ async function pullChanges() {
   }
 }
 
-type FieldNews =
-  | { kind: "part_approved" | "part_rejected"; code: string; description: string }
-  | { kind: "authorized" | "denied"; code: string; by: string | null };
+type FieldNews = { kind: "part_approved" | "part_rejected"; code: string; description: string };
 
 /** O que mudou entre a OS no aparelho e a recebida e merece aviso ao técnico. */
 function fieldNews(before: TicketDetail, after: TicketDetail, user: User): FieldNews[] {
@@ -423,15 +410,11 @@ function fieldNews(before: TicketDetail, after: TicketDetail, user: User): Field
       news.push({ kind: "part_rejected", code: after.code, description: request.description });
     }
   }
-  const auth = after.authorization_status;
-  if (before.authorization_status === "pending" && (auth === "authorized" || auth === "denied")) {
-    news.push({ kind: auth, code: after.code, by: after.authorized_by_name ?? null });
-  }
   return news;
 }
 
 function announceFieldNews(news: FieldNews[]) {
-  const approved = news.filter((n): n is Extract<FieldNews, { description: string }> => n.kind === "part_approved");
+  const approved = news.filter((n) => n.kind === "part_approved");
   if (approved.length) {
     haptic.success();
     showSuccess(
@@ -442,16 +425,7 @@ function announceFieldNews(news: FieldNews[]) {
     );
   }
   for (const n of news) {
-    if (n.kind === "authorized") {
-      haptic.step();
-      showToast(`${n.code} autorizada`, {
-        tone: "success",
-        description: `${n.by ? `Autorizada por ${n.by}. ` : ""}Pode iniciar o deslocamento.`,
-      });
-    } else if (n.kind === "denied") {
-      haptic.warning();
-      showToast(`${n.code}: visita não autorizada`, { tone: "error", description: "Fale com a central no grupo." });
-    } else if (n.kind === "part_rejected") {
+    if (n.kind === "part_rejected") {
       haptic.warning();
       showToast(`${n.code}: peça recusada`, {
         tone: "error",
@@ -883,8 +857,8 @@ function describeEvent(event: RealtimeEvent, user: User): string | null {
   if (event.type === "ticket.created" && event.assignee_id === user.id) return `Nova ${code} para você`;
   const addedIds = (event.data?.added_ids as string[] | undefined) ?? [];
   if (event.type === "ticket.helpers_changed" && addedIds.includes(user.id)) return `Você vai na visita da ${code}`;
-  // "ticket.authorization" e "ticket.part_request_decided" só disparam o sync: o pull compara a OS
-  // e avisa (autorizada/negada, peça aprovada com o check, peça recusada), sem aviso duplicado.
+  // "ticket.part_request_decided" só dispara o sync: o pull compara a OS e avisa (peça aprovada com
+  // o check, peça recusada), sem aviso duplicado.
   // Acompanhamentos não fazem parte do app: a central fala com o técnico pelo grupo de WhatsApp.
   return null;
 }

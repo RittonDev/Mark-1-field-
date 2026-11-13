@@ -14,7 +14,7 @@ import { StatusBadge } from "./badges";
 import { Icon } from "./Icon";
 import { PressableScale, useSwapMotion } from "./motion";
 import { Text } from "./Text";
-import { AuthorizationBadge, FieldClockLine } from "./ticket/FieldClock";
+import { FieldClockLine } from "./ticket/FieldClock";
 import { HelperBadge } from "./ticket/VisitInfo";
 
 const IN_FIELD = ["en_route", "in_progress"];
@@ -93,7 +93,6 @@ export function TicketCard({
             <StatusBadge status={ticket.status} />
           </Animated.View>
           {helping ? <HelperBadge /> : null}
-          <AuthorizationBadge status={ticket.authorization_status} />
         </View>
         {ticket.pending_ops ? (
           <View style={styles.footer}>

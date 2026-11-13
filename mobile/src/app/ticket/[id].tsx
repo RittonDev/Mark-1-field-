@@ -11,7 +11,7 @@ import { Icon, type IconName } from "../../components/Icon";
 import { PressableScale, useSwapMotion } from "../../components/motion";
 import { DetailSkeleton } from "../../components/Skeleton";
 import { Text } from "../../components/Text";
-import { ArrivalResult, AuthorizationNotice, FieldClockLine, OnsiteTimer } from "../../components/ticket/FieldClock";
+import { ArrivalResult, FieldClockLine, OnsiteTimer } from "../../components/ticket/FieldClock";
 import { FormsCard } from "../../components/ticket/FormsCard";
 import { PartRequestSheet, PartRequestsCard } from "../../components/ticket/PartRequests";
 import { QuickActions } from "../../components/ticket/QuickActions";
@@ -19,7 +19,7 @@ import { ReportShareCard } from "../../components/ticket/ReportShareCard";
 import { HelperBadge, VisitNoteCard, VisitTeamCard } from "../../components/ticket/VisitInfo";
 import { InfoPanel, visitWindow } from "../../components/ticket/InfoPanel";
 import { PhotosPanel } from "../../components/ticket/PhotosPanel";
-import { WorklogsPanel } from "../../components/ticket/WorklogsPanel";
+import { TimePanel } from "../../components/ticket/TimePanel";
 import { TransitionModal } from "../../components/TransitionModal";
 import { Button, Card, EmptyState, Segmented } from "../../components/ui";
 import { UnproductiveModal } from "../../components/UnproductiveModal";
@@ -27,7 +27,6 @@ import { useLiveQuery, useNow } from "../../lib/changes";
 import { TRANSITION_ACTION } from "../../lib/constants";
 import { getTicket, listSignatures } from "../../lib/db";
 import { addressOf } from "../../lib/device-actions";
-import { authorizationBlock } from "../../lib/field";
 import { concludeBlock } from "../../lib/forms";
 import { haptic } from "../../lib/haptics";
 import { awaitingReschedule, isDone, isHelper } from "../../lib/lists";
@@ -37,7 +36,7 @@ import { isOnline, requestSync, useSyncStatus } from "../../lib/sync";
 import type { TicketStatus } from "../../lib/types";
 import { RADIUS, useStyles, useTheme, type Palette } from "../../theme/theme";
 
-type Tab = "info" | "worklogs" | "photos";
+type Tab = "info" | "time" | "photos";
 
 /** Ordem das ações: o próximo passo do atendimento em campo vem primeiro. */
 const ACTION_ORDER: TicketStatus[] = [
@@ -106,12 +105,11 @@ export default function TicketScreen() {
   const primary = actions.find((s) => PRIMARY.includes(s));
   // O técnico só trabalha nas OS atribuídas a ele pelo analista (não há "assumir").
   const isMine = current.assignee?.id === user.id;
-  // Auxiliar da visita: vê a OS, aponta horas e manda fotos; status, formulários e assinatura são do responsável.
+  // Auxiliar da visita: vê a OS e manda fotos; status, formulários e assinatura são do responsável.
   const helping = isHelper(current, user);
   const conclude = concludeBlock(current, (pendingSignatures ?? []).length > 0);
-  // Concluir espera formulários/assinatura; deslocamento e check-in esperam a autorização do cliente.
-  const blockedFor = (to: TicketStatus) =>
-    ((to === "resolved" || to === "closed") && conclude ? conclude : null) ?? authorizationBlock(current, to);
+  // Concluir espera os formulários obrigatórios e, se pedida, a assinatura.
+  const blockedFor = (to: TicketStatus) => ((to === "resolved" || to === "closed") && conclude ? conclude : null);
   const canRequestPart = isMine && !isDone(current.status) && current.status !== "cancelled";
   // Visita improdutiva: só o responsável, com a OS atribuída, agendada, em deslocamento ou em atendimento.
   const canUnproductive = isMine && UNPRODUCTIVE_FROM.includes(current.status);
@@ -222,8 +220,7 @@ export default function TicketScreen() {
                   <HelperBadge />
                 </View>
               ) : null}
-              {/* Promessa de campo: autorização do cliente, prazo de chegada e resultado do check-in. */}
-              <AuthorizationNotice ticket={current} />
+              {/* Promessa de campo: prazo de chegada e resultado do check-in. */}
               {current.arrived_at ? <ArrivalResult ticket={current} /> : <FieldClockLine ticket={current} now={now} size={14} />}
               <View style={styles.divider} />
               <FieldStepper ticket={current} />
@@ -261,7 +258,7 @@ export default function TicketScreen() {
               <Card>
                 <Text style={styles.meta}>
                   Você vai junto nesta visita. Iniciar, concluir, formulários e assinatura ficam com{" "}
-                  {current.assignee?.name ?? "o responsável"}. Aqui você aponta suas horas e manda fotos.
+                  {current.assignee?.name ?? "o responsável"}. Aqui você vê a OS e manda fotos.
                 </Text>
               </Card>
               <PartRequestsCard ticket={current} canRequest={false} onRequest={() => undefined} />
@@ -278,12 +275,12 @@ export default function TicketScreen() {
               onChange={setTab}
               options={[
                 { value: "info", label: "Detalhes" },
-                { value: "worklogs", label: "Horas" },
+                { value: "time", label: "Tempo" },
                 { value: "photos", label: "Fotos" },
               ]}
             />
             {tab === "info" ? <InfoPanel ticket={current} /> : null}
-            {tab === "worklogs" ? <WorklogsPanel ticket={current} user={user} /> : null}
+            {tab === "time" ? <TimePanel ticket={current} now={now} /> : null}
             {tab === "photos" ? <PhotosPanel ticket={current} /> : null}
           </Animated.View>
         </ScrollView>

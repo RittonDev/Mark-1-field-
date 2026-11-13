@@ -1,16 +1,9 @@
 // Promessa de campo (maxxfield.com.br), sem dependências nativas para poder ser testada fora do app:
 // - nas capitais o técnico chega em até 4h do pedido (`arrival_due_at`);
 // - cada chamado inclui até 4h de técnico na loja, contadas da chegada (`arrived_at` → `onsite_due_at`);
-// - a visita só sai com a autorização do cliente (`authorization_status`);
 // - peça só entra com orçamento aprovado e assinado pelo cliente (pedidos de peça).
 
-import type {
-  AuthorizationChannel,
-  FieldRules,
-  PartRequestStatus,
-  TicketListItem,
-  TicketStatus,
-} from "./types";
+import type { FieldRules, PartRequestStatus, TicketListItem, TicketStatus } from "./types";
 
 /** Regras de campo (GET /settings/field). Valores da promessa enquanto o aparelho não baixou as da empresa. */
 export const DEFAULT_FIELD_RULES: FieldRules = {
@@ -18,7 +11,6 @@ export const DEFAULT_FIELD_RULES: FieldRules = {
   arrival_hours_interior: null,
   onsite_hours: 4,
   onsite_warning_minutes: 30,
-  require_authorization: true,
 };
 
 let rules: FieldRules = DEFAULT_FIELD_RULES;
@@ -108,20 +100,6 @@ export function arrivalResult(ticket: Clockable): { at: string; late: boolean } 
 }
 
 /**
- * Deslocamento e check-in esperam a autorização do cliente. Devolve o motivo do bloqueio
- * (o servidor responde 422 com "Aguardando autorização do cliente para a visita").
- */
-export function authorizationBlock(ticket: Pick<TicketListItem, "authorization_status">, to: TicketStatus): string | null {
-  if (to !== "en_route" && to !== "in_progress") return null;
-  if (ticket.authorization_status === "pending") return "Aguardando autorização do cliente para a visita.";
-  if (ticket.authorization_status === "denied") return "O cliente não autorizou a visita. Fale com a central no grupo.";
-  return null;
-}
-
-/** Erro do servidor por falta de autorização (push/sync). */
-export const AUTHORIZATION_ERROR = /autoriza/i;
-
-/**
  * Urgência na lista de Hoje: chegada atrasada primeiro, depois em risco, depois o restante.
  * Retorna 0 (atrasada), 1 (em risco) ou 2.
  */
@@ -135,15 +113,6 @@ export function arrivalUrgency(ticket: Clockable, now: number): number {
 export function onsiteDueFrom(arrivedAt: string): string {
   return new Date(new Date(arrivedAt).getTime() + rules.onsite_hours * 3600_000).toISOString();
 }
-
-export const AUTH_CHANNEL: Record<AuthorizationChannel, string> = {
-  whatsapp: "WhatsApp",
-  email: "E-mail",
-  phone: "Telefone",
-  portal: "Portal do cliente",
-  maxxcon: "Central Maxxcon",
-  other: "Outro",
-};
 
 export const PART_STATUS: Record<PartRequestStatus, { label: string; tone: "warning" | "info" | "success" | "danger" | "muted" }> = {
   open: { label: "Aguardando orçamento", tone: "warning" },

@@ -16,7 +16,6 @@ import type { TicketDetail, TicketListItem } from "../../lib/types";
 import { RADIUS, tint, useStyles, useTheme, type Palette } from "../../theme/theme";
 import { Icon } from "../Icon";
 import { Text } from "../Text";
-import { Badge } from "../ui";
 
 type Clockable = Pick<
   TicketListItem,
@@ -168,55 +167,6 @@ export function OnsiteTimer({ ticket, now }: { ticket: Clockable & Pick<TicketDe
   );
 }
 
-/**
- * Autorização do cliente. Pendente ou negada: cartão claro e deslocamento/check-in bloqueados.
- * Autorizada: quem autorizou e por qual canal.
- */
-export function AuthorizationNotice({ ticket }: { ticket: TicketDetail }) {
-  const c = useTheme();
-  const styles = useStyles(makeStyles);
-  const status = ticket.authorization_status;
-  if (!status || status === "not_required") return null;
-  if (status === "authorized") {
-    // Quem autorizou, por onde e quando ficam com a central (o técnico é terceiro).
-    return (
-      <View style={[styles.line, { alignItems: "flex-start" }]}>
-        <View style={{ paddingTop: 1 }}>
-          <Icon name="shield" size={16} color={c.success} strokeWidth={2} />
-        </View>
-        <Text style={[styles.lineText, { color: c.success, fontWeight: "600", lineHeight: 18 }]}>
-          Visita autorizada pelo cliente
-        </Text>
-      </View>
-    );
-  }
-  const denied = status === "denied";
-  const color = denied ? c.danger : c.warning;
-  return (
-    <View style={[styles.auth, { backgroundColor: denied ? c.dangerSoft : c.warningSoft, borderColor: tint(color, "55") }]}>
-      <View style={[styles.authIcon, { backgroundColor: tint(color, "1f") }]}>
-        <Icon name="shield" size={20} color={color} strokeWidth={2} />
-      </View>
-      <View style={{ flex: 1, gap: 2 }}>
-        <Text style={[styles.authTitle, { color }]}>{denied ? "Visita não autorizada pelo cliente" : "Aguardando autorização do cliente"}</Text>
-        <Text style={styles.authText}>
-          {denied
-            ? "Não vá ao local. Fale com a central no grupo para saber o próximo passo."
-            : "A central confirma com o cliente antes da visita. Deslocamento e check-in liberam assim que ele autorizar; você recebe um aviso."}
-        </Text>
-      </View>
-    </View>
-  );
-}
-
-/** Selo curto para o cartão da OS. */
-export function AuthorizationBadge({ status }: { status?: TicketListItem["authorization_status"] }) {
-  const c = useTheme();
-  if (status === "pending") return <Badge label="Aguardando autorização" color={c.warning} />;
-  if (status === "denied") return <Badge label="Visita não autorizada" color={c.danger} />;
-  return null;
-}
-
 const makeStyles = (c: Palette) =>
   StyleSheet.create({
     line: { flexDirection: "row", alignItems: "center", gap: 6 },
@@ -237,15 +187,4 @@ const makeStyles = (c: Palette) =>
       borderWidth: StyleSheet.hairlineWidth,
     },
     bannerText: { fontSize: 13, fontWeight: "700", lineHeight: 18, flex: 1 },
-    auth: {
-      flexDirection: "row",
-      gap: 12,
-      padding: 14,
-      borderRadius: RADIUS.card,
-      borderWidth: StyleSheet.hairlineWidth,
-      alignItems: "flex-start",
-    },
-    authIcon: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
-    authTitle: { fontSize: 15, fontWeight: "700" },
-    authText: { fontSize: 13, color: c.inkMuted, lineHeight: 18 },
   });
