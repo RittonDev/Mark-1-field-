@@ -42,8 +42,8 @@ export default function SignatureScreen() {
   if (!ticket) return <EmptyState title="OS não encontrada neste aparelho" />;
 
   const block = signatureBlock(ticket);
-  // Sugestão: o contato cadastrado do local (o técnico pode trocar).
-  const signer = name ?? ticket.location?.contact_name ?? "";
+  // O técnico digita o nome de quem assina (o app não recebe o contato da loja).
+  const signer = name ?? "";
 
   async function confirm() {
     setError(null);

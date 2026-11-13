@@ -102,12 +102,13 @@ Requisitos:
 
 ## O que o app faz
 
-- **O técnico é terceiro: só o básico.** A OS mostra cliente, local (endereço e contato da loja), data e
+- **O técnico é terceiro: só o básico.** A OS mostra cliente, local (nome e endereço da loja), data e
   hora da visita e o escopo (título, tipo de serviço, descrição e recado da central), mais o fluxo de campo
   (deslocamento, chegada, atendimento, conclusão), formulários, fotos, assinatura, horas, peças e o
-  relatório para o cliente. Prioridade, SLA, projeto, analista, solicitante, classificação interna da OS e
-  reincidência não aparecem (e o servidor nem manda). A migração 5 do banco local tira do aparelho o que
-  tinha vindo antes (notas da central, horas de colegas, prazos) sem apagar as OS, e refaz o sync.
+  relatório para o cliente. Contato da loja, prioridade, SLA, projeto, analista, solicitante, classificação
+  interna da OS e reincidência não aparecem (e o servidor nem manda); sem "Ligar". As migrações 5 e 6 do
+  banco local tiram do aparelho o que tinha vindo antes (notas da central, horas de colegas, prazos,
+  contato da loja) sem apagar as OS, e refazem o sync.
 - **Login** com `/auth/login` no canal `mobile`; tokens no Keychain/Keystore; renovação automática por
   `/auth/refresh` ao receber 401. Se o refresh for recusado por expiração, volta ao login sem apagar a
   fila (o mesmo técnico entra de novo e o que estava pendente é enviado). Se **outro** usuário entrar no
@@ -236,8 +237,8 @@ Regras de [src/lib/field.ts](src/lib/field.ts), espelhando `backend/app/services
 - **Concluir a OS** ("Resolver"/"Fechar") fica desabilitado, com o motivo na tela, até cumprir os
   formulários obrigatórios e, se pedida, a assinatura (o servidor também bloqueia).
 - **Relatório para o cliente**: com a OS concluída, o técnico responsável vê o cartão **Relatório para o
-  cliente** no topo da OS: **WhatsApp** (abre a conversa com o contato da loja quando é celular; senão escolhe
-  o contato), **Compartilhar** (outros apps; sem folha de compartilhamento, copia), **Copiar link** e **Ver
+  cliente** no topo da OS: **WhatsApp** (o técnico escolhe a conversa com o cliente; o app não tem
+  os contatos), **Compartilhar** (outros apps; sem folha de compartilhamento, copia), **Copiar link** e **Ver
   como o cliente vê**. O link vem na OS (`report_link`); OS antiga sem link pede `POST /tickets/{id}/report-link`.
 
 ## Rastreamento da jornada

@@ -1,5 +1,5 @@
 import { StyleSheet, View } from "react-native";
-import { addressOf, callPhone, openInMaps } from "../../lib/device-actions";
+import { addressOf, openInMaps } from "../../lib/device-actions";
 import { formatDay, formatTime } from "../../lib/format";
 import type { LocalTicket } from "../../lib/syncTypes";
 import { useStyles, type Palette } from "../../theme/theme";
@@ -19,9 +19,9 @@ export function visitWindow(ticket: Pick<LocalTicket, "scheduled_start" | "sched
 }
 
 /**
- * Detalhes da OS para o técnico. Ele é terceiro: só o básico para fazer a visita — quando, onde
- * (com o contato da loja) e o escopo. Prazos de SLA, analista, solicitante e a classificação
- * interna da OS ficam com a gestão (e o servidor nem manda).
+ * Detalhes da OS para o técnico. Ele é terceiro: só o básico para fazer a visita — quando, onde e
+ * o escopo. Contato da loja, prazos de SLA, analista, solicitante e a classificação interna da OS
+ * ficam com a central (e o servidor nem manda).
  */
 export function InfoPanel({ ticket }: { ticket: LocalTicket }) {
   const styles = useStyles(makeStyles);
@@ -29,7 +29,6 @@ export function InfoPanel({ ticket }: { ticket: LocalTicket }) {
   // OS baixadas antes da mudança no contrato não têm o campo; trata como vazio.
   const serviceAddress = ticket.service_address?.trim() || null;
   const registeredAddress = addressOf(location);
-  const contactPhone = location?.contact_phone;
   const when = visitWindow(ticket);
 
   return (
@@ -58,8 +57,6 @@ export function InfoPanel({ ticket }: { ticket: LocalTicket }) {
           {registeredAddress ? (
             <InfoRow label={serviceAddress ? "Endereço cadastrado da loja" : "Endereço"} value={registeredAddress} />
           ) : null}
-          {location?.contact_name ? <InfoRow label="Contato no local" value={location.contact_name} /> : null}
-          {contactPhone ? <InfoRow label="Telefone" value={contactPhone} onPress={() => void callPhone(contactPhone)} /> : null}
           <Button
             title={serviceAddress ? "Rota até o endereço do atendimento" : "Abrir no mapa"}
             onPress={() => void openInMaps(location, serviceAddress)}

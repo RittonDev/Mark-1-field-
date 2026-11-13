@@ -1,4 +1,4 @@
-// Recursos do aparelho usados nas telas: GPS para check-in e links para mapa/telefone.
+// Recursos do aparelho usados nas telas: GPS para check-in, links de mapa e o WhatsApp do relatório.
 
 import * as Clipboard from "expo-clipboard";
 import * as Location from "expo-location";
@@ -77,10 +77,6 @@ export async function openInMaps(location: LocationRef | null, serviceAddress: s
   }
 }
 
-export function callPhone(phone: string) {
-  return Linking.openURL(`tel:${phone.replace(/[^\d+]/g, "")}`);
-}
-
 export type NavApp = "google" | "waze";
 
 /** Links de rota (deep link do app; sem o app instalado, o link web do mesmo serviço). */
@@ -123,20 +119,7 @@ export async function copyText(text: string): Promise<boolean> {
   }
 }
 
-/**
- * Celular para o link do WhatsApp (wa.me): só dígitos, com 55 quando vier sem o código do país.
- * Fixo não tem WhatsApp: devolve null e o WhatsApp abre para o técnico escolher o contato.
- */
-export function whatsappNumber(phone: string | null | undefined): string | null {
-  if (!phone) return null;
-  let digits = phone.replace(/\D/g, "").replace(/^0+/, "");
-  if (digits.startsWith("55") && digits.length >= 12) digits = digits.slice(2);
-  // DDD + 9 + 8 dígitos: celular brasileiro.
-  return /^\d{2}9\d{8}$/.test(digits) ? `55${digits}` : null;
-}
-
-/** Abre o WhatsApp com a mensagem pronta, na conversa do número (se for celular) ou para escolher o contato. */
-export function openWhatsApp(text: string, phone?: string | null) {
-  const number = whatsappNumber(phone);
-  return Linking.openURL(`https://wa.me/${number ?? ""}?text=${encodeURIComponent(text)}`);
+/** Abre o WhatsApp com a mensagem pronta; o técnico escolhe a conversa (o app não tem os contatos). */
+export function openWhatsApp(text: string) {
+  return Linking.openURL(`https://wa.me/?text=${encodeURIComponent(text)}`);
 }

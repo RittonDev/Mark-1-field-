@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { StyleSheet, View } from "react-native";
-import { addressOf, callPhone, copyText, navigateWith } from "../../lib/device-actions";
+import { addressOf, copyText, navigateWith } from "../../lib/device-actions";
 import { haptic } from "../../lib/haptics";
 import type { LocalTicket } from "../../lib/syncTypes";
 import { showToast } from "../../lib/toast";
@@ -10,15 +10,17 @@ import { Icon, type IconName } from "../Icon";
 import { PressableScale } from "../motion";
 import { Text } from "../Text";
 
-/** Atalhos do atendimento: ligar para a loja, rota no Google Maps/Waze e copiar o endereço. */
+/**
+ * Atalhos do atendimento: rota no Google Maps/Waze e copiar o endereço. Sem "Ligar": o técnico é
+ * terceiro e não recebe o contato da loja (quem fala com a loja é a central).
+ */
 export function QuickActions({ ticket }: { ticket: LocalTicket }) {
   const c = useTheme();
   const styles = useStyles(makeStyles);
   const [navOpen, setNavOpen] = useState(false);
-  const phone = ticket.location?.contact_phone?.trim() || null;
   const address = ticket.service_address?.trim() || addressOf(ticket.location);
   const hasTarget = Boolean(address || (ticket.location?.latitude !== null && ticket.location?.latitude !== undefined));
-  if (!phone && !hasTarget) return null;
+  if (!hasTarget) return null;
 
   async function copy() {
     if (!address) return;
@@ -28,17 +30,6 @@ export function QuickActions({ ticket }: { ticket: LocalTicket }) {
   }
 
   const items: { key: string; icon: IconName; label: string; hint?: string; onPress: () => void }[] = [
-    ...(phone
-      ? [
-          {
-            key: "call",
-            icon: "phone" as IconName,
-            label: "Ligar",
-            hint: ticket.location?.contact_name ?? undefined,
-            onPress: () => void callPhone(phone),
-          },
-        ]
-      : []),
     ...(hasTarget ? [{ key: "nav", icon: "navigate" as IconName, label: "Rota", hint: "Maps ou Waze", onPress: () => setNavOpen(true) }] : []),
     ...(address ? [{ key: "copy", icon: "copy" as IconName, label: "Copiar", hint: "o endereço", onPress: () => void copy() }] : []),
   ];

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Linking, Pressable, Share, StyleSheet, View } from "react-native";
 import { api, errorMessage } from "../../lib/api";
-import { copyText, openWhatsApp, whatsappNumber } from "../../lib/device-actions";
+import { copyText, openWhatsApp } from "../../lib/device-actions";
 import { isOnline, useSyncStatus } from "../../lib/sync";
 import type { LocalTicket } from "../../lib/syncTypes";
 import { showToast } from "../../lib/toast";
@@ -13,18 +13,17 @@ import { Button, Card } from "../ui";
 
 /** Mensagem para o cliente, com o link do relatório (WhatsApp ou outro app). */
 export function reportMessage(ticket: Pick<LocalTicket, "code" | "location">, url: string): string {
-  const contact = ticket.location?.contact_name?.trim().split(/\s+/)[0];
   const place = ticket.location?.name?.trim();
   return [
-    `Olá${contact ? `, ${contact}` : ""}! O atendimento ${ticket.code}${place ? ` em ${place}` : ""} foi concluído.`,
+    `Olá! O atendimento ${ticket.code}${place ? ` em ${place}` : ""} foi concluído.`,
     `Relatório com fotos, checklist e assinatura: ${url}`,
   ].join("\n");
 }
 
 /**
  * OS concluída: o técnico responsável envia ao cliente o link do relatório (resumo, fotos,
- * checklist e assinatura), como no fechamento do Field Control. WhatsApp direto com a loja quando
- * o contato é celular; senão escolhe o contato, compartilha por outro app ou copia o link.
+ * checklist e assinatura), como no fechamento do Field Control: no WhatsApp ele escolhe o contato
+ * (o app não recebe o contato da loja), compartilha por outro app ou copia o link.
  */
 export function ReportShareCard({ ticket }: { ticket: LocalTicket }) {
   const c = useTheme();
@@ -53,10 +52,6 @@ export function ReportShareCard({ ticket }: { ticket: LocalTicket }) {
     };
   }, [link, waiting, online, error, ticket.id]);
 
-  const phone = ticket.location?.contact_phone?.trim() || null;
-  const storeWhatsapp = whatsappNumber(phone);
-  const contact = ticket.location?.contact_name?.trim() || "a loja";
-
   async function copy(url: string) {
     const ok = await copyText(url);
     showToast(ok ? "Link copiado" : "Não foi possível copiar", {
@@ -67,7 +62,7 @@ export function ReportShareCard({ ticket }: { ticket: LocalTicket }) {
 
   async function whatsapp(url: string) {
     try {
-      await openWhatsApp(reportMessage(ticket, url), storeWhatsapp);
+      await openWhatsApp(reportMessage(ticket, url));
     } catch {
       showToast("O WhatsApp não abriu", { tone: "error", description: "Use Compartilhar ou copie o link." });
     }
@@ -91,9 +86,7 @@ export function ReportShareCard({ ticket }: { ticket: LocalTicket }) {
           <Button title="WhatsApp" variant="primary" onPress={() => void whatsapp(url)} style={{ flex: 1 }} />
           <Button title="Compartilhar" icon="share" onPress={() => void share(url)} style={{ flex: 1 }} />
         </View>
-        <Text style={styles.hint}>
-          {storeWhatsapp ? `Abre a conversa com ${contact} · ${phone}` : "No WhatsApp, escolha o contato do cliente."}
-        </Text>
+        <Text style={styles.hint}>No WhatsApp, escolha a conversa com o cliente.</Text>
         <View style={styles.links}>
           <Pressable onPress={() => void copy(url)} hitSlop={8} accessibilityRole="button" style={styles.link}>
             <Icon name="copy" size={16} color={c.brandInk} />

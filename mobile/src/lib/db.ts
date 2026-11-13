@@ -157,6 +157,14 @@ const MIGRATIONS: string[] = [
   ) WHERE key LIKE 'attachments:%' AND json_valid(value);
   DELETE FROM kv WHERE key = 'sync_since';
   `,
+  // 6: o contato da loja (nome e telefone) também ficou só com a central: tira o que estava
+  // guardado nas OS do aparelho e refaz o sync.
+  `
+  UPDATE tickets SET
+    server_json = json_set(server_json, '$.location.contact_name', NULL, '$.location.contact_phone', NULL),
+    json = json_set(json, '$.location.contact_name', NULL, '$.location.contact_phone', NULL);
+  DELETE FROM kv WHERE key = 'sync_since';
+  `,
 ];
 
 let dbPromise: Promise<DB> | null = null;
