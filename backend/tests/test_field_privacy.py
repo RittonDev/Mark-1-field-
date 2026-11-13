@@ -124,7 +124,9 @@ async def test_technician_gets_only_the_basics(
     listed = (await client.get(url, headers=tech)).json()
     assert {a["id"] for a in listed} == {office_photo["id"], own["id"]}
     assert all(a["uploaded_by"]["email"] == "" for a in listed)
-    assert doc["id"] in {a["id"] for a in (await client.get(url, headers=world.analyst.headers)).json()}
+    assert doc["id"] in {
+        a["id"] for a in (await client.get(url, headers=world.analyst.headers)).json()
+    }
 
     # Horas: cada técnico da visita vê só as dele.
     for headers, desc in ((tech, "Cabeamento"), (helper, "Ajudante")):
