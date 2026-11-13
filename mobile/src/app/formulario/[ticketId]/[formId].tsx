@@ -220,12 +220,19 @@ function FormEditor({ ticket, form }: { ticket: LocalTicket; form: TicketForm })
       return;
     }
     if (complete && missing.length) {
-      setError(
-        mode === "steps" && !locked
-          ? `Falta${missing.length > 1 ? "m" : ""} ${missing.length} ite${missing.length > 1 ? "ns" : "m"} obrigatório${missing.length > 1 ? "s" : ""}: ${missing.join("; ")}. Toque no item marcado para responder.`
-          : `Falta preencher: ${missing.join("; ")}`,
-      );
       haptic.warning();
+      // Uma por tela: leva direto à primeira pergunta pendente, já com o aviso do que falta.
+      const first = mode === "steps" && !locked ? steps.findIndex((_, i) => problemAt(i) !== null) : -1;
+      if (first >= 0) {
+        goTo(first, "back");
+        setAttempted(true);
+        showToast(missing.length > 1 ? `Faltam ${missing.length} itens obrigatórios` : "Falta 1 item obrigatório", {
+          tone: "error",
+          description: missing.join("; "),
+        });
+        return;
+      }
+      setError(`Falta preencher: ${missing.join("; ")}`);
       return;
     }
     setSaving(complete ? "complete" : "save");
