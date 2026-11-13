@@ -102,13 +102,13 @@ function Kpi({
       onClick={onClick}
       style={{ ["--i" as string]: index }}
       className={clsx(
-        "group flex items-center gap-3 rounded-xl border bg-surface p-4 text-left shadow-elev-1 transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:shadow-elev-2",
+        "group flex items-center gap-3 rounded-xl border bg-surface p-4 text-left shadow-elev-1 transition-[border-color,box-shadow] duration-150 hover:shadow-elev-2",
         alert ? "border-red-200 dark:border-red-500/30" : "border-line hover:border-line-strong",
       )}
     >
       <span
         className={clsx(
-          "flex size-10 shrink-0 items-center justify-center rounded-xl transition-transform duration-300 group-hover:scale-105",
+          "flex size-10 shrink-0 items-center justify-center rounded-xl",
           alert ? "bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400" : "bg-surface-2 " + tone,
         )}
       >

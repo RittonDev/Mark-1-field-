@@ -161,14 +161,23 @@ export function CardHeader({
   );
 }
 
+/**
+ * Etiqueta de estado (status, prioridade, SLA). O texto mistura a cor com a tinta do tema: no claro fica
+ * mais escuro e no escuro mais claro, então âmbar, ciano e verde continuam legíveis (a cor pura sobre
+ * fundo claro não passava de ~2,5:1). Fundo e borda são a mesma cor bem diluída na superfície.
+ */
 export function Pill({ color, children, className }: { color: string; children: React.ReactNode; className?: string }) {
   return (
     <span
       className={clsx(
-        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap",
+        "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap",
         className,
       )}
-      style={{ color, backgroundColor: `${color}14`, borderColor: `${color}33` }}
+      style={{
+        color: `color-mix(in oklab, ${color} 64%, var(--ink))`,
+        backgroundColor: `color-mix(in oklab, ${color} 9%, var(--surface))`,
+        borderColor: `color-mix(in oklab, ${color} 22%, var(--surface))`,
+      }}
     >
       {children}
     </span>

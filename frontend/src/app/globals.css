@@ -119,15 +119,18 @@
     sans-serif;
 }
 
-/* Movimento: curto, com desaceleração suave; some com "reduzir movimento" do sistema. */
+/*
+ * Movimento: ferramenta de uso o dia todo, então tudo é curto (até ~0,3 s), desacelera sem quique e
+ * se desloca poucos pixels. Serve para orientar (o que entrou, o que mudou), nunca para enfeitar.
+ * Some com "reduzir movimento" do sistema.
+ */
 @theme {
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
-  --animate-enter: mf-enter 0.42s cubic-bezier(0.16, 1, 0.3, 1) backwards;
-  --animate-rise: mf-rise 0.55s cubic-bezier(0.16, 1, 0.3, 1) backwards;
-  --animate-fade: mf-fade 0.2s ease-out backwards;
-  --animate-pop: mf-pop 0.28s cubic-bezier(0.16, 1, 0.3, 1) backwards;
-  --animate-toast: mf-toast 0.42s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  --animate-enter: mf-enter 0.22s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  --animate-rise: mf-rise 0.32s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  --animate-fade: mf-fade 0.16s ease-out backwards;
+  --animate-pop: mf-pop 0.18s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  --animate-toast: mf-toast 0.24s cubic-bezier(0.16, 1, 0.3, 1) backwards;
   --animate-float: mf-float 5s ease-in-out infinite alternate;
   --animate-draw: mf-draw 2.6s cubic-bezier(0.65, 0, 0.35, 1) backwards;
 }
@@ -135,7 +138,7 @@
 @keyframes mf-enter {
   from {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translateY(4px);
   }
   to {
     opacity: 1;
@@ -145,7 +148,7 @@
 @keyframes mf-rise {
   from {
     opacity: 0;
-    transform: translateY(16px) scale(0.985);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
@@ -163,7 +166,7 @@
 @keyframes mf-pop {
   from {
     opacity: 0;
-    transform: translateY(10px) scale(0.97);
+    transform: translateY(6px) scale(0.985);
   }
   to {
     opacity: 1;
@@ -173,7 +176,7 @@
 @keyframes mf-toast {
   from {
     opacity: 0;
-    transform: translateX(28px) scale(0.98);
+    transform: translateX(16px);
   }
   to {
     opacity: 1;
@@ -239,10 +242,13 @@
   animation: mf-shimmer 1.5s ease-in-out infinite;
 }
 
-/* Entrada em sequência: cada filho recebe --i (índice) e entra um pouco depois do anterior. */
+/*
+ * Entrada em sequência (cartões e listas curtas): cada filho recebe --i (índice) e entra logo depois do
+ * anterior; do 8º em diante entram juntos, para a lista nunca "demorar". Tabelas não usam (dado é para ler).
+ */
 .stagger > * {
-  animation: mf-enter 0.42s cubic-bezier(0.16, 1, 0.3, 1) backwards;
-  animation-delay: calc(min(var(--i, 0), 12) * 32ms);
+  animation: mf-enter 0.22s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  animation-delay: calc(min(var(--i, 0), 8) * 18ms);
 }
 
 /* Base em camada própria: os utilitários do Tailwind (ex.: outline-none) continuam valendo por cima. */

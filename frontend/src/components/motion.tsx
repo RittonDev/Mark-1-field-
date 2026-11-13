@@ -13,7 +13,7 @@ const defaultFormat = (n: number) => Math.round(n).toLocaleString("pt-BR");
 export function CountUp({
   value,
   format,
-  duration = 700,
+  duration = 500,
   className,
 }: {
   value: number;
@@ -136,7 +136,7 @@ export function Tabs<K extends string>({
         ref={indicator}
         aria-hidden
         className={clsx(
-          "pointer-events-none absolute left-0 transition-[transform,width,opacity] duration-300 ease-out-expo",
+          "pointer-events-none absolute left-0 transition-[transform,width,opacity] duration-200 ease-out-expo",
           segmented
             ? "inset-y-0.5 rounded-md bg-surface shadow-elev-1 ring-1 ring-line"
             : "brand-gradient bottom-0 h-0.5 rounded-full",

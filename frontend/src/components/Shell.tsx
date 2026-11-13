@@ -87,7 +87,7 @@ export function Sidebar({ user, onLogout }: { user: User; onLogout: () => void }
           <span
             ref={plate}
             aria-hidden
-            className="pointer-events-none absolute top-0 left-0 rounded-lg bg-surface opacity-0 shadow-elev-1 ring-1 ring-line transition-[transform,height,width,opacity] duration-300 ease-out-expo"
+            className="pointer-events-none absolute top-0 left-0 rounded-lg bg-surface opacity-0 shadow-elev-1 ring-1 ring-line transition-[transform,height,width,opacity] duration-200 ease-out-expo"
           />
           {GROUPS.map((group) => {
             const groupItems = items.filter((i) => i.group === group.key);
@@ -176,19 +176,15 @@ function ConnectionIndicator() {
       className="inline-flex h-8 items-center gap-2 rounded-full border border-line bg-surface px-3 text-xs font-medium text-ink-muted"
       title={state === "online" ? "Atualizações em tempo real ativas" : label}
     >
-      <span className="relative flex size-2">
-        {state === "online" ? (
-          <span className="absolute inset-0 animate-ping rounded-full bg-emerald-400 opacity-60 [animation-duration:2.4s]" />
-        ) : null}
-        <span
-          className={clsx(
-            "relative size-2 rounded-full",
-            state === "online" && "bg-emerald-500",
-            state === "connecting" && "animate-pulse bg-amber-500",
-            state === "offline" && "bg-red-500",
-          )}
-        />
-      </span>
+      {/* Ponto fixo quando está tudo bem (nada piscando o dia inteiro); só "conectando" pulsa. */}
+      <span
+        className={clsx(
+          "size-2 rounded-full ring-2",
+          state === "online" && "bg-emerald-500 ring-emerald-500/15",
+          state === "connecting" && "animate-pulse bg-amber-500 ring-amber-500/15",
+          state === "offline" && "bg-red-500 ring-red-500/15",
+        )}
+      />
       <span className="hidden sm:inline">{label}</span>
     </span>
   );

@@ -376,25 +376,26 @@ function TicketsView() {
                   {manager ? <Th className="edit-col">Editar</Th> : null}
                 </tr>
               </thead>
-              <tbody className={clsx("stagger transition-opacity", query.isFetching && "opacity-70")}>
-                {data.items.map((t, index) => {
+              {/* Linhas sem entrada animada: trocar de página ou filtro mostra o dado na hora. */}
+              <tbody className={clsx("transition-opacity duration-150", query.isFetching && "opacity-70")}>
+                {data.items.map((t) => {
                   const open = ["open", "active", "pending"].includes(STATUS[t.status].group);
                   const owner = t.owner ?? null;
                   return (
                     <tr
                       key={t.id}
-                      style={{ ["--i" as string]: index }}
                       onClick={() => router.push(`/chamados/${t.id}`)}
                       className="group cursor-pointer transition-colors hover:bg-[var(--row-hover)]"
                     >
-                      <Td className="max-w-[20rem]">
+                      <Td className="max-w-[22rem] min-w-[15rem]">
                         <Link
                           href={`/chamados/${t.id}`}
                           onClick={(e) => e.stopPropagation()}
                           className="block font-medium text-ink hover:text-brand"
                         >
-                          <span className="mr-1.5 font-mono text-xs font-normal text-ink-subtle">{t.code}</span>
-                          {t.title}
+                          {/* O nº nunca quebra no meio ("OS-" numa linha e o número na outra). */}
+                          <span className="block font-mono text-[11px] font-normal whitespace-nowrap text-ink-subtle">{t.code}</span>
+                          <span className="line-clamp-2">{t.title}</span>
                         </Link>
                         {t.category ? <span className="mt-0.5 block truncate text-xs text-ink-subtle">{t.category.full_name}</span> : null}
                         {t.recurrence_30d || t.tags?.length ? (
@@ -405,7 +406,7 @@ function TicketsView() {
                         ) : null}
                       </Td>
                       <Td>
-                        <div className="flex flex-col items-start gap-1">
+                        <div className="flex flex-wrap items-center gap-1">
                           <StatusBadge status={t.status} />
                           <PriorityBadge priority={t.priority} compact />
                         </div>
@@ -419,13 +420,16 @@ function TicketsView() {
                           </span>
                         ) : null}
                       </Td>
-                      <Td>
+                      <Td className="max-w-[14rem]">
                         {t.assignee ? (
-                          <span className="whitespace-nowrap">
-                            {t.assignee.name}
+                          <span className="flex min-w-0 items-center">
+                            {/* Nome longo não empurra a coluna da OS: corta com reticências (nome inteiro no título). */}
+                            <span className="truncate" title={t.assignee.name}>
+                              {t.assignee.name}
+                            </span>
                             {t.assignee.is_active === false ? (
                               <span
-                                className="ml-1.5 rounded-full bg-red-50 px-1.5 py-px text-[11px] font-medium text-red-700 dark:bg-red-500/10 dark:text-red-300"
+                                className="ml-1.5 shrink-0 rounded-full bg-red-50 px-1.5 py-px text-[11px] font-medium text-red-700 dark:bg-red-500/10 dark:text-red-300"
                                 title="Técnico desativado: não entra no app. Reatribua a OS."
                               >
                                 inativo
@@ -433,7 +437,7 @@ function TicketsView() {
                             ) : null}
                             {t.helpers?.length ? (
                               <span
-                                className="ml-1.5 rounded-full bg-emerald-50 px-1.5 py-px text-[11px] font-medium text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-200"
+                                className="ml-1.5 shrink-0 rounded-full bg-emerald-50 px-1.5 py-px text-[11px] font-medium text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-200"
                                 title={`Junto: ${t.helpers.map((h) => h.name).join(", ")}`}
                               >
                                 +{t.helpers.length}

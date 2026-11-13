@@ -30,7 +30,7 @@ export function useListMotion() {
     reduced,
     entering: (index: number) =>
       reduced ? undefined : FadeInDown.delay(Math.min(index, MAX_STAGGER) * STAGGER_MS).duration(280),
-    layout: reduced ? undefined : LinearTransition.springify().damping(20).stiffness(220),
+    layout: reduced ? undefined : LinearTransition.duration(220),
   };
 }
 

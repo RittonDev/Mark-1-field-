@@ -59,7 +59,7 @@ function Kpi({
     </div>
   );
   return (
-    <Card className={clsx("animate-enter", href && "transition-[box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:shadow-elev-2")}>
+    <Card className={clsx("animate-enter", href && "transition-[border-color,box-shadow] duration-150 hover:border-line-strong hover:shadow-elev-2")}>
       {href ? <Link href={href}>{content}</Link> : content}
     </Card>
   );

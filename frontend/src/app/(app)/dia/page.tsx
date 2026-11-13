@@ -230,11 +230,11 @@ export default function DayPage() {
               disabled={!state}
               onClick={() => state && setStateFilter(active ? null : state)}
               className={clsx(
-                "min-w-[7.5rem] rounded-xl border px-3.5 py-2.5 text-left shadow-elev-1 transition-[border-color,background-color,box-shadow,transform] duration-200",
+                "min-w-[7.5rem] rounded-xl border px-3.5 py-2.5 text-left shadow-elev-1 transition-[border-color,background-color,box-shadow] duration-150",
                 active
                   ? "border-brand bg-brand-soft ring-2 ring-brand/15"
-                  : "border-line bg-surface hover:-translate-y-0.5 hover:border-line-strong hover:shadow-elev-2",
-                !state && "cursor-default hover:translate-y-0",
+                  : "border-line bg-surface hover:border-line-strong hover:shadow-elev-2",
+                !state && "cursor-default",
                 key === "late" && value > 0 && !active && "border-red-200 dark:border-red-500/30",
               )}
             >
