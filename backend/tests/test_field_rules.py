@@ -1,5 +1,5 @@
-"""Regras de campo da Maxx Field: dois relógios de 4h, autorização do cliente, pedido de peça,
-reincidência e os números de chegada nos relatórios."""
+"""Regras de campo da Maxx Field: dois relógios de 4h, pedido de peça, reincidência e os números
+de chegada nos relatórios. (A autorização do cliente antes da visita foi retirada em 2026-11-12.)"""
 
 import base64
 import uuid
@@ -21,12 +21,11 @@ PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
 )
 SIGNATURE = "data:image/png;base64," + base64.b64encode(PNG).decode()
-RULES_ON = {
+RULES = {
     "arrival_hours_capital": 4,
     "arrival_hours_interior": 24,
     "onsite_hours": 4,
     "onsite_warning_minutes": 30,
-    "require_authorization": True,
 }
 
 
@@ -40,11 +39,10 @@ def test_capitals_and_defaults() -> None:
     assert not is_capital("Santos", "SP") and not is_capital("Vitória da Conquista", "BA")
     assert not is_capital("Vitória", "BA") and not is_capital(None, "SP")
     rules = FieldRules()
-    assert (rules.arrival_hours_capital, rules.onsite_hours, rules.require_authorization) == (
-        4,
-        4,
-        True,
-    )
+    assert (rules.arrival_hours_capital, rules.onsite_hours) == (4, 4)
+    # Regras antigas guardadas com a autorização do cliente continuam lendo (a chave é ignorada).
+    old = FieldRules.model_validate({"require_authorization": True, "onsite_hours": 3})
+    assert old.onsite_hours == 3 and not hasattr(old, "require_authorization")
 
 
 async def _location(client: AsyncClient, world: World, name: str, city: str, uf: str) -> str:
@@ -65,26 +63,25 @@ async def _sql(engine: AsyncEngine, sql: str, **params: object) -> None:
 @requires_db
 async def test_settings_and_arrival_due(client: AsyncClient, world: World) -> None:
     an, sup = world.analyst.headers, world.supervisor.headers
-    assert (await client.get(f"{API}/settings/field", headers=an)).json()[
-        "require_authorization"
-    ] is False  # os testes partem com a regra desligada (conftest)
-    assert (await client.put(f"{API}/settings/field", json=RULES_ON, headers=an)).status_code == 403
+    assert (await client.put(f"{API}/settings/field", json=RULES, headers=an)).status_code == 403
+    # Tela antiga mandando a autorização do cliente: a chave é ignorada (a função saiu).
     saved = await client.put(
-        f"{API}/settings/field", json={**RULES_ON, "require_authorization": False}, headers=sup
+        f"{API}/settings/field", json={**RULES, "require_authorization": True}, headers=sup
     )
     assert saved.status_code == 200 and saved.json()["onsite_warning_minutes"] == 30
+    assert "require_authorization" not in saved.json()
     # O técnico lê as regras (o app usa nos avisos de permanência), mas não altera.
     tech_rules = await client.get(f"{API}/settings/field", headers=world.tech.headers)
     assert tech_rules.status_code == 200 and tech_rules.json()["onsite_warning_minutes"] == 30
     assert (
-        await client.put(f"{API}/settings/field", json=RULES_ON, headers=world.tech.headers)
+        await client.put(f"{API}/settings/field", json=RULES, headers=world.tech.headers)
     ).status_code == 403
 
     capital = await _location(client, world, "Loja Paulista", "São Paulo", "SP")
     interior = await _location(client, world, "Loja Santos", "Santos", "SP")
     t1 = await create(client, world, title="PDV parado", location_id=capital)
     t2 = await create(client, world, title="Impressora", location_id=interior)
-    assert t1["authorization_status"] == "not_required"
+    assert "authorization_status" not in t1
     assert _dt(t1["arrival_due_at"]) - _dt(t1["created_at"]) == timedelta(hours=4)
     assert _dt(t2["arrival_due_at"]) - _dt(t2["created_at"]) == timedelta(hours=24)
     assert t1["arrival_status"] == "pending" and t1["onsite_status"] is None
@@ -96,90 +93,33 @@ async def test_settings_and_arrival_due(client: AsyncClient, world: World) -> No
 
 
 @requires_db
-async def test_authorization_gate(client: AsyncClient, world: World) -> None:
+async def test_no_client_authorization(client: AsyncClient, world: World) -> None:
+    """A autorização do cliente antes da visita saiu: o técnico sai sem esperar registro."""
     an, th, sup = world.analyst.headers, world.tech.headers, world.supervisor.headers
-    await client.put(f"{API}/settings/field", json=RULES_ON, headers=sup)
+    await client.put(f"{API}/settings/field", json={**RULES, "require_authorization": True}, headers=sup)
     capital = await _location(client, world, "Loja Centro", "Recife", "PE")
-    tech = str(world.tech.user.id)
-
-    t = await create(client, world, title="Rede caiu", location_id=capital, assignee_id=tech)
-    assert t["authorization_status"] == "pending"
-    assert t["arrival_due_at"] is None and t["arrival_status"] is None  # relógio parado
-    blocked = await client.post(
-        f"{API}/tickets/{t['id']}/transition",
-        json={"to_status": "en_route", "expected_version": t["version"]},
-        headers=th,
-    )
-    assert blocked.status_code == 422
-    assert blocked.json()["detail"] == "Aguardando autorização do cliente para a visita"
-    # Offline: a operação volta recusada com o mesmo motivo.
-    pushed = await client.post(
-        f"{API}/sync/push",
-        json={
-            "operations": [
-                {
-                    "client_op_id": "op-auth-0001",
-                    "type": "transition",
-                    "ticket_id": t["id"],
-                    "payload": {"to_status": "en_route"},
-                }
-            ]
-        },
-        headers=th,
-    )
-    result = pushed.json()["results"][0]
-    assert result["status"] == "rejected" and "autorização do cliente" in result["error"]
-
-    # Só a gestão registra; o relógio de chegada começa na autorização.
-    body = {
-        "status": "authorized",
-        "by_name": "Paula Gerente",
-        "channel": "whatsapp",
-        "reference": "CH-2231",
-    }
-    assert (
-        await client.post(f"{API}/tickets/{t['id']}/authorization", json=body, headers=th)
-    ).status_code == 403
-    r = await client.post(f"{API}/tickets/{t['id']}/authorization", json=body, headers=an)
-    assert r.status_code == 200, r.text
-    ok = r.json()
-    assert ok["authorization_status"] == "authorized"
-    assert (ok["authorized_by_name"], ok["authorization_channel"], ok["authorization_ref"]) == (
-        "Paula Gerente",
-        "whatsapp",
-        "CH-2231",
-    )
-    assert ok["authorized_by"]["id"] == str(world.analyst.user.id)
-    assert _dt(ok["arrival_due_at"]) - _dt(ok["authorized_at"]) == timedelta(hours=4)
-    events = (await client.get(f"{API}/tickets/{t['id']}/events", headers=an)).json()
-    auth = next(e for e in events if e["event_type"] == "authorization_recorded")
-    assert (auth["from_value"], auth["to_value"]) == ("pending", "authorized")
-    going = await transition(client, th, ok, "en_route")
-    assert going["status"] == "en_route"
-
-    # Registrada já na abertura (correria): sai autorizada.
-    quick = await create(
+    t = await create(
         client,
         world,
-        title="Troca de PDV",
+        title="Rede caiu",
         location_id=capital,
+        assignee_id=str(world.tech.user.id),
+        # Tela antiga mandando a autorização na abertura: ignorada.
         authorization={"status": "authorized", "by_name": "Marcos", "channel": "maxxcon"},
     )
-    assert quick["authorization_status"] == "authorized" and quick["arrival_due_at"]
-    denied = await client.post(
-        f"{API}/tickets",
-        json={"title": "Sem permissão", "authorization": {"status": "authorized"}},
-        headers=world.requester.headers,
+    assert "authorization_status" not in t and "authorized_by_name" not in t
+    # O relógio de chegada corre da abertura, sem esperar ninguém.
+    assert _dt(t["arrival_due_at"]) - _dt(t["created_at"]) == timedelta(hours=4)
+    going = await transition(client, th, t, "en_route")
+    assert going["status"] == "en_route"
+    # A rota de registrar a autorização não existe mais.
+    gone = await client.post(
+        f"{API}/tickets/{t['id']}/authorization", json={"status": "authorized"}, headers=an
     )
-    assert denied.status_code == 403
-
-    # Atendimento remoto do analista não é visita: não depende da autorização.
-    remote = await create(
-        client, world, title="Acesso remoto", assignee_id=str(world.analyst.user.id)
-    )
-    assert remote["authorization_status"] == "pending"
-    started = await transition(client, an, remote, "in_progress")
-    assert started["status"] == "in_progress"
+    assert gone.status_code in (404, 405)
+    q = (await client.get(f"{API}/my-queue", headers=an)).json()
+    codes = {r["code"] for i in q["items"] for r in i["reasons"]}
+    assert "authorization_pending" not in codes
 
 
 @requires_db

@@ -88,25 +88,11 @@ async def test_ticket_messages(client: AsyncClient, world: World) -> None:
     defaults = (await client.post(f"{API}/message-templates/reset", headers=an)).json()["templates"]
     assert [d["key"] for d in defaults][:3] == ["deslocamento", "chegada", "atraso"]
 
-    # Quem autorizou a visita e o prazo de chegada também viram variáveis.
-    custom = {"templates": [{"name": "Autorização", "body": "{autorizado_por} | {prazo_chegada}"}]}
+    # O prazo de chegada também vira variável. A autorização do cliente saiu (2026-11-12): a
+    # variável antiga fica como está no texto, para o analista ver e tirar do modelo.
+    custom = {"templates": [{"name": "Prazo", "body": "{autorizado_por} | {prazo_chegada}"}]}
     await client.put(f"{API}/message-templates", json=custom, headers=an)
     text_of = lambda r: r.json()[0]["text"]  # noqa: E731
     r = await client.get(f"{API}/tickets/{t['id']}/messages", headers=an)
-    assert text_of(r) == f"(não exigida) | {due:%H:%M}"
-    await client.put(
-        f"{API}/settings/field",
-        json={"require_authorization": True},
-        headers=world.supervisor.headers,
-    )
-    pending = await create(client, world, title="Sem autorização", location_id=loc["id"])
-    r = await client.get(f"{API}/tickets/{pending['id']}/messages", headers=an)
-    assert text_of(r) == "(aguardando autorização) | (sem prazo)"
-    await client.post(
-        f"{API}/tickets/{pending['id']}/authorization",
-        json={"status": "authorized", "by_name": "Paula Gerente", "channel": "whatsapp"},
-        headers=an,
-    )
-    r = await client.get(f"{API}/tickets/{pending['id']}/messages", headers=an)
-    assert text_of(r).startswith("Paula Gerente | ") and "(sem prazo)" not in text_of(r)
+    assert text_of(r) == f"{{autorizado_por}} | {due:%H:%M}"
     await client.post(f"{API}/message-templates/reset", headers=an)

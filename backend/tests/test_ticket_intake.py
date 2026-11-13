@@ -53,7 +53,7 @@ async def test_create_with_reference_note_and_helpers(client: AsyncClient, world
     created = next(e for e in events if e["event_type"] == "created")
     assert created["data"]["helpers"] == ["Redes"]
 
-    # O outro técnico vê a OS no app (sync e detalhe) e aponta horas...
+    # O outro técnico vê a OS no app (sync e detalhe).
     helper = world.tech_other.headers
     pulled = (await client.get(f"{API}/sync/pull", headers=helper)).json()
     assert [item["id"] for item in pulled["tickets"]] == [t["id"]]
@@ -79,7 +79,8 @@ async def test_create_with_reference_note_and_helpers(client: AsyncClient, world
         },
         headers=helper,
     )
-    assert r.status_code == 201, r.text
+    # Horas só a gestão aponta: o tempo de quem vai na visita é o da OS.
+    assert r.status_code == 403, r.text
     r = await client.patch(f"{API}/tickets/{t['id']}", json={"title": "Outro"}, headers=helper)
     assert r.status_code == 403
 

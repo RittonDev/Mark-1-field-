@@ -33,8 +33,6 @@ OFFICE_ONLY = (
     "first_response_at",
     "legacy",
     "recurrence",
-    "authorized_by_name",
-    "authorization_ref",
 )
 
 

@@ -21,7 +21,7 @@ from app.core.security import create_access_token, hash_password
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
-from app.models import Customer, Location, SystemSetting, Team, User
+from app.models import Customer, Location, Team, User
 from app.services import login_guard
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
@@ -141,9 +141,6 @@ async def world(engine: AsyncEngine) -> World:
         await db.flush()
         location = Location(customer_id=customer.id, name="Matriz", is_active=True)
         db.add(location)
-        # Os testes antigos abrem a OS e já mandam o técnico: a regra de autorização do cliente
-        # (ligada por padrão) é testada à parte, em test_field_rules.py.
-        db.add(SystemSetting(key="field.rules", value={"require_authorization": False}))
         await db.commit()
 
     def actor(u: User) -> Actor:
