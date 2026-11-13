@@ -79,7 +79,8 @@ def _push_targets(event: dict[str, Any]) -> list[tuple[str, str, str]]:
             notify([previous], f"{code} saiu da sua lista", f"Reatribuída por {by}")
     elif kind == "ticket.helpers_changed":
         notify(data.get("added_ids") or [], f"Você vai na visita da {code}", f"Incluído por {by}")
-        notify(aud.get("previous_helper_ids") or [], f"{code} saiu da sua lista", f"Tirado por {by}")
+        removed = aud.get("previous_helper_ids") or []
+        notify(removed, f"{code} saiu da sua lista", f"Tirado por {by}")
     elif kind == "ticket.status_changed" and data.get("to") == "cancelled":
         notify(_visit_people(event), f"{code} cancelada", f"Cancelada por {by}")
     elif kind == "ticket.status_changed" and data.get("to") == "scheduled":

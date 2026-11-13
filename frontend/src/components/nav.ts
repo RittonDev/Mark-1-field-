@@ -77,3 +77,19 @@ export const NAV: NavItem[] = [
 export function visibleNav(role: UserRole) {
   return NAV.filter((item) => item.visible(role));
 }
+
+// Telas dentro de um item do menu que têm nome próprio na aba do navegador.
+const SUB_PAGES: Record<string, string> = {
+  "/chamados/novo": "Nova OS",
+};
+
+/** Nome da tela para o título da aba: a subtela conhecida ou o item do menu de maior prefixo. */
+export function navLabelFor(pathname: string): string | null {
+  if (SUB_PAGES[pathname]) return SUB_PAGES[pathname];
+  let best: NavItem | null = null;
+  for (const item of NAV) {
+    const match = pathname === item.href || pathname.startsWith(`${item.href}/`);
+    if (match && (!best || item.href.length > best.href.length)) best = item;
+  }
+  return best?.label ?? null;
+}

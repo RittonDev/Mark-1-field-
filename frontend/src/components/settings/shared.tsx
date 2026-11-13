@@ -113,6 +113,15 @@ export function RowEditButton({ label, onClick }: { label: string; onClick: () =
   );
 }
 
+/** Etiqueta neutra para categoria (papel, responsabilidade): cor só sinaliza problema. */
+export function NeutralChip({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="inline-flex items-center rounded-full border border-line px-2 py-0.5 text-xs font-medium whitespace-nowrap text-ink-muted">
+      {children}
+    </span>
+  );
+}
+
 /** Etiqueta neutra de situação (no lugar de apagar a linha, que derrubava o contraste do texto). */
 export function InactiveChip({ label = "Inativo" }: { label?: string }) {
   return (

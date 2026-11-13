@@ -310,7 +310,9 @@ async def live(db: AsyncSession, team_id: uuid.UUID | None = None) -> list[LiveT
         ping = latest.get(tech.id) if shift is not None else None
         ticket = in_field.get(tech.id)
         # Jornada que acabou de abrir ainda não mandou ponto: não é "sem sinal".
-        last_signal = ping.recorded_at if ping is not None else (shift.started_at if shift else None)
+        last_signal = ping.recorded_at if ping is not None else None
+        if last_signal is None and shift is not None:
+            last_signal = shift.started_at
         if shift is None:
             state = "offline"
         elif last_signal is None or last_signal < now - NO_SIGNAL_AFTER:

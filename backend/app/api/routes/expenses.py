@@ -81,7 +81,7 @@ async def expense_report(
 async def mark_paid(body: MarkPaid, db: DB, user: TicketManagerUser) -> dict[str, int]:
     """Marca como reembolsados só os aprovados; os outros ids são ignorados e não contam."""
     count = await svc.mark_paid(db, body.ids, user)
-    await db.commit()
+    await commit_and_publish(db)
     return {"updated": count}
 
 

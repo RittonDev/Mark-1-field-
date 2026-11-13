@@ -1,28 +1,38 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import clsx from "clsx";
 import {
   BadgeCheck,
   Car,
-  Check,
-  Copy,
+  CheckCircle2,
+  CopyPlus,
   IdCard,
   Link2,
   Mail,
   MapPin,
   MessageCircle,
   Phone,
+  Search,
   ShieldCheck,
+  SquarePen,
   UserCheck,
   UserX,
+  Users,
   Wrench,
 } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useMemo, useState } from "react";
+import { useConfirm } from "@/components/Confirm";
+import { MultiSelect } from "@/components/MultiSelect";
+import { Tabs } from "@/components/motion";
+import { fold, replaceSearch } from "@/components/operacao/hooks";
+import { InviteDialog, type InvitePreset } from "@/components/technicians/InviteDialog";
+import { refreshTechnicianViews } from "@/components/technicians/refresh";
 import { useToast } from "@/components/Toaster";
 import {
   Button,
+  buttonClassName,
   Card,
   Checkbox,
   Dialog,
@@ -32,17 +42,19 @@ import {
   Input,
   LoadingBlock,
   PageHeader,
+  Pill,
   Select,
   Table,
   Td,
   Textarea,
   Th,
 } from "@/components/ui";
+import { useNow } from "@/components/useNow";
 import { absoluteApiUrl, api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canManageTickets } from "@/lib/constants";
 import { formatDate, formatDateTime, formatDocument, initials } from "@/lib/format";
-import { inviteUrl, labelMap, useOnboardingCatalog } from "@/lib/onboarding";
+import { labelMap, useOnboardingCatalog } from "@/lib/onboarding";
 import { useTeams } from "@/lib/queries";
 import type {
   ApplicationDetail,
@@ -50,8 +62,10 @@ import type {
   ApplicationSummary,
   InviteState,
   OnboardingInvite,
+  TechnicianRegion,
   User,
 } from "@/lib/types";
+import { whatsappUrl } from "@/lib/whatsapp";
 
 type Tab = ApplicationStatus | "links";
 
@@ -62,18 +76,51 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "links", label: "Links de cadastro" },
 ];
 
-const INVITE_STATE: Record<InviteState, { label: string; className: string }> = {
-  active: { label: "Ativo", className: "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300" },
-  used: { label: "Usado", className: "bg-slate-100 text-slate-700 dark:bg-slate-500/15 dark:text-slate-300" },
-  expired: { label: "Expirado", className: "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300" },
-  revoked: { label: "Cancelado", className: "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300" },
+// Cores dos estados: neutro no que é normal; vermelho só no que foi cancelado ou recusado.
+const NEUTRAL = "#64748b";
+const DANGER = "#dc2626";
+const BRAND = "#2447ff";
+
+const INVITE_STATE: Record<InviteState, { label: string; color: string }> = {
+  active: { label: "Ativo", color: BRAND },
+  used: { label: "Usado", color: NEUTRAL },
+  expired: { label: "Expirado", color: NEUTRAL },
+  revoked: { label: "Revogado", color: DANGER },
 };
 
+const APPLICATION_STATE: Record<ApplicationStatus, { label: string; color: string }> = {
+  pending: { label: "Aguardando análise", color: NEUTRAL },
+  approved: { label: "Aprovado: está na base técnica", color: NEUTRAL },
+  rejected: { label: "Reprovado", color: DANGER },
+};
+
+// Ficha esperando há mais que isso: o atraso aparece em vermelho.
+const WAITING_DAYS_ALERT = 7;
+
+const firstName = (name: string) => name.trim().split(/\s+/)[0];
+const years = (n: number) => `${n} ${n === 1 ? "ano" : "anos"}`;
+
 export default function OnboardingPage() {
+  // A ficha pode chegar aberta pela URL (?ficha=, ex.: "Ver ficha da homologação" no cadastro do técnico).
+  return (
+    <Suspense fallback={<LoadingBlock />}>
+      <OnboardingView />
+    </Suspense>
+  );
+}
+
+function OnboardingView() {
   const { user } = useAuth();
+  const searchParams = useSearchParams();
+  const now = useNow(60_000);
   const [tab, setTab] = useState<Tab>("pending");
-  const [openedId, setOpenedId] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
+  const [openedId, setOpenedId] = useState<string | null>(() => searchParams.get("ficha"));
+  // Convite aberto: novo (sem dados) ou "gerar outro igual" a um link da lista.
+  const [inviting, setInviting] = useState<{ preset?: InvitePreset } | null>(null);
+  const [q, setQ] = useState("");
+  const [uf, setUf] = useState("");
+  const [areaFilter, setAreaFilter] = useState<string[]>([]);
+  const [withVehicle, setWithVehicle] = useState(false);
   const catalog = useOnboardingCatalog();
   const areas = useMemo(() => labelMap(catalog.data?.service_areas), [catalog.data]);
 
@@ -87,6 +134,37 @@ export default function OnboardingPage() {
     queryFn: () => api.get<{ pending: number }>("/onboarding/applications/pending-count"),
   });
 
+  const all = useMemo(() => applications.data ?? [], [applications.data]);
+  const ufs = useMemo(() => [...new Set(all.map((a) => a.state))].sort(), [all]);
+  const rows = useMemo(() => {
+    const term = fold(q.trim());
+    const digits = q.replace(/\D/g, "");
+    const list = all.filter(
+      (a) =>
+        (!term ||
+          fold(`${a.full_name} ${a.email} ${a.city}`).includes(term) ||
+          (digits.length >= 3 && a.phone.replace(/\D/g, "").includes(digits))) &&
+        (!uf || a.state === uf) &&
+        (!areaFilter.length || areaFilter.some((k) => a.service_areas.includes(k))) &&
+        (!withVehicle || a.has_vehicle),
+    );
+    // Pendentes: quem chegou primeiro é analisado primeiro. Analisadas: as mais recentes em cima.
+    return tab === "pending"
+      ? list.sort((a, b) => a.created_at.localeCompare(b.created_at))
+      : list.sort((a, b) => (b.reviewed_at ?? b.created_at).localeCompare(a.reviewed_at ?? a.created_at));
+  }, [all, q, uf, areaFilter, withVehicle, tab]);
+  const filtering = !!(q.trim() || uf || areaFilter.length || withVehicle);
+  const clearFilters = () => {
+    setQ("");
+    setUf("");
+    setAreaFilter([]);
+    setWithVehicle(false);
+  };
+  const closeApplication = () => {
+    setOpenedId(null);
+    if (searchParams.get("ficha")) replaceSearch({ ficha: null });
+  };
+
   if (user && !canManageTickets(user.role)) {
     return <ErrorBox message="A homologação é exclusiva para analistas e gestores." />;
   }
@@ -97,118 +175,190 @@ export default function OnboardingPage() {
         title="Homologação"
         description="Fichas enviadas pelos técnicos pelo link de cadastro. Aprovada, a pessoa entra na base técnica e já acessa o app."
         actions={
-          <Button variant="primary" onClick={() => setCreating(true)}>
+          <Button variant="primary" onClick={() => setInviting({})}>
             <Link2 className="size-4" />
             Gerar link de cadastro
           </Button>
         }
       />
 
-      <div className="mb-4 flex gap-1 overflow-x-auto border-b border-line" role="tablist">
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            role="tab"
-            aria-selected={tab === t.key}
-            onClick={() => setTab(t.key)}
-            className={clsx(
-              "relative shrink-0 px-3 pt-1 pb-2.5 text-sm transition-colors",
-              tab === t.key ? "font-semibold text-ink" : "font-medium text-ink-muted hover:text-ink",
-            )}
-          >
-            {t.label}
-            {t.key === "pending" && pending.data?.pending ? (
-              <span className="ml-1.5 rounded-full bg-red-500 px-1.5 text-[11px] font-semibold text-white">
-                {pending.data.pending}
-              </span>
-            ) : null}
-            {tab === t.key ? <span className="brand-gradient absolute inset-x-2 -bottom-px h-0.5 rounded-full" /> : null}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        className="mb-4 border-b border-line"
+        items={TABS.map((t) => ({ ...t, count: t.key === "pending" ? (pending.data?.pending ?? null) : null }))}
+        value={tab}
+        onChange={setTab}
+        ariaLabel="Fichas e links"
+      />
 
       {tab === "links" ? (
-        <InvitesTab onCreate={() => setCreating(true)} />
+        <InvitesTab onCreate={(preset) => setInviting({ preset })} />
       ) : (
-        <Card>
-          {applications.isLoading ? (
-            <LoadingBlock />
-          ) : applications.error ? (
-            <div className="p-4">
-              <ErrorBox message={errorMessage(applications.error)} />
+        <>
+          {all.length || filtering ? (
+            <div className="mb-4 flex flex-wrap items-center gap-2">
+              <div className="relative min-w-56 flex-1">
+                <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-muted" />
+                <Input
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder="Buscar por nome, e-mail, telefone ou cidade"
+                  className="pl-9"
+                  aria-label="Buscar ficha"
+                />
+              </div>
+              <div className="w-full sm:w-36">
+                <Select value={uf} onChange={(e) => setUf(e.target.value)} aria-label="UF">
+                  <option value="">Todas as UFs</option>
+                  {(uf && !ufs.includes(uf) ? [uf, ...ufs] : ufs).map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div className="w-full sm:w-60">
+                <MultiSelect
+                  label="Áreas de atuação"
+                  ariaLabel="Áreas de atuação"
+                  value={areaFilter}
+                  onChange={setAreaFilter}
+                  options={(catalog.data?.service_areas ?? []).map((s) => ({ value: s.key, label: s.label }))}
+                />
+              </div>
+              <Checkbox label="Com veículo" checked={withVehicle} onChange={setWithVehicle} />
             </div>
-          ) : (applications.data ?? []).length === 0 ? (
-            <EmptyState
-              icon={<BadgeCheck className="size-6" />}
-              title={tab === "pending" ? "Nenhuma ficha aguardando análise" : "Nenhuma ficha aqui"}
-              description={
-                tab === "pending" ? "Gere um link de cadastro e envie ao técnico. A ficha dele aparece aqui na hora." : undefined
-              }
-              action={
-                tab === "pending" ? (
-                  <Button onClick={() => setCreating(true)}>
-                    <Link2 className="size-4" />
-                    Gerar link
-                  </Button>
-                ) : undefined
-              }
-            />
-          ) : (
-            <Table>
-              <thead>
-                <tr>
-                  <Th>Técnico</Th>
-                  <Th className="hidden md:table-cell">Região</Th>
-                  <Th className="hidden lg:table-cell">Atuação</Th>
-                  <Th className="hidden sm:table-cell">Experiência</Th>
-                  <Th>{tab === "pending" ? "Enviada" : "Analisada"}</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {(applications.data ?? []).map((a) => (
-                  <tr key={a.id} className="cursor-pointer hover:bg-surface-2" onClick={() => setOpenedId(a.id)}>
-                    <Td>
-                      <button type="button" className="flex items-center gap-2.5 text-left" onClick={() => setOpenedId(a.id)}>
-                        <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-brand/10 text-xs font-semibold text-brand">
-                          {initials(a.full_name)}
-                        </span>
-                        <span className="min-w-0">
-                          <span className="block truncate font-semibold text-ink">{a.full_name}</span>
-                          <span className="block truncate text-xs text-ink-muted">{a.email}</span>
-                        </span>
-                      </button>
-                    </Td>
-                    <Td className="hidden md:table-cell">
-                      {a.city}/{a.state}
-                    </Td>
-                    <Td className="hidden lg:table-cell">
-                      <span className="line-clamp-2 text-xs text-ink-muted">
-                        {a.service_areas.map((k) => areas[k] ?? k).join(" · ")}
-                      </span>
-                    </Td>
-                    <Td className="hidden sm:table-cell">
-                      {a.years_experience != null ? `${a.years_experience} anos` : "—"}
-                      {a.has_vehicle ? <Car className="ml-1.5 inline size-3.5 text-ink-muted" aria-label="Com veículo" /> : null}
-                    </Td>
-                    <Td className="text-xs text-ink-muted">{formatDateTime(a.reviewed_at ?? a.created_at)}</Td>
+          ) : null}
+          <Card>
+            {applications.isLoading ? (
+              <LoadingBlock />
+            ) : applications.error ? (
+              <div className="p-4">
+                <ErrorBox message={errorMessage(applications.error)} />
+              </div>
+            ) : rows.length === 0 ? (
+              filtering ? (
+                <EmptyState
+                  icon={<BadgeCheck className="size-6" />}
+                  title="Nenhuma ficha com estes filtros"
+                  action={<Button onClick={clearFilters}>Limpar filtros</Button>}
+                />
+              ) : (
+                <EmptyState
+                  icon={<BadgeCheck className="size-6" />}
+                  title={tab === "pending" ? "Nenhuma ficha aguardando análise" : "Nenhuma ficha aqui"}
+                  description={
+                    tab === "pending"
+                      ? "Gere um link de cadastro e envie ao técnico pelo WhatsApp. A ficha dele aparece aqui na hora."
+                      : undefined
+                  }
+                  action={
+                    tab === "pending" ? (
+                      <Button onClick={() => setInviting({})}>
+                        <Link2 className="size-4" />
+                        Gerar link
+                      </Button>
+                    ) : undefined
+                  }
+                />
+              )
+            ) : (
+              <Table>
+                <thead>
+                  <tr>
+                    <Th>Técnico</Th>
+                    <Th className="hidden md:table-cell">Região</Th>
+                    <Th className="hidden lg:table-cell">Atuação</Th>
+                    <Th className="hidden sm:table-cell">Experiência</Th>
+                    <Th>{tab === "pending" ? "Enviada" : "Analisada"}</Th>
+                    <Th className="edit-col">Analisar</Th>
                   </tr>
-                ))}
-              </tbody>
-            </Table>
-          )}
-        </Card>
+                </thead>
+                <tbody>
+                  {rows.map((a) => {
+                    const waitingDays = Math.floor((now - new Date(a.created_at).getTime()) / 86_400_000);
+                    return (
+                      <tr
+                        key={a.id}
+                        className="cursor-pointer transition-colors hover:bg-[var(--row-hover)]"
+                        onClick={(e) => {
+                          if (e.currentTarget.contains(e.target as Node)) setOpenedId(a.id);
+                        }}
+                      >
+                        <Td>
+                          <span className="flex items-center gap-2.5">
+                            <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-brand/10 text-xs font-semibold text-brand">
+                              {initials(a.full_name)}
+                            </span>
+                            <span className="min-w-0">
+                              <span className="block truncate font-semibold text-ink">{a.full_name}</span>
+                              <span className="block truncate text-xs text-ink-muted">{a.email}</span>
+                            </span>
+                          </span>
+                        </Td>
+                        <Td className="hidden md:table-cell">
+                          {a.city}-{a.state}
+                        </Td>
+                        <Td className="hidden lg:table-cell">
+                          <span className="line-clamp-2 text-xs text-ink-muted">
+                            {a.service_areas.map((k) => areas[k] ?? k).join(" · ")}
+                          </span>
+                        </Td>
+                        <Td className="hidden sm:table-cell">
+                          {a.years_experience != null ? years(a.years_experience) : "—"}
+                          {a.has_vehicle ? (
+                            <Car className="ml-1.5 inline size-3.5 text-ink-muted" aria-label="Com veículo" />
+                          ) : null}
+                        </Td>
+                        <Td className="text-xs whitespace-nowrap text-ink-muted">
+                          {tab === "pending" ? (
+                            <>
+                              <span className="block">{formatDate(a.created_at)}</span>
+                              <span
+                                className={
+                                  waitingDays > WAITING_DAYS_ALERT ? "font-medium text-red-700 dark:text-red-400" : undefined
+                                }
+                              >
+                                {waitingDays < 1 ? "hoje" : `há ${waitingDays} ${waitingDays === 1 ? "dia" : "dias"}`}
+                              </span>
+                            </>
+                          ) : (
+                            formatDateTime(a.reviewed_at ?? a.created_at)
+                          )}
+                        </Td>
+                        <Td className="edit-col">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOpenedId(a.id);
+                            }}
+                            className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg border border-line bg-surface text-brand shadow-elev-1 transition-[border-color,background-color] duration-150 hover:border-brand/40 hover:bg-brand-soft focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
+                            aria-label={`Analisar a ficha de ${a.full_name}`}
+                            title="Analisar a ficha"
+                          >
+                            <SquarePen className="size-4" />
+                          </button>
+                        </Td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </Table>
+            )}
+          </Card>
+        </>
       )}
 
-      {creating ? <CreateInviteDialog onClose={() => setCreating(false)} /> : null}
-      {openedId ? <ApplicationDialog id={openedId} onClose={() => setOpenedId(null)} /> : null}
+      {inviting ? <InviteDialog preset={inviting.preset} onClose={() => setInviting(null)} /> : null}
+      {openedId ? <ApplicationDialog key={openedId} id={openedId} onClose={closeApplication} /> : null}
     </div>
   );
 }
 
-function InvitesTab({ onCreate }: { onCreate: () => void }) {
+function InvitesTab({ onCreate }: { onCreate: (preset?: InvitePreset) => void }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const confirm = useConfirm();
   const invites = useQuery({
     queryKey: ["onboarding", "invites"],
     queryFn: () => api.get<OnboardingInvite[]>("/onboarding/invites"),
@@ -216,21 +366,35 @@ function InvitesTab({ onCreate }: { onCreate: () => void }) {
   const revoke = useMutation({
     mutationFn: (id: string) => api.delete(`/onboarding/invites/${id}`),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["onboarding", "invites"] });
-      toast({ title: "Link cancelado", tone: "success" });
+      void queryClient.invalidateQueries({ queryKey: ["onboarding", "invites"] });
+      toast({ title: "Link revogado", tone: "success" });
     },
     onError: (e) => toast({ title: errorMessage(e), tone: "error" }),
   });
+  const askRevoke = async (invite: OnboardingInvite) => {
+    const ok = await confirm({
+      tone: "danger",
+      title: "Revogar este link?",
+      description: "Quem abrir o link verá “Link indisponível”. As fichas já enviadas continuam na Homologação.",
+      confirmLabel: "Revogar",
+    });
+    if (ok) revoke.mutate(invite.id);
+  };
 
   return (
     <Card>
       {invites.isLoading ? (
         <LoadingBlock />
+      ) : invites.error ? (
+        <div className="p-4">
+          <ErrorBox message={errorMessage(invites.error)} />
+        </div>
       ) : (invites.data ?? []).length === 0 ? (
         <EmptyState
           icon={<Link2 className="size-6" />}
           title="Nenhum link gerado"
-          action={<Button onClick={onCreate}>Gerar link</Button>}
+          description="O link de cadastro vai pelo WhatsApp: o técnico preenche a ficha no celular."
+          action={<Button onClick={() => onCreate()}>Gerar link</Button>}
         />
       ) : (
         <Table>
@@ -241,34 +405,44 @@ function InvitesTab({ onCreate }: { onCreate: () => void }) {
               <Th className="hidden sm:table-cell">Fichas</Th>
               <Th className="hidden md:table-cell">Expira em</Th>
               <Th className="hidden lg:table-cell">Criado por</Th>
-              <Th />
+              <Th className="edit-col">Ações</Th>
             </tr>
           </thead>
           <tbody>
             {(invites.data ?? []).map((i) => (
-              <tr key={i.id}>
+              <tr key={i.id} className="transition-colors hover:bg-[var(--row-hover)]">
                 <Td>
                   <span className="block font-semibold text-ink">{i.label ?? "Sem identificação"}</span>
                   <span className="text-xs text-ink-muted">{i.max_uses == null ? "Reutilizável" : "Uso único"}</span>
                 </Td>
                 <Td>
-                  <span className={clsx("rounded-full px-2 py-0.5 text-xs font-medium", INVITE_STATE[i.state].className)}>
-                    {INVITE_STATE[i.state].label}
-                  </span>
+                  <Pill color={INVITE_STATE[i.state].color}>{INVITE_STATE[i.state].label}</Pill>
                 </Td>
                 <Td className="hidden tabular-nums sm:table-cell">{i.use_count}</Td>
                 <Td className="hidden text-xs text-ink-muted md:table-cell">{formatDateTime(i.expires_at)}</Td>
                 <Td className="hidden text-xs text-ink-muted lg:table-cell">{i.created_by?.name ?? "—"}</Td>
-                <Td className="text-right">
-                  {i.state === "active" ? (
+                <Td className="edit-col">
+                  <span className="flex items-center justify-end gap-1">
                     <Button
+                      size="sm"
                       variant="ghost"
-                      onClick={() => revoke.mutate(i.id)}
-                      loading={revoke.isPending && revoke.variables === i.id}
+                      onClick={() => onCreate({ label: i.label, reusable: i.max_uses == null })}
+                      title="O link completo só aparece uma vez: gere outro com os mesmos dados"
                     >
-                      Cancelar
+                      <CopyPlus className="size-3.5" />
+                      Gerar outro igual
                     </Button>
-                  ) : null}
+                    {i.state === "active" ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => askRevoke(i)}
+                        loading={revoke.isPending && revoke.variables === i.id}
+                      >
+                        Revogar
+                      </Button>
+                    ) : null}
+                  </span>
                 </Td>
               </tr>
             ))}
@@ -276,108 +450,6 @@ function InvitesTab({ onCreate }: { onCreate: () => void }) {
         </Table>
       )}
     </Card>
-  );
-}
-
-function CreateInviteDialog({ onClose }: { onClose: () => void }) {
-  const queryClient = useQueryClient();
-  const [label, setLabel] = useState("");
-  const [reusable, setReusable] = useState(false);
-  const [days, setDays] = useState("7");
-  const [copied, setCopied] = useState(false);
-  const create = useMutation({
-    mutationFn: () =>
-      api.post<OnboardingInvite>("/onboarding/invites", {
-        label: label.trim() || null,
-        reusable,
-        days_valid: Number(days),
-      }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["onboarding", "invites"] }),
-  });
-  const url = create.data?.token ? inviteUrl(create.data.token) : null;
-  const message = url
-    ? `Olá! Para se cadastrar como técnico parceiro da Maxx Field, preencha a ficha neste link: ${url}`
-    : "";
-
-  return (
-    <Dialog
-      open
-      onClose={onClose}
-      title="Link de cadastro de técnico"
-      description="O técnico abre no celular, preenche a ficha e ela chega aqui para análise."
-      footer={
-        url ? (
-          <Button variant="primary" onClick={onClose}>
-            Concluir
-          </Button>
-        ) : (
-          <>
-            <Button onClick={onClose}>Cancelar</Button>
-            <Button variant="primary" loading={create.isPending} onClick={() => create.mutate()}>
-              Gerar link
-            </Button>
-          </>
-        )
-      }
-    >
-      {url ? (
-        <div className="flex flex-col gap-3">
-          <div className="flex items-center gap-2 rounded-lg border border-line bg-surface-2 p-2">
-            <code className="min-w-0 flex-1 truncate text-xs text-ink">{url}</code>
-            <Button
-              onClick={async () => {
-                await navigator.clipboard.writeText(url);
-                setCopied(true);
-              }}
-            >
-              {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-              {copied ? "Copiado" : "Copiar"}
-            </Button>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <a href={`https://wa.me/?text=${encodeURIComponent(message)}`} target="_blank" rel="noreferrer">
-              <Button>
-                <MessageCircle className="size-4" />
-                Enviar por WhatsApp
-              </Button>
-            </a>
-            <a
-              href={`mailto:?subject=${encodeURIComponent("Cadastro de técnico parceiro — Maxx Field")}&body=${encodeURIComponent(message)}`}
-            >
-              <Button>
-                <Mail className="size-4" />
-                Enviar por e-mail
-              </Button>
-            </a>
-          </div>
-          <p className="text-xs text-ink-muted">
-            Guarde ou envie agora: por segurança, o link completo só aparece nesta tela. {reusable ? "Vale para várias pessoas" : "Vale para uma ficha"} até{" "}
-            {create.data ? formatDateTime(create.data.expires_at) : ""}.
-          </p>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-4">
-          <Field label="Para quem" hint="Para identificar o link na lista. Ex.: nome do técnico ou da região.">
-            <Input value={label} onChange={(e) => setLabel(e.target.value)} maxLength={160} autoFocus />
-          </Field>
-          <Field label="Validade">
-            <Select value={days} onChange={(e) => setDays(e.target.value)}>
-              <option value="3">3 dias</option>
-              <option value="7">7 dias</option>
-              <option value="15">15 dias</option>
-              <option value="30">30 dias</option>
-              <option value="90">90 dias</option>
-            </Select>
-          </Field>
-          <Checkbox
-            label="Reutilizável (várias pessoas podem usar o mesmo link, ex.: grupo de técnicos)"
-            checked={reusable}
-            onChange={setReusable}
-          />
-          {create.error ? <ErrorBox message={errorMessage(create.error)} /> : null}
-        </div>
-      )}
-    </Dialog>
   );
 }
 
@@ -399,33 +471,51 @@ function Line({ icon, children }: { icon: React.ReactNode; children: React.React
   );
 }
 
+/** Resultado da análise: o diálogo fica aberto para avisar o candidato pelo WhatsApp. */
+type Outcome = { kind: "approved"; name: string } | { kind: "rejected" };
+
 function ApplicationDialog({ id, onClose }: { id: string; onClose: () => void }) {
   const queryClient = useQueryClient();
-  const { toast } = useToast();
   const catalog = useOnboardingCatalog();
   const teams = useTeams();
   const [mode, setMode] = useState<"view" | "approve" | "reject">("view");
   const [teamId, setTeamId] = useState("");
   const [jobTitle, setJobTitle] = useState("Técnico de campo");
+  const [note, setNote] = useState("");
   const [reason, setReason] = useState("");
+  const [outcome, setOutcome] = useState<Outcome | null>(null);
   const detail = useQuery({
     queryKey: ["onboarding", "application", id],
     queryFn: () => api.get<ApplicationDetail>(`/onboarding/applications/${id}`),
   });
-  const done = (title: string) => {
-    queryClient.invalidateQueries({ queryKey: ["onboarding"] });
-    queryClient.invalidateQueries({ queryKey: ["users"] });
-    toast({ title, tone: "success" });
-    onClose();
+  // Quantos técnicos ativos já atendem a cidade e a UF do candidato (para decidir se a região precisa dele).
+  const regions = useQuery({
+    queryKey: ["technicians", "regions", "true"],
+    queryFn: () => api.get<TechnicianRegion[]>("/technicians/regions", { active: "true" }),
+    staleTime: 60_000,
+  });
+  const decided = () => {
+    void queryClient.invalidateQueries({ queryKey: ["onboarding"] });
+    refreshTechnicianViews(queryClient);
   };
   const approve = useMutation({
     mutationFn: () =>
-      api.post<User>(`/onboarding/applications/${id}/approve`, { team_id: teamId || null, job_title: jobTitle || null }),
-    onSuccess: (u) => done(`${u.name} aprovado e incluído na base técnica`),
+      api.post<User>(`/onboarding/applications/${id}/approve`, {
+        team_id: teamId || null,
+        job_title: jobTitle.trim() || null,
+        note: note.trim() || null,
+      }),
+    onSuccess: (u) => {
+      decided();
+      setOutcome({ kind: "approved", name: u.name });
+    },
   });
   const reject = useMutation({
-    mutationFn: () => api.post(`/onboarding/applications/${id}/reject`, { reason }),
-    onSuccess: () => done("Ficha reprovada"),
+    mutationFn: () => api.post(`/onboarding/applications/${id}/reject`, { reason: reason.trim() }),
+    onSuccess: () => {
+      decided();
+      setOutcome({ kind: "rejected" });
+    },
   });
 
   const a = detail.data;
@@ -435,6 +525,64 @@ function ApplicationDialog({ id, onClose }: { id: string; onClose: () => void })
   const vehicles = labelMap(catalog.data?.vehicle_types);
   const pending = a?.status === "pending";
   const error = approve.error ?? reject.error;
+  const coverage = (() => {
+    if (!a || !regions.data) return null;
+    const state = regions.data.find((r) => r.state === a.state);
+    const city = state?.cities.find((c) => fold(c.city) === fold(a.city));
+    return { inCity: city?.total ?? 0, inState: state?.total ?? 0 };
+  })();
+
+  const footer = !a ? (
+    detail.error ? (
+      <>
+        <Button onClick={onClose}>Fechar</Button>
+        <Button variant="primary" onClick={() => detail.refetch()} loading={detail.isFetching}>
+          Tentar de novo
+        </Button>
+      </>
+    ) : undefined
+  ) : outcome ? (
+    <Button variant="primary" onClick={onClose}>
+      Concluir
+    </Button>
+  ) : !pending ? (
+    <>
+      {a.user_id ? (
+        <Link href={`/tecnicos?q=${encodeURIComponent(a.email)}`} className={buttonClassName()}>
+          <Users className="size-4" />
+          Ver na base técnica
+        </Link>
+      ) : null}
+      <Button onClick={onClose}>Fechar</Button>
+    </>
+  ) : mode === "approve" ? (
+    <>
+      <Button onClick={() => setMode("view")}>Voltar</Button>
+      <Button variant="primary" loading={approve.isPending} onClick={() => approve.mutate()}>
+        <UserCheck className="size-4" />
+        Aprovar e incluir na base
+      </Button>
+    </>
+  ) : mode === "reject" ? (
+    <>
+      <Button onClick={() => setMode("view")}>Voltar</Button>
+      <Button variant="danger" loading={reject.isPending} disabled={reason.trim().length < 3} onClick={() => reject.mutate()}>
+        <UserX className="size-4" />
+        Reprovar ficha
+      </Button>
+    </>
+  ) : (
+    <>
+      <Button variant="ghost" onClick={() => setMode("reject")}>
+        <UserX className="size-4" />
+        Reprovar
+      </Button>
+      <Button variant="primary" onClick={() => setMode("approve")}>
+        <UserCheck className="size-4" />
+        Aprovar
+      </Button>
+    </>
+  );
 
   return (
     <Dialog
@@ -443,48 +591,14 @@ function ApplicationDialog({ id, onClose }: { id: string; onClose: () => void })
       onClose={onClose}
       title={a ? a.full_name : "Ficha de homologação"}
       description={a ? `Enviada em ${formatDateTime(a.created_at)}${a.invite_label ? ` · link: ${a.invite_label}` : ""}` : undefined}
-      footer={
-        !a ? undefined : !pending ? (
-          <>
-            {a.user_id ? (
-              <Link href="/usuarios">
-                <Button>Ver na base técnica</Button>
-              </Link>
-            ) : null}
-            <Button onClick={onClose}>Fechar</Button>
-          </>
-        ) : mode === "approve" ? (
-          <>
-            <Button onClick={() => setMode("view")}>Voltar</Button>
-            <Button variant="primary" loading={approve.isPending} onClick={() => approve.mutate()}>
-              <UserCheck className="size-4" />
-              Aprovar e incluir na base
-            </Button>
-          </>
-        ) : mode === "reject" ? (
-          <>
-            <Button onClick={() => setMode("view")}>Voltar</Button>
-            <Button variant="danger" loading={reject.isPending} disabled={reason.trim().length < 3} onClick={() => reject.mutate()}>
-              <UserX className="size-4" />
-              Reprovar ficha
-            </Button>
-          </>
-        ) : (
-          <>
-            <Button variant="ghost" onClick={() => setMode("reject")}>
-              <UserX className="size-4" />
-              Reprovar
-            </Button>
-            <Button variant="primary" onClick={() => setMode("approve")}>
-              <UserCheck className="size-4" />
-              Aprovar
-            </Button>
-          </>
-        )
-      }
+      footer={footer}
     >
-      {detail.isLoading || !a ? (
+      {detail.error && !a ? (
+        <ErrorBox message={errorMessage(detail.error)} />
+      ) : !a ? (
         <LoadingBlock />
+      ) : outcome ? (
+        <OutcomePanel application={a} outcome={outcome} />
       ) : mode === "approve" ? (
         <div className="flex flex-col gap-4">
           <p className="text-sm text-ink">
@@ -506,12 +620,15 @@ function ApplicationDialog({ id, onClose }: { id: string; onClose: () => void })
           <Field label="Cargo">
             <Input value={jobTitle} onChange={(e) => setJobTitle(e.target.value)} maxLength={120} />
           </Field>
+          <Field label="Observação (opcional)" hint="Fica registrada na ficha. Ex.: combinado o valor por chamado.">
+            <Textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)} maxLength={2000} />
+          </Field>
           {error ? <ErrorBox message={errorMessage(error)} /> : null}
         </div>
       ) : mode === "reject" ? (
         <div className="flex flex-col gap-4">
-          <Field label="Motivo" required hint="Fica registrado na ficha.">
-            <Textarea rows={4} value={reason} onChange={(e) => setReason(e.target.value)} autoFocus />
+          <Field label="Motivo" required hint="Fica registrado na ficha (o candidato não vê).">
+            <Textarea rows={4} value={reason} onChange={(e) => setReason(e.target.value)} maxLength={2000} autoFocus />
           </Field>
           {error ? <ErrorBox message={errorMessage(error)} /> : null}
         </div>
@@ -527,10 +644,10 @@ function ApplicationDialog({ id, onClose }: { id: string; onClose: () => void })
               )}
             </div>
             <div className="min-w-0 text-sm">
-              <StatusLine status={a.status} />
-              {a.review_note ? <p className="mt-1 text-ink-muted">“{a.review_note}”</p> : null}
+              <Pill color={APPLICATION_STATE[a.status].color}>{APPLICATION_STATE[a.status].label}</Pill>
+              {a.review_note ? <p className="mt-1.5 text-ink-muted">“{a.review_note}”</p> : null}
               {a.reviewed_by ? (
-                <p className="text-xs text-ink-muted">
+                <p className="mt-0.5 text-xs text-ink-muted">
                   por {a.reviewed_by.name} em {formatDateTime(a.reviewed_at)}
                 </p>
               ) : null}
@@ -540,8 +657,15 @@ function ApplicationDialog({ id, onClose }: { id: string; onClose: () => void })
             <Section title="Contato e identificação">
               <Line icon={<Mail className="size-4" />}>{a.email}</Line>
               <Line icon={<Phone className="size-4" />}>
-                <a href={`https://wa.me/55${a.phone.replace(/\D/g, "")}`} target="_blank" rel="noreferrer" className="hover:text-brand">
+                <a
+                  href={whatsappUrl(a.phone, `Olá, ${firstName(a.full_name)}!`)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 underline-offset-2 hover:text-brand hover:underline"
+                  title="Conversar no WhatsApp"
+                >
                   {a.phone}
+                  <MessageCircle className="size-3.5 text-ink-muted" />
                 </a>
               </Line>
               <Line icon={<IdCard className="size-4" />}>
@@ -550,12 +674,20 @@ function ApplicationDialog({ id, onClose }: { id: string; onClose: () => void })
               </Line>
               {a.company_document ? <Line icon={<IdCard className="size-4" />}>CNPJ {formatDocument(a.company_document)}</Line> : null}
               <Line icon={<MapPin className="size-4" />}>
-                {[a.address, `${a.city}/${a.state}`, a.postal_code].filter(Boolean).join(" · ")}
+                {[a.address, `${a.city}-${a.state}`, a.postal_code].filter(Boolean).join(" · ")}
               </Line>
             </Section>
             <Section title="Região e disponibilidade">
               <p>{a.coverage_area}</p>
-              <p className="text-ink-muted">{a.availability.map((k) => availability[k] ?? k).join(" · ") || "Não informada"}</p>
+              {coverage ? (
+                <p className="text-ink-muted">
+                  {coverage.inCity
+                    ? `Já temos ${coverage.inCity} ${coverage.inCity === 1 ? "técnico ativo" : "técnicos ativos"} em ${a.city}-${a.state}`
+                    : `Nenhum técnico ativo em ${a.city}-${a.state} ainda`}{" "}
+                  ({coverage.inState} na UF).
+                </p>
+              ) : null}
+              <p className="text-ink-muted">{a.availability.map((k) => availability[k] ?? k).join(" · ") || "Disponibilidade não informada"}</p>
               <Line icon={<Car className="size-4" />}>
                 {a.has_vehicle ? `Veículo próprio (${vehicles[a.vehicle_type ?? ""] ?? a.vehicle_type})` : "Sem veículo"}
                 {a.has_driver_license ? " · CNH" : ""}
@@ -565,13 +697,13 @@ function ApplicationDialog({ id, onClose }: { id: string; onClose: () => void })
           <Section title="Atuação">
             <div className="flex flex-wrap gap-1.5">
               {a.service_areas.map((k) => (
-                <span key={k} className="rounded-full bg-nav-active px-2.5 py-0.5 text-xs font-medium text-brand">
+                <span key={k} className="rounded-full bg-nav-active px-2.5 py-0.5 text-xs font-medium text-brand-ink">
                   {areas[k] ?? k}
                 </span>
               ))}
             </div>
             <p className="text-ink-muted">
-              {a.years_experience != null ? `${a.years_experience} anos de experiência` : "Experiência não informada"}
+              {a.years_experience != null ? `${years(a.years_experience)} de experiência` : "Experiência não informada"}
             </p>
           </Section>
           {a.skills.length ? (
@@ -603,11 +735,45 @@ function ApplicationDialog({ id, onClose }: { id: string; onClose: () => void })
   );
 }
 
-function StatusLine({ status }: { status: ApplicationStatus }) {
-  const map: Record<ApplicationStatus, { label: string; className: string }> = {
-    pending: { label: "Aguardando análise", className: "text-amber-700 dark:text-amber-300" },
-    approved: { label: "Aprovado — na base técnica", className: "text-emerald-700 dark:text-emerald-300" },
-    rejected: { label: "Reprovado", className: "text-red-700 dark:text-red-300" },
-  };
-  return <p className={clsx("font-medium", map[status].className)}>{map[status].label}</p>;
+/** Depois de aprovar ou reprovar: a mensagem pronta para avisar o candidato pelo WhatsApp. */
+function OutcomePanel({ application: a, outcome }: { application: ApplicationDetail; outcome: Outcome }) {
+  const first = firstName(a.full_name);
+  const approved = outcome.kind === "approved";
+  const message = approved
+    ? `Olá, ${first}! Seu cadastro de técnico parceiro na Maxx Field foi aprovado. No app, entre com ${a.email} e a senha que você criou na ficha.`
+    : `Olá, ${first}! Obrigado pelo interesse em ser técnico parceiro da Maxx Field. No momento não vamos seguir com o seu cadastro.`;
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-start gap-3">
+        {approved ? (
+          <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-brand" />
+        ) : (
+          <UserX className="mt-0.5 size-5 shrink-0 text-ink-muted" />
+        )}
+        <div className="min-w-0 text-sm">
+          <p className="font-semibold text-ink">
+            {outcome.kind === "approved" ? `${outcome.name} está na base técnica` : "Ficha reprovada"}
+          </p>
+          <p className="mt-0.5 text-ink-muted">
+            {approved
+              ? "Avise o técnico: ele já pode entrar no app com o e-mail e a senha da ficha."
+              : "Se quiser, avise o candidato com uma mensagem educada."}
+          </p>
+        </div>
+      </div>
+      <p className="rounded-lg border border-line bg-surface-2 px-3 py-2 text-sm text-ink">{message}</p>
+      <div className="flex flex-wrap gap-2">
+        <a href={whatsappUrl(a.phone, message)} target="_blank" rel="noreferrer" className={buttonClassName("secondary")}>
+          <MessageCircle className="size-4" />
+          Avisar pelo WhatsApp
+        </a>
+        {approved ? (
+          <Link href={`/tecnicos?q=${encodeURIComponent(a.email)}`} className={buttonClassName("ghost")}>
+            <Users className="size-4" />
+            Ver na base técnica
+          </Link>
+        ) : null}
+      </div>
+    </div>
+  );
 }

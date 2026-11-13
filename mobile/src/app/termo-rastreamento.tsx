@@ -1,119 +1,182 @@
 import { router, useLocalSearchParams } from "expo-router";
-import { useState } from "react";
-import { ScrollView, StyleSheet, View } from "react-native";
+import { useEffect, useState } from "react";
+import { Linking, ScrollView, StyleSheet, View } from "react-native";
 import { Text } from "../components/Text";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BrandRule } from "../components/Brand";
-import { Button, Card, ErrorBox } from "../components/ui";
+import { Icon } from "../components/Icon";
+import { Button, Card, ErrorBox, SectionTitle } from "../components/ui";
 import { locationConsentAt } from "../lib/account";
-import { errorMessage } from "../lib/api";
+import { ApiError, errorMessage } from "../lib/api";
+import { ensurePushRegistration } from "../lib/auth";
 import { formatDateTime } from "../lib/format";
 import { useSession } from "../lib/session";
 import { showToast } from "../lib/toast";
-import { acceptConsent, requestLocationPermissions, startShift } from "../lib/tracking";
-import { useStyles, type Palette } from "../theme/theme";
+import { acceptConsent, requestLocationPermissions, startShift, useTracking } from "../lib/tracking";
+import { tint, useStyles, useTheme, type Palette } from "../theme/theme";
 
 const RETENTION_DAYS = 90;
+const BACKGROUND_HINT = "Sem “Permitir o tempo todo”: só registra com o app aberto. Dá para mudar nas configurações do celular.";
 
+// Texto da ciência (LGPD art. 9º): o que é coletado, quando, para quê, quem vê, por quanto tempo e os
+// direitos do técnico. Precisa dizer a verdade sobre TODA coleta do app, inclusive fora da jornada.
 const SECTIONS: { title: string; items: string[] }[] = [
   {
     title: "Para quê",
     items: [
-      "Acompanhar o seu deslocamento até o cliente e o andamento dos atendimentos de campo.",
-      "Dar previsão de chegada ao cliente e organizar a distribuição das OS.",
-      "Os dados são usados só para a gestão dos atendimentos, conforme a LGPD.",
+      "Organizar as visitas e a distribuição das OS.",
+      "Acompanhar o deslocamento até a loja e o andamento dos atendimentos de campo.",
+      "Os dados servem só para a gestão dos atendimentos, conforme a LGPD.",
     ],
   },
   {
     title: "Quando",
     items: [
-      "Somente durante a jornada que você inicia e encerra no app. Fora dela nada é coletado, e o servidor descarta qualquer ponto fora da jornada.",
-      "Durante a jornada, cerca de uma posição a cada 30 segundos, e a cada 15 segundos quando você estiver a caminho de uma OS.",
+      "Durante a jornada que você inicia e encerra no app: cerca de uma posição a cada 30 segundos, e a cada 15 segundos quando você está a caminho de uma OS.",
       "Com o app aberto ou em segundo plano. No Android aparece uma notificação fixa enquanto a jornada estiver ativa.",
+      "Fora da jornada, o app só registra a posição do momento em que você inicia o deslocamento, faz o check-in, conclui a OS, registra visita improdutiva ou colhe a assinatura. Essa posição fica no histórico daquela OS.",
+      "O servidor descarta qualquer ponto de rastreamento enviado fora da jornada.",
     ],
   },
   {
     title: "O que é coletado",
     items: [
       "Sua localização (latitude e longitude) e a precisão do GPS.",
-      "Velocidade e direção, quando o aparelho informar.",
-      "Nível de bateria do celular.",
+      "Durante a jornada, também a velocidade e a direção (quando o aparelho informar) e o nível de bateria.",
       "Se a posição vem de um aplicativo de localização falsa (detecção de GPS simulado).",
     ],
   },
   {
+    title: "Quem vê",
+    items: [
+      "A central (analistas e gestores), no mapa da operação e no histórico das OS.",
+      "O cliente não vê sua localização: o relatório da visita mostra só os horários das etapas e se o check-in foi feito com GPS.",
+    ],
+  },
+  {
     title: "Por quanto tempo",
-    items: [`As posições ficam guardadas por ${RETENTION_DAYS} dias e depois são apagadas.`],
+    items: [
+      `As posições da jornada ficam guardadas por ${RETENTION_DAYS} dias e depois são apagadas.`,
+      "A posição das etapas fica no histórico da OS, junto com os horários do atendimento.",
+    ],
   },
   {
     title: "Seus controles",
     items: [
-      "Você inicia e encerra a jornada quando quiser, pelo botão na tela inicial. Sair do app também encerra a jornada.",
-      "Dúvidas sobre seus dados: fale com o responsável pela operação na sua empresa.",
+      "Você inicia e encerra a jornada quando quiser, pelo botão na tela inicial.",
+      "Fechar o app não encerra a jornada: encerre pelo botão. Sair da conta (Conta → Sair) também encerra.",
+      "Nas etapas da OS, dá para desligar o registro da posição na hora de confirmar.",
+    ],
+  },
+  {
+    title: "Seus direitos",
+    items: [
+      "Você pode pedir acesso, correção ou exclusão dos seus dados de localização e retirar este aceite falando com a central.",
+      "Sem o aceite você usa o app normalmente, mas não consegue iniciar a jornada.",
     ],
   },
 ];
 
 /**
- * Termo de ciência do rastreamento (LGPD). Aparece no primeiro acesso e antes da primeira jornada.
- * O aceite grava POST /tracking/consent e já pede a permissão de localização do sistema.
- * Com `?start=1` (vindo do botão "Iniciar jornada"), a jornada começa logo após o aceite.
+ * Termo de ciência do rastreamento (LGPD). Abre sozinho no máximo uma vez por dia enquanto não houver
+ * aceite, e antes da primeira jornada. O aceite grava POST /tracking/consent e já pede a permissão de
+ * localização do sistema. Com `?start=1` (vindo do botão "Iniciar jornada"), a jornada começa em seguida.
  */
 export default function TrackingConsentScreen() {
   const { user } = useSession();
   const { start } = useLocalSearchParams<{ start?: string }>();
+  const c = useTheme();
   const styles = useStyles(makeStyles);
   const insets = useSafeAreaInsets();
+  const tracking = useTracking();
   const acceptedAt = locationConsentAt(user);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [denied, setDenied] = useState(false);
+  const wantsShift = start === "1";
+
+  // O pedido de notificações espera o termo fechar: nunca dois pedidos de permissão ao mesmo tempo.
+  useEffect(
+    () => () => {
+      void ensurePushRegistration();
+    },
+    [],
+  );
+
+  function close() {
+    if (router.canGoBack()) router.back();
+    else router.replace("/");
+  }
+
+  /** Inicia a jornada; se falhar (ex.: sem internet), o erro fica na tela com o botão para tentar de novo. */
+  async function begin(background: boolean | null): Promise<boolean> {
+    try {
+      await startShift();
+      showToast("Jornada iniciada", { tone: "success", description: background === false ? BACKGROUND_HINT : "Registrando até você encerrar." });
+      return true;
+    } catch (e) {
+      setError(errorMessage(e));
+      return false;
+    }
+  }
 
   async function accept() {
     setBusy(true);
     setError(null);
     try {
       await acceptConsent();
-      const permissions = await requestLocationPermissions();
-      if (!permissions.foreground) {
-        setError(
-          "Termo aceito, mas o acesso à localização foi negado. Libere a localização para o Maxx Field nas configurações do celular antes de iniciar a jornada.",
-        );
+    } catch (e) {
+      setError(
+        e instanceof ApiError && e.status === 0
+          ? "Sem internet: o aceite precisa chegar à central. Tente de novo quando tiver sinal."
+          : errorMessage(e),
+      );
+      setBusy(false);
+      return;
+    }
+    const permissions = await requestLocationPermissions();
+    if (!permissions.foreground) {
+      setDenied(true);
+      setError("Termo aceito, mas o acesso à localização foi negado. Libere a localização para o Maxx Field nas configurações do celular para iniciar a jornada.");
+      setBusy(false);
+      return;
+    }
+    if (wantsShift) {
+      if (!(await begin(permissions.background))) {
         setBusy(false);
         return;
       }
-      if (start === "1") {
-        await startShift();
-        showToast("Jornada iniciada", { tone: "success", description: "Rastreamento ativo até você encerrar." });
-      } else {
-        showToast("Termo aceito", {
-          tone: "success",
-          description:
-            permissions.background === false
-              ? "Sem “Sempre”: o rastreamento só funcionará com o app aberto. Dá para mudar nas configurações."
-              : "Inicie a jornada quando começar o trabalho.",
-        });
-      }
-      if (router.canGoBack()) router.back();
-      else router.replace("/");
-    } catch (e) {
-      setError(errorMessage(e));
-      setBusy(false);
+    } else {
+      showToast("Termo aceito", {
+        tone: "success",
+        description: permissions.background === false ? BACKGROUND_HINT : "Inicie a jornada quando começar o trabalho.",
+      });
     }
+    close();
+  }
+
+  async function startNow() {
+    setBusy(true);
+    setError(null);
+    if (await begin(null)) close();
+    else setBusy(false);
   }
 
   return (
     <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}>
       <View style={{ gap: 8 }}>
-        <Text style={styles.title}>Uso da sua localização</Text>
+        <Text style={styles.title} accessibilityRole="header">
+          Uso da sua localização
+        </Text>
         <BrandRule width={44} />
         <Text style={styles.lead}>
-          O Maxx Field registra sua localização só durante a jornada de trabalho, para acompanhar o deslocamento
-          até o cliente. Leia como funciona e confirme.
+          O Maxx Field registra sua localização durante a jornada de trabalho e nas etapas das OS, para a central
+          acompanhar os atendimentos. Leia como funciona e confirme.
         </Text>
       </View>
       {SECTIONS.map((section) => (
         <Card key={section.title} style={{ gap: 8 }}>
-          <Text style={styles.sectionTitle}>{section.title}</Text>
+          <SectionTitle accent>{section.title}</SectionTitle>
           {section.items.map((item) => (
             <View key={item} style={styles.item}>
               <View style={styles.bullet} />
@@ -132,20 +195,24 @@ export default function TrackingConsentScreen() {
         </Card>
       ) : null}
       {error ? <ErrorBox message={error} /> : null}
+      {denied ? <Button title="Abrir configurações" icon="shield" onPress={() => void Linking.openSettings()} /> : null}
       {acceptedAt ? (
-        <Text style={styles.accepted}>Termo aceito em {formatDateTime(acceptedAt)}.</Text>
+        <View style={styles.accepted} accessibilityLiveRegion="polite">
+          <Icon name="checkCircle" size={18} color={c.success} />
+          <Text style={styles.acceptedText}>Termo aceito em {formatDateTime(acceptedAt)}.</Text>
+        </View>
       ) : (
         <Button
-          title={start === "1" ? "Concordo · iniciar jornada" : "Concordo e permitir localização"}
+          title={wantsShift ? "Concordo · iniciar jornada" : "Concordo e permitir localização"}
           variant="primary"
-          onPress={accept}
+          onPress={() => void accept()}
           loading={busy}
         />
       )}
-      <Button title={acceptedAt ? "Fechar" : "Agora não"} variant="ghost" onPress={() => (router.canGoBack() ? router.back() : router.replace("/"))} disabled={busy} />
-      {!acceptedAt ? (
-        <Text style={styles.footnote}>Sem o aceite você usa o app normalmente, mas não consegue iniciar a jornada.</Text>
+      {acceptedAt && wantsShift && !tracking.shift && !denied ? (
+        <Button title="Iniciar jornada" icon="clock" variant="primary" onPress={() => void startNow()} loading={busy} />
       ) : null}
+      <Button title={acceptedAt ? "Fechar" : "Agora não"} variant="ghost" onPress={close} disabled={busy} />
     </ScrollView>
   );
 }
@@ -155,12 +222,11 @@ const makeStyles = (c: Palette) =>
     content: { padding: 20, gap: 14, maxWidth: 640, width: "100%", alignSelf: "center" },
     title: { fontSize: 22, fontWeight: "700", color: c.ink, letterSpacing: -0.3 },
     lead: { fontSize: 15, color: c.inkMuted, lineHeight: 21 },
-    sectionTitle: { fontSize: 13, fontWeight: "700", color: c.primary, textTransform: "uppercase", letterSpacing: 0.5 },
     item: { flexDirection: "row", gap: 10, alignItems: "flex-start" },
-    bullet: { width: 6, height: 6, borderRadius: 3, backgroundColor: c.primary, marginTop: 8 },
+    bullet: { width: 5, height: 5, borderRadius: 3, backgroundColor: c.inkSubtle, marginTop: 9 },
     itemText: { flex: 1, fontSize: 14, color: c.ink, lineHeight: 21 },
-    permission: { gap: 6, backgroundColor: c.primarySoft, borderColor: c.primary + "33" },
+    permission: { gap: 6, backgroundColor: c.surface2, borderColor: tint(c.primary, "33") },
     permissionTitle: { fontSize: 14, fontWeight: "700", color: c.ink },
-    accepted: { textAlign: "center", fontSize: 13, color: c.success, fontWeight: "600" },
-    footnote: { textAlign: "center", fontSize: 12, color: c.inkSubtle, lineHeight: 17 },
+    accepted: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, minHeight: 44 },
+    acceptedText: { fontSize: 14, color: c.success, fontWeight: "700" },
   });

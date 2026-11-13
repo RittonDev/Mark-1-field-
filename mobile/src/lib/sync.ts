@@ -1,50 +1,61 @@
 // Motor de sincronização offline-first (docs/MOBILE_SYNC.md).
 //
-// Cada rodada: envia a fila (POST /sync/push), baixa o delta (GET /sync/pull?since=)
-// até has_more = false e sobe as fotos pendentes. Rodadas nunca correm em paralelo;
-// um pedido durante uma rodada agenda outra logo depois.
+// Cada rodada: sobe as fotos pendentes, envia a fila (POST /sync/push) com as assinaturas na
+// ordem certa e baixa o delta (GET /sync/pull?since=) até has_more = false. Rodadas nunca correm
+// em paralelo; um pedido durante uma rodada agenda outra logo depois.
+//
+// A ordem só importa dentro de cada OS (fotos → formulários → assinatura → "Resolver"): um item
+// travado de uma OS espera, com intervalo crescente entre as tentativas, sem segurar as outras OS,
+// e problema no envio não impede o download. Nada sai da fila por erro de transporte: só a recusa
+// do servidor àquela ação tira ela da fila (com aviso ao técnico).
 //
 // Gatilhos: login/abertura do app, rede voltando, app voltando ao primeiro plano,
 // cada ação do técnico, cada evento do WebSocket e um intervalo de segurança.
 
 import NetInfo from "@react-native-community/netinfo";
 import { randomUUID } from "expo-crypto";
-import { deleteAllPhotoFiles, deletePhotoFile, persistPhoto, photoExists } from "./photoFiles";
 import { useSyncExternalStore } from "react";
 import { AppState, type AppStateStatus } from "react-native";
 import { api, ApiError, errorMessage, uploadFile } from "./api";
 import { STATUS } from "./constants";
 import {
   addNotice,
+  addPartAttachment,
+  clearSignatureBlock,
   countPending,
   deleteLocalDraft,
+  deleteMissingOpenTickets,
   deleteOp,
-  dropFormDrafts,
-  deleteSignature,
   deletePhoto,
+  deleteSignature,
   deleteTicket,
+  dropFormDrafts,
   getAttachmentsCache,
   getDb,
   getKv,
+  getServerTicket,
+  getServerVersion,
   getTicket,
   getUnproductiveReasonsAt,
   insertLocalComment,
   insertLocalWorklog,
-  addPartAttachment,
   insertOp,
   insertPhoto,
   insertPhotoRow,
-  partOpsWithPendingPhotos,
   insertSignature,
   listOutbox,
   listPhotos,
-  listTickets,
   listSignatures,
+  listTickets,
   markLocalSent,
   markOpsAttempt,
+  markPhotoAttempt,
   markPhotoError,
+  markSignatureAttempt,
+  markSignatureBlocked,
   markSignatureError,
   maxOutboxSeq,
+  partOpsWithPendingPhotos,
   pruneOld,
   purgeSentDrafts,
   rebaseTicket,
@@ -57,30 +68,37 @@ import {
   setFormError,
   setKv,
   transaction,
+  WriteCancelled,
+  type DB,
   type PendingPhoto,
   type PendingSignature,
 } from "./db";
+import { flushDeviceRegistration } from "./device";
 import { setFieldRules } from "./field";
-import { isDone, isHelper } from "./lists";
+import { formatShort } from "./format";
+import { pendingRequiredForms } from "./forms";
 import { haptic } from "./haptics";
+import { isDone, isHelper } from "./lists";
 import { syncOnsiteAlerts } from "./onsiteAlerts";
 import { userRef } from "./ops";
-import { showSuccess } from "./success";
+import { deleteAllPhotoFiles, deletePhotoFile, persistPhoto, photoExists } from "./photoFiles";
 import { RealtimeClient, type RealtimeState } from "./realtime";
 import { session } from "./session";
+import { showSuccess } from "./success";
 import type {
   CommentCreatePayload,
   FormAnswersPayload,
-  PartRequestPayload,
-  UnproductivePayload,
   OutboxOp,
+  PartRequestPayload,
   SyncOperation,
   SyncOperationIn,
   SyncPullResponse,
+  SyncPushRequest,
   SyncPushResponse,
+  UnproductivePayload,
 } from "./syncTypes";
 import { showToast } from "./toast";
-import { flushPings, resumeTracking, updateTrackingMode } from "./tracking";
+import { flushPendingShiftEnd, flushPings, resumeTracking, updateTrackingMode } from "./tracking";
 import type {
   Attachment,
   FieldRules,
@@ -92,23 +110,32 @@ import type {
   UUID,
 } from "./types";
 
-const PUSH_BATCH = 100; // a API aceita até 200 por lote
+/** A API aceita até 200 por lote; lotes pequenos respondem antes do tempo limite em rede móvel. */
+const PUSH_BATCH = 25;
+/** Envio e download do sync carregam OS inteiras: mais tempo que uma consulta comum. */
+const SYNC_TIMEOUT_MS = 60_000;
 const SAFETY_INTERVAL_MS = 90_000;
+/** Com o tempo real no ar, os eventos já disparam o sync: o intervalo de segurança espaça. */
+const REALTIME_INTERVAL_MS = 5 * 60_000;
 const SINCE_KEY = "sync_since";
+const LAST_SYNC_KEY = "sync_last_at";
 
 // ───────────────────────────── estado ─────────────────────────────
 
 export interface SyncStatus {
-  /** Conectividade do aparelho (NetInfo). */
+  /** Conectividade do aparelho (NetInfo): "offline" só sem Wi-Fi e sem dados. */
   network: "unknown" | "online" | "offline";
   /** Resultado da última conversa com a API. */
   server: "unknown" | "reachable" | "unreachable";
   realtime: RealtimeState;
+  /** Rodada visível: há algo a enviar ou o técnico pediu (rotina silenciosa não acende a faixa). */
   syncing: boolean;
   lastSyncAt: string | null;
   lastError: string | null;
   pendingOps: number;
   pendingPhotos: number;
+  /** Ações que o servidor falhou em processar várias vezes seguidas: o técnico decide (Conta → Descartar). */
+  stuckOps: number;
 }
 
 let status: SyncStatus = {
@@ -120,6 +147,7 @@ let status: SyncStatus = {
   lastError: null,
   pendingOps: 0,
   pendingPhotos: 0,
+  stuckOps: 0,
 };
 const listeners = new Set<() => void>();
 
@@ -152,6 +180,67 @@ function currentUser(): User {
   const user = session.get().user;
   if (!user) throw new Error("Sessão encerrada");
   return user;
+}
+
+// ───────────────────────────── sessão e escritas ─────────────────────────────
+
+/**
+ * Muda a cada "Sair", troca de usuário ou limpeza do aparelho: o que uma rodada da sessão
+ * anterior ainda tinha em andamento não grava mais nada (nem pede mais nada ao servidor).
+ */
+let epoch = 0;
+
+/** Sessão que começou um trabalho (rodada, conferência de OS). */
+interface Ctx {
+  epoch: number;
+  user: User;
+}
+
+const sessionCtx = (): Ctx => ({ epoch, user: currentUser() });
+
+const alive = (ctx: Ctx) => ctx.epoch === epoch && session.get().user?.id === ctx.user.id;
+
+/** Escrita de um trabalho em andamento: cancelada (WriteCancelled) se a sessão mudou no meio. */
+function write(ctx: Ctx, task: (db: DB) => Promise<void>, notify = true): Promise<void> {
+  return transaction(task, { notify, guard: () => alive(ctx) });
+}
+
+/** Antes de cada pedido ao servidor: a sessão ainda é a mesma? */
+function ensureAlive(ctx: Ctx) {
+  if (!alive(ctx)) throw new WriteCancelled();
+}
+
+// ───────────────────────────── espera entre tentativas ─────────────────────────────
+
+interface Retry {
+  failures: number;
+  nextAt: number;
+  /** Falhou sozinha com erro do servidor: provavelmente é ela que derruba o envio. */
+  stuck: boolean;
+}
+
+const BACKOFF_BASE_MS = 5_000;
+const BACKOFF_MAX_MS = 5 * 60_000;
+/** Falhas seguidas, sozinha, para a ação aparecer como "precisa de atenção". */
+const STUCK_AFTER = 3;
+
+/** Por operação, foto ou assinatura (ids aleatórios, sem colisão). Falta de rede não conta aqui. */
+const retries = new Map<string, Retry>();
+
+/** Falha do lado do servidor: espera 5 s, 10 s, 20 s… até 5 min (±20%) antes de tentar de novo. */
+function scheduleRetry(id: string, stuck = false) {
+  const failures = (retries.get(id)?.failures ?? 0) + 1;
+  const delay = Math.min(BACKOFF_BASE_MS * 2 ** (failures - 1), BACKOFF_MAX_MS) * (0.8 + Math.random() * 0.4);
+  retries.set(id, { failures, nextAt: Date.now() + delay, stuck });
+}
+
+const isDue = (id: string) => (retries.get(id)?.nextAt ?? 0) <= Date.now();
+const failuresOf = (id: string) => retries.get(id)?.failures ?? 0;
+
+function countStuck(): number {
+  let count = 0;
+  for (const retry of retries.values()) if (retry.stuck && retry.failures >= STUCK_AFTER) count += 1;
+  return count;
 }
 
 // ───────────────────────────── rodada ─────────────────────────────

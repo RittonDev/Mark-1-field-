@@ -55,10 +55,12 @@ interface RealtimeFeed {
   /** Últimos avisos, o mais recente primeiro. */
   items: RealtimeNotice[];
   unread: number;
+  /** Até quando (ms) os avisos já foram vistos: os mais novos que isso são os não lidos. */
+  readAt: number;
   markAllRead: () => void;
 }
 
-const FeedContext = createContext<RealtimeFeed>({ items: [], unread: 0, markAllRead: () => {} });
+const FeedContext = createContext<RealtimeFeed>({ items: [], unread: 0, readAt: 0, markAllRead: () => {} });
 
 const ControlContext = createContext<{ reconnect: () => void }>({ reconnect: () => {} });
 
@@ -574,7 +576,10 @@ export function RealtimeProvider({
     setFeed((current) => ({ ...current, readAt: now }));
   }, []);
   const unread = useMemo(() => feed.items.filter((n) => Date.parse(n.at) > feed.readAt).length, [feed]);
-  const feedValue = useMemo(() => ({ items: feed.items, unread, markAllRead }), [feed.items, unread, markAllRead]);
+  const feedValue = useMemo(
+    () => ({ items: feed.items, unread, readAt: feed.readAt, markAllRead }),
+    [feed.items, feed.readAt, unread, markAllRead],
+  );
   const control = useMemo(() => ({ reconnect: () => reconnectRef.current() }), []);
 
   return (

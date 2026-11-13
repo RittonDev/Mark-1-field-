@@ -1,88 +1,160 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Save, Timer } from "lucide-react";
-import { useState } from "react";
+import { Save } from "lucide-react";
+import { useId, useState } from "react";
+import { FieldError, useBeforeUnload } from "@/components/settings/shared";
 import { useToast } from "@/components/Toaster";
 import { Button, Card, CardHeader, ErrorBox, Field, Input, LoadingBlock } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import type { FieldRules } from "@/lib/types";
 
+// Limites de backend/app/schemas/field.py (horas e minutos inteiros).
+const LIMITS = {
+  capital: 72,
+  interior: 240,
+  onsite: 24,
+  warning: 240,
+};
+const MIN_WARNING = 5;
+
+type Key = "capital" | "interior" | "onsite" | "warning";
+type Values = Record<Key, string>;
+
+/** Número inteiro digitado (vazio ou com vírgula/ponto vira NaN). */
+const whole = (v: string) => (/^\d+$/.test(v.trim()) ? Number(v.trim()) : Number.NaN);
+
+function problemsOf(v: Values): Partial<Record<Key, string>> {
+  const out: Partial<Record<Key, string>> = {};
+  const arrival = (key: "capital" | "interior") => {
+    if (!v[key].trim()) return;
+    const n = whole(v[key]);
+    if (!(n >= 1 && n <= LIMITS[key])) out[key] = `Use horas inteiras de 1 a ${LIMITS[key]}, ou deixe vazio.`;
+  };
+  arrival("capital");
+  arrival("interior");
+  const onsite = whole(v.onsite);
+  if (!(onsite >= 1 && onsite <= LIMITS.onsite)) out.onsite = `Use horas inteiras de 1 a ${LIMITS.onsite}.`;
+  const warning = whole(v.warning);
+  if (!(warning >= MIN_WARNING && warning <= LIMITS.warning)) {
+    out.warning = `Use minutos inteiros de ${MIN_WARNING} a ${LIMITS.warning}.`;
+  } else if (!out.onsite && warning > onsite * 60 - MIN_WARNING) {
+    // O aviso sai "minutos antes do fim": maior que o tempo na loja, ele chegaria antes do técnico.
+    out.warning = `Com ${onsite}h na loja, avise no máximo ${onsite * 60 - MIN_WARNING} minutos antes do fim.`;
+  }
+  return out;
+}
+
 /** Regras do atendimento em campo: prazo de chegada e tempo na loja por chamado. */
-export function FieldRulesCard() {
+export function FieldRulesCard({ readOnly = false }: { readOnly?: boolean }) {
   const rules = useQuery({ queryKey: ["settings", "field"], queryFn: () => api.get<FieldRules>("/settings/field") });
   return (
     <Card>
       <CardHeader
-        title={
-          <span className="inline-flex items-center gap-2">
-            <Timer className="size-4 text-ink-subtle" />
-            Regras do atendimento em campo
-          </span>
-        }
+        title="Regras do atendimento em campo"
         description="Prazo para o técnico chegar à loja e tempo de técnico incluído em cada chamado."
       />
       {rules.isLoading ? (
         <LoadingBlock rows={2} />
       ) : rules.error ? (
-        <div className="p-4">
+        <div className="flex flex-col items-start gap-3 p-4">
           <ErrorBox message={errorMessage(rules.error)} />
+          <Button size="sm" loading={rules.isFetching} onClick={() => rules.refetch()}>
+            Tentar de novo
+          </Button>
         </div>
       ) : rules.data ? (
-        <RulesForm key={JSON.stringify(rules.data)} initial={rules.data} />
+        <RulesForm key={JSON.stringify(rules.data)} initial={rules.data} readOnly={readOnly} />
       ) : null}
     </Card>
   );
 }
 
-const toNumber = (v: string) => (v.trim() === "" ? null : Number(v));
+const toValues = (r: FieldRules): Values => ({
+  capital: r.arrival_hours_capital?.toString() ?? "",
+  interior: r.arrival_hours_interior?.toString() ?? "",
+  onsite: String(r.onsite_hours),
+  warning: String(r.onsite_warning_minutes),
+});
 
-function RulesForm({ initial }: { initial: FieldRules }) {
+function RulesForm({ initial, readOnly }: { initial: FieldRules; readOnly: boolean }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const [capital, setCapital] = useState(initial.arrival_hours_capital?.toString() ?? "");
-  const [interior, setInterior] = useState(initial.arrival_hours_interior?.toString() ?? "");
-  const [onsite, setOnsite] = useState(String(initial.onsite_hours));
-  const [warning, setWarning] = useState(String(initial.onsite_warning_minutes));
+  const id = useId();
+  const [start] = useState(() => toValues(initial));
+  const [values, setValues] = useState(start);
+  const problems = problemsOf(values);
+  const invalid = Object.keys(problems).length > 0;
+  const dirty = JSON.stringify(values) !== JSON.stringify(start);
+  useBeforeUnload(dirty && !readOnly);
+  const set = (key: Key) => (e: React.ChangeEvent<HTMLInputElement>) => setValues((v) => ({ ...v, [key]: e.target.value }));
+  const optional = (v: string) => (v.trim() === "" ? null : whole(v));
+
   const save = useMutation({
     mutationFn: () =>
       api.put<FieldRules>("/settings/field", {
-        arrival_hours_capital: toNumber(capital),
-        arrival_hours_interior: toNumber(interior),
-        onsite_hours: Number(onsite) || 4,
-        onsite_warning_minutes: Number(warning) || 30,
+        arrival_hours_capital: optional(values.capital),
+        arrival_hours_interior: optional(values.interior),
+        onsite_hours: whole(values.onsite),
+        onsite_warning_minutes: whole(values.warning),
       }),
     onSuccess: (data) => {
       queryClient.setQueryData(["settings", "field"], data);
       toast({ title: "Regras de campo salvas", description: "Valem para as próximas OS e chegadas.", tone: "success" });
     },
   });
+
+  const input = (key: Key, props: React.InputHTMLAttributes<HTMLInputElement>) => (
+    <>
+      <Input
+        inputMode="numeric"
+        value={values[key]}
+        onChange={set(key)}
+        disabled={readOnly}
+        aria-invalid={problems[key] ? true : undefined}
+        aria-describedby={problems[key] ? `${id}-${key}` : undefined}
+        {...props}
+      />
+      {problems[key] ? <FieldError id={`${id}-${key}`}>{problems[key]}</FieldError> : null}
+    </>
+  );
+
   return (
     <form
       className="grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-4"
       onSubmit={(e) => {
         e.preventDefault();
-        save.mutate();
+        if (!invalid && dirty) save.mutate();
       }}
     >
-      <Field label="Chegada nas capitais (horas)" hint="Da solicitação até o técnico chegar">
-        <Input type="number" min={1} max={72} value={capital} onChange={(e) => setCapital(e.target.value)} placeholder="Sem prazo" />
+      <Field
+        label="Chegada nas capitais (horas)"
+        hint={problems.capital ? undefined : "Lojas nas 27 capitais (pela cidade e UF do local). Vazio: sem prazo."}
+      >
+        {input("capital", { placeholder: "Sem prazo" })}
       </Field>
-      <Field label="Chegada no interior (horas)" hint="Vazio: sem prazo de chegada">
-        <Input type="number" min={1} max={168} value={interior} onChange={(e) => setInterior(e.target.value)} placeholder="Sem prazo" />
+      <Field label="Chegada no interior (horas)" hint={problems.interior ? undefined : "Demais cidades. Vazio: sem prazo."}>
+        {input("interior", { placeholder: "Sem prazo" })}
       </Field>
-      <Field label="Tempo na loja por chamado (horas)" hint="Contado a partir da chegada">
-        <Input type="number" min={1} max={24} value={onsite} onChange={(e) => setOnsite(e.target.value)} required />
+      <Field label="Tempo na loja por chamado (horas)" required hint={problems.onsite ? undefined : "Contado a partir da chegada."}>
+        {input("onsite", { required: true })}
       </Field>
-      <Field label="Avisar antes do fim (minutos)" hint="Alerta para o técnico e para a fila">
-        <Input type="number" min={5} max={120} value={warning} onChange={(e) => setWarning(e.target.value)} required />
+      <Field
+        label="Avisar antes do fim (minutos)"
+        required
+        hint={problems.warning ? undefined : "Alerta para o técnico e para a fila antes de acabar o tempo na loja."}
+      >
+        {input("warning", { required: true })}
       </Field>
-      <div className="flex justify-end sm:col-span-2 lg:col-span-4">
-        <Button type="submit" variant="primary" loading={save.isPending}>
-          <Save className="size-4" />
-          Salvar regras
-        </Button>
-      </div>
+      {readOnly ? null : (
+        <div className="flex flex-wrap items-center justify-end gap-3 sm:col-span-2 lg:col-span-4">
+          {dirty ? <span className="text-xs font-semibold text-ink-muted">Alterações não salvas</span> : null}
+          <Button type="submit" variant="primary" loading={save.isPending} disabled={!dirty || invalid}>
+            <Save className="size-4" />
+            Salvar regras
+          </Button>
+        </div>
+      )}
       {save.error ? (
         <div className="sm:col-span-2 lg:col-span-4">
           <ErrorBox message={errorMessage(save.error)} />

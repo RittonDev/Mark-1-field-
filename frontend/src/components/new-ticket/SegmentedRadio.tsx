@@ -12,6 +12,7 @@ export function SegmentedRadio<K extends string>({
   value,
   onChange,
   ariaLabel,
+  labelledBy,
   id,
   className,
 }: {
@@ -19,6 +20,8 @@ export function SegmentedRadio<K extends string>({
   value: K;
   onChange: (value: K) => void;
   ariaLabel: string;
+  /** id do rótulo visível (no lugar do aria-label). */
+  labelledBy?: string;
   id?: string;
   className?: string;
 }) {
@@ -30,7 +33,8 @@ export function SegmentedRadio<K extends string>({
     <div
       id={id}
       role="radiogroup"
-      aria-label={ariaLabel}
+      aria-labelledby={labelledBy}
+      aria-label={labelledBy ? undefined : ariaLabel}
       className={clsx("grid gap-1 rounded-lg bg-surface-2 p-1", className)}
       style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
     >

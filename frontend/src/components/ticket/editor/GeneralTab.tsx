@@ -2,37 +2,50 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { Hand, MapPin, Phone, Star, ThumbsUp, X } from "lucide-react";
+import { AlertTriangle, Hand, MapPin, Phone, Star, ThumbsUp, Users, X } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useConfirm } from "@/components/Confirm";
 import { LocationPicker } from "@/components/LocationPicker";
 import { ConflictHint, ConflictList, scheduleConflicts } from "@/components/ScheduleConflict";
 import { useToast } from "@/components/Toaster";
 import { HelpersField, SuggestedTechnicians } from "@/components/new-ticket/SuggestedTechnicians";
 import { PayoutLine } from "@/components/ticket/PayoutsCard";
-import { TransitionDialog } from "@/components/ticket/TransitionDialog";
-import { ErrorBox, Field, Input, SectionTitle, Select, Textarea } from "@/components/ui";
-import { api, ApiError, errorMessage } from "@/lib/api";
+import { busyTitle, isVersionConflict } from "@/components/ticket/useConflictHandler";
+import { useNow } from "@/components/useNow";
+import { Button, buttonClassName, Card, CardHeader, ErrorBox, Field, Input, SectionTitle, Select, Textarea } from "@/components/ui";
+import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { PRIORITY, PRIORITY_ORDER, STATUS, STATUS_ORDER } from "@/lib/constants";
+import { PRIORITY, PRIORITY_ORDER, ROLE, STATUS, STATUS_ORDER } from "@/lib/constants";
 import { formatDateTime, formatMinutes, formatMoney, fromLocalInput, toLocalInput } from "@/lib/format";
+import { useDebounced } from "@/lib/hooks";
 import { useProjects } from "@/lib/projects";
 import { useAssignable, useCategories, useCustomers, useServiceTypes } from "@/lib/queries";
 import type {
   ConflictItem,
   IntakeContext,
   Location,
-  QueuesOut,
   Tag,
   TechnicianSuggestion,
   TicketDetail,
   TicketPriority,
   TicketStatus,
   TicketUpdatePayload,
+  User,
   UUID,
 } from "@/lib/types";
+import { copyText } from "@/lib/whatsapp";
 
+/** Prefixo do id do formulário (o editor soma um id próprio: página e painel podem estar abertos juntos). */
 export const GENERAL_FORM_ID = "ticket-general";
+
+/** O que o rodapé do editor (fora do formulário) precisa para o botão Salvar. */
+export interface SaveState {
+  dirty: boolean;
+  pending: boolean;
+  /** A API barrou por conflito de agenda: o próximo Salvar confirma mesmo assim. */
+  conflict: boolean;
+}
 
 const split = (iso: string | null | undefined) => {
   const local = toLocalInput(iso);
@@ -40,6 +53,15 @@ const split = (iso: string | null | undefined) => {
 };
 const join = (date: string, time: string) => (date && time ? fromLocalInput(`${date}T${time}`) : null);
 const sameList = (a: string[], b: string[]) => a.length === b.length && [...a].sort().join() === [...b].sort().join();
+
+/** Situações com o técnico na OS: tirar ou trocar o técnico muda a situação. */
+const FIELD_ACTIVE: TicketStatus[] = ["assigned", "scheduled", "en_route", "in_progress"];
+/** Concluída, fechada ou cancelada: as sugestões de técnico ficam recolhidas. */
+const FINISHED: TicketStatus[] = ["resolved", "closed", "cancelled"];
+/** Limite de outros técnicos na visita (o mesmo da API). */
+const MAX_HELPERS = 6;
+/** Folga para o relógio do computador (a API aceita 1 minuto). */
+const SKEW_MS = 60_000;
 
 interface FormState {
   title: string;
@@ -100,17 +122,86 @@ function initial(t: TicketDetail): FormState {
   };
 }
 
+type Key = keyof FormState;
+
+/** Textos comparados sem os espaços das pontas (a API grava aparado). */
+const TEXT_KEYS: Key[] = ["title", "description", "serviceAddress", "visitNote", "resolutionNotes"];
+
+/**
+ * Campos que mudam juntos (a loja e o cliente dela, a agenda, os horários reais). Quando outra pessoa
+ * muda a OS enquanto se edita, cada grupo entra inteiro ou fica como está aqui.
+ */
+const GROUPS: { keys: Key[]; label: string; schedule?: boolean }[] = [
+  { keys: ["title"], label: "título" },
+  { keys: ["serviceTypeId"], label: "tipo de OS" },
+  { keys: ["categoryId"], label: "categoria" },
+  { keys: ["priority"], label: "prioridade" },
+  { keys: ["tags"], label: "etiquetas" },
+  { keys: ["customerId", "locationId", "locationLabel"], label: "cliente e loja" },
+  { keys: ["serviceAddress"], label: "endereço" },
+  { keys: ["description"], label: "descrição" },
+  { keys: ["estimated", "date", "time"], label: "agenda", schedule: true },
+  { keys: ["assigneeId"], label: "técnico", schedule: true },
+  { keys: ["helperIds"], label: "outros técnicos", schedule: true },
+  { keys: ["ownerId"], label: "analista responsável" },
+  { keys: ["projectId"], label: "projeto" },
+  { keys: ["visitNote"], label: "observação da visita" },
+  { keys: ["startDate", "startTime", "endDate", "endTime"], label: "horários reais" },
+  { keys: ["resolutionNotes"], label: "descrição da conclusão" },
+];
+
+const SCHEDULE_KEYS: Key[] = ["date", "time", "estimated"];
+const TIME_KEYS: Key[] = ["startDate", "startTime", "endDate", "endTime"];
+
+function sameValue(key: Key, a: FormState, b: FormState): boolean {
+  if (key === "helperIds") return sameList(a.helperIds, b.helperIds);
+  if (key === "tags") return JSON.stringify(a.tags) === JSON.stringify(b.tags);
+  if (TEXT_KEYS.includes(key)) return String(a[key]).trim() === String(b[key]).trim();
+  return a[key] === b[key];
+}
+
+const sameGroup = (keys: Key[], a: FormState, b: FormState) => keys.every((k) => sameValue(k, a, b));
+
+/** `target` com os campos `keys` copiados de `source`. */
+function withKeys(target: FormState, source: FormState, keys: Key[]): FormState {
+  const out = { ...target };
+  for (const key of keys) Object.assign(out, { [key]: source[key] });
+  return out;
+}
+
+/** Depois de salvar: o que não mudou desde o envio vira o que a API gravou; o que se digitou durante o envio fica. */
+function adopt(current: FormState, sent: FormState, fresh: FormState): FormState {
+  let out = current;
+  for (const group of GROUPS) if (sameGroup(group.keys, current, sent)) out = withKeys(out, fresh, group.keys);
+  return current.timesReason === sent.timesReason ? { ...out, timesReason: "" } : out;
+}
+
+/** A cópia `a` da OS é mais nova que `b`: a versão sobe a cada edição e a hora cobre o que não sobe a versão (outros técnicos). */
+function isNewer(a: TicketDetail, b: TicketDetail) {
+  return a.version > b.version || (a.version === b.version && Date.parse(a.updated_at) > Date.parse(b.updated_at));
+}
+
 function Counter({ value, max }: { value: string; max: number }) {
   return (
-    <span className={clsx("self-end text-[11px] tabular-nums", value.length > max ? "text-red-600" : "text-ink-subtle")}>
-      {value.length} / {max}
+    <span className="self-end text-[11px] text-ink-subtle tabular-nums">
+      {value.length.toLocaleString("pt-BR")} / {max.toLocaleString("pt-BR")}
     </span>
   );
+}
+
+/** Mensagem embaixo do campo com problema (aparece depois da primeira tentativa de salvar). */
+function FieldError({ id, message }: { id: string; message?: string }) {
+  return message ? (
+    <span id={id} className="text-xs font-medium text-red-700 dark:text-red-300">
+      {message}
+    </span>
+  ) : null;
 }
 
 /** Etiquetas da OS (ex.: "Adicional Noturno"): tira com o ×, inclui escolhendo ou digitando. */
 function TagsField({ value, onChange }: { value: Tag[]; onChange: (tags: Tag[]) => void }) {
   const [draft, setDraft] = useState("");
+  const listId = useId();
   const known = useQuery({ queryKey: ["ticket-tags"], queryFn: () => api.get<Tag[]>("/ticket-tags"), staleTime: 5 * 60_000 });
   const add = (name: string) => {
     const clean = name.trim();
@@ -120,67 +211,122 @@ function TagsField({ value, onChange }: { value: Tag[]; onChange: (tags: Tag[]) 
     setDraft("");
   };
   return (
-    <div className="flex min-h-9 flex-wrap items-center gap-1.5">
-      {value.map((t) => (
-        <span key={t.name} className="inline-flex items-center gap-1 rounded-full bg-brand-soft py-0.5 pr-1 pl-2.5 text-xs font-medium text-brand-ink">
-          {t.name}
-          <button
-            type="button"
-            onClick={() => onChange(value.filter((x) => x.name !== t.name))}
-            className="rounded-full p-0.5 hover:bg-brand/15"
-            aria-label={`Tirar a etiqueta ${t.name}`}
-          >
-            <X className="size-3" />
-          </button>
-        </span>
-      ))}
-      <input
-        list="ticket-tags-list"
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            add(draft);
-          }
-        }}
-        onBlur={() => draft && add(draft)}
-        placeholder={value.length ? "+ etiqueta" : "Incluir etiqueta (ex.: Adicional Noturno)"}
-        className="h-7 min-w-44 flex-1 rounded-md bg-transparent px-1.5 text-xs text-ink outline-none placeholder:text-ink-subtle"
-        aria-label="Incluir etiqueta"
-      />
-      <datalist id="ticket-tags-list">
-        {(known.data ?? []).map((t) => (
-          <option key={t.name} value={t.name} />
+    <div className="flex flex-col gap-1.5">
+      <span className="text-xs font-semibold text-ink/80">Etiquetas</span>
+      <div className="flex min-h-9 flex-wrap items-center gap-1.5 rounded-lg border border-line bg-surface px-2 py-1 shadow-elev-1">
+        {value.map((t) => (
+          <span key={t.name} className="inline-flex items-center gap-0.5 rounded-full bg-brand-soft py-px pr-0.5 pl-2.5 text-xs font-medium text-brand-ink">
+            {t.name}
+            <button
+              type="button"
+              onClick={() => onChange(value.filter((x) => x.name !== t.name))}
+              className="inline-flex size-6 items-center justify-center rounded-full hover:bg-brand/15"
+              aria-label={`Tirar a etiqueta ${t.name}`}
+            >
+              <X className="size-3.5" />
+            </button>
+          </span>
         ))}
-      </datalist>
+        <input
+          list={listId}
+          value={draft}
+          maxLength={60}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              add(draft);
+            }
+          }}
+          onBlur={() => draft && add(draft)}
+          placeholder={value.length ? "+ etiqueta" : "Incluir etiqueta (ex.: Adicional Noturno)"}
+          className="h-7 min-w-44 flex-1 rounded-md bg-transparent px-1.5 text-sm text-ink outline-none placeholder:text-ink-subtle"
+          aria-label="Incluir etiqueta"
+        />
+        <datalist id={listId}>
+          {(known.data ?? []).map((t) => (
+            <option key={t.name} value={t.name} />
+          ))}
+        </datalist>
+      </div>
     </div>
   );
+}
+
+/** Corpo da correção de horários (PUT /times): o motivo e só o que mudou. */
+interface TimesBody {
+  reason: string;
+  arrived_at?: string | null;
+  resolved_at?: string | null;
+}
+
+/** O que o Salvar envia, em até três chamadas (dados da OS, técnico, horários reais). */
+interface SavePlan {
+  version: number;
+  patch: TicketUpdatePayload | null;
+  assign: { assignee_id: UUID | null } | null;
+  times: TimesBody | null;
+  /** Os conflitos de agenda já foram mostrados: o Salvar confirma mesmo assim. */
+  confirmed: boolean;
+  /** O formulário como foi enviado (o que mudar depois disso continua não salvo). */
+  sent: FormState;
 }
 
 /**
  * Aba "Geral" da OS, no formato do "Editar atividade" do Field Control: tudo editável pela central a
  * qualquer momento (inclusive com a OS fechada), com os técnicos mais indicados para a loja.
+ *
+ * A edição se apoia numa cópia da OS (a `base`). Quando a OS muda por fora (o técnico conclui no app,
+ * outro analista salva), os campos não mexidos passam a mostrar a versão nova e os mexidos ficam como
+ * estão, com um aviso; nada do que foi digitado se perde.
  */
 export function GeneralTab({
   ticket,
+  formId = GENERAL_FORM_ID,
   onSaveState,
+  onTransition,
 }: {
   ticket: TicketDetail;
+  /** Id do formulário (o botão Salvar do rodapé fica fora dele e aponta para este id). */
+  formId?: string;
   /** Para o botão Salvar do rodapé (fora do formulário). */
-  onSaveState: (state: { dirty: boolean; pending: boolean }) => void;
+  onSaveState: (state: SaveState) => void;
+  /** Mudar a situação: o editor abre a confirmação com o que o destino pede. */
+  onTransition: (to: TicketStatus) => void;
 }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const confirm = useConfirm();
   const { user } = useAuth();
+  const now = useNow(30_000);
+  const formRef = useRef<HTMLFormElement>(null);
+  const errorRef = useRef<HTMLDivElement>(null);
+  const conflictRef = useRef<HTMLDivElement>(null);
+
+  // `server`: a cópia mais nova da OS que se conhece (a da lista em cache ou a resposta do último
+  // Salvar, que pode chegar antes do cache). `snap.base` é o que ela dizia quando a edição se apoiou nela.
+  const [snap, setSnap] = useState(() => ({ server: ticket, base: initial(ticket) }));
+  const [saved, setSaved] = useState<TicketDetail | null>(null);
   const [form, setForm] = useState<FormState>(() => initial(ticket));
-  const [base] = useState<FormState>(() => initial(ticket));
-  const [changingLocation, setChangingLocation] = useState(false);
+  // A OS mudou por fora durante a edição: os grupos que as duas pessoas mexeram.
+  const [notice, setNotice] = useState<string[] | null>(null);
   const [conflicts, setConflicts] = useState<ConflictItem[] | null>(null);
-  const [target, setTarget] = useState<TicketStatus | null>(null);
-  const set = <K extends keyof FormState>(key: K, value: FormState[K]) => {
-    if (key === "assigneeId" || key === "date" || key === "time" || key === "estimated" || key === "helperIds") setConflicts(null);
+  const [tried, setTried] = useState(false);
+  // Um passo do Salvar gravou e outro falhou: o aviso diz que o resto já foi salvo.
+  const [partial, setPartial] = useState(false);
+  const [changingLocation, setChangingLocation] = useState(false);
+  const [suggestOpen, setSuggestOpen] = useState(false);
+  const base = snap.base;
+  const server = saved && isNewer(saved, ticket) ? saved : ticket;
+
+  const set = <K extends Key>(key: K, value: FormState[K]) => {
+    if (key === "date" || key === "time" || key === "estimated" || key === "helperIds") setConflicts(null);
     setForm((f) => ({ ...f, [key]: value }));
+  };
+  // Quem passa a ser o técnico responsável deixa de ser "outro técnico" da visita.
+  const setAssignee = (id: string) => {
+    setConflicts(null);
+    setForm((f) => ({ ...f, assigneeId: id, helperIds: f.helperIds.filter((h) => h !== id) }));
   };
 
   const customers = useCustomers();
@@ -188,7 +334,13 @@ export function GeneralTab({
   const serviceTypes = useServiceTypes({ customerId: form.customerId || null, active: true });
   const assignable = useAssignable(null);
   const projects = useProjects({ enabled: true });
-  const queues = useQuery({ queryKey: ["tickets", "queues"], queryFn: () => api.get<QueuesOut>("/queues"), staleTime: 60_000 });
+  // Analistas e gestores (quem pode ser o analista responsável): lista estável, fora das chaves que o
+  // tempo real recarrega a cada evento.
+  const staff = useQuery({
+    queryKey: ["users", "managers"],
+    queryFn: () => api.get<User[]>("/users", { active: true }),
+    staleTime: 5 * 60_000,
+  });
   const intake = useQuery({
     queryKey: ["intake", form.locationId || null, form.locationId ? null : form.customerId || null],
     queryFn: () =>
@@ -200,24 +352,37 @@ export function GeneralTab({
     staleTime: 30_000,
   });
 
-  const minutes = form.estimated ? Number(form.estimated) : null;
+  const estimatedNumber = form.estimated ? Number(form.estimated) : null;
+  const estimatedValid =
+    estimatedNumber === null || (Number.isInteger(estimatedNumber) && estimatedNumber >= 1 && estimatedNumber <= 10080);
+  const minutes = estimatedValid ? estimatedNumber : null;
   const startIso = join(form.date, form.time);
-  // Os 5 técnicos mais indicados para a loja, o serviço e o horário (o mesmo ranking da abertura).
+  // Os técnicos indicados e o aviso de agenda esperam a digitação parar (uma consulta, não uma por tecla).
+  const lazyStart = useDebounced(startIso, 400);
+  const lazyMinutes = useDebounced(minutes, 400);
+  const lazyTitle = useDebounced(form.title.trim(), 400);
+  // Com técnico na OS, ou com ela concluída, as sugestões ficam recolhidas (a consulta só roda se abrir).
+  const suggestionsShown = suggestOpen || (!form.assigneeId && !FINISHED.includes(server.status));
+  // Os 5 técnicos mais indicados para a loja, o serviço e o horário (o mesmo ranking da abertura). A
+  // própria OS não conta como "ocupado" para o técnico dela (exclude_ticket_id).
   const suggestions = useQuery({
-    queryKey: ["technician-suggest", form.locationId, form.serviceTypeId, form.categoryId, form.projectId, startIso, minutes, ticket.id],
+    queryKey: ["technician-suggest", form.locationId, form.serviceTypeId, form.categoryId, form.projectId, lazyStart, lazyMinutes, lazyTitle, ticket.id],
     queryFn: () =>
       api.get<TechnicianSuggestion[]>("/technicians/suggest", {
         location_id: form.locationId,
         service_type_id: form.serviceTypeId || undefined,
         category_id: form.categoryId || undefined,
         project_id: form.projectId || undefined,
-        title: form.title.trim() || undefined,
-        start: startIso ?? undefined,
-        estimated_minutes: minutes ?? undefined,
+        title: lazyTitle || undefined,
+        start: lazyStart ?? undefined,
+        estimated_minutes: lazyMinutes ?? undefined,
+        exclude_ticket_id: ticket.id,
         limit: 5,
       }),
-    enabled: Boolean(form.locationId),
+    enabled: Boolean(form.locationId) && suggestionsShown,
     staleTime: 30_000,
+    // Mudou só o horário ou o serviço: a lista anterior fica à vista até a nova chegar (sem piscar).
+    placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[1] === form.locationId ? previous : undefined),
   });
 
   const people = useMemo(
@@ -227,84 +392,161 @@ export function GeneralTab({
       ),
     [assignable.data],
   );
+  const technicians = people.filter((p) => p.role === "technician");
+  const internal = people.filter((p) => p.role !== "technician");
   const names = useMemo(() => {
     const map: Record<UUID, string> = {};
     for (const p of people) map[p.id] = p.name;
-    for (const h of ticket.helpers ?? []) map[h.id] ??= h.name;
-    if (ticket.assignee) map[ticket.assignee.id] ??= ticket.assignee.name;
+    for (const h of server.helpers ?? []) map[h.id] ??= h.name;
+    if (server.assignee) map[server.assignee.id] ??= server.assignee.name;
     return map;
-  }, [people, ticket.helpers, ticket.assignee]);
+  }, [people, server.helpers, server.assignee]);
   const analysts = useMemo(() => {
-    const list = (queues.data?.queues ?? []).map((q) => q.user);
-    if (ticket.owner && !list.some((u) => u.id === ticket.owner!.id)) list.push(ticket.owner);
+    const owner = server.owner;
+    const list = (staff.data ?? [])
+      .filter((u) => u.role === "admin" || u.role === "supervisor" || u.role === "analyst")
+      .map((u) => ({ id: u.id, name: u.name }));
+    if (owner && !list.some((u) => u.id === owner.id)) list.push({ id: owner.id, name: owner.name });
     return list.sort((a, b) => a.name.localeCompare(b.name));
-  }, [queues.data, ticket.owner]);
+  }, [staff.data, server.owner]);
 
   // ── o que mudou ──
-  const schedChanged = form.date !== base.date || form.time !== base.time || form.estimated !== base.estimated;
-  const timesChanged =
-    form.startDate !== base.startDate || form.startTime !== base.startTime || form.endDate !== base.endDate || form.endTime !== base.endTime;
-  const patch = useMemo<TicketUpdatePayload>(() => {
+  const schedChanged = !sameGroup(SCHEDULE_KEYS, form, base);
+  const timesChanged = !sameGroup(TIME_KEYS, form, base);
+  const assigneeChanged = form.assigneeId !== base.assigneeId;
+  const helpersChanged = !sameList(form.helperIds, base.helperIds);
+  const dirty = GROUPS.some((group) => !sameGroup(group.keys, form, base));
+
+  // Tirar ou trocar o técnico muda a situação da OS na API: avisa antes.
+  const currentTech = server.assignee;
+  const assigneeWarning =
+    assigneeChanged && currentTech
+      ? !form.assigneeId && FIELD_ACTIVE.includes(server.status)
+        ? { title: "Tirar o técnico da OS?", text: `Sem técnico, a OS volta para Novo e sai do app de ${currentTech.name}.` }
+        : form.assigneeId && (server.status === "en_route" || server.status === "in_progress")
+          ? { title: "Trocar o técnico em campo?", text: `A OS volta para Atribuído e o atendimento de ${currentTech.name} é interrompido.` }
+          : null
+      : null;
+
+  // ── validação (as mesmas regras da API, com a mensagem ao lado do campo) ──
+  const startAt = join(form.startDate, form.startTime);
+  const endAt = join(form.endDate, form.endTime);
+  const errors: Partial<Record<"title" | "estimated" | "schedule" | "start" | "end" | "reason", string>> = {};
+  if (form.title.trim().length < 3) errors.title = "O título precisa de pelo menos 3 letras";
+  if (!estimatedValid) errors.estimated = "Use minutos inteiros, de 1 a 10080";
+  if (Boolean(form.date) !== Boolean(form.time)) errors.schedule = "Informe a data e a hora do agendamento";
+  if (timesChanged) {
+    const created = Date.parse(server.created_at);
+    const problem = (at: string) => {
+      const t = Date.parse(at);
+      if (t > now + SKEW_MS) return "O horário não pode ficar no futuro";
+      if (t < created - SKEW_MS) return `Não pode ser antes da abertura da OS (${formatDateTime(server.created_at)})`;
+      return undefined;
+    };
+    if (server.arrived_at && !startAt) errors.start = "Informe a data e a hora do início";
+    else if (startAt) errors.start = problem(startAt);
+    if (server.resolved_at && !endAt) errors.end = "Informe a data e a hora da conclusão";
+    else if (endAt) errors.end = problem(endAt);
+    if (!errors.end && startAt && endAt && Date.parse(startAt) > Date.parse(endAt)) errors.end = "A conclusão deve ser depois do início";
+    if (!errors.end && endAt && server.closed_at && Date.parse(endAt) > Date.parse(server.closed_at) + SKEW_MS) {
+      errors.end = `A conclusão não pode ser depois do fechamento (${formatDateTime(server.closed_at)})`;
+    }
+    if (form.timesReason.trim().length < 3) errors.reason = "Explique o motivo da correção (pelo menos 3 letras)";
+  }
+  const invalid = Object.values(errors).some(Boolean);
+  // A mensagem aparece depois da primeira tentativa de salvar; o aria-invalid vale sempre.
+  const shown = (key: keyof typeof errors) => (tried ? errors[key] : undefined);
+  const errorId = (key: string) => `${formId}-${key}`;
+  const today = toLocalInput(new Date(now).toISOString()).slice(0, 10);
+
+  function buildPatch(): TicketUpdatePayload {
     const p: TicketUpdatePayload = {};
-    if (form.title.trim() !== base.title) p.title = form.title.trim();
-    if (form.description !== base.description) p.description = form.description;
+    if (!sameValue("title", form, base)) p.title = form.title.trim();
+    if (!sameValue("description", form, base)) p.description = form.description.trim();
     if (form.categoryId !== base.categoryId) p.category_id = form.categoryId || null;
     if (form.priority !== base.priority) p.priority = form.priority;
-    if (form.serviceTypeId !== base.serviceTypeId && form.serviceTypeId) p.service_type_id = form.serviceTypeId;
+    if (form.serviceTypeId !== base.serviceTypeId) p.service_type_id = form.serviceTypeId || null;
     if (form.estimated !== base.estimated) p.estimated_minutes = minutes;
     if (form.customerId !== base.customerId) p.customer_id = form.customerId || null;
     if (form.locationId !== base.locationId) p.location_id = form.locationId || null;
-    if (form.serviceAddress.trim() !== base.serviceAddress) p.service_address = form.serviceAddress.trim() || null;
-    if (form.visitNote !== base.visitNote) p.visit_note = form.visitNote.trim() || null;
-    if (!sameList(form.helperIds, base.helperIds)) p.helper_ids = form.helperIds;
+    if (!sameValue("serviceAddress", form, base)) p.service_address = form.serviceAddress.trim() || null;
+    if (!sameValue("visitNote", form, base)) p.visit_note = form.visitNote.trim() || null;
+    if (helpersChanged) p.helper_ids = form.helperIds;
     if (form.ownerId !== base.ownerId) p.owner_id = form.ownerId || null;
     if (form.projectId !== base.projectId) p.project_id = form.projectId || null;
-    if (form.resolutionNotes !== base.resolutionNotes) p.resolution_notes = form.resolutionNotes.trim() || null;
-    if (JSON.stringify(form.tags) !== JSON.stringify(base.tags)) p.tags = form.tags;
+    if (!sameValue("resolutionNotes", form, base)) p.resolution_notes = form.resolutionNotes.trim() || null;
+    if (!sameValue("tags", form, base)) p.tags = form.tags;
     if (schedChanged && startIso) {
       // Fim = início + duração (estimada ou a da agenda atual), para não sobrar um fim antigo.
       const current =
-        ticket.scheduled_start && ticket.scheduled_end
-          ? Math.round((new Date(ticket.scheduled_end).getTime() - new Date(ticket.scheduled_start).getTime()) / 60000)
+        server.scheduled_start && server.scheduled_end
+          ? Math.round((Date.parse(server.scheduled_end) - Date.parse(server.scheduled_start)) / 60000)
           : null;
       const duration = minutes ?? current ?? 60;
       p.scheduled_start = startIso;
-      p.scheduled_end = new Date(new Date(startIso).getTime() + duration * 60000).toISOString();
+      p.scheduled_end = new Date(Date.parse(startIso) + duration * 60000).toISOString();
+    } else if (schedChanged && !form.date && !form.time && (base.date || base.time)) {
+      // Data e hora apagadas: a OS fica sem agenda.
+      p.scheduled_start = null;
+      p.scheduled_end = null;
     }
     return p;
-  }, [form, base, minutes, schedChanged, startIso, ticket.scheduled_start, ticket.scheduled_end]);
-  const assigneeChanged = form.assigneeId !== base.assigneeId;
-  const dirty = Object.keys(patch).length > 0 || assigneeChanged || timesChanged;
+  }
+
+  function buildTimes(): TimesBody {
+    const body: TimesBody = { reason: form.timesReason.trim() };
+    if (form.startDate !== base.startDate || form.startTime !== base.startTime) body.arrived_at = startAt;
+    if (form.endDate !== base.endDate || form.endTime !== base.endTime) body.resolved_at = endAt;
+    return body;
+  }
 
   const save = useMutation({
-    mutationFn: async () => {
-      const allow = Boolean(conflicts);
-      let current = ticket;
-      if (Object.keys(patch).length) {
-        current = await api.patch<TicketDetail>(`/tickets/${ticket.id}`, {
-          ...patch,
-          expected_version: current.version,
-          allow_conflict: allow,
-        });
+    mutationFn: async (plan: SavePlan) => {
+      let current = server;
+      let version = plan.version;
+      // Cada chamada grava sozinha: a edição passa a se apoiar no que já foi gravado, e se a seguinte
+      // falhar, só ela fica pendente (o próximo Salvar não repete o que já foi).
+      const step = (next: TicketDetail) => {
+        current = next;
+        version = next.version;
+        queryClient.setQueryData(["ticket", ticket.id], next);
+        setSaved(next);
+        setSnap({ server: next, base: initial(next) });
+        setPartial(true);
+      };
+      if (plan.patch) {
+        // Trocando o técnico junto, o conflito de agenda é conferido na troca (com o técnico novo):
+        // aqui a API olharia o técnico que está saindo.
+        step(
+          await api.patch<TicketDetail>(`/tickets/${ticket.id}`, {
+            ...plan.patch,
+            expected_version: version,
+            allow_conflict: plan.assign ? true : plan.confirmed,
+          }),
+        );
       }
-      if (assigneeChanged) {
-        current = await api.post<TicketDetail>(`/tickets/${ticket.id}/assign`, {
-          assignee_id: form.assigneeId || null,
-          expected_version: current.version,
-          allow_conflict: allow,
-        });
+      if (plan.assign) {
+        step(
+          await api.post<TicketDetail>(`/tickets/${ticket.id}/assign`, {
+            ...plan.assign,
+            expected_version: version,
+            allow_conflict: plan.confirmed,
+          }),
+        );
       }
-      if (timesChanged) {
-        const body: Record<string, unknown> = { reason: form.timesReason.trim(), expected_version: current.version };
-        if (form.startDate !== base.startDate || form.startTime !== base.startTime) body.arrived_at = join(form.startDate, form.startTime);
-        if (form.endDate !== base.endDate || form.endTime !== base.endTime) body.resolved_at = join(form.endDate, form.endTime);
-        current = await api.put<TicketDetail>(`/tickets/${ticket.id}/times`, body);
-      }
+      if (plan.times) step(await api.put<TicketDetail>(`/tickets/${ticket.id}/times`, { ...plan.times, expected_version: version }));
       return current;
     },
-    onSuccess: (updated) => {
+    onMutate: () => setPartial(false),
+    onSuccess: (updated, plan) => {
+      const fresh = initial(updated);
+      setSaved(updated);
+      setSnap({ server: updated, base: fresh });
+      setForm((f) => adopt(f, plan.sent, fresh));
+      setPartial(false);
       setConflicts(null);
-      queryClient.setQueryData(["ticket", ticket.id], updated);
+      setNotice(null);
+      setTried(false);
       void queryClient.invalidateQueries({ queryKey: ["ticket", ticket.id] });
       void queryClient.invalidateQueries({ queryKey: ["tickets"] });
       void queryClient.invalidateQueries({ queryKey: ["assignable"] });
@@ -312,25 +554,108 @@ export function GeneralTab({
     },
     onError: (error) => {
       const found = scheduleConflicts(error);
-      if (found) return setConflicts(found);
-      if (error instanceof ApiError && error.status === 409) {
-        void queryClient.invalidateQueries({ queryKey: ["ticket", ticket.id] });
+      if (found) {
+        setConflicts(found);
+        requestAnimationFrame(() => conflictRef.current?.scrollIntoView({ block: "nearest" }));
+        return;
       }
+      // A OS mudou enquanto se salvava: recarrega (as alterações daqui ficam no formulário).
+      if (isVersionConflict(error)) void queryClient.invalidateQueries({ queryKey: ["ticket", ticket.id] });
+      toast({ title: "Não foi possível salvar a OS", description: errorMessage(error), tone: "error" });
+      requestAnimationFrame(() => errorRef.current?.scrollIntoView({ block: "nearest" }));
     },
   });
 
+  // A OS mudou por fora (tempo real, outro analista, a volta do Salvar): os grupos que ninguém mexeu
+  // aqui passam a mostrar a versão nova; os mexidos ficam, e o aviso diz quais mudaram dos dois lados.
+  if (!save.isPending && server !== snap.server && isNewer(server, snap.server)) {
+    const fresh = initial(server);
+    let next = form;
+    let touched = false;
+    let remote = false;
+    let schedule = false;
+    const overlap: string[] = [];
+    for (const group of GROUPS) {
+      const mine = !sameGroup(group.keys, form, base);
+      touched ||= mine;
+      if (sameGroup(group.keys, fresh, base)) continue;
+      remote = true;
+      schedule ||= Boolean(group.schedule);
+      if (!mine) next = withKeys(next, fresh, group.keys);
+      else if (!sameGroup(group.keys, form, fresh)) overlap.push(group.label);
+    }
+    setSnap({ server, base: fresh });
+    if (remote) {
+      setForm(next);
+      if (touched) setNotice((current) => [...new Set([...(current ?? []), ...overlap])]);
+      if (schedule) setConflicts(null);
+    }
+  }
+
   useEffect(() => {
-    onSaveState({ dirty, pending: save.isPending });
-  }, [dirty, save.isPending, onSaveState]);
+    onSaveState({ dirty, pending: save.isPending, conflict: Boolean(conflicts) });
+  }, [dirty, save.isPending, conflicts, onSaveState]);
+
+  const discard = () => {
+    const fresh = initial(server);
+    setSnap({ server, base: fresh });
+    setForm(fresh);
+    setNotice(null);
+    setConflicts(null);
+    setTried(false);
+    setChangingLocation(false);
+  };
+
+  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!dirty || save.isPending) return;
+    if (invalid) {
+      setTried(true);
+      // Leva ao primeiro campo com problema (pode estar lá embaixo, em "Situação e horários").
+      formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
+      return;
+    }
+    if (
+      notice?.length &&
+      !(await confirm({
+        title: "Gravar por cima?",
+        description: `Também mudaram por fora: ${notice.join(", ")}. Ao salvar, fica o que está aqui.`,
+        confirmLabel: "Gravar por cima",
+      }))
+    ) {
+      return;
+    }
+    if (assigneeWarning && !(await confirm({ title: assigneeWarning.title, description: assigneeWarning.text, confirmLabel: "Salvar assim", tone: "danger" }))) {
+      return;
+    }
+    const patch = buildPatch();
+    save.mutate({
+      version: server.version,
+      patch: Object.keys(patch).length ? patch : null,
+      assign: assigneeChanged ? { assignee_id: form.assigneeId || null } : null,
+      times: timesChanged ? buildTimes() : null,
+      confirmed: Boolean(conflicts),
+      sent: form,
+    });
+  }
 
   const intakeCustomer = intake.data?.customer ?? null;
   const intakeLocation = intake.data?.location ?? null;
   // Convite pelo WhatsApp: só o básico (o técnico é parceiro), o bastante para ele topar ou não.
   const chosenType = serviceTypes.data?.find((s) => s.id === form.serviceTypeId) ?? null;
-  const invite = (name?: string) => {
+  // Valor do convite: o que o técnico já tem na OS; senão o do responsável atual (o valor não pago
+  // acompanha quem assume); senão o padrão do tipo de serviço.
+  const payoutOf = (id: UUID | undefined) => (id ? (server.payouts ?? []).find((p) => p.technician.id === id) : undefined);
+  const feeFor = (technicianId?: UUID) => {
+    const own = payoutOf(technicianId);
+    if (own) return own.amount;
+    const moving = payoutOf(server.assignee?.id);
+    return moving && moving.status === "pending" ? moving.amount : (chosenType?.technician_fee ?? null);
+  };
+  const invite = (name?: string, technicianId?: UUID) => {
     const city = [intakeLocation?.city, intakeLocation?.state].filter(Boolean).join(" - ");
     const place = [intakeLocation?.district, city].filter(Boolean).join(", ");
-    const fee = chosenType?.technician_fee ?? null;
+    const fee = feeFor(technicianId);
     return [
       name ? `Olá, ${name.split(" ")[0]}! Temos um chamado da Maxx para você:` : "Pessoal, temos um chamado da Maxx:",
       `• ${chosenType?.name ?? form.title.trim()}`,
@@ -342,6 +667,19 @@ export function GeneralTab({
       .filter(Boolean)
       .join("\n");
   };
+  const copyInvite = async () => {
+    const ok = await copyText(invite());
+    toast(
+      ok
+        ? { title: "Convite copiado: cole no grupo de técnicos do WhatsApp", tone: "success" }
+        : { title: "Não deu para copiar o convite", description: "O navegador não liberou a área de transferência. Tente de novo.", tone: "error" },
+    );
+  };
+  const toggleHelper = (t: TechnicianSuggestion) => {
+    if (form.helperIds.includes(t.id)) return set("helperIds", form.helperIds.filter((h) => h !== t.id));
+    if (form.helperIds.length >= MAX_HELPERS) return toast({ title: `No máximo ${MAX_HELPERS} técnicos junto na visita`, tone: "error" });
+    set("helperIds", [...form.helperIds, t.id]);
+  };
   const address =
     form.serviceAddress.trim() ||
     (intakeLocation
@@ -349,8 +687,20 @@ export function GeneralTab({
           .filter(Boolean)
           .join(", ")
       : "");
-  const statusOptions = [ticket.status, ...[...ticket.allowed_transitions].sort((a, b) => STATUS_ORDER.indexOf(a) - STATUS_ORDER.indexOf(b))];
-  const timesInvalid = timesChanged && form.timesReason.trim().length < 3;
+  const statusOptions = [server.status, ...[...server.allowed_transitions].sort((a, b) => STATUS_ORDER.indexOf(a) - STATUS_ORDER.indexOf(b))];
+  // Tipo de serviço gravado que não está na lista (desativado, ou do catálogo de outro cliente).
+  const typeListed = Boolean(serviceTypes.data?.some((t) => t.id === form.serviceTypeId));
+  const typeName = form.serviceTypeId === server.service_type?.id ? server.service_type.name : null;
+  const missingType = form.serviceTypeId && !typeListed ? form.serviceTypeId : null;
+  const assigneeListed = people.some((p) => p.id === form.assigneeId);
+  const assigneeName = form.assigneeId ? (names[form.assigneeId] ?? null) : null;
+  const unscheduledWarning = schedChanged && !form.date && !form.time && (base.date || base.time) && server.status === "scheduled";
+  const conflictsTitle = conflicts
+    ? `${busyTitle(conflicts, assigneeName ?? "O técnico")}. Para agendar assim mesmo, use "Salvar mesmo assim".`
+    : "";
+  const saveError = save.error
+    ? `${isVersionConflict(save.error) ? "Esta OS mudou enquanto você salvava. Atualizamos os dados e suas alterações continuam aqui: confira e salve de novo." : errorMessage(save.error)}${partial ? " O restante das alterações já foi salvo." : ""}`
+    : null;
 
   return (
     <form

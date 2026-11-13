@@ -216,16 +216,17 @@ async function canUseBackground(): Promise<boolean> {
   }
 }
 
-function taskOptions(transit: boolean): Location.LocationTaskOptions {
+function taskOptions(next: Pace): Location.LocationTaskOptions {
+  const interval = next === "saver" ? 60_000 : next === "transit" ? 15_000 : 30_000;
   return {
-    accuracy: transit ? Location.Accuracy.High : Location.Accuracy.Balanced,
+    accuracy: next === "transit" ? Location.Accuracy.High : Location.Accuracy.Balanced,
     // Entrega por tempo, mesmo parado: o mapa da gestão marca "sem sinal" após 5 min sem ponto.
     // No iOS (que ignora timeInterval) o GPS entrega com frequência e o app limita em handleLocations.
-    timeInterval: transit ? 15_000 : 30_000,
+    timeInterval: interval,
     distanceInterval: 0,
-    deferredUpdatesInterval: transit ? 15_000 : 30_000,
+    deferredUpdatesInterval: interval,
     pausesUpdatesAutomatically: false,
-    activityType: transit ? Location.ActivityType.AutomotiveNavigation : Location.ActivityType.Other,
+    activityType: next === "transit" ? Location.ActivityType.AutomotiveNavigation : Location.ActivityType.Other,
     showsBackgroundLocationIndicator: true,
     foregroundService: {
       notificationTitle: "Maxx Field · jornada em andamento",
@@ -236,15 +237,53 @@ function taskOptions(transit: boolean): Location.LocationTaskOptions {
   };
 }
 
+function foregroundNotice(): string {
+  if (isRunningInExpoGo()) {
+    return "Deixe o app aberto durante a jornada: nesta versão a localização não é registrada em segundo plano.";
+  }
+  if (Platform.OS === "web") return "Pré-visualização no navegador: só registra com a página aberta.";
+  return "Sem permissão de localização “Sempre”: mantenha o app aberto ou libere nas configurações do aparelho.";
+}
+
+async function setPace(next: Pace) {
+  pace = next;
+  await setKv(PACE_KEY, next, undefined, { notify: false });
+}
+
+/** Ritmo guardado da última configuração (o app pode ter sido reaberto com a tarefa rodando). */
+async function storedPace(): Promise<Pace | null> {
+  const raw = await getKv(PACE_KEY);
+  return raw === "normal" || raw === "transit" || raw === "saver" ? raw : null;
+}
+
+async function lowBattery(): Promise<boolean> {
+  try {
+    const power = await Battery.getPowerStateAsync();
+    return power.batteryState === Battery.BatteryState.UNPLUGGED && power.batteryLevel >= 0 && power.batteryLevel < 0.15;
+  } catch {
+    return false;
+  }
+}
+
+/** Ritmo pedido agora: economia de bateria, deslocamento (OS minha "Em deslocamento") ou normal. */
+async function desiredPace(): Promise<Pace> {
+  if (await lowBattery()) return "saver";
+  const user = session.get().user;
+  return user && (await hasTicketInTransit(user.id)) ? "transit" : "normal";
+}
+
 // ───────── ritmo: limitador de pontos e batimento com o app aberto ─────────
 
 const LAST_POINT_KEY = "tracking_last_point_at";
 const HEARTBEAT_MS = 60_000;
+/** A cada quantos batimentos (~5 min) confere permissão e localização do aparelho. */
+const HEALTH_EVERY = 5;
 let lastStoredAt = 0;
 let heartbeat: ReturnType<typeof setInterval> | undefined;
+let beats = 0;
 
-/** Intervalo mínimo entre pontos guardados: ~25 s, ~10 s em deslocamento. */
-const minGapMs = () => (state.transit ? 10_000 : 25_000);
+/** Intervalo mínimo entre pontos guardados: ~25 s, ~10 s em deslocamento, ~1 min economizando bateria. */
+const minGapMs = () => (pace === "saver" ? 55_000 : pace === "transit" ? 10_000 : 25_000);
 
 async function lastStored(): Promise<number> {
   if (!lastStoredAt) {
@@ -254,18 +293,10 @@ async function lastStored(): Promise<number> {
   return lastStoredAt;
 }
 
-/**
- * Com o app aberto, garante um ponto a cada ~60 s mesmo parado (o sistema pode não entregar
- * posição nova sem movimento). Em segundo plano quem cuida é a tarefa do sistema.
- */
 function startHeartbeat() {
-  clearInterval(heartbeat);
-  heartbeat = setInterval(() => {
-    if (!state.shift || Date.now() - lastStoredAt < HEARTBEAT_MS - 5_000) return;
-    Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
-      .then((location) => handleLocations([location], { force: true }))
-      .catch(() => undefined);
-  }, HEARTBEAT_MS);
+  if (heartbeat) return;
+  beats = 0;
+  heartbeat = setInterval(() => void beat(), HEARTBEAT_MS);
 }
 
 function stopHeartbeat() {
@@ -273,10 +304,38 @@ function stopHeartbeat() {
   heartbeat = undefined;
 }
 
-async function stopCollection() {
-  stopHeartbeat();
+/**
+ * Com o app aberto (ou o serviço do Android de pé), garante um ponto a cada ~60 s mesmo parado (o
+ * sistema pode não entregar posição nova sem movimento) e, de tempos em tempos, confere se a
+ * permissão e a localização do aparelho continuam ligadas. Em segundo plano quem cuida é a tarefa.
+ */
+async function beat() {
+  if (!state.shift) return;
+  beats += 1;
+  if (state.mode === "off" || beats % HEALTH_EVERY === 0) {
+    void exclusive(checkCollection).catch((error: unknown) => console.warn("Falha ao conferir o rastreamento", error));
+  }
+  // Relógio que voltou para trás deixa a diferença negativa: vale o valor absoluto.
+  if (state.mode === "off" || Math.abs(Date.now() - lastStoredAt) < HEARTBEAT_MS - 5_000) return;
+  try {
+    const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+    await handleLocations([location], { force: true });
+  } catch {
+    // sem posição agora: a próxima batida tenta de novo
+  }
+}
+
+function removeForegroundWatch() {
   foregroundSub?.remove();
   foregroundSub = null;
+}
+
+async function backgroundRunning(): Promise<boolean> {
+  if (!backgroundPossible()) return false;
+  return Location.hasStartedLocationUpdatesAsync(TRACKING_TASK).catch(() => false);
+}
+
+async function stopBackgroundTask() {
   if (!backgroundPossible()) return;
   try {
     if (await Location.hasStartedLocationUpdatesAsync(TRACKING_TASK)) await Location.stopLocationUpdatesAsync(TRACKING_TASK);
@@ -285,43 +344,120 @@ async function stopCollection() {
   }
 }
 
-async function startCollection(transit: boolean) {
-  await stopCollection();
+/** Para a coleta. `keepHeartbeat`: segue conferindo, para religar quando a permissão voltar. */
+async function stopCollection({ keepHeartbeat = false } = {}) {
+  if (!keepHeartbeat) stopHeartbeat();
+  removeForegroundWatch();
+  await stopBackgroundTask();
+}
+
+/**
+ * Liga a coleta no ritmo pedido ou ajusta o ritmo da que já roda. Com a tarefa já registrada o
+ * sistema só atualiza as opções, sem derrubar o serviço do Android. Nunca lança: sem GPS, o cartão
+ * da jornada avisa e o batimento tenta de novo.
+ */
+async function startCollection(next: Pace): Promise<void> {
+  if (!(state.shift ?? (await readShift()))) return; // a jornada acabou enquanto esperava a vez
   startHeartbeat();
   if (await canUseBackground()) {
-    await Location.startLocationUpdatesAsync(TRACKING_TASK, taskOptions(transit));
-    setState({ mode: "background", transit, notice: null });
+    if (state.mode === "background" && pace === next && (await backgroundRunning())) return;
+    if (Platform.OS === "android" && !appActive()) {
+      // Com o app em segundo plano o Android recusa (re)configurar o serviço de localização e a
+      // coleta pararia: segue no ritmo atual até o app voltar à tela.
+      if (await backgroundRunning()) return;
+    } else {
+      try {
+        await Location.startLocationUpdatesAsync(TRACKING_TASK, taskOptions(next));
+        removeForegroundWatch();
+        await setPace(next);
+        modeNotice = null;
+        problems.gps = null;
+        setState({ mode: "background", transit: next === "transit", batterySaver: next === "saver" });
+        refreshNotice();
+        return;
+      } catch (error) {
+        console.warn("Rastreamento em segundo plano indisponível", error);
+      }
+    }
+  }
+  await stopBackgroundTask();
+  if (foregroundSub && state.mode === "foreground" && pace === next) return;
+  removeForegroundWatch();
+  try {
+    const opts = taskOptions(next);
+    foregroundSub = await Location.watchPositionAsync(
+      { accuracy: opts.accuracy, timeInterval: opts.timeInterval, distanceInterval: 0 },
+      (location) => {
+        handleLocations([location]).catch((error: unknown) => console.warn("Falha ao registrar posição da jornada", error));
+      },
+      (reason) => {
+        console.warn("GPS indisponível", reason);
+        setProblem("gps", GPS_FAILED);
+      },
+    );
+    await setPace(next);
+    modeNotice = foregroundNotice();
+    problems.gps = null;
+    setState({ mode: "foreground", transit: next === "transit", batterySaver: next === "saver" });
+    refreshNotice();
+  } catch (error) {
+    console.warn("Não foi possível ligar o GPS", error);
+    setState({ mode: "off", transit: false, batterySaver: false });
+    setProblem("gps", GPS_FAILED);
+  }
+}
+
+type LocationProblem = "permission" | "services" | null;
+
+/** Permissão retirada ou localização do aparelho desligada no meio da jornada. */
+async function locationProblem(): Promise<LocationProblem> {
+  if (Platform.OS === "web") return null;
+  try {
+    if (!(await Location.getForegroundPermissionsAsync()).granted) return "permission";
+    if (!(await Location.hasServicesEnabledAsync())) return "services";
+  } catch {
+    // sem como conferir agora
+  }
+  return null;
+}
+
+/**
+ * Garante a coleta no ritmo certo, conferindo permissão e localização do aparelho. Sem permissão,
+ * para (e o batimento segue conferindo para religar); localização desligada só avisa, porque a
+ * coleta volta sozinha quando ela for ligada.
+ */
+async function ensureCollecting() {
+  if (!state.shift) return;
+  const problem = await locationProblem();
+  if (problem === "permission") {
+    await stopCollection({ keepHeartbeat: true });
+    startHeartbeat();
+    setState({ mode: "off", transit: false, batterySaver: false });
+    setProblem("location", noPermissionNotice());
     return;
   }
-  const opts = taskOptions(transit);
-  foregroundSub = await Location.watchPositionAsync(
-    { accuracy: opts.accuracy, timeInterval: opts.timeInterval, distanceInterval: 0 },
-    (location) => void handleLocations([location]),
-  );
-  setState({
-    mode: "foreground",
-    transit,
-    notice: isRunningInExpoGo()
-      ? "No Expo Go o rastreamento só funciona com o app aberto. No app instalado ele continua em segundo plano."
-      : Platform.OS === "web"
-        ? "Pré-visualização no navegador: só registra com a página aberta."
-        : "Sem permissão de localização “Sempre”: mantenha o app aberto ou libere nas configurações do aparelho.",
-  });
+  // App reaberto com a tarefa ainda rodando: retoma o ritmo que ela tem, sem reconfigurar à toa.
+  if (state.mode === "off" && (await backgroundRunning())) {
+    pace ??= await storedPace();
+    setState({ mode: "background", transit: pace === "transit", batterySaver: pace === "saver" });
+  }
+  await startCollection(await desiredPace());
+  setProblem("location", problem === "services" ? SERVICES_OFF : null);
 }
 
-/** Há OS minha em deslocamento? (coleta mais frequente) */
-async function inTransit(): Promise<boolean> {
-  const user = session.get().user;
-  if (!user) return false;
-  const tickets = await listTickets();
-  return tickets.some((t) => t.assignee?.id === user.id && t.status === "en_route");
+/** Conferência periódica (batimento). No Android em segundo plano nada pode ser religado agora. */
+async function checkCollection() {
+  if (Platform.OS === "android" && !appActive()) return;
+  await ensureCollecting();
 }
 
-/** Ajusta o ritmo da coleta quando uma OS entra ou sai de "Em deslocamento". */
-export async function updateTrackingMode() {
-  if (!state.shift || state.mode === "off") return;
-  const transit = await inTransit();
-  if (transit !== state.transit) await startCollection(transit);
+/** Ajusta o ritmo quando uma OS entra ou sai de "Em deslocamento" (ou a bateria fica fraca). Nunca lança. */
+export function updateTrackingMode(): Promise<void> {
+  return exclusive(async () => {
+    if (!state.shift || state.mode === "off") return;
+    const next = await desiredPace();
+    if (next !== pace) await startCollection(next);
+  }).catch((error: unknown) => console.warn("Falha ao ajustar o ritmo do rastreamento", error));
 }
 
 // ───────────────────────────── pontos ─────────────────────────────
@@ -329,10 +465,40 @@ export async function updateTrackingMode() {
 async function batteryPct(): Promise<number | null> {
   try {
     const level = await Battery.getBatteryLevelAsync();
-    return level >= 0 ? Math.round(level * 100) : null;
+    return level >= 0 ? Math.min(100, Math.max(0, Math.round(level * 100))) : null;
   } catch {
     return null;
   }
+}
+
+/** Posição de antena ou Wi-Fi (precisão pior que 1 km): só entra se não houver ponto há 4 min. */
+const COARSE_M = 1_000;
+const COARSE_GAP_MS = 4 * 60_000;
+/** Ponto mais velho que o último guardado por mais que isto: o relógio do celular voltou para trás. */
+const CLOCK_JUMP_MS = 3 * 60_000;
+
+/** Coordenada utilizável. O iOS marca posição inválida com precisão negativa; (0, 0) é fix vazio. */
+function usable(l: Location.LocationObject): boolean {
+  const { latitude, longitude, accuracy } = l.coords;
+  if (!Number.isFinite(l.timestamp) || !Number.isFinite(latitude) || !Number.isFinite(longitude)) return false;
+  if (Math.abs(latitude) > 90 || Math.abs(longitude) > 180 || (latitude === 0 && longitude === 0)) return false;
+  return accuracy === null || !(accuracy < 0);
+}
+
+const inRange = (value: number | null, min: number, max = Number.POSITIVE_INFINITY) =>
+  value !== null && Number.isFinite(value) && value >= min && value <= max ? value : null;
+
+function toPing(l: Location.LocationObject, battery: number | null): Ping {
+  return {
+    recorded_at: new Date(l.timestamp).toISOString(),
+    latitude: l.coords.latitude,
+    longitude: l.coords.longitude,
+    accuracy_m: inRange(l.coords.accuracy, 0),
+    speed_mps: inRange(l.coords.speed, 0),
+    heading: inRange(l.coords.heading, 0, 360),
+    battery_pct: battery,
+    is_mock: Boolean(l.mocked),
+  };
 }
 
 /** Recebe pontos do GPS (tarefa de segundo plano ou watch em primeiro plano) e põe na fila. */
@@ -340,39 +506,54 @@ export async function handleLocations(locations: Location.LocationObject[], { fo
   if (!locations.length) return;
   // A tarefa pode rodar com o app fechado: lê a sessão e a jornada do armazenamento.
   if (session.get().status === "loading") await session.load();
+  const user = session.get().user;
   // Sessão encerrada (logout, senha redefinida, usuário desativado): para de coletar.
-  if (session.get().status !== "signedIn") {
+  if (session.get().status !== "signedIn" || !user) {
     await stopCollection();
     return;
   }
   const shift = state.shift ?? (await readShift());
   if (!shift) return; // fora da jornada nada é guardado
+  // Jornada esquecida aberta (LGPD): encerra em vez de seguir coletando.
+  if (shiftExpired(shift)) {
+    await exclusive(autoEndShift);
+    return;
+  }
 
   // Limitador: o GPS pode entregar a cada segundo (iOS sem filtro de distância); guarda ~1 a cada 25 s.
   let last = await lastStored();
   const kept: Location.LocationObject[] = [];
   for (const l of [...locations].sort((a, b) => a.timestamp - b.timestamp)) {
+    if (!usable(l)) continue;
+    // Hora do celular acertada para trás: recomeça o limitador em vez de descartar tudo até o
+    // relógio alcançar o último ponto guardado.
+    if (l.timestamp < last - CLOCK_JUMP_MS) last = 0;
+    if ((l.coords.accuracy ?? 0) > COARSE_M && l.timestamp - last < COARSE_GAP_MS) continue;
     if (force || l.timestamp - last >= minGapMs()) {
       kept.push(l);
       last = l.timestamp;
     }
   }
   if (!kept.length) return;
-  lastStoredAt = last;
-  await setKv(LAST_POINT_KEY, String(last));
 
   const battery = await batteryPct();
-  const pings: Ping[] = kept.map((l) => ({
-    recorded_at: new Date(l.timestamp).toISOString(),
-    latitude: l.coords.latitude,
-    longitude: l.coords.longitude,
-    accuracy_m: l.coords.accuracy ?? null,
-    speed_mps: l.coords.speed !== null && l.coords.speed >= 0 ? l.coords.speed : null,
-    heading: l.coords.heading !== null && l.coords.heading >= 0 && l.coords.heading <= 360 ? l.coords.heading : null,
-    battery_pct: battery,
-    is_mock: Boolean(l.mocked),
-  }));
-  await insertPings(pings);
+  const pings = kept.map((l) => toPing(l, battery));
+  // Pontos e marcador do último ponto juntos (o app pode morrer entre um e outro). Silencioso:
+  // nenhuma tela lista os pontos, e avisar as telas a cada ponto recarregaria tudo o dia inteiro.
+  // Se outro técnico entrou no aparelho enquanto isto rodava, os pontos do anterior não entram.
+  try {
+    await transaction(
+      async (db) => {
+        await insertPingRows(db, pings);
+        await setKv(LAST_POINT_KEY, String(last), db);
+      },
+      { notify: false, guard: () => session.get().user?.id === user.id },
+    );
+  } catch (error) {
+    if (error instanceof WriteCancelled) return;
+    throw error;
+  }
+  lastStoredAt = last;
   setState({ lastFixAt: pings[pings.length - 1].recorded_at, queued: await countPings() });
   void flushPings();
 }
@@ -391,45 +572,141 @@ function toWire(p: Ping) {
   return out;
 }
 
-let flushing = false;
+let flushRun: Promise<void> | null = null;
 let lastFlush = 0;
 
-/** Envia a fila em lotes de até 500. Sem rede, os pontos ficam para a próxima. */
-export async function flushPings(force = false) {
-  if (flushing) return;
-  if (!force && Date.now() - lastFlush < FLUSH_MIN_INTERVAL_MS) return;
-  if (session.get().status === "loading") await session.load();
-  if (session.get().status !== "signedIn") return;
-  flushing = true;
-  lastFlush = Date.now();
+/**
+ * Envia a fila em lotes de até 500. Sem rede, os pontos ficam para a próxima. Em segundo plano
+ * junta os pontos (o rádio do celular dorme entre os envios): envia quando o mais antigo passa de
+ * 60 s em deslocamento ou de 2 min nos outros casos. `force` (sync, fim da jornada) envia na hora,
+ * esperando um envio que já estava em andamento. Nunca lança.
+ */
+export function flushPings(force = false): Promise<void> {
+  if (flushRun) return force ? flushRun.then(() => flushPings(true)) : flushRun;
+  if (!force && Date.now() - lastFlush < FLUSH_MIN_INTERVAL_MS) return Promise.resolve();
+  const run = sendQueued(force).finally(() => {
+    flushRun = null;
+  });
+  flushRun = run;
+  return run;
+}
+
+async function backgroundBatchDue(): Promise<boolean> {
+  const oldest = await oldestPingAt();
+  if (!oldest) return false;
+  return Math.abs(Date.now() - new Date(oldest).getTime()) >= (pace === "transit" ? 60_000 : 120_000);
+}
+
+interface Delivery {
+  accepted: number;
+  discarded: number;
+  sent: number;
+  stop: boolean;
+}
+
+async function sendQueued(force: boolean): Promise<void> {
   try {
+    if (session.get().status === "loading") await session.load();
+    const user = session.get().user;
+    if (session.get().status !== "signedIn" || !user) return;
+    if (!force && !appActive() && !(await backgroundBatchDue())) return;
+    lastFlush = Date.now();
+    const guard = () => session.get().user?.id === user.id;
+    const total: Delivery = { accepted: 0, discarded: 0, sent: 0, stop: false };
     for (let round = 0; round < 20; round++) {
       const batch = await listPings(BATCH);
       if (!batch.length) break;
-      try {
-        await api.post<{ accepted: number; discarded: number }>("/tracking/pings", { pings: batch.map(toWire) });
-        await deletePings(batch.map((p) => p.recorded_at));
-        setState({ lastSentAt: new Date().toISOString(), error: null, serverAvailable: true });
-      } catch (error) {
-        if (error instanceof ApiError && error.status === 404) {
-          setState({ serverAvailable: false, error: "O servidor ainda não recebe rastreamento." });
-          break;
-        }
-        if (error instanceof ApiError && !error.retryable && error.status !== 401) {
-          // Lote recusado por validação: reenviar igual não adianta.
-          await deletePings(batch.map((p) => p.recorded_at));
-          setState({ error: `Pontos recusados: ${error.message}` });
-          continue;
-        }
-        setState({ error: errorMessage(error) });
-        break;
-      }
-      if (batch.length < BATCH) break;
+      const delivery = await postPings(batch, guard);
+      total.accepted += delivery.accepted;
+      total.discarded += delivery.discarded;
+      total.sent += delivery.sent;
+      if (delivery.stop || batch.length < BATCH) break;
     }
+    if (total.sent) reviewDelivery(total);
+  } catch (error) {
+    if (!(error instanceof WriteCancelled)) setState({ error: errorMessage(error) });
   } finally {
-    flushing = false;
-    setState({ queued: await countPings() });
+    setState({ queued: await countPings().catch(() => state.queued) });
   }
+}
+
+/** Um lote. Um ponto inválido faz o servidor recusar o lote inteiro (422): divide até isolar só ele. */
+async function postPings(batch: Ping[], guard: () => boolean): Promise<Delivery> {
+  let result: { accepted?: number; discarded?: number } | null;
+  try {
+    result = await api.post<{ accepted?: number; discarded?: number } | null>("/tracking/pings", { pings: batch.map(toWire) });
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      setState({ serverAvailable: false, error: "O servidor ainda não recebe rastreamento." });
+      return { accepted: 0, discarded: 0, sent: 0, stop: true };
+    }
+    if (error instanceof ApiError && error.status === 422) {
+      if (batch.length === 1) {
+        await deletePings([batch[0].recorded_at], guard);
+        setState({ error: `Ponto recusado pelo servidor: ${error.message}` });
+        return { accepted: 0, discarded: 0, sent: 0, stop: false };
+      }
+      const half = Math.ceil(batch.length / 2);
+      const first = await postPings(batch.slice(0, half), guard);
+      if (first.stop) return first;
+      const second = await postPings(batch.slice(half), guard);
+      return {
+        accepted: first.accepted + second.accepted,
+        discarded: first.discarded + second.discarded,
+        sent: first.sent + second.sent,
+        stop: second.stop,
+      };
+    }
+    // Sem rede, servidor fora ou um proxy recusando (413, 400…): os pontos ficam para a próxima.
+    setState({ error: errorMessage(error) });
+    return { accepted: 0, discarded: 0, sent: 0, stop: true };
+  }
+  await deletePings(batch.map((p) => p.recorded_at), guard);
+  const accepted = result?.accepted ?? batch.length;
+  // "Última posição enviada" só quando o servidor gravou algum ponto deste lote.
+  setState({ error: null, serverAvailable: true, ...(accepted > 0 ? { lastSentAt: new Date().toISOString() } : {}) });
+  return { accepted, discarded: result?.discarded ?? 0, sent: batch.length, stop: false };
+}
+
+/**
+ * Pontos enviados e todos descartados pelo servidor (fora de uma jornada aberta lá ou mais de
+ * 2 min no futuro): relógio do celular errado ou jornada encerrada no servidor. Avisa ou para.
+ */
+function reviewDelivery({ accepted, discarded, sent }: Delivery) {
+  if (accepted > 0) {
+    if (problems.clock) setProblem("clock", null);
+    return;
+  }
+  if (discarded < sent || !state.shift) return;
+  if (Math.abs(getServerOffsetMs()) > CLOCK_LIMIT_MS) {
+    setProblem("clock", CLOCK_NOTICE);
+    return;
+  }
+  void exclusive(confirmShiftOpen).catch((error: unknown) => console.warn("Falha ao conferir a jornada", error));
+}
+
+/** Relógio certo e pontos descartados: a jornada pode ter sido encerrada no servidor. */
+async function confirmShiftOpen() {
+  if (!state.shift) return;
+  let open: Shift | null;
+  try {
+    open = unwrapShift(await api.get("/tracking/shift"));
+  } catch {
+    return; // sem rede: confere numa próxima vez
+  }
+  if (open) {
+    if (open.id !== state.shift.id) await writeShift(open);
+    return;
+  }
+  await stopCollection();
+  await writeShift(null);
+  pace = null;
+  void cancelShiftReminder();
+  setState({ mode: "off", transit: false, batterySaver: false });
+  clearNotices();
+  showToast("Sua jornada foi encerrada no servidor", {
+    description: "O rastreamento parou. Inicie uma nova jornada quando for trabalhar.",
+  });
 }
 
 // ───────────────────────────── termo e jornada ─────────────────────────────
@@ -468,12 +745,70 @@ export async function requestLocationPermissions(): Promise<LocationPermissions>
   }
 }
 
-/** Inicia a jornada: pede permissões, abre a jornada no servidor e começa a coletar. */
-export async function startShift() {
-  if (!hasConsent()) throw new ConsentRequiredError();
-  const permissions = await requestLocationPermissions();
-  if (!permissions.foreground) throw new Error("Permita o acesso à localização para iniciar a jornada.");
-  const position = await currentPosition();
+// ───────────────────────────── lembrete da jornada aberta ─────────────────────────────
+
+/** Notificação local 10 h depois do início: "encerre se já terminou o dia". Sem permissão, não agenda. */
+async function scheduleShiftReminder(shift: Shift) {
+  if (Platform.OS === "web") return;
+  try {
+    // Horário do servidor convertido para o relógio do aparelho, que é o que dispara a notificação.
+    const at = new Date(new Date(shift.started_at).getTime() + REMINDER_AFTER_MS - getServerOffsetMs());
+    if (at.getTime() <= Date.now()) return;
+    const Notifications = await import("expo-notifications");
+    if (!(await Notifications.getPermissionsAsync()).granted) return;
+    if (Platform.OS === "android") {
+      await Notifications.setNotificationChannelAsync(REMINDER_CHANNEL, {
+        name: "Jornada",
+        importance: Notifications.AndroidImportance.DEFAULT,
+      });
+    }
+    await Notifications.scheduleNotificationAsync({
+      identifier: REMINDER_ID,
+      content: { title: "Sua jornada ainda está aberta", body: "Encerre a jornada no app se você já terminou o dia." },
+      trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: at, channelId: REMINDER_CHANNEL },
+    });
+  } catch (error) {
+    console.warn("Lembrete da jornada indisponível", error);
+  }
+}
+
+async function cancelShiftReminder() {
+  if (Platform.OS === "web") return;
+  try {
+    const Notifications = await import("expo-notifications");
+    await Notifications.cancelScheduledNotificationAsync(REMINDER_ID);
+  } catch {
+    // nada agendado
+  }
+}
+
+// ───────────────────────────── iniciar, encerrar e retomar ─────────────────────────────
+
+/** Encerramento feito sem sinal (guardado no aparelho): envia antes de qualquer outra ação da jornada. */
+async function sendPendingEnd(): Promise<void> {
+  const raw = await getKv(END_PENDING_KEY);
+  if (!raw) return;
+  let body: Partial<Position> = {};
+  try {
+    body = JSON.parse(raw) as Partial<Position>;
+  } catch {
+    body = {};
+  }
+  try {
+    await api.post("/tracking/shift/end", { latitude: body.latitude ?? null, longitude: body.longitude ?? null });
+  } catch (error) {
+    // Sem rede ou servidor fora: fica para a próxima. Recusa definitiva: não adianta repetir.
+    if (!(error instanceof ApiError) || error.retryable || error.status === 401) return;
+  }
+  await setKv(END_PENDING_KEY, null, undefined, { notify: false });
+}
+
+/** Envia um encerramento de jornada feito sem sinal (rodada de sync). Nunca lança. */
+export function flushPendingShiftEnd(): Promise<void> {
+  return exclusive(sendPendingEnd).catch((error: unknown) => console.warn("Falha ao enviar o encerramento da jornada", error));
+}
+
+async function openShiftOnServer(position: Position | null): Promise<Shift> {
   let data: unknown;
   try {
     data = await api.post("/tracking/shift/start", position ?? {});
@@ -487,85 +822,140 @@ export async function startShift() {
   }
   const shift = unwrapShift(data);
   if (!shift) throw new Error("O servidor não abriu a jornada.");
-  await writeShift(shift);
-  // Jornada nova: o primeiro ponto entra sem esperar o intervalo mínimo.
-  lastStoredAt = 0;
-  await setKv(LAST_POINT_KEY, null);
-  setState({ serverAvailable: true, error: null });
-  await startCollection(await inTransit());
+  return shift;
+}
+
+/** Inicia a jornada: pede permissões, abre a jornada no servidor e começa a coletar. */
+export function startShift(): Promise<void> {
+  return exclusive(async () => {
+    if (!hasConsent()) throw new ConsentRequiredError();
+    const permissions = await requestLocationPermissions();
+    if (!permissions.foreground) throw new Error("Permita o acesso à localização para iniciar a jornada.");
+    // Encerramento anterior feito sem sinal vai antes: senão o servidor devolveria a jornada antiga
+    // como se fosse a nova, e o encerramento atrasado fecharia a nova depois.
+    await sendPendingEnd();
+    if (await getKv(END_PENDING_KEY)) throw new Error("Conecte-se à internet para iniciar a jornada.");
+    const position = await currentPosition();
+    let shift = await openShiftOnServer(position);
+    // O servidor devolveu uma jornada esquecida aberta de outro dia: fecha e abre a de hoje.
+    if (shiftExpired(shift)) {
+      await api.post("/tracking/shift/end", {});
+      shift = await openShiftOnServer(position);
+    }
+    await writeShift(shift);
+    // Jornada nova: o primeiro ponto entra sem esperar o intervalo mínimo.
+    lastStoredAt = 0;
+    await setKv(LAST_POINT_KEY, null, undefined, { notify: false });
+    clearNotices();
+    setState({ serverAvailable: true, error: null });
+    await startCollection(await desiredPace());
+    void scheduleShiftReminder(shift);
+  });
+}
+
+/**
+ * Para a coleta na hora, envia os pontos que restaram e fecha a jornada no servidor. O
+ * encerramento é guardado antes do envio: sem rede (ou com o app morto no meio), ele vai na
+ * próxima sincronização e, até lá, o aparelho já trata a jornada como encerrada.
+ */
+async function closeShift(withPosition: boolean) {
+  const position = withPosition ? await currentPosition() : null;
+  await stopCollection();
+  // A partir daqui nenhum ponto novo entra na fila (handleLocations exige jornada aberta).
+  await writeShift(null);
+  pace = null;
+  setState({ mode: "off", transit: false, batterySaver: false });
+  clearNotices();
+  void cancelShiftReminder();
+  await flushPings(true);
+  await setKv(END_PENDING_KEY, JSON.stringify(position ?? {}), undefined, { notify: false });
+  await sendPendingEnd();
 }
 
 /**
  * Encerra a jornada: para a coleta na hora, envia o que restou e fecha no servidor.
  * Sem rede, o encerramento fica pendente e é enviado na próxima sincronização.
  */
-export async function endShift() {
-  const position = await currentPosition();
-  await stopCollection();
-  // A partir daqui nenhum ponto novo entra na fila (handleLocations exige jornada aberta).
-  await writeShift(null);
-  setState({ mode: "off", transit: false, notice: null });
-  await flushPings(true);
-  try {
-    await api.post("/tracking/shift/end", position ?? {});
-  } catch (error) {
-    if (error instanceof ApiError && (error.retryable || error.status === 401)) {
-      await setKv(END_PENDING_KEY, JSON.stringify(position ?? {}));
-    }
-  }
+export function endShift(): Promise<void> {
+  return exclusive(() => closeShift(true));
+}
+
+/** Jornada aberta há mais de 14 h (esquecida): encerra como se o técnico tivesse tocado em Encerrar. */
+async function autoEndShift() {
+  if (!(state.shift ?? (await readShift()))) return;
+  await closeShift(false);
+  showToast("Jornada encerrada automaticamente", {
+    description: "Ela estava aberta havia mais de 14 h. Inicie uma nova quando começar a trabalhar.",
+  });
 }
 
 /**
- * Abertura do app/volta da rede: confere a jornada no servidor e garante que a coleta está rodando
- * (o app pode ter sido fechado ou o aparelho reiniciado no meio da jornada).
+ * Abertura do app/volta ao primeiro plano: confere a jornada no servidor e garante a coleta no
+ * ritmo certo (o app pode ter sido fechado ou o aparelho reiniciado no meio da jornada).
  */
-export async function resumeTracking() {
-  const pendingEnd = await getKv(END_PENDING_KEY);
-  if (pendingEnd) {
+export function resumeTracking(): Promise<void> {
+  return exclusive(resumeNow);
+}
+
+async function resumeNow() {
+  await flushPings(true);
+  await sendPendingEnd();
+  // Encerramento feito sem sinal que ainda não chegou: para o aparelho a jornada já acabou, mesmo
+  // que o servidor ainda a mostre aberta (nada de religar o GPS depois do "Encerrar").
+  const endPending = Boolean(await getKv(END_PENDING_KEY));
+  let shift = endPending ? null : await readShift();
+  if (!endPending) {
     try {
-      const body = JSON.parse(pendingEnd) as Record<string, unknown>;
-      await api.post("/tracking/shift/end", { latitude: body.latitude, longitude: body.longitude });
-      await setKv(END_PENDING_KEY, null);
+      shift = unwrapShift(await api.get("/tracking/shift"));
+      setState({ serverAvailable: true });
     } catch (error) {
-      if (error instanceof ApiError && !error.retryable && error.status !== 401) await setKv(END_PENDING_KEY, null);
+      if (error instanceof ApiError && error.status === 404) setState({ serverAvailable: false });
+      // offline: vale a jornada guardada no aparelho
     }
   }
-
-  let shift = await readShift();
-  try {
-    shift = unwrapShift(await api.get("/tracking/shift"));
-    await writeShift(shift);
-    setState({ serverAvailable: true });
-  } catch (error) {
-    if (error instanceof ApiError && error.status === 404) setState({ serverAvailable: false });
-    // offline: vale a jornada guardada no aparelho
-  }
-  setState({ shift, queued: await countPings() });
-
-  if (!shift) {
-    await stopCollection();
-    setState({ mode: "off", transit: false, notice: null });
+  await writeShift(shift);
+  setState({ queued: await countPings() });
+  if (shift && shiftExpired(shift)) {
+    await autoEndShift();
     return;
   }
-  const running =
-    foregroundSub !== null ||
-    (backgroundPossible() && (await Location.hasStartedLocationUpdatesAsync(TRACKING_TASK).catch(() => false)));
-  if (!running) await startCollection(await inTransit());
-  else if (state.mode === "off") setState({ mode: foregroundSub ? "foreground" : "background" });
-  void flushPings(true);
+  if (!shift) {
+    await stopCollection();
+    pace = null;
+    setState({ mode: "off", transit: false, batterySaver: false });
+    clearNotices();
+    return;
+  }
+  await ensureCollecting();
 }
 
 /** Logout/perda de acesso: encerra a jornada (se der) e para tudo. */
-export async function stopTracking({ endOnServer }: { endOnServer: boolean }) {
-  if (endOnServer && state.shift) {
-    try {
-      await endShift();
-    } catch {
-      // segue o logout
+export function stopTracking({ endOnServer }: { endOnServer: boolean }): Promise<void> {
+  return exclusive(async () => {
+    const shift = state.shift ?? (await readShift().catch(() => null));
+    if (endOnServer && shift) {
+      try {
+        await closeShift(true);
+      } catch {
+        // segue o logout
+      }
     }
-  }
-  await stopCollection();
-  // Sem jornada local: nada mais é coletado. No próximo login, GET /tracking/shift diz se ela segue aberta.
-  await writeShift(null).catch(() => undefined);
-  setState({ shift: null, mode: "off", transit: false, notice: null, lastFixAt: null, lastSentAt: null, queued: 0 });
+    await stopCollection();
+    void cancelShiftReminder();
+    // Sem jornada local: nada mais é coletado. No próximo login, GET /tracking/shift diz se ela segue aberta.
+    await writeShift(null).catch(() => undefined);
+    pace = null;
+    lastStoredAt = 0;
+    clearNotices();
+    setState({
+      shift: null,
+      mode: "off",
+      transit: false,
+      batterySaver: false,
+      lastFixAt: null,
+      lastSentAt: null,
+      queued: 0,
+      error: null,
+    });
+  });
 }

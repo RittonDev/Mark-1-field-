@@ -487,8 +487,8 @@ export default function ExpensesPage() {
     ]);
   const cards: { key: StatusFilter; label: string; rows: Row[]; hint: string }[] = [
     { key: "", label: "Todos", rows: [...byStatus.pending, ...byStatus.approved, ...byStatus.paid], hint: "sem os recusados" },
-    { key: "pending", label: "Aguardando aprovação", rows: byStatus.pending, hint: "lançados na OS" },
-    { key: "approved", label: "A reembolsar", rows: byStatus.approved, hint: "aprovados" },
+    { key: "pending", label: "Aguardando aprovação", rows: byStatus.pending, hint: "esperando a gestão" },
+    { key: "approved", label: "A reembolsar", rows: byStatus.approved, hint: "aprovados, ainda não pagos" },
     { key: "paid", label: "Reembolsado", rows: byStatus.paid, hint: "já pagos ao técnico" },
     { key: "rejected", label: "Recusado", rows: byStatus.rejected, hint: "fora das somas" },
   ];
@@ -497,30 +497,11 @@ export default function ExpensesPage() {
     <div className="mx-auto max-w-7xl">
       <PageHeader
         title="Custos extras"
-        description="Reembolso aos técnicos: material, km rodado e despesas lançadas nas OS."
+        description="Reembolso aos técnicos: material, km rodado e despesas lançadas nas OS. Aprove, recuse e marque o que já foi reembolsado."
         actions={
           <>
             <KmRate canEdit={isManager(user?.role)} />
-            <Button
-              disabled={!data?.items.length}
-              onClick={() =>
-                downloadCsv(`custos-extras-${month}.csv`, [
-                  ["data", "os", "cliente", "tipo", "descricao", "quantidade", "valor_unitario", "total", "tecnico", "situacao"],
-                  ...(data?.items ?? []).map((i) => [
-                    formatDate(i.created_at),
-                    i.ticket.code,
-                    i.ticket.customer?.name ?? "",
-                    EXPENSE_KIND[i.kind].label,
-                    i.description,
-                    String(i.quantity).replace(".", ","),
-                    i.unit_value.toFixed(2).replace(".", ","),
-                    i.total.toFixed(2).replace(".", ","),
-                    i.technician?.name ?? "",
-                    EXPENSE_STATUS[i.status].label,
-                  ]),
-                ])
-              }
-            >
+            <Button disabled={!visible.length} onClick={exportCsv}>
               <Download className="size-4" />
               Exportar CSV
             </Button>
@@ -528,203 +509,435 @@ export default function ExpensesPage() {
         }
       />
 
-      <div className="mb-4 flex flex-wrap gap-2">
-        <div className="w-44">
-          <Input type="month" value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} aria-label="Mês" />
-        </div>
-        <div className="w-full sm:w-56">
-          <Select value={technicianId} onChange={(e) => setTechnicianId(e.target.value)} aria-label="Técnico">
-            <option value="">Todos os técnicos</option>
-            {(technicians.data ?? []).map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
-          </Select>
-        </div>
-        <div className="w-full sm:w-44">
-          <Select value={status} onChange={(e) => setStatus(e.target.value as ExpenseStatus | "")} aria-label="Situação">
-            <option value="">Todas as situações</option>
-            {Object.entries(EXPENSE_STATUS).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v.label}
-              </option>
-            ))}
-          </Select>
-        </div>
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <Select
+          value={period}
+          onChange={(e) => {
+            setPeriod(e.target.value);
+            setSelected([]);
+          }}
+          className="w-full sm:w-48"
+          aria-label="Período"
+        >
+          {months.map((m) => (
+            <option key={m.value} value={m.value}>
+              {m.label}
+            </option>
+          ))}
+          <option value={ALL}>Todo o período</option>
+        </Select>
+        <Select
+          value={technician?.id ?? ""}
+          onChange={(e) => {
+            const option = technicianOptions.find((t) => t.id === e.target.value);
+            setTechnician(option ? { id: option.id, name: option.name } : null);
+            setSelected([]);
+          }}
+          className="w-full sm:w-56"
+          aria-label="Técnico"
+        >
+          <option value="">Todos os técnicos</option>
+          {technicianOptions.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.label}
+            </option>
+          ))}
+        </Select>
+        <Select
+          value={customerId}
+          onChange={(e) => {
+            setCustomerId(e.target.value);
+            setSelected([]);
+          }}
+          className="w-full sm:w-56"
+          aria-label="Cliente"
+        >
+          <option value="">Todos os clientes</option>
+          {customerOptions.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.label}
+            </option>
+          ))}
+        </Select>
+        {filtered ? (
+          <Button variant="ghost" onClick={clearFilters}>
+            Limpar filtros
+          </Button>
+        ) : null}
+        {backlogTotal > 0 && !showingBacklog ? (
+          <button
+            type="button"
+            onClick={() => {
+              setPeriod(ALL);
+              setTechnician(null);
+              setCustomerId("");
+              pickStatus("approved");
+            }}
+            className="text-sm font-medium text-brand hover:underline sm:ml-auto"
+          >
+            A reembolsar em todos os meses: {formatMoney(backlogTotal)}
+          </button>
+        ) : null}
+      </div>
+
+      <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5" role="group" aria-label="Situação dos custos">
+        {cards.map((card) => (
+          <StatTile
+            key={card.key || "all"}
+            label={card.label}
+            value={sum(card.rows)}
+            display={formatMoney(sum(card.rows))}
+            loading={report.isLoading}
+            hint={`${plural(card.rows.length, "lançamento", "lançamentos")} · ${card.hint}`}
+            onSelect={() => pickStatus(card.key)}
+            selected={status === card.key}
+          />
+        ))}
       </div>
 
       {report.isLoading ? (
         <LoadingBlock />
-      ) : report.error ? (
+      ) : report.error && !data ? (
         <ErrorBox message={errorMessage(report.error)} />
-      ) : !data || data.items.length === 0 ? (
-        <Card>
-          <EmptyState icon={<Receipt className="size-6" />} title="Nenhum custo extra neste período" />
-        </Card>
       ) : (
         <>
-          <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <Stat label="Total no mês" value={formatMoney(data.total)} />
-            <Stat label="A reembolsar (aprovado)" value={formatMoney(sums.approved)} tone="text-sky-700 dark:text-sky-300" />
-            <Stat label="Reembolsado" value={formatMoney(sums.paid)} tone="text-emerald-700 dark:text-emerald-300" />
-            <Stat label="Aguardando aprovação" value={formatMoney(sums.pending)} />
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
-            <Card className="min-w-0">
-              <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-2.5">
-                <span className="text-sm text-ink-muted">
-                  {selected.length ? `${selected.length} selecionado(s)` : `${data.items.length} lançamento(s)`}
-                </span>
-                <Button size="sm" variant="primary" disabled={!selected.length} loading={markPaid.isPending} onClick={() => markPaid.mutate()}>
-                  <Check className="size-4" />
-                  Marcar como reembolsado
-                </Button>
-              </div>
-              <Table>
-                <thead>
-                  <tr>
-                    <Th>
-                      <input
-                        type="checkbox"
-                        aria-label="Selecionar aprovados"
-                        checked={payable.length > 0 && selected.length === payable.length}
-                        onChange={(e) => setSelected(e.target.checked ? payable.map((i) => i.id) : [])}
-                      />
-                    </Th>
-                    <Th>OS</Th>
-                    <Th>Custo</Th>
-                    <Th className="hidden md:table-cell">Técnico</Th>
-                    <Th className="text-right">Total</Th>
-                    <Th>Situação</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.items.map((i) => (
-                    <tr key={i.id} className={clsx(i.status === "rejected" && "opacity-60")}>
-                      <Td>
-                        <input
-                          type="checkbox"
-                          aria-label={`Selecionar ${i.description}`}
-                          disabled={i.status !== "approved"}
-                          checked={selected.includes(i.id)}
-                          onChange={(e) =>
-                            setSelected((s) => (e.target.checked ? [...s, i.id] : s.filter((x) => x !== i.id)))
-                          }
-                        />
-                      </Td>
-                      <Td>
-                        <TicketLink ticketId={i.ticket.id} className="font-mono text-xs text-brand hover:underline">
-                          {i.ticket.code}
-                        </TicketLink>
-                        <span className="block max-w-48 truncate text-xs text-ink-muted">{i.ticket.customer?.name ?? i.ticket.title}</span>
-                      </Td>
-                      <Td>
-                        <span className="block font-semibold text-ink">{EXPENSE_KIND[i.kind].label}</span>
-                        <span className="block max-w-56 truncate text-xs text-ink-muted">{i.description}</span>
-                      </Td>
-                      <Td className="hidden md:table-cell">{i.technician?.name ?? <span className="text-ink-muted">—</span>}</Td>
-                      <Td className="text-right font-medium tabular-nums">{formatMoney(i.total)}</Td>
-                      <Td>
-                        <span className={clsx("rounded-full px-2 py-0.5 text-[11px] font-medium", EXPENSE_STATUS[i.status].className)}>
-                          {EXPENSE_STATUS[i.status].label}
-                        </span>
-                      </Td>
-                    </tr>
-                  ))}
-                </tbody>
-              </Table>
-            </Card>
-
-            <div className="flex flex-col gap-4">
-              <Card>
-                <CardHeader title="Por técnico" />
-                <ul className="divide-y divide-line">
-                  {data.by_technician.map((t) => (
-                    <li key={t.technician?.id ?? "none"} className="flex items-center justify-between gap-2 px-4 py-2 text-sm">
-                      <span className="min-w-0">
-                        <span className="block truncate font-semibold text-ink">{t.technician?.name ?? "Custo da empresa"}</span>
-                        <span className="text-xs text-ink-muted">
-                          {t.count} lançamento(s){t.to_pay ? ` · a reembolsar ${formatMoney(t.to_pay)}` : ""}
-                        </span>
-                      </span>
-                      <span className="font-medium tabular-nums">{formatMoney(t.total)}</span>
-                    </li>
-                  ))}
-                </ul>
-              </Card>
-              <Card>
-                <CardHeader title="Por tipo" />
-                <ul className="divide-y divide-line">
-                  {Object.entries(data.by_kind)
-                    .sort((a, b) => b[1] - a[1])
-                    .map(([kind, total]) => (
-                      <li key={kind} className="flex justify-between px-4 py-2 text-sm">
-                        <span className="font-semibold text-ink">{kind}</span>
-                        <span className="tabular-nums">{formatMoney(total)}</span>
-                      </li>
-                    ))}
-                </ul>
-              </Card>
+          {report.error ? (
+            <div className="mb-3">
+              <ErrorBox message={errorMessage(report.error)} />
             </div>
-          </div>
+          ) : null}
+          {visible.length === 0 ? (
+            <Card>
+              <EmptyState
+                icon={<Receipt className="size-6" />}
+                title={EMPTY_TITLE[status]}
+                description="Os custos são lançados na OS, na aba Peças e custos."
+                action={filtered ? <Button onClick={clearFilters}>Limpar filtros</Button> : undefined}
+              />
+            </Card>
+          ) : (
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
+              <Card className="min-w-0">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-2.5">
+                  <span className="text-sm text-ink-muted" aria-live="polite">
+                    {chosen.length
+                      ? `${plural(chosen.length, "selecionado", "selecionados")} · ${formatMoney(sum(chosen))}`
+                      : `${plural(visible.length, "lançamento", "lançamentos")} · ${formatMoney(sum(status === "rejected" ? visible : counted))}`}
+                  </span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {chosenPending.length ? (
+                      <Button size="sm" disabled={stale || (busy && !approve.isPending)} loading={approve.isPending} onClick={() => approve.mutate(chosenPending)}>
+                        <Check className="size-4" />
+                        Aprovar {chosenPending.length}
+                      </Button>
+                    ) : null}
+                    {chosen.length ? (
+                      <Button size="sm" disabled={stale || busy} onClick={() => setRejecting(chosen)}>
+                        <X className="size-4" />
+                        Recusar {chosen.length}
+                      </Button>
+                    ) : null}
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      disabled={!chosenApproved.length || stale || (busy && !markPaid.isPending)}
+                      loading={markPaid.isPending}
+                      title={chosenApproved.length ? undefined : "Selecione custos aprovados"}
+                      onClick={() => void confirmReimburse(chosenApproved)}
+                    >
+                      <Check className="size-4" />
+                      {chosenApproved.length
+                        ? `Marcar ${chosenApproved.length} como ${chosenApproved.length === 1 ? "reembolsado" : "reembolsados"}`
+                        : "Marcar como reembolsado"}
+                    </Button>
+                  </div>
+                </div>
+                <div className={clsx("transition-opacity duration-150", stale && "opacity-60")} aria-busy={report.isFetching}>
+                  <Table>
+                    <thead>
+                      <tr>
+                        <Th className="w-10">
+                          <HeaderCheckbox
+                            checked={pickable.length > 0 && chosen.length === pickable.length}
+                            partial={chosen.length > 0 && chosen.length < pickable.length}
+                            disabled={!pickable.length}
+                            onChange={(on) => setSelected(on ? pickable.map((r) => r.id) : [])}
+                          />
+                        </Th>
+                        <Th>Data</Th>
+                        <Th>OS</Th>
+                        <Th>Custo</Th>
+                        <Th className="hidden md:table-cell">Técnico</Th>
+                        <Th className="text-right">Total</Th>
+                        <Th>Situação</Th>
+                        <Th className="edit-col">Editar</Th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {visible.map((r) => {
+                        const canPick = r.status === "pending" || r.status === "approved";
+                        const missingReceipt = canPick && !r.receipt_attachment_id && RECEIPT_KINDS.includes(r.kind);
+                        return (
+                          <tr
+                            key={r.id}
+                            onClick={(e) => {
+                              // Só o clique na própria linha (não o que vem de um diálogo aberto a partir dela).
+                              if (e.currentTarget.contains(e.target as Node)) openTicket(r.ticket.id);
+                            }}
+                            className="cursor-pointer transition-colors hover:bg-[var(--row-hover)]"
+                          >
+                            <Td>
+                              <label
+                                className={clsx("-m-2 flex p-2", canPick ? "cursor-pointer" : "cursor-not-allowed")}
+                                title={canPick ? undefined : r.status === "paid" ? "Já reembolsado" : "Recusado"}
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <input
+                                  type="checkbox"
+                                  disabled={!canPick}
+                                  checked={selected.includes(r.id)}
+                                  onChange={(e) => setSelected((s) => (e.target.checked ? [...s, r.id] : s.filter((x) => x !== r.id)))}
+                                  className="size-4 accent-[var(--brand)]"
+                                  aria-label={`Selecionar ${r.ticket.code} · ${r.description}`}
+                                />
+                              </label>
+                            </Td>
+                            <Td className="text-xs whitespace-nowrap text-ink-muted">{formatDate(r.created_at)}</Td>
+                            <Td>
+                              <TicketLink ticketId={r.ticket.id} className="font-mono text-xs text-brand hover:underline">
+                                {r.ticket.code}
+                              </TicketLink>
+                              <span className="block max-w-48 truncate text-xs text-ink-muted" title={r.ticket.customer?.name ?? r.ticket.title}>
+                                {r.ticket.customer?.name ?? r.ticket.title}
+                              </span>
+                            </Td>
+                            <Td>
+                              <span className="block font-semibold text-ink">{EXPENSE_KIND[r.kind].label}</span>
+                              <span className="block max-w-56 truncate text-xs text-ink-muted" title={r.description}>
+                                {r.description}
+                              </span>
+                              {r.receipt_attachment_id ? (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    void openReceipt(r);
+                                  }}
+                                  className="mt-0.5 inline-flex items-center gap-1 text-xs font-medium text-brand hover:underline"
+                                >
+                                  <Paperclip className="size-3.5" aria-hidden />
+                                  Comprovante
+                                </button>
+                              ) : missingReceipt ? (
+                                <span className="mt-0.5 block text-xs font-medium text-amber-700 dark:text-amber-400">Sem comprovante</span>
+                              ) : null}
+                            </Td>
+                            <Td className="hidden md:table-cell">
+                              {r.technician?.name ?? <span className="text-ink-muted">Custo da empresa</span>}
+                            </Td>
+                            <Td
+                              className={clsx(
+                                "text-right font-medium whitespace-nowrap tabular-nums",
+                                r.status === "rejected" && "text-ink-muted line-through",
+                              )}
+                            >
+                              {formatMoney(r.total)}
+                            </Td>
+                            <Td className="whitespace-nowrap">
+                              <span className={clsx("rounded-full px-2 py-0.5 text-[11px] font-medium", EXPENSE_STATUS[r.status].className)}>
+                                {EXPENSE_STATUS[r.status].label}
+                              </span>
+                              {r.status === "paid" && r.paid_at ? (
+                                <span className="mt-1 block text-[11px] text-ink-muted">em {shortDate(r.paid_at)}</span>
+                              ) : null}
+                            </Td>
+                            <Td className="edit-col">
+                              <span className="inline-flex items-center gap-1.5">
+                                {r.status === "pending" ? (
+                                  <RowAction label={`Aprovar: ${r.description}`} disabled={busy || stale} onClick={() => approve.mutate([r])}>
+                                    <Check className="size-4" />
+                                  </RowAction>
+                                ) : (
+                                  <span className="size-8" aria-hidden />
+                                )}
+                                {canPick ? (
+                                  <RowAction label={`Recusar: ${r.description}`} danger disabled={busy || stale} onClick={() => setRejecting([r])}>
+                                    <X className="size-4" />
+                                  </RowAction>
+                                ) : (
+                                  <span className="size-8" aria-hidden />
+                                )}
+                                <QuickEditButton ticketId={r.ticket.id} code={r.ticket.code} />
+                              </span>
+                            </Td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </Table>
+                </div>
+              </Card>
+
+              <aside className="flex flex-col gap-4">
+                <Card>
+                  <CardHeader title="Por técnico" description={status ? EXPENSE_STATUS[status].label : "Sem os recusados"} />
+                  {breakdown.techs.length === 0 ? (
+                    <p className="px-4 py-3 text-sm text-ink-muted">Nada a somar.</p>
+                  ) : (
+                    <ul className="divide-y divide-line">
+                      {breakdown.techs.map((t) => (
+                        <li key={t.id ?? "none"} className="flex items-center justify-between gap-2 px-4 py-2 text-sm">
+                          <span className="min-w-0">
+                            {t.id && t.id !== technician?.id ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setTechnician({ id: t.id as UUID, name: t.name });
+                                  setSelected([]);
+                                }}
+                                className="block max-w-full truncate text-left font-semibold text-ink hover:text-brand hover:underline"
+                                title={`Ver só os custos de ${t.name}`}
+                              >
+                                {t.name}
+                              </button>
+                            ) : (
+                              <span className="block truncate font-semibold text-ink">{t.name}</span>
+                            )}
+                            <span className="text-xs text-ink-muted">
+                              {plural(t.count, "lançamento", "lançamentos")}
+                              {t.toPay ? ` · a reembolsar ${formatMoney(t.toPay)}` : ""}
+                            </span>
+                          </span>
+                          <span className="shrink-0 font-medium tabular-nums">{formatMoney(t.total)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </Card>
+                <Card>
+                  <CardHeader title="Por tipo" />
+                  {breakdown.kinds.length === 0 ? (
+                    <p className="px-4 py-3 text-sm text-ink-muted">Nada a somar.</p>
+                  ) : (
+                    <ul className="divide-y divide-line">
+                      {breakdown.kinds.map(([kind, value]) => (
+                        <li key={kind} className="flex justify-between gap-2 px-4 py-2 text-sm">
+                          <span className="font-semibold text-ink">{EXPENSE_KIND[kind].label}</span>
+                          <span className="tabular-nums">{formatMoney(value)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </Card>
+              </aside>
+            </div>
+          )}
         </>
       )}
+
+      {rejecting ? (
+        <RejectDialog
+          rows={rejecting}
+          onClose={() => setRejecting(null)}
+          onDone={(result) => {
+            setRejecting(null);
+            announce(result, "recusado", "recusados");
+            refresh();
+          }}
+        />
+      ) : null}
     </div>
   );
 }
 
-function Stat({ label, value, tone }: { label: string; value: string; tone?: string }) {
-  return (
-    <Card className="px-4 py-3">
-      <p className="text-xs font-semibold text-ink/80">{label}</p>
-      <p className={clsx("mt-1 text-xl font-semibold tabular-nums text-ink", tone)}>{value}</p>
-    </Card>
-  );
-}
-
+/** Valor do km rodado: supervisor ou admin altera; o analista só vê. */
 function KmRate({ canEdit }: { canEdit: boolean }) {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
   const settings = useQuery({ queryKey: ["settings", "expenses"], queryFn: () => api.get<{ km_rate: number }>("/settings/expenses") });
   const [value, setValue] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const save = useMutation({
-    mutationFn: (rate: string) => api.put("/settings/expenses", { km_rate: rate.replace(",", ".") }),
+    mutationFn: (rate: number) => api.put("/settings/expenses", { km_rate: rate.toFixed(2) }),
     onSuccess: () => {
       setValue(null);
-      queryClient.invalidateQueries({ queryKey: ["settings", "expenses"] });
+      toast({ title: "Valor do km salvo", description: "Vale para os próximos lançamentos de km.", tone: "success" });
+      void queryClient.invalidateQueries({ queryKey: ["settings", "expenses"] });
+    },
+    onError: (e) => {
+      setError(errorMessage(e));
+      toast({ title: "Não foi possível salvar o valor do km", description: errorMessage(e), tone: "error" });
     },
   });
   if (!settings.data) return null;
-  if (value === null) {
+  const rate = settings.data.km_rate;
+  if (!canEdit) {
     return (
-      <button
-        type="button"
-        disabled={!canEdit}
-        onClick={() => setValue(String(settings.data.km_rate).replace(".", ","))}
-        className="rounded-lg border border-line px-3 py-1.5 text-sm text-ink-muted enabled:hover:border-brand enabled:hover:text-ink"
-        title={canEdit ? "Alterar o valor do km" : "Só supervisor ou admin altera"}
-      >
-        Km: <span className="font-medium text-ink">{formatMoney(settings.data.km_rate)}</span>
-      </button>
+      <span className="text-sm text-ink-muted" title="Só supervisor ou admin altera o valor do km">
+        Km: <span className="font-medium text-ink">{formatMoney(rate)}</span>
+      </span>
     );
   }
+  if (value === null) {
+    return (
+      <Button
+        onClick={() => {
+          setValue(moneyInput(rate));
+          setError(null);
+        }}
+        title="Alterar o valor do km rodado"
+      >
+        Km: <span className="font-semibold text-ink">{formatMoney(rate)}</span>
+      </Button>
+    );
+  }
+  const submit = () => {
+    const read = readDecimal(value, { decimals: 2, allowZero: true, emptyMessage: "Informe o valor do km" });
+    if (read.error || read.value === null) setError(read.error ?? "Informe o valor do km");
+    else if (read.value > 100) setError("Até R$ 100,00 por km");
+    else {
+      setError(null);
+      save.mutate(read.value);
+    }
+  };
   return (
     <form
-      className="flex items-center gap-1.5"
+      className="flex flex-wrap items-center gap-1.5"
       onSubmit={(e) => {
         e.preventDefault();
-        save.mutate(value);
+        submit();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setValue(null);
+        }
       }}
     >
-      <span className="text-xs font-semibold text-ink/80">R$/km</span>
-      <Input value={value} onChange={(e) => setValue(e.target.value)} className="w-20" inputMode="decimal" autoFocus />
+      <label htmlFor="km-rate" className="text-xs font-semibold text-ink/80">
+        R$ por km
+      </label>
+      <Input
+        id="km-rate"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        className="w-24"
+        inputMode="decimal"
+        autoFocus
+        aria-invalid={Boolean(error)}
+        aria-describedby={error ? "km-rate-error" : undefined}
+      />
       <Button size="sm" type="submit" variant="primary" loading={save.isPending}>
         Salvar
       </Button>
       <Button size="sm" variant="ghost" onClick={() => setValue(null)}>
         Cancelar
       </Button>
+      {error ? (
+        <span id="km-rate-error" role="alert" className="w-full text-xs text-red-600 dark:text-red-400">
+          {error}
+        </span>
+      ) : null}
     </form>
   );
 }

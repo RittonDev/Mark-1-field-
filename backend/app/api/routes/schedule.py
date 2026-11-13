@@ -70,7 +70,8 @@ async def conflicts(
         )
     if estimated_minutes is not None and not 1 <= estimated_minutes <= MAX_VISIT_MINUTES:
         raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT, "A duração da visita deve ser de 1 minuto a 7 dias"
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "A duração da visita deve ser de 1 minuto a 7 dias",
         )
     people = [p for p in dict.fromkeys([assignee_id, *helper_id]) if p is not None]
     return await schedule.preview_conflicts(

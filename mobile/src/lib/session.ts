@@ -8,6 +8,13 @@ import type { TokenResponse, User } from "./types";
 
 export type SessionStatus = "loading" | "signedOut" | "signedIn";
 
+/**
+ * O técnico só vê e muda o endereço do servidor em desenvolvimento (Expo Go na rede local) ou num build
+ * sem servidor configurado. No app publicado, ninguém consegue orientá-lo a mandar e-mail e senha para
+ * outro servidor.
+ */
+export const canEditServer = __DEV__ || !process.env.EXPO_PUBLIC_API_URL;
+
 export interface SessionState {
   status: SessionStatus;
   apiUrl: string;

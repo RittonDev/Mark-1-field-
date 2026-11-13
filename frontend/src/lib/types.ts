@@ -313,6 +313,8 @@ export interface TicketListItem {
   onsite_due_at?: ISODate | null;
   arrival_status?: ArrivalStatus | null;
   onsite_status?: OnsiteStatus | null;
+  /** Tempo de técnico na loja já usado no chamado, somando as visitas (minutos). */
+  onsite_used_minutes?: number | null;
   /** Outras OS na mesma loja nos últimos 30 dias. */
   recurrence_30d?: number;
   /** Etiquetas (ex.: "Avulso", "Faturamento Matriz"), vindas do Field Control. */
@@ -508,16 +510,20 @@ export interface TicketCreatePayload {
   scheduled_end?: ISODate | null;
   allow_conflict?: boolean;
   project_id?: UUID | null;
+  /** Etiquetas já na abertura (ex.: "Ticket Avulso"); a API que ainda não aceita ignora o campo. */
+  tags?: Tag[];
 }
 
 export type TicketUpdatePayload = Partial<
-  Omit<TicketCreatePayload, "source" | "requester_id" | "assignee_id">
+  Omit<TicketCreatePayload, "source" | "requester_id" | "assignee_id" | "tags">
 > & {
   expected_version?: number;
   /** Só a gestão, a qualquer momento (inclusive OS fechada). */
   resolution_notes?: string | null;
   tags?: Tag[] | null;
   signature_required?: boolean | null;
+  /** Troca o técnico no mesmo salvamento da agenda (null tira); o conflito confere o final. */
+  assignee_id?: UUID | null;
 };
 
 /** Contexto para abrir a OS: o cliente e a loja escolhidos. */
@@ -598,6 +604,15 @@ export interface Activity {
   actual_minutes: number;
   /** Escopo da OS (o cartão mostra a primeira linha). */
   description?: string;
+  /** Feito offline: a hora que o aparelho marcou no botão (o envio chegou depois). */
+  started_declared_at?: ISODate | null;
+  arrived_declared_at?: ISODate | null;
+  /** Distância (metros) do GPS do técnico até a loja na saída e no início do atendimento. */
+  start_distance_m?: number | null;
+  arrival_distance_m?: number | null;
+  /** Visita improdutiva registrada no dia: quando e o motivo. */
+  unproductive_at?: ISODate | null;
+  unproductive_reason?: string | null;
 }
 
 export interface DaySummary {
@@ -611,6 +626,8 @@ export interface DaySummary {
   done: number;
   pending: number;
   unassigned: number;
+  /** Visitas improdutivas registradas no dia. */
+  unproductive?: number;
 }
 
 export interface DayActivities {
@@ -1248,6 +1265,9 @@ export interface MyQueue {
   generated_at: ISODate;
   counts: QueueCounts;
   items: QueueItem[];
+  /** Quantas OS a fila tem; acima do limite da lista, `truncated` avisa que ficaram de fora as menos urgentes. */
+  total?: number;
+  truncated?: boolean;
 }
 
 export interface QueueSummary {

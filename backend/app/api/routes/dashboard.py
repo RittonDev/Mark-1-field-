@@ -146,19 +146,45 @@ async def sla_violations(
     ]
     if vis is not None:
         conds.append(vis)
-    tickets = list(await db.scalars(select(Ticket).where(*conds)))
+    # Só as colunas dos relógios (a OS inteira traria as ~19 relações de milhares de OS).
+    tickets = (
+        await db.execute(
+            select(
+                Ticket.status,
+                Ticket.response_due_at,
+                Ticket.resolution_due_at,
+                Ticket.first_response_at,
+                Ticket.resolved_at,
+                Ticket.sla_paused_at,
+                Ticket.response_violation_reason_id,
+                Ticket.resolution_violation_reason_id,
+            ).where(*conds)
+        )
+    ).all()
+    reason_ids = {
+        rid
+        for t in tickets
+        for rid in (t.response_violation_reason_id, t.resolution_violation_reason_id)
+        if rid is not None
+    }
+    reasons: dict[uuid.UUID, ViolationReason] = {}
+    if reason_ids:
+        reasons = {
+            r.id: r
+            for r in await db.scalars(
+                select(ViolationReason).where(ViolationReason.id.in_(reason_ids))
+            )
+        }
 
     responsibility: Counter[str] = Counter()
 
     def clock(is_breached: Callable[..., bool], attr: str) -> ClockViolations:
         counts: Counter[uuid.UUID] = Counter()
-        reasons: dict[uuid.UUID, ViolationReason] = {}
         breached = [t for t in tickets if is_breached(t, now)]
         for t in breached:
-            reason = getattr(t, attr)
+            reason = reasons.get(getattr(t, attr))
             if reason is not None:
                 counts[reason.id] += 1
-                reasons[reason.id] = reason
                 responsibility[reason.responsibility.value] += 1
         return ClockViolations(
             breached=len(breached),
@@ -174,8 +200,8 @@ async def sla_violations(
             ],
         )
 
-    response = clock(response_breached, "response_violation_reason")
-    resolution = clock(resolution_breached, "resolution_violation_reason")
+    response = clock(response_breached, "response_violation_reason_id")
+    resolution = clock(resolution_breached, "resolution_violation_reason_id")
     pending = sum(
         1
         for t in tickets

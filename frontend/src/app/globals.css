@@ -142,6 +142,7 @@
   --animate-pop: mf-pop 0.18s cubic-bezier(0.16, 1, 0.3, 1) backwards;
   --animate-toast: mf-toast 0.24s cubic-bezier(0.16, 1, 0.3, 1) backwards;
   --animate-drawer: mf-drawer 0.26s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  --animate-drawer-left: mf-drawer-left 0.22s cubic-bezier(0.16, 1, 0.3, 1) backwards;
   --animate-float: mf-float 5s ease-in-out infinite alternate;
   --animate-draw: mf-draw 2.6s cubic-bezier(0.65, 0, 0.35, 1) backwards;
 }
@@ -199,6 +200,17 @@
   from {
     opacity: 0.4;
     transform: translateX(32px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+/* Menu do celular: entra da esquerda. */
+@keyframes mf-drawer-left {
+  from {
+    opacity: 0.4;
+    transform: translateX(-24px);
   }
   to {
     opacity: 1;

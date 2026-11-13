@@ -155,12 +155,14 @@ function FormEditor({ ticket, form }: { ticket: LocalTicket; form: TicketForm })
 
   // Foto tirada antes de o Android fechar o app com a câmera aberta.
   useEffect(() => {
-    void recoverCapture((t) => t.kind === "form" && t.ticketId === ticket.id && t.formId === form.id).then(async (found) => {
-      if (!found || found.target.kind !== "form") return;
-      const { fieldId } = found.target;
-      for (const asset of found.assets) await queuePhoto(ticket.id, asset.uri, asset.mimeType, { formId: form.id, fieldId });
-      showToast("Foto recuperada", { tone: "success", description: "A foto tirada antes de o app fechar foi guardada no formulário." });
-    });
+    recoverCapture((t) => t.kind === "form" && t.ticketId === ticket.id && t.formId === form.id)
+      .then(async (found) => {
+        if (!found || found.target.kind !== "form") return;
+        const { fieldId } = found.target;
+        for (const asset of found.assets) await queuePhoto(ticket.id, asset.uri, asset.mimeType, { formId: form.id, fieldId });
+        showToast("Foto recuperada", { tone: "success", description: "A foto tirada antes de o app fechar foi guardada no formulário." });
+      })
+      .catch((e: unknown) => console.warn("Não foi possível recuperar a foto", e));
   }, [ticket.id, form.id]);
 
   useEffect(
@@ -208,7 +210,7 @@ function FormEditor({ ticket, form }: { ticket: LocalTicket; form: TicketForm })
   const autosave = useCallback(async () => {
     const { normalized: answers, dirty: changed, locked: blocked } = latest.current;
     const key = JSON.stringify(answers);
-    if (!changed || blocked || key === savedKey.current) return;
+    if (!touched.current || !changed || blocked || key === savedKey.current) return;
     savedKey.current = key;
     try {
       await enqueueFormAnswers(ticket.id, { form_id: form.id, answers, complete: false });
@@ -225,14 +227,39 @@ function FormEditor({ ticket, form }: { ticket: LocalTicket; form: TicketForm })
       void autosave();
     };
   }, [autosave]);
+  // E 2 s depois da última mudança (no modo lista não há troca de pergunta para salvar).
+  useEffect(() => {
+    const timer = setTimeout(() => void autosave(), 2000);
+    return () => clearTimeout(timer);
+  }, [draft, autosave]);
+
+  function cancelAdvance() {
+    if (advanceTimer.current) clearTimeout(advanceTimer.current);
+    advanceTimer.current = null;
+  }
 
   function goTo(index: number, dir: StepDirection) {
+    cancelAdvance();
     setDirection(dir);
     setAttempted(false);
     setError(null);
     setStep(index);
     scrollRef.current?.scrollTo({ y: 0, animated: false });
     void autosave();
+  }
+
+  /**
+   * Sim/Não ou escolha única respondida: avança sozinho em 250 ms (dá para ver a marcação). Confere
+   * a pendência com o valor novo, não com o rascunho de antes do toque.
+   */
+  function advanceAfter(from: number, field: FormField, value: FormAnswer) {
+    cancelAdvance();
+    if (invalidNumber(field, value) || stepProblem(field, normalizeAnswer(field, value), counts[field.id] ?? 0)) return;
+    advanceTimer.current = setTimeout(() => {
+      advanceTimer.current = null;
+      haptic.select();
+      goTo(Math.min(from + 1, steps.length), "forward");
+    }, 250);
   }
 
   function next(skip = false) {
@@ -273,18 +300,22 @@ function FormEditor({ ticket, form }: { ticket: LocalTicket; form: TicketForm })
     }
     if (complete && missing.length) {
       haptic.warning();
+      const summary = missing.length > 1 ? `Faltam ${missing.length} itens obrigatórios` : "Falta 1 item obrigatório";
+      const first = steps.findIndex((_, i) => problemAt(i) !== null);
       // Uma por tela: leva direto à primeira pergunta pendente, já com o aviso do que falta.
-      const first = mode === "steps" && !locked ? steps.findIndex((_, i) => problemAt(i) !== null) : -1;
-      if (first >= 0) {
+      if (mode === "steps" && first >= 0) {
         goTo(first, "back");
         setAttempted(true);
-        showToast(missing.length > 1 ? `Faltam ${missing.length} itens obrigatórios` : "Falta 1 item obrigatório", {
-          tone: "error",
-          description: missing.join("; "),
-        });
+        showToast(summary, { tone: "error", description: missing.join("; ") });
         return;
       }
-      setError(`Falta preencher: ${missing.join("; ")}`);
+      // Todas numa tela: marca cada pendente e rola até a primeira.
+      setShowMissing(true);
+      const firstId = first >= 0 ? steps[first].field.id : null;
+      if (firstId && fieldY.current[firstId] !== undefined) {
+        scrollRef.current?.scrollTo({ y: Math.max(0, listY.current + fieldY.current[firstId] - 12), animated: true });
+      }
+      showToast(summary, { tone: "error", description: missing.join("; ") });
       return;
     }
     setSaving(complete ? "complete" : "save");
@@ -295,13 +326,9 @@ function FormEditor({ ticket, form }: { ticket: LocalTicket; form: TicketForm })
       if (complete) haptic.success();
       showToast(complete ? "Formulário concluído" : "Respostas salvas", {
         tone: "success",
-        description: online ? undefined : "Salvo no aparelho; será enviado quando houver conexão.",
+        description: online ? undefined : "Salvo no aparelho; vai para a central quando houver conexão.",
       });
-      // Aberto por link direto (sem histórico), volta para a OS.
-      if (complete) {
-        if (router.canGoBack()) router.back();
-        else router.replace({ pathname: "/ticket/[id]", params: { id: ticket.id } });
-      }
+      if (complete) backToTicket(ticket.id);
     } catch (e) {
       savedKey.current = null;
       setError(errorMessage(e));
@@ -310,40 +337,42 @@ function FormEditor({ ticket, form }: { ticket: LocalTicket; form: TicketForm })
     }
   }
 
-  async function addPhoto(fieldId: string, source: "camera" | "library") {
+  async function addPhoto(field: FormField, source: "camera" | "library") {
+    const count = counts[field.id] ?? 0;
+    const room = Math.max(1, (field.max_photos > 0 ? field.max_photos : 10) - count);
     setPhotoBusy(true);
     try {
-      const options: ImagePicker.ImagePickerOptions = { mediaTypes: ["images"], quality: 0.7, exif: false };
-      let result: ImagePicker.ImagePickerResult;
-      if (source === "camera") {
-        const permission = await ImagePicker.requestCameraPermissionsAsync();
-        if (!permission.granted) {
-          notify("Câmera bloqueada", "Libere o acesso à câmera nas configurações do aparelho.");
-          return;
-        }
-        result = await ImagePicker.launchCameraAsync(options);
-      } else {
-        result = await ImagePicker.launchImageLibraryAsync(options);
-      }
-      if (result.canceled) return;
-      for (const asset of result.assets) await queuePhoto(ticket.id, asset.uri, asset.mimeType, { formId: form.id, fieldId });
+      const assets = await capturePhotos(
+        source,
+        { kind: "form", ticketId: ticket.id, formId: form.id, fieldId: field.id },
+        source === "library" ? room : 1,
+      );
+      const chosen = assets.slice(0, room);
+      if (!chosen.length) return;
+      for (const asset of chosen) await queuePhoto(ticket.id, asset.uri, asset.mimeType, { formId: form.id, fieldId: field.id });
+      touched.current = true;
       setAttempted(false);
+      const total = count + chosen.length;
+      const need = photoNeed(field);
+      if (source === "camera" && total < need) showToast(`Foto ${total} de ${need} salva`, { tone: "success" });
     } catch (e) {
-      notify("Não foi possível adicionar a foto", errorMessage(e));
+      notify("Não foi possível guardar a foto", errorMessage(e));
     } finally {
       setPhotoBusy(false);
     }
   }
 
-  async function removeServerPhoto(attachment: Attachment) {
+  async function removeServerPhoto(field: FormField, attachment: Attachment) {
     if (!online) {
       notify("Sem conexão", "Para remover uma foto já enviada é preciso estar online.");
       return;
     }
-    const ok = await confirmAction("Remover foto?", "A foto será apagada da OS.", { confirmText: "Remover", destructive: true });
+    const message = photoNeed(field) ? "A foto será apagada da OS. O campo pode voltar a ficar incompleto." : "A foto será apagada da OS.";
+    const ok = await confirmAction("Remover foto?", message, { confirmText: "Remover", destructive: true });
     if (!ok) return;
     try {
       await deleteFormPhoto(ticket.id, form.id, attachment.id);
+      touched.current = true;
     } catch (e) {
       notify("Não foi possível remover", errorMessage(e));
     }
@@ -354,50 +383,86 @@ function FormEditor({ ticket, form }: { ticket: LocalTicket; form: TicketForm })
       confirmText: "Remover",
       destructive: true,
     });
-    if (ok) await discardPhoto(photo.id, photo.file_uri);
+    if (!ok) return;
+    await discardPhoto(photo.id, photo.file_uri);
+    touched.current = true;
   }
 
-  const fieldProps = (fieldId: string, type: string) => ({
-    value: draft[fieldId],
+  async function openPhoto(fieldId: string, index: number) {
+    // Os links das fotos vencem: lista antiga é atualizada antes de abrir.
+    if (online && attachmentsStale(ticket.id)) await reloadAttachments(ticket.id).catch(() => undefined);
+    setViewer({ fieldId, index });
+  }
+
+  const viewerPhotos: ViewerPhoto[] = viewer
+    ? [
+        ...attachments
+          .filter((a) => a.field_id === viewer.fieldId)
+          .map((a) => ({
+            key: a.id,
+            uri: absoluteApiUrl(a.download_url) ?? "",
+            caption: a.uploaded_by ? `Enviada por ${a.uploaded_by.name}` : "Foto enviada",
+          })),
+        ...pendingPhotos
+          .filter((p) => p.field_id === viewer.fieldId)
+          .map((p) => ({ key: p.id, uri: p.file_uri, caption: "Aguardando envio" })),
+      ]
+    : [];
+
+  const fieldProps = (field: FormField) => ({
+    value: draft[field.id],
     onChange: (value: FormAnswer | null) => {
-      setDraft((d) => ({ ...d, [fieldId]: value }));
+      if (value === null) cancelAdvance();
+      touched.current = true;
+      setDraft((d) => ({ ...d, [field.id]: value }));
       setAttempted(false);
     },
     disabled: locked,
     photos:
-      type === "photo"
-        ? { server: attachments.filter((a) => a.field_id === fieldId), pending: pendingPhotos.filter((p) => p.field_id === fieldId) }
+      field.type === "photo"
+        ? { server: attachments.filter((a) => a.field_id === field.id), pending: pendingPhotos.filter((p) => p.field_id === field.id) }
         : undefined,
-    onAddPhoto: (source: "camera" | "library") => void addPhoto(fieldId, source),
-    onRemoveServerPhoto: (a: Attachment) => void removeServerPhoto(a),
+    onAddPhoto: (source: "camera" | "library") => void addPhoto(field, source),
+    onRemoveServerPhoto: (a: Attachment) => void removeServerPhoto(field, a),
     onRemovePendingPhoto: (p: PendingPhoto) => void removePendingPhoto(p),
+    onOpenPhoto: (index: number) => void openPhoto(field.id, index),
+    userId: user?.id,
     photoBusy,
   });
 
   const requiredCount = form.fields.filter(isRequiredItem).length;
   const doneCount = requiredCount - missing.length;
-  const view: "question" | "review" | "list" | "loading" =
-    locked || mode === "list" ? "list" : at === null ? "loading" : at < steps.length ? "question" : "review";
-  const canConclude = !saving && !(form.status === "completed" && !dirty);
-  const concludeTitle = form.status === "completed" && !dirty ? "Concluído" : "Concluir";
+  const view: "question" | "review" | "list" | "locked" | "loading" = locked
+    ? "locked"
+    : mode === "list"
+      ? "list"
+      : at === null
+        ? "loading"
+        : at < steps.length
+          ? "question"
+          : "review";
+  const completed = form.status === "completed";
+  const canConclude = !saving && !(completed && !dirty);
+  // Concluído e alterado: precisa concluir de novo (o servidor faz o mesmo).
+  const concludeTitle = completed ? (dirty ? "Concluir de novo" : "Concluído") : "Concluir";
+  const missingIds = showMissing ? new Set(steps.filter((_, i) => problemAt(i) !== null).map((s) => s.field.id)) : null;
 
   const summaryCard = (
     <Card style={{ gap: 8 }}>
       <View style={styles.cardTop}>
         <Text style={styles.code}>{ticket.code}</Text>
-        {view === "list" && !locked ? (
+        {view === "list" ? (
           <Pressable onPress={() => switchMode("steps")} hitSlop={8} accessibilityRole="button" style={styles.modeLink}>
             <Text style={styles.modeLinkText}>Responder uma por vez</Text>
           </Pressable>
         ) : null}
       </View>
-      <Text style={styles.title}>{form.name}</Text>
+      <Text style={styles.title} accessibilityRole="header">
+        {form.name}
+      </Text>
       <View style={styles.badges}>
-        <Badge
-          label={STATUS_LABEL[form.status]}
-          color={form.status === "completed" ? c.success : form.status === "in_progress" ? c.warning : c.inkMuted}
-        />
-        {form.required ? <Badge label="Obrigatório" color={c.inkMuted} /> : <Badge label="Opcional" color={c.inkSubtle} />}
+        <Badge label={STATUS_LABEL[form.status]} color={completed ? toneInk(c, "success") : c.inkMuted} />
+        <Badge label={form.required ? "Obrigatório" : "Opcional"} color={c.inkMuted} />
       </View>
       {requiredCount ? (
         <View style={{ gap: 6 }}>
@@ -412,20 +477,35 @@ function FormEditor({ ticket, form }: { ticket: LocalTicket; form: TicketForm })
     </Card>
   );
 
+  const lockReason = !canFill
+    ? `Só o técnico responsável (${ticket.assignee?.name ?? "definido pela central"}) preenche este formulário.`
+    : ticket.signed_at || pendingSignature
+      ? "A assinatura do responsável já foi colhida: o formulário não pode mais ser alterado."
+      : ticket.status === "cancelled"
+        ? "A OS foi cancelada: o formulário não pode mais ser alterado."
+        : "A OS foi concluída: o formulário não pode mais ser alterado.";
+
   const notices = (
     <>
       {locked ? (
         <Card style={styles.lockedCard}>
-          <Text style={styles.lockedText}>
-            {ticket.signed_at || pendingSignature
-              ? "A assinatura do responsável já foi colhida: o formulário não pode mais ser alterado."
-              : "A OS foi concluída: o formulário não pode mais ser alterado."}
-          </Text>
+          <Icon name="lock" size={16} color={c.inkMuted} />
+          <Text style={styles.lockedText}>{lockReason}</Text>
         </Card>
       ) : null}
-      {serverError && form.status !== "completed" ? <ErrorBox message={`O servidor não concluiu: ${serverError}`} /> : null}
+      {serverError && !completed ? <ErrorBox message={`O servidor não concluiu: ${serverError}`} /> : null}
     </>
   );
+
+  const reviewRows = () =>
+    steps.map((s) => {
+      const photos = counts[s.field.id] ?? 0;
+      return {
+        answer: answerText(s.field, normalized[s.field.id], photos),
+        problem: stepProblem(s.field, normalized[s.field.id], photos),
+        required: isRequiredItem(s.field),
+      };
+    });
 
   let body: React.ReactNode = null;
   let footer: React.ReactNode = null;
@@ -449,14 +529,15 @@ function FormEditor({ ticket, form }: { ticket: LocalTicket; form: TicketForm })
         {notices}
         <StepSlide key={at} direction={direction}>
           <View style={{ gap: 10 }}>
-            {current.section ? <Text style={styles.stepSection}>{current.section}</Text> : null}
+            {current.section ? <SectionLabel>{current.section}</SectionLabel> : null}
             <Card style={styles.questionCard}>
               <FieldInput
                 field={field}
-                {...fieldProps(field.id, field.type)}
+                {...fieldProps(field)}
                 prominent
                 autoFocus={direction !== "none" && textLike && !isAnswered(field, value)}
                 onSubmit={() => next()}
+                onAnswered={(answer) => advanceAfter(at, field, answer)}
               />
               {attempted && problem ? (
                 <View style={styles.problem} accessibilityRole="alert">
@@ -505,28 +586,32 @@ function FormEditor({ ticket, form }: { ticket: LocalTicket; form: TicketForm })
       </>
     );
   } else if (view === "review") {
-    const rows = steps.map((s) => {
-      const photos = counts[s.field.id] ?? 0;
-      return {
-        answer: answerText(s.field, normalized[s.field.id], photos),
-        problem: stepProblem(s.field, normalized[s.field.id], photos),
-        required: isRequiredItem(s.field),
-      };
-    });
     body = (
       <>
         {summaryCard}
         {notices}
+        {completed ? (
+          <Card style={styles.lockedCard}>
+            <Icon name="checkCircle" size={16} color={c.inkMuted} />
+            <Text style={styles.lockedText}>
+              {dirty
+                ? "Você mudou respostas deste formulário concluído. Toque em Concluir de novo para valer."
+                : "Concluído. Se mudar alguma resposta ou foto, o formulário precisa ser concluído de novo."}
+            </Text>
+          </Card>
+        ) : null}
         <View style={{ gap: 2 }}>
           <Text style={styles.reviewTitle}>Revisão</Text>
           <Text style={styles.meta}>
             {missing.length
               ? "Os itens marcados ainda faltam. Toque numa pergunta para responder ou alterar."
-              : "Tudo certo. Confira as respostas e conclua o formulário."}
+              : completed && !dirty
+                ? "Toque numa pergunta para conferir ou alterar."
+                : "Tudo certo. Confira as respostas e conclua o formulário."}
           </Text>
         </View>
         <Card style={{ paddingVertical: 4 }}>
-          <ReviewList steps={steps} rows={rows} onOpen={(i) => goTo(i, "back")} />
+          <ReviewList steps={steps} rows={reviewRows()} onOpen={(i) => goTo(i, "back")} />
         </Card>
         {error ? <ErrorBox message={error} /> : null}
         <Pressable onPress={() => switchMode("list")} hitSlop={8} accessibilityRole="button" style={styles.listLink}>
@@ -554,15 +639,35 @@ function FormEditor({ ticket, form }: { ticket: LocalTicket; form: TicketForm })
       <>
         {summaryCard}
         {notices}
-        <Card style={{ gap: 20 }}>
-          {form.fields.map((field) => (
-            <FieldInput key={field.id} field={field} {...fieldProps(field.id, field.type)} />
-          ))}
-        </Card>
+        <View
+          onLayout={(e) => {
+            listY.current = e.nativeEvent.layout.y;
+          }}
+        >
+          <Card style={{ gap: 20 }}>
+            {form.fields.map((field) => {
+              const pending = missingIds?.has(field.id) ? stepProblem(field, normalized[field.id], counts[field.id] ?? 0) : null;
+              return (
+                <View
+                  key={field.id}
+                  onLayout={(e) => {
+                    fieldY.current[field.id] = e.nativeEvent.layout.y;
+                  }}
+                >
+                  <FieldInput
+                    field={field}
+                    {...fieldProps(field)}
+                    error={pending ? (field.type === "photo" ? pending : "Obrigatória") : null}
+                  />
+                </View>
+              );
+            })}
+          </Card>
+        </View>
         {error ? <ErrorBox message={error} /> : null}
       </>
     );
-    footer = locked ? null : (
+    footer = (
       <>
         <Button title="Salvar" onPress={() => void submit(false)} loading={saving === "save"} disabled={!!saving || !dirty} style={{ flex: 1 }} />
         <Button
@@ -573,6 +678,17 @@ function FormEditor({ ticket, form }: { ticket: LocalTicket; form: TicketForm })
           disabled={!canConclude}
           style={{ flex: 1 }}
         />
+      </>
+    );
+  } else if (view === "locked") {
+    // Travado: as respostas em leitura, legíveis (sem campos esmaecidos).
+    body = (
+      <>
+        {summaryCard}
+        {notices}
+        <Card style={{ paddingVertical: 4 }}>
+          <ReviewList steps={steps} rows={reviewRows()} />
+        </Card>
       </>
     );
   }
@@ -586,12 +702,13 @@ function FormEditor({ ticket, form }: { ticket: LocalTicket; form: TicketForm })
       <Stack.Screen options={{ title: form.name }} />
       <ScrollView
         ref={scrollRef}
-        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 120 }]}
+        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + (footer ? 120 : 32) }]}
         keyboardShouldPersistTaps="handled"
       >
         {body}
       </ScrollView>
       {footer ? <View style={[styles.footer, { paddingBottom: insets.bottom + 12 }]}>{footer}</View> : null}
+      <PhotoViewer photos={viewerPhotos} index={viewer?.index ?? null} onChange={(i) => setViewer(i === null || !viewer ? null : { ...viewer, index: i })} />
     </KeyboardAvoidingView>
   );
 }
@@ -606,18 +723,17 @@ const makeStyles = (c: Palette) =>
     meta: { fontSize: 13, color: c.inkMuted, lineHeight: 18 },
     progressTrack: { height: 6, borderRadius: 3, backgroundColor: c.segment, overflow: "hidden" },
     progressBar: { height: 6, borderRadius: 3, backgroundColor: c.primary },
-    lockedCard: { backgroundColor: c.surface2 },
-    lockedText: { fontSize: 14, color: c.inkMuted, lineHeight: 20 },
+    lockedCard: { backgroundColor: c.surface2, flexDirection: "row", alignItems: "flex-start", gap: 10 },
+    lockedText: { flex: 1, fontSize: 14, color: c.inkMuted, lineHeight: 20 },
     modeLink: { paddingVertical: 2 },
     modeLinkText: { fontSize: 14, fontWeight: "600", color: c.brandInk },
     listLink: { alignSelf: "center", paddingVertical: 6 },
-    stepSection: { fontSize: 12, fontWeight: "700", color: c.primary, textTransform: "uppercase", letterSpacing: 0.5 },
     questionCard: { gap: 14, paddingVertical: 20 },
     problem: { flexDirection: "row", alignItems: "center", gap: 8 },
     problemText: { flex: 1, fontSize: 14, fontWeight: "600", color: c.danger, lineHeight: 19 },
     skip: { alignSelf: "flex-start", paddingVertical: 2 },
     skipText: { fontSize: 14, fontWeight: "600", color: c.brandInk, textDecorationLine: "underline" },
-    hint: { fontSize: 13, color: c.inkSubtle, textAlign: "center" },
+    hint: { fontSize: 13, color: c.inkMuted, textAlign: "center" },
     reviewTitle: { fontSize: 17, fontWeight: "700", color: c.ink },
     footer: {
       position: "absolute",
