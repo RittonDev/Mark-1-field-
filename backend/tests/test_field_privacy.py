@@ -87,19 +87,24 @@ async def test_technician_gets_only_the_basics(
     office = (await client.get(f"{API}/tickets/{t['id']}", headers=world.analyst.headers)).json()
     assert office["owner"] and office["resolution_due_at"] and office["requester_name"]
     assert office["location"]["document"] == "11222333000181"
+    assert (office["location"]["contact_name"], office["location"]["contact_phone"]) == (
+        "Paula",
+        "(11) 98888-7777",
+    )
 
     seen = (await client.get(f"{API}/tickets/{t['id']}", headers=tech)).json()
-    # Fica o básico: cliente, local (endereço e contato da loja), agenda e escopo.
+    # Fica o básico: cliente, local (nome e endereço da loja), agenda e escopo.
     assert (seen["title"], seen["description"]) == ("Impressora atolando", "Bandeja 2")
     assert seen["customer"]["name"] == office["customer"]["name"]
     assert seen["location"]["name"] == "Matriz"
-    assert seen["location"]["contact_phone"] == "(11) 98888-7777"
     assert seen["visit_note"] == "Falar com a Paula"
     # Sai o que é da gestão.
     for key in OFFICE_ONLY:
         assert seen[key] is None, key
     assert seen["tags"] == [] and seen["recurrence_30d"] == 0
-    assert seen["location"]["document"] is None
+    # CNPJ e contato da loja (nome e telefone) também: quem fala com a loja é a central.
+    loc = seen["location"]
+    assert (loc["document"], loc["contact_name"], loc["contact_phone"]) == (None, None, None)
     assert seen["assignee"]["email"] == ""
     assert {h["email"] for h in seen["helpers"]} == {""}
     # O sync do app recebe a mesma visão.
@@ -107,6 +112,7 @@ async def test_technician_gets_only_the_basics(
     synced = next(x for x in pulled["tickets"] if x["id"] == t["id"])
     assert synced["owner"] is None and synced["resolution_due_at"] is None
     assert synced["location"]["document"] is None
+    assert synced["location"]["contact_phone"] is None
 
     # Anexos: as fotos e o que ele mesmo enviou; documento do escritório fica de fora.
     doc = await _upload(
