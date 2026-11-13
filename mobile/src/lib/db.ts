@@ -165,6 +165,17 @@ const MIGRATIONS: string[] = [
     json = json_set(json, '$.location.contact_name', NULL, '$.location.contact_phone', NULL);
   DELETE FROM kv WHERE key = 'sync_since';
   `,
+  // 7: a autorização do cliente saiu e o horário ficou só com a central (o técnico só sai, inicia
+  // e conclui). Tira os campos de autorização guardados e refaz o sync, para as OS virem com as
+  // ações novas. Os motivos de atraso de SLA também não ficam mais no aparelho.
+  `
+  UPDATE tickets SET
+    server_json = json_remove(server_json, '$.authorization_status', '$.authorized_by_name',
+      '$.authorization_channel', '$.authorization_ref', '$.authorized_at', '$.authorized_by'),
+    json = json_remove(json, '$.authorization_status', '$.authorized_by_name',
+      '$.authorization_channel', '$.authorization_ref', '$.authorized_at', '$.authorized_by');
+  DELETE FROM kv WHERE key IN ('sync_since', 'violation_reasons', 'violation_reasons_at');
+  `,
 ];
 
 let dbPromise: Promise<DB> | null = null;

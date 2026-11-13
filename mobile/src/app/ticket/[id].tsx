@@ -32,6 +32,7 @@ import { haptic } from "../../lib/haptics";
 import { awaitingReschedule, isDone, isHelper } from "../../lib/lists";
 import { UNPRODUCTIVE_FROM } from "../../lib/ops";
 import { useSession } from "../../lib/session";
+import { userCanTransition } from "../../lib/workflow";
 import { isOnline, requestSync, useSyncStatus } from "../../lib/sync";
 import type { TicketStatus } from "../../lib/types";
 import { RADIUS, useStyles, useTheme, type Palette } from "../../theme/theme";
@@ -101,7 +102,11 @@ export default function TicketScreen() {
   }
 
   const current = ticket;
-  const actions = [...current.allowed_transitions].sort((a, b) => ACTION_ORDER.indexOf(a) - ACTION_ORDER.indexOf(b));
+  // O que o servidor liberou, conferido também pela regra do técnico (OS guardada no aparelho antes de
+  // uma mudança de regra pode trazer a lista antiga): ele só sai, inicia e conclui.
+  const actions = current.allowed_transitions
+    .filter((to) => userCanTransition(user, current, to))
+    .sort((a, b) => ACTION_ORDER.indexOf(a) - ACTION_ORDER.indexOf(b));
   const primary = actions.find((s) => PRIMARY.includes(s));
   // O técnico só trabalha nas OS atribuídas a ele pelo analista (não há "assumir").
   const isMine = current.assignee?.id === user.id;
