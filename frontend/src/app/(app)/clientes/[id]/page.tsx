@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Building2, ExternalLink, FileText, MapPin, Star, Ticket } from "lucide-react";
+import { ArrowLeft, ExternalLink, FileText, MapPin, Star, Ticket } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { StatusBadge } from "@/components/badges";
@@ -26,7 +26,7 @@ function Stars({ value }: { value: number }) {
 function Stat({ label, value, display }: { label: string; value?: number; display?: string }) {
   return (
     <div className="rounded-xl border border-line bg-surface px-4 py-3 shadow-elev-1">
-      <p className="text-xs font-medium text-ink-muted">{label}</p>
+      <p className="text-xs font-semibold text-ink/80">{label}</p>
       <p className="mt-1 text-xl font-semibold tracking-tight text-ink">
         {display ?? <CountUp value={value ?? 0} />}
       </p>
@@ -66,7 +66,9 @@ export default function CustomerDetailPage() {
       <Card className="mb-5 p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex min-w-0 items-center gap-4">
-            <span className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-line bg-white text-lg font-semibold text-brand-ink">
+            <span
+              className={`flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-line text-lg font-semibold text-brand-ink ${c.logo_url ? "bg-white" : "bg-brand-soft"}`}
+            >
               {c.logo_url ? (
                 // eslint-disable-next-line @next/next/no-img-element -- logo ainda no armazenamento do Field Control
                 <img src={c.logo_url} alt="" className="size-full object-contain p-1.5" />
@@ -111,7 +113,7 @@ export default function CustomerDetailPage() {
 
           {legacy?.rating && legacy.rating.average > 0 ? (
             <Card className="p-4">
-              <p className="text-xs font-medium text-ink-muted">Avaliação dos atendimentos (Field Control)</p>
+              <p className="text-xs font-semibold text-ink/80">Avaliação dos atendimentos (Field Control)</p>
               <div className="mt-1 flex items-center gap-3">
                 <span className="text-2xl font-semibold text-ink">{legacy.rating.average.toFixed(1).replace(".", ",")}</span>
                 <Stars value={legacy.rating.average} />
@@ -202,12 +204,7 @@ export default function CustomerDetailPage() {
           </Card>
 
           <Card className="p-5">
-            <SectionTitle className="mb-2">
-              <span className="flex items-center gap-2">
-                <Building2 className="size-4 text-ink-subtle" />
-                Endereço da matriz
-              </span>
-            </SectionTitle>
+            <SectionTitle className="mb-2">Endereço da matriz</SectionTitle>
             {address ? (
               <>
                 <p className="text-sm text-ink-muted">{address}</p>

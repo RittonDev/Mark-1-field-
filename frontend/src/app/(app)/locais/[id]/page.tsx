@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, ExternalLink, HardHat, MapPin, Pencil, Ticket, TriangleAlert } from "lucide-react";
+import { ArrowLeft, ExternalLink, HardHat, Pencil, Ticket, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
@@ -62,7 +62,7 @@ export default function LocationDetailPage() {
               </Link>
             </p>
             <h1 className="mt-1 text-[22px] leading-tight font-bold tracking-[-0.02em] text-ink">
-              {l.code ? <span className="mr-2 rounded-md bg-surface-2 px-1.5 py-0.5 font-mono text-base text-ink-muted">{l.code}</span> : null}
+              {l.code ? <span className="mr-2 rounded-md bg-surface-2 px-1.5 py-0.5 font-mono text-base font-semibold text-ink-muted">{l.code}</span> : null}
               {l.name}
             </h1>
             <p className="mt-1 text-sm text-ink-muted">
@@ -94,14 +94,14 @@ export default function LocationDetailPage() {
               { label: "Em aberto", value: l.open_tickets },
             ].map((s) => (
               <div key={s.label} className="rounded-xl border border-line bg-surface px-4 py-3 shadow-elev-1">
-                <p className="text-xs font-medium text-ink-muted">{s.label}</p>
+                <p className="text-xs font-semibold text-ink/80">{s.label}</p>
                 <p className="mt-1 text-xl font-semibold text-ink">
                   <CountUp value={s.value} />
                 </p>
               </div>
             ))}
             <div className="rounded-xl border border-line bg-surface px-4 py-3 shadow-elev-1">
-              <p className="text-xs font-medium text-ink-muted">Última OS</p>
+              <p className="text-xs font-semibold text-ink/80">Última OS</p>
               <p className="mt-1 text-xl font-semibold text-ink">{formatDate(l.last_ticket_at)}</p>
             </div>
           </div>
@@ -179,12 +179,7 @@ export default function LocationDetailPage() {
 
         <aside className="flex flex-col gap-5">
           <Card className="p-5">
-            <SectionTitle className="mb-2">
-              <span className="flex items-center gap-2">
-                <MapPin className="size-4 text-ink-subtle" />
-                Endereço
-              </span>
-            </SectionTitle>
+            <SectionTitle className="mb-2">Endereço</SectionTitle>
             <p className="text-sm text-ink-muted">{address || "Sem endereço cadastrado."}</p>
             {!hasCoords ? (
               <p className="mt-2 flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">

@@ -704,12 +704,7 @@ function EditDialog({ tech, onClose }: { tech: Technician; onClose: () => void }
         ) : null}
 
         <section className="rounded-lg border border-line p-3">
-          <SectionTitle>
-            <span className="flex items-center gap-1.5">
-              <KeyRound className="size-4 text-ink-muted" />
-              Acesso ao app
-            </span>
-          </SectionTitle>
+          <SectionTitle>Acesso ao app</SectionTitle>
           <p className="mt-1 text-xs text-ink-muted">
             {current.location_consent_at ? (
               <span className="inline-flex items-center gap-1">
