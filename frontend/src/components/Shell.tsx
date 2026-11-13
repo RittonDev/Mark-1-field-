@@ -106,7 +106,7 @@ export function Sidebar({ user, onLogout }: { user: User; onLogout: () => void }
             return (
               <div key={group.key} className={group.label ? "mt-5" : "mt-1"}>
                 {group.label ? (
-                  <p className="mb-1 hidden px-2.5 text-[11px] font-semibold text-chrome-subtle lg:block">{group.label}</p>
+                  <p className="mb-1.5 hidden px-2.5 text-[10.5px] font-bold tracking-[0.08em] text-chrome-subtle uppercase lg:block">{group.label}</p>
                 ) : null}
                 <div className="flex flex-col gap-px">
                   {groupItems.map((item) => {
@@ -120,7 +120,7 @@ export function Sidebar({ user, onLogout }: { user: User; onLogout: () => void }
                         aria-current={active ? "page" : undefined}
                         className={clsx(
                           "group relative flex h-[34px] items-center justify-center gap-2.5 rounded-lg px-2.5 text-[13px] font-medium transition-colors lg:justify-start",
-                          active ? "text-ink" : "text-chrome-muted hover:bg-chrome-hover hover:text-chrome-ink",
+                          active ? "font-semibold text-ink" : "text-chrome-muted hover:bg-chrome-hover hover:text-chrome-ink",
                         )}
                       >
                         <span className="relative shrink-0">

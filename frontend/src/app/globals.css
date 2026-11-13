@@ -33,13 +33,15 @@
   --viz-grid: #eceef1;
   /* Seleção dentro das páginas (filtros ativos, item escolhido). */
   --nav-active: var(--brand-soft);
-  /* Moldura do app (menu lateral e borda da área de trabalho): cinza 15% mais escuro que o fundo. */
-  --chrome: #c8cdd5;
-  --chrome-ink: #1f242c;
-  --chrome-muted: #414956;
-  --chrome-subtle: #4f5763;
-  --chrome-hover: rgb(255 255 255 / 0.4);
-  --chrome-line: rgb(16 24 40 / 0.12);
+  /* Moldura do app (menu lateral e borda da área de trabalho). 2026-11-13: mais 13% escura a pedido
+     do usuário (#c8cdd5 -> #aeb2b9); os textos do menu escureceram junto para manter o contraste
+     (itens 6,2:1, ícones e rótulos 5,3:1). */
+  --chrome: #aeb2b9;
+  --chrome-ink: #1b1f26;
+  --chrome-muted: #2b313b;
+  --chrome-subtle: #343b46;
+  --chrome-hover: rgb(255 255 255 / 0.38);
+  --chrome-line: rgb(16 24 40 / 0.16);
   /* Elevação: sombras curtas e frias, nada de "brilho". */
   --elev-1: 0 1px 2px rgb(16 24 40 / 0.05);
   --elev-2: 0 1px 2px rgb(16 24 40 / 0.04), 0 6px 16px -4px rgb(16 24 40 / 0.08);
@@ -131,6 +133,7 @@
   --animate-fade: mf-fade 0.16s ease-out backwards;
   --animate-pop: mf-pop 0.18s cubic-bezier(0.16, 1, 0.3, 1) backwards;
   --animate-toast: mf-toast 0.24s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  --animate-drawer: mf-drawer 0.26s cubic-bezier(0.16, 1, 0.3, 1) backwards;
   --animate-float: mf-float 5s ease-in-out infinite alternate;
   --animate-draw: mf-draw 2.6s cubic-bezier(0.65, 0, 0.35, 1) backwards;
 }
@@ -177,6 +180,17 @@
   from {
     opacity: 0;
     transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+/* Painel lateral (OS aberta da lista): entra da direita, sem quique. */
+@keyframes mf-drawer {
+  from {
+    opacity: 0.4;
+    transform: translateX(32px);
   }
   to {
     opacity: 1;

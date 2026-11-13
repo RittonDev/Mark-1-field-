@@ -236,8 +236,9 @@ export function TicketEditor({ ticket, variant, onClose }: { ticket: TicketDetai
   return (
     <div
       className={clsx(
-        "flex flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-elev-2",
-        variant === "dialog" ? "h-full" : "min-h-[calc(100vh-7rem)]",
+        "flex flex-col overflow-hidden bg-surface",
+        // No painel lateral ele ocupa a altura toda (o painel já tem a borda e a sombra).
+        variant === "dialog" ? "h-full" : "min-h-[calc(100vh-7rem)] rounded-2xl border border-line shadow-elev-2",
       )}
     >
       <div className="flex items-center gap-3 bg-brand px-5 py-3 text-white">

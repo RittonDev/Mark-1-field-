@@ -155,7 +155,7 @@ export function Tabs<K extends string>({
             className={clsx(
               "relative z-10 inline-flex items-center gap-1.5 text-sm whitespace-nowrap transition-colors",
               segmented ? "h-7 rounded-md px-3 text-[13px]" : "px-3 pt-1 pb-2.5",
-              active ? "font-medium text-ink" : "text-ink-muted hover:text-ink",
+              active ? "font-semibold text-ink" : "font-medium text-ink-muted hover:text-ink",
             )}
           >
             {item.label}
