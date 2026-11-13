@@ -5,7 +5,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import func, or_, select
 
-from app.api.deps import DB, CurrentUser, StaffUser, TicketManagerUser
+from app.api.deps import DB, NoTechnicianUser, TicketManagerUser
 from app.core.enums import AssetType, TicketStatus
 from app.db.base import utcnow
 from app.models import Asset, Customer, Location, Ticket, User
@@ -130,7 +130,7 @@ async def _locations_out(db: DB, user: User, locations: list[Location]) -> list[
 
 
 @router.get("/customers", response_model=list[CustomerOut])
-async def list_customers(db: DB, user: CurrentUser, q: str | None = None) -> list[CustomerOut]:
+async def list_customers(db: DB, user: NoTechnicianUser, q: str | None = None) -> list[CustomerOut]:
     stmt = select(Customer)
     # Busca por palavras (nome ou CNPJ/CPF), em qualquer ordem e sem acento.
     matched = search.all_words(q, [Customer.name], digit_columns=[Customer.document])
@@ -156,7 +156,7 @@ async def create_customer(body: CustomerCreate, db: DB, user: TicketManagerUser)
 
 
 @router.get("/customers/{customer_id}", response_model=CustomerOut)
-async def get_customer(customer_id: uuid.UUID, db: DB, user: CurrentUser) -> CustomerOut:
+async def get_customer(customer_id: uuid.UUID, db: DB, user: NoTechnicianUser) -> CustomerOut:
     customer = await _get_or_404(db, Customer, customer_id, "Cliente")
     return (await _customers_out(db, user, [customer]))[0]
 
@@ -179,7 +179,7 @@ async def update_customer(
 
 @router.get("/customers/{customer_id}/locations", response_model=list[LocationOut])
 async def customer_locations(
-    customer_id: uuid.UUID, db: DB, user: CurrentUser
+    customer_id: uuid.UUID, db: DB, user: NoTechnicianUser
 ) -> list[LocationOut]:
     locations = await db.scalars(
         select(Location).where(Location.customer_id == customer_id).order_by(Location.name)
@@ -210,7 +210,7 @@ async def create_location(
 @router.get("/locations", response_model=Page[LocationOut])
 async def list_locations(
     db: DB,
-    user: CurrentUser,
+    user: NoTechnicianUser,
     customer_id: uuid.UUID | None = None,
     q: str | None = None,
     active: bool | None = None,
@@ -255,7 +255,7 @@ async def list_locations(
 
 
 @router.get("/locations/{location_id}", response_model=LocationOut)
-async def get_location(location_id: uuid.UUID, db: DB, user: CurrentUser) -> LocationOut:
+async def get_location(location_id: uuid.UUID, db: DB, user: NoTechnicianUser) -> LocationOut:
     location = await _get_or_404(db, Location, location_id, "Local")
     return (await _locations_out(db, user, [location]))[0]
 
@@ -386,7 +386,7 @@ async def update_location(
 @router.get("/assets", response_model=list[AssetOut])
 async def list_assets(
     db: DB,
-    _: CurrentUser,
+    _: NoTechnicianUser,
     customer_id: uuid.UUID | None = None,
     location_id: uuid.UUID | None = None,
     asset_type: AssetType | None = None,
@@ -426,7 +426,7 @@ async def _check_asset_location(
 
 
 @router.post("/assets", response_model=AssetOut, status_code=status.HTTP_201_CREATED)
-async def create_asset(body: AssetCreate, db: DB, _: StaffUser) -> Asset:
+async def create_asset(body: AssetCreate, db: DB, _: TicketManagerUser) -> Asset:
     await _get_or_404(db, Customer, body.customer_id, "Cliente")
     await _check_asset_location(db, body.customer_id, body.location_id)
     asset = Asset(**body.model_dump(), is_active=True)
@@ -436,12 +436,14 @@ async def create_asset(body: AssetCreate, db: DB, _: StaffUser) -> Asset:
 
 
 @router.get("/assets/{asset_id}", response_model=AssetOut)
-async def get_asset(asset_id: uuid.UUID, db: DB, _: CurrentUser) -> Asset:
+async def get_asset(asset_id: uuid.UUID, db: DB, _: NoTechnicianUser) -> Asset:
     return await _get_or_404(db, Asset, asset_id, "Ativo")
 
 
 @router.patch("/assets/{asset_id}", response_model=AssetOut)
-async def update_asset(asset_id: uuid.UUID, body: AssetUpdate, db: DB, _: StaffUser) -> Asset:
+async def update_asset(
+    asset_id: uuid.UUID, body: AssetUpdate, db: DB, _: TicketManagerUser
+) -> Asset:
     asset = await _get_or_404(db, Asset, asset_id, "Ativo")
     fields = body.model_dump(exclude_unset=True)
     if "location_id" in fields:

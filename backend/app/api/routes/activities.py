@@ -3,7 +3,7 @@ import uuid
 
 from fastapi import APIRouter
 
-from app.api.deps import DB, StaffUser
+from app.api.deps import DB, TicketManagerUser
 from app.schemas.activities import DayActivities
 from app.services.activities import day_activities
 
@@ -13,7 +13,7 @@ router = APIRouter(tags=["activities"])
 @router.get("/activities/day", response_model=DayActivities)
 async def activities_of_the_day(
     db: DB,
-    user: StaffUser,
+    user: TicketManagerUser,
     date: dt.date | None = None,
     assignee_id: uuid.UUID | None = None,
     team_id: uuid.UUID | None = None,

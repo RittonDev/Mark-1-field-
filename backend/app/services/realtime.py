@@ -151,7 +151,16 @@ def should_deliver(
 
 # Técnico é terceiro: o app só precisa saber que a OS mudou (e dispara o sync); o conteúdo do
 # evento (quem fez, dados internos, prioridade, equipe) fica com a gestão.
-_FIELD_EVENT_KEYS = ("type", "ticket_id", "ticket_code", "status", "assignee_id", "actor_id", "version", "occurred_at")
+_FIELD_EVENT_KEYS = (
+    "type",
+    "ticket_id",
+    "ticket_code",
+    "status",
+    "assignee_id",
+    "actor_id",
+    "version",
+    "occurred_at",
+)
 
 
 def field_event(event: dict[str, Any]) -> dict[str, Any]:

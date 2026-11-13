@@ -37,7 +37,7 @@ from app.schemas.ticket import (
 )
 from app.services import forms, parts
 from app.services import tickets as svc
-from app.services.errors import DomainError, NotFound, VersionConflict
+from app.services.errors import DomainError, NotFound, PermissionDenied, VersionConflict
 from app.services.realtime import commit_and_publish, discard_pending, pending_count
 from app.services.workflow import OPEN_STATUSES
 
@@ -70,18 +70,23 @@ async def pull(db: AsyncSession, user: User, since: datetime | None) -> SyncPull
 
     comments: list[TicketComment] = []
     worklogs: list[TicketWorklog] = []
-    if ids:
+    # Técnico é terceiro: não recebe acompanhamentos (a central fala com ele pelo WhatsApp) e
+    # só vê as próprias horas.
+    technician = user.role == UserRole.TECHNICIAN
+    if ids and not technician:
         cq = select(TicketComment).where(TicketComment.ticket_id.in_(ids))
         if since is not None:
             cq = cq.where(TicketComment.created_at > since)
         if not user.is_staff:
             cq = cq.where(TicketComment.is_internal.is_(False))
         comments = list(await db.scalars(cq.order_by(TicketComment.created_at)))
-        if user.is_staff:
-            wq = select(TicketWorklog).where(TicketWorklog.ticket_id.in_(ids))
-            if since is not None:
-                wq = wq.where(TicketWorklog.created_at > since)
-            worklogs = list(await db.scalars(wq.order_by(TicketWorklog.created_at)))
+    if ids and user.is_staff:
+        wq = select(TicketWorklog).where(TicketWorklog.ticket_id.in_(ids))
+        if technician:
+            wq = wq.where(TicketWorklog.user_id == user.id)
+        if since is not None:
+            wq = wq.where(TicketWorklog.created_at > since)
+        worklogs = list(await db.scalars(wq.order_by(TicketWorklog.created_at)))
 
     revoked = []
     if since is not None and user.role == UserRole.TECHNICIAN:
@@ -116,6 +121,10 @@ async def _apply(db: AsyncSession, ticket: Ticket, op: SyncOperationIn, user: Us
     if op.type == "transition":
         await svc.transition_ticket(db, ticket, TicketTransition.model_validate(op.payload), user)
     elif op.type == "comment":
+        if user.role == UserRole.TECHNICIAN:
+            raise PermissionDenied(
+                "Acompanhamento não faz parte do app: fale com a central pelo WhatsApp"
+            )
         await svc.add_comment(db, ticket, CommentCreate.model_validate(op.payload), user)
     elif op.type == "worklog":
         await svc.add_worklog(db, ticket, WorklogCreate.model_validate(op.payload), user)

@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Query
 from sqlalchemy import func, select
 
-from app.api.deps import DB, CurrentUser, StaffUser
+from app.api.deps import DB, NoTechnicianUser, TicketManagerUser
 from app.core.config import settings
 from app.core.enums import Responsibility, SlaStatus, TicketPriority, TicketStatus
 from app.db.base import utcnow
@@ -28,7 +28,7 @@ router = APIRouter(tags=["dashboard"])
 
 
 @router.get("/dashboard/summary", response_model=DashboardSummary)
-async def summary(db: DB, user: CurrentUser) -> DashboardSummary:
+async def summary(db: DB, user: NoTechnicianUser) -> DashboardSummary:
     now = utcnow()
     today = datetime.now(ZoneInfo(settings.TIMEZONE)).replace(
         hour=0, minute=0, second=0, microsecond=0
@@ -135,7 +135,7 @@ async def summary(db: DB, user: CurrentUser) -> DashboardSummary:
 
 @router.get("/reports/sla-violations", response_model=SlaViolationReport)
 async def sla_violations(
-    db: DB, user: StaffUser, days: Annotated[int, Query(ge=1, le=365)] = 30
+    db: DB, user: TicketManagerUser, days: Annotated[int, Query(ge=1, le=365)] = 30
 ) -> SlaViolationReport:
     """Motivos de violação viram estatística: por motivo, por responsabilidade e pendências."""
     now = utcnow()

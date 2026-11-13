@@ -5,9 +5,9 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, sta
 from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy import select
 
-from app.api.deps import DB, CurrentUser, StaffUser, TicketManagerUser
+from app.api.deps import DB, CurrentUser, NoTechnicianUser, StaffUser, TicketManagerUser
 from app.core.config import settings
-from app.core.enums import TicketPriority, TicketStatus, TicketType
+from app.core.enums import TicketPriority, TicketStatus, TicketType, UserRole
 from app.core.security import InvalidToken, create_download_token, decode_token
 from app.models import Ticket, TicketAttachment, TicketComment, TicketEvent, TicketWorklog, User
 from app.schemas.common import Page
@@ -53,7 +53,8 @@ _INTERNAL_EVENT_TYPES = {
 
 async def _with_recurrence(db: DB, ticket: Ticket, user: User) -> TicketDetail:
     detail = svc.to_detail(ticket, user)
-    if user.is_staff:
+    # Reincidência (outras OS no local) é da gestão; o técnico só vê a OS dele.
+    if user.can_manage_tickets:
         detail.recurrence = await svc.recurrence_for(db, ticket)
     return detail
 
@@ -65,7 +66,7 @@ async def _detail(db: DB, ticket_id: uuid.UUID, user: User) -> TicketDetail:
 @router.get("/tickets", response_model=Page[TicketListItem])
 async def list_tickets(
     db: DB,
-    user: CurrentUser,
+    user: NoTechnicianUser,
     status_: Annotated[list[TicketStatus] | None, Query(alias="status")] = None,
     priority: Annotated[list[TicketPriority] | None, Query()] = None,
     type_: Annotated[TicketType | None, Query(alias="type")] = None,
@@ -128,7 +129,7 @@ async def list_tickets(
 
 
 @router.post("/tickets", response_model=TicketDetail, status_code=status.HTTP_201_CREATED)
-async def create_ticket(body: TicketCreate, db: DB, user: CurrentUser) -> TicketDetail:
+async def create_ticket(body: TicketCreate, db: DB, user: NoTechnicianUser) -> TicketDetail:
     ticket = await svc.create_ticket(db, body, user)
     await commit_and_publish(db)
     return await _detail(db, ticket.id, user)
@@ -221,7 +222,9 @@ async def transition_ticket(
 
 
 @router.get("/tickets/{ticket_id}/comments", response_model=list[CommentOut])
-async def list_comments(ticket_id: uuid.UUID, db: DB, user: CurrentUser) -> list[TicketComment]:
+async def list_comments(
+    ticket_id: uuid.UUID, db: DB, user: NoTechnicianUser
+) -> list[TicketComment]:
     await svc.get_visible_ticket(db, user, ticket_id)
     stmt = select(TicketComment).where(TicketComment.ticket_id == ticket_id)
     if not user.is_staff:
@@ -235,7 +238,7 @@ async def list_comments(ticket_id: uuid.UUID, db: DB, user: CurrentUser) -> list
     status_code=status.HTTP_201_CREATED,
 )
 async def add_comment(
-    ticket_id: uuid.UUID, body: CommentCreate, db: DB, user: CurrentUser
+    ticket_id: uuid.UUID, body: CommentCreate, db: DB, user: NoTechnicianUser
 ) -> TicketComment:
     ticket = await svc.get_visible_ticket(db, user, ticket_id)
     comment = await svc.add_comment(db, ticket, body, user)
@@ -244,7 +247,7 @@ async def add_comment(
 
 
 @router.get("/tickets/{ticket_id}/events", response_model=list[EventOut])
-async def list_events(ticket_id: uuid.UUID, db: DB, user: CurrentUser) -> list[TicketEvent]:
+async def list_events(ticket_id: uuid.UUID, db: DB, user: NoTechnicianUser) -> list[TicketEvent]:
     await svc.get_visible_ticket(db, user, ticket_id)
     events = list(
         await db.scalars(
@@ -268,13 +271,10 @@ async def list_events(ticket_id: uuid.UUID, db: DB, user: CurrentUser) -> list[T
 @router.get("/tickets/{ticket_id}/worklogs", response_model=list[WorklogOut])
 async def list_worklogs(ticket_id: uuid.UUID, db: DB, user: StaffUser) -> list[TicketWorklog]:
     await svc.get_visible_ticket(db, user, ticket_id)
-    return list(
-        await db.scalars(
-            select(TicketWorklog)
-            .where(TicketWorklog.ticket_id == ticket_id)
-            .order_by(TicketWorklog.started_at)
-        )
-    )
+    stmt = select(TicketWorklog).where(TicketWorklog.ticket_id == ticket_id)
+    if user.role == UserRole.TECHNICIAN:
+        stmt = stmt.where(TicketWorklog.user_id == user.id)  # só as horas dele
+    return list(await db.scalars(stmt.order_by(TicketWorklog.started_at)))
 
 
 @router.post(
@@ -296,6 +296,8 @@ async def add_worklog(
 
 def _attachment_out(attachment: TicketAttachment, user: User) -> AttachmentOut:
     out = AttachmentOut.model_validate(attachment)
+    if user.role == UserRole.TECHNICIAN and out.uploaded_by is not None:
+        out.uploaded_by = out.uploaded_by.model_copy(update={"email": ""})
     if attachment.external_url:
         # Arquivo migrado que ainda está no armazenamento de origem (Field Control).
         out.download_url = attachment.external_url
@@ -314,7 +316,7 @@ async def list_attachments(ticket_id: uuid.UUID, db: DB, user: CurrentUser) -> l
         .where(TicketAttachment.ticket_id == ticket_id)
         .order_by(TicketAttachment.created_at)
     )
-    return [_attachment_out(a, user) for a in rows]
+    return [_attachment_out(a, user) for a in rows if svc.attachment_visible(a, user)]
 
 
 @router.post(
@@ -349,7 +351,7 @@ async def _attachment_with_ticket(
 
 @router.patch("/attachments/{attachment_id}", response_model=AttachmentOut)
 async def update_attachment(
-    attachment_id: uuid.UUID, body: AttachmentUpdate, db: DB, user: StaffUser
+    attachment_id: uuid.UUID, body: AttachmentUpdate, db: DB, user: TicketManagerUser
 ) -> AttachmentOut:
     """Legenda do anexo (a gestão em qualquer um; o técnico nos que ele enviou)."""
     ticket, attachment = await _attachment_with_ticket(db, user, attachment_id)

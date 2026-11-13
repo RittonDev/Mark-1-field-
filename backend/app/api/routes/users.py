@@ -3,7 +3,7 @@ import uuid
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import func, or_, select
 
-from app.api.deps import DB, AdminUser, CurrentUser, ManagerUser, StaffUser
+from app.api.deps import DB, AdminUser, ManagerUser, NoTechnicianUser, TicketManagerUser
 from app.core.enums import UserRole
 from app.core.security import hash_password
 from app.models import Team, Ticket, User
@@ -36,7 +36,7 @@ async def _check_team(db: DB, team_id: uuid.UUID | None) -> None:
 @router.get("/users", response_model=list[UserOut])
 async def list_users(
     db: DB,
-    _: StaffUser,
+    _: TicketManagerUser,
     role: UserRole | None = None,
     team_id: uuid.UUID | None = None,
     q: str | None = None,
@@ -57,7 +57,7 @@ async def list_users(
 
 @router.get("/users/assignable", response_model=list[AssignableUser])
 async def assignable_users(
-    db: DB, _: StaffUser, team_id: uuid.UUID | None = None
+    db: DB, _: TicketManagerUser, team_id: uuid.UUID | None = None
 ) -> list[AssignableUser]:
     load = (
         select(Ticket.assignee_id, func.count().label("n"))
@@ -111,7 +111,7 @@ async def create_user(body: UserCreate, db: DB, _: AdminUser) -> User:
 
 
 @router.get("/users/{user_id}", response_model=UserOut)
-async def get_user(user_id: uuid.UUID, db: DB, current: CurrentUser) -> User:
+async def get_user(user_id: uuid.UUID, db: DB, current: NoTechnicianUser) -> User:
     if not current.is_staff and current.id != user_id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Sem permissão")
     user = await db.get(User, user_id)
@@ -153,7 +153,7 @@ async def update_user(user_id: uuid.UUID, body: UserUpdate, db: DB, admin: Admin
 
 
 @router.get("/teams", response_model=list[TeamOut])
-async def list_teams(db: DB, _: CurrentUser) -> list[Team]:
+async def list_teams(db: DB, _: NoTechnicianUser) -> list[Team]:
     return list(await db.scalars(select(Team).order_by(Team.name)))
 
 

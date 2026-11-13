@@ -99,6 +99,18 @@ def is_helper(user: User, ticket: Ticket) -> bool:
     return any(h.id == user.id for h in ticket.helpers)
 
 
+def attachment_visible(attachment: TicketAttachment, user: User) -> bool:
+    """O técnico (terceiro) vê as fotos, as fotos dos formulários, a assinatura e o que ele mesmo
+    enviou. Documentos do escritório (orçamento, nota, arquivos migrados) ficam com a gestão."""
+    if user.role != UserRole.TECHNICIAN:
+        return True
+    return (
+        attachment.uploaded_by_id == user.id
+        or attachment.form_id is not None
+        or attachment.kind in ("photo", "signature")
+    )
+
+
 def can_view(user: User, ticket: Ticket) -> bool:
     if user.can_manage_tickets:
         return True

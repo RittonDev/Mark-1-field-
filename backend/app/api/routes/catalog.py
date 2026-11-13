@@ -3,7 +3,7 @@ import uuid
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import or_, select
 
-from app.api.deps import DB, AdminUser, CurrentUser, ManagerUser, StaffUser, TicketManagerUser
+from app.api.deps import DB, AdminUser, ManagerUser, NoTechnicianUser, StaffUser, TicketManagerUser
 from app.core.access import channel_metadata
 from app.core.enums import TicketPriority
 from app.core.labels import enum_options
@@ -71,7 +71,7 @@ async def _check_category_refs(
 
 
 @router.get("/categories", response_model=list[CategoryOut])
-async def list_categories(db: DB, _: CurrentUser) -> list[Category]:
+async def list_categories(db: DB, _: NoTechnicianUser) -> list[Category]:
     categories = list(await db.scalars(select(Category)))
     return sorted(categories, key=lambda c: c.full_name.lower())
 
@@ -104,7 +104,7 @@ async def update_category(
 
 
 @router.get("/sla-policies", response_model=list[SlaPolicyOut])
-async def list_sla(db: DB, _: CurrentUser) -> list[SlaPolicyOut]:
+async def list_sla(db: DB, _: NoTechnicianUser) -> list[SlaPolicyOut]:
     stored = {p.priority: p for p in await db.scalars(select(SlaPolicy))}
     out = []
     for priority in TicketPriority:
@@ -173,7 +173,7 @@ async def _load_service_type(db: DB, service_type_id: uuid.UUID) -> ServiceType:
 @router.get("/service-types", response_model=list[ServiceTypeOut])
 async def list_service_types(
     db: DB,
-    _: StaffUser,
+    _: TicketManagerUser,
     customer_id: uuid.UUID | None = None,
     q: str | None = None,
     active: bool | None = None,
