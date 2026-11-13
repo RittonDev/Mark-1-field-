@@ -92,13 +92,20 @@ async def test_full_lifecycle(client: AsyncClient, world: World) -> None:
     t = await transition(client, world.tech.headers, t, "en_route", latitude=-23.5, longitude=-46.6)
     t = await transition(client, world.tech.headers, t, "in_progress")
 
-    # Pendência de fornecedor pausa o SLA e empurra o prazo ao retomar.
-    due_before = datetime.fromisoformat(t["resolution_due_at"])
+    async def office() -> dict:
+        r = await client.get(f"{API}/tickets/{t['id']}", headers=world.analyst.headers)
+        return r.json()
+
+    # Pendência de fornecedor pausa o SLA e empurra o prazo ao retomar. Os prazos são da gestão:
+    # o técnico (terceiro) recebe a OS sem eles.
+    assert t["resolution_due_at"] is None and t["response_due_at"] is None
+    due_before = datetime.fromisoformat((await office())["resolution_due_at"])
     t = await transition(client, world.tech.headers, t, "on_hold_vendor", note="Peça")
-    assert t["sla_status"] == "paused"
+    assert (await office())["sla_status"] == "paused"
     t = await transition(client, world.tech.headers, t, "in_progress")
-    assert datetime.fromisoformat(t["resolution_due_at"]) >= due_before
-    assert t["sla_paused_at"] is None
+    seen = await office()
+    assert datetime.fromisoformat(seen["resolution_due_at"]) >= due_before
+    assert seen["sla_paused_at"] is None
 
     # Resolver exige a solução.
     r = await client.post(
@@ -111,7 +118,7 @@ async def test_full_lifecycle(client: AsyncClient, world: World) -> None:
         client, world.tech.headers, t, "resolved", resolution_notes="Rolete trocado"
     )
     assert t["resolved_at"] is not None
-    assert t["sla_status"] == "met"
+    assert (await office())["sla_status"] == "met"
 
     r = await client.post(
         f"{API}/tickets/{t['id']}/transition",
@@ -159,8 +166,10 @@ async def test_technician_sees_only_assigned(client: AsyncClient, world: World) 
     queue_ticket = await create(client, world)  # fila geral
     mine = await create(client, world, assignee_id=str(world.tech.user.id))
 
-    listing = (await client.get(f"{API}/tickets", headers=world.tech.headers)).json()
-    assert {i["id"] for i in listing["items"]} == {mine["id"]}
+    # O técnico não lista OS pela API: o app usa o sync, que só traz as dele.
+    assert (await client.get(f"{API}/tickets", headers=world.tech.headers)).status_code == 403
+    pulled = (await client.get(f"{API}/sync/pull", headers=world.tech.headers)).json()
+    assert {i["id"] for i in pulled["tickets"]} == {mine["id"]}
     for other in (team_ticket, queue_ticket):
         r = await client.get(f"{API}/tickets/{other['id']}", headers=world.tech.headers)
         assert r.status_code == 404
@@ -350,22 +359,23 @@ async def test_sync_pull_and_idempotent_push(client: AsyncClient, world: World) 
     r = await client.post(f"{API}/sync/push", json=ops, headers=world.tech.headers)
     assert r.status_code == 200, r.text
     statuses = [res["status"] for res in r.json()["results"]]
-    assert statuses == ["applied", "applied", "rejected"]
+    # Acompanhamento não faz parte do app do técnico (a central fala com ele pelo WhatsApp).
+    assert statuses == ["applied", "rejected", "rejected"]
+    assert "WhatsApp" in r.json()["results"][1]["error"]
     assert r.json()["results"][0]["ticket"]["status"] == "en_route"
 
     # Reenvio do mesmo lote (app perdeu a resposta): nada é aplicado de novo.
     r = await client.post(f"{API}/sync/push", json=ops, headers=world.tech.headers)
     assert [res["status"] for res in r.json()["results"]] == ["duplicate"] * 3
-    comments = (
-        await client.get(f"{API}/tickets/{t['id']}/comments", headers=world.tech.headers)
-    ).json()
-    assert len(comments) == 1
+    comments_url = f"{API}/tickets/{t['id']}/comments"
+    assert (await client.get(comments_url, headers=world.tech.headers)).status_code == 403
+    assert (await client.get(comments_url, headers=world.analyst.headers)).json() == []
 
     delta = (
         await client.get(f"{API}/sync/pull", params={"since": cursor}, headers=world.tech.headers)
     ).json()
     assert [x["id"] for x in delta["tickets"]] == [t["id"]]
-    assert len(delta["comments"]) == 1
+    assert delta["comments"] == []
 
     # Reatribuída a outro técnico: o app do primeiro recebe o id em revoked_ticket_ids.
     current = (await client.get(f"{API}/tickets/{t['id']}", headers=world.admin.headers)).json()
@@ -438,8 +448,42 @@ async def test_technician_scope_is_restricted(client: AsyncClient, world: World)
     detail = (await client.get(f"{API}/tickets/{t['id']}", headers=world.tech.headers)).json()
     assert detail["can_assign"] is False
     assert detail["can_edit"] is True
-    users = (await client.get(f"{API}/users/assignable", headers=world.tech.headers)).json()
-    assert {u["role"] for u in users} >= {"technician", "analyst"}
+
+    # O técnico é terceiro: fora das OS dele (pelo app) não vê cadastros, usuários, painéis,
+    # relatórios nem as notas e o histórico das OS.
+    th = world.tech.headers
+    blocked = (
+        "/users",
+        "/users/assignable",
+        f"/users/{world.analyst.user.id}",
+        "/teams",
+        "/customers",
+        f"/customers/{world.customer_id}",
+        f"/customers/{world.customer_id}/locations",
+        "/locations",
+        f"/locations/{world.location_id}",
+        "/assets",
+        "/dashboard/summary",
+        "/reports/sla-violations",
+        "/activities/day",
+        "/categories",
+        "/sla-policies",
+        "/service-types",
+        "/tickets",
+        f"/tickets/{t['id']}/comments",
+        f"/tickets/{t['id']}/events",
+    )
+    for path in blocked:
+        assert (await client.get(f"{API}{path}", headers=th)).status_code == 403, path
+    # O que o app usa continua liberado.
+    for path in (
+        "/violation-reasons",
+        "/unproductive-reasons",
+        "/settings/field",
+        f"/tickets/{t['id']}/attachments",
+        f"/tickets/{t['id']}/worklogs",
+    ):
+        assert (await client.get(f"{API}{path}", headers=th)).status_code == 200, path
 
 
 async def test_access_channels(client: AsyncClient, world: World) -> None:
@@ -673,9 +717,9 @@ async def test_day_activities(client: AsyncClient, world: World) -> None:
     assert by_id[c["id"]]["finished_at"] is not None
     assert (today["summary"]["in_progress"], today["summary"]["done"]) == (1, 1)
 
-    # Técnico de campo continua restrito ao próprio escopo.
-    other = (await client.get(f"{API}/activities/day", headers=world.tech_other.headers)).json()
-    assert other["activities"] == []
+    # Técnico de campo (terceiro) não vê o painel do dia: ele usa o app, com as OS dele.
+    other = await client.get(f"{API}/activities/day", headers=world.tech_other.headers)
+    assert other.status_code == 403
 
 
 async def test_day_activities_carry_over_and_rescheduled(
@@ -760,6 +804,10 @@ async def test_violation_reasons(client: AsyncClient, world: World, engine: Asyn
         resolution_notes="Peça trocada",
         resolution_violation_reason_id=no_part,
     )
+    # O técnico não recebe os prazos nem os motivos (são da gestão); a gestão vê tudo.
+    assert (t["response_breached"], t["resolution_breached"]) == (False, False)
+    assert t["resolution_violation_reason"] is None
+    t = (await client.get(f"{API}/tickets/{t['id']}", headers=an)).json()
     assert (t["response_breached"], t["resolution_breached"]) == (True, True)
     assert t["resolution_violation_reason"]["name"] == "Peça em falta no fornecedor"
     assert t["violation_reason_pending"] is True

@@ -351,7 +351,7 @@ async def _attachment_with_ticket(
 
 @router.patch("/attachments/{attachment_id}", response_model=AttachmentOut)
 async def update_attachment(
-    attachment_id: uuid.UUID, body: AttachmentUpdate, db: DB, user: TicketManagerUser
+    attachment_id: uuid.UUID, body: AttachmentUpdate, db: DB, user: StaffUser
 ) -> AttachmentOut:
     """Legenda do anexo (a gestão em qualquer um; o técnico nos que ele enviou)."""
     ticket, attachment = await _attachment_with_ticket(db, user, attachment_id)
