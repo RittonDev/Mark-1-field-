@@ -397,15 +397,18 @@ async def test_client_report_link(client: AsyncClient, world: World) -> None:
         "(11) 4000-0000",
     )
 
-    # Reaberta: o link continua, mas a página avisa até concluir de novo.
+    # Reaberta: o relatório continua no ar e mostra o estado atual (como no Field Control).
     detail = (await client.get(f"{API}/tickets/{tid}", headers=an)).json()
     detail = await transition(client, an, detail, "reopened", note="Voltou a falhar")
     r = await client.get(f"{public}/{new['token']}")
-    assert r.status_code == 409 and "reaberta" in r.json()["detail"]
+    assert r.status_code == 200 and r.json()["status"] == "reopened"
     assert detail["report_link"]["token"] == new["token"]
     # Reaberta: o técnico não vê o link até concluir de novo.
     assert (await client.get(f"{API}/tickets/{tid}", headers=th)).json()["report_link"] is None
-    blocked = await client.post(f"{API}/tickets/{tid}/report-link", headers=an)
+    # A gestão pega o link a qualquer momento; o técnico, só com a OS concluída.
+    office_link = await client.post(f"{API}/tickets/{tid}/report-link", headers=an)
+    assert office_link.status_code == 200 and office_link.json()["token"] == new["token"]
+    blocked = await client.post(f"{API}/tickets/{tid}/report-link", headers=th)
     assert blocked.status_code == 422
     assert blocked.json()["detail"] == "Disponível quando a OS for concluída"
 

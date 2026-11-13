@@ -15,19 +15,21 @@ router = APIRouter(tags=["client-report"])
 public = APIRouter(prefix="/public/reports", tags=["client-report"])
 
 LINK_GONE = "Link inválido ou expirado"
-REOPENED = "Esta OS foi reaberta. O relatório volta quando ela for concluída."
 ONLY_ASSIGNEE = "Só a gestão ou o técnico responsável pela OS enviam o relatório"
 
 
 @router.post("/tickets/{ticket_id}/report-link", response_model=ReportLinkOut)
 async def create_report_link(ticket_id: uuid.UUID, db: DB, user: CurrentUser) -> ReportLinkOut:
-    """Link do relatório para o cliente (cria se ainda não houver; a OS precisa estar concluída).
+    """Link do relatório para o cliente (cria se ainda não houver). Toda OS tem relatório.
 
-    A gestão e o técnico responsável (que envia pelo app). Trocar ou revogar: só a gestão.
+    A gestão pega a qualquer momento; o técnico responsável, pelo app, depois de concluir.
+    Trocar ou revogar: só a gestão.
     """
     ticket = await tickets_svc.get_visible_ticket(db, user, ticket_id)
     if not user.can_manage_tickets and ticket.assignee_id != user.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, ONLY_ASSIGNEE)
+    if not user.can_manage_tickets and ticket.status not in svc.FINISHED:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, svc.NOT_FINISHED)
     out = await svc.ensure_link(db, ticket)
     await db.commit()
     return out
@@ -58,8 +60,6 @@ async def view_report(token: str, request: Request, db: DB) -> PublicReport:
         ticket = await svc.ticket_for_token(db, token)
     except svc.ReportUnavailable as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, LINK_GONE) from exc
-    except svc.ReportReopened as exc:
-        raise HTTPException(status.HTTP_409_CONFLICT, REOPENED) from exc
     report = await svc.build(db, ticket, str(request.base_url))
     await svc.register_view(db, ticket, utcnow())
     await db.commit()

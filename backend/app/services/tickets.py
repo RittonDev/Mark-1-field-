@@ -498,10 +498,10 @@ def _change_status(
 
     if to == S.RESOLVED:
         ticket.resolved_at = now
-        client_report.assign_on_finish(ticket, now)
+        client_report.assign_link(ticket, now)
     elif to == S.CLOSED:
         ticket.closed_at = now
-        client_report.assign_on_finish(ticket, now)
+        client_report.assign_link(ticket, now)
     elif to == S.CANCELLED:
         ticket.cancelled_at = now
     elif to == S.REOPENED:
@@ -851,6 +851,8 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
     )
     await field_rules.recompute_arrival_due(db, ticket, rules)
     db.add(ticket)
+    # Toda OS nasce com o link do relatório para o cliente (como no Field Control).
+    client_report.assign_link(ticket, now)
     await db.flush()  # gera id e número
 
     created_data: dict[str, Any] = {"priority": priority.value, "source": data.source.value}

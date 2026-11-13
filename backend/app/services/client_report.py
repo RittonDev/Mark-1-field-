@@ -1,9 +1,10 @@
 """Relatório da OS para o cliente: link público com o resumo do atendimento.
 
-Quando a OS é concluída (resolvida ou fechada), ganha um link que o analista ou o técnico
-responsável (pelo app) envia ao cliente (WhatsApp/e-mail). A página mostra o que foi feito, as
-evidências (fotos dos formulários e da OS), a assinatura e a linha do tempo, e pode ser salva
-em PDF pelo navegador.
+Toda OS tem link (como no Field Control): nasce na abertura (as antigas ganharam na migração
+d5f1a7c3e9b2). Antes de concluir, a página mostra o estado atual (agendada, técnico a caminho,
+em atendimento); concluída, mostra o que foi feito, as evidências (fotos dos formulários e da OS),
+a assinatura e a linha do tempo, e pode ser salva em PDF. A gestão envia a qualquer momento; o
+técnico responsável, pelo app, depois de concluir.
 
 O token do link é `<id>.<assinatura>`: só o id fica no banco e a assinatura é um HMAC com o
 segredo da API. Dá para copiar o link de novo a qualquer momento e trocar (revogar) quando
@@ -42,7 +43,6 @@ from app.schemas.forms import FormField
 from app.schemas.ticket import ReportLinkOut, format_ticket_code
 from app.services import company as company_svc
 from app.services import field as field_rules
-from app.services.errors import WorkflowError
 from app.services.workflow import STATUS_INFO
 
 S = TicketStatus
@@ -54,10 +54,6 @@ NOT_FINISHED = "Disponível quando a OS for concluída"
 
 class ReportUnavailable(Exception):
     """Link inválido, revogado ou adulterado."""
-
-
-class ReportReopened(Exception):
-    """A OS foi reaberta depois do link: o relatório volta quando ela for concluída."""
 
 
 # --------------------------------------------------------------------------- token
@@ -94,8 +90,8 @@ def link_out(ticket: Ticket) -> ReportLinkOut | None:
 # --------------------------------------------------------------------------- gestão do link
 
 
-def assign_on_finish(ticket: Ticket, now: datetime) -> None:
-    """Na conclusão (dentro da mudança de status): cria o link se ainda não houver."""
+def assign_link(ticket: Ticket, now: datetime) -> None:
+    """Na abertura e na conclusão (dentro da mudança de status): cria o link se ainda não houver."""
     if ticket.report_link_id is None:
         ticket.report_link_id = new_link_id()
         ticket.report_link_created_at = now
@@ -127,8 +123,6 @@ async def _store(
 
 
 async def ensure_link(db: AsyncSession, ticket: Ticket) -> ReportLinkOut:
-    if ticket.status not in FINISHED:
-        raise WorkflowError(NOT_FINISHED)
     if ticket.report_link_id is None:
         await _store(db, ticket, new_link_id(), utcnow())
     out = link_out(ticket)
@@ -138,8 +132,6 @@ async def ensure_link(db: AsyncSession, ticket: Ticket) -> ReportLinkOut:
 
 async def rotate_link(db: AsyncSession, ticket: Ticket) -> ReportLinkOut:
     """Novo link (o anterior para de funcionar)."""
-    if ticket.status not in FINISHED:
-        raise WorkflowError(NOT_FINISHED)
     await _store(db, ticket, new_link_id(), utcnow())
     out = link_out(ticket)
     assert out is not None
@@ -168,8 +160,6 @@ async def ticket_for_token(db: AsyncSession, token: str) -> Ticket:
     ticket = await db.scalar(select(Ticket).where(Ticket.report_link_id == link_id))
     if ticket is None:
         raise ReportUnavailable
-    if ticket.status not in FINISHED:
-        raise ReportReopened
     return ticket
 
 
