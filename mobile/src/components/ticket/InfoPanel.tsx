@@ -1,10 +1,10 @@
 import { StyleSheet, View } from "react-native";
-import { addressOf, openInMaps } from "../../lib/device-actions";
+import { addressOf } from "../../lib/device-actions";
 import { formatDay, formatTime } from "../../lib/format";
 import type { LocalTicket } from "../../lib/syncTypes";
 import { useStyles, type Palette } from "../../theme/theme";
 import { Text } from "../Text";
-import { Button, Card, InfoRow, SectionTitle } from "../ui";
+import { Card, InfoRow, SectionTitle } from "../ui";
 import { ExpensesCard } from "./ExpensesCard";
 
 /** "Qui., 12/11 · 21:30 às 22:10" (o fim só quando é no mesmo dia). */
@@ -22,6 +22,9 @@ export function visitWindow(ticket: Pick<LocalTicket, "scheduled_start" | "sched
  * Detalhes da OS para o técnico. Ele é terceiro: só o básico para fazer a visita — quando, onde e
  * o escopo. Contato da loja, prazos de SLA, analista, solicitante e a classificação interna da OS
  * ficam com a central (e o servidor nem manda).
+ *
+ * O topo da OS já mostra cliente, loja, endereço, dia e hora, com Rota e Copiar. Aqui entra só o que
+ * acrescenta: o aviso de que ainda não há data, o endereço do atendimento quando é outro e o escopo.
  */
 export function InfoPanel({ ticket }: { ticket: LocalTicket }) {
   const styles = useStyles(makeStyles);
@@ -33,35 +36,28 @@ export function InfoPanel({ ticket }: { ticket: LocalTicket }) {
 
   return (
     <View style={{ gap: 12 }}>
-      <Card>
-        <SectionTitle>Agendamento</SectionTitle>
-        <Text style={styles.strong}>{when ?? "Sem data marcada: aguarde a central agendar."}</Text>
-      </Card>
+      {when ? null : (
+        <Card>
+          <SectionTitle>Agendamento</SectionTitle>
+          <Text style={styles.strong}>Sem data marcada: aguarde a central agendar.</Text>
+        </Card>
+      )}
 
-      {location || serviceAddress ? (
+      {serviceAddress ? (
         <Card>
           <SectionTitle>Local de atendimento</SectionTitle>
           {ticket.customer ? <Text style={styles.label}>{ticket.customer.name}</Text> : null}
           {location ? (
             <Text style={styles.strong}>{[location.code, location.name].filter(Boolean).join(" · ")}</Text>
           ) : null}
-          {serviceAddress ? (
-            <View style={styles.serviceAddress}>
-              <Text style={styles.label}>Endereço do atendimento</Text>
-              <Text style={[styles.text, { fontWeight: "600" }]} selectable>
-                {serviceAddress}
-              </Text>
-              <Text style={styles.label}>Diferente do endereço cadastrado da loja.</Text>
-            </View>
-          ) : null}
-          {registeredAddress ? (
-            <InfoRow label={serviceAddress ? "Endereço cadastrado da loja" : "Endereço"} value={registeredAddress} />
-          ) : null}
-          <Button
-            title={serviceAddress ? "Rota até o endereço do atendimento" : "Abrir no mapa"}
-            onPress={() => void openInMaps(location, serviceAddress)}
-            style={{ marginTop: 8 }}
-          />
+          <View style={styles.serviceAddress}>
+            <Text style={styles.label}>Endereço do atendimento</Text>
+            <Text style={[styles.text, { fontWeight: "600" }]} selectable>
+              {serviceAddress}
+            </Text>
+            <Text style={styles.label}>Diferente do endereço cadastrado da loja. A Rota do topo já leva para cá.</Text>
+          </View>
+          {registeredAddress ? <InfoRow label="Endereço cadastrado da loja" value={registeredAddress} /> : null}
         </Card>
       ) : null}
 

@@ -47,7 +47,7 @@ export function FormsCard({ ticket }: { ticket: LocalTicket }) {
               <Text style={styles.name}>{form.name}</Text>
               <View style={styles.badges}>
                 <Badge label={STATUS_LABEL[form.status]} color={color} />
-                {form.required ? <Badge label="Obrigatório" color={c.danger} /> : null}
+                {form.required ? <Badge label="Obrigatório" color={c.inkMuted} /> : null}
               </View>
               {progress.total ? (
                 <Text style={styles.meta}>

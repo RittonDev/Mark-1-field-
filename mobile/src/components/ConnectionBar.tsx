@@ -27,14 +27,16 @@ export function ConnectionBar() {
   const c = useTheme();
   const styles = useStyles(makeStyles);
   const { text, tone } = describe(status);
-  const colors: Record<Tone, { bg: string; fg: string }> = {
-    ok: { bg: c.successSoft, fg: c.success },
-    busy: { bg: c.primarySoft, fg: c.primary },
-    warn: { bg: c.warningSoft, fg: c.warning },
-    error: { bg: c.dangerSoft, fg: c.danger },
-    off: { bg: c.surface2, fg: c.inkMuted },
+  // Tudo certo: faixa discreta (fundo da tela, texto neutro, só o ponto verde). Ela só ganha cor quando
+  // pede atenção (sincronizando, servidor fora, falha, offline), para não virar ruído o dia inteiro.
+  const colors: Record<Tone, { bg: string; fg: string; dot: string }> = {
+    ok: { bg: c.canvas, fg: c.inkSubtle, dot: c.success },
+    busy: { bg: c.primarySoft, fg: c.primary, dot: c.primary },
+    warn: { bg: c.warningSoft, fg: c.warning, dot: c.warning },
+    error: { bg: c.dangerSoft, fg: c.danger, dot: c.danger },
+    off: { bg: c.surface2, fg: c.inkMuted, dot: c.inkMuted },
   };
-  const { bg, fg } = colors[tone];
+  const { bg, fg, dot } = colors[tone];
   return (
     <Pressable
       onPress={() => router.push("/conta")}
@@ -42,8 +44,8 @@ export function ConnectionBar() {
       accessibilityLabel={`${text}. Abrir conta e sincronização`}
       style={[styles.bar, { backgroundColor: bg }]}
     >
-      <View style={[styles.dot, { backgroundColor: fg }]} />
-      <Text style={[styles.text, { color: fg }]} numberOfLines={1}>
+      <View style={[styles.dot, { backgroundColor: dot }]} />
+      <Text style={[styles.text, { color: fg }, tone === "ok" && styles.textQuiet]} numberOfLines={1}>
         {text}
       </Text>
     </Pressable>
@@ -63,4 +65,5 @@ const makeStyles = (c: Palette) =>
     },
     dot: { width: 7, height: 7, borderRadius: 4 },
     text: { fontSize: 13, fontWeight: "600", flex: 1 },
+    textQuiet: { fontSize: 12, fontWeight: "500" },
   });

@@ -345,7 +345,7 @@ function FormEditor({ ticket, form }: { ticket: LocalTicket; form: TicketForm })
           label={STATUS_LABEL[form.status]}
           color={form.status === "completed" ? c.success : form.status === "in_progress" ? c.warning : c.inkMuted}
         />
-        {form.required ? <Badge label="Obrigatório" color={c.danger} /> : <Badge label="Opcional" color={c.inkMuted} />}
+        {form.required ? <Badge label="Obrigatório" color={c.inkMuted} /> : <Badge label="Opcional" color={c.inkSubtle} />}
       </View>
       {requiredCount ? (
         <View style={{ gap: 6 }}>
