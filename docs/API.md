@@ -14,16 +14,15 @@ Autenticação: `Authorization: Bearer <access_token>`. Erros seguem `{"detail":
 | Administrador | `admin` | tudo | tudo, inclusive usuários e SLA |
 | Supervisor | `supervisor` | tudo | o mesmo do analista + grupos e categorias |
 | Analista | `analyst` | **todas as OS** (interface web) | gestão completa das OS: abrir, editar, atribuir a qualquer técnico ou analista, mudar qualquer status, comentar, apontar horas; cadastrar clientes, locais e ativos |
-| Técnico de campo (terceiro) | `technician` | **só as OS atribuídas a ele** (app mobile), e delas **só o básico**: cliente, local (nome e endereço da loja), agenda e escopo; grupo ou fila não bastam | mudar status, formulários, fotos, assinatura, horas e pedir peça **nas OS dele**. Não assume nem se atribui OS: quem coloca o técnico na OS é a gestão. Sem acompanhamentos (a central fala com ele pelo WhatsApp) |
+| Técnico de campo (terceiro) | `technician` | **só as OS atribuídas a ele** (app mobile), e delas **só o básico**: cliente, local (nome e endereço da loja), agenda e escopo; grupo ou fila não bastam | sair, iniciar e concluir a visita, formulários, fotos, assinatura e pedir peça **nas OS dele**. Nunca mexe no horário (agenda, pausa e horas são da central; o tempo dele corre do início à conclusão). Não assume nem se atribui OS: quem coloca o técnico na OS é a gestão. Sem acompanhamentos (a central fala com ele pelo WhatsApp) |
 | Solicitante | `requester` | OS que abriu | abrir OS, comentar (público), cancelar enquanto nova, aceitar (fechar) ou recusar (reabrir) solução |
 
 **Técnico é terceiro: só o básico.** Na OS (detalhe, sync e respostas do push) o servidor zera para o
 técnico: prazos e motivos de SLA, analista (`owner`), grupo, projeto, categoria, etiquetas, solicitante,
-quem abriu, nº do chamado do cliente, detalhes da autorização (quem, canal, quando, referência), CNPJ e
-contato da loja (nome e telefone: quem fala com a loja é a central), reincidência e dados migrados
-(`services/tickets.py::field_view`). E-mail dos colegas e de quem lançou custos também sai. Anexos: só
-fotos, fotos dos formulários, assinatura e o que ele mesmo enviou (documentos do escritório ficam fora).
-Horas: só as dele. Comentários: nem lê nem escreve (403; no sync, `comments` vem vazio e a
+quem abriu, nº do chamado do cliente, CNPJ e contato da loja (nome e telefone: quem fala com a loja é a
+central), reincidência e dados migrados (`services/tickets.py::field_view`). E-mail dos colegas e de quem
+lançou custos também sai. Anexos: só fotos, fotos dos formulários, assinatura e o que ele mesmo enviou
+(documentos do escritório ficam fora). Horas: não aponta (só a gestão) e vê só as dele. Comentários: nem lê nem escreve (403; no sync, `comments` vem vazio e a
 operação `comment` é recusada). Rotas de cadastro, usuários, grupos, painel, relatórios de SLA,
 atividades do dia, catálogo (exceto motivos de violação e de visita improdutiva), listagem de OS e
 histórico da OS respondem 403 para ele (`NoTechnicianUser` / `TicketManagerUser`). No WebSocket ele
@@ -161,6 +160,9 @@ Tela própria da operação, como no Field Control (aquela em que, segundo o lev
   - `Activity = {ticket: TicketListItem, state, scheduled_start, scheduled_end, started_at, arrived_at, finished_at, start_delay_minutes, start_has_gps, service_type_name, estimated_minutes, actual_minutes}`: o previsto e o realizado na mesma linha.
   - `state` ∈ `scheduled` (agendada), `late` (horário passou e não saiu), `en_route`, `in_progress`, `on_hold`, `rescheduled` (teve atividade no dia e foi remarcada), `done` (concluída no dia), `pending` (voltou para a fila).
   - `summary` traz a contagem por `state` e `unassigned`.
+  - Ordem: pela hora de atuação, a manhã primeiro (a agendada ou, sem agenda, a de início; sem hora no fim),
+    e só depois pelo técnico. A tela agrupa por técnico na ordem em que aparecem: quem começa mais cedo
+    fica em cima e, dentro do bloco, as OS seguem o relógio.
 
 ### Dashboard
 - `GET /dashboard/summary` → `{by_status:{status:n}, by_priority:{priority:n}, open_total, unassigned, sla_breached, sla_at_risk, created_today, resolved_today, avg_resolution_minutes_30d, sla_compliance_30d, by_assignee:[{user_id,name,open,in_progress,breached}]}`
@@ -366,24 +368,37 @@ banco, então o link pode ser copiado de novo a qualquer momento e trocado quand
   a OS for concluída)"), já no texto padrão de Fechamento. `{analista}` agora é o responsável pela OS.
 - Configuração: `COMPANY_NAME` (nome no relatório, padrão "Maxx Field") e `API_PUBLIC_URL` (opcional).
 
-## Regras de campo, autorização do cliente e pedido de peça
+## Regras de campo, horário do técnico e pedido de peça
 
 O que a Maxx Field promete ao varejo, no sistema:
 - técnico na loja em até 4h nas capitais;
 - até 4h de técnico na loja por chamado, contadas da chegada;
-- visita só com a autorização do cliente, porque cada chamado é cobrado;
 - peça só com orçamento aprovado e assinado.
+
+**Horário: só a central mexe (2026-11-12).** O técnico nunca altera horário: no app ele só sai
+(`en_route`), inicia o atendimento (`in_progress`, a chegada) e conclui (`resolved`)
+(`workflow.TECHNICIAN_TARGETS`, espelhado em `lib/workflow.ts`). Agendar, reagendar, pausar
+(`on_hold_*`), devolver e cancelar são da gestão (403 para o técnico). O tempo dele é automático: corre
+do início do atendimento até a conclusão (`work_seconds`). Mudança de status do técnico com
+`scheduled_start`/`scheduled_end` volta 403; `PATCH /tickets/{id}` e apontamento de horas
+(`POST /tickets/{id}/worklogs` e a operação `worklog` do sync) também são só da gestão. `can_edit` é só
+da gestão; o técnico responsável trabalha na OS (formulários, fotos, assinatura) por `can_work`.
+
+**Autorização do cliente: retirada (2026-11-12).** A central combina a visita com o cliente; o técnico
+não espera registro nenhum. Saíram `POST /tickets/{id}/authorization`, o objeto `authorization` da
+abertura, os campos `authorization_status` e `authorized_*` da OS, a regra `require_authorization` (valor
+antigo guardado é ignorado), o motivo "Aguardando autorização" da fila, a variável `{autorizado_por}` e o
+push "Visita autorizada". As colunas ficaram no banco como histórico; a migração `c3f8a1d6e4b2` passou
+as OS pendentes ou recusadas para `not_required`.
 
 **Regras (Configurações).** `GET /settings/field` (qualquer usuário logado; o app do técnico usa nos avisos)
 e `PUT /settings/field` (supervisor/admin):
-`{arrival_hours_capital: 4, arrival_hours_interior: 24, onsite_hours: 4, onsite_warning_minutes: 30,
-require_authorization: true}`. `null` no prazo de chegada = sem prazo. Capital ou interior vem da cidade/UF
+`{arrival_hours_capital: 4, arrival_hours_interior: 24, onsite_hours: 4, onsite_warning_minutes: 30}`. `null` no prazo de chegada = sem prazo. Capital ou interior vem da cidade/UF
 do local (as 27 capitais, sem acento); OS sem local conta como interior.
 
 **Os dois relógios.** Campos de `TicketListItem` (listas, detalhe, fila e app):
 - `arrival_due_at`: prazo de chegada.
-  - Conta da abertura, ou da autorização quando ela é exigida.
-  - Fica `null` enquanto a autorização está pendente ou negada.
+  - Conta da abertura (nas OS antigas com autorização registrada, da autorização).
   - Recalculado ao trocar o local antes da chegada.
 - `arrived_at`: a primeira vez "Em atendimento".
 - `onsite_due_at`: chegada + `onsite_hours`.
@@ -392,24 +407,6 @@ do local (as 27 capitais, sem acento); OS sem local conta como interior.
 - `onsite_status`: `ok` | `warning` (dentro de `onsite_warning_minutes` do limite) | `over` | `null`.
   - Ao vivo em "Em atendimento".
   - Numa OS concluída, compara a conclusão com o limite.
-
-**Autorização do cliente.** `TicketListItem.authorization_status`: `not_required` | `pending` | `authorized` | `denied`.
-- OS novas nascem `pending` com a regra ligada. As anteriores à regra ficaram `not_required`.
-- `TicketDetail` também traz `authorized_by_name`, `authorization_channel`, `authorization_ref` (o número
-  do chamado do cliente), `authorized_at` e `authorized_by` (UserRef de quem registrou).
-- `POST /tickets/{id}/authorization` (gestão)
-  `{status: "authorized"|"denied"|"pending", by_name?, channel?: whatsapp|email|phone|portal|maxxcon|other, reference?, note?}`
-  → `TicketDetail`.
-  - "authorized" liga o relógio de chegada.
-  - Corrigir uma autorização já dada não reinicia o relógio.
-  - "pending" limpa os dados.
-  - Gera o evento interno `authorization_recorded` (o solicitante não vê).
-  - O técnico recebe push "Visita autorizada".
-- `POST /tickets` aceita o mesmo objeto em `authorization` (só a gestão; 403 para os outros).
-- Trava, com a regra ligada e a autorização `pending`/`denied`: ir para `en_route`, ou para `in_progress`
-  quando quem executa é técnico, devolve 422 "Aguardando autorização do cliente para a visita". No
-  sync, a operação volta `rejected` com o mesmo texto. Atendimento remoto do analista não é visita e
-  não trava.
 
 **Pedido de peça (técnico).**
 - `POST /tickets/{id}/part-requests` (técnico da OS ou gestão)
@@ -449,8 +446,7 @@ do local (as 27 capitais, sem acento); OS sem local conta como interior.
 
 **Textos do WhatsApp.**
 - Novas variáveis:
-  - `{prazo_chegada}`: HH:MM no fuso da operação, ou "(sem prazo)";
-  - `{autorizado_por}`: nome, "(aguardando autorização)" ou "(não exigida)".
+  - `{prazo_chegada}`: HH:MM no fuso da operação, ou "(sem prazo)".
 - O texto padrão de deslocamento termina em "Chegada prevista às {chegada_prevista} (prazo {prazo_chegada})."
 
 ## Migração do Field Control

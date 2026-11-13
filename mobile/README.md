@@ -134,9 +134,9 @@ Requisitos:
   - **Agenda**: calendário com visão de **mês** (grade com marcadores por dia; tocar no dia lista as OS)
     e de **semana** (dia a dia, com horário das visitas). Tocar na OS abre o detalhe.
   - **Concluídas**: resolvidas/fechadas nos últimos 7 dias.
-  - Cada cartão mostra status, prioridade, selo de SLA (recalculado no aparelho, então continua certo
-    offline), duração estimada, o relógio de campo ("Chegar até 14:35 · faltam 52 min" ou "Na loja 1h 20min ·
-    restam 2h 40min"), autorização pendente e quantas ações aguardam envio.
+  - Cada cartão mostra status, horário da visita (até que horas; em atendimento, o tempo correndo), o relógio
+    de campo ("Chegar até 14:35 · faltam 52 min" ou "Na loja 1h 20min · restam 2h 40min") e quantas ações
+    aguardam envio.
 - **Jornada e rastreamento** (cartão no topo da tela inicial): termo de ciência (LGPD) aceito uma vez,
   **Iniciar/Encerrar jornada**, indicador "Rastreamento ativo" e a última posição enviada. Detalhes abaixo.
 - **Aparência**: modo claro/escuro segue o sistema; dá para fixar em Conta → Aparência.
@@ -149,13 +149,12 @@ Requisitos:
   link web do serviço) e **Copiar** o endereço. Local com endereço, contato, ligação e **Abrir no mapa**;
   descrição; prazos de SLA. Não há bloco de equipamento: a operação não controla ativos, e o app não lê
   `ticket.asset`.
-- **Promessa de campo** (detalhes abaixo): prazo de chegada, 4h na loja, autorização do cliente, pedidos
-  de peça e reincidência na loja.
+- **Promessa de campo** (detalhes abaixo): prazo de chegada, 4h na loja e pedidos de peça.
 - **OS de projeto**: selo "Projeto PRJ-0001 · nome" no cartão e no detalhe (somente leitura).
 - **Observação da visita** (`visit_note`): o recado do analista aparece em destaque logo abaixo do cabeçalho
-  da OS. O nº do chamado no sistema do cliente (`client_reference`) aparece discreto ao lado do código.
+  da OS.
 - **Equipe da visita** (`helpers`): cartão com o responsável e quem vai junto. Quem vai junto recebe a OS em
-  Hoje/Agenda/Concluídas com o selo "Você vai junto", aponta horas e manda fotos, mas não vê os botões de
+  Hoje/Agenda/Concluídas com o selo "Você vai junto" e manda fotos, mas não vê os botões de
   status, formulários, assinatura, visita improdutiva nem "Pedir peça" (a API devolve `allowed_transitions: []`).
   O evento `ticket.helpers_changed` avisa "Você vai na visita da OS-…"; quem sai da visita tem a OS conferida
   em `GET /tickets/{id}` e, sem acesso, ela sai do aparelho (o `revoked_ticket_ids` do pull não cobre esse caso;
@@ -175,7 +174,7 @@ Requisitos:
   e o número de itens pendentes. Tocar abre a tela **Conta**, com a fila de envio (dá para descartar uma
   operação), os avisos de operações recusadas, "Sincronizar agora", "Baixar tudo" e o estado do push.
 
-## Promessa de campo (chegada, 4h na loja, autorização, peças)
+## Promessa de campo (chegada, 4h na loja, peças) e horário
 
 Regras de [src/lib/field.ts](src/lib/field.ts), espelhando `backend/app/services/field.py`:
 
@@ -188,21 +187,18 @@ Regras de [src/lib/field.ts](src/lib/field.ts), espelhando `backend/app/services
   duas **notificações locais** (expo-notifications, funcionam offline e no Expo Go): no aviso e no estouro
   ([src/lib/onsiteAlerts.ts](src/lib/onsiteAlerts.ts)). Check-in offline prevê o limite com as regras locais;
   o servidor confirma no próximo sync.
-- **Autorização do cliente** (`authorization_status`): pendente ou negada desabilita "Iniciar
-  deslocamento" e o check-in, com o cartão "Aguardando autorização do cliente". Se uma mudança chegar ao
-  servidor sem autorização (422 "Aguardando autorização do cliente para a visita"), ela é desfeita e o
-  técnico vê "o cliente ainda não autorizou a visita". Autorizada: "Visita autorizada por {nome} · via
-  WhatsApp · data". Quando a central autoriza, chega um aviso com vibração.
+- **Horário é da central**: o técnico nunca mexe no horário. Na OS ele só tem "Iniciar deslocamento",
+  "Iniciar atendimento" (check-in) e "Concluir"; agendar, reagendar, pausar e cancelar ficam com a central
+  (o servidor recusa com 403). A aba **Tempo** mostra o tempo de atendimento, que corre sozinho do início
+  à conclusão, com início e conclusão; não há apontamento de horas pelo técnico. A autorização do cliente
+  antes da visita foi retirada: nada trava o deslocamento.
 - **Pedir peça**: folha com descrição, quantidade, unidade, observação e até 4 fotos da câmera. Vai pela fila
   (`part_request`, funciona offline): as fotos sobem antes como anexo comum e a operação sai depois, com os
   `attachment_ids` e um `client_id` (reenviar não duplica). A lista mostra Aguardando orçamento / Orçamento
   enviado / Aprovada: pode instalar / Recusada; quando o cliente aprova, o app celebra com o check desenhado
   e vibração.
-- **Reincidência**: com `recurrence.count_30d` ≥ 1, cartão "Reincidência: N OS nesta loja em 30 dias" com as
-  últimas (código, título, data e status). Ela não vem no sync (só em `GET /tickets/{id}`): o app busca ao
-  abrir a OS com rede e guarda no aparelho; offline mostra a última guardada (ou nada, se nunca abriu online).
-- **Avisos**: os eventos `ticket.authorization` e `ticket.part_request_decided` do WebSocket disparam o sync;
-  o pull compara a OS e avisa uma vez (autorizada/negada, peça aprovada com o check, peça recusada).
+- **Avisos**: o evento `ticket.part_request_decided` do WebSocket dispara o sync; o pull compara a OS e
+  avisa uma vez (peça aprovada com o check, peça recusada).
 - Regras da empresa: `GET /settings/field` (prazos e aviso), baixadas a cada 30 min e guardadas no aparelho.
   Sem elas (nunca abriu online) valem as da promessa (4h de chegada nas capitais, 4h na loja, aviso 30 min
   antes). Os prazos de cada OS vêm calculados pelo servidor, então isso só afeta a previsão offline e o aviso
@@ -316,7 +312,7 @@ src/
     api.ts session.ts  HTTP com refresh + tokens no SecureStore
     db.ts              schema SQLite e consultas
     ops.ts             aplicação otimista e rebase; allowed_transitions igual ao backend
-    field.ts           promessa de campo: relógios de chegada e de loja, autorização, rótulos de peças
+    field.ts           promessa de campo: relógios de chegada e de loja, rótulos de peças
     onsiteAlerts.ts    notificações locais do tempo na loja
     sync.ts            motor de sync, fila, fotos, gatilhos
     realtime.ts        WebSocket
