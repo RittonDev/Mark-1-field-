@@ -185,6 +185,7 @@ export function SectionTitle({
   className,
   as: Heading = "h3",
   wrap = false,
+  size = "md",
 }: {
   children: React.ReactNode;
   /** Ação ou informação à direita (ex.: "Copiar convite", contador). */
@@ -194,19 +195,31 @@ export function SectionTitle({
   as?: "h2" | "h3" | "h4";
   /** Título longo quebra a linha em vez de cortar com reticências (e a ação desce se não couber). */
   wrap?: boolean;
+  /** "lg": seções dos documentos do cliente (relatório e orçamento), no tamanho do título de cartão. */
+  size?: "md" | "lg";
 }) {
+  const lg = size === "lg";
   return (
     <div className={clsx("flex justify-between gap-x-3 gap-y-1.5", wrap ? "flex-wrap items-start" : "items-center", className)}>
       <Heading
         className={clsx(
-          "flex min-w-0 gap-2 text-[13px] leading-5 font-bold tracking-[-0.005em] text-ink",
+          "flex min-w-0 gap-2 leading-5 font-bold text-ink",
+          lg ? "text-[15px] tracking-[-0.01em]" : "text-[13px] tracking-[-0.005em]",
           wrap ? "items-start" : "items-center",
         )}
       >
-        <span aria-hidden className={clsx("h-3 w-[3px] shrink-0 rounded-full bg-linear-to-b from-brand to-brand-cyan", wrap && "mt-1")} />
+        <span
+          aria-hidden
+          className={clsx(
+            "w-[3px] shrink-0 rounded-full bg-linear-to-b from-brand to-brand-cyan",
+            lg ? "h-3.5" : "h-3",
+            wrap && (lg ? "mt-[3px]" : "mt-1"),
+          )}
+        />
         <span className={clsx("min-w-0", wrap ? "text-pretty" : "truncate")}>{children}</span>
       </Heading>
-      {aside ? <div className="flex shrink-0 items-center gap-2">{aside}</div> : null}
+      {/* min-h-5: uma legenda curta fica centrada na linha do título, mesmo com o título quebrando. */}
+      {aside ? <div className="flex min-h-5 shrink-0 items-center gap-2">{aside}</div> : null}
     </div>
   );
 }

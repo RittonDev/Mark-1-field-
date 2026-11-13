@@ -120,9 +120,11 @@ export function ProjectDialog({ project, onClose }: { project: Project | null; o
             ))}
           </Select>
         </Field>
-        <div>
+        {/* Rótulo em cima, como os outros campos (o MultiSelect não fica dentro de <label>: tem botão e lista). */}
+        <div className="flex flex-col gap-1.5">
+          <span className="text-xs font-semibold text-ink/80">Técnicos do projeto</span>
           <MultiSelect
-            label="Técnicos do projeto"
+            label="Técnicos"
             options={(technicians.data ?? []).map((t) => ({ value: t.id, label: t.name }))}
             value={form.member_ids}
             onChange={(v) => set("member_ids", v)}

@@ -40,7 +40,7 @@ export function LegacyOrderCard({ ticket }: { ticket: TicketDetail }) {
 
         {legacy.request ? (
           <div>
-            <SectionTitle className="mb-1">
+            <SectionTitle wrap className="mb-1">
               Solicitação do cliente
               {legacy.request.created_at ? (
                 <span className="font-normal text-ink-muted"> · {formatDateTime(legacy.request.created_at)}</span>

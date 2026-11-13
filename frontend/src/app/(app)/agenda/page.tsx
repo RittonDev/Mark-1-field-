@@ -137,6 +137,7 @@ export default function AgendaPage() {
         <aside className={clsx("flex-col gap-4", showFilters ? "flex" : "hidden lg:flex")}>
           <Card className="p-3">
             <SectionTitle
+              as="h2"
               className="mb-2"
               aside={
                 techIds.length ? (
@@ -229,6 +230,7 @@ export default function AgendaPage() {
           <Card className="p-3">
             {/* O alerta fica junto do contador: vermelho só quando há conflito. */}
             <SectionTitle
+              as="h2"
               aside={
                 <>
                   <AlertTriangle className={clsx("size-4", conflicted.length ? "text-red-500" : "text-ink-muted")} />

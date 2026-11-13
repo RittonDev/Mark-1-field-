@@ -77,9 +77,17 @@ export function SlaViolationsCard() {
           <Clock title="Solução" data={data.resolution} />
           <div>
             <SectionTitle>Por responsabilidade</SectionTitle>
-            {totalByResp === 0 ? (
-              <p className="mt-2 text-xs text-ink-muted">Sem motivos registrados ainda.</p>
-            ) : (
+            {/* Mesma linha de contagem das outras duas colunas: as listas começam alinhadas. */}
+            <p className="mt-0.5 text-xs text-ink-muted">
+              {totalByResp === 0 ? (
+                "Sem motivos registrados ainda."
+              ) : (
+                <>
+                  <span className="font-semibold text-ink">{totalByResp}</span> motivo(s) registrado(s)
+                </>
+              )}
+            </p>
+            {totalByResp === 0 ? null : (
               <ul className="mt-2 space-y-2">
                 {(Object.keys(RESPONSIBILITY) as Responsibility[]).map((key) => {
                   const n = data.by_responsibility[key] ?? 0;

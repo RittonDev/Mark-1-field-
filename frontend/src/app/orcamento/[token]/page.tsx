@@ -180,6 +180,8 @@ export default function PublicQuotePage() {
             {/* Dados do orçamento */}
             <section className="px-6 py-6 sm:px-8">
               <SectionTitle
+                as="h2"
+                size="lg"
                 className="mb-3 flex-wrap"
                 aside={
                   <dl className="grid grid-cols-[auto_auto] gap-x-2 text-right text-[11px] text-ink-muted">
@@ -230,7 +232,7 @@ export default function PublicQuotePage() {
 
             {/* Itens */}
             <section className="border-t border-line px-6 py-6 sm:px-8">
-              <SectionTitle className="mb-3">Itens</SectionTitle>
+              <SectionTitle as="h2" size="lg" className="mb-3">Itens</SectionTitle>
               <div className="overflow-x-auto rounded-xl border border-line">
                 <table className="w-full min-w-[40rem] text-sm">
                   <thead className="bg-surface-2/70 text-left text-[11px] font-bold tracking-[0.05em] text-ink-muted uppercase">
@@ -261,7 +263,7 @@ export default function PublicQuotePage() {
 
             {/* Resumo */}
             <section className="border-t border-line px-6 py-6 sm:px-8 print:break-inside-avoid">
-              <SectionTitle className="mb-3">Resumo do orçamento</SectionTitle>
+              <SectionTitle as="h2" size="lg" className="mb-3">Resumo do orçamento</SectionTitle>
               <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-line bg-line sm:grid-cols-3 lg:grid-cols-6">
                 {[
                   { label: "Total em produtos", value: totals?.product ?? 0 },
@@ -289,7 +291,7 @@ export default function PublicQuotePage() {
 
             {/* Resposta do cliente */}
             <section className="border-t border-line px-6 py-6 sm:px-8 print:break-inside-avoid">
-              <SectionTitle className="mb-3">{open ? "Responder orçamento" : "Resposta do cliente"}</SectionTitle>
+              <SectionTitle as="h2" size="lg" className="mb-3">{open ? "Responder orçamento" : "Resposta do cliente"}</SectionTitle>
 
               {quote.status === "approved" ? (
                 <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">

@@ -22,7 +22,7 @@ import Image from "next/image";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { Logo, ThemeToggle } from "@/components/Brand";
-import { Button, Skeleton } from "@/components/ui";
+import { Button, SectionTitle, Skeleton } from "@/components/ui";
 import { ApiError, errorMessage, request } from "@/lib/api";
 import { STATUS } from "@/lib/constants";
 import { formatDate, formatDateTime, formatDocument, formatMinutes, formatTime, initials } from "@/lib/format";
@@ -30,12 +30,18 @@ import type { PublicReport, PublicReportPhoto } from "@/lib/types";
 
 const LONG_TEXT = 320;
 
+/** Título de seção do relatório: o mesmo do orçamento público (negrito, com a marca da logo). */
 function SectionHead({ children, aside }: { children: React.ReactNode; aside?: React.ReactNode }) {
   return (
-    <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
-      <h2 className="text-[15px] font-bold tracking-[-0.01em] text-ink">{children}</h2>
-      {aside ? <div className="text-xs text-ink-muted">{aside}</div> : null}
-    </div>
+    <SectionTitle
+      as="h2"
+      size="lg"
+      wrap
+      className="mb-3"
+      aside={aside ? <span className="text-xs text-ink-muted">{aside}</span> : undefined}
+    >
+      {children}
+    </SectionTitle>
   );
 }
 
