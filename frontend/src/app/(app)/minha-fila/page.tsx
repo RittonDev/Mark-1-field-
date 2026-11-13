@@ -445,13 +445,13 @@ export default function MyQueuePage() {
               label="Precisam de atenção"
               value={counts?.attention ?? 0}
               icon={TriangleAlert}
-              tone="bg-surface-2 text-red-600"
+              tone="bg-surface-2 text-red-600 dark:text-red-400"
               alert={(counts?.attention ?? 0) > 0}
               onClick={() => scrollTo("attention")}
             />
             <Kpi index={2} label="Agendadas hoje" value={counts?.today ?? 0} icon={CalendarClock} tone="bg-brand-soft text-brand" onClick={() => scrollTo("today")} />
-            <Kpi index={3} label="Em campo agora" value={counts?.in_field ?? 0} icon={Navigation} tone="bg-surface-2 text-sky-600" onClick={() => scrollTo("in_field")} />
-            <Kpi index={4} label="Concluídas hoje" value={counts?.done ?? 0} icon={CheckCircle2} tone="bg-surface-2 text-emerald-600" onClick={() => scrollTo("done")} />
+            <Kpi index={3} label="Em campo agora" value={counts?.in_field ?? 0} icon={Navigation} tone="bg-surface-2 text-sky-600 dark:text-sky-400" onClick={() => scrollTo("in_field")} />
+            <Kpi index={4} label="Concluídas hoje" value={counts?.done ?? 0} icon={CheckCircle2} tone="bg-surface-2 text-emerald-600 dark:text-emerald-400" onClick={() => scrollTo("done")} />
           </div>
 
           <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_300px]">
