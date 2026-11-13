@@ -152,7 +152,9 @@ async def test_office_edits_everything_on_a_closed_os(client: AsyncClient, world
     assert detail["status"] == "closed" and detail["can_edit"] and detail["can_assign"]
 
     # Outro cliente e loja, agenda, conclusão, etiquetas e recado: tudo pela edição.
-    other = (await client.post(f"{API}/customers", json={"name": "Loja Nova SA"}, headers=an)).json()
+    other = (
+        await client.post(f"{API}/customers", json={"name": "Loja Nova SA"}, headers=an)
+    ).json()
     loc = await client.post(
         f"{API}/customers/{other['id']}/locations", json={"name": "Filial 9"}, headers=an
     )
@@ -163,7 +165,11 @@ async def test_office_edits_everything_on_a_closed_os(client: AsyncClient, world
         "scheduled_start": "2026-11-10T13:00:00Z",
         "scheduled_end": "2026-11-10T15:00:00Z",
         "resolution_notes": "  Troquei o cabo e organizei o rack  ",
-        "tags": [{"name": "Adicional Noturno", "color": "#3f51b5"}, {"name": " adicional noturno "}, {"name": ""}],
+        "tags": [
+            {"name": "Adicional Noturno", "color": "#3f51b5"},
+            {"name": " adicional noturno "},
+            {"name": ""},
+        ],
         "visit_note": "Falar com a gerente",
         "expected_version": detail["version"],
     }
