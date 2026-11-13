@@ -10,11 +10,14 @@ import { useCallback, useEffect } from "react";
 import { useConfirm } from "@/components/Confirm";
 import { Input } from "@/components/ui";
 
+const COMBINING_MARKS = new RegExp(`[${String.fromCharCode(0x300)}-${String.fromCharCode(0x36f)}]`, "g");
+
 /** Texto para busca: sem acento e sem maiúsculas ("Organização" acha "organizacao"). */
 export function fold(text: string | null | undefined): string {
+  // NFD separa a letra do acento; os acentos (marcas combinantes U+0300 a U+036F) saem.
   return (text ?? "")
     .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
+    .replace(COMBINING_MARKS, "")
     .toLowerCase();
 }
 

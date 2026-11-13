@@ -1,4 +1,5 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { LinearGradient } from "expo-linear-gradient";
+import { useEffect, useState, type ReactNode, type Ref } from "react";
 import {
   ActivityIndicator,
   Platform,
@@ -9,6 +10,7 @@ import {
   View,
   type LayoutRectangle,
   type StyleProp,
+  type TextInputInstance,
   type TextStyle,
   type TextInputProps,
   type ViewStyle,
@@ -16,14 +18,17 @@ import {
 import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withSpring } from "react-native-reanimated";
 import { haptic } from "../lib/haptics";
 import { brandFont } from "../theme/fonts";
-import { RADIUS, readable, tint, useStyles, useTheme, type Palette } from "../theme/theme";
+import { BRAND, RADIUS, readable, statusFill, tint, useStyles, useTheme, type Palette } from "../theme/theme";
 import { Icon, type IconName } from "./Icon";
 import { PressableScale, SPRING } from "./motion";
-import { Text } from "./Text";
+import { MAX_FONT_SCALE, Text } from "./Text";
 
 export { tint };
 
 type ButtonVariant = "primary" | "secondary" | "danger" | "ghost";
+
+/** Botão compacto tem 36 pt de altura: a área de toque cresce até 44+ sem mudar o desenho. */
+const COMPACT_HIT_SLOP = { top: 6, bottom: 6, left: 4, right: 4 } as const;
 
 export function Button({
   title,
@@ -47,7 +52,7 @@ export function Button({
   const c = useTheme();
   const styles = useStyles(makeStyles);
   const palette = {
-    primary: { bg: c.primary, pressed: c.primaryPressed, fg: c.onPrimary, border: c.primary },
+    primary: { bg: c.primaryFill, pressed: c.primaryFillPressed, fg: c.onPrimary, border: c.primaryFill },
     secondary: { bg: c.surface, pressed: c.surface2, fg: c.ink, border: c.lineStrong },
     danger: { bg: c.surface, pressed: c.dangerSoft, fg: c.danger, border: tint(c.danger, "55") },
     ghost: { bg: "transparent", pressed: c.primarySoft, fg: c.brandInk, border: "transparent" },
@@ -59,6 +64,7 @@ export function Button({
       accessibilityState={{ disabled: inactive, busy: loading }}
       onPress={onPress}
       disabled={inactive}
+      hitSlop={compact ? COMPACT_HIT_SLOP : undefined}
       style={[
         styles.button,
         compact && styles.buttonCompact,
@@ -79,14 +85,19 @@ export function Card({ children, style }: { children: ReactNode; style?: StylePr
   return <View style={[styles.card, style]}>{children}</View>;
 }
 
+/**
+ * Selo (status, pagamento, aviso). Como o Pill da web: fundo e borda com a cor diluída e o texto
+ * misturado à tinta do tema até 4,5:1 (`readable`), legível no sol; o ponto mantém a cor pura.
+ */
 export function Badge({ label, color }: { label: string; color: string }) {
   const c = useTheme();
   const styles = useStyles(makeStyles);
-  const fg = readable(color, c);
+  const fill = statusFill(color, c);
+  const dark = c.scheme === "dark";
   return (
-    <View style={[styles.badge, { backgroundColor: tint(fg, c.scheme === "dark" ? "24" : "12"), borderColor: tint(fg, "33") }]}>
-      <View style={[styles.badgeDot, { backgroundColor: fg }]} />
-      <Text style={[styles.badgeText, { color: fg }]} numberOfLines={1}>
+    <View style={[styles.badge, { backgroundColor: tint(fill, dark ? "24" : "17"), borderColor: tint(fill, dark ? "40" : "38") }]}>
+      <View style={[styles.badgeDot, { backgroundColor: fill }]} />
+      <Text style={[styles.badgeText, { color: readable(color, c) }]} numberOfLines={1} maxFontSizeMultiplier={1.4}>
         {label}
       </Text>
     </View>
@@ -119,8 +130,17 @@ export function Field({
   );
 }
 
-/** Campo de texto. `icon` à esquerda e `right` (ex.: mostrar senha) à direita são opcionais. */
-export function Input({ icon, right, ...props }: TextInputProps & { icon?: IconName; right?: ReactNode }) {
+/**
+ * Campo de texto. `icon` à esquerda e `right` (ex.: mostrar senha) à direita são opcionais; `ref` vai
+ * direto ao TextInput (para o "próximo" do teclado focar o campo seguinte). Sem `accessibilityLabel`,
+ * o leitor de tela lê o placeholder.
+ */
+export function Input({
+  icon,
+  right,
+  ref,
+  ...props
+}: TextInputProps & { icon?: IconName; right?: ReactNode; ref?: Ref<TextInputInstance> }) {
   const c = useTheme();
   const styles = useStyles(makeStyles);
   const [focused, setFocused] = useState(false);
@@ -128,8 +148,11 @@ export function Input({ icon, right, ...props }: TextInputProps & { icon?: IconN
   const frame = [styles.inputFrame, focused && styles.inputFocused, props.multiline && styles.inputMultiline];
   const input = (
     <TextInput
+      ref={ref}
       placeholderTextColor={c.placeholder}
       selectionColor={c.primary}
+      maxFontSizeMultiplier={MAX_FONT_SCALE}
+      accessibilityLabel={props.accessibilityLabel ?? props.placeholder}
       {...props}
       onFocus={(e) => {
         setFocused(true);
@@ -244,6 +267,7 @@ export function Segmented<T extends string>({
               if (!active) haptic.select();
               onChange(option.value);
             }}
+            hitSlop={4}
             style={styles.segment}
           >
             <Text style={[styles.segmentText, active && styles.segmentTextActive]} numberOfLines={1}>
@@ -257,7 +281,18 @@ export function Segmented<T extends string>({
   );
 }
 
-export function EmptyState({ title, description, icon }: { title: string; description?: string; icon?: IconName }) {
+export function EmptyState({
+  title,
+  description,
+  icon,
+  action,
+}: {
+  title: string;
+  description?: string;
+  icon?: IconName;
+  /** Saída do vazio (ex.: "Ver agenda"). */
+  action?: { label: string; onPress: () => void };
+}) {
   const c = useTheme();
   const styles = useStyles(makeStyles);
   return (
@@ -269,6 +304,7 @@ export function EmptyState({ title, description, icon }: { title: string; descri
       ) : null}
       <Text style={styles.emptyTitle}>{title}</Text>
       {description ? <Text style={styles.emptyText}>{description}</Text> : null}
+      {action ? <Button compact variant="ghost" title={action.label} onPress={action.onPress} style={styles.emptyAction} /> : null}
     </View>
   );
 }
@@ -277,30 +313,56 @@ export function ErrorBox({ message }: { message: string }) {
   const c = useTheme();
   const styles = useStyles(makeStyles);
   return (
-    <View style={styles.errorBox} accessibilityRole="alert">
+    <View style={styles.errorBox} accessibilityRole="alert" accessibilityLiveRegion="assertive">
       <Icon name="alert" size={16} color={c.danger} />
       <Text style={styles.errorText}>{message}</Text>
     </View>
   );
 }
 
-export function SectionTitle({ children, right }: { children: ReactNode; right?: ReactNode }) {
+/** Aviso neutro (informação, não erro): ex.: "Sua sessão expirou" no login. */
+export function InfoBox({ message, icon = "alert" }: { message: string; icon?: IconName }) {
+  const c = useTheme();
+  const styles = useStyles(makeStyles);
+  return (
+    <View style={styles.infoBox} accessibilityLiveRegion="polite">
+      <Icon name={icon} size={16} color={c.inkMuted} />
+      <Text style={styles.infoBoxText}>{message}</Text>
+    </View>
+  );
+}
+
+/**
+ * Título de bloco. Padrão: rótulo em caixa alta (negrito, ink-muted). Com `accent`, título de cartão
+ * em negrito com a barra de 3 px da marca (azul → ciano), como o CardHeader da web.
+ */
+export function SectionTitle({ children, right, accent = false }: { children: ReactNode; right?: ReactNode; accent?: boolean }) {
   const styles = useStyles(makeStyles);
   return (
     <View style={styles.sectionTitleRow}>
-      <Text style={styles.sectionTitle}>{children}</Text>
+      {accent ? (
+        <View style={styles.sectionAccentRow}>
+          <LinearGradient colors={[BRAND.blue, BRAND.cyan]} start={{ x: 0.5, y: 0 }} end={{ x: 0.5, y: 1 }} style={styles.sectionAccentBar} />
+          <Text style={styles.sectionTitleAccent} accessibilityRole="header">
+            {children}
+          </Text>
+        </View>
+      ) : (
+        <Text style={styles.sectionTitle}>{children}</Text>
+      )}
       {right}
     </View>
   );
 }
 
 export function InfoRow({ label, value, onPress }: { label: string; value: ReactNode; onPress?: () => void }) {
+  const c = useTheme();
   const styles = useStyles(makeStyles);
   const content = (
     <View style={styles.infoRow}>
       <Text style={styles.infoLabel}>{label}</Text>
       {typeof value === "string" ? (
-        <Text style={[styles.infoValue, onPress && styles.infoLink]} selectable>
+        <Text style={[styles.infoValue, onPress && styles.infoLink]} selectable={!onPress}>
           {value}
         </Text>
       ) : (
@@ -308,12 +370,18 @@ export function InfoRow({ label, value, onPress }: { label: string; value: React
       )}
     </View>
   );
-  return onPress ? (
-    <Pressable onPress={onPress} accessibilityRole="link">
-      {content}
+  if (!onPress) return content;
+  // Linha que abre algo: área de toque de 44 pt, fundo ao pressionar e a seta indicando a navegação.
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={typeof value === "string" ? `${label}: ${value}` : label}
+      style={({ pressed }) => [styles.infoPressable, pressed && { backgroundColor: c.surface2 }]}
+    >
+      <View style={{ flex: 1 }}>{content}</View>
+      <Icon name="chevronRight" size={18} color={c.inkSubtle} />
     </Pressable>
-  ) : (
-    content
   );
 }
 
@@ -383,7 +451,14 @@ const makeStyles = (c: Palette) =>
       borderColor: c.lineStrong,
       boxShadow: c.elevation,
     },
-    segment: { flex: 1, paddingVertical: 8, borderRadius: RADIUS.control - 2, alignItems: "center" },
+    segment: {
+      flex: 1,
+      minHeight: 40,
+      paddingVertical: 8,
+      borderRadius: RADIUS.control - 2,
+      alignItems: "center",
+      justifyContent: "center",
+    },
     segmentText: { fontSize: 13, fontWeight: "600", color: c.inkMuted },
     segmentTextActive: { color: c.ink },
     segmentCount: { fontWeight: "500", color: c.inkSubtle, fontVariant: ["tabular-nums"] },
@@ -399,6 +474,7 @@ const makeStyles = (c: Palette) =>
     },
     emptyTitle: { fontSize: 16, fontWeight: "600", color: c.ink, textAlign: "center" },
     emptyText: { fontSize: 14, color: c.inkMuted, textAlign: "center", lineHeight: 20 },
+    emptyAction: { marginTop: 4 },
     errorBox: {
       flexDirection: "row",
       gap: 8,
@@ -410,9 +486,32 @@ const makeStyles = (c: Palette) =>
       padding: 12,
     },
     errorText: { color: c.danger, fontSize: 13, lineHeight: 18, flex: 1 },
-    sectionTitleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 },
+    infoBox: {
+      flexDirection: "row",
+      gap: 8,
+      alignItems: "flex-start",
+      backgroundColor: c.surface2,
+      borderColor: c.line,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderRadius: RADIUS.control,
+      padding: 12,
+    },
+    infoBoxText: { color: c.ink, fontSize: 13, lineHeight: 18, flex: 1 },
+    sectionTitleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 },
     sectionTitle: { fontSize: 12, fontWeight: "700", color: c.inkMuted, textTransform: "uppercase", letterSpacing: 0.6 },
+    sectionAccentRow: { flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 1 },
+    sectionAccentBar: { width: 3, height: 14, borderRadius: 2 },
+    sectionTitleAccent: { fontSize: 14, fontWeight: "700", color: c.ink, flexShrink: 1 },
     infoRow: { paddingVertical: 6, gap: 2 },
+    infoPressable: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      minHeight: 44,
+      marginHorizontal: -8,
+      paddingHorizontal: 8,
+      borderRadius: RADIUS.control,
+    },
     infoLabel: { fontSize: 12, color: c.inkMuted },
     infoValue: { fontSize: 15, color: c.ink },
     infoLink: { color: c.brandInk },

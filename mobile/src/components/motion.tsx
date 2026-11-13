@@ -18,18 +18,26 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 
-export const SPRING = { damping: 18, stiffness: 320, mass: 0.6 } as const;
-const STAGGER_MS = 40;
-/** Depois de alguns itens a entrada não espera mais: listas longas não ficam "chegando". */
-const MAX_STAGGER = 8;
+/** Mola com amortecimento crítico (√(4·k·m) ≈ 27,7): chega ao alvo sem passar e voltar. */
+export const SPRING = { damping: 28, stiffness: 320, mass: 0.6 } as const;
+const STAGGER_MS = 30;
+/** Depois de alguns itens a entrada não espera mais: a cascata inteira fica em ~320 ms. */
+const MAX_STAGGER = 4;
 
-/** Entrada em cascata (FadeInDown, ~40 ms por item) e transição de layout para listas. */
+/** Deslocamento das entradas: curto (8 pt), só para dar direção. */
+export const ENTER_OFFSET = 8;
+
+/** Entrada em cascata curta (sobe 8 pt e aparece, 30 ms por item, 200 ms) e transição de layout para listas. */
 export function useListMotion() {
   const reduced = useReducedMotion();
   return {
     reduced,
     entering: (index: number) =>
-      reduced ? undefined : FadeInDown.delay(Math.min(index, MAX_STAGGER) * STAGGER_MS).duration(280),
+      reduced
+        ? undefined
+        : FadeInDown.delay(Math.min(index, MAX_STAGGER) * STAGGER_MS)
+            .duration(200)
+            .withInitialValues({ opacity: 0, transform: [{ translateY: ENTER_OFFSET }] }),
     layout: reduced ? undefined : LinearTransition.duration(220),
   };
 }
@@ -40,13 +48,17 @@ export function useSwapMotion() {
   return reduced ? { entering: undefined, exiting: undefined } : { entering: FadeIn.duration(200), exiting: FadeOut.duration(120) };
 }
 
-/** Ponto "ao vivo": anel que se expande e some, repetindo (jornada ativa, etapa em curso). */
+/**
+ * Ponto "ao vivo" (jornada ativa, etapa em curso): ao ativar, o anel se expande e some três vezes e o
+ * ponto fica parado. Nada pulsa o dia inteiro (distrai e gasta bateria de quem já está com o GPS ligado).
+ */
 export function Pulse({ color, size = 10, active = true }: { color: string; size?: number; active?: boolean }) {
   const reduced = useReducedMotion();
   const wave = useSharedValue(0);
   useEffect(() => {
     if (!active || reduced) return;
-    wave.set(withRepeat(withTiming(1, { duration: 1600, easing: Easing.out(Easing.quad) }), -1, false));
+    wave.set(0);
+    wave.set(withRepeat(withTiming(1, { duration: 1600, easing: Easing.out(Easing.quad) }), 3, false));
     return () => cancelAnimation(wave);
   }, [active, reduced, wave]);
   const ring = useAnimatedStyle(() => ({

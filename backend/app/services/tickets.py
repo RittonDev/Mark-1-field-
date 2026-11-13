@@ -5,6 +5,7 @@ OS deve morar na camada de rotas.
 """
 
 import math
+import re
 import uuid
 from datetime import datetime, timedelta
 from enum import Enum
@@ -13,6 +14,7 @@ from typing import Any
 from fastapi import UploadFile
 from sqlalchemy import DateTime, and_, case, false, func, literal, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import noload
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.config import settings
@@ -38,11 +40,14 @@ from app.models import (
     TicketAttachment,
     TicketComment,
     TicketEvent,
+    TicketForm,
     TicketWorklog,
     UnproductiveReason,
     User,
     ViolationReason,
 )
+from app.models.ticket import ticket_helpers
+from app.models.user import TICKET_MANAGER_ROLES
 from app.schemas.part_request import PartRequestAttachment
 from app.schemas.ticket import (
     CommentCreate,
@@ -58,11 +63,13 @@ from app.schemas.ticket import (
     TicketViolationUpdate,
     WorklogCreate,
 )
-from app.services import client_report, durations, schedule, sla, storage
+from app.services import client_report, durations, geo, schedule, search, sla, storage
 from app.services import field as field_rules
 from app.services import payouts as payouts_svc
 from app.services.errors import NotFound, PermissionDenied, VersionConflict, WorkflowError
 from app.services.realtime import queue_event
+from app.services.suggestions import km_between
+from app.services.technician_regions import fold_words_sql
 from app.services.workflow import (
     OPEN_STATUSES,
     SLA_PAUSED_STATUSES,
@@ -209,6 +216,10 @@ def to_detail(ticket: Ticket, user: User) -> TicketDetail:
         detail.payouts = []
     if user.role == UserRole.TECHNICIAN:
         detail.my_payout = payouts_svc.my_payout(ticket, user)
+        # Reembolso é de cada um: o técnico vê o dele e o material da OS, não o do colega.
+        detail.expenses = [
+            e for e in detail.expenses if e.technician is None or e.technician.id == user.id
+        ]
         field_view(detail)
     return detail
 
@@ -722,14 +733,18 @@ async def _set_helpers(
         await payouts_svc.on_helpers_removed(db, ticket, [h.id for h in removed])
     now = utcnow()
     data = {"added": [u.name for u in added], "removed": [h.name for h in removed]}
-    record_event(db, ticket, actor, TicketEventType.HELPERS_CHANGED, data=data, now=now)
+    # Os ids ficam no histórico: o sync do app avisa quem saiu (revoked_ticket_ids).
+    ids = {"added_ids": [str(u.id) for u in added], "removed_ids": [str(h.id) for h in removed]}
+    record_event(
+        db, ticket, actor, TicketEventType.HELPERS_CHANGED, data={**data, **ids}, now=now
+    )
     await _touch(db, ticket, now)
     queue_event(
         db,
         "helpers_changed",
         ticket,
         actor,
-        {**data, "added_ids": [str(u.id) for u in added]},
+        {**data, "added_ids": ids["added_ids"]},
         previous_helper_ids=[h.id for h in removed],
     )
     return True
@@ -904,10 +919,20 @@ async def update_ticket(
             raise PermissionDenied("Só a gestão troca o analista responsável")
         if new_owner_id is not None:
             await _owner_user(db, new_owner_id)
+    # Técnico responsável no mesmo salvamento da agenda: uma versão nova só, e o conflito de
+    # horário é conferido com o técnico e a agenda finais (null tira o técnico).
+    assignee_change = "assignee_id" in fields
+    new_assignee_id = fields.pop("assignee_id", None)
+    if assignee_change and not can_assign(actor, ticket):
+        raise PermissionDenied("Somente analistas e supervisores atribuem OS")
     # Outros técnicos da visita: lista completa, com evento próprio (null = não mexe).
     new_helper_ids = fields.pop("helper_ids", None)
     if new_helper_ids is not None and not actor.can_manage_tickets:
         raise PermissionDenied("Só a gestão escolhe os outros técnicos da OS")
+    if "title" in fields:
+        fields["title"] = fields["title"].strip()
+        if len(fields["title"]) < 3:
+            raise WorkflowError("O título precisa de pelo menos 3 caracteres")
     for key in ("client_reference", "visit_note"):
         if key in fields:
             fields[key] = _clean_text(fields[key], single_line=key == "client_reference")
@@ -922,12 +947,6 @@ async def update_ticket(
             raise PermissionDenied("Só a gestão decide se a OS exige assinatura")
         if fields["signature_required"] is None:
             fields.pop("signature_required")
-    if not fields:
-        if owner_change:
-            await _set_owner(db, ticket, new_owner_id, actor, now=utcnow())
-        if new_helper_ids is not None:
-            await _set_helpers(db, ticket, new_helper_ids, actor, allow=data.allow_conflict)
-        return ticket
 
     ref_keys = {"customer_id", "location_id", "asset_id", "category_id", "team_id"}
     if ref_keys & fields.keys():
@@ -959,6 +978,18 @@ async def update_ticket(
         fields["priority"] = compute_priority(
             fields.get("impact", ticket.impact), fields.get("urgency", ticket.urgency)
         )
+    # Novo início sem fim: o fim vem da estimativa (não sobra o fim de um agendamento antigo);
+    # sem início, a visita também fica sem fim.
+    if (
+        "scheduled_start" in fields
+        and "scheduled_end" not in fields
+        and fields["scheduled_start"] != ticket.scheduled_start
+    ):
+        fields["scheduled_end"] = _default_end(
+            fields["scheduled_start"],
+            None,
+            fields.get("estimated_minutes", ticket.estimated_minutes),
+        )
     _check_schedule(
         fields.get("scheduled_start", ticket.scheduled_start),
         fields.get("scheduled_end", ticket.scheduled_end),
@@ -970,12 +1001,14 @@ async def update_ticket(
         if old != value:
             changes[key] = [_jsonable(old), _jsonable(value)]
             setattr(ticket, key, value)
+    now = utcnow()
     if owner_change:
-        await _set_owner(db, ticket, new_owner_id, actor, now=utcnow())
+        await _set_owner(db, ticket, new_owner_id, actor, now=now)
+    previous_assignee = ticket.assignee_id
+    if assignee_change:
+        await _assign(db, ticket, new_assignee_id, None, actor, now=now)
     if new_helper_ids is not None:
         await _set_helpers(db, ticket, new_helper_ids, actor, allow=data.allow_conflict)
-    if not changes:
-        return ticket
 
     if "priority" in changes and ticket.resolved_at is None:
         response_min, resolution_min = await sla.get_policy_minutes(db, ticket.priority)
@@ -985,15 +1018,21 @@ async def update_ticket(
             response_minutes=response_min,
             resolution_minutes=resolution_min,
         )
-    # Trocou o local antes da chegada: o prazo segue a nova cidade (capital ou interior).
-    if "location_id" in changes and ticket.arrived_at is None:
+    # Antes da chegada, o prazo segue a cidade (capital ou interior) e a visita combinada.
+    if changes.keys() & {"location_id", "scheduled_start"} and ticket.arrived_at is None:
         await field_rules.recompute_arrival_due(db, ticket, await field_rules.rules(db))
+    # "Agendado" sem data não existe: a agenda saiu, a OS volta para "Atribuído".
+    if ticket.status == S.SCHEDULED and ticket.scheduled_start is None:
+        _change_status(db, ticket, S.ASSIGNED, actor, now=now, note="Agenda removida")
 
-    now = utcnow()
-    if changes.keys() & {"scheduled_start", "scheduled_end", "estimated_minutes"}:
+    schedule_moved = bool(changes.keys() & {"scheduled_start", "scheduled_end", "estimated_minutes"})
+    if schedule_moved or ticket.assignee_id != previous_assignee:
         await schedule.ensure_no_conflict(db, ticket, actor, data.allow_conflict)
-    record_event(db, ticket, actor, TicketEventType.UPDATED, data={"changes": changes}, now=now)
-    queue_event(db, "updated", ticket, actor, {"fields": sorted(changes)})
+    if changes:
+        record_event(
+            db, ticket, actor, TicketEventType.UPDATED, data={"changes": changes}, now=now
+        )
+        queue_event(db, "updated", ticket, actor, {"fields": sorted(changes)})
     return ticket
 
 

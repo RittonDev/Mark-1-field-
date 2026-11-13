@@ -9,7 +9,12 @@ export interface Session {
   user: User;
 }
 
+/** Por que a sessão desta aba terminou: venceu (a API recusou a renovação) ou a pessoa saiu. */
+export type SessionEndReason = "expired" | "logout";
+
 const STORAGE_KEY = "maxxchamados.session";
+// Por aba (sessionStorage): a tela de login explica "sua sessão terminou" só a quem teve a sessão vencida.
+const END_KEY = "mf:fim";
 const listeners = new Set<() => void>();
 let cached: Session | null | undefined;
 
@@ -32,7 +37,8 @@ export const sessionStore = {
     if (cached === undefined) cached = readStorage();
     return cached;
   },
-  set(session: Session | null) {
+  /** Grava a sessão (null encerra). `reason` diz por que terminou, para a tela de login explicar. */
+  set(session: Session | null, reason?: SessionEndReason) {
     cached = session;
     try {
       if (session) window.localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
@@ -40,7 +46,22 @@ export const sessionStore = {
     } catch {
       // Sem storage (aba privada): a sessão vive só em memória.
     }
+    try {
+      if (session) window.sessionStorage.removeItem(END_KEY);
+      else if (reason) window.sessionStorage.setItem(END_KEY, reason);
+    } catch {
+      // Sem storage: o login só não explica o motivo.
+    }
     emit();
+  },
+  /** Motivo do último encerramento nesta aba (some quando alguém entra de novo). */
+  endReason(): SessionEndReason | null {
+    try {
+      const value = window.sessionStorage.getItem(END_KEY);
+      return value === "expired" || value === "logout" ? value : null;
+    } catch {
+      return null;
+    }
   },
   fromTokenResponse(data: TokenResponse) {
     sessionStore.set({

@@ -14,8 +14,21 @@ export interface TabItem<T extends string> {
   count?: number;
 }
 
-/** Barra de abas inferior com a pílula da aba ativa deslizando (mola). */
-export function TabBar<T extends string>({ items, value, onChange }: { items: TabItem<T>[]; value: T; onChange: (value: T) => void }) {
+/**
+ * Barra de abas inferior com a pílula da aba ativa deslizando. Tocar de novo na aba ativa chama
+ * `onReselect` (ex.: voltar ao dia de hoje e ao topo da lista).
+ */
+export function TabBar<T extends string>({
+  items,
+  value,
+  onChange,
+  onReselect,
+}: {
+  items: TabItem<T>[];
+  value: T;
+  onChange: (value: T) => void;
+  onReselect?: (value: T) => void;
+}) {
   const c = useTheme();
   const styles = useStyles(makeStyles);
   const insets = useSafeAreaInsets();
@@ -32,10 +45,14 @@ export function TabBar<T extends string>({ items, value, onChange }: { items: Ta
               key={item.value}
               accessibilityRole="tab"
               accessibilityState={{ selected: active }}
-              accessibilityLabel={item.count ? `${item.label}, ${item.count}` : item.label}
+              accessibilityLabel={item.count ? `${item.label}, ${item.count} OS` : item.label}
               onLayout={(e) => measure(item.value)(e.nativeEvent.layout)}
               onPress={() => {
-                if (!active) haptic.select();
+                if (active) {
+                  onReselect?.(item.value);
+                  return;
+                }
+                haptic.select();
                 onChange(item.value);
               }}
               style={styles.tab}
@@ -43,12 +60,18 @@ export function TabBar<T extends string>({ items, value, onChange }: { items: Ta
               <View>
                 <Icon name={item.icon} size={22} color={color} strokeWidth={active ? 2 : 1.8} />
                 {item.count ? (
-                  <View style={[styles.count, { backgroundColor: active ? c.primary : c.inkSubtle }]}>
-                    <Text style={styles.countText}>{item.count > 99 ? "99+" : item.count}</Text>
+                  <View
+                    style={[styles.count, active ? { backgroundColor: c.primaryFill } : { backgroundColor: c.inkMuted }]}
+                  >
+                    <Text style={[styles.countText, { color: active ? c.onPrimary : c.surface }]} maxFontSizeMultiplier={1.2}>
+                      {item.count > 99 ? "99+" : item.count}
+                    </Text>
                   </View>
                 ) : null}
               </View>
-              <Text style={[styles.label, { color }, active && styles.labelActive]}>{item.label}</Text>
+              <Text style={[styles.label, { color }, active && styles.labelActive]} numberOfLines={1} maxFontSizeMultiplier={1.3}>
+                {item.label}
+              </Text>
             </Pressable>
           );
         })}
@@ -75,15 +98,15 @@ const makeStyles = (c: Palette) =>
       borderRadius: RADIUS.control + 2,
       backgroundColor: c.primarySoft,
     },
-    tab: { flex: 1, alignItems: "center", gap: 4, paddingVertical: 8 },
-    label: { fontSize: 12, fontWeight: "500" },
+    tab: { flex: 1, alignItems: "center", gap: 4, paddingVertical: 8, paddingHorizontal: 2, minHeight: 52 },
+    label: { fontSize: 12, fontWeight: "600" },
     labelActive: { fontWeight: "700" },
     count: {
       position: "absolute",
       top: -6,
       right: -12,
       minWidth: 18,
-      height: 18,
+      minHeight: 18,
       borderRadius: 9,
       paddingHorizontal: 4,
       alignItems: "center",
@@ -91,5 +114,5 @@ const makeStyles = (c: Palette) =>
       borderWidth: 2,
       borderColor: c.surface,
     },
-    countText: { fontSize: 10, fontWeight: "700", color: "#FFFFFF", fontVariant: ["tabular-nums"] },
+    countText: { fontSize: 10, fontWeight: "700", fontVariant: ["tabular-nums"] },
   });

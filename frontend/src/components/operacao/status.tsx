@@ -20,6 +20,7 @@ export function RefreshFailed({
   retrying,
   className,
 }: {
+  /** errorUpdatedAt do TanStack (quando a última leitura falhou). */
   at: number;
   onRetry: () => void;
   retrying?: boolean;
@@ -35,7 +36,9 @@ export function RefreshFailed({
       )}
     >
       <TriangleAlert className="size-3.5 shrink-0" />
-      <span className="min-w-0 flex-1">Não foi possível atualizar às {clock(at || Date.now())}. A tela mostra os últimos dados.</span>
+      <span className="min-w-0 flex-1">
+        Não foi possível atualizar{at ? ` às ${clock(at)}` : ""}. A tela mostra os últimos dados.
+      </span>
       <button
         type="button"
         onClick={onRetry}

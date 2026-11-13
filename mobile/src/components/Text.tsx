@@ -5,17 +5,25 @@ import { brandFont, resolveWeight, type Weight } from "../theme/fonts";
 /** Peso do Text pai: um Text aninhado sem `fontWeight` herda o peso (e a família) dele. */
 const ParentWeight = createContext<Weight>("400");
 
+/** Teto da fonte ampliada do sistema: acompanha até 160% sem estourar cartões e barras. */
+export const MAX_FONT_SCALE = 1.6;
+
 /**
  * Text do app. Troca o `fontWeight` pela família da Manrope do mesmo peso; o resto do estilo
- * passa intacto. Um `fontFamily` explícito no estilo é respeitado.
+ * passa intacto. Um `fontFamily` explícito no estilo é respeitado. Itens densos (abas, calendário,
+ * selos) passam um `maxFontSizeMultiplier` menor.
  */
-export function Text({ style, children, ...rest }: ComponentProps<typeof RNText>) {
+export function Text({ style, children, maxFontSizeMultiplier, ...rest }: ComponentProps<typeof RNText>) {
   const inherited = use(ParentWeight);
   const flat = StyleSheet.flatten(style);
   const weight = flat?.fontWeight !== undefined ? resolveWeight(flat.fontWeight) : inherited;
   const family = flat?.fontFamily ? undefined : brandFont(weight);
   const text = (
-    <RNText style={family ? [style, { fontFamily: family, fontWeight: "normal" }] : style} {...rest}>
+    <RNText
+      style={family ? [style, { fontFamily: family, fontWeight: "normal" }] : style}
+      maxFontSizeMultiplier={maxFontSizeMultiplier ?? MAX_FONT_SCALE}
+      {...rest}
+    >
       {children}
     </RNText>
   );

@@ -42,6 +42,9 @@ export interface Palette {
   primary: string;
   primaryPressed: string;
   primarySoft: string;
+  /** Preenchimento azul com texto branco (botão primário, dia escolhido, contagem ativa): AA nos dois modos. */
+  primaryFill: string;
+  primaryFillPressed: string;
   brandInk: string;
   onPrimary: string;
   placeholder: string;
@@ -70,20 +73,24 @@ export const LIGHT: Palette = {
   surface3: "#ECEEF1",
   line: "#E5E7EB",
   lineStrong: "#D4D8DE",
+  // Mesmos tokens de texto da web (globals.css): todos AA nas superfícies claras.
   ink: "#1B1F26",
-  inkMuted: "#5D6676",
-  inkSubtle: "#7A8290",
+  inkMuted: "#525A68",
+  inkSubtle: "#687080",
   primary: "#2447FF",
   primaryPressed: "#1A36D6",
   primarySoft: "#EEF1FF",
+  primaryFill: "#2447FF",
+  primaryFillPressed: "#1A36D6",
   brandInk: "#1F3BE0",
   onPrimary: "#FFFFFF",
   placeholder: "#8B93A1",
-  danger: "#D92D20",
+  // Cores de alerta usadas como texto: tons escuros para passar de 4,5:1 no branco e no fundo suave.
+  danger: "#B42318",
   dangerSoft: "#FEF3F2",
-  success: "#0E9384",
+  success: "#0B7A6F",
   successSoft: "#EFFCF8",
-  warning: "#DC6803",
+  warning: "#B54708",
   warningSoft: "#FFF7E8",
   info: "#0086C9",
   segment: "#ECEEF1",
@@ -105,10 +112,13 @@ export const DARK: Palette = {
   lineStrong: "#31343B",
   ink: "#ECECF0",
   inkMuted: "#9BA1AC",
-  inkSubtle: "#7B818C",
+  inkSubtle: "#838995",
   primary: "#5470FF",
   primaryPressed: "#3D5AF7",
   primarySoft: "rgba(84, 112, 255, 0.14)",
+  // Branco sobre #5470FF fica em ~4,1:1; o preenchimento usa o brand-strong da web (5,2:1).
+  primaryFill: "#3D5AF7",
+  primaryFillPressed: "#2F49D9",
   brandInk: "#9FB0FF",
   onPrimary: "#FFFFFF",
   placeholder: "#6C727D",
@@ -204,7 +214,45 @@ export function mix(a: string, b: string, amount: number) {
   return `#${out.map((v) => v.toString(16).padStart(2, "0")).join("")}`;
 }
 
-/** Cor de status/prioridade legível no modo escuro (clareia tons escuros). */
-export function readable(color: string, c: Palette) {
-  return c.scheme === "dark" ? mix(color.slice(0, 7), "#FFFFFF", 0.35) : color;
+function luminance(hex: string) {
+  const [r, g, b] = [0, 1, 2].map((i) => {
+    const v = channel(hex, i) / 255;
+    return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/** Contraste WCAG entre duas cores #rrggbb (1 a 21). */
+export function contrast(a: string, b: string) {
+  const [x, y] = [luminance(a.slice(0, 7)), luminance(b.slice(0, 7))];
+  return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+}
+
+const readableCache = new Map<string, string>();
+
+/**
+ * Cor de status/prioridade usada como TEXTO (selos, rótulos). Mistura a cor com a tinta do tema, como o
+ * Pill da web (64% cor, 36% tinta), e aumenta a tinta até passar de 4,5:1: no claro escurece (âmbar,
+ * ciano e verde puros ficavam entre 2 e 2,8:1), no escuro clareia. Sem `background`, mede contra o
+ * pior caso: o fundo do selo sobre o cinza dos cartões.
+ */
+export function readable(color: string, c: Palette, background?: string) {
+  const base = color.slice(0, 7);
+  const key = `${c.scheme}|${base}|${background ?? ""}`;
+  const cached = readableCache.get(key);
+  if (cached) return cached;
+  const bg = background ?? mix(c.surface2, statusFill(base, c), c.scheme === "dark" ? 0.14 : 0.09);
+  let amount = 0.36;
+  let out = mix(base, c.ink, amount);
+  while (contrast(out, bg) < 4.5 && amount < 0.8) {
+    amount += 0.05;
+    out = mix(base, c.ink, amount);
+  }
+  readableCache.set(key, out);
+  return out;
+}
+
+/** Cor de status para BARRAS e PONTOS (não texto): a cor pura no claro, clareada no escuro para aparecer. */
+export function statusFill(color: string, c: Palette) {
+  return c.scheme === "dark" ? mix(color.slice(0, 7), "#FFFFFF", 0.35) : color.slice(0, 7);
 }

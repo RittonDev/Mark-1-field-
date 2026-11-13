@@ -32,7 +32,7 @@ export function useAuth() {
   }, []);
 
   const logout = useCallback(() => {
-    sessionStore.set(null);
+    sessionStore.set(null, "logout");
   }, []);
 
   return {

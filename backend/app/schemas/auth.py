@@ -5,14 +5,20 @@ from app.schemas.user import UserOut
 
 
 class LoginRequest(BaseModel):
-    email: str
-    password: str
+    email: str = Field(max_length=255)
+    password: str = Field(max_length=256)
     # "web" (analistas e gestores) ou "mobile" (técnicos de campo). Omitido = sem restrição.
     channel: Channel | None = None
 
 
 class RefreshRequest(BaseModel):
-    refresh_token: str
+    refresh_token: str = Field(max_length=4096)
+
+
+class LogoutRequest(BaseModel):
+    """Sair: encerra no servidor a sessão deste refresh token (o access dela cai junto)."""
+
+    refresh_token: str = Field(max_length=4096)
 
 
 class TokenResponse(BaseModel):
@@ -24,7 +30,7 @@ class TokenResponse(BaseModel):
 
 
 class ChangePasswordRequest(BaseModel):
-    current_password: str
+    current_password: str = Field(max_length=256)
     new_password: str = Field(min_length=8, max_length=128)
 
 

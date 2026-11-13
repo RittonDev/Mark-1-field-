@@ -48,7 +48,8 @@ export function FormEditor({
   editKey: string;
   /** Modelo salvo (null: formulário novo). */
   template: FormTemplate | null;
-  serviceTypes: ServiceType[];
+  /** Catálogo de tipos de serviço (null: não carregou; os tipos já ligados continuam ligados). */
+  serviceTypes: ServiceType[] | null;
   /** Volta para a lista (quem chama decide entre voltar no histórico e trocar a URL). */
   onLeave: () => void;
 }) {
@@ -72,6 +73,11 @@ export function FormEditor({
   const questions = draft.fields.filter((f) => f.type !== "section").length;
   const full = draft.fields.length >= LIMITS.fields;
   useBeforeUnload(dirty);
+
+  // O editor abre no topo (nome e descrição à vista), mesmo vindo de um formulário lá embaixo na lista.
+  useEffect(() => {
+    window.scrollTo({ top: 0 });
+  }, []);
 
   // O rascunho fica guardado na aba até salvar ou descartar.
   useEffect(() => {
@@ -618,7 +624,8 @@ function ServiceTypePicker({
   value,
   onChange,
 }: {
-  types: ServiceType[];
+  /** null: o catálogo não carregou (dá para salvar o resto; os tipos ligados continuam). */
+  types: ServiceType[] | null;
   value: string[];
   onChange: (ids: string[]) => void;
 }) {
@@ -626,13 +633,13 @@ function ServiceTypePicker({
   const [search, setSearch] = useState("");
   const titleId = useId();
   const listId = useId();
-  const byId = useMemo(() => new Map(types.map((t) => [t.id, t])), [types]);
+  const byId = useMemo(() => new Map((types ?? []).map((t) => [t.id, t])), [types]);
   const labelOf = (t: ServiceType) =>
     `${t.name}${t.customer ? ` · ${t.customer.name}` : ""}${t.is_active ? "" : " (inativo)"}`;
   // Tipos ativos e os inativos que já estavam escolhidos (para poder ver e tirar).
   const options = useMemo(() => {
     const q = fold(search.trim());
-    return types.filter(
+    return (types ?? []).filter(
       (t) =>
         (t.is_active || value.includes(t.id)) &&
         (!q || fold(`${t.name} ${t.customer?.name ?? ""}`).includes(q)),
@@ -645,17 +652,25 @@ function ServiceTypePicker({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span id={titleId} className="text-xs font-semibold text-ink/80">
           Sugerir nas OS destes tipos de serviço
+          {value.length ? <span className="font-normal text-ink-muted"> · {plural(value.length, "escolhido", "escolhidos")}</span> : null}
         </span>
-        <Button size="sm" variant="ghost" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-controls={listId}>
-          <ChevronDown className={clsx("size-3.5 transition-transform duration-150", open && "rotate-180")} />
-          {open ? "Fechar a lista" : "Escolher tipos"}
-        </Button>
+        {types ? (
+          <Button size="sm" variant="ghost" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-controls={listId}>
+            <ChevronDown className={clsx("size-3.5 transition-transform duration-150", open && "rotate-180")} />
+            {open ? "Fechar a lista" : "Escolher tipos"}
+          </Button>
+        ) : null}
       </div>
+      {types ? null : (
+        <p className="text-xs text-ink-muted">
+          Não foi possível carregar os tipos de serviço agora. Os que já estão ligados continuam ligados ao salvar.
+        </p>
+      )}
       {value.length ? (
         <ul className="flex flex-wrap gap-1.5" aria-labelledby={titleId}>
           {value.map((id) => {
             const t = byId.get(id);
-            const text = t ? labelOf(t) : "Tipo removido do catálogo";
+            const text = t ? labelOf(t) : types ? "Tipo removido do catálogo" : "Tipo ligado";
             return (
               <li key={id}>
                 <span className="inline-flex items-center gap-1 rounded-full border border-line bg-surface-2 py-0.5 pr-1 pl-2.5 text-xs font-medium text-ink">

@@ -68,6 +68,12 @@ def fold_sql(column: ColumnElement) -> ColumnElement:
     )
 
 
+def fold_words_sql(column: ColumnElement) -> ColumnElement:
+    """Sem acento e em minúsculas, sem mexer nos espaços: para procurar uma palavra solta (mais
+    leve em texto longo, como a descrição da OS). Nulo vira texto vazio."""
+    return func.lower(func.translate(func.coalesce(column, ""), _FOLD_FROM, _FOLD_TO))
+
+
 def haversine_sql(lat1, lon1, lat2, lon2) -> ColumnElement:
     a = func.power(func.sin(func.radians(lat2 - lat1) / 2), 2) + func.cos(
         func.radians(lat1)

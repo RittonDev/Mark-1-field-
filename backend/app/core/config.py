@@ -23,6 +23,14 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_MINUTES: int = 60
     REFRESH_TOKEN_DAYS: int = 30
     DOWNLOAD_TOKEN_MINUTES: int = 15
+    # Duração máxima de uma sessão, contada do login (as renovações não estendem): depois disso,
+    # entra de novo. Na web (analistas, gestores, clientes) e no app dos técnicos.
+    SESSION_MAX_DAYS: int = 30
+    SESSION_MAX_DAYS_MOBILE: int = 90
+    # Um refresh já usado que volta dentro deste prazo (resposta perdida, duas abas renovando
+    # juntas) ganha um par novo da mesma sessão; depois dele, a sessão é encerrada (token copiado).
+    REFRESH_REUSE_GRACE_SECONDS: int = 120
+    REFRESH_REUSE_GRACE_MOBILE_SECONDS: int = 900
 
     # Lista separada por vírgula.
     CORS_ORIGINS: str = "http://localhost:3001"
@@ -33,6 +41,9 @@ class Settings(BaseSettings):
     AUTO_CLOSE_INTERVAL_SECONDS: int = 600
     # Retenção do histórico de posições dos técnicos (LGPD).
     TRACKING_RETENTION_DAYS: int = 90
+    # Fichas de técnico reprovadas (ou pendentes sem análise) são apagadas depois deste prazo,
+    # com a foto (LGPD: o dado pessoal não fica guardado sem finalidade).
+    ONBOARDING_RETENTION_DAYS: int = 180
     SLA_AT_RISK_RATIO: float = 0.75
 
     MEDIA_ROOT: str = "./media"
@@ -76,10 +87,17 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         return self.ENVIRONMENT == "production"
 
+    @property
+    def max_body_bytes(self) -> int:
+        """Maior corpo de requisição aceito: o maior anexo mais a folga do multipart."""
+        return (self.MAX_UPLOAD_MB + 1) * 1024 * 1024
+
     @model_validator(mode="after")
     def _check_secret(self) -> "Settings":
         if self.is_production and (self.JWT_SECRET == _DEV_SECRET or len(self.JWT_SECRET) < 32):
             raise ValueError("JWT_SECRET precisa ser definido (>= 32 caracteres) em produção")
+        if self.is_production and "*" in self.cors_origin_list:
+            raise ValueError("CORS_ORIGINS não pode ser '*' em produção: liste os endereços do site")
         return self
 
 

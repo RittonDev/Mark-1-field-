@@ -2,14 +2,40 @@
 
 // Peças comuns das telas de operação (Minha fila, Solicitações, Calendário, Atividades do dia e Quadro).
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useToast } from "@/components/Toaster";
 import { api, errorMessage } from "@/lib/api";
-import type { TicketDetail, User, UUID } from "@/lib/types";
+import { STATUS } from "@/lib/constants";
+import type { TicketDetail, TicketStatus, User, UUID } from "@/lib/types";
 
 /** Fuso da operação (o mesmo de settings.TIMEZONE na API). */
 export const OPERATION_TZ = "America/Sao_Paulo";
+
+/** OS em aberto: nem resolvida, nem fechada, nem cancelada (espelha OPEN_STATUSES da API). */
+export const isOpenStatus = (status: TicketStatus) => {
+  const group = STATUS[status]?.group;
+  return group === "open" || group === "active" || group === "pending";
+};
+
+/**
+ * A OS completa, lida agora (versão, formulários, transições permitidas). Fica no mesmo cache do
+ * painel da OS; `staleTime` aproveita uma leitura de segundos atrás (ex.: a do início do arraste).
+ */
+export function fetchTicket(queryClient: QueryClient, id: UUID, staleTime = 0) {
+  return queryClient.fetchQuery({
+    queryKey: ["ticket", id],
+    queryFn: () => api.get<TicketDetail>(`/tickets/${id}`),
+    staleTime,
+  });
+}
+
+/** Rola até um bloco da tela (sem animar com "reduzir movimento" ligado) e leva o foco para ele. */
+export function revealSection(el: HTMLElement) {
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+  el.focus({ preventScroll: true });
+}
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

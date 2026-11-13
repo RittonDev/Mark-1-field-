@@ -5,10 +5,13 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import sessions
 from app.core.enums import UserRole
 from app.core.security import InvalidToken, decode_token
 from app.db.session import get_db
 from app.models.user import User
+
+SESSION_ENDED = "Sessão encerrada. Entre novamente."
 
 bearer = HTTPBearer(auto_error=False)
 
@@ -37,8 +40,9 @@ async def get_current_user(
     user = await db.get(User, user_id)
     if user is None or not user.is_active:
         raise _unauthorized("Usuário inativo ou inexistente")
-    if user.token_revoked(payload):
-        raise _unauthorized("Sessão encerrada. Entre novamente.")
+    # Senha trocada, acesso desativado, saída da sessão ou refresh copiado (core/sessions.py).
+    if user.token_revoked(payload) or await sessions.is_revoked(payload.get("sid")):
+        raise _unauthorized(SESSION_ENDED)
     return user
 
 

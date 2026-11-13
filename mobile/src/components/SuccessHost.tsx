@@ -8,7 +8,6 @@ import Animated, {
   useReducedMotion,
   useSharedValue,
   withDelay,
-  withSpring,
   withTiming,
 } from "react-native-reanimated";
 import Svg, { Path } from "react-native-svg";
@@ -29,13 +28,14 @@ function SuccessOverlay({ moment }: { moment: SuccessMoment }) {
   const c = useTheme();
   const styles = useStyles(makeStyles);
   const reduced = useReducedMotion();
-  const ring = useSharedValue(reduced ? 1 : 0.6);
+  const ring = useSharedValue(reduced ? 1 : 0.92);
   const draw = useSharedValue(reduced ? 1 : 0);
 
+  // Entrada curta e sem rebote: o círculo cresce de 0,92 a 1 e o check é desenhado logo depois.
   useEffect(() => {
     if (reduced) return;
-    ring.set(withSpring(1, { damping: 12, stiffness: 190, mass: 0.7 }));
-    draw.set(withDelay(150, withTiming(1, { duration: 380, easing: Easing.out(Easing.cubic) })));
+    ring.set(withTiming(1, { duration: 220, easing: Easing.out(Easing.cubic) }));
+    draw.set(withDelay(120, withTiming(1, { duration: 300, easing: Easing.out(Easing.cubic) })));
   }, [reduced, ring, draw]);
 
   const ringStyle = useAnimatedStyle(() => ({ transform: [{ scale: ring.get() }] }));

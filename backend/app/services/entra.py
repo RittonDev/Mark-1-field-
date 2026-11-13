@@ -5,8 +5,9 @@ Fluxo "authorization code" com PKCE, feito pela API (cliente confidencial):
    redireciona para a Microsoft.
 2. /auth/microsoft/callback troca o code pelo id_token e valida assinatura (chaves públicas
    do locatário), emissor, audiência, locatário, nonce e validade.
-3. O usuário precisa estar cadastrado (ou ser criado, se ENTRA_AUTO_PROVISION_ROLE),
-   ativo, com papel de gestão e e-mail num domínio permitido.
+3. O usuário precisa estar cadastrado (ou ser criado como analista, se
+   ENTRA_AUTO_PROVISION_ROLE), ativo, com papel de gestão e e-mail num domínio permitido.
+   Convidados (B2B) do locatário não entram: a conta tem que ser da empresa.
 4. A API devolve ao site um código de uso único (60 s) no fragmento da URL; o site troca
    esse código pelos tokens. Assim, nenhum token de acesso passa pela URL.
 """
@@ -26,10 +27,14 @@ import jwt
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import ephemeral
 from app.core.config import settings
 from app.core.enums import UserRole
-from app.core.security import create_token, decode_token, hash_password
+from app.core.security import create_token, decode_token, hash_password_async
 from app.models.user import TICKET_MANAGER_ROLES, User
+
+# Autocadastro no primeiro login: só como analista (gestor é dado à mão, em Usuários).
+AUTO_PROVISION_ROLES = frozenset({UserRole.ANALYST.value})
 
 STATE_COOKIE = "mf_sso"
 STATE_TTL = timedelta(minutes=10)
@@ -97,22 +102,28 @@ def read_state(cookie: str | None, state: str | None) -> dict[str, Any]:
 
 async def exchange_code(code: str, verifier: str) -> dict[str, Any]:
     """Troca o code pelo id_token no endpoint de token do locatário."""
-    async with httpx.AsyncClient(timeout=10) as client:
-        r = await client.post(
-            f"{_authority()}/oauth2/v2.0/token",
-            data={
-                "client_id": settings.ENTRA_CLIENT_ID,
-                "client_secret": settings.ENTRA_CLIENT_SECRET,
-                "grant_type": "authorization_code",
-                "code": code,
-                "redirect_uri": settings.ENTRA_REDIRECT_URI,
-                "code_verifier": verifier,
-                "scope": "openid profile email",
-            },
-        )
-    if r.status_code != 200:
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.post(
+                f"{_authority()}/oauth2/v2.0/token",
+                data={
+                    "client_id": settings.ENTRA_CLIENT_ID,
+                    "client_secret": settings.ENTRA_CLIENT_SECRET,
+                    "grant_type": "authorization_code",
+                    "code": code,
+                    "redirect_uri": settings.ENTRA_REDIRECT_URI,
+                    "code_verifier": verifier,
+                    "scope": "openid profile email",
+                },
+            )
+        if r.status_code != 200:
+            raise SsoError("provider_error")
+        data = r.json()
+    except (httpx.HTTPError, ValueError) as exc:  # rede fora, tempo esgotado, JSON inválido
+        raise SsoError("provider_error") from exc
+    if not isinstance(data, dict):
         raise SsoError("provider_error")
-    return r.json()
+    return data
 
 
 _jwks_cache: dict[str, Any] = {"at": 0.0, "keys": None}
@@ -121,18 +132,32 @@ _jwks_cache: dict[str, Any] = {"at": 0.0, "keys": None}
 async def fetch_jwks() -> dict[str, Any]:
     if _jwks_cache["keys"] and time.monotonic() - _jwks_cache["at"] < _JWKS_TTL:
         return _jwks_cache["keys"]
-    async with httpx.AsyncClient(timeout=10) as client:
-        r = await client.get(f"{_authority()}/discovery/v2.0/keys")
-    r.raise_for_status()
-    _jwks_cache.update(at=time.monotonic(), keys=r.json())
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(f"{_authority()}/discovery/v2.0/keys")
+        r.raise_for_status()
+        keys = r.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        raise SsoError("provider_error") from exc
+    _jwks_cache.update(at=time.monotonic(), keys=keys)
     return _jwks_cache["keys"]
+
+
+def _find_key(jwks: dict[str, Any], kid: str | None) -> dict[str, Any] | None:
+    return next((k for k in jwks.get("keys", []) if k.get("kid") == kid), None)
 
 
 async def validate_id_token(id_token: str, nonce: str) -> dict[str, Any]:
     try:
         header = jwt.get_unverified_header(id_token)
         jwks = await fetch_jwks()
-        jwk = next(k for k in jwks.get("keys", []) if k.get("kid") == header.get("kid"))
+        jwk = _find_key(jwks, header.get("kid"))
+        if jwk is None:
+            # A Microsoft trocou as chaves: busca de novo (uma vez) em vez de esperar o cache.
+            _jwks_cache.update(at=0.0, keys=None)
+            jwk = _find_key(await fetch_jwks(), header.get("kid"))
+        if jwk is None:
+            raise SsoError("invalid_token")
         key = jwt.PyJWK(jwk).key
         claims = jwt.decode(
             id_token,
@@ -143,11 +168,17 @@ async def validate_id_token(id_token: str, nonce: str) -> dict[str, Any]:
             options={"require": ["exp", "iat", "iss", "aud", "sub"]},
             leeway=60,
         )
-    except (StopIteration, jwt.PyJWTError, httpx.HTTPError) as exc:
+    except jwt.PyJWTError as exc:
         raise SsoError("invalid_token") from exc
+    tenant = str(settings.ENTRA_TENANT_ID).lower()
     # O locatário da conta tem que ser o da empresa (contas pessoais e de outras empresas
     # podem ter qualquer e-mail no preferred_username).
-    if str(claims.get("tid", "")).lower() != str(settings.ENTRA_TENANT_ID).lower():
+    if str(claims.get("tid", "")).lower() != tenant:
+        raise SsoError("wrong_tenant")
+    # Convidado (B2B): o token sai com o locatário da empresa, mas a conta é de outro provedor
+    # (`idp`) ou marcada como convidada (`acct` = 1). Não é funcionário: não entra.
+    idp = str(claims.get("idp") or "").lower()
+    if (idp and tenant not in idp) or str(claims.get("acct", "")) == "1":
         raise SsoError("wrong_tenant")
     if not secrets.compare_digest(str(claims.get("nonce", "")), nonce):
         raise SsoError("invalid_token")
@@ -155,7 +186,9 @@ async def validate_id_token(id_token: str, nonce: str) -> dict[str, Any]:
 
 
 def _email_of(claims: dict[str, Any]) -> str:
-    return str(claims.get("email") or claims.get("preferred_username") or "").strip().lower()
+    """O login da conta (preferred_username, o UPN do locatário). O claim `email` é editável pelo
+    usuário e a Microsoft não garante que esteja verificado: fica só como último recurso."""
+    return str(claims.get("preferred_username") or claims.get("email") or "").strip().lower()
 
 
 async def resolve_user(db: AsyncSession, claims: dict[str, Any]) -> User:
@@ -169,15 +202,15 @@ async def resolve_user(db: AsyncSession, claims: dict[str, Any]) -> User:
     if user is None:
         user = await db.scalar(select(User).where(func.lower(User.email) == email))
     if user is None:
-        role = settings.ENTRA_AUTO_PROVISION_ROLE
-        if role not in {r.value for r in TICKET_MANAGER_ROLES}:
+        role = (settings.ENTRA_AUTO_PROVISION_ROLE or "").strip().lower()
+        if role not in AUTO_PROVISION_ROLES:
             raise SsoError("not_registered")
         user = User(
             id=uuid.uuid4(),
-            name=str(claims.get("name") or email.split("@")[0]),
+            name=str(claims.get("name") or email.split("@")[0])[:160],
             email=email,
             # Sem senha local utilizável: entra só pela Microsoft.
-            password_hash=hash_password(secrets.token_urlsafe(32)),
+            password_hash=await hash_password_async(secrets.token_urlsafe(32)),
             role=UserRole(role),
             is_active=True,
         )
@@ -208,24 +241,8 @@ def staff_must_use_microsoft(user: User) -> bool:
     return user.role in TICKET_MANAGER_ROLES and domain in settings.entra_domains
 
 
-_used_codes: dict[str, float] = {}
-
-
 async def consume_once(jti: str, ttl_seconds: int = 120) -> bool:
     """Garante uso único do código de retorno (Redis entre instâncias; memória sem Redis)."""
-    if settings.REDIS_URL:
-        from redis import asyncio as aioredis
-
-        client = aioredis.from_url(settings.REDIS_URL)
-        try:
-            return bool(await client.set(f"sso:used:{jti}", "1", nx=True, ex=ttl_seconds))
-        finally:
-            await client.aclose()
-    now = time.monotonic()
-    for key, expires in list(_used_codes.items()):
-        if expires < now:
-            del _used_codes[key]
-    if jti in _used_codes:
+    if not jti:
         return False
-    _used_codes[jti] = now + ttl_seconds
-    return True
+    return await ephemeral.set_once(f"sso:used:{jti}", "1", ttl_seconds) is None

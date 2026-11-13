@@ -1,154 +1,236 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import clsx from "clsx";
-import {
-  ArrowDown,
-  ArrowLeft,
-  ArrowUp,
-  Camera,
-  CheckSquare,
-  ClipboardList,
-  Copy,
-  Pencil,
-  Plus,
-  Trash2,
-} from "lucide-react";
-import { useMemo, useState } from "react";
-import { MultiSelect } from "@/components/MultiSelect";
+import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
+import { Archive, ArchiveRestore, ClipboardList, Copy, Plus } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useConfirm } from "@/components/Confirm";
+import { Tabs } from "@/components/motion";
+import { ActiveState, fold, RowEditButton, SearchField } from "@/components/settings/shared";
 import { useToast } from "@/components/Toaster";
-import { Button, Card, Checkbox, EmptyState, ErrorBox, Field, Input, LoadingBlock, PageHeader, Select, Textarea } from "@/components/ui";
+import { Button, Card, EmptyState, ErrorBox, LoadingBlock, PageHeader, Table, Td, Th } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canManageTickets } from "@/lib/constants";
 import { useServiceTypes } from "@/lib/queries";
-import type { FormField, FormFieldType, FormTemplate } from "@/lib/types";
+import type { FormTemplate, ServiceType } from "@/lib/types";
+import {
+  type Draft,
+  duplicateOf,
+  emptyDraft,
+  EXAMPLES,
+  invalidateForms,
+  NEW_KEY,
+  storedChanges,
+  type StoredDraft,
+  writeStored,
+} from "./draft";
+import { FormEditor } from "./FormEditor";
 
-const TYPE_LABEL: Record<FormFieldType, string> = {
-  section: "Seção",
-  text: "Texto curto",
-  textarea: "Texto longo",
-  number: "Número",
-  yes_no: "Sim / Não",
-  choice: "Escolha única",
-  multi_choice: "Múltipla escolha",
-  date: "Data",
-  confirm: "Confirmação",
-  photo: "Fotos",
-};
-const ADD_ORDER: FormFieldType[] = ["photo", "yes_no", "text", "textarea", "choice", "multi_choice", "number", "date", "confirm", "section"];
+type Situation = "active" | "inactive" | "all";
 
-interface Draft {
-  id?: string;
-  name: string;
-  description: string;
-  fields: FormField[];
-  service_type_ids: string[];
-  requires_signature: boolean;
-  is_active: boolean;
-}
-
-const newId = () => `f_${Math.random().toString(36).slice(2, 8)}`;
-
-function field(type: FormFieldType, label: string, extra: Partial<FormField> = {}): FormField {
-  return {
-    id: newId(),
-    type,
-    label,
-    help: null,
-    required: type !== "section",
-    options: type === "choice" || type === "multi_choice" ? ["Opção 1", "Opção 2"] : [],
-    min_photos: type === "photo" ? 1 : 0,
-    max_photos: 10,
-    ...extra,
-  };
-}
-
-// Pontos de partida para não começar do zero (o analista ajusta à vontade).
-const EXAMPLES: { name: string; build: () => Draft }[] = [
-  {
-    name: "Preventiva de rack",
-    build: () => ({
-      name: "Preventiva de rack",
-      description: "Fotos antes e depois e a checagem da organização do rack.",
-      requires_signature: true,
-      is_active: true,
-      service_type_ids: [],
-      fields: [
-        field("section", "Antes do serviço"),
-        field("photo", "Foto do rack antes", { min_photos: 2, max_photos: 6, help: "Frente e lateral, com a porta aberta" }),
-        field("textarea", "Problemas encontrados", { required: false }),
-        field("section", "Depois do serviço"),
-        field("photo", "Foto do rack depois", { min_photos: 2, max_photos: 6 }),
-        field("yes_no", "Cabos organizados e identificados?"),
-        field("yes_no", "Patch cords com velcro?"),
-        field("number", "Quantidade de velcro usada (unidades)", { required: false }),
-        field("confirm", "Ambiente limpo e equipamentos ligados"),
-      ],
-    }),
-  },
-  {
-    name: "Organização de PDV",
-    build: () => ({
-      name: "Organização de PDV",
-      description: "Antes e depois de cada caixa.",
-      requires_signature: true,
-      is_active: true,
-      service_type_ids: [],
-      fields: [
-        field("number", "Quantidade de PDVs atendidos"),
-        field("photo", "Fotos dos PDVs antes", { min_photos: 1, max_photos: 20 }),
-        field("photo", "Fotos dos PDVs depois", { min_photos: 1, max_photos: 20 }),
-        field("multi_choice", "Itens verificados", { options: ["Impressora fiscal", "Leitor de código", "Gaveta", "Cabos", "Nobreak"] }),
-        field("textarea", "Observações", { required: false }),
-      ],
-    }),
-  },
-  {
-    name: "Instalação de câmera (CFTV)",
-    build: () => ({
-      name: "Instalação de câmera (CFTV)",
-      description: "",
-      requires_signature: true,
-      is_active: true,
-      service_type_ids: [],
-      fields: [
-        field("text", "Local da câmera"),
-        field("choice", "Tipo de câmera", { options: ["Bullet", "Dome", "PTZ", "Fisheye"] }),
-        field("photo", "Foto da câmera instalada", { min_photos: 1, max_photos: 4 }),
-        field("photo", "Print da imagem no DVR/NVR", { min_photos: 1, max_photos: 4 }),
-        field("yes_no", "Gravação testada?"),
-      ],
-    }),
-  },
-];
-
-const EMPTY: Draft = {
-  name: "",
-  description: "",
-  fields: [field("text", "Nova pergunta")],
-  service_type_ids: [],
-  requires_signature: true,
-  is_active: true,
-};
+/** Nome do rascunho guardado (um formulário novo pode ainda não ter nome). */
+const draftName = (stored: StoredDraft) =>
+  stored.draft.name.trim() || stored.initial.name.trim() || "Formulário novo";
 
 export default function FormsPage() {
+  return (
+    <Suspense fallback={<LoadingBlock />}>
+      <FormsView />
+    </Suspense>
+  );
+}
+
+/**
+ * Lista de formulários e o construtor. O construtor tem endereço (?editar=<id> ou ?editar=novo):
+ * recarregar a página ou usar o Voltar do navegador não perde a edição (o rascunho fica na aba).
+ */
+function FormsView() {
   const { user } = useAuth();
-  const [draft, setDraft] = useState<Draft | null>(null);
+  const router = useRouter();
+  const params = useSearchParams();
+  const confirm = useConfirm();
+  const editKey = params.get("editar");
+  const allowed = !user || canManageTickets(user.role);
   const templates = useQuery({
     queryKey: ["form-templates"],
     queryFn: () => api.get<FormTemplate[]>("/form-templates"),
+    enabled: allowed,
   });
-  const serviceTypes = useServiceTypes({ active: true });
-  const typeName = useMemo(
-    () => Object.fromEntries((serviceTypes.data ?? []).map((t) => [t.id, t.name])),
-    [serviceTypes.data],
-  );
+  // Todos os tipos, inclusive os inativos: o nome sai certo na lista e no editor.
+  const serviceTypes = useServiceTypes({ enabled: allowed });
+  // Onde a lista estava ao abrir o editor (volta ao mesmo ponto) e se o editor foi aberto por aqui:
+  // aí "voltar" usa o histórico; aberto por link ou depois de recarregar, troca o endereço.
+  const listScroll = useRef<number | null>(null);
+  const openedHere = useRef(false);
 
-  if (user && !canManageTickets(user.role)) {
+  useEffect(() => {
+    if (editKey || listScroll.current === null) return;
+    const top = listScroll.current;
+    listScroll.current = null;
+    requestAnimationFrame(() => window.scrollTo({ top }));
+  }, [editKey]);
+
+  const urlFor = (key: string | null) => {
+    const next = new URLSearchParams(params.toString());
+    if (key) next.set("editar", key);
+    else next.delete("editar");
+    const qs = next.toString();
+    return qs ? `/formularios?${qs}` : "/formularios";
+  };
+
+  /** Abre o editor. `start`: ponto de partida de um formulário novo (em branco, exemplo ou cópia). */
+  const open = async (key: string, start?: Draft) => {
+    const pending = storedChanges();
+    // Um rascunho não salvo só dá lugar a outro com a confirmação de quem estava editando.
+    if (pending && (pending.key !== key || start)) {
+      const ok = await confirm({
+        title: "Descartar o rascunho não salvo?",
+        description: `“${draftName(pending)}” tem alterações que ainda não foram salvas.`,
+        confirmLabel: "Descartar e continuar",
+        cancelLabel: "Voltar",
+        tone: "danger",
+      });
+      if (!ok) return;
+      writeStored(null);
+    }
+    if (start) writeStored({ key, initial: start, draft: start });
+    listScroll.current = window.scrollY;
+    openedHere.current = true;
+    router.push(urlFor(key), { scroll: false });
+  };
+
+  const leave = () => {
+    if (openedHere.current) {
+      openedHere.current = false;
+      router.back();
+    } else {
+      router.replace(urlFor(null), { scroll: false });
+    }
+  };
+
+  if (user && !allowed) {
     return <ErrorBox message="Os formulários são montados por analistas e gestores." />;
   }
-  if (draft) return <Editor initial={draft} onDone={() => setDraft(null)} />;
+
+  if (editKey) {
+    const isNew = editKey === NEW_KEY;
+    if ((!isNew && templates.isLoading) || serviceTypes.isLoading) return <LoadingBlock />;
+    const template = isNew ? null : (templates.data?.find((t) => t.id === editKey) ?? null);
+    if (!isNew && !template) {
+      return (
+        <div className="mx-auto max-w-6xl">
+          <PageHeader title="Editar formulário" />
+          <Card className="flex flex-col items-start gap-3 p-4">
+            <ErrorBox message={templates.error ? errorMessage(templates.error) : "Este formulário não foi encontrado."} />
+            <div className="flex flex-wrap gap-2">
+              {templates.error ? (
+                <Button size="sm" loading={templates.isFetching} onClick={() => templates.refetch()}>
+                  Tentar de novo
+                </Button>
+              ) : null}
+              <Button size="sm" onClick={leave}>
+                Voltar para a lista
+              </Button>
+            </div>
+          </Card>
+        </div>
+      );
+    }
+    return (
+      <FormEditor
+        key={editKey}
+        editKey={editKey}
+        template={template}
+        serviceTypes={serviceTypes.data ?? null}
+        onLeave={leave}
+      />
+    );
+  }
+
+  return <FormsList templates={templates} serviceTypes={serviceTypes.data ?? []} onOpen={open} />;
+}
+
+function FormsList({
+  templates,
+  serviceTypes,
+  onOpen,
+}: {
+  templates: UseQueryResult<FormTemplate[]>;
+  serviceTypes: ServiceType[];
+  onOpen: (key: string, start?: Draft) => void;
+}) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const confirm = useConfirm();
+  const [search, setSearch] = useState("");
+  const [situation, setSituation] = useState<Situation>("active");
+  // Rascunho que ficou na aba (o editor fechou pelo Voltar do navegador, pelo menu ou recarregando).
+  const [pending, setPending] = useState(() => storedChanges());
+  const all = useMemo(() => templates.data ?? [], [templates.data]);
+  const typeName = useMemo(
+    () => new Map(serviceTypes.map((t) => [t.id, t.is_active ? t.name : `${t.name} (inativo)`])),
+    [serviceTypes],
+  );
+  const counts = useMemo(() => {
+    const active = all.filter((t) => t.is_active).length;
+    return { active, inactive: all.length - active, all: all.length };
+  }, [all]);
+  const query = search.trim();
+  const rows = useMemo(() => {
+    const q = fold(query);
+    return all.filter(
+      (t) =>
+        (situation === "all" || t.is_active === (situation === "active")) &&
+        (!q || fold(`${t.name} ${t.description ?? ""}`).includes(q)),
+    );
+  }, [all, situation, query]);
+
+  // Desativar no lugar de excluir: some da lista de anexar, e as OS que já têm o formulário não mudam.
+  const toggle = useMutation({
+    // Mesmas perguntas, só a situação: a versão não muda.
+    mutationFn: (t: FormTemplate) =>
+      api.put<FormTemplate>(`/form-templates/${t.id}`, {
+        name: t.name,
+        description: t.description,
+        fields: t.fields,
+        service_type_ids: t.service_type_ids,
+        requires_signature: t.requires_signature,
+        is_active: !t.is_active,
+      }),
+    onSuccess: (saved) => {
+      invalidateForms(queryClient);
+      toast({
+        title: saved.is_active ? `“${saved.name}” reativado` : `“${saved.name}” desativado`,
+        description: saved.is_active
+          ? "Volta a aparecer para anexar nas OS."
+          : "Não aparece mais para anexar. As OS que já têm este formulário continuam com ele.",
+        tone: "success",
+      });
+    },
+    onError: (e) => toast({ title: "Não foi possível alterar o formulário", description: errorMessage(e), tone: "error" }),
+  });
+
+  const discardPending = async () => {
+    if (!pending) return;
+    const ok = await confirm({
+      title: "Descartar as alterações?",
+      description: `As alterações de “${draftName(pending)}” que ainda não foram salvas serão perdidas.`,
+      confirmLabel: "Descartar",
+      cancelLabel: "Voltar",
+      tone: "danger",
+    });
+    if (!ok) return;
+    writeStored(null);
+    setPending(null);
+  };
+
+  const suggested = (t: FormTemplate) => {
+    const names = t.service_type_ids.map((id) => typeName.get(id) ?? "tipo removido");
+    if (!names.length) return <span className="text-ink-subtle">—</span>;
+    const shown = names.slice(0, 2).join(", ");
+    return <span title={names.join(", ")}>{names.length > 2 ? `${shown} e mais ${names.length - 2}` : shown}</span>;
+  };
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -156,16 +238,41 @@ export default function FormsPage() {
         title="Formulários"
         description="Checklists que o técnico preenche no app. Você decide, em cada OS, se anexa e se é obrigatório."
         actions={
-          <Button variant="primary" onClick={() => setDraft({ ...EMPTY, fields: [field("text", "Nova pergunta")] })}>
+          <Button variant="primary" onClick={() => onOpen(NEW_KEY, emptyDraft())}>
             <Plus className="size-4" />
             Novo formulário
           </Button>
         }
       />
 
+      {pending ? (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300/60 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+          <p>
+            <strong className="font-semibold">“{draftName(pending)}”</strong> tem alterações que ainda não foram salvas.
+          </p>
+          <div className="flex gap-2">
+            <Button size="sm" variant="ghost" onClick={discardPending}>
+              Descartar
+            </Button>
+            <Button size="sm" onClick={() => onOpen(pending.key)}>
+              Continuar editando
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
       {templates.isLoading ? (
-        <LoadingBlock />
-      ) : (templates.data ?? []).length === 0 ? (
+        <Card>
+          <LoadingBlock />
+        </Card>
+      ) : templates.error ? (
+        <Card className="flex flex-col items-start gap-3 p-4">
+          <ErrorBox message={errorMessage(templates.error)} />
+          <Button size="sm" loading={templates.isFetching} onClick={() => templates.refetch()}>
+            Tentar de novo
+          </Button>
+        </Card>
+      ) : all.length === 0 ? (
         <Card>
           <EmptyState
             icon={<ClipboardList className="size-6" />}
@@ -174,7 +281,7 @@ export default function FormsPage() {
             action={
               <div className="flex flex-wrap justify-center gap-2">
                 {EXAMPLES.map((ex) => (
-                  <Button key={ex.name} onClick={() => setDraft(ex.build())}>
+                  <Button key={ex.name} onClick={() => onOpen(NEW_KEY, ex.build())}>
                     {ex.name}
                   </Button>
                 ))}
@@ -184,63 +291,122 @@ export default function FormsPage() {
         </Card>
       ) : (
         <>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {(templates.data ?? []).map((t) => {
-              const qs = t.fields.filter((f) => f.type !== "section");
-              const photos = t.fields.filter((f) => f.type === "photo").length;
-              return (
-                <Card key={t.id} className={clsx("flex flex-col p-4", !t.is_active && "opacity-60")}>
-                  <div className="flex items-start justify-between gap-2">
-                    <h2 className="font-bold text-ink">{t.name}</h2>
-                    {!t.is_active ? <span className="text-xs text-ink-muted">Inativo</span> : null}
-                  </div>
-                  {t.description ? <p className="mt-1 line-clamp-2 text-sm text-ink-muted">{t.description}</p> : null}
-                  <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-muted">
-                    <span className="inline-flex items-center gap-1">
-                      <CheckSquare className="size-3.5" /> {qs.length} perguntas
-                    </span>
-                    <span className="inline-flex items-center gap-1">
-                      <Camera className="size-3.5" /> {photos} campos de foto
-                    </span>
-                    <span>v{t.version}</span>
-                  </div>
-                  {t.service_type_ids.length ? (
-                    <p className="mt-2 text-xs text-ink-muted">
-                      Sugerido em: {t.service_type_ids.map((id) => typeName[id] ?? "tipo removido").join(", ")}
-                    </p>
-                  ) : null}
-                  <div className="mt-auto flex gap-2 pt-4">
-                    <Button size="sm" onClick={() => setDraft({ ...t, description: t.description ?? "" })}>
-                      <Pencil className="size-3.5" />
-                      Editar
+          <Card>
+            <div className="flex flex-col gap-2 border-b border-line p-3 sm:flex-row sm:items-center">
+              <SearchField
+                className="sm:max-w-sm sm:flex-1"
+                value={search}
+                onChange={setSearch}
+                placeholder="Buscar por nome ou descrição"
+                label="Buscar formulário"
+              />
+              <Tabs<Situation>
+                variant="segmented"
+                ariaLabel="Situação"
+                className="self-start sm:ml-auto sm:self-auto"
+                value={situation}
+                onChange={setSituation}
+                items={[
+                  { key: "active", label: "Ativos", count: counts.active },
+                  { key: "inactive", label: "Inativos", count: counts.inactive },
+                  { key: "all", label: "Todos", count: counts.all },
+                ]}
+              />
+            </div>
+            {rows.length === 0 ? (
+              <EmptyState
+                icon={<ClipboardList className="size-6" />}
+                title={query ? "Nenhum formulário encontrado" : situation === "inactive" ? "Nenhum formulário inativo" : "Nenhum formulário ativo"}
+                description={query ? "Confira a busca ou procure também nos inativos (Todos)." : undefined}
+                action={
+                  query ? (
+                    <Button size="sm" onClick={() => setSearch("")}>
+                      Limpar busca
                     </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() =>
-                        setDraft({
-                          ...t,
-                          id: undefined,
-                          name: `${t.name} (cópia)`,
-                          description: t.description ?? "",
-                          fields: t.fields.map((f) => ({ ...f, id: newId() })),
-                        })
-                      }
-                    >
-                      <Copy className="size-3.5" />
-                      Duplicar
-                    </Button>
-                  </div>
-                </Card>
-              );
-            })}
-          </div>
+                  ) : undefined
+                }
+              />
+            ) : (
+              <Table>
+                <thead>
+                  <tr>
+                    <Th>Formulário</Th>
+                    <Th className="text-right">Perguntas</Th>
+                    <Th className="text-right">Fotos</Th>
+                    <Th>Sugerido nas OS de</Th>
+                    <Th className="text-right">Versão</Th>
+                    <Th>Situação</Th>
+                    <Th>Ações</Th>
+                    <Th className="edit-col">Editar</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((t) => {
+                    const questions = t.fields.filter((f) => f.type !== "section").length;
+                    const photos = t.fields.filter((f) => f.type === "photo").length;
+                    return (
+                      <tr key={t.id} className="transition-colors hover:bg-[var(--row-hover)]">
+                        <Td className="max-w-md min-w-56">
+                          <button
+                            type="button"
+                            onClick={() => onOpen(t.id)}
+                            className="rounded text-left font-semibold text-ink hover:text-brand focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
+                          >
+                            {t.name}
+                          </button>
+                          {t.description ? <p className="mt-0.5 line-clamp-2 text-xs text-ink-muted">{t.description}</p> : null}
+                        </Td>
+                        <Td className="text-right tabular-nums">{questions}</Td>
+                        <Td className="text-right tabular-nums">{photos || <span className="text-ink-subtle">—</span>}</Td>
+                        <Td className="max-w-xs text-xs text-ink-muted">{suggested(t)}</Td>
+                        <Td className="text-right text-ink-muted tabular-nums">{t.version}</Td>
+                        <Td>
+                          <ActiveState active={t.is_active} />
+                        </Td>
+                        <Td className="whitespace-nowrap">
+                          <div className="flex gap-1">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => onOpen(NEW_KEY, duplicateOf(t))}
+                              aria-label={`Duplicar “${t.name}”`}
+                            >
+                              <Copy className="size-3.5" />
+                              Duplicar
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              loading={toggle.isPending && toggle.variables?.id === t.id}
+                              disabled={toggle.isPending}
+                              onClick={() => toggle.mutate(t)}
+                              aria-label={`${t.is_active ? "Desativar" : "Reativar"} “${t.name}”`}
+                            >
+                              {t.is_active ? <Archive className="size-3.5" /> : <ArchiveRestore className="size-3.5" />}
+                              {t.is_active ? "Desativar" : "Reativar"}
+                            </Button>
+                          </div>
+                        </Td>
+                        <Td className="edit-col">
+                          <RowEditButton label={`Editar “${t.name}”`} onClick={() => onOpen(t.id)} />
+                        </Td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </Table>
+            )}
+          </Card>
           <p className="mt-4 text-xs text-ink-muted">
             Exemplos para começar:{" "}
             {EXAMPLES.map((ex, i) => (
               <span key={ex.name}>
                 {i ? " · " : ""}
-                <button type="button" className="text-brand hover:underline" onClick={() => setDraft(ex.build())}>
+                <button
+                  type="button"
+                  className="rounded font-medium text-brand hover:underline focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
+                  onClick={() => onOpen(NEW_KEY, ex.build())}
+                >
                   {ex.name}
                 </button>
               </span>
@@ -248,247 +414,6 @@ export default function FormsPage() {
           </p>
         </>
       )}
-    </div>
-  );
-}
-
-function Editor({ initial, onDone }: { initial: Draft; onDone: () => void }) {
-  const queryClient = useQueryClient();
-  const { toast } = useToast();
-  const [draft, setDraft] = useState<Draft>(initial);
-  const serviceTypes = useServiceTypes({ active: true });
-  const save = useMutation({
-    mutationFn: () => {
-      const body = {
-        name: draft.name,
-        description: draft.description || null,
-        fields: draft.fields,
-        service_type_ids: draft.service_type_ids,
-        requires_signature: draft.requires_signature,
-        is_active: draft.is_active,
-      };
-      return draft.id
-        ? api.put<FormTemplate>(`/form-templates/${draft.id}`, body)
-        : api.post<FormTemplate>("/form-templates", body);
-    },
-    onSuccess: (t) => {
-      queryClient.invalidateQueries({ queryKey: ["form-templates"] });
-      toast({ title: `Formulário "${t.name}" salvo`, tone: "success" });
-      onDone();
-    },
-  });
-  const setField = (i: number, patch: Partial<FormField>) =>
-    setDraft((d) => ({ ...d, fields: d.fields.map((f, j) => (j === i ? { ...f, ...patch } : f)) }));
-  const move = (i: number, delta: number) =>
-    setDraft((d) => {
-      const fields = [...d.fields];
-      const j = i + delta;
-      if (j < 0 || j >= fields.length) return d;
-      [fields[i], fields[j]] = [fields[j], fields[i]];
-      return { ...d, fields };
-    });
-
-  return (
-    <div className="mx-auto max-w-6xl">
-      <button type="button" onClick={onDone} className="mb-3 inline-flex items-center gap-1 text-sm text-ink-muted hover:text-ink">
-        <ArrowLeft className="size-4" />
-        Formulários
-      </button>
-      <PageHeader
-        title={draft.id ? "Editar formulário" : "Novo formulário"}
-        description={
-          draft.id
-            ? "As OS que já têm este formulário continuam com a versão anterior; as próximas recebem esta."
-            : "Monte as perguntas na ordem em que o técnico vai responder."
-        }
-        actions={
-          <>
-            <Button onClick={onDone}>Cancelar</Button>
-            <Button variant="primary" loading={save.isPending} onClick={() => save.mutate()}>
-              Salvar formulário
-            </Button>
-          </>
-        }
-      />
-      {save.error ? (
-        <div className="mb-4">
-          <ErrorBox message={errorMessage(save.error)} />
-        </div>
-      ) : null}
-
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
-        <div className="flex flex-col gap-4">
-          <Card className="grid gap-4 p-4 sm:grid-cols-2">
-            <Field label="Nome" required className="sm:col-span-2">
-              <Input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Ex.: Preventiva de rack" />
-            </Field>
-            <Field label="Descrição" className="sm:col-span-2">
-              <Textarea rows={2} value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
-            </Field>
-            <div className="sm:col-span-2">
-              <MultiSelect
-                label="Sugerir nas OS destes tipos de serviço"
-                ariaLabel="Sugerir nas OS destes tipos de serviço"
-                options={(serviceTypes.data ?? []).map((t) => ({ value: t.id, label: t.name }))}
-                value={draft.service_type_ids}
-                onChange={(v) => setDraft({ ...draft, service_type_ids: v })}
-              />
-            </div>
-            <Checkbox
-              label="Exige a assinatura do responsável no local (quando obrigatório)"
-              checked={draft.requires_signature}
-              onChange={(v) => setDraft({ ...draft, requires_signature: v })}
-            />
-            <Checkbox label="Ativo" checked={draft.is_active} onChange={(v) => setDraft({ ...draft, is_active: v })} />
-          </Card>
-
-          <Card>
-            <ol className="divide-y divide-line">
-              {draft.fields.map((f, i) => (
-                <li key={f.id} className={clsx("flex gap-3 p-3", f.type === "section" && "bg-surface-2/60")}>
-                  <span className="mt-2 w-5 shrink-0 text-right text-xs text-ink-muted tabular-nums">{i + 1}</span>
-                  <div className="flex min-w-0 flex-1 flex-col gap-2">
-                    <div className="flex flex-wrap gap-2">
-                      <div className="w-40 shrink-0">
-                        <Select
-                          value={f.type}
-                          aria-label="Tipo do campo"
-                          onChange={(e) => {
-                            const type = e.target.value as FormFieldType;
-                            const base = field(type, f.label);
-                            setField(i, { type, options: f.options.length ? f.options : base.options, min_photos: base.min_photos, required: type !== "section" && f.required });
-                          }}
-                        >
-                          {ADD_ORDER.map((t) => (
-                            <option key={t} value={t}>
-                              {TYPE_LABEL[t]}
-                            </option>
-                          ))}
-                        </Select>
-                      </div>
-                      <Input
-                        className="min-w-48 flex-1"
-                        value={f.label}
-                        onChange={(e) => setField(i, { label: e.target.value })}
-                        placeholder={f.type === "section" ? "Título da seção" : "Pergunta"}
-                        aria-label="Texto do campo"
-                      />
-                    </div>
-                    {f.type !== "section" ? (
-                      <Input
-                        value={f.help ?? ""}
-                        onChange={(e) => setField(i, { help: e.target.value || null })}
-                        placeholder="Orientação para o técnico (opcional)"
-                        aria-label="Orientação"
-                        className="h-8 text-xs"
-                      />
-                    ) : null}
-                    {f.type === "choice" || f.type === "multi_choice" ? (
-                      <Textarea
-                        rows={3}
-                        value={f.options.join("\n")}
-                        onChange={(e) => setField(i, { options: e.target.value.split("\n") })}
-                        placeholder="Uma opção por linha"
-                        aria-label="Opções"
-                        className="text-xs"
-                      />
-                    ) : null}
-                    <div className="flex flex-wrap items-center gap-4 text-xs text-ink-muted">
-                      {f.type === "photo" ? (
-                        <>
-                          <label className="inline-flex items-center gap-1.5">
-                            <span className="font-semibold text-ink/80">Mínimo</span>
-                            <Input
-                              type="number"
-                              min={0}
-                              max={20}
-                              value={f.min_photos}
-                              onChange={(e) => setField(i, { min_photos: Number(e.target.value) })}
-                              className="h-7 w-16 text-xs"
-                            />
-                          </label>
-                          <label className="inline-flex items-center gap-1.5">
-                            <span className="font-semibold text-ink/80">Máximo</span>
-                            <Input
-                              type="number"
-                              min={1}
-                              max={30}
-                              value={f.max_photos}
-                              onChange={(e) => setField(i, { max_photos: Number(e.target.value) })}
-                              className="h-7 w-16 text-xs"
-                            />
-                          </label>
-                          <span>{f.min_photos > 0 ? "obrigatório" : "opcional"}</span>
-                        </>
-                      ) : f.type !== "section" ? (
-                        <Checkbox label="Obrigatório" checked={f.required} onChange={(v) => setField(i, { required: v })} />
-                      ) : null}
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 flex-col gap-1">
-                    <IconButton label="Subir" onClick={() => move(i, -1)} disabled={i === 0}>
-                      <ArrowUp className="size-3.5" />
-                    </IconButton>
-                    <IconButton label="Descer" onClick={() => move(i, 1)} disabled={i === draft.fields.length - 1}>
-                      <ArrowDown className="size-3.5" />
-                    </IconButton>
-                    <IconButton
-                      label="Remover"
-                      danger
-                      onClick={() => setDraft((d) => ({ ...d, fields: d.fields.filter((_, j) => j !== i) }))}
-                      disabled={draft.fields.length === 1}
-                    >
-                      <Trash2 className="size-3.5" />
-                    </IconButton>
-                  </div>
-                </li>
-              ))}
-            </ol>
-            <div className="flex flex-wrap gap-1.5 border-t border-line p-3">
-              <span className="mr-1 self-center text-xs font-semibold text-ink/80">Adicionar:</span>
-              {ADD_ORDER.map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() =>
-                    setDraft((d) => ({ ...d, fields: [...d.fields, field(t, t === "section" ? "Nova seção" : "Nova pergunta")] }))
-                  }
-                  className="rounded-md border border-line px-2.5 py-1 text-xs text-ink hover:border-brand hover:text-brand"
-                >
-                  {TYPE_LABEL[t]}
-                </button>
-              ))}
-            </div>
-          </Card>
-        </div>
-
-        <aside className="lg:sticky lg:top-20 lg:self-start">
-          <p className="mb-2 text-xs font-bold tracking-wide text-ink-muted uppercase">Como o técnico vê</p>
-          <div className="rounded-[1.75rem] border-8 border-ink/85 bg-canvas p-3 shadow-sm dark:border-black">
-            <div className="max-h-[32rem] overflow-y-auto rounded-xl bg-surface p-3">
-              <p className="text-sm font-bold text-ink">{draft.name || "Sem nome"}</p>
-              <div className="mt-3 flex flex-col gap-3">
-                {draft.fields.map((f) =>
-                  f.type === "section" ? (
-                    <p key={f.id} className="border-b border-line pb-1 text-[11px] font-bold tracking-wide text-ink-muted uppercase">
-                      {f.label}
-                    </p>
-                  ) : (
-                    <div key={f.id}>
-                      <p className="text-xs font-semibold text-ink">
-                        {f.label}
-                        {f.required || (f.type === "photo" && f.min_photos > 0) ? <span className="text-red-500"> *</span> : null}
-                      </p>
-                      <Preview f={f} />
-                    </div>
-                  ),
-                )}
-              </div>
-              <div className="mt-4 rounded-lg bg-brand py-2 text-center text-xs font-medium text-white">Concluir formulário</div>
-            </div>
-          </div>
-        </aside>
-      </div>
     </div>
   );
 }
