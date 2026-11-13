@@ -125,6 +125,7 @@ export function ProjectDialog({ project, onClose }: { project: Project | null; o
           <span className="text-xs font-semibold text-ink/80">Técnicos do projeto</span>
           <MultiSelect
             label="Técnicos"
+            ariaLabel="Técnicos do projeto"
             options={(technicians.data ?? []).map((t) => ({ value: t.id, label: t.name }))}
             value={form.member_ids}
             onChange={(v) => set("member_ids", v)}

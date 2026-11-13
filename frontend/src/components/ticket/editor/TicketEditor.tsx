@@ -244,7 +244,8 @@ export function TicketEditor({ ticket, variant, onClose }: { ticket: TicketDetai
         variant === "dialog" ? "h-full" : "min-h-[calc(100vh-7rem)] rounded-2xl border border-line shadow-elev-2",
       )}
     >
-      <div className="flex items-center gap-3 bg-brand px-5 py-3 text-white">
+      {/* Azul forte no escuro: o branco fica em 5,2:1 (no brand, 4,1:1). Texto no mínimo white/90 e, no escuro, hover do link mais leve: tudo acima de 4,5:1. */}
+      <div className="flex items-center gap-3 bg-brand dark:bg-brand-strong px-5 py-3 text-white">
         {variant === "page" ? (
           <Link href="/chamados" className="rounded-md p-1 text-white/80 hover:bg-white/10 hover:text-white" aria-label="Voltar para Chamados">
             <ArrowLeft className="size-4" />
@@ -255,7 +256,7 @@ export function TicketEditor({ ticket, variant, onClose }: { ticket: TicketDetai
         <div className="min-w-0 flex-1">
           <Heading className="truncate text-[15px] font-bold tracking-[-0.01em]">
             Editar OS <span className="font-mono">#{ticket.number}</span>
-            <span className="ml-2 font-normal text-white/80">{ticket.title}</span>
+            <span className="ml-2 font-normal text-white/90">{ticket.title}</span>
           </Heading>
         </div>
         <span className="rounded-full bg-white/95 px-0.5 py-0.5">
@@ -265,7 +266,7 @@ export function TicketEditor({ ticket, variant, onClose }: { ticket: TicketDetai
           <>
             <Link
               href={`/chamados/${ticket.id}`}
-              className="hidden rounded-md px-2 py-1 text-xs font-medium text-white/85 hover:bg-white/10 hover:text-white sm:inline-flex"
+              className="hidden rounded-md px-2 py-1 text-xs font-medium text-white hover:bg-white/10 dark:hover:bg-white/5 sm:inline-flex"
             >
               Abrir em página
             </Link>
@@ -312,7 +313,7 @@ export function TicketEditor({ ticket, variant, onClose }: { ticket: TicketDetai
             Salvar
           </Button>
         ) : (
-          <span className="text-xs text-ink-subtle">O que muda nesta aba é salvo na hora.</span>
+          <span className="text-xs text-ink-muted">O que muda nesta aba é salvo na hora.</span>
         )}
         {tab === "geral" && saveState.dirty ? <span className="text-xs text-amber-700 dark:text-amber-300">Alterações não salvas</span> : null}
         <div className="ml-auto flex items-center gap-0.5">

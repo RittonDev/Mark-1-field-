@@ -15,11 +15,14 @@ export function MultiSelect({
   options,
   value,
   onChange,
+  ariaLabel,
 }: {
   label: string;
   options: MultiOption[];
   value: string[];
   onChange: (value: string[]) => void;
+  /** Para quando o rótulo visível fica fora do botão: o leitor de tela ouve "<ariaLabel>: <resumo>". */
+  ariaLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -46,6 +49,7 @@ export function MultiSelect({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
+        aria-label={ariaLabel ? `${ariaLabel}: ${summary}` : undefined}
         className={clsx(
           "inline-flex h-9 w-full items-center justify-between gap-2 rounded-md border bg-surface px-3 text-sm",
           value.length ? "border-brand/50 text-ink" : "border-line text-ink-muted",
