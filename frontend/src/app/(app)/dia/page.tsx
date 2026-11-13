@@ -179,13 +179,21 @@ export default function DayPage() {
   const data = query.data;
 
   // Um bloco por técnico; a visita entra também no dia de quem vai junto (marcada como tal).
+  // Tudo pela hora de atuação, a manhã primeiro: a agendada ou, sem agenda, a de início (sem hora
+  // vai para o fim). Os blocos seguem a primeira OS de cada técnico, então quem começa mais cedo
+  // aparece em cima e, dentro do bloco, as OS seguem o relógio.
   const groups = useMemo(() => {
     const map = new Map<string, { name: string; items: { a: Activity; along: string | null }[] }>();
     const add = (key: string, name: string, a: Activity, along: string | null) => {
       if (!map.has(key)) map.set(key, { name, items: [] });
       map.get(key)!.items.push({ a, along });
     };
-    for (const a of data?.activities ?? []) {
+    const at = (a: Activity) => {
+      const value = a.scheduled_start ?? a.started_at;
+      return value ? new Date(value).getTime() : Number.MAX_SAFE_INTEGER;
+    };
+    const ordered = [...(data?.activities ?? [])].sort((x, y) => at(x) - at(y));
+    for (const a of ordered) {
       if (stateFilter && a.state !== stateFilter) continue;
       add(a.ticket.assignee?.id ?? "none", a.ticket.assignee?.name ?? "Sem técnico", a, null);
       for (const h of a.ticket.helpers ?? []) add(h.id, h.name, a, a.ticket.assignee?.name ?? "sem responsável");

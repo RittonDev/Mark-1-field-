@@ -185,13 +185,15 @@ async def day_activities(
             )
         )
 
-    # Por técnico (sem técnico por último) e, dentro dele, pela hora prevista ou realizada.
+    # Pela hora de atuação (a manhã primeiro): a prevista ou, sem agenda, a realizada; as sem hora
+    # vão por último. A tela agrupa por técnico na ordem em que aparecem, então quem começa mais
+    # cedo vem em cima e, dentro do técnico, as OS seguem o relógio.
     far = datetime.max.replace(tzinfo=day_start.tzinfo)
     activities.sort(
         key=lambda a: (
+            a.scheduled_start or a.started_at or far,
             a.ticket.assignee is None,
             a.ticket.assignee.name if a.ticket.assignee else "",
-            a.scheduled_start or a.started_at or far,
         )
     )
     counts = Counter(a.state for a in activities)
