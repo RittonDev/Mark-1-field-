@@ -350,7 +350,7 @@ export interface TicketDetail extends TicketListItem {
   signature_attachment_id: UUID | null;
   /** Custos extras (a gestão lança; o técnico só vê; o solicitante recebe vazio). */
   expenses: Expense[];
-  /** Link público do relatório para o cliente (só para a gestão; existe com a OS concluída). */
+  /** Link público do relatório para o cliente (gestão; e o técnico responsável com a OS concluída). */
   report_link?: ReportLink | null;
   authorized_by_name?: string | null;
   authorization_channel?: AuthorizationChannel | null;

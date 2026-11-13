@@ -16,6 +16,7 @@ import { ArrivalResult, AuthorizationNotice, FieldClockLine, OnsiteTimer } from 
 import { FormsCard } from "../../components/ticket/FormsCard";
 import { PartRequestSheet, PartRequestsCard } from "../../components/ticket/PartRequests";
 import { QuickActions, RecurrenceCard } from "../../components/ticket/QuickActions";
+import { ReportShareCard } from "../../components/ticket/ReportShareCard";
 import { HelperBadge, VisitNoteCard, VisitTeamCard } from "../../components/ticket/VisitInfo";
 import { InfoPanel } from "../../components/ticket/InfoPanel";
 import { PhotosPanel } from "../../components/ticket/PhotosPanel";
@@ -254,6 +255,13 @@ export default function TicketScreen() {
               ) : null}
             </Card>
           </Animated.View>
+
+          {/* Concluída: o próximo passo é mandar o relatório ao cliente. */}
+          {isMine && (current.status === "resolved" || current.status === "closed") ? (
+            <Animated.View entering={enter(1)}>
+              <ReportShareCard ticket={current} />
+            </Animated.View>
+          ) : null}
 
           {/* Recado do analista para o técnico: antes de tudo o que vem depois do cabeçalho. */}
           <VisitNoteCard note={current.visit_note} />
