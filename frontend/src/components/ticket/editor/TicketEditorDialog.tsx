@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useRef } from "react";
+import { useEffect, useEffectEvent, useRef } from "react";
 import { createPortal } from "react-dom";
 import { ErrorBox, lockScroll, Spinner } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
@@ -15,6 +15,10 @@ import { TicketEditor } from "./TicketEditor";
 export function TicketEditorDialog({ ticketId, onClose }: { ticketId: UUID; onClose: () => void }) {
   const ticket = useQuery({ queryKey: ["ticket", ticketId], queryFn: () => api.get<TicketDetail>(`/tickets/${ticketId}`) });
   const panel = useRef<HTMLDivElement>(null);
+  // Quem abre o painel passa um onClose novo a cada render (ex.: () => setOpen(false)). O efeito não
+  // depende dele: senão rodaria de novo a cada atualização da lista atrás e tiraria o foco do campo
+  // que está sendo editado.
+  const close = useEffectEvent(() => onClose());
 
   useEffect(() => {
     const unlock = lockScroll();
@@ -22,17 +26,19 @@ export function TicketEditorDialog({ ticketId, onClose }: { ticketId: UUID; onCl
     panel.current?.focus();
     const onKey = (e: KeyboardEvent) => {
       // Esc fecha, menos quando outro diálogo (horários, transição, valor) está aberto por cima.
-      if (e.key === "Escape" && document.querySelectorAll('[role="dialog"]:not([data-drawer]), [role="menu"]').length === 0) onClose();
+      if (e.key === "Escape" && document.querySelectorAll('[role="dialog"]:not([data-drawer]), [role="menu"]').length === 0) close();
     };
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("keydown", onKey);
       unlock();
     };
-  }, [onClose]);
+  }, []);
 
   return createPortal(
-    <div className="fixed inset-0 z-40 flex justify-end">
+    // O painel é um portal no <body>, mas o clique ainda "sobe" pela árvore do React até quem o abriu
+    // (ex.: a linha de Chamados, que abriria a OS em página inteira). Ele para aqui.
+    <div className="fixed inset-0 z-40 flex justify-end" onClick={(e) => e.stopPropagation()}>
       <div className="absolute inset-0 animate-fade bg-[rgb(9_11_15/0.38)] backdrop-blur-[2px]" onClick={onClose} aria-hidden />
       <div
         ref={panel}
