@@ -3,9 +3,9 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 import { FileText, PackageOpen, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useToast } from "@/components/Toaster";
-import { Button, Card, CardHeader, ErrorBox } from "@/components/ui";
+import { Button, Card, CardHeader, ErrorBox, isTopLayer, restoreFocus, trapTab } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { formatShort } from "@/lib/format";
 import type { PartRequest, PartRequestStatus, Quote, TicketDetail } from "@/lib/types";
@@ -36,17 +36,30 @@ export function PartRequestsCard({ ticket }: { ticket: TicketDetail }) {
     onSuccess: refresh,
   });
 
-  // Esc fecha só o zoom; o preventDefault avisa o painel da OS que a tecla já foi tratada. Um Esc que
-  // a camada de cima já tratou (a busca Ctrl+K aberta sobre a foto) fica com ela.
+  // Foto ampliada como camada: foco no Fechar ao abrir, Tab preso nela, Esc fecha só ela (o
+  // preventDefault avisa o painel da OS) e o foco volta para a miniatura. Uma tecla que a camada de
+  // cima já tratou (a busca Ctrl+K aberta sobre a foto) fica com ela.
+  const zoomBox = useRef<HTMLDivElement>(null);
+  const zoomClose = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (!zoom) return;
+    const opener = document.activeElement;
+    zoomClose.current?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || e.defaultPrevented) return;
-      e.preventDefault();
-      setZoom(null);
+      const node = zoomBox.current;
+      if (e.defaultPrevented || !node || !isTopLayer(node)) return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setZoom(null);
+      } else if (e.key === "Tab") {
+        trapTab(e, node);
+      }
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      restoreFocus(opener);
+    };
   }, [zoom]);
 
   if (requests.length === 0) return null;
@@ -148,13 +161,14 @@ export function PartRequestsCard({ ticket }: { ticket: TicketDetail }) {
       ) : null}
       {zoom ? (
         <div
+          ref={zoomBox}
           role="dialog"
           aria-modal="true"
           aria-label="Foto da peça"
           className="fixed inset-0 z-50 flex animate-fade items-center justify-center bg-black/80 p-4"
           onClick={() => setZoom(null)}
         >
-          <button type="button" className="absolute top-4 right-4 rounded-full bg-white/10 p-2 text-white" aria-label="Fechar">
+          <button ref={zoomClose} type="button" className="absolute top-4 right-4 rounded-full bg-white/10 p-2 text-white" aria-label="Fechar">
             <X className="size-5" />
           </button>
           {/* eslint-disable-next-line @next/next/no-img-element */}

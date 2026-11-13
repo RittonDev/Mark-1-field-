@@ -20,7 +20,7 @@ import { createPortal } from "react-dom";
 import { useConfirm } from "@/components/Confirm";
 import { Tabs } from "@/components/motion";
 import { useToast } from "@/components/Toaster";
-import { Button, EmptyState, ErrorBox, Input, LoadingBlock, Textarea } from "@/components/ui";
+import { Button, EmptyState, ErrorBox, Input, isTopLayer, LoadingBlock, restoreFocus, Textarea, trapTab } from "@/components/ui";
 import { absoluteApiUrl, api, errorMessage } from "@/lib/api";
 import { ATTACHMENT_KIND } from "@/lib/constants";
 import { formatBytes, formatDateTime } from "@/lib/format";
@@ -131,15 +131,29 @@ function Caption({ attachment, canEdit, onSaved }: { attachment: Attachment; can
 
 function Lightbox({ items, index, onClose, onMove }: { items: Attachment[]; index: number; onClose: () => void; onMove: (i: number) => void }) {
   const a = items[index];
+  const box = useRef<HTMLDivElement>(null);
+  const closeButton = useRef<HTMLButtonElement>(null);
+  // Foco no Fechar ao abrir e de volta na miniatura ao fechar (teclado e leitor de tela).
+  useEffect(() => {
+    const opener = document.activeElement;
+    closeButton.current?.focus();
+    return () => restoreFocus(opener);
+  }, []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      // Um Esc que a camada de cima já tratou (a busca Ctrl+K aberta sobre a foto) fica com ela.
-      if (e.key === "Escape" && !e.defaultPrevented) {
+      const node = box.current;
+      // Uma tecla que a camada de cima já tratou (a busca Ctrl+K aberta sobre a foto) fica com ela.
+      if (e.defaultPrevented || !node || !isTopLayer(node)) return;
+      if (e.key === "Escape") {
         e.preventDefault();
         onClose();
+      } else if (e.key === "Tab") {
+        trapTab(e, node);
+      } else if (e.key === "ArrowRight") {
+        onMove(Math.min(items.length - 1, index + 1));
+      } else if (e.key === "ArrowLeft") {
+        onMove(Math.max(0, index - 1));
       }
-      if (e.key === "ArrowRight") onMove(Math.min(items.length - 1, index + 1));
-      if (e.key === "ArrowLeft") onMove(Math.max(0, index - 1));
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -147,13 +161,14 @@ function Lightbox({ items, index, onClose, onMove }: { items: Attachment[]; inde
   if (!a) return null;
   return createPortal(
     <div
+      ref={box}
       role="dialog"
       aria-modal="true"
       aria-label={`Foto: ${a.description || a.filename}`}
       className="fixed inset-0 z-50 flex animate-fade flex-col items-center justify-center bg-black/85 p-4 backdrop-blur-sm"
       onClick={onClose}
     >
-      <button type="button" onClick={onClose} className="absolute top-4 right-4 rounded-full bg-white/10 p-2 text-white hover:bg-white/20" aria-label="Fechar">
+      <button ref={closeButton} type="button" onClick={onClose} className="absolute top-4 right-4 rounded-full bg-white/10 p-2 text-white hover:bg-white/20" aria-label="Fechar">
         <X className="size-5" />
       </button>
       {index > 0 ? (
