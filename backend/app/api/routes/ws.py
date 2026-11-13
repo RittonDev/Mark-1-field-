@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import json
+import logging
 import time
 import uuid
 from typing import Any
@@ -8,6 +9,7 @@ from typing import Any
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
+from app.core import sessions
 from app.core.enums import UserRole
 from app.core.security import InvalidToken, decode_token
 from app.db.session import SessionLocal
@@ -15,10 +17,12 @@ from app.models import User
 from app.services.realtime import Connection, manager
 
 router = APIRouter(tags=["realtime"])
+log = logging.getLogger(__name__)
 
 AUTH_FAILED = 4401
 # O token só é conferido na abertura; o socket fica aberto por horas. A cada minuto vê se o token
-# venceu; a cada 5 minutos relê o usuário (desativado, senha trocada, papel ou equipe mudados).
+# venceu; a cada 5 minutos relê o usuário (desativado, senha trocada, papel ou equipe mudados) e
+# confere se a sessão de login foi encerrada (saiu, ou o refresh foi copiado).
 EXPIRY_CHECK_S = 60
 USER_CHECK_S = 300
 
@@ -38,6 +42,22 @@ def session_ok(
     if user is None or not user.is_active or user.token_revoked(payload):
         return False
     return user.role == role and user.team_id == team_id
+
+
+async def _load_user(user_id: uuid.UUID) -> User | None:
+    async with SessionLocal() as db:
+        return await db.get(User, user_id)
+
+
+async def _session_alive(
+    payload: dict[str, Any], user_id: uuid.UUID, role: UserRole, team_id: uuid.UUID | None
+) -> bool:
+    """`session_ok` com o usuário relido do banco e a sessão de login ainda aberta (as rotas HTTP
+    recusam o token de uma sessão encerrada; o socket dela também para de receber)."""
+    user = await _load_user(user_id)
+    if not session_ok(user, payload, role=role, team_id=team_id, now=time.time()):
+        return False
+    return not await sessions.is_revoked(payload.get("sid"))
 
 
 async def _close(websocket: WebSocket, conn: Connection, reason: str) -> None:
@@ -65,9 +85,13 @@ async def _watch_session(
         if time.monotonic() - checked_user < USER_CHECK_S:
             continue
         checked_user = time.monotonic()
-        async with SessionLocal() as db:
-            user = await db.get(User, user_id)
-        if not session_ok(user, payload, role=role, team_id=team_id, now=time.time()):
+        try:
+            alive = await _session_alive(payload, user_id, role, team_id)
+        except Exception:
+            # Banco ou Redis fora do ar por um instante: confere de novo na próxima volta.
+            log.exception("Falha ao conferir a sessão do WebSocket")
+            continue
+        if not alive:
             await _close(websocket, conn, "sessão encerrada")
             return
 
@@ -84,10 +108,11 @@ async def websocket_endpoint(websocket: WebSocket, token: str | None = None) -> 
         await websocket.close(code=AUTH_FAILED, reason="token inválido")
         return
 
-    async with SessionLocal() as db:
-        user = await db.get(User, user_id)
-    if user is None or not session_ok(
-        user, payload, role=user.role, team_id=user.team_id, now=time.time()
+    user = await _load_user(user_id)
+    if (
+        user is None
+        or not session_ok(user, payload, role=user.role, team_id=user.team_id, now=time.time())
+        or await sessions.is_revoked(payload.get("sid"))
     ):
         await websocket.close(code=AUTH_FAILED, reason="sessão encerrada")
         return

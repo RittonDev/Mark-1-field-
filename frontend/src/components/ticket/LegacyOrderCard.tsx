@@ -1,11 +1,10 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
 import { Archive, ExternalLink, FileText } from "lucide-react";
 import { Card, CardHeader, SectionTitle } from "@/components/ui";
-import { api } from "@/lib/api";
 import { formatDateTime, formatMoney } from "@/lib/format";
-import type { Attachment, TicketDetail } from "@/lib/types";
+import type { TicketDetail } from "@/lib/types";
+import { useTicketAttachments } from "./AttachmentsTab";
 
 const DEADLINE: Record<string, string> = {
   completedOnSchedule: "cumprido no prazo",
@@ -29,11 +28,7 @@ const isImage = (type: string | null, url: string) => (type ?? "").startsWith("i
 export function LegacyOrderCard({ ticket }: { ticket: TicketDetail }) {
   const legacy = ticket.legacy;
   // Os mesmos anexos da aba Anexos (a consulta é compartilhada): arquivo que já está lá não se repete aqui.
-  const attachments = useQuery({
-    queryKey: ["ticket", ticket.id, "attachments"],
-    queryFn: () => api.get<Attachment[]>(`/tickets/${ticket.id}/attachments`),
-    enabled: Boolean(legacy?.files?.length),
-  });
+  const attachments = useTicketAttachments(ticket.id, Boolean(legacy?.files?.length));
   if (!legacy) return null;
   const values = legacy.values;
   const items = legacy.items ?? [];

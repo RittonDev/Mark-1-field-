@@ -128,7 +128,7 @@ export const PhotosPanel = memo(function PhotosPanel({ ticket }: { ticket: Local
                 icon="repeat"
                 compact
                 variant="ghost"
-                onPress={() => void requestSync()}
+                onPress={() => void requestSync({ manual: true })}
                 disabled={!online || sync.syncing}
                 loading={sync.syncing}
               />

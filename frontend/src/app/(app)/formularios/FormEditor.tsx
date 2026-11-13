@@ -5,13 +5,15 @@ import clsx from "clsx";
 import { ArrowDown, ArrowLeft, ArrowUp, Camera, ChevronDown, Copy, Plus, Trash2, X } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useConfirm } from "@/components/Confirm";
-import { FieldError, fold, plural, SearchField, UnsavedBar, useBeforeUnload } from "@/components/settings/shared";
+import { FieldError, fold, plural, SearchField, UnsavedBar } from "@/components/settings/shared";
 import { useToast } from "@/components/Toaster";
 import { Button, buttonClassName, Card, Checkbox, ErrorBox, Field, Input, PageHeader, Select, Textarea } from "@/components/ui";
-import { api, errorMessage } from "@/lib/api";
+import { api, errorMessage, request } from "@/lib/api";
+import { useUnsavedChanges } from "@/lib/hooks";
 import type { FormField, FormFieldType, FormTemplate, ServiceType } from "@/lib/types";
 import {
   ADD_ORDER,
+  changesTickets,
   type Draft,
   hasProblems,
   invalidateForms,
@@ -30,6 +32,26 @@ import {
 } from "./draft";
 
 type FocusTarget = "label" | "up" | "down";
+
+/** Modelo salvo. Com "levar às OS que não começaram", `applied_to` diz quantas OS receberam a mudança. */
+type SavedTemplate = FormTemplate & { applied_to?: number | null };
+
+/** Aviso depois de salvar: a versão nova e, quando pedido, as OS que receberam a mudança. */
+function savedDescription(saved: SavedTemplate, newVersion: boolean): string | undefined {
+  const applied = saved.applied_to;
+  if (applied === undefined || applied === null) {
+    return newVersion
+      ? `Versão ${saved.version}: vale para as próximas OS; as que já têm o formulário seguem com a anterior.`
+      : undefined;
+  }
+  const reached =
+    applied === 0
+      ? "Nenhuma OS aberta estava com ele sem começar."
+      : applied === 1
+        ? "A OS em que ele ainda não tinha começado também recebeu a mudança."
+        : `As ${applied.toLocaleString("pt-BR")} OS em que ele ainda não tinha começado também receberam a mudança.`;
+  return newVersion ? `Versão ${saved.version}. ${reached} As que já começaram seguem com a anterior.` : reached;
+}
 
 /** Nome da pergunta para os botões ("Subir “Foto do rack”"), lido pelo leitor de tela. */
 function nameOf(f: FormField, position: number) {
@@ -61,6 +83,8 @@ export function FormEditor({
   const [draft, setDraft] = useState(start);
   const [removed, setRemoved] = useState<{ field: FormField; index: number } | null>(null);
   const [showErrors, setShowErrors] = useState(false);
+  // Levar a mudança também às OS em que o formulário ainda não começou (pendente, sem resposta e sem foto).
+  const [applyPending, setApplyPending] = useState(false);
   const rows = useRef(new Map<string, HTMLLIElement>());
   const pendingFocus = useRef<{ id: string; target: FocusTarget } | "undo" | null>(null);
   const undoButton = useRef<HTMLButtonElement>(null);
@@ -72,7 +96,10 @@ export function FormEditor({
   const invalid = showErrors && hasProblems(problems);
   const questions = draft.fields.filter((f) => f.type !== "section").length;
   const full = draft.fields.length >= LIMITS.fields;
-  useBeforeUnload(dirty);
+  // Perguntas ou nome mudaram num modelo salvo: dá para levar a mudança às OS que ainda não começaram.
+  const reachesTickets = template !== null && changesTickets(draft, initial);
+  // Fechar a aba ou sair da central pergunta antes (o rascunho da aba volta ao recarregar ou ao voltar).
+  useUnsavedChanges(dirty);
 
   // O editor abre no topo (nome e descrição à vista), mesmo vindo de um formulário lá embaixo na lista.
   useEffect(() => {
@@ -105,19 +132,20 @@ export function FormEditor({
   const save = useMutation({
     mutationFn: () => {
       const body = payload(draft);
-      return draft.id
-        ? api.put<FormTemplate>(`/form-templates/${draft.id}`, body)
-        : api.post<FormTemplate>("/form-templates", body);
+      if (!draft.id) return api.post<SavedTemplate>("/form-templates", body);
+      return request<SavedTemplate>(`/form-templates/${draft.id}`, {
+        method: "PUT",
+        body,
+        query: { apply_to_pending: reachesTickets && applyPending },
+      });
     },
     onSuccess: (saved) => {
       invalidateForms(queryClient);
+      // As OS que receberam a versão nova (painel e listas) releem os formulários.
+      if (saved.applied_to) queryClient.invalidateQueries({ queryKey: ["ticket"] });
       writeStored(null);
       const newVersion = template !== null && saved.version !== template.version;
-      toast({
-        title: `Formulário “${saved.name}” salvo`,
-        description: newVersion ? `Versão ${saved.version}: vale para as próximas OS; as que já têm o formulário seguem com a anterior.` : undefined,
-        tone: "success",
-      });
+      toast({ title: `Formulário “${saved.name}” salvo`, description: savedDescription(saved, newVersion), tone: "success" });
       onLeave();
     },
   });
@@ -204,7 +232,7 @@ export function FormEditor({
         title={draft.id ? "Editar formulário" : "Novo formulário"}
         description={
           draft.id
-            ? "As OS que já têm este formulário continuam com a versão anterior; as próximas recebem esta."
+            ? "As próximas OS recebem esta versão. Ao salvar, dá para levar a mudança também às OS em que o formulário ainda não começou."
             : "Monte as perguntas na ordem em que o técnico vai responder."
         }
         actions={
@@ -464,6 +492,15 @@ export function FormEditor({
 
       {unsaved ? (
         <UnsavedBar message={draft.id ? "Alterações não salvas" : "Formulário novo, ainda não salvo"}>
+          {reachesTickets ? (
+            <span className="mr-2">
+              <Checkbox
+                label="Levar também às OS em que ele ainda não começou"
+                checked={applyPending}
+                onChange={setApplyPending}
+              />
+            </span>
+          ) : null}
           <Button variant="ghost" onClick={leave}>
             {dirty ? "Descartar" : "Cancelar"}
           </Button>
@@ -728,7 +765,13 @@ function PhonePreview({ draft }: { draft: Draft }) {
     <aside className="lg:sticky lg:top-20 lg:self-start" aria-label="Prévia no app do técnico">
       <p className="mb-2 text-xs font-bold tracking-wide text-ink-muted uppercase">Como o técnico vê</p>
       <div className="rounded-[1.75rem] border-8 border-ink/85 bg-canvas p-3 shadow-sm dark:border-black">
-        <div className="max-h-[32rem] overflow-y-auto rounded-xl bg-surface p-3">
+        {/* Rola sozinha num formulário longo: com foco, as setas do teclado também rolam. */}
+        <div
+          tabIndex={0}
+          role="group"
+          aria-label="Perguntas na tela do app"
+          className="max-h-[32rem] overflow-y-auto rounded-xl bg-surface p-3 focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
+        >
           <p className="text-sm font-bold text-ink">{draft.name.trim() || "Sem nome"}</p>
           <div className="mt-3 flex flex-col gap-3">
             {draft.fields.map((f) =>

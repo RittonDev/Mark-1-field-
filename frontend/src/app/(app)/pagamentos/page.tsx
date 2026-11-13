@@ -27,12 +27,13 @@ interface Group {
   lines: PayoutLine[];
 }
 
-/** O fechamento em três consultas (cada uma traz até 1.000 lançamentos, os mais recentes). */
-const BUCKET_QUERY: Record<Bucket, Record<string, string>> = {
-  to_pay: { status: "pending", concluded: "true" },
-  expected: { status: "pending", concluded: "false" },
-  paid: { status: "paid" },
-};
+/**
+ * O fechamento em duas consultas: o que falta pagar (OS concluída, em andamento ou cancelada; cada
+ * uma vai para o seu lugar pela situação da OS) e o que já foi pago. Cada consulta traz até 1.000
+ * lançamentos, os mais recentes.
+ */
+type Source = "pending" | "paid";
+const SOURCE_QUERY: Record<Source, Record<string, string>> = { pending: { status: "pending" }, paid: { status: "paid" } };
 const LIMIT = 1000;
 /** A API marca até 500 por chamada. */
 const BATCH = 500;
@@ -89,10 +90,10 @@ function monthRange(month: string): { date_from?: string; date_to?: string } {
   return { date_from: `${month}-01`, date_to: new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10) };
 }
 
-function usePayouts(bucket: Bucket, month: string) {
+function usePayouts(source: Source, month: string) {
   return useQuery({
-    queryKey: ["payouts", bucket, month],
-    queryFn: () => api.get<PayoutList>("/payouts", { ...BUCKET_QUERY[bucket], ...monthRange(month) }),
+    queryKey: ["payouts", source, month],
+    queryFn: ({ signal }) => api.get<PayoutList>("/payouts", { ...SOURCE_QUERY[source], ...monthRange(month) }, { signal }),
     placeholderData: keepPreviousData,
   });
 }
@@ -171,10 +172,9 @@ export default function PayoutsPage() {
   const [technician, setTechnician] = useState<{ id: UUID; name: string } | null>(null);
   const [selected, setSelected] = useState<Set<UUID>>(new Set());
 
-  const toPayQuery = usePayouts("to_pay", month);
-  const expectedQuery = usePayouts("expected", month);
+  const pendingQuery = usePayouts("pending", month);
   const paidQuery = usePayouts("paid", month);
-  const queries = [toPayQuery, expectedQuery, paidQuery];
+  const queries = [pendingQuery, paidQuery];
   // Telefone (botão do WhatsApp) e e-mail (separa técnicos com o mesmo nome).
   const people = useQuery({
     queryKey: ["users", { role: "technician", active: true }],
@@ -197,14 +197,13 @@ export default function PayoutsPage() {
     // Logo depois de pagar, a mesma linha pode vir em duas consultas (uma já recarregou, a outra não):
     // vale a da consulta mais recente.
     const sources = [
-      { at: toPayQuery.dataUpdatedAt, items: toPayQuery.data?.items ?? [] },
-      { at: expectedQuery.dataUpdatedAt, items: expectedQuery.data?.items ?? [] },
+      { at: pendingQuery.dataUpdatedAt, items: pendingQuery.data?.items ?? [] },
       { at: paidQuery.dataUpdatedAt, items: paidQuery.data?.items ?? [] },
     ].sort((a, b) => a.at - b.at);
     const byId = new Map<UUID, PayoutLine>();
     for (const source of sources) for (const line of source.items) byId.set(line.id, line);
     return [...byId.values()];
-  }, [toPayQuery.data, toPayQuery.dataUpdatedAt, expectedQuery.data, expectedQuery.dataUpdatedAt, paidQuery.data, paidQuery.dataUpdatedAt]);
+  }, [pendingQuery.data, pendingQuery.dataUpdatedAt, paidQuery.data, paidQuery.dataUpdatedAt]);
   const technicianId = technician?.id ?? "";
   const lines = useMemo(() => (technicianId ? all.filter((l) => l.technician.id === technicianId) : all), [all, technicianId]);
   // Os cartões somam pela mesma regra da API, só com o técnico escolhido.
@@ -246,8 +245,9 @@ export default function PayoutsPage() {
     void queryClient.invalidateQueries({ queryKey: ["payouts"] });
     void queryClient.invalidateQueries({ queryKey: ["ticket"] });
   };
+  // `lineId`: pagamento de uma linha só, pelo botão dela (OS cancelada); o carregamento fica nela.
   const pay = useMutation({
-    mutationFn: async ({ ids, paid }: { ids: UUID[]; paid: boolean; groupId: UUID }) => {
+    mutationFn: async ({ ids, paid }: { ids: UUID[]; paid: boolean; groupId: UUID; lineId?: UUID }) => {
       let changed = 0;
       for (let i = 0; i < ids.length; i += BATCH) {
         const result = await api.post<{ changed: number }>(paid ? "/payouts/pay" : "/payouts/unpay", { ids: ids.slice(i, i + BATCH) });
@@ -290,7 +290,14 @@ export default function PayoutsPage() {
       return next;
     });
   const labelOf = (group: Group) => options.find((o) => o.id === group.id)?.label ?? group.name;
-  const phoneOf = (id: UUID) => people.data?.find((u) => u.id === id)?.phone ?? null;
+  const personOf = (id: UUID) => people.data?.find((u) => u.id === id);
+  // A lista de telefones é a dos técnicos ativos: o inativo não aparece nela.
+  const whatsappTitle = (group: Group, phone: string | null) =>
+    phone
+      ? `Mandar o extrato para ${group.name} no WhatsApp`
+      : people.data && !personOf(group.id)
+        ? "Técnico inativo: o telefone dele não aparece aqui"
+        : "Técnico sem telefone no cadastro";
   const period = month ? (months.find((m) => m.value === month)?.label ?? month) : "até hoje";
   const textFor = (group: Group) =>
     statement(group.name, group.lines, period, reimbursements.data?.by_technician.find((t) => t.technician?.id === group.id)?.to_pay ?? 0);
@@ -309,6 +316,20 @@ export default function PayoutsPage() {
     });
     if (ok) pay.mutate({ ids: chosen.map((l) => l.id), paid: true, groupId: group.id });
   };
+  // OS cancelada não entra no "Pagar tudo": pagar é decisão da central, linha a linha (o técnico foi e o cliente cancelou na hora).
+  const confirmPayCancelled = async (group: Group, line: PayoutLine) => {
+    const ok = await confirm({
+      title: `Pagar a ${line.ticket.code} a ${group.name} mesmo cancelada?`,
+      description: (
+        <>
+          A OS foi cancelada: pague só se o técnico chegou a trabalhar nela. Ele passa a ver{" "}
+          <strong className="font-semibold text-ink">{formatMoney(line.amount)}</strong> como pago no app.
+        </>
+      ),
+      confirmLabel: "Marcar como pago",
+    });
+    if (ok) pay.mutate({ ids: [line.id], paid: true, groupId: group.id, lineId: line.id });
+  };
   const confirmUndo = async (group: Group, chosen: PayoutLine[]) => {
     const ok = await confirm({
       title: chosen.length === 1 ? `Desfazer o pagamento da ${chosen[0].ticket.code}?` : `Desfazer o pagamento de ${chosen.length} OS?`,
@@ -326,7 +347,7 @@ export default function PayoutsPage() {
   const confirmRemove = async (line: PayoutLine) => {
     const ok = await confirm({
       title: `Tirar o valor de ${line.technician.name} da ${line.ticket.code}?`,
-      description: `A OS foi cancelada: os ${formatMoney(line.amount)} saem do previsto. Se precisar, dá para lançar de novo na OS.`,
+      description: `A OS foi cancelada: os ${formatMoney(line.amount)} saem do fechamento. Se precisar, dá para lançar de novo na OS.`,
       confirmLabel: "Tirar o valor",
       tone: "danger",
     });
@@ -381,7 +402,9 @@ export default function PayoutsPage() {
   const stale = queries.some((q) => q.isPlaceholderData);
   const truncated = queries.some((q) => (q.data?.items.length ?? 0) >= LIMIT);
   const busy = pay.isPending || remove.isPending;
+  const retry = () => queries.forEach((q) => void q.refetch());
   // "Previsto" só mostra; marcar como pago vale para OS concluída, e desfazer, para o que já foi pago.
+  // A OS cancelada tem os botões dela na própria linha (pagar ou tirar o valor).
   const selectable = (line: PayoutLine) => view !== "expected" && (stateOf(line) === "to_pay" || stateOf(line) === "paid");
 
   return (
@@ -437,7 +460,7 @@ export default function PayoutsPage() {
           label="A pagar"
           value={total(byState.to_pay)}
           display={formatMoney(total(byState.to_pay))}
-          loading={toPayQuery.isLoading}
+          loading={pendingQuery.isLoading}
           hint={plural(byState.to_pay.length, "OS concluída", "OS concluídas")}
           onSelect={() => changeView("to_pay")}
           selected={view === "to_pay"}
@@ -446,7 +469,7 @@ export default function PayoutsPage() {
           label="Previsto"
           value={total(byState.expected)}
           display={formatMoney(total(byState.expected))}
-          loading={expectedQuery.isLoading}
+          loading={pendingQuery.isLoading}
           hint={
             <>
               {plural(byState.expected.length, "OS em andamento", "OS em andamento")}
@@ -480,7 +503,7 @@ export default function PayoutsPage() {
       {month || truncated ? (
         <p className="mt-2 text-xs text-ink-muted">
           {month ? "O mês vale pela conclusão da OS; a OS ainda aberta entra pela data em que o valor foi lançado." : ""}
-          {truncated ? ` Mostrando os ${intFmt(LIMIT)} lançamentos mais recentes de cada situação: escolha um mês para ver todos.` : ""}
+          {truncated ? ` A lista traz até ${intFmt(LIMIT)} lançamentos a pagar e ${intFmt(LIMIT)} pagos (os mais recentes): escolha um mês para ver todos.` : ""}
         </p>
       ) : null}
 
@@ -488,12 +511,12 @@ export default function PayoutsPage() {
         {loading ? (
           <LoadingBlock rows={4} />
         ) : error && !all.length ? (
-          <ErrorBox message={errorMessage(error)} />
+          <ErrorBox message={errorMessage(error)} onRetry={retry} />
         ) : (
           <>
             {error ? (
               <div className="mb-3">
-                <ErrorBox message={errorMessage(error)} />
+                <ErrorBox message={errorMessage(error)} onRetry={retry} />
               </div>
             ) : null}
             {!groups.length ? (
@@ -502,7 +525,18 @@ export default function PayoutsPage() {
                   icon={<Wallet />}
                   title={EMPTY[view].title}
                   description={EMPTY[view].description}
-                  action={technician ? <Button onClick={() => setTechnician(null)}>Ver todos os técnicos</Button> : undefined}
+                  action={
+                    technician ? (
+                      <Button
+                        onClick={() => {
+                          setTechnician(null);
+                          setSelected(new Set());
+                        }}
+                      >
+                        Ver todos os técnicos
+                      </Button>
+                    ) : undefined
+                  }
                 />
               </Card>
             ) : (
@@ -514,7 +548,9 @@ export default function PayoutsPage() {
                   const chosenPayable = chosen.filter((l) => stateOf(l) === "to_pay");
                   const chosenPaid = chosen.filter((l) => stateOf(l) === "paid");
                   const mine = pay.isPending && pay.variables?.groupId === group.id;
-                  const phone = phoneOf(group.id);
+                  // Pagamento em lote deste técnico (o de uma linha só gira o botão da própria linha).
+                  const batch = mine && !pay.variables?.lineId;
+                  const phone = personOf(group.id)?.phone ?? null;
                   const parts = (["to_pay", "paid", "expected", "cancelled"] as const)
                     .map((state) => ({ state, lines: group.lines.filter((l) => stateOf(l) === state) }))
                     .filter((p) => p.lines.length > 0)
@@ -554,7 +590,7 @@ export default function PayoutsPage() {
                             size="sm"
                             variant="ghost"
                             disabled={!phone}
-                            title={phone ? `Mandar o extrato para ${group.name} no WhatsApp` : "Técnico sem telefone no cadastro"}
+                            title={whatsappTitle(group, phone)}
                             onClick={() => phone && void openWhatsApp(group, phone)}
                           >
                             <MessageCircle className="size-4" />
@@ -563,8 +599,8 @@ export default function PayoutsPage() {
                           {chosenPaid.length || view === "paid" ? (
                             <Button
                               size="sm"
-                              disabled={!chosenPaid.length || stale || (busy && !mine)}
-                              loading={mine && pay.variables?.paid === false}
+                              disabled={!chosenPaid.length || stale || (busy && !batch)}
+                              loading={batch && pay.variables?.paid === false}
                               title={chosenPaid.length ? undefined : "Selecione os pagamentos que quer desfazer"}
                               onClick={() => void confirmUndo(group, chosenPaid)}
                             >
@@ -576,8 +612,8 @@ export default function PayoutsPage() {
                             <Button
                               size="sm"
                               variant="primary"
-                              disabled={stale || (busy && !mine)}
-                              loading={mine && pay.variables?.paid === true}
+                              disabled={stale || (busy && !batch)}
+                              loading={batch && pay.variables?.paid === true}
                               onClick={() => void confirmPay(group, chosenPayable.length ? chosenPayable : payable)}
                             >
                               <CheckCheck className="size-4" />
@@ -598,7 +634,11 @@ export default function PayoutsPage() {
                                 <label
                                   className={clsx("-m-2 flex shrink-0 p-2", canPick ? "cursor-pointer" : "cursor-not-allowed")}
                                   title={
-                                    canPick ? undefined : state === "cancelled" ? "OS cancelada: não entra no pagamento" : "Paga quando a OS for concluída"
+                                    canPick
+                                      ? undefined
+                                      : state === "cancelled"
+                                        ? "OS cancelada: pague ou tire o valor pelos botões da linha"
+                                        : "Paga quando a OS for concluída"
                                   }
                                 >
                                   <input
@@ -626,15 +666,26 @@ export default function PayoutsPage() {
                               <div className="flex w-full items-center justify-end gap-3 sm:w-auto">
                                 <StatePill line={line} />
                                 {state === "cancelled" ? (
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    disabled={busy && remove.variables?.id !== line.id}
-                                    loading={remove.isPending && remove.variables?.id === line.id}
-                                    onClick={() => void confirmRemove(line)}
-                                  >
-                                    Tirar valor
-                                  </Button>
+                                  <span className="flex items-center gap-1">
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      disabled={stale || (busy && pay.variables?.lineId !== line.id)}
+                                      loading={pay.isPending && pay.variables?.lineId === line.id}
+                                      onClick={() => void confirmPayCancelled(group, line)}
+                                    >
+                                      Pagar
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      disabled={stale || (busy && remove.variables?.id !== line.id)}
+                                      loading={remove.isPending && remove.variables?.id === line.id}
+                                      onClick={() => void confirmRemove(line)}
+                                    >
+                                      Tirar valor
+                                    </Button>
+                                  </span>
                                 ) : null}
                                 <span className="text-right text-sm font-medium text-ink tabular-nums sm:w-28">{formatMoney(line.amount)}</span>
                               </div>

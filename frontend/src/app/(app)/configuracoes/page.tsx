@@ -8,7 +8,7 @@ import { useEffect, useId, useMemo, useState } from "react";
 import { PriorityBadge, StatusBadge } from "@/components/badges";
 import { CompanyProfileCard } from "@/components/CompanyProfileCard";
 import { FieldRulesCard } from "@/components/FieldRulesCard";
-import { ActiveState, FieldError, fold, RowEditButton, useDiscardGuard } from "@/components/settings/shared";
+import { ActiveState, FieldError, fold, RowEditButton, useLeaveGuard } from "@/components/settings/shared";
 import { useToast } from "@/components/Toaster";
 import { UnproductiveReasonsCard } from "@/components/UnproductiveReasonsCard";
 import { ViolationReasonsCard } from "@/components/ViolationReasonsCard";
@@ -121,6 +121,7 @@ function SlaRow({ policy, editable }: { policy: SlaPolicy; editable: boolean }) 
   const problems = slaProblems(r, s);
   const invalid = Boolean(problems.response || problems.resolution);
   const label = PRIORITY[policy.priority].label;
+  useLeaveGuard(editable && dirty, `O SLA da prioridade ${label} foi alterado e ainda não foi salvo.`);
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -313,16 +314,19 @@ function CategoryDialog({
       onClose();
     },
   });
-  const requestClose = useDiscardGuard(dirty, onClose);
 
   return (
     <Dialog
       open
-      onClose={requestClose}
+      onClose={onClose}
+      dirty={dirty}
+      busy={mutation.isPending}
       title={category ? `Editar ${category.full_name}` : "Nova categoria"}
       footer={
         <>
-          <Button onClick={requestClose}>Cancelar</Button>
+          <Button onClick={onClose} disabled={mutation.isPending}>
+            Cancelar
+          </Button>
           <Button
             variant="primary"
             type="submit"

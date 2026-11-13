@@ -210,6 +210,13 @@ export function sameDraft(a: Draft, b: Draft): boolean {
   return canon(a) === canon(b);
 }
 
+/** Mudou o que a OS recebe do modelo (as perguntas ou o nome), e não só a descrição ou as sugestões. */
+export function changesTickets(draft: Draft, saved: Draft): boolean {
+  const a = payload(draft);
+  const b = payload(saved);
+  return a.name !== b.name || JSON.stringify(a.fields) !== JSON.stringify(b.fields);
+}
+
 /** O que falta corrigir numa pergunta, por campo (cada mensagem aparece embaixo do seu campo). */
 export interface FieldProblems {
   label?: string;

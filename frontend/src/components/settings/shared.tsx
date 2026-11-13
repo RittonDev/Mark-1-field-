@@ -6,9 +6,11 @@
 
 import clsx from "clsx";
 import { Search, SquarePen } from "lucide-react";
-import { useCallback, useEffect } from "react";
+import Link from "next/link";
+import { useEffect } from "react";
 import { useConfirm } from "@/components/Confirm";
 import { Input } from "@/components/ui";
+import { useUnsavedChanges } from "@/lib/hooks";
 
 const COMBINING_MARKS = new RegExp(`[${String.fromCharCode(0x300)}-${String.fromCharCode(0x36f)}]`, "g");
 
@@ -26,40 +28,63 @@ export function plural(n: number, one: string, many: string): string {
   return `${n.toLocaleString("pt-BR")} ${n === 1 ? one : many}`;
 }
 
-/** Com alterações não salvas, o navegador pergunta antes de recarregar ou fechar a aba. */
-export function useBeforeUnload(active: boolean) {
-  useEffect(() => {
-    if (!active) return;
-    const onBeforeUnload = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      // Navegadores mais antigos só perguntam com o returnValue preenchido.
-      e.returnValue = "";
-    };
-    window.addEventListener("beforeunload", onBeforeUnload);
-    return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, [active]);
+type ConfirmFn = ReturnType<typeof useConfirm>;
+
+// Formulários da tela com alteração não salva (um único ouvinte de clique atende todos).
+const leaveGuards = new Map<symbol, { description: string; confirm: ConfirmFn }>();
+// O clique liberado depois da confirmação passa direto.
+let releasing = false;
+
+function guardLinks(e: MouseEvent) {
+  if (releasing || leaveGuards.size === 0 || e.defaultPrevented || e.button !== 0) return;
+  if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+  const anchor = e.target instanceof Element ? e.target.closest("a[href]") : null;
+  if (!(anchor instanceof HTMLAnchorElement) || anchor.target === "_blank" || anchor.hasAttribute("download")) return;
+  const url = new URL(anchor.href, window.location.href);
+  const here = window.location;
+  // Outro site é navegação de verdade (o navegador já pergunta); âncora da própria tela não sai dela.
+  if (url.origin !== here.origin || (url.pathname === here.pathname && url.search === here.search)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const guards = [...leaveGuards.values()];
+  void guards[0]
+    .confirm({
+      title: "Sair sem salvar?",
+      description: guards.length === 1 ? guards[0].description : "Há alterações não salvas em mais de um lugar desta tela.",
+      confirmLabel: "Sair sem salvar",
+      cancelLabel: "Continuar editando",
+      tone: "danger",
+    })
+    .then((ok) => {
+      if (!ok || !anchor.isConnected) return;
+      releasing = true;
+      try {
+        anchor.click();
+      } finally {
+        releasing = false;
+      }
+    });
 }
 
 /**
- * Fechar um diálogo de cadastro (X, Cancelar, Esc ou clique fora): com algo preenchido, pergunta
- * antes de descartar. Um clique perdido fora do diálogo não apaga mais o que foi digitado.
+ * Enquanto houver alteração não salva: o navegador pergunta antes de recarregar ou fechar a aba, o
+ * Sair da central pergunta antes de encerrar a sessão e um link interno (menu, atalho, outra tela)
+ * pede confirmação antes de sair. O Voltar do navegador não dá para segurar (não pode ser cancelado).
  */
-export function useDiscardGuard(dirty: boolean, onClose: () => void) {
+export function useLeaveGuard(dirty: boolean, description: string) {
   const confirm = useConfirm();
-  return useCallback(async () => {
-    if (
-      !dirty ||
-      (await confirm({
-        title: "Descartar o que foi preenchido?",
-        description: "As alterações deste cadastro ainda não foram salvas.",
-        confirmLabel: "Descartar",
-        cancelLabel: "Continuar editando",
-        tone: "danger",
-      }))
-    ) {
-      onClose();
-    }
-  }, [dirty, confirm, onClose]);
+  useUnsavedChanges(dirty);
+  useEffect(() => {
+    if (!dirty) return;
+    const key = Symbol("alteracoes");
+    leaveGuards.set(key, { description, confirm });
+    // Na captura, antes do Next tratar o link: o clique só segue se a pessoa confirmar.
+    if (leaveGuards.size === 1) window.addEventListener("click", guardLinks, true);
+    return () => {
+      leaveGuards.delete(key);
+      if (leaveGuards.size === 0) window.removeEventListener("click", guardLinks, true);
+    };
+  }, [dirty, description, confirm]);
 }
 
 /** Busca com lupa e nome acessível (o placeholder sozinho não é lido como rótulo). */
@@ -91,6 +116,12 @@ export function SearchField({
   );
 }
 
+const ROW_EDIT_CLASS = clsx(
+  "inline-flex size-8 shrink-0 items-center justify-center rounded-lg border border-line bg-surface text-brand shadow-elev-1",
+  "transition-[border-color,background-color] duration-150 hover:border-brand/40 hover:bg-brand-soft active:translate-y-px",
+  "focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none",
+);
+
 /** Botão da coluna fixa "Editar" das listas (padrão do Field Control), com o nome do item no rótulo. */
 export function RowEditButton({ label, onClick }: { label: string; onClick: () => void }) {
   return (
@@ -102,14 +133,19 @@ export function RowEditButton({ label, onClick }: { label: string; onClick: () =
       }}
       aria-label={label}
       title={label}
-      className={clsx(
-        "inline-flex size-8 shrink-0 items-center justify-center rounded-lg border border-line bg-surface text-brand shadow-elev-1",
-        "transition-[border-color,background-color] duration-150 hover:border-brand/40 hover:bg-brand-soft active:translate-y-px",
-        "focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none",
-      )}
+      className={ROW_EDIT_CLASS}
     >
       <SquarePen className="size-4" />
     </button>
+  );
+}
+
+/** O mesmo botão "Editar" quando o cadastro fica em outra tela (ex.: o técnico, em Técnicos). */
+export function RowEditLink({ label, href }: { label: string; href: string }) {
+  return (
+    <Link href={href} aria-label={label} title={label} className={ROW_EDIT_CLASS}>
+      <SquarePen className="size-4" />
+    </Link>
   );
 }
 
@@ -161,7 +197,7 @@ export function UnsavedBar({ message, children }: { message: string; children: R
         <span aria-hidden className="size-2 shrink-0 rounded-full bg-amber-500" />
         {message}
       </p>
-      <div className="flex flex-wrap gap-2">{children}</div>
+      <div className="flex flex-wrap items-center gap-2">{children}</div>
     </div>
   );
 }

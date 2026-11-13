@@ -26,10 +26,9 @@ import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canManageTickets } from "@/lib/constants";
 import { downloadCsv } from "@/lib/download";
-import { formatDate, formatDocument } from "@/lib/format";
+import { formatDate, formatDocument, todayISO } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
 import { useCustomers, useLocationSearch } from "@/lib/queries";
-import { localDateISO } from "@/lib/quotes";
 import type { Location, Page } from "@/lib/types";
 
 const PAGE_SIZE = 50;
@@ -116,7 +115,7 @@ function LocationsView() {
         if (chunk.items.length === 0) break;
       }
       const documents = new Map((customers.data ?? []).map((c) => [c.id, c.document]));
-      downloadCsv(`locais-${localDateISO()}.csv`, [
+      downloadCsv(`locais-${todayISO()}.csv`, [
         [...LOCATION_COLUMNS, "ativo", "os_abertas", "total_os", "ultima_os"],
         ...rows.map((l) => [
           l.customer.name,

@@ -43,6 +43,7 @@ function JustifyDialog({ ticket, onClose }: { ticket: TicketDetail; onClose: () 
     <Dialog
       open
       onClose={onClose}
+      busy={mutation.isPending}
       title={`Justificar violação · ${ticket.code}`}
       footer={
         <>

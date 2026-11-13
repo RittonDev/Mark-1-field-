@@ -33,7 +33,7 @@ import { api, errorMessage } from "@/lib/api";
 import { EVENT_TYPE, LEVEL, PRIORITY, RESPONSIBILITY, STATUS, TICKET_TYPE } from "@/lib/constants";
 import { formatDateTime, formatMinutes, formatMoney } from "@/lib/format";
 import type { Level, Responsibility, TicketEvent, TicketEventType, TicketPriority, TicketStatus, TicketType, UUID } from "@/lib/types";
-import { distance, eventPoint, km } from "./geo";
+import { eventPoint, km, storeDistance } from "./geo";
 
 type Icon = React.ComponentType<{ className?: string }>;
 
@@ -385,6 +385,7 @@ export function HistoryTab({ ticketId, store = null }: { ticketId: UUID; store?:
       {items.map((event) => {
         const Icon = ICONS[event.event_type] ?? EXTRA_ICONS[event.event_type] ?? History;
         const point = event.actor?.role === "technician" ? eventPoint(event.data) : null;
+        const meters = point ? storeDistance(event.data, store) : null;
         return (
           <li key={event.id} className="mb-5 ml-5 last:mb-0">
             <span className="absolute -left-3 flex size-6 items-center justify-center rounded-full border border-line bg-surface text-ink-muted">
@@ -409,7 +410,7 @@ export function HistoryTab({ ticketId, store = null }: { ticketId: UUID; store?:
                 className="mt-1 inline-flex items-center gap-1 text-xs text-brand hover:underline"
               >
                 <MapPin className="size-3" />
-                Localização registrada{store ? ` · a ${km(distance(store, point))} da loja` : ""}
+                Localização registrada{meters !== null ? ` · a ${km(meters)} da loja` : ""}
               </a>
             ) : null}
           </li>

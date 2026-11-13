@@ -2,9 +2,11 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
-import { createContext, Suspense, useContext, useEffect, useRef } from "react";
+import { createContext, Suspense, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { useConfirm } from "@/components/Confirm";
 import type { UUID } from "@/lib/types";
 import { TicketEditorDialog } from "./editor/TicketEditorDialog";
+import { DISCARD_CONFIRM } from "./editor/useUnsavedGuard";
 
 /**
  * A OS aberta no painel lateral, como no Field Control, fica na URL (ex.: /chamados?os=<id>):
@@ -12,7 +14,10 @@ import { TicketEditorDialog } from "./editor/TicketEditorDialog";
  *   (a OS que muda de seção na Minha fila, de coluna no Quadro, o técnico que sai de campo no Mapa);
  * - Voltar (inclusive o gesto do celular) fecha o painel e fica na lista;
  * - recarregar a página ou mandar o link mantém a OS aberta;
- * - um link de dentro do painel (cliente, loja, projeto) leva para a tela sem o painel.
+ * - um link de dentro do painel (cliente, loja, projeto) leva para a tela sem o painel;
+ * - com alteração não salva na aba Geral, fechar o painel ou trocar de OS (busca Ctrl+K, aviso,
+ *   "Outras OS desta loja") pergunta antes de descartar. O Voltar do navegador não dá para segurar:
+ *   o popstate não pode ser cancelado.
  */
 const PARAM = "os";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -59,34 +64,58 @@ if (typeof window !== "undefined") {
   });
 }
 
+// O painel aberto com alteração não salva registra aqui a pergunta "Descartar as alterações?".
+let leaveCheck: (() => Promise<boolean>) | null = null;
+
+/** Segue em frente direto, ou depois que a pessoa confirmar o descarte das alterações do painel. */
+function afterLeaveCheck(go: () => void) {
+  if (!leaveCheck) return go();
+  void leaveCheck().then((ok) => {
+    if (ok) go();
+  });
+}
+
+function openNow(ticketId: UUID) {
+  closing = false;
+  const current = currentId();
+  if (current === ticketId) return;
+  if (current) {
+    // Trocando de OS dentro do painel (ex.: "Outras OS desta loja"): a entrada é substituída, e o
+    // Fechar volta direto para a lista em vez de reabrir a OS anterior. Aberto por link direto, o
+    // painel continua sem entrada própria (o Fechar só tira o ?os).
+    const ours = (window.history.state as { mfPanel?: string } | null)?.mfPanel === current;
+    window.history.replaceState(ours ? { mfPanel: ticketId } : null, "", hrefWith(ticketId));
+    return;
+  }
+  window.history.pushState({ mfPanel: ticketId }, "", hrefWith(ticketId));
+}
+
+function closeNow() {
+  const id = currentId();
+  if (!id || closing) return;
+  // Aberto daqui: volta a entrada do histórico (o Avançar reabre). Aberto por link direto ou depois
+  // de recarregar: só tira o ?os da URL.
+  if ((window.history.state as { mfPanel?: string } | null)?.mfPanel === id) {
+    closing = true;
+    window.history.back();
+  } else {
+    window.history.replaceState(null, "", hrefWith(null));
+  }
+}
+
 // O Next acompanha o pushState/replaceState nativo (useSearchParams recebe a URL nova sem ir ao
 // servidor), desde que o estado passado não traga as chaves internas dele (__NA): por isso só o nosso.
 const panel: TicketPanel = {
   open(ticketId) {
-    closing = false;
     const current = currentId();
     if (current === ticketId) return;
-    if (current) {
-      // Trocando de OS dentro do painel (ex.: "Outras OS desta loja"): a entrada é substituída, e o
-      // Fechar volta direto para a lista em vez de reabrir a OS anterior. Aberto por link direto, o
-      // painel continua sem entrada própria (o Fechar só tira o ?os).
-      const ours = (window.history.state as { mfPanel?: string } | null)?.mfPanel === current;
-      window.history.replaceState(ours ? { mfPanel: ticketId } : null, "", hrefWith(ticketId));
-      return;
-    }
-    window.history.pushState({ mfPanel: ticketId }, "", hrefWith(ticketId));
+    // Trocar de OS descarta o que o painel tem por salvar: pergunta antes.
+    if (current) afterLeaveCheck(() => openNow(ticketId));
+    else openNow(ticketId);
   },
   close() {
-    const id = currentId();
-    if (!id || closing) return;
-    // Aberto daqui: volta a entrada do histórico (o Avançar reabre). Aberto por link direto ou depois
-    // de recarregar: só tira o ?os da URL.
-    if ((window.history.state as { mfPanel?: string } | null)?.mfPanel === id) {
-      closing = true;
-      window.history.back();
-    } else {
-      window.history.replaceState(null, "", hrefWith(null));
-    }
+    if (!currentId() || closing) return;
+    afterLeaveCheck(closeNow);
   },
 };
 
@@ -111,7 +140,26 @@ function PanelFromUrl() {
   const param = useSearchParams().get(PARAM);
   const ticketId = param && UUID_RE.test(param) ? param : null;
   const queryClient = useQueryClient();
+  const confirm = useConfirm();
   const shown = useRef<string | null>(null);
+  // OS do painel com alteração não salva. Trocou de OS (ou fechou): começa limpo.
+  const [dirtyId, setDirtyId] = useState<string | null>(null);
+  const [seenId, setSeenId] = useState(ticketId);
+  if (seenId !== ticketId) {
+    setSeenId(ticketId);
+    setDirtyId(null);
+  }
+  const dirty = ticketId !== null && dirtyId === ticketId;
+  const onDirtyChange = useCallback((value: boolean) => setDirtyId(value ? ticketId : null), [ticketId]);
+
+  useEffect(() => {
+    if (!dirty) return;
+    const check = () => confirm(DISCARD_CONFIRM);
+    leaveCheck = check;
+    return () => {
+      if (leaveCheck === check) leaveCheck = null;
+    };
+  }, [dirty, confirm]);
 
   useEffect(() => {
     // Fechou (ou trocou de OS): a tela de trás busca de novo o que pode ter mudado no painel, como
@@ -122,5 +170,7 @@ function PanelFromUrl() {
     shown.current = ticketId;
   }, [ticketId, queryClient]);
 
-  return ticketId ? <TicketEditorDialog key={ticketId} ticketId={ticketId} onClose={panel.close} /> : null;
+  return ticketId ? (
+    <TicketEditorDialog key={ticketId} ticketId={ticketId} onClose={panel.close} onDirtyChange={onDirtyChange} />
+  ) : null;
 }

@@ -42,8 +42,11 @@ function Vehicle({ path, begin, color }: { path: string; begin: string; color: s
   );
 }
 
-/** Painel da marca na tela de login: mapa de rotas em movimento e recortes reais do produto. */
-export function LoginArt() {
+/**
+ * Painel da marca na tela de login: mapa de rotas em movimento e recortes reais do produto.
+ * `microsoft`: o login corporativo Microsoft está ligado (só então o rodapé o menciona).
+ */
+export function LoginArt({ microsoft = false }: { microsoft?: boolean }) {
   const reduced = useReducedMotion();
   return (
     <div className="relative flex h-full flex-col overflow-hidden rounded-[28px] bg-[#2447ff] text-white shadow-pop dark:bg-[#1f3be0]">
@@ -154,12 +157,13 @@ export function LoginArt() {
         <h2 className="max-w-md text-[28px] leading-[1.15] font-bold tracking-[-0.02em]">
           Do chamado à assinatura do cliente, em tempo real.
         </h2>
-        <p className="mt-3 max-w-md text-sm leading-relaxed text-white/80">
+        {/* Branco a 90%: o texto pequeno passa de 4,5:1 sobre o azul da marca (a 70-80% ficava abaixo). */}
+        <p className="mt-3 max-w-md text-sm leading-relaxed text-white/90">
           Despacho, rastreamento, formulários e relatórios da sua operação de campo em um só lugar.
         </p>
-        <p className="mt-6 inline-flex items-center gap-2 text-xs text-white/70">
-          <ShieldCheck className="size-4" />
-          Login corporativo Microsoft · dados tratados conforme a LGPD
+        <p className="mt-6 inline-flex items-center gap-2 text-xs text-white/90">
+          <ShieldCheck aria-hidden className="size-4" />
+          {microsoft ? "Login corporativo Microsoft · dados tratados conforme a LGPD" : "Dados tratados conforme a LGPD"}
         </p>
       </div>
     </div>

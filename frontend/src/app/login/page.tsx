@@ -1,14 +1,14 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, Eye, EyeOff, Lock, Mail, Smartphone } from "lucide-react";
+import { ChevronDown, Eye, EyeOff, Info, Lock, Mail, Smartphone } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Logo, ThemeToggle } from "@/components/Brand";
 import { LoginArt } from "@/components/LoginArt";
 import { Button, ErrorBox, Skeleton } from "@/components/ui";
-import { homePath, WEB_DENIED_MESSAGE } from "@/lib/access";
-import { API_URL, errorMessage, request } from "@/lib/api";
+import { homePath, peekLoginNext, rememberLoginNext, safeNextPath, WEB_DENIED_MESSAGE } from "@/lib/access";
+import { API_URL, ApiError, errorMessage, request } from "@/lib/api";
 import { useAuth, useIsClient } from "@/lib/auth";
 
 interface Providers {
@@ -46,49 +46,114 @@ const YEAR = new Date().getFullYear();
 
 const inputClass =
   "h-11 w-full rounded-xl border border-line bg-surface pl-10 text-sm text-ink shadow-elev-1 placeholder:text-ink-subtle " +
-  "transition-[border-color,box-shadow] hover:border-line-strong focus:border-brand focus:ring-4 focus:ring-brand/15 focus:outline-none";
+  "transition-[border-color,box-shadow] hover:border-line-strong focus:border-brand focus:ring-4 focus:ring-brand/15 focus:outline-none " +
+  "dark:border-line-strong aria-[invalid=true]:border-red-500 aria-[invalid=true]:hover:border-red-500 " +
+  "aria-[invalid=true]:focus:border-red-500 aria-[invalid=true]:focus:ring-red-500/15";
+
+/** Recados que chegam pela URL, lidos uma vez na abertura da tela. */
+interface UrlNotice {
+  /** Endereço para voltar depois de entrar (conferido pelo perfil na hora de usar). */
+  next: string | null;
+  /** Técnico no navegador (?acesso=app) ou erro do login Microsoft (?sso_error=). */
+  error: string | null;
+  /** A sessão venceu (?motivo=expirou). */
+  expired: boolean;
+}
+
+// Parâmetros que só trazem o recado: saem da barra de endereço depois de lidos (um F5 não repete o
+// erro antigo). O ?next= fica, para valer também depois de recarregar.
+const NOTICE_PARAMS = ["sso_error", "acesso", "motivo"];
+
+function readUrlNotice(): UrlNotice {
+  const params = new URLSearchParams(window.location.search);
+  const ssoError = params.get("sso_error");
+  return {
+    // Na volta de um login Microsoft que falhou, o endereço de antes espera na aba.
+    next: params.get("next") ?? peekLoginNext(),
+    error:
+      params.get("acesso") === "app"
+        ? WEB_DENIED_MESSAGE
+        : ssoError
+          ? (SSO_ERRORS[ssoError] ?? "Não foi possível entrar com a Microsoft.")
+          : null,
+    expired: params.get("motivo") === "expirou",
+  };
+}
 
 export default function LoginPage() {
   const router = useRouter();
   const { ready, user, login } = useAuth();
+  const isClient = useIsClient();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // E-mail ou senha recusados: os dois campos ficam marcados (a API não diz qual dos dois errou).
+  const [invalid, setInvalid] = useState(false);
   const [loading, setLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [reveal, setReveal] = useState(false);
   const [redirecting, setRedirecting] = useState(false);
+  const [notice, setNotice] = useState<UrlNotice | null>(null);
+  // O recado da URL (erro do login Microsoft, sessão que terminou) some na primeira tentativa nova.
+  const [noticeSeen, setNoticeSeen] = useState(false);
+  const passwordRef = useRef<HTMLInputElement>(null);
+  const errorId = useId();
   const providers = useQuery({
     queryKey: ["auth", "providers"],
     queryFn: () => request<Providers>("/auth/providers", { auth: false }),
     staleTime: 5 * 60_000,
   });
-  // Mensagens que chegam pela URL: sessão de técnico encerrada (?acesso=app) ou erro do SSO.
-  const isClient = useIsClient();
-  const params = isClient ? new URLSearchParams(window.location.search) : null;
-  const ssoError = params?.get("sso_error");
-  const urlError =
-    params?.get("acesso") === "app"
-      ? WEB_DENIED_MESSAGE
-      : ssoError
-        ? (SSO_ERRORS[ssoError] ?? "Não foi possível entrar com a Microsoft.")
-        : null;
-  const shownError = error ?? urlError;
 
-  // Logado (inclusive logo após entrar): vai para a tela inicial do perfil.
+  // A URL só existe no navegador: lida depois da hidratação, uma vez.
+  if (isClient && notice === null) setNotice(readUrlNotice());
+
   useEffect(() => {
-    if (ready && user) router.replace(homePath(user.role));
-  }, [ready, user, router]);
+    if (!notice) return;
+    const url = new URL(window.location.href);
+    const before = url.search;
+    NOTICE_PARAMS.forEach((key) => url.searchParams.delete(key));
+    if (url.search !== before) window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  }, [notice]);
+
+  // Logado (inclusive logo após entrar): volta ao link que abriu (a OS mandada no WhatsApp) ou vai
+  // para a tela inicial do perfil.
+  useEffect(() => {
+    if (!ready || !user || !notice) return;
+    rememberLoginNext(null);
+    router.replace(safeNextPath(notice.next, user.role) ?? homePath(user.role));
+  }, [ready, user, notice, router]);
+
+  // Voltar do navegador depois de ir para a Microsoft: a página volta da memória com o botão travado.
+  useEffect(() => {
+    const onShow = (event: PageTransitionEvent) => {
+      if (event.persisted) setRedirecting(false);
+    };
+    window.addEventListener("pageshow", onShow);
+    return () => window.removeEventListener("pageshow", onShow);
+  }, []);
+
+  const urlError = noticeSeen ? null : (notice?.error ?? null);
+  const shownError = error ?? urlError;
+  const expired = !noticeSeen && !shownError && !!notice?.expired;
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setInvalid(false);
+    setNoticeSeen(true);
     setLoading(true);
     try {
       await login(email.trim(), password);
     } catch (err) {
+      const wrongCredentials = err instanceof ApiError && err.status === 401;
       setError(errorMessage(err));
+      setInvalid(wrongCredentials);
       setLoading(false);
+      // Senha recusada: o foco volta à senha, já selecionada para digitar de novo.
+      if (wrongCredentials) {
+        passwordRef.current?.focus();
+        passwordRef.current?.select();
+      }
     }
   }
 
@@ -99,8 +164,8 @@ export default function LoginPage() {
   const passwordCollapsed = microsoft && providers.data?.password_for_staff === false && !showForm;
 
   return (
-    <main className="grid min-h-screen bg-canvas lg:grid-cols-[minmax(0,1fr)_minmax(0,1.08fr)]">
-      <section className="flex min-h-screen flex-col px-6 py-6 sm:px-10">
+    <main className="grid min-h-dvh bg-canvas lg:grid-cols-[minmax(0,1fr)_minmax(0,1.08fr)]">
+      <section className="flex min-h-dvh flex-col px-6 py-6 sm:px-10">
         <header className="flex items-center justify-between">
           <Logo />
           <ThemeToggle />
@@ -112,13 +177,28 @@ export default function LoginPage() {
               Central de operações de campo
             </p>
             <h1 className="mt-2 text-[30px] leading-tight font-bold tracking-[-0.02em] text-ink" style={{ ["--i" as string]: 1 }}>
-              Bem-vindo de volta
+              Entre na sua conta
             </h1>
             <p className="mt-2 text-sm leading-relaxed text-ink-muted" style={{ ["--i" as string]: 2 }}>
               Entre para acompanhar chamados, técnicos em campo e prazos da sua operação.
             </p>
 
             <div className="mt-8 flex flex-col gap-4" style={{ ["--i" as string]: 3 }}>
+              {expired ? (
+                <p
+                  role="status"
+                  className="flex items-start gap-2.5 rounded-xl border border-line bg-surface px-3.5 py-2.5 text-sm text-ink-muted shadow-elev-1"
+                >
+                  <Info aria-hidden className="mt-0.5 size-4 shrink-0 text-ink-subtle" />
+                  Sua sessão terminou. Entre de novo para continuar.
+                </p>
+              ) : null}
+              {providers.isError ? (
+                <ErrorBox
+                  message="O servidor não respondeu. Confira a internet e tente de novo."
+                  onRetry={() => void providers.refetch()}
+                />
+              ) : null}
               {providers.isLoading ? (
                 <>
                   <Skeleton className="h-11 rounded-xl" />
@@ -135,6 +215,9 @@ export default function LoginPage() {
                         loading={redirecting}
                         onClick={() => {
                           setRedirecting(true);
+                          setNoticeSeen(true);
+                          // A volta da Microsoft chega em outra tela: o link de origem espera na aba.
+                          rememberLoginNext(notice?.next ?? null);
                           // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- vai para a API (outra origem), que redireciona à Microsoft
                           window.location.href = `${API_URL}/auth/microsoft/start`;
                         }}
@@ -152,7 +235,7 @@ export default function LoginPage() {
                           className="inline-flex items-center justify-center gap-1 text-xs text-ink-muted transition-colors hover:text-ink"
                         >
                           Portal do cliente: entrar com e-mail e senha
-                          <ChevronDown className="size-3.5" />
+                          <ChevronDown aria-hidden className="size-3.5" />
                         </button>
                       ) : (
                         <div className="flex items-center gap-3 text-xs text-ink-subtle">
@@ -168,28 +251,51 @@ export default function LoginPage() {
                     <form onSubmit={onSubmit} className="flex animate-enter flex-col gap-3">
                       <label className="relative block">
                         <span className="sr-only">E-mail</span>
-                        <Mail className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-ink-subtle" />
+                        <Mail
+                          aria-hidden
+                          className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-ink-subtle"
+                        />
                         <input
+                          id="login-email"
+                          name="email"
                           type="text"
+                          inputMode="email"
+                          autoCapitalize="none"
+                          autoCorrect="off"
+                          spellCheck={false}
                           autoComplete="username"
                           placeholder="E-mail ou usuário"
                           value={email}
                           onChange={(e) => setEmail(e.target.value)}
                           required
-                          autoFocus={!microsoft}
+                          // Sem Microsoft, ou ao abrir o formulário do portal: o foco já vai para o e-mail.
+                          autoFocus={!microsoft || showForm}
+                          aria-invalid={invalid || undefined}
+                          aria-describedby={shownError ? errorId : undefined}
                           className={`${inputClass} pr-3`}
                         />
                       </label>
                       <label className="relative block">
                         <span className="sr-only">Senha</span>
-                        <Lock className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-ink-subtle" />
+                        <Lock
+                          aria-hidden
+                          className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-ink-subtle"
+                        />
                         <input
+                          ref={passwordRef}
+                          id="login-password"
+                          name="password"
                           type={reveal ? "text" : "password"}
                           autoComplete="current-password"
+                          autoCapitalize="none"
+                          autoCorrect="off"
+                          spellCheck={false}
                           placeholder="Sua senha"
                           value={password}
                           onChange={(e) => setPassword(e.target.value)}
                           required
+                          aria-invalid={invalid || undefined}
+                          aria-describedby={shownError ? errorId : undefined}
                           className={`${inputClass} pr-11`}
                         />
                         <button
@@ -197,8 +303,9 @@ export default function LoginPage() {
                           onClick={() => setReveal((v) => !v)}
                           className="absolute top-1/2 right-2 -translate-y-1/2 rounded-lg p-1.5 text-ink-subtle transition-colors hover:bg-surface-2 hover:text-ink"
                           aria-label={reveal ? "Esconder a senha" : "Mostrar a senha"}
+                          aria-pressed={reveal}
                         >
-                          {reveal ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                          {reveal ? <EyeOff aria-hidden className="size-4" /> : <Eye aria-hidden className="size-4" />}
                         </button>
                       </label>
                       <Button
@@ -212,7 +319,11 @@ export default function LoginPage() {
                       </Button>
                     </form>
                   )}
-                  {shownError ? <ErrorBox message={shownError} /> : null}
+                  {shownError ? (
+                    <div id={errorId}>
+                      <ErrorBox message={shownError} />
+                    </div>
+                  ) : null}
                 </>
               )}
             </div>
@@ -238,7 +349,7 @@ export default function LoginPage() {
 
       <section className="hidden p-3 lg:block">
         <div className="sticky top-3 h-[calc(100vh-1.5rem)]">
-          <LoginArt />
+          <LoginArt microsoft={microsoft} />
         </div>
       </section>
     </main>

@@ -362,6 +362,8 @@ function Palette({ user, onClose }: { user: User; onClose: () => void }) {
             onChange={(e) => {
               setQuery(e.target.value);
               setActive(0);
+              // Texto novo: o Enter que esperava a busca anterior não vale mais.
+              setPendingEnter(null);
             }}
             onKeyDown={onKeyDown}
             placeholder="Buscar OS, loja, cliente ou tela..."

@@ -65,6 +65,8 @@ export function UnproductiveDialog({
     <Dialog
       open
       onClose={onClose}
+      dirty={Boolean(reasonId || note.trim())}
+      busy={save.isPending}
       title="Visita improdutiva"
       description="O técnico foi ao local e não conseguiu atender. A OS volta para Atribuído, sem agenda, para reagendar."
       footer={

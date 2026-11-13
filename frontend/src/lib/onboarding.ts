@@ -51,6 +51,18 @@ export function isInternalUrl(url: string): boolean {
   return a === 10 || a === 127 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31) || (a === 169 && b === 254);
 }
 
+/**
+ * Link de cadastro para mandar ao técnico. A API monta o link com o endereço do servidor (WEB_URL) e
+ * esta tela com NEXT_PUBLIC_WEB_URL ou o endereço aberto agora: vale o desta tela, a não ser que só o
+ * da API abra fora da rede da empresa.
+ */
+export function shareableInviteUrl(invite: { token?: string; url?: string | null }): string | null {
+  const token = invite.token ?? (invite.url ? /\/cadastro-tecnico\/([^/?#]+)/.exec(invite.url)?.[1] : undefined);
+  const local = token ? inviteUrl(token) : null;
+  if (local && invite.url && isInternalUrl(local) && !isInternalUrl(invite.url)) return invite.url;
+  return local ?? invite.url ?? null;
+}
+
 // Mudou o texto? Mude também PRIVACY_VERSION em backend/app/schemas/onboarding.py.
 export const PRIVACY_NOTICE: { title: string; body: string }[] = [
   {
@@ -59,11 +71,15 @@ export const PRIVACY_NOTICE: { title: string; body: string }[] = [
   },
   {
     title: "Quais dados",
-    body: "Os desta ficha: identificação (nome, CPF, nascimento, foto), contato, endereço, região de atendimento, experiência, skills e disponibilidade.",
+    body: "Os desta ficha: identificação (nome, CPF, nascimento e foto), contato, endereço, CNPJ ou MEI (se tiver), região de atendimento, experiência, skills, veículo e CNH, disponibilidade e a senha do app (que ninguém da equipe consegue ver).",
   },
   {
     title: "Para quê",
     body: "Homologação técnica, cadastro na base de técnicos, distribuição de ordens de serviço e contato sobre os atendimentos. Não vendemos nem compartilhamos seus dados para marketing.",
+  },
+  {
+    title: "Com quem compartilhamos",
+    body: "O cliente atendido vê o seu nome e os horários da visita (saída, chegada e conclusão) no relatório e no portal do atendimento. Os demais dados ficam só com a equipe da Maxx Field.",
   },
   {
     title: "Localização (GPS)",
@@ -75,7 +91,7 @@ export const PRIVACY_NOTICE: { title: string; body: string }[] = [
   },
   {
     title: "Seus direitos",
-    body: "Você pode pedir acesso, correção, portabilidade ou exclusão dos seus dados e revogar consentimentos a qualquer momento, pelo canal de privacidade da Maxx Field.",
+    body: "Você pode pedir acesso, correção, portabilidade ou exclusão dos seus dados e revogar consentimentos a qualquer momento, falando com a equipe da Maxx Field que enviou este link.",
   },
 ];
 

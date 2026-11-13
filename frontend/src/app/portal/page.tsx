@@ -13,7 +13,7 @@ import { useNow } from "@/components/useNow";
 import { api, errorMessage } from "@/lib/api";
 import { formatDateTime, formatRelative, formatTime } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
-import { usePortalMe, visitWindow } from "@/lib/portal";
+import { canOpenRequests, PORTAL_SUSPENDED, usePortalMe, visitWindow } from "@/lib/portal";
 import type { Page, PortalLocation, PortalRequestItem } from "@/lib/types";
 
 type Scope = "open" | "done" | "all";
@@ -245,19 +245,33 @@ export default function PortalRequestsPage() {
   const total = pages.length ? pages[pages.length - 1].total : 0;
   const waiting = items.filter((item) => item.status === "on_hold_customer").length;
   const storeCount = me.data?.locations ?? 0;
+  // Empresa sem contrato: o histórico continua aqui, mas abrir solicitação não.
+  const canOpen = canOpenRequests(me.data);
+  const newRequest = (size: "md" | "lg") =>
+    canOpen ? (
+      <Button variant="primary" size={size} onClick={() => router.push("/portal/nova")}>
+        <Plus className="size-4" />
+        Nova solicitação
+      </Button>
+    ) : null;
 
   return (
     <div>
       <PageHeader
         title="Solicitações"
-        description="Abra um chamado para a Maxx e acompanhe a visita na sua loja."
-        actions={
-          <Button variant="primary" size="lg" onClick={() => router.push("/portal/nova")}>
-            <Plus className="size-4" />
-            Nova solicitação
-          </Button>
+        documentTitle="Solicitações"
+        description={
+          canOpen ? "Abra um chamado para a Maxx e acompanhe a visita na sua loja." : "Acompanhe as solicitações da sua empresa."
         }
+        actions={newRequest("lg")}
       />
+
+      {canOpen ? null : (
+        <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-line bg-surface p-3.5 text-sm shadow-elev-1" role="status">
+          <CircleAlert className="mt-0.5 size-4 shrink-0 text-ink-subtle" aria-hidden />
+          <p className="text-ink-muted">{PORTAL_SUSPENDED}</p>
+        </div>
+      )}
 
       <Tabs<Scope>
         items={[
@@ -300,7 +314,7 @@ export default function PortalRequestsPage() {
       {list.isLoading ? (
         <LoadingBlock rows={4} />
       ) : list.error && !items.length ? (
-        <ErrorBox message={errorMessage(list.error)} />
+        <ErrorBox message={errorMessage(list.error)} onRetry={() => void list.refetch()} />
       ) : !items.length ? (
         <EmptyState
           icon={<Inbox />}
@@ -314,14 +328,11 @@ export default function PortalRequestsPage() {
           description={
             q || store
               ? "Mude a busca ou a loja."
-              : "Quando algo parar na loja, abra uma solicitação: a central da Maxx analisa e envia um técnico."
+              : canOpen
+                ? "Quando algo parar na loja, abra uma solicitação: a central da Maxx analisa e envia um técnico."
+                : undefined
           }
-          action={
-            <Button variant="primary" onClick={() => router.push("/portal/nova")}>
-              <Plus className="size-4" />
-              Nova solicitação
-            </Button>
-          }
+          action={q || store ? undefined : newRequest("md")}
         />
       ) : (
         <ul className={clsx("stagger flex flex-col gap-2.5 transition-opacity duration-150", list.isPlaceholderData && "opacity-60")}>
@@ -357,11 +368,13 @@ export default function PortalRequestsPage() {
 
       {items.length ? (
         <div className="mt-4 flex flex-col items-center gap-3">
-          {list.isFetchNextPageError ? <ErrorBox message={errorMessage(list.error)} /> : null}
           <p className="text-xs text-ink-muted">
             Mostrando {items.length.toLocaleString("pt-BR")} de {total.toLocaleString("pt-BR")}
           </p>
-          {list.hasNextPage ? (
+          {/* A página seguinte falhou: as já carregadas ficam, e o "Tentar de novo" busca só a que faltou. */}
+          {list.isFetchNextPageError && !list.isFetchingNextPage ? (
+            <ErrorBox message={errorMessage(list.error)} onRetry={() => void list.fetchNextPage()} />
+          ) : list.hasNextPage ? (
             <Button onClick={() => void list.fetchNextPage()} loading={list.isFetchingNextPage}>
               Mostrar mais
             </Button>

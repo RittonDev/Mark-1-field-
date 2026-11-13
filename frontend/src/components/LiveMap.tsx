@@ -226,6 +226,7 @@ export default function LiveMap({
   focusKey = null,
   focusPending = false,
   fitKey = "",
+  fitPending = false,
   notice = null,
 }: {
   technicians: LiveTechnician[];
@@ -249,6 +250,8 @@ export default function LiveMap({
   focusPending?: boolean;
   /** Muda com o grupo: o mapa enquadra de novo os técnicos e as OS. */
   fitKey?: string;
+  /** Técnicos ou OS ainda chegando: o enquadramento espera para incluir todos de uma vez. */
+  fitPending?: boolean;
   /** Aviso sobre o mapa (ex.: ninguém em jornada). */
   notice?: string | null;
 }) {
@@ -524,12 +527,12 @@ export default function LiveMap({
 
   // Enquadra técnicos e OS na primeira carga e a cada troca de grupo (não a cada posição nova).
   useEffect(() => {
-    if (!usable(ready) || fitRef.current === fitKey) return;
+    if (!usable(ready) || fitPending || fitRef.current === fitKey) return;
     const points = pinPoints(techPins.current, osPins.current);
     if (points.length === 0) return;
     fitRef.current = fitKey;
     moveCamera(ready, points, 13);
-  }, [ready, fitKey, technicians, activities]);
+  }, [ready, fitKey, fitPending, technicians, activities]);
 
   // Ao escolher técnico ou loja, a câmera se mexe uma vez só, quando os dados do foco chegam.
   useEffect(() => {
@@ -556,7 +559,11 @@ export default function LiveMap({
     if (!usable(ready)) return;
     const { L, layers } = ready;
     layers.trail.clearLayers();
-    if (!history) return;
+    if (!history) {
+      // Sem técnico escolhido: ao escolher de novo, quem enquadra é a câmera do foco (não o trajeto).
+      trailKeyRef.current = null;
+      return;
+    }
     const color = TRAIL_COLOR[theme];
     const line = history.points.map((p) => [p.latitude, p.longitude] as LatLngTuple);
     if (line.length > 1) {

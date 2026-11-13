@@ -21,7 +21,6 @@ from app.models import (
     Location,
     Project,
     TechnicianApplication,
-    TechnicianShift,
     Ticket,
     User,
 )
@@ -67,7 +66,6 @@ AREA_LABEL = {
     "energia": "energia",
     "automacao": "PDV",
 }
-LIVE_WINDOW = timedelta(minutes=30)
 
 
 def norm(value: str | None) -> str:
@@ -209,13 +207,10 @@ async def suggest(db: AsyncSession, target: Target, limit: int = 5) -> list[dict
             )
         ).all()
     )
-    on_shift = set(
-        await db.scalars(
-            select(TechnicianShift.user_id).where(
-                TechnicianShift.user_id.in_(ids), TechnicianShift.ended_at.is_(None)
-            )
-        )
-    )
+    from app.services.tracking import active_shifts  # tracking usa tickets, que usa este módulo
+
+    # Em jornada: a aberta e dentro do limite (a esquecida aberta não conta).
+    on_shift = set(await active_shifts(db, ids))
     areas = {
         a.user_id: set(a.service_areas or [])
         for a in await db.scalars(

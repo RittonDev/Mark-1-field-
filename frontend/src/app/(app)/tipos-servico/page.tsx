@@ -5,7 +5,7 @@ import { Plus, Timer, TrendingUp } from "lucide-react";
 import Link from "next/link";
 import { useId, useMemo, useRef, useState } from "react";
 import { useConfirm } from "@/components/Confirm";
-import { FieldError, fold, InactiveChip, plural, RowEditButton, SearchField, useDiscardGuard } from "@/components/settings/shared";
+import { FieldError, fold, InactiveChip, plural, RowEditButton, SearchField } from "@/components/settings/shared";
 import { useToast } from "@/components/Toaster";
 import {
   Button,
@@ -135,18 +135,21 @@ function ServiceTypeDialog({
       onClose();
     },
   });
-  const requestClose = useDiscardGuard(dirty, onClose);
 
   return (
     <Dialog
       open
-      onClose={requestClose}
+      onClose={onClose}
+      dirty={dirty}
+      busy={mutation.isPending}
       size="lg"
       title={editing ? "Editar tipo de serviço" : "Novo tipo de serviço"}
       description="A duração estimada agenda a visita; a real é medida pelo tempo em atendimento."
       footer={
         <>
-          <Button onClick={requestClose}>Cancelar</Button>
+          <Button onClick={onClose} disabled={mutation.isPending}>
+            Cancelar
+          </Button>
           <Button variant="primary" type="submit" form="service-type-form" loading={mutation.isPending}>
             Salvar
           </Button>

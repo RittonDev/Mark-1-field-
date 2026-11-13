@@ -16,6 +16,9 @@ from app.services.realtime import commit_and_publish
 
 router = APIRouter(tags=["payouts"])
 
+BAD_MONTH = "Mês inválido (use AAAA-MM)"
+BAD_PERIOD = "Escolha datas entre 2000 e 2100"
+
 
 class PayoutChanged(BaseModel):
     changed: int
@@ -58,6 +61,8 @@ async def list_payouts(
     date_from: date | None = None,
     date_to: date | None = None,
 ) -> PayoutList:
+    if any(d is not None and not 2000 <= d.year <= 2100 for d in (date_from, date_to)):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, BAD_PERIOD)
     return await svc.list_payouts(
         db,
         technician_id=technician_id,
@@ -94,7 +99,8 @@ async def my_earnings(db: DB, user: CurrentUser, month: str | None = None) -> My
             year, mon = (int(part) for part in month.split("-", 1))
             when = date(year, mon, 1)
         except ValueError as exc:
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY, "Mês inválido (use AAAA-MM)"
-            ) from exc
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, BAD_MONTH) from exc
+        # Fora disso não há OS (e o ano 9999 estoura a conta do fim do mês).
+        if not 2000 <= when.year <= 2100:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, BAD_MONTH)
     return await svc.my_earnings(db, user, when)

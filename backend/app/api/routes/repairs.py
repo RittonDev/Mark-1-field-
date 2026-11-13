@@ -5,12 +5,12 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, sta
 from fastapi.responses import FileResponse
 
 from app.api.deps import DB, TicketManagerUser
+from app.api.files import stored_file
 from app.core.enums import RepairStatus
 from app.core.security import InvalidToken, decode_token
 from app.models import RepairPhoto
 from app.schemas.repair import RepairIn, RepairOut, RepairStatusChange, RepairSummary
 from app.services import repairs as svc
-from app.services import storage
 
 router = APIRouter(tags=["repairs"])
 
@@ -63,6 +63,8 @@ async def update_repair(
 async def change_repair_status(
     repair_id: uuid.UUID, body: RepairStatusChange, db: DB, user: TicketManagerUser
 ) -> RepairOut:
+    """Próxima etapa (`allowed_next`) ou a volta para a anterior (`previous_status`, com motivo
+    em `note`), para a etapa clicada por engano."""
     await svc.change_status(db, await svc.get(db, repair_id), body, user)
     await db.commit()
     return await _full(db, repair_id)
@@ -92,4 +94,4 @@ async def repair_photo(photo_id: uuid.UUID, token: str, db: DB) -> FileResponse:
     photo = await db.get(RepairPhoto, photo_id)
     if photo is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Foto não encontrada")
-    return FileResponse(storage.open_path(photo.storage_key))
+    return stored_file(photo.storage_key)

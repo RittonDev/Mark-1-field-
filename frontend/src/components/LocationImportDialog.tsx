@@ -125,6 +125,9 @@ export function LocationImportDialog({
       open
       size="lg"
       onClose={onClose}
+      // Com a planilha escolhida, clique fora ou Esc perguntam antes de fechar; importando, não fecha.
+      dirty={Boolean(file) && !done}
+      busy={run.isPending}
       title="Importar locais"
       description="Planilha CSV ou Excel (XLSX) com a sua base de filiais, lojas e unidades."
       footer={
@@ -134,7 +137,9 @@ export function LocationImportDialog({
           </Button>
         ) : (
           <>
-            <Button onClick={onClose}>Cancelar</Button>
+            <Button onClick={onClose} disabled={run.isPending}>
+              Cancelar
+            </Button>
             {result?.dry_run ? (
               <Button variant="primary" loading={run.isPending} disabled={total === 0} onClick={() => run.mutate(false)}>
                 Importar {plural(total)}

@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BrandRule } from "../components/Brand";
 import { Icon } from "../components/Icon";
 import { Button, Card, ErrorBox, SectionTitle } from "../components/ui";
-import { locationConsentAt } from "../lib/account";
+import { locationConsentAt, refreshMe } from "../lib/account";
 import { ApiError, errorMessage } from "../lib/api";
 import { ensurePushRegistration } from "../lib/auth";
 import { formatDateTime } from "../lib/format";
@@ -25,14 +25,14 @@ const SECTIONS: { title: string; items: string[] }[] = [
     title: "Para quê",
     items: [
       "Organizar as visitas e a distribuição das OS.",
-      "Acompanhar o deslocamento até a loja e o andamento dos atendimentos de campo.",
+      "Acompanhar o deslocamento até a loja e comprovar os atendimentos de campo.",
       "Os dados servem só para a gestão dos atendimentos, conforme a LGPD.",
     ],
   },
   {
     title: "Quando",
     items: [
-      "Durante a jornada que você inicia e encerra no app: cerca de uma posição a cada 30 segundos, e a cada 15 segundos quando você está a caminho de uma OS.",
+      "Durante a jornada que você inicia e encerra no app: cerca de uma posição a cada 30 segundos, a cada 15 segundos quando você está a caminho de uma OS e uma por minuto com a bateria abaixo de 15%.",
       "Com o app aberto ou em segundo plano. No Android aparece uma notificação fixa enquanto a jornada estiver ativa.",
       "Fora da jornada, o app só registra a posição do momento em que você inicia o deslocamento, faz o check-in, conclui a OS, registra visita improdutiva ou colhe a assinatura. Essa posição fica no histórico daquela OS.",
       "O servidor descarta qualquer ponto de rastreamento enviado fora da jornada.",
@@ -65,13 +65,15 @@ const SECTIONS: { title: string; items: string[] }[] = [
     items: [
       "Você inicia e encerra a jornada quando quiser, pelo botão na tela inicial.",
       "Fechar o app não encerra a jornada: encerre pelo botão. Sair da conta (Conta → Sair) também encerra.",
-      "Nas etapas da OS, dá para desligar o registro da posição na hora de confirmar.",
+      "Jornada esquecida aberta: o app avisa depois de 10 horas e encerra sozinho depois de 14 horas.",
+      "Nas etapas da OS, a posição só é registrada se o celular permitir a localização para o Maxx Field. Sem essa permissão, a etapa vai para a central sem a posição.",
     ],
   },
   {
     title: "Seus direitos",
     items: [
-      "Você pode pedir acesso, correção ou exclusão dos seus dados de localização e retirar este aceite falando com a central.",
+      "Você pode retirar este aceite quando quiser, em Conta → Rastreamento da jornada. A jornada aberta é encerrada na hora.",
+      "Para pedir acesso, correção ou exclusão dos seus dados de localização, fale com a central.",
       "Sem o aceite você usa o app normalmente, mas não consegue iniciar a jornada.",
     ],
   },
@@ -115,7 +117,13 @@ export default function TrackingConsentScreen() {
       showToast("Jornada iniciada", { tone: "success", description: background === false ? BACKGROUND_HINT : "Registrando até você encerrar." });
       return true;
     } catch (e) {
-      setError(errorMessage(e));
+      if (e instanceof ApiError && e.status === 409) {
+        // A central não tem o aceite (ex.: retirado em outro aparelho): relê o usuário e o botão de aceitar volta.
+        await refreshMe().catch(() => undefined);
+        setError("O aceite não está registrado na central. Confirme o termo de novo para iniciar a jornada.");
+      } else {
+        setError(errorMessage(e));
+      }
       return false;
     }
   }

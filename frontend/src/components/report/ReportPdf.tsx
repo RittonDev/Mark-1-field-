@@ -4,6 +4,7 @@ import { formatDocument } from "@/lib/format";
 import type { PublicReport, PublicReportPhoto } from "@/lib/types";
 import { brandMark, prepareImages, saveBlob } from "./pdfAssets";
 import {
+  arrivedOnSite,
   brDate,
   brDateTime,
   brShort,
@@ -168,7 +169,7 @@ export function ReportPdf({ report, images, logo = null }: { report: PublicRepor
   const stage = reportStage(report.status);
   const pill = statusPill(report);
   // Antes de o técnico chegar, os quadros de horário ficariam vazios: entra o andamento no lugar.
-  const showTiles = stage === "done" || (stage === "progress" && Boolean(report.arrived_at));
+  const showTiles = stage !== "cancelled" && arrivedOnSite(report);
   const signature = report.signature?.image_url ? source(report.signature.image_url, images) : null;
   return (
     <Document title={`Relatório ${report.code}`} author={companyName} subject={report.title} language="pt-BR">
@@ -275,13 +276,13 @@ export function ReportPdf({ report, images, logo = null }: { report: PublicRepor
             </View>
           ) : null}
           {stage !== "cancelled" && report.arrival_minutes != null ? (
-            <Text style={{ ...s.small, color: report.arrival_on_time === false ? C.amber : C.green }}>
+            <Text style={{ ...s.small, color: report.arrival_on_time === false ? C.amber : C.muted }}>
               Técnico chegou em {minutes(report.arrival_minutes)}
               {report.arrival_on_time ? " (dentro do prazo)" : report.arrival_on_time === false ? " (fora do prazo)" : ""}.
             </Text>
           ) : null}
           {stage !== "cancelled" && report.check_in_gps ? (
-            <Text style={{ ...s.small, color: C.green }}>Presença no local confirmada por GPS no check-in.</Text>
+            <Text style={s.small}>Presença no local confirmada por GPS no check-in.</Text>
           ) : null}
         </View>
 
@@ -292,7 +293,8 @@ export function ReportPdf({ report, images, logo = null }: { report: PublicRepor
           </View>
         ) : null}
 
-        {report.timeline.length ? (
+        {/* Em andamento, as etapas acima já trazem os horários; cancelada, só o aviso. */}
+        {stage === "done" && report.timeline.length ? (
           <View style={s.section} wrap={false}>
             <Text style={s.sectionTitle}>Linha do tempo (horário de Brasília)</Text>
             <View style={s.timeline}>

@@ -48,14 +48,16 @@ function applyTransition(ticket: TicketDetail, op: Extract<OutboxOp, { type: "tr
   const at = op.client_timestamp;
   const t: TicketDetail = { ...ticket };
   // Check-in: a chegada é a primeira entrada em "Em atendimento" (vale para a promessa de chegada).
-  // As 4h na loja contam de cada visita: sem janela aberta (primeira visita, OS reaberta ou depois de
-  // uma visita improdutiva), entrar em atendimento abre uma nova.
-  if (to === "in_progress" && !t.arrived_at) {
-    t.arrived_at = at;
-    t.arrival_status = t.arrival_due_at && new Date(at).getTime() > new Date(t.arrival_due_at).getTime() ? "late" : "met";
-  }
-  if (to === "in_progress" && !t.onsite_due_at) {
-    t.onsite_due_at = onsiteDueFrom(at);
+  // O limite na loja é refeito a cada entrada (field.py::on_arrival / on_reentry): na primeira, as
+  // horas inteiras do chamado; numa revisita ou retomada, o que sobrou depois do tempo já trabalhado.
+  if (to === "in_progress") {
+    if (!t.arrived_at) {
+      t.arrived_at = at;
+      t.arrival_status = t.arrival_due_at && new Date(at).getTime() > new Date(t.arrival_due_at).getTime() ? "late" : "met";
+      t.onsite_due_at = onsiteDueFrom(at);
+    } else {
+      t.onsite_due_at = onsiteDueFrom(at, t.work_seconds);
+    }
     t.onsite_status = "ok";
   }
   if (p.scheduled_start) {
@@ -146,9 +148,8 @@ export function applyOp(ticket: TicketDetail, op: OutboxOp, user: User): TicketD
       t.status = "assigned";
       t.scheduled_start = null;
       t.scheduled_end = null;
-      // A janela de permanência era desta visita; a próxima abre outra ao iniciar o atendimento.
-      t.onsite_due_at = null;
-      t.onsite_status = null;
+      // O limite na loja fica como está (o servidor faz o mesmo): a próxima entrada em atendimento
+      // o refaz com o que sobrou das horas do chamado.
       t.unproductive_count = (t.unproductive_count ?? 0) + 1;
       t.last_unproductive_at = at;
       t.updated_at = at;

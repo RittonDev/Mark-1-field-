@@ -24,3 +24,13 @@ export function eventPoint(data: Record<string, unknown> | null | undefined): [n
   const lng = data?.longitude;
   return typeof lat === "number" && typeof lng === "number" ? [lat, lng] : null;
 }
+
+/**
+ * Metros do ponto do evento até a loja: a distância que a API gravou na hora (com a loja de então)
+ * ou, nos eventos antigos, a conta com a loja de agora. Null sem ponto ou sem loja no mapa.
+ */
+export function storeDistance(data: Record<string, unknown> | null | undefined, store: [number, number] | null): number | null {
+  if (typeof data?.distance_m === "number") return data.distance_m;
+  const point = eventPoint(data);
+  return point && store ? distance(store, point) : null;
+}

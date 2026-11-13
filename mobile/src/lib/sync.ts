@@ -67,6 +67,7 @@ import {
   setAttachmentsCache,
   setFormError,
   setKv,
+  signatureWaiting,
   transaction,
   WriteCancelled,
   type DB,
@@ -97,7 +98,7 @@ import type {
   SyncPushResponse,
   UnproductivePayload,
 } from "./syncTypes";
-import { showToast } from "./toast";
+import { showToast, type ToastOptions } from "./toast";
 import { flushPendingShiftEnd, flushPings, resumeTracking, updateTrackingMode } from "./tracking";
 import type {
   Attachment,
@@ -115,8 +116,10 @@ const PUSH_BATCH = 25;
 /** Envio e download do sync carregam OS inteiras: mais tempo que uma consulta comum. */
 const SYNC_TIMEOUT_MS = 60_000;
 const SAFETY_INTERVAL_MS = 90_000;
-/** Com o tempo real no ar, os eventos já disparam o sync: o intervalo de segurança espaça. */
+/** Com o tempo real no ar e nada para enviar, os eventos já disparam o sync: o intervalo de segurança espaça. */
 const REALTIME_INTERVAL_MS = 5 * 60_000;
+/** De quanto em quanto tempo (com o app na tela) confere se está na hora de uma rodada. */
+const TICK_MS = 30_000;
 const SINCE_KEY = "sync_since";
 const LAST_SYNC_KEY = "sync_last_at";
 
@@ -217,6 +220,8 @@ interface Retry {
   nextAt: number;
   /** Falhou sozinha com erro do servidor: provavelmente é ela que derruba o envio. */
   stuck: boolean;
+  /** O que deu errado, para a faixa seguir mostrando enquanto o item espera a vez. */
+  message: string;
 }
 
 const BACKOFF_BASE_MS = 5_000;
@@ -228,14 +233,20 @@ const STUCK_AFTER = 3;
 const retries = new Map<string, Retry>();
 
 /** Falha do lado do servidor: espera 5 s, 10 s, 20 s… até 5 min (±20%) antes de tentar de novo. */
-function scheduleRetry(id: string, stuck = false) {
+function scheduleRetry(id: string, message: string, stuck = false) {
   const failures = (retries.get(id)?.failures ?? 0) + 1;
   const delay = Math.min(BACKOFF_BASE_MS * 2 ** (failures - 1), BACKOFF_MAX_MS) * (0.8 + Math.random() * 0.4);
-  retries.set(id, { failures, nextAt: Date.now() + delay, stuck });
+  retries.set(id, { failures, nextAt: Date.now() + delay, stuck, message });
 }
 
 const isDue = (id: string) => (retries.get(id)?.nextAt ?? 0) <= Date.now();
 const failuresOf = (id: string) => retries.get(id)?.failures ?? 0;
+
+/** Algum item em espera ficou pronto para tentar de novo depois da última rodada? */
+function retryDue(now: number): boolean {
+  for (const retry of retries.values()) if (retry.nextAt > lastRoundAt && retry.nextAt <= now) return true;
+  return false;
+}
 
 function countStuck(): number {
   let count = 0;
@@ -252,6 +263,17 @@ interface Round extends Ctx {
   error: string | null;
   /** Anexos da OS no servidor, buscados no máximo uma vez por rodada (reenvio sem duplicar). */
   attachments: Map<UUID, Attachment[] | null>;
+}
+
+/** O restante da OS fica para depois; um item esperando a vez de tentar de novo segue na faixa. */
+function holdTicket(round: Round, ticketId: UUID, itemId?: string) {
+  round.blocked.add(ticketId);
+  if (itemId) round.error ??= retries.get(itemId)?.message ?? null;
+}
+
+/** Código da OS para os avisos ("OS" quando ela não está no aparelho). */
+async function ticketCode(ticketId: UUID, db?: DB): Promise<string> {
+  return (await getTicket(ticketId, db))?.code ?? "OS";
 }
 
 export interface SyncRequest {
@@ -280,34 +302,36 @@ export function requestSync({ manual = false }: SyncRequest = {}): Promise<void>
     again = true;
     return running;
   }
-  const myEpoch = epoch;
-  const loop = (async () => {
-    try {
-      do {
-        again = false;
-        const isManual = pendingManual;
-        pendingManual = false;
-        await runOnce(myEpoch, isManual);
-      } while (again && myEpoch === epoch && session.get().status === "signedIn");
-    } finally {
-      if (running === loop) running = null;
-    }
-  })();
+  const loop = runRounds(epoch);
   running = loop;
-  runningEpoch = myEpoch;
+  runningEpoch = epoch;
+  const settle = () => {
+    if (running === loop) running = null;
+  };
+  loop.then(settle, settle);
   return loop;
+}
+
+/** Rodadas seguidas enquanto chegam pedidos durante elas (da mesma sessão). */
+async function runRounds(myEpoch: number) {
+  do {
+    again = false;
+    const manual = pendingManual;
+    pendingManual = false;
+    await runOnce(myEpoch, manual);
+  } while (again && myEpoch === epoch && session.get().status === "signedIn");
 }
 
 async function runOnce(myEpoch: number, manual: boolean) {
   const user = session.get().user;
   if (!user || myEpoch !== epoch) return;
+  lastRoundAt = Date.now();
   // Sem Wi-Fi e sem dados não adianta tentar, a menos que o técnico peça.
   if (status.network === "offline" && !manual) {
     await refreshPendingCounts().catch(() => undefined);
     return;
   }
   const round: Round = { epoch: myEpoch, user, blocked: new Set(), error: null, attachments: new Map() };
-  lastRoundAt = Date.now();
   const pending = await countPending().catch(() => ({ ops: 0, photos: 0 }));
   // A faixa "Sincronizando…" só acende quando há o que enviar ou o técnico pediu: a rotina
   // silenciosa (intervalo, eventos do tempo real) não pisca a tela o dia todo.
@@ -323,7 +347,6 @@ async function runOnce(myEpoch: number, manual: boolean) {
     await refreshReasons(round);
     // Alertas locais do tempo na loja (aviso faltando 30 min e no estouro das 4h).
     void syncOnsiteAlerts();
-    await syncTracking();
     await flushDeviceRegistration().catch((error: unknown) => console.warn("Falha ao registrar o aparelho", error));
     const at = new Date().toISOString();
     setStatus({ server: "reachable", lastSyncAt: at, lastError: round.error });
@@ -341,6 +364,8 @@ async function runOnce(myEpoch: number, manual: boolean) {
       setStatus({ syncing: false, stuckOps: countStuck() });
     }
   }
+  // O rastreamento tem fila própria: segue mesmo quando o download falhou e nunca vira falha do sync.
+  if (alive(round)) await syncTracking(status.server !== "unreachable");
 }
 
 /**
@@ -360,12 +385,14 @@ async function sendPhase(round: Round, phase: () => Promise<void>) {
 }
 
 /**
- * Rastreamento da jornada: sobe a fila de pontos, envia um encerramento feito sem sinal e ajusta o
- * ritmo (deslocamento = mais frequente). Problema aqui nunca vira falha da sincronização.
+ * Rastreamento da jornada: sobe a fila de pontos e um encerramento feito sem sinal (com o servidor
+ * no ar) e ajusta o ritmo (deslocamento = mais frequente). Nada aqui lança nem vira falha do sync.
  */
-async function syncTracking() {
-  await flushPings(true);
-  await flushPendingShiftEnd();
+async function syncTracking(reachable: boolean) {
+  if (reachable) {
+    await flushPings(true);
+    await flushPendingShiftEnd();
+  }
   await updateTrackingMode();
 }
 
@@ -415,26 +442,55 @@ export function describeOp(op: SyncOperation): string {
  * assinatura pendente seguem direto.
  */
 async function pushWithSignatures(round: Round) {
-  const signatures = await listSignatures();
+  const signatures = await readySignatures();
   const gates = new Map(signatures.map((s) => [s.ticket_id, s.after_seq]));
-  await pushOutbox(round, gates);
+  // Envio interrompido no meio: o que ficou para trás pode ser justamente o que vai antes de uma assinatura.
+  if (!(await pushOutbox(round, gates))) return;
   for (const signature of signatures) {
     if (round.blocked.has(signature.ticket_id)) continue;
+    if (!isDue(signature.id)) {
+      holdTicket(round, signature.ticket_id, signature.id);
+      continue;
+    }
+    // Ainda há na fila o que vai antes dela (formulário, o feito até a assinatura): espera a vez.
+    if (await signatureWaiting(signature.ticket_id, signature.after_seq)) {
+      holdTicket(round, signature.ticket_id);
+      continue;
+    }
     ensureAlive(round);
     if (await uploadSignature(round, signature)) gates.delete(signature.ticket_id);
-    else round.blocked.add(signature.ticket_id);
+    else holdTicket(round, signature.ticket_id);
   }
   await pushOutbox(round, gates);
 }
 
+/**
+ * Assinaturas desta rodada. A guardada porque o formulário ainda não estava concluído no servidor
+ * volta quando ele aparece concluído lá (a conclusão chegou ou a central concluiu); até lá ela não
+ * segura o resto da OS: um "Resolver" segue e o servidor diz o que falta.
+ */
+async function readySignatures(): Promise<PendingSignature[]> {
+  const ready: PendingSignature[] = [];
+  for (const signature of await listSignatures(undefined, { includeBlocked: true })) {
+    if (signature.blocked_reason) {
+      const server = await getServerTicket(signature.ticket_id);
+      if (server && pendingRequiredForms(server).length) continue;
+    }
+    ready.push(signature);
+  }
+  return ready;
+}
+
 const FORM_INCOMPLETE = /falta preencher/i;
 
-async function pushOutbox(round: Round, gates: Map<UUID, number>) {
+/** Envia a fila em lotes. Devolve false quando o envio parou no meio (falha do lote inteiro). */
+async function pushOutbox(round: Round, gates: Map<UUID, number>): Promise<boolean> {
   for (let page = 0; page < 200; page++) {
     const ops = await nextBatch(round, gates);
-    if (!ops.length) return;
-    if (!(await pushBatch(round, ops))) return;
+    if (!ops.length) return true;
+    if (!(await pushBatch(round, ops))) return false;
   }
+  return true;
 }
 
 /**
@@ -449,12 +505,15 @@ async function nextBatch(round: Round, gates: Map<UUID, number>): Promise<Outbox
     let held = false;
     for (const op of rows) {
       if (round.blocked.has(op.ticket_id)) continue;
-      if ((op.type === "part_request" && waiting.has(op.client_op_id)) || !isDue(op.client_op_id)) {
-        round.blocked.add(op.ticket_id);
+      if (op.type === "part_request" && waiting.has(op.client_op_id)) {
+        holdTicket(round, op.ticket_id);
         held = true;
-        continue;
+      } else if (!isDue(op.client_op_id)) {
+        holdTicket(round, op.ticket_id, op.client_op_id);
+        held = true;
+      } else {
+        batch.push(op);
       }
-      batch.push(op);
     }
     // Vazio só porque tudo o que veio ficou para depois: busca de novo, já sem essas OS.
     if (batch.length || !held) return batch;
@@ -512,19 +571,22 @@ async function pushFailed(round: Round, ops: OutboxOp[], error: unknown): Promis
     return true;
   }
   const alone = ops.length === 1 && (suspect || error.status === 413);
-  const message = alone
-    ? `O servidor falhou ao processar esta ação (erro ${error.status}). Toque em Descartar se continuar.`
-    : error.status === 409
-      ? "O servidor ainda processava o envio anterior. Vamos tentar de novo."
-      : error.retryable
-        ? `O servidor está com problema (erro ${error.status}). Vamos tentar de novo.`
-        : `O servidor não aceitou o envio (erro ${error.status}). Vamos tentar de novo.`;
+  const message = batchFailure(error, alone);
   await write(round, (db) => markOpsAttempt(db, ids, message));
-  for (const id of ids) scheduleRetry(id, alone);
+  for (const id of ids) scheduleRetry(id, message, alone);
   for (const op of ops) round.blocked.add(op.ticket_id);
   round.error ??= message;
   // Uma ação travada sozinha não para as das outras OS; problema no envio inteiro para a rodada.
   return alone;
+}
+
+/** Texto do problema no envio (aparece na faixa e ao lado da ação na tela Conta). */
+function batchFailure(error: ApiError, alone: boolean): string {
+  if (alone) return `O servidor não conseguiu processar esta ação (erro ${error.status}). Avise a central no grupo.`;
+  if (error.status === 409) return "O servidor ainda processava o envio anterior. Vamos tentar de novo.";
+  if (error.status === 429) return "O servidor pediu uma pausa nos envios. Vamos tentar de novo em instantes.";
+  if (error.retryable) return `O servidor está com problema (erro ${error.status}). Vamos tentar de novo.`;
+  return `O servidor não aceitou o envio (erro ${error.status}). Vamos tentar de novo.`;
 }
 
 /** Recusa definitiva: sai da fila, o rascunho local some e o técnico é avisado. */

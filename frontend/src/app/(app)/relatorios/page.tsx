@@ -15,15 +15,20 @@ import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canManageTickets } from "@/lib/constants";
 import { downloadCsv } from "@/lib/download";
-import { formatMinutes, formatMoney } from "@/lib/format";
-import type { DailyReport, DayNumbers, MonthlyReport, PayoutList, ReportCountRef, ReportDayPoint } from "@/lib/types";
+import { formatDocument, formatMinutes, formatMoney, OPERATION_TZ } from "@/lib/format";
+import { useCustomers } from "@/lib/queries";
+import type { DailyReport, DayNumbers, MonthlyReport, PayoutList, ReportCountRef, ReportDayPoint, UUID } from "@/lib/types";
 import { copyText } from "@/lib/whatsapp";
 
 type Tab = "diario" | "mensal" | "sla";
 type Cell = string | number | null | undefined;
 
-/** Fuso da operação: o dia fecha à meia-noite de lá. */
-const OPERATION_TZ = "America/Sao_Paulo";
+/** Recorte por cliente (a prestação de contas dos clientes grandes); sem ele, a operação inteira. */
+interface CustomerScope {
+  id: UUID;
+  name: string;
+}
+
 const SLA_DAYS = [7, 30, 90, 180, 365];
 /** Meta de prazo: abaixo dela o número fica âmbar; abaixo do piso, vermelho. */
 const TARGET = 90;
@@ -39,6 +44,15 @@ const csvMoney = (v: number) => v.toFixed(2).replace(".", ",");
 const brDate = (iso: string) => iso.split("-").reverse().join("/");
 const dayISO = (ms: number) => new Intl.DateTimeFormat("en-CA", { timeZone: OPERATION_TZ }).format(new Date(ms));
 const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+/** "Lojas Exemplo Ltda." -> "lojas-exemplo-ltda" (para o nome do arquivo). */
+const slug = (s: string) =>
+  s
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+const fileSuffix = (scope: CustomerScope | null) => (scope ? `-${slug(scope.name) || "cliente"}` : "");
 
 const longDate = (iso: string) =>
   new Intl.DateTimeFormat("pt-BR", { weekday: "long", day: "2-digit", month: "long", year: "numeric", timeZone: "UTC" }).format(
@@ -141,36 +155,41 @@ function summaryRows(n: DayNumbers, p: DayNumbers, partial: boolean): Cell[][] {
   ];
 }
 
-function rankingRows(data: DailyReport | MonthlyReport): Cell[][] {
+/** Rankings do período; com o recorte por cliente, o de clientes sai (seria só ele). */
+function rankingRows(data: DailyReport | MonthlyReport, scope: CustomerScope | null): Cell[][] {
   const block = (title: string, unit: string, items: ReportCountRef[]): Cell[][] => [[title, unit], ...items.map((i) => [i.name, i.count]), []];
   return [
-    ...block("Clientes com mais chamados", "Chamados", data.customers),
-    ...block("OS resolvidas por pessoa", "OS", data.technicians),
+    ...(scope ? [] : block("Clientes com mais chamados", "Chamados", data.customers)),
+    ...block("OS resolvidas por técnico", "OS", data.technicians),
     ...block("Motivos das visitas improdutivas", "Visitas", data.unproductive_reasons),
   ];
 }
 
-function exportDaily(data: DailyReport, partial: boolean) {
-  downloadCsv(`fechamento-${data.date}.csv`, [
+const scopeRows = (scope: CustomerScope | null): Cell[][] => (scope ? [["Cliente", scope.name]] : []);
+
+function exportDaily(data: DailyReport, partial: boolean, scope: CustomerScope | null) {
+  downloadCsv(`fechamento-${data.date}${fileSuffix(scope)}.csv`, [
     ["Fechamento do dia", brDate(data.date)],
+    ...scopeRows(scope),
     ["Situação", partial ? "Parcial: o dia fecha à meia-noite" : "Dia fechado à meia-noite"],
     [],
     ["Indicador", brDate(data.date), `${brDate(shiftDay(data.date, -1))}${partial ? " (dia inteiro)" : ""}`],
     ...summaryRows(data.numbers, data.previous, partial),
     [],
-    ...rankingRows(data),
+    ...rankingRows(data, scope),
   ]);
 }
 
-function exportMonthly(data: MonthlyReport, partial: boolean, payouts: PayoutList["summary"] | undefined) {
+function exportMonthly(data: MonthlyReport, partial: boolean, payouts: PayoutList["summary"] | undefined, scope: CustomerScope | null) {
   const [y, m] = data.month.split("-").map(Number);
   const previous = new Date(Date.UTC(y, m - 2, 15)).toISOString().slice(0, 7);
   const total = data.days.reduce(
     (t, d) => ({ opened: t.opened + d.opened, resolved: t.resolved + d.resolved, cancelled: t.cancelled + d.cancelled, unproductive: t.unproductive + d.unproductive }),
     { opened: 0, resolved: 0, cancelled: 0, unproductive: 0 },
   );
-  downloadCsv(`relatorio-${data.month}.csv`, [
+  downloadCsv(`relatorio-${data.month}${fileSuffix(scope)}.csv`, [
     ["Relatório do mês", monthName(data.month)],
+    ...scopeRows(scope),
     ["Situação", partial ? "Mês em andamento (até hoje)" : "Mês fechado"],
     [],
     ["Indicador", monthName(data.month), `${monthName(previous)}${partial ? " (mês inteiro)" : ""}`],
@@ -188,19 +207,20 @@ function exportMonthly(data: MonthlyReport, partial: boolean, payouts: PayoutLis
     ...data.days.map((d) => [brDate(d.date), d.opened, d.resolved, d.cancelled, d.unproductive]),
     ["Total", total.opened, total.resolved, total.cancelled, total.unproductive],
     [],
-    ...rankingRows(data),
+    ...rankingRows(data, scope),
   ]);
 }
 
 /** Texto do fechamento para colar no grupo dos gestores no WhatsApp. */
-function dailyText(data: DailyReport, partial: boolean, time: string): string {
+function dailyText(data: DailyReport, partial: boolean, time: string, scope: CustomerScope | null): string {
   const n = data.numbers;
   const p = data.previous;
   const { flow, stock } = comparison("day", partial);
   const line = (label: string, value: number, previous: number, labels: CompareLabels) =>
     `${label}: ${intFmt(value)} (${deltaText(value, previous, labels)})`;
+  const who = scope ? ` · ${scope.name}` : "";
   return [
-    partial ? `*Hoje, ${brDate(data.date)}, até as ${time}*` : `*Fechamento de ${brDate(data.date)}*`,
+    partial ? `*Hoje, ${brDate(data.date)}, até as ${time}${who}*` : `*Fechamento de ${brDate(data.date)}${who}*`,
     line("Entraram", n.opened, p.opened, flow),
     line("Resolvidos", n.resolved, p.resolved, flow),
     line("Cancelados", n.cancelled, p.cancelled, flow),
@@ -209,7 +229,9 @@ function dailyText(data: DailyReport, partial: boolean, time: string): string {
     line(partial ? "Em aberto agora" : "Em aberto no fechamento", n.backlog_end, p.backlog_end, stock),
     `Resolvidos no prazo: ${intFmt(n.resolved_in_sla)}`,
     n.arrival_on_time_pct === null ? null : `Chegada no prazo: ${pctFmt(n.arrival_on_time_pct)}`,
-    data.top_customer ? `Cliente destaque: ${data.top_customer.name} (${plural(data.top_customer.count, "chamado", "chamados")})` : null,
+    data.top_customer && !scope
+      ? `Cliente destaque: ${data.top_customer.name} (${plural(data.top_customer.count, "chamado", "chamados")})`
+      : null,
   ]
     .filter((l): l is string => l !== null)
     .join("\n");

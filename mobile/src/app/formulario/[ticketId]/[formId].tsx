@@ -115,7 +115,7 @@ function FormEditor({ ticket, form }: { ticket: LocalTicket; form: TicketForm })
   const [showMissing, setShowMissing] = useState(false);
   const [viewer, setViewer] = useState<{ fieldId: string; index: number } | null>(null);
   /** Esta tela mexeu nas respostas: só então ela salva sozinha (outra cópia aberta não sobrescreve). */
-  const touched = useRef(false);
+  const [touched, setTouched] = useState(false);
   const advanceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Posição de cada pergunta no modo lista, para rolar até a primeira pendente. */
   const fieldY = useRef<Record<string, number>>({});
@@ -201,16 +201,16 @@ function FormEditor({ ticket, form }: { ticket: LocalTicket; form: TicketForm })
   const at = step === null ? null : Math.min(step, steps.length);
 
   // ── salvamento automático: ao trocar de pergunta, ao sair da tela e com o app em segundo plano ──
-  const latest = useRef({ normalized, dirty, locked });
+  const latest = useRef({ normalized, dirty, locked, touched });
   useEffect(() => {
-    latest.current = { normalized, dirty, locked };
+    latest.current = { normalized, dirty, locked, touched };
   });
   /** Respostas que já estão na fila (evita salvar de novo o mesmo conteúdo). */
   const savedKey = useRef<string | null>(null);
   const autosave = useCallback(async () => {
-    const { normalized: answers, dirty: changed, locked: blocked } = latest.current;
+    const { normalized: answers, dirty: changed, locked: blocked, touched: edited } = latest.current;
     const key = JSON.stringify(answers);
-    if (!touched.current || !changed || blocked || key === savedKey.current) return;
+    if (!edited || !changed || blocked || key === savedKey.current) return;
     savedKey.current = key;
     try {
       await enqueueFormAnswers(ticket.id, { form_id: form.id, answers, complete: false });
@@ -250,13 +250,16 @@ function FormEditor({ ticket, form }: { ticket: LocalTicket; form: TicketForm })
 
   /**
    * Sim/Não ou escolha única respondida: avança sozinho em 250 ms (dá para ver a marcação). Confere
-   * a pendência com o valor novo, não com o rascunho de antes do toque.
+   * a pendência com o valor novo, não com o rascunho de antes do toque; e não avança se, nesse meio
+   * tempo, o técnico desmarcou ou trocou a resposta.
    */
   function advanceAfter(from: number, field: FormField, value: FormAnswer) {
     cancelAdvance();
-    if (invalidNumber(field, value) || stepProblem(field, normalizeAnswer(field, value), counts[field.id] ?? 0)) return;
+    const answer = normalizeAnswer(field, value);
+    if (invalidNumber(field, value) || stepProblem(field, answer, counts[field.id] ?? 0)) return;
     advanceTimer.current = setTimeout(() => {
       advanceTimer.current = null;
+      if (JSON.stringify(latest.current.normalized[field.id] ?? null) !== JSON.stringify(answer)) return;
       haptic.select();
       goTo(Math.min(from + 1, steps.length), "forward");
     }, 250);
@@ -350,7 +353,7 @@ function FormEditor({ ticket, form }: { ticket: LocalTicket; form: TicketForm })
       const chosen = assets.slice(0, room);
       if (!chosen.length) return;
       for (const asset of chosen) await queuePhoto(ticket.id, asset.uri, asset.mimeType, { formId: form.id, fieldId: field.id });
-      touched.current = true;
+      setTouched(true);
       setAttempted(false);
       const total = count + chosen.length;
       const need = photoNeed(field);
@@ -372,7 +375,7 @@ function FormEditor({ ticket, form }: { ticket: LocalTicket; form: TicketForm })
     if (!ok) return;
     try {
       await deleteFormPhoto(ticket.id, form.id, attachment.id);
-      touched.current = true;
+      setTouched(true);
     } catch (e) {
       notify("Não foi possível remover", errorMessage(e));
     }
@@ -385,7 +388,7 @@ function FormEditor({ ticket, form }: { ticket: LocalTicket; form: TicketForm })
     });
     if (!ok) return;
     await discardPhoto(photo.id, photo.file_uri);
-    touched.current = true;
+    setTouched(true);
   }
 
   async function openPhoto(fieldId: string, index: number) {
@@ -412,8 +415,7 @@ function FormEditor({ ticket, form }: { ticket: LocalTicket; form: TicketForm })
   const fieldProps = (field: FormField) => ({
     value: draft[field.id],
     onChange: (value: FormAnswer | null) => {
-      if (value === null) cancelAdvance();
-      touched.current = true;
+      setTouched(true);
       setDraft((d) => ({ ...d, [field.id]: value }));
       setAttempted(false);
     },

@@ -5,7 +5,7 @@ import clsx from "clsx";
 import { ArrowDown, ArrowUp, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useConfirm } from "@/components/Confirm";
-import { FieldError, fold, plural, SearchField, UnsavedBar, useBeforeUnload } from "@/components/settings/shared";
+import { FieldError, fold, plural, SearchField, UnsavedBar, useLeaveGuard } from "@/components/settings/shared";
 import { useToast } from "@/components/Toaster";
 import { Button, Card, ErrorBox, Field, Input, LoadingBlock, PageHeader, SectionTitle, Select, Textarea } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
@@ -265,7 +265,7 @@ function Editor({ server }: { server: TemplatesOut }) {
   const undoButton = useRef<HTMLButtonElement>(null);
 
   const dirty = !sameTemplates(items, baseline);
-  useBeforeUnload(dirty);
+  useLeaveGuard(dirty, "Os textos editados ainda não foram salvos.");
 
   // Outra pessoa salvou enquanto a tela estava aberta: sem edição aqui, a tela adota a versão
   // nova; com edição, avisa (salvar agora substitui a versão dela).
@@ -288,9 +288,14 @@ function Editor({ server }: { server: TemplatesOut }) {
   const shownGroups = useMemo(() => groupVariables(server.variables, filter), [server.variables, filter]);
   const problems = useMemo(() => {
     const out = new Map<string, ItemProblems>();
+    // Nome do botão como a API guarda (espaços seguidos viram um), sem acento e sem maiúscula.
+    const nameKey = (t: Template) => fold(t.name.trim().replace(/\s+/g, " "));
+    const uses = new Map<string, number>();
+    for (const t of items) uses.set(nameKey(t), (uses.get(nameKey(t)) ?? 0) + 1);
     for (const t of items) {
       const p: ItemProblems = {};
       if (!t.name.trim()) p.name = "Dê um nome ao botão.";
+      else if ((uses.get(nameKey(t)) ?? 0) > 1) p.name = "Outro texto já tem este nome: na OS, os dois botões ficariam iguais.";
       if (!t.body.trim()) p.body = "Escreva o texto do aviso.";
       if (p.name || p.body) out.set(t.uid, p);
     }
@@ -502,7 +507,9 @@ function Editor({ server }: { server: TemplatesOut }) {
       ) : null}
       {showErrors && problems.size ? (
         <div className="mb-4">
-          <ErrorBox message={`Antes de salvar, corrija ${plural(problems.size, "texto", "textos")}: cada um precisa de nome e de conteúdo.`} />
+          <ErrorBox
+            message={`Antes de salvar, corrija ${plural(problems.size, "texto", "textos")}: cada um precisa de um nome só dele e de conteúdo.`}
+          />
         </div>
       ) : null}
       {save.error ? (
@@ -551,7 +558,7 @@ function Editor({ server }: { server: TemplatesOut }) {
                       <div className="flex flex-col gap-1.5">
                         <div className="flex items-end justify-between gap-2">
                           <label htmlFor={`${t.uid}-texto`} className="text-xs font-semibold text-ink/80">
-                            Texto<span className="text-red-500"> *</span>
+                            Texto<span className="text-red-600 dark:text-red-400"> *</span>
                           </label>
                           <span className="text-[11px] text-ink-subtle tabular-nums">
                             {t.body.length.toLocaleString("pt-BR")} / {MAX_BODY.toLocaleString("pt-BR")}

@@ -29,11 +29,13 @@ export function WorklogsTab({ ticketId, closed }: { ticketId: UUID; closed: bool
     queryFn: () => api.get<Worklog[]>(`/tickets/${ticketId}/worklogs`),
   });
 
+  // O campo está no horário da operação (São Paulo): a conta usa o instante convertido, não o fuso do computador.
+  const startedIso = fromLocalInput(startedAt);
   const create = useMutation({
     mutationFn: () =>
       api.post<Worklog>(`/tickets/${ticketId}/worklogs`, {
         description: description.trim(),
-        started_at: fromLocalInput(startedAt),
+        started_at: startedIso,
         minutes: Number(minutes),
       }),
     onSuccess: () => {
@@ -51,8 +53,8 @@ export function WorklogsTab({ ticketId, closed }: { ticketId: UUID; closed: bool
   const minutesValue = Number(minutes);
   const minutesOk = Number.isInteger(minutesValue) && minutesValue >= 1 && minutesValue <= 1440;
   const minutesError = minutes && !minutesOk ? "Use minutos inteiros, de 1 a 1440" : null;
-  const startedError = startedAt && Date.parse(startedAt) > now + 60_000 ? "O início não pode ficar no futuro" : null;
-  const valid = Boolean(description.trim() && startedAt && minutes && !minutesError && !startedError);
+  const startedError = startedIso && Date.parse(startedIso) > now + 60_000 ? "O início não pode ficar no futuro" : null;
+  const valid = Boolean(description.trim() && startedIso && minutes && !minutesError && !startedError);
 
   return (
     <div className="flex flex-col gap-4">

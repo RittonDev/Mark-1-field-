@@ -944,14 +944,16 @@ export default function TechnicianSignupPage() {
                 </>
               ) : null}
 
+              {/* O ErrorBox já é anunciado (role="alert"); o id liga a mensagem ao campo marcado. */}
               {problem ? (
-                <div role="alert" id="form-problem">
+                <div id="form-problem">
                   <ErrorBox message={problem.message} />
                 </div>
               ) : null}
               </div>
 
-              <div className="flex items-center justify-between gap-2 border-t border-line px-5 py-3">
+              {/* Botões mais altos no celular (alvo de toque de 44 px). */}
+              <div className="flex items-center justify-between gap-2 border-t border-line px-5 py-3 [&>button]:h-11 sm:[&>button]:h-9">
                 <Button onClick={back} disabled={step === 0 || submitting} className={step === 0 ? "invisible" : ""}>
                   <ChevronLeft className="size-4" />
                   Voltar
@@ -1065,7 +1067,7 @@ function PhotoPicker({ value, onChange, name }: { value: string | null; onChange
             }}
           />
         </label>
-        <span className="text-xs text-ink-muted">Foto do rosto, de frente (opcional). Aparece para o cliente na visita.</span>
+        <span className="text-xs text-ink-muted">Foto do rosto, de frente (opcional). Fica no seu cadastro de técnico.</span>
         {value ? (
           <button
             type="button"

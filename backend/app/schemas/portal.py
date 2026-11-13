@@ -52,6 +52,15 @@ class PortalTimelineEntry(BaseModel):
     at: datetime
 
 
+class PortalAttachment(BaseModel):
+    """Arquivo que a empresa do cliente mandou (foto do problema, PDF): só o nome e a data.
+    Os anexos da Maxx (fotos do técnico, documentos internos) não aparecem aqui."""
+
+    id: uuid.UUID
+    filename: str
+    created_at: datetime
+
+
 class PortalRequestDetail(PortalRequestItem):
     description: str
     client_reference: str | None
@@ -60,6 +69,9 @@ class PortalRequestDetail(PortalRequestItem):
     report_url: str | None
     can_cancel: bool
     timeline: list[PortalTimelineEntry]
+    # Arquivos que o cliente mandou e se ainda pode mandar (solicitação em aberto).
+    attachments: list[PortalAttachment] = []
+    can_attach: bool = False
 
 
 class PortalRequestCreate(BaseModel):

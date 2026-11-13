@@ -7,7 +7,7 @@ import Link from "next/link";
 import { useId, useState } from "react";
 import { LocationPicker } from "@/components/LocationPicker";
 import { Tabs } from "@/components/motion";
-import { Card, Checkbox, EmptyState, ErrorBox, Input, LoadingBlock, Select } from "@/components/ui";
+import { buttonClassName, Card, Checkbox, EmptyState, ErrorBox, Input, LoadingBlock, Select } from "@/components/ui";
 import { absoluteApiUrl, api, errorMessage } from "@/lib/api";
 import { formatDate, formatMinutes, initials } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
@@ -161,7 +161,7 @@ function ResultRow({
             href={invite}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-line bg-surface px-2.5 text-xs font-medium text-ink shadow-elev-1 transition-colors hover:border-line-strong hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
+            className={buttonClassName("secondary", "sm")}
             title={
               tech.phone
                 ? `Convidar ${tech.name} pelo WhatsApp para este atendimento`
@@ -227,6 +227,7 @@ export function NearbyFinder({
   onOpenTechnician?: (tech: NearbyTechnician) => void;
 } = {}) {
   const cityListId = useId();
+  const tabsId = useId();
   const [mode, setMode] = useState<Mode>("store");
   const [store, setStore] = useState<Location | null>(null);
   const [uf, setUf] = useState("");
@@ -271,10 +272,11 @@ export function NearbyFinder({
             value={mode}
             onChange={setMode}
             ariaLabel="Como informar a localização"
+            idPrefix={tabsId}
           />
           <Checkbox label="Incluir técnicos sem acesso ao app" checked={includeInactive} onChange={setIncludeInactive} />
         </div>
-        <div className="mt-4">
+        <div className="mt-4" role="tabpanel" id={`${tabsId}-panel-${mode}`} aria-labelledby={`${tabsId}-tab-${mode}`}>
           {mode === "store" ? (
             <LocationPicker customerId={null} value={store} onChange={setStore} />
           ) : mode === "city" ? (

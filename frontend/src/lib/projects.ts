@@ -16,10 +16,16 @@ export const PROJECT_STATUS: Record<ProjectStatus, { label: string; color: strin
 /** Projeto em curso: a data de entrega ainda vale. */
 const RUNNING: ProjectStatus[] = ["planning", "active", "paused"];
 
-/** A entrega prevista já passou e o projeto não terminou. `today` é "AAAA-MM-DD" no fuso de quem usa. */
+/** A entrega prevista já passou e o projeto não terminou. `today` é "AAAA-MM-DD" no fuso da operação. */
 export function projectLate(project: Pick<Project, "end_date" | "status">, today: string): boolean {
   return project.end_date !== null && project.end_date < today && RUNNING.includes(project.status);
 }
+
+/** OS que ainda valem no projeto (o total sem as canceladas): a base do progresso. */
+export const plannedTickets = (stats: Project["stats"]) => stats.tickets_total - (stats.tickets_cancelled ?? 0);
+
+/** Custo do projeto até aqui: os custos extras lançados nas OS e o valor dos técnicos. */
+export const projectCosts = (stats: Project["stats"]) => stats.expenses_total + (stats.payouts_total ?? 0);
 
 export function useProjects(params: { status?: ProjectStatus; q?: string; customerId?: UUID | null; enabled?: boolean } = {}) {
   const { status, q, customerId, enabled = true } = params;

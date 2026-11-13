@@ -222,9 +222,15 @@ export function getDb(): Promise<DB> {
   if (!dbPromise) {
     const opening = (async () => {
       const db = await SQLite.openDatabaseAsync("maxxchamados.db");
-      // Na web (pré-visualização, OPFS) o WAL não se aplica e há uma conexão só.
-      if (!IS_WEB) await db.execAsync(`PRAGMA journal_mode = WAL; ${BUSY_TIMEOUT};`);
-      await migrate(db);
+      try {
+        // Na web (pré-visualização, OPFS) o WAL não se aplica e há uma conexão só.
+        if (!IS_WEB) await db.execAsync(`PRAGMA journal_mode = WAL; ${BUSY_TIMEOUT};`);
+        await migrate(db);
+      } catch (error) {
+        // A próxima tentativa abre outra conexão: esta não fica aberta à toa.
+        await db.closeAsync().catch(() => undefined);
+        throw error;
+      }
       return db;
     })();
     dbPromise = opening;
@@ -842,12 +848,38 @@ export async function insertSignature(
   return replaced;
 }
 
-export async function listSignatures(ticketId?: UUID): Promise<PendingSignature[]> {
+/**
+ * Assinaturas colhidas no aparelho e ainda não enviadas. A guardada esperando o formulário
+ * (`blocked_reason`) só vem com `includeBlocked`: para as telas ela não conta como colhida (o
+ * formulário volta a poder ser preenchido) e reaparece quando a conclusão dele entra na fila.
+ */
+export async function listSignatures(
+  ticketId?: UUID,
+  { includeBlocked = false }: { includeBlocked?: boolean } = {},
+): Promise<PendingSignature[]> {
   const db = await getDb();
+  const visible = includeBlocked ? "1 = 1" : "blocked_reason IS NULL";
   if (ticketId) {
-    return db.getAllAsync<PendingSignature>("SELECT * FROM signatures WHERE ticket_id = ? ORDER BY created_at", ticketId);
+    return db.getAllAsync<PendingSignature>(
+      `SELECT * FROM signatures WHERE ticket_id = ? AND ${visible} ORDER BY created_at`,
+      ticketId,
+    );
   }
-  return db.getAllAsync<PendingSignature>("SELECT * FROM signatures ORDER BY after_seq, created_at");
+  return db.getAllAsync<PendingSignature>(`SELECT * FROM signatures WHERE ${visible} ORDER BY after_seq, created_at`);
+}
+
+/**
+ * Ainda há na fila, desta OS, o que vai antes da assinatura: o feito até ela ser colhida
+ * (`after_seq`) ou uma resposta/conclusão de formulário (que vai antes dela em qualquer ordem).
+ */
+export async function signatureWaiting(ticketId: UUID, afterSeq: number): Promise<boolean> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ found: number }>(
+    "SELECT 1 AS found FROM outbox WHERE ticket_id = ? AND (seq <= ? OR type = 'form_answers') LIMIT 1",
+    ticketId,
+    afterSeq,
+  );
+  return Boolean(row);
 }
 
 export async function deleteSignature(id: string, db?: DB): Promise<void> {

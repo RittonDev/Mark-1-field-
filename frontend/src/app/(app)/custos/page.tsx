@@ -2,7 +2,7 @@
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { Check, Download, Paperclip, Receipt, X } from "lucide-react";
+import { Check, Download, Loader2, Paperclip, Receipt, RotateCcw, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { StatTile } from "@/components/charts";
@@ -22,6 +22,7 @@ import {
   Input,
   LoadingBlock,
   PageHeader,
+  Pill,
   Select,
   Table,
   Td,
@@ -150,12 +151,14 @@ function RowAction({
   label,
   onClick,
   disabled,
+  loading = false,
   danger = false,
   children,
 }: {
   label: string;
   onClick: () => void;
   disabled?: boolean;
+  loading?: boolean;
   danger?: boolean;
   children: React.ReactNode;
 }) {
@@ -164,7 +167,8 @@ function RowAction({
       type="button"
       aria-label={label}
       title={label}
-      disabled={disabled}
+      disabled={disabled || loading}
+      aria-busy={loading || undefined}
       onClick={(e) => {
         e.stopPropagation();
         onClick();
@@ -176,7 +180,7 @@ function RowAction({
           : "text-brand hover:border-brand/40 hover:bg-brand-soft",
       )}
     >
-      {children}
+      {loading ? <Loader2 className="size-4 animate-spin" aria-hidden /> : children}
     </button>
   );
 }
@@ -274,12 +278,12 @@ export default function ExpensesPage() {
   // Sem a situação na consulta: os cartões somam todas e funcionam como o filtro da lista.
   const report = useQuery({
     queryKey: ["expenses", period, technician?.id ?? "", customerId],
-    queryFn: () =>
-      api.get<ExpenseReport>("/expenses", {
-        ...periodRange(period),
-        technician_id: technician?.id,
-        customer_id: customerId || undefined,
-      }),
+    queryFn: ({ signal }) =>
+      api.get<ExpenseReport>(
+        "/expenses",
+        { ...periodRange(period), technician_id: technician?.id, customer_id: customerId || undefined },
+        { signal },
+      ),
     placeholderData: keepPreviousData,
   });
   // Aprovados e ainda não reembolsados em qualquer mês: o que a empresa deve aos técnicos.
@@ -319,6 +323,17 @@ export default function ExpensesPage() {
       forget(rows.map((r) => r.id));
       announce(result, "aprovado", "aprovados");
     },
+    onError: (e) => toast({ title: errorMessage(e), tone: "error" }),
+    onSettled: refresh,
+  });
+  // Desfazer um engano: reembolsado volta para aprovado (estorno); recusado volta para lançado (reavaliar).
+  const restore = useMutation({
+    mutationFn: (row: Row) => api.patch(`/expenses/${row.id}`, { status: row.status === "paid" ? "approved" : "pending" }),
+    onSuccess: (_, row) =>
+      toast({
+        title: row.status === "paid" ? 'Reembolso desfeito: o custo volta para "A reembolsar"' : 'Custo reaberto: volta para "Aguardando aprovação"',
+        tone: "success",
+      }),
     onError: (e) => toast({ title: errorMessage(e), tone: "error" }),
     onSettled: refresh,
   });
@@ -396,7 +411,9 @@ export default function ExpensesPage() {
   }
 
   const stale = report.isPlaceholderData;
-  const busy = approve.isPending || markPaid.isPending;
+  const busy = approve.isPending || markPaid.isPending || restore.isPending;
+  // Aprovação de uma linha só (pelo botão dela): o carregamento fica no botão da linha.
+  const approvingRow = (id: UUID) => approve.isPending && approve.variables?.length === 1 && approve.variables[0].id === id;
   const filtered = Boolean(technician || customerId || status);
   const pickable = visible.filter((r) => r.status === "pending" || r.status === "approved");
   const chosen = pickable.filter((r) => selected.includes(r.id));
@@ -469,6 +486,19 @@ export default function ExpensesPage() {
       confirmLabel: "Marcar como reembolsado",
     });
     if (ok) markPaid.mutate(rows.map((r) => r.id));
+  };
+  const confirmRestore = async (row: Row) => {
+    const paid = row.status === "paid";
+    const what = `${row.ticket.code} · ${row.description} · ${formatMoney(row.total)}.`;
+    const ok = await confirm({
+      title: paid ? "Desfazer o reembolso?" : "Reabrir o custo recusado?",
+      description: paid
+        ? `${what} Volta para "A reembolsar" e o técnico deixa de ver o reembolso como pago no app.`
+        : `${what} Volta para "Aguardando aprovação"; o motivo da recusa continua nas observações.`,
+      confirmLabel: paid ? "Desfazer reembolso" : "Reabrir",
+      tone: paid ? "danger" : "default",
+    });
+    if (ok) restore.mutate(row);
   };
   const exportCsv = () =>
     downloadCsv(`custos-extras-${period === ALL ? "todo-periodo" : period}${status ? `-${STATUS_SLUG[status]}` : ""}.csv`, [
@@ -602,12 +632,12 @@ export default function ExpensesPage() {
       {report.isLoading ? (
         <LoadingBlock />
       ) : report.error && !data ? (
-        <ErrorBox message={errorMessage(report.error)} />
+        <ErrorBox message={errorMessage(report.error)} onRetry={() => void report.refetch()} />
       ) : (
         <>
           {report.error ? (
             <div className="mb-3">
-              <ErrorBox message={errorMessage(report.error)} />
+              <ErrorBox message={errorMessage(report.error)} onRetry={() => void report.refetch()} />
             </div>
           ) : null}
           {visible.length === 0 ? (
@@ -657,7 +687,7 @@ export default function ExpensesPage() {
                   </div>
                 </div>
                 <div className={clsx("transition-opacity duration-150", stale && "opacity-60")} aria-busy={report.isFetching}>
-                  <Table>
+                  <Table label="Custos extras do período">
                     <thead>
                       <tr>
                         <Th className="w-10">
@@ -748,9 +778,7 @@ export default function ExpensesPage() {
                               {formatMoney(r.total)}
                             </Td>
                             <Td className="whitespace-nowrap">
-                              <span className={clsx("rounded-full px-2 py-0.5 text-[11px] font-medium", EXPENSE_STATUS[r.status].className)}>
-                                {EXPENSE_STATUS[r.status].label}
-                              </span>
+                              <Pill color={EXPENSE_STATUS[r.status].color}>{EXPENSE_STATUS[r.status].label}</Pill>
                               {r.status === "paid" && r.paid_at ? (
                                 <span className="mt-1 block text-[11px] text-ink-muted">em {shortDate(r.paid_at)}</span>
                               ) : null}
@@ -758,8 +786,22 @@ export default function ExpensesPage() {
                             <Td className="edit-col">
                               <span className="inline-flex items-center gap-1.5">
                                 {r.status === "pending" ? (
-                                  <RowAction label={`Aprovar: ${r.description}`} disabled={busy || stale} onClick={() => approve.mutate([r])}>
+                                  <RowAction
+                                    label={`Aprovar: ${r.description}`}
+                                    disabled={busy || stale}
+                                    loading={approvingRow(r.id)}
+                                    onClick={() => approve.mutate([r])}
+                                  >
                                     <Check className="size-4" />
+                                  </RowAction>
+                                ) : r.status === "paid" || r.status === "rejected" ? (
+                                  <RowAction
+                                    label={r.status === "paid" ? `Desfazer o reembolso: ${r.description}` : `Reabrir: ${r.description}`}
+                                    disabled={busy || stale}
+                                    loading={restore.isPending && restore.variables?.id === r.id}
+                                    onClick={() => void confirmRestore(r)}
+                                  >
+                                    <RotateCcw className="size-4" />
                                   </RowAction>
                                 ) : (
                                   <span className="size-8" aria-hidden />

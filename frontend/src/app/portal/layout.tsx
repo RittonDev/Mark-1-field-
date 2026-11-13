@@ -4,11 +4,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Building2, LogOut, RotateCw } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Logo, ThemeToggle } from "@/components/Brand";
 import { InstallAppButton, useServiceWorker } from "@/components/portal/InstallApp";
 import { Button, EmptyState, Spinner } from "@/components/ui";
-import { homePath } from "@/lib/access";
+import { homePath, loginPath } from "@/lib/access";
 import { errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { initials } from "@/lib/format";
@@ -30,11 +30,25 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
     if (!ready) return;
     if (!user) {
       queryClient.clear();
-      router.replace("/login");
+      // Quem abriu o link de uma solicitação (mandado por um colega) volta para ela depois de entrar.
+      router.replace(loginPath());
     } else if (!isClient) {
       router.replace(homePath(user.role));
     }
   }, [ready, user, isClient, router, queryClient]);
+
+  // Outra pessoa entrou neste navegador (em outra aba): recomeça do zero. As solicitações na tela e no
+  // cache são da empresa de quem estava antes (computador da loja é compartilhado).
+  const userId = user?.id ?? null;
+  const role = user?.role;
+  const lastUserId = useRef<string | null>(null);
+  useEffect(() => {
+    if (userId && lastUserId.current && userId !== lastUserId.current) {
+      window.location.replace(homePath(role));
+      return;
+    }
+    if (userId) lastUserId.current = userId;
+  }, [userId, role]);
 
   const me = usePortalMe(ready && isClient);
 

@@ -12,9 +12,8 @@ import { Button, Card, CardHeader, ErrorBox, LoadingBlock, Pill, SectionTitle, T
 import { QuickEditButton } from "@/components/ticket/QuickEditButton";
 import { TicketLink } from "@/components/ticket/TicketLink";
 import { api, errorMessage } from "@/lib/api";
-import { formatDate, formatMoney, formatShort } from "@/lib/format";
-import { PROJECT_STATUS, projectLate } from "@/lib/projects";
-import { localDateISO } from "@/lib/quotes";
+import { formatDate, formatMoney, formatShort, todayISO } from "@/lib/format";
+import { plannedTickets, PROJECT_STATUS, projectLate } from "@/lib/projects";
 import type { Page, Project, TicketListItem } from "@/lib/types";
 
 const TICKETS_SHOWN = 200;
@@ -35,7 +34,8 @@ function Stat({ label, value, hint, problem = false }: { label: string; value: s
 export default function ProjectPage() {
   const { id } = useParams<{ id: string }>();
   const [editing, setEditing] = useState(false);
-  const [today] = useState(() => localDateISO());
+  // Hoje no fuso da operação (a entrega prevista é um dia do calendário).
+  const [today] = useState(todayISO);
   const project = useQuery({ queryKey: ["project", id], queryFn: () => api.get<Project>(`/projects/${id}`) });
   const tickets = useQuery({
     queryKey: ["tickets", "project", id],
@@ -98,7 +98,10 @@ export default function ProjectPage() {
         <div className="mt-4">
           <div className="flex flex-wrap justify-between gap-x-3 text-xs text-ink-muted">
             <span>
-              {p.stats.tickets_done} de {p.stats.tickets_total} OS concluídas · {p.stats.tickets_open} em aberto
+              {p.stats.tickets_done} de {plannedTickets(p.stats)} OS concluídas · {p.stats.tickets_open} em aberto
+              {p.stats.tickets_cancelled
+                ? ` · ${p.stats.tickets_cancelled} ${p.stats.tickets_cancelled === 1 ? "cancelada" : "canceladas"}`
+                : ""}
               {p.stats.unproductive
                 ? ` · ${p.stats.unproductive} ${p.stats.unproductive === 1 ? "visita improdutiva" : "visitas improdutivas"}`
                 : ""}
@@ -118,13 +121,14 @@ export default function ProjectPage() {
         </div>
       </Card>
 
-      <div className="stagger mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="stagger mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <Stat label="Valor do projeto" value={p.contract_value != null ? formatMoney(p.contract_value) : "—"} />
         <Stat label="Custos extras" value={formatMoney(p.stats.expenses_total)} hint="lançados nas OS do projeto" />
+        <Stat label="Valor dos técnicos" value={formatMoney(p.stats.payouts_total ?? 0)} hint="pago e a pagar, por OS" />
         <Stat
           label="Margem"
           value={p.margin != null ? formatMoney(p.margin) : "—"}
-          hint="valor menos os custos extras (sem os repasses aos técnicos)"
+          hint="valor menos os custos e os técnicos"
           problem={p.margin != null && p.margin < 0}
         />
         <Stat label="Orçamentos aprovados" value={formatMoney(p.stats.quotes_approved_total)} />

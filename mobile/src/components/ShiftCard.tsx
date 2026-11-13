@@ -3,7 +3,8 @@ import * as Location from "expo-location";
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import { AppState, Linking, Platform, Pressable, StyleSheet, View } from "react-native";
-import { errorMessage } from "../lib/api";
+import { refreshMe } from "../lib/account";
+import { ApiError, errorMessage } from "../lib/api";
 import { useNow } from "../lib/changes";
 import { confirmAction } from "../lib/dialogs";
 import { addDays, formatDate, formatMinutes, formatTime, isSameDay, startOfDay } from "../lib/format";
@@ -16,8 +17,11 @@ import { Pulse } from "./motion";
 import { Text } from "./Text";
 import { Button, ErrorBox } from "./ui";
 
-/** Jornada aberta há mais que isso (ou desde outro dia) provavelmente foi esquecida. */
-const FORGOTTEN_MINUTES = 12 * 60;
+/**
+ * Jornada aberta há mais que isso (ou desde outro dia) provavelmente foi esquecida. Mesmo prazo do
+ * lembrete do celular (lib/tracking); com 14 h ela é encerrada sozinha.
+ */
+const FORGOTTEN_MINUTES = 10 * 60;
 /** Jornada ativa sem a coleta começar por mais que isso: algo bloqueia o GPS. */
 const STALLED_MS = 20_000;
 
@@ -121,8 +125,15 @@ export function ShiftCard() {
       haptic.step();
       showToast("Jornada iniciada", { tone: "success" });
     } catch (e) {
-      if (e instanceof ConsentRequiredError) router.push({ pathname: "/termo-rastreamento", params: { start: "1" } });
-      else setError(errorMessage(e));
+      if (e instanceof ConsentRequiredError) {
+        router.push({ pathname: "/termo-rastreamento", params: { start: "1" } });
+      } else if (e instanceof ApiError && e.status === 409) {
+        // O servidor não tem o aceite (retirado em outro aparelho): relê o usuário e mostra o termo.
+        await refreshMe().catch(() => undefined);
+        router.push({ pathname: "/termo-rastreamento", params: { start: "1" } });
+      } else {
+        setError(errorMessage(e));
+      }
       void recheckGps();
     } finally {
       setBusy(false);
@@ -162,7 +173,10 @@ export function ShiftCard() {
   const gpsOff = active && gps !== null && !gps.services;
   const stalled = active && tracking.mode === "off" && stalledFor === shiftId && !blocked && !gpsOff;
   const serverOff = tracking.serverAvailable === false;
-  const hasNotices = blocked || gpsOff || stalled || serverOff;
+  // O aviso do rastreamento fala do mesmo problema de GPS (permissão, localização desligada, GPS que não
+  // liga): com o aviso daqui na tela, que já traz o botão para resolver, ele não aparece repetido.
+  const trackingNotice = blocked || gpsOff || stalled ? null : tracking.notice;
+  const hasNotices = blocked || gpsOff || stalled || serverOff || Boolean(trackingNotice);
   const settingsButton = (
     <Button compact variant="secondary" title="Abrir configurações" onPress={() => void Linking.openSettings()} style={styles.noticeAction} />
   );
@@ -257,7 +271,7 @@ export function ShiftCard() {
         </Pressable>
         {forgotten ? null : <Button compact variant="secondary" title="Encerrar" onPress={() => void end()} loading={busy} />}
       </View>
-      {expanded || forgotten || tracking.notice || hasNotices || error ? (
+      {expanded || forgotten || hasNotices || error ? (
         <View style={styles.details}>
           {expanded ? (
             <View style={{ gap: 2 }}>
@@ -272,10 +286,10 @@ export function ShiftCard() {
               </Text>
             </View>
           ) : null}
-          {tracking.notice ? (
+          {trackingNotice ? (
             <View style={styles.notice}>
               <Icon name="alert" size={16} color={c.warning} />
-              <Text style={[styles.noticeText, styles.noticeBody]}>{tracking.notice}</Text>
+              <Text style={[styles.noticeText, styles.noticeBody]}>{trackingNotice}</Text>
             </View>
           ) : null}
           {gpsNotices}

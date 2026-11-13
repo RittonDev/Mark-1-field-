@@ -62,6 +62,9 @@ export function TimesDialog({ ticket, onClose }: { ticket: TicketDetail; onClose
   const [edits, setEdits] = useState<{ enRoute?: string; arrived?: string; resolved?: string }>({});
   const [minutes, setMinutes] = useState<string | null>(null);
   const [reason, setReason] = useState("");
+  // Tentou salvar sem o motivo: a mensagem aparece embaixo do campo (o botão não fica mudo).
+  const [tried, setTried] = useState(false);
+  const reasonRef = useRef<HTMLTextAreaElement>(null);
   const value = (key: TimeKey) => edits[key] ?? toLocalInput(original[key]);
   const iso = (key: TimeKey) => (edits[key] !== undefined ? fromLocalInput(edits[key]!) : original[key]);
   // Tempo de atendimento: acompanha início e término enquanto a central não digitar outro (pausa).
@@ -111,8 +114,9 @@ export function TimesDialog({ ticket, onClose }: { ticket: TicketDetail; onClose
       errors.minutes = `Passa do intervalo entre o início e o término (${formatMinutes(minutesBetween(start, end))})`;
     }
   }
-  if (reason && reason.trim().length < 3) errors.reason = "Explique o motivo (pelo menos 3 letras)";
-  const invalid = Object.keys(errors).length > 0;
+  const shortReason = reason.trim().length < 3;
+  if ((tried || reason) && shortReason) errors.reason = "Explique o motivo (pelo menos 3 letras)";
+  const invalid = Object.keys(errors).length > 0 || shortReason;
 
   const save = useMutation({
     mutationFn: () => {
@@ -136,7 +140,18 @@ export function TimesDialog({ ticket, onClose }: { ticket: TicketDetail; onClose
     },
   });
 
-  const canSave = !nothing && !invalid && reason.trim().length >= 3;
+  const submit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (nothing || save.isPending) return;
+    if (invalid) {
+      setTried(true);
+      // Leva ao primeiro horário com problema; sem nenhum, ao motivo.
+      const target = e.currentTarget.querySelector<HTMLElement>('[aria-invalid="true"]');
+      (target ?? reasonRef.current)?.focus();
+      return;
+    }
+    save.mutate();
+  };
   const field = (key: TimeKey, label: string, hint?: string) => (
     <Field label={label} hint={errors[key] ? undefined : hint}>
       <Input
@@ -155,12 +170,14 @@ export function TimesDialog({ ticket, onClose }: { ticket: TicketDetail; onClose
     <Dialog
       open
       onClose={onClose}
+      dirty={!nothing || Boolean(reason.trim())}
+      busy={save.isPending}
       title={`Corrigir horários · ${ticket.code}`}
       description="Só a central mexe no horário. Use quando o técnico esqueceu de iniciar ou de concluir no app."
       footer={
         <>
           <Button onClick={onClose}>Cancelar</Button>
-          <Button variant="primary" type="submit" form="times-form" loading={save.isPending} disabled={!canSave}>
+          <Button variant="primary" type="submit" form="times-form" loading={save.isPending} disabled={nothing}>
             Salvar horários
           </Button>
         </>
@@ -172,17 +189,12 @@ export function TimesDialog({ ticket, onClose }: { ticket: TicketDetail; onClose
         <div className="flex justify-center py-6">
           <Spinner className="size-5" />
         </div>
+      ) : events.error ? (
+        <ErrorBox message={`Não foi possível ler o histórico da OS: ${errorMessage(events.error)}`} onRetry={() => void events.refetch()} />
       ) : departureOnly && !original.enRoute ? (
         <p className="text-sm text-ink-muted">A saída para o local não foi registrada no histórico: não há horário para corrigir.</p>
       ) : (
-        <form
-          id="times-form"
-          className="grid gap-4 sm:grid-cols-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (canSave && !save.isPending) save.mutate();
-          }}
-        >
+        <form id="times-form" className="grid gap-4 sm:grid-cols-2" onSubmit={submit} noValidate>
           {original.enRoute ? field("enRoute", "Saída para o local") : null}
           {departureOnly ? null : field("arrived", "Início do atendimento", "Quando o técnico começou na loja (o tempo conta daqui)")}
           {ticket.resolved_at ? field("resolved", "Término", "Quando o atendimento acabou") : null}

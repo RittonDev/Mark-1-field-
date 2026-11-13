@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, HTTPException, Response, status
 from sqlalchemy import select
 
-from app.api.deps import DB, CurrentUser
+from app.api.deps import DB, CurrentUser, StaffUser
 from app.db.base import utcnow
 from app.models import DeviceToken
 from app.schemas.sync import (
@@ -14,23 +14,24 @@ from app.schemas.sync import (
 )
 from app.services import sync as sync_service
 
+# Sincronização e aparelhos são do app de campo (a equipe). O cliente usa só o portal.
 router = APIRouter(tags=["mobile-sync"])
 
 
 @router.get("/sync/pull", response_model=SyncPullResponse)
-async def pull(db: DB, user: CurrentUser, since: datetime | None = None) -> SyncPullResponse:
+async def pull(db: DB, user: StaffUser, since: datetime | None = None) -> SyncPullResponse:
     if since is not None and since.tzinfo is None:
         since = since.replace(tzinfo=UTC)
     return await sync_service.pull(db, user, since)
 
 
 @router.post("/sync/push", response_model=SyncPushResponse)
-async def push(body: SyncPushRequest, db: DB, user: CurrentUser) -> SyncPushResponse:
+async def push(body: SyncPushRequest, db: DB, user: StaffUser) -> SyncPushResponse:
     return await sync_service.push(db, user, body)
 
 
 @router.post("/devices", status_code=status.HTTP_204_NO_CONTENT)
-async def register_device(body: DeviceRegister, db: DB, user: CurrentUser) -> Response:
+async def register_device(body: DeviceRegister, db: DB, user: StaffUser) -> Response:
     device = await db.scalar(select(DeviceToken).where(DeviceToken.token == body.token))
     if device is None:
         device = DeviceToken(token=body.token, user_id=user.id, platform=body.platform)

@@ -4,6 +4,8 @@ import re
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.core.documents import is_valid_cnpj, normalize_document
+
 EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
@@ -34,3 +36,18 @@ class CompanyProfile(BaseModel):
         if value is not None and not EMAIL.match(value):
             raise ValueError("E-mail inválido")
         return value
+
+
+class CompanyProfileIn(CompanyProfile):
+    """O que a gestão salva em Configurações: o CNPJ (inclusive o alfanumérico) precisa ser
+    válido e é guardado sem pontuação. A leitura (CompanyProfile) não valida de novo, para um
+    cadastro antigo não sumir do cabeçalho."""
+
+    @field_validator("document")
+    @classmethod
+    def _cnpj(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if not is_valid_cnpj(value):
+            raise ValueError("CNPJ inválido: confira os 14 caracteres e os dígitos verificadores")
+        return normalize_document(value)

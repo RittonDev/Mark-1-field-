@@ -3,7 +3,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { useConfirm } from "@/components/Confirm";
 import { MultiSelect } from "@/components/MultiSelect";
 import { useToast } from "@/components/Toaster";
 import { Button, Dialog, ErrorBox, Field, Input, Select, Textarea } from "@/components/ui";
@@ -42,7 +41,6 @@ export function ProjectDialog({ project, onClose }: { project: Project | null; o
   const queryClient = useQueryClient();
   const router = useRouter();
   const { toast } = useToast();
-  const confirm = useConfirm();
   const customers = useCustomers();
   const teams = useTeams();
   // Só a equipe ativa (a base trouxe do Field Control quase mil técnicos inativos).
@@ -105,31 +103,20 @@ export function ProjectDialog({ project, onClose }: { project: Project | null; o
     },
   });
 
-  const requestClose = async () => {
-    if (
-      dirty &&
-      !(await confirm({
-        title: "Descartar alterações?",
-        description: "O que você preencheu neste projeto não será salvo.",
-        tone: "danger",
-        confirmLabel: "Descartar",
-        cancelLabel: "Continuar editando",
-      }))
-    ) {
-      return;
-    }
-    onClose();
-  };
-
   return (
     <Dialog
       open
       size="lg"
-      onClose={() => void requestClose()}
+      onClose={onClose}
+      // Clique fora, Esc ou o X com algo preenchido perguntam antes de descartar; salvando, não fecha.
+      dirty={dirty}
+      busy={save.isPending}
       title={project ? `Editar ${project.code}` : "Novo projeto"}
       footer={
         <>
-          <Button onClick={() => void requestClose()}>Cancelar</Button>
+          <Button onClick={onClose} disabled={save.isPending}>
+            Cancelar
+          </Button>
           <Button variant="primary" type="submit" form="project-form" loading={save.isPending}>
             Salvar
           </Button>

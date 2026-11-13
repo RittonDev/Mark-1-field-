@@ -4,7 +4,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { useConfirm } from "@/components/Confirm";
 import {
   ContactsEditor,
   contactDrafts,
@@ -85,7 +84,6 @@ export function CustomerDialog({ customer, onClose }: { customer: Customer | nul
   const queryClient = useQueryClient();
   const router = useRouter();
   const { toast } = useToast();
-  const confirm = useConfirm();
   const [initial] = useState(() => initialForm(customer));
   const [form, setForm] = useState<FormState>(initial);
   const [initialContacts] = useState<ContactDraft[]>(() => contactDrafts(customerContacts(customer)));
@@ -147,32 +145,21 @@ export function CustomerDialog({ customer, onClose }: { customer: Customer | nul
     mutation.mutate(changed);
   };
 
-  const requestClose = async () => {
-    if (
-      dirty &&
-      !(await confirm({
-        title: "Descartar alterações?",
-        description: "O que você preencheu neste cliente não será salvo.",
-        tone: "danger",
-        confirmLabel: "Descartar",
-        cancelLabel: "Continuar editando",
-      }))
-    ) {
-      return;
-    }
-    onClose();
-  };
-
   return (
     <Dialog
       open
       size="lg"
-      onClose={() => void requestClose()}
+      onClose={onClose}
+      // Clique fora, Esc ou o X com algo preenchido perguntam antes de descartar; salvando, não fecha.
+      dirty={dirty}
+      busy={mutation.isPending}
       title={customer ? "Editar cliente" : "Novo cliente"}
       description="A empresa (matriz). As filiais e lojas são cadastradas em Locais."
       footer={
         <>
-          <Button onClick={() => void requestClose()}>Cancelar</Button>
+          <Button onClick={onClose} disabled={mutation.isPending}>
+            Cancelar
+          </Button>
           <Button variant="primary" type="submit" form="customer-form" loading={mutation.isPending}>
             Salvar
           </Button>

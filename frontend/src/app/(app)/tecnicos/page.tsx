@@ -76,8 +76,9 @@ type Active = "true" | "false" | "";
 
 // A lista abre com as primeiras linhas; o resto vem no "Mostrar mais" (a base passa de mil técnicos).
 const PAGE = 150;
-// Teto da API por consulta (sem paginação ainda): ao chegar nele, a lista avisa.
-const API_LIMIT = 1000;
+// Quantos técnicos a tela pede de uma vez (a busca, os filtros e as contagens são sobre a lista inteira).
+// Ao chegar nele, a lista avisa que há mais.
+const API_LIMIT = 2000;
 
 /** Cadastros incompletos que atrapalham a operação (filtro rápido sobre a lista carregada). */
 type Gap = "phone" | "region" | "services" | "gps";
@@ -170,6 +171,7 @@ function TechniciansView() {
         active: active || undefined,
         state: uf || undefined,
         city: city || undefined,
+        limit: API_LIMIT,
       }),
     placeholderData: (previous) => previous,
     // A lista é pesada (a base inteira com os serviços): não recarrega a cada volta para a aba.
@@ -294,6 +296,7 @@ function TechniciansView() {
           value={view}
           onChange={setView}
           ariaLabel="Visão"
+          idPrefix="tecnicos"
         />
         {view === "list" && list.data ? (
           <span className="flex items-center gap-3 text-xs text-ink-muted">
@@ -317,9 +320,11 @@ function TechniciansView() {
       </div>
 
       {view === "nearby" ? (
-        <NearbyFinder regions={regions.data} onOpenTechnician={openTechnician} />
+        <div role="tabpanel" id="tecnicos-panel-nearby" aria-labelledby="tecnicos-tab-nearby">
+          <NearbyFinder regions={regions.data} onOpenTechnician={openTechnician} />
+        </div>
       ) : (
-        <>
+        <div role="tabpanel" id="tecnicos-panel-list" aria-labelledby="tecnicos-tab-list">
           <div className="mb-3 flex flex-wrap gap-2">
             <div className="w-full sm:w-40">
               <Select
@@ -431,7 +436,8 @@ function TechniciansView() {
               <>
                 {(list.data?.length ?? 0) >= API_LIMIT ? (
                   <p className="border-b border-line px-4 py-2.5 text-xs text-ink-muted">
-                    Mostrando os primeiros {API_LIMIT}: use a busca ou os filtros para achar os demais.
+                    Mostrando os primeiros {API_LIMIT.toLocaleString("pt-BR")} técnicos (por nome): use a busca ou os filtros
+                    para achar os demais.
                   </p>
                 ) : null}
                 <Table>
@@ -571,7 +577,7 @@ function TechniciansView() {
               </>
             )}
           </Card>
-        </>
+        </div>
       )}
 
       {editing ? <EditDialog key={editing.id} tech={editing} onClose={() => setEditing(null)} /> : null}
@@ -742,18 +748,20 @@ function TechnicianFields({
   );
 }
 
+const EMPTY_TECHNICIAN: TechnicianForm = {
+  name: "",
+  email: "",
+  phone: "",
+  team_id: "",
+  job_title: "Técnico de campo",
+  home_city: "",
+  home_state: "",
+  coverage_area: "",
+};
+
 function CreateDialog({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient();
-  const [form, setForm] = useState<TechnicianForm>({
-    name: "",
-    email: "",
-    phone: "",
-    team_id: "",
-    job_title: "Técnico de campo",
-    home_city: "",
-    home_state: "",
-    coverage_area: "",
-  });
+  const [form, setForm] = useState<TechnicianForm>(EMPTY_TECHNICIAN);
   const [problem, setProblem] = useState<string | null>(null);
   const create = useMutation({
     mutationFn: () =>
@@ -774,6 +782,9 @@ function CreateDialog({ onClose }: { onClose: () => void }) {
       open
       size="lg"
       onClose={onClose}
+      busy={create.isPending}
+      // Fechar sem cadastrar pergunta antes de descartar o que foi digitado.
+      dirty={!create.data && JSON.stringify(form) !== JSON.stringify(EMPTY_TECHNICIAN)}
       title="Novo técnico"
       description="Cadastro direto, sem ficha de homologação. O técnico recebe uma senha provisória."
       footer={
@@ -806,11 +817,8 @@ function CreateDialog({ onClose }: { onClose: () => void }) {
           }}
         >
           <TechnicianFields value={form} onChange={setForm} />
-          {problem || create.error ? (
-            <div role="alert">
-              <ErrorBox message={problem ?? errorMessage(create.error)} />
-            </div>
-          ) : null}
+          {/* O ErrorBox já é anunciado (role="alert"). */}
+          {problem || create.error ? <ErrorBox message={problem ?? errorMessage(create.error)} /> : null}
         </form>
       )}
     </Dialog>
@@ -991,6 +999,7 @@ function EditDialog({ tech, onClose }: { tech: Technician; onClose: () => void }
       open
       size="lg"
       onClose={requestClose}
+      busy={save.isPending}
       title={current.name}
       description={current.job_title ?? "Técnico"}
       footer={
@@ -1203,9 +1212,7 @@ function EditDialog({ tech, onClose }: { tech: Technician; onClose: () => void }
         </section>
 
         {problem || save.error || reset.error ? (
-          <div role="alert">
-            <ErrorBox message={problem ?? errorMessage(save.error ?? reset.error)} />
-          </div>
+          <ErrorBox message={problem ?? errorMessage(save.error ?? reset.error)} />
         ) : null}
       </form>
     </Dialog>

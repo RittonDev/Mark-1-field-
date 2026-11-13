@@ -13,7 +13,7 @@ export function RouteMapPattern({ height = 300 }: { height?: number }) {
   const avenue = tint(c.primary, c.scheme === "dark" ? "33" : "26");
   const route = tint(c.primary, c.scheme === "dark" ? "99" : "80");
   return (
-    <View pointerEvents="none" style={[styles.wrap, { height }]} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+    <View style={[styles.wrap, { height }]} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
       <Svg width="100%" height="100%" viewBox="0 0 400 300" preserveAspectRatio="xMidYMid slice">
         <G fill="none" strokeLinecap="round">
           {/* quarteirões */}
@@ -45,5 +45,6 @@ export function RouteMapPattern({ height = 300 }: { height?: number }) {
 }
 
 const styles = StyleSheet.create({
-  wrap: { position: "absolute", top: 0, left: 0, right: 0, overflow: "hidden" },
+  // Desenho de fundo: não recebe toque.
+  wrap: { position: "absolute", top: 0, left: 0, right: 0, overflow: "hidden", pointerEvents: "none" },
 });

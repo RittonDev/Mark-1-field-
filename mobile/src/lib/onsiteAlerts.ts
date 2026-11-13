@@ -4,7 +4,6 @@
 // Tocar no alerta abre a OS.
 
 import type * as NotificationsApi from "expo-notifications";
-import type { NotificationResponse } from "expo-notifications";
 import { router } from "expo-router";
 import { Platform } from "react-native";
 import { listTickets } from "./db";
@@ -23,6 +22,7 @@ interface Wanted {
 }
 
 type NotificationsModule = typeof NotificationsApi;
+type NotificationResponse = NotificationsApi.NotificationResponse;
 
 let running: Promise<void> | null = null;
 let handlerReady = false;

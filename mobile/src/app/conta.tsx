@@ -13,9 +13,10 @@ import {
   type Palette,
   type ThemePreference,
 } from "../theme/theme";
-import { locationConsentAt } from "../lib/account";
+import { locationConsentAt, revokeLocationConsent } from "../lib/account";
+import { ApiError, errorMessage } from "../lib/api";
 import { getDeviceRegistration, logout } from "../lib/auth";
-import { useTracking } from "../lib/tracking";
+import { stopTracking, useTracking } from "../lib/tracking";
 import { useDataVersion, useLiveQuery } from "../lib/changes";
 import { APP_VERSION } from "../lib/config";
 import { confirmAction } from "../lib/dialogs";
@@ -26,7 +27,10 @@ import { canEditServer, useSession } from "../lib/session";
 import { describeOp, discardOp, isOnline, requestSync, resetCursor, useSyncStatus, type SyncStatus } from "../lib/sync";
 import { showToast } from "../lib/toast";
 
-/** Depois de tantas tentativas, a ação provavelmente não vai passar sozinha: aí dá para descartar. */
+/**
+ * Depois de tantas tentativas com o servidor no ar, a ação provavelmente não vai passar sozinha: aí dá
+ * para descartar. Esperando sinal não conta: a falta de rede também soma tentativas e grava o erro.
+ */
 const DISCARD_AFTER_ATTEMPTS = 3;
 
 function networkLabel(s: SyncStatus): string {
@@ -67,9 +71,10 @@ function askLogout(pending: number, canSend: boolean): Promise<LogoutChoice> {
   });
 }
 
-async function hasInternet() {
+/** Sem Wi-Fi e sem dados. Alcance incerto (teste de internet do sistema falhando) ainda vale tentar. */
+async function noNetwork() {
   const net = await NetInfo.fetch();
-  return net.isConnected !== false && net.isInternetReachable !== false;
+  return net.isConnected === false;
 }
 
 export default function AccountScreen() {
@@ -84,20 +89,23 @@ export default function AccountScreen() {
   const registration = getDeviceRegistration();
   const [syncing, setSyncing] = useState(false);
   const [leaving, setLeaving] = useState(false);
+  const [revoking, setRevoking] = useState(false);
   const themePreference = useThemePreference();
   const tracking = useTracking();
   const consentAt = locationConsentAt(user);
+  // A última rodada falou com o servidor: uma ação que segue na fila depois disso não está só esperando sinal.
+  const serverUp = sync.network !== "offline" && sync.server === "reachable";
 
   if (!user) return null;
 
   async function syncNow(full = false) {
     setSyncing(true);
     try {
-      if (!(await hasInternet())) {
+      if (await noNetwork()) {
         showToast("Sem internet", { description: "Seus itens continuam salvos no aparelho e vão quando o sinal voltar." });
         return;
       }
-      await (full ? resetCursor() : requestSync());
+      await (full ? resetCursor() : requestSync({ manual: true }));
       const { ops, photos } = await countPending();
       if (!isOnline()) {
         showToast("Sem conexão com o servidor", { tone: "error", description: "Tente de novo em alguns minutos." });
@@ -106,6 +114,8 @@ export default function AccountScreen() {
       } else {
         showToast("Tudo certo", { tone: "success", description: full ? "Suas OS foram baixadas de novo." : "Tudo enviado e atualizado." });
       }
+    } catch (e) {
+      showToast("Não foi possível sincronizar", { tone: "error", description: errorMessage(e) });
     } finally {
       setSyncing(false);
     }
@@ -128,8 +138,9 @@ export default function AccountScreen() {
     if (choice === "cancel") return;
     setLeaving(true);
     if (choice === "send") {
-      await requestSync();
-      const { ops, photos } = await countPending();
+      await requestSync({ manual: true });
+      // Sem conseguir conferir, vale o que havia antes: pergunta de novo em vez de sair calado.
+      const { ops, photos } = await countPending().catch(() => ({ ops: count, photos: 0 }));
       const left = ops + photos;
       if (left > 0) {
         setLeaving(false);
@@ -143,7 +154,45 @@ export default function AccountScreen() {
       }
     }
     // Com a sessão encerrada, o Stack.Protected do layout leva para o login.
-    await logout();
+    try {
+      await logout();
+    } catch (e) {
+      setLeaving(false);
+      showToast("Não foi possível sair agora", { tone: "error", description: errorMessage(e) });
+    }
+  }
+
+  /** LGPD: o aceite do termo sai quando o técnico quiser, pelo app, e a jornada aberta termina junto. */
+  async function confirmRevoke() {
+    if (revoking) return;
+    const ok = await confirmAction(
+      "Retirar o aceite?",
+      tracking.shift
+        ? "A jornada em andamento é encerrada e o rastreamento para agora. Para iniciar outra jornada, você vai precisar aceitar o termo de novo."
+        : "Para iniciar uma jornada, você vai precisar aceitar o termo de novo.",
+      { confirmText: "Retirar aceite", destructive: true },
+    );
+    if (!ok) return;
+    setRevoking(true);
+    try {
+      // O servidor encerra a jornada e apaga o aceite; só depois disso o aparelho para a coleta.
+      await revokeLocationConsent();
+      await stopTracking({ endOnServer: false });
+      showToast("Aceite retirado", {
+        tone: "success",
+        description: "O rastreamento da jornada parou. Para iniciar outra jornada, aceite o termo de novo.",
+      });
+    } catch (e) {
+      showToast("Não foi possível retirar o aceite", {
+        tone: "error",
+        description:
+          e instanceof ApiError && e.status === 0
+            ? "Sem internet: a retirada precisa chegar à central. Tente de novo quando tiver sinal."
+            : errorMessage(e),
+      });
+    } finally {
+      setRevoking(false);
+    }
   }
 
   const situation = !tracking.shift
@@ -196,7 +245,7 @@ export default function AccountScreen() {
           <Text style={styles.muted}>Nada pendente: tudo foi enviado à central.</Text>
         ) : (
           pending.map((op) => {
-            const stuck = Boolean(op.last_error) || op.attempts >= DISCARD_AFTER_ATTEMPTS;
+            const stuck = serverUp && op.attempts >= DISCARD_AFTER_ATTEMPTS;
             return (
               <View key={op.client_op_id} style={styles.op}>
                 <View style={{ flex: 1, gap: 2 }}>
@@ -207,10 +256,11 @@ export default function AccountScreen() {
                     Feita em {formatDateTime(op.client_timestamp)}
                     {op.attempts ? ` · ${op.attempts === 1 ? "1 tentativa" : `${op.attempts} tentativas`}` : " · na fila"}
                   </Text>
-                  {op.last_error ? <Text style={styles.error}>{op.last_error}</Text> : null}
+                  {/* Erro em vermelho só quando a ação está travada; esperando sinal, é informação. */}
+                  {op.last_error ? <Text style={stuck ? styles.error : styles.muted}>{op.last_error}</Text> : null}
                 </View>
                 {/* Só esperando sinal não se descarta: um toque errado apagaria uma conclusão ou um formulário. */}
-                {stuck ? <Button compact variant="ghost" title="Descartar" onPress={() => confirmDiscard(op)} /> : null}
+                {stuck ? <Button compact variant="ghost" title="Descartar" onPress={() => confirmDiscard(op)} disabled={leaving} /> : null}
               </View>
             );
           })
@@ -274,6 +324,19 @@ export default function AccountScreen() {
         ) : null}
         <InfoRow label="Posições aguardando envio" value={String(tracking.queued)} />
         {tracking.error ? <InfoRow label="Último erro" value={tracking.error} /> : null}
+        {consentAt ? (
+          <View style={styles.revoke}>
+            <Button
+              compact
+              title="Retirar aceite"
+              onPress={() => void confirmRevoke()}
+              loading={revoking}
+              disabled={leaving}
+              style={{ alignSelf: "flex-start" }}
+            />
+            <Text style={styles.hint}>Encerra a jornada e para o rastreamento. Para iniciar outra jornada, é preciso aceitar de novo.</Text>
+          </View>
+        ) : null}
       </Card>
 
       <Card style={{ gap: 10 }}>
@@ -311,7 +374,7 @@ export default function AccountScreen() {
           Encerrando a jornada e saindo…
         </Text>
       ) : null}
-      <Button title="Sair da conta" variant="danger" onPress={() => void confirmLogout()} loading={leaving} />
+      <Button title="Sair da conta" variant="danger" onPress={() => void confirmLogout()} loading={leaving} disabled={revoking} />
     </ScrollView>
   );
 }
@@ -336,5 +399,6 @@ const makeStyles = (c: Palette) =>
     noticeHead: { flexDirection: "row", flexWrap: "wrap", gap: 6, alignItems: "center" },
     opTitle: { fontSize: 14, color: c.ink },
     error: { fontSize: 12, color: c.danger },
+    revoke: { gap: 6, marginTop: 8, paddingTop: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.line },
     leaving: { fontSize: 13, fontWeight: "600", color: c.inkMuted, textAlign: "center" },
   });

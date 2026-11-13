@@ -24,14 +24,21 @@ import type {
 
 const LOOKUP_STALE = 60_000;
 
+// Todas as buscas repassam o `signal` do React Query: a busca que ficou obsoleta (texto digitado mudou,
+// filtro trocado, tela fechada) é cancelada em vez de ocupar a API até o fim.
+
 export function useTeams() {
-  return useQuery({ queryKey: ["teams"], queryFn: () => api.get<Team[]>("/teams"), staleTime: LOOKUP_STALE });
+  return useQuery({
+    queryKey: ["teams"],
+    queryFn: ({ signal }) => api.get<Team[]>("/teams", undefined, { signal }),
+    staleTime: LOOKUP_STALE,
+  });
 }
 
 export function useCategories() {
   return useQuery({
     queryKey: ["categories"],
-    queryFn: () => api.get<Category[]>("/categories"),
+    queryFn: ({ signal }) => api.get<Category[]>("/categories", undefined, { signal }),
     staleTime: LOOKUP_STALE,
   });
 }
@@ -39,7 +46,7 @@ export function useCategories() {
 export function useCustomers(q?: string) {
   return useQuery({
     queryKey: ["customers", q ?? ""],
-    queryFn: () => api.get<Customer[]>("/customers", { q }),
+    queryFn: ({ signal }) => api.get<Customer[]>("/customers", { q }, { signal }),
     staleTime: LOOKUP_STALE,
   });
 }
@@ -47,7 +54,7 @@ export function useCustomers(q?: string) {
 export function useLocations(customerId: UUID | null | undefined) {
   return useQuery({
     queryKey: ["locations", customerId],
-    queryFn: () => api.get<Location[]>(`/customers/${customerId}/locations`),
+    queryFn: ({ signal }) => api.get<Location[]>(`/customers/${customerId}/locations`, undefined, { signal }),
     enabled: Boolean(customerId),
     staleTime: LOOKUP_STALE,
   });
@@ -64,14 +71,18 @@ export function useLocationSearch(params: {
   const { q, customerId, active, page = 1, pageSize = 50 } = params;
   return useQuery({
     queryKey: ["locations", "search", q ?? "", customerId ?? "", active ?? "", page, pageSize],
-    queryFn: () =>
-      api.get<Page<Location>>("/locations", {
-        q: q || undefined,
-        customer_id: customerId ?? undefined,
-        active,
-        page,
-        page_size: pageSize,
-      }),
+    queryFn: ({ signal }) =>
+      api.get<Page<Location>>(
+        "/locations",
+        {
+          q: q || undefined,
+          customer_id: customerId ?? undefined,
+          active,
+          page,
+          page_size: pageSize,
+        },
+        { signal },
+      ),
     placeholderData: (prev) => prev,
   });
 }
@@ -80,7 +91,7 @@ export function useLocationSearch(params: {
 export function useViolationReasons(active?: boolean) {
   return useQuery({
     queryKey: ["violation-reasons", active ?? ""],
-    queryFn: () => api.get<ViolationReason[]>("/violation-reasons", { active }),
+    queryFn: ({ signal }) => api.get<ViolationReason[]>("/violation-reasons", { active }, { signal }),
     staleTime: LOOKUP_STALE,
   });
 }
@@ -89,7 +100,8 @@ export function useViolationReasons(active?: boolean) {
 export function useDayActivities(day: string | null, teamId?: UUID | null) {
   return useQuery({
     queryKey: ["tickets", "day", day, teamId ?? ""],
-    queryFn: () => api.get<DayActivities>("/activities/day", { date: day ?? undefined, team_id: teamId ?? undefined }),
+    queryFn: ({ signal }) =>
+      api.get<DayActivities>("/activities/day", { date: day ?? undefined, team_id: teamId ?? undefined }, { signal }),
     enabled: Boolean(day),
     // "Atrasada" depende do relógio: revalida a cada minuto mesmo sem eventos.
     refetchInterval: 60_000,
@@ -102,8 +114,8 @@ export function useServiceTypes(params: { customerId?: UUID | null; active?: boo
   const { customerId, active, enabled = true } = params;
   return useQuery({
     queryKey: ["service-types", customerId ?? "", active ?? ""],
-    queryFn: () =>
-      api.get<ServiceType[]>("/service-types", { customer_id: customerId ?? undefined, active }),
+    queryFn: ({ signal }) =>
+      api.get<ServiceType[]>("/service-types", { customer_id: customerId ?? undefined, active }, { signal }),
     staleTime: LOOKUP_STALE,
     enabled,
   });
@@ -113,7 +125,7 @@ export function useServiceTypes(params: { customerId?: UUID | null; active?: boo
 export function useAssignable(teamId?: UUID | null, enabled = true) {
   return useQuery({
     queryKey: ["assignable", teamId ?? ""],
-    queryFn: () => api.get<AssignableUser[]>("/users/assignable", { team_id: teamId ?? undefined }),
+    queryFn: ({ signal }) => api.get<AssignableUser[]>("/users/assignable", { team_id: teamId ?? undefined }, { signal }),
     staleTime: 15_000,
     enabled,
   });
@@ -122,7 +134,7 @@ export function useAssignable(teamId?: UUID | null, enabled = true) {
 export function useUsers(params: { q?: string; role?: string; team_id?: string } = {}) {
   return useQuery({
     queryKey: ["users", params],
-    queryFn: () => api.get<User[]>("/users", params),
+    queryFn: ({ signal }) => api.get<User[]>("/users", params, { signal }),
   });
 }
 
@@ -133,7 +145,7 @@ export function useUsers(params: { q?: string; role?: string; team_id?: string }
 export function useLiveTechnicians(teamId?: UUID | null) {
   return useQuery({
     queryKey: ["tracking", "live", teamId ?? ""],
-    queryFn: () => api.get<LiveTechnician[]>("/tracking/live", { team_id: teamId ?? undefined }),
+    queryFn: ({ signal }) => api.get<LiveTechnician[]>("/tracking/live", { team_id: teamId ?? undefined }, { signal }),
     refetchInterval: 60_000,
   });
 }
@@ -142,11 +154,15 @@ export function useLiveTechnicians(teamId?: UUID | null) {
 export function useMapDistances(locationId: UUID | null, teamId?: UUID | null, enabled = true) {
   return useQuery({
     queryKey: ["tracking", "distances", locationId ?? "", teamId ?? ""],
-    queryFn: () =>
-      api.get<MapDistances>("/tracking/distances", {
-        location_id: locationId ?? undefined,
-        team_id: teamId ?? undefined,
-      }),
+    queryFn: ({ signal }) =>
+      api.get<MapDistances>(
+        "/tracking/distances",
+        {
+          location_id: locationId ?? undefined,
+          team_id: teamId ?? undefined,
+        },
+        { signal },
+      ),
     refetchInterval: 60_000,
     enabled,
   });
@@ -155,7 +171,8 @@ export function useMapDistances(locationId: UUID | null, teamId?: UUID | null, e
 export function useTrackingHistory(userId: UUID | null, date: string) {
   return useQuery({
     queryKey: ["tracking", "history", userId, date],
-    queryFn: () => api.get<TrackingHistory>("/tracking/history", { user_id: userId ?? undefined, date }),
+    queryFn: ({ signal }) =>
+      api.get<TrackingHistory>("/tracking/history", { user_id: userId ?? undefined, date }, { signal }),
     enabled: !!userId,
   });
 }
@@ -175,7 +192,7 @@ export interface CalendarQuery {
 export function useCalendar(params: CalendarQuery) {
   return useQuery({
     queryKey: ["tickets", "calendar", params],
-    queryFn: () => api.get<CalendarEvent[]>("/calendar", params as unknown as Query),
+    queryFn: ({ signal }) => api.get<CalendarEvent[]>("/calendar", params as unknown as Query, { signal }),
     placeholderData: (previous) => previous,
   });
 }
@@ -191,14 +208,18 @@ export function useScheduleConflicts(params: {
   const { assigneeId, start, end, estimatedMinutes, excludeId } = params;
   return useQuery({
     queryKey: ["tickets", "conflicts", assigneeId, start, end, estimatedMinutes, excludeId],
-    queryFn: () =>
-      api.get<ConflictItem[]>("/calendar/conflicts", {
-        assignee_id: assigneeId ?? undefined,
-        start: start ?? undefined,
-        end: end ?? undefined,
-        estimated_minutes: estimatedMinutes ?? undefined,
-        exclude_id: excludeId,
-      }),
+    queryFn: ({ signal }) =>
+      api.get<ConflictItem[]>(
+        "/calendar/conflicts",
+        {
+          assignee_id: assigneeId ?? undefined,
+          start: start ?? undefined,
+          end: end ?? undefined,
+          estimated_minutes: estimatedMinutes ?? undefined,
+          exclude_id: excludeId,
+        },
+        { signal },
+      ),
     enabled: !!assigneeId && !!start,
     staleTime: 10_000,
   });
@@ -207,7 +228,7 @@ export function useScheduleConflicts(params: {
 export function useUnproductiveReasons(active?: boolean) {
   return useQuery({
     queryKey: ["unproductive-reasons", active ?? ""],
-    queryFn: () => api.get<UnproductiveReason[]>("/unproductive-reasons", { active }),
+    queryFn: ({ signal }) => api.get<UnproductiveReason[]>("/unproductive-reasons", { active }, { signal }),
     staleTime: LOOKUP_STALE,
   });
 }

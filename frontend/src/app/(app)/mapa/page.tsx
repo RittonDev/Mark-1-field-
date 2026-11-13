@@ -379,8 +379,8 @@ export default function LiveMapPage() {
               />
             </div>
             <div className="mt-2.5">
-              <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-ink/80">
-                <Store className="size-3.5" />
+              <p id="mapa-loja" className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-ink/80">
+                <Store className="size-3.5" aria-hidden />
                 Loja do cliente
               </p>
               {mapPlace && !pickedLocation ? (
@@ -398,6 +398,7 @@ export default function LiveMapPage() {
                 <LocationPicker
                   customerId={null}
                   value={pickedLocation}
+                  labelledBy="mapa-loja"
                   onChange={(location) => {
                     setPickedLocation(location);
                     setMapPlace(null);
@@ -514,6 +515,7 @@ export default function LiveMapPage() {
             focusKey={focusKey}
             focusPending={focusPending}
             fitKey={teamId}
+            fitPending={live.isLoading || (prefs.showOs && (dayList.isLoading || dayList.isPlaceholderData))}
             notice={
               nobodyOnShift
                 ? "Ninguém em jornada agora. A posição aparece quando o técnico inicia a jornada no app."
@@ -532,12 +534,21 @@ function LiveStatus({ updatedAt }: { updatedAt: number }) {
   // Antes da primeira conexão é "conectando"; depois, cair é "reconectando" (as posições param de chegar).
   const [everOnline, setEverOnline] = useState(false);
   if (connection === "online" && !everOnline) setEverOnline(true);
-  const reconnecting = connection !== "online" && everOnline;
+  // Sem tempo real (desistiu de conectar) ou caiu depois de conectar: as posições podem estar atrasadas.
+  const warn = connection === "offline" || (connection === "connecting" && everOnline);
+  const label =
+    connection === "online"
+      ? "Ao vivo"
+      : connection === "offline"
+        ? "Sem tempo real: as posições atualizam a cada minuto"
+        : everOnline
+          ? "Reconectando: as posições podem estar atrasadas"
+          : "Conectando…";
   return (
     <span
       className={clsx(
         "inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-xs",
-        reconnecting
+        warn
           ? "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200"
           : "border-line bg-surface text-ink-muted",
       )}
@@ -545,14 +556,18 @@ function LiveStatus({ updatedAt }: { updatedAt: number }) {
       <span
         aria-hidden
         className={clsx(
-          "size-1.5 rounded-full",
-          connection === "online" ? "bg-emerald-600" : reconnecting ? "bg-amber-500" : "bg-ink-subtle",
+          "size-1.5 shrink-0 rounded-full",
+          connection === "online" ? "bg-emerald-600" : warn ? "bg-amber-500" : "bg-ink-subtle",
         )}
       />
-      <span aria-live="polite">
-        {connection === "online" ? "Ao vivo" : reconnecting ? "Reconectando: as posições podem estar atrasadas" : "Conectando…"}
-      </span>
-      {updatedAt ? <span className="tabular-nums">· {formatTime(new Date(updatedAt).toISOString())}</span> : null}
+      <span aria-live="polite">{label}</span>
+      {updatedAt ? (
+        <span className="tabular-nums" title="Última atualização das posições">
+          <span className="sr-only">, atualizado às </span>
+          <span aria-hidden>· </span>
+          {formatTime(new Date(updatedAt).toISOString())}
+        </span>
+      ) : null}
     </span>
   );
 }

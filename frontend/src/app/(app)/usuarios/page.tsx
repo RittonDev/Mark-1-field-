@@ -7,7 +7,7 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useState } from "react";
 import { useConfirm } from "@/components/Confirm";
 import { Tabs } from "@/components/motion";
-import { InactiveChip, plural, RowEditButton, SearchField, useDiscardGuard } from "@/components/settings/shared";
+import { InactiveChip, plural, RowEditButton, RowEditLink, SearchField } from "@/components/settings/shared";
 import { useToast } from "@/components/Toaster";
 import {
   Button,
@@ -40,6 +40,8 @@ import { copyText, whatsappUrl } from "@/lib/whatsapp";
 
 type Situation = "active" | "inactive" | "all";
 
+// Linhas por vez na lista (o resto entra com "Mostrar mais").
+const PAGE_SIZE = 100;
 const ROLE_ORDER: UserRole[] = ["admin", "supervisor", "analyst", "technician", "requester"];
 const STAFF_ROLES: UserRole[] = ["admin", "supervisor", "analyst"];
 
@@ -149,6 +151,28 @@ function accessFor(user: User, password: string | null): Credentials {
   };
 }
 
+/** Senha nova definida pela central para outra pessoa: a mensagem pronta para mandar a ela. */
+function passwordChangedFor(user: User, password: string): Credentials {
+  const portal = user.role === "requester";
+  return {
+    title: "Senha alterada",
+    intro: (
+      <>
+        <strong className="font-semibold">{user.name}</strong> já entra com a senha nova. As sessões abertas com a senha
+        antiga foram encerradas.
+      </>
+    ),
+    secret: password,
+    message: [
+      `Olá, ${firstName(user.name)}! Sua senha ${portal ? "do portal de solicitações" : "da central Maxx Field"} foi trocada.`,
+      `Endereço: ${window.location.origin}/login`,
+      `E-mail: ${user.email}`,
+      `Senha nova: ${password}`,
+    ].join("\n"),
+    phone: user.phone,
+  };
+}
+
 function technicianAccess(result: TemporaryPassword, reset: boolean): Credentials {
   const { technician: t, temporary_password: pw } = result;
   const hello = `Olá, ${firstName(t.name)}!`;
@@ -227,7 +251,10 @@ function RoleChip({ role }: { role: UserRole }) {
   );
 }
 
-type SaveResult = { kind: "updated"; user: User } | { kind: "created"; user: User; password: string | null } | { kind: "technician"; result: TemporaryPassword };
+type SaveResult =
+  | { kind: "updated"; user: User; password: string | null }
+  | { kind: "created"; user: User; password: string | null }
+  | { kind: "technician"; result: TemporaryPassword };
 
 function UserDialog({ user, onClose }: { user: User | null; onClose: () => void }) {
   const queryClient = useQueryClient();
@@ -288,11 +315,12 @@ function UserDialog({ user, onClose }: { user: User | null; onClose: () => void 
   const asAssignee = editing ? (assignable.data?.find((a) => a.id === user.id)?.open_tickets ?? 0) : 0;
   const asOwner = editing ? (queues.data?.queues.find((q) => q.user.id === user.id)?.open ?? 0) : 0;
   const deactivating = editing && user.is_active && !form.is_active;
+  // A própria senha muda em "Trocar senha" (pede a atual e não derruba a sessão): aqui, só a dos outros.
+  const settingPassword = editing && !self && changingPassword && password !== "";
   const sessionEnds =
-    editing && ((changingPassword && password !== "") || form.email.trim().toLowerCase() !== initial.email.toLowerCase() || form.role !== initial.role);
+    editing && (settingPassword || form.email.trim().toLowerCase() !== initial.email.toLowerCase() || form.role !== initial.role);
 
   const dirty = JSON.stringify(form) !== JSON.stringify(initial) || password !== "";
-  const requestClose = useDiscardGuard(dirty && credentials === null, onClose);
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["users"] });
@@ -320,8 +348,8 @@ function UserDialog({ user, onClose }: { user: User | null; onClose: () => void 
       };
       if (editing) {
         body.is_active = form.is_active;
-        if (changingPassword && password) body.password = password;
-        return { kind: "updated", user: await api.patch<User>(`/users/${user.id}`, body) };
+        if (settingPassword) body.password = password;
+        return { kind: "updated", user: await api.patch<User>(`/users/${user.id}`, body), password: settingPassword ? password : null };
       }
       const secret = microsoftOnly ? randomPassword() : password;
       const created = await api.post<User>("/users", { ...body, password: secret });
@@ -332,7 +360,9 @@ function UserDialog({ user, onClose }: { user: User | null; onClose: () => void 
       if (r.kind === "updated") {
         if (r.user.id === me?.id) sessionStore.updateUser(r.user);
         toast({ title: `${r.user.name}: cadastro atualizado`, tone: "success" });
-        onClose();
+        // Senha nova de outra pessoa: a mensagem pronta para mandar (a senha não aparece de novo).
+        if (r.password) setCredentials(passwordChangedFor(r.user, r.password));
+        else onClose();
       } else if (r.kind === "created") {
         toast({ title: `${r.user.name} cadastrado`, tone: "success" });
         setCredentials(accessFor(r.user, r.password));
@@ -396,13 +426,17 @@ function UserDialog({ user, onClose }: { user: User | null; onClose: () => void 
   return (
     <Dialog
       open
-      onClose={requestClose}
+      onClose={onClose}
+      dirty={dirty}
+      busy={save.isPending || reset.isPending}
       size="lg"
       title={editing ? `Editar ${user.name}` : "Novo usuário"}
       footer={
         <>
-          <Button onClick={requestClose}>Cancelar</Button>
-          <Button variant="primary" type="submit" form="user-form" loading={save.isPending}>
+          <Button onClick={onClose} disabled={save.isPending || reset.isPending}>
+            Cancelar
+          </Button>
+          <Button variant="primary" type="submit" form="user-form" loading={save.isPending} disabled={reset.isPending}>
             {technicianFlow ? "Cadastrar técnico" : "Salvar"}
           </Button>
         </>
@@ -509,17 +543,20 @@ function UserDialog({ user, onClose }: { user: User | null; onClose: () => void 
           <p className="rounded-lg border border-line bg-surface-2 px-3 py-2.5 text-sm text-ink-muted sm:col-span-2">
             Este e-mail entra com a conta Microsoft da empresa: a senha daqui não vale para ele.
           </p>
+        ) : self ? (
+          <p className="rounded-lg border border-line bg-surface-2 px-3 py-2.5 text-sm text-ink-muted sm:col-span-2">
+            Para trocar a sua senha, use <strong className="font-semibold text-ink">Trocar senha</strong> no menu da sua
+            conta (no seu nome, no menu lateral): ela pede a senha atual e você continua conectado.
+          </p>
         ) : changingPassword ? (
           <Field
             label={editing ? "Nova senha" : "Senha"}
             required={!editing}
             className="sm:col-span-2"
             hint={
-              !editing
-                ? "Mínimo de 8 caracteres. Depois de salvar, aparece a mensagem pronta para enviar."
-                : self
-                  ? "Ao salvar, você sai e entra de novo com a senha nova."
-                  : "Mínimo de 8 caracteres. Quem estiver conectado com esta conta sai na hora."
+              editing
+                ? "Mínimo de 8 caracteres. Quem estiver conectado com esta conta sai na hora; depois de salvar, aparece a mensagem pronta para enviar."
+                : "Mínimo de 8 caracteres. Depois de salvar, aparece a mensagem pronta para enviar."
             }
           >
             <Input
@@ -578,7 +615,7 @@ function UserDialog({ user, onClose }: { user: User | null; onClose: () => void 
           </p>
         ) : null}
         {sessionEnds && self ? (
-          <p className="text-xs text-ink-muted sm:col-span-2">Com a troca de e-mail ou senha, você sai e entra de novo.</p>
+          <p className="text-xs text-ink-muted sm:col-span-2">Com a troca de e-mail, você sai e entra de novo.</p>
         ) : null}
         {save.error ? (
           <div className="sm:col-span-2">
@@ -616,16 +653,19 @@ function TeamDialog({ team, onClose }: { team: Team | null; onClose: () => void 
       onClose();
     },
   });
-  const requestClose = useDiscardGuard(dirty, onClose);
 
   return (
     <Dialog
       open
-      onClose={requestClose}
+      onClose={onClose}
+      dirty={dirty}
+      busy={mutation.isPending}
       title={team ? `Editar ${team.name}` : "Novo grupo técnico"}
       footer={
         <>
-          <Button onClick={requestClose}>Cancelar</Button>
+          <Button onClick={onClose} disabled={mutation.isPending}>
+            Cancelar
+          </Button>
           <Button variant="primary" type="submit" form="team-form" loading={mutation.isPending}>
             Salvar
           </Button>
@@ -695,6 +735,12 @@ function UsersView() {
   const [editingTeam, setEditingTeam] = useState<Team | null | undefined>(undefined);
   const list = useMemo(() => users.data ?? [], [users.data]);
   const filtered = Boolean(q || role || situation !== "active");
+  // Lista longa (ex.: os técnicos inativos que vieram do Field Control) entra aos poucos; mudar a
+  // busca ou os filtros volta ao começo.
+  const filterKey = `${q}|${role}|${situation}`;
+  const [shown, setShown] = useState({ key: filterKey, count: PAGE_SIZE });
+  const visibleCount = shown.key === filterKey ? shown.count : PAGE_SIZE;
+  const visible = list.slice(0, visibleCount);
 
   const description =
     me?.role === "admin"
@@ -826,7 +872,7 @@ function UsersView() {
                   </tr>
                 </thead>
                 <tbody>
-                  {list.map((u) => (
+                  {visible.map((u) => (
                     <tr key={u.id} className="transition-colors hover:bg-[var(--row-hover)]">
                       <Td className="min-w-64">
                         <div className="flex items-center gap-2.5">
@@ -862,12 +908,13 @@ function UsersView() {
                         <Td className="edit-col">
                           {canManageRole(me?.role, u.role) ? (
                             <RowEditButton label={`Editar ${u.name}`} onClick={() => setEditingUser(u)} />
+                          ) : u.role === "technician" ? (
+                            // O cadastro do técnico (cidade, área, senha provisória) fica em Técnicos.
+                            <RowEditLink label={`Editar ${u.name} em Técnicos`} href={`/tecnicos?q=${encodeURIComponent(u.email)}`} />
                           ) : (
-                            <span
-                              className="inline-flex size-8 items-center justify-center text-ink-subtle"
-                              title={u.role === "technician" ? "Técnicos são editados em Técnicos" : "Só o administrador edita este papel"}
-                            >
-                              —
+                            <span className="inline-flex size-8 items-center justify-center text-ink-subtle" title="Só o administrador edita este papel">
+                              <span aria-hidden>—</span>
+                              <span className="sr-only">Só o administrador edita este papel</span>
                             </span>
                           )}
                         </Td>
@@ -876,6 +923,16 @@ function UsersView() {
                   ))}
                 </tbody>
               </Table>
+              {list.length > visible.length ? (
+                <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
+                  <span className="text-xs text-ink-muted">
+                    Mostrando {visible.length.toLocaleString("pt-BR")} de {list.length.toLocaleString("pt-BR")}
+                  </span>
+                  <Button size="sm" onClick={() => setShown({ key: filterKey, count: visibleCount + PAGE_SIZE })}>
+                    Mostrar mais {Math.min(PAGE_SIZE, list.length - visible.length)}
+                  </Button>
+                </div>
+              ) : null}
             </>
           )}
         </Card>

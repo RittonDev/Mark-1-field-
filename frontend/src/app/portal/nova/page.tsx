@@ -2,7 +2,7 @@
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { ArrowLeft, CircleCheck, MapPin, Search, Send, Store } from "lucide-react";
+import { ArrowLeft, Ban, CircleCheck, MapPin, Search, Send, Store } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
@@ -10,7 +10,7 @@ import { Button, Card, EmptyState, ErrorBox, Field, Input, LoadingBlock, PageHea
 import { ApiError, api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useDebounced } from "@/lib/hooks";
-import { portalMemory, URGENCY_OPTIONS, usePortalMe } from "@/lib/portal";
+import { canOpenRequests, PORTAL_SUSPENDED, portalMemory, URGENCY_OPTIONS, usePortalMe } from "@/lib/portal";
 import type { Level, PortalLocation, PortalRequestDetail } from "@/lib/types";
 
 function storeLine(s: PortalLocation) {
@@ -229,17 +229,23 @@ export default function NewRequestPage() {
 
   if (me.isLoading) return <LoadingBlock rows={4} />;
 
-  if (me.data?.locations === 0) {
+  // Sem como abrir (empresa sem contrato ou sem lojas): explica em vez de mostrar um formulário que não envia.
+  const blocked = !canOpenRequests(me.data)
+    ? { icon: <Ban />, title: "Abertura de solicitações suspensa", description: PORTAL_SUSPENDED }
+    : me.data?.locations === 0
+      ? {
+          icon: <Store />,
+          title: "Nenhuma loja cadastrada",
+          description: "Sua empresa ainda não tem lojas cadastradas no portal. Fale com a central da Maxx para incluir.",
+        }
+      : null;
+  if (blocked) {
     return (
       <div>
         {back}
-        <PageHeader title="Nova solicitação" />
+        <PageHeader title="Nova solicitação" documentTitle="Nova solicitação" />
         <Card>
-          <EmptyState
-            icon={<Store />}
-            title="Nenhuma loja cadastrada"
-            description="Sua empresa ainda não tem lojas cadastradas no portal. Fale com a central da Maxx para incluir."
-          />
+          <EmptyState icon={blocked.icon} title={blocked.title} description={blocked.description} />
         </Card>
       </div>
     );
@@ -248,7 +254,11 @@ export default function NewRequestPage() {
   return (
     <div>
       {back}
-      <PageHeader title="Nova solicitação" description="Conte o que aconteceu. A central analisa e envia um técnico." />
+      <PageHeader
+        title="Nova solicitação"
+        documentTitle="Nova solicitação"
+        description="Conte o que aconteceu. A central analisa e envia um técnico."
+      />
 
       <Card className="p-5 sm:p-6">
         <form

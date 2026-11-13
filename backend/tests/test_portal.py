@@ -33,6 +33,9 @@ ALLOWED = {
     "report_url",
     "can_cancel",
     "timeline",
+    # Só os arquivos que a empresa do cliente mandou (nome e data).
+    "attachments",
+    "can_attach",
 }
 
 

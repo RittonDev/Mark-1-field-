@@ -1,5 +1,5 @@
 import { router } from "expo-router";
-import { Pressable, StyleSheet, View } from "react-native";
+import { Platform, Pressable, StyleSheet, View } from "react-native";
 import Animated, { FadeInUp, FadeOut, LinearTransition, useReducedMotion } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { dismissToast, useToasts, type Toast } from "../lib/toast";
@@ -8,9 +8,13 @@ import { Icon } from "./Icon";
 import { ENTER_OFFSET } from "./motion";
 import { Text } from "./Text";
 
+/** Altura do cabeçalho nativo das telas: o aviso fica logo abaixo dele, sem cobrir o "Voltar". */
+const HEADER_HEIGHT = Platform.OS === "ios" ? 44 : 56;
+
 /**
- * Avisos rápidos no TOPO da tela: embaixo eles cobriam a barra de abas e a barra do próximo passo da OS
- * justamente quando ela é necessária. Tocar fecha; aviso de uma OS abre a OS.
+ * Avisos rápidos no alto da tela: embaixo eles cobriam a barra de abas e a barra do próximo passo da OS
+ * justamente quando ela é necessária; logo abaixo da altura do cabeçalho, não cobrem o "Voltar" nem a
+ * faixa de conexão da tela inicial. Tocar fecha; aviso de uma OS abre a OS.
  */
 export function ToastHost() {
   const toasts = useToasts();
@@ -32,7 +36,7 @@ export function ToastHost() {
   }
 
   return (
-    <View pointerEvents="box-none" style={[styles.host, { top: insets.top + 8 }]}>
+    <View style={[styles.host, { top: insets.top + HEADER_HEIGHT + 4 }]}>
       {toasts.map((toast) => (
         <Animated.View
           key={toast.id}
@@ -63,7 +67,8 @@ export function ToastHost() {
 
 const makeStyles = (c: Palette) =>
   StyleSheet.create({
-    host: { position: "absolute", left: 16, right: 16, gap: 8, alignItems: "center" },
+    // Só os avisos recebem toque: o resto da faixa deixa passar para a tela embaixo.
+    host: { position: "absolute", left: 16, right: 16, gap: 8, alignItems: "center", pointerEvents: "box-none" },
     item: { width: "100%", maxWidth: 520 },
     toast: {
       flexDirection: "row",

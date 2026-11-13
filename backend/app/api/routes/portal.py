@@ -3,7 +3,7 @@
 import uuid
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 
 from app.api.deps import DB, CurrentUser, TicketManagerUser
 from app.schemas.common import Page
@@ -16,10 +16,14 @@ from app.schemas.portal import (
     PortalRequestDetail,
     PortalRequestItem,
 )
+from app.services import login_guard
 from app.services import portal as svc
 from app.services.realtime import commit_and_publish
 
 router = APIRouter(tags=["portal"])
+
+# Arquivos por usuário do cliente por hora (somando as solicitações).
+MAX_FILES_PER_HOUR = 30
 
 
 @router.get("/portal/me", response_model=PortalMe)
@@ -61,6 +65,29 @@ async def create_request(
 
 @router.get("/portal/requests/{request_id}", response_model=PortalRequestDetail)
 async def get_request(request_id: uuid.UUID, db: DB, user: CurrentUser) -> PortalRequestDetail:
+    return await svc.to_detail(db, await svc.get_request(db, user, request_id))
+
+
+@router.post(
+    "/portal/requests/{request_id}/attachments",
+    response_model=PortalRequestDetail,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_request_file(
+    request_id: uuid.UUID, db: DB, user: CurrentUser, file: Annotated[UploadFile, File()]
+) -> PortalRequestDetail:
+    """Foto do problema ou PDF na solicitação em aberto (a central e o técnico veem)."""
+    ticket = await svc.get_request(db, user, request_id)
+    try:
+        await login_guard.hit("portal-files", str(user.id), MAX_FILES_PER_HOUR, 3600)
+    except login_guard.RateLimited as exc:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "Muitos arquivos enviados agora. Tente de novo mais tarde.",
+            headers={"Retry-After": str(exc.retry_after)},
+        ) from exc
+    await svc.add_file(db, user, ticket, file)
+    await commit_and_publish(db)
     return await svc.to_detail(db, await svc.get_request(db, user, request_id))
 
 

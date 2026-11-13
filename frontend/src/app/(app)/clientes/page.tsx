@@ -70,10 +70,7 @@ function useUrlParams() {
   return [useSearchParams(), update] as const;
 }
 
-// Mesmas classes do <Th> de components/ui, com o aria-sort que o cabeçalho ordenável precisa.
-const TH_CLASS =
-  "border-b border-line bg-[var(--table-head)] px-3 py-2.5 text-[11px] font-bold tracking-[0.06em] whitespace-nowrap text-ink-muted uppercase first:pl-4 last:pr-4";
-
+/** Cabeçalho ordenável: o botão troca a ordem e o aria-sort conta ao leitor de tela qual está valendo. */
 function SortTh({
   label,
   sortKey,
@@ -92,7 +89,7 @@ function SortTh({
   const direction = sort && sort.key === sortKey ? (sort.desc ? "descending" : "ascending") : undefined;
   const Icon = direction === "descending" ? ArrowDown : direction === "ascending" ? ArrowUp : ArrowUpDown;
   return (
-    <th aria-sort={direction} className={clsx(TH_CLASS, right && "text-right", className)}>
+    <Th aria-sort={direction} numeric={right} className={className}>
       <button
         type="button"
         onClick={() => onSort(sortKey)}
@@ -105,7 +102,7 @@ function SortTh({
         {label}
         <Icon aria-hidden className={clsx("size-3 shrink-0", !direction && "opacity-60")} />
       </button>
-    </th>
+    </Th>
   );
 }
 

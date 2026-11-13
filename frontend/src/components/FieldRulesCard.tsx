@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Save } from "lucide-react";
 import { useId, useState } from "react";
-import { FieldError, useBeforeUnload } from "@/components/settings/shared";
+import { FieldError, useLeaveGuard } from "@/components/settings/shared";
 import { useToast } from "@/components/Toaster";
 import { Button, Card, CardHeader, ErrorBox, Field, Input, LoadingBlock } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
@@ -86,7 +86,7 @@ function RulesForm({ initial, readOnly }: { initial: FieldRules; readOnly: boole
   const problems = problemsOf(values);
   const invalid = Object.keys(problems).length > 0;
   const dirty = JSON.stringify(values) !== JSON.stringify(start);
-  useBeforeUnload(dirty && !readOnly);
+  useLeaveGuard(dirty && !readOnly, "As regras de campo alteradas ainda não foram salvas.");
   const set = (key: Key) => (e: React.ChangeEvent<HTMLInputElement>) => setValues((v) => ({ ...v, [key]: e.target.value }));
   const optional = (v: string) => (v.trim() === "" ? null : whole(v));
 

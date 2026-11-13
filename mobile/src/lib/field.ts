@@ -75,10 +75,10 @@ export interface OnsiteClock {
 }
 
 /**
- * Permanência na loja: da chegada até o limite do chamado (4h). O início é a chegada desta visita:
- * numa revisita (OS reaberta ou depois de uma visita improdutiva) a janela é nova e a chegada
- * guardada continua sendo a primeira, então vale o mais recente entre a chegada e o limite menos
- * as horas do chamado.
+ * Permanência na loja: quanto das horas do chamado (4h) já foi usado e quanto falta até o limite.
+ * A cada entrada em atendimento (revisita, OS reaberta, retomada) o servidor refaz o limite com o que
+ * sobrou das horas (field.py::on_reentry). Por isso o início do relógio é o limite menos as horas do
+ * chamado (nunca antes da primeira chegada): o tempo trabalhado em visitas anteriores conta como usado.
  */
 export function onsiteClock(ticket: Clockable, now: number): OnsiteClock | null {
   if (!ticket.arrived_at || !ticket.onsite_due_at || !ONSITE_STATUSES.includes(ticket.status)) return null;
@@ -152,9 +152,14 @@ export function whenLabel(value: string, now: number): string {
   return dayOffset(value, now) === 0 ? time : `${relativeDay(value, now)} ${time}`;
 }
 
-/** Previsão do limite na loja para o check-in feito offline (o servidor confirma no próximo sync). */
-export function onsiteDueFrom(arrivedAt: string): string {
-  return new Date(new Date(arrivedAt).getTime() + rules.onsite_hours * 3600_000).toISOString();
+/**
+ * Previsão do limite na loja quando o técnico entra em atendimento offline (o servidor confirma no
+ * próximo sync, field.py::start_onsite_clock): o que sobra das horas do chamado depois dos
+ * `usedSeconds` já trabalhados em visitas anteriores (0 na primeira chegada).
+ */
+export function onsiteDueFrom(startedAt: string, usedSeconds = 0): string {
+  const left = Math.max(0, rules.onsite_hours * 3600 - Math.max(0, usedSeconds));
+  return new Date(new Date(startedAt).getTime() + left * 1000).toISOString();
 }
 
 export const PART_STATUS: Record<PartRequestStatus, { label: string; tone: "warning" | "info" | "success" | "danger" | "muted" }> = {

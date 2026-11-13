@@ -89,6 +89,8 @@ class RepairOut(BaseModel):
     events: list[RepairEventOut] = []
     photos: list[RepairPhotoOut] = []
     allowed_next: list[RepairStatus] = []
+    # Para onde "Voltar etapa" leva (etapa clicada por engano; pede motivo). Só no detalhe.
+    previous_status: RepairStatus | None = None
     days_open: int = 0
     days_in_status: int = 0
     overdue: bool = False

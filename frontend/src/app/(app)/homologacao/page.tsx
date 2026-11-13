@@ -13,8 +13,10 @@ import {
   MessageCircle,
   Phone,
   Search,
+  Send,
   ShieldCheck,
   SquarePen,
+  Trash2,
   UserCheck,
   UserX,
   Users,
@@ -27,7 +29,12 @@ import { useConfirm } from "@/components/Confirm";
 import { MultiSelect } from "@/components/MultiSelect";
 import { Tabs } from "@/components/motion";
 import { fold, replaceSearch } from "@/components/operacao/hooks";
-import { InviteDialog, type InvitePreset } from "@/components/technicians/InviteDialog";
+import {
+  InviteDialog,
+  type InvitePreset,
+  InviteShareDialog,
+  inviteUsesLabel,
+} from "@/components/technicians/InviteDialog";
 import { refreshTechnicianViews } from "@/components/technicians/refresh";
 import { useToast } from "@/components/Toaster";
 import {
@@ -52,7 +59,7 @@ import {
 import { useNow } from "@/components/useNow";
 import { absoluteApiUrl, api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { canManageTickets } from "@/lib/constants";
+import { canManageTickets, isManager } from "@/lib/constants";
 import { formatDate, formatDateTime, formatDocument, initials } from "@/lib/format";
 import { labelMap, useOnboardingCatalog } from "@/lib/onboarding";
 import { useTeams } from "@/lib/queries";
@@ -188,12 +195,15 @@ function OnboardingView() {
         value={tab}
         onChange={setTab}
         ariaLabel="Fichas e links"
+        idPrefix="homologacao"
       />
 
       {tab === "links" ? (
-        <InvitesTab onCreate={(preset) => setInviting({ preset })} />
+        <div role="tabpanel" id="homologacao-panel-links" aria-labelledby="homologacao-tab-links">
+          <InvitesTab onCreate={(preset) => setInviting({ preset })} />
+        </div>
       ) : (
-        <>
+        <div role="tabpanel" id={`homologacao-panel-${tab}`} aria-labelledby={`homologacao-tab-${tab}`}>
           {all.length || filtering ? (
             <div className="mb-4 flex flex-wrap items-center gap-2">
               <div className="relative min-w-56 flex-1">
@@ -346,7 +356,7 @@ function OnboardingView() {
               </Table>
             )}
           </Card>
-        </>
+        </div>
       )}
 
       {inviting ? <InviteDialog preset={inviting.preset} onClose={() => setInviting(null)} /> : null}
@@ -359,6 +369,8 @@ function InvitesTab({ onCreate }: { onCreate: (preset?: InvitePreset) => void })
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const confirm = useConfirm();
+  // Link ativo aberto para copiar e enviar de novo.
+  const [sharing, setSharing] = useState<OnboardingInvite | null>(null);
   const invites = useQuery({
     queryKey: ["onboarding", "invites"],
     queryFn: () => api.get<OnboardingInvite[]>("/onboarding/invites"),
@@ -413,24 +425,35 @@ function InvitesTab({ onCreate }: { onCreate: (preset?: InvitePreset) => void })
               <tr key={i.id} className="transition-colors hover:bg-[var(--row-hover)]">
                 <Td>
                   <span className="block font-semibold text-ink">{i.label ?? "Sem identificação"}</span>
-                  <span className="text-xs text-ink-muted">{i.max_uses == null ? "Reutilizável" : "Uso único"}</span>
+                  <span className="text-xs text-ink-muted">{inviteUsesLabel(i.max_uses)}</span>
                 </Td>
                 <Td>
                   <Pill color={INVITE_STATE[i.state].color}>{INVITE_STATE[i.state].label}</Pill>
                 </Td>
-                <Td className="hidden tabular-nums sm:table-cell">{i.use_count}</Td>
+                <Td className="hidden tabular-nums sm:table-cell">
+                  {i.use_count}
+                  {i.max_uses != null && i.max_uses > 1 ? <span className="text-ink-muted"> de {i.max_uses}</span> : null}
+                </Td>
                 <Td className="hidden text-xs text-ink-muted md:table-cell">{formatDateTime(i.expires_at)}</Td>
                 <Td className="hidden text-xs text-ink-muted lg:table-cell">{i.created_by?.name ?? "—"}</Td>
                 <Td className="edit-col">
                   <span className="flex items-center justify-end gap-1">
+                    {i.state === "active" && i.url ? (
+                      <Button size="sm" variant="ghost" onClick={() => setSharing(i)} title="Copiar e enviar este link de novo">
+                        <Send className="size-3.5" />
+                        Enviar
+                      </Button>
+                    ) : null}
                     <Button
                       size="sm"
                       variant="ghost"
-                      onClick={() => onCreate({ label: i.label, reusable: i.max_uses == null })}
-                      title="O link completo só aparece uma vez: gere outro com os mesmos dados"
+                      // Uso único tem max_uses 1; reutilizável não tem limite ou tem um limite maior que 1.
+                      onClick={() => onCreate({ label: i.label, reusable: i.max_uses !== 1, maxUses: i.max_uses !== 1 ? i.max_uses : null })}
+                      aria-label={`Gerar outro link igual a ${i.label ?? "este"}`}
+                      title="Gerar outro link com a mesma identificação e o mesmo tipo"
                     >
                       <CopyPlus className="size-3.5" />
-                      Gerar outro igual
+                      <span className="hidden xl:inline">Gerar outro igual</span>
                     </Button>
                     {i.state === "active" ? (
                       <Button
@@ -449,6 +472,7 @@ function InvitesTab({ onCreate }: { onCreate: (preset?: InvitePreset) => void })
           </tbody>
         </Table>
       )}
+      {sharing ? <InviteShareDialog invite={sharing} onClose={() => setSharing(null)} /> : null}
     </Card>
   );
 }
@@ -476,6 +500,9 @@ type Outcome = { kind: "approved"; name: string } | { kind: "rejected" };
 
 function ApplicationDialog({ id, onClose }: { id: string; onClose: () => void }) {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const confirm = useConfirm();
   const catalog = useOnboardingCatalog();
   const teams = useTeams();
   const [mode, setMode] = useState<"view" | "approve" | "reject">("view");
@@ -517,6 +544,18 @@ function ApplicationDialog({ id, onClose }: { id: string; onClose: () => void })
       setOutcome({ kind: "rejected" });
     },
   });
+  // Pedido do candidato (LGPD): só gestores apagam a ficha pendente ou reprovada, com a foto.
+  const remove = useMutation({
+    mutationFn: () => api.delete(`/onboarding/applications/${id}`),
+    onSuccess: () => {
+      // As listas e o contador (a ficha aberta some junto com o diálogo).
+      void queryClient.invalidateQueries({ queryKey: ["onboarding", "applications"] });
+      void queryClient.invalidateQueries({ queryKey: ["onboarding", "pending-count"] });
+      toast({ title: "Ficha excluída", tone: "success" });
+      onClose();
+    },
+    onError: (e) => toast({ title: errorMessage(e), tone: "error" }),
+  });
 
   const a = detail.data;
   const areas = labelMap(catalog.data?.service_areas);
@@ -531,6 +570,25 @@ function ApplicationDialog({ id, onClose }: { id: string; onClose: () => void })
     const city = state?.cities.find((c) => fold(c.city) === fold(a.city));
     return { inCity: city?.total ?? 0, inState: state?.total ?? 0 };
   })();
+  const askRemove = async () => {
+    if (!a) return;
+    const ok = await confirm({
+      tone: "danger",
+      title: `Excluir a ficha de ${a.full_name}?`,
+      description:
+        "Use quando o candidato pedir a exclusão dos dados dele (LGPD). A ficha e a foto são apagadas de vez: não dá para desfazer.",
+      confirmLabel: "Excluir ficha",
+    });
+    if (ok) remove.mutate();
+  };
+  // A aprovada virou o cadastro do técnico: sai pela base técnica, não por aqui.
+  const removeButton =
+    a && a.status !== "approved" && isManager(user?.role) ? (
+      <Button variant="ghost" className="mr-auto" onClick={askRemove} loading={remove.isPending}>
+        <Trash2 className="size-4" />
+        Excluir ficha
+      </Button>
+    ) : null;
 
   const footer = !a ? (
     detail.error ? (
@@ -547,6 +605,7 @@ function ApplicationDialog({ id, onClose }: { id: string; onClose: () => void })
     </Button>
   ) : !pending ? (
     <>
+      {removeButton}
       {a.user_id ? (
         <Link href={`/tecnicos?q=${encodeURIComponent(a.email)}`} className={buttonClassName()}>
           <Users className="size-4" />
@@ -573,6 +632,7 @@ function ApplicationDialog({ id, onClose }: { id: string; onClose: () => void })
     </>
   ) : (
     <>
+      {removeButton}
       <Button variant="ghost" onClick={() => setMode("reject")}>
         <UserX className="size-4" />
         Reprovar
@@ -589,6 +649,9 @@ function ApplicationDialog({ id, onClose }: { id: string; onClose: () => void })
       open
       size="lg"
       onClose={onClose}
+      busy={approve.isPending || reject.isPending || remove.isPending}
+      // Motivo ou observação escritos e ainda não enviados: fechar pergunta antes de descartar.
+      dirty={!outcome && ((mode === "reject" && reason.trim() !== "") || (mode === "approve" && note.trim() !== ""))}
       title={a ? a.full_name : "Ficha de homologação"}
       description={a ? `Enviada em ${formatDateTime(a.created_at)}${a.invite_label ? ` · link: ${a.invite_label}` : ""}` : undefined}
       footer={footer}

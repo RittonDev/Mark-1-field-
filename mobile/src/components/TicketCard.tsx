@@ -193,9 +193,10 @@ function TicketCardBase({ ticket, now, userId, showDate = false, showTime = true
             </Animated.View>
             {helping ? <HelperBadge /> : null}
           </View>
+          {/* Aguardando envio é o normal sem sinal (fica salvo no aparelho): informação, sem cor de alerta. */}
           {pending ? (
             <View style={styles.line}>
-              <Icon name="repeat" size={14} color={c.warning} />
+              <Icon name="repeat" size={14} color={c.inkMuted} />
               <Text style={styles.pending}>{pending}</Text>
             </View>
           ) : null}
@@ -351,7 +352,7 @@ const makeStyles = (c: Palette) =>
     note: { fontSize: 12, color: c.inkMuted, flex: 1 },
     noteLabel: { fontWeight: "700", color: c.inkMuted },
     badges: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 4 },
-    pending: { fontSize: 12, fontWeight: "600", color: c.warning, flex: 1 },
+    pending: { fontSize: 12, fontWeight: "600", color: c.inkMuted, flex: 1 },
     timelineRow: { flexDirection: "row", gap: 10 },
     rail: { minWidth: 56, alignItems: "center", paddingTop: 16 },
     railDate: { fontSize: 11, fontWeight: "700", color: c.inkMuted, fontVariant: ["tabular-nums"] },

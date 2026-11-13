@@ -37,8 +37,15 @@ function monthName(d: Date) {
   return name.charAt(0).toUpperCase() + name.slice(1);
 }
 
+const OFFLINE_TEXT = "Sem internet: os ganhos aparecem quando a conexão voltar.";
+
 function failureText(e: unknown) {
-  return e instanceof ApiError && e.status !== 0 ? e.message : "Sem internet: os ganhos aparecem quando a conexão voltar.";
+  return e instanceof ApiError && e.status !== 0 ? e.message : OFFLINE_TEXT;
+}
+
+/** Valores guardados na tela enquanto a atualização falha: diz de quando são e por que não mudaram. */
+function staleText(error: string, at: string) {
+  return `${error === OFFLINE_TEXT ? "Sem internet" : "Não deu para atualizar"} · valores de ${formatDateTime(at)}`;
 }
 
 function lineStatus(line: PayoutLine): { label: string; tone: "paid" | "due" | "expected" } {
@@ -49,6 +56,7 @@ function lineStatus(line: PayoutLine): { label: string; tone: "paid" | "due" | "
 /**
  * Busca os ganhos de um mês (ou de todos) e guarda POR CHAVE: um mês nunca aparece com os valores de
  * outro. O último resultado fica no aparelho, para abrir sem internet; a resposta do servidor substitui.
+ * Do total de todos os meses só o resumo é usado: as linhas não ficam na memória nem no aparelho.
  */
 async function loadInto(key: string, { setEntries, setErrors }: Setters): Promise<void> {
   void getKv(storeKey(key))
@@ -60,7 +68,7 @@ async function loadInto(key: string, { setEntries, setErrors }: Setters): Promis
     .catch(() => undefined);
   try {
     const data = await api.get<MyEarnings>(key === ALL ? "/me/earnings" : `/me/earnings?month=${key}`);
-    const entry: Entry = { at: new Date().toISOString(), data };
+    const entry: Entry = { at: new Date().toISOString(), data: key === ALL ? { ...data, items: [] } : data };
     setEntries((prev) => ({ ...prev, [key]: entry }));
     setErrors((prev) => {
       if (!(key in prev)) return prev;
@@ -68,7 +76,8 @@ async function loadInto(key: string, { setEntries, setErrors }: Setters): Promis
       delete next[key];
       return next;
     });
-    void setKv(storeKey(key), JSON.stringify(entry)).catch(() => undefined);
+    // Escrita silenciosa: nenhuma lista do aparelho depende dos ganhos (não recarrega as OS à toa).
+    void setKv(storeKey(key), JSON.stringify(entry), undefined, { notify: false }).catch(() => undefined);
   } catch (e) {
     setErrors((prev) => ({ ...prev, [key]: failureText(e) }));
   }
@@ -171,7 +180,7 @@ export function EarningsView({ refreshKey = 0, onSettled }: { refreshKey?: numbe
             ? `Inclui ${formatBRL(earlier)} de meses anteriores. É o que a central ainda vai pagar das OS concluídas.`
             : "OS concluídas que a central ainda vai pagar."}
         </Text>
-        {all && errors[ALL] ? <Text style={styles.stale}>Sem internet · valores de {formatDateTime(all.at)}</Text> : null}
+        {all && errors[ALL] ? <Text style={styles.stale}>{staleText(errors[ALL], all.at)}</Text> : null}
       </Card>
 
       <View style={styles.monthNav}>
@@ -219,7 +228,7 @@ export function EarningsView({ refreshKey = 0, onSettled }: { refreshKey?: numbe
         </Card>
       ) : (
         <>
-          {error ? <Text style={styles.stale}>Sem internet · valores de {formatDateTime(entry.at)}</Text> : null}
+          {error ? <Text style={styles.stale}>{staleText(error, entry.at)}</Text> : null}
           <Card style={{ gap: 4 }}>
             <SectionTitle accent>Chamados de {MONTHS[month.getMonth()]}</SectionTitle>
             <View style={styles.stats}>

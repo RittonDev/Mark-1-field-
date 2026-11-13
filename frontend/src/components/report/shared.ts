@@ -108,6 +108,15 @@ function currentStep(r: PublicReport): number {
   }
 }
 
+/**
+ * O técnico já está (ou esteve) no local na visita atual: em atendimento, pausado no local ou concluída.
+ * Antes disso os quadros de horário (início, fim, tempo no local) ficariam vazios, ou mostrariam a
+ * visita anterior, improdutiva, de uma OS reagendada.
+ */
+export function arrivedOnSite(r: PublicReport): boolean {
+  return currentStep(r) >= 3;
+}
+
 /** Etapas do atendimento (Aberta, Agendada, A caminho, Em atendimento, Concluída) para o cliente acompanhar. */
 export function progressSteps(r: PublicReport): ProgressStep[] {
   const current = currentStep(r);

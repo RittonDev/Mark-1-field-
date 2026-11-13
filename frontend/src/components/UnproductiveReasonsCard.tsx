@@ -3,7 +3,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Ban, Plus } from "lucide-react";
 import { useId, useState } from "react";
-import { ActiveState, FieldError, fold, NeutralChip, RowEditButton, useDiscardGuard } from "@/components/settings/shared";
+import { ActiveState, FieldError, fold, NeutralChip, RowEditButton } from "@/components/settings/shared";
 import { useToast } from "@/components/Toaster";
 import {
   Button,
@@ -156,16 +156,19 @@ function ReasonDialog({
       onClose();
     },
   });
-  const requestClose = useDiscardGuard(dirty, onClose);
 
   return (
     <Dialog
       open
-      onClose={requestClose}
+      onClose={onClose}
+      dirty={dirty}
+      busy={save.isPending}
       title={reason ? "Editar motivo de visita improdutiva" : "Novo motivo de visita improdutiva"}
       footer={
         <>
-          <Button onClick={requestClose}>Cancelar</Button>
+          <Button onClick={onClose} disabled={save.isPending}>
+            Cancelar
+          </Button>
           <Button
             variant="primary"
             type="submit"

@@ -2,12 +2,12 @@
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { CalendarClock, Download, FileText, Loader2, Plus, Search, Send, Share2, SquarePen } from "lucide-react";
+import { CalendarClock, Download, FileText, Link2, Loader2, Plus, Search, Send, Share2, SquarePen } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useState } from "react";
 import { Tabs } from "@/components/motion";
 import { QUOTE_EDITABLE, QuoteViewer } from "@/components/quotes/QuoteViewer";
-import { QuoteEditor, type QuoteTicketRef, ShareDialog } from "@/components/ticket/QuotesCard";
+import { QuoteEditor, type QuotePrefill, type QuoteTicketRef, ShareDialog } from "@/components/ticket/QuotesCard";
 import { TicketLink } from "@/components/ticket/TicketLink";
 import { useToast } from "@/components/Toaster";
 import { useNow } from "@/components/useNow";
@@ -34,15 +34,13 @@ import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canManageTickets, STATUS } from "@/lib/constants";
 import { downloadCsv } from "@/lib/download";
-import { formatDate, formatMoney, moneyInput } from "@/lib/format";
+import { dayKey, formatDate, formatMoney, moneyInput, OPERATION_TZ, todayISO } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
-import { addDaysISO, localDateISO, QUOTE_KIND, QUOTE_STATUS, QUOTE_VALID_DAYS, readDecimal } from "@/lib/quotes";
+import { QUOTE_KIND, QUOTE_STATUS, QUOTE_VALID_DAYS, readDecimal } from "@/lib/quotes";
 import type { Page, Quote, QuoteCatalogItem, QuoteItemKind, QuoteListRow, QuoteStatus, TicketListItem } from "@/lib/types";
 
 type Tab = "quotes" | "catalog";
 
-/** Fuso da operação: o mês do filtro fecha à meia-noite de Brasília, não na do navegador. */
-const OPERATION_TZ = "America/Sao_Paulo";
 /** A API devolve no máximo 500 orçamentos por consulta (os mais novos do período). */
 const LIST_LIMIT = 500;
 const RECENT = "90d";
@@ -100,6 +98,42 @@ function daysBetween(from: string, to: string): number {
   return Math.round((Date.UTC(y2, m2 - 1, d2) - Date.UTC(y1, m1 - 1, d1)) / 86_400_000);
 }
 
+/** O dia do calendário `days` dias depois de `day` ("AAAA-MM-DD"). */
+function shiftDays(day: string, days: number): string {
+  const [y, m, d] = day.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+}
+
+/**
+ * Validade vencida num orçamento que ainda dá para mexer (rascunho, enviado ou vencido): o envio seria
+ * recusado, o caminho é renovar a data. A validade é dia do calendário no fuso da operação, como na API.
+ */
+const needsRenew = (q: QuoteListRow, today: string) =>
+  QUOTE_EDITABLE.includes(q.status) && (q.status === "expired" || Boolean(q.valid_until && q.valid_until < today));
+
+/** O cliente já recebeu o link alguma vez (o rascunho em revisão também já foi enviado). */
+const sentBefore = (q: QuoteListRow) => q.status !== "draft" || Boolean(q.sent_at);
+
+/** Cliente e local (loja) da OS, numa linha. */
+const placeOf = (q: QuoteListRow) => [q.customer, q.location].filter(Boolean).join(" · ");
+
+/** Novo orçamento com os itens, o desconto e as condições de outro (Duplicar, como no Field Control). */
+function duplicateOf(q: Quote): QuotePrefill {
+  return {
+    title: q.title,
+    items: q.items.map((i) => ({
+      description: i.description,
+      quantity: i.quantity,
+      unit: i.unit,
+      kind: i.kind,
+      unit_price: i.unit_price,
+      catalog_item_id: i.catalog_item_id,
+    })),
+    discount: q.discount,
+    notes: q.notes,
+  };
+}
+
 /** A aba fica na URL (?aba=itens), sem navegar e mantendo a OS aberta no painel (?os=). */
 function setParams(patch: Record<string, string | null>) {
   const url = new URL(window.location.href);
@@ -139,9 +173,12 @@ function QuotesTabs() {
           value={tab}
           onChange={(key) => setParams({ aba: key === "catalog" ? "itens" : null })}
           ariaLabel="Orçamentos"
+          idPrefix="orcamentos"
         />
       </div>
-      {tab === "quotes" ? <QuoteList /> : <Catalog />}
+      <div role="tabpanel" id={`orcamentos-panel-${tab}`} aria-labelledby={`orcamentos-tab-${tab}`}>
+        {tab === "quotes" ? <QuoteList /> : <Catalog />}
+      </div>
     </>
   );
 }
@@ -250,11 +287,18 @@ const ticketOf = (q: QuoteListRow): QuoteTicketRef => ({
   customer: q.customer ? { name: q.customer } : null,
 });
 
+/** O orçamento recém-salvo no formato da lista (para abrir a visualização ou o link na hora). */
+const rowOf = (saved: Quote, ticket: QuoteTicketRef): QuoteListRow => ({
+  ...saved,
+  ticket_code: ticket.code,
+  customer: ticket.customer?.name ?? null,
+});
+
 function QuoteList() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const now = useNow(60_000);
-  const today = localDateISO(new Date(now));
+  const today = dayKey(now);
   const months = useMemo(() => monthOptions(), []);
   const [period, setPeriod] = useState(RECENT);
   const [status, setStatus] = useState<QuoteStatus | "">("");
@@ -266,11 +310,12 @@ function QuoteList() {
   const [sharing, setSharing] = useState<QuoteListRow | null>(null);
   const [renewing, setRenewing] = useState<QuoteListRow | null>(null);
   const [picking, setPicking] = useState(false);
-  const [creatingFor, setCreatingFor] = useState<QuoteTicketRef | null>(null);
+  // Orçamento novo: escolhido pela OS (Novo orçamento) ou cópia de outro (Duplicar).
+  const [creating, setCreating] = useState<{ ticket: QuoteTicketRef; prefill?: QuotePrefill } | null>(null);
   // Sem a situação na consulta: os contadores somam o período inteiro e a situação filtra aqui.
   const quotes = useQuery({
     queryKey: ["quotes", period],
-    queryFn: () => api.get<QuoteListRow[]>("/quotes", periodRange(period)),
+    queryFn: ({ signal }) => api.get<QuoteListRow[]>("/quotes", periodRange(period), { signal }),
     placeholderData: keepPreviousData,
   });
   const refresh = (ticketId: string) => {
@@ -301,7 +346,9 @@ function QuoteList() {
   const visible = useMemo(
     () =>
       (rows ?? []).filter(
-        (q) => (!status || q.status === status) && (!term || matches(term, `${q.code} ${q.ticket_code} ${q.title} ${q.customer ?? ""}`)),
+        (q) =>
+          (!status || q.status === status) &&
+          (!term || matches(term, `${q.code} ${q.ticket_code} ${q.title} ${q.customer ?? ""} ${q.location ?? ""}`)),
       ),
     [rows, status, term],
   );
@@ -313,11 +360,12 @@ function QuoteList() {
 
   const exportCsv = () =>
     downloadCsv(`orcamentos-${periodSlug}.csv`, [
-      ["orcamento", "os", "cliente", "titulo", "situacao", "total", "validade", "criado_em", "criado_por", "enviado_em", "respondido_em", "respondido_por", "motivo_recusa"],
+      ["orcamento", "os", "cliente", "local", "titulo", "situacao", "total", "validade", "criado_em", "criado_por", "enviado_em", "respondido_em", "respondido_por", "motivo_recusa"],
       ...visible.map((q) => [
         q.code,
         q.ticket_code,
         q.customer ?? "",
+        q.location ?? "",
         q.title,
         QUOTE_STATUS[q.status].label,
         csvMoney(q.total),
@@ -340,7 +388,7 @@ function QuoteList() {
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Nº, OS, cliente ou título"
+            placeholder="Nº, OS, cliente, loja ou título"
             aria-label="Buscar orçamentos"
             className="pl-9"
           />
@@ -394,7 +442,7 @@ function QuoteList() {
           <LoadingBlock />
         ) : quotes.error && !rows ? (
           <div className="p-4">
-            <ErrorBox message={errorMessage(quotes.error)} />
+            <ErrorBox message={errorMessage(quotes.error)} onRetry={() => void quotes.refetch()} />
           </div>
         ) : visible.length === 0 ? (
           <EmptyState
@@ -422,11 +470,11 @@ function QuoteList() {
           <>
             {quotes.error ? (
               <div className="p-4 pb-0">
-                <ErrorBox message={errorMessage(quotes.error)} />
+                <ErrorBox message={errorMessage(quotes.error)} onRetry={() => void quotes.refetch()} />
               </div>
             ) : null}
             <div className={clsx("transition-opacity duration-150", quotes.isPlaceholderData && "opacity-60")} aria-busy={quotes.isFetching}>
-              <Table>
+              <Table label="Orçamentos do período">
                 <thead>
                   <tr>
                     <Th>Orçamento</Th>
@@ -441,6 +489,7 @@ function QuoteList() {
                 <tbody>
                   {visible.map((q) => {
                     const detail = statusDetail(q);
+                    const place = placeOf(q);
                     return (
                       <tr
                         key={q.id}
@@ -468,8 +517,8 @@ function QuoteList() {
                           <TicketLink ticketId={q.ticket_id} className="font-mono text-xs text-brand hover:underline">
                             {q.ticket_code}
                           </TicketLink>
-                          <span className="block max-w-44 truncate text-xs text-ink-muted xl:max-w-56" title={q.customer ?? undefined}>
-                            {q.customer ?? "—"}
+                          <span className="block max-w-44 truncate text-xs text-ink-muted xl:max-w-64" title={place || undefined}>
+                            {place || "—"}
                           </span>
                         </Td>
                         <Td className="text-right font-medium whitespace-nowrap tabular-nums">{formatMoney(q.total)}</Td>
@@ -486,7 +535,12 @@ function QuoteList() {
                         </Td>
                         <Td className="edit-col">
                           <span className="inline-flex items-center gap-1.5">
-                            {q.status === "sent" && q.link ? (
+                            {needsRenew(q, today) ? (
+                              // Validade vencida: enviar seria recusado; renovar dá a data nova e envia.
+                              <RowAction label={`Renovar o ${q.code} (nova validade)`} onClick={() => setRenewing(q)}>
+                                <CalendarClock className="size-4" />
+                              </RowAction>
+                            ) : q.status === "sent" && q.link ? (
                               <RowAction label={`Link do ${q.code} para o cliente`} onClick={() => setSharing(q)}>
                                 <Share2 className="size-4" />
                               </RowAction>
@@ -499,9 +553,10 @@ function QuoteList() {
                               >
                                 <Send className="size-4" />
                               </RowAction>
-                            ) : q.status === "expired" ? (
-                              <RowAction label={`Renovar o ${q.code} (nova validade)`} onClick={() => setRenewing(q)}>
-                                <CalendarClock className="size-4" />
+                            ) : (q.status === "approved" || q.status === "rejected") && q.link ? (
+                              // Já respondido: o link mostra ao cliente o documento com a decisão.
+                              <RowAction label={`Link do ${q.code} (já respondido)`} onClick={() => setSharing(q)}>
+                                <Link2 className="size-4" />
                               </RowAction>
                             ) : (
                               <span className="size-8" aria-hidden />
@@ -533,19 +588,20 @@ function QuoteList() {
             setOpened(null);
             setEditing(openedQuote);
           }}
-          onSend={() => {
-            // Vencido não volta só reenviando: precisa de validade nova.
-            if (openedQuote.status === "expired") {
-              setOpened(null);
-              setRenewing(openedQuote);
-            } else {
-              send.mutate(openedQuote);
-            }
+          // Validade vencida: a visualização oferece "Renovar" no lugar de enviar (o envio seria recusado).
+          onRenew={() => {
+            setOpened(null);
+            setRenewing(openedQuote);
           }}
+          onSend={() => send.mutate(openedQuote)}
           sending={send.isPending}
           onShare={() => {
             setOpened(null);
             setSharing(openedQuote);
+          }}
+          onDuplicate={() => {
+            setOpened(null);
+            setCreating({ ticket: ticketOf(openedQuote), prefill: duplicateOf(openedQuote) });
           }}
         />
       ) : null}
@@ -554,8 +610,10 @@ function QuoteList() {
           ticket={ticketOf(editing)}
           quote={editing}
           onClose={() => setEditing(null)}
-          onSaved={(saved) => {
+          onSaved={(saved, sending) => {
             refresh(editing.ticket_id);
+            // "Salvar e enviar": o envio abre o link do cliente em seguida.
+            if (sending) return;
             toast({
               title: `${saved.code} salvo`,
               description: editing.status === "sent" ? "Envie de novo para o cliente responder a versão nova." : undefined,
@@ -564,6 +622,7 @@ function QuoteList() {
             // Volta para a visualização: dali já dá para enviar ao cliente.
             setOpened({ ...editing, ...saved });
           }}
+          onSend={(saved) => send.mutate({ ...editing, ...saved })}
         />
       ) : null}
       {sharingQuote ? (
@@ -582,7 +641,11 @@ function QuoteList() {
             const quote = renewing;
             setRenewing(null);
             refresh(quote.ticket_id);
-            toast({ title: `${saved.code} renovado e enviado`, description: "O link é o mesmo: mande de novo para o cliente.", tone: "success" });
+            toast({
+              title: `${saved.code} renovado e enviado`,
+              description: sentBefore(quote) ? "O link é o mesmo: mande de novo para o cliente." : "Mande o link para o cliente.",
+              tone: "success",
+            });
             setSharing({ ...quote, ...saved });
           }}
         />
@@ -592,31 +655,36 @@ function QuoteList() {
           onClose={() => setPicking(false)}
           onPick={(ticket) => {
             setPicking(false);
-            setCreatingFor(ticket);
+            setCreating({ ticket });
           }}
         />
       ) : null}
-      {creatingFor ? (
+      {creating ? (
         <QuoteEditor
-          ticket={creatingFor}
+          ticket={creating.ticket}
           quote={null}
-          onClose={() => setCreatingFor(null)}
-          onSaved={(saved) => {
-            refresh(creatingFor.id);
+          prefill={creating.prefill}
+          onClose={() => setCreating(null)}
+          onSaved={(saved, sending) => {
+            refresh(creating.ticket.id);
+            if (sending) return;
             toast({ title: `${saved.code} criado`, description: "Confira e envie ao cliente.", tone: "success" });
-            setOpened({ ...saved, ticket_code: creatingFor.code, customer: creatingFor.customer?.name ?? null });
+            setOpened(rowOf(saved, creating.ticket));
           }}
+          onSend={(saved) => send.mutate(rowOf(saved, creating.ticket))}
         />
       ) : null}
     </>
   );
 }
 
-/** Orçamento vencido sem resposta: nova validade e reenvio com o mesmo link. */
+/** Orçamento com a validade vencida: data nova e envio (quem já tinha o link continua com o mesmo). */
 function RenewDialog({ quote, onClose, onDone }: { quote: QuoteListRow; onClose: () => void; onDone: (saved: Quote) => void }) {
-  const [date, setDate] = useState(() => addDaysISO(QUOTE_VALID_DAYS));
-  const today = localDateISO();
+  // A validade é dia do calendário no fuso da operação, como a API confere.
+  const today = todayISO();
+  const [date, setDate] = useState(() => shiftDays(today, QUOTE_VALID_DAYS));
   const valid = /^\d{4}-\d{2}-\d{2}$/.test(date) && date >= today;
+  const wasSent = sentBefore(quote);
   const renew = useMutation({
     mutationFn: async () => {
       // Salvar volta o orçamento a rascunho com a validade nova; o envio o devolve ao cliente.
@@ -643,13 +711,20 @@ function RenewDialog({ quote, onClose, onDone }: { quote: QuoteListRow; onClose:
       open
       onClose={onClose}
       title={`Renovar o ${quote.code}`}
-      description={`Venceu${quote.valid_until ? ` em ${formatDate(quote.valid_until)}` : ""} sem resposta. Com a validade nova, ele volta para o cliente no mesmo link.`}
+      description={
+        wasSent
+          ? `Venceu${quote.valid_until ? ` em ${formatDate(quote.valid_until)}` : ""} sem resposta. Com a validade nova, ele volta para o cliente no mesmo link.`
+          : `A validade${quote.valid_until ? ` (${formatDate(quote.valid_until)})` : ""} passou antes do envio. Com a data nova, ele vai para o cliente.`
+      }
+      busy={renew.isPending}
       footer={
         <>
-          <Button onClick={onClose}>Cancelar</Button>
+          <Button onClick={onClose} disabled={renew.isPending}>
+            Cancelar
+          </Button>
           <Button type="submit" form="renew-quote" variant="primary" disabled={!valid} loading={renew.isPending}>
-            <Send className="size-4" />
-            Renovar e enviar
+            {renew.isPending ? null : <Send className="size-4" />}
+            {wasSent ? "Renovar e reenviar" : "Renovar e enviar"}
           </Button>
         </>
       }
@@ -681,7 +756,7 @@ function PickTicketDialog({ onClose, onPick }: { onClose: () => void; onPick: (t
   const ready = q.length >= 2 || /^\d+$/.test(q);
   const results = useQuery({
     queryKey: ["quote-ticket-search", q],
-    queryFn: () => api.get<Page<TicketListItem>>("/tickets", { q, page_size: 8 }),
+    queryFn: ({ signal }) => api.get<Page<TicketListItem>>("/tickets", { q, page_size: 8 }, { signal }),
     enabled: ready,
     placeholderData: keepPreviousData,
   });
@@ -700,7 +775,7 @@ function PickTicketDialog({ onClose, onPick }: { onClose: () => void; onPick: (t
         {!ready ? (
           <p className="py-2 text-sm text-ink-muted">Digite o número da OS ou pelo menos 2 letras.</p>
         ) : results.error ? (
-          <ErrorBox message={errorMessage(results.error)} />
+          <ErrorBox message={errorMessage(results.error)} onRetry={() => void results.refetch()} />
         ) : results.isLoading ? (
           <LoadingBlock rows={2} />
         ) : items.length === 0 ? (
@@ -712,26 +787,33 @@ function PickTicketDialog({ onClose, onPick }: { onClose: () => void; onPick: (t
               results.isPlaceholderData && "opacity-60",
             )}
           >
-            {items.map((t) => (
-              <li key={t.id}>
-                <button
-                  type="button"
-                  onClick={() => onPick({ id: t.id, code: t.code, title: t.title, customer: t.customer })}
-                  className="flex w-full items-start justify-between gap-3 px-3 py-2.5 text-left transition-colors hover:bg-[var(--row-hover)] focus-visible:bg-[var(--row-hover)] focus-visible:outline-none"
-                >
-                  <span className="min-w-0">
-                    <span className="block font-mono text-xs text-ink-subtle">{t.code}</span>
-                    <span className="block truncate text-sm font-semibold text-ink">{t.title}</span>
-                    <span className="block truncate text-xs text-ink-muted">
-                      {[t.customer?.name, t.location?.name].filter(Boolean).join(" · ") || "Sem cliente"}
+            {items.map((t) => {
+              // A API recusa orçamento em OS cancelada: ela aparece, mas não dá para escolher.
+              const cancelled = t.status === "cancelled";
+              return (
+                <li key={t.id}>
+                  <button
+                    type="button"
+                    disabled={cancelled}
+                    onClick={() => onPick({ id: t.id, code: t.code, title: t.title, customer: t.customer })}
+                    className="flex w-full items-start justify-between gap-3 px-3 py-2.5 text-left transition-colors hover:bg-[var(--row-hover)] focus-visible:bg-[var(--row-hover)] focus-visible:outline-none disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                  >
+                    <span className="min-w-0">
+                      <span className="block font-mono text-xs text-ink-subtle">{t.code}</span>
+                      <span className="block truncate text-sm font-semibold text-ink">{t.title}</span>
+                      <span className="block truncate text-xs text-ink-muted">
+                        {cancelled
+                          ? "OS cancelada: reabra a OS para fazer orçamento"
+                          : [t.customer?.name, t.location?.name].filter(Boolean).join(" · ") || "Sem cliente"}
+                      </span>
                     </span>
-                  </span>
-                  <Pill color={STATUS[t.status].color} className="shrink-0">
-                    {STATUS[t.status].label}
-                  </Pill>
-                </button>
-              </li>
-            ))}
+                    <Pill color={STATUS[t.status].color} className="shrink-0">
+                      {STATUS[t.status].label}
+                    </Pill>
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>
@@ -745,7 +827,7 @@ function Catalog() {
   const term = useDebounced(normalize(search.trim()), 200);
   const [active, setActive] = useState<"active" | "inactive" | "all">("active");
   const [kind, setKind] = useState<QuoteItemKind | "">("");
-  const items = useQuery({ queryKey: ["quote-items"], queryFn: () => api.get<QuoteCatalogItem[]>("/quote-items") });
+  const items = useQuery({ queryKey: ["quote-items"], queryFn: ({ signal }) => api.get<QuoteCatalogItem[]>("/quote-items", undefined, { signal }) });
   const list = items.data;
   const activeCount = useMemo(() => (list ?? []).filter((i) => i.is_active).length, [list]);
   const visible = useMemo(
@@ -809,7 +891,7 @@ function Catalog() {
         <LoadingBlock />
       ) : items.error ? (
         <div className="p-4">
-          <ErrorBox message={errorMessage(items.error)} />
+          <ErrorBox message={errorMessage(items.error)} onRetry={() => void items.refetch()} />
         </div>
       ) : visible.length === 0 ? (
         <EmptyState
@@ -830,7 +912,7 @@ function Catalog() {
           }
         />
       ) : (
-        <Table>
+        <Table label="Itens e preços">
           <thead>
             <tr>
               <Th>Item</Th>

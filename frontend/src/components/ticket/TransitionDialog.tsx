@@ -38,6 +38,8 @@ export interface TransitionTarget {
   forms?: TicketForm[];
   signature_required?: boolean;
   signed_at?: string | null;
+  /** Só o detalhe tem: os destinos que a API aceita agora (avisa quando a OS mudou por fora). */
+  allowed_transitions?: TicketStatus[];
 }
 
 /** Texto do destino quando o de STATUS não diz o que acontece com a OS. */
@@ -52,7 +54,7 @@ const WHAT_HAPPENS: Partial<Record<TicketStatus, string>> = {
  * navegador nunca vai junto (o ponto de GPS da OS é a prova de presença do técnico, pelo app).
  */
 export function TransitionDialog({
-  ticket,
+  ticket: given,
   to,
   onClose,
   onOpenForms,
@@ -65,6 +67,10 @@ export function TransitionDialog({
 }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  // A OS mais nova que se conhece: a recebida (o editor passa a OS ao vivo) ou a relida depois de um
+  // 409 (o quadro passa a cópia da lista, que não se atualiza sozinha). O que foi digitado fica.
+  const [latest, setLatest] = useState<TicketDetail | null>(null);
+  const ticket: TransitionTarget = latest && latest.version > given.version ? latest : given;
   const req = transitionRequirements(to);
   const [note, setNote] = useState("");
   const [resolution, setResolution] = useState(ticket.resolution_notes ?? "");
@@ -86,7 +92,9 @@ export function TransitionDialog({
   const closing = (to === "resolved" || to === "closed") && ticket.status !== "resolved" && ticket.status !== "closed";
   const pendingForms = closing ? (ticket.forms ?? []).filter((f) => f.required && f.status !== "completed").map((f) => f.name) : [];
   const missingSignature = closing && Boolean(ticket.signature_required) && !ticket.signed_at;
-  const blocked = pendingForms.length > 0 || missingSignature;
+  // A OS mudou por fora (ex.: o técnico concluiu no app) e este destino não vale mais.
+  const gone = Boolean(ticket.allowed_transitions && !ticket.allowed_transitions.includes(to));
+  const blocked = pendingForms.length > 0 || missingSignature || gone;
   // Sem técnico, quem confirma (analista) vira o responsável pela visita.
   const selfAssign = STATUS[to].requiresAssignee && !ticket.assignee;
 
@@ -126,14 +134,11 @@ export function TransitionDialog({
         return;
       }
       if (isVersionConflict(error)) {
-        queryClient.invalidateQueries({ queryKey: ["ticket", ticket.id] });
-        queryClient.invalidateQueries({ queryKey: ["tickets"] });
-        toast({
-          title: "A OS foi alterada por outra pessoa",
-          description: "Recarregamos os dados. Confira o status atual e tente de novo.",
-          tone: "error",
-        });
-        onClose();
+        // Relê a OS (o próximo envio vai com a versão nova) e o diálogo fica aberto com o que foi digitado.
+        void queryClient.invalidateQueries({ queryKey: ["tickets"] });
+        void queryClient
+          .fetchQuery({ queryKey: ["ticket", given.id], queryFn: () => api.get<TicketDetail>(`/tickets/${given.id}`), staleTime: 0 })
+          .then(setLatest, () => undefined);
       }
     },
   });
@@ -141,19 +146,30 @@ export function TransitionDialog({
   function submit(e: React.FormEvent) {
     e.preventDefault();
     setLocalError(null);
-    if (blocked) return;
+    if (blocked || mutation.isPending) return;
     if (req.needsSchedule && !start) return setLocalError("Informe a data e hora da visita.");
     if (req.needsResolution && !resolution.trim()) return setLocalError("Descreva a solução aplicada.");
     if (req.needsNote && !note.trim()) return setLocalError("Informe o motivo.");
     mutation.mutate();
   }
 
-  const error = localError ?? (mutation.error && !conflicts ? errorMessage(mutation.error) : null);
+  const error =
+    localError ??
+    (mutation.error && !conflicts
+      ? isVersionConflict(mutation.error)
+        ? "A OS mudou enquanto isso (outra pessoa ou o app do técnico). Atualizamos os dados: confira e confirme de novo."
+        : errorMessage(mutation.error)
+      : null);
+
+  // Texto digitado (motivo, solução): o Esc ou o clique fora perguntam antes de descartar.
+  const typed = Boolean(note.trim()) || (req.needsResolution && resolution.trim() !== (given.resolution_notes ?? "").trim());
 
   return (
     <Dialog
       open
       onClose={onClose}
+      dirty={typed}
+      busy={mutation.isPending}
       title={TRANSITION_ACTION[to]}
       description={
         <span className="flex flex-wrap items-center gap-1.5">
@@ -180,7 +196,15 @@ export function TransitionDialog({
     >
       <form id="transition-form" onSubmit={submit} className="flex flex-col gap-4">
         <p className="text-sm text-ink-muted">{WHAT_HAPPENS[to] ?? STATUS[to].description}</p>
-        {blocked ? (
+        {gone ? (
+          <p
+            role="alert"
+            className="flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200"
+          >
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+            A OS mudou para {STATUS[ticket.status].label} enquanto isso: esta mudança não vale mais. Volte e confira a situação atual.
+          </p>
+        ) : blocked ? (
           <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200">
             <p className="flex items-center gap-1.5 font-semibold">
               <ClipboardList className="size-4 shrink-0" />
@@ -190,14 +214,14 @@ export function TransitionDialog({
               {pendingForms.map((name) => (
                 <li key={name}>Formulário obrigatório: {name}</li>
               ))}
-              {missingSignature ? <li>Assinatura do responsável no local</li> : null}
+              {missingSignature ? <li>Assinatura do responsável no local (o técnico colhe no app, depois dos formulários)</li> : null}
             </ul>
-            {onOpenForms && pendingForms.length ? (
-              <button type="button" onClick={onOpenForms} className="mt-1.5 text-xs font-semibold underline underline-offset-2">
-                Preencher na aba Formulários
+            {onOpenForms ? (
+              <button type="button" onClick={onOpenForms} className="mt-1.5 text-xs font-semibold underline underline-offset-2 hover:no-underline">
+                Abrir a aba Formulários
               </button>
             ) : (
-              <p className="mt-1.5 text-xs">Preencha na aba Formulários da OS.</p>
+              <p className="mt-1.5 text-xs">Confira na aba Formulários da OS.</p>
             )}
           </div>
         ) : null}

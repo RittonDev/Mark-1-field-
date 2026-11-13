@@ -12,7 +12,8 @@ preciso, e um vazamento do banco não entrega links válidos.
 
 Nada interno entra no relatório: acompanhamentos, apontamentos, custos, orçamentos, notas,
 motivos de violação e eventos internos ficam de fora (inclusive a foto do comprovante de um
-custo extra, que é um anexo da OS).
+custo extra, que é um anexo da OS). As fotos que o próprio cliente mandou pelo portal (o
+problema) também não entram: as evidências são do atendimento.
 """
 
 import uuid
@@ -25,7 +26,7 @@ from sqlalchemy.orm.attributes import set_committed_value
 
 from app.core import links
 from app.core.config import settings
-from app.core.enums import TicketEventType, TicketStatus
+from app.core.enums import TicketEventType, TicketStatus, UserRole
 from app.core.security import create_download_token
 from app.db.base import utcnow
 from app.models import Ticket, TicketAttachment, TicketEvent, TicketExpense, User
@@ -287,6 +288,8 @@ async def build(db: AsyncSession, ticket: Ticket, base_url: str) -> PublicReport
             signature_att = att
         elif att.id in receipts:
             continue
+        elif att.uploaded_by is not None and att.uploaded_by.role == UserRole.REQUESTER:
+            continue  # foto do problema mandada pelo cliente no portal: não é evidência da visita
         elif att.form_id is not None and att.field_id:
             by_field.setdefault((att.form_id, att.field_id), []).append(att)
         elif att.kind == "photo" and att.form_id is None:

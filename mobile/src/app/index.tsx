@@ -16,9 +16,10 @@ import { TabBar } from "../components/TabBar";
 import { Text } from "../components/Text";
 import { TicketCard, TimelineRow } from "../components/TicketCard";
 import { EmptyState, SectionTitle } from "../components/ui";
+import { consentPromptDue, markConsentPrompted } from "../lib/account";
 import { ensurePushRegistration } from "../lib/auth";
 import { useLiveQuery, useNow } from "../lib/changes";
-import { getKv, listNotices, listTickets, setKv } from "../lib/db";
+import { listNotices, listTickets } from "../lib/db";
 import { arrivalUrgency } from "../lib/field";
 import { addDays, formatDay, formatTime, initials, startOfDay } from "../lib/format";
 import { buildLists, ticketsOnDay, waitingReason } from "../lib/lists";
@@ -40,8 +41,6 @@ const TAB_TITLE: Record<Exclude<Tab, "today">, string> = {
 
 /** A lista do dia volta no máximo 7 dias: antes disso o aparelho pode não ter as OS (pull inicial de 7 dias). */
 const MIN_DAY_OFFSET = -7;
-/** Dia em que o termo de localização foi oferecido sozinho (no máximo uma vez por dia). */
-const CONSENT_PROMPT_KEY = "consent_prompt_day";
 /** Tempo máximo esperando os ganhos no "puxar para atualizar". */
 const EARNINGS_REFRESH_TIMEOUT_MS = 25_000;
 
@@ -50,10 +49,6 @@ const countLabel = (n: number) => (n === 1 ? "1 OS" : `${n} OS`);
 function greetingFor(date: Date) {
   const hour = date.getHours();
   return hour < 12 ? "Bom dia" : hour < 18 ? "Boa tarde" : "Boa noite";
-}
-
-function localDayKey(date: Date) {
-  return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
 }
 
 /**
@@ -72,13 +67,15 @@ function HomeEmpty({
   onAgenda: () => void;
 }) {
   const sync = useSyncStatus();
+  const offline = sync.network === "offline";
   const neverSynced = !hasTickets && !sync.lastSyncAt;
-  const serverTrouble = sync.network !== "offline" && (sync.server === "unreachable" || Boolean(sync.lastError));
-  // Primeiro download: o banco local responde vazio na hora; o esqueleto fica até a primeira rodada.
-  if (variant === "today" && neverSynced && sync.syncing) return <TicketListSkeleton />;
+  const serverTrouble = !offline && (sync.server === "unreachable" || Boolean(sync.lastError));
+  // Primeira carga: o banco local responde vazio na hora enquanto a rodada (silenciosa, sem a faixa
+  // acesa) ainda baixa as OS. O esqueleto fica até ela terminar, dar erro ou faltar internet.
+  if (variant === "today" && neverSynced && !offline && !serverTrouble) return <TicketListSkeleton />;
   const syncText =
-    neverSynced && sync.network === "offline"
-      ? "Conecte o aparelho à internet para baixar suas OS pela primeira vez."
+    neverSynced && offline
+      ? "Sem internet. Conecte o aparelho para baixar suas OS."
       : serverTrouble
         ? "Não deu para falar com o servidor. Puxe a tela para baixo para tentar de novo."
         : neverSynced
@@ -146,8 +143,9 @@ export default function MyTicketsScreen() {
     return () => clearTimeout(id);
   }, [loaded, intro]);
 
-  // LGPD: sem aceite, o termo de localização abre sozinho no máximo uma vez por dia (dá para adiar).
-  // O pedido de notificações vem depois do termo (ao fechá-lo), nunca junto com o de localização.
+  // LGPD: sem aceite, o termo de localização abre sozinho no máximo uma vez por dia (dá para adiar; quem
+  // retirou o aceite não recebe de novo). O pedido de notificações vem depois do termo (ao fechá-lo),
+  // nunca junto com o de localização.
   useEffect(() => {
     if (!userId) return;
     let alive = true;
@@ -156,11 +154,10 @@ export default function MyTicketsScreen() {
         await ensurePushRegistration();
         return;
       }
-      const today = localDayKey(new Date());
-      const last = await getKv(CONSENT_PROMPT_KEY).catch(() => null);
+      const due = await consentPromptDue();
       if (!alive) return;
-      if (last !== today && shouldPromptConsent()) {
-        await setKv(CONSENT_PROMPT_KEY, today).catch(() => undefined);
+      if (due && shouldPromptConsent()) {
+        await markConsentPrompted();
         router.push("/termo-rastreamento");
       } else {
         await ensurePushRegistration();
@@ -220,8 +217,10 @@ export default function MyTicketsScreen() {
   async function refresh() {
     setRefreshing(true);
     try {
+      // Sem Wi-Fi e sem dados não há o que tentar. Com rede de alcance incerto (o teste de internet do
+      // sistema falha em algumas redes), tenta assim mesmo: o pedido do técnico vale a tentativa.
       const net = await NetInfo.fetch();
-      if (net.isConnected === false || net.isInternetReachable === false) {
+      if (net.isConnected === false) {
         showToast("Sem internet", { description: "Mostrando o que está no aparelho." });
         return;
       }
@@ -232,9 +231,9 @@ export default function MyTicketsScreen() {
           setTimeout(resolve, EARNINGS_REFRESH_TIMEOUT_MS);
         });
         setEarningsKey((k) => k + 1);
-        await Promise.all([requestSync(), settled]);
+        await Promise.all([requestSync({ manual: true }), settled]);
       } else {
-        await requestSync();
+        await requestSync({ manual: true });
       }
     } finally {
       setRefreshing(false);
@@ -242,6 +241,8 @@ export default function MyTicketsScreen() {
   }
 
   function changeTab(next: Tab) {
+    // Saiu de Ganhos no meio do "puxar para atualizar": o indicador não fica girando nas outras abas.
+    settleEarnings();
     setTab(next);
     listRef.current?.scrollToOffset({ offset: 0, animated: false });
   }

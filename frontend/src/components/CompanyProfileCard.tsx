@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Save } from "lucide-react";
 import Image from "next/image";
 import { useId, useState } from "react";
-import { FieldError, useBeforeUnload } from "@/components/settings/shared";
+import { FieldError, useLeaveGuard } from "@/components/settings/shared";
 import { useToast } from "@/components/Toaster";
 import { Button, Card, CardHeader, ErrorBox, Field, Input, LoadingBlock } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
@@ -90,7 +90,7 @@ function ProfileForm({ initial, readOnly }: { initial: CompanyProfile; readOnly:
       website: f.website.trim(),
     });
   const dirty = normalized(form) !== normalized(start);
-  useBeforeUnload(dirty && !readOnly);
+  useLeaveGuard(dirty && !readOnly, "Os dados da empresa alterados ainda não foram salvos.");
 
   const save = useMutation({
     mutationFn: () =>

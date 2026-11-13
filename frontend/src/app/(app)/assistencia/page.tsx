@@ -4,7 +4,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 import { Camera, PackageSearch, Pencil, Plus, Search, SquarePen, TriangleAlert, X } from "lucide-react";
 import { useId, useState } from "react";
-import { useConfirm } from "@/components/Confirm";
 import { LocationPicker } from "@/components/LocationPicker";
 import { useToast } from "@/components/Toaster";
 import { isPlainClick, TicketLink } from "@/components/ticket/TicketLink";
@@ -683,7 +682,6 @@ function FieldError({ children }: { children: React.ReactNode }) {
 function RepairForm({ repair, vendors, onClose }: { repair: Repair | null; vendors: string[]; onClose: () => void }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const confirm = useConfirm();
   const ids = useId();
   const customers = useCustomers();
   const [initial] = useState(() => repairForm(repair));
@@ -732,22 +730,6 @@ function RepairForm({ repair, vendors, onClose }: { repair: Repair | null; vendo
     },
   });
 
-  const requestClose = async () => {
-    if (
-      dirty &&
-      !(await confirm({
-        title: "Descartar alterações?",
-        description: "O que você preencheu nesta retirada não será salvo.",
-        tone: "danger",
-        confirmLabel: "Descartar",
-        cancelLabel: "Continuar editando",
-      }))
-    ) {
-      return;
-    }
-    onClose();
-  };
-
   const pickStore = (location: Location | null) => {
     setPicked(location);
     setForm((f) => ({ ...f, location_id: location?.id ?? "", customer_id: location ? location.customer_id : f.customer_id }));
@@ -765,12 +747,17 @@ function RepairForm({ repair, vendors, onClose }: { repair: Repair | null; vendo
     <Dialog
       open
       size="lg"
-      onClose={() => void requestClose()}
+      onClose={onClose}
+      // Clique fora, Esc ou o X com algo preenchido perguntam antes de descartar; salvando, não fecha.
+      dirty={dirty}
+      busy={save.isPending}
       title={repair ? `Editar ${repair.code}` : "Registrar retirada de equipamento"}
       description={repair ? undefined : "O equipamento que o técnico trouxe do cliente para consertar fora."}
       footer={
         <>
-          <Button onClick={() => void requestClose()}>Cancelar</Button>
+          <Button onClick={onClose} disabled={save.isPending}>
+            Cancelar
+          </Button>
           <Button variant="primary" type="submit" form="repair-form" loading={save.isPending}>
             Salvar
           </Button>
@@ -812,31 +799,29 @@ function RepairForm({ repair, vendors, onClose }: { repair: Repair | null; vendo
                 ))}
               </Select>
             </Field>
-            {/* Loja e OS são buscas (com botões e listas): rótulo fora de <label>, ligado ao grupo. */}
-            <div
-              className="flex flex-col gap-1.5 sm:col-span-2"
-              onKeyDown={(e) => {
-                // Enter na busca da loja escolhe/busca; não envia o formulário da retirada.
-                if (e.key === "Enter" && e.target instanceof HTMLInputElement) e.preventDefault();
-              }}
-            >
+            {/* Loja e OS são buscas (com botões e listas): rótulo fora de <label>, ligado ao campo pelo id.
+                O Enter na busca da loja escolhe a loja e não envia o formulário. */}
+            <div className="flex flex-col gap-1.5 sm:col-span-2">
               <span id={`${ids}-store`} className="text-xs font-semibold text-ink/80">
                 Loja
               </span>
-              <div role="group" aria-labelledby={`${ids}-store`}>
-                {form.location_id && !store ? (
-                  storeQuery.error ? (
-                    <ErrorBox message={errorMessage(storeQuery.error)} />
-                  ) : (
-                    <p className="flex h-9 items-center gap-2 text-sm text-ink-muted">
-                      <Spinner className="size-4" />
-                      Carregando a loja...
-                    </p>
-                  )
+              {form.location_id && !store ? (
+                storeQuery.error ? (
+                  <ErrorBox message={errorMessage(storeQuery.error)} onRetry={() => void storeQuery.refetch()} />
                 ) : (
-                  <LocationPicker customerId={form.customer_id || null} value={store} onChange={pickStore} />
-                )}
-              </div>
+                  <p className="flex h-9 items-center gap-2 text-sm text-ink-muted">
+                    <Spinner className="size-4" />
+                    Carregando a loja...
+                  </p>
+                )
+              ) : (
+                <LocationPicker
+                  customerId={form.customer_id || null}
+                  value={store}
+                  onChange={pickStore}
+                  labelledBy={`${ids}-store`}
+                />
+              )}
             </div>
             <div className="flex flex-col gap-1.5 sm:col-span-2">
               <span id={`${ids}-ticket`} className="text-xs font-semibold text-ink/80">

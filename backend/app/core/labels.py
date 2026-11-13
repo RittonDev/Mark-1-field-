@@ -35,6 +35,7 @@ SOURCE_LABELS = {
     TicketSource.PHONE: "Telefone",
     TicketSource.WHATSAPP: "WhatsApp",
     TicketSource.MONITORING: "Monitoramento",
+    TicketSource.PORTAL: "Portal do cliente",
 }
 
 ASSET_TYPE_LABELS = {

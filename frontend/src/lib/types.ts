@@ -963,6 +963,8 @@ export interface FormTemplate {
   version: number;
   created_at: ISODate;
   updated_at: ISODate;
+  /** Só ao salvar com `apply_to_pending=true`: quantas OS (formulário ainda não começado) receberam a versão nova. */
+  applied_to?: number | null;
 }
 
 export type FormStatus = "pending" | "in_progress" | "completed";
@@ -972,6 +974,8 @@ export interface TicketForm {
   id: UUID;
   ticket_id: UUID;
   template_id: UUID | null;
+  /** Versão do modelo que esta OS usa (o modelo pode ter sido corrigido depois de anexar). */
+  template_version?: number;
   name: string;
   fields: FormField[];
   required: boolean;
@@ -1085,6 +1089,18 @@ export interface Quote {
 export interface QuoteListRow extends Quote {
   ticket_code: string;
   customer: string | null;
+  /** Local (loja) da OS do orçamento. */
+  location?: string | null;
+}
+
+export interface QuoteStatusTotal {
+  count: number;
+  total: number;
+}
+
+/** GET /quotes/summary: quantidade e valor por situação, somados no banco (não dependem do limite da lista). */
+export interface QuoteSummary {
+  by_status: Record<QuoteStatus, QuoteStatusTotal>;
 }
 
 export interface QuoteCatalogItem {
@@ -1163,8 +1179,12 @@ export interface Project {
     tickets_total: number;
     tickets_open: number;
     tickets_done: number;
+    /** Canceladas: contam no total, não no progresso. */
+    tickets_cancelled?: number;
     unproductive: number;
     expenses_total: number;
+    /** Valores dos técnicos nas OS do projeto (entram na margem). */
+    payouts_total?: number;
     quotes_approved_total: number;
     progress: number;
   };
@@ -1210,6 +1230,8 @@ export interface Repair {
   events: { id: UUID; from_status: RepairStatus | null; to_status: RepairStatus; note: string | null; actor: Ref | null; created_at: ISODate }[];
   photos: { id: UUID; caption: string | null; created_at: ISODate; url: string }[];
   allowed_next: RepairStatus[];
+  /** Para onde "Voltar etapa" leva (etapa clicada por engano; pede motivo). Só no detalhe. */
+  previous_status?: RepairStatus | null;
   days_open: number;
   days_in_status: number;
   overdue: boolean;
@@ -1507,6 +1529,8 @@ export interface PayoutLine {
   paid_at: ISODate | null;
   /** OS concluída entra no "a pagar"; aberta ainda é previsão. */
   concluded: boolean;
+  /** OS cancelada: o valor pendente não é previsão (só sai se a central decidir pagar). */
+  cancelled?: boolean;
   ticket: {
     id: UUID;
     code: string;
@@ -1523,11 +1547,15 @@ export interface PayoutSummary {
   to_pay: number;
   expected: number;
   paid: number;
+  /** Pendente de OS cancelada (fora do "a pagar" e do "previsto"). */
+  cancelled?: number;
 }
 
 export interface PayoutList {
   items: PayoutLine[];
   summary: PayoutSummary;
+  /** Quantos valores batem com o filtro (a lista vem até o limite; o resumo soma todos). */
+  total_count?: number;
 }
 
 export interface MyEarnings extends PayoutList {
@@ -1570,6 +1598,13 @@ export interface PortalRequestItem {
   cancelled_at: ISODate | null;
 }
 
+/** Arquivo que a empresa do cliente mandou na solicitação (só nome e data). */
+export interface PortalAttachment {
+  id: UUID;
+  filename: string;
+  created_at: ISODate;
+}
+
 export interface PortalRequestDetail extends PortalRequestItem {
   description: string;
   client_reference: string | null;
@@ -1578,6 +1613,10 @@ export interface PortalRequestDetail extends PortalRequestItem {
   report_url: string | null;
   can_cancel: boolean;
   timeline: { status: TicketStatus | "created"; at: ISODate }[];
+  /** Fotos do problema ou PDF que o cliente mandou (POST /portal/requests/{id}/attachments). */
+  attachments?: PortalAttachment[];
+  /** Ainda aceita arquivo (solicitação em aberto e abaixo do limite). */
+  can_attach?: boolean;
 }
 
 // --------------------------------------------------------------------------- relatórios (fechamento do dia e do mês)

@@ -3,7 +3,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeftRight, ExternalLink } from "lucide-react";
 import { useState } from "react";
-import { useConfirm } from "@/components/Confirm";
 import {
   ContactsEditor,
   contactDrafts,
@@ -128,13 +127,19 @@ function checkCoords(latText: string, lonText: string): CoordCheck {
   return result("Fora do Brasil: a latitude vai de -34 a 6 e a longitude de -74 a -28.");
 }
 
-/** Contatos da loja: a lista completa e, se o telefone único (editado à parte) não estiver nela, ele também. */
+/**
+ * Contatos da loja. O telefone único da loja (contact_phone) é o que vai para a OS, então é ele o
+ * principal da lista; gravado à parte (planilha, cadastro antigo) e fora dela, entra também. Assim,
+ * salvar a lista de novo não troca o telefone da OS pelo principal antigo.
+ */
 export function locationContacts(location: Pick<Location, "contacts" | "contact_name" | "contact_phone">): ContactEntry[] {
   const list = location.contacts ?? [];
   const phone = location.contact_phone;
-  if (!phone || list.some((c) => c.kind === "phone" && samePhone(c.value, phone))) return list;
-  const hasPrimary = list.some((c) => c.kind === "phone" && c.primary);
-  return [{ kind: "phone", value: phone, name: location.contact_name, label: null, primary: !hasPrimary }, ...list];
+  if (!phone) return list;
+  const main = list.find((c) => c.kind === "phone" && samePhone(c.value, phone));
+  if (main?.primary) return list;
+  const rest = list.map((c) => (c.kind === "phone" ? { ...c, primary: c === main } : c));
+  return main ? rest : [{ kind: "phone", value: phone, name: location.contact_name, label: null, primary: true }, ...rest];
 }
 
 // ---------------------------------------------------------------- formulário
@@ -236,7 +241,6 @@ export function LocationDialog({
 }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const confirm = useConfirm();
   const customers = useCustomers();
   const [initial] = useState<FormState>(() => initialForm(location, customerId));
   const [form, setForm] = useState<FormState>(initial);
@@ -304,22 +308,6 @@ export function LocationDialog({
     mutation.mutate(changed);
   };
 
-  const requestClose = async () => {
-    if (
-      dirty &&
-      !(await confirm({
-        title: "Descartar alterações?",
-        description: "O que você preencheu neste local não será salvo.",
-        tone: "danger",
-        confirmLabel: "Descartar",
-        cancelLabel: "Continuar editando",
-      }))
-    ) {
-      return;
-    }
-    onClose();
-  };
-
   const onCoordChange = (key: "latitude" | "longitude", value: string) => {
     const pair = coordPair(value);
     if (pair) setForm((f) => ({ ...f, latitude: pair[0], longitude: pair[1] }));
@@ -329,13 +317,18 @@ export function LocationDialog({
   return (
     <Dialog
       open
-      onClose={() => void requestClose()}
+      onClose={onClose}
+      // Clique fora, Esc ou o X com algo preenchido perguntam antes de descartar; salvando, não fecha.
+      dirty={dirty}
+      busy={mutation.isPending}
       size="lg"
       title={editing ? "Editar local" : "Novo local de atendimento"}
       description="Filial, loja ou unidade onde o técnico atende. Pode ter CNPJ próprio."
       footer={
         <>
-          <Button onClick={() => void requestClose()}>Cancelar</Button>
+          <Button onClick={onClose} disabled={mutation.isPending}>
+            Cancelar
+          </Button>
           <Button variant="primary" type="submit" form="location-form" loading={mutation.isPending}>
             Salvar
           </Button>

@@ -36,7 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.enums import TicketStatus, UserRole
 from app.db.base import utcnow
-from app.models import Location, LocationPing, TechnicianShift, Ticket, TicketWorklog, User
+from app.models import Location, Ticket, TicketWorklog, User
 from app.models.ticket import ticket_helpers
 from app.services import geo
 from app.services.errors import NotFound, WorkflowError
@@ -570,22 +570,11 @@ async def proximity(
     )
     history = {row.user_id: row for row in (await db.execute(stmt)).all()}
 
-    on_shift = set(
-        await db.scalars(
-            select(TechnicianShift.user_id).where(
-                TechnicianShift.user_id.in_(ids), TechnicianShift.ended_at.is_(None)
-            )
-        )
-    )
-    pings = {
-        p.user_id: p
-        for p in await db.scalars(
-            select(LocationPing)
-            .where(LocationPing.user_id.in_(ids), LocationPing.recorded_at >= now - LIVE_WINDOW)
-            .distinct(LocationPing.user_id)
-            .order_by(LocationPing.user_id, LocationPing.recorded_at.desc())
-        )
-    }
+    from app.services import tracking  # tracking usa tickets, que usa este módulo
+
+    # Posição ao vivo: só o último ponto da jornada aberta (e dentro do limite dela), como no
+    # mapa. Fora da jornada a posição não existe (termo de ciência, LGPD).
+    pings = await tracking.latest_pings(db, await tracking.active_shifts(db, ids, now))
     target = (point.latitude, point.longitude)
     out: dict[uuid.UUID, Proximity] = {}
     for u in users:
@@ -600,8 +589,12 @@ async def proximity(
             p.visits_in_city = int(row.in_city or 0)
         if geo.valid_coords(u.home_latitude, u.home_longitude):
             p.home_km = km_between((u.home_latitude, u.home_longitude), target)
-        ping = pings.get(u.id) if u.id in on_shift else None
-        if ping is not None and geo.valid_coords(ping.latitude, ping.longitude):
+        ping = pings.get(u.id)
+        if (
+            ping is not None
+            and ping.recorded_at >= now - LIVE_WINDOW
+            and geo.valid_coords(ping.latitude, ping.longitude)
+        ):
             p.live_km = km_between((ping.latitude, ping.longitude), target)
         candidates = [
             (km, kind)
@@ -675,13 +668,9 @@ async def nearby(
                 )
             ).all()
         )
-        on_shift = set(
-            await db.scalars(
-                select(TechnicianShift.user_id).where(
-                    TechnicianShift.user_id.in_(ids), TechnicianShift.ended_at.is_(None)
-                )
-            )
-        )
+        from app.services.tracking import active_shifts  # evita import circular
+
+        on_shift = set(await active_shifts(db, ids))
     from app.services.technicians import avatar_url  # evita import circular
 
     rows = []

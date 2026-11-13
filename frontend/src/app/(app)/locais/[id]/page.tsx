@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
-import { ArrowLeft, ClipboardCopy, Copy, ExternalLink, HardHat, MessageCircle, Pencil, Ticket, TriangleAlert } from "lucide-react";
+import { ArrowLeft, ClipboardCopy, Copy, ExternalLink, HardHat, MessageCircle, Pencil, Plus, Ticket, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
@@ -149,6 +149,13 @@ export default function LocationDetailPage() {
                 <Pencil className="size-4" />
                 Editar
               </Button>
+            ) : null}
+            {/* O pedido chegou no WhatsApp e a loja já está aberta: a Nova OS vem com ela escolhida. */}
+            {canEdit && l.is_active ? (
+              <Link href={`/chamados/novo?location_id=${l.id}`} className={buttonClassName("primary")}>
+                <Plus className="size-4" />
+                Nova OS
+              </Link>
             ) : null}
           </div>
         </div>

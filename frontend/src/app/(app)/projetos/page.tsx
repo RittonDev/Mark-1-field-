@@ -9,11 +9,10 @@ import { Button, Card, EmptyState, ErrorBox, Input, LoadingBlock, PageHeader, Pi
 import { errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canManageTickets } from "@/lib/constants";
-import { formatDate, formatMoney } from "@/lib/format";
+import { formatDate, formatMoney, todayISO } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
-import { PROJECT_STATUS, projectLate, useProjects } from "@/lib/projects";
+import { plannedTickets, PROJECT_STATUS, projectCosts, projectLate, useProjects } from "@/lib/projects";
 import { useCustomers } from "@/lib/queries";
-import { localDateISO } from "@/lib/quotes";
 import type { ProjectStatus } from "@/lib/types";
 
 export default function ProjectsPage() {
@@ -22,8 +21,8 @@ export default function ProjectsPage() {
   const [search, setSearch] = useState("");
   const [customerId, setCustomerId] = useState("");
   const [creating, setCreating] = useState(false);
-  // O dia de hoje no fuso de quem usa (a entrega prevista é um dia do calendário, não um instante).
-  const [today] = useState(() => localDateISO());
+  // Hoje no fuso da operação (a entrega prevista é um dia do calendário, não um instante).
+  const [today] = useState(todayISO);
   const q = useDebounced(search.trim(), 300);
   const customers = useCustomers();
   const projects = useProjects({ status: status || undefined, q, customerId: customerId || null });
@@ -103,9 +102,10 @@ export default function ProjectsPage() {
                     </Pill>
                   </div>
                   <div className="mt-4">
-                    <div className="flex justify-between text-xs text-ink-muted">
+                    <div className="flex justify-between gap-2 text-xs text-ink-muted">
                       <span>
-                        {p.stats.tickets_done} de {p.stats.tickets_total} OS concluídas
+                        {p.stats.tickets_done} de {plannedTickets(p.stats)} OS concluídas
+                        {p.stats.tickets_cancelled ? ` · ${p.stats.tickets_cancelled} ${p.stats.tickets_cancelled === 1 ? "cancelada" : "canceladas"}` : ""}
                       </span>
                       <span className="tabular-nums">{Math.round(p.stats.progress * 100)}%</span>
                     </div>
@@ -120,14 +120,25 @@ export default function ProjectsPage() {
                       <div className="h-full rounded-full bg-brand" style={{ width: `${p.stats.progress * 100}%` }} />
                     </div>
                   </div>
-                  <dl className="mt-4 grid grid-cols-2 gap-2 text-xs">
+                  <dl className="mt-4 grid grid-cols-3 gap-2 text-xs">
                     <div>
-                      <dt className="text-ink-muted">Valor do projeto</dt>
+                      <dt className="text-ink-muted">Valor</dt>
                       <dd className="font-medium text-ink tabular-nums">{p.contract_value != null ? formatMoney(p.contract_value) : "—"}</dd>
                     </div>
+                    <div title="Custos extras lançados nas OS e o valor dos técnicos">
+                      <dt className="text-ink-muted">Custos</dt>
+                      <dd className="font-medium text-ink tabular-nums">{formatMoney(projectCosts(p.stats))}</dd>
+                    </div>
                     <div>
-                      <dt className="text-ink-muted">Custos extras</dt>
-                      <dd className="font-medium text-ink tabular-nums">{formatMoney(p.stats.expenses_total)}</dd>
+                      <dt className="text-ink-muted">Margem</dt>
+                      <dd
+                        className={clsx(
+                          "font-medium tabular-nums",
+                          p.margin != null && p.margin < 0 ? "text-red-600 dark:text-red-400" : "text-ink",
+                        )}
+                      >
+                        {p.margin != null ? formatMoney(p.margin) : "—"}
+                      </dd>
                     </div>
                   </dl>
                   {p.end_date ? (

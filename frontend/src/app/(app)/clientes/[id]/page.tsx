@@ -149,6 +149,13 @@ export default function CustomerDetailPage() {
                 Editar
               </Button>
             ) : null}
+            {/* A Nova OS vem com o cliente escolhido (a loja se busca entre as dele). */}
+            {canEdit && c.is_active ? (
+              <Link href={`/chamados/novo?customer_id=${c.id}`} className={buttonClassName("primary")}>
+                <Plus className="size-4" />
+                Nova OS
+              </Link>
+            ) : null}
           </div>
         </div>
       </Card>

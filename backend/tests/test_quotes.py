@@ -237,7 +237,7 @@ async def test_company_profile_and_public_address(
     assert default["name"] == settings.COMPANY_NAME and default["email"] is None
     profile = {
         "name": "  Maxx Field   Serviços ",
-        "document": "12.345.678/0001-90",
+        "document": "12.345.678/0001-95",
         "email": "atendimento@exemplo.com.br",
         "phone": "(11) 4000-0000",
         "address": "Rua Exemplo, 100 - São Paulo - SP",
@@ -250,8 +250,13 @@ async def test_company_profile_and_public_address(
         f"{API}/settings/company", json={**profile, "email": "sem-arroba"}, headers=sup
     )
     assert bad.status_code == 422
+    bad = await client.put(
+        f"{API}/settings/company", json={**profile, "document": "12.345.678/0001-90"}, headers=sup
+    )
+    assert bad.status_code == 422  # dígitos verificadores errados
     saved = (await client.put(f"{API}/settings/company", json=profile, headers=sup)).json()
     assert (saved["name"], saved["website"]) == ("Maxx Field Serviços", None)
+    assert saved["document"] == "12345678000195"  # guardado sem pontuação
     assert (await client.get(f"{API}/settings/company", headers=an)).json() == saved
 
     # Endereço do local completo (rua, bairro, cidade, UF e CEP) no cartão do orçamento.

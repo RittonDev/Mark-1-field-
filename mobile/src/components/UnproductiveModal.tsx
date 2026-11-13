@@ -107,7 +107,7 @@ export function UnproductiveModal({ ticket, onClose }: { ticket: LocalTicket; on
             title="Baixar agora"
             compact
             loading={sync.syncing}
-            onPress={() => void requestSync()}
+            onPress={() => void requestSync({ manual: true })}
             style={{ alignSelf: "flex-start" }}
           />
         ) : null}
