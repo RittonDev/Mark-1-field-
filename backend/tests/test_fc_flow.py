@@ -454,6 +454,51 @@ async def test_extra_cost_adds_its_tag_once(client: AsyncClient, world: World) -
     assert seen["tags"] == [{"name": "custo extra", "color": None}]
 
 
+async def test_editor_tag_edit_keeps_what_changed_meanwhile(
+    client: AsyncClient, world: World
+) -> None:
+    """O editor estava aberto quando a automação (ou o lote) mudou as etiquetas, sem mudar a
+    versão da OS. Com `tags_base` (o que o editor carregou), a edição vale como diferença."""
+    an = world.analyst.headers
+    night = {"name": "Adicional Noturno", "color": "indigo"}
+    t = await create(client, world, title="Editor aberto", tags=[ONE_OFF])
+    url = f"{API}/tickets/{t['id']}"
+    expense = {"kind": "material", "description": "Cabo de rede", "quantity": 1, "unit_value": "30"}
+    assert (await client.post(f"{url}/expenses", json=expense, headers=an)).status_code == 201
+
+    body = {
+        "tags": [ONE_OFF, night],
+        "tags_base": ["Ticket Avulso"],
+        "expected_version": t["version"],
+    }
+    r = await client.patch(url, json=body, headers=an)
+    assert r.status_code == 200, r.text
+    assert r.json()["tags"] == [ONE_OFF, night, EXTRA_COST]
+    events = (await client.get(f"{url}/events", headers=an)).json()
+    changes = [e["data"]["changes"]["tags"] for e in tag_events(events)]
+    # O histórico da edição parte das etiquetas de agora (com o "Custo Extra").
+    assert [[ONE_OFF, EXTRA_COST], [ONE_OFF, night, EXTRA_COST]] in changes
+
+    # A que o analista tirou sai; a que saiu nesse meio-tempo (técnico pago) não volta; a que
+    # entrou pelo lote fica.
+    b = await create(client, world, title="Outra aberta")
+    lote = {"ids": [b["id"]], "add": [PROJECT], "remove": ["Pendente Envio PGTO"]}
+    assert (await client.post(f"{API}/tickets/bulk-tags", json=lote, headers=an)).status_code == 200
+    body = {
+        "tags": [PENDING_PAYMENT],
+        "tags_base": ["Pendente Envio PGTO", "Ticket Avulso"],
+        "expected_version": b["version"],
+    }
+    r = await client.patch(f"{API}/tickets/{b['id']}", json=body, headers=an)
+    assert r.status_code == 200, r.text
+    assert r.json()["tags"] == [PROJECT]
+
+    # Sem `tags_base`, a lista substitui a da OS (quem chama a API sem o editor).
+    body = {"tags": [ONE_OFF], "expected_version": r.json()["version"]}
+    r = await client.patch(f"{API}/tickets/{b['id']}", json=body, headers=an)
+    assert r.status_code == 200 and r.json()["tags"] == [ONE_OFF]
+
+
 async def test_paying_every_technician_removes_the_pending_payment_tag(
     client: AsyncClient, world: World
 ) -> None:
