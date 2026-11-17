@@ -43,12 +43,15 @@ function FilterField({
  * Tab, fecha com Esc, com o X ou clicando fora, e devolve o foco ao botão que o abriu.
  */
 function Sheet({
+  id,
   title,
   description,
   onClose,
   children,
   footer,
 }: {
+  /** id do painel (o aria-controls do botão que o abre). */
+  id?: string;
   title: string;
   description: string;
   onClose: () => void;
@@ -94,6 +97,7 @@ function Sheet({
       <div className="absolute inset-0 animate-fade bg-[rgb(9_11_15/0.28)]" onClick={onClose} aria-hidden />
       <div
         ref={panel}
+        id={id}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
@@ -137,6 +141,7 @@ const section = "flex flex-col gap-3.5 border-b border-line pb-5 [&:not(:first-c
  * cadastros só carregam com o painel aberto.
  */
 export function MoreFilters({
+  id,
   view,
   filters,
   onChange,
@@ -149,6 +154,8 @@ export function MoreFilters({
   fetching,
   onClose,
 }: {
+  /** id do painel (o aria-controls do botão "Mais filtros"). */
+  id?: string;
   view: View;
   filters: Filters;
   onChange: (patch: Partial<Filters>) => void;
@@ -194,6 +201,7 @@ export function MoreFilters({
 
   return (
     <Sheet
+      id={id}
       title="Mais filtros"
       description="Cada escolha vale na hora: a lista atrás já mostra o resultado."
       onClose={onClose}

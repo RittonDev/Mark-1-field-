@@ -86,7 +86,7 @@ import { dayKey, formatMinutes, formatMoney, formatTime, fromLocalInput, toLocal
 import { useUnsavedChanges } from "@/lib/hooks";
 import { useProjects } from "@/lib/projects";
 import { useAssignable, useCategories, useCustomers } from "@/lib/queries";
-import { useTagRules } from "@/lib/tagRules";
+import { tagRulesQuery } from "@/lib/tagRules";
 import type {
   AssignableUser,
   ConflictItem,
@@ -290,7 +290,12 @@ function NewTicket() {
   const categories = useCategories();
   const assignable = useAssignable(null);
   const projects = useProjects({ enabled: true });
-  const tagRules = useTagRules();
+  // Regras das etiquetas padrão. Sem elas (carregando ou com erro), nada de padrão adivinhado: a OS vai
+  // sem a lista e a API aplica as regras que a gestão configurou.
+  const tagRulesState = useQuery(tagRulesQuery);
+  const tagRules = tagRulesState.data ?? null;
+  const tagRulesLoading = tagRulesState.isPending;
+  const tagRulesFailed = !tagRules && tagRulesState.isError;
   // Tipos gerais + o catálogo do cliente. Ao trocar de cliente, a lista anterior fica até a nova chegar.
   const serviceTypes = useQuery({
     queryKey: ["service-types", f.customer_id, true],
@@ -430,9 +435,10 @@ function NewTicket() {
   // Etiquetas: o padrão (da abertura ou de projeto) até o analista mexer; a lista que aparece é a enviada.
   const tagMode: TagMode = f.project_id ? "project" : "create";
   const defaultTags = (mode: TagMode): Tag[] =>
-    (mode === "project" ? tagRules.rules.on_project : tagRules.rules.on_create).map((t) => ({ name: t.name, color: t.color }));
+    tagRules ? (mode === "project" ? tagRules.on_project : tagRules.on_create).map((t) => ({ name: t.name, color: t.color })) : [];
   const tags: Tag[] = d.tagsAuto ? defaultTags(tagMode) : d.tags;
-  const payoutTags = tags.filter((t) => tagRules.rules.remove_on_payout_paid.some((n) => n.toLowerCase() === t.name.toLowerCase()));
+  const payoutNames = tagRules?.remove_on_payout_paid ?? [];
+  const payoutTags = tags.filter((t) => payoutNames.some((n) => n.toLowerCase() === t.name.toLowerCase()));
 
   // Prazos: o SLA (24x7) conta da abertura. A chegada também, mas com a visita marcada para depois
   // disso vale o horário dela + 30 min (como a API calcula: a visita combinada não nasce atrasada).
@@ -735,7 +741,8 @@ function NewTicket() {
   };
   const openPanel = panel ? (ticketId: UUID) => panel.open(ticketId) : undefined;
 
-  function submit() {
+  /** Cria a OS. `tagsNow`: a lista de etiquetas que acabou de mudar (Ctrl+Enter no campo de etiquetas). */
+  function submit(tagsNow?: Tag[]) {
     if (submitting.current || create.isPending || created) return;
     const first = ERROR_ORDER.find((k) => errors[k]);
     if (first) {
@@ -765,9 +772,10 @@ function NewTicket() {
       assignee_id: f.assignee_id || null,
       helper_ids: d.helperIds,
       scheduled_start: startIso,
-      // A lista que o analista vê (o padrão ou o que ele ajustou), mesmo vazia. Com as regras ainda
-      // carregando, vai sem a lista: a API aplica as mesmas regras (as de projeto, com projeto).
-      tags: d.tagsAuto && tagRules.isLoading ? undefined : tags,
+      // A lista que o analista vê (o padrão ou o que ele ajustou), mesmo vazia. Com o padrão sem as
+      // regras (carregando ou com erro), vai sem a lista: a API aplica as regras configuradas (as de
+      // projeto, com projeto), e não um padrão fixo por cima delas.
+      tags: tagsNow ?? (d.tagsAuto && !tagRules ? undefined : tags),
     };
     if (conflicts) payload.allow_conflict = true;
     // "Assumir" é o padrão: sem owner_id, quem cria leva a OS para a própria fila.
@@ -890,7 +898,11 @@ function NewTicket() {
 
   const tagsHint = (
     <>
-      {d.tagsAuto ? `Padrão para ${tagMode === "project" ? "OS de projeto" : "OS nova"}: tire ou inclua o que precisar.` : "Ajustadas nesta OS."}
+      {d.tagsAuto
+        ? tagRulesFailed
+          ? `A OS sai com as etiquetas padrão para ${tagMode === "project" ? "OS de projeto" : "OS nova"}, definidas pela gestão.`
+          : `Padrão para ${tagMode === "project" ? "OS de projeto" : "OS nova"}: tire ou inclua o que precisar.`
+        : "Ajustadas nesta OS."}
       {payoutTags.length
         ? ` ${quoteList(payoutTags.map((t) => t.name))} ${payoutTags.length === 1 ? "sai sozinha" : "saem sozinhas"} quando o técnico for pago.`
         : null}
@@ -1363,8 +1375,10 @@ function NewTicket() {
                   !d.tagsAuto && d.tagsMode !== tagMode ? (
                     <p className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-ink-muted" role="status">
                       <Lightbulb aria-hidden className="size-3.5 shrink-0 text-ink-subtle" />
-                      {tagMode === "project" ? "A OS agora é de projeto" : "A OS saiu do projeto"}: o padrão é{" "}
-                      {defaultTags(tagMode).length ? quoteList(defaultTags(tagMode).map((t) => t.name)) : "sem etiquetas"}.
+                      {tagMode === "project" ? "A OS agora é de projeto" : "A OS saiu do projeto"}
+                      {tagRules
+                        ? `: o padrão é ${defaultTags(tagMode).length ? quoteList(defaultTags(tagMode).map((t) => t.name)) : "sem etiquetas"}.`
+                        : ": o padrão de etiquetas muda."}
                       <button type="button" onClick={resetTags} className="font-semibold text-brand-ink hover:underline">
                         Usar o padrão
                       </button>
@@ -1372,10 +1386,44 @@ function NewTicket() {
                   ) : null
                 }
               >
-                {d.tagsAuto && tagRules.isLoading ? (
+                {d.tagsAuto && tagRulesLoading ? (
                   <Skeleton className="h-10 w-full rounded-lg" />
+                ) : d.tagsAuto && tagRulesFailed ? (
+                  // Sem as regras não há como mostrar o padrão certo: a API aplica ao criar.
+                  <div
+                    role="status"
+                    className="flex min-h-10 flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-line bg-surface-2 px-3 py-2 text-sm text-ink-muted"
+                  >
+                    <span>As etiquetas padrão serão aplicadas ao criar.</span>
+                    <button
+                      type="button"
+                      onClick={() => void tagRulesState.refetch()}
+                      disabled={tagRulesState.isFetching}
+                      className="font-semibold text-brand-ink hover:underline disabled:cursor-wait disabled:opacity-60"
+                    >
+                      {tagRulesState.isFetching ? "Carregando..." : "Mostrar o padrão"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        // A lista passa a ser a escolhida aqui (começa vazia); o foco vai para o campo.
+                        onTags([]);
+                        window.requestAnimationFrame(() => document.getElementById(`${ids.tags}-campo`)?.focus());
+                      }}
+                      className="font-semibold text-brand-ink hover:underline"
+                    >
+                      Escolher as etiquetas
+                    </button>
+                  </div>
                 ) : (
-                  <TagsInput value={tags} onChange={onTags} labelledBy={ids.tags} describedBy={stepHintId(ids.tags)} />
+                  <TagsInput
+                    value={tags}
+                    onChange={onTags}
+                    onSubmitShortcut={(next) => submit(next)}
+                    inputId={`${ids.tags}-campo`}
+                    labelledBy={ids.tags}
+                    describedBy={stepHintId(ids.tags)}
+                  />
                 )}
               </Step>
             </ol>

@@ -3,6 +3,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Download, Eraser, Tag as TagIcon, X } from "lucide-react";
 import { useId, useMemo, useState } from "react";
+import { BILLING_TAGS } from "@/components/TagChips";
 import { useToast } from "@/components/Toaster";
 import { Button, Dialog } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
@@ -77,6 +78,19 @@ function uniqueTags(tags: Tag[]): Tag[] {
   return out;
 }
 
+/** Etiqueta de cobrança ("Ticket Avulso", "Ticket Contratual"): uma exclui a outra, como no editor da OS. */
+const isBilling = (name: string) => BILLING_TAGS.some((b) => sameTag(b.name, name));
+
+/**
+ * Ao incluir: a etiqueta de cobrança escolhida por último fica e a outra sai da escolha (as duas juntas
+ * não fazem sentido).
+ */
+function keepOneBilling(prev: string[], next: string[]): string[] {
+  const added = next.filter((n) => !prev.some((p) => sameTag(p, n)));
+  const billing = added.find(isBilling);
+  return billing ? next.filter((n) => !isBilling(n) || sameTag(n, billing)) : next;
+}
+
 /**
  * Pôr ou tirar etiquetas das OS marcadas de uma vez (como no Field Control): ex.: tirar "Pendente
  * Envio PGTO" das OS já pagas, pôr "Custo Extra". Cada OS alterada ganha o registro no histórico.
@@ -98,13 +112,18 @@ export function BulkTagsDialog({ mode, tickets, onClose }: { mode: BulkTagMode; 
     () => uniqueTags([...ruleTags.map((t) => withColor(t.name, palette)), ...(known.data ?? [])]).slice(0, 10),
     [ruleTags, palette, known.data],
   );
+  // Incluir uma etiqueta de cobrança tira a outra das OS, como no editor da OS: "Ticket Contratual" entra
+  // no lugar de "Ticket Avulso" (as duas juntas confundem a cobrança e o pagamento do técnico).
+  const billing = adding ? names.find(isBilling) : undefined;
+  const replaced = billing ? BILLING_TAGS.map((b) => b.name).filter((n) => !sameTag(n, billing)) : [];
+  const replacedText = replaced.map((n) => `“${n}”`).join(" e ");
 
   const save = useMutation({
     mutationFn: () =>
       api.post<{ updated: number }>("/tickets/bulk-tags", {
         ids: tickets.map((t) => t.id),
         add: adding ? names.map((n) => withColor(n, palette)) : [],
-        remove: adding ? [] : names,
+        remove: adding ? replaced : names,
       }),
     onSuccess: ({ updated }) => {
       void queryClient.invalidateQueries({ queryKey: ["tickets"] });
@@ -119,7 +138,11 @@ export function BulkTagsDialog({ mode, tickets, onClose }: { mode: BulkTagMode; 
         });
       } else {
         const verb = adding ? (names.length === 1 ? "adicionada em" : "adicionadas em") : names.length === 1 ? "removida de" : "removidas de";
-        toast({ title: `${what} ${verb} ${countOs(updated)}`, tone: "success" });
+        toast({
+          title: `${what} ${verb} ${countOs(updated)}`,
+          description: replaced.length ? `${replacedText} saiu das OS que tinham.` : undefined,
+          tone: "success",
+        });
       }
       onClose();
     },
@@ -135,7 +158,9 @@ export function BulkTagsDialog({ mode, tickets, onClose }: { mode: BulkTagMode; 
       title={adding ? `Adicionar etiqueta em ${countOs(tickets.length)}` : `Remover etiqueta de ${countOs(tickets.length)}`}
       description={
         adding
-          ? "Escolha uma ou mais etiquetas. As OS que já têm a etiqueta ficam como estão."
+          ? billing
+            ? `Escolha uma ou mais etiquetas. “${billing}” entra no lugar de ${replacedText} nas OS que têm.`
+            : "Escolha uma ou mais etiquetas. As OS que já têm a etiqueta ficam como estão."
           : "Marque as etiquetas que saem. As outras etiquetas das OS continuam."
       }
       footer={
@@ -156,7 +181,7 @@ export function BulkTagsDialog({ mode, tickets, onClose }: { mode: BulkTagMode; 
           </span>
           <TagPicker
             value={names}
-            onChange={setNames}
+            onChange={(next) => setNames((prev) => keepOneBilling(prev, next))}
             known={palette}
             suggestions={suggestions}
             labelledBy={labelId}

@@ -137,7 +137,8 @@ export function ExportMenu({
             </button>
           ) : null}
           <p role="presentation" className="border-t border-line px-4 pt-2 pb-1 text-xs text-ink-muted">
-            Planilha CSV que abre no Excel, com as colunas da lista.
+            Planilha CSV que abre no Excel: identificador, etiquetas, agendamento, cliente, local, situação, técnico, tipo, escopo,
+            analista e criação.
           </p>
         </div>
       ) : null}

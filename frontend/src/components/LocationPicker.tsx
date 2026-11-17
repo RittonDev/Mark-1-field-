@@ -88,7 +88,7 @@ export function LocationPicker({
   invalid,
   describedBy,
   required,
-  placeholder = "Buscar loja por nome, código, CNPJ ou cidade",
+  placeholder = "Buscar localização por nome, código, CNPJ ou cidade",
 }: {
   customerId: UUID | null;
   value: Location | null;
@@ -166,13 +166,13 @@ export function LocationPicker({
     ? ""
     : browsing
       ? customerName
-        ? `${customerName} não tem lojas ativas cadastradas.`
-        : "Este cliente não tem lojas ativas cadastradas."
+        ? `${customerName} não tem localizações ativas cadastradas.`
+        : "Este cliente não tem localizações ativas cadastradas."
       : customerId
         ? customerName
-          ? `Nenhuma loja de ${customerName} com “${term}”.`
-          : `Nenhuma loja deste cliente com “${term}”.`
-        : `Nenhuma loja com “${term}”.`;
+          ? `Nenhuma localização de ${customerName} com “${term}”.`
+          : `Nenhuma localização deste cliente com “${term}”.`
+        : `Nenhuma localização com “${term}”.`;
   const actionRows: Row[] = [];
   if (nothingFound && customerId && !browsing && onClearCustomer) {
     actionRows.push({ key: "acao-todos-clientes", action: { label: "Buscar em todos os clientes", icon: Search, run: onClearCustomer } });
@@ -290,7 +290,7 @@ export function LocationPicker({
             focusNext.current = { to: "input" };
             onChange(null);
           }}
-          aria-label={`Trocar a loja ${value.name}`}
+          aria-label={`Trocar a localização ${value.name}`}
         >
           <X aria-hidden className="size-3.5" />
           Trocar
@@ -300,15 +300,15 @@ export function LocationPicker({
   }
 
   // A busca falhou (rede, sessão): diz isso em vez de ficar em "Buscando...".
-  const failure = results.error && !searching && pickRows.length === 0 ? `Não deu para buscar as lojas: ${errorMessage(results.error)}` : "";
+  const failure = results.error && !searching && pickRows.length === 0 ? `Não deu para buscar as localizações: ${errorMessage(results.error)}` : "";
   const status = !open
     ? ""
     : loadingId
-      ? "Carregando a loja..."
+      ? "Carregando a localização..."
       : searching && pickRows.length === 0
         ? "Buscando..."
         : pickRows.length
-          ? `${pickRows.length} ${pickRows.length === 1 ? "loja" : "lojas"} na lista`
+          ? `${pickRows.length} ${pickRows.length === 1 ? "localização" : "localizações"} na lista`
           : failure || emptyText;
 
   const option = (row: Row, i: number) => (
@@ -397,7 +397,7 @@ export function LocationPicker({
         aria-autocomplete="list"
         aria-activedescendant={open && activeIndex >= 0 ? `${listId}-o${activeIndex}` : undefined}
         aria-labelledby={labelledBy}
-        aria-label={labelledBy ? undefined : "Buscar loja"}
+        aria-label={labelledBy ? undefined : "Buscar localização"}
         aria-invalid={invalid || undefined}
         aria-describedby={describedBy}
         aria-required={required || undefined}
@@ -412,7 +412,7 @@ export function LocationPicker({
         <ul
           id={listId}
           role="listbox"
-          aria-label="Lojas"
+          aria-label="Localizações"
           aria-busy={searching || undefined}
           // Clicar em qualquer ponto da lista (título, aviso) não tira o foco da busca.
           onMouseDown={(e) => e.preventDefault()}
@@ -420,11 +420,11 @@ export function LocationPicker({
         >
           {recentRows.length ? heading("Recentes") : null}
           {recentRows.map((row, i) => option(row, i))}
-          {browsing && resultRows.length ? heading(customerName ? `Lojas de ${customerName}` : "Lojas do cliente") : null}
+          {browsing && resultRows.length ? heading(customerName ? `Localizações de ${customerName}` : "Localizações do cliente") : null}
           {resultRows.map((row, i) => option(row, recentRows.length + i))}
           {pickRows.length === 0 ? (
             <li role="presentation" className="px-3 py-2 text-sm text-ink-muted">
-              {browsing && !customerId ? "Digite o nome, o código, o CNPJ ou a cidade da loja." : nothingFound ? emptyText : failure || "Buscando..."}
+              {browsing && !customerId ? "Digite o nome, o código, o CNPJ ou a cidade da localização." : nothingFound ? emptyText : failure || "Buscando..."}
             </li>
           ) : null}
           {actionRows.length ? <li role="presentation" aria-hidden className="mx-3 my-1 border-t border-line" /> : null}
@@ -436,7 +436,7 @@ export function LocationPicker({
           ) : null}
           {more > 0 ? (
             <li role="presentation" className="border-t border-line px-3 py-2 text-xs text-ink-muted">
-              Mais {more.toLocaleString("pt-BR")} {more === 1 ? "loja" : "lojas"}: refine a busca
+              Mais {more.toLocaleString("pt-BR")} {more === 1 ? "localização" : "localizações"}: refine a busca
             </li>
           ) : null}
         </ul>

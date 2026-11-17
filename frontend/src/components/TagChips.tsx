@@ -85,11 +85,13 @@ type Suggestion = { key: string; tag: Tag; isNew: boolean };
  * Etiquetas da OS para editar: as escolhidas (tira com o ×, ou Backspace no campo vazio) e um campo
  * que sugere as já usadas nas OS, com a cor de cada uma (as mais usadas primeiro). Enter inclui a
  * destacada ou cria uma nova com o texto digitado; Enter nunca envia o formulário em volta. "Ticket
- * Avulso" e "Ticket Contratual" se excluem: incluir uma tira a outra.
+ * Avulso" e "Ticket Contratual" se excluem: incluir uma tira a outra. Ctrl+Enter com um nome digitado
+ * inclui a etiqueta e chama `onSubmitShortcut` com a lista já com ela (o formulário salva de uma vez).
  */
 export function TagsInput({
   value,
   onChange,
+  onSubmitShortcut,
   inputId,
   labelledBy,
   describedBy,
@@ -97,6 +99,11 @@ export function TagsInput({
 }: {
   value: Tag[];
   onChange: (tags: Tag[]) => void;
+  /**
+   * Ctrl+Enter com um nome digitado: recebe a lista com a etiqueta incluída (o estado em volta ainda não
+   * mudou). Sem ele, o Ctrl+Enter só inclui a etiqueta.
+   */
+  onSubmitShortcut?: (tags: Tag[]) => void;
   inputId?: string;
   /** id do rótulo visível do campo. */
   labelledBy?: string;
@@ -134,17 +141,26 @@ export function TagsInput({
     if (showList) document.getElementById(`${listId}-o${activeIndex}`)?.scrollIntoView({ block: "nearest" });
   }, [showList, activeIndex, listId]);
 
-  const add = (tag: Tag) => {
+  /** Inclui a etiqueta e devolve a lista nova (a mesma de antes quando não entra: repetida, vazia, cheia). */
+  const add = (tag: Tag): Tag[] => {
     const name = tidyName(tag.name);
     setDraft("");
     setActive(0);
-    if (!name || has(name) || full) return;
+    if (!name || has(name) || full) return value;
     const color = tag.color ?? known.data?.find((t) => same(t.name, name))?.color ?? null;
     const billing = BILLING_TAGS.find((b) => same(b.name, name));
     const replaced = billing ? value.filter((t) => BILLING_TAGS.some((b) => same(b.name, t.name))) : [];
     const rest = value.filter((t) => !replaced.includes(t));
-    onChange([...rest, { name, color }]);
+    const next = [...rest, { name, color }];
+    onChange(next);
     setAnnounce(replaced.length ? `${name} incluída no lugar de ${replaced.map((t) => t.name).join(", ")}.` : `${name} incluída.`);
+    return next;
+  };
+  /** A destacada na lista ou, sem lista, o nome digitado (o mesmo do Enter). */
+  const addTyped = (): Tag[] => {
+    const pick = showList ? suggestions[activeIndex] : undefined;
+    if (pick) return add(pick.tag);
+    return typed ? add({ name: typed, color: null }) : value;
   };
   const remove = (tag: Tag) => {
     onChange(value.filter((t) => t !== tag));
@@ -223,14 +239,13 @@ export function TagsInput({
             } else if (e.key === "Enter" && !e.ctrlKey && !e.metaKey) {
               // Enter inclui a etiqueta (não envia o formulário).
               e.preventDefault();
-              const pick = showList ? suggestions[activeIndex] : undefined;
-              if (pick) add(pick.tag);
-              else if (typed) add({ name: typed, color: null });
+              addTyped();
             } else if (e.key === "Enter" && typed) {
-              // Ctrl+Enter com um nome digitado: a etiqueta entra primeiro (o formulário em volta não salva
-              // sem ela); o próximo Ctrl+Enter salva.
+              // Ctrl+Enter com um nome digitado: a etiqueta entra e o formulário salva com ela, pelo
+              // onSubmitShortcut (o atalho do formulário em volta ainda veria a lista sem ela).
               e.preventDefault();
-              add({ name: typed, color: null });
+              const next = addTyped();
+              onSubmitShortcut?.(next);
             } else if (e.key === "Escape" && showList) {
               e.preventDefault();
               setOpen(false);

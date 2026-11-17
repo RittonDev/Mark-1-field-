@@ -3,7 +3,7 @@
 import clsx from "clsx";
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 import { useEffect, useRef } from "react";
-import { CopyGroupTextButton } from "@/components/ticket/MessagesPanel";
+import { GroupTextsMenu } from "@/components/ticket/MessagesPanel";
 import { QuickEditButton } from "@/components/ticket/QuickEditButton";
 import { Skeleton, Table, Td, Th } from "@/components/ui";
 import type { TicketListItem, UUID } from "@/lib/types";
@@ -125,7 +125,9 @@ function cell(key: ColumnKey, t: TicketListItem, ctx: CellContext): React.ReactN
     case "created":
       return <CreatedCell t={t} />;
     case "texts":
-      return <CopyGroupTextButton ticketId={t.id} label="Copiar texto" />;
+      // Menu que só lê os textos ao abrir (o sugerido para agora vem primeiro): ligar a coluna não faz
+      // uma leitura por linha, nem cria o link do relatório de cada OS da página.
+      return <GroupTextsMenu ticketId={t.id} size="sm" label="Textos" />;
   }
 }
 

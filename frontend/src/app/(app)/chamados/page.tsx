@@ -5,7 +5,7 @@ import clsx from "clsx";
 import { Plus, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useId, useRef, useState } from "react";
 import { useConfirm } from "@/components/Confirm";
 import { Tabs } from "@/components/motion";
 import { useToast } from "@/components/Toaster";
@@ -67,8 +67,8 @@ function TicketsView() {
   // Um relógio para a lista toda: "atrasada há 35min" e a virada do dia.
   const now = useNow(60_000);
   const listTop = useRef<HTMLDivElement>(null);
-  const columns = useColumns(manager);
   const [moreOpen, setMoreOpen] = useState(false);
+  const moreId = useId();
   const [exporting, setExporting] = useState<ExportScope | null>(null);
   // Etiquetas em massa: as OS marcadas quando o diálogo abriu (a lista pode mudar em tempo real).
   const [bulk, setBulk] = useState<{ mode: BulkTagMode; tickets: TicketListItem[] } | null>(null);
@@ -88,6 +88,7 @@ function TicketsView() {
   });
   const data = query.data;
   const items = data?.items ?? [];
+  const columns = useColumns(manager, data?.items);
 
   // Seleção: as OS marcadas nesta página (como no Field Control). Outra página, filtro, busca ou ordem
   // começam sem nada marcado; a OS que sai da página (tempo real) sai da seleção.
@@ -258,6 +259,8 @@ function TicketsView() {
         onChange={update}
         onAllViews={() => chooseView("todas")}
         moreCount={moreFilterCount(filters)}
+        moreOpen={moreOpen}
+        moreId={moreId}
         onOpenMore={() => setMoreOpen(true)}
       />
 
@@ -343,6 +346,7 @@ function TicketsView() {
 
       {moreOpen ? (
         <MoreFilters
+          id={moreId}
           view={view}
           filters={filters}
           onChange={update}

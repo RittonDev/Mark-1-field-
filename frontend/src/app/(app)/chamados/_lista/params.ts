@@ -283,7 +283,8 @@ export function useListState(): ListState {
 }
 
 // "OS-15829", "os 15829", "OS15829", "#15829": o nº de uma OS escrito como nº de OS. Um número solto
-// ("041", "10234") é busca de texto: código de loja e nº do chamado do cliente também são números.
+// ("041", "10234") é busca de texto e fica na aba: código de loja e nº do chamado do cliente também são
+// números (a API ainda acha a OS com esse nº, se ela estiver na aba, e a põe primeiro).
 const NUMBER_SEARCH = /^(?:os|#)[\s#-]*0*\d{1,9}$/i;
 
 /** A busca é o nº de uma OS (com "OS" ou "#" na frente): procura em todas, qualquer que seja a aba. */

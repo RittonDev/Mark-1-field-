@@ -304,8 +304,9 @@ function LocationFilter({
 
 /**
  * Busca de texto: o campo responde na hora e a URL (com a lista) acompanha quando a digitação para.
- * Número solto procura também código de loja e nº do chamado do cliente; "OS-16976" ou "#16976"
- * procura a OS em todas as abas (para isso há também o filtro Identificador).
+ * Número solto fica na aba: procura código de loja, nº do chamado do cliente e a OS com esse nº (a API
+ * põe essa OS primeiro). "OS-16976" ou "#16976" procura a OS em todas as abas (para isso há também o
+ * filtro Identificador).
  */
 function SearchBox({ urlQ, view }: { urlQ: string; view: View }) {
   const [search, setSearch] = useState(urlQ);
@@ -329,7 +330,7 @@ function SearchBox({ urlQ, view }: { urlQ: string; view: View }) {
         value={search}
         onChange={(e) => setSearch(e.target.value)}
         placeholder="Buscar loja, cliente, cidade, título..."
-        title="Título, loja (nome, código ou cidade), cliente, técnico, nº do chamado do cliente ou descrição. “OS-16976” procura a OS em todas as abas."
+        title="Título, loja (nome, código ou cidade), cliente, técnico, nº do chamado do cliente, nº da OS ou descrição. “OS-16976” procura a OS em todas as abas."
         aria-label="Buscar chamados"
         className={fieldClassName("h-8 pl-9")}
       />
@@ -346,12 +347,17 @@ export function FilterBar({
   onChange,
   onAllViews,
   moreCount,
+  moreOpen,
+  moreId,
   onOpenMore,
 }: {
   state: ListState;
   onChange: (patch: Partial<Filters>) => void;
   onAllViews: () => void;
   moreCount: number;
+  /** O painel "Mais filtros" está aberto (e o id dele, para o leitor de tela). */
+  moreOpen: boolean;
+  moreId: string;
   onOpenMore: () => void;
 }) {
   const f = state.filters;
@@ -360,7 +366,14 @@ export function FilterBar({
   const location = useFilterLocation(f.location_id);
   return (
     <div className="mb-3 flex flex-wrap items-center gap-2" role="group" aria-label="Filtros da lista">
-      <button type="button" onClick={onOpenMore} aria-haspopup="dialog" className={pillClassName(moreCount > 0)}>
+      <button
+        type="button"
+        onClick={onOpenMore}
+        aria-haspopup="dialog"
+        aria-expanded={moreOpen}
+        aria-controls={moreOpen ? moreId : undefined}
+        className={pillClassName(moreCount > 0)}
+      >
         <ListFilter aria-hidden className="size-3.5 shrink-0" />
         Mais filtros
         {moreCount > 0 ? (

@@ -3,6 +3,7 @@
 
 import { useState } from "react";
 import { readStored, writeStored } from "@/components/new-ticket/storage";
+import type { TicketListItem } from "@/lib/types";
 
 export type ColumnKey =
   | "tags"
@@ -34,7 +35,16 @@ export interface ColumnDef {
   sort?: ColumnSort;
   /** Só para quem gerencia as OS (a fila de cada analista). */
   managerOnly?: boolean;
+  /**
+   * Campo da OS que a lista da API pode ainda não mandar: a coluna só é oferecida depois que ele chega
+   * (sem ele, seria uma coluna só de "—").
+   */
+  field?: ListField;
 }
+
+/** Campos da OS que GET /tickets pode não mandar na lista (o tipo de OS e o escopo). */
+type ListField = "service_type" | "description";
+const LIST_FIELDS: ListField[] = ["service_type", "description"];
 
 /** O identificador fica sempre (é o que se fala da OS) e ordena a lista do maior para o menor. */
 export const IDENTIFIER_SORT: ColumnSort = { field: "number", first: "desc" };
@@ -47,8 +57,8 @@ export const COLUMNS: ColumnDef[] = [
   { key: "location", label: "Localização", initial: true },
   { key: "status", label: "Situação", initial: false },
   { key: "technician", label: "Técnico", initial: false },
-  { key: "service_type", label: "Tipo de OS", initial: false },
-  { key: "scope", label: "Escopo", initial: false },
+  { key: "service_type", label: "Tipo de OS", initial: false, field: "service_type" },
+  { key: "scope", label: "Escopo", initial: false, field: "description" },
   { key: "title", label: "Título", initial: false },
   { key: "owner", label: "Analista", initial: false, managerOnly: true },
   { key: "sla", label: "Prazo (SLA)", initial: false, sort: { field: "resolution_due_at", first: "asc" } },
@@ -74,11 +84,19 @@ export function splitOrder(order: string): { field: string; dir: "asc" | "desc" 
   return order.startsWith("-") ? { field: order.slice(1), dir: "desc" } : { field: order, dir: "asc" };
 }
 
-/** Colunas à vista: a escolha guardada neste navegador ou as padrão. */
-export function useColumns(manager: boolean) {
+/**
+ * Colunas à vista: a escolha guardada neste navegador ou as padrão. `items`: as OS da página de agora,
+ * para saber se a API já manda os campos das colunas que dependem dela (`field`).
+ */
+export function useColumns(manager: boolean, items: TicketListItem[] | undefined) {
   const [stored, setStored] = useState<ColumnKey[] | null>(readColumns);
+  // Campos que a API já mandou nesta visita: uma vez vistos, ficam (a coluna não some enquanto a lista
+  // carrega ou numa página vazia).
+  const [sent, setSent] = useState<ListField[]>([]);
+  const arrived = LIST_FIELDS.filter((f) => !sent.includes(f) && (items ?? []).some((t) => f in t));
+  if (arrived.length) setSent([...sent, ...arrived]);
   const chosen = stored ?? INITIAL;
-  const available = COLUMNS.filter((c) => manager || !c.managerOnly);
+  const available = COLUMNS.filter((c) => (manager || !c.managerOnly) && (!c.field || sent.includes(c.field) || arrived.includes(c.field)));
   const visible = available.filter((c) => chosen.includes(c.key));
 
   // Voltou a ser igual ao padrão: nada fica guardado (a lista acompanha o padrão se ele mudar).
