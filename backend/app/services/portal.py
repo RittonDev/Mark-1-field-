@@ -240,8 +240,7 @@ async def to_detail(db: AsyncSession, ticket: Ticket) -> PortalRequestDetail:
         can_cancel=ticket.status in CANCELLABLE,
         timeline=timeline,
         attachments=[
-            PortalAttachment(id=a.id, filename=a.filename, created_at=a.created_at)
-            for a in files
+            PortalAttachment(id=a.id, filename=a.filename, created_at=a.created_at) for a in files
         ],
         can_attach=ticket.status not in FINAL and len(files) < MAX_CLIENT_FILES,
     )

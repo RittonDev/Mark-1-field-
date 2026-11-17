@@ -120,9 +120,7 @@ async def test_lgpd_retention_and_deletion_on_request(
         )
         keys = dict(
             (
-                await conn.execute(
-                    text("SELECT id::text, photo_key FROM technician_applications")
-                )
+                await conn.execute(text("SELECT id::text, photo_key FROM technician_applications"))
             ).all()
         )
     assert (tmp_path / keys[rejected]).exists()

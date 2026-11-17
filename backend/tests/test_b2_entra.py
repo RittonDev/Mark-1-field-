@@ -21,7 +21,9 @@ def error_of(target: str) -> str:
 
 @requires_db
 async def test_guests_and_unverified_emails_do_not_get_in(
-    client: AsyncClient, world: World, microsoft: dict  # noqa: F811
+    client: AsyncClient,
+    world: World,
+    microsoft: dict,  # noqa: F811
 ) -> None:
     # Convidado (B2B): o token vem com o locatário da empresa, mas a conta é de outro provedor.
     guest = await sso(client, microsoft, idp="https://sts.windows.net/outro-locatario/", oid="g1")

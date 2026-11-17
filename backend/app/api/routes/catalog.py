@@ -276,9 +276,7 @@ async def update_service_type(
     service_type_id: uuid.UUID, body: ServiceTypeUpdate, db: DB, _: TicketManagerUser
 ) -> ServiceTypeOut:
     service_type = await _load_service_type(db, service_type_id)
-    fields = _clean(
-        body.model_dump(exclude_unset=True), ("name", "estimated_minutes", "is_active")
-    )
+    fields = _clean(body.model_dump(exclude_unset=True), ("name", "estimated_minutes", "is_active"))
     await _check_service_type_refs(db, None, fields.get("category_id"))
     if "name" in fields:
         await _check_service_type_name(

@@ -32,9 +32,7 @@ async def upload_photo(client: AsyncClient, headers: dict, ticket_id: str, name:
 
 
 async def report_url(client: AsyncClient, world: World, ticket_id: str) -> str:
-    r = await client.post(
-        f"{API}/tickets/{ticket_id}/report-link", headers=world.analyst.headers
-    )
+    r = await client.post(f"{API}/tickets/{ticket_id}/report-link", headers=world.analyst.headers)
     assert r.status_code == 200, r.text
     return f"{API}/public/reports/{r.json()['token']}"
 

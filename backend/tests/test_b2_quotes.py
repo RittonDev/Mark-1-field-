@@ -68,9 +68,7 @@ async def test_public_approval_uses_the_connection_ip_and_answers_once(
     forged = {"X-Forwarded-For": "1" * 200}
 
     async def approve() -> int:
-        r = await client.post(
-            f"{API}/public/quotes/{token}/approve", json=APPROVAL, headers=forged
-        )
+        r = await client.post(f"{API}/public/quotes/{token}/approve", json=APPROVAL, headers=forged)
         return r.status_code
 
     # Dois cliques ao mesmo tempo: um aprova, o outro vê "já respondido".

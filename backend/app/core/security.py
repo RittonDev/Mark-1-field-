@@ -67,9 +67,7 @@ def create_access_token(user_id: str, role: str, session_id: str | None = None) 
     extra: dict[str, Any] = {"role": role}
     if session_id:
         extra["sid"] = session_id
-    return create_token(
-        user_id, "access", timedelta(minutes=settings.ACCESS_TOKEN_MINUTES), extra
-    )
+    return create_token(user_id, "access", timedelta(minutes=settings.ACCESS_TOKEN_MINUTES), extra)
 
 
 def create_refresh_token(

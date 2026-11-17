@@ -394,9 +394,7 @@ async def list_payouts(
             select(
                 func.count(),
                 func.coalesce(
-                    func.sum(TicketPayout.amount).filter(
-                        TicketPayout.status == PayoutStatus.PAID
-                    ),
+                    func.sum(TicketPayout.amount).filter(TicketPayout.status == PayoutStatus.PAID),
                     0,
                 ),
                 func.coalesce(

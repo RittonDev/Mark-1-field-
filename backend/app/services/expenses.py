@@ -287,9 +287,7 @@ async def report(
 ) -> ExpenseReport:
     # Só as colunas da OS que a linha mostra (a OS inteira traria as ~19 relações dela).
     stmt = (
-        select(
-            TicketExpense, Ticket.id, Ticket.number, Ticket.title, Customer.id, Customer.name
-        )
+        select(TicketExpense, Ticket.id, Ticket.number, Ticket.title, Customer.id, Customer.name)
         .join(Ticket, Ticket.id == TicketExpense.ticket_id)
         .outerjoin(Customer, Customer.id == Ticket.customer_id)
         .where(TicketExpense.created_at >= start, TicketExpense.created_at < end)
