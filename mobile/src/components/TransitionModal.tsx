@@ -25,11 +25,10 @@ import { capturePhotos } from "./ticket/photoCapture";
 import { SheetScaffold } from "./ticket/SheetScaffold";
 import { Button, ErrorBox, Field, Input } from "./ui";
 
-/** O que a ação faz, em uma frase para o técnico. */
-const FIELD_HINT: Partial<Record<TicketStatus, string>> = {
-  en_route: "A central vê que você está a caminho. O prazo de chegada continua contando.",
-  in_progress: "Registra sua chegada e começa a contar o tempo na loja.",
-};
+// O que a ação faz, em uma frase para o técnico.
+const EN_ROUTE_HINT = "A central vê que você está a caminho.";
+const ARRIVAL_DUE_HINT = "O prazo de chegada continua contando.";
+const ARRIVAL_HINT = "Registra sua chegada e começa a contar o tempo na loja.";
 const RESUME_HINT = "Volta a contar o tempo do atendimento.";
 /** Nova visita a uma OS já atendida: as horas do chamado usadas antes continuam contando. */
 const REVISIT_HINT = "Registra a chegada desta visita. O tempo na loja segue de onde parou na visita anterior.";
@@ -39,11 +38,17 @@ const MIN_RESOLUTION = 10;
 /** Acima disso (descontada a imprecisão do GPS), o técnico provavelmente ainda não está na loja. */
 const FAR_METERS = 1000;
 
-/** Frase da confirmação: retomada depois de uma pausa, nova visita ou a primeira chegada. */
+/**
+ * Frase da confirmação. O prazo de chegada só vale antes da primeira chegada; entrar em atendimento
+ * é a primeira chegada, uma nova visita ou a retomada depois de uma pausa da central.
+ */
 function fieldHint(ticket: LocalTicket, to: TicketStatus): string {
-  if (to === "in_progress" && PAUSED_STATUSES.includes(ticket.status)) return RESUME_HINT;
-  if (to === "in_progress" && ticket.arrived_at) return REVISIT_HINT;
-  return FIELD_HINT[to] ?? STATUS[to].description;
+  if (to === "en_route") return ticket.arrival_due_at && !ticket.arrived_at ? `${EN_ROUTE_HINT} ${ARRIVAL_DUE_HINT}` : EN_ROUTE_HINT;
+  if (to === "in_progress") {
+    if (PAUSED_STATUSES.includes(ticket.status)) return RESUME_HINT;
+    return ticket.arrived_at ? REVISIT_HINT : ARRIVAL_HINT;
+  }
+  return STATUS[to].description;
 }
 
 // Texto da solução digitado e não enviado (o modal fechou pelo voltar): volta ao reabrir.

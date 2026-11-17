@@ -66,10 +66,12 @@ function shiftDay(day: string, delta: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+/** "Segunda-feira, 16 de novembro" (abre a frase da descrição e o cabeçalho da lista). */
 function longDate(day: string): string {
-  return new Intl.DateTimeFormat("pt-BR", { weekday: "long", day: "2-digit", month: "long", timeZone: "UTC" }).format(
+  const text = new Intl.DateTimeFormat("pt-BR", { weekday: "long", day: "2-digit", month: "long", timeZone: "UTC" }).format(
     new Date(`${day}T12:00:00Z`),
   );
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 /** Hora no fuso da operação; com a data quando não é do dia exibido (ex.: OS em campo desde ontem). */
@@ -505,17 +507,17 @@ function DayView() {
       </div>
 
       <div role="group" aria-label="Situação" className="mb-4 flex flex-wrap items-center gap-2">
-        {FILTERS.map(({ key, label, color }) => {
+        {FILTERS.map(({ key, label, color, hint }) => {
           const value = counts.get(key) ?? 0;
           const active = filter === key;
-          const problem = (key === "late" || key === "no_technician") && value > 0;
+          const problem = PROBLEM_FILTERS.includes(key) && value > 0;
           return (
             <button
               key={key}
               type="button"
               aria-pressed={active}
               onClick={() => setFilter(active ? null : key)}
-              title={key === "no_technician" ? "Sem técnico ou com técnico inativo (não entra mais no app)" : undefined}
+              title={hint}
               className={clsx(
                 "min-w-[7.5rem] rounded-xl border px-3.5 py-2.5 text-left shadow-elev-1 transition-[border-color,background-color,box-shadow] duration-150",
                 active
@@ -563,11 +565,11 @@ function DayView() {
           <LoadingBlock rows={4} label="Carregando as atividades do dia..." />
         </Card>
       ) : !fresh ? (
-        <ErrorBox message={errorMessage(query.error)} />
+        <ErrorBox message={errorMessage(query.error)} onRetry={() => void query.refetch()} />
       ) : items.length === 0 ? (
         <Card>
           <EmptyState
-            icon={<CalendarClock className="size-8" />}
+            icon={<CalendarClock />}
             title={
               narrowed || filter
                 ? techMissing
@@ -581,7 +583,7 @@ function DayView() {
       ) : (
         <Card className="animate-enter overflow-hidden">
           <div className="flex items-center justify-between gap-3 border-b border-line bg-[var(--table-head)] px-4 py-2.5 text-xs text-ink-muted">
-            <span className="font-bold text-ink first-letter:uppercase">{longDate(day)}</span>
+            <span className="font-bold text-ink">{longDate(day)}</span>
             <span className="tabular-nums">
               {items.length} atividade{items.length === 1 ? "" : "s"}
               {filterLabel ? ` · ${filterLabel}` : ""}

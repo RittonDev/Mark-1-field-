@@ -10,6 +10,7 @@ import uuid
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from fastapi import UploadFile
 from sqlalchemy import DateTime, Select, and_, case, false, func, literal, or_, select, update
@@ -1115,6 +1116,48 @@ def _work_from_timeline(events: list[TicketEvent], resolved_at: datetime | None)
     return int(total)
 
 
+def _status_moment(ev: TicketEvent, at: datetime) -> str:
+    """ "Aguardando fornecedor/peça" (13/11 11:00): a mudança de status como a central lê."""
+    try:
+        label = STATUS_INFO[TicketStatus(ev.to_value)].label
+    except ValueError:
+        label = ev.to_value or "status"
+    local = at.astimezone(ZoneInfo(settings.TIMEZONE)).strftime("%d/%m %H:%M")
+    return f'"{label}" ({local})'
+
+
+def _check_timeline_order(
+    events: list[TicketEvent],
+    *,
+    moves: tuple[tuple[TicketEvent | None, datetime | None], ...],
+    arrive_ev: TicketEvent | None,
+    finish_ev: TicketEvent | None,
+) -> None:
+    """A correção não inverte a linha do tempo: o início do atendimento fica antes da mudança
+    seguinte (pausa, nova visita, conclusão) e o término depois da anterior (o início da última
+    visita). Invertida, a soma dos trechos em atendimento sairia errada. `events` está na ordem
+    original; `moves` traz os horários corrigidos (a saída, o início e o término)."""
+    corrected = {id(ev): at for ev, at in moves if ev is not None and at is not None}
+
+    def moment(ev: TicketEvent) -> datetime:
+        return corrected.get(id(ev), ev.created_at)
+
+    if arrive_ev is not None:
+        index = events.index(arrive_ev)
+        after = events[index + 1] if index + 1 < len(events) else None
+        if after is not None and moment(arrive_ev) > moment(after):
+            raise WorkflowError(
+                "O início do atendimento deve ser antes de " + _status_moment(after, moment(after))
+            )
+    if finish_ev is not None:
+        index = events.index(finish_ev)
+        before = events[index - 1] if index > 0 else None
+        if before is not None and moment(finish_ev) < moment(before):
+            raise WorkflowError(
+                "O término deve ser depois de " + _status_moment(before, moment(before))
+            )
+
+
 async def correct_times(
     db: AsyncSession, ticket: Ticket, data: TicketTimesIn, actor: User
 ) -> Ticket:
@@ -1182,6 +1225,16 @@ async def correct_times(
         and data.work_minutes * 60 > (resolved_at - arrived_at).total_seconds() + 59
     ):
         raise WorkflowError("O tempo de atendimento passa do intervalo entre o início e o término")
+    _check_timeline_order(
+        events,
+        moves=(
+            (en_route_ev, data.en_route_at),
+            (arrive_ev, data.arrived_at),
+            (finish_ev, data.resolved_at),
+        ),
+        arrive_ev=arrive_ev if data.arrived_at is not None else None,
+        finish_ev=finish_ev if data.resolved_at is not None else None,
+    )
 
     changes: dict[str, list[Any]] = {}
     if (

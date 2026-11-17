@@ -222,7 +222,9 @@ export default function CustomerDetailPage() {
                           {l.code ? <span className="mr-1.5 font-mono text-xs font-normal text-ink-subtle">{l.code}</span> : null}
                           {l.name}
                         </span>
-                        <span className="block truncate text-xs text-ink-subtle">{[l.city, l.state].filter(Boolean).join("-")}</span>
+                        <span className="block truncate text-xs text-ink-subtle">
+                          {[[l.city, l.state].filter(Boolean).join("-"), l.is_active ? null : "inativa"].filter(Boolean).join(" · ")}
+                        </span>
                       </span>
                       <span className="text-xs text-ink-muted tabular-nums">{l.total_tickets} OS</span>
                     </Link>
