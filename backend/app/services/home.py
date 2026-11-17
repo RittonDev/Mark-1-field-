@@ -649,8 +649,8 @@ GROUPS: dict[str, GroupSpec] = {
             "Visitas de hoje sem início",
             "high",
             "Agendadas para hoje, 30 min ou mais depois do horário e sem saída ou início.",
-            # Sem "Ver todas": a lista filtra por dia, não pela tolerância de 30 min, e mostraria também
-            # as visitas que ainda estão no horário (o número não bateria).
+            # Sem "Ver todas": a lista filtra por dia, não pela tolerância de 30 min, e mostraria
+            # também as visitas que ainda estão no horário (o número não bateria).
             tier="now",
         ),
         GroupSpec(
