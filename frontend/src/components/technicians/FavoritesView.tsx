@@ -134,7 +134,7 @@ function factsOf(t: FavoriteTechnician, city: FavoriteCity, windowLabel: string)
   return parts.join(" · ");
 }
 
-/** "Fixado por Ana em 12/11/2026" (quem fez a última mudança). */
+/** "Fixado por {analista} em 12/11/2026" (quem fez a última mudança). */
 function decisionTitle(verb: string, t: FavoriteTechnician): string {
   return [verb, t.set_by ? `por ${t.set_by.name}` : null, t.set_at ? `em ${formatDate(t.set_at)}` : null].filter(Boolean).join(" ");
 }

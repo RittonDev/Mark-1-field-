@@ -22,7 +22,7 @@ const SHOWN_AS_NUMBERS = [
   /^Favorito em /,
 ];
 
-/** Title da estrela: "Favorito em Santos-SP · 12 OS em 12 meses" ou "... · fixado por Ana". */
+/** Title da estrela: "Favorito em Santos-SP · 12 OS em 12 meses" ou "... · fixado por {analista}". */
 function favoriteTitle(t: TechnicianSuggestion, city: FavoriteCityDetail | null | undefined): string {
   const mine = city?.favorites.find((f) => f.id === t.id);
   const base = city ? `Favorito em ${city.city}-${city.state}` : (t.reasons.find((r) => r.startsWith("Favorito em ")) ?? "Favorito");
