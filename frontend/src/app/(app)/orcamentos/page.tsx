@@ -2,12 +2,12 @@
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { CalendarClock, Download, FileText, Link2, Loader2, Plus, Search, Send, Share2, SquarePen } from "lucide-react";
+import { BellRing, CalendarClock, Download, FileText, Link2, Loader2, Plus, Search, Send, Share2, SquarePen } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useState } from "react";
 import { Tabs } from "@/components/motion";
 import { QUOTE_EDITABLE, QuoteViewer } from "@/components/quotes/QuoteViewer";
-import { QuoteEditor, type QuotePrefill, type QuoteTicketRef, ShareDialog } from "@/components/ticket/QuotesCard";
+import { QuoteEditor, type QuotePrefill, type QuoteTicketRef, ShareDialog, type ShareMode } from "@/components/ticket/QuotesCard";
 import { TicketLink } from "@/components/ticket/TicketLink";
 import { useToast } from "@/components/Toaster";
 import { useNow } from "@/components/useNow";
@@ -34,9 +34,20 @@ import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canManageTickets, STATUS } from "@/lib/constants";
 import { downloadCsv } from "@/lib/download";
-import { dayKey, formatDate, formatMoney, moneyInput, OPERATION_TZ, todayISO } from "@/lib/format";
+import { dayKey, formatDate, formatDateTime, formatMoney, moneyInput, OPERATION_TZ, todayISO } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
-import { QUOTE_KIND, QUOTE_STATUS, QUOTE_VALID_DAYS, readDecimal } from "@/lib/quotes";
+import {
+  dayMonth,
+  daysUntil,
+  followUpAction,
+  followUpText,
+  QUOTE_KIND,
+  QUOTE_STATUS,
+  QUOTE_VALID_DAYS,
+  readDecimal,
+  trackingText,
+  trackingTitle,
+} from "@/lib/quotes";
 import type {
   Page,
   Quote,
@@ -101,13 +112,6 @@ function periodRange(period: string): { start?: string; end?: string } {
   return { start: midnight(`${period}-01`), end: midnight(new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10)) };
 }
 
-/** Dias de `from` até `to` ("AAAA-MM-DD"); negativo quando `to` já passou. */
-function daysBetween(from: string, to: string): number {
-  const [y1, m1, d1] = from.split("-").map(Number);
-  const [y2, m2, d2] = to.split("-").map(Number);
-  return Math.round((Date.UTC(y2, m2 - 1, d2) - Date.UTC(y1, m1 - 1, d1)) / 86_400_000);
-}
-
 /** O dia do calendário `days` dias depois de `day` ("AAAA-MM-DD"). */
 function shiftDays(day: string, days: number): string {
   const [y, m, d] = day.split("-").map(Number);
@@ -170,7 +174,7 @@ export default function QuotesPage() {
   if (user && !canManageTickets(user.role)) return <ErrorBox message="Orçamentos são da gestão." />;
   return (
     <div className="mx-auto max-w-7xl">
-      <PageHeader title="Orçamentos" description="Orçamentos enviados aos clientes a partir das OS, e os itens com preço para montá-los." />
+      <PageHeader title="Orçamentos" />
       {/* useSearchParams pede um Suspense em volta. */}
       <Suspense fallback={<LoadingBlock />}>
         <QuotesTabs />
@@ -242,13 +246,16 @@ function StatusChip({
   count,
   amount,
   color,
+  title,
   onClick,
 }: {
   active: boolean;
   label: string;
-  count: number;
+  /** null: ainda carregando (sem número). */
+  count: number | null;
   amount?: number;
   color?: string;
+  title?: string;
   onClick: () => void;
 }) {
   return (
@@ -256,6 +263,7 @@ function StatusChip({
       type="button"
       aria-pressed={active}
       onClick={onClick}
+      title={title}
       className={clsx(
         "inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm shadow-elev-1 transition-[border-color,background-color] duration-150",
         active ? "border-brand bg-brand-soft ring-2 ring-brand/15" : "border-line bg-surface hover:border-line-strong",
@@ -263,7 +271,7 @@ function StatusChip({
     >
       {color ? <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: color }} aria-hidden /> : null}
       <span className="font-medium text-ink">{label}</span>
-      <span className="font-semibold text-ink tabular-nums">{intFmt(count)}</span>
+      {count !== null ? <span className="font-semibold text-ink tabular-nums">{intFmt(count)}</span> : null}
       {amount !== undefined ? <span className="text-ink-muted tabular-nums">· {formatMoney(amount)}</span> : null}
     </button>
   );
@@ -274,7 +282,7 @@ function Validity({ quote, today }: { quote: QuoteListRow; today: string }) {
   if (!quote.valid_until) return <span className="text-ink-muted">Sem validade</span>;
   const date = formatDate(quote.valid_until);
   if (quote.status !== "sent") return <span className="text-ink-muted">{date}</span>;
-  const days = daysBetween(today, quote.valid_until);
+  const days = daysUntil(today, quote.valid_until);
   const text =
     days < 0 ? `venceu há ${plural(-days, "dia", "dias")}` : days === 0 ? "vence hoje" : days === 1 ? "vence amanhã" : `vence em ${days} dias`;
   return (
@@ -300,11 +308,20 @@ function statusDetail(q: QuoteListRow): string | null {
   return null;
 }
 
+/** Linha de baixo da situação: o motivo da cobrança ou o detalhe com aberturas e cobranças. */
+function situationOf(q: QuoteListRow, today: string): { text: string | null; reason: boolean } {
+  const reason = followUpText(q, today);
+  if (reason) return { text: reason, reason: true };
+  const text = [statusDetail(q), trackingText(q, { sent: false })].filter(Boolean).join(" · ");
+  return { text: text || null, reason: false };
+}
+
 const ticketOf = (q: QuoteListRow): QuoteTicketRef => ({
   id: q.ticket_id,
   code: q.ticket_code,
   title: q.title,
-  customer: q.customer ? { name: q.customer } : null,
+  customer: q.customer ? { id: q.customer_id ?? undefined, name: q.customer } : null,
+  location: q.location ? { name: q.location } : null,
 });
 
 /** O orçamento recém-salvo no formato da lista (para abrir a visualização ou o link na hora). */
@@ -312,7 +329,12 @@ const rowOf = (saved: Quote, ticket: QuoteTicketRef): QuoteListRow => ({
   ...saved,
   ticket_code: ticket.code,
   customer: ticket.customer?.name ?? null,
+  customer_id: ticket.customer?.id ?? null,
+  location: ticket.location?.name ?? null,
 });
+
+/** Orçamento no diálogo de envio: o link com a mensagem ("share") ou o lembrete da cobrança ("remind"). */
+type Sharing = { row: QuoteListRow; mode: ShareMode };
 
 function QuoteList() {
   const queryClient = useQueryClient();
