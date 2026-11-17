@@ -2,9 +2,10 @@
 
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { CalendarClock, Loader2, MapPin, Search, UserRound, X } from "lucide-react";
+import { CalendarClock, ChevronDown, Loader2, MapPin, Search, UserRound, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { nextDue, PriorityBadge, SlaBadge } from "@/components/badges";
 import { fetchTicket, useActiveTechnicians } from "@/components/operacao/hooks";
 import { InactiveChip, RefreshFailed } from "@/components/operacao/status";
@@ -96,8 +97,17 @@ function useFinalColumn(status: TicketStatus, filters: Query, enabled: boolean) 
   });
 }
 
-/** Mudar o status sem arrastar (teclado, tablet e celular), com o mesmo fluxo do soltar. */
-function MoveSelect({
+const MENU_WIDTH = 216;
+/** Altura de cada item e do contorno do menu (para decidir se abre para baixo ou para cima). */
+const MENU_ITEM_PX = 36;
+const MENU_PADDING_PX = 14;
+
+/**
+ * Mudar o status sem arrastar (teclado, tablet e celular), com o mesmo fluxo do soltar. É um botão de
+ * menu: as setas só andam pelas opções e nada acontece até a escolha com Enter ou clique (no <select>,
+ * a seta do teclado já escolhia a primeira opção e abria o diálogo).
+ */
+function MoveMenu({
   code,
   targets,
   disabled,
@@ -108,30 +118,138 @@ function MoveSelect({
   disabled: boolean;
   onMove: (to: TicketStatus) => void;
 }) {
+  const [open, setOpen] = useState(false);
+  // Posição na tela, medida ao abrir: o menu vai para o <body>, senão a rolagem da coluna o cortaria.
+  const [place, setPlace] = useState<React.CSSProperties>({});
+  const [focusLast, setFocusLast] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
+  const menuId = useId();
+  const label = `Mudar o status da ${code}`;
+  const items = [...targets].sort((a, b) => STATUS_ORDER.indexOf(a) - STATUS_ORDER.indexOf(b));
+
+  const show = (last: boolean) => {
+    const rect = trigger.current?.getBoundingClientRect();
+    if (!rect) return;
+    const height = items.length * MENU_ITEM_PX + MENU_PADDING_PX;
+    const below = window.innerHeight - rect.bottom;
+    const left = Math.max(8, Math.min(rect.right - MENU_WIDTH, window.innerWidth - MENU_WIDTH - 8));
+    // Perto do pé da tela, abre para cima.
+    setPlace(below < height + 12 && rect.top > below ? { left, bottom: window.innerHeight - rect.top + 6 } : { left, top: rect.bottom + 6 });
+    setFocusLast(last);
+    setOpen(true);
+  };
+  const close = (refocus: boolean) => {
+    setOpen(false);
+    if (refocus) trigger.current?.focus({ preventScroll: true });
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const list = Array.from(menu.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
+    (focusLast ? list[list.length - 1] : list[0])?.focus({ preventScroll: true });
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (!menu.current?.contains(target) && !trigger.current?.contains(target)) setOpen(false);
+    };
+    // A página ou a coluna rolou, a janela mudou de tamanho: o menu ficaria fora do lugar, então fecha.
+    const onShift = (e: Event) => {
+      if (e.target instanceof Node && menu.current?.contains(e.target)) return;
+      const hadFocus = Boolean(menu.current?.contains(document.activeElement));
+      setOpen(false);
+      if (hadFocus) trigger.current?.focus({ preventScroll: true });
+    };
+    document.addEventListener("mousedown", onDown);
+    window.addEventListener("scroll", onShift, true);
+    window.addEventListener("resize", onShift);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      window.removeEventListener("scroll", onShift, true);
+      window.removeEventListener("resize", onShift);
+    };
+  }, [open, focusLast]);
+
+  const onMenuKey = (e: React.KeyboardEvent) => {
+    const list = Array.from(menu.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
+    const index = list.indexOf(document.activeElement as HTMLElement);
+    if (e.key === "Escape" || e.key === "Tab") {
+      // O menu fica no fim da página: o Tab e o Esc voltam para o botão do cartão.
+      e.preventDefault();
+      close(true);
+    } else if (list.length && (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Home" || e.key === "End")) {
+      e.preventDefault();
+      const next =
+        e.key === "Home"
+          ? 0
+          : e.key === "End"
+            ? list.length - 1
+            : (index + (e.key === "ArrowDown" ? 1 : -1) + list.length) % list.length;
+      list[next].focus({ preventScroll: true });
+    }
+  };
+
   return (
-    <select
-      aria-label={`Mudar o status da ${code}`}
-      value=""
-      disabled={disabled}
-      onChange={(e) => {
-        const to = e.target.value as TicketStatus;
-        if (to) onMove(to);
-      }}
-      className={clsx(
-        "h-7 max-w-[8.5rem] min-w-0 shrink-0 cursor-pointer truncate rounded-md border border-line bg-surface pr-6 pl-2 text-xs font-medium text-ink-muted",
-        "transition-colors hover:border-line-strong hover:text-ink focus:border-brand focus:ring-2 focus:ring-brand/20 focus:outline-none",
-        "disabled:cursor-default disabled:opacity-60",
-      )}
-    >
-      <option value="" disabled hidden>
+    <>
+      <button
+        ref={trigger}
+        type="button"
+        disabled={disabled}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
+        aria-label={label}
+        onClick={() => (open ? close(false) : show(false))}
+        onKeyDown={(e) => {
+          if (!open && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+            e.preventDefault();
+            show(e.key === "ArrowUp");
+          }
+        }}
+        className={clsx(
+          "inline-flex h-7 shrink-0 items-center gap-1 rounded-md border bg-surface pr-1.5 pl-2 text-xs font-medium transition-colors",
+          "hover:border-line-strong hover:text-ink focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-brand/20 focus-visible:outline-none",
+          "disabled:cursor-default disabled:opacity-60",
+          open ? "border-line-strong text-ink" : "border-line text-ink-muted",
+        )}
+      >
         Mudar status
-      </option>
-      {targets.map((to) => (
-        <option key={to} value={to}>
-          {transitionLabel(to)}
-        </option>
-      ))}
-    </select>
+        <ChevronDown aria-hidden className={clsx("size-3.5 transition-transform duration-150", open && "rotate-180")} />
+      </button>
+      {open
+        ? createPortal(
+            <div
+              ref={menu}
+              id={menuId}
+              role="menu"
+              aria-label={label}
+              onKeyDown={onMenuKey}
+              style={{ position: "fixed", width: MENU_WIDTH, ...place }}
+              className="z-40 animate-pop overflow-hidden rounded-xl border border-line bg-surface py-1.5 text-ink shadow-pop"
+            >
+              {items.map((to) => (
+                <button
+                  key={to}
+                  type="button"
+                  role="menuitem"
+                  tabIndex={-1}
+                  onClick={() => {
+                    close(true);
+                    onMove(to);
+                  }}
+                  className={clsx(
+                    "flex h-9 w-full items-center gap-2.5 px-3.5 text-left text-sm transition-colors outline-none hover:bg-surface-2 focus-visible:bg-surface-2",
+                    to === "cancelled" ? "text-red-700 dark:text-red-300" : "text-ink",
+                  )}
+                >
+                  <span aria-hidden className="size-2 shrink-0 rounded-full" style={{ backgroundColor: STATUS[to].color }} />
+                  <span className="truncate">{transitionLabel(to)}</span>
+                </button>
+              ))}
+            </div>,
+            document.body,
+          )
+        : null}
+    </>
   );
 }
 
@@ -223,9 +341,7 @@ function BoardCard({
           </span>
           {ticket.assignee?.is_active === false ? <InactiveChip className="mt-1" /> : null}
         </div>
-        {targets.length ? (
-          <MoveSelect code={ticket.code} targets={targets} disabled={busy || locked} onMove={onMove} />
-        ) : null}
+        {targets.length ? <MoveMenu code={ticket.code} targets={targets} disabled={busy || locked} onMove={onMove} /> : null}
       </div>
     </article>
   );
@@ -293,6 +409,9 @@ export default function BoardPage() {
   });
   const closed = useFinalColumn("closed", filters, showFinal);
   const cancelled = useFinalColumn("cancelled", filters, showFinal);
+  // Releitura que falhou com dados na tela: o quadro avisa e continua com o que já tinha. (Coluna de
+  // fechadas ou canceladas que nunca carregou mostra o erro nela mesma.)
+  const stale = [open, ...(showFinal ? [closed, cancelled] : [])].filter((q) => q.error && q.data);
 
   const grouped = useMemo(() => {
     const map = new Map<TicketStatus, TicketListItem[]>();
@@ -420,16 +539,13 @@ export default function BoardPage() {
             Limpar filtros
           </Button>
         ) : null}
-        <span className="ml-auto text-xs text-ink-muted" aria-live="polite">
-          {open.isFetching && !open.isLoading ? "Atualizando..." : ""}
-        </span>
       </div>
 
-      {open.error && open.data ? (
+      {stale.length ? (
         <RefreshFailed
-          at={open.errorUpdatedAt}
-          onRetry={() => void open.refetch()}
-          retrying={open.isFetching}
+          at={Math.max(...stale.map((q) => q.errorUpdatedAt))}
+          onRetry={() => stale.forEach((q) => void q.refetch())}
+          retrying={stale.some((q) => q.isFetching)}
           className="mb-3"
         />
       ) : null}
@@ -589,7 +705,13 @@ export default function BoardPage() {
             {selfAssign ? (
               <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line bg-surface-2/60 px-3 py-2.5">
                 <span className="min-w-0 flex-1 text-xs">
-                  Vai atender você mesmo, a distância? Você vira o executor e o analista responsável.
+                  Vai atender você mesmo, a distância? Você vira o executor
+                  {/* A API só põe quem assume como analista responsável quando a OS ainda não tem um. */}
+                  {!noTech.ticket.owner
+                    ? " e o analista responsável."
+                    : noTech.ticket.owner.id === user?.id
+                      ? "."
+                      : `; a OS continua na fila de ${noTech.ticket.owner.name}.`}
                 </span>
                 <Button
                   size="sm"

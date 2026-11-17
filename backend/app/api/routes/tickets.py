@@ -1,23 +1,39 @@
 import uuid
+from datetime import date
 from typing import Annotated
+from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Response,
+    UploadFile,
+    status,
+)
 from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy import select, text
 
-from app.api.deps import DB, CurrentUser, StaffUser, TicketManagerUser
+from app.api.deps import DB, CurrentUser, ManagerUser, StaffUser, TicketManagerUser
 from app.core.config import settings
 from app.core.enums import TicketPriority, TicketSource, TicketStatus, TicketType, UserRole
 from app.core.security import InvalidToken, create_download_token, decode_token
+from app.db.base import utcnow
 from app.models import Ticket, TicketAttachment, TicketComment, TicketEvent, TicketWorklog, User
 from app.schemas.common import Page, TagOut
+from app.schemas.tag_rules import TicketTagRules
 from app.schemas.ticket import (
     AttachmentOut,
     AttachmentUpdate,
+    BulkTagsResult,
     CommentCreate,
     CommentOut,
     EventOut,
     TicketAssign,
+    TicketBulkTags,
     TicketCreate,
     TicketDetail,
     TicketFilters,
@@ -30,7 +46,7 @@ from app.schemas.ticket import (
     WorklogCreate,
     WorklogOut,
 )
-from app.services import storage
+from app.services import storage, tag_rules
 from app.services import tickets as svc
 from app.services.realtime import commit_and_publish
 
@@ -66,10 +82,12 @@ async def _detail(db: DB, ticket_id: uuid.UUID, user: User) -> TicketDetail:
     return await _with_recurrence(db, await svc.get_ticket(db, ticket_id), user)
 
 
-@router.get("/tickets", response_model=Page[TicketListItem])
-async def list_tickets(
-    db: DB,
-    user: TicketManagerUser,
+BAD_PERIOD = "Escolha datas entre 2000 e 2100"
+# Nº da OS: coluna integer (número maior não é OS e daria erro no banco).
+MAX_NUMBER = 2**31 - 1
+
+
+def ticket_filters(
     status_: Annotated[list[TicketStatus] | None, Query(alias="status")] = None,
     priority: Annotated[list[TicketPriority] | None, Query()] = None,
     type_: Annotated[TicketType | None, Query(alias="type")] = None,
@@ -90,11 +108,19 @@ async def list_tickets(
     open_only: bool = False,
     sla_breached: bool = False,
     violation_pending: bool = False,
-    page: Annotated[int, Query(ge=1)] = 1,
-    page_size: Annotated[int, Query(ge=1, le=500)] = 25,
-    order_by: str = "-updated_at",
-) -> Page[TicketListItem]:
-    filters = TicketFilters(
+    number: Annotated[int | None, Query(ge=1, le=MAX_NUMBER)] = None,
+    created_from: date | None = None,
+    created_to: date | None = None,
+    scheduled_from: date | None = None,
+    scheduled_to: date | None = None,
+    tag: Annotated[list[str] | None, Query(max_length=20)] = None,
+) -> TicketFilters:
+    """Filtros da lista de OS (a exportação usa os mesmos). Datas em AAAA-MM-DD, dias inteiros no
+    fuso da operação; `tag` repetível (OS com qualquer uma delas)."""
+    days = (created_from, created_to, scheduled_from, scheduled_to)
+    if any(day is not None and not 2000 <= day.year <= 2100 for day in days):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, BAD_PERIOD)
+    return TicketFilters(
         status=status_,
         priority=priority,
         type=type_,
@@ -115,7 +141,29 @@ async def list_tickets(
         open_only=open_only,
         sla_breached=sla_breached,
         violation_pending=violation_pending,
+        number=number,
+        created_from=created_from,
+        created_to=created_to,
+        scheduled_from=scheduled_from,
+        scheduled_to=scheduled_to,
+        tag=tag,
     )
+
+
+Filters = Annotated[TicketFilters, Depends(ticket_filters)]
+
+
+@router.get("/tickets", response_model=Page[TicketListItem])
+async def list_tickets(
+    db: DB,
+    user: TicketManagerUser,
+    filters: Filters,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=500)] = 25,
+    order_by: str = "-updated_at",
+) -> Page[TicketListItem]:
+    """`order_by`: updated_at, created_at, priority, resolution_due_at, number, scheduled_start ou
+    customer (nome do cliente), com "-" na frente para decrescente; vazios por último."""
     items, total = await svc.list_tickets(
         db, user, filters, page=page, page_size=page_size, order_by=order_by
     )
@@ -152,6 +200,56 @@ async def ticket_tags(db: DB, _: TicketManagerUser) -> list[TagOut]:
         )
     )
     return [TagOut(name=r.name, color=r.color) for r in rows]
+
+
+@router.get("/ticket-tag-rules", response_model=TicketTagRules)
+async def get_tag_rules(db: DB, _: TicketManagerUser) -> TicketTagRules:
+    """Etiquetas automáticas: as da abertura (OS avulsa e de projeto), as que entram com o custo
+    extra e as que saem quando os técnicos da OS são pagos."""
+    return await tag_rules.get_rules(db)
+
+
+@router.put("/ticket-tag-rules", response_model=TicketTagRules)
+async def put_tag_rules(body: TicketTagRules, db: DB, user: ManagerUser) -> TicketTagRules:
+    """Só supervisor e admin mudam as etiquetas automáticas (valem para as próximas OS)."""
+    rules = await tag_rules.save_rules(db, body, user)
+    await db.commit()
+    return rules
+
+
+@router.get(
+    "/tickets/export",
+    response_class=Response,
+    responses={200: {"content": {"text/csv": {}}, "description": "Planilha CSV"}},
+)
+async def export_tickets(
+    db: DB,
+    user: TicketManagerUser,
+    filters: Filters,
+    ids: Annotated[list[uuid.UUID] | None, Query(max_length=500)] = None,
+    order_by: str = "-updated_at",
+) -> Response:
+    """A lista de atividades em CSV (os mesmos filtros e a mesma ordem da lista; `ids` repetível
+    exporta só as OS escolhidas). UTF-8 com BOM e ";" para abrir direto no Excel."""
+    content = await svc.export_csv(
+        db, user, filters.model_copy(update={"ids": ids}), order_by=order_by
+    )
+    today = utcnow().astimezone(ZoneInfo(settings.TIMEZONE)).date()
+    filename = f"chamados-{today.isoformat()}.csv"
+    return Response(
+        content=content.encode("utf-8"),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/tickets/bulk-tags", response_model=BulkTagsResult)
+async def bulk_tags(body: TicketBulkTags, db: DB, user: TicketManagerUser) -> BulkTagsResult:
+    """Inclui e tira etiquetas de várias OS de uma vez (até 500). Cada OS que mudou ganha um
+    evento no histórico."""
+    updated = await svc.bulk_tags(db, body, user)
+    await commit_and_publish(db)
+    return BulkTagsResult(updated=updated)
 
 
 @router.get("/tickets/{ticket_id}", response_model=TicketDetail)

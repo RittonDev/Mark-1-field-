@@ -2,7 +2,7 @@
 
 import clsx from "clsx";
 import { Check, ChevronDown, X } from "lucide-react";
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Input } from "@/components/ui";
 
 /** Texto para a busca: sem acento e em minúsculas. */
@@ -46,6 +46,7 @@ export function Combobox<T>({
   ariaLabel,
   invalid,
   describedBy,
+  required,
   loading = false,
   limit = 60,
 }: {
@@ -65,10 +66,13 @@ export function Combobox<T>({
   ariaLabel?: string;
   invalid?: boolean;
   describedBy?: string;
+  /** Campo obrigatório (anunciado pelo leitor de tela; o asterisco fica no rótulo). */
+  required?: boolean;
   loading?: boolean;
   limit?: number;
 }) {
   const listId = useId();
+  const inputRef = useRef<HTMLInputElement>(null);
   // null: lista fechada, o campo mostra o escolhido. Texto: lista aberta, filtrando.
   const [query, setQuery] = useState<string | null>(null);
   const [active, setActive] = useState(0);
@@ -104,6 +108,7 @@ export function Combobox<T>({
   return (
     <div className="relative">
       <Input
+        ref={inputRef}
         id={id}
         role="combobox"
         aria-expanded={open}
@@ -114,6 +119,7 @@ export function Combobox<T>({
         aria-label={labelledBy ? undefined : ariaLabel}
         aria-invalid={invalid || undefined}
         aria-describedby={describedBy}
+        aria-required={required || undefined}
         autoComplete="off"
         value={open ? query : shownLabel}
         placeholder={open && shownLabel ? shownLabel : placeholder}
@@ -144,19 +150,21 @@ export function Combobox<T>({
       />
       <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center gap-0.5">
         {value && clearLabel ? (
+          // Alcançável pelo Tab (é o único jeito de deixar o campo vazio); o mousedown não tira o foco da busca.
           <button
             type="button"
-            tabIndex={-1}
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => {
               onChange(null);
               setQuery(null);
+              // O botão some com o campo vazio: o foco volta para a busca (e não para o fim da página).
+              inputRef.current?.focus();
             }}
-            className="pointer-events-auto rounded p-1 text-ink-subtle hover:bg-surface-2 hover:text-ink"
+            className="pointer-events-auto rounded p-1 text-ink-subtle hover:bg-surface-2 hover:text-ink focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
             aria-label={clearLabel}
             title={clearLabel}
           >
-            <X className="size-3.5" />
+            <X aria-hidden className="size-3.5" />
           </button>
         ) : null}
         <ChevronDown aria-hidden className="size-4 text-ink-subtle" />

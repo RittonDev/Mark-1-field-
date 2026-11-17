@@ -1,6 +1,7 @@
 """Custos extras da OS e o relatório de reembolso dos técnicos.
 
-Só a gestão lança, altera e remove. O técnico vê os custos da OS dele (somente leitura).
+Só a gestão lança, altera e remove. O técnico vê os custos da OS dele (somente leitura). Lançar
+um custo põe na OS as etiquetas automáticas do custo extra (ex.: "Custo Extra", services/tag_rules).
 
 Situação: pendente, aprovado e recusado mudam livremente; "reembolsado" só vem de aprovado
 (o dinheiro saiu) e só volta para aprovado (estorno). Reembolsado não muda de valor, técnico ou
@@ -33,9 +34,10 @@ from app.schemas.expense import (
     TechnicianTotal,
 )
 from app.schemas.ticket import format_ticket_code
+from app.services import tag_rules
 from app.services.errors import NotFound, PermissionDenied, WorkflowError
 from app.services.realtime import queue_event
-from app.services.tickets import _touch, record_event
+from app.services.tickets import _touch, change_tags, record_event
 
 KM_RATE_KEY = "expenses.km_rate"
 DEFAULT_KM_RATE = Decimal("1.20")
@@ -163,6 +165,15 @@ async def create(db: AsyncSession, ticket: Ticket, data: ExpenseIn, actor: User)
     record_event(db, ticket, actor, TicketEventType.EXPENSE_ADDED, data=_summary(expense))
     await _touch(db, ticket, utcnow())
     _changed(db, ticket, actor)
+    # Etiqueta automática (ex.: "Custo Extra"), se a OS ainda não tem.
+    rules = await tag_rules.get_rules(db)
+    await change_tags(
+        db,
+        [ticket],
+        actor,
+        reason="Custo extra lançado",
+        add=[tag.model_dump() for tag in rules.on_extra_cost],
+    )
     await db.flush()
     await db.refresh(expense, ["technician", "created_by"])
     return expense

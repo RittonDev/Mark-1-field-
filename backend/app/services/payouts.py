@@ -3,6 +3,7 @@
 Os técnicos são parceiros sem vínculo: pegam a demanda e recebem por chamado. A central define o
 valor ao colocar o técnico na OS (o padrão vem do tipo de serviço), paga na web ("Pagamentos") e o
 técnico acompanha no app ("Meus ganhos"). Reembolsos (km, material) seguem nos custos extras.
+Com todos os técnicos da OS pagos, saem as etiquetas de pagamento pendente (services/tag_rules).
 """
 
 import uuid
@@ -35,6 +36,7 @@ from app.schemas.payout import (
     PayoutTicketRef,
 )
 from app.schemas.ticket import format_ticket_code
+from app.services import tag_rules
 from app.services.errors import WorkflowError
 from app.services.realtime import queue_event
 
@@ -460,13 +462,41 @@ async def mark_paid(db: AsyncSession, ids: list[uuid.UUID], actor: User, *, paid
     ticket_ids = list({p.ticket_id for p in changed})
     await _touch(db, ticket_ids)
     if ticket_ids:
-        tickets = await db.scalars(
-            select(Ticket).where(Ticket.id.in_(ticket_ids)).options(raiseload("*"))
+        tickets = list(
+            await db.scalars(
+                select(Ticket).where(Ticket.id.in_(ticket_ids)).options(raiseload("*"))
+            )
         )
         for ticket in tickets:
             _changed(db, ticket, actor)
+        if paid:
+            await _drop_paid_tags(db, tickets, actor)
     await db.flush()
     return len(changed)
+
+
+async def _drop_paid_tags(db: AsyncSession, tickets: list[Ticket], actor: User) -> None:
+    """OS com todos os técnicos pagos: saem as etiquetas de pagamento pendente (ex.: "Pendente
+    Envio PGTO"). Desfazer o pagamento não traz a etiqueta de volta."""
+    from app.services.tickets import change_tags  # tickets usa este módulo: import tardio
+
+    await db.flush()  # a conta abaixo precisa ver os pagamentos de agora
+    pending = set(
+        await db.scalars(
+            select(TicketPayout.ticket_id).where(
+                TicketPayout.ticket_id.in_([t.id for t in tickets]),
+                TicketPayout.status == PayoutStatus.PENDING,
+            )
+        )
+    )
+    rules = await tag_rules.get_rules(db)
+    await change_tags(
+        db,
+        [t for t in tickets if t.id not in pending],
+        actor,
+        reason="Todos os técnicos pagos",
+        remove=rules.remove_on_payout_paid,
+    )
 
 
 async def my_earnings(db: AsyncSession, user: User, month: date | None = None) -> MyEarnings:

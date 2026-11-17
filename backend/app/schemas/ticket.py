@@ -1,5 +1,5 @@
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Annotated, Any, Literal
 from zoneinfo import ZoneInfo
 
@@ -329,6 +329,9 @@ class TicketCreate(BaseModel):
     scheduled_end: LocalDatetime | None = None
     # Agendar mesmo com o técnico ocupado no horário (a API recusa com 409 sem isso).
     allow_conflict: bool = False
+    # Etiquetas da OS. Sem informar (ou null): as automáticas da abertura (as da OS de projeto,
+    # com `project_id`). Uma lista, mesmo vazia, vale como está (a web manda a que o analista vê).
+    tags: list[TagOut] | None = Field(default=None, max_length=20)
 
 
 # Campos que a OS sempre tem: null na edição é recusado com uma mensagem clara.
@@ -542,6 +545,47 @@ class TicketFilters(BaseModel):
     open_only: bool = False
     sla_breached: bool = False
     violation_pending: bool = False
+    # Lista de atividades (como no Field Control): o nº exato, a abertura e o agendamento por dia
+    # (no fuso da operação, dias inclusive) e as etiquetas (qualquer uma delas).
+    number: int | None = None
+    created_from: date | None = None
+    created_to: date | None = None
+    scheduled_from: date | None = None
+    scheduled_to: date | None = None
+    tag: list[str] | None = None
+    # Exportação: só as OS escolhidas.
+    ids: list[uuid.UUID] | None = None
+
+
+class TicketBulkTags(BaseModel):
+    """Etiquetas em lote (lista de atividades): inclui `add` e tira `remove` nas OS escolhidas."""
+
+    ids: list[uuid.UUID] = Field(min_length=1, max_length=500)
+    add: list[TagOut] = Field(default_factory=list, max_length=20)
+    remove: list[str] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def _something_to_change(self) -> "TicketBulkTags":
+        def key(name: str) -> str:
+            return " ".join(name.split()).lower()
+
+        added = [key(t.name) for t in self.add]
+        removed = [key(n) for n in self.remove]
+        if "" in added or "" in removed:
+            raise ValueError("Informe o nome de cada etiqueta")
+        if any(len(name) > 60 for name in added):
+            raise ValueError("Nome da etiqueta com no máximo 60 caracteres")
+        if not added and not removed:
+            raise ValueError("Escolha as etiquetas para incluir ou tirar")
+        if set(added) & set(removed):
+            raise ValueError("A mesma etiqueta não pode ser incluída e tirada de uma vez")
+        return self
+
+
+class BulkTagsResult(BaseModel):
+    """Quantas OS mudaram (as que já estavam assim ficam de fora)."""
+
+    updated: int
 
 
 class TicketUnproductive(BaseModel):

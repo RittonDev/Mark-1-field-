@@ -5,7 +5,15 @@ import { CalendarClock, ChevronLeft, ChevronRight, Navigation, Search, X } from 
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { CountUp } from "@/components/motion";
-import { fold, isUuid, OPERATION_TZ, operationDay, replaceSearch, useActiveTechnicians } from "@/components/operacao/hooks";
+import {
+  fold,
+  isUuid,
+  OPERATION_TZ,
+  operationDay,
+  replaceSearch,
+  useActiveTechnicians,
+  useSearchChange,
+} from "@/components/operacao/hooks";
 import { InactiveChip, LiveStatus, RefreshFailed } from "@/components/operacao/status";
 import { TagChips } from "@/components/TagChips";
 import { FAR_FROM_STORE_M, km } from "@/components/ticket/geo";
@@ -59,6 +67,14 @@ const LATE_TOLERANCE = 5;
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 const timeFmt = new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: OPERATION_TZ });
+
+/** Dia, grupo e técnico guardados na URL (?d=&grupo=&tec=); sem ?d=, hoje. */
+function readUrl(params: URLSearchParams): { picked: string | null; teamId: string; techId: string } {
+  const d = params.get("d");
+  const team = params.get("grupo");
+  const tech = params.get("tec");
+  return { picked: d && DAY_RE.test(d) ? d : null, teamId: isUuid(team) ? team : "", techId: isUuid(tech) ? tech : "" };
+}
 
 function shiftDay(day: string, delta: number): string {
   const d = new Date(`${day}T12:00:00Z`);
@@ -115,14 +131,27 @@ function haystack(a: Activity): string {
 /**
  * Hora de atuação para ordenar (a mesma regra da API): a agendada quando cai no dia; senão a realizada
  * no dia, a saída, a chegada ou a improdutiva (a visita atendida hoje e remarcada para outro dia fica
- * onde aconteceu); senão a agendada (em campo desde ontem vem primeiro); sem hora nenhuma, no fim.
+ * onde aconteceu, e a improdutiva que tirou a OS da agenda fica na hora em que foi registrada); senão
+ * a agendada (em campo desde ontem vem primeiro); sem hora nenhuma, no fim.
  */
 function actingAt(a: Activity, day: string): number {
   if (a.scheduled_start && operationDay(a.scheduled_start) === day) return new Date(a.scheduled_start).getTime();
-  const real = a.started_at ?? a.arrived_at ?? a.unproductive_at;
+  const real = a.started_at ?? a.arrived_at ?? unproductiveAt(a, day);
   if (real && operationDay(real) === day) return new Date(real).getTime();
-  const any = a.scheduled_start ?? real ?? a.ticket.arrived_at;
+  const any = a.scheduled_start ?? real;
   return any ? new Date(any).getTime() : Number.MAX_SAFE_INTEGER;
+}
+
+/**
+ * Chegada guardada na OS (a primeira de todas), para quando o dia não tem histórico de status (ex.: OS
+ * migrada do Field Control). Só vale se cair no dia exibido ou depois do horário desta visita: a
+ * chegada de uma visita anterior não é o início do retorno agendado para hoje.
+ */
+function ticketArrival(a: Activity, day: string): string | null {
+  const at = a.ticket.arrived_at;
+  if (!at) return null;
+  if (operationDay(at) === day) return at;
+  return a.scheduled_start && new Date(at).getTime() >= new Date(a.scheduled_start).getTime() ? at : null;
 }
 
 /**
@@ -151,8 +180,9 @@ function Timing({ a, day, now }: { a: Activity; day: string; now: number }) {
   const scheduled = a.scheduled_start;
   const scheduledInDay = Boolean(scheduled && operationDay(scheduled) === day);
   // Chegada (o início do atendimento): a do dia; em atendimento desde antes do dia, a etapa atual; sem
-  // registro nenhum no dia (ex.: OS migrada do Field Control, sem o histórico de status), a da OS.
-  const arrival = a.arrived_at ?? (a.state === "in_progress" ? a.started_at : null) ?? (a.started_at ? null : t.arrived_at);
+  // registro nenhum no dia, a da OS quando é desta visita. Sem chegada, a visita ainda não começou (e a
+  // atrasada mostra há quanto tempo).
+  const arrival = a.arrived_at ?? (a.state === "in_progress" ? a.started_at : null) ?? (a.started_at ? null : ticketArrival(a, day));
   // Saiu e não chegou no dia: a caminho, improdutiva antes de chegar ou remarcada no caminho.
   const departure = arrival ? null : a.started_at;
   // Término: o do dia ou o da OS (concluída sem o histórico de status também diz quando terminou).
@@ -353,19 +383,18 @@ function DayView() {
   const manage = canManageTickets(user?.role);
   // Um relógio para a tela toda: "atrasada há", "em atendimento há" e a virada do dia.
   const now = useNow(60_000);
-  // Dia, grupo e técnico ficam na URL (?d=&grupo=&tec=): recarregar ou mandar o link mantém a visão.
-  const [picked, setPicked] = useState<string | null>(() => {
-    const value = searchParams.get("d");
-    return value && DAY_RE.test(value) ? value : null;
-  });
-  const [teamId, setTeamId] = useState(() => {
-    const value = searchParams.get("grupo");
-    return isUuid(value) ? value : "";
-  });
-  const [techId, setTechId] = useState(() => {
-    const value = searchParams.get("tec");
-    return isUuid(value) ? value : "";
-  });
+  // Dia, grupo e técnico ficam na URL: recarregar ou mandar o link mantém a visão.
+  const [picked, setPicked] = useState(() => readUrl(searchParams).picked);
+  const [teamId, setTeamId] = useState(() => readUrl(searchParams).teamId);
+  const [techId, setTechId] = useState(() => readUrl(searchParams).techId);
+  // A URL mudou com a tela aberta (o link do menu, Voltar, um link com outro dia): mostra o que ela diz.
+  const urlChange = useSearchChange();
+  if (urlChange) {
+    const next = readUrl(urlChange);
+    if (next.picked !== picked) setPicked(next.picked);
+    if (next.teamId !== teamId) setTeamId(next.teamId);
+    if (next.techId !== techId) setTechId(next.techId);
+  }
   // Hoje é calculado só no cliente (evita divergência de hidratação perto da meia-noite).
   const day = picked ?? (isClient ? operationDay(now) : null);
   const [search, setSearch] = useState("");

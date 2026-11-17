@@ -9,6 +9,7 @@ import { PriorityBadge, StatusBadge } from "@/components/badges";
 import { CompanyProfileCard } from "@/components/CompanyProfileCard";
 import { FieldRulesCard } from "@/components/FieldRulesCard";
 import { ActiveState, FieldError, fold, RowEditButton, useLeaveGuard } from "@/components/settings/shared";
+import { TagRulesCard } from "@/components/settings/TagRulesCard";
 import { useToast } from "@/components/Toaster";
 import { UnproductiveReasonsCard } from "@/components/UnproductiveReasonsCard";
 import { ViolationReasonsCard } from "@/components/ViolationReasonsCard";
@@ -46,6 +47,7 @@ const SECTIONS = [
   { id: "campo", label: "Campo" },
   { id: "sla", label: "SLA" },
   { id: "categorias", label: "Categorias" },
+  { id: "etiquetas", label: "Etiquetas" },
   { id: "motivos", label: "Motivos" },
   { id: "status", label: "Status" },
 ];
@@ -572,7 +574,7 @@ export default function SettingsPage() {
     <div className="mx-auto max-w-6xl">
       <PageHeader
         title="Configurações"
-        description="Dados da empresa, regras de campo, SLA, categorias, motivos e fluxo de status."
+        description="Dados da empresa, regras de campo, SLA, categorias, etiquetas automáticas, motivos e fluxo de status."
       />
       {user && !canEdit ? (
         <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-line bg-surface px-4 py-3 text-sm text-ink-muted shadow-elev-1">
@@ -598,6 +600,9 @@ export default function SettingsPage() {
         </section>
         <section id="categorias" className="scroll-mt-28">
           <CategoriesCard canEdit={canEdit} />
+        </section>
+        <section id="etiquetas" className="scroll-mt-28">
+          <TagRulesCard readOnly={!canEdit} />
         </section>
         <section id="motivos" className="flex scroll-mt-28 flex-col gap-4">
           <ViolationReasonsCard readOnly={!canEdit} />

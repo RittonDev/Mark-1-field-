@@ -5,18 +5,36 @@ OS deve morar na camada de rotas.
 """
 
 import contextlib
+import csv
+import io
 import math
 import re
 import uuid
-from datetime import date, datetime, timedelta
+from collections.abc import Iterable, Mapping, Sequence
+from datetime import date, datetime, time, timedelta
 from enum import Enum
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from fastapi import UploadFile
-from sqlalchemy import DateTime, Select, and_, case, false, func, literal, or_, select, update
+from sqlalchemy import (
+    DateTime,
+    Select,
+    and_,
+    case,
+    column,
+    exists,
+    false,
+    func,
+    literal,
+    or_,
+    select,
+    update,
+)
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import noload
+from sqlalchemy.orm import aliased, noload, raiseload
+from sqlalchemy.orm.attributes import set_committed_value
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.config import settings
@@ -54,6 +72,7 @@ from app.schemas.part_request import PartRequestAttachment
 from app.schemas.ticket import (
     CommentCreate,
     RecurrenceItem,
+    TicketBulkTags,
     TicketCreate,
     TicketDetail,
     TicketFilters,
@@ -65,7 +84,7 @@ from app.schemas.ticket import (
     TicketViolationUpdate,
     WorklogCreate,
 )
-from app.services import client_report, durations, geo, schedule, search, sla, storage
+from app.services import client_report, durations, geo, schedule, search, sla, storage, tag_rules
 from app.services import field as field_rules
 from app.services import payouts as payouts_svc
 from app.services.errors import NotFound, PermissionDenied, VersionConflict, WorkflowError
@@ -670,16 +689,7 @@ async def _set_owner(
 
 def _clean_tags(tags: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     """Etiquetas da OS (ex.: "Adicional Noturno"): sem repetição nem vazias, até 20."""
-    out: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for tag in tags or []:
-        name = " ".join(str(tag.get("name") or "").split())[:60]
-        if not name or name.lower() in seen:
-            continue
-        seen.add(name.lower())
-        color = tag.get("color")
-        out.append({"name": name, "color": color if isinstance(color, str) and color else None})
-    return out[:20]
+    return tag_rules.merged([], tags or [])
 
 
 def _clean_text(value: str | None, *, single_line: bool = False) -> str | None:
@@ -833,6 +843,12 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
     )
 
     rules = await field_rules.rules(db)
+    project_id = await _check_project(db, data.project_id, actor)
+    # Etiquetas: a lista que o analista mandou (mesmo vazia) ou as automáticas da abertura.
+    if data.tags is not None and not is_requester:
+        tags = _clean_tags([tag.model_dump() for tag in data.tags])
+    else:
+        tags = _clean_tags(await tag_rules.opening_tags(db, project=project_id is not None))
 
     ticket = Ticket(
         title=title,
@@ -857,7 +873,8 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
         created_by_id=actor.id,
         owner_id=owner_id,
         team_id=team_id,
-        project_id=await _check_project(db, data.project_id, actor),
+        project_id=project_id,
+        tags=tags,
         scheduled_start=scheduled_start,
         scheduled_end=scheduled_end,
         service_type_id=service_type.id if service_type else None,
@@ -1780,6 +1797,114 @@ async def auto_close_resolved(db: AsyncSession, now: datetime | None = None) -> 
     return len(tickets)
 
 
+# --------------------------------------------------------------------------- etiquetas
+
+
+def _tags_note(reason: str, added: list[str], removed: list[str]) -> str:
+    """ "Custo extra lançado. Incluída: Custo Extra": o motivo e o que mudou, para o histórico."""
+    parts: list[str] = []
+    if added:
+        parts.append(("Incluída: " if len(added) == 1 else "Incluídas: ") + ", ".join(added))
+    if removed:
+        parts.append(("Retirada: " if len(removed) == 1 else "Retiradas: ") + ", ".join(removed))
+    return f"{reason}. {' · '.join(parts)}"
+
+
+async def change_tags(
+    db: AsyncSession,
+    tickets: Sequence[Ticket],
+    actor: User | None,
+    *,
+    reason: str,
+    add: Iterable[Mapping[str, Any]] = (),
+    remove: Iterable[str] = (),
+) -> list[Ticket]:
+    """Inclui e tira etiquetas das OS (regras automáticas e etiquetas em lote).
+
+    Compara pelo nome, sem diferenciar maiúsculas; a grafia e a cor que a OS já tem ficam.
+    Etiqueta é da gestão (o técnico nem vê): muda o "atualizado em" e não a versão da OS, então o
+    app do técnico não entra em conflito por ela. Cada OS alterada ganha um evento no histórico e
+    a gestão vê na hora. Devolve as OS que mudaram.
+    """
+    add, remove = list(add), list(remove)
+    by_id = {ticket.id: ticket for ticket in tickets}
+    if not by_id or not (add or remove):
+        return []
+    now = utcnow()
+    # As etiquetas de agora, com as linhas travadas (na ordem do id) até gravar: duas mudanças
+    # ao mesmo tempo (o lote e um custo extra, por exemplo) não se perdem.
+    rows = await db.execute(
+        select(Ticket.id, Ticket.tags)
+        .where(Ticket.id.in_(by_id))
+        .order_by(Ticket.id)
+        .with_for_update()
+    )
+    changed: list[Ticket] = []
+    for ticket_id, current in rows.all():
+        before: list[dict[str, Any]] = list(current or [])
+        after = tag_rules.without(tag_rules.merged(before, add), remove)
+        if after == before:
+            continue
+        ticket = by_id[ticket_id]
+        await db.execute(
+            update(Ticket)
+            .where(Ticket.id == ticket_id)
+            .values(tags=after, updated_at=now)
+            .execution_options(synchronize_session=False)
+        )
+        set_committed_value(ticket, "tags", after)
+        set_committed_value(ticket, "updated_at", now)
+        keys_before = {tag_rules.tag_key(tag.get("name")) for tag in before}
+        keys_after = {tag_rules.tag_key(tag.get("name")) for tag in after}
+        added = [
+            str(t.get("name") or "")
+            for t in after
+            if tag_rules.tag_key(t.get("name")) not in keys_before
+        ]
+        removed = [
+            str(t.get("name") or "")
+            for t in before
+            if tag_rules.tag_key(t.get("name")) not in keys_after
+        ]
+        record_event(
+            db,
+            ticket,
+            actor,
+            TicketEventType.UPDATED,
+            note=_tags_note(reason, added, removed),
+            data={"changes": {"tags": [before, after]}, "added": added, "removed": removed},
+            now=now,
+        )
+        queue_event(
+            db, "updated", ticket, actor, {"fields": ["tags"]}, internal=True, managers_only=True
+        )
+        changed.append(ticket)
+    return changed
+
+
+async def bulk_tags(db: AsyncSession, data: TicketBulkTags, actor: User) -> int:
+    """Etiquetas em lote (lista de atividades): só nas OS que a pessoa pode editar; as outras e os
+    ids que não existem ficam de fora. Devolve quantas OS mudaram."""
+    if not actor.can_manage_tickets:
+        raise PermissionDenied("Só a gestão muda as etiquetas das OS")
+    conds: list[ColumnElement[bool]] = [Ticket.id.in_(set(data.ids))]
+    vis = visibility_clause(actor)
+    if vis is not None:
+        conds.append(vis)
+    # Só as colunas: o lote chega a 500 OS e nenhuma relação é usada aqui.
+    found = await db.scalars(select(Ticket).options(raiseload("*")).where(*conds))
+    editable = [ticket for ticket in found if can_edit(actor, ticket)]
+    changed = await change_tags(
+        db,
+        editable,
+        actor,
+        reason="Etiquetas alteradas em lote",
+        add=[tag.model_dump() for tag in data.add],
+        remove=data.remove,
+    )
+    return len(changed)
+
+
 # --------------------------------------------------------------------------- listagem
 
 
@@ -1833,14 +1958,29 @@ ORDERABLE: dict[str, Any] = {
     "priority": PRIORITY_RANK,
     "resolution_due_at": Ticket.resolution_due_at,
     "number": Ticket.number,
+    "scheduled_start": Ticket.scheduled_start,
+    # Nome do cliente (OS sem cliente vão para o fim, nas duas direções).
+    "customer": select(Customer.name)
+    .where(Customer.id == Ticket.customer_id)
+    .correlate(Ticket)
+    .scalar_subquery(),
 }
 
 
 def _ordering(order_by: str) -> list[Any]:
     desc = order_by.startswith("-")
-    column = ORDERABLE.get(order_by.lstrip("-"), Ticket.updated_at)
-    primary = column.desc() if desc else column.asc()
+    key = ORDERABLE.get(order_by.lstrip("-"), Ticket.updated_at)
+    primary = key.desc() if desc else key.asc()
     return [primary.nulls_last(), Ticket.number.desc()]
+
+
+def _list_ordering(f: TicketFilters, order_by: str) -> list[Any]:
+    ordering = _ordering(order_by)
+    number = _parse_number(f.q) if f.q else None
+    if number is not None:
+        # Na busca pelo número, a própria OS vem primeiro (a paleta mostra só as primeiras).
+        ordering.insert(0, case((Ticket.number == number, 0), else_=1))
+    return ordering
 
 
 # Nº da OS como a pessoa digita: "123", "OS-000123", "os 123", "OS123", "#123".
@@ -1979,7 +2119,39 @@ def filter_conditions(user: User, f: TicketFilters, now: datetime) -> list[Colum
         conds.append(violation_pending_clause(now))
     if f.q and f.q.strip():
         conds.append(search_clause(f.q))
+    if f.number is not None:
+        conds.append(Ticket.number == f.number)
+    if f.created_from is not None:
+        conds.append(Ticket.created_at >= _day_start(f.created_from))
+    if f.created_to is not None:
+        conds.append(Ticket.created_at < _day_start(f.created_to + timedelta(days=1)))
+    if f.scheduled_from is not None:
+        conds.append(Ticket.scheduled_start >= _day_start(f.scheduled_from))
+    if f.scheduled_to is not None:
+        conds.append(Ticket.scheduled_start < _day_start(f.scheduled_to + timedelta(days=1)))
+    if f.tag:
+        names = {tag_rules.tag_key(name) for name in f.tag} - {""}
+        if names:
+            conds.append(_has_any_tag(names))
+    if f.ids is not None:
+        conds.append(Ticket.id.in_(f.ids))
     return conds
+
+
+def _day_start(day: date) -> datetime:
+    """Começo do dia no fuso da operação (a OS aberta às 23h do dia 9 é do dia 9)."""
+    return datetime.combine(day, time.min, tzinfo=ZoneInfo(settings.TIMEZONE))
+
+
+def _has_any_tag(keys: set[str]) -> ColumnElement[bool]:
+    """A OS tem alguma destas etiquetas (`keys` já na forma de tag_rules.tag_key)."""
+    tag = (
+        func.jsonb_array_elements(Ticket.tags)
+        .table_valued(column("value", JSONB), joins_implicitly=True)
+        .alias("tag")
+    )
+    name = func.lower(func.regexp_replace(func.btrim(tag.c.value["name"].astext), r"\s+", " ", "g"))
+    return exists(select(tag.c.value).where(name.in_(keys)))
 
 
 def orphan_owner_ids() -> Select[tuple[uuid.UUID]]:
@@ -2000,20 +2172,128 @@ async def list_tickets(
 ) -> tuple[list[Ticket], int]:
     conds = filter_conditions(user, f, utcnow())
     total = await db.scalar(select(func.count()).select_from(Ticket).where(*conds)) or 0
-    ordering = _ordering(order_by)
-    number = _parse_number(f.q) if f.q else None
-    if number is not None:
-        # Na busca pelo número, a própria OS vem primeiro (a paleta mostra só as primeiras).
-        ordering.insert(0, case((Ticket.number == number, 0), else_=1))
     stmt = (
         select(Ticket)
         .options(*LIST_NOLOAD)
         .where(*conds)
-        .order_by(*ordering)
+        .order_by(*_list_ordering(f, order_by))
         .offset((page - 1) * page_size)
         .limit(page_size)
     )
     return list(await db.scalars(stmt)), total
+
+
+# ------------------------------------------------------------------ exportação
+
+EXPORT_LIMIT = 20_000
+EXPORT_COLUMNS = (
+    "Identificador",
+    "Etiquetas",
+    "Data do agendamento",
+    "Cliente",
+    "Localização",
+    "Cidade",
+    "Situação",
+    "Técnico",
+    "Tipo de OS",
+    "Escopo",
+    "Analista",
+    "Criada em",
+)
+# Começo de célula que a planilha leria como fórmula (injeção de fórmula no CSV).
+_FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _cell(value: object) -> str:
+    text = "" if value is None else str(value)
+    return f"'{text}" if text.startswith(_FORMULA_START) else text
+
+
+def _local_text(value: datetime | None) -> str:
+    """dd/mm/aaaa HH:MM no fuso da operação."""
+    if value is None:
+        return ""
+    return value.astimezone(ZoneInfo(settings.TIMEZONE)).strftime("%d/%m/%Y %H:%M")
+
+
+async def export_csv(db: AsyncSession, user: User, f: TicketFilters, *, order_by: str) -> str:
+    """A lista de atividades em CSV para a planilha (Excel em português): UTF-8 com BOM, separado
+    por ";", com os filtros e a ordem da lista e até 20.000 linhas (as primeiras na ordem pedida).
+
+    Só as colunas que a planilha mostra, numa consulta só. Cliente, loja, técnico, analista e tipo
+    entram por apelido: os filtros da lista têm subconsultas nas mesmas tabelas.
+    """
+    customer, location = aliased(Customer), aliased(Location)
+    assignee, owner = aliased(User), aliased(User)
+    service_type = aliased(ServiceType)
+    stmt = (
+        select(
+            Ticket.number,
+            Ticket.tags,
+            Ticket.scheduled_start,
+            customer.name,
+            location.name,
+            location.city,
+            location.state,
+            Ticket.service_address,
+            Ticket.status,
+            assignee.name,
+            service_type.name,
+            Ticket.title,
+            Ticket.description,
+            owner.name,
+            Ticket.created_at,
+        )
+        .select_from(Ticket)
+        .outerjoin(customer, customer.id == Ticket.customer_id)
+        .outerjoin(location, location.id == Ticket.location_id)
+        .outerjoin(assignee, assignee.id == Ticket.assignee_id)
+        .outerjoin(owner, owner.id == Ticket.owner_id)
+        .outerjoin(service_type, service_type.id == Ticket.service_type_id)
+        .where(*filter_conditions(user, f, utcnow()))
+        .order_by(*_list_ordering(f, order_by))
+        .limit(EXPORT_LIMIT)
+    )
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, delimiter=";", lineterminator="\r\n")
+    writer.writerow(EXPORT_COLUMNS)
+    for (
+        number,
+        tags,
+        scheduled_start,
+        customer_name,
+        location_name,
+        city,
+        state,
+        service_address,
+        status,
+        technician,
+        service_type_name,
+        title,
+        description,
+        analyst,
+        created_at,
+    ) in (await db.execute(stmt)).all():
+        tag_names = ", ".join(
+            str(tag["name"]) for tag in tags or [] if isinstance(tag, dict) and tag.get("name")
+        )
+        place = f"{city}/{state}" if city and state else city
+        values = (
+            number,
+            tag_names,
+            _local_text(scheduled_start),
+            customer_name,
+            location_name or service_address,
+            place,
+            STATUS_INFO[status].label,
+            technician,
+            service_type_name,
+            (description or "").strip() or title,
+            analyst,
+            _local_text(created_at),
+        )
+        writer.writerow([_cell(value) for value in values])
+    return "﻿" + buffer.getvalue()
 
 
 # ------------------------------------------------------------------ improdutiva

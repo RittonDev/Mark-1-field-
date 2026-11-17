@@ -47,7 +47,7 @@ function Stars({ value }: { value: number }) {
   );
 }
 
-/** Cliente e loja da OS que está sendo aberta: quem é, como anda e o que esperar da visita. */
+/** Cliente e localização da OS que está sendo aberta: quem é, como anda e o que esperar da visita. */
 export function IntakePanel({
   context,
   loading,
@@ -63,7 +63,7 @@ export function IntakePanel({
   return (
     <div>
       <div className="border-b border-line px-4 py-3">
-        <SectionTitle>Cliente e loja</SectionTitle>
+        <SectionTitle>Cliente e localização</SectionTitle>
       </div>
       <IntakeBody context={context} loading={loading} error={error} onRetry={onRetry} />
     </div>
@@ -95,7 +95,7 @@ function IntakeBody({
   }
   if (loading && !context) {
     return (
-      <div className="flex flex-col gap-2 p-4" role="status" aria-label="Carregando cliente e loja">
+      <div className="flex flex-col gap-2 p-4" role="status" aria-label="Carregando cliente e localização">
         <Skeleton className="h-4 w-2/3" />
         <Skeleton className="h-3 w-1/2" />
         <Skeleton className="h-14 w-full" />
@@ -111,8 +111,8 @@ function IntakeBody({
         <span className="flex size-10 items-center justify-center rounded-full bg-brand-soft text-brand">
           <Store aria-hidden className="size-5" />
         </span>
-        <p className="text-sm font-bold text-ink">Escolha a loja</p>
-        <p className="text-xs text-ink-muted">Aqui aparecem o histórico, a avaliação do cliente, o contato e o prazo de chegada.</p>
+        <p className="text-sm font-bold text-ink">Escolha o cliente e a localização</p>
+        <p className="text-xs text-ink-muted">Aqui aparecem o histórico, a avaliação do cliente, o contato da loja e o prazo de chegada.</p>
       </div>
     );
   }
@@ -174,7 +174,7 @@ function IntakeBody({
       ) : null}
 
       {location ? (
-        <section className="flex flex-col gap-2.5 p-4" aria-label="Loja">
+        <section className="flex flex-col gap-2.5 p-4" aria-label="Localização">
           <div className="min-w-0">
             <Link
               href={`/locais/${location.id}`}

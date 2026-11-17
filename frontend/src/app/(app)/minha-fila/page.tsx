@@ -27,6 +27,7 @@ import {
   replaceSearch,
   revealSection,
   useClaim,
+  useSearchChange,
 } from "@/components/operacao/hooks";
 import { ClaimButton, InactiveChip, LiveStatus, RefreshFailed } from "@/components/operacao/status";
 import { ArrivalChip, OnsiteBar } from "@/components/ticket/FieldClock";
@@ -501,6 +502,12 @@ function TeamQueues({
   );
 }
 
+/** A fila aberta guardada na URL: ?analista=<id> ou ?analista=sem; sem o parâmetro, a minha. */
+function queueFromUrl(params: URLSearchParams): string | null {
+  const value = params.get("analista");
+  return value === UNOWNED || isUuid(value) ? value : null;
+}
+
 /** Seções candidatas de cada indicador: rola até a primeira que estiver na tela. */
 function reveal(keys: QueueSection[]) {
   for (const key of keys) {
@@ -521,11 +528,14 @@ function MyQueueView() {
   useEffect(() => {
     if (user && !allowed) router.replace("/chamados");
   }, [user, allowed, router]);
-  // A fila aberta fica na URL (?analista=<id> ou ?analista=sem): recarregar ou mandar o link mantém.
-  const [viewing, setViewing] = useState<string | null>(() => {
-    const param = searchParams.get("analista");
-    return param === UNOWNED || isUuid(param) ? param : null;
-  });
+  // A fila aberta fica na URL: recarregar ou mandar o link mantém.
+  const [viewing, setViewing] = useState(() => queueFromUrl(searchParams));
+  // A URL mudou com a tela aberta (o link do menu volta para a minha fila, Voltar): mostra o que ela diz.
+  const urlChange = useSearchChange();
+  if (urlChange) {
+    const next = queueFromUrl(urlChange);
+    if (next !== viewing) setViewing(next);
+  }
   const now = useNow(60_000);
   const meId = user?.id ?? null;
   const unowned = viewing === UNOWNED;

@@ -147,10 +147,9 @@ async def revoke_link(db: AsyncSession, ticket: Ticket) -> None:
         await _store(db, ticket, None, None)
 
 
-async def url_if_finished(db: AsyncSession, ticket: Ticket) -> str | None:
-    """Link do relatório para os textos do WhatsApp (cria na hora para OS antigas)."""
-    if ticket.status not in FINISHED:
-        return None
+async def report_url(db: AsyncSession, ticket: Ticket) -> str:
+    """Link do relatório para os textos do WhatsApp, em qualquer status: antes de concluir, a
+    página mostra o andamento. A OS sem link (revogado) ganha um novo na hora."""
     return (await ensure_link(db, ticket)).url
 
 

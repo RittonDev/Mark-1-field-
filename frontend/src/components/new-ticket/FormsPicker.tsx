@@ -6,7 +6,7 @@ import { Checkbox, Select, Skeleton } from "@/components/ui";
 import type { FormTemplate, ServiceType, UUID } from "@/lib/types";
 
 /**
- * Formulários (checklists) que o técnico preenche no app. Os do tipo de serviço escolhido vêm marcados;
+ * Formulários (checklists) que o técnico preenche no app. Os do tipo de OS escolhido vêm marcados;
  * os demais entram pelo seletor. Obrigatório trava a conclusão da OS até ser preenchido.
  */
 export function FormsPicker({
@@ -53,7 +53,7 @@ export function FormsPicker({
     <div className="flex flex-col gap-3">
       {suggested.length ? (
         <fieldset className="flex flex-col gap-1.5">
-          <legend className="mb-1 text-xs font-semibold text-ink/80">Do tipo “{serviceType?.name}”</legend>
+          <legend className="mb-1 text-xs font-semibold text-ink/80">Sugeridos pelo tipo de OS “{serviceType?.name}”</legend>
           {suggested.map((t) => (
             <Checkbox key={t.id} label={t.name} checked={value.includes(t.id)} onChange={() => onToggle(t.id)} />
           ))}

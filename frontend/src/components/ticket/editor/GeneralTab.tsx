@@ -26,6 +26,7 @@ import { formatDateTime, formatDocument, formatMinutes, formatMoney, fromLocalIn
 import { useDebounced } from "@/lib/hooks";
 import { useProjects } from "@/lib/projects";
 import { useAssignable, useCategories, useCustomers, useServiceTypes } from "@/lib/queries";
+import { type TicketTagRules, useTagRules } from "@/lib/tagRules";
 import type {
   ConflictItem,
   Customer,
@@ -266,6 +267,22 @@ function storeAddressOf(loc: IntakeContext["location"]): string {
   return [loc.address_line, loc.district, [loc.city, loc.state].filter(Boolean).join(" - "), loc.zip_code].filter(Boolean).join(", ");
 }
 
+/** “A”; “A” e “B”; “A”, “B” e “C”. */
+function quoted(names: string[]): string {
+  const list = names.map((n) => `“${n}”`);
+  return list.length > 1 ? `${list.slice(0, -1).join(", ")} e ${list[list.length - 1]}` : (list[0] ?? "");
+}
+
+/** O que o sistema faz sozinho com as etiquetas de uma OS já aberta, numa frase (vazio sem regra). */
+function autoTagsHint(rules: TicketTagRules): string {
+  const parts: string[] = [];
+  const extra = rules.on_extra_cost.map((t) => t.name);
+  const paid = rules.remove_on_payout_paid;
+  if (extra.length) parts.push(`${quoted(extra)} ${extra.length > 1 ? "entram" : "entra"} ao lançar um custo extra`);
+  if (paid.length) parts.push(`${quoted(paid)} ${paid.length > 1 ? "saem" : "sai"} quando o técnico da OS é pago`);
+  return parts.length ? `Automático: ${parts.join("; ")}.` : "";
+}
+
 /** Corpo da correção de horários (PUT /times): o motivo e só o que mudou. */
 interface TimesBody {
   reason: string;
@@ -362,6 +379,7 @@ export function GeneralTab({
 
   const customers = useCustomers();
   const categories = useCategories();
+  const { rules: tagRules } = useTagRules();
   const serviceTypes = useServiceTypes({ customerId: form.customerId || null, active: true });
   const assignable = useAssignable(null);
   const projects = useProjects({ enabled: true });
@@ -442,6 +460,28 @@ export function GeneralTab({
     }
     return list.sort((a, b) => a.name.localeCompare(b.name));
   }, [staff.data, server.owner, user]);
+  // Cliente e tipo de OS com busca, como na Nova OS (centenas de tipos, mais de cem clientes).
+  const customerItems = useMemo<ComboItem<Customer>[]>(
+    () =>
+      (customers.data ?? [])
+        // O cliente da OS continua na lista, mesmo inativo.
+        .filter((c) => c.is_active || c.id === form.customerId)
+        .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"))
+        .map((c) => ({
+          key: c.id,
+          item: c,
+          label: c.is_active ? c.name : `${c.name} (inativo)`,
+          haystack: `${searchText(c.name)} ${c.document ?? ""}`,
+        })),
+    [customers.data, form.customerId],
+  );
+  const typeItems = useMemo<ComboItem<ServiceType>[]>(() => {
+    // Os tipos do catálogo do cliente da OS primeiro, depois os gerais.
+    const rank = (t: ServiceType) => (t.customer_id && t.customer_id === form.customerId ? 0 : t.customer_id ? 2 : 1);
+    return [...(serviceTypes.data ?? [])]
+      .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name, "pt-BR"))
+      .map((t) => ({ key: t.id, item: t, label: t.name, haystack: searchText(`${t.name} ${t.customer?.name ?? ""}`) }));
+  }, [serviceTypes.data, form.customerId]);
 
   // ── o que mudou ──
   const schedChanged = !sameGroup(SCHEDULE_KEYS, form, base);
@@ -504,6 +544,9 @@ export function GeneralTab({
     if (form.locationId !== base.locationId) p.location_id = form.locationId || null;
     if (!sameValue("serviceAddress", form, base)) p.service_address = form.serviceAddress.trim() || null;
     if (!sameValue("visitNote", form, base)) p.visit_note = form.visitNote.trim() || null;
+    if (!sameValue("clientReference", form, base)) p.client_reference = form.clientReference.trim() || null;
+    if (!sameValue("requesterName", form, base)) p.requester_name = form.requesterName.trim() || null;
+    if (!sameValue("requesterContact", form, base)) p.requester_contact = form.requesterContact.trim() || null;
     if (helpersChanged) p.helper_ids = form.helperIds;
     if (form.ownerId !== base.ownerId) p.owner_id = form.ownerId || null;
     if (form.projectId !== base.projectId) p.project_id = form.projectId || null;
@@ -647,7 +690,8 @@ export function GeneralTab({
     if (!dirty || save.isPending) return;
     if (invalid) {
       setTried(true);
-      // Leva ao primeiro campo com problema (pode estar lá embaixo, em "Situação e horários").
+      // Leva ao primeiro campo com problema. Título e horários ficam em "Mais detalhes": recolhido, abre antes.
+      if (!moreOpen && (errors.title || errors.start || errors.end || errors.reason)) flushSync(() => setMoreOpen(true));
       formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
       return;
     }
@@ -717,18 +761,19 @@ export function GeneralTab({
     if (form.helperIds.length >= MAX_HELPERS) return toast({ title: `No máximo ${MAX_HELPERS} técnicos junto na visita`, tone: "error" });
     set("helperIds", [...form.helperIds, t.id]);
   };
-  const address =
-    form.serviceAddress.trim() ||
-    (intakeLocation
-      ? [intakeLocation.address_line, intakeLocation.district, [intakeLocation.city, intakeLocation.state].filter(Boolean).join(" - "), intakeLocation.zip_code]
-          .filter(Boolean)
-          .join(", ")
-      : "");
+  const storeAddress = storeAddressOf(intakeLocation);
+  // Onde o técnico vai: o endereço do atendimento, quando informado; senão, o da loja.
+  const address = form.serviceAddress.trim() || storeAddress;
   const statusOptions = [server.status, ...[...server.allowed_transitions].sort((a, b) => STATUS_ORDER.indexOf(a) - STATUS_ORDER.indexOf(b))];
-  // Tipo de serviço gravado que não está na lista (desativado, ou do catálogo de outro cliente).
+  // O nome do cliente escolhido, também enquanto a lista de clientes carrega.
+  const customerName =
+    customers.data?.find((c) => c.id === form.customerId)?.name ?? (form.customerId === server.customer?.id ? server.customer.name : null);
+  // Tipo de serviço gravado que não está na lista (desativado, ou do catálogo de outro cliente): o nome continua no campo.
   const typeListed = Boolean(serviceTypes.data?.some((t) => t.id === form.serviceTypeId));
   const typeName = form.serviceTypeId === server.service_type?.id ? server.service_type.name : null;
-  const missingType = form.serviceTypeId && !typeListed ? form.serviceTypeId : null;
+  const typeLabel =
+    form.serviceTypeId && !typeListed ? `${typeName ?? "Tipo escolhido"}${serviceTypes.data ? " (inativo ou de outro cliente)" : ""}` : undefined;
+  const autoTags = autoTagsHint(tagRules);
   const assigneeListed = people.some((p) => p.id === form.assigneeId);
   const assigneeName = form.assigneeId ? (names[form.assigneeId] ?? null) : null;
   const unscheduledWarning = schedChanged && !form.date && !form.time && (base.date || base.time) && server.status === "scheduled";
@@ -772,99 +817,33 @@ export function GeneralTab({
         </div>
       ) : null}
 
+      {/* Na ordem da abertura da OS (Nova OS): cliente, localização, tipo de OS, escopo, agendamento,
+          colaborador e etiquetas. O resto fica em "Mais detalhes". */}
       <Card>
         <CardHeader title="Dados da OS" />
         <div className="grid grid-cols-12 gap-4 p-5">
-          <Field label="Identificador" className="col-span-12 @xl:col-span-3">
-            <Input value={ticket.code} readOnly className="bg-surface-2 font-mono text-ink-muted" />
-          </Field>
-          <Field label="Tipo de OS" className="col-span-12 @xl:col-span-6">
-            <Select
-              value={form.serviceTypeId}
-              onChange={(e) => {
-                const st = serviceTypes.data?.find((t) => t.id === e.target.value);
-                set("serviceTypeId", e.target.value);
-                if (st) set("estimated", String(st.estimated_minutes));
-              }}
-            >
-              <option value="">Sem tipo de serviço</option>
-              {serviceTypes.data?.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name} · {formatMinutes(t.estimated_minutes)}
-                </option>
-              ))}
-              {missingType ? (
-                <option value={missingType}>
-                  {typeName ?? "Tipo escolhido"}
-                  {serviceTypes.data ? " (inativo ou de outro cliente)" : ""}
-                </option>
-              ) : null}
-            </Select>
-          </Field>
-          <Field label="Categoria" className="col-span-12 @xl:col-span-3">
-            <Select value={form.categoryId} onChange={(e) => set("categoryId", e.target.value)}>
-              <option value="">Sem categoria</option>
-              {(categories.data ?? [])
-                .filter((c) => c.is_active || c.id === form.categoryId)
-                .sort((a, b) => a.full_name.localeCompare(b.full_name))
-                .map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.full_name}
-                  </option>
-                ))}
-            </Select>
-          </Field>
-          <Field label="Título" required error={shown("title")} className="col-span-12 @xl:col-span-8">
-            <Input
-              value={form.title}
-              onChange={(e) => set("title", e.target.value)}
-              maxLength={200}
-              aria-required="true"
-              aria-invalid={errors.title ? true : undefined}
-            />
-          </Field>
-          <Field label="Contrato de prazo (prioridade)" className="col-span-12 @xl:col-span-4">
-            <Select value={form.priority} onChange={(e) => set("priority", e.target.value as TicketPriority)}>
-              {PRIORITY_ORDER.map((p) => (
-                <option key={p} value={p}>
-                  {PRIORITY[p].code} - {PRIORITY[p].label}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <div className="col-span-12">
-            <TagsField value={form.tags} onChange={(tags) => set("tags", tags)} />
-          </div>
-          <div className="col-span-12 flex flex-col gap-1">
-            <Field label="Descrição da ordem de serviço">
-              <Textarea rows={3} value={form.description} onChange={(e) => set("description", e.target.value)} maxLength={20000} />
-            </Field>
-            <Counter value={form.description} max={20000} />
-          </div>
-        </div>
-      </Card>
-
-      <Card>
-        <CardHeader title="Cliente e local" />
-        <div className="grid grid-cols-12 gap-4 p-5">
-          <div className="col-span-12 flex flex-col gap-1.5">
-            <Field label="Cliente">
-              <Select
-                value={form.customerId}
-                onChange={(e) => {
-                  const id = e.target.value;
-                  setForm((f) => ({ ...f, customerId: id, locationId: "", locationLabel: "" }));
-                  setChangingLocation(Boolean(id));
-                }}
-              >
-                <option value="">Sem cliente</option>
-                {(customers.data ?? []).map((c) => (
-                  <option key={c.id} value={c.id}>
+          <div className="col-span-12 flex flex-col gap-1.5 @xl:col-span-5">
+            <FieldLabel id={fieldId("customer")}>Cliente</FieldLabel>
+            <Combobox
+              items={customerItems}
+              value={form.customerId}
+              valueLabel={customerName ?? undefined}
+              onChange={(c) => setCustomer(c?.id ?? "")}
+              loading={customers.isLoading}
+              labelledBy={fieldId("customer")}
+              placeholder="Buscar cliente por nome ou CNPJ"
+              emptyText="Nenhum cliente com esse nome ou CNPJ"
+              clearLabel="Tirar o cliente"
+              renderItem={(c) => (
+                <span className="flex flex-col">
+                  <span className="font-medium">
                     {c.name}
-                  </option>
-                ))}
-              </Select>
-            </Field>
+                    {c.is_active ? null : <span className="ml-1.5 text-[11px] font-medium text-ink-muted">(inativo)</span>}
+                  </span>
+                  {c.document ? <span className="text-xs text-ink-muted tabular-nums">{formatDocument(c.document)}</span> : null}
+                </span>
+              )}
+            />
             {intakeCustomer ? (
               <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-muted">
                 <span>
@@ -880,12 +859,6 @@ export function GeneralTab({
                     <ThumbsUp className="size-3" /> Última avaliação: <b className="text-ink">{intakeCustomer.rating_last}</b>
                   </span>
                 ) : null}
-                {intakeLocation?.contact_phone ? (
-                  <span className="inline-flex items-center gap-1">
-                    <Phone className="size-3" /> {intakeLocation.contact_phone}
-                    {intakeLocation.contact_name ? ` · ${intakeLocation.contact_name}` : ""}
-                  </span>
-                ) : null}
                 <Link href={`/clientes/${intakeCustomer.id}`} className="font-medium text-brand hover:underline">
                   Ver cliente
                 </Link>
@@ -895,15 +868,16 @@ export function GeneralTab({
 
           {/* Rótulo fora de <label>: dentro dele, o clique no texto acionaria o "Trocar". A busca já
               trata Enter (escolhe a loja, não salva a OS) e Esc (fecha só a lista). */}
-          <div className="col-span-12 flex flex-col gap-1.5">
-            <span id={fieldId("location")} className="text-xs font-semibold text-ink/80">
-              Localização
-            </span>
+          <div className="col-span-12 flex flex-col gap-1.5 @xl:col-span-7">
+            <FieldLabel id={fieldId("location")}>Localização</FieldLabel>
             {changingLocation || !form.locationId ? (
               <>
                 <LocationPicker
                   labelledBy={fieldId("location")}
                   customerId={form.customerId || null}
+                  customerName={customerName}
+                  // "Buscar em todos os clientes": a loja escolhida antes era do cliente que sai.
+                  onClearCustomer={() => setForm((f) => ({ ...f, customerId: "", locationId: "", locationLabel: "" }))}
                   value={null}
                   onChange={(loc: Location | null) => {
                     if (!loc) return;
@@ -944,46 +918,80 @@ export function GeneralTab({
                 </button>
               </div>
             )}
+            {/* Onde o técnico vai e com quem falar na loja (o endereço do atendimento muda em "Mais detalhes"). */}
+            {!changingLocation && (address || intakeLocation?.contact_phone) ? (
+              <div className="flex flex-col gap-1 text-xs text-ink-muted">
+                {address ? (
+                  <p className="flex items-start gap-1.5">
+                    <MapPin aria-hidden className="mt-px size-3.5 shrink-0 text-ink-subtle" />
+                    <span className="min-w-0 break-words">
+                      {form.serviceAddress.trim() ? (
+                        <>
+                          Atendimento em: <span className="font-medium text-ink">{address}</span>
+                        </>
+                      ) : (
+                        address
+                      )}
+                    </span>
+                  </p>
+                ) : null}
+                {intakeLocation?.contact_phone ? (
+                  <p className="flex items-start gap-1.5">
+                    <Phone aria-hidden className="mt-px size-3.5 shrink-0 text-ink-subtle" />
+                    <span className="min-w-0 break-words">
+                      {intakeLocation.contact_phone}
+                      {intakeLocation.contact_name ? ` · ${intakeLocation.contact_name}` : ""}
+                    </span>
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
           </div>
 
-          <div className="col-span-12 rounded-lg border border-line px-3 py-2.5">
-            <p className="text-xs font-semibold text-ink/80">Endereço da ordem de serviço</p>
-            <p className="mt-1 flex items-start gap-1.5 text-sm text-ink">
-              <MapPin className="mt-0.5 size-4 shrink-0 text-ink-subtle" />
-              {address || <span className="text-ink-subtle">Sem endereço (escolha a loja)</span>}
-            </p>
-            <Input
-              value={form.serviceAddress}
-              onChange={(e) => set("serviceAddress", e.target.value)}
-              placeholder="Outro endereço para este atendimento (opcional)"
-              aria-label="Outro endereço para este atendimento"
-              maxLength={255}
-              className="mt-2"
+          <div className="col-span-12 flex flex-col gap-1.5">
+            <FieldLabel id={fieldId("type")}>Tipo de OS</FieldLabel>
+            <Combobox
+              items={typeItems}
+              value={form.serviceTypeId}
+              valueLabel={typeLabel}
+              onChange={(t) => {
+                if ((t?.id ?? "") === form.serviceTypeId) return;
+                set("serviceTypeId", t?.id ?? "");
+                // O tipo traz a duração dele (ajustável no agendamento).
+                if (t) set("estimated", String(t.estimated_minutes));
+              }}
+              loading={serviceTypes.isLoading}
+              labelledBy={fieldId("type")}
+              placeholder="Buscar tipo de OS"
+              emptyText="Nenhum tipo de OS com esse nome"
+              clearLabel="Tirar o tipo de OS"
+              renderItem={(t) => (
+                <span className="flex flex-col">
+                  <span className="flex flex-wrap items-center gap-x-1.5 font-medium">
+                    {t.name}
+                    {t.customer ? (
+                      <span className="rounded bg-surface-3 px-1.5 text-[11px] font-medium text-ink-muted">{t.customer.name}</span>
+                    ) : null}
+                  </span>
+                  <span className="text-xs text-ink-muted">{serviceTypeTiming(t)}</span>
+                </span>
+              )}
             />
           </div>
-        </div>
-      </Card>
 
-      <Card>
-        <CardHeader title="Agenda e técnicos" />
-        <div className="grid grid-cols-12 gap-4 p-5">
-          <Field
-            label="Duração estimada (min)"
-            className="col-span-12 @xl:col-span-4"
-            hint={minutes ? formatMinutes(minutes) : undefined}
-            error={shown("estimated")}
-          >
-            <Input
-              type="number"
-              inputMode="numeric"
-              min={1}
-              max={10080}
-              step={1}
-              value={form.estimated}
-              onChange={(e) => set("estimated", e.target.value)}
-              aria-invalid={errors.estimated ? true : undefined}
-            />
-          </Field>
+          <div className="col-span-12 flex flex-col gap-1">
+            <Field label="Escopo">
+              <Textarea
+                rows={4}
+                value={form.description}
+                onChange={(e) => set("description", e.target.value)}
+                maxLength={20000}
+                placeholder="O que deve ser feito no atendimento, de forma clara: o técnico chega sabendo e não há retrabalho."
+              />
+            </Field>
+            <Counter value={form.description} max={20000} />
+          </div>
+
           <Field label="Data do agendamento" className="col-span-6 @xl:col-span-4">
             <Input
               type="date"
@@ -1000,6 +1008,23 @@ export function GeneralTab({
               onChange={(e) => set("time", e.target.value)}
               aria-invalid={errors.schedule && !form.time ? true : undefined}
               aria-describedby={shown("schedule") ? fieldId("schedule") : undefined}
+            />
+          </Field>
+          <Field
+            label="Duração estimada (min)"
+            className="col-span-12 @xl:col-span-4"
+            hint={minutes ? formatMinutes(minutes) : undefined}
+            error={shown("estimated")}
+          >
+            <Input
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={10080}
+              step={1}
+              value={form.estimated}
+              onChange={(e) => set("estimated", e.target.value)}
+              aria-invalid={errors.estimated ? true : undefined}
             />
           </Field>
           {shown("schedule") ? (
@@ -1118,152 +1143,375 @@ export function GeneralTab({
               ))}
             </div>
           ) : null}
+
+          <div className="col-span-12 flex flex-col gap-1.5">
+            <FieldLabel id={fieldId("tags")}>Etiquetas</FieldLabel>
+            <TagsInput value={form.tags} onChange={(tags) => set("tags", tags)} labelledBy={fieldId("tags")} />
+            {autoTags ? <span className="text-xs text-ink-subtle">{autoTags}</span> : null}
+          </div>
         </div>
       </Card>
 
       <Card>
-        <CardHeader title="Central" description="Quem acompanha a OS na central e o recado para o técnico." />
-        <div className="grid grid-cols-12 gap-4 p-5">
-          <div className="col-span-12 flex flex-col gap-1.5 @xl:col-span-6">
-            <span id={fieldId("owner")} className="text-xs font-semibold text-ink/80">
-              Analista responsável
-            </span>
-            <div className="flex items-center gap-2">
-              <Select value={form.ownerId} onChange={(e) => set("ownerId", e.target.value)} className="flex-1" aria-labelledby={fieldId("owner")}>
-                <option value="">Sem analista (fila geral)</option>
-                {analysts.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name}
-                  </option>
-                ))}
-              </Select>
-              {user && form.ownerId !== user.id ? (
-                <Button onClick={() => set("ownerId", user.id)}>
-                  <Hand className="size-3.5" />
-                  Assumir
-                </Button>
+        <CardHeader
+          title="Mais detalhes"
+          description={moreOpen ? undefined : "Título, prazo, analista, projeto, pedido do cliente, recado, endereço, situação, horários e conclusão."}
+          actions={
+            <button
+              type="button"
+              onClick={toggleMore}
+              aria-expanded={moreOpen}
+              aria-controls={fieldId("more")}
+              aria-label={moreOpen ? "Recolher mais detalhes" : "Mostrar mais detalhes"}
+              className={buttonClassName("ghost", "sm")}
+            >
+              {moreOpen ? "Recolher" : "Mostrar"}
+              <ChevronDown aria-hidden className={clsx("size-3.5 transition-transform duration-150", moreOpen && "rotate-180")} />
+            </button>
+          }
+        />
+        <div id={fieldId("more")} hidden={!moreOpen} className="divide-y divide-line">
+          <div className="p-5">
+            <SectionTitle className="mb-3">Identificação</SectionTitle>
+            <div className="grid grid-cols-12 gap-4">
+              <Field label="Identificador" className="col-span-12 @xl:col-span-3">
+                <Input value={ticket.code} readOnly className="bg-surface-2 font-mono text-ink-muted" />
+              </Field>
+              <Field label="Título" required error={shown("title")} className="col-span-12 @xl:col-span-9">
+                <Input
+                  value={form.title}
+                  onChange={(e) => set("title", e.target.value)}
+                  maxLength={200}
+                  aria-required="true"
+                  aria-invalid={errors.title ? true : undefined}
+                />
+              </Field>
+              <Field label="Contrato de prazo (prioridade)" className="col-span-12 @xl:col-span-6">
+                <Select value={form.priority} onChange={(e) => set("priority", e.target.value as TicketPriority)}>
+                  {PRIORITY_ORDER.map((p) => (
+                    <option key={p} value={p}>
+                      {PRIORITY[p].code} - {PRIORITY[p].label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Categoria" className="col-span-12 @xl:col-span-6">
+                <Select value={form.categoryId} onChange={(e) => set("categoryId", e.target.value)}>
+                  <option value="">Sem categoria</option>
+                  {(categories.data ?? [])
+                    .filter((c) => c.is_active || c.id === form.categoryId)
+                    .sort((a, b) => a.full_name.localeCompare(b.full_name))
+                    .map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.full_name}
+                      </option>
+                    ))}
+                </Select>
+              </Field>
+            </div>
+          </div>
+
+          <div className="p-5">
+            <SectionTitle className="mb-3">Central</SectionTitle>
+            <div className="grid grid-cols-12 gap-4">
+              <div className="col-span-12 flex flex-col gap-1.5 @xl:col-span-6">
+                <FieldLabel id={fieldId("owner")}>Analista responsável</FieldLabel>
+                <div className="flex items-center gap-2">
+                  <Select value={form.ownerId} onChange={(e) => set("ownerId", e.target.value)} className="flex-1" aria-labelledby={fieldId("owner")}>
+                    <option value="">Sem analista (fila geral)</option>
+                    {analysts.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name}
+                      </option>
+                    ))}
+                  </Select>
+                  {user && form.ownerId !== user.id ? (
+                    <Button onClick={() => set("ownerId", user.id)}>
+                      <Hand className="size-3.5" />
+                      Assumir
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+              <Field label="Projeto" className="col-span-12 @xl:col-span-6">
+                <Select value={form.projectId} onChange={(e) => set("projectId", e.target.value)}>
+                  <option value="">Não é de projeto (OS avulsa)</option>
+                  {(projects.data ?? [])
+                    .filter((p) => p.status === "active" || p.status === "planning" || p.id === form.projectId)
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.code} · {p.name}
+                      </option>
+                    ))}
+                </Select>
+              </Field>
+            </div>
+          </div>
+
+          <div className="p-5">
+            <SectionTitle wrap className="mb-3" aside={<span className="text-xs text-ink-muted">Origem: {TICKET_SOURCE[server.source] ?? server.source}</span>}>
+              Pedido do cliente
+            </SectionTitle>
+            <div className="grid grid-cols-12 gap-4">
+              <Field label="Nº do chamado do cliente" className="col-span-12 @xl:col-span-4">
+                <Input
+                  value={form.clientReference}
+                  onChange={(e) => set("clientReference", e.target.value)}
+                  maxLength={80}
+                  placeholder="Ex.: INC0012345"
+                />
+              </Field>
+              <Field label="Quem pediu" className="col-span-12 @xl:col-span-4">
+                <Input
+                  value={form.requesterName}
+                  onChange={(e) => set("requesterName", e.target.value)}
+                  maxLength={160}
+                  placeholder="Nome de quem abriu o chamado"
+                />
+              </Field>
+              <Field label="Contato" className="col-span-12 @xl:col-span-4">
+                <Input
+                  value={form.requesterContact}
+                  onChange={(e) => set("requesterContact", e.target.value)}
+                  maxLength={160}
+                  inputMode="tel"
+                  placeholder="(11) 90000-0000"
+                />
+              </Field>
+            </div>
+          </div>
+
+          <div className="p-5">
+            <SectionTitle className="mb-3">Visita</SectionTitle>
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-1">
+                <Field label="Recado para o técnico" hint="Aparece em destaque no app do técnico">
+                  <Textarea
+                    rows={2}
+                    value={form.visitNote}
+                    onChange={(e) => set("visitNote", e.target.value)}
+                    maxLength={5000}
+                    placeholder="Com quem falar, acesso, o que levar."
+                  />
+                </Field>
+                <Counter value={form.visitNote} max={5000} />
+              </div>
+              <Field
+                label="Endereço do atendimento"
+                hint={storeAddress ? `Vazio, vale o endereço da loja: ${storeAddress}` : "Vazio, vale o endereço da loja."}
+              >
+                <Input
+                  value={form.serviceAddress}
+                  onChange={(e) => set("serviceAddress", e.target.value)}
+                  placeholder="Outro lugar para este atendimento (ex.: doca 3, entrada pelos fundos)"
+                  maxLength={255}
+                />
+              </Field>
+            </div>
+          </div>
+
+          <div className="p-5">
+            <SectionTitle className="mb-1">Situação e horários</SectionTitle>
+            <p className="mb-3 text-xs text-ink-muted">Os horários reais vêm do app do técnico; aqui a central corrige, com o motivo.</p>
+            <div className="grid grid-cols-12 gap-4">
+              <Field
+                label="Situação"
+                className="col-span-12 @xl:col-span-4"
+                hint={dirty && statusOptions.length > 1 ? "Salve as alterações para mudar a situação" : undefined}
+              >
+                <Select
+                  value={server.status}
+                  onChange={(e) => e.target.value !== server.status && onTransition(e.target.value as TicketStatus)}
+                  disabled={statusOptions.length <= 1 || dirty}
+                >
+                  {statusOptions.map((s) => (
+                    <option key={s} value={s}>
+                      {STATUS[s].label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Data de início" className="col-span-6 @xl:col-span-2">
+                <Input
+                  type="date"
+                  value={form.startDate}
+                  max={today}
+                  disabled={!server.arrived_at}
+                  onChange={(e) => set("startDate", e.target.value)}
+                  aria-invalid={errors.start ? true : undefined}
+                  aria-describedby={shown("start") ? fieldId("start") : undefined}
+                />
+              </Field>
+              <Field label="Hora de início" className="col-span-6 @xl:col-span-2">
+                <Input
+                  type="time"
+                  value={form.startTime}
+                  disabled={!server.arrived_at}
+                  onChange={(e) => set("startTime", e.target.value)}
+                  aria-invalid={errors.start ? true : undefined}
+                  aria-describedby={shown("start") ? fieldId("start") : undefined}
+                />
+              </Field>
+              <Field label="Data de conclusão" className="col-span-6 @xl:col-span-2">
+                <Input
+                  type="date"
+                  value={form.endDate}
+                  max={today}
+                  disabled={!server.resolved_at}
+                  onChange={(e) => set("endDate", e.target.value)}
+                  aria-invalid={errors.end ? true : undefined}
+                  aria-describedby={shown("end") ? fieldId("end") : undefined}
+                />
+              </Field>
+              <Field label="Hora de conclusão" className="col-span-6 @xl:col-span-2">
+                <Input
+                  type="time"
+                  value={form.endTime}
+                  disabled={!server.resolved_at}
+                  onChange={(e) => set("endTime", e.target.value)}
+                  aria-invalid={errors.end ? true : undefined}
+                  aria-describedby={shown("end") ? fieldId("end") : undefined}
+                />
+              </Field>
+              {shown("start") || shown("end") ? (
+                <div className="col-span-12 -mt-2 flex flex-col gap-0.5">
+                  <FieldError id={fieldId("start")} message={shown("start") ? `Início: ${errors.start}` : undefined} />
+                  <FieldError id={fieldId("end")} message={shown("end") ? `Conclusão: ${errors.end}` : undefined} />
+                </div>
+              ) : null}
+              {timesChanged ? (
+                <Field
+                  label="Motivo da correção do horário"
+                  required
+                  className="col-span-12"
+                  hint="Fica no histórico da OS (o técnico não vê)"
+                  error={shown("reason")}
+                >
+                  <Input
+                    value={form.timesReason}
+                    onChange={(e) => set("timesReason", e.target.value)}
+                    placeholder="Ex.: técnico esqueceu de concluir no app; confirmado com a loja"
+                    maxLength={500}
+                    aria-required="true"
+                    aria-invalid={errors.reason ? true : undefined}
+                  />
+                </Field>
               ) : null}
             </div>
           </div>
-          <Field label="Projeto" className="col-span-12 @xl:col-span-6">
-            <Select value={form.projectId} onChange={(e) => set("projectId", e.target.value)}>
-              <option value="">Não é de projeto (OS avulsa)</option>
-              {(projects.data ?? [])
-                .filter((p) => p.status === "active" || p.status === "planning" || p.id === form.projectId)
-                .map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.code} · {p.name}
-                  </option>
-                ))}
-            </Select>
-          </Field>
-          <div className="col-span-12 flex flex-col gap-1">
-            <Field label="Observação da visita" hint="Recado para o técnico (aparece em destaque no app)">
-              <Textarea rows={2} value={form.visitNote} onChange={(e) => set("visitNote", e.target.value)} maxLength={5000} />
+
+          <div className="flex flex-col gap-1 p-5">
+            <SectionTitle className="mb-2">Conclusão</SectionTitle>
+            <Field label="Descrição da conclusão" hint="O que foi feito. Aparece no relatório do cliente.">
+              <Textarea rows={5} value={form.resolutionNotes} onChange={(e) => set("resolutionNotes", e.target.value)} maxLength={20000} />
             </Field>
-            <Counter value={form.visitNote} max={5000} />
+            <Counter value={form.resolutionNotes} max={20000} />
           </div>
         </div>
       </Card>
-
-      <Card>
-        <CardHeader title="Situação e horários" description="Os horários reais vêm do app do técnico; aqui a central corrige, com o motivo." />
-        <div className="grid grid-cols-12 gap-4 p-5">
-          <Field
-            label="Situação"
-            className="col-span-12 @xl:col-span-4"
-            hint={dirty && statusOptions.length > 1 ? "Salve as alterações para mudar a situação" : undefined}
-          >
-            <Select
-              value={server.status}
-              onChange={(e) => e.target.value !== server.status && onTransition(e.target.value as TicketStatus)}
-              disabled={statusOptions.length <= 1 || dirty}
-            >
-              {statusOptions.map((s) => (
-                <option key={s} value={s}>
-                  {STATUS[s].label}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Data de início" className="col-span-6 @xl:col-span-2">
-            <Input
-              type="date"
-              value={form.startDate}
-              max={today}
-              disabled={!server.arrived_at}
-              onChange={(e) => set("startDate", e.target.value)}
-              aria-invalid={errors.start ? true : undefined}
-              aria-describedby={shown("start") ? fieldId("start") : undefined}
-            />
-          </Field>
-          <Field label="Hora de início" className="col-span-6 @xl:col-span-2">
-            <Input
-              type="time"
-              value={form.startTime}
-              disabled={!server.arrived_at}
-              onChange={(e) => set("startTime", e.target.value)}
-              aria-invalid={errors.start ? true : undefined}
-              aria-describedby={shown("start") ? fieldId("start") : undefined}
-            />
-          </Field>
-          <Field label="Data de conclusão" className="col-span-6 @xl:col-span-2">
-            <Input
-              type="date"
-              value={form.endDate}
-              max={today}
-              disabled={!server.resolved_at}
-              onChange={(e) => set("endDate", e.target.value)}
-              aria-invalid={errors.end ? true : undefined}
-              aria-describedby={shown("end") ? fieldId("end") : undefined}
-            />
-          </Field>
-          <Field label="Hora de conclusão" className="col-span-6 @xl:col-span-2">
-            <Input
-              type="time"
-              value={form.endTime}
-              disabled={!server.resolved_at}
-              onChange={(e) => set("endTime", e.target.value)}
-              aria-invalid={errors.end ? true : undefined}
-              aria-describedby={shown("end") ? fieldId("end") : undefined}
-            />
-          </Field>
-          {shown("start") || shown("end") ? (
-            <div className="col-span-12 -mt-2 flex flex-col gap-0.5">
-              <FieldError id={fieldId("start")} message={shown("start") ? `Início: ${errors.start}` : undefined} />
-              <FieldError id={fieldId("end")} message={shown("end") ? `Conclusão: ${errors.end}` : undefined} />
-            </div>
-          ) : null}
-          {timesChanged ? (
-            <Field
-              label="Motivo da correção do horário"
-              required
-              className="col-span-12"
-              hint="Fica no histórico da OS (o técnico não vê)"
-              error={shown("reason")}
-            >
-              <Input
-                value={form.timesReason}
-                onChange={(e) => set("timesReason", e.target.value)}
-                placeholder="Ex.: técnico esqueceu de concluir no app; confirmado com a loja"
-                maxLength={500}
-                aria-required="true"
-                aria-invalid={errors.reason ? true : undefined}
-              />
-            </Field>
-          ) : null}
-        </div>
-      </Card>
-
-      <Card>
-        <CardHeader title="Conclusão" />
-        <div className="flex flex-col gap-1 p-5">
-          <Field label="Descrição da conclusão" hint="O que foi feito. Aparece no relatório do cliente.">
-            <Textarea rows={5} value={form.resolutionNotes} onChange={(e) => set("resolutionNotes", e.target.value)} maxLength={20000} />
-          </Field>
-          <Counter value={form.resolutionNotes} max={20000} />
-        </div>
-      </Card>
     </form>
+  );
+}
+
+/** Um dado da OS para quem só vê (sem editar): o rótulo em cima, o valor embaixo. */
+function ViewItem({ label, children, wide = false }: { label: string; children: React.ReactNode; wide?: boolean }) {
+  const empty = children === null || children === undefined || children === "";
+  return (
+    <div className={clsx("col-span-12 flex min-w-0 flex-col gap-1", !wide && "@xl:col-span-6")}>
+      <dt className="text-xs font-semibold text-ink/80">{label}</dt>
+      <dd className="text-sm break-words text-ink">{empty ? <span className="text-ink-muted">—</span> : children}</dd>
+    </div>
+  );
+}
+
+/** Texto longo da OS (escopo, recado, conclusão) com as quebras de linha de quem escreveu. */
+const longText = (text: string | null | undefined) => (text?.trim() ? <span className="whitespace-pre-wrap">{text.trim()}</span> : null);
+
+/**
+ * A aba Geral para quem pode ver a OS mas não editar: os mesmos dados, na mesma ordem da abertura
+ * (cliente, localização, tipo de OS, escopo, agendamento, colaborador, etiquetas) e depois o resto.
+ */
+export function GeneralView({ ticket }: { ticket: TicketDetail }) {
+  const loc = ticket.location;
+  const storeAddress = loc ? [loc.address_line, [loc.city, loc.state].filter(Boolean).join(" - ")].filter(Boolean).join(", ") : "";
+  const helpers = (ticket.helpers ?? []).map((h) => h.name).join(", ");
+  const requester = ticket.requester?.name ?? ticket.requester_name;
+  return (
+    <div className="@container flex flex-col gap-4">
+      <Card>
+        <CardHeader title="Dados da OS" />
+        <dl className="grid grid-cols-12 gap-4 p-5">
+          <ViewItem label="Cliente">{ticket.customer?.name}</ViewItem>
+          <ViewItem label="Localização">
+            {loc ? (
+              <>
+                {[loc.name, loc.code].filter(Boolean).join(" - ")}
+                {storeAddress ? <span className="block text-xs text-ink-muted">{storeAddress}</span> : null}
+              </>
+            ) : null}
+          </ViewItem>
+          <ViewItem label="Tipo de OS" wide>
+            {ticket.service_type?.name}
+          </ViewItem>
+          <ViewItem label="Escopo" wide>
+            {longText(ticket.description)}
+          </ViewItem>
+          <ViewItem label="Data e hora do agendamento">
+            {ticket.scheduled_start
+              ? `${formatDateTime(ticket.scheduled_start)}${ticket.estimated_minutes ? ` · ${formatMinutes(ticket.estimated_minutes)}` : ""}`
+              : null}
+          </ViewItem>
+          <ViewItem label="Colaborador">
+            {ticket.assignee ? (
+              <>
+                {ticket.assignee.name}
+                {helpers ? <span className="block text-xs text-ink-muted">Com {helpers}</span> : null}
+              </>
+            ) : null}
+          </ViewItem>
+          <ViewItem label="Etiquetas" wide>
+            {ticket.tags?.length ? <TagChips tags={ticket.tags} max={20} /> : null}
+          </ViewItem>
+        </dl>
+      </Card>
+      <Card>
+        <CardHeader title="Mais detalhes" />
+        <dl className="grid grid-cols-12 gap-4 p-5">
+          <ViewItem label="Identificador">
+            <span className="font-mono">{ticket.code}</span>
+          </ViewItem>
+          <ViewItem label="Título">{ticket.title}</ViewItem>
+          <ViewItem label="Contrato de prazo (prioridade)">
+            {PRIORITY[ticket.priority] ? `${PRIORITY[ticket.priority].code} - ${PRIORITY[ticket.priority].label}` : ticket.priority}
+          </ViewItem>
+          <ViewItem label="Categoria">{ticket.category?.full_name}</ViewItem>
+          <ViewItem label="Analista responsável">{ticket.owner?.name ?? "Sem analista (fila geral)"}</ViewItem>
+          <ViewItem label="Projeto">{ticket.project ? `${ticket.project.code} · ${ticket.project.name}` : "Não é de projeto (OS avulsa)"}</ViewItem>
+          <ViewItem label="Nº do chamado do cliente">{ticket.client_reference}</ViewItem>
+          <ViewItem label="Quem pediu">
+            {requester || ticket.requester_contact ? (
+              <>
+                {requester}
+                {ticket.requester_contact ? <span className="block text-xs text-ink-muted">{ticket.requester_contact}</span> : null}
+              </>
+            ) : null}
+          </ViewItem>
+          <ViewItem label="Origem">{TICKET_SOURCE[ticket.source] ?? ticket.source}</ViewItem>
+          <ViewItem label="Recado para o técnico" wide>
+            {longText(ticket.visit_note)}
+          </ViewItem>
+          <ViewItem label="Endereço do atendimento" wide>
+            {ticket.service_address?.trim() || (storeAddress ? `O da loja: ${storeAddress}` : null)}
+          </ViewItem>
+          <ViewItem label="Situação">{STATUS[ticket.status]?.label ?? ticket.status}</ViewItem>
+          <ViewItem label="Início e conclusão do atendimento">
+            {ticket.arrived_at || ticket.resolved_at ? `${formatDateTime(ticket.arrived_at)} até ${formatDateTime(ticket.resolved_at)}` : null}
+          </ViewItem>
+          <ViewItem label="Descrição da conclusão" wide>
+            {longText(ticket.resolution_notes)}
+          </ViewItem>
+        </dl>
+      </Card>
+    </div>
   );
 }

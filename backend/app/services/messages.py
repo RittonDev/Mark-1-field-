@@ -1,9 +1,13 @@
-"""Textos prontos da OS para o grupo de WhatsApp dos técnicos.
+"""Textos prontos da OS para colar nos grupos de WhatsApp (o do cliente e o dos técnicos).
 
 A gestão mantém os modelos (com variáveis entre chaves, ex.: {tecnico}); a API preenche com os
-dados da OS na hora. Ex.: "Técnico {tecnico} em deslocamento para {local}, chega às
-{chegada_prevista}" vira "Técnico Carlos Souza em deslocamento para Loja 27, chega às 14:35".
-A previsão de chegada usa a posição ao vivo do técnico (rastreamento) quando há.
+dados da OS na hora. Ex.: "O técnico {tecnico} está a caminho de {local}. Chegada prevista às
+{chegada_prevista}." vira "O técnico Carlos Souza está a caminho de Loja 27. Chegada prevista às
+14:35.". A previsão de chegada usa a posição ao vivo do técnico (rastreamento) quando há.
+
+Os modelos padrão seguem os avisos do Field Control para o grupo do cliente: atividade confirmada,
+técnico em deslocamento (ou atrasado), chegada, atividade encerrada (com o link do relatório) e
+visita improdutiva. O texto que combina com a situação da OS agora vem marcado (`suggested`).
 """
 
 import re
@@ -17,7 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.enums import TicketEventType
+from app.core.enums import TicketEventType, TicketStatus
 from app.db.base import utcnow
 from app.models import SystemSetting, Ticket, TicketEvent, User
 from app.schemas.ticket import format_ticket_code
@@ -27,10 +31,13 @@ from app.services.map_distances import ROAD_FACTOR, travel_minutes
 from app.services.suggestions import km_between
 from app.services.workflow import PRIORITY_INFO, STATUS_INFO
 
+S = TicketStatus
 TEMPLATES_KEY = "messages.templates"
 # Posição mais velha que isto não serve para prever a chegada.
 LIVE_WINDOW = timedelta(minutes=30)
 MIN_ETA_MINUTES = 5
+# Antes de o técnico sair para o local (o texto da vez é a confirmação da atividade).
+BEFORE_FIELD = frozenset({S.NEW, S.TRIAGE, S.ASSIGNED, S.SCHEDULED, S.REOPENED})
 
 VARIABLES: dict[str, str] = {
     "tecnico": "Nome do técnico responsável",
@@ -56,45 +63,50 @@ VARIABLES: dict[str, str] = {
     "motivo_improdutiva": "Motivo da última visita improdutiva",
     "projeto": "Projeto da OS",
     "analista": "Analista responsável pela OS (sem responsável: quem copia o texto)",
-    "link_relatorio": "Link do relatório para o cliente (OS concluída)",
+    "link_relatorio": (
+        "Link do relatório para o cliente (mostra o andamento e, depois de concluída, o resultado)"
+    ),
     "prazo_chegada": "Prazo para o técnico chegar (4h nas capitais), ex.: 14:30",
+    "hora_chegada": "Hora em que o técnico chegou (início do atendimento; antes disso, a atual)",
+    "hora_conclusao": "Hora em que a OS foi concluída (antes disso, a atual)",
 }
 
+# Na ordem do atendimento, para o grupo do cliente (como os avisos do Field Control).
 DEFAULT_TEMPLATES: list[dict[str, str]] = [
     {
+        "key": "agendamento",
+        "name": "Atividade confirmada",
+        "body": "*{os}* · {cliente}\nAtividade confirmada para {agendamento} em {local}.\n"
+        "Técnico: {tecnico}.",
+    },
+    {
         "key": "deslocamento",
-        "name": "Deslocamento",
-        "body": "*{os}* · {cliente}\nTécnico {tecnico} em deslocamento para {local} ({cidade}). "
-        "Chegada prevista às {chegada_prevista} (prazo {prazo_chegada}).",
+        "name": "Técnico em deslocamento",
+        "body": "*{os}* · {cliente}\nO técnico {tecnico} está a caminho de {local}. "
+        "Chegada prevista às {chegada_prevista}.",
     },
     {
         "key": "chegada",
-        "name": "Chegada",
-        "body": "*{os}* · {cliente}\nTécnico {tecnico} chegou em {local} às {agora} "
+        "name": "Técnico chegou",
+        "body": "*{os}* · {cliente}\nO técnico {tecnico} chegou em {local} às {hora_chegada} "
         "e iniciou o atendimento.",
     },
     {
         "key": "atraso",
-        "name": "Atraso",
-        "body": "*{os}* · {cliente}\nTécnico {tecnico} está a caminho de {local} com atraso. "
+        "name": "Atraso na chegada",
+        "body": "*{os}* · {cliente}\nO técnico {tecnico} está a caminho de {local}, com atraso. "
         "Nova previsão de chegada: {chegada_prevista}.",
     },
     {
-        "key": "agendamento",
-        "name": "Agendamento",
-        "body": "*{os}* · {cliente}\nVisita agendada para {agendamento} em {local}, {endereco}.\n"
-        "Técnico: {tecnico}. Contato no local: {contato}.",
-    },
-    {
         "key": "fechamento",
-        "name": "Fechamento",
-        "body": "*{os}* · {cliente}\nAtendimento concluído por {tecnico} em {local} às {agora}.\n"
-        "Solução: {solucao}\nRelatório: {link_relatorio}",
+        "name": "Atividade encerrada",
+        "body": "*{os}* · {cliente}\nAtividade encerrada pelo técnico {tecnico} em {local} às "
+        "{hora_conclusao}.\nRelatório do atendimento: {link_relatorio}",
     },
     {
         "key": "improdutiva",
         "name": "Visita improdutiva",
-        "body": "*{os}* · {cliente}\nVisita improdutiva em {local}: {motivo_improdutiva}. "
+        "body": "*{os}* · {cliente}\nVisita improdutiva em {local} ({motivo_improdutiva}). "
         "Vamos reagendar e avisamos o novo horário.",
     },
 ]
@@ -174,8 +186,10 @@ async def _eta(db: AsyncSession, ticket: Ticket, now: datetime) -> tuple[str | N
     return _local(now + timedelta(minutes=minutes)).strftime("%H:%M"), f"{road_km:.0f} km"
 
 
-async def context(db: AsyncSession, ticket: Ticket, actor: User) -> dict[str, str]:
-    now = utcnow()
+async def context(
+    db: AsyncSession, ticket: Ticket, actor: User, now: datetime | None = None
+) -> dict[str, str]:
+    now = now or utcnow()
     loc = ticket.location
     assignee = ticket.assignee
     eta, distance = await _eta(db, ticket, now)
@@ -217,6 +231,8 @@ async def context(db: AsyncSession, ticket: Ticket, actor: User) -> dict[str, st
     )
     priority = PRIORITY_INFO[ticket.priority]
     local_now = _local(now)
+    # Chegada: o início do atendimento atual (ou o primeiro, com a OS já fora de atendimento).
+    arrived = ticket.work_started_at or ticket.arrived_at
     team = [p.name for p in ([assignee] if assignee else []) + list(ticket.helpers)]
     values: dict[str, Any] = {
         "tecnico": assignee.name if assignee else "(técnico a definir)",
@@ -244,13 +260,14 @@ async def context(db: AsyncSession, ticket: Ticket, actor: User) -> dict[str, st
         "motivo_improdutiva": reason or "",
         "projeto": ticket.project.name if ticket.project else "",
         "analista": ticket.owner.name if ticket.owner else actor.name,
-        "link_relatorio": await client_report.url_if_finished(db, ticket)
-        or "(disponível quando a OS for concluída)",
+        "link_relatorio": await client_report.report_url(db, ticket),
         "prazo_chegada": (
             _local(ticket.arrival_due_at).strftime("%H:%M")
             if ticket.arrival_due_at
             else "(sem prazo)"
         ),
+        "hora_chegada": _local(arrived or now).strftime("%H:%M"),
+        "hora_conclusao": _local(ticket.resolved_at or now).strftime("%H:%M"),
     }
     return {k: str(v) for k, v in values.items()}
 
@@ -262,9 +279,62 @@ def render(body: str, ctx: dict[str, str]) -> str:
     return re.sub(r" \(\)", "", text).strip()
 
 
-async def for_ticket(db: AsyncSession, ticket: Ticket, actor: User) -> list[dict[str, str]]:
-    ctx = await context(db, ticket, actor)
+async def _unproductive_pending(db: AsyncSession, ticket: Ticket) -> bool:
+    """A última ida a campo terminou em visita improdutiva e a OS ainda não foi remarcada."""
+    if ticket.last_unproductive_at is None or ticket.scheduled_start is not None:
+        return False
+    later_visit = await db.scalar(
+        select(TicketEvent.id)
+        .where(
+            TicketEvent.ticket_id == ticket.id,
+            TicketEvent.event_type == TicketEventType.STATUS_CHANGED,
+            TicketEvent.to_value.in_((S.EN_ROUTE.value, S.IN_PROGRESS.value)),
+            TicketEvent.created_at > ticket.last_unproductive_at,
+        )
+        .limit(1)
+    )
+    return later_visit is None
+
+
+async def suggested_keys(db: AsyncSession, ticket: Ticket, now: datetime) -> tuple[str, ...]:
+    """Os textos que combinam com a situação da OS agora, do melhor para o substituto (se a
+    gestão tirou o modelo "atraso", vale o de deslocamento). Vazio: nenhum combina (cancelada,
+    sem técnico ou sem agenda, pausada)."""
+    status = ticket.status
+    if status == S.CANCELLED:
+        return ()
+    if status in (S.RESOLVED, S.CLOSED):
+        return ("fechamento",)
+    if status == S.IN_PROGRESS:
+        return ("chegada",)
+    if status == S.EN_ROUTE:
+        late = ticket.arrival_due_at is not None and ticket.arrival_due_at < now
+        return ("atraso", "deslocamento") if late else ("deslocamento",)
+    if await _unproductive_pending(db, ticket):
+        return ("improdutiva",)
+    if (
+        status in BEFORE_FIELD
+        and ticket.assignee_id is not None
+        and ticket.scheduled_start is not None
+    ):
+        return ("agendamento",)
+    return ()
+
+
+async def for_ticket(db: AsyncSession, ticket: Ticket, actor: User) -> list[dict[str, Any]]:
+    """Os textos da OS já preenchidos; no máximo um vem com `suggested` (o da situação atual)."""
+    now = utcnow()
+    ctx = await context(db, ticket, actor, now)
+    items = await templates(db)
+    keys = [t["key"] for t in items]
+    wanted = next((k for k in await suggested_keys(db, ticket, now) if k in keys), None)
+    chosen = keys.index(wanted) if wanted is not None else -1
     return [
-        {"key": t["key"], "name": t["name"], "text": render(t["body"], ctx)}
-        for t in await templates(db)
+        {
+            "key": t["key"],
+            "name": t["name"],
+            "text": render(t["body"], ctx),
+            "suggested": index == chosen,
+        }
+        for index, t in enumerate(items)
     ]

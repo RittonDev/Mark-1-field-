@@ -2,7 +2,7 @@
 
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { History, Loader2, MapPin, Search, X } from "lucide-react";
+import { History, Loader2, MapPin, Plus, Search, X, type LucideIcon } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { readStored, writeStored } from "@/components/new-ticket/storage";
 import { Button, Input } from "@/components/ui";
@@ -26,7 +26,19 @@ interface RecentLocation {
   state: string | null;
 }
 
-type Row = { key: string; recent: RecentLocation; location?: undefined } | { key: string; location: Location; recent?: undefined };
+/** Ação no fim da lista ("Buscar em todos os clientes"): opção como as outras, alcançável pelas setas. */
+interface RowAction {
+  label: string;
+  icon: LucideIcon;
+  run: () => void;
+}
+
+type Row =
+  | { key: string; recent: RecentLocation; location?: undefined; action?: undefined }
+  | { key: string; location: Location; recent?: undefined; action?: undefined }
+  | { key: string; action: RowAction; recent?: undefined; location?: undefined };
+
+type PickRow = Exclude<Row, { action: RowAction }>;
 
 const recentKey = (userId: string) => `maxx.lojas.recentes.${userId}`;
 
@@ -38,7 +50,7 @@ function describe(l: Location) {
   return [l.customer.name, town(l.city, l.state), l.document ? formatDocument(l.document) : null].filter(Boolean).join(" · ");
 }
 
-function RowText({ row }: { row: Row }) {
+function RowText({ row }: { row: PickRow }) {
   const item = row.recent ?? row.location;
   return (
     <>
@@ -68,12 +80,15 @@ export function LocationPicker({
   onChange,
   customerName,
   onClearCustomer,
+  onCreate,
   initialQuery = "",
   autoFocus,
   inputId,
   labelledBy,
   invalid,
   describedBy,
+  required,
+  placeholder = "Buscar loja por nome, código, CNPJ ou cidade",
 }: {
   customerId: UUID | null;
   value: Location | null;
@@ -82,6 +97,8 @@ export function LocationPicker({
   customerName?: string | null;
   /** "Buscar em todos os clientes": tira o cliente que limita a busca. */
   onClearCustomer?: () => void;
+  /** "Cadastrar nova localização" quando a busca não acha nada (recebe o texto buscado). */
+  onCreate?: (query: string) => void;
   /** Texto inicial da busca (ex.: a loja citada na mensagem do cliente). */
   initialQuery?: string;
   autoFocus?: boolean;
@@ -90,6 +107,9 @@ export function LocationPicker({
   labelledBy?: string;
   invalid?: boolean;
   describedBy?: string;
+  /** Campo obrigatório (anunciado pelo leitor de tela; o asterisco fica no rótulo). */
+  required?: boolean;
+  placeholder?: string;
 }) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -126,28 +146,61 @@ export function LocationPicker({
     staleTime: 30_000,
   });
 
-  const recentRows: Row[] = browsing
+  const recentRows: PickRow[] = browsing
     ? recents.filter((r) => !customerId || r.customer_id === customerId).map((r) => ({ key: `recente-${r.id}`, recent: r }))
     : [];
   const showResults = !browsing || Boolean(customerId);
   const resultItems = showResults && results.data && (!browsing || debounced === "") ? results.data.items : [];
-  const resultRows: Row[] = resultItems
+  const resultRows: PickRow[] = resultItems
     .filter((l) => !recentRows.some((r) => r.recent?.id === l.id))
     .map((l) => ({ key: l.id, location: l }));
-  const rows = [...recentRows, ...resultRows];
-  // Resultado de uma busca anterior ainda na tela enquanto a nova não chega.
-  const stale = !browsing && (term !== debounced || results.isPlaceholderData);
+  const pickRows: PickRow[] = [...recentRows, ...resultRows];
+  // Resultado de uma busca anterior (ou das lojas de outro cliente) ainda na tela enquanto a nova não chega.
+  const stale = showResults && ((!browsing && term !== debounced) || results.isPlaceholderData);
   const searching = showResults && (stale || results.isFetching);
   const more = resultItems.length && results.data ? results.data.total - resultItems.length : 0;
 
-  // Lista nova: o destaque volta para o primeiro item.
+  // Nada achado (com texto, ou o cliente escolhido sem lojas): o que dizer e as saídas possíveis.
+  const nothingFound = pickRows.length === 0 && !searching && showResults && Boolean(results.data);
+  const emptyText = !nothingFound
+    ? ""
+    : browsing
+      ? customerName
+        ? `${customerName} não tem lojas ativas cadastradas.`
+        : "Este cliente não tem lojas ativas cadastradas."
+      : customerId
+        ? customerName
+          ? `Nenhuma loja de ${customerName} com “${term}”.`
+          : `Nenhuma loja deste cliente com “${term}”.`
+        : `Nenhuma loja com “${term}”.`;
+  const actionRows: Row[] = [];
+  if (nothingFound && customerId && !browsing && onClearCustomer) {
+    actionRows.push({ key: "acao-todos-clientes", action: { label: "Buscar em todos os clientes", icon: Search, run: onClearCustomer } });
+  }
+  if (nothingFound && onCreate) {
+    actionRows.push({
+      key: "acao-cadastrar",
+      action: {
+        label: "Cadastrar nova localização",
+        icon: Plus,
+        run: () => {
+          setOpen(false);
+          onCreate(term);
+        },
+      },
+    });
+  }
+  const rows: Row[] = [...pickRows, ...actionRows];
+
+  // Lista nova: o destaque volta para a primeira loja. Só com ações na lista, nada fica destacado: o
+  // Enter não dispara "Buscar em todos os clientes" sem a pessoa ter ido até ela pelas setas.
   const rowsKey = rows.map((r) => r.key).join("|");
   const [seenRows, setSeenRows] = useState(rowsKey);
   if (seenRows !== rowsKey) {
     setSeenRows(rowsKey);
-    setActive(0);
+    setActive(pickRows.length ? 0 : -1);
   }
-  const activeIndex = Math.max(0, Math.min(active, rows.length - 1));
+  const activeIndex = rows.length ? Math.max(-1, Math.min(active, rows.length - 1)) : -1;
 
   useEffect(() => {
     const next = focusNext.current;
@@ -185,6 +238,7 @@ export function LocationPicker({
   };
 
   const pick = async (row: Row) => {
+    if (row.action) return row.action.run();
     if (row.location) return choose(row.location);
     const recent = row.recent;
     setLoadingId(recent.id);
@@ -245,17 +299,17 @@ export function LocationPicker({
     );
   }
 
+  // A busca falhou (rede, sessão): diz isso em vez de ficar em "Buscando...".
+  const failure = results.error && !searching && pickRows.length === 0 ? `Não deu para buscar as lojas: ${errorMessage(results.error)}` : "";
   const status = !open
     ? ""
     : loadingId
       ? "Carregando a loja..."
-      : searching && rows.length === 0
+      : searching && pickRows.length === 0
         ? "Buscando..."
-        : rows.length
-          ? `${rows.length} ${rows.length === 1 ? "loja" : "lojas"} na lista`
-          : browsing
-            ? ""
-            : "Nenhuma loja encontrada";
+        : pickRows.length
+          ? `${pickRows.length} ${pickRows.length === 1 ? "loja" : "lojas"} na lista`
+          : failure || emptyText;
 
   const option = (row: Row, i: number) => (
     <li
@@ -275,9 +329,16 @@ export function LocationPicker({
         row.location && stale && "opacity-60",
       )}
     >
-      <span className="min-w-0 flex-1">
-        <RowText row={row} />
-      </span>
+      {row.action ? (
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm font-semibold text-brand-ink">
+          <row.action.icon aria-hidden className="size-3.5 shrink-0" />
+          {row.action.label}
+        </span>
+      ) : (
+        <span className="min-w-0 flex-1">
+          <RowText row={row} />
+        </span>
+      )}
       {row.recent && loadingId === row.recent.id ? <Loader2 aria-hidden className="size-4 shrink-0 animate-spin text-ink-subtle" /> : null}
     </li>
   );
@@ -307,12 +368,13 @@ export function LocationPicker({
             if (!open) return setOpen(true);
             if (!rows.length) return;
             const step = e.key === "ArrowDown" ? 1 : -1;
-            setActive((activeIndex + step + rows.length) % rows.length);
+            // Sem destaque (só ações na lista): a seta para baixo vai à primeira, a para cima à última.
+            setActive(activeIndex < 0 ? (step > 0 ? 0 : rows.length - 1) : (activeIndex + step + rows.length) % rows.length);
           } else if (e.key === "Enter" && !e.ctrlKey && !e.metaKey) {
             // Enter escolhe a loja destacada e nunca envia o formulário em volta (a OS sairia sem loja).
             e.preventDefault();
             if (!open || stale || loadingId) return;
-            const row = rows[activeIndex];
+            const row = activeIndex >= 0 ? rows[activeIndex] : undefined;
             if (row) void pick(row);
           } else if (e.key === "Escape") {
             // Esc fecha só a lista: o painel da OS em volta ignora a tecla já tratada aqui.
@@ -327,17 +389,18 @@ export function LocationPicker({
         }}
         autoFocus={autoFocus}
         autoComplete="off"
-        placeholder="Buscar loja por nome, código, CNPJ ou cidade"
+        placeholder={placeholder}
         className="pr-9 pl-9"
         role="combobox"
         aria-expanded={open}
         aria-controls={listId}
         aria-autocomplete="list"
-        aria-activedescendant={open && rows.length ? `${listId}-o${activeIndex}` : undefined}
+        aria-activedescendant={open && activeIndex >= 0 ? `${listId}-o${activeIndex}` : undefined}
         aria-labelledby={labelledBy}
         aria-label={labelledBy ? undefined : "Buscar loja"}
         aria-invalid={invalid || undefined}
         aria-describedby={describedBy}
+        aria-required={required || undefined}
       />
       {open && searching ? (
         <Loader2 aria-hidden className="pointer-events-none absolute top-2.5 right-3 size-4 animate-spin text-ink-subtle" />
@@ -357,35 +420,15 @@ export function LocationPicker({
         >
           {recentRows.length ? heading("Recentes") : null}
           {recentRows.map((row, i) => option(row, i))}
-          {browsing && resultRows.length ? heading(`Lojas de ${customerName || "do cliente"}`) : null}
+          {browsing && resultRows.length ? heading(customerName ? `Lojas de ${customerName}` : "Lojas do cliente") : null}
           {resultRows.map((row, i) => option(row, recentRows.length + i))}
-          {rows.length === 0 ? (
+          {pickRows.length === 0 ? (
             <li role="presentation" className="px-3 py-2 text-sm text-ink-muted">
-              {browsing && !customerId ? (
-                "Digite o nome, o código, o CNPJ ou a cidade da loja."
-              ) : searching ? (
-                "Buscando..."
-              ) : customerId && !browsing ? (
-                <span className="flex flex-col items-start gap-1.5">
-                  <span>
-                    Nenhuma loja de {customerName || "deste cliente"} com “{term}”.
-                  </span>
-                  {onClearCustomer ? (
-                    <button
-                      type="button"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={onClearCustomer}
-                      className="text-xs font-semibold text-brand-ink hover:underline"
-                    >
-                      Buscar em todos os clientes
-                    </button>
-                  ) : null}
-                </span>
-              ) : (
-                "Nenhuma loja encontrada."
-              )}
+              {browsing && !customerId ? "Digite o nome, o código, o CNPJ ou a cidade da loja." : nothingFound ? emptyText : failure || "Buscando..."}
             </li>
           ) : null}
+          {actionRows.length ? <li role="presentation" aria-hidden className="mx-3 my-1 border-t border-line" /> : null}
+          {actionRows.map((row, i) => option(row, pickRows.length + i))}
           {pickError ? (
             <li role="presentation" className="px-3 py-2 text-xs font-medium text-red-600 dark:text-red-400">
               {pickError}

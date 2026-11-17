@@ -24,10 +24,11 @@ def _out(items: list[dict[str, str]]) -> MessageTemplatesOut:
 
 @router.get("/tickets/{ticket_id}/messages", response_model=list[RenderedMessage])
 async def ticket_messages(ticket_id: uuid.UUID, db: DB, user: TicketManagerUser) -> list[dict]:
-    """Textos prontos para o grupo de WhatsApp, já preenchidos com os dados da OS."""
+    """Textos prontos para os grupos de WhatsApp, já preenchidos com os dados da OS. O da
+    situação atual vem com `suggested` (no máximo um)."""
     ticket = await tickets_svc.get_visible_ticket(db, user, ticket_id)
     rendered = await svc.for_ticket(db, ticket, user)
-    await db.commit()  # o link do relatório pode ter sido criado agora (OS concluída antiga)
+    await db.commit()  # o link do relatório pode ter sido criado agora (OS sem link)
     return rendered
 
 

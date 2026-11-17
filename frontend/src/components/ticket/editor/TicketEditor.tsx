@@ -50,7 +50,7 @@ import { formatDateTime, formatMinutes, formatShort } from "@/lib/format";
 import { useDocumentTitle } from "@/lib/hooks";
 import type { Comment, Quote, ReportLink, TicketDetail, TicketEvent, TicketStatus } from "@/lib/types";
 import { copyText, whatsappUrl } from "@/lib/whatsapp";
-import { GENERAL_FORM_ID, GeneralTab, type SaveState } from "./GeneralTab";
+import { GENERAL_FORM_ID, GeneralTab, GeneralView, type SaveState } from "./GeneralTab";
 import { StatusMenu } from "./StatusMenu";
 import { useUnsavedGuard } from "./useUnsavedGuard";
 
@@ -474,7 +474,9 @@ export function TicketEditor({
   const uid = useId();
   const formId = `${GENERAL_FORM_ID}-${uid}`;
   const tabsId = `os-${uid}`;
-  const dirty = saveState.dirty;
+  // Quem não edita a OS vê a Geral só para leitura (sem Salvar nem alteração pendente).
+  const editable = ticket.can_edit;
+  const dirty = editable && saveState.dirty;
   const canUnproductive = UNPRODUCTIVE_FROM.includes(ticket.status) && Boolean(ticket.assignee);
   const canFixTimes = hasRealTimes(ticket);
   const reopenable = (ticket.status === "closed" || ticket.status === "cancelled") && ticket.allowed_transitions.includes("reopened");
@@ -633,7 +635,11 @@ export function TicketEditor({
         {/* A Geral fica montada (escondida) nas outras abas: o que se digitou não se perde ao trocar de aba. */}
         <div role="tabpanel" id={`${tabsId}-panel-geral`} aria-labelledby={`${tabsId}-tab-geral`} hidden={tab !== "geral"}>
           <ReportStrip ticket={ticket} />
-          <GeneralTab ticket={ticket} formId={formId} onSaveState={onSaveState} onTransition={setTransition} />
+          {editable ? (
+            <GeneralTab ticket={ticket} formId={formId} onSaveState={onSaveState} onTransition={setTransition} />
+          ) : (
+            <GeneralView ticket={ticket} />
+          )}
         </div>
         {tab !== "geral" ? (
           <div role="tabpanel" id={`${tabsId}-panel-${tab}`} aria-labelledby={`${tabsId}-tab-${tab}`}>
@@ -666,7 +672,7 @@ export function TicketEditor({
       </div>
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-line bg-surface-2/60 px-5 py-3">
-        {tab === "geral" || dirty ? (
+        {editable && (tab === "geral" || dirty) ? (
           <div className="flex items-center gap-3">
             {/* Na Geral é o envio do formulário (Enter num campo também salva); nas outras abas, volta para ela e salva. */}
             <Button

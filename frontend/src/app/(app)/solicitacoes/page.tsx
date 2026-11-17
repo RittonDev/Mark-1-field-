@@ -1,6 +1,6 @@
 "use client";
 
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 import { ChevronLeft, ChevronRight, ClipboardPlus, Hand, Hash, MapPin, Search, UserRound, X } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -218,15 +218,28 @@ function RequestRow({
           </Button>
         ) : null}
         {open && !t.owner ? (
-          <Button size="sm" onClick={onPull} loading={pulling} title="Vai para a sua fila e o cliente passa a ver “Em análise”">
+          // Só a recebida entra em análise ao puxar; as outras (já em análise, agendadas...) só vêm para a fila.
+          <Button
+            size="sm"
+            onClick={onPull}
+            loading={pulling}
+            aria-label={`${t.status === "new" ? "Puxar e analisar" : "Puxar"} a ${t.code}`}
+            title={t.status === "new" ? "Vai para a sua fila e o cliente passa a ver “Em análise”" : "Vai para a sua fila"}
+          >
             {pulling ? null : <Hand className="size-4" />}
-            Puxar e analisar
+            {t.status === "new" ? "Puxar e analisar" : "Puxar"}
           </Button>
         ) : open && t.owner?.id !== meId ? (
           <ClaimButton code={t.code} busy={pulling} onClaim={onPull} />
         ) : t.status === "new" ? (
           // Já está na minha fila, mas o cliente ainda vê "Recebida".
-          <Button size="sm" onClick={onPull} loading={pulling} title="O cliente passa a ver “Em análise”">
+          <Button
+            size="sm"
+            onClick={onPull}
+            loading={pulling}
+            aria-label={`Analisar a ${t.code}`}
+            title="O cliente passa a ver “Em análise”"
+          >
             Analisar
           </Button>
         ) : null}
@@ -272,10 +285,12 @@ export default function RequestsInboxPage() {
           page_size: PAGE_SIZE,
         };
   const list = useQuery({
-    queryKey: ["solicitacoes", "list", params],
+    queryKey: ["solicitacoes", "list", tab, params],
     // A busca obsoleta (página, aba ou filtro trocados no meio) é cancelada.
     queryFn: ({ signal }) => api.get<Page<TicketListItem>>("/tickets", params, { signal }),
-    placeholderData: keepPreviousData,
+    // Na mesma aba, a página ou o filtro anterior fica esmaecido enquanto o novo carrega. Trocando de
+    // aba, não: a lista da outra aba apareceria com os grupos e as ações desta.
+    placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[2] === tab ? previous : undefined),
     refetchInterval: 60_000,
   });
   const count = useQuery({

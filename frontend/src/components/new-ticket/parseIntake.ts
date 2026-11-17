@@ -5,9 +5,10 @@ export type IntakeSource = "whatsapp" | "email";
 
 export interface IntakeParse {
   source: IntakeSource | null;
-  /** Assunto do e-mail ou a primeira frase útil da conversa. */
-  title: string | null;
-  /** O texto inteiro, limpo (sem data, hora e cabeçalhos). */
+  /**
+   * O escopo: o texto limpo (sem data, hora e cabeçalhos; no e-mail, o assunto na primeira linha). O
+   * técnico vê o escopo no app: telefones e e-mails viram "[telefone]" e "[e-mail]" (vão para o Contato).
+   */
   description: string;
   /** Quem escreveu: o primeiro remetente da conversa ou o "De:" do e-mail. */
   contactName: string | null;
@@ -41,7 +42,12 @@ const SUBJECT_PREFIX = /^\s*((re|res|enc|fw|fwd|tr)\s*:\s*)+/i;
 
 const CNPJ = /\b\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}\b/;
 const PHONE = /(?:\+?55[\s.-]?)?\(?\b(\d{2})\)?[\s.-]?(9?\d{4})[\s.-]?(\d{4})\b/;
+// Telefones a tirar do escopo: com DDD entre parênteses, com separador no meio ou celular de 11 dígitos
+// colado. Número de 10 dígitos sem nada (protocolo, pedido) fica, para não sumir com o nº do chamado.
+const PHONE_IN_TEXT =
+  /(?:\+?55[\s.-]?)?(?:\(\d{2}\)\s?\d{4,5}[\s.-]?\d{4}|\b\d{2}[\s.-]?9?\d{4}[\s.-]\d{4}|\b[1-9]{2}9\d{8})\b/g;
 const EMAIL = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/;
+const EMAIL_IN_TEXT = new RegExp(EMAIL.source, "g");
 // Nº de chamado em sistemas de atendimento (ServiceNow, Jira...): "INC0012345", "RITM-123456".
 const REF_CODE = /\b(INC|RITM|REQ|SR|CHG|WO|TASK|CS)[\s-]?(\d{4,})\b/i;
 // "Chamado nº 123456", "protocolo: AB-2026-0042", "ticket #98765" (o nº da nossa OS, "OS 15829", fica de fora).
@@ -56,11 +62,6 @@ const STORE_STOP = new Set([
 ]);
 const URGENT =
   /\b(urgente|urg[êe]ncia|parad[oa]s?|fora do ar|sem sistema|inoperante|emerg[êe]ncia|caiu|n[ãa]o liga|travad[oa]s?)\b/i;
-// Saudação no começo da frase (seguida de pontuação ou espaço: "oito PDVs" não perde o "oi").
-const GREETING =
-  /^(bom dia|boa tarde|boa noite|ol[áa]|oi|prezad[oa]s?|pessoal|caros?|tudo bem\??)(?=[\s,!.:;?-]|$)[\s,!.:;-]*/i;
-
-const TITLE_MAX = 90;
 
 /** Tira caracteres invisíveis que o WhatsApp põe no começo das linhas exportadas. */
 function clean(line: string): string {
@@ -76,34 +77,23 @@ function findPhone(text: string): string | null {
   return m ? formatPhone(m[1], m[2], m[3]) : null;
 }
 
-/** Primeira frase útil como título: sem saudação, até 90 letras, cortando entre palavras. */
-function titleFrom(lines: string[]): string | null {
-  for (const raw of lines) {
-    let line = raw.trim();
-    // A saudação pode vir duas vezes ("Bom dia, pessoal!").
-    line = line.replace(GREETING, "").replace(GREETING, "").trim();
-    if (line.length < 3) continue;
-    // Só a primeira frase, quando ela já diz o problema.
-    const sentence = line.split(/(?<=[.!?])\s+/)[0];
-    if (sentence.length >= 15) line = sentence;
-    if (line.length > TITLE_MAX) {
-      const cut = line.slice(0, TITLE_MAX);
-      const space = cut.lastIndexOf(" ");
-      line = space > 40 ? cut.slice(0, space) : cut;
-    }
-    line = line.replace(/[\s,;:.!?-]+$/, "");
-    if (line.length < 3) continue;
-    return line.charAt(0).toUpperCase() + line.slice(1);
-  }
-  return null;
+/** O escopo vai para o técnico (terceiro): telefone e e-mail do cliente ficam só no Contato. */
+function withoutContacts(text: string): string {
+  return text.replace(EMAIL_IN_TEXT, "[e-mail]").replace(PHONE_IN_TEXT, "[telefone]");
 }
 
+/**
+ * Como a mensagem chama a loja, para abrir a busca com ela. Só vale o que parece nome ou código (começa
+ * com número ou letra maiúscula): "a loja está sem sistema" ou "a loja parou" não viram pista.
+ */
 function storeHintFrom(text: string): string | null {
   const m = STORE.exec(text);
   if (!m) return null;
   const words = m[1].replace(/\s+-\s+/g, " ").split(/\s+/).filter(Boolean);
   // "na filial de Campinas": o "de" não ajuda na busca.
   while (words.length && /^(d[aoe]s?|n[ao]s?)$/i.test(words[0])) words.shift();
+  const first = words[0];
+  if (!first || STORE_STOP.has(first.toLowerCase()) || !/^[\p{Lu}\p{N}]/u.test(first)) return null;
   const kept: string[] = [];
   for (const word of words) {
     if (kept.length && STORE_STOP.has(word.toLowerCase())) break;
@@ -171,7 +161,6 @@ export function parseIntake(raw: string): IntakeParse {
     .filter((l) => !WHATSAPP_NOISE.test(l.trim()));
 
   let source: IntakeSource | null = null;
-  let title: string | null = null;
   let contactName: string | null = null;
   let contact: string | null = null;
   let body: string[] = lines;
@@ -183,11 +172,12 @@ export function parseIntake(raw: string): IntakeParse {
     const first = chat[0]?.sender ?? "";
     contactName = first ? senderName(first) : null;
     contact = findPhone(first);
+    // Conversa do grupo (cliente e central): cada fala com quem disse. Número fora da agenda vira
+    // "Cliente" (o escopo vai para o técnico, que não vê o contato do cliente).
     body =
       senders.length > 1
-        ? chat.flatMap((m) => [`${senderName(m.sender) ?? m.sender}: ${m.lines[0]}`, ...m.lines.slice(1)])
+        ? chat.flatMap((m) => [`${senderName(m.sender) ?? "Cliente"}: ${m.lines[0]}`, ...m.lines.slice(1)])
         : chat.flatMap((m) => m.lines);
-    title = titleFrom(chat.flatMap((m) => m.lines));
   } else {
     // E-mail: cabeçalhos "De:" e "Assunto:" nas primeiras linhas (acabam na primeira linha em branco).
     const headers = new Map<string, string>();
@@ -211,30 +201,56 @@ export function parseIntake(raw: string): IntakeParse {
       const name = from.replace(/<[^>]*>/g, "").replace(EMAIL, "").replace(/["'[\]()]/g, "").trim();
       contactName = name || null;
       contact = address;
-      title = subject.replace(SUBJECT_PREFIX, "").trim() || null;
       const rest = lines.slice(lastHeader + 1);
       const history = rest.findIndex((l) => EMAIL_HISTORY.test(l.trim()));
-      body = history >= 0 ? rest.slice(0, history) : rest;
-    } else {
-      title = titleFrom(lines);
+      const message = history >= 0 ? rest.slice(0, history) : rest;
+      // O assunto resume o pedido: abre o escopo (se o corpo já não começa com ele).
+      const topic = subject.replace(SUBJECT_PREFIX, "").trim();
+      const opening = message.find((l) => l.trim())?.trim() ?? "";
+      body = topic && !opening.toLowerCase().startsWith(topic.toLowerCase()) ? [topic, "", ...message] : message;
     }
   }
 
-  const description = tidy(body);
+  const tidied = tidy(body);
   const text = lines.join("\n");
-  const phone = findPhone(description);
+  const phone = findPhone(tidied);
   const cnpj = CNPJ.exec(text)?.[0].replace(/\D/g, "") ?? null;
 
   return {
     source,
-    title: title ? title.slice(0, 200) : null,
-    description,
+    description: withoutContacts(tidied),
     contactName: contactName ? contactName.slice(0, 160) : null,
-    // Telefone do corpo da mensagem vale mais que o e-mail do remetente (o técnico liga para ele).
+    // Telefone do corpo da mensagem vale mais que o e-mail do remetente (a central liga para ele).
     contact: (phone ?? contact)?.slice(0, 160) ?? null,
     clientReference: referenceFrom(text)?.slice(0, 80) ?? null,
     cnpj: cnpj && cnpj.length === 14 ? cnpj : null,
-    storeHint: storeHintFrom(description),
+    storeHint: storeHintFrom(tidied),
     urgent: URGENT.test(text),
   };
+}
+
+/** Nome para comparar: sem acento, minúsculo, só letras e números, sem o artigo do começo ("O Boticário"). */
+function comparable(name: string): string {
+  return name
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/^(?:o|a|os|as)\s+/, "");
+}
+
+/**
+ * Cliente citado pelo nome na mensagem ("Bom dia, aqui é da Madero..."). Só nomes de 4 letras ou mais e
+ * só um candidato: com "Madero" e "Madero Steak" citados, vale o nome mais longo, que contém o outro.
+ */
+export function customerIn<T extends { id: string; name: string }>(text: string, customers: T[]): T | null {
+  const haystack = ` ${comparable(text)} `;
+  const found = customers
+    .map((customer) => ({ customer, name: comparable(customer.name) }))
+    .filter(({ name }) => name.length >= 4 && haystack.includes(` ${name} `))
+    .sort((a, b) => b.name.length - a.name.length);
+  const best = found[0];
+  if (!best) return null;
+  return found.every(({ name }) => best.name.includes(name)) ? best.customer : null;
 }

@@ -1,7 +1,8 @@
 "use client";
 
-import { ClipboardPaste, Lightbulb, Undo2 } from "lucide-react";
-import { useId, useState } from "react";
+import clsx from "clsx";
+import { ChevronDown, ClipboardPaste, Lightbulb, Undo2 } from "lucide-react";
+import { useId, useRef, useState } from "react";
 import { Button, Card, Textarea } from "@/components/ui";
 
 export interface FilledChip {
@@ -17,9 +18,10 @@ export interface IntakeSuggestion {
 }
 
 /**
- * "Mensagem do cliente": o analista cola a conversa do WhatsApp ou o e-mail e os campos vazios da OS
- * se preenchem (origem, título, descrição, contato, nº do chamado e a loja). Cada campo preenchido vira
- * um chip que desfaz; a urgência só aparece como sugestão.
+ * "Colar mensagem do WhatsApp ou e-mail": o analista cola a conversa ou o e-mail do cliente e os campos
+ * vazios da OS se preenchem (cliente, localização, escopo e, em Mais opções, origem, contato e nº do
+ * chamado). Fica fechado até ser usado. Cada campo preenchido vira um chip que desfaz; a urgência só
+ * aparece como sugestão.
  */
 export function MessageIntake({
   onFill,
@@ -32,8 +34,11 @@ export function MessageIntake({
   onUndo: (key: string) => void;
   suggestions: IntakeSuggestion[];
 }) {
-  const titleId = useId();
+  const panelId = useId();
+  const textId = useId();
+  const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
+  const area = useRef<HTMLTextAreaElement>(null);
   const fill = () => {
     if (!text.trim()) return;
     onFill(text);
@@ -41,80 +46,94 @@ export function MessageIntake({
   };
   return (
     <Card>
-      <div className="flex items-start gap-3 px-5 py-4">
-        <span aria-hidden className="mt-px flex size-7 shrink-0 items-center justify-center rounded-lg bg-brand-soft text-brand-ink">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={panelId}
+        onClick={() => {
+          setOpen((o) => !o);
+          // Abriu: o foco vai direto para a caixa (é só colar).
+          if (!open) window.requestAnimationFrame(() => area.current?.focus());
+        }}
+        className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left transition-colors hover:bg-surface-2/60 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none sm:px-5"
+      >
+        <span aria-hidden className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-brand-soft text-brand-ink">
           <ClipboardPaste className="size-4" />
         </span>
-        <div className="min-w-0 flex-1">
-          <h2 id={titleId} className="text-[15px] leading-5 font-bold tracking-[-0.01em] text-ink">
-            Mensagem do cliente <span className="text-xs font-medium text-ink-muted">(opcional)</span>
-          </h2>
-          <p className="mt-0.5 text-xs text-ink-muted">
-            Cole a conversa do WhatsApp ou o e-mail: os campos vazios se preenchem (loja, título, contato, nº do chamado). O
-            texto não sai do navegador.
-          </p>
-          <Textarea
-            rows={3}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              // Ctrl+Enter aqui preenche os campos (no resto da tela, abre a OS).
-              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-                e.preventDefault();
-                fill();
-              }
-            }}
-            aria-labelledby={titleId}
-            placeholder="[09:41, 13/11/2026] Cliente: A loja 41 está sem sistema desde ontem..."
-            className="mt-2.5"
-          />
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <Button size="sm" disabled={!text.trim()} onClick={fill}>
-              Preencher campos
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-bold text-ink">Colar mensagem do WhatsApp ou e-mail</span>
+          <span className="block text-xs text-ink-muted">Preenche cliente, localização e escopo a partir do pedido do cliente.</span>
+        </span>
+        <ChevronDown aria-hidden className={clsx("size-4 shrink-0 text-ink-subtle transition-transform duration-200", open && "rotate-180")} />
+      </button>
+      {/* Sempre no documento (o aria-controls aponta para ele); fechado, fica escondido. */}
+      <div id={panelId} hidden={!open} className="animate-enter border-t border-line px-4 py-3 sm:px-5">
+        <label htmlFor={textId} className="text-xs font-semibold text-ink/80">
+          Mensagem do cliente
+        </label>
+        <Textarea
+          ref={area}
+          id={textId}
+          rows={4}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            // Ctrl+Enter aqui preenche os campos (no resto da tela, cria a OS).
+            if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+              e.preventDefault();
+              fill();
+            }
+          }}
+          placeholder="[09:41, 13/11/2026] Cliente: A loja 41 está sem sistema desde ontem..."
+          className="mt-1.5"
+        />
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <Button size="sm" disabled={!text.trim()} onClick={fill}>
+            Preencher campos
+          </Button>
+          {text ? (
+            <Button size="sm" variant="ghost" onClick={() => setText("")}>
+              Limpar
             </Button>
-            {text ? (
-              <Button size="sm" variant="ghost" onClick={() => setText("")}>
-                Limpar
-              </Button>
-            ) : null}
-          </div>
-          {filled.length || suggestions.length ? (
-            <div className="mt-3 flex flex-col gap-2" aria-live="polite">
-              {filled.length ? (
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-xs font-semibold text-ink/80">Preenchido:</span>
-                  {filled.map((chip) => (
-                    <span
-                      key={chip.key}
-                      className="inline-flex max-w-full items-center gap-1 rounded-full bg-brand-soft py-0.5 pr-1 pl-2.5 text-xs font-medium text-brand-ink"
-                    >
-                      <span className="truncate">{chip.label}</span>
-                      <button
-                        type="button"
-                        onClick={() => onUndo(chip.key)}
-                        className="rounded-full p-0.5 hover:bg-brand/15"
-                        aria-label={`Desfazer: ${chip.label}`}
-                        title="Desfazer"
-                      >
-                        <Undo2 aria-hidden className="size-3" />
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              ) : null}
-              {suggestions.map((s) => (
-                <p key={s.key} className="flex flex-wrap items-center gap-1.5 text-xs text-ink-muted">
-                  <Lightbulb aria-hidden className="size-3.5 shrink-0 text-ink-subtle" />
-                  {s.label}
-                  <button type="button" onClick={s.onApply} className="font-semibold text-brand-ink hover:underline">
-                    {s.action}
+          ) : null}
+          <span className="text-xs text-ink-subtle">O texto não sai do navegador. Telefones e e-mails vão para o Contato, não para o escopo.</span>
+        </div>
+      </div>
+      {filled.length || suggestions.length ? (
+        <div className="flex flex-col gap-2 border-t border-line px-4 py-3 sm:px-5" aria-live="polite">
+          {filled.length ? (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-xs font-semibold text-ink/80">Preenchido pela mensagem:</span>
+              {filled.map((chip) => (
+                <span
+                  key={chip.key}
+                  className="inline-flex max-w-full items-center gap-1 rounded-full bg-brand-soft py-0.5 pr-1 pl-2.5 text-xs font-medium text-brand-ink"
+                >
+                  <span className="truncate">{chip.label}</span>
+                  <button
+                    type="button"
+                    onClick={() => onUndo(chip.key)}
+                    className="rounded-full p-0.5 hover:bg-brand/15 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+                    aria-label={`Desfazer: ${chip.label}`}
+                    title="Desfazer"
+                  >
+                    <Undo2 aria-hidden className="size-3" />
                   </button>
-                </p>
+                </span>
               ))}
             </div>
           ) : null}
+          {suggestions.map((s) => (
+            <p key={s.key} className="flex flex-wrap items-center gap-1.5 text-xs text-ink-muted">
+              <Lightbulb aria-hidden className="size-3.5 shrink-0 text-ink-subtle" />
+              {s.label}
+              <button type="button" onClick={s.onApply} className="font-semibold text-brand-ink hover:underline">
+                {s.action}
+              </button>
+            </p>
+          ))}
         </div>
-      </div>
+      ) : null}
     </Card>
   );
 }

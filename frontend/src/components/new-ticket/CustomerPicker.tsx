@@ -17,6 +17,7 @@ export function CustomerPicker({
   ariaLabel,
   invalid,
   describedBy,
+  required,
   placeholder = "Buscar cliente por nome ou CNPJ",
 }: {
   customers: Customer[] | undefined;
@@ -30,6 +31,7 @@ export function CustomerPicker({
   ariaLabel?: string;
   invalid?: boolean;
   describedBy?: string;
+  required?: boolean;
   placeholder?: string;
 }) {
   const items = useMemo<ComboItem<Customer>[]>(
@@ -58,6 +60,7 @@ export function CustomerPicker({
       ariaLabel={ariaLabel ?? "Cliente"}
       invalid={invalid}
       describedBy={describedBy}
+      required={required}
       placeholder={placeholder}
       emptyText="Nenhum cliente com esse nome ou CNPJ"
       clearLabel="Tirar o cliente"

@@ -27,6 +27,9 @@ export function ServiceTypePicker({
   id,
   labelledBy,
   ariaLabel,
+  invalid,
+  describedBy,
+  required,
   placeholder = "Buscar tipo de serviço",
 }: {
   types: ServiceType[] | undefined;
@@ -38,6 +41,9 @@ export function ServiceTypePicker({
   id?: string;
   labelledBy?: string;
   ariaLabel?: string;
+  invalid?: boolean;
+  describedBy?: string;
+  required?: boolean;
   placeholder?: string;
 }) {
   const items = useMemo<ComboItem<ServiceType>[]>(() => {
@@ -62,6 +68,9 @@ export function ServiceTypePicker({
       id={id}
       labelledBy={labelledBy}
       ariaLabel={ariaLabel ?? "Tipo de serviço"}
+      invalid={invalid}
+      describedBy={describedBy}
+      required={required}
       placeholder={placeholder}
       emptyText="Nenhum tipo de serviço com esse nome"
       clearLabel="Tirar o tipo de serviço"

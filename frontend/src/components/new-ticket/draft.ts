@@ -1,4 +1,4 @@
-// Estado da Nova OS e as regras que valem em qualquer mudança (trocar loja, cliente ou tipo de serviço).
+// Estado da Nova OS e as regras que valem em qualquer mudança (trocar cliente, localização ou tipo de OS).
 // Fica num módulo próprio porque também vira o rascunho guardado na aba (sessionStorage).
 
 import type { FormTemplate, Location, Project, ServiceType, Tag, TicketPriority, TicketType, UUID } from "@/lib/types";
@@ -6,9 +6,13 @@ import type { FormTemplate, Location, Project, ServiceType, Tag, TicketPriority,
 export type OwnerMode = "me" | "none" | "other";
 /** Por onde o chamado chegou ("web" = outro canal). */
 export type Origin = "whatsapp" | "email" | "phone" | "web";
+/** Padrão de etiquetas da OS: o da abertura ou o de OS de projeto. */
+export type TagMode = "create" | "project";
 
 export interface NewTicketForm {
+  /** Opcional: em branco, a OS sai com o título automático (autoTitle). */
   title: string;
+  /** O escopo: o que deve ser feito no atendimento. */
   description: string;
   type: TicketType;
   category_id: string;
@@ -32,23 +36,27 @@ export interface NewTicketDraft {
   form: NewTicketForm;
   location: Location | null;
   serviceType: ServiceType | null;
-  /** Loja ainda sem cadastro: vai o cliente e o endereço do atendimento. */
-  noStore: boolean;
+  /** Atender em outro endereço (ou ponto de referência) que não o da localização. */
   otherAddress: boolean;
   helperIds: UUID[];
   ownerMode: OwnerMode;
   ownerId: string;
-  /** Título e duração vieram do tipo de serviço (não foram digitados): trocam junto com ele. */
-  titleFromType: boolean;
+  /** A duração veio do tipo de OS (não foi digitada): sai junto com ele. */
   minutesFromType: boolean;
+  /** As etiquetas seguem o padrão (abertura ou projeto) até o analista mexer nelas. */
+  tagsAuto: boolean;
+  /** Etiquetas escolhidas pelo analista (valem com tagsAuto false). */
   tags: Tag[];
+  /** O padrão que valia quando o analista mexeu nas etiquetas: avisa se a OS entrar ou sair de projeto. */
+  tagsMode: TagMode;
   formIds: UUID[];
-  /** Formulários marcados sozinhos por serem do tipo de serviço escolhido. */
+  /** Formulários marcados sozinhos por serem do tipo de OS escolhido. */
   autoFormIds: UUID[];
   formsRequired: boolean;
 }
 
-export const DRAFT_VERSION = 1;
+// Versão 2: título opcional, localização obrigatória e etiquetas pelo padrão (rascunhos da 1 não voltam).
+export const DRAFT_VERSION = 2;
 export const draftKey = (userId: string) => `maxx.novaOs.rascunho.${userId}`;
 export const ORIGIN_KEY = "maxx.novaOs.origem";
 
@@ -82,14 +90,14 @@ export function blankDraft(source: Origin, keep?: { location: Location | null; c
     },
     location: keep?.location ?? null,
     serviceType: null,
-    noStore: false,
     otherAddress: false,
     helperIds: [],
     ownerMode: "me",
     ownerId: "",
-    titleFromType: false,
     minutesFromType: false,
+    tagsAuto: true,
     tags: [],
+    tagsMode: "create",
     formIds: [],
     autoFormIds: [],
     formsRequired: true,
@@ -112,24 +120,35 @@ export function isFilled(d: NewTicketDraft): boolean {
       f.date ||
       f.assignee_id ||
       d.serviceType ||
-      d.tags.length ||
+      !d.tagsAuto ||
       d.formIds.length ||
       d.helperIds.length,
   );
 }
 
-/** Tira o tipo de serviço e, junto, o título e a duração que vieram dele. */
+/** "21795 · BOT - SH. PIEDADE": o código (quando há) e o nome da localização. */
+export function locationLabel(location: Pick<Location, "code" | "name">): string {
+  return [location.code, location.name].filter(Boolean).join(" · ");
+}
+
+/**
+ * Título da OS quando o analista deixa o campo em branco: "<Tipo de OS> · <Localização>", como as OS
+ * aparecem no Field Control; sem os dois, a primeira linha do escopo.
+ */
+export function autoTitle(d: NewTicketDraft): string {
+  const joined = [d.serviceType?.name.trim(), d.location?.name.trim()].filter(Boolean).join(" · ");
+  if (joined.length >= 3) return joined.slice(0, 200);
+  const firstLine = d.form.description.split("\n").map((line) => line.trim()).find(Boolean) ?? "";
+  return firstLine.slice(0, 200);
+}
+
+/** Tira o tipo de OS e, junto, a duração e os formulários que vieram dele. */
 function withoutServiceType(d: NewTicketDraft): NewTicketDraft {
   return {
     ...d,
     serviceType: null,
-    titleFromType: false,
     minutesFromType: false,
-    form: {
-      ...d.form,
-      title: d.titleFromType ? "" : d.form.title,
-      estimated_minutes: d.minutesFromType ? "" : d.form.estimated_minutes,
-    },
+    form: { ...d.form, estimated_minutes: d.minutesFromType ? "" : d.form.estimated_minutes },
     formIds: d.formIds.filter((id) => !d.autoFormIds.includes(id)),
     autoFormIds: [],
   };
@@ -142,11 +161,11 @@ function projectFits(projectId: string, customerId: string, projects: Project[] 
   return !project || !project.customer || !customerId || project.customer.id === customerId;
 }
 
-/** Troca de cliente: limpa o que é do cliente anterior (loja, tipo de serviço do catálogo dele, projeto). */
+/** Troca de cliente: limpa o que é do cliente anterior (localização, tipo de OS do catálogo dele, projeto). */
 export function withCustomer(d: NewTicketDraft, customerId: string, projects: Project[] | undefined): NewTicketDraft {
   let next: NewTicketDraft = { ...d, form: { ...d.form, customer_id: customerId } };
   if (next.location && next.location.customer_id !== customerId) {
-    next = { ...next, location: null, otherAddress: false, form: { ...next.form, location_id: "", service_address: next.noStore ? next.form.service_address : "" } };
+    next = { ...next, location: null, otherAddress: false, form: { ...next.form, location_id: "", service_address: "" } };
   }
   const st = next.serviceType;
   if (st?.customer_id && st.customer_id !== customerId) next = withoutServiceType(next);
@@ -154,7 +173,7 @@ export function withCustomer(d: NewTicketDraft, customerId: string, projects: Pr
   return next;
 }
 
-/** Loja escolhida (ou tirada): a loja define o cliente; o "outro endereço" era da loja anterior. */
+/** Localização escolhida (ou tirada): ela define o cliente; o "outro endereço" era da anterior. */
 export function withLocation(d: NewTicketDraft, location: Location | null, projects: Project[] | undefined): NewTicketDraft {
   const base: NewTicketDraft = {
     ...d,
@@ -165,21 +184,18 @@ export function withLocation(d: NewTicketDraft, location: Location | null, proje
   return location ? withCustomer(base, location.customer_id, projects) : base;
 }
 
-/** Tipo de serviço escolhido: duração, título (se não foi digitado), categoria e formulários dele. */
+/** Tipo de OS escolhido: a duração, a categoria e os formulários dele. */
 export function withServiceType(d: NewTicketDraft, st: ServiceType | null, templates: FormTemplate[] | undefined): NewTicketDraft {
   const base = withoutServiceType(d);
   if (!st) return base;
-  const keepTitle = Boolean(base.form.title.trim());
   const suggested = (templates ?? []).filter((t) => t.service_type_ids.includes(st.id)).map((t) => t.id);
   const added = suggested.filter((id) => !base.formIds.includes(id));
   return {
     ...base,
     serviceType: st,
-    titleFromType: !keepTitle,
     minutesFromType: true,
     form: {
       ...base.form,
-      title: keepTitle ? base.form.title : st.name.slice(0, 200),
       estimated_minutes: String(st.estimated_minutes),
       category_id: base.form.category_id || st.category_id || "",
       // Tipo do catálogo de um cliente: a OS é desse cliente.

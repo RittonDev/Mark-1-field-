@@ -25,3 +25,5 @@ class RenderedMessage(BaseModel):
     key: str
     name: str
     text: str
+    # O texto da situação atual da OS (no máximo um): confirmada, a caminho, chegou, encerrada...
+    suggested: bool = False

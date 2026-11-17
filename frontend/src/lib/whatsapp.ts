@@ -22,6 +22,12 @@ export interface GroupText {
 export const GROUP_TEXT_COPIED = "Texto copiado. Cole no grupo do WhatsApp.";
 
 /**
+ * Texto lido há mais que isso é buscado de novo antes de copiar: hora, previsão de chegada e situação
+ * da OS mudam.
+ */
+export const GROUP_TEXT_FRESH_MS = 60_000;
+
+/**
  * Textos prontos da OS. A chave fica sob ["ticket", id]: o que muda a OS (salvar, mudar a situação,
  * evento em tempo real) relê os textos junto.
  */
@@ -38,14 +44,6 @@ export function suggestedFirst(list: GroupText[]): GroupText[] {
   const pick = list.find((m) => m.suggested);
   if (!pick) return list;
   return [pick, ...list.filter((m) => m !== pick).map((m) => (m.suggested ? { ...m, suggested: false } : m))];
-}
-
-/**
- * Abre o WhatsApp com o texto, sem número: a pessoa escolhe o grupo. Texto longo demais para ir no
- * endereço abre a conversa vazia (copie antes e cole).
- */
-export function openWhatsApp(text: string) {
-  window.open(whatsappUrl(null, text.length <= WHATSAPP_TEXT_LIMIT ? text : ""), "_blank", "noopener,noreferrer");
 }
 
 /** Abre a conversa com o número (DDD + número; o 55 entra quando falta) já com o texto. */

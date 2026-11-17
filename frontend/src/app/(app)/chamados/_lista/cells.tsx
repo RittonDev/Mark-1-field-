@@ -1,14 +1,12 @@
 "use client";
 
 import clsx from "clsx";
-import { FolderKanban, Hand, Pause } from "lucide-react";
+import { Hand, Pause, RotateCcw } from "lucide-react";
 import { PriorityBadge, SlaBadge, SlaCountdown, StatusBadge } from "@/components/badges";
-import { dayTimeLabel } from "@/components/new-ticket/dayTime";
-import { TagChips } from "@/components/TagChips";
-import { ArrivalChip, OnsiteBar, RecurrenceChip } from "@/components/ticket/FieldClock";
+import { ArrivalChip, OnsiteBar } from "@/components/ticket/FieldClock";
 import { TicketLink } from "@/components/ticket/TicketLink";
 import { SLA_STATUS, STATUS } from "@/lib/constants";
-import { dayKey, formatMinutes, formatTime, initials } from "@/lib/format";
+import { dayKey, formatDate, formatDateTime, formatMinutes, formatShort, formatTime, initials } from "@/lib/format";
 import type { TicketListItem, UUID } from "@/lib/types";
 
 /** OS ainda aberta (nem resolvida, nem fechada, nem cancelada). */
@@ -33,97 +31,124 @@ export function needsReschedule(t: TicketListItem): boolean {
 /** Aguardando cliente ou fornecedor: sem técnico é o esperado. */
 const waiting = (t: TicketListItem) => t.status === "on_hold_customer" || t.status === "on_hold_vendor";
 
-/** Loja como o analista fala dela: "041 · Shopping Iguatemi · Campinas". */
-export function storeLabel(t: TicketListItem): string | null {
-  if (!t.location) return null;
-  return [t.location.code, t.location.name, t.location.city].filter(Boolean).join(" · ");
-}
+const empty = <span className="text-xs text-ink-subtle">—</span>;
 
-/** Nº, título e o que ajuda a reconhecer a OS (chamado do cliente, projeto, categoria, etiquetas). */
-export function TicketTitleCell({ t, compact }: { t: TicketListItem; compact: boolean }) {
+/** Identificador como no Field Control (o nº puro, em negrito): abre a OS no painel. */
+export function IdentifierCell({ t }: { t: TicketListItem }) {
   return (
-    <>
-      <TicketLink ticketId={t.id} className="block font-semibold text-ink hover:text-brand-ink">
-        {/* O nº nunca quebra no meio ("OS-" numa linha e o número na outra). */}
-        <span className="flex min-w-0 items-center gap-1.5 font-mono text-[11px] font-normal whitespace-nowrap text-ink-subtle">
-          {t.code}
-          {t.client_reference ? (
-            <span className="truncate" title={`Nº do chamado do cliente: ${t.client_reference}`}>
-              · {t.client_reference}
-            </span>
-          ) : null}
-        </span>
-        <span className={compact ? "block truncate" : "line-clamp-2"} title={t.title}>
-          {t.title}
-        </span>
-      </TicketLink>
-      {compact ? null : (
-        <>
-          {t.project || t.category ? (
-            <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-ink-subtle">
-              {t.project ? (
-                <span className="inline-flex shrink-0 items-center gap-1 font-medium text-ink-muted" title={`Projeto ${t.project.code} · ${t.project.name}`}>
-                  <FolderKanban aria-hidden className="size-3" />
-                  {t.project.code}
-                </span>
-              ) : null}
-              {t.category ? (
-                <span className="truncate" title={t.category.full_name}>
-                  {t.category.full_name}
-                </span>
-              ) : null}
-            </span>
-          ) : null}
-          {t.recurrence_30d || t.tags?.length ? (
-            <span className="mt-1.5 flex flex-wrap gap-1">
-              <RecurrenceChip count={t.recurrence_30d} />
-              <TagChips tags={t.tags} max={2} />
-            </span>
-          ) : null}
-        </>
-      )}
-    </>
+    <TicketLink
+      ticketId={t.id}
+      label={`OS ${t.number}: ${t.title}`}
+      title={`${t.code} · ${t.title}`}
+      className="rounded font-bold text-ink tabular-nums underline-offset-2 hover:text-brand-ink hover:underline"
+    >
+      {t.number}
+    </TicketLink>
   );
 }
 
-export function StatusCell({ t }: { t: TicketListItem }) {
-  return (
-    <div className="flex flex-wrap items-center gap-1">
-      <StatusBadge status={t.status} />
-      <PriorityBadge priority={t.priority} compact />
-    </div>
-  );
-}
-
-/** Quando é a visita. Atraso em vermelho (como na Minha fila); aberta sem data diz "Sem agenda". */
-export function AgendaCell({ t, now, compact }: { t: TicketListItem; now: number; compact: boolean }) {
+/** Dia do agendamento (dd/mm/aaaa) e a hora embaixo; atraso em vermelho, como na Minha fila. */
+export function ScheduleCell({ t, now }: { t: TicketListItem; now: number }) {
   const open = isOpenTicket(t);
   const late = open ? lateMinutes(t, now) : null;
-  const reschedule = needsReschedule(t);
-  const rescheduleNote = reschedule ? (
+  const reschedule = needsReschedule(t) ? (
     <span className="text-xs font-medium text-amber-700 dark:text-amber-300" title="O técnico foi ao local e não atendeu">
       Improdutiva: reagendar
     </span>
   ) : null;
-  if (!t.scheduled_start) {
+  const start = t.scheduled_start;
+  if (!start) {
     return (
-      <div className="flex flex-col gap-0.5">
+      <div className="flex flex-col gap-0.5 whitespace-nowrap">
         <span className="text-xs text-ink-subtle">{open ? "Sem agenda" : "—"}</span>
-        {rescheduleNote}
+        {reschedule}
       </div>
     );
   }
-  const end = t.scheduled_end;
-  const endLabel = end ? (dayKey(end) === dayKey(t.scheduled_start) ? formatTime(end) : dayTimeLabel(end, now, true)) : null;
+  const end = t.scheduled_end && dayKey(t.scheduled_end) === dayKey(start) ? formatTime(t.scheduled_end) : null;
   return (
-    <div className="flex flex-col gap-0.5 whitespace-nowrap">
-      <span className={clsx("text-sm tabular-nums", open ? "text-ink" : "text-ink-muted")}>{dayTimeLabel(t.scheduled_start, now)}</span>
-      {late !== null ? (
-        <span className="text-xs font-semibold text-red-700 dark:text-red-300">Atrasada há {formatMinutes(Math.max(1, late))}</span>
-      ) : endLabel && !compact ? (
-        <span className="text-xs text-ink-subtle tabular-nums">até {endLabel}</span>
+    <div className="flex flex-col gap-0.5 whitespace-nowrap" title={`Agendada para ${formatDateTime(start)}`}>
+      <span className={clsx("tabular-nums", open ? "text-ink" : "text-ink-muted")}>{formatDate(start)}</span>
+      <span
+        className={clsx("text-xs tabular-nums", late !== null ? "font-semibold text-red-700 dark:text-red-300" : "text-ink-subtle")}
+      >
+        {formatTime(start)}
+        {end ? `–${end}` : ""}
+        {late !== null ? ` · atrasada há ${formatMinutes(Math.max(1, late))}` : ""}
+      </span>
+      {reschedule}
+    </div>
+  );
+}
+
+export function CustomerCell({ t }: { t: TicketListItem }) {
+  const name = t.customer?.name ?? t.requester_name;
+  if (!name) return empty;
+  return (
+    <span className="block max-w-[14rem] truncate" title={name}>
+      {name}
+    </span>
+  );
+}
+
+/**
+ * Loja (nome) e, embaixo, o código (quando o nome não o traz) e a cidade. Duas ou mais OS na mesma loja
+ * em 30 dias indicam problema que volta: o aviso fica em âmbar.
+ */
+export function LocationCell({ t }: { t: TicketListItem }) {
+  const l = t.location;
+  if (!l) return empty;
+  const code = l.code && !l.name.includes(l.code) ? l.code : null;
+  const town = l.city ? `${l.city}${l.state ? `/${l.state}` : ""}` : null;
+  const detail = [code, town].filter(Boolean).join(" · ");
+  const recurrence = t.recurrence_30d ?? 0;
+  return (
+    <div className="max-w-[18rem] min-w-[10rem]">
+      <span className="block truncate" title={l.name}>
+        {l.name}
+      </span>
+      {detail || recurrence >= 2 ? (
+        <span className="flex min-w-0 items-center gap-1.5 text-xs text-ink-subtle">
+          {detail ? (
+            <span className="truncate" title={detail}>
+              {detail}
+            </span>
+          ) : null}
+          {recurrence >= 2 ? (
+            <span
+              className="inline-flex shrink-0 items-center gap-0.5 font-medium text-amber-700 dark:text-amber-300"
+              title="Outras OS nesta loja nos últimos 30 dias"
+            >
+              <RotateCcw aria-hidden className="size-3" />
+              {recurrence} OS em 30 dias
+            </span>
+          ) : null}
+        </span>
       ) : null}
-      {rescheduleNote}
+    </div>
+  );
+}
+
+export function StatusCell({ t }: { t: TicketListItem }) {
+  return <StatusBadge status={t.status} />;
+}
+
+export function PriorityCell({ t }: { t: TicketListItem }) {
+  return <PriorityBadge priority={t.priority} />;
+}
+
+/** Título da OS e, embaixo, o nº do chamado no sistema do cliente. */
+export function TitleCell({ t }: { t: TicketListItem }) {
+  return (
+    <div className="max-w-[20rem] min-w-[12rem]">
+      <span className="line-clamp-2" title={t.title}>
+        {t.title}
+      </span>
+      {t.client_reference ? (
+        <span className="block truncate text-xs text-ink-subtle" title={`Nº do chamado do cliente: ${t.client_reference}`}>
+          Chamado do cliente: {t.client_reference}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -132,18 +157,14 @@ export function AgendaCell({ t, now, compact }: { t: TicketListItem; now: number
 export function TechnicianCell({ t }: { t: TicketListItem }) {
   if (!t.assignee) {
     // Sem técnico só é problema na OS em aberto que não está esperando o cliente ou o fornecedor.
-    return isOpenTicket(t) && !waiting(t) ? (
-      <span className="text-xs font-medium text-amber-700 dark:text-amber-300">Sem técnico</span>
-    ) : (
-      <span className="text-xs text-ink-subtle">—</span>
-    );
+    return isOpenTicket(t) && !waiting(t) ? <span className="text-xs font-medium text-amber-700 dark:text-amber-300">Sem técnico</span> : empty;
   }
   const helpers = t.helpers ?? [];
   const helperNames = helpers.map((h) => h.name).join(", ");
   return (
-    <>
+    <div className="max-w-[12rem]">
       <span className="flex min-w-0 items-center">
-        {/* Nome longo não empurra a coluna da OS: corta com reticências (nome inteiro no título). */}
+        {/* Nome longo corta com reticências (nome inteiro no título). */}
         <span className="truncate" title={t.assignee.name}>
           {t.assignee.name}
         </span>
@@ -166,25 +187,7 @@ export function TechnicianCell({ t }: { t: TicketListItem }) {
         ) : null}
       </span>
       {t.team ? <span className="block truncate text-xs text-ink-subtle">{t.team.name}</span> : null}
-    </>
-  );
-}
-
-/** Cliente e loja (código, nome e cidade). */
-export function StoreCell({ t }: { t: TicketListItem }) {
-  const customer = t.customer?.name ?? t.requester_name ?? "—";
-  const store = storeLabel(t);
-  return (
-    <>
-      <span className="block truncate" title={customer}>
-        {customer}
-      </span>
-      {store ? (
-        <span className="block truncate text-xs text-ink-subtle" title={store}>
-          {store}
-        </span>
-      ) : null}
-    </>
+    </div>
   );
 }
 
@@ -216,12 +219,12 @@ export function OwnerCell({
           >
             {initials(owner.name)}
           </span>
-          <span className="max-w-[6rem] truncate text-xs text-ink-muted max-2xl:sr-only" title={owner.name}>
+          <span className="max-w-[7rem] truncate text-xs text-ink-muted" title={owner.name}>
             {mine ? "Você" : owner.name.split(" ")[0]}
           </span>
         </>
       ) : (
-        <span className="text-xs text-ink-subtle">—</span>
+        empty
       )}
       {isOpenTicket(t) && !mine ? (
         <button
@@ -231,8 +234,8 @@ export function OwnerCell({
             onClaim(t);
           }}
           disabled={claiming}
-          className="-my-1 shrink-0 rounded-md p-1.5 text-ink-subtle transition-colors hover:bg-surface-3 hover:text-brand-ink focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none disabled:opacity-40"
-          aria-label={owner ? `Assumir ${t.code} (hoje com ${owner.name})` : `Assumir ${t.code}`}
+          className="-my-1 shrink-0 rounded-md p-1.5 text-ink-subtle transition-colors hover:bg-surface-3 hover:text-brand-ink focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none disabled:opacity-40"
+          aria-label={owner ? `Assumir a OS ${t.number} (hoje com ${owner.name})` : `Assumir a OS ${t.number}`}
           title={owner ? `Assumir: a OS sai da fila de ${owner.name} e vai para a sua` : "Assumir: a OS vai para a sua fila"}
         >
           <Hand aria-hidden className="size-4" />
@@ -243,12 +246,10 @@ export function OwnerCell({
 }
 
 /** Prazo do SLA: cor só para o problema (em risco, violado); no prazo, cumprido e pausado ficam neutros. */
-export function SlaCell({ t, now, compact }: { t: TicketListItem; now: number; compact: boolean }) {
-  const open = isOpenTicket(t);
+export function SlaCell({ t }: { t: TicketListItem }) {
   const status = t.sla_status;
-  const arrivalLate = Boolean(t.arrival_due_at && new Date(t.arrival_due_at).getTime() < now);
   return (
-    <div className="flex flex-col items-start gap-1">
+    <div className="flex max-w-[12rem] flex-col items-start gap-1">
       {status === "breached" || status === "at_risk" ? (
         <SlaBadge status={status} />
       ) : (
@@ -258,53 +259,17 @@ export function SlaCell({ t, now, compact }: { t: TicketListItem; now: number; c
         </span>
       )}
       {status === "paused" ? null : <SlaCountdown ticket={t} />}
-      {/* Prazo de chegada à loja; na lista compacta, só quando já passou. */}
-      {open && !t.arrived_at && (!compact || arrivalLate) ? <ArrivalChip ticket={t} compact /> : null}
-      {!compact && t.status === "in_progress" ? <OnsiteBar ticket={t} className="mt-0.5" /> : null}
+      {/* Prazo de chegada à loja (enquanto o técnico não chega) e o tempo na loja. */}
+      {isOpenTicket(t) && !t.arrived_at ? <ArrivalChip ticket={t} compact /> : null}
+      {t.status === "in_progress" ? <OnsiteBar ticket={t} className="mt-0.5" /> : null}
     </div>
   );
 }
 
-/** A OS como cartão, no lugar da tabela em tela estreita (celular): o toque abre a OS no painel. */
-export function TicketCard({ t, now }: { t: TicketListItem; now: number }) {
-  const store = storeLabel(t);
-  const late = isOpenTicket(t) ? lateMinutes(t, now) : null;
+export function CreatedCell({ t }: { t: TicketListItem }) {
   return (
-    <TicketLink ticketId={t.id} className="flex flex-col gap-1.5 px-4 py-3 transition-colors hover:bg-[var(--row-hover)]">
-      <span className="flex items-center justify-between gap-2">
-        <span className="min-w-0 truncate font-mono text-[11px] text-ink-subtle">
-          {t.code}
-          {t.client_reference ? ` · ${t.client_reference}` : ""}
-        </span>
-        <span className="flex shrink-0 items-center gap-1">
-          <StatusBadge status={t.status} />
-          <PriorityBadge priority={t.priority} compact />
-        </span>
-      </span>
-      <span className="line-clamp-2 text-sm font-semibold text-ink">{t.title}</span>
-      <span className="truncate text-xs text-ink-muted">{[t.customer?.name, store].filter(Boolean).join(" · ") || "Sem loja"}</span>
-      <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-ink-muted">
-        {t.scheduled_start ? (
-          <span className="tabular-nums">{dayTimeLabel(t.scheduled_start, now)}</span>
-        ) : (
-          <span className="text-ink-subtle">{isOpenTicket(t) ? "Sem agenda" : "—"}</span>
-        )}
-        {late !== null ? <span className="font-semibold text-red-700 dark:text-red-300">atrasada há {formatMinutes(Math.max(1, late))}</span> : null}
-        <span aria-hidden>·</span>
-        {t.assignee ? (
-          <span className="truncate">{t.assignee.name}</span>
-        ) : isOpenTicket(t) && !waiting(t) ? (
-          <span className="font-medium text-amber-700 dark:text-amber-300">Sem técnico</span>
-        ) : (
-          <span className="text-ink-subtle">sem técnico</span>
-        )}
-      </span>
-      {t.sla_status === "breached" || t.sla_status === "at_risk" ? (
-        <span className="flex flex-wrap items-center gap-2">
-          <SlaBadge status={t.sla_status} />
-          <SlaCountdown ticket={t} />
-        </span>
-      ) : null}
-    </TicketLink>
+    <span className="text-xs whitespace-nowrap text-ink-muted tabular-nums" title={`Atualizada em ${formatDateTime(t.updated_at)}`}>
+      {formatShort(t.created_at)}
+    </span>
   );
 }

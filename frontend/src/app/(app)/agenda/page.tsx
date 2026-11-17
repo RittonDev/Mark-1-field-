@@ -23,12 +23,13 @@ import { Suspense, useEffect, useId, useMemo, useState } from "react";
 import { type GridColumn, MonthView, TimeGrid } from "@/components/calendar/CalendarViews";
 import { PriorityBadge, StatusBadge } from "@/components/badges";
 import { LocationPicker } from "@/components/LocationPicker";
-import { fold, isUuid, replaceSearch, useActiveTechnicians } from "@/components/operacao/hooks";
+import { fold, isUuid, replaceSearch, useActiveTechnicians, useSearchChange } from "@/components/operacao/hooks";
 import { RefreshFailed } from "@/components/operacao/status";
 import { ConflictHint, ConflictList, scheduleConflicts } from "@/components/ScheduleConflict";
 import { useToast } from "@/components/Toaster";
 import { isPlainClick } from "@/components/ticket/TicketLink";
 import { useTicketPanel } from "@/components/ticket/TicketPanel";
+import { isVersionConflict } from "@/components/ticket/useConflictHandler";
 import {
   Button,
   buttonClassName,
@@ -44,7 +45,7 @@ import {
   SectionTitle,
   Select,
 } from "@/components/ui";
-import { ApiError, api, errorMessage, type Query } from "@/lib/api";
+import { api, errorMessage, type Query } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import {
   ACTIVE_STATUSES,
@@ -67,7 +68,7 @@ import {
   visibleRange,
   WEEKDAYS_SHORT,
 } from "@/lib/calendar";
-import { canManageTickets } from "@/lib/constants";
+import { canManageTickets, STATUS } from "@/lib/constants";
 import { formatMinutes, formatShort, formatTime, fromLocalInput, toLocalInput } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
 import { useCustomers, useTeams } from "@/lib/queries";
@@ -109,17 +110,34 @@ function foreignTimeZone(): string | null {
   return clock(zone) === clock(OPERATION_TIMEZONE) ? null : zone;
 }
 
+/**
+ * Visão, dia e técnicos guardados na URL (?v=&d=&tec=). Dias no relógio da operação (lib/calendar):
+ * sem ?d=, hoje no horário de Brasília.
+ */
+function readUrl(params: URLSearchParams): { view: CalendarView; anchor: Date; techIds: string[] } {
+  const value = params.get("v");
+  return {
+    view: value === "month" || value === "day" ? value : "week",
+    anchor: parseDayKey(params.get("d")) ?? operationToday(),
+    techIds: (params.get("tec") ?? "").split(",").filter(isUuid),
+  };
+}
+
 function AgendaView() {
   const { user } = useAuth();
   const searchParams = useSearchParams();
-  // Visão, data e técnicos ficam na URL (?v=&d=&tec=): recarregar ou mandar o link mantém a agenda.
-  const [view, setView] = useState<CalendarView>(() => {
-    const value = searchParams.get("v");
-    return value === "month" || value === "day" ? value : "week";
-  });
-  // Dias e horas no relógio da operação (lib/calendar): hoje é o de Brasília.
-  const [anchor, setAnchor] = useState(() => parseDayKey(searchParams.get("d")) ?? operationToday());
-  const [techIds, setTechIds] = useState<string[]>(() => (searchParams.get("tec") ?? "").split(",").filter(isUuid));
+  // Visão, data e técnicos ficam na URL: recarregar ou mandar o link mantém a agenda.
+  const [view, setView] = useState(() => readUrl(searchParams).view);
+  const [anchor, setAnchor] = useState(() => readUrl(searchParams).anchor);
+  const [techIds, setTechIds] = useState(() => readUrl(searchParams).techIds);
+  // A URL mudou com a tela aberta (o link do menu, Voltar, um link com outro dia): mostra o que ela diz.
+  const urlChange = useSearchChange();
+  if (urlChange) {
+    const next = readUrl(urlChange);
+    if (next.view !== view) setView(next.view);
+    if (dayKey(next.anchor) !== dayKey(anchor)) setAnchor(next.anchor);
+    if (next.techIds.join(",") !== techIds.join(",")) setTechIds(next.techIds);
+  }
   const [techSearch, setTechSearch] = useState("");
   const [unassigned, setUnassigned] = useState(false);
   const [teamId, setTeamId] = useState("");
@@ -209,6 +227,19 @@ function AgendaView() {
     setTechIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
   const advanced =
     [teamId, customerId, location, city].filter(Boolean).length + (techIds.length ? 1 : 0) + (unassigned ? 1 : 0);
+  // Filtros que escondem visitas ("Ocultar OS concluídas" é o padrão e fica de fora).
+  const filtered = advanced > 0 || onlyConflicts;
+  const clearFilters = () => {
+    setTechIds([]);
+    setUnassigned(false);
+    setTeamId("");
+    setCustomerId("");
+    setLocation(null);
+    setCityInput("");
+    setOnlyConflicts(false);
+  };
+  // Dia por técnico vazio: oferece mostrar todos os técnicos, para achar quem está livre.
+  const idleOffer = !showIdle && techList.length > 0;
   const techTerm = fold(techSearch.trim());
   const visibleTechs = techTerm ? techList.filter((t) => fold(t.name).includes(techTerm)) : techList;
   const viewInfo = VIEWS.find((v) => v.key === view) ?? VIEWS[1];
@@ -363,30 +394,31 @@ function AgendaView() {
             {conflicted.length === 0 ? (
               <p className="mt-1.5 text-xs text-ink-muted">Nenhum técnico com duas OS no mesmo horário neste período.</p>
             ) : (
-              <>
-                <ul className="mt-2 max-h-56 space-y-1 overflow-y-auto">
-                  {conflicted.map((e) => (
-                    <li key={e.id}>
-                      <button
-                        type="button"
-                        onClick={() => setOpened(e)}
-                        className="w-full rounded-md px-1.5 py-1 text-left text-xs hover:bg-surface-2"
-                      >
-                        <span className="block font-semibold text-ink">
-                          {e.assignee?.name} · {formatShort(e.start)}
-                        </span>
-                        <span className="block truncate text-ink-muted">
-                          {e.code} × {e.conflict_with.map((id) => byId.get(id)?.code ?? "OS").join(", ")}
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-                <div className="mt-2 border-t border-line pt-2">
-                  <Checkbox label="Mostrar só os conflitos" checked={onlyConflicts} onChange={setOnlyConflicts} />
-                </div>
-              </>
+              <ul className="mt-2 max-h-56 space-y-1 overflow-y-auto">
+                {conflicted.map((e) => (
+                  <li key={e.id}>
+                    <button
+                      type="button"
+                      onClick={() => setOpened(e)}
+                      className="w-full rounded-md px-1.5 py-1 text-left text-xs hover:bg-surface-2"
+                    >
+                      <span className="block font-semibold text-ink">
+                        {e.assignee?.name} · {formatShort(e.start)}
+                      </span>
+                      <span className="block truncate text-ink-muted">
+                        {e.code} × {e.conflict_with.map((id) => byId.get(id)?.code ?? "OS").join(", ")}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
             )}
+            {/* Marcado, fica à vista mesmo sem conflito no período (senão não haveria como desmarcar). */}
+            {conflicted.length > 0 || onlyConflicts ? (
+              <div className="mt-2 border-t border-line pt-2">
+                <Checkbox label="Mostrar só os conflitos" checked={onlyConflicts} onChange={setOnlyConflicts} />
+              </div>
+            ) : null}
           </Card>
         </aside>
 
@@ -414,9 +446,8 @@ function AgendaView() {
               </button>
             </div>
             <h2 className="text-sm font-bold text-ink first-letter:uppercase">{rangeTitle(view, anchor)}</h2>
-            <span className="text-xs text-ink-muted" aria-live="polite">
-              {calendar.isFetching && calendar.data ? "Atualizando..." : ""}
-            </span>
+            {/* Só ao trocar de período ou de filtro: a releitura de fundo não pisca nada na tela. */}
+            {calendar.isPlaceholderData ? <span className="text-xs text-ink-muted">Carregando...</span> : null}
             <div className="ml-auto flex flex-wrap items-center gap-3">
               {view === "day" && !techIds.length ? (
                 <Checkbox label="Técnicos sem visita" checked={showIdle} onChange={setShowIdle} />
@@ -448,12 +479,19 @@ function AgendaView() {
               />
             </div>
           ) : null}
-          <div className="h-[calc(100vh-15rem)] min-h-[520px]">
+          {/* Período ou filtro novo carregando: a grade anterior fica esmaecida até a resposta chegar. */}
+          <div
+            aria-busy={calendar.isPlaceholderData || undefined}
+            className={clsx(
+              "h-[calc(100vh-15rem)] min-h-[520px] transition-opacity duration-150",
+              calendar.isPlaceholderData && "opacity-60",
+            )}
+          >
             {calendar.error && !calendar.data ? (
               <div className="p-3">
                 <ErrorBox message={errorMessage(calendar.error)} onRetry={() => void calendar.refetch()} />
               </div>
-            ) : !calendar.data ? (
+            ) : !calendar.data || (view === "day" && columns.length === 0 && !ready) ? (
               <LoadingBlock rows={5} label="Carregando a agenda..." />
             ) : view === "month" ? (
               <MonthView
@@ -467,12 +505,24 @@ function AgendaView() {
             ) : view === "day" && columns.length === 0 ? (
               <EmptyState
                 icon={<CalendarDays />}
-                title="Nenhuma visita neste dia"
+                title={
+                  filtered
+                    ? "Nenhuma visita com esses filtros"
+                    : hideDone
+                      ? "Nenhuma visita em aberto neste dia"
+                      : "Nenhuma visita neste dia"
+                }
                 description={
-                  !showIdle && techList.length ? "Mostre os técnicos sem visita para achar quem está livre." : undefined
+                  filtered
+                    ? "Os filtros escondem as visitas deste dia."
+                    : [hideDone ? "As OS concluídas estão ocultas." : "", idleOffer ? "Mostre os técnicos sem visita para achar quem está livre." : ""]
+                        .filter(Boolean)
+                        .join(" ") || undefined
                 }
                 action={
-                  !showIdle && techList.length ? (
+                  filtered ? (
+                    <Button onClick={clearFilters}>Limpar filtros</Button>
+                  ) : idleOffer ? (
                     <Button onClick={() => setShowIdle(true)}>Ver técnicos sem visita</Button>
                   ) : undefined
                 }
@@ -495,6 +545,7 @@ function AgendaView() {
           event={current}
           related={current.conflict_with.map((id) => byId.get(id)).filter((e): e is CalendarEvent => !!e)}
           color={current.assignee ? (colors.get(current.assignee.id) ?? technicianColor(current.assignee.id)) : UNASSIGNED_COLOR}
+          zone={zone}
           onOpen={setOpened}
           onOpenTicket={
             ticketPanel
@@ -611,10 +662,23 @@ function Row({ icon, children }: { icon: React.ReactNode; children: React.ReactN
   );
 }
 
+/** O que mudou na OS desde que o reagendamento abriu: a situação, a visita e o técnico. */
+function changeSummary(before: TicketDetail, now: TicketDetail): string {
+  const parts: string[] = [];
+  if (now.status !== before.status) parts.push(`situação agora: ${STATUS[now.status].label}`);
+  if (now.scheduled_start !== before.scheduled_start || now.scheduled_end !== before.scheduled_end) {
+    parts.push(now.scheduled_start ? `visita agora: ${formatShort(now.scheduled_start)}` : "a visita saiu da agenda");
+  }
+  if ((now.assignee?.id ?? null) !== (before.assignee?.id ?? null)) parts.push(`técnico agora: ${now.assignee?.name ?? "nenhum"}`);
+  const text = parts.length ? parts.join(" · ") : "outros dados da OS foram alterados";
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 function EventDialog({
   event,
   related,
   color,
+  zone,
   onOpen,
   onOpenTicket,
   onClose,
@@ -622,6 +686,8 @@ function EventDialog({
   event: CalendarEvent;
   related: CalendarEvent[];
   color: string;
+  /** Fuso do computador quando difere do da operação: o formulário lembra que a hora é a de Brasília. */
+  zone: string | null;
   onOpen: (event: CalendarEvent) => void;
   /** Abre a OS no painel lateral; sem ele, "Abrir OS" vai para a página da OS. */
   onOpenTicket?: (ticketId: string) => void;
@@ -637,28 +703,41 @@ function EventDialog({
   // A API barrou por conflito de agenda: mostra as OS em choque e o próximo envio confirma.
   const [conflicts, setConflicts] = useState<ConflictItem[] | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
+  // A OS lida depois que o reagendamento abriu: a versão dela vai no envio, para não sobrescrever o que
+  // outra pessoa (ou o app do técnico) mudar enquanto isso.
+  const [openedAt, setOpenedAt] = useState(0);
+  const [base, setBase] = useState<TicketDetail | null>(null);
+  // Na prévia: o reagendamento fechou porque a OS saiu das situações que se reagendam por aqui.
+  const [notice, setNotice] = useState<string | null>(null);
   // Outra OS aberta pela lista de conflitos: volta para a prévia, no mesmo diálogo.
   if (shownId !== event.id) {
     setShownId(event.id);
     setMode("view");
     setConflicts(null);
     setLocalError(null);
+    setBase(null);
+    setNotice(null);
   }
   const rescheduling = mode === "reschedule";
-  // A OS completa só para reagendar: a versão (para não sobrescrever a mudança de outra pessoa) e a
-  // duração estimada.
+  // A OS completa só para reagendar (versão e duração estimada). O tempo real relê a cada mudança nela.
   const detail = useQuery({
     queryKey: ["ticket", event.id],
     queryFn: ({ signal }) => api.get<TicketDetail>(`/tickets/${event.id}`, undefined, { signal }),
     enabled: rescheduling,
+    // Ao abrir o formulário relê sempre, mesmo com uma cópia de segundos atrás no cache.
+    staleTime: 0,
   });
+  // A base é a primeira leitura terminada depois de abrir (uma cópia antiga do cache não serve).
+  if (rescheduling && !base && detail.data && detail.dataUpdatedAt >= openedAt) setBase(detail.data);
+  // Mudou depois disso: o formulário mostra o que mudou e salvar passa a ser a confirmação.
+  const changed = base && detail.data && detail.data.version !== base.version ? detail.data : null;
   const save = useMutation({
-    mutationFn: () =>
+    mutationFn: (version: number) =>
       api.patch<TicketDetail>(`/tickets/${event.id}`, {
         scheduled_start: fromLocalInput(startInput),
         // Em branco, a API usa a duração estimada da OS.
         scheduled_end: fromLocalInput(endInput),
-        expected_version: detail.data?.version,
+        expected_version: version,
         allow_conflict: Boolean(conflicts),
       }),
     onSuccess: (updated) => {
@@ -677,17 +756,23 @@ function EventDialog({
         setConflicts(clash);
         return;
       }
-      if (error instanceof ApiError && error.status === 409) {
+      // A OS mudou entre a última leitura e o envio: relê, e o aviso do que mudou pede a confirmação.
+      if (isVersionConflict(error)) {
         void queryClient.invalidateQueries({ queryKey: ["ticket", event.id] });
         void queryClient.invalidateQueries({ queryKey: ["tickets"] });
-        toast({
-          title: "A OS foi alterada por outra pessoa",
-          description: "Recarregamos os dados. Confira o horário e tente de novo.",
-          tone: "error",
-        });
       }
     },
   });
+
+  // Saiu das situações que se reagendam por aqui (ex.: o técnico saiu para a visita): volta para a
+  // prévia e diz por quê. A situação vem do calendário e, depois de aberto, da leitura atual da OS.
+  const moved = [event.status, base ? detail.data?.status : undefined].find(
+    (status): status is TicketStatus => status !== undefined && !RESCHEDULABLE.includes(status),
+  );
+  if (rescheduling && moved && !save.isPending) {
+    setMode("view");
+    setNotice(`${event.code} passou para ${STATUS[moved].label}: não dá mais para reagendar pelo calendário.`);
+  }
 
   const start = new Date(event.start);
   const end = new Date(event.end);
@@ -702,6 +787,9 @@ function EventDialog({
     setEndTouched(false);
     setConflicts(null);
     setLocalError(null);
+    setNotice(null);
+    setBase(null);
+    setOpenedAt(Date.now());
     setMode("reschedule");
   };
   const changeStart = (value: string) => {
@@ -714,6 +802,7 @@ function EventDialog({
   };
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!base || save.isPending) return;
     const startIso = fromLocalInput(startInput);
     const endIso = fromLocalInput(endInput);
     if (!startIso) return setLocalError("Informe a data e a hora da visita.");
@@ -721,10 +810,12 @@ function EventDialog({
       return setLocalError("O fim precisa ser depois do início.");
     }
     setLocalError(null);
-    save.mutate();
+    // Com o aviso de mudança à vista, salvar confirma sobre a OS como ela está agora.
+    const target = changed ?? base;
+    if (changed) setBase(changed);
+    save.mutate(target.version);
   };
-  const saveError =
-    save.error && !conflicts && !(save.error instanceof ApiError && save.error.status === 409) ? errorMessage(save.error) : null;
+  const saveError = save.error && !conflicts && !isVersionConflict(save.error) ? errorMessage(save.error) : null;
   const error = localError ?? saveError;
   const endHint = !endInput
     ? estimate
@@ -754,11 +845,11 @@ function EventDialog({
               variant="primary"
               type="submit"
               form="reschedule-form"
-              loading={save.isPending}
-              // A versão vem da leitura de agora: com uma cópia antiga no cache, espera a releitura.
-              disabled={!detail.data || detail.isFetching}
+              // Espera a leitura da OS (a versão do envio) e as releituras do tempo real.
+              loading={save.isPending || (!base && !detail.error)}
+              disabled={!base || detail.isFetching}
             >
-              {conflicts ? "Reagendar mesmo assim" : "Salvar horário"}
+              {conflicts ? "Reagendar mesmo assim" : changed ? "Salvar mesmo assim" : "Salvar horário"}
             </Button>
           </>
         ) : (
@@ -790,10 +881,12 @@ function EventDialog({
       {rescheduling ? (
         <form id="reschedule-form" onSubmit={submit} className="flex flex-col gap-4">
           <p className="text-sm text-ink-muted">
-            Escolha o novo horário da visita{event.assignee ? ` de ${event.assignee.name}` : ""}. Antes: {formatShort(event.start)}.
+            Escolha o novo horário da visita{event.assignee ? ` de ${event.assignee.name}` : ""}. Antes:{" "}
+            {formatShort(base?.scheduled_start ?? event.start)}
+            {zone ? " (horário de Brasília)" : ""}.
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Início" required>
+            <Field label="Início" required hint={zone ? "No horário de Brasília, o da operação" : undefined}>
               <Input type="datetime-local" value={startInput} onChange={(e) => changeStart(e.target.value)} required autoFocus />
             </Field>
             <Field label="Fim" hint={endHint}>
@@ -809,6 +902,17 @@ function EventDialog({
               />
             </Field>
           </div>
+          {changed && base ? (
+            <div
+              role="alert"
+              className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200"
+            >
+              <p className="font-semibold">A OS mudou enquanto você editava</p>
+              <p className="mt-0.5 text-xs">
+                {changeSummary(base, changed)}. Confira o horário e use Salvar mesmo assim para confirmar.
+              </p>
+            </div>
+          ) : null}
           {conflicts ? (
             <ConflictList
               tone="error"
@@ -825,11 +929,23 @@ function EventDialog({
               excludeId={event.id}
             />
           ) : null}
-          {detail.error ? <ErrorBox message={errorMessage(detail.error)} /> : null}
+          {detail.error && !base ? (
+            <ErrorBox message={errorMessage(detail.error)} onRetry={() => void detail.refetch()} />
+          ) : null}
           {error ? <ErrorBox message={error} /> : null}
         </form>
       ) : (
-        <EventDetails event={event} related={related} onOpen={onOpen} />
+        <div className="flex flex-col gap-3">
+          {notice ? (
+            <p
+              role="status"
+              className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200"
+            >
+              {notice}
+            </p>
+          ) : null}
+          <EventDetails event={event} related={related} onOpen={onOpen} />
+        </div>
       )}
     </Dialog>
   );
