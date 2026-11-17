@@ -692,6 +692,38 @@ def _clean_tags(tags: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     return tag_rules.merged([], tags or [])
 
 
+async def _rebase_tags(
+    db: AsyncSession, ticket: Ticket, wanted: list[dict[str, Any]], base: list[str]
+) -> list[dict[str, Any]]:
+    """A edição de etiquetas do editor como diferença sobre as etiquetas de agora.
+
+    O editor manda a lista inteira e os nomes que carregou (`base`). O que o analista incluiu
+    entra, o que ele tirou sai, e o que mudou nesse meio-tempo sem mexer na versão da OS (custo
+    extra lançado, técnico pago, etiquetas em lote) fica: a que entrou continua e a que saiu não
+    volta. A linha fica travada até gravar, como em `change_tags`.
+    """
+    row = await db.scalar(select(Ticket.tags).where(Ticket.id == ticket.id).with_for_update())
+    current: list[dict[str, Any]] = list(row or [])
+    # O histórico compara com as etiquetas de agora, não com as que a sessão carregou.
+    set_committed_value(ticket, "tags", current)
+    key = tag_rules.tag_key
+    base_keys = {key(name) for name in base} - {""}
+    current_keys = {key(tag.get("name")) for tag in current}
+    wanted_keys = {key(tag.get("name")) for tag in wanted}
+    removed = base_keys - wanted_keys
+    kept = [
+        tag
+        for tag in wanted
+        if key(tag.get("name")) not in base_keys or key(tag.get("name")) in current_keys
+    ]
+    others = [
+        tag
+        for tag in current
+        if key(tag.get("name")) not in wanted_keys and key(tag.get("name")) not in removed
+    ]
+    return _clean_tags(kept + others)
+
+
 def _clean_text(value: str | None, *, single_line: bool = False) -> str | None:
     """Texto livre opcional: sem espaços nas pontas; vazio vira null."""
     if value is None:
@@ -963,8 +995,11 @@ async def update_ticket(
             fields[key] = _clean_text(fields[key], single_line=key == "client_reference")
     if "resolution_notes" in fields:
         fields["resolution_notes"] = (fields["resolution_notes"] or "").strip() or None
+    tags_base = fields.pop("tags_base", None)
     if "tags" in fields:
         fields["tags"] = _clean_tags(fields["tags"])
+        if tags_base is not None:
+            fields["tags"] = await _rebase_tags(db, ticket, fields["tags"], tags_base)
     if "project_id" in fields:
         await _check_project(db, fields["project_id"], actor)
     if "signature_required" in fields:
@@ -2202,6 +2237,8 @@ EXPORT_COLUMNS = (
 )
 # Começo de célula que a planilha leria como fórmula (injeção de fórmula no CSV).
 _FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
+# Marca de UTF-8 no início do arquivo: sem ela o Excel em português abre os acentos errados.
+CSV_BOM = "﻿"
 
 
 def _cell(value: object) -> str:
@@ -2293,7 +2330,7 @@ async def export_csv(db: AsyncSession, user: User, f: TicketFilters, *, order_by
             _local_text(created_at),
         )
         writer.writerow([_cell(value) for value in values])
-    return "﻿" + buffer.getvalue()
+    return CSV_BOM + buffer.getvalue()
 
 
 # ------------------------------------------------------------------ improdutiva

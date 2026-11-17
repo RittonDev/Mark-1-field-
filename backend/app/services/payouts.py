@@ -477,7 +477,9 @@ async def mark_paid(db: AsyncSession, ids: list[uuid.UUID], actor: User, *, paid
 
 async def _drop_paid_tags(db: AsyncSession, tickets: list[Ticket], actor: User) -> None:
     """OS com todos os técnicos pagos: saem as etiquetas de pagamento pendente (ex.: "Pendente
-    Envio PGTO"). Desfazer o pagamento não traz a etiqueta de volta."""
+    Envio PGTO"). Valor pendente de OS cancelada conta como cancelado (não vai ser pago, como na
+    lista de pagamentos): pago o deslocamento de um técnico, a etiqueta sai mesmo com o valor do
+    outro ainda pendente. Desfazer o pagamento não traz a etiqueta de volta."""
     from app.services.tickets import change_tags  # tickets usa este módulo: import tardio
 
     await db.flush()  # a conta abaixo precisa ver os pagamentos de agora
@@ -492,7 +494,7 @@ async def _drop_paid_tags(db: AsyncSession, tickets: list[Ticket], actor: User) 
     rules = await tag_rules.get_rules(db)
     await change_tags(
         db,
-        [t for t in tickets if t.id not in pending],
+        [t for t in tickets if t.id not in pending or t.status == CANCELLED],
         actor,
         reason="Todos os técnicos pagos",
         remove=rules.remove_on_payout_paid,

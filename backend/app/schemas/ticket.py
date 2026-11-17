@@ -379,6 +379,13 @@ class TicketUpdate(BaseModel):
     # Só a gestão: o que foi feito (descrição da conclusão) e as etiquetas, a qualquer momento.
     resolution_notes: str | None = Field(default=None, max_length=20000)
     tags: list[TagOut] | None = Field(default=None, max_length=20)
+    # Os nomes das etiquetas que o editor carregou. Com eles, `tags` vale como diferença (o que
+    # entrou e o que saiu) sobre as etiquetas de agora: não se perde o que a automação ou o lote
+    # mudou nesse meio-tempo (essas mudanças não mexem na versão da OS). Sem eles, `tags`
+    # substitui a lista inteira.
+    tags_base: list[Annotated[str, Field(max_length=100)]] | None = Field(
+        default=None, max_length=40
+    )
     expected_version: int | None = None
     allow_conflict: bool = False
 

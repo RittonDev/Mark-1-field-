@@ -8,6 +8,10 @@ dados da OS na hora. Ex.: "O técnico {tecnico} está a caminho de {local}. Cheg
 Os modelos padrão seguem os avisos do Field Control para o grupo do cliente: atividade confirmada,
 técnico em deslocamento (ou atrasado), chegada, atividade encerrada (com o link do relatório) e
 visita improdutiva. O texto que combina com a situação da OS agora vem marcado (`suggested`).
+
+Os textos padrão vão para o grupo do cliente com um clique, sem revisão: a frase com um dado que
+falta (sem previsão de chegada, sem técnico) sai inteira. Nos textos escritos pela gestão a marca
+("__:__", "(técnico a definir)") fica, para o analista completar antes de mandar.
 """
 
 import re
@@ -17,7 +21,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -26,6 +30,7 @@ from app.db.base import utcnow
 from app.models import SystemSetting, Ticket, TicketEvent, User
 from app.schemas.ticket import format_ticket_code
 from app.services import client_report, geo, tracking
+from app.services import field as field_rules
 from app.services.errors import WorkflowError
 from app.services.map_distances import ROAD_FACTOR, travel_minutes
 from app.services.suggestions import km_between
@@ -38,6 +43,10 @@ LIVE_WINDOW = timedelta(minutes=30)
 MIN_ETA_MINUTES = 5
 # Antes de o técnico sair para o local (o texto da vez é a confirmação da atividade).
 BEFORE_FIELD = frozenset({S.NEW, S.TRIAGE, S.ASSIGNED, S.SCHEDULED, S.REOPENED})
+# Marcas de dado que falta. Nos textos padrão a frase com uma delas sai (ver `render`).
+NO_ETA = "__:__"
+NO_TECHNICIAN = "(técnico a definir)"
+PLACEHOLDERS = frozenset({NO_ETA, NO_TECHNICIAN})
 
 VARIABLES: dict[str, str] = {
     "tecnico": "Nome do técnico responsável",
@@ -100,8 +109,9 @@ DEFAULT_TEMPLATES: list[dict[str, str]] = [
     {
         "key": "fechamento",
         "name": "Atividade encerrada",
-        "body": "*{os}* · {cliente}\nAtividade encerrada pelo técnico {tecnico} em {local} às "
-        "{hora_conclusao}.\nRelatório do atendimento: {link_relatorio}",
+        # O técnico em linha própria: OS concluída no remoto, sem técnico, perde só essa linha.
+        "body": "*{os}* · {cliente}\nAtividade encerrada em {local} às {hora_conclusao}.\n"
+        "Técnico: {tecnico}.\nRelatório do atendimento: {link_relatorio}",
     },
     {
         "key": "improdutiva",
@@ -110,8 +120,11 @@ DEFAULT_TEMPLATES: list[dict[str, str]] = [
         "Vamos reagendar e avisamos o novo horário.",
     },
 ]
+_DEFAULT_BODIES = {t["key"]: t["body"] for t in DEFAULT_TEMPLATES}
 
 _VAR = re.compile(r"\{(\w+)\}")
+# Fim de frase dentro da linha (o modelo ainda tem as variáveis: nenhuma URL no meio).
+_SENTENCE_BREAK = re.compile(r"(?<=[.!?])[ \t]+")
 
 
 def _slug(name: str) -> str:
@@ -235,10 +248,10 @@ async def context(
     arrived = ticket.work_started_at or ticket.arrived_at
     team = [p.name for p in ([assignee] if assignee else []) + list(ticket.helpers)]
     values: dict[str, Any] = {
-        "tecnico": assignee.name if assignee else "(técnico a definir)",
+        "tecnico": assignee.name if assignee else NO_TECHNICIAN,
         "equipe": (" e ".join([", ".join(team[:-1]), team[-1]]) if len(team) > 1 else team[0])
         if team
-        else "(técnico a definir)",
+        else NO_TECHNICIAN,
         "tecnico_telefone": (assignee.phone if assignee else None) or "",
         "os": format_ticket_code(ticket.number),
         "titulo": ticket.title,
@@ -250,7 +263,7 @@ async def context(
         "contato": contact or "(sem contato)",
         "agendamento": scheduled.strftime("%d/%m às %H:%M") if scheduled else "(a agendar)",
         "hora_agendada": scheduled.strftime("%H:%M") if scheduled else "",
-        "chegada_prevista": eta or "__:__",
+        "chegada_prevista": eta or NO_ETA,
         "distancia": distance or "",
         "agora": local_now.strftime("%H:%M"),
         "hoje": local_now.strftime("%d/%m"),
@@ -272,11 +285,36 @@ async def context(
     return {k: str(v) for k, v in values.items()}
 
 
-def render(body: str, ctx: dict[str, str]) -> str:
-    """Troca {variavel} pelo valor; variável desconhecida fica como está (o analista vê)."""
+def _without_missing(body: str, missing: set[str]) -> str:
+    """O modelo sem as frases que usam uma variável de `missing` (e sem a linha que ficou vazia).
+    Ex.: "O técnico {tecnico} está a caminho de {local}. Chegada prevista às {chegada_prevista}."
+    sem previsão de chegada fica só "O técnico {tecnico} está a caminho de {local}."."""
+    if not missing:
+        return body
+    lines: list[str] = []
+    for line in body.split("\n"):
+        kept = [s for s in _SENTENCE_BREAK.split(line) if not missing & set(_VAR.findall(s))]
+        if kept or not line.strip():
+            lines.append(" ".join(kept))
+    return "\n".join(lines)
+
+
+def render(body: str, ctx: dict[str, str], *, drop_missing: bool = False) -> str:
+    """Troca {variavel} pelo valor; variável desconhecida fica como está (o analista vê).
+
+    `drop_missing` (textos padrão, copiados com um clique para o grupo do cliente): a frase com um
+    dado que falta (sem previsão de chegada, sem técnico) sai, em vez de levar "__:__" ao cliente.
+    """
+    if drop_missing:
+        body = _without_missing(body, {k for k, v in ctx.items() if v in PLACEHOLDERS})
     text = _VAR.sub(lambda m: ctx.get(m.group(1), m.group(0)), body)
     # Parênteses vazios de variáveis em branco (ex.: cidade não cadastrada).
     return re.sub(r" \(\)", "", text).strip()
+
+
+def is_default(template: dict[str, str]) -> bool:
+    """O texto é o padrão do sistema (mesmo gravado pela gestão sem mudar nada)."""
+    return template.get("body") == _DEFAULT_BODIES.get(template.get("key", ""))
 
 
 async def _unproductive_pending(db: AsyncSession, ticket: Ticket) -> bool:
@@ -296,10 +334,39 @@ async def _unproductive_pending(db: AsyncSession, ticket: Ticket) -> bool:
     return later_visit is None
 
 
+async def _trip_start(db: AsyncSession, ticket: Ticket) -> datetime | None:
+    """Desde quando vale a ida a campo de agora: o fim da última passagem pelo local (a primeira
+    chegada, ou a saída de "Em atendimento": concluída, pausada, improdutiva) ou a última
+    reabertura. None: a OS ainda está na primeira ida (nunca chegou nem foi reaberta)."""
+    if ticket.arrived_at is None and not ticket.reopen_count:
+        return None
+    last = await db.scalar(
+        select(func.max(TicketEvent.created_at)).where(
+            TicketEvent.ticket_id == ticket.id,
+            TicketEvent.event_type == TicketEventType.STATUS_CHANGED,
+            or_(
+                TicketEvent.from_value == S.IN_PROGRESS.value,
+                TicketEvent.to_value == S.REOPENED.value,
+            ),
+        )
+    )
+    moments = [m for m in (ticket.arrived_at, last) if m is not None]
+    return max(moments) if moments else None
+
+
+def _schedule_for_trip(ticket: Ticket, trip_start: datetime | None) -> datetime | None:
+    """A visita marcada para esta ida. A agenda de uma ida anterior (a OS reaberta ou que volta
+    ao local sem remarcar guarda a data velha) não vale."""
+    start = ticket.scheduled_start
+    if start is None or (trip_start is not None and start <= trip_start):
+        return None
+    return start
+
+
 async def suggested_keys(db: AsyncSession, ticket: Ticket, now: datetime) -> tuple[str, ...]:
     """Os textos que combinam com a situação da OS agora, do melhor para o substituto (se a
     gestão tirou o modelo "atraso", vale o de deslocamento). Vazio: nenhum combina (cancelada,
-    sem técnico ou sem agenda, pausada)."""
+    sem técnico ou sem agenda em dia, pausada)."""
     status = ticket.status
     if status == S.CANCELLED:
         return ()
@@ -308,7 +375,15 @@ async def suggested_keys(db: AsyncSession, ticket: Ticket, now: datetime) -> tup
     if status == S.IN_PROGRESS:
         return ("chegada",)
     if status == S.EN_ROUTE:
-        late = ticket.arrival_due_at is not None and ticket.arrival_due_at < now
+        trip_start = await _trip_start(db, ticket)
+        if trip_start is None:
+            # Primeira ida: o prazo de chegada (o da cidade, ou a visita combinada + tolerância).
+            late = ticket.arrival_due_at is not None and ticket.arrival_due_at < now
+        else:
+            # Revisita ou OS reaberta: o prazo de chegada era o da primeira ida (não muda depois
+            # da chegada); vale a visita marcada para esta ida, com a mesma tolerância.
+            visit = _schedule_for_trip(ticket, trip_start)
+            late = visit is not None and visit + field_rules.SCHEDULE_TOLERANCE < now
         return ("atraso", "deslocamento") if late else ("deslocamento",)
     if await _unproductive_pending(db, ticket):
         return ("improdutiva",)
@@ -316,6 +391,9 @@ async def suggested_keys(db: AsyncSession, ticket: Ticket, now: datetime) -> tup
         status in BEFORE_FIELD
         and ticket.assignee_id is not None
         and ticket.scheduled_start is not None
+        # Agenda de dia que já passou não se confirma (o texto daria uma data vencida).
+        and _local(ticket.scheduled_start).date() >= _local(now).date()
+        and _schedule_for_trip(ticket, await _trip_start(db, ticket)) is not None
     ):
         return ("agendamento",)
     return ()
@@ -333,7 +411,7 @@ async def for_ticket(db: AsyncSession, ticket: Ticket, actor: User) -> list[dict
         {
             "key": t["key"],
             "name": t["name"],
-            "text": render(t["body"], ctx),
+            "text": render(t["body"], ctx, drop_missing=is_default(t)),
             "suggested": index == chosen,
         }
         for index, t in enumerate(items)

@@ -525,6 +525,11 @@ export type TicketUpdatePayload = Partial<
   /** Só a gestão, a qualquer momento (inclusive OS fechada). */
   resolution_notes?: string | null;
   tags?: Tag[] | null;
+  /**
+   * Nomes das etiquetas que o editor carregou: com eles, `tags` vale como diferença sobre as de agora
+   * (não se perde o "Custo Extra" ou o lote que entrou nesse meio-tempo). Sem eles, `tags` substitui tudo.
+   */
+  tags_base?: string[] | null;
   signature_required?: boolean | null;
   /** Troca o técnico no mesmo salvamento da agenda (null tira); o conflito confere o final. */
   assignee_id?: UUID | null;
