@@ -9,7 +9,7 @@ import { STATUS } from "./constants";
 import { todayISO } from "./format";
 import { sessionStore } from "./session";
 import type { LiveTechnician, RealtimeEvent, TicketStatus, TrackingHistory, UUID } from "./types";
-import { copyText, GROUP_TEXT_COPIED, GROUP_TEXT_FRESH_MS, type GroupText, groupTextsQuery } from "./whatsapp";
+import { copyText, GROUP_TEXT_COPIED, GROUP_TEXT_FRESH_MS, type GroupText, groupShareUrl, groupTextsQuery } from "./whatsapp";
 
 export type ConnectionState = "connecting" | "online" | "offline";
 
@@ -48,7 +48,7 @@ export interface RealtimeNotice {
   href?: string;
   /**
    * O técnico mudou a situação da OS e há texto pronto para o grupo do WhatsApp (ex.: atividade
-   * encerrada, com o link do relatório): o aviso oferece "Copiar texto".
+   * encerrada, com o link do relatório): o aviso oferece "Abrir e copiar texto".
    */
   groupText?: boolean;
   /** Quando chegou (ISO). */
@@ -342,8 +342,8 @@ function listCodes(codes: string[]): string {
 /**
  * Mantém um WebSocket com a API enquanto houver sessão. Reconecta com backoff (e na hora quando a
  * internet volta ou a aba volta a ficar visível), confere o pong, junta as invalidações de uma rajada
- * de eventos e mostra só os avisos que pedem atenção, com "Abrir" para a OS (ou "Copiar texto" para o
- * grupo, quando o técnico encerra a OS).
+ * de eventos e mostra só os avisos que pedem atenção, com "Abrir" para a OS (ou "Abrir e copiar texto",
+ * com o texto para o grupo, quando o técnico encerra a OS).
  * `quiet` (portal do cliente): só mantém a tela atualizada, sem avisos.
  */
 export function RealtimeProvider({
@@ -392,33 +392,56 @@ export function RealtimeProvider({
     const lastByTicket = new Map<string, number>();
 
     /**
-     * "Copiar texto" do aviso: copia o texto sugerido para o momento da OS (encerrada: com o link do
-     * relatório para o cliente). O aviso seguinte leva o "Abrir a OS" que este aviso deixou de ter.
+     * Copia o texto sugerido para o momento da OS (encerrada: com o link do relatório para o cliente) e
+     * avisa, com o atalho para o WhatsApp. Com `cached`, copia sem esperar a rede.
      */
-    const copyGroupText = async (ticketId: UUID, code = "OS") => {
-      const open = { label: "Abrir a OS", onClick: () => requestOpenTicket(ticketId) };
-      let list: GroupText[];
-      try {
-        list = await queryClient.fetchQuery({ ...groupTextsQuery(ticketId), staleTime: GROUP_TEXT_FRESH_MS });
-      } catch (error) {
-        toastRef.current({ title: `Não foi possível buscar o texto da ${code}`, description: errorMessage(error), tone: "error", action: open });
-        return;
+    const copyGroupText = async (ticketId: UUID, code: string, cached: GroupText[] | null) => {
+      let list = cached;
+      if (!list) {
+        try {
+          list = await queryClient.fetchQuery({ ...groupTextsQuery(ticketId), staleTime: 0 });
+        } catch (error) {
+          toastRef.current({ title: `Não foi possível buscar o texto da ${code}`, description: errorMessage(error), tone: "error" });
+          return;
+        }
       }
       const message = list.find((m) => m.suggested);
       if (!message) {
-        toastRef.current({ title: `${code}: nenhum texto combina com a situação agora`, description: "Abra a OS para escolher o texto.", action: open });
+        toastRef.current({ title: `${code}: nenhum texto combina com a situação agora`, description: "Escolha o texto em Textos para o grupo, na OS." });
         return;
       }
+      const { name, text: body } = message;
       toastRef.current(
-        (await copyText(message.text))
-          ? { title: GROUP_TEXT_COPIED, description: `${message.name} · ${code}`, tone: "success", action: open }
-          : { title: "Não foi possível copiar", description: "Abra a OS e copie em Textos para o grupo.", tone: "error", action: open },
+        (await copyText(body))
+          ? {
+              title: GROUP_TEXT_COPIED,
+              description: `${name} · ${code}`,
+              tone: "success",
+              action: { label: "Abrir no WhatsApp", onClick: () => void window.open(groupShareUrl(body), "_blank", "noopener,noreferrer") },
+            }
+          : { title: "Não foi possível copiar", description: "Copie em Textos para o grupo, na OS que abriu.", tone: "error" },
       );
+    };
+
+    /**
+     * "Abrir e copiar texto" do aviso de OS encerrada pelo técnico: abre a OS no painel (para conferir
+     * formulários, fotos e assinatura) e copia o texto para o grupo. O aviso tem um botão só, então os dois
+     * vão juntos num clique.
+     */
+    const openAndCopy = (notice: RealtimeNotice, ticketId: UUID) => {
+      // Copia primeiro, ainda dentro do clique (o navegador só deixa copiar logo depois dele), com a leitura
+      // feita depois do aviso, sem esperar a rede. As sincronizações seguintes do técnico (fotos,
+      // formulários) marcam a OS como desatualizada, mas não mudam o texto do encerramento; a leitura de
+      // antes do aviso (ex.: a OS aberta mais cedo) ainda era de outro momento e é buscada de novo.
+      const state = queryClient.getQueryState<GroupText[]>(groupTextsQuery(ticketId).queryKey);
+      const cached = state?.data !== undefined && state.dataUpdatedAt >= Date.parse(notice.at) ? state.data : null;
+      void copyGroupText(ticketId, notice.code ?? "OS", cached);
+      requestOpenTicket(ticketId);
     };
 
     const actionFor = (notice: RealtimeNotice) => {
       const { ticketId, href } = notice;
-      if (ticketId && notice.groupText) return { label: "Copiar texto", onClick: () => void copyGroupText(ticketId, notice.code) };
+      if (ticketId && notice.groupText) return { label: "Abrir e copiar texto", onClick: () => openAndCopy(notice, ticketId) };
       if (ticketId) return { label: "Abrir", onClick: () => requestOpenTicket(ticketId) };
       if (href) return { label: "Ver", onClick: () => routerRef.current.push(href) };
       return undefined;
@@ -430,8 +453,8 @@ export function RealtimeProvider({
       pending = [];
       if (items.length <= 2) {
         for (const notice of items) {
-          // O texto já vem buscado: o clique em "Copiar texto" copia na hora (o navegador só deixa copiar
-          // logo depois do clique).
+          // O texto já vem buscado: o clique em "Abrir e copiar texto" copia na hora (o navegador só deixa
+          // copiar logo depois do clique).
           if (notice.groupText && notice.ticketId) {
             void queryClient.prefetchQuery({ ...groupTextsQuery(notice.ticketId), staleTime: GROUP_TEXT_FRESH_MS });
           }

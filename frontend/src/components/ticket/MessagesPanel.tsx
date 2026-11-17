@@ -693,6 +693,7 @@ function GroupTextsPopover({
           type="button"
           role="menuitem"
           tabIndex={-1}
+          data-item="tentar"
           aria-describedby={errorId}
           onClick={() => void messages.refetch()}
           className={clsx(menuItem, "items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-ink")}
@@ -725,6 +726,7 @@ function GroupTextsPopover({
                 type="button"
                 role="menuitem"
                 tabIndex={-1}
+                data-item={`copiar:${m.key}`}
                 onClick={() => onPick(m)}
                 aria-label={`Copiar ${m.name}${m.suggested ? ", sugerido agora" : ""}`}
                 aria-describedby={previewId}
@@ -745,6 +747,7 @@ function GroupTextsPopover({
               <a
                 role="menuitem"
                 tabIndex={-1}
+                data-item={`whatsapp:${m.key}`}
                 href={shareUrl(m.text)}
                 target="_blank"
                 rel="noreferrer"
@@ -771,6 +774,10 @@ function GroupTextsPopover({
       aria-labelledby={titleId}
       aria-busy={!settled || undefined}
       onKeyDown={onKeyDown}
+      onFocus={(e) => {
+        const item = e.target instanceof HTMLElement ? e.target.dataset.item : undefined;
+        if (item) lastItem.current = item;
+      }}
       // O menu é um portal no <body>, mas o clique ainda "sobe" pela árvore do React até quem o
       // renderiza (ex.: a linha da lista, que abriria a OS). Ele para aqui.
       onClick={(e) => e.stopPropagation()}
@@ -790,6 +797,7 @@ function GroupTextsPopover({
           href="/textos"
           role="menuitem"
           tabIndex={-1}
+          data-item={FOOTER_ITEM}
           onClick={() => onClose(false)}
           aria-describedby={empty ? emptyId : undefined}
           className={clsx(menuItem, "items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-ink-muted hover:text-ink")}
@@ -807,8 +815,9 @@ function GroupTextsPopover({
 
 /**
  * Copia com um clique o texto `templateKey` da OS, ou o sugerido para agora (sem `templateKey`), e mostra
- * o "Copiado". Busca os textos ao aparecer: serve para o painel da OS e listas curtas (numa lista longa,
- * o GroupTextsMenu só busca ao abrir). Sem texto que sirva, fica desabilitado e diz por quê.
+ * o "Copiado". Busca os textos ao aparecer (uma leitura por botão) e não de novo a cada volta do WhatsApp
+ * para a aba: serve para o painel da OS e listas de uma página (numa lista longa, o GroupTextsMenu só
+ * busca ao abrir). Sem texto que sirva, fica desabilitado e diz por quê.
  */
 export function CopyGroupTextButton({
   ticketId,
@@ -824,7 +833,7 @@ export function CopyGroupTextButton({
   /** "md": ao lado de botões do tamanho padrão (ex.: o "Abrir OS" da OS recém-criada). */
   size?: "sm" | "md";
 }) {
-  const messages = useGroupTexts(ticketId, BUTTON_STALE_MS);
+  const messages = useGroupTexts(ticketId, { staleTime: BUTTON_STALE_MS, refetchOnWindowFocus: false });
   const { copy, busy, fallback } = useGroupTextCopy(ticketId);
   const [copied, setCopied] = useState(false);
   const reasonId = useId();
