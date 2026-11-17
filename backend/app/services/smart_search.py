@@ -232,6 +232,8 @@ class Pool:
 
 def pick(matches: list[tuple[int, Cand]]) -> Cand | None:
     """O nome que vira filtro: só quando não há dúvida (homônimos: vale o único ativo)."""
+    # Cidade só pelo nome inteiro ("paulo" não é "São Paulo", "joao" não é "São João").
+    matches = [(s, c) for s, c in matches if c.kind != "city" or s == 3]
     if not matches:
         return None
     best = max(s for s, _ in matches)
@@ -241,10 +243,7 @@ def pick(matches: list[tuple[int, Cand]]) -> Cand | None:
         if len(active) != 1:
             return None
         top = active
-    chosen = top[0]
-    if chosen.kind == "city" and best < 3:
-        return None  # cidade só pelo nome inteiro ("paulo" não é "São Paulo")
-    return chosen
+    return top[0]
 
 
 # --------------------------------------------------------------------------- períodos
@@ -532,7 +531,7 @@ PRIORITY_RULES: list[tuple[re.Pattern[str], str, list[TicketPriority]]] = [
 OS_NUMBER_RX = re.compile(
     r"(?<![a-z0-9])(?:os|o\.s\.?|#|n[o.]|numero|chamado|ticket)[\s#.:-]*0*(\d{1,10})(?![\w/])"
 )
-LONE_NUMBER_RX = re.compile(r"\s*#?\s*0*(\d{1,10})\s*")
+LONE_NUMBER_RX = re.compile(r"\s*0*(\d{1,10})\s*")
 DOCUMENT_RX = re.compile(r"(?<![\w./-])[0-9a-z][0-9a-z./-]{9,19}(?![\w./-])")
 
 
@@ -999,6 +998,11 @@ def _code_digits() -> ColumnElement[str]:
     return func.ltrim(func.regexp_replace(Location.code, r"[^0-9]", "", "g"), "0")
 
 
+def _same_code(code: str | None, number: str) -> bool:
+    digits = re.sub(r"[^0-9]", "", code or "").lstrip("0")
+    return bool(digits) and digits == (number.lstrip("0") or "0")
+
+
 def _location_word(word: str) -> ColumnElement[bool]:
     rx = _prefix_regex(word)
     if word.isdigit():
@@ -1086,6 +1090,10 @@ async def locations_step(db: AsyncSession, parsed: Parsed, entity_words: list[st
                 matches = scoped.match(phrase)
                 if size == 1 and phrase[0] in DOMAIN_WORDS:
                     matches = [m for m in matches if m[0] == 3]
+                if size == 1 and phrase[0].isdigit():
+                    # "loja 41": vale o código da loja (o número no nome fica de reserva).
+                    by_code = [m for m in matches if _same_code(m[1].code, phrase[0])]
+                    matches = by_code or matches
                 chosen = pick(matches)
                 if chosen is not None and _set_entity(parsed, chosen, span[0].pos, span):
                     for w in span:
