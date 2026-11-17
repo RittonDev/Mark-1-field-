@@ -29,8 +29,7 @@ from app.services.tickets import _touch, add_attachment, can_work, record_event
 
 CLOSED_STATES = (TicketStatus.RESOLVED, TicketStatus.CLOSED, TicketStatus.CANCELLED)
 FINISHED_STATES = (TicketStatus.RESOLVED, TicketStatus.CLOSED)
-# Fotos do iPhone (HEIC/HEIF): a marca do formato vem logo depois de "ftyp".
-_HEIF_BRANDS = (b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis", b"mif1", b"msf1")
+PHOTO_TYPES = "Envie uma foto JPG, PNG ou WebP"
 
 
 async def _image_head(upload: UploadFile) -> bytes:
@@ -41,11 +40,10 @@ async def _image_head(upload: UploadFile) -> bytes:
 
 
 def _is_photo(head: bytes) -> bool:
-    """Foto de verdade pelo conteúdo: JPG, PNG, WebP ou HEIC do iPhone (a foto do técnico não se
-    perde). Arquivo qualquer enviado como "image/*" não passa."""
-    if storage.image_extension(head) is not None:
-        return True
-    return head[4:8] == b"ftyp" and head[8:12] in _HEIF_BRANDS
+    """Foto de verdade pelo conteúdo: JPG, PNG ou WebP, os formatos que a tela, o relatório do
+    cliente e o PDF mostram. Arquivo qualquer enviado como "image/*" (ou HEIC, que o navegador
+    não abre) não passa: a foto quebrada no relatório só seria notada pelo cliente."""
+    return storage.image_extension(head) is not None
 
 
 # ------------------------------------------------------------------ modelos
@@ -485,7 +483,7 @@ async def add_photo(
     if (await photo_counts(db, form.id)).get(field_id, 0) >= field.max_photos:
         raise WorkflowError(f'"{field.label}": no máximo {field.max_photos} foto(s)')
     if not _is_photo(await _image_head(upload)):
-        raise WorkflowError("Envie uma foto (JPG, PNG, WebP ou HEIC)")
+        raise WorkflowError(PHOTO_TYPES)
     attachment = await add_attachment(db, ticket, upload, "photo", actor)
     attachment.form_id = form.id
     attachment.field_id = field_id
@@ -550,11 +548,8 @@ async def collect_signature(
     name = " ".join(signer_name.split())
     if len(name) < 3:
         raise WorkflowError("Informe o nome de quem assina")
-    if (upload.content_type or "") not in (
-        "image/png",
-        "image/jpeg",
-        "image/webp",
-    ) or storage.image_extension(await _image_head(upload)) is None:
+    # Vale o conteúdo do arquivo, não o tipo que o aparelho declarou.
+    if not _is_photo(await _image_head(upload)):
         raise WorkflowError("A assinatura deve ser uma imagem PNG ou JPG")
     attachment = await add_attachment(db, ticket, upload, "signature", actor)
     ticket.signer_name = name[:160]

@@ -146,7 +146,8 @@ async def test_form_photos_and_signature_must_be_real_images(
         return r.status_code
 
     assert await send(b"<svg xmlns='http://www.w3.org/2000/svg'/>", "foto.png") == 422
-    assert await send(HEIC, "IMG_0001.HEIC") == 201  # foto do iPhone não se perde
+    # HEIC não abre no navegador nem no PDF do cliente: é recusado com aviso (o app manda JPG).
+    assert await send(HEIC, "IMG_0001.HEIC") == 422
     assert await photo(client, th, t["id"], form["id"], "rack_antes") == 201
 
     plain = await create(client, world, title="Assinatura", assignee_id=str(world.tech.user.id))
