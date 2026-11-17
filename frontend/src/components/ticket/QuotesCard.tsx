@@ -202,7 +202,8 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
             const action = followUpAction(q, today);
             const reason = followUpText(q, today);
             const detail = [rowDetail(q, today), trackingText(q)].filter(Boolean).join(" · ");
-            const detailTitle = trackingTitle(q);
+            // A linha corta no celular: o title traz o texto inteiro e as datas de abertura e cobrança.
+            const detailTitle = [detail, trackingTitle(q)].filter(Boolean).join(" · ");
             return (
               <li key={q.id} className="flex flex-wrap items-center gap-2 px-4 py-2.5">
                 <FileText className="size-4 shrink-0 text-ink-muted" />
@@ -211,11 +212,11 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
                     {q.code} · {q.title}
                   </span>
                   {reason ? (
-                    <span className="block truncate text-xs font-medium text-ink" title={[detail, detailTitle].filter(Boolean).join(" · ")}>
+                    <span className="block truncate text-xs font-medium text-ink" title={detailTitle}>
                       {reason}
                     </span>
                   ) : (
-                    <span className="block truncate text-xs text-ink-muted" title={detailTitle ?? detail}>
+                    <span className="block truncate text-xs text-ink-muted" title={detailTitle}>
                       {detail}
                     </span>
                   )}

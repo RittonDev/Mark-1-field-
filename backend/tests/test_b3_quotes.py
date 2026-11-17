@@ -215,6 +215,16 @@ async def test_follow_up_rule_is_the_same_in_the_list_the_field_and_the_home(
     r = await client.get(f"{API}/quotes", params={"follow_up": "true", "q": "revisão"}, headers=an)
     assert [q["id"] for q in r.json()] == [in_review["id"]]
 
+    # Cobrou hoje o que vence amanhã: sai da fila (volta amanhã, no dia em que vence).
+    r = await client.post(f"{API}/quotes/{expiring['id']}/remind", headers=an)
+    assert r.status_code == 200
+    ids = await queue_ids(client, world)
+    assert expiring["id"] not in ids and len(ids) == 5
+    listed = (await client.get(f"{API}/quotes", headers=an)).json()
+    assert {q["id"] for q in listed if q["follow_up"]} == set(ids)
+    group = await home_group(client, world, "quotes_waiting")
+    assert group is not None and group["count"] == 5
+
 
 async def test_remind_records_who_and_when_and_leaves_the_queue(
     client: AsyncClient, world: World, engine: AsyncEngine
@@ -639,12 +649,18 @@ async def test_decision_toast_carries_the_total(
         published.append(event)
 
     monkeypatch.setattr(realtime.bus, "publish", capture)
+    an = world.analyst.headers
     t = await create(client, world, title="Rack")
     q = await new_quote(client, world, t["id"], "Organização do rack", "350")
     token = await send(client, world, q)
+    # Cobrado antes de responder: a resposta do cliente segue normal.
+    assert (await client.post(f"{API}/quotes/{q['id']}/remind", headers=an)).status_code == 200
     r = await client.post(f"{API}/public/quotes/{token}/approve", json=APPROVAL)
     assert r.status_code == 200, r.text
     decided = [e for e in published if e["type"] == "quote.decided"]
     assert [(e["quote_code"], e["status"], e["total"]) for e in decided] == [
         (q["code"], "approved", 350.0)
     ]
+    out = (await client.get(f"{API}/tickets/{t['id']}/quotes", headers=an)).json()[0]
+    assert (out["status"], out["reminder_count"], out["follow_up"]) == ("approved", 1, None)
+    assert out["last_reminded_by"]["name"] == "Analista"

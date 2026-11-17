@@ -179,7 +179,8 @@ function noticeFor(event: RealtimeEvent, userId: string): NoticeDraft | null {
       // "OS-001234: ORC-000123 aprovado pelo cliente", com "R$ 350,00 · <quem aprovou>" embaixo.
       const decided = event as { status?: string; quote_code?: string; total?: unknown };
       const approved = decided.status === "approved";
-      const amount = typeof decided.total === "number" ? formatMoney(decided.total) : null;
+      const total = typeof decided.total === "string" ? Number(decided.total) : decided.total;
+      const amount = typeof total === "number" && Number.isFinite(total) ? formatMoney(total) : null;
       return {
         ticketId,
         code,
