@@ -150,7 +150,8 @@ async def revoke_link(db: AsyncSession, ticket: Ticket) -> None:
 async def report_url(db: AsyncSession, ticket: Ticket) -> str | None:
     """Link do relatório para os textos do WhatsApp, em qualquer status: antes de concluir, a
     página mostra o andamento. Toda OS nasce com link; sem link é porque a gestão desativou, e o
-    texto respeita (não cria outro sozinho: um novo sai pelo menu "Link do relatório da atividade")."""
+    texto respeita: não cria outro sozinho (um novo sai pelo menu "Link do relatório da
+    atividade")."""
     out = link_out(ticket)
     return out.url if out else None
 

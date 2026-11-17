@@ -344,6 +344,15 @@ async def test_default_texts_leave_out_missing_data(client: AsyncClient, world: 
         f"Relatório do atendimento: {link['url']}"
     )
 
+    # Link desativado pela gestão: o texto não cria outro sozinho, a linha do link sai.
+    r = await client.delete(f"{API}/tickets/{remote['id']}/report-link", headers=an)
+    assert r.status_code == 204, r.text
+    closing = (await texts_of(client, world, remote))["fechamento"]
+    assert "Relatório do atendimento" not in closing
+    assert "desativado" not in closing
+    detail = (await client.get(f"{API}/tickets/{remote['id']}", headers=an)).json()
+    assert detail["report_link"] is None
+
 
 # ------------------------------------------------------------------ etiquetas automáticas
 
