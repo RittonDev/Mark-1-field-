@@ -839,7 +839,7 @@ function NewTicket() {
         <ArrowLeft aria-hidden className="size-4" />
         Chamados
       </Link>
-      <PageHeader title="Nova OS" description="Na ordem do atendimento: cliente, localização, tipo de OS, escopo, agendamento, colaborador e etiquetas." />
+      <PageHeader title="Nova OS" />
     </>
   );
 
@@ -918,7 +918,7 @@ function NewTicket() {
   );
 
   return (
-    <div className="mx-auto max-w-5xl">
+    <div className="mx-auto max-w-7xl">
       {header}
 
       {restoredAt ? (
@@ -982,7 +982,9 @@ function NewTicket() {
           // Enter puro num campo de uma linha não cria a OS pela metade (só Ctrl+Enter ou o botão).
           if ((e.target as HTMLElement).tagName === "INPUT") e.preventDefault();
         }}
-        className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]"
+        // Lateral a partir de 1280 px: técnicos sugeridos, cliente e localização e prazos ao lado dos
+        // passos. Abaixo disso, ela desce para depois do formulário.
+        className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_22rem] 2xl:grid-cols-[minmax(0,1fr)_24rem]"
       >
         <div className="flex min-w-0 flex-col gap-4">
           <MessageIntake
@@ -992,16 +994,17 @@ function NewTicket() {
             suggestions={suggestionsForMessage}
           />
 
-          <Card>
+          {/* @container: os passos ficam em duas colunas quando o cartão tem largura para isso. */}
+          <Card className="@container">
             <CardHeader title="Dados da OS" description="Siga a ordem dos passos. Os campos com * são obrigatórios." />
-            <ol className="divide-y divide-line">
+            <ol className="grid gap-x-8 gap-y-5 p-4 sm:p-5 @2xl:grid-cols-2">
               <Step
                 n={1}
                 title="Cliente"
                 titleId={ids.customer}
                 required
                 done={Boolean(f.customer_id)}
-                hint="As localizações e os tipos de OS do cliente aparecem primeiro nos próximos passos."
+                hint="As localizações e os tipos de OS do cliente aparecem primeiro."
                 error={shown.customer}
                 errorId={errorId("customer")}
               >
@@ -1027,7 +1030,7 @@ function NewTicket() {
                 hint={
                   location && autoLocationId === location.id
                     ? "Escolhida sozinha: é a única localização ativa deste cliente."
-                    : "Importante quando o cliente tem mais de um endereço ou unidade: escolha onde o serviço será feito."
+                    : "Onde o serviço será feito (o cliente pode ter mais de uma unidade)."
                 }
                 error={shown.location}
                 errorId={errorId("location")}
@@ -1087,7 +1090,7 @@ function NewTicket() {
                       ]
                         .filter(Boolean)
                         .join(" · ")
-                    : "O serviço que será feito: define a duração estimada e sugere os formulários."
+                    : "Define a duração estimada e sugere os formulários."
                 }
                 error={shown.type}
                 errorId={errorId("type")}
@@ -1114,7 +1117,8 @@ function NewTicket() {
                 htmlFor={ERROR_FIELD.scope}
                 required
                 done={Boolean(f.description.trim())}
-                hint="Descreva com clareza o que deve ser feito: um escopo bem detalhado ajuda o técnico a entender a demanda antes de chegar e evita retrabalho."
+                hint="Um escopo bem detalhado ajuda o técnico a entender a demanda antes de chegar e evita retrabalho."
+                className="@2xl:row-span-2"
                 error={shown.scope}
                 errorId={errorId("scope")}
                 extra={
@@ -1166,6 +1170,8 @@ function NewTicket() {
                     if (!f.description.trim() && text.trim().length > 80) setPasteOffer(text);
                   }}
                   rows={5}
+                  // Na coluna da direita, ao lado do tipo de OS e do agendamento: cresce até o fim deles.
+                  className="min-h-32 flex-1"
                   maxLength={TEXT_LIMIT}
                   required
                   aria-invalid={shown.scope ? true : undefined}
@@ -1220,7 +1226,7 @@ function NewTicket() {
                       </button>
                     </span>
                   ) : (
-                    "Opcional, mas combine com o cliente. Sem data, a OS fica na fila para agendar depois."
+                    "Opcional. Sem data, a OS fica na fila para agendar depois."
                   )
                 }
                 error={shown.date ?? shown.time}
@@ -1231,7 +1237,7 @@ function NewTicket() {
                     {lateResolution && startIso && resolutionDue ? (
                       <Caution>
                         O agendamento ({dayTimeLabel(startIso, now, true)}) fica depois do prazo de solução ({dayTimeLabel(iso(resolutionDue), now, true)}):
-                        a OS já vai nascer atrasada. Escolha uma prioridade com prazo maior (em Mais detalhes) ou combine outra data.
+                        a OS já vai nascer atrasada. Escolha uma prioridade com prazo maior (em Prazos desta OS) ou combine outra data.
                       </Caution>
                     ) : null}
                     {conflicts ? (
@@ -1301,45 +1307,7 @@ function NewTicket() {
                 hint={
                   f.assignee_id
                     ? "Quem executa: inicia, conclui e colhe a assinatura no app."
-                    : "Opcional. Sem colaborador, a OS fica na fila para atribuir depois (dá para convidar um técnico abaixo)."
-                }
-                extra={
-                  <div className="flex flex-col gap-2 rounded-xl border border-line bg-surface-2/40 p-3">
-                    <SectionTitle
-                      wrap
-                      aside={
-                        <>
-                          {suggestions.isFetching ? <span className="text-xs text-ink-subtle">atualizando...</span> : null}
-                          {f.location_id ? (
-                            <button type="button" onClick={() => void copyGroupInvite()} className="text-xs font-semibold text-brand-ink hover:underline">
-                              Copiar convite para o grupo
-                            </button>
-                          ) : null}
-                        </>
-                      }
-                    >
-                      Técnicos sugeridos
-                    </SectionTitle>
-                    <SuggestedTechnicians
-                      items={suggestions.data}
-                      loading={suggestions.isLoading}
-                      hasPlace={Boolean(f.location_id)}
-                      scheduled={Boolean(startIso)}
-                      assigneeId={f.assignee_id}
-                      helperIds={d.helperIds}
-                      onAssign={(t) => onAssignee(t?.id ?? "")}
-                      onToggleHelper={(t) => {
-                        setConflicts(null);
-                        update((x) => ({
-                          ...x,
-                          helperIds: x.helperIds.includes(t.id) ? x.helperIds.filter((id) => id !== t.id) : [...x.helperIds, t.id].slice(0, 6),
-                        }));
-                      }}
-                      invite={(t) => invite(t.name)}
-                      error={suggestions.error}
-                      onRetry={() => void suggestions.refetch()}
-                    />
-                  </div>
+                    : "Opcional: escolha aqui ou em Técnicos sugeridos. Sem colaborador, a OS fica na fila para atribuir."
                 }
               >
                 <Combobox<AssignableUser>

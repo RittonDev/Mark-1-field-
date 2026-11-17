@@ -41,6 +41,7 @@ export function SuggestedTechnicians({
   invite,
   error,
   onRetry,
+  compact = false,
 }: {
   items: TechnicianSuggestion[] | undefined;
   loading: boolean;
@@ -55,6 +56,8 @@ export function SuggestedTechnicians({
   /** Falha ao buscar as sugestões (não é o mesmo que "nenhum técnico na região"). */
   error?: unknown;
   onRetry?: () => void;
+  /** Coluna estreita (lateral da Nova OS): os botões descem para baixo do nome. */
+  compact?: boolean;
 }) {
   if (!hasPlace) {
     return (
@@ -109,7 +112,8 @@ export function SuggestedTechnicians({
             key={t.id}
             style={{ ["--i" as string]: i }}
             className={clsx(
-              "group flex items-start gap-3 rounded-xl border px-3 py-2.5 transition-colors",
+              "group flex rounded-xl border px-3 py-2.5 transition-colors",
+              compact ? "flex-col gap-2" : "items-start gap-3",
               isAssignee
                 ? "border-brand/50 bg-brand-soft/60 dark:bg-brand/10"
                 : isHelper
@@ -117,6 +121,7 @@ export function SuggestedTechnicians({
                   : "border-line bg-surface hover:border-line-strong",
             )}
           >
+            <div className="flex min-w-0 flex-1 items-start gap-3">
             <span className="relative mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full bg-surface-3 text-xs font-semibold text-ink-muted">
               {initials(t.name)}
               {i === 0 && !isAssignee ? (
@@ -161,7 +166,14 @@ export function SuggestedTechnicians({
                 </p>
               ) : null}
             </div>
-            <div className="flex shrink-0 flex-col items-stretch gap-1 sm:flex-row sm:items-center">
+            </div>
+            <div
+              className={clsx(
+                "flex shrink-0 gap-1",
+                // Alinhados com o nome (avatar de 36 px + 12 px de espaço).
+                compact ? "flex-wrap items-center pl-12" : "flex-col items-stretch sm:flex-row sm:items-center",
+              )}
+            >
               {invite ? (
                 <a
                   href={whatsappUrl(t.phone, invite(t))}

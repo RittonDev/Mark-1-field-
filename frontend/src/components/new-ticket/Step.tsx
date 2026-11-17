@@ -41,7 +41,8 @@ export const stepHintId = (titleId: string) => `${titleId}-dica`;
 /**
  * Um passo da Nova OS, na ordem do Field Control: número, rótulo em negrito (com * quando obrigatório),
  * o campo, a dica ou o erro logo abaixo dele e, depois, o que complementa o passo (avisos, sugestões).
- * O número ganha a cor da marca quando o passo já está preenchido. Vai dentro de um <ol>.
+ * O número ganha a cor da marca quando o passo já está preenchido. Vai dentro de um <ol> em grade
+ * (uma coluna no estreito, duas no largo), que dá o espaçamento entre os passos.
  */
 export function Step({
   n,
@@ -56,6 +57,7 @@ export function Step({
   errorId,
   children,
   extra,
+  className,
 }: {
   n: number;
   title: string;
@@ -71,6 +73,8 @@ export function Step({
   errorId?: string;
   children: React.ReactNode;
   extra?: React.ReactNode;
+  /** Posição na grade dos passos (ex.: ocupar duas linhas). */
+  className?: string;
 }) {
   const label = (
     <>
@@ -79,7 +83,7 @@ export function Step({
     </>
   );
   return (
-    <li className="flex gap-3 px-4 py-4 sm:px-5">
+    <li className={clsx("flex min-w-0 gap-3", className)}>
       <span
         aria-hidden
         className={clsx(
