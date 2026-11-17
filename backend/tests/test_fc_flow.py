@@ -355,9 +355,7 @@ async def test_activity_list_filters_and_order(
 ) -> None:
     an = world.analyst.headers
     alfa, alfa_store = await _customer(client, world, "Alfa Lojas")
-    a = await create(
-        client, world, title="Primeira", scheduled_start="2026-03-12T13:00:00+00:00"
-    )
+    a = await create(client, world, title="Primeira", scheduled_start="2026-03-12T13:00:00+00:00")
     b = await create(
         client,
         world,
@@ -411,9 +409,7 @@ async def test_activity_list_filters_and_order(
         assert r.status_code == 422, bad
 
 
-async def test_activity_list_export(
-    client: AsyncClient, world: World, engine: AsyncEngine
-) -> None:
+async def test_activity_list_export(client: AsyncClient, world: World, engine: AsyncEngine) -> None:
     an = world.analyst.headers
     market, store = await _customer(client, world, "+Mercado Central", city="Cuiabá", state="MT")
     kind = await client.post(

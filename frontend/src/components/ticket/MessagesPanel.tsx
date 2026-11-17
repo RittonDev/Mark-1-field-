@@ -598,6 +598,10 @@ function GroupTextsPopover({
       focusAt(0);
     } else if (e.key === "End") {
       focusAt(-1);
+    } else if (e.key === " " && document.activeElement instanceof HTMLAnchorElement) {
+      // Espaço também ativa os links do menu (WhatsApp, modelos), como nos botões.
+      e.preventDefault();
+      document.activeElement.click();
     }
   };
 
@@ -752,11 +756,14 @@ export function CopyGroupTextButton({
   templateKey,
   className,
   label = "Copiar texto",
+  size = "sm",
 }: {
   ticketId: string;
   templateKey?: string;
   className?: string;
   label?: string;
+  /** "md": ao lado de botões do tamanho padrão (ex.: o "Abrir OS" da OS recém-criada). */
+  size?: "sm" | "md";
 }) {
   const messages = useGroupTexts(ticketId, BUTTON_STALE_MS);
   const { copy, busy, fallback } = useGroupTextCopy(ticketId);
@@ -765,6 +772,14 @@ export function CopyGroupTextButton({
   useCopiedReset(copied, () => setCopied(false));
 
   const target = messages.data?.find((m) => (templateKey ? m.key === templateKey : m.suggested));
+  // Nome acessível com o texto que será copiado (sem repetir quando o rótulo já diz qual é).
+  const name = !target
+    ? undefined
+    : copied
+      ? `Copiado: ${target.name}`
+      : label.includes(target.name)
+        ? label
+        : `${label}: ${target.name}`;
   const failed = !messages.data && messages.isError;
   const reason = messages.isPending
     ? "Carregando o texto..."
@@ -795,16 +810,16 @@ export function CopyGroupTextButton({
         }}
         aria-disabled={unavailable || undefined}
         aria-busy={busy || undefined}
-        aria-label={target ? `${copied ? "Copiado" : label}: ${target.name}` : undefined}
+        aria-label={name}
         aria-describedby={reason ? reasonId : undefined}
         title={target ? `Copia “${target.name}” para colar no grupo do WhatsApp` : (reason ?? undefined)}
         className={buttonClassName(
           "secondary",
-          "sm",
+          size,
           clsx("aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:active:translate-y-0", className),
         )}
       >
-        <Icon aria-hidden className={clsx("size-3.5", loading && "animate-spin")} />
+        <Icon aria-hidden className={clsx(size === "sm" ? "size-3.5" : "size-4", loading && "animate-spin")} />
         {copied ? "Copiado" : label}
       </button>
       {reason ? (

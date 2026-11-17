@@ -522,8 +522,11 @@ function AgendaView() {
                 action={
                   filtered ? (
                     <Button onClick={clearFilters}>Limpar filtros</Button>
-                  ) : idleOffer ? (
-                    <Button onClick={() => setShowIdle(true)}>Ver técnicos sem visita</Button>
+                  ) : hideDone || idleOffer ? (
+                    <div className="flex flex-wrap justify-center gap-2">
+                      {hideDone ? <Button onClick={() => setHideDone(false)}>Mostrar concluídas</Button> : null}
+                      {idleOffer ? <Button onClick={() => setShowIdle(true)}>Ver técnicos sem visita</Button> : null}
+                    </div>
                   ) : undefined
                 }
               />

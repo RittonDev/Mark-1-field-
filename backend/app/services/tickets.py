@@ -1987,7 +1987,7 @@ def _list_ordering(f: TicketFilters, order_by: str) -> list[Any]:
 _NUMBER = re.compile(
     rf"(?P<prefix>{re.escape(settings.TICKET_PREFIX)}|#)?[\s#-]*0*(?P<n>\d+)", re.IGNORECASE
 )
-_MAX_NUMBER = 2**31 - 1  # coluna integer: número maior que isto não é OS (e daria erro no banco)
+MAX_NUMBER = 2**31 - 1  # coluna integer: número maior que isto não é OS (e daria erro no banco)
 
 # Listas (TicketListItem) não usam estes relacionamentos: não carregar poupa ~11 consultas a cada
 # página (e toda mudança de OS recarrega as listas abertas).
@@ -2019,7 +2019,7 @@ def _parse_number(q: str) -> int | None:
     if match is None:
         return None
     number = int(match.group("n"))
-    return number if number <= _MAX_NUMBER else None
+    return number if number <= MAX_NUMBER else None
 
 
 def _word_clause(word: str) -> ColumnElement[bool]:

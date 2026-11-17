@@ -71,9 +71,7 @@ def tag_key(name: object) -> str:
     return " ".join(str(name or "").split()).lower()
 
 
-def merged(
-    tags: list[dict[str, Any]], add: Iterable[Mapping[str, Any]]
-) -> list[dict[str, Any]]:
+def merged(tags: list[dict[str, Any]], add: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
     """As etiquetas da OS mais as de `add` que ela ainda não tem (até 20 na OS)."""
     out = list(tags)
     have = {tag_key(tag.get("name")) for tag in out}

@@ -121,9 +121,9 @@ function EditorSkeleton({ preview, onClose }: { preview: Preview | null; onClose
           </div>
         </div>
       </div>
-      <div aria-hidden className="flex items-center gap-3 border-t border-line bg-surface-2/60 px-5 py-3">
+      <div aria-hidden className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-line bg-surface-2/60 px-5 py-3">
         <Skeleton className="h-9 w-20 rounded-lg" />
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-x-1 gap-y-1.5">
           <Skeleton className="mr-1 h-8 w-40 rounded-lg" />
           {[0, 1, 2].map((i) => (
             <Skeleton key={i} className="size-9 rounded-lg" />

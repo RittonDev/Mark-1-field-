@@ -83,8 +83,6 @@ async def _detail(db: DB, ticket_id: uuid.UUID, user: User) -> TicketDetail:
 
 
 BAD_PERIOD = "Escolha datas entre 2000 e 2100"
-# Nº da OS: coluna integer (número maior não é OS e daria erro no banco).
-MAX_NUMBER = 2**31 - 1
 
 
 def ticket_filters(
@@ -108,7 +106,7 @@ def ticket_filters(
     open_only: bool = False,
     sla_breached: bool = False,
     violation_pending: bool = False,
-    number: Annotated[int | None, Query(ge=1, le=MAX_NUMBER)] = None,
+    number: Annotated[int | None, Query(ge=1, le=svc.MAX_NUMBER)] = None,
     created_from: date | None = None,
     created_to: date | None = None,
     scheduled_from: date | None = None,

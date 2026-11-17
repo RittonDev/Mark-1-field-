@@ -354,7 +354,7 @@ export function GeneralTab({
   const [changingLocation, setChangingLocation] = useState(false);
   const [suggestOpen, setSuggestOpen] = useState(false);
   // "Mais detalhes" começa aberto; quem recolhe uma vez encontra recolhido nas próximas OS.
-  const [moreOpen, setMoreOpen] = useState(() => readStored<boolean>("local", MORE_KEY) ?? true);
+  const [moreOpen, setMoreOpen] = useState(() => readStored<boolean>("local", MORE_KEY) !== false);
   const base = snap.base;
   const server = saved && isNewer(saved, ticket) ? saved : ticket;
 
