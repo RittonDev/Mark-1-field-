@@ -13,6 +13,8 @@ import { useDebounced } from "@/lib/hooks";
 import type { Location, Page, UUID } from "@/lib/types";
 
 const PAGE_SIZE = 8;
+/** Preso ao cliente: a lista mostra de uma vez as lojas dele (uma rede inteira cabe; as maiores, com busca). */
+const CUSTOMER_PAGE_SIZE = 60;
 const RECENT_MAX = 5;
 
 /** O que fica guardado das últimas lojas escolhidas: só o que aparece na lista (sem contatos). */
@@ -46,11 +48,14 @@ function town(city: string | null, state: string | null) {
   return city ? `${city}${state ? `/${state}` : ""}` : null;
 }
 
-function describe(l: Location) {
-  return [l.customer.name, town(l.city, l.state), l.document ? formatDocument(l.document) : null].filter(Boolean).join(" · ");
+function describe(l: Location, withCustomer = true) {
+  return [withCustomer ? l.customer.name : null, town(l.city, l.state), l.document ? formatDocument(l.document) : null]
+    .filter(Boolean)
+    .join(" · ");
 }
 
-function RowText({ row }: { row: PickRow }) {
+/** `withCustomer` falso: todas as linhas são do mesmo cliente, então só a cidade e o CNPJ diferenciam. */
+function RowText({ row, withCustomer }: { row: PickRow; withCustomer: boolean }) {
   const item = row.recent ?? row.location;
   return (
     <>
@@ -62,7 +67,9 @@ function RowText({ row }: { row: PickRow }) {
         </span>
       </p>
       <p className="truncate text-xs text-ink-muted">
-        {row.recent ? [row.recent.customer, town(row.recent.city, row.recent.state)].filter(Boolean).join(" · ") : describe(row.location)}
+        {row.recent
+          ? [withCustomer ? row.recent.customer : null, town(row.recent.city, row.recent.state)].filter(Boolean).join(" · ")
+          : describe(row.location, withCustomer)}
       </p>
     </>
   );
@@ -73,9 +80,13 @@ function RowText({ row }: { row: PickRow }) {
  * lojas, um select não serve. Escolher a loja também define o cliente. Sem texto, mostra as últimas
  * escolhidas e, com cliente escolhido, as lojas dele. Setas e Enter escolhem; o Enter nunca envia o
  * formulário em volta e o Esc fecha só a lista.
+ *
+ * Com `requireCustomer` (abertura e edição de OS), a busca nunca sai do cliente: sem cliente ela fica
+ * travada, e com cliente lista só as lojas dele, mesmo com nomes de marcas diferentes da rede.
  */
 export function LocationPicker({
   customerId,
+  requireCustomer = false,
   value,
   onChange,
   customerName,
@@ -91,6 +102,8 @@ export function LocationPicker({
   placeholder = "Buscar localização por nome, código, CNPJ ou cidade",
 }: {
   customerId: UUID | null;
+  /** Só as localizações do cliente escolhido: sem cliente, a busca fica travada; nunca busca nos outros. */
+  requireCustomer?: boolean;
   value: Location | null;
   onChange: (location: Location | null) => void;
   /** Nome do cliente que limita a busca (para dizer isso quando nada é achado). */
@@ -130,18 +143,21 @@ export function LocationPicker({
   const term = q.trim();
   const debounced = useDebounced(term, 250);
   const browsing = term === "";
+  // Preso ao cliente e sem cliente ainda: nada a buscar (o campo fica travado).
+  const locked = requireCustomer && !customerId;
+  const pageSize = requireCustomer ? CUSTOMER_PAGE_SIZE : PAGE_SIZE;
   const results = useQuery({
-    queryKey: ["locations", "search", debounced, customerId ?? "", true, 1, PAGE_SIZE],
+    queryKey: ["locations", "search", debounced, customerId ?? "", true, 1, pageSize],
     queryFn: () =>
       api.get<Page<Location>>("/locations", {
         q: debounced || undefined,
         customer_id: customerId ?? undefined,
         active: true,
         page: 1,
-        page_size: PAGE_SIZE,
+        page_size: pageSize,
       }),
     // Só com a lista aberta. Sem texto, só com cliente escolhido (as lojas dele); senão, as recentes.
-    enabled: open && !value && (debounced !== "" || Boolean(customerId)),
+    enabled: open && !value && !locked && (debounced !== "" || Boolean(customerId)),
     placeholderData: keepPreviousData,
     staleTime: 30_000,
   });
@@ -174,7 +190,7 @@ export function LocationPicker({
           : `Nenhuma localização deste cliente com “${term}”.`
         : `Nenhuma localização com “${term}”.`;
   const actionRows: Row[] = [];
-  if (nothingFound && customerId && !browsing && onClearCustomer) {
+  if (nothingFound && customerId && !browsing && onClearCustomer && !requireCustomer) {
     actionRows.push({ key: "acao-todos-clientes", action: { label: "Buscar em todos os clientes", icon: Search, run: onClearCustomer } });
   }
   if (nothingFound && onCreate) {
@@ -299,6 +315,28 @@ export function LocationPicker({
     );
   }
 
+  if (locked) {
+    // Sem cliente, não há lojas para mostrar: o campo espera o cliente (o texto da pista fica guardado).
+    return (
+      <div className="relative">
+        <Search aria-hidden className="pointer-events-none absolute top-2.5 left-3 size-4 text-ink-subtle" />
+        <Input
+          id={inputId}
+          value=""
+          disabled
+          readOnly
+          placeholder={placeholder}
+          className="pl-9"
+          aria-labelledby={labelledBy}
+          aria-label={labelledBy ? undefined : "Buscar localização"}
+          aria-invalid={invalid || undefined}
+          aria-describedby={describedBy}
+          aria-required={required || undefined}
+        />
+      </div>
+    );
+  }
+
   // A busca falhou (rede, sessão): diz isso em vez de ficar em "Buscando...".
   const failure = results.error && !searching && pickRows.length === 0 ? `Não deu para buscar as localizações: ${errorMessage(results.error)}` : "";
   const status = !open
@@ -336,7 +374,7 @@ export function LocationPicker({
         </span>
       ) : (
         <span className="min-w-0 flex-1">
-          <RowText row={row} />
+          <RowText row={row} withCustomer={!customerId} />
         </span>
       )}
       {row.recent && loadingId === row.recent.id ? <Loader2 aria-hidden className="size-4 shrink-0 animate-spin text-ink-subtle" /> : null}
@@ -436,7 +474,9 @@ export function LocationPicker({
           ) : null}
           {more > 0 ? (
             <li role="presentation" className="border-t border-line px-3 py-2 text-xs text-ink-muted">
-              Mais {more.toLocaleString("pt-BR")} {more === 1 ? "localização" : "localizações"}: refine a busca
+              {browsing && customerId
+                ? `Mais ${more.toLocaleString("pt-BR")} ${more === 1 ? "loja" : "lojas"} ${customerName ? `de ${customerName}` : "do cliente"}: digite o nome, a cidade ou o código`
+                : `Mais ${more.toLocaleString("pt-BR")} ${more === 1 ? "localização" : "localizações"}: refine a busca`}
             </li>
           ) : null}
         </ul>
