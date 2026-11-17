@@ -613,10 +613,10 @@ export function createBackdropEngine(canvas: HTMLCanvasElement, options: Backdro
     }
   }
 
-  /** O par está desenhado (no 1º balde ou acima). */
+  /** O par está ligado na rede, mesmo que a linha esteja apagada demais para aparecer (a sinapse desenha a dela). */
   function linked(a: number, b: number): boolean {
     const p = a < b ? a * MAX_NODES + b : b * MAX_NODES + a;
-    return strength[p] >= 0.125;
+    return strength[p] > 0;
   }
 
   function visited(node: number, length: number): boolean {
