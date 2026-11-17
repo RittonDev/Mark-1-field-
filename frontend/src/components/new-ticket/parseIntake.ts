@@ -12,7 +12,7 @@ export interface IntakeParse {
   description: string;
   /** Quem escreveu: o primeiro remetente da conversa ou o "De:" do e-mail. */
   contactName: string | null;
-  /** Telefone achado no texto (ou no remetente) ou, no e-mail, o endereço de quem mandou. */
+  /** O número de quem mandou a conversa do WhatsApp, o telefone achado no texto ou o e-mail do remetente. */
   contact: string | null;
   /** Nº do chamado no sistema do cliente (ex.: INC0012345). */
   clientReference: string | null;
@@ -215,13 +215,15 @@ export function parseIntake(raw: string): IntakeParse {
   const text = lines.join("\n");
   const phone = findPhone(tidied);
   const cnpj = CNPJ.exec(text)?.[0].replace(/\D/g, "") ?? null;
+  // No WhatsApp, o número de quem mandou é o contato de quem pediu. Fora dele, o telefone do corpo da
+  // mensagem vale mais que o e-mail do remetente (a central liga para ele).
+  const reach = source === "whatsapp" && contact ? contact : (phone ?? contact);
 
   return {
     source,
     description: withoutContacts(tidied),
     contactName: contactName ? contactName.slice(0, 160) : null,
-    // Telefone do corpo da mensagem vale mais que o e-mail do remetente (a central liga para ele).
-    contact: (phone ?? contact)?.slice(0, 160) ?? null,
+    contact: reach?.slice(0, 160) ?? null,
     clientReference: referenceFrom(text)?.slice(0, 80) ?? null,
     cnpj: cnpj && cnpj.length === 14 ? cnpj : null,
     storeHint: storeHintFrom(tidied),

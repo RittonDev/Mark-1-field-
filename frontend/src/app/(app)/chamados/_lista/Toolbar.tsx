@@ -6,11 +6,14 @@ import { useEffect, useId, useRef, useState } from "react";
 import { buttonClassName, isTopLayer } from "@/components/ui";
 import type { ColumnsState } from "./columns";
 import { EXPORT_LIMIT } from "./exportTickets";
-import { Popover } from "./Popover";
+import { fitOffset, Popover } from "./Popover";
 
 export type ExportScope = "filtered" | "selected";
 
 const countOs = (n: number) => `${n.toLocaleString("pt-BR")} OS`;
+
+/** Largura do menu "Exportar" (w-80). */
+const EXPORT_MENU_PX = 320;
 
 /**
  * "Exportar": a planilha do que está filtrado (todas as páginas) ou só das OS marcadas na lista. Menu
@@ -29,6 +32,8 @@ export function ExportMenu({
   onExport: (scope: ExportScope) => void;
 }) {
   const [open, setOpen] = useState(false);
+  // Deslocamento do menu para caber na tela (a página põe o botão à direita; no celular, à esquerda).
+  const [offset, setOffset] = useState(0);
   const wrap = useRef<HTMLDivElement>(null);
   const menu = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -81,7 +86,10 @@ export function ExportMenu({
       <button
         ref={trigger}
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          if (!open && trigger.current) setOffset(fitOffset(trigger.current, EXPORT_MENU_PX));
+          setOpen(!open);
+        }}
         disabled={busy}
         aria-haspopup="menu"
         aria-expanded={open}
@@ -99,7 +107,8 @@ export function ExportMenu({
           id={menuId}
           role="menu"
           aria-label="Exportar planilha"
-          className="absolute right-0 z-40 mt-1.5 w-80 max-w-[calc(100vw-2rem)] animate-pop overflow-hidden rounded-xl border border-line bg-surface py-1.5 shadow-pop"
+          style={{ left: offset }}
+          className="absolute top-full z-40 mt-1.5 w-80 max-w-[calc(100vw-2rem)] animate-pop overflow-hidden rounded-xl border border-line bg-surface py-1.5 shadow-pop"
         >
           <button type="button" role="menuitem" tabIndex={-1} disabled={!total} onClick={() => run("filtered")} className={item}>
             <ListFilter aria-hidden className="mt-0.5 size-4 shrink-0 text-ink-muted" />

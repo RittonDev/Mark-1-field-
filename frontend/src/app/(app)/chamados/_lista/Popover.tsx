@@ -16,6 +16,18 @@ export type PanelWidth = keyof typeof PANEL_WIDTHS;
 const FOCUSABLE =
   'input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
 
+/**
+ * Deslocamento (px, zero ou negativo) de um quadro de `panelPx` de largura que abre alinhado à esquerda
+ * do botão: perto da borda direita ele anda para a esquerda até caber, com 16px de margem dos dois
+ * lados (a mesma do max-w-[calc(100vw-2rem)] dos quadros).
+ */
+export function fitOffset(anchor: HTMLElement, panelPx: number): number {
+  const rect = anchor.getBoundingClientRect();
+  const panelWidth = Math.min(panelPx, window.innerWidth - 32);
+  const overflow = rect.left + panelWidth - (window.innerWidth - 16);
+  return -Math.max(0, Math.min(overflow, rect.left - 16));
+}
+
 /** Botão em pílula da fileira de filtros (como no Field Control); ativo, fica no tom da marca. */
 export function pillClassName(active: boolean, className?: string) {
   return clsx(
@@ -31,7 +43,8 @@ export function pillClassName(active: boolean, className?: string) {
 /**
  * Botão que abre um quadro com campos (um filtro, as colunas). O foco vai para o campo marcado com
  * data-autofocus (ou para o primeiro do quadro); Esc fecha e devolve o foco ao botão; clicar fora ou
- * sair com o Tab fecha. Perto da borda direita da tela o quadro abre alinhado à direita do botão.
+ * sair com o Tab fecha. Perto da borda direita da tela o quadro abre puxado para a esquerda, sem sair
+ * da tela (no celular também).
  */
 export function Popover({
   label,
@@ -51,7 +64,8 @@ export function Popover({
   children: (close: (focusTrigger?: boolean) => void) => React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
-  const [alignRight, setAlignRight] = useState(false);
+  // Quanto o quadro anda para a esquerda do botão para caber na tela (px, zero ou negativo).
+  const [offset, setOffset] = useState(0);
   // Pedidos de devolver o foco ao botão (cada fechamento que pede soma um; o efeito abaixo atende).
   const [focusRequest, setFocusRequest] = useState(0);
   const wrap = useRef<HTMLDivElement>(null);
@@ -60,8 +74,7 @@ export function Popover({
   const panelId = useId();
 
   const show = () => {
-    const rect = button.current?.getBoundingClientRect();
-    setAlignRight(!!rect && rect.left + PANEL_WIDTHS[width].px > window.innerWidth - 16);
+    if (button.current) setOffset(fitOffset(button.current, PANEL_WIDTHS[width].px));
     setOpen(true);
   };
   const close = (focusTrigger = true) => {
@@ -117,10 +130,10 @@ export function Popover({
           id={panelId}
           role="dialog"
           aria-label={label}
+          style={{ left: offset }}
           className={clsx(
             "absolute top-full z-40 mt-1.5 max-w-[calc(100vw-2rem)] animate-pop rounded-xl border border-line bg-surface p-3 shadow-pop",
             PANEL_WIDTHS[width].className,
-            alignRight ? "right-0" : "left-0",
           )}
         >
           {children(close)}
