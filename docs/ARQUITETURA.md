@@ -50,7 +50,6 @@ Next.js 16 (App Router) + React 19 + Tailwind 4 + TanStack Query.
 | `src/app/login` | login |
 | `src/app/(app)/dashboard` | indicadores, backlog por status/prioridade, carga por analista |
 | `src/app/(app)/chamados` | lista com filtros, nova OS e detalhe (ações, atribuição, acompanhamentos, histórico, apontamentos, anexos) |
-| `src/app/(app)/quadro` | kanban por status com arrastar e soltar |
 | `src/app/(app)/clientes`, `ativos`, `usuarios`, `configuracoes` | cadastros, SLA e categorias |
 | `src/lib/api.ts` | cliente HTTP com renovação automática do token |
 | `src/lib/realtime.tsx` | WebSocket com reconexão, invalida o cache e mostra avisos |

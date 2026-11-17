@@ -31,7 +31,7 @@ export function setFieldRules(next: Partial<FieldRules> | null | undefined) {
   };
 }
 
-/** Chegada "em risco" quando faltam até 60 min (mesmo critério do quadro da web). */
+/** Chegada "em risco" quando faltam até 60 min (mesmo critério da web). */
 export const ARRIVAL_RISK_MINUTES = 60;
 
 const BEFORE_ARRIVAL: TicketStatus[] = ["assigned", "scheduled", "en_route"];

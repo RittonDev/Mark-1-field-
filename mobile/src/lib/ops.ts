@@ -20,7 +20,7 @@ export const UNPRODUCTIVE_FROM: TicketStatus[] = ["assigned", "scheduled", "en_r
 
 /**
  * Espelho de backend/app/services/tickets.py::allowed_transitions.
- * Diferente do quadro da web, analista e técnico podem levar uma OS sem responsável para
+ * Analista e técnico podem levar uma OS sem responsável para
  * um status de campo: o servidor os define como responsável automaticamente (SELF_ASSIGN_ROLES).
  */
 export function allowedTransitions(user: User, ticket: TicketDetail): TicketStatus[] {

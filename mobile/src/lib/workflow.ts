@@ -1,5 +1,5 @@
 // Regras de transição espelhadas de workflow.user_can_transition / validate_transition.
-// Usadas só para pré-filtrar o arraste no quadro; a API valida de novo.
+// Pré-filtram as ações de status no app; a API valida de novo.
 
 import {
   canManageTickets,
@@ -19,7 +19,7 @@ export function userCanTransition(user: User, ticket: TicketListItem, to: Ticket
   // visita (sair, iniciar, concluir). Agenda, pausa e cancelamento são da central: o técnico nunca
   // mexe no horário.
   if (user.role === "technician") return ticket.assignee?.id === user.id && TECHNICIAN_TARGETS.includes(to);
-  // Solicitante: a lista não traz requester_id; o quadro não é usado por solicitantes.
+  // Solicitante: a lista não traz requester_id (o app não é usado por solicitantes).
   if (to === "cancelled") return UNTOUCHED_STATUSES.includes(ticket.status);
   return ticket.status === "resolved" && (to === "closed" || to === "reopened");
 }
