@@ -875,6 +875,137 @@ async def test_finance_values_and_payout_tag(
 
 
 @requires_db
+async def test_quotes_box(
+    client: AsyncClient,
+    world: World,
+    db: AsyncSession,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ticket = await add_ticket(db, world, title="OS com orçamentos")
+    cancelled = await add_ticket(db, world, title="OS cancelada", status=S.CANCELLED)
+    sent, expired, draft = QuoteStatus.SENT, QuoteStatus.EXPIRED, QuoteStatus.DRAFT
+    approved, rejected = QuoteStatus.APPROVED, QuoteStatus.REJECTED
+
+    def quote(title: str, total: str, status: QuoteStatus, **fields: object) -> Quote:
+        value = Decimal(total)
+        fields.setdefault("ticket_id", ticket.id)
+        return Quote(title=title, subtotal=value, total=value, status=status, **fields)
+
+    def listed(now: datetime, today: date) -> list[Quote]:
+        """Os orçamentos dos recortes com link para a lista (aguardando, vencidos e rascunhos),
+        com as datas relativas a `now` e `today`."""
+
+        def day(n: int) -> date:
+            return today + timedelta(days=n)
+
+        def before(**delta: float) -> datetime:
+            return now - timedelta(**delta)
+
+        gone = {"ticket_id": cancelled.id}
+        return [
+            # Aguardando a assinatura (o da OS cancelada também, como na lista).
+            quote(
+                "Na validade", "100.25", sent, link_id="l1", valid_until=day(10), sent_at=before(days=1)
+            ),
+            quote("Sem link", "200", sent, valid_until=day(5), sent_at=before(days=3)),
+            quote("Vence amanhã", "400", sent, link_id="l2", valid_until=day(1), sent_at=before(days=1)),
+            quote(
+                "Vence hoje, cobrado agora",
+                "500",
+                sent,
+                link_id="l3",
+                valid_until=day(0),
+                sent_at=before(days=5),
+                last_reminded_at=now,
+                reminder_count=1,
+            ),
+            quote(
+                "Da OS cancelada", "600", sent, link_id="l4", valid_until=day(10), sent_at=before(days=3), **gone
+            ),
+            # Vencidos pela criação nos 90 dias: o enviado com a validade passada também conta.
+            quote(
+                "Validade passada",
+                "1000",
+                sent,
+                link_id="l5",
+                valid_until=day(-2),
+                sent_at=before(days=9),
+                created_at=before(days=10),
+            ),
+            quote("Vencido há 8 dias", "2000", expired, valid_until=day(-8), created_at=before(days=10)),
+            quote(
+                "Vencido da OS cancelada", "8000", expired, valid_until=day(-3), created_at=before(days=5), **gone
+            ),
+            quote("Criado há 100 dias", "4000", expired, valid_until=day(-95), created_at=before(days=100)),
+            # Rascunhos: o nunca enviado e o editado depois do envio (em revisão).
+            quote("Rascunho", "10", draft),
+            quote("Em revisão", "20", draft, sent_at=before(days=3), updated_at=before(days=2)),
+        ]
+
+    db.add_all(
+        [
+            *listed(NOW, TODAY),
+            # Link antigo (só o hash) e sem validade: aguardando, e o cliente tem como assinar.
+            quote("Link antigo, sem validade", "300", sent, token_hash="f" * 64, sent_at=ago(days=1)),
+            # Respondidos. O de 31/10 às 23h30 em São Paulo (já 01/11 em UTC) é do mês passado.
+            quote("Aprovado", "50", approved, decided_at=ago(days=2)),
+            quote("Aprovado da OS cancelada", "60", approved, decided_at=ago(days=2), ticket_id=cancelled.id),
+            quote("Aprovado em 31/10", "70", approved, decided_at=at(date(2026, 10, 31), 23, 30)),
+            quote("Aprovado há 60 dias", "80", approved, decided_at=ago(days=60)),
+            quote("Aprovado há 100 dias", "90", approved, decided_at=ago(days=100)),
+            quote("Recusado", "30", rejected, decided_at=ago(days=5)),
+            quote("Cancelado", "40", QuoteStatus.CANCELLED),
+        ]
+    )
+    await db.commit()
+
+    data = await overview(client, world)
+    quotes = data["pulse"]["quotes"]
+    assert quotes == {
+        "awaiting": 6,  # os 5 enviados na validade (um de OS cancelada) e o sem validade
+        "awaiting_total": 2100.25,
+        "awaiting_no_link": 1,
+        "expiring": 2,  # vence hoje e vence amanhã
+        "expired_90d": 3,  # validade passada, vencido há 8 dias e o da OS cancelada
+        "expired_90d_total": 11000.0,
+        "drafts": 2,
+        "in_review": 1,
+        "follow_up": 4,  # sem link, vence amanhã, validade passada e em revisão
+        "follow_up_total": 1620.0,
+        "approved_month": 1,
+        "approved_month_total": 50.0,
+        "rejected_month": 1,
+        "approved_90d": 3,  # no mês, em 31/10 e há 60 dias
+        "decided_90d": 6,  # os 3 aprovados, o recusado e os 2 vencidos de OS aberta
+    }
+    # A fila é o número do grupo do Início; o aprovado no mês, o mesmo do financeiro.
+    assert groups(data)["quotes_waiting"]["count"] == quotes["follow_up"]
+    finance = data["pulse"]["finance"]
+    assert (finance["quotes_approved_month"], finance["quotes_approved_month_total"]) == (1, 50.0)
+
+    # GET /quotes usa o relógio de verdade: os mesmos orçamentos de novo, com as datas relativas a
+    # ele, e a tela sem o "agora" fixo. Cada recorte com link bate com a lista do link.
+    await db.execute(delete(Quote))
+    db.add_all(listed(utcnow(), local_today()))
+    await db.commit()
+    monkeypatch.setattr(home, "utcnow", utcnow)
+    monkeypatch.setattr(home, "local_today", local_today)
+    quotes = (await overview(client, world))["pulse"]["quotes"]
+    counts = (quotes["awaiting"], quotes["expired_90d"], quotes["drafts"], quotes["follow_up"])
+    assert counts == (5, 3, 2, 4)
+    start = (utcnow() - timedelta(days=90)).isoformat()
+    for params, count in (
+        ({"status": "sent"}, quotes["awaiting"]),
+        ({"status": "expired", "start": start}, quotes["expired_90d"]),
+        ({"status": "draft"}, quotes["drafts"]),
+        ({"follow_up": "true"}, quotes["follow_up"]),
+    ):
+        r = await client.get(f"{API}/quotes", params=params, headers=world.analyst.headers)
+        assert r.status_code == 200, r.text
+        assert (r.headers["x-total-count"], len(r.json())) == (str(count), count), params
+
+
+@requires_db
 async def test_weeks_follow_local_mondays(
     client: AsyncClient,
     world: World,
