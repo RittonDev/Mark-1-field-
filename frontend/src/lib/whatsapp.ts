@@ -55,6 +55,14 @@ export function whatsappUrl(phone: string | null | undefined, text: string): str
 }
 
 /**
+ * WhatsApp sem número, para o grupo (a pessoa escolhe a conversa). O texto longo demais para ir no
+ * endereço (WHATSAPP_TEXT_LIMIT) abre a conversa vazia: copie e cole.
+ */
+export function groupShareUrl(text: string): string {
+  return whatsappUrl(null, text.length <= WHATSAPP_TEXT_LIMIT ? text : "");
+}
+
+/**
  * Copia o texto para a área de transferência. Em http na rede do escritório (ex.:
  * http://servidor:3001) o navegador não libera a área de transferência moderna: aí vale o "copiar"
  * antigo, por um campo escondido. Devolve false quando nada foi copiado (avise a pessoa).

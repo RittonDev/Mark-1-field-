@@ -13,33 +13,37 @@ import Link from "next/link";
 import { useEffect, useEffectEvent, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useToast } from "@/components/Toaster";
-import { Button, buttonClassName, Dialog, EmptyState, ErrorBox, LoadingBlock, Skeleton, Textarea } from "@/components/ui";
+import { Button, buttonClassName, Dialog, EmptyState, ErrorBox, isTopLayer, LoadingBlock, Skeleton, Textarea } from "@/components/ui";
 import { errorMessage } from "@/lib/api";
 import {
   copyText,
   GROUP_TEXT_COPIED,
   GROUP_TEXT_FRESH_MS,
   type GroupText,
+  groupShareUrl,
   groupTextsQuery,
   suggestedFirst,
   WHATSAPP_TEXT_LIMIT,
-  whatsappUrl,
 } from "@/lib/whatsapp";
 
 type ToastFn = ReturnType<typeof useToast>["toast"];
 
-/** O botão de copiar busca os textos ao aparecer (também em listas): reaproveita a busca por esse tempo. */
-const BUTTON_STALE_MS = 30_000;
+/**
+ * O botão de copiar lê os textos ao aparecer (também nas linhas da lista de OS). A leitura serve por esse
+ * tempo e não se repete a cada volta do WhatsApp para a aba: o que muda a OS chega em tempo real e relê
+ * os textos, e o clique relê o que tiver mais de 1 min (GROUP_TEXT_FRESH_MS) antes de copiar.
+ */
+const BUTTON_STALE_MS = 5 * 60_000;
 /** Tempo do "Copiado" no botão depois de copiar. */
 const COPIED_MS = 2000;
 
 /**
- * Textos da OS já preenchidos, o sugerido primeiro. Hora, previsão de chegada e técnico mudam: relê ao
- * abrir, e a chave fica sob ["ticket", id], então salvar ou mudar a situação da OS (aqui ou em tempo
- * real) relê os textos.
+ * Textos da OS já preenchidos, o sugerido primeiro. A chave fica sob ["ticket", id]: salvar ou mudar a
+ * situação da OS (aqui ou em tempo real) relê os textos. `staleTime`: por quanto tempo a leitura serve
+ * sem buscar de novo ao aparecer (0: relê sempre; hora, previsão de chegada e técnico mudam).
  */
-function useGroupTexts(ticketId: string, staleTime = 0) {
-  return useQuery({ ...groupTextsQuery(ticketId), staleTime, select: suggestedFirst });
+function useGroupTexts(ticketId: string, { staleTime = 0, refetchOnWindowFocus = true }: { staleTime?: number; refetchOnWindowFocus?: boolean } = {}) {
+  return useQuery({ ...groupTextsQuery(ticketId), staleTime, refetchOnWindowFocus, select: suggestedFirst });
 }
 
 /** Tira o "Copiado" do botão um pouco depois de copiar (`copied`: o que foi copiado, ou vazio). */
@@ -72,7 +76,7 @@ function previewOf(text: string, shared: string | null): string {
 }
 
 /** WhatsApp sem número (a pessoa escolhe o grupo). O texto longo demais para ir no endereço abre vazio. */
-const shareUrl = (text: string) => whatsappUrl(null, text.length <= WHATSAPP_TEXT_LIMIT ? text : "");
+const shareUrl = groupShareUrl;
 
 const openWhatsApp = (text: string) => {
   window.open(shareUrl(text), "_blank", "noopener,noreferrer");
@@ -425,6 +429,23 @@ const menuItem =
   "flex text-left transition-colors outline-none hover:bg-surface-2 focus-visible:bg-surface-2 " +
   "focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset";
 
+/** Item "Editar modelos" do rodapé do menu (data-item): não recebe o foco no lugar dos textos. */
+const FOOTER_ITEM = "modelos";
+
+/**
+ * Setas, Home e End andam pelos itens do menu, dando a volta; sem item com o foco, a seta para baixo vai
+ * ao primeiro e a para cima, ao último. Devolve false para as outras teclas (e sem itens).
+ */
+function moveMenuFocus(menu: HTMLElement, key: string): boolean {
+  const items = Array.from(menu.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+  const index = items.indexOf(document.activeElement as HTMLElement);
+  const next =
+    key === "ArrowDown" ? index + 1 : key === "ArrowUp" ? (index < 0 ? -1 : index - 1) : key === "Home" ? 0 : key === "End" ? -1 : null;
+  if (next === null || items.length === 0) return false;
+  items[(next + items.length) % items.length].focus();
+  return true;
+}
+
 /**
  * "Textos para o grupo": os textos prontos da OS num menu, o sugerido para agora primeiro (marcado
  * "Agora"). O clique copia e o aviso oferece abrir o WhatsApp; o ícone ao lado de cada texto abre o
@@ -459,7 +480,8 @@ export function GroupTextsMenu({
     void copy(m.key).then(setCopied);
   };
   const share = (m: GroupText) => {
-    close(false);
+    // O WhatsApp abre em outra aba; aqui o foco volta ao botão, e quem volta da outra aba não se perde.
+    close(true);
     void copyForLongLink(m.text, toast);
   };
   const icon = size === "sm" ? "size-3.5" : "size-4";
@@ -501,7 +523,8 @@ export function GroupTextsMenu({
 /**
  * A lista do menu, num portal no <body>: não é cortada pela tabela nem pelo painel com rolagem e fica
  * por cima do painel da OS. Teclado como menu: setas, Home e End andam; Esc fecha e devolve o foco ao
- * botão; Tab fecha e segue a partir do botão.
+ * botão; Tab fecha e segue a partir do botão. As teclas valem mesmo com o foco perdido (ex.: o item com o
+ * foco saiu da tela): enquanto o menu está aberto, o painel e os diálogos por baixo não atendem o Esc.
  */
 function GroupTextsPopover({
   id,
@@ -523,11 +546,21 @@ function GroupTextsPopover({
   /** Fechar; `focusTrigger` devolve o foco ao botão. */
   onClose: (focusTrigger: boolean) => void;
 }) {
-  const messages = useGroupTexts(ticketId);
+  // A leitura de até 1 min (a mesma que o clique copia) aparece na hora. Mais velha, ou desatualizada por
+  // uma mudança na OS, o menu espera a leitura nova: a lista não muda de ordem embaixo do mouse logo
+  // depois de abrir (ex.: passou a hora de chegar e o "Atraso na chegada" vira o sugerido).
+  const messages = useGroupTexts(ticketId, { staleTime: GROUP_TEXT_FRESH_MS });
+  const [waitFresh] = useState(messages.isStale);
+  const waiting = waitFresh && !messages.isFetchedAfterMount;
+  const list = waiting ? undefined : messages.data;
+  const failed = !waiting && list === undefined && messages.isError;
+  const settled = list !== undefined || failed;
   const menu = useRef<HTMLDivElement>(null);
   const baseId = useId();
-  const list = messages.data;
-  const settled = list !== undefined || messages.isError;
+  /** O último item com o foco (data-item), para devolver o foco a ele se a lista mudar. */
+  const lastItem = useRef<string | null>(null);
+  /** O foco já foi para a lista (ou para o erro) depois de carregar. */
+  const focusedList = useRef(false);
   const dismiss = useEffectEvent(() => onClose(false));
   const onOutside = useEffectEvent((e: MouseEvent) => {
     const target = e.target as Node;
@@ -565,22 +598,28 @@ function GroupTextsPopover({
     return () => document.removeEventListener("mousedown", listener);
   }, []);
 
-  // Foco no primeiro item (o sugerido) assim que a lista chega; enquanto carrega, no próprio menu.
+  // Foco: enquanto carrega, no próprio menu (o leitor de tela ouve que está ocupado); quando a lista chega,
+  // no primeiro item (o sugerido), também se a pessoa desceu até "Editar modelos" enquanto carregava.
+  // Depois, se a lista muda com o menu aberto (leitura nova que troca a ordem, o "Tentar de novo" que
+  // some ao dar certo) e o item com o foco sai do lugar, o foco volta ao mesmo item, ou ao primeiro.
   useEffect(() => {
     const node = menu.current;
     if (!node) return;
     const active = document.activeElement;
-    if (active && active !== node && node.contains(active)) return;
-    (node.querySelector<HTMLElement>('[role="menuitem"]') ?? node).focus({ preventScroll: true });
-  }, [settled]);
+    const item = active instanceof HTMLElement && active !== node && node.contains(active) ? active : null;
+    if (!settled) {
+      if (!item) node.focus({ preventScroll: true });
+      return;
+    }
+    const first = !focusedList.current;
+    focusedList.current = true;
+    if (item && !(first && item.dataset.item === FOOTER_ITEM)) return;
+    const items = Array.from(node.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+    const same = first || active === node ? undefined : items.find((el) => el.dataset.item === lastItem.current);
+    (same ?? items[0] ?? node).focus({ preventScroll: true });
+  }, [settled, list]);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    const items = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]'));
-    const index = items.indexOf(document.activeElement as HTMLElement);
-    const focusAt = (i: number) => {
-      e.preventDefault();
-      items[(i + items.length) % items.length]?.focus();
-    };
     if (e.key === "Escape") {
       // O preventDefault avisa o painel da OS e os diálogos por baixo: o Esc fecha só o menu.
       e.preventDefault();
@@ -588,22 +627,42 @@ function GroupTextsPopover({
     } else if (e.key === "Tab") {
       // O foco volta ao botão e o Tab segue a partir dele (no painel da OS, o Tab continua preso nele).
       onClose(true);
-    } else if (items.length === 0) {
-      return;
-    } else if (e.key === "ArrowDown") {
-      focusAt(index + 1);
-    } else if (e.key === "ArrowUp") {
-      focusAt(index < 0 ? -1 : index - 1);
-    } else if (e.key === "Home") {
-      focusAt(0);
-    } else if (e.key === "End") {
-      focusAt(-1);
+    } else if (moveMenuFocus(e.currentTarget, e.key)) {
+      e.preventDefault();
     } else if (e.key === " " && document.activeElement instanceof HTMLAnchorElement) {
       // Espaço também ativa os links do menu (WhatsApp, modelos), como nos botões.
       e.preventDefault();
       document.activeElement.click();
     }
   };
+
+  // Com o foco fora do menu (perdido no <body> ou no botão que o abriu), as teclas continuam valendo. Com
+  // o foco dentro, quem trata é o onKeyDown acima, que roda antes (na raiz do React).
+  const onWindowKey = useEffectEvent((e: KeyboardEvent) => {
+    const node = menu.current;
+    if (!node || (e.target instanceof Node && node.contains(e.target)) || !isTopLayer(node)) return;
+    if (e.key === "Tab") {
+      // O Tab segue de onde o foco está (no painel da OS, o painel o prende nele) e o menu fecha.
+      onClose(false);
+      return;
+    }
+    if (e.defaultPrevented) return;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      onClose(true);
+      return;
+    }
+    // As setas só com o foco perdido ou no botão: não atrapalham um campo que esteja com o foco.
+    const active = document.activeElement;
+    const lost = !active || active === document.body || active === anchor.current;
+    if (lost && moveMenuFocus(node, e.key)) e.preventDefault();
+  });
+
+  useEffect(() => {
+    const listener = (e: KeyboardEvent) => onWindowKey(e);
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
+  }, []);
 
   const shared = list ? sharedFirstLine(list) : null;
   const titleId = `${baseId}-titulo`;

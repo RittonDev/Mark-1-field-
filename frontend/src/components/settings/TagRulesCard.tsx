@@ -284,7 +284,10 @@ function RulesForm({ server, readOnly }: { server: TicketTagRules; readOnly: boo
 
   const save = useMutation({
     mutationFn: (body: TicketTagRules) => api.put<TicketTagRules>("/ticket-tag-rules", body),
-    onSuccess: (saved, sent) => {
+    onSuccess: async (saved, sent) => {
+      // Uma releitura que saiu antes de salvar (volta para a aba, reconexão) traria a versão antiga depois
+      // desta: é cancelada antes de gravar a resposta no cache.
+      await queryClient.cancelQueries({ queryKey: tagRulesQuery.queryKey });
       // Antes de a resposta entrar no cache, o formulário já sabe que ela é desta tela (e não de outra
       // pessoa). A API pode ajustar os nomes: a tela fica com o gravado, e o que foi mexido durante o envio
       // continua como alteração por salvar.
