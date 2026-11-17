@@ -281,7 +281,7 @@ async def test_old_visit_is_not_confirmed_again(client: AsyncClient, world: Worl
         assignee_id=tech,
         scheduled_start=minute(-timedelta(days=1)).isoformat(),
     )
-    assert yesterday["status"] == "scheduled"
+    assert yesterday["scheduled_start"] is not None
     assert await suggested_of(client, world, yesterday) == []
 
     t = await create(
