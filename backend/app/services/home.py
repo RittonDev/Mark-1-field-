@@ -1148,7 +1148,7 @@ def _group(key: str, count: int, items: list[AttentionItem], m: Moment) -> Atten
 
 
 async def _recent_rows(db: AsyncSession, m: Moment) -> list[Any]:
-    """OS dos últimos 30 dias (abertura ou prazo de chegada) e as concluídas na semana."""
+    """OS dos últimos 30 dias (abertura, chegada ou prazo de chegada) e as concluídas na semana."""
     since = m.days_ago(RECENT_DAYS - 1)
     week_start = m.days_ago(WEEK_DAYS - 1)
     stmt = select(
@@ -1158,12 +1158,14 @@ async def _recent_rows(db: AsyncSession, m: Moment) -> list[Any]:
         Ticket.assignee_id,
         Ticket.arrival_due_at,
         Ticket.arrived_at,
+        Ticket.scheduled_start,
         Ticket.status,
     ).where(
         or_(
             Ticket.created_at >= since,
             Ticket.resolved_at >= week_start,
             Ticket.arrival_due_at >= since,
+            Ticket.arrived_at >= since,
         )
     )
     return list((await db.execute(stmt)).all())
@@ -1181,15 +1183,24 @@ def _week(rows: list[Any], m: Moment) -> list[WeekDay]:
 
 
 def _arrived_late(row: Any, m: Moment, since: datetime) -> bool:
-    due = row.arrival_due_at
-    if due is None or row.assignee_id is None or not since <= due <= m.now:
+    """Com prazo de chegada: chegou depois dele (ou ainda não chegou). Sem prazo (OS importada):
+    chegou mais de 30 min depois do horário agendado (field.SCHEDULE_TOLERANCE)."""
+    if row.assignee_id is None:
         return False
-    if row.arrived_at is not None:
-        return row.arrived_at > due
-    return row.status not in FINISHED
+    due = row.arrival_due_at
+    if due is not None:
+        if not since <= due <= m.now:
+            return False
+        if row.arrived_at is not None:
+            return row.arrived_at > due
+        return row.status not in FINISHED
+    arrived, start = row.arrived_at, row.scheduled_start
+    if arrived is None or start is None or not since <= arrived <= m.now:
+        return False
+    return arrived > start + SCHEDULE_TOLERANCE
 
 
-async def _suggest_tomorrow(m: Moment, counts: dict[str, int]) -> Suggestion | None:
+async def _suggest_tomorrow(m: Moment, counts: dict[str, Any]) -> Suggestion | None:
     n = counts["tomorrow_unassigned"]
     if not n:
         return None
@@ -1266,7 +1277,7 @@ async def _suggest_recurrence(db: AsyncSession, m: Moment, rows: list[Any]) -> S
     )
 
 
-async def _suggest_top_customer(db: AsyncSession, counts: dict[str, int]) -> Suggestion | None:
+async def _suggest_top_customer(db: AsyncSession, counts: dict[str, Any]) -> Suggestion | None:
     total_open = counts["open"]
     if not total_open:
         return None
@@ -1330,7 +1341,7 @@ async def _suggest_slow_service(db: AsyncSession) -> Suggestion | None:
 
 
 async def _suggestions(
-    db: AsyncSession, m: Moment, counts: dict[str, int], rows: list[Any]
+    db: AsyncSession, m: Moment, counts: dict[str, Any], rows: list[Any]
 ) -> list[Suggestion]:
     found = [
         await _suggest_tomorrow(m, counts),
