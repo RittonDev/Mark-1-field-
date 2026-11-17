@@ -14,7 +14,7 @@ from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from app.core.config import settings
-from app.models import Ticket
+from app.models import Ticket, TicketEvent
 from tests.conftest import World, requires_db
 from tests.test_api import create, transition
 
@@ -43,8 +43,37 @@ async def set_columns(engine: AsyncEngine, ticket_id: str, **values: Any) -> Non
         await db.commit()
 
 
+async def set_history_at(engine: AsyncEngine, ticket_id: str, when: datetime) -> None:
+    """Leva todo o histórico da OS (as mudanças de status) para `when`."""
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as db:
+        await db.execute(
+            update(TicketEvent)
+            .where(TicketEvent.ticket_id == uuid.UUID(ticket_id))
+            .values(created_at=when)
+        )
+        await db.commit()
+
+
 def at(iso: str) -> datetime:
     return datetime.fromisoformat(iso).astimezone(TZ)
+
+
+def minute(delta: timedelta) -> datetime:
+    """Agora + `delta`, no minuto cheio."""
+    return (datetime.now(UTC) + delta).replace(second=0, microsecond=0)
+
+
+async def suggested_of(client: AsyncClient, world: World, ticket: dict) -> list[str]:
+    r = await client.get(f"{API}/tickets/{ticket['id']}/messages", headers=world.analyst.headers)
+    assert r.status_code == 200, r.text
+    return [m["key"] for m in r.json() if m["suggested"]]
+
+
+async def texts_of(client: AsyncClient, world: World, ticket: dict) -> dict[str, str]:
+    r = await client.get(f"{API}/tickets/{ticket['id']}/messages", headers=world.analyst.headers)
+    assert r.status_code == 200, r.text
+    return {m["key"]: m["text"] for m in r.json()}
 
 
 def tag_events(events: list[dict]) -> list[dict]:
@@ -128,8 +157,8 @@ async def test_group_texts_follow_the_ticket(
     assert [m["key"] for m in msgs if m["suggested"]] == ["fechamento"]
     closing = next(m["text"] for m in msgs if m["key"] == "fechamento")
     assert closing == (
-        f"{head}Atividade encerrada pelo técnico Tecnico em Matriz às "
-        f"{at(t['resolved_at']):%H:%M}.\nRelatório do atendimento: {link['url']}"
+        f"{head}Atividade encerrada em Matriz às {at(t['resolved_at']):%H:%M}.\n"
+        f"Técnico: Tecnico.\nRelatório do atendimento: {link['url']}"
     )
     t = await transition(client, an, t, "closed")
     assert await suggested(t) == ["fechamento"]
@@ -183,6 +212,137 @@ async def test_unproductive_and_cancelled_texts(client: AsyncClient, world: Worl
     )
     c = await transition(client, an, c, "cancelled", note="Cliente desistiu")
     assert await suggested(c) == []
+
+
+async def test_revisit_lateness_follows_the_new_visit(
+    client: AsyncClient, world: World, engine: AsyncEngine
+) -> None:
+    """Na revisita o prazo de chegada é o da primeira ida (já vencido; não muda depois da
+    chegada): o atraso se mede pela visita remarcada, com a mesma tolerância."""
+    an, th = world.analyst.headers, world.tech.headers
+    reason = (
+        await client.post(
+            f"{API}/unproductive-reasons",
+            json={"name": "Sem acesso ao rack", "responsibility": "customer"},
+            headers=an,
+        )
+    ).json()
+    t = await create(
+        client,
+        world,
+        title="Rack trancado",
+        assignee_id=str(world.tech.user.id),
+        scheduled_start=minute(timedelta(hours=1)).isoformat(),
+    )
+    t = await transition(client, th, t, "en_route")
+    t = await transition(client, th, t, "in_progress")
+    r = await client.post(
+        f"{API}/tickets/{t['id']}/unproductive",
+        json={"reason_id": reason["id"], "expected_version": t["version"]},
+        headers=th,
+    )
+    assert r.status_code == 200, r.text
+    t = r.json()
+    assert t["status"] == "assigned" and t["scheduled_start"] is None
+    await set_columns(engine, t["id"], arrival_due_at=datetime.now(UTC) - timedelta(hours=1))
+    assert await suggested_of(client, world, t) == ["improdutiva"]
+
+    t = await transition(
+        client, an, t, "scheduled", scheduled_start=minute(timedelta(days=2)).isoformat()
+    )
+    assert await suggested_of(client, world, t) == ["agendamento"]
+    t = await transition(client, th, t, "en_route")
+    assert await suggested_of(client, world, t) == ["deslocamento"]
+
+    # A visita remarcada passou da tolerância: agora, sim, o texto da vez é o do atraso.
+    left = datetime.now(UTC) - timedelta(hours=3)
+    await set_history_at(engine, t["id"], left)
+    await set_columns(
+        engine,
+        t["id"],
+        arrived_at=left - timedelta(hours=1),
+        scheduled_start=datetime.now(UTC) - timedelta(hours=1),
+    )
+    assert await suggested_of(client, world, t) == ["atraso"]
+    # Agenda de antes da última saída do local (a da ida anterior) não conta.
+    await set_columns(engine, t["id"], scheduled_start=left - timedelta(minutes=30))
+    assert await suggested_of(client, world, t) == ["deslocamento"]
+
+
+async def test_old_visit_is_not_confirmed_again(client: AsyncClient, world: World) -> None:
+    """A confirmação da atividade só vale para a agenda em dia: nem a de um dia que já passou nem
+    a da visita anterior de uma OS reaberta (concluir e reabrir não tiram a agenda)."""
+    an, th = world.analyst.headers, world.tech.headers
+    tech = str(world.tech.user.id)
+    yesterday = await create(
+        client,
+        world,
+        title="Ficou para trás",
+        assignee_id=tech,
+        scheduled_start=minute(-timedelta(days=1)).isoformat(),
+    )
+    assert yesterday["status"] == "scheduled"
+    assert await suggested_of(client, world, yesterday) == []
+
+    t = await create(
+        client,
+        world,
+        title="Voltou a falhar",
+        assignee_id=tech,
+        scheduled_start=minute(-timedelta(hours=2)).isoformat(),
+    )
+    t = await transition(client, th, t, "en_route")
+    t = await transition(client, th, t, "in_progress")
+    t = await transition(client, th, t, "resolved", resolution_notes="Cabo trocado")
+    t = await transition(client, an, t, "reopened", note="Parou de novo")
+    assert t["scheduled_start"] is not None and t["assignee"] is not None
+    assert await suggested_of(client, world, t) == []
+    t = await transition(
+        client, an, t, "scheduled", scheduled_start=minute(timedelta(days=1)).isoformat()
+    )
+    assert await suggested_of(client, world, t) == ["agendamento"]
+
+
+async def test_default_texts_leave_out_missing_data(client: AsyncClient, world: World) -> None:
+    """Os textos padrão vão para o grupo do cliente com um clique: a frase sem o dado (sem
+    previsão de chegada, sem técnico) sai. Nos escritos pela gestão, a marca fica."""
+    an, th = world.analyst.headers, world.tech.headers
+    # Horário combinado já passou e o técnico não está com a localização ligada: sem previsão.
+    t = await create(
+        client,
+        world,
+        title="Atrasado sem posição",
+        assignee_id=str(world.tech.user.id),
+        scheduled_start=minute(-timedelta(hours=1)).isoformat(),
+    )
+    t = await transition(client, th, t, "en_route")
+    head = f"*{t['code']}* · Cliente Teste\n"
+    text = await texts_of(client, world, t)
+    assert text["deslocamento"] == f"{head}O técnico Tecnico está a caminho de Matriz."
+    assert text["atraso"] == f"{head}O técnico Tecnico está a caminho de Matriz, com atraso."
+
+    # O padrão gravado pela gestão sem mudança continua padrão.
+    defaults = (await client.get(f"{API}/message-templates", headers=an)).json()["templates"]
+    r = await client.put(f"{API}/message-templates", json={"templates": defaults}, headers=an)
+    assert r.status_code == 200, r.text
+    assert (await texts_of(client, world, t))["deslocamento"] == text["deslocamento"]
+    # Texto escrito pela gestão: a marca fica, para o analista completar antes de mandar.
+    own = {"name": "Previsão", "body": "Chegada às {chegada_prevista}. Técnico: {tecnico}."}
+    r = await client.put(f"{API}/message-templates", json={"templates": [own]}, headers=an)
+    assert r.status_code == 200, r.text
+    assert await texts_of(client, world, t) == {"previsao": "Chegada às __:__. Técnico: Tecnico."}
+    await client.post(f"{API}/message-templates/reset", headers=an)
+
+    # Concluída no remoto, sem técnico: sai só a linha do técnico.
+    remote = await create(client, world, title="Senha do Wi-Fi")
+    remote = await transition(client, an, remote, "on_hold_customer")
+    remote = await transition(client, an, remote, "resolved", resolution_notes="Senha trocada")
+    link = (await client.get(f"{API}/tickets/{remote['id']}", headers=an)).json()["report_link"]
+    assert (await texts_of(client, world, remote))["fechamento"] == (
+        f"*{remote['code']}* · Cliente Teste\n"
+        f"Atividade encerrada em Matriz às {at(remote['resolved_at']):%H:%M}.\n"
+        f"Relatório do atendimento: {link['url']}"
+    )
 
 
 # ------------------------------------------------------------------ etiquetas automáticas
@@ -333,6 +493,17 @@ async def test_paying_every_technician_removes_the_pending_payment_tag(
     undo = await client.post(f"{API}/payouts/unpay", json={"ids": [helper_fee]}, headers=an)
     assert undo.json() == {"changed": 1}
     assert await tags(t) == [ONE_OFF]
+
+    # OS cancelada: o valor ainda pendente não vai ser pago (conta como cancelado, como na lista
+    # de pagamentos). Pago o deslocamento de um técnico, a etiqueta sai.
+    c = await create(client, world, title="Cancelada", assignee_id=tech, helper_ids=[other])
+    trip_fee = await set_fee(c, tech, 60)
+    await set_fee(c, other, 60)
+    c = (await client.get(f"{API}/tickets/{c['id']}", headers=an)).json()
+    c = await transition(client, an, c, "cancelled", note="Cliente desistiu")
+    pay = await client.post(f"{API}/payouts/pay", json={"ids": [trip_fee]}, headers=an)
+    assert pay.json() == {"changed": 1}
+    assert await tags(c) == [ONE_OFF]
 
 
 # ------------------------------------------------------------------ lista de atividades
