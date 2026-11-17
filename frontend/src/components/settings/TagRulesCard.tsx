@@ -156,6 +156,12 @@ function RulesForm({ server, readOnly }: { server: TicketTagRules; readOnly: boo
   // `baseline`: a versão salva em que a tela se baseia; `draft`: o que está na tela.
   const [baseline, setBaseline] = useState(server);
   const [draft, setDraft] = useState(server);
+  // Descartar ou restaurar o padrão recria as listas (some o texto digitado e o erro de cada uma).
+  const [round, setRound] = useState(0);
+  // Aviso para o leitor de tela (etiqueta incluída ou tirada, erro ao incluir).
+  const [news, setNews] = useState("");
+  // Depois de descartar ou restaurar, o botão clicado some ou desabilita: o foco vai para a 1ª lista.
+  const focusFirst = useRef(false);
   // Última versão da API já tratada aqui e a que este formulário acabou de salvar (para reconhecer a volta dela).
   const serverPrint = fingerprint(server);
   const [seen, setSeen] = useState(serverPrint);
@@ -181,12 +187,6 @@ function RulesForm({ server, readOnly }: { server: TicketTagRules; readOnly: boo
   }
   // Outra pessoa salvou outras regras enquanto esta tela tinha alterações por salvar.
   const outdated = dirty && serverPrint !== fingerprint(baseline);
-  // Descartar ou restaurar o padrão recria as listas (some o texto digitado e o erro de cada uma).
-  const [round, setRound] = useState(0);
-  // Aviso para o leitor de tela (etiqueta incluída ou tirada, erro ao incluir).
-  const [news, setNews] = useState("");
-  // Depois de descartar ou restaurar, o botão clicado some ou desabilita: o foco vai para a 1ª lista.
-  const focusFirst = useRef(false);
   const known = useQuery({
     queryKey: ["ticket-tags"],
     queryFn: ({ signal }) => api.get<Tag[]>("/ticket-tags", undefined, { signal }),
@@ -526,143 +526,144 @@ function TagList({
         )
       ) : (
         <>
+          {/* A lista de sugestões abre logo abaixo da caixa, por cima do que vem depois. */}
           <div className="relative">
-          <div
-            // Clicar no espaço vazio da caixa leva ao campo (como numa caixa de texto comum).
-            onMouseDown={(e) => {
-              if (e.target === e.currentTarget) {
-                e.preventDefault();
-                input.current?.focus();
-                setOpen(true);
-              }
-            }}
-            className={clsx(
-              "flex min-h-9 cursor-text flex-wrap items-center gap-1.5 rounded-lg border bg-surface px-1.5 py-1 shadow-elev-1",
-              "transition-[border-color,box-shadow] duration-150 focus-within:ring-4 dark:bg-surface-2",
-              error
-                ? "border-red-500 focus-within:border-red-500 focus-within:ring-red-500/15"
-                : "border-line focus-within:border-brand focus-within:ring-brand/15 dark:border-line-strong",
-            )}
-          >
-            {tags.length ? (
-              <ul ref={list} aria-labelledby={titleId} className="flex max-w-full flex-wrap gap-1.5">
-                {tags.map((t, i) => (
-                  <li
-                    key={t.name}
-                    className={clsx(CHIP, "cursor-default gap-0.5 pr-0.5", kind === "tags" ? "pl-0.5" : "pl-2", tagTone(t.color))}
-                  >
-                    {kind === "tags" ? <ColorMenu tag={t} onPick={(color) => onRecolor?.(t.name, color)} /> : null}
-                    <span className="min-w-0 truncate px-0.5" title={t.name}>
-                      {t.name}
-                    </span>
-                    <button
-                      type="button"
-                      data-remove
-                      onClick={() => remove(i, t.name)}
-                      aria-label={`Tirar ${t.name} da lista “${group.title}”`}
-                      title="Tirar da lista"
-                      className="flex size-6 shrink-0 items-center justify-center rounded transition-colors hover:bg-ink/10 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+            <div
+              // Clicar no espaço vazio da caixa leva ao campo (como numa caixa de texto comum).
+              onMouseDown={(e) => {
+                if (e.target === e.currentTarget) {
+                  e.preventDefault();
+                  input.current?.focus();
+                  setOpen(true);
+                }
+              }}
+              className={clsx(
+                "flex min-h-9 cursor-text flex-wrap items-center gap-1.5 rounded-lg border bg-surface px-1.5 py-1 shadow-elev-1",
+                "transition-[border-color,box-shadow] duration-150 focus-within:ring-4 dark:bg-surface-2",
+                error
+                  ? "border-red-500 focus-within:border-red-500 focus-within:ring-red-500/15"
+                  : "border-line focus-within:border-brand focus-within:ring-brand/15 dark:border-line-strong",
+              )}
+            >
+              {tags.length ? (
+                <ul ref={list} aria-labelledby={titleId} className="flex max-w-full flex-wrap gap-1.5">
+                  {tags.map((t, i) => (
+                    <li
+                      key={t.name}
+                      className={clsx(CHIP, "cursor-default gap-0.5 pr-0.5", kind === "tags" ? "pl-0.5" : "pl-2", tagTone(t.color))}
                     >
-                      <X aria-hidden className="size-3.5" />
-                    </button>
+                      {kind === "tags" ? <ColorMenu tag={t} onPick={(color) => onRecolor?.(t.name, color)} /> : null}
+                      <span className="min-w-0 truncate px-0.5" title={t.name}>
+                        {t.name}
+                      </span>
+                      <button
+                        type="button"
+                        data-remove
+                        onClick={() => remove(i, t.name)}
+                        aria-label={`Tirar ${t.name} da lista “${group.title}”`}
+                        title="Tirar da lista"
+                        className="flex size-6 shrink-0 items-center justify-center rounded transition-colors hover:bg-ink/10 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+                      >
+                        <X aria-hidden className="size-3.5" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              <input
+                ref={input}
+                value={text}
+                maxLength={MAX_NAME}
+                autoComplete="off"
+                role="combobox"
+                aria-expanded={showList}
+                aria-controls={showList ? listboxId : undefined}
+                aria-autocomplete="list"
+                aria-activedescendant={showList ? optionId(activeIndex) : undefined}
+                onChange={(e) => {
+                  setText(e.target.value);
+                  setError(null);
+                  setActive(0);
+                  setOpen(true);
+                }}
+                onClick={() => setOpen(true)}
+                onKeyDown={(e) => {
+                  if (e.nativeEvent.isComposing) return;
+                  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                    e.preventDefault();
+                    if (!showList) {
+                      setOpen(true);
+                      setActive(e.key === "ArrowDown" ? 0 : options.length - 1);
+                      return;
+                    }
+                    const step = e.key === "ArrowDown" ? 1 : -1;
+                    setActive((activeIndex + step + options.length) % options.length);
+                  } else if (e.key === "Enter") {
+                    // Enter inclui a sugestão destacada ou o texto digitado (nunca envia o formulário).
+                    e.preventDefault();
+                    const pick = showList ? options[activeIndex] : undefined;
+                    if (pick) add(pick.tag.name);
+                    else if (typed) add(typed);
+                  } else if (e.key === "Escape" && showList) {
+                    // Esc fecha só as sugestões.
+                    e.preventDefault();
+                    setOpen(false);
+                  } else if (e.key === "Backspace" && !text && tags.length) {
+                    onRemove(tags[tags.length - 1].name);
+                    setError(null);
+                  }
+                }}
+                onBlur={() => {
+                  setOpen(false);
+                  // Saiu do campo com um nome digitado: a etiqueta entra (como ao apertar Enter).
+                  if (typed) add(typed);
+                }}
+                placeholder={
+                  full ? `Limite de ${MAX_TAGS} etiquetas` : tags.length ? "Incluir etiqueta" : `Incluir etiqueta (ex.: ${group.example})`
+                }
+                aria-label={`Incluir etiqueta na lista “${group.title}”`}
+                aria-invalid={error ? true : undefined}
+                aria-describedby={error ? `${hintId} ${errorId}` : hintId}
+                className="h-7 min-w-40 flex-1 bg-transparent px-1 text-sm text-ink outline-none placeholder:text-ink-subtle"
+              />
+            </div>
+            {showList ? (
+              <ul
+                id={listboxId}
+                role="listbox"
+                aria-label={`Sugestões para “${group.title}”`}
+                // Clicar na lista não tira o foco do campo.
+                onMouseDown={(e) => e.preventDefault()}
+                className="absolute z-30 mt-1 max-h-64 w-full overflow-auto rounded-lg border border-line bg-surface py-1 shadow-pop"
+              >
+                {options.map((o, i) => (
+                  <li
+                    key={o.key}
+                    id={optionId(i)}
+                    role="option"
+                    aria-selected={i === activeIndex}
+                    onClick={() => add(o.tag.name)}
+                    onMouseMove={() => {
+                      if (i !== activeIndex) setActive(i);
+                    }}
+                    className={clsx("flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm text-ink", i === activeIndex && "bg-surface-2")}
+                  >
+                    {o.isNew ? (
+                      <span className="inline-flex min-w-0 items-center gap-1.5 font-medium text-brand-ink">
+                        <Plus aria-hidden className="size-3.5 shrink-0" />
+                        <span className="truncate">
+                          {kind === "tags" ? "Criar etiqueta" : "Incluir"} “{o.tag.name}”
+                        </span>
+                      </span>
+                    ) : (
+                      <span className={clsx(OPTION_CHIP, tagTone(o.tag.color))}>
+                        <span className="truncate">{o.tag.name}</span>
+                      </span>
+                    )}
                   </li>
                 ))}
               </ul>
             ) : null}
-            <input
-              ref={input}
-              value={text}
-              maxLength={MAX_NAME}
-              autoComplete="off"
-              role="combobox"
-              aria-expanded={showList}
-              aria-controls={showList ? listboxId : undefined}
-              aria-autocomplete="list"
-              aria-activedescendant={showList ? optionId(activeIndex) : undefined}
-              onChange={(e) => {
-                setText(e.target.value);
-                setError(null);
-                setActive(0);
-                setOpen(true);
-              }}
-              onClick={() => setOpen(true)}
-              onKeyDown={(e) => {
-                if (e.nativeEvent.isComposing) return;
-                if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-                  e.preventDefault();
-                  if (!showList) {
-                    setOpen(true);
-                    setActive(e.key === "ArrowDown" ? 0 : options.length - 1);
-                    return;
-                  }
-                  const step = e.key === "ArrowDown" ? 1 : -1;
-                  setActive((activeIndex + step + options.length) % options.length);
-                } else if (e.key === "Enter") {
-                  // Enter inclui a sugestão destacada ou o texto digitado (nunca envia o formulário).
-                  e.preventDefault();
-                  const pick = showList ? options[activeIndex] : undefined;
-                  if (pick) add(pick.tag.name);
-                  else if (typed) add(typed);
-                } else if (e.key === "Escape" && showList) {
-                  // Esc fecha só as sugestões.
-                  e.preventDefault();
-                  setOpen(false);
-                } else if (e.key === "Backspace" && !text && tags.length) {
-                  onRemove(tags[tags.length - 1].name);
-                  setError(null);
-                }
-              }}
-              onBlur={() => {
-                setOpen(false);
-                // Saiu do campo com um nome digitado: a etiqueta entra (como ao apertar Enter).
-                if (typed) add(typed);
-              }}
-              placeholder={
-                full ? `Limite de ${MAX_TAGS} etiquetas` : tags.length ? "Incluir etiqueta" : `Incluir etiqueta (ex.: ${group.example})`
-              }
-              aria-label={`Incluir etiqueta na lista “${group.title}”`}
-              aria-invalid={error ? true : undefined}
-              aria-describedby={error ? `${hintId} ${errorId}` : hintId}
-              className="h-7 min-w-40 flex-1 bg-transparent px-1 text-sm text-ink outline-none placeholder:text-ink-subtle"
-            />
-          </div>
-          {showList ? (
-            <ul
-              id={listboxId}
-              role="listbox"
-              aria-label={`Sugestões para “${group.title}”`}
-              // Clicar na lista não tira o foco do campo.
-              onMouseDown={(e) => e.preventDefault()}
-              className="absolute z-30 mt-1 max-h-64 w-full overflow-auto rounded-lg border border-line bg-surface py-1 shadow-pop"
-            >
-              {options.map((o, i) => (
-                <li
-                  key={o.key}
-                  id={optionId(i)}
-                  role="option"
-                  aria-selected={i === activeIndex}
-                  onClick={() => add(o.tag.name)}
-                  onMouseMove={() => {
-                    if (i !== activeIndex) setActive(i);
-                  }}
-                  className={clsx("flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm text-ink", i === activeIndex && "bg-surface-2")}
-                >
-                  {o.isNew ? (
-                    <span className="inline-flex min-w-0 items-center gap-1.5 font-medium text-brand-ink">
-                      <Plus aria-hidden className="size-3.5 shrink-0" />
-                      <span className="truncate">
-                        {kind === "tags" ? "Criar etiqueta" : "Incluir"} “{o.tag.name}”
-                      </span>
-                    </span>
-                  ) : (
-                    <span className={clsx(OPTION_CHIP, tagTone(o.tag.color))}>
-                      <span className="truncate">{o.tag.name}</span>
-                    </span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          ) : null}
           </div>
           {error ? (
             <FieldError id={errorId}>{error}</FieldError>

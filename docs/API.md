@@ -109,11 +109,11 @@ Equivale ao "Tipo de OS" do Field Control. Sem `customer_id`, o tipo vale para t
 
 ### OS / Chamados
 - `GET /tickets` → `Page<TicketListItem> {items,total,page,page_size}`
-  - filtros: `status` (repetível), `priority` (repetível), `type`, `assignee_id`, `team_id`, `customer_id`, `location_id`, `service_type_id`, `violation_pending=true`, `category_id`, `asset_id`, `owner_id`, `no_owner=true`, `q` (título, descrição, número), `mine=true` (analista: executa ou é o responsável), `unassigned=true`, `open_only=true`, `sla_breached=true`
+  - filtros: `status` (repetível), `priority` (repetível), `type`, `source`, `project_id`, `assignee_id`, `team_id`, `customer_id`, `location_id`, `service_type_id`, `violation_pending=true`, `category_id`, `asset_id`, `owner_id`, `no_owner=true`, `q` (título, descrição, número), `mine=true` (analista: executa ou é o responsável), `unassigned=true`, `open_only=true`, `sla_breached=true`
   - lista de atividades (como no Field Control): `number` (nº exato da OS, o "Identificador"), `created_from`/`created_to` e
     `scheduled_from`/`scheduled_to` (AAAA-MM-DD, dias inteiros no fuso da operação, inclusive; OS sem agenda saem do filtro de
-    agendamento; datas fora de 2000–2100 → 422), `tag` (repetível: OS com qualquer uma dessas etiquetas, sem diferenciar
-    maiúsculas nem espaços sobrando)
+    agendamento; datas fora de 2000–2100 → 422), `tag` (repetível, até 20: OS com qualquer uma dessas etiquetas, sem
+    diferenciar maiúsculas nem espaços sobrando)
   - `page` (1..), `page_size` (1..500, padrão 25), `order_by` ∈ `updated_at, created_at, priority, resolution_due_at, number, scheduled_start, customer` (nome do cliente) com `-` para desc (padrão `-updated_at`); vazios (sem agenda, sem cliente) por último nas duas direções
 - `GET /tickets/export` (gestão) → `text/csv; charset=utf-8` com BOM, separado por `;`, `Content-Disposition: attachment;
   filename="chamados-AAAA-MM-DD.csv"` (dia de hoje no fuso da operação). Os mesmos filtros e o mesmo `order_by` da lista,
