@@ -182,10 +182,13 @@ export function CardHeader({
   title,
   description,
   actions,
+  as: Heading = "h2",
 }: {
   title: React.ReactNode;
   description?: React.ReactNode;
   actions?: React.ReactNode;
+  /** Nível do título na página (h3 ou h4 quando o cartão fica dentro de uma seção com título). */
+  as?: "h2" | "h3" | "h4";
 }) {
   return (
     // Sem descrição, as ações (botão, legenda) ficam centradas na linha do título; com descrição, no topo.
@@ -194,7 +197,7 @@ export function CardHeader({
         {/* Marca da seção nas cores da logo (azul -> ciano): ajuda a achar cada bloco na tela. */}
         <span aria-hidden className="mt-[3px] h-3.5 w-[3px] shrink-0 rounded-full bg-linear-to-b from-brand to-brand-cyan" />
         <div className="min-w-0">
-          <h2 className="text-[15px] leading-5 font-bold tracking-[-0.01em] text-ink">{title}</h2>
+          <Heading className="text-[15px] leading-5 font-bold tracking-[-0.01em] text-ink">{title}</Heading>
           {description ? <p className="mt-0.5 text-xs text-ink-muted">{description}</p> : null}
         </div>
       </div>

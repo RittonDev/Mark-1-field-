@@ -183,6 +183,8 @@ export function TrendChart({
   height = 240,
   formatLabel,
   partialLast = false,
+  unit = "dia",
+  partialNote = "Trecho tracejado: hoje, ainda em andamento.",
 }: {
   /** Rótulo curto de cada ponto no eixo (ex.: "12"). */
   labels: string[];
@@ -192,6 +194,10 @@ export function TrendChart({
   formatLabel?: (index: number) => string;
   /** O último ponto ainda está em andamento (hoje): o trecho final fica tracejado. */
   partialLast?: boolean;
+  /** O que cada ponto é, para a leitura do gráfico ("dia", "semana"). */
+  unit?: string;
+  /** Nota embaixo do gráfico quando o trecho final está tracejado. */
+  partialNote?: string;
 }) {
   const wrap = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(640);
@@ -255,7 +261,7 @@ export function TrendChart({
             height={height}
             role="img"
             tabIndex={0}
-            aria-label={`Gráfico: ${series.map((s) => s.label).join(" e ")} por dia. Use as setas para ler dia a dia.`}
+            aria-label={`Gráfico: ${series.map((s) => s.label).join(" e ")} por ${unit}. Use as setas para ler ${unit} a ${unit}.`}
             onKeyDown={onKey}
             onFocus={() => setPointer(hover ?? n - 1)}
             onBlur={() => setPointer(null)}
@@ -351,7 +357,7 @@ export function TrendChart({
               ))}
             </div>
           ) : null}
-          {dashed ? <p className="mt-1 text-xs text-ink-muted">Trecho tracejado: hoje, ainda em andamento.</p> : null}
+          {dashed ? <p className="mt-1 text-xs text-ink-muted">{partialNote}</p> : null}
         </>
       )}
     </div>

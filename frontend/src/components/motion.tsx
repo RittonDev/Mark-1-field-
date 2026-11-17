@@ -19,11 +19,14 @@ export function CountUp({
   format,
   duration = 300,
   className,
+  tabular = true,
 }: {
   value: number;
   format?: (n: number) => string;
   duration?: number;
   className?: string;
+  /** Algarismos de mesma largura (números lado a lado, em coluna); false no número grande e sozinho. */
+  tabular?: boolean;
 }) {
   const ref = useRef<HTMLSpanElement>(null);
   // O texto do React fica com o valor da abertura; dali em diante quem escreve é o efeito.
@@ -59,7 +62,7 @@ export function CountUp({
   }, [value, duration]);
 
   return (
-    <span ref={ref} className={clsx("tabular-nums", className)}>
+    <span ref={ref} className={clsx(tabular && "tabular-nums", className)}>
       {(format ?? defaultFormat)(initial)}
     </span>
   );

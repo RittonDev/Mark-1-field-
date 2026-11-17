@@ -518,6 +518,24 @@ body:has([data-drawer]) .mf-toasts {
   }
 }
 
+/* Início: fundo animado (galáxia neural). A máscara deixa o efeito forte só no alto à direita, onde fica o
+   núcleo, e em no máximo 35% atrás da coluna de texto da esquerda. */
+.mf-galaxy-mask {
+  -webkit-mask-image: radial-gradient(ellipse 75% 85% at 88% 0%, #000 0%, rgb(0 0 0 / 0.75) 35%, rgb(0 0 0 / 0.35) 70%, rgb(0 0 0 / 0.22) 100%);
+  mask-image: radial-gradient(ellipse 75% 85% at 88% 0%, #000 0%, rgb(0 0 0 / 0.75) 35%, rgb(0 0 0 / 0.35) 70%, rgb(0 0 0 / 0.22) 100%);
+}
+/* Brilho estático do núcleo, sob o canvas (é também o fundo de "reduzir movimento"). */
+.mf-galaxy-glow {
+  background-image:
+    radial-gradient(42% 38% at 88% 0%, color-mix(in srgb, var(--brand) 8%, transparent), transparent 72%),
+    radial-gradient(28% 26% at 97% 22%, color-mix(in srgb, var(--brand-cyan) 6%, transparent), transparent 70%);
+}
+:root[data-theme="dark"] .mf-galaxy-glow {
+  background-image:
+    radial-gradient(42% 38% at 88% 0%, color-mix(in srgb, var(--brand) 14%, transparent), transparent 72%),
+    radial-gradient(28% 26% at 97% 22%, color-mix(in srgb, var(--brand-cyan) 9%, transparent), transparent 70%);
+}
+
 /* Impressão / PDF sempre no tema claro, com as cores dos detalhes preservadas. */
 @media print {
   :root,
