@@ -2,7 +2,23 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { CalendarClock, CheckCircle2, Clock, CopyPlus, Download, ExternalLink, FileText, Link2, Pencil, RefreshCw, Send, Share2, XCircle } from "lucide-react";
+import {
+  BellRing,
+  CalendarClock,
+  CheckCircle2,
+  Clock,
+  CopyPlus,
+  Download,
+  ExternalLink,
+  FileText,
+  Link2,
+  Paperclip,
+  Pencil,
+  RefreshCw,
+  Send,
+  Share2,
+  XCircle,
+} from "lucide-react";
 import { useState } from "react";
 import { isPlainClick, TicketLink } from "@/components/ticket/TicketLink";
 import { useToast } from "@/components/Toaster";
@@ -10,7 +26,7 @@ import { Button, buttonClassName, Dialog, Pill, SectionTitle } from "@/component
 import { useNow } from "@/components/useNow";
 import { absoluteApiUrl, api, errorMessage } from "@/lib/api";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
-import { localDateISO, QUOTE_KIND, QUOTE_STATUS, totalsByKind } from "@/lib/quotes";
+import { dayTime, followUpAction, localDateISO, previewHref, QUOTE_KIND, QUOTE_STATUS, totalsByKind, trackingText, trackingTitle } from "@/lib/quotes";
 import type { CompanyProfile, PublicQuote, Quote, QuoteItemKind, QuoteStatus, TicketDetail, UUID } from "@/lib/types";
 
 /** Situações em que o orçamento ainda pode ser alterado (o mesmo do backend). */
@@ -18,7 +34,7 @@ export const QUOTE_EDITABLE: QuoteStatus[] = ["draft", "sent", "expired"];
 
 const qty = (value: number) => value.toLocaleString("pt-BR", { maximumFractionDigits: 3 });
 
-type ViewerTicket = { id: UUID; code: string; customer?: string | null; title?: string | null };
+type ViewerTicket = { id: UUID; code: string; customer?: string | null; title?: string | null; location?: string | null };
 
 /** Endereço do atendimento como o cliente vê: o da OS, quando informado; senão, o da loja. */
 function serviceAddress(detail: TicketDetail | null): PublicQuote["address"] {
@@ -52,7 +68,7 @@ function asDocument(
     title: quote.title,
     status: quote.status,
     customer: detail?.customer?.name ?? ticket?.customer ?? null,
-    location: detail?.location?.name ?? null,
+    location: detail?.location?.name ?? ticket?.location ?? null,
     address: serviceAddress(detail),
     ticket_number: detail?.number,
     ticket_code: ticket?.code ?? detail?.code ?? "",
@@ -76,16 +92,35 @@ function asDocument(
   };
 }
 
-function Meta({ label, children, tone }: { label: string; children: React.ReactNode; tone?: "danger" }) {
+function Meta({
+  label,
+  children,
+  tone,
+  title,
+  className,
+}: {
+  label: string;
+  children: React.ReactNode;
+  tone?: "danger";
+  /** Texto inteiro quando o valor é cortado (cliente e loja com nome longo). */
+  title?: string;
+  className?: string;
+}) {
   return (
-    <div className="min-w-0 bg-surface px-3.5 py-2.5">
+    <div className={clsx("min-w-0 bg-surface px-3.5 py-2.5", className)}>
       <dt className="text-[11px] font-semibold text-ink-muted">{label}</dt>
-      <dd className={clsx("mt-0.5 truncate text-sm font-medium", tone === "danger" ? "text-red-600 dark:text-red-400" : "text-ink")}>
+      <dd
+        className={clsx("mt-0.5 truncate text-sm font-medium", tone === "danger" ? "text-red-600 dark:text-red-400" : "text-ink")}
+        title={title}
+      >
         {children}
       </dd>
     </div>
   );
 }
+
+/** Só endereço da web vira link (o anexo vem do Field Control). */
+const isWebUrl = (url: string) => /^https?:\/\//i.test(url);
 
 /** A situação do orçamento em destaque: quem aprovou (com a assinatura), por que recusou, desde quando espera. */
 function Decision({ quote, expiredByDate }: { quote: Quote; expiredByDate: boolean }) {
@@ -146,20 +181,19 @@ function Decision({ quote, expiredByDate }: { quote: Quote; expiredByDate: boole
     return (
       <div className="flex gap-3 rounded-xl border border-amber-200 bg-amber-50/70 p-4 text-sm text-amber-950 dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-100">
         <CalendarClock className="size-5 shrink-0 text-amber-600 dark:text-amber-400" />
-        <p>
-          <span className="font-semibold">Venceu{quote.valid_until ? ` em ${formatDate(quote.valid_until)}` : ""} sem resposta.</span>{" "}
-          Renove a validade e envie de novo: o cliente continua com o mesmo link.
-        </p>
+        <p className="font-semibold">Venceu{quote.valid_until ? ` em ${formatDate(quote.valid_until)}` : ""} sem resposta.</p>
       </div>
     );
   }
   if (quote.status === "sent") {
+    // Abertas do link e cobranças, com as datas no title.
+    const tracking = trackingText(quote, { sent: false });
     return (
       <div className="flex gap-3 rounded-xl border border-sky-200 bg-sky-50/70 p-4 text-sm text-sky-950 dark:border-sky-500/25 dark:bg-sky-500/10 dark:text-sky-100">
         <Clock className="size-5 shrink-0 text-sky-600 dark:text-sky-400" />
-        <p>
-          <span className="font-semibold">Aguardando o cliente</span>
-          {quote.sent_at ? ` desde ${formatDateTime(quote.sent_at)}` : ""}. Ele aprova pelo link, com nome e assinatura.
+        <p title={trackingTitle(quote)}>
+          <span className="font-semibold">Aguardando o cliente{quote.sent_at ? ` desde ${dayTime(quote.sent_at)}` : ""}</span>
+          {tracking ? ` · ${tracking}` : ""}
         </p>
       </div>
     );
@@ -168,10 +202,7 @@ function Decision({ quote, expiredByDate }: { quote: Quote; expiredByDate: boole
     return (
       <div className="flex gap-3 rounded-xl border border-line bg-surface-2 p-4 text-sm text-ink-muted">
         <FileText className="size-5 shrink-0 text-ink-subtle" />
-        <p>
-          <span className="font-semibold text-ink">Rascunho.</span> O cliente só vê depois do envio (se já tinha o link, ele
-          mostra que o orçamento está em revisão).
-        </p>
+        <p className="font-semibold text-ink">{quote.sent_at ? "Em revisão: reenvie." : "Rascunho."}</p>
       </div>
     );
   }
@@ -193,17 +224,20 @@ export function QuoteViewer({
   onShare,
   onRenew,
   onDuplicate,
+  onRemind,
   inTicket = false,
   sending = false,
 }: {
   quote: Quote;
-  /** OS do orçamento (mostra o link para ela e o cliente). */
+  /** OS do orçamento (mostra o link para ela, o cliente e a loja). */
   ticket?: ViewerTicket | null;
   onClose: () => void;
   onEdit?: () => void;
   /** Envia (ou gera o link de um enviado sem link) e abre o compartilhamento. */
   onSend?: () => void;
   onShare?: () => void;
+  /** Na fila "Para cobrar": abre o lembrete para o cliente (e registra a cobrança). */
+  onRemind?: () => void;
   /** Vencido: abre o editor com a nova validade para salvar e reenviar. Sem ele, "Renovar validade" usa o onEdit. */
   onRenew?: () => void;
   /** Novo orçamento com os mesmos itens (como o "Duplicar" do Field Control). */
@@ -228,6 +262,9 @@ export function QuoteViewer({
   // Validade vencida: o envio seria recusado; o caminho é renovar a data e enviar de novo.
   const needsRenew = editable && (quote.status === "expired" || pastDue);
   const decided = quote.status === "approved" || quote.status === "rejected";
+  const remindable = followUpAction(quote, today) === "remind" && Boolean(onRemind);
+  // Anexos do Field Control com endereço da web (cotação, nota): abrem em outra aba.
+  const legacyFiles = (quote.legacy_attachments ?? []).filter((a) => a.url && isWebUrl(a.url));
 
   const downloadPdf = async () => {
     setPdfBusy(true);
@@ -275,6 +312,22 @@ export function QuoteViewer({
         {quote.status === "sent" ? "Gerar link" : "Enviar ao cliente"}
       </Button>
     );
+  } else if (remindable) {
+    // Na fila "Para cobrar": o lembrete vem primeiro; o link (mensagem do envio) fica ao lado.
+    primary = (
+      <>
+        {onShare ? (
+          <Button onClick={onShare}>
+            <Link2 className="size-4" />
+            Link do cliente
+          </Button>
+        ) : null}
+        <Button variant="primary" onClick={onRemind}>
+          <BellRing className="size-4" />
+          Cobrar
+        </Button>
+      </>
+    );
   } else if (quote.status === "sent" && onShare) {
     primary = (
       <Button variant="primary" onClick={onShare}>
@@ -314,7 +367,7 @@ export function QuoteViewer({
         <div className="flex w-full flex-wrap items-center justify-end gap-2">
           <div className="mr-auto flex flex-wrap items-center gap-1">
             {clientPath ? (
-              <a href={clientPath} target="_blank" rel="noreferrer" className={buttonClassName("ghost")}>
+              <a href={previewHref(clientPath)} target="_blank" rel="noreferrer" className={buttonClassName("ghost")}>
                 <ExternalLink className="size-4" />
                 Ver como o cliente
               </a>
@@ -341,7 +394,7 @@ export function QuoteViewer({
       }
     >
       <div className="flex flex-col gap-5">
-        <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-line bg-line sm:grid-cols-4">
+        <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-line bg-line sm:grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)_auto_auto]">
           <Meta label="OS">
             {!ticket ? (
               "—"
@@ -360,7 +413,13 @@ export function QuoteViewer({
               </span>
             )}
           </Meta>
-          <Meta label="Cliente">{ticket?.customer ?? "—"}</Meta>
+          <Meta label="Cliente" title={ticket?.customer ?? undefined}>
+            {ticket?.customer ?? "—"}
+          </Meta>
+          {/* No celular a loja ocupa a linha: o nome costuma ser longo. */}
+          <Meta label="Local" title={ticket?.location ?? undefined} className="col-span-2 sm:col-span-1">
+            {ticket?.location ?? "—"}
+          </Meta>
           <Meta label="Criado">
             {formatDate(quote.created_at)}
             {quote.created_by ? <span className="font-normal text-ink-muted"> · {quote.created_by.name.split(" ")[0]}</span> : null}
@@ -431,6 +490,35 @@ export function QuoteViewer({
             </div>
           </div>
         </div>
+
+        {/* Histórico do Field Control: só aqui, na visualização da equipe (nunca no link nem no PDF). */}
+        {quote.legacy_code ? (
+          <section aria-label="Field Control" className="flex flex-col gap-2 border-t border-line pt-4">
+            <SectionTitle aside={<span className="font-mono text-xs text-ink-muted">{quote.legacy_code}</span>}>Field Control</SectionTitle>
+            {quote.legacy_description ? (
+              <p className="text-sm leading-relaxed break-words whitespace-pre-wrap text-ink-muted">{quote.legacy_description}</p>
+            ) : null}
+            {legacyFiles.length ? (
+              <ul className="flex flex-col gap-1.5">
+                {legacyFiles.map((file, i) => (
+                  <li key={`${file.url}-${i}`} className="min-w-0">
+                    <a
+                      href={file.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex max-w-full items-center gap-1.5 rounded-md text-sm font-medium text-brand-ink underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+                      title={file.title ?? undefined}
+                    >
+                      <Paperclip aria-hidden className="size-3.5 shrink-0" />
+                      <span className="truncate">{file.title || `Anexo ${i + 1}`}</span>
+                      <ExternalLink aria-hidden className="size-3 shrink-0 text-ink-subtle" />
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </section>
+        ) : null}
       </div>
     </Dialog>
   );
