@@ -876,7 +876,13 @@ def _set_entity(parsed: Parsed, cand: Cand, pos: int, span: Sequence[Word] = ())
     return True
 
 
-def match_spans(parsed: Parsed, pools: Sequence[Pool], words: Sequence[Word]) -> None:
+def _first_name(cand: Cand, word: str) -> bool:
+    return cand.kind != "technician" or bool(cand.words and cand.words[0].startswith(word))
+
+
+def match_spans(
+    parsed: Parsed, pools: Sequence[Pool], words: Sequence[Word], *, after_keyword: bool = False
+) -> None:
     """Frases de 4 palavras até 1, da esquerda para a direita: a mais longa que casa ganha."""
     for size in range(min(MAX_PHRASE, len(words)), 0, -1):
         for start in range(len(words) - size + 1):
@@ -888,6 +894,10 @@ def match_spans(parsed: Parsed, pools: Sequence[Pool], words: Sequence[Word]) ->
             parsed.note(matches, size)
             if size == 1 and phrase[0] in DOMAIN_WORDS:
                 matches = [m for m in matches if m[0] == 3]
+            if size == 1 and not after_keyword:
+                # Pessoa por uma palavra só: pelo primeiro nome ("joao"), não pelo sobrenome
+                # ("velho", "santos" são palavras comuns demais). Com "técnico" antes, vale tudo.
+                matches = [m for m in matches if m[0] == 3 or _first_name(m[1], phrase[0])]
             chosen = pick(matches)
             if chosen is not None and _set_entity(parsed, chosen, span[0].pos, span):
                 for w in span:
@@ -915,7 +925,7 @@ def keyword_entities(parsed: Parsed, pools: dict[str, Pool]) -> None:
         kind = (
             "technician" if w.text in TECH_KW else "customer" if w.text in CUSTOMER_KW else "city"
         )
-        match_spans(parsed, [pools[kind]], run)
+        match_spans(parsed, [pools[kind]], run, after_keyword=True)
 
 
 def typo_entities(parsed: Parsed, pools: Sequence[Pool]) -> None:
@@ -927,7 +937,12 @@ def typo_entities(parsed: Parsed, pools: Sequence[Pool]) -> None:
             continue
         matches = [m for pool in pools for m in pool.typo(w.text)]
         parsed.note(matches, 1)
-        named = [m for m in matches if m[1].kind != "city"]
+        named = [
+            m
+            for m in matches
+            if m[1].kind == "customer"
+            or (m[1].kind == "technician" and m[1].words and close(m[1].words[0], w.text))
+        ]
         if len({c.kind for _, c in named}) != 1:
             continue
         chosen = pick(named)
@@ -1246,11 +1261,15 @@ def free_text(parsed: Parsed) -> tuple[str | None, list[Word]]:
 
 def build_filters(parsed: Parsed, q: str | None) -> ListFilters | None:
     flags = parsed.flags
+    customer = parsed.customer
+    if customer is not None and parsed.location is not None:
+        # A loja já diz o cliente (o chip do cliente continua).
+        customer = None if parsed.location.customer_id == customer.id else customer
     filters = ListFilters(
         status=parsed.status or None,
         priority=parsed.priority or None,
         number=parsed.number,
-        customer_id=parsed.customer.id if parsed.customer else None,
+        customer_id=customer.id if customer else None,
         location_id=parsed.location.id if parsed.location else None,
         technician_id=parsed.technician.id if parsed.technician else None,
         tag=parsed.tags or None,
