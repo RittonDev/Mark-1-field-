@@ -69,7 +69,7 @@ const PAIRS = (MAX_NODES * MAX_NODES) / 2;
 const NEIGHBORS = 3;
 
 /** Raio das estrelas por tamanho (60%, 30% e 10% delas), dos nós e do ponto da sinapse, em px. */
-const STAR_RADII = [0.6, 1, 1.6] as const;
+const STAR_RADII = [0.7, 1.1, 1.7] as const;
 const NODE_RADIUS = 1.4;
 const DOT_RADIUS = 1.8;
 /** Halo do escuro: 3× o raio, de 35% a 0. */
@@ -326,10 +326,11 @@ export function createBackdropEngine(canvas: HTMLCanvasElement, options: Backdro
 
   // Gerado uma vez por montagem, sempre na mesma ordem: todas as estrelas e depois todos os nós.
   for (let i = 0; i < MAX_STARS; i++) {
-    // Mais densas perto do núcleo; 25% fora dos braços, com θ uniforme.
-    const rho = 0.04 + 0.96 * Math.pow(rand(), 0.7);
+    // Bem mais densas perto do núcleo (u^1,7: a densidade cai com o raio, como num disco de galáxia);
+    // 15% fora dos braços, com θ uniforme.
+    const rho = 0.03 + 0.97 * Math.pow(rand(), 1.7);
     starRho[i] = rho;
-    starTheta[i] = rand() < 0.25 ? rand() * TAU : armAngle(rand, rho, 1);
+    starTheta[i] = rand() < 0.15 ? rand() * TAU : armAngle(rand, rho, 1);
     const size = rand();
     starSize[i] = size < 0.6 ? 0 : size < 0.9 ? 1 : 2;
     starTone[i] = rand();
