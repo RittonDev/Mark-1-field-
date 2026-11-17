@@ -109,6 +109,8 @@ export function BulkTagsDialog({ mode, tickets, onClose }: { mode: BulkTagMode; 
     onSuccess: ({ updated }) => {
       void queryClient.invalidateQueries({ queryKey: ["tickets"] });
       void queryClient.invalidateQueries({ queryKey: ["ticket-tags"] });
+      // A OS aberta no painel mostra as etiquetas novas mesmo sem o tempo real.
+      for (const t of tickets) void queryClient.invalidateQueries({ queryKey: ["ticket", t.id] });
       const what = names.length === 1 ? `Etiqueta “${names[0]}”` : `${names.length} etiquetas`;
       if (updated === 0) {
         toast({
