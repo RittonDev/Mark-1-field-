@@ -374,7 +374,8 @@ async def test_home_attention_groups(
         "sla_breached": 2,
         "late_arrival": 1,
         "today_not_started": 1,
-        "unassigned_soon": 2,
+        "unassigned_visit": 1,
+        "unassigned": 4,
         "unproductive_pending": 1,
         "no_schedule": 1,
         "part_requests_open": 1,
@@ -386,26 +387,30 @@ async def test_home_attention_groups(
         "payouts_pending": 1,
         "quotes_waiting": 1,
     }
-    # Mais grave primeiro; no mesmo nível, o maior número.
-    order = [(grp["severity"], grp["count"]) for grp in data["attention"]]
+    # O que pede ação agora primeiro; depois o mais grave e, no mesmo nível, o maior número.
+    order = [(grp["tier"], grp["severity"], grp["count"]) for grp in data["attention"]]
+    tier = {"now": 0, "routine": 1}
     rank = {"critical": 0, "high": 1, "medium": 2, "low": 3}
-    assert order == sorted(order, key=lambda o: (rank[o[0]], -o[1]))
+    assert order == sorted(order, key=lambda o: (tier[o[0]], rank[o[1]], -o[2]))
     assert [grp["key"] for grp in data["attention"]] == [
         "sla_breached",
-        "unassigned_soon",
         "late_arrival",
         "today_not_started",
-        "unproductive_pending",
+        "unassigned_visit",
+        "unassigned",
         "no_owner",
+        "unproductive_pending",
         "no_schedule",
-        "stale",
         "portal_requests",
         "part_requests_open",
         "costs_pending",
+        "stale",
         "violation_pending",
         "payouts_pending",
         "quotes_waiting",
     ]
+    now = {"sla_breached", "late_arrival", "today_not_started", "unassigned_visit"}
+    assert {key for key, grp in g.items() if grp["tier"] == "now"} == now
 
     def ids(key: str) -> list[str]:
         return [item["ticket_id"] for item in g[key]["items"]]
@@ -417,11 +422,14 @@ async def test_home_attention_groups(
     assert g["late_arrival"]["items"][0]["reason"] == "Chegada atrasada há 40 min · Em deslocamento"
     assert ids("today_not_started") == [str(not_started.id)]
     assert g["today_not_started"]["items"][0]["reason"] == "Agendada para 09:00, sem início há 6 h"
-    assert ids("unassigned_soon") == [str(soon_unassigned.id), str(old_unassigned.id)]
-    assert [i["reason"] for i in g["unassigned_soon"]["items"]] == [
-        "Visita amanhã às 11:00 sem técnico",
-        "Sem técnico há 1 dia",
-    ]
+    assert ids("unassigned_visit") == [str(soon_unassigned.id)]
+    assert g["unassigned_visit"]["items"][0]["reason"] == "Visita amanhã às 11:00 sem técnico"
+    # Sem técnico (rotina): a visita mais próxima primeiro, depois as sem data, mais antigas antes.
+    assert ids("unassigned")[0] == str(soon_unassigned.id)
+    old_reason = next(
+        i["reason"] for i in g["unassigned"]["items"] if i["ticket_id"] == str(old_unassigned.id)
+    )
+    assert old_reason == "Sem técnico há 1 dia"
     assert ids("unproductive_pending") == [str(unproductive.id)]
     assert g["unproductive_pending"]["items"][0]["reason"] == (
         "Improdutiva em 16/11: falta reagendar (2 visitas improdutivas)"
@@ -457,11 +465,23 @@ async def test_home_attention_groups(
     assert item["number"] == late.number and item["title"] == "A caminho"
     assert datetime.fromisoformat(item["when"]) == NOW - timedelta(minutes=40)
 
-    # Filtro da lista (só as chaves usadas) ou a página que mostra tudo.
-    assert g["sla_breached"]["filters"] == {"sla_breached": True}
-    assert g["unassigned_soon"]["filters"] == {"unassigned": True, "open_only": True}
-    assert g["no_owner"]["filters"] == {"no_owner": True, "open_only": True}
-    assert g["violation_pending"]["filters"] == {"violation_pending": True}
+    # Filtro da lista (só as chaves usadas) ou a página que mostra tudo. Os grupos recortados
+    # nos últimos 30 dias levam o mesmo corte (created_from = hoje - 29).
+    window = (TODAY - timedelta(days=29)).isoformat()
+    assert g["sla_breached"]["filters"] == {"sla_breached": True, "created_from": window}
+    assert g["unassigned_visit"]["filters"] == {
+        "unassigned": True,
+        "open_only": True,
+        "scheduled_from": TODAY.isoformat(),
+        "scheduled_to": (TODAY + timedelta(days=1)).isoformat(),
+    }
+    assert g["unassigned"]["filters"] == {
+        "unassigned": True,
+        "open_only": True,
+        "created_from": window,
+    }
+    assert g["no_owner"]["filters"] == {"no_owner": True, "open_only": True, "created_from": window}
+    assert g["violation_pending"]["filters"] == {"violation_pending": True, "created_from": window}
     assert g["today_not_started"]["filters"] == {
         "status": ["new", "triage", "assigned", "scheduled", "reopened"],
         "scheduled_from": TODAY.isoformat(),
