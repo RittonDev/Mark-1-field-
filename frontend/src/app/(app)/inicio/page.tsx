@@ -22,7 +22,7 @@ import { ServiceCard } from "@/components/home/vitals/ServiceCard";
 import { TodayCard } from "@/components/home/vitals/TodayCard";
 import { RefreshFailed } from "@/components/operacao/status";
 import { Button, ErrorBox, PageHeader, SectionTitle } from "@/components/ui";
-import { useMediaQuery } from "@/components/useMediaQuery";
+import { useMediaQuery, useSaveData } from "@/components/useMediaQuery";
 import { useNow } from "@/components/useNow";
 import { api, ApiError, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -118,10 +118,14 @@ export default function HomePage() {
   const { user } = useAuth();
   const now = useNow(60_000);
   const stopped = useBackdropStopped();
-  // O botão "Animação" só faz sentido com o fundo animado: movimento permitido e tela de 768 px ou mais.
+  // O botão "Animação" só aparece quando o fundo pode animar: movimento permitido, tela de 768 px ou mais,
+  // sem cores forçadas nem alto contraste (o fundo some) e sem economia de dados (fica estático).
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)", true);
   const narrow = useMediaQuery("(max-width: 767.98px)", true);
-  const canAnimate = !reducedMotion && !narrow;
+  const forcedColors = useMediaQuery("(forced-colors: active)", true);
+  const moreContrast = useMediaQuery("(prefers-contrast: more)", true);
+  const saveData = useSaveData(true);
+  const canAnimate = !reducedMotion && !narrow && !forcedColors && !moreContrast && !saveData;
   // Na chave "dashboard": o tempo real (eventos das OS) e o fechar do painel da OS já releem.
   const overview = useQuery({
     queryKey: ["dashboard", "home"],
@@ -231,7 +235,7 @@ export default function HomePage() {
                   className="mb-3"
                   aside={
                     data && data.attention.length ? (
-                      <span className="text-xs text-ink-muted">
+                      <span className="-mr-1 rounded bg-sheet px-1 text-xs text-ink-muted">
                         {data.attention.length} {data.attention.length === 1 ? "ponto" : "pontos"}
                       </span>
                     ) : null

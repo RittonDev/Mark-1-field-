@@ -982,10 +982,28 @@ export function Topbar({ onOpenMenu, menuOpen = false }: { onOpenMenu?: () => vo
     [ticketPanel, router],
   );
 
+  // Altura real da barra (cresce com a fonte maior do navegador e com o aviso "Sem internet"): o fundo
+  // animado da Início gruda logo abaixo dela, pela variável --topbar-h, sem passar sob o desfoque.
+  const headerRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    const root = document.documentElement;
+    const observer = new ResizeObserver(([entry]) => {
+      const height = entry.borderBoxSize?.[0]?.blockSize ?? el.getBoundingClientRect().height;
+      root.style.setProperty("--topbar-h", `${Math.ceil(height)}px`);
+    });
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty("--topbar-h");
+    };
+  }, []);
+
   // Abrir OS é a tarefa mais frequente da central (chamados chegam pelo WhatsApp e e-mail o dia todo).
   const canCreate = canManageTickets(user?.role) && pathname !== "/chamados/novo";
   return (
-    <header className="sticky top-0 z-30 border-b border-line bg-sheet/85 backdrop-blur-md print:hidden">
+    <header ref={headerRef} className="sticky top-0 z-30 border-b border-line bg-sheet/85 backdrop-blur-md print:hidden">
       <div className="flex h-14 items-center gap-2 px-3 sm:gap-3 sm:px-4 md:px-6">
         {onOpenMenu ? (
           <button

@@ -293,7 +293,11 @@ export function AttentionList({
           <SectionTitle
             as="h3"
             className="mb-3"
-            aside={focusTotal !== null ? <span className="text-xs text-ink-muted tabular-nums">{intFmt(focusTotal)} OS</span> : null}
+            aside={
+              focusTotal !== null ? (
+                <span className="-mr-1 rounded bg-sheet px-1 text-xs text-ink-muted tabular-nums">{intFmt(focusTotal)} OS</span>
+              ) : null
+            }
           >
             <span id="pontos-agora-titulo">Agora</span>
           </SectionTitle>

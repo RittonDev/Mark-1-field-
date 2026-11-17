@@ -1,5 +1,6 @@
 "use client";
 
+import clsx from "clsx";
 import { memo, useEffect, useRef } from "react";
 import { createBackdropEngine, readPalette } from "@/components/home/backdrop/engine";
 import { useMediaQuery } from "@/components/useMediaQuery";
@@ -153,9 +154,17 @@ function HomeBackdrop({ paused }: { paused: boolean }) {
   return (
     <div
       aria-hidden
-      className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[max(100%,calc(100lvh_-_57px))] overflow-clip print:hidden forced-colors:hidden contrast-more:hidden"
+      // --topbar-h: a altura real da barra do topo (Shell). No md+ a camada desce também pelo recuo de baixo da
+      // folha (py-2 + borda): sem isso, no fim da rolagem o sticky subiria 9 px para baixo da barra.
+      className={clsx(
+        "pointer-events-none absolute inset-x-0 top-0 -z-10 overflow-clip print:hidden forced-colors:hidden contrast-more:hidden",
+        "h-[max(100%,calc(100lvh_-_var(--topbar-h,57px)))] md:h-[max(calc(100%_+_9px),calc(100lvh_-_var(--topbar-h,57px)))]",
+      )}
     >
-      <div ref={box} className="mf-galaxy-mask sticky top-[57px] h-[calc(100lvh_-_57px)] [contain:strict]">
+      <div
+        ref={box}
+        className="mf-galaxy-mask sticky top-[var(--topbar-h,57px)] h-[calc(100lvh_-_var(--topbar-h,57px))] [contain:strict]"
+      >
         <div className="mf-galaxy-glow absolute inset-0" />
         <canvas ref={canvas} className="absolute inset-0 block size-full opacity-0 transition-opacity duration-400 ease-out" />
       </div>

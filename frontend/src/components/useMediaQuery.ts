@@ -18,3 +18,22 @@ export function useMediaQuery(query: string, serverValue: boolean): boolean {
   const read = useCallback(() => window.matchMedia(query).matches, [query]);
   return useSyncExternalStore(subscribe, read, () => serverValue);
 }
+
+type ConnectionNavigator = Navigator & {
+  connection?: EventTarget & { saveData?: boolean };
+};
+
+function subscribeConnection(onChange: () => void) {
+  const connection = (navigator as ConnectionNavigator).connection;
+  connection?.addEventListener?.("change", onChange);
+  return () => connection?.removeEventListener?.("change", onChange);
+}
+
+/** "Economia de dados" do navegador (navigator.connection.saveData); no servidor, `serverValue`. */
+export function useSaveData(serverValue: boolean): boolean {
+  return useSyncExternalStore(
+    subscribeConnection,
+    () => (navigator as ConnectionNavigator).connection?.saveData === true,
+    () => serverValue,
+  );
+}

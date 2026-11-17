@@ -162,7 +162,8 @@ export function HomeSearch({ user }: { user: User }) {
             key={text}
             type="button"
             onClick={() => pick(text)}
-            className="rounded-md px-1.5 py-0.5 font-medium text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+            // Fundo da folha: na Início o texto fica sobre o fundo animado e não pode perder contraste.
+            className="rounded-md bg-sheet px-1.5 py-0.5 font-medium text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
           >
             {text}
           </button>

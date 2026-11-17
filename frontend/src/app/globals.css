@@ -519,7 +519,8 @@ body:has([data-drawer]) .mf-toasts {
 }
 
 /* Início: fundo animado (galáxia neural). A máscara deixa o efeito forte só no alto à direita, onde fica o
-   núcleo, e em cerca de 40% atrás da coluna de texto da esquerda (os alphas do engine contam com isso). */
+   núcleo, e em cerca de 40% atrás da coluna de texto da esquerda (os alphas do engine contam com isso).
+   Rótulos pequenos que caem na área forte (exemplos da busca, contadores à direita) levam bg-sheet. */
 .mf-galaxy-mask {
   --mf-galaxy-mask: radial-gradient(ellipse 80% 95% at 80% 20%, #000 0%, rgb(0 0 0 / 0.8) 35%, rgb(0 0 0 / 0.42) 70%, rgb(0 0 0 / 0.28) 100%);
   -webkit-mask-image: var(--mf-galaxy-mask);
