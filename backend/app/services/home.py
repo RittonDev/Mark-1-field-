@@ -1742,6 +1742,10 @@ async def _pulse(
 
 async def overview(db: AsyncSession) -> HomeOverview:
     m = _moment()
+    # A varredura tem cerca de 80 expressões e o custo estimado passa do jit_above_cost: o
+    # PostgreSQL gastava ~0,9 s compilando (JIT) consultas que rodam em ~0,2 s. Desligado só até o
+    # fim da transação deste pedido (o SET LOCAL de set_config com is_local; a tela só lê).
+    await db.execute(select(func.set_config("jit", "off", True)))
     rules = await field_svc.rules(db)
     counts = await _ticket_counts(db, m, rules.onsite_hours)
     attention = await _attention(db, m, counts)
