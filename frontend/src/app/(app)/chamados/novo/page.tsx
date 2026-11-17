@@ -900,7 +900,7 @@ function NewTicket() {
     <>
       {d.tagsAuto
         ? tagRulesFailed
-          ? `A OS sai com as etiquetas padrão para ${tagMode === "project" ? "OS de projeto" : "OS nova"}, definidas pela gestão.`
+          ? `Não deu para carregar agora o padrão para ${tagMode === "project" ? "OS de projeto" : "OS nova"} definido pela gestão.`
           : `Padrão para ${tagMode === "project" ? "OS de projeto" : "OS nova"}: tire ou inclua o que precisar.`
         : "Ajustadas nesta OS."}
       {payoutTags.length
