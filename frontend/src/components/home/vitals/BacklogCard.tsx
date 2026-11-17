@@ -76,7 +76,7 @@ function BacklogBody({ backlog: b }: { backlog: HomeBacklog }) {
 function AgeRows({ backlog: b }: { backlog: HomeBacklog }) {
   const max = Math.max(...b.ages.map((a) => a.count), 1);
   return (
-    <ol className="flex flex-col gap-1.5" aria-label={AGES_LABEL}>
+    <ol className="flex flex-col gap-2" aria-label={AGES_LABEL}>
       {b.ages.map((a) => {
         const label = AGE_LABEL[a.key] ?? a.key;
         const name = `${label}: ${plural(a.count, "OS", "OS")}`;

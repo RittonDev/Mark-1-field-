@@ -664,7 +664,7 @@ GROUPS: dict[str, GroupSpec] = {
             "due_soon",
             "Prazo vence em 24 h",
             "high",
-            "Prazo de solução nas próximas 24 h.",
+            "Abertas nos últimos 30 dias com prazo de solução nas próximas 24 h.",
             tier="now",
         ),
         GroupSpec(
@@ -1053,8 +1053,12 @@ TICKET_GROUPS: dict[str, TicketGroup] = {
         _field_stuck_reason,
         extra=lambda: [field_since().label("field_since")],
     ),
+    # Com o mesmo corte de 30 dias do "SLA estourado": a OS antiga que volta de uma pausa não entra no
+    # topo para sumir dele na hora em que o prazo estoura (ela fica só na "Fila antiga").
     "due_soon": TicketGroup(
-        due_soon_clause, lambda m: [Ticket.resolution_due_at.asc()], _due_soon_reason
+        lambda m: and_(due_soon_clause(m), recent(m)),
+        lambda m: [Ticket.resolution_due_at.asc()],
+        _due_soon_reason,
     ),
     "unassigned_visit": TicketGroup(
         unassigned_visit_clause, lambda m: [Ticket.scheduled_start.asc()], _unassigned_reason

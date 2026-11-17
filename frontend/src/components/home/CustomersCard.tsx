@@ -116,7 +116,8 @@ function Concentration({ customers: c }: { customers: HomeCustomers }) {
   const three = c.top.slice(0, 3).reduce((sum, x) => sum + x.created, 0);
   return (
     <p className="border-t border-line px-5 py-2.5 text-xs text-ink-muted tabular-nums">
-      Maior cliente: {portion(first)} das OS
+      Maior cliente: {portion(first)}
+      {c.entered >= MIN_BASE ? " das OS" : " OS"}
       {c.active > 3 ? ` · 3 maiores: ${portion(three)}` : ""}
     </p>
   );

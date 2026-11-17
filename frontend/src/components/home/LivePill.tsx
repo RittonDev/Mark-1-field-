@@ -27,9 +27,13 @@ export function LivePill({ updatedAt }: { updatedAt: string | null }) {
   } else if (reconnecting) {
     label = "Reconectando…";
     title = time ? `Tempo real caiu; os dados são das ${time}.` : undefined;
-  } else {
+  } else if (state === "online") {
     label = time ? `Ao vivo · ${time}` : "Ao vivo";
     title = time ? `Dados das ${time}; a tela se atualiza sozinha.` : undefined;
+  } else {
+    // Conectando sem ter conectado com a Início aberta (abertura, ou tempo real já caído ao montar):
+    // ainda não é "ao vivo".
+    label = time ? `Dados das ${time}` : "Conectando…";
   }
   return (
     <span

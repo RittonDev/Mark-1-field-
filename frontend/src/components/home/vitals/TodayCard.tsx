@@ -74,9 +74,9 @@ function TodayBody({ today }: { today: HomeToday }) {
           <ProblemText tone="warning" icon={UserX} href={ticketsListHref(today.unassigned_filters)} title="Visitas de hoje sem técnico">
             {intFmt(today.unassigned)} sem técnico
           </ProblemText>
-        ) : (
+        ) : today.planned > 1 ? (
           <span>todas com técnico</span>
-        )}
+        ) : null}
         {resolved}
       </p>
     </>
@@ -98,7 +98,7 @@ function Tomorrow({ tomorrow }: { tomorrow: HomeTomorrow }) {
   const head = [
     `Amanhã: ${plural(tomorrow.planned, "visita", "visitas")}`,
     ...(tomorrow.technicians > 0 ? [plural(tomorrow.technicians, "técnico", "técnicos")] : []),
-    ...(tomorrow.unassigned > 0 ? [] : ["todas com técnico"]),
+    ...(tomorrow.unassigned > 0 || tomorrow.planned < 2 ? [] : ["todas com técnico"]),
   ].join(" · ");
   return (
     <p className="tabular-nums">

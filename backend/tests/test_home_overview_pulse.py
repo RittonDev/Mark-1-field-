@@ -216,6 +216,14 @@ async def test_focus_counts_each_ticket_once(
     await add_ticket(
         db, world, title="SLA antiga", created_at=ago(days=40), resolution_due_at=ago(days=20)
     )
+    # Antiga com o prazo vencendo (voltou de uma pausa): fica fora do topo, como a "SLA antiga".
+    await add_ticket(
+        db,
+        world,
+        title="Antiga vencendo",
+        created_at=ago(days=40),
+        resolution_due_at=NOW + timedelta(hours=2),
+    )
     # Dois motivos na mesma OS (chegada atrasada e prazo vencendo): conta uma vez no topo.
     await add_ticket(
         db,

@@ -123,15 +123,23 @@ function ItemList({ group, now, href }: { group: AttentionGroup; now: number; hr
   );
 }
 
-function SeeAll({ group, href }: { group: AttentionGroup; href: string }) {
+/** Telas que abrem com todas as situações (não só as do grupo): o atalho vai sem número. */
+const PAGE_LABEL: Record<string, string> = {
+  "/orcamentos": "Abrir orçamentos",
+  "/custos": "Abrir custos extras",
+  "/pagamentos": "Abrir pagamentos",
+};
+
+function SeeAll({ group, href, exact }: { group: AttentionGroup; href: string; exact: boolean }) {
   const count = intFmt(group.count);
+  const text = exact ? `Ver todas (${count})` : (PAGE_LABEL[href] ?? "Abrir");
   return (
     <Link
       href={href}
       className="inline-flex items-center gap-1 text-xs font-semibold text-brand-ink underline-offset-2 hover:underline"
-      aria-label={`Ver todas (${count}): ${group.title}`}
+      aria-label={`${text}: ${group.title}`}
     >
-      Ver todas ({count})
+      {text}
       <ArrowRight aria-hidden className="size-3.5" />
     </Link>
   );
@@ -139,15 +147,17 @@ function SeeAll({ group, href }: { group: AttentionGroup; href: string }) {
 
 /**
  * Um grupo de pontos de atenção. Em "Agora" vem aberto, com as OS e o motivo de cada uma; em "Rotina"
- * vem recolhido, com os exemplos atrás de um botão. "Ver todas (N)" só quando a lista reproduz o
- * número; sem ela, "e mais N".
+ * vem recolhido, com os exemplos atrás de um botão. "Ver todas (N)" só quando o destino mostra exatamente
+ * as N (a lista de chamados com o filtro do grupo ou as solicitações do portal); senão, "e mais N" e, se
+ * houver tela, um atalho sem número.
  */
 function GroupCard({ group, now, collapsed }: { group: AttentionGroup; now: number; collapsed: boolean }) {
   const href = targetHref(group);
+  const exact = Boolean(href) && (!group.link || group.link === "/solicitacoes");
   const [open, setOpen] = useState(false);
   const listId = useId();
   const items = group.items.length;
-  const more = !href && items > 0 && group.count > items ? group.count - items : 0;
+  const more = !exact && items > 0 && group.count > items ? group.count - items : 0;
   const moreNote = more ? (
     <p className="border-t border-line px-5 py-2.5 text-xs text-ink-muted tabular-nums">e mais {intFmt(more)}</p>
   ) : null;
@@ -182,7 +192,7 @@ function GroupCard({ group, now, collapsed }: { group: AttentionGroup; now: numb
               ) : (
                 <span />
               )}
-              {href ? <SeeAll group={group} href={href} /> : null}
+              {href ? <SeeAll group={group} href={href} exact={exact} /> : null}
             </div>
           ) : null}
           {items ? (
@@ -195,13 +205,12 @@ function GroupCard({ group, now, collapsed }: { group: AttentionGroup; now: numb
       ) : (
         <>
           {items ? <ItemList group={group} now={now} href={href} /> : null}
+          {moreNote}
           {href ? (
-            <div className={clsx("px-5 py-2.5", items && "border-t border-line")}>
-              <SeeAll group={group} href={href} />
+            <div className={clsx("px-5 py-2.5", (items || more) && "border-t border-line")}>
+              <SeeAll group={group} href={href} exact={exact} />
             </div>
-          ) : (
-            moreNote
-          )}
+          ) : null}
         </>
       )}
     </Card>
@@ -217,7 +226,7 @@ function Groups({ groups, now, collapsed }: { groups: AttentionGroup[]; now: num
           key={group.key}
           id={`ponto-${group.key}`}
           tabIndex={-1}
-          className="scroll-mt-20 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          className="scroll-mt-20 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-hidden"
           style={{ ["--i" as string]: i }}
         >
           <GroupCard group={group} now={now} collapsed={collapsed} />
@@ -275,7 +284,12 @@ export function AttentionList({
   return (
     <div className="flex flex-col gap-6">
       {nowGroups.length ? (
-        <section id="pontos-agora" tabIndex={-1} aria-labelledby="pontos-agora-titulo" className="scroll-mt-20 rounded-xl outline-none">
+        <section
+          id="pontos-agora"
+          tabIndex={-1}
+          aria-labelledby="pontos-agora-titulo"
+          className="scroll-mt-20 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-hidden"
+        >
           <SectionTitle
             as="h3"
             className="mb-3"

@@ -22,7 +22,7 @@ const SEVERITY_ICON: Record<Severity, { icon: LucideIcon; className: string }> =
 
 const chipClass =
   "inline-flex h-8 items-center gap-1.5 rounded-full bg-surface px-3 text-[13px] shadow-elev-1 ring-1 ring-line " +
-  "transition-shadow duration-150 hover:ring-line-strong focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none";
+  "transition-shadow duration-150 hover:ring-line-strong focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-hidden";
 
 /** Rola até o alvo e põe o foco nele, sem mudar a URL. Sem o alvo na tela, o link segue normal. */
 function reveal(e: React.MouseEvent<HTMLAnchorElement>, id: string) {

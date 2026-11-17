@@ -80,7 +80,7 @@ function FinanceBody({ finance: f }: { finance: HomeFinance }) {
             <span className="text-ink-muted">Nenhum aguardando resposta</span>
           )}
         </p>
-        <p className="text-[13px] text-ink tabular-nums">
+        <p className="mt-1.5 text-[13px] text-ink tabular-nums">
           {f.quotes_approved_month > 0 ? (
             <Link href="/orcamentos" className={valueLink}>
               {plural(f.quotes_approved_month, "aprovado no mês", "aprovados no mês")} · {formatMoney(f.quotes_approved_month_total)}

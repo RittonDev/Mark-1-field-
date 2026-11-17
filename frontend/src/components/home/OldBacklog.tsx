@@ -5,7 +5,7 @@ import Link from "next/link";
 import { RankBars, type RankItem } from "@/components/charts";
 import { revealSection } from "@/components/operacao/hooks";
 import { ticketsListHref } from "./links";
-import { dayMonth, intFmt } from "./rules";
+import { dayMonth, plural } from "./rules";
 import type { HomeBacklog } from "./types";
 
 export const OLD_BACKLOG_ID = "fila-antiga";
@@ -38,7 +38,7 @@ export function OldBacklog({ backlog, windowFrom }: { backlog: HomeBacklog; wind
           Fila antiga
           <span className="text-sm font-normal tracking-normal text-ink-muted tabular-nums">
             {" "}
-            · {intFmt(backlog.old)} OS abertas antes de {dayMonth(windowFrom)}
+            · {plural(backlog.old, "OS aberta", "OS abertas")} antes de {dayMonth(windowFrom)}
           </span>
         </span>
         <ChevronDown aria-hidden className="size-4 shrink-0 text-ink-subtle transition-transform duration-150 group-open:rotate-180" />

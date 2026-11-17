@@ -144,6 +144,9 @@ export function MeterRow({
 }) {
   const { pct, text } = share(ratio, min);
   const tone = pct === null ? "accent" : meterTone(pct, target, floor);
+  // Abaixo da meta (ou do piso), o % mostrado não arredonda até ela: 89,7% sai "89%", nunca "90%" ao
+  // lado do alerta e de "meta 90%". A barra continua com o valor exato.
+  const limit = tone === "danger" ? floor : tone === "warning" ? target : undefined;
   const Alert = tone === "danger" ? OctagonAlert : tone === "warning" ? TriangleAlert : null;
   const alertColor = tone === "danger" ? PROBLEM.danger.icon : PROBLEM.warning.icon;
   return (
@@ -160,7 +163,7 @@ export function MeterRow({
           ) : (
             <>
               {Alert ? <Alert aria-hidden className={clsx("size-3.5 shrink-0", alertColor)} /> : null}
-              {pctText(pct)}
+              {pctText(limit === undefined ? pct : Math.min(pct, limit - 1))}
               {Alert ? <span className="sr-only">, abaixo da meta</span> : null}
             </>
           )}
