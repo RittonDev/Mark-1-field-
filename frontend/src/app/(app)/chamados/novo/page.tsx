@@ -234,6 +234,7 @@ function NewTicket() {
     tags: `${uid}-etiquetas`,
     origin: `${uid}-origem`,
     owner: `${uid}-analista`,
+    priority: `${uid}-prioridade`,
     more: `${uid}-mais`,
   };
 
@@ -881,7 +882,6 @@ function NewTicket() {
   const moreSummary =
     [
       titleText ? `Título: ${titleText}` : null,
-      f.priority ? `${PRIORITY[f.priority].code} · ${PRIORITY[f.priority].label}` : null,
       d.ownerMode === "none" ? "Sem analista" : d.ownerMode === "other" ? `Analista: ${ownerName ?? "a escolher"}` : null,
       project ? `Projeto ${project.code}` : null,
       d.formIds.length ? `${d.formIds.length} ${d.formIds.length === 1 ? "formulário" : "formulários"}` : null,
@@ -894,7 +894,7 @@ function NewTicket() {
       f.type !== "incident" ? TICKET_TYPE[f.type] : null,
     ]
       .filter(Boolean)
-      .join(" · ") || "Título, prioridade, analista, projeto, formulários, duração, pedido do cliente, recado e endereço";
+      .join(" · ") || "Título, duração, analista, projeto, recado, endereço, outros técnicos, pedido do cliente e formulários";
 
   const tagsHint = (
     <>
@@ -1423,8 +1423,9 @@ function NewTicket() {
                 <ChevronDown aria-hidden className={clsx("size-4 shrink-0 text-ink-subtle transition-transform duration-200", moreOpen && "rotate-180")} />
               </button>
             </h2>
-            <div id={ids.more} hidden={!moreOpen} className="animate-enter border-t border-line px-4 py-4 sm:px-5">
-              <div className="flex flex-col gap-5">
+            <div id={ids.more} hidden={!moreOpen} className="@container animate-enter border-t border-line px-4 py-4 sm:px-5">
+              {/* Duas colunas quando cabe; o que é longo (outros técnicos, pedido do cliente, formulários) usa a linha toda. */}
+              <div className="grid gap-x-6 gap-y-5 @2xl:grid-cols-2">
                 <Field
                   label="Título"
                   error={shown.title}
@@ -1440,18 +1441,37 @@ function NewTicket() {
                   />
                 </Field>
 
-                <Field label="Prioridade (prazo)" hint="Define os prazos de 1ª resposta e de solução (veja Prazos desta OS).">
-                  <Select value={f.priority} onChange={(e) => setForm("priority", e.target.value as NewTicketForm["priority"])} className="sm:max-w-xs">
-                    <option value="">
-                      Padrão ({PRIORITY.medium.code} · {PRIORITY.medium.label})
-                    </option>
-                    {PRIORITY_ORDER.map((p) => (
-                      <option key={p} value={p}>
-                        {PRIORITY[p].code} · {PRIORITY[p].label}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
+                <div className="flex flex-col gap-1.5">
+                  <Field label="Duração estimada (min)" error={shown.minutes} hint={minutes ? formatMinutes(minutes) : "Vazio: a agenda reserva 1h"}>
+                    <Input
+                      id={ERROR_FIELD.minutes}
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      max={MAX_MINUTES}
+                      value={f.estimated_minutes}
+                      onChange={(e) => setForm("estimated_minutes", e.target.value)}
+                      placeholder="60"
+                      aria-invalid={shown.minutes ? true : undefined}
+                      className="w-40"
+                    />
+                  </Field>
+                  {st?.suggested_minutes && st.observed_median_minutes != null && minutes !== st.suggested_minutes ? (
+                    // A estimativa aprende: a mediana das OS concluídas deste tipo, com um clique para usar.
+                    <p className="flex flex-wrap items-center gap-x-1.5 text-xs text-ink-muted">
+                      <Lightbulb aria-hidden className="size-3.5 text-ink-subtle" />
+                      Na prática, “{st.name}” leva ~{formatMinutes(st.observed_median_minutes)} (mediana de{" "}
+                      {st.observed_count.toLocaleString("pt-BR")} OS).
+                      <button
+                        type="button"
+                        onClick={() => setForm("estimated_minutes", String(st.suggested_minutes))}
+                        className="font-semibold text-brand-ink hover:underline"
+                      >
+                        Usar {formatMinutes(st.suggested_minutes)}
+                      </button>
+                    </p>
+                  ) : null}
+                </div>
 
                 <div className="flex flex-col gap-1.5">
                   <span id={ids.owner} className="text-xs font-semibold text-ink/80">
@@ -1502,7 +1522,7 @@ function NewTicket() {
                 </div>
 
                 <Field label="Projeto" hint="Se a OS faz parte de um projeto do cliente. Com projeto, as etiquetas passam a ser as de projeto.">
-                  <Select value={f.project_id} onChange={(e) => setForm("project_id", e.target.value)} className="sm:max-w-md">
+                  <Select value={f.project_id} onChange={(e) => setForm("project_id", e.target.value)}>
                     <option value="">Sem projeto</option>
                     {projectOptions.map((p) => (
                       <option key={p.id} value={p.id}>
@@ -1511,90 +1531,6 @@ function NewTicket() {
                     ))}
                   </Select>
                 </Field>
-
-                <div className="flex flex-col gap-1.5">
-                  <span className="text-xs font-semibold text-ink/80">Formulários</span>
-                  <FormsPicker
-                    templates={templates.data}
-                    loading={templates.isLoading}
-                    serviceType={st}
-                    value={d.formIds}
-                    onToggle={toggleForm}
-                    required={d.formsRequired}
-                    onRequiredChange={(formsRequired) => update((x) => ({ ...x, formsRequired }))}
-                  />
-                </div>
-
-                <div className="flex flex-col gap-1.5">
-                  <Field label="Duração estimada (min)" error={shown.minutes} hint={minutes ? formatMinutes(minutes) : "Vazio: a agenda reserva 1h"}>
-                    <Input
-                      id={ERROR_FIELD.minutes}
-                      type="number"
-                      inputMode="numeric"
-                      min={1}
-                      max={MAX_MINUTES}
-                      value={f.estimated_minutes}
-                      onChange={(e) => setForm("estimated_minutes", e.target.value)}
-                      placeholder="60"
-                      aria-invalid={shown.minutes ? true : undefined}
-                      className="w-40"
-                    />
-                  </Field>
-                  {st?.suggested_minutes && st.observed_median_minutes != null && minutes !== st.suggested_minutes ? (
-                    // A estimativa aprende: a mediana das OS concluídas deste tipo, com um clique para usar.
-                    <p className="flex flex-wrap items-center gap-x-1.5 text-xs text-ink-muted">
-                      <Lightbulb aria-hidden className="size-3.5 text-ink-subtle" />
-                      Na prática, “{st.name}” leva ~{formatMinutes(st.observed_median_minutes)} (mediana de{" "}
-                      {st.observed_count.toLocaleString("pt-BR")} OS).
-                      <button
-                        type="button"
-                        onClick={() => setForm("estimated_minutes", String(st.suggested_minutes))}
-                        className="font-semibold text-brand-ink hover:underline"
-                      >
-                        Usar {formatMinutes(st.suggested_minutes)}
-                      </button>
-                    </p>
-                  ) : null}
-                </div>
-
-                <fieldset className="flex flex-col gap-3 rounded-lg border border-line p-3.5">
-                  <legend className="px-1 text-xs font-semibold text-ink/80">Pedido do cliente</legend>
-                  <div className="flex flex-col gap-1.5">
-                    <span id={ids.origin} className="text-xs font-semibold text-ink/80">
-                      Origem
-                    </span>
-                    <SegmentedRadio options={ORIGINS} value={f.source} onChange={onOrigin} ariaLabel="Origem" labelledBy={ids.origin} className="max-w-md" />
-                  </div>
-                  <Field label="Nº do chamado do cliente">
-                    <Input
-                      value={f.client_reference}
-                      onChange={(e) => setForm("client_reference", e.target.value)}
-                      maxLength={80}
-                      placeholder="Ex.: INC0012345"
-                      className="sm:max-w-xs"
-                    />
-                  </Field>
-                  {f.client_reference.trim().length >= 4 ? <SameClientReference reference={f.client_reference} /> : null}
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Field label="Quem pediu">
-                      <Input
-                        value={f.requester_name}
-                        onChange={(e) => setForm("requester_name", e.target.value)}
-                        maxLength={160}
-                        placeholder="Nome de quem abriu o chamado"
-                      />
-                    </Field>
-                    <Field label="Contato" hint="O técnico não vê o contato do cliente.">
-                      <Input
-                        value={f.requester_contact}
-                        onChange={(e) => setForm("requester_contact", e.target.value)}
-                        maxLength={160}
-                        inputMode="tel"
-                        placeholder="(11) 90000-0000"
-                      />
-                    </Field>
-                  </div>
-                </fieldset>
 
                 <div className="flex flex-col gap-1">
                   <Field label="Recado para o técnico">
@@ -1610,19 +1546,6 @@ function NewTicket() {
                     {f.visit_note.length.toLocaleString("pt-BR")} / {NOTE_LIMIT.toLocaleString("pt-BR")}
                   </span>
                 </div>
-
-                <HelpersField
-                  options={people
-                    .filter((u) => u.role === "technician")
-                    .map((u) => ({ id: u.id, name: u.name, detail: u.team_name ?? undefined }))}
-                  assigneeId={f.assignee_id}
-                  helperIds={d.helperIds}
-                  names={names}
-                  onChange={(helperIds) => {
-                    setConflicts(null);
-                    update((x) => ({ ...x, helperIds }));
-                  }}
-                />
 
                 <div className="flex flex-col gap-1.5">
                   <span className="text-xs font-semibold text-ink/80">Endereço do atendimento</span>
@@ -1657,39 +1580,161 @@ function NewTicket() {
                   )}
                 </div>
 
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <Field label="Categoria">
-                    <Select value={f.category_id} onChange={(e) => setForm("category_id", e.target.value)}>
-                      <option value="">Sem categoria</option>
-                      {sortedCategories.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.full_name}
-                        </option>
-                      ))}
-                    </Select>
+                <Field label="Categoria">
+                  <Select value={f.category_id} onChange={(e) => setForm("category_id", e.target.value)}>
+                    <option value="">Sem categoria</option>
+                    {sortedCategories.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.full_name}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Tipo de atendimento">
+                  <Select value={f.type} onChange={(e) => setForm("type", e.target.value as TicketType)}>
+                    {(Object.keys(TICKET_TYPE) as TicketType[]).map((type) => (
+                      <option key={type} value={type}>
+                        {TICKET_TYPE[type]}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+
+                <div className="@2xl:col-span-2">
+                  <HelpersField
+                    options={people
+                      .filter((u) => u.role === "technician")
+                      .map((u) => ({ id: u.id, name: u.name, detail: u.team_name ?? undefined }))}
+                    assigneeId={f.assignee_id}
+                    helperIds={d.helperIds}
+                    names={names}
+                    onChange={(helperIds) => {
+                      setConflicts(null);
+                      update((x) => ({ ...x, helperIds }));
+                    }}
+                  />
+                </div>
+
+                <fieldset className="grid gap-3 rounded-lg border border-line p-3.5 @2xl:col-span-2 @2xl:grid-cols-2">
+                  <legend className="px-1 text-xs font-semibold text-ink/80">Pedido do cliente</legend>
+                  <div className="flex flex-col gap-1.5">
+                    <span id={ids.origin} className="text-xs font-semibold text-ink/80">
+                      Origem
+                    </span>
+                    <SegmentedRadio options={ORIGINS} value={f.source} onChange={onOrigin} ariaLabel="Origem" labelledBy={ids.origin} className="max-w-md" />
+                  </div>
+                  <Field label="Nº do chamado do cliente">
+                    <Input value={f.client_reference} onChange={(e) => setForm("client_reference", e.target.value)} maxLength={80} placeholder="Ex.: INC0012345" />
                   </Field>
-                  <Field label="Tipo de atendimento">
-                    <Select value={f.type} onChange={(e) => setForm("type", e.target.value as TicketType)}>
-                      {(Object.keys(TICKET_TYPE) as TicketType[]).map((type) => (
-                        <option key={type} value={type}>
-                          {TICKET_TYPE[type]}
-                        </option>
-                      ))}
-                    </Select>
+                  {f.client_reference.trim().length >= 4 ? (
+                    <div className="@2xl:col-span-2">
+                      <SameClientReference reference={f.client_reference} />
+                    </div>
+                  ) : null}
+                  <Field label="Quem pediu">
+                    <Input
+                      value={f.requester_name}
+                      onChange={(e) => setForm("requester_name", e.target.value)}
+                      maxLength={160}
+                      placeholder="Nome de quem abriu o chamado"
+                    />
                   </Field>
+                  <Field label="Contato" hint="O técnico não vê o contato do cliente.">
+                    <Input
+                      value={f.requester_contact}
+                      onChange={(e) => setForm("requester_contact", e.target.value)}
+                      maxLength={160}
+                      inputMode="tel"
+                      placeholder="(11) 90000-0000"
+                    />
+                  </Field>
+                </fieldset>
+
+                <div className="flex flex-col gap-1.5 @2xl:col-span-2">
+                  <span className="text-xs font-semibold text-ink/80">Formulários</span>
+                  <FormsPicker
+                    templates={templates.data}
+                    loading={templates.isLoading}
+                    serviceType={st}
+                    value={d.formIds}
+                    onToggle={toggleForm}
+                    required={d.formsRequired}
+                    onRequiredChange={(formsRequired) => update((x) => ({ ...x, formsRequired }))}
+                  />
                 </div>
               </div>
             </div>
           </Card>
         </div>
 
-        <aside className="flex flex-col gap-4 lg:sticky lg:top-[4.5rem] lg:max-h-[calc(100dvh-10.5rem)] lg:overflow-y-auto" aria-label="Contexto da OS">
+        {/* Lateral: no largo fica ao lado dos passos (e acompanha a rolagem); no estreito, desce em duas colunas. */}
+        <aside
+          className="grid gap-4 md:grid-cols-2 xl:sticky xl:top-[4.5rem] xl:flex xl:max-h-[calc(100dvh-10.5rem)] xl:flex-col xl:overflow-y-auto"
+          aria-label="Contexto da OS"
+        >
+          <Card className="flex flex-col gap-3 p-4">
+            <SectionTitle
+              as="h2"
+              wrap
+              aside={
+                <>
+                  {suggestions.isFetching ? <span className="text-xs text-ink-subtle">atualizando...</span> : null}
+                  {f.location_id ? (
+                    <button type="button" onClick={() => void copyGroupInvite()} className="text-xs font-semibold text-brand-ink hover:underline">
+                      Copiar convite para o grupo
+                    </button>
+                  ) : null}
+                </>
+              }
+            >
+              Técnicos sugeridos
+            </SectionTitle>
+            <SuggestedTechnicians
+              compact
+              items={suggestions.data}
+              loading={suggestions.isLoading}
+              hasPlace={Boolean(f.location_id)}
+              scheduled={Boolean(startIso)}
+              assigneeId={f.assignee_id}
+              helperIds={d.helperIds}
+              onAssign={(t) => onAssignee(t?.id ?? "")}
+              onToggleHelper={(t) => {
+                setConflicts(null);
+                update((x) => ({
+                  ...x,
+                  helperIds: x.helperIds.includes(t.id) ? x.helperIds.filter((id) => id !== t.id) : [...x.helperIds, t.id].slice(0, 6),
+                }));
+              }}
+              invite={(t) => invite(t.name)}
+              error={suggestions.error}
+              onRetry={() => void suggestions.refetch()}
+            />
+          </Card>
+
           <Card>
             <IntakePanel context={intake.data} loading={intake.isLoading} error={intake.error} onRetry={() => void intake.refetch()} />
           </Card>
 
           <Card className="p-4">
-            <SectionTitle aside={<PriorityBadge priority={effectivePriority} />}>Prazos desta OS</SectionTitle>
+            <SectionTitle as="h2" aside={<PriorityBadge priority={effectivePriority} />}>
+              Prazos desta OS
+            </SectionTitle>
+            {/* A prioridade fica junto dos prazos que ela define. */}
+            <div className="mt-3 flex flex-col gap-1.5">
+              <label htmlFor={ids.priority} className="text-xs font-semibold text-ink/80">
+                Prioridade
+              </label>
+              <Select id={ids.priority} value={f.priority} onChange={(e) => setForm("priority", e.target.value as NewTicketForm["priority"])}>
+                <option value="">
+                  Padrão ({PRIORITY.medium.code} · {PRIORITY.medium.label})
+                </option>
+                {PRIORITY_ORDER.map((p) => (
+                  <option key={p} value={p}>
+                    {PRIORITY[p].code} · {PRIORITY[p].label}
+                  </option>
+                ))}
+              </Select>
+            </div>
             {policy && responseDue && resolutionDue ? (
               <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-xs">
                 <dt className="text-ink-muted">1ª resposta</dt>
@@ -1725,7 +1770,7 @@ function NewTicket() {
         </aside>
 
         {/* Barra fixa no rodapé: o Criar fica à vista em qualquer tela, com o resumo da OS. */}
-        <div className="sticky bottom-3 z-20 flex flex-col gap-2 rounded-xl border border-line bg-surface/95 px-4 py-3 shadow-elev-2 backdrop-blur lg:col-span-2">
+        <div className="sticky bottom-3 z-20 flex flex-col gap-2 rounded-xl border border-line bg-surface/95 px-4 py-3 shadow-elev-2 backdrop-blur xl:col-span-2">
           {/* O ErrorBox já é anunciado (role="alert") ao aparecer. */}
           {create.error && !conflicts ? <ErrorBox message={errorMessage(create.error)} /> : null}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
