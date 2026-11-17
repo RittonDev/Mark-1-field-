@@ -3,10 +3,10 @@ pontos de atenção das OS e sugestões.
 
 Uma varredura das OS conta os indicadores, os grupos e quase todos os sinais vitais (FILTER
 no banco, sem COUNT(DISTINCT)); o resto sai de consultas pequenas (técnicos com visita,
-retorno na loja, improdutivas, equipe, clientes e financeiro). Cada grupo com alguma OS traz
-até 5 exemplos, já com cliente, loja e técnico na mesma consulta. Os grupos de rotina e os
-números de 30 dias olham o que foi aberto na janela; o que ficou de antes vai para a "Fila
-antiga". "Hoje", os dias e as semanas seguem o fuso da operação (America/Sao_Paulo).
+retorno na loja, improdutivas, equipe, clientes, financeiro e orçamentos). Cada grupo com
+alguma OS traz até 5 exemplos, já com cliente, loja e técnico na mesma consulta. Os grupos
+de rotina e os números de 30 dias olham o que foi aberto na janela; o que ficou de antes vai
+para a "Fila antiga". "Hoje", os dias e as semanas seguem o fuso da operação (America/Sao_Paulo).
 """
 
 import uuid
@@ -74,6 +74,7 @@ from app.schemas.home import (
     HomeOverview,
     HomePulse,
     HomeQuality,
+    HomeQuotes,
     HomeTeam,
     HomeToday,
     HomeTomorrow,
@@ -121,6 +122,9 @@ PAYOUT_LATE = timedelta(days=7)
 FIELD_STUCK_AFTER = timedelta(hours=12)
 DUE_SOON = timedelta(hours=24)
 TAG_OLD = timedelta(days=30)
+# Orçamentos: o período "Últimos 90 dias" da lista de /orcamentos (agora - 90 × 24 h), que também
+# é a janela da taxa de aprovação.
+QUOTES_WINDOW = timedelta(days=90)
 RECENT_DAYS = 30
 WEEK_DAYS = 7
 WEEKS = 8
@@ -1583,6 +1587,73 @@ async def _finance(db: AsyncSession, m: Moment) -> HomeFinance:
     )
 
 
+async def _quotes_pulse(db: AsyncSession, m: Moment) -> HomeQuotes:
+    """A caixinha dos orçamentos numa consulta só (COUNT e SUM com FILTER, sem COUNT(DISTINCT)).
+    Aguardando, vencidos e rascunhos são os da lista de /orcamentos com o filtro do link (com os de
+    OS cancelada, como lá); a fila é a do grupo quotes_waiting; aprovados, recusados e a base da
+    taxa de aprovação deixam de fora a OS cancelada, como o financeiro. Sem orçamento o valor sai
+    0: a tela decide pela contagem."""
+    sent = Quote.status == QuoteStatus.SENT
+    awaiting = and_(sent, or_(Quote.valid_until.is_(None), Quote.valid_until >= m.today))
+    # Vencido como na lista: o enviado com a validade passada já conta (antes da rotina gravar).
+    overdue = or_(Quote.status == QuoteStatus.EXPIRED, and_(sent, Quote.valid_until < m.today))
+    draft = Quote.status == QuoteStatus.DRAFT
+    approved = Quote.status == QuoteStatus.APPROVED
+    rejected = Quote.status == QuoteStatus.REJECTED
+    live = Ticket.status != S.CANCELLED
+    since = m.now - QUOTES_WINDOW
+    month_start = month_bounds(m.today.year, m.today.month)[0]
+    # Base da taxa de aprovação: o que o cliente respondeu nos 90 dias e o que venceu sem resposta
+    # (validade de hoje - 90 até ontem).
+    answered = and_(or_(approved, rejected), Quote.decided_at >= since)
+    lapsed = and_(
+        overdue, Quote.valid_until >= m.today - QUOTES_WINDOW, Quote.valid_until < m.today
+    )
+    columns: dict[str, ColumnElement[bool]] = {
+        "awaiting": awaiting,
+        "awaiting_no_link": and_(awaiting, Quote.link_id.is_(None), Quote.token_hash.is_(None)),
+        "expiring": and_(awaiting, Quote.valid_until <= m.tomorrow),
+        "expired_90d": and_(overdue, Quote.created_at >= since),
+        "drafts": draft,
+        "in_review": and_(draft, Quote.sent_at.is_not(None)),
+        "follow_up": quotes_svc.follow_up_condition(m.now, m.today, m.day_start),
+        "approved_month": and_(live, approved, Quote.decided_at >= month_start),
+        "rejected_month": and_(live, rejected, Quote.decided_at >= month_start),
+        "approved_90d": and_(live, approved, Quote.decided_at >= since),
+        "decided_90d": and_(live, or_(answered, lapsed)),
+    }
+    with_total = ("awaiting", "expired_90d", "follow_up", "approved_month")
+    stmt = (
+        select(
+            *(func.count().filter(cond).label(name) for name, cond in columns.items()),
+            *(
+                func.sum(Quote.total).filter(columns[name]).label(f"{name}_total")
+                for name in with_total
+            ),
+        )
+        .select_from(Quote)
+        .join(Ticket, Ticket.id == Quote.ticket_id)
+    )
+    row = (await db.execute(stmt)).one()
+    return HomeQuotes(
+        awaiting=row.awaiting,
+        awaiting_total=_money(row.awaiting_total),
+        awaiting_no_link=row.awaiting_no_link,
+        expiring=row.expiring,
+        expired_90d=row.expired_90d,
+        expired_90d_total=_money(row.expired_90d_total),
+        drafts=row.drafts,
+        in_review=row.in_review,
+        follow_up=row.follow_up,
+        follow_up_total=_money(row.follow_up_total),
+        approved_month=row.approved_month,
+        approved_month_total=_money(row.approved_month_total),
+        rejected_month=row.rejected_month,
+        approved_90d=row.approved_90d,
+        decided_90d=row.decided_90d,
+    )
+
+
 def _focus(counts: dict[str, Any]) -> HomeFocus:
     return HomeFocus(total=counts["now_total"], next_visit_at=counts["next_visit_at"])
 
@@ -1758,6 +1829,7 @@ async def _pulse(
         customers=await _customers(db, m, counts["entered_30d"]),
         # Todos que abrem a tela (TicketManagerUser) veem os valores.
         finance=await _finance(db, m),
+        quotes=await _quotes_pulse(db, m),
         weeks=_weeks(m, counts),
     )
 

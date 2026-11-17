@@ -54,7 +54,9 @@ function QuotesBody({ quotes: q }: { quotes: HomeQuotes }) {
           <Link href={AWAITING_HREF} className="group block w-fit max-w-full rounded-sm" title={AWAITING_HINT}>
             <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
               <CountUp value={q.awaiting} tabular={false} className="text-[28px] leading-none font-semibold tracking-[-0.02em] text-ink" />
-              <span className="text-sm text-ink-muted underline-offset-2 group-hover:text-ink group-hover:underline">aguardando assinatura</span>
+              <span className="text-sm text-ink-muted underline-offset-2 group-hover:text-ink group-hover:underline">
+                aguardando assinatura
+              </span>
             </span>
             <span className="mt-1 block text-sm font-medium text-ink tabular-nums">{formatMoney(q.awaiting_total)}</span>
           </Link>
@@ -130,7 +132,9 @@ function Row({ label, title, children }: { label: string; title: string; childre
 function Decided({ quotes: q }: { quotes: HomeQuotes }) {
   const rate = share({ count: q.approved_90d, base: q.decided_90d }, MIN_BASE);
   const month = [
-    q.approved_month > 0 ? `Aprovados no mês: ${intFmt(q.approved_month)} · ${formatMoney(q.approved_month_total)}` : "Nenhum aprovado no mês",
+    q.approved_month > 0
+      ? `Aprovados no mês: ${intFmt(q.approved_month)} · ${formatMoney(q.approved_month_total)}`
+      : "Nenhum aprovado no mês",
     ...(q.rejected_month > 0 ? [plural(q.rejected_month, "recusado", "recusados")] : []),
   ].join(" · ");
   return (

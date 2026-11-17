@@ -251,7 +251,11 @@ export default function HomePage() {
                 aria-label="Como está a operação"
                 className={clsx(
                   "stagger mt-6 grid grid-cols-1 gap-4 @min-[620px]:grid-cols-2",
-                  showQuotes ? "@min-[1100px]:grid-cols-6" : showFinance ? "@min-[1100px]:grid-cols-4" : "@min-[1100px]:grid-cols-3",
+                  showQuotes
+                    ? "@min-[1100px]:grid-cols-6"
+                    : showFinance
+                      ? "@min-[1100px]:grid-cols-4"
+                      : "@min-[1100px]:grid-cols-3",
                 )}
               >
                 {vital(0, <TodayCard today={pulse?.today ?? null} tomorrow={pulse?.tomorrow ?? null} />, firstRow)}
