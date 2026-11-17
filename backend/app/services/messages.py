@@ -46,7 +46,9 @@ BEFORE_FIELD = frozenset({S.NEW, S.TRIAGE, S.ASSIGNED, S.SCHEDULED, S.REOPENED})
 # Marcas de dado que falta. Nos textos padrão a frase com uma delas sai (ver `render`).
 NO_ETA = "__:__"
 NO_TECHNICIAN = "(técnico a definir)"
-PLACEHOLDERS = frozenset({NO_ETA, NO_TECHNICIAN})
+# Link do relatório desativado pela gestão: o texto não recria o link sozinho.
+NO_REPORT_LINK = "(link do relatório desativado)"
+PLACEHOLDERS = frozenset({NO_ETA, NO_TECHNICIAN, NO_REPORT_LINK})
 
 VARIABLES: dict[str, str] = {
     "tecnico": "Nome do técnico responsável",
@@ -73,7 +75,8 @@ VARIABLES: dict[str, str] = {
     "projeto": "Projeto da OS",
     "analista": "Analista responsável pela OS (sem responsável: quem copia o texto)",
     "link_relatorio": (
-        "Link do relatório para o cliente (mostra o andamento e, depois de concluída, o resultado)"
+        "Link do relatório para o cliente (mostra o andamento e, depois de concluída, o resultado; "
+        "se a gestão desativou o link, a frase sai do texto)"
     ),
     "prazo_chegada": "Prazo para o técnico chegar (4h nas capitais), ex.: 14:30",
     "hora_chegada": "Hora em que o técnico chegou (início do atendimento; antes disso, a atual)",
@@ -273,7 +276,7 @@ async def context(
         "motivo_improdutiva": reason or "",
         "projeto": ticket.project.name if ticket.project else "",
         "analista": ticket.owner.name if ticket.owner else actor.name,
-        "link_relatorio": await client_report.report_url(db, ticket),
+        "link_relatorio": await client_report.report_url(db, ticket) or NO_REPORT_LINK,
         "prazo_chegada": (
             _local(ticket.arrival_due_at).strftime("%H:%M")
             if ticket.arrival_due_at

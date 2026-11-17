@@ -1239,7 +1239,15 @@ async function uploadSignature(round: Round, signature: PendingSignature): Promi
     fields.longitude = String(signature.longitude);
   }
   // A tentativa conta antes do envio: se o app morrer no meio, o próximo envio confere primeiro.
-  await write(round, (db) => markSignatureAttempt(db, signature.id), false);
+  let queued = false;
+  await write(
+    round,
+    async (db) => {
+      queued = await markSignatureAttempt(db, signature.id);
+    },
+    false,
+  );
+  if (!queued) return true; // apagada enquanto esperava a vez (OS saiu do aparelho)
   ensureAlive(round);
   let ticket: TicketDetail | null;
   try {
@@ -1543,12 +1551,18 @@ export function startSync() {
   });
 
   // Rodada de segurança com o app na tela: a cada 90 s, ou 5 min com o tempo real no ar e nada para
-  // enviar; e quando um item que falhou termina a espera para tentar de novo.
+  // enviar, ou 30 s com rede e o servidor sem responder; e quando um item que falhou termina a espera
+  // para tentar de novo.
   const interval = setInterval(() => {
     if (appState !== "active") return;
     const now = Date.now();
     const pending = status.pendingOps + status.pendingPhotos > 0;
-    const every = status.realtime === "online" && !pending ? REALTIME_INTERVAL_MS : SAFETY_INTERVAL_MS;
+    const every =
+      status.network !== "offline" && status.server === "unreachable"
+        ? UNREACHABLE_INTERVAL_MS
+        : status.realtime === "online" && !pending
+          ? REALTIME_INTERVAL_MS
+          : SAFETY_INTERVAL_MS;
     if (now - lastRoundAt >= every || retryDue(now)) void requestSync();
   }, TICK_MS);
 
