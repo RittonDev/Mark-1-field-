@@ -222,6 +222,31 @@ class HomeFinance(BaseModel):
     costs_pending_total: Money
 
 
+class HomeQuotes(BaseModel):
+    """Orçamentos para a caixinha da Início. Os recortes "aguardando", "vencidos" e "rascunhos"
+    contam exatamente o que a lista de /orcamentos mostra com o filtro do link (mesma regra de
+    vencido da lista: enviado com validade passada conta como vencido), inclusive de OS cancelada.
+    Valor sem orçamento sai 0: quem diz "nenhum" é a contagem."""
+
+    awaiting: int  # enviados na validade (ou sem validade): aguardando a assinatura do cliente
+    awaiting_total: Money
+    awaiting_no_link: int  # desses, sem link: o cliente não tem como assinar
+    expiring: int  # desses, com a validade hoje ou amanhã
+    expired_90d: int  # vencidos criados nos últimos 90 dias (now - 90 × 24 h, como a lista)
+    expired_90d_total: Money
+    drafts: int  # rascunhos (todos)
+    in_review: int  # desses, já enviados (editados depois do envio)
+    follow_up: int  # a fila "Para cobrar" (= grupo quotes_waiting)
+    follow_up_total: Money
+    approved_month: int  # aprovados no mês (fuso da operação), OS não cancelada
+    approved_month_total: Money
+    rejected_month: int  # recusados no mês, OS não cancelada
+    approved_90d: int  # aprovados nos últimos 90 dias, OS não cancelada
+    # A base da taxa de aprovação: aprovados e recusados nos últimos 90 dias mais os vencidos com
+    # a validade nos 90 dias anteriores a hoje (OS não cancelada).
+    decided_90d: int
+
+
 class WeekFlow(BaseModel):
     start: date  # segunda-feira (fuso da operação)
     created: int
@@ -237,6 +262,7 @@ class HomePulse(BaseModel):
     team: HomeTeam
     customers: HomeCustomers
     finance: HomeFinance | None = None  # None: sem permissão para ver valores
+    quotes: HomeQuotes | None = None  # None: sem permissão (reservado; hoje sempre preenchido)
     weeks: list[WeekFlow]  # 8, da mais antiga para a atual (em andamento)
 
 
