@@ -6,6 +6,7 @@ import { BellRing, CalendarClock, Download, FileText, Link2, Loader2, Plus, Sear
 import { useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useState } from "react";
 import { Tabs } from "@/components/motion";
+import { useSearchChange } from "@/components/operacao/hooks";
 import { QUOTE_EDITABLE, QuoteViewer } from "@/components/quotes/QuoteViewer";
 import { QuoteEditor, type QuotePrefill, type QuoteTicketRef, ShareDialog, type ShareMode } from "@/components/ticket/QuotesCard";
 import { TicketLink } from "@/components/ticket/TicketLink";
@@ -103,6 +104,23 @@ function midnight(day: string): string {
   const zone = OFFSET.formatToParts(new Date(`${day}T12:00:00Z`)).find((p) => p.type === "timeZoneName")?.value ?? "";
   return `${day}T00:00:00${/GMT([+-]\d{2}:\d{2})/.exec(zone)?.[1] ?? "-03:00"}`;
 }
+
+// A situação e o período ficam no endereço (?situacao=sent&periodo=tudo): os números do Início abrem a
+// lista já filtrada, e recarregar ou mandar o link mantém o filtro.
+
+/** Situação do endereço; fora das conhecidas, "Todos". */
+function statusFromUrl(value: string | null): QuoteStatus | "" {
+  return CHIPS.find((c) => c.key === value)?.key ?? "";
+}
+
+/** Período do endereço: "tudo", um dos meses da lista ("2026-11") ou, sem ele, os últimos 90 dias. */
+function periodFromUrl(value: string | null, months: { value: string }[]): string {
+  if (value === "tudo") return ALL;
+  return value && months.some((m) => m.value === value) ? value : RECENT;
+}
+
+/** O período no endereço: os últimos 90 dias (o padrão) ficam de fora. */
+const periodParam = (period: string) => (period === RECENT ? null : period === ALL ? "tudo" : period);
 
 /** Período pela criação do orçamento: últimos 90 dias, um mês ou tudo. */
 function periodRange(period: string): { start?: string; end?: string } {
@@ -346,10 +364,19 @@ function QuoteList() {
   const now = useNow(60_000);
   const today = dayKey(now);
   const months = useMemo(() => monthOptions(), []);
+  const searchParams = useSearchParams();
   // A fila "Para cobrar" fica no endereço (?cobrar=1): o "Ver todas" do Início abre a tela já nela.
-  const queue = useSearchParams().get("cobrar") === "1";
-  const [period, setPeriod] = useState(RECENT);
-  const [status, setStatus] = useState<QuoteStatus | "">("");
+  const queue = searchParams.get("cobrar") === "1";
+  const [period, setPeriod] = useState(() => periodFromUrl(searchParams.get("periodo"), months));
+  const [status, setStatus] = useState<QuoteStatus | "">(() => statusFromUrl(searchParams.get("situacao")));
+  // A URL mudou com a tela aberta (o link do menu, um link com outro filtro): mostra o que ela diz.
+  const urlChange = useSearchChange();
+  if (urlChange) {
+    const nextPeriod = periodFromUrl(urlChange.get("periodo"), months);
+    const nextStatus = statusFromUrl(urlChange.get("situacao"));
+    if (nextPeriod !== period) setPeriod(nextPeriod);
+    if (nextStatus !== status) setStatus(nextStatus);
+  }
   const [search, setSearch] = useState("");
   // A busca depois de uma pausa na digitação: filtra a lista na tela e, no período grande, vai para a API.
   const query = useDebounced(search.trim(), 250);
@@ -407,10 +434,18 @@ function QuoteList() {
     onError: (e) => toast({ title: "Não foi possível enviar", description: errorMessage(e), tone: "error" }),
   });
   const setQueue = (on: boolean) => setParams({ cobrar: on ? "1" : null });
+  const filterStatus = (next: QuoteStatus | "") => {
+    setStatus(next);
+    setParams({ situacao: next || null });
+  };
   // Escolher uma situação desliga a fila.
   const pickStatus = (next: QuoteStatus | "") => {
-    setStatus(next);
+    filterStatus(next);
     if (queue) setQueue(false);
+  };
+  const pickPeriod = (next: string) => {
+    setPeriod(next);
+    setParams({ periodo: periodParam(next) });
   };
   // O filtro da API vale quando já chegou (enquanto carrega, o recorte da lista do período).
   const serverRows = narrowing && narrowed.data && !narrowed.isPlaceholderData ? narrowed.data : null;
@@ -514,7 +549,7 @@ function QuoteList() {
           />
         </div>
         {queue ? null : (
-          <Select value={period} onChange={(e) => setPeriod(e.target.value)} className="w-full sm:w-52" aria-label="Período">
+          <Select value={period} onChange={(e) => pickPeriod(e.target.value)} className="w-full sm:w-52" aria-label="Período">
             <option value={RECENT}>Últimos 90 dias</option>
             {months.map((m) => (
               <option key={m.value} value={m.value}>
@@ -594,7 +629,7 @@ function QuoteList() {
                       <Button
                         onClick={() => {
                           setSearch("");
-                          setStatus("");
+                          filterStatus("");
                         }}
                       >
                         {queue ? "Limpar busca" : "Limpar busca e situação"}
