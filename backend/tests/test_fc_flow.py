@@ -724,6 +724,31 @@ async def test_activity_list_export(client: AsyncClient, world: World, engine: A
     assert r.status_code == 403
 
 
+async def test_activity_list_brings_service_type_and_scope(
+    client: AsyncClient, world: World
+) -> None:
+    an = world.analyst.headers
+    kind = await client.post(
+        f"{API}/service-types", json={"name": "Instalação", "estimated_minutes": 90}, headers=an
+    )
+    assert kind.status_code == 201, kind.text
+    scope = "Trocar o rack. " * 40  # 600 caracteres
+    ticket = await create(
+        client, world, title="Rack", description=scope, service_type_id=kind.json()["id"]
+    )
+    r = await client.get(f"{API}/tickets", params={"number": ticket["number"]}, headers=an)
+    assert r.status_code == 200, r.text
+    [item] = r.json()["items"]
+    # Colunas opcionais "Tipo de OS" e "Escopo": na lista, só o começo do escopo.
+    assert item["service_type"]["name"] == "Instalação"
+    assert len(item["description"]) <= 300
+    assert item["description"].endswith("…")
+    assert scope.startswith(item["description"][:-1])
+    # A OS completa traz o escopo inteiro.
+    detail = await client.get(f"{API}/tickets/{ticket['id']}", headers=an)
+    assert detail.json()["description"].strip() == scope.strip()
+
+
 async def test_bulk_tags(client: AsyncClient, world: World) -> None:
     an = world.analyst.headers
     a = await create(client, world, title="Lote A")

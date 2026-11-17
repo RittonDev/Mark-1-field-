@@ -920,7 +920,7 @@ export function GeneralTab({
                   type="button"
                   onClick={() => setForm((f) => ({ ...f, locationId: "", locationLabel: "" }))}
                   className="inline-flex size-7 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
-                  aria-label="Tirar a loja"
+                  aria-label="Tirar a localização"
                 >
                   <X className="size-4" />
                 </button>
