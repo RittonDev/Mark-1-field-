@@ -7,12 +7,11 @@ import { useEffect, useRef, useState } from "react";
 import { PriorityBadge } from "@/components/badges";
 import { TagChips } from "@/components/TagChips";
 import { useToast } from "@/components/Toaster";
-import { CopyGroupTextButton } from "@/components/ticket/MessagesPanel";
+import { CopyGroupTextButton, GroupTextsMenu } from "@/components/ticket/MessagesPanel";
 import { useTicketPanel } from "@/components/ticket/TicketPanel";
 import { WhatsAppShare } from "@/components/ticket/WhatsAppShare";
 import { Button, buttonClassName, Card } from "@/components/ui";
 import { useNow } from "@/components/useNow";
-import { formatDateTime } from "@/lib/format";
 import { copyText } from "@/lib/whatsapp";
 import type { TicketDetail } from "@/lib/types";
 import { dayTimeLabel } from "./dayTime";
@@ -23,23 +22,11 @@ export interface CreatedResult {
   problems: string[];
 }
 
-/** Aviso para o grupo do cliente quando a OS ainda não tem técnico e horário: recebemos, vamos agendar. */
-export function clientMessage(t: TicketDetail): string {
-  const where = [t.customer?.name, t.location?.name].filter(Boolean).join(" · ");
-  return [
-    `*OS ${t.number}*${where ? ` · ${where}` : ""}`,
-    `Recebemos o chamado: ${t.title.replace(/[\s.!?]+$/, "")}.`,
-    t.scheduled_start ? `Visita: ${formatDateTime(t.scheduled_start)}` : "Vamos agendar a visita e avisamos o horário.",
-    t.report_link?.url ? `Acompanhe por aqui: ${t.report_link.url}` : null,
-  ]
-    .filter(Boolean)
-    .join("\n");
-}
-
 /**
  * Depois de criar a OS: o resumo e o que o analista faz em seguida (abrir a OS no painel, copiar o
  * texto "Atividade confirmada" para o grupo do cliente no WhatsApp, mandar o resumo aos técnicos ou já
- * criar a próxima).
+ * criar a próxima). Os textos do grupo são sempre os modelos de Textos do WhatsApp (os que a gestão
+ * edita), nunca um texto fixo daqui.
  */
 export function CreatedTicket({
   result,
@@ -156,10 +143,8 @@ export function CreatedTicket({
             {confirmed ? (
               <CopyGroupTextButton ticketId={t.id} templateKey="agendamento" label="Copiar texto: Atividade confirmada" size="md" />
             ) : (
-              <Button onClick={() => void copy(clientMessage(t), "Texto copiado. Cole no grupo do WhatsApp.")}>
-                <Copy aria-hidden className="size-4" />
-                Copiar texto: Chamado recebido
-              </Button>
+              // Sem técnico ou sem horário, "Atividade confirmada" não serve: os outros modelos ficam à mão.
+              <GroupTextsMenu ticketId={t.id} />
             )}
             <Button onClick={() => setSharing(true)}>
               <MessageCircle aria-hidden className="size-4" />

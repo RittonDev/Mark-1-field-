@@ -1440,12 +1440,16 @@ function NewTicket() {
                 onClick={() => setMore(!moreOpen)}
                 className="flex w-full items-center gap-3 rounded-xl px-4 py-3.5 text-left transition-colors hover:bg-surface-2/60 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none sm:px-5"
               >
-                <span className="min-w-0 flex-1">
-                  <span id={`${ids.more}-titulo`} className="block text-[15px] leading-5 font-bold tracking-[-0.01em] text-ink">
-                    Mais opções
-                  </span>
-                  <span id={`${ids.more}-resumo`} className="mt-0.5 block truncate text-xs font-normal text-ink-muted" title={moreSummary}>
-                    {moreSummary}
+                <span className="flex min-w-0 flex-1 gap-2.5">
+                  {/* A mesma marca de seção do CardHeader (azul -> ciano), como em "Dados da OS". */}
+                  <span aria-hidden className="mt-[3px] h-3.5 w-[3px] shrink-0 rounded-full bg-linear-to-b from-brand to-brand-cyan" />
+                  <span className="min-w-0 flex-1">
+                    <span id={`${ids.more}-titulo`} className="block text-[15px] leading-5 font-bold tracking-[-0.01em] text-ink">
+                      Mais opções
+                    </span>
+                    <span id={`${ids.more}-resumo`} className="mt-0.5 block truncate text-xs font-normal text-ink-muted" title={moreSummary}>
+                      {moreSummary}
+                    </span>
                   </span>
                 </span>
                 <ChevronDown aria-hidden className={clsx("size-4 shrink-0 text-ink-subtle transition-transform duration-200", moreOpen && "rotate-180")} />
