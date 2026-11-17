@@ -39,9 +39,9 @@ function Chip({ label, onClear, tone = "brand" }: { label: string; onClear: () =
 
 // Cada chip de cadastro busca o nome só quando aparece (o cadastro já costuma estar em cache).
 
-function TechnicianChip({ id, onClear }: { id: UUID; onClear: () => void }) {
+function TechnicianChip({ id, onClear, prefix = "Técnico" }: { id: UUID; onClear: () => void; prefix?: string }) {
   const people = useAssignable(null);
-  return <Chip label={`Técnico: ${nameOr(people.data?.find((u) => u.id === id)?.name, people.isLoading)}`} onClear={onClear} />;
+  return <Chip label={`${prefix}: ${nameOr(people.data?.find((u) => u.id === id)?.name, people.isLoading)}`} onClear={onClear} />;
 }
 
 function TeamChip({ id, onClear }: { id: UUID; onClear: () => void }) {
@@ -124,6 +124,9 @@ export function ActiveFilters({
           label={`Criação: ${rangeLabel({ from: f.created_from, to: f.created_to })}`}
           onClear={() => onChange({ created_from: "", created_to: "" })}
         />
+      ) : null}
+      {f.technician_id ? (
+        <TechnicianChip id={f.technician_id} prefix="Técnico que atuou" onClear={() => onChange({ technician_id: "" })} />
       ) : null}
       {f.assignee_id ? <TechnicianChip id={f.assignee_id} onClear={() => onChange({ assignee_id: "" })} /> : null}
       {f.service_type_id ? <ServiceTypeChip id={f.service_type_id} onClear={() => onChange({ service_type_id: "" })} /> : null}

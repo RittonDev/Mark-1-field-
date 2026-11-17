@@ -7,12 +7,8 @@ import type { ListFilters } from "./types";
 /** Abas da lista (parâmetro "view"). */
 type ListView = "abertos" | "minhas" | "sem_tecnico" | "sla" | "todas";
 
-/**
- * A lista ainda não tem o filtro "técnico que atuou na OS" (atual, quem foi junto ou quem atendeu antes):
- * por ora vai como técnico responsável (assignee_id). Quando a lista ganhar o parâmetro próprio, troque
- * aqui (ex.: "technician_id").
- */
-const TECHNICIAN_PARAM = "assignee_id";
+/** Técnico que atuou na OS (o atual, quem foi junto ou quem já foi o responsável): filtro da lista. */
+const TECHNICIAN_PARAM = "technician_id";
 
 /** Endereço de uma aba da lista, sem filtros (ex.: "Minhas OS"). */
 export function ticketsViewHref(view: ListView): string {

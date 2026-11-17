@@ -224,8 +224,12 @@ export function MoreFilters({
       <div className="flex flex-col">
         <section className={section}>
           <SectionTitle as="h3">Quem</SectionTitle>
-          <Field label="Técnico">
-            <Select value={filters.assignee_id} onChange={(e) => onChange({ assignee_id: e.target.value })}>
+          {/* Técnico que atuou: acha também as OS antigas em que ele foi o responsável antes de uma troca. */}
+          <Field label="Técnico que atuou" hint="O atual, quem foi junto ou quem já foi o responsável.">
+            <Select
+              value={filters.technician_id}
+              onChange={(e) => onChange({ technician_id: e.target.value, assignee_id: "" })}
+            >
               <option value="">Qualquer técnico</option>
               {people.map((u) => (
                 <option key={u.id} value={u.id}>

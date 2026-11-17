@@ -113,7 +113,9 @@ Equivale ao "Tipo de OS" do Field Control. Sem `customer_id`, o tipo vale para t
   - lista de atividades (como no Field Control): `number` (nº exato da OS, o "Identificador"), `created_from`/`created_to` e
     `scheduled_from`/`scheduled_to` (AAAA-MM-DD, dias inteiros no fuso da operação, inclusive; OS sem agenda saem do filtro de
     agendamento; datas fora de 2000–2100 → 422), `tag` (repetível, até 20: OS com qualquer uma dessas etiquetas, sem
-    diferenciar maiúsculas nem espaços sobrando)
+    diferenciar maiúsculas nem espaços sobrando), `technician_id` (técnico que atuou: o responsável atual, quem foi junto
+    ou quem já foi o responsável antes de uma troca, inclusive no histórico importado do FC; `assignee_id` continua sendo só
+    o atual)
   - `page` (1..), `page_size` (1..500, padrão 25), `order_by` ∈ `updated_at, created_at, priority, resolution_due_at, number, scheduled_start, customer` (nome do cliente) com `-` para desc (padrão `-updated_at`); vazios (sem agenda, sem cliente) por último nas duas direções
 - `GET /tickets/export` (gestão) → `text/csv; charset=utf-8` com BOM, separado por `;`, `Content-Disposition: attachment;
   filename="chamados-AAAA-MM-DD.csv"` (dia de hoje no fuso da operação). Os mesmos filtros e o mesmo `order_by` da lista,

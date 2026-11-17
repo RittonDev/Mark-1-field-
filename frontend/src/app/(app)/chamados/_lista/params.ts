@@ -46,6 +46,7 @@ const FILTER_KEYS = [
   "type",
   "source",
   "assignee_id",
+  "technician_id",
   "team_id",
   "customer_id",
   "location_id",
@@ -103,6 +104,8 @@ export interface Filters {
   type: TicketType | "";
   source: TicketSource | "";
   assignee_id: UUID | "";
+  /** Técnico que atuou na OS: o atual, quem foi junto ou quem já foi o responsável (OS antigas). */
+  technician_id: UUID | "";
   team_id: UUID | "";
   customer_id: UUID | "";
   location_id: UUID | "";
@@ -142,6 +145,7 @@ export const CLEAR_FILTERS: Record<FilterKey, null> = {
   type: null,
   source: null,
   assignee_id: null,
+  technician_id: null,
   team_id: null,
   customer_id: null,
   location_id: null,
@@ -161,6 +165,7 @@ export const CLEAR_FILTERS: Record<FilterKey, null> = {
 
 /** Os filtros que ficam em "Mais filtros" (os outros têm botão próprio na fileira de filtros). */
 export const MORE_FILTER_KEYS: FilterKey[] = [
+  "technician_id",
   "assignee_id",
   "owner_id",
   "no_owner",
@@ -253,6 +258,7 @@ export function readListState(params: Params): ListState {
       type: Object.keys(TICKET_TYPE).includes(type) ? (type as TicketType) : "",
       source,
       assignee_id: id("assignee_id"),
+      technician_id: id("technician_id"),
       team_id: id("team_id"),
       customer_id: id("customer_id"),
       location_id: id("location_id"),
@@ -298,7 +304,7 @@ export function moreFilterCount(f: Filters): number {
   return (
     f.priority.length +
     f.tag.length +
-    [f.type, f.source, f.assignee_id, f.team_id, f.service_type_id, f.category_id, f.project_id, f.owner_id].filter(Boolean).length +
+    [f.type, f.source, f.assignee_id, f.technician_id, f.team_id, f.service_type_id, f.category_id, f.project_id, f.owner_id].filter(Boolean).length +
     (f.no_owner ? 1 : 0) +
     (f.violation_pending ? 1 : 0) +
     (f.scheduled_from || f.scheduled_to ? 1 : 0)
@@ -324,6 +330,7 @@ export function apiQuery(state: ListState): Query {
     type: f.type || undefined,
     source: f.source || undefined,
     assignee_id: f.assignee_id || undefined,
+    technician_id: f.technician_id || undefined,
     team_id: f.team_id || undefined,
     customer_id: f.customer_id || undefined,
     location_id: f.location_id || undefined,
