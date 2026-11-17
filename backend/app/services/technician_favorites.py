@@ -17,6 +17,7 @@ padronizadas. Loja sem UF ou sem cidade fica fora.
 import logging
 import re
 import uuid
+from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -40,7 +41,7 @@ from app.schemas.technician_favorite import (
 )
 from app.services import technician_regions, technicians
 from app.services.errors import NotFound, WorkflowError
-from app.services.technician_regions import fold_sql, fold_text
+from app.services.technician_regions import fold_text
 from app.services.workflow import OPEN_STATUSES
 
 log = logging.getLogger(__name__)
@@ -99,9 +100,10 @@ class _City:
     rows: list[Visit] = field(default_factory=list)
 
 
-def _city_columns(state_col: Any, city_col: Any) -> tuple[Any, Any]:
-    """A chave da cidade no banco: UF aparada em maiúsculas e a cidade sem acento."""
-    return func.upper(func.trim(state_col)), fold_sql(city_col)
+def _key(state: str | None, city: str | None) -> CityKey | None:
+    """(UF, cidade sem acento) de uma grafia; None sem UF ou sem cidade."""
+    uf, city_key = (state or "").strip().upper(), fold_text(city)
+    return (uf, city_key) if uf and city_key else None
 
 
 def _place(state: str | None, city: str | None) -> CityKey:
@@ -122,46 +124,42 @@ async def _cities(
     key: str | None = None,
     with_visits: bool = True,
 ) -> dict[CityKey, _City]:
-    """As cidades com loja (todas ou só a pedida), com as visitas de cada técnico na janela."""
-    # Lojas: agrupa pela grafia antes de tirar o acento (poucas grafias, milhares de lojas).
-    names = (
-        select(
-            Location.state,
-            Location.city,
-            func.count().filter(Location.is_active).label("active"),
-            func.count().label("total"),
-        )
+    """As cidades com loja (todas, as da UF ou só a pedida), com as visitas de cada técnico na
+    janela. O banco devolve as grafias e a chave sai de _key (fold_text): a mesma dos pedidos e
+    das decisões gravadas, sem depender de o banco tirar o acento do mesmo jeito."""
+
+    def wanted(place: CityKey) -> bool:
+        return (not state or place[0] == state) and (not key or place[1] == key)
+
+    uf_col = func.upper(func.trim(Location.state))
+    stores = (
+        select(Location.state, Location.city, func.count().filter(Location.is_active), func.count())
         .where(Location.state.is_not(None), Location.city.is_not(None))
         .group_by(Location.state, Location.city)
-        .subquery("store_names")
     )
-    uf_col, key_col = _city_columns(names.c.state, names.c.city)
-    stmt = select(uf_col, key_col, names.c.city, names.c.active, names.c.total)
     if state:
-        stmt = stmt.where(uf_col == state)
-    if key:
-        stmt = stmt.where(key_col == key)
+        stores = stores.where(uf_col == state)
     out: dict[CityKey, _City] = {}
-    spellings: dict[CityKey, dict[str, int]] = {}
-    for uf, city_key, name, active, total in (await db.execute(stmt)).all():
-        if not uf or not city_key:
+    spellings: dict[CityKey, Counter[str]] = {}
+    for raw_state, raw_city, active, total in (await db.execute(stores)).all():
+        place = _key(raw_state, raw_city)
+        if place is None or not wanted(place):
             continue
-        out.setdefault((uf, city_key), _City(state=uf, key=city_key, city="")).stores += active
-        counts = spellings.setdefault((uf, city_key), {})
-        counts[name.strip()] = counts.get(name.strip(), 0) + total
+        out.setdefault(place, _City(state=place[0], key=place[1], city="")).stores += active
+        spellings.setdefault(place, Counter())[raw_city.strip()] += total
     for place, counts in spellings.items():
         # A grafia mais usada nas lojas (no empate, a primeira em ordem alfabética).
         out[place].city = min(counts.items(), key=lambda kv: (-kv[1], kv[0]))[0]
     if not out or not with_visits:
         return out
 
-    # Visitas: uma passada só, com o total da cidade (OS distintas) no mesmo GROUP BY.
+    # Visitas: uma passada só, com o total de OS distintas de cada grafia no mesmo GROUP BY. A OS
+    # é de uma loja só, então somar as grafias da mesma cidade não conta OS duas vezes.
     fp = technician_regions.footprint(now - WINDOW, until=now)
-    uf_col, key_col = _city_columns(Location.state, Location.city)
     visited = (
         select(
-            uf_col.label("state"),
-            key_col.label("key"),
+            Location.state,
+            Location.city,
             fp.c.user_id,
             fp.c.ticket_id,
             fp.c.at,
@@ -179,13 +177,11 @@ async def _cities(
     )
     if state:
         visited = visited.where(uf_col == state)
-    if key:
-        visited = visited.where(key_col == key)
     v = visited.subquery("city_visits")
     rows = await db.execute(
         select(
             v.c.state,
-            v.c.key,
+            v.c.city,
             v.c.user_id,
             v.c.name,
             v.c.is_active,
@@ -193,19 +189,27 @@ async def _cities(
             func.max(v.c.at),
         ).group_by(
             func.grouping_sets(
-                tuple_(v.c.state, v.c.key, v.c.user_id, v.c.name, v.c.is_active),
-                tuple_(v.c.state, v.c.key),
+                tuple_(v.c.state, v.c.city, v.c.user_id, v.c.name, v.c.is_active),
+                tuple_(v.c.state, v.c.city),
             )
         )
     )
-    for uf, city_key, user_id, name, is_active, count, last_at in rows.all():
-        city = out.get((uf, city_key))
-        if city is None:
+    merged: dict[tuple[CityKey, uuid.UUID], Visit] = {}
+    for raw_state, raw_city, user_id, name, is_active, count, last_at in rows.all():
+        place = _key(raw_state, raw_city)
+        city = out.get(place) if place is not None else None
+        if place is None or city is None:
             continue
-        if user_id is None:  # linha do total da cidade
-            city.visits = count
-        else:
-            city.rows.append(Visit(user_id, name, is_active, count, last_at))
+        if user_id is None:  # total da grafia
+            city.visits += count
+            continue
+        before = merged.get((place, user_id))
+        if before is not None:  # a mesma cidade escrita de outro jeito
+            count += before.visits
+            last_at = max((d for d in (last_at, before.last_visit_at) if d), default=None)
+        merged[(place, user_id)] = Visit(user_id, name, is_active, count, last_at)
+    for (place, _), visit in merged.items():
+        out[place].rows.append(visit)
     return out
 
 

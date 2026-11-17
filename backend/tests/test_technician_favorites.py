@@ -488,6 +488,36 @@ async def test_list_all_cities_and_filters(
 
 
 @requires_db
+async def test_city_from_the_list_is_found_again(
+    client: AsyncClient, engine: AsyncEngine, world: World
+) -> None:
+    """A chave sai do mesmo fold_text para as lojas e para os pedidos: a cidade que a lista
+    devolve sempre volta pela consulta, pela loja e no PUT (até com apóstrofo tipográfico)."""
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as db:
+        store = Location(
+            customer_id=uuid.UUID(world.customer_id),
+            name="Loja Herval",
+            city="Herval d’Oeste",
+            state="SC",
+            is_active=True,
+        )
+        db.add(store)
+        await db.commit()
+    an = world.analyst.headers
+
+    (city,) = (await client.get(FAV, params={"state": "SC"}, headers=an)).json()["cities"]
+    assert (city["city"], city["key"], city["stores"]) == ("Herval d’Oeste", "herval doeste", 1)
+    place = {"state": city["state"], "city": city["city"]}
+    r = await client.get(f"{FAV}/city", params=place, headers=an)
+    assert r.status_code == 200 and r.json()["key"] == "herval doeste"
+    r = await client.get(f"{FAV}/city", params={"location_id": str(store.id)}, headers=an)
+    assert r.status_code == 200 and r.json()["key"] == "herval doeste"
+    r = await client.put(f"{FAV}/{world.tech.user.id}", json=place, headers=an)
+    assert r.status_code == 200 and _ids(r.json()["favorites"]) == [str(world.tech.user.id)]
+
+
+@requires_db
 async def test_deleting_the_technician_deletes_the_decisions(
     client: AsyncClient, engine: AsyncEngine, world: World
 ) -> None:
