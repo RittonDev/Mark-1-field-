@@ -20,7 +20,7 @@ import {
   Type,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useEffectEvent, useId, useState } from "react";
+import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
 import { StatusBadge } from "@/components/badges";
 import { toggleTheme } from "@/components/Brand";
 import { useTicketPanel } from "@/components/ticket/TicketPanel";
@@ -157,7 +157,9 @@ export function useSearchController({
   const [query, setQueryState] = useState("");
   const [active, setActive] = useState(0);
   // Enter apertado antes de a busca do texto digitado voltar: abre o 1º resultado dela quando chegar.
-  const [pendingEnter, setPendingEnter] = useState<{ text: string; mods: Mods } | null>(null);
+  const [pendingEnter, setPendingEnter] = useState<{ text: string; mods: Mods; seq: number } | null>(null);
+  const enterSeq = useRef(0);
+  const ranEnter = useRef(0);
   const listId = useId();
   const typed = query.trim();
   // Uma busca por pausa na digitação.
@@ -321,14 +323,15 @@ export function useSearchController({
 
   useEffect(() => {
     if (activeId) listRef.current?.querySelector(`#${CSS.escape(activeId)}`)?.scrollIntoView({ block: "nearest" });
-  }, [activeId]);
+  }, [activeId, listRef]);
 
   // A busca do Enter voltou: abre o resultado escolhido (descartado se o texto mudou nesse meio-tempo).
+  // Cada Enter roda uma vez só: a busca que volta a ficar pronta (outra leitura do mesmo texto) não reabre.
   const enterReady = !!pendingEnter && pendingEnter.text === typed && !stale;
   const runPending = useEffectEvent(() => {
     const pending = pendingEnter;
-    if (!pending) return;
-    setPendingEnter(null);
+    if (!pending || ranEnter.current === pending.seq) return;
+    ranEnter.current = pending.seq;
     entries[current]?.run(pending.mods);
   });
   useEffect(() => {
@@ -355,8 +358,10 @@ export function useSearchController({
       e.preventDefault();
       const mods = modsOf(e);
       // O que está na tela ainda é da busca anterior: espera a do texto digitado.
-      if (typed && stale && isSearchable(typed)) setPendingEnter({ text: typed, mods });
-      else entries[current]?.run(mods);
+      if (typed && stale && isSearchable(typed)) {
+        enterSeq.current += 1;
+        setPendingEnter({ text: typed, mods, seq: enterSeq.current });
+      } else entries[current]?.run(mods);
       return true;
     }
     return false;
