@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
 import { Plus, X } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { searchText } from "@/components/new-ticket/Combobox";
 import { api } from "@/lib/api";
 import type { Tag } from "@/lib/types";
 
@@ -78,11 +79,6 @@ const SUGGESTIONS = 12;
 const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 const tidyName = (name: string) => name.replace(/\s+/g, " ").trim().slice(0, NAME_MAX);
 
-/** Busca sem acento e sem diferença de maiúsculas. */
-function plain(text: string): string {
-  return text.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
-}
-
 type Suggestion = { key: string; tag: Tag; isNew: boolean };
 
 /**
@@ -120,9 +116,9 @@ export function TagsInput({
   const typed = tidyName(draft);
 
   const suggestions = useMemo<Suggestion[]>(() => {
-    const words = plain(typed).split(/\s+/).filter(Boolean);
+    const words = searchText(typed).split(/\s+/).filter(Boolean);
     const list: Suggestion[] = (known.data ?? [])
-      .filter((t) => !value.some((v) => same(v.name, t.name)) && words.every((w) => plain(t.name).includes(w)))
+      .filter((t) => !value.some((v) => same(v.name, t.name)) && words.every((w) => searchText(t.name).includes(w)))
       .slice(0, SUGGESTIONS)
       .map((t) => ({ key: `tag-${t.name}`, tag: t, isNew: false }));
     const exists = typed && ((known.data ?? []).some((t) => same(t.name, typed)) || value.some((t) => same(t.name, typed)));

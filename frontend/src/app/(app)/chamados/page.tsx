@@ -291,7 +291,10 @@ function TicketsView() {
         ) : null}
 
         {loadingRows ? (
-          <div aria-busy role="status" aria-label="Carregando a lista">
+          <div aria-busy="true">
+            <span role="status" className="sr-only">
+              Carregando a lista...
+            </span>
             <TicketsTable rows={null} skeletonRows={Math.min(pageSize, 10)} selected={NO_SELECTION} {...table} />
           </div>
         ) : !data ? (

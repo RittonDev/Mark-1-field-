@@ -45,6 +45,8 @@ export function Popover({
 }) {
   const [open, setOpen] = useState(false);
   const [alignRight, setAlignRight] = useState(false);
+  // Pedidos de devolver o foco ao botão (cada fechamento que pede soma um; o efeito abaixo atende).
+  const [focusRequest, setFocusRequest] = useState(0);
   const wrap = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
@@ -57,8 +59,12 @@ export function Popover({
   };
   const close = (focusTrigger = true) => {
     setOpen(false);
-    if (focusTrigger) button.current?.focus();
+    if (focusTrigger) setFocusRequest((n) => n + 1);
   };
+
+  useEffect(() => {
+    if (focusRequest) button.current?.focus();
+  }, [focusRequest]);
 
   useEffect(() => {
     if (!open) return;
