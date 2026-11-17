@@ -601,48 +601,109 @@ class GroupSpec:
     hint: str
     filters: ListFilters | None = None
     link: str | None = None
+    tier: str = "routine"
+    # Filtro que depende do dia (o "Ver todas" com as datas de hoje); no lugar de `filters`.
+    make_filters: Callable[[Moment], ListFilters] | None = None
+
+
+def _today_filters(m: Moment) -> ListFilters:
+    return ListFilters(scheduled_from=m.today, scheduled_to=m.today, status=list(NOT_STARTED))
+
+
+def _recent_filters(**flags: Any) -> Callable[[Moment], ListFilters]:
+    """O filtro da lista com o mesmo corte de 30 dias do grupo (`created_from` = hoje - 29)."""
+    return lambda m: ListFilters(**flags, created_from=m.recent_from)
+
+
+def _unassigned_visit_filters(m: Moment) -> ListFilters:
+    return ListFilters(
+        unassigned=True, open_only=True, scheduled_from=m.today, scheduled_to=m.tomorrow
+    )
+
+
+def _missed_filters(m: Moment) -> ListFilters:
+    return ListFilters(
+        status=list(NOT_STARTED),
+        scheduled_from=m.today - timedelta(days=MISSED_DAYS),
+        scheduled_to=m.today - timedelta(days=1),
+    )
 
 
 GROUPS: dict[str, GroupSpec] = {
     spec.key: spec
     for spec in (
+        # Pedem ação agora (entram no número do topo).
         GroupSpec(
             "sla_breached",
             "SLA estourado",
             "critical",
-            "OS em aberto com prazo de SLA vencido.",
-            ListFilters(sla_breached=True),
+            "Abertas nos últimos 30 dias com prazo de SLA vencido.",
+            tier="now",
+            make_filters=_recent_filters(sla_breached=True),
         ),
         GroupSpec(
             "late_arrival",
             "Chegada atrasada",
             "high",
             "O prazo de chegada passou e o técnico ainda não chegou ao local.",
+            tier="now",
         ),
         GroupSpec(
             "today_not_started",
             "Visitas de hoje sem início",
             "high",
             "Agendadas para hoje, 30 min ou mais depois do horário e sem saída ou início.",
+            tier="now",
+            make_filters=_today_filters,
         ),
         GroupSpec(
-            "unassigned_soon",
-            "Sem técnico",
+            "field_stuck",
+            "Em campo há mais de 12 h",
             "high",
-            "Visita nas próximas 48 h ou aberta há mais de 24 h, e ninguém para atender.",
-            ListFilters(unassigned=True, open_only=True),
+            "A caminho ou em atendimento há mais de 12 h.",
+            tier="now",
+        ),
+        GroupSpec(
+            "due_soon",
+            "Prazo vence em 24 h",
+            "high",
+            "Prazo de solução nas próximas 24 h.",
+            tier="now",
+        ),
+        GroupSpec(
+            "unassigned_visit",
+            "Sem técnico com visita até amanhã",
+            "high",
+            "Visita hoje ou amanhã e ninguém para atender.",
+            tier="now",
+            make_filters=_unassigned_visit_filters,
+        ),
+        # Rotina: o que foi aberto nos últimos 30 dias (o resto fica na "Fila antiga").
+        GroupSpec(
+            "missed_visits",
+            "Visitas que passaram sem baixa",
+            "medium",
+            "Agendadas nos 7 dias anteriores e ainda sem início.",
+            make_filters=_missed_filters,
+        ),
+        GroupSpec(
+            "unassigned",
+            "Sem técnico",
+            "medium",
+            "Abertas nos últimos 30 dias, sem técnico.",
+            make_filters=_recent_filters(unassigned=True, open_only=True),
         ),
         GroupSpec(
             "unproductive_pending",
             "Improdutivas sem reagendar",
-            "high",
-            "A última visita foi improdutiva e a OS ainda não tem data nova.",
+            "medium",
+            "Improdutiva nos últimos 30 dias e ainda sem data nova.",
         ),
         GroupSpec(
             "no_schedule",
             "Sem agenda",
             "medium",
-            "Técnico definido, mas sem data de visita.",
+            "Abertas nos últimos 30 dias, com técnico e sem data de visita.",
         ),
         GroupSpec(
             "part_requests_open",
@@ -667,22 +728,22 @@ GROUPS: dict[str, GroupSpec] = {
         GroupSpec(
             "stale",
             "Paradas há 3 dias ou mais",
-            "medium",
-            "OS em aberto sem nenhuma atualização há 3 dias ou mais.",
+            "low",
+            "Abertas nos últimos 30 dias e sem nenhuma atualização há 3 dias ou mais.",
         ),
         GroupSpec(
             "no_owner",
             "Sem analista responsável",
             "medium",
-            "OS em aberto fora da fila de qualquer analista.",
-            ListFilters(no_owner=True, open_only=True),
+            "Abertas nos últimos 30 dias e fora da fila de qualquer analista.",
+            make_filters=_recent_filters(no_owner=True, open_only=True),
         ),
         GroupSpec(
             "violation_pending",
             "Justificar SLA",
             "low",
-            "OS concluídas com SLA violado e sem o motivo informado.",
-            ListFilters(violation_pending=True),
+            "Abertas nos últimos 30 dias, concluídas com SLA violado e sem o motivo informado.",
+            make_filters=_recent_filters(violation_pending=True),
         ),
         GroupSpec(
             "payouts_pending",
@@ -700,10 +761,6 @@ GROUPS: dict[str, GroupSpec] = {
         ),
     )
 }
-
-
-def _today_filters(m: Moment) -> ListFilters:
-    return ListFilters(scheduled_from=m.today, scheduled_to=m.today, status=list(NOT_STARTED))
 
 
 # --------------------------------------------------------------------------- contagens
