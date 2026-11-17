@@ -794,3 +794,37 @@ async def test_bulk_tags(client: AsyncClient, world: World) -> None:
     ]
     for bad in invalid:
         assert (await client.post(url, json=bad, headers=an)).status_code == 422, bad
+
+
+async def test_activity_list_filters_by_technician_who_acted(client: AsyncClient, world: World) -> None:
+    """Busca de OS antigas por técnico: entra quem é o responsável agora e quem já foi antes de
+    uma troca (o filtro do técnico atual continua só com o atual)."""
+    sup = world.supervisor.headers
+    tech, other = str(world.tech.user.id), str(world.tech_other.user.id)
+    t = await create(client, world, title="Trocou de técnico")
+    r = await client.post(
+        f"{API}/tickets/{t['id']}/assign",
+        json={"assignee_id": tech, "expected_version": t["version"]},
+        headers=sup,
+    )
+    assert r.status_code == 200, r.text
+    r = await client.post(
+        f"{API}/tickets/{t['id']}/assign",
+        json={"assignee_id": other, "expected_version": r.json()["version"]},
+        headers=sup,
+    )
+    assert r.status_code == 200, r.text
+    untouched = await create(client, world, title="Nunca foi do técnico")
+
+    async def ids(**params: str) -> set[str]:
+        r = await client.get(f"{API}/tickets", params=params, headers=sup)
+        assert r.status_code == 200, r.text
+        return {item["id"] for item in r.json()["items"]}
+
+    assert t["id"] in await ids(technician_id=tech)
+    assert t["id"] in await ids(technician_id=other)
+    assert untouched["id"] not in await ids(technician_id=tech)
+    assert t["id"] not in await ids(assignee_id=tech)
+    r = await client.get(f"{API}/tickets/export", params={"technician_id": tech}, headers=sup)
+    assert r.status_code == 200, r.text
+    assert "Trocou de técnico" in r.text
