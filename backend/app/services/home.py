@@ -1053,8 +1053,8 @@ TICKET_GROUPS: dict[str, TicketGroup] = {
         _field_stuck_reason,
         extra=lambda: [field_since().label("field_since")],
     ),
-    # Com o mesmo corte de 30 dias do "SLA estourado": a OS antiga que volta de uma pausa não entra no
-    # topo para sumir dele na hora em que o prazo estoura (ela fica só na "Fila antiga").
+    # Com o mesmo corte de 30 dias do "SLA estourado": a OS antiga que volta de uma pausa não
+    # entra no topo para sumir dele na hora em que o prazo estoura (fica só na "Fila antiga").
     "due_soon": TicketGroup(
         lambda m: and_(due_soon_clause(m), recent(m)),
         lambda m: [Ticket.resolution_due_at.asc()],
