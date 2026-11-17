@@ -885,6 +885,7 @@ async def test_quotes_box(
     cancelled = await add_ticket(db, world, title="OS cancelada", status=S.CANCELLED)
     sent, expired, draft = QuoteStatus.SENT, QuoteStatus.EXPIRED, QuoteStatus.DRAFT
     approved, rejected = QuoteStatus.APPROVED, QuoteStatus.REJECTED
+    gone = {"ticket_id": cancelled.id}
 
     def quote(title: str, total: str, status: QuoteStatus, **fields: object) -> Quote:
         value = Decimal(total)
@@ -898,29 +899,34 @@ async def test_quotes_box(
         def day(n: int) -> date:
             return today + timedelta(days=n)
 
-        def before(**delta: float) -> datetime:
-            return now - timedelta(**delta)
+        def before(days: float) -> datetime:
+            return now - timedelta(days=days)
 
-        gone = {"ticket_id": cancelled.id}
         return [
             # Aguardando a assinatura (o da OS cancelada também, como na lista).
             quote(
-                "Na validade", "100.25", sent, link_id="l1", valid_until=day(10), sent_at=before(days=1)
+                "Na validade", "100.25", sent, link_id="l1", valid_until=day(10), sent_at=before(1)
             ),
-            quote("Sem link", "200", sent, valid_until=day(5), sent_at=before(days=3)),
-            quote("Vence amanhã", "400", sent, link_id="l2", valid_until=day(1), sent_at=before(days=1)),
+            quote("Sem link", "200", sent, valid_until=day(5), sent_at=before(3)),
+            quote("Vence amanhã", "400", sent, link_id="l2", valid_until=day(1), sent_at=before(1)),
             quote(
                 "Vence hoje, cobrado agora",
                 "500",
                 sent,
                 link_id="l3",
                 valid_until=day(0),
-                sent_at=before(days=5),
+                sent_at=before(5),
                 last_reminded_at=now,
                 reminder_count=1,
             ),
             quote(
-                "Da OS cancelada", "600", sent, link_id="l4", valid_until=day(10), sent_at=before(days=3), **gone
+                "Da OS cancelada",
+                "600",
+                sent,
+                link_id="l4",
+                valid_until=day(10),
+                sent_at=before(3),
+                **gone,
             ),
             # Vencidos pela criação nos 90 dias: o enviado com a validade passada também conta.
             quote(
@@ -929,27 +935,36 @@ async def test_quotes_box(
                 sent,
                 link_id="l5",
                 valid_until=day(-2),
-                sent_at=before(days=9),
-                created_at=before(days=10),
+                sent_at=before(9),
+                created_at=before(10),
             ),
-            quote("Vencido há 8 dias", "2000", expired, valid_until=day(-8), created_at=before(days=10)),
+            quote("Vencido há 8 dias", "2000", expired, valid_until=day(-8), created_at=before(10)),
             quote(
-                "Vencido da OS cancelada", "8000", expired, valid_until=day(-3), created_at=before(days=5), **gone
+                "Vencido da OS cancelada",
+                "8000",
+                expired,
+                valid_until=day(-3),
+                created_at=before(5),
+                **gone,
             ),
-            quote("Criado há 100 dias", "4000", expired, valid_until=day(-95), created_at=before(days=100)),
+            quote(
+                "Criado há 100 dias", "4000", expired, valid_until=day(-95), created_at=before(100)
+            ),
             # Rascunhos: o nunca enviado e o editado depois do envio (em revisão).
             quote("Rascunho", "10", draft),
-            quote("Em revisão", "20", draft, sent_at=before(days=3), updated_at=before(days=2)),
+            quote("Em revisão", "20", draft, sent_at=before(3), updated_at=before(2)),
         ]
 
     db.add_all(
         [
             *listed(NOW, TODAY),
             # Link antigo (só o hash) e sem validade: aguardando, e o cliente tem como assinar.
-            quote("Link antigo, sem validade", "300", sent, token_hash="f" * 64, sent_at=ago(days=1)),
+            quote(
+                "Link antigo, sem validade", "300", sent, token_hash="f" * 64, sent_at=ago(days=1)
+            ),
             # Respondidos. O de 31/10 às 23h30 em São Paulo (já 01/11 em UTC) é do mês passado.
             quote("Aprovado", "50", approved, decided_at=ago(days=2)),
-            quote("Aprovado da OS cancelada", "60", approved, decided_at=ago(days=2), ticket_id=cancelled.id),
+            quote("Aprovado da OS cancelada", "60", approved, decided_at=ago(days=2), **gone),
             quote("Aprovado em 31/10", "70", approved, decided_at=at(date(2026, 10, 31), 23, 30)),
             quote("Aprovado há 60 dias", "80", approved, decided_at=ago(days=60)),
             quote("Aprovado há 100 dias", "90", approved, decided_at=ago(days=100)),
