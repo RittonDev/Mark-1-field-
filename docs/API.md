@@ -628,8 +628,9 @@ colaboradores.
     inexistente: 404.
 - **Sugestões da OS** (`GET /tickets/{id}/technician-suggestions` e `GET /technicians/suggest`): usam o
   mesmo cálculo (distância pelo histórico/endereço/ao vivo, visitas a esta mesma loja e a base na
-  cidade), somado a agenda livre, skill, equipe do projeto e carga. Só técnicos **ativos**. O formato não
-  mudou; `home_city`/`home_state` passam a trazer a região efetiva (a base, senão o endereço).
+  cidade), somado a agenda livre, skill, equipe do projeto e carga. Só técnicos **ativos**.
+  `home_city`/`home_state` trazem a região efetiva (a base, senão o endereço). Os favoritos da cidade da loja
+  ganham pontos e vaga garantida (ver "Técnicos favoritos por cidade").
 - **Coordenadas de loja inválidas** (`app/services/geo.py`): não valem para distância nem mapa o
   `(0, 0)`, o centro do Brasil (`-14,2350, -51,9253`, ponto padrão do geocodificador quando o endereço
   não foi achado) e qualquer ponto repetido em lojas de **2 ou mais UFs** (lojas do mesmo shopping, na
@@ -641,6 +642,64 @@ colaboradores.
   há lojas com coordenadas em {Cidade}-{UF} para calcular a distância").
 - O mapa ao vivo, o ETA/link do mapa dos textos do WhatsApp e as sugestões da OS também ignoram
   coordenada inválida.
+
+## Técnicos favoritos por cidade
+
+Até 3 técnicos por cidade pela regra automática, mais os que a central fixar. Só as decisões manuais ficam no banco
+(`technician_favorites`); a regra é calculada na hora (cerca de 50 ms no banco real).
+
+**Regra automática** (`app/services/technician_favorites.py`):
+- Cidade = a da **loja** da OS, com a UF: `(UF em maiúsculas, cidade sem acento)`, a mesma chave das cidades
+  padronizadas. Loja sem UF ou sem cidade fica fora. "SANTOS" e "Santos" são a mesma cidade; Bom Jesus-PI e
+  Bom Jesus-RS, não.
+- Atendimento = o mesmo de "Base em X (N OS)": responsável ou outro técnico da visita numa OS não cancelada que teve
+  chegada ou foi concluída, ou quem apontou trabalho. Conta 1 por técnico e OS.
+- Janela de 365 dias, mínimo de 2 OS, até 3 por cidade.
+- Ordem: mais OS; no empate, quem tem acesso ao app (`is_active`), depois a visita mais recente, depois o nome.
+- Os inativos (sem acesso ao app) entram na regra e aparecem na lista, mas nunca nas sugestões da OS.
+
+**Decisões da central** (analista, supervisor e admin):
+- Fixado: favorito mesmo sem OS ou fora do top 3. Até 10 por cidade, com nota opcional (até 300 caracteres; espaços
+  das pontas saem e vazio vira `null`). Fixar não muda os automáticos.
+- Tirado: sai da regra daquela cidade e o próximo sobe. Vale até alguém desfazer.
+- Favorito efetivo = fixado ou automático. Ordem: os fixados (mais OS, depois o nome), depois os automáticos pelo
+  ranking.
+- `set_by`/`set_at`: quem gravou a decisão por último e quando. Desfazer apaga a decisão e só deixa o registro no log.
+  Técnico apagado leva as decisões junto.
+
+**Rotas** (técnico e solicitante recebem 403):
+- `GET /technicians/favorites?state=&technician_id=` → `FavoritesOut {window_days, min_visits, top, max_pinned,
+  cities: [FavoriteCity]}`.
+  - Todas as cidades com loja, também as sem favorito. Ordem: OS na janela, depois UF, depois cidade.
+  - `technician_id`: só as cidades em que ele é favorito ou foi tirado.
+- `FavoriteCity {state, city, key, stores, visits, favorites: [FavoriteTechnician], hidden_count, others_count}`:
+  - `city` é a grafia mais usada nas lojas; `stores` conta as lojas ativas;
+  - `visits` = OS distintas atendidas nas lojas da cidade na janela (uma OS com 2 técnicos conta 1);
+  - `others_count` = quantos mais atenderam na janela sem ser favoritos nem tirados.
+- `FavoriteTechnician {id, name, email, phone, avatar_url, is_active, on_shift, open_tickets, base_city, base_state,
+  visits, last_visit_at, rank, automatic, pinned, hidden, note, set_by: Ref | null, set_at}`. `visits` e
+  `last_visit_at` são da cidade, na janela; `rank` é a posição no ranking da cidade (`null` sem OS na janela).
+- `GET /technicians/favorites/city?location_id=` ou `?state=SP&city=Santos` → `FavoriteCityDetail` =
+  `FavoriteCity` + `hidden: [FavoriteTechnician]` + `others` (até 10, pelo ranking).
+- `PUT /technicians/favorites/{technician_id}` `{state, city, favorite: true, note?}` → `FavoriteCityDetail`.
+  - `favorite=true`: fixa o técnico; um tirado vira fixado. A nota do corpo substitui a gravada.
+  - `favorite=false`: se ele está tirado, só troca a nota; se é automático agora, tira da lista com a nota; senão,
+    apaga a decisão.
+- `DELETE /technicians/favorites/{technician_id}?state=&city=` → `FavoriteCityDetail`. Volta a valer só a regra;
+  sem decisão gravada, responde 200 do mesmo jeito.
+- Erros:
+  - 404: "Técnico não encontrado" (não existe ou não é técnico), "Loja não encontrada", "Nenhuma loja em
+    Santos-SP";
+  - 422: "UF inválida", "Até 10 técnicos fixados por cidade", "A loja não tem cidade e UF", "Informe a loja ou a
+    cidade com a UF" e nota com mais de 300 caracteres.
+
+**Nas sugestões da OS** (`GET /tickets/{id}/technician-suggestions` e `GET /technicians/suggest`):
+- `TechnicianSuggestion` ganhou `favorite: "auto" | "manual" | null` (manual = fixado) e `favorite_note`.
+- O favorito ativo da cidade da loja ganha +25 pontos e o primeiro motivo "Favorito em Santos-SP".
+- Vaga garantida: os favoritos entram sempre entre os `limit` (se forem mais, os de mais pontos); as outras vagas
+  seguem o ranking. Sem UF no alvo, não há favoritos.
+- `GET /technicians/suggest` aceita `exclude_ticket_id`: no editor de uma OS aberta, a própria OS não deixa o técnico
+  "Ocupado no horário" nem conta na carga do dia.
 
 ## Fichas completas (técnico, cliente e loja)
 
@@ -761,3 +820,58 @@ computador" no portal: vira app com ícone na área de trabalho e no menu Inicia
 - `GET /me/earnings?month=AAAA-MM` (técnico) → os chamados dele, o resumo e os reembolsos (custos extras
   aprovados a receber e pagos no mês).
 - Mudar o valor ou pagar marca a OS como alterada (`updated_at`), para o app do técnico baixar de novo.
+
+## Orçamentos: cobrança, aberturas e preço do cliente (2026-11-17)
+
+**Campos novos** em `QuoteOut`, `QuoteSent` e `QuoteListRow` (sempre presentes no JSON):
+- `client_views`, `client_first_viewed_at`, `client_last_viewed_at`: aberturas do link pelo cliente.
+- `reminder_count`, `last_reminded_at`, `last_reminded_by: Ref | null`: cobranças registradas pelo "Cobrar".
+- `follow_up`: `not_opened` | `no_answer` | `expiring` | `in_review` | `expired` | `null` (por que está na fila
+  "Para cobrar").
+- `legacy_code` (código do Field Control), `legacy_description` (só quando difere do título) e
+  `legacy_attachments: [{url, title, type}]`. Nada disso vai para o `PublicQuote`.
+- `QuoteListRow.customer_id`.
+
+**Fila "Para cobrar".** A mesma regra vale para a lista, o campo `follow_up` e o Início. Contato = a última cobrança
+ou, sem ela, o envio. Orçamento de OS cancelada nunca entra. Motivos, nesta ordem:
+1. `expired`: vencido (situação vencido, ou enviado com a validade passada) há até 7 dias;
+2. `expiring`: enviado, vence hoje ou amanhã e ainda sem contato hoje;
+3. `not_opened`: enviado há até 30 dias, sem contato há 48 h, com link e nenhuma abertura;
+4. `no_answer`: como o anterior, mas já aberto (ou sem link);
+5. `in_review`: voltou a rascunho depois de enviado e está parado há 24 h.
+
+**Rotas.**
+- `GET /quotes?follow_up=true[&q=&customer_id=&start=&end=&limit=]` → `QuoteListRow[]` só da fila. Ordem: validade
+  (sem validade no fim), depois o contato mais antigo. `X-Total-Count` = tamanho da fila. Sem `follow_up`, a lista
+  funciona como antes.
+- `GET /quotes?q=` também acha o orçamento pelo código do Field Control, sem diferença de maiúsculas.
+- `POST /quotes/{id}/remind` (analista, supervisor e admin) → `QuoteOut` com `reminder_count + 1`,
+  `last_reminded_at`, `last_reminded_by` e `follow_up: null`.
+  - Grava na OS o evento interno `quote_reminded` (`to_value` "ORC-000123", `data {quote_id, count, total}`); o
+    solicitante não vê.
+  - 422: "Só orçamento aguardando o cliente pode ser cobrado", "O orçamento venceu: renove a validade antes de
+    cobrar", "Gere o link antes de cobrar", "A OS foi cancelada: reabra a OS antes de mexer no orçamento".
+  - 403 para técnico e solicitante; 404 "Orçamento não encontrado".
+- `GET /quote-items` → `CatalogItemOut` com `uses_12m` (orçamentos não cancelados criados nos últimos 365 dias com o
+  item) e `last_used_at`. `POST` e `PUT` devolvem `uses_12m = 0`.
+- `GET /quote-items/last-prices?customer_id=` (gestão; 422 sem `customer_id`) →
+  `[{catalog_item_id, unit_price, quote_id, quote_code, decided_at}]`: o preço mais recente de cada item do catálogo
+  em orçamentos aprovados de OS do cliente.
+
+**Aberturas.** `GET /public/quotes/{token}[?preview=1]`, com `Authorization` opcional, devolve o mesmo
+`PublicQuote` de antes.
+- Conta uma abertura sem sessão válida (ou com sessão de solicitante) e sem `preview=1`. A equipe com sessão e a
+  prévia não contam.
+- Aberturas repetidas em 10 min contam uma vez. Contar não muda o `updated_at` do orçamento.
+- `GET /public/reports/{token}?preview=1` também não conta visita no relatório.
+
+**Início e relatórios.**
+- Grupo de atenção `quotes_waiting`: "Orçamentos para cobrar", link `/orcamentos?cobrar=1`, `count` = tamanho da
+  fila e o motivo em cada item (ex.: "ORC-000123 (R$ 300,00) enviado há 3 dias, não aberto").
+- Orçamentos aguardando e aprovados de OS cancelada saem do Financeiro do Início, do relatório mensal e dos projetos.
+  A lista de orçamentos continua mostrando o aprovado.
+
+**Outros.**
+- O evento WS `quote.decided` ganha `total`.
+- Cancelar um orçamento devolve os pedidos de peça ligados a ele (abertos ou orçados) para `open`, sem `quote_id`,
+  com o evento `part_request_updated`.
