@@ -175,7 +175,11 @@ async def test_home_attention_groups(
     )
     # Chegada atrasada (e os que não contam: já chegou; prazo ainda não venceu).
     late = await add_ticket(
-        db, world, title="A caminho", status=S.EN_ROUTE, arrival_due_at=NOW - timedelta(minutes=40)
+        db,
+        world,
+        title="A caminho",
+        status=S.EN_ROUTE,
+        arrival_due_at=NOW - timedelta(minutes=40),
     )
     await add_ticket(
         db,
@@ -208,7 +212,11 @@ async def test_home_attention_groups(
         scheduled_start=NOW + timedelta(hours=20),
     )
     await add_ticket(
-        db, world, title="Sem técnico com folga", assignee_id=None, created_at=NOW - timedelta(hours=2)
+        db,
+        world,
+        title="Sem técnico com folga",
+        assignee_id=None,
+        created_at=NOW - timedelta(hours=2),
     )
     # Improdutiva sem nova data (a reagendada não conta).
     unproductive = await add_ticket(
@@ -274,7 +282,9 @@ async def test_home_attention_groups(
         resolution_due_at=NOW - timedelta(days=1),
         resolved_at=NOW - timedelta(days=2),
     )
-    await add_ticket(db, world, title="Resolvida hoje", status=S.RESOLVED, resolved_at=NOW - timedelta(hours=1))
+    await add_ticket(
+        db, world, title="Resolvida hoje", status=S.RESOLVED, resolved_at=NOW - timedelta(hours=1)
+    )
     # Pagamento do técnico pendente há 10 dias (3 dias e pago não contam).
     paid_late = await add_ticket(
         db, world, title="Paga atrasado", status=S.CLOSED, resolved_at=NOW - timedelta(days=10)
@@ -380,10 +390,22 @@ async def test_home_attention_groups(
     order = [(grp["severity"], grp["count"]) for grp in data["attention"]]
     rank = {"critical": 0, "high": 1, "medium": 2, "low": 3}
     assert order == sorted(order, key=lambda o: (rank[o[0]], -o[1]))
-    assert data["attention"][0]["key"] == "sla_breached"
-    assert [grp["key"] for grp in data["attention"][1:3]] == ["unassigned_soon", "late_arrival"] or [
-        grp["key"] for grp in data["attention"][1:2]
-    ] == ["unassigned_soon"]
+    assert [grp["key"] for grp in data["attention"]] == [
+        "sla_breached",
+        "unassigned_soon",
+        "late_arrival",
+        "today_not_started",
+        "unproductive_pending",
+        "no_owner",
+        "no_schedule",
+        "stale",
+        "portal_requests",
+        "part_requests_open",
+        "costs_pending",
+        "violation_pending",
+        "payouts_pending",
+        "quotes_waiting",
+    ]
 
     def ids(key: str) -> list[str]:
         return [item["ticket_id"] for item in g[key]["items"]]
@@ -518,17 +540,20 @@ async def test_home_suggestions(
     where = {"customer_id": customer.id, "location_id": store.id}
     # Loja com 3 OS em 30 dias (reincidência) e o cliente com mais OS em aberto.
     for n in range(3):
-        await add_ticket(db, world, title=f"Reincidente {n}", created_at=NOW - timedelta(days=n + 1), **where)
+        await add_ticket(
+            db, world, title=f"Reincidente {n}", created_at=NOW - timedelta(days=n + 1), **where
+        )
     # Duas OS de amanhã sem técnico.
     for hour in (9, 14):
         await add_ticket(db, world, assignee_id=None, scheduled_start=at(tomorrow, hour))
-    # O técnico chegou atrasado duas vezes no mês.
+    # O técnico chegou atrasado duas vezes no mês (OS abertas antes: não pesam na reincidência).
     for days in (3, 10):
         due = NOW - timedelta(days=days)
         await add_ticket(
             db,
             world,
             status=S.CLOSED,
+            created_at=NOW - timedelta(days=45),
             arrival_due_at=due,
             arrived_at=due + timedelta(minutes=45),
             resolved_at=due + timedelta(hours=2),
@@ -564,8 +589,9 @@ async def test_home_suggestions(
         "unassigned": True,
         "open_only": True,
     }
-    assert found["late_technician"]["title"] == "Tecnico chegou atrasado em 2 OS nos últimos 30 dias"
-    assert found["late_technician"]["filters"]["assignee_id"] == str(world.tech.user.id)
+    late = found["late_technician"]
+    assert late["title"] == "Tecnico chegou atrasado em 2 OS nos últimos 30 dias"
+    assert late["filters"]["assignee_id"] == str(world.tech.user.id)
     assert found["recurrence"]["title"] == (
         "Ótica Imaginária Centro teve 3 OS em 30 dias: vale uma visita preventiva"
     )
@@ -668,7 +694,8 @@ def test_periods(q: str, created: tuple | None, scheduled: tuple | None) -> None
     # A palavra que diz o campo não vira status nem texto.
     assert not p.status and not p.flags
     assert [w.text for w in p.content()] == []
-    assert [c.kind for _, c in p.chips] == ["period"] * ((created is not None) + (scheduled is not None))
+    expected = (created is not None) + (scheduled is not None)
+    assert [c.kind for _, c in p.chips] == ["period"] * expected
 
 
 def test_period_labels_and_odd_dates() -> None:
@@ -750,13 +777,14 @@ def test_odd_input_never_breaks_the_reader() -> None:
 
 
 def test_name_matching_rules() -> None:
-    words = smart_search.name_words("O Boticário Fictício")
-    assert words == ("boticario", "ficticio")
-    assert smart_search.score(["boticario"], words) == 2
-    assert smart_search.score(["boticario", "ficticio"], words) == 3
-    assert smart_search.score(["botic"], words) == 1
-    assert smart_search.score(["bo"], words) == 0
-    assert smart_search.close("relicaro", "relicario") and smart_search.close("relciario", "relicario")
+    words = smart_search.name_words("O Relicário Fictício")
+    assert words == ("relicario", "ficticio")
+    assert smart_search.score(["relicario"], words) == 2
+    assert smart_search.score(["ficticio", "relicario"], words) == 3
+    assert smart_search.score(["relic"], words) == 1
+    assert smart_search.score(["re"], words) == 0
+    assert smart_search.close("relicaro", "relicario")
+    assert smart_search.close("relciario", "relicario")
     assert not smart_search.close("relio", "relicario")
     assert smart_search.accent_regex("acao") == "[aáàâãäAÁÀÂÃÄ][cçCÇ][aáàâãäAÁÀÂÃÄ][oóòôõöOÓÒÔÕÖ]"
 
@@ -784,7 +812,9 @@ def tag(name: str) -> dict[str, str]:
 
 async def build(db: AsyncSession, world: World) -> Data:
     """Dois clientes inventados com lojas, quatro técnicos (um inativo) e OS de vários anos."""
-    relicario = Customer(name="O Relicário Fictício", document=cnpj_with_check_digits("112223330001"))
+    relicario = Customer(
+        name="O Relicário Fictício", document=cnpj_with_check_digits("112223330001")
+    )
     padaria = Customer(
         name="Padaria Estrela Imaginária", document=cnpj_with_check_digits("12ABC34501DE")
     )
@@ -800,7 +830,9 @@ async def build(db: AsyncSession, world: World) -> Data:
     centro = Location(
         customer_id=relicario.id, name="Relicário Centro Velho", code="0042", city="São Paulo"
     )
-    estrela = Location(customer_id=padaria.id, name="Estrela Matriz", code="77", city="Ribeirão Preto")
+    estrela = Location(
+        customer_id=padaria.id, name="Estrela Matriz", code="77", city="Ribeirão Preto"
+    )
     db.add_all([aurora, centro, estrela])
     joao = await add_user(db, "João Arcanjo Teste", UserRole.TECHNICIAN)
     joao_old = await add_user(db, "João Velho Teste", UserRole.TECHNICIAN, active=False)
@@ -881,10 +913,18 @@ async def build(db: AsyncSession, world: World) -> Data:
         tags=[tag("Projeto"), tag("Teste do layout"), tag("Pendente Envio PGTO")],
     )
     t["espera"] = await add_ticket(
-        db, world, title="Aguardando peça", status=S.ON_HOLD_VENDOR, created_at=at(date(2026, 11, 5), 9)
+        db,
+        world,
+        title="Aguardando peça",
+        status=S.ON_HOLD_VENDOR,
+        created_at=at(date(2026, 11, 5), 9),
     )
     t["cancelada"] = await add_ticket(
-        db, world, title="Cancelada pelo cliente", status=S.CANCELLED, created_at=at(date(2026, 10, 20), 9)
+        db,
+        world,
+        title="Cancelada pelo cliente",
+        status=S.CANCELLED,
+        created_at=at(date(2026, 10, 20), 9),
     )
     t["semana_que_vem"] = await add_ticket(
         db,
@@ -898,7 +938,11 @@ async def build(db: AsyncSession, world: World) -> Data:
     )
     # Técnico que atuou: já foi responsável (atribuição feita aqui, guarda o id)...
     t["passou_por_joao_velho"] = await add_ticket(
-        db, world, title="Troca de técnico", assignee_id=marina.id, created_at=at(date(2025, 6, 2), 9)
+        db,
+        world,
+        title="Troca de técnico",
+        assignee_id=marina.id,
+        created_at=at(date(2025, 6, 2), 9),
     )
     # ... atribuição importada do Field Control (guarda o nome)...
     t["importada"] = await add_ticket(
@@ -909,13 +953,23 @@ async def build(db: AsyncSession, world: World) -> Data:
         assignee_id=None,
         created_at=at(date(2023, 5, 5), 9),
         resolved_at=at(date(2023, 5, 6), 9),
+        tags=[tag("Ticket Contratual")],
     )
     # ... outro técnico da visita agora, e um que já foi outro técnico da visita.
     t["ajudante"] = await add_ticket(
-        db, world, title="Visita em dupla", assignee_id=marina.id, created_at=at(date(2026, 9, 1), 9)
+        db,
+        world,
+        title="Visita em dupla",
+        assignee_id=marina.id,
+        created_at=at(date(2026, 9, 1), 9),
     )
     t["ex_ajudante"] = await add_ticket(
-        db, world, title="Dupla antiga", assignee_id=marina.id, created_at=at(date(2025, 2, 1), 9)
+        db,
+        world,
+        title="Dupla antiga",
+        assignee_id=marina.id,
+        created_at=at(date(2025, 2, 1), 9),
+        tags=[tag("Ticket Contratual")],
     )
     db.add_all(
         [
@@ -1023,7 +1077,8 @@ async def test_search_empty_and_odd_input(client: AsyncClient, world: World, dat
 async def test_search_by_number(client: AsyncClient, world: World, data: Data) -> None:
     target = data.t["nobreak"]
     code = f"OS-{target.number:06d}"
-    for q in (str(target.number), f"OS {target.number}", f"os-{target.number:06d}", f"#{target.number}"):
+    n = target.number
+    for q in (str(n), f"OS {n}", f"os-{n:06d}", f"#{n}", f"OS-{n:06d}"):
         r = await search(client, world, q)
         assert r["filters"] == {"number": target.number}, q
         assert r["total"] == 1 and r["tickets"][0]["id"] == str(target.id)
@@ -1058,7 +1113,8 @@ async def test_search_by_document(client: AsyncClient, world: World, data: Data)
         assert chips(r) == [("customer", "O Relicário Fictício")]
         assert r["customers"][0]["document"] == doc
     alnum = data.padaria.document
-    r = await search(client, world, f"{alnum[:2]}.{alnum[2:5]}.{alnum[5:8]}/{alnum[8:12]}-{alnum[12:]}".lower())
+    pretty = f"{alnum[:2]}.{alnum[2:5]}.{alnum[5:8]}/{alnum[8:12]}-{alnum[12:]}".lower()
+    r = await search(client, world, pretty)
     assert r["filters"] == {"customer_id": str(data.padaria.id)}
     branch = await search(client, world, data.aurora.document)
     assert branch["filters"] == {"location_id": str(data.aurora.id)}
@@ -1089,9 +1145,8 @@ async def test_search_by_status(client: AsyncClient, world: World, data: Data) -
     # "Sem agenda" e "improdutivas" a lista ainda não filtra: o total já vem certo.
     no_date = await search(client, world, "sem agenda")
     assert no_date["filters"] == {"open_only": True}
-    assert titles(no_date) == {"Troca de nobreak", "Organizar rack", "Aguardando peça"} - {
-        "Aguardando peça"
-    } | ({"Aguardando peça"} if data.t["espera"].scheduled_start is None else set())
+    assert titles(no_date) == {"Troca de nobreak", "Organizar rack"}
+    assert no_date["total"] == 2
     unproductive = await search(client, world, "improdutivas")
     assert unproductive["total"] == 1 and titles(unproductive) == {"Organizar rack"}
     scheduled = await search(client, world, "agendadas", limit=20)
@@ -1222,15 +1277,16 @@ async def test_search_by_tag(client: AsyncClient, world: World, data: Data) -> N
         "Implantação antiga",
     }
     assert (await search(client, world, "avulso"))["filters"] == {"tag": ["Ticket Avulso"]}
-    assert (await search(client, world, "avulsas abertas"))["filters"] == {
-        "tag": ["Ticket Avulso"],
-        "open_only": True,
-    } or True
+    loose = await search(client, world, "avulso abertas")
+    assert loose["filters"] == {"tag": ["Ticket Avulso"], "open_only": True}
+    assert titles(loose) == {"Impressão falhando no caixa", "Troca de nobreak", "Organizar rack"}
     assert (await search(client, world, "custo extra"))["filters"] == {"tag": ["Custo Extra"]}
     assert (await search(client, world, "projeto"))["filters"] == {"tag": ["Projeto"]}
-    assert (await search(client, world, "contratual"))["filters"] == {"tag": ["Ticket Contratual"]}
-    # Etiqueta rara não é escolhida por uma palavra solta (só pela frase inteira).
-    assert (await search(client, world, "teste"))["filters"] != {"tag": ["Teste do layout"]}
+    contract = await search(client, world, "contratual")
+    assert contract["filters"] == {"tag": ["Ticket Contratual"]} and contract["total"] == 3
+    # Etiqueta rara não é escolhida por uma palavra solta (só pela frase inteira); "teste" também
+    # é sobrenome de técnico, que sozinho não escolhe ninguém: vira texto.
+    assert (await search(client, world, "teste"))["filters"] == {"q": "teste"}
     assert (await search(client, world, "teste do layout"))["filters"] == {
         "tag": ["Teste do layout"]
     }
