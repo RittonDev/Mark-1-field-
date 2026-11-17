@@ -257,6 +257,8 @@ function NewTicket() {
   const [offerPrefill, setOfferPrefill] = useState(restored && hasPrefill);
   const [pendingLocationId, setPendingLocationId] = useState(restored ? "" : prefill.locationId);
   const [pendingTypeId, setPendingTypeId] = useState(restored ? "" : prefill.serviceTypeId);
+  // Cliente recém-escolhido (ou vindo pela URL sem a loja): se tiver uma localização ativa só, ela entra.
+  const [onlyFor, setOnlyFor] = useState(restored || prefill.locationId ? "" : prefill.customerId);
   const [created, setCreated] = useState<CreatedResult | null>(null);
   // A API barrou por conflito de agenda: o próximo envio confirma (até mudar técnico ou horário).
   const [conflicts, setConflicts] = useState<ConflictItem[] | null>(null);
@@ -329,6 +331,22 @@ function NewTicket() {
     setPendingTypeId("");
     const type = serviceTypes.data.find((t) => t.id === pendingTypeId);
     if (type) setD((x) => (x.serviceType ? x : withServiceType(x, type, templates.data)));
+  }
+
+  // Cliente com uma localização ativa só: ela entra sozinha e o passo 2 já fica pronto.
+  const onlyLocation = useQuery({
+    queryKey: ["locations", "only", onlyFor],
+    queryFn: () => api.get<Page<Location>>("/locations", { customer_id: onlyFor, active: true, page: 1, page_size: 2 }),
+    enabled: Boolean(onlyFor),
+    staleTime: 30_000,
+  });
+  if (onlyFor && (onlyLocation.data || onlyLocation.error)) {
+    setOnlyFor("");
+    const only = onlyLocation.data?.total === 1 ? onlyLocation.data.items[0] : null;
+    if (only && d.form.customer_id === only.customer_id && !d.form.location_id) {
+      setD((x) => (x.form.customer_id === only.customer_id && !x.form.location_id ? withLocation(x, only, projects.data) : x));
+      setAutoLocationId(only.id);
+    }
   }
 
   // Cliente e localização: etiquetas, avaliação, histórico, contato e prazo de chegada.
@@ -535,28 +553,10 @@ function NewTicket() {
     writeStored("local", MORE_KEY, open);
   };
 
-  /** Cliente com uma localização ativa só: ela entra sozinha (o passo 2 já fica pronto). */
-  async function pickOnlyLocation(customerId: string) {
-    if (!customerId) return;
-    try {
-      const page = await queryClient.fetchQuery({
-        queryKey: ["locations", "only", customerId],
-        queryFn: () => api.get<Page<Location>>("/locations", { customer_id: customerId, active: true, page: 1, page_size: 2 }),
-        staleTime: 30_000,
-      });
-      const only = page.total === 1 ? page.items[0] : null;
-      if (!only) return;
-      setD((x) => (x.form.customer_id === customerId && !x.form.location_id ? withLocation(x, only, projects.data) : x));
-      setAutoLocationId(only.id);
-    } catch {
-      // Sem a consulta, o analista escolhe a localização na busca.
-    }
-  }
-
   const onCustomer = (customerId: string) => {
     setConflicts(null);
     update((x) => withCustomer(x, customerId, projects.data));
-    void pickOnlyLocation(customerId);
+    if (customerId) setOnlyFor(customerId);
   };
   const onLocation = (loc: Location | null) => {
     setConflicts(null);
@@ -667,7 +667,7 @@ function NewTicket() {
     if (next.form.location_id) return;
     if (parsed.cnpj) void findStore(parsed.cnpj, parsed.storeHint);
     else if (parsed.storeHint) setStoreHint((h) => ({ text: parsed.storeHint ?? "", n: (h?.n ?? 0) + 1 }));
-    else if (named) void pickOnlyLocation(named.id);
+    else if (named) setOnlyFor(named.id);
   }
 
   /** CNPJ da mensagem: uma loja só com ele já entra na OS; senão, a busca abre com a pista. */
@@ -791,6 +791,9 @@ function NewTicket() {
     setRestoredAt(null);
     setOfferPrefill(false);
     setAutoLocationId(null);
+    setPendingLocationId("");
+    setPendingTypeId("");
+    setOnlyFor("");
     create.reset();
     window.scrollTo({ top: 0 });
   }
@@ -800,6 +803,7 @@ function NewTicket() {
     reset(blankDraft(f.source, { location: null, customerId: prefill.customerId }));
     setPendingLocationId(prefill.locationId);
     setPendingTypeId(prefill.serviceTypeId);
+    setOnlyFor(prefill.locationId ? "" : prefill.customerId);
   }
 
   async function cancel() {
@@ -884,7 +888,7 @@ function NewTicket() {
 
   const tagsHint = (
     <>
-      {d.tagsAuto ? (tagMode === "project" ? "Padrão para OS de projeto." : "Padrão da abertura: atendimento avulso com o pagamento do técnico a enviar.") : "Ajustadas nesta OS."}
+      {d.tagsAuto ? `Padrão para ${tagMode === "project" ? "OS de projeto" : "OS nova"}: tire ou inclua o que precisar.` : "Ajustadas nesta OS."}
       {payoutTags.length
         ? ` ${quoteList(payoutTags.map((t) => t.name))} ${payoutTags.length === 1 ? "sai sozinha" : "saem sozinhas"} quando o técnico for pago.`
         : null}

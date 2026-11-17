@@ -124,7 +124,7 @@ export function BulkTagsDialog({ mode, tickets, onClose }: { mode: BulkTagMode; 
           <Button onClick={onClose} disabled={save.isPending}>
             Cancelar
           </Button>
-          <Button variant="primary" onClick={() => save.mutate()} loading={save.isPending} disabled={names.length === 0}>
+          <Button variant="primary" onClick={() => save.mutate()} loading={save.isPending} disabled={names.length === 0 || tickets.length === 0}>
             {adding ? "Adicionar" : "Remover"}
           </Button>
         </>
