@@ -145,11 +145,42 @@ export function TagRulesCard({ readOnly = false }: { readOnly?: boolean }) {
   );
 }
 
-function RulesForm({ initial, readOnly }: { initial: TicketTagRules; readOnly: boolean }) {
+/**
+ * O formulário fica montado enquanto a tela estiver aberta (salvar não o recria nem tira o foco do
+ * botão). `server`: as regras como estão na API agora (a última leitura ou o que este formulário salvou).
+ */
+function RulesForm({ server, readOnly }: { server: TicketTagRules; readOnly: boolean }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const formRef = useRef<HTMLFormElement>(null);
-  const [draft, setDraft] = useState(initial);
+  // `baseline`: a versão salva em que a tela se baseia; `draft`: o que está na tela.
+  const [baseline, setBaseline] = useState(server);
+  const [draft, setDraft] = useState(server);
+  // Última versão da API já tratada aqui e a que este formulário acabou de salvar (para reconhecer a volta dela).
+  const serverPrint = fingerprint(server);
+  const [seen, setSeen] = useState(serverPrint);
+  const [ownSave, setOwnSave] = useState<string | null>(null);
+  const dirty = fingerprint(draft) !== fingerprint(baseline);
+  if (serverPrint !== seen) {
+    setSeen(serverPrint);
+    if (serverPrint === ownSave || serverPrint === fingerprint(draft)) {
+      // Voltou o que este formulário salvou (ou a mesma coisa que está na tela): vira a base. O que foi
+      // mexido durante o envio continua como alteração por salvar.
+      setBaseline(server);
+      setOwnSave(null);
+    } else if (!dirty) {
+      // Outra pessoa salvou e aqui nada foi mexido: a tela passa para a versão nova.
+      setBaseline(server);
+      setDraft(server);
+    }
+    // Com alteração por salvar, o rascunho fica como está; o aviso abaixo oferece ver a versão nova.
+  } else if (!dirty && serverPrint !== fingerprint(baseline)) {
+    // Depois do aviso, as alterações foram desfeitas à mão: a tela passa para a versão nova.
+    setBaseline(server);
+    setDraft(server);
+  }
+  // Outra pessoa salvou outras regras enquanto esta tela tinha alterações por salvar.
+  const outdated = dirty && serverPrint !== fingerprint(baseline);
   // Descartar ou restaurar o padrão recria as listas (some o texto digitado e o erro de cada uma).
   const [round, setRound] = useState(0);
   // Aviso para o leitor de tela (etiqueta incluída ou tirada, erro ao incluir).
@@ -163,7 +194,6 @@ function RulesForm({ initial, readOnly }: { initial: TicketTagRules; readOnly: b
     enabled: !readOnly,
   });
 
-  const dirty = fingerprint(draft) !== fingerprint(initial);
   const isDefault = fingerprint(draft) === DEFAULT_FINGERPRINT;
   useLeaveGuard(dirty && !readOnly, "As etiquetas automáticas alteradas ainda não foram salvas.");
 
@@ -173,21 +203,27 @@ function RulesForm({ initial, readOnly }: { initial: TicketTagRules; readOnly: b
     formRef.current?.querySelector<HTMLInputElement>("input")?.focus();
   });
 
-  // Sugestões ao digitar: as etiquetas já usadas nas OS (as mais usadas primeiro) e as das listas.
+  // Sugestões ao digitar: as etiquetas já usadas nas OS (as mais usadas primeiro) e as das listas, cada
+  // uma na cor escolhida nas listas ou, se não houver, na usada nas OS.
   const suggestionPool = useMemo(() => {
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const t of [...(known.data ?? []), ...draft.on_create, ...draft.on_project, ...draft.on_extra_cost]) {
+    const inLists = [...draft.on_create, ...draft.on_project, ...draft.on_extra_cost];
+    const listColor = new Map<string, string | null>();
+    for (const t of inLists) if (!listColor.has(nameKey(t.name))) listColor.set(nameKey(t.name), t.color);
+    const done = new Set<string>();
+    const out: TagRule[] = [];
+    for (const t of [...(known.data ?? []), ...inLists]) {
       const name = clean(t.name);
-      if (!name || name.length > MAX_NAME || seen.has(nameKey(name))) continue;
-      seen.add(nameKey(name));
-      out.push(name);
+      const key = nameKey(name);
+      if (!name || name.length > MAX_NAME || done.has(key)) continue;
+      done.add(key);
+      const color = listColor.has(key) ? (listColor.get(key) ?? null) : t.color;
+      out.push({ name, color: color && TAG_COLOR_NAMES.includes(color) ? color : null });
     }
     return out;
   }, [known.data, draft]);
   const suggestionsFor = (taken: string[]) => {
     const used = new Set(taken.map(nameKey));
-    return suggestionPool.filter((n) => !used.has(nameKey(n)));
+    return suggestionPool.filter((t) => !used.has(nameKey(t.name)));
   };
 
   /** A etiqueta pelo nome, com a cor escolhida nas listas ou, se não houver, a usada nas OS. */
@@ -248,7 +284,14 @@ function RulesForm({ initial, readOnly }: { initial: TicketTagRules; readOnly: b
 
   const save = useMutation({
     mutationFn: (body: TicketTagRules) => api.put<TicketTagRules>("/ticket-tag-rules", body),
-    onSuccess: (saved) => {
+    onSuccess: (saved, sent) => {
+      // Antes de a resposta entrar no cache, o formulário já sabe que ela é desta tela (e não de outra
+      // pessoa). A API pode ajustar os nomes: a tela fica com o gravado, e o que foi mexido durante o envio
+      // continua como alteração por salvar.
+      flushSync(() => {
+        setOwnSave(fingerprint(saved));
+        setDraft((d) => (fingerprint(d) === fingerprint(sent) ? saved : d));
+      });
       queryClient.setQueryData(tagRulesQuery.queryKey, saved);
       toast({
         title: "Etiquetas automáticas salvas",
@@ -258,15 +301,35 @@ function RulesForm({ initial, readOnly }: { initial: TicketTagRules; readOnly: b
     },
   });
 
+  // Descartar: a tela volta para a versão da API (a mais nova, se outra pessoa salvou no meio).
+  const discard = () => {
+    save.reset();
+    setBaseline(server);
+    reset(server, outdated ? "Alterações descartadas. Na tela, a versão salva por último." : "Alterações descartadas.");
+  };
+
   return (
     <form
       ref={formRef}
       className="grid gap-x-8 gap-y-6 p-5 md:grid-cols-2"
       onSubmit={(e) => {
         e.preventDefault();
-        if (dirty) save.mutate(draft);
+        // O botão Salvar fica só com aria-disabled (continua focável): o Enter nele chega aqui.
+        if (dirty && !save.isPending) save.mutate(draft);
       }}
     >
+      {outdated ? (
+        <div
+          role="status"
+          className="flex items-start gap-2.5 rounded-lg border border-line bg-surface-2 px-3 py-2.5 text-sm text-ink-muted md:col-span-2"
+        >
+          <Info aria-hidden className="mt-0.5 size-4 shrink-0" />
+          <p>
+            Outra pessoa salvou estas etiquetas enquanto você editava. <strong className="font-semibold text-ink">Descartar</strong>{" "}
+            mostra a versão nova; <strong className="font-semibold text-ink">Salvar</strong> troca pela sua.
+          </p>
+        </div>
+      ) : null}
       {TAG_GROUPS.map((g) => (
         <TagList
           key={`${g.key}-${round}`}
@@ -308,12 +371,20 @@ function RulesForm({ initial, readOnly }: { initial: TicketTagRules; readOnly: b
               {dirty ? "Alterações não salvas" : null}
             </span>
             {dirty ? (
-              <Button variant="ghost" onClick={() => reset(initial, "Alterações descartadas.")} disabled={save.isPending}>
+              <Button variant="ghost" onClick={discard} disabled={save.isPending}>
                 Descartar
               </Button>
             ) : null}
-            <Button type="submit" variant="primary" loading={save.isPending} disabled={!dirty}>
-              <Save className="size-4" />
+            {/* Sem `disabled` (nem `loading`, que desabilita): ao salvar, o botão sai do ar e o foco cairia no
+                <body>. Com aria-disabled ele continua focável e o teclado segue de onde estava. */}
+            <Button
+              type="submit"
+              variant="primary"
+              aria-disabled={!dirty || save.isPending || undefined}
+              aria-busy={save.isPending || undefined}
+              className="aria-disabled:pointer-events-none aria-disabled:opacity-50 aria-disabled:active:translate-y-0"
+            >
+              {save.isPending ? <Loader2 aria-hidden className="size-4 animate-spin" /> : <Save aria-hidden className="size-4" />}
               Salvar etiquetas
             </Button>
           </div>
