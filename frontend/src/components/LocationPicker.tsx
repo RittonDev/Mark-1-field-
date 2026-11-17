@@ -325,7 +325,7 @@ export function LocationPicker({
           value=""
           disabled
           readOnly
-          placeholder={placeholder}
+          placeholder="Escolha o cliente primeiro"
           className="pl-9"
           aria-labelledby={labelledBy}
           aria-label={labelledBy ? undefined : "Buscar localização"}

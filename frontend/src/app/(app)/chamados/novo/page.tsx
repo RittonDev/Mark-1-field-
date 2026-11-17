@@ -1004,7 +1004,7 @@ function NewTicket() {
                 titleId={ids.customer}
                 required
                 done={Boolean(f.customer_id)}
-                hint="As localizações e os tipos de OS do cliente aparecem primeiro."
+                hint="Busque pelo nome do cliente (ex.: a rede de lojas). Em Localização aparecem só as lojas dele."
                 error={shown.customer}
                 errorId={errorId("customer")}
               >
@@ -1030,7 +1030,9 @@ function NewTicket() {
                 hint={
                   location && autoLocationId === location.id
                     ? "Escolhida sozinha: é a única localização ativa deste cliente."
-                    : "Onde o serviço será feito (o cliente pode ter mais de uma unidade)."
+                    : f.customer_id
+                      ? `Só as lojas ${customerName ? `de ${customerName}` : "do cliente escolhido"}: busque pelo nome, código, CNPJ ou cidade.`
+                      : "Escolha o cliente no passo 1: aqui aparecem só as lojas dele."
                 }
                 error={shown.location}
                 errorId={errorId("location")}
@@ -1057,8 +1059,8 @@ function NewTicket() {
                 <LocationPicker
                   key={storeHint ? `pista-${storeHint.n}` : "localizacao"}
                   customerId={f.customer_id || null}
+                  requireCustomer
                   customerName={customerName}
-                  onClearCustomer={() => onCustomer("")}
                   onCreate={() => setCreatingLocation(true)}
                   value={location}
                   onChange={onLocation}
@@ -1069,7 +1071,7 @@ function NewTicket() {
                   required
                   invalid={Boolean(shown.location)}
                   describedBy={shown.location ? errorId("location") : stepHintId(ids.location)}
-                  placeholder={f.customer_id ? "Buscar por nome, código, CNPJ ou cidade" : "Buscar em todos os clientes por nome, código, CNPJ ou cidade"}
+                  placeholder="Buscar loja por nome, código, CNPJ ou cidade"
                 />
               </Step>
 

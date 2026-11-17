@@ -883,9 +883,9 @@ export function GeneralTab({
                 <LocationPicker
                   labelledBy={fieldId("location")}
                   customerId={form.customerId || null}
+                  // Como na Nova OS: só as lojas do cliente escolhido (para outra rede, troque o cliente antes).
+                  requireCustomer
                   customerName={customerName}
-                  // "Buscar em todos os clientes": a loja escolhida antes era do cliente que sai.
-                  onClearCustomer={() => setForm((f) => ({ ...f, customerId: "", locationId: "", locationLabel: "" }))}
                   value={null}
                   onChange={(loc: Location | null) => {
                     if (!loc) return;
