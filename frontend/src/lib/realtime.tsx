@@ -9,7 +9,7 @@ import { STATUS } from "./constants";
 import { todayISO } from "./format";
 import { sessionStore } from "./session";
 import type { LiveTechnician, RealtimeEvent, TicketStatus, TrackingHistory, UUID } from "./types";
-import { copyText, GROUP_TEXT_COPIED, GROUP_TEXT_FRESH_MS, type GroupText, groupShareUrl, groupTextsQuery } from "./whatsapp";
+import { copyText, GROUP_TEXT_COPIED, type GroupText, groupShareUrl, groupTextsQuery } from "./whatsapp";
 
 export type ConnectionState = "connecting" | "online" | "offline";
 
@@ -454,9 +454,9 @@ export function RealtimeProvider({
       if (items.length <= 2) {
         for (const notice of items) {
           // O texto já vem buscado: o clique em "Abrir e copiar texto" copia na hora (o navegador só deixa
-          // copiar logo depois do clique).
+          // copiar logo depois do clique). A leitura é nova, de depois do aviso (a OS já encerrada).
           if (notice.groupText && notice.ticketId) {
-            void queryClient.prefetchQuery({ ...groupTextsQuery(notice.ticketId), staleTime: GROUP_TEXT_FRESH_MS });
+            void queryClient.prefetchQuery({ ...groupTextsQuery(notice.ticketId), staleTime: 0 });
           }
           toastRef.current({ title: notice.title, description: notice.description, tone: notice.tone, action: actionFor(notice) });
         }
