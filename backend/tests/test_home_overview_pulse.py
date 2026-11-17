@@ -928,11 +928,9 @@ async def test_quotes_box(
                 sent_at=before(3),
                 **gone,
             ),
-            # Link antigo (só o hash) e sem validade: aguardando, e o cliente tem como assinar. A lista
-            # também mostra (o filtro "Aguardando cliente" não pode perder quem não tem validade).
-            quote(
-                "Link antigo, sem validade", "300", sent, token_hash="f" * 64, sent_at=before(1)
-            ),
+            # Link antigo (só o hash) e sem validade: aguardando, e o cliente tem como assinar.
+            # A lista também mostra (o filtro "Aguardando cliente" não perde quem não tem validade).
+            quote("Link antigo, sem validade", "300", sent, token_hash="f" * 64, sent_at=before(1)),
             # Vencidos pela criação nos 90 dias: o enviado com a validade passada também conta.
             quote(
                 "Validade passada",
