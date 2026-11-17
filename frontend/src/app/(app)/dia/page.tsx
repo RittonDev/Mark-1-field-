@@ -15,10 +15,11 @@ import {
   useActiveTechnicians,
   useSearchChange,
 } from "@/components/operacao/hooks";
+import { CopyNowButton } from "@/components/operacao/CopyNowButton";
 import { InactiveChip, LiveStatus, RefreshFailed } from "@/components/operacao/status";
 import { TagChips } from "@/components/TagChips";
 import { FAR_FROM_STORE_M, km } from "@/components/ticket/geo";
-import { CopyGroupTextButton, MessagesButton } from "@/components/ticket/MessagesPanel";
+import { MessagesButton } from "@/components/ticket/MessagesPanel";
 import { QuickEditButton } from "@/components/ticket/QuickEditButton";
 import { TicketLink } from "@/components/ticket/TicketLink";
 import { TimesButton } from "@/components/ticket/TimesDialog";
@@ -371,7 +372,7 @@ function ActivityCard({
                 encerrada com o link do relatório... Os outros textos ficam no ícone ao lado. */}
             {mayHaveGroupText(t) ? (
               <span className="hidden sm:inline-flex">
-                <CopyGroupTextButton ticketId={t.id} />
+                <CopyNowButton ticketId={t.id} code={t.code} />
               </span>
             ) : null}
             <MessagesButton ticketId={t.id} code={t.code} />

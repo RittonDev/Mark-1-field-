@@ -514,7 +514,7 @@ function AgendaView() {
                 }
                 description={
                   filtered
-                    ? "Os filtros escondem as visitas deste dia."
+                    ? "Limpe os filtros para ver todas as visitas do dia."
                     : [hideDone ? "As OS concluídas estão ocultas." : "", idleOffer ? "Mostre os técnicos sem visita para achar quem está livre." : ""]
                         .filter(Boolean)
                         .join(" ") || undefined

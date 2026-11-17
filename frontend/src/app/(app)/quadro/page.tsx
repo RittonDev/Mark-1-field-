@@ -125,7 +125,8 @@ function MoveMenu({
   const trigger = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
   const menuId = useId();
-  const label = `Mudar o status da ${code}`;
+  // Começa pelo que está escrito no botão (quem usa a voz fala "Mudar status") e diz de qual OS é.
+  const label = `Mudar status da ${code}`;
   const items = [...targets].sort((a, b) => STATUS_ORDER.indexOf(a) - STATUS_ORDER.indexOf(b));
 
   const show = (last: boolean) => {

@@ -30,9 +30,10 @@ import {
   useClaim,
   useSearchChange,
 } from "@/components/operacao/hooks";
+import { CopyNowButton } from "@/components/operacao/CopyNowButton";
 import { ClaimButton, InactiveChip, LiveStatus, RefreshFailed } from "@/components/operacao/status";
 import { ArrivalChip, OnsiteBar } from "@/components/ticket/FieldClock";
-import { CopyGroupTextButton, MessagesButton } from "@/components/ticket/MessagesPanel";
+import { MessagesButton } from "@/components/ticket/MessagesPanel";
 import { QuickEditButton } from "@/components/ticket/QuickEditButton";
 import { TicketLink } from "@/components/ticket/TicketLink";
 import {
@@ -261,7 +262,7 @@ function Actions({
     <div className={clsx("flex shrink-0 items-center gap-1 border-l border-line", className)}>
       {quickText && mayHaveGroupText(item) ? (
         <span className="hidden sm:inline-flex">
-          <CopyGroupTextButton ticketId={item.id} />
+          <CopyNowButton ticketId={item.id} code={item.code} />
         </span>
       ) : null}
       {claim ? <ClaimButton code={item.code} busy={claim.busy} onClaim={claim.onClaim} /> : null}
