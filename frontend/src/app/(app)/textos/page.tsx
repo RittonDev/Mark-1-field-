@@ -64,6 +64,8 @@ function sampleValues(origin: string): Record<string, string> {
     analista: "Bruno Martins",
     link_relatorio: `${origin}/relatorio/exemplo`,
     prazo_chegada: "14:30",
+    hora_chegada: "14:32",
+    hora_conclusao: "16:05",
   };
 }
 
@@ -72,7 +74,7 @@ const GROUPS: { label: string; keys: string[] }[] = [
   { label: "OS", keys: ["os", "titulo", "status", "prioridade", "analista", "projeto", "solucao", "motivo_improdutiva"] },
   { label: "Técnico", keys: ["tecnico", "equipe", "tecnico_telefone", "chegada_prevista", "distancia"] },
   { label: "Cliente e local", keys: ["cliente", "local", "cidade", "endereco", "mapa", "contato"] },
-  { label: "Datas e horários", keys: ["agendamento", "hora_agendada", "prazo_chegada", "agora", "hoje"] },
+  { label: "Datas e horários", keys: ["agendamento", "hora_agendada", "prazo_chegada", "hora_chegada", "hora_conclusao", "agora", "hoje"] },
   { label: "Links", keys: ["link_relatorio"] },
 ];
 
@@ -80,18 +82,20 @@ const GROUPS: { label: string; keys: string[] }[] = [
  * Quando a OS sugere cada texto padrão (ele aparece primeiro, marcado "Agora"), pela chave que a API dá
  * ao texto. Renomear mantém a chave; os textos criados aqui não são sugeridos, ficam na lista para copiar.
  */
-const SUGGESTED_WHEN: Record<string, string> = {
-  agendamento: "quando a visita está marcada, com técnico e horário, até o técnico sair",
-  deslocamento: "quando o técnico sai para o local",
-  chegada: "quando o técnico chega e inicia o atendimento",
-  atraso: "quando o técnico está a caminho e o prazo de chegada já passou",
-  fechamento: "quando a OS é concluída",
-  improdutiva: "depois de uma visita improdutiva, até a nova visita ser marcada",
-};
+const SUGGESTED_WHEN = new Map<string, string>([
+  ["agendamento", "quando a visita está marcada, com técnico e horário, até o técnico sair"],
+  ["deslocamento", "quando o técnico sai para o local"],
+  ["chegada", "quando o técnico chega e inicia o atendimento"],
+  ["atraso", "quando o técnico está a caminho e o prazo de chegada já passou"],
+  ["fechamento", "quando a OS é concluída"],
+  ["improdutiva", "depois de uma visita improdutiva, até a nova visita ser marcada"],
+]);
 
+// Toda OS tem o link do relatório para o cliente: a variável funciona em qualquer texto, a qualquer hora.
 const REPORT_LINK = "link_relatorio";
-/** Toda OS tem o link do relatório para o cliente: a variável funciona em qualquer texto, a qualquer momento. */
-const REPORT_LINK_NOTE = "Sempre preenchido: antes da conclusão o cliente vê o andamento da OS; depois, o resultado com fotos e assinatura.";
+const REPORT_LINK_ALWAYS = "Sempre disponível: toda OS tem o link.";
+const REPORT_LINK_NOTE =
+  "toda OS tem o link do relatório. Antes da conclusão o cliente vê o andamento; depois, o resultado com fotos e assinatura.";
 
 // Variável entre chaves (como o \w da API, com as letras acentuadas).
 const VAR_RE = /\{([0-9A-Za-z_À-ÿ]+)\}/g;
@@ -553,7 +557,7 @@ function Editor({ server }: { server: TemplatesOut }) {
             const p = showErrors ? problems.get(t.uid) : undefined;
             const missing = unknown.get(t.uid) ?? [];
             const label = labelOf(t);
-            const when = t.key ? SUGGESTED_WHEN[t.key] : undefined;
+            const when = t.key ? SUGGESTED_WHEN.get(t.key) : undefined;
             const usesReportLink = t.body.includes(`{${REPORT_LINK}}`);
             const isTarget = items.length > 1 && t.uid === target.uid;
             const bodyHelp = [p?.body ? `${t.uid}-texto-erro` : null, missing.length ? `${t.uid}-variaveis` : null]
@@ -694,7 +698,7 @@ function Editor({ server }: { server: TemplatesOut }) {
             <span className="text-xs text-ink-muted">
               {full
                 ? `Limite de ${MAX_TEMPLATES} textos: remova um para criar outro.`
-                : `${plural(items.length, "texto", "textos")} (até ${MAX_TEMPLATES})`}
+                : `${plural(items.length, "texto", "textos")} (até ${MAX_TEMPLATES}). Na OS, nesta ordem, com o do momento no topo.`}
             </span>
           </div>
         </div>
@@ -728,13 +732,13 @@ function Editor({ server }: { server: TemplatesOut }) {
                           <button
                             type="button"
                             onClick={() => insert(v.key, target.uid)}
-                            aria-label={`Inserir {${v.key}}: ${v.description}${v.key === REPORT_LINK ? `. ${REPORT_LINK_NOTE}` : ""}`}
+                            aria-label={`Inserir {${v.key}}: ${v.description}${v.key === REPORT_LINK ? `. ${REPORT_LINK_ALWAYS}` : ""}`}
                             className="w-full rounded-md px-2 py-1 text-left hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
                           >
                             <code className="text-xs font-semibold text-brand-ink">{`{${v.key}}`}</code>
                             <span className="block text-[11px] text-ink-muted">{v.description}</span>
                             {v.key === REPORT_LINK ? (
-                              <span className="mt-0.5 block text-[11px] font-medium text-ink">{REPORT_LINK_NOTE}</span>
+                              <span className="mt-0.5 block text-[11px] font-semibold text-ink">{REPORT_LINK_ALWAYS}</span>
                             ) : null}
                           </button>
                         </li>

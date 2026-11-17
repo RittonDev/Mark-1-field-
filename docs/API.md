@@ -110,8 +110,25 @@ Equivale ao "Tipo de OS" do Field Control. Sem `customer_id`, o tipo vale para t
 ### OS / Chamados
 - `GET /tickets` → `Page<TicketListItem> {items,total,page,page_size}`
   - filtros: `status` (repetível), `priority` (repetível), `type`, `assignee_id`, `team_id`, `customer_id`, `location_id`, `service_type_id`, `violation_pending=true`, `category_id`, `asset_id`, `owner_id`, `no_owner=true`, `q` (título, descrição, número), `mine=true` (analista: executa ou é o responsável), `unassigned=true`, `open_only=true`, `sla_breached=true`
-  - `page` (1..), `page_size` (1..500, padrão 25), `order_by` ∈ `updated_at, created_at, priority, resolution_due_at, number` com `-` para desc (padrão `-updated_at`)
-- `POST /tickets` `TicketCreate` → `TicketDetail` (201)
+  - lista de atividades (como no Field Control): `number` (nº exato da OS, o "Identificador"), `created_from`/`created_to` e
+    `scheduled_from`/`scheduled_to` (AAAA-MM-DD, dias inteiros no fuso da operação, inclusive; OS sem agenda saem do filtro de
+    agendamento; datas fora de 2000–2100 → 422), `tag` (repetível: OS com qualquer uma dessas etiquetas, sem diferenciar
+    maiúsculas nem espaços sobrando)
+  - `page` (1..), `page_size` (1..500, padrão 25), `order_by` ∈ `updated_at, created_at, priority, resolution_due_at, number, scheduled_start, customer` (nome do cliente) com `-` para desc (padrão `-updated_at`); vazios (sem agenda, sem cliente) por último nas duas direções
+- `GET /tickets/export` (gestão) → `text/csv; charset=utf-8` com BOM, separado por `;`, `Content-Disposition: attachment;
+  filename="chamados-AAAA-MM-DD.csv"` (dia de hoje no fuso da operação). Os mesmos filtros e o mesmo `order_by` da lista,
+  mais `ids` (repetível, até 500) para exportar só as OS escolhidas; até 20.000 linhas (as primeiras na ordem pedida).
+  Colunas: `Identificador; Etiquetas; Data do agendamento; Cliente; Localização; Cidade; Situação; Técnico; Tipo de OS;
+  Escopo; Analista; Criada em` (datas `dd/mm/aaaa HH:MM` no fuso da operação; Localização sem loja = endereço do
+  atendimento; Cidade `cidade/UF`; Escopo = descrição, ou o título sem descrição). Célula que começa com `=`, `+`, `-`, `@`,
+  tab ou retorno ganha um `'` na frente (a planilha não roda como fórmula).
+- `POST /tickets/bulk-tags` `{ids: uuid[] (1..500), add: [{name, color}], remove: [nome]}` (gestão) → `{updated}`: inclui e tira
+  etiquetas nas OS que a pessoa pode editar (ids desconhecidos ficam de fora; `updated` conta só as que mudaram). 422 sem
+  nada para incluir ou tirar, com nome vazio ou com a mesma etiqueta nos dois lados. Cada OS alterada ganha um evento no
+  histórico e um `ticket.updated` `{fields: ["tags"]}` só para a gestão.
+- `POST /tickets` `TicketCreate` → `TicketDetail` (201). `tags: [{name, color}] | null` (até 20): sem informar (ou `null`),
+  a OS nasce com as etiquetas automáticas da abertura (`on_project` com `project_id`, senão `on_create`); uma lista, mesmo
+  vazia, vale como está (a web manda a que o analista vê, já preenchida pelas regras).
 - `GET /tickets/{id}` → `TicketDetail`
 - `PATCH /tickets/{id}` `TicketUpdate` → `TicketDetail`
 - `POST /tickets/{id}/assign` `{assignee_id|null, team_id?, note?, expected_version?}` → `TicketDetail`
@@ -124,7 +141,7 @@ Equivale ao "Tipo de OS" do Field Control. Sem `customer_id`, o tipo vale para t
 - `GET /tickets/{id}/attachments` → `AttachmentOut[]` · `POST` multipart `file` + `kind` (`file|photo|signature`)
 - `GET /attachments/{id}/download?token=` → arquivo (o `download_url` da listagem já vem assinado, expira em 15 min)
 
-`TicketListItem = {id, number, code:"OS-000123", title, status, priority, type, source, category:{id,name,full_name}|null, customer:{id,name}|null, location:{id,name,code,document,address_line,city,state,latitude,longitude,contact_name,contact_phone}|null, assignee:{id,name,email,role}|null, team:{id,name}|null, requester_name, scheduled_start, scheduled_end, response_due_at, resolution_due_at, first_response_at, resolved_at, sla_paused_at, sla_paused_seconds, created_at, updated_at, version, sla_status}`
+`TicketListItem = {id, number, code:"OS-000123", title, status, priority, type, source, category:{id,name,full_name}|null, customer:{id,name}|null, location:{id,name,code,document,address_line,city,state,latitude,longitude,contact_name,contact_phone}|null, assignee:{id,name,email,role}|null, team:{id,name}|null, requester_name, scheduled_start, scheduled_end, response_due_at, resolution_due_at, first_response_at, resolved_at, sla_paused_at, sla_paused_seconds, created_at, updated_at, version, sla_status, tags:[{name,color}]}`
 
 `TicketDetail = TicketListItem + {description, impact, urgency, asset:{id,name,asset_type,brand,model,serial_number,asset_tag,ip_address}|null, requester:UserRef|null, requester_contact, service_address, service_type:{id,name,estimated_minutes}|null, estimated_minutes, work_seconds, work_started_at, actual_minutes, created_by:UserRef|null, closed_at, cancelled_at, reopen_count, resolution_notes, allowed_transitions:[status], can_edit, can_assign}`
 
@@ -276,7 +293,8 @@ Todos exigem analista ou gestor, salvo indicação. Valores em R$ chegam como n�
 - **Custos extras:** `GET|POST /tickets/{id}/expenses` (técnico só lê; solicitante recebe vazio) · `PATCH|DELETE /expenses/{id}` ·
   `GET /expenses?start&end&technician_id&status&customer_id` (relatório) · `POST /expenses/mark-paid {ids}` → `{updated}`
   (marca como reembolsados só os aprovados; os demais ids são ignorados, sem erro, e não entram em `updated`) ·
-  `GET|PUT /settings/expenses {km_rate}` (PUT: supervisor/admin). `TicketDetail.expenses`.
+  `GET|PUT /settings/expenses {km_rate}` (PUT: supervisor/admin). `TicketDetail.expenses`. Lançar um custo inclui na OS as
+  etiquetas `on_extra_cost` que ela ainda não tem (ex.: "Custo Extra"; ver "Etiquetas automáticas").
 - **Visita improdutiva:** `GET|POST|PATCH /unproductive-reasons` · `POST /tickets/{id}/unproductive {reason_id, note?, latitude?, longitude?, expected_version?}`
   (técnico responsável ou gestão) → a OS volta para `assigned` sem agenda; `unproductive_count`. Sync: operação `unproductive`.
 - **Orçamentos:** `GET|POST /quote-items` e `PUT /quote-items/{id}` (catálogo, com `kind`) · `GET|POST /tickets/{id}/quotes` ·
@@ -310,10 +328,18 @@ Todos exigem analista ou gestor, salvo indicação. Valores em R$ chegam como n�
 - **Relatórios:** `GET /reports/daily?date=` (sem data: o dia anterior, já fechado) · `GET /reports/monthly?month=AAAA-MM`.
 - **Sugestão de técnicos:** `GET /tickets/{id}/technician-suggestions` · `GET /technicians/suggest?city&state&latitude&longitude`
   → `[{id, name, home_city, home_state, open_tickets, on_shift, distance_km, score, reasons[]}]`.
-- **Textos do WhatsApp:** `GET /tickets/{id}/messages` → `[{key, name, text}]` já preenchidos com os dados da OS ·
+- **Textos do WhatsApp:** `GET /tickets/{id}/messages` → `[{key, name, text, suggested}]` já preenchidos com os dados da OS ·
   `GET /message-templates` → `{templates: [{key, name, body}], variables: [{key, description}]}` ·
   `PUT /message-templates {templates}` · `POST /message-templates/reset`. Variáveis desconhecidas ficam como estão;
   `{chegada_prevista}` usa a última posição do técnico na jornada (até 30 min) e cai para o horário agendado.
+  Modelos padrão, para o grupo do cliente e nesta ordem: `agendamento` "Atividade confirmada", `deslocamento` "Técnico em
+  deslocamento", `chegada` "Técnico chegou", `atraso` "Atraso na chegada", `fechamento` "Atividade encerrada" (termina com
+  "Relatório do atendimento: {link_relatorio}") e `improdutiva` "Visita improdutiva". Modelos já gravados pela gestão ficam
+  como estão. `suggested` marca no máximo um texto, o da situação da OS: em deslocamento → `deslocamento` (`atraso` com o
+  prazo de chegada vencido; sem esse modelo, o de deslocamento); em atendimento → `chegada`; resolvida ou fechada →
+  `fechamento`; última visita improdutiva e a OS ainda sem agenda → `improdutiva`; antes de sair para o local (nova, em
+  triagem, atribuída, agendada, reaberta) com técnico e agenda → `agendamento`; cancelada ou nada que combine → nenhum.
+  Variáveis novas: `{hora_chegada}` (início do atendimento; antes disso, a hora atual) e `{hora_conclusao}`.
 - **Puxar OS do colega:** `GET /tickets?owner_id=` (fila de outro analista) + `POST /tickets/{id}/claim` (vira o responsável; ver abaixo).
 
 ## Fila do analista e relatório do cliente
@@ -370,8 +396,9 @@ link pode ser copiado de novo a qualquer momento e trocado quando preciso.
   inválido ou expirado" (token adulterado, trocado ou revogado). Vale em qualquer status: a OS reaberta
   aparece como "reaberta" até ser concluída de novo. Cada visita soma em `views` sem mexer na OS. Nunca inclui acompanhamentos, apontamentos, custos, orçamentos,
   notas internas nem motivos de violação.
-- Textos do WhatsApp: variável `{link_relatorio}` (o link da OS concluída; antes disso, "(disponível quando
-  a OS for concluída)"), já no texto padrão de Fechamento. `{analista}` agora é o responsável pela OS.
+- Textos do WhatsApp: variável `{link_relatorio}`, sempre preenchida (toda OS tem link: antes de concluir, a página
+  mostra o andamento; a OS sem link, revogado, ganha um novo ao montar os textos), já no texto padrão "Atividade
+  encerrada". `{analista}` agora é o responsável pela OS.
 - Configuração: `COMPANY_NAME` (nome no relatório, padrão "Maxx Field") e `API_PUBLIC_URL` (opcional).
 
 ## Regras de campo, horário do técnico e pedido de peça
@@ -401,6 +428,21 @@ gestão e com motivo (técnico 403; sem motivo 422). Limpa `resolved_at`, `close
 do "Editar atividade" do Field Control (abas Geral, Prazos, Localização, Vínculos, Orçamentos, Peças e custos,
 Formulários, Anexos, Acompanhamentos e Histórico), na página e por cima das listas; a aba Geral traz os 5
 técnicos mais indicados para a loja.
+
+**Etiquetas automáticas (como no Field Control).** `GET /ticket-tag-rules` (gestão) → `{on_create, on_project,
+on_extra_cost, remove_on_payout_paid}`, com `on_*: [{name, color}]` e `remove_on_payout_paid: [nome]`. `PUT` com o mesmo
+corpo, só supervisor e admin (analista 403): nomes de 1 a 40 caracteres (espaços sobrando saem), sem repetir na mesma
+lista (maiúsculas não contam), até 10 por lista; `color` null ou uma das cores do Field Control (`green, pink, yellow,
+indigo, purple, field-pale, light-blue, brown, red, blue-grey, blue, teal, orange, grey`). Gravado em `system_settings`
+(`tickets.tag_rules`). Padrão: abertura "Pendente Envio PGTO" (field-pale) + "Ticket Avulso" (green); OS de projeto
+"Projeto" (purple); custo extra "Custo Extra" (yellow); técnico pago tira "Pendente Envio PGTO". Regras: a OS nova recebe
+`on_project` (com projeto) ou `on_create`, a menos que `POST /tickets` traga `tags`; lançar um custo extra inclui as
+`on_extra_cost` que faltam; quando todos os valores dos técnicos da OS ficam pagos (`POST /payouts/pay`), saem as
+`remove_on_payout_paid`. Nada mais mexe nas etiquetas sozinho (as OS migradas só mudam por estes eventos). O nome se
+compara sem maiúsculas e a grafia e a cor que a OS já tem ficam. Cada mudança automática (e a em lote) vira um evento
+`updated` no histórico (`data: {changes: {tags: [antes, depois]}, added, removed}` e um `note` como "Custo extra lançado.
+Incluída: Custo Extra"); muda o `updated_at` e não a `version` da OS (o app do técnico não entra em conflito por etiqueta,
+que ele nem vê).
 
 **Correção dos horários reais (gestão).** `PUT /tickets/{id}/times`
 `{en_route_at?, arrived_at?, resolved_at?, work_minutes?, reason, expected_version?}` → `TicketDetail`
@@ -694,7 +736,8 @@ computador" no portal: vira app com ícone na área de trabalho e no menu Inicia
 - `TicketDetail.payouts` (só a gestão) e `TicketDetail.my_payout` (só o técnico, o dele).
 - `GET /payouts?technician_id=&status=pending|paid&concluded=&date_from=&date_to=` (gestão) → `{items, summary}`
   com `summary = {to_pay (OS concluídas), expected (OS abertas), paid}`; o período vale pela conclusão da OS.
-- `POST /payouts/pay` e `POST /payouts/unpay` `{ids}` → `{changed}`.
+- `POST /payouts/pay` e `POST /payouts/unpay` `{ids}` → `{changed}`. Pagar o último valor pendente de uma OS tira dela as
+  etiquetas `remove_on_payout_paid` (ex.: "Pendente Envio PGTO"); desfazer o pagamento não traz de volta.
 - `GET /me/earnings?month=AAAA-MM` (técnico) → os chamados dele, o resumo e os reembolsos (custos extras
   aprovados a receber e pagos no mês).
 - Mudar o valor ou pagar marca a OS como alterada (`updated_at`), para o app do técnico baixar de novo.

@@ -94,3 +94,5 @@ export function useColumns(manager: boolean) {
     reset: () => save(null),
   };
 }
+
+export type ColumnsState = ReturnType<typeof useColumns>;

@@ -22,6 +22,7 @@ import { CountUp } from "@/components/motion";
 import {
   isOpenStatus,
   isUuid,
+  mayHaveGroupText,
   OPERATION_TZ,
   operationDay,
   replaceSearch,
@@ -31,7 +32,7 @@ import {
 } from "@/components/operacao/hooks";
 import { ClaimButton, InactiveChip, LiveStatus, RefreshFailed } from "@/components/operacao/status";
 import { ArrivalChip, OnsiteBar } from "@/components/ticket/FieldClock";
-import { MessagesButton } from "@/components/ticket/MessagesPanel";
+import { CopyGroupTextButton, MessagesButton } from "@/components/ticket/MessagesPanel";
 import { QuickEditButton } from "@/components/ticket/QuickEditButton";
 import { TicketLink } from "@/components/ticket/TicketLink";
 import {
@@ -244,9 +245,25 @@ function Technician({ item, flagInactive }: { item: TicketListItem; flagInactive
   );
 }
 
-function Actions({ item, claim, className }: { item: TicketListItem; claim: Claim; className?: string }) {
+function Actions({
+  item,
+  claim,
+  quickText = false,
+  className,
+}: {
+  item: TicketListItem;
+  claim: Claim;
+  /** Um clique copia o texto do momento para o grupo (confirmada, a caminho, encerrada...). */
+  quickText?: boolean;
+  className?: string;
+}) {
   return (
     <div className={clsx("flex shrink-0 items-center gap-1 border-l border-line", className)}>
+      {quickText && mayHaveGroupText(item) ? (
+        <span className="hidden sm:inline-flex">
+          <CopyGroupTextButton ticketId={item.id} />
+        </span>
+      ) : null}
       {claim ? <ClaimButton code={item.code} busy={claim.busy} onClaim={claim.onClaim} /> : null}
       <MessagesButton ticketId={item.id} code={item.code} />
       <QuickEditButton ticketId={item.id} code={item.code} />
@@ -268,7 +285,7 @@ function Avatar({ name, className }: { name: string; className?: string }) {
   );
 }
 
-function QueueRow({ item, today, claim }: { item: Row; today: string; claim: Claim }) {
+function QueueRow({ item, today, claim, quickText = false }: { item: Row; today: string; claim: Claim; quickText?: boolean }) {
   const loc = item.location;
   const place = [item.customer?.name, loc?.name, loc?.city].filter(Boolean).join(" · ");
   const done = item.section === "done" || !isOpenStatus(item.status);
@@ -322,7 +339,7 @@ function QueueRow({ item, today, claim }: { item: Row; today: string; claim: Cla
         {inField ? <OnsiteBar ticket={item} /> : null}
       </div>
       {/* Ações sempre no canto direito, alinhadas em coluna (como "Editar" nas tabelas). */}
-      <Actions item={item} claim={claim} className="self-center pl-3" />
+      <Actions item={item} claim={claim} quickText={quickText} className="self-center pl-3" />
     </li>
   );
 }
@@ -382,7 +399,7 @@ function TodayTimeline({ items, claimFor }: { items: QueueItem[]; claimFor: (ite
                 </div>
                 {item.reasons.length ? <Reasons ticketId={item.id} reasons={item.reasons} /> : null}
               </div>
-              <Actions item={item} claim={claimFor(item)} className="self-stretch pl-2.5" />
+              <Actions item={item} claim={claimFor(item)} quickText className="self-stretch pl-2.5" />
             </div>
           </li>
         );
@@ -725,7 +742,7 @@ function MyQueueView() {
             ) : (
               <ul className="divide-y divide-line">
                 {items.map((item) => (
-                  <QueueRow key={item.id} item={item} today={today} claim={claimFor(item)} />
+                  <QueueRow key={item.id} item={item} today={today} claim={claimFor(item)} quickText />
                 ))}
               </ul>
             )}

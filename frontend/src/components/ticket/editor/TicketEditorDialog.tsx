@@ -58,6 +58,22 @@ function PanelBar({ onClose, children }: { onClose: () => void; children: React.
   );
 }
 
+/**
+ * Campos da Geral na ordem da abertura: cliente e localização, tipo de OS, escopo, data, hora e duração,
+ * colaborador e outros colaboradores (mesmas larguras do formulário).
+ */
+const SKELETON_FIELDS: { span: string; tall?: boolean }[] = [
+  { span: "col-span-12 @xl:col-span-5" },
+  { span: "col-span-12 @xl:col-span-7" },
+  { span: "col-span-12" },
+  { span: "col-span-12", tall: true },
+  { span: "col-span-6 @xl:col-span-4" },
+  { span: "col-span-6 @xl:col-span-4" },
+  { span: "col-span-12 @xl:col-span-4" },
+  { span: "col-span-12 @xl:col-span-6" },
+  { span: "col-span-12 @xl:col-span-6" },
+];
+
 /** O formato do editor enquanto a OS carrega (cabeçalho, abas, campos e rodapé): nada pula quando ela chega. */
 function EditorSkeleton({ preview, onClose }: { preview: Preview | null; onClose: () => void }) {
   return (
@@ -81,16 +97,25 @@ function EditorSkeleton({ preview, onClose }: { preview: Preview | null; onClose
           <Skeleton key={i} className="h-3.5 shrink-0" style={{ width }} />
         ))}
       </div>
-      <div aria-hidden className="min-h-0 flex-1 overflow-hidden bg-[var(--canvas,transparent)] px-5 py-5">
+      <div aria-hidden className="@container min-h-0 flex-1 overflow-hidden bg-[var(--canvas,transparent)] px-5 py-5">
+        {/* A faixa do relatório do cliente, no topo da Geral. */}
+        <div className="mb-4 flex items-center gap-3 rounded-xl border border-line bg-surface px-4 py-2.5 shadow-elev-1">
+          <Skeleton className="size-4 shrink-0 rounded" />
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            <Skeleton className="h-3.5 w-36" />
+            <Skeleton className="h-3 w-56 max-w-full" />
+          </div>
+          <Skeleton className="h-8 w-24 shrink-0 rounded-lg" />
+        </div>
         <div className="rounded-xl border border-line bg-surface shadow-elev-1">
           <div className="border-b border-line px-5 py-4">
             <Skeleton className="h-4 w-28" />
           </div>
-          <div className="grid grid-cols-1 gap-x-4 gap-y-5 p-5 sm:grid-cols-2">
-            {Array.from({ length: 8 }).map((_, i) => (
-              <div key={i} className="flex flex-col gap-2">
+          <div className="grid grid-cols-12 gap-x-4 gap-y-5 p-5">
+            {SKELETON_FIELDS.map(({ span, tall }, i) => (
+              <div key={i} className={clsx("flex flex-col gap-2", span)}>
                 <Skeleton className="h-3 w-24" />
-                <Skeleton className="h-9 w-full rounded-lg" />
+                <Skeleton className={clsx("w-full rounded-lg", tall ? "h-24" : "h-9")} />
               </div>
             ))}
           </div>
@@ -98,7 +123,8 @@ function EditorSkeleton({ preview, onClose }: { preview: Preview | null; onClose
       </div>
       <div aria-hidden className="flex items-center gap-3 border-t border-line bg-surface-2/60 px-5 py-3">
         <Skeleton className="h-9 w-20 rounded-lg" />
-        <div className="ml-auto flex gap-1">
+        <div className="ml-auto flex items-center gap-1">
+          <Skeleton className="mr-1 h-8 w-40 rounded-lg" />
           {[0, 1, 2].map((i) => (
             <Skeleton key={i} className="size-9 rounded-lg" />
           ))}

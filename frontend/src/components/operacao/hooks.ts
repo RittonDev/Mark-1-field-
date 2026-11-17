@@ -8,7 +8,7 @@ import { useState } from "react";
 import { useToast } from "@/components/Toaster";
 import { api, errorMessage } from "@/lib/api";
 import { STATUS } from "@/lib/constants";
-import type { TicketDetail, TicketStatus, User, UUID } from "@/lib/types";
+import type { TicketDetail, TicketListItem, TicketStatus, User, UUID } from "@/lib/types";
 
 /** Fuso da operação (o mesmo de settings.TIMEZONE na API). */
 export const OPERATION_TZ = "America/Sao_Paulo";
@@ -18,6 +18,21 @@ export const isOpenStatus = (status: TicketStatus) => {
   const group = STATUS[status]?.group;
   return group === "open" || group === "active" || group === "pending";
 };
+
+/** Em campo ou concluída: sempre há um texto para o grupo (a caminho, chegou, encerrada com o relatório). */
+const GROUP_TEXT_STATUSES: TicketStatus[] = ["en_route", "in_progress", "resolved", "closed"];
+
+/**
+ * A OS está num momento com texto pronto para o grupo do WhatsApp: atividade confirmada (técnico e
+ * visita marcada), a caminho, no local, encerrada ou depois de uma visita improdutiva. Qual texto, quem
+ * decide é a API; isto só tira o botão de copiar das linhas em que nada combinaria (sem técnico nem
+ * visita, cancelada), sem buscar os textos de cada uma.
+ */
+export function mayHaveGroupText(t: TicketListItem): boolean {
+  if (t.status === "cancelled") return false;
+  if (GROUP_TEXT_STATUSES.includes(t.status)) return true;
+  return Boolean(t.assignee && t.scheduled_start) || t.unproductive_count > 0;
+}
 
 /**
  * A OS completa, lida agora (versão, formulários, transições permitidas). Fica no mesmo cache do

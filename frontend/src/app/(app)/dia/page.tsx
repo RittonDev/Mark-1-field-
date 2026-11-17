@@ -8,6 +8,7 @@ import { CountUp } from "@/components/motion";
 import {
   fold,
   isUuid,
+  mayHaveGroupText,
   OPERATION_TZ,
   operationDay,
   replaceSearch,
@@ -17,7 +18,7 @@ import {
 import { InactiveChip, LiveStatus, RefreshFailed } from "@/components/operacao/status";
 import { TagChips } from "@/components/TagChips";
 import { FAR_FROM_STORE_M, km } from "@/components/ticket/geo";
-import { MessagesButton } from "@/components/ticket/MessagesPanel";
+import { CopyGroupTextButton, MessagesButton } from "@/components/ticket/MessagesPanel";
 import { QuickEditButton } from "@/components/ticket/QuickEditButton";
 import { TicketLink } from "@/components/ticket/TicketLink";
 import { TimesButton } from "@/components/ticket/TimesDialog";
@@ -366,6 +367,13 @@ function ActivityCard({
         </div>
         {manage ? (
           <div className="flex shrink-0 items-start gap-1 pt-0.5">
+            {/* Um clique copia o texto do momento para o grupo: atividade confirmada, técnico a caminho,
+                encerrada com o link do relatório... Os outros textos ficam no ícone ao lado. */}
+            {mayHaveGroupText(t) ? (
+              <span className="hidden sm:inline-flex">
+                <CopyGroupTextButton ticketId={t.id} />
+              </span>
+            ) : null}
             <MessagesButton ticketId={t.id} code={t.code} />
             {canFixTimes ? <TimesButton ticketId={t.id} code={t.code} /> : null}
             <QuickEditButton ticketId={t.id} code={t.code} />

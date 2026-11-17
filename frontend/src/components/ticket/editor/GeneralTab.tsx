@@ -1148,8 +1148,17 @@ export function GeneralTab({
 
           <div className="col-span-12 flex flex-col gap-1.5">
             <FieldLabel id={fieldId("tags")}>Etiquetas</FieldLabel>
-            <TagsInput value={form.tags} onChange={(tags) => set("tags", tags)} labelledBy={fieldId("tags")} />
-            {autoTags ? <span className="text-xs text-ink-subtle">{autoTags}</span> : null}
+            <TagsInput
+              value={form.tags}
+              onChange={(tags) => set("tags", tags)}
+              labelledBy={fieldId("tags")}
+              describedBy={autoTags ? fieldId("tags-hint") : undefined}
+            />
+            {autoTags ? (
+              <span id={fieldId("tags-hint")} className="text-xs text-ink-subtle">
+                {autoTags}
+              </span>
+            ) : null}
           </div>
         </div>
       </Card>

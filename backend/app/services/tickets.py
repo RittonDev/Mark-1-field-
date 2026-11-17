@@ -1826,23 +1826,23 @@ async def change_tags(
     app do técnico não entra em conflito por ela. Cada OS alterada ganha um evento no histórico e
     a gestão vê na hora. Devolve as OS que mudaram.
     """
-    add, remove = list(add), list(remove)
+    additions, removals = list(add), list(remove)
     by_id = {ticket.id: ticket for ticket in tickets}
-    if not by_id or not (add or remove):
+    if not by_id or not (additions or removals):
         return []
     now = utcnow()
     # As etiquetas de agora, com as linhas travadas (na ordem do id) até gravar: duas mudanças
     # ao mesmo tempo (o lote e um custo extra, por exemplo) não se perdem.
     rows = await db.execute(
         select(Ticket.id, Ticket.tags)
-        .where(Ticket.id.in_(by_id))
+        .where(Ticket.id.in_(list(by_id)))
         .order_by(Ticket.id)
         .with_for_update()
     )
     changed: list[Ticket] = []
     for ticket_id, current in rows.all():
         before: list[dict[str, Any]] = list(current or [])
-        after = tag_rules.without(tag_rules.merged(before, add), remove)
+        after = tag_rules.without(tag_rules.merged(before, additions), removals)
         if after == before:
             continue
         ticket = by_id[ticket_id]
@@ -1887,7 +1887,7 @@ async def bulk_tags(db: AsyncSession, data: TicketBulkTags, actor: User) -> int:
     ids que não existem ficam de fora. Devolve quantas OS mudaram."""
     if not actor.can_manage_tickets:
         raise PermissionDenied("Só a gestão muda as etiquetas das OS")
-    conds: list[ColumnElement[bool]] = [Ticket.id.in_(set(data.ids))]
+    conds: list[ColumnElement[bool]] = [Ticket.id.in_(list(dict.fromkeys(data.ids)))]
     vis = visibility_clause(actor)
     if vis is not None:
         conds.append(vis)
@@ -2151,7 +2151,7 @@ def _has_any_tag(keys: set[str]) -> ColumnElement[bool]:
         .alias("tag")
     )
     name = func.lower(func.regexp_replace(func.btrim(tag.c.value["name"].astext), r"\s+", " ", "g"))
-    return exists(select(tag.c.value).where(name.in_(keys)))
+    return exists(select(tag.c.value).where(name.in_(sorted(keys))))
 
 
 def orphan_owner_ids() -> Select[tuple[uuid.UUID]]:
