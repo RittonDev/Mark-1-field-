@@ -210,7 +210,9 @@ export default function HomePage() {
               </section>
             ) : null}
 
-            <div className="mt-6 grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px] xl:grid-cols-[minmax(0,1fr)_380px]">
+            {/* grid-cols-1 (minmax(0, 1fr)) no celular: sem ela, a coluna cresce até o conteúdo mais largo
+                (o gráfico, os títulos cortados) e a página rola para o lado. */}
+            <div className="mt-6 grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px] xl:grid-cols-[minmax(0,1fr)_380px]">
               <section id={ATTENTION_ID} tabIndex={-1} aria-labelledby={`${ATTENTION_ID}-titulo`} className="scroll-mt-20 rounded-xl outline-none">
                 <SectionTitle
                   as="h2"
