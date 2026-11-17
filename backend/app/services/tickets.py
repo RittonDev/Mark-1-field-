@@ -2196,7 +2196,7 @@ def filter_conditions(user: User, f: TicketFilters, now: datetime) -> list[Colum
     if f.tag:
         names = {tag_rules.tag_key(name) for name in f.tag} - {""}
         if names:
-            conds.append(_has_any_tag(names))
+            conds.append(has_any_tag(names))
     if f.ids is not None:
         conds.append(Ticket.id.in_(f.ids))
     return conds
@@ -2207,8 +2207,9 @@ def _day_start(day: date) -> datetime:
     return datetime.combine(day, time.min, tzinfo=ZoneInfo(settings.TIMEZONE))
 
 
-def _has_any_tag(keys: set[str]) -> ColumnElement[bool]:
-    """A OS tem alguma destas etiquetas (`keys` já na forma de tag_rules.tag_key)."""
+def has_any_tag(keys: set[str]) -> ColumnElement[bool]:
+    """A OS tem alguma destas etiquetas (`keys` já na forma de tag_rules.tag_key). A lista e a
+    tela inicial usam a mesma regra (o número da tela é o total da lista)."""
     tag = (
         func.jsonb_array_elements(Ticket.tags)
         .table_valued(column("value", JSONB), joins_implicitly=True)
@@ -2216,6 +2217,9 @@ def _has_any_tag(keys: set[str]) -> ColumnElement[bool]:
     )
     name = func.lower(func.regexp_replace(func.btrim(tag.c.value["name"].astext), r"\s+", " ", "g"))
     return exists(select(tag.c.value).where(name.in_(sorted(keys))))
+
+
+_has_any_tag = has_any_tag  # nome antigo
 
 
 def orphan_owner_ids() -> Select[tuple[uuid.UUID]]:

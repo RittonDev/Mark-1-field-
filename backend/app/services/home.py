@@ -1,8 +1,12 @@
-"""Tela inicial da gestão: indicadores do dia, pontos de atenção das OS e sugestões.
+"""Tela inicial da gestão: o número do topo (focus), os sinais vitais da operação (pulse), os
+pontos de atenção das OS e sugestões.
 
-Uma varredura das OS conta todos os grupos e indicadores (FILTER no banco); cada grupo com
-alguma OS traz até 5 exemplos, já com cliente, loja e técnico na mesma consulta. "Hoje" e os
-dias da semana seguem o fuso da operação (America/Sao_Paulo).
+Uma varredura das OS conta os indicadores, os grupos e quase todos os sinais vitais (FILTER
+no banco, sem COUNT(DISTINCT)); o resto sai de consultas pequenas (técnicos com visita,
+retorno na loja, improdutivas, equipe, clientes e financeiro). Cada grupo com alguma OS traz
+até 5 exemplos, já com cliente, loja e técnico na mesma consulta. Os grupos de rotina e os
+números de 30 dias olham o que foi aberto na janela; o que ficou de antes vai para a "Fila
+antiga". "Hoje", os dias e as semanas seguem o fuso da operação (America/Sao_Paulo).
 """
 
 import uuid
@@ -14,7 +18,20 @@ from decimal import Decimal
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import ColumnElement, Select, and_, func, or_, select
+from sqlalchemy import (
+    ColumnElement,
+    DateTime,
+    Float,
+    Select,
+    and_,
+    case,
+    cast,
+    func,
+    literal,
+    not_,
+    or_,
+    select,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -25,8 +42,10 @@ from app.core.enums import (
     PartRequestStatus,
     PayoutStatus,
     QuoteStatus,
+    TicketEventType,
     TicketSource,
     TicketStatus,
+    TicketType,
     UserRole,
 )
 from app.db.base import utcnow
@@ -36,24 +55,47 @@ from app.models import (
     Quote,
     ServiceType,
     Ticket,
+    TicketEvent,
     TicketExpense,
     TicketPartRequest,
     TicketPayout,
     User,
 )
 from app.schemas.home import (
+    AgeBucket,
     AttentionGroup,
     AttentionItem,
+    CustomerPulse,
+    HomeBacklog,
+    HomeCustomers,
+    HomeFinance,
+    HomeFocus,
     HomeKpis,
     HomeOverview,
+    HomePulse,
+    HomeQuality,
+    HomeTeam,
+    HomeToday,
+    HomeTomorrow,
     ListFilters,
+    OldReason,
+    Ratio,
     Suggestion,
     WeekDay,
+    WeekFlow,
 )
-from app.services import durations
+from app.services import durations, tag_rules
+from app.services import field as field_svc
 from app.services import portal as portal_svc
 from app.services.activities import day_bounds, local_today
-from app.services.tickets import breached_clause, orphan_owner_ids, violation_pending_clause
+from app.services.field import SCHEDULE_TOLERANCE
+from app.services.reports import month_bounds
+from app.services.tickets import (
+    breached_clause,
+    has_any_tag,
+    orphan_owner_ids,
+    violation_pending_clause,
+)
 from app.services.workflow import OPEN_STATUSES, STATUS_INFO
 
 S = TicketStatus
@@ -62,6 +104,7 @@ MAX_SUGGESTIONS = 6
 FIELD = (S.EN_ROUTE, S.IN_PROGRESS)
 DONE = (S.RESOLVED, S.CLOSED)
 FINISHED = (S.RESOLVED, S.CLOSED, S.CANCELLED)
+ON_HOLD = (S.ON_HOLD_CUSTOMER, S.ON_HOLD_VENDOR)
 # Visita do dia que ainda não começou (nem saiu para o local).
 NOT_STARTED = (S.NEW, S.TRIAGE, S.ASSIGNED, S.SCHEDULED, S.REOPENED)
 # Com técnico definido e sem chegada registrada.
@@ -71,17 +114,36 @@ NEEDS_SCHEDULE = (S.NEW, S.TRIAGE, S.ASSIGNED, S.REOPENED)
 
 START_TOLERANCE = timedelta(minutes=30)
 UNASSIGNED_HORIZON = timedelta(hours=48)
-UNASSIGNED_AGE = timedelta(hours=24)
 STALE_AFTER = timedelta(days=3)
 PAYOUT_LATE = timedelta(days=7)
 QUOTE_WAIT = timedelta(days=3)
+FIELD_STUCK_AFTER = timedelta(hours=12)
+DUE_SOON = timedelta(hours=24)
+TAG_OLD = timedelta(days=30)
 RECENT_DAYS = 30
 WEEK_DAYS = 7
+WEEKS = 8
+MISSED_DAYS = 7
+# Retorno na loja: nova corretiva até 7 dias depois da conclusão, nas concluídas de 30 dias que
+# já tiveram os 7 dias de acompanhamento.
+RETURN_DAYS = 7
+RETURN_BASE_DAYS = 30
+TOP_CUSTOMERS = 5
 RECURRENCE_MIN = 3
 TOP_CUSTOMER_MIN = 3
 LATE_TECH_MIN = 2
 SLOW_RATIO = 1.3
 SEVERITY_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+# "now" pede ação agora e entra no número do topo; "routine" é o resto.
+TIER_RANK = {"now": 0, "routine": 1}
+NOW_KEYS = (
+    "sla_breached",
+    "late_arrival",
+    "today_not_started",
+    "field_stuck",
+    "due_soon",
+    "unassigned_visit",
+)
 
 EXPENSE_LABELS = {
     ExpenseKind.MATERIAL: "Material",
@@ -108,6 +170,35 @@ class Moment:
     def days_ago(self, days: int) -> datetime:
         """Começo do dia `days` dias atrás (no fuso da operação)."""
         return day_bounds(self.today - timedelta(days=days))[0]
+
+    @property
+    def recent_from(self) -> date:
+        """1º dia dos "últimos 30 dias" (hoje - 29): o `created_from` da lista."""
+        return self.today - timedelta(days=RECENT_DAYS - 1)
+
+    @property
+    def recent_start(self) -> datetime:
+        """Começo da janela de 30 dias (o início de `recent_from`)."""
+        return self.days_ago(RECENT_DAYS - 1)
+
+    @property
+    def old_to(self) -> date:
+        """Último dia da "Fila antiga" (o `created_to` das abertas antes da janela)."""
+        return self.recent_from - timedelta(days=1)
+
+    @property
+    def tomorrow(self) -> date:
+        return self.today + timedelta(days=1)
+
+    @property
+    def tomorrow_end(self) -> datetime:
+        return day_bounds(self.today + timedelta(days=2))[0]
+
+    @property
+    def week_starts(self) -> list[date]:
+        """As segundas-feiras das últimas 8 semanas, da mais antiga para a atual."""
+        monday = self.today - timedelta(days=self.today.weekday())
+        return [monday - timedelta(weeks=n) for n in range(WEEKS - 1, -1, -1)]
 
 
 def _moment() -> Moment:
@@ -214,15 +305,62 @@ def today_not_started_clause(m: Moment) -> ColumnElement[bool]:
     )
 
 
-def unassigned_soon_clause(m: Moment) -> ColumnElement[bool]:
-    """Em aberto sem técnico com visita nas próximas 48 h (ou já passada) ou aberta há 24 h+."""
+def recent(m: Moment) -> ColumnElement[bool]:
+    """Aberta nos últimos 30 dias: o corte da rotina e dos números de 30 dias (o resto é a
+    "Fila antiga"). É o mesmo `created_from` (hoje - 29) que os filtros mandam para a lista."""
+    return Ticket.created_at >= m.recent_start
+
+
+def field_since() -> ColumnElement[Any]:
+    """Desde quando a OS está em campo: a última ida para "Em deslocamento" ou "Em atendimento" no
+    histórico; sem esse evento (OS importada), o início do atendimento, a chegada ou a última
+    mudança. Fora de campo é nulo: o CASE só roda a subconsulta nas OS em campo."""
+    moved = (
+        select(func.max(TicketEvent.created_at))
+        .where(
+            TicketEvent.ticket_id == Ticket.id,
+            TicketEvent.event_type == TicketEventType.STATUS_CHANGED,
+            TicketEvent.to_value.in_([s.value for s in FIELD]),
+        )
+        .correlate(Ticket)
+        .scalar_subquery()
+    )
+    since = func.coalesce(moved, Ticket.work_started_at, Ticket.arrived_at, Ticket.updated_at)
+    return case((Ticket.status.in_(FIELD), since))
+
+
+def field_stuck_clause(m: Moment) -> ColumnElement[bool]:
+    """A caminho ou em atendimento há mais de 12 h (esqueceram de concluir ou de voltar a OS)."""
+    return field_since() < m.now - FIELD_STUCK_AFTER
+
+
+def due_soon_clause(m: Moment) -> ColumnElement[bool]:
+    """Prazo de solução nas próximas 24 h, com o SLA correndo e ainda sem estourar."""
+    return and_(
+        _open(),
+        Ticket.sla_paused_at.is_(None),
+        Ticket.resolution_due_at > m.now,
+        Ticket.resolution_due_at <= m.now + DUE_SOON,
+        not_(breached_clause(m.now)),
+    )
+
+
+def unassigned_visit_clause(m: Moment) -> ColumnElement[bool]:
+    """Em aberto sem técnico com visita hoje (mesmo se o horário já passou) ou amanhã."""
     return and_(
         _open(),
         Ticket.assignee_id.is_(None),
-        or_(
-            Ticket.scheduled_start <= m.now + UNASSIGNED_HORIZON,
-            Ticket.created_at < m.now - UNASSIGNED_AGE,
-        ),
+        Ticket.scheduled_start >= m.day_start,
+        Ticket.scheduled_start < m.tomorrow_end,
+    )
+
+
+def missed_visits_clause(m: Moment) -> ColumnElement[bool]:
+    """Agendada nos 7 dias anteriores e ainda sem saída nem início."""
+    return and_(
+        Ticket.status.in_(NOT_STARTED),
+        Ticket.scheduled_start >= m.days_ago(MISSED_DAYS),
+        Ticket.scheduled_start < m.day_start,
     )
 
 
@@ -261,6 +399,20 @@ def no_owner_clause() -> ColumnElement[bool]:
 def portal_clause() -> ColumnElement[bool]:
     """Solicitações do portal esperando a central (a mesma regra de /portal/inbox-count)."""
     return and_(Ticket.source == TicketSource.PORTAL, Ticket.status.in_(portal_svc.CANCELLABLE))
+
+
+def arrival_limit() -> ColumnElement[Any]:
+    """Até quando a chegada é "no horário": o prazo de chegada da OS ou, sem ele (OS importada),
+    o horário agendado mais a tolerância de field.SCHEDULE_TOLERANCE."""
+    return func.coalesce(Ticket.arrival_due_at, Ticket.scheduled_start + SCHEDULE_TOLERANCE)
+
+
+def on_time_base(m: Moment) -> ColumnElement[bool]:
+    """Chegadas da janela de 30 dias com o que comparar (prazo de chegada ou agenda)."""
+    return and_(
+        Ticket.arrived_at >= m.recent_start,
+        or_(Ticket.arrival_due_at.is_not(None), Ticket.scheduled_start.is_not(None)),
+    )
 
 
 # --------------------------------------------------------------------------- exemplos (itens)
@@ -324,8 +476,10 @@ async def _ticket_items(
     cond: ColumnElement[bool],
     order: Sequence[Any],
     reason: Reason,
+    extra: Sequence[Any] = (),
 ) -> list[AttentionItem]:
-    rows = (await db.execute(_ticket_select().where(cond).order_by(*order).limit(ITEMS))).all()
+    stmt = _ticket_select(*extra).where(cond).order_by(*order).limit(ITEMS)
+    rows = (await db.execute(stmt)).all()
     items = []
     for row in rows:
         when, text = reason(row, m)
@@ -418,6 +572,22 @@ def _violation_reason(row: Any, m: Moment) -> tuple[datetime | None, str]:
 
 def _portal_reason(row: Any, m: Moment) -> tuple[datetime | None, str]:
     return row.created_at, f"Aberta pelo cliente há {span_text(m.now - row.created_at)}"
+
+
+def _field_stuck_reason(row: Any, m: Moment) -> tuple[datetime | None, str]:
+    since = row.field_since
+    label = STATUS_INFO[row.status].label
+    return since, f"{label} desde {_when_text(since, m)} ({span_text(m.now - since)})"
+
+
+def _due_soon_reason(row: Any, m: Moment) -> tuple[datetime | None, str]:
+    due = row.resolution_due_at
+    return due, f"Vence {_when_text(due, m)}"
+
+
+def _missed_reason(row: Any, m: Moment) -> tuple[datetime | None, str]:
+    start = row.scheduled_start
+    return start, f"Era {_when_text(start, m)}, sem início"
 
 
 # --------------------------------------------------------------------------- grupos
