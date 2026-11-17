@@ -99,8 +99,9 @@ class _City:
     rows: list[Visit] = field(default_factory=list)
 
 
-def _city_columns() -> tuple[Any, Any]:
-    return func.upper(func.trim(Location.state)), fold_sql(Location.city)
+def _city_columns(state_col: Any, city_col: Any) -> tuple[Any, Any]:
+    """A chave da cidade no banco: UF aparada em maiúsculas e a cidade sem acento."""
+    return func.upper(func.trim(state_col)), fold_sql(city_col)
 
 
 def _place(state: str | None, city: str | None) -> CityKey:
@@ -122,33 +123,41 @@ async def _cities(
     with_visits: bool = True,
 ) -> dict[CityKey, _City]:
     """As cidades com loja (todas ou só a pedida), com as visitas de cada técnico na janela."""
-    uf_col, key_col = _city_columns()
-    stores = select(
-        uf_col.label("state"), key_col.label("key"), Location.city, Location.is_active
-    ).where(Location.state.is_not(None), Location.city.is_not(None))
-    if state:
-        stores = stores.where(uf_col == state)
-    if key:
-        stores = stores.where(key_col == key)
-    s = stores.subquery("stores")
-    out: dict[CityKey, _City] = {}
-    rows = await db.execute(
+    # Lojas: agrupa pela grafia antes de tirar o acento (poucas grafias, milhares de lojas).
+    names = (
         select(
-            s.c.state,
-            s.c.key,
-            func.mode().within_group(s.c.city),
-            func.count().filter(s.c.is_active),
-        ).group_by(s.c.state, s.c.key)
+            Location.state,
+            Location.city,
+            func.count().filter(Location.is_active).label("active"),
+            func.count().label("total"),
+        )
+        .where(Location.state.is_not(None), Location.city.is_not(None))
+        .group_by(Location.state, Location.city)
+        .subquery("store_names")
     )
-    for uf, city_key, name, active in rows.all():
-        if uf and city_key:
-            out[(uf, city_key)] = _City(state=uf, key=city_key, city=name.strip(), stores=active)
+    uf_col, key_col = _city_columns(names.c.state, names.c.city)
+    stmt = select(uf_col, key_col, names.c.city, names.c.active, names.c.total)
+    if state:
+        stmt = stmt.where(uf_col == state)
+    if key:
+        stmt = stmt.where(key_col == key)
+    out: dict[CityKey, _City] = {}
+    spellings: dict[CityKey, dict[str, int]] = {}
+    for uf, city_key, name, active, total in (await db.execute(stmt)).all():
+        if not uf or not city_key:
+            continue
+        out.setdefault((uf, city_key), _City(state=uf, key=city_key, city="")).stores += active
+        counts = spellings.setdefault((uf, city_key), {})
+        counts[name.strip()] = counts.get(name.strip(), 0) + total
+    for place, counts in spellings.items():
+        # A grafia mais usada nas lojas (no empate, a primeira em ordem alfabética).
+        out[place].city = min(counts.items(), key=lambda kv: (-kv[1], kv[0]))[0]
     if not out or not with_visits:
         return out
 
     # Visitas: uma passada só, com o total da cidade (OS distintas) no mesmo GROUP BY.
     fp = technician_regions.footprint(now - WINDOW, until=now)
-    uf_col, key_col = _city_columns()
+    uf_col, key_col = _city_columns(Location.state, Location.city)
     visited = (
         select(
             uf_col.label("state"),

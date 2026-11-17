@@ -25,7 +25,7 @@ import { PRIORITY, PRIORITY_ORDER, ROLE, STATUS, STATUS_ORDER, TICKET_SOURCE } f
 import { formatDateTime, formatDocument, formatMinutes, formatMoney, fromLocalInput, toLocalInput } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
 import { useProjects } from "@/lib/projects";
-import { useAssignable, useCategories, useCustomers, useServiceTypes } from "@/lib/queries";
+import { useAssignable, useCategories, useCityFavorites, useCustomers, useServiceTypes } from "@/lib/queries";
 import { type TicketTagRules, useTagRules } from "@/lib/tagRules";
 import type {
   ConflictItem,
@@ -448,6 +448,15 @@ export function GeneralTab({
   );
   const technicians = people.filter((p) => p.role === "technician");
   const internal = people.filter((p) => p.role !== "technician");
+  // Favoritos da cidade da loja: a estrela nos sugeridos e um grupo próprio no Colaborador (os ativos
+  // que estão na lista, na ordem dos favoritos; eles saem do grupo "Técnicos" para não repetir).
+  const cityFavorites = useCityFavorites(form.locationId || null);
+  const favoriteCity = cityFavorites.data ?? null;
+  const favoriteTechs = (favoriteCity?.favorites ?? []).flatMap((fav) => {
+    const person = fav.is_active ? technicians.find((p) => p.id === fav.id) : undefined;
+    return person ? [person] : [];
+  });
+  const otherTechs = technicians.filter((p) => !favoriteTechs.includes(p));
   const names = useMemo(() => {
     const map: Record<UUID, string> = {};
     for (const p of people) map[p.id] = p.name;
@@ -1049,9 +1058,18 @@ export function GeneralTab({
           <Field label="Colaborador" className="col-span-12 @xl:col-span-6">
             <Select value={form.assigneeId} onChange={(e) => setAssignee(e.target.value)}>
               <option value="">Sem colaborador</option>
-              {technicians.length ? (
+              {favoriteCity && favoriteTechs.length ? (
+                <optgroup label={`Favoritos em ${favoriteCity.city}-${favoriteCity.state}`}>
+                  {favoriteTechs.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} · {p.open_tickets} em aberto
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null}
+              {otherTechs.length ? (
                 <optgroup label="Técnicos">
-                  {technicians.map((p) => (
+                  {otherTechs.map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.name} · {p.open_tickets} em aberto
                     </option>
@@ -1123,6 +1141,7 @@ export function GeneralTab({
                   invite={(t) => invite(t.name, t.id)}
                   error={suggestions.error}
                   onRetry={() => void suggestions.refetch()}
+                  favorites={favoriteCity}
                 />
               </div>
             ) : (

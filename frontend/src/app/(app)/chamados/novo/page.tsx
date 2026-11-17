@@ -15,6 +15,7 @@ import {
   MoreHorizontal,
   Phone,
   Plus,
+  Star,
   UserRoundCog,
   X,
   type LucideIcon,
@@ -84,7 +85,7 @@ import { PRIORITY, PRIORITY_ORDER, ROLE, TICKET_TYPE } from "@/lib/constants";
 import { dayKey, formatMinutes, formatMoney, formatTime, fromLocalInput, toLocalInput } from "@/lib/format";
 import { useUnsavedChanges } from "@/lib/hooks";
 import { useProjects } from "@/lib/projects";
-import { useAssignable, useCategories, useCustomers } from "@/lib/queries";
+import { useAssignable, useCategories, useCityFavorites, useCustomers } from "@/lib/queries";
 import { tagRulesQuery } from "@/lib/tagRules";
 import type {
   AssignableUser,
@@ -405,16 +406,25 @@ function NewTicket() {
       ),
     [assignable.data],
   );
-  const assigneeItems = useMemo<ComboItem<AssignableUser>[]>(
-    () =>
-      people.map((u) => ({
-        key: u.id,
-        item: u,
-        label: u.name,
-        haystack: searchText(`${u.name} ${u.team_name ?? ""} ${ROLE[u.role]}`),
-      })),
-    [people],
-  );
+  // Favoritos da cidade da localização: estrela nos sugeridos e os ativos primeiro no Colaborador.
+  const cityFavorites = useCityFavorites(f.location_id || null);
+  const favoriteCity = cityFavorites.data ?? null;
+  const favoriteRank = useMemo(() => {
+    const rank = new Map<UUID, number>();
+    for (const fav of favoriteCity?.favorites ?? []) if (fav.is_active) rank.set(fav.id, rank.size);
+    return rank;
+  }, [favoriteCity]);
+  const assigneeItems = useMemo<ComboItem<AssignableUser>[]>(() => {
+    // Os favoritos na ordem deles; o resto continua na ordem de antes (a ordenação é estável).
+    const order = (u: AssignableUser) => favoriteRank.get(u.id) ?? favoriteRank.size;
+    const ranked = favoriteRank.size ? [...people].sort((a, b) => order(a) - order(b)) : people;
+    return ranked.map((u) => ({
+      key: u.id,
+      item: u,
+      label: u.name,
+      haystack: searchText(`${u.name} ${u.team_name ?? ""} ${ROLE[u.role]}${favoriteRank.has(u.id) ? " favorito" : ""}`),
+    }));
+  }, [people, favoriteRank]);
   const names = useMemo(() => {
     const map: Record<UUID, string> = {};
     for (const u of assignable.data ?? []) map[u.id] = u.name;
@@ -1290,14 +1300,26 @@ function NewTicket() {
                   placeholder="Buscar colaborador por nome ou equipe"
                   emptyText="Nenhum colaborador com esse nome"
                   clearLabel="Tirar o colaborador"
-                  renderItem={(u) => (
-                    <span className="flex flex-col">
-                      <span className="font-medium">{u.name}</span>
-                      <span className="text-xs text-ink-muted">
-                        {u.role === "technician" ? (u.team_name ?? "Técnico") : ROLE[u.role]} · {u.open_tickets} em aberto
+                  renderItem={(u) =>
+                    favoriteCity && favoriteRank.has(u.id) ? (
+                      <span className="flex flex-col">
+                        <span className="flex items-center gap-1 font-medium">
+                          <Star aria-hidden className="size-3 shrink-0 fill-current text-brand" />
+                          {u.name}
+                        </span>
+                        <span className="text-xs text-ink-muted">
+                          Favorito em {favoriteCity.city}-{favoriteCity.state} · {u.open_tickets} em aberto
+                        </span>
                       </span>
-                    </span>
-                  )}
+                    ) : (
+                      <span className="flex flex-col">
+                        <span className="font-medium">{u.name}</span>
+                        <span className="text-xs text-ink-muted">
+                          {u.role === "technician" ? (u.team_name ?? "Técnico") : ROLE[u.role]} · {u.open_tickets} em aberto
+                        </span>
+                      </span>
+                    )
+                  }
                 />
               </Step>
 
@@ -1680,6 +1702,7 @@ function NewTicket() {
                 invite={(t) => invite(t.name)}
                 error={suggestions.error}
                 onRetry={() => void suggestions.refetch()}
+                favorites={favoriteCity}
               />
             </Card>
           )}

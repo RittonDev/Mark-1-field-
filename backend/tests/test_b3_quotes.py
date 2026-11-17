@@ -448,7 +448,8 @@ async def test_cancelled_ticket_quotes_leave_the_revenue_totals(
     kept = await create(client, world, title="OS que segue", project_id=project["id"])
     gone = await create(client, world, title="OS cancelada", project_id=project["id"])
     for ticket, price in ((kept, "100"), (gone, "500")):
-        token = await send(client, world, await new_quote(client, world, ticket["id"], "OK", price))
+        accepted = await new_quote(client, world, ticket["id"], "Aprovado", price)
+        token = await send(client, world, accepted)
         r = await client.post(f"{API}/public/quotes/{token}/approve", json=APPROVAL)
         assert r.status_code == 200, r.text
     for ticket, price in ((kept, "30"), (gone, "70")):
