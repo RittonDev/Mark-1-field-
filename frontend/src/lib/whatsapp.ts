@@ -1,11 +1,52 @@
 // Compartilhar pelo WhatsApp e copiar texto: a central fala com os técnicos parceiros e com os
 // clientes pelo WhatsApp (nunca pelo app).
 
+import { api } from "./api";
+
 /**
  * Acima disso o link do WhatsApp pode cortar ou não abrir (o texto vai inteiro no endereço): melhor
  * copiar o texto e colar na conversa.
  */
 export const WHATSAPP_TEXT_LIMIT = 1800;
+
+/** Texto pronto da OS para o grupo do WhatsApp: um modelo de /textos já preenchido pela API. */
+export interface GroupText {
+  key: string;
+  name: string;
+  text: string;
+  /** O texto do momento da OS (no máximo um): atividade confirmada, técnico a caminho, encerrada... */
+  suggested: boolean;
+}
+
+/** Aviso depois de copiar um texto pronto (no menu da OS, no botão de copiar e no aviso em tempo real). */
+export const GROUP_TEXT_COPIED = "Texto copiado. Cole no grupo do WhatsApp.";
+
+/**
+ * Textos prontos da OS. A chave fica sob ["ticket", id]: o que muda a OS (salvar, mudar a situação,
+ * evento em tempo real) relê os textos junto.
+ */
+export function groupTextsQuery(ticketId: string) {
+  return {
+    queryKey: ["ticket", ticketId, "messages"] as const,
+    queryFn: ({ signal }: { signal: AbortSignal }) =>
+      api.get<GroupText[]>(`/tickets/${ticketId}/messages`, undefined, { signal }),
+  };
+}
+
+/** O sugerido primeiro (só ele marcado); os outros na ordem dos modelos. */
+export function suggestedFirst(list: GroupText[]): GroupText[] {
+  const pick = list.find((m) => m.suggested);
+  if (!pick) return list;
+  return [pick, ...list.filter((m) => m !== pick).map((m) => (m.suggested ? { ...m, suggested: false } : m))];
+}
+
+/**
+ * Abre o WhatsApp com o texto, sem número: a pessoa escolhe o grupo. Texto longo demais para ir no
+ * endereço abre a conversa vazia (copie antes e cole).
+ */
+export function openWhatsApp(text: string) {
+  window.open(whatsappUrl(null, text.length <= WHATSAPP_TEXT_LIMIT ? text : ""), "_blank", "noopener,noreferrer");
+}
 
 /** Abre a conversa com o número (DDD + número; o 55 entra quando falta) já com o texto. */
 export function whatsappUrl(phone: string | null | undefined, text: string): string {

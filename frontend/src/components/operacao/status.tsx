@@ -3,9 +3,11 @@
 import clsx from "clsx";
 import { Hand, Loader2, TriangleAlert } from "lucide-react";
 import { useState } from "react";
+import { OPERATION_TZ } from "@/lib/format";
 import { useConnectionState } from "@/lib/realtime";
 
-const clockFmt = new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" });
+// No horário da operação, como as horas das OS na mesma tela (mesmo num computador em outro fuso).
+const clockFmt = new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: OPERATION_TZ });
 
 /** Hora de um carimbo em milissegundos (dataUpdatedAt/errorUpdatedAt do TanStack). */
 export const clock = (at: number) => clockFmt.format(at);

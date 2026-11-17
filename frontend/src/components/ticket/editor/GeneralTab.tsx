@@ -2,13 +2,18 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { AlertTriangle, Hand, MapPin, Phone, Star, ThumbsUp, Users, X } from "lucide-react";
+import { AlertTriangle, ChevronDown, Hand, MapPin, Phone, Star, ThumbsUp, Users, X } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { useConfirm } from "@/components/Confirm";
 import { LocationPicker } from "@/components/LocationPicker";
 import { ConflictHint, ConflictList, scheduleConflicts } from "@/components/ScheduleConflict";
+import { TagChips, TagsInput } from "@/components/TagChips";
 import { useToast } from "@/components/Toaster";
+import { Combobox, searchText, type ComboItem } from "@/components/new-ticket/Combobox";
+import { serviceTypeTiming } from "@/components/new-ticket/ServiceTypePicker";
+import { readStored, writeStored } from "@/components/new-ticket/storage";
 import { HelpersField, SuggestedTechnicians } from "@/components/new-ticket/SuggestedTechnicians";
 import { PayoutLine } from "@/components/ticket/PayoutsCard";
 import { busyTitle, isVersionConflict } from "@/components/ticket/useConflictHandler";
@@ -16,15 +21,17 @@ import { useNow } from "@/components/useNow";
 import { Button, buttonClassName, Card, CardHeader, ErrorBox, Field, Input, SectionTitle, Select, Textarea } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { PRIORITY, PRIORITY_ORDER, ROLE, STATUS, STATUS_ORDER } from "@/lib/constants";
-import { formatDateTime, formatMinutes, formatMoney, fromLocalInput, toLocalInput } from "@/lib/format";
+import { PRIORITY, PRIORITY_ORDER, ROLE, STATUS, STATUS_ORDER, TICKET_SOURCE } from "@/lib/constants";
+import { formatDateTime, formatDocument, formatMinutes, formatMoney, fromLocalInput, toLocalInput } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
 import { useProjects } from "@/lib/projects";
 import { useAssignable, useCategories, useCustomers, useServiceTypes } from "@/lib/queries";
 import type {
   ConflictItem,
+  Customer,
   IntakeContext,
   Location,
+  ServiceType,
   Tag,
   TechnicianSuggestion,
   TicketDetail,
@@ -63,6 +70,8 @@ const FINISHED: TicketStatus[] = ["resolved", "closed", "cancelled"];
 const MAX_HELPERS = 6;
 /** Folga para o relógio do computador (a API aceita 1 minuto). */
 const SKEW_MS = 60_000;
+/** "Mais detalhes" recolhido ou aberto: preferência de quem usa, neste navegador. */
+const MORE_KEY = "maxx.os.maisDetalhes";
 
 interface FormState {
   title: string;
@@ -82,6 +91,9 @@ interface FormState {
   helperIds: UUID[];
   ownerId: string;
   projectId: string;
+  clientReference: string;
+  requesterName: string;
+  requesterContact: string;
   visitNote: string;
   startDate: string;
   startTime: string;
@@ -113,6 +125,9 @@ function initial(t: TicketDetail): FormState {
     helperIds: (t.helpers ?? []).map((h) => h.id),
     ownerId: t.owner?.id ?? "",
     projectId: t.project?.id ?? "",
+    clientReference: t.client_reference ?? "",
+    requesterName: t.requester_name ?? "",
+    requesterContact: t.requester_contact ?? "",
     visitNote: t.visit_note ?? "",
     startDate: start.date,
     startTime: start.time,
@@ -126,27 +141,39 @@ function initial(t: TicketDetail): FormState {
 type Key = keyof FormState;
 
 /** Textos comparados sem os espaços das pontas (a API grava aparado). */
-const TEXT_KEYS: Key[] = ["title", "description", "serviceAddress", "visitNote", "resolutionNotes"];
+const TEXT_KEYS: Key[] = [
+  "title",
+  "description",
+  "serviceAddress",
+  "clientReference",
+  "requesterName",
+  "requesterContact",
+  "visitNote",
+  "resolutionNotes",
+];
 
 /**
  * Campos que mudam juntos (a loja e o cliente dela, a agenda, os horários reais). Quando outra pessoa
  * muda a OS enquanto se edita, cada grupo entra inteiro ou fica como está aqui.
  */
 const GROUPS: { keys: Key[]; label: string; schedule?: boolean }[] = [
-  { keys: ["title"], label: "título" },
-  { keys: ["serviceTypeId"], label: "tipo de OS" },
-  { keys: ["categoryId"], label: "categoria" },
-  { keys: ["priority"], label: "prioridade" },
-  { keys: ["tags"], label: "etiquetas" },
   { keys: ["customerId", "locationId", "locationLabel"], label: "cliente e loja" },
-  { keys: ["serviceAddress"], label: "endereço" },
-  { keys: ["description"], label: "descrição" },
+  { keys: ["serviceTypeId"], label: "tipo de OS" },
+  { keys: ["description"], label: "escopo" },
   { keys: ["estimated", "date", "time"], label: "agenda", schedule: true },
   { keys: ["assigneeId"], label: "técnico", schedule: true },
   { keys: ["helperIds"], label: "outros técnicos", schedule: true },
+  { keys: ["tags"], label: "etiquetas" },
+  { keys: ["title"], label: "título" },
+  { keys: ["priority"], label: "prioridade" },
+  { keys: ["categoryId"], label: "categoria" },
   { keys: ["ownerId"], label: "analista responsável" },
   { keys: ["projectId"], label: "projeto" },
-  { keys: ["visitNote"], label: "observação da visita" },
+  { keys: ["clientReference"], label: "nº do chamado do cliente" },
+  { keys: ["requesterName"], label: "quem pediu" },
+  { keys: ["requesterContact"], label: "contato de quem pediu" },
+  { keys: ["visitNote"], label: "recado para o técnico" },
+  { keys: ["serviceAddress"], label: "endereço do atendimento" },
   { keys: ["startDate", "startTime", "endDate", "endTime"], label: "horários reais" },
   { keys: ["resolutionNotes"], label: "descrição da conclusão" },
 ];
@@ -154,9 +181,16 @@ const GROUPS: { keys: Key[]; label: string; schedule?: boolean }[] = [
 const SCHEDULE_KEYS: Key[] = ["date", "time", "estimated"];
 const TIME_KEYS: Key[] = ["startDate", "startTime", "endDate", "endTime"];
 
+/** Etiquetas iguais: os mesmos nomes com as mesmas cores, em qualquer ordem (tirar e pôr de volta não é mudança). */
+const tagsKey = (tags: Tag[]) =>
+  tags
+    .map((t) => `${t.name.trim()}\u0000${t.color ?? ""}`)
+    .sort()
+    .join("\u0001");
+
 function sameValue(key: Key, a: FormState, b: FormState): boolean {
   if (key === "helperIds") return sameList(a.helperIds, b.helperIds);
-  if (key === "tags") return JSON.stringify(a.tags) === JSON.stringify(b.tags);
+  if (key === "tags") return tagsKey(a.tags) === tagsKey(b.tags);
   if (TEXT_KEYS.includes(key)) return String(a[key]).trim() === String(b[key]).trim();
   return a[key] === b[key];
 }
@@ -217,59 +251,19 @@ function Caution({ children, className }: { children: React.ReactNode; className
   );
 }
 
-/** Etiquetas da OS (ex.: "Adicional Noturno"): tira com o ×, inclui escolhendo ou digitando. */
-function TagsField({ value, onChange }: { value: Tag[]; onChange: (tags: Tag[]) => void }) {
-  const [draft, setDraft] = useState("");
-  const listId = useId();
-  const known = useQuery({ queryKey: ["ticket-tags"], queryFn: () => api.get<Tag[]>("/ticket-tags"), staleTime: 5 * 60_000 });
-  const add = (name: string) => {
-    const clean = name.trim();
-    if (!clean || value.some((t) => t.name.toLowerCase() === clean.toLowerCase())) return setDraft("");
-    const match = known.data?.find((t) => t.name.toLowerCase() === clean.toLowerCase());
-    onChange([...value, match ?? { name: clean, color: null }]);
-    setDraft("");
-  };
+/** Rótulo de um campo que fica fora de <label> (busca com lista, grupo de chips): o campo aponta para o id. */
+function FieldLabel({ id, children }: { id: string; children: React.ReactNode }) {
   return (
-    <div className="flex flex-col gap-1.5">
-      <span className="text-xs font-semibold text-ink/80">Etiquetas</span>
-      <div className="flex min-h-9 flex-wrap items-center gap-1.5 rounded-lg border border-line bg-surface px-2 py-1 shadow-elev-1">
-        {value.map((t) => (
-          <span key={t.name} className="inline-flex items-center gap-0.5 rounded-full bg-brand-soft py-px pr-0.5 pl-2.5 text-xs font-medium text-brand-ink">
-            {t.name}
-            <button
-              type="button"
-              onClick={() => onChange(value.filter((x) => x.name !== t.name))}
-              className="inline-flex size-6 items-center justify-center rounded-full hover:bg-brand/15"
-              aria-label={`Tirar a etiqueta ${t.name}`}
-            >
-              <X className="size-3.5" />
-            </button>
-          </span>
-        ))}
-        <input
-          list={listId}
-          value={draft}
-          maxLength={60}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              add(draft);
-            }
-          }}
-          onBlur={() => draft && add(draft)}
-          placeholder={value.length ? "+ etiqueta" : "Incluir etiqueta (ex.: Adicional Noturno)"}
-          className="h-7 min-w-44 flex-1 rounded-md bg-transparent px-1.5 text-sm text-ink outline-none placeholder:text-ink-subtle"
-          aria-label="Incluir etiqueta"
-        />
-        <datalist id={listId}>
-          {(known.data ?? []).map((t) => (
-            <option key={t.name} value={t.name} />
-          ))}
-        </datalist>
-      </div>
-    </div>
+    <span id={id} className="text-xs font-semibold text-ink/80">
+      {children}
+    </span>
   );
+}
+
+/** Endereço da loja numa linha (rua, bairro, cidade - UF, CEP). */
+function storeAddressOf(loc: IntakeContext["location"]): string {
+  if (!loc) return "";
+  return [loc.address_line, loc.district, [loc.city, loc.state].filter(Boolean).join(" - "), loc.zip_code].filter(Boolean).join(", ");
 }
 
 /** Corpo da correção de horários (PUT /times): o motivo e só o que mudou. */
@@ -340,6 +334,8 @@ export function GeneralTab({
   const [partial, setPartial] = useState(false);
   const [changingLocation, setChangingLocation] = useState(false);
   const [suggestOpen, setSuggestOpen] = useState(false);
+  // "Mais detalhes" começa aberto; quem recolhe uma vez encontra recolhido nas próximas OS.
+  const [moreOpen, setMoreOpen] = useState(() => readStored<boolean>("local", MORE_KEY) ?? true);
   const base = snap.base;
   const server = saved && isNewer(saved, ticket) ? saved : ticket;
 
@@ -351,6 +347,17 @@ export function GeneralTab({
   const setAssignee = (id: string) => {
     setConflicts(null);
     setForm((f) => ({ ...f, assigneeId: id, helperIds: f.helperIds.filter((h) => h !== id) }));
+  };
+  // Outro cliente: a loja era do anterior e sai; a busca de loja abre já filtrada pelo cliente novo.
+  const setCustomer = (id: string) => {
+    if (id === form.customerId) return;
+    setForm((f) => ({ ...f, customerId: id, locationId: "", locationLabel: "" }));
+    setChangingLocation(Boolean(id));
+  };
+  const toggleMore = () => {
+    const next = !moreOpen;
+    setMoreOpen(next);
+    writeStored("local", MORE_KEY, next ? null : false);
   };
 
   const customers = useCustomers();

@@ -213,7 +213,9 @@ export function TimeGrid({
   const minWidth = `${56 + columns.length * (columns.length > 7 ? 150 : 88)}px`;
 
   return (
-    <div ref={scrollRef} className="h-full overflow-auto">
+    // `isolate`: as camadas fixas da grade (cabeçalho, horas, linha de agora) ficam por baixo da barra do
+    // topo e dos menus dela (avisos), em vez de competir com eles na rolagem da página.
+    <div ref={scrollRef} className="isolate h-full overflow-auto">
       <div style={{ minWidth }}>
         <div className="sticky top-0 z-40 flex border-b border-line bg-surface">
           <div className="sticky left-0 z-10 w-14 shrink-0 bg-surface" />
