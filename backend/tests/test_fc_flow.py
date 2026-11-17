@@ -796,7 +796,9 @@ async def test_bulk_tags(client: AsyncClient, world: World) -> None:
         assert (await client.post(url, json=bad, headers=an)).status_code == 422, bad
 
 
-async def test_activity_list_filters_by_technician_who_acted(client: AsyncClient, world: World) -> None:
+async def test_activity_list_filters_by_technician_who_acted(
+    client: AsyncClient, world: World
+) -> None:
     """Busca de OS antigas por técnico: entra quem é o responsável agora e quem já foi antes de
     uma troca (o filtro do técnico atual continua só com o atual)."""
     sup = world.supervisor.headers
@@ -827,4 +829,5 @@ async def test_activity_list_filters_by_technician_who_acted(client: AsyncClient
     assert t["id"] not in await ids(assignee_id=tech)
     r = await client.get(f"{API}/tickets/export", params={"technician_id": tech}, headers=sup)
     assert r.status_code == 200, r.text
-    assert "Trocou de técnico" in r.text
+    rows = r.text.splitlines()[1:]  # a 1ª linha é o cabeçalho (com o BOM)
+    assert [row.split(";")[0] for row in rows] == [str(t["number"])]
