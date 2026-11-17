@@ -335,11 +335,21 @@ Todos exigem analista ou gestor, salvo indicação. Valores em R$ chegam como n�
   `{chegada_prevista}` usa a última posição do técnico na jornada (até 30 min) e cai para o horário agendado.
   Modelos padrão, para o grupo do cliente e nesta ordem: `agendamento` "Atividade confirmada", `deslocamento` "Técnico em
   deslocamento", `chegada` "Técnico chegou", `atraso` "Atraso na chegada", `fechamento` "Atividade encerrada" (termina com
-  "Relatório do atendimento: {link_relatorio}") e `improdutiva` "Visita improdutiva". Modelos já gravados pela gestão ficam
-  como estão. `suggested` marca no máximo um texto, o da situação da OS: em deslocamento → `deslocamento` (`atraso` com o
-  prazo de chegada vencido; sem esse modelo, o de deslocamento); em atendimento → `chegada`; resolvida ou fechada →
-  `fechamento`; última visita improdutiva e a OS ainda sem agenda → `improdutiva`; antes de sair para o local (nova, em
-  triagem, atribuída, agendada, reaberta) com técnico e agenda → `agendamento`; cancelada ou nada que combine → nenhum.
+  "Relatório do atendimento: {link_relatorio}"; o técnico vai numa linha própria, "Técnico: {tecnico}.") e `improdutiva`
+  "Visita improdutiva". Modelos já gravados pela gestão ficam como estão. `suggested` marca no máximo um texto, o da
+  situação da OS: em deslocamento → `deslocamento` (`atraso` quando a chegada já está atrasada; sem esse modelo, o de
+  deslocamento); em atendimento → `chegada`; resolvida ou fechada → `fechamento`; última visita improdutiva e a OS ainda
+  sem agenda → `improdutiva`; antes de sair para o local (nova, em triagem, atribuída, agendada, reaberta) com técnico e
+  agenda em dia → `agendamento`; cancelada ou nada que combine → nenhum.
+  - Atraso: na primeira ida, o prazo de chegada vencido (`arrival_due_at`). Na revisita (depois da primeira chegada) e na
+    OS reaberta esse prazo não vale mais (não muda depois da chegada): conta a visita marcada para esta ida, com a mesma
+    tolerância de 30 min. Visita marcada para esta ida = agenda depois da última saída de "Em atendimento" (concluída,
+    pausada, improdutiva) e da última reabertura.
+  - Agenda em dia (para `agendamento`): do dia de hoje em diante (fuso da operação) e marcada para esta ida. A OS
+    reaberta guarda a agenda da visita anterior: sem remarcar, nenhum texto vem marcado.
+  - Dado que falta: nos modelos padrão (mesmo gravados pela gestão sem mudar o texto) a frase com `{chegada_prevista}` sem
+    previsão ou com `{tecnico}`/`{equipe}` sem técnico sai inteira (ex.: "O técnico X está a caminho de Loja 27." sem
+    "Chegada prevista às __:__."). Nos modelos escritos pela gestão a marca (`__:__`, "(técnico a definir)") fica.
   Variáveis novas: `{hora_chegada}` (início do atendimento; antes disso, a hora atual) e `{hora_conclusao}`.
 - **Puxar OS do colega:** `GET /tickets?owner_id=` (fila de outro analista) + `POST /tickets/{id}/claim` (vira o responsável; ver abaixo).
 
@@ -422,6 +432,9 @@ da gestão; o técnico responsável trabalha na OS (formulários, fotos, assinat
 concluída, fechada ou cancelada (como no Field Control): `PATCH /tickets/{id}` troca cliente, loja, escopo,
 agenda, analista, projeto, outros técnicos, `resolution_notes` (descrição da conclusão) e `tags`
 (`[{name, color}]`, até 20, sem repetir); `POST /tickets/{id}/assign` troca o técnico. Editar não muda o status.
+Com `tags_base` (os nomes das etiquetas que o editor carregou, até 40), `tags` vale como diferença sobre as etiquetas de
+agora: o que o analista incluiu entra, o que tirou sai e o que mudou nesse meio-tempo sem mexer na `version` (custo
+extra, técnico pago, etiquetas em lote) fica. Sem `tags_base`, `tags` substitui a lista inteira.
 **Reabrir** uma OS fechada ou cancelada: `POST /tickets/{id}/transition` `{to_status: "reopened", note}`, só a
 gestão e com motivo (técnico 403; sem motivo 422). Limpa `resolved_at`, `closed_at` e `cancelled_at`, soma 1 em
 `reopen_count` e a OS volta ao fluxo; o prazo de SLA continua o original.
@@ -439,7 +452,8 @@ indigo, purple, field-pale, light-blue, brown, red, blue-grey, blue, teal, orang
 "Projeto" (purple); custo extra "Custo Extra" (yellow); técnico pago tira "Pendente Envio PGTO". Regras: a OS nova recebe
 `on_project` (com projeto) ou `on_create`, a menos que `POST /tickets` traga `tags`; lançar um custo extra inclui as
 `on_extra_cost` que faltam; quando todos os valores dos técnicos da OS ficam pagos (`POST /payouts/pay`), saem as
-`remove_on_payout_paid`. Nada mais mexe nas etiquetas sozinho (as OS migradas só mudam por estes eventos). O nome se
+`remove_on_payout_paid` (na OS cancelada o valor ainda pendente conta como cancelado, como na lista de pagamentos: a etiqueta sai quando a
+central paga o que vai pagar, ex.: o deslocamento de um dos técnicos). Nada mais mexe nas etiquetas sozinho (as OS migradas só mudam por estes eventos). O nome se
 compara sem maiúsculas e a grafia e a cor que a OS já tem ficam. Cada mudança automática (e a em lote) vira um evento
 `updated` no histórico (`data: {changes: {tags: [antes, depois]}, added, removed}` e um `note` como "Custo extra lançado.
 Incluída: Custo Extra"); muda o `updated_at` e não a `version` da OS (o app do técnico não entra em conflito por etiqueta,
@@ -520,7 +534,8 @@ do local (as 27 capitais, sem acento); OS sem local conta como interior.
 **Textos do WhatsApp.**
 - Novas variáveis:
   - `{prazo_chegada}`: HH:MM no fuso da operação, ou "(sem prazo)".
-- O texto padrão de deslocamento termina em "Chegada prevista às {chegada_prevista} (prazo {prazo_chegada})."
+- O texto padrão de deslocamento termina em "Chegada prevista às {chegada_prevista}." (frase que sai sem previsão; ver
+  "Textos do WhatsApp" acima).
 
 ## Migração do Field Control
 
