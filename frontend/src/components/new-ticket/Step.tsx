@@ -40,7 +40,7 @@ export const stepHintId = (titleId: string) => `${titleId}-dica`;
 
 /**
  * Um passo da Nova OS, na ordem do Field Control: número, rótulo em negrito (com * quando obrigatório),
- * o campo, a dica ou o erro logo abaixo dele e, depois, o que complementa o passo (avisos, sugestões).
+ * o campo, a dica (quando há) ou o erro logo abaixo dele e, depois, o que complementa o passo (avisos, sugestões).
  * O número ganha a cor da marca quando o passo já está preenchido. Vai dentro de um <ol> em grade
  * (uma coluna no estreito, duas no largo), que dá o espaçamento entre os passos.
  */
@@ -68,7 +68,8 @@ export function Step({
   done: boolean;
   /** À direita do rótulo (ex.: os atalhos Hoje e Amanhã). */
   aside?: React.ReactNode;
-  hint: React.ReactNode;
+  /** Só o que muda com a OS (duração do tipo, horário escolhido): o campo em si não precisa de explicação. */
+  hint?: React.ReactNode;
   error?: string;
   errorId?: string;
   children: React.ReactNode;
@@ -109,11 +110,11 @@ export function Step({
         {children}
         {error && errorId ? (
           <FieldError id={errorId}>{error}</FieldError>
-        ) : (
+        ) : hint ? (
           <div id={stepHintId(titleId)} className="text-xs text-ink-muted">
             {hint}
           </div>
-        )}
+        ) : null}
         {extra}
       </div>
     </li>

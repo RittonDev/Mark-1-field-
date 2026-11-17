@@ -894,28 +894,17 @@ function NewTicket() {
       f.type !== "incident" ? TICKET_TYPE[f.type] : null,
     ]
       .filter(Boolean)
-      .join(" · ") || "Título, duração, analista, projeto, recado, endereço, outros técnicos, pedido do cliente e formulários";
+      .join(" · ") || "Título, duração, analista, projeto, prioridade, recado, endereço, outros técnicos, pedido do cliente e formulários";
 
-  const tagsHint = (
-    <>
-      {d.tagsAuto
-        ? tagRulesFailed
-          ? `Não deu para carregar agora o padrão para ${tagMode === "project" ? "OS de projeto" : "OS nova"} definido pela gestão.`
-          : `Padrão para ${tagMode === "project" ? "OS de projeto" : "OS nova"}: tire ou inclua o que precisar.`
-        : "Ajustadas nesta OS."}
-      {payoutTags.length
-        ? ` ${quoteList(payoutTags.map((t) => t.name))} ${payoutTags.length === 1 ? "sai sozinha" : "saem sozinhas"} quando o técnico for pago.`
-        : null}
-      {!d.tagsAuto && d.tagsMode === tagMode ? (
-        <>
-          {" "}
-          <button type="button" onClick={resetTags} className="font-semibold text-brand-ink hover:underline">
-            Voltar ao padrão
-          </button>
-        </>
-      ) : null}
-    </>
-  );
+  // Só o que pede ação: as regras não carregaram, ou a lista foi mexida e dá para voltar ao padrão.
+  const tagsHint =
+    d.tagsAuto && tagRulesFailed ? (
+      "Não deu para carregar agora o padrão de etiquetas."
+    ) : !d.tagsAuto && d.tagsMode === tagMode ? (
+      <button type="button" onClick={resetTags} className="font-semibold text-brand-ink hover:underline">
+        Voltar ao padrão
+      </button>
+    ) : undefined;
 
   return (
     <div className="mx-auto max-w-7xl">
@@ -996,7 +985,7 @@ function NewTicket() {
 
           {/* @container: os passos ficam em duas colunas quando o cartão tem largura para isso. */}
           <Card className="@container">
-            <CardHeader title="Dados da OS" description="Siga a ordem dos passos. Os campos com * são obrigatórios." />
+            <CardHeader title="Dados da OS" />
             <ol className="grid gap-x-8 gap-y-5 p-4 sm:p-5 @2xl:grid-cols-2">
               <Step
                 n={1}
@@ -1004,7 +993,6 @@ function NewTicket() {
                 titleId={ids.customer}
                 required
                 done={Boolean(f.customer_id)}
-                hint="Busque pelo nome do cliente (ex.: a rede de lojas). Em Localização aparecem só as lojas dele."
                 error={shown.customer}
                 errorId={errorId("customer")}
               >
@@ -1027,13 +1015,7 @@ function NewTicket() {
                 titleId={ids.location}
                 required
                 done={Boolean(f.location_id)}
-                hint={
-                  location && autoLocationId === location.id
-                    ? "Escolhida sozinha: é a única localização ativa deste cliente."
-                    : f.customer_id
-                      ? `Só as lojas ${customerName ? `de ${customerName}` : "do cliente escolhido"}: busque pelo nome, código, CNPJ ou cidade.`
-                      : "Escolha o cliente no passo 1: aqui aparecem só as lojas dele."
-                }
+                hint={location && autoLocationId === location.id ? "Escolhida sozinha: é a única localização ativa deste cliente." : undefined}
                 error={shown.location}
                 errorId={errorId("location")}
                 extra={
@@ -1092,7 +1074,7 @@ function NewTicket() {
                       ]
                         .filter(Boolean)
                         .join(" · ")
-                    : "Define a duração estimada e sugere os formulários."
+                    : undefined
                 }
                 error={shown.type}
                 errorId={errorId("type")}
@@ -1119,7 +1101,6 @@ function NewTicket() {
                 htmlFor={ERROR_FIELD.scope}
                 required
                 done={Boolean(f.description.trim())}
-                hint="Um escopo bem detalhado ajuda o técnico a entender a demanda antes de chegar e evita retrabalho."
                 className="@2xl:row-span-2"
                 error={shown.scope}
                 errorId={errorId("scope")}
@@ -1152,12 +1133,13 @@ function NewTicket() {
                       <p className="text-xs font-medium text-amber-700 dark:text-amber-300" role="status">
                         O texto colado passou de {TEXT_LIMIT.toLocaleString("pt-BR")} caracteres e foi cortado no fim.
                       </p>
-                    ) : (
-                      <p className="text-xs text-ink-subtle">O técnico vê o escopo no app.</p>
-                    )}
-                    <span className="text-[11px] text-ink-subtle tabular-nums">
-                      {f.description.length.toLocaleString("pt-BR")} / {TEXT_LIMIT.toLocaleString("pt-BR")}
-                    </span>
+                    ) : null}
+                    {/* O contador só aparece perto do limite. */}
+                    {f.description.length >= TEXT_LIMIT * 0.9 ? (
+                      <span className="ml-auto text-[11px] text-ink-subtle tabular-nums">
+                        {f.description.length.toLocaleString("pt-BR")} / {TEXT_LIMIT.toLocaleString("pt-BR")}
+                      </span>
+                    ) : null}
                   </div>
                 }
               >
@@ -1178,7 +1160,6 @@ function NewTicket() {
                   required
                   aria-invalid={shown.scope ? true : undefined}
                   aria-describedby={shown.scope ? errorId("scope") : stepHintId(ids.scope)}
-                  placeholder="Ex.: PDV 2 sem rede desde ontem. Verificar cabo e switch do caixa, testar a venda e registrar fotos antes e depois."
                 />
               </Step>
 
@@ -1227,9 +1208,7 @@ function NewTicket() {
                         Deixar sem agendamento
                       </button>
                     </span>
-                  ) : (
-                    "Opcional. Sem data, a OS fica na fila para agendar depois."
-                  )
+                  ) : undefined
                 }
                 error={shown.date ?? shown.time}
                 errorId={shown.date ? errorId("date") : errorId("time")}
@@ -1239,7 +1218,10 @@ function NewTicket() {
                     {lateResolution && startIso && resolutionDue ? (
                       <Caution>
                         O agendamento ({dayTimeLabel(startIso, now, true)}) fica depois do prazo de solução ({dayTimeLabel(iso(resolutionDue), now, true)}):
-                        a OS já vai nascer atrasada. Escolha uma prioridade com prazo maior (em Prazos desta OS) ou combine outra data.
+                        a OS já nasce atrasada.{" "}
+                        <button type="button" onClick={() => focusField(ids.priority, true)} className="font-semibold underline underline-offset-2 hover:no-underline">
+                          Mudar a prioridade
+                        </button>
                       </Caution>
                     ) : null}
                     {conflicts ? (
@@ -1306,11 +1288,6 @@ function NewTicket() {
                 title="Colaborador"
                 titleId={ids.assignee}
                 done={Boolean(f.assignee_id)}
-                hint={
-                  f.assignee_id
-                    ? "Quem executa: inicia, conclui e colhe a assinatura no app."
-                    : "Opcional: escolha aqui ou em Técnicos sugeridos. Sem colaborador, a OS fica na fila para atribuir."
-                }
               >
                 <Combobox<AssignableUser>
                   items={assigneeItems}
@@ -1428,11 +1405,7 @@ function NewTicket() {
             <div id={ids.more} hidden={!moreOpen} className="@container animate-enter border-t border-line px-4 py-4 sm:px-5">
               {/* Duas colunas quando cabe; o que é longo (outros técnicos, pedido do cliente, formulários) usa a linha toda. */}
               <div className="grid gap-x-6 gap-y-5 @2xl:grid-cols-2">
-                <Field
-                  label="Título"
-                  error={shown.title}
-                  hint={titleText ? undefined : `Em branco, a OS sai como “${automaticTitle || "Tipo de OS · Localização"}”.`}
-                >
+                <Field label="Título" error={shown.title}>
                   <Input
                     id={ERROR_FIELD.title}
                     value={f.title}
@@ -1444,7 +1417,7 @@ function NewTicket() {
                 </Field>
 
                 <div className="flex flex-col gap-1.5">
-                  <Field label="Duração estimada (min)" error={shown.minutes} hint={minutes ? formatMinutes(minutes) : "Vazio: a agenda reserva 1h"}>
+                  <Field label="Duração estimada (min)" error={shown.minutes} hint={minutes ? formatMinutes(minutes) : undefined}>
                     <Input
                       id={ERROR_FIELD.minutes}
                       type="number"
@@ -1510,20 +1483,10 @@ function NewTicket() {
                         ))}
                     </Select>
                   ) : null}
-                  {shown.owner ? (
-                    <FieldError id={errorId("owner")}>{shown.owner}</FieldError>
-                  ) : (
-                    <span className="text-xs text-ink-subtle">
-                      {d.ownerMode === "me"
-                        ? "A OS vai para a sua fila."
-                        : d.ownerMode === "none"
-                          ? "Fica em “Sem analista” até alguém assumir."
-                          : "Vai para a fila do analista escolhido."}
-                    </span>
-                  )}
+                  {shown.owner ? <FieldError id={errorId("owner")}>{shown.owner}</FieldError> : null}
                 </div>
 
-                <Field label="Projeto" hint="Se a OS faz parte de um projeto do cliente. Com projeto, as etiquetas passam a ser as de projeto.">
+                <Field label="Projeto">
                   <Select value={f.project_id} onChange={(e) => setForm("project_id", e.target.value)}>
                     <option value="">Sem projeto</option>
                     {projectOptions.map((p) => (
@@ -1541,12 +1504,13 @@ function NewTicket() {
                       value={f.visit_note}
                       onChange={(e) => setForm("visit_note", e.target.value.slice(0, NOTE_LIMIT))}
                       maxLength={NOTE_LIMIT}
-                      placeholder="Com quem falar, acesso, o que levar. O técnico vê em destaque no app."
                     />
                   </Field>
-                  <span className="text-right text-[11px] text-ink-subtle tabular-nums">
-                    {f.visit_note.length.toLocaleString("pt-BR")} / {NOTE_LIMIT.toLocaleString("pt-BR")}
-                  </span>
+                  {f.visit_note.length >= NOTE_LIMIT * 0.9 ? (
+                    <span className="text-right text-[11px] text-ink-subtle tabular-nums">
+                      {f.visit_note.length.toLocaleString("pt-BR")} / {NOTE_LIMIT.toLocaleString("pt-BR")}
+                    </span>
+                  ) : null}
                 </div>
 
                 <div className="flex flex-col gap-1.5">
@@ -1570,7 +1534,6 @@ function NewTicket() {
                         <Input
                           value={f.service_address}
                           onChange={(e) => setForm("service_address", e.target.value)}
-                          placeholder="Ex.: Doca 3, entrada pelos fundos"
                           maxLength={255}
                           autoFocus
                           aria-label="Outro endereço do atendimento"
@@ -1578,7 +1541,7 @@ function NewTicket() {
                       ) : null}
                     </div>
                   ) : (
-                    <span className="text-xs text-ink-subtle">Escolha a localização (passo 2): o endereço vem dela, e aqui dá para trocar.</span>
+                    <span className="text-sm text-ink-subtle">—</span>
                   )}
                 </div>
 
@@ -1626,7 +1589,7 @@ function NewTicket() {
                     <SegmentedRadio options={ORIGINS} value={f.source} onChange={onOrigin} ariaLabel="Origem" labelledBy={ids.origin} className="max-w-md" />
                   </div>
                   <Field label="Nº do chamado do cliente">
-                    <Input value={f.client_reference} onChange={(e) => setForm("client_reference", e.target.value)} maxLength={80} placeholder="Ex.: INC0012345" />
+                    <Input value={f.client_reference} onChange={(e) => setForm("client_reference", e.target.value)} maxLength={80} />
                   </Field>
                   {f.client_reference.trim().length >= 4 ? (
                     <div className="@2xl:col-span-2">
@@ -1638,16 +1601,14 @@ function NewTicket() {
                       value={f.requester_name}
                       onChange={(e) => setForm("requester_name", e.target.value)}
                       maxLength={160}
-                      placeholder="Nome de quem abriu o chamado"
                     />
                   </Field>
-                  <Field label="Contato" hint="O técnico não vê o contato do cliente.">
+                  <Field label="Contato">
                     <Input
                       value={f.requester_contact}
                       onChange={(e) => setForm("requester_contact", e.target.value)}
                       maxLength={160}
                       inputMode="tel"
-                      placeholder="(11) 90000-0000"
                     />
                   </Field>
                 </fieldset>

@@ -62,7 +62,6 @@ export function MessageIntake({
         </span>
         <span className="min-w-0 flex-1">
           <span className="block text-sm font-bold text-ink">Colar mensagem do WhatsApp ou e-mail</span>
-          <span className="block text-xs text-ink-muted">Preenche cliente, localização e escopo a partir do pedido do cliente.</span>
         </span>
         <ChevronDown aria-hidden className={clsx("size-4 shrink-0 text-ink-subtle transition-transform duration-200", open && "rotate-180")} />
       </button>
@@ -84,7 +83,6 @@ export function MessageIntake({
               fill();
             }
           }}
-          placeholder="[09:41, 13/11/2026] Cliente: A loja 41 está sem sistema desde ontem..."
           className="mt-1.5"
         />
         <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -96,7 +94,6 @@ export function MessageIntake({
               Limpar
             </Button>
           ) : null}
-          <span className="text-xs text-ink-subtle">O texto não sai do navegador. Telefones e e-mails vão para o Contato, não para o escopo.</span>
         </div>
       </div>
       {filled.length || suggestions.length ? (
