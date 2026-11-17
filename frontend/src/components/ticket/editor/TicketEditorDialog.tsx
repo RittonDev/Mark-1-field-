@@ -155,7 +155,7 @@ export function TicketEditorDialog({
 }) {
   const queryClient = useQueryClient();
   const ticket = useQuery({ queryKey: ["ticket", ticketId], queryFn: () => api.get<TicketDetail>(`/tickets/${ticketId}`) });
-  // Lido uma vez, ao abrir: a lista de trás (fila, quadro, dia) já tem o nº, o título e a situação.
+  // Lido uma vez, ao abrir: a lista de trás (fila, calendário, dia) já tem o nº, o título e a situação.
   const [preview] = useState(() => {
     for (const [, data] of queryClient.getQueriesData({ predicate: (q) => q.queryKey[0] !== "ticket" })) {
       const found = findPreview(data, ticketId);

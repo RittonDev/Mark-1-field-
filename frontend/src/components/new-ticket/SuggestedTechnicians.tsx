@@ -122,50 +122,50 @@ export function SuggestedTechnicians({
             )}
           >
             <div className="flex min-w-0 flex-1 items-start gap-3">
-            <span className="relative mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full bg-surface-3 text-xs font-semibold text-ink-muted">
-              {initials(t.name)}
-              {i === 0 && !isAssignee ? (
-                <span className="absolute -top-1 -right-1 flex size-4 items-center justify-center rounded-full bg-brand text-white dark:bg-brand-strong" title="Mais indicado">
-                  <Star aria-hidden className="size-2.5 fill-current" />
-                  <span className="sr-only">Mais indicado</span>
-                </span>
-              ) : null}
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                <span className="truncate text-sm font-semibold text-ink">{t.name}</span>
-                {scheduled && t.busy != null ? (
-                  <span
-                    className={clsx(
-                      "rounded-full px-1.5 py-px text-[11px] font-medium",
-                      // Cor só para o problema: livre no horário é o esperado.
-                      t.busy ? "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300" : "bg-surface-2 text-ink-muted",
-                    )}
-                  >
-                    {t.busy ? "Ocupado no horário" : "Livre no horário"}
+              <span className="relative mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full bg-surface-3 text-xs font-semibold text-ink-muted">
+                {initials(t.name)}
+                {i === 0 && !isAssignee ? (
+                  <span className="absolute -top-1 -right-1 flex size-4 items-center justify-center rounded-full bg-brand text-white dark:bg-brand-strong" title="Mais indicado">
+                    <Star aria-hidden className="size-2.5 fill-current" />
+                    <span className="sr-only">Mais indicado</span>
                   </span>
                 ) : null}
-                {t.on_shift ? (
-                  <span className="inline-flex items-center gap-1 text-[11px] font-medium text-ink-muted">
-                    <span aria-hidden className="size-1.5 rounded-full bg-ink-subtle" />
-                    em turno
-                  </span>
-                ) : null}
-              </p>
-              <p className="mt-0.5 text-xs text-ink-muted">
-                {facts.join(" · ")}
-                {t.last_visit_at_location ? ` · última aqui em ${formatDate(t.last_visit_at_location)}` : ""}
-              </p>
-              {extra.length ? (
-                <p className="mt-1 flex flex-wrap gap-1">
-                  {extra.map((r) => (
-                    <span key={r} className="rounded-md bg-surface-2 px-1.5 py-px text-[11px] text-ink-muted">
-                      {r}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                  <span className="truncate text-sm font-semibold text-ink">{t.name}</span>
+                  {scheduled && t.busy != null ? (
+                    <span
+                      className={clsx(
+                        "rounded-full px-1.5 py-px text-[11px] font-medium",
+                        // Cor só para o problema: livre no horário é o esperado.
+                        t.busy ? "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300" : "bg-surface-2 text-ink-muted",
+                      )}
+                    >
+                      {t.busy ? "Ocupado no horário" : "Livre no horário"}
                     </span>
-                  ))}
+                  ) : null}
+                  {t.on_shift ? (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-ink-muted">
+                      <span aria-hidden className="size-1.5 rounded-full bg-ink-subtle" />
+                      em turno
+                    </span>
+                  ) : null}
                 </p>
-              ) : null}
-            </div>
+                <p className="mt-0.5 text-xs text-ink-muted">
+                  {facts.join(" · ")}
+                  {t.last_visit_at_location ? ` · última aqui em ${formatDate(t.last_visit_at_location)}` : ""}
+                </p>
+                {extra.length ? (
+                  <p className="mt-1 flex flex-wrap gap-1">
+                    {extra.map((r) => (
+                      <span key={r} className="rounded-md bg-surface-2 px-1.5 py-px text-[11px] text-ink-muted">
+                        {r}
+                      </span>
+                    ))}
+                  </p>
+                ) : null}
+              </div>
             </div>
             <div
               className={clsx(

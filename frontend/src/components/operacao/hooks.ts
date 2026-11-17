@@ -1,8 +1,8 @@
 "use client";
 
-// Peças comuns das telas de operação (Minha fila, Solicitações, Calendário, Atividades do dia e Quadro).
+// Peças comuns das telas de operação (Minha fila, Solicitações, Calendário e Atividades do dia).
 
-import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { useToast } from "@/components/Toaster";
@@ -32,18 +32,6 @@ export function mayHaveGroupText(t: TicketListItem): boolean {
   if (t.status === "cancelled") return false;
   if (GROUP_TEXT_STATUSES.includes(t.status)) return true;
   return Boolean(t.assignee && t.scheduled_start) || t.unproductive_count > 0;
-}
-
-/**
- * A OS completa, lida agora (versão, formulários, transições permitidas). Fica no mesmo cache do
- * painel da OS; `staleTime` aproveita uma leitura de segundos atrás (ex.: a do início do arraste).
- */
-export function fetchTicket(queryClient: QueryClient, id: UUID, staleTime = 0) {
-  return queryClient.fetchQuery({
-    queryKey: ["ticket", id],
-    queryFn: () => api.get<TicketDetail>(`/tickets/${id}`),
-    staleTime,
-  });
 }
 
 /** Rola até um bloco da tela (sem animar com "reduzir movimento" ligado) e leva o foco para ele. */

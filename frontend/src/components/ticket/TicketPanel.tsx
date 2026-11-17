@@ -11,7 +11,7 @@ import { DISCARD_CONFIRM } from "./editor/useUnsavedGuard";
 /**
  * A OS aberta no painel lateral, como no Field Control, fica na URL (ex.: /chamados?os=<id>):
  * - um painel só por tela, fora das listas: ele não fecha nem troca de OS quando a lista atrás muda
- *   (a OS que muda de seção na Minha fila, de coluna no Quadro, o técnico que sai de campo no Mapa);
+ *   (a OS que muda de seção na Minha fila, de dia no Calendário, o técnico que sai de campo no Mapa);
  * - Voltar (inclusive o gesto do celular) fecha o painel e fica na lista;
  * - recarregar a página ou mandar o link mantém a OS aberta;
  * - um link de dentro do painel (cliente, loja, projeto) leva para a tela sem o painel;

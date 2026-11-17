@@ -24,7 +24,7 @@ export interface TransitionTarget {
   scheduled_start: string | null;
   scheduled_end: string | null;
   assignee?: { id: UUID; name: string } | null;
-  /** Só o detalhe tem (o quadro não): usado na dica do fim da visita. */
+  /** Só o detalhe tem: usado na dica do fim da visita. */
   estimated_minutes?: number | null;
   /** Só o detalhe tem: ao resolver uma OS que furou o prazo, pede o motivo de cada relógio. */
   response_breached?: boolean;
@@ -73,7 +73,7 @@ export function TransitionDialog({
   const queryClient = useQueryClient();
   const { toast } = useToast();
   // A OS mais nova que se conhece: a recebida (o editor passa a OS ao vivo) ou a relida depois de um
-  // 409 (o quadro passa a cópia da lista, que não se atualiza sozinha). O que foi digitado fica.
+  // 409 (quem passa a cópia de uma lista recebe a versão nova). O que foi digitado fica.
   const [latest, setLatest] = useState<TicketDetail | null>(null);
   const ticket: TransitionTarget = latest && latest.version > given.version ? latest : given;
   const req = transitionRequirements(to);

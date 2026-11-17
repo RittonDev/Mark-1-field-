@@ -106,7 +106,6 @@ const SYNONYMS: Record<string, string[]> = {
   "/agenda": ["calendário", "agendamentos", "agenda"],
   "/dia": ["atividades", "hoje", "programação do dia", "roteiro", "dia"],
   "/mapa": ["mapa", "ao vivo", "rastreamento", "localização", "gps", "onde está o técnico", "jornada"],
-  "/quadro": ["kanban", "colunas"],
   "/assistencia": ["laboratório", "conserto", "reparo", "bancada", "rma", "assistência técnica"],
   "/orcamentos": ["orçamento", "proposta", "cotação", "catálogo de itens"],
   "/projetos": ["projeto", "implantação", "rollout"],

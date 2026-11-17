@@ -76,8 +76,6 @@ export const TRANSITIONS: Record<TicketStatus, TicketStatus[]> = {
   reopened: ["assigned", "scheduled", "en_route", "in_progress", "on_hold_customer", "on_hold_vendor", "resolved"],
 };
 
-export const UNTOUCHED_STATUSES: TicketStatus[] = ["new", "triage"];
-
 /** Verbo do botão de ação para cada status de destino. */
 export const TRANSITION_ACTION: Record<TicketStatus, string> = {
   new: "Voltar para novo",
@@ -207,8 +205,6 @@ export const canManageTickets = (role: UserRole | undefined) =>
   role === "admin" || role === "supervisor" || role === "analyst";
 /** Configuração: grupos e categorias (SLA e usuários só admin). */
 export const isManager = (role: UserRole | undefined) => role === "admin" || role === "supervisor";
-/** Quem assume sozinho uma OS sem responsável ao iniciar o atendimento (SELF_ASSIGN_ROLES). */
-export const SELF_ASSIGN_ROLES: UserRole[] = ["analyst"];
 
 export const RESPONSIBILITY: Record<Responsibility, { label: string; color: string }> = {
   internal: { label: "Interna", color: "#dc2626" },
