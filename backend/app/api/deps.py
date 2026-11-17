@@ -46,7 +46,9 @@ async def get_current_user(
     return user
 
 
-async def optional_user(db: AsyncSession, creds: HTTPAuthorizationCredentials | None) -> User | None:
+async def optional_user(
+    db: AsyncSession, creds: HTTPAuthorizationCredentials | None
+) -> User | None:
     """Quem abriu uma página pública, se mandou a sessão (ela não exige login: sem sessão, é o
     cliente). Token inválido, usuário inativo ou sessão encerrada valem como "sem sessão"."""
     if creds is None:

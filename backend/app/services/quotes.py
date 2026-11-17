@@ -11,7 +11,8 @@ from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 
-from sqlalchemy import ColumnElement, and_, case, column, func, or_, select, true, update
+from sqlalchemy import ColumnElement, and_, case, column, func, or_, select, true
+from sqlalchemy import update as sql_update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -387,7 +388,7 @@ async def register_view(db: AsyncSession, quote: Quote, now: datetime) -> None:
     não reinicia o "em revisão" nem muda a ordem das listas."""
     last = Quote.client_last_viewed_at
     await db.execute(
-        update(Quote)
+        sql_update(Quote)
         .where(Quote.id == quote.id)
         .values(
             client_views=case(

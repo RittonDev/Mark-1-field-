@@ -337,7 +337,8 @@ async def test_home_attention_groups(
                 total=Decimal("20"),
                 status=ExpenseStatus.APPROVED,
             ),
-            # Orçamentos: enviado há 4 dias (conta), há 1 dia e vencido (não contam).
+            # Orçamentos para cobrar: enviado há 4 dias sem resposta e vencido ontem (contam);
+            # enviado há 1 dia (ainda não).
             Quote(
                 ticket_id=no_problem.id,
                 title="Rack",
@@ -385,7 +386,7 @@ async def test_home_attention_groups(
         "no_owner": 2,
         "violation_pending": 1,
         "payouts_pending": 1,
-        "quotes_waiting": 1,
+        "quotes_waiting": 2,
     }
     # O que pede ação agora primeiro; depois o mais grave e, no mesmo nível, o maior número.
     order = [(grp["tier"], grp["severity"], grp["count"]) for grp in data["attention"]]
@@ -404,10 +405,10 @@ async def test_home_attention_groups(
         "portal_requests",
         "part_requests_open",
         "costs_pending",
+        "quotes_waiting",
         "stale",
         "violation_pending",
         "payouts_pending",
-        "quotes_waiting",
     ]
     now = {"sla_breached", "late_arrival", "today_not_started", "unassigned_visit"}
     assert {key for key, grp in g.items() if grp["tier"] == "now"} == now
@@ -452,8 +453,11 @@ async def test_home_attention_groups(
     assert "(2 un)" in part["reason"] and part["technician"] == "Tecnico"
     cost = g["costs_pending"]["items"][0]
     assert cost["reason"].startswith("Pedágio de R$ 12,50 aguardando aprovação")
-    quote = g["quotes_waiting"]["items"][0]
-    assert quote["reason"].startswith("ORC-") and "R$ 300,00" in quote["reason"]
+    # Quem vence antes primeiro (o vencido ontem); depois o sem validade, com o motivo.
+    expired, waiting = (item["reason"] for item in g["quotes_waiting"]["items"])
+    assert expired.startswith("ORC-") and expired.endswith("(R$ 70,00) venceu em 16/11: renove")
+    assert waiting.startswith("ORC-")
+    assert waiting.endswith("(R$ 300,00) enviado há 4 dias, sem resposta")
 
     # Os nomes vêm junto (cliente, loja, técnico), sem consulta por item.
     item = g["late_arrival"]["items"][0]
@@ -489,7 +493,7 @@ async def test_home_attention_groups(
         "costs_pending": "/custos",
         "portal_requests": "/solicitacoes",
         "payouts_pending": "/pagamentos",
-        "quotes_waiting": "/orcamentos",
+        "quotes_waiting": "/orcamentos?cobrar=1",
     }
     assert all(grp["title"] and grp["hint"] for grp in data["attention"])
 

@@ -137,6 +137,8 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
     mutationFn: (q: Quote) => api.post<Quote>(`/quotes/${q.id}/cancel`),
     onSuccess: (q) => {
       refresh();
+      // Os pedidos de peça ligados a ele voltam a "aguardando orçamento" (vêm no detalhe da OS).
+      void queryClient.invalidateQueries({ queryKey: ["ticket", ticket.id], exact: true });
       toast({ title: `${q.code} cancelado`, description: "O link do cliente não abre mais.", tone: "success" });
     },
     onError: (e) => toast({ title: "Não foi possível cancelar", description: errorMessage(e), tone: "error" }),

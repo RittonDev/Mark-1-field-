@@ -76,7 +76,9 @@ def _legacy_description(quote: Quote) -> str | None:
 
 def _legacy_attachments(quote: Quote) -> list[QuoteLegacyAttachment]:
     return [
-        QuoteLegacyAttachment(url=str(a["url"]), title=_text(a.get("title")), type=_text(a.get("type")))
+        QuoteLegacyAttachment(
+            url=str(a["url"]), title=_text(a.get("title")), type=_text(a.get("type"))
+        )
         for a in (quote.legacy or {}).get("attachments") or []
         if isinstance(a, dict) and a.get("url")
     ]
@@ -131,9 +133,7 @@ async def list_catalog(
 
 
 @router.get("/quote-items/last-prices", response_model=list[QuoteLastPrice])
-async def last_prices(
-    customer_id: uuid.UUID, db: DB, _: TicketManagerUser
-) -> list[QuoteLastPrice]:
+async def last_prices(customer_id: uuid.UUID, db: DB, _: TicketManagerUser) -> list[QuoteLastPrice]:
     """Último preço aprovado do cliente para cada item do catálogo (o editor oferece com 1
     clique)."""
     return await svc.last_prices(db, customer_id)
@@ -338,7 +338,9 @@ async def list_quotes(
     response.headers["X-Total-Count"] = str(total or 0)
     # Só as colunas da OS que a lista mostra (a OS inteira traria as ~19 relações dela).
     stmt = _joined(
-        select(Quote, Ticket.number, Ticket.customer_id, Ticket.status, Customer.name, Location.name)
+        select(
+            Quote, Ticket.number, Ticket.customer_id, Ticket.status, Customer.name, Location.name
+        )
     ).where(*conds)
     rows = (await db.execute(stmt.order_by(*order).limit(limit))).all()
     out = []
