@@ -58,11 +58,16 @@ MIN_YEAR, MAX_YEAR = 2000, 2100
 
 # Palavras que não dizem nada sozinhas (artigos, preposições, "chamado", "mostrar"...).
 STOP = frozenset(
-    """a o as os ao aos de da do das dos em no na nos nas num numa para pra pro pras pros com por
-    pelo pela pelos pelas e ou que um uma uns umas todas todos toda todo me mostrar mostre mostra
-    ver veja listar liste lista quais qual quero buscar busca procurar procure achar ache chamado
-    chamados ordem ordens servico servicos ticket tickets dia dias ate entre desde durante mes
-    semana ano sobre visita visitas""".split()
+    {
+        *("a", "o", "as", "os", "ao", "aos", "de", "da", "do", "das", "dos", "em", "no", "na"),
+        *("nos", "nas", "num", "numa", "para", "pra", "pro", "pras", "pros", "com", "por"),
+        *("pelo", "pela", "pelos", "pelas", "e", "ou", "que", "um", "uma", "uns", "umas"),
+        *("todas", "todos", "toda", "todo", "me", "mostrar", "mostre", "mostra", "ver", "veja"),
+        *("listar", "liste", "lista", "quais", "qual", "quero", "buscar", "busca", "procurar"),
+        *("procure", "achar", "ache", "chamado", "chamados", "ordem", "ordens", "servico"),
+        *("servicos", "ticket", "tickets", "dia", "dias", "ate", "entre", "desde", "durante"),
+        *("mes", "semana", "ano", "sobre", "visita", "visitas"),
+    }
 )
 TECH_KW = frozenset({"tecnico", "tecnica", "tecnicos", "tecnicas", "tec"})
 CUSTOMER_KW = frozenset({"cliente", "clientes", "empresa"})
@@ -71,10 +76,14 @@ CITY_KW = frozenset({"cidade", "municipio"})
 KEYWORDS = TECH_KW | CUSTOMER_KW | LOCATION_KW | CITY_KW
 # Palavra comum do dia a dia da OS: sozinha, só vira nome se for o nome inteiro.
 DOMAIN_WORDS = frozenset(
-    """rede redes impressora impressoras camera cameras cftv computador computadores notebook
-    internet link servidor switch cabo cabos cabeamento manutencao instalacao preventiva corretiva
-    troca sistema energia telefone telefonia wifi acesso senha shopping centro matriz sala andar
-    visita visitas equipamento equipamentos rack nobreak tela monitor""".split()
+    {
+        *("rede", "redes", "impressora", "impressoras", "camera", "cameras", "cftv"),
+        *("computador", "computadores", "notebook", "internet", "link", "servidor", "switch"),
+        *("cabo", "cabos", "cabeamento", "manutencao", "instalacao", "preventiva", "corretiva"),
+        *("troca", "sistema", "energia", "telefone", "telefonia", "wifi", "acesso", "senha"),
+        *("shopping", "centro", "matriz", "sala", "andar", "visita", "visitas", "equipamento"),
+        *("equipamentos", "rack", "nobreak", "tela", "monitor"),
+    }
 )
 # Palavras de etiqueta que não bastam sozinhas para escolher a etiqueta.
 GENERIC_TAG_WORDS = frozenset({"ticket", "tickets", "tecnico", "nao", "cliente", "envio"})
@@ -344,7 +353,9 @@ def _year(value: str | None) -> int | None:
     return year if MIN_YEAR <= year <= MAX_YEAR else None
 
 
-def parse_date(value: str, today: date, default_year: int | None = None) -> tuple[date, bool] | None:
+def parse_date(
+    value: str, today: date, default_year: int | None = None
+) -> tuple[date, bool] | None:
     """ "12/11", "12/11/25", "12-11-2025", "2025-11-12" -> (data, se veio com ano)."""
     parts = re.split(r"[/.-]", value)
     try:
@@ -686,7 +697,7 @@ def read_periods(reader: Reader, today: date, *, alone: bool, wants_schedule: bo
         add(m, start, end, month_label(year, month), _tense(start, today))
     for m in list(YEAR_RANGE_RX.finditer(reader.text)):
         first, last = sorted((int(m.group(1)), int(m.group(2))))
-        if MIN_YEAR <= first and last <= MAX_YEAR:
+        if first >= MIN_YEAR and last <= MAX_YEAR:
             add(m, date(first, 1, 1), date(last, 12, 31), f"{first} a {last}", "created")
     if not alone:
         for m in list(YEAR_RX.finditer(reader.text)):
@@ -902,7 +913,9 @@ def keyword_entities(parsed: Parsed, pools: dict[str, Pool]) -> None:
             for x in run:
                 x.location_only = True
             continue
-        kind = "technician" if w.text in TECH_KW else "customer" if w.text in CUSTOMER_KW else "city"
+        kind = (
+            "technician" if w.text in TECH_KW else "customer" if w.text in CUSTOMER_KW else "city"
+        )
         match_spans(parsed, [pools[kind]], run)
 
 
@@ -990,9 +1003,7 @@ def _location_word(word: str) -> ColumnElement[bool]:
     rx = _prefix_regex(word)
     if word.isdigit():
         return or_(_code_digits() == (word.lstrip("0") or "0"), Location.name.regexp_match(rx))
-    return or_(
-        Location.name.regexp_match(rx, flags="i"), Location.code.regexp_match(rx, flags="i")
-    )
+    return or_(Location.name.regexp_match(rx, flags="i"), Location.code.regexp_match(rx, flags="i"))
 
 
 def _location_cand(row: Any, words: tuple[str, ...] = ()) -> Cand:

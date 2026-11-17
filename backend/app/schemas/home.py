@@ -176,5 +176,7 @@ def tags_out(raw: Any) -> list[TagOut]:
     for tag in raw or []:
         if isinstance(tag, dict) and str(tag.get("name") or "").strip():
             color = tag.get("color")
-            out.append(TagOut(name=str(tag["name"]), color=color if isinstance(color, str) else None))
+            out.append(
+                TagOut(name=str(tag["name"]), color=color if isinstance(color, str) else None)
+            )
     return out

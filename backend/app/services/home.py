@@ -255,9 +255,7 @@ def stale_clause(m: Moment) -> ColumnElement[bool]:
 
 def no_owner_clause() -> ColumnElement[bool]:
     """Sem analista responsável (ou com um que saiu da gestão), como o filtro da lista."""
-    return and_(
-        _open(), or_(Ticket.owner_id.is_(None), Ticket.owner_id.in_(orphan_owner_ids()))
-    )
+    return and_(_open(), or_(Ticket.owner_id.is_(None), Ticket.owner_id.in_(orphan_owner_ids())))
 
 
 def portal_clause() -> ColumnElement[bool]:
@@ -302,7 +300,9 @@ def _ticket_select(*extra: Any) -> Select[Any]:
     )
 
 
-def _item(row: Any, when: datetime | None, reason: str, technician: str | None = None) -> AttentionItem:
+def _item(
+    row: Any, when: datetime | None, reason: str, technician: str | None = None
+) -> AttentionItem:
     return AttentionItem(
         ticket_id=row.id,
         number=row.number,
@@ -386,7 +386,10 @@ def _stale_reason(row: Any, m: Moment) -> tuple[datetime | None, str]:
 def _no_owner_reason(row: Any, m: Moment) -> tuple[datetime | None, str]:
     if row.owner_id is not None:
         return row.created_at, "O analista responsável saiu da gestão: escolha outro"
-    return row.created_at, f"Sem analista responsável (aberta há {span_text(m.now - row.created_at)})"
+    return (
+        row.created_at,
+        f"Sem analista responsável (aberta há {span_text(m.now - row.created_at)})",
+    )
 
 
 def _violation_reason(row: Any, m: Moment) -> tuple[datetime | None, str]:
@@ -764,7 +767,11 @@ TICKET_GROUPS: dict[str, TicketGroup] = {
         lambda: [Ticket.resolved_at.desc().nulls_last()],
         _violation_reason,
     ),
-    "portal_requests": (lambda m: portal_clause(), lambda: [Ticket.created_at.asc()], _portal_reason),
+    "portal_requests": (
+        lambda m: portal_clause(),
+        lambda: [Ticket.created_at.asc()],
+        _portal_reason,
+    ),
 }
 
 OtherGroup = Callable[[AsyncSession, Moment], Awaitable[tuple[int, list[AttentionItem]]]]
@@ -887,16 +894,16 @@ async def _suggest_late_technician(
         key="late_technician",
         title=f"{name} chegou atrasado em {n} OS nos últimos 30 dias",
         detail=detail,
-        filters=ListFilters(assignee_id=tech_id, created_from=m.today - timedelta(days=RECENT_DAYS - 1)),
+        filters=ListFilters(
+            assignee_id=tech_id, created_from=m.today - timedelta(days=RECENT_DAYS - 1)
+        ),
     )
 
 
 async def _suggest_recurrence(db: AsyncSession, m: Moment, rows: list[Any]) -> Suggestion | None:
     since = m.days_ago(RECENT_DAYS - 1)
     per_store = Counter(
-        row.location_id
-        for row in rows
-        if row.location_id is not None and row.created_at >= since
+        row.location_id for row in rows if row.location_id is not None and row.created_at >= since
     )
     repeated = [(loc, n) for loc, n in per_store.items() if n >= RECURRENCE_MIN]
     if not repeated:
@@ -976,9 +983,7 @@ async def _suggest_slow_service(db: AsyncSession) -> Suggestion | None:
         return None
     slow.sort(key=lambda item: (-item[0], item[1].name))
     _, worst, median, count = slow[0]
-    detail = (
-        f"Mediana de {count} OS concluídas. Ajuste a estimativa para a agenda não estourar."
-    )
+    detail = f"Mediana de {count} OS concluídas. Ajuste a estimativa para a agenda não estourar."
     if len(slow) > 1:
         k = len(slow) - 1
         detail += f" Mais {k} {plural(k, 'tipo', 'tipos')} acima do previsto."
