@@ -9,6 +9,7 @@ import {
   FileText,
   FolderKanban,
   HardHat,
+  House,
   Inbox,
   LayoutDashboard,
   MapPin,
@@ -47,6 +48,8 @@ export const GROUPS: { key: NavGroup; label: string | null }[] = [
 ];
 
 export const NAV: NavItem[] = [
+  // Visão do gestor: pontos de atenção das OS, sugestões e a busca de tudo.
+  { href: "/inicio", label: "Início", icon: House, visible: canManageTickets, group: "main" },
   { href: "/minha-fila", label: "Minha fila", icon: Inbox, visible: canManageTickets, group: "main" },
   // Pedidos que os clientes abrem no portal (antes chegavam pelo WhatsApp ou e-mail).
   { href: "/solicitacoes", label: "Solicitações", icon: ClipboardPlus, visible: canManageTickets, group: "main" },

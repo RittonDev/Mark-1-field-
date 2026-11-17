@@ -27,6 +27,7 @@ import { createPortal } from "react-dom";
 import { applyTheme, clearThemeChoice, Logo, ThemeToggle, type ThemeChoice, useThemeChoice } from "@/components/Brand";
 import { openCommandPalette } from "@/components/CommandPalette";
 import { useConfirm } from "@/components/Confirm";
+import { onChangePasswordRequest } from "@/components/home/events";
 import { GROUPS, type NavItem, visibleNav } from "@/components/nav";
 import { useToast } from "@/components/Toaster";
 import { useTicketPanel } from "@/components/ticket/TicketPanel";
@@ -971,6 +972,9 @@ export function Topbar({ onOpenMenu, menuOpen = false }: { onOpenMenu?: () => vo
   const ticketPanel = useTicketPanel();
   const { user } = useAuth();
   const online = useOnline();
+  // "Trocar senha" pedido pela busca (Ctrl+K ou a busca do Início).
+  const [changingPassword, setChangingPassword] = useState(false);
+  useEffect(() => onChangePasswordRequest(() => setChangingPassword(true)), []);
 
   // "Abrir" de um aviso: a OS abre no painel lateral, sem sair da tela.
   useEffect(
@@ -1003,7 +1007,7 @@ export function Topbar({ onOpenMenu, menuOpen = false }: { onOpenMenu?: () => vo
           className="group inline-flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg border border-line bg-surface px-3 text-sm text-ink-subtle shadow-elev-1 transition-[border-color,color] hover:border-line-strong hover:text-ink-muted sm:max-w-md"
         >
           <Search aria-hidden className="size-4 shrink-0" />
-          <span className="flex-1 truncate text-left">Buscar OS, loja, cliente ou tela...</span>
+          <span className="flex-1 truncate text-left">Buscar OS, cliente, loja, técnico ou tela...</span>
           <span aria-hidden className="hidden items-center gap-1 sm:inline-flex">
             <Kbd>Ctrl</Kbd>
             <Kbd>K</Kbd>
@@ -1029,6 +1033,7 @@ export function Topbar({ onOpenMenu, menuOpen = false }: { onOpenMenu?: () => vo
           </p>
         )}
       </div>
+      <ChangePasswordDialog open={changingPassword} onClose={() => setChangingPassword(false)} />
     </header>
   );
 }
