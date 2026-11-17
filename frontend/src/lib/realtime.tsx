@@ -396,8 +396,10 @@ export function RealtimeProvider({
      * avisa, com o atalho para o WhatsApp. Com `cached`, copia sem esperar a rede.
      */
     const copyGroupText = async (ticketId: UUID, code: string, cached: GroupText[] | null) => {
-      let list = cached;
-      if (!list) {
+      let list: GroupText[];
+      if (cached) {
+        list = cached;
+      } else {
         try {
           list = await queryClient.fetchQuery({ ...groupTextsQuery(ticketId), staleTime: 0 });
         } catch (error) {
