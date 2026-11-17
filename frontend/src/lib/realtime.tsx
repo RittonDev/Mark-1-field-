@@ -4,7 +4,7 @@ import { type QueryClient, type QueryKey, useQueryClient } from "@tanstack/react
 import { useRouter } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useToast } from "@/components/Toaster";
-import { errorMessage, refreshSessionResult, WS_URL } from "./api";
+import { API_REACHABLE_EVENT, errorMessage, refreshSessionResult, WS_URL } from "./api";
 import { STATUS } from "./constants";
 import { formatMoney, todayISO } from "./format";
 import { sessionStore } from "./session";
@@ -691,6 +691,8 @@ export function RealtimeProvider({
       reconnectNow();
     };
     window.addEventListener("online", reconnectNow);
+    // A API voltou a responder (servidor reiniciado, deploy): conecta já, sem esperar a próxima tentativa.
+    window.addEventListener(API_REACHABLE_EVENT, reconnectNow);
     document.addEventListener("visibilitychange", onVisible);
 
     connect();
@@ -703,6 +705,7 @@ export function RealtimeProvider({
       window.clearTimeout(flushTimer);
       window.clearTimeout(followUpTimer);
       window.removeEventListener("online", reconnectNow);
+      window.removeEventListener(API_REACHABLE_EVENT, reconnectNow);
       document.removeEventListener("visibilitychange", onVisible);
       reconnectRef.current = () => {};
       if (socket) {

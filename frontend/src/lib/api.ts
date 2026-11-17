@@ -180,6 +180,18 @@ interface RequestOptions extends CallOptions {
   auth?: boolean;
 }
 
+/** A API respondeu: o tempo real caído (deploy, servidor reiniciado) tenta de novo na hora, sem esperar o backoff. */
+export const API_REACHABLE_EVENT = "mf:api-ok";
+let lastReachableSignal = 0;
+
+function signalReachable() {
+  const now = Date.now();
+  // No máximo um aviso a cada 5 s: a tela faz várias buscas juntas.
+  if (typeof window === "undefined" || now - lastReachableSignal < 5_000) return;
+  lastReachableSignal = now;
+  window.dispatchEvent(new Event(API_REACHABLE_EVENT));
+}
+
 const DEFAULT_TIMEOUT_MS = 30_000;
 const UPLOAD_TIMEOUT_MS = 120_000;
 const REFRESH_TIMEOUT_MS = 15_000;
@@ -313,6 +325,8 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     if (error instanceof ApiError) throw error;
     throw transportError(error, options.signal);
   }
+  // Qualquer resposta da própria API (não a página de erro de um proxy, 5xx) prova que ela está no ar.
+  if (res.status < 500) signalReachable();
   if (res.status === 204) return undefined as T;
   let text: string;
   try {
