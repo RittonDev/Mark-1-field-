@@ -459,6 +459,12 @@ export function TicketEditor({
   const [transition, setTransition] = useState<TicketStatus | null>(null);
   const [sharing, setSharing] = useState(false);
   const [unproductive, setUnproductive] = useState(false);
+  // Depois da visita improdutiva: o "Agendar visita" abre quando a OS nova (sem a agenda antiga) chegar aqui.
+  const [rescheduleAt, setRescheduleAt] = useState<number | null>(null);
+  if (rescheduleAt !== null && ticket.version >= rescheduleAt) {
+    setRescheduleAt(null);
+    if (ticket.allowed_transitions.includes("scheduled")) setTransition("scheduled");
+  }
   const [timesOpen, setTimesOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
@@ -731,9 +737,7 @@ export function TicketEditor({
           ticket={ticket}
           onClose={() => setUnproductive(false)}
           // A OS volta para Atribuído sem agenda: o próximo passo é marcar a nova visita.
-          onDone={(updated) => {
-            if (updated.allowed_transitions.includes("scheduled")) setTransition("scheduled");
-          }}
+          onDone={(updated) => setRescheduleAt(updated.version)}
         />
       ) : null}
     </div>

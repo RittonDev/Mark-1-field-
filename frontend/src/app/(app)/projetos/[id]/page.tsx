@@ -37,9 +37,11 @@ export default function ProjectPage() {
   // Hoje no fuso da operação (a entrega prevista é um dia do calendário).
   const [today] = useState(todayISO);
   const project = useQuery({ queryKey: ["project", id], queryFn: () => api.get<Project>(`/projects/${id}`) });
+  // Até 200 OS: não recarrega a cada volta para a aba (o tempo real já atualiza quando uma OS muda).
   const tickets = useQuery({
     queryKey: ["tickets", "project", id],
     queryFn: () => api.get<Page<TicketListItem>>("/tickets", { project_id: id, page_size: TICKETS_SHOWN, order_by: "-created_at" }),
+    staleTime: 30_000,
   });
 
   const back = (

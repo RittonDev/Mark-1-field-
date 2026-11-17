@@ -253,6 +253,51 @@ def _plain(value: Any) -> Any:
     return value if value is None or isinstance(value, bool | int | float | str) else str(value)
 
 
+# Nome que a pessoa vê nos campos do login, dos cadastros, do portal e do comercial (os campos
+# da OS ficam em services/validation_messages, que o sync do app também usa).
+FIELD_LABELS: dict[str, str] = {
+    "name": "Nome",
+    "full_name": "Nome completo",
+    "email": "E-mail",
+    "password": "Senha",
+    "current_password": "Senha atual",
+    "new_password": "Nova senha",
+    "phone": "Telefone",
+    "job_title": "Cargo",
+    "document": "CPF/CNPJ",
+    "company_document": "CNPJ",
+    "birth_date": "Data de nascimento",
+    "address_line": "Endereço",
+    "address": "Endereço",
+    "district": "Bairro",
+    "city": "Cidade",
+    "state": "UF",
+    "zip_code": "CEP",
+    "postal_code": "CEP",
+    "code": "Código",
+    "contact": "Contato",
+    "contact_name": "Contato",
+    "contact_phone": "Telefone do contato",
+    "amount": "Valor",
+    "unit_value": "Valor unitário",
+    "unit_price": "Preço unitário",
+    "discount": "Desconto",
+    "valid_until": "Validade",
+    "problem": "Defeito",
+    "signature": "Assinatura",
+}
+
+
+def _field_label(loc: list[Any]) -> str:
+    """Rótulo do campo: o da OS (validation_messages) ou o dos cadastros; vazio quando o erro é
+    do formulário inteiro ou o campo não tem nome conhecido."""
+    names = [p for p in loc if isinstance(p, str) and p not in ("body", "query", "path", "header")]
+    if not names:
+        return ""
+    label = validation_messages.field_label(loc)
+    return label if label != names[-1] else FIELD_LABELS.get(label, "")
+
+
 def validation_issue(error: dict[str, Any]) -> dict[str, Any]:
     """Um erro do pydantic no formato de sempre ({loc, msg, type, ctx}), com o texto em
     português. O `loc` segue com o nome técnico do campo (as telas acham o rótulo por ele) e
@@ -270,8 +315,8 @@ def validation_issue(error: dict[str, Any]) -> dict[str, Any]:
     ctx = error.get("ctx")
     if isinstance(ctx, dict) and ctx:
         issue["ctx"] = {str(k): _plain(v) for k, v in ctx.items()}
-    label = validation_messages.field_label(loc)
-    if label and label not in loc:
+    label = _field_label(loc)
+    if label:
         issue["label"] = label
     return issue
 

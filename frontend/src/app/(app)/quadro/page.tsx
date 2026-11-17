@@ -11,7 +11,7 @@ import { InactiveChip, RefreshFailed } from "@/components/operacao/status";
 import { useToast } from "@/components/Toaster";
 import { TicketLink } from "@/components/ticket/TicketLink";
 import { useTicketPanel } from "@/components/ticket/TicketPanel";
-import { TransitionDialog } from "@/components/ticket/TransitionDialog";
+import { TransitionDialog, transitionLabel } from "@/components/ticket/TransitionDialog";
 import { Button, Checkbox, Dialog, ErrorBox, Input, PageHeader, Select, Skeleton } from "@/components/ui";
 import { useNow } from "@/components/useNow";
 import { api, errorMessage, type Query } from "@/lib/api";
@@ -84,13 +84,12 @@ function closingBlocker(t: TicketDetail): string | null {
 function useFinalColumn(status: TicketStatus, filters: Query, enabled: boolean) {
   return useQuery({
     queryKey: ["tickets", "board", "final", status, filters],
-    queryFn: () =>
-      api.get<Page<TicketListItem>>("/tickets", {
-        ...filters,
-        status: [status],
-        order_by: "-updated_at",
-        page_size: FINAL_LIMIT,
-      }),
+    queryFn: ({ signal }) =>
+      api.get<Page<TicketListItem>>(
+        "/tickets",
+        { ...filters, status: [status], order_by: "-updated_at", page_size: FINAL_LIMIT },
+        { signal },
+      ),
     enabled,
     placeholderData: keepPreviousData,
     refetchInterval: 60_000,
@@ -129,7 +128,7 @@ function MoveSelect({
       </option>
       {targets.map((to) => (
         <option key={to} value={to}>
-          {TRANSITION_ACTION[to]}
+          {transitionLabel(to)}
         </option>
       ))}
     </select>
@@ -281,13 +280,13 @@ export default function BoardPage() {
   };
   const open = useQuery({
     queryKey: ["tickets", "board", "open", filters],
-    queryFn: () =>
-      api.get<Page<TicketListItem>>("/tickets", {
-        ...filters,
-        status: OPEN_COLUMNS,
-        order_by: "priority",
-        page_size: OPEN_LIMIT,
-      }),
+    // A busca obsoleta (filtro trocado no meio) é cancelada.
+    queryFn: ({ signal }) =>
+      api.get<Page<TicketListItem>>(
+        "/tickets",
+        { ...filters, status: OPEN_COLUMNS, order_by: "priority", page_size: OPEN_LIMIT },
+        { signal },
+      ),
     placeholderData: keepPreviousData,
     // Selos de SLA e atrasos mudam com o relógio: relê mesmo sem eventos (e com o tempo real caído).
     refetchInterval: 60_000,
@@ -445,7 +444,7 @@ export default function BoardPage() {
       ) : null}
 
       {open.error && !open.data ? (
-        <ErrorBox message={errorMessage(open.error)} />
+        <ErrorBox message={errorMessage(open.error)} onRetry={() => void open.refetch()} />
       ) : (
         <div
           aria-busy={open.isPlaceholderData || undefined}
@@ -460,6 +459,8 @@ export default function BoardPage() {
             const items = finalPage ? (finalPage.data?.items ?? []) : (grouped.get(status) ?? []);
             const count = finalPage ? (finalPage.data?.total ?? 0) : items.length;
             const loading = finalPage ? finalPage.isLoading : open.isLoading;
+            // Coluna de fechadas ou canceladas que não carregou: diz isso em vez de "Nenhuma OS".
+            const failed = Boolean(finalPage?.error && !finalPage.data);
             const canDrop = dragging !== null && dropTargets.includes(status);
             const isSource = dragging?.status === status;
             return (
@@ -499,7 +500,7 @@ export default function BoardPage() {
                       <h2 className="truncate text-sm font-bold text-ink">{info.label}</h2>
                     </div>
                     <span className="rounded-full bg-surface px-2 py-0.5 text-xs font-semibold text-ink-muted tabular-nums">
-                      {loading ? "…" : count}
+                      {loading ? "…" : failed ? "—" : count}
                     </span>
                   </div>
                   {finalPage && count > items.length ? (
@@ -509,6 +510,17 @@ export default function BoardPage() {
                 <div className="flex min-h-24 flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2">
                   {loading ? (
                     <ColumnSkeleton />
+                  ) : failed ? (
+                    <p role="alert" className="px-2 py-6 text-center text-xs text-red-700 dark:text-red-300">
+                      Não foi possível carregar.{" "}
+                      <button
+                        type="button"
+                        onClick={() => void finalPage?.refetch()}
+                        className="font-semibold underline-offset-2 hover:underline"
+                      >
+                        Tentar de novo
+                      </button>
+                    </p>
                   ) : (
                     items.map((t) => (
                       <BoardCard
@@ -532,7 +544,7 @@ export default function BoardPage() {
                       />
                     ))
                   )}
-                  {!loading && items.length === 0 ? (
+                  {!loading && !failed && items.length === 0 ? (
                     <p className="px-2 py-6 text-center text-xs text-ink-muted">Nenhuma OS</p>
                   ) : null}
                 </div>

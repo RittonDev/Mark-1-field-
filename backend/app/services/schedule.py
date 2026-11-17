@@ -7,11 +7,15 @@ SCHEDULE_CONFLICT; quem agenda vê as OS em choque e pode confirmar mesmo assim
 conflitos que já existem.
 """
 
+import functools
 import uuid
 from datetime import datetime, timedelta
+from typing import Any
 
 from sqlalchemy import ColumnElement, func, or_, select, union
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import noload
 
 from app.core.enums import TicketStatus
 from app.models import Location, Ticket, User
@@ -37,6 +41,22 @@ OCCUPYING = frozenset(
         TicketStatus.REOPENED,
     }
 )
+
+
+@functools.cache
+def _only_relations(*keep: str) -> tuple[Any, ...]:
+    """Carrega da OS só os relacionamentos que a agenda mostra: são ~19, e formulários, custos,
+    pagamentos e pedidos de peça de um mês inteiro de visitas iam junto sem uso. Montado na
+    primeira consulta (os mapeamentos já estão prontos)."""
+    return tuple(
+        noload(getattr(Ticket, rel.key))
+        for rel in sa_inspect(Ticket).relationships
+        if rel.key not in keep
+    )
+
+
+_CALENDAR_SHOWS = ("assignee", "helpers", "team", "customer", "location", "service_type")
+_CONFLICT_SHOWS = ("customer", "location")
 
 
 def visit_end(start: datetime, end: datetime | None, estimated_minutes: int | None) -> datetime:
@@ -85,7 +105,11 @@ async def find_conflicts(
     end: datetime,
     exclude_id: uuid.UUID | None = None,
 ) -> list[Ticket]:
-    stmt = select(Ticket).where(works_on(assignee_id), *_occupied(start, end, exclude_id))
+    stmt = (
+        select(Ticket)
+        .options(*_only_relations(*_CONFLICT_SHOWS))
+        .where(works_on(assignee_id), *_occupied(start, end, exclude_id))
+    )
     return list(await db.scalars(stmt.order_by(Ticket.scheduled_start)))
 
 
@@ -192,11 +216,15 @@ async def check_slot(
 async def calendar(
     db: AsyncSession, start: datetime, end: datetime, f: CalendarFilters
 ) -> list[CalendarEvent]:
-    stmt = select(Ticket).where(
-        Ticket.scheduled_start.is_not(None),
-        Ticket.scheduled_start < end,
-        _end_expr() > start,
-        Ticket.status != TicketStatus.CANCELLED,
+    stmt = (
+        select(Ticket)
+        .options(*_only_relations(*_CALENDAR_SHOWS))
+        .where(
+            Ticket.scheduled_start.is_not(None),
+            Ticket.scheduled_start < end,
+            _end_expr() > start,
+            Ticket.status != TicketStatus.CANCELLED,
+        )
     )
     if f.assignee_ids:
         # A agenda de cada técnico inclui as visitas em que ele vai junto.

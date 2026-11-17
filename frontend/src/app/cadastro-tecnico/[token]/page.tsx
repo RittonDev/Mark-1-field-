@@ -733,7 +733,11 @@ export default function TechnicianSignupPage() {
                           : { "aria-invalid": form.document.length === 14 && !isValidCpf(form.document) })}
                       />
                     </Field>
-                    <Field label="Data de nascimento" hint="É preciso ter 18 anos ou mais." error={fieldError("birth_date")}>
+                    <Field
+                      label="Data de nascimento"
+                      hint="É preciso ter 18 anos ou mais."
+                      error={fieldError("birth_date")}
+                    >
                       <Input
                         name="birth_date"
                         type="date"
@@ -929,7 +933,12 @@ export default function TechnicianSignupPage() {
 
               {step === 2 && cat ? (
                 <>
-                  <Field label="Região que você atende" required hint="Cidades, bairros ou zonas." error={fieldError("coverage_area")}>
+                  <Field
+                    label="Região que você atende"
+                    required
+                    hint="Cidades, bairros ou zonas."
+                    error={fieldError("coverage_area")}
+                  >
                     <Textarea
                       name="coverage_area"
                       rows={2}

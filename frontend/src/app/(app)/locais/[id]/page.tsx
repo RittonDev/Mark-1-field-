@@ -48,10 +48,12 @@ export default function LocationDetailPage() {
   });
   // Quem já atendeu esta loja, pelo cálculo da busca por proximidade: pede o máximo (50) para quem visita
   // com frequência não ficar de fora quando a distância é medida do centro da cidade.
+  // A conta mede a base técnica inteira: não refaz a cada volta para a aba (o histórico muda devagar).
   const nearby = useQuery({
     queryKey: ["technicians", "nearby", { location_id: id, limit: 50 }, true],
     queryFn: () => api.get<NearbyResult>("/technicians/nearby", { location_id: id, include_inactive: true, limit: 50 }),
     retry: false,
+    staleTime: 5 * 60_000,
   });
 
   const back = (

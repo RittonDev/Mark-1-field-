@@ -732,6 +732,7 @@ function QuoteList() {
 
 /** Orçamento com a validade vencida: data nova e envio (quem já tinha o link continua com o mesmo). */
 function RenewDialog({ quote, onClose, onDone }: { quote: QuoteListRow; onClose: () => void; onDone: (saved: Quote) => void }) {
+  const queryClient = useQueryClient();
   // A validade é dia do calendário no fuso da operação, como a API confere.
   const today = todayISO();
   const [date, setDate] = useState(() => shiftDays(today, QUOTE_VALID_DAYS));
@@ -757,6 +758,11 @@ function RenewDialog({ quote, onClose, onDone }: { quote: QuoteListRow; onClose:
       return api.post<Quote>(`/quotes/${quote.id}/send`);
     },
     onSuccess: onDone,
+    // A data nova pode ter sido salva e só o envio falhado (o orçamento voltou a rascunho): a lista relê.
+    onError: () => {
+      void queryClient.invalidateQueries({ queryKey: ["quotes"] });
+      void queryClient.invalidateQueries({ queryKey: ["ticket", quote.ticket_id, "quotes"] });
+    },
   });
   return (
     <Dialog

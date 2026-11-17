@@ -4,10 +4,11 @@ As rotas HTTP e a sincronização mobile chamam estas funções; nenhuma regra d
 OS deve morar na camada de rotas.
 """
 
+import contextlib
 import math
 import re
 import uuid
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from enum import Enum
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -2039,6 +2040,64 @@ async def _rescheduled_after(db: AsyncSession, ticket: Ticket, moment: datetime)
     return False
 
 
+# A visita que deu errado começou (saída ou início do atendimento) há no máximo isto.
+VISIT_WINDOW = timedelta(hours=12)
+_FIELD_RUN = (S.EN_ROUTE.value, S.IN_PROGRESS.value)
+
+
+def _pressed_at(ev: TicketEvent) -> datetime:
+    """Quando apertaram o botão: a hora do aparelho (ação feita offline) ou a do servidor."""
+    raw = (ev.data or {}).get("declared_at")
+    if isinstance(raw, str):
+        with contextlib.suppress(ValueError):
+            return datetime.fromisoformat(raw)
+    return ev.created_at
+
+
+async def _visit_began(db: AsyncSession, ticket: Ticket, now: datetime) -> datetime | None:
+    """Início da ida a campo mais recente (a sequência de "Em deslocamento"/"Em atendimento" das
+    últimas 12 h), mesmo que a central já tenha tirado a OS de campo ao remarcar."""
+    events = await db.scalars(
+        select(TicketEvent)
+        .where(
+            TicketEvent.ticket_id == ticket.id,
+            TicketEvent.event_type == TicketEventType.STATUS_CHANGED,
+            TicketEvent.created_at >= now - VISIT_WINDOW,
+        )
+        .order_by(TicketEvent.created_at.desc())
+    )
+    began: datetime | None = None
+    for ev in events:
+        if ev.to_value in _FIELD_RUN:
+            began = _pressed_at(ev)
+        elif began is not None:
+            break
+    return began
+
+
+def _local_day(value: datetime) -> date:
+    return value.astimezone(ZoneInfo(settings.TIMEZONE)).date()
+
+
+async def _keeps_new_schedule(
+    db: AsyncSession, ticket: Ticket, now: datetime, pressed: datetime | None
+) -> bool:
+    """A agenda atual já é a nova (a central remarcou, avisada pelo grupo) e não a da visita que
+    deu errado, então fica:
+    - improdutiva feita offline (`pressed`, a hora do botão): a central mexeu na agenda depois;
+    - na hora: com o técnico em campo, a central remarcou para outro dia.
+    """
+    start = ticket.scheduled_start
+    if start is None or start <= now:
+        return False
+    if pressed is not None and await _rescheduled_after(db, ticket, pressed):
+        return True
+    if _local_day(start) <= _local_day(pressed or now):
+        return False
+    began = await _visit_began(db, ticket, now)
+    return began is not None and await _rescheduled_after(db, ticket, began)
+
+
 async def register_unproductive(
     db: AsyncSession,
     ticket: Ticket,
@@ -2050,8 +2109,8 @@ async def register_unproductive(
     """O técnico foi e não atendeu (cliente ausente, sem acesso...). A OS volta para
     "Atribuído" sem agenda, para ser reagendada, e a ocorrência fica contada e no histórico.
 
-    Registrada offline e enviada depois que a central já remarcou (avisada pelo grupo): a nova
-    data fica e a OS segue "Agendado"; só a ocorrência é contada.
+    Se a central já remarcou (avisada pelo grupo) antes de a improdutiva chegar, offline ou com o
+    técnico ainda em campo, a nova data fica e a OS segue "Agendado"; só a ocorrência é contada.
     """
     check_version(ticket, payload.expected_version)
     is_assignee = actor.role == UserRole.TECHNICIAN and ticket.assignee_id == actor.id
@@ -2067,24 +2126,21 @@ async def register_unproductive(
         raise WorkflowError("Motivo de visita improdutiva inválido")
     now = utcnow()
     evidence = _declared(declared_at, ticket, now)
+    keep_schedule = await _keeps_new_schedule(
+        db, ticket, now, declared_at if evidence else None
+    )
     data: dict[str, Any] = {
         "reason_id": str(reason.id),
         "reason": reason.name,
         "responsibility": reason.responsibility.value,
         "from_status": ticket.status.value,
     }
-    if ticket.scheduled_start is not None:
-        data["previous_schedule"] = ticket.scheduled_start.isoformat()
+    if ticket.scheduled_start is not None and not keep_schedule:
+        data["previous_schedule"] = ticket.scheduled_start.isoformat()  # a agenda que saiu
     if payload.latitude is not None and payload.longitude is not None:
         data.update(latitude=payload.latitude, longitude=payload.longitude)
         data.update(_distance_to_store(ticket, payload.latitude, payload.longitude))
     data.update(evidence)
-    keep_schedule = (
-        bool(evidence)
-        and ticket.scheduled_start is not None
-        and ticket.scheduled_start > now
-        and await _rescheduled_after(db, ticket, declared_at)  # type: ignore[arg-type]
-    )
     record_event(
         db,
         ticket,

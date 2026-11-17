@@ -17,12 +17,12 @@ export function reportMessage(ticket: Pick<TicketDetail, "code" | "title">, url:
 }
 
 /**
- * O relatório aberto pela central, em outra aba. A página manda a sessão de quem está logado e a API não
- * conta essa abertura como visita do cliente (nem a do técnico da OS).
+ * O relatório aberto pela central, em outra aba. "preview" (o mesmo que o app do técnico usa) e a sessão
+ * de quem está logado avisam a API que não é o cliente abrindo: a contagem de aberturas é só dele.
  */
-export const previewPath = (link: ReportLink) => link.path;
-/** Abre o relatório e já baixa o PDF (o parâmetro sai do endereço assim que a página carrega). */
-export const pdfPath = (link: ReportLink) => `${link.path}?pdf=1`;
+export const previewPath = (link: ReportLink) => `${link.path}?preview=1`;
+/** Abre o relatório e já baixa o PDF (o "pdf" sai do endereço assim que a página carrega). */
+export const pdfPath = (link: ReportLink) => `${link.path}?pdf=1&preview=1`;
 
 /**
  * Link público do relatório da OS (toda OS tem): o cliente vê o andamento e, concluída, o resultado e o PDF.

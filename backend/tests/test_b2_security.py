@@ -70,6 +70,14 @@ async def test_validation_messages_in_portuguese(client: AsyncClient, world: Wor
     r = await client.get(f"{API}/tickets/nao-e-um-id", headers=world.analyst.headers)
     assert r.status_code == 422
     assert r.json()["detail"][0]["msg"] == "Identificador inválido"
+    # Campos do login e dos cadastros também vêm com o nome que a pessoa vê (o app mostra).
+    r = await client.post(
+        f"{API}/auth/change-password",
+        json={"current_password": "qualquer", "new_password": "curta"},
+        headers=world.tech.headers,
+    )
+    issue = r.json()["detail"][0]
+    assert (issue["msg"], issue["label"]) == ("Informe pelo menos 8 caracteres", "Nova senha")
 
 
 @requires_db

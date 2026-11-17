@@ -440,9 +440,14 @@ export default function PublicReportPage() {
 
   useEffect(() => {
     const controller = new AbortController();
-    // Sem login vale como visita do cliente; com a sessão da central (a gestão conferindo, o técnico
-    // da OS), a API não conta a abertura.
-    request<PublicReport>(`/public/reports/${encodeURIComponent(token)}`, { signal: controller.signal, timeoutMs: LOAD_TIMEOUT_MS })
+    // Sem login vale como visita do cliente. Não contam: a sessão da central (a gestão conferindo, o
+    // técnico da OS) e o link de prévia (?preview=1), que a OS e o app do técnico abrem.
+    const preview = new URLSearchParams(window.location.search).get("preview") === "1";
+    request<PublicReport>(`/public/reports/${encodeURIComponent(token)}`, {
+      query: preview ? { preview: 1 } : undefined,
+      signal: controller.signal,
+      timeoutMs: LOAD_TIMEOUT_MS,
+    })
       .then((data) => {
         setReport(data);
         // Link com ?pdf=1 (botão "Baixar PDF" da OS): baixa assim que carrega. O parâmetro sai do

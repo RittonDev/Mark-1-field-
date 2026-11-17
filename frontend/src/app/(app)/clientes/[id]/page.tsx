@@ -75,9 +75,12 @@ export default function CustomerDetailPage() {
   const [editing, setEditing] = useState(false);
   const [newStore, setNewStore] = useState(false);
   const customer = useQuery({ queryKey: ["customer", id], queryFn: () => api.get<Customer>(`/customers/${id}`) });
+  // Todas as lojas do cliente (há cliente com mais de mil): não recarrega a cada volta para a aba. Cadastrar
+  // ou editar loja invalida esta lista na hora.
   const locations = useQuery({
     queryKey: ["customer", id, "locations"],
     queryFn: () => api.get<Location[]>(`/customers/${id}/locations`),
+    staleTime: 5 * 60_000,
   });
   const recent = useQuery({
     queryKey: ["tickets", "customer", id],

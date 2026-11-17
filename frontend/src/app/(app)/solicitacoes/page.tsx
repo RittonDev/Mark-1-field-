@@ -49,7 +49,8 @@ const SITUATIONS: { key: Situation; label: string; query: Query }[] = [
   { key: "cancelled", label: "Canceladas", query: { status: ["cancelled"] } },
 ];
 
-type PullResult = { detail: TicketDetail | null; analysed: boolean; warning: string | null };
+/** Resultado do Puxar e analisar: a OS como ficou, se veio para a minha fila agora e se entrou em análise. */
+type PullResult = { detail: TicketDetail | null; claimed: boolean; analysed: boolean; warning: string | null };
 
 /** Recusar = cancelar a solicitação com o motivo (fica no histórico da OS). */
 function DeclineDialog({ ticket, onClose }: { ticket: TicketListItem; onClose: () => void }) {
@@ -119,7 +120,12 @@ function DeclineDialog({ ticket, onClose }: { ticket: TicketListItem; onClose: (
           A solicitação fica cancelada e sai da caixa. No portal, o cliente vê a solicitação como cancelada; o motivo fica no
           histórico da OS, só para a equipe.
         </p>
-        <Field label="Motivo" required hint="Ex.: repetida de outra OS, fora do contrato, aberta por engano.">
+        <Field
+          label="Motivo"
+          required
+          hint="Ex.: repetida de outra OS, fora do contrato, aberta por engano."
+          error={touched && invalid ? "Escreva o motivo (pelo menos 3 letras)." : null}
+        >
           <Textarea
             value={reason}
             onChange={(e) => setReason(e.target.value)}
@@ -130,7 +136,6 @@ function DeclineDialog({ ticket, onClose }: { ticket: TicketListItem; onClose: (
             placeholder="Por que a solicitação não vai virar atendimento?"
           />
         </Field>
-        {touched && invalid ? <ErrorBox message="Escreva o motivo (pelo menos 3 letras)." /> : null}
         {apiError ? <ErrorBox message={errorMessage(apiError)} /> : null}
       </form>
     </Dialog>
@@ -205,6 +210,11 @@ function RequestRow({
           </Button>
         ) : open && t.owner?.id !== meId ? (
           <ClaimButton code={t.code} busy={pulling} onClaim={onPull} />
+        ) : t.status === "new" ? (
+          // Já está na minha fila, mas o cliente ainda vê "Recebida".
+          <Button size="sm" onClick={onPull} loading={pulling} title="O cliente passa a ver “Em análise”">
+            Analisar
+          </Button>
         ) : null}
         <QuickEditButton ticketId={t.id} code={t.code} />
       </div>
@@ -249,32 +259,35 @@ export default function RequestsInboxPage() {
         };
   const list = useQuery({
     queryKey: ["solicitacoes", "list", params],
-    queryFn: () => api.get<Page<TicketListItem>>("/tickets", params),
+    // A busca obsoleta (página, aba ou filtro trocados no meio) é cancelada.
+    queryFn: ({ signal }) => api.get<Page<TicketListItem>>("/tickets", params, { signal }),
     placeholderData: keepPreviousData,
     refetchInterval: 60_000,
   });
   const count = useQuery({
     queryKey: ["solicitacoes", "count"],
-    queryFn: () => api.get<{ pending: number }>("/portal/inbox-count"),
+    queryFn: ({ signal }) => api.get<{ pending: number }>("/portal/inbox-count", undefined, { signal }),
     refetchInterval: 60_000,
   });
 
   // Puxar e analisar: a OS vai para a minha fila e, se ainda estava como recebida, entra em análise
   // (o cliente vê "Em análise" no portal). Depois abre ao lado para escolher o tipo e o técnico.
+  // Já na minha fila e ainda recebida, só analisa.
   const pull = useMutation({
     mutationFn: async (t: TicketListItem): Promise<PullResult> => {
       let detail: TicketDetail | null = null;
-      if (t.owner?.id !== meId) detail = await api.post<TicketDetail>(`/tickets/${t.id}/claim`);
-      if ((detail?.status ?? t.status) !== "new") return { detail, analysed: false, warning: null };
+      const claimed = t.owner?.id !== meId;
+      if (claimed) detail = await api.post<TicketDetail>(`/tickets/${t.id}/claim`);
+      if ((detail?.status ?? t.status) !== "new") return { detail, claimed, analysed: false, warning: null };
       try {
         detail = await api.post<TicketDetail>(`/tickets/${t.id}/transition`, {
           to_status: "triage",
           expected_version: detail?.version ?? t.version,
         });
-        return { detail, analysed: true, warning: null };
+        return { detail, claimed, analysed: true, warning: null };
       } catch (error) {
         // Já está na minha fila: só a análise não entrou (ex.: alguém mexeu na OS no mesmo instante).
-        if (detail) return { detail, analysed: false, warning: errorMessage(error) };
+        if (detail) return { detail, claimed, analysed: false, warning: errorMessage(error) };
         throw error;
       }
     },
@@ -285,7 +298,7 @@ export default function RequestsInboxPage() {
         next.delete(t.id);
         return next;
       }),
-    onSuccess: ({ detail, analysed, warning }, t) => {
+    onSuccess: ({ detail, claimed, analysed, warning }, t) => {
       if (detail) {
         const updated = detail;
         queryClient.setQueryData(["ticket", t.id], updated);
@@ -307,7 +320,7 @@ export default function RequestsInboxPage() {
         toast({ title: `${t.code} está na sua fila, mas continua como recebida`, description: warning, tone: "error" });
       } else {
         toast({
-          title: `${t.code} está na sua fila`,
+          title: claimed ? `${t.code} está na sua fila` : `${t.code} em análise`,
           description: analysed ? "O cliente passa a ver “Em análise” no portal." : undefined,
           tone: "success",
         });
@@ -317,7 +330,11 @@ export default function RequestsInboxPage() {
     },
     onError: (error, t) => {
       void queryClient.invalidateQueries({ queryKey: ["solicitacoes"] });
-      toast({ title: `Não foi possível puxar a ${t.code}`, description: errorMessage(error), tone: "error" });
+      toast({
+        title: t.owner?.id === meId ? `Não foi possível analisar a ${t.code}` : `Não foi possível puxar a ${t.code}`,
+        description: errorMessage(error),
+        tone: "error",
+      });
     },
   });
 
@@ -325,8 +342,10 @@ export default function RequestsInboxPage() {
   const total = list.data?.total ?? 0;
   // A última página esvaziou (recusadas ou puxadas por outra pessoa): volta para a primeira.
   if (page > 1 && list.data && !list.isPlaceholderData && items.length === 0) setPage(1);
-  const first = total ? (page - 1) * PAGE_SIZE + 1 : 0;
-  const last = Math.min(page * PAGE_SIZE, total);
+  // Faixa da página que está na tela (enquanto a próxima carrega, a anterior continua valendo).
+  const shownPage = list.data?.page ?? page;
+  const first = total ? (shownPage - 1) * PAGE_SIZE + 1 : 0;
+  const last = Math.min((shownPage - 1) * PAGE_SIZE + items.length, total);
   const hasFilters = tab === "all" && (situation !== "all" || Boolean(customerId) || Boolean(search.trim()));
   const clearFilters = () => {
     setSituation("all");
@@ -367,83 +386,85 @@ export default function RequestsInboxPage() {
           setPage(1);
         }}
         ariaLabel="Solicitações"
+        idPrefix="solicitacoes"
         className="mb-4"
       />
 
-      {tab === "all" ? (
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <div className="relative w-full sm:w-72">
-            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-subtle" />
-            <Input
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setPage(1);
-              }}
-              placeholder="Nº, título ou chamado do cliente"
-              aria-label="Buscar solicitação"
-              className="pl-9"
-            />
-          </div>
-          <Select
-            value={customerId}
-            onChange={(e) => {
-              setCustomerId(e.target.value);
-              setPage(1);
-            }}
-            aria-label="Cliente"
-            className="w-full sm:w-56"
-          >
-            <option value="">Todos os clientes</option>
-            {customers.data?.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </Select>
-          <div role="group" aria-label="Situação" className="flex flex-wrap gap-1">
-            {SITUATIONS.map((s) => (
-              <button
-                key={s.key}
-                type="button"
-                aria-pressed={situation === s.key}
-                onClick={() => {
-                  setSituation(s.key);
+      <div role="tabpanel" id={`solicitacoes-panel-${tab}`} aria-labelledby={`solicitacoes-tab-${tab}`}>
+        {tab === "all" ? (
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <div className="relative w-full sm:w-72">
+              <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-subtle" />
+              <Input
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
                   setPage(1);
                 }}
-                className={clsx(
-                  "h-8 rounded-full border px-3 text-xs font-medium transition-colors",
-                  situation === s.key
-                    ? "border-brand/40 bg-brand-soft text-brand-ink"
-                    : "border-line bg-surface text-ink-muted hover:border-line-strong hover:text-ink",
-                )}
-              >
-                {s.label}
-              </button>
-            ))}
+                placeholder="Nº, título ou chamado do cliente"
+                aria-label="Buscar solicitação"
+                className="pl-9"
+              />
+            </div>
+            <Select
+              value={customerId}
+              onChange={(e) => {
+                setCustomerId(e.target.value);
+                setPage(1);
+              }}
+              aria-label="Cliente"
+              className="w-full sm:w-56"
+            >
+              <option value="">Todos os clientes</option>
+              {customers.data?.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </Select>
+            <div role="group" aria-label="Situação" className="flex flex-wrap gap-1">
+              {SITUATIONS.map((s) => (
+                <button
+                  key={s.key}
+                  type="button"
+                  aria-pressed={situation === s.key}
+                  onClick={() => {
+                    setSituation(s.key);
+                    setPage(1);
+                  }}
+                  className={clsx(
+                    "h-8 rounded-full border px-3 text-xs font-medium transition-colors",
+                    situation === s.key
+                      ? "border-brand/40 bg-brand-soft text-brand-ink"
+                      : "border-line bg-surface text-ink-muted hover:border-line-strong hover:text-ink",
+                  )}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+            {hasFilters ? (
+              <Button size="sm" variant="ghost" onClick={clearFilters}>
+                <X className="size-3.5" />
+                Limpar filtros
+              </Button>
+            ) : null}
           </div>
-          {hasFilters ? (
-            <Button size="sm" variant="ghost" onClick={clearFilters}>
-              <X className="size-3.5" />
-              Limpar filtros
-            </Button>
-          ) : null}
-        </div>
-      ) : null}
+        ) : null}
 
-      {list.error && list.data ? (
-        <RefreshFailed
-          at={list.errorUpdatedAt}
-          onRetry={() => void list.refetch()}
-          retrying={list.isFetching}
-          className="mb-3"
-        />
-      ) : null}
+        {list.error && list.data ? (
+          <RefreshFailed
+            at={list.errorUpdatedAt}
+            onRetry={() => void list.refetch()}
+            retrying={list.isFetching}
+            className="mb-3"
+          />
+        ) : null}
 
       {list.isLoading ? (
         <LoadingBlock rows={4} />
       ) : list.error && !list.data ? (
-        <ErrorBox message={errorMessage(list.error)} />
+        <ErrorBox message={errorMessage(list.error)} onRetry={() => void list.refetch()} />
       ) : !items.length ? (
         <Card>
           <EmptyState
@@ -502,11 +523,21 @@ export default function RequestsInboxPage() {
                 Mostrando {first}–{last} de {total}
               </span>
               <div className="flex gap-1">
-                <Button size="sm" variant="ghost" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={page <= 1 || list.isPlaceholderData}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
                   <ChevronLeft className="size-4" />
                   Anterior
                 </Button>
-                <Button size="sm" variant="ghost" disabled={last >= total} onClick={() => setPage((p) => p + 1)}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={last >= total || list.isPlaceholderData}
+                  onClick={() => setPage((p) => p + 1)}
+                >
                   Próxima
                   <ChevronRight className="size-4" />
                 </Button>
@@ -515,6 +546,7 @@ export default function RequestsInboxPage() {
           ) : null}
         </Card>
       )}
+      </div>
 
       {declining ? <DeclineDialog key={declining.id} ticket={declining} onClose={() => setDeclining(null)} /> : null}
     </div>

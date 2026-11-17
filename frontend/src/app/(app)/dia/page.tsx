@@ -155,7 +155,8 @@ function Timing({ a, day, now }: { a: Activity; day: string; now: number }) {
   const arrival = a.arrived_at ?? (a.state === "in_progress" ? a.started_at : null) ?? (a.started_at ? null : t.arrived_at);
   // Saiu e não chegou no dia: a caminho, improdutiva antes de chegar ou remarcada no caminho.
   const departure = arrival ? null : a.started_at;
-  const finished = arrival ? (a.finished_at ?? t.resolved_at ?? null) : null;
+  // Término: o do dia ou o da OS (concluída sem o histórico de status também diz quando terminou).
+  const finished = arrival || a.state === "done" ? (a.finished_at ?? t.resolved_at ?? null) : null;
   const delay = arrival && scheduled && scheduledInDay ? minutesBetween(scheduled, arrival) : null;
   // Distância do GPS até a loja no check-in do dia: a prova de presença (como no Field Control).
   const checkinMeters = arrival && arrival === a.arrived_at ? (a.arrival_distance_m ?? null) : null;
@@ -202,8 +203,7 @@ function Timing({ a, day, now }: { a: Activity; day: string; now: number }) {
         </span>,
       );
     }
-    if (finished) parts.push(<span key="end">Fim {when(finished, day)}</span>);
-    else if (a.state === "in_progress") {
+    if (!finished && a.state === "in_progress") {
       parts.push(<span key="running">em atendimento há {formatMinutes(Math.max(0, minutesBetween(arrival, now)))}</span>);
     }
   } else if (a.state === "late" && scheduled) {
@@ -213,6 +213,7 @@ function Timing({ a, day, now }: { a: Activity; day: string; now: number }) {
       </span>,
     );
   }
+  if (finished) parts.push(<span key="end">Fim {when(finished, day)}</span>);
   if (bounced) {
     parts.push(
       <span key="bounce" className="font-semibold text-amber-800 dark:text-amber-300">

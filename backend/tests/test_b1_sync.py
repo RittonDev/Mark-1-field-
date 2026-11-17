@@ -68,6 +68,32 @@ async def test_bad_operation_does_not_block_the_batch(
     assert res["results"][1]["ticket"]["status"] == "in_progress"
 
 
+async def test_failed_operation_keeps_the_events_of_the_ones_applied(
+    client: AsyncClient, world: World
+) -> None:
+    """Uma operação que o banco recusa (texto com caractere nulo) é desfeita no meio do lote; a
+    anterior, da mesma OS, já valeu: o lote responde normalmente e o evento dela sai."""
+    an, th = world.analyst.headers, world.tech.headers
+    reason = (
+        await client.post(
+            f"{API}/unproductive-reasons",
+            json={"name": "Loja fechada", "responsibility": "customer"},
+            headers=an,
+        )
+    ).json()
+    t = await create(client, world, assignee_id=str(world.tech.user.id))
+    res = await push(
+        client,
+        th,
+        op(t["id"], "transition", {"to_status": "en_route"}),
+        op(t["id"], "unproductive", {"reason_id": reason["id"], "note": "Loja\u0000fechada"}),
+    )
+    assert [r["status"] for r in res["results"]] == ["applied", "rejected"]
+    assert res["results"][1]["error"] == sync.UNEXPECTED
+    assert {r["ticket"]["status"] for r in res["results"]} == {"en_route"}
+    assert res["results"][0]["ticket"]["unproductive_count"] == 0
+
+
 async def test_operation_recorded_by_another_send_is_duplicate(
     client: AsyncClient, world: World, engine: AsyncEngine
 ) -> None:

@@ -717,7 +717,14 @@ function ServiceTypePicker({
           {value.length ? <span className="font-normal text-ink-muted"> · {plural(value.length, "escolhido", "escolhidos")}</span> : null}
         </span>
         {types ? (
-          <Button size="sm" variant="ghost" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-controls={listId}>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setOpen((o) => !o)}
+            aria-expanded={open}
+            // A lista só existe aberta: apontar para ela fechada seria apontar para o nada.
+            aria-controls={open ? listId : undefined}
+          >
             <ChevronDown className={clsx("size-3.5 transition-transform duration-150", open && "rotate-180")} />
             {open ? "Fechar a lista" : "Escolher tipos"}
           </Button>

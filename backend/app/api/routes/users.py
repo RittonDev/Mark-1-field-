@@ -84,9 +84,13 @@ async def list_users(
         stmt = stmt.where(User.team_id == team_id)
     if active is not None:
         stmt = stmt.where(User.is_active.is_(active))
-    if q:
-        like = f"%{q.strip()}%"
-        stmt = stmt.where(or_(User.name.ilike(like), User.email.ilike(like)))
+    if q and q.strip():
+        # O texto é procurado como está ("%" e "_" não viram curinga).
+        escaped = q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        like = f"%{escaped}%"
+        stmt = stmt.where(
+            or_(User.name.ilike(like, escape="\\"), User.email.ilike(like, escape="\\"))
+        )
     return list(await db.scalars(stmt))
 
 
@@ -235,7 +239,14 @@ async def update_team(team_id: uuid.UUID, body: TeamUpdate, db: DB, _: ManagerUs
     team = await db.get(Team, team_id)
     if team is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Grupo não encontrado")
-    for key, value in body.model_dump(exclude_unset=True).items():
+    fields = body.model_dump(exclude_unset=True)
+    # null num campo obrigatório (formulário vazio) não apaga nada: fica como está.
+    for key in ("name", "is_active"):
+        if key in fields and fields[key] is None:
+            fields.pop(key)
+    if "name" in fields:
+        fields["name"] = " ".join(fields["name"].split())
+    for key, value in fields.items():
         setattr(team, key, value)
     await db.commit()
     return team
