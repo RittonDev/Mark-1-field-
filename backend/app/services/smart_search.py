@@ -62,7 +62,7 @@ STOP = frozenset(
     pelo pela pelos pelas e ou que um uma uns umas todas todos toda todo me mostrar mostre mostra
     ver veja listar liste lista quais qual quero buscar busca procurar procure achar ache chamado
     chamados ordem ordens servico servicos ticket tickets dia dias ate entre desde durante mes
-    semana ano sobre""".split()
+    semana ano sobre visita visitas""".split()
 )
 TECH_KW = frozenset({"tecnico", "tecnica", "tecnicos", "tecnicas", "tec"})
 CUSTOMER_KW = frozenset({"cliente", "clientes", "empresa"})
@@ -274,7 +274,8 @@ _MONTH_NUMBER = {name: i + 1 for i, name in enumerate(MONTHS)} | {
 }
 _FULL = "|".join(MONTHS)
 _ANY_MONTH = "|".join((*MONTHS, *MONTH_ABBR))
-_D = r"(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[/.-]\d{1,2}(?:[/.-]\d{2,4})?)"
+# dd/mm, dd/mm/aa(aa), dd-mm-aaaa, dd.mm.aaaa (com ponto só a data inteira) e aaaa-mm-dd.
+_D = r"(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?|\d{1,2}\.\d{1,2}\.\d{2,4})"
 _L = r"(?<![\w/.-])"
 _R = r"(?![\w/.-])"
 
@@ -775,7 +776,10 @@ def read_statuses(reader: Reader, parsed: Parsed) -> None:
 
 # --------------------------------------------------------------------------- etiquetas
 
-Tags = list[tuple[str, tuple[str, ...]]]
+# (nome, palavras sem acento, em quantas OS aparece)
+Tags = list[tuple[str, tuple[str, ...], int]]
+# Etiqueta rara (ex.: um teste) só pela frase inteira, não por uma palavra solta.
+SINGLE_WORD_TAG_MIN_USES = 3
 
 
 def _tag_match(phrase: Sequence[str], tag_words: tuple[str, ...]) -> bool:
@@ -810,7 +814,7 @@ def read_tag_phrases(reader: Reader, parsed: Parsed, tags: Tags) -> None:
             if any(w.used for w in span):
                 continue
             phrase = [w.text for w in span]
-            hits = [name for name, tw in tags if len(tw) >= 2 and _tag_match(phrase, tw)]
+            hits = [name for name, tw, _ in tags if len(tw) >= 2 and _tag_match(phrase, tw)]
             if not hits or len(hits) > 3:
                 continue
             _add_tags(parsed, hits, span[0].pos)
@@ -824,11 +828,12 @@ def read_single_tags(parsed: Parsed, tags: Tags) -> None:
     for w in parsed.content():
         if w.text in GENERIC_TAG_WORDS or w.text in KEYWORDS or len(w.text) < 3:
             continue
-        exact = [name for name, tw in tags if tw == (w.text,)]
+        exact = [name for name, tw, _ in tags if tw == (w.text,)]
         hits = exact or [
             name
-            for name, tw in tags
-            if any(t == w.text or (len(w.text) >= 4 and t.startswith(w.text)) for t in tw)
+            for name, tw, uses in tags
+            if uses >= SINGLE_WORD_TAG_MIN_USES
+            and any(t == w.text or (len(w.text) >= 4 and t.startswith(w.text)) for t in tw)
         ]
         if hits and len(hits) <= 3:
             _add_tags(parsed, hits, w.pos)
@@ -922,14 +927,20 @@ def typo_entities(parsed: Parsed, pools: Sequence[Pool]) -> None:
 
 
 async def tag_names(db: AsyncSession) -> Tags:
-    rows = await db.scalars(
+    """Etiquetas usadas nas OS (as de mesmo nome, ignorando maiúsculas, juntas)."""
+    rows = await db.execute(
         text(
-            "SELECT DISTINCT btrim(t->>'name') FROM tickets, jsonb_array_elements(tickets.tags) t"
+            "SELECT min(btrim(t->>'name')) AS name, count(*) AS uses"
+            " FROM tickets, jsonb_array_elements(tickets.tags) t"
             " WHERE coalesce(btrim(t->>'name'), '') <> ''"
+            " GROUP BY lower(regexp_replace(btrim(t->>'name'), '\\s+', ' ', 'g'))"
         )
     )
-    out = [(raw, tuple(_WORD.findall(fold_text(raw)))) for raw in rows]
-    out = [(raw, words) for raw, words in out if words]
+    out: Tags = []
+    for name, uses in rows:
+        words = tuple(_WORD.findall(fold_text(name)))
+        if words:
+            out.append((name, words, int(uses)))
     out.sort(key=lambda item: (len(item[1]), item[0]))
     return out
 
@@ -1374,7 +1385,7 @@ async def customers_out(db: AsyncSession, cands: list[Cand]) -> list[SearchCusto
 # --------------------------------------------------------------------------- busca
 
 
-def read_query(raw: str | None, today: date, tags: Tags = ()) -> Parsed:  # type: ignore[assignment]
+def read_query(raw: str | None, today: date, tags: Tags | None = None) -> Parsed:
     """A parte da leitura que não precisa do banco: documento, nº da OS, período, etiquetas de
     várias palavras, status e prioridade. O resto da frase fica em `words`."""
     query = " ".join(_CONTROL.sub(" ", raw or "").split())[:MAX_QUERY]
@@ -1407,7 +1418,7 @@ async def smart_search(
     db: AsyncSession, user: User, raw: str | None, limit: int = 6
 ) -> SmartSearchResult:
     limit = max(1, min(limit, MAX_LIMIT))
-    tags = await tag_names(db) if _needs_names(raw) else []
+    tags: Tags = await tag_names(db) if _needs_names(raw) else []
     parsed = read_query(raw, local_today(), tags)
     if not parsed.query or not parsed.folded:
         return SmartSearchResult(query=parsed.query)

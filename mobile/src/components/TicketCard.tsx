@@ -22,6 +22,8 @@ import { HelperBadge } from "./ticket/VisitInfo";
 const IN_FIELD = ["en_route", "in_progress"];
 /** Dois toques rápidos não empilham a mesma OS duas vezes. */
 const DOUBLE_TAP_MS = 600;
+/** Faixa colorida do status na borda esquerda do cartão. */
+const ACCENT_WIDTH = 3;
 
 type Variant = "default" | "done";
 
@@ -86,6 +88,18 @@ function TicketCardBase({ ticket, now, userId, showDate = false, showTime = true
   const swap = useSwapMotion();
   const lastPress = useRef(0);
   const [routeOpen, setRouteOpen] = useState(false);
+  // Botão de rota por cima do cartão (irmão do botão do cartão, nunca dentro: botão dentro de botão quebra o
+  // leitor de tela e é HTML inválido na versão web). O lugar dele no layout é reservado por um espaço vazio.
+  const [routeSpot, setRouteSpot] = useState<{ top: number; left: number } | null>(null);
+  const rowAt = useRef<{ x: number; y: number } | null>(null);
+  const spotAt = useRef<{ x: number; y: number } | null>(null);
+  const placeRoute = () => {
+    const row = rowAt.current;
+    const spot = spotAt.current;
+    if (!row || !spot) return;
+    const next = { top: row.y + spot.y, left: ACCENT_WIDTH + row.x + spot.x };
+    setRouteSpot((prev) => (prev && prev.top === next.top && prev.left === next.left ? prev : next));
+  };
   const status = STATUS[ticket.status];
   const helping = Boolean(userId && isHelper(ticket, { id: userId }));
   const site = ticket.location ? [ticket.location.code, ticket.location.name].filter(Boolean).join(" · ") : null;
@@ -129,14 +143,14 @@ function TicketCardBase({ ticket, now, userId, showDate = false, showTime = true
   }
 
   return (
-    <>
+    <View>
       <PressableScale
         onPress={open}
         accessibilityRole="button"
         accessibilityLabel={label}
         accessibilityHint="Abre a OS"
-        // No iPhone o cartão inteiro é um elemento só para o leitor de tela (o botão de rota de dentro
-        // não recebe foco): a rota vira uma ação do próprio cartão.
+        // A rota também é uma ação do próprio cartão: quem navega pelo leitor de tela chega a ela sem
+        // procurar o botão.
         accessibilityActions={route ? [{ name: "route", label: "Rota até a loja" }] : undefined}
         onAccessibilityAction={(event) => {
           if (event.nativeEvent.actionName === "route") openRoute();
@@ -159,7 +173,13 @@ function TicketCardBase({ ticket, now, userId, showDate = false, showTime = true
           <Text style={styles.title} numberOfLines={2}>
             {ticket.title}
           </Text>
-          <View style={styles.placeRow}>
+          <View
+            style={styles.placeRow}
+            onLayout={(e) => {
+              rowAt.current = e.nativeEvent.layout;
+              placeRoute();
+            }}
+          >
             <View style={styles.place}>
               {site ? (
                 <View style={styles.line}>
@@ -184,16 +204,13 @@ function TicketCardBase({ ticket, now, userId, showDate = false, showTime = true
               ) : null}
             </View>
             {route ? (
-              <Pressable
-                onPress={openRoute}
-                accessibilityRole="button"
-                accessibilityLabel="Rota até a loja"
-                accessibilityHint="Abre o Google Maps ou o Waze"
-                hitSlop={4}
-                style={({ pressed }) => [styles.routeButton, pressed && { backgroundColor: c.surface3 }]}
-              >
-                <Icon name="navigate" size={20} color={c.brandInk} strokeWidth={2} />
-              </Pressable>
+              <View
+                style={styles.routeSpot}
+                onLayout={(e) => {
+                  spotAt.current = e.nativeEvent.layout;
+                  placeRoute();
+                }}
+              />
             ) : null}
           </View>
           {ticket.visit_note?.trim() && !done ? (
@@ -230,8 +247,25 @@ function TicketCardBase({ ticket, now, userId, showDate = false, showTime = true
           ) : null}
         </View>
       </PressableScale>
+      {route && routeSpot ? (
+        <Pressable
+          onPress={openRoute}
+          accessibilityRole="button"
+          accessibilityLabel={`Rota até a loja, ${ticket.code}`}
+          accessibilityHint="Abre o Google Maps ou o Waze"
+          hitSlop={4}
+          style={({ pressed }) => [
+            styles.routeButton,
+            styles.routeFloating,
+            routeSpot,
+            pressed && { backgroundColor: c.surface3 },
+          ]}
+        >
+          <Icon name="navigate" size={20} color={c.brandInk} strokeWidth={2} />
+        </Pressable>
+      ) : null}
       {route ? <RouteSheet ticket={ticket} visible={routeOpen} onClose={() => setRouteOpen(false)} /> : null}
-    </>
+    </View>
   );
 }
 
@@ -354,7 +388,7 @@ const makeStyles = (c: Palette) =>
       overflow: "hidden",
       boxShadow: c.elevation,
     },
-    accent: { width: 3 },
+    accent: { width: ACCENT_WIDTH },
     body: { flex: 1, padding: 16, paddingLeft: 14, gap: 6 },
     header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 },
     code: { fontSize: 12, fontWeight: "700", color: c.inkMuted, fontVariant: ["tabular-nums"], letterSpacing: 0.3 },
@@ -377,6 +411,8 @@ const makeStyles = (c: Palette) =>
       justifyContent: "center",
       backgroundColor: c.primarySoft,
     },
+    routeSpot: { width: 44, height: 44 },
+    routeFloating: { position: "absolute" },
     note: { fontSize: 12, color: c.inkMuted, flex: 1 },
     noteLabel: { fontWeight: "700", color: c.inkMuted },
     badges: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 4 },

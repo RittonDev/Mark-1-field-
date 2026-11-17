@@ -11,6 +11,7 @@ from app.api.routes import (
     expenses,
     field,
     forms,
+    home,
     messages,
     onboarding,
     parts,
@@ -33,6 +34,7 @@ from app.api.routes import (
 api_router = APIRouter()
 for module in (
     auth,
+    home,
     catalog,
     users,
     technicians,
