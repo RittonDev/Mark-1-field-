@@ -4,7 +4,14 @@ import clsx from "clsx";
 import { ChevronDown } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 
-const PANEL_WIDTH = 320;
+/** Larguras do quadro (a classe e os pixels, para saber se cabe à direita do botão). */
+const PANEL_WIDTHS = {
+  sm: { className: "w-72", px: 288 },
+  md: { className: "w-80", px: 320 },
+  lg: { className: "w-96", px: 384 },
+} as const;
+
+export type PanelWidth = keyof typeof PANEL_WIDTHS;
 
 const FOCUSABLE =
   'input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
@@ -31,7 +38,7 @@ export function Popover({
   trigger,
   triggerLabel,
   triggerClassName,
-  panelClassName,
+  width = "md",
   children,
 }: {
   /** Nome do quadro para o leitor de tela (ex.: "Filtrar por cliente"). */
@@ -40,7 +47,7 @@ export function Popover({
   /** Nome do botão quando o texto à vista não diz tudo. */
   triggerLabel?: string;
   triggerClassName: string;
-  panelClassName?: string;
+  width?: PanelWidth;
   children: (close: (focusTrigger?: boolean) => void) => React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -54,7 +61,7 @@ export function Popover({
 
   const show = () => {
     const rect = button.current?.getBoundingClientRect();
-    setAlignRight(!!rect && rect.left + PANEL_WIDTH > window.innerWidth - 16);
+    setAlignRight(!!rect && rect.left + PANEL_WIDTHS[width].px > window.innerWidth - 16);
     setOpen(true);
   };
   const close = (focusTrigger = true) => {

@@ -340,7 +340,8 @@ function NewTicket() {
     enabled: Boolean(onlyFor),
     staleTime: 30_000,
   });
-  if (onlyFor && (onlyLocation.data || onlyLocation.error)) {
+  // Espera a resposta de agora (a lista em cache pode ser de antes de uma loja nova ser cadastrada).
+  if (onlyFor && !onlyLocation.isFetching && (onlyLocation.data || onlyLocation.error)) {
     setOnlyFor("");
     const only = onlyLocation.data?.total === 1 ? onlyLocation.data.items[0] : null;
     if (only && d.form.customer_id === only.customer_id && !d.form.location_id) {
@@ -1735,7 +1736,15 @@ function NewTicket() {
 
       {/* Fora do formulário: as teclas do cadastro (Enter, Ctrl+Enter) não chegam à Nova OS. */}
       {creatingLocation ? (
-        <LocationDialog location={null} customerId={f.customer_id || null} onClose={() => setCreatingLocation(false)} />
+        <LocationDialog
+          location={null}
+          customerId={f.customer_id || null}
+          onClose={() => {
+            setCreatingLocation(false);
+            // Primeira localização do cliente cadastrada agora: já entra na OS (com várias, é só buscar).
+            if (f.customer_id && !f.location_id) setOnlyFor(f.customer_id);
+          }}
+        />
       ) : null}
     </div>
   );
