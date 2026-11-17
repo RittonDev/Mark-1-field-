@@ -84,9 +84,11 @@ from app.schemas.home import (
     WeekDay,
     WeekFlow,
 )
+from app.schemas.quote import format_quote_code
 from app.services import durations, tag_rules
 from app.services import field as field_svc
 from app.services import portal as portal_svc
+from app.services import quotes as quotes_svc
 from app.services.activities import day_bounds, local_today
 from app.services.field import SCHEDULE_TOLERANCE
 from app.services.reports import month_bounds
@@ -116,7 +118,6 @@ START_TOLERANCE = timedelta(minutes=30)
 UNASSIGNED_HORIZON = timedelta(hours=48)
 STALE_AFTER = timedelta(days=3)
 PAYOUT_LATE = timedelta(days=7)
-QUOTE_WAIT = timedelta(days=3)
 FIELD_STUCK_AFTER = timedelta(hours=12)
 DUE_SOON = timedelta(hours=24)
 TAG_OLD = timedelta(days=30)
@@ -749,12 +750,13 @@ GROUPS: dict[str, GroupSpec] = {
             "OS concluídas há mais de 7 dias com pagamento do técnico pendente.",
             link="/pagamentos",
         ),
+        # A fila "Para cobrar" de /orcamentos (a mesma regra: services/quotes.follow_up).
         GroupSpec(
             "quotes_waiting",
-            "Orçamentos sem resposta",
+            "Orçamentos para cobrar",
             "low",
-            "Orçamentos enviados ao cliente há mais de 3 dias, ainda sem resposta.",
-            link="/orcamentos",
+            "Sem resposta há 2 dias, vencendo, em revisão parada ou vencidos na última semana.",
+            link="/orcamentos?cobrar=1",
         ),
     )
 }
@@ -988,36 +990,54 @@ async def _payouts(db: AsyncSession, m: Moment) -> tuple[int, list[AttentionItem
     return int(count), items
 
 
+def _quote_reason(quote: Quote, m: Moment) -> tuple[datetime | None, str]:
+    """ "ORC-000123 (R$ 300,00) enviado há 3 dias, não aberto": o motivo de services/quotes."""
+    base = f"{format_quote_code(quote.number)} ({money_text(quote.total)})"
+    reason = quotes_svc.follow_up(quote, ticket_cancelled=False, now=m.now, today=m.today)
+    contact = quote.last_reminded_at or quote.sent_at
+    if reason == "in_review":
+        since = span_text(m.now - quote.updated_at)
+        return quote.updated_at, f"{base} em revisão há {since}: reenvie"
+    if reason == "expired" and quote.valid_until is not None:
+        return contact, f"{base} venceu em {quote.valid_until:%d/%m}: renove"
+    if reason == "expiring":
+        return contact, f"{base} vence {'hoje' if quote.valid_until == m.today else 'amanhã'}"
+    if contact is None:
+        return None, base
+    # Cobrado: o tempo conta da última cobrança (é ela que tira o orçamento da fila por 48 h).
+    verb = "cobrado" if quote.reminder_count and quote.last_reminded_at else "enviado"
+    since = f"{verb} há {span_text(m.now - contact)}"
+    if reason == "not_opened":
+        return contact, f"{base} {since}, não aberto"
+    opened = f", aberto {quote.client_views}x" if quote.client_views else ""
+    return contact, f"{base} {since}{opened}, sem resposta"
+
+
 async def _quotes(db: AsyncSession, m: Moment) -> tuple[int, list[AttentionItem]]:
-    # Enviado com a validade vencida já conta como vencido (services/quotes.refresh_expiry).
-    cond = and_(
-        Quote.status == QuoteStatus.SENT,
-        Quote.sent_at < m.now - QUOTE_WAIT,
-        or_(Quote.valid_until.is_(None), Quote.valid_until >= m.today),
+    """Orçamentos para cobrar: a contagem é a fila de /orcamentos?cobrar=1 (a mesma condição e a
+    mesma ordem); o motivo de cada exemplo sai da versão Python da regra."""
+    cond = quotes_svc.follow_up_condition(m.now, m.today, m.day_start)
+    count = await db.scalar(
+        select(func.count())
+        .select_from(Quote)
+        .join(Ticket, Ticket.id == Quote.ticket_id)
+        .where(cond)
     )
-    count = await db.scalar(select(func.count()).select_from(Quote).where(cond))
     if not count:
         return 0, []
     rows = (
         await db.execute(
-            _ticket_select(
-                Quote.number.label("quote_number"), Quote.sent_at, Quote.total.label("amount")
-            )
+            _ticket_select(Quote)
             .join(Quote, Quote.ticket_id == Ticket.id)
             .where(cond)
-            .order_by(Quote.sent_at.asc())
+            .order_by(*quotes_svc.follow_up_order())
             .limit(ITEMS)
         )
     ).all()
-    items = [
-        _item(
-            row,
-            row.sent_at,
-            f"ORC-{row.quote_number:06d} ({money_text(row.amount)}) enviado há "
-            f"{span_text(m.now - row.sent_at)}, sem resposta",
-        )
-        for row in rows
-    ]
+    items = []
+    for row in rows:
+        when, text = _quote_reason(row.Quote, m)
+        items.append(_item(row, when, text))
     return int(count), items
 
 
@@ -1515,7 +1535,8 @@ async def _finance(db: AsyncSession, m: Moment) -> HomeFinance:
         )
         tag_tickets, tag_technicians, tag_old = (await db.execute(stmt)).one()
 
-    # Aguardando: a validade de _quotes, sem o mínimo de 3 dias do ponto de atenção.
+    # Aguardando: enviados e ainda na validade. Orçamento de OS cancelada não entra em nenhum dos
+    # dois (como em Pagamentos): não vai ser cobrado.
     waiting = and_(
         Quote.status == QuoteStatus.SENT,
         or_(Quote.valid_until.is_(None), Quote.valid_until >= m.today),
@@ -1529,7 +1550,10 @@ async def _finance(db: AsyncSession, m: Moment) -> HomeFinance:
                 func.sum(Quote.total).filter(waiting).label("waiting_total"),
                 func.count().filter(approved).label("approved"),
                 func.sum(Quote.total).filter(approved).label("approved_total"),
-            ).select_from(Quote)
+            )
+            .select_from(Quote)
+            .join(Ticket, Ticket.id == Quote.ticket_id)
+            .where(Ticket.status != S.CANCELLED)
         )
     ).one()
     costs = (

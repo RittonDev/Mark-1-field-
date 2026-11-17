@@ -348,15 +348,19 @@ async def monthly(
             join_from=TicketExpense.ticket_id,
         )
     )
+    # Aprovado de OS cancelada não entra (não vai ser cobrado), como os pagamentos dos técnicos.
     quotes = await db.scalar(
         _of_customer(
-            select(func.coalesce(func.sum(Quote.total), 0)).where(
+            select(func.coalesce(func.sum(Quote.total), 0))
+            .select_from(Quote)
+            .join(Ticket, Ticket.id == Quote.ticket_id)
+            .where(
                 Quote.status == QuoteStatus.APPROVED,
                 Quote.decided_at >= start,
                 Quote.decided_at < end,
+                Ticket.status != TicketStatus.CANCELLED,
             ),
             customer_id,
-            join_from=Quote.ticket_id,
         )
     )
     return MonthlyReport(

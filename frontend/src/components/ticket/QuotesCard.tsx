@@ -800,23 +800,34 @@ export function QuoteEditor({
   );
 }
 
-/** Link do orçamento para o cliente: copiar, WhatsApp, e-mail ou gerar um novo (o anterior para de valer). */
+/**
+ * Mensagem e link do orçamento para o cliente: copiar, WhatsApp, e-mail ou gerar um novo link (o anterior
+ * para de valer). No modo "remind" a mensagem é o lembrete, e o primeiro envio (copiar, WhatsApp ou
+ * e-mail) registra a cobrança no histórico da OS.
+ */
 export function ShareDialog({
   ticket,
   quote,
+  mode = "share",
   onClose,
   onRotated,
 }: {
-  ticket: Pick<QuoteTicketRef, "code">;
+  ticket: Pick<QuoteTicketRef, "code" | "customer" | "location">;
   quote: Quote;
+  mode?: ShareMode;
   onClose: () => void;
   onRotated: () => void;
 }) {
   const confirm = useConfirm();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [copied, setCopied] = useState<"link" | "message" | null>(null);
   const [current, setCurrent] = useState(quote);
-  const urlField = useRef<HTMLInputElement>(null);
+  const messageRef = useRef<HTMLParagraphElement>(null);
+  const urlRef = useRef<HTMLSpanElement>(null);
+  // A cobrança vale uma vez por abertura do diálogo, no primeiro envio (copiar de novo não cobra de novo).
+  const reminded = useRef(false);
+  const reminding = mode === "remind";
   const rotate = useMutation({
     mutationFn: () => api.post<QuoteLink>(`/quotes/${quote.id}/link/rotate`),
     onSuccess: (link) => {
@@ -826,77 +837,54 @@ export function ShareDialog({
       toast({ title: "Novo link gerado", description: "O link anterior parou de funcionar.", tone: "success" });
     },
   });
+  const remind = useMutation({
+    mutationFn: () => api.post<Quote>(`/quotes/${quote.id}/remind`),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["quotes"] });
+      void queryClient.invalidateQueries({ queryKey: ["ticket", quote.ticket_id, "quotes"] });
+      toast({ title: "Cobrança registrada", tone: "success" });
+    },
+  });
   const url = linkOf(current);
-  const message = url ? shareMessage(current, ticket.code, url) : "";
+  const message = url ? (reminding ? reminderMessage(current, ticket, url, localDateISO()) : quoteMessage(current, ticket, url)) : "";
+  // O link é o fim da mensagem: separado, dá para selecionar só ele quando a cópia falha.
+  const urlAtEnd = Boolean(url) && message.endsWith(url ?? "");
+  const registerRemind = () => {
+    if (!reminding || reminded.current) return;
+    reminded.current = true;
+    remind.mutate();
+  };
+
+  const select = (node: HTMLElement | null) => {
+    const selection = window.getSelection();
+    if (!node || !selection) return;
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  };
 
   const copy = async (what: "link" | "message") => {
     if (!url) return;
+    registerRemind();
     if (await copyText(what === "link" ? url : message)) {
       setCopied(what);
-      toast({ title: what === "link" ? "Link copiado" : "Mensagem copiada", description: "Cole na conversa com o cliente.", tone: "success" });
+      toast({ title: what === "link" ? "Link copiado" : "Mensagem copiada", tone: "success" });
       return;
     }
-    toast({ title: "Não foi possível copiar", description: "Selecione o link e copie com Ctrl+C.", tone: "error" });
-    urlField.current?.select();
+    toast({ title: "Não foi possível copiar", description: "Selecione o texto e copie com Ctrl+C.", tone: "error" });
+    select(what === "link" && urlAtEnd ? urlRef.current : messageRef.current);
   };
 
+  const reminder = remind.data;
   return (
     <Dialog
       open
       onClose={onClose}
-      title={`Link do ${quote.code}`}
-      description="O cliente abre pelo celular e aprova com nome, matrícula (opcional) e assinatura, ou recusa com o motivo."
+      title={reminding ? `Cobrar ${quote.code}` : `Link do ${quote.code}`}
       footer={
-        <Button variant="primary" onClick={onClose}>
-          Concluir
-        </Button>
-      }
-    >
-      {url ? (
-        <div className="flex flex-col gap-3">
-          <div className="flex items-center gap-2 rounded-lg border border-line bg-surface-2/60 py-1.5 pr-1.5 pl-3 focus-within:ring-2 focus-within:ring-brand/45">
-            <input
-              ref={urlField}
-              readOnly
-              value={url}
-              aria-label={`Link do ${quote.code} para o cliente`}
-              onFocus={(e) => e.currentTarget.select()}
-              className="min-w-0 flex-1 truncate bg-transparent text-xs text-ink-muted outline-none"
-            />
-            <Button size="sm" variant="primary" onClick={() => copy("link")}>
-              {copied === "link" ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-              {copied === "link" ? "Copiado" : "Copiar link"}
-            </Button>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <a href={whatsappUrl(null, message)} target="_blank" rel="noreferrer" className={buttonClassName("secondary", "sm")}>
-              <MessageCircle className="size-3.5" />
-              WhatsApp
-            </a>
-            <a
-              href={`mailto:?subject=${encodeURIComponent(`Orçamento ${quote.code} · ${quote.title}`)}&body=${encodeURIComponent(message)}`}
-              className={buttonClassName("secondary", "sm")}
-            >
-              <Mail className="size-3.5" />
-              E-mail
-            </a>
-            <a href={current.link?.path ?? url} target="_blank" rel="noreferrer" className={buttonClassName("secondary", "sm")}>
-              <ExternalLink className="size-3.5" />
-              Ver como o cliente
-            </a>
-          </div>
-          <div className="rounded-lg border border-line bg-surface-2/40 p-3">
-            <div className="mb-1.5 flex items-center justify-between gap-2">
-              <span className="text-xs font-semibold text-ink/80">Mensagem que vai junto</span>
-              <Button size="sm" variant="ghost" onClick={() => copy("message")}>
-                {copied === "message" ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-                {copied === "message" ? "Copiada" : "Copiar mensagem"}
-              </Button>
-            </div>
-            <p className="text-sm leading-relaxed whitespace-pre-wrap text-ink-muted">{message}</p>
-          </div>
-          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">
-            <p className="text-xs text-ink-muted">O link fica aqui para copiar de novo quando precisar.</p>
+        <div className="flex w-full flex-wrap items-center justify-between gap-2">
+          {url ? (
             <Button
               size="sm"
               variant="ghost"
@@ -913,7 +901,70 @@ export function ShareDialog({
               {rotate.isPending ? null : <RefreshCw className="size-3.5" />}
               Gerar novo link
             </Button>
+          ) : (
+            <span />
+          )}
+          <Button onClick={onClose}>Concluir</Button>
+        </div>
+      }
+    >
+      {url ? (
+        <div className="flex flex-col gap-3">
+          <div className="rounded-lg border border-line bg-surface-2 p-3">
+            <p ref={messageRef} className="text-sm leading-relaxed break-words whitespace-pre-wrap text-ink">
+              {urlAtEnd ? (
+                <>
+                  {message.slice(0, message.length - (url?.length ?? 0))}
+                  <span ref={urlRef}>{url}</span>
+                </>
+              ) : (
+                message
+              )}
+            </p>
+            <div className="mt-3 flex justify-end">
+              <Button variant="primary" onClick={() => copy("message")}>
+                {copied === "message" ? <Check className="size-4" /> : <Copy className="size-4" />}
+                {copied === "message" ? "Mensagem copiada" : "Copiar mensagem"}
+              </Button>
+            </div>
           </div>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" onClick={() => copy("link")}>
+              {copied === "link" ? <Check className="size-3.5" /> : <Link2 className="size-3.5" />}
+              {copied === "link" ? "Link copiado" : "Copiar link"}
+            </Button>
+            <a
+              href={whatsappUrl(null, message)}
+              target="_blank"
+              rel="noreferrer"
+              onClick={registerRemind}
+              className={buttonClassName("secondary", "sm")}
+            >
+              <MessageCircle className="size-3.5" />
+              WhatsApp
+            </a>
+            <a
+              href={`mailto:?subject=${encodeURIComponent(quoteSubject(current, ticket))}&body=${encodeURIComponent(message)}`}
+              onClick={registerRemind}
+              className={buttonClassName("secondary", "sm")}
+            >
+              <Mail className="size-3.5" />
+              E-mail
+            </a>
+            <a href={previewHref(current.link?.path ?? url)} target="_blank" rel="noreferrer" className={buttonClassName("secondary", "sm")}>
+              <ExternalLink className="size-3.5" />
+              Ver como o cliente
+            </a>
+          </div>
+          {reminder ? (
+            <p className="flex items-center gap-1.5 text-xs text-ink-muted tabular-nums" role="status">
+              <BellRing aria-hidden className="size-3.5 shrink-0" />
+              Cobrado {reminder.reminder_count ?? 1}x · última {dayTime(reminder.last_reminded_at)}
+            </p>
+          ) : null}
+          {remind.error ? (
+            <ErrorBox title="A cobrança não foi registrada" message={errorMessage(remind.error)} onRetry={() => remind.mutate()} />
+          ) : null}
           {rotate.error ? <ErrorBox message={errorMessage(rotate.error)} /> : null}
         </div>
       ) : (
@@ -922,15 +973,3 @@ export function ShareDialog({
     </Dialog>
   );
 }
-
-/** Texto que acompanha o link: pede a aprovação (com a validade) ou, já respondido, só envia para consulta. */
-function shareMessage(q: Quote, ticketCode: string, url: string): string {
-  const which = `o orçamento ${q.code} (${q.title}), da OS ${ticketCode}`;
-  if (q.status === "approved" || q.status === "rejected") {
-    const verb = q.status === "approved" ? "aprovado" : "recusado";
-    return `Olá! Segue ${which}, ${verb}${q.decided_at ? ` em ${formatDate(q.decided_at)}` : ""}. Para consultar: ${url}`;
-  }
-  const validity = q.valid_until ? ` Válido até ${formatDate(q.valid_until)}.` : "";
-  return `Olá! Segue ${which}, no valor de ${formatMoney(q.total)}.${validity} Para aprovar com sua assinatura (ou recusar com o motivo), acesse: ${url}`;
-}
-

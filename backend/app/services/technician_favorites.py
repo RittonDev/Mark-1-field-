@@ -312,10 +312,7 @@ async def _people(db: AsyncSession, ids: set[uuid.UUID], setters: set[uuid.UUID]
 
 def _setters(boards: Iterable[_Board]) -> set[uuid.UUID]:
     return {
-        d.updated_by_id
-        for b in boards
-        for d in b.decisions.values()
-        if d.updated_by_id is not None
+        d.updated_by_id for b in boards for d in b.decisions.values() if d.updated_by_id is not None
     }
 
 
@@ -413,9 +410,7 @@ async def list_cities(
     decisions = await _decisions(db, state=uf)
     boards = [_board(c, decisions.get(k, {})) for k, c in cities.items()]
     if technician_id is not None:
-        boards = [
-            b for b in boards if b.is_favorite(technician_id) or technician_id in b.hidden
-        ]
+        boards = [b for b in boards if b.is_favorite(technician_id) or technician_id in b.hidden]
     ids = {uid for b in boards for uid in (*b.pinned, *b.automatic)}
     people = await _people(db, ids, _setters(boards))
     boards.sort(key=lambda b: (-b.city.visits, b.city.state, fold_text(b.city.city)))
@@ -566,9 +561,9 @@ async def set_favorite(
         if pinned >= MAX_PINNED_PER_CITY:
             raise WorkflowError(f"Até {MAX_PINNED_PER_CITY} técnicos fixados por cidade")
         await _save(db, tech.id, city, FavoriteKind.INCLUDE, data.note, actor)
-    elif mine is not None and mine.kind == FavoriteKind.HIDE:
-        await _save(db, tech.id, city, FavoriteKind.HIDE, data.note, actor)
-    elif tech.id in _board(city, decisions).automatic:
+        return
+    hidden = mine is not None and mine.kind == FavoriteKind.HIDE
+    if hidden or tech.id in _board(city, decisions).automatic:
         await _save(db, tech.id, city, FavoriteKind.HIDE, data.note, actor)
     elif mine is not None:
         await _delete(db, tech.id, uf, key, actor)

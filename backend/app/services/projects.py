@@ -99,10 +99,15 @@ async def stats(db: AsyncSession, ids: list[uuid.UUID]) -> dict[uuid.UUID, Proje
         .group_by(Ticket.project_id)
     ):
         out[pid].payouts_total = total or Decimal("0")
+    # Aprovado de OS cancelada não conta (não vai ser cobrado), como em Pagamentos.
     for pid, total in await db.execute(
         select(Ticket.project_id, func.sum(Quote.total))
         .join(Ticket, Ticket.id == Quote.ticket_id)
-        .where(Ticket.project_id.in_(ids), Quote.status == QuoteStatus.APPROVED)
+        .where(
+            Ticket.project_id.in_(ids),
+            Quote.status == QuoteStatus.APPROVED,
+            Ticket.status != TicketStatus.CANCELLED,
+        )
         .group_by(Ticket.project_id)
     ):
         out[pid].quotes_approved_total = total or Decimal("0")
