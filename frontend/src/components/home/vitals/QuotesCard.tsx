@@ -9,8 +9,8 @@ import { intFmt, MIN_BASE, pctText, plural, share } from "../rules";
 import type { HomeQuotes } from "../types";
 import { VitalCard } from "./VitalCard";
 
-// A lista de Orçamentos lê a situação e o período do endereço: cada número abre a lista que o mostra.
-/** Aguardando a assinatura: os enviados na validade, de qualquer data. */
+// Cada número abre a lista de Orçamentos que o mostra (a lista lê a situação e o período do endereço).
+/** Os que aguardam a assinatura, de qualquer data. */
 const AWAITING_HREF = "/orcamentos?situacao=sent&periodo=tudo";
 const FOLLOW_UP_HREF = "/orcamentos?cobrar=1";
 /** Os últimos 90 dias são o período padrão da lista. */
@@ -67,7 +67,8 @@ function QuotesBody({ quotes: q }: { quotes: HomeQuotes }) {
         )}
         {q.awaiting_no_link > 0 || q.expiring > 0 ? (
           <p className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs tabular-nums">
-            {/* Na lista dos que aguardam, cada um sem link tem o "Gerar o link". */}
+            {/* Os sem link abrem a lista dos que aguardam: todos estão lá, cada um com o "Gerar o link" (na
+                fila "Para cobrar", o enviado há mais de 30 dias só entra perto de vencer). */}
             {q.awaiting_no_link > 0 ? (
               <ProblemText tone="warning" icon={TriangleAlert} href={AWAITING_HREF} title={NO_LINK_HINT}>
                 {intFmt(q.awaiting_no_link)} sem link
@@ -83,47 +84,78 @@ function QuotesBody({ quotes: q }: { quotes: HomeQuotes }) {
       </div>
 
       <dl className="flex flex-col gap-2 text-[13px]">
-        <Row label="Para cobrar" title={FOLLOW_UP_HINT}>
-          {q.follow_up > 0 ? (
-            <Link href={FOLLOW_UP_HREF} className={valueLink}>
-              {intFmt(q.follow_up)} · {formatMoney(q.follow_up_total)}
-            </Link>
-          ) : (
-            <span className="font-normal text-ink-muted">Nada para cobrar</span>
-          )}
-        </Row>
-        <Row label="Vencidos (90 dias)" title={EXPIRED_HINT}>
-          {q.expired_90d > 0 ? (
-            <ProblemText tone="warning" icon={TriangleAlert} href={EXPIRED_HREF}>
-              {intFmt(q.expired_90d)} · {formatMoney(q.expired_90d_total)}
-            </ProblemText>
-          ) : (
-            <span className="font-normal text-ink-muted">Nenhum</span>
-          )}
-        </Row>
-        <Row label="Rascunhos" title={DRAFTS_HINT}>
-          {q.drafts > 0 ? (
-            <Link href={DRAFTS_HREF} className={valueLink}>
-              {intFmt(q.drafts)}
-              {q.in_review > 0 ? ` · ${intFmt(q.in_review)} em revisão` : ""}
-            </Link>
-          ) : (
-            <span className="font-normal text-ink-muted">Nenhum</span>
-          )}
-        </Row>
+        <Row
+          label="Para cobrar"
+          title={FOLLOW_UP_HINT}
+          href={FOLLOW_UP_HREF}
+          value={q.follow_up > 0 ? `${intFmt(q.follow_up)} · ${formatMoney(q.follow_up_total)}` : null}
+          empty="Nada para cobrar"
+        />
+        {/* Vencido é dinheiro perdido: âmbar quando há. */}
+        <Row
+          label="Vencidos (90 dias)"
+          title={EXPIRED_HINT}
+          href={EXPIRED_HREF}
+          value={q.expired_90d > 0 ? `${intFmt(q.expired_90d)} · ${formatMoney(q.expired_90d_total)}` : null}
+          empty="Nenhum"
+          problem
+        />
+        <Row
+          label="Rascunhos"
+          title={DRAFTS_HINT}
+          href={DRAFTS_HREF}
+          value={q.drafts > 0 ? `${intFmt(q.drafts)}${q.in_review > 0 ? ` · ${intFmt(q.in_review)} em revisão` : ""}` : null}
+          empty="Nenhum"
+        />
       </dl>
     </>
   );
 }
 
-/** Uma linha da lista: o nome (com a definição no title) à esquerda e o número à direita. */
-function Row({ label, title, children }: { label: string; title: string; children: React.ReactNode }) {
+/**
+ * Uma linha: o nome (com a definição no title) à esquerda e o número à direita, com link para a lista que
+ * o mostra. Sem nada (value null), o texto neutro de `empty`.
+ */
+function Row({
+  label,
+  title,
+  href,
+  value,
+  empty,
+  problem,
+}: {
+  label: string;
+  title: string;
+  href: string;
+  value: string | null;
+  empty: string;
+  problem?: boolean;
+}) {
+  // O nome vai junto no link: fora da lista (a relação de links do leitor de tela), "8 · R$ 900,00" não diz o quê.
+  const text = (
+    <>
+      <span className="sr-only">{label}: </span>
+      {value}
+    </>
+  );
   return (
     <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
       <dt className="text-ink-muted" title={title}>
         {label}
       </dt>
-      <dd className="ml-auto text-right font-medium text-ink tabular-nums">{children}</dd>
+      <dd className="ml-auto text-right font-medium text-ink tabular-nums">
+        {value === null ? (
+          <span className="font-normal text-ink-muted">{empty}</span>
+        ) : problem ? (
+          <ProblemText tone="warning" icon={TriangleAlert} href={href}>
+            {text}
+          </ProblemText>
+        ) : (
+          <Link href={href} className={valueLink}>
+            {text}
+          </Link>
+        )}
+      </dd>
     </div>
   );
 }

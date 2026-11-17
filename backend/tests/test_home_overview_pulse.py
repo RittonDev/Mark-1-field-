@@ -10,7 +10,7 @@ from decimal import Decimal
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import update
+from sqlalchemy import delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import (
@@ -21,6 +21,7 @@ from app.core.enums import (
     TicketEventType,
     TicketType,
 )
+from app.db.base import utcnow
 from app.models import (
     Customer,
     Location,
@@ -30,6 +31,8 @@ from app.models import (
     TicketPayout,
     User,
 )
+from app.services import home
+from app.services.activities import local_today
 from tests.conftest import World, requires_db
 from tests.test_home_search import (  # noqa: F401 (fixtures db e frozen)
     API,
@@ -201,6 +204,26 @@ async def test_pulse_without_data(client: AsyncClient, world: World) -> None:
         "status": ["resolved", "closed"],
         "tag": ["Pendente Envio PGTO"],
     }
+    # A caixinha dos orçamentos sem orçamento: tudo 0, e o valor também é o número 0.
+    quotes = pulse["quotes"]
+    assert quotes == {
+        "awaiting": 0,
+        "awaiting_total": 0,
+        "awaiting_no_link": 0,
+        "expiring": 0,
+        "expired_90d": 0,
+        "expired_90d_total": 0,
+        "drafts": 0,
+        "in_review": 0,
+        "follow_up": 0,
+        "follow_up_total": 0,
+        "approved_month": 0,
+        "approved_month_total": 0,
+        "rejected_month": 0,
+        "approved_90d": 0,
+        "decided_90d": 0,
+    }
+    assert all(isinstance(quotes[key], float) for key in quotes if key.endswith("_total"))
     assert pulse["weeks"] == [{"start": s, "created": 0, "resolved": 0} for s in WEEK_STARTS]
 
 
