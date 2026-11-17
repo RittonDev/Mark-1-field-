@@ -550,6 +550,8 @@ class TicketFilters(BaseModel):
     type: TicketType | None = None
     source: TicketSource | None = None
     assignee_id: uuid.UUID | None = None
+    # Técnico que atuou: o atual, quem foi junto ou quem já foi o responsável (OS antigas).
+    technician_id: uuid.UUID | None = None
     team_id: uuid.UUID | None = None
     customer_id: uuid.UUID | None = None
     location_id: uuid.UUID | None = None

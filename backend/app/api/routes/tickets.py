@@ -94,6 +94,7 @@ def ticket_filters(
     type_: Annotated[TicketType | None, Query(alias="type")] = None,
     source: TicketSource | None = None,
     assignee_id: uuid.UUID | None = None,
+    technician_id: uuid.UUID | None = None,
     team_id: uuid.UUID | None = None,
     customer_id: uuid.UUID | None = None,
     location_id: uuid.UUID | None = None,
@@ -117,7 +118,8 @@ def ticket_filters(
     tag: Annotated[list[str] | None, Query(max_length=20)] = None,
 ) -> TicketFilters:
     """Filtros da lista de OS (a exportação usa os mesmos). Datas em AAAA-MM-DD, dias inteiros no
-    fuso da operação; `tag` repetível (OS com qualquer uma delas)."""
+    fuso da operação; `tag` repetível (OS com qualquer uma delas); `technician_id` = técnico que
+    atuou na OS (o atual, quem foi junto ou quem já foi o responsável antes de uma troca)."""
     days = (created_from, created_to, scheduled_from, scheduled_to)
     if any(day is not None and not 2000 <= day.year <= 2100 for day in days):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, BAD_PERIOD)
@@ -127,6 +129,7 @@ def ticket_filters(
         type=type_,
         source=source,
         assignee_id=assignee_id,
+        technician_id=technician_id,
         team_id=team_id,
         customer_id=customer_id,
         location_id=location_id,

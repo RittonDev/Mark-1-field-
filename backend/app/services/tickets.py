@@ -2098,6 +2098,18 @@ def search_clause(q: str) -> ColumnElement[bool]:
     return or_(*options) if options else false()
 
 
+def acted_by_clause(user_id: uuid.UUID) -> ColumnElement[bool]:
+    """OS em que o técnico atuou: é o responsável agora, foi junto (ajudante) ou já foi o
+    responsável antes de uma troca (evento de atribuição, inclusive o histórico importado do FC)."""
+    uid = str(user_id)
+    helped = select(ticket_helpers.c.ticket_id).where(ticket_helpers.c.user_id == user_id)
+    assigned_before = select(TicketEvent.ticket_id).where(
+        TicketEvent.event_type == TicketEventType.ASSIGNED,
+        or_(TicketEvent.to_value == uid, TicketEvent.from_value == uid),
+    )
+    return or_(Ticket.assignee_id == user_id, Ticket.id.in_(helped), Ticket.id.in_(assigned_before))
+
+
 def filter_conditions(user: User, f: TicketFilters, now: datetime) -> list[ColumnElement[bool]]:
     conds: list[ColumnElement[bool]] = []
     vis = visibility_clause(user)
@@ -2115,6 +2127,8 @@ def filter_conditions(user: User, f: TicketFilters, now: datetime) -> list[Colum
         conds.append(Ticket.source == f.source)
     if f.assignee_id:
         conds.append(Ticket.assignee_id == f.assignee_id)
+    if f.technician_id:
+        conds.append(acted_by_clause(f.technician_id))
     if f.team_id:
         conds.append(Ticket.team_id == f.team_id)
     if f.project_id:
