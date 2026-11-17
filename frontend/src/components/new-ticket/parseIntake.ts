@@ -231,7 +231,7 @@ export function parseIntake(raw: string): IntakeParse {
   };
 }
 
-/** Nome para comparar: sem acento, minúsculo, só letras e números, sem o artigo do começo ("O Boticário"). */
+/** Nome para comparar: sem acento, minúsculo, só letras e números, sem o artigo do começo ("A Rede Exemplo"). */
 function comparable(name: string): string {
   return name
     .normalize("NFD")
@@ -243,8 +243,9 @@ function comparable(name: string): string {
 }
 
 /**
- * Cliente citado pelo nome na mensagem ("Bom dia, aqui é da Madero..."). Só nomes de 4 letras ou mais e
- * só um candidato: com "Madero" e "Madero Steak" citados, vale o nome mais longo, que contém o outro.
+ * Cliente citado pelo nome na mensagem ("Bom dia, aqui é da Rede Exemplo..."). Só nomes de 4 letras ou
+ * mais e só um candidato: com "Rede Exemplo" e "Rede Exemplo Grill" citados, vale o nome mais longo, que
+ * contém o outro.
  */
 export function customerIn<T extends { id: string; name: string }>(text: string, customers: T[]): T | null {
   const haystack = ` ${comparable(text)} `;

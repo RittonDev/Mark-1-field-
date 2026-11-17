@@ -126,7 +126,7 @@ export function isFilled(d: NewTicketDraft): boolean {
   );
 }
 
-/** "21795 · BOT - SH. PIEDADE": o código (quando há) e o nome da localização. */
+/** "0123 · LOJA CENTRO": o código (quando há) e o nome da localização. */
 export function locationLabel(location: Pick<Location, "code" | "name">): string {
   return [location.code, location.name].filter(Boolean).join(" · ");
 }
