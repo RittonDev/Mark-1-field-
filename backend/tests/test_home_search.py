@@ -518,7 +518,9 @@ async def test_home_week_counts_sao_paulo_days(
     )
     await add_ticket(db, world, created_at=at(TODAY - timedelta(days=7), 12))  # fora da semana
     await db.commit()
-    week = {w["day"]: (w["created"], w["resolved"]) for w in (await overview(client, world))["week"]}
+    week = {
+        w["day"]: (w["created"], w["resolved"]) for w in (await overview(client, world))["week"]
+    }
     assert len(week) == 7
     assert week[(TODAY - timedelta(days=2)).isoformat()] == (1, 0)
     assert week[(TODAY - timedelta(days=1)).isoformat()] == (0, 1)
@@ -910,7 +912,7 @@ async def build(db: AsyncSession, world: World) -> Data:
         scheduled_start=at(date(2024, 11, 12), 9),
         created_at=at(date(2024, 11, 12), 8),
         resolved_at=at(date(2024, 11, 13), 8),
-        tags=[tag("Projeto"), tag("Teste do layout"), tag("Pendente Envio PGTO")],
+        tags=[tag("Projeto"), tag("Layout Experimental"), tag("Pendente Envio PGTO")],
     )
     t["espera"] = await add_ticket(
         db,
@@ -1066,9 +1068,7 @@ async def test_search_empty_and_odd_input(client: AsyncClient, world: World, dat
         "(.*)+$",
         "[[[",
     ):
-        r = await client.get(
-            f"{API}/search/smart", params={"q": q}, headers=world.analyst.headers
-        )
+        r = await client.get(f"{API}/search/smart", params={"q": q}, headers=world.analyst.headers)
         assert r.status_code == 200, (q, r.text)
     assert (await search(client, world, "de da do"))["filters"] is None
 
@@ -1097,7 +1097,9 @@ async def test_search_by_number(client: AsyncClient, world: World, data: Data) -
     assert chips(store) == [("location", "Relicário Shopping Aurora (0041)")]
     assert titles(store) == {"Impressão falhando no caixa", "Internet lenta no estoque"}
     assert store["customers"][0]["id"] == str(data.relicario.id)
-    assert (await search(client, world, "loja 77"))["filters"] == {"location_id": str(data.estrela.id)}
+    assert (await search(client, world, "loja 77"))["filters"] == {
+        "location_id": str(data.estrela.id)
+    }
     # "OS 77" é sempre o número (não existe: nenhuma OS).
     missing = await search(client, world, "OS 77")
     assert missing["filters"] == {"number": 77} and missing["total"] == 0
@@ -1244,6 +1246,12 @@ async def test_search_by_technician_who_acted(
     assert chips(joao) == [("technician", "Técnico: João Arcanjo Teste")]
     assert titles(joao) == {"Impressão falhando no caixa", "Preventiva mensal"}
     assert {t["name"] for t in joao["technicians"]} == {"João Arcanjo Teste", "João Velho Teste"}
+    # Sobrenome sozinho não escolhe o técnico (é palavra comum demais): vira texto, que ainda
+    # acha as OS dele pelo nome do responsável.
+    surname = await search(client, world, "arcanjo")
+    assert surname["filters"] == {"q": "arcanjo"}
+    assert titles(surname) == {"Impressão falhando no caixa", "Preventiva mensal"}
+    assert surname["technicians"][0]["id"] == str(data.joao.id)
     assert joao["technicians"][0] == {
         "id": str(data.joao.id),
         "name": "João Arcanjo Teste",
@@ -1284,11 +1292,10 @@ async def test_search_by_tag(client: AsyncClient, world: World, data: Data) -> N
     assert (await search(client, world, "projeto"))["filters"] == {"tag": ["Projeto"]}
     contract = await search(client, world, "contratual")
     assert contract["filters"] == {"tag": ["Ticket Contratual"]} and contract["total"] == 3
-    # Etiqueta rara não é escolhida por uma palavra solta (só pela frase inteira); "teste" também
-    # é sobrenome de técnico, que sozinho não escolhe ninguém: vira texto.
-    assert (await search(client, world, "teste"))["filters"] == {"q": "teste"}
-    assert (await search(client, world, "teste do layout"))["filters"] == {
-        "tag": ["Teste do layout"]
+    # Etiqueta rara não é escolhida por uma palavra solta, só pela frase inteira.
+    assert (await search(client, world, "experimental"))["filters"] == {"q": "experimental"}
+    assert (await search(client, world, "layout experimental"))["filters"] == {
+        "tag": ["Layout Experimental"]
     }
 
 
