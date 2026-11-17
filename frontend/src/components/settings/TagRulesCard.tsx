@@ -2,9 +2,10 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { Check, RotateCcw, Save, X } from "lucide-react";
+import { Check, Info, Loader2, Plus, RotateCcw, Save, X } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { FieldError, useLeaveGuard } from "@/components/settings/shared";
+import { flushSync } from "react-dom";
+import { FieldError, fold, useLeaveGuard } from "@/components/settings/shared";
 import { tagTone } from "@/components/TagChips";
 import { useToast } from "@/components/Toaster";
 import { Button, Card, CardHeader, ErrorBox, LoadingBlock, SectionTitle } from "@/components/ui";
@@ -16,9 +17,12 @@ import type { Tag } from "@/lib/types";
 // contam) e até 10 etiquetas por lista.
 const MAX_TAGS = 10;
 const MAX_NAME = 40;
+// Sugestões à vista ao digitar (como no campo de etiquetas da OS).
+const SUGGESTIONS = 12;
 
 // Cores do Field Control no seletor: o nome em português e o ponto na cor cheia, na ordem do arco-íris.
-// O chip da etiqueta usa os tons de tagTone (os mesmos das listas de OS e da Nova OS).
+// O chip da etiqueta usa os tons de tagTone (components/TagChips), os mesmos da Nova OS e do editor da OS.
+// A lista Atividades (chamados/_lista/tags.tsx) ainda tem tons próprios, um pouco diferentes.
 const COLORS: Record<string, { label: string; dot: string }> = {
   red: { label: "Vermelho", dot: "bg-red-500" },
   orange: { label: "Laranja", dot: "bg-orange-500" },
@@ -85,8 +89,11 @@ const REMOVE_GROUP: GroupText = {
   example: "Pendente Envio PGTO",
 };
 
+// Espaços como a API conta (str.split do Python): os do \s do JavaScript e mais os separadores U+001C a
+// U+001F e U+0085. Assim o nome limpo aqui chega igual na API e a checagem de repetidos dá o mesmo lá.
+const SPACES = new RegExp(`[\\s${String.fromCharCode(0x1c)}-${String.fromCharCode(0x1f)}${String.fromCharCode(0x85)}]+`, "g");
 /** Nome como a API guarda: sem espaços sobrando. */
-const clean = (name: string) => name.replace(/\s+/g, " ").trim();
+const clean = (name: string) => name.replace(SPACES, " ").trim();
 /** Chave de comparação: a API trata "ticket avulso" e "Ticket Avulso" como a mesma etiqueta. */
 const nameKey = (name: string) => clean(name).toLowerCase();
 const colorLabel = (color: string | null) => (color === null ? "Sem cor" : (COLORS[color]?.label ?? color));
@@ -112,11 +119,9 @@ function addProblem(name: string, names: string[]): string | null {
 
 /** Etiquetas que o sistema põe e tira sozinho nas OS (como no Field Control). */
 export function TagRulesCard({ readOnly = false }: { readOnly?: boolean }) {
-  const rules = useQuery({
-    ...tagRulesQuery,
-    // Voltar para a aba no meio da edição não relê: outra versão salva recriaria o formulário e apagaria o digitado.
-    refetchOnWindowFocus: false,
-  });
+  // Releituras (voltar para a aba, reconexão do tempo real) só atualizam a tela quando não há alteração
+  // por salvar: o formulário fica montado e decide (ver RulesForm).
+  const rules = useQuery(tagRulesQuery);
   return (
     <Card>
       <CardHeader
@@ -125,7 +130,7 @@ export function TagRulesCard({ readOnly = false }: { readOnly?: boolean }) {
       />
       {/* Com as regras na tela, uma releitura que falha (rede caiu) não troca o formulário pelo erro. */}
       {rules.data ? (
-        <RulesForm key={fingerprint(rules.data)} initial={rules.data} readOnly={readOnly} />
+        <RulesForm server={rules.data} readOnly={readOnly} />
       ) : rules.isError ? (
         <div className="flex flex-col items-start gap-3 p-4">
           <ErrorBox message={errorMessage(rules.error)} />

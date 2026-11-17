@@ -279,7 +279,8 @@ function autoTagsHint(rules: TicketTagRules): string {
   const extra = rules.on_extra_cost.map((t) => t.name);
   const paid = rules.remove_on_payout_paid;
   if (extra.length) parts.push(`${quoted(extra)} ${extra.length > 1 ? "entram" : "entra"} ao lançar um custo extra`);
-  if (paid.length) parts.push(`${quoted(paid)} ${paid.length > 1 ? "saem" : "sai"} quando o técnico da OS é pago`);
+  // A API tira a etiqueta só quando todos os pagamentos da OS (responsável e quem foi junto) estão pagos.
+  if (paid.length) parts.push(`${quoted(paid)} ${paid.length > 1 ? "saem" : "sai"} quando todos os técnicos da OS estão pagos`);
   return parts.length ? `Automático: ${parts.join("; ")}.` : "";
 }
 
@@ -1163,7 +1164,8 @@ export function GeneralTab({
         </div>
       </Card>
 
-      <Card>
+      {/* Recolhido, o cartão é só o cabeçalho: sem a linha de baixo dele, que dobraria com a borda do cartão. */}
+      <Card className={moreOpen ? undefined : "[&>div:first-child]:border-b-0"}>
         <CardHeader
           title="Mais detalhes"
           description={moreOpen ? undefined : "Título, prazo, analista, projeto, pedido do cliente, recado, endereço, situação, horários e conclusão."}
