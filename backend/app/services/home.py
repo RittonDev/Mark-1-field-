@@ -1353,14 +1353,400 @@ async def _suggestions(
     return [s for s in found if s is not None][:MAX_SUGGESTIONS]
 
 
+# --------------------------------------------------------------------------- sinais vitais
+
+
+async def _visit_technicians(db: AsyncSession, m: Moment) -> tuple[int, int]:
+    """Técnicos distintos com visita hoje e amanhã. Consulta pequena (só a agenda dos 2 dias),
+    para o COUNT(DISTINCT) ficar fora da varredura grande."""
+    technicians = Ticket.assignee_id.distinct()
+    today = and_(Ticket.scheduled_start < m.day_end, Ticket.status != S.CANCELLED)
+    tomorrow = and_(Ticket.scheduled_start >= m.day_end, Ticket.status.not_in(FINISHED))
+    window = and_(Ticket.scheduled_start >= m.day_start, Ticket.scheduled_start < m.tomorrow_end)
+    stmt = select(
+        func.count(technicians).filter(today), func.count(technicians).filter(tomorrow)
+    ).where(window)
+    today_n, tomorrow_n = (await db.execute(stmt)).one()
+    return today_n or 0, tomorrow_n or 0
+
+
+async def _store_return(db: AsyncSession, m: Moment) -> Ratio:
+    """Concluídas numa loja entre 37 e 7 dias atrás (os 7 dias de acompanhamento completos) e
+    quantas tiveram nova corretiva na mesma loja em até 7 dias (cancelada não conta)."""
+    later = aliased(Ticket, name="return_ticket")
+    came_back = (
+        select(later.id)
+        .where(
+            later.location_id == Ticket.location_id,
+            later.id != Ticket.id,
+            later.type == TicketType.INCIDENT,
+            later.status != S.CANCELLED,
+            later.created_at > Ticket.resolved_at,
+            later.created_at <= Ticket.resolved_at + timedelta(days=RETURN_DAYS),
+        )
+        .correlate(Ticket)
+        .exists()
+    )
+    followed_until = m.now - timedelta(days=RETURN_DAYS)
+    stmt = (
+        select(func.count().label("base"), func.count().filter(came_back).label("returned"))
+        .select_from(Ticket)
+        .where(
+            Ticket.status.in_(DONE),
+            Ticket.location_id.is_not(None),
+            Ticket.resolved_at >= followed_until - timedelta(days=RETURN_BASE_DAYS),
+            Ticket.resolved_at < followed_until,
+        )
+    )
+    row = (await db.execute(stmt)).one()
+    return Ratio(count=row.returned or 0, base=row.base or 0)
+
+
+async def _unproductive_events(db: AsyncSession, m: Moment) -> int:
+    """Visitas improdutivas na janela (o evento da OS, não um status)."""
+    stmt = (
+        select(func.count())
+        .select_from(TicketEvent)
+        .where(
+            TicketEvent.event_type == TicketEventType.UNPRODUCTIVE_VISIT,
+            TicketEvent.created_at >= m.recent_start,
+        )
+    )
+    return await db.scalar(stmt) or 0
+
+
+async def _team_rows(db: AsyncSession, m: Moment) -> list[Any]:
+    """OS resolvidas na janela por técnico (users.role = technician) e se ele já entrou no app."""
+    stmt = (
+        select(Ticket.assignee_id, User.last_login_at, func.count().label("resolved"))
+        .select_from(Ticket)
+        .join(User, User.id == Ticket.assignee_id)
+        .where(User.role == UserRole.TECHNICIAN, Ticket.resolved_at >= m.recent_start)
+        .group_by(Ticket.assignee_id, User.last_login_at)
+    )
+    return list((await db.execute(stmt)).all())
+
+
+async def _customers(db: AsyncSession, m: Moment, entered: int) -> HomeCustomers:
+    """Clientes com OS abertas na janela: os 5 maiores, cada um com a chegada no horário (a regra
+    do atendimento ao cliente) e o prazo estourado."""
+    created = recent(m)
+    arrivals = on_time_base(m)
+    on_time = and_(arrivals, Ticket.arrived_at <= arrival_limit())
+    stmt = (
+        select(
+            Ticket.customer_id,
+            Customer.name,
+            func.count().filter(created).label("created"),
+            func.count().filter(arrivals).label("on_time_base"),
+            func.count().filter(on_time).label("on_time_ok"),
+            func.count().filter(created, breached_clause(m.now)).label("breached"),
+        )
+        .select_from(Ticket)
+        .join(Customer, Customer.id == Ticket.customer_id)
+        .where(or_(created, Ticket.arrived_at >= m.recent_start))
+        .group_by(Ticket.customer_id, Customer.name)
+    )
+    rows = [row for row in (await db.execute(stmt)).all() if row.created]
+    rows.sort(key=lambda row: (-row.created, row.name))
+    top = [
+        CustomerPulse(
+            id=row.customer_id,
+            name=row.name,
+            created=row.created,
+            on_time=Ratio(count=row.on_time_ok, base=row.on_time_base),
+            breached=row.breached,
+            filters=ListFilters(customer_id=row.customer_id, created_from=m.recent_from),
+            breached_filters=(
+                ListFilters(
+                    customer_id=row.customer_id, sla_breached=True, created_from=m.recent_from
+                )
+                if row.breached
+                else None
+            ),
+        )
+        for row in rows[:TOP_CUSTOMERS]
+    ]
+    return HomeCustomers(active=len(rows), entered=entered, top=top)
+
+
+def _money(value: Any) -> Decimal:
+    return Decimal(value or 0).quantize(Decimal("0.01"))
+
+
+async def _finance(db: AsyncSession, m: Moment) -> HomeFinance:
+    """Pagamentos dos técnicos, a etiqueta de pagamento pendente, orçamentos e custos extras.
+    Sem lançamento o valor sai 0: a tela decide "sem valores" pela contagem."""
+    done = Ticket.status.in_(DONE)
+    late = and_(done, Ticket.resolved_at < m.now - PAYOUT_LATE)
+    payouts = (
+        await db.execute(
+            select(
+                func.sum(TicketPayout.amount).filter(done).label("to_pay"),
+                func.count().filter(done).label("to_pay_count"),
+                func.count(TicketPayout.technician_id.distinct()).filter(done).label("payees"),
+                func.count().filter(late).label("late"),
+                func.sum(TicketPayout.amount)
+                .filter(Ticket.status.not_in(FINISHED))
+                .label("expected"),
+            )
+            .select_from(TicketPayout)
+            .join(Ticket, Ticket.id == TicketPayout.ticket_id)
+            .where(TicketPayout.status == PayoutStatus.PENDING)
+        )
+    ).one()
+
+    # A etiqueta que sai quando os técnicos da OS são pagos ("Pendente Envio PGTO"): enquanto os
+    # valores não são lançados, ela é o sinal do que falta pagar.
+    rules = await tag_rules.get_rules(db)
+    names = [name for name in rules.remove_on_payout_paid if tag_rules.tag_key(name)]
+    tag_tickets = tag_technicians = tag_old = 0
+    if names:
+        keys = {tag_rules.tag_key(name) for name in names}
+        stmt = (
+            select(
+                func.count(),
+                func.count(Ticket.assignee_id.distinct()),
+                func.count().filter(Ticket.resolved_at < m.now - TAG_OLD),
+            )
+            .select_from(Ticket)
+            .where(done, has_any_tag(keys))
+        )
+        tag_tickets, tag_technicians, tag_old = (await db.execute(stmt)).one()
+
+    # Aguardando: a validade de _quotes, sem o mínimo de 3 dias do ponto de atenção.
+    waiting = and_(
+        Quote.status == QuoteStatus.SENT,
+        or_(Quote.valid_until.is_(None), Quote.valid_until >= m.today),
+    )
+    month_start = month_bounds(m.today.year, m.today.month)[0]
+    approved = and_(Quote.status == QuoteStatus.APPROVED, Quote.decided_at >= month_start)
+    quotes = (
+        await db.execute(
+            select(
+                func.count().filter(waiting).label("waiting"),
+                func.sum(Quote.total).filter(waiting).label("waiting_total"),
+                func.count().filter(approved).label("approved"),
+                func.sum(Quote.total).filter(approved).label("approved_total"),
+            ).select_from(Quote)
+        )
+    ).one()
+    costs = (
+        await db.execute(
+            select(func.count().label("pending"), func.sum(TicketExpense.total).label("total"))
+            .select_from(TicketExpense)
+            .where(TicketExpense.status == ExpenseStatus.PENDING)
+        )
+    ).one()
+    return HomeFinance(
+        payouts_to_pay=_money(payouts.to_pay),
+        payouts_to_pay_count=payouts.to_pay_count,
+        payouts_technicians=payouts.payees,
+        payouts_late=payouts.late,
+        payouts_expected=_money(payouts.expected),
+        payout_tag=names[0] if names else None,
+        payout_tag_tickets=tag_tickets,
+        payout_tag_technicians=tag_technicians,
+        payout_tag_over_30d=tag_old,
+        payout_tag_filters=ListFilters(status=list(DONE), tag=names) if names else None,
+        quotes_waiting=quotes.waiting,
+        quotes_waiting_total=_money(quotes.waiting_total),
+        quotes_approved_month=quotes.approved,
+        quotes_approved_month_total=_money(quotes.approved_total),
+        costs_pending=costs.pending,
+        costs_pending_total=_money(costs.total),
+    )
+
+
+def _focus(counts: dict[str, Any]) -> HomeFocus:
+    return HomeFocus(total=counts["now_total"], next_visit_at=counts["next_visit_at"])
+
+
+def _today(m: Moment, counts: dict[str, Any], technicians: int) -> HomeToday:
+    return HomeToday(
+        planned=counts["scheduled_today"],
+        done=counts["today_done"],
+        in_field=counts["today_in_field"],
+        not_started=counts["today_not_started"],
+        on_hold=counts["today_on_hold"],
+        upcoming=counts["today_upcoming"],
+        unassigned=counts["today_unassigned"],
+        unassigned_filters=ListFilters(
+            unassigned=True, open_only=True, scheduled_from=m.today, scheduled_to=m.today
+        ),
+        technicians=technicians,
+        resolved=counts["resolved_today"],
+    )
+
+
+def _tomorrow(m: Moment, counts: dict[str, Any], technicians: int) -> HomeTomorrow:
+    return HomeTomorrow(
+        day=m.tomorrow,
+        planned=counts["tomorrow_planned"],
+        technicians=technicians,
+        unassigned=counts["tomorrow_unassigned"],
+        unassigned_filters=ListFilters(
+            unassigned=True, open_only=True, scheduled_from=m.tomorrow, scheduled_to=m.tomorrow
+        ),
+    )
+
+
+def _backlog(m: Moment, counts: dict[str, Any]) -> HomeBacklog:
+    oldest_first = "created_at"
+    ages = [
+        AgeBucket(
+            key="d7",
+            count=counts["age_d7"],
+            filters=ListFilters(
+                open_only=True, created_from=m.today - timedelta(days=6), order_by=oldest_first
+            ),
+        ),
+        AgeBucket(
+            key="d30",
+            count=counts["age_d30"],
+            filters=ListFilters(
+                open_only=True,
+                created_from=m.recent_from,
+                created_to=m.today - timedelta(days=7),
+                order_by=oldest_first,
+            ),
+        ),
+        AgeBucket(
+            key="d90",
+            count=counts["age_d90"],
+            filters=ListFilters(
+                open_only=True,
+                created_from=m.today - timedelta(days=89),
+                created_to=m.old_to,
+                order_by=oldest_first,
+            ),
+        ),
+        AgeBucket(
+            key="older",
+            count=counts["age_older"],
+            filters=ListFilters(
+                open_only=True, created_to=m.today - timedelta(days=90), order_by=oldest_first
+            ),
+        ),
+    ]
+    reasons = [
+        OldReason(
+            key="no_owner",
+            label="Sem analista responsável",
+            count=counts["old_no_owner"],
+            filters=ListFilters(no_owner=True, open_only=True, created_to=m.old_to),
+        ),
+        OldReason(
+            key="unassigned",
+            label="Sem técnico",
+            count=counts["old_unassigned"],
+            filters=ListFilters(unassigned=True, open_only=True, created_to=m.old_to),
+        ),
+        OldReason(
+            key="overdue_visit",
+            label="Visita passou sem baixa",
+            count=counts["old_overdue_visit"],
+            filters=ListFilters(
+                status=list(NOT_STARTED),
+                scheduled_to=m.today - timedelta(days=1),
+                created_to=m.old_to,
+            ),
+        ),
+        OldReason(
+            key="sla_breached",
+            label="SLA estourado",
+            count=counts["old_sla_breached"],
+            filters=ListFilters(sla_breached=True, created_to=m.old_to),
+        ),
+        # A lista não filtra improdutivas: sem filtro, a tela não mostra "Ver todas".
+        OldReason(
+            key="unproductive", label="Improdutiva sem reagendar", count=counts["old_unproductive"]
+        ),
+    ]
+    median = counts["median_age_s"]
+    return HomeBacklog(
+        open=counts["open"],
+        recent=counts["open_recent"],
+        old=counts["open"] - counts["open_recent"],
+        median_age_days=round(median / 86400, 1) if median is not None else None,
+        ages=ages,
+        entered_30d=counts["entered_30d"],
+        resolved_30d=counts["resolved_30d"],
+        cancelled_30d=counts["cancelled_30d"],
+        # Maior primeiro; no empate, a ordem acima (o sort é estável).
+        old_reasons=sorted((r for r in reasons if r.count), key=lambda r: -r.count),
+        old_filters=ListFilters(open_only=True, created_to=m.old_to, order_by=oldest_first),
+    )
+
+
+def _quality(counts: dict[str, Any], store_return: Ratio, unproductive: int) -> HomeQuality:
+    return HomeQuality(
+        on_time=Ratio(count=counts["on_time_ok"], base=counts["on_time_base"]),
+        resolution_sla=Ratio(count=counts["sla_ok"], base=counts["sla_base"]),
+        resolution_sla_imported=counts["sla_imported"],
+        store_return=store_return,
+        return_days=RETURN_DAYS,
+        unproductive=unproductive,
+        visits=counts["arrivals_30d"] + unproductive,
+    )
+
+
+def _team(rows: list[Any], counts: dict[str, Any], onsite_hours: int) -> HomeTeam:
+    per_technician = sorted((row.resolved for row in rows), reverse=True)
+    median = counts["onsite_median_s"]
+    return HomeTeam(
+        worked=len(per_technician),
+        resolved=sum(per_technician),
+        top3_resolved=sum(per_technician[:3]),
+        in_app=sum(1 for row in rows if row.last_login_at is not None),
+        onsite_median_minutes=round(median / 60) if median is not None else None,
+        onsite_over=Ratio(count=counts["onsite_over"], base=counts["onsite_base"]),
+        onsite_limit_hours=onsite_hours,
+    )
+
+
+def _weeks(m: Moment, counts: dict[str, Any]) -> list[WeekFlow]:
+    return [
+        WeekFlow(
+            start=start,
+            created=counts[f"week_created_{i}"],
+            resolved=counts[f"week_resolved_{i}"],
+        )
+        for i, start in enumerate(m.week_starts)
+    ]
+
+
+async def _pulse(
+    db: AsyncSession, m: Moment, counts: dict[str, Any], onsite_hours: int
+) -> HomePulse:
+    today_technicians, tomorrow_technicians = await _visit_technicians(db, m)
+    store_return = await _store_return(db, m)
+    unproductive = await _unproductive_events(db, m)
+    team_rows = await _team_rows(db, m)
+    return HomePulse(
+        window_from=m.recent_from,
+        today=_today(m, counts, today_technicians),
+        tomorrow=_tomorrow(m, counts, tomorrow_technicians),
+        backlog=_backlog(m, counts),
+        quality=_quality(counts, store_return, unproductive),
+        team=_team(team_rows, counts, onsite_hours),
+        customers=await _customers(db, m, counts["entered_30d"]),
+        # Todos que abrem a tela (TicketManagerUser) veem os valores.
+        finance=await _finance(db, m),
+        weeks=_weeks(m, counts),
+    )
+
+
 # --------------------------------------------------------------------------- tela
 
 
 async def overview(db: AsyncSession) -> HomeOverview:
     m = _moment()
-    counts = await _ticket_counts(db, m)
+    rules = await field_svc.rules(db)
+    counts = await _ticket_counts(db, m, rules.onsite_hours)
     attention = await _attention(db, m, counts)
     rows = await _recent_rows(db, m)
+    suggestions = await _suggestions(db, m, counts, rows)
     return HomeOverview(
         generated_at=m.now,
         kpis=HomeKpis(
@@ -1368,10 +1754,12 @@ async def overview(db: AsyncSession) -> HomeOverview:
             scheduled_today=counts["scheduled_today"],
             in_field_now=counts["in_field_now"],
             resolved_today=counts["resolved_today"],
-            late=counts["sla_breached"],
-            unassigned=counts["unassigned"],
+            late=counts["late"],
+            unassigned=counts["open_unassigned"],
         ),
         attention=attention,
-        suggestions=await _suggestions(db, m, counts, rows),
+        suggestions=suggestions,
         week=_week(rows, m),
+        focus=_focus(counts),
+        pulse=await _pulse(db, m, counts, rules.onsite_hours),
     )

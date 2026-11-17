@@ -12,9 +12,11 @@ router = APIRouter(tags=["home"])
 
 @router.get("/home/overview", response_model=HomeOverview)
 async def overview(db: DB, _: TicketManagerUser) -> HomeOverview:
-    """Tela inicial da gestão: indicadores do dia, pontos de atenção das OS (os mais graves
-    primeiro, cada um com até 5 exemplos e o filtro da lista ou a página que mostra todos),
-    sugestões tiradas dos dados e a semana (abertas x concluídas por dia, no fuso da operação)."""
+    """Tela inicial da gestão: focus (o número do topo) e pulse (sinais vitais de hoje e dos
+    últimos 30 dias), indicadores do dia, pontos de atenção das OS (os que pedem ação agora
+    primeiro, depois os mais graves, cada um com até 5 exemplos e o filtro da lista ou a página
+    que mostra todos), sugestões tiradas dos dados e a semana (abertas x concluídas por dia, no
+    fuso da operação)."""
     return await svc.overview(db)
 
 
