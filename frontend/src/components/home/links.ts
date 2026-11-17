@@ -15,10 +15,7 @@ export function ticketsViewHref(view: ListView): string {
   return view === "abertos" ? "/chamados" : `/chamados?view=${view}`;
 }
 
-/**
- * Aba que mostra o que os filtros pedem. A aba sempre vai escrita: sem ela, a lista escolheria sozinha
- * ("Em aberto" para uma busca só de texto), e o número de OS não bateria com o que a busca contou.
- */
+/** Aba que mostra o que os filtros pedem. */
 function viewFor(f: ListFilters): ListView {
   if (f.sla_breached) return "sla";
   if (f.unassigned) return "sem_tecnico";
@@ -28,11 +25,14 @@ function viewFor(f: ListFilters): ListView {
   return "todas";
 }
 
-/** Endereço da lista de Chamados com os filtros da API. */
+/**
+ * Endereço da lista de Chamados com os filtros da API. A aba vai escrita sempre que há algum parâmetro:
+ * sem ela, a lista abre em "Todas" quando vê um filtro (readListState), e "as abertas do cliente"
+ * mostrariam até as fechadas, sem bater com o número que levou até ali. Sem parâmetro nenhum,
+ * "/chamados" já é "Em aberto".
+ */
 export function ticketsListHref(f: ListFilters): string {
   const params = new URLSearchParams();
-  const view = viewFor(f);
-  if (view !== "abertos") params.set("view", view);
   const list = (key: string, values: string[] | undefined) => values?.forEach((v) => v && params.append(key, v));
   const one = (key: string, value: string | number | undefined | null) => {
     if (value !== undefined && value !== null && value !== "") params.set(key, String(value));
@@ -43,6 +43,8 @@ export function ticketsListHref(f: ListFilters): string {
 
   list("status", f.status);
   list("priority", f.priority);
+  one("type", f.type);
+  one("source", f.source);
   one("number", f.number);
   one("customer_id", f.customer_id);
   one("location_id", f.location_id);
@@ -58,7 +60,10 @@ export function ticketsListHref(f: ListFilters): string {
   flag("no_owner", f.no_owner);
   flag("violation_pending", f.violation_pending);
   one("q", f.q?.trim());
+  one("order_by", f.order_by);
 
+  const view = viewFor(f);
+  if (params.toString() || view !== "abertos") params.set("view", view);
   const query = params.toString();
   return query ? `/chamados?${query}` : "/chamados";
 }
@@ -77,9 +82,11 @@ export function targetHref(target: { filters: ListFilters | null; link: string |
 
 /**
  * Os filtros dizem alguma coisa? Um objeto vazio (ex.: a busca "improdutivas", que a lista não
- * filtra) abriria a lista inteira: aí não há "Ver todas".
+ * filtra) abriria a lista inteira: aí não há "Ver todas". A ordem sozinha não recorta nada.
  */
 export function hasFilters(f: ListFilters | null | undefined): f is ListFilters {
   if (!f) return false;
-  return Object.values(f).some((v) => (Array.isArray(v) ? v.length > 0 : v !== undefined && v !== null && v !== "" && v !== false));
+  return Object.entries(f).some(
+    ([key, v]) => key !== "order_by" && (Array.isArray(v) ? v.length > 0 : v !== undefined && v !== null && v !== "" && v !== false),
+  );
 }
