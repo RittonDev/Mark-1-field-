@@ -29,12 +29,12 @@ TAG_COLORS: tuple[str, ...] = get_args(TagColor)
 MAX_RULE_TAGS = 10
 MAX_RULE_NAME = 40
 
-# Nome de cada lista nas mensagens de erro.
+# Nome de cada lista nas mensagens de erro (os mesmos títulos da tela de Configurações).
 _LIST_LABELS = {
-    "on_create": "Na abertura",
+    "on_create": "Toda OS nova (avulsa)",
     "on_project": "OS de projeto",
-    "on_extra_cost": "Custo extra",
-    "remove_on_payout_paid": "Técnico pago",
+    "on_extra_cost": "Ao lançar custo extra",
+    "remove_on_payout_paid": "Ao marcar o técnico como pago, remover",
 }
 
 

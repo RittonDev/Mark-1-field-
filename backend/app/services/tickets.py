@@ -2209,7 +2209,7 @@ async def list_tickets(
     total = await db.scalar(select(func.count()).select_from(Ticket).where(*conds)) or 0
     stmt = (
         select(Ticket)
-        .options(*LIST_NOLOAD)
+        .options(*list_noload("service_type"))  # coluna "Tipo de OS" da lista de atividades
         .where(*conds)
         .order_by(*_list_ordering(f, order_by))
         .offset((page - 1) * page_size)

@@ -48,6 +48,15 @@ def assume_local(value: datetime) -> datetime:
 # Data e hora recebida pela API (a web e o app mandam com fuso; sem fuso, vale Brasília).
 LocalDatetime = Annotated[datetime, AfterValidator(assume_local)]
 
+# Escopo nas listas (coluna da lista de atividades e exportação de até 500 por página): só o
+# começo. A OS completa (TicketDetail) traz o texto inteiro.
+SCOPE_PREVIEW = 300
+
+
+def scope_preview(text: str) -> str:
+    text = text.strip()
+    return text if len(text) <= SCOPE_PREVIEW else text[: SCOPE_PREVIEW - 1].rstrip() + "…"
+
 
 class ViolationReasonRef(ORMModel):
     id: uuid.UUID
@@ -155,6 +164,10 @@ class TicketListItem(ORMModel):
     recurrence_30d: int = 0
     # Etiquetas (ex.: "Avulso", "Faturamento Matriz").
     tags: list[TagOut] = []
+    # Tipo de OS e escopo (colunas opcionais da lista de atividades). Nas listas o escopo vem
+    # cortado; a OS completa redefine os dois campos (texto inteiro).
+    service_type: ServiceTypeRef | None = None
+    description: Annotated[str, AfterValidator(scope_preview)] = ""
 
     @computed_field  # type: ignore[prop-decorator]
     @property

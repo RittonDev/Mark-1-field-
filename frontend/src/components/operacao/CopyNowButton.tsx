@@ -17,16 +17,12 @@ import {
   GROUP_TEXT_COPIED,
   GROUP_TEXT_FRESH_MS,
   type GroupText,
+  groupShareUrl as shareUrl,
   groupTextsQuery,
-  WHATSAPP_TEXT_LIMIT,
-  whatsappUrl,
 } from "@/lib/whatsapp";
 
 /** Tempo do "Copiado" no botão depois de copiar. */
 const COPIED_MS = 2000;
-
-/** WhatsApp sem número (a pessoa escolhe o grupo). O texto longo demais para ir no endereço abre vazio. */
-const shareUrl = (text: string) => whatsappUrl(null, text.length <= WHATSAPP_TEXT_LIMIT ? text : "");
 
 export function CopyNowButton({ ticketId, code, className }: { ticketId: string; code: string; className?: string }) {
   const queryClient = useQueryClient();

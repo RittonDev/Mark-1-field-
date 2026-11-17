@@ -112,7 +112,7 @@ const NOTE_LIMIT = 5_000;
 const MAX_MINUTES = 60 * 24 * 7;
 /** Tolerância da chegada sobre o horário agendado (a mesma de field.SCHEDULE_TOLERANCE na API). */
 const SCHEDULE_TOLERANCE_MS = 30 * 60_000;
-/** "Mais opções" aberto ou fechado: lembrado neste navegador. */
+/** "Mais detalhes" aberto ou fechado: lembrado neste navegador. */
 const MORE_KEY = "maxx.novaOs.maisOpcoes";
 
 const ORIGINS: { value: Origin; label: string; icon: LucideIcon }[] = [
@@ -131,7 +131,7 @@ const OWNER_MODES: { value: OwnerMode; label: string; icon: LucideIcon }[] = [
 ];
 
 // Campos que barram a criação, na ordem da tela (o foco vai para o primeiro). Os três últimos ficam em
-// "Mais opções", que abre sozinho quando o problema está lá.
+// "Mais detalhes", que abre sozinho quando o problema está lá.
 type ErrorKey = "customer" | "location" | "type" | "scope" | "date" | "time" | "title" | "minutes" | "owner";
 const ERROR_ORDER: ErrorKey[] = ["customer", "location", "type", "scope", "date", "time", "title", "minutes", "owner"];
 const IN_MORE: ErrorKey[] = ["title", "minutes", "owner"];
@@ -607,7 +607,7 @@ function NewTicket() {
     update((x) => ({ ...x, form: { ...x.form, date, time } }));
   }
 
-  /** Leva o foco a um campo; o que fica em "Mais opções" abre a seção antes. */
+  /** Leva o foco a um campo; o que fica em "Mais detalhes" abre a seção antes. */
   function focusField(id: string, inMore: boolean) {
     const go = () => {
       const el = document.getElementById(id);
@@ -874,7 +874,7 @@ function NewTicket() {
     .filter(Boolean)
     .join(" · ");
 
-  // O que já foi mexido em "Mais opções" (aparece com a seção fechada).
+  // O que já foi mexido em "Mais detalhes" (aparece com a seção fechada).
   const ownerName = d.ownerMode === "other" ? queues.data?.queues.find((q) => q.user.id === d.ownerId)?.user.name : null;
   const project = projectOptions.find((p) => p.id === f.project_id);
   const category = sortedCategories.find((c) => c.id === f.category_id);
@@ -1038,12 +1038,12 @@ function NewTicket() {
                         <MapPin aria-hidden className="mt-px size-3.5 shrink-0 text-ink-subtle" />
                         {d.otherAddress && f.service_address.trim() ? (
                           <span>
-                            Atendimento em outro endereço: <span className="text-ink">{f.service_address.trim()}</span> (em Mais opções)
+                            Atendimento em outro endereço: <span className="text-ink">{f.service_address.trim()}</span> (em Mais detalhes)
                           </span>
                         ) : storeAddress ? (
                           <span className="text-ink">{storeAddress}</span>
                         ) : (
-                          <span>Localização sem endereço no cadastro: informe o endereço do atendimento em Mais opções.</span>
+                          <span>Localização sem endereço no cadastro: informe o endereço do atendimento em Mais detalhes.</span>
                         )}
                       </p>
                       <OpenAtLocation locationId={location.id} />
@@ -1231,7 +1231,7 @@ function NewTicket() {
                     {lateResolution && startIso && resolutionDue ? (
                       <Caution>
                         O agendamento ({dayTimeLabel(startIso, now, true)}) fica depois do prazo de solução ({dayTimeLabel(iso(resolutionDue), now, true)}):
-                        a OS já vai nascer atrasada. Escolha uma prioridade com prazo maior (em Mais opções) ou combine outra data.
+                        a OS já vai nascer atrasada. Escolha uma prioridade com prazo maior (em Mais detalhes) ou combine outra data.
                       </Caution>
                     ) : null}
                     {conflicts ? (
@@ -1445,7 +1445,7 @@ function NewTicket() {
                   <span aria-hidden className="mt-[3px] h-3.5 w-[3px] shrink-0 rounded-full bg-linear-to-b from-brand to-brand-cyan" />
                   <span className="min-w-0 flex-1">
                     <span id={`${ids.more}-titulo`} className="block text-[15px] leading-5 font-bold tracking-[-0.01em] text-ink">
-                      Mais opções
+                      Mais detalhes
                     </span>
                     <span id={`${ids.more}-resumo`} className="mt-0.5 block truncate text-xs font-normal text-ink-muted" title={moreSummary}>
                       {moreSummary}

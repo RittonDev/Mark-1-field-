@@ -19,7 +19,7 @@ export interface IntakeSuggestion {
 
 /**
  * "Colar mensagem do WhatsApp ou e-mail": o analista cola a conversa ou o e-mail do cliente e os campos
- * vazios da OS se preenchem (cliente, localização, escopo e, em Mais opções, origem, contato e nº do
+ * vazios da OS se preenchem (cliente, localização, escopo e, em Mais detalhes, origem, contato e nº do
  * chamado). Fica fechado até ser usado. Cada campo preenchido vira um chip que desfaz; a urgência só
  * aparece como sugestão.
  */

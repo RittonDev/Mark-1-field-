@@ -21,8 +21,8 @@ const MAX_NAME = 40;
 const SUGGESTIONS = 12;
 
 // Cores do Field Control no seletor: o nome em português e o ponto na cor cheia, na ordem do arco-íris.
-// O chip da etiqueta usa os tons de tagTone (components/TagChips), os mesmos da Nova OS e do editor da OS.
-// A lista Atividades (chamados/_lista/tags.tsx) ainda tem tons próprios, um pouco diferentes.
+// O chip da etiqueta usa os tons de tagTone (components/TagChips), os mesmos da lista Atividades, da
+// Nova OS e do editor da OS.
 const COLORS: Record<string, { label: string; dot: string }> = {
   red: { label: "Vermelho", dot: "bg-red-500" },
   orange: { label: "Laranja", dot: "bg-orange-500" },

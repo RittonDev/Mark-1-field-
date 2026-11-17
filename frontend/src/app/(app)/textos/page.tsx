@@ -83,10 +83,10 @@ const GROUPS: { label: string; keys: string[] }[] = [
  * ao texto. Renomear mantém a chave; os textos criados aqui não são sugeridos, ficam na lista para copiar.
  */
 const SUGGESTED_WHEN = new Map<string, string>([
-  ["agendamento", "quando a visita está marcada, com técnico e horário, até o técnico sair"],
+  ["agendamento", "quando a visita está marcada para hoje em diante, com técnico e horário, até o técnico sair"],
   ["deslocamento", "quando o técnico sai para o local"],
   ["chegada", "quando o técnico chega e inicia o atendimento"],
-  ["atraso", "quando o técnico está a caminho e o prazo de chegada já passou"],
+  ["atraso", "quando o técnico está a caminho e a chegada já atrasou (na revisita, pelo horário da visita remarcada)"],
   ["fechamento", "quando a OS é concluída"],
   ["improdutiva", "depois de uma visita improdutiva, até a nova visita ser marcada"],
 ]);

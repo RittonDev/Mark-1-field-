@@ -143,7 +143,7 @@ export function Popover({
   );
 }
 
-/** Filtro da fileira: "Cliente" vazio; "Cliente: Madero" com valor. */
+/** Filtro da fileira: "Cliente" vazio; "Cliente: Rede Exemplo" com valor. */
 export function FilterPopover({
   label,
   value,

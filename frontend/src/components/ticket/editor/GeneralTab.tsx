@@ -554,7 +554,12 @@ export function GeneralTab({
     if (form.ownerId !== base.ownerId) p.owner_id = form.ownerId || null;
     if (form.projectId !== base.projectId) p.project_id = form.projectId || null;
     if (!sameValue("resolutionNotes", form, base)) p.resolution_notes = form.resolutionNotes.trim() || null;
-    if (!sameValue("tags", form, base)) p.tags = form.tags;
+    if (!sameValue("tags", form, base)) {
+      // Com os nomes carregados, a API aplica só o que mudou aqui: o "Custo Extra" (ou o lote) que
+      // entrou com o editor aberto fica, e o "Pendente Envio PGTO" que saiu com o pagamento não volta.
+      p.tags = form.tags;
+      p.tags_base = base.tags.map((t) => t.name);
+    }
     if (schedChanged && startIso) {
       // Fim = início + duração (estimada ou a da agenda atual), para não sobrar um fim antigo.
       const current =
