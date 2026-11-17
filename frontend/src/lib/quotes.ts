@@ -247,7 +247,7 @@ export interface QuoteMessageTicket {
 }
 
 /** Sem acento e em minúsculas, para comparar nomes ("Loja São Paulo" = "loja sao paulo"). */
-const plain = (text: string) => text.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
+const plain = (text: string) => text.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 
 /** "Troca de fonte (Loja Centro)": a loja entra só quando o título ainda não a cita. */
 export function titleWithStore(title: string, store: string | null | undefined): string {
@@ -256,7 +256,7 @@ export function titleWithStore(title: string, store: string | null | undefined):
   return `${title} (${name})`;
 }
 
-/** Valor em texto corrido: o espaço do "R$" é comum (o Intl usa o não separável). */
+/** Valor em texto corrido: o espaço depois do "R$" vira comum (o Intl usa o não separável). */
 const moneyPlain = (value: number) => formatMoney(value).replace(/\s/g, " ");
 
 /** Primeira linha, no formato dos textos de grupo: "*OS-001234* · Cliente". */
