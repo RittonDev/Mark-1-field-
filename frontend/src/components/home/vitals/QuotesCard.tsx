@@ -131,7 +131,7 @@ function Row({
   empty: string;
   problem?: boolean;
 }) {
-  // O nome vai junto no link: fora da lista (a relação de links do leitor de tela), "8 · R$ 900,00" não diz o quê.
+  // O nome vai junto no link (só para o leitor de tela): na relação de links, "8 · R$ 900,00" sozinho não diz o quê.
   const text = (
     <>
       <span className="sr-only">{label}: </span>
