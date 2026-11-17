@@ -1,6 +1,6 @@
 """Busca inteligente da gestão: uma frase em português vira o recorte da lista de OS.
 
-Exemplos: "16976", "OS-016976", um CNPJ, "boticario abertas", "agendadas amanhã", "técnico João
+Exemplos: "16976", "OS-016976", um CNPJ, "relicario abertas", "agendadas amanhã", "técnico João
 em novembro/2025", "sem técnico campinas", "pendente pgto", "criadas de 01/11 a 15/11".
 
 O texto é normalizado sem acento e em minúsculas (fold_text; o banco não tem a extensão unaccent)
@@ -9,7 +9,7 @@ e lido em camadas. Cada camada consome o pedaço da frase que entendeu e vira um
 cidade, loja). O que sobra é texto livre (q), procurado nos mesmos campos da busca da lista.
 
 Na consulta das OS o texto livre usa expressão regular com as variantes acentuadas de cada letra
-(ex.: "botic[aá...]rio"): o mesmo resultado de fold_words_sql, cerca de 10x mais rápido nas
+(ex.: "relic[aá...]rio"): o mesmo resultado de fold_words_sql, cerca de 10x mais rápido nas
 descrições longas (traduzir letra a letra 15 mil descrições leva quase 1 s por palavra).
 """
 
@@ -104,19 +104,19 @@ _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 
 
 def accent_regex(word: str) -> str:
-    """ "boticario" -> regex que casa "Boticário" (as palavras da busca só têm [a-z0-9])."""
+    """ "relicario" -> regex que casa "Relicário" (as palavras da busca só têm [a-z0-9])."""
     return "".join(f"[{_ACCENTS[ch]}]" if ch in _ACCENTS else ch for ch in word)
 
 
 def _prefix_regex(word: str) -> str:
-    """Começo de palavra: "botic" casa "O Boticário" e não "Abotica"; número só inteiro."""
+    """Começo de palavra: "relic" casa "O Relicário" e não "Arelic"; número só inteiro."""
     if word.isdigit():
         return rf"(^|[^0-9]){word}([^0-9]|$)"
     return rf"(^|[^[:alnum:]]){accent_regex(word)}"
 
 
 def name_words(name: str | None) -> tuple[str, ...]:
-    """Palavras de um nome sem acento, sem as que não dizem nada ("O Boticário" -> boticario)."""
+    """Palavras de um nome sem acento, sem as que não dizem nada ("O Relicário" -> relicario)."""
     words = _WORD.findall(fold_text(name))
     useful = tuple(w for w in words if w not in STOP)
     return useful or tuple(words)
@@ -905,7 +905,7 @@ def match_spans(
 
 
 def keyword_entities(parsed: Parsed, pools: dict[str, Pool]) -> None:
-    """ "técnico João", "cliente Natura", "cidade Campinas", "loja 41": o nome logo depois."""
+    """ "técnico João", "cliente Relicário", "cidade Campinas", "loja 41": o nome logo depois."""
     words = [w for w in parsed.words if not w.used]
     for i, w in enumerate(words):
         if w.used or w.text not in KEYWORDS:
