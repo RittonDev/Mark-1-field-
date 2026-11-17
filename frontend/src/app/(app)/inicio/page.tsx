@@ -90,9 +90,9 @@ export default function HomePage() {
           </>
         }
         actions={
-          <Button variant="ghost" size="sm" onClick={() => void overview.refetch()} disabled={overview.isFetching}>
+          <Button variant="ghost" size="sm" onClick={() => void overview.refetch()} aria-busy={overview.isFetching || undefined}>
             <RotateCw aria-hidden className={overview.isFetching ? "size-3.5 animate-spin" : "size-3.5"} />
-            {overview.isFetching ? "Atualizando..." : "Atualizar"}
+            Atualizar
           </Button>
         }
       />
