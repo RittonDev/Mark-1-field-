@@ -27,9 +27,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.core.documents import is_valid_cnpj
-from app.core.enums import TicketEventType, TicketPriority, TicketStatus, UserRole
+from app.core.enums import TicketPriority, TicketStatus, UserRole
 from app.db.base import utcnow
-from app.models import Customer, Location, Ticket, TicketEvent, User
+from app.models import Customer, Location, Ticket, User
 from app.models.ticket import ticket_helpers
 from app.schemas.home import (
     ListFilters,
@@ -45,7 +45,7 @@ from app.schemas.ticket import TicketFilters, format_ticket_code
 from app.services import search
 from app.services.activities import local_today
 from app.services.technician_regions import fold_text
-from app.services.tickets import MAX_NUMBER, filter_conditions
+from app.services.tickets import MAX_NUMBER, acted_by_clause, filter_conditions
 from app.services.workflow import OPEN_STATUSES
 
 S = TicketStatus
@@ -1190,28 +1190,10 @@ async def lone_number_step(db: AsyncSession, parsed: Parsed) -> None:
 # --------------------------------------------------------------------------- filtros e OS
 
 
-def acted_clause(technician_id: uuid.UUID, name: str | None) -> ColumnElement[bool]:
-    """ "Técnico que atuou": o responsável de agora, outro técnico da visita ou quem já foi
-    responsável ou auxiliar (histórico). Nas atribuições feitas aqui o evento guarda os ids
-    (to_value/from_value e added_ids); nas importadas do Field Control, o nome do técnico."""
-    tid = str(technician_id)
-    targets = [tid] + ([name[:64]] if name else [])
-    assigned = select(TicketEvent.ticket_id).where(
-        TicketEvent.event_type == TicketEventType.ASSIGNED,
-        or_(TicketEvent.to_value.in_(targets), TicketEvent.from_value == tid),
-    )
-    helped = select(TicketEvent.ticket_id).where(
-        TicketEvent.event_type == TicketEventType.HELPERS_CHANGED,
-        TicketEvent.data["added_ids"].contains([tid]),
-    )
-    return or_(
-        Ticket.assignee_id == technician_id,
-        Ticket.id.in_(
-            select(ticket_helpers.c.ticket_id).where(ticket_helpers.c.user_id == technician_id)
-        ),
-        Ticket.id.in_(assigned),
-        Ticket.id.in_(helped),
-    )
+def acted_clause(technician_id: uuid.UUID) -> ColumnElement[bool]:
+    """ "Técnico que atuou": a mesma regra do filtro technician_id da lista de OS (o responsável de
+    agora, quem vai junto e o histórico, inclusive as atribuições importadas do Field Control)."""
+    return acted_by_clause(technician_id)
 
 
 def text_clause(word: str) -> ColumnElement[bool]:
@@ -1315,7 +1297,7 @@ def ticket_conditions(
     )
     conds = filter_conditions(user, base, utcnow())
     if parsed.technician is not None:
-        conds.append(acted_clause(parsed.technician.id, parsed.technician.name))
+        conds.append(acted_clause(parsed.technician.id))
     if filters.q:
         terms = search.words(filters.q)
         if terms:

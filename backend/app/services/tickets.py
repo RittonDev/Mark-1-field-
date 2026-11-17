@@ -2099,15 +2099,30 @@ def search_clause(q: str) -> ColumnElement[bool]:
 
 
 def acted_by_clause(user_id: uuid.UUID) -> ColumnElement[bool]:
-    """OS em que o técnico atuou: é o responsável agora, foi junto (ajudante) ou já foi o
-    responsável antes de uma troca (evento de atribuição, inclusive o histórico importado do FC)."""
+    """OS em que o técnico atuou: é o responsável agora, vai junto (ajudante) ou já foi responsável
+    ou ajudante antes (histórico). Nas atribuições feitas aqui o evento guarda o id (to_value,
+    from_value, added_ids); nas importadas do Field Control, o nome do técnico em to_value."""
     uid = str(user_id)
-    helped = select(ticket_helpers.c.ticket_id).where(ticket_helpers.c.user_id == user_id)
-    assigned_before = select(TicketEvent.ticket_id).where(
+    name = select(func.left(User.name, 64)).where(User.id == user_id).scalar_subquery()
+    helping = select(ticket_helpers.c.ticket_id).where(ticket_helpers.c.user_id == user_id)
+    assigned = select(TicketEvent.ticket_id).where(
         TicketEvent.event_type == TicketEventType.ASSIGNED,
-        or_(TicketEvent.to_value == uid, TicketEvent.from_value == uid),
+        or_(
+            TicketEvent.to_value == uid,
+            TicketEvent.from_value == uid,
+            TicketEvent.to_value == name,
+        ),
     )
-    return or_(Ticket.assignee_id == user_id, Ticket.id.in_(helped), Ticket.id.in_(assigned_before))
+    helped = select(TicketEvent.ticket_id).where(
+        TicketEvent.event_type == TicketEventType.HELPERS_CHANGED,
+        TicketEvent.data["added_ids"].contains([uid]),
+    )
+    return or_(
+        Ticket.assignee_id == user_id,
+        Ticket.id.in_(helping),
+        Ticket.id.in_(assigned),
+        Ticket.id.in_(helped),
+    )
 
 
 def filter_conditions(user: User, f: TicketFilters, now: datetime) -> list[ColumnElement[bool]]:
