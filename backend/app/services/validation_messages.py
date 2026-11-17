@@ -88,7 +88,7 @@ def _plural(n: Any, one: str, many: str) -> str:
 
 
 def _options(expected: Any) -> str:
-    """"'a', 'b' or 'c'" -> "a, b ou c"."""
+    """ "'a', 'b' or 'c'" -> "a, b ou c"."""
     text = str(expected or "").replace("'", "")
     head, sep, tail = text.rpartition(" or ")
     return f"{head} ou {tail}" if sep else text
