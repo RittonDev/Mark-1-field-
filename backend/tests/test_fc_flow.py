@@ -501,6 +501,9 @@ async def test_activity_list_export(client: AsyncClient, world: World, engine: A
     assert [row[0] for row in (await export(tag="@urgente"))[1:]] == [str(first["number"])]
     assert [row[0] for row in (await export(ids=[second["id"]]))[1:]] == [str(second["number"])]
     assert (await export(ids=[str(uuid.uuid4())]))[1:] == []
+    # Os ids vão na URL: seleção grande exporta pelos filtros.
+    many = [("ids", str(uuid.uuid4())) for _ in range(301)]
+    assert (await client.get(f"{API}/tickets/export", params=many, headers=an)).status_code == 422
     r = await client.get(f"{API}/tickets/export", headers=world.tech.headers)
     assert r.status_code == 403
 

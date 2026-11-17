@@ -117,7 +117,8 @@ Equivale ao "Tipo de OS" do Field Control. Sem `customer_id`, o tipo vale para t
   - `page` (1..), `page_size` (1..500, padrão 25), `order_by` ∈ `updated_at, created_at, priority, resolution_due_at, number, scheduled_start, customer` (nome do cliente) com `-` para desc (padrão `-updated_at`); vazios (sem agenda, sem cliente) por último nas duas direções
 - `GET /tickets/export` (gestão) → `text/csv; charset=utf-8` com BOM, separado por `;`, `Content-Disposition: attachment;
   filename="chamados-AAAA-MM-DD.csv"` (dia de hoje no fuso da operação). Os mesmos filtros e o mesmo `order_by` da lista,
-  mais `ids` (repetível, até 500) para exportar só as OS escolhidas; até 20.000 linhas (as primeiras na ordem pedida).
+  mais `ids` (repetível, até 300: vão na URL; para mais, exporte pelos filtros) para exportar só as OS escolhidas; até
+  20.000 linhas (as primeiras na ordem pedida).
   Colunas: `Identificador; Etiquetas; Data do agendamento; Cliente; Localização; Cidade; Situação; Técnico; Tipo de OS;
   Escopo; Analista; Criada em` (datas `dd/mm/aaaa HH:MM` no fuso da operação; Localização sem loja = endereço do
   atendimento; Cidade `cidade/UF`; Escopo = descrição, ou o título sem descrição). Célula que começa com `=`, `+`, `-`, `@`,

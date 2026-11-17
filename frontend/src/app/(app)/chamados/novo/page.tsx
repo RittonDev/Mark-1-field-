@@ -15,7 +15,6 @@ import {
   MoreHorizontal,
   Phone,
   Plus,
-  TriangleAlert,
   UserRoundCog,
   X,
   type LucideIcon,
@@ -57,6 +56,7 @@ import { MessageIntake, type IntakeSuggestion } from "@/components/new-ticket/Me
 import { customerIn, parseIntake } from "@/components/new-ticket/parseIntake";
 import { SegmentedRadio } from "@/components/new-ticket/SegmentedRadio";
 import { ServiceTypePicker } from "@/components/new-ticket/ServiceTypePicker";
+import { Caution, FieldError, Step, stepHintId } from "@/components/new-ticket/Step";
 import { readStored, writeStored } from "@/components/new-ticket/storage";
 import { HelpersField, SuggestedTechnicians } from "@/components/new-ticket/SuggestedTechnicians";
 import { ConflictHint, ConflictList, scheduleConflicts } from "@/components/ScheduleConflict";
@@ -236,7 +236,6 @@ function NewTicket() {
     owner: `${uid}-analista`,
     more: `${uid}-mais`,
   };
-  const hintOf = (titleId: string) => `${titleId}-dica`;
 
   // Começo da tela: o rascunho guardado nesta aba tem prioridade (o pré-preenchimento pela URL vira uma
   // oferta no aviso do rascunho); sem rascunho, a OS já começa com o que veio pela URL.
@@ -986,7 +985,7 @@ function NewTicket() {
                 done={Boolean(f.customer_id)}
                 hint="As localizações e os tipos de OS do cliente aparecem primeiro nos próximos passos."
                 error={shown.customer}
-                errorFor="customer"
+                errorId={errorId("customer")}
               >
                 <CustomerPicker
                   customers={customers.data}
@@ -997,7 +996,7 @@ function NewTicket() {
                   labelledBy={ids.customer}
                   required
                   invalid={Boolean(shown.customer)}
-                  describedBy={shown.customer ? errorId("customer") : hintOf(ids.customer)}
+                  describedBy={shown.customer ? errorId("customer") : stepHintId(ids.customer)}
                 />
               </Step>
 
@@ -1013,7 +1012,7 @@ function NewTicket() {
                     : "Importante quando o cliente tem mais de um endereço ou unidade: escolha onde o serviço será feito."
                 }
                 error={shown.location}
-                errorFor="location"
+                errorId={errorId("location")}
                 extra={
                   location ? (
                     <>
@@ -1048,7 +1047,7 @@ function NewTicket() {
                   labelledBy={ids.location}
                   required
                   invalid={Boolean(shown.location)}
-                  describedBy={shown.location ? errorId("location") : hintOf(ids.location)}
+                  describedBy={shown.location ? errorId("location") : stepHintId(ids.location)}
                   placeholder={f.customer_id ? "Buscar por nome, código, CNPJ ou cidade" : "Buscar em todos os clientes por nome, código, CNPJ ou cidade"}
                 />
               </Step>
@@ -1073,7 +1072,7 @@ function NewTicket() {
                     : "O serviço que será feito: define a duração estimada e sugere os formulários."
                 }
                 error={shown.type}
-                errorFor="type"
+                errorId={errorId("type")}
               >
                 <ServiceTypePicker
                   types={serviceTypes.data}
@@ -1085,7 +1084,7 @@ function NewTicket() {
                   labelledBy={ids.type}
                   required
                   invalid={Boolean(shown.type)}
-                  describedBy={shown.type ? errorId("type") : hintOf(ids.type)}
+                  describedBy={shown.type ? errorId("type") : stepHintId(ids.type)}
                   placeholder="Buscar tipo de OS"
                 />
               </Step>
@@ -1099,7 +1098,7 @@ function NewTicket() {
                 done={Boolean(f.description.trim())}
                 hint="Descreva com clareza o que deve ser feito: um escopo bem detalhado ajuda o técnico a entender a demanda antes de chegar e evita retrabalho."
                 error={shown.scope}
-                errorFor="scope"
+                errorId={errorId("scope")}
                 extra={
                   <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
                     {pasteOffer ? (
@@ -1152,7 +1151,7 @@ function NewTicket() {
                   maxLength={TEXT_LIMIT}
                   required
                   aria-invalid={shown.scope ? true : undefined}
-                  aria-describedby={shown.scope ? errorId("scope") : hintOf(ids.scope)}
+                  aria-describedby={shown.scope ? errorId("scope") : stepHintId(ids.scope)}
                   placeholder="Ex.: PDV 2 sem rede desde ontem. Verificar cabo e switch do caixa, testar a venda e registrar fotos antes e depois."
                 />
               </Step>
@@ -1206,7 +1205,7 @@ function NewTicket() {
                   )
                 }
                 error={shown.date ?? shown.time}
-                errorFor={shown.date ? "date" : shown.time ? "time" : undefined}
+                errorId={shown.date ? errorId("date") : errorId("time")}
                 extra={
                   <>
                     {startPassed ? <Caution>Esse horário já passou. Confira a data e a hora do agendamento.</Caution> : null}
@@ -1255,7 +1254,7 @@ function NewTicket() {
                       value={f.date}
                       onChange={(e) => setForm("date", e.target.value)}
                       aria-invalid={shown.date ? true : undefined}
-                      aria-describedby={shown.date ? errorId("date") : hintOf(ids.schedule)}
+                      aria-describedby={shown.date ? errorId("date") : stepHintId(ids.schedule)}
                     />
                   </div>
                   <div className="flex flex-col gap-1">
@@ -1269,7 +1268,7 @@ function NewTicket() {
                       value={f.time}
                       onChange={(e) => setForm("time", e.target.value)}
                       aria-invalid={shown.time ? true : undefined}
-                      aria-describedby={shown.time ? errorId("time") : hintOf(ids.schedule)}
+                      aria-describedby={shown.time ? errorId("time") : stepHintId(ids.schedule)}
                     />
                   </div>
                 </div>
@@ -1332,7 +1331,7 @@ function NewTicket() {
                   loading={assignable.isLoading}
                   id="nova-colaborador"
                   labelledBy={ids.assignee}
-                  describedBy={hintOf(ids.assignee)}
+                  describedBy={stepHintId(ids.assignee)}
                   placeholder="Buscar colaborador por nome ou equipe"
                   emptyText="Nenhum colaborador com esse nome"
                   clearLabel="Tirar o colaborador"
@@ -1369,7 +1368,7 @@ function NewTicket() {
                 {d.tagsAuto && tagRules.isLoading ? (
                   <Skeleton className="h-10 w-full rounded-lg" />
                 ) : (
-                  <TagsInput value={tags} onChange={onTags} labelledBy={ids.tags} describedBy={hintOf(ids.tags)} />
+                  <TagsInput value={tags} onChange={onTags} labelledBy={ids.tags} describedBy={stepHintId(ids.tags)} />
                 )}
               </Step>
             </ol>

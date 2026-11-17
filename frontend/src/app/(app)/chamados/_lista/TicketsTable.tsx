@@ -31,10 +31,12 @@ const ROW =
   "data-[selected=true]:hover:bg-[color-mix(in_srgb,var(--brand)_10%,var(--surface))]";
 
 // Seleção e identificador presos à esquerda: rolando a tabela para o lado (tela estreita, muitas
-// colunas), dá para saber de qual OS é cada linha. A coluna "Editar" fica presa à direita.
-const STICKY_BOX = "sticky left-0 z-[1] w-10 max-w-10 min-w-10 bg-inherit pr-0";
-const STICKY_ID = "sticky left-10 z-[1] bg-inherit shadow-[inset_-1px_0_0_var(--line)]";
-const HEAD_BG = "bg-[var(--table-head)]";
+// colunas), dá para saber de qual OS é cada linha. A coluna "Editar" fica presa à direita. No corpo,
+// as células presas herdam o fundo da linha; no cabeçalho, ficam com o fundo dele (o do Th).
+const STICKY_BOX = "sticky left-0 w-10 max-w-10 min-w-10 pr-0";
+const STICKY_ID = "sticky left-10 shadow-[inset_-1px_0_0_var(--line)]";
+const STICKY_HEAD = "z-[2]";
+const STICKY_BODY = "z-[1] bg-inherit";
 
 /** Cabeçalho que ordena a lista: o primeiro clique usa a direção natural da coluna, o seguinte inverte. */
 function SortHeader({
@@ -134,10 +136,10 @@ function SkeletonRows({ count, columns, edit }: { count: number; columns: Column
     <>
       {Array.from({ length: count }).map((_, i) => (
         <tr key={i} className="bg-surface" style={{ opacity: Math.max(0.35, 1 - i * 0.07) }}>
-          <Td className={STICKY_BOX}>
+          <Td className={clsx(STICKY_BOX, STICKY_BODY)}>
             <Skeleton className="size-4 rounded" />
           </Td>
-          <Td className={STICKY_ID}>
+          <Td className={clsx(STICKY_ID, STICKY_BODY)}>
             <Skeleton className="h-3.5 w-12" />
           </Td>
           {columns.map((c) => (
@@ -206,10 +208,15 @@ export function TicketsTable({
     <Table label="Lista de chamados">
       <thead>
         <tr>
-          <Th className={clsx(STICKY_BOX, HEAD_BG, "z-[2]")}>
-            <PageCheckbox checked={list.length > 0 && marked === list.length} partial={marked > 0 && marked < list.length} disabled={!list.length} onChange={onTogglePage} />
+          <Th className={clsx(STICKY_BOX, STICKY_HEAD)}>
+            <PageCheckbox
+              checked={list.length > 0 && marked === list.length}
+              partial={marked > 0 && marked < list.length}
+              disabled={!list.length}
+              onChange={onTogglePage}
+            />
           </Th>
-          <SortHeader label="Identificador" sort={IDENTIFIER_SORT} order={order} onSort={onSort} className={clsx(STICKY_ID, HEAD_BG, "z-[2]")} />
+          <SortHeader label="Identificador" sort={IDENTIFIER_SORT} order={order} onSort={onSort} className={clsx(STICKY_ID, STICKY_HEAD)} />
           {columns.map((c) =>
             c.sort ? <SortHeader key={c.key} label={c.label} sort={c.sort} order={order} onSort={onSort} /> : <Th key={c.key}>{c.label}</Th>,
           )}
@@ -241,7 +248,7 @@ export function TicketsTable({
                 className={ROW}
               >
                 {/* A célula toda marca a OS (alvo maior que a caixa) e o clique nela não abre a OS. */}
-                <Td className={STICKY_BOX} onClick={(e) => e.stopPropagation()}>
+                <Td className={clsx(STICKY_BOX, STICKY_BODY)} onClick={(e) => e.stopPropagation()}>
                   <label className="-my-3 flex cursor-pointer items-center py-3">
                     <input
                       type="checkbox"
@@ -252,7 +259,7 @@ export function TicketsTable({
                     />
                   </label>
                 </Td>
-                <Td className={STICKY_ID}>
+                <Td className={clsx(STICKY_ID, STICKY_BODY)}>
                   <IdentifierCell t={t} />
                 </Td>
                 {columns.map((c) => (

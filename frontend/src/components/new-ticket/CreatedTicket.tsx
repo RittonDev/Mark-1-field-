@@ -154,7 +154,7 @@ export function CreatedTicket({
               Abrir OS
             </Button>
             {confirmed ? (
-              <CopyGroupTextButton ticketId={t.id} templateKey="agendamento" label="Copiar texto: Atividade confirmada" />
+              <CopyGroupTextButton ticketId={t.id} templateKey="agendamento" label="Copiar texto: Atividade confirmada" size="md" />
             ) : (
               <Button onClick={() => void copy(clientMessage(t), "Texto copiado. Cole no grupo do WhatsApp.")}>
                 <Copy aria-hidden className="size-4" />

@@ -83,6 +83,9 @@ async def _detail(db: DB, ticket_id: uuid.UUID, user: User) -> TicketDetail:
 
 
 BAD_PERIOD = "Escolha datas entre 2000 e 2100"
+# OS escolhidas na exportação: os ids vão na URL (o servidor aceita até 16 KB no começo do
+# pedido). Mais que isto: exporte pelos filtros.
+EXPORT_MAX_IDS = 300
 
 
 def ticket_filters(
@@ -224,7 +227,7 @@ async def export_tickets(
     db: DB,
     user: TicketManagerUser,
     filters: Filters,
-    ids: Annotated[list[uuid.UUID] | None, Query(max_length=500)] = None,
+    ids: Annotated[list[uuid.UUID] | None, Query(max_length=EXPORT_MAX_IDS)] = None,
     order_by: str = "-updated_at",
 ) -> Response:
     """A lista de atividades em CSV (os mesmos filtros e a mesma ordem da lista; `ids` repetível
