@@ -58,7 +58,16 @@ const EMPTY: Record<View, { title: string; description: string }> = {
 
 const intFmt = (n: number) => n.toLocaleString("pt-BR");
 const plural = (n: number, one: string, many: string) => `${intFmt(n)} ${n === 1 ? one : many}`;
+/** Quantidade de uma lista cortada no limite: só das linhas que vieram ("812+ OS concluídas"). */
+const countText = (n: number, one: string, many: string, partial: boolean) => (partial ? `${intFmt(n)}+ ${many}` : plural(n, one, many));
 const total = (lines: PayoutLine[]) => lines.reduce((acc, l) => acc + l.amount, 0);
+
+/** A API cortou a lista no limite: há mais lançamentos no filtro do que linhas na tela. */
+function isCut(list: PayoutList | undefined): boolean {
+  if (!list) return false;
+  // Sem o total do filtro (servidor antigo), a lista cheia indica o corte.
+  return list.total_count !== undefined ? list.total_count > list.items.length : list.items.length >= LIMIT;
+}
 const shortDate = (iso: string) =>
   new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", timeZone: OPERATION_TZ }).format(new Date(iso));
 
@@ -400,7 +409,20 @@ export default function PayoutsPage() {
   const loading = queries.some((q) => q.isLoading);
   const error = queries.find((q) => q.error)?.error ?? null;
   const stale = queries.some((q) => q.isPlaceholderData);
-  const truncated = queries.some((q) => (q.data?.items.length ?? 0) >= LIMIT);
+  const pendingCut = isCut(pendingQuery.data);
+  const paidCut = isCut(paidQuery.data);
+  const truncated = pendingCut || paidCut;
+  // Lista cortada no limite e sem técnico escolhido: o valor dos cartões vem somado pela API, que conta
+  // todos os lançamentos do filtro (as linhas na tela são só as mais recentes).
+  const pendingSums = !technicianId && pendingCut ? pendingQuery.data?.summary : undefined;
+  const paidSums = !technicianId && paidCut ? paidQuery.data?.summary : undefined;
+  const sums = {
+    to_pay: pendingSums?.to_pay ?? total(byState.to_pay),
+    expected: pendingSums?.expected ?? total(byState.expected),
+    cancelled: pendingSums?.cancelled ?? total(byState.cancelled),
+    paid: paidSums?.paid ?? total(byState.paid),
+  };
+  const sumAll = pendingSums || paidSums ? sums.to_pay + sums.expected + sums.cancelled + sums.paid : total(lines);
   const busy = pay.isPending || remove.isPending;
   const retry = () => queries.forEach((q) => void q.refetch());
   // "Previsto" só mostra; marcar como pago vale para OS concluída, e desfazer, para o que já foi pago.
@@ -421,7 +443,7 @@ export default function PayoutsPage() {
                 setTechnician(option ? { id: option.id, name: option.name } : null);
                 setSelected(new Set());
               }}
-              className="w-56"
+              className="w-full sm:w-56"
               aria-label="Técnico"
             >
               <option value="">Todos os técnicos</option>
@@ -437,7 +459,7 @@ export default function PayoutsPage() {
                 setMonth(e.target.value);
                 setSelected(new Set());
               }}
-              className="w-48"
+              className="w-full sm:w-48"
               aria-label="Período"
             >
               <option value="">Todos os períodos</option>
@@ -455,26 +477,30 @@ export default function PayoutsPage() {
         }
       />
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" role="group" aria-label="Situação dos pagamentos">
+      <div
+        className={clsx("grid grid-cols-2 gap-3 transition-opacity duration-150 lg:grid-cols-4", stale && "opacity-60")}
+        role="group"
+        aria-label="Situação dos pagamentos"
+      >
         <StatTile
           label="A pagar"
-          value={total(byState.to_pay)}
-          display={formatMoney(total(byState.to_pay))}
+          value={sums.to_pay}
+          display={formatMoney(sums.to_pay)}
           loading={pendingQuery.isLoading}
-          hint={plural(byState.to_pay.length, "OS concluída", "OS concluídas")}
+          hint={countText(byState.to_pay.length, "OS concluída", "OS concluídas", pendingCut)}
           onSelect={() => changeView("to_pay")}
           selected={view === "to_pay"}
         />
         <StatTile
           label="Previsto"
-          value={total(byState.expected)}
-          display={formatMoney(total(byState.expected))}
+          value={sums.expected}
+          display={formatMoney(sums.expected)}
           loading={pendingQuery.isLoading}
           hint={
             <>
-              {plural(byState.expected.length, "OS em andamento", "OS em andamento")}
-              {byState.cancelled.length ? (
-                <span className="font-medium text-amber-700 dark:text-amber-400"> · {formatMoney(total(byState.cancelled))} em OS canceladas</span>
+              {countText(byState.expected.length, "OS em andamento", "OS em andamento", pendingCut)}
+              {sums.cancelled > 0 ? (
+                <span className="font-medium text-amber-700 dark:text-amber-400"> · {formatMoney(sums.cancelled)} em OS canceladas</span>
               ) : null}
             </>
           }
@@ -483,8 +509,8 @@ export default function PayoutsPage() {
         />
         <StatTile
           label="Pago"
-          value={total(byState.paid)}
-          display={formatMoney(total(byState.paid))}
+          value={sums.paid}
+          display={formatMoney(sums.paid)}
           loading={paidQuery.isLoading}
           hint={month ? "OS concluídas no mês" : "até hoje"}
           onSelect={() => changeView("paid")}
@@ -492,10 +518,10 @@ export default function PayoutsPage() {
         />
         <StatTile
           label="Todos"
-          value={total(lines)}
-          display={formatMoney(total(lines))}
+          value={sumAll}
+          display={formatMoney(sumAll)}
           loading={loading}
-          hint={plural(lines.length, "lançamento", "lançamentos")}
+          hint={countText(lines.length, "lançamento", "lançamentos", truncated)}
           onSelect={() => changeView("all")}
           selected={view === "all"}
         />
@@ -503,7 +529,9 @@ export default function PayoutsPage() {
       {month || truncated ? (
         <p className="mt-2 text-xs text-ink-muted">
           {month ? "O mês vale pela conclusão da OS; a OS ainda aberta entra pela data em que o valor foi lançado." : ""}
-          {truncated ? ` A lista traz até ${intFmt(LIMIT)} lançamentos a pagar e ${intFmt(LIMIT)} pagos (os mais recentes): escolha um mês para ver todos.` : ""}
+          {truncated
+            ? ` A lista traz até ${intFmt(LIMIT)} lançamentos a pagar e ${intFmt(LIMIT)} pagos (os mais recentes)${technicianId ? "" : "; os valores dos cartões somam todos"}: escolha um mês para ver a lista inteira.`
+            : ""}
         </p>
       ) : null}
 

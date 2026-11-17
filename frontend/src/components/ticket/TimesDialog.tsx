@@ -152,7 +152,7 @@ export function TimesDialog({ ticket, onClose }: { ticket: TicketDetail; onClose
     save.mutate();
   };
   const field = (key: TimeKey, label: string, hint?: string) => (
-    <Field label={label} hint={errors[key] ? undefined : hint}>
+    <Field label={label} hint={hint} error={errors[key]}>
       <Input
         type="datetime-local"
         value={value(key)}
@@ -161,7 +161,6 @@ export function TimesDialog({ ticket, onClose }: { ticket: TicketDetail; onClose
         onChange={(e) => setEdits((d) => ({ ...d, [key]: e.target.value }))}
         aria-invalid={errors[key] ? true : undefined}
       />
-      {errors[key] ? <span className="text-xs font-medium text-red-700 dark:text-red-300">{errors[key]}</span> : null}
     </Field>
   );
 
@@ -200,7 +199,8 @@ export function TimesDialog({ ticket, onClose }: { ticket: TicketDetail; onClose
           {finished ? (
             <Field
               label="Tempo de atendimento (minutos)"
-              hint={errors.minutes ? undefined : `${formatMinutes(Number(shownMinutes))}. Menor que o intervalo quando houve pausa.`}
+              hint={`${formatMinutes(Number(shownMinutes))}. Menor que o intervalo quando houve pausa.`}
+              error={errors.minutes}
             >
               <Input
                 inputMode="numeric"
@@ -208,7 +208,6 @@ export function TimesDialog({ ticket, onClose }: { ticket: TicketDetail; onClose
                 onChange={(e) => setMinutes(e.target.value.replace(/\D/g, ""))}
                 aria-invalid={errors.minutes ? true : undefined}
               />
-              {errors.minutes ? <span className="text-xs font-medium text-red-700 dark:text-red-300">{errors.minutes}</span> : null}
             </Field>
           ) : running ? (
             <p className="self-end text-xs text-ink-subtle sm:col-span-1">
@@ -216,7 +215,7 @@ export function TimesDialog({ ticket, onClose }: { ticket: TicketDetail; onClose
             </p>
           ) : null}
           <div className="sm:col-span-2">
-            <Field label="Motivo" required hint={errors.reason ? undefined : "Fica no histórico da OS (o técnico não vê)."}>
+            <Field label="Motivo" required hint="Fica no histórico da OS (o técnico não vê)." error={errors.reason}>
               <Textarea
                 ref={reasonRef}
                 rows={2}
@@ -226,7 +225,6 @@ export function TimesDialog({ ticket, onClose }: { ticket: TicketDetail; onClose
                 placeholder="Ex.: técnico esqueceu de concluir no app; confirmado com a loja por telefone."
                 aria-invalid={errors.reason ? true : undefined}
               />
-              {errors.reason ? <span className="text-xs font-medium text-red-700 dark:text-red-300">{errors.reason}</span> : null}
             </Field>
           </div>
           {save.error ? (

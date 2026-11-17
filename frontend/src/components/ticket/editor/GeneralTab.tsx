@@ -190,10 +190,13 @@ function Counter({ value, max }: { value: string; max: number }) {
   );
 }
 
-/** Mensagem embaixo do campo com problema (aparece depois da primeira tentativa de salvar). */
+/**
+ * Erro de uma linha com dois campos (data e hora), embaixo dos dois: o `error` do Field cobre um campo
+ * só. Mesmo tom e anúncio do Field; aparece depois da primeira tentativa de salvar.
+ */
 function FieldError({ id, message }: { id: string; message?: string }) {
   return message ? (
-    <span id={id} className="text-xs font-medium text-red-700 dark:text-red-300">
+    <span id={id} role="alert" className="block text-xs font-medium text-red-600 dark:text-red-400">
       {message}
     </span>
   ) : null;
@@ -281,6 +284,11 @@ interface SavePlan {
   version: number;
   patch: TicketUpdatePayload | null;
   assign: { assignee_id: UUID | null } | null;
+  /**
+   * Troca o técnico antes dos dados: o técnico que sai continua na visita como "outro técnico", e a
+   * API só aceita como outro técnico quem já não é o responsável.
+   */
+  assignFirst: boolean;
   times: TimesBody | null;
   /** Os conflitos de agenda já foram mostrados: o Salvar confirma mesmo assim. */
   confirmed: boolean;
@@ -532,25 +540,23 @@ export function GeneralTab({
         setSnap({ server: next, base: initial(next) });
         setPartial(true);
       };
-      if (plan.patch) {
-        // Trocando o técnico junto, o conflito de agenda é conferido na troca (com o técnico novo):
-        // aqui a API olharia o técnico que está saindo.
-        step(
-          await api.patch<TicketDetail>(`/tickets/${ticket.id}`, {
-            ...plan.patch,
-            expected_version: version,
-            allow_conflict: plan.assign ? true : plan.confirmed,
-          }),
-        );
-      }
-      if (plan.assign) {
-        step(
-          await api.post<TicketDetail>(`/tickets/${ticket.id}/assign`, {
-            ...plan.assign,
-            expected_version: version,
-            allow_conflict: plan.confirmed,
-          }),
-        );
+      const sendPatch = async (patch: TicketUpdatePayload, allow: boolean) =>
+        step(await api.patch<TicketDetail>(`/tickets/${ticket.id}`, { ...patch, expected_version: version, allow_conflict: allow }));
+      const sendAssign = async (assign: { assignee_id: UUID | null }, allow: boolean) =>
+        step(await api.post<TicketDetail>(`/tickets/${ticket.id}/assign`, { ...assign, expected_version: version, allow_conflict: allow }));
+      // A agenda muda no PATCH: lá a API confere o conflito com a agenda nova, o técnico e os outros técnicos finais.
+      const agendaInPatch = Boolean(
+        plan.patch && ("scheduled_start" in plan.patch || "scheduled_end" in plan.patch || "estimated_minutes" in plan.patch),
+      );
+      if (plan.assign && plan.assignFirst) {
+        // O conflito do técnico novo é conferido aqui, a menos que a agenda ainda vá mudar no PATCH.
+        await sendAssign(plan.assign, agendaInPatch || plan.confirmed);
+        if (plan.patch) await sendPatch(plan.patch, plan.confirmed);
+      } else {
+        // Trocando o técnico depois, o conflito é conferido na troca (com o técnico novo, a agenda e
+        // os outros técnicos já gravados): no PATCH a API olharia o técnico que está saindo.
+        if (plan.patch) await sendPatch(plan.patch, plan.assign ? true : plan.confirmed);
+        if (plan.assign) await sendAssign(plan.assign, plan.confirmed);
       }
       if (plan.times) step(await api.put<TicketDetail>(`/tickets/${ticket.id}/times`, { ...plan.times, expected_version: version }));
       return current;
@@ -621,7 +627,10 @@ export function GeneralTab({
     setNotice(null);
     setConflicts(null);
     setTried(false);
+    setPartial(false);
     setChangingLocation(false);
+    // O erro do último Salvar era sobre as alterações descartadas.
+    save.reset();
   };
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -653,6 +662,7 @@ export function GeneralTab({
       version: server.version,
       patch: Object.keys(patch).length ? patch : null,
       assign: assigneeChanged ? { assignee_id: form.assigneeId || null } : null,
+      assignFirst: assigneeChanged && Boolean(base.assigneeId) && form.helperIds.includes(base.assigneeId),
       times: timesChanged ? buildTimes() : null,
       confirmed: Boolean(conflicts),
       sent: form,
@@ -797,16 +807,14 @@ export function GeneralTab({
                 ))}
             </Select>
           </Field>
-          <Field label="Título" required className="col-span-12 @xl:col-span-8">
+          <Field label="Título" required error={shown("title")} className="col-span-12 @xl:col-span-8">
             <Input
               value={form.title}
               onChange={(e) => set("title", e.target.value)}
               maxLength={200}
               aria-required="true"
               aria-invalid={errors.title ? true : undefined}
-              aria-describedby={shown("title") ? fieldId("title") : undefined}
             />
-            <FieldError id={fieldId("title")} message={shown("title")} />
           </Field>
           <Field label="Contrato de prazo (prioridade)" className="col-span-12 @xl:col-span-4">
             <Select value={form.priority} onChange={(e) => set("priority", e.target.value as TicketPriority)}>
@@ -955,18 +963,19 @@ export function GeneralTab({
           <Field
             label="Duração estimada (min)"
             className="col-span-12 @xl:col-span-4"
-            hint={!shown("estimated") && minutes ? formatMinutes(minutes) : undefined}
+            hint={minutes ? formatMinutes(minutes) : undefined}
+            error={shown("estimated")}
           >
             <Input
               type="number"
               inputMode="numeric"
-              step="any"
+              min={1}
+              max={10080}
+              step={1}
               value={form.estimated}
               onChange={(e) => set("estimated", e.target.value)}
               aria-invalid={errors.estimated ? true : undefined}
-              aria-describedby={shown("estimated") ? fieldId("estimated") : undefined}
             />
-            <FieldError id={fieldId("estimated")} message={shown("estimated")} />
           </Field>
           <Field label="Data do agendamento" className="col-span-6 @xl:col-span-4">
             <Input
@@ -987,9 +996,9 @@ export function GeneralTab({
             />
           </Field>
           {shown("schedule") ? (
-            <p id={fieldId("schedule")} className="col-span-12 -mt-2 text-xs font-medium text-red-700 dark:text-red-300">
-              {errors.schedule}
-            </p>
+            <div className="col-span-12 -mt-2">
+              <FieldError id={fieldId("schedule")} message={errors.schedule} />
+            </div>
           ) : null}
           {unscheduledWarning ? (
             <Caution className="col-span-12">Sem data e hora, a OS sai de Agendado e volta para Atribuído (fora da agenda do técnico).</Caution>
@@ -1223,7 +1232,8 @@ export function GeneralTab({
               label="Motivo da correção do horário"
               required
               className="col-span-12"
-              hint={shown("reason") ? undefined : "Fica no histórico da OS (o técnico não vê)"}
+              hint="Fica no histórico da OS (o técnico não vê)"
+              error={shown("reason")}
             >
               <Input
                 value={form.timesReason}
@@ -1232,9 +1242,7 @@ export function GeneralTab({
                 maxLength={500}
                 aria-required="true"
                 aria-invalid={errors.reason ? true : undefined}
-                aria-describedby={shown("reason") ? fieldId("reason") : undefined}
               />
-              <FieldError id={fieldId("reason")} message={shown("reason")} />
             </Field>
           ) : null}
         </div>

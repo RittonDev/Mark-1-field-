@@ -15,8 +15,8 @@ import { reloadAttachments } from "../../components/ticket/attachments";
 import { ArrivalResult, FieldClockLine, OnsiteTimer } from "../../components/ticket/FieldClock";
 import { FormsCard, openForm, openSignature } from "../../components/ticket/FormsCard";
 import { InfoPanel, ScopeCard, visitWindow } from "../../components/ticket/InfoPanel";
-import { PartRequestSheet, PartRequestsCard, type PartPhoto } from "../../components/ticket/PartRequests";
-import { capturePhotos, recoverCapture } from "../../components/ticket/photoCapture";
+import { PartRequestSheet, PartRequestsCard } from "../../components/ticket/PartRequests";
+import { capturePhotos, recoverCapture, type PartDraft } from "../../components/ticket/photoCapture";
 import { PhotosPanel } from "../../components/ticket/PhotosPanel";
 import { hasRoute, routeAddress, RouteSheet } from "../../components/ticket/QuickActions";
 import { ReportShareCard } from "../../components/ticket/ReportShareCard";
@@ -134,8 +134,8 @@ function TicketView({ ticket: current, user }: { ticket: LocalTicket; user: User
   const [sheetOpen, setSheetOpen] = useState(false);
   const [routeOpen, setRouteOpen] = useState(false);
   const [unproductiveOpen, setUnproductiveOpen] = useState(false);
-  /** Folha "Pedir peça" aberta (com as fotos já escolhidas, quando recuperadas). */
-  const [part, setPart] = useState<PartPhoto[] | null>(null);
+  /** Folha "Pedir peça" aberta (`initial`: o pedido recuperado depois de o Android fechar o app). */
+  const [part, setPart] = useState<{ initial?: PartDraft } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [photoBusy, setPhotoBusy] = useState(false);
   const [barHeight, setBarHeight] = useState(0);
@@ -170,8 +170,19 @@ function TicketView({ ticket: current, user }: { ticket: LocalTicket; user: User
         if (!found) return;
         const { target: shot, assets } = found;
         if (shot.kind === "part" && alive) {
-          setPart(assets.map((asset) => ({ uri: asset.uri, mimeType: asset.mimeType })));
-          showToast("Foto recuperada", { tone: "success", description: "O app fechou com a câmera aberta. Complete o pedido de peça." });
+          // A folha volta como estava, com a foto nova junto das já escolhidas.
+          const draft = shot.draft;
+          const recovered = assets.map((asset) => ({ uri: asset.uri, mimeType: asset.mimeType }));
+          setPart({
+            initial: {
+              description: draft?.description ?? "",
+              quantity: draft?.quantity ?? "1",
+              unit: draft?.unit ?? "un",
+              note: draft?.note ?? "",
+              photos: [...(draft?.photos ?? []), ...recovered],
+            },
+          });
+          showToast("Foto recuperada", { tone: "success", description: "O app fechou com a câmera aberta. Confira e envie o pedido de peça." });
           return;
         }
         const field = shot.kind === "form" ? { formId: shot.formId, fieldId: shot.fieldId } : undefined;
@@ -309,7 +320,7 @@ function TicketView({ ticket: current, user }: { ticket: LocalTicket; user: User
       right: <StatusBadge status={to} />,
       onPress: () => open(to),
     })),
-    ...(canRequestPart ? [{ key: "part", label: "Pedir peça", icon: "package" as IconName, onPress: () => setPart([]) }] : []),
+    ...(canRequestPart ? [{ key: "part", label: "Pedir peça", icon: "package" as IconName, onPress: () => setPart({}) }] : []),
     ...(canUnproductive
       ? [
           {
@@ -459,7 +470,7 @@ function TicketView({ ticket: current, user }: { ticket: LocalTicket; user: User
         {isMine ? (
           <Animated.View entering={motion.entering(2)} style={{ gap: 12 }}>
             <FormsCard ticket={current} attachments={attachments ?? []} pendingPhotos={queued} pendingSignature={pendingSignature} />
-            <PartRequestsCard ticket={current} canRequest={canRequestPart} onRequest={() => setPart([])} />
+            <PartRequestsCard ticket={current} canRequest={canRequestPart} onRequest={() => setPart({})} />
           </Animated.View>
         ) : helping ? (
           <>
@@ -553,7 +564,7 @@ function TicketView({ ticket: current, user }: { ticket: LocalTicket; user: User
         <TransitionModal key={target} ticket={current} to={target} onClose={() => setTarget(null)} onDone={afterTransition} />
       ) : null}
       {unproductiveOpen ? <UnproductiveModal ticket={current} onClose={() => setUnproductiveOpen(false)} /> : null}
-      {part ? <PartRequestSheet ticket={current} initialPhotos={part} onClose={() => setPart(null)} /> : null}
+      {part ? <PartRequestSheet ticket={current} initial={part.initial} onClose={() => setPart(null)} /> : null}
     </View>
   );
 }

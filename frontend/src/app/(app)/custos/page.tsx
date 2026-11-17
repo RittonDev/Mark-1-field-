@@ -519,12 +519,20 @@ export default function ExpensesPage() {
         r.notes ?? "",
       ]),
     ]);
-  const cards: { key: StatusFilter; label: string; rows: Row[]; hint: string }[] = [
-    { key: "", label: "Todos", rows: [...byStatus.pending, ...byStatus.approved, ...byStatus.paid], hint: "sem os recusados" },
-    { key: "pending", label: "Aguardando aprovação", rows: byStatus.pending, hint: "esperando a gestão" },
-    { key: "approved", label: "A reembolsar", rows: byStatus.approved, hint: "aprovados, ainda não pagos" },
-    { key: "paid", label: "Reembolsado", rows: byStatus.paid, hint: "já pagos ao técnico" },
-    { key: "rejected", label: "Recusado", rows: byStatus.rejected, hint: "fora das somas" },
+  // "Todos" lista também os recusados (como a tabela), mas a soma fica sem eles.
+  const rejectedCount = byStatus.rejected.length;
+  const cards: { key: StatusFilter; label: string; count: number; value: number; hint: string }[] = [
+    {
+      key: "",
+      label: "Todos",
+      count: data?.items.length ?? 0,
+      value: sum([...byStatus.pending, ...byStatus.approved, ...byStatus.paid]),
+      hint: rejectedCount ? "soma sem os recusados" : "todas as situações",
+    },
+    { key: "pending", label: "Aguardando aprovação", count: byStatus.pending.length, value: sum(byStatus.pending), hint: "esperando a gestão" },
+    { key: "approved", label: "A reembolsar", count: byStatus.approved.length, value: sum(byStatus.approved), hint: "aprovados, ainda não pagos" },
+    { key: "paid", label: "Reembolsado", count: byStatus.paid.length, value: sum(byStatus.paid), hint: "já pagos ao técnico" },
+    { key: "rejected", label: "Recusado", count: rejectedCount, value: sum(byStatus.rejected), hint: "fora das somas" },
   ];
 
   return (
@@ -614,15 +622,19 @@ export default function ExpensesPage() {
         ) : null}
       </div>
 
-      <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5" role="group" aria-label="Situação dos custos">
+      <div
+        className={clsx("mb-4 grid grid-cols-2 gap-3 transition-opacity duration-150 sm:grid-cols-3 xl:grid-cols-5", stale && "opacity-60")}
+        role="group"
+        aria-label="Situação dos custos"
+      >
         {cards.map((card) => (
           <StatTile
             key={card.key || "all"}
             label={card.label}
-            value={sum(card.rows)}
-            display={formatMoney(sum(card.rows))}
+            value={card.value}
+            display={formatMoney(card.value)}
             loading={report.isLoading}
-            hint={`${plural(card.rows.length, "lançamento", "lançamentos")} · ${card.hint}`}
+            hint={`${plural(card.count, "lançamento", "lançamentos")} · ${card.hint}`}
             onSelect={() => pickStatus(card.key)}
             selected={status === card.key}
           />
@@ -646,7 +658,20 @@ export default function ExpensesPage() {
                 icon={<Receipt className="size-6" />}
                 title={EMPTY_TITLE[status]}
                 description="Os custos são lançados na OS, na aba Peças e custos."
-                action={filtered ? <Button onClick={clearFilters}>Limpar filtros</Button> : undefined}
+                action={
+                  filtered ? (
+                    <Button onClick={clearFilters}>Limpar filtros</Button>
+                  ) : period !== ALL ? (
+                    <Button
+                      onClick={() => {
+                        setPeriod(ALL);
+                        setSelected([]);
+                      }}
+                    >
+                      Ver todo o período
+                    </Button>
+                  ) : undefined
+                }
               />
             </Card>
           ) : (
@@ -656,7 +681,9 @@ export default function ExpensesPage() {
                   <span className="text-sm text-ink-muted" aria-live="polite">
                     {chosen.length
                       ? `${plural(chosen.length, "selecionado", "selecionados")} · ${formatMoney(sum(chosen))}`
-                      : `${plural(visible.length, "lançamento", "lançamentos")} · ${formatMoney(sum(status === "rejected" ? visible : counted))}`}
+                      : `${plural(visible.length, "lançamento", "lançamentos")} · ${formatMoney(sum(status === "rejected" ? visible : counted))}${
+                          !status && rejectedCount ? " sem os recusados" : ""
+                        }`}
                   </span>
                   <div className="flex flex-wrap items-center gap-2">
                     {chosenPending.length ? (

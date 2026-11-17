@@ -44,7 +44,7 @@ export function CommentsTab({ ticketId }: { ticketId: UUID }) {
       {comments.isLoading ? (
         <LoadingBlock />
       ) : comments.error ? (
-        <ErrorBox message={errorMessage(comments.error)} />
+        <ErrorBox message={errorMessage(comments.error)} onRetry={() => void comments.refetch()} />
       ) : items.length === 0 ? (
         <EmptyState icon={<MessageSquare className="size-7" />} title="Nenhum acompanhamento ainda" />
       ) : (

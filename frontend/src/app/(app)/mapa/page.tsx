@@ -26,11 +26,12 @@ import {
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "@/components/Brand";
 import type { MapFocus, MapPlace } from "@/components/LiveMap";
 import { LocationPicker } from "@/components/LocationPicker";
-import { fold, operationDay } from "@/components/operacao/hooks";
+import { fold, operationDay, replaceSearch } from "@/components/operacao/hooks";
 import { TicketLink } from "@/components/ticket/TicketLink";
 import {
   Button,
@@ -141,7 +142,17 @@ function closeness(d: TechnicianDistance | undefined, now: number): number {
 }
 
 export default function LiveMapPage() {
+  // O técnico pode chegar escolhido pela URL (?tecnico=, ex.: "Em jornada" na base técnica).
+  return (
+    <Suspense fallback={<LoadingBlock />}>
+      <LiveMapView />
+    </Suspense>
+  );
+}
+
+function LiveMapView() {
   const { user } = useAuth();
+  const searchParams = useSearchParams();
   const theme = useTheme();
   const now = useNow(15_000);
   const today = operationDay(now);
@@ -152,7 +163,8 @@ export default function LiveMapPage() {
   const [stateFilter, setStateFilter] = useState<ReadonlySet<LiveState>>(() => new Set());
   const [prefs, setPrefs] = useState<MapPrefs>(readPrefs);
   const [onlyUnassigned, setOnlyUnassigned] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Técnico escolhido na lista, no mapa ou pela URL.
+  const [pickedId, setPickedId] = useState<string | null>(() => searchParams.get("tecnico"));
   // Dia do trajeto: null = hoje (acompanha a virada do dia com a tela aberta).
   const [dayChoice, setDayChoice] = useState<string | null>(null);
   // Loja do cliente: escolhida na busca (cadastro completo) ou numa OS do dia no mapa.
@@ -168,6 +180,10 @@ export default function LiveMapPage() {
 
   const teams = useTeams();
   const live = useLiveTechnicians(teamId || null);
+  const liveById = useMemo(() => new Map((live.data ?? []).map((t) => [t.id, t])), [live.data]);
+  // Só vale quem está na lista (ativo e no grupo escolhido): um link antigo ou um técnico desativado
+  // não deixa a tela presa num técnico que não aparece.
+  const selectedId = pickedId && liveById.has(pickedId) ? pickedId : null;
   const history = useTrackingHistory(selectedId, day);
   // As distâncias só servem com loja ou técnico escolhido: sem isso, nada na tela usa (e a conta é pesada).
   const distancesEnabled = canManage && (!!place || !!selectedId);
@@ -181,7 +197,6 @@ export default function LiveMapPage() {
     refetchInterval: 60_000,
   });
 
-  const liveById = useMemo(() => new Map((live.data ?? []).map((t) => [t.id, t])), [live.data]);
   const distanceById = useMemo(
     () => new Map((distances.data?.technicians ?? []).map((d) => [d.id, onlyShiftDistance(d, liveById.get(d.id))])),
     [distances.data, liveById],
@@ -261,9 +276,11 @@ export default function LiveMapPage() {
   }, [selectedId]);
 
   const select = (id: string | null) => {
-    setSelectedId(id);
+    setPickedId(id);
     // Outro técnico: o trajeto volta para hoje.
     setDayChoice(null);
+    // O endereço da tela leva ao mesmo técnico (recarregar ou mandar o link).
+    replaceSearch({ tecnico: id });
   };
   const changeTeam = (id: string) => {
     setTeamId(id);
@@ -726,6 +743,18 @@ function LegRow({ icon, label, leg }: { icon: React.ReactNode; label: string; le
   );
 }
 
+/** Leva à base técnica já buscando o técnico, para completar o cadastro. */
+function CompleteLink({ name }: { name: string }) {
+  return (
+    <Link
+      href={`/tecnicos?q=${encodeURIComponent(name)}`}
+      className="font-medium text-ink underline underline-offset-2 hover:text-brand"
+    >
+      Completar em Técnicos
+    </Link>
+  );
+}
+
 function Fact({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className="flex items-center gap-2 text-xs text-ink-muted">
@@ -856,7 +885,9 @@ function TechnicianDetail({
           </a>
         </div>
       ) : (
-        <p className="text-xs text-ink-muted">Sem celular no cadastro (complete em Técnicos).</p>
+        <p className="text-xs text-ink-muted">
+          Sem celular no cadastro. <CompleteLink name={tech.name} />
+        </p>
       )}
 
       {ticket ? (
@@ -939,7 +970,13 @@ function TechnicianDetail({
           ) : null}
           <p className="flex items-start gap-1.5 text-[11px] text-ink-muted">
             <House className="mt-px size-3 shrink-0" />
-            {distance.home ? distance.home.label : "Sem endereço de casa no cadastro (complete em Técnicos)."}
+            {distance.home ? (
+              distance.home.label
+            ) : (
+              <span>
+                Sem endereço de casa no cadastro. <CompleteLink name={tech.name} />
+              </span>
+            )}
           </p>
           {!tech.on_shift ? (
             <p className="text-[11px] text-ink-muted">Fora da jornada: a posição não aparece, só a casa.</p>

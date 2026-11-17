@@ -8,6 +8,7 @@ import { CountUp } from "@/components/motion";
 import { fold, isUuid, OPERATION_TZ, operationDay, replaceSearch, useActiveTechnicians } from "@/components/operacao/hooks";
 import { InactiveChip, LiveStatus, RefreshFailed } from "@/components/operacao/status";
 import { TagChips } from "@/components/TagChips";
+import { FAR_FROM_STORE_M, km } from "@/components/ticket/geo";
 import { MessagesButton } from "@/components/ticket/MessagesPanel";
 import { QuickEditButton } from "@/components/ticket/QuickEditButton";
 import { TicketLink } from "@/components/ticket/TicketLink";
@@ -34,20 +35,24 @@ const STATE: Record<ActivityState, { label: string; color: string }> = {
   pending: { label: "Voltou para a fila", color: STATUS.new.color },
 };
 
-/** Filtro dos números: uma situação ou as visitas sem técnico (ou com técnico inativo). */
-type Filter = ActivityState | "no_technician";
+/** Filtro dos números: uma situação, as visitas improdutivas do dia ou as sem técnico (ou com técnico inativo). */
+type Filter = ActivityState | "unproductive" | "no_technician";
 
-const FILTERS: { key: Filter; label: string; color: string }[] = [
+const FILTERS: { key: Filter; label: string; color: string; hint?: string }[] = [
   { key: "scheduled", label: "Agendadas", color: STATE.scheduled.color },
   { key: "late", label: "Atrasadas", color: STATE.late.color },
   { key: "en_route", label: "Em deslocamento", color: STATE.en_route.color },
   { key: "in_progress", label: "Em atendimento", color: STATE.in_progress.color },
   { key: "on_hold", label: "Pendentes", color: STATE.on_hold.color },
   { key: "rescheduled", label: "Reagendadas", color: STATE.rescheduled.color },
-  { key: "pending", label: "Voltaram para a fila", color: STATE.pending.color },
+  { key: "pending", label: "Voltaram para a fila", color: STATE.pending.color, hint: "Saíram da agenda e esperam uma nova visita" },
   { key: "done", label: "Concluídas", color: STATE.done.color },
-  { key: "no_technician", label: "Sem técnico", color: "#b45309" },
+  { key: "unproductive", label: "Improdutivas", color: "#c2410c", hint: "O técnico foi e não conseguiu atender (com o motivo)" },
+  { key: "no_technician", label: "Sem técnico", color: "#b45309", hint: "Sem técnico ou com técnico inativo (não entra mais no app)" },
 ];
+
+/** Números que pedem ação quando passam de zero: vermelho para atraso, âmbar para o resto. */
+const PROBLEM_FILTERS: Filter[] = ["late", "unproductive", "no_technician"];
 
 /** Tolerância antes de marcar o início como atrasado (minutos depois do agendado). */
 const LATE_TOLERANCE = 5;
@@ -84,8 +89,17 @@ const lacksTechnician = (a: Activity) => !a.ticket.assignee || a.ticket.assignee
 const worksOn = (a: Activity, userId: string) =>
   a.ticket.assignee?.id === userId || Boolean(a.ticket.helpers?.some((h) => h.id === userId));
 
-function matches(a: Activity, filter: Filter): boolean {
-  return filter === "no_technician" ? lacksTechnician(a) : a.state === filter;
+/** Hora da visita improdutiva no dia (a API manda a do dia; a última da OS cobre a resposta antiga). */
+function unproductiveAt(a: Activity, day: string): string | null {
+  if (a.unproductive_at) return a.unproductive_at;
+  const last = a.ticket.last_unproductive_at;
+  return last && operationDay(last) === day ? last : null;
+}
+
+function matches(a: Activity, filter: Filter, day: string): boolean {
+  if (filter === "no_technician") return lacksTechnician(a);
+  if (filter === "unproductive") return unproductiveAt(a, day) !== null;
+  return a.state === filter;
 }
 
 /** Texto da busca: nº, cliente, loja e código, cidade, título e tipo de serviço, sem acento. */
@@ -97,32 +111,53 @@ function haystack(a: Activity): string {
 }
 
 /**
- * Hora de atuação para ordenar: a agendada quando cai no dia; senão a realizada no dia (a visita
- * atendida hoje e remarcada para outro dia fica onde aconteceu); senão a agendada (em campo desde
- * ontem vem primeiro); sem hora nenhuma, no fim.
+ * Hora de atuação para ordenar (a mesma regra da API): a agendada quando cai no dia; senão a realizada
+ * no dia, a saída, a chegada ou a improdutiva (a visita atendida hoje e remarcada para outro dia fica
+ * onde aconteceu); senão a agendada (em campo desde ontem vem primeiro); sem hora nenhuma, no fim.
  */
 function actingAt(a: Activity, day: string): number {
   if (a.scheduled_start && operationDay(a.scheduled_start) === day) return new Date(a.scheduled_start).getTime();
-  const real = a.arrived_at ?? a.started_at;
+  const real = a.started_at ?? a.arrived_at ?? a.unproductive_at;
   if (real && operationDay(real) === day) return new Date(real).getTime();
   const any = a.scheduled_start ?? real ?? a.ticket.arrived_at;
   return any ? new Date(any).getTime() : Number.MAX_SAFE_INTEGER;
 }
 
 /**
- * Previsto e realizado na mesma linha: "Agendada 09:00–10:00 · Início 10:12 (+12min) · Fim 11:40",
- * "em atendimento há 45min" ou "atrasada há 35min".
+ * Feito sem internet: a hora que o aparelho marcou no botão. O envio chegou depois e o horário da OS
+ * continua sendo o do servidor; a central decide se corrige.
+ */
+function OfflineMark({ at, day }: { at: string | null | undefined; day: string }) {
+  if (!at) return null;
+  return (
+    <span
+      className="text-ink-subtle"
+      title="O técnico estava sem internet: o aparelho marcou este horário e o envio chegou depois. Use Corrigir horários se precisar."
+    >
+      {" "}
+      (marcou {when(at, day)} sem internet)
+    </span>
+  );
+}
+
+/**
+ * Previsto e realizado na mesma linha: "Agendada 09:00–10:00 · Início 10:12 (+12min) · a 80 m da
+ * loja · Fim 11:40", "em atendimento há 45min", "atrasada há 35min" ou "Improdutiva 10:40: motivo".
  */
 function Timing({ a, day, now }: { a: Activity; day: string; now: number }) {
   const t = a.ticket;
   const scheduled = a.scheduled_start;
   const scheduledInDay = Boolean(scheduled && operationDay(scheduled) === day);
-  // A caminho: só a saída. Depois, o início real é a chegada (check-in); OS migradas do Field Control
-  // não têm o histórico de status e valem o início e o fim da própria OS.
-  const departed = a.state === "en_route" && !a.arrived_at ? a.started_at : null;
-  const start = departed ? null : (a.arrived_at ?? a.started_at ?? t.arrived_at ?? null);
-  const finished = a.finished_at ?? t.resolved_at ?? null;
-  const delay = start && scheduled && scheduledInDay ? minutesBetween(scheduled, start) : null;
+  // Chegada (o início do atendimento): a do dia; em atendimento desde antes do dia, a etapa atual; sem
+  // registro nenhum no dia (ex.: OS migrada do Field Control, sem o histórico de status), a da OS.
+  const arrival = a.arrived_at ?? (a.state === "in_progress" ? a.started_at : null) ?? (a.started_at ? null : t.arrived_at);
+  // Saiu e não chegou no dia: a caminho, improdutiva antes de chegar ou remarcada no caminho.
+  const departure = arrival ? null : a.started_at;
+  const finished = arrival ? (a.finished_at ?? t.resolved_at ?? null) : null;
+  const delay = arrival && scheduled && scheduledInDay ? minutesBetween(scheduled, arrival) : null;
+  // Distância do GPS até a loja no check-in do dia: a prova de presença (como no Field Control).
+  const checkinMeters = arrival && arrival === a.arrived_at ? (a.arrival_distance_m ?? null) : null;
+  const bounced = unproductiveAt(a, day);
   const parts: React.ReactNode[] = [];
   if (scheduled) {
     parts.push(
@@ -133,29 +168,54 @@ function Timing({ a, day, now }: { a: Activity; day: string; now: number }) {
       </span>,
     );
   }
-  if (departed) {
+  if (departure) {
     parts.push(
-      <span key="departed">
-        Saiu {when(departed, day)} · a caminho há {formatMinutes(Math.max(0, minutesBetween(departed, now)))}
+      <span key="departure">
+        Saiu {when(departure, day)}
+        {a.state === "en_route" ? ` · a caminho há ${formatMinutes(Math.max(0, minutesBetween(departure, now)))}` : ""}
+        <OfflineMark at={a.started_declared_at} day={day} />
       </span>,
     );
-  } else if (start) {
+  }
+  if (arrival) {
     parts.push(
-      <span key="start">
-        Início {when(start, day)}
+      <span key="arrival">
+        Início {when(arrival, day)}
         {delay !== null && delay >= LATE_TOLERANCE ? (
           <span className="font-semibold text-red-700 dark:text-red-300"> (+{formatMinutes(delay)})</span>
         ) : null}
+        <OfflineMark at={arrival === a.arrived_at ? a.arrived_declared_at : null} day={day} />
       </span>,
     );
+    if (checkinMeters !== null) {
+      const far = checkinMeters > FAR_FROM_STORE_M;
+      parts.push(
+        <span
+          key="gps"
+          className={clsx("inline-flex items-center gap-1", far && "font-semibold text-red-700 dark:text-red-300")}
+          title="Distância do GPS do técnico até a loja no início do atendimento"
+        >
+          <Navigation aria-hidden className={clsx("size-3", far ? "text-red-600 dark:text-red-400" : "text-ink-subtle")} />
+          {far ? `check-in a ${km(checkinMeters)} da loja` : `a ${km(checkinMeters)} da loja`}
+        </span>,
+      );
+    }
     if (finished) parts.push(<span key="end">Fim {when(finished, day)}</span>);
     else if (a.state === "in_progress") {
-      parts.push(<span key="running">em atendimento há {formatMinutes(Math.max(0, minutesBetween(start, now)))}</span>);
+      parts.push(<span key="running">em atendimento há {formatMinutes(Math.max(0, minutesBetween(arrival, now)))}</span>);
     }
   } else if (a.state === "late" && scheduled) {
     parts.push(
       <span key="late" className="font-semibold text-red-700 dark:text-red-300">
         atrasada há {formatMinutes(Math.max(0, minutesBetween(scheduled, now)))}
+      </span>,
+    );
+  }
+  if (bounced) {
+    parts.push(
+      <span key="bounce" className="font-semibold text-amber-800 dark:text-amber-300">
+        Improdutiva {when(bounced, day)}
+        {a.unproductive_reason ? `: ${a.unproductive_reason}` : ""}
       </span>,
     );
   }
@@ -168,7 +228,9 @@ function Timing({ a, day, now }: { a: Activity; day: string; now: number }) {
           {part}
         </span>
       ))}
-      {a.start_has_gps ? <Navigation className="size-3 text-brand" aria-label="Check-in com GPS" /> : null}
+      {a.start_has_gps && checkinMeters === null ? (
+        <Navigation className="size-3 text-ink-subtle" aria-label="Registro com GPS" />
+      ) : null}
     </span>
   );
 }
@@ -196,11 +258,9 @@ function ActivityCard({
   const helpers = t.helpers ?? [];
   const address = loc ? [loc.address_line, [loc.city, loc.state].filter(Boolean).join(" - ")].filter(Boolean).join(", ") : null;
   const description = (a.description ?? "").trim() || t.title;
-  // Voltou para a fila por visita improdutiva no dia: diz o porquê.
+  // Voltou para a fila por visita improdutiva no dia: diz o porquê (o motivo vem na linha dos horários).
   const state =
-    a.state === "pending" && t.last_unproductive_at && operationDay(t.last_unproductive_at) === day
-      ? { label: "Improdutiva", color: STATE.pending.color }
-      : STATE[a.state];
+    a.state === "pending" && unproductiveAt(a, day) ? { label: "Improdutiva", color: STATE.pending.color } : STATE[a.state];
   const helperMark = focusId && t.assignee?.id !== focusId ? helpers.find((h) => h.id === focusId) : undefined;
   // A correção vale para qualquer OS com horário real, inclusive iniciada em outro dia.
   const canFixTimes = Boolean(a.started_at || a.arrived_at || t.arrived_at || t.resolved_at);
@@ -336,13 +396,15 @@ function DayView() {
   );
   const counts = useMemo(() => {
     const result = new Map<Filter, number>();
-    for (const f of FILTERS) result.set(f.key, base.filter((a) => matches(a, f.key)).length);
+    if (day) for (const f of FILTERS) result.set(f.key, base.filter((a) => matches(a, f.key, day)).length);
     return result;
-  }, [base]);
+  }, [base, day]);
   // Lista única pela hora de atuação, a manhã primeiro (como pedido pela operação).
   const items = useMemo(
     () =>
-      day ? base.filter((a) => !filter || matches(a, filter)).sort((x, y) => actingAt(x, day) - actingAt(y, day)) : [],
+      day
+        ? base.filter((a) => !filter || matches(a, filter, day)).sort((x, y) => actingAt(x, day) - actingAt(y, day))
+        : [],
     [base, filter, day],
   );
 

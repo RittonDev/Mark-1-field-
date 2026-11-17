@@ -236,5 +236,6 @@ const makeStyles = (c: Palette) =>
     permission: { gap: 6, backgroundColor: c.surface2, borderColor: tint(c.primary, "33") },
     permissionTitle: { fontSize: 14, fontWeight: "700", color: c.ink },
     accepted: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, minHeight: 44 },
-    acceptedText: { fontSize: 14, color: c.success, fontWeight: "700" },
+    // Texto neutro (cor só para problema); o check verde ao lado já diz que deu certo.
+    acceptedText: { fontSize: 14, color: c.ink, fontWeight: "700" },
   });

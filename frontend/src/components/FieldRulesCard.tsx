@@ -47,7 +47,12 @@ function problemsOf(v: Values): Partial<Record<Key, string>> {
 
 /** Regras do atendimento em campo: prazo de chegada e tempo na loja por chamado. */
 export function FieldRulesCard({ readOnly = false }: { readOnly?: boolean }) {
-  const rules = useQuery({ queryKey: ["settings", "field"], queryFn: () => api.get<FieldRules>("/settings/field") });
+  const rules = useQuery({
+    queryKey: ["settings", "field"],
+    queryFn: () => api.get<FieldRules>("/settings/field"),
+    // Voltar para a aba no meio da edição não relê: outra versão salva recriaria o formulário e apagaria o digitado.
+    refetchOnWindowFocus: false,
+  });
   return (
     <Card>
       <CardHeader

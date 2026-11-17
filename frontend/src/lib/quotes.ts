@@ -1,3 +1,4 @@
+import { dayKey } from "./format";
 import type { QuoteItem, QuoteItemKind, QuoteStatus } from "./types";
 
 /**
@@ -18,8 +19,8 @@ export const QUOTE_STATUS: Record<QuoteStatus, { label: string; className: strin
 function normalizeDecimal(text: string): string {
   const raw = text.replace(/R\$/gi, "").replace(/\s/g, "");
   if (raw.includes(",")) return raw.replace(/\./g, "").replace(",", ".");
-  // Sem vírgula, ponto em grupos de 3 é milhar ("1.000" = mil); fora disso, é decimal ("1.5").
-  if (/^-?\d{1,3}(\.\d{3})+$/.test(raw)) return raw.replace(/\./g, "");
+  // Sem vírgula, ponto em grupos de 3 é milhar ("1.000" = mil); fora disso, é decimal ("1.5", "0.500").
+  if (/^-?[1-9]\d{0,2}(\.\d{3})+$/.test(raw)) return raw.replace(/\./g, "");
   return raw;
 }
 
@@ -81,14 +82,18 @@ export function lineTotalCents(quantity: number, unitPrice: number): number {
   return Number((milli * cents + BigInt(500)) / BigInt(1000));
 }
 
-/** "AAAA-MM-DD" do dia no fuso de quem está usando (a validade é um dia do calendário). */
+/**
+ * "AAAA-MM-DD" do dia no fuso da operação (São Paulo). A validade é um dia do calendário e a API a
+ * confere nesse fuso: um computador em outro fuso, perto da meia-noite, veria outro dia.
+ */
 export function localDateISO(date: Date = new Date()): string {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  return dayKey(date);
 }
 
-/** Dia do calendário daqui a `days` dias ("AAAA-MM-DD"). */
+/** Dia do calendário `days` dias depois de hoje na operação ("AAAA-MM-DD"). */
 export function addDaysISO(days: number, from: Date = new Date()): string {
-  return localDateISO(new Date(from.getFullYear(), from.getMonth(), from.getDate() + days));
+  const [year, month, day] = localDateISO(from).split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
 }
 
 /** Validade padrão de um orçamento novo ou renovado. */

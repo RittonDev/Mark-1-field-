@@ -495,6 +495,22 @@ function Line({ icon, children }: { icon: React.ReactNode; children: React.React
   );
 }
 
+/** Foto da ficha; sem foto (ou com o link vencido), as iniciais. */
+function ApplicantPhoto({ name, url }: { name: string; url: string | null }) {
+  const src = absoluteApiUrl(url);
+  const [broken, setBroken] = useState(false);
+  return (
+    <div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-brand/10 text-lg font-semibold text-brand">
+      {src && !broken ? (
+        // eslint-disable-next-line @next/next/no-img-element -- link assinado da API
+        <img src={src} alt={`Foto de ${name}`} onError={() => setBroken(true)} className="size-full object-cover" />
+      ) : (
+        initials(name)
+      )}
+    </div>
+  );
+}
+
 /** Resultado da análise: o diálogo fica aberto para avisar o candidato pelo WhatsApp. */
 type Outcome = { kind: "approved"; name: string } | { kind: "rejected" };
 
@@ -698,14 +714,7 @@ function ApplicationDialog({ id, onClose }: { id: string; onClose: () => void })
       ) : (
         <div className="flex flex-col gap-5">
           <div className="flex items-center gap-4">
-            <div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-brand/10 text-lg font-semibold text-brand">
-              {a.photo_url ? (
-                // eslint-disable-next-line @next/next/no-img-element -- link assinado da API
-                <img src={absoluteApiUrl(a.photo_url) ?? undefined} alt={`Foto de ${a.full_name}`} className="size-full object-cover" />
-              ) : (
-                initials(a.full_name)
-              )}
-            </div>
+            <ApplicantPhoto name={a.full_name} url={a.photo_url} />
             <div className="min-w-0 text-sm">
               <Pill color={APPLICATION_STATE[a.status].color}>{APPLICATION_STATE[a.status].label}</Pill>
               {a.review_note ? <p className="mt-1.5 text-ink-muted">“{a.review_note}”</p> : null}

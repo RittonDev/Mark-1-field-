@@ -344,6 +344,11 @@ function FormEditor({ ticket, form }: { ticket: LocalTicket; form: TicketForm })
     const room = Math.max(1, (field.max_photos > 0 ? field.max_photos : 10) - count);
     setPhotoBusy(true);
     try {
+      // O Android pode fechar o app com a câmera aberta: as respostas já digitadas vão antes para a fila
+      // (cada envio leva todas as respostas e substitui o rascunho anterior).
+      if (touched && dirty) {
+        await enqueueFormAnswers(ticket.id, { form_id: form.id, answers: normalized, complete: false }).catch(() => undefined);
+      }
       const assets = await capturePhotos(
         source,
         { kind: "form", ticketId: ticket.id, formId: form.id, fieldId: field.id },

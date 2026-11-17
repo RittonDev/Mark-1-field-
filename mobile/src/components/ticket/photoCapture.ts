@@ -8,10 +8,22 @@ import { Platform } from "react-native";
 import { getKv, setKv } from "../../lib/db";
 import { askOpenSettings, notify } from "../../lib/dialogs";
 
+/**
+ * Pedido de peça que estava sendo preenchido quando a câmera abriu: se o Android fechar o app, a
+ * folha volta igual (descrição, quantidade, unidade, observação e as fotos já escolhidas).
+ */
+export interface PartDraft {
+  description: string;
+  quantity: string;
+  unit: string;
+  note: string;
+  photos: { uri: string; mimeType?: string | null }[];
+}
+
 export type CaptureTarget =
   | { kind: "loose"; ticketId: string }
   | { kind: "form"; ticketId: string; formId: string; fieldId: string }
-  | { kind: "part"; ticketId: string };
+  | { kind: "part"; ticketId: string; draft?: PartDraft };
 
 type StoredTarget = CaptureTarget & { at: string };
 

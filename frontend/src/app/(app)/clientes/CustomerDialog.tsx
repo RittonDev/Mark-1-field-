@@ -12,12 +12,13 @@ import {
   sameContacts,
   type ContactDraft,
 } from "@/components/ContactList";
-import { cleanDocument, documentError, maskZip, UFS } from "@/components/LocationDialog";
+import { cleanDocument, documentError, UFS } from "@/components/LocationDialog";
 import { useToast } from "@/components/Toaster";
 import { Button, Checkbox, Dialog, ErrorBox, Field, Input, SectionTitle, Select, Textarea } from "@/components/ui";
 import { ApiError, api, errorMessage } from "@/lib/api";
 import { formatDocument } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
+import { maskCep } from "@/lib/onboarding";
 import type { ContactEntry, Customer } from "@/lib/types";
 
 type FormState = {
@@ -42,7 +43,7 @@ function initialForm(customer: Customer | null): FormState {
     district: customer?.district ?? "",
     city: customer?.city ?? "",
     state: (customer?.state ?? "").toUpperCase(),
-    zip_code: maskZip(customer?.zip_code ?? ""),
+    zip_code: maskCep(customer?.zip_code ?? ""),
   };
 }
 
@@ -262,7 +263,7 @@ export function CustomerDialog({ customer, onClose }: { customer: Customer | nul
             <Field label="CEP" className="sm:col-span-2">
               <Input
                 value={form.zip_code}
-                onChange={(e) => set("zip_code", maskZip(e.target.value))}
+                onChange={(e) => set("zip_code", maskCep(e.target.value))}
                 inputMode="numeric"
                 placeholder="00000-000"
                 maxLength={9}

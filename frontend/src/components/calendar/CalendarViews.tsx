@@ -7,14 +7,17 @@ import { useNow } from "@/components/useNow";
 import {
   type Placed,
   eventsOnDay,
-  hhmm,
+  formatDay,
+  hoursIntoDay,
   layoutDay,
   sameDay,
   technicianColor,
+  toWall,
   UNASSIGNED_COLOR,
   WEEKDAYS_SHORT,
 } from "@/lib/calendar";
 import { STATUS } from "@/lib/constants";
+import { formatTime } from "@/lib/format";
 import type { CalendarEvent } from "@/lib/types";
 
 export interface ViewProps {
@@ -48,7 +51,7 @@ function label(event: CalendarEvent): string {
   const where = [event.customer?.name, event.location?.name].filter(Boolean).join(" · ");
   const conflict = event.conflict_with.length ? " · CONFLITO DE HORÁRIO" : "";
   const done = isDone(event) ? ` · ${STATUS[event.status].label.toLowerCase()}` : "";
-  return `${event.code} · ${hhmm(new Date(event.start))}–${hhmm(new Date(event.end))} · ${who}${where ? ` · ${where}` : ""}${done}${conflict}`;
+  return `${event.code} · ${formatTime(event.start)}–${formatTime(event.end)} · ${who}${where ? ` · ${where}` : ""}${done}${conflict}`;
 }
 
 // ------------------------------------------------------------------------- mês
@@ -59,7 +62,9 @@ export function MonthView({
   onDay,
   ...props
 }: ViewProps & { days: Date[]; month: number; onDay: (day: Date) => void }) {
-  const today = new Date();
+  // O dia de hoje na operação (vira à meia-noite de Brasília, com a tela aberta).
+  const now = useNow(60_000);
+  const today = toWall(now);
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="grid shrink-0 grid-cols-7 border-b border-line text-center text-xs font-bold tracking-wide text-ink-muted uppercase">
@@ -74,7 +79,7 @@ export function MonthView({
         {days.map((day) => {
           const list = eventsOnDay(props.events, day).sort((a, b) => a.start.localeCompare(b.start));
           const shown = list.slice(0, 3);
-          const outside = day.getMonth() !== month;
+          const outside = day.getUTCMonth() !== month;
           const clashes = list.filter((e) => e.conflict_with.length > 0).length;
           return (
             <div
@@ -88,7 +93,7 @@ export function MonthView({
                 type="button"
                 onClick={() => onDay(day)}
                 className="flex items-center justify-between rounded px-1 text-xs hover:bg-surface-2"
-                aria-label={`Ver o dia ${day.toLocaleDateString("pt-BR")} por técnico`}
+                aria-label={`Ver o dia ${formatDay(day, { day: "numeric", month: "long" })} por técnico${clashes ? `, ${clashes} com conflito de horário` : ""}`}
               >
                 <span
                   className={clsx(
@@ -100,7 +105,7 @@ export function MonthView({
                         : "text-ink",
                   )}
                 >
-                  {day.getDate()}
+                  {day.getUTCDate()}
                 </span>
                 {clashes ? (
                   <span className="inline-flex items-center gap-0.5 font-medium text-red-600 dark:text-red-400">
@@ -149,7 +154,7 @@ function EventChip({ event, colors, onOpen }: ViewProps & { event: CalendarEvent
       style={eventColors(event, color, 10)}
     >
       {conflict ? <AlertTriangle className="size-3 shrink-0 text-red-600 dark:text-red-400" /> : null}
-      <span className="shrink-0 font-medium tabular-nums">{hhmm(new Date(event.start))}</span>
+      <span className="shrink-0 font-medium tabular-nums">{formatTime(event.start)}</span>
       <span className="truncate">
         {event.code.replace("OS-", "")} · {event.assignee?.name.split(" ")[0] ?? "—"}
       </span>
@@ -186,9 +191,10 @@ export function TimeGrid({
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrolledFor = useRef<string | null>(null);
   const laid = columns.map((c) => layoutDay(c.events, c.day));
-  const first = laid.flat().reduce((min, p) => Math.min(min, p.start.getHours()), 7);
-  const nowDate = new Date(now);
-  const showsToday = columns.some((c) => sameDay(c.day, nowDate));
+  const first = laid.flat().reduce((min, p) => Math.min(min, p.start.getUTCHours()), 7);
+  // Agora no relógio da operação: a linha vermelha fica na hora de Brasília, como as visitas.
+  const nowWall = toWall(now);
+  const showsToday = columns.some((c) => sameDay(c.day, nowWall));
 
   // Rola uma vez por período: com hoje à vista, até uma hora antes de agora; senão até a primeira
   // visita (ou 7 h). Uma atualização em tempo real não mexe na rolagem de quem está olhando.
@@ -197,12 +203,12 @@ export function TimeGrid({
     const key = scrollKey ?? "grade";
     if (!el || !ready || scrolledFor.current === key) return;
     scrolledFor.current = key;
-    const hour = showsToday ? new Date().getHours() - 1 : first - 1;
+    const hour = showsToday ? toWall(Date.now()).getUTCHours() - 1 : first - 1;
     el.scrollTop = Math.max(0, hour) * HOUR_PX;
   }, [scrollKey, ready, showsToday, first]);
 
   const hours = Array.from({ length: 24 }, (_, h) => h);
-  const nowTop = (nowDate.getHours() + nowDate.getMinutes() / 60) * HOUR_PX;
+  const nowTop = hoursIntoDay(nowWall) * HOUR_PX;
   // Largura mínima por coluna: a semana cabe no notebook e, no celular, rola de lado com as horas fixas.
   const minWidth = `${56 + columns.length * (columns.length > 7 ? 150 : 88)}px`;
 
@@ -230,7 +236,7 @@ export function TimeGrid({
               {hours.map((h) => (
                 <div key={h} className="border-b border-line/70" style={{ height: HOUR_PX }} />
               ))}
-              {sameDay(c.day, nowDate) ? (
+              {sameDay(c.day, nowWall) ? (
                 <div className="pointer-events-none absolute inset-x-0 z-26 flex items-center" style={{ top: nowTop }}>
                   <span className="-ml-1 size-2 rounded-full bg-red-500" />
                   <span className="h-px flex-1 bg-red-500" />
@@ -251,7 +257,7 @@ function GridEvent({ placed, colors, onOpen }: Omit<ViewProps, "events"> & { pla
   const { event, start, end, lane, lanes } = placed;
   const color = colorOf(event, colors);
   const conflict = event.conflict_with.length > 0;
-  const top = (start.getHours() + start.getMinutes() / 60) * HOUR_PX;
+  const top = hoursIntoDay(start) * HOUR_PX;
   const height = Math.max(22, ((end.getTime() - start.getTime()) / 3_600_000) * HOUR_PX - 2);
   // OS no mesmo horário: lado a lado viravam tiras ilegíveis numa coluna de ~100 px
   // ("0... S..."). Em cascata cada uma entra 14 px à direita e por cima da anterior: a de cima fica
@@ -289,7 +295,7 @@ function GridEvent({ placed, colors, onOpen }: Omit<ViewProps, "events"> & { pla
       <span className="flex items-center gap-1 font-semibold">
         {conflict ? <AlertTriangle className="size-3 shrink-0 text-red-600 dark:text-red-400" /> : null}
         <span className="truncate">
-          {hhmm(new Date(event.start))} {event.code}
+          {formatTime(event.start)} {event.code}
         </span>
       </span>
       {height > 34 ? <span className="block truncate">{event.assignee?.name ?? "Sem técnico"}</span> : null}

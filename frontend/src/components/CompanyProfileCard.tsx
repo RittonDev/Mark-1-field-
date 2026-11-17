@@ -37,6 +37,8 @@ export function CompanyProfileCard({ readOnly = false }: { readOnly?: boolean })
   const profile = useQuery({
     queryKey: ["settings", "company"],
     queryFn: () => api.get<CompanyProfile>("/settings/company"),
+    // Voltar para a aba no meio da edição não relê: outra versão salva recriaria o formulário e apagaria o digitado.
+    refetchOnWindowFocus: false,
   });
   return (
     <Card>

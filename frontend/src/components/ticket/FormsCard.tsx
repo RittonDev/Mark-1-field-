@@ -2,7 +2,8 @@
 
 import { useMutation, useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
-import { Camera, CheckCircle2, ClipboardList, ExternalLink, FileSignature, FileText, Lock, Plus, Trash2, X } from "lucide-react";
+import { Camera, CheckCircle2, ClipboardList, ExternalLink, FileSignature, FileText, Info, Lock, Plus, Trash2, X } from "lucide-react";
+import Link from "next/link";
 import { useId, useState } from "react";
 import { useConfirm } from "@/components/Confirm";
 import { FILE_KIND_LABEL, fileKind, formAnchor } from "@/components/report/shared";
@@ -10,10 +11,11 @@ import { useToast } from "@/components/Toaster";
 import { Button, buttonClassName, Card, CardHeader, Checkbox, Dialog, ErrorBox, Field, Input, Pill, Select, Textarea } from "@/components/ui";
 import { absoluteApiUrl, api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { canManageTickets, STATUS } from "@/lib/constants";
-import { formatDateTime } from "@/lib/format";
+import { canManageTickets } from "@/lib/constants";
+import { formatDate, formatDateTime } from "@/lib/format";
 import type { Attachment, FormAnswer, FormField, FormTemplate, TicketDetail, TicketForm } from "@/lib/types";
 import { AttachmentImage, uploadProblem, useTicketAttachments } from "./AttachmentsTab";
+import { previewPath } from "./ReportLinkCard";
 import { useInvalidateTicket, useTicketErrorHandler } from "./useConflictHandler";
 
 // Cinza: ninguém começou; azul: em preenchimento; verde: concluído.
@@ -85,7 +87,12 @@ export function FormsCard({ ticket }: { ticket: TicketDetail }) {
   const attachments = useTicketAttachments(ticket.id);
   const [adding, setAdding] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
-  const final = STATUS[ticket.status].final || ticket.status === "resolved";
+  // A gestão mexe nos formulários a qualquer momento. Na OS concluída ainda entra o checklist que chegou
+  // depois (ex.: pelo WhatsApp), como opcional: obrigatório e assinatura já não travam nada. Cancelada, não.
+  const cancelled = ticket.status === "cancelled";
+  const finished = ticket.status === "resolved" || ticket.status === "closed";
+  const canChange = manager && !cancelled;
+  const canRequire = canChange && !finished;
 
   const photosOf = (formId: string) => (attachments.data ?? []).filter((a) => a.form_id === formId);
   const signature = (attachments.data ?? []).find((a) => a.id === ticket.signature_attachment_id);
@@ -116,7 +123,7 @@ export function FormsCard({ ticket }: { ticket: TicketDetail }) {
         title="Formulários e assinatura"
         description="O técnico preenche no app. A OS só é concluída com os obrigatórios prontos e a assinatura, quando exigida."
         actions={
-          manager && !final ? (
+          canChange ? (
             <Button size="sm" onClick={() => setAdding(true)}>
               <Plus className="size-4" />
               Adicionar
@@ -146,7 +153,7 @@ export function FormsCard({ ticket }: { ticket: TicketDetail }) {
                   </span>
                 </button>
                 <Pill color={status.color}>{status.label}</Pill>
-                {manager && !final ? (
+                {canRequire ? (
                   <button
                     type="button"
                     onClick={() => toggleRequired.mutate(form)}
@@ -164,20 +171,24 @@ export function FormsCard({ ticket }: { ticket: TicketDetail }) {
                 ) : (
                   <span className="text-xs text-ink-muted">{form.required ? "Obrigatório" : "Opcional"}</span>
                 )}
-                {manager && !final ? (
+                {canChange ? (
                   <button
                     type="button"
                     onClick={async () => {
                       const ok = await confirm({
                         title: "Remover este formulário da OS?",
-                        description: `“${form.name}” sai desta OS, com as respostas e as fotos dele.`,
+                        description: `“${form.name}” sai desta OS com as respostas e as fotos dele${
+                          finished ? ", e deixa de aparecer no relatório do cliente" : ""
+                        }. Não dá para desfazer.`,
                         confirmLabel: "Remover",
                         tone: "danger",
                       });
                       if (ok) remove.mutate(form);
                     }}
-                    className="rounded-md p-1 text-ink-muted hover:bg-surface-2 hover:text-red-600"
+                    disabled={remove.isPending && remove.variables?.id === form.id}
+                    className="rounded-md p-1.5 text-ink-muted hover:bg-surface-2 hover:text-red-600 disabled:opacity-40"
                     aria-label={`Remover ${form.name}`}
+                    title="Remover da OS"
                   >
                     <Trash2 className="size-4" />
                   </button>
@@ -214,7 +225,7 @@ export function FormsCard({ ticket }: { ticket: TicketDetail }) {
               : "Assinatura do responsável no local: não exigida."}
           </p>
         )}
-        {manager && !final && !ticket.signed_at ? (
+        {canRequire && !ticket.signed_at ? (
           <Checkbox
             label="Exigir assinatura"
             checked={ticket.signature_required}
@@ -224,7 +235,7 @@ export function FormsCard({ ticket }: { ticket: TicketDetail }) {
         ) : null}
       </div>
 
-      {adding ? <AddFormDialog ticket={ticket} onClose={() => setAdding(false)} /> : null}
+      {adding ? <AddFormDialog ticket={ticket} finished={finished} onClose={() => setAdding(false)} /> : null}
       {opened ? (
         <FormDialog
           ticket={ticket}
@@ -238,10 +249,12 @@ export function FormsCard({ ticket }: { ticket: TicketDetail }) {
   );
 }
 
-function AddFormDialog({ ticket, onClose }: { ticket: TicketDetail; onClose: () => void }) {
+function AddFormDialog({ ticket, finished, onClose }: { ticket: TicketDetail; finished: boolean; onClose: () => void }) {
   const invalidate = useInvalidateTicket(ticket.id);
+  const { toast } = useToast();
   const [templateId, setTemplateId] = useState("");
-  const [required, setRequired] = useState(true);
+  // Na OS concluída o formulário entra como registro, sempre opcional (a API também garante).
+  const [required, setRequired] = useState(!finished);
   const templates = useQuery({
     queryKey: ["form-templates", "active"],
     queryFn: () => api.get<FormTemplate[]>("/form-templates", { active: true }),
@@ -252,9 +265,10 @@ function AddFormDialog({ ticket, onClose }: { ticket: TicketDetail; onClose: () 
   });
   const attached = new Set(ticket.forms.map((f) => f.template_id));
   const add = useMutation({
-    mutationFn: (id: string) => api.post(`/tickets/${ticket.id}/forms`, { template_id: id, required }),
-    onSuccess: () => {
+    mutationFn: (id: string) => api.post<TicketForm>(`/tickets/${ticket.id}/forms`, { template_id: id, required: required && !finished }),
+    onSuccess: (form) => {
       invalidate();
+      toast({ title: `${form.name} adicionado`, tone: "success" });
       onClose();
     },
   });
@@ -264,8 +278,13 @@ function AddFormDialog({ ticket, onClose }: { ticket: TicketDetail; onClose: () 
     <Dialog
       open
       onClose={onClose}
+      busy={add.isPending}
       title="Adicionar formulário à OS"
-      description="O técnico vê o formulário no app e preenche no atendimento."
+      description={
+        finished
+          ? "OS concluída: o formulário entra como registro (ex.: checklist que chegou pelo WhatsApp) e a central preenche."
+          : "O técnico vê o formulário no app e preenche no atendimento."
+      }
       footer={
         <>
           <Button onClick={onClose}>Cancelar</Button>
@@ -313,16 +332,29 @@ function AddFormDialog({ ticket, onClose }: { ticket: TicketDetail; onClose: () 
             ))}
           </Select>
         </Field>
-        {templates.data && templates.data.length === 0 ? (
+        {templates.error ? (
+          <ErrorBox message={`Não foi possível carregar os modelos: ${errorMessage(templates.error)}`} onRetry={() => void templates.refetch()} />
+        ) : templates.data && templates.data.length === 0 ? (
           <p className="text-sm text-ink-muted">
-            Nenhum modelo ainda. Crie em <a href="/formularios" className="text-brand hover:underline">Formulários</a>.
+            Nenhum modelo ainda. Crie em{" "}
+            <Link href="/formularios" className="font-medium text-brand hover:underline">
+              Formulários
+            </Link>
+            .
           </p>
         ) : null}
-        <Checkbox
-          label="Obrigatório: a OS só é concluída (e a assinatura só é colhida) com ele preenchido"
-          checked={required}
-          onChange={setRequired}
-        />
+        {finished ? (
+          <p className="flex items-start gap-1.5 text-xs text-ink-muted">
+            <Info className="mt-px size-3.5 shrink-0" />
+            Entra como opcional: a OS já foi concluída, então não trava nada.
+          </p>
+        ) : (
+          <Checkbox
+            label="Obrigatório: a OS só é concluída (e a assinatura só é colhida) com ele preenchido"
+            checked={required}
+            onChange={setRequired}
+          />
+        )}
         {add.error ? <ErrorBox message={errorMessage(add.error)} /> : null}
       </div>
     </Dialog>
@@ -377,7 +409,6 @@ function FormDialog({
       api.put<TicketForm>(`/tickets/${ticket.id}/forms/${form.id}/answers`, { answers: changes, complete }),
     onSuccess: (saved, { complete, partial }) => {
       invalidate();
-      setError(null);
       if (complete) {
         toast({ title: `${form.name} concluído`, tone: "success" });
         onClose();
@@ -386,7 +417,13 @@ function FormDialog({
       setAnswers((current) => rebase(current, base, saved.answers));
       setBase(saved.answers);
       setSeenKey(JSON.stringify(saved.answers));
-      if (!partial) toast({ title: "Respostas salvas", tone: "success" });
+      if (partial) {
+        // Gravado na tentativa de concluir: o aviso do que falta continua na tela.
+        toast({ title: "Respostas salvas", description: "Complete o que falta para concluir o formulário.", tone: "info" });
+        return;
+      }
+      setError(null);
+      toast({ title: "Respostas salvas", tone: "success" });
     },
     onError: (e) => {
       invalidate(); // ao concluir, as respostas são gravadas mesmo quando falta algo: a releitura acerta a tela
@@ -419,25 +456,15 @@ function FormDialog({
       return next;
     });
 
-  const requestClose = async () => {
-    if (
-      dirty &&
-      !(await confirm({
-        title: "Descartar as alterações?",
-        description: "O que você respondeu aqui ainda não foi salvo.",
-        confirmLabel: "Descartar",
-        tone: "danger",
-      }))
-    ) {
-      return;
-    }
-    onClose();
-  };
-
   const askRemovePhoto = async (photo: Attachment, field: FormField, index: number) => {
+    // Concluído continua concluído enquanto o campo tiver as fotos que pede (correção da central).
+    const need = photosNeeded(field);
+    const reopens = form.status === "completed" && fieldPhotos(field.id).length - 1 < need;
     const ok = await confirm({
       title: "Remover esta foto?",
-      description: `A foto ${index + 1} de “${field.label}” sai do formulário${form.status === "completed" ? ", que volta para Em preenchimento" : ""}. Não dá para desfazer.`,
+      description: `A foto ${index + 1} de “${field.label}” sai do formulário e do relatório do cliente${
+        reopens ? `. O campo pede ${need} ${need === 1 ? "foto" : "fotos"}: o formulário volta para Em preenchimento` : ""
+      }. Não dá para desfazer.`,
       confirmLabel: "Remover",
       tone: "danger",
     });
@@ -458,19 +485,19 @@ function FormDialog({
     first?.scrollIntoView({ block: "center", behavior: reduce ? "auto" : "smooth" });
     first?.querySelector<HTMLElement>("input, select, textarea, button")?.focus({ preventScroll: true });
     // O que já foi respondido não se perde: grava agora, sem concluir.
-    if (dirty) {
-      save.mutate({ complete: false, partial: true });
-      toast({ title: "Respostas salvas", description: "Complete o que falta para concluir o formulário.", tone: "info" });
-    }
+    if (dirty) save.mutate({ complete: false, partial: true });
   };
 
-  const reportHref = ticket.report_link ? `${ticket.report_link.path}?preview=1#${formAnchor(form.name)}` : null;
+  const reportHref = ticket.report_link ? `${previewPath(ticket.report_link)}#${formAnchor(form.name)}` : null;
 
   return (
     <Dialog
       open
       size="lg"
-      onClose={requestClose}
+      onClose={onClose}
+      // Clique fora, Esc ou o X com respostas não salvas perguntam antes de descartar; salvando, não fecha.
+      dirty={dirty}
+      busy={save.isPending}
       title={form.name}
       description={
         <span className="inline-flex flex-wrap items-center gap-2">
@@ -493,7 +520,7 @@ function FormDialog({
           ) : null}
           {canFill ? (
             <>
-              <Button onClick={requestClose}>Fechar</Button>
+              <Button onClick={onClose}>{dirty ? "Cancelar" : "Fechar"}</Button>
               <Button disabled={!dirty} loading={save.isPending && !save.variables?.complete} onClick={() => save.mutate({ complete: false })}>
                 Salvar
               </Button>
@@ -518,6 +545,8 @@ function FormDialog({
             );
           }
           const invalid = lackingIds.has(field.id);
+          const labelId = `${domId(field.id)}-label`;
+          const helpId = field.help ? `${domId(field.id)}-help` : undefined;
           return (
             <div
               key={field.id}
@@ -527,11 +556,15 @@ function FormDialog({
                 invalid && "-mx-2 bg-red-50/70 px-2 py-2 ring-1 ring-red-300 dark:bg-red-500/10 dark:ring-red-500/40",
               )}
             >
-              <span className="text-sm font-semibold text-ink">
+              <span id={labelId} className="text-sm font-semibold text-ink">
                 {field.label}
-                {field.required || (field.type === "photo" && field.min_photos > 0) ? <span className="text-red-500"> *</span> : null}
+                {field.required || (field.type === "photo" && field.min_photos > 0) ? <span className="text-red-600 dark:text-red-400"> *</span> : null}
               </span>
-              {field.help ? <span className="-mt-1 text-xs text-ink-muted">{field.help}</span> : null}
+              {field.help ? (
+                <span id={helpId} className="-mt-1 text-xs text-ink-muted">
+                  {field.help}
+                </span>
+              ) : null}
               {field.type === "photo" ? (
                 <PhotoField
                   field={field}
@@ -543,7 +576,14 @@ function FormDialog({
                   onProblem={setError}
                 />
               ) : canFill ? (
-                <AnswerInput field={field} value={answers[field.id]} invalid={invalid} onChange={(v) => set(field, v)} />
+                <AnswerInput
+                  field={field}
+                  value={answers[field.id]}
+                  invalid={invalid}
+                  labelledBy={labelId}
+                  describedBy={helpId}
+                  onChange={(v) => set(field, v)}
+                />
               ) : (
                 <p className="text-sm text-ink">{formatAnswer(field, form.answers[field.id])}</p>
               )}
@@ -564,7 +604,8 @@ function formatAnswer(field: FormField, value: FormAnswer | undefined): string {
   if (value === undefined || value === "") return "—";
   if (typeof value === "boolean") return field.type === "confirm" ? (value ? "Confirmado" : "—") : value ? "Sim" : "Não";
   if (Array.isArray(value)) return value.join(", ");
-  if (field.type === "date") return new Date(`${value}T12:00:00`).toLocaleDateString("pt-BR");
+  if (typeof value === "number") return value.toLocaleString("pt-BR", { maximumFractionDigits: 6 });
+  if (field.type === "date") return formatDate(value);
   return String(value);
 }
 
@@ -575,50 +616,39 @@ function AnswerInput({
   field,
   value,
   invalid,
+  labelledBy,
+  describedBy,
   onChange,
 }: {
   field: FormField;
   value: FormAnswer | undefined;
   invalid: boolean;
+  /** Id da pergunta (o rótulo do campo) e da dica, para o leitor de tela ler junto com o campo. */
+  labelledBy: string;
+  describedBy?: string;
   onChange: (v: FormAnswer | undefined) => void;
 }) {
-  const invalidClass = invalid ? "border-red-400 dark:border-red-500/60" : undefined;
+  // A borda vermelha vem do aria-invalid (padrão dos campos).
+  const a11y = { "aria-labelledby": labelledBy, "aria-describedby": describedBy, "aria-invalid": invalid || undefined };
   switch (field.type) {
     case "textarea":
-      return (
-        <Textarea
-          rows={3}
-          maxLength={TEXT_MAX}
-          aria-invalid={invalid || undefined}
-          className={invalidClass}
-          value={(value as string) ?? ""}
-          onChange={(e) => onChange(e.target.value)}
-        />
-      );
+      return <Textarea rows={3} maxLength={TEXT_MAX} {...a11y} value={(value as string) ?? ""} onChange={(e) => onChange(e.target.value)} />;
     case "number":
       return (
         <Input
           type="number"
           inputMode="decimal"
-          aria-invalid={invalid || undefined}
-          className={clsx("w-40", invalidClass)}
+          {...a11y}
+          className="w-40"
           value={value === undefined ? "" : String(value)}
           onChange={(e) => onChange(e.target.value === "" ? undefined : Number(e.target.value))}
         />
       );
     case "date":
-      return (
-        <Input
-          type="date"
-          aria-invalid={invalid || undefined}
-          className={clsx("w-48", invalidClass)}
-          value={(value as string) ?? ""}
-          onChange={(e) => onChange(e.target.value)}
-        />
-      );
+      return <Input type="date" {...a11y} className="w-48" value={(value as string) ?? ""} onChange={(e) => onChange(e.target.value)} />;
     case "yes_no":
       return (
-        <div className="flex gap-2">
+        <div role="group" aria-labelledby={labelledBy} aria-describedby={describedBy} className="flex gap-2">
           {[true, false].map((v) => (
             <button
               key={String(v)}
@@ -633,15 +663,14 @@ function AnswerInput({
         </div>
       );
     case "confirm":
-      return <Checkbox label="Confirmo" checked={value === true} onChange={(v) => onChange(v ? true : undefined)} />;
+      return (
+        <div role="group" aria-labelledby={labelledBy} aria-describedby={describedBy}>
+          <Checkbox label="Confirmo" checked={value === true} onChange={(v) => onChange(v ? true : undefined)} />
+        </div>
+      );
     case "choice":
       return (
-        <Select
-          aria-invalid={invalid || undefined}
-          className={invalidClass}
-          value={(value as string) ?? ""}
-          onChange={(e) => onChange(e.target.value || undefined)}
-        >
+        <Select {...a11y} value={(value as string) ?? ""} onChange={(e) => onChange(e.target.value || undefined)}>
           <option value="">Selecione...</option>
           {field.options.map((o) => (
             <option key={o} value={o}>
@@ -653,7 +682,7 @@ function AnswerInput({
     case "multi_choice": {
       const selected = Array.isArray(value) ? value : [];
       return (
-        <div className="flex flex-wrap gap-2">
+        <div role="group" aria-labelledby={labelledBy} aria-describedby={describedBy} className="flex flex-wrap gap-2">
           {field.options.map((o) => {
             const on = selected.includes(o);
             return (
@@ -672,15 +701,7 @@ function AnswerInput({
       );
     }
     default:
-      return (
-        <Input
-          maxLength={TEXT_MAX}
-          aria-invalid={invalid || undefined}
-          className={invalidClass}
-          value={(value as string) ?? ""}
-          onChange={(e) => onChange(e.target.value)}
-        />
-      );
+      return <Input maxLength={TEXT_MAX} {...a11y} value={(value as string) ?? ""} onChange={(e) => onChange(e.target.value)} />;
   }
 }
 

@@ -461,7 +461,8 @@ const makeStyles = (c: Palette) =>
     },
     segmentText: { fontSize: 13, fontWeight: "600", color: c.inkMuted },
     segmentTextActive: { color: c.ink },
-    segmentCount: { fontWeight: "500", color: c.inkSubtle, fontVariant: ["tabular-nums"] },
+    // ink-muted: o ink-subtle fica abaixo de 4,5:1 no cinza do trilho (#ECEEF1) no modo claro.
+    segmentCount: { fontWeight: "500", color: c.inkMuted, fontVariant: ["tabular-nums"] },
     empty: { alignItems: "center", paddingVertical: 40, paddingHorizontal: 24, gap: 8 },
     emptyIcon: {
       width: 44,

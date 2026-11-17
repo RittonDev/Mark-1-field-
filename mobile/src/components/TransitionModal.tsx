@@ -8,7 +8,7 @@ import { STATUS } from "../lib/constants";
 import { getAttachmentsCache, listPhotos, listSignatures, listTickets } from "../lib/db";
 import { dayMonth, dayOffset } from "../lib/field";
 import { haptic } from "../lib/haptics";
-import { fieldActionLabel } from "../lib/progress";
+import { fieldActionLabel, PAUSED_STATUSES } from "../lib/progress";
 import { useSession } from "../lib/session";
 import { showSuccess } from "../lib/success";
 import { enqueueTransition, isOnline, queuePhoto, useSyncStatus } from "../lib/sync";
@@ -31,11 +31,20 @@ const FIELD_HINT: Partial<Record<TicketStatus, string>> = {
   in_progress: "Registra sua chegada e começa a contar o tempo na loja.",
 };
 const RESUME_HINT = "Volta a contar o tempo do atendimento.";
+/** Nova visita a uma OS já atendida: as horas do chamado usadas antes continuam contando. */
+const REVISIT_HINT = "Registra a chegada desta visita. O tempo na loja segue de onde parou na visita anterior.";
 
 /** Solução curta demais ("ok") não diz nada ao cliente no relatório. */
 const MIN_RESOLUTION = 10;
 /** Acima disso (descontada a imprecisão do GPS), o técnico provavelmente ainda não está na loja. */
 const FAR_METERS = 1000;
+
+/** Frase da confirmação: retomada depois de uma pausa, nova visita ou a primeira chegada. */
+function fieldHint(ticket: LocalTicket, to: TicketStatus): string {
+  if (to === "in_progress" && PAUSED_STATUSES.includes(ticket.status)) return RESUME_HINT;
+  if (to === "in_progress" && ticket.arrived_at) return REVISIT_HINT;
+  return FIELD_HINT[to] ?? STATUS[to].description;
+}
 
 // Texto da solução digitado e não enviado (o modal fechou pelo voltar): volta ao reabrir.
 const resolutionDrafts = new Map<string, string>();
@@ -244,7 +253,7 @@ export function TransitionModal({
               {label}
             </Text>
             <Flow ticket={ticket} to={to} />
-            <Text style={styles.description}>{to === "in_progress" && ticket.arrived_at ? RESUME_HINT : (FIELD_HINT[to] ?? STATUS[to].description)}</Text>
+            <Text style={styles.description}>{fieldHint(ticket, to)}</Text>
           </View>
           {warnings}
           {locationBlock}
@@ -265,7 +274,11 @@ export function TransitionModal({
 
   async function takePhoto() {
     const assets = await capturePhotos("camera", { kind: "loose", ticketId: ticket.id });
-    for (const asset of assets) await queuePhoto(ticket.id, asset.uri, asset.mimeType);
+    try {
+      for (const asset of assets) await queuePhoto(ticket.id, asset.uri, asset.mimeType);
+    } catch (e) {
+      setError(`Não foi possível guardar a foto: ${errorMessage(e)}`);
+    }
   }
 
   return (

@@ -196,6 +196,8 @@ function SlaCard({ editable }: { editable: boolean }) {
   const policies = useQuery({
     queryKey: ["sla-policies"],
     queryFn: () => api.get<SlaPolicy[]>("/sla-policies"),
+    // Voltar para a aba no meio da edição não relê: outra versão salva recriaria a linha e apagaria o digitado.
+    refetchOnWindowFocus: false,
   });
   const sorted = useMemo(() => {
     const rank = (p: TicketPriority) => PRIORITY_ORDER.indexOf(p);
@@ -511,20 +513,18 @@ function StatusFlowCard() {
   return (
     <Card>
       <details className="group">
-        <summary className="flex cursor-pointer list-none items-start justify-between gap-3 rounded-xl px-5 py-3.5 focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none [&::-webkit-details-marker]:hidden">
-          <span className="flex min-w-0 gap-2.5">
-            <span aria-hidden className="mt-[3px] h-3.5 w-[3px] shrink-0 rounded-full bg-linear-to-b from-brand to-brand-cyan" />
-            <span className="min-w-0">
-              <h2 className="text-[15px] leading-5 font-bold tracking-[-0.01em] text-ink">Fluxo de status</h2>
-              <span className="mt-0.5 block text-xs text-ink-muted">
-                Para onde cada status pode ir (regra do sistema; referência para a equipe).
-              </span>
-            </span>
-          </span>
-          <span className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-ink-muted">
+        {/* Grade com o título direto no <summary> (um título dentro de <span> não é HTML válido), no
+            mesmo desenho do CardHeader: marca da seção, título e descrição, e o "Ver fluxo" à direita. */}
+        <summary className="grid cursor-pointer list-none grid-cols-[3px_minmax(0,1fr)_auto] items-start gap-x-2.5 rounded-xl px-5 py-3.5 focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none [&::-webkit-details-marker]:hidden">
+          <span aria-hidden className="mt-[3px] h-3.5 w-[3px] rounded-full bg-linear-to-b from-brand to-brand-cyan" />
+          <h2 className="text-[15px] leading-5 font-bold tracking-[-0.01em] text-ink">Fluxo de status</h2>
+          <span className="row-span-2 inline-flex items-center gap-1 self-center text-xs font-semibold text-ink-muted">
             <span className="group-open:hidden">Ver fluxo</span>
             <span className="hidden group-open:inline">Esconder</span>
-            <ChevronRight className="size-4 transition-transform duration-150 group-open:rotate-90" />
+            <ChevronRight aria-hidden className="size-4 transition-transform duration-150 group-open:rotate-90" />
+          </span>
+          <span className="col-start-2 mt-0.5 text-xs text-ink-muted">
+            Para onde cada status pode ir (regra do sistema; referência para a equipe).
           </span>
         </summary>
         <div className="border-t border-line">

@@ -89,6 +89,8 @@ export default function AccountScreen() {
   const registration = getDeviceRegistration();
   const [syncing, setSyncing] = useState(false);
   const [leaving, setLeaving] = useState(false);
+  // O que a tela diz durante o Sair: enviando os itens primeiro ("Enviar e sair") ou saindo.
+  const [leavingText, setLeavingText] = useState("");
   const [revoking, setRevoking] = useState(false);
   const themePreference = useThemePreference();
   const tracking = useTracking();
@@ -138,6 +140,7 @@ export default function AccountScreen() {
     if (choice === "cancel") return;
     setLeaving(true);
     if (choice === "send") {
+      setLeavingText("Enviando os itens antes de sair…");
       await requestSync({ manual: true });
       // Sem conseguir conferir, vale o que havia antes: pergunta de novo em vez de sair calado.
       const { ops, photos } = await countPending().catch(() => ({ ops: count, photos: 0 }));
@@ -154,6 +157,7 @@ export default function AccountScreen() {
       }
     }
     // Com a sessão encerrada, o Stack.Protected do layout leva para o login.
+    setLeavingText(tracking.shift ? "Encerrando a jornada e saindo…" : "Saindo…");
     try {
       await logout();
     } catch (e) {
@@ -371,7 +375,7 @@ export default function AccountScreen() {
 
       {leaving ? (
         <Text style={styles.leaving} accessibilityLiveRegion="polite">
-          Encerrando a jornada e saindo…
+          {leavingText}
         </Text>
       ) : null}
       <Button title="Sair da conta" variant="danger" onPress={() => void confirmLogout()} loading={leaving} disabled={revoking} />

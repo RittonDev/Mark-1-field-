@@ -297,6 +297,13 @@ async def commit_and_publish(db: AsyncSession) -> None:
 
     await db.commit()
     pending: list[PendingEvent] = db.info.pop(_PENDING_KEY, [])
+    # Uma operação desfeita no meio do lote do sync (SAVEPOINT) deixa a OS expirada na sessão. O
+    # evento de outra operação da mesma OS, já gravada, lê a OS aqui: relê antes (ler um atributo
+    # expirado fora de um await dá erro, e o lote inteiro voltava 500 depois de gravado).
+    for ticket in {id(ev.ticket): ev.ticket for ev in pending}.values():
+        state = sa_inspect(ticket)
+        if state.persistent and state.expired_attributes:
+            await db.refresh(ticket)
     rendered = [render_event(ev) for ev in pending]
     for event in rendered:
         await bus.publish(event)

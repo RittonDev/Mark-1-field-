@@ -18,7 +18,7 @@ from app.models.part_request import TicketPartRequest
 from app.schemas.part_request import PartRequestIn, PartRequestUpdate
 from app.services.errors import NotFound, PermissionDenied, WorkflowError
 from app.services.realtime import queue_event
-from app.services.tickets import FINAL, _touch, record_event
+from app.services.tickets import FINAL, _touch, attachment_visible, record_event
 
 P = PartRequestStatus
 # Pedidos que ainda acompanham a decisão do orçamento ligado.
@@ -67,14 +67,18 @@ async def create(
             return existing  # reenvio do mesmo pedido feito offline
     ids = list(dict.fromkeys(data.attachment_ids))
     if ids:
-        found = set(
+        found = list(
             await db.scalars(
-                select(TicketAttachment.id).where(
+                select(TicketAttachment).where(
                     TicketAttachment.ticket_id == ticket.id, TicketAttachment.id.in_(ids)
                 )
             )
         )
-        if found != set(ids):
+        # O pedido devolve o link de cada foto: o técnico só liga as que ele vê na OS (documento
+        # do escritório, como orçamento e nota, fica com a gestão).
+        if {a.id for a in found} != set(ids) or not all(
+            attachment_visible(a, actor) for a in found
+        ):
             raise WorkflowError("Foto não encontrada nesta OS")
     now = utcnow()
     request = TicketPartRequest(

@@ -150,6 +150,12 @@ export function FormEditor({
       toast({ title: `Formulário “${saved.name}” salvo`, description: savedDescription(saved, newVersion), tone: "success" });
       onLeave();
     },
+    // O erro aparece no topo: quem salvou pela barra do rodapé é levado até ele (e o leitor de tela também).
+    onError: () =>
+      requestAnimationFrame(() => {
+        summary.current?.scrollIntoView({ block: "center" });
+        summary.current?.focus({ preventScroll: true });
+      }),
   });
 
   const setField = (id: string, patch: Partial<FormField>) =>
@@ -421,7 +427,10 @@ export function FormEditor({
                                   label={`Mínimo de fotos da pergunta ${n} (0 = opcional)`}
                                   invalid={!!p?.photos}
                                   describedBy={p?.photos ? `${errId}-fotos` : undefined}
-                                  onChange={(v) => setField(f.id, { min_photos: v, required: v > 0 })}
+                                  // Mínimo acima do máximo: o máximo sobe junto (o técnico precisa conseguir enviar).
+                                  onChange={(v) =>
+                                    setField(f.id, { min_photos: v, required: v > 0, max_photos: Math.max(f.max_photos, v) })
+                                  }
                                 />
                               </span>
                               <span className="inline-flex items-center gap-1.5">

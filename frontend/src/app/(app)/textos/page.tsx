@@ -117,15 +117,17 @@ function renderPreview(body: string, values: Record<string, string>, variables: 
     .trim();
 
   const tokenNode = (token: Token, key: string) => {
-    const value = values[token.key];
-    if (value !== undefined) {
+    // Só a API decide o que é variável: a que ela não conhece sai crua na mensagem (marcada em vermelho).
+    if (!variables.has(token.key)) {
       return (
-        <span key={key} title={`{${token.key}}`} className="underline decoration-ink-subtle/50 decoration-dotted underline-offset-2">
-          {value}
-        </span>
+        <mark key={key} title="Variável desconhecida: sai assim na mensagem" className="rounded bg-red-50 px-0.5 text-red-700 dark:bg-red-500/10 dark:text-red-300">
+          {token.raw}
+        </mark>
       );
     }
-    if (variables.has(token.key)) {
+    const value = values[token.key];
+    if (value === undefined) {
+      // Variável da API ainda sem exemplo nesta tela: aparece o nome, com a descrição ao passar o mouse.
       return (
         <code key={key} title={variables.get(token.key)} className="rounded bg-ink/[0.06] px-1 text-[0.92em]">
           {token.raw}
@@ -133,9 +135,9 @@ function renderPreview(body: string, values: Record<string, string>, variables: 
       );
     }
     return (
-      <mark key={key} title="Variável desconhecida: sai assim na mensagem" className="rounded bg-red-50 px-0.5 text-red-700 dark:bg-red-500/10 dark:text-red-300">
-        {token.raw}
-      </mark>
+      <span key={key} title={`{${token.key}}`} className="underline decoration-ink-subtle/50 decoration-dotted underline-offset-2">
+        {value}
+      </span>
     );
   };
 
@@ -263,6 +265,7 @@ function Editor({ server }: { server: TemplatesOut }) {
   const cards = useRef(new Map<string, HTMLDivElement>());
   const pendingFocus = useRef<{ uid: string; target: FocusTarget } | "undo" | null>(null);
   const undoButton = useRef<HTMLButtonElement>(null);
+  const alerts = useRef<HTMLDivElement>(null);
 
   const dirty = !sameTemplates(items, baseline);
   useLeaveGuard(dirty, "Os textos editados ainda não foram salvos.");
@@ -342,6 +345,12 @@ function Editor({ server }: { server: TemplatesOut }) {
       adopt(r);
       toast({ title: "Textos salvos", description: "Os textos novos já aparecem nas OS.", tone: "success" });
     },
+    // O erro aparece no topo: quem salvou pela barra do rodapé é levado até ele (e o leitor de tela também).
+    onError: () =>
+      requestAnimationFrame(() => {
+        alerts.current?.scrollIntoView({ block: "center" });
+        alerts.current?.focus({ preventScroll: true });
+      }),
   });
   const reset = useMutation({
     mutationFn: () => api.post<TemplatesOut>("/message-templates/reset"),
@@ -505,18 +514,21 @@ function Editor({ server }: { server: TemplatesOut }) {
           </Button>
         </div>
       ) : null}
-      {showErrors && problems.size ? (
-        <div className="mb-4">
-          <ErrorBox
-            message={`Antes de salvar, corrija ${plural(problems.size, "texto", "textos")}: cada um precisa de um nome só dele e de conteúdo.`}
-          />
-        </div>
-      ) : null}
-      {save.error ? (
-        <div className="mb-4">
-          <ErrorBox message={errorMessage(save.error)} />
-        </div>
-      ) : null}
+      {/* Sempre na tela (mesmo vazio): o erro do salvar chega depois e o foco já tem onde cair. */}
+      <div ref={alerts} tabIndex={-1} className="outline-none">
+        {showErrors && problems.size ? (
+          <div className="mb-4">
+            <ErrorBox
+              message={`Antes de salvar, corrija ${plural(problems.size, "texto", "textos")}: cada um precisa de um nome só dele e de conteúdo.`}
+            />
+          </div>
+        ) : null}
+        {save.error ? (
+          <div className="mb-4">
+            <ErrorBox message={errorMessage(save.error)} />
+          </div>
+        ) : null}
+      </div>
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
         <div className="flex min-w-0 flex-col gap-3">
           {items.map((t, i) => {

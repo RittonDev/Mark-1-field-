@@ -66,7 +66,7 @@ export function WorklogsTab({ ticketId, closed }: { ticketId: UUID; closed: bool
       {worklogs.isLoading ? (
         <LoadingBlock rows={2} />
       ) : worklogs.error ? (
-        <ErrorBox message={errorMessage(worklogs.error)} />
+        <ErrorBox message={errorMessage(worklogs.error)} onRetry={() => void worklogs.refetch()} />
       ) : items.length === 0 ? (
         <p className="text-sm text-ink-muted">Nenhum apontamento registrado.</p>
       ) : (
@@ -112,7 +112,7 @@ export function WorklogsTab({ ticketId, closed }: { ticketId: UUID; closed: bool
               placeholder="Ex.: Troca do fusor e teste de impressão"
             />
           </Field>
-          <Field label="Início" required>
+          <Field label="Início" required error={startedError}>
             <Input
               type="datetime-local"
               value={startedAt}
@@ -120,9 +120,8 @@ export function WorklogsTab({ ticketId, closed }: { ticketId: UUID; closed: bool
               onChange={(e) => setStartedAt(e.target.value)}
               aria-invalid={startedError ? true : undefined}
             />
-            {startedError ? <span className="text-xs font-medium text-red-700 dark:text-red-300">{startedError}</span> : null}
           </Field>
-          <Field label="Minutos" required>
+          <Field label="Minutos" required error={minutesError}>
             <Input
               type="number"
               inputMode="numeric"
@@ -133,7 +132,6 @@ export function WorklogsTab({ ticketId, closed }: { ticketId: UUID; closed: bool
               onChange={(e) => setMinutes(e.target.value)}
               aria-invalid={minutesError ? true : undefined}
             />
-            {minutesError ? <span className="text-xs font-medium text-red-700 dark:text-red-300">{minutesError}</span> : null}
           </Field>
           <div className="flex items-end self-stretch">
             <Button type="submit" variant="primary" className="w-full" disabled={!valid} loading={create.isPending}>

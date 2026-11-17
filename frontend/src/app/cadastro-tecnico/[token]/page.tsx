@@ -15,7 +15,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { useParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Logo, ThemeToggle } from "@/components/Brand";
 import { useConfirm } from "@/components/Confirm";
 import { Button, buttonClassName, Card, Checkbox, ErrorBox, Field, Input, LoadingBlock, Select, Textarea } from "@/components/ui";
@@ -61,13 +61,48 @@ const FIELDS: Record<string, { label: string; step: number }> = {
   has_driver_license: { label: "CNH", step: 2 },
   notes: { label: "Observações", step: 2 },
   password: { label: "Senha", step: 3 },
+  password2: { label: "Confirme a senha", step: 3 },
   privacy_consent: { label: "Aviso de privacidade", step: 3 },
 };
+
+/** Campos que mostram o problema logo abaixo deles; nos demais (foto, veículo, CNH), ele vai no fim da etapa. */
+const INLINE_FIELDS = new Set([
+  "full_name",
+  "email",
+  "phone",
+  "document",
+  "birth_date",
+  "postal_code",
+  "address",
+  "city",
+  "state",
+  "service_areas",
+  "years_experience",
+  "company_document",
+  "skills",
+  "certifications",
+  "tools",
+  "coverage_area",
+  "availability",
+  "notes",
+  "password",
+  "password2",
+  "privacy_consent",
+]);
 
 /** O que está errado e em qual campo (para marcar, levar até ele e anunciar). */
 interface Problem {
   field: string | null;
   message: string;
+  /** A mensagem fala só deste campo: aparece logo abaixo dele (senão, no fim da etapa). */
+  inline?: boolean;
+}
+
+/** Primeira letra maiúscula e ponto final ("mínimo de 3 caracteres" -> "Mínimo de 3 caracteres."). */
+function sentence(text: string): string {
+  const trimmed = text.trim();
+  const capitalized = `${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}`;
+  return /[.!?]$/.test(capitalized) ? capitalized : `${capitalized}.`;
 }
 
 interface ValidationIssue {
@@ -121,20 +156,24 @@ function apiProblem(error: unknown): Problem {
       return { field: null, message: "Sem internet. Confira o sinal e toque em “Enviar ficha” de novo." };
     }
     if (Array.isArray(error.detail)) {
-      const issues = error.detail as ValidationIssue[];
-      const fieldOf = (issue: ValidationIssue) =>
-        (issue.loc ?? []).find((p): p is string => typeof p === "string" && p in FIELDS) ?? null;
-      const message = issues
-        .map((issue) => {
-          const field = fieldOf(issue);
-          const { text, withLabel } = translateIssue(issue);
-          return field && withLabel ? `${FIELDS[field].label}: ${text}` : text;
-        })
-        .join(" · ");
-      return { field: issues.map(fieldOf).find(Boolean) ?? null, message };
+      const issues = (error.detail as ValidationIssue[]).map((issue) => {
+        const field = (issue.loc ?? []).find((p): p is string => typeof p === "string" && p in FIELDS) ?? null;
+        const { text, withLabel } = translateIssue(issue);
+        return { field, text, labelled: field && withLabel ? `${FIELDS[field].label}: ${text}` : text };
+      });
+      // Um problema só, num campo que mostra o recado: aparece abaixo dele, sem repetir o nome do campo.
+      if (issues.length === 1 && issues[0].field && INLINE_FIELDS.has(issues[0].field)) {
+        return { field: issues[0].field, message: sentence(issues[0].text), inline: true };
+      }
+      return {
+        field: issues.find((issue) => issue.field)?.field ?? null,
+        message: issues.map((issue) => issue.labelled).join(" · "),
+      };
     }
     if (typeof error.detail === "string" && error.detail) {
-      return { field: /e-mail/i.test(error.detail) ? "email" : null, message: error.detail };
+      // E-mail ou CPF de um cadastro que já existe: o recado vai junto do campo.
+      const field = /e-mail/i.test(error.detail) ? "email" : /\bCPF\b/.test(error.detail) ? "document" : null;
+      return { field, message: error.detail, inline: !!field };
     }
     if (error.status >= 500) {
       return { field: null, message: "O servidor não respondeu agora. Espere um pouco e toque em “Enviar ficha” de novo." };
@@ -401,12 +440,17 @@ export default function TechnicianSignupPage() {
       ...f,
       [key]: f[key].includes(value) ? f[key].filter((v) => v !== value) : [...f[key], value],
     }));
-  /** Marca o campo com problema para o leitor de tela (aponta para a mensagem). */
+  // A mensagem que fala de um campo só aparece abaixo dele; as demais, no fim da etapa.
+  const inlineProblem = !!problem?.inline && !!problem.field && INLINE_FIELDS.has(problem.field);
+  const fieldError = (field: string) => (inlineProblem && problem?.field === field ? problem.message : null);
+  /** Marca o campo com problema para o leitor de tela (com a mensagem no fim da etapa, aponta para ela). */
   const invalid = (field: string) =>
-    problem?.field === field ? { "aria-invalid": true as const, "aria-describedby": "form-problem" } : {};
+    problem?.field === field
+      ? { "aria-invalid": true as const, ...(inlineProblem ? {} : { "aria-describedby": "form-problem" }) }
+      : {};
 
   function validate(index: number): Problem | null {
-    const fail = (field: string, message: string): Problem => ({ field, message });
+    const fail = (field: string, message: string): Problem => ({ field, message, inline: true });
     if (index === 0) {
       const name = form.full_name.trim();
       if (name.length < 5 || name.split(/\s+/).length < 2) return fail("full_name", "Informe seu nome completo (nome e sobrenome).");
@@ -644,7 +688,7 @@ export default function TechnicianSignupPage() {
                   <div data-field="photo">
                     <PhotoPicker value={form.photo} onChange={(v) => set("photo", v)} name={form.full_name} />
                   </div>
-                  <Field label="Nome completo" required>
+                  <Field label="Nome completo" required error={fieldError("full_name")}>
                     <Input
                       name="full_name"
                       value={form.full_name}
@@ -654,7 +698,7 @@ export default function TechnicianSignupPage() {
                     />
                   </Field>
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <Field label="E-mail" required hint="Será o seu login no app.">
+                    <Field label="E-mail" required hint="Será o seu login no app." error={fieldError("email")}>
                       <Input
                         name="email"
                         type="email"
@@ -666,7 +710,7 @@ export default function TechnicianSignupPage() {
                         {...invalid("email")}
                       />
                     </Field>
-                    <Field label="Celular (WhatsApp)" required>
+                    <Field label="Celular (WhatsApp)" required error={fieldError("phone")}>
                       <Input
                         name="phone"
                         value={form.phone}
@@ -677,7 +721,7 @@ export default function TechnicianSignupPage() {
                         {...invalid("phone")}
                       />
                     </Field>
-                    <Field label="CPF" required>
+                    <Field label="CPF" required error={fieldError("document")}>
                       <Input
                         name="document"
                         value={form.document}
@@ -689,7 +733,7 @@ export default function TechnicianSignupPage() {
                           : { "aria-invalid": form.document.length === 14 && !isValidCpf(form.document) })}
                       />
                     </Field>
-                    <Field label="Data de nascimento" hint="É preciso ter 18 anos ou mais.">
+                    <Field label="Data de nascimento" hint="É preciso ter 18 anos ou mais." error={fieldError("birth_date")}>
                       <Input
                         name="birth_date"
                         type="date"
@@ -699,7 +743,7 @@ export default function TechnicianSignupPage() {
                         {...invalid("birth_date")}
                       />
                     </Field>
-                    <Field label="CEP">
+                    <Field label="CEP" error={fieldError("postal_code")}>
                       <Input
                         name="postal_code"
                         value={form.postal_code}
@@ -710,7 +754,7 @@ export default function TechnicianSignupPage() {
                         {...invalid("postal_code")}
                       />
                     </Field>
-                    <Field label="Endereço">
+                    <Field label="Endereço" error={fieldError("address")}>
                       <Input
                         name="address"
                         value={form.address}
@@ -722,7 +766,7 @@ export default function TechnicianSignupPage() {
                     </Field>
                   </div>
                   <div className="grid grid-cols-[1fr_6rem] gap-4">
-                    <Field label="Cidade" required>
+                    <Field label="Cidade" required error={fieldError("city")}>
                       <Input
                         name="city"
                         value={form.city}
@@ -732,7 +776,7 @@ export default function TechnicianSignupPage() {
                         {...invalid("city")}
                       />
                     </Field>
-                    <Field label="UF" required>
+                    <Field label="UF" required error={fieldError("state")}>
                       <Select
                         name="state"
                         value={form.state}
@@ -754,7 +798,13 @@ export default function TechnicianSignupPage() {
 
               {step === 1 && cat ? (
                 <>
-                  <Group label="Em que você atende?" required hint="Escolha todas as áreas em que tem experiência." field="service_areas">
+                  <Group
+                    label="Em que você atende?"
+                    required
+                    hint="Escolha todas as áreas em que tem experiência."
+                    field="service_areas"
+                    error={fieldError("service_areas")}
+                  >
                     <div className="flex flex-wrap gap-2">
                       {cat.service_areas.map((a) => (
                         <Chip key={a.key} active={form.service_areas.includes(a.key)} onClick={() => toggle("service_areas", a.key)}>
@@ -764,7 +814,7 @@ export default function TechnicianSignupPage() {
                     </div>
                   </Group>
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <Field label="Anos de experiência">
+                    <Field label="Anos de experiência" error={fieldError("years_experience")}>
                       <Input
                         name="years_experience"
                         type="number"
@@ -777,7 +827,7 @@ export default function TechnicianSignupPage() {
                         {...invalid("years_experience")}
                       />
                     </Field>
-                    <Field label="CNPJ / MEI" hint="Se você emite nota.">
+                    <Field label="CNPJ / MEI" hint="Se você emite nota." error={fieldError("company_document")}>
                       <Input
                         name="company_document"
                         value={form.company_document}
@@ -788,7 +838,12 @@ export default function TechnicianSignupPage() {
                       />
                     </Field>
                   </div>
-                  <Group label="Skills" hint="Equipamentos, marcas e sistemas que você domina." field="skills">
+                  <Group
+                    label="Skills"
+                    hint="Equipamentos, marcas e sistemas que você domina."
+                    field="skills"
+                    error={fieldError("skills")}
+                  >
                     <div className="flex flex-col gap-2">
                       <datalist id="skill-suggestions">
                         {cat.skill_suggestions.map((s) => (
@@ -847,18 +902,34 @@ export default function TechnicianSignupPage() {
                       ) : null}
                     </div>
                   </Group>
-                  <Field label="Certificações e cursos">
-                    <Textarea rows={2} value={form.certifications} onChange={(e) => set("certifications", e.target.value)} />
+                  <Field label="Certificações e cursos" error={fieldError("certifications")}>
+                    <Textarea
+                      name="certifications"
+                      rows={2}
+                      value={form.certifications}
+                      onChange={(e) => set("certifications", e.target.value)}
+                      {...invalid("certifications")}
+                    />
                   </Field>
-                  <Field label="Ferramentas próprias" hint="Ex.: alicate de crimpagem, testador de cabos, máquina de fusão.">
-                    <Textarea rows={2} value={form.tools} onChange={(e) => set("tools", e.target.value)} />
+                  <Field
+                    label="Ferramentas próprias"
+                    hint="Ex.: alicate de crimpagem, testador de cabos, máquina de fusão."
+                    error={fieldError("tools")}
+                  >
+                    <Textarea
+                      name="tools"
+                      rows={2}
+                      value={form.tools}
+                      onChange={(e) => set("tools", e.target.value)}
+                      {...invalid("tools")}
+                    />
                   </Field>
                 </>
               ) : null}
 
               {step === 2 && cat ? (
                 <>
-                  <Field label="Região que você atende" required hint="Cidades, bairros ou zonas.">
+                  <Field label="Região que você atende" required hint="Cidades, bairros ou zonas." error={fieldError("coverage_area")}>
                     <Textarea
                       name="coverage_area"
                       rows={2}
@@ -869,7 +940,7 @@ export default function TechnicianSignupPage() {
                       {...invalid("coverage_area")}
                     />
                   </Field>
-                  <Group label="Disponibilidade" field="availability">
+                  <Group label="Disponibilidade" field="availability" error={fieldError("availability")}>
                     <div className="flex flex-wrap gap-2">
                       {cat.availability.map((a) => (
                         <Chip key={a.key} active={form.availability.includes(a.key)} onClick={() => toggle("availability", a.key)}>
@@ -891,8 +962,14 @@ export default function TechnicianSignupPage() {
                     ) : null}
                     <Checkbox label="Tenho CNH válida" checked={form.has_driver_license} onChange={(v) => set("has_driver_license", v)} />
                   </div>
-                  <Field label="Observações">
-                    <Textarea rows={3} value={form.notes} onChange={(e) => set("notes", e.target.value)} />
+                  <Field label="Observações" error={fieldError("notes")}>
+                    <Textarea
+                      name="notes"
+                      rows={3}
+                      value={form.notes}
+                      onChange={(e) => set("notes", e.target.value)}
+                      {...invalid("notes")}
+                    />
                   </Field>
                 </>
               ) : null}
@@ -904,7 +981,7 @@ export default function TechnicianSignupPage() {
                     senha:
                   </p>
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <Field label="Senha" required hint="Mínimo de 8 caracteres.">
+                    <Field label="Senha" required hint="Mínimo de 8 caracteres." error={fieldError("password")}>
                       <Input
                         name="password"
                         type="password"
@@ -915,7 +992,7 @@ export default function TechnicianSignupPage() {
                         {...invalid("password")}
                       />
                     </Field>
-                    <Field label="Confirme a senha" required>
+                    <Field label="Confirme a senha" required error={fieldError("password2")}>
                       <Input
                         name="password2"
                         type="password"
@@ -940,12 +1017,18 @@ export default function TechnicianSignupPage() {
                       checked={form.privacy_consent}
                       onChange={(v) => set("privacy_consent", v)}
                     />
+                    {fieldError("privacy_consent") ? (
+                      <p role="alert" className="mt-1.5 pl-6 text-xs font-medium text-red-600 dark:text-red-400">
+                        {fieldError("privacy_consent")}
+                      </p>
+                    ) : null}
                   </div>
                 </>
               ) : null}
 
-              {/* O ErrorBox já é anunciado (role="alert"); o id liga a mensagem ao campo marcado. */}
-              {problem ? (
+              {/* Problema sem campo próprio (internet, servidor, vários campos): no fim da etapa. O ErrorBox
+                  já é anunciado (role="alert"); o id liga a mensagem ao campo marcado. */}
+              {problem && !inlineProblem ? (
                 <div id="form-problem">
                   <ErrorBox message={problem.message} />
                 </div>
@@ -1093,6 +1176,7 @@ function Group({
   hint,
   required,
   field,
+  error,
   children,
 }: {
   label: string;
@@ -1100,16 +1184,25 @@ function Group({
   required?: boolean;
   /** Campo da ficha (para levar a pessoa até o grupo quando há um problema nele). */
   field?: string;
+  /** Problema no grupo: aparece no lugar da dica, em vermelho, e é anunciado. */
+  error?: string | null;
   children: React.ReactNode;
 }) {
+  const errorId = useId();
   return (
-    <fieldset className="flex flex-col gap-1.5" data-field={field}>
+    <fieldset className="flex flex-col gap-1.5" data-field={field} aria-describedby={error ? errorId : undefined}>
       <legend className="mb-1.5 text-xs font-semibold text-ink/80">
         {label}
         {required ? <span className="text-red-600 dark:text-red-400"> *</span> : null}
       </legend>
       {children}
-      {hint ? <span className="text-xs text-ink-muted">{hint}</span> : null}
+      {error ? (
+        <span id={errorId} role="alert" className="text-xs font-medium text-red-600 dark:text-red-400">
+          {error}
+        </span>
+      ) : hint ? (
+        <span className="text-xs text-ink-muted">{hint}</span>
+      ) : null}
     </fieldset>
   );
 }

@@ -187,14 +187,16 @@ const fromClient = (a: Attachment) => a.uploaded_by?.role === "requester";
 
 /**
  * Vai para o relatório do cliente (e o técnico vê no app) ou fica só com a central. Como a API monta o
- * relatório: o comprovante de um custo extra e a foto mandada pelo cliente no portal ficam de fora.
+ * relatório: o comprovante de um custo extra, a foto mandada pelo cliente no portal e uma assinatura que
+ * não é a atual da OS (colhida de novo depois) ficam de fora.
  */
-function inReport(a: Attachment, receipts: UUID[]): boolean {
+function inReport(a: Attachment, receipts: UUID[], signatureId: UUID | null): boolean {
+  if (a.kind === "signature" || a.id === signatureId) return a.id === signatureId;
   if (fromClient(a) || receipts.includes(a.id)) return false;
-  return a.form_id !== null || a.kind === "photo" || a.kind === "signature";
+  return a.form_id !== null ? Boolean(a.field_id) : a.kind === "photo";
 }
 
-function VisibilityChip({ attachment, receipts }: { attachment: Attachment; receipts: UUID[] }) {
+function VisibilityChip({ attachment, receipts, signatureId }: { attachment: Attachment; receipts: UUID[]; signatureId: UUID | null }) {
   const chip = "rounded-md px-1.5 py-0.5 text-[11px] font-semibold";
   if (fromClient(attachment)) {
     return (
@@ -203,7 +205,7 @@ function VisibilityChip({ attachment, receipts }: { attachment: Attachment; rece
       </span>
     );
   }
-  return inReport(attachment, receipts) ? (
+  return inReport(attachment, receipts, signatureId) ? (
     <span className={clsx(chip, "bg-brand-soft text-brand-ink")} title="O cliente vê no relatório e o técnico vê no app">
       No relatório
     </span>
@@ -603,12 +605,16 @@ export function AttachmentsTab({
     let description: string;
     if (context?.form) {
       const field = context.form.fields.find((f) => f.id === a.field_id);
+      // Formulário concluído continua concluído enquanto o campo tiver as fotos que pede.
+      const need = field ? Math.max(field.min_photos, field.required ? 1 : 0) : 0;
+      const left = (attachments.data ?? []).filter((x) => x.form_id === a.form_id && x.field_id === a.field_id).length - 1;
+      const reopens = context.form.status === "completed" && left < need;
       description =
-        `A foto sai do formulário “${context.form.name}”${field ? ` (campo ${field.label})` : ""}` +
-        (context.form.status === "completed" ? " e ele volta para Em preenchimento: precisa ser concluído de novo." : ".") +
+        `A foto sai do formulário “${context.form.name}”${field ? ` (campo ${field.label})` : ""} e do relatório do cliente` +
+        (reopens ? `. O campo pede ${need} ${need === 1 ? "foto" : "fotos"}: o formulário volta para Em preenchimento.` : ".") +
         " Não dá para desfazer.";
     } else {
-      description = `“${a.filename}” sai da OS${inReport(a, receipts) ? " e do relatório do cliente" : ""}. Não dá para desfazer.`;
+      description = `“${a.filename}” sai da OS${inReport(a, receipts, signatureId) ? " e do relatório do cliente" : ""}. Não dá para desfazer.`;
     }
     const ok = await confirm({ title: "Excluir este anexo?", description, confirmLabel: "Excluir", tone: "danger" });
     if (ok) remove.mutate(a);
@@ -693,6 +699,10 @@ export function AttachmentsTab({
   const shownPhotos = shown.filter(isViewableImage);
   const shownFiles = shown.filter((a) => !isViewableImage(a));
   const busy = progress !== null && progress.done < progress.total;
+  // A lista pode encolher com a foto aberta (outra pessoa excluiu): a ampliada fica na última que sobrou;
+  // sem nenhuma, a foto ampliada fecha (e não reabre sozinha quando chegar outra).
+  if (zoom !== null && !shownPhotos.length) setZoom(null);
+  const zoomed = zoom !== null && shownPhotos.length ? Math.min(zoom, shownPhotos.length - 1) : null;
 
   return (
     <div ref={rootRef} className="flex flex-col gap-4">
@@ -890,7 +900,7 @@ export function AttachmentsTab({
                         {meta(a)}
                       </p>
                       <div className="mt-auto flex items-center justify-between gap-1">
-                        <VisibilityChip attachment={a} receipts={receipts} />
+                        <VisibilityChip attachment={a} receipts={receipts} signatureId={signatureId} />
                         <span className="flex items-center gap-0.5">
                           {url ? (
                             <a
@@ -950,7 +960,7 @@ export function AttachmentsTab({
                       </div>
                     </div>
                     <span className="flex shrink-0 items-center gap-1">
-                      <VisibilityChip attachment={a} receipts={receipts} />
+                      <VisibilityChip attachment={a} receipts={receipts} signatureId={signatureId} />
                       {url ? (
                         <a
                           href={url}
@@ -984,7 +994,7 @@ export function AttachmentsTab({
         </>
       )}
 
-      {zoom !== null ? <Lightbox items={shownPhotos} index={zoom} forms={forms} onClose={() => setZoom(null)} onMove={setZoom} /> : null}
+      {zoomed !== null ? <Lightbox items={shownPhotos} index={zoomed} forms={forms} onClose={() => setZoom(null)} onMove={setZoom} /> : null}
     </div>
   );
 }

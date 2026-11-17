@@ -123,6 +123,11 @@ function TicketCardBase({ ticket, now, userId, showDate = false, showTime = true
     router.push({ pathname: "/ticket/[id]", params: { id: ticket.id } });
   }
 
+  function openRoute() {
+    haptic.select();
+    setRouteOpen(true);
+  }
+
   return (
     <>
       <PressableScale
@@ -130,6 +135,12 @@ function TicketCardBase({ ticket, now, userId, showDate = false, showTime = true
         accessibilityRole="button"
         accessibilityLabel={label}
         accessibilityHint="Abre a OS"
+        // No iPhone o cartão inteiro é um elemento só para o leitor de tela (o botão de rota de dentro
+        // não recebe foco): a rota vira uma ação do próprio cartão.
+        accessibilityActions={route ? [{ name: "route", label: "Rota até a loja" }] : undefined}
+        onAccessibilityAction={(event) => {
+          if (event.nativeEvent.actionName === "route") openRoute();
+        }}
         style={styles.card}
         pressedStyle={{ backgroundColor: c.surface2 }}
       >
@@ -174,10 +185,7 @@ function TicketCardBase({ ticket, now, userId, showDate = false, showTime = true
             </View>
             {route ? (
               <Pressable
-                onPress={() => {
-                  haptic.select();
-                  setRouteOpen(true);
-                }}
+                onPress={openRoute}
                 accessibilityRole="button"
                 accessibilityLabel="Rota até a loja"
                 accessibilityHint="Abre o Google Maps ou o Waze"

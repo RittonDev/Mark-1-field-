@@ -153,7 +153,6 @@ export function PayoutsDialog({ ticket, onClose }: { ticket: TicketDetail; onClo
                     value={values[p.id] ?? ""}
                     disabled={paid}
                     onChange={(e) => setValues((v) => ({ ...v, [p.id]: e.target.value }))}
-                    className={error ? "border-red-400 dark:border-red-500/60" : undefined}
                   />
                   {error ? (
                     <span id={hintId} className="text-xs text-red-700 dark:text-red-400">
@@ -217,7 +216,11 @@ export function PayoutLine({ ticket }: { ticket: TicketDetail }) {
       <span className="font-medium text-ink tabular-nums">{mine ? formatMoney(mine.amount) : "não definido"}</span>
       {payouts.length > 1 ? <span className="text-xs text-ink-muted">· equipe {formatMoney(total)}</span> : null}
       {mine ? <StatusPill payout={mine} /> : null}
-      <button type="button" onClick={() => setOpen(true)} className="ml-auto rounded px-1 text-xs font-medium text-brand hover:underline">
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="ml-auto inline-flex h-7 items-center rounded-md px-2 text-xs font-medium text-brand transition-colors hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+      >
         {mine ? "Alterar" : "Definir valor"}
       </button>
       {open ? <PayoutsDialog ticket={ticket} onClose={() => setOpen(false)} /> : null}

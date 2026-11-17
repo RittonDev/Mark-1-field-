@@ -232,7 +232,13 @@ function LocationsView() {
             <ErrorBox message={errorMessage(locations.error)} onRetry={() => void locations.refetch()} />
           </div>
         ) : !data || data.items.length === 0 ? (
-          <EmptyState icon={<MapPin className="size-8" />} title="Nenhum local encontrado" />
+          <EmptyState
+            icon={<MapPin className="size-8" />}
+            title="Nenhum local encontrado"
+            description={urlQ || customerId ? "Mude a busca ou o filtro de cliente." : undefined}
+            // Página que deixou de existir (link antigo, locais desativados): volta para o começo da lista.
+            action={page > 1 ? <Button onClick={() => setParams({ pagina: null })}>Ir para a primeira página</Button> : undefined}
+          />
         ) : (
           <>
             <Table>

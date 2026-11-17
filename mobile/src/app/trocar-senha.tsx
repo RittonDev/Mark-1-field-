@@ -38,6 +38,7 @@ export default function ChangePasswordScreen() {
   const [error, setError] = useState<string | null>(null);
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [leaving, setLeaving] = useState(false);
   const nextRef = useRef<TextInputInstance>(null);
   const confirmRef = useRef<TextInputInstance>(null);
 
@@ -50,8 +51,8 @@ export default function ChangePasswordScreen() {
   }
 
   async function submit() {
-    // Dois "concluir" seguidos não mandam duas trocas (a segunda iria com a senha antiga).
-    if (saving) return;
+    // Dois "concluir" seguidos não mandam duas trocas (a segunda iria com a senha antiga); saindo, nada.
+    if (saving || leaving) return;
     const invalid = problem();
     setError(invalid);
     if (invalid) return;
@@ -70,6 +71,16 @@ export default function ChangePasswordScreen() {
     } finally {
       if (pauseSync) startSync();
     }
+  }
+
+  /** Sair sem trocar (senha provisória): um toque só, com retorno enquanto encerra a sessão. */
+  function leave() {
+    if (leaving) return;
+    setLeaving(true);
+    logout().catch((e: unknown) => {
+      setLeaving(false);
+      setError(errorMessage(e));
+    });
   }
 
   const toggle = (
@@ -151,10 +162,16 @@ export default function ChangePasswordScreen() {
             />
           </Field>
           {error ? <ErrorBox message={error} /> : null}
-          <Button title={forced ? "Salvar e continuar" : "Salvar nova senha"} variant="primary" onPress={() => void submit()} loading={saving} />
+          <Button
+            title={forced ? "Salvar e continuar" : "Salvar nova senha"}
+            variant="primary"
+            onPress={() => void submit()}
+            loading={saving}
+            disabled={leaving}
+          />
         </Card>
         {forced ? (
-          <Button compact variant="ghost" title="Sair" onPress={() => void logout()} disabled={saving} style={{ alignSelf: "center" }} />
+          <Button compact variant="ghost" title="Sair" onPress={leave} loading={leaving} disabled={saving} style={{ alignSelf: "center" }} />
         ) : null}
       </ScrollView>
     </KeyboardAvoidingView>

@@ -531,15 +531,6 @@ export default function LiveMap({
     }
   }, [ready, activities, technicians, picked]);
 
-  // Enquadra técnicos e OS na primeira carga e a cada troca de grupo (não a cada posição nova).
-  useEffect(() => {
-    if (!usable(ready) || fitPending || fitRef.current === fitKey) return;
-    const points = pinPoints(techPins.current, osPins.current);
-    if (points.length === 0) return;
-    fitRef.current = fitKey;
-    moveCamera(ready, points, 13);
-  }, [ready, fitKey, fitPending, technicians, activities]);
-
   // Ao escolher técnico ou loja, a câmera se mexe uma vez só, quando os dados do foco chegam.
   useEffect(() => {
     if (!focusKey) {
@@ -559,6 +550,21 @@ export default function LiveMap({
     cameraRef.current = focusKey;
     moveCamera(ready, points, 14);
   }, [ready, focus, focusKey, focusPending, history, selectedId]);
+
+  // Enquadra técnicos e OS na primeira carga e a cada troca de grupo (não a cada posição nova). Com técnico
+  // ou loja já escolhidos (ex.: link com ?tecnico=), quem enquadra é a câmera do foco, acima: um
+  // movimento só. Sem nada para mostrar no foco, enquadra todos.
+  useEffect(() => {
+    if (!usable(ready) || fitPending || fitRef.current === fitKey) return;
+    if (focusKey && (focusPending || cameraRef.current === focusKey)) {
+      if (cameraRef.current === focusKey) fitRef.current = fitKey;
+      return;
+    }
+    const points = pinPoints(techPins.current, osPins.current);
+    if (points.length === 0) return;
+    fitRef.current = fitKey;
+    moveCamera(ready, points, 13);
+  }, [ready, fitKey, fitPending, focusKey, focusPending, technicians, activities]);
 
   // Trajeto do dia do técnico escolhido, com os pontos em que ele mudou o status da OS.
   useEffect(() => {

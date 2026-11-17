@@ -154,22 +154,26 @@ export function ExpensesCard({ ticket }: { ticket: TicketDetail }) {
                     >
                       <Pencil className="size-3.5" />
                     </button>
-                    <button
-                      type="button"
-                      onClick={async () =>
-                        (await confirm({
-                          title: "Remover este custo?",
-                          description: `“${e.description}” sai dos custos extras da OS.`,
-                          confirmLabel: "Remover",
-                          tone: "danger",
-                        })) && remove.mutate(e.id)
-                      }
-                      className="rounded-md p-1.5 text-ink-muted hover:bg-surface-2 hover:text-red-600"
-                      aria-label={`Remover o custo ${e.description}`}
-                      title="Remover"
-                    >
-                      <Trash2 className="size-3.5" />
-                    </button>
+                    {/* Reembolsado não sai (a API recusa): primeiro desfaz o reembolso, voltando para Aprovado. */}
+                    {e.status !== "paid" ? (
+                      <button
+                        type="button"
+                        onClick={async () =>
+                          (await confirm({
+                            title: "Remover este custo?",
+                            description: `“${e.description}” sai dos custos extras da OS. Não dá para desfazer.`,
+                            confirmLabel: "Remover",
+                            tone: "danger",
+                          })) && remove.mutate(e.id)
+                        }
+                        disabled={remove.isPending && remove.variables === e.id}
+                        className="rounded-md p-1.5 text-ink-muted hover:bg-surface-2 hover:text-red-600 disabled:opacity-40"
+                        aria-label={`Remover o custo ${e.description}`}
+                        title="Remover"
+                      >
+                        <Trash2 className="size-3.5" />
+                      </button>
+                    ) : null}
                   </div>
                 ) : null}
               </li>
@@ -198,12 +202,10 @@ export function ExpensesCard({ ticket }: { ticket: TicketDetail }) {
   );
 }
 
-const fieldError = "text-xs text-red-700 dark:text-red-400";
-const invalidInput = "border-red-400 dark:border-red-500/60";
+const fieldError = "text-xs font-medium text-red-600 dark:text-red-400";
 
 function ExpenseDialog({ ticket, expense, onClose }: { ticket: TicketDetail; expense: Expense | null; onClose: () => void }) {
   const invalidate = useInvalidateTicket(ticket.id);
-  const confirm = useConfirm();
   const { toast } = useToast();
   const people = useAssignable(null);
   const settings = useQuery({
@@ -305,30 +307,21 @@ function ExpenseDialog({ ticket, expense, onClose }: { ticket: TicketDetail; exp
     setTried(true);
     if (!invalid) save.mutate();
   };
-  const requestClose = async () => {
-    if (
-      dirty &&
-      !(await confirm({
-        title: "Descartar as alterações?",
-        description: "O que você preencheu neste custo não foi salvo.",
-        confirmLabel: "Descartar",
-        tone: "danger",
-      }))
-    ) {
-      return;
-    }
-    onClose();
-  };
 
   return (
     <Dialog
       open
-      onClose={requestClose}
+      onClose={onClose}
+      // Clique fora, Esc ou o X com algo preenchido perguntam antes de descartar; salvando, não fecha.
+      dirty={dirty}
+      busy={save.isPending || uploadReceipt.isPending}
       title={expense ? "Editar custo extra" : "Lançar custo extra"}
       description={`${ticket.code} · ${ticket.title}`}
       footer={
         <>
-          <Button onClick={requestClose}>Cancelar</Button>
+          <Button onClick={onClose} disabled={save.isPending}>
+            Cancelar
+          </Button>
           <Button variant="primary" loading={save.isPending} disabled={Boolean(qtyError || unitError)} onClick={submit}>
             Salvar · {formatMoney(totalCents / 100)}
           </Button>
@@ -354,7 +347,7 @@ function ExpenseDialog({ ticket, expense, onClose }: { ticket: TicketDetail; exp
             ))}
           </Select>
         </Field>
-        <Field label="Descrição" required className="sm:col-span-2">
+        <Field label="Descrição" required className="sm:col-span-2" error={tried ? descriptionError : null}>
           <Input
             value={description}
             onChange={(e) => setDescription(e.target.value)}
@@ -362,23 +355,20 @@ function ExpenseDialog({ ticket, expense, onClose }: { ticket: TicketDetail; exp
             maxLength={200}
             disabled={locked}
             aria-invalid={(tried && Boolean(descriptionError)) || undefined}
-            className={tried && descriptionError ? invalidInput : undefined}
           />
-          {tried && descriptionError ? <span className={fieldError}>{descriptionError}</span> : null}
         </Field>
-        <Field label={kind === "km" ? "Km rodados" : "Quantidade"}>
+        <Field label={kind === "km" ? "Km rodados" : "Quantidade"} error={qtyError}>
           <Input
             value={quantity}
             onChange={(e) => setQuantity(e.target.value)}
             inputMode="decimal"
             disabled={locked}
             aria-invalid={Boolean(qtyError) || undefined}
-            className={qtyError ? invalidInput : undefined}
           />
-          {qtyError ? <span className={fieldError}>{qtyError}</span> : null}
         </Field>
         <Field
           label={kind === "km" ? "Valor por km (R$)" : "Valor unitário (R$)"}
+          error={unitError}
           hint={kind === "km" && kmRate !== undefined ? `Em branco: ${formatMoney(kmRate)}/km (Configurações)` : undefined}
         >
           <Input
@@ -388,9 +378,7 @@ function ExpenseDialog({ ticket, expense, onClose }: { ticket: TicketDetail; exp
             disabled={locked}
             placeholder={kind === "km" && kmRate !== undefined ? moneyInput(kmRate) : "0,00"}
             aria-invalid={Boolean(unitError) || undefined}
-            className={unitError ? invalidInput : undefined}
           />
-          {unitError ? <span className={fieldError}>{unitError}</span> : null}
         </Field>
         <Field label="Reembolsar a" hint={technicianId ? undefined : "Custo da empresa: não entra no reembolso de ninguém."}>
           <Select value={technicianId} onChange={(e) => setTechnicianId(e.target.value)} disabled={locked}>

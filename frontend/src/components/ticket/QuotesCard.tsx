@@ -170,7 +170,7 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
           {list.map((q) => {
             const editable = q.status === "draft" || q.status === "sent" || q.status === "expired";
             // Validade vencida: o envio seria recusado. Renovar abre o editor com a nova data e envia.
-            const pastDue = Boolean(q.valid_until && q.valid_until < today);
+            const pastDue = q.status === "expired" || Boolean(q.valid_until && q.valid_until < today);
             const detail = rowDetail(q, today);
             return (
               <li key={q.id} className="flex flex-wrap items-center gap-2 px-4 py-2.5">
@@ -346,8 +346,7 @@ function checkLine(l: Line): LineCheck {
   return { empty, quantity: quantity.value, price: price.value, errors };
 }
 
-const fieldError = "text-xs text-red-700 dark:text-red-400";
-const invalidInput = "border-red-400 dark:border-red-500/60";
+const fieldError = "text-xs font-medium text-red-600 dark:text-red-400";
 
 /** Rótulo pequeno dos campos de cada item (na primeira linha; no celular, em todas). */
 function LineField({ label, error, first, children, className }: { label: string; error?: string; first: boolean; children: React.ReactNode; className?: string }) {
@@ -380,7 +379,6 @@ export function QuoteEditor({
   /** Com ele, o rodapé ganha "Salvar e enviar" (salva e já envia o link ao cliente). */
   onSend?: (saved: Quote) => void;
 }) {
-  const confirm = useConfirm();
   const catalog = useQuery({
     queryKey: ["quote-items", "active"],
     queryFn: () => api.get<QuoteCatalogItem[]>("/quote-items", { active: true }),
@@ -496,28 +494,16 @@ export function QuoteEditor({
     save.mutate(sending);
   };
 
-  const requestClose = async () => {
-    if (
-      dirty &&
-      !(await confirm({
-        title: "Descartar as alterações?",
-        description: "O que você digitou neste orçamento não foi salvo.",
-        confirmLabel: "Descartar",
-        tone: "danger",
-      }))
-    ) {
-      return;
-    }
-    onClose();
-  };
-
   const totalLabel = formatMoney(totalCents / 100);
 
   return (
     <Dialog
       open
       size="lg"
-      onClose={requestClose}
+      onClose={onClose}
+      // Clique fora, Esc ou o X com algo digitado perguntam antes de descartar; salvando, não fecha.
+      dirty={dirty}
+      busy={save.isPending}
       title={quote ? `Editar ${quote.code}` : "Novo orçamento"}
       description={
         quote?.status === "sent"
@@ -526,7 +512,9 @@ export function QuoteEditor({
       }
       footer={
         <div className="flex w-full flex-wrap justify-end gap-2">
-          <Button onClick={requestClose}>Cancelar</Button>
+          <Button onClick={onClose} disabled={save.isPending}>
+            Cancelar
+          </Button>
           {onSend ? (
             <>
               <Button loading={save.isPending && save.variables === false} disabled={save.isPending} onClick={() => submit(false)}>
@@ -546,15 +534,8 @@ export function QuoteEditor({
       }
     >
       <div className="flex flex-col gap-4">
-        <Field label="Título" required>
-          <Input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            maxLength={200}
-            aria-invalid={(tried && Boolean(titleError)) || undefined}
-            className={tried && titleError ? invalidInput : undefined}
-          />
-          {tried && titleError ? <span className={fieldError}>{titleError}</span> : null}
+        <Field label="Título" required error={tried ? titleError : null}>
+          <Input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} aria-invalid={(tried && Boolean(titleError)) || undefined} />
         </Field>
         <datalist id={listId}>
           {(catalog.data ?? []).map((c) => (
@@ -565,7 +546,7 @@ export function QuoteEditor({
         </datalist>
         <div>
           <p className="mb-1.5 text-xs font-semibold text-ink/80">
-            Itens <span className="text-red-500">*</span>
+            Itens <span className="text-red-600 dark:text-red-400">*</span>
           </p>
           <ol className="divide-y divide-line overflow-hidden rounded-lg border border-line">
             {lines.map((l, i) => {
@@ -586,7 +567,6 @@ export function QuoteEditor({
                         placeholder="Descrição do item (digite ou escolha do catálogo)"
                         aria-label={`Item ${n}: descrição`}
                         aria-invalid={Boolean(errors.description) || undefined}
-                        className={errors.description ? invalidInput : undefined}
                         onChange={(e) => {
                           const match = catalog.data?.find((item) => item.name === e.target.value);
                           setLine(
@@ -631,7 +611,6 @@ export function QuoteEditor({
                         inputMode="decimal"
                         aria-label={`Item ${n}: quantidade`}
                         aria-invalid={Boolean(errors.quantity) || undefined}
-                        className={errors.quantity ? invalidInput : undefined}
                         onChange={(e) => setLine(l.id, { quantity: e.target.value })}
                       />
                     </LineField>
@@ -645,7 +624,6 @@ export function QuoteEditor({
                         placeholder="0,00"
                         aria-label={`Item ${n}: valor unitário`}
                         aria-invalid={Boolean(errors.unit_price) || undefined}
-                        className={errors.unit_price ? invalidInput : undefined}
                         onChange={(e) => setLine(l.id, { unit_price: e.target.value })}
                         onKeyDown={(e) => {
                           // Enter no valor do último item abre o próximo.
@@ -674,27 +652,23 @@ export function QuoteEditor({
           Adicionar item
         </Button>
         <div className="grid gap-4 sm:grid-cols-3">
-          <Field label="Desconto (R$)">
+          <Field label="Desconto (R$)" error={tried ? discountError : null}>
             <Input
               value={discount}
               onChange={(e) => setDiscount(e.target.value)}
               inputMode="decimal"
               placeholder="0,00"
               aria-invalid={(tried && Boolean(discountError)) || undefined}
-              className={tried && discountError ? invalidInput : undefined}
             />
-            {tried && discountError ? <span className={fieldError}>{discountError}</span> : null}
           </Field>
-          <Field label="Válido até" hint={validUntil ? undefined : "Sem data: o orçamento não vence."}>
+          <Field label="Válido até" error={dateError} hint={validUntil ? undefined : "Sem data: o orçamento não vence."}>
             <Input
               type="date"
               min={today}
               value={validUntil}
               onChange={(e) => setValidUntil(e.target.value)}
               aria-invalid={Boolean(dateError) || undefined}
-              className={dateError ? invalidInput : undefined}
             />
-            {dateError ? <span className={fieldError}>{dateError}</span> : null}
           </Field>
           <div className="flex flex-col justify-end gap-0.5 rounded-lg bg-surface-2 px-3 py-2 text-sm tabular-nums">
             <span className="text-xs text-ink-muted">Subtotal {formatMoney(subtotalCents / 100)}</span>

@@ -16,7 +16,7 @@ import { useToast } from "@/components/Toaster";
 import { Button, Checkbox, Dialog, ErrorBox, Field, Input, SectionTitle, Select, Textarea } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { formatDocument } from "@/lib/format";
-import { isValidCpf } from "@/lib/onboarding";
+import { isValidCnpj, isValidCpf, maskCep } from "@/lib/onboarding";
 import { useCustomers } from "@/lib/queries";
 import type { ContactEntry, Location, Page, UUID } from "@/lib/types";
 
@@ -33,23 +33,10 @@ export function cleanDocument(value: string): string {
   return value.replace(/[^0-9A-Za-z]/g, "").toUpperCase();
 }
 
-const CNPJ_WEIGHTS = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
-
-function cnpjDigit(chars: string, weights: number[]): number {
-  const total = weights.reduce((sum, weight, i) => sum + (chars.charCodeAt(i) - 48) * weight, 0);
-  const rest = total % 11;
-  return rest < 2 ? 0 : 11 - rest;
-}
-
-/** CNPJ, inclusive o alfanumérico (desde julho de 2026): a mesma conta da API (core/documents.py). */
-function isValidCnpj(clean: string): boolean {
-  if (!/^[0-9A-Z]{12}[0-9]{2}$/.test(clean) || new Set(clean).size === 1) return false;
-  const first = cnpjDigit(clean, CNPJ_WEIGHTS);
-  const second = cnpjDigit(clean.slice(0, 12) + first, [6, ...CNPJ_WEIGHTS]);
-  return clean.slice(12) === `${first}${second}`;
-}
-
-/** O que há de errado com o CPF/CNPJ digitado (null quando está em branco ou certo). */
+/**
+ * O que há de errado com o CPF/CNPJ digitado (null quando está em branco ou certo). O CNPJ pode ser o
+ * alfanumérico (desde julho de 2026): a conta é a mesma da API (core/documents.py).
+ */
 export function documentError(value: string): string | null {
   const clean = cleanDocument(value);
   if (!clean) return null;
@@ -61,12 +48,6 @@ export function documentError(value: string): string | null {
 /** "CPF" ou "CNPJ", pelo tamanho do documento. */
 export function documentKind(document: string | null | undefined): "CPF" | "CNPJ" {
   return document && cleanDocument(document).length === 11 ? "CPF" : "CNPJ";
-}
-
-/** CEP com a máscara 00000-000. */
-export function maskZip(value: string): string {
-  const d = value.replace(/\D/g, "").slice(0, 8);
-  return d.length > 5 ? `${d.slice(0, 5)}-${d.slice(5)}` : d;
 }
 
 // O retângulo do Brasil e o ponto padrão do geocodificador antigo: os mesmos de backend/app/services/geo.py.
@@ -90,12 +71,16 @@ function coordNumber(text: string): number | null {
   return /^-?\d{1,3}([.,]\d+)?$/.test(t) ? Number(t.replace(",", ".")) : Number.NaN;
 }
 
-/** "lat, long" colado num campo só (Google Maps, planilha) ou um link do Maps: vai para os dois campos. */
+/**
+ * "lat, long" colado num campo só (Google Maps, planilha) ou um link do Maps: vai para os dois campos.
+ * No link de um lugar, o alfinete (!3d...!4d...) vale mais que o centro da tela (@...), que pode estar
+ * a centenas de metros da loja.
+ */
 function coordPair(text: string): [string, string] | null {
   const raw = text.trim();
   const patterns = [
-    /@(-?\d+\.\d+),(-?\d+\.\d+)/,
     /!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/,
+    /@(-?\d+\.\d+),(-?\d+\.\d+)/,
     /[?&](?:q|query|ll)=(-?\d+\.\d+)(?:,|%2C)\s*(-?\d+\.\d+)/i,
     /^(-?\d{1,3}\.\d+)\s*[,;\s]\s*(-?\d{1,3}\.\d+)$/,
     /^(-?\d{1,3},\d+)\s*(?:;|,\s|\s)\s*(-?\d{1,3},\d+)$/,
@@ -172,7 +157,7 @@ function initialForm(location: Location | null, customerId: UUID | null): FormSt
     district: asText(location?.district),
     city: asText(location?.city),
     state: asText(location?.state).toUpperCase(),
-    zip_code: maskZip(asText(location?.zip_code)),
+    zip_code: maskCep(asText(location?.zip_code)),
     latitude: asText(location?.latitude),
     longitude: asText(location?.longitude),
     notes: asText(location?.notes),
@@ -249,6 +234,7 @@ export function LocationDialog({
   const [tried, setTried] = useState(false);
   const [docTouched, setDocTouched] = useState(false);
   const [checked, setChecked] = useState({ code: "", document: "" });
+  const [pasteError, setPasteError] = useState<string | null>(null);
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm((f) => ({ ...f, [key]: value }));
   const editing = location !== null;
 
@@ -309,9 +295,26 @@ export function LocationDialog({
   };
 
   const onCoordChange = (key: "latitude" | "longitude", value: string) => {
-    const pair = coordPair(value);
-    if (pair) setForm((f) => ({ ...f, latitude: pair[0], longitude: pair[1] }));
-    else set(key, value);
+    setPasteError(null);
+    set(key, value);
+  };
+
+  // Colar "lat, long" ou o link do Maps em qualquer um dos dois campos preenche os dois. Só ao colar:
+  // quem digita "-23.55, -46.6..." no campo não tem o texto dividido no meio da digitação.
+  const onCoordPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const text = e.clipboardData.getData("text");
+    const pair = coordPair(text);
+    if (pair) {
+      e.preventDefault();
+      setPasteError(null);
+      setForm((f) => ({ ...f, latitude: pair[0], longitude: pair[1] }));
+    } else if (/^\s*https?:\/\//i.test(text)) {
+      // O link do "Compartilhar" (maps.app.goo.gl) não traz as coordenadas: não entra no campo.
+      e.preventDefault();
+      setPasteError(
+        "Este link do Maps não traz as coordenadas. No Google Maps, clique com o botão direito na loja e copie os números do topo do menu.",
+      );
+    }
   };
 
   return (
@@ -441,7 +444,7 @@ export function LocationDialog({
             <Field label="CEP" className="sm:col-span-2">
               <Input
                 value={form.zip_code}
-                onChange={(e) => set("zip_code", maskZip(e.target.value))}
+                onChange={(e) => set("zip_code", maskCep(e.target.value))}
                 inputMode="numeric"
                 placeholder="00000-000"
                 maxLength={9}
@@ -451,9 +454,10 @@ export function LocationDialog({
               <Input
                 value={form.latitude}
                 onChange={(e) => onCoordChange("latitude", e.target.value)}
+                onPaste={onCoordPaste}
                 inputMode="decimal"
                 placeholder="-23.5505"
-                maxLength={120}
+                maxLength={40}
                 aria-invalid={showCoordsError ? true : undefined}
               />
             </Field>
@@ -461,9 +465,10 @@ export function LocationDialog({
               <Input
                 value={form.longitude}
                 onChange={(e) => onCoordChange("longitude", e.target.value)}
+                onPaste={onCoordPaste}
                 inputMode="decimal"
                 placeholder="-46.6333"
-                maxLength={120}
+                maxLength={40}
                 aria-invalid={showCoordsError ? true : undefined}
               />
             </Field>
@@ -479,7 +484,11 @@ export function LocationDialog({
               </a>
             </div>
           </div>
-          {showCoordsError ? (
+          {pasteError ? (
+            <p className="text-xs font-medium text-red-600 dark:text-red-400" role="alert">
+              {pasteError}
+            </p>
+          ) : showCoordsError ? (
             <p className="flex flex-wrap items-center gap-2 text-xs font-medium text-red-600 dark:text-red-400" role="alert">
               {errors.coords}
               {coords.swapped ? (
@@ -508,8 +517,8 @@ export function LocationDialog({
             </p>
           ) : (
             <p className="text-xs text-ink-subtle">
-              No Google Maps, clique com o botão direito na loja e copie as coordenadas: dá para colar as duas de uma vez em qualquer
-              um dos campos.
+              No Google Maps, clique com o botão direito na loja e copie as coordenadas: dá para colar as duas de uma vez (ou o link
+              do lugar) em qualquer um dos campos.
             </p>
           )}
         </section>

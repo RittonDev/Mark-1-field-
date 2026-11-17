@@ -5,7 +5,7 @@ import clsx from "clsx";
 import { ArrowLeft, Ban, CircleCheck, MapPin, Search, Send, Store } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { Button, Card, EmptyState, ErrorBox, Field, Input, LoadingBlock, PageHeader, Spinner, Textarea } from "@/components/ui";
 import { ApiError, api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -32,12 +32,17 @@ function StorePicker({
   total,
   single,
   labelledBy,
+  searchRef,
+  invalid,
 }: {
   value: PortalLocation | null;
   onChange: (s: PortalLocation | null) => void;
   total: number;
   single: boolean;
   labelledBy: string;
+  /** O campo de busca (o envio sem loja leva o foco para ele). */
+  searchRef: React.Ref<HTMLInputElement>;
+  invalid: boolean;
 }) {
   const [search, setSearch] = useState("");
   const q = useDebounced(search.trim(), 300);
@@ -80,6 +85,7 @@ function StorePicker({
       <div className="relative">
         <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-subtle" />
         <Input
+          ref={searchRef}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           onKeyDown={(e) => {
@@ -91,6 +97,7 @@ function StorePicker({
           placeholder="Nome, código ou cidade da loja"
           className="pl-9"
           aria-label="Buscar loja"
+          aria-invalid={invalid ? true : undefined}
           autoFocus
         />
       </div>
@@ -152,7 +159,9 @@ export default function NewRequestPage() {
   const [urgency, setUrgency] = useState<Level>("medium");
   const [contact, setContact] = useState(() => (userId ? portalMemory.lastContact(userId) : ""));
   const [reference, setReference] = useState("");
-  const [localError, setLocalError] = useState<string | null>(null);
+  const [tried, setTried] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const titleRef = useRef<HTMLInputElement>(null);
   // Empresa com uma loja só: ela já vem escolhida.
   const single = me.data?.locations === 1;
   const onlyStore = useQuery({
@@ -162,6 +171,9 @@ export default function NewRequestPage() {
     staleTime: 60_000,
   });
   const chosen = store ?? (single ? (onlyStore.data?.[0] ?? null) : null);
+  // Erro no próprio campo depois da primeira tentativa de enviar; some assim que o campo fica certo.
+  const storeError = tried && !chosen ? "Escolha a loja da solicitação." : null;
+  const titleError = tried && title.trim().length < 3 ? "Diga em poucas palavras o que aconteceu (pelo menos 3 letras)." : null;
 
   const send = useMutation({
     mutationFn: (location: PortalLocation) =>
@@ -198,7 +210,9 @@ export default function NewRequestPage() {
     return (
       <Card className="animate-rise px-6 py-10 text-center">
         <div role="status">
-          <CircleCheck className="mx-auto size-12 text-emerald-600 dark:text-emerald-400" aria-hidden />
+          <span aria-hidden className="mx-auto flex size-12 items-center justify-center rounded-full bg-brand-soft text-brand-ink">
+            <CircleCheck className="size-6" />
+          </span>
           <h1 ref={focusOnMount} tabIndex={-1} className="mt-4 text-xl font-bold tracking-[-0.02em] text-ink outline-none">
             Solicitação enviada
           </h1>
@@ -215,6 +229,7 @@ export default function NewRequestPage() {
           <Button
             onClick={() => {
               send.reset();
+              setTried(false);
               setTitle("");
               setDescription("");
               setReference("");
@@ -267,9 +282,16 @@ export default function NewRequestPage() {
           noValidate
           onSubmit={(e) => {
             e.preventDefault();
-            if (!chosen) return setLocalError("Escolha a loja.");
-            if (title.trim().length < 3) return setLocalError("Diga em poucas palavras o que aconteceu.");
-            setLocalError(null);
+            setTried(true);
+            // O foco vai para o primeiro campo que falta (o leitor de tela lê o erro dele).
+            if (!chosen) {
+              searchRef.current?.focus();
+              return;
+            }
+            if (title.trim().length < 3) {
+              titleRef.current?.focus();
+              return;
+            }
             send.mutate(chosen);
           }}
         >
@@ -277,7 +299,7 @@ export default function NewRequestPage() {
               cartão da loja ia para o "Trocar" e o clique no rótulo marcava "Pode esperar"). */}
           <div className="flex flex-col gap-1.5">
             <span id={storeLabel} className="text-xs font-semibold text-ink/80">
-              Loja<span className="text-red-500"> *</span>
+              Loja<span className="text-red-600 dark:text-red-400"> *</span>
             </span>
             {single && !chosen && onlyStore.isLoading ? (
               <p className="flex h-9 items-center gap-2 text-sm text-ink-muted">
@@ -287,26 +309,29 @@ export default function NewRequestPage() {
             ) : (
               <StorePicker
                 value={chosen}
-                onChange={(s) => {
-                  setStore(s);
-                  setLocalError(null);
-                }}
+                onChange={setStore}
                 total={me.data?.locations ?? 0}
                 single={single}
                 labelledBy={storeLabel}
+                searchRef={searchRef}
+                invalid={Boolean(storeError)}
               />
             )}
+            {storeError ? (
+              <span role="alert" className="text-xs font-medium text-red-600 dark:text-red-400">
+                {storeError}
+              </span>
+            ) : null}
           </div>
 
-          <Field label="O que aconteceu?" required>
+          <Field label="O que aconteceu?" required error={titleError}>
             <Input
+              ref={titleRef}
               value={title}
-              onChange={(e) => {
-                setTitle(e.target.value);
-                setLocalError(null);
-              }}
+              onChange={(e) => setTitle(e.target.value)}
               placeholder="Ex.: PDV 2 sem rede, impressora fiscal não liga"
               maxLength={200}
+              aria-invalid={titleError ? true : undefined}
             />
           </Field>
 
@@ -370,7 +395,7 @@ export default function NewRequestPage() {
             </Field>
           </div>
 
-          {localError || send.error ? <ErrorBox message={localError ?? errorMessage(send.error)} /> : null}
+          {send.error ? <ErrorBox message={errorMessage(send.error)} /> : null}
 
           <div className="flex justify-end">
             <Button type="submit" variant="primary" size="lg" loading={send.isPending} className="w-full sm:w-auto">

@@ -55,7 +55,7 @@ import { canManageTickets } from "@/lib/constants";
 import { downloadCsv } from "@/lib/download";
 import { formatDate, formatMoney, formatRelative, initials } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
-import { labelMap, maskPhone, resizePhotoBlob, UFS, useOnboardingCatalog } from "@/lib/onboarding";
+import { labelMap, maskCep, maskPhone, resizePhotoBlob, UFS, useOnboardingCatalog } from "@/lib/onboarding";
 import { useServiceTypes, useTeams } from "@/lib/queries";
 import { Tabs } from "@/components/motion";
 import { InviteDialog } from "@/components/technicians/InviteDialog";
@@ -600,10 +600,10 @@ function AppStatus({ tech, now }: { tech: Technician; now: number }) {
     <span className="flex flex-col gap-0.5 text-xs">
       {tech.on_shift ? (
         <Link
-          href="/mapa"
+          href={`/mapa?tecnico=${tech.id}`}
           onClick={(e) => e.stopPropagation()}
           className="inline-flex items-center gap-1 font-medium text-ink underline-offset-2 hover:text-brand hover:underline"
-          title="Ver no mapa ao vivo"
+          title={`Ver ${tech.name} no mapa ao vivo`}
         >
           <span aria-hidden className="size-1.5 rounded-full bg-emerald-600" />
           Em jornada
@@ -943,22 +943,6 @@ function EditDialog({ tech, onClose }: { tech: Technician; onClose: () => void }
     onError: (e) => toast({ title: errorMessage(e), tone: "error" }),
   });
 
-  const requestClose = async () => {
-    if (
-      dirty &&
-      !(await confirm({
-        tone: "danger",
-        title: "Descartar as alterações?",
-        description: "O que você mudou neste técnico ainda não foi salvo.",
-        confirmLabel: "Descartar",
-        cancelLabel: "Continuar editando",
-      }))
-    ) {
-      return;
-    }
-    onClose();
-  };
-
   const submit = async () => {
     const found = validateTechnician(form);
     setProblem(found);
@@ -968,9 +952,13 @@ function EditDialog({ tech, onClose }: { tech: Technician; onClose: () => void }
       const ok = await confirm({
         tone: "danger",
         title: `Desativar ${tech.name}?`,
-        description: open
-          ? `Ele sai do app na hora e some do mapa e das sugestões. As ${open} OS abertas dele continuam com ele: reatribua em Chamados.`
-          : "Ele sai do app na hora e some do mapa e das sugestões.",
+        description: `Ele sai do app na hora e some do mapa e das sugestões.${
+          open === 1
+            ? " A OS aberta dele continua com ele: reatribua em Chamados."
+            : open
+              ? ` As ${open} OS abertas dele continuam com ele: reatribua em Chamados.`
+              : ""
+        }`,
         confirmLabel: "Desativar",
       });
       if (!ok) return;
@@ -1001,14 +989,17 @@ function EditDialog({ tech, onClose }: { tech: Technician; onClose: () => void }
     <Dialog
       open
       size="lg"
-      onClose={requestClose}
+      onClose={onClose}
+      // Com alterações (campos, endereço, jornada, até 200 serviços), clique fora, Esc e o X perguntam
+      // antes de descartar, e fechar a aba também.
+      dirty={dirty}
       // Salvando ou gerando a senha provisória (que só aparece uma vez): o diálogo espera terminar.
       busy={save.isPending || reset.isPending}
       title={current.name}
       description={current.job_title ?? "Técnico"}
       footer={
         <>
-          <Button onClick={requestClose} disabled={save.isPending || reset.isPending}>
+          <Button onClick={onClose} disabled={save.isPending || reset.isPending}>
             Cancelar
           </Button>
           <Button variant="primary" type="submit" form="tech-edit-form" loading={save.isPending}>
@@ -1088,7 +1079,7 @@ function EditDialog({ tech, onClose }: { tech: Technician; onClose: () => void }
                   target="_blank"
                   className="font-medium text-ink underline underline-offset-2 hover:text-brand"
                 >
-                  Ver as {current.open_tickets} OS abertas dele
+                  {current.open_tickets === 1 ? "Ver a OS aberta dele" : `Ver as ${current.open_tickets} OS abertas dele`}
                 </Link>
               </>
             ) : null}
@@ -1113,7 +1104,13 @@ function EditDialog({ tech, onClose }: { tech: Technician; onClose: () => void }
               <Input value={address.district} onChange={(e) => setAddress((a) => ({ ...a, district: e.target.value }))} maxLength={120} />
             </Field>
             <Field label="CEP">
-              <Input value={address.zip} onChange={(e) => setAddress((a) => ({ ...a, zip: e.target.value }))} inputMode="numeric" maxLength={9} />
+              <Input
+                value={address.zip}
+                onChange={(e) => setAddress((a) => ({ ...a, zip: maskCep(e.target.value) }))}
+                inputMode="numeric"
+                placeholder="00000-000"
+                maxLength={9}
+              />
             </Field>
           </div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">

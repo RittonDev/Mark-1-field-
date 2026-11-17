@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useId, useMemo, useState } from "react";
 import { type GridColumn, MonthView, TimeGrid } from "@/components/calendar/CalendarViews";
 import { PriorityBadge, StatusBadge } from "@/components/badges";
 import { LocationPicker } from "@/components/LocationPicker";
@@ -52,19 +52,23 @@ import {
   colorMap,
   dayKey,
   eventsOnDay,
+  formatDay,
+  fromWall,
   hhmm,
   OPERATION_TIMEZONE,
+  operationToday,
   parseDayKey,
   rangeTitle,
   sameDay,
   shiftAnchor,
   technicianColor,
+  toWall,
   UNASSIGNED_COLOR,
   visibleRange,
   WEEKDAYS_SHORT,
 } from "@/lib/calendar";
 import { canManageTickets } from "@/lib/constants";
-import { formatMinutes, formatShort, fromLocalInput, toLocalInput } from "@/lib/format";
+import { formatMinutes, formatShort, formatTime, fromLocalInput, toLocalInput } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
 import { useCustomers, useTeams } from "@/lib/queries";
 import type { CalendarEvent, ConflictItem, Location, TicketDetail, TicketStatus } from "@/lib/types";
@@ -86,7 +90,8 @@ const RESCHEDULABLE: TicketStatus[] = [
   "reopened",
 ];
 
-/** O fuso do computador quando o relógio dele difere do da operação (senão null). */
+/** O fuso do computador quando o relógio dele difere do da operação (senão null): a agenda mostra
+ *  sempre o horário de Brasília e avisa quem está com outro relógio. */
 function foreignTimeZone(): string | null {
   const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   if (!zone || zone === OPERATION_TIMEZONE) return null;
@@ -112,7 +117,8 @@ function AgendaView() {
     const value = searchParams.get("v");
     return value === "month" || value === "day" ? value : "week";
   });
-  const [anchor, setAnchor] = useState(() => parseDayKey(searchParams.get("d")) ?? new Date());
+  // Dias e horas no relógio da operação (lib/calendar): hoje é o de Brasília.
+  const [anchor, setAnchor] = useState(() => parseDayKey(searchParams.get("d")) ?? operationToday());
   const [techIds, setTechIds] = useState<string[]>(() => (searchParams.get("tec") ?? "").split(",").filter(isUuid));
   const [techSearch, setTechSearch] = useState("");
   const [unassigned, setUnassigned] = useState(false);
@@ -132,6 +138,7 @@ function AgendaView() {
   // "Abrir OS" fecha a prévia e abre a OS no painel lateral, com o calendário à vista.
   const ticketPanel = useTicketPanel();
   const city = useDebounced(cityInput.trim());
+  const locationLabelId = useId();
 
   const technicians = useActiveTechnicians();
   const teams = useTeams();
@@ -142,8 +149,8 @@ function AgendaView() {
   const { start, end, days } = visibleRange(view, anchor);
 
   const params: Query = {
-    start: start.toISOString(),
-    end: end.toISOString(),
+    start: fromWall(start).toISOString(),
+    end: fromWall(end).toISOString(),
     assignee_id: techIds.length ? techIds : undefined,
     unassigned: unassigned || undefined,
     team_id: teamId || undefined,
@@ -174,7 +181,7 @@ function AgendaView() {
   useEffect(() => {
     replaceSearch({
       v: view === "week" ? null : view,
-      d: sameDay(anchor, new Date()) ? null : dayKey(anchor),
+      d: sameDay(anchor, operationToday()) ? null : dayKey(anchor),
       tec: techIds.length ? techIds.join(",") : null,
     });
   }, [view, anchor, techIds]);
@@ -222,7 +229,7 @@ function AgendaView() {
       {zone ? (
         <p className="mb-4 flex items-center gap-2 rounded-lg border border-line bg-surface px-3 py-2 text-xs text-ink-muted">
           <Globe className="size-3.5 shrink-0" />
-          Horários no fuso do seu computador ({zone}). A operação usa o horário de Brasília.
+          Dias e horários no horário de Brasília, o da operação. O relógio deste computador está em outro fuso ({zone}).
         </p>
       ) : null}
 
@@ -311,9 +318,14 @@ function AgendaView() {
             {/* Busca com paginação (o cliente maior tem mais de mil lojas). Fora de um <label>: o botão
                 "Trocar" do local escolhido não pode receber o clique do rótulo. */}
             <div className="flex flex-col gap-1.5">
-              <span className="text-xs font-semibold text-ink/80">Local</span>
+              <span id={locationLabelId} className="text-xs font-semibold text-ink/80">
+                Local
+              </span>
               <LocationPicker
                 customerId={customerId || null}
+                customerName={customers.data?.find((c) => c.id === customerId)?.name}
+                onClearCustomer={() => setCustomerId("")}
+                labelledBy={locationLabelId}
                 value={location}
                 onChange={(picked) => {
                   setLocation(picked);
@@ -379,7 +391,7 @@ function AgendaView() {
 
         <Card className="flex min-w-0 flex-col overflow-hidden">
           <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2">
-            <Button onClick={() => setAnchor(new Date())}>Hoje</Button>
+            <Button onClick={() => setAnchor(operationToday())}>Hoje</Button>
             <div className="flex">
               <button
                 type="button"
@@ -445,7 +457,7 @@ function AgendaView() {
             ) : view === "month" ? (
               <MonthView
                 days={days}
-                month={anchor.getMonth()}
+                month={anchor.getUTCMonth()}
                 events={events}
                 colors={colors}
                 onOpen={setOpened}
@@ -509,22 +521,23 @@ export default function AgendaPage() {
 
 /** Cabeçalho do dia na semana: o clique abre o dia por técnico. */
 function DayHeader({ day, onPick }: { day: Date; onPick: () => void }) {
-  const today = sameDay(day, new Date());
+  const today = sameDay(day, operationToday());
   return (
     <button
       type="button"
       onClick={onPick}
-      aria-label={`Ver ${day.toLocaleDateString("pt-BR", { weekday: "long", day: "numeric", month: "long" })} por técnico`}
+      aria-label={`Ver ${formatDay(day, { weekday: "long", day: "numeric", month: "long" })} por técnico`}
+      aria-current={today ? "date" : undefined}
       className="mx-auto flex flex-col items-center rounded-lg px-2 py-0.5 leading-tight transition-colors hover:bg-surface-2"
     >
-      <span className="text-[11px] font-bold tracking-wide text-ink-muted uppercase">{WEEKDAYS_SHORT[day.getDay()]}</span>
+      <span className="text-[11px] font-bold tracking-wide text-ink-muted uppercase">{WEEKDAYS_SHORT[day.getUTCDay()]}</span>
       <span
         className={clsx(
           "mt-0.5 flex size-7 items-center justify-center rounded-full text-sm font-semibold tabular-nums",
           today ? "bg-brand text-white dark:bg-brand-strong" : "text-ink",
         )}
       >
-        {day.getDate()}
+        {day.getUTCDate()}
       </span>
     </button>
   );
@@ -829,8 +842,9 @@ function EventDetails({
   related: CalendarEvent[];
   onOpen: (event: CalendarEvent) => void;
 }) {
-  const start = new Date(event.start);
-  const end = new Date(event.end);
+  // No relógio da operação, como a grade.
+  const start = toWall(event.start);
+  const end = toWall(event.end);
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap gap-1.5">
@@ -838,7 +852,7 @@ function EventDetails({
         <PriorityBadge priority={event.priority} />
       </div>
       <Row icon={<Clock className="size-4" />}>
-        {start.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" })}, {hhmm(start)} –{" "}
+        {formatDay(start, { weekday: "long", day: "2-digit", month: "long" })}, {hhmm(start)} –{" "}
         {sameDay(start, end) ? hhmm(end) : formatShort(event.end)}
         {event.end_is_estimated ? <span className="text-ink-muted"> (fim estimado)</span> : null}
       </Row>
@@ -871,8 +885,8 @@ function EventDetails({
                   onClick={() => onOpen(r)}
                   className="text-left text-xs text-red-900 hover:underline dark:text-red-100"
                 >
-                  <span className="font-mono font-medium">{r.code}</span> · {hhmm(new Date(r.start))}–
-                  {hhmm(new Date(r.end))} · {[r.customer?.name, r.location?.name].filter(Boolean).join(" · ") || r.title}
+                  <span className="font-mono font-medium">{r.code}</span> · {formatTime(r.start)}–{formatTime(r.end)} ·{" "}
+                  {[r.customer?.name, r.location?.name].filter(Boolean).join(" · ") || r.title}
                 </button>
               </li>
             ))}

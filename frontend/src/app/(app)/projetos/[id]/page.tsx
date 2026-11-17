@@ -143,6 +143,14 @@ export default function ProjectPage() {
                 ? `Mostrando as ${items.length} mais recentes de ${totalTickets.toLocaleString("pt-BR")}`
                 : undefined
             }
+            actions={
+              // A lista de OS filtrada pelo projeto: todas (sem o corte de 200), com busca, filtros e exportação.
+              totalTickets > 0 ? (
+                <Link href={`/chamados?project_id=${p.id}`} className="text-xs text-ink-muted hover:text-brand">
+                  Ver na lista de OS
+                </Link>
+              ) : null
+            }
           />
           {tickets.isLoading ? (
             <LoadingBlock />

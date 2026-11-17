@@ -4,7 +4,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { Check, ChevronRight, Copy, KeyRound, MessageCircle, Plus, Users, UsersRound } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useId, useMemo, useState } from "react";
 import { useConfirm } from "@/components/Confirm";
 import { Tabs } from "@/components/motion";
 import { InactiveChip, plural, RowEditButton, RowEditLink, SearchField } from "@/components/settings/shared";
@@ -94,11 +94,14 @@ interface Providers {
   microsoft_domains: string[];
 }
 
-/** Senha forte para conta que entra só pela Microsoft (a API exige uma, mas ela não é usada). */
-function randomPassword(): string {
-  const bytes = new Uint8Array(18);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, (b) => b.toString(36).padStart(2, "0")).join("").slice(0, 24);
+// O mesmo alfabeto das senhas provisórias da API: sem 0/O nem 1/l, fácil de ler e de ditar.
+const PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+
+/** Senha aleatória forte (12 caracteres para entregar à pessoa; 24 para conta que entra pela Microsoft). */
+function generatePassword(length = 12): string {
+  const values = new Uint32Array(length);
+  crypto.getRandomValues(values);
+  return Array.from(values, (n) => PASSWORD_ALPHABET[n % PASSWORD_ALPHABET.length]).join("");
 }
 
 const firstName = (name: string) => name.trim().split(/\s+/)[0] ?? name;
@@ -201,14 +204,21 @@ function technicianAccess(result: TemporaryPassword, reset: boolean): Credential
   };
 }
 
-/** Senha e mensagem prontas, mostradas uma vez. */
-function CredentialsPanel({ credentials }: { credentials: Credentials }) {
+/**
+ * Senha e mensagem prontas, mostradas uma vez. `onHandedOver`: a senha saiu daqui (copiada ou
+ * mandada pelo WhatsApp).
+ */
+function CredentialsPanel({ credentials, onHandedOver }: { credentials: Credentials; onHandedOver: () => void }) {
   const { toast } = useToast();
   const [copied, setCopied] = useState<"secret" | "message" | null>(null);
   const { intro, secret, message, phone } = credentials;
   const copy = async (what: "secret" | "message", text: string) => {
-    if (await copyText(text)) setCopied(what);
-    else toast({ title: "Não foi possível copiar", description: "Selecione o texto e copie com Ctrl+C.", tone: "error" });
+    if (await copyText(text)) {
+      setCopied(what);
+      onHandedOver();
+    } else {
+      toast({ title: "Não foi possível copiar", description: "Selecione o texto e copie com Ctrl+C.", tone: "error" });
+    }
   };
   return (
     <div className="flex flex-col gap-3">
@@ -231,7 +241,13 @@ function CredentialsPanel({ credentials }: { credentials: Credentials }) {
           {copied === "message" ? <Check className="size-4" /> : <Copy className="size-4" />}
           {copied === "message" ? "Mensagem copiada" : "Copiar mensagem"}
         </Button>
-        <a href={whatsappUrl(phone, message)} target="_blank" rel="noreferrer" className={buttonClassName("secondary")}>
+        <a
+          href={whatsappUrl(phone, message)}
+          target="_blank"
+          rel="noreferrer"
+          onClick={onHandedOver}
+          className={buttonClassName("secondary")}
+        >
           <MessageCircle className="size-4" />
           Enviar por WhatsApp
         </a>
@@ -277,9 +293,15 @@ function UserDialog({ user, onClose }: { user: User | null; onClose: () => void 
   }));
   const [form, setForm] = useState(initial);
   const [password, setPassword] = useState("");
+  // Senha gerada fica à vista (dá para conferir antes de salvar).
+  const [revealed, setRevealed] = useState(false);
+  const passwordId = useId();
+  const passwordHintId = useId();
   // Editando, a senha fica escondida até alguém pedir para trocar (o navegador não preenche sozinho).
   const [changingPassword, setChangingPassword] = useState(!editing);
   const [credentials, setCredentials] = useState<Credentials | null>(null);
+  // A senha mostrada já foi copiada ou enviada: fechar antes disso pergunta (ela não aparece de novo).
+  const [handedOver, setHandedOver] = useState(false);
   const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) => setForm((f) => ({ ...f, [key]: value }));
 
   // Usuário do cliente fica ligado à empresa (o portal mostra as solicitações de todas as lojas dela).
@@ -351,7 +373,8 @@ function UserDialog({ user, onClose }: { user: User | null; onClose: () => void 
         if (settingPassword) body.password = password;
         return { kind: "updated", user: await api.patch<User>(`/users/${user.id}`, body), password: settingPassword ? password : null };
       }
-      const secret = microsoftOnly ? randomPassword() : password;
+      // Conta que entra pela Microsoft: a API exige uma senha, mas ela não é usada.
+      const secret = microsoftOnly ? generatePassword(24) : password;
       const created = await api.post<User>("/users", { ...body, password: secret });
       return { kind: "created", user: created, password: microsoftOnly ? null : secret };
     },
@@ -407,18 +430,35 @@ function UserDialog({ user, onClose }: { user: User | null; onClose: () => void 
   };
 
   if (credentials) {
+    // Um clique fora sem querer não pode levar a senha embora antes de ela chegar à pessoa.
+    const closeCredentials = async () => {
+      if (
+        credentials.secret &&
+        !handedOver &&
+        !(await confirm({
+          title: "Fechar sem copiar a senha?",
+          description: "Por segurança, ela não aparece de novo. Para passar o acesso depois, será preciso gerar outra senha.",
+          confirmLabel: "Fechar mesmo assim",
+          cancelLabel: "Voltar",
+          tone: "danger",
+        }))
+      ) {
+        return;
+      }
+      onClose();
+    };
     return (
       <Dialog
         open
-        onClose={onClose}
+        onClose={closeCredentials}
         title={credentials.title}
         footer={
-          <Button variant="primary" onClick={onClose}>
+          <Button variant="primary" onClick={closeCredentials}>
             Concluir
           </Button>
         }
       >
-        <CredentialsPanel credentials={credentials} />
+        <CredentialsPanel credentials={credentials} onHandedOver={() => setHandedOver(true)} />
       </Dialog>
     );
   }
@@ -549,28 +589,44 @@ function UserDialog({ user, onClose }: { user: User | null; onClose: () => void 
             conta (no seu nome, no menu lateral): ela pede a senha atual e você continua conectado.
           </p>
         ) : changingPassword ? (
-          <Field
-            label={editing ? "Nova senha" : "Senha"}
-            required={!editing}
-            className="sm:col-span-2"
-            hint={
-              editing
-                ? "Mínimo de 8 caracteres. Quem estiver conectado com esta conta sai na hora; depois de salvar, aparece a mensagem pronta para enviar."
-                : "Mínimo de 8 caracteres. Depois de salvar, aparece a mensagem pronta para enviar."
-            }
-          >
-            <Input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required={!editing}
-              minLength={8}
-              maxLength={128}
-              autoComplete="new-password"
-              autoFocus={editing}
-              {...NO_AUTOFILL}
-            />
-          </Field>
+          // Rótulo próprio (e não o Field): o botão "Gerar senha" fica ao lado do campo, fora do rótulo.
+          <div className="flex flex-col gap-1.5 sm:col-span-2">
+            <label htmlFor={passwordId} className="text-xs font-semibold text-ink/80">
+              {editing ? "Nova senha" : "Senha"}
+              {editing ? null : <span className="text-red-600 dark:text-red-400"> *</span>}
+            </label>
+            <div className="flex gap-2">
+              <Input
+                id={passwordId}
+                type={revealed ? "text" : "password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required={!editing}
+                minLength={8}
+                maxLength={128}
+                autoComplete="new-password"
+                autoFocus={editing}
+                spellCheck={false}
+                aria-describedby={passwordHintId}
+                className={revealed ? "min-w-0 flex-1 font-mono" : "min-w-0 flex-1"}
+                {...NO_AUTOFILL}
+              />
+              <Button
+                onClick={() => {
+                  setPassword(generatePassword());
+                  setRevealed(true);
+                }}
+              >
+                <KeyRound className="size-4" />
+                Gerar senha
+              </Button>
+            </div>
+            <span id={passwordHintId} className="text-xs text-ink-subtle">
+              {editing
+                ? "Mínimo de 8 caracteres (ou gere uma forte). Quem estiver conectado com esta conta sai na hora; depois de salvar, aparece a mensagem pronta para enviar."
+                : "Mínimo de 8 caracteres (ou gere uma forte). Depois de salvar, aparece a mensagem pronta para enviar."}
+            </span>
+          </div>
         ) : (
           <div className="sm:col-span-2">
             <Button size="sm" variant="ghost" onClick={() => setChangingPassword(true)}>

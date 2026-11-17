@@ -1,6 +1,6 @@
 "use client";
 
-import { Copy, Mail, MessageCircle, Phone, Plus, Smartphone, Star, X } from "lucide-react";
+import { Copy, Mail, MessageCircle, Phone, Plus, Smartphone, X } from "lucide-react";
 import { useId, useState } from "react";
 import { useToast } from "@/components/Toaster";
 import { Button, Input, Select } from "@/components/ui";
@@ -43,12 +43,17 @@ export function formatPhone(value: string): string {
 }
 
 /**
- * Link para ligar. O número gravado com o DDI ("5511999998888") vai como internacional (+55...):
- * sem o "+", o celular e o softphone discam 5511... como se fosse um número local.
+ * Link para ligar, sempre no formato internacional (+55 DDD número): o celular e o softphone completam
+ * a ligação de qualquer DDD. Sem o "+", "5511..." seria discado como número local, e o número de outro
+ * DDD sem o 0 + operadora não completa. 0800/0300 e números curtos (4004-...) vão como estão; o número
+ * de fora do país, digitado com "+", também.
  */
 function telLink(value: string): string {
   const d = digits(value);
-  return d.startsWith("55") && (d.length === 12 || d.length === 13) ? `tel:+${d}` : `tel:${d}`;
+  if (value.trim().startsWith("+")) return `tel:+${d}`;
+  if (/^0[3589]00/.test(d)) return `tel:${d}`;
+  const n = national(value);
+  return n.length === 10 || n.length === 11 ? `tel:+55${n}` : `tel:${d}`;
 }
 
 /** Todos os contatos do cadastro, com atalhos para copiar, ligar, e-mail e WhatsApp. */
@@ -64,19 +69,20 @@ export function ContactList({ contacts, empty = "Nenhum contato cadastrado." }: 
         const mobile = isPhone && (c.label === "mobile" || national(c.value).length === 11);
         const Icon = isPhone ? (mobile ? Smartphone : Phone) : Mail;
         const shown = isPhone ? formatPhone(c.value) : c.value;
+        // "Principal" só quando há mais de um do mesmo tipo (com um só, ele é o principal por definição).
+        const marked = c.primary && list.filter((x) => x.kind === c.kind).length > 1;
         return (
           <li key={`${c.kind}-${c.value}-${i}`} className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
             <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-ink-subtle">
               <Icon className="size-4" />
             </span>
             <div className="min-w-0 flex-1">
-              <p className="flex items-center gap-1.5 truncate text-sm font-semibold text-ink">
+              <p className="flex items-center gap-1.5 text-sm font-semibold text-ink">
                 <span className="truncate">{shown}</span>
-                {c.primary ? (
-                  <>
-                    <Star aria-hidden className="size-3 shrink-0 fill-amber-400 text-amber-400" />
-                    <span className="sr-only">(principal)</span>
-                  </>
+                {marked ? (
+                  <span className="shrink-0 rounded-md bg-surface-2 px-1.5 py-px text-[10px] font-semibold text-ink-muted ring-1 ring-line ring-inset">
+                    Principal
+                  </span>
                 ) : null}
               </p>
               <p className="truncate text-xs text-ink-subtle">
@@ -91,7 +97,7 @@ export function ContactList({ contacts, empty = "Nenhum contato cadastrado." }: 
                       href={whatsappLink(c.value)}
                       target="_blank"
                       rel="noreferrer"
-                      className="rounded-md p-1.5 text-emerald-600 transition-colors hover:bg-emerald-50 dark:hover:bg-emerald-500/10"
+                      className="rounded-md p-1.5 text-ink-subtle transition-colors hover:bg-surface-2 hover:text-ink"
                       aria-label={`WhatsApp ${shown}`}
                       title="WhatsApp"
                     >

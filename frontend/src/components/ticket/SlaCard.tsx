@@ -22,6 +22,11 @@ function JustifyDialog({ ticket, onClose }: { ticket: TicketDetail; onClose: () 
     resolution: ticket.resolution_violation_reason?.id ?? "",
     note: ticket.violation_note ?? "",
   });
+  // Motivo escolhido ou detalhe digitado: fechar pergunta antes de descartar.
+  const dirty =
+    values.response !== (ticket.response_violation_reason?.id ?? "") ||
+    values.resolution !== (ticket.resolution_violation_reason?.id ?? "") ||
+    values.note.trim() !== (ticket.violation_note ?? "").trim();
   const mutation = useMutation({
     mutationFn: () => {
       const changed = changedViolation(values, current);
@@ -43,6 +48,7 @@ function JustifyDialog({ ticket, onClose }: { ticket: TicketDetail; onClose: () 
     <Dialog
       open
       onClose={onClose}
+      dirty={dirty}
       busy={mutation.isPending}
       title={`Justificar violação · ${ticket.code}`}
       footer={

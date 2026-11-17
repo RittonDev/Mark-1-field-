@@ -323,7 +323,9 @@ function QuoteList() {
   const [period, setPeriod] = useState(RECENT);
   const [status, setStatus] = useState<QuoteStatus | "">("");
   const [search, setSearch] = useState("");
-  const term = useDebounced(normalize(search.trim()), 200);
+  // A busca depois de uma pausa na digitação: filtra a lista na tela e, no período grande, vai para a API.
+  const query = useDebounced(search.trim(), 250);
+  const term = normalize(query);
   // Guardam a linha do clique; a tela usa a versão mais nova da lista (o cliente pode responder com a janela aberta).
   const [opened, setOpened] = useState<QuoteListRow | null>(null);
   const [editing, setEditing] = useState<QuoteListRow | null>(null);
@@ -338,8 +340,8 @@ function QuoteList() {
     queryFn: ({ signal }) => api.get<QuoteListRow[]>("/quotes", periodRange(period), { signal }),
     placeholderData: keepPreviousData,
   });
-  // O período passou do limite da lista (ex.: "Todo o período"): os contadores vêm somados pela API e
-  // a situação escolhida é filtrada lá, para chegar também aos orçamentos mais antigos.
+  // O período passou do limite da lista (ex.: "Todo o período"): os contadores vêm somados pela API, e a
+  // situação e a busca são filtradas lá, para chegar também aos orçamentos mais antigos.
   const capped = !quotes.isPlaceholderData && (quotes.data?.length ?? 0) >= LIST_LIMIT;
   const totals = useQuery({
     queryKey: ["quotes", "summary", period],
@@ -348,10 +350,11 @@ function QuoteList() {
     // Sem o resumo (servidor antigo, falha passageira), os contadores somam a lista que veio.
     retry: false,
   });
-  const ofStatus = useQuery({
-    queryKey: ["quotes", period, status],
-    queryFn: ({ signal }) => api.get<QuoteListRow[]>("/quotes", { ...periodRange(period), status }, { signal }),
-    enabled: capped && Boolean(status),
+  const narrowing = capped && Boolean(status || query);
+  const narrowed = useQuery({
+    queryKey: ["quotes", period, status, query],
+    queryFn: ({ signal }) => api.get<QuoteListRow[]>("/quotes", { ...periodRange(period), status, q: query }, { signal }),
+    enabled: narrowing,
     placeholderData: keepPreviousData,
   });
   const refresh = (ticketId: string) => {
@@ -368,9 +371,11 @@ function QuoteList() {
     },
     onError: (e) => toast({ title: "Não foi possível enviar", description: errorMessage(e), tone: "error" }),
   });
-  // A situação filtrada pela API vale quando já chegou (enquanto carrega, o recorte da lista do período).
-  const serverRows = capped && status && ofStatus.data && !ofStatus.isPlaceholderData ? ofStatus.data : null;
+  // O filtro da API vale quando já chegou (enquanto carrega, o recorte da lista do período).
+  const serverRows = narrowing && narrowed.data && !narrowed.isPlaceholderData ? narrowed.data : null;
   const rows = serverRows ?? quotes.data;
+  // A API ainda vai responder: uma lista vazia aqui não quer dizer que não há orçamento.
+  const waiting = narrowing && !serverRows && narrowed.isFetching;
   const summary = useMemo(() => {
     const by = totals.data?.by_status ?? countByStatus(quotes.data ?? []);
     const count = CHIPS.reduce((n, { key }) => n + by[key].count, 0);
@@ -383,12 +388,15 @@ function QuoteList() {
       (rows ?? []).filter(
         (q) =>
           (!status || q.status === status) &&
-          (!term || matches(term, `${q.code} ${q.ticket_code} ${q.title} ${q.customer ?? ""} ${q.location ?? ""}`)),
+          // A busca da API já filtrou (ela também olha o título da OS): aqui só a lista do período.
+          (serverRows !== null || !term || matches(term, `${q.code} ${q.ticket_code} ${q.title} ${q.customer ?? ""} ${q.location ?? ""}`)),
       ),
-    [rows, status, term],
+    [rows, serverRows, status, term],
   );
-  // Trocou de período, ou a situação ainda vem da API: a lista na tela é a anterior (fica apagada).
-  const listStale = quotes.isPlaceholderData || (capped && Boolean(status) && !serverRows && ofStatus.isFetching);
+  // Trocou de período, ou o filtro ainda vem da API: a lista na tela é a anterior (fica apagada).
+  const listStale = quotes.isPlaceholderData || waiting;
+  const listError = quotes.error ?? (narrowing && !serverRows ? narrowed.error : null);
+  const retry = () => void (quotes.error ? quotes.refetch() : narrowed.refetch());
   const latest = (q: QuoteListRow | null) => (q ? (rows?.find((r) => r.id === q.id) ?? q) : null);
   const openedQuote = latest(opened);
   const sharingQuote = latest(sharing);
@@ -427,6 +435,7 @@ function QuoteList() {
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Nº, OS, cliente, loja ou título"
             aria-label="Buscar orçamentos"
+            maxLength={200}
             className="pl-9"
           />
         </div>
@@ -471,150 +480,154 @@ function QuoteList() {
       </div>
       {capped && !(serverRows && serverRows.length < LIST_LIMIT) ? (
         <p className="mb-3 text-xs text-ink-muted">
-          {status && serverRows
-            ? `Mostrando os ${intFmt(LIST_LIMIT)} orçamentos mais recentes nesta situação: escolha um mês para ver todos.`
+          {serverRows
+            ? `Mostrando os ${intFmt(LIST_LIMIT)} orçamentos mais recentes que batem com o filtro: escolha um mês para ver todos.`
             : `A lista traz os ${intFmt(LIST_LIMIT)} orçamentos mais recentes do período${summary.exact ? " (os números acima somam todos)" : ""}: escolha um mês para ver todos.`}
         </p>
       ) : null}
       <Card>
-        {quotes.isLoading ? (
+        {quotes.isLoading || (waiting && visible.length === 0) ? (
           <LoadingBlock />
         ) : quotes.error && !rows ? (
           <div className="p-4">
             <ErrorBox message={errorMessage(quotes.error)} onRetry={() => void quotes.refetch()} />
           </div>
-        ) : visible.length === 0 ? (
-          <EmptyState
-            icon={<FileText className="size-6" />}
-            title={filtered ? "Nenhum orçamento encontrado" : "Nenhum orçamento no período"}
-            description={
-              filtered
-                ? "Tente outra busca, outra situação ou um período maior."
-                : "Crie aqui, em Novo orçamento, ou dentro da OS, no quadro Orçamentos."
-            }
-            action={
-              filtered ? (
-                <Button
-                  onClick={() => {
-                    setSearch("");
-                    setStatus("");
-                  }}
-                >
-                  Limpar busca e situação
-                </Button>
-              ) : undefined
-            }
-          />
         ) : (
           <>
-            {quotes.error ? (
-              <div className="p-4 pb-0">
-                <ErrorBox message={errorMessage(quotes.error)} onRetry={() => void quotes.refetch()} />
+            {listError ? (
+              <div className={clsx("p-4", visible.length > 0 && "pb-0")}>
+                <ErrorBox message={errorMessage(listError)} onRetry={retry} />
               </div>
             ) : null}
-            <div className={clsx("transition-opacity duration-150", listStale && "opacity-60")} aria-busy={quotes.isFetching || ofStatus.isFetching}>
-              <Table label="Orçamentos do período">
-                <thead>
-                  <tr>
-                    <Th>Orçamento</Th>
-                    <Th>OS / cliente</Th>
-                    <Th className="text-right">Total</Th>
-                    <Th>Validade</Th>
-                    <Th>Situação</Th>
-                    <Th className="hidden lg:table-cell">Criado</Th>
-                    <Th className="edit-col">Editar</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visible.map((q) => {
-                    const detail = statusDetail(q);
-                    const place = placeOf(q);
-                    return (
-                      <tr
-                        key={q.id}
-                        onClick={(e) => {
-                          // Só o clique na própria linha (não o que vem de uma janela aberta a partir dela).
-                          if (e.currentTarget.contains(e.target as Node)) setOpened(q);
+            {visible.length === 0 ? (
+              listError ? null : (
+                <EmptyState
+                  icon={<FileText className="size-6" />}
+                  title={filtered ? "Nenhum orçamento encontrado" : "Nenhum orçamento no período"}
+                  description={
+                    filtered
+                      ? "Tente outra busca, outra situação ou um período maior."
+                      : "Crie aqui, em Novo orçamento, ou dentro da OS, no quadro Orçamentos."
+                  }
+                  action={
+                    filtered ? (
+                      <Button
+                        onClick={() => {
+                          setSearch("");
+                          setStatus("");
                         }}
-                        className="cursor-pointer transition-colors hover:bg-[var(--row-hover)]"
                       >
-                        <Td className="max-w-[18rem]">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setOpened(q);
-                            }}
-                            className="block max-w-full text-left"
-                            title={q.title}
-                          >
-                            <span className="block font-mono text-xs text-ink-subtle">{q.code}</span>
-                            <span className="block truncate font-semibold text-ink hover:text-brand">{q.title}</span>
-                          </button>
-                        </Td>
-                        <Td>
-                          <TicketLink ticketId={q.ticket_id} className="font-mono text-xs text-brand hover:underline">
-                            {q.ticket_code}
-                          </TicketLink>
-                          <span className="block max-w-44 truncate text-xs text-ink-muted xl:max-w-64" title={place || undefined}>
-                            {place || "—"}
-                          </span>
-                        </Td>
-                        <Td className="text-right font-medium whitespace-nowrap tabular-nums">{formatMoney(q.total)}</Td>
-                        <Td className="text-xs whitespace-nowrap">
-                          <Validity quote={q} today={today} />
-                        </Td>
-                        <Td className="whitespace-nowrap">
-                          <Pill color={QUOTE_STATUS[q.status].color}>{QUOTE_STATUS[q.status].label}</Pill>
-                          {detail ? <span className="mt-1 block text-[11px] text-ink-muted">{detail}</span> : null}
-                        </Td>
-                        <Td className="hidden text-xs whitespace-nowrap text-ink-muted lg:table-cell">
-                          {formatDate(q.created_at)}
-                          {q.created_by ? ` · ${q.created_by.name.split(" ")[0]}` : ""}
-                        </Td>
-                        <Td className="edit-col">
-                          <span className="inline-flex items-center gap-1.5">
-                            {needsRenew(q, today) ? (
-                              // Validade vencida: enviar seria recusado; renovar dá a data nova e envia.
-                              <RowAction label={`Renovar o ${q.code} (nova validade)`} onClick={() => setRenewing(q)}>
-                                <CalendarClock className="size-4" />
-                              </RowAction>
-                            ) : q.status === "sent" && q.link ? (
-                              <RowAction label={`Link do ${q.code} para o cliente`} onClick={() => setSharing(q)}>
-                                <Share2 className="size-4" />
-                              </RowAction>
-                            ) : q.status === "draft" || q.status === "sent" ? (
-                              <RowAction
-                                label={q.status === "draft" ? `Enviar o ${q.code} ao cliente` : `Gerar o link do ${q.code}`}
-                                loading={send.isPending && send.variables?.id === q.id}
-                                disabled={send.isPending}
-                                onClick={() => send.mutate(q)}
-                              >
-                                <Send className="size-4" />
-                              </RowAction>
-                            ) : (q.status === "approved" || q.status === "rejected") && q.link ? (
-                              // Já respondido: o link mostra ao cliente o documento com a decisão.
-                              <RowAction label={`Link do ${q.code} (já respondido)`} onClick={() => setSharing(q)}>
-                                <Link2 className="size-4" />
-                              </RowAction>
-                            ) : (
-                              <span className="size-8" aria-hidden />
-                            )}
-                            {QUOTE_EDITABLE.includes(q.status) ? (
-                              <RowAction label={`Editar o ${q.code}`} onClick={() => setEditing(q)}>
-                                <SquarePen className="size-4" />
-                              </RowAction>
-                            ) : (
-                              <span className="size-8" aria-hidden />
-                            )}
-                          </span>
-                        </Td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </Table>
-            </div>
+                        Limpar busca e situação
+                      </Button>
+                    ) : undefined
+                  }
+                />
+              )
+            ) : (
+              <div className={clsx("transition-opacity duration-150", listStale && "opacity-60")} aria-busy={quotes.isFetching || narrowed.isFetching}>
+                <Table label="Orçamentos do período">
+                  <thead>
+                    <tr>
+                      <Th>Orçamento</Th>
+                      <Th>OS / cliente</Th>
+                      <Th className="text-right">Total</Th>
+                      <Th>Validade</Th>
+                      <Th>Situação</Th>
+                      <Th className="hidden lg:table-cell">Criado</Th>
+                      <Th className="edit-col">Editar</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visible.map((q) => {
+                      const detail = statusDetail(q);
+                      const place = placeOf(q);
+                      return (
+                        <tr
+                          key={q.id}
+                          onClick={(e) => {
+                            // Só o clique na própria linha (não o que vem de uma janela aberta a partir dela).
+                            if (e.currentTarget.contains(e.target as Node)) setOpened(q);
+                          }}
+                          className="cursor-pointer transition-colors hover:bg-[var(--row-hover)]"
+                        >
+                          <Td className="max-w-[18rem]">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setOpened(q);
+                              }}
+                              className="block max-w-full text-left"
+                              title={q.title}
+                            >
+                              <span className="block font-mono text-xs text-ink-subtle">{q.code}</span>
+                              <span className="block truncate font-semibold text-ink hover:text-brand">{q.title}</span>
+                            </button>
+                          </Td>
+                          <Td>
+                            <TicketLink ticketId={q.ticket_id} className="font-mono text-xs text-brand hover:underline">
+                              {q.ticket_code}
+                            </TicketLink>
+                            <span className="block max-w-44 truncate text-xs text-ink-muted xl:max-w-64" title={place || undefined}>
+                              {place || "—"}
+                            </span>
+                          </Td>
+                          <Td className="text-right font-medium whitespace-nowrap tabular-nums">{formatMoney(q.total)}</Td>
+                          <Td className="text-xs whitespace-nowrap">
+                            <Validity quote={q} today={today} />
+                          </Td>
+                          <Td className="whitespace-nowrap">
+                            <Pill color={QUOTE_STATUS[q.status].color}>{QUOTE_STATUS[q.status].label}</Pill>
+                            {detail ? <span className="mt-1 block text-[11px] text-ink-muted">{detail}</span> : null}
+                          </Td>
+                          <Td className="hidden text-xs whitespace-nowrap text-ink-muted lg:table-cell">
+                            {formatDate(q.created_at)}
+                            {q.created_by ? ` · ${q.created_by.name.split(" ")[0]}` : ""}
+                          </Td>
+                          <Td className="edit-col">
+                            <span className="inline-flex items-center gap-1.5">
+                              {needsRenew(q, today) ? (
+                                // Validade vencida: enviar seria recusado; renovar dá a data nova e envia.
+                                <RowAction label={`Renovar o ${q.code} (nova validade)`} onClick={() => setRenewing(q)}>
+                                  <CalendarClock className="size-4" />
+                                </RowAction>
+                              ) : q.status === "sent" && q.link ? (
+                                <RowAction label={`Link do ${q.code} para o cliente`} onClick={() => setSharing(q)}>
+                                  <Share2 className="size-4" />
+                                </RowAction>
+                              ) : q.status === "draft" || q.status === "sent" ? (
+                                <RowAction
+                                  label={q.status === "draft" ? `Enviar o ${q.code} ao cliente` : `Gerar o link do ${q.code}`}
+                                  loading={send.isPending && send.variables?.id === q.id}
+                                  disabled={send.isPending}
+                                  onClick={() => send.mutate(q)}
+                                >
+                                  <Send className="size-4" />
+                                </RowAction>
+                              ) : (q.status === "approved" || q.status === "rejected") && q.link ? (
+                                // Já respondido: o link mostra ao cliente o documento com a decisão.
+                                <RowAction label={`Link do ${q.code} (já respondido)`} onClick={() => setSharing(q)}>
+                                  <Link2 className="size-4" />
+                                </RowAction>
+                              ) : (
+                                <span className="size-8" aria-hidden />
+                              )}
+                              {QUOTE_EDITABLE.includes(q.status) ? (
+                                <RowAction label={`Editar o ${q.code}`} onClick={() => setEditing(q)}>
+                                  <SquarePen className="size-4" />
+                                </RowAction>
+                              ) : (
+                                <span className="size-8" aria-hidden />
+                              )}
+                            </span>
+                          </Td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </Table>
+              </div>
+            )}
           </>
         )}
       </Card>

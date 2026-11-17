@@ -752,9 +752,16 @@ async def _set_helpers(
 # --------------------------------------------------------------------------- casos de uso
 
 
+TITLE_TOO_SHORT = "O título precisa de pelo menos 3 caracteres"
+
+
 async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ticket:
     now = utcnow()
     is_requester = actor.role == UserRole.REQUESTER
+    # Só espaços (ou quase) passava no tamanho mínimo e a OS nascia sem título.
+    title = data.title.strip()
+    if len(title) < 3:
+        raise WorkflowError(TITLE_TOO_SHORT)
     refs = await _resolve_refs(
         db,
         customer_id=data.customer_id,
@@ -826,7 +833,7 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
     rules = await field_rules.rules(db)
 
     ticket = Ticket(
-        title=data.title.strip(),
+        title=title,
         description=data.description,
         type=data.type,
         status=S.NEW,
@@ -931,7 +938,7 @@ async def update_ticket(
     if "title" in fields:
         fields["title"] = fields["title"].strip()
         if len(fields["title"]) < 3:
-            raise WorkflowError("O título precisa de pelo menos 3 caracteres")
+            raise WorkflowError(TITLE_TOO_SHORT)
     for key in ("client_reference", "visit_note"):
         if key in fields:
             fields[key] = _clean_text(fields[key], single_line=key == "client_reference")
@@ -1120,6 +1127,9 @@ async def correct_times(
     if not actor.can_manage_tickets:
         raise PermissionDenied(TECHNICIAN_TIME)
     check_version(ticket, data.expected_version)
+    reason = " ".join(data.reason.split())
+    if len(reason) < 3:
+        raise WorkflowError("Explique o motivo da correção (pelo menos 3 letras)")
     now = utcnow()
     events = list(
         await db.scalars(
@@ -1194,19 +1204,19 @@ async def correct_times(
         ticket.resolved_at = data.resolved_at
         if finish_ev is not None:
             finish_ev.created_at = data.resolved_at
-    if not running and ticket.arrived_at is not None and ticket.resolved_at is not None:
+    moved = "arrived_at" in changes or "resolved_at" in changes
+    if ticket.arrived_at is not None and (moved or data.work_minutes is not None):
+        work = ticket.work_seconds
         if data.work_minutes is not None:
             work = data.work_minutes * 60
-        elif "arrived_at" in changes or "resolved_at" in changes:
+        elif arrive_ev is not None:
             # Soma os trechos em "Em atendimento" da linha do tempo corrigida: pausas e o tempo
-            # entre visitas não contam. OS sem esse histórico (migrada): o intervalo todo.
-            work = (
-                _work_from_timeline(events, ticket.resolved_at)
-                if arrive_ev is not None
-                else int((ticket.resolved_at - ticket.arrived_at).total_seconds())
-            )
-        else:
-            work = ticket.work_seconds
+            # entre visitas não contam. Vale também para a OS pausada entre visitas; com o
+            # atendimento correndo, só os trechos já fechados (o atual corre em work_started_at).
+            work = _work_from_timeline(events, None if running else ticket.resolved_at)
+        elif ticket.resolved_at is not None and not running:
+            # OS sem esse histórico (migrada): o intervalo todo.
+            work = int((ticket.resolved_at - ticket.arrived_at).total_seconds())
         if work != ticket.work_seconds:
             changes["work_minutes"] = [ticket.work_seconds // 60, work // 60]
             ticket.work_seconds = work
@@ -1232,7 +1242,7 @@ async def correct_times(
         ticket,
         actor,
         TicketEventType.TIMES_CORRECTED,
-        note=" ".join(data.reason.split()),
+        note=reason,
         data={"changes": changes},
         now=now,
     )
@@ -1446,13 +1456,16 @@ async def add_comment(
 ) -> TicketComment:
     if ticket.status in FINAL and not actor.can_manage_tickets:
         raise WorkflowError("OS encerrada não recebe novos acompanhamentos")
+    body = data.body.strip()
+    if not body:
+        raise WorkflowError("Escreva o acompanhamento")
     now = utcnow()
     is_internal = data.is_internal and actor.is_staff
     comment = TicketComment(
         id=uuid.uuid4(),
         ticket_id=ticket.id,
         author_id=actor.id,
-        body=data.body.strip(),
+        body=body,
         is_internal=is_internal,
         created_at=now,
     )
@@ -1495,6 +1508,9 @@ async def add_worklog(
         raise PermissionDenied(TECHNICIAN_TIME)
     if not can_edit(actor, ticket):
         raise PermissionDenied("Você não pode apontar horas nesta OS")
+    description = data.description.strip()
+    if not description:
+        raise WorkflowError("Descreva o que foi feito")
     now = utcnow()
     minutes = data.minutes
     if minutes is None and data.ended_at is not None:
@@ -1503,7 +1519,7 @@ async def add_worklog(
         id=uuid.uuid4(),
         ticket_id=ticket.id,
         user_id=actor.id,
-        description=data.description.strip(),
+        description=description,
         started_at=data.started_at,
         ended_at=data.ended_at,
         minutes=minutes or 1,
@@ -1598,9 +1614,12 @@ async def update_attachment(
     description: str | None,
     actor: User,
 ) -> TicketAttachment:
-    """Descrição (legenda) do anexo: a gestão em qualquer anexo; o técnico só nos que enviou."""
+    """Descrição (legenda) do anexo: a gestão em qualquer anexo, a qualquer momento; o técnico só
+    nos que enviou e enquanto a OS não foi encerrada (a legenda sai no relatório do cliente)."""
     if not (actor.can_manage_tickets or attachment.uploaded_by_id == actor.id):
         raise PermissionDenied("Você não pode editar este anexo")
+    if ticket.status in FINAL and not actor.can_manage_tickets:
+        raise WorkflowError("OS encerrada: a legenda da foto não pode mais ser alterada")
     now = utcnow()
     attachment.description = _clean_description(description)
     record_event(

@@ -14,9 +14,15 @@ export const FIELD_ACTION: Partial<Record<TicketStatus, string>> = {
   resolved: "Concluir OS",
 };
 
-/** Rótulo da ação para o técnico. Voltar a atender depois de uma pausa da central é "retomar". */
-export function fieldActionLabel(to: TicketStatus, ticket?: Pick<TicketDetail, "arrived_at" | "work_seconds">): string {
-  if (to === "in_progress" && ticket && (ticket.arrived_at || (ticket.work_seconds ?? 0) > 0)) return "Retomar atendimento";
+/** Pausas da central (aguardando cliente ou peça): voltar a atender é "retomar". */
+export const PAUSED_STATUSES: TicketStatus[] = ["on_hold_customer", "on_hold_vendor"];
+
+/**
+ * Rótulo da ação para o técnico. Voltar a atender depois de uma pausa da central é "retomar"; uma
+ * nova visita (OS reaberta, volta depois de visita improdutiva) começa de novo com "iniciar".
+ */
+export function fieldActionLabel(to: TicketStatus, ticket?: Pick<TicketDetail, "status">): string {
+  if (to === "in_progress" && ticket && PAUSED_STATUSES.includes(ticket.status)) return "Retomar atendimento";
   return FIELD_ACTION[to] ?? TRANSITION_ACTION[to];
 }
 

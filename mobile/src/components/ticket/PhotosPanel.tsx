@@ -117,7 +117,8 @@ export const PhotosPanel = memo(function PhotosPanel({
           uri: absoluteApiUrl(a.download_url) ?? "",
           caption: [a.description, a.uploaded_by?.name, `${dayMonth(a.created_at)} ${formatTime(a.created_at)}`].filter(Boolean).join(" · "),
         }));
-  const failed = queue.some((p) => p.attempts > 0);
+  // A tentativa conta antes do envio (uma foto subindo já tem 1): falhou só quem tem o erro anotado.
+  const failed = queue.some((p) => Boolean(p.last_error));
 
   return (
     <View style={{ gap: 12 }}>
@@ -146,14 +147,13 @@ export const PhotosPanel = memo(function PhotosPanel({
           </SectionTitle>
           {!online ? <Text style={styles.note}>Sem conexão: as fotos ficam guardadas e sobem quando a conexão voltar.</Text> : null}
           {queue.map((photo, i) => {
-            const state =
-              photo.attempts > 0
-                ? `Falhou ${photo.attempts}x${photo.last_error ? `: ${photo.last_error}` : ""}. Nova tentativa automática.`
-                : !online
-                  ? "Sem conexão: envia quando voltar"
-                  : sync.syncing
-                    ? "Enviando…"
-                    : "Na fila";
+            const state = photo.last_error
+              ? `Não enviou (${photo.attempts} ${photo.attempts === 1 ? "tentativa" : "tentativas"}): ${photo.last_error}. Nova tentativa automática.`
+              : !online
+                ? "Sem conexão: envia quando voltar"
+                : sync.syncing
+                  ? "Enviando…"
+                  : "Na fila";
             return (
               <View key={photo.id} style={styles.pendingRow}>
                 <Pressable
@@ -168,7 +168,7 @@ export const PhotosPanel = memo(function PhotosPanel({
                   <Text style={styles.meta} numberOfLines={2}>
                     {origin(ticket, photo)}
                   </Text>
-                  <Text style={[styles.meta, photo.attempts > 0 && styles.failed]} numberOfLines={3}>
+                  <Text style={[styles.meta, photo.last_error ? styles.failed : null]} numberOfLines={3}>
                     {state}
                   </Text>
                 </View>
@@ -236,5 +236,5 @@ const makeStyles = (c: Palette) =>
     tile: { width: "48%", gap: 4 },
     tileImage: { width: "100%", aspectRatio: 1, borderRadius: RADIUS.control, backgroundColor: c.line },
     tileMissing: { alignItems: "center", justifyContent: "center" },
-    tileText: { fontSize: 12, color: c.inkMuted },
+    tileText: { fontSize: 13, color: c.inkMuted, lineHeight: 18 },
   });

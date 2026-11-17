@@ -143,10 +143,16 @@ export default function DashboardPage() {
     refetchInterval: 60_000,
   });
 
+  const header = <PageHeader title="Dashboard" description="A operação agora, o dia até aqui e os últimos 30 dias. Atualiza em tempo real." />;
   const data = summary.data;
   // Uma falha ao atualizar mantém os números na tela (com o aviso abaixo do título).
   if (!data) {
-    return summary.error ? <ErrorBox message={errorMessage(summary.error)} onRetry={() => void summary.refetch()} /> : <LoadingBlock />;
+    return (
+      <div className="mx-auto max-w-7xl">
+        {header}
+        {summary.error ? <ErrorBox message={errorMessage(summary.error)} onRetry={() => void summary.refetch()} /> : <LoadingBlock />}
+      </div>
+    );
   }
 
   const openStatuses = STATUS_ORDER.filter((s) => ["open", "active", "pending"].includes(STATUS[s].group));
@@ -170,7 +176,7 @@ export default function DashboardPage() {
 
   return (
     <div className="mx-auto max-w-7xl">
-      <PageHeader title="Dashboard" description="A operação agora, o dia até aqui e os últimos 30 dias. Atualiza em tempo real." />
+      {header}
       {summary.error ? (
         <p role="status" className="-mt-3 mb-4 text-xs text-ink-muted">
           Sem conexão com o servidor: mostrando os números das {formatTime(new Date(summary.dataUpdatedAt).toISOString())}. Tentando de
@@ -203,10 +209,12 @@ export default function DashboardPage() {
           href="/chamados?sla_breached=true"
           hint="Abertos com o prazo estourado"
         />
+        {/* A lista de OS não tem o filtro "em risco": abre as em aberto pelo prazo de solução mais próximo. */}
         <StatTile
           label="SLA em risco"
           value={data.sla_at_risk}
           tone={data.sla_at_risk > 0 ? "warning" : undefined}
+          href="/chamados?open_only=true&order_by=resolution_due_at"
           hint="Perto de estourar o prazo"
         />
       </div>

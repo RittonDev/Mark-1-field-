@@ -376,7 +376,7 @@ export function HistoryTab({ ticketId, store = null }: { ticketId: UUID; store?:
   });
 
   if (events.isLoading) return <LoadingBlock />;
-  if (events.error) return <ErrorBox message={errorMessage(events.error)} />;
+  if (events.error) return <ErrorBox message={errorMessage(events.error)} onRetry={() => void events.refetch()} />;
   const items = [...(events.data ?? [])].sort((a, b) => b.created_at.localeCompare(a.created_at));
   if (items.length === 0) return <EmptyState icon={<History className="size-7" />} title="Sem eventos registrados" />;
 

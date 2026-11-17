@@ -15,7 +15,7 @@ import { Icon } from "../Icon";
 import { PressableScale } from "../motion";
 import { Text } from "../Text";
 import { Badge, Button, Card, ErrorBox, Field, Input, SectionTitle } from "../ui";
-import { capturePhotos } from "./photoCapture";
+import { capturePhotos, type PartDraft } from "./photoCapture";
 import { SheetScaffold } from "./SheetScaffold";
 
 const MAX_PHOTOS = 4;
@@ -127,28 +127,26 @@ export interface PartPhoto {
 
 const toPartPhoto = (asset: Pick<ImagePickerAsset, "uri" | "mimeType">): PartPhoto => ({ uri: asset.uri, mimeType: asset.mimeType });
 
+/** Unidade do rascunho, se for uma das rápidas; senão "un". */
+function knownUnit(unit: string | undefined): string {
+  return unit && (PART_UNITS as readonly string[]).includes(unit) ? unit : "un";
+}
+
 /**
  * Folha "Pedir peça": descrição, quantidade (aceita decimal: 2,5 m de cabo), unidade, observação e
- * fotos. Funciona offline. `initialPhotos`: foto recuperada depois de o Android fechar o app.
+ * fotos. Funciona offline. `initial`: o pedido que estava sendo preenchido quando o Android fechou o
+ * app com a câmera aberta, já com a foto recuperada.
  */
-export function PartRequestSheet({
-  ticket,
-  initialPhotos,
-  onClose,
-}: {
-  ticket: LocalTicket;
-  initialPhotos?: PartPhoto[];
-  onClose: () => void;
-}) {
+export function PartRequestSheet({ ticket, initial, onClose }: { ticket: LocalTicket; initial?: PartDraft; onClose: () => void }) {
   const c = useTheme();
   const styles = useStyles(makeStyles);
   const online = isOnline(useSyncStatus());
   const [open, setOpen] = useState(true);
-  const [description, setDescription] = useState("");
-  const [qtyText, setQtyText] = useState("1");
-  const [unit, setUnit] = useState<string>("un");
-  const [note, setNote] = useState("");
-  const [photos, setPhotos] = useState<PartPhoto[]>(() => (initialPhotos ?? []).slice(0, MAX_PHOTOS));
+  const [description, setDescription] = useState(initial?.description ?? "");
+  const [qtyText, setQtyText] = useState(initial?.quantity || "1");
+  const [unit, setUnit] = useState<string>(() => knownUnit(initial?.unit));
+  const [note, setNote] = useState(initial?.note ?? "");
+  const [photos, setPhotos] = useState<PartPhoto[]>(() => (initial?.photos ?? []).slice(0, MAX_PHOTOS));
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [photoBusy, setPhotoBusy] = useState(false);
@@ -178,7 +176,8 @@ export function PartRequestSheet({
   async function addPhoto(source: "camera" | "library") {
     if (room <= 0) return;
     setPhotoBusy(true);
-    const assets = await capturePhotos(source, { kind: "part", ticketId: ticket.id }, source === "library" ? room : 1);
+    const draft: PartDraft = { description, quantity: qtyText, unit, note, photos };
+    const assets = await capturePhotos(source, { kind: "part", ticketId: ticket.id, draft }, source === "library" ? room : 1);
     setPhotoBusy(false);
     if (assets.length) setPhotos((prev) => [...prev, ...assets.map(toPartPhoto)].slice(0, MAX_PHOTOS));
   }
@@ -228,7 +227,7 @@ export function PartRequestSheet({
           onChangeText={setDescription}
           placeholder="Ex.: Fonte 12V 5A para câmera"
           icon="package"
-          autoFocus={!initialPhotos?.length}
+          autoFocus={!initial}
         />
       </Field>
       <Field label="Quantidade" required hint={unit === "m" ? "Aceita meio metro: 2,5." : undefined}>

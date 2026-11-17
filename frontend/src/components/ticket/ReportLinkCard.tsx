@@ -16,9 +16,13 @@ export function reportMessage(ticket: Pick<TicketDetail, "code" | "title">, url:
   return `Olá! Segue o relatório da ${ticket.code} (${ticket.title}): ${url}`;
 }
 
-/** Aberto pela central: "preview" avisa que não é o cliente abrindo (a contagem de aberturas é dele). */
-export const previewPath = (link: ReportLink) => `${link.path}?preview=1`;
-export const pdfPath = (link: ReportLink) => `${link.path}?pdf=1&preview=1`;
+/**
+ * O relatório aberto pela central, em outra aba. A página manda a sessão de quem está logado e a API não
+ * conta essa abertura como visita do cliente (nem a do técnico da OS).
+ */
+export const previewPath = (link: ReportLink) => link.path;
+/** Abre o relatório e já baixa o PDF (o parâmetro sai do endereço assim que a página carrega). */
+export const pdfPath = (link: ReportLink) => `${link.path}?pdf=1`;
 
 /**
  * Link público do relatório da OS (toda OS tem): o cliente vê o andamento e, concluída, o resultado e o PDF.
@@ -118,10 +122,11 @@ export function ReportLinkCard({ ticket, bare = false }: { ticket: TicketDetail;
               <Download className="size-3.5" />
               Baixar PDF
             </a>
+            {/* Só as visitas do cliente contam: a central e o técnico abrindo o link não entram. */}
             <span className="ml-auto text-xs text-ink-muted">
               {link.views
-                ? `Aberto ${link.views}x${link.last_viewed_at ? ` · último ${formatShort(link.last_viewed_at)}` : ""}`
-                : "Ainda não aberto"}
+                ? `O cliente abriu ${link.views}x${link.last_viewed_at ? ` · última vez ${formatShort(link.last_viewed_at)}` : ""}`
+                : "O cliente ainda não abriu"}
             </span>
           </div>
           <div className="flex flex-wrap gap-1 border-t border-line pt-3">

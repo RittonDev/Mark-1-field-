@@ -14,12 +14,13 @@ const SLOW_SYNC_MS = 1500;
 
 function describe(s: SyncStatus, slow: boolean): { text: string; tone: Tone } {
   const pending = s.pendingOps + s.pendingPhotos;
-  const items = pending === 1 ? "1 item para enviar" : `${pending} itens para enviar`;
+  const count = pending === 1 ? "1 item" : `${pending} itens`;
+  const items = `${count} para enviar`;
   if (s.network === "offline") {
     return { text: pending ? `Sem internet · ${items}, salvos no aparelho` : "Sem internet · suas ações ficam salvas no aparelho", tone: "off" };
   }
   if (s.server === "unreachable") return { text: pending ? `Sem conexão com o servidor · ${items}` : "Sem conexão com o servidor", tone: "warn" };
-  if (s.syncing && (slow || pending)) return { text: pending ? `Enviando · ${items}` : "Sincronizando…", tone: "busy" };
+  if (s.syncing && (slow || pending)) return { text: pending ? `Enviando ${count}…` : "Sincronizando…", tone: "busy" };
   if (s.lastError) return { text: `Falha ao sincronizar: ${s.lastError}`, tone: "error" };
   if (pending) return { text: items, tone: "busy" };
   if (s.lastSyncAt) return { text: `Sincronizado às ${formatTime(s.lastSyncAt)}`, tone: "ok" };

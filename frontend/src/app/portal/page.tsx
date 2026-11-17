@@ -131,6 +131,12 @@ function StoreFilter({
         setOpen(false);
         trigger.current?.focus();
       }}
+      // Sair da lista com o Tab também fecha (o clique fora já fecha pelo mousedown). Sem destino (clique
+      // na barra de rolagem da lista), continua aberta.
+      onBlur={(e) => {
+        const next = e.relatedTarget;
+        if (open && next instanceof Node && !e.currentTarget.contains(next)) setOpen(false);
+      }}
     >
       <button
         ref={trigger}

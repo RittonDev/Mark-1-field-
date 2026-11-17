@@ -17,11 +17,14 @@ export function TicketLink({
   ticketId,
   className,
   title,
+  label,
   children,
 }: {
   ticketId: UUID;
   className?: string;
   title?: string;
+  /** Nome para o leitor de tela quando o conteúdo é só um ícone (ex.: "Editar OS-015829"). */
+  label?: string;
   children: React.ReactNode;
 }) {
   const panel = useTicketPanel();
@@ -30,6 +33,7 @@ export function TicketLink({
       href={`/chamados/${ticketId}`}
       className={className}
       title={title}
+      aria-label={label}
       // Marca o link que abre no painel (não sai da tela): o aviso de alterações não salvas da página
       // da OS deixa ele passar.
       data-ticket-link={panel ? "" : undefined}

@@ -67,8 +67,8 @@ export function LocationLine({ fix, place, onAllow }: { fix: PositionFix | null;
         : place
           ? place
           : fix.accuracy !== null
-          ? `Localização pronta (±${Math.max(5, Math.round(fix.accuracy))} m)`
-          : "Localização pronta";
+            ? `Localização pronta (±${Math.max(5, Math.round(fix.accuracy))} m)`
+            : "Localização pronta";
   return (
     <View style={styles.row} accessibilityLiveRegion="polite">
       {fix === null ? <ActivityIndicator size="small" color={c.inkMuted} /> : <Icon name="pin" size={18} color={c.inkMuted} strokeWidth={2} />}
