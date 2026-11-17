@@ -103,7 +103,13 @@ async def test_update_helpers(client: AsyncClient, world: World) -> None:
     assert (await client.get(url, headers=world.tech_other.headers)).status_code == 200
     events = (await client.get(f"{url}/events", headers=an)).json()
     changed = next(e for e in events if e["event_type"] == "helpers_changed")
-    assert changed["data"] == {"added": ["Redes"], "removed": []}
+    # Os ids ficam junto dos nomes: o sync do app avisa quem saiu da visita (revoked_ticket_ids).
+    assert changed["data"] == {
+        "added": ["Redes"],
+        "removed": [],
+        "added_ids": [other],
+        "removed_ids": [],
+    }
 
     # Virar responsável tira da lista de outros técnicos.
     r = await client.post(f"{url}/assign", json={"assignee_id": other}, headers=an)

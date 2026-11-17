@@ -6,6 +6,7 @@ import { ArrowDown, ArrowUp, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useConfirm } from "@/components/Confirm";
 import { FieldError, fold, plural, SearchField, UnsavedBar, useLeaveGuard } from "@/components/settings/shared";
+import { NowBadge } from "@/components/ticket/MessagesPanel";
 import { useToast } from "@/components/Toaster";
 import { Button, Card, ErrorBox, Field, Input, LoadingBlock, PageHeader, SectionTitle, Select, Textarea } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
@@ -74,6 +75,23 @@ const GROUPS: { label: string; keys: string[] }[] = [
   { label: "Datas e horários", keys: ["agendamento", "hora_agendada", "prazo_chegada", "agora", "hoje"] },
   { label: "Links", keys: ["link_relatorio"] },
 ];
+
+/**
+ * Quando a OS sugere cada texto padrão (ele aparece primeiro, marcado "Agora"), pela chave que a API dá
+ * ao texto. Renomear mantém a chave; os textos criados aqui não são sugeridos, ficam na lista para copiar.
+ */
+const SUGGESTED_WHEN: Record<string, string> = {
+  agendamento: "quando a visita está marcada, com técnico e horário, até o técnico sair",
+  deslocamento: "quando o técnico sai para o local",
+  chegada: "quando o técnico chega e inicia o atendimento",
+  atraso: "quando o técnico está a caminho e o prazo de chegada já passou",
+  fechamento: "quando a OS é concluída",
+  improdutiva: "depois de uma visita improdutiva, até a nova visita ser marcada",
+};
+
+const REPORT_LINK = "link_relatorio";
+/** Toda OS tem o link do relatório para o cliente: a variável funciona em qualquer texto, a qualquer momento. */
+const REPORT_LINK_NOTE = "Sempre preenchido: antes da conclusão o cliente vê o andamento da OS; depois, o resultado com fotos e assinatura.";
 
 // Variável entre chaves (como o \w da API, com as letras acentuadas).
 const VAR_RE = /\{([0-9A-Za-z_À-ÿ]+)\}/g;
@@ -493,7 +511,7 @@ function Editor({ server }: { server: TemplatesOut }) {
     <div className="mx-auto max-w-6xl" data-textos>
       <PageHeader
         title="Textos do WhatsApp"
-        description="Avisos que o analista copia na OS para o grupo de WhatsApp dos técnicos. As palavras entre chaves, como {tecnico}, são trocadas pelos dados da OS."
+        description="Avisos que a central copia na OS e cola no grupo do WhatsApp. As palavras entre chaves, como {tecnico}, são trocadas pelos dados da OS, e o texto que combina com o momento da OS aparece primeiro, marcado “Agora”."
         actions={
           <>
             <Button variant="ghost" loading={reset.isPending} onClick={askReset}>
@@ -535,6 +553,8 @@ function Editor({ server }: { server: TemplatesOut }) {
             const p = showErrors ? problems.get(t.uid) : undefined;
             const missing = unknown.get(t.uid) ?? [];
             const label = labelOf(t);
+            const when = t.key ? SUGGESTED_WHEN[t.key] : undefined;
+            const usesReportLink = t.body.includes(`{${REPORT_LINK}}`);
             const isTarget = items.length > 1 && t.uid === target.uid;
             const bodyHelp = [p?.body ? `${t.uid}-texto-erro` : null, missing.length ? `${t.uid}-variaveis` : null]
               .filter(Boolean)
@@ -554,19 +574,30 @@ function Editor({ server }: { server: TemplatesOut }) {
                 >
                   <div className="flex items-start gap-3">
                     <div className="flex min-w-0 flex-1 flex-col gap-3">
-                      <Field label="Nome do botão" required>
-                        <Input
-                          data-focus="name"
-                          value={t.name}
-                          maxLength={MAX_NAME}
-                          placeholder="Ex.: Material a caminho"
-                          onFocus={() => setTargetUid(t.uid)}
-                          onChange={(e) => update(t.uid, { name: e.target.value })}
-                          aria-invalid={p?.name ? true : undefined}
-                          aria-describedby={p?.name ? `${t.uid}-nome-erro` : undefined}
-                        />
-                        {p?.name ? <FieldError id={`${t.uid}-nome-erro`}>{p.name}</FieldError> : null}
-                      </Field>
+                      <div className="flex flex-col gap-1.5">
+                        <Field label="Nome do botão" required>
+                          <Input
+                            data-focus="name"
+                            value={t.name}
+                            maxLength={MAX_NAME}
+                            placeholder="Ex.: Material a caminho"
+                            onFocus={() => setTargetUid(t.uid)}
+                            onChange={(e) => update(t.uid, { name: e.target.value })}
+                            aria-invalid={p?.name ? true : undefined}
+                            aria-describedby={p?.name ? `${t.uid}-nome-erro ${t.uid}-quando` : `${t.uid}-quando`}
+                          />
+                          {p?.name ? <FieldError id={`${t.uid}-nome-erro`}>{p.name}</FieldError> : null}
+                        </Field>
+                        <p id={`${t.uid}-quando`} className="text-xs text-ink-muted">
+                          {when ? (
+                            <>
+                              Aparece como <NowBadge /> na OS {when}.
+                            </>
+                          ) : (
+                            "Sem sugestão automática: aparece na lista da OS para copiar."
+                          )}
+                        </p>
+                      </div>
                       <div className="flex flex-col gap-1.5">
                         <div className="flex items-end justify-between gap-2">
                           <label htmlFor={`${t.uid}-texto`} className="text-xs font-semibold text-ink/80">
@@ -626,6 +657,11 @@ function Editor({ server }: { server: TemplatesOut }) {
                         ) : (
                           <p className="text-sm text-ink-muted">Escreva o texto para ver a prévia.</p>
                         )}
+                        {usesReportLink && variables.has(REPORT_LINK) ? (
+                          <p className="mt-2 border-t border-line pt-1.5 text-xs text-ink-muted">
+                            <code className="font-semibold text-ink">{`{${REPORT_LINK}}`}</code>: {REPORT_LINK_NOTE}
+                          </p>
+                        ) : null}
                       </div>
                     </div>
                     <div className="flex shrink-0 flex-col gap-0.5">
@@ -692,11 +728,14 @@ function Editor({ server }: { server: TemplatesOut }) {
                           <button
                             type="button"
                             onClick={() => insert(v.key, target.uid)}
-                            aria-label={`Inserir {${v.key}}: ${v.description}`}
+                            aria-label={`Inserir {${v.key}}: ${v.description}${v.key === REPORT_LINK ? `. ${REPORT_LINK_NOTE}` : ""}`}
                             className="w-full rounded-md px-2 py-1 text-left hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
                           >
                             <code className="text-xs font-semibold text-brand-ink">{`{${v.key}}`}</code>
                             <span className="block text-[11px] text-ink-muted">{v.description}</span>
+                            {v.key === REPORT_LINK ? (
+                              <span className="mt-0.5 block text-[11px] font-medium text-ink">{REPORT_LINK_NOTE}</span>
+                            ) : null}
                           </button>
                         </li>
                       ))}

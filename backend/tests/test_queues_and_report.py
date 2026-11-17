@@ -303,10 +303,11 @@ async def test_client_report_link(client: AsyncClient, world: World) -> None:
     # Toda OS tem relatório desde a abertura (a gestão já vê o link; o técnico, só ao concluir).
     opening_token = detail["report_link"]["token"]
 
-    # Concluída: o mesmo link passa a mostrar o resultado; o técnico responsável também recebe.
+    # O texto de encerramento já leva o link (antes de concluir, a página mostra o andamento).
     msgs = (await client.get(f"{API}/tickets/{tid}/messages", headers=an)).json()
     closing = next(m["text"] for m in msgs if m["key"] == "fechamento")
-    assert "Relatório: (disponível quando a OS for concluída)" in closing
+    assert closing.endswith(f"Relatório do atendimento: {detail['report_link']['url']}")
+    # Concluída: o mesmo link passa a mostrar o resultado; o técnico responsável também recebe.
     await transition(client, th, detail, "resolved", resolution_notes="Rack organizado")
     detail = (await client.get(f"{API}/tickets/{tid}", headers=an)).json()
     link = detail["report_link"]

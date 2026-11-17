@@ -53,12 +53,11 @@ async def test_ticket_messages(client: AsyncClient, world: World) -> None:
         for m in (await client.get(f"{API}/tickets/{t['id']}/messages", headers=an)).json()
     }
     trip = msgs["deslocamento"]
-    assert "Técnico Tecnico em deslocamento para Loja 27 (São Paulo)" in trip
+    assert trip.startswith(f"*{t['code']}* · Cliente Teste\nO técnico Tecnico está a caminho de")
+    assert "Loja 27. Chegada prevista às " in trip
+    assert "__:__" not in trip  # tem posição ao vivo: horário calculado
     # Prazo de chegada: capital (São Paulo) = 4h da abertura, no fuso da operação.
     due = datetime.fromisoformat(t["arrival_due_at"]).astimezone(ZoneInfo(settings.TIMEZONE))
-    assert trip.endswith(f"(prazo {due:%H:%M}).")
-    assert t["code"] in trip and "Cliente Teste" in trip
-    assert "__:__" not in trip  # tem posição ao vivo: horário calculado
     assert (await client.get(f"{API}/tickets/{t['id']}/messages", headers=th)).status_code == 403
 
     # A gestão edita os modelos; variável que não existe fica visível para corrigir.
@@ -77,16 +76,25 @@ async def test_ticket_messages(client: AsyncClient, world: World) -> None:
     ]
     assert any(v["key"] == "chegada_prevista" for v in r.json()["variables"])
     msgs = (await client.get(f"{API}/tickets/{t['id']}/messages", headers=an)).json()
+    # Modelo próprio sem a chave da situação (deslocamento): nenhum texto vem marcado.
     assert msgs == [
         {
             "key": "saida_da_base",
             "name": "Saída da base",
             "text": "Tecnico saiu para Loja 27 {inexistente}",
+            "suggested": False,
         }
     ]
 
     defaults = (await client.post(f"{API}/message-templates/reset", headers=an)).json()["templates"]
-    assert [d["key"] for d in defaults][:3] == ["deslocamento", "chegada", "atraso"]
+    assert [d["key"] for d in defaults] == [
+        "agendamento",
+        "deslocamento",
+        "chegada",
+        "atraso",
+        "fechamento",
+        "improdutiva",
+    ]
 
     # O prazo de chegada também vira variável. A autorização do cliente saiu (2026-11-12): a
     # variável antiga fica como está no texto, para o analista ver e tirar do modelo.

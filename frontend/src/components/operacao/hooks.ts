@@ -71,26 +71,20 @@ export function replaceSearch(values: Record<string, string | null | undefined>)
   window.history.replaceState(state?.mfPanel ? state : null, "", next);
 }
 
-/** Os parâmetros da barra de endereço agora, no formato de URLSearchParams.toString(). */
-function addressSearch(): string {
-  return typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).toString();
-}
-
 /**
  * A URL da tela mudou depois que ela abriu: o link do menu para a mesma tela (o Next mantém a página
  * montada), Voltar e Avançar, um link com outros filtros. No render em que a mudança chega, devolve os
  * parâmetros novos para a tela reler o que guarda na URL; nos outros, null. A gravação da própria tela
- * (replaceSearch) também chega aqui e, relida, dá o mesmo estado.
+ * (replaceSearch) também chega aqui e, relida, dá o mesmo estado: o Next aplica as trocas de URL na
+ * ordem, e a gravação de um clique sai antes de a tela renderizar a próxima.
  */
 export function useSearchChange(): URLSearchParams | null {
   const searchParams = useSearchParams();
   const search = searchParams.toString();
   const [seen, setSeen] = useState(search);
-  // O Next ainda numa URL anterior (a tela já gravou outra por cima): espera ele chegar na atual, senão
-  // a releitura desfaria a mudança que acabou de acontecer.
-  const changed = search !== seen && search === addressSearch();
-  if (changed) setSeen(search);
-  return changed ? searchParams : null;
+  if (search === seen) return null;
+  setSeen(search);
+  return searchParams;
 }
 
 /** Técnicos ativos (filtros e cores). Os desativados não entram no app nem recebem OS novas. */

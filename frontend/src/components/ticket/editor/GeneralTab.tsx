@@ -308,8 +308,10 @@ interface SavePlan {
 }
 
 /**
- * Aba "Geral" da OS, no formato do "Editar atividade" do Field Control: tudo editável pela central a
- * qualquer momento (inclusive com a OS fechada), com os técnicos mais indicados para a loja.
+ * Aba "Geral" da OS, no formato do "Editar atividade" do Field Control e na mesma ordem da abertura
+ * (Nova OS): cliente, localização, tipo de OS, escopo, agendamento, colaborador (com os técnicos mais
+ * indicados para a loja) e etiquetas; o resto fica em "Mais detalhes". Tudo editável pela central a
+ * qualquer momento, inclusive com a OS fechada.
  *
  * A edição se apoia numa cópia da OS (a `base`). Quando a OS muda por fora (o técnico conclui no app,
  * outro analista salva), os campos não mexidos passam a mostrar a versão nova e os mexidos ficam como
@@ -986,7 +988,7 @@ export function GeneralTab({
                 value={form.description}
                 onChange={(e) => set("description", e.target.value)}
                 maxLength={20000}
-                placeholder="O que deve ser feito no atendimento, de forma clara: o técnico chega sabendo e não há retrabalho."
+                placeholder="O que deve ser feito no atendimento, de forma clara."
               />
             </Field>
             <Counter value={form.description} max={20000} />
@@ -1249,7 +1251,7 @@ export function GeneralTab({
           </div>
 
           <div className="p-5">
-            <SectionTitle wrap className="mb-3" aside={<span className="text-xs text-ink-muted">Origem: {TICKET_SOURCE[server.source] ?? server.source}</span>}>
+            <SectionTitle wrap className="mb-3" aside={<span className="text-xs text-ink-muted">Origem: {TICKET_SOURCE[server.source]}</span>}>
               Pedido do cliente
             </SectionTitle>
             <div className="grid grid-cols-12 gap-4">
@@ -1481,9 +1483,7 @@ export function GeneralView({ ticket }: { ticket: TicketDetail }) {
             <span className="font-mono">{ticket.code}</span>
           </ViewItem>
           <ViewItem label="Título">{ticket.title}</ViewItem>
-          <ViewItem label="Contrato de prazo (prioridade)">
-            {PRIORITY[ticket.priority] ? `${PRIORITY[ticket.priority].code} - ${PRIORITY[ticket.priority].label}` : ticket.priority}
-          </ViewItem>
+          <ViewItem label="Contrato de prazo (prioridade)">{`${PRIORITY[ticket.priority].code} - ${PRIORITY[ticket.priority].label}`}</ViewItem>
           <ViewItem label="Categoria">{ticket.category?.full_name}</ViewItem>
           <ViewItem label="Analista responsável">{ticket.owner?.name ?? "Sem analista (fila geral)"}</ViewItem>
           <ViewItem label="Projeto">{ticket.project ? `${ticket.project.code} · ${ticket.project.name}` : "Não é de projeto (OS avulsa)"}</ViewItem>
@@ -1496,14 +1496,14 @@ export function GeneralView({ ticket }: { ticket: TicketDetail }) {
               </>
             ) : null}
           </ViewItem>
-          <ViewItem label="Origem">{TICKET_SOURCE[ticket.source] ?? ticket.source}</ViewItem>
+          <ViewItem label="Origem">{TICKET_SOURCE[ticket.source]}</ViewItem>
           <ViewItem label="Recado para o técnico" wide>
             {longText(ticket.visit_note)}
           </ViewItem>
           <ViewItem label="Endereço do atendimento" wide>
             {ticket.service_address?.trim() || (storeAddress ? `O da loja: ${storeAddress}` : null)}
           </ViewItem>
-          <ViewItem label="Situação">{STATUS[ticket.status]?.label ?? ticket.status}</ViewItem>
+          <ViewItem label="Situação">{STATUS[ticket.status].label}</ViewItem>
           <ViewItem label="Início e conclusão do atendimento">
             {ticket.arrived_at || ticket.resolved_at ? `${formatDateTime(ticket.arrived_at)} até ${formatDateTime(ticket.resolved_at)}` : null}
           </ViewItem>

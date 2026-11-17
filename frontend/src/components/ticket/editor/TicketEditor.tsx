@@ -29,6 +29,7 @@ import { FormsCard } from "@/components/ticket/FormsCard";
 import { eventPoint, FAR_FROM_STORE_M, km, storeDistance } from "@/components/ticket/geo";
 import { HistoryTab } from "@/components/ticket/HistoryTab";
 import { LegacyOrderCard } from "@/components/ticket/LegacyOrderCard";
+import { GroupTextsMenu } from "@/components/ticket/MessagesPanel";
 import { PartRequestsCard } from "@/components/ticket/PartRequestsCard";
 import { PayoutsCard } from "@/components/ticket/PayoutsCard";
 import { QuotesCard } from "@/components/ticket/QuotesCard";
@@ -49,7 +50,7 @@ import { STATUS } from "@/lib/constants";
 import { formatDateTime, formatMinutes, formatShort } from "@/lib/format";
 import { useDocumentTitle } from "@/lib/hooks";
 import type { Comment, Quote, ReportLink, TicketDetail, TicketEvent, TicketStatus } from "@/lib/types";
-import { copyText, whatsappUrl } from "@/lib/whatsapp";
+import { copyText, groupTextsQuery, whatsappUrl } from "@/lib/whatsapp";
 import { GENERAL_FORM_ID, GeneralTab, GeneralView, type SaveState } from "./GeneralTab";
 import { StatusMenu } from "./StatusMenu";
 import { useUnsavedGuard } from "./useUnsavedGuard";
@@ -425,6 +426,32 @@ function StatusNotice({ ticket }: { ticket: TicketDetail }) {
   );
 }
 
+/**
+ * "Textos para o grupo" no rodapé, sempre à vista: atividade confirmada, técnico em deslocamento,
+ * atividade encerrada com o link do relatório... Quando a OS muda de momento e o texto sugerido muda
+ * (ex.: o técnico saiu para o local), o botão ganha um destaque e o leitor de tela avisa, até a pessoa
+ * abrir o menu. Os textos vêm da mesma busca do menu (sob ["ticket", id]: o tempo real relê junto).
+ */
+function GroupTexts({ ticketId }: { ticketId: string }) {
+  const texts = useQuery(groupTextsQuery(ticketId));
+  const suggested = texts.data?.find((m) => m.suggested) ?? null;
+  const current = suggested?.key ?? null;
+  // O texto sugerido que a pessoa já viu (ao abrir a OS ou o menu); undefined: os textos não chegaram.
+  const [seen, setSeen] = useState<string | null | undefined>(undefined);
+  if (texts.data && seen === undefined) setSeen(current);
+  const fresh = seen !== undefined && current !== null && current !== seen;
+  return (
+    // Na captura: o botão do menu para o clique (para não abrir a OS numa linha de lista).
+    <span className="relative mr-1 inline-flex" onClickCapture={() => setSeen(current)}>
+      <GroupTextsMenu ticketId={ticketId} size="sm" className={fresh ? "ring-2 ring-brand/40" : undefined} />
+      {fresh ? <span aria-hidden className="pointer-events-none absolute -top-1 -right-1 size-2.5 rounded-full bg-brand ring-2 ring-surface" /> : null}
+      <span role="status" className="sr-only">
+        {fresh && suggested ? `Novo texto sugerido para o grupo: ${suggested.name}` : ""}
+      </span>
+    </span>
+  );
+}
+
 /** O editor está por cima de tudo (nenhum diálogo ou menu aberto sobre ele): os atalhos valem. */
 function editorOnTop(root: HTMLElement) {
   const modal = root.closest('[aria-modal="true"]');
@@ -697,13 +724,16 @@ export function TicketEditor({
         ) : INLINE_TABS.includes(tab) ? (
           <span className="text-xs text-ink-muted">O que muda nesta aba é salvo na hora.</span>
         ) : null}
-        <div className="ml-auto flex items-center gap-0.5">
+        {/* Numa tela estreita as ações quebram a linha (alinhadas à direita) em vez de sair do painel. */}
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-x-0.5 gap-y-1.5">
+          {/* Os textos para o grupo junto do link do relatório (o "Atividade encerrada" já leva o link). */}
+          {ticket.can_assign ? <GroupTexts key={ticket.id} ticketId={ticket.id} /> : null}
+          {/* O nome ao lado do ícone (telas largas) vem do CSS: o menu do relatório só desenha o ícone. */}
+          <ReportMenu ticket={ticket} buttonClassName={clsx(footerAction, "lg:after:text-xs lg:after:font-medium lg:after:content-['Relatório']")} />
           <button type="button" className={footerAction} onClick={() => setSharing(true)} title="Mensagens de WhatsApp" aria-label="Mensagens de WhatsApp">
             <MessageCircle aria-hidden className="size-[18px]" />
             <span className="hidden text-xs font-medium lg:inline">WhatsApp</span>
           </button>
-          {/* O nome ao lado do ícone (telas largas) vem do CSS: o menu do relatório só desenha o ícone. */}
-          <ReportMenu ticket={ticket} buttonClassName={clsx(footerAction, "lg:after:text-xs lg:after:font-medium lg:after:content-['Relatório']")} />
           <button
             type="button"
             className={footerAction}

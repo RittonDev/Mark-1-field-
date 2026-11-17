@@ -82,9 +82,13 @@ async def test_access_management(client: AsyncClient, world: World) -> None:
     )
     assert fake.status_code == 422
 
-    # Desativado: não entra mais.
+    # Desativado: não entra mais. Com a senha certa, o aviso diz o motivo (test_b2_auth).
     await client.patch(f"{API}/technicians/{tech_id}", json={"is_active": False}, headers=an)
-    assert (await login(client, "paula.campos@campo.com", new_temp))["status"] == 401
+    blocked = await client.post(
+        f"{API}/auth/login",
+        json={"email": "paula.campos@campo.com", "password": new_temp, "channel": "mobile"},
+    )
+    assert blocked.status_code == 403 and "desativado" in blocked.json()["detail"]
 
 
 async def test_import_csv_and_xlsx(client: AsyncClient, world: World) -> None:

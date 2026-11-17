@@ -4,11 +4,12 @@ import { type QueryClient, type QueryKey, useQueryClient } from "@tanstack/react
 import { useRouter } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useToast } from "@/components/Toaster";
-import { refreshSessionResult, WS_URL } from "./api";
+import { errorMessage, refreshSessionResult, WS_URL } from "./api";
 import { STATUS } from "./constants";
 import { todayISO } from "./format";
 import { sessionStore } from "./session";
 import type { LiveTechnician, RealtimeEvent, TicketStatus, TrackingHistory, UUID } from "./types";
+import { copyText, GROUP_TEXT_COPIED, GROUP_TEXT_FRESH_MS, type GroupText, groupTextsQuery } from "./whatsapp";
 
 export type ConnectionState = "connecting" | "online" | "offline";
 
@@ -45,6 +46,11 @@ export interface RealtimeNotice {
   tone?: "info" | "success" | "error";
   /** Tela do aviso sem OS (ex.: /homologacao). */
   href?: string;
+  /**
+   * O técnico mudou a situação da OS e há texto pronto para o grupo do WhatsApp (ex.: atividade
+   * encerrada, com o link do relatório): o aviso oferece "Copiar texto".
+   */
+  groupText?: boolean;
   /** Quando chegou (ISO). */
   at: string;
 }
@@ -142,11 +148,14 @@ function noticeFor(event: RealtimeEvent, userId: string): NoticeDraft | null {
     case "ticket.status_changed": {
       const status = event.status;
       if (!byOther || othersTicket || !status || !NOTICE_STATUSES.includes(status)) return null;
+      // Encerrada pelo próprio técnico (no app): ninguém da central mandou o encerramento ao grupo ainda.
+      const byTechnician = !!event.actor_id && event.actor_id === event.assignee_id;
       return {
         ticketId,
         code,
         title: `${code} → ${STATUS[status]?.label ?? status}${by}`,
         tone: status === "resolved" ? "success" : "info",
+        groupText: status === "resolved" && byTechnician,
       };
     }
     case "ticket.comment_added":
@@ -333,7 +342,8 @@ function listCodes(codes: string[]): string {
 /**
  * Mantém um WebSocket com a API enquanto houver sessão. Reconecta com backoff (e na hora quando a
  * internet volta ou a aba volta a ficar visível), confere o pong, junta as invalidações de uma rajada
- * de eventos e mostra só os avisos que pedem atenção, com "Abrir" para a OS.
+ * de eventos e mostra só os avisos que pedem atenção, com "Abrir" para a OS (ou "Copiar texto" para o
+ * grupo, quando o técnico encerra a OS).
  * `quiet` (portal do cliente): só mantém a tela atualizada, sem avisos.
  */
 export function RealtimeProvider({
@@ -381,8 +391,34 @@ export function RealtimeProvider({
     let seq = 0;
     const lastByTicket = new Map<string, number>();
 
+    /**
+     * "Copiar texto" do aviso: copia o texto sugerido para o momento da OS (encerrada: com o link do
+     * relatório para o cliente). O aviso seguinte leva o "Abrir a OS" que este aviso deixou de ter.
+     */
+    const copyGroupText = async (ticketId: UUID, code = "OS") => {
+      const open = { label: "Abrir a OS", onClick: () => requestOpenTicket(ticketId) };
+      let list: GroupText[];
+      try {
+        list = await queryClient.fetchQuery({ ...groupTextsQuery(ticketId), staleTime: GROUP_TEXT_FRESH_MS });
+      } catch (error) {
+        toastRef.current({ title: `Não foi possível buscar o texto da ${code}`, description: errorMessage(error), tone: "error", action: open });
+        return;
+      }
+      const message = list.find((m) => m.suggested);
+      if (!message) {
+        toastRef.current({ title: `${code}: nenhum texto combina com a situação agora`, description: "Abra a OS para escolher o texto.", action: open });
+        return;
+      }
+      toastRef.current(
+        (await copyText(message.text))
+          ? { title: GROUP_TEXT_COPIED, description: `${message.name} · ${code}`, tone: "success", action: open }
+          : { title: "Não foi possível copiar", description: "Abra a OS e copie em Textos para o grupo.", tone: "error", action: open },
+      );
+    };
+
     const actionFor = (notice: RealtimeNotice) => {
       const { ticketId, href } = notice;
+      if (ticketId && notice.groupText) return { label: "Copiar texto", onClick: () => void copyGroupText(ticketId, notice.code) };
       if (ticketId) return { label: "Abrir", onClick: () => requestOpenTicket(ticketId) };
       if (href) return { label: "Ver", onClick: () => routerRef.current.push(href) };
       return undefined;
@@ -394,6 +430,11 @@ export function RealtimeProvider({
       pending = [];
       if (items.length <= 2) {
         for (const notice of items) {
+          // O texto já vem buscado: o clique em "Copiar texto" copia na hora (o navegador só deixa copiar
+          // logo depois do clique).
+          if (notice.groupText && notice.ticketId) {
+            void queryClient.prefetchQuery({ ...groupTextsQuery(notice.ticketId), staleTime: GROUP_TEXT_FRESH_MS });
+          }
           toastRef.current({ title: notice.title, description: notice.description, tone: notice.tone, action: actionFor(notice) });
         }
         return;
@@ -422,7 +463,7 @@ export function RealtimeProvider({
       window.clearTimeout(timer);
       pushNoticeRef.current = () => {};
     };
-  }, [quiet]);
+  }, [quiet, queryClient]);
 
   useEffect(() => {
     let socket: WebSocket | null = null;

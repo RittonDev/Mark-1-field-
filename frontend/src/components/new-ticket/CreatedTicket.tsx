@@ -1,13 +1,16 @@
 "use client";
 
-import { CircleCheckBig, Copy, CopyPlus, Link2, MessageCircle, PanelRightOpen, Plus, TriangleAlert } from "lucide-react";
+import { CircleCheckBig, Copy, CopyPlus, Link2, List, MessageCircle, PanelRightOpen, Plus, TriangleAlert } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { PriorityBadge } from "@/components/badges";
+import { TagChips } from "@/components/TagChips";
 import { useToast } from "@/components/Toaster";
+import { CopyGroupTextButton } from "@/components/ticket/MessagesPanel";
 import { useTicketPanel } from "@/components/ticket/TicketPanel";
 import { WhatsAppShare } from "@/components/ticket/WhatsAppShare";
-import { Button, Card } from "@/components/ui";
+import { Button, buttonClassName, Card } from "@/components/ui";
 import { useNow } from "@/components/useNow";
 import { formatDateTime } from "@/lib/format";
 import { copyText } from "@/lib/whatsapp";
@@ -16,15 +19,15 @@ import { dayTimeLabel } from "./dayTime";
 
 export interface CreatedResult {
   ticket: TicketDetail;
-  /** O que não foi salvo depois de abrir a OS (etiquetas, formulários): a OS existe, falta completar. */
+  /** O que não foi salvo depois de criar a OS (formulários): a OS existe, falta completar nela. */
   problems: string[];
 }
 
-/** Recado para o grupo do cliente: nº da OS, o que foi pedido, a visita e o link de acompanhamento. */
+/** Aviso para o grupo do cliente quando a OS ainda não tem técnico e horário: recebemos, vamos agendar. */
 export function clientMessage(t: TicketDetail): string {
   const where = [t.customer?.name, t.location?.name].filter(Boolean).join(" · ");
   return [
-    `*${t.code}*${where ? ` · ${where}` : ""}`,
+    `*OS ${t.number}*${where ? ` · ${where}` : ""}`,
     `Recebemos o chamado: ${t.title.replace(/[\s.!?]+$/, "")}.`,
     t.scheduled_start ? `Visita: ${formatDateTime(t.scheduled_start)}` : "Vamos agendar a visita e avisamos o horário.",
     t.report_link?.url ? `Acompanhe por aqui: ${t.report_link.url}` : null,
@@ -34,8 +37,9 @@ export function clientMessage(t: TicketDetail): string {
 }
 
 /**
- * Depois de abrir a OS: o resumo e o que o analista faz em seguida (avisar o grupo dos técnicos e o do
- * cliente no WhatsApp, abrir a OS no painel ou já abrir a próxima).
+ * Depois de criar a OS: o resumo e o que o analista faz em seguida (abrir a OS no painel, copiar o
+ * texto "Atividade confirmada" para o grupo do cliente no WhatsApp, mandar o resumo aos técnicos ou já
+ * criar a próxima).
  */
 export function CreatedTicket({
   result,
@@ -54,7 +58,7 @@ export function CreatedTicket({
   const [sharing, setSharing] = useState(false);
   const titleRef = useRef<HTMLHeadingElement>(null);
 
-  // O foco vai para o título: quem usa leitor de tela ouve que a OS foi aberta.
+  // O foco vai para o título: quem usa leitor de tela ouve que a OS foi criada.
   useEffect(() => {
     titleRef.current?.focus();
   }, []);
@@ -66,13 +70,14 @@ export function CreatedTicket({
   const reportUrl = t.report_link?.url ?? null;
   const store = t.location ? [t.location.code, t.location.name].filter(Boolean).join(" · ") : null;
   const town = t.location?.city ? `${t.location.city}${t.location.state ? `/${t.location.state}` : ""}` : null;
+  // "Atividade confirmada" só faz sentido com o técnico e o horário combinados.
+  const confirmed = Boolean(t.assignee && t.scheduled_start);
   const rows: [string, React.ReactNode][] = [
-    ["Cliente e loja", [t.customer?.name, store, town].filter(Boolean).join(" · ") || "Sem loja"],
-    ["Visita", t.scheduled_start ? dayTimeLabel(t.scheduled_start, now) : "Sem agenda: fica na fila para agendar"],
-    [
-      "Técnico",
-      t.assignee ? `${t.assignee.name}${t.helpers?.length ? ` + ${t.helpers.length} junto` : ""}` : "Sem técnico",
-    ],
+    ["Cliente e localização", [t.customer?.name, store, town].filter(Boolean).join(" · ") || "—"],
+    ["Tipo de OS", t.service_type?.name ?? "—"],
+    ["Agendamento", t.scheduled_start ? dayTimeLabel(t.scheduled_start, now) : "Sem agendamento: fica na fila para agendar"],
+    ["Colaborador", t.assignee ? `${t.assignee.name}${t.helpers?.length ? ` + ${t.helpers.length} junto` : ""}` : "Sem colaborador: fica na fila"],
+    ["Etiquetas", t.tags?.length ? <TagChips key="etiquetas" tags={t.tags} max={10} /> : "Sem etiquetas"],
     ["Analista", t.owner?.name ?? "Sem analista"],
     [
       "Prazo de solução",
@@ -92,7 +97,7 @@ export function CreatedTicket({
           </span>
           <div className="min-w-0">
             <h2 ref={titleRef} tabIndex={-1} className="text-lg leading-6 font-bold tracking-[-0.01em] text-ink outline-none">
-              <span className="font-mono">{t.code}</span> aberta
+              OS <span className="tabular-nums">{t.number}</span> criada
             </h2>
             <p className="mt-0.5 text-sm text-ink-muted">{t.title}</p>
           </div>
@@ -107,17 +112,18 @@ export function CreatedTicket({
           ))}
           {reportUrl ? (
             <div className="contents">
-              <dt className="text-xs font-semibold text-ink/80 sm:pt-0.5">Acompanhamento</dt>
+              <dt className="text-xs font-semibold text-ink/80 sm:pt-0.5">Relatório do cliente</dt>
               <dd className="flex min-w-0 items-center gap-2">
                 <Link2 aria-hidden className="size-4 shrink-0 text-ink-subtle" />
                 <a href={reportUrl} target="_blank" rel="noreferrer" className="truncate font-medium text-brand-ink hover:underline">
                   {reportUrl}
+                  <span className="sr-only"> (abre em outra aba)</span>
                 </a>
                 <button
                   type="button"
-                  onClick={() => void copy(reportUrl, "Link de acompanhamento copiado")}
-                  className="shrink-0 rounded-md p-1 text-ink-subtle hover:bg-surface-2 hover:text-ink"
-                  aria-label="Copiar o link de acompanhamento"
+                  onClick={() => void copy(reportUrl, "Link do relatório copiado")}
+                  className="shrink-0 rounded-md p-1 text-ink-subtle hover:bg-surface-2 hover:text-ink focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+                  aria-label="Copiar o link do relatório do cliente"
                   title="Copiar o link"
                 >
                   <Copy aria-hidden className="size-4" />
@@ -131,7 +137,7 @@ export function CreatedTicket({
           <div className="mx-5 mb-4 rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2.5 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200" role="alert">
             <p className="flex items-center gap-1.5 font-semibold">
               <TriangleAlert aria-hidden className="size-4 shrink-0" />
-              A OS foi aberta, mas falta completar na OS:
+              A OS foi criada, mas falta completar nela:
             </p>
             <ul className="mt-1 list-disc pl-6 text-xs">
               {result.problems.map((p) => (
@@ -145,28 +151,36 @@ export function CreatedTicket({
           <div className="flex flex-wrap gap-2">
             <Button variant="primary" onClick={() => (panel ? panel.open(t.id) : router.push(`/chamados/${t.id}`))}>
               <PanelRightOpen aria-hidden className="size-4" />
-              Abrir a OS
+              Abrir OS
             </Button>
+            {confirmed ? (
+              <CopyGroupTextButton ticketId={t.id} templateKey="agendamento" label="Copiar texto: Atividade confirmada" />
+            ) : (
+              <Button onClick={() => void copy(clientMessage(t), "Texto copiado. Cole no grupo do WhatsApp.")}>
+                <Copy aria-hidden className="size-4" />
+                Copiar texto: Chamado recebido
+              </Button>
+            )}
             <Button onClick={() => setSharing(true)}>
               <MessageCircle aria-hidden className="size-4" />
-              Enviar para o grupo dos técnicos
-            </Button>
-            <Button onClick={() => void copy(clientMessage(t), "Mensagem copiada: cole no grupo do cliente")}>
-              <Copy aria-hidden className="size-4" />
-              Copiar mensagem para o cliente
+              Resumo para os técnicos
             </Button>
           </div>
           <div className="flex flex-wrap gap-2">
             <Button variant="ghost" onClick={onNew}>
               <Plus aria-hidden className="size-4" />
-              Abrir outra OS
+              Criar outra OS
             </Button>
             {t.location ? (
               <Button variant="ghost" onClick={onSameStore}>
                 <CopyPlus aria-hidden className="size-4" />
-                Outra OS nesta loja
+                Outra OS nesta localização
               </Button>
             ) : null}
+            <Link href="/chamados" className={buttonClassName("ghost")}>
+              <List aria-hidden className="size-4" />
+              Ver chamados
+            </Link>
           </div>
         </div>
       </Card>

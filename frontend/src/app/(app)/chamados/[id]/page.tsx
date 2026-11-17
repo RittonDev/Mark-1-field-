@@ -47,7 +47,9 @@ export default function TicketDetailPage() {
   const id = decoded(params.id).trim();
   const isId = UUID_RE.test(id);
   // /chamados/15829: a central conhece a OS pelo número; acha o id e troca a URL.
-  const number = isId ? null : (NUMBER_RE.exec(id)?.[1] ?? null);
+  const match = isId ? null : (NUMBER_RE.exec(id)?.[1] ?? null);
+  // "0" não é número de OS: cai no "não encontrada" sem perguntar à API.
+  const number = match !== null && Number(match) > 0 ? Number(match) : null;
   const query = useQuery({
     queryKey: ["ticket", id],
     queryFn: () => api.get<TicketDetail>(`/tickets/${id}`),
@@ -56,8 +58,9 @@ export default function TicketDetailPage() {
   const lookup = useQuery({
     queryKey: ["ticket-number", number],
     queryFn: async () => {
-      const found = await api.get<Page<TicketListItem>>("/tickets", { q: number ?? undefined, page_size: 25 });
-      return found.items.find((t) => t.number === Number(number))?.id ?? null;
+      // Filtro pelo nº exato (a busca por texto também acharia o nº dentro de outros campos).
+      const found = await api.get<Page<TicketListItem>>("/tickets", { number: number ?? undefined, page_size: 1 });
+      return found.items.find((t) => t.number === number)?.id ?? null;
     },
     enabled: number !== null,
     staleTime: 60_000,
@@ -75,7 +78,7 @@ export default function TicketDetailPage() {
         </div>
       );
     }
-    if (lookup.data === null) return <NotFound what={`OS nº ${Number(number)}`} />;
+    if (lookup.data === null) return <NotFound what={`OS nº ${number}`} />;
     return <LoadingBlock label="Abrindo a OS..." />;
   }
   if (!isId || (query.error instanceof ApiError && query.error.status === 404)) return <NotFound what="OS" />;

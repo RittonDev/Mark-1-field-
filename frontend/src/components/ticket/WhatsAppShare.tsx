@@ -66,7 +66,10 @@ export function ticketWhatsAppText(t: TicketDetail): string {
   return lines.filter((l) => l !== null).join("\n");
 }
 
-/** WhatsApp da OS: os textos prontos (modelos de /textos) e o resumo da OS para o grupo dos técnicos. */
+/**
+ * WhatsApp da OS: os textos prontos para o grupo (modelos de /textos, o do momento da OS primeiro) e o
+ * resumo da OS para o grupo dos técnicos.
+ */
 export function WhatsAppShare({ ticket, onClose }: { ticket: TicketDetail; onClose: () => void }) {
   const { toast } = useToast();
   const summaryId = useId();
@@ -107,8 +110,10 @@ export function WhatsAppShare({ ticket, onClose }: { ticket: TicketDetail; onClo
     >
       <div className="flex flex-col gap-6">
         <section className="flex flex-col gap-2">
-          <SectionTitle aside={<TemplatesLink />}>Textos prontos</SectionTitle>
-          <p className="text-xs text-ink-muted">Avisos do dia a dia já preenchidos com os dados da OS: clique para copiar e cole no grupo.</p>
+          <SectionTitle aside={<TemplatesLink />}>Textos para o grupo</SectionTitle>
+          <p className="text-xs text-ink-muted">
+            Avisos do dia a dia já preenchidos com os dados da OS, o do momento primeiro (Agora). Copie e cole no grupo.
+          </p>
           <MessageList ticketId={ticket.id} />
         </section>
         <section className="flex flex-col gap-2">

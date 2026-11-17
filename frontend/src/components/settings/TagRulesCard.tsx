@@ -99,34 +99,16 @@ const fingerprint = (r: TicketTagRules) =>
   ]);
 const DEFAULT_FINGERPRINT = fingerprint(DEFAULT_TAG_RULES);
 
-/** O que impede incluir o nome na lista (null: pode incluir). */
+/**
+ * O que impede incluir o nome na lista (null: pode incluir). Com isto, as cores só da paleta e as
+ * regras salvas já conferidas pela API, as listas nunca ficam fora das regras de PUT /ticket-tag-rules.
+ */
 function addProblem(name: string, names: string[]): string | null {
   if (name.length > MAX_NAME) return `Use até ${MAX_NAME} caracteres.`;
   if (names.some((n) => nameKey(n) === nameKey(name))) return `“${name}” já está nesta lista.`;
   if (names.length >= MAX_TAGS) return `No máximo ${MAX_TAGS} etiquetas por lista.`;
   return null;
 }
-
-/** Confere a lista inteira com as regras da API antes de salvar (null: tudo certo). */
-function listProblem(names: string[], colors: (string | null)[] = []): string | null {
-  if (names.length > MAX_TAGS) return `No máximo ${MAX_TAGS} etiquetas por lista: tire ${names.length - MAX_TAGS}.`;
-  const seen = new Set<string>();
-  for (const raw of names) {
-    const name = clean(raw);
-    if (!name) return "Há uma etiqueta sem nome.";
-    if (name.length > MAX_NAME) return `“${name}” passa de ${MAX_NAME} caracteres.`;
-    if (seen.has(nameKey(name))) return `“${name}” aparece duas vezes.`;
-    seen.add(nameKey(name));
-  }
-  if (colors.some((c) => c !== null && !TAG_COLOR_NAMES.includes(c))) return "Uma das cores não é aceita: escolha outra.";
-  return null;
-}
-
-const tagsProblem = (list: TagRule[]) =>
-  listProblem(
-    list.map((t) => t.name),
-    list.map((t) => t.color),
-  );
 
 /** Etiquetas que o sistema põe e tira sozinho nas OS (como no Field Control). */
 export function TagRulesCard({ readOnly = false }: { readOnly?: boolean }) {
@@ -185,14 +167,6 @@ function RulesForm({ initial, readOnly }: { initial: TicketTagRules; readOnly: b
     focusFirst.current = false;
     formRef.current?.querySelector<HTMLInputElement>("input")?.focus();
   });
-
-  const problems = {
-    on_create: tagsProblem(draft.on_create),
-    on_project: tagsProblem(draft.on_project),
-    on_extra_cost: tagsProblem(draft.on_extra_cost),
-    remove_on_payout_paid: listProblem(draft.remove_on_payout_paid),
-  };
-  const invalid = Object.values(problems).some(Boolean);
 
   // Sugestões ao digitar: as etiquetas já usadas nas OS (as mais usadas primeiro) e as das listas.
   const suggestionPool = useMemo(() => {
@@ -285,7 +259,7 @@ function RulesForm({ initial, readOnly }: { initial: TicketTagRules; readOnly: b
       className="grid gap-x-8 gap-y-6 p-5 md:grid-cols-2"
       onSubmit={(e) => {
         e.preventDefault();
-        if (dirty && !invalid) save.mutate(draft);
+        if (dirty) save.mutate(draft);
       }}
     >
       {TAG_GROUPS.map((g) => (
@@ -296,7 +270,6 @@ function RulesForm({ initial, readOnly }: { initial: TicketTagRules; readOnly: b
           tags={draft[g.key]}
           readOnly={readOnly}
           suggestions={suggestionsFor(draft[g.key].map((t) => t.name))}
-          problem={problems[g.key]}
           onAdd={(name) => addTag(g.key, g.title, name)}
           onRemove={(name) => removeTag(g.key, g.title, name)}
           onRecolor={recolor}
@@ -309,7 +282,6 @@ function RulesForm({ initial, readOnly }: { initial: TicketTagRules; readOnly: b
         tags={draft.remove_on_payout_paid.map((name) => ({ name, color: lookup(name)?.color ?? null }))}
         readOnly={readOnly}
         suggestions={suggestionsFor(draft.remove_on_payout_paid)}
-        problem={problems.remove_on_payout_paid}
         onAdd={addName}
         onRemove={removeName}
       />
@@ -335,7 +307,7 @@ function RulesForm({ initial, readOnly }: { initial: TicketTagRules; readOnly: b
                 Descartar
               </Button>
             ) : null}
-            <Button type="submit" variant="primary" loading={save.isPending} disabled={!dirty || invalid}>
+            <Button type="submit" variant="primary" loading={save.isPending} disabled={!dirty}>
               <Save className="size-4" />
               Salvar etiquetas
             </Button>
@@ -354,15 +326,14 @@ function RulesForm({ initial, readOnly }: { initial: TicketTagRules; readOnly: b
 // Chip da etiqueta; a cor (fundo, texto e contorno) vem de tagTone.
 const CHIP = "inline-flex h-7 max-w-full min-w-0 items-center rounded-md text-xs font-medium whitespace-nowrap ring-1 ring-inset";
 
-/** Ponto com a cor da etiqueta; sem cor, um círculo tracejado. */
-function ColorDot({ color, className }: { color: string | null; className?: string }) {
+/** Ponto com a cor cheia da etiqueta; sem cor, um círculo tracejado. */
+function ColorDot({ color }: { color: string | null }) {
   return (
     <span
       aria-hidden
       className={clsx(
         "size-2.5 shrink-0 rounded-full",
         color === null ? "border border-dashed border-ink-subtle" : (COLORS[color]?.dot ?? "bg-ink-subtle"),
-        className,
       )}
     />
   );
@@ -379,7 +350,6 @@ function TagList({
   tags,
   readOnly,
   suggestions,
-  problem,
   onAdd,
   onRemove,
   onRecolor,
@@ -389,8 +359,6 @@ function TagList({
   tags: TagRule[];
   readOnly: boolean;
   suggestions: string[];
-  /** Problema da lista inteira (impede salvar). */
-  problem: string | null;
   /** Inclui o nome; devolve o motivo quando não dá. */
   onAdd: (name: string) => string | null;
   onRemove: (name: string) => void;
@@ -404,7 +372,6 @@ function TagList({
   const list = useRef<HTMLUListElement>(null);
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const shownError = error ?? problem;
   const full = tags.length >= MAX_TAGS;
 
   const add = () => {
@@ -452,11 +419,19 @@ function TagList({
       ) : (
         <>
           <div
+            // Clicar no espaço vazio da caixa leva ao campo (como numa caixa de texto comum).
+            onMouseDown={(e) => {
+              if (e.target === e.currentTarget) {
+                e.preventDefault();
+                input.current?.focus();
+              }
+            }}
             className={clsx(
-              "flex min-h-9 flex-wrap items-center gap-1.5 rounded-lg border bg-surface px-1.5 py-1 shadow-elev-1 focus-within:ring-4",
-              shownError
+              "flex min-h-9 cursor-text flex-wrap items-center gap-1.5 rounded-lg border bg-surface px-1.5 py-1 shadow-elev-1",
+              "transition-[border-color,box-shadow] duration-150 focus-within:ring-4 dark:bg-surface-2",
+              error
                 ? "border-red-500 focus-within:border-red-500 focus-within:ring-red-500/15"
-                : "border-line focus-within:border-brand focus-within:ring-brand/15",
+                : "border-line focus-within:border-brand focus-within:ring-brand/15 dark:border-line-strong",
             )}
           >
             {tags.length ? (
@@ -464,7 +439,7 @@ function TagList({
                 {tags.map((t, i) => (
                   <li
                     key={t.name}
-                    className={clsx(CHIP, "gap-0.5 pr-0.5", kind === "tags" ? "pl-0.5" : "pl-2", tagTone(t.color))}
+                    className={clsx(CHIP, "cursor-default gap-0.5 pr-0.5", kind === "tags" ? "pl-0.5" : "pl-2", tagTone(t.color))}
                   >
                     {kind === "tags" ? <ColorMenu tag={t} onPick={(color) => onRecolor?.(t.name, color)} /> : null}
                     <span className="min-w-0 truncate px-0.5" title={t.name}>
@@ -508,8 +483,8 @@ function TagList({
                 full ? `Limite de ${MAX_TAGS} etiquetas` : tags.length ? "Incluir etiqueta" : `Incluir etiqueta (ex.: ${group.example})`
               }
               aria-label={`Incluir etiqueta na lista “${group.title}”`}
-              aria-invalid={shownError ? true : undefined}
-              aria-describedby={shownError ? `${hintId} ${errorId}` : hintId}
+              aria-invalid={error ? true : undefined}
+              aria-describedby={error ? `${hintId} ${errorId}` : hintId}
               className="h-7 min-w-40 flex-1 bg-transparent px-1 text-sm text-ink outline-none placeholder:text-ink-subtle"
             />
             <datalist id={listId}>
@@ -518,8 +493,8 @@ function TagList({
               ))}
             </datalist>
           </div>
-          {shownError ? (
-            <FieldError id={errorId}>{shownError}</FieldError>
+          {error ? (
+            <FieldError id={errorId}>{error}</FieldError>
           ) : tags.length === 0 ? (
             <p className="text-xs text-ink-subtle">{group.empty}</p>
           ) : null}

@@ -88,8 +88,8 @@ async function copyForLongLink(text: string, toast: ToastFn) {
   );
 }
 
-/** Marca do texto sugerido para o momento da OS. */
-function NowBadge() {
+/** Marca do texto sugerido para o momento da OS (também na tela Textos, que explica quando aparece). */
+export function NowBadge() {
   return (
     <span
       title="Sugerido para a situação atual da OS"
@@ -384,6 +384,435 @@ export function MessagesButton({ ticketId, code }: { ticketId: string; code: str
           <MessageList ticketId={ticketId} compact />
         </Dialog>
       ) : null}
+    </>
+  );
+}
+
+// ------------------------------------------------------------------ menu "Textos para o grupo"
+
+const MENU_WIDTH = 384;
+const MENU_GAP = 6;
+const VIEW_EDGE = 8;
+/** Abre embaixo do botão quando cabe ao menos isso; senão, do lado com mais espaço (ex.: rodapé do painel). */
+const MIN_BELOW = 320;
+
+/**
+ * Põe o menu (fixo na tela) junto do botão e inteiro dentro da janela: embaixo ou em cima, alinhado pela
+ * borda do botão mais perto do meio da tela. Devolve false quando o botão saiu da tela (rolou).
+ */
+function placeMenu(menu: HTMLElement, anchor: HTMLElement): boolean {
+  const rect = anchor.getBoundingClientRect();
+  const viewWidth = document.documentElement.clientWidth;
+  const viewHeight = window.innerHeight;
+  if (rect.bottom < 0 || rect.top > viewHeight) return false;
+  const width = Math.min(MENU_WIDTH, viewWidth - VIEW_EDGE * 2);
+  const start = rect.left + rect.width / 2 > viewWidth / 2 ? rect.right - width : rect.left;
+  const below = viewHeight - rect.bottom - MENU_GAP - VIEW_EDGE;
+  const above = rect.top - MENU_GAP - VIEW_EDGE;
+  const down = below >= MIN_BELOW || below >= above;
+  Object.assign(menu.style, {
+    left: `${Math.max(VIEW_EDGE, Math.min(start, viewWidth - width - VIEW_EDGE))}px`,
+    width: `${width}px`,
+    top: down ? `${rect.bottom + MENU_GAP}px` : "",
+    bottom: down ? "" : `${viewHeight - rect.top + MENU_GAP}px`,
+    maxHeight: `${Math.max(down ? below : above, 160)}px`,
+  });
+  return true;
+}
+
+// Item do menu: fundo e anel de foco por dentro (a lista rola e cortaria o anel de fora).
+const menuItem =
+  "flex text-left transition-colors outline-none hover:bg-surface-2 focus-visible:bg-surface-2 " +
+  "focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset";
+
+/**
+ * "Textos para o grupo": os textos prontos da OS num menu, o sugerido para agora primeiro (marcado
+ * "Agora"). O clique copia e o aviso oferece abrir o WhatsApp; o ícone ao lado de cada texto abre o
+ * WhatsApp com ele, sem número (a pessoa escolhe o grupo). Só busca os textos ao abrir, então serve
+ * também nas listas.
+ */
+export function GroupTextsMenu({
+  ticketId,
+  className,
+  size = "md",
+  label = "Textos para o grupo",
+}: {
+  ticketId: string;
+  className?: string;
+  size?: "sm" | "md";
+  label?: string;
+}) {
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const menuId = useId();
+  const { copy, fallback } = useGroupTextCopy(ticketId);
+  useCopiedReset(copied, () => setCopied(false));
+
+  const close = (focusTrigger: boolean) => {
+    setOpen(false);
+    if (focusTrigger) trigger.current?.focus();
+  };
+  const pick = (m: GroupText) => {
+    close(true);
+    void copy(m.key).then(setCopied);
+  };
+  const share = (m: GroupText) => {
+    close(false);
+    void copyForLongLink(m.text, toast);
+  };
+  const icon = size === "sm" ? "size-3.5" : "size-4";
+  const Icon = copied ? Check : MessageSquareText;
+
+  return (
+    <>
+      <button
+        ref={trigger}
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
+        onClick={(e) => {
+          // Numa linha de lista que abre a OS ao clicar, o clique fica só no botão.
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+        onKeyDown={(e) => {
+          if (!open && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+            e.preventDefault();
+            setOpen(true);
+          }
+        }}
+        className={buttonClassName("secondary", size, className)}
+      >
+        <Icon aria-hidden className={icon} />
+        {label}
+        <ChevronDown aria-hidden className={clsx(icon, "text-ink-muted transition-transform duration-150", open && "rotate-180")} />
+      </button>
+      {open ? (
+        <GroupTextsPopover id={menuId} ticketId={ticketId} label={label} anchor={trigger} onPick={pick} onShare={share} onClose={close} />
+      ) : null}
+      {fallback}
+    </>
+  );
+}
+
+/**
+ * A lista do menu, num portal no <body>: não é cortada pela tabela nem pelo painel com rolagem e fica
+ * por cima do painel da OS. Teclado como menu: setas, Home e End andam; Esc fecha e devolve o foco ao
+ * botão; Tab fecha e segue a partir do botão.
+ */
+function GroupTextsPopover({
+  id,
+  ticketId,
+  label,
+  anchor,
+  onPick,
+  onShare,
+  onClose,
+}: {
+  id: string;
+  ticketId: string;
+  label: string;
+  anchor: React.RefObject<HTMLButtonElement | null>;
+  /** Escolheu um texto para copiar. */
+  onPick: (m: GroupText) => void;
+  /** Abriu o WhatsApp com o texto (o link segue sozinho). */
+  onShare: (m: GroupText) => void;
+  /** Fechar; `focusTrigger` devolve o foco ao botão. */
+  onClose: (focusTrigger: boolean) => void;
+}) {
+  const messages = useGroupTexts(ticketId);
+  const menu = useRef<HTMLDivElement>(null);
+  const baseId = useId();
+  const list = messages.data;
+  const settled = list !== undefined || messages.isError;
+  const dismiss = useEffectEvent(() => onClose(false));
+  const onOutside = useEffectEvent((e: MouseEvent) => {
+    const target = e.target as Node;
+    if (!menu.current?.contains(target) && !anchor.current?.contains(target)) onClose(false);
+  });
+
+  // Junto do botão antes de pintar. Rolando a tela (lista, painel) ou mudando o tamanho da janela, o menu
+  // acompanha o botão; se o botão sai da tela, fecha.
+  useLayoutEffect(() => {
+    let frame = 0;
+    const update = () => {
+      const node = menu.current;
+      const button = anchor.current;
+      if (node && button && !placeMenu(node, button)) dismiss();
+    };
+    const schedule = (e: Event) => {
+      // A rolagem da própria lista do menu não muda nada.
+      if (e.target instanceof Node && menu.current?.contains(e.target)) return;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(update);
+    };
+    update();
+    window.addEventListener("resize", schedule);
+    window.addEventListener("scroll", schedule, true);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("resize", schedule);
+      window.removeEventListener("scroll", schedule, true);
+    };
+  }, [anchor]);
+
+  useEffect(() => {
+    const listener = (e: MouseEvent) => onOutside(e);
+    document.addEventListener("mousedown", listener);
+    return () => document.removeEventListener("mousedown", listener);
+  }, []);
+
+  // Foco no primeiro item (o sugerido) assim que a lista chega; enquanto carrega, no próprio menu.
+  useEffect(() => {
+    const node = menu.current;
+    if (!node) return;
+    const active = document.activeElement;
+    if (active && active !== node && node.contains(active)) return;
+    (node.querySelector<HTMLElement>('[role="menuitem"]') ?? node).focus({ preventScroll: true });
+  }, [settled]);
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const items = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+    const index = items.indexOf(document.activeElement as HTMLElement);
+    const focusAt = (i: number) => {
+      e.preventDefault();
+      items[(i + items.length) % items.length]?.focus();
+    };
+    if (e.key === "Escape") {
+      // O preventDefault avisa o painel da OS e os diálogos por baixo: o Esc fecha só o menu.
+      e.preventDefault();
+      onClose(true);
+    } else if (e.key === "Tab") {
+      // O foco volta ao botão e o Tab segue a partir dele (no painel da OS, o Tab continua preso nele).
+      onClose(true);
+    } else if (items.length === 0) {
+      return;
+    } else if (e.key === "ArrowDown") {
+      focusAt(index + 1);
+    } else if (e.key === "ArrowUp") {
+      focusAt(index < 0 ? -1 : index - 1);
+    } else if (e.key === "Home") {
+      focusAt(0);
+    } else if (e.key === "End") {
+      focusAt(-1);
+    }
+  };
+
+  const shared = list ? sharedFirstLine(list) : null;
+  const titleId = `${baseId}-titulo`;
+  const errorId = `${baseId}-erro`;
+  const emptyId = `${baseId}-vazio`;
+  const empty = list !== undefined && list.length === 0;
+
+  let body: React.ReactNode;
+  if (!settled) {
+    body = (
+      <div aria-hidden className="flex flex-col gap-4 px-4 py-3">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="flex flex-col gap-1.5">
+            <Skeleton className="h-3.5 w-36" />
+            <Skeleton className="h-3 w-full" />
+            <Skeleton className="h-3 w-2/3" />
+          </div>
+        ))}
+      </div>
+    );
+  } else if (!list) {
+    body = (
+      <div role="none" className="flex flex-col items-start gap-2 px-4 py-3">
+        <p id={errorId} className="text-sm text-red-700 dark:text-red-300">
+          Não foi possível carregar os textos. {errorMessage(messages.error)}
+        </p>
+        <button
+          type="button"
+          role="menuitem"
+          tabIndex={-1}
+          aria-describedby={errorId}
+          onClick={() => void messages.refetch()}
+          className={clsx(menuItem, "items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-ink")}
+        >
+          {messages.isFetching ? <Loader2 aria-hidden className="size-3.5 animate-spin" /> : <RotateCcw aria-hidden className="size-3.5" />}
+          Tentar de novo
+        </button>
+      </div>
+    );
+  } else if (empty) {
+    body = (
+      <p id={emptyId} className="px-4 py-4 text-xs text-ink-muted">
+        Nenhum texto pronto ainda. Crie os modelos uma vez e eles aparecem aqui preenchidos com os dados da OS.
+      </p>
+    );
+  } else {
+    body = (
+      <div role="none" className="divide-y divide-line">
+        {list.map((m) => {
+          const previewId = `${baseId}-${m.key}`;
+          return (
+            <div key={m.key} role="none" className="relative flex items-stretch">
+              {m.suggested ? (
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute inset-y-2.5 left-1.5 w-[3px] rounded-full bg-linear-to-b from-brand to-brand-cyan"
+                />
+              ) : null}
+              <button
+                type="button"
+                role="menuitem"
+                tabIndex={-1}
+                onClick={() => onPick(m)}
+                aria-label={`Copiar ${m.name}${m.suggested ? ", sugerido agora" : ""}`}
+                aria-describedby={previewId}
+                className={clsx(menuItem, "min-w-0 flex-1 flex-col gap-1 py-2.5 pr-3 pl-4")}
+              >
+                <span className="flex w-full min-w-0 items-center gap-2">
+                  <span className="min-w-0 truncate text-sm font-semibold text-ink">{m.name}</span>
+                  {m.suggested ? <NowBadge /> : null}
+                  <span aria-hidden className="ml-auto inline-flex shrink-0 items-center gap-1 text-xs font-medium text-ink-muted">
+                    <Copy className="size-3.5" />
+                    Copiar
+                  </span>
+                </span>
+                <span id={previewId} className="line-clamp-3 text-xs leading-relaxed break-words whitespace-pre-line text-ink-muted">
+                  {previewOf(m.text, shared)}
+                </span>
+              </button>
+              <a
+                role="menuitem"
+                tabIndex={-1}
+                href={shareUrl(m.text)}
+                target="_blank"
+                rel="noreferrer"
+                onClick={() => onShare(m)}
+                aria-label={`Abrir ${m.name} no WhatsApp`}
+                title="Abrir no WhatsApp"
+                className={clsx(menuItem, "w-11 shrink-0 items-center justify-center border-l border-line text-ink-muted hover:text-ink")}
+              >
+                <MessageCircle aria-hidden className="size-4" />
+              </a>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  return createPortal(
+    <div
+      ref={menu}
+      id={id}
+      role="menu"
+      tabIndex={-1}
+      aria-labelledby={titleId}
+      aria-busy={!settled || undefined}
+      onKeyDown={onKeyDown}
+      // O menu é um portal no <body>, mas o clique ainda "sobe" pela árvore do React até quem o
+      // renderiza (ex.: a linha da lista, que abriria a OS). Ele para aqui.
+      onClick={(e) => e.stopPropagation()}
+      className="fixed z-50 flex animate-pop flex-col overflow-hidden rounded-xl border border-line bg-surface text-ink shadow-pop outline-none"
+    >
+      <div role="none" className="border-b border-line px-4 py-2.5">
+        <p id={titleId} className="text-sm font-bold text-ink">
+          {label}
+        </p>
+        <p className="mt-0.5 truncate text-xs text-ink-muted">{shared ? unbold(shared) : "Clique para copiar e cole no grupo do WhatsApp."}</p>
+      </div>
+      <div role="none" className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        {body}
+      </div>
+      <div role="none" className="border-t border-line p-1">
+        <Link
+          href="/textos"
+          role="menuitem"
+          tabIndex={-1}
+          onClick={() => onClose(false)}
+          aria-describedby={empty ? emptyId : undefined}
+          className={clsx(menuItem, "items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-ink-muted hover:text-ink")}
+        >
+          <Settings2 aria-hidden className="size-3.5" />
+          {empty ? "Criar modelos" : "Editar modelos"}
+        </Link>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+// ------------------------------------------------------------------ copiar com um clique
+
+/**
+ * Copia com um clique o texto `templateKey` da OS, ou o sugerido para agora (sem `templateKey`), e mostra
+ * o "Copiado". Busca os textos ao aparecer: serve para o painel da OS e listas curtas (numa lista longa,
+ * o GroupTextsMenu só busca ao abrir). Sem texto que sirva, fica desabilitado e diz por quê.
+ */
+export function CopyGroupTextButton({
+  ticketId,
+  templateKey,
+  className,
+  label = "Copiar texto",
+}: {
+  ticketId: string;
+  templateKey?: string;
+  className?: string;
+  label?: string;
+}) {
+  const messages = useGroupTexts(ticketId, BUTTON_STALE_MS);
+  const { copy, busy, fallback } = useGroupTextCopy(ticketId);
+  const [copied, setCopied] = useState(false);
+  const reasonId = useId();
+  useCopiedReset(copied, () => setCopied(false));
+
+  const target = messages.data?.find((m) => (templateKey ? m.key === templateKey : m.suggested));
+  const failed = !messages.data && messages.isError;
+  const reason = messages.isPending
+    ? "Carregando o texto..."
+    : failed
+      ? "Não foi possível carregar os textos: clique para tentar de novo."
+      : target
+        ? null
+        : templateKey
+          ? "Este texto não está entre os modelos (veja em Textos do WhatsApp)."
+          : "Nenhum texto combina com a situação da OS agora.";
+  const unavailable = messages.isPending || (!failed && !target);
+  const loading = busy || (messages.isPending && messages.isFetching);
+  const Icon = loading ? Loader2 : copied ? Check : Copy;
+
+  const run = async () => {
+    if (unavailable || busy) return;
+    setCopied(await copy(templateKey ?? null));
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={(e) => {
+          // Numa linha de lista que abre a OS ao clicar, o clique fica só no botão.
+          e.stopPropagation();
+          void run();
+        }}
+        aria-disabled={unavailable || undefined}
+        aria-busy={busy || undefined}
+        aria-label={target ? `${copied ? "Copiado" : label}: ${target.name}` : undefined}
+        aria-describedby={reason ? reasonId : undefined}
+        title={target ? `Copia “${target.name}” para colar no grupo do WhatsApp` : (reason ?? undefined)}
+        className={buttonClassName(
+          "secondary",
+          "sm",
+          clsx("aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:active:translate-y-0", className),
+        )}
+      >
+        <Icon aria-hidden className={clsx("size-3.5", loading && "animate-spin")} />
+        {copied ? "Copiado" : label}
+      </button>
+      {reason ? (
+        <span id={reasonId} className="sr-only">
+          {reason}
+        </span>
+      ) : null}
+      {fallback}
     </>
   );
 }
