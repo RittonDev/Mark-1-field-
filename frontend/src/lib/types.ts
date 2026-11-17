@@ -60,6 +60,7 @@ export type TicketEventType =
   | "quote_sent"
   | "quote_approved"
   | "quote_rejected"
+  | "quote_reminded"
   | "times_corrected"
   | "payout_set"
   | "payout_removed";
@@ -1056,6 +1057,16 @@ export interface QuoteLink {
   url: string;
 }
 
+/** Por que o orçamento está na fila "Para cobrar" (mesma regra do Início). */
+export type QuoteFollowUp = "not_opened" | "no_answer" | "expiring" | "in_review" | "expired";
+
+/** Anexo do orçamento no Field Control (cotação, nota): link externo. */
+export interface QuoteLegacyAttachment {
+  url: string;
+  title: string | null;
+  type: string | null;
+}
+
 export interface CompanyProfile {
   name: string;
   document: string | null;
@@ -1093,6 +1104,19 @@ export interface Quote {
   client_comment?: string | null;
   link?: QuoteLink | null;
   totals_by_kind?: Record<QuoteItemKind, number>;
+  /** Aberturas do link pelo cliente (a equipe e a prévia não contam). */
+  client_views?: number;
+  client_first_viewed_at?: ISODate | null;
+  client_last_viewed_at?: ISODate | null;
+  /** Cobranças registradas pelo "Cobrar". */
+  reminder_count?: number;
+  last_reminded_at?: ISODate | null;
+  last_reminded_by?: Ref | null;
+  follow_up?: QuoteFollowUp | null;
+  /** Orçamento migrado do Field Control. */
+  legacy_code?: string | null;
+  legacy_description?: string | null;
+  legacy_attachments?: QuoteLegacyAttachment[];
 }
 
 export interface QuoteListRow extends Quote {
@@ -1100,6 +1124,7 @@ export interface QuoteListRow extends Quote {
   customer: string | null;
   /** Local (loja) da OS do orçamento. */
   location?: string | null;
+  customer_id?: UUID | null;
 }
 
 export interface QuoteStatusTotal {
@@ -1120,6 +1145,18 @@ export interface QuoteCatalogItem {
   description: string | null;
   is_active: boolean;
   kind?: QuoteItemKind;
+  /** Orçamentos não cancelados dos últimos 12 meses com o item. */
+  uses_12m?: number;
+  last_used_at?: ISODate | null;
+}
+
+/** GET /quote-items/last-prices: último preço aprovado do cliente, por item do catálogo. */
+export interface QuoteLastPrice {
+  catalog_item_id: UUID;
+  unit_price: number;
+  quote_id: UUID;
+  quote_code: string;
+  decided_at: ISODate | null;
 }
 
 export interface PublicQuote {
@@ -1264,6 +1301,9 @@ export interface TechnicianSuggestion {
   day_load?: number | null;
   score: number;
   reasons: string[];
+  /** Favorito na cidade da loja: pela regra ("auto") ou fixado pela central ("manual"). */
+  favorite?: "auto" | "manual" | null;
+  favorite_note?: string | null;
 }
 
 // ---- Fila do analista ----
@@ -1473,6 +1513,65 @@ export interface NearbyTechnician {
 export interface NearbyResult {
   point: { latitude: number; longitude: number; label: string };
   technicians: NearbyTechnician[];
+}
+
+// ---- Técnicos favoritos por cidade ----
+
+export interface FavoriteTechnician {
+  id: UUID;
+  name: string;
+  email: string;
+  phone: string | null;
+  avatar_url: string | null;
+  is_active: boolean;
+  on_shift: boolean;
+  open_tickets: number;
+  base_city: string | null;
+  base_state: string | null;
+  /** OS dele nas lojas da cidade nos últimos 12 meses. */
+  visits: number;
+  last_visit_at: ISODate | null;
+  /** Posição no ranking da cidade (null sem OS na janela). */
+  rank: number | null;
+  automatic: boolean;
+  pinned: boolean;
+  hidden: boolean;
+  note: string | null;
+  set_by: Ref | null;
+  set_at: ISODate | null;
+}
+
+export interface FavoriteCity {
+  state: string;
+  city: string;
+  key: string;
+  /** Lojas ativas na cidade. */
+  stores: number;
+  /** OS distintas atendidas nas lojas da cidade nos últimos 12 meses. */
+  visits: number;
+  favorites: FavoriteTechnician[];
+  hidden_count: number;
+  others_count: number;
+}
+
+export interface FavoriteCityDetail extends FavoriteCity {
+  hidden: FavoriteTechnician[];
+  others: FavoriteTechnician[];
+}
+
+export interface FavoritesOut {
+  window_days: number;
+  min_visits: number;
+  top: number;
+  max_pinned: number;
+  cities: FavoriteCity[];
+}
+
+export interface FavoriteSet {
+  state: string;
+  city: string;
+  favorite: boolean;
+  note?: string | null;
 }
 
 // ---- Fichas completas (técnico, cliente e loja) ----

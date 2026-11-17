@@ -178,6 +178,7 @@ export const EVENT_TYPE: Record<TicketEventType, string> = {
   quote_sent: "enviou o orçamento",
   quote_approved: "Cliente aprovou o orçamento",
   quote_rejected: "Cliente recusou o orçamento",
+  quote_reminded: "cobrou o cliente pelo orçamento",
   times_corrected: "corrigiu os horários",
   payout_set: "definiu o valor do técnico",
   payout_removed: "tirou o valor do técnico",

@@ -19,6 +19,7 @@ from app.models.project import Project
 from app.models.quote import Quote, QuoteItemCatalog
 from app.models.repair import RepairEvent, RepairOrder, RepairPhoto
 from app.models.sync import DeviceToken, SyncOperation
+from app.models.technician_favorite import TechnicianFavorite
 from app.models.ticket import (
     Ticket,
     TicketAttachment,
@@ -58,6 +59,7 @@ __all__ = [
     "TicketPartRequest",
     "TicketPayout",
     "TicketWorklog",
+    "TechnicianFavorite",
     "UnproductiveReason",
     "TechnicianApplication",
     "TechnicianShift",

@@ -9,6 +9,7 @@ import {
   ClipboardList,
   ClipboardX,
   Ban,
+  BellRing,
   Clock,
   FileCheck2,
   FileSignature,
@@ -60,6 +61,7 @@ const ICONS: Record<TicketEventType, Icon> = {
   quote_sent: FileText,
   quote_approved: FileCheck2,
   quote_rejected: FileX2,
+  quote_reminded: BellRing,
   times_corrected: Clock,
   payout_set: Wallet,
   payout_removed: Wallet,
@@ -284,6 +286,7 @@ function Detail({ event }: { event: TicketEvent }) {
     case "form_removed":
       return <Joined parts={[event.from_value]} />;
     case "quote_sent":
+    case "quote_reminded":
     case "quote_approved":
     case "quote_rejected":
       return <Joined parts={[event.to_value, money(data.total)]} />;
