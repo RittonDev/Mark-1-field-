@@ -333,7 +333,13 @@ export function PartRequestsCard({ ticket }: { ticket: TicketDetail }) {
       {viewing ? (
         <QuoteViewer
           quote={viewing}
-          ticket={{ id: ticket.id, code: ticket.code, customer: ticket.customer?.name ?? null, title: ticket.title }}
+          ticket={{
+            id: ticket.id,
+            code: ticket.code,
+            customer: ticket.customer?.name ?? null,
+            title: ticket.title,
+            location: ticket.location?.name ?? null,
+          }}
           inTicket
           sending={send.isPending}
           onClose={() => setViewing(null)}

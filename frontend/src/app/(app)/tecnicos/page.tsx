@@ -7,7 +7,6 @@ import {
   BadgeCheck,
   Camera,
   Check,
-  Copy,
   Download,
   FileSpreadsheet,
   HardHat,
@@ -19,6 +18,7 @@ import {
   Plus,
   Search,
   SquarePen,
+  Star,
   Upload,
   UserPlus,
   Wallet,
@@ -26,9 +26,9 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useMemo, useRef, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 import { useConfirm } from "@/components/Confirm";
-import { fold } from "@/components/operacao/hooks";
+import { fold, replaceSearch, useSearchChange } from "@/components/operacao/hooks";
 import { useToast } from "@/components/Toaster";
 import {
   Button,
@@ -56,23 +56,29 @@ import { downloadCsv } from "@/lib/download";
 import { formatDate, formatMoney, formatRelative, initials } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
 import { labelMap, maskCep, maskPhone, resizePhotoBlob, UFS, useOnboardingCatalog } from "@/lib/onboarding";
-import { useServiceTypes, useTeams } from "@/lib/queries";
+import { useFavorites, useServiceTypes, useTeams } from "@/lib/queries";
 import { Tabs } from "@/components/motion";
+import { favoritesHref, FavoritesView } from "@/components/technicians/FavoritesView";
+import { TempPasswordPanel } from "@/components/technicians/GrantAccessDialog";
 import { InviteDialog } from "@/components/technicians/InviteDialog";
 import { NearbyFinder } from "@/components/technicians/NearbyFinder";
 import { refreshTechnicianViews } from "@/components/technicians/refresh";
-import { useCopy } from "@/components/technicians/useCopy";
 import type {
   ImportResult,
-  NearbyTechnician,
   PayoutList,
   Technician,
   TechnicianRegion,
   TemporaryPassword,
+  UUID,
 } from "@/lib/types";
 import { whatsappUrl } from "@/lib/whatsapp";
 
 type Active = "true" | "false" | "";
+
+/** Abas da tela; a de favoritos (e a dos mais próximos) fica na URL: ?aba=favoritos&uf=SP&cidade=Santos. */
+type View = "list" | "favorites" | "nearby";
+const VIEW_PARAM: Record<View, string | null> = { list: null, favorites: "favoritos", nearby: "proximos" };
+const viewOf = (aba: string | null): View => (aba === "favoritos" ? "favorites" : aba === "proximos" ? "nearby" : "list");
 
 // A lista abre com as primeiras linhas; o resto vem no "Mostrar mais" (a base passa de mil técnicos).
 const PAGE = 150;
@@ -150,7 +156,10 @@ function TechniciansView() {
   const [teamId, setTeamId] = useState("");
   // Depois da migração, quem está "inativo" no Field Control continua na rede (só sem licença): mostra todos.
   const [active, setActive] = useState<Active>("");
-  const [view, setView] = useState<"list" | "nearby">("list");
+  const [view, setView] = useState<View>(() => viewOf(searchParams.get("aba")));
+  // A URL mudou com a tela aberta (o menu, Voltar, o "Favorito em ..." do cadastro): mostra a aba dela.
+  const urlChange = useSearchChange();
+  if (urlChange && viewOf(urlChange.get("aba")) !== view) setView(viewOf(urlChange.get("aba")));
   const [uf, setUf] = useState("");
   const [city, setCity] = useState("");
   const [gap, setGap] = useState<Gap | null>(null);
@@ -234,8 +243,14 @@ function TechniciansView() {
         t.open_tickets,
       ]),
     ]);
-  // Nome clicado em "Mais próximos": abre o cadastro (da lista carregada ou buscado pelo e-mail).
-  const openTechnician = async (tech: NearbyTechnician) => {
+  // Trocar de aba: a URL acompanha (mantém o ?os= do painel); UF e cidade são só dos favoritos.
+  const changeView = (next: View) => {
+    setView(next);
+    replaceSearch({ aba: VIEW_PARAM[next], ...(next === "favorites" ? {} : { uf: null, cidade: null }) });
+  };
+  // Nome clicado em "Favoritos por cidade" ou "Mais próximos": abre o cadastro (da lista carregada ou
+  // buscado pelo e-mail).
+  const openTechnician = async (tech: { id: UUID; email: string }) => {
     const known = list.data?.find((t) => t.id === tech.id);
     if (known) {
       setEditing(known);
@@ -291,10 +306,11 @@ function TechniciansView() {
           variant="segmented"
           items={[
             { key: "list" as const, label: "Base técnica" },
+            { key: "favorites" as const, label: "Favoritos por cidade" },
             { key: "nearby" as const, label: "Mais próximos de uma loja" },
           ]}
           value={view}
-          onChange={setView}
+          onChange={changeView}
           ariaLabel="Visão"
           idPrefix="tecnicos"
         />
@@ -322,6 +338,14 @@ function TechniciansView() {
       {view === "nearby" ? (
         <div role="tabpanel" id="tecnicos-panel-nearby" aria-labelledby="tecnicos-tab-nearby">
           <NearbyFinder regions={regions.data} onOpenTechnician={openTechnician} />
+        </div>
+      ) : view === "favorites" ? (
+        <div role="tabpanel" id="tecnicos-panel-favorites" aria-labelledby="tecnicos-tab-favorites">
+          <FavoritesView
+            initialUf={searchParams.get("uf") ?? ""}
+            initialCity={searchParams.get("cidade") ?? ""}
+            onOpenTechnician={openTechnician}
+          />
         </div>
       ) : (
         <div role="tabpanel" id="tecnicos-panel-list" aria-labelledby="tecnicos-tab-list">
@@ -624,40 +648,6 @@ function AppStatus({ tech, now }: { tech: Technician; now: number }) {
   );
 }
 
-/** Senha provisória: aparece uma vez, com atalhos para enviar ao técnico. */
-function TempPasswordPanel({ result }: { result: TemporaryPassword }) {
-  const copy = useCopy();
-  const codeRef = useRef<HTMLElement>(null);
-  const [copied, setCopied] = useState(false);
-  const { technician: t, temporary_password: pw } = result;
-  const message = `Olá, ${t.name.trim().split(/\s+/)[0]}! Seu acesso ao app Maxx Field: e-mail ${t.email} e senha provisória ${pw}. No primeiro acesso, o app pede para você criar uma senha nova.`;
-  return (
-    <div className="flex flex-col gap-3">
-      <p className="text-sm text-ink">
-        Senha provisória de <strong>{t.name}</strong>. No primeiro acesso ao app, ele cria uma senha nova.
-      </p>
-      <div className="flex items-center gap-2 rounded-lg border border-line bg-surface-2 p-2">
-        <code ref={codeRef} className="flex-1 text-center font-mono text-lg tracking-wider text-ink">
-          {pw}
-        </code>
-        <Button
-          onClick={async () => {
-            if (await copy(pw, { select: codeRef.current, title: "Senha copiada" })) setCopied(true);
-          }}
-        >
-          {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-          {copied ? "Copiada" : "Copiar"}
-        </Button>
-      </div>
-      <a href={whatsappUrl(t.phone, message)} target="_blank" rel="noreferrer" className={buttonClassName("secondary", "md", "self-start")}>
-        <MessageCircle className="size-4" />
-        {t.phone ? "Enviar no WhatsApp dele" : "Enviar por WhatsApp"}
-      </a>
-      <p className="text-xs text-ink-muted">Por segurança, esta senha não aparece de novo. Se perder, gere outra.</p>
-    </div>
-  );
-}
-
 interface TechnicianForm {
   name: string;
   email: string;
@@ -880,6 +870,12 @@ function EditDialog({ tech, onClose }: { tech: Technician; onClose: () => void }
     queryFn: () => api.get<PayoutList>("/payouts", { technician_id: tech.id }),
     staleTime: 60_000,
   });
+  // Cidades em que ele é favorito (pela regra ou fixado pela central).
+  const favorites = useFavorites({ technicianId: tech.id });
+  const favoriteIn = (favorites.data?.cities ?? []).flatMap((c) => {
+    const me = c.favorites.find((f) => f.id === tech.id);
+    return me ? [{ city: c, me }] : [];
+  });
   const dirty = snapshot({ form, address, schedule, serviceIds, isActive }) !== snapshot(baseline);
   const emailChanged = form.email.trim().toLowerCase() !== tech.email.toLowerCase();
   const refresh = (t: Technician) => {
@@ -1096,6 +1092,27 @@ function EditDialog({ tech, onClose }: { tech: Technician; onClose: () => void }
               {current.last_visit_at ? ` · última visita ${formatDate(current.last_visit_at)}` : ""}
             </p>
           </div>
+          {favoriteIn.length ? (
+            <p className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-ink-muted">
+              <Star aria-hidden className="size-3.5 shrink-0 fill-current text-brand" />
+              Favorito em
+              {favoriteIn.map(({ city, me }, i) => (
+                <span key={`${city.state}-${city.key}`}>
+                  <Link
+                    href={favoritesHref(city.state, city.city)}
+                    // Sem alteração pendente, o cadastro fecha e a aba de favoritos aparece já na cidade.
+                    onClick={() => {
+                      if (!dirty) onClose();
+                    }}
+                    className="rounded font-medium text-ink underline-offset-2 hover:text-brand-ink hover:underline focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+                  >
+                    {city.city}-{city.state}
+                  </Link>{" "}
+                  ({me.pinned ? "fixado" : `${me.visits} OS`}){i < favoriteIn.length - 1 ? " ·" : ""}
+                </span>
+              ))}
+            </p>
+          ) : null}
           <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem_8rem]">
             <Field label="Endereço (rua, número, complemento)">
               <Input value={address.line} onChange={(e) => setAddress((a) => ({ ...a, line: e.target.value }))} maxLength={255} />

@@ -6,7 +6,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useToast } from "@/components/Toaster";
 import { errorMessage, refreshSessionResult, WS_URL } from "./api";
 import { STATUS } from "./constants";
-import { todayISO } from "./format";
+import { formatMoney, todayISO } from "./format";
 import { sessionStore } from "./session";
 import type { LiveTechnician, RealtimeEvent, TicketStatus, TrackingHistory, UUID } from "./types";
 import { copyText, GROUP_TEXT_COPIED, type GroupText, groupShareUrl, groupTextsQuery } from "./whatsapp";
@@ -176,12 +176,15 @@ function noticeFor(event: RealtimeEvent, userId: string): NoticeDraft | null {
       };
     }
     case "quote.decided": {
-      const approved = (event as { status?: string }).status === "approved";
+      // "OS-001234: ORC-000123 aprovado pelo cliente", com "R$ 350,00 · <quem aprovou>" embaixo.
+      const decided = event as { status?: string; quote_code?: string; total?: unknown };
+      const approved = decided.status === "approved";
+      const amount = typeof decided.total === "number" ? formatMoney(decided.total) : null;
       return {
         ticketId,
         code,
-        title: `${code}: orçamento ${approved ? "aprovado" : "recusado"} pelo cliente`,
-        description: event.name ?? undefined,
+        title: `${code}: ${text(decided.quote_code) ?? "orçamento"} ${approved ? "aprovado" : "recusado"} pelo cliente`,
+        description: [amount, event.name].filter(Boolean).join(" · ") || undefined,
         tone: approved ? "success" : "error",
       };
     }

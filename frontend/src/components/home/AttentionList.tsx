@@ -123,6 +123,12 @@ function ItemList({ group, now, href }: { group: AttentionGroup; now: number; hr
   );
 }
 
+/**
+ * Telas próprias que abrem mostrando exatamente o grupo (as solicitações do portal e a fila "Para cobrar"
+ * dos orçamentos): aí vale "Ver todas (N)".
+ */
+const EXACT_LINKS = new Set(["/solicitacoes", "/orcamentos?cobrar=1"]);
+
 /** Telas que abrem com todas as situações (não só as do grupo): o atalho vai sem número. */
 const PAGE_LABEL: Record<string, string> = {
   "/orcamentos": "Abrir orçamentos",
@@ -148,12 +154,12 @@ function SeeAll({ group, href, exact }: { group: AttentionGroup; href: string; e
 /**
  * Um grupo de pontos de atenção. Em "Agora" vem aberto, com as OS e o motivo de cada uma; em "Rotina"
  * vem recolhido, com os exemplos atrás de um botão. "Ver todas (N)" só quando o destino mostra exatamente
- * as N (a lista de chamados com o filtro do grupo ou as solicitações do portal); senão, "e mais N" e, se
- * houver tela, um atalho sem número.
+ * as N (a lista de chamados com o filtro do grupo, as solicitações do portal ou os orçamentos para
+ * cobrar); senão, "e mais N" e, se houver tela, um atalho sem número.
  */
 function GroupCard({ group, now, collapsed }: { group: AttentionGroup; now: number; collapsed: boolean }) {
   const href = targetHref(group);
-  const exact = Boolean(href) && (!group.link || group.link === "/solicitacoes");
+  const exact = Boolean(href) && (!group.link || EXACT_LINKS.has(group.link));
   const [open, setOpen] = useState(false);
   const listId = useId();
   const items = group.items.length;

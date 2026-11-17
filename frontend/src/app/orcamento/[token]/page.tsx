@@ -124,6 +124,15 @@ function listText(items: string[]): string {
 
 const smoothScroll = (): ScrollBehavior => (window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth");
 
+/**
+ * Leitura do orçamento. Sem login vale como abertura do cliente. Não contam: a sessão da central (a
+ * gestão conferindo) e o link de prévia (?preview=1), que o "Ver como o cliente" abre. Só a leitura leva
+ * a sessão: aprovar e recusar são sempre do cliente.
+ */
+function readQuery(): { preview: number } | undefined {
+  return new URLSearchParams(window.location.search).get("preview") === "1" ? { preview: 1 } : undefined;
+}
+
 export default function PublicQuotePage() {
   const { token } = useParams<{ token: string }>();
   const [quote, setQuote] = useState<PublicQuote | null>(null);
@@ -160,7 +169,7 @@ export default function PublicQuotePage() {
 
   useEffect(() => {
     const controller = new AbortController();
-    request<PublicQuote>(path, { auth: false, signal: controller.signal, timeoutMs: LOAD_TIMEOUT_MS })
+    request<PublicQuote>(path, { query: readQuery(), signal: controller.signal, timeoutMs: LOAD_TIMEOUT_MS })
       .then(setQuote)
       .catch((e) => {
         if (controller.signal.aborted) return;
@@ -222,7 +231,7 @@ export default function PublicQuotePage() {
       if (e instanceof ApiError && e.status === 409) {
         // Mudou com a página aberta (a empresa editou, venceu, outra pessoa respondeu): mostra como está agora.
         try {
-          setQuote(await request<PublicQuote>(path, { auth: false }));
+          setQuote(await request<PublicQuote>(path, { query: readQuery() }));
         } catch {
           // Sem a releitura, fica a mensagem.
         }

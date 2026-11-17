@@ -1171,7 +1171,7 @@ function ItemDialog({ item, onClose }: { item: QuoteCatalogItem | null; onClose:
   const priceRead = readDecimal(price, { decimals: 2, allowZero: true, emptyMessage: "Informe o preço (pode ser 0)" });
   const errors = {
     name: name.trim().length < 2 ? "Escreva o nome (pelo menos 2 letras)" : null,
-    unit: unit.trim() ? null : "Informe a unidade (ex.: un, m, h)",
+    unit: unit.trim() ? null : "Informe a unidade",
     price: priceRead.error,
   };
   const valid = !errors.name && !errors.unit && !errors.price;
@@ -1225,14 +1225,7 @@ function ItemDialog({ item, onClose }: { item: QuoteCatalogItem | null; onClose:
         }}
       >
         <Field label="Nome" required className="sm:col-span-3">
-          <Input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Ex.: Velcro 3 m"
-            maxLength={200}
-            autoFocus
-            aria-invalid={Boolean(shown("name"))}
-          />
+          <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={200} autoFocus aria-invalid={Boolean(shown("name"))} />
           {fieldError("name")}
         </Field>
         <Field label="Tipo">
@@ -1245,13 +1238,7 @@ function ItemDialog({ item, onClose }: { item: QuoteCatalogItem | null; onClose:
           </Select>
         </Field>
         <Field label="Unidade (medida)" required>
-          <Input
-            value={unit}
-            onChange={(e) => setUnit(e.target.value)}
-            placeholder="un, m, rolo, h"
-            maxLength={20}
-            aria-invalid={Boolean(shown("unit"))}
-          />
+          <Input value={unit} onChange={(e) => setUnit(e.target.value)} maxLength={20} aria-invalid={Boolean(shown("unit"))} />
           {fieldError("unit")}
         </Field>
         <Field label="Preço (R$)" required>
@@ -1264,8 +1251,8 @@ function ItemDialog({ item, onClose }: { item: QuoteCatalogItem | null; onClose:
           />
           {fieldError("price")}
         </Field>
-        <Field label="Descrição" hint="Para a equipe: detalhes do item (não vai para o cliente)." className="sm:col-span-3">
-          <Textarea rows={2} maxLength={2000} value={description} onChange={(e) => setDescription(e.target.value)} />
+        <Field label="Descrição interna" className="sm:col-span-3">
+          <Textarea rows={2} maxLength={2000} value={description} onChange={(e) => setDescription(e.target.value)} title="Não vai para o cliente" />
         </Field>
         <div className="sm:col-span-3">
           <Checkbox label="Ativo (aparece ao montar um orçamento)" checked={active} onChange={setActive} />
