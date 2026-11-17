@@ -429,7 +429,7 @@ export function SearchResults({ ctl, onLeave }: { ctl: SearchController; onLeave
   const groups = groupEntries(ctl.entries);
   const showChips = ctl.typed !== "" && ctl.chips.some((c) => c.kind !== "text");
   const onlyPlaces = ctl.entries.every((e) => e.group === GROUP.screens || e.group === GROUP.pages || e.group === GROUP.actions);
-  const waiting = ctl.typed !== "" && (ctl.stale || ctl.fetching) && onlyPlaces && !ctl.failed;
+  const waiting = isSearchable(ctl.typed) && (ctl.stale || ctl.fetching) && onlyPlaces && !ctl.failed;
   return (
     <>
       {ctl.failed ? (
