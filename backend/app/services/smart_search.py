@@ -9,19 +9,20 @@ e lido em camadas. Cada camada consome o pedaço da frase que entendeu e vira um
 cidade, loja). O que sobra é texto livre (q), procurado nos mesmos campos da busca da lista.
 
 Na consulta das OS o texto livre usa expressão regular com as variantes acentuadas de cada letra
-(ex.: "botic[aá...]rio"), com o mesmo resultado de fold_words_sql e cerca de 10x mais rápida nas
-descrições longas (a tradução letra a letra de 15 mil descrições leva quase 1 s).
+(ex.: "botic[aá...]rio"): o mesmo resultado de fold_words_sql, cerca de 10x mais rápido nas
+descrições longas (traduzir letra a letra 15 mil descrições leva quase 1 s por palavra).
 """
 
 import re
 import uuid
 from bisect import bisect_left
 from collections import defaultdict
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any
 
-from sqlalchemy import ColumnElement, and_, case, func, or_, select
+from sqlalchemy import ColumnElement, and_, case, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -61,14 +62,14 @@ STOP = frozenset(
     pelo pela pelos pelas e ou que um uma uns umas todas todos toda todo me mostrar mostre mostra
     ver veja listar liste lista quais qual quero buscar busca procurar procure achar ache chamado
     chamados ordem ordens servico servicos ticket tickets dia dias ate entre desde durante mes
-    semana ano sobre the""".split()
+    semana ano sobre""".split()
 )
 TECH_KW = frozenset({"tecnico", "tecnica", "tecnicos", "tecnicas", "tec"})
 CUSTOMER_KW = frozenset({"cliente", "clientes", "empresa"})
 LOCATION_KW = frozenset({"loja", "lojas", "filial", "filiais", "unidade", "local"})
 CITY_KW = frozenset({"cidade", "municipio"})
 KEYWORDS = TECH_KW | CUSTOMER_KW | LOCATION_KW | CITY_KW
-# Palavra comum do dia a dia da OS: sozinha, não vira cliente nem loja (fica no texto livre).
+# Palavra comum do dia a dia da OS: sozinha, só vira nome se for o nome inteiro.
 DOMAIN_WORDS = frozenset(
     """rede redes impressora impressoras camera cameras cftv computador computadores notebook
     internet link servidor switch cabo cabos cabeamento manutencao instalacao preventiva corretiva
@@ -99,7 +100,7 @@ def accent_regex(word: str) -> str:
 
 
 def _prefix_regex(word: str) -> str:
-    """Começo de palavra: "botic" casa "O Boticário" e não "Abotica"."""
+    """Começo de palavra: "botic" casa "O Boticário" e não "Abotica"; número só inteiro."""
     if word.isdigit():
         return rf"(^|[^0-9]){word}([^0-9]|$)"
     return rf"(^|[^[:alnum:]]){accent_regex(word)}"
@@ -112,8 +113,8 @@ def name_words(name: str | None) -> tuple[str, ...]:
     return useful or tuple(words)
 
 
-def _close(a: str, b: str) -> bool:
-    """Diferença de no máximo uma letra (troca, falta, sobra ou inversão): erro de digitação."""
+def close(a: str, b: str) -> bool:
+    """No máximo uma letra de diferença (trocada, faltando, sobrando ou invertida)."""
     if a == b:
         return True
     la, lb = len(a), len(b)
@@ -136,7 +137,7 @@ def _close(a: str, b: str) -> bool:
     return short[i:] == long_[i + 1 :]
 
 
-def score(phrase: list[str], words: tuple[str, ...]) -> int:
+def score(phrase: Sequence[str], words: tuple[str, ...]) -> int:
     """Quanto a frase casa com o nome: 3 = o nome inteiro, 2 = palavras exatas, 1 = começo de
     palavra (3+ letras; número só exato), 0 = não casa. Cada palavra usa uma palavra do nome."""
     used: set[int] = set()
@@ -164,7 +165,7 @@ class Cand:
     kind: str  # customer | technician | city | location
     id: Any
     name: str
-    words: tuple[str, ...]
+    words: tuple[str, ...] = ()
     active: bool = True
     city: str | None = None
     document: str | None = None
@@ -198,7 +199,7 @@ class Pool:
         self._having[word] = found
         return found
 
-    def match(self, phrase: list[str]) -> list[tuple[int, Cand]]:
+    def match(self, phrase: Sequence[str]) -> list[tuple[int, Cand]]:
         ids: set[int] | None = None
         for w in phrase:
             ids = self.having(w) if ids is None else ids & self.having(w)
@@ -212,34 +213,28 @@ class Pool:
         return out
 
     def typo(self, word: str) -> list[tuple[int, Cand]]:
-        """Nomes com uma palavra a uma letra de distância (só para palavras de 5+ letras)."""
-        if len(word) < 5 or word.isdigit():
-            return []
+        """Nomes com uma palavra a uma letra de distância (palavras de 5+ letras)."""
         ids: set[int] = set()
         for w in self.vocab:
-            if w[0] == word[0] and abs(len(w) - len(word)) <= 1 and _close(w, word):
+            if w[0] == word[0] and abs(len(w) - len(word)) <= 1 and close(w, word):
                 ids |= self.by_word[w]
         return [(1, self.cands[i]) for i in ids]
 
 
-def pick(matches: list[tuple[int, Cand]], *, single_word: bool) -> Cand | None:
-    """O nome escolhido para virar filtro: só quando não há dúvida."""
+def pick(matches: list[tuple[int, Cand]]) -> Cand | None:
+    """O nome que vira filtro: só quando não há dúvida (homônimos: vale o único ativo)."""
     if not matches:
         return None
     best = max(s for s, _ in matches)
     top = [c for s, c in matches if s == best]
     if len(top) > 1:
-        # Homônimos: vale o único ativo (os técnicos antigos ficam inativos).
         active = [c for c in top if c.active]
         if len(active) != 1:
             return None
         top = active
     chosen = top[0]
     if chosen.kind == "city" and best < 3:
-        return None
-    if single_word and best < 3 and chosen.kind in ("customer", "location"):
-        if chosen.words and any(w in DOMAIN_WORDS for w in chosen.words if len(chosen.words) > 1):
-            pass
+        return None  # cidade só pelo nome inteiro ("paulo" não é "São Paulo")
     return chosen
 
 
@@ -284,7 +279,8 @@ _L = r"(?<![\w/.-])"
 _R = r"(?![\w/.-])"
 
 RANGE_RX = re.compile(
-    rf"{_L}(?:(?:de|entre|desde|do dia)\s+)?({_D})(?:\s+(?:a|ate|e|ao)\s+|\s*-\s*|\s*~\s*)({_D}){_R}"
+    rf"{_L}(?:(?:de|entre|desde|do dia)\s+)?({_D})"
+    rf"(?:\s+(?:a|ate|e|ao)\s+|\s*-\s*|\s*~\s*)({_D}){_R}"
 )
 DATE_RX = re.compile(rf"{_L}({_D}){_R}")
 MONTH_YEAR_NUM_RX = re.compile(rf"{_L}(\d{{1,2}})[/-](\d{{4}}){_R}")
@@ -296,15 +292,18 @@ YEAR_RANGE_RX = re.compile(r"\b(?:de|entre)\s+(\d{4})\s+(?:a|e|ate)\s+(\d{4})\b"
 YEAR_RX = re.compile(r"(?<![\w/.-])(\d{4})(?![\w/.-])")
 LAST_N_RX = re.compile(r"\bultim[oa]s\s+(\d{1,4})\s+(dias?|semanas?|mes|meses|anos?)\b")
 NEXT_N_RX = re.compile(r"\bproxim[oa]s\s+(\d{1,3})\s+(dias?|semanas?)\b")
-# Antes de "março" sozinho (que também é nome de gente) precisa de "em", "de" ou "mês de".
-_MONTH_CUE = re.compile(r"(?:\b(?:em|de|mes|desde|durante|ate|no|criadas?|agendadas?)\s*)$")
+# "março" sozinho também é nome de gente: vale como mês depois de "em", "de", "mês de"...
+_MONTH_CUE = re.compile(r"\b(?:em|de|mes|desde|durante|ate|no|criadas?|agendadas?)\s*$")
+# "loja 2015", "OS 2024": o número não é ano.
+_NOT_YEAR_CUE = re.compile(r"\b(?:loja|filial|unidade|codigo|cod|os|n[o.]?)\s*$")
 
 CREATED_KW = re.compile(
-    r"(?<!em )\b(?:criad[ao]s?|abert[ao]s?|abertura|registrad[ao]s?|recebid[ao]s?|cadastrad[ao]s?)\b"
+    r"(?<!em )\b(?:criad[ao]s?|abert[ao]s?|abertura|registrad[ao]s?|recebid[ao]s?"
+    r"|cadastrad[ao]s?)\b"
 )
 SCHEDULED_KW = re.compile(
-    r"\b(?:agendad[ao]s?|agenda|agendamentos?|para|pra|visitas?|marcad[ao]s?|programad[ao]s?|"
-    r"previst[ao]s?)\b"
+    r"(?<!sem )\b(?:agendad[ao]s?|agenda|agendamentos?|para|pra|visitas?|marcad[ao]s?"
+    r"|programad[ao]s?|previst[ao]s?)\b"
 )
 
 
@@ -313,7 +312,7 @@ class Period:
     start: date
     end: date
     label: str
-    default: str  # created | scheduled
+    default: str  # created | scheduled (quando a frase não diz)
     pos: int
     end_pos: int
 
@@ -333,21 +332,20 @@ def _fmt(day: date) -> str:
 
 
 def _tense(start: date, today: date) -> str:
+    """Sem palavra que diga: período futuro é agenda; passado, abertura."""
     return "scheduled" if start > today else "created"
 
 
-def _year(text: str | None, today: date) -> int | None:
-    if not text:
+def _year(value: str | None) -> int | None:
+    if not value:
         return None
-    value = int(text)
-    if len(text) == 2:
-        value += 2000
-    return value if MIN_YEAR <= value <= MAX_YEAR else None
+    year = int(value) + (2000 if len(value) == 2 else 0)
+    return year if MIN_YEAR <= year <= MAX_YEAR else None
 
 
-def _date(text: str, today: date, default_year: int | None = None) -> tuple[date, bool] | None:
-    """ "12/11", "12/11/25", "12-11-2025", "2025-11-12" -> (data, tinha ano)."""
-    parts = re.split(r"[/.-]", text)
+def parse_date(value: str, today: date, default_year: int | None = None) -> tuple[date, bool] | None:
+    """ "12/11", "12/11/25", "12-11-2025", "2025-11-12" -> (data, se veio com ano)."""
+    parts = re.split(r"[/.-]", value)
     try:
         if len(parts[0]) == 4:
             year, month, day = (int(p) for p in parts)
@@ -355,9 +353,10 @@ def _date(text: str, today: date, default_year: int | None = None) -> tuple[date
         else:
             day, month = int(parts[0]), int(parts[1])
             has_year = len(parts) == 3
-            year = _year(parts[2], today) if has_year else (default_year or today.year)
-            if year is None:
+            found = _year(parts[2]) if has_year else (default_year or today.year)
+            if found is None:
                 return None
+            year = found
         if not MIN_YEAR <= year <= MAX_YEAR:
             return None
         return date(year, month, day), has_year
@@ -365,12 +364,11 @@ def _date(text: str, today: date, default_year: int | None = None) -> tuple[date
         return None
 
 
-def _relative(today: date) -> list[tuple[re.Pattern[str], Any]]:
+def _relative(today: date) -> list[tuple[re.Pattern[str], tuple[date, date, str, str]]]:
     monday = today - timedelta(days=today.weekday())
-    this_month = _month(today.year, today.month)
-    last_month = _month(_add_months(today, -1).year, _add_months(today, -1).month)
-    next_month = _month(_add_months(today, 1).year, _add_months(today, 1).month)
     d = timedelta
+    last = _add_months(today, -1)
+    following = _add_months(today, 1)
     rules: list[tuple[str, tuple[date, date, str, str]]] = [
         (r"\bdepois de amanha\b", (today + d(2), today + d(2), "depois de amanhã", "scheduled")),
         (r"\banteontem\b", (today - d(2), today - d(2), "anteontem", "created")),
@@ -391,10 +389,16 @@ def _relative(today: date) -> list[tuple[re.Pattern[str], Any]]:
         ),
         (
             r"\b(?:n|d)?(?:este|esse)\s+mes\b|\bmes\s+atual\b",
-            (*this_month, "este mês", "created"),
+            (*_month(today.year, today.month), "este mês", "created"),
         ),
-        (r"\bmes\s+passado\b|\bultimo\s+mes\b", (*last_month, "mês passado", "created")),
-        (r"\bproximo\s+mes\b|\bmes\s+que\s+vem\b", (*next_month, "próximo mês", "scheduled")),
+        (
+            r"\bmes\s+passado\b|\bultimo\s+mes\b",
+            (*_month(last.year, last.month), "mês passado", "created"),
+        ),
+        (
+            r"\bproximo\s+mes\b|\bmes\s+que\s+vem\b",
+            (*_month(following.year, following.month), "próximo mês", "scheduled"),
+        ),
         (
             r"\b(?:n|d)?(?:este|esse)\s+ano\b|\bano\s+atual\b",
             (date(today.year, 1, 1), date(today.year, 12, 31), "este ano", "created"),
@@ -512,7 +516,7 @@ PRIORITY_RULES: list[tuple[re.Pattern[str], str, list[TicketPriority]]] = [
     ),
 ]
 
-# Nº da OS como a pessoa digita: "OS 16976", "os-016976", "#16976", "nº 16976".
+# Nº da OS como a pessoa digita: "OS 16976", "os-016976", "os016976", "#16976", "nº 16976".
 OS_NUMBER_RX = re.compile(
     r"(?<![a-z0-9])(?:os|o\.s\.?|#|n[o.]|numero|chamado|ticket)[\s#.:-]*0*(\d{1,10})(?![\w/])"
 )
@@ -534,11 +538,13 @@ class Word:
 @dataclass
 class Parsed:
     query: str
+    folded: str = ""
     chips: list[tuple[int, SearchChip]] = field(default_factory=list)
     status: list[TicketStatus] = field(default_factory=list)
     priority: list[TicketPriority] = field(default_factory=list)
     flags: dict[str, bool] = field(default_factory=dict)
     number: int | None = None
+    number_explicit: bool = False
     document: str | None = None
     document_pos: int = 0
     created: Period | None = None
@@ -548,6 +554,7 @@ class Parsed:
     location: Cand | None = None
     technician: Cand | None = None
     cities: list[Cand] = field(default_factory=list)
+    city_words: list[Word] = field(default_factory=list)
     words: list[Word] = field(default_factory=list)
     seen: dict[str, dict[Any, tuple[int, int, Cand]]] = field(
         default_factory=lambda: defaultdict(dict)
@@ -556,12 +563,15 @@ class Parsed:
     def chip(self, pos: int, kind: str, label: str) -> None:
         self.chips.append((pos, SearchChip(kind=kind, label=label)))  # type: ignore[arg-type]
 
-    def free(self) -> list[Word]:
-        return [w for w in self.words if not w.used]
+    def content(self) -> list[Word]:
+        """Palavras ainda não entendidas (sem artigos, preposições...)."""
+        return [w for w in self.words if not w.used and w.text not in STOP]
 
-    def note(self, matches: list[tuple[int, Cand]], size: int) -> None:
-        """Guarda os nomes encontrados para as listas (cliente, loja, técnico)."""
+    def note(self, matches: Iterable[tuple[int, Cand]], size: int) -> None:
+        """Guarda os nomes encontrados para as listas (clientes, lojas, técnicos)."""
         for s, cand in matches:
+            if cand.kind == "city":
+                continue
             best = self.seen[cand.kind].get(cand.id)
             if best is None or (s, size) > best[:2]:
                 self.seen[cand.kind][cand.id] = (s, size, cand)
@@ -570,8 +580,8 @@ class Parsed:
 class Reader:
     """Texto da busca com os pedaços já entendidos apagados (trocados por espaços)."""
 
-    def __init__(self, text: str) -> None:
-        self.text = text
+    def __init__(self, value: str) -> None:
+        self.text = value
 
     def blank(self, start: int, end: int) -> None:
         self.text = self.text[:start] + " " * (end - start) + self.text[end:]
@@ -584,19 +594,19 @@ class Reader:
 
 
 def _documents(reader: Reader, parsed: Parsed) -> None:
+    """CNPJ (também o alfanumérico) ou CPF, com ou sem pontuação."""
     for m in DOCUMENT_RX.finditer(reader.text):
-        raw = m.group()
-        clean = re.sub(r"[^0-9a-z]", "", raw).upper()
-        is_cnpj = len(clean) == 14 and re.fullmatch(r"[0-9A-Z]{12}[0-9]{2}", clean) is not None
-        is_cnpj = is_cnpj and (clean.isdigit() or is_valid_cnpj(clean))
-        is_cpf = len(clean) == 11 and clean.isdigit()
-        if is_cnpj or is_cpf:
+        clean = re.sub(r"[^0-9a-z]", "", m.group()).upper()
+        cnpj = len(clean) == 14 and re.fullmatch(r"[0-9A-Z]{12}[0-9]{2}", clean) is not None
+        cnpj = cnpj and (clean.isdigit() or is_valid_cnpj(clean))
+        cpf = len(clean) == 11 and clean.isdigit()
+        if cnpj or cpf:
             parsed.document, parsed.document_pos = clean, m.start()
             reader.blank(m.start(), m.end())
             return
 
 
-def _os_number(reader: Reader, parsed: Parsed) -> bool:
+def _os_number(reader: Reader, parsed: Parsed) -> None:
     """Número da OS com prefixo ("OS 123", "#123") ou a busca só com um número."""
     lone = LONE_NUMBER_RX.fullmatch(reader.text)
     if lone is not None:
@@ -604,18 +614,18 @@ def _os_number(reader: Reader, parsed: Parsed) -> bool:
         if 0 < number <= MAX_NUMBER:
             parsed.number = number
             reader.blank(0, len(reader.text))
-            return False  # número sozinho: também pode ser código de loja
+        return
     for m in OS_NUMBER_RX.finditer(reader.text):
         number = int(m.group(1))
         if 0 < number <= MAX_NUMBER:
-            parsed.number = number
+            parsed.number, parsed.number_explicit = number, True
             parsed.chip(m.start(), "number", format_ticket_code(number))
             reader.blank(m.start(), m.end())
-            return True
-    return False
+            return
 
 
-def _periods(reader: Reader, today: date, alone: bool) -> list[Period]:
+def read_periods(reader: Reader, today: date, *, alone: bool, wants_schedule: bool) -> list[Period]:
+    """Datas, intervalos, meses, anos e "hoje", "semana passada", "últimos 30 dias"..."""
     found: list[Period] = []
 
     def add(m: re.Match[str], start: date, end: date, label: str, default: str) -> None:
@@ -624,11 +634,14 @@ def _periods(reader: Reader, today: date, alone: bool) -> list[Period]:
         found.append(Period(start, end, label, default, m.start(), m.end()))
         reader.blank(m.start(), m.end())
 
+    def month_label(year: int, month: int) -> str:
+        return f"{MONTH_LABELS[month - 1]} de {year}"
+
     for m in list(RANGE_RX.finditer(reader.text)):
-        second = _date(m.group(2), today)
+        second = parse_date(m.group(2), today)
         if second is None:
             continue
-        first = _date(m.group(1), today, default_year=second[0].year if second[1] else None)
+        first = parse_date(m.group(1), today, default_year=second[0].year if second[1] else None)
         if first is None:
             continue
         start, end = first[0], second[0]
@@ -639,47 +652,50 @@ def _periods(reader: Reader, today: date, alone: bool) -> list[Period]:
         month, year = int(m.group(1)), int(m.group(2))
         if 1 <= month <= 12 and MIN_YEAR <= year <= MAX_YEAR:
             start, end = _month(year, month)
-            add(m, start, end, f"{MONTH_LABELS[month - 1]} de {year}", _tense(start, today))
+            add(m, start, end, month_label(year, month), _tense(start, today))
     for m in list(DATE_RX.finditer(reader.text)):
-        parsed = _date(m.group(1), today)
-        if parsed is not None:
-            day = parsed[0]
-            add(m, day, day, _fmt(day), _tense(day, today))
+        day = parse_date(m.group(1), today)
+        if day is not None:
+            add(m, day[0], day[0], _fmt(day[0]), _tense(day[0], today))
     for m in list(DAY_MONTH_RX.finditer(reader.text)):
         year = int(m.group(3)) if m.group(3) else today.year
+        if not MIN_YEAR <= year <= MAX_YEAR:
+            continue
         try:
             day = date(year, _MONTH_NUMBER[m.group(2)], int(m.group(1)))
         except ValueError:
             continue
-        if MIN_YEAR <= year <= MAX_YEAR:
-            add(m, day, day, _fmt(day), _tense(day, today))
+        add(m, day, day, _fmt(day), _tense(day, today))
     for rx in (MONTH_YEAR_RX, MONTH_YY_RX):
         for m in list(rx.finditer(reader.text)):
-            year = _year(m.group(2), today)
+            year = _year(m.group(2))
             if year is None:
                 continue
             month = _MONTH_NUMBER[m.group(1)]
             start, end = _month(year, month)
-            add(m, start, end, f"{MONTH_LABELS[month - 1]} de {year}", _tense(start, today))
+            add(m, start, end, month_label(year, month), _tense(start, today))
     for m in list(MONTH_RX.finditer(reader.text)):
         name = m.group(1)
         if name == "marco" and not _MONTH_CUE.search(reader.text[: m.start()]):
             continue
         month = _MONTH_NUMBER[name]
-        year = today.year if month <= today.month else today.year - 1
+        # Sem ano: o último que já começou (ou o próximo, para a agenda).
+        year = today.year if month <= today.month or wants_schedule else today.year - 1
         start, end = _month(year, month)
-        add(m, start, end, f"{MONTH_LABELS[month - 1]} de {year}", "created")
+        add(m, start, end, month_label(year, month), _tense(start, today))
     for m in list(YEAR_RANGE_RX.finditer(reader.text)):
-        first, last = int(m.group(1)), int(m.group(2))
-        if MIN_YEAR <= min(first, last) and max(first, last) <= MAX_YEAR:
-            start, end = date(min(first, last), 1, 1), date(max(first, last), 12, 31)
-            add(m, start, end, f"{start.year} a {end.year}", _tense(start, today))
+        first, last = sorted((int(m.group(1)), int(m.group(2))))
+        if MIN_YEAR <= first and last <= MAX_YEAR:
+            add(m, date(first, 1, 1), date(last, 12, 31), f"{first} a {last}", "created")
     if not alone:
         for m in list(YEAR_RX.finditer(reader.text)):
             year = int(m.group(1))
-            if MIN_YEAR <= year <= MAX_YEAR:
-                start = date(year, 1, 1)
-                add(m, start, date(year, 12, 31), str(year), _tense(start, today))
+            if not MIN_YEAR <= year <= today.year + 1:
+                continue
+            if _NOT_YEAR_CUE.search(reader.text[: m.start()]):
+                continue
+            start = date(year, 1, 1)
+            add(m, start, date(year, 12, 31), str(year), _tense(start, today))
     for rx, (start, end, label, default) in _relative(today):
         for m in list(rx.finditer(reader.text)):
             add(m, start, end, label, default)
@@ -688,15 +704,14 @@ def _periods(reader: Reader, today: date, alone: bool) -> list[Period]:
         if n < 1:
             continue
         if unit.startswith("dia"):
-            start, label = today - timedelta(days=n - 1), f"últimos {n} dias"
+            days, label = n, f"últimos {n} dias"
         elif unit.startswith("semana"):
-            start, label = today - timedelta(days=7 * n - 1), f"últimas {n} semanas"
+            days, label = 7 * n, f"últimas {n} semanas"
         elif unit.startswith("ano"):
-            start, label = today - timedelta(days=365 * n - 1), f"últimos {n} anos"
+            days, label = 365 * n, f"últimos {n} anos"
         else:
-            start, label = _add_months(today, -n) + timedelta(days=today.day), f"últimos {n} meses"
-        if start.year < MIN_YEAR:
-            start = date(MIN_YEAR, 1, 1)
+            days, label = 30 * n, f"últimos {n} meses"
+        start = max(today - timedelta(days=days - 1), date(MIN_YEAR, 1, 1))
         add(m, start, today, label, "created")
     for m in list(NEXT_N_RX.finditer(reader.text)):
         n, unit = int(m.group(1)), m.group(2)
@@ -709,21 +724,28 @@ def _periods(reader: Reader, today: date, alone: bool) -> list[Period]:
     return found
 
 
-def _assign_periods(reader: Reader, original: str, periods: list[Period], parsed: Parsed) -> None:
+def assign_periods(reader: Reader, folded: str, periods: list[Period], parsed: Parsed) -> None:
     """Cada período vale para a abertura ("criadas", "abertas em") ou para a agenda ("agendadas",
-    "para", "visita"); sem palavra, o futuro é agenda e o passado é abertura."""
-    keywords = [(m.start(), m.end(), "created") for m in CREATED_KW.finditer(original)]
-    keywords += [(m.start(), m.end(), "scheduled") for m in SCHEDULED_KW.finditer(original)]
+    "para", "visita"): manda a palavra mais perto antes dele (ou logo depois). Sem palavra, o
+    futuro (e hoje / esta semana) é agenda; o passado, abertura."""
+    keywords = [(m.start(), m.end(), "created") for m in CREATED_KW.finditer(folded)]
+    keywords += [(m.start(), m.end(), "scheduled") for m in SCHEDULED_KW.finditer(folded)]
     keywords.sort()
     previous_end = 0
     for i, period in enumerate(periods):
-        next_start = periods[i + 1].pos if i + 1 < len(periods) else len(original)
+        next_start = periods[i + 1].pos if i + 1 < len(periods) else len(folded)
         before = [k for k in keywords if previous_end <= k[0] < period.pos]
         after = [k for k in keywords if period.end_pos <= k[0] < next_start]
-        chosen = before[-1] if before else (after[0] if after else None)
-        target = chosen[2] if chosen else period.default
-        if chosen is not None:
-            reader.blank(chosen[0], chosen[1])
+        if before:
+            target = before[-1][2]
+            used = before
+        elif after:
+            target = after[0][2]
+            used = after[:1]
+        else:
+            target, used = period.default, []
+        for start, end, _ in used:
+            reader.blank(start, end)
         previous_end = period.end_pos
         if target == "created" and parsed.created is None:
             parsed.created = period
@@ -733,7 +755,7 @@ def _assign_periods(reader: Reader, original: str, periods: list[Period], parsed
             parsed.chip(period.pos, "period", f"Agendadas: {period.label}")
 
 
-def _statuses(reader: Reader, parsed: Parsed) -> None:
+def read_statuses(reader: Reader, parsed: Parsed) -> None:
     for rx, label, effect in STATUS_RULES:
         found = reader.take(rx)
         if not found:
@@ -751,19 +773,14 @@ def _statuses(reader: Reader, parsed: Parsed) -> None:
             parsed.priority.extend(p for p in levels if p not in parsed.priority)
 
 
-def _words(reader: Reader) -> list[Word]:
-    return [Word(m.start(), m.group()) for m in _WORD.finditer(reader.text)]
-
-
-def _content(words: list[Word]) -> list[Word]:
-    return [w for w in words if not w.used and w.text not in STOP]
-
-
 # --------------------------------------------------------------------------- etiquetas
 
+Tags = list[tuple[str, tuple[str, ...]]]
 
-def _tag_match(phrase: list[str], tag_words: tuple[str, ...]) -> bool:
-    """Cada palavra casa o começo de uma palavra da etiqueta, na ordem (pode pular palavras)."""
+
+def _tag_match(phrase: Sequence[str], tag_words: tuple[str, ...]) -> bool:
+    """Cada palavra casa (inteira ou pelo começo) uma palavra da etiqueta, na ordem; a frase pode
+    pular palavras ("pendente pgto" -> "Pendente Envio PGTO")."""
     i = 0
     for w in phrase:
         while i < len(tag_words) and not (
@@ -776,27 +793,36 @@ def _tag_match(phrase: list[str], tag_words: tuple[str, ...]) -> bool:
     return True
 
 
-def _tags(parsed: Parsed, tags: list[tuple[str, tuple[str, ...]]], *, multi: bool) -> None:
-    words = _content(parsed.words)
-    if multi:
-        for size in range(min(MAX_PHRASE, len(words)), 1, -1):
-            for start in range(len(words) - size + 1):
-                span = words[start : start + size]
-                if any(w.used for w in span):
-                    continue
-                phrase = [w.text for w in span]
-                hits = [name for name, tw in tags if len(tw) >= 2 and _tag_match(phrase, tw)]
-                if not hits:
-                    continue
-                for name in hits[:3]:
-                    if name not in parsed.tags:
-                        parsed.tags.append(name)
-                        parsed.chip(span[0].pos, "tag", name)
-                for w in span:
-                    w.used = True
-        return
-    for w in words:
-        if w.used or w.text in GENERIC_TAG_WORDS or len(w.text) < 3:
+def _add_tags(parsed: Parsed, names: Iterable[str], pos: int) -> None:
+    for name in names:
+        if name not in parsed.tags:
+            parsed.tags.append(name)
+            parsed.chip(pos, "tag", name)
+
+
+def read_tag_phrases(reader: Reader, parsed: Parsed, tags: Tags) -> None:
+    """Etiquetas de duas palavras ou mais, antes dos status ("pendente pgto" não é "pendentes")."""
+    words = [Word(m.start(), m.group()) for m in _WORD.finditer(reader.text)]
+    content = [w for w in words if w.text not in STOP]
+    for size in range(min(MAX_PHRASE, len(content)), 1, -1):
+        for start in range(len(content) - size + 1):
+            span = content[start : start + size]
+            if any(w.used for w in span):
+                continue
+            phrase = [w.text for w in span]
+            hits = [name for name, tw in tags if len(tw) >= 2 and _tag_match(phrase, tw)]
+            if not hits or len(hits) > 3:
+                continue
+            _add_tags(parsed, hits, span[0].pos)
+            for w in span:
+                w.used = True
+                reader.blank(w.pos, w.pos + len(w.text))
+
+
+def read_single_tags(parsed: Parsed, tags: Tags) -> None:
+    """Uma palavra só: "avulso" -> "Ticket Avulso", "projeto" -> "Projeto"."""
+    for w in parsed.content():
+        if w.text in GENERIC_TAG_WORDS or w.text in KEYWORDS or len(w.text) < 3:
             continue
         exact = [name for name, tw in tags if tw == (w.text,)]
         hits = exact or [
@@ -804,21 +830,20 @@ def _tags(parsed: Parsed, tags: list[tuple[str, tuple[str, ...]]], *, multi: boo
             for name, tw in tags
             if any(t == w.text or (len(w.text) >= 4 and t.startswith(w.text)) for t in tw)
         ]
-        if not hits or len(hits) > 3:
-            continue
-        for name in hits:
-            if name not in parsed.tags:
-                parsed.tags.append(name)
-                parsed.chip(w.pos, "tag", name)
-        w.used = True
+        if hits and len(hits) <= 3:
+            _add_tags(parsed, hits, w.pos)
+            w.used = True
 
 
 # --------------------------------------------------------------------------- nomes
 
 
-def _set_entity(parsed: Parsed, cand: Cand, pos: int) -> bool:
+def _set_entity(parsed: Parsed, cand: Cand, pos: int, span: Sequence[Word] = ()) -> bool:
     if cand.kind == "city":
+        if any(c.id == cand.id for c in parsed.cities):
+            return False
         parsed.cities.append(cand)
+        parsed.city_words.extend(span)
         parsed.chip(pos, "city", cand.name)
         return True
     if getattr(parsed, cand.kind) is not None:
@@ -827,100 +852,89 @@ def _set_entity(parsed: Parsed, cand: Cand, pos: int) -> bool:
     if cand.kind == "technician":
         parsed.chip(pos, "technician", f"Técnico: {cand.name}")
     elif cand.kind == "location":
-        label = f"{cand.name} ({cand.code})" if cand.code and cand.code not in cand.name else cand.name
+        label = cand.name
+        if cand.code and fold_text(cand.code) not in fold_text(cand.name):
+            label = f"{cand.name} ({cand.code})"
         parsed.chip(pos, "location", label)
     else:
         parsed.chip(pos, "customer", cand.name)
     return True
 
 
-def _match_spans(
-    parsed: Parsed,
-    pools: list[Pool],
-    words: list[Word],
-    *,
-    min_size: int = 1,
-    record: bool = True,
-) -> None:
+def match_spans(parsed: Parsed, pools: Sequence[Pool], words: Sequence[Word]) -> None:
     """Frases de 4 palavras até 1, da esquerda para a direita: a mais longa que casa ganha."""
-    for size in range(min(MAX_PHRASE, len(words)), min_size - 1, -1):
+    for size in range(min(MAX_PHRASE, len(words)), 0, -1):
         for start in range(len(words) - size + 1):
             span = words[start : start + size]
             if any(w.used for w in span):
                 continue
             phrase = [w.text for w in span]
             matches = [m for pool in pools for m in pool.match(phrase)]
-            if record:
-                parsed.note([m for m in matches if m[1].kind != "city"], size)
+            parsed.note(matches, size)
             if size == 1 and phrase[0] in DOMAIN_WORDS:
                 matches = [m for m in matches if m[0] == 3]
-            chosen = pick(matches, single_word=size == 1)
-            if chosen is not None and _set_entity(parsed, chosen, span[0].pos):
+            chosen = pick(matches)
+            if chosen is not None and _set_entity(parsed, chosen, span[0].pos, span):
                 for w in span:
                     w.used = True
 
 
-def _keyword_entities(parsed: Parsed, pools: dict[str, Pool]) -> None:
+def keyword_entities(parsed: Parsed, pools: dict[str, Pool]) -> None:
     """ "técnico João", "cliente Natura", "cidade Campinas", "loja 41": o nome logo depois."""
     words = [w for w in parsed.words if not w.used]
     for i, w in enumerate(words):
         if w.used or w.text not in KEYWORDS:
             continue
         w.used = True
-        following = [x for x in words[i + 1 :] if x.text not in STOP][:MAX_PHRASE]
-        if w.text in LOCATION_KW:
-            for x in following:
-                if x.text in KEYWORDS:
-                    break
-                x.location_only = True
-            continue
-        kind = (
-            "technician"
-            if w.text in TECH_KW
-            else "customer"
-            if w.text in CUSTOMER_KW
-            else "city"
-        )
-        run = []
-        for x in following:
-            if x.used or x.text in KEYWORDS:
+        run: list[Word] = []
+        for x in words[i + 1 :]:
+            if x.text in STOP:
+                continue
+            if x.used or x.text in KEYWORDS or len(run) == MAX_PHRASE:
                 break
             run.append(x)
-        _match_spans(parsed, [pools[kind]], run)
+        if w.text in LOCATION_KW:
+            for x in run:
+                x.location_only = True
+            continue
+        kind = "technician" if w.text in TECH_KW else "customer" if w.text in CUSTOMER_KW else "city"
+        match_spans(parsed, [pools[kind]], run)
 
 
-def _typos(parsed: Parsed, pools: list[Pool]) -> None:
-    """Palavra que não casou com nada: tenta nomes com uma letra de diferença."""
-    for w in _content(parsed.words):
-        if w.location_only or w.text in KEYWORDS:
+def typo_entities(parsed: Parsed, pools: Sequence[Pool]) -> None:
+    """Palavra que não casou com nome nenhum: tenta os nomes com uma letra de diferença."""
+    for w in parsed.content():
+        if w.location_only or w.text in KEYWORDS or w.text in DOMAIN_WORDS:
+            continue
+        if len(w.text) < 5 or w.text.isdigit() or any(p.having(w.text) for p in pools):
             continue
         matches = [m for pool in pools for m in pool.typo(w.text)]
-        parsed.note([m for m in matches if m[1].kind != "city"], 1)
-        kinds = {c.kind for _, c in matches}
-        if len(kinds) != 1:
+        parsed.note(matches, 1)
+        named = [m for m in matches if m[1].kind != "city"]
+        if len({c.kind for _, c in named}) != 1:
             continue
-        chosen = pick(matches, single_word=True)
-        if chosen is not None and chosen.kind != "city" and _set_entity(parsed, chosen, w.pos):
+        chosen = pick(named)
+        if chosen is not None and _set_entity(parsed, chosen, w.pos, [w]):
             w.used = True
 
 
 # --------------------------------------------------------------------------- consultas
 
 
-async def _tag_names(db: AsyncSession) -> list[tuple[str, tuple[str, ...]]]:
-    tag = func.jsonb_array_elements(Ticket.tags).table_valued("value").alias("tag")
-    name = tag.c.value.op("->>")("name")
-    rows = await db.scalars(select(name).select_from(Ticket, tag).where(name != "").distinct())
-    out = []
-    for raw in rows:
-        words = tuple(_WORD.findall(fold_text(raw)))
-        if words:
-            out.append((raw, words))
+async def tag_names(db: AsyncSession) -> Tags:
+    rows = await db.scalars(
+        text(
+            "SELECT DISTINCT btrim(t->>'name') FROM tickets, jsonb_array_elements(tickets.tags) t"
+            " WHERE coalesce(btrim(t->>'name'), '') <> ''"
+        )
+    )
+    out = [(raw, tuple(_WORD.findall(fold_text(raw)))) for raw in rows]
+    out = [(raw, words) for raw, words in out if words]
     out.sort(key=lambda item: (len(item[1]), item[0]))
     return out
 
 
-async def _pools(db: AsyncSession) -> dict[str, Pool]:
+async def load_pools(db: AsyncSession) -> dict[str, Pool]:
     customers = [
         Cand("customer", r.id, r.name, name_words(r.name), r.is_active, document=r.document)
         for r in await db.execute(
@@ -949,7 +963,7 @@ async def _pools(db: AsyncSession) -> dict[str, Pool]:
     for city in city_rows:
         words = tuple(_WORD.findall(fold_text(city)))
         if words:
-            cities.setdefault(words, city.strip())
+            cities.setdefault(words, " ".join(city.split()))
     return {
         "customer": Pool(customers),
         "technician": Pool(technicians),
@@ -957,205 +971,168 @@ async def _pools(db: AsyncSession) -> dict[str, Pool]:
     }
 
 
+def _code_digits() -> ColumnElement[str]:
+    return func.ltrim(func.regexp_replace(Location.code, r"[^0-9]", "", "g"), "0")
+
+
 def _location_word(word: str) -> ColumnElement[bool]:
     rx = _prefix_regex(word)
     if word.isdigit():
-        code = func.ltrim(func.regexp_replace(Location.code, r"[^0-9]", "", "g"), "0")
-        return or_(code == (word.lstrip("0") or "0"), Location.name.op("~*")(rx))
-    return or_(Location.name.op("~*")(rx), Location.code.op("~*")(rx))
-
-
-async def _location_candidates(
-    db: AsyncSession, words: list[str], customer_id: uuid.UUID | None
-) -> tuple[list[Cand], bool]:
-    """Lojas com alguma das palavras (no nome ou no código), as que têm mais palavras primeiro.
-    Devolve também se a lista foi cortada (então só uma frase bem específica escolhe a loja)."""
-    words = list(dict.fromkeys(words))[:8]
-    if not words:
-        return [], False
-    conds = [_location_word(w) for w in words]
-    hits = sum((case((c, 1), else_=0) for c in conds), start=case((False, 0), else_=0))  # type: ignore[arg-type]
-    first = (
-        case((Location.customer_id == customer_id, 0), else_=1)
-        if customer_id is not None
-        else case((Location.id.is_(None), 0), else_=0)
+        return or_(_code_digits() == (word.lstrip("0") or "0"), Location.name.regexp_match(rx))
+    return or_(
+        Location.name.regexp_match(rx, flags="i"), Location.code.regexp_match(rx, flags="i")
     )
+
+
+def _location_cand(row: Any, words: tuple[str, ...] = ()) -> Cand:
+    return Cand(
+        "location",
+        row.id,
+        row.name,
+        words,
+        row.is_active,
+        city=row.city,
+        code=row.code,
+        customer_id=row.customer_id,
+        customer=row.customer,
+        hits=int(getattr(row, "hits", 0) or 0),
+    )
+
+
+_LOCATION_COLUMNS = (
+    Location.id,
+    Location.name,
+    Location.code,
+    Location.city,
+    Location.customer_id,
+    Location.is_active,
+    Customer.name.label("customer"),
+)
+
+
+async def location_candidates(
+    db: AsyncSession, words: Sequence[str], customer_id: uuid.UUID | None
+) -> tuple[list[Cand], bool]:
+    """Lojas com alguma das palavras (nome ou código), as que têm mais palavras primeiro (e as do
+    cliente escolhido antes). Diz também se a lista foi cortada."""
+    unique = list(dict.fromkeys(words))[:8]
+    if not unique:
+        return [], False
+    conds = [_location_word(w) for w in unique]
+    hits: Any = case((conds[0], 1), else_=0)
+    for cond in conds[1:]:
+        hits = hits + case((cond, 1), else_=0)
+    order: list[Any] = []
+    if customer_id is not None:
+        order.append(case((Location.customer_id == customer_id, 0), else_=1))
+    order += [hits.desc(), Location.is_active.desc(), Location.name]
     rows = (
         await db.execute(
-            select(
-                Location.id,
-                Location.name,
-                Location.code,
-                Location.city,
-                Location.customer_id,
-                Location.is_active,
-                Customer.name.label("customer"),
-                hits.label("hits"),
-            )
+            select(*_LOCATION_COLUMNS, hits.label("hits"))
             .outerjoin(Customer, Customer.id == Location.customer_id)
             .where(or_(*conds))
-            .order_by(first, hits.desc(), Location.is_active.desc(), Location.name)
+            .order_by(*order)
             .limit(LOCATION_CAP)
         )
     ).all()
     cands = [
-        Cand(
-            "location",
-            r.id,
-            r.name,
-            name_words(r.name) + tuple(_WORD.findall(fold_text(r.code))),
-            r.is_active,
-            city=r.city,
-            code=r.code,
-            customer_id=r.customer_id,
-            customer=r.customer,
-            hits=int(r.hits or 0),
-        )
+        _location_cand(r, name_words(r.name) + tuple(_WORD.findall(fold_text(r.code))))
         for r in rows
     ]
     return cands, len(rows) == LOCATION_CAP
 
 
-async def _locations_step(db: AsyncSession, parsed: Parsed, entity_words: list[str]) -> None:
-    """Loja: pelas palavras que sobraram (dentro do cliente escolhido, se houver)."""
-    remaining = [w for w in _content(parsed.words) if w.text not in KEYWORDS]
+async def locations_step(db: AsyncSession, parsed: Parsed, entity_words: list[str]) -> None:
+    """Loja pelas palavras que sobraram (dentro do cliente escolhido, se houver); a lista de
+    lojas mostra as que casaram com as palavras de nome da busca."""
+    remaining = [w for w in parsed.content() if w.text not in KEYWORDS]
+    words = entity_words + [w.text for w in remaining]
     customer_id = parsed.customer.id if parsed.customer else None
-    if parsed.location is None and parsed.number is None:
-        wanted = entity_words + [w.text for w in remaining]
-    else:
-        wanted = entity_words
-    cands, truncated = await _location_candidates(db, wanted, customer_id)
+    cands, truncated = await location_candidates(db, words, customer_id)
     if not cands:
         return
-    pool = Pool(cands)
     if remaining and parsed.location is None:
         scoped = Pool([c for c in cands if customer_id is None or c.customer_id == customer_id])
         for size in range(min(MAX_PHRASE, len(remaining)), 0, -1):
             for start in range(len(remaining) - size + 1):
                 span = remaining[start : start + size]
-                if any(w.used for w in span):
+                if parsed.location is not None or any(w.used for w in span):
                     continue
                 phrase = [w.text for w in span]
+                if truncated and cands[-1].hits >= len(set(phrase)):
+                    continue  # lista cortada: pode haver outra loja igual fora dela
                 matches = scoped.match(phrase)
                 if size == 1 and phrase[0] in DOMAIN_WORDS:
                     matches = [m for m in matches if m[0] == 3]
-                if truncated and cands[-1].hits >= len(set(phrase)):
-                    continue  # a lista foi cortada: pode haver outra loja igual
-                chosen = pick(matches, single_word=size == 1)
-                if chosen is not None and parsed.location is None:
-                    _set_entity(parsed, chosen, span[0].pos)
+                chosen = pick(matches)
+                if chosen is not None and _set_entity(parsed, chosen, span[0].pos, span):
                     for w in span:
                         w.used = True
-    # Para a lista de lojas: todas as que casaram com alguma frase das palavras de nome.
-    phrase_words = entity_words + [w.text for w in remaining]
-    for size in range(min(MAX_PHRASE, len(phrase_words)), 0, -1):
-        for start in range(len(phrase_words) - size + 1):
-            parsed.note(pool.match(phrase_words[start : start + size]), size)
+    pool = Pool(cands)
+    unique = list(dict.fromkeys(words))
+    for size in range(min(MAX_PHRASE, len(unique)), 0, -1):
+        for start in range(len(unique) - size + 1):
+            parsed.note(pool.match(unique[start : start + size]), size)
 
 
-async def _document_step(db: AsyncSession, parsed: Parsed) -> None:
+async def document_step(db: AsyncSession, parsed: Parsed) -> None:
+    """CPF/CNPJ: o cliente (matriz) ou a filial com esse documento."""
     doc = parsed.document
     if doc is None:
         return
-    customers = (
-        await db.execute(
+    customers = [
+        Cand("customer", r.id, r.name, (), r.is_active, document=r.document)
+        for r in await db.execute(
             select(Customer.id, Customer.name, Customer.document, Customer.is_active).where(
                 Customer.document == doc
             )
         )
-    ).all()
-    locations = (
-        await db.execute(
-            select(
-                Location.id,
-                Location.name,
-                Location.code,
-                Location.city,
-                Location.customer_id,
-                Location.is_active,
-                Customer.name.label("customer"),
-            )
+    ]
+    stores = [
+        _location_cand(r)
+        for r in await db.execute(
+            select(*_LOCATION_COLUMNS)
             .outerjoin(Customer, Customer.id == Location.customer_id)
             .where(Location.document == doc)
             .order_by(Location.is_active.desc(), Location.name)
             .limit(MAX_LIMIT)
         )
-    ).all()
-    found_c = [
-        Cand("customer", r.id, r.name, (), r.is_active, document=r.document) for r in customers
     ]
-    found_l = [
-        Cand(
-            "location",
-            r.id,
-            r.name,
-            (),
-            r.is_active,
-            city=r.city,
-            code=r.code,
-            customer_id=r.customer_id,
-            customer=r.customer,
-        )
-        for r in locations
-    ]
-    parsed.note([(3, c) for c in found_c + found_l], 9)
-    if len(found_c) == 1:
-        _set_entity(parsed, found_c[0], parsed.document_pos)
-    elif len(found_l) == 1:
-        _set_entity(parsed, found_l[0], parsed.document_pos)
-    elif found_l and len({c.customer_id for c in found_l}) == 1 and found_l[0].customer_id:
-        # Mesmo CNPJ em vários andares/salas de um prédio: o cliente deles.
-        loc = found_l[0]
-        _set_entity(
-            parsed,
-            Cand("customer", loc.customer_id, loc.customer or loc.name, ()),
-            parsed.document_pos,
-        )
+    parsed.note([(3, c) for c in customers + stores], MAX_PHRASE + 1)
+    owners = {c.customer_id for c in stores}
+    if len(customers) == 1:
+        _set_entity(parsed, customers[0], parsed.document_pos)
+    elif len(stores) == 1:
+        _set_entity(parsed, stores[0], parsed.document_pos)
+    elif stores and len(owners) == 1 and stores[0].customer_id is not None:
+        # O mesmo CNPJ em vários andares/salas de um prédio: o cliente deles.
+        first = stores[0]
+        owner = Cand("customer", first.customer_id, first.customer or first.name)
+        _set_entity(parsed, owner, parsed.document_pos)
     else:
-        # Documento que não está cadastrado: procura como texto (pode estar na descrição).
+        # Documento que não está no cadastro: vira texto (pode estar na descrição da OS).
         parsed.words.append(Word(parsed.document_pos, doc.lower()))
 
 
-async def _lone_number_step(db: AsyncSession, parsed: Parsed, chip: bool) -> None:
-    """Só um número: a OS com esse número; sem ela, a loja com esse código; senão, texto."""
+async def lone_number_step(db: AsyncSession, parsed: Parsed) -> None:
+    """Só um número: a OS com esse número; sem ela, a loja com esse código; senão, texto (nº do
+    chamado do cliente, descrição...)."""
     number = parsed.number
-    if number is None or chip:
+    if number is None or parsed.number_explicit:
         return
-    exists = await db.scalar(select(Ticket.id).where(Ticket.number == number))
-    code = func.ltrim(func.regexp_replace(Location.code, r"[^0-9]", "", "g"), "0")
-    rows = (
-        await db.execute(
-            select(
-                Location.id,
-                Location.name,
-                Location.code,
-                Location.city,
-                Location.customer_id,
-                Location.is_active,
-                Customer.name.label("customer"),
-            )
+    found = await db.scalar(select(Ticket.id).where(Ticket.number == number))
+    stores = [
+        _location_cand(r)
+        for r in await db.execute(
+            select(*_LOCATION_COLUMNS)
             .outerjoin(Customer, Customer.id == Location.customer_id)
-            .where(code == str(number))
+            .where(_code_digits() == str(number))
             .order_by(Location.is_active.desc(), Location.name)
             .limit(MAX_LIMIT)
         )
-    ).all()
-    stores = [
-        Cand(
-            "location",
-            r.id,
-            r.name,
-            (),
-            r.is_active,
-            city=r.city,
-            code=r.code,
-            customer_id=r.customer_id,
-            customer=r.customer,
-        )
-        for r in rows
     ]
     parsed.note([(3, c) for c in stores], 1)
-    if exists is not None:
+    if found is not None:
         parsed.chip(0, "number", format_ticket_code(number))
         return
     parsed.number = None
@@ -1170,8 +1147,8 @@ async def _lone_number_step(db: AsyncSession, parsed: Parsed, chip: bool) -> Non
 
 def acted_clause(technician_id: uuid.UUID, name: str | None) -> ColumnElement[bool]:
     """ "Técnico que atuou": o responsável de agora, outro técnico da visita ou quem já foi
-    responsável ou auxiliar (histórico). Nas atribuições feitas aqui o evento guarda os ids; nas
-    importadas do Field Control, o nome do técnico."""
+    responsável ou auxiliar (histórico). Nas atribuições feitas aqui o evento guarda os ids
+    (to_value/from_value e added_ids); nas importadas do Field Control, o nome do técnico."""
     tid = str(technician_id)
     targets = [tid] + ([name[:64]] if name else [])
     assigned = select(TicketEvent.ticket_id).where(
@@ -1193,19 +1170,19 @@ def acted_clause(technician_id: uuid.UUID, name: str | None) -> ColumnElement[bo
 
 
 def text_clause(word: str) -> ColumnElement[bool]:
-    """Uma palavra do texto livre nos mesmos campos da busca da lista (services/tickets.py):
-    loja (nome, código, cidade), cliente, técnicos, título, solicitante, nº do chamado do
-    cliente e descrição. Sem acento e sem diferença de maiúsculas."""
+    """Uma palavra do texto livre nos campos da busca da lista (services/tickets.search_clause):
+    loja (nome, código, cidade), cliente, técnicos, título, solicitante, nº do chamado do cliente
+    e descrição; sem acento e sem diferença de maiúsculas."""
     rx = accent_regex(word)
     stores = select(Location.id).where(
         or_(
-            Location.name.op("~*")(rx),
-            Location.code.op("~*")(rx),
-            Location.city.op("~*")(rx),
+            Location.name.regexp_match(rx, flags="i"),
+            Location.code.regexp_match(rx, flags="i"),
+            Location.city.regexp_match(rx, flags="i"),
         )
     )
-    customers = select(Customer.id).where(Customer.name.op("~*")(rx))
-    people = select(User.id).where(User.name.op("~*")(rx))
+    customers = select(Customer.id).where(Customer.name.regexp_match(rx, flags="i"))
+    people = select(User.id).where(User.name.regexp_match(rx, flags="i"))
     return or_(
         Ticket.location_id.in_(stores),
         Ticket.customer_id.in_(customers),
@@ -1213,23 +1190,31 @@ def text_clause(word: str) -> ColumnElement[bool]:
         Ticket.id.in_(
             select(ticket_helpers.c.ticket_id).where(ticket_helpers.c.user_id.in_(people))
         ),
-        Ticket.title.op("~*")(rx),
-        Ticket.requester_name.op("~*")(rx),
-        Ticket.client_reference.op("~*")(rx),
-        Ticket.description.op("~*")(rx),
+        Ticket.title.regexp_match(rx, flags="i"),
+        Ticket.requester_name.regexp_match(rx, flags="i"),
+        Ticket.client_reference.regexp_match(rx, flags="i"),
+        Ticket.description.regexp_match(rx, flags="i"),
     )
 
 
-def _free_text(parsed: Parsed) -> tuple[str | None, list[Word]]:
-    city_words = {w for c in parsed.cities for w in c.words}
-    free = [w for w in _content(parsed.words) if w.text not in KEYWORDS]
-    cities = [w for w in parsed.words if w.used and w.text in city_words]
-    words = sorted(free + cities, key=lambda w: w.pos)
+def _original_words(query: str) -> dict[str, str]:
+    """Palavra sem acento -> como a pessoa digitou ("impressao" -> "impressão")."""
+    out: dict[str, str] = {}
+    for token in re.findall(r"\w+", query):
+        for folded in _WORD.findall(fold_text(token)):
+            out.setdefault(folded, token if fold_text(token) == folded else folded)
+    return out
+
+
+def free_text(parsed: Parsed) -> tuple[str | None, list[Word]]:
+    """O texto livre (q): o que sobrou mais as cidades (procuradas na cidade da loja)."""
+    free = [w for w in parsed.content() if w.text not in KEYWORDS]
+    words = sorted(free + parsed.city_words, key=lambda w: w.pos)
     terms = search.words(" ".join(w.text for w in words))
     return (" ".join(terms) or None), free
 
 
-def _filters(parsed: Parsed, q: str | None) -> ListFilters | None:
+def build_filters(parsed: Parsed, q: str | None) -> ListFilters | None:
     flags = parsed.flags
     filters = ListFilters(
         status=parsed.status or None,
@@ -1250,8 +1235,8 @@ def _filters(parsed: Parsed, q: str | None) -> ListFilters | None:
         no_owner=flags.get("no_owner") or None,
         violation_pending=flags.get("violation_pending") or None,
     )
-    has_extra = flags.get("unscheduled") or flags.get("unproductive")
-    if not filters.model_dump() and not has_extra:
+    extra = flags.get("unscheduled") or flags.get("unproductive")
+    if not filters.model_dump() and not extra:
         return None
     return filters
 
@@ -1259,8 +1244,8 @@ def _filters(parsed: Parsed, q: str | None) -> ListFilters | None:
 def ticket_conditions(
     user: User, filters: ListFilters, parsed: Parsed
 ) -> list[ColumnElement[bool]]:
-    """As condições da lista (filter_conditions) + técnico que atuou, texto livre rápido e os
-    recortes que a lista ainda não tem (sem agenda, improdutivas)."""
+    """As condições da lista (filter_conditions) + técnico que atuou, o texto livre e os recortes
+    que a lista ainda não tem (sem agenda, improdutivas)."""
     base = TicketFilters(
         status=filters.status,
         priority=filters.priority,
@@ -1284,11 +1269,12 @@ def ticket_conditions(
         conds.append(acted_clause(parsed.technician.id, parsed.technician.name))
     if filters.q:
         terms = search.words(filters.q)
-        text = and_(*(text_clause(t) for t in terms))
-        # Como na lista: um número sozinho também é o nº da OS.
-        if len(terms) == 1 and terms[0].isdigit() and 0 < int(terms[0]) <= MAX_NUMBER:
-            text = or_(Ticket.number == int(terms[0]), text)
-        conds.append(text)
+        if terms:
+            clause = and_(*(text_clause(t) for t in terms))
+            # Como na lista: um número sozinho também é o nº da OS.
+            if len(terms) == 1 and terms[0].isdigit() and 0 < int(terms[0]) <= MAX_NUMBER:
+                clause = or_(Ticket.number == int(terms[0]), clause)
+            conds.append(clause)
     if parsed.flags.get("unscheduled"):
         conds.append(Ticket.scheduled_start.is_(None))
     if parsed.flags.get("unproductive"):
@@ -1296,9 +1282,10 @@ def ticket_conditions(
     return conds
 
 
-async def _tickets(
+async def find_tickets(
     db: AsyncSession, user: User, filters: ListFilters, parsed: Parsed, limit: int
 ) -> tuple[int, list[SearchTicket]]:
+    """As OS do recorte (o nº exato primeiro; depois a agenda ou o mais recente) e o total."""
     tech = aliased(User, name="search_technician")
     order: list[Any] = []
     if filters.number is not None:
@@ -1353,43 +1340,32 @@ async def _tickets(
 
 def _ranked(parsed: Parsed, kind: str, chosen: Cand | None, limit: int) -> list[Cand]:
     found = list(parsed.seen.get(kind, {}).values())
-    found.sort(key=lambda item: (-item[0], -item[1], not item[2].active, -item[2].hits, item[2].name))
+    found.sort(key=lambda i: (-i[0], -i[1], not i[2].active, -i[2].hits, i[2].name))
     out = [chosen] if chosen is not None else []
     out += [c for _, _, c in found if chosen is None or c.id != chosen.id]
     return out[:limit]
 
 
-async def _customers_out(
-    db: AsyncSession, cands: list[Cand]
-) -> list[SearchCustomer]:
+async def customers_out(db: AsyncSession, cands: list[Cand]) -> list[SearchCustomer]:
     if not cands:
         return []
     ids = [c.id for c in cands]
-    counts = dict(
-        (
-            await db.execute(
-                select(Ticket.customer_id, func.count())
-                .where(Ticket.customer_id.in_(ids), Ticket.status.in_(OPEN_STATUSES))
-                .group_by(Ticket.customer_id)
-            )
-        ).all()
-    )
-    missing = [c.id for c in cands if c.document is None]
-    documents = {}
-    if missing:
-        documents = dict(
-            (
-                await db.execute(
-                    select(Customer.id, Customer.document).where(Customer.id.in_(missing))
-                )
-            ).all()
+    rows = await db.execute(
+        select(Customer.id, Customer.document, func.count(Ticket.id))
+        .outerjoin(
+            Ticket,
+            and_(Ticket.customer_id == Customer.id, Ticket.status.in_(OPEN_STATUSES)),
         )
+        .where(Customer.id.in_(ids))
+        .group_by(Customer.id, Customer.document)
+    )
+    info = {r[0]: (r[1], int(r[2] or 0)) for r in rows}
     return [
         SearchCustomer(
             id=c.id,
             name=c.name,
-            document=c.document or documents.get(c.id),
-            open_count=int(counts.get(c.id, 0)),
+            document=c.document or info.get(c.id, (None, 0))[0],
+            open_count=info.get(c.id, (None, 0))[1],
         )
         for c in cands
     ]
@@ -1398,53 +1374,69 @@ async def _customers_out(
 # --------------------------------------------------------------------------- busca
 
 
-def parse_text(raw: str, today: date) -> tuple[Parsed, Reader, bool]:
-    """Primeira leitura, sem banco: documento, nº da OS, período e status."""
-    query = _CONTROL.sub(" ", raw or "")[:MAX_QUERY].strip()
-    parsed = Parsed(query=query)
+def read_query(raw: str | None, today: date, tags: Tags = ()) -> Parsed:  # type: ignore[assignment]
+    """A parte da leitura que não precisa do banco: documento, nº da OS, período, etiquetas de
+    várias palavras, status e prioridade. O resto da frase fica em `words`."""
+    query = " ".join(_CONTROL.sub(" ", raw or "").split())[:MAX_QUERY]
     folded = fold_text(query)
+    parsed = Parsed(query=query, folded=folded)
     reader = Reader(folded)
     _documents(reader, parsed)
-    explicit = _os_number(reader, parsed)
-    alone = not reader.text.strip() or LONE_NUMBER_RX.fullmatch(reader.text) is not None
-    periods = _periods(reader, today, alone)
-    _assign_periods(reader, folded, periods, parsed)
-    _statuses(reader, parsed)
-    parsed.words = _words(reader)
-    return parsed, reader, explicit
+    _os_number(reader, parsed)
+    alone = not reader.text.strip()
+    periods = read_periods(
+        reader, today, alone=alone, wants_schedule=SCHEDULED_KW.search(folded) is not None
+    )
+    assign_periods(reader, folded, periods, parsed)
+    if tags:
+        read_tag_phrases(reader, parsed, tags)
+    read_statuses(reader, parsed)
+    parsed.words = [Word(m.start(), m.group()) for m in _WORD.finditer(reader.text)]
+    return parsed
 
 
-async def smart_search(db: AsyncSession, user: User, raw: str, limit: int = 6) -> SmartSearchResult:
+def _needs_names(raw: str | None) -> bool:
+    """Tem alguma palavra que pode ser nome ou etiqueta (não só número ou documento)?"""
+    return any(
+        len(w) >= 3 and not w.isdigit() and w not in STOP
+        for w in _WORD.findall(fold_text(raw or ""))
+    )
+
+
+async def smart_search(
+    db: AsyncSession, user: User, raw: str | None, limit: int = 6
+) -> SmartSearchResult:
     limit = max(1, min(limit, MAX_LIMIT))
-    parsed, _, explicit = parse_text(raw, local_today())
-    if not parsed.query:
-        return SmartSearchResult(query="")
-    await _lone_number_step(db, parsed, explicit)
-    await _document_step(db, parsed)
+    tags = await tag_names(db) if _needs_names(raw) else []
+    parsed = read_query(raw, local_today(), tags)
+    if not parsed.query or not parsed.folded:
+        return SmartSearchResult(query=parsed.query)
+    await lone_number_step(db, parsed)
+    await document_step(db, parsed)
 
-    if _content(parsed.words):
-        tags = await _tag_names(db)
-        _tags(parsed, tags, multi=True)
-        pools = await _pools(db)
-        _keyword_entities(parsed, pools)
-        _tags(parsed, tags, multi=False)
-        entity_words = [w.text for w in _content(parsed.words) if w.text not in KEYWORDS]
-        general = [w for w in _content(parsed.words) if not w.location_only]
-        _match_spans(parsed, [pools["customer"], pools["technician"], pools["city"]], general)
-        _typos(parsed, [pools["customer"], pools["technician"], pools["city"]])
-        await _locations_step(db, parsed, entity_words)
+    if parsed.content():
+        pools = await load_pools(db)
+        keyword_entities(parsed, pools)
+        read_single_tags(parsed, tags)
+        entity_words = [w.text for w in parsed.content() if w.text not in KEYWORDS]
+        names = [pools["customer"], pools["technician"], pools["city"]]
+        match_spans(parsed, names, [w for w in parsed.content() if not w.location_only])
+        typo_entities(parsed, names)
+        await locations_step(db, parsed, entity_words)
 
-    q, free = _free_text(parsed)
+    q, free = free_text(parsed)
     if free:
-        parsed.chip(free[0].pos, "text", " ".join(w.text for w in free))
-    filters = _filters(parsed, q)
-    total, tickets = (0, [])
+        original = _original_words(parsed.query)
+        parsed.chip(free[0].pos, "text", " ".join(original.get(w.text, w.text) for w in free))
+    filters = build_filters(parsed, q)
+    total, tickets = 0, []
     if filters is not None:
-        total, tickets = await _tickets(db, user, filters, parsed, limit)
+        total, tickets = await find_tickets(db, user, filters, parsed, limit)
 
-    customers = _ranked(parsed, "customer", parsed.customer, limit)
-    locations = _ranked(parsed, "location", parsed.location, limit)
-    technicians = _ranked(parsed, "technician", parsed.technician, limit)
+    owner = parsed.customer
+    if owner is None and parsed.location is not None and parsed.location.customer_id:
+        loc = parsed.location
+        owner = Cand("customer", loc.customer_id, loc.customer or loc.name)
     parsed.chips.sort(key=lambda item: item[0])
     return SmartSearchResult(
         query=parsed.query,
@@ -1452,13 +1444,13 @@ async def smart_search(db: AsyncSession, user: User, raw: str, limit: int = 6) -
         filters=filters,
         total=total,
         tickets=tickets,
-        customers=await _customers_out(db, customers),
+        customers=await customers_out(db, _ranked(parsed, "customer", owner, limit)),
         locations=[
             SearchLocation(id=c.id, name=c.name, code=c.code, city=c.city, customer=c.customer)
-            for c in locations
+            for c in _ranked(parsed, "location", parsed.location, limit)
         ],
         technicians=[
             SearchTechnician(id=c.id, name=c.name, city=c.city, active=c.active)
-            for c in technicians
+            for c in _ranked(parsed, "technician", parsed.technician, limit)
         ],
     )
