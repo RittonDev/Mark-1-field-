@@ -13,8 +13,8 @@ const rowTitle = "text-xs font-semibold text-ink-muted";
 const valueLink = "underline-offset-2 hover:text-brand-ink hover:underline";
 
 /**
- * Sinal vital 4: o que se deve aos técnicos e o dinheiro parado em orçamentos e custos. Tabela vazia
- * nunca vira "R$ 0,00": quem decide o que aparece são as contagens, não os valores.
+ * Sinal vital 5: o que se deve aos técnicos e os custos extras a aprovar (os orçamentos têm caixinha
+ * própria). Tabela vazia nunca vira "R$ 0,00": quem decide o que aparece são as contagens, não os valores.
  */
 export function FinanceCard({ finance }: { finance: HomeFinance | null }) {
   return (
@@ -67,28 +67,6 @@ function FinanceBody({ finance: f }: { finance: HomeFinance }) {
             )}
           </p>
         ) : null}
-      </div>
-
-      <div>
-        <h3 className={rowTitle}>Orçamentos</h3>
-        <p className="mt-0.5 text-[13px] text-ink tabular-nums">
-          {f.quotes_waiting > 0 ? (
-            <Link href="/orcamentos" className={valueLink}>
-              {intFmt(f.quotes_waiting)} aguardando resposta · {formatMoney(f.quotes_waiting_total)}
-            </Link>
-          ) : (
-            <span className="text-ink-muted">Nenhum aguardando resposta</span>
-          )}
-        </p>
-        <p className="mt-1.5 text-[13px] text-ink tabular-nums">
-          {f.quotes_approved_month > 0 ? (
-            <Link href="/orcamentos" className={valueLink}>
-              {plural(f.quotes_approved_month, "aprovado no mês", "aprovados no mês")} · {formatMoney(f.quotes_approved_month_total)}
-            </Link>
-          ) : (
-            <span className="text-ink-muted">Nenhum aprovado no mês</span>
-          )}
-        </p>
       </div>
 
       <div>

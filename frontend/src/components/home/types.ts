@@ -232,6 +232,38 @@ export interface HomeFinance {
   costs_pending_total: number;
 }
 
+/**
+ * A caixinha de Orçamentos, com os valores em R$ como número. "Aguardando", "vencidos" e "rascunhos"
+ * contam o que a lista de /orcamentos mostra com o filtro do link (enviado com a validade passada já é
+ * vencido), inclusive de OS cancelada. Valor zero não diz nada: a tela decide pelas contagens.
+ */
+export interface HomeQuotes {
+  /** Enviados e na validade (ou sem validade): aguardando a assinatura do cliente. */
+  awaiting: number;
+  awaiting_total: number;
+  /** Desses, sem link: o cliente não tem como assinar. */
+  awaiting_no_link: number;
+  /** Desses, com a validade hoje ou amanhã. */
+  expiring: number;
+  /** Criados nos últimos 90 dias e vencidos. */
+  expired_90d: number;
+  expired_90d_total: number;
+  /** Todos os rascunhos. */
+  drafts: number;
+  /** Desses, já enviados uma vez (editados depois do envio). */
+  in_review: number;
+  /** A fila "Para cobrar" (o mesmo número do ponto de atenção). */
+  follow_up: number;
+  follow_up_total: number;
+  /** Respondidos no mês corrente, sem OS cancelada. */
+  approved_month: number;
+  approved_month_total: number;
+  rejected_month: number;
+  /** Taxa de aprovação de 90 dias: aprovados sobre aprovados, recusados e vencidos (sem OS cancelada). */
+  approved_90d: number;
+  decided_90d: number;
+}
+
 export interface WeekFlow {
   /** Segunda-feira, "AAAA-MM-DD". */
   start: string;
@@ -250,6 +282,8 @@ export interface HomePulse {
   customers: HomeCustomers;
   /** null: sem permissão para ver valores. */
   finance: HomeFinance | null;
+  /** null: sem permissão; a API antiga não manda (a caixinha não aparece). */
+  quotes?: HomeQuotes | null;
   /** 8 semanas, da mais antiga para a atual (em andamento). */
   weeks: WeekFlow[];
 }

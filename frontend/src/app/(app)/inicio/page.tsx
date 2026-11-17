@@ -15,9 +15,10 @@ import { LivePill } from "@/components/home/LivePill";
 import { SuggestionsCard } from "@/components/home/SuggestionsCard";
 import { TeamCard } from "@/components/home/TeamCard";
 import { TrendCard } from "@/components/home/TrendCard";
-import type { HomeData, HomeFinance, HomeOverview, HomePulse } from "@/components/home/types";
+import type { HomeData, HomeFinance, HomeOverview, HomePulse, HomeQuotes } from "@/components/home/types";
 import { BacklogCard } from "@/components/home/vitals/BacklogCard";
 import { FinanceCard } from "@/components/home/vitals/FinanceCard";
+import { QuotesCard } from "@/components/home/vitals/QuotesCard";
 import { ServiceCard } from "@/components/home/vitals/ServiceCard";
 import { TodayCard } from "@/components/home/vitals/TodayCard";
 import { RefreshFailed } from "@/components/operacao/status";
@@ -71,6 +72,33 @@ function normalizeFinance(f: HomeFinance | null | undefined): HomeFinance | null
   };
 }
 
+/** Contagem que a API manda; ausente (API parcial) vale 0. */
+function count(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+/** Orçamentos com os valores em número; sem o bloco (API antiga ou sem permissão), null e a caixinha não aparece. */
+function normalizeQuotes(q: HomeQuotes | null | undefined): HomeQuotes | null {
+  if (!q || typeof q !== "object") return null;
+  return {
+    awaiting: count(q.awaiting),
+    awaiting_total: money(q.awaiting_total),
+    awaiting_no_link: count(q.awaiting_no_link),
+    expiring: count(q.expiring),
+    expired_90d: count(q.expired_90d),
+    expired_90d_total: money(q.expired_90d_total),
+    drafts: count(q.drafts),
+    in_review: count(q.in_review),
+    follow_up: count(q.follow_up),
+    follow_up_total: money(q.follow_up_total),
+    approved_month: count(q.approved_month),
+    approved_month_total: money(q.approved_month_total),
+    rejected_month: count(q.rejected_month),
+    approved_90d: count(q.approved_90d),
+    decided_90d: count(q.decided_90d),
+  };
+}
+
 /** Sinais vitais inteiros ou nada: faltando um bloco (API antiga ou parcial), os cartões somem em vez de quebrar. */
 function normalizePulse(p: HomePulse | null | undefined): HomePulse | null {
   if (!p || !p.window_from || !p.today || !p.tomorrow || !p.backlog || !p.quality || !p.team || !p.customers) return null;
@@ -79,6 +107,7 @@ function normalizePulse(p: HomePulse | null | undefined): HomePulse | null {
     backlog: { ...p.backlog, ages: p.backlog.ages ?? [], old_reasons: p.backlog.old_reasons ?? [] },
     customers: { ...p.customers, top: p.customers.top ?? [] },
     finance: normalizeFinance(p.finance),
+    quotes: normalizeQuotes(p.quotes),
     weeks: Array.isArray(p.weeks) ? p.weeks : [],
   };
 }
@@ -148,7 +177,18 @@ export default function HomePage() {
     lastUpdate.current = at;
   }, [overview.dataUpdatedAt]);
 
-  const vital = (index: number, card: React.ReactNode) => <div style={{ ["--i" as string]: index }}>{card}</div>;
+  const vital = (index: number, card: React.ReactNode, className?: string) => (
+    <div className={className} style={{ ["--i" as string]: index }}>
+      {card}
+    </div>
+  );
+  // Carregando, todos os cartões; com os dados, Financeiro só com permissão e Orçamentos só se a API manda.
+  const showFinance = !pulse || Boolean(pulse.finance);
+  const showQuotes = !pulse || Boolean(pulse.quotes);
+  // Com Orçamentos, 6 colunas a partir de 1100 px: Hoje, Fila e Atendimento na 1ª linha (2 cada), Orçamentos e
+  // Financeiro na 2ª (3 cada). Em 2 colunas, o 5º cartão fica com a linha inteira. Sem Orçamentos (API
+  // antiga), a grade de antes.
+  const firstRow = showQuotes ? "@min-[1100px]:col-span-2" : undefined;
 
   return (
     // De ponta a ponta na folha (as margens negativas anulam o padding do main); "isolate" põe o fundo
@@ -211,13 +251,26 @@ export default function HomePage() {
                 aria-label="Como está a operação"
                 className={clsx(
                   "stagger mt-6 grid grid-cols-1 gap-4 @min-[620px]:grid-cols-2",
-                  pulse && !pulse.finance ? "@min-[1100px]:grid-cols-3" : "@min-[1100px]:grid-cols-4",
+                  showQuotes ? "@min-[1100px]:grid-cols-6" : showFinance ? "@min-[1100px]:grid-cols-4" : "@min-[1100px]:grid-cols-3",
                 )}
               >
-                {vital(0, <TodayCard today={pulse?.today ?? null} tomorrow={pulse?.tomorrow ?? null} />)}
-                {vital(1, <BacklogCard backlog={pulse?.backlog ?? null} />)}
-                {vital(2, <ServiceCard quality={pulse?.quality ?? null} windowFrom={pulse?.window_from ?? null} />)}
-                {!pulse || pulse.finance ? vital(3, <FinanceCard finance={pulse?.finance ?? null} />) : null}
+                {vital(0, <TodayCard today={pulse?.today ?? null} tomorrow={pulse?.tomorrow ?? null} />, firstRow)}
+                {vital(1, <BacklogCard backlog={pulse?.backlog ?? null} />, firstRow)}
+                {vital(2, <ServiceCard quality={pulse?.quality ?? null} windowFrom={pulse?.window_from ?? null} />, firstRow)}
+                {showQuotes
+                  ? vital(
+                      3,
+                      <QuotesCard quotes={pulse?.quotes ?? null} />,
+                      showFinance ? "@min-[1100px]:col-span-3" : "@min-[1100px]:col-span-6",
+                    )
+                  : null}
+                {showFinance
+                  ? vital(
+                      showQuotes ? 4 : 3,
+                      <FinanceCard finance={pulse?.finance ?? null} />,
+                      showQuotes ? "@min-[620px]:col-span-2 @min-[1100px]:col-span-3" : undefined,
+                    )
+                  : null}
               </section>
             ) : null}
 
