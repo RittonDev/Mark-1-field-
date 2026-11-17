@@ -206,7 +206,9 @@ async def test_pulse_without_data(client: AsyncClient, world: World) -> None:
 
 @requires_db
 async def test_focus_counts_each_ticket_once(
-    client: AsyncClient, world: World, db: AsyncSession
+    client: AsyncClient,
+    world: World,
+    db: AsyncSession,  # noqa: F811
 ) -> None:
     await add_ticket(
         db, world, title="SLA recente", created_at=ago(days=2), resolution_due_at=ago(hours=1)
@@ -296,7 +298,9 @@ async def test_focus_counts_each_ticket_once(
 
 @requires_db
 async def test_routine_recent_cut_and_old_backlog(
-    client: AsyncClient, world: World, db: AsyncSession
+    client: AsyncClient,
+    world: World,
+    db: AsyncSession,  # noqa: F811
 ) -> None:
     recent = await add_ticket(
         db,
@@ -413,7 +417,11 @@ async def test_routine_recent_cut_and_old_backlog(
 
 
 @requires_db
-async def test_today_and_tomorrow(client: AsyncClient, world: World, db: AsyncSession) -> None:
+async def test_today_and_tomorrow(
+    client: AsyncClient,
+    world: World,
+    db: AsyncSession,  # noqa: F811
+) -> None:
     tech, other = world.tech.user.id, world.tech_other.user.id
     tomorrow = TODAY + timedelta(days=1)
     await add_ticket(
@@ -424,9 +432,7 @@ async def test_today_and_tomorrow(client: AsyncClient, world: World, db: AsyncSe
         scheduled_start=at(TODAY, 8),
         resolved_at=at(TODAY, 10),
     )
-    await add_ticket(
-        db, world, title="A caminho", status=S.EN_ROUTE, scheduled_start=at(TODAY, 14)
-    )
+    await add_ticket(db, world, title="A caminho", status=S.EN_ROUTE, scheduled_start=at(TODAY, 14))
     await add_ticket(db, world, title="Nove horas", scheduled_start=at(TODAY, 9))
     await add_ticket(db, world, title="Quinze para as três", scheduled_start=at(TODAY, 14, 45))
     await add_ticket(
@@ -504,7 +510,11 @@ async def test_today_and_tomorrow(client: AsyncClient, world: World, db: AsyncSe
 
 
 @requires_db
-async def test_backlog_ages_and_flow(client: AsyncClient, world: World, db: AsyncSession) -> None:
+async def test_backlog_ages_and_flow(
+    client: AsyncClient,
+    world: World,
+    db: AsyncSession,  # noqa: F811
+) -> None:
     for age in (timedelta(hours=1), timedelta(days=10), timedelta(days=45), timedelta(days=120)):
         await add_ticket(db, world, created_at=NOW - age)
     await add_ticket(db, world, status=S.CLOSED, created_at=ago(days=50), resolved_at=ago(days=5))
@@ -524,7 +534,9 @@ async def test_backlog_ages_and_flow(client: AsyncClient, world: World, db: Asyn
 
 @requires_db
 async def test_quality_on_time_sla_unproductive(
-    client: AsyncClient, world: World, db: AsyncSession
+    client: AsyncClient,
+    world: World,
+    db: AsyncSession,  # noqa: F811
 ) -> None:
     async def visit(arrived: datetime, **fields: object) -> None:
         await add_ticket(
@@ -547,9 +559,7 @@ async def test_quality_on_time_sla_unproductive(
     await visit(ago(days=2) + timedelta(minutes=45), scheduled_start=ago(days=2))
     # Fora da janela; e uma chegada sem com o que comparar (conta só nas idas à loja).
     await visit(ago(days=40), scheduled_start=ago(days=40))
-    await add_ticket(
-        db, world, status=S.IN_PROGRESS, scheduled_start=None, arrived_at=ago(hours=1)
-    )
+    await add_ticket(db, world, status=S.IN_PROGRESS, scheduled_start=None, arrived_at=ago(hours=1))
     # Prazo de solução: no prazo, atrasada (importada do Field Control) e sem prazo.
     in_time = await add_ticket(
         db, world, status=S.CLOSED, resolution_due_at=ago(days=1), resolved_at=ago(days=2)
@@ -583,7 +593,9 @@ async def test_quality_on_time_sla_unproductive(
 
 @requires_db
 async def test_store_return_needs_complete_follow_up(
-    client: AsyncClient, world: World, db: AsyncSession
+    client: AsyncClient,
+    world: World,
+    db: AsyncSession,  # noqa: F811
 ) -> None:
     customer_id = uuid.UUID(world.customer_id)
     stores = [Location(customer_id=customer_id, name=f"Loja Fictícia {n}") for n in range(1, 5)]
@@ -623,7 +635,11 @@ async def test_store_return_needs_complete_follow_up(
 
 
 @requires_db
-async def test_team_block(client: AsyncClient, world: World, db: AsyncSession) -> None:
+async def test_team_block(
+    client: AsyncClient,
+    world: World,
+    db: AsyncSession,  # noqa: F811
+) -> None:
     tech, other = world.tech.user.id, world.tech_other.user.id
     await db.execute(update(User).where(User.id == tech).values(last_login_at=ago(days=1)))
     for seconds in (3600, 18000, 0):
@@ -658,7 +674,11 @@ async def test_team_block(client: AsyncClient, world: World, db: AsyncSession) -
 
 
 @requires_db
-async def test_customers_block(client: AsyncClient, world: World, db: AsyncSession) -> None:
+async def test_customers_block(
+    client: AsyncClient,
+    world: World,
+    db: AsyncSession,  # noqa: F811
+) -> None:
     main = world.customer_id
     second = Customer(name="Rede Fictícia de Testes")
     third = Customer(name="Comércio Imaginário")
@@ -719,7 +739,9 @@ async def test_customers_block(client: AsyncClient, world: World, db: AsyncSessi
 
 @requires_db
 async def test_finance_values_and_payout_tag(
-    client: AsyncClient, world: World, db: AsyncSession
+    client: AsyncClient,
+    world: World,
+    db: AsyncSession,  # noqa: F811
 ) -> None:
     tech, other = world.tech.user.id, world.tech_other.user.id
     late = await add_ticket(db, world, status=S.CLOSED, resolved_at=ago(days=10))
@@ -823,7 +845,9 @@ async def test_finance_values_and_payout_tag(
 
 @requires_db
 async def test_weeks_follow_local_mondays(
-    client: AsyncClient, world: World, db: AsyncSession
+    client: AsyncClient,
+    world: World,
+    db: AsyncSession,  # noqa: F811
 ) -> None:
     # Domingo 23h30 em São Paulo (já segunda em UTC) é da semana anterior.
     await add_ticket(db, world, created_at=at(date(2026, 11, 15), 23, 30))
@@ -855,7 +879,9 @@ async def test_weeks_follow_local_mondays(
 
 @requires_db
 async def test_late_technician_uses_schedule_without_arrival_due(
-    client: AsyncClient, world: World, db: AsyncSession
+    client: AsyncClient,
+    world: World,
+    db: AsyncSession,  # noqa: F811
 ) -> None:
     # OS sem prazo de chegada (como as importadas), abertas antes da janela: vale a agenda +
     # 30 min. Duas chegaram 45 min depois; a de 20 min ficou no horário.
@@ -880,7 +906,9 @@ async def test_late_technician_uses_schedule_without_arrival_due(
 
 @requires_db
 async def test_filters_reproduce_list_totals(
-    client: AsyncClient, world: World, db: AsyncSession
+    client: AsyncClient,
+    world: World,
+    db: AsyncSession,  # noqa: F811
 ) -> None:
     second = Customer(name="Rede Fictícia Dois")
     db.add(second)
@@ -916,9 +944,7 @@ async def test_filters_reproduce_list_totals(
     )
     await add_ticket(db, world, created_at=ago(days=8), resolution_due_at=ago(days=4), **on_second)
     await add_ticket(db, world, created_at=ago(days=12), **on_second)
-    await add_ticket(
-        db, world, status=S.CANCELLED, assignee_id=None, scheduled_start=at(TODAY, 10)
-    )
+    await add_ticket(db, world, status=S.CANCELLED, assignee_id=None, scheduled_start=at(TODAY, 10))
     # Abertas antes (a "Fila antiga").
     await add_ticket(db, world, created_at=ago(days=40), resolution_due_at=ago(days=20))
     await add_ticket(db, world, created_at=ago(days=50), owner_id=None, **nobody)
