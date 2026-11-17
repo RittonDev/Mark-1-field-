@@ -72,5 +72,14 @@ const isInternal = (link: string) => link.startsWith("/") && !link.startsWith("/
  */
 export function targetHref(target: { filters: ListFilters | null; link: string | null }): string | null {
   if (target.link && isInternal(target.link)) return target.link;
-  return target.filters ? ticketsListHref(target.filters) : null;
+  return hasFilters(target.filters) ? ticketsListHref(target.filters) : null;
+}
+
+/**
+ * Os filtros dizem alguma coisa? Um objeto vazio (ex.: a busca "improdutivas", que a lista não
+ * filtra) abriria a lista inteira: aí não há "Ver todas".
+ */
+export function hasFilters(f: ListFilters | null | undefined): f is ListFilters {
+  if (!f) return false;
+  return Object.values(f).some((v) => (Array.isArray(v) ? v.length > 0 : v !== undefined && v !== null && v !== "" && v !== false));
 }

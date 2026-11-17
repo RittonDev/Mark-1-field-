@@ -20,7 +20,7 @@ import { api, ApiError, request } from "@/lib/api";
 import { canManageTickets, isManager } from "@/lib/constants";
 import { sessionStore } from "@/lib/session";
 import type { Customer, Location, Page, TicketListItem, UserRole, UUID } from "@/lib/types";
-import { ticketsListHref, ticketsViewHref } from "./links";
+import { hasFilters, ticketsListHref, ticketsViewHref } from "./links";
 import type { NameLike, SmartSearchResult } from "./types";
 
 /** Texto sem acento, em minúsculas e sem espaços nas pontas ("Técnico" -> "tecnico"). */
@@ -300,7 +300,7 @@ function normalizeSmart(data: Partial<SmartSearchResult> | null, q: string): Sma
   return {
     query: data?.query ?? q,
     chips: Array.isArray(data?.chips) ? data.chips : [],
-    filters: data?.filters ?? null,
+    filters: hasFilters(data?.filters) ? data.filters : null,
     total: typeof data?.total === "number" ? data.total : (data?.tickets?.length ?? 0),
     tickets: Array.isArray(data?.tickets) ? data.tickets : [],
     customers: Array.isArray(data?.customers) ? data.customers : [],
