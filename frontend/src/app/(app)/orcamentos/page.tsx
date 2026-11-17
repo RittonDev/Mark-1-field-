@@ -308,12 +308,16 @@ function statusDetail(q: QuoteListRow): string | null {
   return null;
 }
 
-/** Linha de baixo da situação: o motivo da cobrança ou o detalhe com aberturas e cobranças. */
-function situationOf(q: QuoteListRow, today: string): { text: string | null; reason: boolean } {
+/**
+ * Linha de baixo da situação: o motivo da cobrança ou o detalhe com aberturas e cobranças. As datas
+ * (1ª e última abertura, última cobrança) ficam no title.
+ */
+function situationOf(q: QuoteListRow, today: string): { text: string | null; reason: boolean; title?: string } {
+  const detail = [statusDetail(q), trackingText(q, { sent: false })].filter(Boolean).join(" · ");
+  const dates = trackingTitle(q);
   const reason = followUpText(q, today);
-  if (reason) return { text: reason, reason: true };
-  const text = [statusDetail(q), trackingText(q, { sent: false })].filter(Boolean).join(" · ");
-  return { text: text || null, reason: false };
+  if (reason) return { text: reason, reason: true, title: [detail, dates].filter(Boolean).join(" · ") || undefined };
+  return { text: detail || null, reason: false, title: dates };
 }
 
 const ticketOf = (q: QuoteListRow): QuoteTicketRef => ({
@@ -342,6 +346,8 @@ function QuoteList() {
   const now = useNow(60_000);
   const today = dayKey(now);
   const months = useMemo(() => monthOptions(), []);
+  // A fila "Para cobrar" fica no endereço (?cobrar=1): o "Ver todas" do Início abre a tela já nela.
+  const queue = useSearchParams().get("cobrar") === "1";
   const [period, setPeriod] = useState(RECENT);
   const [status, setStatus] = useState<QuoteStatus | "">("");
   const [search, setSearch] = useState("");
@@ -351,7 +357,7 @@ function QuoteList() {
   // Guardam a linha do clique; a tela usa a versão mais nova da lista (o cliente pode responder com a janela aberta).
   const [opened, setOpened] = useState<QuoteListRow | null>(null);
   const [editing, setEditing] = useState<QuoteListRow | null>(null);
-  const [sharing, setSharing] = useState<QuoteListRow | null>(null);
+  const [sharing, setSharing] = useState<Sharing | null>(null);
   const [renewing, setRenewing] = useState<QuoteListRow | null>(null);
   const [picking, setPicking] = useState(false);
   // Orçamento novo: escolhido pela OS (Novo orçamento) ou cópia de outro (Duplicar).
@@ -362,6 +368,13 @@ function QuoteList() {
     queryFn: ({ signal }) => api.get<QuoteListRow[]>("/quotes", periodRange(period), { signal }),
     placeholderData: keepPreviousData,
   });
+  // Fila "Para cobrar": a regra do Início, sem período. É pequena, então o chip sempre mostra o tamanho.
+  const followUp = useQuery({
+    queryKey: ["quotes", "follow-up"],
+    queryFn: ({ signal }) => api.get<QuoteListRow[]>("/quotes", { follow_up: true }, { signal }),
+  });
+  const queueRows = useMemo(() => (followUp.data ?? []).filter((q) => q.follow_up), [followUp.data]);
+  const queueTotal = useMemo(() => queueRows.reduce((sum, q) => sum + q.total, 0), [queueRows]);
   // O período passou do limite da lista (ex.: "Todo o período"): os contadores vêm somados pela API, e a
   // situação e a busca são filtradas lá, para chegar também aos orçamentos mais antigos.
   const capped = !quotes.isPlaceholderData && (quotes.data?.length ?? 0) >= LIST_LIMIT;
@@ -372,7 +385,7 @@ function QuoteList() {
     // Sem o resumo (servidor antigo, falha passageira), os contadores somam a lista que veio.
     retry: false,
   });
-  const narrowing = capped && Boolean(status || query);
+  const narrowing = !queue && capped && Boolean(status || query);
   const narrowed = useQuery({
     queryKey: ["quotes", period, status, query],
     queryFn: ({ signal }) => api.get<QuoteListRow[]>("/quotes", { ...periodRange(period), status, q: query }, { signal }),
@@ -389,13 +402,19 @@ function QuoteList() {
     onSuccess: (saved, q) => {
       refresh(q.ticket_id);
       setOpened(null);
-      setSharing({ ...q, ...saved });
+      setSharing({ row: { ...q, ...saved }, mode: "share" });
     },
     onError: (e) => toast({ title: "Não foi possível enviar", description: errorMessage(e), tone: "error" }),
   });
+  const setQueue = (on: boolean) => setParams({ cobrar: on ? "1" : null });
+  // Escolher uma situação desliga a fila.
+  const pickStatus = (next: QuoteStatus | "") => {
+    setStatus(next);
+    if (queue) setQueue(false);
+  };
   // O filtro da API vale quando já chegou (enquanto carrega, o recorte da lista do período).
   const serverRows = narrowing && narrowed.data && !narrowed.isPlaceholderData ? narrowed.data : null;
-  const rows = serverRows ?? quotes.data;
+  const rows = queue ? (followUp.data ? queueRows : undefined) : (serverRows ?? quotes.data);
   // A API ainda vai responder: uma lista vazia aqui não quer dizer que não há orçamento.
   const waiting = narrowing && !serverRows && narrowed.isFetching;
   const summary = useMemo(() => {
@@ -409,25 +428,51 @@ function QuoteList() {
     () =>
       (rows ?? []).filter(
         (q) =>
-          (!status || q.status === status) &&
-          // A busca da API já filtrou (ela também olha o título da OS): aqui só a lista do período.
-          (serverRows !== null || !term || matches(term, `${q.code} ${q.ticket_code} ${q.title} ${q.customer ?? ""} ${q.location ?? ""}`)),
+          (queue || !status || q.status === status) &&
+          // A busca da API já filtrou (ela também olha o título da OS): aqui só a lista do período e a fila.
+          (serverRows !== null ||
+            !term ||
+            matches(term, `${q.code} ${q.ticket_code} ${q.title} ${q.customer ?? ""} ${q.location ?? ""} ${q.legacy_code ?? ""}`)),
       ),
-    [rows, serverRows, status, term],
+    [rows, queue, serverRows, status, term],
   );
   // Trocou de período, ou o filtro ainda vem da API: a lista na tela é a anterior (fica apagada).
-  const listStale = quotes.isPlaceholderData || waiting;
-  const listError = quotes.error ?? (narrowing && !serverRows ? narrowed.error : null);
-  const retry = () => void (quotes.error ? quotes.refetch() : narrowed.refetch());
+  const listStale = !queue && (quotes.isPlaceholderData || waiting);
+  const loading = queue ? followUp.isLoading : quotes.isLoading || (waiting && visible.length === 0);
+  // Sem nada para mostrar: o erro ocupa o cartão. Com a lista na tela, ele aparece em cima dela.
+  const fatalError = queue ? (followUp.data ? null : followUp.error) : rows ? null : quotes.error;
+  const listError = queue ? followUp.error : (quotes.error ?? (narrowing && !serverRows ? narrowed.error : null));
+  const retry = () => void (queue ? followUp.refetch() : quotes.error ? quotes.refetch() : narrowed.refetch());
   const latest = (q: QuoteListRow | null) => (q ? (rows?.find((r) => r.id === q.id) ?? q) : null);
   const openedQuote = latest(opened);
-  const sharingQuote = latest(sharing);
-  const filtered = Boolean(status || search.trim());
+  const sharingQuote = latest(sharing?.row ?? null);
+  const filtered = Boolean((!queue && status) || search.trim());
   const periodSlug = period === RECENT ? "ultimos-90-dias" : period === ALL ? "todo-periodo" : period;
 
   const exportCsv = () =>
-    downloadCsv(`orcamentos-${periodSlug}.csv`, [
-      ["orcamento", "os", "cliente", "local", "titulo", "situacao", "total", "validade", "criado_em", "criado_por", "enviado_em", "respondido_em", "respondido_por", "motivo_recusa"],
+    downloadCsv(queue ? "orcamentos-para-cobrar.csv" : `orcamentos-${periodSlug}.csv`, [
+      [
+        "orcamento",
+        "os",
+        "cliente",
+        "local",
+        "titulo",
+        "situacao",
+        "total",
+        "validade",
+        "criado_em",
+        "criado_por",
+        "enviado_em",
+        "respondido_em",
+        "respondido_por",
+        "motivo_recusa",
+        "codigo_fc",
+        "aberturas",
+        "ultima_abertura",
+        "cobrancas",
+        "ultima_cobranca",
+        "para_cobrar",
+      ],
       ...visible.map((q) => [
         q.code,
         q.ticket_code,
@@ -443,6 +488,12 @@ function QuoteList() {
         q.decided_at ? formatDate(q.decided_at) : "",
         q.decided_at ? (q.approver_name ?? "") : "",
         q.rejection_reason ?? "",
+        q.legacy_code ?? "",
+        q.client_views ?? 0,
+        q.client_last_viewed_at ? formatDateTime(q.client_last_viewed_at) : "",
+        q.reminder_count ?? 0,
+        q.last_reminded_at ? formatDateTime(q.last_reminded_at) : "",
+        followUpText(q, today) ?? "",
       ]),
     ]);
 
@@ -456,20 +507,23 @@ function QuoteList() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Nº, OS, cliente, loja ou título"
+            title="Também acha pelo código do Field Control"
             aria-label="Buscar orçamentos"
             maxLength={200}
             className="pl-9"
           />
         </div>
-        <Select value={period} onChange={(e) => setPeriod(e.target.value)} className="w-full sm:w-52" aria-label="Período">
-          <option value={RECENT}>Últimos 90 dias</option>
-          {months.map((m) => (
-            <option key={m.value} value={m.value}>
-              {m.label}
-            </option>
-          ))}
-          <option value={ALL}>Todo o período</option>
-        </Select>
+        {queue ? null : (
+          <Select value={period} onChange={(e) => setPeriod(e.target.value)} className="w-full sm:w-52" aria-label="Período">
+            <option value={RECENT}>Últimos 90 dias</option>
+            {months.map((m) => (
+              <option key={m.value} value={m.value}>
+                {m.label}
+              </option>
+            ))}
+            <option value={ALL}>Todo o período</option>
+          </Select>
+        )}
         <div className="flex flex-wrap gap-2 sm:ml-auto">
           <Button disabled={!visible.length} onClick={exportCsv}>
             <Download className="size-4" />
@@ -482,25 +536,33 @@ function QuoteList() {
         </div>
       </div>
       <div className="mb-4 flex flex-wrap items-center gap-2" role="group" aria-label="Situação">
-        <StatusChip active={status === ""} label="Todos" count={summary.count} onClick={() => setStatus("")} />
+        <StatusChip
+          active={queue}
+          label="Para cobrar"
+          count={followUp.data ? queueRows.length : null}
+          amount={queueRows.length ? queueTotal : undefined}
+          title="A fila não depende do período"
+          onClick={() => setQueue(!queue)}
+        />
+        <StatusChip active={!queue && status === ""} label="Todos" count={summary.count} onClick={() => pickStatus("")} />
         {CHIPS.map((c) => (
           <StatusChip
             key={c.key}
-            active={status === c.key}
+            active={!queue && status === c.key}
             label={c.label}
             count={summary.by[c.key].count}
             amount={c.key === "sent" || c.key === "approved" ? summary.by[c.key].total : undefined}
             color={QUOTE_STATUS[c.key].color}
-            onClick={() => setStatus(status === c.key ? "" : c.key)}
+            onClick={() => pickStatus(!queue && status === c.key ? "" : c.key)}
           />
         ))}
-        {summary.rate !== null ? (
+        {!queue && summary.rate !== null ? (
           <span className="text-xs text-ink-muted sm:ml-auto" title="Aprovados sobre os aprovados, recusados e vencidos do período">
             Taxa de aprovação <strong className="font-semibold text-ink">{summary.rate}%</strong>
           </span>
         ) : null}
       </div>
-      {capped && !(serverRows && serverRows.length < LIST_LIMIT) ? (
+      {!queue && capped && !(serverRows && serverRows.length < LIST_LIMIT) ? (
         <p className="mb-3 text-xs text-ink-muted">
           {serverRows
             ? `Mostrando os ${intFmt(LIST_LIMIT)} orçamentos mais recentes que batem com o filtro: escolha um mês para ver todos.`
@@ -508,11 +570,11 @@ function QuoteList() {
         </p>
       ) : null}
       <Card>
-        {quotes.isLoading || (waiting && visible.length === 0) ? (
+        {loading ? (
           <LoadingBlock />
-        ) : quotes.error && !rows ? (
+        ) : fatalError ? (
           <div className="p-4">
-            <ErrorBox message={errorMessage(quotes.error)} onRetry={() => void quotes.refetch()} />
+            <ErrorBox message={errorMessage(fatalError)} onRetry={retry} />
           </div>
         ) : (
           <>
@@ -525,12 +587,8 @@ function QuoteList() {
               listError ? null : (
                 <EmptyState
                   icon={<FileText className="size-6" />}
-                  title={filtered ? "Nenhum orçamento encontrado" : "Nenhum orçamento no período"}
-                  description={
-                    filtered
-                      ? "Tente outra busca, outra situação ou um período maior."
-                      : "Crie aqui, em Novo orçamento, ou dentro da OS, no quadro Orçamentos."
-                  }
+                  title={filtered ? "Nenhum orçamento encontrado" : queue ? "Nada para cobrar" : "Nenhum orçamento no período"}
+                  description={filtered && !queue ? "Tente outra busca, outra situação ou um período maior." : undefined}
                   action={
                     filtered ? (
                       <Button
@@ -539,15 +597,18 @@ function QuoteList() {
                           setStatus("");
                         }}
                       >
-                        Limpar busca e situação
+                        {queue ? "Limpar busca" : "Limpar busca e situação"}
                       </Button>
                     ) : undefined
                   }
                 />
               )
             ) : (
-              <div className={clsx("transition-opacity duration-150", listStale && "opacity-60")} aria-busy={quotes.isFetching || narrowed.isFetching}>
-                <Table label="Orçamentos do período">
+              <div
+                className={clsx("transition-opacity duration-150", listStale && "opacity-60")}
+                aria-busy={queue ? followUp.isFetching : quotes.isFetching || narrowed.isFetching}
+              >
+                <Table label={queue ? "Orçamentos para cobrar" : "Orçamentos do período"}>
                   <thead>
                     <tr>
                       <Th>Orçamento</Th>
@@ -561,8 +622,10 @@ function QuoteList() {
                   </thead>
                   <tbody>
                     {visible.map((q) => {
-                      const detail = statusDetail(q);
+                      const situation = situationOf(q, today);
                       const place = placeOf(q);
+                      // Na fila (ou com motivo de cobrança): a ação que o motivo pede.
+                      const action = followUpAction(q, today);
                       return (
                         <tr
                           key={q.id}
@@ -600,7 +663,14 @@ function QuoteList() {
                           </Td>
                           <Td className="whitespace-nowrap">
                             <Pill color={QUOTE_STATUS[q.status].color}>{QUOTE_STATUS[q.status].label}</Pill>
-                            {detail ? <span className="mt-1 block text-[11px] text-ink-muted">{detail}</span> : null}
+                            {situation.text ? (
+                              <span
+                                className={clsx("mt-1 block text-[11px]", situation.reason ? "font-medium text-ink" : "text-ink-muted")}
+                                title={situation.title}
+                              >
+                                {situation.text}
+                              </span>
+                            ) : null}
                           </Td>
                           <Td className="hidden text-xs whitespace-nowrap text-ink-muted lg:table-cell">
                             {formatDate(q.created_at)}
@@ -608,13 +678,26 @@ function QuoteList() {
                           </Td>
                           <Td className="edit-col">
                             <span className="inline-flex items-center gap-1.5">
-                              {needsRenew(q, today) ? (
+                              {action === "remind" ? (
+                                <RowAction label={`Cobrar o ${q.code}`} onClick={() => setSharing({ row: q, mode: "remind" })}>
+                                  <BellRing className="size-4" />
+                                </RowAction>
+                              ) : action === "link" || action === "send" ? (
+                                <RowAction
+                                  label={action === "link" ? `Gerar o link do ${q.code}` : `Enviar o ${q.code} ao cliente`}
+                                  loading={send.isPending && send.variables?.id === q.id}
+                                  disabled={send.isPending}
+                                  onClick={() => send.mutate(q)}
+                                >
+                                  <Send className="size-4" />
+                                </RowAction>
+                              ) : action === "renew" || needsRenew(q, today) ? (
                                 // Validade vencida: enviar seria recusado; renovar dá a data nova e envia.
                                 <RowAction label={`Renovar o ${q.code} (nova validade)`} onClick={() => setRenewing(q)}>
                                   <CalendarClock className="size-4" />
                                 </RowAction>
                               ) : q.status === "sent" && q.link ? (
-                                <RowAction label={`Link do ${q.code} para o cliente`} onClick={() => setSharing(q)}>
+                                <RowAction label={`Link do ${q.code} para o cliente`} onClick={() => setSharing({ row: q, mode: "share" })}>
                                   <Share2 className="size-4" />
                                 </RowAction>
                               ) : q.status === "draft" || q.status === "sent" ? (
@@ -628,7 +711,7 @@ function QuoteList() {
                                 </RowAction>
                               ) : (q.status === "approved" || q.status === "rejected") && q.link ? (
                                 // Já respondido: o link mostra ao cliente o documento com a decisão.
-                                <RowAction label={`Link do ${q.code} (já respondido)`} onClick={() => setSharing(q)}>
+                                <RowAction label={`Link do ${q.code} (já respondido)`} onClick={() => setSharing({ row: q, mode: "share" })}>
                                   <Link2 className="size-4" />
                                 </RowAction>
                               ) : (
@@ -656,7 +739,12 @@ function QuoteList() {
       {openedQuote ? (
         <QuoteViewer
           quote={openedQuote}
-          ticket={{ id: openedQuote.ticket_id, code: openedQuote.ticket_code, customer: openedQuote.customer }}
+          ticket={{
+            id: openedQuote.ticket_id,
+            code: openedQuote.ticket_code,
+            customer: openedQuote.customer,
+            location: openedQuote.location ?? null,
+          }}
           onClose={() => setOpened(null)}
           onEdit={() => {
             setOpened(null);
@@ -671,7 +759,11 @@ function QuoteList() {
           sending={send.isPending}
           onShare={() => {
             setOpened(null);
-            setSharing(openedQuote);
+            setSharing({ row: openedQuote, mode: "share" });
+          }}
+          onRemind={() => {
+            setOpened(null);
+            setSharing({ row: openedQuote, mode: "remind" });
           }}
           onDuplicate={() => {
             setOpened(null);
@@ -699,10 +791,11 @@ function QuoteList() {
           onSend={(saved) => send.mutate({ ...editing, ...saved })}
         />
       ) : null}
-      {sharingQuote ? (
+      {sharing && sharingQuote ? (
         <ShareDialog
-          ticket={{ code: sharingQuote.ticket_code }}
+          ticket={ticketOf(sharingQuote)}
           quote={sharingQuote}
+          mode={sharing.mode}
           onClose={() => setSharing(null)}
           onRotated={() => refresh(sharingQuote.ticket_id)}
         />
@@ -720,7 +813,7 @@ function QuoteList() {
               description: sentBefore(quote) ? "O link é o mesmo: mande de novo para o cliente." : "Mande o link para o cliente.",
               tone: "success",
             });
-            setSharing({ ...quote, ...saved });
+            setSharing({ row: { ...quote, ...saved }, mode: "share" });
           }}
         />
       ) : null}
@@ -791,11 +884,7 @@ function RenewDialog({ quote, onClose, onDone }: { quote: QuoteListRow; onClose:
       open
       onClose={onClose}
       title={`Renovar o ${quote.code}`}
-      description={
-        wasSent
-          ? `Venceu${quote.valid_until ? ` em ${formatDate(quote.valid_until)}` : ""} sem resposta. Com a validade nova, ele volta para o cliente no mesmo link.`
-          : `A validade${quote.valid_until ? ` (${formatDate(quote.valid_until)})` : ""} passou antes do envio. Com a data nova, ele vai para o cliente.`
-      }
+      description={`Venceu${quote.valid_until ? ` em ${dayMonth(quote.valid_until)}` : ""} ${wasSent ? "sem resposta" : "antes do envio"}.`}
       busy={renew.isPending}
       footer={
         <>
@@ -816,8 +905,8 @@ function RenewDialog({ quote, onClose, onDone }: { quote: QuoteListRow; onClose:
           if (valid) renew.mutate();
         }}
       >
-        <Field label="Nova validade" required hint={valid ? "O cliente pode aprovar até esse dia." : "Escolha hoje ou uma data futura."}>
-          <Input type="date" value={date} min={today} onChange={(e) => setDate(e.target.value)} autoFocus />
+        <Field label="Nova validade" required error={valid ? null : "Escolha hoje ou uma data futura."}>
+          <Input type="date" value={date} min={today} onChange={(e) => setDate(e.target.value)} aria-invalid={!valid || undefined} autoFocus />
         </Field>
         {renew.error ? (
           <div className="mt-3">
@@ -842,18 +931,18 @@ function PickTicketDialog({ onClose, onPick }: { onClose: () => void; onPick: (t
   });
   const items = results.data?.items ?? [];
   return (
-    <Dialog open onClose={onClose} title="Novo orçamento" description="De qual OS? Busque pelo número, cliente, loja ou título.">
+    <Dialog open onClose={onClose} title="Novo orçamento">
       <Input
         type="search"
         autoFocus
         value={text}
         onChange={(e) => setText(e.target.value)}
-        placeholder="Ex.: 1234 ou o nome do cliente"
+        placeholder="Nº da OS, cliente ou loja"
         aria-label="Buscar OS"
       />
       <div className="mt-3 max-h-[22rem] overflow-y-auto" aria-live="polite">
         {!ready ? (
-          <p className="py-2 text-sm text-ink-muted">Digite o número da OS ou pelo menos 2 letras.</p>
+          <p className="py-2 text-sm text-ink-muted">Digite o nº da OS ou 2 letras.</p>
         ) : results.error ? (
           <ErrorBox message={errorMessage(results.error)} onRetry={() => void results.refetch()} />
         ) : results.isLoading ? (
@@ -875,7 +964,7 @@ function PickTicketDialog({ onClose, onPick }: { onClose: () => void; onPick: (t
                   <button
                     type="button"
                     disabled={cancelled}
-                    onClick={() => onPick({ id: t.id, code: t.code, title: t.title, customer: t.customer })}
+                    onClick={() => onPick({ id: t.id, code: t.code, title: t.title, customer: t.customer, location: t.location })}
                     className="flex w-full items-start justify-between gap-3 px-3 py-2.5 text-left transition-colors hover:bg-[var(--row-hover)] focus-visible:bg-[var(--row-hover)] focus-visible:outline-none disabled:cursor-not-allowed disabled:hover:bg-transparent"
                   >
                     <span className="min-w-0">
@@ -907,10 +996,13 @@ function Catalog() {
   const term = useDebounced(normalize(search.trim()), 200);
   const [active, setActive] = useState<"active" | "inactive" | "all">("active");
   const [kind, setKind] = useState<QuoteItemKind | "">("");
+  // Sem uso em orçamentos (não cancelados) nos últimos 12 meses: candidatos a desativar.
+  const [unused, setUnused] = useState(false);
   const items = useQuery({ queryKey: ["quote-items"], queryFn: ({ signal }) => api.get<QuoteCatalogItem[]>("/quote-items", undefined, { signal }) });
   const list = items.data;
   const activeCount = useMemo(() => (list ?? []).filter((i) => i.is_active).length, [list]);
-  const visible = useMemo(
+  // Os demais filtros; o chip "Sem uso" conta dentro deles (o número bate com a lista ao ligar o chip).
+  const shown = useMemo(
     () =>
       (list ?? []).filter(
         (i) =>
@@ -920,14 +1012,14 @@ function Catalog() {
       ),
     [list, active, kind, term],
   );
-  const filtered = Boolean(search.trim() || kind || active !== "active");
+  const unusedCount = useMemo(() => shown.filter((i) => !i.uses_12m).length, [shown]);
+  const visible = useMemo(() => (unused ? shown.filter((i) => !i.uses_12m) : shown), [shown, unused]);
+  const filtered = Boolean(search.trim() || kind || active !== "active" || unused);
   return (
     <Card>
       <CardHeader
         title="Itens e preços"
-        description={
-          list ? `${plural(activeCount, "item ativo", "itens ativos")} · o preço é a referência (dá para mudar no orçamento)` : "Material e serviços com preço de referência"
-        }
+        description={list ? plural(activeCount, "item ativo", "itens ativos") : undefined}
         actions={
           <Button size="sm" variant="primary" onClick={() => setEditing("new")}>
             <Plus className="size-4" />
@@ -966,6 +1058,18 @@ function Catalog() {
             </button>
           ))}
         </div>
+        <button
+          type="button"
+          aria-pressed={unused}
+          onClick={() => setUnused((v) => !v)}
+          title="Nenhum orçamento (fora os cancelados) com o item nos últimos 12 meses"
+          className={clsx(
+            "h-8 rounded-lg border px-3 text-xs font-medium tabular-nums transition-[border-color,background-color] duration-150",
+            unused ? "border-brand bg-brand-soft text-ink ring-2 ring-brand/15" : "border-line bg-surface text-ink-muted hover:border-line-strong hover:text-ink",
+          )}
+        >
+          Sem uso em 12 meses{list ? ` (${intFmt(unusedCount)})` : ""}
+        </button>
       </div>
       {items.isLoading ? (
         <LoadingBlock />
@@ -976,7 +1080,7 @@ function Catalog() {
       ) : visible.length === 0 ? (
         <EmptyState
           title={filtered ? "Nenhum item encontrado" : "Nenhum item"}
-          description={filtered ? "Tente outra busca ou outro filtro." : "Ex.: Velcro 3 m, Conector RJ45, Hora técnica."}
+          description={filtered ? "Tente outra busca ou outro filtro." : undefined}
           action={
             filtered ? (
               <Button
@@ -984,6 +1088,7 @@ function Catalog() {
                   setSearch("");
                   setKind("");
                   setActive("active");
+                  setUnused(false);
                 }}
               >
                 Limpar filtros
@@ -998,7 +1103,13 @@ function Catalog() {
               <Th>Item</Th>
               <Th>Tipo</Th>
               <Th>Unidade</Th>
-              <Th className="text-right">Preço</Th>
+              <Th className="text-right" title="Preço de referência: dá para mudar no orçamento">
+                Preço
+              </Th>
+              <Th className="text-right" title="Orçamentos (fora os cancelados) com o item nos últimos 12 meses">
+                Usos (12 meses)
+              </Th>
+              <Th className="hidden md:table-cell">Último uso</Th>
               <Th className="edit-col">Editar</Th>
             </tr>
           </thead>
@@ -1027,6 +1138,10 @@ function Catalog() {
                 <Td className="text-ink-muted">{QUOTE_KIND[i.kind ?? "product"].label}</Td>
                 <Td className="text-ink-muted">{i.unit}</Td>
                 <Td className="text-right whitespace-nowrap tabular-nums">{formatMoney(i.price)}</Td>
+                <Td className="text-right whitespace-nowrap text-ink-muted tabular-nums">{intFmt(i.uses_12m ?? 0)}</Td>
+                <Td className="hidden whitespace-nowrap text-ink-muted tabular-nums md:table-cell">
+                  {i.last_used_at ? formatDate(i.last_used_at) : "—"}
+                </Td>
                 <Td className="edit-col">
                   <RowAction label={`Editar ${i.name}`} onClick={() => setEditing(i)}>
                     <SquarePen className="size-4" />
