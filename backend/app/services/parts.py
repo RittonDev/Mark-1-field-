@@ -16,6 +16,7 @@ from app.db.base import utcnow
 from app.models import Quote, Ticket, TicketAttachment, User
 from app.models.part_request import TicketPartRequest
 from app.schemas.part_request import PartRequestIn, PartRequestUpdate
+from app.schemas.quote import format_quote_code
 from app.services.errors import NotFound, PermissionDenied, WorkflowError
 from app.services.realtime import queue_event
 from app.services.tickets import FINAL, _touch, attachment_visible, record_event
@@ -231,4 +232,41 @@ async def on_quote_decided(
             now=now,
         )
         _notify_decision(db, ticket, None, request)
+    await db.flush()
+
+
+async def on_quote_cancelled(db: AsyncSession, ticket: Ticket, quote: Quote, actor: User) -> None:
+    """A gestão cancelou o orçamento: os pedidos ligados a ele (ainda à espera da decisão) se
+    soltam e voltam a "aberto", esperando outro orçamento. Não é decisão do cliente: o técnico
+    não recebe aviso de aprovado/recusado, só a OS atualizada."""
+    requests = list(
+        await db.scalars(
+            select(TicketPartRequest).where(
+                TicketPartRequest.quote_id == quote.id,
+                TicketPartRequest.status.in_(FOLLOWING_QUOTE),
+            )
+        )
+    )
+    if not requests:
+        return
+    now = utcnow()
+    for request in requests:
+        before = request.status
+        request.status = P.OPEN
+        request.quote_id = None
+        request.updated_at = now
+        record_event(
+            db,
+            ticket,
+            actor,
+            TicketEventType.PART_REQUEST_UPDATED,
+            from_value=before.value,
+            to_value=P.OPEN.value,
+            note=f"Orçamento {format_quote_code(quote.number)} cancelado",
+            data=_summary(request) | {"quote_id": str(quote.id)},
+            now=now,
+        )
+    # O app do técnico sincroniza pela atualização da OS.
+    await _touch(db, ticket, now)
+    queue_event(db, "updated", ticket, actor, {"fields": ["part_requests"]}, internal=True)
     await db.flush()

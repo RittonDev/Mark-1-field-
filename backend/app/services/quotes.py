@@ -506,6 +506,7 @@ async def publish_decision(quote: Quote, ticket_code: str) -> None:
             "quote_code": format_quote_code(quote.number),
             "status": quote.status.value,
             "name": quote.approver_name,
+            "total": float(quote.total),
             "audience": {"managers_only": True},
         }
     )
@@ -519,3 +520,70 @@ async def catalog_item(db: AsyncSession, item_id: uuid.UUID) -> QuoteItemCatalog
     if item is None:
         raise NotFound("Item não encontrado")
     return item
+
+
+def _quote_lines() -> Any:
+    """Uma linha por item do orçamento (os itens ficam em JSONB)."""
+    return func.jsonb_array_elements(Quote.items).table_valued(column("value", JSONB)).alias("line")
+
+
+async def catalog_usage(db: AsyncSession, now: datetime) -> dict[str, tuple[int, datetime]]:
+    """Uso de cada item do catálogo nos últimos 12 meses: em quantos orçamentos (não cancelados)
+    ele entrou e quando foi o mais recente. A chave é o id do item como texto (é como ele fica
+    gravado nos itens do orçamento)."""
+    line = _quote_lines()
+    item_id = line.c.value["catalog_item_id"].astext
+    rows = await db.execute(
+        select(item_id, func.count(func.distinct(Quote.id)), func.max(Quote.created_at))
+        .select_from(Quote)
+        .join(line, true())
+        .where(
+            Quote.status != QuoteStatus.CANCELLED,
+            Quote.created_at >= now - USAGE_WINDOW,
+            item_id.is_not(None),
+        )
+        .group_by(item_id)
+    )
+    return {key: (int(count), last) for key, count, last in rows}
+
+
+async def last_prices(db: AsyncSession, customer_id: uuid.UUID) -> list[QuoteLastPrice]:
+    """O preço do orçamento aprovado mais recente do cliente, por item do catálogo (acerta mais
+    que o preço de referência do catálogo)."""
+    line = _quote_lines()
+    item_id = line.c.value["catalog_item_id"].astext
+    rows = await db.execute(
+        select(
+            item_id,
+            line.c.value["unit_price"].astext,
+            Quote.id,
+            Quote.number,
+            Quote.decided_at,
+        )
+        .select_from(Quote)
+        .join(Ticket, Ticket.id == Quote.ticket_id)
+        .join(line, true())
+        .where(
+            Ticket.customer_id == customer_id,
+            Quote.status == QuoteStatus.APPROVED,
+            item_id.is_not(None),
+        )
+        .distinct(item_id)
+        .order_by(item_id, Quote.decided_at.desc().nulls_last(), Quote.number.desc())
+    )
+    out = []
+    for key, price, quote_id, number, decided_at in rows:
+        try:
+            catalog_item_id, unit_price = uuid.UUID(key), Decimal(price)
+        except (TypeError, ValueError, InvalidOperation):
+            continue  # item gravado sem id válido ou sem preço: não sugere nada
+        out.append(
+            QuoteLastPrice(
+                catalog_item_id=catalog_item_id,
+                unit_price=unit_price,
+                quote_id=quote_id,
+                quote_code=format_quote_code(number),
+                decided_at=decided_at,
+            )
+        )
+    return out

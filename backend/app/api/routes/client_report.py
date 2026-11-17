@@ -6,10 +6,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials
 
-from app.api.deps import DB, CurrentUser, TicketManagerUser, bearer
-from app.core.security import InvalidToken, decode_token
+from app.api.deps import DB, CurrentUser, TicketManagerUser, bearer, optional_user
 from app.db.base import utcnow
-from app.models import User
 from app.schemas.client_report import PublicReport
 from app.schemas.ticket import ReportLinkOut
 from app.services import client_report as svc
@@ -58,35 +56,23 @@ async def revoke_report_link(ticket_id: uuid.UUID, db: DB, user: TicketManagerUs
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-async def _viewer(db: DB, creds: HTTPAuthorizationCredentials | None) -> User | None:
-    """Quem abriu, se mandou a sessão (a página pública não exige login: sem ela, é o cliente)."""
-    if creds is None:
-        return None
-    try:
-        payload = decode_token(creds.credentials, "access")
-        user = await db.get(User, uuid.UUID(payload["sub"]))
-    except (InvalidToken, KeyError, ValueError):
-        return None
-    if user is None or not user.is_active or user.token_revoked(payload):
-        return None
-    return user
-
-
 @public.get("/{token}", response_model=PublicReport)
 async def view_report(
     token: str,
     request: Request,
     db: DB,
     creds: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
+    preview: bool = False,
 ) -> PublicReport:
     """Página do cliente. Só a visita do cliente conta ("aberto N vezes"): a gestão e o técnico
-    da OS conferindo ou baixando o PDF não contam, nem a mesma pessoa recarregando a página."""
+    da OS conferindo ou baixando o PDF não contam, nem a prévia da equipe (?preview=1), nem a
+    mesma pessoa recarregando a página."""
     try:
         ticket = await svc.ticket_for_token(db, token)
     except svc.ReportUnavailable as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, LINK_GONE) from exc
     report = await svc.build(db, ticket, str(request.base_url))
-    if svc.counts_as_client_view(ticket, await _viewer(db, creds)):
+    if not preview and svc.counts_as_client_view(ticket, await optional_user(db, creds)):
         await svc.register_view(db, ticket, utcnow())
         await db.commit()
     return report

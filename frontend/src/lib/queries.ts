@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { api, type Query } from "./api";
+import { api, ApiError, type Query } from "./api";
 import type {
   AssignableUser,
   CalendarEvent,
@@ -9,6 +9,8 @@ import type {
   ConflictItem,
   Customer,
   DayActivities,
+  FavoriteCityDetail,
+  FavoritesOut,
   LiveTechnician,
   MapDistances,
   Location,
@@ -230,5 +232,45 @@ export function useUnproductiveReasons(active?: boolean) {
     queryKey: ["unproductive-reasons", active ?? ""],
     queryFn: ({ signal }) => api.get<UnproductiveReason[]>("/unproductive-reasons", { active }, { signal }),
     staleTime: LOOKUP_STALE,
+  });
+}
+
+/**
+ * Técnicos favoritos por cidade: todas as cidades com loja (inclusive as sem favorito) e a regra
+ * automática (janela, mínimo de OS, quantos por cidade). Com `technicianId`, só as cidades em que ele é
+ * favorito ou foi tirado da lista.
+ */
+export function useFavorites(params: { state?: string; technicianId?: UUID } = {}) {
+  return useQuery({
+    queryKey: ["technician-favorites", "list", params],
+    queryFn: ({ signal }) =>
+      api.get<FavoritesOut>(
+        "/technicians/favorites",
+        { state: params.state || undefined, technician_id: params.technicianId || undefined },
+        { signal },
+      ),
+    staleTime: 60_000,
+  });
+}
+
+/**
+ * Favoritos da cidade da loja (Nova OS e editor da OS): a estrela dos sugeridos, a ordem do
+ * Colaborador e os favoritos sem acesso ao app. Loja sem cidade e UF (422) ou que não existe mais
+ * (404) não tem favoritos: null.
+ */
+export function useCityFavorites(locationId: UUID | null | undefined) {
+  return useQuery({
+    queryKey: ["technician-favorites", "city", locationId],
+    queryFn: async ({ signal }) => {
+      try {
+        return await api.get<FavoriteCityDetail>("/technicians/favorites/city", { location_id: locationId ?? undefined }, { signal });
+      } catch (error) {
+        if (error instanceof ApiError && (error.status === 404 || error.status === 422)) return null;
+        throw error;
+      }
+    },
+    enabled: Boolean(locationId),
+    staleTime: 5 * 60_000,
+    retry: false,
   });
 }

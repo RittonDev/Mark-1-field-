@@ -221,9 +221,11 @@ async def suggest_for_place(
     end: dt.datetime | None = None,
     estimated_minutes: Annotated[int | None, Query(gt=0, le=60 * 24 * 7)] = None,
     limit: Annotated[int, Query(ge=1, le=10)] = 5,
+    exclude_ticket_id: uuid.UUID | None = None,
 ) -> list[dict]:
     """Para quem ainda está abrindo a OS: a loja (ou o lugar), o serviço e o horário da visita
-    dão o mesmo ranking de uma OS já aberta (distância, histórico na loja, skill, agenda)."""
+    dão o mesmo ranking de uma OS já aberta (distância, histórico na loja, skill, agenda).
+    No editor de uma OS aberta, `exclude_ticket_id` tira a própria OS da agenda e da carga."""
     if any(t is not None and t.tzinfo is None for t in (start, end)):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Informe o fuso do horário")
     if start is not None and end is not None and end <= start:
@@ -251,5 +253,6 @@ async def suggest_for_place(
         estimated_minutes=estimated_minutes
         or (service_type.estimated_minutes if service_type else None),
         project=project,
+        exclude_ticket_id=exclude_ticket_id,
     )
     return await suggestions.suggest(db, target, limit=limit)

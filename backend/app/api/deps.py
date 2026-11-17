@@ -46,6 +46,23 @@ async def get_current_user(
     return user
 
 
+async def optional_user(db: AsyncSession, creds: HTTPAuthorizationCredentials | None) -> User | None:
+    """Quem abriu uma página pública, se mandou a sessão (ela não exige login: sem sessão, é o
+    cliente). Token inválido, usuário inativo ou sessão encerrada valem como "sem sessão"."""
+    if creds is None:
+        return None
+    try:
+        payload = decode_token(creds.credentials, "access")
+        user = await db.get(User, uuid.UUID(payload["sub"]))
+    except (InvalidToken, KeyError, ValueError):
+        return None
+    if user is None or not user.is_active or user.token_revoked(payload):
+        return None
+    if await sessions.is_revoked(payload.get("sid")):
+        return None
+    return user
+
+
 def require_roles(*roles: UserRole):  # noqa: ANN201
     async def dependency(user: Annotated[User, Depends(get_current_user)]) -> User:
         if user.role not in roles:

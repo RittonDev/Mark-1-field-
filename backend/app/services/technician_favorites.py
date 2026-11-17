@@ -114,7 +114,12 @@ def _place(state: str | None, city: str | None) -> CityKey:
 
 
 async def _cities(
-    db: AsyncSession, now: datetime, *, state: str | None = None, key: str | None = None
+    db: AsyncSession,
+    now: datetime,
+    *,
+    state: str | None = None,
+    key: str | None = None,
+    with_visits: bool = True,
 ) -> dict[CityKey, _City]:
     """As cidades com loja (todas ou só a pedida), com as visitas de cada técnico na janela."""
     uf_col, key_col = _city_columns()
@@ -138,7 +143,7 @@ async def _cities(
     for uf, city_key, name, active in rows.all():
         if uf and city_key:
             out[(uf, city_key)] = _City(state=uf, key=city_key, city=name.strip(), stores=active)
-    if not out:
+    if not out or not with_visits:
         return out
 
     # Visitas: uma passada só, com o total da cidade (OS distintas) no mesmo GROUP BY.
@@ -226,11 +231,16 @@ async def _decisions(
 
 
 async def _city_state(
-    db: AsyncSession, uf: str, key: str, now: datetime | None = None
+    db: AsyncSession,
+    uf: str,
+    key: str,
+    now: datetime | None = None,
+    *,
+    with_visits: bool = True,
 ) -> tuple[_City | None, dict[uuid.UUID, _Decision]]:
-    city = (await _cities(db, now or utcnow(), state=uf, key=key)).get((uf, key))
+    cities = await _cities(db, now or utcnow(), state=uf, key=key, with_visits=with_visits)
     decisions = (await _decisions(db, state=uf, key=key)).get((uf, key), {})
-    return city, decisions
+    return cities.get((uf, key)), decisions
 
 
 # ------------------------------------------------------------------ favorito efetivo
@@ -340,11 +350,15 @@ def _technician(board: _Board, user: User, people: _People) -> FavoriteTechnicia
     )
 
 
-def _technicians(board: _Board, ids: Iterable[uuid.UUID], people: _People) -> list:
-    users = (people.users.get(uid) for uid in ids)
-    return [
-        _technician(board, u, people) for u in users if u is not None and u.role == UserRole.TECHNICIAN
-    ]
+def _technicians(
+    board: _Board, ids: Iterable[uuid.UUID], people: _People
+) -> list[FavoriteTechnician]:
+    out = []
+    for uid in ids:
+        user = people.users.get(uid)
+        if user is not None and user.role == UserRole.TECHNICIAN:
+            out.append(_technician(board, user, people))
+    return out
 
 
 def _favorite_ids(board: _Board, people: _People) -> list[uuid.UUID]:
@@ -540,7 +554,8 @@ async def set_favorite(
     troca a nota; automático agora vira tirado (o próximo sobe); fora disso, apaga a decisão."""
     tech = await technicians.get_technician(db, technician_id)
     uf, key = _place(data.state, data.city)
-    city, decisions = await _city_state(db, uf, key)
+    # O ranking só importa para tirar: fixar não mexe nos automáticos.
+    city, decisions = await _city_state(db, uf, key, with_visits=not data.favorite)
     if city is None:
         raise NotFound(f"Nenhuma loja em {data.city}-{uf}")
     mine = decisions.get(tech.id)
@@ -565,7 +580,7 @@ async def clear_favorite(
     """Apaga a decisão (fixado ou tirado): volta a valer só a regra. Sem decisão, não faz nada."""
     tech = await technicians.get_technician(db, technician_id)
     uf, key = _place(state, city)
-    found, _ = await _city_state(db, uf, key)
+    found, _ = await _city_state(db, uf, key, with_visits=False)
     if found is None:
         raise NotFound(f"Nenhuma loja em {city.strip()}-{uf}")
     await _delete(db, tech.id, uf, key, actor)

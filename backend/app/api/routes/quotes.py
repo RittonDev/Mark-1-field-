@@ -1,18 +1,20 @@
 import re
 import uuid
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import FileResponse
+from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy import ColumnElement, and_, func, or_, select
 
-from app.api.deps import DB, TicketManagerUser
+from app.api.deps import DB, TicketManagerUser, bearer, optional_user
 from app.api.files import stored_file
 from app.core.config import settings
 from app.core.enums import QuoteStatus, TicketStatus
 from app.core.security import InvalidToken, create_token, decode_token
+from app.db.base import utcnow
 from app.models import Customer, Location, Quote, QuoteItemCatalog, Ticket
 from app.schemas.quote import (
     CatalogItemIn,
@@ -22,6 +24,8 @@ from app.schemas.quote import (
     PublicQuoteCustomer,
     QuoteApprove,
     QuoteIn,
+    QuoteLastPrice,
+    QuoteLegacyAttachment,
     QuoteLink,
     QuoteListRow,
     QuoteOut,
@@ -36,7 +40,7 @@ from app.services import company as company_svc
 from app.services import quotes as svc
 from app.services import search
 from app.services import tickets as tickets_svc
-from app.services.activities import local_today
+from app.services.activities import day_bounds, local_today
 from app.services.realtime import commit_and_publish
 
 router = APIRouter(tags=["quotes"])
@@ -58,7 +62,33 @@ def _signature_path(quote: Quote, ttl: timedelta) -> str:
     return f"{settings.API_PREFIX}/quotes/{quote.id}/signature?token={token}"
 
 
-def _out(quote: Quote) -> QuoteOut:
+def _text(value: Any) -> str | None:
+    return str(value) if value not in (None, "") else None
+
+
+def _legacy_description(quote: Quote) -> str | None:
+    """Descrição do Field Control só quando acrescenta algo ao título."""
+    text = (_text((quote.legacy or {}).get("description")) or "").strip()
+    if not text or text.lower() == quote.title.strip().lower():
+        return None
+    return text
+
+
+def _legacy_attachments(quote: Quote) -> list[QuoteLegacyAttachment]:
+    return [
+        QuoteLegacyAttachment(url=str(a["url"]), title=_text(a.get("title")), type=_text(a.get("type")))
+        for a in (quote.legacy or {}).get("attachments") or []
+        if isinstance(a, dict) and a.get("url")
+    ]
+
+
+def _out(
+    quote: Quote,
+    *,
+    ticket_status: TicketStatus | None,
+    now: datetime | None = None,
+    today: date | None = None,
+) -> QuoteOut:
     out = QuoteOut.model_validate(quote)
     if quote.signature_key:
         out.signature_url = _signature_path(quote, SIGNATURE_LINK)
@@ -66,6 +96,16 @@ def _out(quote: Quote) -> QuoteOut:
         # Orçamento migrado: a assinatura continua no armazenamento do Field Control.
         out.signature_url = quote.legacy["signature_url"]
     out.link = svc.link_out(quote)
+    out.follow_up = svc.follow_up(
+        quote,
+        ticket_cancelled=ticket_status == TicketStatus.CANCELLED,
+        now=now or utcnow(),
+        today=today or local_today(),
+    )
+    # Orçamento migrado: código, descrição e anexos do Field Control (só para a equipe).
+    out.legacy_code = _text((quote.legacy or {}).get("identifier"))
+    out.legacy_description = _legacy_description(quote)
+    out.legacy_attachments = _legacy_attachments(quote)
     return out
 
 
@@ -75,11 +115,28 @@ def _out(quote: Quote) -> QuoteOut:
 @router.get("/quote-items", response_model=list[CatalogItemOut])
 async def list_catalog(
     db: DB, _: TicketManagerUser, active: bool | None = None
-) -> list[QuoteItemCatalog]:
+) -> list[CatalogItemOut]:
+    """Itens do catálogo com o uso nos últimos 12 meses (uma consulta para a lista inteira)."""
     stmt = select(QuoteItemCatalog).order_by(QuoteItemCatalog.name)
     if active is not None:
         stmt = stmt.where(QuoteItemCatalog.is_active.is_(active))
-    return list(await db.scalars(stmt))
+    items = list(await db.scalars(stmt))
+    usage = await svc.catalog_usage(db, utcnow())
+    out = []
+    for item in items:
+        row = CatalogItemOut.model_validate(item)
+        row.uses_12m, row.last_used_at = usage.get(str(item.id), (0, None))
+        out.append(row)
+    return out
+
+
+@router.get("/quote-items/last-prices", response_model=list[QuoteLastPrice])
+async def last_prices(
+    customer_id: uuid.UUID, db: DB, _: TicketManagerUser
+) -> list[QuoteLastPrice]:
+    """Último preço aprovado do cliente para cada item do catálogo (o editor oferece com 1
+    clique)."""
+    return await svc.last_prices(db, customer_id)
 
 
 @router.post("/quote-items", response_model=CatalogItemOut, status_code=status.HTTP_201_CREATED)
@@ -111,18 +168,22 @@ async def ticket_quotes(ticket_id: uuid.UUID, db: DB, user: TicketManagerUser) -
     ticket = await tickets_svc.get_visible_ticket(db, user, ticket_id)
     quotes = await svc.list_for_ticket(db, ticket)
     await db.commit()  # grava os que venceram
-    return [_out(q) for q in quotes]
+    now, today = utcnow(), local_today()
+    return [_out(q, ticket_status=ticket.status, now=now, today=today) for q in quotes]
 
 
 async def _ticket_status(db: DB, ticket_id: uuid.UUID) -> TicketStatus | None:
     return await db.scalar(select(Ticket.status).where(Ticket.id == ticket_id))
 
 
-async def _ensure_not_cancelled(db: DB, ticket_id: uuid.UUID) -> None:
-    """OS cancelada não recebe orçamento novo nem envio (a aprovação liberaria peças e avisaria o
-    técnico de uma OS que não existe mais). Reaberta, volta a valer."""
-    if await _ticket_status(db, ticket_id) == TicketStatus.CANCELLED:
+async def _ensure_not_cancelled(db: DB, ticket_id: uuid.UUID) -> TicketStatus | None:
+    """OS cancelada não recebe orçamento novo, envio nem cobrança (a aprovação liberaria peças e
+    avisaria o técnico de uma OS que não existe mais). Reaberta, volta a valer. Devolve a
+    situação da OS."""
+    ticket_status = await _ticket_status(db, ticket_id)
+    if ticket_status == TicketStatus.CANCELLED:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, TICKET_CANCELLED)
+    return ticket_status
 
 
 @router.post(
@@ -135,7 +196,7 @@ async def create_quote(
     await _ensure_not_cancelled(db, ticket.id)
     quote = await svc.create(db, ticket, body, user)
     await db.commit()
-    return _out(quote)
+    return _out(quote, ticket_status=ticket.status)
 
 
 @router.put("/quotes/{quote_id}", response_model=QuoteOut)
@@ -143,21 +204,34 @@ async def update_quote(
     quote_id: uuid.UUID, body: QuoteIn, db: DB, user: TicketManagerUser
 ) -> QuoteOut:
     quote = await svc.get(db, quote_id)
-    await _ensure_not_cancelled(db, quote.ticket_id)
+    ticket_status = await _ensure_not_cancelled(db, quote.ticket_id)
     quote = await svc.update(db, quote, body, user)
     await db.commit()
-    return _out(quote)
+    return _out(quote, ticket_status=ticket_status)
 
 
 @router.post("/quotes/{quote_id}/send", response_model=QuoteSent)
 async def send_quote(quote_id: uuid.UUID, db: DB, user: TicketManagerUser) -> QuoteSent:
     """Marca como enviado e devolve o link do cliente (reenviar mantém o mesmo link)."""
     quote = await svc.get(db, quote_id)
-    await _ensure_not_cancelled(db, quote.ticket_id)
+    ticket_status = await _ensure_not_cancelled(db, quote.ticket_id)
     ticket = await tickets_svc.get_ticket(db, quote.ticket_id)
     token = await svc.send(db, ticket, quote, user)
     await commit_and_publish(db)
-    return QuoteSent(**_out(quote).model_dump(exclude={"code"}), token=token)
+    out = _out(quote, ticket_status=ticket_status)
+    return QuoteSent(**out.model_dump(exclude={"code"}), token=token)
+
+
+@router.post("/quotes/{quote_id}/remind", response_model=QuoteOut)
+async def remind_quote(quote_id: uuid.UUID, db: DB, user: TicketManagerUser) -> QuoteOut:
+    """Registra a cobrança da resposta do cliente ("Cobrar"): o lembrete sai pelo WhatsApp,
+    montado na tela, e a cobrança fica no histórico da OS (só a gestão vê)."""
+    quote = await svc.get(db, quote_id)
+    ticket_status = await _ensure_not_cancelled(db, quote.ticket_id)
+    ticket = await tickets_svc.get_ticket(db, quote.ticket_id)
+    quote = await svc.remind(db, ticket, quote, user)
+    await commit_and_publish(db)
+    return _out(quote, ticket_status=ticket_status)
 
 
 @router.post("/quotes/{quote_id}/link/rotate", response_model=QuoteLink)
@@ -170,9 +244,11 @@ async def rotate_quote_link(quote_id: uuid.UUID, db: DB, user: TicketManagerUser
 
 @router.post("/quotes/{quote_id}/cancel", response_model=QuoteOut)
 async def cancel_quote(quote_id: uuid.UUID, db: DB, user: TicketManagerUser) -> QuoteOut:
+    """Cancela (o link sai do ar) e solta os pedidos de peça ligados a ele."""
     quote = await svc.cancel(db, await svc.get(db, quote_id), user)
-    await db.commit()
-    return _out(quote)
+    ticket_status = await _ticket_status(db, quote.ticket_id)
+    await commit_and_publish(db)
+    return _out(quote, ticket_status=ticket_status)
 
 
 def _overdue() -> ColumnElement[bool]:
@@ -189,10 +265,11 @@ def _status_condition(wanted: QuoteStatus) -> ColumnElement[bool]:
 
 
 def _search(q: str | None) -> ColumnElement[bool] | None:
-    """Código do orçamento ou da OS ("ORC-000123", "OS 123"), título, cliente ou loja."""
+    """Código do orçamento ou da OS ("ORC-000123", "OS 123"), título, cliente, loja ou o código do
+    Field Control (exato, sem diferença de maiúscula)."""
     if not q or not q.strip():
         return None
-    options: list[Any] = []
+    options: list[Any] = [Quote.legacy["identifier"].astext == q.strip().upper()]
     code = _CODE.match(q.strip())
     if code:
         number, prefix = int(code.group("number")), (code.group("prefix") or "").lower()
@@ -203,7 +280,7 @@ def _search(q: str | None) -> ColumnElement[bool] | None:
     words = search.all_words(q, [Quote.title, Ticket.title, Customer.name, Location.name])
     if words is not None:
         options.append(words)
-    return or_(*options) if options else None
+    return or_(*options)
 
 
 def _list_conditions(
@@ -243,26 +320,37 @@ async def list_quotes(
     status_: Annotated[QuoteStatus | None, Query(alias="status")] = None,
     customer_id: uuid.UUID | None = None,
     q: Annotated[str | None, Query(max_length=200)] = None,
+    follow_up: bool | None = None,
     limit: Annotated[int, Query(ge=1, le=2000)] = 500,
 ) -> list[QuoteListRow]:
     """Orçamentos (mais novos primeiro). Os filtros valem no banco, antes do limite; o total que
-    bate com eles vai no cabeçalho X-Total-Count."""
+    bate com eles vai no cabeçalho X-Total-Count. Com follow_up=true, só a fila "Para cobrar"
+    (a mesma regra do Início), quem vence antes primeiro."""
+    now, today = utcnow(), local_today()
     conds = _list_conditions(start, end, customer_id, q)
     if status_ is not None:
         conds.append(_status_condition(status_))
+    order: list[Any] = [Quote.created_at.desc()]
+    if follow_up:
+        conds.append(svc.follow_up_condition(now, today, day_bounds(today)[0]))
+        order = svc.follow_up_order()
     total = await db.scalar(_joined(select(func.count()).select_from(Quote)).where(*conds))
     response.headers["X-Total-Count"] = str(total or 0)
     # Só as colunas da OS que a lista mostra (a OS inteira traria as ~19 relações dela).
-    stmt = _joined(select(Quote, Ticket.number, Customer.name, Location.name)).where(*conds)
-    rows = (await db.execute(stmt.order_by(Quote.created_at.desc()).limit(limit))).all()
+    stmt = _joined(
+        select(Quote, Ticket.number, Ticket.customer_id, Ticket.status, Customer.name, Location.name)
+    ).where(*conds)
+    rows = (await db.execute(stmt.order_by(*order).limit(limit))).all()
     out = []
-    for quote, ticket_number, customer, location in rows:
+    for quote, ticket_number, ticket_customer_id, ticket_status, customer, location in rows:
         svc.refresh_expiry(quote)
+        row = _out(quote, ticket_status=ticket_status, now=now, today=today)
         out.append(
             QuoteListRow(
-                **_out(quote).model_dump(exclude={"code"}),
+                **row.model_dump(exclude={"code"}),
                 ticket_code=format_ticket_code(ticket_number),
                 customer=customer,
+                customer_id=ticket_customer_id,
                 location=location,
             )
         )
@@ -359,7 +447,7 @@ def _address(ticket: Ticket) -> PublicQuoteAddress | None:
 
 
 async def _public_view(db: DB, quote: Quote, ticket: Ticket, base_url: str) -> PublicQuote:
-    out = _out(quote)
+    out = _out(quote, ticket_status=ticket.status)
     customer = ticket.customer
     signature_url = None
     if quote.status == QuoteStatus.APPROVED and quote.signature_key:
@@ -407,8 +495,19 @@ async def _public_view(db: DB, quote: Quote, ticket: Ticket, base_url: str) -> P
 
 
 @public.get("/{token}", response_model=PublicQuote)
-async def view_quote(token: str, request: Request, db: DB) -> PublicQuote:
+async def view_quote(
+    token: str,
+    request: Request,
+    db: DB,
+    creds: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
+    preview: bool = False,
+) -> PublicQuote:
+    """Página do cliente. Conta as aberturas do cliente: a equipe com sessão e a prévia
+    (?preview=1) não contam, e recarregar em menos de 10 min conta uma vez só. A contagem não
+    aparece aqui (é da equipe)."""
     quote, ticket = await _public(db, token)
+    if svc.counts_as_view(await optional_user(db, creds), preview):
+        await svc.register_view(db, quote, utcnow())
     await db.commit()
     return await _public_view(db, quote, ticket, str(request.base_url))
 

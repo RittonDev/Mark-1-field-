@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 import {
   Ban,
+  BellRing,
   Check,
   Copy,
   CopyPlus,
@@ -20,7 +21,7 @@ import {
   Share2,
   X,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useConfirm } from "@/components/Confirm";
 import { QuoteViewer } from "@/components/quotes/QuoteViewer";
 import { useToast } from "@/components/Toaster";
@@ -32,16 +33,25 @@ import { canManageTickets } from "@/lib/constants";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
 import {
   addDaysISO,
+  dayTime,
+  followUpAction,
+  followUpText,
   lineTotalCents,
   localDateISO,
+  previewHref,
   QUOTE_KIND,
   QUOTE_STATUS,
   QUOTE_VALID_DAYS,
   quantityInput,
+  quoteMessage,
+  quoteSubject,
   quoteUrl,
   readDecimal,
+  reminderMessage,
+  trackingText,
+  trackingTitle,
 } from "@/lib/quotes";
-import type { Quote, QuoteCatalogItem, QuoteItemKind, QuoteLink, Ref, TicketDetail, UUID } from "@/lib/types";
+import type { Quote, QuoteCatalogItem, QuoteItemKind, QuoteLastPrice, QuoteLink, TicketDetail, UUID } from "@/lib/types";
 import { copyText, whatsappUrl } from "@/lib/whatsapp";
 
 /** O que o editor e o compartilhamento precisam da OS (dá para abrir também pela tela Orçamentos). */
@@ -49,8 +59,14 @@ export interface QuoteTicketRef {
   id: UUID;
   code: string;
   title: string;
-  customer?: Pick<Ref, "name"> | null;
+  /** Com o id, o editor mostra o último preço aprovado do cliente. */
+  customer?: { id?: UUID; name: string } | null;
+  /** A loja: título do orçamento novo e mensagem para o cliente. */
+  location?: { name: string } | null;
 }
+
+/** Compartilhar (link e mensagem) ou cobrar o cliente (lembrete, registrado no histórico da OS). */
+export type ShareMode = "share" | "remind";
 
 /** Link do cliente: o persistente da API (copiar a qualquer momento) ou o token devolvido no envio. */
 function linkOf(q: Quote): string | null {
@@ -97,7 +113,7 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
   const now = useNow(60_000);
   const manager = canManageTickets(user?.role);
   const [editing, setEditing] = useState<{ quote: Quote | null; prefill?: QuotePrefill; renew?: boolean } | null>(null);
-  const [sharing, setSharing] = useState<Quote | null>(null);
+  const [sharing, setSharing] = useState<{ quote: Quote; mode: ShareMode } | null>(null);
   const [opened, setOpened] = useState<Quote | null>(null);
   const quotes = useQuery({
     queryKey: ["ticket", ticket.id, "quotes"],
@@ -113,7 +129,7 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
     mutationFn: (q: Quote) => api.post<Quote>(`/quotes/${q.id}/send`),
     onSuccess: (q) => {
       refresh();
-      setSharing(q);
+      setSharing({ quote: q, mode: "share" });
     },
     onError: (e) => toast({ title: "Não foi possível enviar", description: errorMessage(e), tone: "error" }),
   });
@@ -129,6 +145,8 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
   if (!manager) return null;
   const list = quotes.data ?? [];
   const today = localDateISO(new Date(now));
+  const approved = list.filter((q) => q.status === "approved");
+  const approvedTotal = approved.reduce((sum, q) => sum + q.total, 0);
 
   const askCancel = async (q: Quote) => {
     const ok = await confirm({
@@ -145,7 +163,13 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
     <Card>
       <CardHeader
         title="Orçamentos"
-        description="Monte, envie o link e o cliente aprova com nome, matrícula (opcional) e assinatura."
+        description={
+          approved.length ? (
+            <span className="tabular-nums" title="Soma dos orçamentos aprovados desta OS">
+              Aprovado {formatMoney(approvedTotal)}
+            </span>
+          ) : undefined
+        }
         actions={
           <Button size="sm" onClick={() => setEditing({ quote: null })}>
             <Plus className="size-4" />
@@ -171,7 +195,12 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
             const editable = q.status === "draft" || q.status === "sent" || q.status === "expired";
             // Validade vencida: o envio seria recusado. Renovar abre o editor com a nova data e envia.
             const pastDue = q.status === "expired" || Boolean(q.valid_until && q.valid_until < today);
-            const detail = rowDetail(q, today);
+            const sending = send.isPending && send.variables?.id === q.id;
+            // Na fila "Para cobrar": o motivo na linha de baixo e a ação que ele pede.
+            const action = followUpAction(q, today);
+            const reason = followUpText(q, today);
+            const detail = [rowDetail(q, today), trackingText(q)].filter(Boolean).join(" · ");
+            const detailTitle = trackingTitle(q);
             return (
               <li key={q.id} className="flex flex-wrap items-center gap-2 px-4 py-2.5">
                 <FileText className="size-4 shrink-0 text-ink-muted" />
@@ -179,9 +208,15 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
                   <span className="block truncate text-sm font-semibold text-ink group-hover:text-brand">
                     {q.code} · {q.title}
                   </span>
-                  <span className="block truncate text-xs text-ink-muted" title={detail}>
-                    {detail}
-                  </span>
+                  {reason ? (
+                    <span className="block truncate text-xs font-medium text-ink" title={[detail, detailTitle].filter(Boolean).join(" · ")}>
+                      {reason}
+                    </span>
+                  ) : (
+                    <span className="block truncate text-xs text-ink-muted" title={detailTitle ?? detail}>
+                      {detail}
+                    </span>
+                  )}
                 </button>
                 <span className="text-sm font-semibold text-ink tabular-nums">{formatMoney(q.total)}</span>
                 <Pill color={QUOTE_STATUS[q.status].color}>{QUOTE_STATUS[q.status].label}</Pill>
@@ -191,27 +226,42 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
                       Editar
                     </Button>
                   ) : null}
-                  {editable && pastDue ? (
+                  {action === "remind" ? (
+                    <Button size="sm" variant="primary" onClick={() => setSharing({ quote: q, mode: "remind" })}>
+                      <BellRing className="size-3.5" />
+                      Cobrar
+                    </Button>
+                  ) : action === "link" || action === "send" ? (
+                    <Button size="sm" variant="primary" loading={sending} onClick={() => send.mutate(q)}>
+                      {sending ? null : <Send className="size-3.5" />}
+                      {action === "link" ? "Gerar link" : "Enviar"}
+                    </Button>
+                  ) : action === "renew" ? (
+                    <Button size="sm" variant="primary" onClick={() => setEditing({ quote: q, renew: true })}>
+                      <RefreshCw className="size-3.5" />
+                      Renovar e reenviar
+                    </Button>
+                  ) : editable && pastDue ? (
                     <Button size="sm" variant="primary" onClick={() => setEditing({ quote: q, renew: true })}>
                       <RefreshCw className="size-3.5" />
                       {q.status === "draft" ? "Renovar e enviar" : "Renovar e reenviar"}
                     </Button>
                   ) : q.status === "sent" && linkOf(q) ? (
-                    <Button size="sm" variant="primary" onClick={() => setSharing(q)}>
+                    <Button size="sm" variant="primary" onClick={() => setSharing({ quote: q, mode: "share" })}>
                       <Share2 className="size-3.5" />
                       Enviar link
                     </Button>
                   ) : q.status === "draft" || q.status === "sent" ? (
                     // Rascunho ou enviado sem link (veio do Field Control): o envio cria o link.
-                    <Button size="sm" variant="primary" loading={send.isPending && send.variables?.id === q.id} onClick={() => send.mutate(q)}>
-                      <Send className="size-3.5" />
+                    <Button size="sm" variant="primary" loading={sending} onClick={() => send.mutate(q)}>
+                      {sending ? null : <Send className="size-3.5" />}
                       {q.status === "draft" ? "Enviar" : "Gerar link"}
                     </Button>
                   ) : null}
-                  {(q.status === "approved" || q.status === "rejected") && linkOf(q) ? (
+                  {(action === "remind" || q.status === "approved" || q.status === "rejected") && linkOf(q) ? (
                     <button
                       type="button"
-                      onClick={() => setSharing(q)}
+                      onClick={() => setSharing({ quote: q, mode: "share" })}
                       className={clsx(iconAction, "hover:text-brand")}
                       aria-label={`Link do ${q.code} para o cliente`}
                       title="Link para o cliente"
@@ -260,11 +310,19 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
           onSend={(saved) => send.mutate(saved)}
         />
       ) : null}
-      {sharing ? <ShareDialog ticket={ticket} quote={sharing} onClose={() => setSharing(null)} onRotated={refresh} /> : null}
+      {sharing ? (
+        <ShareDialog ticket={ticket} quote={sharing.quote} mode={sharing.mode} onClose={() => setSharing(null)} onRotated={refresh} />
+      ) : null}
       {opened ? (
         <QuoteViewer
           quote={opened}
-          ticket={{ id: ticket.id, code: ticket.code, customer: ticket.customer?.name ?? null, title: ticket.title }}
+          ticket={{
+            id: ticket.id,
+            code: ticket.code,
+            customer: ticket.customer?.name ?? null,
+            title: ticket.title,
+            location: ticket.location?.name ?? null,
+          }}
           inTicket
           sending={send.isPending}
           onClose={() => setOpened(null)}
@@ -282,7 +340,11 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
           }}
           onShare={() => {
             setOpened(null);
-            setSharing(opened);
+            setSharing({ quote: opened, mode: "share" });
+          }}
+          onRemind={() => {
+            setOpened(null);
+            setSharing({ quote: opened, mode: "remind" });
           }}
           onDuplicate={() => {
             setOpened(null);
@@ -383,6 +445,22 @@ export function QuoteEditor({
     queryKey: ["quote-items", "active"],
     queryFn: () => api.get<QuoteCatalogItem[]>("/quote-items", { active: true }),
   });
+  // Os mais usados nos últimos 12 meses primeiro (metade do catálogo não é usada há um ano).
+  const catalogByUse = useMemo(
+    () => [...(catalog.data ?? [])].sort((a, b) => (b.uses_12m ?? 0) - (a.uses_12m ?? 0) || a.name.localeCompare(b.name, "pt-BR")),
+    [catalog.data],
+  );
+  // Último preço aprovado pelo cliente em cada item do catálogo (acerta mais que o preço de referência).
+  const customerId = ticket.customer?.id ?? null;
+  const lastPrices = useQuery({
+    queryKey: ["quote-items", "last-prices", customerId],
+    queryFn: ({ signal }) => api.get<QuoteLastPrice[]>("/quote-items/last-prices", { customer_id: customerId }, { signal }),
+    enabled: Boolean(customerId),
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+  const lastPriceOf = useMemo(() => new Map((lastPrices.data ?? []).map((p) => [p.catalog_item_id, p])), [lastPrices.data]);
+  const store = ticket.location?.name?.trim() || null;
   const listId = `quote-catalog-${quote?.id ?? "new"}`;
   // Estado inicial calculado uma vez (inclusive o "hoje" e a foto do formulário para avisar o que não foi salvo).
   const [initial] = useState(() => {
@@ -407,7 +485,8 @@ export function QuoteEditor({
     const expiredOn = current && current < today ? current : null;
     const validUntil = !quote || renew || expiredOn ? addDaysISO(QUOTE_VALID_DAYS) : (current ?? "");
     const state = {
-      title: quote?.title ?? prefill?.title ?? ticket.title,
+      // Orçamento novo nasce com o nome da loja (os clientes são redes; sem loja, o título da OS).
+      title: quote?.title ?? prefill?.title ?? store ?? ticket.title,
       lines,
       discount: quote ? moneyText(quote.discount) : prefill?.discount ? moneyText(prefill.discount) : "",
       validUntil,
@@ -417,6 +496,8 @@ export function QuoteEditor({
   });
   const today = initial.today;
   const [title, setTitle] = useState(initial.title);
+  // Título automático ("<Loja> - <item>") até alguém digitar nele: só no orçamento novo, sem itens prontos.
+  const [autoTitle, setAutoTitle] = useState(() => !quote && !prefill && Boolean(store));
   const [lines, setLines] = useState<Line[]>(initial.lines);
   const [discount, setDiscount] = useState(initial.discount);
   const [validUntil, setValidUntil] = useState(initial.validUntil);
@@ -507,8 +588,8 @@ export function QuoteEditor({
       title={quote ? `Editar ${quote.code}` : "Novo orçamento"}
       description={
         quote?.status === "sent"
-          ? "Ao salvar, o orçamento volta para revisão: envie de novo para o cliente responder (o link continua o mesmo)."
-          : `${ticket.code} · ${ticket.customer?.name ?? "sem cliente"}`
+          ? "Ao salvar, volta para revisão até reenviar."
+          : [ticket.code, ticket.customer?.name ?? "sem cliente", store].filter(Boolean).join(" · ")
       }
       footer={
         <div className="flex w-full flex-wrap justify-end gap-2">
@@ -535,10 +616,18 @@ export function QuoteEditor({
     >
       <div className="flex flex-col gap-4">
         <Field label="Título" required error={tried ? titleError : null}>
-          <Input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} aria-invalid={(tried && Boolean(titleError)) || undefined} />
+          <Input
+            value={title}
+            onChange={(e) => {
+              setAutoTitle(false);
+              setTitle(e.target.value);
+            }}
+            maxLength={200}
+            aria-invalid={(tried && Boolean(titleError)) || undefined}
+          />
         </Field>
         <datalist id={listId}>
-          {(catalog.data ?? []).map((c) => (
+          {catalogByUse.map((c) => (
             <option key={c.id} value={c.name}>
               {formatMoney(c.price)} / {c.unit}
             </option>
@@ -554,6 +643,10 @@ export function QuoteEditor({
               const errors = tried && !c.empty ? c.errors : {};
               const n = i + 1;
               const last = i === lines.length - 1;
+              // Preço que este cliente aprovou por último no item, quando difere do digitado.
+              const lastPrice = l.catalog_item_id ? lastPriceOf.get(l.catalog_item_id) : undefined;
+              const showLastPrice =
+                lastPrice !== undefined && (c.price === null || Math.round(c.price * 100) !== Math.round(lastPrice.unit_price * 100));
               return (
                 <li key={l.id} className="flex flex-col gap-2 bg-surface p-3">
                   <div className="flex items-start gap-2">
@@ -564,7 +657,7 @@ export function QuoteEditor({
                         value={l.description}
                         maxLength={300}
                         autoFocus={l.id === focusId}
-                        placeholder="Descrição do item (digite ou escolha do catálogo)"
+                        placeholder="Item"
                         aria-label={`Item ${n}: descrição`}
                         aria-invalid={Boolean(errors.description) || undefined}
                         onChange={(e) => {
@@ -581,6 +674,7 @@ export function QuoteEditor({
                                 }
                               : { description: e.target.value, catalog_item_id: null },
                           );
+                          if (match && i === 0 && autoTitle && store) setTitle(`${store} - ${match.name}`.slice(0, 200));
                         }}
                       />
                       {errors.description ? <span className={fieldError}>{errors.description}</span> : null}
@@ -641,6 +735,19 @@ export function QuoteEditor({
                       </span>
                     </div>
                   </div>
+                  {lastPrice && showLastPrice ? (
+                    <div className="pl-7">
+                      <button
+                        type="button"
+                        onClick={() => setLine(l.id, { unit_price: moneyText(lastPrice.unit_price) })}
+                        title={lastPrice.decided_at ? `${lastPrice.quote_code} · ${formatDate(lastPrice.decided_at)}` : lastPrice.quote_code}
+                        aria-label={`Item ${n}: usar o último preço aprovado pelo cliente, ${formatMoney(lastPrice.unit_price)} (${lastPrice.quote_code})`}
+                        className="rounded-md text-xs font-medium text-brand-ink tabular-nums underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+                      >
+                        Último aprovado: {formatMoney(lastPrice.unit_price)}
+                      </button>
+                    </div>
+                  ) : null}
                 </li>
               );
             })}
@@ -661,12 +768,13 @@ export function QuoteEditor({
               aria-invalid={(tried && Boolean(discountError)) || undefined}
             />
           </Field>
-          <Field label="Válido até" error={dateError} hint={validUntil ? undefined : "Sem data: o orçamento não vence."}>
+          <Field label="Válido até" error={dateError}>
             <Input
               type="date"
               min={today}
               value={validUntil}
               onChange={(e) => setValidUntil(e.target.value)}
+              title="Sem data: o orçamento não vence."
               aria-invalid={Boolean(dateError) || undefined}
             />
           </Field>
@@ -682,7 +790,7 @@ export function QuoteEditor({
             A validade anterior ({formatDate(initial.expiredOn)}) já passou: a nova é {formatDate(validUntil || null)}. Ajuste se precisar.
           </p>
         ) : null}
-        <Field label="Condições" hint={`Prazo de execução, forma de pagamento, garantia... (${notes.length}/5000)`}>
+        <Field label="Condições" hint={`${notes.length}/5000`}>
           <Textarea rows={3} value={notes} maxLength={5000} onChange={(e) => setNotes(e.target.value)} />
         </Field>
         {tried && problems.length ? <ErrorBox message={`Confira antes de salvar: ${problems.join(" · ")}`} /> : null}

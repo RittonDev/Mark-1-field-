@@ -24,6 +24,7 @@ from app.api.routes import (
     reports,
     schedule,
     sync,
+    technician_favorites,
     technicians,
     tickets,
     tracking,
@@ -37,6 +38,7 @@ for module in (
     home,
     catalog,
     users,
+    technician_favorites,  # antes de technicians: /technicians/favorites/...
     technicians,
     customers,
     tickets,

@@ -25,7 +25,7 @@ from app.models import (
     User,
 )
 from app.models.ticket import ticket_helpers
-from app.services import geo, technician_regions
+from app.services import geo, technician_favorites, technician_regions
 from app.services.schedule import busy_people, visit_end
 from app.services.workflow import OPEN_STATUSES
 
@@ -184,11 +184,17 @@ def _distance_points(km: float | None) -> float:
     return 0
 
 
+def _order(row: dict) -> tuple:
+    distance = row["distance_km"] if row["distance_km"] is not None else float("inf")
+    return (-row["score"], distance, row["open_tickets"], row["name"])
+
+
 async def suggest(db: AsyncSession, target: Target, limit: int = 5) -> list[dict]:
     """Ranking para atribuir: distância (histórico, endereço, ao vivo) e o que mais ajuda.
 
     Só técnicos ativos (a OS só pode ir para quem está no app). A distância e as visitas a
-    esta mesma loja vêm do mesmo cálculo de "técnicos mais próximos".
+    esta mesma loja vêm do mesmo cálculo de "técnicos mais próximos". Os favoritos da cidade da
+    loja ganham pontos e vaga garantida entre os `limit`.
     """
     techs = list(
         await db.scalars(
@@ -241,6 +247,8 @@ async def suggest(db: AsyncSession, target: Target, limit: int = 5) -> list[dict
         if target.start and target.end
         else set()
     )
+    # Favoritos da cidade da loja (pela regra ou fixados pela central). Sem UF, nenhum.
+    marks = await technician_favorites.marks_for_place(db, target.state, target.city)
 
     ranked = []
     for tech in techs:
@@ -309,6 +317,10 @@ async def suggest(db: AsyncSession, target: Target, limit: int = 5) -> list[dict
         load = loads.get(tech.id, 0)
         score -= min(load, 10) * 2
         reasons.append(f"{load} OS em aberto")
+        mark = marks.get(tech.id)
+        if mark is not None:
+            score += technician_favorites.SUGGESTION_POINTS
+            reasons.insert(0, f"Favorito em {mark.label}")
         has_base = tech.base_source is not None
         distance = p.distance_km if p is not None else None
         ranked.append(
@@ -329,14 +341,15 @@ async def suggest(db: AsyncSession, target: Target, limit: int = 5) -> list[dict
                 "day_load": day_load,
                 "score": round(score, 1),
                 "reasons": reasons,
+                "favorite": mark.kind if mark is not None else None,
+                "favorite_note": mark.note if mark is not None else None,
             }
         )
-    ranked.sort(
-        key=lambda r: (
-            -r["score"],
-            r["distance_km"] if r["distance_km"] is not None else float("inf"),
-            r["open_tickets"],
-            r["name"],
-        )
-    )
-    return ranked[:limit]
+    ranked.sort(key=_order)
+    # Vaga garantida: os favoritos entram sempre (se passarem de `limit`, os de mais pontos); as
+    # outras vagas seguem o ranking.
+    favorites = [r for r in ranked if r["favorite"]][:limit]
+    others = [r for r in ranked if not r["favorite"]]
+    picked = favorites + others[: limit - len(favorites)]
+    picked.sort(key=_order)
+    return picked
