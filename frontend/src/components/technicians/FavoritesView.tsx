@@ -418,12 +418,15 @@ export function FavoritesView({
         </div>
       </div>
 
-      {favorites.isLoading ? (
-        <Card>
-          <LoadingBlock rows={4} label="Carregando os favoritos..." />
-        </Card>
-      ) : favorites.error ? (
-        <ErrorBox message={errorMessage(favorites.error)} onRetry={() => void favorites.refetch()} />
+      {/* Uma releitura que falha com a lista já na tela não a esconde. */}
+      {!out ? (
+        favorites.error ? (
+          <ErrorBox message={errorMessage(favorites.error)} onRetry={() => void favorites.refetch()} />
+        ) : (
+          <Card>
+            <LoadingBlock rows={4} label="Carregando os favoritos..." />
+          </Card>
+        )
       ) : !cards.length ? (
         <Card>
           {filtered || anyFavorite ? (
@@ -522,22 +525,19 @@ function CityCard({
     />
   );
   const detailRows = (pick: (d: FavoriteCityDetail) => FavoriteTechnician[], kind: RowKind, total: number) => {
-    if (detail.isLoading) {
-      return (
+    if (!detail.data) {
+      return detail.error ? (
+        <div className="px-4 pb-3">
+          <ErrorBox message={errorMessage(detail.error)} onRetry={() => void detail.refetch()} />
+        </div>
+      ) : (
         <div className="flex flex-col gap-2 px-4 pb-3">
           <Skeleton className="h-10 w-full" />
           <Skeleton className="h-10 w-full" />
         </div>
       );
     }
-    if (detail.error) {
-      return (
-        <div className="px-4 pb-3">
-          <ErrorBox message={errorMessage(detail.error)} onRetry={() => void detail.refetch()} />
-        </div>
-      );
-    }
-    const list = detail.data ? pick(detail.data) : [];
+    const list = pick(detail.data);
     if (!list.length) return <p className="px-4 pb-3 text-xs text-ink-muted">Nenhum.</p>;
     return (
       <>
