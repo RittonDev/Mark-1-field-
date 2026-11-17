@@ -10,7 +10,7 @@ import type { Suggestion } from "./types";
 export function SuggestionsCard({ suggestions }: { suggestions: Suggestion[] | null }) {
   return (
     <Card className="overflow-hidden">
-      <CardHeader title="Sugestões" description="O que dá para adiantar agora" />
+      <CardHeader title="Sugestões" />
       {suggestions === null ? (
         <div className="flex flex-col gap-4 px-5 py-4" role="status" aria-label="Carregando as sugestões">
           {[0, 1].map((i) => (
