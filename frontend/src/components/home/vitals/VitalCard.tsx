@@ -43,7 +43,11 @@ export function VitalCard({
           aria-hidden
           className="pointer-events-none absolute inset-x-5 top-0 h-px bg-linear-to-r from-transparent via-brand/45 to-transparent dark:via-brand/60"
         />
-        <CardHeader title={title} description={description} actions={action ? <CardLink href={action.href}>{action.label}</CardLink> : undefined} />
+        <CardHeader
+          title={title}
+          description={description}
+          actions={action ? <CardLink href={action.href}>{action.label}</CardLink> : undefined}
+        />
         {loading ? (
           <div role="status" aria-label={`Carregando: ${title}`} className="flex flex-1 flex-col gap-3 px-4 py-4 sm:px-5">
             <Skeleton className="h-7 w-28" />

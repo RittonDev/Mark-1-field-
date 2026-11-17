@@ -66,7 +66,11 @@ function Unproductive({ quality: q }: { quality: HomeQuality }) {
           rate.pct !== null ? `${pctText(rate.pct)} das idas à loja` : `${rate.text} idas à loja`
         }`;
   return (
-    <Link href="/relatorios?aba=mensal" className={`tabular-nums ${mutedLink}`} title="Idas à loja: chegadas e improdutivas nos últimos 30 dias">
+    <Link
+      href="/relatorios?aba=mensal"
+      className={`tabular-nums ${mutedLink}`}
+      title="Idas à loja: chegadas e improdutivas nos últimos 30 dias"
+    >
       {text}
     </Link>
   );

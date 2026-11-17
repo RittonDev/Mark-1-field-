@@ -33,6 +33,9 @@ function TeamBody({ team: t }: { team: HomeTeam }) {
   const top3 = share({ count: t.top3_resolved, base: t.resolved }, MIN_BASE);
   const over = share(t.onsite_over, MIN_BASE);
   const limit = `${t.onsite_limit_hours} h`;
+  const verb = t.onsite_over.count === 1 ? "passou" : "passaram";
+  const overPct = over.pct !== null ? ` (${pctText(over.pct)})` : "";
+  const overText = t.onsite_over.count === 0 ? `Nenhuma passou de ${limit}` : `${over.text} ${verb} de ${limit}${overPct}`;
   return (
     <div className="flex flex-col gap-3 px-5 py-4">
       <div>
@@ -56,11 +59,7 @@ function TeamBody({ team: t }: { team: HomeTeam }) {
           <p className="text-sm text-ink tabular-nums" title="Tempo de trabalho na loja das OS resolvidas">
             Tempo na loja: mediana <span className="font-semibold">{hoursText(t.onsite_median_minutes)}</span>
           </p>
-          <p className="mt-0.5 text-xs text-ink-muted tabular-nums">
-            {t.onsite_over.count === 0
-              ? `Nenhuma passou de ${limit}`
-              : `${over.text} ${t.onsite_over.count === 1 ? "passou" : "passaram"} de ${limit}${over.pct !== null ? ` (${pctText(over.pct)})` : ""}`}
-          </p>
+          <p className="mt-0.5 text-xs text-ink-muted tabular-nums">{overText}</p>
         </div>
       ) : null}
     </div>

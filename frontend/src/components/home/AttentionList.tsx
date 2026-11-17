@@ -1,7 +1,18 @@
 "use client";
 
 import clsx from "clsx";
-import { ArrowRight, Building2, CheckCircle2, ChevronDown, CircleAlert, Clock3, HardHat, Info, OctagonAlert, TriangleAlert } from "lucide-react";
+import {
+  ArrowRight,
+  Building2,
+  CheckCircle2,
+  ChevronDown,
+  CircleAlert,
+  Clock3,
+  HardHat,
+  Info,
+  OctagonAlert,
+  TriangleAlert,
+} from "lucide-react";
 import Link from "next/link";
 import { useId, useState } from "react";
 import { TicketLink } from "@/components/ticket/TicketLink";
@@ -137,7 +148,9 @@ function GroupCard({ group, now, collapsed }: { group: AttentionGroup; now: numb
   const listId = useId();
   const items = group.items.length;
   const more = !href && items > 0 && group.count > items ? group.count - items : 0;
-  const moreNote = more ? <p className="border-t border-line px-5 py-2.5 text-xs text-ink-muted tabular-nums">e mais {intFmt(more)}</p> : null;
+  const moreNote = more ? (
+    <p className="border-t border-line px-5 py-2.5 text-xs text-ink-muted tabular-nums">e mais {intFmt(more)}</p>
+  ) : null;
   return (
     <Card className="overflow-hidden">
       <CardHeader

@@ -68,12 +68,11 @@ export function TrendCard({ week, weeks, today }: { week: WeekDay[] | null; week
   const points = week === null ? null : shown === "weeks" && weeks ? weekPoints(weeks, today) : dayPoints(week, today);
   const created = points?.reduce((sum, p) => sum + p.created, 0) ?? 0;
   const resolved = points?.reduce((sum, p) => sum + p.resolved, 0) ?? 0;
+  // A soma da vista que está na tela.
+  const total = `${plural(created, "entrou", "entraram")} · ${plural(resolved, "resolvida", "resolvidas")}`;
   return (
     <Card className="overflow-hidden">
-      <CardHeader
-        title="Tendência"
-        description={points === null ? "Carregando..." : `${plural(created, "entrou", "entraram")} · ${plural(resolved, "resolvida", "resolvidas")}`}
-      />
+      <CardHeader title="Tendência" description={points === null ? "Carregando..." : total} />
       {points === null ? (
         <div className="px-5 py-4" role="status" aria-label="Carregando o gráfico">
           <Skeleton className="h-[180px] rounded-lg" />
@@ -134,7 +133,9 @@ function FlowChart({ points, weekly }: { points: Point[]; weekly: boolean }) {
       </div>
       {points.length ? (
         <details className="group border-t border-line">
-          <summary className="cursor-pointer px-5 py-2.5 text-xs font-semibold text-ink-muted select-none hover:text-ink">Ver em tabela</summary>
+          <summary className="cursor-pointer px-5 py-2.5 text-xs font-semibold text-ink-muted select-none hover:text-ink">
+            Ver em tabela
+          </summary>
           <Table label={weekly ? "Entraram e resolvidas por semana" : "Entraram e resolvidas por dia"}>
             <thead>
               <tr>

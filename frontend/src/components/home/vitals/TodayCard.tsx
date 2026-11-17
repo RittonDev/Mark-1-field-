@@ -108,7 +108,12 @@ function Tomorrow({ tomorrow }: { tomorrow: HomeTomorrow }) {
       {tomorrow.unassigned > 0 ? (
         <>
           {" · "}
-          <ProblemText tone="warning" icon={UserX} href={ticketsListHref(tomorrow.unassigned_filters)} title="Visitas de amanhã sem técnico">
+          <ProblemText
+            tone="warning"
+            icon={UserX}
+            href={ticketsListHref(tomorrow.unassigned_filters)}
+            title="Visitas de amanhã sem técnico"
+          >
             {intFmt(tomorrow.unassigned)} sem técnico
           </ProblemText>
         </>
