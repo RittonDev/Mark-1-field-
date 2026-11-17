@@ -80,7 +80,7 @@ export function ContactList({ contacts, empty = "Nenhum contato cadastrado." }: 
               <p className="flex items-center gap-1.5 text-sm font-semibold text-ink">
                 <span className="truncate">{shown}</span>
                 {marked ? (
-                  <span className="shrink-0 rounded-md bg-surface-2 px-1.5 py-px text-[10px] font-semibold text-ink-muted ring-1 ring-line ring-inset">
+                  <span className="shrink-0 rounded-md bg-surface-2 px-1.5 py-px text-[11px] font-medium text-ink-muted ring-1 ring-line ring-inset">
                     Principal
                   </span>
                 ) : null}

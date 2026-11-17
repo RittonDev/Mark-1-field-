@@ -179,8 +179,9 @@ async def application_photo(application_id: uuid.UUID, token: str, db: DB) -> Fi
 async def delete_application(application_id: uuid.UUID, db: DB, _: ManagerUser) -> Response:
     """Pedido de exclusão do titular (LGPD): apaga a ficha pendente ou reprovada e a foto."""
     application = await svc.get_application(db, application_id)
-    await svc.delete_application(db, application)
+    photo = await svc.delete_application(db, application)
     await db.commit()
+    svc.remove_photos([photo])  # só depois da exclusão gravada
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

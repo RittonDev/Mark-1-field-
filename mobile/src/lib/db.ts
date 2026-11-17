@@ -703,13 +703,14 @@ export async function insertPhoto(photo: Omit<PendingPhoto, "attempts" | "last_e
   await transaction((db) => insertPhotoRow(db, photo));
 }
 
-/** Pedidos de peça com foto ainda por subir: a operação espera as fotos para levar os ids. */
-export async function partOpsWithPendingPhotos(db?: DB): Promise<Set<string>> {
+/**
+ * OS com foto ainda no aparelho: as ações delas esperam as fotos subirem (a conclusão de formulário
+ * confere as fotos dos campos e o pedido de peça leva os ids das fotos dele).
+ */
+export async function ticketsWithPendingPhotos(db?: DB): Promise<Set<UUID>> {
   const conn = db ?? (await getDb());
-  const rows = await conn.getAllAsync<{ part_op_id: string }>(
-    "SELECT DISTINCT part_op_id FROM photos WHERE part_op_id IS NOT NULL",
-  );
-  return new Set(rows.map((r) => r.part_op_id));
+  const rows = await conn.getAllAsync<{ ticket_id: UUID }>("SELECT DISTINCT ticket_id FROM photos");
+  return new Set(rows.map((r) => r.ticket_id));
 }
 
 /** Foto do pedido enviada: o id do anexo entra no payload da operação ainda na fila. */
@@ -742,10 +743,12 @@ export async function deletePhoto(id: string): Promise<void> {
 
 /**
  * Conta a tentativa antes de enviar: se o app morrer ou a resposta se perder no meio, o próximo
- * envio sabe que a foto pode já estar no servidor (e confere antes de duplicar).
+ * envio sabe que a foto pode já estar no servidor (e confere antes de duplicar). Devolve false
+ * quando a foto já saiu da fila (o técnico descartou enquanto ela esperava a vez).
  */
-export async function markPhotoAttempt(db: DB, id: string): Promise<void> {
-  await db.runAsync("UPDATE photos SET attempts = attempts + 1 WHERE id = ?", id);
+export async function markPhotoAttempt(db: DB, id: string): Promise<boolean> {
+  const result = await db.runAsync("UPDATE photos SET attempts = attempts + 1 WHERE id = ?", id);
+  return result.changes > 0;
 }
 
 export async function markPhotoError(id: string, error: string, db?: DB): Promise<void> {
@@ -894,14 +897,26 @@ export async function signatureWaiting(ticketId: UUID, afterSeq: number): Promis
   return Boolean(row);
 }
 
-export async function deleteSignature(id: string, db?: DB): Promise<void> {
-  if (!db) return transaction((txn) => deleteSignature(id, txn));
-  await db.runAsync("DELETE FROM signatures WHERE id = ?", id);
+/** Tira a assinatura da fila. Devolve false se ela já tinha saído (ex.: trocada por outra colhida depois). */
+export async function deleteSignature(id: string, db?: DB): Promise<boolean> {
+  if (!db) {
+    let removed = false;
+    await transaction(async (txn) => {
+      removed = await deleteSignature(id, txn);
+    });
+    return removed;
+  }
+  const result = await db.runAsync("DELETE FROM signatures WHERE id = ?", id);
+  return result.changes > 0;
 }
 
-/** Conta a tentativa antes de enviar (como as fotos): um envio interrompido é conferido antes de repetir. */
-export async function markSignatureAttempt(db: DB, id: string): Promise<void> {
-  await db.runAsync("UPDATE signatures SET attempts = attempts + 1 WHERE id = ?", id);
+/**
+ * Conta a tentativa antes de enviar (como as fotos): um envio interrompido é conferido antes de
+ * repetir. Devolve false quando ela já saiu da fila (trocada por outra colhida depois).
+ */
+export async function markSignatureAttempt(db: DB, id: string): Promise<boolean> {
+  const result = await db.runAsync("UPDATE signatures SET attempts = attempts + 1 WHERE id = ?", id);
+  return result.changes > 0;
 }
 
 export async function markSignatureError(id: string, error: string, db?: DB): Promise<void> {

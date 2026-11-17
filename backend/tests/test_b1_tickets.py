@@ -65,6 +65,22 @@ async def test_null_in_a_required_field_is_a_clear_422(client: AsyncClient, worl
     assert r.json()["description"] == ""
 
 
+async def test_blank_texts_are_refused(client: AsyncClient, world: World) -> None:
+    """Só espaços passava no tamanho mínimo: OS sem título, acompanhamento e apontamento vazios."""
+    an = world.analyst.headers
+    r = await client.post(
+        f"{API}/tickets", json={"title": "     ", "customer_id": world.customer_id}, headers=an
+    )
+    assert r.status_code == 422
+    assert r.json()["detail"] == "O título precisa de pelo menos 3 caracteres"
+    t = await create(client, world)
+    r = await client.post(f"{API}/tickets/{t['id']}/comments", json={"body": "   "}, headers=an)
+    assert r.status_code == 422 and r.json()["detail"] == "Escreva o acompanhamento"
+    worklog = {"description": "  ", "started_at": datetime.now(UTC).isoformat(), "minutes": 30}
+    r = await client.post(f"{API}/tickets/{t['id']}/worklogs", json=worklog, headers=an)
+    assert r.status_code == 422 and r.json()["detail"] == "Descreva o que foi feito"
+
+
 async def test_editor_saves_agenda_and_technician_together(
     client: AsyncClient, world: World
 ) -> None:
@@ -326,6 +342,61 @@ async def test_times_correction_keeps_the_pause_between_visits(
     assert r.json()["onsite_status"] == "ok"
 
 
+async def test_times_correction_while_paused_between_visits(
+    client: AsyncClient, world: World, engine: AsyncEngine
+) -> None:
+    """OS pausada entre visitas (ainda não concluída): corrigir a chegada refaz o trecho já
+    fechado; uma chegada depois da pausa inverteria a linha do tempo e é recusada."""
+    an, th = world.analyst.headers, world.tech.headers
+    t = await create(
+        client, world, title="Nobreak em duas visitas", assignee_id=str(world.tech.user.id)
+    )
+    t = await transition(client, th, t, "in_progress")
+    t = await transition(client, an, t, "on_hold_vendor", note="Aguardando bateria")
+    first = (datetime.now(UTC) - timedelta(days=1)).replace(microsecond=0)
+    moves = {"in_progress": first, "on_hold_vendor": first + timedelta(hours=1)}
+    status_events = [
+        e for e in await _events(client, world, t["id"]) if e["event_type"] == "status_changed"
+    ]
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "UPDATE tickets SET created_at = :c, arrived_at = :a, work_seconds = 3600 "
+                "WHERE id = :i"
+            ),
+            {"c": first - timedelta(hours=2), "a": first, "i": uuid.UUID(t["id"])},
+        )
+        for event in status_events:
+            await conn.execute(
+                text("UPDATE ticket_events SET created_at = :at WHERE id = :id"),
+                {
+                    "at": moves.get(event["to_value"], first - timedelta(hours=2)),
+                    "id": uuid.UUID(event["id"]),
+                },
+            )
+    current = (await client.get(f"{API}/tickets/{t['id']}", headers=an)).json()
+    assert current["actual_minutes"] == 60
+    url = f"{API}/tickets/{t['id']}/times"
+    r = await client.put(
+        url,
+        json={
+            "arrived_at": (first - timedelta(minutes=15)).isoformat(),
+            "reason": "Chegou antes de iniciar no app",
+            "expected_version": current["version"],
+        },
+        headers=an,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["actual_minutes"] == 75
+
+    late = {"arrived_at": (first + timedelta(hours=2)).isoformat(), "reason": "teste"}
+    r = await client.put(url, json=late, headers=an)
+    assert r.status_code == 422 and "Aguardando fornecedor/peça" in r.json()["detail"]
+    # Motivo só com espaços não vale.
+    r = await client.put(url, json={"arrived_at": first.isoformat(), "reason": "     "}, headers=an)
+    assert r.status_code == 422
+
+
 async def test_time_without_timezone_is_brasilia(
     client: AsyncClient, world: World, engine: AsyncEngine
 ) -> None:
@@ -433,6 +504,61 @@ async def test_unproductive_after_reschedule_keeps_the_new_date(
     assert day["summary"]["unproductive"] == 1
 
 
+async def test_unproductive_keeps_the_new_day_set_while_in_the_field(
+    client: AsyncClient, world: World
+) -> None:
+    """O técnico chegou e a loja estava fechada; avisou no grupo e a central remarcou para outro
+    dia antes de ele registrar a improdutiva no app (online): a nova data fica."""
+    an, th = world.analyst.headers, world.tech.headers
+    tech = str(world.tech.user.id)
+    reason = (
+        await client.post(
+            f"{API}/unproductive-reasons",
+            json={"name": "Loja fechada", "responsibility": "customer"},
+            headers=an,
+        )
+    ).json()
+    later = (datetime.now(UTC) + timedelta(days=2)).replace(
+        hour=13, minute=0, second=0, microsecond=0
+    )
+
+    async def unproductive(ticket_id: str) -> dict:
+        r = await client.post(
+            f"{API}/tickets/{ticket_id}/unproductive",
+            json={"reason_id": reason["id"]},
+            headers=th,
+        )
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    # Remarcada pela edição, com o técnico em atendimento.
+    t = await create(client, world, title="Loja fechada no horário", assignee_id=tech)
+    t = await transition(client, th, t, "en_route")
+    t = await transition(client, th, t, "in_progress")
+    r = await client.patch(
+        f"{API}/tickets/{t['id']}", json={"scheduled_start": later.isoformat()}, headers=an
+    )
+    assert r.status_code == 200, r.text
+    kept = await unproductive(t["id"])
+    assert (kept["status"], _dt(kept["scheduled_start"]), kept["unproductive_count"]) == (
+        "scheduled",
+        later,
+        1,
+    )
+    visit = next(
+        e for e in await _events(client, world, t["id"]) if e["event_type"] == "unproductive_visit"
+    )
+    assert "previous_schedule" not in visit["data"]  # nenhuma agenda saiu
+
+    # Remarcada pela mudança de status ("Agendado" com a nova data), com o técnico a caminho.
+    moved = later + timedelta(hours=3)
+    t2 = await create(client, world, title="Sem acesso à sala", assignee_id=tech)
+    t2 = await transition(client, th, t2, "en_route")
+    await transition(client, an, t2, "scheduled", scheduled_start=moved.isoformat())
+    kept = await unproductive(t2["id"])
+    assert (kept["status"], _dt(kept["scheduled_start"])) == ("scheduled", moved)
+
+
 # ------------------------------------------------------------------ anexos
 
 
@@ -516,6 +642,67 @@ async def test_deleting_a_form_photo_reopens_the_required_form(
         headers=th,
     )
     assert r.status_code == 422 and "Fachada da loja" in r.json()["detail"]
+
+
+async def test_caption_of_a_closed_os_is_the_office(
+    client: AsyncClient, world: World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A legenda sai no relatório do cliente: depois de encerrada, só a central mexe."""
+    monkeypatch.setattr(settings, "MEDIA_ROOT", str(tmp_path))
+    an, th = world.analyst.headers, world.tech.headers
+    t = await create(client, world, title="Fachada", assignee_id=str(world.tech.user.id))
+    r = await client.post(
+        f"{API}/tickets/{t['id']}/attachments",
+        files={"file": ("fachada.png", PNG, "image/png")},
+        data={"kind": "photo"},
+        headers=th,
+    )
+    assert r.status_code == 201, r.text
+    url = f"{API}/attachments/{r.json()['id']}"
+    assert (await client.patch(url, json={"description": "Antes"}, headers=th)).status_code == 200
+
+    t = (await client.get(f"{API}/tickets/{t['id']}", headers=th)).json()
+    t = await transition(client, th, t, "in_progress")
+    t = await transition(client, th, t, "resolved", resolution_notes="Letreiro aceso")
+    await transition(client, world.supervisor.headers, t, "closed")
+    r = await client.patch(url, json={"description": "Depois"}, headers=th)
+    assert r.status_code == 422 and "encerrada" in r.json()["detail"]
+    r = await client.patch(url, json={"description": "Depois"}, headers=an)
+    assert r.status_code == 200 and r.json()["description"] == "Depois"
+
+
+async def test_part_request_links_only_photos_the_technician_sees(
+    client: AsyncClient, world: World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "MEDIA_ROOT", str(tmp_path))
+    an, th = world.analyst.headers, world.tech.headers
+    t = await create(client, world, title="Fonte queimada", assignee_id=str(world.tech.user.id))
+    uploads = f"{API}/tickets/{t['id']}/attachments"
+    office = await client.post(
+        uploads,
+        files={"file": ("orcamento.pdf", b"%PDF-1.4\n%teste\n", "application/pdf")},
+        data={"kind": "file"},
+        headers=an,
+    )
+    photo = await client.post(
+        uploads,
+        files={"file": ("fonte.png", PNG, "image/png")},
+        data={"kind": "photo"},
+        headers=th,
+    )
+    assert office.status_code == 201 and photo.status_code == 201, photo.text
+    url = f"{API}/tickets/{t['id']}/part-requests"
+
+    # O documento do escritório não aparece para o técnico: ele não o liga ao pedido.
+    body = {"description": "Fonte ATX 500W", "attachment_ids": [office.json()["id"]]}
+    r = await client.post(url, json=body, headers=th)
+    assert r.status_code == 422 and r.json()["detail"] == "Foto não encontrada nesta OS"
+    r = await client.post(url, json={**body, "attachment_ids": [photo.json()["id"]]}, headers=th)
+    assert r.status_code == 201, r.text
+    assert [a["id"] for a in r.json()["attachments"]] == [photo.json()["id"]]
+    # A gestão liga qualquer anexo da OS.
+    r = await client.post(url, json={**body, "description": "Cabo de força"}, headers=an)
+    assert r.status_code == 201, r.text
 
 
 # ------------------------------------------------------------------ privacidade do técnico

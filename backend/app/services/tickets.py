@@ -2126,9 +2126,7 @@ async def register_unproductive(
         raise WorkflowError("Motivo de visita improdutiva inválido")
     now = utcnow()
     evidence = _declared(declared_at, ticket, now)
-    keep_schedule = await _keeps_new_schedule(
-        db, ticket, now, declared_at if evidence else None
-    )
+    keep_schedule = await _keeps_new_schedule(db, ticket, now, declared_at if evidence else None)
     data: dict[str, Any] = {
         "reason_id": str(reason.id),
         "reason": reason.name,

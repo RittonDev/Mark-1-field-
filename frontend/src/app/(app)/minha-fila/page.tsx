@@ -429,7 +429,7 @@ function TeamQueues({
         </div>
       ) : queues.error && !queues.data ? (
         <div className="p-3">
-          <ErrorBox message={errorMessage(queues.error)} />
+          <ErrorBox message={errorMessage(queues.error)} onRetry={() => void queues.refetch()} />
         </div>
       ) : (
         <ul className="p-1.5">
@@ -534,27 +534,26 @@ function MyQueueView() {
 
   const queues = useQuery({
     queryKey: ["tickets", "queues"],
-    queryFn: () => api.get<QueuesOut>("/queues"),
+    queryFn: ({ signal }) => api.get<QueuesOut>("/queues", undefined, { signal }),
     staleTime: 30_000,
     enabled: allowed,
   });
   // Sem dados de reserva: ao trocar de fila, a tela não mostra a fila anterior com o nome novo.
   const queue = useQuery({
     queryKey: ["tickets", "my-queue", ownerId],
-    queryFn: () => api.get<MyQueue>("/my-queue", mine ? {} : { user_id: ownerId ?? undefined }),
+    queryFn: ({ signal }) => api.get<MyQueue>("/my-queue", mine ? {} : { user_id: ownerId ?? undefined }, { signal }),
     enabled: Boolean(ownerId) && allowed,
     // "Atrasada" e prazos dependem do relógio: revalida mesmo sem eventos.
     refetchInterval: 60_000,
   });
   const orphans = useQuery({
     queryKey: ["tickets", "unowned-queue"],
-    queryFn: () =>
-      api.get<Page<TicketListItem>>("/tickets", {
-        no_owner: true,
-        open_only: true,
-        order_by: "resolution_due_at",
-        page_size: UNOWNED_LIMIT,
-      }),
+    queryFn: ({ signal }) =>
+      api.get<Page<TicketListItem>>(
+        "/tickets",
+        { no_owner: true, open_only: true, order_by: "resolution_due_at", page_size: UNOWNED_LIMIT },
+        { signal },
+      ),
     enabled: unowned && allowed,
     refetchInterval: 60_000,
   });
@@ -626,7 +625,7 @@ function MyQueueView() {
 
   const orphanItems = orphans.data?.items ?? [];
   const main = active.error && !active.hasData ? (
-    <ErrorBox message={errorMessage(active.error)} />
+    <ErrorBox message={errorMessage(active.error)} onRetry={refresh} />
   ) : unowned ? (
     <Card className="overflow-hidden">
       <CardHeader

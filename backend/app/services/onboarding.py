@@ -268,26 +268,38 @@ async def reject(
 # ------------------------------------------------------------------- LGPD
 
 
-async def _drop(db: AsyncSession, application: TechnicianApplication) -> None:
-    """Apaga a ficha e a foto (a foto fica se for a de algum usuário, ex.: ficha aprovada)."""
+async def _drop(db: AsyncSession, application: TechnicianApplication) -> str | None:
+    """Apaga a ficha. Devolve a foto a tirar do disco depois do commit (None quando não há foto
+    ou ela é a de algum usuário, ex.: ficha aprovada)."""
     key = application.photo_key
     await db.delete(application)
     await db.flush()
     if key and await db.scalar(select(User.id).where(User.avatar_key == key)) is None:
-        storage.delete(key)
+        return key
+    return None
 
 
-async def delete_application(db: AsyncSession, application: TechnicianApplication) -> None:
-    """Pedido do titular (LGPD, art. 18): apaga a ficha pendente ou reprovada com a foto.
-    A aprovada virou o cadastro do técnico e sai pela ficha dele, não por aqui."""
+def remove_photos(keys: list[str | None]) -> None:
+    """Depois do commit: as fotos das fichas apagadas saem do disco (se a gravação falhar, a
+    ficha e a foto ficam juntas)."""
+    for key in keys:
+        if key:
+            storage.delete(key)
+
+
+async def delete_application(db: AsyncSession, application: TechnicianApplication) -> str | None:
+    """Pedido do titular (LGPD, art. 18): apaga a ficha pendente ou reprovada. Devolve a foto a
+    tirar do disco depois do commit (`remove_photos`). A aprovada virou o cadastro do técnico e
+    sai pela ficha dele, não por aqui."""
     if application.status == ApplicationStatus.APPROVED:
         raise WorkflowError("Ficha aprovada faz parte do cadastro do técnico e não é apagada aqui")
-    await _drop(db, application)
+    return await _drop(db, application)
 
 
 async def purge_expired(db: AsyncSession) -> int:
     """Rotina periódica: ficha pendente sem análise além do prazo vira reprovada ("Expirada sem
-    análise", sem a senha); reprovada além do prazo é apagada com a foto. Devolve quantas mudaram.
+    análise", sem a senha); reprovada além do prazo é apagada com a foto. Grava (a foto só sai do
+    disco com a exclusão gravada) e devolve quantas mudaram.
     """
     cutoff = utcnow() - timedelta(days=settings.ONBOARDING_RETENTION_DAYS)
     stale = list(
@@ -316,7 +328,7 @@ async def purge_expired(db: AsyncSession) -> int:
             )
         )
     )
-    for application in old:
-        await _drop(db, application)
-    await db.flush()
+    keys = [await _drop(db, application) for application in old]
+    await db.commit()
+    remove_photos(keys)
     return len(stale) + len(old)

@@ -161,7 +161,8 @@ function AgendaView() {
   };
   const calendar = useQuery({
     queryKey: ["tickets", "calendar", params],
-    queryFn: () => api.get<CalendarEvent[]>("/calendar", params),
+    // A busca obsoleta (período ou filtro trocados no meio) é cancelada.
+    queryFn: ({ signal }) => api.get<CalendarEvent[]>("/calendar", params, { signal }),
     placeholderData: keepPreviousData,
     // O tempo real atualiza na hora; a releitura cobre a conexão caída e a tela parada num monitor.
     refetchInterval: 120_000,
@@ -450,7 +451,7 @@ function AgendaView() {
           <div className="h-[calc(100vh-15rem)] min-h-[520px]">
             {calendar.error && !calendar.data ? (
               <div className="p-3">
-                <ErrorBox message={errorMessage(calendar.error)} />
+                <ErrorBox message={errorMessage(calendar.error)} onRetry={() => void calendar.refetch()} />
               </div>
             ) : !calendar.data ? (
               <LoadingBlock rows={5} label="Carregando a agenda..." />
@@ -648,7 +649,7 @@ function EventDialog({
   // duração estimada.
   const detail = useQuery({
     queryKey: ["ticket", event.id],
-    queryFn: () => api.get<TicketDetail>(`/tickets/${event.id}`),
+    queryFn: ({ signal }) => api.get<TicketDetail>(`/tickets/${event.id}`, undefined, { signal }),
     enabled: rescheduling,
   });
   const save = useMutation({
@@ -754,7 +755,8 @@ function EventDialog({
               type="submit"
               form="reschedule-form"
               loading={save.isPending}
-              disabled={!detail.data}
+              // A versão vem da leitura de agora: com uma cópia antiga no cache, espera a releitura.
+              disabled={!detail.data || detail.isFetching}
             >
               {conflicts ? "Reagendar mesmo assim" : "Salvar horário"}
             </Button>

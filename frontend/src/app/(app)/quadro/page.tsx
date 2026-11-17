@@ -466,7 +466,7 @@ export default function BoardPage() {
             return (
               <section
                 key={status}
-                aria-label={`${info.label}: ${loading ? "carregando" : `${count} OS`}`}
+                aria-label={`${info.label}: ${loading ? "carregando" : failed ? "não carregou" : `${count} OS`}`}
                 onDragOver={(e) => {
                   if (!canDrop) return;
                   e.preventDefault();

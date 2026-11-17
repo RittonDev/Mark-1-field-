@@ -142,6 +142,20 @@ function DeclineDialog({ ticket, onClose }: { ticket: TicketListItem; onClose: (
   );
 }
 
+/** Título de um grupo da caixa ("Ninguém pegou", "Com analista"), na faixa do cabeçalho das tabelas. */
+function GroupTitle({ children, divided = false }: { children: React.ReactNode; divided?: boolean }) {
+  return (
+    <h2
+      className={clsx(
+        "border-b border-line bg-[var(--table-head)] px-4 py-2 text-[11px] font-bold tracking-[0.06em] text-ink-muted uppercase sm:px-5",
+        divided && "border-t",
+      )}
+    >
+      {children}
+    </h2>
+  );
+}
+
 function RequestRow({
   ticket: t,
   now,
@@ -461,91 +475,82 @@ export default function RequestsInboxPage() {
           />
         ) : null}
 
-      {list.isLoading ? (
-        <LoadingBlock rows={4} />
-      ) : list.error && !list.data ? (
-        <ErrorBox message={errorMessage(list.error)} onRetry={() => void list.refetch()} />
-      ) : !items.length ? (
-        <Card>
-          <EmptyState
-            icon={<ClipboardPlus />}
-            title={
-              tab === "new"
-                ? "Nenhuma solicitação esperando"
-                : hasFilters
-                  ? "Nenhuma solicitação com esses filtros"
-                  : "Nenhuma solicitação do portal ainda"
-            }
-            description={
-              hasFilters
-                ? undefined
-                : "Quando um cliente abrir um chamado pelo portal ou pelo app instalado no Windows, ele aparece aqui na hora."
-            }
-            action={hasFilters ? <Button onClick={clearFilters}>Limpar filtros</Button> : undefined}
-          />
-        </Card>
-      ) : (
-        <Card
-          className={clsx("overflow-hidden transition-opacity duration-150", list.isPlaceholderData && "opacity-60")}
-        >
-          <div aria-busy={list.isPlaceholderData || undefined}>
-            {tab === "new" ? (
-              <>
-                {unclaimed.length ? (
-                  <>
-                    <p className="border-b border-line bg-[var(--table-head)] px-4 py-2 text-[11px] font-bold tracking-[0.06em] text-ink-muted uppercase sm:px-5">
-                      Ninguém pegou · {unclaimed.length}
-                    </p>
-                    <ul className="divide-y divide-line">{unclaimed.map(row)}</ul>
-                  </>
-                ) : null}
-                {claimed.length ? (
-                  <>
-                    <p
-                      className={clsx(
-                        "border-b border-line bg-[var(--table-head)] px-4 py-2 text-[11px] font-bold tracking-[0.06em] text-ink-muted uppercase sm:px-5",
-                        unclaimed.length && "border-t",
-                      )}
-                    >
-                      Com analista · {claimed.length}
-                    </p>
-                    <ul className="divide-y divide-line">{claimed.map(row)}</ul>
-                  </>
-                ) : null}
-              </>
-            ) : (
-              <ul className="divide-y divide-line">{items.map(row)}</ul>
-            )}
-          </div>
-          {total > items.length || page > 1 ? (
-            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line px-4 py-2.5 text-xs text-ink-muted sm:px-5">
-              <span className="tabular-nums">
-                Mostrando {first}–{last} de {total}
-              </span>
-              <div className="flex gap-1">
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={page <= 1 || list.isPlaceholderData}
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                >
-                  <ChevronLeft className="size-4" />
-                  Anterior
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={last >= total || list.isPlaceholderData}
-                  onClick={() => setPage((p) => p + 1)}
-                >
-                  Próxima
-                  <ChevronRight className="size-4" />
-                </Button>
-              </div>
+        {list.isLoading ? (
+          <LoadingBlock rows={4} />
+        ) : list.error && !list.data ? (
+          <ErrorBox message={errorMessage(list.error)} onRetry={() => void list.refetch()} />
+        ) : !items.length ? (
+          <Card>
+            <EmptyState
+              icon={<ClipboardPlus />}
+              title={
+                tab === "new"
+                  ? "Nenhuma solicitação esperando"
+                  : hasFilters
+                    ? "Nenhuma solicitação com esses filtros"
+                    : "Nenhuma solicitação do portal ainda"
+              }
+              description={
+                hasFilters
+                  ? undefined
+                  : "Quando um cliente abrir um chamado pelo portal ou pelo app instalado no Windows, ele aparece aqui na hora."
+              }
+              action={hasFilters ? <Button onClick={clearFilters}>Limpar filtros</Button> : undefined}
+            />
+          </Card>
+        ) : (
+          <Card
+            className={clsx("overflow-hidden transition-opacity duration-150", list.isPlaceholderData && "opacity-60")}
+          >
+            <div aria-busy={list.isPlaceholderData || undefined}>
+              {tab === "new" ? (
+                <>
+                  {unclaimed.length ? (
+                    <>
+                      <GroupTitle>Ninguém pegou · {unclaimed.length}</GroupTitle>
+                      <ul className="divide-y divide-line">{unclaimed.map(row)}</ul>
+                    </>
+                  ) : null}
+                  {claimed.length ? (
+                    <>
+                      <GroupTitle divided={unclaimed.length > 0}>Com analista · {claimed.length}</GroupTitle>
+                      <ul className="divide-y divide-line">{claimed.map(row)}</ul>
+                    </>
+                  ) : null}
+                </>
+              ) : (
+                <ul className="divide-y divide-line">{items.map(row)}</ul>
+              )}
             </div>
-          ) : null}
-        </Card>
-      )}
+            {total > items.length || page > 1 ? (
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line px-4 py-2.5 text-xs text-ink-muted sm:px-5">
+                <span className="tabular-nums">
+                  Mostrando {first}–{last} de {total}
+                </span>
+                <div className="flex gap-1">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={page <= 1 || list.isPlaceholderData}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  >
+                    <ChevronLeft className="size-4" />
+                    Anterior
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={last >= total || list.isPlaceholderData}
+                    onClick={() => setPage((p) => p + 1)}
+                  >
+                    Próxima
+                    <ChevronRight className="size-4" />
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+          </Card>
+        )}
       </div>
 
       {declining ? <DeclineDialog key={declining.id} ticket={declining} onClose={() => setDeclining(null)} /> : null}

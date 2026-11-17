@@ -81,6 +81,7 @@ function rebase(current: Answers, base: Answers, server: Answers): Answers {
 export function FormsCard({ ticket }: { ticket: TicketDetail }) {
   const { user } = useAuth();
   const confirm = useConfirm();
+  const { toast } = useToast();
   const manager = canManageTickets(user?.role);
   const invalidate = useInvalidateTicket(ticket.id);
   const onError = useTicketErrorHandler(ticket.id);
@@ -104,7 +105,10 @@ export function FormsCard({ ticket }: { ticket: TicketDetail }) {
   });
   const remove = useMutation({
     mutationFn: (form: TicketForm) => api.delete(`/tickets/${ticket.id}/forms/${form.id}`),
-    onSuccess: invalidate,
+    onSuccess: (_, form) => {
+      invalidate();
+      toast({ title: `${form.name} removido da OS`, tone: "success" });
+    },
     onError,
   });
   const signatureRule = useMutation({

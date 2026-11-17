@@ -101,10 +101,17 @@ async def test_lgpd_retention_and_deletion_on_request(
     assert r.status_code == 200, r.text
 
     # Pedido do titular: a gestão (supervisor ou admin) apaga a ficha e a foto na hora.
+    async with engine.connect() as conn:
+        asked_photo = await conn.scalar(
+            text("SELECT photo_key FROM technician_applications WHERE id = :i"),
+            {"i": apps["pedido@exemplo.com"]},
+        )
+    assert (tmp_path / asked_photo).exists()
     asked = f"{API}/onboarding/applications/{apps['pedido@exemplo.com']}"
     assert (await client.delete(asked, headers=an)).status_code == 403
     assert (await client.delete(asked, headers=sup)).status_code == 204
     assert (await client.get(asked, headers=an)).status_code == 404
+    assert not (tmp_path / asked_photo).exists()
     kept = f"{API}/onboarding/applications/{approved}"
     assert (await client.delete(kept, headers=sup)).status_code == 422  # virou o cadastro
 

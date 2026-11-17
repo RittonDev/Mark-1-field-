@@ -253,3 +253,20 @@ async def test_client_stays_out_of_field_settings_and_sync(
     # O app do técnico continua lendo os prazos de campo.
     rules = await client.get(f"{API}/settings/field", headers=world.tech.headers)
     assert rules.status_code == 200
+
+
+async def test_onsite_warning_comes_before_the_limit(client: AsyncClient, world: World) -> None:
+    """O aviso sai "X minutos antes do fim": maior que o tempo na loja, tocaria na chegada."""
+    sup = world.supervisor.headers
+    body = {
+        "arrival_hours_capital": 4,
+        "arrival_hours_interior": 24,
+        "onsite_hours": 1,
+        "onsite_warning_minutes": 60,
+    }
+    r = await client.put(f"{API}/settings/field", json=body, headers=sup)
+    assert r.status_code == 422 and "no máximo 55 minutos" in r.text
+    r = await client.put(
+        f"{API}/settings/field", json={**body, "onsite_warning_minutes": 55}, headers=sup
+    )
+    assert r.status_code == 200 and r.json()["onsite_warning_minutes"] == 55

@@ -1,13 +1,15 @@
 // Motor de sincronização offline-first (docs/MOBILE_SYNC.md).
 //
-// Cada rodada: sobe as fotos pendentes, envia a fila (POST /sync/push) com as assinaturas na
-// ordem certa e baixa o delta (GET /sync/pull?since=) até has_more = false. Rodadas nunca correm
-// em paralelo; um pedido durante uma rodada agenda outra logo depois.
+// Cada rodada: envia a fila (POST /sync/push) das OS sem foto pendente, sobe as fotos, envia o
+// restante com as assinaturas na ordem certa e baixa o delta (GET /sync/pull?since=) até
+// has_more = false. Rodadas nunca correm em paralelo; um pedido durante uma rodada agenda outra
+// logo depois.
 //
-// A ordem só importa dentro de cada OS (fotos → formulários → assinatura → "Resolver"): um item
-// travado de uma OS espera, com intervalo crescente entre as tentativas, sem segurar as outras OS,
-// e problema no envio não impede o download. Nada sai da fila por erro de transporte: só a recusa
-// do servidor àquela ação tira ela da fila (com aviso ao técnico).
+// A ordem só importa dentro de cada OS (fotos → formulários → assinatura → "Resolver"): as ações
+// de uma OS esperam as fotos dela, nunca as das outras (a foto pesada de uma OS não atrasa o
+// "Iniciar atendimento" de outra). Um item travado espera, com intervalo crescente entre as
+// tentativas, sem segurar as outras OS, e problema no envio não impede o download. Nada sai da
+// fila por erro de transporte: só a recusa do servidor àquela ação tira ela da fila (com aviso).
 //
 // Gatilhos: login/abertura do app, rede voltando, app voltando ao primeiro plano,
 // cada ação do técnico, cada evento do WebSocket e um intervalo de segurança.
@@ -56,7 +58,6 @@ import {
   markSignatureBlocked,
   markSignatureError,
   maxOutboxSeq,
-  partOpsWithPendingPhotos,
   pruneOld,
   purgeSentDrafts,
   rebaseTicket,
@@ -69,6 +70,7 @@ import {
   setFormError,
   setKv,
   signatureWaiting,
+  ticketsWithPendingPhotos,
   transaction,
   WriteCancelled,
   type DB,
@@ -119,6 +121,8 @@ const SYNC_TIMEOUT_MS = 60_000;
 const SAFETY_INTERVAL_MS = 90_000;
 /** Com o tempo real no ar e nada para enviar, os eventos já disparam o sync: o intervalo de segurança espaça. */
 const REALTIME_INTERVAL_MS = 5 * 60_000;
+/** Rede ligada e servidor sem responder: tenta de novo mais cedo (a faixa não fica "sem conexão" à toa). */
+const UNREACHABLE_INTERVAL_MS = 30_000;
 /** De quanto em quanto tempo (com o app na tela) confere se está na hora de uma rodada. */
 const TICK_MS = 30_000;
 const SINCE_KEY = "sync_since";
@@ -267,7 +271,12 @@ interface Round extends Ctx {
   error: string | null;
   /** Anexos da OS no servidor, buscados no máximo uma vez por rodada (reenvio sem duplicar). */
   attachments: Map<UUID, Attachment[] | null>;
+  /** Ações do técnico já levadas em conta (muda quando ele faz algo enquanto as fotos sobem). */
+  actions: number;
 }
+
+/** Conta as ações do técnico (fila, pedido de peça, assinatura): a rodada vê o que entrou no meio dela. */
+let actionsQueued = 0;
 
 /** O restante da OS fica para depois; um item esperando a vez de tentar de novo segue na faixa. */
 function holdTicket(round: Round, ticketId: UUID, itemId?: string) {
@@ -335,14 +344,23 @@ async function runOnce(myEpoch: number, manual: boolean) {
     await refreshPendingCounts().catch(() => undefined);
     return;
   }
-  const round: Round = { epoch: myEpoch, user, blocked: new Set(), error: null, attachments: new Map() };
+  const round: Round = {
+    epoch: myEpoch,
+    user,
+    blocked: new Set(),
+    error: null,
+    attachments: new Map(),
+    actions: actionsQueued,
+  };
   const pending = await countPending().catch(() => ({ ops: 0, photos: 0 }));
   // A faixa "Sincronizando…" só acende quando há o que enviar ou o técnico pediu: a rotina
   // silenciosa (intervalo, eventos do tempo real) não pisca a tela o dia todo.
   if (manual || pending.ops + pending.photos > 0) setStatus({ syncing: true });
   try {
     // Ordem causal por OS: fotos (inclusive de campos de formulário) → respostas/conclusões →
-    // assinatura → o restante (ex.: "Resolver"), que o servidor só aceita depois dela.
+    // assinatura → o restante (ex.: "Resolver"), que o servidor só aceita depois dela. O que não
+    // espera foto (as OS sem foto pendente) sai antes do upload, que em rede lenta leva minutos.
+    await sendPhase(round, () => pushWithSignatures(round));
     await sendPhase(round, () => uploadPhotos(round));
     await sendPhase(round, () => pushWithSignatures(round));
     await pullChanges(round);
@@ -353,6 +371,8 @@ async function runOnce(myEpoch: number, manual: boolean) {
     void syncOnsiteAlerts();
     await flushDeviceRegistration().catch((error: unknown) => console.warn("Falha ao registrar o aparelho", error));
     const at = new Date().toISOString();
+    // A rodada de uma sessão que terminou no meio não marca a hora da sincronização da próxima.
+    ensureAlive(round);
     setStatus({ server: "reachable", lastSyncAt: at, lastError: round.error });
     await write(round, (db) => setKv(LAST_SYNC_KEY, at, db), false);
   } catch (error) {
@@ -443,15 +463,17 @@ export function describeOp(op: SyncOperation): string {
 /**
  * Envia a fila em fases, por OS: com assinatura pendente, primeiro o que foi feito até ela (e os
  * formulários, sempre antes dela), depois a assinatura e então o resto ("Resolver"). As OS sem
- * assinatura pendente seguem direto.
+ * assinatura pendente seguem direto; as com foto ainda no aparelho esperam o upload.
  */
 async function pushWithSignatures(round: Round) {
   const signatures = await readySignatures();
   const gates = new Map(signatures.map((s) => [s.ticket_id, s.after_seq]));
   // Envio interrompido no meio: o que ficou para trás pode ser justamente o que vai antes de uma assinatura.
   if (!(await pushOutbox(round, gates))) return;
+  const withPhotos = await ticketsWithPendingPhotos();
   for (const signature of signatures) {
-    if (round.blocked.has(signature.ticket_id)) continue;
+    // Com foto ainda por subir, o formulário (que vem antes da assinatura) também espera.
+    if (round.blocked.has(signature.ticket_id) || withPhotos.has(signature.ticket_id)) continue;
     if (!isDue(signature.id)) {
       holdTicket(round, signature.ticket_id, signature.id);
       continue;
@@ -498,21 +520,20 @@ async function pushOutbox(round: Round, gates: Map<UUID, number>): Promise<boole
 }
 
 /**
- * Próximo lote, em ordem. Uma operação em espera (falhou há pouco) ou um pedido de peça com foto
- * ainda no aparelho (leva os ids dos anexos) seguram as seguintes da mesma OS; as das outras seguem.
+ * Próximo lote, em ordem. As OS com foto ainda no aparelho ficam para depois do upload (a conclusão
+ * de formulário confere as fotos dos campos e o pedido de peça leva os ids das fotos dele; a lista
+ * é relida a cada lote, então uma foto tirada no meio da rodada também segura a OS dela). Uma
+ * operação em espera (falhou há pouco) segura as seguintes da mesma OS; as das outras seguem.
  */
 async function nextBatch(round: Round, gates: Map<UUID, number>): Promise<OutboxOp[]> {
-  const waiting = await partOpsWithPendingPhotos();
+  const withPhotos = await ticketsWithPendingPhotos();
   for (let pass = 0; pass < 100; pass++) {
-    const rows = await listOutbox(PUSH_BATCH, undefined, { excludeTickets: round.blocked, gates });
+    const rows = await listOutbox(PUSH_BATCH, undefined, { excludeTickets: [...round.blocked, ...withPhotos], gates });
     const batch: OutboxOp[] = [];
     let held = false;
     for (const op of rows) {
       if (round.blocked.has(op.ticket_id)) continue;
-      if (op.type === "part_request" && waiting.has(op.client_op_id)) {
-        holdTicket(round, op.ticket_id);
-        held = true;
-      } else if (!isDue(op.client_op_id)) {
+      if (!isDue(op.client_op_id)) {
         holdTicket(round, op.ticket_id, op.client_op_id);
         held = true;
       } else {
@@ -963,7 +984,8 @@ export async function storeServerTicket(ticket: TicketDetail) {
 
 /**
  * Sobe as fotos, uma OS não segurando a outra: foto que falhou (ou que ainda espera a vez de tentar
- * de novo) segura só o que vem depois na mesma OS (conclusão de formulário, pedido de peça).
+ * de novo) segura só o que vem depois na mesma OS (conclusão de formulário, pedido de peça). Servidor
+ * fora do ar ou pedindo pausa encerra o upload desta rodada (as próximas fotos dariam no mesmo).
  */
 async function uploadPhotos(round: Round) {
   for (const photo of await listPhotos()) {
@@ -975,6 +997,9 @@ async function uploadPhotos(round: Round) {
     }
     if (!photoExists(photo.file_uri)) {
       await write(round, async (db) => {
+        // Descartada pelo técnico enquanto esperava a vez (o arquivo sai junto): nada a avisar.
+        const removed = await db.runAsync("DELETE FROM photos WHERE id = ?", photo.id);
+        if (!removed.changes) return;
         const ticket = await getTicket(photo.ticket_id, db);
         await addNotice(db, {
           ticket_id: photo.ticket_id,
@@ -982,13 +1007,21 @@ async function uploadPhotos(round: Round) {
           kind: "photo",
           message: "Uma foto não está mais no aparelho e não foi enviada. Tire de novo se ela for necessária.",
         });
-        await db.runAsync("DELETE FROM photos WHERE id = ?", photo.id);
       });
       continue;
     }
-    await uploadPhoto(round, photo);
+    if (!(await uploadPhoto(round, photo))) return;
+    // O técnico fez algo enquanto as fotos subiam (ex.: "Iniciar atendimento" em outra OS): sai
+    // já, sem esperar o resto do upload.
+    if (actionsQueued !== round.actions) {
+      round.actions = actionsQueued;
+      await pushWithSignatures(round);
+    }
   }
 }
+
+/** Erros do servidor inteiro (e não desta foto): pausa pedida ou serviço fora do ar. */
+const SERVER_DOWN = new Set([429, 502, 503, 504]);
 
 /**
  * Arquivo que este técnico já enviou e cuja resposta se perdeu (tempo esgotado, conexão caiu, app
@@ -1008,7 +1041,8 @@ async function findUploaded(round: Round, ticketId: UUID, match: (a: Attachment)
   return round.attachments.get(ticketId)?.find((a) => a.uploaded_by?.id === round.user.id && match(a)) ?? null;
 }
 
-async function uploadPhoto(round: Round, photo: PendingPhoto) {
+/** Envia uma foto. Devolve false quando o upload desta rodada deve parar (servidor fora do ar). */
+async function uploadPhoto(round: Round, photo: PendingPhoto): Promise<boolean> {
   const isFormPhoto = Boolean(photo.form_id && photo.field_id);
   // O nome do arquivo leva o id da foto: um reenvio acha a foto que já chegou e não duplica.
   let attachment =
@@ -1023,7 +1057,15 @@ async function uploadPhoto(round: Round, photo: PendingPhoto) {
       : null;
   if (!attachment) {
     // A tentativa conta antes do envio: se o app morrer no meio, o próximo envio confere primeiro.
-    await write(round, (db) => markPhotoAttempt(db, photo.id), false);
+    let queued = false;
+    await write(
+      round,
+      async (db) => {
+        queued = await markPhotoAttempt(db, photo.id);
+      },
+      false,
+    );
+    if (!queued) return true; // descartada pelo técnico enquanto esperava a vez
     ensureAlive(round);
     try {
       attachment = await uploadFile<Attachment>(
@@ -1042,10 +1084,13 @@ async function uploadPhoto(round: Round, photo: PendingPhoto) {
         if (error.status === 0 || error.status === 401) throw error;
         scheduleRetry(photo.id, `Foto da ${await ticketCode(photo.ticket_id)}: ${error.message}`);
         holdTicket(round, photo.ticket_id, photo.id);
-        return;
+        return !SERVER_DOWN.has(error.status);
       }
-      // Recusada (ex.: campo já com o máximo de fotos, arquivo grande demais): sai da fila com aviso.
+      // Recusada (ex.: campo já com o máximo de fotos, arquivo grande demais): sai da fila com aviso
+      // (a não ser que o técnico tenha descartado a foto no meio do envio).
       await write(round, async (db) => {
+        const removed = await db.runAsync("DELETE FROM photos WHERE id = ?", photo.id);
+        if (!removed.changes) return;
         const ticket = await getTicket(photo.ticket_id, db);
         await addNotice(db, {
           ticket_id: photo.ticket_id,
@@ -1053,11 +1098,10 @@ async function uploadPhoto(round: Round, photo: PendingPhoto) {
           kind: "photo",
           message: `Foto recusada pelo servidor: ${error.message}`,
         });
-        await db.runAsync("DELETE FROM photos WHERE id = ?", photo.id);
       });
       retries.delete(photo.id);
       deletePhotoFile(photo.file_uri);
-      return;
+      return true;
     }
   }
   retries.delete(photo.id);
@@ -1073,6 +1117,7 @@ async function uploadPhoto(round: Round, photo: PendingPhoto) {
     }
   });
   deletePhotoFile(photo.file_uri);
+  return true;
 }
 
 /**
@@ -1101,6 +1146,8 @@ export async function queuePhoto(
     form_id: target?.formId ?? null,
     field_id: target?.fieldId ?? null,
   });
+  // A faixa já conta a foto (sem esperar o fim da rodada, que pode estar subindo outras).
+  await refreshPendingCounts();
   void requestSync();
 }
 
@@ -1146,6 +1193,7 @@ export async function queueSignature(
     created_at: new Date().toISOString(),
   });
   replaced.forEach(deletePhotoFile);
+  actionsQueued += 1;
   await refreshPendingCounts();
   void requestSync();
 }
