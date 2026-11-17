@@ -271,7 +271,9 @@ def _overdue() -> ColumnElement[bool]:
 
 def _status_condition(wanted: QuoteStatus) -> ColumnElement[bool]:
     if wanted == QuoteStatus.SENT:
-        return and_(Quote.status == QuoteStatus.SENT, ~_overdue())
+        # Sem validade também aguarda (o NOT de uma comparação com NULL daria NULL e sumiria).
+        valid = or_(Quote.valid_until.is_(None), Quote.valid_until >= local_today())
+        return and_(Quote.status == QuoteStatus.SENT, valid)
     if wanted == QuoteStatus.EXPIRED:
         return or_(Quote.status == QuoteStatus.EXPIRED, _overdue())
     return Quote.status == wanted

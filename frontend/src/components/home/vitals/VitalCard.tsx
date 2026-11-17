@@ -18,7 +18,7 @@ export function CardLink({ href, children }: { href: string; children: React.Rea
 }
 
 /**
- * Casca dos 4 sinais vitais: o cartão opaco de sempre com o filete de luz no topo, o atalho no
+ * Casca dos sinais vitais: o cartão opaco de sempre com o filete de luz no topo, o atalho no
  * cabeçalho, o rodapé com borda e a mesma altura carregando ou com dados (sem pulo quando chegam).
  */
 export function VitalCard({

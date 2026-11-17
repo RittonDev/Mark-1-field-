@@ -304,6 +304,14 @@ async def test_resending_after_a_reminder_is_the_latest_contact(
     one = await client.get(f"{API}/tickets/{t['id']}/quotes", headers=world.analyst.headers)
     assert [x["follow_up"] for x in one.json() if x["id"] == q["id"]] == [None]
 
+    # Reenviado há 49 h, depois da cobrança de 3 dias atrás: volta à fila, e o motivo fala do envio.
+    await set_quote(engine, q["id"], sent_at=ago(hours=49))
+    group = await home_group(client, world, "quotes_waiting")
+    assert group is not None
+    assert [i["reason"] for i in group["items"]] == [
+        f"{q['code']} (R$ 100,00) enviado há 2 dias, não aberto"
+    ]
+
 
 # =========================================================================== aberturas do cliente
 

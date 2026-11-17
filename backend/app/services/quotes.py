@@ -241,7 +241,7 @@ def has_link(quote: Quote) -> bool:
     return quote.link_id is not None or quote.token_hash is not None
 
 
-def _contact(quote: Quote) -> datetime | None:
+def last_contact(quote: Quote) -> datetime | None:
     """Último contato com o cliente: o envio ou a cobrança, o que for mais recente (reenviar ou
     renovar depois de uma cobrança também conta como contato)."""
     return max((d for d in (quote.sent_at, quote.last_reminded_at) if d is not None), default=None)
@@ -265,7 +265,7 @@ def follow_up(
         return None
     valid = quote.valid_until
     sent = quote.status == QuoteStatus.SENT
-    contact = _contact(quote)
+    contact = last_contact(quote)
     if quote.status == QuoteStatus.EXPIRED or (sent and valid is not None and valid < today):
         return "expired" if valid is not None and valid >= today - EXPIRED_WINDOW else None
     if sent:

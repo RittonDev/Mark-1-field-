@@ -42,6 +42,7 @@ import {
   daysUntil,
   followUpAction,
   followUpText,
+  hasClientLink,
   QUOTE_KIND,
   QUOTE_STATUS,
   QUOTE_VALID_DAYS,
@@ -480,7 +481,9 @@ function QuoteList() {
   const retry = () => void (queue ? followUp.refetch() : quotes.error ? quotes.refetch() : narrowed.refetch());
   const latest = (q: QuoteListRow | null) => (q ? (rows?.find((r) => r.id === q.id) ?? q) : null);
   const openedQuote = latest(opened);
-  const sharingQuote = latest(sharing?.row ?? null);
+  // O diálogo do link recebe exatamente o que foi passado: a linha do clique ou a resposta do envio (que
+  // traz o link novo). A linha da lista ainda pode estar sem o link até a releitura.
+  const sharingQuote = sharing?.row ?? null;
   const filtered = Boolean((!queue && status) || search.trim());
   const periodSlug = period === RECENT ? "ultimos-90-dias" : period === ALL ? "todo-periodo" : period;
 
@@ -828,6 +831,8 @@ function QuoteList() {
       ) : null}
       {sharing && sharingQuote ? (
         <ShareDialog
+          // Remonta a cada orçamento e modo: um envio que termina depois não mistura texto e link.
+          key={`${sharingQuote.id}:${sharing.mode}`}
           ticket={ticketOf(sharingQuote)}
           quote={sharingQuote}
           mode={sharing.mode}
@@ -845,7 +850,11 @@ function QuoteList() {
             refresh(quote.ticket_id);
             toast({
               title: `${saved.code} renovado e enviado`,
-              description: sentBefore(quote) ? "O link é o mesmo: mande de novo para o cliente." : "Mande o link para o cliente.",
+              // Do Field Control, o orçamento pode ter "enviado" sem nunca ter tido link: o link é novo.
+              description:
+                sentBefore(quote) && hasClientLink(quote)
+                  ? "O link é o mesmo: mande de novo para o cliente."
+                  : "Mande o link para o cliente.",
               tone: "success",
             });
             setSharing({ row: { ...quote, ...saved }, mode: "share" });

@@ -998,7 +998,7 @@ def _quote_reason(quote: Quote, m: Moment) -> tuple[datetime | None, str]:
     """ "ORC-000123 (R$ 300,00) enviado há 3 dias, não aberto": o motivo de services/quotes."""
     base = f"{format_quote_code(quote.number)} ({money_text(quote.total)})"
     reason = quotes_svc.follow_up(quote, ticket_cancelled=False, now=m.now, today=m.today)
-    contact = quote.last_reminded_at or quote.sent_at
+    contact = quotes_svc.last_contact(quote)
     if reason == "in_review":
         since = span_text(m.now - quote.updated_at)
         return quote.updated_at, f"{base} em revisão há {since}: reenvie"
@@ -1008,8 +1008,10 @@ def _quote_reason(quote: Quote, m: Moment) -> tuple[datetime | None, str]:
         return contact, f"{base} vence {'hoje' if quote.valid_until == m.today else 'amanhã'}"
     if contact is None:
         return None, base
-    # Cobrado: o tempo conta da última cobrança (é ela que tira o orçamento da fila por 48 h).
-    verb = "cobrado" if quote.reminder_count and quote.last_reminded_at else "enviado"
+    # O tempo conta do último contato: "cobrado" quando ele foi a cobrança, "enviado" quando foi o
+    # envio (inclusive um reenvio depois de uma cobrança antiga).
+    reminded = quote.last_reminded_at is not None and contact == quote.last_reminded_at
+    verb = "cobrado" if reminded else "enviado"
     since = f"{verb} há {span_text(m.now - contact)}"
     if reason == "not_opened":
         return contact, f"{base} {since}, não aberto"

@@ -928,6 +928,11 @@ async def test_quotes_box(
                 sent_at=before(3),
                 **gone,
             ),
+            # Link antigo (só o hash) e sem validade: aguardando, e o cliente tem como assinar. A lista
+            # também mostra (o filtro "Aguardando cliente" não pode perder quem não tem validade).
+            quote(
+                "Link antigo, sem validade", "300", sent, token_hash="f" * 64, sent_at=before(1)
+            ),
             # Vencidos pela criação nos 90 dias: o enviado com a validade passada também conta.
             quote(
                 "Validade passada",
@@ -958,10 +963,6 @@ async def test_quotes_box(
     db.add_all(
         [
             *listed(NOW, TODAY),
-            # Link antigo (só o hash) e sem validade: aguardando, e o cliente tem como assinar.
-            quote(
-                "Link antigo, sem validade", "300", sent, token_hash="f" * 64, sent_at=ago(days=1)
-            ),
             # Respondidos. O de 31/10 às 23h30 em São Paulo (já 01/11 em UTC) é do mês passado.
             quote("Aprovado", "50", approved, decided_at=ago(days=2)),
             quote("Aprovado da OS cancelada", "60", approved, decided_at=ago(days=2), **gone),
@@ -1007,7 +1008,7 @@ async def test_quotes_box(
     monkeypatch.setattr(home, "local_today", local_today)
     quotes = (await overview(client, world))["pulse"]["quotes"]
     counts = (quotes["awaiting"], quotes["expired_90d"], quotes["drafts"], quotes["follow_up"])
-    assert counts == (5, 3, 2, 4)
+    assert counts == (6, 3, 2, 4)
     start = (utcnow() - timedelta(days=90)).isoformat()
     for params, count in (
         ({"status": "sent"}, quotes["awaiting"]),

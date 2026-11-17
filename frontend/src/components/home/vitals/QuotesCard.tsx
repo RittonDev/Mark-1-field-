@@ -75,7 +75,7 @@ function QuotesBody({ quotes: q }: { quotes: HomeQuotes }) {
               </ProblemText>
             ) : null}
             {q.expiring > 0 ? (
-              <ProblemText tone="warning" icon={TriangleAlert} href={FOLLOW_UP_HREF} title={EXPIRING_HINT}>
+              <ProblemText tone="warning" icon={TriangleAlert} href={AWAITING_HREF} title={EXPIRING_HINT}>
                 {plural(q.expiring, "vence até amanhã", "vencem até amanhã")}
               </ProblemText>
             ) : null}
