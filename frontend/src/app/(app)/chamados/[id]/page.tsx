@@ -92,7 +92,8 @@ export default function TicketDetailPage() {
   }
   return (
     <div className="mx-auto max-w-6xl">
-      <TicketEditor ticket={query.data} variant="page" />
+      {/* A OS guardada (aberta antes) pode ser antiga até a releitura chegar. */}
+      <TicketEditor ticket={query.data} variant="page" synced={query.isFetchedAfterMount || !query.isStale} />
     </div>
   );
 }

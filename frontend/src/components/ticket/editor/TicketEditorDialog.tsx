@@ -216,7 +216,14 @@ export function TicketEditorDialog({
         )}
       >
         {ticket.data ? (
-          <TicketEditor ticket={ticket.data} variant="dialog" onClose={onClose} onDirtyChange={onDirtyChange} />
+          <TicketEditor
+            ticket={ticket.data}
+            variant="dialog"
+            // A OS guardada (reaberta no painel) pode ser antiga até a releitura chegar.
+            synced={ticket.isFetchedAfterMount || !ticket.isStale}
+            onClose={onClose}
+            onDirtyChange={onDirtyChange}
+          />
         ) : ticket.error ? (
           <>
             {/* Com erro também há como fechar: no celular o painel cobre tudo. */}

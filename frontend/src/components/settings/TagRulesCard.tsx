@@ -415,10 +415,18 @@ function ColorDot({ color }: { color: string | null }) {
   );
 }
 
+// Etiqueta dentro da lista de sugestões (menor que o chip da lista de regras).
+const OPTION_CHIP =
+  "inline-flex min-w-0 max-w-full items-center rounded-md px-1.5 py-0.5 text-xs font-medium whitespace-nowrap ring-1 ring-inset";
+
+type Option = { key: string; tag: TagRule; isNew: boolean };
+
 /**
  * Uma lista de etiquetas: os chips (na cor de cada uma, com o ponto para trocar a cor e o × para tirar)
- * e o campo para incluir, com as etiquetas já usadas como sugestão. `kind="names"`: só nomes (a lista
- * de remover); o chip mostra a cor conhecida da etiqueta, sem trocar.
+ * e o campo para incluir. O campo funciona como o de etiquetas da OS (TagsInput): sugere as etiquetas já
+ * usadas, na cor de cada uma; clique ou Enter inclui a destacada (ou cria com o texto digitado), as setas
+ * andam, Esc fecha as sugestões e Backspace no campo vazio tira a última. `kind="names"`: só nomes (a
+ * lista de remover); o chip mostra a cor conhecida da etiqueta, sem trocar.
  */
 function TagList({
   group,
@@ -434,7 +442,8 @@ function TagList({
   kind: "tags" | "names";
   tags: TagRule[];
   readOnly: boolean;
-  suggestions: string[];
+  /** Etiquetas conhecidas que ainda não estão nesta lista. */
+  suggestions: TagRule[];
   /** Inclui o nome; devolve o motivo quando não dá. */
   onAdd: (name: string) => string | null;
   onRemove: (name: string) => void;
@@ -443,19 +452,42 @@ function TagList({
   const titleId = useId();
   const hintId = useId();
   const errorId = useId();
-  const listId = useId();
+  const listboxId = useId();
   const input = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLUListElement>(null);
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
   const full = tags.length >= MAX_TAGS;
+  const typed = clean(text);
 
-  const add = () => {
-    if (!clean(text)) {
+  // Sugestões que têm todas as palavras digitadas (sem acento); a de nome igual ao digitado vem primeiro.
+  // Nome novo: no fim, a opção de criar (ou, na lista de remover, de incluir só o nome).
+  const words = fold(typed).split(" ").filter(Boolean);
+  const hits = suggestions.filter((t) => words.every((w) => fold(t.name).includes(w)));
+  const exact = hits.findIndex((t) => nameKey(t.name) === nameKey(typed));
+  if (exact > 0) hits.unshift(...hits.splice(exact, 1));
+  const options: Option[] = hits.slice(0, SUGGESTIONS).map((t) => ({ key: `tag-${nameKey(t.name)}`, tag: t, isNew: false }));
+  if (typed && exact < 0 && !tags.some((t) => nameKey(t.name) === nameKey(typed))) {
+    options.push({ key: "nova", tag: { name: typed, color: null }, isNew: true });
+  }
+  const activeIndex = Math.max(0, Math.min(active, options.length - 1));
+  const showList = open && !full && options.length > 0;
+  const optionId = (i: number) => `${listboxId}-o${i}`;
+
+  // A opção destacada pelas setas fica sempre à vista na lista.
+  useEffect(() => {
+    if (showList) document.getElementById(`${listboxId}-o${activeIndex}`)?.scrollIntoView({ block: "nearest" });
+  }, [showList, activeIndex, listboxId]);
+
+  const add = (raw: string) => {
+    setActive(0);
+    if (!clean(raw)) {
       setText("");
       return;
     }
-    const issue = onAdd(text);
+    const issue = onAdd(raw);
     setError(issue);
     if (!issue) setText("");
   };
@@ -494,12 +526,14 @@ function TagList({
         )
       ) : (
         <>
+          <div className="relative">
           <div
             // Clicar no espaço vazio da caixa leva ao campo (como numa caixa de texto comum).
             onMouseDown={(e) => {
               if (e.target === e.currentTarget) {
                 e.preventDefault();
                 input.current?.focus();
+                setOpen(true);
               }
             }}
             className={clsx(
@@ -537,23 +571,51 @@ function TagList({
             ) : null}
             <input
               ref={input}
-              list={listId}
               value={text}
               maxLength={MAX_NAME}
               autoComplete="off"
+              role="combobox"
+              aria-expanded={showList}
+              aria-controls={showList ? listboxId : undefined}
+              aria-autocomplete="list"
+              aria-activedescendant={showList ? optionId(activeIndex) : undefined}
               onChange={(e) => {
                 setText(e.target.value);
                 setError(null);
+                setActive(0);
+                setOpen(true);
               }}
+              onClick={() => setOpen(true)}
               onKeyDown={(e) => {
-                // Enter inclui a etiqueta (não envia o formulário).
-                if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                if (e.nativeEvent.isComposing) return;
+                if (e.key === "ArrowDown" || e.key === "ArrowUp") {
                   e.preventDefault();
-                  add();
+                  if (!showList) {
+                    setOpen(true);
+                    setActive(e.key === "ArrowDown" ? 0 : options.length - 1);
+                    return;
+                  }
+                  const step = e.key === "ArrowDown" ? 1 : -1;
+                  setActive((activeIndex + step + options.length) % options.length);
+                } else if (e.key === "Enter") {
+                  // Enter inclui a sugestão destacada ou o texto digitado (nunca envia o formulário).
+                  e.preventDefault();
+                  const pick = showList ? options[activeIndex] : undefined;
+                  if (pick) add(pick.tag.name);
+                  else if (typed) add(typed);
+                } else if (e.key === "Escape" && showList) {
+                  // Esc fecha só as sugestões.
+                  e.preventDefault();
+                  setOpen(false);
+                } else if (e.key === "Backspace" && !text && tags.length) {
+                  onRemove(tags[tags.length - 1].name);
+                  setError(null);
                 }
               }}
               onBlur={() => {
-                if (clean(text)) add();
+                setOpen(false);
+                // Saiu do campo com um nome digitado: a etiqueta entra (como ao apertar Enter).
+                if (typed) add(typed);
               }}
               placeholder={
                 full ? `Limite de ${MAX_TAGS} etiquetas` : tags.length ? "Incluir etiqueta" : `Incluir etiqueta (ex.: ${group.example})`
@@ -563,11 +625,44 @@ function TagList({
               aria-describedby={error ? `${hintId} ${errorId}` : hintId}
               className="h-7 min-w-40 flex-1 bg-transparent px-1 text-sm text-ink outline-none placeholder:text-ink-subtle"
             />
-            <datalist id={listId}>
-              {suggestions.map((name) => (
-                <option key={name} value={name} />
+          </div>
+          {showList ? (
+            <ul
+              id={listboxId}
+              role="listbox"
+              aria-label={`Sugestões para “${group.title}”`}
+              // Clicar na lista não tira o foco do campo.
+              onMouseDown={(e) => e.preventDefault()}
+              className="absolute z-30 mt-1 max-h-64 w-full overflow-auto rounded-lg border border-line bg-surface py-1 shadow-pop"
+            >
+              {options.map((o, i) => (
+                <li
+                  key={o.key}
+                  id={optionId(i)}
+                  role="option"
+                  aria-selected={i === activeIndex}
+                  onClick={() => add(o.tag.name)}
+                  onMouseMove={() => {
+                    if (i !== activeIndex) setActive(i);
+                  }}
+                  className={clsx("flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm text-ink", i === activeIndex && "bg-surface-2")}
+                >
+                  {o.isNew ? (
+                    <span className="inline-flex min-w-0 items-center gap-1.5 font-medium text-brand-ink">
+                      <Plus aria-hidden className="size-3.5 shrink-0" />
+                      <span className="truncate">
+                        {kind === "tags" ? "Criar etiqueta" : "Incluir"} “{o.tag.name}”
+                      </span>
+                    </span>
+                  ) : (
+                    <span className={clsx(OPTION_CHIP, tagTone(o.tag.color))}>
+                      <span className="truncate">{o.tag.name}</span>
+                    </span>
+                  )}
+                </li>
               ))}
-            </datalist>
+            </ul>
+          ) : null}
           </div>
           {error ? (
             <FieldError id={errorId}>{error}</FieldError>

@@ -45,12 +45,13 @@ import { WhatsAppShare } from "@/components/ticket/WhatsAppShare";
 import { WorklogsTab } from "@/components/ticket/WorklogsTab";
 import { useToast } from "@/components/Toaster";
 import { Button, buttonClassName, Card, CardHeader, ErrorBox, isTopLayer, Kbd, SectionTitle, Skeleton } from "@/components/ui";
+import { useNow } from "@/components/useNow";
 import { api, errorMessage } from "@/lib/api";
 import { STATUS } from "@/lib/constants";
 import { formatDateTime, formatMinutes, formatShort } from "@/lib/format";
 import { useDocumentTitle } from "@/lib/hooks";
 import type { Comment, Quote, ReportLink, TicketDetail, TicketEvent, TicketStatus } from "@/lib/types";
-import { copyText, groupTextsQuery, whatsappUrl } from "@/lib/whatsapp";
+import { copyText, type GroupText, groupTextsQuery, whatsappUrl } from "@/lib/whatsapp";
 import { GENERAL_FORM_ID, GeneralTab, GeneralView, type SaveState } from "./GeneralTab";
 import { StatusMenu } from "./StatusMenu";
 import { useUnsavedGuard } from "./useUnsavedGuard";
@@ -426,27 +427,102 @@ function StatusNotice({ ticket }: { ticket: TicketDetail }) {
   );
 }
 
+/** Antes de o técnico sair para o local: o texto da vez é a confirmação da atividade (como na API). */
+const BEFORE_FIELD: TicketStatus[] = ["new", "triage", "assigned", "scheduled", "reopened"];
+
+/** Nomes dos modelos padrão, para o aviso ao leitor de tela enquanto os textos não foram lidos. */
+const GROUP_TEXT_NAMES: Record<string, string> = {
+  agendamento: "Atividade confirmada",
+  deslocamento: "Técnico em deslocamento",
+  chegada: "Técnico chegou",
+  atraso: "Atraso na chegada",
+  fechamento: "Atividade encerrada",
+  improdutiva: "Visita improdutiva",
+};
+
+/**
+ * O texto do momento da OS (a chave do modelo), pela mesma regra com que a API marca o sugerido, com
+ * os dados que a tela já tem (sem buscar os textos). Só decide o destaque do botão: quem marca o texto
+ * no menu continua sendo a API.
+ */
+function groupMoment(t: TicketDetail, now: number): string | null {
+  switch (t.status) {
+    case "cancelled":
+      return null;
+    case "resolved":
+    case "closed":
+      return "fechamento";
+    case "in_progress":
+      return "chegada";
+    case "en_route":
+      return t.arrival_due_at && Date.parse(t.arrival_due_at) < now ? "atraso" : "deslocamento";
+  }
+  // A última ida a campo terminou em visita improdutiva e a OS ainda não foi remarcada.
+  if (t.last_unproductive_at && !t.scheduled_start) return "improdutiva";
+  return BEFORE_FIELD.includes(t.status) && t.assignee && t.scheduled_start ? "agendamento" : null;
+}
+
+/**
+ * O modelo que o menu vai marcar, quando os textos já foram lidos: a gestão pode ter tirado um modelo
+ * em Textos (sem o de atraso, vale o de deslocamento, como na API).
+ */
+function availableMoment(moment: string | null, list: GroupText[] | undefined): string | null {
+  if (!moment || !list) return moment;
+  const keys = moment === "atraso" ? ["atraso", "deslocamento"] : [moment];
+  return keys.find((k) => list.some((m) => m.key === k)) ?? null;
+}
+
 /**
  * "Textos para o grupo" no rodapé, sempre à vista: atividade confirmada, técnico em deslocamento,
- * atividade encerrada com o link do relatório... Quando a OS muda de momento e o texto sugerido muda
- * (ex.: o técnico saiu para o local), o botão ganha um destaque e o leitor de tela avisa, até a pessoa
- * abrir o menu. Os textos vêm da mesma busca do menu (sob ["ticket", id]: o tempo real relê junto).
+ * atividade encerrada com o link do relatório... Quando a OS muda de momento com ela aberta (ex.: o
+ * técnico saiu para o local), o botão ganha um destaque e o leitor de tela avisa, até a pessoa abrir o
+ * menu.
+ *
+ * Os textos só são buscados ao abrir o menu: a API cria o link do relatório da OS sem link ao montar
+ * os textos, e só ver a OS não pode criar (nem trazer de volta um link desativado). O destaque vem da
+ * situação da OS que a tela já tem.
  */
-function GroupTexts({ ticketId }: { ticketId: string }) {
-  const texts = useQuery(groupTextsQuery(ticketId));
-  const suggested = texts.data?.find((m) => m.suggested) ?? null;
-  const current = suggested?.key ?? null;
-  // O texto sugerido que a pessoa já viu (ao abrir a OS ou o menu); undefined: os textos não chegaram.
+function GroupTexts({ ticket, synced }: { ticket: TicketDetail; synced: boolean }) {
+  const queryClient = useQueryClient();
+  // O atraso depende da hora: passou o prazo de chegada, o texto da vez muda.
+  const now = useNow(30_000);
+  // Só lê o que o menu (ou outra tela) já buscou: desligada, esta leitura nunca busca nem relê.
+  const texts = useQuery({ ...groupTextsQuery(ticket.id), enabled: false });
+  const current = availableMoment(groupMoment(ticket, now), texts.data);
+  // O momento que a pessoa já viu (ao abrir a OS ou o menu). Só vale a OS lida do servidor depois que a
+  // tela abriu: a guardada de antes pode ser antiga, e o que mudou com ela fechada não é novidade aqui.
   const [seen, setSeen] = useState<string | null | undefined>(undefined);
-  if (texts.data && seen === undefined) setSeen(current);
+  if (seen === undefined && synced) setSeen(current);
   const fresh = seen !== undefined && current !== null && current !== seen;
+  const name = current ? (texts.data ? texts.data.find((m) => m.key === current)?.name : GROUP_TEXT_NAMES[current]) : undefined;
+
+  // Os textos trazem o link do relatório, e a API acabou de criá-lo se a OS estava sem: relê a OS para o
+  // topo da Geral e o menu do relatório mostrarem o link que agora existe.
+  const handled = useRef(texts.dataUpdatedAt);
+  const syncLink = useEffectEvent((updatedAt: number) => {
+    if (updatedAt <= handled.current) return;
+    handled.current = updatedAt;
+    if (!ticket.report_link) void queryClient.invalidateQueries({ queryKey: ["ticket", ticket.id], exact: true });
+  });
+  useEffect(() => {
+    syncLink(texts.dataUpdatedAt);
+  }, [texts.dataUpdatedAt]);
+
+  const markSeen = () => setSeen(current);
   return (
-    // Na captura: o botão do menu para o clique (para não abrir a OS numa linha de lista).
-    <span className="relative mr-1 inline-flex" onClickCapture={() => setSeen(current)}>
-      <GroupTextsMenu ticketId={ticketId} size="sm" className={fresh ? "ring-2 ring-brand/40" : undefined} />
+    // Na captura: o botão do menu para o clique (para não abrir a OS numa linha de lista). As setas
+    // também abrem o menu, sem clique; Enter e Espaço chegam como clique.
+    <span
+      className="relative mr-1 inline-flex"
+      onClickCapture={markSeen}
+      onKeyDownCapture={(e) => {
+        if (e.key === "ArrowDown" || e.key === "ArrowUp") markSeen();
+      }}
+    >
+      <GroupTextsMenu ticketId={ticket.id} size="sm" className={fresh ? "ring-2 ring-brand/40" : undefined} />
       {fresh ? <span aria-hidden className="pointer-events-none absolute -top-1 -right-1 size-2.5 rounded-full bg-brand ring-2 ring-surface" /> : null}
       <span role="status" className="sr-only">
-        {fresh && suggested ? `Novo texto sugerido para o grupo: ${suggested.name}` : ""}
+        {fresh ? `Novo texto sugerido para o grupo${name ? `: ${name}` : ""}` : ""}
       </span>
     </span>
   );
@@ -470,11 +546,17 @@ const footerAction =
 export function TicketEditor({
   ticket,
   variant,
+  synced = true,
   onClose,
   onDirtyChange,
 }: {
   ticket: TicketDetail;
   variant: "page" | "dialog";
+  /**
+   * A OS em tela veio do servidor depois que a tela abriu (ou tinha acabado de vir). Falso enquanto se
+   * mostra a OS guardada de antes e a releitura não chegou.
+   */
+  synced?: boolean;
   /** Fechar o painel (no painel lateral: ele pergunta antes se há alteração não salva). */
   onClose?: () => void;
   /** Avisa quem abriu quando a aba Geral passa a ter (ou deixa de ter) alteração não salva. */
@@ -727,7 +809,7 @@ export function TicketEditor({
         {/* Numa tela estreita as ações quebram a linha (alinhadas à direita) em vez de sair do painel. */}
         <div className="ml-auto flex flex-wrap items-center justify-end gap-x-0.5 gap-y-1.5">
           {/* Os textos para o grupo junto do link do relatório (o "Atividade encerrada" já leva o link). */}
-          {ticket.can_assign ? <GroupTexts key={ticket.id} ticketId={ticket.id} /> : null}
+          {ticket.can_assign ? <GroupTexts key={ticket.id} ticket={ticket} synced={synced} /> : null}
           {/* O nome ao lado do ícone (telas largas) vem do CSS: o menu do relatório só desenha o ícone. */}
           <ReportMenu ticket={ticket} buttonClassName={clsx(footerAction, "lg:after:text-xs lg:after:font-medium lg:after:content-['Relatório']")} />
           <button type="button" className={footerAction} onClick={() => setSharing(true)} title="Mensagens de WhatsApp" aria-label="Mensagens de WhatsApp">
