@@ -766,40 +766,115 @@ GROUPS: dict[str, GroupSpec] = {
 # --------------------------------------------------------------------------- contagens
 
 
-async def _ticket_counts(db: AsyncSession, m: Moment) -> dict[str, int]:
-    """Indicadores e grupos das OS numa varredura só (COUNT ... FILTER)."""
-    tomorrow_start, tomorrow_end = day_bounds(m.today + timedelta(days=1))
-    columns = {
+def _week_bounds(start: date) -> tuple[datetime, datetime]:
+    """Da segunda-feira 00:00 até a segunda seguinte, no fuso da operação."""
+    return day_bounds(start)[0], day_bounds(start + timedelta(days=7))[0]
+
+
+async def _ticket_counts(db: AsyncSession, m: Moment, onsite_hours: int) -> dict[str, Any]:
+    """Indicadores, grupos de atenção e quase todos os sinais vitais numa varredura só das OS
+    (COUNT ... FILTER), com os limites de tempo como parâmetros. Sem COUNT(DISTINCT), que obriga o
+    banco a ordenar a tabela inteira: os técnicos distintos saem de _visit_technicians."""
+    today = and_(
+        Ticket.scheduled_start >= m.day_start,
+        Ticket.scheduled_start < m.day_end,
+        Ticket.status != S.CANCELLED,
+    )
+    tomorrow = and_(
+        Ticket.scheduled_start >= m.day_end,
+        Ticket.scheduled_start < m.tomorrow_end,
+        Ticket.status.not_in(FINISHED),
+    )
+    in_window = recent(m)
+    old = and_(_open(), Ticket.created_at < m.recent_start)
+    arrivals = on_time_base(m)
+    sla = and_(
+        Ticket.resolved_at >= m.recent_start,
+        Ticket.resolution_due_at.is_not(None),
+        Ticket.status != S.CANCELLED,
+    )
+    onsite = and_(Ticket.resolved_at >= m.recent_start, Ticket.work_seconds > 0)
+    columns: dict[str, ColumnElement[bool]] = {
+        # Indicadores (kpis): os de sempre, sem o corte de 30 dias.
         "open": _open(),
-        "scheduled_today": and_(
-            Ticket.scheduled_start >= m.day_start,
-            Ticket.scheduled_start < m.day_end,
-            Ticket.status != S.CANCELLED,
-        ),
+        "scheduled_today": today,
         "in_field_now": Ticket.status.in_(FIELD),
         "resolved_today": and_(Ticket.resolved_at >= m.day_start, Ticket.resolved_at < m.day_end),
-        "unassigned": and_(_open(), Ticket.assignee_id.is_(None)),
-        "sla_breached": breached_clause(m.now),
-        "late_arrival": late_arrival_clause(m),
-        "today_not_started": today_not_started_clause(m),
-        "unassigned_soon": unassigned_soon_clause(m),
-        "unproductive_pending": unproductive_pending_clause(),
-        "no_schedule": no_schedule_clause(),
-        "stale": stale_clause(m),
-        "no_owner": no_owner_clause(),
-        "violation_pending": violation_pending_clause(m.now),
-        "tomorrow_unassigned": and_(
-            Ticket.scheduled_start >= tomorrow_start,
-            Ticket.scheduled_start < tomorrow_end,
-            Ticket.assignee_id.is_(None),
-            Ticket.status.not_in(FINISHED),
+        "late": breached_clause(m.now),
+        "open_unassigned": and_(_open(), Ticket.assignee_id.is_(None)),
+        # Grupos de atenção, com a condição do próprio grupo (a do portal é a do menu).
+        **{key: group.cond(m) for key, group in TICKET_GROUPS.items() if key != "portal_requests"},
+        # O número do topo: cada OS uma vez, mesmo com dois motivos.
+        "now_total": or_(*(TICKET_GROUPS[key].cond(m) for key in NOW_KEYS)),
+        # Hoje e amanhã.
+        "today_done": and_(today, Ticket.status.in_(DONE)),
+        "today_in_field": and_(today, Ticket.status.in_(FIELD)),
+        "today_on_hold": and_(today, Ticket.status.in_(ON_HOLD)),
+        "today_upcoming": and_(
+            today,
+            Ticket.status.in_(NOT_STARTED),
+            Ticket.scheduled_start > m.now - START_TOLERANCE,
         ),
+        "today_unassigned": and_(
+            today, Ticket.assignee_id.is_(None), Ticket.status.not_in(FINISHED)
+        ),
+        "tomorrow_planned": tomorrow,
+        "tomorrow_unassigned": and_(tomorrow, Ticket.assignee_id.is_(None)),
+        # Fila em aberto: recentes x antigas, idade e o fluxo de 30 dias.
+        "open_recent": and_(_open(), in_window),
+        "age_d7": and_(_open(), Ticket.created_at >= m.days_ago(6)),
+        "age_d30": and_(_open(), in_window, Ticket.created_at < m.days_ago(6)),
+        "age_d90": and_(old, Ticket.created_at >= m.days_ago(89)),
+        "age_older": and_(_open(), Ticket.created_at < m.days_ago(89)),
+        "entered_30d": in_window,
+        "resolved_30d": Ticket.resolved_at >= m.recent_start,
+        "cancelled_30d": Ticket.cancelled_at >= m.recent_start,
+        "old_no_owner": and_(old, no_owner_clause()),
+        "old_unassigned": and_(old, Ticket.assignee_id.is_(None)),
+        "old_overdue_visit": and_(
+            old, Ticket.status.in_(NOT_STARTED), Ticket.scheduled_start < m.day_start
+        ),
+        "old_sla_breached": and_(old, breached_clause(m.now)),
+        "old_unproductive": and_(old, unproductive_pending_clause()),
+        # Atendimento ao cliente e equipe de campo (30 dias).
+        "on_time_base": arrivals,
+        "on_time_ok": and_(arrivals, Ticket.arrived_at <= arrival_limit()),
+        "arrivals_30d": Ticket.arrived_at >= m.recent_start,
+        "sla_base": sla,
+        "sla_ok": and_(sla, Ticket.resolved_at <= Ticket.resolution_due_at),
+        "sla_imported": and_(sla, Ticket.legacy.is_not(None)),
+        "onsite_base": onsite,
+        "onsite_over": and_(onsite, Ticket.work_seconds > onsite_hours * 3600),
     }
+    for i, start in enumerate(m.week_starts):
+        week_start, week_end = _week_bounds(start)
+        columns[f"week_created_{i}"] = and_(
+            Ticket.created_at >= week_start, Ticket.created_at < week_end
+        )
+        columns[f"week_resolved_{i}"] = and_(
+            Ticket.resolved_at >= week_start, Ticket.resolved_at < week_end
+        )
+    now = literal(m.now, DateTime(timezone=True))
+    age = cast(func.extract("epoch", now - Ticket.created_at), Float)
+    next_visit = and_(
+        Ticket.status.in_(NOT_STARTED),
+        Ticket.scheduled_start > m.now,
+        Ticket.scheduled_start < m.day_end,
+    )
     stmt = select(
-        *(func.count().filter(cond).label(name) for name, cond in columns.items())
+        *(func.count().filter(cond).label(name) for name, cond in columns.items()),
+        func.min(Ticket.scheduled_start).filter(next_visit).label("next_visit_at"),
+        func.percentile_cont(0.5).within_group(age).filter(_open()).label("median_age_s"),
+        func.percentile_cont(0.5)
+        .within_group(Ticket.work_seconds)
+        .filter(onsite)
+        .label("onsite_median_s"),
     ).select_from(Ticket)
     row = (await db.execute(stmt)).one()
-    counts = {name: int(getattr(row, name) or 0) for name in columns}
+    counts: dict[str, Any] = {name: int(getattr(row, name) or 0) for name in columns}
+    counts["next_visit_at"] = row.next_visit_at
+    counts["median_age_s"] = row.median_age_s
+    counts["onsite_median_s"] = row.onsite_median_s
     # O mesmo número do aviso do menu (GET /portal/inbox-count).
     counts["portal_requests"] = await portal_svc.inbox_count(db)
     return counts
@@ -949,55 +1024,82 @@ async def _quotes(db: AsyncSession, m: Moment) -> tuple[int, list[AttentionItem]
     return int(count), items
 
 
-# Grupos que vêm das OS: condição, ordem dos exemplos (o mais urgente primeiro) e o motivo.
-TicketGroup = tuple[Callable[[Moment], ColumnElement[bool]], Callable[[], list[Any]], Reason]
+@dataclass(frozen=True)
+class TicketGroup:
+    """Grupo que vem das OS: a condição (a mesma da contagem), a ordem dos exemplos (o mais
+    urgente primeiro), o motivo e as colunas a mais que o motivo lê."""
+
+    cond: Callable[[Moment], ColumnElement[bool]]
+    order: Callable[[Moment], list[Any]]
+    reason: Reason
+    extra: Callable[[], list[Any]] | None = None
+
 
 TICKET_GROUPS: dict[str, TicketGroup] = {
-    "sla_breached": (
-        lambda m: breached_clause(m.now),
-        lambda: [
+    "sla_breached": TicketGroup(
+        lambda m: and_(breached_clause(m.now), recent(m)),
+        lambda m: [
             Ticket.resolution_due_at.asc().nulls_last(),
             Ticket.response_due_at.asc().nulls_last(),
         ],
         _sla_reason,
     ),
-    "late_arrival": (
-        late_arrival_clause,
-        lambda: [Ticket.arrival_due_at.asc()],
-        _late_arrival_reason,
+    "late_arrival": TicketGroup(
+        late_arrival_clause, lambda m: [Ticket.arrival_due_at.asc()], _late_arrival_reason
     ),
-    "today_not_started": (
-        today_not_started_clause,
-        lambda: [Ticket.scheduled_start.asc()],
-        _not_started_reason,
+    "today_not_started": TicketGroup(
+        today_not_started_clause, lambda m: [Ticket.scheduled_start.asc()], _not_started_reason
     ),
-    "unassigned_soon": (
-        unassigned_soon_clause,
-        lambda: [Ticket.scheduled_start.asc().nulls_last(), Ticket.created_at.asc()],
+    "field_stuck": TicketGroup(
+        field_stuck_clause,
+        lambda m: [field_since().asc()],
+        _field_stuck_reason,
+        extra=lambda: [field_since().label("field_since")],
+    ),
+    "due_soon": TicketGroup(
+        due_soon_clause, lambda m: [Ticket.resolution_due_at.asc()], _due_soon_reason
+    ),
+    "unassigned_visit": TicketGroup(
+        unassigned_visit_clause, lambda m: [Ticket.scheduled_start.asc()], _unassigned_reason
+    ),
+    "missed_visits": TicketGroup(
+        missed_visits_clause, lambda m: [Ticket.scheduled_start.asc()], _missed_reason
+    ),
+    "unassigned": TicketGroup(
+        lambda m: and_(_open(), Ticket.assignee_id.is_(None), recent(m)),
+        lambda m: [Ticket.scheduled_start.asc().nulls_last(), Ticket.created_at.asc()],
         _unassigned_reason,
     ),
-    "unproductive_pending": (
-        lambda m: unproductive_pending_clause(),
-        lambda: [Ticket.last_unproductive_at.asc()],
+    "unproductive_pending": TicketGroup(
+        lambda m: and_(
+            unproductive_pending_clause(), Ticket.last_unproductive_at >= m.recent_start
+        ),
+        lambda m: [Ticket.last_unproductive_at.asc()],
         _unproductive_reason,
     ),
-    "no_schedule": (
-        lambda m: no_schedule_clause(),
-        lambda: [Ticket.created_at.asc()],
+    "no_schedule": TicketGroup(
+        lambda m: and_(no_schedule_clause(), recent(m)),
+        lambda m: [Ticket.created_at.asc()],
         _no_schedule_reason,
     ),
-    "stale": (stale_clause, lambda: [Ticket.updated_at.asc()], _stale_reason),
-    "no_owner": (lambda m: no_owner_clause(), lambda: [Ticket.created_at.asc()], _no_owner_reason),
-    # As mais recentes primeiro: são as que a equipe ainda lembra o motivo.
-    "violation_pending": (
-        lambda m: violation_pending_clause(m.now),
-        lambda: [Ticket.resolved_at.desc().nulls_last()],
-        _violation_reason,
+    "no_owner": TicketGroup(
+        lambda m: and_(no_owner_clause(), recent(m)),
+        lambda m: [Ticket.created_at.asc()],
+        _no_owner_reason,
     ),
-    "portal_requests": (
-        lambda m: portal_clause(),
-        lambda: [Ticket.created_at.asc()],
-        _portal_reason,
+    "portal_requests": TicketGroup(
+        lambda m: portal_clause(), lambda m: [Ticket.created_at.asc()], _portal_reason
+    ),
+    "stale": TicketGroup(
+        lambda m: and_(stale_clause(m), recent(m)),
+        lambda m: [Ticket.updated_at.asc()],
+        _stale_reason,
+    ),
+    # As mais recentes primeiro: são as que a equipe ainda lembra o motivo.
+    "violation_pending": TicketGroup(
+        lambda m: and_(violation_pending_clause(m.now), recent(m)),
+        lambda m: [Ticket.resolved_at.desc().nulls_last()],
+        _violation_reason,
     ),
 }
 
@@ -1010,31 +1112,33 @@ OTHER_GROUPS: dict[str, OtherGroup] = {
 }
 
 
-async def _attention(db: AsyncSession, m: Moment, counts: dict[str, int]) -> list[AttentionGroup]:
+async def _attention(db: AsyncSession, m: Moment, counts: dict[str, Any]) -> list[AttentionGroup]:
     groups: list[AttentionGroup] = []
-    for key, (cond, order, reason) in TICKET_GROUPS.items():
+    for key, group in TICKET_GROUPS.items():
         count = counts[key]
         if count:
-            items = await _ticket_items(db, m, cond(m), order(), reason)
+            extra = group.extra() if group.extra else ()
+            items = await _ticket_items(db, m, group.cond(m), group.order(m), group.reason, extra)
             groups.append(_group(key, count, items, m))
     for key, load in OTHER_GROUPS.items():
         count, items = await load(db, m)
         if count:
             groups.append(_group(key, count, items, m))
-    groups.sort(key=lambda g: (SEVERITY_RANK[g.severity], -g.count))
+    # Agora antes da rotina; depois o mais grave e o maior número (empate: a ordem dos grupos).
+    groups.sort(key=lambda g: (TIER_RANK[g.tier], SEVERITY_RANK[g.severity], -g.count))
     return groups
 
 
 def _group(key: str, count: int, items: list[AttentionItem], m: Moment) -> AttentionGroup:
     spec = GROUPS[key]
-    filters = _today_filters(m) if key == "today_not_started" else spec.filters
     return AttentionGroup(
         key=key,
         title=spec.title,
         severity=spec.severity,  # type: ignore[arg-type]
+        tier=spec.tier,  # type: ignore[arg-type]
         count=count,
         hint=spec.hint,
-        filters=filters,
+        filters=spec.make_filters(m) if spec.make_filters else spec.filters,
         link=spec.link,
         items=items,
     )
