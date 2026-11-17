@@ -242,8 +242,9 @@ def has_link(quote: Quote) -> bool:
 
 
 def _contact(quote: Quote) -> datetime | None:
-    """Último contato com o cliente: a última cobrança ou, sem ela, o envio."""
-    return quote.last_reminded_at or quote.sent_at
+    """Último contato com o cliente: o envio ou a cobrança, o que for mais recente (reenviar ou
+    renovar depois de uma cobrança também conta como contato)."""
+    return max((d for d in (quote.sent_at, quote.last_reminded_at) if d is not None), default=None)
 
 
 def follow_up(
@@ -294,7 +295,8 @@ def follow_up(
 def follow_up_condition(now: datetime, today: date, day_start: datetime) -> ColumnElement[bool]:
     """A regra de follow_up em SQL (quem chama faz o join com Ticket). "Não abriu" e "sem
     resposta" têm a mesma condição de fila: o que separa os dois (as aberturas) é só o motivo."""
-    contact = func.coalesce(Quote.last_reminded_at, Quote.sent_at)
+    # GREATEST ignora NULL no Postgres: o mesmo "mais recente" do _contact.
+    contact = func.greatest(Quote.sent_at, Quote.last_reminded_at)
     sent = Quote.status == QuoteStatus.SENT
     overdue = or_(Quote.status == QuoteStatus.EXPIRED, and_(sent, Quote.valid_until < today))
     return and_(
@@ -330,7 +332,7 @@ def follow_up_order() -> list[Any]:
     """Quem vence antes primeiro (sem validade no fim), depois o contato mais antigo."""
     return [
         Quote.valid_until.asc().nulls_last(),
-        func.coalesce(Quote.last_reminded_at, Quote.sent_at).asc(),
+        func.greatest(Quote.sent_at, Quote.last_reminded_at).asc(),
         Quote.number.asc(),
     ]
 

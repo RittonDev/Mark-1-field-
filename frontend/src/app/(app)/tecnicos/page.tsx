@@ -306,8 +306,25 @@ function TechniciansView() {
           variant="segmented"
           items={[
             { key: "list" as const, label: "Base técnica" },
-            { key: "favorites" as const, label: "Favoritos por cidade" },
-            { key: "nearby" as const, label: "Mais próximos de uma loja" },
+            // No celular, rótulos curtos: os três cabem na largura da tela.
+            {
+              key: "favorites" as const,
+              label: (
+                <>
+                  <span className="sm:hidden">Favoritos</span>
+                  <span className="hidden sm:inline">Favoritos por cidade</span>
+                </>
+              ),
+            },
+            {
+              key: "nearby" as const,
+              label: (
+                <>
+                  <span className="sm:hidden">Mais próximos</span>
+                  <span className="hidden sm:inline">Mais próximos de uma loja</span>
+                </>
+              ),
+            },
           ]}
           value={view}
           onChange={changeView}

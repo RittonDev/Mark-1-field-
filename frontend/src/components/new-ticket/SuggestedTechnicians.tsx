@@ -4,6 +4,7 @@ import clsx from "clsx";
 import { Check, MapPinned, MessageCircle, Plus, Star, UserPlus, X } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
+import { favoritesHref } from "@/components/technicians/FavoritesView";
 import { GrantAccessDialog } from "@/components/technicians/GrantAccessDialog";
 import { Button, ErrorBox, Skeleton } from "@/components/ui";
 import { errorMessage } from "@/lib/api";
@@ -43,7 +44,7 @@ function NoAccessLine({
   people: FavoriteTechnician[];
   onGrant: (t: FavoriteTechnician) => void;
 }) {
-  const href = `/tecnicos?${new URLSearchParams({ aba: "favoritos", uf: city.state, cidade: city.city }).toString()}`;
+  const href = favoritesHref(city.state, city.city);
   return (
     <p className="text-xs text-ink-muted">
       Sem acesso ao app:{" "}

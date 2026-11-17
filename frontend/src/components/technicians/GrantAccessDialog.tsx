@@ -56,9 +56,18 @@ export function GrantAccessDialog({
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
+  const activated = useRef(false);
   const grant = useMutation({
-    mutationFn: async () => {
-      await api.patch(`/technicians/${technician.id}`, { is_active: true });
+    mutationFn: async (): Promise<TemporaryPassword | null> => {
+      // Outra tela (ou aba) pode ter liberado há pouco, com a lista ainda antiga: liberar de novo
+      // trocaria a senha que o técnico acabou de receber e o tiraria do app.
+      // No "Tentar de novo" depois de a senha falhar, o acesso já foi liberado aqui: só falta a senha.
+      if (!activated.current) {
+        const current = await api.get<{ is_active: boolean }>(`/users/${technician.id}`);
+        if (current.is_active) return null;
+        await api.patch(`/technicians/${technician.id}`, { is_active: true });
+        activated.current = true;
+      }
       try {
         return await api.post<TemporaryPassword>(`/technicians/${technician.id}/reset-password`);
       } catch (error) {
@@ -68,6 +77,22 @@ export function GrantAccessDialog({
     // Mesmo com a senha falhando, o acesso pode já ter sido liberado: as telas releem nos dois casos.
     onSettled: () => refreshTechnicianViews(queryClient),
   });
+
+  if (grant.isSuccess && !grant.data) {
+    return (
+      <Dialog
+        open
+        size="sm"
+        onClose={onClose}
+        title={`${technician.name} já tem acesso ao app`}
+        footer={
+          <Button variant="primary" onClick={onClose}>
+            Concluir
+          </Button>
+        }
+      />
+    );
+  }
 
   if (grant.data) {
     return (

@@ -71,6 +71,8 @@ class FavoriteSet(BaseModel):
     city: str = Field(min_length=1, max_length=120)
     favorite: bool = True
     note: str | None = Field(default=None, max_length=300)
+    # Só para o Desfazer de um tirado: grava tirado mesmo fora do top 3.
+    hide: bool = False
 
     @field_validator("state", mode="before")
     @classmethod

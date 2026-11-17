@@ -224,14 +224,19 @@ class _Decision:
 async def _decisions(
     db: AsyncSession, *, state: str | None = None, key: str | None = None
 ) -> dict[CityKey, dict[uuid.UUID, _Decision]]:
-    stmt = select(
-        TechnicianFavorite.state,
-        TechnicianFavorite.city_key,
-        TechnicianFavorite.user_id,
-        TechnicianFavorite.kind,
-        TechnicianFavorite.note,
-        TechnicianFavorite.updated_by_id,
-        TechnicianFavorite.updated_at,
+    stmt = (
+        select(
+            TechnicianFavorite.state,
+            TechnicianFavorite.city_key,
+            TechnicianFavorite.user_id,
+            TechnicianFavorite.kind,
+            TechnicianFavorite.note,
+            TechnicianFavorite.updated_by_id,
+            TechnicianFavorite.updated_at,
+        )
+        .join(User, User.id == TechnicianFavorite.user_id)
+        # Quem deixou de ser técnico sai das contagens (a decisão volta a valer se ele voltar).
+        .where(User.role == UserRole.TECHNICIAN)
     )
     if state:
         stmt = stmt.where(TechnicianFavorite.state == state)
@@ -576,7 +581,8 @@ async def set_favorite(
         await _save(db, tech.id, city, FavoriteKind.INCLUDE, data.note, actor)
         return
     hidden = mine is not None and mine.kind == FavoriteKind.HIDE
-    if hidden or tech.id in _board(city, decisions).automatic:
+    # hide: o Desfazer de um tirado grava tirado mesmo fora do top 3 (a decisão não se perde).
+    if data.hide or hidden or tech.id in _board(city, decisions).automatic:
         await _save(db, tech.id, city, FavoriteKind.HIDE, data.note, actor)
     elif mine is not None:
         await _delete(db, tech.id, uf, key, actor)

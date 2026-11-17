@@ -960,6 +960,9 @@ function NewTicket() {
           submit();
         }}
         onKeyDown={(e) => {
+          // Tecla num diálogo em portal (ex.: Liberar acesso): não é com a Nova OS (o React propaga o
+          // evento do portal para o formulário).
+          if (!e.currentTarget.contains(e.target as Node)) return;
           // Já tratado pelo campo (busca com lista, etiqueta, mensagem do cliente): não é com o formulário.
           if (e.key !== "Enter" || e.defaultPrevented) return;
           if (e.ctrlKey || e.metaKey) {

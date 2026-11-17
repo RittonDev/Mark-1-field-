@@ -210,10 +210,20 @@ async def update_quote(
     return _out(quote, ticket_status=ticket_status)
 
 
+async def _lock(db: DB, quote: Quote) -> None:
+    """Trava a linha do orçamento antes de tocar a OS (a mesma ordem da aprovação do cliente) e
+    relê: cobrar, enviar ou cancelar no instante em que o cliente responde não trava o banco nem
+    grava por cima da resposta, e duas cobranças juntas contam duas."""
+    await db.execute(select(Quote.id).where(Quote.id == quote.id).with_for_update())
+    await db.refresh(quote)
+    svc.refresh_expiry(quote)
+
+
 @router.post("/quotes/{quote_id}/send", response_model=QuoteSent)
 async def send_quote(quote_id: uuid.UUID, db: DB, user: TicketManagerUser) -> QuoteSent:
     """Marca como enviado e devolve o link do cliente (reenviar mantém o mesmo link)."""
     quote = await svc.get(db, quote_id)
+    await _lock(db, quote)
     ticket_status = await _ensure_not_cancelled(db, quote.ticket_id)
     ticket = await tickets_svc.get_ticket(db, quote.ticket_id)
     token = await svc.send(db, ticket, quote, user)
@@ -227,6 +237,7 @@ async def remind_quote(quote_id: uuid.UUID, db: DB, user: TicketManagerUser) -> 
     """Registra a cobrança da resposta do cliente ("Cobrar"): o lembrete sai pelo WhatsApp,
     montado na tela, e a cobrança fica no histórico da OS (só a gestão vê)."""
     quote = await svc.get(db, quote_id)
+    await _lock(db, quote)
     ticket_status = await _ensure_not_cancelled(db, quote.ticket_id)
     ticket = await tickets_svc.get_ticket(db, quote.ticket_id)
     quote = await svc.remind(db, ticket, quote, user)
@@ -245,7 +256,9 @@ async def rotate_quote_link(quote_id: uuid.UUID, db: DB, user: TicketManagerUser
 @router.post("/quotes/{quote_id}/cancel", response_model=QuoteOut)
 async def cancel_quote(quote_id: uuid.UUID, db: DB, user: TicketManagerUser) -> QuoteOut:
     """Cancela (o link sai do ar) e solta os pedidos de peça ligados a ele."""
-    quote = await svc.cancel(db, await svc.get(db, quote_id), user)
+    quote = await svc.get(db, quote_id)
+    await _lock(db, quote)
+    quote = await svc.cancel(db, quote, user)
     ticket_status = await _ticket_status(db, quote.ticket_id)
     await commit_and_publish(db)
     return _out(quote, ticket_status=ticket_status)

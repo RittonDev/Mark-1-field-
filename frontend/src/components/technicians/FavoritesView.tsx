@@ -63,7 +63,8 @@ const TEXT_LINK =
 
 /** Endereço da aba já filtrada na cidade (a OS e o cadastro do técnico levam até ela). */
 export function favoritesHref(state: string, city: string): string {
-  return `/tecnicos?${new URLSearchParams({ aba: "favoritos", uf: state, cidade: city }).toString()}`;
+  // "Cidade-UF" na busca acha só a cidade (o nome solto também casaria com o sobrenome de um técnico).
+  return `/tecnicos?${new URLSearchParams({ aba: "favoritos", uf: state, cidade: `${city}-${state}` }).toString()}`;
 }
 
 /** Filtros rápidos (um de cada vez): favoritos sem acesso ao app e cidades com OS e sem favorito. */
@@ -76,7 +77,8 @@ interface Place {
 }
 
 /** Fixar ou tirar da lista (PUT, com a nota) ou voltar a valer só a regra automática (null = DELETE). */
-type Change = { favorite: boolean; note: string | null } | null;
+// hide: só no Desfazer de um tirado (grava tirado mesmo que ele já não esteja no top 3).
+type Change = { favorite: boolean; note: string | null; hide?: boolean } | null;
 
 interface FavoriteAction {
   tech: { id: UUID; name: string };
@@ -112,7 +114,7 @@ function ruleText(out: FavoritesOut): string {
 /** Como voltar ao estado de antes: fixado (com a nota), tirado (com o motivo) ou só a regra (DELETE). */
 function undoOf(before: FavoriteTechnician | null | undefined): Change {
   if (before?.pinned) return { favorite: true, note: before.note };
-  if (before?.hidden) return { favorite: false, note: before.note };
+  if (before?.hidden) return { favorite: false, note: before.note, hide: true };
   return null;
 }
 
@@ -146,6 +148,7 @@ function sendFavorite(techId: UUID, place: Place, change: Change) {
         city: place.city,
         favorite: change.favorite,
         note: change.note,
+        ...(change.hide ? { hide: true } : {}),
       })
     : api.delete<FavoriteCityDetail>(`/technicians/favorites/${techId}${buildQuery({ state: place.state, city: place.city })}`);
 }
@@ -964,10 +967,13 @@ function IncludeDialog({
     if (!picked || include.isPending) return;
     // O estado de antes (para o Desfazer): favorito, tirado da lista ou nada.
     const known = [...(detail.data?.favorites ?? city.favorites), ...(detail.data?.hidden ?? [])];
+    const before = known.find((f) => f.id === picked.id) ?? null;
     include.mutate({
       tech: picked,
-      change: { favorite: true, note: note.trim() || null },
-      before: known.find((f) => f.id === picked.id) ?? null,
+      // Nota em branco num já fixado mantém a nota dele (trocar ou apagar fica no lápis); o motivo de um
+      // tirado não vira nota.
+      change: { favorite: true, note: note.trim() || (before?.pinned ? before.note : null) },
+      before,
     });
   };
   const pickClass = (selected: boolean) =>

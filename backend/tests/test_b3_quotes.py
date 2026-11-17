@@ -285,6 +285,26 @@ async def test_remind_records_who_and_when_and_leaves_the_queue(
     assert (r.status_code, r.json()["detail"]) == (404, "Orçamento não encontrado")
 
 
+async def test_resending_after_a_reminder_is_the_latest_contact(
+    client: AsyncClient, world: World, engine: AsyncEngine
+) -> None:
+    """Cobrado há 3 dias e reenviado (ou renovado) agora: o contato é o reenvio, não a cobrança
+    antiga, e o orçamento não volta para a fila logo depois de sair para o cliente."""
+    t = await create(client, world, title="Troca de nobreak")
+    q = await sent_quote(client, world, engine, t, "Troca de nobreak", sent_at=ago(days=5))
+    r = await client.post(f"{API}/quotes/{q['id']}/remind", headers=world.analyst.headers)
+    assert r.status_code == 200, r.text
+    await set_quote(engine, q["id"], last_reminded_at=ago(days=3))
+    # Sem reenvio, a cobrança de 3 dias atrás é o último contato: volta para a fila.
+    assert q["id"] in await queue_ids(client, world)
+
+    await send(client, world, q)
+    assert q["id"] not in await queue_ids(client, world)
+    assert await home_group(client, world, "quotes_waiting") is None
+    one = await client.get(f"{API}/tickets/{t['id']}/quotes", headers=world.analyst.headers)
+    assert [x["follow_up"] for x in one.json() if x["id"] == q["id"]] == [None]
+
+
 # =========================================================================== aberturas do cliente
 
 

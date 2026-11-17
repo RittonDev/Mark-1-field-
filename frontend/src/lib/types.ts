@@ -1572,6 +1572,8 @@ export interface FavoriteSet {
   city: string;
   favorite: boolean;
   note?: string | null;
+  /** Só no Desfazer de um tirado: grava tirado mesmo fora do top 3. */
+  hide?: boolean;
 }
 
 // ---- Fichas completas (técnico, cliente e loja) ----

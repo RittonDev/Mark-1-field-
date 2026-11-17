@@ -390,6 +390,40 @@ async def test_hide_and_back_to_the_rule(
     r = await client.put(f"{FAV}/{ids['E']}", json={**SANTOS, "favorite": False}, headers=an)
     assert r.status_code == 200 and await _decisions(engine, ids["E"]) == []
 
+    # O Desfazer de um tirado (hide=true) grava tirado mesmo fora do top 3, com o motivo.
+    undo = {**SANTOS, "favorite": False, "note": "Atende só a capital", "hide": True}
+    r = await client.put(f"{FAV}/{ids['E']}", json=undo, headers=an)
+    assert r.status_code == 200, r.text
+    hidden_e = [h for h in r.json()["hidden"] if h["id"] == ids["E"]]
+    assert [h["note"] for h in hidden_e] == ["Atende só a capital"]
+    assert [d.kind.value for d in await _decisions(engine, ids["E"])] == ["hide"]
+
+
+@requires_db
+async def test_decisions_of_who_is_no_longer_a_technician_leave_the_counts(
+    client: AsyncClient, engine: AsyncEngine, world: World
+) -> None:
+    ids = await _seed(engine, world)
+    an = world.analyst.headers
+    a, e = ids["A"], ids["E"]
+    await client.put(f"{FAV}/{a}", json={**SANTOS, "favorite": False, "note": "Saiu"}, headers=an)
+    await client.put(f"{FAV}/{e}", json=SANTOS, headers=an)
+
+    # A gestão corrige o papel dos dois: as decisões ficam guardadas, mas não contam mais.
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as db:
+        for user_id in (a, e):
+            user = await db.get(User, uuid.UUID(user_id))
+            assert user is not None
+            user.role = UserRole.ANALYST
+        await db.commit()
+    r = await client.get(f"{FAV}/city", params=SANTOS, headers=an)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert (body["hidden_count"], body["hidden"]) == (0, [])
+    assert e not in _ids(body["favorites"])
+    assert len(await _decisions(engine, a)) == 1 and len(await _decisions(engine, e)) == 1
+
 
 @requires_db
 async def test_audit_who_decided(client: AsyncClient, engine: AsyncEngine, world: World) -> None:

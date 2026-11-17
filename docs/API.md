@@ -685,6 +685,8 @@ Até 3 técnicos por cidade pela regra automática, mais os que a central fixar.
   - `favorite=true`: fixa o técnico; um tirado vira fixado. A nota do corpo substitui a gravada.
   - `favorite=false`: se ele está tirado, só troca a nota; se é automático agora, tira da lista com a nota; senão,
     apaga a decisão.
+  - `hide=true` (só o Desfazer de um tirado usa): com `favorite=false`, grava tirado mesmo fora do top 3.
+  - Decisões de quem deixou de ser técnico ficam guardadas, mas não contam (voltam se ele voltar a ser técnico).
 - `DELETE /technicians/favorites/{technician_id}?state=&city=` → `FavoriteCityDetail`. Volta a valer só a regra;
   sem decisão gravada, responde 200 do mesmo jeito.
 - Erros:

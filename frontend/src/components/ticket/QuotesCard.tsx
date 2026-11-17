@@ -314,7 +314,16 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
         />
       ) : null}
       {sharing ? (
-        <ShareDialog ticket={ticket} quote={sharing.quote} mode={sharing.mode} onClose={() => setSharing(null)} onRotated={refresh} />
+        // A chave remonta o diálogo a cada orçamento e modo: um envio que termina depois não mistura o
+        // texto e o link de outro orçamento.
+        <ShareDialog
+          key={`${sharing.quote.id}:${sharing.mode}`}
+          ticket={ticket}
+          quote={sharing.quote}
+          mode={sharing.mode}
+          onClose={() => setSharing(null)}
+          onRotated={refresh}
+        />
       ) : null}
       {opened ? (
         <QuoteViewer
@@ -744,7 +753,7 @@ export function QuoteEditor({
                         type="button"
                         onClick={() => setLine(l.id, { unit_price: moneyText(lastPrice.unit_price) })}
                         title={lastPrice.decided_at ? `${lastPrice.quote_code} · ${formatDate(lastPrice.decided_at)}` : lastPrice.quote_code}
-                        aria-label={`Item ${n}: usar o último preço aprovado pelo cliente, ${formatMoney(lastPrice.unit_price)} (${lastPrice.quote_code})`}
+                        aria-label={`Último aprovado: ${formatMoney(lastPrice.unit_price)}, item ${n} (${lastPrice.quote_code})`}
                         className="rounded-md text-xs font-medium text-brand-ink tabular-nums underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
                       >
                         Último aprovado: {formatMoney(lastPrice.unit_price)}
