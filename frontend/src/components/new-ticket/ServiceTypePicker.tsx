@@ -30,7 +30,7 @@ export function ServiceTypePicker({
   invalid,
   describedBy,
   required,
-  placeholder = "Buscar tipo de serviço",
+  placeholder = "Buscar tipo de OS",
 }: {
   types: ServiceType[] | undefined;
   value: ServiceType | null;
@@ -67,13 +67,13 @@ export function ServiceTypePicker({
       loading={loading}
       id={id}
       labelledBy={labelledBy}
-      ariaLabel={ariaLabel ?? "Tipo de serviço"}
+      ariaLabel={ariaLabel ?? "Tipo de OS"}
       invalid={invalid}
       describedBy={describedBy}
       required={required}
       placeholder={placeholder}
-      emptyText="Nenhum tipo de serviço com esse nome"
-      clearLabel="Tirar o tipo de serviço"
+      emptyText="Nenhum tipo de OS com esse nome"
+      clearLabel="Tirar o tipo de OS"
       renderItem={(t) => (
         <span className="flex flex-col">
           <span className="flex flex-wrap items-center gap-x-1.5 font-medium">

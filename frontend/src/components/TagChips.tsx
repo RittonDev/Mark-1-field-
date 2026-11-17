@@ -226,6 +226,11 @@ export function TagsInput({
               const pick = showList ? suggestions[activeIndex] : undefined;
               if (pick) add(pick.tag);
               else if (typed) add({ name: typed, color: null });
+            } else if (e.key === "Enter" && typed) {
+              // Ctrl+Enter com um nome digitado: a etiqueta entra primeiro (o formulário em volta não salva
+              // sem ela); o próximo Ctrl+Enter salva.
+              e.preventDefault();
+              add({ name: typed, color: null });
             } else if (e.key === "Escape" && showList) {
               e.preventDefault();
               setOpen(false);

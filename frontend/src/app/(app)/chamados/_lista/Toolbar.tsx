@@ -142,7 +142,7 @@ export function ColumnsMenu({ columns }: { columns: ColumnsState }) {
     <Popover
       label="Colunas da lista"
       triggerClassName={buttonClassName("secondary")}
-      panelClassName="w-72"
+      width="sm"
       trigger={
         <>
           <Columns3 aria-hidden className="size-4" />

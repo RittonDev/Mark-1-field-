@@ -46,7 +46,7 @@ function StatusFilter({
   const summary = value.length === 0 ? null : value.length === 1 ? STATUS[value[0]].label : `${value.length} escolhidas`;
   const toggle = (s: TicketStatus) => onChange(STATUS_ORDER.filter((x) => (x === s ? !value.includes(s) : value.includes(x))));
   return (
-    <FilterPopover label="Situação" value={summary} panelLabel="Filtrar pela situação" panelClassName="w-72">
+    <FilterPopover label="Situação" value={summary} panelLabel="Filtrar pela situação" width="sm">
       {(close) => (
         <div className="flex flex-col gap-2">
           <fieldset>
@@ -272,7 +272,7 @@ function LocationFilter({
 }) {
   const summary = value ? nameOr(location?.name, loading) : null;
   return (
-    <FilterPopover label="Localização" value={summary} panelLabel="Filtrar pela localização" panelClassName="w-96">
+    <FilterPopover label="Localização" value={summary} panelLabel="Filtrar pela localização" width="lg">
       {(close) =>
         value && loading ? (
           <Skeleton className="h-9 w-full rounded-lg" />
@@ -392,7 +392,7 @@ export function FilterBar({
         label="Identificador"
         value={f.number !== null ? String(f.number) : null}
         panelLabel="Filtrar pelo identificador"
-        panelClassName="w-72"
+        width="sm"
       >
         {(close) => (
           <NumberForm

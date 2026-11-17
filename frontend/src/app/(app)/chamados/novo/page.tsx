@@ -765,8 +765,9 @@ function NewTicket() {
       assignee_id: f.assignee_id || null,
       helper_ids: d.helperIds,
       scheduled_start: startIso,
-      // A lista que o analista vê (o padrão ou o que ele ajustou), mesmo vazia.
-      tags,
+      // A lista que o analista vê (o padrão ou o que ele ajustou), mesmo vazia. Com as regras ainda
+      // carregando, vai sem a lista: a API aplica as mesmas regras (as de projeto, com projeto).
+      tags: d.tagsAuto && tagRules.isLoading ? undefined : tags,
     };
     if (conflicts) payload.allow_conflict = true;
     // "Assumir" é o padrão: sem owner_id, quem cria leva a OS para a própria fila.
@@ -1173,6 +1174,7 @@ function NewTicket() {
                         key={offset}
                         type="button"
                         onClick={() => pickDay(offset)}
+                        aria-label={offset === 0 ? "Agendar para hoje" : "Agendar para amanhã"}
                         className="rounded-md border border-line px-2 py-0.5 text-xs font-medium text-ink-muted hover:border-brand hover:text-brand-ink focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
                       >
                         {offset === 0 ? "Hoje" : "Amanhã"}

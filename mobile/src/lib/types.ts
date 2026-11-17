@@ -319,6 +319,10 @@ export interface TicketListItem {
   recurrence_30d?: number;
   /** Etiquetas (ex.: "Avulso", "Faturamento Matriz"), vindas do Field Control. */
   tags?: Tag[];
+  /** Tipo de OS (colunas opcionais da lista de chamados; a OS completa sempre traz). */
+  service_type?: ServiceTypeRef | null;
+  /** Escopo: o que deve ser feito no atendimento (coluna opcional da lista de chamados). */
+  description?: string;
 }
 
 export interface TicketDetail extends TicketListItem {

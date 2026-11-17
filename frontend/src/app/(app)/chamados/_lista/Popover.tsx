@@ -118,9 +118,9 @@ export function Popover({
           role="dialog"
           aria-label={label}
           className={clsx(
-            "absolute top-full z-40 mt-1.5 w-80 max-w-[calc(100vw-2rem)] animate-pop rounded-xl border border-line bg-surface p-3 shadow-pop",
+            "absolute top-full z-40 mt-1.5 max-w-[calc(100vw-2rem)] animate-pop rounded-xl border border-line bg-surface p-3 shadow-pop",
+            PANEL_WIDTHS[width].className,
             alignRight ? "right-0" : "left-0",
-            panelClassName,
           )}
         >
           {children(close)}
@@ -135,14 +135,14 @@ export function FilterPopover({
   label,
   value,
   panelLabel,
-  panelClassName,
+  width,
   children,
 }: {
   label: string;
   /** Resumo do que está escolhido (vazio: filtro sem uso). */
   value?: string | null;
   panelLabel: string;
-  panelClassName?: string;
+  width?: PanelWidth;
   children: (close: (focusTrigger?: boolean) => void) => React.ReactNode;
 }) {
   const active = Boolean(value);
@@ -151,7 +151,7 @@ export function FilterPopover({
       label={panelLabel}
       triggerLabel={active ? `${label}: ${value}` : label}
       triggerClassName={pillClassName(active)}
-      panelClassName={panelClassName}
+      width={width}
       trigger={
         <>
           <span className="truncate">

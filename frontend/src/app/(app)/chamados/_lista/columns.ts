@@ -10,11 +10,13 @@ export type ColumnKey =
   | "customer"
   | "location"
   | "status"
-  | "priority"
-  | "title"
   | "technician"
+  | "service_type"
+  | "scope"
+  | "title"
   | "owner"
   | "sla"
+  | "priority"
   | "created"
   | "texts";
 
@@ -44,11 +46,13 @@ export const COLUMNS: ColumnDef[] = [
   { key: "customer", label: "Cliente", initial: true, sort: { field: "customer", first: "asc" } },
   { key: "location", label: "Localização", initial: true },
   { key: "status", label: "Situação", initial: false },
-  { key: "priority", label: "Prioridade", initial: false, sort: { field: "priority", first: "asc" } },
-  { key: "title", label: "Título", initial: false },
   { key: "technician", label: "Técnico", initial: false },
+  { key: "service_type", label: "Tipo de OS", initial: false },
+  { key: "scope", label: "Escopo", initial: false },
+  { key: "title", label: "Título", initial: false },
   { key: "owner", label: "Analista", initial: false, managerOnly: true },
   { key: "sla", label: "Prazo (SLA)", initial: false, sort: { field: "resolution_due_at", first: "asc" } },
+  { key: "priority", label: "Prioridade", initial: false, sort: { field: "priority", first: "asc" } },
   { key: "created", label: "Criada em", initial: false, sort: { field: "created_at", first: "desc" } },
   { key: "texts", label: "Textos para o grupo", initial: false },
 ];

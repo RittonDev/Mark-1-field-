@@ -15,6 +15,8 @@ import {
   OwnerCell,
   PriorityCell,
   ScheduleCell,
+  ScopeCell,
+  ServiceTypeCell,
   SlaCell,
   StatusCell,
   TechnicianCell,
@@ -108,6 +110,10 @@ function cell(key: ColumnKey, t: TicketListItem, ctx: CellContext): React.ReactN
       return <StatusCell t={t} />;
     case "priority":
       return <PriorityCell t={t} />;
+    case "service_type":
+      return <ServiceTypeCell t={t} />;
+    case "scope":
+      return <ScopeCell t={t} />;
     case "title":
       return <TitleCell t={t} />;
     case "technician":
@@ -144,7 +150,9 @@ function SkeletonRows({ count, columns, edit }: { count: number; columns: Column
           </Td>
           {columns.map((c) => (
             <Td key={c.key}>
-              <Skeleton className={clsx("h-3", c.key === "location" || c.key === "title" ? "w-40" : c.key === "tags" ? "w-28" : "w-20")} />
+              <Skeleton
+                className={clsx("h-3", c.key === "location" || c.key === "title" || c.key === "scope" ? "w-40" : c.key === "tags" ? "w-28" : "w-20")}
+              />
               {c.key === "scheduled" || c.key === "location" ? <Skeleton className="mt-1.5 h-2.5 w-12" /> : null}
             </Td>
           ))}

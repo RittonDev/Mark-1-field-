@@ -137,6 +137,28 @@ export function PriorityCell({ t }: { t: TicketListItem }) {
   return <PriorityBadge priority={t.priority} />;
 }
 
+/** Tipo de OS (o serviço que será feito). */
+export function ServiceTypeCell({ t }: { t: TicketListItem }) {
+  const name = t.service_type?.name;
+  if (!name) return empty;
+  return (
+    <span className="block max-w-[12rem] truncate" title={name}>
+      {name}
+    </span>
+  );
+}
+
+/** Escopo (o que deve ser feito): duas linhas, o texto inteiro no título. */
+export function ScopeCell({ t }: { t: TicketListItem }) {
+  const scope = t.description?.trim();
+  if (!scope) return empty;
+  return (
+    <span className="line-clamp-2 max-w-[22rem] min-w-[14rem] text-xs leading-relaxed text-ink-muted" title={scope}>
+      {scope}
+    </span>
+  );
+}
+
 /** Título da OS e, embaixo, o nº do chamado no sistema do cliente. */
 export function TitleCell({ t }: { t: TicketListItem }) {
   return (
