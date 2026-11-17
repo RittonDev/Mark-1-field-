@@ -112,7 +112,6 @@ function IntakeBody({
           <Store aria-hidden className="size-5" />
         </span>
         <p className="text-sm font-bold text-ink">Escolha o cliente e a localização</p>
-        <p className="text-xs text-ink-muted">Aqui aparecem o histórico, a avaliação do cliente, o contato da loja e o prazo de chegada.</p>
       </div>
     );
   }

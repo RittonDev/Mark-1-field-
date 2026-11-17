@@ -63,7 +63,7 @@ export function SuggestedTechnicians({
     return (
       <p className="flex items-center gap-2 rounded-lg border border-dashed border-line-strong px-3 py-3 text-xs text-ink-muted">
         <MapPinned aria-hidden className="size-4 shrink-0 text-ink-subtle" />
-        Escolha a loja para ver os técnicos mais indicados para ela.
+        Escolha a localização.
       </p>
     );
   }
@@ -91,7 +91,7 @@ export function SuggestedTechnicians({
   if (!items?.length) {
     return (
       <p className="rounded-lg bg-surface-2 px-3 py-3 text-xs text-ink-muted">
-        Nenhum técnico ativo encontrado para esta região. Use “Copiar convite para o grupo” para chamar um parceiro no WhatsApp.
+        Nenhum técnico ativo nesta região.
       </p>
     );
   }
@@ -290,7 +290,6 @@ export function HelpersField({
           </select>
         </span>
       </div>
-      <span className="text-xs text-ink-subtle">Eles veem a OS no app e mandam fotos; iniciar e concluir fica com o responsável.</span>
     </div>
   );
 }

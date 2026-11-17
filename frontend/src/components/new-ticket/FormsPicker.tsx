@@ -97,12 +97,12 @@ export function FormsPicker({
       ) : null}
       {value.length ? (
         <Checkbox
-          label="Obrigatórios: a OS só é concluída com eles preenchidos"
+          label="Obrigatórios para concluir"
           checked={required}
           onChange={onRequiredChange}
         />
       ) : (
-        <p className="text-xs text-ink-subtle">Nenhum formulário por enquanto (dá para incluir depois, na OS).</p>
+        <p className="text-xs text-ink-subtle">Nenhum formulário.</p>
       )}
     </div>
   );
