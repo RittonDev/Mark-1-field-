@@ -22,7 +22,6 @@ import {
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useId, useMemo, useRef, useState } from "react";
-import { PriorityBadge } from "@/components/badges";
 import { useConfirm } from "@/components/Confirm";
 import { LocationDialog } from "@/components/LocationDialog";
 import { LocationPicker } from "@/components/LocationPicker";
@@ -110,8 +109,6 @@ import { copyText } from "@/lib/whatsapp";
 const TEXT_LIMIT = 20_000;
 const NOTE_LIMIT = 5_000;
 const MAX_MINUTES = 60 * 24 * 7;
-/** Tolerância da chegada sobre o horário agendado (a mesma de field.SCHEDULE_TOLERANCE na API). */
-const SCHEDULE_TOLERANCE_MS = 30 * 60_000;
 /** "Mais detalhes" aberto ou fechado: lembrado neste navegador. */
 const MORE_KEY = "maxx.novaOs.maisOpcoes";
 
@@ -438,21 +435,12 @@ function NewTicket() {
   const defaultTags = (mode: TagMode): Tag[] =>
     tagRules ? (mode === "project" ? tagRules.on_project : tagRules.on_create).map((t) => ({ name: t.name, color: t.color })) : [];
   const tags: Tag[] = d.tagsAuto ? defaultTags(tagMode) : d.tags;
-  const payoutNames = tagRules?.remove_on_payout_paid ?? [];
-  const payoutTags = tags.filter((t) => payoutNames.some((n) => n.toLowerCase() === t.name.toLowerCase()));
 
-  // Prazos: o SLA (24x7) conta da abertura. A chegada também, mas com a visita marcada para depois
-  // disso vale o horário dela + 30 min (como a API calcula: a visita combinada não nasce atrasada).
-  const effectivePriority = f.priority || "medium";
-  const policy = sla.data?.find((p) => p.priority === effectivePriority);
-  const responseDue = policy ? now + policy.response_minutes * 60_000 : null;
+  // Prazo de solução (SLA 24x7, conta da abertura): avisa quando o agendamento já nasce depois dele.
+  const policy = sla.data?.find((p) => p.priority === (f.priority || "medium"));
   const resolutionDue = policy ? now + policy.resolution_minutes * 60_000 : null;
   const startMs = startIso ? new Date(startIso).getTime() : null;
   const startPassed = startMs !== null && startMs < now - 5 * 60_000;
-  const arrivalHours = location ? (intake.data?.location?.arrival_hours ?? null) : null;
-  const arrivalByClock = arrivalHours ? now + arrivalHours * 3_600_000 : null;
-  const arrivalBySchedule = arrivalByClock !== null && startMs !== null && startMs + SCHEDULE_TOLERANCE_MS > arrivalByClock;
-  const arrivalDue = arrivalByClock === null ? null : arrivalBySchedule && startMs !== null ? startMs + SCHEDULE_TOLERANCE_MS : arrivalByClock;
   const lateResolution = startMs !== null && !startPassed && resolutionDue !== null && startMs > resolutionDue;
   const endLabel = startMs !== null ? formatTime(iso(startMs + (minutes ?? 60) * 60_000)) : null;
   const storeAddress = location
@@ -885,6 +873,7 @@ function NewTicket() {
       d.ownerMode === "none" ? "Sem analista" : d.ownerMode === "other" ? `Analista: ${ownerName ?? "a escolher"}` : null,
       project ? `Projeto ${project.code}` : null,
       d.formIds.length ? `${d.formIds.length} ${d.formIds.length === 1 ? "formulário" : "formulários"}` : null,
+      f.priority ? `Prioridade ${PRIORITY[f.priority].code}` : null,
       minutes ? `Duração ${formatMinutes(minutes)}` : null,
       f.client_reference.trim() ? `Chamado ${f.client_reference.trim()}` : null,
       f.visit_note.trim() ? "Recado para o técnico" : null,
@@ -971,7 +960,7 @@ function NewTicket() {
           // Enter puro num campo de uma linha não cria a OS pela metade (só Ctrl+Enter ou o botão).
           if ((e.target as HTMLElement).tagName === "INPUT") e.preventDefault();
         }}
-        // Lateral a partir de 1280 px: técnicos sugeridos, cliente e localização e prazos ao lado dos
+        // Lateral a partir de 1280 px: técnicos sugeridos e histórico do cliente e da loja ao lado dos
         // passos. Abaixo disso, ela desce para depois do formulário.
         className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_22rem] 2xl:grid-cols-[minmax(0,1fr)_24rem]"
       >
@@ -1545,25 +1534,40 @@ function NewTicket() {
                   )}
                 </div>
 
-                <Field label="Categoria">
-                  <Select value={f.category_id} onChange={(e) => setForm("category_id", e.target.value)}>
-                    <option value="">Sem categoria</option>
-                    {sortedCategories.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.full_name}
+                {/* Três seletores curtos lado a lado, na linha toda. */}
+                <div className="grid gap-x-6 gap-y-5 @2xl:col-span-2 @2xl:grid-cols-3">
+                  <Field label="Prioridade">
+                    <Select id={ids.priority} value={f.priority} onChange={(e) => setForm("priority", e.target.value as NewTicketForm["priority"])}>
+                      <option value="">
+                        Padrão ({PRIORITY.medium.code} · {PRIORITY.medium.label})
                       </option>
-                    ))}
-                  </Select>
-                </Field>
-                <Field label="Tipo de atendimento">
-                  <Select value={f.type} onChange={(e) => setForm("type", e.target.value as TicketType)}>
-                    {(Object.keys(TICKET_TYPE) as TicketType[]).map((type) => (
-                      <option key={type} value={type}>
-                        {TICKET_TYPE[type]}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
+                      {PRIORITY_ORDER.map((p) => (
+                        <option key={p} value={p}>
+                          {PRIORITY[p].code} · {PRIORITY[p].label}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <Field label="Categoria">
+                    <Select value={f.category_id} onChange={(e) => setForm("category_id", e.target.value)}>
+                      <option value="">Sem categoria</option>
+                      {sortedCategories.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.full_name}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <Field label="Tipo de atendimento">
+                    <Select value={f.type} onChange={(e) => setForm("type", e.target.value as TicketType)}>
+                      {(Object.keys(TICKET_TYPE) as TicketType[]).map((type) => (
+                        <option key={type} value={type}>
+                          {TICKET_TYPE[type]}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                </div>
 
                 <div className="@2xl:col-span-2">
                   <HelpersField
@@ -1630,7 +1634,7 @@ function NewTicket() {
           </Card>
         </div>
 
-        {/* Lateral: no largo fica ao lado dos passos (e acompanha a rolagem); no estreito, desce em duas colunas. */}
+        {/* Lateral: técnicos sugeridos e histórico; no largo fica ao lado dos passos (e acompanha a rolagem). */}
         <aside
           className="grid gap-4 md:grid-cols-2 xl:sticky xl:top-[4.5rem] xl:flex xl:max-h-[calc(100dvh-10.5rem)] xl:flex-col xl:overflow-y-auto"
           aria-label="Contexto da OS"
@@ -1676,59 +1680,6 @@ function NewTicket() {
 
           <Card>
             <IntakePanel context={intake.data} loading={intake.isLoading} error={intake.error} onRetry={() => void intake.refetch()} />
-          </Card>
-
-          <Card className="p-4">
-            <SectionTitle as="h2" aside={<PriorityBadge priority={effectivePriority} />}>
-              Prazos desta OS
-            </SectionTitle>
-            {/* A prioridade fica junto dos prazos que ela define. */}
-            <div className="mt-3 flex flex-col gap-1.5">
-              <label htmlFor={ids.priority} className="text-xs font-semibold text-ink/80">
-                Prioridade
-              </label>
-              <Select id={ids.priority} value={f.priority} onChange={(e) => setForm("priority", e.target.value as NewTicketForm["priority"])}>
-                <option value="">
-                  Padrão ({PRIORITY.medium.code} · {PRIORITY.medium.label})
-                </option>
-                {PRIORITY_ORDER.map((p) => (
-                  <option key={p} value={p}>
-                    {PRIORITY[p].code} · {PRIORITY[p].label}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            {policy && responseDue && resolutionDue ? (
-              <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-xs">
-                <dt className="text-ink-muted">1ª resposta</dt>
-                <dd className="text-right font-medium text-ink tabular-nums">até {dayTimeLabel(iso(responseDue), now, true)}</dd>
-                <dt className="text-ink-muted">Solução</dt>
-                <dd className="text-right font-medium text-ink tabular-nums">até {dayTimeLabel(iso(resolutionDue), now, true)}</dd>
-                {arrivalDue ? (
-                  <>
-                    <dt className="text-ink-muted">Chegada</dt>
-                    <dd className="text-right font-medium text-ink tabular-nums">
-                      até {dayTimeLabel(iso(arrivalDue), now, true)}{" "}
-                      <span className="font-normal text-ink-muted">{arrivalBySchedule ? "(agendamento + 30 min)" : `(${arrivalHours}h)`}</span>
-                    </dd>
-                  </>
-                ) : null}
-              </dl>
-            ) : sla.isLoading ? (
-              <div className="mt-3 flex flex-col gap-2" role="status" aria-label="Carregando os prazos">
-                <Skeleton className="h-3 w-full" />
-                <Skeleton className="h-3 w-4/5" />
-              </div>
-            ) : sla.error ? (
-              <p className="mt-2 text-xs text-ink-muted">
-                Não deu para carregar os prazos.{" "}
-                <button type="button" onClick={() => void sla.refetch()} className="font-semibold text-brand-ink hover:underline">
-                  Tentar de novo
-                </button>
-              </p>
-            ) : (
-              <p className="mt-2 text-xs text-ink-muted">Os prazos seguem a prioridade escolhida.</p>
-            )}
           </Card>
         </aside>
 
