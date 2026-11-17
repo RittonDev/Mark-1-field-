@@ -74,6 +74,18 @@ class Quote(UUIDPrimaryKey, Timestamps, Base):
     decision_ip: Mapped[str | None] = mapped_column(String(64))
     rejection_reason: Mapped[str | None] = mapped_column(Text)
 
+    # Aberturas do link pelo cliente (a equipe com sessão e a prévia não contam; recarregar em
+    # menos de 10 min conta uma vez só).
+    client_views: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    client_first_viewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    client_last_viewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Cobranças da resposta ("Cobrar"): o lembrete vira o último contato com o cliente.
+    reminder_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    last_reminded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_reminded_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+
     # Orçamento migrado (Field Control): código antigo, link da assinatura e anexos.
     legacy: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
@@ -82,3 +94,6 @@ class Quote(UUIDPrimaryKey, Timestamps, Base):
     )
 
     created_by: Mapped[User | None] = relationship(foreign_keys=[created_by_id], lazy="selectin")
+    last_reminded_by: Mapped[User | None] = relationship(
+        foreign_keys=[last_reminded_by_id], lazy="selectin"
+    )

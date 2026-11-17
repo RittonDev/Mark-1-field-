@@ -18,6 +18,10 @@ def format_quote_code(number: int) -> str:
 # Produto (material), serviço (mão de obra) ou despesa (deslocamento, pedágio...).
 QuoteItemKind = Literal["product", "service", "expense"]
 
+# Por que o orçamento está na fila "Para cobrar" (a mesma regra do Início): o cliente não abriu
+# o link, abriu e não respondeu, vence hoje ou amanhã, está em revisão parada ou venceu há pouco.
+QuoteFollowUp = Literal["not_opened", "no_answer", "expiring", "in_review", "expired"]
+
 
 class KindTotals(BaseModel):
     product: Money = Decimal("0")
@@ -38,6 +42,14 @@ class QuoteLink(BaseModel):
     token: str
     path: str
     url: str
+
+
+class QuoteLegacyAttachment(BaseModel):
+    """Anexo do orçamento no Field Control (cotação, nota): link externo."""
+
+    url: str
+    title: str | None = None
+    type: str | None = None
 
 
 class QuoteItemIn(BaseModel):
@@ -94,6 +106,20 @@ class QuoteOut(ORMModel):
     updated_at: dt.datetime
     signature_url: str | None = None
     link: QuoteLink | None = None
+    # Aberturas do link pelo cliente (a equipe e a prévia não contam).
+    client_views: int = 0
+    client_first_viewed_at: dt.datetime | None = None
+    client_last_viewed_at: dt.datetime | None = None
+    # Cobranças registradas pelo "Cobrar".
+    reminder_count: int = 0
+    last_reminded_at: dt.datetime | None = None
+    last_reminded_by: Ref | None = None
+    follow_up: QuoteFollowUp | None = None
+    # Orçamento migrado do Field Control: o código antigo, a descrição (só quando difere do
+    # título) e os anexos. Só para a equipe: nunca vai para a página do cliente.
+    legacy_code: str | None = None
+    legacy_description: str | None = None
+    legacy_attachments: list[QuoteLegacyAttachment] = []
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -196,11 +222,25 @@ class CatalogItemOut(ORMModel):
     description: str | None
     is_active: bool
     kind: str = "product"
+    # Orçamentos não cancelados dos últimos 12 meses com o item, e o mais recente deles.
+    uses_12m: int = 0
+    last_used_at: dt.datetime | None = None
+
+
+class QuoteLastPrice(BaseModel):
+    """Último preço aprovado do cliente para um item do catálogo."""
+
+    catalog_item_id: uuid.UUID
+    unit_price: Money
+    quote_id: uuid.UUID
+    quote_code: str
+    decided_at: dt.datetime | None
 
 
 class QuoteListRow(QuoteOut):
     ticket_code: str
     customer: str | None
+    customer_id: uuid.UUID | None = None
     # Local (loja) da OS do orçamento.
     location: str | None = None
 

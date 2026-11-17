@@ -107,6 +107,8 @@ class TicketEventType(StrEnum):
     QUOTE_SENT = "quote_sent"
     QUOTE_APPROVED = "quote_approved"
     QUOTE_REJECTED = "quote_rejected"
+    # Cobrança da resposta do cliente ("Cobrar": lembrete pelo WhatsApp), só para a gestão.
+    QUOTE_REMINDED = "quote_reminded"
     # Autorização do cliente para a visita (cada chamado é cobrado).
     AUTHORIZATION_RECORDED = "authorization_recorded"
     # Pedido de peça do técnico (peça só entra com orçamento aprovado).

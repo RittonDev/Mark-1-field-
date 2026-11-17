@@ -135,6 +135,9 @@ class TechnicianSuggestion(BaseModel):
     score: float
     # Por que foi sugerido: "Mora em Santos", "A 4 km agora", "Livre no horário"...
     reasons: list[str]
+    # Favorito na cidade da loja: pela regra ("auto") ou fixado pela central ("manual").
+    favorite: Literal["auto", "manual"] | None = None
+    favorite_note: str | None = None
 
 
 class RegionCity(BaseModel):

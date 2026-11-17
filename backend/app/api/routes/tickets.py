@@ -59,6 +59,7 @@ _INTERNAL_EVENT_TYPES = {
     "expense_updated",
     "expense_removed",
     "quote_sent",
+    "quote_reminded",
     "owner_changed",
     "authorization_recorded",
     "part_requested",
