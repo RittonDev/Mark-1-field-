@@ -427,10 +427,14 @@ async def test_client_report_link(client: AsyncClient, world: World) -> None:
     assert office["token"] == again["token"]
     assert (await client.get(f"{public}/{again['token']}")).status_code == 200
 
-    # OS concluída sem link (ex.: antiga): o texto de fechamento cria na hora.
+    # Link desativado pela gestão: o texto de fechamento não cria outro sozinho (a linha do link
+    # sai); um link novo sai pelo menu, e aí o texto já leva o novo.
     await client.delete(f"{API}/tickets/{tid}/report-link", headers=an)
     msgs = (await client.get(f"{API}/tickets/{tid}/messages", headers=an)).json()
     closing = next(m["text"] for m in msgs if m["key"] == "fechamento")
-    assert "/relatorio/" in closing
-    detail = (await client.get(f"{API}/tickets/{tid}", headers=an)).json()
-    assert detail["report_link"]["url"] in closing
+    assert "/relatorio/" not in closing
+    assert (await client.get(f"{API}/tickets/{tid}", headers=an)).json()["report_link"] is None
+    fresh = (await client.post(f"{API}/tickets/{tid}/report-link", headers=an)).json()
+    msgs = (await client.get(f"{API}/tickets/{tid}/messages", headers=an)).json()
+    closing = next(m["text"] for m in msgs if m["key"] == "fechamento")
+    assert closing.endswith(f"Relatório do atendimento: {fresh['url']}")
