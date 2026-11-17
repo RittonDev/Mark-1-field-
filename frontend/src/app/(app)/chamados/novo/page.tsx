@@ -1634,49 +1634,55 @@ function NewTicket() {
           </Card>
         </div>
 
-        {/* Lateral: técnicos sugeridos e histórico; no largo fica ao lado dos passos (e acompanha a rolagem). */}
+        {/* Lateral: técnicos sugeridos e histórico; no largo fica ao lado dos passos (e acompanha a rolagem).
+            Com o colaborador escolhido (no passo 6 ou em "Responsável"), os sugeridos saem; tirando ele, voltam. */}
         <aside
-          className="grid gap-4 md:grid-cols-2 xl:sticky xl:top-[4.5rem] xl:flex xl:max-h-[calc(100dvh-10.5rem)] xl:flex-col xl:overflow-y-auto"
+          className={clsx(
+            "grid gap-4 xl:sticky xl:top-[4.5rem] xl:flex xl:max-h-[calc(100dvh-10.5rem)] xl:flex-col xl:overflow-y-auto",
+            !f.assignee_id && "md:grid-cols-2",
+          )}
           aria-label="Contexto da OS"
         >
-          <Card className="flex flex-col gap-3 p-4">
-            <SectionTitle
-              as="h2"
-              wrap
-              aside={
-                <>
-                  {suggestions.isFetching ? <span className="text-xs text-ink-subtle">atualizando...</span> : null}
-                  {f.location_id ? (
-                    <button type="button" onClick={() => void copyGroupInvite()} className="text-xs font-semibold text-brand-ink hover:underline">
-                      Copiar convite para o grupo
-                    </button>
-                  ) : null}
-                </>
-              }
-            >
-              Técnicos sugeridos
-            </SectionTitle>
-            <SuggestedTechnicians
-              compact
-              items={suggestions.data}
-              loading={suggestions.isLoading}
-              hasPlace={Boolean(f.location_id)}
-              scheduled={Boolean(startIso)}
-              assigneeId={f.assignee_id}
-              helperIds={d.helperIds}
-              onAssign={(t) => onAssignee(t?.id ?? "")}
-              onToggleHelper={(t) => {
-                setConflicts(null);
-                update((x) => ({
-                  ...x,
-                  helperIds: x.helperIds.includes(t.id) ? x.helperIds.filter((id) => id !== t.id) : [...x.helperIds, t.id].slice(0, 6),
-                }));
-              }}
-              invite={(t) => invite(t.name)}
-              error={suggestions.error}
-              onRetry={() => void suggestions.refetch()}
-            />
-          </Card>
+          {f.assignee_id ? null : (
+            <Card className="flex flex-col gap-3 p-4">
+              <SectionTitle
+                as="h2"
+                wrap
+                aside={
+                  <>
+                    {suggestions.isFetching ? <span className="text-xs text-ink-subtle">atualizando...</span> : null}
+                    {f.location_id ? (
+                      <button type="button" onClick={() => void copyGroupInvite()} className="text-xs font-semibold text-brand-ink hover:underline">
+                        Copiar convite para o grupo
+                      </button>
+                    ) : null}
+                  </>
+                }
+              >
+                Técnicos sugeridos
+              </SectionTitle>
+              <SuggestedTechnicians
+                compact
+                items={suggestions.data}
+                loading={suggestions.isLoading}
+                hasPlace={Boolean(f.location_id)}
+                scheduled={Boolean(startIso)}
+                assigneeId={f.assignee_id}
+                helperIds={d.helperIds}
+                onAssign={(t) => onAssignee(t?.id ?? "")}
+                onToggleHelper={(t) => {
+                  setConflicts(null);
+                  update((x) => ({
+                    ...x,
+                    helperIds: x.helperIds.includes(t.id) ? x.helperIds.filter((id) => id !== t.id) : [...x.helperIds, t.id].slice(0, 6),
+                  }));
+                }}
+                invite={(t) => invite(t.name)}
+                error={suggestions.error}
+                onRetry={() => void suggestions.refetch()}
+              />
+            </Card>
+          )}
 
           <Card>
             <IntakePanel context={intake.data} loading={intake.isLoading} error={intake.error} onRetry={() => void intake.refetch()} />

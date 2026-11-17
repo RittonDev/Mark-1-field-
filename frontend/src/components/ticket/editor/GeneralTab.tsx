@@ -367,6 +367,8 @@ export function GeneralTab({
   const setAssignee = (id: string) => {
     setConflicts(null);
     setForm((f) => ({ ...f, assigneeId: id, helperIds: f.helperIds.filter((h) => h !== id) }));
+    // Técnico escolhido (no campo ou nas sugestões): a lista de sugeridos fecha.
+    if (id) setSuggestOpen(false);
   };
   // Outro cliente: a loja era do anterior e sai; a busca de loja abre já filtrada pelo cliente novo.
   const setCustomer = (id: string) => {
