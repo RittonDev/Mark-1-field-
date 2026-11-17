@@ -138,7 +138,7 @@ async def test_technician_import_creates_accounts_with_temporary_passwords(
 
 def test_spreadsheet_formats_from_the_office() -> None:
     # TAB (copiado do Excel) e "Texto Unicode" (UTF-16) também são lidos.
-    tsv = "Nome\tE-mail\nAna\tana@exemplo.com\n".encode()
+    tsv = b"Nome\tE-mail\nAna\tana@exemplo.com\n"
     assert read_table("tecnicos.csv", tsv) == [{"nome": "Ana", "e_mail": "ana@exemplo.com"}]
     utf16 = "Nome;E-mail\nJoão;joao@exemplo.com\n".encode("utf-16")
     assert read_table("tecnicos.csv", utf16) == [{"nome": "João", "e_mail": "joao@exemplo.com"}]
