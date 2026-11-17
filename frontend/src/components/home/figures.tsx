@@ -69,6 +69,12 @@ export function SwatchLegend({ parts }: { parts: SegmentPart[] }) {
   );
 }
 
+/** Cor de problema: âmbar (abaixo da meta, crescendo, sem técnico) e vermelho (prazo estourado, abaixo do piso). */
+const PROBLEM = {
+  warning: { text: "text-amber-700 dark:text-amber-400", icon: "text-amber-600 dark:text-amber-400" },
+  danger: { text: "text-red-600 dark:text-red-400", icon: "text-red-600 dark:text-red-400" },
+} as const;
+
 // O preenchimento e o trilho saem da mesma cor (--meter): o trilho é ela a 16% sobre o cartão.
 const METER: Record<MeterTone, string> = {
   accent: "[--meter:var(--viz-1)]",
@@ -86,7 +92,10 @@ export function Meter({ value, tone, target, className }: { value: number; tone:
     >
       <span className="grow-x block h-full rounded-full bg-[var(--meter)]" style={{ width: `${clamp(value)}%` }} />
       {target !== undefined ? (
-        <span className="absolute top-1/2 h-2.5 w-px -translate-x-1/2 -translate-y-1/2 bg-ink-subtle" style={{ left: `${clamp(target)}%` }} />
+        <span
+          className="absolute top-1/2 h-2.5 w-px -translate-x-1/2 -translate-y-1/2 bg-ink-subtle"
+          style={{ left: `${clamp(target)}%` }}
+        />
       ) : null}
     </span>
   );
@@ -136,6 +145,7 @@ export function MeterRow({
   const { pct, text } = share(ratio, min);
   const tone = pct === null ? "accent" : meterTone(pct, target, floor);
   const Alert = tone === "danger" ? OctagonAlert : tone === "warning" ? TriangleAlert : null;
+  const alertColor = tone === "danger" ? PROBLEM.danger.icon : PROBLEM.warning.icon;
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5">
@@ -149,12 +159,7 @@ export function MeterRow({
             text
           ) : (
             <>
-              {Alert ? (
-                <Alert
-                  aria-hidden
-                  className={clsx("size-3.5 shrink-0", tone === "danger" ? "text-red-600 dark:text-red-400" : "text-amber-600 dark:text-amber-400")}
-                />
-              ) : null}
+              {Alert ? <Alert aria-hidden className={clsx("size-3.5 shrink-0", alertColor)} /> : null}
               {pctText(pct)}
               {Alert ? <span className="sr-only">, abaixo da meta</span> : null}
             </>
@@ -181,11 +186,6 @@ export function MeterRow({
     </div>
   );
 }
-
-const PROBLEM = {
-  warning: { text: "text-amber-700 dark:text-amber-400", icon: "text-amber-600 dark:text-amber-400" },
-  danger: { text: "text-red-600 dark:text-red-400", icon: "text-red-600 dark:text-red-400" },
-} as const;
 
 /**
  * Número que é problema (nunca o zero): ícone e texto na cor do problema, nunca só a cor. Com `href`,

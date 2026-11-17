@@ -177,14 +177,21 @@ export default function HomePage() {
         {failed ? (
           <ErrorBox
             title="Não foi possível carregar o resumo"
-            message={routeMissing(overview.error) ? "O resumo do Início ainda não está disponível neste servidor." : errorMessage(overview.error)}
+            message={
+              routeMissing(overview.error) ? "O resumo do Início ainda não está disponível neste servidor." : errorMessage(overview.error)
+            }
             onRetry={() => void overview.refetch()}
           />
         ) : !data || data.focus ? (
           <FocusHero focus={data?.focus ?? null} groups={data?.attention ?? []} />
         ) : null}
         {overview.error && data ? (
-          <RefreshFailed at={overview.errorUpdatedAt} onRetry={() => void overview.refetch()} retrying={overview.isFetching} className="mt-3" />
+          <RefreshFailed
+            at={overview.errorUpdatedAt}
+            onRetry={() => void overview.refetch()}
+            retrying={overview.isFetching}
+            className="mt-3"
+          />
         ) : null}
 
         {user ? (
@@ -213,7 +220,12 @@ export default function HomePage() {
             {/* grid-cols-1 (minmax(0, 1fr)) no celular: sem ela, a coluna cresce até o conteúdo mais largo
                 (o gráfico, os títulos cortados) e a página rola para o lado. */}
             <div className="mt-6 grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px] xl:grid-cols-[minmax(0,1fr)_380px]">
-              <section id={ATTENTION_ID} tabIndex={-1} aria-labelledby={`${ATTENTION_ID}-titulo`} className="scroll-mt-20 rounded-xl outline-none">
+              <section
+                id={ATTENTION_ID}
+                tabIndex={-1}
+                aria-labelledby={`${ATTENTION_ID}-titulo`}
+                className="scroll-mt-20 rounded-xl outline-none"
+              >
                 <SectionTitle
                   as="h2"
                   className="mb-3"
@@ -239,8 +251,12 @@ export default function HomePage() {
               <aside className="flex flex-col gap-4" aria-label="Sugestões e últimos 30 dias">
                 <SuggestionsCard suggestions={data?.suggestions ?? null} />
                 <TrendCard week={data?.week ?? null} weeks={pulse?.weeks ?? null} today={dayKey(now)} />
-                {!data || pulse ? <CustomersCard customers={pulse?.customers ?? null} operationOnTime={pulse?.quality.on_time ?? null} /> : null}
-                {!data || pulse ? <TeamCard team={pulse?.team ?? null} /> : null}
+                {!data || pulse ? (
+                  <>
+                    <CustomersCard customers={pulse?.customers ?? null} operationOnTime={pulse?.quality.on_time ?? null} />
+                    <TeamCard team={pulse?.team ?? null} />
+                  </>
+                ) : null}
               </aside>
             </div>
           </>
