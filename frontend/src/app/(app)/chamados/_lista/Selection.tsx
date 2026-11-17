@@ -6,6 +6,7 @@ import { useId, useMemo, useState } from "react";
 import { useToast } from "@/components/Toaster";
 import { Button, Dialog } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
+import { useTagRules } from "@/lib/tagRules";
 import type { Tag, TicketListItem } from "@/lib/types";
 import { sameTag, TagPicker, TagToggle, useKnownTags, withColor } from "./tags";
 
@@ -69,6 +70,13 @@ function tagsOf(tickets: TicketListItem[]): { tag: Tag; count: number }[] {
   return found.sort((a, b) => b.count - a.count || a.tag.name.localeCompare(b.tag.name, "pt-BR"));
 }
 
+/** Etiquetas sem repetição (a primeira escrita de cada nome vale). */
+function uniqueTags(tags: Tag[]): Tag[] {
+  const out: Tag[] = [];
+  for (const tag of tags) if (!out.some((x) => sameTag(x.name, tag.name))) out.push(tag);
+  return out;
+}
+
 /**
  * Pôr ou tirar etiquetas das OS marcadas de uma vez (como no Field Control): ex.: tirar "Pendente
  * Envio PGTO" das OS já pagas, pôr "Custo Extra". Cada OS alterada ganha o registro no histórico.
@@ -78,15 +86,24 @@ export function BulkTagsDialog({ mode, tickets, onClose }: { mode: BulkTagMode; 
   const { toast } = useToast();
   const labelId = useId();
   const known = useKnownTags();
+  const { rules } = useTagRules();
   const [names, setNames] = useState<string[]>([]);
   const present = useMemo(() => tagsOf(tickets), [tickets]);
   const adding = mode === "add";
+  // As etiquetas automáticas (abertura, projeto, custo extra) primeiro, para um clique; depois as mais
+  // usadas. A cor de cada uma é a já usada nas OS ou, para uma automática ainda sem uso, a da regra.
+  const ruleTags = useMemo(() => uniqueTags([...rules.on_create, ...rules.on_project, ...rules.on_extra_cost]), [rules]);
+  const palette = useMemo(() => uniqueTags([...(known.data ?? []), ...ruleTags]), [known.data, ruleTags]);
+  const suggestions = useMemo(
+    () => uniqueTags([...ruleTags.map((t) => withColor(t.name, palette)), ...(known.data ?? [])]).slice(0, 10),
+    [ruleTags, palette, known.data],
+  );
 
   const save = useMutation({
     mutationFn: () =>
       api.post<{ updated: number }>("/tickets/bulk-tags", {
         ids: tickets.map((t) => t.id),
-        add: adding ? names.map((n) => withColor(n, known.data)) : [],
+        add: adding ? names.map((n) => withColor(n, palette)) : [],
         remove: adding ? [] : names,
       }),
     onSuccess: ({ updated }) => {
@@ -135,7 +152,14 @@ export function BulkTagsDialog({ mode, tickets, onClose }: { mode: BulkTagMode; 
           <span id={labelId} className="text-xs font-semibold text-ink/80">
             Etiquetas
           </span>
-          <TagPicker value={names} onChange={setNames} known={known.data} labelledBy={labelId} placeholder="Buscar ou criar etiqueta" />
+          <TagPicker
+            value={names}
+            onChange={setNames}
+            known={palette}
+            suggestions={suggestions}
+            labelledBy={labelId}
+            placeholder="Buscar ou criar etiqueta"
+          />
         </div>
       ) : present.length ? (
         <fieldset className="flex flex-col gap-2">
