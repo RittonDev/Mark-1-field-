@@ -482,11 +482,8 @@ async def test_home_attention_groups(
     }
     assert g["no_owner"]["filters"] == {"no_owner": True, "open_only": True, "created_from": window}
     assert g["violation_pending"]["filters"] == {"violation_pending": True, "created_from": window}
-    assert g["today_not_started"]["filters"] == {
-        "status": ["new", "triage", "assigned", "scheduled", "reopened"],
-        "scheduled_from": TODAY.isoformat(),
-        "scheduled_to": TODAY.isoformat(),
-    }
+    # A lista não reproduz a tolerância de 30 min: o grupo vem sem filtro (e sem "Ver todas").
+    assert g["today_not_started"]["filters"] is None
     links = {key: grp["link"] for key, grp in g.items() if grp["link"]}
     assert links == {
         "costs_pending": "/custos",

@@ -606,10 +606,6 @@ class GroupSpec:
     make_filters: Callable[[Moment], ListFilters] | None = None
 
 
-def _today_filters(m: Moment) -> ListFilters:
-    return ListFilters(scheduled_from=m.today, scheduled_to=m.today, status=list(NOT_STARTED))
-
-
 def _recent_filters(**flags: Any) -> Callable[[Moment], ListFilters]:
     """O filtro da lista com o mesmo corte de 30 dias do grupo (`created_from` = hoje - 29)."""
     return lambda m: ListFilters(**flags, created_from=m.recent_from)
@@ -653,8 +649,9 @@ GROUPS: dict[str, GroupSpec] = {
             "Visitas de hoje sem início",
             "high",
             "Agendadas para hoje, 30 min ou mais depois do horário e sem saída ou início.",
+            # Sem "Ver todas": a lista filtra por dia, não pela tolerância de 30 min, e mostraria também
+            # as visitas que ainda estão no horário (o número não bateria).
             tier="now",
-            make_filters=_today_filters,
         ),
         GroupSpec(
             "field_stuck",

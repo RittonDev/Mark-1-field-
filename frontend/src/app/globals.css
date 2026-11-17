@@ -519,21 +519,22 @@ body:has([data-drawer]) .mf-toasts {
 }
 
 /* Início: fundo animado (galáxia neural). A máscara deixa o efeito forte só no alto à direita, onde fica o
-   núcleo, e em no máximo 35% atrás da coluna de texto da esquerda. */
+   núcleo, e em cerca de 40% atrás da coluna de texto da esquerda (os alphas do engine contam com isso). */
 .mf-galaxy-mask {
-  -webkit-mask-image: radial-gradient(ellipse 75% 85% at 88% 0%, #000 0%, rgb(0 0 0 / 0.75) 35%, rgb(0 0 0 / 0.35) 70%, rgb(0 0 0 / 0.22) 100%);
-  mask-image: radial-gradient(ellipse 75% 85% at 88% 0%, #000 0%, rgb(0 0 0 / 0.75) 35%, rgb(0 0 0 / 0.35) 70%, rgb(0 0 0 / 0.22) 100%);
+  --mf-galaxy-mask: radial-gradient(ellipse 80% 95% at 80% 20%, #000 0%, rgb(0 0 0 / 0.8) 35%, rgb(0 0 0 / 0.42) 70%, rgb(0 0 0 / 0.28) 100%);
+  -webkit-mask-image: var(--mf-galaxy-mask);
+  mask-image: var(--mf-galaxy-mask);
 }
 /* Brilho estático do núcleo, sob o canvas (é também o fundo de "reduzir movimento"). */
 .mf-galaxy-glow {
   background-image:
-    radial-gradient(42% 38% at 88% 0%, color-mix(in srgb, var(--brand) 8%, transparent), transparent 72%),
-    radial-gradient(28% 26% at 97% 22%, color-mix(in srgb, var(--brand-cyan) 6%, transparent), transparent 70%);
+    radial-gradient(30% 34% at 80% 20%, color-mix(in srgb, var(--brand) 9%, transparent), transparent 72%),
+    radial-gradient(14% 16% at 80% 20%, color-mix(in srgb, var(--brand-cyan) 8%, transparent), transparent 70%);
 }
 :root[data-theme="dark"] .mf-galaxy-glow {
   background-image:
-    radial-gradient(42% 38% at 88% 0%, color-mix(in srgb, var(--brand) 14%, transparent), transparent 72%),
-    radial-gradient(28% 26% at 97% 22%, color-mix(in srgb, var(--brand-cyan) 9%, transparent), transparent 70%);
+    radial-gradient(30% 34% at 80% 20%, color-mix(in srgb, var(--brand) 16%, transparent), transparent 72%),
+    radial-gradient(14% 16% at 80% 20%, color-mix(in srgb, var(--brand-cyan) 12%, transparent), transparent 70%);
 }
 
 /* Impressão / PDF sempre no tema claro, com as cores dos detalhes preservadas. */

@@ -963,11 +963,9 @@ async def test_filters_reproduce_list_totals(
     data = await overview(client, world)
     pulse = data["pulse"]
     backlog = pulse["backlog"]
-    # O filtro de hoje sem início é mais amplo que o grupo (a lista não sabe dos 30 min).
+    # Todo grupo com filtro tem de bater com a lista (o de hoje sem início vem sem filtro).
     checks: list[tuple[str, int, dict]] = [
-        (grp["key"], grp["count"], grp["filters"])
-        for grp in data["attention"]
-        if grp["filters"] and grp["key"] != "today_not_started"
+        (grp["key"], grp["count"], grp["filters"]) for grp in data["attention"] if grp["filters"]
     ]
     checks += [(f"idade {a['key']}", a["count"], a["filters"]) for a in backlog["ages"]]
     checks += [

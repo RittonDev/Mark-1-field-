@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowDownRight, ArrowUpRight } from "lucide-react";
-import { RankBars, type RankItem } from "@/components/charts";
+import Link from "next/link";
 import { CountUp } from "@/components/motion";
 import { mutedLink, ProblemText } from "../figures";
 import { ticketsListHref } from "../links";
@@ -11,6 +11,7 @@ import type { HomeBacklog } from "../types";
 import { VitalCard } from "./VitalCard";
 
 const BALANCE_HINT = "Entraram − resolvidas − canceladas nos últimos 30 dias";
+const AGES_LABEL = "Idade das OS em aberto";
 
 /** "mediana de 74 dias"; abaixo de 1 dia, "menos de 1 dia". */
 function medianText(days: number): string {
@@ -33,12 +34,6 @@ export function BacklogCard({ backlog }: { backlog: HomeBacklog | null }) {
 
 function BacklogBody({ backlog: b }: { backlog: HomeBacklog }) {
   if (b.open === 0) return <p className="text-sm text-ink-muted">Nenhuma OS em aberto</p>;
-  // Faixas na ordem natural (da mais nova para a mais antiga), não por tamanho.
-  const ages = b.ages.map((a) => ({ id: a.key, name: AGE_LABEL[a.key] ?? a.key, count: a.count }));
-  const hrefOf = (item: RankItem) => {
-    const age = b.ages.find((a) => a.key === item.id);
-    return age && age.count > 0 ? ticketsListHref(age.filters) : undefined;
-  };
   return (
     <>
       <div>
@@ -52,7 +47,7 @@ function BacklogBody({ backlog: b }: { backlog: HomeBacklog }) {
           </p>
         ) : null}
       </div>
-      <RankBars items={ages} empty="Nenhuma OS em aberto" href={hrefOf} label="Idade das OS em aberto" />
+      <AgeRows backlog={b} />
       <p className="text-xs text-ink-muted tabular-nums">
         {plural(b.recent, "aberta nos últimos 30 dias", "abertas nos últimos 30 dias")}
         {b.old > 0 ? (
@@ -71,6 +66,41 @@ function BacklogBody({ backlog: b }: { backlog: HomeBacklog }) {
         ) : null}
       </p>
     </>
+  );
+}
+
+/**
+ * Idade da fila numa linha por faixa (nome, barra e número), na ordem natural (da mais nova para a mais
+ * antiga), não por tamanho: cabe na primeira dobra junto dos outros sinais vitais.
+ */
+function AgeRows({ backlog: b }: { backlog: HomeBacklog }) {
+  const max = Math.max(...b.ages.map((a) => a.count), 1);
+  return (
+    <ol className="flex flex-col gap-1.5" aria-label={AGES_LABEL}>
+      {b.ages.map((a) => {
+        const label = AGE_LABEL[a.key] ?? a.key;
+        const name = `${label}: ${plural(a.count, "OS", "OS")}`;
+        return (
+          <li key={a.key} className="grid grid-cols-[6.75rem_minmax(0,1fr)_2.75rem] items-center gap-2 text-xs">
+            {a.count > 0 ? (
+              <Link
+                href={ticketsListHref(a.filters)}
+                className="truncate font-semibold text-ink hover:text-brand hover:underline"
+                aria-label={name}
+              >
+                {label}
+              </Link>
+            ) : (
+              <span className="truncate font-semibold text-ink">{label}</span>
+            )}
+            <span aria-hidden className="h-1.5 overflow-hidden rounded-full bg-surface-2">
+              <span className="grow-x block h-full rounded-full" style={{ width: `${(a.count / max) * 100}%`, background: "var(--viz-1)" }} />
+            </span>
+            <span className="text-right font-medium text-ink tabular-nums">{intFmt(a.count)}</span>
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 
@@ -99,9 +129,8 @@ function Flow({ backlog: b }: { backlog: HomeBacklog }) {
   }
   return (
     <div className="flex flex-col gap-1 tabular-nums">
-      <p>
-        Últimos 30 dias: {plural(b.entered_30d, "entrou", "entraram")} · {plural(b.resolved_30d, "resolvida", "resolvidas")} ·{" "}
-        {plural(b.cancelled_30d, "cancelada", "canceladas")}
+      <p title={`${plural(b.resolved_30d, "resolvida", "resolvidas")} e ${plural(b.cancelled_30d, "cancelada", "canceladas")}`}>
+        30 dias: {plural(b.entered_30d, "entrou", "entraram")} · {plural(b.resolved_30d + b.cancelled_30d, "saiu", "saíram")}
       </p>
       <p>{balance}</p>
     </div>

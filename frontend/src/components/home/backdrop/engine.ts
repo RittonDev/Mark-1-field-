@@ -1,6 +1,6 @@
 /**
  * Motor do fundo animado da Início ("galáxia neural"): estrelas em dois braços espirais girando devagar em
- * volta de um núcleo fora do quadro (alto à direita), uma rede de nós ligados ao longo dos braços e, de vez
+ * volta de um núcleo no alto à direita, uma rede de nós ligados ao longo dos braços e, de vez
  * em quando, uma "sinapse" que percorre a rede rumo ao núcleo. É decoração pura: não codifica dado nenhum.
  *
  * TypeScript puro, sem React. Canvas 2D com sprites pré-desenhados (refeitos só na troca de tema), até
@@ -55,11 +55,14 @@ const TWIST = 3.4;
 const TILT = 0.62;
 /** Velocidade linear na borda (px/s): v(ρ) = 7·√ρ, cerca de 2 px/s perto do núcleo. */
 const SPEED = 7;
+/** Núcleo em fração da largura e da altura (o brilho estático .mf-galaxy-glow e a máscara usam o mesmo ponto). */
+const CORE_X = 0.8;
+const CORE_Y = 0.2;
 
-const MIN_STARS = 160;
-const MAX_STARS = 420;
-const MIN_NODES = 30;
-const MAX_NODES = 80;
+const MIN_STARS = 260;
+const MAX_STARS = 720;
+const MIN_NODES = 36;
+const MAX_NODES = 96;
 /** Pares de nós (i < j) cabem aqui; o índice do par é i * MAX_NODES + j. */
 const PAIRS = (MAX_NODES * MAX_NODES) / 2;
 /** Cada nó liga com até 3 vizinhos mais próximos. */
@@ -122,29 +125,29 @@ interface ThemeStyle {
 // Claro: só azul e ciano (menta some na folha clara), pontos um pouco mais escuros que a folha.
 const LIGHT: ThemeStyle = {
   composite: "source-over",
-  star: [0.06, 0.09, 0.12],
+  star: [0.09, 0.14, 0.2],
   starMix: [0.85, 0.15, 0],
-  node: 0.14,
+  node: 0.2,
   nodeMix: [0.75, 0.25, 0],
   halo: false,
-  link: 0.1,
-  dot: 0.3,
+  link: 0.12,
+  dot: 0.34,
   dotColor: CYAN,
-  synapse: 0.2,
+  synapse: 0.22,
 };
 
 // Escuro: brilho aditivo, azul predominante, um pouco de ciano e um toque de menta. Halo dos nós: 0,24 × 35%.
 const DARK: ThemeStyle = {
   composite: "lighter",
-  star: [0.1, 0.15, 0.22],
+  star: [0.14, 0.22, 0.32],
   starMix: [0.7, 0.2, 0.1],
-  node: 0.24,
+  node: 0.3,
   nodeMix: [0.8, 0.15, 0.05],
   halo: true,
-  link: 0.14,
-  dot: 0.5,
+  link: 0.17,
+  dot: 0.55,
   dotColor: MINT,
-  synapse: 0.32,
+  synapse: 0.36,
 };
 
 const FALLBACK_BRAND: Rgb = [0x24, 0x47, 0xff];
@@ -439,8 +442,8 @@ export function createBackdropEngine(canvas: HTMLCanvasElement, options: Backdro
   function recount() {
     const area = width * height;
     const share = density * (halved ? 0.5 : 1);
-    activeStars = Math.max(1, Math.round(clamp(Math.round(area / 4000), MIN_STARS, MAX_STARS) * share));
-    const nodes = Math.max(2, Math.round(clamp(Math.round(area / 22000), MIN_NODES, MAX_NODES) * share));
+    activeStars = Math.max(1, Math.round(clamp(Math.round(area / 2400), MIN_STARS, MAX_STARS) * share));
+    const nodes = Math.max(2, Math.round(clamp(Math.round(area / 15000), MIN_NODES, MAX_NODES) * share));
     if (nodes === activeNodes) return;
     activeNodes = nodes;
     // Pares com um nó que saiu ficam zerados: se ele voltar, a ligação entra aos poucos.
@@ -469,10 +472,11 @@ export function createBackdropEngine(canvas: HTMLCanvasElement, options: Backdro
     dpr = nextDpr;
     canvas.width = Math.round(width * dpr);
     canvas.height = Math.round(height * dpr);
-    // Núcleo fora do quadro, no alto à direita; raio que cobre a tela toda.
-    coreX = 0.86 * width;
-    coreY = -0.12 * height;
-    const radius = 0.95 * Math.hypot(width, height);
+    // Núcleo dentro do quadro, no alto à direita (atrás do espaço livre ao lado do herói), e braços que
+    // chegam até a borda esquerda: a galáxia aparece inteira, não só a ponta de um braço.
+    coreX = CORE_X * width;
+    coreY = CORE_Y * height;
+    const radius = 0.62 * Math.hypot(width, height);
     linkLength = clamp(0.11 * Math.min(width, height) + 40, 90, 140);
     // Rotação diferencial: ω = v / (ρ·R), com v = 7·√ρ px/s.
     for (let i = 0; i < MAX_STARS; i++) {
