@@ -48,7 +48,8 @@ export function CommandPalette({ user }: { user: User }) {
 function Palette({ user, onClose }: { user: User; onClose: () => void }) {
   const [recent] = useState(() => readRecent(user.id));
   const dialogRef = useRef<HTMLDivElement>(null);
-  const ctl = useSearchController({ user, recent, mode: "palette", onLeave: onClose });
+  const listRef = useRef<HTMLDivElement>(null);
+  const ctl = useSearchController({ user, recent, mode: "palette", onLeave: onClose, listRef });
 
   // Modal: trava a rolagem da página, prende o Tab e devolve o foco a quem abriu.
   const close = useEffectEvent(() => onClose());
@@ -117,7 +118,7 @@ function Palette({ user, onClose }: { user: User; onClose: () => void }) {
             <Kbd>Esc</Kbd>
           </span>
         </div>
-        <div ref={ctl.listRef} className="flex-1 overflow-y-auto p-2">
+        <div ref={listRef} className="flex-1 overflow-y-auto p-2">
           <SearchResults ctl={ctl} onLeave={onClose} />
         </div>
         <div className="hidden items-center gap-4 border-t border-line bg-surface-2/60 px-4 py-2 text-[11px] text-ink-subtle sm:flex">

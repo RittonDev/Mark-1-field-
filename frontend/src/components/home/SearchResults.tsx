@@ -20,7 +20,7 @@ import {
   Type,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useId, useState } from "react";
 import { StatusBadge } from "@/components/badges";
 import { toggleTheme } from "@/components/Brand";
 import { useTicketPanel } from "@/components/ticket/TicketPanel";
@@ -122,7 +122,6 @@ export interface SearchController {
   activeId: string | undefined;
   optionId: (index: number) => string;
   listId: string;
-  listRef: React.RefObject<HTMLDivElement | null>;
   /** O que está na tela ainda é da busca anterior (o texto mudou e a nova não voltou). */
   stale: boolean;
   fetching: boolean;
@@ -141,9 +140,12 @@ export function useSearchController({
   recent,
   mode,
   onLeave,
+  listRef,
 }: {
   user: User;
   recent: RecentTicket[];
+  /** A área que rola a lista: o item escolhido pelo teclado fica sempre à vista. */
+  listRef: React.RefObject<HTMLDivElement | null>;
   /** "palette": sem texto mostra recentes, telas e ações; "home": só as recentes. */
   mode: "palette" | "home";
   /** Um resultado foi aberto: fecha a busca (o diálogo ou a lista suspensa). */
@@ -156,7 +158,6 @@ export function useSearchController({
   const [active, setActive] = useState(0);
   // Enter apertado antes de a busca do texto digitado voltar: abre o 1º resultado dela quando chegar.
   const [pendingEnter, setPendingEnter] = useState<{ text: string; mods: Mods } | null>(null);
-  const listRef = useRef<HTMLDivElement>(null);
   const listId = useId();
   const typed = query.trim();
   // Uma busca por pausa na digitação.
@@ -372,7 +373,6 @@ export function useSearchController({
     activeId,
     optionId,
     listId,
-    listRef,
     stale,
     fetching,
     failed,
@@ -418,7 +418,7 @@ function Understood({ chips, stale }: { chips: SearchChip[]; stale: boolean }) {
 /**
  * Resultados da busca (lista de opções do combobox): grupos, "Entendi", erro com "Tentar de novo",
  * "Buscando...", nada encontrado e a contagem para o leitor de tela. Quem usa põe em volta a área que
- * rola (com o listRef do controlador).
+ * rola (com o listRef passado ao controlador).
  */
 export function SearchResults({ ctl, onLeave }: { ctl: SearchController; onLeave?: () => void }) {
   const groups = groupEntries(ctl.entries);

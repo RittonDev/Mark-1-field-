@@ -27,9 +27,10 @@ export function HomeSearch({ user }: { user: User }) {
   const [recent, setRecent] = useState<RecentTicket[]>(() => readRecent(user.id));
   const inputRef = useRef<HTMLInputElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const hintId = useId();
   const close = () => setOpen(false);
-  const ctl = useSearchController({ user, recent, mode: "home", onLeave: close });
+  const ctl = useSearchController({ user, recent, mode: "home", onLeave: close, listRef });
   const showPanel = open && (ctl.typed !== "" || recent.length > 0);
 
   // "/" em qualquer lugar da tela (fora de um campo, sem diálogo ou menu aberto) leva à busca.
@@ -132,7 +133,7 @@ export function HomeSearch({ user }: { user: User }) {
 
       {showPanel ? (
         <div className="absolute inset-x-0 top-full z-30 mt-2 flex animate-pop flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-pop">
-          <div ref={ctl.listRef} className="max-h-[min(62vh,540px)] overflow-y-auto p-2">
+          <div ref={listRef} className="max-h-[min(62vh,540px)] overflow-y-auto p-2">
             <SearchResults ctl={ctl} onLeave={close} />
           </div>
           <div className="hidden items-center gap-4 border-t border-line bg-surface-2/60 px-4 py-2 text-[11px] text-ink-subtle sm:flex">
