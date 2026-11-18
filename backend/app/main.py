@@ -218,6 +218,8 @@ app.add_middleware(RequestGuard)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
+    # Em desenvolvimento, também localhost e a rede local (o app no navegador do celular).
+    allow_origin_regex=settings.cors_origin_regex,
     # A web manda o token no cabeçalho Authorization: não há cookie de sessão para a API.
     allow_credentials=False,
     allow_methods=["*"],

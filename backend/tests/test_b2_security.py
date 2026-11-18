@@ -2,6 +2,7 @@
 validação em português, registro repetido com motivo, limite de corpo, cabeçalhos e logs."""
 
 import logging
+import re
 
 import pytest
 from httpx import AsyncClient
@@ -165,3 +166,11 @@ def test_production_settings_refuse_open_cors() -> None:
         ENVIRONMENT="production", JWT_SECRET="s" * 40, CORS_ORIGINS="https://app.exemplo.com"
     )
     assert ok.cors_origin_list == ["https://app.exemplo.com"]
+    # Produção: só a lista. Desenvolvimento: também localhost e a rede local, nunca a internet.
+    assert ok.cors_origin_regex is None
+    dev = Settings(ENVIRONMENT="development")
+    pattern = re.compile(dev.cors_origin_regex or "")
+    for origin in ("http://192.168.15.6:8081", "http://10.0.0.5:8081", "http://localhost:8081"):
+        assert pattern.fullmatch(origin), origin
+    for origin in ("https://exemplo.com", "http://192.168.15.6.exemplo.com", "http://8.8.8.8"):
+        assert not pattern.fullmatch(origin), origin

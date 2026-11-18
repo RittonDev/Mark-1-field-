@@ -4,6 +4,12 @@ from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _DEV_SECRET = "dev-only-secret-troque-em-producao"
+# Desenvolvimento: localhost e a rede local (qualquer porta). Assim o app dos técnicos aberto no
+# navegador do celular, pelo IP do notebook, fala com a API. Em produção vale só a CORS_ORIGINS.
+_DEV_ORIGIN_REGEX = (
+    r"^https?://(localhost|127\.0\.0\.1|10(\.\d{1,3}){3}|192\.168(\.\d{1,3}){2}"
+    r"|172\.(1[6-9]|2\d|3[01])(\.\d{1,3}){2})(:\d{1,5})?$"
+)
 
 
 class Settings(BaseSettings):
@@ -34,6 +40,8 @@ class Settings(BaseSettings):
 
     # Lista separada por vírgula.
     CORS_ORIGINS: str = "http://localhost:3001"
+    # Expressão regular extra para a origem. Vazio: em desenvolvimento, localhost e rede local.
+    CORS_ORIGIN_REGEX: str | None = None
 
     TIMEZONE: str = "America/Sao_Paulo"  # usado para "hoje" no dashboard
     TICKET_PREFIX: str = "OS"
@@ -82,6 +90,12 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
+
+    @property
+    def cors_origin_regex(self) -> str | None:
+        if self.CORS_ORIGIN_REGEX:
+            return self.CORS_ORIGIN_REGEX
+        return None if self.is_production else _DEV_ORIGIN_REGEX
 
     @property
     def is_production(self) -> bool:
