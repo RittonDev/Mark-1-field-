@@ -27,14 +27,23 @@ const linkClass = "inline-flex items-center gap-0.5 font-mono font-semibold unde
  * painel lateral, por cima da tela (Ctrl+clique continua abrindo outra aba).
  */
 function ConflictLink({ item, onOpenTicket }: { item: ConflictItem; onOpenTicket?: (ticketId: UUID) => void }) {
+  const id = item.id;
+  // OS de outra fila: a API manda só o horário (sem número, cliente e local), e ela não abre.
+  if (item.hidden || !id) {
+    return (
+      <span className="font-semibold" title="Seu acesso mostra só a sua fila: esta OS não abre">
+        OS de outra fila
+      </span>
+    );
+  }
   if (onOpenTicket) {
     return (
       <Link
-        href={`/chamados/${item.id}`}
+        href={`/chamados/${id}`}
         onClick={(e) => {
           if (e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
           e.preventDefault();
-          onOpenTicket(item.id);
+          onOpenTicket(id);
         }}
         className={linkClass}
         title="Abre a OS no painel (Ctrl+clique: outra aba)"
@@ -44,7 +53,7 @@ function ConflictLink({ item, onOpenTicket }: { item: ConflictItem; onOpenTicket
     );
   }
   return (
-    <Link href={`/chamados/${item.id}`} target="_blank" rel="noreferrer" className={linkClass} title="Abre em outra aba">
+    <Link href={`/chamados/${id}`} target="_blank" rel="noreferrer" className={linkClass} title="Abre em outra aba">
       {item.code}
       <ExternalLink aria-hidden className="size-3" />
       <span className="sr-only"> (abre em outra aba)</span>
@@ -76,11 +85,11 @@ export function ConflictList({
         {title}
       </p>
       <ul className="mt-1.5 space-y-1">
-        {items.map((c) => (
-          <li key={`${c.who ?? ""}-${c.id}`} className="text-xs">
+        {items.map((c, i) => (
+          <li key={`${c.who ?? ""}-${c.id ?? `oculta-${i}`}`} className="text-xs">
             {c.who ? <span className="font-semibold">{c.who}: </span> : null}
-            <ConflictLink item={c} onOpenTicket={onOpenTicket} /> · {span(c)} ·{" "}
-            {[c.customer, c.location].filter(Boolean).join(" · ") || c.title}
+            <ConflictLink item={c} onOpenTicket={onOpenTicket} /> · {span(c)}
+            {c.hidden || !c.id ? null : <> · {[c.customer, c.location].filter(Boolean).join(" · ") || c.title}</>}
           </li>
         ))}
       </ul>

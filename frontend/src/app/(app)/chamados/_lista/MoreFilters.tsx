@@ -249,7 +249,8 @@ export function MoreFilters({
                     {x.user.id === userId ? "Minha fila" : x.user.name} ({x.open} em aberto)
                   </option>
                 ))}
-                <option value="none">Sem analista ({queues.unowned.open} em aberto)</option>
+                {/* Sem a fila "Sem analista" no acesso, a API manda unowned null e a opção some. */}
+                {queues.unowned ? <option value="none">Sem analista ({queues.unowned.open} em aberto)</option> : null}
               </Select>
             </Field>
           ) : null}

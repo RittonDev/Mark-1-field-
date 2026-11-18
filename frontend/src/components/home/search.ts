@@ -1,7 +1,8 @@
 // Busca da central (Ctrl+K e a caixa do Início): a busca inteligente da API, as OS recentes e as telas
 // e ações achadas aqui mesmo, sem ir ao servidor.
 
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, type QueryClient, useQuery } from "@tanstack/react-query";
+import { useCallback } from "react";
 import {
   AlarmClock,
   Download,
@@ -17,9 +18,10 @@ import {
 } from "lucide-react";
 import { visibleNav } from "@/components/nav";
 import { api, ApiError, request } from "@/lib/api";
-import { canManageTickets, isManager } from "@/lib/constants";
+import { canManageTickets } from "@/lib/constants";
+import { accessOf, can, seesUnowned, useAccess } from "@/lib/permissions";
 import { sessionStore } from "@/lib/session";
-import type { Customer, Location, Page, TicketListItem, UserRole, UUID } from "@/lib/types";
+import type { AccessItemKey, Customer, EffectiveAccess, Location, Page, TicketListItem, User, UserRole, UUID } from "@/lib/types";
 import { hasFilters, ticketsListHref, ticketsViewHref } from "./links";
 import type { NameLike, SmartSearchResult } from "./types";
 
@@ -78,6 +80,33 @@ export function rememberRecentTicket(ticket: RecentTicket) {
   }
 }
 
+/** Tira a OS das recentes (passou para outra fila ou deixou de existir). */
+export function forgetRecentTicket(ticketId: UUID) {
+  const userId = sessionStore.get()?.user.id;
+  if (!userId) return;
+  try {
+    const list = readRecent(userId);
+    if (!list.some((t) => t.id === ticketId)) return;
+    window.localStorage.setItem(recentKey(userId), JSON.stringify(list.filter((t) => t.id !== ticketId)));
+  } catch {
+    // Sem armazenamento: nada guardado para tirar.
+  }
+}
+
+/**
+ * A OS que não abre mais (403 de outra fila ou 404), no painel ou na página, sai das recentes da busca.
+ * Ouve as leituras da OS (["ticket", id]) no cache; devolve a função que para de ouvir.
+ */
+export function watchDeniedRecents(queryClient: QueryClient): () => void {
+  return queryClient.getQueryCache().subscribe((event) => {
+    if (event.type !== "updated" || event.action.type !== "error") return;
+    const key = event.query.queryKey;
+    if (key.length !== 2 || key[0] !== "ticket" || typeof key[1] !== "string") return;
+    const error: unknown = event.action.error;
+    if (error instanceof ApiError && (error.status === 403 || error.status === 404)) forgetRecentTicket(key[1]);
+  });
+}
+
 // ------------------------------------------------------------------ telas e ações
 
 type Icon = React.ComponentType<{ className?: string }>;
@@ -124,9 +153,20 @@ const SYNONYMS: Record<string, string[]> = {
   "/configuracoes": ["ajustes", "configuração", "sla", "categorias", "empresa", "motivos"],
 };
 
-interface ActionDef extends Omit<ScreenEntry, "kind"> {
-  visible: (role: UserRole, ctx: { passwordAllowed: boolean }) => boolean;
+/** Quem procura: o papel, o acesso do perfil e se a equipe entra com senha. */
+interface ActionContext {
+  role: UserRole;
+  access: EffectiveAccess | null;
+  passwordAllowed: boolean;
 }
+
+interface ActionDef extends Omit<ScreenEntry, "kind"> {
+  /** Tela que a ação abre: sem acesso a ela, a ação some (sem item = núcleo, toda a gestão das OS). */
+  item?: AccessItemKey;
+  visible: (ctx: ActionContext) => boolean;
+}
+
+const manages = (ctx: ActionContext) => canManageTickets(ctx.role);
 
 const ACTIONS: ActionDef[] = [
   {
@@ -136,7 +176,7 @@ const ACTIONS: ActionDef[] = [
     icon: FilePlus2,
     keywords: ["nova ordem de serviço", "abrir chamado", "abrir os", "criar os", "novo chamado", "cadastrar os"],
     target: { href: "/chamados/novo" },
-    visible: canManageTickets,
+    visible: manages,
   },
   {
     id: "a-export",
@@ -145,7 +185,7 @@ const ACTIONS: ActionDef[] = [
     icon: Download,
     keywords: ["exportar", "planilha", "excel", "csv", "baixar os", "exportação"],
     target: { href: "/chamados" },
-    visible: canManageTickets,
+    visible: manages,
   },
   {
     id: "a-mine",
@@ -154,7 +194,7 @@ const ACTIONS: ActionDef[] = [
     icon: ListChecks,
     keywords: ["meus chamados", "minhas ordens", "comigo"],
     target: { href: ticketsViewHref("minhas") },
-    visible: canManageTickets,
+    visible: manages,
   },
   {
     id: "a-unassigned",
@@ -163,7 +203,7 @@ const ACTIONS: ActionDef[] = [
     icon: UserX,
     keywords: ["sem técnico", "sem tecnico", "não atribuídas", "sem responsável", "atribuir técnico"],
     target: { href: ticketsListHref({ unassigned: true, open_only: true }) },
-    visible: canManageTickets,
+    visible: manages,
   },
   {
     id: "a-sla",
@@ -172,7 +212,7 @@ const ACTIONS: ActionDef[] = [
     icon: AlarmClock,
     keywords: ["sla violado", "atrasadas", "prazo estourado", "fora do prazo", "vencidas"],
     target: { href: ticketsListHref({ sla_breached: true }) },
-    visible: canManageTickets,
+    visible: manages,
   },
   {
     id: "a-no-owner",
@@ -181,7 +221,8 @@ const ACTIONS: ActionDef[] = [
     icon: Inbox,
     keywords: ["sem analista", "sem dono", "órfãs", "puxar os"],
     target: { href: "/minha-fila?analista=sem" },
-    visible: canManageTickets,
+    // Quem vê só a própria fila sem as OS sem analista não tem essa lista.
+    visible: (ctx) => manages(ctx) && seesUnowned(ctx.access),
   },
   {
     id: "a-tags",
@@ -190,7 +231,8 @@ const ACTIONS: ActionDef[] = [
     icon: Tags,
     keywords: ["etiquetas", "tags", "regras de etiqueta", "rótulos", "marcadores"],
     target: { href: "/configuracoes#etiquetas" },
-    visible: isManager,
+    item: "setup.settings",
+    visible: manages,
   },
   {
     id: "a-payouts",
@@ -199,7 +241,8 @@ const ACTIONS: ActionDef[] = [
     icon: Wallet,
     keywords: ["pagar técnicos", "a pagar", "pendente pgto", "pgto pendente", "repasse pendente"],
     target: { href: "/pagamentos" },
-    visible: canManageTickets,
+    item: "commercial.payouts",
+    visible: manages,
   },
   {
     id: "a-costs",
@@ -208,7 +251,8 @@ const ACTIONS: ActionDef[] = [
     icon: Receipt,
     keywords: ["aprovar custos", "custos pendentes", "despesas pendentes", "reembolso"],
     target: { href: "/custos" },
-    visible: canManageTickets,
+    item: "commercial.expenses",
+    visible: manages,
   },
   {
     id: "a-password",
@@ -217,7 +261,7 @@ const ACTIONS: ActionDef[] = [
     icon: KeyRound,
     keywords: ["alterar senha", "mudar senha", "nova senha", "senha"],
     target: { action: "password" },
-    visible: (_role, ctx) => ctx.passwordAllowed,
+    visible: (ctx) => ctx.passwordAllowed,
   },
   {
     id: "a-theme",
@@ -229,9 +273,15 @@ const ACTIONS: ActionDef[] = [
   },
 ];
 
-/** Telas do menu (na ordem dele) e ações que a pessoa pode usar. */
-export function screenCatalog(role: UserRole, ctx: { passwordAllowed: boolean }): { screens: ScreenEntry[]; actions: ScreenEntry[] } {
-  const screens: ScreenEntry[] = visibleNav(role).map((n) => ({
+/**
+ * Telas do menu (na ordem dele) e ações que a pessoa pode usar, pelo perfil de acesso: o que o menu
+ * esconde a busca também não oferece. Com só o papel, vale o acesso da sessão (é sempre de quem busca).
+ */
+export function screenCatalog(who: User | UserRole, ctx: { passwordAllowed: boolean }): { screens: ScreenEntry[]; actions: ScreenEntry[] } {
+  const user = typeof who === "string" ? (sessionStore.get()?.user ?? null) : who;
+  const role = typeof who === "string" ? who : who.role;
+  const access = accessOf(user);
+  const screens: ScreenEntry[] = visibleNav(user).map((n) => ({
     id: `p-${n.href}`,
     label: n.label,
     icon: n.icon,
@@ -239,7 +289,9 @@ export function screenCatalog(role: UserRole, ctx: { passwordAllowed: boolean })
     target: { href: n.href },
     kind: "screen",
   }));
-  const actions: ScreenEntry[] = ACTIONS.filter((a) => a.visible(role, ctx)).map((a) => ({
+  const context: ActionContext = { role, access, passwordAllowed: ctx.passwordAllowed };
+  const usable = (a: ActionDef) => (!a.item || can(access, a.item)) && a.visible(context);
+  const actions: ScreenEntry[] = ACTIONS.filter(usable).map((a) => ({
     id: a.id,
     label: a.label,
     detail: a.detail,
@@ -367,9 +419,27 @@ async function smartSearch(q: string, signal: AbortSignal): Promise<SmartSearchR
  * quando o texto muda, e o resultado anterior continua na tela até o novo chegar.
  */
 export function useSmartSearch(q: string, enabled: boolean) {
+  // Clientes, locais e técnicos abrem as telas deles: sem acesso a elas, o resultado não aparece.
+  const access = useAccess();
+  const customers = can(access, "base.customers");
+  const locations = can(access, "base.locations");
+  const technicians = can(access, "base.technicians");
+  const select = useCallback(
+    (data: SmartSearchResult): SmartSearchResult =>
+      customers && locations && technicians
+        ? data
+        : {
+            ...data,
+            customers: customers ? data.customers : [],
+            locations: locations ? data.locations : [],
+            technicians: technicians ? data.technicians : [],
+          },
+    [customers, locations, technicians],
+  );
   return useQuery({
     queryKey: ["search", "smart", q],
     queryFn: ({ signal }) => smartSearch(q, signal),
+    select,
     enabled,
     staleTime: 15_000,
     placeholderData: keepPreviousData,

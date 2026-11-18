@@ -2,16 +2,16 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { ArrowDown, ArrowUp, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Lock, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useConfirm } from "@/components/Confirm";
+import { NoAccess } from "@/components/NoAccess";
 import { FieldError, fold, plural, SearchField, UnsavedBar, useLeaveGuard } from "@/components/settings/shared";
 import { NowBadge } from "@/components/ticket/MessagesPanel";
 import { useToast } from "@/components/Toaster";
 import { Button, Card, ErrorBox, Field, Input, LoadingBlock, PageHeader, SectionTitle, Select, Textarea } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
-import { canManageTickets } from "@/lib/constants";
+import { useCan } from "@/lib/permissions";
 
 interface Template {
   key?: string | null;
@@ -217,16 +217,17 @@ function renderPreview(body: string, values: Record<string, string>, variables: 
 }
 
 export default function TemplatesPage() {
-  const { user } = useAuth();
-  const allowed = !user || canManageTickets(user.role);
+  // Visualizar: os textos e a prévia de cada um, sem alterar. Editar: escrever, ordenar, criar e restaurar.
+  const canView = useCan("setup.messages");
+  const canEdit = useCan("setup.messages", "edit");
   const data = useQuery({
     queryKey: ["message-templates"],
     queryFn: () => api.get<TemplatesOut>("/message-templates"),
-    enabled: allowed,
+    enabled: canView,
     // Sem releitura ao voltar para a aba no meio da edição (o editor avisa se outra pessoa salvou).
     refetchOnWindowFocus: false,
   });
-  if (user && !allowed) return <ErrorBox message="Os textos do WhatsApp são mantidos por analistas e gestores." />;
+  if (!canView) return <NoAccess kind="module" item="setup.messages" />;
   if (data.isLoading) return <LoadingBlock />;
   if (!data.data) {
     return (
@@ -241,7 +242,7 @@ export default function TemplatesPage() {
       </div>
     );
   }
-  return <Editor server={data.data} />;
+  return <Editor server={data.data} readOnly={!canEdit} />;
 }
 
 /** Variáveis por grupo, filtradas pelo texto digitado (sem acento). */
@@ -269,7 +270,8 @@ interface ItemProblems {
   body?: string;
 }
 
-function Editor({ server }: { server: TemplatesOut }) {
+/** `readOnly` (acesso de visualização): os textos e a prévia, sem campos editáveis nem botões. */
+function Editor({ server, readOnly }: { server: TemplatesOut; readOnly: boolean }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const confirm = useConfirm();
@@ -517,17 +519,25 @@ function Editor({ server }: { server: TemplatesOut }) {
         title="Textos do WhatsApp"
         description="Avisos que a central copia na OS e cola no grupo do WhatsApp. As palavras entre chaves, como {tecnico}, são trocadas pelos dados da OS, e o texto que combina com o momento da OS aparece primeiro, marcado “Agora”."
         actions={
-          <>
-            <Button variant="ghost" loading={reset.isPending} onClick={askReset}>
-              <RotateCcw className="size-4" />
-              Restaurar padrão
-            </Button>
-            <Button variant="primary" loading={save.isPending} disabled={!dirty} onClick={trySave}>
-              Salvar textos
-            </Button>
-          </>
+          readOnly ? undefined : (
+            <>
+              <Button variant="ghost" loading={reset.isPending} onClick={askReset}>
+                <RotateCcw className="size-4" />
+                Restaurar padrão
+              </Button>
+              <Button variant="primary" loading={save.isPending} disabled={!dirty} onClick={trySave}>
+                Salvar textos
+              </Button>
+            </>
+          )
         }
       />
+      {readOnly ? (
+        <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-line bg-surface px-4 py-3 text-sm text-ink-muted shadow-elev-1">
+          <Lock aria-hidden className="mt-0.5 size-4 shrink-0" />
+          <p>Seu acesso a Textos do WhatsApp é de visualização.</p>
+        </div>
+      ) : null}
       {remoteChanged ? (
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300/60 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
           <p>Outra pessoa salvou os textos enquanto você editava. Se você salvar agora, a versão dela será substituída.</p>
@@ -551,7 +561,7 @@ function Editor({ server }: { server: TemplatesOut }) {
           </div>
         ) : null}
       </div>
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
+      <div className={clsx("grid gap-4", !readOnly && "lg:grid-cols-[minmax(0,1fr)_18rem]")}>
         <div className="flex min-w-0 flex-col gap-3">
           {items.map((t, i) => {
             const p = showErrors ? problems.get(t.uid) : undefined;
@@ -559,7 +569,7 @@ function Editor({ server }: { server: TemplatesOut }) {
             const label = labelOf(t);
             const when = t.key ? SUGGESTED_WHEN.get(t.key) : undefined;
             const usesReportLink = t.body.includes(`{${REPORT_LINK}}`);
-            const isTarget = items.length > 1 && t.uid === target.uid;
+            const isTarget = !readOnly && items.length > 1 && t.uid === target.uid;
             const bodyHelp = [p?.body ? `${t.uid}-texto-erro` : null, missing.length ? `${t.uid}-variaveis` : null]
               .filter(Boolean)
               .join(" ");
@@ -583,6 +593,7 @@ function Editor({ server }: { server: TemplatesOut }) {
                           <Input
                             data-focus="name"
                             value={t.name}
+                            readOnly={readOnly}
                             maxLength={MAX_NAME}
                             placeholder="Ex.: Material a caminho"
                             onFocus={() => setTargetUid(t.uid)}
@@ -612,25 +623,27 @@ function Editor({ server }: { server: TemplatesOut }) {
                           </span>
                         </div>
                         {/* Na tela estreita a lista de variáveis fica longe: um seletor em cada texto. */}
-                        <Select
-                          className="lg:hidden"
-                          value=""
-                          aria-label={`Inserir variável em “${label}”`}
-                          onChange={(e) => {
-                            if (e.target.value) insert(e.target.value, t.uid);
-                          }}
-                        >
-                          <option value="">Inserir variável…</option>
-                          {allGroups.map((g) => (
-                            <optgroup key={g.label} label={g.label}>
-                              {g.vars.map((v) => (
-                                <option key={v.key} value={v.key}>
-                                  {`{${v.key}} · ${v.description}`}
-                                </option>
-                              ))}
-                            </optgroup>
-                          ))}
-                        </Select>
+                        {readOnly ? null : (
+                          <Select
+                            className="lg:hidden"
+                            value=""
+                            aria-label={`Inserir variável em “${label}”`}
+                            onChange={(e) => {
+                              if (e.target.value) insert(e.target.value, t.uid);
+                            }}
+                          >
+                            <option value="">Inserir variável…</option>
+                            {allGroups.map((g) => (
+                              <optgroup key={g.label} label={g.label}>
+                                {g.vars.map((v) => (
+                                  <option key={v.key} value={v.key}>
+                                    {`{${v.key}} · ${v.description}`}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            ))}
+                          </Select>
+                        )}
                         <Textarea
                           id={`${t.uid}-texto`}
                           ref={(el) => {
@@ -639,6 +652,7 @@ function Editor({ server }: { server: TemplatesOut }) {
                           }}
                           rows={4}
                           value={t.body}
+                          readOnly={readOnly}
                           maxLength={MAX_BODY}
                           onFocus={() => setTargetUid(t.uid)}
                           onChange={(e) => update(t.uid, { body: e.target.value })}
@@ -668,88 +682,98 @@ function Editor({ server }: { server: TemplatesOut }) {
                         ) : null}
                       </div>
                     </div>
-                    <div className="flex shrink-0 flex-col gap-0.5">
-                      <IconButton focusKey="up" label={`Subir “${label}”`} onClick={() => move(i, -1)} disabled={i === 0}>
-                        <ArrowUp className="size-4" />
-                      </IconButton>
-                      <IconButton
-                        focusKey="down"
-                        label={`Descer “${label}”`}
-                        onClick={() => move(i, 1)}
-                        disabled={i === items.length - 1}
-                      >
-                        <ArrowDown className="size-4" />
-                      </IconButton>
-                      <IconButton danger label={`Remover “${label}”`} onClick={() => remove(i)} disabled={items.length === 1}>
-                        <Trash2 className="size-4" />
-                      </IconButton>
-                    </div>
+                    {readOnly ? null : (
+                      <div className="flex shrink-0 flex-col gap-0.5">
+                        <IconButton focusKey="up" label={`Subir “${label}”`} onClick={() => move(i, -1)} disabled={i === 0}>
+                          <ArrowUp className="size-4" />
+                        </IconButton>
+                        <IconButton
+                          focusKey="down"
+                          label={`Descer “${label}”`}
+                          onClick={() => move(i, 1)}
+                          disabled={i === items.length - 1}
+                        >
+                          <ArrowDown className="size-4" />
+                        </IconButton>
+                        <IconButton danger label={`Remover “${label}”`} onClick={() => remove(i)} disabled={items.length === 1}>
+                          <Trash2 className="size-4" />
+                        </IconButton>
+                      </div>
+                    )}
                   </div>
                 </div>
               </Fragment>
             );
           })}
           {removed && removed.index >= items.length ? removedNotice(removed) : null}
-          <div className="flex flex-wrap items-center gap-3">
-            <Button onClick={add} disabled={full}>
-              <Plus className="size-4" />
-              Novo texto
-            </Button>
-            <span className="text-xs text-ink-muted">
-              {full
-                ? `Limite de ${MAX_TEMPLATES} textos: remova um para criar outro.`
-                : `${plural(items.length, "texto", "textos")} (até ${MAX_TEMPLATES}). Na OS, nesta ordem, com o do momento no topo.`}
-            </span>
-          </div>
+          {readOnly ? (
+            <p className="text-xs text-ink-muted">
+              {plural(items.length, "texto", "textos")}. Na OS, nesta ordem, com o do momento no topo.
+            </p>
+          ) : (
+            <div className="flex flex-wrap items-center gap-3">
+              <Button onClick={add} disabled={full}>
+                <Plus className="size-4" />
+                Novo texto
+              </Button>
+              <span className="text-xs text-ink-muted">
+                {full
+                  ? `Limite de ${MAX_TEMPLATES} textos: remova um para criar outro.`
+                  : `${plural(items.length, "texto", "textos")} (até ${MAX_TEMPLATES}). Na OS, nesta ordem, com o do momento no topo.`}
+              </span>
+            </div>
+          )}
         </div>
-        <aside className="hidden lg:sticky lg:top-20 lg:block lg:self-start">
-          <Card className="flex max-h-[calc(100vh-6rem)] flex-col overflow-hidden">
-            <div className="flex flex-col gap-2 border-b border-line p-3">
-              <SectionTitle as="h2">Variáveis</SectionTitle>
-              <p className="text-xs text-ink-muted">
-                Clique para inserir{" "}
-                {items.length > 1 ? (
-                  <>
-                    em <strong className="font-semibold text-ink">“{labelOf(target)}”</strong>
-                  </>
+        {readOnly ? null : (
+          <aside className="hidden lg:sticky lg:top-20 lg:block lg:self-start">
+            <Card className="flex max-h-[calc(100vh-6rem)] flex-col overflow-hidden">
+              <div className="flex flex-col gap-2 border-b border-line p-3">
+                <SectionTitle as="h2">Variáveis</SectionTitle>
+                <p className="text-xs text-ink-muted">
+                  Clique para inserir{" "}
+                  {items.length > 1 ? (
+                    <>
+                      em <strong className="font-semibold text-ink">“{labelOf(target)}”</strong>
+                    </>
+                  ) : (
+                    "no texto"
+                  )}
+                  , onde o cursor estava.
+                </p>
+                <SearchField value={filter} onChange={setFilter} placeholder="Filtrar variáveis" label="Filtrar variáveis" />
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto p-2">
+                {shownGroups.length === 0 ? (
+                  <p className="px-2 py-3 text-xs text-ink-muted">Nenhuma variável encontrada.</p>
                 ) : (
-                  "no texto"
+                  shownGroups.map((g) => (
+                    <div key={g.label} className="mb-2 last:mb-0">
+                      <p className="px-2 pt-1 pb-0.5 text-[11px] font-bold tracking-wide text-ink-muted uppercase">{g.label}</p>
+                      <ul>
+                        {g.vars.map((v) => (
+                          <li key={v.key}>
+                            <button
+                              type="button"
+                              onClick={() => insert(v.key, target.uid)}
+                              aria-label={`Inserir {${v.key}}: ${v.description}${v.key === REPORT_LINK ? `. ${REPORT_LINK_ALWAYS}` : ""}`}
+                              className="w-full rounded-md px-2 py-1 text-left hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
+                            >
+                              <code className="text-xs font-semibold text-brand-ink">{`{${v.key}}`}</code>
+                              <span className="block text-[11px] text-ink-muted">{v.description}</span>
+                              {v.key === REPORT_LINK ? (
+                                <span className="mt-0.5 block text-[11px] font-semibold text-ink">{REPORT_LINK_ALWAYS}</span>
+                              ) : null}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))
                 )}
-                , onde o cursor estava.
-              </p>
-              <SearchField value={filter} onChange={setFilter} placeholder="Filtrar variáveis" label="Filtrar variáveis" />
-            </div>
-            <div className="min-h-0 flex-1 overflow-y-auto p-2">
-              {shownGroups.length === 0 ? (
-                <p className="px-2 py-3 text-xs text-ink-muted">Nenhuma variável encontrada.</p>
-              ) : (
-                shownGroups.map((g) => (
-                  <div key={g.label} className="mb-2 last:mb-0">
-                    <p className="px-2 pt-1 pb-0.5 text-[11px] font-bold tracking-wide text-ink-muted uppercase">{g.label}</p>
-                    <ul>
-                      {g.vars.map((v) => (
-                        <li key={v.key}>
-                          <button
-                            type="button"
-                            onClick={() => insert(v.key, target.uid)}
-                            aria-label={`Inserir {${v.key}}: ${v.description}${v.key === REPORT_LINK ? `. ${REPORT_LINK_ALWAYS}` : ""}`}
-                            className="w-full rounded-md px-2 py-1 text-left hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
-                          >
-                            <code className="text-xs font-semibold text-brand-ink">{`{${v.key}}`}</code>
-                            <span className="block text-[11px] text-ink-muted">{v.description}</span>
-                            {v.key === REPORT_LINK ? (
-                              <span className="mt-0.5 block text-[11px] font-semibold text-ink">{REPORT_LINK_ALWAYS}</span>
-                            ) : null}
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ))
-              )}
-            </div>
-          </Card>
-        </aside>
+              </div>
+            </Card>
+          </aside>
+        )}
       </div>
       {dirty ? (
         <UnsavedBar message="Alterações não salvas">

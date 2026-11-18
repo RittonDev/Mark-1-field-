@@ -28,9 +28,8 @@ import { useToast } from "@/components/Toaster";
 import { useNow } from "@/components/useNow";
 import { Button, buttonClassName, Card, CardHeader, Dialog, ErrorBox, Field, Input, LoadingBlock, Pill, Select, Textarea } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
-import { canManageTickets } from "@/lib/constants";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
+import { useCan } from "@/lib/permissions";
 import {
   addDaysISO,
   dayTime,
@@ -104,21 +103,24 @@ function rowDetail(q: Quote, today: string): string {
 const iconAction =
   "rounded-md p-1.5 text-ink-muted transition-colors hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none";
 
-/** Orçamentos da OS: montar, enviar o link e acompanhar a decisão do cliente. */
+/**
+ * Orçamentos da OS: montar, enviar o link e acompanhar a decisão do cliente. Segue o acesso à tela
+ * Orçamentos: Visualizar lista, abre e copia o link já gerado; Editar cria, envia, cobra e cancela.
+ */
 export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
-  const { user } = useAuth();
   const { toast } = useToast();
   const confirm = useConfirm();
   const queryClient = useQueryClient();
   const now = useNow(60_000);
-  const manager = canManageTickets(user?.role);
+  const canView = useCan("commercial.quotes");
+  const canEdit = useCan("commercial.quotes", "edit");
   const [editing, setEditing] = useState<{ quote: Quote | null; prefill?: QuotePrefill; renew?: boolean } | null>(null);
   const [sharing, setSharing] = useState<{ quote: Quote; mode: ShareMode } | null>(null);
   const [opened, setOpened] = useState<Quote | null>(null);
   const quotes = useQuery({
     queryKey: ["ticket", ticket.id, "quotes"],
     queryFn: () => api.get<Quote[]>(`/tickets/${ticket.id}/quotes`),
-    enabled: manager,
+    enabled: canView,
   });
   // A lista da OS e a tela Orçamentos mostram os mesmos orçamentos.
   const refresh = () => {
@@ -144,7 +146,7 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
     onError: (e) => toast({ title: "Não foi possível cancelar", description: errorMessage(e), tone: "error" }),
   });
 
-  if (!manager) return null;
+  if (!canView) return null;
   const list = quotes.data ?? [];
   const today = localDateISO(new Date(now));
   const approved = list.filter((q) => q.status === "approved");
@@ -173,10 +175,12 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
           ) : undefined
         }
         actions={
-          <Button size="sm" onClick={() => setEditing({ quote: null })}>
-            <Plus className="size-4" />
-            Novo
-          </Button>
+          canEdit ? (
+            <Button size="sm" onClick={() => setEditing({ quote: null })}>
+              <Plus className="size-4" />
+              Novo
+            </Button>
+          ) : undefined
         }
       />
       {quotes.isLoading ? (
@@ -204,6 +208,13 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
             const detail = [rowDetail(q, today), trackingText(q)].filter(Boolean).join(" · ");
             // A linha corta no celular: o title traz o texto inteiro e as datas de abertura e cobrança.
             const detailTitle = [detail, trackingTitle(q)].filter(Boolean).join(" · ");
+            // O ícone do link: com Editar, onde o botão principal não é o próprio link; só com Visualizar,
+            // em todo orçamento que já tem link (copiar o link não altera nada).
+            const linkIcon =
+              Boolean(linkOf(q)) &&
+              (canEdit
+                ? action === "remind" || q.status === "approved" || q.status === "rejected"
+                : q.status === "sent" || q.status === "approved" || q.status === "rejected");
             return (
               <li key={q.id} className="flex flex-wrap items-center gap-2 px-4 py-2.5">
                 <FileText className="size-4 shrink-0 text-ink-muted" />
@@ -223,77 +234,81 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
                 </button>
                 <span className="text-sm font-semibold text-ink tabular-nums">{formatMoney(q.total)}</span>
                 <Pill color={QUOTE_STATUS[q.status].color}>{QUOTE_STATUS[q.status].label}</Pill>
-                <div className="flex w-full items-center justify-end gap-1 sm:w-auto">
-                  {editable ? (
-                    <Button size="sm" variant="ghost" onClick={() => setEditing({ quote: q })}>
-                      Editar
-                    </Button>
-                  ) : null}
-                  {action === "remind" ? (
-                    <Button size="sm" variant="primary" onClick={() => setSharing({ quote: q, mode: "remind" })}>
-                      <BellRing className="size-3.5" />
-                      Cobrar
-                    </Button>
-                  ) : action === "link" || action === "send" ? (
-                    <Button size="sm" variant="primary" loading={sending} onClick={() => send.mutate(q)}>
-                      {sending ? null : <Send className="size-3.5" />}
-                      {action === "link" ? "Gerar link" : "Enviar"}
-                    </Button>
-                  ) : action === "renew" ? (
-                    <Button size="sm" variant="primary" onClick={() => setEditing({ quote: q, renew: true })}>
-                      <RefreshCw className="size-3.5" />
-                      Renovar e reenviar
-                    </Button>
-                  ) : editable && pastDue ? (
-                    <Button size="sm" variant="primary" onClick={() => setEditing({ quote: q, renew: true })}>
-                      <RefreshCw className="size-3.5" />
-                      {q.status === "draft" ? "Renovar e enviar" : "Renovar e reenviar"}
-                    </Button>
-                  ) : q.status === "sent" && linkOf(q) ? (
-                    <Button size="sm" variant="primary" onClick={() => setSharing({ quote: q, mode: "share" })}>
-                      <Share2 className="size-3.5" />
-                      Enviar link
-                    </Button>
-                  ) : q.status === "draft" || q.status === "sent" ? (
-                    // Rascunho ou enviado sem link (veio do Field Control): o envio cria o link.
-                    <Button size="sm" variant="primary" loading={sending} onClick={() => send.mutate(q)}>
-                      {sending ? null : <Send className="size-3.5" />}
-                      {q.status === "draft" ? "Enviar" : "Gerar link"}
-                    </Button>
-                  ) : null}
-                  {(action === "remind" || q.status === "approved" || q.status === "rejected") && linkOf(q) ? (
-                    <button
-                      type="button"
-                      onClick={() => setSharing({ quote: q, mode: "share" })}
-                      className={clsx(iconAction, "hover:text-brand")}
-                      aria-label={`Link do ${q.code} para o cliente`}
-                      title="Link para o cliente"
-                    >
-                      <Link2 className="size-4" />
-                    </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    onClick={() => setEditing({ quote: null, prefill: duplicateOf(q) })}
-                    className={clsx(iconAction, "hover:text-ink")}
-                    aria-label={`Duplicar o orçamento ${q.code}`}
-                    title="Duplicar"
-                  >
-                    <CopyPlus className="size-4" />
-                  </button>
-                  {editable ? (
-                    <button
-                      type="button"
-                      onClick={() => askCancel(q)}
-                      disabled={cancel.isPending && cancel.variables?.id === q.id}
-                      className={clsx(iconAction, "hover:text-red-600 disabled:opacity-40")}
-                      aria-label={`Cancelar o orçamento ${q.code}`}
-                      title="Cancelar orçamento"
-                    >
-                      <Ban className="size-4" />
-                    </button>
-                  ) : null}
-                </div>
+                {canEdit || linkIcon ? (
+                  <div className="flex w-full items-center justify-end gap-1 sm:w-auto">
+                    {canEdit && editable ? (
+                      <Button size="sm" variant="ghost" onClick={() => setEditing({ quote: q })}>
+                        Editar
+                      </Button>
+                    ) : null}
+                    {!canEdit ? null : action === "remind" ? (
+                      <Button size="sm" variant="primary" onClick={() => setSharing({ quote: q, mode: "remind" })}>
+                        <BellRing className="size-3.5" />
+                        Cobrar
+                      </Button>
+                    ) : action === "link" || action === "send" ? (
+                      <Button size="sm" variant="primary" loading={sending} onClick={() => send.mutate(q)}>
+                        {sending ? null : <Send className="size-3.5" />}
+                        {action === "link" ? "Gerar link" : "Enviar"}
+                      </Button>
+                    ) : action === "renew" ? (
+                      <Button size="sm" variant="primary" onClick={() => setEditing({ quote: q, renew: true })}>
+                        <RefreshCw className="size-3.5" />
+                        Renovar e reenviar
+                      </Button>
+                    ) : editable && pastDue ? (
+                      <Button size="sm" variant="primary" onClick={() => setEditing({ quote: q, renew: true })}>
+                        <RefreshCw className="size-3.5" />
+                        {q.status === "draft" ? "Renovar e enviar" : "Renovar e reenviar"}
+                      </Button>
+                    ) : q.status === "sent" && linkOf(q) ? (
+                      <Button size="sm" variant="primary" onClick={() => setSharing({ quote: q, mode: "share" })}>
+                        <Share2 className="size-3.5" />
+                        Enviar link
+                      </Button>
+                    ) : q.status === "draft" || q.status === "sent" ? (
+                      // Rascunho ou enviado sem link (veio do Field Control): o envio cria o link.
+                      <Button size="sm" variant="primary" loading={sending} onClick={() => send.mutate(q)}>
+                        {sending ? null : <Send className="size-3.5" />}
+                        {q.status === "draft" ? "Enviar" : "Gerar link"}
+                      </Button>
+                    ) : null}
+                    {linkIcon ? (
+                      <button
+                        type="button"
+                        onClick={() => setSharing({ quote: q, mode: "share" })}
+                        className={clsx(iconAction, "hover:text-brand")}
+                        aria-label={`Link do ${q.code} para o cliente`}
+                        title="Link para o cliente"
+                      >
+                        <Link2 className="size-4" />
+                      </button>
+                    ) : null}
+                    {canEdit ? (
+                      <button
+                        type="button"
+                        onClick={() => setEditing({ quote: null, prefill: duplicateOf(q) })}
+                        className={clsx(iconAction, "hover:text-ink")}
+                        aria-label={`Duplicar o orçamento ${q.code}`}
+                        title="Duplicar"
+                      >
+                        <CopyPlus className="size-4" />
+                      </button>
+                    ) : null}
+                    {canEdit && editable ? (
+                      <button
+                        type="button"
+                        onClick={() => askCancel(q)}
+                        disabled={cancel.isPending && cancel.variables?.id === q.id}
+                        className={clsx(iconAction, "hover:text-red-600 disabled:opacity-40")}
+                        aria-label={`Cancelar o orçamento ${q.code}`}
+                        title="Cancelar orçamento"
+                      >
+                        <Ban className="size-4" />
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
               </li>
             );
           })}
@@ -321,11 +336,13 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
           ticket={ticket}
           quote={sharing.quote}
           mode={sharing.mode}
+          readOnly={!canEdit}
           onClose={() => setSharing(null)}
           onRotated={refresh}
         />
       ) : null}
       {opened ? (
+        // Só com Visualizar, a janela fica com o PDF e o link já gerado (sem editar, enviar nem cobrar).
         <QuoteViewer
           quote={opened}
           ticket={{
@@ -338,30 +355,50 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
           inTicket
           sending={send.isPending}
           onClose={() => setOpened(null)}
-          onEdit={() => {
-            setOpened(null);
-            setEditing({ quote: opened });
-          }}
-          onRenew={() => {
-            setOpened(null);
-            setEditing({ quote: opened, renew: true });
-          }}
-          onSend={() => {
-            setOpened(null);
-            send.mutate(opened);
-          }}
+          onEdit={
+            canEdit
+              ? () => {
+                  setOpened(null);
+                  setEditing({ quote: opened });
+                }
+              : undefined
+          }
+          onRenew={
+            canEdit
+              ? () => {
+                  setOpened(null);
+                  setEditing({ quote: opened, renew: true });
+                }
+              : undefined
+          }
+          onSend={
+            canEdit
+              ? () => {
+                  setOpened(null);
+                  send.mutate(opened);
+                }
+              : undefined
+          }
           onShare={() => {
             setOpened(null);
             setSharing({ quote: opened, mode: "share" });
           }}
-          onRemind={() => {
-            setOpened(null);
-            setSharing({ quote: opened, mode: "remind" });
-          }}
-          onDuplicate={() => {
-            setOpened(null);
-            setEditing({ quote: null, prefill: duplicateOf(opened) });
-          }}
+          onRemind={
+            canEdit
+              ? () => {
+                  setOpened(null);
+                  setSharing({ quote: opened, mode: "remind" });
+                }
+              : undefined
+          }
+          onDuplicate={
+            canEdit
+              ? () => {
+                  setOpened(null);
+                  setEditing({ quote: null, prefill: duplicateOf(opened) });
+                }
+              : undefined
+          }
         />
       ) : null}
     </Card>
@@ -815,18 +852,21 @@ export function QuoteEditor({
 /**
  * Mensagem e link do orçamento para o cliente: copiar, WhatsApp, e-mail ou gerar um novo link (o anterior
  * para de valer). No modo "remind" a mensagem é o lembrete, e o primeiro envio (copiar, WhatsApp ou
- * e-mail) registra a cobrança no histórico da OS.
+ * e-mail) registra a cobrança no histórico da OS. `readOnly` (acesso de visualização a Orçamentos):
+ * só o link que já existe, sem gerar outro.
  */
 export function ShareDialog({
   ticket,
   quote,
   mode = "share",
+  readOnly = false,
   onClose,
   onRotated,
 }: {
   ticket: Pick<QuoteTicketRef, "code" | "customer" | "location">;
   quote: Quote;
   mode?: ShareMode;
+  readOnly?: boolean;
   onClose: () => void;
   onRotated: () => void;
 }) {
@@ -896,7 +936,7 @@ export function ShareDialog({
       title={reminding ? `Cobrar ${quote.code}` : `Link do ${quote.code}`}
       footer={
         <div className="flex w-full flex-wrap items-center justify-between gap-2">
-          {url ? (
+          {url && !readOnly ? (
             <Button
               size="sm"
               variant="ghost"
@@ -980,7 +1020,9 @@ export function ShareDialog({
           {rotate.error ? <ErrorBox message={errorMessage(rotate.error)} /> : null}
         </div>
       ) : (
-        <p className="text-sm text-ink-muted">Envie o orçamento para gerar o link do cliente.</p>
+        <p className="text-sm text-ink-muted">
+          {readOnly ? "Este orçamento ainda não tem link para o cliente." : "Envie o orçamento para gerar o link do cliente."}
+        </p>
       )}
     </Dialog>
   );

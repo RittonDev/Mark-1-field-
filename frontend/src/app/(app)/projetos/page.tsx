@@ -4,19 +4,20 @@ import clsx from "clsx";
 import { FolderKanban, Plus, Search } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
+import { NoAccess } from "@/components/NoAccess";
 import { ProjectDialog } from "@/components/ProjectDialog";
 import { Button, Card, EmptyState, ErrorBox, Input, LoadingBlock, PageHeader, Pill, Select } from "@/components/ui";
 import { errorMessage } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
-import { canManageTickets } from "@/lib/constants";
 import { formatDate, formatMoney, todayISO } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
+import { useCan } from "@/lib/permissions";
 import { plannedTickets, PROJECT_STATUS, projectCosts, projectLate, useProjects } from "@/lib/projects";
 import { useCustomers } from "@/lib/queries";
 import type { ProjectStatus } from "@/lib/types";
 
 export default function ProjectsPage() {
-  const { user } = useAuth();
+  const canView = useCan("commercial.projects");
+  const canEdit = useCan("commercial.projects", "edit");
   const [status, setStatus] = useState<ProjectStatus | "">("active");
   const [search, setSearch] = useState("");
   const [customerId, setCustomerId] = useState("");
@@ -25,8 +26,8 @@ export default function ProjectsPage() {
   const [today] = useState(todayISO);
   const q = useDebounced(search.trim(), 300);
   const customers = useCustomers();
-  const projects = useProjects({ status: status || undefined, q, customerId: customerId || null });
-  if (user && !canManageTickets(user.role)) return <ErrorBox message="Projetos são da gestão." />;
+  const projects = useProjects({ status: status || undefined, q, customerId: customerId || null, enabled: canView });
+  if (!canView) return <NoAccess kind="module" item="commercial.projects" />;
   const list = projects.data ?? [];
   const filtered = Boolean(q || customerId || status);
 
@@ -36,10 +37,12 @@ export default function ProjectsPage() {
         title="Projetos"
         description="OS marcadas como de projeto, com valor fechado, equipe própria e o acompanhamento de custo e prazo."
         actions={
-          <Button variant="primary" onClick={() => setCreating(true)}>
-            <Plus className="size-4" />
-            Novo projeto
-          </Button>
+          canEdit ? (
+            <Button variant="primary" onClick={() => setCreating(true)}>
+              <Plus className="size-4" />
+              Novo projeto
+            </Button>
+          ) : undefined
         }
       />
       <div className="mb-4 grid gap-2 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_12rem]">
@@ -79,7 +82,7 @@ export default function ProjectsPage() {
           <EmptyState
             icon={<FolderKanban className="size-6" />}
             title={filtered ? "Nenhum projeto com esses filtros" : "Nenhum projeto ainda"}
-            description="Crie um projeto e marque as OS dele (em Nova OS ou no editor da OS)."
+            description={canEdit ? "Crie um projeto e marque as OS dele (em Nova OS ou no editor da OS)." : undefined}
           />
         </Card>
       ) : (

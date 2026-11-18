@@ -33,7 +33,7 @@ from app.schemas.tracking import (
 from app.services import geo
 from app.services.activities import day_bounds
 from app.services.realtime import bus
-from app.services.tickets import LIST_NOLOAD
+from app.services.tickets import LIST_NOLOAD, can_view, visibility_clause
 from app.services.workflow import OPEN_STATUSES
 
 # Tolerância entre o relógio do aparelho e o início/fim da jornada.
@@ -253,8 +253,12 @@ async def publish_shift(user: User, on_shift: bool) -> None:
     )
 
 
-async def live(db: AsyncSession, team_id: uuid.UUID | None = None) -> list[LiveTechnician]:
-    """Todos os técnicos ativos com jornada, última posição, OS em campo e estado."""
+async def live(
+    db: AsyncSession, team_id: uuid.UUID | None = None, viewer: User | None = None
+) -> list[LiveTechnician]:
+    """Todos os técnicos ativos com jornada, última posição, OS em campo e estado. A OS em campo
+    de uma fila que `viewer` não vê sai sem os detalhes (current_ticket_hidden); a contagem de OS
+    abertas de cada técnico continua agregada."""
     now = utcnow()
     stmt = select(User).where(User.role == UserRole.TECHNICIAN, User.is_active.is_(True))
     if team_id is not None:
@@ -309,6 +313,7 @@ async def live(db: AsyncSession, team_id: uuid.UUID | None = None) -> list[LiveT
         shift = shifts.get(tech.id)
         ping = latest.get(tech.id) if shift is not None else None
         ticket = in_field.get(tech.id)
+        hidden = ticket is not None and viewer is not None and not can_view(viewer, ticket)
         # Jornada que acabou de abrir ainda não mandou ponto: não é "sem sinal".
         last_signal = ping.recorded_at if ping is not None else None
         if last_signal is None and shift is not None:
@@ -364,16 +369,21 @@ async def live(db: AsyncSession, team_id: uuid.UUID | None = None) -> list[LiveT
                     else None,
                     service_address=ticket.service_address,
                 )
-                if ticket
+                if ticket and not hidden
                 else None,
+                current_ticket_hidden=hidden,
                 open_tickets=open_counts.get(tech.id, 0),
             )
         )
     return out
 
 
-async def history(db: AsyncSession, user_id: uuid.UUID, day: date) -> TrackingHistory:
-    """Trajeto do dia (pontos) e as mudanças de status que o técnico fez, com GPS."""
+async def history(
+    db: AsyncSession, user_id: uuid.UUID, day: date, viewer: User | None = None
+) -> TrackingHistory:
+    """Trajeto do dia (pontos) e as mudanças de status que o técnico fez, com GPS (com `viewer`,
+    só as das OS que ele vê)."""
+    vis = visibility_clause(viewer) if viewer is not None else None
     start, end = day_bounds(day)
     points = [
         HistoryPoint(
@@ -400,6 +410,7 @@ async def history(db: AsyncSession, user_id: uuid.UUID, day: date) -> TrackingHi
             TicketEvent.event_type == TicketEventType.STATUS_CHANGED,
             TicketEvent.created_at >= start,
             TicketEvent.created_at < end,
+            *((vis,) if vis is not None else ()),
         )
         .order_by(TicketEvent.created_at)
     )

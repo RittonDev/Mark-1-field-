@@ -5,10 +5,12 @@ import { FileSearch } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect } from "react";
+import { NoAccess } from "@/components/NoAccess";
 import { TicketEditor } from "@/components/ticket/editor/TicketEditor";
 import { buttonClassName, EmptyState, ErrorBox, LoadingBlock } from "@/components/ui";
 import { api, ApiError, errorMessage } from "@/lib/api";
-import type { Page, TicketDetail, TicketListItem } from "@/lib/types";
+import { forbiddenCode, forbiddenItem } from "@/lib/permissions";
+import type { TicketDetail, UUID } from "@/lib/types";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** O nº como a central fala e digita: "15829", "015829", "OS-015829", "os15829". */
@@ -58,9 +60,13 @@ export default function TicketDetailPage() {
   const lookup = useQuery({
     queryKey: ["ticket-number", number],
     queryFn: async () => {
-      // Filtro pelo nº exato (a busca por texto também acharia o nº dentro de outros campos).
-      const found = await api.get<Page<TicketListItem>>("/tickets", { number: number ?? undefined, page_size: 1 });
-      return found.items.find((t) => t.number === number)?.id ?? null;
+      // O nº exato; a API diz também quando a OS existe mas é de outra fila (403), sem mostrar nada dela.
+      try {
+        return (await api.get<{ id: UUID; code: string }>("/tickets/lookup", { number: number ?? undefined })).id;
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) return null;
+        throw error;
+      }
     },
     enabled: number !== null,
     staleTime: 60_000,
@@ -71,6 +77,7 @@ export default function TicketDetailPage() {
   }, [lookup.data, router]);
 
   if (number !== null) {
+    if (forbiddenCode(lookup.error) === "QUEUE_FORBIDDEN") return <NoAccess kind="queue" />;
     if (lookup.error) {
       return (
         <div className="mx-auto max-w-3xl">
@@ -82,6 +89,10 @@ export default function TicketDetailPage() {
     return <LoadingBlock label="Abrindo a OS..." />;
   }
   if (!isId || (query.error instanceof ApiError && query.error.status === 404)) return <NotFound what="OS" />;
+  // OS de outra fila (link direto, recente, aviso antigo): a tela amigável no lugar do erro.
+  const denied = forbiddenCode(query.error);
+  if (denied === "QUEUE_FORBIDDEN") return <NoAccess kind="queue" />;
+  if (denied === "MODULE_FORBIDDEN") return <NoAccess kind="module" item={forbiddenItem(query.error)} />;
   if (query.isLoading) return <LoadingBlock label="Abrindo a OS..." />;
   if (query.error || !query.data) {
     return (

@@ -6,6 +6,7 @@ import {
   Car,
   CheckCircle2,
   CopyPlus,
+  Eye,
   IdCard,
   Link2,
   Mail,
@@ -28,6 +29,7 @@ import { Suspense, useMemo, useState } from "react";
 import { useConfirm } from "@/components/Confirm";
 import { MultiSelect } from "@/components/MultiSelect";
 import { Tabs } from "@/components/motion";
+import { NoAccess } from "@/components/NoAccess";
 import { fold, replaceSearch } from "@/components/operacao/hooks";
 import {
   InviteDialog,
@@ -59,9 +61,10 @@ import {
 import { useNow } from "@/components/useNow";
 import { absoluteApiUrl, api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { canManageTickets, isManager } from "@/lib/constants";
+import { isManager } from "@/lib/constants";
 import { formatDate, formatDateTime, formatDocument, initials } from "@/lib/format";
 import { labelMap, useOnboardingCatalog } from "@/lib/onboarding";
+import { useCan } from "@/lib/permissions";
 import { useTeams } from "@/lib/queries";
 import type {
   ApplicationDetail,
@@ -117,7 +120,10 @@ export default function OnboardingPage() {
 }
 
 function OnboardingView() {
-  const { user } = useAuth();
+  // Visualizar: as fichas, os links e o que cada candidato mandou. Editar: gerar e revogar links,
+  // aprovar e reprovar.
+  const canView = useCan("base.onboarding");
+  const canEdit = useCan("base.onboarding", "edit");
   const searchParams = useSearchParams();
   const now = useNow(60_000);
   const [tab, setTab] = useState<Tab>("pending");
@@ -134,11 +140,12 @@ function OnboardingView() {
   const applications = useQuery({
     queryKey: ["onboarding", "applications", tab],
     queryFn: () => api.get<ApplicationSummary[]>("/onboarding/applications", { status: tab }),
-    enabled: tab !== "links",
+    enabled: canView && tab !== "links",
   });
   const pending = useQuery({
     queryKey: ["onboarding", "pending-count"],
     queryFn: () => api.get<{ pending: number }>("/onboarding/applications/pending-count"),
+    enabled: canView,
   });
 
   const all = useMemo(() => applications.data ?? [], [applications.data]);
@@ -172,9 +179,7 @@ function OnboardingView() {
     if (searchParams.get("ficha")) replaceSearch({ ficha: null });
   };
 
-  if (user && !canManageTickets(user.role)) {
-    return <ErrorBox message="A homologação é exclusiva para analistas e gestores." />;
-  }
+  if (!canView) return <NoAccess kind="module" item="base.onboarding" />;
 
   return (
     <div>
@@ -182,10 +187,12 @@ function OnboardingView() {
         title="Homologação"
         description="Fichas enviadas pelos técnicos pelo link de cadastro. Aprovada, a pessoa entra na base técnica e já acessa o app."
         actions={
-          <Button variant="primary" onClick={() => setInviting({})}>
-            <Link2 className="size-4" />
-            Gerar link de cadastro
-          </Button>
+          canEdit ? (
+            <Button variant="primary" onClick={() => setInviting({})}>
+              <Link2 className="size-4" />
+              Gerar link de cadastro
+            </Button>
+          ) : undefined
         }
       />
 
@@ -200,7 +207,7 @@ function OnboardingView() {
 
       {tab === "links" ? (
         <div role="tabpanel" id="homologacao-panel-links" aria-labelledby="homologacao-tab-links">
-          <InvitesTab onCreate={(preset) => setInviting({ preset })} />
+          <InvitesTab canEdit={canEdit} onCreate={(preset) => setInviting({ preset })} />
         </div>
       ) : (
         <div role="tabpanel" id={`homologacao-panel-${tab}`} aria-labelledby={`homologacao-tab-${tab}`}>
@@ -257,12 +264,12 @@ function OnboardingView() {
                   icon={<BadgeCheck className="size-6" />}
                   title={tab === "pending" ? "Nenhuma ficha aguardando análise" : "Nenhuma ficha aqui"}
                   description={
-                    tab === "pending"
+                    tab === "pending" && canEdit
                       ? "Gere um link de cadastro e envie ao técnico pelo WhatsApp. A ficha dele aparece aqui na hora."
                       : undefined
                   }
                   action={
-                    tab === "pending" ? (
+                    tab === "pending" && canEdit ? (
                       <Button onClick={() => setInviting({})}>
                         <Link2 className="size-4" />
                         Gerar link
@@ -280,7 +287,7 @@ function OnboardingView() {
                     <Th className="hidden lg:table-cell">Atuação</Th>
                     <Th className="hidden sm:table-cell">Experiência</Th>
                     <Th>{tab === "pending" ? "Enviada" : "Analisada"}</Th>
-                    <Th className="edit-col">Analisar</Th>
+                    <Th className="edit-col">{canEdit ? "Analisar" : "Ver"}</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -343,10 +350,10 @@ function OnboardingView() {
                               setOpenedId(a.id);
                             }}
                             className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg border border-line bg-surface text-brand shadow-elev-1 transition-[border-color,background-color] duration-150 hover:border-brand/40 hover:bg-brand-soft focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
-                            aria-label={`Analisar a ficha de ${a.full_name}`}
-                            title="Analisar a ficha"
+                            aria-label={`${canEdit ? "Analisar" : "Ver"} a ficha de ${a.full_name}`}
+                            title={canEdit ? "Analisar a ficha" : "Ver a ficha"}
                           >
-                            <SquarePen className="size-4" />
+                            {canEdit ? <SquarePen className="size-4" /> : <Eye className="size-4" />}
                           </button>
                         </Td>
                       </tr>
@@ -360,12 +367,13 @@ function OnboardingView() {
       )}
 
       {inviting ? <InviteDialog preset={inviting.preset} onClose={() => setInviting(null)} /> : null}
-      {openedId ? <ApplicationDialog key={openedId} id={openedId} onClose={closeApplication} /> : null}
+      {openedId ? <ApplicationDialog key={openedId} id={openedId} canEdit={canEdit} onClose={closeApplication} /> : null}
     </div>
   );
 }
 
-function InvitesTab({ onCreate }: { onCreate: (preset?: InvitePreset) => void }) {
+/** Links de cadastro. Sem `canEdit` (só Visualizar): a lista e o reenvio do link ativo, sem gerar nem revogar. */
+function InvitesTab({ canEdit, onCreate }: { canEdit: boolean; onCreate: (preset?: InvitePreset) => void }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const confirm = useConfirm();
@@ -406,7 +414,7 @@ function InvitesTab({ onCreate }: { onCreate: (preset?: InvitePreset) => void })
           icon={<Link2 className="size-6" />}
           title="Nenhum link gerado"
           description="O link de cadastro vai pelo WhatsApp: o técnico preenche a ficha no celular."
-          action={<Button onClick={() => onCreate()}>Gerar link</Button>}
+          action={canEdit ? <Button onClick={() => onCreate()}>Gerar link</Button> : undefined}
         />
       ) : (
         <Table>
@@ -444,18 +452,20 @@ function InvitesTab({ onCreate }: { onCreate: (preset?: InvitePreset) => void })
                         Enviar
                       </Button>
                     ) : null}
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      // Uso único tem max_uses 1; reutilizável não tem limite ou tem um limite maior que 1.
-                      onClick={() => onCreate({ label: i.label, reusable: i.max_uses !== 1, maxUses: i.max_uses !== 1 ? i.max_uses : null })}
-                      aria-label={`Gerar outro link igual a ${i.label ?? "este"}`}
-                      title="Gerar outro link com a mesma identificação e o mesmo tipo"
-                    >
-                      <CopyPlus className="size-3.5" />
-                      <span className="hidden xl:inline">Gerar outro igual</span>
-                    </Button>
-                    {i.state === "active" ? (
+                    {canEdit ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        // Uso único tem max_uses 1; reutilizável não tem limite ou tem um limite maior que 1.
+                        onClick={() => onCreate({ label: i.label, reusable: i.max_uses !== 1, maxUses: i.max_uses !== 1 ? i.max_uses : null })}
+                        aria-label={`Gerar outro link igual a ${i.label ?? "este"}`}
+                        title="Gerar outro link com a mesma identificação e o mesmo tipo"
+                      >
+                        <CopyPlus className="size-3.5" />
+                        <span className="hidden xl:inline">Gerar outro igual</span>
+                      </Button>
+                    ) : null}
+                    {canEdit && i.state === "active" ? (
                       <Button
                         size="sm"
                         variant="ghost"
@@ -514,9 +524,12 @@ function ApplicantPhoto({ name, url }: { name: string; url: string | null }) {
 /** Resultado da análise: o diálogo fica aberto para avisar o candidato pelo WhatsApp. */
 type Outcome = { kind: "approved"; name: string } | { kind: "rejected" };
 
-function ApplicationDialog({ id, onClose }: { id: string; onClose: () => void }) {
+/** Ficha do candidato. Sem `canEdit` (Homologação só com Visualizar): consulta, sem aprovar, reprovar nem excluir. */
+function ApplicationDialog({ id, canEdit, onClose }: { id: string; canEdit: boolean; onClose: () => void }) {
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  // "Ver na base técnica" leva a Técnicos: só com acesso a essa tela.
+  const canTechnicians = useCan("base.technicians");
   const { toast } = useToast();
   const confirm = useConfirm();
   const catalog = useOnboardingCatalog();
@@ -597,9 +610,10 @@ function ApplicationDialog({ id, onClose }: { id: string; onClose: () => void })
     });
     if (ok) remove.mutate();
   };
-  // A aprovada virou o cadastro do técnico: sai pela base técnica, não por aqui.
+  // A aprovada virou o cadastro do técnico: sai pela base técnica, não por aqui. Excluir (pedido do
+  // candidato, LGPD) pede Editar e continua só com supervisores e administradores.
   const removeButton =
-    a && a.status !== "approved" && isManager(user?.role) ? (
+    a && a.status !== "approved" && canEdit && isManager(user?.role) ? (
       <Button variant="ghost" className="mr-auto" onClick={askRemove} loading={remove.isPending}>
         <Trash2 className="size-4" />
         Excluir ficha
@@ -619,10 +633,10 @@ function ApplicationDialog({ id, onClose }: { id: string; onClose: () => void })
     <Button variant="primary" onClick={onClose}>
       Concluir
     </Button>
-  ) : !pending ? (
+  ) : !pending || !canEdit ? (
     <>
       {removeButton}
-      {a.user_id ? (
+      {a.user_id && canTechnicians ? (
         <Link href={`/tecnicos?q=${encodeURIComponent(a.email)}`} className={buttonClassName()}>
           <Users className="size-4" />
           Ver na base técnica
@@ -809,6 +823,7 @@ function ApplicationDialog({ id, onClose }: { id: string; onClose: () => void })
 
 /** Depois de aprovar ou reprovar: a mensagem pronta para avisar o candidato pelo WhatsApp. */
 function OutcomePanel({ application: a, outcome }: { application: ApplicationDetail; outcome: Outcome }) {
+  const canTechnicians = useCan("base.technicians");
   const first = firstName(a.full_name);
   const approved = outcome.kind === "approved";
   const message = approved
@@ -839,7 +854,7 @@ function OutcomePanel({ application: a, outcome }: { application: ApplicationDet
           <MessageCircle className="size-4" />
           Avisar pelo WhatsApp
         </a>
-        {approved ? (
+        {approved && canTechnicians ? (
           <Link href={`/tecnicos?q=${encodeURIComponent(a.email)}`} className={buttonClassName("ghost")}>
             <Users className="size-4" />
             Ver na base técnica

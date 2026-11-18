@@ -31,6 +31,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "@/components/Brand";
 import type { MapFocus, MapPlace } from "@/components/LiveMap";
 import { LocationPicker } from "@/components/LocationPicker";
+import { NoAccess } from "@/components/NoAccess";
 import { fold, operationDay, replaceSearch } from "@/components/operacao/hooks";
 import { TicketLink } from "@/components/ticket/TicketLink";
 import {
@@ -48,9 +49,9 @@ import {
 } from "@/components/ui";
 import { useNow } from "@/components/useNow";
 import { api, errorMessage } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
-import { canManageTickets, STATUS } from "@/lib/constants";
+import { STATUS } from "@/lib/constants";
 import { formatMinutes, formatShort, formatTime, initials } from "@/lib/format";
+import { useCan } from "@/lib/permissions";
 import { useDayActivities, useLiveTechnicians, useMapDistances, useTeams, useTrackingHistory } from "@/lib/queries";
 import { useConnectionState } from "@/lib/realtime";
 import {
@@ -151,12 +152,13 @@ export default function LiveMapPage() {
 }
 
 function LiveMapView() {
-  const { user } = useAuth();
   const searchParams = useSearchParams();
   const theme = useTheme();
   const now = useNow(15_000);
   const today = operationDay(now);
-  const canManage = canManageTickets(user?.role);
+  const canView = useCan("operation.map");
+  // "Ir para Técnicos" e "Completar em Técnicos" só para quem tem acesso a essa tela.
+  const canTechnicians = useCan("base.technicians");
   const [teamId, setTeamId] = useState("");
   const [q, setQ] = useState("");
   // Estados escolhidos nos filtros (vazio = todos).
@@ -186,14 +188,14 @@ function LiveMapView() {
   const selectedId = pickedId && liveById.has(pickedId) ? pickedId : null;
   const history = useTrackingHistory(selectedId, day);
   // As distâncias só servem com loja ou técnico escolhido: sem isso, nada na tela usa (e a conta é pesada).
-  const distancesEnabled = canManage && (!!place || !!selectedId);
+  const distancesEnabled = canView && (!!place || !!selectedId);
   const distances = useMapDistances(place?.id ?? null, teamId || null, distancesEnabled);
-  const dayList = useDayActivities(canManage && prefs.showOs ? today : null, teamId || null);
+  const dayList = useDayActivities(canView && prefs.showOs ? today : null, teamId || null);
   // O dia do técnico escolhido (inclui as visitas em que ele vai junto), em ordem de horário.
   const agenda = useQuery({
     queryKey: ["tickets", "day-of", selectedId, today],
     queryFn: () => api.get<DayActivities>("/activities/day", { date: today, assignee_id: selectedId ?? undefined }),
-    enabled: canManage && !!selectedId,
+    enabled: canView && !!selectedId,
     refetchInterval: 60_000,
   });
 
@@ -303,9 +305,7 @@ function LiveMapView() {
     setQ("");
   };
 
-  if (user && !canManage) {
-    return <ErrorBox message="O mapa ao vivo é exclusivo para analistas e gestores." />;
-  }
+  if (!canView) return <NoAccess kind="module" item="operation.map" />;
 
   return (
     <div>
@@ -455,9 +455,11 @@ function LiveMapView() {
                   title="Nenhum técnico com acesso ao app"
                   description="Libere o acesso em Técnicos ou aprove fichas na Homologação para vê-los aqui."
                   action={
-                    <Link href="/tecnicos" className={buttonClassName()}>
-                      Ir para Técnicos
-                    </Link>
+                    canTechnicians ? (
+                      <Link href="/tecnicos" className={buttonClassName()}>
+                        Ir para Técnicos
+                      </Link>
+                    ) : undefined
                   }
                 />
               )
@@ -683,6 +685,9 @@ function TechnicianRow({
             <span className="mt-0.5 block truncate text-xs text-ink-muted">
               {tech.current_ticket.code} · {tech.current_ticket.location?.name ?? tech.current_ticket.title}
             </span>
+          ) : tech.current_ticket_hidden ? (
+            // Em campo numa OS que a pessoa não vê (fila de outro analista): só o fato, sem a OS.
+            <span className="mt-0.5 block truncate text-xs text-ink-muted">Em atendimento · OS de outra fila</span>
           ) : tech.team ? (
             <span className="mt-0.5 block truncate text-xs text-ink-muted">{tech.team.name}</span>
           ) : null}
@@ -743,8 +748,10 @@ function LegRow({ icon, label, leg }: { icon: React.ReactNode; label: string; le
   );
 }
 
-/** Leva à base técnica já buscando o técnico, para completar o cadastro. */
+/** Leva à base técnica já buscando o técnico, para completar o cadastro (só com acesso a Técnicos). */
 function CompleteLink({ name }: { name: string }) {
+  const canTechnicians = useCan("base.technicians");
+  if (!canTechnicians) return null;
   return (
     <Link
       href={`/tecnicos?q=${encodeURIComponent(name)}`}
@@ -906,6 +913,12 @@ function TechnicianDetail({
             </span>
           </span>
         </TicketLink>
+      ) : tech.current_ticket_hidden ? (
+        // A OS em campo é da fila de outro analista: aparece só o fato, sem número nem link.
+        <p className="flex items-start gap-2 rounded-lg border border-line bg-surface p-2 text-xs text-ink-muted">
+          <Wrench aria-hidden className="mt-0.5 size-3.5 shrink-0" />
+          Em atendimento · OS de outra fila
+        </p>
       ) : null}
 
       <div className="space-y-1.5 rounded-lg border border-line bg-surface p-2.5">

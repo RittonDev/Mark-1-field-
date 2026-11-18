@@ -100,6 +100,133 @@ export interface User {
   // Senha provisória: o app obriga a criar uma senha nova antes de seguir.
   must_change_password: boolean;
   created_at: ISODate;
+  /** Perfil de acesso (só supervisor e analista; null nos demais papéis). */
+  access_profile_id?: UUID | null;
+  access_profile?: Ref | null;
+  /** Ajustes deste usuário sobre o perfil. */
+  access_overrides?: AccessOverrides | null;
+  /**
+   * Acesso efetivo calculado pela API (perfil + ajustes). null: técnico e cliente, que ficam fora dos
+   * perfis. undefined: sessão aberta antes dos perfis existirem (a central relê o /auth/me).
+   */
+  access?: EffectiveAccess | null;
+}
+
+// ---- Perfis de acesso (por tela) e visibilidade das filas ----
+
+/** Nível de acesso a uma tela: sem acesso, só ver, ou ver e alterar (criar, alterar e excluir). */
+export type AccessLevel = "none" | "view" | "edit";
+
+/** Filas que a pessoa vê: só a dela (mais as OS que executa) ou todas as da equipe. */
+export type QueueScope = "own" | "all";
+
+/** Os módulos do menu (o núcleo, com Início, Minha fila, Solicitações e Chamados, fica fora). */
+export type AccessModuleKey = "operation" | "commercial" | "base" | "analysis" | "setup";
+
+/** As telas com nível de acesso próprio (espelha backend/app/core/permissions.py). */
+export type AccessItemKey =
+  | "operation.calendar"
+  | "operation.day"
+  | "operation.map"
+  | "operation.repairs"
+  | "commercial.quotes"
+  | "commercial.projects"
+  | "commercial.expenses"
+  | "commercial.payouts"
+  | "base.customers"
+  | "base.locations"
+  | "base.technicians"
+  | "base.onboarding"
+  | "analysis.dashboard"
+  | "analysis.reports"
+  | "setup.forms"
+  | "setup.messages"
+  | "setup.service_types"
+  | "setup.users"
+  | "setup.settings";
+
+/** Acesso efetivo de quem está na central (perfil + ajustes; o administrador é sempre total). */
+export interface EffectiveAccess {
+  full: boolean;
+  profile: Ref | null;
+  /** Algum ajuste por usuário muda o que o perfil daria. */
+  customized: boolean;
+  /** Todas as telas, com o nível de cada uma. */
+  items: Record<AccessItemKey, AccessLevel>;
+  /** unowned: vê também as OS sem analista (com scope "all" é sempre true). */
+  queues: { scope: QueueScope; unowned: boolean };
+}
+
+/** Ajustes de um usuário sobre o perfil: o que falta (ou vem null) segue o perfil. */
+export interface AccessOverrides {
+  items?: Partial<Record<AccessItemKey, AccessLevel>>;
+  queue_scope?: QueueScope | null;
+  queue_unowned?: boolean | null;
+}
+
+export interface AccessProfile {
+  id: UUID;
+  name: string;
+  description: string | null;
+  /** Perfil padrão de um papel (nome fixo, não é excluído); null = criado na tela. */
+  system_key: "supervisor" | "analyst" | null;
+  /** Só os níveis gravados no perfil; o que falta segue o padrão. */
+  items: Partial<Record<AccessItemKey, AccessLevel>>;
+  /** O nível de cada tela, completo (gravado ou padrão). */
+  effective_items: Record<AccessItemKey, AccessLevel>;
+  queue_scope: QueueScope;
+  queue_unowned: boolean;
+  /** Usuários no perfil, ativos e inativos. */
+  users_count: number;
+  updated_at: ISODate;
+}
+
+/** POST /access/profiles: começa igual a `copy_from_id` (sem ele, igual ao Analista). */
+export interface AccessProfileCreate {
+  name: string;
+  description?: string | null;
+  copy_from_id?: UUID | null;
+  items?: Partial<Record<AccessItemKey, AccessLevel>> | null;
+  queue_scope?: QueueScope | null;
+  queue_unowned?: boolean | null;
+}
+
+/** PATCH /access/profiles/{id}: só o que mudou; em `items`, null devolve a tela ao padrão. */
+export interface AccessProfileUpdate {
+  name?: string;
+  description?: string | null;
+  items?: Partial<Record<AccessItemKey, AccessLevel | null>>;
+  queue_scope?: QueueScope;
+  queue_unowned?: boolean;
+}
+
+export interface AccessCatalogItem {
+  key: AccessItemKey;
+  label: string;
+  /** A tela do menu que o item protege. */
+  href: string;
+  /** Níveis que a tela aceita (as só de leitura não têm "edit"). */
+  levels: AccessLevel[];
+  /** O que o nível inclui, quando não é óbvio. */
+  hint?: string | null;
+}
+
+export interface AccessCatalogModule {
+  key: AccessModuleKey;
+  label: string;
+  items: AccessCatalogItem[];
+}
+
+/** GET /access/catalog: as telas na ordem do menu e o acesso padrão de cada papel. */
+export interface AccessCatalog {
+  modules: AccessCatalogModule[];
+  defaults: Record<"supervisor" | "analyst", Record<AccessItemKey, AccessLevel>>;
+}
+
+/** Acesso no cadastro do usuário (POST e PATCH /users). profile_id null = perfil padrão do papel. */
+export interface UserAccessIn {
+  profile_id: UUID | null;
+  overrides: AccessOverrides | null;
 }
 
 export interface TokenResponse {
@@ -470,6 +597,8 @@ export interface RealtimeEvent {
   status?: TicketStatus;
   priority?: TicketPriority;
   assignee_id?: UUID | null;
+  /** Analista responsável pela OS (null: sem analista). */
+  owner_id?: UUID | null;
   team_id?: UUID | null;
   actor_id?: UUID | null;
   actor_name?: string | null;
@@ -539,6 +668,8 @@ export type TicketUpdatePayload = Partial<
 /** Contexto para abrir a OS: o cliente e a loja escolhidos. */
 export interface IntakeContext {
   upcoming_days: number;
+  /** OS abertas da loja em filas que quem consulta não vê (só com "Somente a própria fila"). */
+  other_queues_open?: number;
   customer: {
     id: UUID;
     name: string;
@@ -719,6 +850,8 @@ export interface LiveTechnician {
   state: LiveState;
   last_position: LivePosition | null;
   current_ticket: LiveTicket | null;
+  /** Em atendimento numa OS de outra fila: `current_ticket` vem null. */
+  current_ticket_hidden?: boolean;
   open_tickets: number;
 }
 
@@ -778,9 +911,12 @@ export interface TrackingHistory {
 export interface ConflictItem {
   /** Quem está ocupado (o responsável ou outro técnico da visita). */
   who?: string | null;
-  id: UUID;
-  code: string;
+  /** null quando a OS é de outra fila (`hidden`): só o horário aparece. */
+  id: UUID | null;
+  code: string | null;
   title: string;
+  /** OS de outra fila: vem sem número, cliente e local ("OS de outra fila"). */
+  hidden?: boolean;
   customer: string | null;
   location: string | null;
   start: ISODate;
@@ -1352,9 +1488,22 @@ export interface QueueSummary {
   in_field: number;
 }
 
+/** Contagens de uma fila da equipe (painel "Filas da equipe"). */
+export interface TeamQueueCounts {
+  open: number;
+  attention: number;
+  today: number;
+  in_field: number;
+}
+
 export interface QueuesOut {
+  /** Com scope "own", só a linha de quem consulta. */
   queues: QueueSummary[];
-  unowned: { open: number; attention: number; today: number; in_field: number };
+  /** Sem analista; null quando quem consulta não vê essas OS. */
+  unowned: TeamQueueCounts | null;
+  scope: QueueScope;
+  /** Soma das linhas devolvidas mais a "Sem analista". */
+  total: TeamQueueCounts;
 }
 
 // ---- Relatório da OS para o cliente ----
@@ -1467,7 +1616,8 @@ export interface LegacyOrder {
   identifier: string | null;
   fc_status?: string | null;
   values?: { products: number; services: number; expenses: number; total: number } | null;
-  items?: { type: string; name: string; quantity: number; value: number; total: number }[];
+  /** Sem acesso a Orçamentos, a API manda os preços (value, total e `values`) como null. */
+  items?: { type: string; name: string; quantity: number; value: number | null; total: number | null }[];
   request?: {
     subject: string | null;
     message: string | null;

@@ -5,6 +5,7 @@ import { Plus, Timer, TrendingUp } from "lucide-react";
 import Link from "next/link";
 import { useId, useMemo, useRef, useState } from "react";
 import { useConfirm } from "@/components/Confirm";
+import { NoAccess } from "@/components/NoAccess";
 import { FieldError, fold, InactiveChip, plural, RowEditButton, SearchField } from "@/components/settings/shared";
 import { useToast } from "@/components/Toaster";
 import {
@@ -25,9 +26,8 @@ import {
   Th,
 } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
-import { canManageTickets } from "@/lib/constants";
 import { formatMinutes, formatMoney, moneyInput, parseMoney } from "@/lib/format";
+import { useCan } from "@/lib/permissions";
 import { useCategories, useCustomers, useServiceTypes } from "@/lib/queries";
 import type { FormTemplate, ServiceType } from "@/lib/types";
 
@@ -77,6 +77,9 @@ function ServiceTypeDialog({
 }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  // Os formulários são de outra tela: o link só aparece com acesso a ela (abrir o construtor pede Editar).
+  const canForms = useCan("setup.forms");
+  const canEditForms = useCan("setup.forms", "edit");
   const customers = useCustomers();
   const categories = useCategories();
   const editing = serviceType !== null;
@@ -261,21 +264,29 @@ function ServiceTypeDialog({
               <ul className="flex flex-wrap gap-1.5">
                 {linkedForms.map((f) => (
                   <li key={f.id}>
-                    <Link
-                      href={`/formularios?editar=${f.id}`}
-                      className="inline-flex rounded-full border border-line px-2.5 py-0.5 text-xs font-medium text-ink hover:border-brand/40 hover:text-brand focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
-                    >
-                      {f.name}
-                    </Link>
+                    {canEditForms ? (
+                      <Link
+                        href={`/formularios?editar=${f.id}`}
+                        className="inline-flex rounded-full border border-line px-2.5 py-0.5 text-xs font-medium text-ink hover:border-brand/40 hover:text-brand focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
+                      >
+                        {f.name}
+                      </Link>
+                    ) : (
+                      <span className="inline-flex rounded-full border border-line px-2.5 py-0.5 text-xs font-medium text-ink">{f.name}</span>
+                    )}
                   </li>
                 ))}
               </ul>
             ) : (
               <span className="text-xs text-ink-muted">
                 Nenhum. A ligação é feita no próprio formulário, em{" "}
-                <Link href="/formularios" className="font-medium text-brand hover:underline">
-                  Formulários
-                </Link>
+                {canForms ? (
+                  <Link href="/formularios" className="font-medium text-brand hover:underline">
+                    Formulários
+                  </Link>
+                ) : (
+                  "Formulários"
+                )}
                 .
               </span>
             )}
@@ -311,8 +322,8 @@ export default function ServiceTypesPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const confirm = useConfirm();
-  const { user } = useAuth();
-  const canEdit = canManageTickets(user?.role);
+  const canView = useCan("setup.service_types");
+  const canEdit = useCan("setup.service_types", "edit");
   const customers = useCustomers();
   const [customerId, setCustomerId] = useState("");
   const [search, setSearch] = useState("");
@@ -403,6 +414,8 @@ export default function ServiceTypesPage() {
     setCustomerId("");
     setOnlySuggested(false);
   };
+
+  if (!canView) return <NoAccess kind="module" item="setup.service_types" />;
 
   return (
     <div className="mx-auto max-w-7xl">

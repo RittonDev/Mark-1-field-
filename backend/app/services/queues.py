@@ -12,6 +12,7 @@ from typing import Any
 from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import permissions
 from app.core.enums import PartRequestStatus, SlaStatus, TicketEventType, TicketStatus, UserRole
 from app.db.base import utcnow
 from app.models import Ticket, TicketEvent, User
@@ -31,7 +32,7 @@ from app.services import field as field_rules
 from app.services import sla
 from app.services.activities import day_bounds, local_today
 from app.services.technician_regions import km_text
-from app.services.tickets import LIST_NOLOAD, recurrence_counts
+from app.services.tickets import LIST_NOLOAD, recurrence_counts, visibility_clause
 from app.services.workflow import OPEN_STATUSES
 
 S = TicketStatus
@@ -186,7 +187,10 @@ async def far_checkins(db: AsyncSession, ticket_ids: list[uuid.UUID]) -> dict[uu
     return out
 
 
-async def my_queue(db: AsyncSession, target: User, day: date | None = None) -> MyQueue:
+async def my_queue(
+    db: AsyncSession, target: User, day: date | None = None, viewer: User | None = None
+) -> MyQueue:
+    """A fila de `target`. `viewer` (quem pede) limita a reincidência às OS que ele vê."""
     now = utcnow()
     day = day or local_today()
     day_start, day_end = day_bounds(day)
@@ -226,7 +230,7 @@ async def my_queue(db: AsyncSession, target: User, day: date | None = None) -> M
     ).one()
     asking = await open_part_requests(db, [t.id for t in tickets])
     far = await far_checkins(db, [t.id for t in tickets if t.status == S.IN_PROGRESS])
-    recurrence = await recurrence_counts(db, tickets, now)
+    recurrence = await recurrence_counts(db, tickets, now, user=viewer)
     items: list[QueueItem] = []
     for t in tickets:
         reasons = reasons_for(
@@ -280,10 +284,17 @@ def needs_attention(section: str, reasons: list[QueueReason]) -> bool:
     return section == "in_field" and any(r.tone in ("danger", "warning") for r in reasons)
 
 
-async def team_queues(db: AsyncSession) -> TeamQueues:
+async def team_queues(db: AsyncSession, viewer: User | None = None) -> TeamQueues:
     """Tamanho da fila de cada analista/gestor (e das OS sem analista) para hoje. OS de um
-    analista que saiu da gestão (desativado ou com outro papel) contam como sem analista."""
+    analista que saiu da gestão (desativado ou com outro papel) contam como sem analista.
+
+    `viewer` (quem pede) limita ao que ele vê: com "Somente a própria fila", só a linha dele e,
+    com a opção, a sem analista. A divisão por fila usa todos os gestores ativos; só a saída é
+    filtrada."""
     now = utcnow()
+    vis = visibility_clause(viewer) if viewer is not None else None
+    acc = permissions.of(viewer) if viewer is not None else None
+    own = acc is not None and not acc.all_queues
     day_start, day_end = day_bounds(local_today())
     asking = await open_part_requests(db)
     managers = list(
@@ -317,7 +328,7 @@ async def team_queues(db: AsyncSession) -> TeamQueues:
                 User.is_active.label("assignee_active"),
             )
             .outerjoin(User, User.id == Ticket.assignee_id)
-            .where(Ticket.status.in_(OPEN_STATUSES))
+            .where(Ticket.status.in_(OPEN_STATUSES), *((vis,) if vis is not None else ()))
         )
     ).all()
     far = await far_checkins(db, [row.id for row in rows if row.status == S.IN_PROGRESS])
@@ -339,14 +350,23 @@ async def team_queues(db: AsyncSession) -> TeamQueues:
         )
         if needs_attention(section_for(row, reasons, day_start, day_end), reasons):
             c.attention += 1
+    queues = [
+        TeamQueue(
+            user=UserRef.model_validate(u),
+            role=u.role,
+            **counts.get(u.id, QueueCounts()).model_dump(),
+        )
+        for u in managers
+        if not own or (viewer is not None and u.id == viewer.id)
+    ]
+    unowned = counts.get(None, QueueCounts()) if not own or (acc and acc.queue_unowned) else None
+    total = QueueCounts()
+    for part in [*queues, *([unowned] if unowned is not None else [])]:
+        for key in QueueCounts.model_fields:
+            setattr(total, key, getattr(total, key) + getattr(part, key))
     return TeamQueues(
-        queues=[
-            TeamQueue(
-                user=UserRef.model_validate(u),
-                role=u.role,
-                **counts.get(u.id, QueueCounts()).model_dump(),
-            )
-            for u in managers
-        ],
-        unowned=counts.get(None, QueueCounts()),
+        queues=queues,
+        unowned=unowned,
+        scope=acc.queue_scope if acc is not None else "all",
+        total=total,
     )

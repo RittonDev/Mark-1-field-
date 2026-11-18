@@ -10,6 +10,7 @@ import { StatusBadge } from "@/components/badges";
 import { ContactList } from "@/components/ContactList";
 import { documentKind, LocationDialog } from "@/components/LocationDialog";
 import { CountUp } from "@/components/motion";
+import { NoAccess } from "@/components/NoAccess";
 import { TagChips } from "@/components/TagChips";
 import { Button, buttonClassName, Card, CardHeader, ErrorBox, LoadingBlock, SectionTitle } from "@/components/ui";
 import { TicketLink } from "@/components/ticket/TicketLink";
@@ -17,6 +18,7 @@ import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canManageTickets } from "@/lib/constants";
 import { formatDate, formatDocument, initials } from "@/lib/format";
+import { useCan } from "@/lib/permissions";
 import type { Customer, Location, Page, TicketListItem } from "@/lib/types";
 import { CustomerDialog, customerContacts } from "../CustomerDialog";
 
@@ -71,20 +73,28 @@ const plural = (n: number, one: string, many: string) => `${n.toLocaleString("pt
 export default function CustomerDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
-  const canEdit = canManageTickets(user?.role);
+  const canView = useCan("base.customers");
+  const canEdit = useCan("base.customers", "edit");
+  // As lojas são da tela Locais: ver e abrir com Visualizar lá; cadastrar com Editar.
+  const canLocations = useCan("base.locations");
+  const canNewStore = useCan("base.locations", "edit");
+  // Nova OS é da central inteira (não depende do acesso a Clientes).
+  const canOpenTicket = canManageTickets(user?.role);
   const [editing, setEditing] = useState(false);
   const [newStore, setNewStore] = useState(false);
-  const customer = useQuery({ queryKey: ["customer", id], queryFn: () => api.get<Customer>(`/customers/${id}`) });
+  const customer = useQuery({ queryKey: ["customer", id], queryFn: () => api.get<Customer>(`/customers/${id}`), enabled: canView });
   // Todas as lojas do cliente (há cliente com mais de mil): não recarrega a cada volta para a aba. Cadastrar
   // ou editar loja invalida esta lista na hora.
   const locations = useQuery({
     queryKey: ["customer", id, "locations"],
     queryFn: () => api.get<Location[]>(`/customers/${id}/locations`),
     staleTime: 5 * 60_000,
+    enabled: canView,
   });
   const recent = useQuery({
     queryKey: ["tickets", "customer", id],
     queryFn: () => api.get<Page<TicketListItem>>("/tickets", { customer_id: id, page_size: 8, order_by: "-created_at" }),
+    enabled: canView,
   });
 
   const back = (
@@ -93,6 +103,7 @@ export default function CustomerDetailPage() {
       Clientes
     </Link>
   );
+  if (!canView) return <NoAccess kind="module" item="base.customers" />;
   if (customer.isLoading) return <LoadingBlock rows={4} />;
   if (customer.error || !customer.data) {
     return (
@@ -142,10 +153,12 @@ export default function CustomerDetailPage() {
               <Ticket className="size-4" />
               Ver OS do cliente
             </Link>
-            <Link href={`/locais?customer_id=${c.id}`} className={buttonClassName()}>
-              <MapPin className="size-4" />
-              Lojas ({storeCount.toLocaleString("pt-BR")})
-            </Link>
+            {canLocations ? (
+              <Link href={`/locais?customer_id=${c.id}`} className={buttonClassName()}>
+                <MapPin className="size-4" />
+                Lojas ({storeCount.toLocaleString("pt-BR")})
+              </Link>
+            ) : null}
             {canEdit ? (
               <Button onClick={() => setEditing(true)}>
                 <Pencil className="size-4" />
@@ -153,7 +166,7 @@ export default function CustomerDetailPage() {
               </Button>
             ) : null}
             {/* A Nova OS vem com o cliente escolhido (a loja se busca entre as dele). */}
-            {canEdit && c.is_active ? (
+            {canOpenTicket && c.is_active ? (
               <Link href={`/chamados/novo?customer_id=${c.id}`} className={buttonClassName("primary")}>
                 <Plus className="size-4" />
                 Nova OS
@@ -194,15 +207,17 @@ export default function CustomerDetailPage() {
               description={`${plural(storeCount, "loja cadastrada", "lojas cadastradas")} · as com mais OS primeiro`}
               actions={
                 <>
-                  {canEdit ? (
+                  {canNewStore ? (
                     <Button size="sm" variant="ghost" onClick={() => setNewStore(true)}>
                       <Plus className="size-3.5" />
                       Nova loja
                     </Button>
                   ) : null}
-                  <Link href={`/locais?customer_id=${c.id}`} className="text-xs text-ink-muted hover:text-brand">
-                    Ver todas
-                  </Link>
+                  {canLocations ? (
+                    <Link href={`/locais?customer_id=${c.id}`} className="text-xs text-ink-muted hover:text-brand">
+                      Ver todas
+                    </Link>
+                  ) : null}
                 </>
               }
             />
@@ -216,9 +231,9 @@ export default function CustomerDetailPage() {
               <p className="px-5 py-4 text-sm text-ink-subtle">Nenhuma loja cadastrada.</p>
             ) : (
               <ul className="divide-y divide-line">
-                {stores.slice(0, 8).map((l) => (
-                  <li key={l.id}>
-                    <Link href={`/locais/${l.id}`} className="flex items-center gap-3 px-5 py-2.5 transition-colors hover:bg-[var(--row-hover)]">
+                {stores.slice(0, 8).map((l) => {
+                  const body = (
+                    <>
                       <MapPin className="size-4 shrink-0 text-ink-subtle" />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm font-semibold text-ink">
@@ -230,9 +245,21 @@ export default function CustomerDetailPage() {
                         </span>
                       </span>
                       <span className="text-xs text-ink-muted tabular-nums">{l.total_tickets} OS</span>
-                    </Link>
-                  </li>
-                ))}
+                    </>
+                  );
+                  return (
+                    <li key={l.id}>
+                      {/* A ficha da loja é da tela Locais: sem acesso a ela, a linha fica só como texto. */}
+                      {canLocations ? (
+                        <Link href={`/locais/${l.id}`} className="flex items-center gap-3 px-5 py-2.5 transition-colors hover:bg-[var(--row-hover)]">
+                          {body}
+                        </Link>
+                      ) : (
+                        <div className="flex items-center gap-3 px-5 py-2.5">{body}</div>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </Card>

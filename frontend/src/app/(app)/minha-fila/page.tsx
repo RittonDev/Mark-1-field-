@@ -19,6 +19,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { PriorityBadge, SlaCountdown, StatusBadge } from "@/components/badges";
 import { CountUp } from "@/components/motion";
+import { NoAccess } from "@/components/NoAccess";
 import {
   isOpenStatus,
   isUuid,
@@ -53,11 +54,13 @@ import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canManageTickets } from "@/lib/constants";
 import { formatTime, initials } from "@/lib/format";
+import { forbiddenCode, useQueueScope } from "@/lib/permissions";
 import type {
   MyQueue,
   Page,
   QueueItem,
   QueueReason,
+  QueueScope,
   QueueSection,
   QueuesOut,
   TicketListItem,
@@ -423,20 +426,29 @@ function AttentionCount({ value }: { value: number }) {
   );
 }
 
-/** Filas dos analistas (abertas e alertas de cada um) e as OS sem analista. Um clique abre a fila. */
+/**
+ * Filas dos analistas (abertas e alertas de cada um) e as OS sem analista. Um clique abre a fila.
+ * Com "Somente a própria fila", a API manda só a linha de quem vê (e a "Sem analista", se ela vê).
+ */
 function TeamQueues({
   meId,
   viewing,
   queues,
+  scope,
   onPick,
 }: {
   meId: UUID;
   /** O id da fila aberta, ou UNOWNED. */
   viewing: string;
   queues: UseQueryResult<QueuesOut>;
+  /** Filas que o acesso de quem vê mostra. */
+  scope: { scope: QueueScope; unowned: boolean };
   onPick: (id: string) => void;
 }) {
-  const unowned = queues.data?.unowned;
+  const own = scope.scope === "own";
+  // A resposta já vem filtrada; o filtro daqui só cobre a lista guardada de antes de o acesso mudar.
+  const rows = (queues.data?.queues ?? []).filter((q) => !own || q.user.id === meId);
+  const unowned = own && !scope.unowned ? null : queues.data?.unowned;
   return (
     <Card>
       <CardHeader title="Filas da equipe" actions={<span className="text-[11px] text-ink-muted">abertas · atenção</span>} />
@@ -452,7 +464,7 @@ function TeamQueues({
         </div>
       ) : (
         <ul className="p-1.5">
-          {(queues.data?.queues ?? []).map((q) => {
+          {rows.map((q) => {
             const selected = q.user.id === viewing;
             const me = q.user.id === meId;
             return (
@@ -516,6 +528,11 @@ function TeamQueues({
           ) : null}
         </ul>
       )}
+      {own ? (
+        <p className="border-t border-line px-4 py-2.5 text-[11px] text-ink-muted">
+          Seu acesso mostra só a sua fila{scope.unowned ? " e as OS sem analista" : ""}.
+        </p>
+      ) : null}
     </Card>
   );
 }
@@ -559,6 +576,11 @@ function MyQueueView() {
   const unowned = viewing === UNOWNED;
   const mine = !unowned && (!viewing || viewing === meId);
   const ownerId = unowned ? null : mine ? meId : viewing;
+  // "Somente a própria fila": a fila de um colega (e a "Sem analista", sem a opção) não abre; a API
+  // também recusa (403), então nem pergunta.
+  const scope = useQueueScope();
+  const ownOnly = scope.scope === "own";
+  const outsideScope = ownOnly && ((!mine && !unowned) || (unowned && !scope.unowned));
 
   const queues = useQuery({
     queryKey: ["tickets", "queues"],
@@ -570,7 +592,7 @@ function MyQueueView() {
   const queue = useQuery({
     queryKey: ["tickets", "my-queue", ownerId],
     queryFn: ({ signal }) => api.get<MyQueue>("/my-queue", mine ? {} : { user_id: ownerId ?? undefined }, { signal }),
-    enabled: Boolean(ownerId) && allowed,
+    enabled: Boolean(ownerId) && allowed && !outsideScope,
     // "Atrasada" e prazos dependem do relógio: revalida mesmo sem eventos.
     refetchInterval: 60_000,
   });
@@ -582,9 +604,11 @@ function MyQueueView() {
         { no_owner: true, open_only: true, order_by: "resolution_due_at", page_size: UNOWNED_LIMIT },
         { signal },
       ),
-    enabled: unowned && allowed,
+    enabled: unowned && allowed && !outsideScope,
     refetchInterval: 60_000,
   });
+  // O acesso mudou com a tela aberta (a API recusou a fila do colega): a mesma tela amigável.
+  const blocked = outsideScope || (!mine && forbiddenCode(queue.error) === "QUEUE_FORBIDDEN");
   const { claim, isClaiming } = useClaim();
 
   const grouped = useMemo(() => {
@@ -644,15 +668,21 @@ function MyQueueView() {
       ? "OS sem analista"
       : colleague
         ? `Fila de ${colleague.name}`
-        : "Carregando...";
-  const description = mine ? (
+        : blocked
+          ? "Fila de outro analista"
+          : "Carregando...";
+  const description = blocked ? undefined : mine ? (
     <>Suas OS, pelo que pede ação primeiro · {live}</>
   ) : (
     <>Use Puxar para trazer uma OS para a sua fila · {live}</>
   );
 
   const orphanItems = orphans.data?.items ?? [];
-  const main = active.error && !active.hasData ? (
+  const main = blocked ? (
+    <Card>
+      <NoAccess kind="queue" as="h2" title={unowned ? "OS sem analista" : "Fila de outro analista"} />
+    </Card>
+  ) : active.error && !active.hasData ? (
     <ErrorBox message={errorMessage(active.error)} onRetry={refresh} />
   ) : unowned ? (
     <Card className="overflow-hidden">
@@ -705,7 +735,7 @@ function MyQueueView() {
             : `Nenhuma OS aberta na fila de ${colleague?.name ?? "quem você escolheu"}.`
         }
         action={
-          mine ? (
+          mine && (!ownOnly || scope.unowned) ? (
             <Button onClick={() => pick(UNOWNED)}>
               <Inbox className="size-4" />
               Ver OS sem analista
@@ -774,11 +804,11 @@ function MyQueueView() {
         }
       />
 
-      {active.error && active.hasData ? (
+      {active.error && active.hasData && !blocked ? (
         <RefreshFailed at={active.errorAt} onRetry={refresh} retrying={active.fetching} className="mb-4" />
       ) : null}
 
-      {unowned || (active.error && !active.hasData) ? null : (
+      {unowned || blocked || (active.error && !active.hasData) ? null : (
         <div className="stagger mb-6 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
           <Kpi
             index={0}
@@ -823,7 +853,7 @@ function MyQueueView() {
         <div className="flex flex-col gap-5">{main}</div>
 
         <aside className="flex flex-col gap-4 xl:sticky xl:top-20">
-          {meId ? <TeamQueues meId={meId} viewing={viewing ?? meId} queues={queues} onPick={pick} /> : null}
+          {meId ? <TeamQueues meId={meId} viewing={viewing ?? meId} queues={queues} scope={scope} onPick={pick} /> : null}
           <Card className="p-4">
             <SectionTitle>Como a fila se organiza</SectionTitle>
             <p className="mt-2 text-xs leading-relaxed text-ink-muted">

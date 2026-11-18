@@ -1,13 +1,15 @@
 "use client";
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronRight, Copy, KeyRound, MessageCircle, Plus, Users, UsersRound } from "lucide-react";
+import { Check, Copy, KeyRound, MessageCircle, Plus, Users, UsersRound } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useId, useMemo, useState } from "react";
+import { ProfilesTab } from "@/components/access/ProfilesTab";
+import { type AccessDraft, accessPayload, profileFor, UserAccessFields, usesAccessProfile } from "@/components/access/UserAccessFields";
 import { useConfirm } from "@/components/Confirm";
 import { Tabs } from "@/components/motion";
-import { InactiveChip, plural, RowEditButton, RowEditLink, SearchField } from "@/components/settings/shared";
+import { InactiveChip, NeutralChip, plural, RowEditButton, RowEditLink, SearchField } from "@/components/settings/shared";
 import { useToast } from "@/components/Toaster";
 import {
   Button,
@@ -32,41 +34,28 @@ import { api, errorMessage, request } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { isManager, ROLE } from "@/lib/constants";
 import { formatDateTime, initials } from "@/lib/format";
-import { useDebounced } from "@/lib/hooks";
-import { useAssignable, useCustomers, useTeams } from "@/lib/queries";
+import { hasUnsavedChanges, useDebounced } from "@/lib/hooks";
+import { useCan } from "@/lib/permissions";
+import { useAccessProfiles, useAssignable, useCustomers, useTeams } from "@/lib/queries";
 import { sessionStore } from "@/lib/session";
 import type { QueuesOut, TemporaryPassword, Team, User, UserRole } from "@/lib/types";
 import { copyText, whatsappUrl } from "@/lib/whatsapp";
 
 type Situation = "active" | "inactive" | "all";
+type Tab = "users" | "profiles";
 
 // Linhas por vez na lista (o resto entra com "Mostrar mais").
 const PAGE_SIZE = 100;
 const ROLE_ORDER: UserRole[] = ["admin", "supervisor", "analyst", "technician", "requester"];
 const STAFF_ROLES: UserRole[] = ["admin", "supervisor", "analyst"];
 
-/** O que cada papel acessa (as regras valem no servidor; aqui só explicam). */
-const ROLE_HELP: Record<UserRole, { where: string; can: string }> = {
-  admin: {
-    where: "Central, no navegador",
-    can: "Tudo o que o supervisor faz, mais o SLA e os usuários de qualquer papel.",
-  },
-  supervisor: {
-    where: "Central, no navegador",
-    can: "Tudo o que o analista faz, mais categorias, grupos técnicos, motivos de violação, dados da empresa, regras de campo e valor do km. Cria e edita analistas e clientes do portal.",
-  },
-  analyst: {
-    where: "Central, no navegador",
-    can: "Abre e cuida das OS, clientes, locais, técnicos, formulários, textos do WhatsApp, tipos de serviço, custos extras e motivos de visita improdutiva.",
-  },
-  technician: {
-    where: "App do técnico, no celular",
-    can: "Só as OS atribuídas a ele, com o básico do atendimento. Não entra na central.",
-  },
-  requester: {
-    where: "Portal do cliente, no navegador",
-    can: "Abre e acompanha as solicitações da empresa dele, só com os dados liberados ao cliente.",
-  },
+/** Onde cada papel entra (o que supervisor e analista veem sai do perfil de acesso, na seção Acesso). */
+const ROLE_HINT: Record<UserRole, string> = {
+  admin: "Central no navegador, com acesso total (inclusive SLA e usuários de qualquer papel).",
+  supervisor: "Central no navegador. Cria e edita analistas e clientes do portal.",
+  analyst: "Central no navegador. Abre e cuida das OS.",
+  technician: "Só o app no celular, com as OS atribuídas a ele.",
+  requester: "Portal do cliente: as solicitações da empresa dele.",
 };
 
 // Espelho de backend/app/api/routes/users.py: o supervisor cuida de analistas e clientes do portal;
@@ -74,9 +63,23 @@ const ROLE_HELP: Record<UserRole, { where: string; can: string }> = {
 const SUPERVISOR_MANAGES: UserRole[] = ["analyst", "requester"];
 const canManageRole = (me: UserRole | undefined, role: UserRole) =>
   me === "admin" || (me === "supervisor" && SUPERVISOR_MANAGES.includes(role));
-/** Papéis que dá para escolher no cadastro. Técnico novo sai pelo cadastro de técnicos (senha provisória). */
-function roleOptions(me: UserRole | undefined, creating: boolean): UserRole[] {
-  return ROLE_ORDER.filter((r) => canManageRole(me, r) || (creating && r === "technician" && isManager(me)));
+/**
+ * Papéis que dá para escolher no cadastro. Técnico novo sai pelo cadastro de técnicos (senha
+ * provisória), que é gravar em Técnicos: só com Editar nela.
+ */
+function roleOptions(me: UserRole | undefined, creating: boolean, technicians: boolean): UserRole[] {
+  return ROLE_ORDER.filter((r) => canManageRole(me, r) || (creating && r === "technician" && isManager(me) && technicians));
+}
+
+/** A aba fica na URL (?aba=perfis), sem navegar e mantendo a OS aberta no painel (?os=). */
+function setParams(patch: Record<string, string | null>) {
+  const url = new URL(window.location.href);
+  for (const [key, value] of Object.entries(patch)) {
+    if (value) url.searchParams.set(key, value);
+    else url.searchParams.delete(key);
+  }
+  const state = window.history.state as { mfPanel?: string } | null;
+  window.history.replaceState(state?.mfPanel ? { mfPanel: state.mfPanel } : null, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
 // Gerenciadores de senha tratam e-mail + senha como tela de login e preencheriam os dados de quem
@@ -279,8 +282,17 @@ function UserDialog({ user, onClose }: { user: User | null; onClose: () => void 
   const { user: me } = useAuth();
   const teams = useTeams();
   const customers = useCustomers();
+  const canTechnicians = useCan("base.technicians", "edit");
+  const profiles = useAccessProfiles();
   const editing = user !== null;
   const self = editing && user.id === me?.id;
+  // Perfil de acesso e ajustes (supervisor e analista): só vão para a API quando mudam aqui.
+  const [initialAccess] = useState<AccessDraft>(() => ({
+    profileId: user?.access_profile_id ?? null,
+    overrides: user?.access_overrides ?? null,
+  }));
+  const [access, setAccess] = useState<AccessDraft>(initialAccess);
+  const accessChanged = JSON.stringify(access) !== JSON.stringify(initialAccess);
   const [initial] = useState(() => ({
     name: user?.name ?? "",
     email: user?.email ?? "",
@@ -309,7 +321,14 @@ function UserDialog({ user, onClose }: { user: User | null; onClose: () => void 
   // Técnico novo: cadastro de técnicos (senha provisória gerada pela API e troca no 1º acesso ao app).
   const technicianFlow = !editing && form.role === "technician";
   const savedTechnician = editing && user.role === "technician";
-  const roles = roleOptions(me?.role, !editing);
+  const roles = roleOptions(me?.role, !editing, canTechnicians);
+  // Troca de papel: o perfil padrão do papel antigo dá lugar ao do novo (um perfil criado na tela fica).
+  const changeRole = (role: UserRole) => {
+    set("role", role);
+    const current = profiles.data?.find((p) => p.id === access.profileId);
+    if (current?.system_key) setAccess((a) => ({ ...a, profileId: null }));
+  };
+  const showAccess = !technicianFlow && canManageRole(me?.role, form.role);
   const teamOptions = (teams.data ?? []).filter((t) => t.is_active || t.id === initial.team_id);
   const customerOptions = (customers.data ?? []).filter((c) => c.is_active || c.id === initial.customer_id);
 
@@ -342,12 +361,14 @@ function UserDialog({ user, onClose }: { user: User | null; onClose: () => void 
   const sessionEnds =
     editing && (settingPassword || form.email.trim().toLowerCase() !== initial.email.toLowerCase() || form.role !== initial.role);
 
-  const dirty = JSON.stringify(form) !== JSON.stringify(initial) || password !== "";
+  const dirty = JSON.stringify(form) !== JSON.stringify(initial) || password !== "" || accessChanged;
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["users"] });
     queryClient.invalidateQueries({ queryKey: ["assignable"] });
     queryClient.invalidateQueries({ queryKey: ["technicians"] });
+    // Quantas pessoas usam cada perfil (papel ou perfil trocado).
+    queryClient.invalidateQueries({ queryKey: ["access", "profiles"] });
   };
 
   const save = useMutation({
@@ -368,6 +389,10 @@ function UserDialog({ user, onClose }: { user: User | null; onClose: () => void 
         team_id: isClient ? null : form.team_id || null,
         customer_id: isClient ? form.customer_id || null : null,
       };
+      // Sem mudança no acesso, a API mantém o perfil (ou, com troca de papel, passa ao padrão do novo).
+      if (showAccess && accessChanged && usesAccessProfile(form.role)) {
+        body.access = accessPayload(access, profileFor(profiles.data, form.role, access.profileId), form.role);
+      }
       if (editing) {
         body.is_active = form.is_active;
         if (settingPassword) body.password = password;
@@ -513,8 +538,8 @@ function UserDialog({ user, onClose }: { user: User | null; onClose: () => void 
             {...NO_AUTOFILL}
           />
         </Field>
-        <Field label="Papel" required hint={self ? "Você não pode tirar o próprio acesso." : ROLE_HELP[form.role].can}>
-          <Select value={form.role} onChange={(e) => set("role", e.target.value as UserRole)} disabled={self}>
+        <Field label="Papel" required hint={self ? "Você não pode tirar o próprio acesso." : ROLE_HINT[form.role]}>
+          <Select value={form.role} onChange={(e) => changeRole(e.target.value as UserRole)} disabled={self}>
             {roles.map((r) => (
               <option key={r} value={r}>
                 {ROLE[r]}
@@ -545,6 +570,15 @@ function UserDialog({ user, onClose }: { user: User | null; onClose: () => void 
             </Select>
           </Field>
         )}
+        {showAccess ? (
+          <UserAccessFields
+            role={form.role}
+            draft={access}
+            onChange={setAccess}
+            before={editing && user.role === form.role ? (user.access ?? null) : null}
+            disabled={self || save.isPending}
+          />
+        ) : null}
         <Field label="Cargo">
           <Input
             value={form.job_title}
@@ -766,52 +800,69 @@ export default function UsersPage() {
   );
 }
 
+/** Por que a linha não tem o "Editar". */
+const noEditReason = (role: UserRole) =>
+  role === "technician" ? "O cadastro do técnico fica em Técnicos" : "Só o administrador edita este papel";
+
+/** Coluna "Acesso": total, o perfil, "ajustado" e "só a própria fila" (técnico e cliente não têm perfil). */
+function AccessCell({ user }: { user: User }) {
+  if (user.role === "admin") return <span className="text-ink">Total</span>;
+  if (!usesAccessProfile(user.role)) return <span className="text-ink-subtle">—</span>;
+  const access = user.access;
+  const name = access?.profile?.name ?? user.access_profile?.name ?? "Padrão do papel";
+  return (
+    <span className="flex flex-wrap items-center gap-1.5">
+      <span className="text-ink">{name}</span>
+      {access?.customized ? <NeutralChip>ajustado</NeutralChip> : null}
+      {access && !access.full && access.queues.scope === "own" ? <NeutralChip>só a própria fila</NeutralChip> : null}
+    </span>
+  );
+}
+
 function UsersView() {
   const { user: me } = useAuth();
   const params = useSearchParams();
-  const manager = isManager(me?.role);
-  // ?q= vem de outras telas (ex.: Homologação) para achar uma pessoa: aí vale olhar ativos e inativos.
-  const [search, setSearch] = useState(() => params.get("q") ?? "");
-  const [role, setRole] = useState("");
-  const [situation, setSituation] = useState<Situation>(() => (params.get("q") ? "all" : "active"));
-  const q = useDebounced(search.trim());
-  const users = useQuery({
-    queryKey: ["users", { q, role, situation }],
-    queryFn: () =>
-      api.get<User[]>("/users", {
-        q: q || undefined,
-        role: role || undefined,
-        // A API lê "true"/"false" (o falso booleano nem iria na URL).
-        active: situation === "active" ? "true" : situation === "inactive" ? "false" : undefined,
-      }),
-    placeholderData: keepPreviousData,
-  });
-  const teams = useTeams();
+  const tab: Tab = params.get("aba") === "perfis" ? "profiles" : "users";
+  // Usuários > Editar: grupos técnicos; cadastrar pessoas depende também do papel (a hierarquia).
+  const canEdit = useCan("setup.users", "edit");
+  const manager = canEdit && isManager(me?.role);
+  const canOpenTechnicians = useCan("base.technicians");
+  const confirm = useConfirm();
   const [editingUser, setEditingUser] = useState<User | null | undefined>(undefined);
   const [editingTeam, setEditingTeam] = useState<Team | null | undefined>(undefined);
-  const list = useMemo(() => users.data ?? [], [users.data]);
-  const filtered = Boolean(q || role || situation !== "active");
-  // Lista longa (ex.: os técnicos inativos que vieram do Field Control) entra aos poucos; mudar a
-  // busca ou os filtros volta ao começo.
-  const filterKey = `${q}|${role}|${situation}`;
-  const [shown, setShown] = useState({ key: filterKey, count: PAGE_SIZE });
-  const visibleCount = shown.key === filterKey ? shown.count : PAGE_SIZE;
-  const visible = list.slice(0, visibleCount);
+
+  // Trocar de aba com um perfil alterado e não salvo perderia a edição: pergunta antes.
+  const switchTab = async (key: Tab) => {
+    if (key === tab) return;
+    if (
+      hasUnsavedChanges() &&
+      !(await confirm({
+        title: "Sair sem salvar?",
+        description: "Há alterações não salvas no perfil de acesso.",
+        confirmLabel: "Sair sem salvar",
+        cancelLabel: "Continuar editando",
+        tone: "danger",
+      }))
+    ) {
+      return;
+    }
+    setParams({ aba: key === "profiles" ? "perfis" : null, perfil: null });
+  };
 
   const description =
     me?.role === "admin"
-      ? "Contas da central, dos técnicos e dos clientes do portal."
-      : me?.role === "supervisor"
-        ? "Você cria e edita analistas e clientes do portal; os outros papéis, só o administrador."
+      ? "Contas da central, dos técnicos e dos clientes do portal, e o que cada perfil acessa."
+      : me?.role === "supervisor" && manager
+        ? "Você cria e edita analistas e clientes do portal; os outros papéis e os perfis, só o administrador."
         : "Só administradores e supervisores criam e editam usuários.";
 
   return (
     <div className="mx-auto max-w-7xl">
       <PageHeader
-        title="Usuários e grupos"
+        title="Usuários e acessos"
         description={description}
         actions={
-          manager ? (
+          manager && tab === "users" ? (
             <Button variant="primary" onClick={() => setEditingUser(null)}>
               <Plus className="size-4" />
               Novo usuário
@@ -820,228 +871,301 @@ function UsersView() {
         }
       />
 
-      <details className="group mb-4 rounded-xl border border-line bg-surface shadow-elev-1">
-        <summary className="flex cursor-pointer list-none items-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold text-ink focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none [&::-webkit-details-marker]:hidden">
-          <ChevronRight className="size-4 shrink-0 text-ink-muted transition-transform duration-150 group-open:rotate-90" />
-          Quem pode o quê
-          <span className="font-normal text-ink-muted">· o que cada papel acessa</span>
-        </summary>
-        <div className="border-t border-line">
-          <Table>
-            <thead>
-              <tr>
-                <Th>Papel</Th>
-                <Th>Onde entra</Th>
-                <Th>O que pode</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {ROLE_ORDER.map((r) => (
-                <tr key={r}>
-                  <Td className="font-semibold whitespace-nowrap">{ROLE[r]}</Td>
-                  <Td className="text-sm whitespace-nowrap text-ink-muted">{ROLE_HELP[r].where}</Td>
-                  <Td className="min-w-72 text-sm">{ROLE_HELP[r].can}</Td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        </div>
-      </details>
+      <div className="mb-4 border-b border-line">
+        <Tabs<Tab>
+          className="-mb-px"
+          items={[
+            { key: "users", label: "Usuários" },
+            { key: "profiles", label: "Perfis de acesso" },
+          ]}
+          value={tab}
+          onChange={(key) => void switchTab(key)}
+          ariaLabel="Usuários e acessos"
+          idPrefix="usuarios"
+        />
+      </div>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
-        <Card className="min-w-0">
-          <div className="flex flex-col gap-2 border-b border-line p-3 lg:flex-row lg:items-center">
-            <SearchField
-              className="lg:max-w-xs lg:flex-1"
-              value={search}
-              onChange={setSearch}
-              placeholder="Buscar por nome ou e-mail"
-              label="Buscar usuário"
-            />
-            <Select value={role} onChange={(e) => setRole(e.target.value)} aria-label="Papel" className="lg:w-48">
-              <option value="">Todos os papéis</option>
-              {ROLE_ORDER.map((r) => (
-                <option key={r} value={r}>
-                  {ROLE[r]}
-                </option>
-              ))}
-            </Select>
-            <Tabs<Situation>
-              variant="segmented"
-              ariaLabel="Situação"
-              className="self-start lg:ml-auto lg:self-auto"
-              value={situation}
-              onChange={setSituation}
-              items={[
-                { key: "active", label: "Ativos" },
-                { key: "inactive", label: "Inativos" },
-                { key: "all", label: "Todos" },
-              ]}
-            />
-          </div>
-          {users.isLoading ? (
-            <LoadingBlock />
-          ) : users.error && !users.data ? (
-            <div className="flex flex-col items-start gap-3 p-4">
-              <ErrorBox message={errorMessage(users.error)} />
-              <Button size="sm" loading={users.isFetching} onClick={() => users.refetch()}>
-                Tentar de novo
-              </Button>
-            </div>
-          ) : list.length === 0 ? (
-            <EmptyState
-              icon={<Users />}
-              title={filtered ? "Nenhum usuário encontrado" : "Nenhum usuário ativo"}
-              description={filtered ? "Confira a busca, o papel e a situação." : undefined}
-              action={
-                filtered ? (
-                  <Button
-                    size="sm"
-                    onClick={() => {
-                      setSearch("");
-                      setRole("");
-                      setSituation("active");
-                    }}
-                  >
-                    Limpar filtros
-                  </Button>
-                ) : undefined
-              }
-            />
-          ) : (
-            <>
-              <p className="px-4 pt-3 pb-1 text-xs text-ink-muted" aria-live="polite">
-                {situation === "active"
-                  ? plural(list.length, "usuário ativo", "usuários ativos")
-                  : situation === "inactive"
-                    ? plural(list.length, "usuário inativo", "usuários inativos")
-                    : plural(list.length, "usuário", "usuários")}
-              </p>
-              <Table>
-                <thead>
-                  <tr>
-                    <Th>Usuário</Th>
-                    <Th>Papel</Th>
-                    <Th>Grupo / empresa</Th>
-                    <Th>Último acesso</Th>
-                    {manager ? <Th className="edit-col">Editar</Th> : null}
-                  </tr>
-                </thead>
-                <tbody>
-                  {visible.map((u) => (
-                    <tr key={u.id} className="transition-colors hover:bg-[var(--row-hover)]">
-                      <Td className="min-w-64">
-                        <div className="flex items-center gap-2.5">
-                          <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-brand-soft text-xs font-semibold text-brand-ink">
-                            {initials(u.name)}
-                          </div>
-                          <div className="min-w-0">
-                            <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-semibold text-ink">
-                              <span className="min-w-0 truncate">{u.name}</span>
-                              {u.id === me?.id ? <span className="text-xs font-normal text-ink-muted">(você)</span> : null}
-                              {!u.is_active ? <InactiveChip /> : null}
-                            </p>
-                            <p className="truncate text-xs text-ink-muted">
-                              {u.email}
-                              {u.job_title ? ` · ${u.job_title}` : ""}
-                            </p>
-                          </div>
-                        </div>
-                      </Td>
-                      <Td>
-                        <RoleChip role={u.role} />
-                      </Td>
-                      <Td className="text-sm">
-                        {u.role === "requester"
-                          ? (u.customer?.name ?? <span className="text-ink-muted">Sem empresa</span>)
-                          : (u.team?.name ?? <span className="text-ink-subtle">—</span>)}
-                      </Td>
-                      <Td className="text-xs whitespace-nowrap text-ink-muted">
-                        <span className="block">{u.last_login_at ? formatDateTime(u.last_login_at) : "Nunca acessou"}</span>
-                        {u.must_change_password ? <span className="block">Senha provisória</span> : null}
-                      </Td>
-                      {manager ? (
-                        <Td className="edit-col">
-                          {canManageRole(me?.role, u.role) ? (
-                            <RowEditButton label={`Editar ${u.name}`} onClick={() => setEditingUser(u)} />
-                          ) : u.role === "technician" ? (
-                            // O cadastro do técnico (cidade, área, senha provisória) fica em Técnicos.
-                            <RowEditLink label={`Editar ${u.name} em Técnicos`} href={`/tecnicos?q=${encodeURIComponent(u.email)}`} />
-                          ) : (
-                            <span className="inline-flex size-8 items-center justify-center text-ink-subtle" title="Só o administrador edita este papel">
-                              <span aria-hidden>—</span>
-                              <span className="sr-only">Só o administrador edita este papel</span>
-                            </span>
-                          )}
-                        </Td>
-                      ) : null}
-                    </tr>
-                  ))}
-                </tbody>
-              </Table>
-              {list.length > visible.length ? (
-                <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
-                  <span className="text-xs text-ink-muted">
-                    Mostrando {visible.length.toLocaleString("pt-BR")} de {list.length.toLocaleString("pt-BR")}
-                  </span>
-                  <Button size="sm" onClick={() => setShown({ key: filterKey, count: visibleCount + PAGE_SIZE })}>
-                    Mostrar mais {Math.min(PAGE_SIZE, list.length - visible.length)}
-                  </Button>
-                </div>
-              ) : null}
-            </>
-          )}
-        </Card>
-
-        <Card className="self-start">
-          <CardHeader
-            title="Grupos técnicos"
-            description="Filas de atendimento e roteamento por categoria"
-            actions={
-              manager ? (
-                <Button size="sm" onClick={() => setEditingTeam(null)}>
-                  <Plus className="size-3.5" />
-                  Novo
-                </Button>
-              ) : null
-            }
+      <div role="tabpanel" id={`usuarios-panel-${tab}`} aria-labelledby={`usuarios-tab-${tab}`}>
+        {tab === "profiles" ? (
+          <ProfilesTab />
+        ) : (
+          <UsersTab
+            manager={manager}
+            canEditTeams={canEdit}
+            canOpenTechnicians={canOpenTechnicians}
+            onEditUser={setEditingUser}
+            onEditTeam={setEditingTeam}
           />
-          {teams.isLoading ? (
-            <LoadingBlock rows={2} />
-          ) : teams.error ? (
-            <div className="flex flex-col items-start gap-3 p-4">
-              <ErrorBox message={errorMessage(teams.error)} />
-              <Button size="sm" loading={teams.isFetching} onClick={() => teams.refetch()}>
-                Tentar de novo
-              </Button>
-            </div>
-          ) : (teams.data ?? []).length === 0 ? (
-            <EmptyState
-              icon={<UsersRound />}
-              title="Nenhum grupo"
-              description="Grupos organizam as filas e o roteamento das categorias."
-            />
-          ) : (
-            <ul className="divide-y divide-line">
-              {teams.data?.map((t) => (
-                <li key={t.id} className="flex items-start justify-between gap-2 px-4 py-3">
-                  <div className="min-w-0">
-                    <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-ink">
-                      {t.name}
-                      {!t.is_active ? <InactiveChip /> : null}
-                    </p>
-                    {t.description ? <p className="text-xs text-ink-muted">{t.description}</p> : null}
-                  </div>
-                  {manager ? <RowEditButton label={`Editar o grupo ${t.name}`} onClick={() => setEditingTeam(t)} /> : null}
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
+        )}
       </div>
 
       {editingUser !== undefined ? <UserDialog user={editingUser} onClose={() => setEditingUser(undefined)} /> : null}
       {editingTeam !== undefined ? <TeamDialog team={editingTeam} onClose={() => setEditingTeam(undefined)} /> : null}
+    </div>
+  );
+}
+
+/** Aba "Usuários": a lista com busca e filtros e o cartão dos grupos técnicos. */
+function UsersTab({
+  manager,
+  canEditTeams,
+  canOpenTechnicians,
+  onEditUser,
+  onEditTeam,
+}: {
+  /** Cadastra e edita pessoas (Usuários: Editar, admin ou supervisor). */
+  manager: boolean;
+  /** Usuários: Editar (os grupos técnicos). */
+  canEditTeams: boolean;
+  /** Vê a tela de Técnicos (o cadastro do técnico fica lá). */
+  canOpenTechnicians: boolean;
+  onEditUser: (user: User | null) => void;
+  onEditTeam: (team: Team | null) => void;
+}) {
+  const { user: me } = useAuth();
+  const params = useSearchParams();
+  // ?q= vem de outras telas (ex.: Homologação) para achar uma pessoa: aí vale olhar ativos e inativos.
+  const [search, setSearch] = useState(() => params.get("q") ?? "");
+  const [role, setRole] = useState("");
+  const [situation, setSituation] = useState<Situation>(() => (params.get("q") ? "all" : "active"));
+  // ?perfil= vem do "Usado por" da aba Perfis de acesso.
+  const profileId = params.get("perfil") ?? "";
+  const profiles = useAccessProfiles();
+  const q = useDebounced(search.trim());
+  const users = useQuery({
+    queryKey: ["users", { q, role, situation, profileId }],
+    queryFn: () =>
+      api.get<User[]>("/users", {
+        q: q || undefined,
+        role: role || undefined,
+        // A API lê "true"/"false" (o falso booleano nem iria na URL).
+        active: situation === "active" ? "true" : situation === "inactive" ? "false" : undefined,
+        access_profile_id: profileId || undefined,
+      }),
+    placeholderData: keepPreviousData,
+  });
+  const teams = useTeams();
+  const list = useMemo(() => users.data ?? [], [users.data]);
+  const filtered = Boolean(q || role || situation !== "active" || profileId);
+  // Lista longa (ex.: os técnicos inativos que vieram do Field Control) entra aos poucos; mudar a
+  // busca ou os filtros volta ao começo.
+  const filterKey = `${q}|${role}|${situation}|${profileId}`;
+  const [shown, setShown] = useState({ key: filterKey, count: PAGE_SIZE });
+  const visibleCount = shown.key === filterKey ? shown.count : PAGE_SIZE;
+  const visible = list.slice(0, visibleCount);
+  const profileOptions = profiles.data ?? [];
+
+  return (
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
+      <Card className="min-w-0">
+        <div className="flex flex-col gap-2 border-b border-line p-3 lg:flex-row lg:items-center">
+          <SearchField
+            className="lg:max-w-xs lg:flex-1"
+            value={search}
+            onChange={setSearch}
+            placeholder="Buscar por nome ou e-mail"
+            label="Buscar usuário"
+          />
+          <Select value={role} onChange={(e) => setRole(e.target.value)} aria-label="Papel" className="lg:w-48">
+            <option value="">Todos os papéis</option>
+            {ROLE_ORDER.map((r) => (
+              <option key={r} value={r}>
+                {ROLE[r]}
+              </option>
+            ))}
+          </Select>
+          {profileOptions.length ? (
+            <Select
+              value={profileId}
+              onChange={(e) => setParams({ perfil: e.target.value || null })}
+              aria-label="Perfil de acesso"
+              className="lg:w-48"
+            >
+              <option value="">Todos os perfis</option>
+              {profileOptions.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </Select>
+          ) : null}
+          <Tabs<Situation>
+            variant="segmented"
+            ariaLabel="Situação"
+            className="self-start lg:ml-auto lg:self-auto"
+            value={situation}
+            onChange={setSituation}
+            items={[
+              { key: "active", label: "Ativos" },
+              { key: "inactive", label: "Inativos" },
+              { key: "all", label: "Todos" },
+            ]}
+          />
+        </div>
+        {users.isLoading ? (
+          <LoadingBlock />
+        ) : users.error && !users.data ? (
+          <div className="flex flex-col items-start gap-3 p-4">
+            <ErrorBox message={errorMessage(users.error)} />
+            <Button size="sm" loading={users.isFetching} onClick={() => users.refetch()}>
+              Tentar de novo
+            </Button>
+          </div>
+        ) : list.length === 0 ? (
+          <EmptyState
+            icon={<Users />}
+            title={filtered ? "Nenhum usuário encontrado" : "Nenhum usuário ativo"}
+            description={filtered ? "Confira a busca, o papel, o perfil e a situação." : undefined}
+            action={
+              filtered ? (
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setSearch("");
+                    setRole("");
+                    setSituation("active");
+                    if (profileId) setParams({ perfil: null });
+                  }}
+                >
+                  Limpar filtros
+                </Button>
+              ) : undefined
+            }
+          />
+        ) : (
+          <>
+            <p className="px-4 pt-3 pb-1 text-xs text-ink-muted" aria-live="polite">
+              {situation === "active"
+                ? plural(list.length, "usuário ativo", "usuários ativos")
+                : situation === "inactive"
+                  ? plural(list.length, "usuário inativo", "usuários inativos")
+                  : plural(list.length, "usuário", "usuários")}
+            </p>
+            <Table>
+              <thead>
+                <tr>
+                  <Th>Usuário</Th>
+                  <Th>Papel</Th>
+                  <Th>Acesso</Th>
+                  <Th>Grupo / empresa</Th>
+                  <Th>Último acesso</Th>
+                  {manager ? <Th className="edit-col">Editar</Th> : null}
+                </tr>
+              </thead>
+              <tbody>
+                {visible.map((u) => (
+                  <tr key={u.id} className="transition-colors hover:bg-[var(--row-hover)]">
+                    <Td className="min-w-64">
+                      <div className="flex items-center gap-2.5">
+                        <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-brand-soft text-xs font-semibold text-brand-ink">
+                          {initials(u.name)}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-semibold text-ink">
+                            <span className="min-w-0 truncate">{u.name}</span>
+                            {u.id === me?.id ? <span className="text-xs font-normal text-ink-muted">(você)</span> : null}
+                            {!u.is_active ? <InactiveChip /> : null}
+                          </p>
+                          <p className="truncate text-xs text-ink-muted">
+                            {u.email}
+                            {u.job_title ? ` · ${u.job_title}` : ""}
+                          </p>
+                        </div>
+                      </div>
+                    </Td>
+                    <Td>
+                      <RoleChip role={u.role} />
+                    </Td>
+                    <Td className="min-w-36 text-sm">
+                      <AccessCell user={u} />
+                    </Td>
+                    <Td className="text-sm">
+                      {u.role === "requester"
+                        ? (u.customer?.name ?? <span className="text-ink-muted">Sem empresa</span>)
+                        : (u.team?.name ?? <span className="text-ink-subtle">—</span>)}
+                    </Td>
+                    <Td className="text-xs whitespace-nowrap text-ink-muted">
+                      <span className="block">{u.last_login_at ? formatDateTime(u.last_login_at) : "Nunca acessou"}</span>
+                      {u.must_change_password ? <span className="block">Senha provisória</span> : null}
+                    </Td>
+                    {manager ? (
+                      <Td className="edit-col">
+                        {canManageRole(me?.role, u.role) ? (
+                          <RowEditButton label={`Editar ${u.name}`} onClick={() => onEditUser(u)} />
+                        ) : u.role === "technician" && canOpenTechnicians ? (
+                          // O cadastro do técnico (cidade, área, senha provisória) fica em Técnicos.
+                          <RowEditLink label={`Editar ${u.name} em Técnicos`} href={`/tecnicos?q=${encodeURIComponent(u.email)}`} />
+                        ) : (
+                          <span className="inline-flex size-8 items-center justify-center text-ink-subtle" title={noEditReason(u.role)}>
+                            <span aria-hidden>—</span>
+                            <span className="sr-only">{noEditReason(u.role)}</span>
+                          </span>
+                        )}
+                      </Td>
+                    ) : null}
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+            {list.length > visible.length ? (
+              <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
+                <span className="text-xs text-ink-muted">
+                  Mostrando {visible.length.toLocaleString("pt-BR")} de {list.length.toLocaleString("pt-BR")}
+                </span>
+                <Button size="sm" onClick={() => setShown({ key: filterKey, count: visibleCount + PAGE_SIZE })}>
+                  Mostrar mais {Math.min(PAGE_SIZE, list.length - visible.length)}
+                </Button>
+              </div>
+            ) : null}
+          </>
+        )}
+      </Card>
+
+      <Card className="self-start">
+        <CardHeader
+          title="Grupos técnicos"
+          description="Filas de atendimento e roteamento por categoria"
+          actions={
+            canEditTeams ? (
+              <Button size="sm" onClick={() => onEditTeam(null)}>
+                <Plus className="size-3.5" />
+                Novo
+              </Button>
+            ) : null
+          }
+        />
+        {teams.isLoading ? (
+          <LoadingBlock rows={2} />
+        ) : teams.error ? (
+          <div className="flex flex-col items-start gap-3 p-4">
+            <ErrorBox message={errorMessage(teams.error)} />
+            <Button size="sm" loading={teams.isFetching} onClick={() => teams.refetch()}>
+              Tentar de novo
+            </Button>
+          </div>
+        ) : (teams.data ?? []).length === 0 ? (
+          <EmptyState
+            icon={<UsersRound />}
+            title="Nenhum grupo"
+            description="Grupos organizam as filas e o roteamento das categorias."
+          />
+        ) : (
+          <ul className="divide-y divide-line">
+            {teams.data?.map((t) => (
+              <li key={t.id} className="flex items-start justify-between gap-2 px-4 py-3">
+                <div className="min-w-0">
+                  <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-ink">
+                    {t.name}
+                    {!t.is_active ? <InactiveChip /> : null}
+                  </p>
+                  {t.description ? <p className="text-xs text-ink-muted">{t.description}</p> : null}
+                </div>
+                {canEditTeams ? <RowEditButton label={`Editar o grupo ${t.name}`} onClick={() => onEditTeam(t)} /> : null}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
     </div>
   );
 }

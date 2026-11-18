@@ -24,6 +24,7 @@ from app.services import onboarding as onboarding_svc
 from app.services import technician_regions, validation_messages
 from app.services.activities import local_today
 from app.services.errors import (
+    AccessDenied,
     DomainError,
     NotFound,
     PermissionDenied,
@@ -345,6 +346,13 @@ async def _forbidden(_: Request, exc: PermissionDenied) -> JSONResponse:
     return _error(403, str(exc))
 
 
+@app.exception_handler(AccessDenied)
+async def _access_denied(_: Request, exc: AccessDenied) -> JSONResponse:
+    """403 com código (tela fora do perfil, OS de outra fila, teto do acesso): a web mostra a
+    tela de "sem acesso" em vez do erro genérico."""
+    return _error(403, str(exc), code=exc.code, **exc.extra)
+
+
 @app.exception_handler(WorkflowError)
 async def _workflow(_: Request, exc: WorkflowError) -> JSONResponse:
     return _error(422, str(exc))
@@ -377,6 +385,7 @@ CONSTRAINT_MESSAGES: dict[str, str] = {
     "uq_quote_item_catalog_name": "Já existe um item com este nome no catálogo",
     "uq_ticket_payouts_ticket_tech": "O valor deste técnico já foi definido. Recarregue a OS.",
     "uq_users_entra_oid": "Esta conta Microsoft já está ligada a outro usuário",
+    "uq_access_profiles_name": "Já existe um perfil com este nome",
 }
 CONFLICT = "Conflito de dados: registro duplicado ou referência inválida"
 

@@ -3,6 +3,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, ApiError, type Query } from "./api";
 import type {
+  AccessCatalog,
+  AccessProfile,
   AssignableUser,
   CalendarEvent,
   Category,
@@ -133,10 +135,30 @@ export function useAssignable(teamId?: UUID | null, enabled = true) {
   });
 }
 
-export function useUsers(params: { q?: string; role?: string; team_id?: string } = {}) {
+export function useUsers(params: { q?: string; role?: string; team_id?: string; access_profile_id?: string } = {}) {
   return useQuery({
     queryKey: ["users", params],
     queryFn: ({ signal }) => api.get<User[]>("/users", params, { signal }),
+  });
+}
+
+/** Telas com nível de acesso (na ordem do menu) e o acesso padrão de cada papel. */
+export function useAccessCatalog(enabled = true) {
+  return useQuery({
+    queryKey: ["access", "catalog"],
+    queryFn: ({ signal }) => api.get<AccessCatalog>("/access/catalog", undefined, { signal }),
+    staleTime: 10 * 60_000,
+    enabled,
+  });
+}
+
+/** Perfis de acesso (Supervisor, Analista e os criados na tela), com quantas pessoas usam cada um. */
+export function useAccessProfiles(enabled = true) {
+  return useQuery({
+    queryKey: ["access", "profiles"],
+    queryFn: ({ signal }) => api.get<AccessProfile[]>("/access/profiles", undefined, { signal }),
+    staleTime: LOOKUP_STALE,
+    enabled,
   });
 }
 

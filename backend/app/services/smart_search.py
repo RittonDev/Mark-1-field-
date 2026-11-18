@@ -45,7 +45,12 @@ from app.schemas.ticket import TicketFilters, format_ticket_code
 from app.services import search
 from app.services.activities import local_today
 from app.services.technician_regions import fold_text
-from app.services.tickets import MAX_NUMBER, acted_by_clause, filter_conditions
+from app.services.tickets import (
+    MAX_NUMBER,
+    acted_by_clause,
+    filter_conditions,
+    visibility_clause,
+)
 from app.services.workflow import OPEN_STATUSES
 
 S = TicketStatus
@@ -1159,13 +1164,17 @@ async def document_step(db: AsyncSession, parsed: Parsed) -> None:
         parsed.words.append(Word(parsed.document_pos, doc.lower()))
 
 
-async def lone_number_step(db: AsyncSession, parsed: Parsed) -> None:
+async def lone_number_step(db: AsyncSession, parsed: Parsed, user: User | None = None) -> None:
     """Só um número: a OS com esse número; sem ela, a loja com esse código; senão, texto (nº do
-    chamado do cliente, descrição...)."""
+    chamado do cliente, descrição...). Com `user`, só a OS que ele vê vira o chip "OS nº" (a de
+    outra fila não aparece nem como chip)."""
     number = parsed.number
     if number is None or parsed.number_explicit:
         return
-    found = await db.scalar(select(Ticket.id).where(Ticket.number == number))
+    vis = visibility_clause(user) if user is not None else None
+    found = await db.scalar(
+        select(Ticket.id).where(Ticket.number == number, *((vis,) if vis is not None else ()))
+    )
     stores = [
         _location_cand(r)
         for r in await db.execute(
@@ -1377,15 +1386,23 @@ def _ranked(parsed: Parsed, kind: str, chosen: Cand | None, limit: int) -> list[
     return out[:limit]
 
 
-async def customers_out(db: AsyncSession, cands: list[Cand]) -> list[SearchCustomer]:
+async def customers_out(
+    db: AsyncSession, cands: list[Cand], user: User | None = None
+) -> list[SearchCustomer]:
+    """Clientes achados, com as OS abertas de cada um (com `user`, só as que ele vê)."""
     if not cands:
         return []
     ids = [c.id for c in cands]
+    vis = visibility_clause(user) if user is not None else None
     rows = await db.execute(
         select(Customer.id, Customer.document, func.count(Ticket.id))
         .outerjoin(
             Ticket,
-            and_(Ticket.customer_id == Customer.id, Ticket.status.in_(OPEN_STATUSES)),
+            and_(
+                Ticket.customer_id == Customer.id,
+                Ticket.status.in_(OPEN_STATUSES),
+                *((vis,) if vis is not None else ()),
+            ),
         )
         .where(Customer.id.in_(ids))
         .group_by(Customer.id, Customer.document)
@@ -1442,7 +1459,7 @@ async def smart_search(
     parsed = read_query(raw, local_today(), tags)
     if not parsed.query or not parsed.folded:
         return SmartSearchResult(query=parsed.query)
-    await lone_number_step(db, parsed)
+    await lone_number_step(db, parsed, user)
     await document_step(db, parsed)
 
     if parsed.content():
@@ -1475,7 +1492,7 @@ async def smart_search(
         filters=filters,
         total=total,
         tickets=tickets,
-        customers=await customers_out(db, _ranked(parsed, "customer", owner, limit)),
+        customers=await customers_out(db, _ranked(parsed, "customer", owner, limit), user),
         locations=[
             SearchLocation(id=c.id, name=c.name, code=c.code, city=c.city, customer=c.customer)
             for c in _ranked(parsed, "location", parsed.location, limit)

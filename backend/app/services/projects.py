@@ -10,6 +10,7 @@ from app.core.enums import ExpenseStatus, PayoutStatus, ProjectStatus, QuoteStat
 from app.models import Customer, Project, Quote, Team, Ticket, TicketExpense, TicketPayout, User
 from app.schemas.project import ProjectIn, ProjectOut, ProjectStats
 from app.services.errors import NotFound, WorkflowError
+from app.services.tickets import visibility_clause
 from app.services.workflow import OPEN_STATUSES
 
 DONE = (TicketStatus.RESOLVED, TicketStatus.CLOSED)
@@ -58,10 +59,15 @@ async def update(db: AsyncSession, project: Project, data: ProjectIn) -> Project
     return project
 
 
-async def stats(db: AsyncSession, ids: list[uuid.UUID]) -> dict[uuid.UUID, ProjectStats]:
+async def stats(
+    db: AsyncSession, ids: list[uuid.UUID], viewer: User | None = None
+) -> dict[uuid.UUID, ProjectStats]:
+    """Números de cada projeto. Com `viewer`, só as OS da fila que ele vê."""
     out = {i: ProjectStats() for i in ids}
     if not ids:
         return out
+    vis = visibility_clause(viewer) if viewer is not None else None
+    scope = (vis,) if vis is not None else ()
     for pid, total, open_, done, cancelled, unproductive in await db.execute(
         select(
             Ticket.project_id,
@@ -71,7 +77,7 @@ async def stats(db: AsyncSession, ids: list[uuid.UUID]) -> dict[uuid.UUID, Proje
             func.count().filter(Ticket.status == TicketStatus.CANCELLED),
             func.coalesce(func.sum(Ticket.unproductive_count), 0),
         )
-        .where(Ticket.project_id.in_(ids))
+        .where(Ticket.project_id.in_(ids), *scope)
         .group_by(Ticket.project_id)
     ):
         s = out[pid]
@@ -80,7 +86,7 @@ async def stats(db: AsyncSession, ids: list[uuid.UUID]) -> dict[uuid.UUID, Proje
     for pid, total in await db.execute(
         select(Ticket.project_id, func.sum(TicketExpense.total))
         .join(Ticket, Ticket.id == TicketExpense.ticket_id)
-        .where(Ticket.project_id.in_(ids), TicketExpense.status != ExpenseStatus.REJECTED)
+        .where(Ticket.project_id.in_(ids), TicketExpense.status != ExpenseStatus.REJECTED, *scope)
         .group_by(Ticket.project_id)
     ):
         out[pid].expenses_total = total or Decimal("0")
@@ -95,6 +101,7 @@ async def stats(db: AsyncSession, ids: list[uuid.UUID]) -> dict[uuid.UUID, Proje
                 TicketPayout.status == PayoutStatus.PAID,
                 Ticket.status != TicketStatus.CANCELLED,
             ),
+            *scope,
         )
         .group_by(Ticket.project_id)
     ):
@@ -107,6 +114,7 @@ async def stats(db: AsyncSession, ids: list[uuid.UUID]) -> dict[uuid.UUID, Proje
             Ticket.project_id.in_(ids),
             Quote.status == QuoteStatus.APPROVED,
             Ticket.status != TicketStatus.CANCELLED,
+            *scope,
         )
         .group_by(Ticket.project_id)
     ):
@@ -114,8 +122,10 @@ async def stats(db: AsyncSession, ids: list[uuid.UUID]) -> dict[uuid.UUID, Proje
     return out
 
 
-async def to_out(db: AsyncSession, projects: list[Project]) -> list[ProjectOut]:
-    numbers = await stats(db, [p.id for p in projects])
+async def to_out(
+    db: AsyncSession, projects: list[Project], viewer: User | None = None
+) -> list[ProjectOut]:
+    numbers = await stats(db, [p.id for p in projects], viewer)
     member_ids = {uuid.UUID(m) for p in projects for m in (p.member_ids or [])}
     names = {}
     if member_ids:
@@ -150,7 +160,11 @@ async def to_out(db: AsyncSession, projects: list[Project]) -> list[ProjectOut]:
 
 
 async def list_projects(
-    db: AsyncSession, status: ProjectStatus | None, q: str | None, customer_id: uuid.UUID | None
+    db: AsyncSession,
+    status: ProjectStatus | None,
+    q: str | None,
+    customer_id: uuid.UUID | None,
+    viewer: User | None = None,
 ) -> list[ProjectOut]:
     stmt = select(Project).order_by(Project.number.desc())
     if status is not None:
@@ -160,4 +174,4 @@ async def list_projects(
     if q:
         term = f"%{q.strip()}%"
         stmt = stmt.where(or_(Project.name.ilike(term), Project.description.ilike(term)))
-    return await to_out(db, list(await db.scalars(stmt.limit(500))))
+    return await to_out(db, list(await db.scalars(stmt.limit(500))), viewer)

@@ -1,17 +1,26 @@
 "use client";
 
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { BrandMark } from "@/components/Brand";
 import { CommandPalette } from "@/components/CommandPalette";
+import { watchDeniedRecents } from "@/components/home/search";
 import { navLabelFor } from "@/components/nav";
+import { NoAccess } from "@/components/NoAccess";
 import { MobileNav, Sidebar, Topbar } from "@/components/Shell";
 import { TicketPanelProvider } from "@/components/ticket/TicketPanel";
 import { canUseWeb, homePath, loginPath } from "@/lib/access";
+import { ACCESS_DENIED_EVENT, api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useDocumentTitle } from "@/lib/hooks";
+import { canAccess, itemForPath } from "@/lib/permissions";
 import { RealtimeProvider } from "@/lib/realtime";
+import { sessionStore } from "@/lib/session";
+import type { User } from "@/lib/types";
+
+/** Releitura do usuário: o perfil de acesso pode mudar com a central aberta. */
+const ME_INTERVAL_MS = 5 * 60_000;
 
 /** Abertura enquanto a sessão carrega: o símbolo da marca "respirando". */
 function SplashLoader() {
@@ -68,7 +77,46 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     if (userId) lastUserId.current = userId;
   }, [userId, role]);
 
+  // O usuário de agora (perfil e ajustes de acesso), relido de 5 em 5 minutos, ao voltar para a aba, no
+  // aviso de acesso alterado (tempo real) e depois de um 403 de tela sem acesso.
+  const central = ready && !!user && !wrongChannel && !isClient;
+  const me = useQuery({
+    queryKey: ["auth", "me"],
+    queryFn: ({ signal }) => api.get<User>("/auth/me", undefined, { signal }),
+    enabled: central,
+    staleTime: ME_INTERVAL_MS,
+    refetchInterval: ME_INTERVAL_MS,
+    refetchOnWindowFocus: true,
+  });
+  const fresh = me.data;
+  useEffect(() => {
+    const current = sessionStore.get()?.user;
+    if (!fresh || !current || fresh.id !== current.id) return;
+    // Só o acesso decide: o menu, a busca e a guarda das telas seguem o novo na hora.
+    if (JSON.stringify(fresh.access ?? null) !== JSON.stringify(current.access ?? null)) sessionStore.updateUser(fresh);
+  }, [fresh]);
+
+  useEffect(() => {
+    if (!central) return;
+    const recheck = () => void queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
+    window.addEventListener(ACCESS_DENIED_EVENT, recheck);
+    // OS recente que deixou de abrir (outra fila ou excluída) sai das recentes da busca.
+    const unwatch = watchDeniedRecents(queryClient);
+    return () => {
+      window.removeEventListener(ACCESS_DENIED_EVENT, recheck);
+      unwatch();
+    };
+  }, [central, queryClient]);
+
   if (!ready || !user || wrongChannel || isClient) return <SplashLoader />;
+  // Sessão aberta antes dos perfis de acesso: espera o /auth/me para não mostrar um menu que muda logo
+  // depois (se ele falhar, segue com o acesso padrão do papel, que é o de antes).
+  if (user.access === undefined && me.isPending) return <SplashLoader />;
+
+  // Tela de um módulo fora do perfil (link direto, favorito, ?next=): a tela amigável no lugar da
+  // página, sem que ela chegue a buscar nada na API.
+  const item = itemForPath(pathname);
+  const blocked = !!item && !canAccess(user, item);
 
   return (
     <RealtimeProvider key={user.id} userId={user.id}>
@@ -93,7 +141,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <Topbar onOpenMenu={() => setMenuAt(pathname)} menuOpen={menuOpen} />
               {/* A chave pela rota refaz a entrada suave a cada troca de tela. */}
               <main key={pathname} id="conteudo" tabIndex={-1} className="flex-1 animate-enter px-4 py-6 outline-none md:px-8 print:p-0">
-                {children}
+                {blocked && item ? <NoAccess kind="module" item={item} /> : children}
               </main>
             </div>
           </div>

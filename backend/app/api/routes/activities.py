@@ -3,17 +3,20 @@ import uuid
 
 from fastapi import APIRouter
 
-from app.api.deps import DB, TicketManagerUser
+from app.api.deps import DB, access_user
 from app.schemas.activities import DayActivities
 from app.services.activities import day_activities
 
 router = APIRouter(tags=["activities"])
 
+# Atividades do dia; o Mapa ao vivo também lê a lista.
+DayView = access_user("operation.day", "operation.map")
+
 
 @router.get("/activities/day", response_model=DayActivities)
 async def activities_of_the_day(
     db: DB,
-    user: TicketManagerUser,
+    user: DayView,
     date: dt.date | None = None,
     assignee_id: uuid.UUID | None = None,
     team_id: uuid.UUID | None = None,

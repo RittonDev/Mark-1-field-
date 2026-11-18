@@ -3,6 +3,7 @@
 import { Archive, ExternalLink, FileText } from "lucide-react";
 import { Card, CardHeader, SectionTitle } from "@/components/ui";
 import { formatDateTime, formatMoney } from "@/lib/format";
+import { useCan } from "@/lib/permissions";
 import type { TicketDetail } from "@/lib/types";
 import { useTicketAttachments } from "./AttachmentsTab";
 
@@ -24,14 +25,20 @@ const FC_STATUS: Record<string, string> = {
 
 const isImage = (type: string | null, url: string) => (type ?? "").startsWith("image/") || /\.(jpe?g|png|webp|gif)(\?|$)/i.test(url);
 
+/** Preço do pedido; sem acesso a Orçamentos a API manda os preços vazios (null). */
+const price = (value: number | null | undefined) => (value == null ? "—" : formatMoney(value));
+
 /** O que veio do Field Control na migração: valores, itens, a solicitação original do cliente e os arquivos. */
 export function LegacyOrderCard({ ticket }: { ticket: TicketDetail }) {
   const legacy = ticket.legacy;
+  // Os preços do pedido seguem o acesso a Orçamentos (a API também os tira).
+  const canPrices = useCan("commercial.quotes");
   // Os mesmos anexos da aba Anexos (a consulta é compartilhada): arquivo que já está lá não se repete aqui.
   const attachments = useTicketAttachments(ticket.id, Boolean(legacy?.files?.length));
   if (!legacy) return null;
-  const values = legacy.values;
+  const values = canPrices ? legacy.values : null;
   const items = legacy.items ?? [];
+  const priced = canPrices && items.some((i) => i.value != null || i.total != null);
   const inAttachments = new Set((attachments.data ?? []).map((a) => a.download_url).filter(Boolean));
   const allFiles = legacy.files ?? [];
   const files = allFiles.filter((f) => !inAttachments.has(f.url));
@@ -80,14 +87,18 @@ export function LegacyOrderCard({ ticket }: { ticket: TicketDetail }) {
 
         {items.length ? (
           <div className="overflow-x-auto rounded-xl border border-line">
-            <table className="w-full min-w-[30rem] text-sm">
+            <table className={priced ? "w-full min-w-[30rem] text-sm" : "w-full min-w-[18rem] text-sm"}>
               <thead className="bg-[var(--table-head)] text-left text-[11px] font-bold tracking-[0.05em] text-ink-muted uppercase">
                 <tr>
                   <th className="px-3 py-2">Item</th>
                   <th className="px-3 py-2">Tipo</th>
                   <th className="px-3 py-2 text-right">Qtd.</th>
-                  <th className="px-3 py-2 text-right">Valor</th>
-                  <th className="px-3 py-2 text-right">Total</th>
+                  {priced ? (
+                    <>
+                      <th className="px-3 py-2 text-right">Valor</th>
+                      <th className="px-3 py-2 text-right">Total</th>
+                    </>
+                  ) : null}
                 </tr>
               </thead>
               <tbody className="divide-y divide-line">
@@ -96,13 +107,20 @@ export function LegacyOrderCard({ ticket }: { ticket: TicketDetail }) {
                     <td className="px-3 py-2 font-semibold text-ink">{i.name}</td>
                     <td className="px-3 py-2 text-ink-muted">{i.type === "service" ? "Serviço" : "Produto"}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{i.quantity.toLocaleString("pt-BR")}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{formatMoney(i.value)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{formatMoney(i.total)}</td>
+                    {priced ? (
+                      <>
+                        <td className="px-3 py-2 text-right tabular-nums">{price(i.value)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{price(i.total)}</td>
+                      </>
+                    ) : null}
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+        ) : null}
+        {items.length && !canPrices ? (
+          <p className="text-xs text-ink-muted">Os valores do pedido aparecem para quem tem acesso a Orçamentos.</p>
         ) : null}
 
         {hasValues ? (
@@ -115,7 +133,7 @@ export function LegacyOrderCard({ ticket }: { ticket: TicketDetail }) {
             ].map(([label, value]) => (
               <div key={label as string} className="bg-surface px-3 py-2.5">
                 <p className="text-[11px] text-ink-muted">{label}</p>
-                <p className="text-sm font-semibold text-ink tabular-nums">{formatMoney(value as number)}</p>
+                <p className="text-sm font-semibold text-ink tabular-nums">{price(value as number | null)}</p>
               </div>
             ))}
           </div>

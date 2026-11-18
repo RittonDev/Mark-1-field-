@@ -10,6 +10,7 @@ import { StatusBadge } from "@/components/badges";
 import { ContactList, formatPhone, whatsappLink } from "@/components/ContactList";
 import { documentKind, LocationDialog, locationContacts, validCoords } from "@/components/LocationDialog";
 import { CountUp } from "@/components/motion";
+import { NoAccess } from "@/components/NoAccess";
 import { useToast } from "@/components/Toaster";
 import { Button, buttonClassName, Card, CardHeader, ErrorBox, LoadingBlock, SectionTitle } from "@/components/ui";
 import { TicketLink } from "@/components/ticket/TicketLink";
@@ -17,6 +18,7 @@ import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canManageTickets } from "@/lib/constants";
 import { formatDate, formatDocument, initials } from "@/lib/format";
+import { useCan } from "@/lib/permissions";
 import type { Location, NearbyResult, Page, TicketListItem } from "@/lib/types";
 import { copyText } from "@/lib/whatsapp";
 
@@ -39,12 +41,19 @@ export default function LocationDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
   const { toast } = useToast();
-  const canEdit = canManageTickets(user?.role);
+  const canView = useCan("base.locations");
+  const canEdit = useCan("base.locations", "edit");
+  // O cliente e a busca de técnicos são de outras telas: o link só aparece com acesso a elas.
+  const canCustomers = useCan("base.customers");
+  const canTechnicians = useCan("base.technicians");
+  // Nova OS é da central inteira (não depende do acesso a Locais).
+  const canOpenTicket = canManageTickets(user?.role);
   const [editing, setEditing] = useState(false);
-  const loc = useQuery({ queryKey: ["location", id], queryFn: () => api.get<Location>(`/locations/${id}`) });
+  const loc = useQuery({ queryKey: ["location", id], queryFn: () => api.get<Location>(`/locations/${id}`), enabled: canView });
   const recent = useQuery({
     queryKey: ["tickets", "location", id],
     queryFn: () => api.get<Page<TicketListItem>>("/tickets", { location_id: id, page_size: 10, order_by: "-created_at" }),
+    enabled: canView,
   });
   // Quem já atendeu esta loja, pelo cálculo da busca por proximidade: pede o máximo (50) para quem visita
   // com frequência não ficar de fora quando a distância é medida do centro da cidade.
@@ -54,6 +63,7 @@ export default function LocationDetailPage() {
     queryFn: () => api.get<NearbyResult>("/technicians/nearby", { location_id: id, include_inactive: true, limit: 50 }),
     retry: false,
     staleTime: 5 * 60_000,
+    enabled: canView,
   });
 
   const back = (
@@ -62,6 +72,7 @@ export default function LocationDetailPage() {
       Locais
     </Link>
   );
+  if (!canView) return <NoAccess kind="module" item="base.locations" />;
   if (loc.isLoading) return <LoadingBlock rows={4} />;
   if (loc.error || !loc.data) {
     return (
@@ -117,9 +128,13 @@ export default function LocationDetailPage() {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
             <p className="text-xs font-medium text-ink-subtle">
-              <Link href={`/clientes/${l.customer_id}`} className="hover:text-brand hover:underline">
-                {l.customer.name}
-              </Link>
+              {canCustomers ? (
+                <Link href={`/clientes/${l.customer_id}`} className="hover:text-brand hover:underline">
+                  {l.customer.name}
+                </Link>
+              ) : (
+                l.customer.name
+              )}
             </p>
             <h1 className="mt-1 text-[22px] leading-tight font-bold tracking-[-0.02em] text-ink">
               {l.code ? <span className="mr-2 rounded-md bg-surface-2 px-1.5 py-0.5 font-mono text-base font-semibold text-ink-muted">{l.code}</span> : null}
@@ -153,7 +168,7 @@ export default function LocationDetailPage() {
               </Button>
             ) : null}
             {/* O pedido chegou no WhatsApp e a loja já está aberta: a Nova OS vem com ela escolhida. */}
-            {canEdit && l.is_active ? (
+            {canOpenTicket && l.is_active ? (
               <Link href={`/chamados/novo?location_id=${l.id}`} className={buttonClassName("primary")}>
                 <Plus className="size-4" />
                 Nova OS
@@ -176,17 +191,19 @@ export default function LocationDetailPage() {
               title="Técnicos que já atenderam esta loja"
               description="Pelo histórico de OS; quem tem mais visitas aparece primeiro."
               actions={
-                <Link href="/tecnicos" className="text-xs text-ink-muted hover:text-brand">
-                  Buscar mais próximos
-                </Link>
+                canTechnicians ? (
+                  <Link href="/tecnicos" className="text-xs text-ink-muted hover:text-brand">
+                    Buscar mais próximos
+                  </Link>
+                ) : undefined
               }
             />
             {nearby.isLoading ? (
               <LoadingBlock rows={2} />
             ) : nearby.error ? (
               <p className="px-5 py-4 text-sm text-ink-muted">
-                Não deu para calcular quem atende perto desta loja ({errorMessage(nearby.error)}). Complete o endereço ou as
-                coordenadas em Editar.
+                Não deu para calcular quem atende perto desta loja ({errorMessage(nearby.error)}).
+                {canEdit ? " Complete o endereço ou as coordenadas em Editar." : ""}
               </p>
             ) : attended.length === 0 ? (
               <p className="px-5 py-4 text-sm text-ink-subtle">Nenhum técnico com visita registrada nesta loja.</p>
@@ -289,8 +306,9 @@ export default function LocationDetailPage() {
               <p className="mt-2 flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
                 <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
                 {hasPoint
-                  ? "Coordenadas fora do Brasil ou invertidas: a distância dos técnicos usa o centro da cidade. Corrija em Editar."
-                  : "Sem coordenadas: a distância dos técnicos usa o centro da cidade. Ajuste em Editar."}
+                  ? "Coordenadas fora do Brasil ou invertidas: a distância dos técnicos usa o centro da cidade."
+                  : "Sem coordenadas: a distância dos técnicos usa o centro da cidade."}
+                {canEdit ? (hasPoint ? " Corrija em Editar." : " Ajuste em Editar.") : ""}
               </p>
             ) : null}
             <a href={mapUrl} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs text-brand hover:underline">

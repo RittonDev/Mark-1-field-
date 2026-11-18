@@ -64,7 +64,13 @@ async def test_owner_claim_and_filters(client: AsyncClient, world: World) -> Non
     events = (await client.get(f"{API}/tickets/{t3['id']}/events", headers=an)).json()
     moved = next(e for e in events if e["event_type"] == "owner_changed")
     assert moved["note"] == "Analista puxou a OS de Super"
-    assert moved["data"] == {"from_name": "Super", "to_name": "Analista"}
+    # Com os ids, além dos nomes: a web compara por id (o nome pode repetir).
+    assert moved["data"] == {
+        "from_name": "Super",
+        "to_name": "Analista",
+        "from_id": sup_id,
+        "to_id": analyst_id,
+    }
 
     # Transferir pela edição (só gestão; só para analista/gestor) e tirar da fila.
     url = f"{API}/tickets/{t1['id']}"

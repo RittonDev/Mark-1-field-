@@ -1,20 +1,25 @@
 "use client";
 
 import Link from "next/link";
+import { useCan } from "@/lib/permissions";
 import { MeterRow, mutedLink } from "../figures";
 import { dayMonth, intFmt, MIN_BASE, pctText, plural, share, shiftDay, SLA_FLOOR, SLA_TARGET } from "../rules";
 import type { HomeQuality } from "../types";
 import { VitalCard } from "./VitalCard";
 
-/** Sinal vital 3: o que o cliente sente (chegada no horário, prazo cumprido, loja que chama de novo). */
+/**
+ * Sinal vital 3: o que o cliente sente (chegada no horário, prazo cumprido, loja que chama de novo).
+ * Os atalhos para Relatórios só aparecem para quem tem acesso a eles.
+ */
 export function ServiceCard({ quality, windowFrom }: { quality: HomeQuality | null; windowFrom: string | null }) {
+  const canReports = useCan("analysis.reports");
   // A janela vai de window_from (hoje − 29) até hoje.
   const period = windowFrom ? `${dayMonth(windowFrom)} a ${dayMonth(shiftDay(windowFrom, 29))}` : undefined;
   return (
     <VitalCard
       title="Atendimento ao cliente"
       description={period}
-      action={{ href: "/relatorios?aba=sla&dias=30", label: "Violações de SLA" }}
+      action={canReports ? { href: "/relatorios?aba=sla&dias=30", label: "Violações de SLA" } : undefined}
       loading={quality === null}
       footer={quality ? <Unproductive quality={quality} /> : null}
     >
@@ -58,6 +63,7 @@ function ServiceBody({ quality: q }: { quality: HomeQuality }) {
 
 /** Rodapé: idas à loja perdidas. */
 function Unproductive({ quality: q }: { quality: HomeQuality }) {
+  const canReports = useCan("analysis.reports");
   const rate = share({ count: q.unproductive, base: q.visits }, MIN_BASE);
   const text =
     q.unproductive === 0
@@ -65,12 +71,16 @@ function Unproductive({ quality: q }: { quality: HomeQuality }) {
       : `${plural(q.unproductive, "visita improdutiva", "visitas improdutivas")} · ${
           rate.pct !== null ? `${pctText(rate.pct)} das idas à loja` : `${rate.text} idas à loja`
         }`;
+  const title = "Idas à loja: chegadas e improdutivas nos últimos 30 dias";
+  if (!canReports) {
+    return (
+      <span className="tabular-nums" title={title}>
+        {text}
+      </span>
+    );
+  }
   return (
-    <Link
-      href="/relatorios?aba=mensal"
-      className={`tabular-nums ${mutedLink}`}
-      title="Idas à loja: chegadas e improdutivas nos últimos 30 dias"
-    >
+    <Link href="/relatorios?aba=mensal" className={`tabular-nums ${mutedLink}`} title={title}>
       {text}
     </Link>
   );

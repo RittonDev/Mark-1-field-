@@ -84,6 +84,7 @@ import { useAuth } from "@/lib/auth";
 import { PRIORITY, PRIORITY_ORDER, ROLE, TICKET_TYPE } from "@/lib/constants";
 import { dayKey, formatMinutes, formatMoney, formatTime, fromLocalInput, toLocalInput } from "@/lib/format";
 import { useUnsavedChanges } from "@/lib/hooks";
+import { useCan, useQueueScope } from "@/lib/permissions";
 import { useProjects } from "@/lib/projects";
 import { useAssignable, useCategories, useCityFavorites, useCustomers } from "@/lib/queries";
 import { tagRulesQuery } from "@/lib/tagRules";
@@ -274,6 +275,13 @@ function NewTicket() {
   const [autoLocationId, setAutoLocationId] = useState<string | null>(null);
   const submitting = useRef(false);
   const f = d.form;
+  // Cadastrar localização daqui é gravar em Locais: só com Editar nela.
+  const canCreateLocation = useCan("base.locations", "edit");
+  // "Somente a própria fila": a OS fica com quem abre ou sem analista (a lista de analistas é só a própria).
+  const queueScope = useQueueScope();
+  const ownOnly = queueScope.scope === "own";
+  const ownerModes = ownOnly ? OWNER_MODES.filter((m) => m.value !== "other") : OWNER_MODES;
+  const ownerMode: OwnerMode = ownOnly && d.ownerMode === "other" ? "me" : d.ownerMode;
 
   // O pré-preenchimento sai da URL: recarregar a página traz o rascunho, e não a OS em branco de novo.
   useEffect(() => {
@@ -315,7 +323,7 @@ function NewTicket() {
   const queues = useQuery({
     queryKey: ["tickets", "queues"],
     queryFn: () => api.get<QueuesOut>("/queues"),
-    enabled: d.ownerMode === "other",
+    enabled: ownerMode === "other",
     staleTime: 60_000,
   });
   // A localização da URL: aplicada sozinha (sem rascunho) ou mostrada na oferta do aviso do rascunho.
@@ -469,7 +477,7 @@ function NewTicket() {
   if (f.date && !f.time) errors.time = "Informe a hora do agendamento.";
   if (titleText && titleText.length < 3) errors.title = "Use pelo menos 3 letras ou deixe em branco para o título automático.";
   if (!minutesValid) errors.minutes = "Use de 1 a 10.080 minutos (7 dias).";
-  if (d.ownerMode === "other" && !d.ownerId) errors.owner = "Escolha o analista.";
+  if (ownerMode === "other" && !d.ownerId) errors.owner = "Escolha o analista.";
   const shown = showErrors ? errors : {};
   const missing = ERROR_ORDER.filter((k) => shown[k]);
   const dirty = touched && isFilled(d);
@@ -778,8 +786,8 @@ function NewTicket() {
     };
     if (conflicts) payload.allow_conflict = true;
     // "Assumir" é o padrão: sem owner_id, quem cria leva a OS para a própria fila.
-    if (d.ownerMode === "none") payload.owner_id = null;
-    else if (d.ownerMode === "other") payload.owner_id = d.ownerId;
+    if (ownerMode === "none") payload.owner_id = null;
+    else if (ownerMode === "other") payload.owner_id = d.ownerId;
     const forms = d.formIds.map((id) => ({ id, name: templates.data?.find((t) => t.id === id)?.name ?? "formulário" }));
     create.mutate({ payload, forms, formsRequired: d.formsRequired });
   }
@@ -874,13 +882,13 @@ function NewTicket() {
     .join(" · ");
 
   // O que já foi mexido em "Mais detalhes" (aparece com a seção fechada).
-  const ownerName = d.ownerMode === "other" ? queues.data?.queues.find((q) => q.user.id === d.ownerId)?.user.name : null;
+  const ownerName = ownerMode === "other" ? queues.data?.queues.find((q) => q.user.id === d.ownerId)?.user.name : null;
   const project = projectOptions.find((p) => p.id === f.project_id);
   const category = sortedCategories.find((c) => c.id === f.category_id);
   const moreSummary =
     [
       titleText ? `Título: ${titleText}` : null,
-      d.ownerMode === "none" ? "Sem analista" : d.ownerMode === "other" ? `Analista: ${ownerName ?? "a escolher"}` : null,
+      ownerMode === "none" ? "Sem analista" : ownerMode === "other" ? `Analista: ${ownerName ?? "a escolher"}` : null,
       project ? `Projeto ${project.code}` : null,
       d.formIds.length ? `${d.formIds.length} ${d.formIds.length === 1 ? "formulário" : "formulários"}` : null,
       f.priority ? `Prioridade ${PRIORITY[f.priority].code}` : null,
@@ -1035,7 +1043,10 @@ function NewTicket() {
                           <span>Localização sem endereço no cadastro: informe o endereço do atendimento em Mais detalhes.</span>
                         )}
                       </p>
-                      <OpenAtLocation locationId={location.id} />
+                      <OpenAtLocation
+                        locationId={location.id}
+                        otherQueues={intake.data?.location?.id === location.id ? (intake.data.other_queues_open ?? 0) : 0}
+                      />
                     </>
                   ) : null
                 }
@@ -1045,7 +1056,7 @@ function NewTicket() {
                   customerId={f.customer_id || null}
                   requireCustomer
                   customerName={customerName}
-                  onCreate={() => setCreatingLocation(true)}
+                  onCreate={canCreateLocation ? () => setCreatingLocation(true) : undefined}
                   value={location}
                   onChange={onLocation}
                   initialQuery={storeHint?.text}
@@ -1467,14 +1478,17 @@ function NewTicket() {
                     Analista responsável
                   </span>
                   <SegmentedRadio
-                    options={OWNER_MODES}
-                    value={d.ownerMode}
-                    onChange={(ownerMode) => update((x) => ({ ...x, ownerMode }))}
+                    options={ownerModes}
+                    value={ownerMode}
+                    onChange={(mode) => update((x) => ({ ...x, ownerMode: mode }))}
                     ariaLabel="Analista responsável"
                     labelledBy={ids.owner}
                     className="max-w-sm"
                   />
-                  {d.ownerMode === "other" ? (
+                  {ownerMode === "none" && ownOnly && !queueScope.unowned ? (
+                    <p className="text-xs text-ink-muted">Sem analista, a OS sai da sua fila e você deixa de vê-la.</p>
+                  ) : null}
+                  {ownerMode === "other" ? (
                     <Select
                       id={ERROR_FIELD.owner}
                       value={d.ownerId}

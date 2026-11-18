@@ -37,7 +37,7 @@ from app.schemas.ticket import format_ticket_code
 from app.services import tag_rules
 from app.services.errors import NotFound, PermissionDenied, WorkflowError
 from app.services.realtime import queue_event
-from app.services.tickets import _touch, change_tags, record_event
+from app.services.tickets import _touch, change_tags, record_event, visibility_clause
 
 KM_RATE_KEY = "expenses.km_rate"
 DEFAULT_KM_RATE = Decimal("1.20")
@@ -247,10 +247,16 @@ async def mark_paid(db: AsyncSession, ids: list[uuid.UUID], actor: User) -> int:
     a ver "Reembolsado") e a gestão vê na hora. Devolve quantos foram marcados.
     """
     _require_manager(actor)
+    # Só os das OS que a pessoa vê (fila); os de outra fila ficam como estão.
+    vis = visibility_clause(actor)
     expenses = list(
         await db.scalars(
-            select(TicketExpense).where(
-                TicketExpense.id.in_(ids), TicketExpense.status == ExpenseStatus.APPROVED
+            select(TicketExpense)
+            .join(Ticket, Ticket.id == TicketExpense.ticket_id)
+            .where(
+                TicketExpense.id.in_(ids),
+                TicketExpense.status == ExpenseStatus.APPROVED,
+                *((vis,) if vis is not None else ()),
             )
         )
     )
@@ -295,7 +301,9 @@ async def report(
     technician_id: uuid.UUID | None = None,
     status: ExpenseStatus | None = None,
     customer_id: uuid.UUID | None = None,
+    viewer: User | None = None,
 ) -> ExpenseReport:
+    """Custos do período. Com `viewer`, só os das OS que ele vê (fila)."""
     # Só as colunas da OS que a linha mostra (a OS inteira traria as ~19 relações dela).
     stmt = (
         select(TicketExpense, Ticket.id, Ticket.number, Ticket.title, Customer.id, Customer.name)
@@ -310,6 +318,9 @@ async def report(
         stmt = stmt.where(TicketExpense.status == status)
     if customer_id is not None:
         stmt = stmt.where(Ticket.customer_id == customer_id)
+    vis = visibility_clause(viewer) if viewer is not None else None
+    if vis is not None:
+        stmt = stmt.where(vis)
     rows = (await db.execute(stmt)).all()
 
     items: list[ExpenseReportRow] = []

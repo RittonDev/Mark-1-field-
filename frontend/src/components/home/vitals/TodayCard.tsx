@@ -3,6 +3,7 @@
 import { UserX } from "lucide-react";
 import Link from "next/link";
 import { CountUp } from "@/components/motion";
+import { useCan } from "@/lib/permissions";
 import { actionLink, mutedLink, ProblemText, SegmentBar, type SegmentPart, SwatchLegend, TRACK } from "../figures";
 import { ticketsListHref } from "../links";
 import { intFmt, plural } from "../rules";
@@ -12,12 +13,16 @@ import { VitalCard } from "./VitalCard";
 /** "Sem início": a mesma regra do número do topo. */
 const NOT_STARTED_HINT = "30 min ou mais depois do horário, sem sair nem começar";
 
-/** Sinal vital 1: como anda o dia (visitas de hoje) e como está montado o de amanhã. */
+/**
+ * Sinal vital 1: como anda o dia (visitas de hoje) e como está montado o de amanhã. Os atalhos para
+ * Atividades do dia e Calendário só aparecem para quem tem acesso a essas telas.
+ */
 export function TodayCard({ today, tomorrow }: { today: HomeToday | null; tomorrow: HomeTomorrow | null }) {
+  const canDay = useCan("operation.day");
   return (
     <VitalCard
       title="Hoje"
-      action={{ href: "/dia", label: "Abrir o dia" }}
+      action={canDay ? { href: "/dia", label: "Abrir o dia" } : undefined}
       loading={today === null || tomorrow === null}
       footer={tomorrow ? <Tomorrow tomorrow={tomorrow} /> : null}
     >
@@ -27,16 +32,19 @@ export function TodayCard({ today, tomorrow }: { today: HomeToday | null; tomorr
 }
 
 function TodayBody({ today }: { today: HomeToday }) {
+  const canCalendar = useCan("operation.calendar");
   const resolved = <span>{plural(today.resolved, "OS resolvida hoje", "OS resolvidas hoje")}</span>;
   if (today.planned === 0) {
     return (
       <>
         <p className="text-sm text-ink-muted">Nenhuma visita marcada para hoje</p>
-        <p className="text-xs">
-          <Link href="/agenda" className={actionLink}>
-            Abrir agenda
-          </Link>
-        </p>
+        {canCalendar ? (
+          <p className="text-xs">
+            <Link href="/agenda" className={actionLink}>
+              Abrir agenda
+            </Link>
+          </p>
+        ) : null}
         {today.resolved > 0 ? <p className="text-xs text-ink-muted tabular-nums">{resolved}</p> : null}
       </>
     );
@@ -85,13 +93,17 @@ function TodayBody({ today }: { today: HomeToday }) {
 
 /** Rodapé: o dia seguinte (visitas, técnicos e o buraco de quem não tem técnico). */
 function Tomorrow({ tomorrow }: { tomorrow: HomeTomorrow }) {
+  const canDay = useCan("operation.day");
+  const canCalendar = useCan("operation.calendar");
   if (tomorrow.planned === 0) {
     return (
       <p className="flex flex-wrap gap-x-2">
         <span>Amanhã: nada marcado</span>
-        <Link href="/agenda" className={actionLink}>
-          Abrir agenda
-        </Link>
+        {canCalendar ? (
+          <Link href="/agenda" className={actionLink}>
+            Abrir agenda
+          </Link>
+        ) : null}
       </p>
     );
   }
@@ -102,9 +114,13 @@ function Tomorrow({ tomorrow }: { tomorrow: HomeTomorrow }) {
   ].join(" · ");
   return (
     <p className="tabular-nums">
-      <Link href={`/dia?d=${tomorrow.day}`} className={mutedLink}>
-        {head}
-      </Link>
+      {canDay ? (
+        <Link href={`/dia?d=${tomorrow.day}`} className={mutedLink}>
+          {head}
+        </Link>
+      ) : (
+        <span>{head}</span>
+      )}
       {tomorrow.unassigned > 0 ? (
         <>
           {" · "}

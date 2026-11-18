@@ -1,10 +1,12 @@
 from fastapi import APIRouter
 
-from app.api.deps import DB, ManagerUser, StaffUser
+from app.api.deps import DB, StaffUser, access_user
 from app.schemas.field import FieldRules
 from app.services import field as svc
 
 router = APIRouter(tags=["settings"])
+
+SettingsEdit = access_user("setup.settings", level="edit")
 
 
 @router.get("/settings/field", response_model=FieldRules)
@@ -15,7 +17,7 @@ async def get_field_rules(db: DB, _: StaffUser) -> FieldRules:
 
 
 @router.put("/settings/field", response_model=FieldRules)
-async def put_field_rules(body: FieldRules, db: DB, user: ManagerUser) -> FieldRules:
+async def put_field_rules(body: FieldRules, db: DB, user: SettingsEdit) -> FieldRules:
     """Prazos de chegada (capital x interior) e o tempo de técnico na loja."""
     saved = await svc.save_rules(db, body, user)
     await db.commit()

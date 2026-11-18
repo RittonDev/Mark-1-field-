@@ -4,11 +4,14 @@ import uuid
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import func, or_, select
 
-from app.api.deps import DB, ManagerUser, NoTechnicianUser, TicketManagerUser
+from app.api.deps import DB, MANAGER_ROLES, NoTechnicianUser, TicketManagerUser, access_user
+from app.core import permissions
 from app.core.enums import UserRole
+from app.core.permissions import PROFILE_ROLES
 from app.core.security import hash_password_async
 from app.db.base import utcnow
 from app.models import Customer, Team, Ticket, User
+from app.schemas.access import UserAccessIn
 from app.schemas.user import (
     AssignableUser,
     TeamCreate,
@@ -18,11 +21,17 @@ from app.schemas.user import (
     UserOut,
     UserUpdate,
 )
+from app.services import access as access_svc
 from app.services.workflow import OPEN_STATUSES
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["users"])
+
+# Cadastro de usuários: Usuários em Editar, só admin e supervisor (mais a hierarquia abaixo).
+UsersManage = access_user("setup.users", level="edit", roles=MANAGER_ROLES)
+# Grupos técnicos: Usuários em Editar (antes só admin e supervisor; o padrão do analista é ver).
+TeamsEdit = access_user("setup.users", level="edit")
 
 # O supervisor cuida da equipe de analistas e dos acessos do portal; administradores e
 # supervisores só o admin cria, promove ou edita. Técnicos ficam em Técnicos (analistas também).
@@ -76,10 +85,13 @@ async def list_users(
     team_id: uuid.UUID | None = None,
     q: str | None = None,
     active: bool | None = None,
+    access_profile_id: uuid.UUID | None = None,
 ) -> list[User]:
     stmt = select(User).order_by(User.name)
     if role is not None:
         stmt = stmt.where(User.role == role)
+    if access_profile_id is not None:
+        stmt = stmt.where(User.access_profile_id == access_profile_id)
     if team_id is not None:
         stmt = stmt.where(User.team_id == team_id)
     if active is not None:
@@ -130,9 +142,11 @@ async def assignable_users(
 
 
 @router.post("/users", response_model=UserOut, status_code=status.HTTP_201_CREATED)
-async def create_user(body: UserCreate, db: DB, actor: ManagerUser) -> User:
+async def create_user(body: UserCreate, db: DB, actor: UsersManage) -> User:
     if not _can_manage(actor, body.role):
         raise HTTPException(status.HTTP_403_FORBIDDEN, ONLY_ADMIN)
+    if body.access is not None and body.role not in PROFILE_ROLES:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, access_svc.NO_PROFILE_ROLE)
     if await _email_taken(db, body.email):
         raise HTTPException(status.HTTP_409_CONFLICT, "E-mail já cadastrado")
     await _check_team(db, body.team_id)
@@ -150,6 +164,18 @@ async def create_user(body: UserCreate, db: DB, actor: ManagerUser) -> User:
         # Técnico com senha escolhida pela central troca no primeiro acesso ao app.
         must_change_password=body.role == UserRole.TECHNICIAN,
     )
+    if body.role in PROFILE_ROLES:
+        # Perfil escolhido ou o padrão do papel; o supervisor não cria ninguém com mais acesso
+        # do que ele tem.
+        await access_svc.ensure_system_profiles(db)
+        await access_svc.apply_user_access(
+            db,
+            actor,
+            user,
+            body.access or UserAccessIn(),
+            role=body.role,
+            before=permissions.NO_ACCESS,
+        )
     db.add(user)
     await db.commit()
     log.info("Usuários: %s criou %s (%s)", actor.id, user.id, body.role.value)
@@ -167,11 +193,14 @@ async def get_user(user_id: uuid.UUID, db: DB, current: NoTechnicianUser) -> Use
 
 
 @router.patch("/users/{user_id}", response_model=UserOut)
-async def update_user(user_id: uuid.UUID, body: UserUpdate, db: DB, actor: ManagerUser) -> User:
+async def update_user(user_id: uuid.UUID, body: UserUpdate, db: DB, actor: UsersManage) -> User:
     user = await db.get(User, user_id)
     if user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Usuário não encontrado")
     fields = body.model_dump(exclude_unset=True)
+    # Perfil e ajustes de acesso vão à parte (services/access.py); null = não mexe.
+    fields.pop("access", None)
+    access_in = body.access
     # null num campo obrigatório não apaga nada (o formulário mandou vazio): fica como está.
     for key in REQUIRED_FIELDS:
         if key in fields and fields[key] is None:
@@ -201,8 +230,29 @@ async def update_user(user_id: uuid.UUID, body: UserUpdate, db: DB, actor: Manag
     for key in ("phone", "job_title"):
         if key in fields:
             fields[key] = (fields[key] or "").strip() or None
+    old_role, new_role = user.role, fields.get("role", user.role)
+    if access_in is not None and new_role not in PROFILE_ROLES:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, access_svc.NO_PROFILE_ROLE)
+    # Acesso de antes (o teto do supervisor compara com ele) e o acesso novo: perfil e ajustes
+    # enviados ou, na troca de papel, o padrão do papel novo.
+    before = await access_svc.effective(db, user)
+    after = before
+    if access_in is not None:
+        after = await access_svc.apply_user_access(
+            db, actor, user, access_in, role=new_role, before=before
+        )
+    elif "role" in fields:
+        after = await access_svc.follow_role(
+            db, actor, user, old_role=old_role, new_role=new_role, before=before
+        )
+    access_changed = (after.fingerprint, after.profile_id) != (
+        before.fingerprint,
+        before.profile_id,
+    )
     password = fields.pop("password", None)
-    changed = sorted([*fields, *(["password"] if password else [])])
+    changed = sorted(
+        [*fields, *(["password"] if password else []), *(["access"] if access_changed else [])]
+    )
     if password:
         user.password_hash = await hash_password_async(password)
         # Técnico com senha definida pela central troca no próximo acesso ao app.
@@ -218,6 +268,9 @@ async def update_user(user_id: uuid.UUID, body: UserUpdate, db: DB, actor: Manag
     await db.commit()
     if changed:
         log.info("Usuários: %s alterou %s (%s)", actor.id, user.id, ", ".join(changed))
+    if access_changed:
+        # A web da pessoa relê o acesso e o socket dela reconecta com o acesso novo.
+        await access_svc.publish_changed([user.id])
     return await db.get(User, user.id, populate_existing=True)  # type: ignore[return-value]
 
 
@@ -227,7 +280,7 @@ async def list_teams(db: DB, _: TicketManagerUser) -> list[Team]:
 
 
 @router.post("/teams", response_model=TeamOut, status_code=status.HTTP_201_CREATED)
-async def create_team(body: TeamCreate, db: DB, _: ManagerUser) -> Team:
+async def create_team(body: TeamCreate, db: DB, _: TeamsEdit) -> Team:
     team = Team(name=body.name.strip(), description=body.description, is_active=True)
     db.add(team)
     await db.commit()
@@ -235,7 +288,7 @@ async def create_team(body: TeamCreate, db: DB, _: ManagerUser) -> Team:
 
 
 @router.patch("/teams/{team_id}", response_model=TeamOut)
-async def update_team(team_id: uuid.UUID, body: TeamUpdate, db: DB, _: ManagerUser) -> Team:
+async def update_team(team_id: uuid.UUID, body: TeamUpdate, db: DB, _: TeamsEdit) -> Team:
     team = await db.get(Team, team_id)
     if team is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Grupo não encontrado")

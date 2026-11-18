@@ -4,7 +4,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import func, or_, select
 
-from app.api.deps import DB, AdminUser, ManagerUser, StaffUser, TicketManagerUser
+from app.api.deps import DB, AdminUser, StaffUser, TicketManagerUser, access_user
 from app.core.access import channel_metadata
 from app.core.enums import TicketPriority
 from app.core.labels import enum_options
@@ -38,6 +38,11 @@ from app.services.sla import DEFAULT_SLA_MINUTES
 from app.services.workflow import workflow_metadata
 
 router = APIRouter(tags=["catalog"])
+
+# Categorias e motivos de violação ficam em Configurações; tipos de serviço têm tela própria. O
+# SLA continua só com o administrador; os motivos de improdutiva, com toda a gestão.
+SettingsEdit = access_user("setup.settings", level="edit")
+ServiceTypesEdit = access_user("setup.service_types", level="edit")
 
 
 @router.get("/meta")
@@ -116,7 +121,7 @@ async def list_categories(db: DB, _: TicketManagerUser) -> list[Category]:
 
 
 @router.post("/categories", response_model=CategoryOut, status_code=status.HTTP_201_CREATED)
-async def create_category(body: CategoryCreate, db: DB, _: ManagerUser) -> Category:
+async def create_category(body: CategoryCreate, db: DB, _: SettingsEdit) -> Category:
     fields = _clean(body.model_dump(), ())
     await _check_category_refs(db, body.parent_id, body.default_team_id, None)
     await _check_category_name(db, fields["name"], body.parent_id, None)
@@ -128,7 +133,7 @@ async def create_category(body: CategoryCreate, db: DB, _: ManagerUser) -> Categ
 
 @router.patch("/categories/{category_id}", response_model=CategoryOut)
 async def update_category(
-    category_id: uuid.UUID, body: CategoryUpdate, db: DB, _: ManagerUser
+    category_id: uuid.UUID, body: CategoryUpdate, db: DB, _: SettingsEdit
 ) -> Category:
     category = await _load_category(db, category_id)
     fields = _clean(body.model_dump(exclude_unset=True), ("name", "is_active"))
@@ -260,7 +265,7 @@ async def _check_service_type_name(
 
 @router.post("/service-types", response_model=ServiceTypeOut, status_code=status.HTTP_201_CREATED)
 async def create_service_type(
-    body: ServiceTypeCreate, db: DB, _: TicketManagerUser
+    body: ServiceTypeCreate, db: DB, _: ServiceTypesEdit
 ) -> ServiceTypeOut:
     fields = _clean(body.model_dump(), ())
     await _check_service_type_refs(db, body.customer_id, body.category_id)
@@ -273,7 +278,7 @@ async def create_service_type(
 
 @router.patch("/service-types/{service_type_id}", response_model=ServiceTypeOut)
 async def update_service_type(
-    service_type_id: uuid.UUID, body: ServiceTypeUpdate, db: DB, _: TicketManagerUser
+    service_type_id: uuid.UUID, body: ServiceTypeUpdate, db: DB, _: ServiceTypesEdit
 ) -> ServiceTypeOut:
     service_type = await _load_service_type(db, service_type_id)
     fields = _clean(body.model_dump(exclude_unset=True), ("name", "estimated_minutes", "is_active"))
@@ -290,7 +295,7 @@ async def update_service_type(
 
 @router.post("/service-types/{service_type_id}/apply-observed", response_model=ServiceTypeOut)
 async def apply_observed_duration(
-    service_type_id: uuid.UUID, db: DB, _: TicketManagerUser
+    service_type_id: uuid.UUID, db: DB, _: ServiceTypesEdit
 ) -> ServiceTypeOut:
     """A estimativa aprende: adota a mediana observada (arredondada a 5 min)."""
     service_type = await _load_service_type(db, service_type_id)
@@ -322,7 +327,7 @@ async def list_violation_reasons(
     "/violation-reasons", response_model=ViolationReasonOut, status_code=status.HTTP_201_CREATED
 )
 async def create_violation_reason(
-    body: ViolationReasonCreate, db: DB, _: ManagerUser
+    body: ViolationReasonCreate, db: DB, _: SettingsEdit
 ) -> ViolationReason:
     reason = ViolationReason(**_clean(body.model_dump(), ()), is_active=True)
     db.add(reason)
@@ -332,7 +337,7 @@ async def create_violation_reason(
 
 @router.patch("/violation-reasons/{reason_id}", response_model=ViolationReasonOut)
 async def update_violation_reason(
-    reason_id: uuid.UUID, body: ViolationReasonUpdate, db: DB, _: ManagerUser
+    reason_id: uuid.UUID, body: ViolationReasonUpdate, db: DB, _: SettingsEdit
 ) -> ViolationReason:
     reason = await db.get(ViolationReason, reason_id)
     if reason is None:

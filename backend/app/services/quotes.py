@@ -29,11 +29,12 @@ from app.schemas.quote import (
     QuoteLink,
     format_quote_code,
 )
+from app.schemas.ticket import format_ticket_code
 from app.services import parts, storage
 from app.services.activities import day_bounds, local_today
 from app.services.client_report import VIEW_DEDUPE
 from app.services.errors import NotFound, PermissionDenied, WorkflowError
-from app.services.realtime import bus, queue_event
+from app.services.realtime import bus, queue_event, unowned_ticket
 from app.services.tickets import _touch, record_event
 
 CENT = Decimal("0.01")
@@ -498,19 +499,25 @@ async def reject(
     return quote
 
 
-async def publish_decision(quote: Quote, ticket_code: str) -> None:
-    """Toast para a gestão na hora em que o cliente responde."""
+async def publish_decision(quote: Quote, ticket: Ticket) -> None:
+    """Toast para a gestão na hora em que o cliente responde (só para quem tem Orçamentos e vê a
+    fila da OS: o dono, o executor ou, com a opção, as sem analista)."""
     await bus.publish(
         {
             "type": "quote.decided",
             "quote_id": str(quote.id),
             "ticket_id": str(quote.ticket_id),
-            "ticket_code": ticket_code,
+            "ticket_code": format_ticket_code(ticket.number),
             "quote_code": format_quote_code(quote.number),
             "status": quote.status.value,
             "name": quote.approver_name,
             "total": float(quote.total),
-            "audience": {"managers_only": True},
+            "audience": {
+                "managers_only": True,
+                "owner_id": str(ticket.owner_id) if ticket.owner_id else None,
+                "assignee_id": str(ticket.assignee_id) if ticket.assignee_id else None,
+                "unowned": unowned_ticket(ticket),
+            },
         }
     )
 

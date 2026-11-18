@@ -8,6 +8,7 @@ import {
   Camera,
   Check,
   Download,
+  Eye,
   FileSpreadsheet,
   HardHat,
   KeyRound,
@@ -28,6 +29,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useState } from "react";
 import { useConfirm } from "@/components/Confirm";
+import { NoAccess } from "@/components/NoAccess";
 import { fold, replaceSearch, useSearchChange } from "@/components/operacao/hooks";
 import { useToast } from "@/components/Toaster";
 import {
@@ -50,12 +52,11 @@ import {
 } from "@/components/ui";
 import { useNow } from "@/components/useNow";
 import { absoluteApiUrl, api, errorMessage } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
-import { canManageTickets } from "@/lib/constants";
 import { downloadCsv } from "@/lib/download";
 import { formatDate, formatMoney, formatRelative, initials } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
 import { labelMap, maskCep, maskPhone, resizePhotoBlob, UFS, useOnboardingCatalog } from "@/lib/onboarding";
+import { useCan } from "@/lib/permissions";
 import { useFavorites, useServiceTypes, useTeams } from "@/lib/queries";
 import { Tabs } from "@/components/motion";
 import { favoritesHref, FavoritesView } from "@/components/technicians/FavoritesView";
@@ -147,7 +148,12 @@ export default function TechniciansPage() {
 }
 
 function TechniciansView() {
-  const { user } = useAuth();
+  // Visualizar: a base, os favoritos, os mais próximos e o cadastro só para consulta. Editar: cadastrar,
+  // importar, alterar, foto, senha e liberar o acesso. Convidar segue a Homologação (Editar lá).
+  const canView = useCan("base.technicians");
+  const canEdit = useCan("base.technicians", "edit");
+  const canOnboarding = useCan("base.onboarding");
+  const canInvite = useCan("base.onboarding", "edit");
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const searchParams = useSearchParams();
@@ -186,12 +192,14 @@ function TechniciansView() {
     // A lista é pesada (a base inteira com os serviços): não recarrega a cada volta para a aba.
     staleTime: 60_000,
     refetchOnWindowFocus: false,
+    enabled: canView,
   });
   // Estados e cidades onde a base técnica está (pela região de atuação).
   const regions = useQuery({
     queryKey: ["technicians", "regions", active],
     queryFn: () => api.get<TechnicianRegion[]>("/technicians/regions", { active: active || undefined }),
     staleTime: 60_000,
+    enabled: canView,
   });
   const cities = regions.data?.find((r) => r.state === uf)?.cities ?? [];
   // O UF e a cidade escolhidos continuam na lista mesmo quando a situação muda e eles somem das opções.
@@ -270,9 +278,7 @@ function TechniciansView() {
     }
   };
 
-  if (user && !canManageTickets(user.role)) {
-    return <ErrorBox message="A base técnica é exclusiva para analistas e gestores." />;
-  }
+  if (!canView) return <NoAccess kind="module" item="base.technicians" />;
 
   return (
     <div>
@@ -281,22 +287,30 @@ function TechniciansView() {
         description="Base técnica: acesso ao app, contato, região, serviços e foto. Novos técnicos chegam pelo convite (homologação) ou são cadastrados aqui."
         actions={
           <>
-            <Link href="/homologacao" className={buttonClassName()}>
-              <BadgeCheck className="size-4" />
-              Homologação
-            </Link>
-            <Button onClick={() => setImporting(true)}>
-              <Upload className="size-4" />
-              Importar planilha
-            </Button>
-            <Button onClick={() => setInviting(true)}>
-              <UserPlus className="size-4" />
-              Convidar técnico
-            </Button>
-            <Button variant="primary" onClick={() => setCreating(true)}>
-              <Plus className="size-4" />
-              Novo técnico
-            </Button>
+            {canOnboarding ? (
+              <Link href="/homologacao" className={buttonClassName()}>
+                <BadgeCheck className="size-4" />
+                Homologação
+              </Link>
+            ) : null}
+            {canEdit ? (
+              <Button onClick={() => setImporting(true)}>
+                <Upload className="size-4" />
+                Importar planilha
+              </Button>
+            ) : null}
+            {canInvite ? (
+              <Button onClick={() => setInviting(true)}>
+                <UserPlus className="size-4" />
+                Convidar técnico
+              </Button>
+            ) : null}
+            {canEdit ? (
+              <Button variant="primary" onClick={() => setCreating(true)}>
+                <Plus className="size-4" />
+                Novo técnico
+              </Button>
+            ) : null}
           </>
         }
       />
@@ -464,12 +478,22 @@ function TechniciansView() {
                 <EmptyState
                   icon={<HardHat className="size-6" />}
                   title="Nenhum técnico na base"
-                  description="Convide pelo WhatsApp, cadastre aqui ou importe a sua base em planilha."
+                  description={
+                    canInvite && canEdit
+                      ? "Convide pelo WhatsApp, cadastre aqui ou importe a sua base em planilha."
+                      : canEdit
+                        ? "Cadastre aqui ou importe a sua base em planilha."
+                        : canInvite
+                          ? "Convide pelo WhatsApp: a ficha chega na Homologação."
+                          : undefined
+                  }
                   action={
-                    <Button variant="primary" onClick={() => setInviting(true)}>
-                      <UserPlus className="size-4" />
-                      Convidar técnico
-                    </Button>
+                    canInvite ? (
+                      <Button variant="primary" onClick={() => setInviting(true)}>
+                        <UserPlus className="size-4" />
+                        Convidar técnico
+                      </Button>
+                    ) : undefined
                   }
                 />
               )
@@ -502,7 +526,7 @@ function TechniciansView() {
                         </button>
                       </Th>
                       <Th className="hidden sm:table-cell">OS abertas</Th>
-                      <Th className="edit-col">Editar</Th>
+                      <Th className="edit-col">{canEdit ? "Editar" : "Ver"}</Th>
                     </tr>
                   </thead>
                   <tbody>
@@ -595,10 +619,10 @@ function TechniciansView() {
                               setEditing(t);
                             }}
                             className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg border border-line bg-surface text-brand shadow-elev-1 transition-[border-color,background-color] duration-150 hover:border-brand/40 hover:bg-brand-soft focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
-                            aria-label={`Editar ${t.name}`}
-                            title={`Editar ${t.name}`}
+                            aria-label={`${canEdit ? "Editar" : "Ver"} ${t.name}`}
+                            title={`${canEdit ? "Editar" : "Ver o cadastro de"} ${t.name}`}
                           >
-                            <SquarePen className="size-4" />
+                            {canEdit ? <SquarePen className="size-4" /> : <Eye className="size-4" />}
                           </button>
                         </Td>
                       </tr>
@@ -621,7 +645,7 @@ function TechniciansView() {
         </div>
       )}
 
-      {editing ? <EditDialog key={editing.id} tech={editing} onClose={() => setEditing(null)} /> : null}
+      {editing ? <EditDialog key={editing.id} tech={editing} readOnly={!canEdit} onClose={() => setEditing(null)} /> : null}
       {creating ? <CreateDialog onClose={() => setCreating(false)} /> : null}
       {importing ? <ImportDialog onClose={() => setImporting(false)} /> : null}
       {inviting ? <InviteDialog onClose={() => setInviting(false)} /> : null}
@@ -630,6 +654,8 @@ function TechniciansView() {
 }
 
 function AppStatus({ tech, now }: { tech: Technician; now: number }) {
+  // "Em jornada" leva ao Mapa ao vivo: sem acesso a ele, fica só como texto.
+  const canMap = useCan("operation.map");
   if (!tech.is_active) {
     return (
       <span className="inline-flex rounded-full border border-line bg-surface-2 px-2 py-0.5 text-xs font-medium text-ink-muted">
@@ -639,7 +665,7 @@ function AppStatus({ tech, now }: { tech: Technician; now: number }) {
   }
   return (
     <span className="flex flex-col gap-0.5 text-xs">
-      {tech.on_shift ? (
+      {tech.on_shift && canMap ? (
         <Link
           href={`/mapa?tecnico=${tech.id}`}
           onClick={(e) => e.stopPropagation()}
@@ -649,6 +675,11 @@ function AppStatus({ tech, now }: { tech: Technician; now: number }) {
           <span aria-hidden className="size-1.5 rounded-full bg-emerald-600" />
           Em jornada
         </Link>
+      ) : tech.on_shift ? (
+        <span className="inline-flex items-center gap-1 font-medium text-ink">
+          <span aria-hidden className="size-1.5 rounded-full bg-emerald-600" />
+          Em jornada
+        </span>
       ) : null}
       {tech.must_change_password ? (
         <span className="text-amber-800 dark:text-amber-300">Senha provisória</span>
@@ -864,10 +895,17 @@ function editableOf(tech: Technician) {
 type Editable = ReturnType<typeof editableOf>;
 const snapshot = (value: Editable) => JSON.stringify({ ...value, serviceIds: [...value.serviceIds].sort() });
 
-function EditDialog({ tech, onClose }: { tech: Technician; onClose: () => void }) {
+/**
+ * Cadastro do técnico. `readOnly` (Técnicos só com Visualizar): a mesma ficha para consulta, com os campos
+ * travados e sem foto, senha nem salvar.
+ */
+function EditDialog({ tech, readOnly = false, onClose }: { tech: Technician; readOnly?: boolean; onClose: () => void }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const confirm = useConfirm();
+  // O resumo de pagamentos é de Pagamentos, e a ficha da homologação, da Homologação.
+  const canPayouts = useCan("commercial.payouts");
+  const canOnboarding = useCan("base.onboarding");
   const catalog = useOnboardingCatalog();
   const areas = useMemo(() => labelMap(catalog.data?.service_areas), [catalog.data]);
   const levels = useMemo(() => labelMap(catalog.data?.skill_levels), [catalog.data]);
@@ -886,6 +924,7 @@ function EditDialog({ tech, onClose }: { tech: Technician; onClose: () => void }
     queryKey: ["payouts", "technician", tech.id],
     queryFn: () => api.get<PayoutList>("/payouts", { technician_id: tech.id }),
     staleTime: 60_000,
+    enabled: canPayouts,
   });
   // Cidades em que ele é favorito (pela regra ou fixado pela central).
   const favorites = useFavorites({ technicianId: tech.id });
@@ -997,7 +1036,7 @@ function EditDialog({ tech, onClose }: { tech: Technician; onClose: () => void }
     );
   }
 
-  const summary = payouts.data?.summary;
+  const summary = canPayouts ? payouts.data?.summary : undefined;
   return (
     <Dialog
       open
@@ -1011,246 +1050,259 @@ function EditDialog({ tech, onClose }: { tech: Technician; onClose: () => void }
       title={current.name}
       description={current.job_title ?? "Técnico"}
       footer={
-        <>
-          <Button onClick={onClose} disabled={save.isPending || reset.isPending}>
-            Cancelar
+        readOnly ? (
+          <Button variant="primary" onClick={onClose}>
+            Fechar
           </Button>
-          <Button variant="primary" type="submit" form="tech-edit-form" loading={save.isPending}>
-            Salvar
-          </Button>
-        </>
+        ) : (
+          <>
+            <Button onClick={onClose} disabled={save.isPending || reset.isPending}>
+              Cancelar
+            </Button>
+            <Button variant="primary" type="submit" form="tech-edit-form" loading={save.isPending}>
+              Salvar
+            </Button>
+          </>
+        )
       }
     >
       <form
         id="tech-edit-form"
         noValidate
-        className="flex flex-col gap-5"
         onSubmit={(e) => {
           e.preventDefault();
-          void submit();
+          if (!readOnly) void submit();
         }}
       >
-        <div className="flex items-center gap-4">
-          <Avatar tech={current} size="lg" />
-          <div className="flex flex-col gap-1.5">
-            <label
-              className={clsx(
-                buttonClassName("secondary", "sm"),
-                "cursor-pointer self-start has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-brand/45",
-                photo.isPending && "pointer-events-none opacity-60",
-              )}
-            >
-              {photo.isPending ? <Loader2 className="size-4 animate-spin" /> : <Camera className="size-4" />}
-              {photo.isPending ? "Enviando foto…" : current.avatar_url ? "Trocar foto" : "Adicionar foto"}
-              <input
-                type="file"
-                accept="image/*"
-                className="sr-only"
-                disabled={photo.isPending}
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  e.target.value = "";
-                  if (file) photo.mutate(file);
-                }}
-              />
-            </label>
-            {current.avatar_url && !photo.isPending ? (
-              <button
-                type="button"
-                className="self-start rounded text-xs text-red-700 hover:underline focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none dark:text-red-400"
-                onClick={async () => {
-                  if (await confirm({ tone: "danger", title: "Remover a foto?", description: "O técnico fica com as iniciais no lugar da foto.", confirmLabel: "Remover" })) {
-                    photo.mutate(null);
-                  }
-                }}
-              >
-                Remover foto
-              </button>
-            ) : null}
-            <span className="text-xs text-ink-muted">Foto do rosto. A foto é reduzida antes de enviar.</span>
-          </div>
-        </div>
-
-        <TechnicianFields
-          value={form}
-          onChange={setForm}
-          emailHint={emailChanged ? "O técnico passa a entrar no app com este e-mail." : undefined}
-        />
-        <div className="flex flex-col gap-1">
-          <Checkbox label="Acesso ao app liberado" checked={isActive} onChange={setIsActive} />
-          <p className="pl-6 text-xs text-ink-muted">
-            {isActive
-              ? "Ao desativar, ele sai do app na hora e some do mapa e das sugestões."
-              : tech.is_active
-                ? "Ao salvar, ele sai do app na hora."
-                : "Sem acesso: não entra no app nem recebe OS novas."}
-            {!isActive && current.open_tickets ? (
-              <>
-                {" "}
-                <Link
-                  href={`/chamados?assignee_id=${tech.id}&open_only=true`}
-                  target="_blank"
-                  className="font-medium text-ink underline underline-offset-2 hover:text-brand"
+        {/* Só com Visualizar, o fieldset trava todos os campos de uma vez (os links continuam abrindo). */}
+        <fieldset disabled={readOnly} className="flex min-w-0 flex-col gap-5">
+          <div className="flex items-center gap-4">
+            <Avatar tech={current} size="lg" />
+            {readOnly ? null : (
+              <div className="flex flex-col gap-1.5">
+                <label
+                  className={clsx(
+                    buttonClassName("secondary", "sm"),
+                    "cursor-pointer self-start has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-brand/45",
+                    photo.isPending && "pointer-events-none opacity-60",
+                  )}
                 >
-                  {current.open_tickets === 1 ? "Ver a OS aberta dele" : `Ver as ${current.open_tickets} OS abertas dele`}
-                </Link>
-              </>
-            ) : null}
-          </p>
-        </div>
-
-        <section className="flex flex-col gap-3 rounded-lg border border-line p-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <SectionTitle>Ficha completa</SectionTitle>
-            <p className="text-xs text-ink-muted">
-              {current.base_city
-                ? `Atua em ${regionText(current.base_city, current.base_state)} ${current.base_source === "history" ? `(pelo histórico, ${current.base_visits ?? 0} OS)` : "(pelo endereço)"}`
-                : "Região de atuação ainda não identificada"}
-              {current.last_visit_at ? ` · última visita ${formatDate(current.last_visit_at)}` : ""}
-            </p>
-          </div>
-          {favoriteIn.length ? (
-            <p className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-ink-muted">
-              <Star aria-hidden className="size-3.5 shrink-0 fill-current text-brand" />
-              Favorito em
-              {favoriteIn.map(({ city, me }, i) => (
-                <span key={`${city.state}-${city.key}`}>
-                  <Link
-                    href={favoritesHref(city.state, city.city)}
-                    // Sem alteração pendente, o cadastro fecha e a aba de favoritos aparece já na cidade.
-                    onClick={() => {
-                      if (!dirty) onClose();
+                  {photo.isPending ? <Loader2 className="size-4 animate-spin" /> : <Camera className="size-4" />}
+                  {photo.isPending ? "Enviando foto…" : current.avatar_url ? "Trocar foto" : "Adicionar foto"}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="sr-only"
+                    disabled={photo.isPending}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      e.target.value = "";
+                      if (file) photo.mutate(file);
                     }}
-                    className="rounded font-medium text-ink underline-offset-2 hover:text-brand-ink hover:underline focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+                  />
+                </label>
+                {current.avatar_url && !photo.isPending ? (
+                  <button
+                    type="button"
+                    className="self-start rounded text-xs text-red-700 hover:underline focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none dark:text-red-400"
+                    onClick={async () => {
+                      if (await confirm({ tone: "danger", title: "Remover a foto?", description: "O técnico fica com as iniciais no lugar da foto.", confirmLabel: "Remover" })) {
+                        photo.mutate(null);
+                      }
+                    }}
                   >
-                    {city.city}-{city.state}
-                  </Link>{" "}
-                  ({me.pinned ? "fixado" : `${me.visits} OS`}){i < favoriteIn.length - 1 ? " ·" : ""}
-                </span>
-              ))}
-            </p>
-          ) : null}
-          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem_8rem]">
-            <Field label="Endereço (rua, número, complemento)">
-              <Input value={address.line} onChange={(e) => setAddress((a) => ({ ...a, line: e.target.value }))} maxLength={255} />
-            </Field>
-            <Field label="Bairro">
-              <Input value={address.district} onChange={(e) => setAddress((a) => ({ ...a, district: e.target.value }))} maxLength={120} />
-            </Field>
-            <Field label="CEP">
-              <Input
-                value={address.zip}
-                onChange={(e) => setAddress((a) => ({ ...a, zip: maskCep(e.target.value) }))}
-                inputMode="numeric"
-                placeholder="00000-000"
-                maxLength={9}
-              />
-            </Field>
+                    Remover foto
+                  </button>
+                ) : null}
+                <span className="text-xs text-ink-muted">Foto do rosto. A foto é reduzida antes de enviar.</span>
+              </div>
+            )}
           </div>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {(
-              [
-                ["start", "Jornada: início"],
-                ["end", "Jornada: fim"],
-                ["break_start", "Intervalo: de"],
-                ["break_end", "Intervalo: até"],
-              ] as const
-            ).map(([key, label]) => (
-              <Field key={key} label={label}>
-                <Input type="time" value={schedule[key]} onChange={(e) => setSchedule((s) => ({ ...s, [key]: e.target.value }))} />
-              </Field>
-            ))}
-          </div>
-          <ServicePicker
-            value={serviceIds}
-            onChange={setServiceIds}
-            options={serviceTypes.data ?? []}
-            saved={current.services ?? []}
-            loading={serviceTypes.isLoading}
+
+          <TechnicianFields
+            value={form}
+            onChange={setForm}
+            emailHint={emailChanged ? "O técnico passa a entrar no app com este e-mail." : undefined}
           />
-          {current.legacy ? (
-            <p className="text-xs text-ink-muted">
-              Importado do Field Control{current.legacy.id ? ` · ID ${current.legacy.id}` : ""}
-              {current.legacy.territories?.length ? ` · territórios: ${current.legacy.territories.join(", ")}` : ""}
-            </p>
-          ) : null}
-        </section>
-
-        {current.service_areas.length || current.skills.length || current.application_id ? (
-          <section>
-            <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-xs font-bold tracking-wide text-ink-muted uppercase">Perfil da homologação</h3>
-              {current.application_id ? (
-                <Link href={`/homologacao?ficha=${current.application_id}`} className={buttonClassName("ghost", "sm")}>
-                  <BadgeCheck className="size-3.5" />
-                  Ver ficha da homologação
-                </Link>
+          <div className="flex flex-col gap-1">
+            <Checkbox label="Acesso ao app liberado" checked={isActive} onChange={setIsActive} />
+            <p className="pl-6 text-xs text-ink-muted">
+              {isActive
+                ? readOnly
+                  ? "Entra no app e aparece no mapa e nas sugestões."
+                  : "Ao desativar, ele sai do app na hora e some do mapa e das sugestões."
+                : tech.is_active
+                  ? "Ao salvar, ele sai do app na hora."
+                  : "Sem acesso: não entra no app nem recebe OS novas."}
+              {!isActive && current.open_tickets ? (
+                <>
+                  {" "}
+                  <Link
+                    href={`/chamados?assignee_id=${tech.id}&open_only=true`}
+                    target="_blank"
+                    className="font-medium text-ink underline underline-offset-2 hover:text-brand"
+                  >
+                    {current.open_tickets === 1 ? "Ver a OS aberta dele" : `Ver as ${current.open_tickets} OS abertas dele`}
+                  </Link>
+                </>
               ) : null}
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {current.service_areas.map((k) => (
-                <span key={k} className="rounded-full bg-nav-active px-2.5 py-0.5 text-xs font-medium text-brand-ink">
-                  {areas[k] ?? k}
-                </span>
-              ))}
-              {current.skills.map((s) => (
-                <span key={s.name} className="rounded-full border border-line px-2.5 py-0.5 text-xs text-ink">
-                  {s.name} · {levels[s.level] ?? s.level}
-                </span>
-              ))}
-            </div>
-          </section>
-        ) : null}
+            </p>
+          </div>
 
-        {summary && payouts.data?.items.length ? (
-          <section className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line p-3">
-            <div className="min-w-0">
-              <SectionTitle>Pagamentos por chamado</SectionTitle>
-              <p className="mt-1 text-xs text-ink-muted tabular-nums">
-                A pagar <strong className="font-semibold text-ink">{formatMoney(summary.to_pay)}</strong> · Previsto{" "}
-                {formatMoney(summary.expected)} · Pago {formatMoney(summary.paid)}
+          <section className="flex flex-col gap-3 rounded-lg border border-line p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <SectionTitle>Ficha completa</SectionTitle>
+              <p className="text-xs text-ink-muted">
+                {current.base_city
+                  ? `Atua em ${regionText(current.base_city, current.base_state)} ${current.base_source === "history" ? `(pelo histórico, ${current.base_visits ?? 0} OS)` : "(pelo endereço)"}`
+                  : "Região de atuação ainda não identificada"}
+                {current.last_visit_at ? ` · última visita ${formatDate(current.last_visit_at)}` : ""}
               </p>
             </div>
-            <Link href="/pagamentos" className={buttonClassName("ghost", "sm")}>
-              <Wallet className="size-3.5" />
-              Ver em Pagamentos
-            </Link>
+            {favoriteIn.length ? (
+              <p className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-ink-muted">
+                <Star aria-hidden className="size-3.5 shrink-0 fill-current text-brand" />
+                Favorito em
+                {favoriteIn.map(({ city, me }, i) => (
+                  <span key={`${city.state}-${city.key}`}>
+                    <Link
+                      href={favoritesHref(city.state, city.city)}
+                      // Sem alteração pendente, o cadastro fecha e a aba de favoritos aparece já na cidade.
+                      onClick={() => {
+                        if (!dirty) onClose();
+                      }}
+                      className="rounded font-medium text-ink underline-offset-2 hover:text-brand-ink hover:underline focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+                    >
+                      {city.city}-{city.state}
+                    </Link>{" "}
+                    ({me.pinned ? "fixado" : `${me.visits} OS`}){i < favoriteIn.length - 1 ? " ·" : ""}
+                  </span>
+                ))}
+              </p>
+            ) : null}
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem_8rem]">
+              <Field label="Endereço (rua, número, complemento)">
+                <Input value={address.line} onChange={(e) => setAddress((a) => ({ ...a, line: e.target.value }))} maxLength={255} />
+              </Field>
+              <Field label="Bairro">
+                <Input value={address.district} onChange={(e) => setAddress((a) => ({ ...a, district: e.target.value }))} maxLength={120} />
+              </Field>
+              <Field label="CEP">
+                <Input
+                  value={address.zip}
+                  onChange={(e) => setAddress((a) => ({ ...a, zip: maskCep(e.target.value) }))}
+                  inputMode="numeric"
+                  placeholder="00000-000"
+                  maxLength={9}
+                />
+              </Field>
+            </div>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {(
+                [
+                  ["start", "Jornada: início"],
+                  ["end", "Jornada: fim"],
+                  ["break_start", "Intervalo: de"],
+                  ["break_end", "Intervalo: até"],
+                ] as const
+              ).map(([key, label]) => (
+                <Field key={key} label={label}>
+                  <Input type="time" value={schedule[key]} onChange={(e) => setSchedule((s) => ({ ...s, [key]: e.target.value }))} />
+                </Field>
+              ))}
+            </div>
+            <ServicePicker
+              value={serviceIds}
+              onChange={setServiceIds}
+              options={serviceTypes.data ?? []}
+              saved={current.services ?? []}
+              loading={serviceTypes.isLoading}
+              readOnly={readOnly}
+            />
+            {current.legacy ? (
+              <p className="text-xs text-ink-muted">
+                Importado do Field Control{current.legacy.id ? ` · ID ${current.legacy.id}` : ""}
+                {current.legacy.territories?.length ? ` · territórios: ${current.legacy.territories.join(", ")}` : ""}
+              </p>
+            ) : null}
           </section>
-        ) : null}
 
-        <section className="rounded-lg border border-line p-3">
-          <SectionTitle>Acesso ao app</SectionTitle>
-          <p className="mt-1 text-xs text-ink-muted">
-            {current.location_consent_at ? (
-              <span className="inline-flex items-center gap-1">
-                <MapPinned className="size-3.5" /> Autorizou o GPS durante a jornada
-              </span>
+          {current.service_areas.length || current.skills.length || current.application_id ? (
+            <section>
+              <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-xs font-bold tracking-wide text-ink-muted uppercase">Perfil da homologação</h3>
+                {current.application_id && canOnboarding ? (
+                  <Link href={`/homologacao?ficha=${current.application_id}`} className={buttonClassName("ghost", "sm")}>
+                    <BadgeCheck className="size-3.5" />
+                    Ver ficha da homologação
+                  </Link>
+                ) : null}
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {current.service_areas.map((k) => (
+                  <span key={k} className="rounded-full bg-nav-active px-2.5 py-0.5 text-xs font-medium text-brand-ink">
+                    {areas[k] ?? k}
+                  </span>
+                ))}
+                {current.skills.map((s) => (
+                  <span key={s.name} className="rounded-full border border-line px-2.5 py-0.5 text-xs text-ink">
+                    {s.name} · {levels[s.level] ?? s.level}
+                  </span>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          {summary && payouts.data?.items.length ? (
+            <section className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line p-3">
+              <div className="min-w-0">
+                <SectionTitle>Pagamentos por chamado</SectionTitle>
+                <p className="mt-1 text-xs text-ink-muted tabular-nums">
+                  A pagar <strong className="font-semibold text-ink">{formatMoney(summary.to_pay)}</strong> · Previsto{" "}
+                  {formatMoney(summary.expected)} · Pago {formatMoney(summary.paid)}
+                </p>
+              </div>
+              <Link href="/pagamentos" className={buttonClassName("ghost", "sm")}>
+                <Wallet className="size-3.5" />
+                Ver em Pagamentos
+              </Link>
+            </section>
+          ) : null}
+
+          <section className="rounded-lg border border-line p-3">
+            <SectionTitle>Acesso ao app</SectionTitle>
+            <p className="mt-1 text-xs text-ink-muted">
+              {current.location_consent_at ? (
+                <span className="inline-flex items-center gap-1">
+                  <MapPinned className="size-3.5" /> Autorizou o GPS durante a jornada
+                </span>
+              ) : (
+                "Ainda não autorizou o GPS (o app pede antes da primeira jornada; sem o aceite, não inicia a jornada)."
+              )}
+            </p>
+            {readOnly ? null : confirmReset ? (
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <span className="text-sm text-ink">Gerar senha provisória e encerrar as sessões abertas?</span>
+                <Button onClick={() => setConfirmReset(false)}>Não</Button>
+                <Button variant="danger" loading={reset.isPending} onClick={() => reset.mutate()}>
+                  Sim, redefinir
+                </Button>
+              </div>
             ) : (
-              "Ainda não autorizou o GPS (o app pede antes da primeira jornada; sem o aceite, não inicia a jornada)."
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <Button onClick={() => setConfirmReset(true)} disabled={dirty}>
+                  <KeyRound className="size-4" />
+                  Redefinir senha
+                </Button>
+                {dirty ? <span className="text-xs text-ink-muted">Salve as alterações antes de redefinir a senha.</span> : null}
+              </div>
             )}
-          </p>
-          {confirmReset ? (
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <span className="text-sm text-ink">Gerar senha provisória e encerrar as sessões abertas?</span>
-              <Button onClick={() => setConfirmReset(false)}>Não</Button>
-              <Button variant="danger" loading={reset.isPending} onClick={() => reset.mutate()}>
-                Sim, redefinir
-              </Button>
-            </div>
-          ) : (
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <Button onClick={() => setConfirmReset(true)} disabled={dirty}>
-                <KeyRound className="size-4" />
-                Redefinir senha
-              </Button>
-              {dirty ? <span className="text-xs text-ink-muted">Salve as alterações antes de redefinir a senha.</span> : null}
-            </div>
-          )}
-        </section>
+          </section>
 
-        {problem || save.error || reset.error ? (
-          <ErrorBox message={problem ?? errorMessage(save.error ?? reset.error)} />
-        ) : null}
+          {problem || save.error || reset.error ? (
+            <ErrorBox message={problem ?? errorMessage(save.error ?? reset.error)} />
+          ) : null}
+        </fieldset>
       </form>
     </Dialog>
   );
@@ -1259,13 +1311,17 @@ function EditDialog({ tech, onClose }: { tech: Technician; onClose: () => void }
 // Etiquetas dos serviços marcados: acima disso, só a contagem (há técnico com quase 200 serviços).
 const SERVICE_CHIPS = 24;
 
-/** "Serviços que faz": busca, marcar os filtrados e etiquetas do que está marcado agora (não do que foi salvo). */
+/**
+ * "Serviços que faz": busca, marcar os filtrados e etiquetas do que está marcado agora (não do que foi
+ * salvo). `readOnly`: só as etiquetas do que está marcado, sem busca nem lista.
+ */
 function ServicePicker({
   value,
   onChange,
   options,
   saved,
   loading,
+  readOnly = false,
 }: {
   value: string[];
   onChange: (ids: string[]) => void;
@@ -1273,6 +1329,7 @@ function ServicePicker({
   /** Serviços salvos no cadastro (inclui tipos que foram desativados, para poder desmarcar). */
   saved: { id: string; name: string }[];
   loading: boolean;
+  readOnly?: boolean;
 }) {
   const [term, setTerm] = useState("");
   const all = useMemo(() => {
@@ -1287,6 +1344,29 @@ function ServicePicker({
   const selected = new Set(value);
   const toggle = (id: string) => onChange(selected.has(id) ? value.filter((v) => v !== id) : [...value, id]);
   const markVisible = () => onChange([...new Set([...value, ...visible.map((o) => o.id)])]);
+  if (readOnly) {
+    return (
+      <div className="flex flex-col gap-2">
+        <p className="text-xs font-semibold text-ink/80">
+          Serviços que faz <span className="font-normal text-ink-muted tabular-nums">({value.length})</span>
+        </p>
+        {value.length ? (
+          <ul className="flex flex-wrap gap-1" aria-label="Serviços que faz">
+            {value.slice(0, SERVICE_CHIPS).map((id) => (
+              <li key={id} className="rounded-md bg-surface-2 px-1.5 py-0.5 text-[11px] text-ink-muted ring-1 ring-line ring-inset">
+                {names.get(id) ?? "Serviço"}
+              </li>
+            ))}
+            {value.length > SERVICE_CHIPS ? (
+              <li className="self-center text-[11px] text-ink-muted">+{value.length - SERVICE_CHIPS}</li>
+            ) : null}
+          </ul>
+        ) : (
+          <p className="text-xs text-ink-muted">Nenhum serviço marcado.</p>
+        )}
+      </div>
+    );
+  }
   return (
     <fieldset className="flex flex-col gap-2">
       <legend className="mb-1.5 text-xs font-semibold text-ink/80">

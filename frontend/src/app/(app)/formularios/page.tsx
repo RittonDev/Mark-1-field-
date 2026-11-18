@@ -6,12 +6,12 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useConfirm } from "@/components/Confirm";
 import { Tabs } from "@/components/motion";
+import { NoAccess } from "@/components/NoAccess";
 import { ActiveState, fold, RowEditButton, SearchField } from "@/components/settings/shared";
 import { useToast } from "@/components/Toaster";
-import { Button, Card, EmptyState, ErrorBox, LoadingBlock, PageHeader, Table, Td, Th } from "@/components/ui";
+import { Button, Card, Dialog, EmptyState, ErrorBox, LoadingBlock, PageHeader, Table, Td, Th } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
-import { canManageTickets } from "@/lib/constants";
+import { useCan } from "@/lib/permissions";
 import { useServiceTypes } from "@/lib/queries";
 import type { FormTemplate, ServiceType } from "@/lib/types";
 import {
@@ -21,8 +21,10 @@ import {
   EXAMPLES,
   invalidateForms,
   NEW_KEY,
+  photoNeed,
   storedChanges,
   type StoredDraft,
+  TYPE_LABEL,
   writeStored,
 } from "./draft";
 import { FormEditor } from "./FormEditor";
@@ -44,21 +46,22 @@ export default function FormsPage() {
 /**
  * Lista de formulários e o construtor. O construtor tem endereço (?editar=<id> ou ?editar=novo):
  * recarregar a página ou usar o Voltar do navegador não perde a edição (o rascunho fica na aba).
+ * Só com Visualizar: a lista e a prévia de cada formulário (o construtor não abre, nem pelo endereço).
  */
 function FormsView() {
-  const { user } = useAuth();
   const router = useRouter();
   const params = useSearchParams();
   const confirm = useConfirm();
-  const editKey = params.get("editar");
-  const allowed = !user || canManageTickets(user.role);
+  const canView = useCan("setup.forms");
+  const canEdit = useCan("setup.forms", "edit");
+  const editKey = canEdit ? params.get("editar") : null;
   const templates = useQuery({
     queryKey: ["form-templates"],
     queryFn: () => api.get<FormTemplate[]>("/form-templates"),
-    enabled: allowed,
+    enabled: canView,
   });
   // Todos os tipos, inclusive os inativos: o nome sai certo na lista e no editor.
-  const serviceTypes = useServiceTypes({ enabled: allowed });
+  const serviceTypes = useServiceTypes({ enabled: canView });
   // Onde a lista estava ao abrir o editor (volta ao mesmo ponto) e se o editor foi aberto por aqui:
   // aí "voltar" usa o histórico; aberto por link ou depois de recarregar, troca o endereço.
   const listScroll = useRef<number | null>(null);
@@ -109,9 +112,7 @@ function FormsView() {
     }
   };
 
-  if (user && !allowed) {
-    return <ErrorBox message="Os formulários são montados por analistas e gestores." />;
-  }
+  if (!canView) return <NoAccess kind="module" item="setup.forms" />;
 
   if (editKey) {
     const isNew = editKey === NEW_KEY;
@@ -148,16 +149,19 @@ function FormsView() {
     );
   }
 
-  return <FormsList templates={templates} serviceTypes={serviceTypes.data ?? []} onOpen={open} />;
+  return <FormsList templates={templates} serviceTypes={serviceTypes.data ?? []} canEdit={canEdit} onOpen={open} />;
 }
 
 function FormsList({
   templates,
   serviceTypes,
+  canEdit,
   onOpen,
 }: {
   templates: UseQueryResult<FormTemplate[]>;
   serviceTypes: ServiceType[];
+  /** Formulários com Editar: criar, duplicar, alterar e desativar. Sem ele, o nome abre a prévia. */
+  canEdit: boolean;
   onOpen: (key: string, start?: Draft) => void;
 }) {
   const queryClient = useQueryClient();
@@ -165,8 +169,9 @@ function FormsList({
   const confirm = useConfirm();
   const [search, setSearch] = useState("");
   const [situation, setSituation] = useState<Situation>("active");
+  const [preview, setPreview] = useState<FormTemplate | null>(null);
   // Rascunho que ficou na aba (o editor fechou pelo Voltar do navegador, pelo menu ou recarregando).
-  const [pending, setPending] = useState(() => storedChanges());
+  const [pending, setPending] = useState(() => (canEdit ? storedChanges() : null));
   const all = useMemo(() => templates.data ?? [], [templates.data]);
   const typeName = useMemo(
     () => new Map(serviceTypes.map((t) => [t.id, t.is_active ? t.name : `${t.name} (inativo)`])),
@@ -238,10 +243,12 @@ function FormsList({
         title="Formulários"
         description="Checklists que o técnico preenche no app. Você decide, em cada OS, se anexa e se é obrigatório."
         actions={
-          <Button variant="primary" onClick={() => onOpen(NEW_KEY, emptyDraft())}>
-            <Plus className="size-4" />
-            Novo formulário
-          </Button>
+          canEdit ? (
+            <Button variant="primary" onClick={() => onOpen(NEW_KEY, emptyDraft())}>
+              <Plus className="size-4" />
+              Novo formulário
+            </Button>
+          ) : undefined
         }
       />
 
@@ -277,15 +284,17 @@ function FormsList({
           <EmptyState
             icon={<ClipboardList className="size-6" />}
             title="Nenhum formulário ainda"
-            description="Comece de um exemplo e ajuste, ou crie do zero."
+            description={canEdit ? "Comece de um exemplo e ajuste, ou crie do zero." : undefined}
             action={
-              <div className="flex flex-wrap justify-center gap-2">
-                {EXAMPLES.map((ex) => (
-                  <Button key={ex.name} onClick={() => onOpen(NEW_KEY, ex.build())}>
-                    {ex.name}
-                  </Button>
-                ))}
-              </div>
+              canEdit ? (
+                <div className="flex flex-wrap justify-center gap-2">
+                  {EXAMPLES.map((ex) => (
+                    <Button key={ex.name} onClick={() => onOpen(NEW_KEY, ex.build())}>
+                      {ex.name}
+                    </Button>
+                  ))}
+                </div>
+              ) : undefined
             }
           />
         </Card>
@@ -336,8 +345,12 @@ function FormsList({
                     <Th>Sugerido nas OS de</Th>
                     <Th className="text-right">Versão</Th>
                     <Th>Situação</Th>
-                    <Th>Ações</Th>
-                    <Th className="edit-col">Editar</Th>
+                    {canEdit ? (
+                      <>
+                        <Th>Ações</Th>
+                        <Th className="edit-col">Editar</Th>
+                      </>
+                    ) : null}
                   </tr>
                 </thead>
                 <tbody>
@@ -349,7 +362,8 @@ function FormsList({
                         <Td className="max-w-md min-w-56">
                           <button
                             type="button"
-                            onClick={() => onOpen(t.id)}
+                            onClick={() => (canEdit ? onOpen(t.id) : setPreview(t))}
+                            title={canEdit ? undefined : "Ver as perguntas"}
                             className="rounded text-left font-semibold text-ink hover:text-brand focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
                           >
                             {t.name}
@@ -363,33 +377,37 @@ function FormsList({
                         <Td>
                           <ActiveState active={t.is_active} />
                         </Td>
-                        <Td className="whitespace-nowrap">
-                          <div className="flex gap-1">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => onOpen(NEW_KEY, duplicateOf(t))}
-                              aria-label={`Duplicar “${t.name}”`}
-                            >
-                              <Copy className="size-3.5" />
-                              Duplicar
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              loading={toggle.isPending && toggle.variables?.id === t.id}
-                              disabled={toggle.isPending}
-                              onClick={() => toggle.mutate(t)}
-                              aria-label={`${t.is_active ? "Desativar" : "Reativar"} “${t.name}”`}
-                            >
-                              {t.is_active ? <Archive className="size-3.5" /> : <ArchiveRestore className="size-3.5" />}
-                              {t.is_active ? "Desativar" : "Reativar"}
-                            </Button>
-                          </div>
-                        </Td>
-                        <Td className="edit-col">
-                          <RowEditButton label={`Editar “${t.name}”`} onClick={() => onOpen(t.id)} />
-                        </Td>
+                        {canEdit ? (
+                          <>
+                            <Td className="whitespace-nowrap">
+                              <div className="flex gap-1">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => onOpen(NEW_KEY, duplicateOf(t))}
+                                  aria-label={`Duplicar “${t.name}”`}
+                                >
+                                  <Copy className="size-3.5" />
+                                  Duplicar
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  loading={toggle.isPending && toggle.variables?.id === t.id}
+                                  disabled={toggle.isPending}
+                                  onClick={() => toggle.mutate(t)}
+                                  aria-label={`${t.is_active ? "Desativar" : "Reativar"} “${t.name}”`}
+                                >
+                                  {t.is_active ? <Archive className="size-3.5" /> : <ArchiveRestore className="size-3.5" />}
+                                  {t.is_active ? "Desativar" : "Reativar"}
+                                </Button>
+                              </div>
+                            </Td>
+                            <Td className="edit-col">
+                              <RowEditButton label={`Editar “${t.name}”`} onClick={() => onOpen(t.id)} />
+                            </Td>
+                          </>
+                        ) : null}
                       </tr>
                     );
                   })}
@@ -397,23 +415,86 @@ function FormsList({
               </Table>
             )}
           </Card>
-          <p className="mt-4 text-xs text-ink-muted">
-            Exemplos para começar:{" "}
-            {EXAMPLES.map((ex, i) => (
-              <span key={ex.name}>
-                {i ? " · " : ""}
-                <button
-                  type="button"
-                  className="rounded font-medium text-brand hover:underline focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
-                  onClick={() => onOpen(NEW_KEY, ex.build())}
-                >
-                  {ex.name}
-                </button>
-              </span>
-            ))}
-          </p>
+          {canEdit ? (
+            <p className="mt-4 text-xs text-ink-muted">
+              Exemplos para começar:{" "}
+              {EXAMPLES.map((ex, i) => (
+                <span key={ex.name}>
+                  {i ? " · " : ""}
+                  <button
+                    type="button"
+                    className="rounded font-medium text-brand hover:underline focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
+                    onClick={() => onOpen(NEW_KEY, ex.build())}
+                  >
+                    {ex.name}
+                  </button>
+                </span>
+              ))}
+            </p>
+          ) : null}
         </>
       )}
+      {preview ? <FormPreview template={preview} onClose={() => setPreview(null)} /> : null}
     </div>
+  );
+}
+
+/** Formulário só para consulta (acesso de visualização): as perguntas na ordem em que o técnico responde. */
+function FormPreview({ template: t, onClose }: { template: FormTemplate; onClose: () => void }) {
+  const questions = t.fields.filter((f) => f.type !== "section").length;
+  const details = (f: FormTemplate["fields"][number]) => {
+    const need = photoNeed(f);
+    return [
+      TYPE_LABEL[f.type],
+      f.type === "photo" ? `${need ? `mín. ${need}` : "opcional"}, máx. ${f.max_photos}` : null,
+      f.type !== "photo" && f.required ? "obrigatória" : null,
+      f.options.length ? f.options.join(", ") : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  };
+  return (
+    <Dialog
+      open
+      size="lg"
+      onClose={onClose}
+      title={t.name}
+      description={[
+        `Versão ${t.version}`,
+        `${questions} ${questions === 1 ? "pergunta" : "perguntas"}`,
+        t.requires_signature ? "pede a assinatura no local" : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")}
+      footer={
+        <Button variant="primary" onClick={onClose}>
+          Fechar
+        </Button>
+      }
+    >
+      <div className="flex flex-col gap-3">
+        {t.description ? <p className="text-sm whitespace-pre-wrap text-ink-muted">{t.description}</p> : null}
+        {t.fields.length === 0 ? (
+          <p className="text-sm text-ink-muted">Nenhuma pergunta.</p>
+        ) : (
+          <ol className="flex flex-col gap-2">
+            {t.fields.map((f) =>
+              f.type === "section" ? (
+                <li key={f.id} className="border-b border-line pt-2 pb-1">
+                  <p className="text-xs font-bold tracking-wide text-ink-muted uppercase">{f.label.trim() || "Seção"}</p>
+                  {f.help?.trim() ? <p className="text-xs text-ink-muted">{f.help}</p> : null}
+                </li>
+              ) : (
+                <li key={f.id} className="rounded-lg border border-line px-3 py-2">
+                  <p className="text-sm font-semibold text-ink">{f.label.trim() || "Pergunta sem texto"}</p>
+                  <p className="text-xs text-ink-muted">{details(f)}</p>
+                  {f.help?.trim() ? <p className="mt-0.5 text-xs text-ink-muted">{f.help}</p> : null}
+                </li>
+              ),
+            )}
+          </ol>
+        )}
+      </div>
+    </Dialog>
   );
 }

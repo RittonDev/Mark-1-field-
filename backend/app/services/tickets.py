@@ -37,6 +37,7 @@ from sqlalchemy.orm import aliased, noload, raiseload
 from sqlalchemy.orm.attributes import set_committed_value
 from sqlalchemy.sql.elements import ColumnElement
 
+from app.core import permissions
 from app.core.config import settings
 from app.core.enums import (
     FormStatus,
@@ -83,12 +84,19 @@ from app.schemas.ticket import (
     TicketUpdate,
     TicketViolationUpdate,
     WorklogCreate,
+    format_ticket_code,
 )
 from app.services import client_report, durations, geo, schedule, search, sla, storage, tag_rules
 from app.services import field as field_rules
 from app.services import payouts as payouts_svc
-from app.services.errors import NotFound, PermissionDenied, VersionConflict, WorkflowError
-from app.services.realtime import queue_event
+from app.services.errors import (
+    AccessDenied,
+    NotFound,
+    PermissionDenied,
+    VersionConflict,
+    WorkflowError,
+)
+from app.services.realtime import queue_event, unowned_ticket
 from app.services.suggestions import km_between
 from app.services.technician_regions import fold_words_sql
 from app.services.workflow import (
@@ -112,9 +120,31 @@ SELF_ASSIGN_ROLES = frozenset({UserRole.ANALYST})
 # --------------------------------------------------------------------------- visibilidade
 
 
+QUEUE_FORBIDDEN = "Esta OS é de outra fila."
+
+
+def unowned_clause() -> ColumnElement[bool]:
+    """OS "sem analista": sem responsável ou com um que saiu da gestão (desativado ou com outro
+    papel). Essas OS não aparecem em fila nenhuma e precisam de alguém."""
+    return or_(Ticket.owner_id.is_(None), Ticket.owner_id.in_(orphan_owner_ids()))
+
+
+def queue_scope_clause(user: User) -> ColumnElement[bool] | None:
+    """Fila que a gestão vê (core/permissions.py). "Todas as filas": tudo (None). "Somente a
+    própria fila": as OS de que a pessoa é a analista responsável ou a executora e, com a opção,
+    as sem analista (para poder puxá-las)."""
+    acc = permissions.of(user)
+    if acc.all_queues:
+        return None
+    parts = [Ticket.owner_id == user.id, Ticket.assignee_id == user.id]
+    if acc.queue_unowned:
+        parts.append(unowned_clause())
+    return or_(*parts)
+
+
 def visibility_clause(user: User) -> ColumnElement[bool] | None:
     if user.can_manage_tickets:
-        return None
+        return queue_scope_clause(user)
     if user.role == UserRole.TECHNICIAN:
         # O técnico só vê as OS em que o analista o colocou (responsável ou outro técnico).
         return schedule.works_on(user.id)
@@ -140,9 +170,25 @@ def attachment_visible(attachment: TicketAttachment, user: User) -> bool:
     )
 
 
+def is_unowned(ticket: Ticket) -> bool:
+    """A regra de unowned_clause numa OS carregada: sem responsável, ou responsável carregado e
+    fora da gestão. Responsável não carregado: na dúvida, não é (nega a visibilidade)."""
+    return unowned_ticket(ticket)
+
+
+def in_queue_scope(user: User, ticket: Ticket) -> bool:
+    """A mesma regra de queue_scope_clause numa OS só."""
+    acc = permissions.of(user)
+    if acc.all_queues:
+        return True
+    if user.id in (ticket.owner_id, ticket.assignee_id):
+        return True
+    return acc.queue_unowned and is_unowned(ticket)
+
+
 def can_view(user: User, ticket: Ticket) -> bool:
     if user.can_manage_tickets:
-        return True
+        return in_queue_scope(user, ticket)
     if user.role == UserRole.TECHNICIAN:
         return ticket.assignee_id == user.id or is_helper(user, ticket)
     return False  # cliente: só pelo portal
@@ -236,6 +282,8 @@ def to_detail(ticket: Ticket, user: User) -> TicketDetail:
     # Valores dos técnicos: a gestão vê todos; o técnico só o dele (o do colega, não).
     if not user.can_manage_tickets:
         detail.payouts = []
+    else:
+        _commercial_blocks(detail, permissions.of(user))
     if user.role == UserRole.TECHNICIAN:
         detail.my_payout = payouts_svc.my_payout(ticket, user)
         # Reembolso é de cada um: o técnico vê o dele e o material da OS, não o do colega.
@@ -244,6 +292,25 @@ def to_detail(ticket: Ticket, user: User) -> TicketDetail:
         ]
         field_view(detail)
     return detail
+
+
+def _commercial_blocks(detail: TicketDetail, acc: permissions.Access) -> None:
+    """Blocos comerciais da OS só para quem tem a tela: custos (Custos extras), valores dos
+    técnicos (Pagamentos) e os preços do pedido migrado do Field Control (Orçamentos)."""
+    if not acc.can("commercial.expenses"):
+        detail.expenses = []
+    if not acc.can("commercial.payouts"):
+        detail.payouts = []
+    if not acc.can("commercial.quotes") and isinstance(detail.legacy, dict):
+        legacy = dict(detail.legacy)
+        if "values" in legacy:
+            legacy["values"] = None
+        if isinstance(legacy.get("items"), list):
+            legacy["items"] = [
+                {**item, "value": None, "total": None} if isinstance(item, dict) else item
+                for item in legacy["items"]
+            ]
+        detail.legacy = legacy
 
 
 def field_view(detail: TicketDetail) -> TicketDetail:
@@ -315,10 +382,30 @@ async def get_ticket(db: AsyncSession, ticket_id: uuid.UUID) -> Ticket:
 
 
 async def get_visible_ticket(db: AsyncSession, user: User, ticket_id: uuid.UUID) -> Ticket:
+    """A OS, se a pessoa a vê. Gestão fora da fila: 403 QUEUE_FORBIDDEN (a web mostra "OS de
+    outra fila"); técnico e cliente: 404, como se não existisse."""
     ticket = await get_ticket(db, ticket_id)
     if not can_view(user, ticket):
+        if user.can_manage_tickets:
+            raise AccessDenied(QUEUE_FORBIDDEN, code="QUEUE_FORBIDDEN")
         raise NotFound("OS não encontrada")
     return ticket
+
+
+async def lookup(db: AsyncSession, user: User, number: int) -> dict[str, Any]:
+    """OS pelo número (o link /chamados/{nº}): {id, code}. Não existe: 404; existe mas é de
+    outra fila: 403 QUEUE_FORBIDDEN. Técnico e cliente: 404."""
+    if not user.can_manage_tickets:
+        raise NotFound("OS não encontrada")
+    found = await db.scalar(select(Ticket.id).where(Ticket.number == number))
+    if found is None:
+        raise NotFound("OS não encontrada")
+    vis = visibility_clause(user)
+    if vis is not None:
+        seen = await db.scalar(select(Ticket.id).where(Ticket.id == found, vis))
+        if seen is None:
+            raise AccessDenied(QUEUE_FORBIDDEN, code="QUEUE_FORBIDDEN")
+    return {"id": found, "code": format_ticket_code(number)}
 
 
 def check_version(ticket: Ticket, expected: int | None) -> None:
@@ -660,7 +747,15 @@ async def _set_owner(
     prev_id = ticket.owner_id
     prev = await db.get(User, prev_id) if prev_id is not None else None
     ticket.owner_id = owner_id
-    data = {"from_name": prev.name if prev else None, "to_name": owner.name if owner else None}
+    # Com os ids (a web compara por id, não por nome) e o responsável carregado: o evento de
+    # tempo real decide se a OS ficou "sem analista" sem ir ao banco.
+    ticket.owner = owner
+    data = {
+        "from_name": prev.name if prev else None,
+        "to_name": owner.name if owner else None,
+        "from_id": _jsonable(prev_id),
+        "to_id": _jsonable(owner_id),
+    }
     if note is None:
         if owner is not None and owner.id == actor.id:
             note = (
@@ -683,7 +778,15 @@ async def _set_owner(
         data=data,
         now=now,
     )
-    queue_event(db, "updated", ticket, actor, {"fields": ["owner_id"], **data}, internal=True)
+    queue_event(
+        db,
+        "updated",
+        ticket,
+        actor,
+        {"fields": ["owner_id"], **data},
+        internal=True,
+        previous_owner_id=prev_id,
+    )
     return True
 
 
@@ -1361,21 +1464,33 @@ async def correct_times(
 RECURRENCE_WINDOW = timedelta(days=30)
 
 
+def _visible(user: User | None) -> tuple[ColumnElement[bool], ...]:
+    """A cláusula de visibilidade como lista de condições (vazia quando a pessoa vê tudo)."""
+    vis = visibility_clause(user) if user is not None else None
+    return (vis,) if vis is not None else ()
+
+
 async def recurrence_counts(
-    db: AsyncSession, tickets: list[Ticket], now: datetime | None = None
+    db: AsyncSession,
+    tickets: list[Ticket],
+    now: datetime | None = None,
+    user: User | None = None,
 ) -> dict[uuid.UUID, int]:
     """Outras OS no mesmo local nos últimos 30 dias, para uma página inteira (uma consulta).
-    Cancelada (duplicada, aberta por engano) não é reincidência."""
+    Cancelada (duplicada, aberta por engano) não é reincidência. Com `user`, só as OS que ele
+    vê (fila)."""
     since = (now or utcnow()) - RECURRENCE_WINDOW
     location_ids = {t.location_id for t in tickets if t.location_id is not None}
     if not location_ids:
         return {}
+    vis = _visible(user)
     rows = await db.execute(
         select(Ticket.location_id, func.count())
         .where(
             Ticket.location_id.in_(location_ids),
             Ticket.created_at >= since,
             Ticket.status != S.CANCELLED,
+            *vis,
         )
         .group_by(Ticket.location_id)
     )
@@ -1392,8 +1507,9 @@ async def recurrence_counts(
 
 
 async def recurrence_for(
-    db: AsyncSession, ticket: Ticket, now: datetime | None = None
+    db: AsyncSession, ticket: Ticket, user: User | None = None, now: datetime | None = None
 ) -> TicketRecurrence:
+    """Outras OS do mesmo local nos últimos 30 dias (com `user`, só as que ele vê)."""
     since = (now or utcnow()) - RECURRENCE_WINDOW
     if ticket.location_id is None:
         return TicketRecurrence(count_30d=0, previous=[])
@@ -1402,6 +1518,7 @@ async def recurrence_for(
         Ticket.id != ticket.id,
         Ticket.created_at >= since,
         Ticket.status != S.CANCELLED,
+        *_visible(user),
     )
     count = await db.scalar(select(func.count()).where(*same_place)) or 0
     rows = await db.execute(
@@ -2161,12 +2278,19 @@ def filter_conditions(user: User, f: TicketFilters, now: datetime) -> list[Colum
             or_(Category.id == f.category_id, Category.parent_id == f.category_id)
         )
         conds.append(Ticket.category_id.in_(subcats))
+    own_queue = user.can_manage_tickets and not permissions.of(user).all_queues
     if f.owner_id:
         conds.append(Ticket.owner_id == f.owner_id)
+        if own_queue and f.owner_id != user.id:
+            # Só a própria fila: a fila de outro analista volta vazia (mesmo a OS dele que a
+            # pessoa executa aparece só na fila dela).
+            conds.append(false())
     if f.no_owner:
         # Sem analista de verdade: sem responsável ou com um que saiu da gestão (desativado ou
         # mudou de papel). Essas OS não aparecem em fila nenhuma e precisam de alguém.
-        conds.append(or_(Ticket.owner_id.is_(None), Ticket.owner_id.in_(orphan_owner_ids())))
+        conds.append(unowned_clause())
+        if own_queue and not permissions.of(user).queue_unowned:
+            conds.append(false())
     if f.mine:
         if user.can_manage_tickets:
             # Do analista: as que ele executa e as da fila dele (responsável).

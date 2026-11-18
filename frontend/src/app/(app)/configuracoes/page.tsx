@@ -8,6 +8,7 @@ import { useEffect, useId, useMemo, useState } from "react";
 import { PriorityBadge, StatusBadge } from "@/components/badges";
 import { CompanyProfileCard } from "@/components/CompanyProfileCard";
 import { FieldRulesCard } from "@/components/FieldRulesCard";
+import { NoAccess } from "@/components/NoAccess";
 import { ActiveState, FieldError, fold, RowEditButton, useLeaveGuard } from "@/components/settings/shared";
 import { TagRulesCard } from "@/components/settings/TagRulesCard";
 import { useToast } from "@/components/Toaster";
@@ -33,8 +34,9 @@ import {
 } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { isManager, PRIORITY, PRIORITY_ORDER, STATUS, STATUS_ORDER, TRANSITIONS } from "@/lib/constants";
+import { PRIORITY, PRIORITY_ORDER, STATUS, STATUS_ORDER, TRANSITIONS } from "@/lib/constants";
 import { formatMinutes, formatMoney } from "@/lib/format";
+import { useCan } from "@/lib/permissions";
 import { useCategories, useTeams } from "@/lib/queries";
 import type { Category, SlaPolicy, TicketPriority } from "@/lib/types";
 
@@ -494,8 +496,9 @@ function CategoriesCard({ canEdit }: { canEdit: boolean }) {
   );
 }
 
-/** Valor do km fica em Custos extras; aqui só o lembrete de onde mudar. */
+/** Valor do km fica em Custos extras; aqui só o lembrete de onde mudar (o link, com acesso àquela tela). */
 function KmRateNote() {
+  const canExpenses = useCan("commercial.expenses");
   const settings = useQuery({
     queryKey: ["settings", "expenses"],
     queryFn: () => api.get<{ km_rate: number }>("/settings/expenses"),
@@ -503,9 +506,13 @@ function KmRateNote() {
   return (
     <p className="px-1 text-xs text-ink-muted">
       Valor do km rodado{settings.data ? `: ${formatMoney(settings.data.km_rate)}` : ""}. Muda em{" "}
-      <Link href="/custos" className="font-medium text-brand hover:underline">
-        Custos extras
-      </Link>
+      {canExpenses ? (
+        <Link href="/custos" className="font-medium text-brand hover:underline">
+          Custos extras
+        </Link>
+      ) : (
+        "Custos extras"
+      )}
       .
     </p>
   );
@@ -565,10 +572,13 @@ function StatusFlowCard() {
 
 export default function SettingsPage() {
   const { user } = useAuth();
-  // Escrita: supervisores e administradores (o SLA, só o administrador). O analista lê e cuida dos
-  // motivos de visita improdutiva.
-  const canEdit = isManager(user?.role);
+  // Escrita: quem tem Configurações com Editar (o SLA continua só com o administrador). Os motivos de
+  // visita improdutiva são de toda a central e ficam editáveis mesmo só com Visualizar.
+  const canView = useCan("setup.settings");
+  const canEdit = useCan("setup.settings", "edit");
   const isAdmin = user?.role === "admin";
+
+  if (!canView) return <NoAccess kind="module" item="setup.settings" />;
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -576,12 +586,12 @@ export default function SettingsPage() {
         title="Configurações"
         description="Dados da empresa, regras de campo, SLA, categorias, etiquetas automáticas, motivos e fluxo de status."
       />
-      {user && !canEdit ? (
+      {!canEdit ? (
         <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-line bg-surface px-4 py-3 text-sm text-ink-muted shadow-elev-1">
-          <Lock className="mt-0.5 size-4 shrink-0" />
+          <Lock aria-hidden className="mt-0.5 size-4 shrink-0" />
           <p>
-            Somente leitura: supervisores e administradores alteram as configurações. Os motivos de visita improdutiva
-            você também cadastra e edita.
+            Seu acesso a Configurações é de visualização. Os motivos de visita improdutiva você também cadastra e
+            edita.
           </p>
         </div>
       ) : null}

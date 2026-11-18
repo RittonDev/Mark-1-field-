@@ -333,6 +333,15 @@ def _line(row: Any) -> PayoutLine:
     )
 
 
+def _visibility(viewer: User | None) -> Any:
+    """A visibilidade das OS de quem pede (fila). Import aqui: services.tickets usa este módulo."""
+    if viewer is None:
+        return None
+    from app.services.tickets import visibility_clause
+
+    return visibility_clause(viewer)
+
+
 async def list_payouts(
     db: AsyncSession,
     *,
@@ -343,6 +352,7 @@ async def list_payouts(
     date_to: date | None = None,
     limit: int = 1000,
     hide_cancelled_pending: bool = False,
+    viewer: User | None = None,
 ) -> PayoutList:
     """Pagamentos para a gestão. O período vale pela conclusão da OS (aberta: pelo lançamento).
 
@@ -364,6 +374,10 @@ async def list_payouts(
         conds.append(
             not_(and_(TicketPayout.status == PayoutStatus.PENDING, Ticket.status == CANCELLED))
         )
+    vis = _visibility(viewer)
+    if vis is not None:
+        # Só os das OS da fila que quem pede vê.
+        conds.append(vis)
     start, end = _bounds(date_from, date_to)
     if start is not None:
         conds.append(when >= start)
@@ -428,8 +442,13 @@ async def list_payouts(
 
 async def mark_paid(db: AsyncSession, ids: list[uuid.UUID], actor: User, *, paid: bool) -> int:
     """Marca como pago (ou desfaz). Devolve quantos mudaram. Cada mudança fica no histórico da
-    OS (quem pagou, quando e quanto) e a gestão vê na hora."""
-    payouts = list(await db.scalars(select(TicketPayout).where(TicketPayout.id.in_(ids))))
+    OS (quem pagou, quando e quanto) e a gestão vê na hora. Só os das OS que quem marca vê (os
+    de outra fila ficam como estão)."""
+    stmt = select(TicketPayout).where(TicketPayout.id.in_(ids))
+    vis = _visibility(actor)
+    if vis is not None:
+        stmt = stmt.join(Ticket, Ticket.id == TicketPayout.ticket_id).where(vis)
+    payouts = list(await db.scalars(stmt))
     now = utcnow()
     changed: list[TicketPayout] = []
     for payout in payouts:

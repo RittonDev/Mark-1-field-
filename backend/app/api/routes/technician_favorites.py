@@ -5,18 +5,22 @@ import uuid
 
 from fastapi import APIRouter
 
-from app.api.deps import DB, TicketManagerUser
+from app.api.deps import DB, TicketManagerUser, access_user
 from app.schemas.technician_favorite import FavoriteCityDetail, FavoriteSet, FavoritesOut
 from app.services import technician_favorites as svc
 from app.services.errors import WorkflowError
 
 router = APIRouter(tags=["technicians"])
 
+# Tela de Técnicos (os favoritos da cidade da loja ficam com toda a gestão: a Nova OS usa).
+TechniciansView = access_user("base.technicians")
+TechniciansEdit = access_user("base.technicians", level="edit")
+
 
 @router.get("/technicians/favorites", response_model=FavoritesOut)
 async def list_favorites(
     db: DB,
-    _: TicketManagerUser,
+    _: TechniciansView,
     state: str | None = None,
     technician_id: uuid.UUID | None = None,
 ) -> FavoritesOut:
@@ -43,7 +47,7 @@ async def city_favorites(
 
 @router.put("/technicians/favorites/{technician_id}", response_model=FavoriteCityDetail)
 async def set_favorite(
-    technician_id: uuid.UUID, body: FavoriteSet, db: DB, user: TicketManagerUser
+    technician_id: uuid.UUID, body: FavoriteSet, db: DB, user: TechniciansEdit
 ) -> FavoriteCityDetail:
     """favorite=true fixa o técnico na cidade; favorite=false tira da lista (ou desfaz o fixado)."""
     await svc.set_favorite(db, technician_id, body, user)
@@ -53,7 +57,7 @@ async def set_favorite(
 
 @router.delete("/technicians/favorites/{technician_id}", response_model=FavoriteCityDetail)
 async def clear_favorite(
-    technician_id: uuid.UUID, state: str, city: str, db: DB, user: TicketManagerUser
+    technician_id: uuid.UUID, state: str, city: str, db: DB, user: TechniciansEdit
 ) -> FavoriteCityDetail:
     """Volta a valer só a regra automática (idempotente)."""
     await svc.clear_favorite(db, technician_id, state, city, user)

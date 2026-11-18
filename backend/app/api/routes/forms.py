@@ -4,7 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, File, Form, Response, UploadFile, status
 from sqlalchemy import select
 
-from app.api.deps import DB, CurrentUser, TicketManagerUser
+from app.api.deps import DB, CurrentUser, TicketManagerUser, access_user
 from app.api.routes.tickets import _attachment_out, _detail
 from app.models import FormTemplate, TicketAttachment
 from app.schemas.forms import (
@@ -25,12 +25,16 @@ from app.services.realtime import commit_and_publish
 
 router = APIRouter(tags=["forms"])
 
+# Tela de Formulários (a lista de modelos fica com toda a gestão: a Nova OS e a OS usam).
+FormsView = access_user("setup.forms")
+FormsEdit = access_user("setup.forms", level="edit")
+
 
 # ------------------------------------------------------------------ modelos
 
 
 @router.get("/form-templates/catalog", response_model=FormCatalog)
-async def catalog(_: TicketManagerUser) -> FormCatalog:
+async def catalog(_: FormsView) -> FormCatalog:
     return field_type_catalog()
 
 
@@ -45,14 +49,14 @@ async def list_templates(
 
 
 @router.post("/form-templates", response_model=FormTemplateOut, status_code=status.HTTP_201_CREATED)
-async def create_template(body: FormTemplateIn, db: DB, user: TicketManagerUser) -> FormTemplate:
+async def create_template(body: FormTemplateIn, db: DB, user: FormsEdit) -> FormTemplate:
     template = await svc.create_template(db, body, user)
     await db.commit()
     return template
 
 
 @router.get("/form-templates/{template_id}", response_model=FormTemplateOut)
-async def get_template(template_id: uuid.UUID, db: DB, _: TicketManagerUser) -> FormTemplate:
+async def get_template(template_id: uuid.UUID, db: DB, _: FormsView) -> FormTemplate:
     return await svc.get_template(db, template_id)
 
 
@@ -61,7 +65,7 @@ async def update_template(
     template_id: uuid.UUID,
     body: FormTemplateIn,
     db: DB,
-    _: TicketManagerUser,
+    _: FormsEdit,
     apply_to_pending: bool = False,
 ) -> FormTemplateOut:
     """Salva o modelo. Com `apply_to_pending`, a correção chega também às OS em que o formulário

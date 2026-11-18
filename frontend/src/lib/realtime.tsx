@@ -7,8 +7,9 @@ import { useToast } from "@/components/Toaster";
 import { API_REACHABLE_EVENT, errorMessage, refreshSessionResult, WS_URL } from "./api";
 import { STATUS } from "./constants";
 import { formatMoney, todayISO } from "./format";
+import { accessOf, can } from "./permissions";
 import { sessionStore } from "./session";
-import type { LiveTechnician, RealtimeEvent, TicketStatus, TrackingHistory, UUID } from "./types";
+import type { AccessItemKey, LiveTechnician, RealtimeEvent, TicketStatus, TrackingHistory, UUID } from "./types";
 import { copyText, GROUP_TEXT_COPIED, type GroupText, groupShareUrl, groupTextsQuery } from "./whatsapp";
 
 export type ConnectionState = "connecting" | "online" | "offline";
@@ -108,9 +109,14 @@ const text = (value: unknown) => (typeof value === "string" && value ? value : u
  * não traz, null se a OS está sem responsável.
  */
 function ownerOf(event: RealtimeEvent): string | null | undefined {
-  const raw = (event as { owner_id?: unknown }).owner_id ?? event.data?.owner_id;
+  const raw = event.owner_id ?? event.data?.owner_id;
   if (raw === null) return null;
   return typeof raw === "string" ? raw : undefined;
+}
+
+/** O perfil de quem está na central inclui a tela? (os avisos de Orçamentos e Homologação só para quem vê). */
+function sessionCan(item: AccessItemKey): boolean {
+  return can(accessOf(sessionStore.get()?.user), item);
 }
 
 /**
@@ -176,6 +182,8 @@ function noticeFor(event: RealtimeEvent, userId: string): NoticeDraft | null {
       };
     }
     case "quote.decided": {
+      // Sem acesso a Orçamentos, sem aviso (a API também não manda; a sessão aberta antes pode receber).
+      if (!sessionCan("commercial.quotes")) return null;
       // "OS-001234: ORC-000123 aprovado pelo cliente", com "R$ 350,00 · <quem aprovou>" embaixo.
       const decided = event as { status?: string; quote_code?: string; total?: unknown };
       const approved = decided.status === "approved";
@@ -191,8 +199,14 @@ function noticeFor(event: RealtimeEvent, userId: string): NoticeDraft | null {
     }
     case "part_request.created":
       if (othersTicket) return null;
-      return { ticketId, code, title: `${code}: o técnico pediu peça`, description: "Monte o orçamento para o cliente aprovar." };
+      return {
+        ticketId,
+        code,
+        title: `${code}: o técnico pediu peça`,
+        description: sessionCan("commercial.quotes") ? "Monte o orçamento para o cliente aprovar." : undefined,
+      };
     case "onboarding.submitted":
+      if (!sessionCan("base.onboarding")) return null;
       return { title: `Nova ficha de homologação: ${event.name ?? "técnico"}`, href: "/homologacao" };
     default:
       return null;
@@ -549,6 +563,14 @@ export function RealtimeProvider({
       const type = event.type ?? "";
       if (type.startsWith("technician.")) {
         applyTrackingEvent(queryClient, event, invalidate);
+        return;
+      }
+      if (type === "access.changed") {
+        // O perfil de acesso mudou: relê o usuário primeiro (o menu e a guarda das telas seguem o novo) e
+        // depois todas as telas abertas. Logo em seguida o servidor fecha o socket, que volta com o acesso novo.
+        void queryClient
+          .invalidateQueries({ queryKey: ["auth", "me"] })
+          .finally(() => void queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] !== "auth" }));
         return;
       }
       if (type === "quote.decided") {

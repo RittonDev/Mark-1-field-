@@ -7,6 +7,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { LocationDialog, validCoords } from "@/components/LocationDialog";
 import { LOCATION_COLUMNS, LocationImportDialog } from "@/components/LocationImportDialog";
+import { NoAccess } from "@/components/NoAccess";
 import { useToast } from "@/components/Toaster";
 import {
   Button,
@@ -23,11 +24,10 @@ import {
   Th,
 } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
-import { canManageTickets } from "@/lib/constants";
 import { downloadCsv } from "@/lib/download";
 import { formatDate, formatDocument, todayISO } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
+import { useCan } from "@/lib/permissions";
 import { useCustomers, useLocationSearch } from "@/lib/queries";
 import type { Location, Page } from "@/lib/types";
 
@@ -62,9 +62,10 @@ const documentOrBlank = (value: string | null | undefined) => (value ? formatDoc
 const coordOrBlank = (value: number | null) => (value === null ? "" : String(value).replace(".", ","));
 
 function LocationsView() {
-  const { user } = useAuth();
   const { toast } = useToast();
-  const canEdit = canManageTickets(user?.role);
+  // Visualizar: busca, ficha e exportação. Editar: cadastrar, alterar e importar planilha.
+  const canView = useCan("base.locations");
+  const canEdit = useCan("base.locations", "edit");
   const customers = useCustomers();
   const [params, setParams] = useUrlParams();
   const urlQ = params.get("q") ?? "";
@@ -146,6 +147,8 @@ function LocationsView() {
       setExporting(null);
     }
   };
+
+  if (!canView) return <NoAccess kind="module" item="base.locations" />;
 
   return (
     <div className="mx-auto max-w-7xl">

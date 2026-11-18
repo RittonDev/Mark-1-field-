@@ -2,7 +2,8 @@
 
 Tudo sai da trilha de eventos das OS: assim "quantos ficaram agendados" é o estado de cada OS
 no fim do período, e não o de agora. Com `customer_id`, tudo é recortado para um cliente (a
-prestação de contas dos clientes grandes).
+prestação de contas dos clientes grandes). Com `scope` (a visibilidade de quem pede), só as OS
+da fila que ele vê.
 """
 
 import uuid
@@ -10,7 +11,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import ColumnElement, and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -28,15 +29,28 @@ from app.services.workflow import OPEN_STATUSES
 
 STATUS_EVENTS = (TicketEventType.CREATED, TicketEventType.STATUS_CHANGED)
 CustomerId = uuid.UUID | None
+# Visibilidade das OS de quem pede (services.tickets.visibility_clause); None = todas.
+Scope = ColumnElement[bool] | None
 
 
 def _of_customer(stmt: Any, customer_id: CustomerId, *, join_from: Any = None) -> Any:
     """Recorta a consulta para um cliente (eventos, custos e orçamentos: pela OS)."""
-    if customer_id is None:
+    return _scoped(stmt, customer_id, None, join_from=join_from)
+
+
+def _scoped(stmt: Any, customer_id: CustomerId, scope: Scope, *, join_from: Any = None) -> Any:
+    """Recorta a consulta para um cliente e para as OS que quem pede vê (a fila; None = todas).
+    Eventos, custos e orçamentos entram pela OS (`join_from`)."""
+    conds = []
+    if customer_id is not None:
+        conds.append(Ticket.customer_id == customer_id)
+    if scope is not None:
+        conds.append(scope)
+    if not conds:
         return stmt
     if join_from is not None:
         stmt = stmt.join(Ticket, Ticket.id == join_from)
-    return stmt.where(Ticket.customer_id == customer_id)
+    return stmt.where(*conds)
 
 
 def _local_day(column: Any) -> Any:
@@ -45,14 +59,15 @@ def _local_day(column: Any) -> Any:
 
 
 async def _status_counts_at(
-    db: AsyncSession, moment: datetime, customer_id: CustomerId = None
+    db: AsyncSession, moment: datetime, customer_id: CustomerId = None, scope: Scope = None
 ) -> dict[str, int]:
     """Status de cada OS num instante (último evento de criação/mudança antes dele)."""
-    last = _of_customer(
+    last = _scoped(
         select(TicketEvent.ticket_id, TicketEvent.to_value).where(
             TicketEvent.event_type.in_(STATUS_EVENTS), TicketEvent.created_at < moment
         ),
         customer_id,
+        scope,
         join_from=TicketEvent.ticket_id,
     )
     last = (
@@ -70,6 +85,7 @@ async def _status_changes(
     end: datetime,
     to: TicketStatus,
     customer_id: CustomerId = None,
+    scope: Scope = None,
 ) -> int:
     stmt = select(func.count(func.distinct(TicketEvent.ticket_id))).where(
         TicketEvent.event_type == TicketEventType.STATUS_CHANGED,
@@ -77,19 +93,23 @@ async def _status_changes(
         TicketEvent.created_at >= start,
         TicketEvent.created_at < end,
     )
-    stmt = _of_customer(stmt, customer_id, join_from=TicketEvent.ticket_id)
+    stmt = _scoped(stmt, customer_id, scope, join_from=TicketEvent.ticket_id)
     return await db.scalar(stmt) or 0
 
 
 async def _field_numbers(
-    db: AsyncSession, start: datetime, end: datetime, customer_id: CustomerId = None
+    db: AsyncSession,
+    start: datetime,
+    end: datetime,
+    customer_id: CustomerId = None,
+    scope: Scope = None,
 ) -> dict[str, Any]:
     """Chegadas no período (prazo de 4h nas capitais) e tempo médio de técnico na loja."""
     arrived = and_(Ticket.arrived_at >= start, Ticket.arrived_at < end)
     clock_start = func.coalesce(Ticket.authorized_at, Ticket.created_at)
     row = (
         await db.execute(
-            _of_customer(
+            _scoped(
                 select(
                     func.count(),
                     func.count().filter(Ticket.arrival_due_at.is_not(None)),
@@ -97,16 +117,18 @@ async def _field_numbers(
                     func.avg(func.extract("epoch", Ticket.arrived_at - clock_start)),
                 ).where(arrived),
                 customer_id,
+                scope,
             )
         )
     ).one()
     arrivals, with_due, on_time, avg_arrival = row
     avg_onsite = await db.scalar(
-        _of_customer(
+        _scoped(
             select(func.avg(Ticket.work_seconds)).where(
                 Ticket.resolved_at >= start, Ticket.resolved_at < end, Ticket.work_seconds > 0
             ),
             customer_id,
+            scope,
         )
     )
     return {
@@ -119,16 +141,21 @@ async def _field_numbers(
 
 
 async def numbers(
-    db: AsyncSession, start: datetime, end: datetime, customer_id: CustomerId = None
+    db: AsyncSession,
+    start: datetime,
+    end: datetime,
+    customer_id: CustomerId = None,
+    scope: Scope = None,
 ) -> DayNumbers:
     opened = await db.scalar(
-        _of_customer(
+        _scoped(
             select(func.count()).where(Ticket.created_at >= start, Ticket.created_at < end),
             customer_id,
+            scope,
         )
     )
     unproductive = await db.scalar(
-        _of_customer(
+        _scoped(
             select(func.count())
             .select_from(TicketEvent)
             .where(
@@ -137,11 +164,12 @@ async def numbers(
                 TicketEvent.created_at < end,
             ),
             customer_id,
+            scope,
             join_from=TicketEvent.ticket_id,
         )
     )
     in_sla = await db.scalar(
-        _of_customer(
+        _scoped(
             select(func.count()).where(
                 Ticket.resolved_at >= start,
                 Ticket.resolved_at < end,
@@ -149,15 +177,16 @@ async def numbers(
                 Ticket.resolved_at <= Ticket.resolution_due_at,
             ),
             customer_id,
+            scope,
         )
     )
-    at_end = await _status_counts_at(db, end, customer_id)
-    field = await _field_numbers(db, start, end, customer_id)
+    at_end = await _status_counts_at(db, end, customer_id, scope)
+    field = await _field_numbers(db, start, end, customer_id, scope)
     return DayNumbers(
         **field,
         opened=opened or 0,
-        resolved=await _status_changes(db, start, end, TicketStatus.RESOLVED, customer_id),
-        cancelled=await _status_changes(db, start, end, TicketStatus.CANCELLED, customer_id),
+        resolved=await _status_changes(db, start, end, TicketStatus.RESOLVED, customer_id, scope),
+        cancelled=await _status_changes(db, start, end, TicketStatus.CANCELLED, customer_id, scope),
         unproductive=unproductive or 0,
         scheduled_end=at_end.get(TicketStatus.SCHEDULED.value, 0),
         backlog_end=sum(c for s, c in at_end.items() if s in {o.value for o in OPEN_STATUSES}),
@@ -171,6 +200,7 @@ async def _customers(
     end: datetime,
     limit: int = 5,
     customer_id: CustomerId = None,
+    scope: Scope = None,
 ) -> list[CountRef]:
     stmt = (
         select(Customer.id, Customer.name, func.count(Ticket.id).label("n"))
@@ -180,7 +210,7 @@ async def _customers(
         .order_by(func.count(Ticket.id).desc(), Customer.name)
         .limit(limit)
     )
-    rows = await db.execute(_of_customer(stmt, customer_id))
+    rows = await db.execute(_scoped(stmt, customer_id, scope))
     return [CountRef(id=i, name=n, count=c) for i, n, c in rows]
 
 
@@ -190,6 +220,7 @@ async def _technicians(
     end: datetime,
     limit: int = 10,
     customer_id: CustomerId = None,
+    scope: Scope = None,
 ) -> list[CountRef]:
     """Técnicos que mais resolveram: conta para o técnico da OS, mesmo quando a central é que
     marcou como resolvida (o técnico esqueceu de concluir no app)."""
@@ -210,12 +241,16 @@ async def _technicians(
         .order_by(resolved.desc(), User.name)
         .limit(limit)
     )
-    rows = await db.execute(_of_customer(stmt, customer_id))
+    rows = await db.execute(_scoped(stmt, customer_id, scope))
     return [CountRef(id=i, name=n, count=c) for i, n, c in rows]
 
 
 async def _unproductive_reasons(
-    db: AsyncSession, start: datetime, end: datetime, customer_id: CustomerId = None
+    db: AsyncSession,
+    start: datetime,
+    end: datetime,
+    customer_id: CustomerId = None,
+    scope: Scope = None,
 ) -> list[CountRef]:
     stmt = (
         select(TicketEvent.to_value, func.count())
@@ -227,7 +262,7 @@ async def _unproductive_reasons(
         .group_by(TicketEvent.to_value)
         .order_by(func.count().desc())
     )
-    rows = await db.execute(_of_customer(stmt, customer_id, join_from=TicketEvent.ticket_id))
+    rows = await db.execute(_scoped(stmt, customer_id, scope, join_from=TicketEvent.ticket_id))
     return [CountRef(id=None, name=reason or "Sem motivo", count=c) for reason, c in rows]
 
 
@@ -236,19 +271,21 @@ def default_report_day() -> date:
     return local_today() - timedelta(days=1)
 
 
-async def daily(db: AsyncSession, day: date, customer_id: CustomerId = None) -> DailyReport:
+async def daily(
+    db: AsyncSession, day: date, customer_id: CustomerId = None, scope: Scope = None
+) -> DailyReport:
     start, end = day_bounds(day)
     prev_start, prev_end = day_bounds(day - timedelta(days=1))
-    customers = await _customers(db, start, end, customer_id=customer_id)
+    customers = await _customers(db, start, end, customer_id=customer_id, scope=scope)
     return DailyReport(
         date=day,
         closed=day < local_today(),
-        numbers=await numbers(db, start, end, customer_id),
-        previous=await numbers(db, prev_start, prev_end, customer_id),
+        numbers=await numbers(db, start, end, customer_id, scope),
+        previous=await numbers(db, prev_start, prev_end, customer_id, scope),
         top_customer=customers[0] if customers else None,
         customers=customers,
-        technicians=await _technicians(db, start, end, customer_id=customer_id),
-        unproductive_reasons=await _unproductive_reasons(db, start, end, customer_id),
+        technicians=await _technicians(db, start, end, customer_id=customer_id, scope=scope),
+        unproductive_reasons=await _unproductive_reasons(db, start, end, customer_id, scope),
     )
 
 
@@ -263,7 +300,11 @@ async def _per_day(db: AsyncSession, stmt: Any) -> dict[date, int]:
 
 
 async def _series(
-    db: AsyncSession, first: date, next_first: date, customer_id: CustomerId = None
+    db: AsyncSession,
+    first: date,
+    next_first: date,
+    customer_id: CustomerId = None,
+    scope: Scope = None,
 ) -> list[DayPoint]:
     """Um ponto por dia do mês (até hoje, se for o mês corrente), com 0 nos dias sem movimento.
     Quatro consultas agrupadas pelo dia local (e não quatro por dia do mês)."""
@@ -274,23 +315,25 @@ async def _series(
     created_day = _local_day(Ticket.created_at)
     opened = await _per_day(
         db,
-        _of_customer(
+        _scoped(
             select(created_day, func.count())
             .where(Ticket.created_at >= start, Ticket.created_at < end)
             .group_by(created_day),
             customer_id,
+            scope,
         ),
     )
     event_day = _local_day(TicketEvent.created_at)
     in_period = and_(TicketEvent.created_at >= start, TicketEvent.created_at < end)
     unproductive = await _per_day(
         db,
-        _of_customer(
+        _scoped(
             select(event_day, func.count())
             .select_from(TicketEvent)
             .where(TicketEvent.event_type == TicketEventType.UNPRODUCTIVE_VISIT, in_period)
             .group_by(event_day),
             customer_id,
+            scope,
             join_from=TicketEvent.ticket_id,
         ),
     )
@@ -298,7 +341,7 @@ async def _series(
     async def changed_to(status: TicketStatus) -> dict[date, int]:
         return await _per_day(
             db,
-            _of_customer(
+            _scoped(
                 select(event_day, func.count(func.distinct(TicketEvent.ticket_id)))
                 .select_from(TicketEvent)
                 .where(
@@ -308,6 +351,7 @@ async def _series(
                 )
                 .group_by(event_day),
                 customer_id,
+                scope,
                 join_from=TicketEvent.ticket_id,
             ),
         )
@@ -331,26 +375,31 @@ async def _series(
 
 
 async def monthly(
-    db: AsyncSession, year: int, month: int, customer_id: CustomerId = None
+    db: AsyncSession,
+    year: int,
+    month: int,
+    customer_id: CustomerId = None,
+    scope: Scope = None,
 ) -> MonthlyReport:
     start, end, first, next_first = month_bounds(year, month)
     prev_year, prev_month = (year - 1, 12) if month == 1 else (year, month - 1)
     p_start, p_end, _, _ = month_bounds(prev_year, prev_month)
-    customers = await _customers(db, start, end, limit=10, customer_id=customer_id)
+    customers = await _customers(db, start, end, limit=10, customer_id=customer_id, scope=scope)
     expenses = await db.scalar(
-        _of_customer(
+        _scoped(
             select(func.coalesce(func.sum(TicketExpense.total), 0)).where(
                 TicketExpense.created_at >= start,
                 TicketExpense.created_at < end,
                 TicketExpense.status != ExpenseStatus.REJECTED,
             ),
             customer_id,
+            scope,
             join_from=TicketExpense.ticket_id,
         )
     )
     # Aprovado de OS cancelada não entra (não vai ser cobrado), como os pagamentos dos técnicos.
     quotes = await db.scalar(
-        _of_customer(
+        _scoped(
             select(func.coalesce(func.sum(Quote.total), 0))
             .select_from(Quote)
             .join(Ticket, Ticket.id == Quote.ticket_id)
@@ -361,18 +410,19 @@ async def monthly(
                 Ticket.status != TicketStatus.CANCELLED,
             ),
             customer_id,
+            scope,
         )
     )
     return MonthlyReport(
         month=f"{year:04d}-{month:02d}",
         closed=next_first <= local_today(),
-        numbers=await numbers(db, start, end, customer_id),
-        previous=await numbers(db, p_start, p_end, customer_id),
-        days=await _series(db, first, next_first, customer_id),
+        numbers=await numbers(db, start, end, customer_id, scope),
+        previous=await numbers(db, p_start, p_end, customer_id, scope),
+        days=await _series(db, first, next_first, customer_id, scope),
         top_customer=customers[0] if customers else None,
         customers=customers,
-        technicians=await _technicians(db, start, end, customer_id=customer_id),
-        unproductive_reasons=await _unproductive_reasons(db, start, end, customer_id),
+        technicians=await _technicians(db, start, end, customer_id=customer_id, scope=scope),
+        unproductive_reasons=await _unproductive_reasons(db, start, end, customer_id, scope),
         expenses_total=Decimal(expenses or 0),
         quotes_approved_total=Decimal(quotes or 0),
     )

@@ -15,9 +15,10 @@ from fastapi import (
     status,
 )
 from fastapi.responses import FileResponse, RedirectResponse
+from pydantic import BaseModel
 from sqlalchemy import select, text
 
-from app.api.deps import DB, CurrentUser, ManagerUser, StaffUser, TicketManagerUser
+from app.api.deps import DB, CurrentUser, StaffUser, TicketManagerUser, access_user
 from app.core.config import settings
 from app.core.enums import TicketPriority, TicketSource, TicketStatus, TicketType, UserRole
 from app.core.security import InvalidToken, create_download_token, decode_token
@@ -52,6 +53,17 @@ from app.services.realtime import commit_and_publish
 
 router = APIRouter(tags=["tickets"])
 
+# Etiquetas automáticas ficam em Configurações (antes: só admin e supervisor).
+SettingsEdit = access_user("setup.settings", level="edit")
+
+
+class TicketLookup(BaseModel):
+    """OS achada pelo número (link /chamados/{nº})."""
+
+    id: uuid.UUID
+    code: str
+
+
 # Eventos que o solicitante não vê no histórico.
 _INTERNAL_EVENT_TYPES = {
     "worklog_added",
@@ -75,7 +87,7 @@ async def _with_recurrence(db: DB, ticket: Ticket, user: User) -> TicketDetail:
     detail = svc.to_detail(ticket, user)
     # Reincidência (outras OS no local) é da gestão; o técnico só vê a OS dele.
     if user.can_manage_tickets:
-        detail.recurrence = await svc.recurrence_for(db, ticket)
+        detail.recurrence = await svc.recurrence_for(db, ticket, user)
     return detail
 
 
@@ -172,7 +184,7 @@ async def list_tickets(
     items, total = await svc.list_tickets(
         db, user, filters, page=page, page_size=page_size, order_by=order_by
     )
-    recurrence = await svc.recurrence_counts(db, list(items))
+    recurrence = await svc.recurrence_counts(db, list(items), user=user)
     page_items = []
     for t in items:
         item = TicketListItem.model_validate(t)
@@ -215,8 +227,8 @@ async def get_tag_rules(db: DB, _: TicketManagerUser) -> TicketTagRules:
 
 
 @router.put("/ticket-tag-rules", response_model=TicketTagRules)
-async def put_tag_rules(body: TicketTagRules, db: DB, user: ManagerUser) -> TicketTagRules:
-    """Só supervisor e admin mudam as etiquetas automáticas (valem para as próximas OS)."""
+async def put_tag_rules(body: TicketTagRules, db: DB, user: SettingsEdit) -> TicketTagRules:
+    """Só quem edita Configurações muda as etiquetas automáticas (valem para as próximas OS)."""
     rules = await tag_rules.save_rules(db, body, user)
     await db.commit()
     return rules
@@ -255,6 +267,16 @@ async def bulk_tags(body: TicketBulkTags, db: DB, user: TicketManagerUser) -> Bu
     updated = await svc.bulk_tags(db, body, user)
     await commit_and_publish(db)
     return BulkTagsResult(updated=updated)
+
+
+# Antes de /tickets/{ticket_id}: "lookup" não é um id.
+@router.get("/tickets/lookup", response_model=TicketLookup)
+async def lookup_ticket(
+    db: DB, user: CurrentUser, number: Annotated[int, Query(ge=1, le=svc.MAX_NUMBER)]
+) -> dict:
+    """Acha a OS pelo número (o link /chamados/{nº}). Não existe: 404; existe mas é de outra fila:
+    403 QUEUE_FORBIDDEN. Técnico e cliente: 404."""
+    return await svc.lookup(db, user, number)
 
 
 @router.get("/tickets/{ticket_id}", response_model=TicketDetail)

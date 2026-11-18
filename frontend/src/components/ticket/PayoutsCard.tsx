@@ -9,6 +9,7 @@ import { Button, Card, CardHeader, Dialog, ErrorBox, Input, Pill } from "@/compo
 import { api, errorMessage } from "@/lib/api";
 import { PAYOUT_STATUS } from "@/lib/constants";
 import { formatDate, formatMoney, moneyInput } from "@/lib/format";
+import { useCan } from "@/lib/permissions";
 import { readDecimal } from "@/lib/quotes";
 import type { Payout, TicketDetail, UUID } from "@/lib/types";
 
@@ -202,10 +203,15 @@ export function PayoutsDialog({ ticket, onClose }: { ticket: TicketDetail; onClo
   );
 }
 
-/** Linha da aba Geral: o valor do responsável, ao lado de quem vai atender. */
+/**
+ * Linha da aba Geral: o valor do responsável, ao lado de quem vai atender. Segue o acesso a Pagamentos:
+ * sem ele a linha some (a API nem manda os valores); só com Visualizar, mostra sem o botão de alterar.
+ */
 export function PayoutLine({ ticket }: { ticket: TicketDetail }) {
   const [open, setOpen] = useState(false);
-  if (!ticket.assignee) return null;
+  const canView = useCan("commercial.payouts");
+  const canEdit = useCan("commercial.payouts", "edit");
+  if (!ticket.assignee || !canView) return null;
   const payouts = ticket.payouts ?? [];
   const total = payouts.reduce((sum, p) => sum + cents(p.amount), 0) / 100;
   const mine = payoutOf(ticket, ticket.assignee.id);
@@ -216,21 +222,26 @@ export function PayoutLine({ ticket }: { ticket: TicketDetail }) {
       <span className="font-medium text-ink tabular-nums">{mine ? formatMoney(mine.amount) : "não definido"}</span>
       {payouts.length > 1 ? <span className="text-xs text-ink-muted">· equipe {formatMoney(total)}</span> : null}
       {mine ? <StatusPill payout={mine} /> : null}
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="ml-auto inline-flex h-7 items-center rounded-md px-2 text-xs font-medium text-brand transition-colors hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
-      >
-        {mine ? "Alterar" : "Definir valor"}
-      </button>
+      {canEdit ? (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="ml-auto inline-flex h-7 items-center rounded-md px-2 text-xs font-medium text-brand transition-colors hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+        >
+          {mine ? "Alterar" : "Definir valor"}
+        </button>
+      ) : null}
       {open ? <PayoutsDialog ticket={ticket} onClose={() => setOpen(false)} /> : null}
     </div>
   );
 }
 
-/** Quadro da aba de custos: quanto cada técnico recebe por esta OS. */
+/** Quadro da aba de custos: quanto cada técnico recebe por esta OS (segue o acesso a Pagamentos). */
 export function PayoutsCard({ ticket }: { ticket: TicketDetail }) {
   const [open, setOpen] = useState(false);
+  const canView = useCan("commercial.payouts");
+  const canEdit = useCan("commercial.payouts", "edit");
+  if (!canView) return null;
   const team = people(ticket);
   const left = former(ticket, team);
   const total = (ticket.payouts ?? []).reduce((sum, p) => sum + cents(p.amount), 0) / 100;
@@ -240,7 +251,7 @@ export function PayoutsCard({ ticket }: { ticket: TicketDetail }) {
         title="Pagamento dos técnicos"
         description="Os parceiros recebem por chamado. A central paga em Pagamentos."
         actions={
-          team.length ? (
+          canEdit && team.length ? (
             <Button size="sm" onClick={() => setOpen(true)}>
               Editar valores
             </Button>

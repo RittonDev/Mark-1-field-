@@ -7,15 +7,15 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useState } from "react";
 import { Legend, RankBars, StatTile, TrendChart } from "@/components/charts";
 import { Tabs } from "@/components/motion";
+import { NoAccess } from "@/components/NoAccess";
 import { SlaViolationsCard } from "@/components/SlaViolationsCard";
 import { useToast } from "@/components/Toaster";
 import { useNow } from "@/components/useNow";
 import { Button, Card, ErrorBox, Input, LoadingBlock, PageHeader, SectionTitle, Select } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
-import { canManageTickets } from "@/lib/constants";
 import { downloadCsv } from "@/lib/download";
 import { formatDocument, formatMinutes, formatMoney, OPERATION_TZ } from "@/lib/format";
+import { useCan } from "@/lib/permissions";
 import { useCustomers } from "@/lib/queries";
 import type { DailyReport, DayNumbers, MonthlyReport, PayoutList, ReportCountRef, ReportDayPoint, UUID } from "@/lib/types";
 import { copyText } from "@/lib/whatsapp";
@@ -238,8 +238,8 @@ function dailyText(data: DailyReport, partial: boolean, time: string, scope: Cus
 }
 
 export default function ReportsPage() {
-  const { user } = useAuth();
-  if (user && !canManageTickets(user.role)) return <ErrorBox message="Relatórios são da gestão." />;
+  const canView = useCan("analysis.reports");
+  if (!canView) return <NoAccess kind="module" item="analysis.reports" />;
   return (
     <div className="mx-auto max-w-7xl">
       <PageHeader
@@ -639,6 +639,8 @@ function MonthlyView({
   filter: React.ReactNode;
 }) {
   const [table, setTable] = useState(false);
+  // O valor dos técnicos é de Pagamentos: o cartão (e a linha na exportação) só com acesso a essa tela.
+  const canPayouts = useCan("commercial.payouts");
   const report = useQuery({
     queryKey: scope ? ["reports", "monthly", month, scope.id] : ["reports", "monthly", month],
     queryFn: ({ signal }) => api.get<MonthlyReport>("/reports/monthly", { month, customer_id: scope?.id }, { signal }),
@@ -646,11 +648,12 @@ function MonthlyView({
   });
   // Valor por chamado das OS concluídas no mês (o mesmo período do fechamento em Pagamentos). Não
   // tem recorte por cliente: com um cliente escolhido, o cartão sai.
+  const showPayouts = canPayouts && !scope;
   const payouts = useQuery({
     queryKey: ["payouts", "month", month],
     queryFn: ({ signal }) => api.get<PayoutList>("/payouts", monthDays(month), { signal }),
     placeholderData: keepPreviousData,
-    enabled: !scope,
+    enabled: showPayouts,
   });
   const options = useMemo(() => monthOptions(today.slice(0, 7), month), [today, month]);
   const data = report.data;
@@ -662,7 +665,7 @@ function MonthlyView({
     { key: "resolved", label: "Resolvidos", color: "var(--viz-2)", values: days.map((d) => d.resolved) },
   ];
   // Com um cliente escolhido, o valor dos técnicos (de todos os clientes) não entra.
-  const summary = scope ? undefined : payouts.data?.summary;
+  const summary = showPayouts ? payouts.data?.summary : undefined;
   const techniciansTotal = summary ? summary.paid + summary.to_pay : 0;
 
   return (
@@ -702,7 +705,7 @@ function MonthlyView({
             top={data.top_customer}
             scoped={Boolean(scope)}
           />
-          <div className={clsx("grid gap-3", scope ? "sm:grid-cols-2" : "sm:grid-cols-3")}>
+          <div className={clsx("grid gap-3", showPayouts ? "sm:grid-cols-3" : "sm:grid-cols-2")}>
             <StatTile
               label="Custos extras no mês"
               value={data.expenses_total}
@@ -715,7 +718,7 @@ function MonthlyView({
               display={formatMoney(data.quotes_approved_total)}
               hint="Aprovados pelo cliente no mês"
             />
-            {scope ? null : (
+            {showPayouts ? (
               <StatTile
                 label="Valor dos técnicos"
                 value={techniciansTotal}
@@ -724,7 +727,7 @@ function MonthlyView({
                 hint={summary ? `pago ${formatMoney(summary.paid)} · a pagar ${formatMoney(summary.to_pay)}` : "OS concluídas no mês"}
                 href="/pagamentos"
               />
-            )}
+            ) : null}
           </div>
           <Card className="p-4">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">

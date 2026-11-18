@@ -9,6 +9,7 @@ import { useToast } from "@/components/Toaster";
 import { Button, Card, CardHeader, Dialog, ErrorBox, Field, isTopLayer, lockScroll, Pill, restoreFocus, Select, Textarea, trapTab } from "@/components/ui";
 import { absoluteApiUrl, api, errorMessage } from "@/lib/api";
 import { formatMoney, formatShort } from "@/lib/format";
+import { useCan } from "@/lib/permissions";
 import { QUOTE_STATUS } from "@/lib/quotes";
 import type { PartRequest, PartRequestStatus, Quote, TicketDetail } from "@/lib/types";
 import { QuoteEditor, type QuotePrefill, ShareDialog } from "./QuotesCard";
@@ -158,7 +159,12 @@ export function PartRequestsCard({ ticket }: { ticket: TicketDetail }) {
   const { toast } = useToast();
   const requests = ticket.part_requests ?? [];
   const openRequests = requests.filter((r) => r.status === "open");
+  // Recusar o pedido é da OS; montar ou ligar o orçamento segue o acesso a Orçamentos (Editar), e ver
+  // o orçamento ligado, o Visualizar.
   const canAct = ticket.can_assign;
+  const quotesView = useCan("commercial.quotes");
+  const quotesEdit = useCan("commercial.quotes", "edit");
+  const canQuote = canAct && quotesEdit;
   const [editor, setEditor] = useState<{ quote: Quote | null; prefill?: QuotePrefill; requests: PartRequest[] } | null>(null);
   const [rejecting, setRejecting] = useState<PartRequest | null>(null);
   const [linking, setLinking] = useState<PartRequest | null>(null);
@@ -168,7 +174,7 @@ export function PartRequestsCard({ ticket }: { ticket: TicketDetail }) {
   const quotes = useQuery({
     queryKey: ["ticket", ticket.id, "quotes"],
     queryFn: () => api.get<Quote[]>(`/tickets/${ticket.id}/quotes`),
-    enabled: canAct && requests.length > 0,
+    enabled: quotesView && requests.length > 0,
   });
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ["ticket", ticket.id] });
@@ -226,7 +232,7 @@ export function PartRequestsCard({ ticket }: { ticket: TicketDetail }) {
         }
         description="Peça só entra com orçamento aprovado e assinado pelo cliente."
         actions={
-          canAct && openRequests.length > 1 ? (
+          canQuote && openRequests.length > 1 ? (
             <Button size="sm" onClick={() => setEditor({ quote: null, requests: openRequests, prefill: prefillFrom(openRequests, ticket.code) })}>
               <FileText className="size-3.5" />
               Orçar os {openRequests.length} abertos
@@ -280,16 +286,22 @@ export function PartRequestsCard({ ticket }: { ticket: TicketDetail }) {
                       <Button size="sm" variant="ghost" onClick={() => setRejecting(r)}>
                         Recusar
                       </Button>
-                      {linkable.length ? (
+                      {canQuote && linkable.length ? (
                         <Button size="sm" variant="ghost" onClick={() => setLinking(r)}>
                           <Link2 className="size-3.5" />
                           Ligar a orçamento
                         </Button>
                       ) : null}
-                      <Button size="sm" variant="primary" onClick={() => setEditor({ quote: null, requests: [r], prefill: prefillFrom([r], ticket.code) })}>
-                        <FileText className="size-3.5" />
-                        Montar orçamento
-                      </Button>
+                      {canQuote ? (
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          onClick={() => setEditor({ quote: null, requests: [r], prefill: prefillFrom([r], ticket.code) })}
+                        >
+                          <FileText className="size-3.5" />
+                          Montar orçamento
+                        </Button>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>
@@ -343,21 +355,31 @@ export function PartRequestsCard({ ticket }: { ticket: TicketDetail }) {
           inTicket
           sending={send.isPending}
           onClose={() => setViewing(null)}
-          onEdit={() => {
-            setViewing(null);
-            setEditor({ quote: viewing, requests: [] });
-          }}
-          onSend={() => {
-            setViewing(null);
-            send.mutate(viewing);
-          }}
+          onEdit={
+            quotesEdit
+              ? () => {
+                  setViewing(null);
+                  setEditor({ quote: viewing, requests: [] });
+                }
+              : undefined
+          }
+          onSend={
+            quotesEdit
+              ? () => {
+                  setViewing(null);
+                  send.mutate(viewing);
+                }
+              : undefined
+          }
           onShare={() => {
             setViewing(null);
             setSharing(viewing);
           }}
         />
       ) : null}
-      {sharing ? <ShareDialog ticket={ticket} quote={sharing} onClose={() => setSharing(null)} onRotated={refresh} /> : null}
+      {sharing ? (
+        <ShareDialog ticket={ticket} quote={sharing} readOnly={!quotesEdit} onClose={() => setSharing(null)} onRotated={refresh} />
+      ) : null}
       {zoom ? (
         <PhotoZoom
           request={zoom.request}

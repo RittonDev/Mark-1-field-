@@ -6,6 +6,7 @@ import { CheckCheck, Copy, Download, MessageCircle, RotateCcw, Wallet } from "lu
 import { useEffect, useMemo, useRef, useState } from "react";
 import { StatTile } from "@/components/charts";
 import { useConfirm } from "@/components/Confirm";
+import { NoAccess } from "@/components/NoAccess";
 import { TicketLink } from "@/components/ticket/TicketLink";
 import { useToast } from "@/components/Toaster";
 import { Button, Card, EmptyState, ErrorBox, LoadingBlock, PageHeader, Pill, Select } from "@/components/ui";
@@ -13,6 +14,7 @@ import { api, errorMessage } from "@/lib/api";
 import { PAYOUT_STATUS, STATUS } from "@/lib/constants";
 import { downloadCsv } from "@/lib/download";
 import { formatDate, formatMoney } from "@/lib/format";
+import { useCan } from "@/lib/permissions";
 import type { ExpenseReport, PayoutLine, PayoutList, User, UUID } from "@/lib/types";
 import { copyText, WHATSAPP_TEXT_LIMIT, whatsappUrl } from "@/lib/whatsapp";
 
@@ -99,11 +101,12 @@ function monthRange(month: string): { date_from?: string; date_to?: string } {
   return { date_from: `${month}-01`, date_to: new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10) };
 }
 
-function usePayouts(source: Source, month: string) {
+function usePayouts(source: Source, month: string, enabled: boolean) {
   return useQuery({
     queryKey: ["payouts", source, month],
     queryFn: ({ signal }) => api.get<PayoutList>("/payouts", { ...SOURCE_QUERY[source], ...monthRange(month) }, { signal }),
     placeholderData: keepPreviousData,
+    enabled,
   });
 }
 
@@ -174,6 +177,11 @@ export default function PayoutsPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const confirm = useConfirm();
+  // Visualizar: o fechamento, o extrato e a exportação. Editar: pagar, desfazer e tirar valor.
+  const canView = useCan("commercial.payouts");
+  const canEdit = useCan("commercial.payouts", "edit");
+  // Os reembolsos de Custos extras entram no extrato só para quem tem acesso a Custos extras.
+  const canExpenses = useCan("commercial.expenses");
   const months = useMemo(() => lastMonths(), []);
   const [view, setView] = useState<View>("to_pay");
   const [month, setMonth] = useState("");
@@ -181,8 +189,8 @@ export default function PayoutsPage() {
   const [technician, setTechnician] = useState<{ id: UUID; name: string } | null>(null);
   const [selected, setSelected] = useState<Set<UUID>>(new Set());
 
-  const pendingQuery = usePayouts("pending", month);
-  const paidQuery = usePayouts("paid", month);
+  const pendingQuery = usePayouts("pending", month, canView);
+  const paidQuery = usePayouts("paid", month, canView);
   const queries = [pendingQuery, paidQuery];
   // Telefone (botão do WhatsApp) e e-mail (separa técnicos com o mesmo nome).
   const people = useQuery({
@@ -200,6 +208,7 @@ export default function PayoutsPage() {
         end: new Date(Date.now() + 86_400_000).toISOString(),
       }),
     staleTime: 60_000,
+    enabled: canView && canExpenses,
   });
 
   const all = useMemo(() => {
@@ -308,8 +317,9 @@ export default function PayoutsPage() {
         ? "Técnico inativo: o telefone dele não aparece aqui"
         : "Técnico sem telefone no cadastro";
   const period = month ? (months.find((m) => m.value === month)?.label ?? month) : "até hoje";
-  const textFor = (group: Group) =>
-    statement(group.name, group.lines, period, reimbursements.data?.by_technician.find((t) => t.technician?.id === group.id)?.to_pay ?? 0);
+  const reimbursementOf = (group: Group) =>
+    canExpenses ? (reimbursements.data?.by_technician.find((t) => t.technician?.id === group.id)?.to_pay ?? 0) : 0;
+  const textFor = (group: Group) => statement(group.name, group.lines, period, reimbursementOf(group));
 
   const confirmPay = async (group: Group, chosen: PayoutLine[]) => {
     const codes = chosen.map((l) => l.ticket.code);
@@ -426,8 +436,12 @@ export default function PayoutsPage() {
   const busy = pay.isPending || remove.isPending;
   const retry = () => queries.forEach((q) => void q.refetch());
   // "Previsto" só mostra; marcar como pago vale para OS concluída, e desfazer, para o que já foi pago.
-  // A OS cancelada tem os botões dela na própria linha (pagar ou tirar o valor).
-  const selectable = (line: PayoutLine) => view !== "expected" && (stateOf(line) === "to_pay" || stateOf(line) === "paid");
+  // A OS cancelada tem os botões dela na própria linha (pagar ou tirar o valor). Só com Visualizar,
+  // nada se seleciona.
+  const selectable = (line: PayoutLine) =>
+    canEdit && view !== "expected" && (stateOf(line) === "to_pay" || stateOf(line) === "paid");
+
+  if (!canView) return <NoAccess kind="module" item="commercial.payouts" />;
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -624,7 +638,7 @@ export default function PayoutsPage() {
                             <MessageCircle className="size-4" />
                             WhatsApp
                           </Button>
-                          {chosenPaid.length || view === "paid" ? (
+                          {canEdit && (chosenPaid.length || view === "paid") ? (
                             <Button
                               size="sm"
                               disabled={!chosenPaid.length || stale || (busy && !batch)}
@@ -636,7 +650,7 @@ export default function PayoutsPage() {
                               {chosenPaid.length > 1 ? `Desfazer ${chosenPaid.length} pagamentos` : "Desfazer pagamento"}
                             </Button>
                           ) : null}
-                          {(view === "to_pay" || view === "all") && payable.length ? (
+                          {canEdit && (view === "to_pay" || view === "all") && payable.length ? (
                             <Button
                               size="sm"
                               variant="primary"
@@ -658,7 +672,7 @@ export default function PayoutsPage() {
                           const canPick = selectable(line);
                           return (
                             <li key={line.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-5 py-2.5 sm:flex-nowrap">
-                              {view !== "expected" ? (
+                              {canEdit && view !== "expected" ? (
                                 <label
                                   className={clsx("-m-2 flex shrink-0 p-2", canPick ? "cursor-pointer" : "cursor-not-allowed")}
                                   title={
@@ -693,7 +707,7 @@ export default function PayoutsPage() {
                               </div>
                               <div className="flex w-full flex-wrap items-center justify-end gap-x-3 gap-y-1.5 sm:w-auto sm:flex-nowrap">
                                 <StatePill line={line} />
-                                {state === "cancelled" ? (
+                                {canEdit && state === "cancelled" ? (
                                   <span className="flex items-center gap-1">
                                     <Button
                                       size="sm"

@@ -202,6 +202,9 @@ class IntakeContext(BaseModel):
     upcoming_days: int
     customer: IntakeCustomer | None = None
     location: IntakeLocation | None = None
+    # OS abertas da loja em filas que a pessoa não vê (só com "Somente a própria fila"): a Nova OS
+    # avisa a quantidade, sem os detalhes, para não abrir OS repetida.
+    other_queues_open: int = 0
 
 
 class LocationCreate(BaseModel):

@@ -32,6 +32,7 @@ from app.schemas.auth import (
     TokenResponse,
 )
 from app.schemas.user import UserOut
+from app.services import access as access_svc
 from app.services import entra, login_guard
 
 log = logging.getLogger(__name__)
@@ -96,6 +97,8 @@ async def login(body: LoginRequest, db: DB, request: Request) -> TokenResponse:
         raise HTTPException(status.HTTP_403_FORBIDDEN, MICROSOFT_REQUIRED)
     user.last_login_at = utcnow()
     await db.commit()
+    # O acesso efetivo (telas e filas) vai junto no TokenResponse.user.
+    await access_svc.attach(db, user)
     return _tokens(user, body.channel)
 
 
@@ -132,6 +135,7 @@ async def refresh(body: RefreshRequest, db: DB) -> TokenResponse:
         await sessions.revoke(session_id)
         log.warning("Refresh token reutilizado: sessão encerrada (usuário %s)", user.id)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, SESSION_COPIED)
+    await access_svc.attach(db, user)
     return _tokens(user, channel, session_id=session_id, auth_time=auth_time)
 
 
@@ -267,4 +271,5 @@ async def microsoft_exchange(body: SsoExchange, db: DB) -> TokenResponse:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Acesso não permitido")
     user.last_login_at = utcnow()
     await db.commit()
+    await access_svc.attach(db, user)
     return _tokens(user, "web")

@@ -5,6 +5,7 @@ import clsx from "clsx";
 import { Camera, PackageSearch, Pencil, Plus, Search, SquarePen, TriangleAlert, Undo2, X } from "lucide-react";
 import { useId, useState } from "react";
 import { LocationPicker } from "@/components/LocationPicker";
+import { NoAccess } from "@/components/NoAccess";
 import { useToast } from "@/components/Toaster";
 import { isPlainClick, TicketLink } from "@/components/ticket/TicketLink";
 import {
@@ -28,10 +29,9 @@ import {
   Th,
 } from "@/components/ui";
 import { absoluteApiUrl, api, errorMessage } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
-import { canManageTickets } from "@/lib/constants";
 import { formatDate, formatDateTime, formatMoney, moneyInput, parseMoney } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
+import { useCan } from "@/lib/permissions";
 import { useCustomers } from "@/lib/queries";
 import { daysAgo, REPAIR_FLOW, REPAIR_OPEN_EXTRA, REPAIR_REASON_REQUIRED, REPAIR_STATUS, repairWhere } from "@/lib/repairs";
 import type { Location, Page, Repair, RepairStatus, TicketListItem, UUID } from "@/lib/types";
@@ -60,7 +60,10 @@ function StageChip({ status }: { status: RepairStatus }) {
 }
 
 export default function RepairsPage() {
-  const { user } = useAuth();
+  // Visualizar: a lista, as etapas e a ficha de cada equipamento. Editar: registrar, editar, mudar a
+  // etapa e enviar foto.
+  const canView = useCan("operation.repairs");
+  const canEdit = useCan("operation.repairs", "edit");
   const [status, setStatus] = useState<RepairStatus | "">("");
   const [overdueOnly, setOverdueOnly] = useState(false);
   const [openOnly, setOpenOnly] = useState(true);
@@ -71,13 +74,15 @@ export default function RepairsPage() {
   const summary = useQuery({
     queryKey: ["repairs", "summary"],
     queryFn: () => api.get<RepairSummary>("/repairs/summary"),
+    enabled: canView,
   });
   const list = useQuery({
     queryKey: ["repairs", status, openOnly, q],
     queryFn: () => api.get<Repair[]>("/repairs", { status: status || undefined, open_only: openOnly || undefined, q: q || undefined }),
     placeholderData: (previous) => previous,
+    enabled: canView,
   });
-  if (user && !canManageTickets(user.role)) return <ErrorBox message="A assistência externa é controlada pela gestão." />;
+  if (!canView) return <NoAccess kind="module" item="operation.repairs" />;
 
   const all = list.data ?? [];
   // "Retorno atrasado" filtra aqui mesmo: a lista vem inteira (até 500 registros) e já traz o atraso calculado.
@@ -95,10 +100,12 @@ export default function RepairsPage() {
         title="Assistência externa"
         description="Impressoras e equipamentos retirados dos clientes para conserto em assistência de terceiros, da retirada à devolução."
         actions={
-          <Button variant="primary" onClick={() => setEditing("new")}>
-            <Plus className="size-4" />
-            Registrar retirada
-          </Button>
+          canEdit ? (
+            <Button variant="primary" onClick={() => setEditing("new")}>
+              <Plus className="size-4" />
+              Registrar retirada
+            </Button>
+          ) : undefined
         }
       />
 
@@ -182,7 +189,9 @@ export default function RepairsPage() {
             description={
               overdueOnly || q || status
                 ? "Mude a busca ou o filtro de etapa."
-                : "Registre a retirada quando o técnico trouxer um equipamento do cliente."
+                : canEdit
+                  ? "Registre a retirada quando o técnico trouxer um equipamento do cliente."
+                  : undefined
             }
           />
         ) : (
@@ -194,7 +203,7 @@ export default function RepairsPage() {
                 <Th className="hidden lg:table-cell">Com quem está</Th>
                 <Th>Etapa</Th>
                 <Th className="hidden sm:table-cell">Retorno</Th>
-                <Th className="edit-col">Editar</Th>
+                {canEdit ? <Th className="edit-col">Editar</Th> : null}
               </tr>
             </thead>
             {/* Linhas sem entrada animada; trocando o filtro, a lista anterior fica esmaecida até a nova chegar. */}
@@ -246,27 +255,29 @@ export default function RepairsPage() {
                     {r.expected_return_date ? formatDate(r.expected_return_date) : "—"}
                     {r.overdue ? " · atrasado" : ""}
                   </Td>
-                  <Td className="edit-col">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setEditing(r);
-                      }}
-                      className={EDIT_BUTTON}
-                      aria-label={`Editar ${r.code}`}
-                      title={`Editar ${r.code}`}
-                    >
-                      <SquarePen className="size-4" />
-                    </button>
-                  </Td>
+                  {canEdit ? (
+                    <Td className="edit-col">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditing(r);
+                        }}
+                        className={EDIT_BUTTON}
+                        aria-label={`Editar ${r.code}`}
+                        title={`Editar ${r.code}`}
+                      >
+                        <SquarePen className="size-4" />
+                      </button>
+                    </Td>
+                  ) : null}
                 </tr>
               ))}
             </tbody>
           </Table>
         )}
       </Card>
-      {opened ? <RepairDetail id={opened} onEdit={(r) => setEditing(r)} onClose={() => setOpened(null)} /> : null}
+      {opened ? <RepairDetail id={opened} canEdit={canEdit} onEdit={(r) => setEditing(r)} onClose={() => setOpened(null)} /> : null}
       {editing ? <RepairForm repair={editing === "new" ? null : editing} vendors={vendors} onClose={() => setEditing(null)} /> : null}
     </div>
   );
@@ -291,7 +302,18 @@ function invalidMoney(value: number): boolean {
 /** Etapas em que se informa (ou corrige) a previsão de volta do equipamento. */
 const RETURN_DATE_STAGES: RepairStatus[] = ["sent_to_vendor", "vendor_quote", "in_repair"];
 
-function RepairDetail({ id, onEdit, onClose }: { id: string; onEdit: (r: Repair) => void; onClose: () => void }) {
+/** Ficha do equipamento. Sem `canEdit` (acesso de visualização), só consulta: sem etapa, foto nem edição. */
+function RepairDetail({
+  id,
+  canEdit,
+  onEdit,
+  onClose,
+}: {
+  id: string;
+  canEdit: boolean;
+  onEdit: (r: Repair) => void;
+  onClose: () => void;
+}) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const repair = useQuery({ queryKey: ["repairs", "detail", id], queryFn: () => api.get<Repair>(`/repairs/${id}`) });
@@ -353,7 +375,7 @@ function RepairDetail({ id, onEdit, onClose }: { id: string; onEdit: (r: Repair)
       description={r ? <StageChip status={r.status} /> : undefined}
       footer={
         <>
-          {r ? (
+          {r && canEdit ? (
             <Button variant="ghost" onClick={() => onEdit(r)}>
               <Pencil className="size-4" />
               Editar dados
@@ -415,7 +437,7 @@ function RepairDetail({ id, onEdit, onClose }: { id: string; onEdit: (r: Repair)
             ) : null}
           </div>
 
-          {r.allowed_next.length || previous ? (
+          {canEdit && (r.allowed_next.length || previous) ? (
             <div className="rounded-lg border border-line p-3">
               <p id={`next-${id}`} className="mb-2 text-xs font-bold tracking-wide text-ink-muted uppercase">
                 {r.allowed_next.length ? "Próxima etapa" : "Corrigir etapa"}
@@ -523,24 +545,28 @@ function RepairDetail({ id, onEdit, onClose }: { id: string; onEdit: (r: Repair)
                   <img src={absoluteApiUrl(p.url) ?? undefined} alt={p.caption ?? "Foto do equipamento"} className="size-20 rounded-lg border border-line object-cover" />
                 </a>
               ))}
-              <label className="flex size-20 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-line text-xs text-ink-muted focus-within:ring-2 focus-within:ring-brand/45 hover:border-brand hover:text-brand">
-                {photo.isPending ? <Spinner className="size-5" /> : <Camera className="size-5" />}
-                {photo.isPending ? "Enviando..." : "Adicionar"}
-                <input
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  className="sr-only"
-                  disabled={photo.isPending}
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    e.target.value = "";
-                    if (!file) return;
-                    const problem = photoProblem(file);
-                    setPhotoError(problem);
-                    if (!problem) photo.mutate(file);
-                  }}
-                />
-              </label>
+              {canEdit ? (
+                <label className="flex size-20 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-line text-xs text-ink-muted focus-within:ring-2 focus-within:ring-brand/45 hover:border-brand hover:text-brand">
+                  {photo.isPending ? <Spinner className="size-5" /> : <Camera className="size-5" />}
+                  {photo.isPending ? "Enviando..." : "Adicionar"}
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    className="sr-only"
+                    disabled={photo.isPending}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      e.target.value = "";
+                      if (!file) return;
+                      const problem = photoProblem(file);
+                      setPhotoError(problem);
+                      if (!problem) photo.mutate(file);
+                    }}
+                  />
+                </label>
+              ) : r.photos.length === 0 ? (
+                <p className="text-sm text-ink-muted">Nenhuma foto.</p>
+              ) : null}
             </div>
             {photoMessage ? (
               <div className="mt-2">

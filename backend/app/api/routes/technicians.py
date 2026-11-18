@@ -5,7 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, File, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy import func, select
 
-from app.api.deps import DB, TicketManagerUser
+from app.api.deps import DB, TicketManagerUser, access_user
 from app.api.files import stored_file
 from app.core.enums import UserRole
 from app.core.security import InvalidToken, decode_token
@@ -29,6 +29,13 @@ from app.services.spreadsheet import MAX_BYTES, SpreadsheetError, read_upload
 
 router = APIRouter(tags=["technicians"])
 
+# Tela de Técnicos ("Editar" inclui Liberar acesso). As regiões também aparecem na Homologação
+# e os técnicos perto da loja, no detalhe do Local. As sugestões ficam com toda a gestão.
+TechniciansView = access_user("base.technicians")
+TechniciansEdit = access_user("base.technicians", level="edit")
+RegionsView = access_user("base.technicians", "base.onboarding")
+NearbyView = access_user("base.technicians", "base.locations")
+
 
 async def _one(db: DB, user: User) -> TechnicianOut:
     await db.refresh(user, ["team"])
@@ -50,7 +57,7 @@ async def _ensure_regions(db: DB) -> None:
 @router.get("/technicians", response_model=list[TechnicianOut])
 async def list_technicians(
     db: DB,
-    _: TicketManagerUser,
+    _: TechniciansView,
     response: Response,
     q: str | None = None,
     team_id: uuid.UUID | None = None,
@@ -71,15 +78,13 @@ async def list_technicians(
 
 
 @router.get("/technicians/regions", response_model=list[RegionState])
-async def technician_regions(
-    db: DB, _: TicketManagerUser, active: bool | None = None
-) -> list[dict]:
+async def technician_regions(db: DB, _: RegionsView, active: bool | None = None) -> list[dict]:
     """Estados e cidades com técnicos (região: a base pelo histórico, senão o endereço)."""
     return await regions_svc.regions(db, active)
 
 
 @router.post("/technicians/regions/refresh", response_model=RegionRefresh)
-async def refresh_technician_regions(db: DB, _: TicketManagerUser) -> dict:
+async def refresh_technician_regions(db: DB, _: TechniciansEdit) -> dict:
     """Recalcula agora a região de atuação de todos os técnicos."""
     counts = await regions_svc.refresh_bases(db)
     await db.commit()
@@ -89,7 +94,7 @@ async def refresh_technician_regions(db: DB, _: TicketManagerUser) -> dict:
 @router.get("/technicians/nearby", response_model=NearbyOut)
 async def nearby_technicians(
     db: DB,
-    _: TicketManagerUser,
+    _: NearbyView,
     location_id: uuid.UUID | None = None,
     latitude: float | None = None,
     longitude: float | None = None,
@@ -115,7 +120,7 @@ async def nearby_technicians(
 
 @router.post("/technicians", response_model=TemporaryPassword, status_code=status.HTTP_201_CREATED)
 async def create_technician(
-    body: TechnicianCreate, db: DB, _: TicketManagerUser
+    body: TechnicianCreate, db: DB, _: TechniciansEdit
 ) -> TemporaryPassword:
     """Cadastro direto (sem ficha): o técnico recebe uma senha provisória."""
     user, password = await svc.create(db, body)
@@ -125,7 +130,7 @@ async def create_technician(
 
 @router.patch("/technicians/{user_id}", response_model=TechnicianOut)
 async def update_technician(
-    user_id: uuid.UUID, body: TechnicianUpdate, db: DB, _: TicketManagerUser
+    user_id: uuid.UUID, body: TechnicianUpdate, db: DB, _: TechniciansEdit
 ) -> TechnicianOut:
     user = await svc.get_technician(db, user_id)
     await svc.update(db, user, body)
@@ -134,7 +139,7 @@ async def update_technician(
 
 
 @router.post("/technicians/{user_id}/reset-password", response_model=TemporaryPassword)
-async def reset_password(user_id: uuid.UUID, db: DB, _: TicketManagerUser) -> TemporaryPassword:
+async def reset_password(user_id: uuid.UUID, db: DB, _: TechniciansEdit) -> TemporaryPassword:
     """Esqueceu a senha: gera uma provisória e encerra as sessões abertas do técnico."""
     user = await svc.get_technician(db, user_id)
     password = await svc.reset_password(db, user)
@@ -144,7 +149,7 @@ async def reset_password(user_id: uuid.UUID, db: DB, _: TicketManagerUser) -> Te
 
 @router.post("/technicians/{user_id}/photo", response_model=TechnicianOut)
 async def upload_photo(
-    user_id: uuid.UUID, db: DB, _: TicketManagerUser, file: Annotated[UploadFile, File()]
+    user_id: uuid.UUID, db: DB, _: TechniciansEdit, file: Annotated[UploadFile, File()]
 ) -> TechnicianOut:
     user = await svc.get_technician(db, user_id)
     await svc.set_photo(db, user, file)
@@ -153,7 +158,7 @@ async def upload_photo(
 
 
 @router.delete("/technicians/{user_id}/photo", response_model=TechnicianOut)
-async def remove_photo(user_id: uuid.UUID, db: DB, _: TicketManagerUser) -> TechnicianOut:
+async def remove_photo(user_id: uuid.UUID, db: DB, _: TechniciansEdit) -> TechnicianOut:
     user = await svc.get_technician(db, user_id)
     user.avatar_key = None
     await db.commit()
@@ -163,7 +168,7 @@ async def remove_photo(user_id: uuid.UUID, db: DB, _: TicketManagerUser) -> Tech
 @router.post("/technicians/import", response_model=ImportResult)
 async def import_technicians(
     db: DB,
-    _: TicketManagerUser,
+    _: TechniciansEdit,
     file: Annotated[UploadFile, File()],
     dry_run: bool = True,
 ) -> ImportResult:

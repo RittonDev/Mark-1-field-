@@ -6,12 +6,14 @@ import { ArrowRight, Moon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { StatTile } from "@/components/charts";
+import { NoAccess } from "@/components/NoAccess";
 import { SlaViolationsCard } from "@/components/SlaViolationsCard";
 import { useNow } from "@/components/useNow";
 import { Card, CardHeader, ErrorBox, LoadingBlock, PageHeader, SectionTitle, Skeleton, Table, Td, Th } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { PRIORITY, PRIORITY_ORDER, STATUS, STATUS_ORDER } from "@/lib/constants";
 import { dayKey, formatMinutes, formatTime } from "@/lib/format";
+import { useCan, useQueueScope } from "@/lib/permissions";
 import type { DailyReport, DashboardSummary, Page, TicketListItem } from "@/lib/types";
 
 /** Meta de prazo: abaixo dela o número fica âmbar; abaixo do piso, vermelho. */
@@ -62,6 +64,8 @@ function Bars({ rows, label }: { rows: BarRow[]; label: string }) {
  * real agrupa as mudanças antes de buscar de novo) e, sem eventos, a cada 2 minutos.
  */
 function TodaySoFar({ today }: { today: string }) {
+  // O fechamento completo fica em Relatórios: o atalho só aparece para quem tem acesso a eles.
+  const canReports = useCan("analysis.reports");
   const report = useQuery({
     queryKey: ["reports", "daily", today],
     queryFn: () => api.get<DailyReport>("/reports/daily", { date: today }),
@@ -118,12 +122,14 @@ function TodaySoFar({ today }: { today: string }) {
           ))}
         </div>
       )}
-      <p className="mt-2 text-right text-xs">
-        <Link href="/relatorios" className="inline-flex items-center gap-1 font-medium text-brand hover:underline">
-          Ver o fechamento de ontem
-          <ArrowRight className="size-3.5" aria-hidden />
-        </Link>
-      </p>
+      {canReports ? (
+        <p className="mt-2 text-right text-xs">
+          <Link href="/relatorios" className="inline-flex items-center gap-1 font-medium text-brand hover:underline">
+            Ver o fechamento de ontem
+            <ArrowRight className="size-3.5" aria-hidden />
+          </Link>
+        </p>
+      ) : null}
     </section>
   );
 }
@@ -131,18 +137,25 @@ function TodaySoFar({ today }: { today: string }) {
 export default function DashboardPage() {
   const router = useRouter();
   const now = useNow(60_000);
+  const canView = useCan("analysis.dashboard");
+  // Quem vê só a própria fila e não vê as sem analista não tem o cartão "Sem analista" (a API devolveria 0).
+  const queues = useQueueScope();
+  const showNoOwner = queues.scope === "all" || queues.unowned;
   const summary = useQuery({
     queryKey: ["dashboard"],
     queryFn: () => api.get<DashboardSummary>("/dashboard/summary"),
     refetchInterval: 60_000,
+    enabled: canView,
   });
   // OS em aberto sem analista responsável: ninguém da central acompanhando.
   const noOwner = useQuery({
     queryKey: ["dashboard", "no-owner"],
     queryFn: () => api.get<Page<TicketListItem>>("/tickets", { no_owner: true, open_only: true, page_size: 1 }),
     refetchInterval: 60_000,
+    enabled: canView && showNoOwner,
   });
 
+  if (!canView) return <NoAccess kind="module" item="analysis.dashboard" />;
   const header = <PageHeader title="Dashboard" description="A operação agora, o dia até aqui e os últimos 30 dias. Atualiza em tempo real." />;
   const data = summary.data;
   // Uma falha ao atualizar mantém os números na tela (com o aviso abaixo do título).
@@ -184,7 +197,7 @@ export default function DashboardPage() {
         </p>
       ) : null}
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      <div className={clsx("grid grid-cols-2 gap-3 sm:grid-cols-3", showNoOwner ? "lg:grid-cols-5" : "lg:grid-cols-4")}>
         <StatTile label="Chamados abertos" value={data.open_total} href="/chamados?open_only=true" hint="Ainda não resolvidos" />
         <StatTile
           label="Sem técnico"
@@ -193,15 +206,17 @@ export default function DashboardPage() {
           href="/chamados?unassigned=true"
           hint="Abertos sem técnico definido"
         />
-        <StatTile
-          label="Sem analista"
-          value={noOwnerCount}
-          display={noOwner.error ? "—" : undefined}
-          loading={noOwner.isLoading}
-          tone={noOwnerCount > 0 ? "warning" : undefined}
-          href="/chamados?no_owner=true"
-          hint="Abertos sem analista responsável"
-        />
+        {showNoOwner ? (
+          <StatTile
+            label="Sem analista"
+            value={noOwnerCount}
+            display={noOwner.error ? "—" : undefined}
+            loading={noOwner.isLoading}
+            tone={noOwnerCount > 0 ? "warning" : undefined}
+            href="/chamados?no_owner=true"
+            hint="Abertos sem analista responsável"
+          />
+        ) : null}
         <StatTile
           label="SLA violado"
           value={data.sla_breached}

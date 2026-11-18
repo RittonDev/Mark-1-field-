@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.routes import (
+    access,
     activities,
     auth,
     catalog,
@@ -35,6 +36,7 @@ from app.api.routes import (
 api_router = APIRouter()
 for module in (
     auth,
+    access,
     home,
     catalog,
     users,

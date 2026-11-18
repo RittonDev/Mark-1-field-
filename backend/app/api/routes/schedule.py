@@ -4,13 +4,15 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, status
 
-from app.api.deps import DB, TicketManagerUser
+from app.api.deps import DB, TicketManagerUser, access_user
 from app.core.enums import TicketStatus
 from app.schemas.schedule import CalendarEvent, CalendarFilters, ConflictItem
 from app.schemas.ticket import assume_local
 from app.services import schedule
 
 router = APIRouter(tags=["schedule"])
+
+CalendarView = access_user("operation.calendar")
 
 MAX_RANGE = timedelta(days=62)
 MAX_VISIT_MINUTES = 60 * 24 * 7
@@ -19,7 +21,7 @@ MAX_VISIT_MINUTES = 60 * 24 * 7
 @router.get("/calendar", response_model=list[CalendarEvent])
 async def calendar(
     db: DB,
-    _: TicketManagerUser,
+    user: CalendarView,
     start: datetime,
     end: datetime,
     assignee_id: Annotated[list[uuid.UUID], Query()] = [],  # noqa: B006
@@ -46,13 +48,13 @@ async def calendar(
         city=city,
         statuses=status_,
     )
-    return await schedule.calendar(db, start, end, filters)
+    return await schedule.calendar(db, user, start, end, filters)
 
 
 @router.get("/calendar/conflicts", response_model=list[ConflictItem])
 async def conflicts(
     db: DB,
-    _: TicketManagerUser,
+    user: TicketManagerUser,
     start: datetime,
     assignee_id: uuid.UUID | None = None,
     helper_id: Annotated[list[uuid.UUID], Query()] = [],  # noqa: B006
@@ -61,7 +63,8 @@ async def conflicts(
     exclude_id: uuid.UUID | None = None,
 ) -> list[ConflictItem]:
     """Prévia antes de agendar: o que o técnico (e cada outro técnico da visita, em
-    `helper_id`) já tem neste horário. Cada item diz de quem é o choque (`who`)."""
+    `helper_id`) já tem neste horário. Cada item diz de quem é o choque (`who`); a OS de uma fila
+    que a pessoa não vê vem sem os detalhes (`hidden`)."""
     start = assume_local(start)
     end = assume_local(end) if end is not None else None
     if end is not None and end <= start:
@@ -80,4 +83,5 @@ async def conflicts(
         start=start,
         end=schedule.visit_end(start, end, estimated_minutes),
         exclude_id=exclude_id,
+        viewer=user,
     )

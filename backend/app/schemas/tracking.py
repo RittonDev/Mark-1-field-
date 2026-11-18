@@ -85,6 +85,8 @@ class LiveTechnician(BaseModel):
     state: LiveState
     last_position: LivePosition | None
     current_ticket: LiveTicket | None
+    # Em campo numa OS de outra fila (quem pede só vê a própria): o estado aparece, a OS não.
+    current_ticket_hidden: bool = False
     open_tickets: int
 
 

@@ -9,6 +9,7 @@ import { GrantAccessDialog } from "@/components/technicians/GrantAccessDialog";
 import { Button, ErrorBox, Skeleton } from "@/components/ui";
 import { errorMessage } from "@/lib/api";
 import { formatDate, initials } from "@/lib/format";
+import { useCan } from "@/lib/permissions";
 import { whatsappUrl } from "@/lib/whatsapp";
 import type { FavoriteCityDetail, FavoriteTechnician, TechnicianSuggestion, UUID } from "@/lib/types";
 
@@ -32,8 +33,8 @@ function favoriteTitle(t: TechnicianSuggestion, city: FavoriteCityDetail | null 
 }
 
 /**
- * Favoritos da cidade sem acesso ao app (não aparecem nos sugeridos): cada nome abre o "Liberar acesso";
- * o link leva aos favoritos da cidade.
+ * Favoritos da cidade sem acesso ao app (não aparecem nos sugeridos): cada nome abre o "Liberar acesso"
+ * (com Técnicos: Editar; sem ele, só o nome); o link leva aos favoritos da cidade (com Técnicos).
  */
 function NoAccessLine({
   city,
@@ -44,28 +45,38 @@ function NoAccessLine({
   people: FavoriteTechnician[];
   onGrant: (t: FavoriteTechnician) => void;
 }) {
+  const canGrant = useCan("base.technicians", "edit");
+  const canOpen = useCan("base.technicians");
   const href = favoritesHref(city.state, city.city);
   return (
     <p className="text-xs text-ink-muted">
       Sem acesso ao app:{" "}
       {people.map((t, i) => (
         <span key={t.id}>
-          <button
-            type="button"
-            onClick={() => onGrant(t)}
-            title="Liberar acesso ao app"
-            className="rounded font-medium text-ink underline-offset-2 hover:text-brand-ink hover:underline focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
-          >
-            {t.name}
-          </button>{" "}
+          {canGrant ? (
+            <button
+              type="button"
+              onClick={() => onGrant(t)}
+              title="Liberar acesso ao app"
+              className="rounded font-medium text-ink underline-offset-2 hover:text-brand-ink hover:underline focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+            >
+              {t.name}
+            </button>
+          ) : (
+            <span className="font-medium text-ink">{t.name}</span>
+          )}{" "}
           ({t.visits} OS){i < people.length - 1 ? ", " : ""}
         </span>
       ))}
-      {" · "}
-      {/* Em outra aba: a OS que está sendo aberta ou editada continua aqui. */}
-      <Link href={href} target="_blank" className="font-semibold whitespace-nowrap text-brand-ink hover:underline">
-        Favoritos de {city.city}
-      </Link>
+      {canOpen ? (
+        <>
+          {" · "}
+          {/* Em outra aba: a OS que está sendo aberta ou editada continua aqui. */}
+          <Link href={href} target="_blank" className="font-semibold whitespace-nowrap text-brand-ink hover:underline">
+            Favoritos de {city.city}
+          </Link>
+        </>
+      ) : null}
     </p>
   );
 }
@@ -104,12 +115,13 @@ interface SuggestedProps {
  *  da cidade da loja; os favoritos sem acesso ao app aparecem embaixo, com o "Liberar acesso". */
 export function SuggestedTechnicians(props: SuggestedProps) {
   const [granting, setGranting] = useState<FavoriteTechnician | null>(null);
+  const canGrant = useCan("base.technicians", "edit");
   // O diálogo fica fora da lista: liberado o acesso, a lista muda (o técnico sai da linha "Sem acesso
   // ao app" e pode virar sugerido) e a senha provisória continua na tela.
   return (
     <>
       <SuggestionList {...props} onGrant={setGranting} />
-      {granting ? <GrantAccessDialog technician={granting} onClose={() => setGranting(null)} /> : null}
+      {granting && canGrant ? <GrantAccessDialog technician={granting} onClose={() => setGranting(null)} /> : null}
     </>
   );
 }

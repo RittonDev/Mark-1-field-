@@ -23,9 +23,10 @@ from sqlalchemy.orm.base import NO_VALUE
 
 from app.core.config import settings
 from app.core.enums import UserRole
+from app.core.permissions import EVENT_ITEMS, Access
 from app.db.base import utcnow
 from app.models.ticket import Ticket
-from app.models.user import User
+from app.models.user import TICKET_MANAGER_ROLES, User
 from app.schemas.ticket import format_ticket_code
 
 log = logging.getLogger(__name__)
@@ -47,6 +48,9 @@ class PendingEvent:
     managers_only: bool = False
     # Técnicos que saíram da visita (para o app deles tirar a OS da lista).
     previous_helper_ids: list[uuid.UUID] = field(default_factory=list)
+    # Analista responsável de antes (troca de fila): quem só vê a própria fila também é avisado
+    # e tira a OS da tela.
+    previous_owner_id: uuid.UUID | None = None
 
 
 def queue_event(
@@ -61,6 +65,7 @@ def queue_event(
     event_type: str | None = None,
     managers_only: bool = False,
     previous_helper_ids: list[uuid.UUID] | None = None,
+    previous_owner_id: uuid.UUID | None = None,
 ) -> None:
     db.info.setdefault(_PENDING_KEY, []).append(
         PendingEvent(
@@ -73,6 +78,7 @@ def queue_event(
             event_type,
             managers_only,
             list(previous_helper_ids or []),
+            previous_owner_id=previous_owner_id,
         )
     )
 
@@ -98,6 +104,18 @@ def _helper_ids(ticket: Ticket) -> list[str]:
     return [str(u.id) for u in value]
 
 
+def unowned_ticket(ticket: Ticket) -> bool:
+    """OS "sem analista" (mesma regra de services.tickets.is_unowned), sem ir ao banco: sem
+    responsável, ou responsável carregado e fora da gestão (desativado ou de outro papel). Sem
+    o responsável carregado, na dúvida, não é."""
+    if ticket.owner_id is None:
+        return True
+    owner = sa_inspect(ticket).attrs.owner.loaded_value
+    if owner is NO_VALUE or owner is None:
+        return False
+    return not owner.is_active or owner.role not in TICKET_MANAGER_ROLES
+
+
 def render_event(ev: PendingEvent) -> dict[str, Any]:
     """Renderiza após o commit (a `version` da OS já está atualizada)."""
     t = ev.ticket
@@ -108,6 +126,8 @@ def render_event(ev: PendingEvent) -> dict[str, Any]:
         "status": t.status.value,
         "priority": t.priority.value,
         "assignee_id": _s(t.assignee_id),
+        # Analista responsável: a web avisa só a fila dele (e todo mundo quando não tem).
+        "owner_id": _s(t.owner_id),
         "team_id": _s(t.team_id),
         "actor_id": _s(ev.actor.id) if ev.actor else None,
         "actor_name": ev.actor.name if ev.actor else "Sistema",
@@ -124,17 +144,40 @@ def render_event(ev: PendingEvent) -> dict[str, Any]:
             "created_by_id": _s(t.created_by_id),
             "internal": ev.internal,
             "managers_only": ev.managers_only,
+            # Filas: quem só vê a própria fila recebe a OS dele (dono atual ou anterior,
+            # executor) e, com a opção, as sem analista.
+            "owner_id": _s(t.owner_id),
+            "previous_owner_id": _s(ev.previous_owner_id),
+            "unowned": unowned_ticket(t),
         },
     }
 
 
 def should_deliver(
-    *, user_id: str, role: UserRole, team_id: str | None, event: dict[str, Any]
+    *,
+    user_id: str,
+    role: UserRole,
+    team_id: str | None,
+    event: dict[str, Any],
+    access: Access | None = None,
 ) -> bool:
-    """Mesma regra de visibilidade da listagem de OS (services.tickets.can_view)."""
+    """Mesma regra de visibilidade da listagem de OS (services.tickets.can_view).
+
+    `access` é o acesso da conexão (telas e fila); sem ele, a gestão recebe tudo, como antes dos
+    perfis de acesso."""
     aud = event.get("audience") or {}
+    # Evento endereçado (ex.: access.changed): só para quem está na lista.
+    if aud.get("user_ids") is not None:
+        return user_id in aud["user_ids"]
     if role in (UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.ANALYST):
-        return True
+        if access is None:
+            return True
+        item = EVENT_ITEMS.get(str(event.get("type")))
+        if item is not None and not access.can(item):
+            return False
+        if not event.get("ticket_id"):
+            return True
+        return access.sees(user_id, aud)
     if aud.get("managers_only"):
         return False
     if role == UserRole.TECHNICIAN:
@@ -192,6 +235,13 @@ class Connection:
     user_id: str
     role: UserRole
     team_id: str | None
+    # Acesso da abertura (telas e fila); o vigia do socket fecha quando ele muda.
+    access: Access | None = None
+
+
+# Fechamento que faz o cliente renovar o token e reconectar (mesmo código do token recusado).
+RECONNECT_CODE = 4401
+ACCESS_CHANGED = "access.changed"
 
 
 class ConnectionManager:
@@ -212,7 +262,11 @@ class ConnectionManager:
         self, conn: Connection, event: dict[str, Any], public: dict[str, Any]
     ) -> dict[str, Any] | None:
         if not should_deliver(
-            user_id=conn.user_id, role=conn.role, team_id=conn.team_id, event=event
+            user_id=conn.user_id,
+            role=conn.role,
+            team_id=conn.team_id,
+            event=event,
+            access=conn.access,
         ):
             return None
         if conn.role == UserRole.TECHNICIAN:
@@ -229,16 +283,29 @@ class ConnectionManager:
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(conn.ws.close(), timeout=1.0)
 
+    async def _reconnect(self, conn: Connection) -> None:
+        """Fecha com 4401: o cliente renova o token e reconecta com o acesso novo."""
+        self.remove(conn)
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(
+                conn.ws.close(code=RECONNECT_CODE, reason="acesso alterado"), timeout=1.0
+            )
+
     async def dispatch(self, event: dict[str, Any]) -> None:
         """Entrega a todos em paralelo: um celular lento não segura o evento dos outros."""
         public = {k: v for k, v in event.items() if k != "audience"}
         sends = []
+        targets = []
         for conn in list(self._conns):
             payload = self._payload_for(conn, event, public)
             if payload is not None:
                 sends.append(self._send(conn, payload))
+                targets.append(conn)
         if sends:
             await asyncio.gather(*sends)
+        if event.get("type") == ACCESS_CHANGED and targets:
+            # O acesso da conexão foi calculado na abertura: reconecta para valer o novo.
+            await asyncio.gather(*(self._reconnect(c) for c in targets))
 
 
 class EventBus:

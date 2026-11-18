@@ -102,6 +102,6 @@ async def cancel_request(
 
 
 @router.get("/portal/inbox-count", response_model=PortalInboxCount)
-async def inbox_count(db: DB, _: TicketManagerUser) -> PortalInboxCount:
-    """Solicitações do portal esperando a central (menu "Solicitações")."""
-    return PortalInboxCount(pending=await svc.inbox_count(db))
+async def inbox_count(db: DB, user: TicketManagerUser) -> PortalInboxCount:
+    """Solicitações do portal esperando a central (menu "Solicitações"), na fila que a pessoa vê."""
+    return PortalInboxCount(pending=await svc.inbox_count(db, user))

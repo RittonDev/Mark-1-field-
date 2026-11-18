@@ -1,5 +1,6 @@
 """Importa todos os modelos para registrar as tabelas no metadata (usado pelo Alembic)."""
 
+from app.models.access import AccessProfile
 from app.models.asset import Asset
 from app.models.catalog import (
     Category,
@@ -31,6 +32,7 @@ from app.models.tracking import LocationPing, TechnicianShift
 from app.models.user import Team, User
 
 __all__ = [
+    "AccessProfile",
     "Asset",
     "Category",
     "Customer",

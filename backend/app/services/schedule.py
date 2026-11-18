@@ -135,8 +135,26 @@ async def busy_people(
     return set(await db.scalars(union(as_assignee, as_helper)))
 
 
-def conflict_item(t: Ticket, who: str | None = None) -> ConflictItem:
+HIDDEN_TITLE = "OS de outra fila"
+
+
+def conflict_item(t: Ticket, who: str | None = None, *, hidden: bool = False) -> ConflictItem:
+    """O choque de horário. `hidden`: a OS é de uma fila que quem agenda não vê; aparece só o
+    horário ocupado (sem código, título, cliente nem loja), para não marcar o técnico duas vezes."""
     assert t.scheduled_start is not None
+    end = visit_end(t.scheduled_start, t.scheduled_end, t.estimated_minutes)
+    if hidden:
+        return ConflictItem(
+            who=who,
+            id=None,
+            code=None,
+            title=HIDDEN_TITLE,
+            customer=None,
+            location=None,
+            start=t.scheduled_start,
+            end=end,
+            hidden=True,
+        )
     return ConflictItem(
         who=who,
         id=t.id,
@@ -145,8 +163,27 @@ def conflict_item(t: Ticket, who: str | None = None) -> ConflictItem:
         customer=t.customer.name if t.customer else None,
         location=t.location.name if t.location else None,
         start=t.scheduled_start,
-        end=visit_end(t.scheduled_start, t.scheduled_end, t.estimated_minutes),
+        end=end,
     )
+
+
+def _visibility(viewer: User | None) -> ColumnElement[bool] | None:
+    # Import aqui: services.tickets importa este módulo.
+    from app.services.tickets import visibility_clause
+
+    return visibility_clause(viewer) if viewer is not None else None
+
+
+async def hidden_ids(
+    db: AsyncSession, viewer: User | None, tickets: list[Ticket]
+) -> set[uuid.UUID]:
+    """As OS da lista que `viewer` não vê (fila de outro analista)."""
+    vis = _visibility(viewer)
+    if vis is None or not tickets:
+        return set()
+    ids = [t.id for t in tickets]
+    seen = set(await db.scalars(select(Ticket.id).where(Ticket.id.in_(ids), vis)))
+    return set(ids) - seen
 
 
 async def preview_conflicts(
@@ -156,8 +193,10 @@ async def preview_conflicts(
     start: datetime,
     end: datetime,
     exclude_id: uuid.UUID | None = None,
+    viewer: User | None = None,
 ) -> list[ConflictItem]:
-    """Prévia antes de agendar: o que cada pessoa da visita já tem no horário (com o nome)."""
+    """Prévia antes de agendar: o que cada pessoa da visita já tem no horário (com o nome). A OS
+    que `viewer` não vê sai sem os detalhes."""
     if not people:
         return []
     names = {u.id: u.name for u in await db.scalars(select(User).where(User.id.in_(people)))}
@@ -166,7 +205,8 @@ async def preview_conflicts(
         clashes = await find_conflicts(
             db, assignee_id=person_id, start=start, end=end, exclude_id=exclude_id
         )
-        items.extend(conflict_item(t, names.get(person_id)) for t in clashes)
+        hidden = await hidden_ids(db, viewer, clashes)
+        items.extend(conflict_item(t, names.get(person_id), hidden=t.id in hidden) for t in clashes)
     return items
 
 
@@ -203,7 +243,11 @@ async def check_slot(
         person = await db.get(User, person_id)
         name = person.name if person else "O técnico"
         names.append(name)
-        items.extend(conflict_item(t, name).model_dump(mode="json") for t in clashes)
+        # A OS de outra fila vai sem os detalhes (a mesma redação da prévia).
+        hidden = await hidden_ids(db, actor, clashes)
+        items.extend(
+            conflict_item(t, name, hidden=t.id in hidden).model_dump(mode="json") for t in clashes
+        )
     if not items:
         return
     if len(names) == 1:
@@ -214,8 +258,10 @@ async def check_slot(
 
 
 async def calendar(
-    db: AsyncSession, start: datetime, end: datetime, f: CalendarFilters
+    db: AsyncSession, user: User | None, start: datetime, end: datetime, f: CalendarFilters
 ) -> list[CalendarEvent]:
+    """As OS agendadas no período que `user` vê (fila), com os conflitos entre elas."""
+    vis = _visibility(user)
     stmt = (
         select(Ticket)
         .options(*_only_relations(*_CALENDAR_SHOWS))
@@ -224,6 +270,7 @@ async def calendar(
             Ticket.scheduled_start < end,
             _end_expr() > start,
             Ticket.status != TicketStatus.CANCELLED,
+            *((vis,) if vis is not None else ()),
         )
     )
     if f.assignee_ids:

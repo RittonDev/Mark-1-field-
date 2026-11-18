@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { StatTile } from "@/components/charts";
 import { useConfirm } from "@/components/Confirm";
+import { NoAccess } from "@/components/NoAccess";
 import { QuickEditButton } from "@/components/ticket/QuickEditButton";
 import { TicketLink } from "@/components/ticket/TicketLink";
 import { useTicketPanel } from "@/components/ticket/TicketPanel";
@@ -30,11 +31,10 @@ import {
   Th,
 } from "@/components/ui";
 import { absoluteApiUrl, api, errorMessage } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
-import { canManageTickets, isManager } from "@/lib/constants";
 import { downloadCsv } from "@/lib/download";
 import { EXPENSE_KIND, EXPENSE_STATUS } from "@/lib/expenses";
 import { formatDate, formatDocument, formatMoney, moneyInput } from "@/lib/format";
+import { useCan } from "@/lib/permissions";
 import { useCustomers } from "@/lib/queries";
 import { readDecimal } from "@/lib/quotes";
 import type { Attachment, ExpenseKind, ExpenseReport, ExpenseStatus, UUID, User } from "@/lib/types";
@@ -254,7 +254,11 @@ function RejectDialog({ rows, onClose, onDone }: { rows: Row[]; onClose: () => v
 }
 
 export default function ExpensesPage() {
-  const { user } = useAuth();
+  // Visualizar: lista, filtros e exportação. Editar: aprovar, recusar, reembolsar e desfazer. O valor
+  // do km é das Configurações (Editar lá).
+  const canView = useCan("commercial.expenses");
+  const canEdit = useCan("commercial.expenses", "edit");
+  const canEditKm = useCan("setup.settings", "edit");
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const confirm = useConfirm();
@@ -285,6 +289,7 @@ export default function ExpensesPage() {
         { signal },
       ),
     placeholderData: keepPreviousData,
+    enabled: canView,
   });
   // Aprovados e ainda não reembolsados em qualquer mês: o que a empresa deve aos técnicos.
   const backlog = useQuery({
@@ -296,6 +301,7 @@ export default function ExpensesPage() {
         end: new Date(Date.now() + 86_400_000).toISOString(),
       }),
     staleTime: 60_000,
+    enabled: canView,
   });
 
   const refresh = () => {
@@ -407,9 +413,7 @@ export default function ExpensesPage() {
     }));
   }, [customers.data]);
 
-  if (user && !canManageTickets(user.role)) {
-    return <ErrorBox message="Os custos extras são da gestão." />;
-  }
+  if (!canView) return <NoAccess kind="module" item="commercial.expenses" />;
 
   const stale = report.isPlaceholderData;
   const busy = approve.isPending || markPaid.isPending || restore.isPending;
@@ -542,7 +546,7 @@ export default function ExpensesPage() {
         description="Reembolso aos técnicos: material, km rodado e despesas lançadas nas OS. Aprove, recuse e marque o que já foi reembolsado."
         actions={
           <>
-            <KmRate canEdit={isManager(user?.role)} />
+            <KmRate canEdit={canEditKm} />
             <Button disabled={!visible.length} onClick={exportCsv}>
               <Download className="size-4" />
               Exportar CSV
@@ -685,51 +689,55 @@ export default function ExpensesPage() {
                           !status && rejectedCount ? " sem os recusados" : ""
                         }`}
                   </span>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {chosenPending.length ? (
+                  {canEdit ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      {chosenPending.length ? (
+                        <Button
+                          size="sm"
+                          disabled={stale || (busy && !approvingBulk)}
+                          loading={approvingBulk}
+                          onClick={() => approve.mutate({ rows: chosenPending })}
+                        >
+                          <Check className="size-4" />
+                          Aprovar {chosenPending.length}
+                        </Button>
+                      ) : null}
+                      {chosen.length ? (
+                        <Button size="sm" disabled={stale || busy} onClick={() => setRejecting(chosen)}>
+                          <X className="size-4" />
+                          Recusar {chosen.length}
+                        </Button>
+                      ) : null}
                       <Button
                         size="sm"
-                        disabled={stale || (busy && !approvingBulk)}
-                        loading={approvingBulk}
-                        onClick={() => approve.mutate({ rows: chosenPending })}
+                        variant="primary"
+                        disabled={!chosenApproved.length || stale || (busy && !markPaid.isPending)}
+                        loading={markPaid.isPending}
+                        title={chosenApproved.length ? undefined : "Selecione custos aprovados"}
+                        onClick={() => void confirmReimburse(chosenApproved)}
                       >
                         <Check className="size-4" />
-                        Aprovar {chosenPending.length}
+                        {chosenApproved.length
+                          ? `Marcar ${chosenApproved.length} como ${chosenApproved.length === 1 ? "reembolsado" : "reembolsados"}`
+                          : "Marcar como reembolsado"}
                       </Button>
-                    ) : null}
-                    {chosen.length ? (
-                      <Button size="sm" disabled={stale || busy} onClick={() => setRejecting(chosen)}>
-                        <X className="size-4" />
-                        Recusar {chosen.length}
-                      </Button>
-                    ) : null}
-                    <Button
-                      size="sm"
-                      variant="primary"
-                      disabled={!chosenApproved.length || stale || (busy && !markPaid.isPending)}
-                      loading={markPaid.isPending}
-                      title={chosenApproved.length ? undefined : "Selecione custos aprovados"}
-                      onClick={() => void confirmReimburse(chosenApproved)}
-                    >
-                      <Check className="size-4" />
-                      {chosenApproved.length
-                        ? `Marcar ${chosenApproved.length} como ${chosenApproved.length === 1 ? "reembolsado" : "reembolsados"}`
-                        : "Marcar como reembolsado"}
-                    </Button>
-                  </div>
+                    </div>
+                  ) : null}
                 </div>
                 <div className={clsx("transition-opacity duration-150", stale && "opacity-60")} aria-busy={report.isFetching}>
                   <Table label="Custos extras do período">
                     <thead>
                       <tr>
-                        <Th className="w-10">
-                          <HeaderCheckbox
-                            checked={pickable.length > 0 && chosen.length === pickable.length}
-                            partial={chosen.length > 0 && chosen.length < pickable.length}
-                            disabled={!pickable.length}
-                            onChange={(on) => setSelected(on ? pickable.map((r) => r.id) : [])}
-                          />
-                        </Th>
+                        {canEdit ? (
+                          <Th className="w-10">
+                            <HeaderCheckbox
+                              checked={pickable.length > 0 && chosen.length === pickable.length}
+                              partial={chosen.length > 0 && chosen.length < pickable.length}
+                              disabled={!pickable.length}
+                              onChange={(on) => setSelected(on ? pickable.map((r) => r.id) : [])}
+                            />
+                          </Th>
+                        ) : null}
                         <Th>Data</Th>
                         <Th>OS</Th>
                         <Th>Custo</Th>
@@ -752,22 +760,24 @@ export default function ExpensesPage() {
                             }}
                             className="cursor-pointer transition-colors hover:bg-[var(--row-hover)]"
                           >
-                            <Td>
-                              <label
-                                className={clsx("-m-2 flex p-2", canPick ? "cursor-pointer" : "cursor-not-allowed")}
-                                title={canPick ? undefined : r.status === "paid" ? "Já reembolsado" : "Recusado"}
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <input
-                                  type="checkbox"
-                                  disabled={!canPick}
-                                  checked={selected.includes(r.id)}
-                                  onChange={(e) => setSelected((s) => (e.target.checked ? [...s, r.id] : s.filter((x) => x !== r.id)))}
-                                  className="size-4 accent-[var(--brand)]"
-                                  aria-label={`Selecionar ${r.ticket.code} · ${r.description}`}
-                                />
-                              </label>
-                            </Td>
+                            {canEdit ? (
+                              <Td>
+                                <label
+                                  className={clsx("-m-2 flex p-2", canPick ? "cursor-pointer" : "cursor-not-allowed")}
+                                  title={canPick ? undefined : r.status === "paid" ? "Já reembolsado" : "Recusado"}
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    disabled={!canPick}
+                                    checked={selected.includes(r.id)}
+                                    onChange={(e) => setSelected((s) => (e.target.checked ? [...s, r.id] : s.filter((x) => x !== r.id)))}
+                                    className="size-4 accent-[var(--brand)]"
+                                    aria-label={`Selecionar ${r.ticket.code} · ${r.description}`}
+                                  />
+                                </label>
+                              </Td>
+                            ) : null}
                             <Td className="text-xs whitespace-nowrap text-ink-muted">{formatDate(r.created_at)}</Td>
                             <Td>
                               <TicketLink ticketId={r.ticket.id} className="font-mono text-xs text-brand hover:underline">
@@ -817,7 +827,7 @@ export default function ExpensesPage() {
                             </Td>
                             <Td className="edit-col">
                               <span className="inline-flex items-center gap-1.5">
-                                {r.status === "pending" ? (
+                                {!canEdit ? null : r.status === "pending" ? (
                                   <RowAction
                                     label={`Aprovar: ${r.description}`}
                                     disabled={busy || stale}
@@ -838,7 +848,7 @@ export default function ExpensesPage() {
                                 ) : (
                                   <span className="size-8" aria-hidden />
                                 )}
-                                {canPick ? (
+                                {!canEdit ? null : canPick ? (
                                   <RowAction label={`Recusar: ${r.description}`} danger disabled={busy || stale} onClick={() => setRejecting([r])}>
                                     <X className="size-4" />
                                   </RowAction>
@@ -929,7 +939,7 @@ export default function ExpensesPage() {
   );
 }
 
-/** Valor do km rodado: supervisor ou admin altera; o analista só vê. */
+/** Valor do km rodado: quem edita Configurações altera; os demais só veem. */
 function KmRate({ canEdit }: { canEdit: boolean }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -952,7 +962,7 @@ function KmRate({ canEdit }: { canEdit: boolean }) {
   const rate = settings.data.km_rate;
   if (!canEdit) {
     return (
-      <span className="text-sm text-ink-muted" title="Só supervisor ou admin altera o valor do km">
+      <span className="text-sm text-ink-muted" title="O valor do km muda com acesso de edição a Configurações">
         Km: <span className="font-medium text-ink">{formatMoney(rate)}</span>
       </span>
     );

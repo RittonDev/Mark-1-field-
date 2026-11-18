@@ -1,9 +1,11 @@
 import uuid
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, EmailStr, Field
 
 from app.core.enums import UserRole
+from app.schemas.access import EffectiveAccessOut, UserAccessIn
 from app.schemas.common import ORMModel, Ref
 
 
@@ -33,6 +35,14 @@ class UserOut(ORMModel):
     location_consent_at: datetime | None = None
     must_change_password: bool = False
     created_at: datetime
+    # Perfil de acesso (só supervisor e analista) e os ajustes da pessoa por cima dele.
+    access_profile_id: uuid.UUID | None = None
+    access_profile: Ref | None = None
+    # Só o que foi ajustado: {"items"?: {tela: nível}, "queue_scope"?: "own" | "all",
+    # "queue_unowned"?: bool} (o formato de AccessOverrides, sem as chaves vazias).
+    access_overrides: dict[str, Any] | None = None
+    # Acesso efetivo (telas e filas); null para técnico e cliente.
+    access: EffectiveAccessOut | None = Field(default=None, validation_alias="access_summary")
 
 
 class UserCreate(BaseModel):
@@ -44,6 +54,8 @@ class UserCreate(BaseModel):
     job_title: str | None = Field(default=None, max_length=120)
     team_id: uuid.UUID | None = None
     customer_id: uuid.UUID | None = None
+    # Só supervisor e analista; sem ele, o perfil padrão do papel.
+    access: UserAccessIn | None = None
 
 
 class UserUpdate(BaseModel):
@@ -56,6 +68,8 @@ class UserUpdate(BaseModel):
     team_id: uuid.UUID | None = None
     customer_id: uuid.UUID | None = None
     is_active: bool | None = None
+    # Perfil e ajustes de acesso (só supervisor e analista).
+    access: UserAccessIn | None = None
 
 
 class AssignableUser(BaseModel):

@@ -8,10 +8,9 @@ import { useConfirm } from "@/components/Confirm";
 import { useToast } from "@/components/Toaster";
 import { Button, Card, CardHeader, Dialog, ErrorBox, Field, Input, Pill, Select, Textarea } from "@/components/ui";
 import { absoluteApiUrl, api, errorMessage } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
-import { canManageTickets } from "@/lib/constants";
 import { EXPENSE_KIND, EXPENSE_STATUS, EXPENSE_TRANSITIONS } from "@/lib/expenses";
 import { formatDate, formatMoney, formatShort, moneyInput } from "@/lib/format";
+import { useCan } from "@/lib/permissions";
 import { useAssignable } from "@/lib/queries";
 import { lineTotalCents, quantityInput, readDecimal } from "@/lib/quotes";
 import type { Attachment, Expense, ExpenseKind, ExpenseStatus, TicketDetail } from "@/lib/types";
@@ -27,12 +26,15 @@ const STATUS_DONE: Record<ExpenseStatus, string> = {
 
 const sum = (list: Expense[]) => list.reduce((s, e) => s + Math.round(e.total * 100), 0) / 100;
 
-/** Custos extras da OS: material, km rodado, pedágio... Só a gestão lança e altera. */
+/**
+ * Custos extras da OS: material, km rodado, pedágio... Segue o acesso a Custos extras: sem ele o quadro
+ * some (a API nem manda os custos); só com Visualizar, lista sem lançar nem alterar.
+ */
 export function ExpensesCard({ ticket }: { ticket: TicketDetail }) {
-  const { user } = useAuth();
   const { toast } = useToast();
   const confirm = useConfirm();
-  const manager = canManageTickets(user?.role);
+  const canView = useCan("commercial.expenses");
+  const canEdit = useCan("commercial.expenses", "edit");
   const invalidate = useInvalidateTicket(ticket.id);
   const onError = useTicketErrorHandler(ticket.id);
   const [editing, setEditing] = useState<Expense | "new" | null>(null);
@@ -63,24 +65,23 @@ export function ExpensesCard({ ticket }: { ticket: TicketDetail }) {
   const toReimburse = sum(ticket.expenses.filter((e) => e.status === "approved" && e.technician));
   const awaiting = sum(ticket.expenses.filter((e) => e.status === "pending"));
   const receipt = (id: string | null) => (attachments.data ?? []).find((a) => a.id === id);
+  if (!canView) return null;
 
   return (
     <Card>
       <CardHeader
         title="Custos extras"
-        description={
-          manager
-            ? "Material comprado, km rodado, pedágio... para reembolsar o técnico."
-            : "Lançados pela gestão. O técnico vê, mas não altera."
-        }
+        description="Material comprado, km rodado, pedágio... para reembolsar o técnico."
         actions={
-          manager ? (
+          canEdit ? (
             <Button size="sm" onClick={() => setEditing("new")}>
               <Plus className="size-4" />
               Lançar
             </Button>
           ) : (
-            <Lock className="size-4 text-ink-muted" aria-label="Somente leitura" />
+            <span title="Seu acesso a Custos extras é de visualização.">
+              <Lock className="size-4 text-ink-muted" aria-label="Somente visualização" />
+            </span>
           )
         }
       />
@@ -122,7 +123,7 @@ export function ExpensesCard({ ticket }: { ticket: TicketDetail }) {
                   </span>
                   <Pill color={EXPENSE_STATUS[e.status].color}>{EXPENSE_STATUS[e.status].label}</Pill>
                 </div>
-                {manager ? (
+                {canEdit ? (
                   <div className="flex w-full flex-wrap items-center justify-end gap-1 sm:w-auto">
                     {e.status === "pending" ? (
                       <>

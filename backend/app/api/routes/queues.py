@@ -7,18 +7,22 @@ from typing import Annotated
 from fastapi import APIRouter, Query
 
 from app.api.deps import DB, TicketManagerUser
+from app.core import permissions
 from app.models import User
 from app.schemas.queues import MyQueue, TeamQueues
 from app.services import queues as svc
-from app.services.errors import NotFound
+from app.services.errors import AccessDenied, NotFound
 
 router = APIRouter(tags=["queues"])
 
+OWN_QUEUE_ONLY = "Seu acesso mostra só a sua fila."
+
 
 @router.get("/queues", response_model=TeamQueues)
-async def team_queues(db: DB, _: TicketManagerUser) -> TeamQueues:
-    """Quantas OS cada analista/gestor tem na fila (e as sem analista)."""
-    return await svc.team_queues(db)
+async def team_queues(db: DB, user: TicketManagerUser) -> TeamQueues:
+    """Quantas OS cada analista/gestor tem na fila (e as sem analista). Com "Somente a própria
+    fila", só a linha de quem pede (e a sem analista, se ele a vê)."""
+    return await svc.team_queues(db, user)
 
 
 @router.get("/my-queue", response_model=MyQueue)
@@ -31,8 +35,10 @@ async def my_queue(
     """A fila do dia: minhas OS (ou de um colega, com `user_id`) organizadas por seção."""
     target = user
     if user_id is not None and user_id != user.id:
+        if not permissions.of(user).all_queues:
+            raise AccessDenied(OWN_QUEUE_ONLY, code="QUEUE_FORBIDDEN")
         found = await db.get(User, user_id)
         if found is None:
             raise NotFound("Usuário não encontrado")
         target = found
-    return await svc.my_queue(db, target, day)
+    return await svc.my_queue(db, target, day, viewer=user)

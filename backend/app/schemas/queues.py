@@ -3,9 +3,10 @@
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.enums import UserRole
+from app.core.permissions import QueueScope
 from app.schemas.ticket import TicketListItem
 from app.schemas.user import UserRef
 
@@ -64,6 +65,12 @@ class TeamQueue(QueueCounts):
 
 
 class TeamQueues(BaseModel):
+    # Com "Somente a própria fila", só a linha de quem pediu.
     queues: list[TeamQueue]
     # Sem analista, incluindo as OS de analista que saiu da gestão (desativado ou outro papel).
-    unowned: QueueCounts
+    # null quando a pessoa só vê a própria fila e não vê as sem analista.
+    unowned: QueueCounts | None = None
+    # Visibilidade de filas de quem pediu: "all" (todas) ou "own" (só a própria).
+    scope: QueueScope = "all"
+    # Soma das linhas devolvidas e da sem analista (quando vem).
+    total: QueueCounts = Field(default_factory=QueueCounts)

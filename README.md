@@ -95,6 +95,20 @@ domínio `@maxxgroup.com.br`); técnicos entram no app com o e-mail e a senha qu
 - **Pronto para mobile:** sync offline idempotente, revogação de OS reatribuídas, registro de aparelhos para push. Ver [docs/MOBILE_SYNC.md](docs/MOBILE_SYNC.md).
 - **Papéis:** administrador, supervisor, analista (gestão completa na web), técnico de campo (app) e solicitante.
 
+### Papéis, perfis de acesso e filas
+
+O papel continua decidindo o canal (web ou app), quem cadastra quem e as regras duras (o SLA é só do
+administrador). Por cima dele, supervisores e analistas têm um **perfil de acesso** (Configuração >
+Usuários > Perfis de acesso): para cada tela do menu (Operação, Comercial, Base, Análise e Configuração)
+o nível Sem acesso, Visualizar ou Editar, e a **visibilidade de filas** ("Todas as filas da equipe" ou
+"Somente a própria fila", com ou sem as OS sem analista). Cada pessoa pode ter ajustes por tela por cima
+do perfil. O administrador tem acesso total sempre; técnico e cliente ficam fora da matriz. Os perfis
+padrão (Supervisor e Analista) reproduzem o acesso de antes, e a migração coloca cada supervisor e
+analista no perfil do papel. A regra vale na API: tela fora do perfil responde 403 `MODULE_FORBIDDEN` e
+OS de outra fila, 403 `QUEUE_FORBIDDEN`, e "Somente a própria fila" vale em listas, buscas, contadores,
+Início, agenda, mapa, comercial, relatórios, exportação e tempo real. Detalhes em
+[docs/API.md](docs/API.md#acesso-perfis-por-tela-e-visibilidade-de-filas).
+
 ## Rodar localmente (Docker)
 
 Pré-requisito: Docker Desktop.

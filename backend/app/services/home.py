@@ -12,7 +12,7 @@ para a "Fila antiga". "Hoje", os dias e as semanas seguem o fuso da operação (
 import uuid
 from collections import Counter
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -35,6 +35,7 @@ from sqlalchemy import (
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from app.core import permissions
 from app.core.config import settings
 from app.core.enums import (
     ExpenseKind,
@@ -98,6 +99,7 @@ from app.services.tickets import (
     has_any_tag,
     orphan_owner_ids,
     violation_pending_clause,
+    visibility_clause,
 )
 from app.services.workflow import OPEN_STATUSES, STATUS_INFO
 
@@ -167,6 +169,23 @@ class Moment:
     today: date
     day_start: datetime
     day_end: datetime
+    # As OS que quem abre a tela vê (fila; None = todas) e o acesso dele (telas): os números, os
+    # grupos e os exemplos contam só o que ele vê, e os blocos de outras telas saem sem o acesso.
+    scope: ColumnElement[bool] | None = field(default=None, compare=False)
+    access: permissions.Access | None = field(default=None, compare=False)
+    viewer: Any = field(default=None, compare=False)
+
+    @property
+    def where(self) -> tuple[ColumnElement[bool], ...]:
+        """Condição de visibilidade para o .where() de toda consulta sobre as OS."""
+        return (self.scope,) if self.scope is not None else ()
+
+    def can(self, item: str) -> bool:
+        """Tem a tela (Visualizar)? Sem acesso informado (serviço chamado direto): sim."""
+        return self.access is None or self.access.can(item)
+
+    def allows(self, link: str | None) -> bool:
+        return self.access is None or permissions.allows_link(self.access, link)
 
     @property
     def tz(self) -> ZoneInfo:
@@ -206,11 +225,21 @@ class Moment:
         return [monday - timedelta(weeks=n) for n in range(WEEKS - 1, -1, -1)]
 
 
-def _moment() -> Moment:
+def _moment(viewer: Any = None) -> Moment:
     now = utcnow()
     today = local_today()
     start, end = day_bounds(today)
-    return Moment(now=now, today=today, day_start=start, day_end=end)
+    if viewer is None:
+        return Moment(now=now, today=today, day_start=start, day_end=end)
+    return Moment(
+        now=now,
+        today=today,
+        day_start=start,
+        day_end=end,
+        scope=visibility_clause(viewer),
+        access=permissions.of(viewer),
+        viewer=viewer,
+    )
 
 
 # --------------------------------------------------------------------------- textos
@@ -483,7 +512,7 @@ async def _ticket_items(
     reason: Reason,
     extra: Sequence[Any] = (),
 ) -> list[AttentionItem]:
-    stmt = _ticket_select(*extra).where(cond).order_by(*order).limit(ITEMS)
+    stmt = _ticket_select(*extra).where(cond, *m.where).order_by(*order).limit(ITEMS)
     rows = (await db.execute(stmt)).all()
     items = []
     for row in rows:
@@ -872,14 +901,15 @@ async def _ticket_counts(db: AsyncSession, m: Moment, onsite_hours: int) -> dict
         .within_group(Ticket.work_seconds)
         .filter(onsite)
         .label("onsite_median_s"),
-    ).select_from(Ticket)
+    )
+    stmt = stmt.select_from(Ticket).where(*m.where)
     row = (await db.execute(stmt)).one()
     counts: dict[str, Any] = {name: int(getattr(row, name) or 0) for name in columns}
     counts["next_visit_at"] = row.next_visit_at
     counts["median_age_s"] = row.median_age_s
     counts["onsite_median_s"] = row.onsite_median_s
     # O mesmo número do aviso do menu (GET /portal/inbox-count).
-    counts["portal_requests"] = await portal_svc.inbox_count(db)
+    counts["portal_requests"] = await portal_svc.inbox_count(db, m.viewer)
     return counts
 
 
@@ -889,7 +919,7 @@ async def _part_requests(db: AsyncSession, m: Moment) -> tuple[int, list[Attenti
         select(func.count())
         .select_from(TicketPartRequest)
         .join(Ticket, Ticket.id == TicketPartRequest.ticket_id)
-        .where(cond)
+        .where(cond, *m.where)
     )
     if not count:
         return 0, []
@@ -905,7 +935,7 @@ async def _part_requests(db: AsyncSession, m: Moment) -> tuple[int, list[Attenti
             )
             .join(TicketPartRequest, TicketPartRequest.ticket_id == Ticket.id)
             .outerjoin(asker, asker.id == TicketPartRequest.requested_by_id)
-            .where(cond)
+            .where(cond, *m.where)
             .order_by(TicketPartRequest.created_at.asc())
             .limit(ITEMS)
         )
@@ -925,7 +955,12 @@ async def _part_requests(db: AsyncSession, m: Moment) -> tuple[int, list[Attenti
 
 async def _costs(db: AsyncSession, m: Moment) -> tuple[int, list[AttentionItem]]:
     cond = TicketExpense.status == ExpenseStatus.PENDING
-    count = await db.scalar(select(func.count()).select_from(TicketExpense).where(cond))
+    count = await db.scalar(
+        select(func.count())
+        .select_from(TicketExpense)
+        .join(Ticket, Ticket.id == TicketExpense.ticket_id)
+        .where(cond, *m.where)
+    )
     if not count:
         return 0, []
     payee = aliased(User, name="expense_technician")
@@ -939,7 +974,7 @@ async def _costs(db: AsyncSession, m: Moment) -> tuple[int, list[AttentionItem]]
             )
             .join(TicketExpense, TicketExpense.ticket_id == Ticket.id)
             .outerjoin(payee, payee.id == TicketExpense.technician_id)
-            .where(cond)
+            .where(cond, *m.where)
             .order_by(TicketExpense.created_at.asc())
             .limit(ITEMS)
         )
@@ -967,7 +1002,7 @@ async def _payouts(db: AsyncSession, m: Moment) -> tuple[int, list[AttentionItem
         select(func.count())
         .select_from(TicketPayout)
         .join(Ticket, Ticket.id == TicketPayout.ticket_id)
-        .where(cond)
+        .where(cond, *m.where)
     )
     if not count:
         return 0, []
@@ -977,7 +1012,7 @@ async def _payouts(db: AsyncSession, m: Moment) -> tuple[int, list[AttentionItem
             _ticket_select(TicketPayout.amount, payee.name.label("payee_name"))
             .join(TicketPayout, TicketPayout.ticket_id == Ticket.id)
             .outerjoin(payee, payee.id == TicketPayout.technician_id)
-            .where(cond)
+            .where(cond, *m.where)
             .order_by(Ticket.resolved_at.asc(), Ticket.number)
             .limit(ITEMS)
         )
@@ -1027,7 +1062,7 @@ async def _quotes(db: AsyncSession, m: Moment) -> tuple[int, list[AttentionItem]
         select(func.count())
         .select_from(Quote)
         .join(Ticket, Ticket.id == Quote.ticket_id)
-        .where(cond)
+        .where(cond, *m.where)
     )
     if not count:
         return 0, []
@@ -1035,7 +1070,7 @@ async def _quotes(db: AsyncSession, m: Moment) -> tuple[int, list[AttentionItem]
         await db.execute(
             _ticket_select(Quote)
             .join(Quote, Quote.ticket_id == Ticket.id)
-            .where(cond)
+            .where(cond, *m.where)
             .order_by(*quotes_svc.follow_up_order())
             .limit(ITEMS)
         )
@@ -1137,17 +1172,26 @@ OTHER_GROUPS: dict[str, OtherGroup] = {
     "payouts_pending": _payouts,
     "quotes_waiting": _quotes,
 }
+# Grupos de outra tela: sem o acesso a ela, o grupo nem é calculado.
+OTHER_GROUP_ITEMS: dict[str, str] = {
+    "costs_pending": "commercial.expenses",
+    "payouts_pending": "commercial.payouts",
+    "quotes_waiting": "commercial.quotes",
+}
 
 
 async def _attention(db: AsyncSession, m: Moment, counts: dict[str, Any]) -> list[AttentionGroup]:
     groups: list[AttentionGroup] = []
     for key, group in TICKET_GROUPS.items():
         count = counts[key]
-        if count:
+        if count and m.allows(GROUPS[key].link):
             extra = group.extra() if group.extra else ()
             items = await _ticket_items(db, m, group.cond(m), group.order(m), group.reason, extra)
             groups.append(_group(key, count, items, m))
     for key, load in OTHER_GROUPS.items():
+        item = OTHER_GROUP_ITEMS.get(key)
+        if (item is not None and not m.can(item)) or not m.allows(GROUPS[key].link):
+            continue
         count, items = await load(db, m)
         if count:
             groups.append(_group(key, count, items, m))
@@ -1193,7 +1237,8 @@ async def _recent_rows(db: AsyncSession, m: Moment) -> list[Any]:
             Ticket.resolved_at >= week_start,
             Ticket.arrival_due_at >= since,
             Ticket.arrived_at >= since,
-        )
+        ),
+        *m.where,
     )
     return list((await db.execute(stmt)).all())
 
@@ -1304,7 +1349,9 @@ async def _suggest_recurrence(db: AsyncSession, m: Moment, rows: list[Any]) -> S
     )
 
 
-async def _suggest_top_customer(db: AsyncSession, counts: dict[str, Any]) -> Suggestion | None:
+async def _suggest_top_customer(
+    db: AsyncSession, m: Moment, counts: dict[str, Any]
+) -> Suggestion | None:
     total_open = counts["open"]
     if not total_open:
         return None
@@ -1312,7 +1359,7 @@ async def _suggest_top_customer(db: AsyncSession, counts: dict[str, Any]) -> Sug
         await db.execute(
             select(Ticket.customer_id, Customer.name, func.count().label("n"))
             .join(Customer, Customer.id == Ticket.customer_id)
-            .where(_open())
+            .where(_open(), *m.where)
             .group_by(Ticket.customer_id, Customer.name)
             .order_by(func.count().desc(), Customer.name)
             .limit(1)
@@ -1329,7 +1376,9 @@ async def _suggest_top_customer(db: AsyncSession, counts: dict[str, Any]) -> Sug
     )
 
 
-async def _suggest_slow_service(db: AsyncSession) -> Suggestion | None:
+async def _suggest_slow_service(db: AsyncSession, m: Moment) -> Suggestion | None:
+    if not m.allows("/tipos-servico"):
+        return None
     types = (
         await db.execute(
             select(ServiceType.id, ServiceType.name, ServiceType.estimated_minutes).where(
@@ -1374,10 +1423,10 @@ async def _suggestions(
         await _suggest_tomorrow(m, counts),
         await _suggest_late_technician(db, m, rows),
         await _suggest_recurrence(db, m, rows),
-        await _suggest_top_customer(db, counts),
-        await _suggest_slow_service(db),
+        await _suggest_top_customer(db, m, counts),
+        await _suggest_slow_service(db, m),
     ]
-    return [s for s in found if s is not None][:MAX_SUGGESTIONS]
+    return [s for s in found if s is not None and m.allows(s.link)][:MAX_SUGGESTIONS]
 
 
 # --------------------------------------------------------------------------- sinais vitais
@@ -1392,7 +1441,7 @@ async def _visit_technicians(db: AsyncSession, m: Moment) -> tuple[int, int]:
     window = and_(Ticket.scheduled_start >= m.day_start, Ticket.scheduled_start < m.tomorrow_end)
     stmt = select(
         func.count(technicians).filter(today), func.count(technicians).filter(tomorrow)
-    ).where(window)
+    ).where(window, *m.where)
     today_n, tomorrow_n = (await db.execute(stmt)).one()
     return today_n or 0, tomorrow_n or 0
 
@@ -1423,6 +1472,7 @@ async def _store_return(db: AsyncSession, m: Moment) -> Ratio:
             Ticket.location_id.is_not(None),
             Ticket.resolved_at >= followed_until - timedelta(days=RETURN_BASE_DAYS),
             Ticket.resolved_at < followed_until,
+            *m.where,
         )
     )
     row = (await db.execute(stmt)).one()
@@ -1434,9 +1484,11 @@ async def _unproductive_events(db: AsyncSession, m: Moment) -> int:
     stmt = (
         select(func.count())
         .select_from(TicketEvent)
+        .join(Ticket, Ticket.id == TicketEvent.ticket_id)
         .where(
             TicketEvent.event_type == TicketEventType.UNPRODUCTIVE_VISIT,
             TicketEvent.created_at >= m.recent_start,
+            *m.where,
         )
     )
     return await db.scalar(stmt) or 0
@@ -1448,7 +1500,7 @@ async def _team_rows(db: AsyncSession, m: Moment) -> list[Any]:
         select(Ticket.assignee_id, User.last_login_at, func.count().label("resolved"))
         .select_from(Ticket)
         .join(User, User.id == Ticket.assignee_id)
-        .where(User.role == UserRole.TECHNICIAN, Ticket.resolved_at >= m.recent_start)
+        .where(User.role == UserRole.TECHNICIAN, Ticket.resolved_at >= m.recent_start, *m.where)
         .group_by(Ticket.assignee_id, User.last_login_at)
     )
     return list((await db.execute(stmt)).all())
@@ -1471,7 +1523,7 @@ async def _customers(db: AsyncSession, m: Moment, entered: int) -> HomeCustomers
         )
         .select_from(Ticket)
         .join(Customer, Customer.id == Ticket.customer_id)
-        .where(or_(created, Ticket.arrived_at >= m.recent_start))
+        .where(or_(created, Ticket.arrived_at >= m.recent_start), *m.where)
         .group_by(Ticket.customer_id, Customer.name)
     )
     rows = [row for row in (await db.execute(stmt)).all() if row.created]
@@ -1519,7 +1571,7 @@ async def _finance(db: AsyncSession, m: Moment) -> HomeFinance:
             )
             .select_from(TicketPayout)
             .join(Ticket, Ticket.id == TicketPayout.ticket_id)
-            .where(TicketPayout.status == PayoutStatus.PENDING)
+            .where(TicketPayout.status == PayoutStatus.PENDING, *m.where)
         )
     ).one()
 
@@ -1537,7 +1589,7 @@ async def _finance(db: AsyncSession, m: Moment) -> HomeFinance:
                 func.count().filter(Ticket.resolved_at < m.now - TAG_OLD),
             )
             .select_from(Ticket)
-            .where(done, has_any_tag(keys))
+            .where(done, has_any_tag(keys), *m.where)
         )
         tag_tickets, tag_technicians, tag_old = (await db.execute(stmt)).one()
 
@@ -1559,14 +1611,15 @@ async def _finance(db: AsyncSession, m: Moment) -> HomeFinance:
             )
             .select_from(Quote)
             .join(Ticket, Ticket.id == Quote.ticket_id)
-            .where(Ticket.status != S.CANCELLED)
+            .where(Ticket.status != S.CANCELLED, *m.where)
         )
     ).one()
     costs = (
         await db.execute(
             select(func.count().label("pending"), func.sum(TicketExpense.total).label("total"))
             .select_from(TicketExpense)
-            .where(TicketExpense.status == ExpenseStatus.PENDING)
+            .join(Ticket, Ticket.id == TicketExpense.ticket_id)
+            .where(TicketExpense.status == ExpenseStatus.PENDING, *m.where)
         )
     ).one()
     return HomeFinance(
@@ -1635,6 +1688,7 @@ async def _quotes_pulse(db: AsyncSession, m: Moment) -> HomeQuotes:
         )
         .select_from(Quote)
         .join(Ticket, Ticket.id == Quote.ticket_id)
+        .where(*m.where)
     )
     row = (await db.execute(stmt)).one()
     return HomeQuotes(
@@ -1829,9 +1883,14 @@ async def _pulse(
         quality=_quality(counts, store_return, unproductive),
         team=_team(team_rows, counts, onsite_hours),
         customers=await _customers(db, m, counts["entered_30d"]),
-        # Todos que abrem a tela (TicketManagerUser) veem os valores.
-        finance=await _finance(db, m),
-        quotes=await _quotes_pulse(db, m),
+        # Valores só para quem tem Custos extras e Pagamentos; orçamentos, com Orçamentos (sem o
+        # acesso, o bloco nem é calculado e a tela mostra "sem permissão").
+        finance=(
+            await _finance(db, m)
+            if m.can("commercial.expenses") and m.can("commercial.payouts")
+            else None
+        ),
+        quotes=await _quotes_pulse(db, m) if m.can("commercial.quotes") else None,
         weeks=_weeks(m, counts),
     )
 
@@ -1839,8 +1898,10 @@ async def _pulse(
 # --------------------------------------------------------------------------- tela
 
 
-async def overview(db: AsyncSession) -> HomeOverview:
-    m = _moment()
+async def overview(db: AsyncSession, user: Any = None) -> HomeOverview:
+    """A tela inicial de quem pede: só as OS da fila que ele vê e os blocos das telas a que ele
+    tem acesso. Sem o usuário (serviço chamado direto), tudo."""
+    m = _moment(user)
     # A varredura tem cerca de 80 expressões e o custo estimado passa do jit_above_cost: o
     # PostgreSQL gastava ~0,9 s compilando (JIT) consultas que rodam em ~0,2 s. Desligado só até o
     # fim da transação deste pedido (o SET LOCAL de set_config com is_local; a tela só lê).

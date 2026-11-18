@@ -6,13 +6,13 @@ import { ArrowDown, ArrowUp, ArrowUpDown, Building2, MapPin, Plus, Search, Squar
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
+import { NoAccess } from "@/components/NoAccess";
 import { TagChips } from "@/components/TagChips";
 import { Button, Card, Checkbox, EmptyState, ErrorBox, Input, LoadingBlock, PageHeader, Table, Td, Th } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
-import { canManageTickets } from "@/lib/constants";
 import { formatDate, formatDocument } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
+import { useCan } from "@/lib/permissions";
 import type { Customer } from "@/lib/types";
 import { CustomerDialog } from "./CustomerDialog";
 
@@ -109,8 +109,10 @@ function SortTh({
 const plural = (n: number, one: string, many: string) => `${n.toLocaleString("pt-BR")} ${n === 1 ? one : many}`;
 
 function CustomersView() {
-  const { user } = useAuth();
-  const canEdit = canManageTickets(user?.role);
+  const canView = useCan("base.customers");
+  const canEdit = useCan("base.customers", "edit");
+  // Os locais do cliente são da tela Locais: sem acesso a ela, o número fica só como texto.
+  const canLocations = useCan("base.locations");
   const [params, setParams] = useUrlParams();
   const urlQ = params.get("q") ?? "";
   const showInactive = params.get("inativos") === "1";
@@ -137,6 +139,7 @@ function CustomersView() {
     staleTime: 60_000,
     // Trocar a busca mantém a tabela (esmaecida) até a resposta, sem piscar o esqueleto.
     placeholderData: keepPreviousData,
+    enabled: canView,
   });
   const all = customers.data ?? [];
   const hidden = showInactive ? 0 : all.filter((c) => !c.is_active).length;
@@ -145,6 +148,8 @@ function CustomersView() {
     const desc = sort?.key === key ? !sort.desc : !ASCENDING_FIRST.includes(key);
     setParams({ ordem: `${desc ? "-" : ""}${key}` });
   };
+
+  if (!canView) return <NoAccess kind="module" item="base.customers" />;
 
   return (
     <div className="mx-auto max-w-7xl">
@@ -231,14 +236,18 @@ function CustomersView() {
                     </Td>
                     <Td className="font-mono text-xs whitespace-nowrap">{formatDocument(c.document)}</Td>
                     <Td className="text-right">
-                      <Link
-                        href={`/locais?customer_id=${c.id}`}
-                        className="inline-flex items-center gap-1 text-brand hover:underline"
-                        aria-label={`${plural(c.locations_count, "local", "locais")} de ${c.name}`}
-                      >
-                        <MapPin className="size-3.5" />
-                        {c.locations_count.toLocaleString("pt-BR")}
-                      </Link>
+                      {canLocations ? (
+                        <Link
+                          href={`/locais?customer_id=${c.id}`}
+                          className="inline-flex items-center gap-1 text-brand hover:underline"
+                          aria-label={`${plural(c.locations_count, "local", "locais")} de ${c.name}`}
+                        >
+                          <MapPin className="size-3.5" />
+                          {c.locations_count.toLocaleString("pt-BR")}
+                        </Link>
+                      ) : (
+                        <span className="tabular-nums">{c.locations_count.toLocaleString("pt-BR")}</span>
+                      )}
                     </Td>
                     <Td className="text-right tabular-nums">
                       {c.open_tickets > 0 ? (

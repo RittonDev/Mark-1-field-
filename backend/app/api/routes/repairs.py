@@ -4,7 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
 
-from app.api.deps import DB, TicketManagerUser
+from app.api.deps import DB, access_user
 from app.api.files import stored_file
 from app.core.enums import RepairStatus
 from app.core.security import InvalidToken, decode_token
@@ -13,6 +13,10 @@ from app.schemas.repair import RepairIn, RepairOut, RepairStatusChange, RepairSu
 from app.services import repairs as svc
 
 router = APIRouter(tags=["repairs"])
+
+# Tela de Assistência externa (não é lista de OS: o link para a OS segue a fila de quem abre).
+RepairsView = access_user("operation.repairs")
+RepairsEdit = access_user("operation.repairs", level="edit")
 
 
 async def _full(db: DB, repair_id: uuid.UUID) -> RepairOut:
@@ -24,7 +28,7 @@ async def _full(db: DB, repair_id: uuid.UUID) -> RepairOut:
 @router.get("/repairs", response_model=list[RepairOut])
 async def list_repairs(
     db: DB,
-    _: TicketManagerUser,
+    _: RepairsView,
     status_: Annotated[RepairStatus | None, Query(alias="status")] = None,
     customer_id: uuid.UUID | None = None,
     q: str | None = None,
@@ -34,26 +38,24 @@ async def list_repairs(
 
 
 @router.get("/repairs/summary", response_model=RepairSummary)
-async def repairs_summary(db: DB, _: TicketManagerUser) -> RepairSummary:
+async def repairs_summary(db: DB, _: RepairsView) -> RepairSummary:
     return await svc.summary(db)
 
 
 @router.post("/repairs", response_model=RepairOut, status_code=status.HTTP_201_CREATED)
-async def create_repair(body: RepairIn, db: DB, user: TicketManagerUser) -> RepairOut:
+async def create_repair(body: RepairIn, db: DB, user: RepairsEdit) -> RepairOut:
     repair = await svc.create(db, body, user)
     await db.commit()
     return await _full(db, repair.id)
 
 
 @router.get("/repairs/{repair_id}", response_model=RepairOut)
-async def get_repair(repair_id: uuid.UUID, db: DB, _: TicketManagerUser) -> RepairOut:
+async def get_repair(repair_id: uuid.UUID, db: DB, _: RepairsView) -> RepairOut:
     return await _full(db, repair_id)
 
 
 @router.put("/repairs/{repair_id}", response_model=RepairOut)
-async def update_repair(
-    repair_id: uuid.UUID, body: RepairIn, db: DB, _: TicketManagerUser
-) -> RepairOut:
+async def update_repair(repair_id: uuid.UUID, body: RepairIn, db: DB, _: RepairsEdit) -> RepairOut:
     await svc.update(db, await svc.get(db, repair_id), body)
     await db.commit()
     return await _full(db, repair_id)
@@ -61,7 +63,7 @@ async def update_repair(
 
 @router.post("/repairs/{repair_id}/status", response_model=RepairOut)
 async def change_repair_status(
-    repair_id: uuid.UUID, body: RepairStatusChange, db: DB, user: TicketManagerUser
+    repair_id: uuid.UUID, body: RepairStatusChange, db: DB, user: RepairsEdit
 ) -> RepairOut:
     """Próxima etapa (`allowed_next`) ou a volta para a anterior (`previous_status`, com motivo
     em `note`), para a etapa clicada por engano."""
@@ -74,7 +76,7 @@ async def change_repair_status(
 async def add_repair_photo(
     repair_id: uuid.UUID,
     db: DB,
-    user: TicketManagerUser,
+    user: RepairsEdit,
     file: Annotated[UploadFile, File()],
     caption: Annotated[str | None, Form(max_length=200)] = None,
 ) -> RepairOut:

@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from fastapi.responses import FileResponse
 from sqlalchemy import func, select
 
-from app.api.deps import DB, ManagerUser, TicketManagerUser
+from app.api.deps import DB, MANAGER_ROLES, access_user
 from app.api.files import stored_file
 from app.core.config import settings
 from app.core.enums import ApplicationStatus
@@ -35,6 +35,11 @@ from app.services import onboarding as svc
 public = APIRouter(prefix="/public/onboarding", tags=["onboarding"])
 # Análise das fichas pela gestão (analistas e gestores).
 router = APIRouter(prefix="/onboarding", tags=["onboarding"])
+
+OnboardingView = access_user("base.onboarding")
+OnboardingEdit = access_user("base.onboarding", level="edit")
+# Exclusão da ficha a pedido do titular (LGPD): também só admin e supervisor, como antes.
+OnboardingDelete = access_user("base.onboarding", level="edit", roles=MANAGER_ROLES)
 
 INVITE_GONE = "Este link de cadastro expirou ou já foi usado. Peça um novo link à Maxx Field."
 TOO_MANY = "Muitas fichas enviadas por este link. Tente mais tarde."
@@ -94,7 +99,7 @@ def _invite_out(invite: OnboardingInvite) -> InviteOut:
 
 
 @router.get("/invites", response_model=list[InviteOut])
-async def list_invites(db: DB, _: TicketManagerUser) -> list[InviteOut]:
+async def list_invites(db: DB, _: OnboardingView) -> list[InviteOut]:
     rows = await db.scalars(
         select(OnboardingInvite).order_by(OnboardingInvite.created_at.desc()).limit(200)
     )
@@ -102,14 +107,14 @@ async def list_invites(db: DB, _: TicketManagerUser) -> list[InviteOut]:
 
 
 @router.post("/invites", response_model=InviteCreated, status_code=status.HTTP_201_CREATED)
-async def create_invite(body: InviteCreate, db: DB, user: TicketManagerUser) -> InviteCreated:
+async def create_invite(body: InviteCreate, db: DB, user: OnboardingEdit) -> InviteCreated:
     invite, token = await svc.create_invite(db, body, user)
     await db.commit()
     return InviteCreated(**_invite_out(invite).model_dump(), token=token)
 
 
 @router.delete("/invites/{invite_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def revoke_invite(invite_id: uuid.UUID, db: DB, _: TicketManagerUser) -> Response:
+async def revoke_invite(invite_id: uuid.UUID, db: DB, _: OnboardingEdit) -> Response:
     invite = await db.get(OnboardingInvite, invite_id)
     if invite is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Link não encontrado")
@@ -125,7 +130,7 @@ async def revoke_invite(invite_id: uuid.UUID, db: DB, _: TicketManagerUser) -> R
 @router.get("/applications", response_model=list[ApplicationSummary])
 async def list_applications(
     db: DB,
-    _: TicketManagerUser,
+    _: OnboardingView,
     status_: Annotated[ApplicationStatus | None, Query(alias="status")] = None,
 ) -> list[TechnicianApplication]:
     stmt = select(TechnicianApplication).order_by(TechnicianApplication.created_at.desc())
@@ -135,7 +140,7 @@ async def list_applications(
 
 
 @router.get("/applications/pending-count")
-async def pending_count(db: DB, _: TicketManagerUser) -> dict[str, int]:
+async def pending_count(db: DB, _: OnboardingView) -> dict[str, int]:
     count = await db.scalar(
         select(func.count()).where(TechnicianApplication.status == ApplicationStatus.PENDING)
     )
@@ -155,7 +160,7 @@ def _detail(application: TechnicianApplication) -> ApplicationDetail:
 
 @router.get("/applications/{application_id}", response_model=ApplicationDetail)
 async def get_application(
-    application_id: uuid.UUID, db: DB, _: TicketManagerUser
+    application_id: uuid.UUID, db: DB, _: OnboardingView
 ) -> ApplicationDetail:
     return _detail(await svc.get_application(db, application_id))
 
@@ -176,7 +181,7 @@ async def application_photo(application_id: uuid.UUID, token: str, db: DB) -> Fi
 
 
 @router.delete("/applications/{application_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_application(application_id: uuid.UUID, db: DB, _: ManagerUser) -> Response:
+async def delete_application(application_id: uuid.UUID, db: DB, _: OnboardingDelete) -> Response:
     """Pedido de exclusão do titular (LGPD): apaga a ficha pendente ou reprovada e a foto."""
     application = await svc.get_application(db, application_id)
     photo = await svc.delete_application(db, application)
@@ -187,7 +192,7 @@ async def delete_application(application_id: uuid.UUID, db: DB, _: ManagerUser) 
 
 @router.post("/applications/{application_id}/approve", response_model=UserOut)
 async def approve_application(
-    application_id: uuid.UUID, body: ApplicationApprove, db: DB, user: TicketManagerUser
+    application_id: uuid.UUID, body: ApplicationApprove, db: DB, user: OnboardingEdit
 ) -> UserOut:
     """Aprova: o técnico entra na base e já acessa o app com o e-mail e a senha da ficha."""
     application = await svc.get_application(db, application_id)
@@ -199,7 +204,7 @@ async def approve_application(
 
 @router.post("/applications/{application_id}/reject", response_model=ApplicationDetail)
 async def reject_application(
-    application_id: uuid.UUID, body: ApplicationReject, db: DB, user: TicketManagerUser
+    application_id: uuid.UUID, body: ApplicationReject, db: DB, user: OnboardingEdit
 ) -> ApplicationDetail:
     application = await svc.get_application(db, application_id)
     await svc.reject(db, application, body.reason, user)

@@ -11,13 +11,16 @@ from app.schemas.common import Ref
 class ConflictItem(BaseModel):
     # Quem está ocupado (o responsável ou outro técnico da visita).
     who: str | None = None
-    id: uuid.UUID
-    code: str
+    # Sem id e sem código quando a OS é de uma fila que a pessoa não vê (hidden): o horário
+    # ocupado aparece, os detalhes não.
+    id: uuid.UUID | None = None
+    code: str | None = None
     title: str
     customer: str | None
     location: str | None
     start: datetime
     end: datetime
+    hidden: bool = False
 
 
 class CalendarLocation(BaseModel):

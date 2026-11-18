@@ -10,6 +10,19 @@ class PermissionDenied(DomainError):
     """Usuário sem permissão para a ação (HTTP 403)."""
 
 
+class AccessDenied(PermissionDenied):
+    """403 com código, para a tela amigável de "sem acesso" (core/permissions.py).
+
+    code: MODULE_FORBIDDEN (tela fora do perfil), QUEUE_FORBIDDEN (OS ou fila de outro analista)
+    ou ACCESS_CAP (dar mais acesso do que se tem). Os extras (item, module, required) vão no corpo.
+    """
+
+    def __init__(self, message: str, *, code: str, **extra: str) -> None:
+        self.code = code
+        self.extra = extra
+        super().__init__(message)
+
+
 class NotFound(DomainError):
     """Registro inexistente ou fora do escopo do usuário (HTTP 404)."""
 

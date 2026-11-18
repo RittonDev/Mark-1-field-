@@ -6,6 +6,7 @@ import { BellRing, CalendarClock, Download, FileText, Link2, Loader2, Plus, Sear
 import { useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useState } from "react";
 import { Tabs } from "@/components/motion";
+import { NoAccess } from "@/components/NoAccess";
 import { useSearchChange } from "@/components/operacao/hooks";
 import { QUOTE_EDITABLE, QuoteViewer } from "@/components/quotes/QuoteViewer";
 import { QuoteEditor, type QuotePrefill, type QuoteTicketRef, ShareDialog, type ShareMode } from "@/components/ticket/QuotesCard";
@@ -32,11 +33,11 @@ import {
   Th,
 } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
-import { canManageTickets, STATUS } from "@/lib/constants";
+import { STATUS } from "@/lib/constants";
 import { downloadCsv } from "@/lib/download";
 import { dayKey, formatDate, formatDateTime, formatMoney, moneyInput, OPERATION_TZ, todayISO } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
+import { useCan } from "@/lib/permissions";
 import {
   dayMonth,
   daysUntil,
@@ -189,8 +190,8 @@ function setParams(patch: Record<string, string | null>) {
 }
 
 export default function QuotesPage() {
-  const { user } = useAuth();
-  if (user && !canManageTickets(user.role)) return <ErrorBox message="Orçamentos são da gestão." />;
+  const canView = useCan("commercial.quotes");
+  if (!canView) return <NoAccess kind="module" item="commercial.quotes" />;
   return (
     <div className="mx-auto max-w-7xl">
       <PageHeader title="Orçamentos" />
@@ -362,6 +363,8 @@ type Sharing = { row: QuoteListRow; mode: ShareMode };
 function QuoteList() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  // Só com Visualizar: lista, filtros, exportação e a janela do orçamento (PDF e o link já gerado).
+  const canEdit = useCan("commercial.quotes", "edit");
   const now = useNow(60_000);
   const today = dayKey(now);
   const months = useMemo(() => monthOptions(), []);
@@ -567,10 +570,12 @@ function QuoteList() {
             <Download className="size-4" />
             Exportar CSV
           </Button>
-          <Button variant="primary" onClick={() => setPicking(true)}>
-            <Plus className="size-4" />
-            Novo orçamento
-          </Button>
+          {canEdit ? (
+            <Button variant="primary" onClick={() => setPicking(true)}>
+              <Plus className="size-4" />
+              Novo orçamento
+            </Button>
+          ) : null}
         </div>
       </div>
       <div className="mb-4 flex flex-wrap items-center gap-2" role="group" aria-label="Situação">
@@ -655,7 +660,7 @@ function QuoteList() {
                       <Th>Validade</Th>
                       <Th>Situação</Th>
                       <Th className="hidden lg:table-cell">Criado</Th>
-                      <Th className="edit-col">Editar</Th>
+                      {canEdit ? <Th className="edit-col">Editar</Th> : null}
                     </tr>
                   </thead>
                   <tbody>
@@ -714,56 +719,58 @@ function QuoteList() {
                             {formatDate(q.created_at)}
                             {q.created_by ? ` · ${q.created_by.name.split(" ")[0]}` : ""}
                           </Td>
-                          <Td className="edit-col">
-                            <span className="inline-flex items-center gap-1.5">
-                              {action === "remind" ? (
-                                <RowAction label={`Cobrar o ${q.code}`} onClick={() => setSharing({ row: q, mode: "remind" })}>
-                                  <BellRing className="size-4" />
-                                </RowAction>
-                              ) : action === "link" || action === "send" ? (
-                                <RowAction
-                                  label={action === "link" ? `Gerar o link do ${q.code}` : `Enviar o ${q.code} ao cliente`}
-                                  loading={send.isPending && send.variables?.id === q.id}
-                                  disabled={send.isPending}
-                                  onClick={() => send.mutate(q)}
-                                >
-                                  <Send className="size-4" />
-                                </RowAction>
-                              ) : action === "renew" || needsRenew(q, today) ? (
-                                // Validade vencida: enviar seria recusado; renovar dá a data nova e envia.
-                                <RowAction label={`Renovar o ${q.code} (nova validade)`} onClick={() => setRenewing(q)}>
-                                  <CalendarClock className="size-4" />
-                                </RowAction>
-                              ) : q.status === "sent" && q.link ? (
-                                <RowAction label={`Link do ${q.code} para o cliente`} onClick={() => setSharing({ row: q, mode: "share" })}>
-                                  <Share2 className="size-4" />
-                                </RowAction>
-                              ) : q.status === "draft" || q.status === "sent" ? (
-                                <RowAction
-                                  label={q.status === "draft" ? `Enviar o ${q.code} ao cliente` : `Gerar o link do ${q.code}`}
-                                  loading={send.isPending && send.variables?.id === q.id}
-                                  disabled={send.isPending}
-                                  onClick={() => send.mutate(q)}
-                                >
-                                  <Send className="size-4" />
-                                </RowAction>
-                              ) : (q.status === "approved" || q.status === "rejected") && q.link ? (
-                                // Já respondido: o link mostra ao cliente o documento com a decisão.
-                                <RowAction label={`Link do ${q.code} (já respondido)`} onClick={() => setSharing({ row: q, mode: "share" })}>
-                                  <Link2 className="size-4" />
-                                </RowAction>
-                              ) : (
-                                <span className="size-8" aria-hidden />
-                              )}
-                              {QUOTE_EDITABLE.includes(q.status) ? (
-                                <RowAction label={`Editar o ${q.code}`} onClick={() => setEditing(q)}>
-                                  <SquarePen className="size-4" />
-                                </RowAction>
-                              ) : (
-                                <span className="size-8" aria-hidden />
-                              )}
-                            </span>
-                          </Td>
+                          {canEdit ? (
+                            <Td className="edit-col">
+                              <span className="inline-flex items-center gap-1.5">
+                                {action === "remind" ? (
+                                  <RowAction label={`Cobrar o ${q.code}`} onClick={() => setSharing({ row: q, mode: "remind" })}>
+                                    <BellRing className="size-4" />
+                                  </RowAction>
+                                ) : action === "link" || action === "send" ? (
+                                  <RowAction
+                                    label={action === "link" ? `Gerar o link do ${q.code}` : `Enviar o ${q.code} ao cliente`}
+                                    loading={send.isPending && send.variables?.id === q.id}
+                                    disabled={send.isPending}
+                                    onClick={() => send.mutate(q)}
+                                  >
+                                    <Send className="size-4" />
+                                  </RowAction>
+                                ) : action === "renew" || needsRenew(q, today) ? (
+                                  // Validade vencida: enviar seria recusado; renovar dá a data nova e envia.
+                                  <RowAction label={`Renovar o ${q.code} (nova validade)`} onClick={() => setRenewing(q)}>
+                                    <CalendarClock className="size-4" />
+                                  </RowAction>
+                                ) : q.status === "sent" && q.link ? (
+                                  <RowAction label={`Link do ${q.code} para o cliente`} onClick={() => setSharing({ row: q, mode: "share" })}>
+                                    <Share2 className="size-4" />
+                                  </RowAction>
+                                ) : q.status === "draft" || q.status === "sent" ? (
+                                  <RowAction
+                                    label={q.status === "draft" ? `Enviar o ${q.code} ao cliente` : `Gerar o link do ${q.code}`}
+                                    loading={send.isPending && send.variables?.id === q.id}
+                                    disabled={send.isPending}
+                                    onClick={() => send.mutate(q)}
+                                  >
+                                    <Send className="size-4" />
+                                  </RowAction>
+                                ) : (q.status === "approved" || q.status === "rejected") && q.link ? (
+                                  // Já respondido: o link mostra ao cliente o documento com a decisão.
+                                  <RowAction label={`Link do ${q.code} (já respondido)`} onClick={() => setSharing({ row: q, mode: "share" })}>
+                                    <Link2 className="size-4" />
+                                  </RowAction>
+                                ) : (
+                                  <span className="size-8" aria-hidden />
+                                )}
+                                {QUOTE_EDITABLE.includes(q.status) ? (
+                                  <RowAction label={`Editar o ${q.code}`} onClick={() => setEditing(q)}>
+                                    <SquarePen className="size-4" />
+                                  </RowAction>
+                                ) : (
+                                  <span className="size-8" aria-hidden />
+                                )}
+                              </span>
+                            </Td>
+                          ) : null}
                         </tr>
                       );
                     })}
@@ -784,29 +791,46 @@ function QuoteList() {
             location: openedQuote.location ?? null,
           }}
           onClose={() => setOpened(null)}
-          onEdit={() => {
-            setOpened(null);
-            setEditing(openedQuote);
-          }}
+          // Só com Visualizar: sem editar, enviar, cobrar nem duplicar (fica o PDF e o link já gerado).
+          onEdit={
+            canEdit
+              ? () => {
+                  setOpened(null);
+                  setEditing(openedQuote);
+                }
+              : undefined
+          }
           // Validade vencida: a visualização oferece "Renovar" no lugar de enviar (o envio seria recusado).
-          onRenew={() => {
-            setOpened(null);
-            setRenewing(openedQuote);
-          }}
-          onSend={() => send.mutate(openedQuote)}
+          onRenew={
+            canEdit
+              ? () => {
+                  setOpened(null);
+                  setRenewing(openedQuote);
+                }
+              : undefined
+          }
+          onSend={canEdit ? () => send.mutate(openedQuote) : undefined}
           sending={send.isPending}
           onShare={() => {
             setOpened(null);
             setSharing({ row: openedQuote, mode: "share" });
           }}
-          onRemind={() => {
-            setOpened(null);
-            setSharing({ row: openedQuote, mode: "remind" });
-          }}
-          onDuplicate={() => {
-            setOpened(null);
-            setCreating({ ticket: ticketOf(openedQuote), prefill: duplicateOf(openedQuote) });
-          }}
+          onRemind={
+            canEdit
+              ? () => {
+                  setOpened(null);
+                  setSharing({ row: openedQuote, mode: "remind" });
+                }
+              : undefined
+          }
+          onDuplicate={
+            canEdit
+              ? () => {
+                  setOpened(null);
+                  setCreating({ ticket: ticketOf(openedQuote), prefill: duplicateOf(openedQuote) });
+                }
+              : undefined
+          }
         />
       ) : null}
       {editing ? (
@@ -836,6 +860,7 @@ function QuoteList() {
           ticket={ticketOf(sharingQuote)}
           quote={sharingQuote}
           mode={sharing.mode}
+          readOnly={!canEdit}
           onClose={() => setSharing(null)}
           onRotated={() => refresh(sharingQuote.ticket_id)}
         />
@@ -1035,6 +1060,8 @@ function PickTicketDialog({ onClose, onPick }: { onClose: () => void; onPick: (t
 }
 
 function Catalog() {
+  // Só com Visualizar: a tabela de preços sem criar nem alterar itens.
+  const canEdit = useCan("commercial.quotes", "edit");
   const [editing, setEditing] = useState<QuoteCatalogItem | "new" | null>(null);
   const [search, setSearch] = useState("");
   const term = useDebounced(normalize(search.trim()), 200);
@@ -1065,10 +1092,12 @@ function Catalog() {
         title="Itens e preços"
         description={list ? plural(activeCount, "item ativo", "itens ativos") : undefined}
         actions={
-          <Button size="sm" variant="primary" onClick={() => setEditing("new")}>
-            <Plus className="size-4" />
-            Novo item
-          </Button>
+          canEdit ? (
+            <Button size="sm" variant="primary" onClick={() => setEditing("new")}>
+              <Plus className="size-4" />
+              Novo item
+            </Button>
+          ) : undefined
         }
       />
       <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-3">
@@ -1154,17 +1183,21 @@ function Catalog() {
                 Usos (12 meses)
               </Th>
               <Th className="hidden md:table-cell">Último uso</Th>
-              <Th className="edit-col">Editar</Th>
+              {canEdit ? <Th className="edit-col">Editar</Th> : null}
             </tr>
           </thead>
           <tbody>
             {visible.map((i) => (
               <tr
                 key={i.id}
-                onClick={(e) => {
-                  if (e.currentTarget.contains(e.target as Node)) setEditing(i);
-                }}
-                className="cursor-pointer transition-colors hover:bg-[var(--row-hover)]"
+                onClick={
+                  canEdit
+                    ? (e) => {
+                        if (e.currentTarget.contains(e.target as Node)) setEditing(i);
+                      }
+                    : undefined
+                }
+                className={clsx("transition-colors hover:bg-[var(--row-hover)]", canEdit && "cursor-pointer")}
               >
                 <Td className="max-w-[26rem]">
                   <span className="flex min-w-0 items-center gap-2">
@@ -1186,11 +1219,13 @@ function Catalog() {
                 <Td className="hidden whitespace-nowrap text-ink-muted tabular-nums md:table-cell">
                   {i.last_used_at ? formatDate(i.last_used_at) : "—"}
                 </Td>
-                <Td className="edit-col">
-                  <RowAction label={`Editar ${i.name}`} onClick={() => setEditing(i)}>
-                    <SquarePen className="size-4" />
-                  </RowAction>
-                </Td>
+                {canEdit ? (
+                  <Td className="edit-col">
+                    <RowAction label={`Editar ${i.name}`} onClick={() => setEditing(i)}>
+                      <SquarePen className="size-4" />
+                    </RowAction>
+                  </Td>
+                ) : null}
               </tr>
             ))}
           </tbody>

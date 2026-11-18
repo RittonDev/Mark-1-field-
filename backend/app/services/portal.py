@@ -317,13 +317,19 @@ async def cancel_request(db: AsyncSession, user: User, ticket: Ticket, reason: s
     return ticket
 
 
-async def inbox_count(db: AsyncSession) -> int:
-    """Solicitações do portal esperando a central (novas ou em triagem)."""
+async def inbox_count(db: AsyncSession, viewer: User | None = None) -> int:
+    """Solicitações do portal esperando a central (novas ou em triagem). Com `viewer`, só as
+    que ele vê (quem só vê a própria fila conta as sem analista se tiver a opção)."""
+    vis = tickets_svc.visibility_clause(viewer) if viewer is not None else None
     return (
         await db.scalar(
             select(func.count())
             .select_from(Ticket)
-            .where(Ticket.source == TicketSource.PORTAL, Ticket.status.in_(CANCELLABLE))
+            .where(
+                Ticket.source == TicketSource.PORTAL,
+                Ticket.status.in_(CANCELLABLE),
+                *((vis,) if vis is not None else ()),
+            )
         )
         or 0
     )

@@ -1,10 +1,12 @@
 from fastapi import APIRouter
 
-from app.api.deps import DB, ManagerUser, TicketManagerUser
+from app.api.deps import DB, TicketManagerUser, access_user
 from app.schemas.company import CompanyProfile, CompanyProfileIn
 from app.services import company as svc
 
 router = APIRouter(tags=["settings"])
+
+SettingsEdit = access_user("setup.settings", level="edit")
 
 
 @router.get("/settings/company", response_model=CompanyProfile)
@@ -13,8 +15,8 @@ async def get_company(db: DB, _: TicketManagerUser) -> CompanyProfile:
 
 
 @router.put("/settings/company", response_model=CompanyProfile)
-async def put_company(body: CompanyProfileIn, db: DB, user: ManagerUser) -> CompanyProfile:
-    """Dados da empresa no cabeçalho dos orçamentos e relatórios (supervisor ou admin). O CNPJ
+async def put_company(body: CompanyProfileIn, db: DB, user: SettingsEdit) -> CompanyProfile:
+    """Dados da empresa no cabeçalho dos orçamentos e relatórios (Configurações em Editar). O CNPJ
     precisa ser válido e é guardado sem pontuação."""
     saved = await svc.save_profile(db, body, user)
     await db.commit()

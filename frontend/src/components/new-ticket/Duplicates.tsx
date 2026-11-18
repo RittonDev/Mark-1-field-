@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ExternalLink, TriangleAlert } from "lucide-react";
+import { ExternalLink, Info, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { StatusBadge } from "@/components/badges";
 import { TicketLink } from "@/components/ticket/TicketLink";
@@ -15,10 +15,29 @@ import { dayTimeLabel } from "./dayTime";
 const PANEL_TITLE = "Abre a OS no painel, por cima desta tela (Ctrl+clique: outra aba)";
 
 /**
- * OS ainda abertas na mesma loja: evita mandar dois técnicos para o mesmo problema. Cada OS abre no
- * painel por cima da Nova OS (o formulário continua aqui).
+ * OS abertas da loja nas filas que quem abre a OS não vê ("Somente a própria fila"): só o número, sem
+ * os dados delas. Neutro: não é problema, é para não mandar dois técnicos ao mesmo chamado.
  */
-export function OpenAtLocation({ locationId }: { locationId: UUID }) {
+function OtherQueuesNote({ count, more }: { count: number; more: boolean }) {
+  const what =
+    count === 1 ? "1 OS aberta desta loja em outra fila" : `${count.toLocaleString("pt-BR")} OS abertas desta loja em outras filas`;
+  return (
+    <p
+      className="flex items-center gap-1.5 text-xs text-ink-muted"
+      title="Seu acesso mostra só a sua fila: o analista da outra fila cuida delas"
+    >
+      <Info aria-hidden className="size-3.5 shrink-0 text-ink-subtle" />
+      {more ? `Mais ${what}.` : `${what.charAt(0).toUpperCase()}${what.slice(1)}.`}
+    </p>
+  );
+}
+
+/**
+ * OS ainda abertas na mesma loja: evita mandar dois técnicos para o mesmo problema. Cada OS abre no
+ * painel por cima da Nova OS (o formulário continua aqui). `otherQueues`: as abertas da loja em filas
+ * que a pessoa não vê (vem do contexto da loja, /intake/context).
+ */
+export function OpenAtLocation({ locationId, otherQueues = 0 }: { locationId: UUID; otherQueues?: number }) {
   const now = useNow(60_000);
   const open = useQuery({
     queryKey: ["tickets", "open-at-location", locationId],
@@ -27,8 +46,9 @@ export function OpenAtLocation({ locationId }: { locationId: UUID }) {
     staleTime: 15_000,
   });
   const data = open.data;
-  if (!data || data.total === 0) return null;
-  return (
+  if (!data) return null;
+  if (data.total === 0) return otherQueues > 0 ? <OtherQueuesNote count={otherQueues} more={false} /> : null;
+  const box = (
     <div className="animate-enter rounded-lg border border-amber-200 bg-amber-50/70 p-3 dark:border-amber-500/30 dark:bg-amber-500/10" role="status">
       <p className="flex items-center gap-1.5 text-sm font-semibold text-amber-900 dark:text-amber-200">
         <TriangleAlert aria-hidden className="size-4 shrink-0" />
@@ -65,6 +85,13 @@ export function OpenAtLocation({ locationId }: { locationId: UUID }) {
         ) : null}
       </div>
     </div>
+  );
+  if (otherQueues <= 0) return box;
+  return (
+    <>
+      {box}
+      <OtherQueuesNote count={otherQueues} more />
+    </>
   );
 }
 

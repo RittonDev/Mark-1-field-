@@ -7,12 +7,14 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 import { StatusBadge } from "@/components/badges";
+import { NoAccess } from "@/components/NoAccess";
 import { ProjectDialog } from "@/components/ProjectDialog";
 import { Button, Card, CardHeader, ErrorBox, LoadingBlock, Pill, SectionTitle, Table, Td, Th } from "@/components/ui";
 import { QuickEditButton } from "@/components/ticket/QuickEditButton";
 import { TicketLink } from "@/components/ticket/TicketLink";
 import { api, errorMessage } from "@/lib/api";
 import { formatDate, formatMoney, formatShort, todayISO } from "@/lib/format";
+import { useCan } from "@/lib/permissions";
 import { plannedTickets, PROJECT_STATUS, projectLate } from "@/lib/projects";
 import type { Page, Project, TicketListItem } from "@/lib/types";
 
@@ -33,15 +35,18 @@ function Stat({ label, value, hint, problem = false }: { label: string; value: s
 
 export default function ProjectPage() {
   const { id } = useParams<{ id: string }>();
+  const canView = useCan("commercial.projects");
+  const canEdit = useCan("commercial.projects", "edit");
   const [editing, setEditing] = useState(false);
   // Hoje no fuso da operação (a entrega prevista é um dia do calendário).
   const [today] = useState(todayISO);
-  const project = useQuery({ queryKey: ["project", id], queryFn: () => api.get<Project>(`/projects/${id}`) });
+  const project = useQuery({ queryKey: ["project", id], queryFn: () => api.get<Project>(`/projects/${id}`), enabled: canView });
   // Até 200 OS: não recarrega a cada volta para a aba (o tempo real já atualiza quando uma OS muda).
   const tickets = useQuery({
     queryKey: ["tickets", "project", id],
     queryFn: () => api.get<Page<TicketListItem>>("/tickets", { project_id: id, page_size: TICKETS_SHOWN, order_by: "-created_at" }),
     staleTime: 30_000,
+    enabled: canView,
   });
 
   const back = (
@@ -50,6 +55,7 @@ export default function ProjectPage() {
       Projetos
     </Link>
   );
+  if (!canView) return <NoAccess kind="module" item="commercial.projects" />;
   if (project.isLoading) return <LoadingBlock />;
   if (project.error || !project.data) {
     return (
@@ -92,10 +98,12 @@ export default function ProjectPage() {
               ) : null}
             </p>
           </div>
-          <Button onClick={() => setEditing(true)}>
-            <Pencil className="size-4" />
-            Editar
-          </Button>
+          {canEdit ? (
+            <Button onClick={() => setEditing(true)}>
+              <Pencil className="size-4" />
+              Editar
+            </Button>
+          ) : null}
         </div>
         <div className="mt-4">
           <div className="flex flex-wrap justify-between gap-x-3 text-xs text-ink-muted">

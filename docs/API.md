@@ -17,6 +17,9 @@ Autenticação: `Authorization: Bearer <access_token>`. Erros seguem `{"detail":
 | Técnico de campo (terceiro) | `technician` | **só as OS atribuídas a ele** (app mobile), e delas **só o básico**: cliente, local (nome e endereço da loja), agenda e escopo; grupo ou fila não bastam | sair, iniciar e concluir a visita, formulários, fotos, assinatura e pedir peça **nas OS dele**. Nunca mexe no horário (agenda, pausa e horas são da central; o tempo dele corre do início à conclusão). Não assume nem se atribui OS: quem coloca o técnico na OS é a gestão. Sem acompanhamentos (a central fala com ele pelo WhatsApp) |
 | Cliente (portal) | `requester` | **pelo portal**, as solicitações de todas as lojas da empresa dele (`users.customer_id`), com lista fechada de campos | abrir solicitação e acompanhar a visita; cancelar enquanto a central não começou (nova ou em triagem). Não usa as rotas internas: `/tickets`, cadastros, painel e grupos respondem 403 (ou 404 por id) |
 
+Supervisor e analista: as telas que cada um vê e edita e as filas que vê dependem do **perfil de acesso** (os
+perfis padrão reproduzem a tabela acima). Ver [Acesso: perfis por tela e visibilidade de filas](#acesso-perfis-por-tela-e-visibilidade-de-filas).
+
 **Técnico é terceiro: só o básico.** Na OS (detalhe, sync e respostas do push) o servidor zera para o
 técnico: prazos e motivos de SLA, analista (`owner`), grupo, projeto, categoria, etiquetas, solicitante,
 quem abriu, nº do chamado do cliente, CNPJ e contato da loja (nome e telefone: quem fala com a loja é a
@@ -877,3 +880,186 @@ ou, sem ela, o envio. Orçamento de OS cancelada nunca entra. Motivos, nesta ord
 - O evento WS `quote.decided` ganha `total`.
 - Cancelar um orçamento devolve os pedidos de peça ligados a ele (abertos ou orçados) para `open`, sem `quote_id`,
   com o evento `part_request_updated`.
+
+## Acesso: perfis por tela e visibilidade de filas
+
+O papel (`users.role`) continua decidindo o canal (web ou app), a hierarquia de cadastro (quem cria e altera
+quem em Usuários) e as regras duras (o SLA é só do administrador; a exclusão da ficha de homologação, de
+admin e supervisor). Por cima do papel:
+
+- **Perfil de acesso** (`access_profiles`), só de supervisor e analista: o nível de cada tela do menu
+  (`none` | `view` | `edit`) e a visibilidade de filas. Os perfis padrão "Supervisor" e "Analista"
+  (`system_key`) nascem vazios e reproduzem o acesso de antes; tela sem nível gravado segue o padrão do papel.
+- **Ajustes da pessoa** (`users.access_overrides`): `{items?: {tela: nível}, queue_scope?, queue_unowned?}`
+  por cima do perfil, item por item. Ajuste igual ao perfil não é gravado.
+- **Administrador**: acesso total sempre (ignora perfil e ajustes).
+- **Técnico e cliente**: fora da matriz (`access: null`); valem as regras do papel.
+- **Núcleo sem tela**: Início, Minha fila, Solicitações, Chamados, Nova OS e tudo dentro da OS ficam com a
+  gestão (admin, supervisor e analista), sempre com a visibilidade de filas. As exceções dentro da OS são os
+  blocos comerciais (abaixo).
+
+### Catálogo (`core/permissions.py`)
+
+| Tela | Chave | Níveis | Supervisor | Analista |
+|---|---|---|---|---|
+| Calendário (`/agenda`) | `operation.calendar` | none, view, edit | edit | edit |
+| Atividades do dia (`/dia`) | `operation.day` | none, view | view | view |
+| Mapa ao vivo (`/mapa`) | `operation.map` | none, view | view | view |
+| Assistência externa (`/assistencia`) | `operation.repairs` | none, view, edit | edit | edit |
+| Orçamentos (`/orcamentos`, aba da OS) | `commercial.quotes` | none, view, edit | edit | edit |
+| Projetos (`/projetos`) | `commercial.projects` | none, view, edit | edit | edit |
+| Custos extras (`/custos`, custos da OS) | `commercial.expenses` | none, view, edit | edit | edit |
+| Pagamentos (`/pagamentos`, valor do técnico na OS) | `commercial.payouts` | none, view, edit | edit | edit |
+| Clientes (`/clientes`) | `base.customers` | none, view, edit | edit | edit |
+| Locais (`/locais`) | `base.locations` | none, view, edit | edit | edit |
+| Técnicos (`/tecnicos`; editar inclui Liberar acesso) | `base.technicians` | none, view, edit | edit | edit |
+| Homologação (`/homologacao`) | `base.onboarding` | none, view, edit | edit | edit |
+| Dashboard (`/dashboard`) | `analysis.dashboard` | none, view | view | view |
+| Relatórios (`/relatorios`) | `analysis.reports` | none, view | view | view |
+| Formulários (`/formularios`) | `setup.forms` | none, view, edit | edit | edit |
+| Textos do WhatsApp (`/textos`) | `setup.messages` | none, view, edit | edit | edit |
+| Tipos de serviço (`/tipos-servico`) | `setup.service_types` | none, view, edit | edit | edit |
+| Usuários (`/usuarios`) | `setup.users` | none, view, edit | edit | view |
+| Configurações (`/configuracoes`) | `setup.settings` | none, view, edit | edit | none |
+
+Fila padrão dos dois perfis: todas as filas. "Editar" em Usuários deixa o supervisor cadastrar só os papéis
+que ele já cuidava (analista e cliente) e os grupos técnicos; "Editar" no Calendário é remarcar arrastando
+(o editor da OS é do núcleo).
+
+### Erros 403
+
+| Corpo | Quando |
+|---|---|
+| `{"detail": "Sem acesso a Pagamentos.", "code": "MODULE_FORBIDDEN", "item": "commercial.payouts", "module": "commercial", "required": "view"}` | tela fora do perfil |
+| `{"detail": "Seu acesso a Orçamentos é só de visualização.", "code": "MODULE_FORBIDDEN", "item": "commercial.quotes", "module": "commercial", "required": "edit"}` | gravação com Visualizar |
+| `{"detail": "Esta OS é de outra fila.", "code": "QUEUE_FORBIDDEN"}` | OS fora da fila de quem pede (qualquer rota da OS e as ações por orçamento ou custo) |
+| `{"detail": "Seu acesso mostra só a sua fila.", "code": "QUEUE_FORBIDDEN"}` | `GET /my-queue?user_id=<outro>` com "Somente a própria fila" |
+| `{"detail": "Você não pode dar mais acesso do que tem.", "code": "ACCESS_CAP"}` | supervisor dando acesso acima do dele |
+
+Técnico e cliente numa rota da gestão recebem o 403 de sempre (`{"detail": "Sem permissão para esta ação"}`);
+numa OS que não é deles, 404.
+
+### Rotas
+
+- `GET /access/catalog` (gestão) → `{modules: [{key, label, items: [{key, label, href, levels, hint}]}],
+  defaults: {supervisor: {...}, analyst: {...}}}`.
+- `GET /access/profiles` (Usuários em Visualizar) → `[{id, name, description, system_key, items, effective_items,
+  queue_scope, queue_unowned, users_count, updated_at}]`: Supervisor, Analista e depois por nome; `items` só o
+  gravado e `effective_items` todas as 19 telas; `users_count` conta ativos e inativos. Cria os perfis padrão
+  que faltarem.
+- Só o administrador:
+  - `POST /access/profiles` `{name, description?, copy_from_id?, items?, queue_scope?, queue_unowned?}` → 201.
+    Grava o `effective_items` do perfil de origem (sem ele, o do Analista) mais as telas enviadas, sempre
+    completo. 409 "Já existe um perfil com este nome".
+  - `PATCH /access/profiles/{id}` (parcial; em `items`, `null` tira a tela e ela volta ao padrão). Perfil
+    padrão: 422 "O nome dos perfis padrão não muda".
+  - `POST /access/profiles/{id}/reset`: perfil padrão volta a `items {}` e todas as filas (422 nos outros).
+  - `DELETE /access/profiles/{id}` → 204; 409 "Perfis padrão não são excluídos." ou "Perfil em uso por N
+    usuários. Troque o perfil deles antes."
+- Validação (422): "Tela desconhecida: <chave>"; "<Tela> só tem Sem acesso ou Visualizar".
+- Depois de mudar um perfil, todos que o usam (e, num perfil padrão, quem do mesmo papel está sem perfil)
+  recebem `access.changed`.
+
+**Usuários.** `UserOut` ganha `access_profile_id`, `access_profile: Ref | null`, `access_overrides` e
+`access: EffectiveAccessOut | null` = `{full, profile: Ref | null, customized, items: {19 telas: nível},
+queues: {scope: "own" | "all", unowned}}` (admin: `full: true`, tudo no máximo; técnico e cliente: `null`).
+Vem também em `/auth/me` e no `user` do login, do refresh, da troca de senha e do login Microsoft.
+
+- `POST /users` e `PATCH /users/{id}` (Usuários em Editar, admin e supervisor, com a hierarquia de antes)
+  aceitam `access: {profile_id: uuid | null, overrides: {items?, queue_scope?, queue_unowned?} | null}`;
+  `profile_id` `null` é o perfil padrão do papel.
+  - Supervisor ou analista sem `access` entra no perfil padrão do papel; outros papéis com `access`: 422 "Este
+    papel não usa perfil de acesso".
+  - Troca de papel sem `access`: quem estava no padrão do papel antigo (ou sem perfil) passa ao padrão do
+    novo; papel fora da matriz fica sem perfil e sem ajustes.
+  - Teto do supervisor: nenhuma tela acima do nível dele (a não ser que a pessoa já tivesse esse nível) e, se
+    ele só vê a própria fila, nada de "todas as filas" nem de OS sem analista que ele não vê (403
+    `ACCESS_CAP`). Ao criar alguém, o teto vale para o acesso inteiro.
+  - Mudança de acesso publica `access.changed` para a pessoa.
+- `GET /users?access_profile_id=` filtra por perfil.
+
+### Visibilidade de filas
+
+A fila de X são as OS com `owner_id = X` (analista responsável). "Somente a própria fila" vê as OS de que a
+pessoa é a responsável **ou** a executora (`assignee_id`) e, com `queue_unowned`, as "sem analista" (sem
+responsável, ou com responsável desativado ou fora da gestão). "Todas as filas" vê tudo e já inclui as sem
+analista.
+
+Vale em:
+- `GET /tickets`, `/tickets/export` e `/tickets/bulk-tags` (OS de outra fila fica de fora; `owner_id=<outro>`
+  e `no_owner` sem a opção voltam vazios); toda rota de uma OS (`QUEUE_FORBIDDEN`).
+- `GET /tickets/lookup?number=N` (novo) → `{id, code}`; 404 "OS não encontrada"; 403 `QUEUE_FORBIDDEN` quando
+  existe mas é de outra fila (técnico e cliente: 404).
+- `GET /queues` → `TeamQueues {queues, unowned: QueueCounts | null, scope, total}`: com "própria fila", só a
+  linha de quem pede e a sem analista se ele a vê; `total` soma as linhas devolvidas e a sem analista.
+- `GET /my-queue?user_id=` (403 acima); Início (`/home/overview`: números, grupos, exemplos, sugestões e sinais
+  vitais); `/search/smart` (OS, chip "OS nº" e OS abertas de cada cliente); `/dashboard/summary`,
+  `/reports/daily`, `/reports/monthly`, `/reports/sla-violations`; `/activities/day`; `/portal/inbox-count`.
+- `GET /calendar` (só as OS visíveis); conflitos (`/calendar/conflicts` e o 409 `SCHEDULE_CONFLICT`): a OS de
+  outra fila vem como `{who, id: null, code: null, title: "OS de outra fila", customer: null, location: null,
+  start, end, hidden: true}`.
+- `GET /tracking/live`: OS em campo de outra fila → `current_ticket: null`, `current_ticket_hidden: true` (o
+  estado continua); `/tracking/history` só com as mudanças de status das OS visíveis.
+- Comercial: `/quotes` e `/quotes/summary`, `/expenses`, `/payouts` só com as OS visíveis; `mark-paid`, `pay` e
+  `unpay` ignoram os ids de outra fila; ações por orçamento ou custo de outra fila: 403. Projetos contam só as
+  OS visíveis.
+- Clientes e locais: contagens de OS; `GET /intake/context` (agendadas, 30 dias e última visita) e o novo
+  `other_queues_open` (OS abertas da loja em filas que a pessoa não vê; só com "própria fila").
+- Reincidência do detalhe e das listas.
+- Ficam globais, por serem agregados: `/users/assignable` (carga), OS abertas por técnico, sugestões de técnico.
+- Passar a OS para outra fila (`PATCH owner_id`) continua permitido; depois disso a OS some para quem passou.
+
+**Blocos comerciais da OS** (`GET /tickets/{id}` da gestão): sem Custos extras, `expenses: []`; sem
+Pagamentos, `payouts: []`; sem Orçamentos, `legacy.values` e o `value`/`total` dos itens do pedido migrado vêm
+`null`. No Início, `pulse.finance` só com Custos extras e Pagamentos, `pulse.quotes` só com Orçamentos, e os
+grupos `costs_pending`, `payouts_pending`, `quotes_waiting` e a sugestão `slow_service_type` só com a tela deles.
+
+### Tempo real
+
+- Eventos de OS ganham `owner_id`; a `audience` interna ganha `owner_id`, `previous_owner_id` e `unowned`. Na
+  troca de analista, `data` traz `from_id` e `to_id` (além dos nomes).
+- Quem só vê a própria fila recebe só eventos das OS dele (responsável atual ou anterior, executor) e, com a
+  opção, das sem analista. `quote.decided` só vai para quem tem Orçamentos; `onboarding.submitted`, para quem
+  tem Homologação.
+- `{"type": "access.changed"}` vai só para a pessoa afetada; logo depois o servidor fecha o socket com 4401 e o
+  cliente renova o token e reconecta com o acesso novo. O vigia de 5 minutos também fecha quando o acesso muda.
+
+### Tabela rota → tela
+
+V = Visualizar, E = Editar; "a \| b" = basta uma das telas.
+
+| Tela | Rotas |
+|---|---|
+| `operation.calendar` | V: `GET /calendar` |
+| `operation.day` \| `operation.map` | V: `GET /activities/day` |
+| `operation.map` | V: `GET /tracking/live`, `/tracking/distances`, `/tracking/history` |
+| `operation.repairs` | V: `GET /repairs`, `/repairs/summary`, `/repairs/{id}`. E: `POST /repairs`, `PUT /repairs/{id}`, `POST /repairs/{id}/status`, `POST /repairs/{id}/photos` |
+| `commercial.quotes` | V: `GET /quote-items`, `/quote-items/last-prices`, `/tickets/{id}/quotes`, `/quotes`, `/quotes/summary`. E: `POST`/`PUT /quote-items`, `POST /tickets/{id}/quotes`, `PUT /quotes/{id}`, `POST /quotes/{id}/send`, `/remind`, `/link/rotate`, `/cancel` |
+| `commercial.projects` | V: `GET /projects/{id}`. E: `POST /projects`, `PUT /projects/{id}` |
+| `commercial.expenses` | V: `GET /tickets/{id}/expenses` (só a gestão; o técnico como antes). E: `POST /tickets/{id}/expenses`, `PATCH`/`DELETE /expenses/{id}`, `POST /expenses/mark-paid` |
+| `commercial.expenses` \| `commercial.payouts` | V: `GET /expenses` |
+| `commercial.payouts` | V: `GET /payouts`. E: `PUT`/`DELETE /tickets/{id}/payouts/{tech}`, `POST /payouts/pay`, `/payouts/unpay` |
+| `base.customers` | V: `GET /customers/{id}`, `GET /assets`, `/assets/{id}`. E: `POST /customers`, `PATCH /customers/{id}`, `POST`/`PATCH /assets` |
+| `base.locations` | E: `POST /customers/{id}/locations`, `PATCH /locations/{id}`, `POST /locations/import` |
+| `base.technicians` | V: `GET /technicians`, `/technicians/favorites`. E: `POST /technicians`, `PATCH /technicians/{id}`, `POST /technicians/{id}/reset-password`, `POST`/`DELETE /technicians/{id}/photo`, `POST /technicians/import`, `POST /technicians/regions/refresh`, `PUT`/`DELETE /technicians/favorites/{id}` |
+| `base.technicians` \| `base.onboarding` | V: `GET /technicians/regions` |
+| `base.technicians` \| `base.locations` | V: `GET /technicians/nearby` |
+| `base.onboarding` | V: `GET /onboarding/invites`, `/onboarding/applications`, `/applications/pending-count`, `/applications/{id}`. E: `POST`/`DELETE /onboarding/invites`, `POST .../approve`, `.../reject`; `DELETE /onboarding/applications/{id}` (E e só admin e supervisor) |
+| `analysis.dashboard` | V: `GET /dashboard/summary` |
+| `analysis.dashboard` \| `analysis.reports` | V: `GET /reports/sla-violations`, `GET /reports/daily` |
+| `analysis.reports` | V: `GET /reports/monthly` |
+| `setup.forms` | V: `GET /form-templates/catalog`, `/form-templates/{id}`. E: `POST /form-templates`, `PUT /form-templates/{id}` |
+| `setup.messages` | V: `GET /message-templates`. E: `PUT /message-templates`, `POST /message-templates/reset` |
+| `setup.service_types` | E: `POST /service-types`, `PATCH /service-types/{id}`, `POST /service-types/{id}/apply-observed` |
+| `setup.users` | V: `GET /access/profiles`. E: `POST /users`, `PATCH /users/{id}` (admin e supervisor), `POST`/`PATCH /teams` |
+| `setup.settings` | E: `PUT /settings/company`, `/settings/expenses`, `/settings/field`, `/ticket-tag-rules`, `POST`/`PATCH /categories`, `POST`/`PATCH /violation-reasons` |
+
+Sem tela (toda a gestão): as leituras que a Nova OS, o editor, a OS, os filtros, a Minha fila e o Início usam
+(`/customers`, `/customers/{id}/locations`, `/locations`, `/locations/{id}`, `/intake/context`,
+`/service-types`, `/categories`, `/sla-policies`, `/violation-reasons`, `/unproductive-reasons`,
+`/ticket-tags`, `/ticket-tag-rules`, `/form-templates`, `/users`, `/users/assignable`, `/users/{id}`,
+`/teams`, `/technicians/suggest`, `/technicians/favorites/city`, `/tickets/{id}/technician-suggestions`,
+`/calendar/conflicts`, `/projects`, `/queues`, `/settings/company`, `/settings/expenses`, `/settings/field`,
+`/portal/inbox-count`, `/access/catalog`) e o núcleo da OS. `PUT /sla-policies` continua só do administrador
+e os motivos de visita improdutiva continuam com toda a gestão. O inventário completo está em
+`backend/tests/test_access_routes.py` (rota nova sem classificação faz o teste falhar).

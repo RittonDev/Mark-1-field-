@@ -149,6 +149,18 @@ export function errorMessage(error: unknown): string {
   return "Erro inesperado";
 }
 
+/** Código do erro no corpo da resposta (ex.: MODULE_FORBIDDEN, QUEUE_FORBIDDEN, SCHEDULE_CONFLICT). */
+export function apiErrorCode(error: unknown): string | null {
+  if (!(error instanceof ApiError)) return null;
+  return bodyCode(error.body);
+}
+
+function bodyCode(body: unknown): string | null {
+  if (!body || typeof body !== "object" || !("code" in body)) return null;
+  const code = (body as { code: unknown }).code;
+  return typeof code === "string" ? code : null;
+}
+
 type QueryValue = string | number | boolean | null | undefined | (string | number)[];
 export type Query = Record<string, QueryValue>;
 
@@ -190,6 +202,20 @@ function signalReachable() {
   if (typeof window === "undefined" || now - lastReachableSignal < 5_000) return;
   lastReachableSignal = now;
   window.dispatchEvent(new Event(API_REACHABLE_EVENT));
+}
+
+/**
+ * 403 de tela sem acesso: o perfil pode ter mudado desde que a central leu o usuário. A central relê o
+ * /auth/me para acertar o menu (no máximo uma vez a cada 10 s: a tela faz várias buscas juntas).
+ */
+export const ACCESS_DENIED_EVENT = "mf:acesso-negado";
+let lastAccessDenied = 0;
+
+function signalAccessDenied() {
+  const now = Date.now();
+  if (typeof window === "undefined" || now - lastAccessDenied < 10_000) return;
+  lastAccessDenied = now;
+  window.dispatchEvent(new Event(ACCESS_DENIED_EVENT));
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -353,6 +379,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
         : typeof data === "string"
           ? data
           : null;
+    if (res.status === 403 && json && bodyCode(data) === "MODULE_FORBIDDEN") signalAccessDenied();
     throw new ApiError(res.status, detail, json ? data : null);
   }
   return data as T;

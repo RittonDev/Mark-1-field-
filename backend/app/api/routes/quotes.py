@@ -9,13 +9,13 @@ from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy import ColumnElement, and_, func, or_, select
 
-from app.api.deps import DB, TicketManagerUser, bearer, optional_user
+from app.api.deps import DB, access_user, bearer, optional_user
 from app.api.files import stored_file
 from app.core.config import settings
 from app.core.enums import QuoteStatus, TicketStatus
 from app.core.security import InvalidToken, create_token, decode_token
 from app.db.base import utcnow
-from app.models import Customer, Location, Quote, QuoteItemCatalog, Ticket
+from app.models import Customer, Location, Quote, QuoteItemCatalog, Ticket, User
 from app.schemas.quote import (
     CatalogItemIn,
     CatalogItemOut,
@@ -44,6 +44,9 @@ from app.services.activities import day_bounds, local_today
 from app.services.realtime import commit_and_publish
 
 router = APIRouter(tags=["quotes"])
+# Tela de Orçamentos (inclui a aba Orçamentos da OS).
+QuotesView = access_user("commercial.quotes")
+QuotesEdit = access_user("commercial.quotes", level="edit")
 public = APIRouter(prefix="/public/quotes", tags=["quotes"])
 
 LINK_GONE = "Este orçamento não está mais disponível. Fale com a Maxx Field."
@@ -115,9 +118,7 @@ def _out(
 
 
 @router.get("/quote-items", response_model=list[CatalogItemOut])
-async def list_catalog(
-    db: DB, _: TicketManagerUser, active: bool | None = None
-) -> list[CatalogItemOut]:
+async def list_catalog(db: DB, _: QuotesView, active: bool | None = None) -> list[CatalogItemOut]:
     """Itens do catálogo com o uso nos últimos 12 meses (uma consulta para a lista inteira)."""
     stmt = select(QuoteItemCatalog).order_by(QuoteItemCatalog.name)
     if active is not None:
@@ -133,16 +134,14 @@ async def list_catalog(
 
 
 @router.get("/quote-items/last-prices", response_model=list[QuoteLastPrice])
-async def last_prices(customer_id: uuid.UUID, db: DB, _: TicketManagerUser) -> list[QuoteLastPrice]:
+async def last_prices(customer_id: uuid.UUID, db: DB, _: QuotesView) -> list[QuoteLastPrice]:
     """Último preço aprovado do cliente para cada item do catálogo (o editor oferece com 1
     clique)."""
     return await svc.last_prices(db, customer_id)
 
 
 @router.post("/quote-items", response_model=CatalogItemOut, status_code=status.HTTP_201_CREATED)
-async def create_catalog_item(
-    body: CatalogItemIn, db: DB, _: TicketManagerUser
-) -> QuoteItemCatalog:
+async def create_catalog_item(body: CatalogItemIn, db: DB, _: QuotesEdit) -> QuoteItemCatalog:
     item = QuoteItemCatalog(id=uuid.uuid4(), **body.model_dump())
     db.add(item)
     await db.commit()
@@ -151,7 +150,7 @@ async def create_catalog_item(
 
 @router.put("/quote-items/{item_id}", response_model=CatalogItemOut)
 async def update_catalog_item(
-    item_id: uuid.UUID, body: CatalogItemIn, db: DB, _: TicketManagerUser
+    item_id: uuid.UUID, body: CatalogItemIn, db: DB, _: QuotesEdit
 ) -> QuoteItemCatalog:
     item = await svc.catalog_item(db, item_id)
     for key, value in body.model_dump().items():
@@ -164,7 +163,7 @@ async def update_catalog_item(
 
 
 @router.get("/tickets/{ticket_id}/quotes", response_model=list[QuoteOut])
-async def ticket_quotes(ticket_id: uuid.UUID, db: DB, user: TicketManagerUser) -> list[QuoteOut]:
+async def ticket_quotes(ticket_id: uuid.UUID, db: DB, user: QuotesView) -> list[QuoteOut]:
     ticket = await tickets_svc.get_visible_ticket(db, user, ticket_id)
     quotes = await svc.list_for_ticket(db, ticket)
     await db.commit()  # grava os que venceram
@@ -189,9 +188,7 @@ async def _ensure_not_cancelled(db: DB, ticket_id: uuid.UUID) -> TicketStatus | 
 @router.post(
     "/tickets/{ticket_id}/quotes", response_model=QuoteOut, status_code=status.HTTP_201_CREATED
 )
-async def create_quote(
-    ticket_id: uuid.UUID, body: QuoteIn, db: DB, user: TicketManagerUser
-) -> QuoteOut:
+async def create_quote(ticket_id: uuid.UUID, body: QuoteIn, db: DB, user: QuotesEdit) -> QuoteOut:
     ticket = await tickets_svc.get_visible_ticket(db, user, ticket_id)
     await _ensure_not_cancelled(db, ticket.id)
     quote = await svc.create(db, ticket, body, user)
@@ -200,14 +197,19 @@ async def create_quote(
 
 
 @router.put("/quotes/{quote_id}", response_model=QuoteOut)
-async def update_quote(
-    quote_id: uuid.UUID, body: QuoteIn, db: DB, user: TicketManagerUser
-) -> QuoteOut:
-    quote = await svc.get(db, quote_id)
+async def update_quote(quote_id: uuid.UUID, body: QuoteIn, db: DB, user: QuotesEdit) -> QuoteOut:
+    quote = await _visible_quote(db, user, quote_id)
     ticket_status = await _ensure_not_cancelled(db, quote.ticket_id)
     quote = await svc.update(db, quote, body, user)
     await db.commit()
     return _out(quote, ticket_status=ticket_status)
+
+
+async def _visible_quote(db: DB, user: User, quote_id: uuid.UUID) -> Quote:
+    """O orçamento, se a pessoa vê a OS dele (a de outra fila dá o mesmo 403 de abrir a OS)."""
+    quote = await svc.get(db, quote_id)
+    await tickets_svc.get_visible_ticket(db, user, quote.ticket_id)
+    return quote
 
 
 async def _lock(db: DB, quote: Quote) -> None:
@@ -220,12 +222,12 @@ async def _lock(db: DB, quote: Quote) -> None:
 
 
 @router.post("/quotes/{quote_id}/send", response_model=QuoteSent)
-async def send_quote(quote_id: uuid.UUID, db: DB, user: TicketManagerUser) -> QuoteSent:
+async def send_quote(quote_id: uuid.UUID, db: DB, user: QuotesEdit) -> QuoteSent:
     """Marca como enviado e devolve o link do cliente (reenviar mantém o mesmo link)."""
-    quote = await svc.get(db, quote_id)
+    quote = await _visible_quote(db, user, quote_id)
     await _lock(db, quote)
     ticket_status = await _ensure_not_cancelled(db, quote.ticket_id)
-    ticket = await tickets_svc.get_ticket(db, quote.ticket_id)
+    ticket = await tickets_svc.get_visible_ticket(db, user, quote.ticket_id)
     token = await svc.send(db, ticket, quote, user)
     await commit_and_publish(db)
     out = _out(quote, ticket_status=ticket_status)
@@ -233,30 +235,30 @@ async def send_quote(quote_id: uuid.UUID, db: DB, user: TicketManagerUser) -> Qu
 
 
 @router.post("/quotes/{quote_id}/remind", response_model=QuoteOut)
-async def remind_quote(quote_id: uuid.UUID, db: DB, user: TicketManagerUser) -> QuoteOut:
+async def remind_quote(quote_id: uuid.UUID, db: DB, user: QuotesEdit) -> QuoteOut:
     """Registra a cobrança da resposta do cliente ("Cobrar"): o lembrete sai pelo WhatsApp,
     montado na tela, e a cobrança fica no histórico da OS (só a gestão vê)."""
-    quote = await svc.get(db, quote_id)
+    quote = await _visible_quote(db, user, quote_id)
     await _lock(db, quote)
     ticket_status = await _ensure_not_cancelled(db, quote.ticket_id)
-    ticket = await tickets_svc.get_ticket(db, quote.ticket_id)
+    ticket = await tickets_svc.get_visible_ticket(db, user, quote.ticket_id)
     quote = await svc.remind(db, ticket, quote, user)
     await commit_and_publish(db)
     return _out(quote, ticket_status=ticket_status)
 
 
 @router.post("/quotes/{quote_id}/link/rotate", response_model=QuoteLink)
-async def rotate_quote_link(quote_id: uuid.UUID, db: DB, user: TicketManagerUser) -> QuoteLink:
+async def rotate_quote_link(quote_id: uuid.UUID, db: DB, user: QuotesEdit) -> QuoteLink:
     """Troca o link do cliente: o anterior para de abrir."""
-    link = await svc.rotate_link(db, await svc.get(db, quote_id), user)
+    link = await svc.rotate_link(db, await _visible_quote(db, user, quote_id), user)
     await db.commit()
     return link
 
 
 @router.post("/quotes/{quote_id}/cancel", response_model=QuoteOut)
-async def cancel_quote(quote_id: uuid.UUID, db: DB, user: TicketManagerUser) -> QuoteOut:
+async def cancel_quote(quote_id: uuid.UUID, db: DB, user: QuotesEdit) -> QuoteOut:
     """Cancela (o link sai do ar) e solta os pedidos de peça ligados a ele."""
-    quote = await svc.get(db, quote_id)
+    quote = await _visible_quote(db, user, quote_id)
     await _lock(db, quote)
     quote = await svc.cancel(db, quote, user)
     ticket_status = await _ticket_status(db, quote.ticket_id)
@@ -303,8 +305,13 @@ def _list_conditions(
     end: datetime | None,
     customer_id: uuid.UUID | None,
     q: str | None,
+    user: User | None = None,
 ) -> list[Any]:
     conds: list[Any] = []
+    # Só os orçamentos das OS da fila que a pessoa vê.
+    vis = tickets_svc.visibility_clause(user) if user is not None else None
+    if vis is not None:
+        conds.append(vis)
     if start is not None:
         conds.append(Quote.created_at >= start)
     if end is not None:
@@ -328,7 +335,7 @@ def _joined(stmt: Any) -> Any:
 @router.get("/quotes", response_model=list[QuoteListRow])
 async def list_quotes(
     db: DB,
-    _: TicketManagerUser,
+    user: QuotesView,
     response: Response,
     start: datetime | None = None,
     end: datetime | None = None,
@@ -342,7 +349,7 @@ async def list_quotes(
     bate com eles vai no cabeçalho X-Total-Count. Com follow_up=true, só a fila "Para cobrar"
     (a mesma regra do Início), quem vence antes primeiro."""
     now, today = utcnow(), local_today()
-    conds = _list_conditions(start, end, customer_id, q)
+    conds = _list_conditions(start, end, customer_id, q, user)
     if status_ is not None:
         conds.append(_status_condition(status_))
     order: list[Any] = [Quote.created_at.desc()]
@@ -378,7 +385,7 @@ async def list_quotes(
 @router.get("/quotes/summary", response_model=QuoteSummary)
 async def quotes_summary(
     db: DB,
-    _: TicketManagerUser,
+    user: QuotesView,
     start: datetime | None = None,
     end: datetime | None = None,
     customer_id: uuid.UUID | None = None,
@@ -386,7 +393,7 @@ async def quotes_summary(
 ) -> QuoteSummary:
     """Quantidade e valor por situação, somados no banco sobre todos os orçamentos do filtro
     (os totais do topo da tela não dependem do limite da lista)."""
-    conds = _list_conditions(start, end, customer_id, q)
+    conds = _list_conditions(start, end, customer_id, q, user)
     by_status = {s.value: QuoteStatusTotal() for s in QuoteStatus}
     rows = await db.execute(
         _joined(select(Quote.status, func.count(), func.coalesce(func.sum(Quote.total), 0)))
@@ -555,7 +562,7 @@ async def approve_quote(token: str, body: QuoteApprove, request: Request, db: DB
     except svc.QuoteNotOpen as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     await commit_and_publish(db)
-    await svc.publish_decision(quote, format_ticket_code(ticket.number))
+    await svc.publish_decision(quote, ticket)
     return await _public_view(db, quote, ticket, str(request.base_url))
 
 
@@ -568,5 +575,5 @@ async def reject_quote(token: str, body: QuoteReject, request: Request, db: DB) 
     except svc.QuoteNotOpen as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     await commit_and_publish(db)
-    await svc.publish_decision(quote, format_ticket_code(ticket.number))
+    await svc.publish_decision(quote, ticket)
     return await _public_view(db, quote, ticket, str(request.base_url))

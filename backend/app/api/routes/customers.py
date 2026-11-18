@@ -4,9 +4,10 @@ from datetime import timedelta
 from typing import Annotated, Any
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
-from sqlalchemy import ColumnElement, func, or_, select
+from sqlalchemy import ColumnElement, func, or_, select, true
 
-from app.api.deps import DB, TicketManagerUser
+from app.api.deps import DB, TicketManagerUser, access_user
+from app.core import permissions
 from app.core.enums import AssetType, TicketStatus
 from app.db.base import utcnow
 from app.models import Asset, Customer, Location, Ticket, User
@@ -36,6 +37,12 @@ from app.services.tickets import visibility_clause
 from app.services.workflow import OPEN_STATUSES
 
 router = APIRouter(tags=["customers"])
+
+# Telas de Clientes e Locais (as listas, o local e o contexto da Nova OS ficam com toda a gestão:
+# a OS usa). Os ativos não têm tela: ficam com Clientes.
+CustomersView = access_user("base.customers")
+CustomersEdit = access_user("base.customers", level="edit")
+LocationsEdit = access_user("base.locations", level="edit")
 
 
 def _document_term(q: str | None) -> str | None:
@@ -184,7 +191,7 @@ async def list_customers(
 
 
 @router.post("/customers", response_model=CustomerOut, status_code=status.HTTP_201_CREATED)
-async def create_customer(body: CustomerCreate, db: DB, user: TicketManagerUser) -> CustomerOut:
+async def create_customer(body: CustomerCreate, db: DB, user: CustomersEdit) -> CustomerOut:
     fields = body.model_dump(exclude_unset=True)
     customer = Customer(is_active=True)
     _apply_contacts(customer, fields)
@@ -197,14 +204,14 @@ async def create_customer(body: CustomerCreate, db: DB, user: TicketManagerUser)
 
 
 @router.get("/customers/{customer_id}", response_model=CustomerOut)
-async def get_customer(customer_id: uuid.UUID, db: DB, user: TicketManagerUser) -> CustomerOut:
+async def get_customer(customer_id: uuid.UUID, db: DB, user: CustomersView) -> CustomerOut:
     customer = await _get_or_404(db, Customer, customer_id, "Cliente")
     return (await _customers_out(db, user, [customer]))[0]
 
 
 @router.patch("/customers/{customer_id}", response_model=CustomerOut)
 async def update_customer(
-    customer_id: uuid.UUID, body: CustomerUpdate, db: DB, user: TicketManagerUser
+    customer_id: uuid.UUID, body: CustomerUpdate, db: DB, user: CustomersEdit
 ) -> CustomerOut:
     customer = await _get_or_404(db, Customer, customer_id, "Cliente")
     fields = body.model_dump(exclude_unset=True)
@@ -263,7 +270,7 @@ async def customer_locations(
     status_code=status.HTTP_201_CREATED,
 )
 async def create_location(
-    customer_id: uuid.UUID, body: LocationCreate, db: DB, user: TicketManagerUser
+    customer_id: uuid.UUID, body: LocationCreate, db: DB, user: LocationsEdit
 ) -> LocationOut:
     await _get_or_404(db, Customer, customer_id, "Cliente")
     fields = body.model_dump(exclude_unset=True)
@@ -339,7 +346,32 @@ async def get_location(location_id: uuid.UUID, db: DB, user: TicketManagerUser) 
 UPCOMING_DAYS = 7
 
 
-async def _last_visit(db: DB, location_id: uuid.UUID) -> IntakeLastVisit | None:
+def _visible(user: User) -> tuple[ColumnElement[bool], ...]:
+    """A visibilidade da fila como lista de condições (vazia para quem vê todas)."""
+    vis = visibility_clause(user)
+    return (vis,) if vis is not None else ()
+
+
+async def _other_queues_open(db: DB, user: User, location_id: uuid.UUID) -> int:
+    """OS abertas da loja em filas que a pessoa não vê (só com "Somente a própria fila"): a Nova
+    OS avisa a quantidade, sem os detalhes, para ninguém abrir OS repetida."""
+    vis = visibility_clause(user)
+    if vis is None or permissions.of(user).all_queues:
+        return 0
+    return (
+        await db.scalar(
+            select(func.count()).where(
+                Ticket.location_id == location_id,
+                Ticket.status.in_(OPEN_STATUSES),
+                # IS NOT TRUE: a OS sem técnico dá NULL na comparação e também é de outra fila.
+                vis.is_not(true()),
+            )
+        )
+        or 0
+    )
+
+
+async def _last_visit(db: DB, user: User, location_id: uuid.UUID) -> IntakeLastVisit | None:
     # Só as colunas da linha: carregar a OS inteira traria as ~19 relações dela.
     done_at = func.coalesce(Ticket.resolved_at, Ticket.closed_at)
     row = (
@@ -350,6 +382,7 @@ async def _last_visit(db: DB, location_id: uuid.UUID) -> IntakeLastVisit | None:
                 Ticket.location_id == location_id,
                 Ticket.status.in_((TicketStatus.RESOLVED, TicketStatus.CLOSED)),
                 done_at.is_not(None),
+                *_visible(user),
             )
             .order_by(done_at.desc())
             .limit(1)
@@ -393,6 +426,7 @@ async def intake_context(
                 Ticket.status.in_(OPEN_STATUSES),
                 Ticket.scheduled_start >= now,
                 Ticket.scheduled_start < now + timedelta(days=UPCOMING_DAYS),
+                *_visible(user),
             )
         )
         rating = (customer.legacy or {}).get("rating") or {}
@@ -417,6 +451,7 @@ async def intake_context(
             select(func.count()).where(
                 Ticket.location_id == location.id,
                 Ticket.created_at >= now - timedelta(days=30),
+                *_visible(user),
             )
         )
         rules = await field_rules.rules(db)
@@ -438,16 +473,17 @@ async def intake_context(
             total_tickets=stats.get("total_tickets", 0),
             open_tickets=stats.get("open_tickets", 0),
             tickets_30d=recent or 0,
-            last_visit=await _last_visit(db, location.id),
+            last_visit=await _last_visit(db, user, location.id),
             is_capital=field_rules.is_capital(location.city, location.state),
             arrival_hours=field_rules.arrival_hours(rules, location.city, location.state),
         )
+        out.other_queues_open = await _other_queues_open(db, user, location.id)
     return out
 
 
 @router.patch("/locations/{location_id}", response_model=LocationOut)
 async def update_location(
-    location_id: uuid.UUID, body: LocationUpdate, db: DB, user: TicketManagerUser
+    location_id: uuid.UUID, body: LocationUpdate, db: DB, user: LocationsEdit
 ) -> LocationOut:
     location = await _get_or_404(db, Location, location_id, "Local")
     fields = body.model_dump(exclude_unset=True)
@@ -468,7 +504,7 @@ async def update_location(
 @router.get("/assets", response_model=list[AssetOut])
 async def list_assets(
     db: DB,
-    _: TicketManagerUser,
+    _: CustomersView,
     customer_id: uuid.UUID | None = None,
     location_id: uuid.UUID | None = None,
     asset_type: AssetType | None = None,
@@ -508,7 +544,7 @@ async def _check_asset_location(
 
 
 @router.post("/assets", response_model=AssetOut, status_code=status.HTTP_201_CREATED)
-async def create_asset(body: AssetCreate, db: DB, _: TicketManagerUser) -> Asset:
+async def create_asset(body: AssetCreate, db: DB, _: CustomersEdit) -> Asset:
     await _get_or_404(db, Customer, body.customer_id, "Cliente")
     await _check_asset_location(db, body.customer_id, body.location_id)
     asset = Asset(**body.model_dump(), is_active=True)
@@ -518,14 +554,12 @@ async def create_asset(body: AssetCreate, db: DB, _: TicketManagerUser) -> Asset
 
 
 @router.get("/assets/{asset_id}", response_model=AssetOut)
-async def get_asset(asset_id: uuid.UUID, db: DB, _: TicketManagerUser) -> Asset:
+async def get_asset(asset_id: uuid.UUID, db: DB, _: CustomersView) -> Asset:
     return await _get_or_404(db, Asset, asset_id, "Ativo")
 
 
 @router.patch("/assets/{asset_id}", response_model=AssetOut)
-async def update_asset(
-    asset_id: uuid.UUID, body: AssetUpdate, db: DB, _: TicketManagerUser
-) -> Asset:
+async def update_asset(asset_id: uuid.UUID, body: AssetUpdate, db: DB, _: CustomersEdit) -> Asset:
     asset = await _get_or_404(db, Asset, asset_id, "Ativo")
     fields = body.model_dump(exclude_unset=True)
     if "location_id" in fields:
@@ -542,7 +576,7 @@ async def update_asset(
 @router.post("/locations/import", response_model=LocationImportResult)
 async def import_locations(
     db: DB,
-    _: TicketManagerUser,
+    _: LocationsEdit,
     file: Annotated[UploadFile, File()],
     dry_run: bool = True,
     customer_id: uuid.UUID | None = None,

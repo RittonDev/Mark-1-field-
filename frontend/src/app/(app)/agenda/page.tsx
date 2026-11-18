@@ -23,6 +23,7 @@ import { Suspense, useEffect, useId, useMemo, useState } from "react";
 import { type GridColumn, MonthView, TimeGrid } from "@/components/calendar/CalendarViews";
 import { PriorityBadge, StatusBadge } from "@/components/badges";
 import { LocationPicker } from "@/components/LocationPicker";
+import { NoAccess } from "@/components/NoAccess";
 import { fold, isUuid, replaceSearch, useActiveTechnicians, useSearchChange } from "@/components/operacao/hooks";
 import { RefreshFailed } from "@/components/operacao/status";
 import { ConflictHint, ConflictList, scheduleConflicts } from "@/components/ScheduleConflict";
@@ -46,7 +47,6 @@ import {
   Select,
 } from "@/components/ui";
 import { api, errorMessage, type Query } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
 import {
   ACTIVE_STATUSES,
   type CalendarView,
@@ -68,9 +68,10 @@ import {
   visibleRange,
   WEEKDAYS_SHORT,
 } from "@/lib/calendar";
-import { canManageTickets, STATUS } from "@/lib/constants";
+import { STATUS } from "@/lib/constants";
 import { formatMinutes, formatShort, formatTime, fromLocalInput, toLocalInput } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
+import { useCan } from "@/lib/permissions";
 import { useCustomers, useTeams } from "@/lib/queries";
 import type { CalendarEvent, ConflictItem, Location, TicketDetail, TicketStatus } from "@/lib/types";
 
@@ -124,7 +125,10 @@ function readUrl(params: URLSearchParams): { view: CalendarView; anchor: Date; t
 }
 
 function AgendaView() {
-  const { user } = useAuth();
+  // Visualizar: a agenda e a prévia de cada OS. Editar: também o Reagendar daqui (o editor da OS é de
+  // toda a central e continua remarcando).
+  const canView = useCan("operation.calendar");
+  const canEdit = useCan("operation.calendar", "edit");
   const searchParams = useSearchParams();
   // Visão, data e técnicos ficam na URL: recarregar ou mandar o link mantém a agenda.
   const [view, setView] = useState(() => readUrl(searchParams).view);
@@ -184,6 +188,7 @@ function AgendaView() {
     placeholderData: keepPreviousData,
     // O tempo real atualiza na hora; a releitura cobre a conexão caída e a tela parada num monitor.
     refetchInterval: 120_000,
+    enabled: canView,
   });
   const allEvents = useMemo(() => calendar.data ?? [], [calendar.data]);
   const events = useMemo(
@@ -205,9 +210,7 @@ function AgendaView() {
     });
   }, [view, anchor, techIds]);
 
-  if (user && !canManageTickets(user.role)) {
-    return <ErrorBox message="O calendário da equipe é exclusivo para analistas e gestores." />;
-  }
+  if (!canView) return <NoAccess kind="module" item="operation.calendar" />;
 
   const openDay = (day: Date) => {
     setAnchor(day);
@@ -549,6 +552,7 @@ function AgendaView() {
           related={current.conflict_with.map((id) => byId.get(id)).filter((e): e is CalendarEvent => !!e)}
           color={current.assignee ? (colors.get(current.assignee.id) ?? technicianColor(current.assignee.id)) : UNASSIGNED_COLOR}
           zone={zone}
+          canReschedule={canEdit}
           onOpen={setOpened}
           onOpenTicket={
             ticketPanel
@@ -682,6 +686,7 @@ function EventDialog({
   related,
   color,
   zone,
+  canReschedule,
   onOpen,
   onOpenTicket,
   onClose,
@@ -691,6 +696,8 @@ function EventDialog({
   color: string;
   /** Fuso do computador quando difere do da operação: o formulário lembra que a hora é a de Brasília. */
   zone: string | null;
+  /** Calendário com Editar: o Reagendar daqui. */
+  canReschedule: boolean;
   onOpen: (event: CalendarEvent) => void;
   /** Abre a OS no painel lateral; sem ele, "Abrir OS" vai para a página da OS. */
   onOpenTicket?: (ticketId: string) => void;
@@ -858,7 +865,7 @@ function EventDialog({
         ) : (
           <>
             <Button onClick={onClose}>Fechar</Button>
-            {RESCHEDULABLE.includes(event.status) ? (
+            {canReschedule && RESCHEDULABLE.includes(event.status) ? (
               <Button onClick={beginReschedule}>
                 <CalendarClock className="size-4" />
                 Reagendar
@@ -947,7 +954,7 @@ function EventDialog({
               {notice}
             </p>
           ) : null}
-          <EventDetails event={event} related={related} onOpen={onOpen} />
+          <EventDetails event={event} related={related} canReschedule={canReschedule} onOpen={onOpen} />
         </div>
       )}
     </Dialog>
@@ -957,10 +964,12 @@ function EventDialog({
 function EventDetails({
   event,
   related,
+  canReschedule,
   onOpen,
 }: {
   event: CalendarEvent;
   related: CalendarEvent[];
+  canReschedule: boolean;
   onOpen: (event: CalendarEvent) => void;
 }) {
   // No relógio da operação, como a grade.
@@ -1013,7 +1022,9 @@ function EventDetails({
             ))}
           </ul>
           <p className="mt-2 text-xs text-red-800 dark:text-red-200">
-            Use Reagendar numa delas ou troque o técnico na própria OS.
+            {canReschedule
+              ? "Use Reagendar numa delas ou troque o técnico na própria OS."
+              : "Troque o horário ou o técnico na própria OS."}
           </p>
         </div>
       ) : null}

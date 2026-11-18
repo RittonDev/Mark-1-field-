@@ -41,6 +41,7 @@ import { absoluteApiUrl, api, buildQuery, errorMessage } from "@/lib/api";
 import { downloadCsv } from "@/lib/download";
 import { formatDate, initials } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
+import { useCan } from "@/lib/permissions";
 import { useFavorites } from "@/lib/queries";
 import type { FavoriteCity, FavoriteCityDetail, FavoritesOut, FavoriteTechnician, Technician, UUID } from "@/lib/types";
 import { whatsappUrl } from "@/lib/whatsapp";
@@ -255,6 +256,8 @@ export function FavoritesView({
 }) {
   const favorites = useFavorites();
   const actions = useFavoriteActions();
+  // Favoritar, fixar, tirar da lista, incluir e liberar acesso gravam em Técnicos: só com Editar.
+  const canEdit = useCan("base.technicians", "edit");
   const [uf, setUf] = useState(() => initialUf.trim().toUpperCase());
   const [qInput, setQInput] = useState(initialCity);
   const [chip, setChip] = useState<Chip | null>(null);
@@ -453,6 +456,7 @@ export function FavoritesView({
                 windowLabel={windowLabel}
                 top={out?.top ?? 3}
                 actions={actions}
+                canEdit={canEdit}
                 onOpenTechnician={onOpenTechnician}
                 onInclude={() => setIncluding(c)}
                 onEditNote={(tech) => setEditing({ tech, city: c })}
@@ -473,8 +477,8 @@ export function FavoritesView({
         </>
       )}
 
-      {including ? <IncludeDialog city={including} onClose={() => setIncluding(null)} onSaved={actions.done} /> : null}
-      {editing ? (
+      {including && canEdit ? <IncludeDialog city={including} onClose={() => setIncluding(null)} onSaved={actions.done} /> : null}
+      {editing && canEdit ? (
         <NoteDialog
           key={`${editing.tech.id}-${editing.city.key}`}
           tech={editing.tech}
@@ -483,7 +487,7 @@ export function FavoritesView({
           onSaved={actions.done}
         />
       ) : null}
-      {granting ? <GrantAccessDialog technician={granting} onClose={() => setGranting(null)} /> : null}
+      {granting && canEdit ? <GrantAccessDialog technician={granting} onClose={() => setGranting(null)} /> : null}
     </div>
   );
 }
@@ -495,6 +499,7 @@ function CityCard({
   windowLabel,
   top,
   actions,
+  canEdit,
   onOpenTechnician,
   onInclude,
   onEditNote,
@@ -505,6 +510,8 @@ function CityCard({
   windowLabel: string;
   top: number;
   actions: FavoriteActions;
+  /** Técnicos: Editar (sem ele, a lista é só de consulta). */
+  canEdit: boolean;
   onOpenTechnician: (t: { id: UUID; email: string }) => void;
   onInclude: () => void;
   onEditNote: (t: FavoriteTechnician) => void;
@@ -522,6 +529,7 @@ function CityCard({
       windowLabel={windowLabel}
       top={top}
       actions={actions}
+      canEdit={canEdit}
       onOpen={onOpenTechnician}
       onNote={onEditNote}
       onGrant={onGrant}
@@ -565,10 +573,12 @@ function CityCard({
               <span className="text-xs text-ink-muted tabular-nums" title={`OS atendidas nas lojas da cidade nos últimos ${windowLabel}`}>
                 {city.visits.toLocaleString("pt-BR")} OS em {windowLabel} · {plural(city.stores, "loja", "lojas")}
               </span>
-              <Button size="sm" variant="ghost" onClick={onInclude}>
-                <UserPlus aria-hidden className="size-3.5" />
-                Incluir técnico
-              </Button>
+              {canEdit ? (
+                <Button size="sm" variant="ghost" onClick={onInclude}>
+                  <UserPlus aria-hidden className="size-3.5" />
+                  Incluir técnico
+                </Button>
+              ) : null}
             </span>
           }
         >
@@ -636,6 +646,7 @@ function FavoriteRow({
   windowLabel,
   top,
   actions,
+  canEdit,
   onOpen,
   onNote,
   onGrant,
@@ -646,6 +657,8 @@ function FavoriteRow({
   windowLabel: string;
   top: number;
   actions: FavoriteActions;
+  /** Técnicos: Editar. Sem ele, a estrela é só indicação e as ações da linha somem. */
+  canEdit: boolean;
   onOpen: (t: { id: UUID; email: string }) => void;
   onNote: (t: FavoriteTechnician) => void;
   onGrant: (t: FavoriteTechnician) => void;
@@ -657,7 +670,7 @@ function FavoriteRow({
   const starLabel = kind === "favorite" ? `Tirar ${t.name} dos favoritos de ${label}` : `Favoritar ${t.name} em ${label}`;
 
   const side: React.ReactNode[] = [];
-  if (kind === "favorite" && t.automatic && !t.pinned) {
+  if (canEdit && kind === "favorite" && t.automatic && !t.pinned) {
     side.push(
       <button
         key="pin"
@@ -672,7 +685,7 @@ function FavoriteRow({
       </button>,
     );
   }
-  if ((kind === "favorite" && t.pinned) || kind === "hidden") {
+  if (canEdit && ((kind === "favorite" && t.pinned) || kind === "hidden")) {
     side.push(
       <button
         key="note"
@@ -687,7 +700,7 @@ function FavoriteRow({
       </button>,
     );
   }
-  if (kind === "hidden") {
+  if (canEdit && kind === "hidden") {
     side.push(
       <Button
         key="restore"
@@ -702,7 +715,7 @@ function FavoriteRow({
       </Button>,
     );
   }
-  if (kind === "favorite" && !t.is_active) {
+  if (canEdit && kind === "favorite" && !t.is_active) {
     side.push(
       <Button key="grant" size="sm" onClick={() => onGrant(t)}>
         <KeyRound aria-hidden className="size-3.5" />
@@ -741,7 +754,16 @@ function FavoriteRow({
   return (
     <li className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-2 px-4 py-3 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
       <span className="flex items-center gap-1">
-        {kind === "hidden" ? null : (
+        {kind === "hidden" ? null : !canEdit ? (
+          // Só consulta: a estrela marca o favorito, sem virar botão.
+          <span
+            className={clsx(ICON_BUTTON, kind === "favorite" ? "text-brand" : "invisible")}
+            title={kind === "favorite" ? `Favorito em ${label}` : undefined}
+          >
+            <Star aria-hidden className={clsx("size-4", kind === "favorite" && "fill-current")} />
+            {kind === "favorite" ? <span className="sr-only">Favorito em {label}</span> : null}
+          </span>
+        ) : (
           <button
             type="button"
             aria-pressed={kind === "favorite"}

@@ -52,6 +52,7 @@ import { useAuth } from "@/lib/auth";
 import { canManageTickets, ROLE } from "@/lib/constants";
 import { formatRelative, initials } from "@/lib/format";
 import { hasUnsavedChanges, useDocumentTitleCount } from "@/lib/hooks";
+import { useCan } from "@/lib/permissions";
 import {
   onOpenFeedRequest,
   onOpenTicketRequest,
@@ -70,13 +71,17 @@ export const MOBILE_NAV_ID = "menu-celular";
 
 // ------------------------------------------------------------------ peças comuns do menu
 
-/** Pendências no menu: fichas de homologação e solicitações do portal (o tempo real atualiza). */
+/**
+ * Pendências no menu: fichas de homologação (só quem vê Homologação) e solicitações do portal (toda a
+ * gestão; a API conta só as das filas que a pessoa vê). O tempo real atualiza.
+ */
 function useNavBadges(user: User): Record<string, number> {
   const manager = canManageTickets(user.role);
+  const onboarding = useCan("base.onboarding");
   const pending = useQuery({
     queryKey: ["onboarding", "pending-count"],
     queryFn: () => api.get<{ pending: number }>("/onboarding/applications/pending-count"),
-    enabled: manager,
+    enabled: manager && onboarding,
     staleTime: 60_000,
   });
   const requests = useQuery({
@@ -87,7 +92,7 @@ function useNavBadges(user: User): Record<string, number> {
     refetchInterval: 120_000,
   });
   return {
-    "/homologacao": pending.data?.pending ?? 0,
+    "/homologacao": onboarding ? (pending.data?.pending ?? 0) : 0,
     "/solicitacoes": requests.data?.pending ?? 0,
   };
 }
@@ -454,7 +459,7 @@ export function Sidebar({ user, onLogout }: { user: User; onLogout: () => void }
   const badges = useNavBadges(user);
   // Solicitações esperando a central aparecem no título da aba, mesmo em segundo plano.
   useDocumentTitleCount(badges["/solicitacoes"]);
-  const items = visibleNav(user.role);
+  const items = visibleNav(user);
   const collapsed = useSyncExternalStore(subscribeCollapsed, readCollapsed, () => false);
   const wide = !collapsed;
 
@@ -620,7 +625,7 @@ export function MobileNav({
 }) {
   const pathname = usePathname();
   const badges = useNavBadges(user);
-  const items = visibleNav(user.role);
+  const items = visibleNav(user);
   const panel = useRef<HTMLDivElement>(null);
   const [changing, setChanging] = useState(false);
   const allowPassword = usePasswordAllowed();

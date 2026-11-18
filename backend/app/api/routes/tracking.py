@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 
-from app.api.deps import DB, TicketManagerUser, require_roles
+from app.api.deps import DB, access_user, require_roles
 from app.core.enums import UserRole
 from app.db.base import utcnow
 from app.models import User
@@ -24,6 +24,8 @@ from app.services.activities import local_today
 router = APIRouter(prefix="/tracking", tags=["tracking"])
 
 TechnicianUser = Annotated[User, Depends(require_roles(UserRole.TECHNICIAN))]
+# Só o Mapa ao vivo usa as rotas de leitura da gestão.
+MapView = access_user("operation.map")
 
 CONSENT_REQUIRED = (
     "Aceite o termo de ciência do rastreamento antes de iniciar a jornada "
@@ -90,15 +92,16 @@ async def add_pings(body: PingBatch, db: DB, user: TechnicianUser) -> PingResult
 
 
 @router.get("/live", response_model=list[LiveTechnician])
-async def live(db: DB, _: TicketManagerUser, team_id: uuid.UUID | None = None) -> list:
-    """Mapa ao vivo: onde está cada técnico, o estado e a OS em campo."""
-    return await tracking.live(db, team_id)
+async def live(db: DB, user: MapView, team_id: uuid.UUID | None = None) -> list:
+    """Mapa ao vivo: onde está cada técnico, o estado e a OS em campo (a de outra fila, sem os
+    detalhes)."""
+    return await tracking.live(db, team_id, user)
 
 
 @router.get("/distances", response_model=MapDistances)
 async def distances(
     db: DB,
-    _: TicketManagerUser,
+    _: MapView,
     location_id: uuid.UUID | None = None,
     team_id: uuid.UUID | None = None,
 ) -> MapDistances:
@@ -109,6 +112,6 @@ async def distances(
 
 @router.get("/history", response_model=TrackingHistory)
 async def history(
-    db: DB, _: TicketManagerUser, user_id: uuid.UUID, date: dt.date | None = None
+    db: DB, user: MapView, user_id: uuid.UUID, date: dt.date | None = None
 ) -> TrackingHistory:
-    return await tracking.history(db, user_id, date or local_today())
+    return await tracking.history(db, user_id, date or local_today(), user)

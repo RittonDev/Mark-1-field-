@@ -7,7 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Query, Response, status
 from pydantic import BaseModel
 
-from app.api.deps import DB, CurrentUser, TicketManagerUser
+from app.api.deps import DB, CurrentUser, access_user
 from app.core.enums import PayoutStatus, UserRole
 from app.schemas.payout import MyEarnings, PayoutIds, PayoutIn, PayoutList, PayoutOut
 from app.services import payouts as svc
@@ -15,6 +15,10 @@ from app.services import tickets as tickets_svc
 from app.services.realtime import commit_and_publish
 
 router = APIRouter(tags=["payouts"])
+
+# Tela de Pagamentos (inclui o valor do técnico na OS). "Meus ganhos" é do técnico.
+PayoutsView = access_user("commercial.payouts")
+PayoutsEdit = access_user("commercial.payouts", level="edit")
 
 BAD_MONTH = "Mês inválido (use AAAA-MM)"
 BAD_PERIOD = "Escolha datas entre 2000 e 2100"
@@ -31,7 +35,7 @@ async def _ticket_payouts(db: DB, ticket_id: uuid.UUID) -> list[PayoutOut]:
 
 @router.put("/tickets/{ticket_id}/payouts/{technician_id}", response_model=list[PayoutOut])
 async def set_payout(
-    ticket_id: uuid.UUID, technician_id: uuid.UUID, body: PayoutIn, db: DB, user: TicketManagerUser
+    ticket_id: uuid.UUID, technician_id: uuid.UUID, body: PayoutIn, db: DB, user: PayoutsEdit
 ) -> list[PayoutOut]:
     ticket = await tickets_svc.get_visible_ticket(db, user, ticket_id)
     await svc.set_payout(db, ticket, technician_id, body, user)
@@ -43,7 +47,7 @@ async def set_payout(
     "/tickets/{ticket_id}/payouts/{technician_id}", status_code=status.HTTP_204_NO_CONTENT
 )
 async def remove_payout(
-    ticket_id: uuid.UUID, technician_id: uuid.UUID, db: DB, user: TicketManagerUser
+    ticket_id: uuid.UUID, technician_id: uuid.UUID, db: DB, user: PayoutsEdit
 ) -> Response:
     ticket = await tickets_svc.get_visible_ticket(db, user, ticket_id)
     await svc.remove_payout(db, ticket, technician_id, user)
@@ -54,7 +58,7 @@ async def remove_payout(
 @router.get("/payouts", response_model=PayoutList)
 async def list_payouts(
     db: DB,
-    _: TicketManagerUser,
+    user: PayoutsView,
     technician_id: uuid.UUID | None = None,
     status_: Annotated[PayoutStatus | None, Query(alias="status")] = None,
     concluded: bool | None = None,
@@ -70,18 +74,19 @@ async def list_payouts(
         concluded=concluded,
         date_from=date_from,
         date_to=date_to,
+        viewer=user,
     )
 
 
 @router.post("/payouts/pay", response_model=PayoutChanged)
-async def pay(body: PayoutIds, db: DB, user: TicketManagerUser) -> PayoutChanged:
+async def pay(body: PayoutIds, db: DB, user: PayoutsEdit) -> PayoutChanged:
     changed = await svc.mark_paid(db, body.ids, user, paid=True)
     await commit_and_publish(db)
     return PayoutChanged(changed=changed)
 
 
 @router.post("/payouts/unpay", response_model=PayoutChanged)
-async def unpay(body: PayoutIds, db: DB, user: TicketManagerUser) -> PayoutChanged:
+async def unpay(body: PayoutIds, db: DB, user: PayoutsEdit) -> PayoutChanged:
     """Desfaz um pagamento marcado por engano (fica no histórico da OS)."""
     changed = await svc.mark_paid(db, body.ids, user, paid=False)
     await commit_and_publish(db)

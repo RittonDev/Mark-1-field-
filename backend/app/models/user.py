@@ -6,9 +6,11 @@ from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, Str
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core import permissions
 from app.core.enums import UserRole
 from app.db.base import Base, Timestamps, UUIDPrimaryKey
 from app.models._types import str_enum
+from app.models.access import AccessProfile
 from app.models.customer import Customer
 
 STAFF_ROLES = frozenset(
@@ -86,9 +88,20 @@ class User(UUIDPrimaryKey, Timestamps, Base):
     legacy: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     # Conta Microsoft (Entra ID) vinculada no primeiro login: "oid" do token.
     entra_oid: Mapped[str | None] = mapped_column(String(64), unique=True)
+    # Perfil de acesso (telas e filas): só supervisor e analista. O administrador tem acesso
+    # total sempre; técnico e cliente ficam fora da matriz (core/permissions.py).
+    access_profile_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("access_profiles.id", ondelete="RESTRICT"), index=True
+    )
+    # Ajustes da pessoa por cima do perfil:
+    # {"items": {item: "none"|"view"|"edit"}, "queue_scope": "own"|"all"|null,
+    #  "queue_unowned": bool|null}. Sem ajuste fica NULL de verdade.
+    access_overrides: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
 
     team: Mapped[Team | None] = relationship(lazy="selectin")
     customer: Mapped[Customer | None] = relationship(lazy="selectin")
+    # Chega carregado com o usuário (como team e customer): sem I/O síncrono depois.
+    access_profile: Mapped[AccessProfile | None] = relationship(lazy="selectin")
 
     def token_revoked(self, payload: dict) -> bool:
         """Token emitido antes da última revogação de sessões (iat em segundos inteiros)."""
@@ -110,3 +123,8 @@ class User(UUIDPrimaryKey, Timestamps, Base):
     def is_manager(self) -> bool:
         """Configuração: grupos, categorias (SLA e usuários só admin)."""
         return self.role in (UserRole.ADMIN, UserRole.SUPERVISOR)
+
+    @property
+    def access_summary(self) -> dict[str, Any] | None:
+        """Acesso efetivo (telas e filas) para a tela; técnico e cliente: None."""
+        return permissions.summary(self)

@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query, Response, status
 
-from app.api.deps import DB, CurrentUser, ManagerUser, TicketManagerUser
+from app.api.deps import DB, TicketManagerUser, access_user
 from app.core.enums import ExpenseStatus
 from app.models import TicketExpense
 from app.schemas.expense import (
@@ -21,9 +21,19 @@ from app.services.realtime import commit_and_publish
 
 router = APIRouter(tags=["expenses"])
 
+# Custos da OS: a gestão precisa de Custos extras (o técnico vê os dele no app, como sempre).
+TicketExpensesView = access_user("commercial.expenses", roles=None)
+ExpensesEdit = access_user("commercial.expenses", level="edit")
+# A lista do período: Custos extras e também Pagamentos (o bloco de reembolsos).
+ExpensesListView = access_user("commercial.expenses", "commercial.payouts")
+# O valor do km fica em Configurações.
+SettingsEdit = access_user("setup.settings", level="edit")
+
 
 @router.get("/tickets/{ticket_id}/expenses", response_model=list[ExpenseOut])
-async def list_expenses(ticket_id: uuid.UUID, db: DB, user: CurrentUser) -> list[TicketExpense]:
+async def list_expenses(
+    ticket_id: uuid.UUID, db: DB, user: TicketExpensesView
+) -> list[TicketExpense]:
     """O técnico responsável vê (somente leitura); o solicitante não vê custo."""
     ticket = await tickets_svc.get_visible_ticket(db, user, ticket_id)
     if not user.is_staff:
@@ -35,7 +45,7 @@ async def list_expenses(ticket_id: uuid.UUID, db: DB, user: CurrentUser) -> list
     "/tickets/{ticket_id}/expenses", response_model=ExpenseOut, status_code=status.HTTP_201_CREATED
 )
 async def create_expense(
-    ticket_id: uuid.UUID, body: ExpenseIn, db: DB, user: TicketManagerUser
+    ticket_id: uuid.UUID, body: ExpenseIn, db: DB, user: ExpensesEdit
 ) -> TicketExpense:
     ticket = await tickets_svc.get_visible_ticket(db, user, ticket_id)
     expense = await svc.create(db, ticket, body, user)
@@ -45,19 +55,19 @@ async def create_expense(
 
 @router.patch("/expenses/{expense_id}", response_model=ExpenseOut)
 async def update_expense(
-    expense_id: uuid.UUID, body: ExpenseUpdate, db: DB, user: TicketManagerUser
+    expense_id: uuid.UUID, body: ExpenseUpdate, db: DB, user: ExpensesEdit
 ) -> TicketExpense:
     expense = await svc.get(db, expense_id)
-    ticket = await tickets_svc.get_ticket(db, expense.ticket_id)
+    ticket = await tickets_svc.get_visible_ticket(db, user, expense.ticket_id)
     await svc.update(db, ticket, expense, body, user)
     await commit_and_publish(db)
     return expense
 
 
 @router.delete("/expenses/{expense_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_expense(expense_id: uuid.UUID, db: DB, user: TicketManagerUser) -> Response:
+async def delete_expense(expense_id: uuid.UUID, db: DB, user: ExpensesEdit) -> Response:
     expense = await svc.get(db, expense_id)
-    ticket = await tickets_svc.get_ticket(db, expense.ticket_id)
+    ticket = await tickets_svc.get_visible_ticket(db, user, expense.ticket_id)
     await svc.remove(db, ticket, expense, user)
     await commit_and_publish(db)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -66,20 +76,22 @@ async def delete_expense(expense_id: uuid.UUID, db: DB, user: TicketManagerUser)
 @router.get("/expenses", response_model=ExpenseReport)
 async def expense_report(
     db: DB,
-    _: TicketManagerUser,
+    user: ExpensesListView,
     start: datetime,
     end: datetime,
     technician_id: uuid.UUID | None = None,
     status_: Annotated[ExpenseStatus | None, Query(alias="status")] = None,
     customer_id: uuid.UUID | None = None,
 ) -> ExpenseReport:
-    """Reembolso dos técnicos no período (lançamento), com totais por técnico e por tipo."""
-    return await svc.report(db, start, end, technician_id, status_, customer_id)
+    """Reembolso dos técnicos no período (lançamento), com totais por técnico e por tipo. Só os
+    das OS da fila que a pessoa vê."""
+    return await svc.report(db, start, end, technician_id, status_, customer_id, viewer=user)
 
 
 @router.post("/expenses/mark-paid")
-async def mark_paid(body: MarkPaid, db: DB, user: TicketManagerUser) -> dict[str, int]:
-    """Marca como reembolsados só os aprovados; os outros ids são ignorados e não contam."""
+async def mark_paid(body: MarkPaid, db: DB, user: ExpensesEdit) -> dict[str, int]:
+    """Marca como reembolsados só os aprovados das OS que a pessoa vê; os outros ids são
+    ignorados e não contam."""
     count = await svc.mark_paid(db, body.ids, user)
     await commit_and_publish(db)
     return {"updated": count}
@@ -91,8 +103,8 @@ async def get_settings(db: DB, _: TicketManagerUser) -> ExpenseSettings:
 
 
 @router.put("/settings/expenses", response_model=ExpenseSettings)
-async def put_settings(body: ExpenseSettings, db: DB, user: ManagerUser) -> ExpenseSettings:
-    """Valor do km rodado (supervisor ou admin)."""
+async def put_settings(body: ExpenseSettings, db: DB, user: SettingsEdit) -> ExpenseSettings:
+    """Valor do km rodado (Configurações em Editar)."""
     rate = await svc.set_km_rate(db, body.km_rate, user)
     await db.commit()
     return ExpenseSettings(km_rate=rate)

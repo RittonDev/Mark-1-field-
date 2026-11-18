@@ -3,6 +3,7 @@
 import { OctagonAlert, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { Card, CardHeader, Skeleton } from "@/components/ui";
+import { useCan } from "@/lib/permissions";
 import { ProblemText } from "./figures";
 import { ticketsListHref } from "./links";
 import { CUSTOMER_GAP, intFmt, MIN_BASE, MIN_BASE_ROW, pctText, plural, share } from "./rules";
@@ -52,6 +53,8 @@ export function CustomersCard({ customers, operationOnTime }: { customers: HomeC
 }
 
 function CustomerRow({ customer: c, entered, operation }: { customer: CustomerPulse; entered: number; operation: number | null }) {
+  // A ficha do cliente é da tela Clientes: sem acesso a ela, o nome fica só como texto.
+  const canCustomers = useCan("base.customers");
   const onTime = share(c.on_time, MIN_BASE_ROW);
   // Âmbar só com as duas bases firmes e uma distância que não é ruído.
   const low = onTime.pct !== null && operation !== null && operation - onTime.pct >= CUSTOMER_GAP;
@@ -60,13 +63,19 @@ function CustomerRow({ customer: c, entered, operation }: { customer: CustomerPu
   return (
     <li className="py-3">
       <div className="flex items-baseline justify-between gap-3">
-        <Link
-          href={`/clientes/${c.id}`}
-          className="min-w-0 truncate text-sm font-semibold text-ink underline-offset-2 hover:text-brand-ink hover:underline"
-          title={c.name}
-        >
-          {c.name}
-        </Link>
+        {canCustomers ? (
+          <Link
+            href={`/clientes/${c.id}`}
+            className="min-w-0 truncate text-sm font-semibold text-ink underline-offset-2 hover:text-brand-ink hover:underline"
+            title={c.name}
+          >
+            {c.name}
+          </Link>
+        ) : (
+          <span className="min-w-0 truncate text-sm font-semibold text-ink" title={c.name}>
+            {c.name}
+          </span>
+        )}
         <Link
           href={ticketsListHref(c.filters)}
           className="shrink-0 text-sm font-medium text-ink tabular-nums underline-offset-2 hover:text-brand-ink hover:underline"

@@ -9,11 +9,12 @@ from typing import Any
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
-from app.core import sessions
+from app.core import permissions, sessions
 from app.core.enums import UserRole
 from app.core.security import InvalidToken, decode_token
 from app.db.session import SessionLocal
 from app.models import User
+from app.services import access as access_svc
 from app.services.realtime import Connection, manager
 
 router = APIRouter(tags=["realtime"])
@@ -22,7 +23,8 @@ log = logging.getLogger(__name__)
 AUTH_FAILED = 4401
 # O token só é conferido na abertura; o socket fica aberto por horas. A cada minuto vê se o token
 # venceu; a cada 5 minutos relê o usuário (desativado, senha trocada, papel ou equipe mudados) e
-# confere se a sessão de login foi encerrada (saiu, ou o refresh foi copiado).
+# confere se a sessão de login foi encerrada (saiu, ou o refresh foi copiado). Mudança de acesso
+# (perfil, ajustes, fila) também fecha: o cliente reconecta e passa a receber pelo acesso novo.
 EXPIRY_CHECK_S = 60
 USER_CHECK_S = 300
 
@@ -34,28 +36,42 @@ def session_ok(
     role: UserRole,
     team_id: uuid.UUID | None,
     now: float,
+    access_fp: str | None = None,
 ) -> bool:
     """A sessão do socket continua valendo: token no prazo, usuário ativo, sessões não revogadas
-    e o mesmo papel e equipe da abertura (a regra de entrega dos eventos depende deles)."""
+    e o mesmo papel e equipe da abertura (a regra de entrega dos eventos depende deles). Com
+    `access_fp`, também o mesmo acesso (telas e fila) da abertura."""
     if now >= int(payload.get("exp", 0)):
         return False
     if user is None or not user.is_active or user.token_revoked(payload):
+        return False
+    if access_fp is not None and permissions.of(user).fingerprint != access_fp:
         return False
     return user.role == role and user.team_id == team_id
 
 
 async def _load_user(user_id: uuid.UUID) -> User | None:
     async with SessionLocal() as db:
-        return await db.get(User, user_id)
+        user = await db.get(User, user_id)
+        if user is not None:
+            # Acesso efetivo calculado com a sessão aberta (fica guardado no objeto).
+            await access_svc.attach(db, user)
+        return user
 
 
 async def _session_alive(
-    payload: dict[str, Any], user_id: uuid.UUID, role: UserRole, team_id: uuid.UUID | None
+    payload: dict[str, Any],
+    user_id: uuid.UUID,
+    role: UserRole,
+    team_id: uuid.UUID | None,
+    access_fp: str | None = None,
 ) -> bool:
     """`session_ok` com o usuário relido do banco e a sessão de login ainda aberta (as rotas HTTP
     recusam o token de uma sessão encerrada; o socket dela também para de receber)."""
     user = await _load_user(user_id)
-    if not session_ok(user, payload, role=role, team_id=team_id, now=time.time()):
+    if not session_ok(
+        user, payload, role=role, team_id=team_id, now=time.time(), access_fp=access_fp
+    ):
         return False
     return not await sessions.is_revoked(payload.get("sid"))
 
@@ -73,9 +89,10 @@ async def _watch_session(
     user_id: uuid.UUID,
     role: UserRole,
     team_id: uuid.UUID | None,
+    access_fp: str | None = None,
 ) -> None:
-    """Fecha o socket com 4401 quando a sessão deixa de valer: os clientes renovam o token e
-    reconectam sozinhos."""
+    """Fecha o socket com 4401 quando a sessão deixa de valer (ou o acesso muda): os clientes
+    renovam o token e reconectam sozinhos."""
     checked_user = time.monotonic()
     while True:
         await asyncio.sleep(EXPIRY_CHECK_S)
@@ -86,7 +103,7 @@ async def _watch_session(
             continue
         checked_user = time.monotonic()
         try:
-            alive = await _session_alive(payload, user_id, role, team_id)
+            alive = await _session_alive(payload, user_id, role, team_id, access_fp)
         except Exception:
             # Banco ou Redis fora do ar por um instante: confere de novo na próxima volta.
             log.exception("Falha ao conferir a sessão do WebSocket")
@@ -117,15 +134,20 @@ async def websocket_endpoint(websocket: WebSocket, token: str | None = None) -> 
         await websocket.close(code=AUTH_FAILED, reason="sessão encerrada")
         return
 
+    access = permissions.of(user)
     conn = Connection(
         ws=websocket,
         user_id=str(user.id),
         role=user.role,
         team_id=str(user.team_id) if user.team_id else None,
+        # Técnico e cliente: a entrega segue o papel (sem acesso de tela e fila).
+        access=access if user.can_manage_tickets else None,
     )
     manager.add(conn)
     watcher = asyncio.create_task(
-        _watch_session(websocket, conn, payload, user.id, user.role, user.team_id)
+        _watch_session(
+            websocket, conn, payload, user.id, user.role, user.team_id, access.fingerprint
+        )
     )
     try:
         await websocket.send_json({"type": "hello", "user_id": str(user.id)})
