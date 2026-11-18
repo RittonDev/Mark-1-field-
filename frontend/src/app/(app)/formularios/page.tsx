@@ -12,8 +12,8 @@ import { useToast } from "@/components/Toaster";
 import { Button, Card, Dialog, EmptyState, ErrorBox, LoadingBlock, PageHeader, Table, Td, Th } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useCan } from "@/lib/permissions";
-import { useServiceTypes } from "@/lib/queries";
-import type { FormTemplate, ServiceType } from "@/lib/types";
+import { useCategories, useServiceTypes } from "@/lib/queries";
+import type { Category, FormTemplate, ServiceType } from "@/lib/types";
 import {
   type Draft,
   duplicateOf,
@@ -60,8 +60,9 @@ function FormsView() {
     queryFn: () => api.get<FormTemplate[]>("/form-templates"),
     enabled: canView,
   });
-  // Todos os tipos, inclusive os inativos: o nome sai certo na lista e no editor.
+  // Todos os tipos, inclusive os inativos: o nome sai certo na lista e no editor. As categorias também.
   const serviceTypes = useServiceTypes({ enabled: canView });
+  const categories = useCategories();
   // Onde a lista estava ao abrir o editor (volta ao mesmo ponto) e se o editor foi aberto por aqui:
   // aí "voltar" usa o histórico; aberto por link ou depois de recarregar, troca o endereço.
   const listScroll = useRef<number | null>(null);
@@ -116,7 +117,7 @@ function FormsView() {
 
   if (editKey) {
     const isNew = editKey === NEW_KEY;
-    if ((!isNew && templates.isLoading) || serviceTypes.isLoading) return <LoadingBlock />;
+    if ((!isNew && templates.isLoading) || serviceTypes.isLoading || categories.isLoading) return <LoadingBlock />;
     const template = isNew ? null : (templates.data?.find((t) => t.id === editKey) ?? null);
     if (!isNew && !template) {
       return (
@@ -144,22 +145,34 @@ function FormsView() {
         editKey={editKey}
         template={template}
         serviceTypes={serviceTypes.data ?? null}
+        categories={categories.data ?? null}
         onLeave={leave}
       />
     );
   }
 
-  return <FormsList templates={templates} serviceTypes={serviceTypes.data ?? []} canEdit={canEdit} onOpen={open} />;
+  return (
+    <FormsList
+      templates={templates}
+      serviceTypes={serviceTypes.data ?? []}
+      categories={categories.data ?? null}
+      canEdit={canEdit}
+      onOpen={open}
+    />
+  );
 }
 
 function FormsList({
   templates,
   serviceTypes,
+  categories,
   canEdit,
   onOpen,
 }: {
   templates: UseQueryResult<FormTemplate[]>;
   serviceTypes: ServiceType[];
+  /** null: as categorias não carregaram (a coluna diz só que há categoria ligada). */
+  categories: Category[] | null;
   /** Formulários com Editar: criar, duplicar, alterar e desativar. Sem ele, o nome abre a prévia. */
   canEdit: boolean;
   onOpen: (key: string, start?: Draft) => void;
@@ -177,6 +190,10 @@ function FormsList({
     () => new Map(serviceTypes.map((t) => [t.id, t.is_active ? t.name : `${t.name} (inativo)`])),
     [serviceTypes],
   );
+  const categoryName = useMemo(
+    () => new Map((categories ?? []).map((c) => [c.id, c.is_active ? c.full_name : `${c.full_name} (inativa)`])),
+    [categories],
+  );
   const counts = useMemo(() => {
     const active = all.filter((t) => t.is_active).length;
     return { active, inactive: all.length - active, all: all.length };
@@ -191,10 +208,11 @@ function FormsList({
     );
   }, [all, situation, query]);
 
-  // Desativar no lugar de excluir: some da lista de anexar, e as OS que já têm o formulário não mudam.
+  // Desativar no lugar de excluir: não entra mais nas OS nem aparece para adicionar, e as OS que já têm o
+  // formulário não mudam.
   const toggle = useMutation({
-    // Mesmas perguntas, só a situação: a versão não muda. As perguntas vêm do modelo relido agora, e não da
-    // lista guardada: o que outra pessoa salvou nesse meio-tempo não volta atrás.
+    // Mesmas perguntas, só a situação: a versão não muda. Tudo vem do modelo relido agora, e não da lista
+    // guardada: o que outra pessoa salvou nesse meio-tempo (vínculos inclusive) não volta atrás.
     mutationFn: async (t: FormTemplate) => {
       const current = await api.get<FormTemplate>(`/form-templates/${t.id}`);
       return api.put<FormTemplate>(`/form-templates/${t.id}`, {
@@ -202,6 +220,8 @@ function FormsList({
         description: current.description,
         fields: current.fields,
         service_type_ids: current.service_type_ids,
+        category_ids: current.category_ids,
+        default_required: current.default_required,
         requires_signature: current.requires_signature,
         is_active: !t.is_active,
         // Se alguém salvar entre a leitura e esta gravação, a API recusa (409) em vez de desfazer.
@@ -213,8 +233,8 @@ function FormsList({
       toast({
         title: saved.is_active ? `“${saved.name}” reativado` : `“${saved.name}” desativado`,
         description: saved.is_active
-          ? "Volta a aparecer para anexar nas OS."
-          : "Não aparece mais para anexar. As OS que já têm este formulário continuam com ele.",
+          ? "Volta a entrar nas OS e a aparecer para adicionar."
+          : "Não entra mais nas OS nem aparece para adicionar. As OS que já têm este formulário continuam com ele.",
         tone: "success",
       });
     },
@@ -235,8 +255,12 @@ function FormsList({
     setPending(null);
   };
 
-  const suggested = (t: FormTemplate) => {
-    const names = t.service_type_ids.map((id) => typeName.get(id) ?? "tipo removido");
+  // Os tipos de OS e as categorias em que o formulário entra sozinho.
+  const linkedTo = (t: FormTemplate) => {
+    const names = [
+      ...t.service_type_ids.map((id) => typeName.get(id) ?? "tipo removido"),
+      ...(t.category_ids ?? []).map((id) => categoryName.get(id) ?? (categories ? "categoria removida" : "categoria")),
+    ];
     if (!names.length) return <span className="text-ink-subtle">—</span>;
     const shown = names.slice(0, 2).join(", ");
     return <span title={names.join(", ")}>{names.length > 2 ? `${shown} e mais ${names.length - 2}` : shown}</span>;
@@ -246,7 +270,7 @@ function FormsList({
     <div className="mx-auto max-w-6xl">
       <PageHeader
         title="Formulários"
-        description="Checklists que o técnico preenche no app. Você decide, em cada OS, se anexa e se é obrigatório."
+        description="Checklists que o técnico preenche no app. Ligados a tipos de OS ou categorias, entram sozinhos nas OS."
         actions={
           canEdit ? (
             <Button variant="primary" onClick={() => onOpen(NEW_KEY, emptyDraft())}>
@@ -347,7 +371,7 @@ function FormsList({
                     <Th>Formulário</Th>
                     <Th className="text-right">Perguntas</Th>
                     <Th className="text-right">Fotos</Th>
-                    <Th>Sugerido nas OS de</Th>
+                    <Th>Entra sozinho nas OS de</Th>
                     <Th className="text-right">Versão</Th>
                     <Th>Situação</Th>
                     {canEdit ? (
@@ -377,7 +401,7 @@ function FormsList({
                         </Td>
                         <Td className="text-right tabular-nums">{questions}</Td>
                         <Td className="text-right tabular-nums">{photos || <span className="text-ink-subtle">—</span>}</Td>
-                        <Td className="max-w-xs text-xs text-ink-muted">{suggested(t)}</Td>
+                        <Td className="max-w-xs text-xs text-ink-muted">{linkedTo(t)}</Td>
                         <Td className="text-right text-ink-muted tabular-nums">{t.version}</Td>
                         <Td>
                           <ActiveState active={t.is_active} />
@@ -467,6 +491,7 @@ function FormPreview({ template: t, onClose }: { template: FormTemplate; onClose
       description={[
         `Versão ${t.version}`,
         `${questions} ${questions === 1 ? "pergunta" : "perguntas"}`,
+        (t.default_required ?? true) ? "entra como obrigatório" : "entra como opcional",
         t.requires_signature ? "pede a assinatura no local" : null,
       ]
         .filter(Boolean)

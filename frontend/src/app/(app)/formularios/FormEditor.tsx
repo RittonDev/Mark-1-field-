@@ -1078,6 +1078,9 @@ function PhonePreview({ draft }: { draft: Draft }) {
 
 function PreviewControl({ f }: { f: FormField }) {
   const box = "mt-1 rounded-md border border-line bg-surface-2 px-2 py-1.5 text-[11px] text-ink-subtle";
+  // Resposta automática: a pergunta já chega preenchida com o dado da OS (o técnico corrige).
+  const source = prefillOf(f);
+  if (source) return <p className={clsx(box, "font-medium text-ink", f.type === "textarea" && "h-12")}>{PREFILL_LABEL[source]}</p>;
   switch (f.type) {
     case "photo": {
       const need = photoNeed(f);

@@ -49,7 +49,7 @@ function feeProblem(fee: number | null): string | undefined {
   return undefined;
 }
 
-/** Formulários ativos sugeridos em cada tipo de serviço (a ligação fica no formulário). */
+/** Formulários ativos que entram sozinhos nas OS de cada tipo de serviço (a ligação fica no formulário). */
 function useLinkedForms() {
   const templates = useQuery({
     queryKey: ["form-templates", "active"],
@@ -71,7 +71,7 @@ function ServiceTypeDialog({
   onClose,
 }: {
   serviceType: ServiceType | null;
-  /** Formulários sugeridos neste tipo (null: ainda carregando). */
+  /** Formulários que entram nas OS deste tipo (null: ainda carregando). */
   linkedForms: FormTemplate[] | null;
   onClose: () => void;
 }) {
@@ -257,7 +257,7 @@ function ServiceTypeDialog({
         ) : null}
         {editing ? (
           <div className="flex flex-col gap-1.5 sm:col-span-2">
-            <span className="text-xs font-semibold text-ink/80">Formulários sugeridos nas OS deste tipo</span>
+            <span className="text-xs font-semibold text-ink/80">Formulários que entram nas OS deste tipo</span>
             {linkedForms === null ? (
               <span className="text-xs text-ink-muted">Carregando...</span>
             ) : linkedForms.length ? (

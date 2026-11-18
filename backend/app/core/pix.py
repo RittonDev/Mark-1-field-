@@ -87,7 +87,7 @@ def _phone_digits(key: str) -> str:
 
 
 def display(kind: PixKeyType | str, key: str) -> str:
-    """Para ler e conferir: "123.456.789-09", "11.222.333/0001-81", "+55 (11) 98888-7777"; e-mail
+    """Para ler e conferir: "123.456.789-09", "12.345.678/0001-95", "+55 (11) 98888-7777"; e-mail
     e chave aleatória como estão."""
     kind = key_type(kind)
     if kind == PixKeyType.CPF and len(key) == 11:
@@ -102,7 +102,7 @@ def display(kind: PixKeyType | str, key: str) -> str:
 
 
 def mask(kind: PixKeyType | str, key: str) -> str:
-    """Só o bastante para reconhecer a chave: "***.456.789-**", "11.222.333/****-**",
+    """Só o bastante para reconhecer a chave: "***.456.789-**", "12.345.678/****-**",
     "t***@exemplo.com", "+55 (11) *****-7777", "…4000"."""
     kind = key_type(kind)
     if kind == PixKeyType.CPF and len(key) == 11:
