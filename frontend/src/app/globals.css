@@ -286,10 +286,13 @@
 /*
  * Entrada em sequência (cartões e listas curtas): cada filho recebe --i (índice) e entra logo depois do
  * anterior; do 8º em diante entram juntos, para a lista nunca "demorar". Tabelas não usam (dado é para ler).
+ * Na camada dos componentes, como o .skeleton: um animate-* num filho direto vale por cima.
  */
-.stagger > * {
-  animation: mf-enter 0.22s cubic-bezier(0.16, 1, 0.3, 1) backwards;
-  animation-delay: calc(min(var(--i, 0), 8) * 18ms);
+@layer components {
+  .stagger > * {
+    animation: mf-enter 0.22s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+    animation-delay: calc(min(var(--i, 0), 8) * 18ms);
+  }
 }
 
 /* Base em camada própria: os utilitários do Tailwind (ex.: outline-none) continuam valendo por cima. */

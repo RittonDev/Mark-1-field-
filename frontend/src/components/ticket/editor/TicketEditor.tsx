@@ -495,7 +495,8 @@ function groupMoment(t: TicketDetail, now: number): string | null {
     case "in_progress":
       return "chegada";
     case "en_route":
-      return t.arrival_due_at && Date.parse(t.arrival_due_at) < now ? "atraso" : "deslocamento";
+      // De volta à loja sem data nova depois da improdutiva, o prazo da 1ª ida não vale (como na API).
+      return t.arrival_due_at && Date.parse(t.arrival_due_at) < now && !awaitingNewVisit(t) ? "atraso" : "deslocamento";
   }
   // A última ida a campo terminou em visita improdutiva e a OS ainda não foi remarcada.
   if (t.last_unproductive_at && !t.scheduled_start) return "improdutiva";
