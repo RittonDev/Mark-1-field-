@@ -22,12 +22,11 @@ import {
   Star,
   Upload,
   UserPlus,
-  Wallet,
   X,
 } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useConfirm } from "@/components/Confirm";
 import { NoAccess } from "@/components/NoAccess";
 import { fold, replaceSearch, useSearchChange } from "@/components/operacao/hooks";
@@ -53,7 +52,7 @@ import {
 import { useNow } from "@/components/useNow";
 import { absoluteApiUrl, api, errorMessage } from "@/lib/api";
 import { downloadCsv } from "@/lib/download";
-import { formatDate, formatMoney, formatRelative, initials } from "@/lib/format";
+import { formatDate, formatRelative, initials } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
 import { labelMap, maskCep, maskPhone, resizePhotoBlob, UFS, useOnboardingCatalog } from "@/lib/onboarding";
 import { useCan } from "@/lib/permissions";
@@ -63,10 +62,11 @@ import { favoritesHref, FavoritesView } from "@/components/technicians/Favorites
 import { TempPasswordPanel } from "@/components/technicians/GrantAccessDialog";
 import { InviteDialog } from "@/components/technicians/InviteDialog";
 import { NearbyFinder } from "@/components/technicians/NearbyFinder";
+import { ProfileHistory } from "@/components/technicians/ProfileHistory";
 import { refreshTechnicianViews } from "@/components/technicians/refresh";
+import { TechnicianPayment } from "@/components/technicians/TechnicianPayment";
 import type {
   ImportResult,
-  PayoutList,
   Technician,
   TechnicianRegion,
   TemporaryPassword,
@@ -88,7 +88,7 @@ const PAGE = 150;
 const API_LIMIT = 2000;
 
 /** Cadastros incompletos que atrapalham a operação (filtro rápido sobre a lista carregada). */
-type Gap = "phone" | "region" | "services" | "gps";
+type Gap = "phone" | "region" | "services" | "gps" | "pix";
 const GAPS: { key: Gap; label: string; hint: string; test: (t: Technician) => boolean }[] = [
   { key: "phone", label: "Sem celular", hint: "Sem celular, o WhatsApp não abre direto na conversa", test: (t) => !t.phone },
   {
@@ -103,6 +103,13 @@ const GAPS: { key: Gap; label: string; hint: string; test: (t: Technician) => bo
     label: "Sem aceite do GPS",
     hint: "Com acesso ao app, mas ainda não autorizou o GPS: não consegue iniciar a jornada",
     test: (t) => t.is_active && !t.location_consent_at,
+  },
+  {
+    key: "pix",
+    label: "Sem chave PIX",
+    hint: "Sem a chave, não há para onde pagar: ele cadastra no app, em Conta › Meu cadastro",
+    // Só quando a API diz que não tem (sem o campo, não conta ninguém).
+    test: (t) => t.is_active && t.has_pix === false,
   },
 ];
 

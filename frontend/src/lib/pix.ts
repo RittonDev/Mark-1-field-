@@ -13,6 +13,9 @@ import { copyText } from "./whatsapp";
 const DAY_MS = 86_400_000;
 const dayFmt = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", timeZone: OPERATION_TZ });
 
+/** Cor do selo "Chave nova" (âmbar, a mesma de "Em risco"). */
+export const PIX_NEW_COLOR = "#d97706";
+
 /** Tipo e chave para conferir com o que o banco mostra: "CPF 123.456.789-09". */
 export function pixText(pix: Pick<PixInfo, "key_type" | "key">): string {
   return `${PIX_KEY_TYPE[pix.key_type] ?? pix.key_type} ${formatPixKey(pix.key_type, pix.key)}`;
