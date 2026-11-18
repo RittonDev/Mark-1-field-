@@ -380,8 +380,10 @@ async def build(db: AsyncSession, ticket: Ticket, base_url: str) -> PublicReport
             contact_name=loc.contact_name,
             contact_phone=loc.contact_phone,
         )
+    # Solução e assinatura são o resultado: só com a OS concluída. Reaberta (ou cancelada), as da
+    # conclusão anterior não valem como o que foi feito agora nem como o aceite do cliente.
     signature = None
-    if ticket.signed_at is not None:
+    if finished and ticket.signed_at is not None:
         signature = PublicReportSignature(
             name=ticket.signer_name,
             role=ticket.signer_role,
@@ -430,7 +432,7 @@ async def build(db: AsyncSession, ticket: Ticket, base_url: str) -> PublicReport
             else None
         ),
         check_in_gps=check_in_gps,
-        resolution_notes=ticket.resolution_notes,
+        resolution_notes=ticket.resolution_notes if finished else None,
         forms=forms,
         photos=[_photo(a, base_url) for a in loose],
         signature=signature,

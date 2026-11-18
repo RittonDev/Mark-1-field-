@@ -136,7 +136,13 @@ async def create(db: AsyncSession, data: RepairIn, actor: User) -> RepairOrder:
 
 
 async def update(db: AsyncSession, repair: RepairOrder, data: RepairIn) -> RepairOrder:
-    for key, value in (await _values(db, data)).items():
+    values = await _values(db, data)
+    # A etapa também grava o valor do orçamento e a previsão de retorno: só o que veio no corpo
+    # muda (o formulário aberto antes da etapa não apaga o que outra pessoa lançou nela).
+    for key in ("vendor_quote_value", "expected_return_date"):
+        if key not in data.model_fields_set:
+            values.pop(key)
+    for key, value in values.items():
         setattr(repair, key, value)
     await db.flush()
     return repair

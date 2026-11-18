@@ -225,7 +225,9 @@ async def add_pings(db: AsyncSession, user: User, pings: list[PingIn]) -> tuple[
 
 
 async def publish_location(user: User, latest: dict) -> None:
-    """Avisa os gestores (só eles) da nova posição: o mapa ao vivo se atualiza."""
+    """Avisa os gestores (só eles) da nova posição: o mapa ao vivo se atualiza. Vai o ponto
+    inteiro (precisão, velocidade, direção, bateria e GPS simulado), para o mapa não mostrar os
+    dados do ponto anterior na posição nova."""
     if not latest:
         return
     await bus.publish(
@@ -236,6 +238,11 @@ async def publish_location(user: User, latest: dict) -> None:
             "latitude": latest["latitude"],
             "longitude": latest["longitude"],
             "recorded_at": latest["recorded_at"].isoformat(),
+            "accuracy_m": latest.get("accuracy_m"),
+            "speed_mps": latest.get("speed_mps"),
+            "heading": latest.get("heading"),
+            "battery_pct": latest.get("battery_pct"),
+            "is_mock": bool(latest.get("is_mock")),
             "audience": {"managers_only": True},
         }
     )
