@@ -2396,6 +2396,22 @@ def filter_conditions(user: User, f: TicketFilters, now: datetime) -> list[Colum
         conds.append(Ticket.scheduled_start >= _day_start(f.scheduled_from))
     if f.scheduled_to is not None:
         conds.append(Ticket.scheduled_start < _day_start(f.scheduled_to + timedelta(days=1)))
+    if f.resolved_from is not None or f.resolved_to is not None:
+        # Resolvida nesses dias: houve a resolução no período, mesmo se a OS foi reaberta depois.
+        # É a conta dos rankings dos relatórios (reports._technicians), e o atalho abre esta lista.
+        when: list[ColumnElement[bool]] = []
+        if f.resolved_from is not None:
+            when.append(TicketEvent.created_at >= _day_start(f.resolved_from))
+        if f.resolved_to is not None:
+            when.append(TicketEvent.created_at < _day_start(f.resolved_to + timedelta(days=1)))
+        conds.append(
+            exists().where(
+                TicketEvent.ticket_id == Ticket.id,
+                TicketEvent.event_type == TicketEventType.STATUS_CHANGED,
+                TicketEvent.to_value == TicketStatus.RESOLVED.value,
+                *when,
+            )
+        )
     if f.tag:
         names = {tag_rules.tag_key(name) for name in f.tag} - {""}
         if names:

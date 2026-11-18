@@ -311,3 +311,46 @@ async def test_sla_violations_window_matches_the_list_cut(
     ids = {i["id"] for i in listing}
     assert inside["id"] in ids
     assert outside["id"] not in ids
+
+
+async def test_list_filters_by_the_day_of_the_resolution(
+    client: AsyncClient, world: World, engine: AsyncEngine
+) -> None:
+    """O atalho do ranking de técnicos abre as OS resolvidas no período contado (o dia da
+    resolução), e não o histórico inteiro do técnico."""
+    an, th = world.analyst.headers, world.tech.headers
+    tech = str(world.tech.user.id)
+    done = await create(client, world, title="Resolvida", assignee_id=tech)
+    other = await create(client, world, title="Em aberto", assignee_id=tech)
+    done = await transition(client, th, done, "en_route")
+    done = await transition(client, th, done, "in_progress")
+    r = await client.post(
+        f"{API}/tickets/{done['id']}/signature",
+        files={"file": ("assinatura.png", PNG, "image/png")},
+        data={"signer_name": "Gerente da Loja", "signer_role": "Gerente"},
+        headers=th,
+    )
+    assert r.status_code == 200, r.text
+    done = (await client.get(f"{API}/tickets/{done['id']}", headers=th)).json()
+    await transition(client, th, done, "resolved", resolution_notes="Ok")
+    # A resolução foi há 3 dias.
+    await _sql(
+        engine,
+        "UPDATE ticket_events SET created_at = now() - interval '3 days' "
+        "WHERE ticket_id = :i AND to_value = 'resolved'",
+        i=uuid.UUID(done["id"]),
+    )
+    day = (local_today() - timedelta(days=3)).isoformat()
+
+    async def ids(**params: str) -> set[str]:
+        query = {"assignee_id": tech, **params}
+        r = await client.get(f"{API}/tickets", params=query, headers=an)
+        assert r.status_code == 200, r.text
+        return {i["id"] for i in r.json()["items"]}
+
+    that_day = await ids(resolved_from=day, resolved_to=day)
+    assert done["id"] in that_day
+    assert other["id"] not in that_day
+    assert done["id"] not in await ids(resolved_from=local_today().isoformat())
+    bad = await client.get(f"{API}/tickets", params={"resolved_from": "1990-01-01"}, headers=an)
+    assert bad.status_code == 422

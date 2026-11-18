@@ -578,6 +578,9 @@ class TicketFilters(BaseModel):
     created_to: date | None = None
     scheduled_from: date | None = None
     scheduled_to: date | None = None
+    # Resolvida nesses dias (o evento da resolução), como os rankings dos relatórios contam.
+    resolved_from: date | None = None
+    resolved_to: date | None = None
     tag: list[str] | None = None
     # Exportação: só as OS escolhidas.
     ids: list[uuid.UUID] | None = None

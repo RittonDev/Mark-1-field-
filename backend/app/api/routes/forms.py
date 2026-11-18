@@ -62,7 +62,8 @@ async def get_template(template_id: uuid.UUID, db: DB, _: FormsView) -> FormTemp
 
 
 FORM_CHANGED = (
-    "Outra pessoa salvou este formulário depois que você abriu. Abra de novo para ver a versão atual."
+    "Outra pessoa salvou este formulário depois que você abriu. "
+    "Abra de novo para ver a versão atual."
 )
 
 

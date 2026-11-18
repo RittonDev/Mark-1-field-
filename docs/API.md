@@ -116,7 +116,7 @@ Equivale ao "Tipo de OS" do Field Control. Sem `customer_id`, o tipo vale para t
 - `GET /tickets` → `Page<TicketListItem> {items,total,page,page_size}`
   - filtros: `status` (repetível), `priority` (repetível), `type`, `source`, `project_id`, `assignee_id`, `team_id`, `customer_id`, `location_id`, `service_type_id`, `violation_pending=true`, `category_id`, `asset_id`, `owner_id`, `no_owner=true`, `q` (título, descrição, número), `mine=true` (analista: executa ou é o responsável), `unassigned=true`, `open_only=true`, `sla_breached=true`
   - lista de atividades (como no Field Control): `number` (nº exato da OS, o "Identificador"), `created_from`/`created_to` e
-    `scheduled_from`/`scheduled_to` (AAAA-MM-DD, dias inteiros no fuso da operação, inclusive; OS sem agenda saem do filtro de
+    `scheduled_from`/`scheduled_to`, `resolved_from`/`resolved_to` (resolvida nesses dias: houve a resolução no período, mesmo se reaberta depois, como os rankings dos relatórios) (AAAA-MM-DD, dias inteiros no fuso da operação, inclusive; OS sem agenda saem do filtro de
     agendamento; datas fora de 2000–2100 → 422), `tag` (repetível, até 20: OS com qualquer uma dessas etiquetas, sem
     diferenciar maiúsculas nem espaços sobrando), `technician_id` (técnico que atuou: o responsável atual, quem foi junto
     ou quem já foi o responsável antes de uma troca, inclusive no histórico importado do FC; `assignee_id` continua sendo só
