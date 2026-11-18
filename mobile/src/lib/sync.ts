@@ -81,16 +81,18 @@ import {
   type PendingPhoto,
   type PendingSignature,
 } from "./db";
-import { flushDeviceRegistration } from "./device";
+import { flushDeviceRegistration, pushLive } from "./device";
 import { setFieldRules } from "./field";
 import { formatShort } from "./format";
 import { pendingRequiredForms } from "./forms";
 import { haptic } from "./haptics";
 import { isDone, isHelper } from "./lists";
+import { dismissNewsExcept, inForeground, presentNews, syncLocalAlerts, type NewsItem } from "./notifications";
 import {
-  announceOffers,
+  announceClosedOffers,
   applyOfferList,
   dropOffer,
+  offerNewsItems,
   offersChanged,
   offersDue,
   offersFetchDone,
@@ -102,7 +104,6 @@ import {
   setScopeRead,
   type OfferListOutcome,
 } from "./offers";
-import { syncOnsiteAlerts } from "./onsiteAlerts";
 import { userRef } from "./ops";
 import { deleteAllPhotoFiles, deletePhotoFile, persistPhoto, photoExists } from "./photoFiles";
 import { photoFileType } from "./photoFormat";
@@ -121,7 +122,7 @@ import type {
   SyncPushResponse,
   UnproductivePayload,
 } from "./syncTypes";
-import { showToast, type ToastOptions } from "./toast";
+import { showToast, type ToastTone } from "./toast";
 import { flushPendingShiftEnd, flushPings, resumeTracking, updateTrackingMode } from "./tracking";
 import type {
   Attachment,
@@ -135,6 +136,7 @@ import type {
   User,
   UUID,
 } from "./types";
+import { codesLine, siteLine, visitLine } from "./visitReminders";
 
 /** A API aceita até 200 por lote; lotes pequenos respondem antes do tempo limite em rede móvel. */
 const PUSH_BATCH = 25;
@@ -407,8 +409,8 @@ async function runOnce(myEpoch: number, manual: boolean) {
     await revalidateHelperTickets(round);
     await refreshFieldRules(round);
     await refreshReasons(round);
-    // Alertas locais do tempo na loja (aviso faltando 30 min e no estouro das 4h).
-    void syncOnsiteAlerts();
+    // Alertas locais: tempo na loja (aviso e estouro) e lembretes da visita (1 dia, 1h40 e 10 min antes).
+    void syncLocalAlerts();
     await flushDeviceRegistration().catch((error: unknown) => console.warn("Falha ao registrar o aparelho", error));
     const at = new Date().toISOString();
     // A rodada de uma sessão que terminou no meio não marca a hora da sincronização da próxima.
@@ -807,7 +809,7 @@ async function pullChanges(round: Round) {
         for (const worklog of data.worklogs) await saveServerWorklog(db, worklog);
         for (const id of data.revoked_ticket_ids) {
           const local = await getTicket(id, db);
-          if (local) revoked.push({ code: local.code });
+          if (local) revoked.push({ id, code: local.code });
           await deleteTicket(db, id);
         }
         if (last) {

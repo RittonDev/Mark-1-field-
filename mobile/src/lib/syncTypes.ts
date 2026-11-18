@@ -116,6 +116,15 @@ export interface SyncPushResponse {
   results: SyncOperationResult[];
 }
 
+/**
+ * Resposta do POST /devices (backend: DeviceRegistered). `live`: a central entrega push a este aparelho, então o
+ * app não repete o aviso com notificação própria; `simulated`: o push ainda não está ligado. Servidor antigo
+ * responde 204 sem corpo (vale como `simulated`).
+ */
+export interface DeviceRegistered {
+  push: "live" | "simulated";
+}
+
 /** Operação guardada na fila local (tabela `outbox`). */
 export type OutboxOp = SyncOperation & {
   seq: number;

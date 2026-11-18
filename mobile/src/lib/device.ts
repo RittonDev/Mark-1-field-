@@ -1,8 +1,11 @@
 // Registro do aparelho para push (POST /devices). O backend ainda só registra em log
-// (LogPushProvider); quando o FCM for ligado, este token é o que ele vai usar.
+// (LogPushProvider) e responde `push: "simulated"`: o app avisa sozinho as novidades da sincronização
+// (notifications.ts). Quando o FCM for ligado, este token é o que ele vai usar, a resposta passa a ser
+// "live" e o app para de repetir o aviso (kv push_live).
 //
 // No Expo Go não existe token de push do próprio app (no Android o expo-notifications
 // lança erro desde o SDK 53), então o registro só acontece num development build.
+// Aqui não se pede permissão: o pedido é um só, em auth.ts (ensurePushRegistration) e na Conta.
 // Sem rede na abertura do app, o token fica guardado e vai na próxima sincronização.
 
 import Constants from "expo-constants";
@@ -12,16 +15,27 @@ import { Platform } from "react-native";
 import { api, ApiError } from "./api";
 import { APP_VERSION } from "./config";
 import { getKv, setKv } from "./db";
+import { ensureNotificationsReady } from "./notifications";
+import type { DeviceRegistered } from "./syncTypes";
 
+export type PushMode = DeviceRegistered["push"];
+
+/**
+ * - registered: token no servidor (`push`: "live" quando a central entrega mesmo o push a este aparelho);
+ * - unsupported: Expo Go, emulador ou web (sem token de push do app);
+ * - blocked: notificações bloqueadas e o celular não deixa pedir de novo;
+ * - undetermined: notificações ainda não liberadas (dá para pedir);
+ * - error: falha ao pegar o token ou ao registrar.
+ */
 export type DeviceRegistration =
-  | { state: "registered"; token: string }
-  | { state: "unsupported" | "denied" | "error"; message: string };
+  | { state: "registered"; token: string; push: PushMode }
+  | { state: "unsupported" | "blocked" | "undetermined" | "error" };
 
 const TOKEN_KEY = "push_token";
 /** Token que ainda não chegou ao servidor (sem rede na hora): reenviado depois de cada sync. */
 const UNSENT_KEY = "push_token_unsent";
-
-const UNSUPPORTED = "Notificações ainda não disponíveis nesta versão do app.";
+/** "1": o servidor entrega push a este aparelho; as novidades não viram notificação local repetida. */
+const PUSH_LIVE_KEY = "push_live";
 
 let listenerInstalled = false;
 let current: DeviceRegistration | null = null;
@@ -29,9 +43,15 @@ let current: DeviceRegistration | null = null;
 /** Último estado do registro, inclusive depois de um reenvio que deu certo. */
 export const deviceRegistration = () => current;
 
-async function post(token: string) {
+/** O push da central já avisa este aparelho (o POST /devices respondeu "live"). */
+export async function pushLive(): Promise<boolean> {
+  return (await getKv(PUSH_LIVE_KEY).catch(() => null)) === "1";
+}
+
+async function post(token: string): Promise<PushMode> {
+  let response: DeviceRegistered | undefined;
   try {
-    await api.post("/devices", {
+    response = await api.post<DeviceRegistered | undefined>("/devices", {
       platform: Platform.OS === "ios" ? "ios" : "android",
       token,
       app_version: Constants.expoConfig?.version ?? APP_VERSION,
@@ -40,9 +60,13 @@ async function post(token: string) {
     if (error instanceof ApiError && error.retryable) await setKv(UNSENT_KEY, token);
     throw error;
   }
+  // Servidor antigo (204 sem corpo): o push não está ligado.
+  const push: PushMode = response?.push === "live" ? "live" : "simulated";
   await setKv(TOKEN_KEY, token);
   await setKv(UNSENT_KEY, null);
-  current = { state: "registered", token };
+  await setKv(PUSH_LIVE_KEY, push === "live" ? "1" : null);
+  current = { state: "registered", token, push };
+  return push;
 }
 
 export async function registerDevice(): Promise<DeviceRegistration> {
@@ -51,33 +75,13 @@ export async function registerDevice(): Promise<DeviceRegistration> {
 }
 
 async function register(): Promise<DeviceRegistration> {
-  if (Platform.OS !== "ios" && Platform.OS !== "android") return { state: "unsupported", message: UNSUPPORTED };
-  if (isRunningInExpoGo()) return { state: "unsupported", message: UNSUPPORTED };
-  if (!Device.isDevice) {
-    return { state: "unsupported", message: "Emuladores não recebem notificações." };
-  }
+  if (Platform.OS !== "ios" && Platform.OS !== "android") return { state: "unsupported" };
+  if (isRunningInExpoGo() || !Device.isDevice) return { state: "unsupported" };
   try {
-    // Import tardio: no Expo Go o módulo só emite avisos e não é usado.
-    const Notifications = await import("expo-notifications");
-    Notifications.setNotificationHandler({
-      handleNotification: async () => ({
-        shouldPlaySound: true,
-        shouldSetBadge: false,
-        shouldShowBanner: true,
-        shouldShowList: true,
-      }),
-    });
-    if (Platform.OS === "android") {
-      await Notifications.setNotificationChannelAsync("default", {
-        name: "Ordens de serviço",
-        importance: Notifications.AndroidImportance.HIGH,
-      });
-    }
-    let permission = await Notifications.getPermissionsAsync();
-    if (!permission.granted) permission = await Notifications.requestPermissionsAsync();
-    if (!permission.granted) {
-      return { state: "denied", message: "Notificações bloqueadas: libere nas configurações do celular." };
-    }
+    const Notifications = await ensureNotificationsReady();
+    if (!Notifications) return { state: "unsupported" };
+    const permission = await Notifications.getPermissionsAsync();
+    if (!permission.granted) return { state: permission.canAskAgain ? "undetermined" : "blocked" };
     // Token nativo: FCM no Android, APNs no iOS.
     const token = await Notifications.getDevicePushTokenAsync();
     const value = String(token.data);
@@ -88,11 +92,11 @@ async function register(): Promise<DeviceRegistration> {
         post(String(next.data)).catch((error: unknown) => console.warn("Falha ao atualizar o token de push", error));
       });
     }
-    await post(value);
-    return { state: "registered", token: value };
+    const push = await post(value);
+    return { state: "registered", token: value, push };
   } catch (error) {
     console.warn("Falha ao registrar o aparelho para notificações", error);
-    return { state: "error", message: "Não foi possível ativar as notificações agora." };
+    return { state: "error" };
   }
 }
 
@@ -112,6 +116,8 @@ export async function flushDeviceRegistration(): Promise<void> {
 export async function unregisterDevice(): Promise<void> {
   current = null;
   await setKv(UNSENT_KEY, null);
+  // Já não recebe o push da central: o próximo técnico neste aparelho é avisado pelo próprio app.
+  await setKv(PUSH_LIVE_KEY, null);
   const token = await getKv(TOKEN_KEY);
   if (!token) return;
   try {

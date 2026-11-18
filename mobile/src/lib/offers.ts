@@ -15,6 +15,7 @@ import { getKv, getTicket, setKv, type DB } from "./db";
 import { formatBRL } from "./expenses";
 import { whenLabel } from "./field";
 import { formatMinutes } from "./format";
+import type { NewsItem } from "./notifications";
 import { showToast } from "./toast";
 import type { FieldOffer, FieldOfferTicket, OfferState, UUID } from "./types";
 
@@ -138,6 +139,8 @@ export interface OfferListOutcome {
   closed: FieldOffer[];
   /** Busca antes do pull: ficou oferta para a busca depois do pull decidir (a central definiu o técnico). */
   held: boolean;
+  /** As que esperam a resposta do técnico agora: a notificação das outras sai da bandeja. */
+  pending: UUID[];
 }
 
 /**
@@ -188,7 +191,7 @@ export async function applyOfferList(
   };
   const changed = JSON.stringify(next) !== JSON.stringify(current);
   if (changed) await writeStore(db, next);
-  return { changed, news, closed, held };
+  return { changed, news, closed, held, pending: pendingOffers(offers, at).map((offer) => offer.id) };
 }
 
 /** Grava uma oferta que a tela leu do servidor (aberta ou recusada) sem esperar a próxima lista. */
@@ -264,15 +267,31 @@ function closedText(offer: FieldOffer): { title: string; description: string } {
 }
 
 /**
- * Oferta nova (tocar abre a oferta; a OS ainda não é do técnico) e a que fechou sem ele responder. Mais de
- * uma do mesmo tipo vira um resumo.
+ * Aviso de oferta nova (o mesmo texto no toast, com o app na tela, e na notificação do sistema, fora dela): uma
+ * oferta abre a oferta (a OS ainda não é do técnico); mais de uma vira um resumo que abre Hoje. `at`: agora pelo
+ * relógio do servidor (prazo para responder).
  */
-export function announceOffers({ news, closed }: Pick<OfferListOutcome, "news" | "closed">) {
-  if (news.length === 1) {
-    showToast("Nova oferta de OS", { description: offerSummary(news[0]), offerId: news[0].id });
-  } else if (news.length > 1) {
-    showToast(`${news.length} novas ofertas de OS`, { description: "Veja em Hoje e responda." });
+export function offerNewsItems(news: FieldOffer[], at: number): NewsItem[] {
+  if (news.length > 1) {
+    return [{ id: "news-offer-many", title: `${news.length} novas ofertas de OS`, body: "Veja em Hoje e responda.", home: true }];
   }
+  return news.map((offer) => {
+    const deadline = deadlineInfo(offer, at);
+    const summary = offerSummary(offer);
+    return {
+      id: `news-offer-${offer.id}`,
+      title: "Nova oferta de OS",
+      body: deadline ? `${summary} · responder até ${deadline.due}` : summary,
+      offerId: offer.id,
+    };
+  });
+}
+
+/**
+ * Oferta que fechou sem o técnico responder (outro técnico aceitou, a central cancelou...): só toast, com o app na
+ * tela. Mais de uma vira um resumo.
+ */
+export function announceClosedOffers(closed: FieldOffer[]) {
   if (closed.length === 1) {
     showToast(closedText(closed[0]).title, { description: closedText(closed[0]).description });
   } else if (closed.length > 1) {

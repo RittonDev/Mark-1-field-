@@ -1,0 +1,468 @@
+"""Formulários que entram sozinhos na OS pelo tipo de OS e pela categoria (valendo as de baixo),
+a lista explícita da Nova OS, a reconciliação antes da visita (troca de tipo ou de categoria e
+"Levar também às OS que ainda não começaram"), o histórico de uso do modelo e a resposta
+automática, ao vivo até a conclusão do formulário."""
+
+import uuid
+from datetime import UTC, datetime
+
+from httpx import AsyncClient
+
+from app.core.config import settings
+from tests.conftest import World, requires_db
+from tests.test_api import create, transition
+from tests.test_queue_visibility import access_a
+
+pytestmark = requires_db
+
+API = settings.API_PREFIX
+FIELDS = [{"id": "obs", "type": "textarea", "label": "Observações"}]
+
+
+async def category(client: AsyncClient, world: World, name: str, parent: dict | None = None) -> dict:
+    body: dict = {"name": name}
+    if parent is not None:
+        body["parent_id"] = parent["id"]
+    r = await client.post(f"{API}/categories", json=body, headers=world.supervisor.headers)
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+async def service_type(
+    client: AsyncClient, world: World, name: str, default: dict | None = None
+) -> dict:
+    body: dict = {"name": name, "estimated_minutes": 60}
+    if default is not None:
+        body["category_id"] = default["id"]
+    r = await client.post(f"{API}/service-types", json=body, headers=world.supervisor.headers)
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+async def template(client: AsyncClient, world: World, name: str, **extra: object) -> dict:
+    body = {"name": name, "fields": FIELDS, "requires_signature": False, **extra}
+    r = await client.post(f"{API}/form-templates", json=body, headers=world.analyst.headers)
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+async def detail(client: AsyncClient, world: World, ticket_id: str) -> dict:
+    r = await client.get(f"{API}/tickets/{ticket_id}", headers=world.analyst.headers)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+async def patch(client: AsyncClient, world: World, ticket_id: str, **body: object) -> dict:
+    r = await client.patch(f"{API}/tickets/{ticket_id}", json=body, headers=world.analyst.headers)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+async def events(client: AsyncClient, world: World, ticket_id: str, kind: str) -> list[dict]:
+    r = await client.get(f"{API}/tickets/{ticket_id}/events", headers=world.analyst.headers)
+    assert r.status_code == 200, r.text
+    return [e for e in r.json() if e["event_type"] == kind]
+
+
+def names(ticket: dict) -> list[str]:
+    return [f["name"] for f in ticket["forms"]]
+
+
+async def printers_scene(client: AsyncClient, world: World) -> dict:
+    """A ligado ao tipo T (obrigatório, pede assinatura); B à categoria-mãe "Impressoras"
+    (opcional); C a "Redes"; D inativo, ligado a T."""
+    printers = await category(client, world, "Impressoras")
+    jam = await category(client, world, "Atolamento", printers)
+    network = await category(client, world, "Redes")
+    kind = await service_type(client, world, "Instalação de impressora")
+    a = await template(
+        client, world, "Checklist A", service_type_ids=[kind["id"]], requires_signature=True
+    )
+    b = await template(
+        client, world, "Checklist B", category_ids=[printers["id"]], default_required=False
+    )
+    c = await template(client, world, "Checklist C", category_ids=[network["id"]])
+    d = await template(
+        client, world, "Checklist D", service_type_ids=[kind["id"]], is_active=False
+    )
+    return {"printers": printers, "jam": jam, "network": network, "type": kind}, a, b, c, d
+
+
+async def test_new_ticket_gets_the_forms_of_its_type_and_category(
+    client: AsyncClient, world: World
+) -> None:
+    scene, a, b, _, _ = await printers_scene(client, world)
+    assert (b["category_ids"], b["default_required"]) == ([scene["printers"]["id"]], False)
+    assert (a["category_ids"], a["default_required"]) == ([], True)
+
+    t = await create(
+        client, world, service_type_id=scene["type"]["id"], category_id=scene["jam"]["id"]
+    )
+    got = [(f["name"], f["required"], f["auto_attached"]) for f in t["forms"]]
+    assert got == [("Checklist A", True, True), ("Checklist B", False, True)]
+    assert t["signature_required"] is True
+    added = await events(client, world, t["id"], "form_added")
+    assert sorted((e["to_value"], e["actor"], e["note"]) for e in added) == [
+        ("Checklist A", None, "Pelo tipo de OS “Instalação de impressora”"),
+        ("Checklist B", None, "Pela categoria “Impressoras”"),
+    ]
+    assert all(e["data"]["auto"] is True for e in added)
+    assert {e["data"]["template_id"] for e in added} == {a["id"], b["id"]}
+
+    # Tipo com a categoria padrão "Impressoras > Atolamento", aberto sem categoria: B entra.
+    jam_type = await service_type(client, world, "Atolamento de papel", scene["jam"])
+    t = await create(client, world, service_type_id=jam_type["id"])
+    assert t["category"]["id"] == scene["jam"]["id"]
+    assert names(t) == ["Checklist B"]
+    assert t["signature_required"] is False
+
+
+async def test_explicit_forms_list_is_what_goes_in(client: AsyncClient, world: World) -> None:
+    scene, a, b, c, d = await printers_scene(client, world)
+    base = {"service_type_id": scene["type"]["id"], "category_id": scene["jam"]["id"]}
+
+    # Lista vazia: nenhum formulário, e os ligados que ficaram de fora vão para o histórico.
+    t = await create(client, world, forms=[], **base)
+    assert t["forms"] == [] and t["signature_required"] is False
+    created = await events(client, world, t["id"], "created")
+    assert set(created[0]["data"]["forms_left_out"]) == {a["id"], b["id"]}
+
+    # Exatamente a lista, na ordem: A é ligado (automático), C foi escolhido à mão.
+    t = await create(
+        client,
+        world,
+        forms=[{"template_id": c["id"], "required": True}, {"template_id": a["id"], "required": False}],
+        **base,
+    )
+    got = [(f["name"], f["required"], f["auto_attached"]) for f in t["forms"]]
+    assert got == [("Checklist C", True, False), ("Checklist A", False, True)]
+    assert t["signature_required"] is False
+    number = t["number"]
+
+    # Repetido, inexistente ou inativo: 422 e nenhuma OS (o número não é gasto).
+    bad_lists = [
+        ([{"template_id": a["id"]}, {"template_id": a["id"]}], "Formulário repetido na lista"),
+        ([{"template_id": str(uuid.uuid4())}], "Modelo de formulário não encontrado"),
+        ([{"template_id": d["id"]}], "Modelo de formulário inativo: Checklist D"),
+    ]
+    for forms, message in bad_lists:
+        body = {
+            "title": "Impressora parada",
+            "customer_id": world.customer_id,
+            "location_id": world.location_id,
+            "forms": forms,
+            **base,
+        }
+        r = await client.post(f"{API}/tickets", json=body, headers=world.supervisor.headers)
+        assert (r.status_code, r.json()["detail"]) == (422, message)
+    t = await create(client, world, **base)
+    assert t["number"] == number + 1
+
+    # Quem só vê a própria fila abre "Sem analista" já com os formulários (sem passos depois).
+    await access_a(client, world, unowned=False)
+    body = {
+        "title": "OS sem analista",
+        "customer_id": world.customer_id,
+        "location_id": world.location_id,
+        "owner_id": None,
+        "forms": [{"template_id": c["id"], "required": True}],
+    }
+    r = await client.post(f"{API}/tickets", json=body, headers=world.analyst.headers)
+    assert r.status_code == 201, r.text
+    assert r.json()["owner"] is None and names(r.json()) == ["Checklist C"]
+
+
+async def test_type_change_before_the_visit_reconciles_forms(
+    client: AsyncClient, world: World
+) -> None:
+    kind = await service_type(client, world, "Preventiva")
+    other = await service_type(client, world, "Corretiva")
+    a = await template(
+        client, world, "Checklist A", service_type_ids=[kind["id"]], requires_signature=True
+    )
+    g = await template(client, world, "Checklist G", service_type_ids=[other["id"]])
+    e = await template(client, world, "Checklist E")
+
+    t = await create(client, world, service_type_id=kind["id"])
+    assert names(t) == ["Checklist A"] and t["signature_required"] is True
+    r = await client.post(
+        f"{API}/tickets/{t['id']}/forms",
+        json={"template_id": e["id"], "required": False},
+        headers=world.analyst.headers,
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["auto_attached"] is False
+
+    t = await patch(client, world, t["id"], service_type_id=other["id"])
+    assert names(t) == ["Checklist E", "Checklist G"]
+    assert [f["auto_attached"] for f in t["forms"]] == [False, True]
+    # A exigência de assinatura vinha só do A, que saiu.
+    assert t["signature_required"] is False
+    removed = await events(client, world, t["id"], "form_removed")
+    assert [(x["from_value"], x["actor"], x["note"]) for x in removed] == [
+        ("Checklist A", None, "Saiu com a troca do tipo de OS")
+    ]
+    assert removed[0]["data"]["template_id"] == a["id"]
+    updated = await events(client, world, t["id"], "updated")
+    assert updated[0]["data"]["changes"]["signature_required"] == [True, False]
+
+    # Com resposta, o automático não sai.
+    started = await create(client, world, service_type_id=kind["id"])
+    form_id = started["forms"][0]["id"]
+    r = await client.put(
+        f"{API}/tickets/{started['id']}/forms/{form_id}/answers",
+        json={"answers": {"obs": "Começou"}},
+        headers=world.analyst.headers,
+    )
+    assert r.status_code == 200, r.text
+    started = await patch(client, world, started["id"], service_type_id=other["id"])
+    assert names(started) == ["Checklist A", "Checklist G"]
+
+    # Tirado à mão não volta sozinho (nem com a troca da categoria).
+    g_form = next(f for f in t["forms"] if f["template_id"] == g["id"])
+    r = await client.delete(
+        f"{API}/tickets/{t['id']}/forms/{g_form['id']}", headers=world.analyst.headers
+    )
+    assert r.status_code == 204
+    printers = await category(client, world, "Impressoras")
+    t = await patch(client, world, t["id"], category_id=printers["id"])
+    assert names(t) == ["Checklist E"]
+
+    # Em atendimento ou cancelada, a troca não mexe nos formulários.
+    visit = await create(client, world, service_type_id=kind["id"], assignee_id=str(world.tech.user.id))
+    visit = await transition(client, world.tech.headers, visit, "en_route")
+    visit = await transition(client, world.tech.headers, visit, "in_progress")
+    visit = await patch(client, world, visit["id"], service_type_id=other["id"])
+    assert names(visit) == ["Checklist A"]
+    gone = await create(client, world, service_type_id=kind["id"])
+    await transition(client, world.supervisor.headers, gone, "cancelled", note="Duplicada")
+    gone = await patch(client, world, gone["id"], service_type_id=other["id"])
+    assert names(gone) == ["Checklist A"]
+
+
+async def test_category_follows_the_type(client: AsyncClient, world: World) -> None:
+    printers = await category(client, world, "Impressoras")
+    network = await category(client, world, "Redes")
+    chosen = await category(client, world, "Outra")
+    kind = await service_type(client, world, "Instalação", printers)
+    other = await service_type(client, world, "Cabeamento", network)
+
+    # A categoria que veio do tipo acompanha a troca.
+    t = await create(client, world, service_type_id=kind["id"])
+    assert t["category"]["id"] == printers["id"]
+    t = await patch(client, world, t["id"], service_type_id=other["id"])
+    assert t["category"]["id"] == network["id"]
+    # Tirar o tipo não mexe na categoria.
+    t = await patch(client, world, t["id"], service_type_id=None)
+    assert t["category"]["id"] == network["id"]
+    # Sem categoria, o tipo traz a dele.
+    empty = await create(client, world)
+    empty = await patch(client, world, empty["id"], service_type_id=other["id"])
+    assert empty["category"]["id"] == network["id"]
+
+    # A escolhida à mão fica.
+    manual = await create(client, world, service_type_id=kind["id"], category_id=chosen["id"])
+    manual = await patch(client, world, manual["id"], service_type_id=other["id"])
+    assert manual["category"]["id"] == chosen["id"]
+
+    # A informada no corpo vence.
+    sent = await create(client, world, service_type_id=kind["id"])
+    sent = await patch(
+        client, world, sent["id"], service_type_id=other["id"], category_id=chosen["id"]
+    )
+    assert sent["category"]["id"] == chosen["id"]
+
+
+async def test_portal_request_gets_forms_when_the_central_sets_the_type(
+    client: AsyncClient, world: World
+) -> None:
+    kind = await service_type(client, world, "Visita técnica")
+    a = await template(client, world, "Checklist A", service_type_ids=[kind["id"]])
+    r = await client.post(
+        f"{API}/portal/requests",
+        json={"location_id": world.location_id, "title": "Impressora sem toner"},
+        headers=world.requester.headers,
+    )
+    assert r.status_code == 201, r.text
+    ticket_id = r.json()["id"]
+    assert (await detail(client, world, ticket_id))["forms"] == []
+
+    t = await patch(client, world, ticket_id, service_type_id=kind["id"])
+    assert t["status"] == "new"
+    assert [(f["template_id"], f["auto_attached"]) for f in t["forms"]] == [(a["id"], True)]
+
+
+async def test_apply_to_pending_reconciles_tickets_not_started(
+    client: AsyncClient, world: World
+) -> None:
+    an = world.analyst.headers
+    kind = await service_type(client, world, "Preventiva")
+    elsewhere = await category(client, world, "Sem OS")
+    f = await template(
+        client, world, "Checklist F", category_ids=[elsewhere["id"]], default_required=False
+    )
+    url = f"{API}/form-templates/{f['id']}"
+    base = {"name": "Checklist F", "fields": FIELDS, "requires_signature": False}
+
+    os1 = await create(client, world, title="Loja 1", service_type_id=kind["id"])
+    os2 = await create(
+        client, world, title="Loja 2", service_type_id=kind["id"], assignee_id=str(world.tech.user.id)
+    )
+    os2 = await transition(client, world.tech.headers, os2, "in_progress")
+    os3 = await create(client, world, title="Loja 3", service_type_id=kind["id"])
+    r = await client.post(f"{API}/tickets/{os3['id']}/forms", json={"template_id": f["id"]}, headers=an)
+    assert r.status_code == 201, r.text
+    r = await client.delete(f"{API}/tickets/{os3['id']}/forms/{r.json()['id']}", headers=an)
+    assert r.status_code == 204
+
+    # Sem a opção, o vínculo vale só para as próximas OS.
+    r = await client.put(url, json={**base, "service_type_ids": [kind["id"]]}, headers=an)
+    assert r.status_code == 200, r.text
+    assert (r.json()["attached_to"], r.json()["detached_from"]) == (None, None)
+    assert (await detail(client, world, os1["id"]))["forms"] == []
+
+    # Com a opção: só a OS que não começou e de onde ninguém tirou o formulário.
+    linked = {**base, "service_type_ids": [kind["id"]]}
+    r = await client.put(url, params={"apply_to_pending": True}, json=linked, headers=an)
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert (out["attached_to"], out["detached_from"], out["applied_to"]) == (1, 0, 0)
+    # Sem category_ids nem default_required no corpo, o modelo mantém os dois; e só os vínculos
+    # mudaram: a versão não sobe.
+    assert (out["category_ids"], out["default_required"], out["version"]) == (
+        [elsewhere["id"]],
+        False,
+        1,
+    )
+    form = (await detail(client, world, os1["id"]))["forms"]
+    assert [(x["template_id"], x["required"], x["auto_attached"]) for x in form] == [
+        (f["id"], False, True)
+    ]
+    assert (await detail(client, world, os2["id"]))["forms"] == []
+    assert (await detail(client, world, os3["id"]))["forms"] == []
+
+    # Tirando o tipo: sai de onde entrou sozinho e ninguém começou.
+    r = await client.put(url, params={"apply_to_pending": True}, json=base, headers=an)
+    assert (r.json()["attached_to"], r.json()["detached_from"]) == (0, 1)
+    assert (await detail(client, world, os1["id"]))["forms"] == []
+    removed = await events(client, world, os1["id"], "form_removed")
+    assert [(x["actor"], x["note"]) for x in removed] == [
+        (None, "O modelo não está mais ligado ao tipo nem à categoria desta OS")
+    ]
+    # Saiu sozinho (sem autor): ligando de novo, volta. Respondido, não sai mais.
+    r = await client.put(url, params={"apply_to_pending": True}, json=linked, headers=an)
+    assert r.json()["attached_to"] == 1
+    form_id = (await detail(client, world, os1["id"]))["forms"][0]["id"]
+    r = await client.put(
+        f"{API}/tickets/{os1['id']}/forms/{form_id}/answers",
+        json={"answers": {"obs": "Respondido"}},
+        headers=an,
+    )
+    assert r.status_code == 200, r.text
+    r = await client.put(url, params={"apply_to_pending": True}, json=base, headers=an)
+    assert (r.json()["attached_to"], r.json()["detached_from"]) == (0, 0)
+    assert len((await detail(client, world, os1["id"]))["forms"]) == 1
+
+    # O modelo novo já entra nas OS que não começaram.
+    r = await client.post(
+        f"{API}/form-templates",
+        params={"apply_to_pending": True},
+        json={**base, "name": "Checklist F2", "service_type_ids": [kind["id"]]},
+        headers=an,
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["attached_to"] == 2
+    assert "Checklist F2" in names(await detail(client, world, os3["id"]))
+    assert "Checklist F2" not in names(await detail(client, world, os2["id"]))
+
+
+async def test_prefill_until_the_form_is_completed(client: AsyncClient, world: World) -> None:
+    an, th = world.analyst.headers, world.tech.headers
+    catalog = (await client.get(f"{API}/form-templates/catalog", headers=an)).json()
+    sources = {s["key"]: s for s in catalog["prefill_sources"]}
+    assert sources["visit_date"]["types"] == ["text", "textarea", "date"]
+    assert sources["location_name"]["label"] == "Nome da loja"
+
+    fields = [
+        {"id": "loja", "type": "text", "label": "Loja", "required": True, "prefill": "location_name"},
+        {"id": "tecnico", "type": "text", "label": "Técnico", "prefill": "technician"},
+        {"id": "data", "type": "date", "label": "Data", "required": True, "prefill": "visit_date"},
+        {"id": "qtd", "type": "number", "label": "Quantidade", "prefill": "location_name"},
+        {"id": "obs", "type": "textarea", "label": "Observações"},
+    ]
+    tpl = await template(client, world, "Relatório da visita", fields=fields)
+    by_id = {x["id"]: x for x in tpl["fields"]}
+    assert by_id["qtd"]["prefill"] is None and by_id["obs"]["prefill"] is None
+    assert by_id["data"]["prefill"] == "visit_date"
+
+    start = datetime(2026, 12, 3, 13, 0, tzinfo=UTC)  # 10h em Brasília
+    t = await create(
+        client, world, assignee_id=str(world.tech.user.id), scheduled_start=start.isoformat()
+    )
+    r = await client.post(
+        f"{API}/tickets/{t['id']}/forms", json={"template_id": tpl["id"]}, headers=an
+    )
+    assert r.status_code == 201, r.text
+    expected = {"loja": "Matriz", "tecnico": "Tecnico", "data": "2026-12-03"}
+    assert r.json()["prefill"] == expected
+    form = (await client.get(f"{API}/tickets/{t['id']}", headers=th)).json()["forms"][0]
+    assert (form["prefill"], form["answers"]) == (expected, {})
+
+    # Concluir sem responder nada: a resposta automática conta e fica gravada.
+    r = await client.put(
+        f"{API}/tickets/{t['id']}/forms/{form['id']}/answers",
+        json={"answers": {}, "complete": True},
+        headers=th,
+    )
+    assert r.status_code == 200, r.text
+    assert (r.json()["status"], r.json()["answers"], r.json()["prefill"]) == (
+        "completed",
+        expected,
+        {},
+    )
+
+    # Depois de concluído, trocar o técnico não muda as respostas.
+    t = await patch(client, world, t["id"], assignee_id=str(world.tech_other.user.id))
+    assert t["forms"][0]["answers"] == expected and t["forms"][0]["prefill"] == {}
+
+
+async def test_usage_lists_types_from_history(client: AsyncClient, world: World) -> None:
+    kind = await service_type(client, world, "Preventiva")
+    rare = await service_type(client, world, "Corretiva")
+    f = await template(client, world, "Checklist F")
+    with_f = [{"template_id": f["id"], "required": True}]
+    for _ in range(3):
+        await create(client, world, service_type_id=kind["id"], forms=with_f)
+    await create(client, world, service_type_id=kind["id"], forms=[])
+    for _ in range(2):
+        await create(client, world, service_type_id=rare["id"], forms=with_f)
+
+    r = await client.get(f"{API}/form-templates/{f['id']}/usage", headers=world.analyst.headers)
+    assert r.status_code == 200, r.text
+    assert r.json() == {
+        "service_types": [
+            {"id": kind["id"], "name": "Preventiva", "customer": None, "used": 3, "total": 4}
+        ]
+    }
+
+
+async def test_suggestions_follow_type_and_category(client: AsyncClient, world: World) -> None:
+    printers = await category(client, world, "Impressoras")
+    jam = await category(client, world, "Atolamento", printers)
+    kind = await service_type(client, world, "Instalação")
+    by_category = await template(client, world, "Checklist da categoria", category_ids=[printers["id"]])
+    by_type = await template(client, world, "Checklist do tipo", service_type_ids=[kind["id"]])
+    await template(client, world, "Checklist solto")
+
+    t = await create(
+        client,
+        world,
+        service_type_id=kind["id"],
+        category_id=jam["id"],
+        forms=[{"template_id": by_type["id"], "required": True}],
+    )
+    r = await client.get(
+        f"{API}/tickets/{t['id']}/forms/suggestions", headers=world.analyst.headers
+    )
+    assert r.status_code == 200, r.text
+    assert [x["id"] for x in r.json()] == [by_category["id"]]
