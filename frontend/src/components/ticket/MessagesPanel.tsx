@@ -15,6 +15,7 @@ import { createPortal } from "react-dom";
 import { useToast } from "@/components/Toaster";
 import { Button, buttonClassName, Dialog, EmptyState, ErrorBox, isTopLayer, LoadingBlock, Skeleton, Textarea } from "@/components/ui";
 import { errorMessage } from "@/lib/api";
+import { useCan } from "@/lib/permissions";
 import {
   copyText,
   GROUP_TEXT_COPIED,
@@ -192,12 +193,15 @@ export function LongTextNote({ text }: { text: string }) {
   );
 }
 
-/** Link para os modelos dos textos (tela Textos). */
+/** Link para os modelos dos textos (tela Textos do WhatsApp): só com acesso a ela, e "Ver" sem Editar. */
 export function TemplatesLink() {
+  const canView = useCan("setup.messages");
+  const canEdit = useCan("setup.messages", "edit");
+  if (!canView) return null;
   return (
     <Link href="/textos" className="inline-flex items-center gap-1 rounded text-xs font-medium text-ink-muted hover:text-brand">
       <Settings2 className="size-3.5" />
-      Editar modelos
+      {canEdit ? "Editar modelos" : "Ver modelos"}
     </Link>
   );
 }
@@ -220,6 +224,8 @@ export function MessageList({ ticketId, compact = false }: { ticketId: string; c
   const [edited, setEdited] = useState<Record<string, string>>({});
   const [copied, setCopied] = useState<string | null>(null);
   useCopiedReset(copied, () => setCopied(null));
+  // Criar os modelos é gravar em Textos do WhatsApp.
+  const canEditTemplates = useCan("setup.messages", "edit");
 
   if (messages.isPending) return <LoadingBlock rows={2} label="Carregando os textos prontos..." />;
   if (!messages.data) return <ErrorBox message={errorMessage(messages.error)} onRetry={() => void messages.refetch()} />;
@@ -230,12 +236,18 @@ export function MessageList({ ticketId, compact = false }: { ticketId: string; c
         size="sm"
         icon={<MessageSquareText />}
         title="Nenhum texto pronto"
-        description="Crie os modelos (atividade confirmada, técnico em deslocamento, atividade encerrada...) uma vez e eles aparecem aqui preenchidos."
+        description={
+          canEditTemplates
+            ? "Crie os modelos (atividade confirmada, técnico em deslocamento, atividade encerrada...) uma vez e eles aparecem aqui preenchidos."
+            : "Os modelos (atividade confirmada, técnico em deslocamento, atividade encerrada...) aparecem aqui preenchidos depois de criados. Peça a quem cuida dos Textos do WhatsApp."
+        }
         action={
-          <Link href="/textos" className={buttonClassName("secondary", "sm")}>
-            <Settings2 className="size-3.5" />
-            Criar modelos
-          </Link>
+          canEditTemplates ? (
+            <Link href="/textos" className={buttonClassName("secondary", "sm")}>
+              <Settings2 className="size-3.5" />
+              Criar modelos
+            </Link>
+          ) : undefined
         }
       />
     );
@@ -557,6 +569,9 @@ function GroupTextsPopover({
   const settled = list !== undefined || failed;
   const menu = useRef<HTMLDivElement>(null);
   const baseId = useId();
+  // O rodapé leva à tela Textos do WhatsApp: só com acesso a ela ("Ver modelos" sem Editar).
+  const canTemplates = useCan("setup.messages");
+  const canEditTemplates = useCan("setup.messages", "edit");
   /** O último item com o foco (data-item), para devolver o foco a ele se a lista mudar. */
   const lastItem = useRef<string | null>(null);
   /** O foco já foi para a lista (ou para o erro) depois de carregar. */
@@ -706,7 +721,9 @@ function GroupTextsPopover({
   } else if (empty) {
     body = (
       <p id={emptyId} className="px-4 py-4 text-xs text-ink-muted">
-        Nenhum texto pronto ainda. Crie os modelos uma vez e eles aparecem aqui preenchidos com os dados da OS.
+        {canEditTemplates
+          ? "Nenhum texto pronto ainda. Crie os modelos uma vez e eles aparecem aqui preenchidos com os dados da OS."
+          : "Nenhum texto pronto ainda. Peça a quem cuida dos Textos do WhatsApp para criar os modelos."}
       </p>
     );
   } else {
@@ -792,20 +809,22 @@ function GroupTextsPopover({
       <div role="none" className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         {body}
       </div>
-      <div role="none" className="border-t border-line p-1">
-        <Link
-          href="/textos"
-          role="menuitem"
-          tabIndex={-1}
-          data-item={FOOTER_ITEM}
-          onClick={() => onClose(false)}
-          aria-describedby={empty ? emptyId : undefined}
-          className={clsx(menuItem, "items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-ink-muted hover:text-ink")}
-        >
-          <Settings2 aria-hidden className="size-3.5" />
-          {empty ? "Criar modelos" : "Editar modelos"}
-        </Link>
-      </div>
+      {canTemplates ? (
+        <div role="none" className="border-t border-line p-1">
+          <Link
+            href="/textos"
+            role="menuitem"
+            tabIndex={-1}
+            data-item={FOOTER_ITEM}
+            onClick={() => onClose(false)}
+            aria-describedby={empty ? emptyId : undefined}
+            className={clsx(menuItem, "items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-ink-muted hover:text-ink")}
+          >
+            <Settings2 aria-hidden className="size-3.5" />
+            {canEditTemplates ? (empty ? "Criar modelos" : "Editar modelos") : "Ver modelos"}
+          </Link>
+        </div>
+      ) : null}
     </div>,
     document.body,
   );

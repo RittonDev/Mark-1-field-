@@ -20,6 +20,11 @@ export interface CreatedResult {
   ticket: TicketDetail;
   /** O que não foi salvo depois de criar a OS (formulários): a OS existe, falta completar nela. */
   problems: string[];
+  /**
+   * A OS ficou sem analista e quem a criou só vê a própria fila: abrir a OS e os textos dela dariam
+   * "OS de outra fila", então o resumo não os oferece.
+   */
+  hidden?: boolean;
 }
 
 /**
@@ -135,22 +140,26 @@ export function CreatedTicket({
         ) : null}
 
         <div className="flex flex-col gap-3 border-t border-line bg-surface-2/50 px-5 py-4">
-          <div className="flex flex-wrap gap-2">
-            <Button variant="primary" onClick={() => (panel ? panel.open(t.id) : router.push(`/chamados/${t.id}`))}>
-              <PanelRightOpen aria-hidden className="size-4" />
-              Abrir OS
-            </Button>
-            {confirmed ? (
-              <CopyGroupTextButton ticketId={t.id} templateKey="agendamento" label="Copiar texto: Atividade confirmada" size="md" />
-            ) : (
-              // Sem técnico ou sem horário, "Atividade confirmada" não serve: os outros modelos ficam à mão.
-              <GroupTextsMenu ticketId={t.id} />
-            )}
-            <Button onClick={() => setSharing(true)}>
-              <MessageCircle aria-hidden className="size-4" />
-              Resumo para os técnicos
-            </Button>
-          </div>
+          {result.hidden ? (
+            <p className="text-sm text-ink-muted">A OS ficou sem analista e saiu da sua fila.</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              <Button variant="primary" onClick={() => (panel ? panel.open(t.id) : router.push(`/chamados/${t.id}`))}>
+                <PanelRightOpen aria-hidden className="size-4" />
+                Abrir OS
+              </Button>
+              {confirmed ? (
+                <CopyGroupTextButton ticketId={t.id} templateKey="agendamento" label="Copiar texto: Atividade confirmada" size="md" />
+              ) : (
+                // Sem técnico ou sem horário, "Atividade confirmada" não serve: os outros modelos ficam à mão.
+                <GroupTextsMenu ticketId={t.id} />
+              )}
+              <Button onClick={() => setSharing(true)}>
+                <MessageCircle aria-hidden className="size-4" />
+                Resumo para os técnicos
+              </Button>
+            </div>
+          )}
           <div className="flex flex-wrap gap-2">
             <Button variant="ghost" onClick={onNew}>
               <Plus aria-hidden className="size-4" />
@@ -170,7 +179,7 @@ export function CreatedTicket({
         </div>
       </Card>
       {/* Fora de qualquer formulário: o Ctrl+Enter do texto não pode reenviar nada. */}
-      {sharing ? <WhatsAppShare ticket={t} onClose={() => setSharing(false)} /> : null}
+      {sharing && !result.hidden ? <WhatsAppShare ticket={t} onClose={() => setSharing(false)} /> : null}
     </div>
   );
 }

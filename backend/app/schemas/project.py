@@ -58,17 +58,13 @@ class ProjectOut(BaseModel):
     team: Ref | None
     members: list[Ref]
     stats: ProjectStats
+    # Valor do contrato menos os custos extras e os valores dos técnicos nas OS do projeto.
+    # null sem valor de contrato ou sem a tela de Custos extras ou de Pagamentos (as duas entram
+    # na conta). services/projects.to_out calcula, porque depende do acesso de quem vê.
+    margin: float | None = None
     created_at: dt.datetime
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def code(self) -> str:
         return f"PRJ-{self.number:04d}"
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def margin(self) -> float | None:
-        """Valor do contrato menos os custos extras e os valores dos técnicos nas OS do projeto."""
-        if self.contract_value is None:
-            return None
-        return float(self.contract_value - self.stats.expenses_total - self.stats.payouts_total)

@@ -630,6 +630,9 @@ def _change_status(
         ticket.resolved_at = None
         ticket.closed_at = None
         ticket.cancelled_at = None
+        # O veredito do Field Control (prazo de solução cumprido na visita) era do atendimento que
+        # terminou: reaberta, vale o prazo original, como nas outras OS (se já venceu, estourada).
+        ticket.resolution_sla_met_at = None
 
     ticket.status = to
     payload = {"from": from_status.value, "to": to.value, **(data or {})}
@@ -2061,7 +2064,8 @@ async def bulk_tags(db: AsyncSession, data: TicketBulkTags, actor: User) -> int:
 
 
 def violation_pending_clause(now: datetime) -> ColumnElement[bool]:
-    """Resolvida/fechada com prazo violado e sem o motivo correspondente."""
+    """Resolvida/fechada com prazo violado e sem o motivo correspondente. O relógio de solução
+    para na conclusão ou antes, no prazo encerrado pelo Field Control (sla.resolution_end_col)."""
     response_late = or_(
         Ticket.first_response_at > Ticket.response_due_at,
         and_(Ticket.first_response_at.is_(None), Ticket.response_due_at < now),
@@ -2071,7 +2075,7 @@ def violation_pending_clause(now: datetime) -> ColumnElement[bool]:
         or_(
             and_(response_late, Ticket.response_violation_reason_id.is_(None)),
             and_(
-                Ticket.resolved_at > Ticket.resolution_due_at,
+                sla.resolution_end_col() > Ticket.resolution_due_at,
                 Ticket.resolution_violation_reason_id.is_(None),
             ),
         ),
@@ -2079,11 +2083,15 @@ def violation_pending_clause(now: datetime) -> ColumnElement[bool]:
 
 
 def breached_clause(now: datetime) -> ColumnElement[bool]:
+    """Em aberto com prazo estourado. O relógio de solução já encerrado (resolution_sla_met_at, o
+    veredito do Field Control na OS migrada) fica parado onde terminou: fora do prazo continua
+    estourado, no prazo não estoura mais."""
     clock = func.coalesce(Ticket.sla_paused_at, literal(now, DateTime(timezone=True)))
+    solution_end = func.coalesce(Ticket.resolution_sla_met_at, clock)
     return and_(
         Ticket.status.in_(OPEN_STATUSES),
         or_(
-            and_(Ticket.resolution_due_at.is_not(None), clock > Ticket.resolution_due_at),
+            and_(Ticket.resolution_due_at.is_not(None), solution_end > Ticket.resolution_due_at),
             and_(
                 Ticket.first_response_at.is_(None),
                 Ticket.response_due_at.is_not(None),

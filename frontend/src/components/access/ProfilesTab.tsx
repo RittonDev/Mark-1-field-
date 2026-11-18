@@ -210,6 +210,7 @@ function ProfileEditor({
   const confirm = useConfirm();
   const refresh = useRefreshAccess();
   const nameId = useId();
+  const deleteHintId = useId();
   const custom = profile.system_key === null;
   const [name, setName] = useState(profile.name);
   const [items, setItems] = useState<Levels>(profile.effective_items);
@@ -339,12 +340,27 @@ function ProfileEditor({
                   Restaurar padrão
                 </Button>
               ) : (
-                <span title={inUse ? `Em uso por ${peopleLabel(profile.users_count)}: troque o perfil delas antes.` : undefined}>
-                  <Button size="sm" variant="ghost" onClick={() => void askDelete()} loading={remove.isPending} disabled={inUse}>
-                    <Trash2 className="size-3.5" />
-                    Excluir
-                  </Button>
-                </span>
+                <>
+                  {/* O motivo à vista (o title não chega ao teclado nem ao leitor de tela). */}
+                  {inUse ? (
+                    <span id={deleteHintId} className="text-xs text-ink-muted">
+                      Em uso: troque o perfil dessas pessoas antes de excluir.
+                    </span>
+                  ) : null}
+                  <span title={inUse ? `Em uso por ${peopleLabel(profile.users_count)}: troque o perfil delas antes.` : undefined}>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => void askDelete()}
+                      loading={remove.isPending}
+                      disabled={inUse}
+                      aria-describedby={inUse ? deleteHintId : undefined}
+                    >
+                      <Trash2 className="size-3.5" />
+                      Excluir
+                    </Button>
+                  </span>
+                </>
               )}
             </div>
           ) : null}

@@ -2,12 +2,14 @@
 
 import clsx from "clsx";
 import { Hand, Pause, RotateCcw } from "lucide-react";
+import { useLayoutEffect, useState } from "react";
 import { PriorityBadge, SlaBadge, SlaCountdown, StatusBadge } from "@/components/badges";
+import { InactiveChip } from "@/components/operacao/status";
 import { ArrivalChip, OnsiteBar } from "@/components/ticket/FieldClock";
 import { TicketLink } from "@/components/ticket/TicketLink";
 import { SLA_STATUS, STATUS } from "@/lib/constants";
 import { dayKey, formatDate, formatDateTime, formatMinutes, formatShort, formatTime, initials } from "@/lib/format";
-import type { TicketListItem, UUID } from "@/lib/types";
+import type { TicketListItem, UserRef, UUID } from "@/lib/types";
 
 /** OS ainda aberta (nem resolvida, nem fechada, nem cancelada). */
 export const isOpenTicket = (t: TicketListItem) => ["open", "active", "pending"].includes(STATUS[t.status].group);
@@ -187,17 +189,14 @@ export function TechnicianCell({ t }: { t: TicketListItem }) {
     <div className="max-w-[12rem]">
       <span className="flex min-w-0 items-center">
         {/* Nome longo corta com reticências (nome inteiro no título). */}
-        <span className="truncate" title={t.assignee.name}>
+        <span
+          className="truncate"
+          title={t.assignee.is_active === false ? `${t.assignee.name} · sem acesso ao app` : t.assignee.name}
+        >
           {t.assignee.name}
         </span>
-        {t.assignee.is_active === false ? (
-          <span
-            className="ml-1.5 shrink-0 rounded-full bg-red-50 px-1.5 py-px text-[11px] font-medium text-red-700 dark:bg-red-500/10 dark:text-red-300"
-            title="Técnico desativado: não entra no app. Reatribua a OS."
-          >
-            inativo
-          </span>
-        ) : null}
+        {/* Sem acesso ao app só pede ação na OS em aberto: liberar o acesso ou trocar o técnico. */}
+        {t.assignee.is_active === false && isOpenTicket(t) ? <InactiveChip className="ml-1.5" /> : null}
         {helpers.length ? (
           <span
             className="ml-1.5 shrink-0 rounded-full bg-surface-2 px-1.5 py-px text-[11px] font-medium text-ink-muted ring-1 ring-line ring-inset"
@@ -211,6 +210,65 @@ export function TechnicianCell({ t }: { t: TicketListItem }) {
       {t.team ? <span className="block truncate text-xs text-ink-subtle">{t.team.name}</span> : null}
     </div>
   );
+}
+
+// ------------------------------------------------------------------ analista (nome curto sem empate)
+
+const PARTICLES = new Set(["da", "das", "de", "do", "dos", "e"]);
+
+/** Formas do nome, da mais curta à mais completa: "Fulano", "Fulano T.", "Fulano Tal" e o nome inteiro. */
+function nameForms(name: string): string[] {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  const first = words[0] ?? name;
+  const last = words.slice(1).filter((w) => !PARTICLES.has(w.toLocaleLowerCase("pt-BR"))).at(-1);
+  return last ? [first, `${first} ${last[0].toLocaleUpperCase("pt-BR")}.`, `${first} ${last}`, name] : [first, name];
+}
+
+/**
+ * Nome curto do analista: o primeiro nome; com outro analista de mesmo primeiro nome na página, mais a
+ * inicial do sobrenome ("Fulano T." e "Fulano B."); se ainda empatar, o sobrenome inteiro.
+ */
+function ownerLabel(name: string, others: readonly string[]): string {
+  const mine = nameForms(name);
+  const theirs = others.map(nameForms);
+  for (let level = 0; level < mine.length; level++) {
+    const key = mine[level].toLocaleLowerCase("pt-BR");
+    if (!theirs.some((forms) => forms[Math.min(level, forms.length - 1)].toLocaleLowerCase("pt-BR") === key)) return mine[level];
+  }
+  return name;
+}
+
+// Analistas das linhas à mostra (id → nome e quantas linhas), para achar o primeiro nome repetido na
+// página. Imutável: cada mudança troca o mapa e avisa as células.
+type ShownOwners = ReadonlyMap<UUID, { name: string; rows: number }>;
+let shownOwners: ShownOwners = new Map();
+const ownerListeners = new Set<() => void>();
+
+function changeShownOwners(id: UUID, name: string, delta: 1 | -1) {
+  const next = new Map(shownOwners);
+  const rows = (next.get(id)?.rows ?? 0) + delta;
+  if (rows > 0) next.set(id, { name, rows });
+  else next.delete(id);
+  shownOwners = next;
+  ownerListeners.forEach((listener) => listener());
+}
+
+/** Registra o analista da linha enquanto ela aparece e devolve os analistas da página (antes da pintura). */
+function useShownOwners(owner: UserRef | null): ShownOwners {
+  const [owners, setOwners] = useState(() => shownOwners);
+  const id = owner?.id;
+  const name = owner?.name;
+  useLayoutEffect(() => {
+    if (!id || !name) return;
+    const listener = () => setOwners(shownOwners);
+    ownerListeners.add(listener);
+    changeShownOwners(id, name, 1);
+    return () => {
+      ownerListeners.delete(listener);
+      changeShownOwners(id, name, -1);
+    };
+  }, [id, name]);
+  return owners;
 }
 
 /** Analista que acompanha a OS (a fila dela) e o "Assumir", que puxa a OS para a fila de quem clica. */
@@ -227,6 +285,9 @@ export function OwnerCell({
 }) {
   const owner = t.owner ?? null;
   const mine = Boolean(owner && owner.id === userId);
+  const shown = useShownOwners(owner);
+  const others = owner ? [...shown].filter(([id]) => id !== owner.id).map(([, o]) => o.name) : [];
+  const label = owner && !mine ? ownerLabel(owner.name, others) : null;
   return (
     <div className="flex items-center gap-1.5">
       {owner ? (
@@ -242,7 +303,7 @@ export function OwnerCell({
             {initials(owner.name)}
           </span>
           <span className="max-w-[7rem] truncate text-xs text-ink-muted" title={owner.name}>
-            {mine ? "Você" : owner.name.split(" ")[0]}
+            {mine ? "Você" : label}
           </span>
         </>
       ) : (

@@ -76,7 +76,9 @@ export function StatusMenu({
       e.preventDefault();
       close(true);
     } else if (e.key === "Tab") {
-      close(false);
+      // O foco volta ao botão antes do Tab do navegador, que segue a partir dele (no painel da OS, o Tab
+      // preso no painel acharia o foco no <body> com o menu já fora da tela).
+      close(true);
     } else if (list.length && (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Home" || e.key === "End")) {
       e.preventDefault();
       const next =
@@ -104,7 +106,11 @@ export function StatusMenu({
         aria-label={`Situação: ${STATUS[status].label}. Mudar a situação`}
         className="group rounded-full focus-visible:outline-white"
       >
-        <StatusChip status={status} className="pr-1.5 transition-[background-color,box-shadow] duration-150 group-hover:bg-white/[0.16] group-hover:ring-white/70">
+        <StatusChip
+          status={status}
+          // No escuro, o fundo continua com o véu de 5% (branco sobre o azul acima de 4,5:1): o contorno marca o hover.
+          className="pr-1.5 transition-[background-color,box-shadow] duration-150 group-hover:bg-white/[0.16] group-hover:ring-white/70 dark:group-hover:bg-white/5"
+        >
           <ChevronDown className={clsx("size-3.5 text-white/85 transition-transform duration-150", open && "rotate-180")} aria-hidden />
         </StatusChip>
       </button>

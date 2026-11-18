@@ -205,17 +205,26 @@ function signalReachable() {
 }
 
 /**
- * 403 de tela sem acesso: o perfil pode ter mudado desde que a central leu o usuário. A central relê o
- * /auth/me para acertar o menu (no máximo uma vez a cada 10 s: a tela faz várias buscas juntas).
+ * 403 de tela sem acesso: o perfil pode ter mudado desde que a central leu o usuário. O evento leva a
+ * tela e o nível que a API pediu: a central troca a página pelo "Sem acesso" na hora, quando é a tela
+ * aberta, e relê o /auth/me para acertar o menu (lá, no máximo uma vez a cada 10 s).
  */
 export const ACCESS_DENIED_EVENT = "mf:acesso-negado";
-let lastAccessDenied = 0;
 
-function signalAccessDenied() {
-  const now = Date.now();
-  if (typeof window === "undefined" || now - lastAccessDenied < 10_000) return;
-  lastAccessDenied = now;
-  window.dispatchEvent(new Event(ACCESS_DENIED_EVENT));
+/** O que vem no evento ACCESS_DENIED_EVENT (CustomEvent.detail). */
+export interface AccessDeniedDetail {
+  item: string | null;
+  required: string | null;
+}
+
+function signalAccessDenied(body: unknown) {
+  if (typeof window === "undefined") return;
+  const b = body && typeof body === "object" ? (body as { item?: unknown; required?: unknown }) : {};
+  const detail: AccessDeniedDetail = {
+    item: typeof b.item === "string" ? b.item : null,
+    required: typeof b.required === "string" ? b.required : null,
+  };
+  window.dispatchEvent(new CustomEvent<AccessDeniedDetail>(ACCESS_DENIED_EVENT, { detail }));
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -379,7 +388,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
         : typeof data === "string"
           ? data
           : null;
-    if (res.status === 403 && json && bodyCode(data) === "MODULE_FORBIDDEN") signalAccessDenied();
+    if (res.status === 403 && json && bodyCode(data) === "MODULE_FORBIDDEN") signalAccessDenied(data);
     throw new ApiError(res.status, detail, json ? data : null);
   }
   return data as T;

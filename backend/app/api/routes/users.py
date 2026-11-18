@@ -22,6 +22,7 @@ from app.schemas.user import (
     UserUpdate,
 )
 from app.services import access as access_svc
+from app.services.errors import AccessDenied
 from app.services.workflow import OPEN_STATUSES
 
 log = logging.getLogger(__name__)
@@ -37,6 +38,7 @@ TeamsEdit = access_user("setup.users", level="edit")
 # supervisores só o admin cria, promove ou edita. Técnicos ficam em Técnicos (analistas também).
 SUPERVISOR_MANAGES = frozenset({UserRole.ANALYST, UserRole.REQUESTER})
 ONLY_ADMIN = "Só o administrador cria ou altera usuários com este papel"
+TAKEOVER_CAP = "Só o administrador troca a senha ou o e-mail de quem tem mais acesso que você."
 # Mudanças que encerram as sessões abertas do usuário (o token antigo deixa de valer).
 REVOKING_FIELDS = frozenset({"password", "email", "role"})
 REQUIRED_FIELDS = ("name", "email", "role", "is_active")
@@ -236,6 +238,14 @@ async def update_user(user_id: uuid.UUID, body: UserUpdate, db: DB, actor: Users
     # Acesso de antes (o teto do supervisor compara com ele) e o acesso novo: perfil e ajustes
     # enviados ou, na troca de papel, o padrão do papel novo.
     before = await access_svc.effective(db, user)
+    if fields.get("password") or "email" in fields:
+        # Entrar como a pessoa daria ao supervisor o acesso que o teto não deixa dar: senha e
+        # e-mail de quem tem mais acesso que ele ficam com o administrador. ("email" só fica em
+        # fields quando muda de fato; para o administrador, check_cap volta logo.)
+        try:
+            access_svc.check_cap(actor, permissions.NO_ACCESS, before)
+        except AccessDenied:
+            raise AccessDenied(TAKEOVER_CAP, code="ACCESS_CAP") from None
     after = before
     if access_in is not None:
         after = await access_svc.apply_user_access(

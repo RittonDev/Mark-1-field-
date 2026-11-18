@@ -35,6 +35,7 @@ from app.services.realtime import (
     should_deliver,
 )
 from tests.conftest import World, requires_db
+from tests.test_b2_forms import template as form_template
 
 pytestmark = requires_db
 
@@ -548,6 +549,72 @@ async def test_passing_ticket_to_another_queue(client: AsyncClient, scene: Scene
     assert (moved["data"]["from_id"], moved["data"]["to_id"]) == (s.a_id, s.b_id)
 
 
+async def test_passing_to_another_queue_goes_last(
+    client: AsyncClient, world: World, scene: Scene
+) -> None:
+    """O Salvar da OS (GeneralTab) troca o técnico e os horários antes do analista responsável:
+    depois da troca de fila, a OS já não é de quem salva e o resto daria 403."""
+    s = scene
+    await access_a(client, world, unowned=False)
+    url = f"{API}/tickets/{s.t_a['id']}"
+    version = (await client.get(url, headers=s.a)).json()["version"]
+    r = await client.patch(
+        url, json={"title": "Título novo", "expected_version": version}, headers=s.a
+    )
+    assert r.status_code == 200, r.text
+    other_tech = str(world.tech_other.user.id)
+    r = await client.post(
+        f"{url}/assign",
+        json={"assignee_id": other_tech, "expected_version": r.json()["version"]},
+        headers=s.a,
+    )
+    assert r.status_code == 200, r.text
+    r = await client.patch(
+        url, json={"owner_id": s.b_id, "expected_version": r.json()["version"]}, headers=s.a
+    )
+    assert r.status_code == 200, r.text
+    after = (await client.get(url, headers=s.b)).json()
+    assert (after["title"], after["owner"]["id"]) == ("Título novo", s.b_id)
+    assert after["assignee"]["id"] == other_tech
+    # Por isso a fila vai por último: já não dá para mexer na OS.
+    r = await client.post(
+        f"{url}/assign",
+        json={"assignee_id": str(world.tech.user.id), "expected_version": after["version"]},
+        headers=s.a,
+    )
+    assert (r.status_code, r.json()) == (403, QUEUE_FORBIDDEN)
+
+
+async def test_new_ticket_without_owner_gets_forms_before_leaving(
+    client: AsyncClient, world: World, scene: Scene
+) -> None:
+    """Nova OS "Sem analista" de quem não vê as OS sem analista: a tela cria na fila de quem abre,
+    anexa os formulários e só no fim deixa a OS sem analista (direto sem analista, os formulários
+    dariam 403 e a OS ficaria sem os obrigatórios)."""
+    s = scene
+    tpl = await form_template(client, world)
+    await access_a(client, world, unowned=False)
+    body = {"title": "OS nova", "customer_id": world.customer_id, "location_id": world.location_id}
+    r = await client.post(f"{API}/tickets", json=body, headers=s.a)
+    assert r.status_code == 201, r.text
+    tid = r.json()["id"]
+    assert r.json()["owner"]["id"] == s.a_id  # sem owner_id, quem abre assume
+    r = await client.post(
+        f"{API}/tickets/{tid}/forms", json={"template_id": tpl["id"], "required": True}, headers=s.a
+    )
+    assert r.status_code == 201, r.text
+    version = (await client.get(f"{API}/tickets/{tid}", headers=s.a)).json()["version"]
+    r = await client.patch(
+        f"{API}/tickets/{tid}", json={"owner_id": None, "expected_version": version}, headers=s.a
+    )
+    assert r.status_code == 200, r.text
+    detail = (await client.get(f"{API}/tickets/{tid}", headers=s.b)).json()
+    assert detail["owner"] is None and len(detail["forms"]) == 1
+    # E saiu da fila de quem criou.
+    r = await client.get(f"{API}/tickets/{tid}", headers=s.a)
+    assert (r.status_code, r.json()) == (403, QUEUE_FORBIDDEN)
+
+
 # ------------------------------------------------------------------------------- tempo real
 
 
@@ -577,6 +644,19 @@ def test_should_deliver_follows_the_queue() -> None:
     assert not deliver(event(unowned=True), dataclasses.replace(own, queue_unowned=False))
     assert deliver(event(owner_id=other), None)  # sem acesso informado: como antes
     assert deliver({"type": "technician.location", "audience": {}})  # não é de OS
+
+    # Posição e jornada dos técnicos (nome e GPS ao vivo): só com o Mapa ao vivo, como o
+    # /tracking/*.
+    no_map = dataclasses.replace(own, items={**own.items, "operation.map": "none"})
+    for kind in ("technician.location", "technician.shift"):
+        ping = {"type": kind, "user_id": "tecnico", "audience": {"managers_only": True}}
+        assert deliver(ping)  # padrão do analista: Mapa em Visualizar
+        assert deliver(ping, None)  # sem acesso informado: como antes
+        assert not deliver(ping, no_map)
+        admin = permissions.FULL_ACCESS
+        assert should_deliver(
+            user_id=me, role=UserRole.ADMIN, team_id=None, event=ping, access=admin
+        )
 
     changed = {"type": "access.changed", "audience": {"user_ids": [me]}}
     assert deliver(changed)

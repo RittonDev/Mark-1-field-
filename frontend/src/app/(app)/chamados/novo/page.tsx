@@ -500,8 +500,17 @@ function NewTicket() {
       payload: TicketCreatePayload;
       forms: { id: UUID; name: string }[];
       formsRequired: boolean;
+      /**
+       * "Sem analista" de quem não vê as OS sem analista: a OS nasce na fila de quem abre, recebe os
+       * formulários e só no fim fica sem analista (depois disso, ela some para quem criou).
+       */
+      unownLast: boolean;
+      /** A OS sai da fila de quem cria (o resumo não oferece o que daria "OS de outra fila"). */
+      leavesQueue: boolean;
     }): Promise<CreatedResult> => {
-      const ticket = await api.post<TicketDetail>("/tickets", input.payload);
+      const payload = { ...input.payload };
+      if (input.unownLast) delete payload.owner_id;
+      const ticket = await api.post<TicketDetail>("/tickets", payload);
       // A OS já existe: daqui em diante nada pode falhar a criação (o analista reenviaria e duplicaria).
       const problems: string[] = [];
       let current = ticket;
@@ -525,7 +534,16 @@ function NewTicket() {
           // O resumo segue com a versão de antes dos formulários.
         }
       }
-      return { ticket: current, problems };
+      if (input.unownLast) {
+        try {
+          current = await api.patch<TicketDetail>(`/tickets/${ticket.id}`, { owner_id: null, expected_version: current.version });
+        } catch (err) {
+          problems.push(`Analista responsável: ${errorMessage(err)}`);
+        }
+      }
+      // Sem analista e sem ser quem executa, a OS ficou fora da fila de quem a criou.
+      const hidden = input.leavesQueue && !current.owner && current.assignee?.id !== userId;
+      return { ticket: current, problems, hidden };
     },
     onSuccess: (result) => {
       writeStored("session", draftKey(userId), null);
@@ -789,7 +807,9 @@ function NewTicket() {
     if (ownerMode === "none") payload.owner_id = null;
     else if (ownerMode === "other") payload.owner_id = d.ownerId;
     const forms = d.formIds.map((id) => ({ id, name: templates.data?.find((t) => t.id === id)?.name ?? "formulário" }));
-    create.mutate({ payload, forms, formsRequired: d.formsRequired });
+    // "Sem analista" sem ver essas OS: depois de criada, a OS é de outra fila para quem a abriu.
+    const leavesQueue = ownerMode === "none" && ownOnly && !queueScope.unowned;
+    create.mutate({ payload, forms, formsRequired: d.formsRequired, unownLast: leavesQueue && forms.length > 0, leavesQueue });
   }
 
   /** Volta ao formulário limpo com `next` (sem contar como mexida: nada é gravado até o analista agir). */

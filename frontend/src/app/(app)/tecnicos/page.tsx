@@ -460,6 +460,28 @@ function TechniciansView() {
             </div>
           ) : null}
 
+          {/* Sem celular o WhatsApp abre sem o número. A planilha exportada volta pela importação, que acha
+              cada técnico pelo e-mail e grava o celular preenchido (o resto da planilha vem igual ao cadastro). */}
+          {gap === "phone" && canEdit && rows.length > 0 ? (
+            <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-line bg-surface px-4 py-2.5 text-xs text-ink-muted shadow-elev-1">
+              <p className="min-w-0 flex-1 basis-64">
+                Para preencher de uma vez: exporte esta lista, preencha a coluna{" "}
+                <strong className="font-semibold text-ink">celular</strong> e importe a planilha. O e-mail identifica cada
+                técnico e nada muda antes da prévia.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="ghost" onClick={exportCsv}>
+                  <Download className="size-3.5" />
+                  Exportar
+                </Button>
+                <Button size="sm" onClick={() => setImporting(true)}>
+                  <Upload className="size-3.5" />
+                  Importar planilha
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
           <Card className={clsx("transition-opacity", list.isPlaceholderData && "opacity-70")}>
             {list.isLoading ? (
               <LoadingBlock />

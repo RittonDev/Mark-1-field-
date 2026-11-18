@@ -25,6 +25,7 @@ from app.core.enums import (
 from app.models import Customer, Quote, Ticket, TicketEvent, TicketExpense, User
 from app.schemas.reports import CountRef, DailyReport, DayNumbers, DayPoint, MonthlyReport
 from app.services.activities import day_bounds, local_today
+from app.services.sla import resolution_end_col
 from app.services.workflow import OPEN_STATUSES
 
 STATUS_EVENTS = (TicketEventType.CREATED, TicketEventType.STATUS_CHANGED)
@@ -168,13 +169,15 @@ async def numbers(
             join_from=TicketEvent.ticket_id,
         )
     )
+    # No prazo: o relógio de solução parou até o prazo. O fim é a conclusão ou, antes dela, o
+    # prazo encerrado pelo Field Control na OS migrada (sla.resolution_end_col).
     in_sla = await db.scalar(
         _scoped(
             select(func.count()).where(
                 Ticket.resolved_at >= start,
                 Ticket.resolved_at < end,
                 Ticket.resolution_due_at.is_not(None),
-                Ticket.resolved_at <= Ticket.resolution_due_at,
+                resolution_end_col() <= Ticket.resolution_due_at,
             ),
             customer_id,
             scope,
@@ -380,39 +383,49 @@ async def monthly(
     month: int,
     customer_id: CustomerId = None,
     scope: Scope = None,
+    *,
+    with_expenses: bool = True,
+    with_quotes: bool = True,
 ) -> MonthlyReport:
+    """Sem `with_expenses`/`with_quotes` (a pessoa não tem a tela de Custos extras/Orçamentos),
+    o total correspondente sai null e nem é calculado."""
     start, end, first, next_first = month_bounds(year, month)
     prev_year, prev_month = (year - 1, 12) if month == 1 else (year, month - 1)
     p_start, p_end, _, _ = month_bounds(prev_year, prev_month)
     customers = await _customers(db, start, end, limit=10, customer_id=customer_id, scope=scope)
-    expenses = await db.scalar(
-        _scoped(
-            select(func.coalesce(func.sum(TicketExpense.total), 0)).where(
-                TicketExpense.created_at >= start,
-                TicketExpense.created_at < end,
-                TicketExpense.status != ExpenseStatus.REJECTED,
-            ),
-            customer_id,
-            scope,
-            join_from=TicketExpense.ticket_id,
+    expenses_total = quotes_total = None
+    if with_expenses:
+        expenses = await db.scalar(
+            _scoped(
+                select(func.coalesce(func.sum(TicketExpense.total), 0)).where(
+                    TicketExpense.created_at >= start,
+                    TicketExpense.created_at < end,
+                    TicketExpense.status != ExpenseStatus.REJECTED,
+                ),
+                customer_id,
+                scope,
+                join_from=TicketExpense.ticket_id,
+            )
         )
-    )
-    # Aprovado de OS cancelada não entra (não vai ser cobrado), como os pagamentos dos técnicos.
-    quotes = await db.scalar(
-        _scoped(
-            select(func.coalesce(func.sum(Quote.total), 0))
-            .select_from(Quote)
-            .join(Ticket, Ticket.id == Quote.ticket_id)
-            .where(
-                Quote.status == QuoteStatus.APPROVED,
-                Quote.decided_at >= start,
-                Quote.decided_at < end,
-                Ticket.status != TicketStatus.CANCELLED,
-            ),
-            customer_id,
-            scope,
+        expenses_total = Decimal(expenses or 0)
+    if with_quotes:
+        # Aprovado de OS cancelada não entra (não vai ser cobrado), como os pagamentos.
+        quotes = await db.scalar(
+            _scoped(
+                select(func.coalesce(func.sum(Quote.total), 0))
+                .select_from(Quote)
+                .join(Ticket, Ticket.id == Quote.ticket_id)
+                .where(
+                    Quote.status == QuoteStatus.APPROVED,
+                    Quote.decided_at >= start,
+                    Quote.decided_at < end,
+                    Ticket.status != TicketStatus.CANCELLED,
+                ),
+                customer_id,
+                scope,
+            )
         )
-    )
+        quotes_total = Decimal(quotes or 0)
     return MonthlyReport(
         month=f"{year:04d}-{month:02d}",
         closed=next_first <= local_today(),
@@ -423,6 +436,6 @@ async def monthly(
         customers=customers,
         technicians=await _technicians(db, start, end, customer_id=customer_id, scope=scope),
         unproductive_reasons=await _unproductive_reasons(db, start, end, customer_id, scope),
-        expenses_total=Decimal(expenses or 0),
-        quotes_approved_total=Decimal(quotes or 0),
+        expenses_total=expenses_total,
+        quotes_approved_total=quotes_total,
     )

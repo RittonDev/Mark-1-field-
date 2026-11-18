@@ -427,6 +427,11 @@ export interface TicketListItem {
   first_response_at: ISODate | null;
   resolved_at: ISODate | null;
   sla_paused_at: ISODate | null;
+  /**
+   * Prazo de solução encerrado antes da conclusão: na OS migrada, a visita (mesmo improdutiva) com que o
+   * Field Control deu o prazo como cumprido, no prazo ou fora dele. O relógio de solução para aí.
+   */
+  resolution_sla_met_at?: ISODate | null;
   /** Visitas improdutivas (foi ao local e não atendeu). */
   unproductive_count: number;
   last_unproductive_at: ISODate | null;
@@ -769,6 +774,8 @@ export interface DaySummary {
   unassigned: number;
   /** Visitas improdutivas registradas no dia. */
   unproductive?: number;
+  /** Só hoje: OS a caminho ou em atendimento há mais de 12 h (dado parado). Ficam fora da lista e dos números acima. */
+  stuck_in_field?: number;
 }
 
 export interface DayActivities {
@@ -1447,7 +1454,16 @@ export interface TechnicianSuggestion {
 export type QueueSection = "attention" | "in_field" | "today" | "waiting" | "upcoming" | "unscheduled" | "done";
 
 export interface QueueReason {
-  code: "sla_violated" | "sla_at_risk" | "no_technician" | "late_start" | "unproductive" | "violation_pending" | string;
+  code:
+    | "sla_violated"
+    | "sla_at_risk"
+    | "no_technician"
+    | "late_start"
+    | "unproductive"
+    | "violation_pending"
+    | "inactive_technician"
+    | "field_stuck"
+    | string;
   label: string;
   tone: "danger" | "warning" | "info";
 }
@@ -1457,6 +1473,11 @@ export interface QueueItem extends TicketListItem {
   reasons: QueueReason[];
 }
 
+/**
+ * Números da Minha fila: só as OS de que a pessoa é a analista responsável, sem o limite da lista (a mesma
+ * conta da linha dela em "Filas da equipe"). `today`: em aberto agendadas para o dia; `in_field`: em campo
+ * há até 12 h; `done`: resolvidas no dia; waiting, upcoming e unscheduled: o tamanho dessas seções.
+ */
 export interface QueueCounts {
   open: number;
   attention: number;
@@ -1477,6 +1498,8 @@ export interface MyQueue {
   /** Quantas OS a fila tem; acima do limite da lista, `truncated` avisa que ficaram de fora as menos urgentes. */
   total?: number;
   truncated?: boolean;
+  /** Em aberto em que a pessoa só executa (o responsável é outro ou ninguém): estão na lista, fora de `counts`. */
+  executing_only?: number;
 }
 
 export interface QueueSummary {
@@ -1936,6 +1959,8 @@ export interface ReportDayPoint {
 export interface MonthlyReport extends Omit<DailyReport, "date"> {
   month: string;
   days: ReportDayPoint[];
-  expenses_total: number;
-  quotes_approved_total: number;
+  /** null sem a tela de Custos extras (o total nem é calculado). */
+  expenses_total: number | null;
+  /** null sem a tela de Orçamentos. */
+  quotes_approved_total: number | null;
 }

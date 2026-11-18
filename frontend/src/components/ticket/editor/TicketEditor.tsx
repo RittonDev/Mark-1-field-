@@ -51,7 +51,7 @@ import { UNPRODUCTIVE_FROM, UnproductiveDialog } from "@/components/ticket/Unpro
 import { WhatsAppShare } from "@/components/ticket/WhatsAppShare";
 import { WorklogsTab } from "@/components/ticket/WorklogsTab";
 import { useToast } from "@/components/Toaster";
-import { Button, buttonClassName, Card, CardHeader, EmptyState, ErrorBox, isTopLayer, Kbd, SectionTitle, Skeleton } from "@/components/ui";
+import { Button, buttonClassName, Card, CardHeader, EmptyState, ErrorBox, Kbd, SectionTitle, Skeleton } from "@/components/ui";
 import { useNow } from "@/components/useNow";
 import { api, errorMessage } from "@/lib/api";
 import { STATUS } from "@/lib/constants";
@@ -61,7 +61,7 @@ import { useCan } from "@/lib/permissions";
 import type { Comment, Quote, ReportLink, TicketDetail, TicketEvent, TicketStatus } from "@/lib/types";
 import { copyText, type GroupText, groupTextsQuery, whatsappUrl } from "@/lib/whatsapp";
 import { GENERAL_FORM_ID, GeneralTab, GeneralView, type SaveState } from "./GeneralTab";
-import { type HeaderJump, TicketHeader } from "./TicketHeader";
+import { type HeaderJump, slaView, TicketHeader } from "./TicketHeader";
 import { type TicketTabAlert, type TicketTabItem, TicketTabs } from "./TicketTabs";
 import { useUnsavedGuard } from "./useUnsavedGuard";
 
@@ -83,6 +83,9 @@ const TABS: { key: TabKey; label: string; icon: LucideIcon }[] = [
 
 /** Abas em que se muda algo ali mesmo (salva na hora); Localização, Vínculos e Histórico só mostram. */
 const INLINE_TABS: TabKey[] = ["prazos", "orcamentos", "pecas", "formularios", "anexos", "acompanhamentos"];
+
+/** Altura máxima do resumo do cabeçalho no celular (max-sm:max-h-[4.5rem] do TicketHeader), em px. */
+const SUMMARY_MAX_PX = 72;
 
 const GPS_LABEL: Record<string, string> = {
   en_route: "Saída para o local",
@@ -565,10 +568,17 @@ function GroupTexts({ ticket, synced }: { ticket: TicketDetail; synced: boolean 
   );
 }
 
-/** O editor está por cima de tudo (nenhum diálogo ou menu aberto sobre ele): os atalhos valem. */
+/**
+ * O editor está por cima de tudo (nenhum diálogo, nem menu de fora, aberto sobre ele): os atalhos valem.
+ * Os menus do próprio editor (situação, "Mais", relatório) não contam: com eles abertos, o Ctrl+S ainda
+ * salva, em vez de abrir o "Salvar página" do navegador.
+ */
 function editorOnTop(root: HTMLElement) {
+  const layers = Array.from(document.querySelectorAll('[aria-modal="true"], [role="menu"]')).filter(
+    (el) => el.getAttribute("role") !== "menu" || !root.contains(el),
+  );
   const modal = root.closest('[aria-modal="true"]');
-  return modal ? isTopLayer(modal) : !document.querySelector('[aria-modal="true"], [role="menu"]');
+  return modal ? layers[layers.length - 1] === modal : layers.length === 0;
 }
 
 // Ações do rodapé: só o ícone no celular; com o nome ao lado em telas largas (o title não aparece no toque).
@@ -584,10 +594,13 @@ const FINISHED: TicketStatus[] = ["resolved", "closed", "cancelled"];
  */
 function deadlineAlert(t: TicketDetail, now: number): TicketTabAlert | null {
   const due = nextDue(t);
+  // O SLA com a mesma conta ao vivo do chip do cabeçalho (em risco a 75% do prazo, sem esperar a releitura).
+  const sla = slaView(t, now);
   const arrivalDue = !t.arrived_at && !FINISHED.includes(t.status) && t.arrival_due_at ? Date.parse(t.arrival_due_at) : null;
   const onsiteDue = t.status === "in_progress" && t.onsite_due_at ? Date.parse(t.onsite_due_at) : null;
   const late =
     t.sla_status === "breached" ||
+    sla.tone === "late" ||
     (due !== null && !t.sla_paused_at && Date.parse(due.at) < now) ||
     t.arrival_status === "late" ||
     (arrivalDue !== null && arrivalDue < now) ||
@@ -596,6 +609,7 @@ function deadlineAlert(t: TicketDetail, now: number): TicketTabAlert | null {
   if (late) return { tone: "danger", label: "prazo vencido" };
   const risk =
     t.sla_status === "at_risk" ||
+    sla.tone === "risk" ||
     t.arrival_status === "at_risk" ||
     (arrivalDue !== null && arrivalDue - now <= 60 * 60_000) ||
     t.onsite_status === "warning";
@@ -768,9 +782,14 @@ export function TicketEditor({
     const read = () => {
       frame = 0;
       const top = el.scrollTop;
-      setScroll((prev) =>
-        prev.shadow === top > 4 && prev.collapsed === top > 24 ? prev : { shadow: top > 4, collapsed: top > 24 },
-      );
+      const room = el.scrollHeight - el.clientHeight;
+      setScroll((prev) => {
+        // Recolhido, só reabre perto do topo. Aberto, só recolhe se, depois de recolher (a área cresce até a
+        // altura do resumo), ainda sobrar rolagem acima de 24 px: senão o navegador corta a rolagem, o
+        // resumo reabre e o conteúdo fica pulando.
+        const collapsed = prev.collapsed ? top > 4 : top > 24 && room > 24 + SUMMARY_MAX_PX;
+        return prev.shadow === top > 4 && prev.collapsed === collapsed ? prev : { shadow: top > 4, collapsed };
+      });
     };
     const onScroll = () => {
       if (!frame) frame = requestAnimationFrame(read);

@@ -147,9 +147,10 @@ Equivale ao "Tipo de OS" do Field Control. Sem `customer_id`, o tipo vale para t
 - `GET /tickets/{id}/attachments` → `AttachmentOut[]` · `POST` multipart `file` + `kind` (`file|photo|signature`)
 - `GET /attachments/{id}/download?token=` → arquivo (o `download_url` da listagem já vem assinado, expira em 15 min)
 
-`TicketListItem = {id, number, code:"OS-000123", title, status, priority, type, source, category:{id,name,full_name}|null, customer:{id,name}|null, location:{id,name,code,document,address_line,city,state,latitude,longitude,contact_name,contact_phone}|null, assignee:{id,name,email,role}|null, team:{id,name}|null, requester_name, scheduled_start, scheduled_end, response_due_at, resolution_due_at, first_response_at, resolved_at, sla_paused_at, sla_paused_seconds, created_at, updated_at, version, sla_status, tags:[{name,color}], service_type:{id,name,estimated_minutes}|null, description}`
+`TicketListItem = {id, number, code:"OS-000123", title, status, priority, type, source, category:{id,name,full_name}|null, customer:{id,name}|null, location:{id,name,code,document,address_line,city,state,latitude,longitude,contact_name,contact_phone}|null, assignee:{id,name,email,role}|null, team:{id,name}|null, requester_name, scheduled_start, scheduled_end, response_due_at, resolution_due_at, first_response_at, resolved_at, sla_paused_at, resolution_sla_met_at, sla_paused_seconds, created_at, updated_at, version, sla_status, tags:[{name,color}], service_type:{id,name,estimated_minutes}|null, description}`
 (na lista, `description` é o começo do escopo, até 300 caracteres; `service_type` vem preenchido em `GET /tickets` e
-pode vir null em outras listas)
+pode vir null em outras listas; `resolution_sla_met_at`: o prazo de solução encerrado antes da conclusão, na OS
+migrada em que o Field Control deu o prazo como cumprido; o relógio de solução para aí, ver `docs/STATUS_E_SLA.md`)
 
 `TicketDetail = TicketListItem + {description, impact, urgency, asset:{id,name,asset_type,brand,model,serial_number,asset_tag,ip_address}|null, requester:UserRef|null, requester_contact, service_address, service_type:{id,name,estimated_minutes}|null, estimated_minutes, work_seconds, work_started_at, actual_minutes, created_by:UserRef|null, closed_at, cancelled_at, reopen_count, resolution_notes, allowed_transitions:[status], can_edit, can_assign}`
 
@@ -181,16 +182,18 @@ O "Motivo da violação" do Field Control: um campo por relógio, escolhido de u
 Tela própria da operação, como no Field Control (aquela em que, segundo o levantamento, quem opera passa o dia).
 
 - `GET /activities/day?date=YYYY-MM-DD&team_id=&assignee_id=` → `DayActivities {date, timezone, is_today, summary, activities[]}`. Sem `date`, usa o dia de hoje no fuso `TIMEZONE`.
-  - Entram no dia: as OS agendadas para ele; as que tiveram deslocamento, atendimento ou conclusão nele (pelo histórico); e, se for hoje, as que estão em campo agora.
+  - Entram no dia: as OS agendadas para ele; as que tiveram deslocamento, atendimento ou conclusão nele (pelo histórico); e, se for hoje, as que estão em campo agora (há até 12 h, a regra de `services/field.py`).
   - `Activity = {ticket: TicketListItem, state, scheduled_start, scheduled_end, started_at, arrived_at, finished_at, start_delay_minutes, start_has_gps, service_type_name, estimated_minutes, actual_minutes}`: o previsto e o realizado na mesma linha.
   - `state` ∈ `scheduled` (agendada), `late` (horário passou e não saiu), `en_route`, `in_progress`, `on_hold`, `rescheduled` (teve atividade no dia e foi remarcada), `done` (concluída no dia), `pending` (voltou para a fila).
-  - `summary` traz a contagem por `state` e `unassigned`.
+  - `summary` traz a contagem por `state` e `unassigned`. Hoje, `stuck_in_field` conta as OS a caminho ou em atendimento há mais de 12 h (dado parado): ficam fora da lista e dos outros números.
   - Ordem: pela hora de atuação, a manhã primeiro (a agendada ou, sem agenda, a de início; sem hora no fim),
     e só depois pelo técnico. A tela agrupa por técnico na ordem em que aparecem: quem começa mais cedo
     fica em cima e, dentro do bloco, as OS seguem o relógio.
 
 ### Dashboard
 - `GET /dashboard/summary` → `{by_status:{status:n}, by_priority:{priority:n}, open_total, unassigned, sla_breached, sla_at_risk, created_today, resolved_today, avg_resolution_minutes_30d, sla_compliance_30d, by_assignee:[{user_id,name,open,in_progress,breached}]}`
+  - `sla_compliance_30d`: das resolvidas em 30 dias com prazo de solução (sem as canceladas), a % em que o relógio de solução parou até o prazo (a conclusão ou, antes dela, `resolution_sla_met_at`).
+  - `by_assignee[].in_progress`: em campo agora, há até 12 h (a parada há mais tempo não conta).
 
 ### Sincronização mobile
 Ver `docs/MOBILE_SYNC.md`.
@@ -275,7 +278,8 @@ Cada usuário só recebe eventos de OS que pode ver (o técnico, só das OS atri
 acabou de sair dele); notas internas não chegam ao solicitante.
 
 Só para a gestão (analistas, supervisores, admin): `technician.location` `{user_id, name, latitude, longitude, recorded_at}`,
-`technician.shift` `{user_id, name, on_shift}` e `onboarding.submitted` `{application_id, name}` (ficha nova na homologação).
+`technician.shift` `{user_id, name, on_shift}` (esses dois só com o Mapa ao vivo) e `onboarding.submitted` `{application_id, name}`
+(ficha nova na homologação).
 O cliente pode mandar `{"type":"ping"}` e recebe `{"type":"pong"}`.
 Ao receber um evento, recarregue a OS/lista (o evento não carrega o objeto inteiro).
 
@@ -372,22 +376,38 @@ Assumir (`/take`) ou iniciar uma OS sem analista também coloca na fila de quem 
 evento interno `owner_changed` (`data: {from_name, to_name}`, `note` ex.: "Bruno puxou a OS de Carla").
 
 **Minha fila.** `GET /my-queue?user_id=&date=AAAA-MM-DD` (gestão; sem `user_id`, a minha; sem `date`, hoje no
-fuso `TIMEZONE`) → `{user, date, generated_at, counts, items}`. Entram as OS em aberto em que a pessoa é
-responsável ou executa, mais as concluídas no dia. Cada item é um `TicketListItem` com:
-- `section`: `in_field` (em deslocamento/atendimento) → `done` (resolvida/fechada no dia) → `attention`
-  (algum motivo `danger`/`warning`) → `today` (agendada no dia) → `waiting` (aguardando cliente/fornecedor)
-  → `upcoming` (agendada depois) → `unscheduled`. Os itens vêm nessa ordem de tela: attention (pior primeiro,
-  depois prazo), in_field (mais recente), today/upcoming (horário), waiting/unscheduled (prazo), done.
+fuso `TIMEZONE`) → `{user, date, generated_at, counts, items, total, truncated, executing_only}`. Entram as OS
+em aberto em que a pessoa é responsável ou executa, mais as resolvidas no dia (`resolved_at` no dia: o
+fechamento automático, dias depois, não conta de novo). A lista vai até 500 itens, primeiro as em aberto de
+prazo mais apertado; `total` é o tamanho de verdade e `truncated` avisa do corte. Cada item é um
+`TicketListItem` com:
+- `section`: `in_field` (em deslocamento/atendimento há até 12 h; parada há mais tempo, vai para `attention`)
+  → `done` (resolvida no dia) → `attention` (algum motivo `danger`/`warning`) → `today` (agendada no dia) →
+  `waiting` (aguardando cliente/fornecedor) → `upcoming` (agendada depois) → `unscheduled`. Os itens vêm nessa
+  ordem de tela: attention (pior primeiro, depois prazo), in_field (mais recente), today/upcoming (horário),
+  waiting/unscheduled (prazo), done.
 - `reasons: [{code, label, tone}]`: `sla_violated` (danger), `sla_at_risk` (warning), `late_start` (danger,
-  agendada que passou do horário sem sair), `no_technician` (warning, sem técnico de campo), `unproductive`
-  (warning, improdutiva sem nova agenda), `violation_pending` (info, concluída com SLA a justificar) e as
-  regras de campo (ver abaixo): `authorization_pending`, `arrival_late`, `arrival_at_risk`, `onsite_over`,
-  `onsite_warning`, `part_request`. Uma OS em campo continua em `in_field`, mas com os motivos.
-- `counts`: `open` (em aberto) e o tamanho de cada seção.
+  agendada que passou 30 min do horário sem sair, a tolerância da Início e do prazo de chegada; não vale com
+  visita improdutiva no horário ou depois), `no_technician` (warning, sem técnico de campo),
+  `inactive_technician` (warning, "Técnico sem acesso: libere ou troque": técnico inativo no cadastro, sem
+  acesso ao app), `unproductive` (warning, improdutiva sem nova agenda), `violation_pending` (info, concluída
+  com SLA a justificar), `field_stuck` (danger, "Em campo há 13 h: conclua ou corrija", em dias a partir de
+  24 h; dado parado, a regra de `services/field.py`) e as regras de campo (ver abaixo): `arrival_late`,
+  `arrival_at_risk`, `onsite_over`, `onsite_warning`, `checkin_far` (warning, check-in a mais de 1 km da
+  loja) e `part_request`. Uma OS em campo continua em `in_field`, mas com os motivos; com `field_stuck`, os
+  relógios da visita (`arrival_*` e `onsite_*`) saem.
+- `counts`: só as OS de que a pessoa é a responsável, sem o limite da lista (a mesma conta da linha dela em
+  `GET /queues`): `open` (em aberto), `attention` (seção "atenção" mais as em campo com motivo
+  `danger`/`warning`), `today` (em aberto agendadas para o dia), `in_field` (em campo há até 12 h), `done`
+  (resolvidas no dia) e `waiting`, `upcoming` e `unscheduled` (o tamanho dessas seções).
+- `executing_only`: em aberto em que a pessoa só executa (o responsável é outro ou ninguém): estão na lista,
+  fora de `counts`.
 
-`GET /queues` (gestão) → `{queues: [{user, role, open, attention, today, in_field}], unowned: {...}}`: a
-fila de cada analista/gestor ativo e as OS sem analista. `attention` conta a seção "atenção" e também as OS em campo
-com motivo `danger`/`warning` (ex.: passou do tempo na loja).
+`GET /queues` (gestão) → `{queues: [{user, role, open, attention, today, in_field}], unowned, scope, total}`: a
+fila de cada analista/gestor ativo e as OS sem analista, com a mesma conta de `counts` da Minha fila
+(`services/queues.queue_counts`). `attention` conta a seção "atenção" e também as OS em campo com motivo
+`danger`/`warning` (ex.: passou do tempo na loja); a parada em campo há mais de 12 h conta em `attention`, não
+em `in_field`.
 
 **Relatório para o cliente.** Como no Field Control, toda OS tem o link público do relatório desde a
 abertura (as OS antigas ganharam o link na migração `d5f1a7c3e9b2`). Antes de concluir, a página mostra o
@@ -935,6 +955,7 @@ que ele já cuidava (analista e cliente) e os grupos técnicos; "Editar" no Cale
 | `{"detail": "Esta OS é de outra fila.", "code": "QUEUE_FORBIDDEN"}` | OS fora da fila de quem pede (qualquer rota da OS e as ações por orçamento ou custo) |
 | `{"detail": "Seu acesso mostra só a sua fila.", "code": "QUEUE_FORBIDDEN"}` | `GET /my-queue?user_id=<outro>` com "Somente a própria fila" |
 | `{"detail": "Você não pode dar mais acesso do que tem.", "code": "ACCESS_CAP"}` | supervisor dando acesso acima do dele |
+| `{"detail": "Só o administrador troca a senha ou o e-mail de quem tem mais acesso que você.", "code": "ACCESS_CAP"}` | supervisor trocando a senha ou o e-mail de quem tem mais acesso que ele |
 
 Técnico e cliente numa rota da gestão recebem o 403 de sempre (`{"detail": "Sem permissão para esta ação"}`);
 numa OS que não é deles, 404.
@@ -975,6 +996,8 @@ Vem também em `/auth/me` e no `user` do login, do refresh, da troca de senha e 
   - Teto do supervisor: nenhuma tela acima do nível dele (a não ser que a pessoa já tivesse esse nível) e, se
     ele só vê a própria fila, nada de "todas as filas" nem de OS sem analista que ele não vê (403
     `ACCESS_CAP`). Ao criar alguém, o teto vale para o acesso inteiro.
+  - Senha e e-mail: o supervisor só troca os de quem cabe no teto dele (o acesso atual da pessoa, telas e
+    fila); senão, 403 `ACCESS_CAP` (entrar como a pessoa daria a ele o acesso que o teto não deixa dar).
   - Mudança de acesso publica `access.changed` para a pessoa.
 - `GET /users?access_profile_id=` filtra por perfil.
 
@@ -1013,6 +1036,19 @@ Vale em:
 Pagamentos, `payouts: []`; sem Orçamentos, `legacy.values` e o `value`/`total` dos itens do pedido migrado vêm
 `null`. No Início, `pulse.finance` só com Custos extras e Pagamentos, `pulse.quotes` só com Orçamentos, e os
 grupos `costs_pending`, `payouts_pending`, `quotes_waiting` e a sugestão `slow_service_type` só com a tela deles.
+Os mesmos valores fora dessas telas:
+- `GET /tickets/{id}/events` (Histórico): sem a tela, saem inteiros os eventos com o valor dela
+  (`payout_set`/`payout_removed`; `expense_added`/`expense_updated`/`expense_removed`;
+  `quote_sent`/`quote_approved`/`quote_rejected`/`quote_reminded`).
+- `GET /projects` e `/projects/{id}`: sem Projetos, `contract_value`, `pricing_notes` e `margin` vêm `null` e
+  os totais em dinheiro, 0 (a lista continua aberta para o seletor da Nova OS). Cada total de `stats`
+  (`expenses_total`, `payouts_total`, `quotes_approved_total`) também pede a tela dele (sem ela, 0), e
+  `margin` pede Custos extras e Pagamentos.
+- `GET /reports/monthly`: `expenses_total` `null` sem Custos extras e `quotes_approved_total` `null` sem
+  Orçamentos.
+- `pulse.finance` sem Orçamentos: `quotes_waiting*` e `quotes_approved_month*` saem 0.
+- `GET /tickets/{id}/expenses` segue as regras do detalhe (o técnico vê o reembolso dele e o material da OS,
+  sem quem lançou).
 
 ### Tempo real
 
@@ -1020,7 +1056,7 @@ grupos `costs_pending`, `payouts_pending`, `quotes_waiting` e a sugestão `slow_
   troca de analista, `data` traz `from_id` e `to_id` (além dos nomes).
 - Quem só vê a própria fila recebe só eventos das OS dele (responsável atual ou anterior, executor) e, com a
   opção, das sem analista. `quote.decided` só vai para quem tem Orçamentos; `onboarding.submitted`, para quem
-  tem Homologação.
+  tem Homologação; `technician.location` e `technician.shift`, para quem tem o Mapa ao vivo.
 - `{"type": "access.changed"}` vai só para a pessoa afetada; logo depois o servidor fecha o socket com 4401 e o
   cliente renova o token e reconecta com o acesso novo. O vigia de 5 minutos também fecha quando o acesso muda.
 

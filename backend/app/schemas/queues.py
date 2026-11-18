@@ -28,7 +28,10 @@ class QueueItem(TicketListItem):
 
 
 class MyQueueCounts(BaseModel):
-    """`open`: OS em aberto na fila; os demais são o tamanho de cada seção."""
+    """Números da fila, só das OS de que a pessoa é a analista responsável (a mesma conta da linha
+    dela em "Filas da equipe", sem o limite da lista): `open` em aberto; `attention` precisam de
+    atenção (inclui a em campo com alerta); `today` em aberto agendadas para o dia; `in_field` em
+    campo agora (até 12 h); `done` resolvidas no dia; os demais, o tamanho de cada seção."""
 
     open: int = 0
     attention: int = 0
@@ -50,9 +53,14 @@ class MyQueue(BaseModel):
     # ficaram de fora as menos urgentes (as em aberto de prazo mais apertado vêm primeiro).
     total: int = 0
     truncated: bool = False
+    # Em aberto em que a pessoa só executa (o responsável é outro analista ou ninguém): estão na
+    # lista, mas fora dos números (`counts`), que são por responsável.
+    executing_only: int = 0
 
 
 class QueueCounts(BaseModel):
+    """Uma fila no painel "Filas da equipe": os mesmos números de MyQueueCounts."""
+
     open: int = 0
     attention: int = 0
     today: int = 0

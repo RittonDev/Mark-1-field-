@@ -105,17 +105,37 @@ function elapsedRatio(createdAt: string, due: string, pausedSeconds: number, now
   return total <= 0 ? 1 : (now - created - pausedSeconds * 1000) / total;
 }
 
+/**
+ * Prazo de solução encerrado antes da conclusão (na OS migrada, a visita com que o Field Control deu o prazo
+ * como cumprido, mesmo improdutiva): o fim do relógio quando veio antes da conclusão (como a API calcula).
+ */
+function fieldControlEnd(ticket: TicketDetail): string | null {
+  const met = ticket.resolution_sla_met_at ?? null;
+  if (!met) return null;
+  const concluded = (ticket.status === "resolved" || ticket.status === "closed") && ticket.resolved_at;
+  return concluded && Date.parse(concluded) < Date.parse(met) ? null : met;
+}
+
 /** Os dois relógios de SLA lado a lado — limite, concluído, situação e motivo (como no Field Control). */
 export function SlaCard({ ticket }: { ticket: TicketDetail }) {
   const { user } = useAuth();
   const now = useNow(30_000);
   const [justifying, setJustifying] = useState(false);
   const canJustify = canManageTickets(user?.role) && (ticket.response_breached || ticket.resolution_breached);
-  const clocks = [
+  const clocks: {
+    label: string;
+    due: string | null;
+    done: string | null;
+    /** O relógio parou antes da conclusão (prazo encerrado pelo Field Control). */
+    stoppedAt: string | null;
+    breached: boolean;
+    reason: ViolationReasonRef | null;
+  }[] = [
     {
       label: "1ª resposta",
       due: ticket.response_due_at,
       done: ticket.first_response_at,
+      stoppedAt: null,
       breached: ticket.response_breached,
       reason: ticket.response_violation_reason,
     },
@@ -123,15 +143,24 @@ export function SlaCard({ ticket }: { ticket: TicketDetail }) {
       label: "Solução",
       due: ticket.resolution_due_at,
       done: ticket.resolved_at,
+      stoppedAt: fieldControlEnd(ticket),
       breached: ticket.resolution_breached,
       reason: ticket.resolution_violation_reason,
     },
   ];
   // "Em risco" vale para a OS toda: fica em âmbar o relógio aberto que mais consumiu o prazo.
-  const open = clocks.filter((c) => !c.done && c.due && !c.breached);
+  const open = clocks.filter((c) => !c.done && !c.stoppedAt && c.due && !c.breached);
   const ratios = open.map((c) => elapsedRatio(ticket.created_at, c.due!, ticket.sla_paused_seconds, now));
   const atRisk = ticket.sla_status === "at_risk" && open.length ? open[ratios.indexOf(Math.max(...ratios))] : null;
-  const situation = (c: (typeof clocks)[number]) => {
+  const situation = (c: (typeof clocks)[number]): { text: string; tone: string; hint?: string } => {
+    if (c.stoppedAt && ticket.status !== "cancelled") {
+      // O veredito do Field Control: a contagem não anda mais (no prazo ou fora dele).
+      const when = formatShort(c.stoppedAt);
+      const hint = "Na OS migrada, o Field Control encerra o prazo de solução na visita, mesmo improdutiva.";
+      return c.breached
+        ? { text: `Cumprido fora do prazo em ${when} · Field Control`, tone: RED, hint }
+        : { text: `Cumprido em ${when} · Field Control`, tone: "text-ink", hint };
+    }
     if (c.done) return c.breached ? { text: "Concluído fora do prazo", tone: RED } : { text: "Concluído no prazo", tone: "text-ink" };
     if (ticket.status === "cancelled") return { text: "OS cancelada (sem prazo)", tone: "text-ink-muted" };
     if (!c.due) return { text: "Sem prazo", tone: "text-ink-muted" };
@@ -175,7 +204,9 @@ export function SlaCard({ ticket }: { ticket: TicketDetail }) {
                 <dt className="text-ink-muted">Concluído em</dt>
                 <dd className="text-ink">{formatDateTime(c.done)}</dd>
                 <dt className="text-ink-muted">Situação</dt>
-                <dd className={`font-medium ${s.tone}`}>{s.text}</dd>
+                <dd className={`font-medium ${s.tone}`} title={s.hint}>
+                  {s.text}
+                </dd>
                 <dt className="text-ink-muted">Motivo</dt>
                 <dd>
                   <Reason reason={c.reason} breached={c.breached} />

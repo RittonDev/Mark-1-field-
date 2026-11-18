@@ -5,6 +5,7 @@ import uuid
 from fastapi import APIRouter, HTTPException, status
 
 from app.api.deps import DB, access_user
+from app.core import permissions
 from app.schemas.reports import DailyReport, MonthlyReport
 from app.services import reports as svc
 from app.services.activities import local_today
@@ -45,14 +46,20 @@ async def monthly(
     customer_id: uuid.UUID | None = None,
 ) -> MonthlyReport:
     """Relatório do mês (AAAA-MM). Sem mês: o mês corrente, até hoje. Com `customer_id`, só as
-    OS daquele cliente. Sempre só as OS da fila que a pessoa vê."""
+    OS daquele cliente. Sempre só as OS da fila que a pessoa vê. Os totais de Custos extras e de
+    Orçamentos aprovados só vêm com a tela de cada um (sem ela, null)."""
     scope = visibility_clause(user)
+    acc = permissions.of(user)
+    money = {
+        "with_expenses": acc.can("commercial.expenses"),
+        "with_quotes": acc.can("commercial.quotes"),
+    }
     if month is None:
         today = local_today()
-        return await svc.monthly(db, today.year, today.month, customer_id, scope)
+        return await svc.monthly(db, today.year, today.month, customer_id, scope, **money)
     if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Mês no formato AAAA-MM")
     year, mon = (int(p) for p in month.split("-"))
     if not FIRST_DAY.year <= year <= LAST_DAY.year:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, OUT_OF_RANGE)
-    return await svc.monthly(db, year, mon, customer_id, scope)
+    return await svc.monthly(db, year, mon, customer_id, scope, **money)

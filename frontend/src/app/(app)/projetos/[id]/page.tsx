@@ -19,6 +19,14 @@ import { plannedTickets, PROJECT_STATUS, projectLate } from "@/lib/projects";
 import type { Page, Project, TicketListItem } from "@/lib/types";
 
 const TICKETS_SHOWN = 200;
+/** Colunas dos indicadores pelo número de cartões (os de valor dependem do acesso). */
+const STAT_COLS: Record<number, string> = {
+  1: "sm:grid-cols-2",
+  2: "sm:grid-cols-2",
+  3: "sm:grid-cols-3",
+  4: "sm:grid-cols-2 lg:grid-cols-4",
+  5: "sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5",
+};
 
 /** Indicador da ficha (o mesmo das fichas de cliente e de loja). */
 function Stat({ label, value, hint, problem = false }: { label: string; value: string; hint?: string; problem?: boolean }) {
@@ -37,6 +45,9 @@ export default function ProjectPage() {
   const { id } = useParams<{ id: string }>();
   const canView = useCan("commercial.projects");
   const canEdit = useCan("commercial.projects", "edit");
+  const canExpenses = useCan("commercial.expenses");
+  const canPayouts = useCan("commercial.payouts");
+  const canQuotes = useCan("commercial.quotes");
   const [editing, setEditing] = useState(false);
   // Hoje no fuso da operação (a entrega prevista é um dia do calendário).
   const [today] = useState(todayISO);
@@ -71,6 +82,24 @@ export default function ProjectPage() {
   const items = tickets.data?.items ?? [];
   const totalTickets = tickets.data?.total ?? 0;
   const progress = Math.round(p.stats.progress * 100);
+  // Cada valor só com a tela dele (a API manda 0 sem ela); a margem desconta custos e técnicos, então
+  // pede as duas.
+  const money = [
+    canExpenses ? <Stat key="custos" label="Custos extras" value={formatMoney(p.stats.expenses_total)} hint="lançados nas OS do projeto" /> : null,
+    canPayouts ? (
+      <Stat key="tecnicos" label="Valor dos técnicos" value={formatMoney(p.stats.payouts_total ?? 0)} hint="pago e a pagar, por OS" />
+    ) : null,
+    canExpenses && canPayouts ? (
+      <Stat
+        key="margem"
+        label="Margem"
+        value={p.margin != null ? formatMoney(p.margin) : "—"}
+        hint="valor menos os custos e os técnicos"
+        problem={p.margin != null && p.margin < 0}
+      />
+    ) : null,
+    canQuotes ? <Stat key="orcamentos" label="Orçamentos aprovados" value={formatMoney(p.stats.quotes_approved_total)} /> : null,
+  ].filter(Boolean);
 
   return (
     <div className="mx-auto max-w-7xl">
@@ -131,17 +160,9 @@ export default function ProjectPage() {
         </div>
       </Card>
 
-      <div className="stagger mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+      <div className={clsx("stagger mb-4 grid gap-3", STAT_COLS[money.length + 1])}>
         <Stat label="Valor do projeto" value={p.contract_value != null ? formatMoney(p.contract_value) : "—"} />
-        <Stat label="Custos extras" value={formatMoney(p.stats.expenses_total)} hint="lançados nas OS do projeto" />
-        <Stat label="Valor dos técnicos" value={formatMoney(p.stats.payouts_total ?? 0)} hint="pago e a pagar, por OS" />
-        <Stat
-          label="Margem"
-          value={p.margin != null ? formatMoney(p.margin) : "—"}
-          hint="valor menos os custos e os técnicos"
-          problem={p.margin != null && p.margin < 0}
-        />
-        <Stat label="Orçamentos aprovados" value={formatMoney(p.stats.quotes_approved_total)} />
+        {money}
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">

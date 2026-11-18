@@ -7,6 +7,7 @@ import { TicketLink } from "@/components/ticket/TicketLink";
 import { Button, ErrorBox, SectionTitle, Skeleton } from "@/components/ui";
 import { errorMessage } from "@/lib/api";
 import { formatDate } from "@/lib/format";
+import { useCan } from "@/lib/permissions";
 import { whatsappUrl } from "@/lib/whatsapp";
 import type { IntakeContext } from "@/lib/types";
 
@@ -81,6 +82,10 @@ function IntakeBody({
   error?: unknown;
   onRetry?: () => void;
 }) {
+  // As fichas são das telas Clientes e Locais: sem o acesso, o nome fica como texto (o link levaria a
+  // "Sem acesso").
+  const canCustomers = useCan("base.customers");
+  const canLocations = useCan("base.locations");
   if (error && !context) {
     return (
       <div className="flex flex-col items-start gap-2 p-4">
@@ -144,14 +149,18 @@ function IntakeBody({
       {customer ? (
         <section className="flex flex-col gap-2.5 p-4" aria-label="Cliente">
           <div className="flex items-start justify-between gap-2">
-            <Link
-              href={`/clientes/${customer.id}`}
-              target="_blank"
-              className="min-w-0 text-sm font-semibold text-ink hover:text-brand-ink"
-              title="Abre a ficha do cliente em outra aba"
-            >
-              {customer.name}
-            </Link>
+            {canCustomers ? (
+              <Link
+                href={`/clientes/${customer.id}`}
+                target="_blank"
+                className="min-w-0 text-sm font-semibold text-ink hover:text-brand-ink"
+                title="Abre a ficha do cliente em outra aba"
+              >
+                {customer.name}
+              </Link>
+            ) : (
+              <span className="min-w-0 text-sm font-semibold text-ink">{customer.name}</span>
+            )}
             {customer.rating_average ? (
               <span className="flex shrink-0 flex-col items-end gap-0.5" title="Avaliação dos atendimentos (histórico do Field Control)">
                 <Stars value={customer.rating_average} />
@@ -175,15 +184,22 @@ function IntakeBody({
       {location ? (
         <section className="flex flex-col gap-2.5 p-4" aria-label="Localização">
           <div className="min-w-0">
-            <Link
-              href={`/locais/${location.id}`}
-              target="_blank"
-              className="text-sm font-semibold text-ink hover:text-brand-ink"
-              title="Abre a ficha da loja em outra aba"
-            >
-              {location.code ? <span className="mr-1 font-mono text-xs text-ink-subtle">{location.code}</span> : null}
-              {location.name}
-            </Link>
+            {canLocations ? (
+              <Link
+                href={`/locais/${location.id}`}
+                target="_blank"
+                className="text-sm font-semibold text-ink hover:text-brand-ink"
+                title="Abre a ficha da loja em outra aba"
+              >
+                {location.code ? <span className="mr-1 font-mono text-xs text-ink-subtle">{location.code}</span> : null}
+                {location.name}
+              </Link>
+            ) : (
+              <span className="text-sm font-semibold text-ink">
+                {location.code ? <span className="mr-1 font-mono text-xs text-ink-subtle">{location.code}</span> : null}
+                {location.name}
+              </span>
+            )}
             {address ? (
               <p className="mt-1 flex gap-1.5 text-xs text-ink-muted">
                 <MapPin aria-hidden className="mt-px size-3.5 shrink-0 text-ink-subtle" />

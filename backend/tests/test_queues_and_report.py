@@ -116,12 +116,14 @@ async def test_my_queue_sections_and_team_queues(client: AsyncClient, world: Wor
 
     field = await create(client, world, title="Em campo", assignee_id=tech, **mine)
     await transition(client, th, field, "en_route", latitude=-23.5, longitude=-46.6)
+    # "Atrasada" só 30 min depois do horário (a tolerância da Início e da chegada): 45 min antes.
+    late_start = now - timedelta(minutes=45)
     late = await create(
         client,
         world,
         title="Atrasada",
         assignee_id=other,
-        scheduled_start=(now - timedelta(minutes=5)).isoformat(),
+        scheduled_start=late_start.isoformat(),
         **mine,
     )
     today = await create(
@@ -196,16 +198,20 @@ async def test_my_queue_sections_and_team_queues(client: AsyncClient, world: Wor
     assert codes["Sem técnico"] == ["no_technician"]
     assert codes["Improdutiva"] == ["unproductive"]
     assert codes["Sem agenda"] == [] and codes["Aguardando"] == []
+    # "today" são as em aberto agendadas para hoje, como no painel da equipe (a atrasada conta,
+    # mesmo estando em "atenção"); perto da meia-noite o horário dela cai no dia anterior.
+    scheduled_today = int(late_start.astimezone(tz).date() == local_now.date())
     assert q["counts"] == {
         "open": 8,
         "attention": 3,
         "in_field": 1,
-        "today": 0,
+        "today": scheduled_today,
         "waiting": 1,
         "upcoming": 2,
         "unscheduled": 1,
         "done": 1,
     }
+    assert q["executing_only"] == 0  # todas são da fila dele (responsável)
     # Seções na ordem da tela: atenção (pior primeiro), em campo, ... concluídas.
     order = [i["section"] for i in q["items"]]
     assert order == sorted(
@@ -236,6 +242,9 @@ async def test_my_queue_sections_and_team_queues(client: AsyncClient, world: Wor
     assert by_name["Analista"]["role"] == "analyst"
     assert (by_name["Analista"]["open"], by_name["Analista"]["in_field"]) == (8, 1)
     assert by_name["Analista"]["attention"] == 3
+    # A linha do painel e os cartões da Minha fila são a mesma conta.
+    counted = ("open", "attention", "today", "in_field")
+    assert {k: by_name["Analista"][k] for k in counted} == {k: q["counts"][k] for k in counted}
     assert by_name["Super"]["open"] == 1
     assert teams["unowned"]["open"] == 1
     assert (await client.get(f"{API}/queues", headers=th)).status_code == 403

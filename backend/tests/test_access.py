@@ -16,8 +16,10 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from app.api.deps import require_access
 from app.core import permissions
 from app.core.config import settings
+from app.core.enums import TicketEventType
 from tests.conftest import World, requires_db
 from tests.test_api import create
+from tests.test_b2_quotes import APPROVAL
 
 pytestmark = requires_db
 
@@ -248,6 +250,184 @@ async def test_quotes_view_only(client: AsyncClient, world: World, engine: Async
     ]
     assert hidden["source"] == "fieldcontrol"
     assert (await client.get(f"{API}/quotes", headers=an)).status_code == 403
+
+
+# ------------------------------------------- valores comerciais fora das telas de cada item
+
+QUOTE = {
+    "title": "Troca de peça",
+    "items": [{"description": "Peça", "quantity": 1, "unit_price": 50}],
+}
+COST = {"kind": "material", "description": "Conector", "quantity": 1, "unit_value": "7.00"}
+NO_MONEY = dict.fromkeys(("commercial.payouts", "commercial.expenses", "commercial.quotes"), "none")
+
+
+async def money_trail(client: AsyncClient, world: World, ticket: dict) -> None:
+    """Valor do técnico (R$ 80), um custo extra (R$ 7) e um orçamento de R$ 50 enviado e
+    aprovado pelo cliente, lançados pelo supervisor na OS."""
+    sup, tid = world.supervisor.headers, ticket["id"]
+    r = await client.put(
+        f"{API}/tickets/{tid}/payouts/{world.tech.user.id}", json={"amount": "80.00"}, headers=sup
+    )
+    assert r.status_code == 200, r.text
+    r = await client.post(f"{API}/tickets/{tid}/expenses", json=COST, headers=sup)
+    assert r.status_code == 201, r.text
+    r = await client.post(f"{API}/tickets/{tid}/quotes", json=QUOTE, headers=sup)
+    assert r.status_code == 201, r.text
+    r = await client.post(f"{API}/quotes/{r.json()['id']}/send", headers=sup)
+    assert r.status_code == 200, r.text
+    r = await client.post(f"{API}/public/quotes/{r.json()['token']}/approve", json=APPROVAL)
+    assert r.status_code == 200, r.text
+
+
+async def test_history_hides_values_of_screens_without_access(
+    client: AsyncClient, world: World
+) -> None:
+    """O Histórico da OS (rota do núcleo) não mostra o que o detalhe esconde: o evento com valor
+    de Pagamentos, Custos extras ou Orçamentos sai inteiro para quem não tem a tela."""
+    assert set(permissions.HISTORY_ITEMS) <= {t.value for t in TicketEventType}
+    ticket = await create(client, world, assignee_id=str(world.tech.user.id))
+    await money_trail(client, world, ticket)
+    an, url = world.analyst.headers, f"{API}/tickets/{ticket['id']}/events"
+
+    async def kinds(headers: dict) -> set[str]:
+        r = await client.get(url, headers=headers)
+        assert r.status_code == 200, r.text
+        return {e["event_type"] for e in r.json()}
+
+    everything = await kinds(an)
+    assert {"payout_set", "expense_added", "quote_sent", "quote_approved"} <= everything
+    # O caso do pedido: Orçamentos liberado e Pagamentos bloqueado.
+    await restrict_analyst(client, world, **{"commercial.payouts": "none"})
+    seen = await kinds(an)
+    assert "payout_set" not in seen
+    assert {"expense_added", "quote_sent", "quote_approved"} <= seen
+    # Sem as três telas, nenhum evento com valor; o resto do histórico continua.
+    await restrict_analyst(client, world, **NO_MONEY)
+    seen = await kinds(an)
+    assert not seen & set(permissions.HISTORY_ITEMS)
+    assert "created" in seen
+    # Quem tem as telas (o supervisor, no padrão) vê tudo.
+    assert everything <= await kinds(world.supervisor.headers)
+
+
+async def test_projects_list_hides_values_without_the_screens(
+    client: AsyncClient, world: World
+) -> None:
+    """A lista de projetos é de toda a gestão (o seletor da Nova OS usa), mas o valor do contrato
+    só sai com Projetos, e cada total também pede a tela dele (a margem, Custos e Pagamentos)."""
+    sup, an = world.supervisor.headers, world.analyst.headers
+    body = {"name": "Projeto Teste", "contract_value": "1000.00", "pricing_notes": "Tabela X"}
+    r = await client.post(f"{API}/projects", json=body, headers=sup)
+    assert r.status_code == 201, r.text
+    pid = r.json()["id"]
+    ticket = await create(client, world, assignee_id=str(world.tech.user.id), project_id=pid)
+    await money_trail(client, world, ticket)
+    totals = ("payouts_total", "expenses_total", "quotes_approved_total")
+
+    async def row() -> dict:
+        r = await client.get(f"{API}/projects", headers=an)
+        assert r.status_code == 200, r.text
+        return next(p for p in r.json() if p["id"] == pid)
+
+    seen = await row()
+    assert (seen["contract_value"], seen["margin"]) == (1000.0, 913.0)
+    assert tuple(seen["stats"][k] for k in totals) == (80.0, 7.0, 50.0)
+
+    await restrict_analyst(client, world, **ALL_NONE)
+    assert (await client.get(f"{API}/projects/{pid}", headers=an)).status_code == 403
+    seen = await row()
+    assert (seen["contract_value"], seen["pricing_notes"], seen["margin"]) == (None, None, None)
+    assert tuple(seen["stats"][k] for k in totals) == (0, 0, 0)
+    assert seen["stats"]["tickets_total"] == 1  # as contagens de OS continuam
+
+    # Projetos sim, as três telas comerciais não: o contrato aparece, os totais e a margem não.
+    await restrict_analyst(client, world, **NO_MONEY)
+    one = (await client.get(f"{API}/projects/{pid}", headers=an)).json()
+    assert (one["contract_value"], one["pricing_notes"], one["margin"]) == (
+        1000.0,
+        "Tabela X",
+        None,
+    )
+    assert tuple(one["stats"][k] for k in totals) == (0, 0, 0)
+    # Só sem Pagamentos, a margem também não sai (seria o contrato menos só os custos).
+    await restrict_analyst(client, world, **{"commercial.payouts": "none"})
+    one = (await client.get(f"{API}/projects/{pid}", headers=an)).json()
+    assert (one["margin"], one["stats"]["expenses_total"], one["stats"]["payouts_total"]) == (
+        None,
+        7.0,
+        0,
+    )
+
+
+async def test_monthly_report_and_home_money_follow_the_screens(
+    client: AsyncClient, world: World
+) -> None:
+    sup, an = world.supervisor.headers, world.analyst.headers
+    ticket = await create(client, world, assignee_id=str(world.tech.user.id))
+    await money_trail(client, world, ticket)
+    # Mais um orçamento, este aguardando o cliente.
+    other = await create(client, world)
+    r = await client.post(f"{API}/tickets/{other['id']}/quotes", json=QUOTE, headers=sup)
+    assert r.status_code == 201, r.text
+    r = await client.post(f"{API}/quotes/{r.json()['id']}/send", headers=sup)
+    assert r.status_code == 200, r.text
+
+    monthly = (await client.get(f"{API}/reports/monthly", headers=an)).json()
+    assert (monthly["expenses_total"], monthly["quotes_approved_total"]) == (7.0, 50.0)
+    finance = (await client.get(f"{API}/home/overview", headers=an)).json()["pulse"]["finance"]
+    assert (finance["quotes_waiting"], finance["quotes_approved_month"]) == (1, 1)
+
+    # Relatórios sim, Custos extras e Orçamentos não: os dois totais do mês saem null.
+    await restrict_analyst(
+        client, world, **{"commercial.expenses": "none", "commercial.quotes": "none"}
+    )
+    r = await client.get(f"{API}/reports/monthly", headers=an)
+    assert r.status_code == 200, r.text
+    assert (r.json()["expenses_total"], r.json()["quotes_approved_total"]) == (None, None)
+
+    # Início sem Orçamentos: pulse.quotes já sai null, e o financeiro sai sem os números de
+    # orçamento; custos e pagamentos continuam.
+    await restrict_analyst(client, world, **{"commercial.quotes": "none"})
+    pulse = (await client.get(f"{API}/home/overview", headers=an)).json()["pulse"]
+    finance = pulse["finance"]
+    assert pulse["quotes"] is None
+    assert (finance["quotes_waiting"], finance["quotes_waiting_total"]) == (0, 0)
+    assert (finance["quotes_approved_month"], finance["quotes_approved_month_total"]) == (0, 0)
+    assert finance["costs_pending_total"] == 7.0
+
+
+async def test_ticket_expenses_route_follows_the_detail(client: AsyncClient, world: World) -> None:
+    """GET /tickets/{id}/expenses segue as regras do detalhe: o técnico vê o reembolso dele e o
+    material da OS, não o do colega, e não vê quem lançou."""
+    sup = world.supervisor.headers
+    ticket = await create(
+        client,
+        world,
+        assignee_id=str(world.tech.user.id),
+        helper_ids=[str(world.tech_other.user.id)],
+    )
+    url = f"{API}/tickets/{ticket['id']}/expenses"
+    parking = {
+        "kind": "parking",
+        "description": "Estacionamento do colega",
+        "quantity": 1,
+        "unit_value": "33.00",
+        "technician_id": str(world.tech_other.user.id),
+    }
+    for body in (COST, parking):
+        r = await client.post(url, json=body, headers=sup)
+        assert r.status_code == 201, r.text
+    for actor in (world.tech, world.tech_other, world.analyst):
+        route = (await client.get(url, headers=actor.headers)).json()
+        detail = (await client.get(f"{API}/tickets/{ticket['id']}", headers=actor.headers)).json()
+        assert route == detail["expenses"], actor.user.name
+    mine = (await client.get(url, headers=world.tech.headers)).json()
+    assert [(e["description"], e["created_by"]) for e in mine] == [("Conector", None)]
+    helper = (await client.get(url, headers=world.tech_other.headers)).json()
+    assert [e["description"] for e in helper] == ["Estacionamento do colega"]
+    office = (await client.get(url, headers=world.analyst.headers)).json()
+    assert len(office) == 2 and all(e["created_by"] is not None for e in office)
 
 
 async def test_shared_reads_stay_open_with_everything_none(
@@ -557,6 +737,50 @@ async def test_supervisor_cap_and_hierarchy(client: AsyncClient, world: World) -
     }
     r = await client.post(f"{API}/users", json=body, headers=sup)
     assert r.status_code == 403 and r.json()["code"] == "ACCESS_CAP"
+
+
+async def test_supervisor_cap_covers_password_and_email(client: AsyncClient, world: World) -> None:
+    """Entrar como a pessoa daria ao supervisor o acesso que o teto não deixa dar: restrito, ele
+    não troca a senha nem o e-mail de quem tem mais acesso (isso fica com o administrador)."""
+    adm, sup = world.admin.headers, world.supervisor.headers
+    analyst = f"{API}/users/{world.analyst.user.id}"
+    # Nos padrões, como sempre.
+    r = await client.patch(analyst, json={"password": "senha-nova-111"}, headers=sup)
+    assert r.status_code == 200, r.text
+    await set_access(
+        client,
+        adm,
+        world.supervisor.user.id,
+        items={"commercial.payouts": "none"},
+        scope="own",
+        unowned=False,
+    )
+    for body in ({"password": "senha-nova-456"}, {"email": "analista.outro@teste.com.br"}):
+        r = await client.patch(analyst, json=body, headers=sup)
+        assert r.status_code == 403, r.text
+        assert r.json() == {
+            "detail": "Só o administrador troca a senha ou o e-mail de quem tem mais acesso "
+            "que você.",
+            "code": "ACCESS_CAP",
+        }
+    # O resto do cadastro continua, e o e-mail igual ao atual não conta como troca.
+    for body in ({"job_title": "Analista de suporte"}, {"email": "Analista@teste.com.br"}):
+        r = await client.patch(analyst, json=body, headers=sup)
+        assert r.status_code == 200, r.text
+    # Com o analista no mesmo nível, o supervisor volta a trocar a senha.
+    await set_access(
+        client,
+        adm,
+        world.analyst.user.id,
+        items={"commercial.payouts": "none"},
+        scope="own",
+        unowned=False,
+    )
+    r = await client.patch(analyst, json={"password": "senha-nova-789"}, headers=sup)
+    assert r.status_code == 200, r.text
+    # O administrador não tem teto.
+    r = await client.patch(analyst, json={"password": "senha-nova-000"}, headers=adm)
+    assert r.status_code == 200, r.text
 
 
 async def test_role_change_follows_profile(client: AsyncClient, world: World) -> None:

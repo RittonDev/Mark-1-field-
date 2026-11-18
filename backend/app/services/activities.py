@@ -6,6 +6,9 @@ Entram no dia D, no fuso de settings.TIMEZONE:
   histórico), mesmo que a visita tenha sido remarcada;
 - se D é hoje, as OS que estão em campo agora (em deslocamento ou em atendimento).
 
+Se D é hoje, a OS em campo há mais de 12 h (dado parado, a regra de services/field.py) sai da
+lista e só conta no resumo (stuck_in_field): ninguém está em campo nela agora.
+
 Os horários reais vêm do histórico de status, então o agendado e o realizado ficam lado a lado.
 """
 
@@ -15,7 +18,7 @@ from datetime import date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -25,12 +28,12 @@ from app.models import Ticket, TicketEvent, User
 from app.schemas.activities import Activity, ActivityState, DayActivities, DaySummary
 from app.schemas.ticket import TicketListItem
 from app.services.durations import actual_seconds
+from app.services.field import FIELD, field_since_of, field_stuck
 from app.services.schedule import works_on
 from app.services.tickets import list_noload, visibility_clause
 from app.services.workflow import SLA_PAUSED_STATUSES
 
 S = TicketStatus
-FIELD_NOW = (S.EN_ROUTE, S.IN_PROGRESS)
 WORK_TARGETS = (S.EN_ROUTE.value, S.IN_PROGRESS.value, S.RESOLVED.value)
 DAY_EVENTS = (TicketEventType.STATUS_CHANGED, TicketEventType.UNPRODUCTIVE_VISIT)
 
@@ -125,7 +128,7 @@ async def day_activities(
         Ticket.id.in_(worked_in_day),
     ]
     if day == today:
-        belongs.append(Ticket.status.in_(FIELD_NOW))
+        belongs.append(Ticket.status.in_(FIELD))
     conds = [or_(*belongs), Ticket.status != S.CANCELLED]
     vis = visibility_clause(user)
     if vis is not None:
@@ -138,6 +141,14 @@ async def day_activities(
     tickets = list(
         await db.scalars(select(Ticket).options(*list_noload("service_type")).where(*conds))
     )
+    # Desde quando cada OS em campo está lá (a regra única de "em campo", services/field.py).
+    # Hoje, a parada há mais de 12 h sai da lista e só conta no resumo.
+    since = await field_since_of(db, [t.id for t in tickets if t.status in FIELD])
+    stuck_in_field = 0
+    if day == today:
+        moving = [t for t in tickets if not field_stuck(t, since.get(t.id), now)]
+        stuck_in_field = len(tickets) - len(moving)
+        tickets = moving
 
     events: dict[uuid.UUID, list[TicketEvent]] = {t.id: [] for t in tickets}
     bounced: dict[uuid.UUID, TicketEvent] = {}
@@ -157,26 +168,6 @@ async def day_activities(
             else:
                 events[ev.ticket_id].append(ev)
 
-    # OS em campo desde antes do dia: quando a etapa atual começou (para não ficar sem início).
-    carried: dict[uuid.UUID, datetime] = {}
-    missing = [
-        t.id
-        for t in tickets
-        if t.status in FIELD_NOW
-        and not any(e.to_value in (S.EN_ROUTE.value, S.IN_PROGRESS.value) for e in events[t.id])
-    ]
-    if missing:
-        rows = await db.execute(
-            select(TicketEvent.ticket_id, func.max(TicketEvent.created_at))
-            .where(
-                TicketEvent.ticket_id.in_(missing),
-                TicketEvent.event_type == TicketEventType.STATUS_CHANGED,
-                TicketEvent.to_value.in_((S.EN_ROUTE.value, S.IN_PROGRESS.value)),
-            )
-            .group_by(TicketEvent.ticket_id)
-        )
-        carried = dict(rows.all())
-
     activities: list[Activity] = []
     for t in tickets:
         evs = events[t.id]
@@ -185,7 +176,8 @@ async def day_activities(
         )
         arrive_ev = next((e for e in evs if e.to_value == S.IN_PROGRESS.value), None)
         finish_ev = next((e for e in reversed(evs) if e.to_value == S.RESOLVED.value), None)
-        started = start_ev.created_at if start_ev else carried.get(t.id)
+        # Em campo desde antes do dia: quando a etapa atual começou (para não ficar sem início).
+        started = start_ev.created_at if start_ev else since.get(t.id)
         delay = None
         if started is not None and _in_day(t.scheduled_start, day_start, day_end):
             delay = int((started - t.scheduled_start).total_seconds() // 60)  # type: ignore[operator]
@@ -256,6 +248,7 @@ async def day_activities(
         pending=counts["pending"],
         unassigned=sum(1 for a in activities if a.ticket.assignee is None),
         unproductive=sum(1 for a in activities if a.unproductive_at is not None),
+        stuck_in_field=stuck_in_field,
     )
     return DayActivities(
         date=day,

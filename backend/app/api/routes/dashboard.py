@@ -6,7 +6,7 @@ from typing import Annotated
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Query
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 
 from app.api.deps import DB, access_user
 from app.core.config import settings
@@ -20,7 +20,13 @@ from app.schemas.dashboard import (
     SlaViolationReport,
     ViolationReasonCount,
 )
-from app.services.sla import compute_sla_status, resolution_breached, response_breached
+from app.services.field import FIELD, field_since, field_stuck
+from app.services.sla import (
+    compute_sla_status,
+    resolution_breached,
+    resolution_end_col,
+    response_breached,
+)
 from app.services.tickets import visibility_clause
 from app.services.workflow import OPEN_STATUSES
 
@@ -64,8 +70,10 @@ async def summary(db: DB, user: DashboardView) -> DashboardSummary:
                 Ticket.resolution_due_at,
                 Ticket.first_response_at,
                 Ticket.resolved_at,
+                Ticket.resolution_sla_met_at,
                 Ticket.sla_paused_at,
                 Ticket.sla_paused_seconds,
+                field_since().label("field_since"),
             ).where(*scope, Ticket.status.in_(OPEN_STATUSES))
         )
     ).all()
@@ -83,7 +91,8 @@ async def summary(db: DB, user: DashboardView) -> DashboardSummary:
             continue
         entry = load[row.assignee_id]
         entry["open"] += 1
-        if row.status in (TicketStatus.EN_ROUTE, TicketStatus.IN_PROGRESS):
+        # Em campo agora: a regra única (services/field.py), sem a parada há mais de 12 h.
+        if row.status in FIELD and not field_stuck(row, row.field_since, now):
             entry["in_progress"] += 1
         if sla_status == SlaStatus.BREACHED:
             entry["breached"] += 1
@@ -112,12 +121,15 @@ async def summary(db: DB, user: DashboardView) -> DashboardSummary:
     resolution_seconds = (
         func.extract("epoch", Ticket.resolved_at - Ticket.created_at) - Ticket.sla_paused_seconds
     )
-    avg_seconds, resolved_30d, within_30d = (
+    # SLA %: só as resolvidas com prazo de solução (como a Início e os relatórios). No prazo = o
+    # relógio parou até o prazo (a conclusão ou, antes, o prazo encerrado pelo Field Control).
+    with_due = and_(Ticket.resolution_due_at.is_not(None), Ticket.status != TicketStatus.CANCELLED)
+    avg_seconds, sla_base_30d, within_30d = (
         await db.execute(
             select(
                 func.avg(resolution_seconds),
-                func.count(),
-                func.count().filter(Ticket.resolved_at <= Ticket.resolution_due_at),
+                func.count().filter(with_due),
+                func.count().filter(with_due, resolution_end_col() <= Ticket.resolution_due_at),
             ).where(*scope, Ticket.resolved_at.is_not(None), Ticket.resolved_at >= since)
         )
     ).one()
@@ -132,7 +144,7 @@ async def summary(db: DB, user: DashboardView) -> DashboardSummary:
         created_today=created_today or 0,
         resolved_today=resolved_today or 0,
         avg_resolution_minutes_30d=round(float(avg_seconds) / 60, 1) if avg_seconds else None,
-        sla_compliance_30d=round(100 * within_30d / resolved_30d, 1) if resolved_30d else None,
+        sla_compliance_30d=round(100 * within_30d / sla_base_30d, 1) if sla_base_30d else None,
         by_assignee=by_assignee,
     )
 
@@ -159,6 +171,7 @@ async def sla_violations(
                 Ticket.resolution_due_at,
                 Ticket.first_response_at,
                 Ticket.resolved_at,
+                Ticket.resolution_sla_met_at,
                 Ticket.sla_paused_at,
                 Ticket.response_violation_reason_id,
                 Ticket.resolution_violation_reason_id,

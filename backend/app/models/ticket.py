@@ -126,6 +126,10 @@ class Ticket(UUIDPrimaryKey, Timestamps, Base):
     first_response_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     sla_paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     sla_paused_seconds: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # Prazo de solução encerrado antes da conclusão da OS: nas OS migradas, a visita (mesmo
+    # improdutiva) com que o Field Control deu o prazo como cumprido, no prazo ou fora dele. O
+    # relógio de solução para aí (ver services/sla.py).
+    resolution_sla_met_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

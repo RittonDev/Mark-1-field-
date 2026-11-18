@@ -18,6 +18,10 @@ import type { ProjectStatus } from "@/lib/types";
 export default function ProjectsPage() {
   const canView = useCan("commercial.projects");
   const canEdit = useCan("commercial.projects", "edit");
+  // "Custos" soma custos extras e valores dos técnicos (e a margem desconta os dois): só com as duas telas.
+  const canExpenses = useCan("commercial.expenses");
+  const canPayouts = useCan("commercial.payouts");
+  const canCosts = canExpenses && canPayouts;
   const [status, setStatus] = useState<ProjectStatus | "">("active");
   const [search, setSearch] = useState("");
   const [customerId, setCustomerId] = useState("");
@@ -123,26 +127,30 @@ export default function ProjectsPage() {
                       <div className="h-full rounded-full bg-brand" style={{ width: `${p.stats.progress * 100}%` }} />
                     </div>
                   </div>
-                  <dl className="mt-4 grid grid-cols-3 gap-2 text-xs">
+                  <dl className={clsx("mt-4 grid gap-2 text-xs", canCosts ? "grid-cols-3" : "grid-cols-1")}>
                     <div>
                       <dt className="text-ink-muted">Valor</dt>
                       <dd className="font-medium text-ink tabular-nums">{p.contract_value != null ? formatMoney(p.contract_value) : "—"}</dd>
                     </div>
-                    <div title="Custos extras lançados nas OS e o valor dos técnicos">
-                      <dt className="text-ink-muted">Custos</dt>
-                      <dd className="font-medium text-ink tabular-nums">{formatMoney(projectCosts(p.stats))}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-ink-muted">Margem</dt>
-                      <dd
-                        className={clsx(
-                          "font-medium tabular-nums",
-                          p.margin != null && p.margin < 0 ? "text-red-600 dark:text-red-400" : "text-ink",
-                        )}
-                      >
-                        {p.margin != null ? formatMoney(p.margin) : "—"}
-                      </dd>
-                    </div>
+                    {canCosts ? (
+                      <>
+                        <div title="Custos extras lançados nas OS e o valor dos técnicos">
+                          <dt className="text-ink-muted">Custos</dt>
+                          <dd className="font-medium text-ink tabular-nums">{formatMoney(projectCosts(p.stats))}</dd>
+                        </div>
+                        <div>
+                          <dt className="text-ink-muted">Margem</dt>
+                          <dd
+                            className={clsx(
+                              "font-medium tabular-nums",
+                              p.margin != null && p.margin < 0 ? "text-red-600 dark:text-red-400" : "text-ink",
+                            )}
+                          >
+                            {p.margin != null ? formatMoney(p.margin) : "—"}
+                          </dd>
+                        </div>
+                      </>
+                    ) : null}
                   </dl>
                   {p.end_date ? (
                     <p className={clsx("mt-auto pt-3 text-xs", late ? "font-medium text-red-600 dark:text-red-400" : "text-ink-muted")}>

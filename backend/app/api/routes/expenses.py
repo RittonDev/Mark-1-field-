@@ -31,14 +31,14 @@ SettingsEdit = access_user("setup.settings", level="edit")
 
 
 @router.get("/tickets/{ticket_id}/expenses", response_model=list[ExpenseOut])
-async def list_expenses(
-    ticket_id: uuid.UUID, db: DB, user: TicketExpensesView
-) -> list[TicketExpense]:
+async def list_expenses(ticket_id: uuid.UUID, db: DB, user: TicketExpensesView) -> list[ExpenseOut]:
     """O técnico responsável vê (somente leitura); o solicitante não vê custo."""
     ticket = await tickets_svc.get_visible_ticket(db, user, ticket_id)
     if not user.is_staff:
         return []
-    return list(ticket.expenses)
+    # Mesmas regras do detalhe da OS: o técnico vê o reembolso dele e o material da OS (não o
+    # do colega) e não vê quem lançou.
+    return tickets_svc.to_detail(ticket, user).expenses
 
 
 @router.post(

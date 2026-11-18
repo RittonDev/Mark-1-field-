@@ -6,7 +6,14 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useId, useMemo, useState } from "react";
 import { ProfilesTab } from "@/components/access/ProfilesTab";
-import { type AccessDraft, accessPayload, profileFor, UserAccessFields, usesAccessProfile } from "@/components/access/UserAccessFields";
+import {
+  type AccessDraft,
+  accessPayload,
+  capExcess,
+  profileFor,
+  UserAccessFields,
+  usesAccessProfile,
+} from "@/components/access/UserAccessFields";
 import { useConfirm } from "@/components/Confirm";
 import { Tabs } from "@/components/motion";
 import { InactiveChip, NeutralChip, plural, RowEditButton, RowEditLink, SearchField } from "@/components/settings/shared";
@@ -35,7 +42,7 @@ import { useAuth } from "@/lib/auth";
 import { isManager, ROLE } from "@/lib/constants";
 import { formatDateTime, initials } from "@/lib/format";
 import { hasUnsavedChanges, useDebounced } from "@/lib/hooks";
-import { useCan } from "@/lib/permissions";
+import { useCan, useQueueScope } from "@/lib/permissions";
 import { useAccessProfiles, useAssignable, useCustomers, useTeams } from "@/lib/queries";
 import { sessionStore } from "@/lib/session";
 import type { QueuesOut, TemporaryPassword, Team, User, UserRole } from "@/lib/types";
@@ -329,6 +336,13 @@ function UserDialog({ user, onClose }: { user: User | null; onClose: () => void 
     if (current?.system_key) setAccess((a) => ({ ...a, profileId: null }));
   };
   const showAccess = !technicianFlow && canManageRole(me?.role, form.role);
+  // O acesso de antes desta edição (o teto do supervisor também vale o que a pessoa já tinha).
+  const accessBefore = editing && user.role === form.role ? (user.access ?? null) : null;
+  const excess = showAccess ? capExcess(me, profiles.data, form.role, access, accessBefore) : null;
+  // Acima do teto do supervisor, a API recusaria ao salvar (ela confere o acesso enviado, o perfil padrão
+  // do cadastro novo e o da troca de papel): o Salvar fica travado e a seção Acesso diz o que passa.
+  const overCap =
+    !!excess && (excess.items.length > 0 || excess.queue) && (!editing || accessChanged || form.role !== initial.role);
   const teamOptions = (teams.data ?? []).filter((t) => t.is_active || t.id === initial.team_id);
   const customerOptions = (customers.data ?? []).filter((c) => c.is_active || c.id === initial.customer_id);
 
@@ -355,6 +369,11 @@ function UserDialog({ user, onClose }: { user: User | null; onClose: () => void 
   });
   const asAssignee = editing ? (assignable.data?.find((a) => a.id === user.id)?.open_tickets ?? 0) : 0;
   const asOwner = editing ? (queues.data?.queues.find((q) => q.user.id === user.id)?.open ?? 0) : 0;
+  // Quem vê só a própria fila não sabe se a pessoa tem OS como analista responsável: o /queues dele traz
+  // só a linha dele (o "como responsável pelo atendimento" vem de /users/assignable, que é da equipe toda).
+  const viewerQueue = useQueueScope();
+  const ownerUnknown =
+    editing && viewerQueue.scope === "own" && user.id !== me?.id && (user.role === "analyst" || user.role === "supervisor");
   const deactivating = editing && user.is_active && !form.is_active;
   // A própria senha muda em "Trocar senha" (pede a atual e não derruba a sessão): aqui, só a dos outros.
   const settingPassword = editing && !self && changingPassword && password !== "";
@@ -441,11 +460,22 @@ function UserDialog({ user, onClose }: { user: User | null; onClose: () => void 
   };
 
   const submit = async () => {
-    if (deactivating && (asAssignee > 0 || asOwner > 0)) {
+    if (overCap) return;
+    if (deactivating && (asAssignee > 0 || asOwner > 0 || ownerUnknown)) {
+      const known = asAssignee > 0 || asOwner > 0;
       const ok = await confirm({
-        title: `Desativar ${user?.name} com OS abertas?`,
-        description: "A pessoa não entra mais no sistema, e as OS continuam com ela até você reatribuir.",
-        confirmLabel: "Desativar mesmo assim",
+        title: known ? `Desativar ${user?.name} com OS abertas?` : `Desativar ${user?.name}?`,
+        description: [
+          known
+            ? "A pessoa não entra mais no sistema, e as OS continuam com ela até você reatribuir."
+            : "A pessoa não entra mais no sistema.",
+          ownerUnknown && asOwner === 0
+            ? "Você vê só a sua fila: confira com quem vê todas se a pessoa ainda é analista responsável de OS abertas. Depois de desativar, essas OS passam para Sem analista."
+            : null,
+        ]
+          .filter(Boolean)
+          .join(" "),
+        confirmLabel: known ? "Desativar mesmo assim" : "Desativar",
         cancelLabel: "Voltar",
         tone: "danger",
       });
@@ -501,7 +531,14 @@ function UserDialog({ user, onClose }: { user: User | null; onClose: () => void 
           <Button onClick={onClose} disabled={save.isPending || reset.isPending}>
             Cancelar
           </Button>
-          <Button variant="primary" type="submit" form="user-form" loading={save.isPending} disabled={reset.isPending}>
+          <Button
+            variant="primary"
+            type="submit"
+            form="user-form"
+            loading={save.isPending}
+            disabled={reset.isPending || overCap}
+            title={overCap ? "O acesso escolhido passa do seu: veja a seção Acesso" : undefined}
+          >
             {technicianFlow ? "Cadastrar técnico" : "Salvar"}
           </Button>
         </>
@@ -575,7 +612,7 @@ function UserDialog({ user, onClose }: { user: User | null; onClose: () => void 
             role={form.role}
             draft={access}
             onChange={setAccess}
-            before={editing && user.role === form.role ? (user.access ?? null) : null}
+            before={accessBefore}
             disabled={self || save.isPending}
           />
         ) : null}
@@ -927,7 +964,9 @@ function UsersTab({
   // ?q= vem de outras telas (ex.: Homologação) para achar uma pessoa: aí vale olhar ativos e inativos.
   const [search, setSearch] = useState(() => params.get("q") ?? "");
   const [role, setRole] = useState("");
-  const [situation, setSituation] = useState<Situation>(() => (params.get("q") ? "all" : "active"));
+  // Vindo do "Usado por N" de um perfil: ativos e inativos, como a contagem (quem segura o perfil pode
+  // estar inativo).
+  const [situation, setSituation] = useState<Situation>(() => (params.get("q") || params.get("perfil") ? "all" : "active"));
   // ?perfil= vem do "Usado por" da aba Perfis de acesso.
   const profileId = params.get("perfil") ?? "";
   const profiles = useAccessProfiles();

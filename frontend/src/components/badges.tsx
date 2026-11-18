@@ -37,11 +37,14 @@ export function SlaBadge({ status }: { status: SlaStatus }) {
   );
 }
 
-/** Próximo prazo relevante: resposta (se ainda não houve) ou solução. */
+/**
+ * Próximo prazo relevante: resposta (se ainda não houve) ou solução. O prazo de solução já encerrado (na OS
+ * migrada, a visita com que o Field Control deu o prazo como cumprido) não conta mais: o relógio parou ali.
+ */
 export function nextDue(ticket: TicketListItem): { label: string; at: string } | null {
   if (ticket.resolved_at || STATUS[ticket.status].final) return null;
   if (!ticket.first_response_at && ticket.response_due_at) return { label: "Resposta", at: ticket.response_due_at };
-  if (ticket.resolution_due_at) return { label: "Solução", at: ticket.resolution_due_at };
+  if (ticket.resolution_due_at && !ticket.resolution_sla_met_at) return { label: "Solução", at: ticket.resolution_due_at };
   return null;
 }
 

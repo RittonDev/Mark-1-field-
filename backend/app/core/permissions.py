@@ -141,6 +141,23 @@ DEFAULT_QUEUE: tuple[QueueScope, bool] = ("all", True)
 EVENT_ITEMS: dict[str, str] = {
     "quote.decided": "commercial.quotes",
     "onboarding.submitted": "base.onboarding",
+    # Posição e jornada dos técnicos: só o Mapa ao vivo usa (e /tracking/* já pede o item).
+    "technician.location": "operation.map",
+    "technician.shift": "operation.map",
+}
+
+# Eventos do histórico da OS que levam valores de uma tela comercial: só vão para quem tem o
+# item, como os blocos do detalhe (o evento sai inteiro: from_value/to_value também têm o valor).
+HISTORY_ITEMS: dict[str, str] = {
+    "payout_set": "commercial.payouts",
+    "payout_removed": "commercial.payouts",
+    "expense_added": "commercial.expenses",
+    "expense_updated": "commercial.expenses",
+    "expense_removed": "commercial.expenses",
+    "quote_sent": "commercial.quotes",
+    "quote_approved": "commercial.quotes",
+    "quote_rejected": "commercial.quotes",
+    "quote_reminded": "commercial.quotes",
 }
 
 

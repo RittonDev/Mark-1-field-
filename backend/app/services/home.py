@@ -24,7 +24,6 @@ from sqlalchemy import (
     Float,
     Select,
     and_,
-    case,
     cast,
     func,
     literal,
@@ -91,6 +90,7 @@ from app.services import durations, tag_rules
 from app.services import field as field_svc
 from app.services import portal as portal_svc
 from app.services import quotes as quotes_svc
+from app.services import sla as sla_svc
 from app.services.activities import day_bounds, local_today
 from app.services.field import SCHEDULE_TOLERANCE
 from app.services.reports import month_bounds
@@ -117,11 +117,12 @@ ARRIVAL_PENDING = (S.ASSIGNED, S.SCHEDULED, S.EN_ROUTE)
 # Estados em que a OS precisa de uma data de visita.
 NEEDS_SCHEDULE = (S.NEW, S.TRIAGE, S.ASSIGNED, S.REOPENED)
 
-START_TOLERANCE = timedelta(minutes=30)
+# Visita de hoje "sem início" só 30 min depois do horário: a mesma tolerância do "Atrasada" da Minha
+# fila e do prazo de chegada (services/field.py).
+START_TOLERANCE = SCHEDULE_TOLERANCE
 UNASSIGNED_HORIZON = timedelta(hours=48)
 STALE_AFTER = timedelta(days=3)
 PAYOUT_LATE = timedelta(days=7)
-FIELD_STUCK_AFTER = timedelta(hours=12)
 DUE_SOON = timedelta(hours=24)
 TAG_OLD = timedelta(days=30)
 # Orçamentos: o período "Últimos 90 dias" da lista de /orcamentos (agora - 90 × 24 h), que também
@@ -329,6 +330,16 @@ def late_arrival_clause(m: Moment) -> ColumnElement[bool]:
     )
 
 
+def not_bounced_clause() -> ColumnElement[bool]:
+    """Sem visita improdutiva no horário agendado ou depois (a mesma regra do "Atrasada" da Minha
+    fila, services/queues.bounced_after_schedule): a visita que deu improdutiva aconteceu e fica no
+    grupo das improdutivas, não no de visita sem início ou sem baixa."""
+    return or_(
+        Ticket.last_unproductive_at.is_(None),
+        Ticket.last_unproductive_at < Ticket.scheduled_start,
+    )
+
+
 def today_not_started_clause(m: Moment) -> ColumnElement[bool]:
     """Visita de hoje cujo horário passou há 30 min ou mais sem sair nem começar."""
     return and_(
@@ -336,6 +347,7 @@ def today_not_started_clause(m: Moment) -> ColumnElement[bool]:
         Ticket.scheduled_start >= m.day_start,
         Ticket.scheduled_start < m.day_end,
         Ticket.scheduled_start <= m.now - START_TOLERANCE,
+        not_bounced_clause(),
     )
 
 
@@ -345,34 +357,13 @@ def recent(m: Moment) -> ColumnElement[bool]:
     return Ticket.created_at >= m.recent_start
 
 
-def field_since() -> ColumnElement[Any]:
-    """Desde quando a OS está em campo: a última ida para "Em deslocamento" ou "Em atendimento" no
-    histórico; sem esse evento (OS importada), o início do atendimento, a chegada ou a última
-    mudança. Fora de campo é nulo: o CASE só roda a subconsulta nas OS em campo."""
-    moved = (
-        select(func.max(TicketEvent.created_at))
-        .where(
-            TicketEvent.ticket_id == Ticket.id,
-            TicketEvent.event_type == TicketEventType.STATUS_CHANGED,
-            TicketEvent.to_value.in_([s.value for s in FIELD]),
-        )
-        .correlate(Ticket)
-        .scalar_subquery()
-    )
-    since = func.coalesce(moved, Ticket.work_started_at, Ticket.arrived_at, Ticket.updated_at)
-    return case((Ticket.status.in_(FIELD), since))
-
-
-def field_stuck_clause(m: Moment) -> ColumnElement[bool]:
-    """A caminho ou em atendimento há mais de 12 h (esqueceram de concluir ou de voltar a OS)."""
-    return field_since() < m.now - FIELD_STUCK_AFTER
-
-
 def due_soon_clause(m: Moment) -> ColumnElement[bool]:
-    """Prazo de solução nas próximas 24 h, com o SLA correndo e ainda sem estourar."""
+    """Prazo de solução nas próximas 24 h, com o SLA correndo e ainda sem estourar (o prazo já
+    encerrado pelo Field Control, resolution_sla_met_at, não vence mais)."""
     return and_(
         _open(),
         Ticket.sla_paused_at.is_(None),
+        Ticket.resolution_sla_met_at.is_(None),
         Ticket.resolution_due_at > m.now,
         Ticket.resolution_due_at <= m.now + DUE_SOON,
         not_(breached_clause(m.now)),
@@ -389,11 +380,28 @@ def unassigned_visit_clause(m: Moment) -> ColumnElement[bool]:
     )
 
 
-def missed_visits_clause(m: Moment) -> ColumnElement[bool]:
-    """Agendada nos 7 dias anteriores e ainda sem saída nem início."""
+def missed_visits_raw(m: Moment) -> ColumnElement[bool]:
+    """O recorte que a lista reproduz (situação e datas): agendada nos 7 dias anteriores e ainda
+    sem saída nem início."""
     return and_(
         Ticket.status.in_(NOT_STARTED),
         Ticket.scheduled_start >= m.days_ago(MISSED_DAYS),
+        Ticket.scheduled_start < m.day_start,
+    )
+
+
+def missed_visits_clause(m: Moment) -> ColumnElement[bool]:
+    """Agendada nos 7 dias anteriores, sem saída nem início e sem improdutiva depois do horário."""
+    return and_(missed_visits_raw(m), not_bounced_clause())
+
+
+def old_overdue_raw(m: Moment) -> ColumnElement[bool]:
+    """Da "Fila antiga", com a visita num dia que já passou e sem saída nem início (o recorte que
+    a lista reproduz)."""
+    return and_(
+        _open(),
+        Ticket.created_at < m.recent_start,
+        Ticket.status.in_(NOT_STARTED),
         Ticket.scheduled_start < m.day_start,
     )
 
@@ -465,6 +473,7 @@ _ROW_COLUMNS = (
     Ticket.resolution_due_at,
     Ticket.first_response_at,
     Ticket.resolved_at,
+    Ticket.resolution_sla_met_at,
     Ticket.sla_paused_at,
     Ticket.last_unproductive_at,
     Ticket.unproductive_count,
@@ -524,8 +533,14 @@ async def _ticket_items(
 def _sla_reason(row: Any, m: Moment) -> tuple[datetime | None, str]:
     clock = row.sla_paused_at or m.now
     paused = " (SLA pausado)" if row.sla_paused_at else ""
-    if row.resolution_due_at is not None and clock > row.resolution_due_at:
-        due = row.resolution_due_at
+    due = row.resolution_due_at
+    met_at = row.resolution_sla_met_at
+    if due is not None and met_at is not None:
+        # Prazo de solução encerrado pelo Field Control: fora do prazo fica parado onde terminou;
+        # no prazo, o estouro é da 1ª resposta.
+        if met_at > due:
+            return due, f"Solução cumprida fora do prazo em {_dm(met_at, m)} (Field Control)"
+    elif due is not None and clock > due:
         return due, f"Prazo de solução estourado há {span_text(m.now - due)}{paused}"
     due = row.response_due_at
     late = span_text(m.now - due) if due else ""
@@ -593,10 +608,12 @@ def _violation_reason(row: Any, m: Moment) -> tuple[datetime | None, str]:
     clocks = []
     if response_late and row.response_violation_reason_id is None:
         clocks.append("1ª resposta")
+    # O fim do relógio de solução: a conclusão ou, antes dela, o prazo encerrado pelo Field Control.
+    solution_end = sla_svc.resolution_end(row)
     if (
-        row.resolved_at is not None
+        solution_end is not None
         and row.resolution_due_at is not None
-        and row.resolved_at > row.resolution_due_at
+        and solution_end > row.resolution_due_at
         and row.resolution_violation_reason_id is None
     ):
         clocks.append("solução")
@@ -827,15 +844,19 @@ async def _ticket_counts(db: AsyncSession, m: Moment, onsite_hours: int) -> dict
     )
     onsite = and_(Ticket.resolved_at >= m.recent_start, Ticket.work_seconds > 0)
     columns: dict[str, ColumnElement[bool]] = {
-        # Indicadores (kpis): os de sempre, sem o corte de 30 dias.
+        # Indicadores (kpis): os de sempre, sem o corte de 30 dias. Em campo agora é a regra única
+        # (services/field.py): a caminho ou em atendimento há até 12 h.
         "open": _open(),
         "scheduled_today": today,
-        "in_field_now": Ticket.status.in_(FIELD),
+        "in_field_now": field_svc.in_field_now_clause(m.now),
         "resolved_today": and_(Ticket.resolved_at >= m.day_start, Ticket.resolved_at < m.day_end),
         "late": breached_clause(m.now),
         "open_unassigned": and_(_open(), Ticket.assignee_id.is_(None)),
         # Grupos de atenção, com a condição do próprio grupo (a do portal é a do menu).
         **{key: group.cond(m) for key, group in TICKET_GROUPS.items() if key != "portal_requests"},
+        # O que a lista do "Ver todas" mostra: sem a improdutiva depois do horário, que ela não
+        # sabe filtrar. Quando os dois números diferem, o grupo vai sem o filtro da lista.
+        "missed_visits_listed": missed_visits_raw(m),
         # O número do topo: cada OS uma vez, mesmo com dois motivos.
         "now_total": or_(*(TICKET_GROUPS[key].cond(m) for key in NOW_KEYS)),
         # Hoje e amanhã.
@@ -863,9 +884,8 @@ async def _ticket_counts(db: AsyncSession, m: Moment, onsite_hours: int) -> dict
         "cancelled_30d": Ticket.cancelled_at >= m.recent_start,
         "old_no_owner": and_(old, no_owner_clause()),
         "old_unassigned": and_(old, Ticket.assignee_id.is_(None)),
-        "old_overdue_visit": and_(
-            old, Ticket.status.in_(NOT_STARTED), Ticket.scheduled_start < m.day_start
-        ),
+        "old_overdue_visit": and_(old_overdue_raw(m), not_bounced_clause()),
+        "old_overdue_visit_listed": old_overdue_raw(m),
         "old_sla_breached": and_(old, breached_clause(m.now)),
         "old_unproductive": and_(old, unproductive_pending_clause()),
         # Atendimento ao cliente e equipe de campo (30 dias).
@@ -873,7 +893,9 @@ async def _ticket_counts(db: AsyncSession, m: Moment, onsite_hours: int) -> dict
         "on_time_ok": and_(arrivals, Ticket.arrived_at <= arrival_limit()),
         "arrivals_30d": Ticket.arrived_at >= m.recent_start,
         "sla_base": sla,
-        "sla_ok": and_(sla, Ticket.resolved_at <= Ticket.resolution_due_at),
+        # No prazo: o relógio de solução parou (conclusão ou prazo encerrado pelo Field Control,
+        # o que veio primeiro) até o prazo.
+        "sla_ok": and_(sla, sla_svc.resolution_end_col() <= Ticket.resolution_due_at),
         "sla_imported": and_(sla, Ticket.legacy.is_not(None)),
         "onsite_base": onsite,
         "onsite_over": and_(onsite, Ticket.work_seconds > onsite_hours * 3600),
@@ -1108,11 +1130,12 @@ TICKET_GROUPS: dict[str, TicketGroup] = {
     "today_not_started": TicketGroup(
         today_not_started_clause, lambda m: [Ticket.scheduled_start.asc()], _not_started_reason
     ),
+    # A regra única de "em campo" (services/field.py): a caminho ou em atendimento há mais de 12 h.
     "field_stuck": TicketGroup(
-        field_stuck_clause,
-        lambda m: [field_since().asc()],
+        lambda m: field_svc.field_stuck_clause(m.now),
+        lambda m: [field_svc.field_since().asc()],
         _field_stuck_reason,
-        extra=lambda: [field_since().label("field_since")],
+        extra=lambda: [field_svc.field_since().label("field_since")],
     ),
     # Com o mesmo corte de 30 dias do "SLA estourado": a OS antiga que volta de uma pausa não
     # entra no topo para sumir dele na hora em que o prazo estoura (fica só na "Fila antiga").
@@ -1187,7 +1210,9 @@ async def _attention(db: AsyncSession, m: Moment, counts: dict[str, Any]) -> lis
         if count and m.allows(GROUPS[key].link):
             extra = group.extra() if group.extra else ()
             items = await _ticket_items(db, m, group.cond(m), group.order(m), group.reason, extra)
-            groups.append(_group(key, count, items, m))
+            # O "Ver todas" só quando a lista mostra o mesmo número (ver missed_visits_listed).
+            listed = counts.get(f"{key}_listed", count) == count
+            groups.append(_group(key, count, items, m, listed=listed))
     for key, load in OTHER_GROUPS.items():
         item = OTHER_GROUP_ITEMS.get(key)
         if (item is not None and not m.can(item)) or not m.allows(GROUPS[key].link):
@@ -1200,8 +1225,12 @@ async def _attention(db: AsyncSession, m: Moment, counts: dict[str, Any]) -> lis
     return groups
 
 
-def _group(key: str, count: int, items: list[AttentionItem], m: Moment) -> AttentionGroup:
+def _group(
+    key: str, count: int, items: list[AttentionItem], m: Moment, *, listed: bool = True
+) -> AttentionGroup:
+    """`listed`: a lista com o filtro do grupo mostra o mesmo número (sem isso, sem filtro)."""
     spec = GROUPS[key]
+    filters = spec.make_filters(m) if spec.make_filters else spec.filters
     return AttentionGroup(
         key=key,
         title=spec.title,
@@ -1209,7 +1238,7 @@ def _group(key: str, count: int, items: list[AttentionItem], m: Moment) -> Atten
         tier=spec.tier,  # type: ignore[arg-type]
         count=count,
         hint=spec.hint,
-        filters=spec.make_filters(m) if spec.make_filters else spec.filters,
+        filters=filters if listed else None,
         link=spec.link,
         items=items,
     )
@@ -1601,19 +1630,29 @@ async def _finance(db: AsyncSession, m: Moment) -> HomeFinance:
     )
     month_start = month_bounds(m.today.year, m.today.month)[0]
     approved = and_(Quote.status == QuoteStatus.APPROVED, Quote.decided_at >= month_start)
-    quotes = (
-        await db.execute(
-            select(
-                func.count().filter(waiting).label("waiting"),
-                func.sum(Quote.total).filter(waiting).label("waiting_total"),
-                func.count().filter(approved).label("approved"),
-                func.sum(Quote.total).filter(approved).label("approved_total"),
+    # Sem a tela de Orçamentos (pulse.quotes também sai null), os números de orçamento saem
+    # zerados e nem são calculados.
+    quotes: dict[str, Any] = {
+        "waiting": 0,
+        "waiting_total": None,
+        "approved": 0,
+        "approved_total": None,
+    }
+    if m.can("commercial.quotes"):
+        row = (
+            await db.execute(
+                select(
+                    func.count().filter(waiting).label("waiting"),
+                    func.sum(Quote.total).filter(waiting).label("waiting_total"),
+                    func.count().filter(approved).label("approved"),
+                    func.sum(Quote.total).filter(approved).label("approved_total"),
+                )
+                .select_from(Quote)
+                .join(Ticket, Ticket.id == Quote.ticket_id)
+                .where(Ticket.status != S.CANCELLED, *m.where)
             )
-            .select_from(Quote)
-            .join(Ticket, Ticket.id == Quote.ticket_id)
-            .where(Ticket.status != S.CANCELLED, *m.where)
-        )
-    ).one()
+        ).one()
+        quotes = row._asdict()
     costs = (
         await db.execute(
             select(func.count().label("pending"), func.sum(TicketExpense.total).label("total"))
@@ -1633,10 +1672,10 @@ async def _finance(db: AsyncSession, m: Moment) -> HomeFinance:
         payout_tag_technicians=tag_technicians,
         payout_tag_over_30d=tag_old,
         payout_tag_filters=ListFilters(status=list(DONE), tag=names) if names else None,
-        quotes_waiting=quotes.waiting,
-        quotes_waiting_total=_money(quotes.waiting_total),
-        quotes_approved_month=quotes.approved,
-        quotes_approved_month_total=_money(quotes.approved_total),
+        quotes_waiting=quotes["waiting"],
+        quotes_waiting_total=_money(quotes["waiting_total"]),
+        quotes_approved_month=quotes["approved"],
+        quotes_approved_month_total=_money(quotes["approved_total"]),
         costs_pending=costs.pending,
         costs_pending_total=_money(costs.total),
     )
@@ -1798,10 +1837,16 @@ def _backlog(m: Moment, counts: dict[str, Any]) -> HomeBacklog:
             key="overdue_visit",
             label="Visita passou sem baixa",
             count=counts["old_overdue_visit"],
-            filters=ListFilters(
-                status=list(NOT_STARTED),
-                scheduled_to=m.today - timedelta(days=1),
-                created_to=m.old_to,
+            # A improdutiva depois do horário fica no motivo dela; a lista não sabe tirar: com
+            # alguma assim, sem "Ver todas" (o número não bateria).
+            filters=(
+                ListFilters(
+                    status=list(NOT_STARTED),
+                    scheduled_to=m.today - timedelta(days=1),
+                    created_to=m.old_to,
+                )
+                if counts["old_overdue_visit_listed"] == counts["old_overdue_visit"]
+                else None
             ),
         ),
         OldReason(

@@ -24,6 +24,7 @@ import { useAuth } from "@/lib/auth";
 import { PRIORITY, PRIORITY_ORDER, ROLE, STATUS, STATUS_ORDER, TICKET_SOURCE } from "@/lib/constants";
 import { formatDateTime, formatDocument, formatMinutes, formatMoney, fromLocalInput, toLocalInput } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
+import { useCan } from "@/lib/permissions";
 import { useProjects } from "@/lib/projects";
 import { useAssignable, useCategories, useCityFavorites, useCustomers, useServiceTypes } from "@/lib/queries";
 import { type TicketTagRules, useTagRules } from "@/lib/tagRules";
@@ -336,6 +337,8 @@ export function GeneralTab({
   const { toast } = useToast();
   const confirm = useConfirm();
   const { user } = useAuth();
+  // A ficha do cliente é da tela Clientes: sem ela, o "Ver cliente" levaria a "Sem acesso".
+  const canCustomers = useCan("base.customers");
   const now = useNow(30_000);
   const formRef = useRef<HTMLFormElement>(null);
   const errorRef = useRef<HTMLDivElement>(null);
@@ -613,21 +616,28 @@ export function GeneralTab({
         step(await api.patch<TicketDetail>(`/tickets/${ticket.id}`, { ...patch, expected_version: version, allow_conflict: allow }));
       const sendAssign = async (assign: { assignee_id: UUID | null }, allow: boolean) =>
         step(await api.post<TicketDetail>(`/tickets/${ticket.id}/assign`, { ...assign, expected_version: version, allow_conflict: allow }));
+      // A troca do analista responsável vai por último: com "Somente a própria fila", passar a OS para
+      // outra fila a tira da vista de quem salva, e o técnico e os horários dariam "Esta OS é de outra fila".
+      const moveOwner = plan.patch !== null && "owner_id" in plan.patch;
+      const { owner_id: nextOwner, ...rest }: TicketUpdatePayload = plan.patch ?? {};
+      const patch = Object.keys(rest).length ? rest : null;
       // A agenda muda no PATCH: lá a API confere o conflito com a agenda nova, o técnico e os outros técnicos finais.
       const agendaInPatch = Boolean(
-        plan.patch && ("scheduled_start" in plan.patch || "scheduled_end" in plan.patch || "estimated_minutes" in plan.patch),
+        patch && ("scheduled_start" in patch || "scheduled_end" in patch || "estimated_minutes" in patch),
       );
       if (plan.assign && plan.assignFirst) {
         // O conflito do técnico novo é conferido aqui, a menos que a agenda ainda vá mudar no PATCH.
         await sendAssign(plan.assign, agendaInPatch || plan.confirmed);
-        if (plan.patch) await sendPatch(plan.patch, plan.confirmed);
+        if (patch) await sendPatch(patch, plan.confirmed);
       } else {
         // Trocando o técnico depois, o conflito é conferido na troca (com o técnico novo, a agenda e
         // os outros técnicos já gravados): no PATCH a API olharia o técnico que está saindo.
-        if (plan.patch) await sendPatch(plan.patch, plan.assign ? true : plan.confirmed);
+        if (patch) await sendPatch(patch, plan.assign ? true : plan.confirmed);
         if (plan.assign) await sendAssign(plan.assign, plan.confirmed);
       }
       if (plan.times) step(await api.put<TicketDetail>(`/tickets/${ticket.id}/times`, { ...plan.times, expected_version: version }));
+      // A agenda já foi conferida acima: aqui só muda a fila.
+      if (moveOwner) await sendPatch({ owner_id: nextOwner ?? null }, true);
       return current;
     },
     onMutate: () => setPartial(false),
@@ -878,9 +888,11 @@ export function GeneralTab({
                     <ThumbsUp className="size-3" /> Última avaliação: <b className="text-ink">{intakeCustomer.rating_last}</b>
                   </span>
                 ) : null}
-                <Link href={`/clientes/${intakeCustomer.id}`} className="font-medium text-brand hover:underline">
-                  Ver cliente
-                </Link>
+                {canCustomers ? (
+                  <Link href={`/clientes/${intakeCustomer.id}`} className="font-medium text-brand hover:underline">
+                    Ver cliente
+                  </Link>
+                ) : null}
               </p>
             ) : null}
           </div>

@@ -46,6 +46,8 @@ function clamp(item: MatrixItem, level: AccessLevel): AccessLevel {
 
 const INHERIT = "perfil";
 type Choice = AccessLevel | typeof INHERIT;
+/** "Igual ao perfil" fora do teto de quem edita (supervisor): o perfil dá mais do que ele tem. */
+const INHERIT_CAPPED = "O nível do perfil passa do seu próprio acesso";
 
 /**
  * Matriz "Tela x Nível": uma linha por tela, agrupadas por módulo, com Sem acesso | Visualizar | Editar.
@@ -98,6 +100,8 @@ export function AccessMatrix({
     const top = cap?.[item.key];
     return !top || LEVEL_RANK[level] <= LEVEL_RANK[top] || level === levelOf(item.key);
   };
+  // Voltar a seguir o perfil também passa pelo teto: o nível do perfil pode estar acima dele.
+  const inheritAllowed = (item: MatrixItem) => choiceOf(item.key) === INHERIT || !cap || !base || allowed(item, base[item.key]);
 
   const moduleState = (m: MatrixModule): { choice: Choice | null; levels: AccessLevel[] } => {
     const levels = ACCESS_LEVELS.filter((l) => m.items.some((i) => i.levels.includes(l)));
@@ -111,6 +115,7 @@ export function AccessMatrix({
     onChange(patch);
   };
   const moduleAllowed = (m: MatrixModule, level: AccessLevel) => m.items.every((i) => allowed(i, clamp(i, level)));
+  const moduleInheritAllowed = (m: MatrixModule) => m.items.every(inheritAllowed);
 
   // A coluna "Igual ao perfil" leva também o nível do perfil ao lado do rádio ("Sem acesso" inteiro).
   const grid = override
@@ -134,6 +139,7 @@ export function AccessMatrix({
                 override={override}
                 inherited={state.choice === INHERIT}
                 onInherit={() => applyModule(m, INHERIT)}
+                canInherit={moduleInheritAllowed(m)}
                 className="bg-[var(--table-head)]"
               />
               {m.items.map((item) => (
@@ -148,6 +154,7 @@ export function AccessMatrix({
                   override={override}
                   inherited={choiceOf(item.key) === INHERIT}
                   onInherit={() => onChange({ [item.key]: null })}
+                  canInherit={inheritAllowed(item)}
                   reference={base?.[item.key]}
                 />
               ))}
@@ -191,8 +198,9 @@ export function AccessMatrix({
                 <RadioCell
                   name={moduleName}
                   label="Igual ao perfil"
+                  title={moduleInheritAllowed(m) ? undefined : INHERIT_CAPPED}
                   checked={state.choice === INHERIT}
-                  disabled={disabled}
+                  disabled={disabled || !moduleInheritAllowed(m)}
                   readOnly={readOnly}
                   onPick={() => applyModule(m, INHERIT)}
                 />
@@ -231,8 +239,9 @@ export function AccessMatrix({
                     <RadioCell
                       name={name}
                       label={`Igual ao perfil (${LEVEL_LABEL[base?.[item.key] ?? "none"]})`}
+                      title={inheritAllowed(item) ? undefined : INHERIT_CAPPED}
                       checked={choice === INHERIT}
-                      disabled={disabled}
+                      disabled={disabled || !inheritAllowed(item)}
                       readOnly={readOnly}
                       onPick={() => onChange({ [item.key]: null })}
                       note={base ? LEVEL_LABEL[base[item.key]] : undefined}
@@ -391,6 +400,7 @@ function NarrowRow({
   override,
   inherited,
   onInherit,
+  canInherit = true,
   reference,
   className,
 }: {
@@ -405,6 +415,8 @@ function NarrowRow({
   override: boolean;
   inherited: boolean;
   onInherit: () => void;
+  /** Voltar ao perfil cabe no teto de quem edita (sem isso, o "Voltar ao perfil" não aparece). */
+  canInherit?: boolean;
   /** O nível do perfil, como referência. */
   reference?: AccessLevel;
   className?: string;
@@ -433,11 +445,11 @@ function NarrowRow({
           />
           {!override ? null : inherited ? (
             <span className="text-xs text-ink-muted">{profileText}</span>
-          ) : (
+          ) : canInherit ? (
             <button type="button" onClick={onInherit} className="text-xs font-semibold text-brand-ink hover:underline">
               Voltar ao perfil{reference ? ` (${LEVEL_LABEL[reference]})` : ""}
             </button>
-          )}
+          ) : null}
         </div>
       )}
     </div>

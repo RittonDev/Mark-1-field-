@@ -137,6 +137,11 @@ OPEN_AFTER_IMPORT = {
     TicketStatus.EN_ROUTE,
     TicketStatus.IN_PROGRESS,
 }
+FINISHED_ON_IMPORT = {TicketStatus.CLOSED, TicketStatus.CANCELLED}
+# Situações que exigem técnico (STATUS_INFO.requires_assignee) e esperam a visita.
+NEEDS_TECHNICIAN = {TicketStatus.ASSIGNED, TicketStatus.SCHEDULED}
+# Veredito do prazo de solução no FC quando a visita já o encerrou.
+FC_SOLUTION_MET = ("completedOnSchedule", "completedOutOfSchedule")
 
 
 # ------------------------------------------------------------------------------------ leitura
@@ -513,6 +518,27 @@ def active_tasks(order: dict[str, Any]) -> list[dict[str, Any]]:
     return sorted(tasks, key=lambda t: (t.get("createdAt") or "", t.get("position") or 0))
 
 
+def task_end(task: dict[str, Any]) -> datetime | None:
+    """Fim de uma visita (concluída ou reportada como improdutiva)."""
+    return (
+        parse_ts(task.get("completedAt"))
+        or parse_ts(task.get("startedAt"))
+        or parse_ts(task.get("createdAt"))
+    )
+
+
+def solution_met_at(
+    deadline: dict[str, Any], tasks: list[dict[str, Any]], status: TicketStatus
+) -> datetime | None:
+    """Prazo de solução que o FC deu como cumprido (no prazo ou fora) numa OS que chega aberta: no
+    FC ele fecha quando a visita termina, mesmo improdutiva, então vale a última visita encerrada.
+    Na OS concluída ou cancelada o fim já é a conclusão (ou o SLA não conta)."""
+    if deadline.get("solutionStatus") not in FC_SOLUTION_MET or status in FINISHED_ON_IMPORT:
+        return None
+    ends = [task_end(t) for t in tasks if t.get("status") in ("done", "reported")]
+    return max((end for end in ends if end), default=None)
+
+
 def _task_times(task: dict[str, Any]) -> list[datetime]:
     out = [parse_ts(task.get(k)) for k in ("createdAt", "startedAt", "completedAt")]
     sched = task.get("scheduling") or {}
@@ -560,12 +586,14 @@ def map_status(
             mapped = MappedStatus(TicketStatus.EN_ROUTE, last_activity=last_activity)
         elif st in ("scheduled", "pending"):
             sched = effective.get("scheduling") or {}
-            if sched.get("date"):
-                mapped = MappedStatus(TicketStatus.SCHEDULED, last_activity=last_activity)
-            elif effective.get("employee"):
-                mapped = MappedStatus(TicketStatus.ASSIGNED, last_activity=last_activity)
-            else:
+            # "Agendado" exige técnico (como "Atribuído"): data sem colaborador fica "Novo", com a
+            # data (a fila mostra "Sem técnico").
+            if not effective.get("employee"):
                 mapped = MappedStatus(TicketStatus.NEW, last_activity=last_activity)
+            elif sched.get("date"):
+                mapped = MappedStatus(TicketStatus.SCHEDULED, last_activity=last_activity)
+            else:
+                mapped = MappedStatus(TicketStatus.ASSIGNED, last_activity=last_activity)
         elif st == "reported":
             mapped = MappedStatus(
                 TicketStatus.ASSIGNED if effective.get("employee") else TicketStatus.NEW,
@@ -1324,8 +1352,16 @@ class Importer:
             effective = next((t for t in reversed(tasks) if t.get("status") != "canceled"), last)
         employee = (effective or {}).get("employee") or {}
         assignee = self.user(employee.get("id"), employee.get("_id"))
+        ticket_status = mapped.status
+        if ticket_status in NEEDS_TECHNICIAN and assignee is None:
+            # Colaborador que não veio no export: sem técnico, a OS espera como "Novo".
+            ticket_status = TicketStatus.NEW
         sched = (effective or {}).get("scheduling") or {}
         scheduled_start = local_datetime(sched.get("date"), sched.get("time"))
+        if (effective or {}).get("status") == "reported":
+            # A improdutiva tira a OS da agenda, como no fluxo daqui (senão vira "Atrasada"). A
+            # data que saiu fica no evento da visita.
+            scheduled_start = None
         duration = int((effective or {}).get("duration") or service.get("duration") or 0)
         scheduled_end = (
             scheduled_start + timedelta(minutes=duration) if scheduled_start and duration else None
@@ -1425,7 +1461,7 @@ class Importer:
             "title": service_name,
             "description": order.get("description") or "",
             "type": ticket_type_for(service_name),
-            "status": mapped.status,
+            "status": ticket_status,
             "source": TicketSource.PORTAL if request else TicketSource.WEB,
             "customer_id": self.ref("customer", customer.get("id")),
             "location_id": self.ref("location", location.get("id")),
@@ -1437,6 +1473,8 @@ class Importer:
             "scheduled_end": scheduled_end,
             "response_due_at": parse_ts(deadline.get("responseAt")),
             "resolution_due_at": parse_ts(deadline.get("solutionAt")),
+            # O veredito do FC: o prazo de solução já fechou numa visita (mesmo improdutiva).
+            "resolution_sla_met_at": solution_met_at(deadline, tasks, ticket_status),
             "first_response_at": parse_ts(deadline.get("firstTaskStartedAt")) or first_started,
             "resolved_at": mapped.resolved_at,
             "closed_at": mapped.closed_at,
@@ -1553,11 +1591,15 @@ class Importer:
                     note=desc,
                 )
             elif status == "reported":
+                task_sched = task.get("scheduling") or {}
+                planned = local_datetime(task_sched.get("date"), task_sched.get("time"))
                 event(
                     TicketEventType.UNPRODUCTIVE_VISIT,
                     completed or started or t_created,
                     tech,
                     note=desc or "Visita reportada no Field Control",
+                    # A agenda que saiu (como no registro da improdutiva daqui).
+                    data={"previous_schedule": planned.isoformat()} if planned else None,
                 )
             elif status == "canceled":
                 event(

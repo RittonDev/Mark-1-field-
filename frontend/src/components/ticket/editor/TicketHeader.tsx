@@ -34,15 +34,17 @@ export type HeaderJump = "geral" | "prazos" | "localizacao";
 const ASSIGNEE_FIELD = "Colaborador";
 const DATE_FIELD = "Data do agendamento";
 
-// Chips do resumo no azul da marca: véu branco e contorno, como a situação (branco acima de 4,5:1).
+// Chips do resumo no azul da marca: véu branco e contorno, como a situação. Branco acima de 4,5:1 com
+// véu de até 17% no azul claro; no escuro (brand-strong) só com o de 5%, então lá o fundo não muda no
+// hover e quem marca o hover é o contorno.
 // A largura máxima fica em cada chip (max-w-full) e, no de cliente e loja, também no item da lista
 // (22rem): duas classes max-w juntas não se somam, vale a que o CSS gerar por último.
 const CHIP =
   "inline-flex h-6 min-w-0 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium whitespace-nowrap ring-1 ring-inset " +
   "transition-[background-color,box-shadow,color] duration-150";
 const FULL = "max-w-full";
-const NEUTRAL = "bg-white/10 text-white ring-white/25";
-const NEUTRAL_ACTION = "hover:bg-white/[0.17] hover:ring-white/50";
+const NEUTRAL = "bg-white/10 text-white ring-white/25 dark:bg-white/5";
+const NEUTRAL_ACTION = "hover:bg-white/[0.17] hover:ring-white/50 dark:hover:bg-white/5";
 // Vencido: vermelho cheio com texto branco (4,8:1).
 const DANGER = "bg-red-600 text-white ring-red-300/40";
 const DANGER_ACTION = "hover:bg-red-700";
@@ -75,6 +77,13 @@ function agendaText(iso: string | null, now: number): string {
   return `${weekday.charAt(0).toUpperCase()}${weekday.slice(1)} ${dayMonthFmt.format(date)}${year} ${time}`;
 }
 
+/**
+ * Fração do prazo a partir da qual a OS fica "em risco": espelho de SLA_AT_RISK_RATIO do backend
+ * (backend/app/core/config.py). O sla_status da API só muda quando a OS é relida; com o painel aberto, o
+ * chip e a aba Prazos ficam âmbar na hora certa pela conta ao vivo.
+ */
+const SLA_AT_RISK_RATIO = 0.75;
+
 /** Parte do prazo já consumida, sem o tempo pausado (como o backend calcula o "em risco"). */
 function elapsedRatio(createdAt: string, due: number, pausedSeconds: number, moment: number): number {
   const created = new Date(createdAt).getTime();
@@ -92,8 +101,11 @@ interface SlaView {
   ratio: number | null;
 }
 
-/** O próximo prazo de SLA da OS, contado ao vivo (resposta enquanto não houve; depois, solução). */
-function slaView(ticket: TicketDetail, now: number): SlaView {
+/**
+ * O próximo prazo de SLA da OS, contado ao vivo (resposta enquanto não houve; depois, solução). O chip do
+ * cabeçalho e o alerta da aba Prazos saem desta mesma conta.
+ */
+export function slaView(ticket: TicketDetail, now: number): SlaView {
   if (ticket.status === "cancelled") return { text: "Sem prazo", tone: "neutral", due: null, ratio: null };
   const due = nextDue(ticket);
   if (!due) {
@@ -117,7 +129,7 @@ function slaView(ticket: TicketDetail, now: number): SlaView {
   if (minutes < 1) return { text: `${due.label} vence agora`, tone: "risk", due: due.at, ratio };
   return {
     text: `${due.label} em ${formatMinutes(minutes)}`,
-    tone: ticket.sla_status === "at_risk" ? "risk" : "neutral",
+    tone: ticket.sla_status === "at_risk" || ratio >= SLA_AT_RISK_RATIO ? "risk" : "neutral",
     due: due.at,
     ratio,
   };
@@ -148,7 +160,7 @@ function CopyCode({ code }: { code: string }) {
       onClick={() => void copy()}
       title={`Copiar ${code}`}
       className={clsx(
-        "group/copy -mx-1 inline-flex shrink-0 items-center gap-1 rounded-md px-1 font-mono transition-colors duration-150 hover:bg-white/10",
+        "group/copy -mx-1 inline-flex shrink-0 items-center gap-1 rounded-md px-1 font-mono transition-colors duration-150 hover:bg-white/10 dark:hover:bg-white/5",
         FOCUS,
       )}
     >
@@ -240,7 +252,7 @@ export function TicketHeader({
             type="button"
             onClick={() => onTransition("reopened")}
             className={clsx(
-              "hidden h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs font-semibold text-white ring-1 ring-white/40 ring-inset transition-colors duration-150 hover:bg-white/10 sm:inline-flex",
+              "hidden h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs font-semibold text-white ring-1 ring-white/40 ring-inset transition-colors duration-150 hover:bg-white/10 sm:inline-flex dark:hover:bg-white/5",
               FOCUS,
             )}
           >

@@ -216,6 +216,14 @@ export function TicketEditorDialog({
   // O efeito não depende de onClose: se dependesse, rodaria de novo a cada render de quem abriu e
   // tiraria o foco do campo que está sendo editado.
   const close = useEffectEvent(() => onClose());
+  // 403 na releitura (a OS passou para outra fila, o acesso mudou): a OS guardada no cache não vale
+  // mais. O editor sai, como na página, e o rascunho que não pode mais ser salvo não segura o Fechar.
+  const denied = forbiddenCode(ticket.error);
+  const shown = ticket.data ? { code: ticket.data.code, title: ticket.data.title, status: ticket.data.status } : preview;
+  const clearDirty = useEffectEvent(() => onDirtyChange?.(false));
+  useEffect(() => {
+    if (denied) clearDirty();
+  }, [denied]);
 
   useEffect(() => {
     // Quem abriu (o link ou o botão da lista): o foco volta para ele quando o painel fecha.
@@ -256,7 +264,13 @@ export function TicketEditorDialog({
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
-        aria-label={ticket.data ? `${ticket.data.code}: ${ticket.data.title}` : preview ? `${preview.code}: ${preview.title}` : "Abrindo a OS"}
+        aria-label={
+          denied
+            ? `${shown ? `${shown.code}: ` : ""}${denied === "QUEUE_FORBIDDEN" ? "OS de outra fila" : "Sem acesso à OS"}`
+            : shown
+              ? `${shown.code}: ${shown.title}`
+              : "Abrindo a OS"
+        }
         data-drawer
         // Celular e tablet: a tela toda. Telas largas: a lista continua à vista ao lado.
         className={clsx(
@@ -264,7 +278,10 @@ export function TicketEditorDialog({
           entering && "animate-drawer",
         )}
       >
-        {ticket.data ? (
+        {denied ? (
+          <Forbidden error={ticket.error} preview={shown} onClose={onClose} />
+        ) : ticket.data ? (
+          // Outro erro de releitura (rede, 500) mantém a OS guardada: o Salvar mostra o problema.
           <TicketEditor
             ticket={ticket.data}
             variant="dialog"
@@ -273,8 +290,6 @@ export function TicketEditorDialog({
             onClose={onClose}
             onDirtyChange={onDirtyChange}
           />
-        ) : ticket.error && forbiddenCode(ticket.error) ? (
-          <Forbidden error={ticket.error} preview={preview} onClose={onClose} />
         ) : ticket.error ? (
           <>
             {/* Com erro também há como fechar: no celular o painel cobre tudo. */}

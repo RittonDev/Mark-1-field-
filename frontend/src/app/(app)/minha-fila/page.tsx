@@ -1,6 +1,6 @@
 "use client";
 
-import { type UseQueryResult, useQuery } from "@tanstack/react-query";
+import { type UseQueryResult, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 import {
   AlarmClock,
@@ -10,9 +10,11 @@ import {
   Coffee,
   HardHat,
   Inbox,
+  KeyRound,
   Navigation,
   Plus,
   TriangleAlert,
+  Users,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -33,6 +35,7 @@ import {
 } from "@/components/operacao/hooks";
 import { CopyNowButton } from "@/components/operacao/CopyNowButton";
 import { ClaimButton, InactiveChip, LiveStatus, RefreshFailed } from "@/components/operacao/status";
+import { GrantAccessDialog } from "@/components/technicians/GrantAccessDialog";
 import { ArrivalChip, OnsiteBar } from "@/components/ticket/FieldClock";
 import { MessagesButton } from "@/components/ticket/MessagesPanel";
 import { QuickEditButton } from "@/components/ticket/QuickEditButton";
@@ -54,7 +57,7 @@ import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canManageTickets } from "@/lib/constants";
 import { formatTime, initials } from "@/lib/format";
-import { forbiddenCode, useQueueScope } from "@/lib/permissions";
+import { forbiddenCode, useCan, useQueueScope } from "@/lib/permissions";
 import type {
   MyQueue,
   Page,
@@ -65,6 +68,7 @@ import type {
   QueuesOut,
   TicketListItem,
   TicketStatus,
+  UserRef,
   UUID,
 } from "@/lib/types";
 
@@ -79,15 +83,19 @@ const SECTIONS: { key: QueueSection; title: string; hint: string }[] = [
   { key: "waiting", title: "Aguardando", hint: "Pendente do cliente ou de fornecedor" },
   { key: "unscheduled", title: "Sem agenda", hint: "Abertas, ainda sem visita marcada" },
   { key: "upcoming", title: "Próximos dias", hint: "Já agendadas" },
-  { key: "done", title: "Concluídas hoje", hint: "Resolvidas ou encerradas hoje" },
+  { key: "done", title: "Concluídas hoje", hint: "Resolvidas hoje" },
 ];
 
 /** Antes de começar a visita: só aí o horário vencido é atraso (pausada ou em campo não conta). */
 const NOT_STARTED: TicketStatus[] = ["new", "triage", "assigned", "scheduled", "reopened"];
+/** Atraso só 30 min depois do horário, como o "Atrasada" da API e a Início. */
+const LATE_AFTER_MS = 30 * 60_000;
 
 /** Linha da fila: a OS da fila (com seção e motivos) ou uma OS da lista "sem analista". */
 type Row = TicketListItem & Partial<Pick<QueueItem, "section" | "reasons">>;
 type Claim = { busy: boolean; onClaim: () => void } | null;
+/** "Liberar acesso" do técnico sem acesso ao app (só com Técnicos: Editar); null sem o acesso. */
+type Grant = ((technician: UserRef) => void) | null;
 
 const REASON_TONE: Record<QueueReason["tone"], string> = {
   danger: "bg-red-50 text-red-700 ring-red-200 dark:bg-red-500/10 dark:text-red-300 dark:ring-red-500/25",
@@ -127,6 +135,7 @@ function Kpi({
   index,
   onClick,
   href,
+  note,
 }: {
   label: string;
   /** null enquanto carrega. */
@@ -136,6 +145,8 @@ function Kpi({
   index: number;
   onClick?: () => void;
   href?: string;
+  /** Linha a mais embaixo do rótulo (ex.: "+2 que você executa"). */
+  note?: string | null;
 }) {
   const interactive = value !== null && value > 0 && Boolean(onClick || href);
   const className = clsx(
@@ -168,6 +179,7 @@ function Kpi({
           />
         )}
         <span className="mt-1 block text-xs leading-snug font-medium text-ink-muted">{label}</span>
+        {note ? <span className="mt-0.5 block text-[11px] leading-snug text-ink-muted">{note}</span> : null}
       </span>
     </>
   );
@@ -230,11 +242,15 @@ function Reasons({ ticketId, reasons }: { ticketId: UUID; reasons: QueueReason[]
   );
 }
 
-/** Técnico da visita (quem vai junto como +N). Sem os motivos da fila, avisa do técnico inativo. */
-function Technician({ item, flagInactive }: { item: TicketListItem; flagInactive: boolean }) {
+/**
+ * Técnico da visita (quem vai junto como +N). Sem os motivos da fila, avisa do técnico sem acesso ao app.
+ * Com Técnicos: Editar, o técnico sem acesso ganha o "Liberar acesso" (OS em aberto).
+ */
+function Technician({ item, flagInactive, onGrant }: { item: TicketListItem; flagInactive: boolean; onGrant?: Grant }) {
   const technician = item.assignee && item.assignee.role === "technician" ? item.assignee : null;
+  const locked = technician?.is_active === false;
   return (
-    <span className="inline-flex min-w-0 items-center gap-1">
+    <span className="inline-flex min-w-0 flex-wrap items-center gap-1">
       <HardHat className="size-3.5 shrink-0 text-ink-subtle" />
       {technician ? (
         <span className="truncate">{technician.name}</span>
@@ -244,7 +260,22 @@ function Technician({ item, flagInactive }: { item: TicketListItem; flagInactive
       {item.helpers?.length ? (
         <span title={`Vai junto: ${item.helpers.map((h) => h.name).join(", ")}`}>+{item.helpers.length}</span>
       ) : null}
-      {flagInactive && technician?.is_active === false ? <InactiveChip /> : null}
+      {flagInactive && locked ? <InactiveChip /> : null}
+      {technician && locked && onGrant && isOpenStatus(item.status) ? (
+        <button
+          type="button"
+          onClick={() => onGrant(technician)}
+          aria-label={`Liberar o acesso de ${technician.name} ao app`}
+          title="Libera o acesso ao app e gera a senha provisória"
+          className={clsx(
+            "ml-0.5 inline-flex items-center gap-1 rounded-md px-1.5 py-px text-[11px] font-semibold text-brand-ink ring-1 ring-brand/25 ring-inset",
+            "transition-colors hover:bg-brand-soft focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none",
+          )}
+        >
+          <KeyRound aria-hidden className="size-3" />
+          Liberar acesso
+        </button>
+      ) : null}
     </span>
   );
 }
@@ -289,7 +320,19 @@ function Avatar({ name, className }: { name: string; className?: string }) {
   );
 }
 
-function QueueRow({ item, today, claim, quickText = false }: { item: Row; today: string; claim: Claim; quickText?: boolean }) {
+function QueueRow({
+  item,
+  today,
+  claim,
+  quickText = false,
+  onGrant,
+}: {
+  item: Row;
+  today: string;
+  claim: Claim;
+  quickText?: boolean;
+  onGrant?: Grant;
+}) {
   const loc = item.location;
   const place = [item.customer?.name, loc?.name, loc?.city].filter(Boolean).join(" · ");
   const done = item.section === "done" || !isOpenStatus(item.status);
@@ -314,7 +357,7 @@ function QueueRow({ item, today, claim, quickText = false }: { item: Row; today:
               <span className="truncate">{place}</span>
             </span>
           ) : null}
-          <Technician item={item} flagInactive={!item.reasons} />
+          <Technician item={item} flagInactive={!item.reasons} onGrant={onGrant} />
           {item.scheduled_start && item.section !== "today" ? (
             <span className="inline-flex items-center gap-1 tabular-nums">
               <CalendarClock className="size-3.5 shrink-0 text-ink-subtle" />
@@ -327,7 +370,11 @@ function QueueRow({ item, today, claim, quickText = false }: { item: Row; today:
           {done && item.resolved_at ? (
             <span className="inline-flex items-center gap-1 tabular-nums">
               <CheckCircle2 className="size-3.5 shrink-0 text-ink-subtle" />
-              Concluída {formatTime(item.resolved_at)}
+              {/* De outro dia (a fila de outra data), com o dia junto da hora. */}
+              Concluída{" "}
+              {operationDay(item.resolved_at) === today
+                ? formatTime(item.resolved_at)
+                : `${shortDay(item.resolved_at)} ${formatTime(item.resolved_at)}`}
             </span>
           ) : null}
         </div>
@@ -355,8 +402,9 @@ function TodayTimeline({ items, claimFor }: { items: QueueItem[]; claimFor: (ite
     <ol className="relative px-4 py-3 sm:px-5">
       {items.map((item) => {
         const start = item.scheduled_start ? new Date(item.scheduled_start).getTime() : null;
-        // Atraso só antes de começar: a OS já atendida e pausada (aguardando) não está "atrasada".
-        const past = start !== null && start < now && NOT_STARTED.includes(item.status) && !item.arrived_at;
+        // Atraso só antes de começar e passada a tolerância: a OS já atendida e pausada (aguardando) não
+        // está "atrasada".
+        const past = start !== null && start + LATE_AFTER_MS < now && NOT_STARTED.includes(item.status) && !item.arrived_at;
         return (
           <li key={item.id} className="group relative flex gap-4 pb-4 last:pb-0">
             <div className="w-12 shrink-0 pt-0.5 text-right">
@@ -429,6 +477,8 @@ function AttentionCount({ value }: { value: number }) {
 /**
  * Filas dos analistas (abertas e alertas de cada um) e as OS sem analista. Um clique abre a fila.
  * Com "Somente a própria fila", a API manda só a linha de quem vê (e a "Sem analista", se ela vê).
+ * A linha de quem vê ("Você") fica no topo, com o nome da conta no title e no aria-label ("Você" e uma
+ * conta chamada "Administrador" podem ser pessoas diferentes). Embaixo, a soma das linhas ("Equipe").
  */
 function TeamQueues({
   meId,
@@ -447,8 +497,11 @@ function TeamQueues({
 }) {
   const own = scope.scope === "own";
   // A resposta já vem filtrada; o filtro daqui só cobre a lista guardada de antes de o acesso mudar.
-  const rows = (queues.data?.queues ?? []).filter((q) => !own || q.user.id === meId);
+  const listed = (queues.data?.queues ?? []).filter((q) => !own || q.user.id === meId);
+  const rows = [...listed.filter((q) => q.user.id === meId), ...listed.filter((q) => q.user.id !== meId)];
   const unowned = own && !scope.unowned ? null : queues.data?.unowned;
+  // A soma (TeamQueues.total) só quando há mais de uma linha: com uma, repetiria a própria.
+  const total = rows.length + (unowned ? 1 : 0) > 1 ? queues.data?.total : null;
   return (
     <Card>
       <CardHeader title="Filas da equipe" actions={<span className="text-[11px] text-ink-muted">abertas · atenção</span>} />
@@ -473,7 +526,8 @@ function TeamQueues({
                   type="button"
                   onClick={() => onPick(q.user.id)}
                   aria-pressed={selected}
-                  aria-label={`Fila de ${me ? "você" : q.user.name}: ${q.open} abertas, ${q.attention} precisam de atenção, ${q.today} hoje, ${q.in_field} em campo`}
+                  aria-label={`${me ? `Sua fila (${q.user.name})` : `Fila de ${q.user.name}`}: ${q.open} abertas, ${q.attention} precisam de atenção, ${q.today} hoje, ${q.in_field} em campo`}
+                  title={me ? q.user.name : undefined}
                   className={clsx(
                     "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors",
                     selected ? "bg-brand-soft" : "hover:bg-surface-2",
@@ -524,6 +578,25 @@ function TeamQueues({
                 </span>
                 <AttentionCount value={unowned.attention} />
               </button>
+            </li>
+          ) : null}
+          {total ? (
+            <li className="mt-1 border-t border-line pt-1">
+              <div className="flex items-center gap-2.5 px-2.5 py-2">
+                <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-surface-3 text-ink-muted">
+                  <Users aria-hidden className="size-3.5" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[13px] font-bold text-ink">{own ? "Total" : "Equipe"}</span>
+                  <span className="block text-[11px] text-ink-muted">
+                    {total.today} hoje · {total.in_field} em campo
+                  </span>
+                </span>
+                <span className="text-sm font-bold text-ink tabular-nums" title="Abertas">
+                  {total.open}
+                </span>
+                <AttentionCount value={total.attention} />
+              </div>
             </li>
           ) : null}
         </ul>
@@ -610,6 +683,18 @@ function MyQueueView() {
   // O acesso mudou com a tela aberta (a API recusou a fila do colega): a mesma tela amigável.
   const blocked = outsideScope || (!mine && forbiddenCode(queue.error) === "QUEUE_FORBIDDEN");
   const { claim, isClaiming } = useClaim();
+  // "Liberar acesso" do técnico sem acesso ao app: com Técnicos: Editar (a API confere de novo). O diálogo
+  // fica fora das linhas: liberado o acesso, a fila relê e o motivo some, mas a senha continua na tela.
+  const queryClient = useQueryClient();
+  const canGrant = useCan("base.technicians", "edit");
+  // O atalho para Atividades do dia só com a tela (sem ela, o link levaria a "Sem acesso").
+  const canDay = useCan("operation.day");
+  const [granting, setGranting] = useState<UserRef | null>(null);
+  const onGrant: Grant = canGrant ? setGranting : null;
+  const closeGrant = () => {
+    setGranting(null);
+    void queryClient.invalidateQueries({ queryKey: ["tickets"] });
+  };
 
   const grouped = useMemo(() => {
     const map = new Map<QueueSection, QueueItem[]>();
@@ -619,22 +704,6 @@ function MyQueueView() {
       map.set(item.section, list);
     }
     return map;
-  }, [queue.data]);
-
-  // Mesmas regras das filas da equipe (services/queues.py): "hoje" conta toda OS do dia que não foi
-  // concluída (inclusive atrasada ou em campo), e "atenção" soma as em campo com alerta.
-  const kpis = useMemo(() => {
-    const data = queue.data;
-    if (!data) return null;
-    let attention = 0;
-    let today = 0;
-    for (const item of data.items) {
-      if (item.section === "attention" || (item.section === "in_field" && item.reasons.some((r) => r.tone !== "info"))) {
-        attention += 1;
-      }
-      if (item.section !== "done" && item.scheduled_start && operationDay(item.scheduled_start) === data.date) today += 1;
-    }
-    return { open: data.counts.open, attention, today, inField: data.counts.in_field, done: data.counts.done };
   }, [queue.data]);
 
   if (user && !allowed) return null;
@@ -707,7 +776,7 @@ function MyQueueView() {
       ) : (
         <ul className="divide-y divide-line">
           {orphanItems.map((item) => (
-            <QueueRow key={item.id} item={item} today={today} claim={claimFor(item)} />
+            <QueueRow key={item.id} item={item} today={today} claim={claimFor(item)} onGrant={onGrant} />
           ))}
         </ul>
       )}
@@ -761,7 +830,7 @@ function MyQueueView() {
               }
               description={section.hint}
               actions={
-                section.key === "today" ? (
+                section.key === "today" && canDay ? (
                   <Link href="/dia" className="text-xs font-medium text-ink-muted hover:text-brand">
                     Atividades do dia
                   </Link>
@@ -773,7 +842,7 @@ function MyQueueView() {
             ) : (
               <ul className="divide-y divide-line">
                 {items.map((item) => (
-                  <QueueRow key={item.id} item={item} today={today} claim={claimFor(item)} quickText />
+                  <QueueRow key={item.id} item={item} today={today} claim={claimFor(item)} onGrant={onGrant} quickText />
                 ))}
               </ul>
             )}
@@ -782,6 +851,11 @@ function MyQueueView() {
       );
     })
   );
+  // Fila maior que a lista (500): a lista fica com as de prazo mais apertado; os números contam todas.
+  const cut = queue.data?.truncated && !unowned && !blocked ? queue.data : null;
+  const queueHref = ownerId ? `/chamados?owner_id=${ownerId}&open_only=true` : undefined;
+  const executing = queue.data?.executing_only ?? 0;
+  const counts = queue.data && !unowned ? queue.data.counts : null;
 
   return (
     <div className="mx-auto max-w-7xl">
@@ -809,61 +883,97 @@ function MyQueueView() {
       ) : null}
 
       {unowned || blocked || (active.error && !active.hasData) ? null : (
-        <div className="stagger mb-6 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
-          <Kpi
-            index={0}
-            label="Na fila"
-            value={kpis?.open ?? null}
-            icon={Inbox}
-            href={mine ? "/chamados?mine=true" : `/chamados?owner_id=${ownerId}`}
-          />
-          <Kpi
-            index={1}
-            label="Precisam de atenção"
-            value={kpis?.attention ?? null}
-            icon={TriangleAlert}
-            alert={(kpis?.attention ?? 0) > 0}
-            onClick={() => reveal(["attention", "in_field"])}
-          />
-          <Kpi
-            index={2}
-            label="Agendadas hoje"
-            value={kpis?.today ?? null}
-            icon={CalendarClock}
-            onClick={() => reveal(["today", "attention", "in_field"])}
-          />
-          <Kpi
-            index={3}
-            label="Em campo agora"
-            value={kpis?.inField ?? null}
-            icon={Navigation}
-            onClick={() => reveal(["in_field"])}
-          />
-          <Kpi
-            index={4}
-            label="Concluídas hoje"
-            value={kpis?.done ?? null}
-            icon={CheckCircle2}
-            onClick={() => reveal(["done"])}
-          />
-        </div>
+        // Os cartões contam a fila aberta na tela (a sua ou a do colega), pelo analista responsável: o mesmo
+        // número da linha dela em "Filas da equipe".
+        <section aria-labelledby="fila-numeros" className="mb-6">
+          <SectionTitle
+            as="h2"
+            wrap
+            className="mb-2"
+            aside={<span className="text-[11px] text-ink-muted">Pelo analista responsável</span>}
+          >
+            <span id="fila-numeros">{mine ? "Sua fila" : `Fila de ${colleague?.name ?? "outro analista"}`}</span>
+          </SectionTitle>
+          <div className="stagger grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+            <Kpi
+              index={0}
+              label="Na fila"
+              value={counts?.open ?? null}
+              icon={Inbox}
+              href={queueHref}
+              note={
+                executing > 0
+                  ? `+${executing} que ${mine ? "você executa" : `${(colleague?.name ?? "o analista").split(" ")[0]} executa`}`
+                  : null
+              }
+            />
+            <Kpi
+              index={1}
+              label="Precisam de atenção"
+              value={counts?.attention ?? null}
+              icon={TriangleAlert}
+              alert={(counts?.attention ?? 0) > 0}
+              onClick={() => reveal(["attention", "in_field"])}
+            />
+            <Kpi
+              index={2}
+              label="Agendadas hoje"
+              value={counts?.today ?? null}
+              icon={CalendarClock}
+              onClick={() => reveal(["today", "attention", "in_field"])}
+            />
+            <Kpi
+              index={3}
+              label="Em campo agora"
+              value={counts?.in_field ?? null}
+              icon={Navigation}
+              onClick={() => reveal(["in_field"])}
+            />
+            <Kpi
+              index={4}
+              label="Concluídas hoje"
+              value={counts?.done ?? null}
+              icon={CheckCircle2}
+              onClick={() => reveal(["done"])}
+            />
+          </div>
+        </section>
       )}
 
-      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_300px]">
-        <div className="flex flex-col gap-5">{main}</div>
+      {/* grid-cols-1 (minmax(0, 1fr)): sem ela, a coluna única cresce até o texto que não quebra (cliente e
+          loja de uma linha) e a página rola de lado no celular. */}
+      <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="flex flex-col gap-5">
+          {cut ? (
+            <p className="rounded-xl border border-line bg-surface px-4 py-2.5 text-xs text-ink-muted shadow-elev-1">
+              Mostrando {cut.items.length} de {cut.total ?? cut.items.length} OS: as em aberto de prazo mais apertado primeiro.
+              {queueHref ? (
+                <>
+                  {" "}
+                  <Link href={queueHref} className="font-semibold text-brand-ink underline-offset-2 hover:underline">
+                    Ver todas em Chamados
+                  </Link>
+                </>
+              ) : null}
+            </p>
+          ) : null}
+          {main}
+        </div>
 
         <aside className="flex flex-col gap-4 xl:sticky xl:top-20">
           {meId ? <TeamQueues meId={meId} viewing={viewing ?? meId} queues={queues} scope={scope} onPick={pick} /> : null}
           <Card className="p-4">
             <SectionTitle>Como a fila se organiza</SectionTitle>
             <p className="mt-2 text-xs leading-relaxed text-ink-muted">
-              Entram na fila as OS em que o analista é o responsável ou o executor. Primeiro o que precisa de ação (prazo,
-              técnico, atraso), depois o que está em campo, a agenda de hoje, o que aguarda, o que está sem agenda, os
-              próximos dias e as concluídas hoje.
+              Entram na fila as OS em que o analista é o responsável ou o executor. Os números do topo contam as em que ele
+              é o responsável, como a linha dele em Filas da equipe. Primeiro o que precisa de ação (prazo, técnico, atraso
+              de mais de 30 min, OS parada em campo há mais de 12 h), depois o que está em campo, a agenda de hoje, o que
+              aguarda, o que está sem agenda, os próximos dias e as concluídas hoje.
             </p>
           </Card>
         </aside>
       </div>
+      {granting && canGrant ? <GrantAccessDialog technician={granting} onClose={closeGrant} /> : null}
     </div>
   );
 }

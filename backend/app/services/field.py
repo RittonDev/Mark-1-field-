@@ -6,17 +6,23 @@
   autorização do cliente registrada (função retirada), o relógio começa na autorização.
 - Permanência: cada chamado inclui até 4 horas de técnico na loja, somando as visitas (o tempo
   em "Em atendimento"). A cada entrada o limite é o que sobrou dessas horas.
+
+Aqui também fica a regra única de "em campo agora" (a caminho ou em atendimento há até 12 h),
+usada pelos cartões, pelas filas, pelas Atividades do dia e pela Início.
 """
 
 import unicodedata
+import uuid
+from collections.abc import Collection
 from datetime import datetime, timedelta
 from typing import Any
 
 from pydantic import ValidationError
+from sqlalchemy import ColumnElement, and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.enums import AuthorizationStatus, TicketStatus
-from app.models import Location, SystemSetting, Ticket, User
+from app.core.enums import AuthorizationStatus, TicketEventType, TicketStatus
+from app.models import Location, SystemSetting, Ticket, TicketEvent, User
 from app.schemas.field import FieldRules
 
 RULES_KEY = "field.rules"
@@ -26,6 +32,11 @@ AT_RISK = timedelta(minutes=60)
 SCHEDULE_TOLERANCE = timedelta(minutes=30)
 S = TicketStatus
 FINISHED = (S.RESOLVED, S.CLOSED, S.CANCELLED)
+# Em campo: a caminho ou em atendimento.
+FIELD = (S.EN_ROUTE, S.IN_PROGRESS)
+# Em campo há mais que isto é dado parado (esqueceram de concluir ou de voltar a OS): não conta
+# como "em campo agora" e vira alerta.
+FIELD_STUCK_AFTER = timedelta(hours=12)
 
 # As 27 capitais (cidade normalizada, UF).
 CAPITALS = frozenset(
@@ -204,3 +215,51 @@ def onsite_status(t: Any, now: datetime) -> str | None:
     if warning is not None and moment >= warning:
         return "warning"
     return "ok"
+
+
+# ------------------------------------------------------------------ em campo agora (regra única)
+
+
+def field_since() -> ColumnElement[Any]:
+    """Desde quando a OS está em campo: a última ida para "Em deslocamento" ou "Em atendimento" no
+    histórico; sem esse evento (OS importada), o início do atendimento, a chegada ou a última
+    mudança. Fora de campo é nulo: o CASE só roda a subconsulta nas OS em campo."""
+    moved = (
+        select(func.max(TicketEvent.created_at))
+        .where(
+            TicketEvent.ticket_id == Ticket.id,
+            TicketEvent.event_type == TicketEventType.STATUS_CHANGED,
+            TicketEvent.to_value.in_([s.value for s in FIELD]),
+        )
+        .correlate(Ticket)
+        .scalar_subquery()
+    )
+    since = func.coalesce(moved, Ticket.work_started_at, Ticket.arrived_at, Ticket.updated_at)
+    return case((Ticket.status.in_(FIELD), since))
+
+
+def in_field_now_clause(now: datetime) -> ColumnElement[bool]:
+    """Em campo agora: a caminho ou em atendimento há até 12 h."""
+    return and_(Ticket.status.in_(FIELD), field_since() >= now - FIELD_STUCK_AFTER)
+
+
+def field_stuck_clause(now: datetime) -> ColumnElement[bool]:
+    """Parada em campo: a caminho ou em atendimento há mais de 12 h."""
+    return field_since() < now - FIELD_STUCK_AFTER
+
+
+def field_stuck(t: Any, since: datetime | None, now: datetime) -> bool:
+    """A mesma regra para uma OS (do ORM ou linha de consulta), com o `field_since` já lido."""
+    return t.status in FIELD and since is not None and now - since > FIELD_STUCK_AFTER
+
+
+async def field_since_of(
+    db: AsyncSession, ticket_ids: Collection[uuid.UUID]
+) -> dict[uuid.UUID, datetime]:
+    """`field_since` das OS em campo entre estas, numa consulta só (as outras ficam de fora)."""
+    if not ticket_ids:
+        return {}
+    rows = await db.execute(
+        select(Ticket.id, field_since()).where(Ticket.id.in_(ticket_ids), Ticket.status.in_(FIELD))
+    )
+    return {ticket_id: since for ticket_id, since in rows.all() if since is not None}

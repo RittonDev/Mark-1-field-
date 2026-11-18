@@ -1,7 +1,8 @@
 "use client";
 
 import clsx from "clsx";
-import { CalendarClock, ChevronLeft, ChevronRight, Navigation, Search, X } from "lucide-react";
+import { CalendarClock, ChevronLeft, ChevronRight, Navigation, Search, TriangleAlert, X } from "lucide-react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { CountUp } from "@/components/motion";
@@ -459,6 +460,9 @@ function DayView() {
     setSearch("");
   };
   const filterLabel = filter ? FILTERS.find((f) => f.key === filter)?.label.toLowerCase() : null;
+  // Hoje: OS a caminho ou em atendimento há mais de 12 h (dado parado). A API tira da lista e dos números;
+  // a tela avisa para alguém concluir ou corrigir (a mesma regra da Minha fila e da Início).
+  const stuck = fresh && data?.is_today ? (data.summary.stuck_in_field ?? 0) : 0;
 
   return (
     <div className="mx-auto max-w-7xl">
@@ -544,6 +548,25 @@ function DayView() {
           </Button>
         ) : null}
       </div>
+
+      {/* Antes dos números: explica por que a OS parada não aparece em "Em deslocamento" nem "Em atendimento". */}
+      {stuck > 0 ? (
+        <p className="mb-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+          <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
+          <span>
+            <strong className="font-semibold">
+              {stuck} {stuck === 1 ? "OS parada" : "OS paradas"} em campo há mais de 12 h
+            </strong>
+            : {stuck === 1 ? "ficou" : "ficaram"} fora da lista e dos números. Conclua ou corrija a situação.{" "}
+            <Link
+              href="/chamados?status=en_route&status=in_progress&order_by=scheduled_start"
+              className="rounded font-semibold whitespace-nowrap underline underline-offset-2 hover:no-underline focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+            >
+              Ver em Chamados
+            </Link>
+          </span>
+        </p>
+      ) : null}
 
       <div role="group" aria-label="Situação" className="mb-4 flex flex-wrap items-center gap-2">
         {FILTERS.map(({ key, label, color, hint }) => {

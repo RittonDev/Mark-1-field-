@@ -198,7 +198,11 @@ class ApplicationIn(BaseModel):
     def _age(cls, v: dt.date | None) -> dt.date | None:
         if v is None:
             return None
-        today = dt.date.today()
+        # O dia da operação (Brasília): o servidor roda em UTC, e entre 21h e 24h o dia UTC já é o
+        # seguinte. Importado aqui para o schema não depender dos serviços ao carregar (ciclo).
+        from app.services.activities import local_today
+
+        today = local_today()
         age = today.year - v.year - ((today.month, today.day) < (v.month, v.day))
         if age < 18:
             raise ValueError("O cadastro é para maiores de 18 anos: confira a data de nascimento")

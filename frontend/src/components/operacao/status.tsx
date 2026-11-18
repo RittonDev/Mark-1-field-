@@ -93,18 +93,22 @@ export function LiveStatus({
   );
 }
 
-/** Técnico desativado: não entra mais no app, então a visita não acontece até alguém trocar o técnico. */
+/**
+ * Técnico inativo no cadastro = sem acesso ao app (os "inativos" do Field Control estão só sem licença e
+ * continuam na rede): ele não recebe a OS no app até alguém liberar o acesso em Técnicos ou trocar o
+ * técnico. Aviso em âmbar, não erro.
+ */
 export function InactiveChip({ className }: { className?: string }) {
   return (
     <span
-      title="Ele não entra mais no app: troque o técnico na OS"
+      title="Técnico sem acesso ao app: libere o acesso em Técnicos ou troque o técnico na OS"
       className={clsx(
-        "inline-flex shrink-0 items-center rounded-md bg-red-50 px-1.5 py-px text-[11px] font-semibold whitespace-nowrap text-red-700 ring-1 ring-red-200 ring-inset",
-        "dark:bg-red-500/10 dark:text-red-300 dark:ring-red-500/25",
+        "inline-flex shrink-0 items-center rounded-md bg-amber-50 px-1.5 py-px text-[11px] font-semibold whitespace-nowrap text-amber-800 ring-1 ring-amber-200 ring-inset",
+        "dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-500/25",
         className,
       )}
     >
-      inativo · reatribua
+      sem acesso · liberar
     </span>
   );
 }

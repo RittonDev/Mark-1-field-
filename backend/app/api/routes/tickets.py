@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, text
 
 from app.api.deps import DB, CurrentUser, StaffUser, TicketManagerUser, access_user
+from app.core import permissions
 from app.core.config import settings
 from app.core.enums import TicketPriority, TicketSource, TicketStatus, TicketType, UserRole
 from app.core.security import InvalidToken, create_download_token, decode_token
@@ -400,6 +401,15 @@ async def list_events(ticket_id: uuid.UUID, db: DB, user: TicketManagerUser) -> 
             .order_by(TicketEvent.created_at.desc())
         )
     )
+    # Valores de Pagamentos, Custos extras e Orçamentos só para quem tem a tela, como no
+    # detalhe (que já sai sem payouts e expenses). O evento sai inteiro, porque from_value e
+    # to_value também levam o valor.
+    acc = permissions.of(user)
+    events = [
+        e
+        for e in events
+        if (item := permissions.HISTORY_ITEMS.get(e.event_type.value)) is None or acc.can(item)
+    ]
     if user.is_staff:
         return events
     return [

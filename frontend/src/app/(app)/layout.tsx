@@ -11,13 +11,13 @@ import { NoAccess } from "@/components/NoAccess";
 import { MobileNav, Sidebar, Topbar } from "@/components/Shell";
 import { TicketPanelProvider } from "@/components/ticket/TicketPanel";
 import { canUseWeb, homePath, loginPath } from "@/lib/access";
-import { ACCESS_DENIED_EVENT, api } from "@/lib/api";
+import { ACCESS_DENIED_EVENT, type AccessDeniedDetail, api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useDocumentTitle } from "@/lib/hooks";
 import { canAccess, itemForPath } from "@/lib/permissions";
 import { RealtimeProvider } from "@/lib/realtime";
 import { sessionStore } from "@/lib/session";
-import type { User } from "@/lib/types";
+import type { AccessItemKey, User } from "@/lib/types";
 
 /** Releitura do usuário: o perfil de acesso pode mudar com a central aberta. */
 const ME_INTERVAL_MS = 5 * 60_000;
@@ -96,14 +96,37 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     if (JSON.stringify(fresh.access ?? null) !== JSON.stringify(current.access ?? null)) sessionStore.updateUser(fresh);
   }, [fresh]);
 
+  // 403 de Visualizar na própria tela aberta (o acesso mudou e o /auth/me ainda não voltou): o "Sem
+  // acesso" aparece na hora, no lugar da mensagem de erro da página. Vale para a rota e o acesso daquele
+  // momento: trocar de tela, ou o acesso relido, decide de novo.
+  const [denied, setDenied] = useState<{ path: string; item: AccessItemKey; access: unknown } | null>(null);
+  const seen = useRef<{ path: string; access: unknown }>({ path: pathname, access: user?.access });
+  const lastRecheck = useRef(0);
+  useEffect(() => {
+    seen.current = { path: pathname, access: user?.access };
+  });
+
   useEffect(() => {
     if (!central) return;
-    const recheck = () => void queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
-    window.addEventListener(ACCESS_DENIED_EVENT, recheck);
+    const onDenied = (e: Event) => {
+      const detail = (e as CustomEvent<AccessDeniedDetail | null>).detail;
+      const { path, access } = seen.current;
+      const screen = itemForPath(path);
+      if (screen && detail?.required === "view" && detail.item === screen) {
+        setDenied((prev) =>
+          prev && prev.path === path && prev.item === screen && prev.access === access ? prev : { path, item: screen, access },
+        );
+      }
+      // A tela faz várias buscas juntas: uma releitura do usuário basta (no máximo uma a cada 10 s).
+      if (Date.now() - lastRecheck.current < 10_000) return;
+      lastRecheck.current = Date.now();
+      void queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
+    };
+    window.addEventListener(ACCESS_DENIED_EVENT, onDenied);
     // OS recente que deixou de abrir (outra fila ou excluída) sai das recentes da busca.
     const unwatch = watchDeniedRecents(queryClient);
     return () => {
-      window.removeEventListener(ACCESS_DENIED_EVENT, recheck);
+      window.removeEventListener(ACCESS_DENIED_EVENT, onDenied);
       unwatch();
     };
   }, [central, queryClient]);
@@ -116,7 +139,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   // Tela de um módulo fora do perfil (link direto, favorito, ?next=): a tela amigável no lugar da
   // página, sem que ela chegue a buscar nada na API.
   const item = itemForPath(pathname);
-  const blocked = !!item && !canAccess(user, item);
+  const deniedHere = denied !== null && denied.path === pathname && denied.item === item && denied.access === user.access;
+  const blocked = !!item && (!canAccess(user, item) || deniedHere);
 
   return (
     <RealtimeProvider key={user.id} userId={user.id}>

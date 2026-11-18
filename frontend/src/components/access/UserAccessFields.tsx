@@ -7,7 +7,7 @@ import { AccessMatrix, type LevelPatch } from "@/components/access/AccessMatrix"
 import { Field, SectionTitle, Select } from "@/components/ui";
 import { errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { ACCESS_ITEM_KEYS, accessOf, LEVEL_RANK, queuesLabel, ROLE_DEFAULTS } from "@/lib/permissions";
+import { ACCESS_ITEM, ACCESS_ITEM_KEYS, accessOf, LEVEL_RANK, queuesLabel, ROLE_DEFAULTS } from "@/lib/permissions";
 import { useAccessCatalog, useAccessProfiles } from "@/lib/queries";
 import type {
   AccessItemKey,
@@ -16,6 +16,7 @@ import type {
   AccessProfile,
   EffectiveAccess,
   QueueScope,
+  User,
   UserAccessIn,
   UserRole,
   UUID,
@@ -86,6 +87,61 @@ function adjustedCount(draft: AccessDraft, base: Levels): number {
 
 const higher = (a: AccessLevel, b: AccessLevel) => (LEVEL_RANK[a] >= LEVEL_RANK[b] ? a : b);
 
+/**
+ * Teto de quem edita, como a API confere (ACCESS_CAP): o supervisor não dá mais do que tem, mas o que a
+ * pessoa já tinha (`before`) continua valendo. null: sem teto (administrador).
+ */
+interface Cap {
+  levels: Levels;
+  /** A fila cabe no teto? */
+  queue: (scope: QueueScope, unowned: boolean) => boolean;
+}
+
+function capOf(me: User | null | undefined, before: EffectiveAccess | null): Cap | null {
+  const mine = accessOf(me);
+  if (!mine || mine.full) return null;
+  const levels = Object.fromEntries(
+    ACCESS_ITEM_KEYS.map((k) => {
+      const own = mine.items[k] ?? "none";
+      return [k, before ? higher(own, before.items[k] ?? "none") : own];
+    }),
+  ) as Levels;
+  const queue = (scope: QueueScope, unowned: boolean) => {
+    if (mine.queues.scope === "all") return true;
+    if (scope === "all") return before?.queues.scope === "all";
+    return !unowned || mine.queues.unowned || !!before?.queues.unowned;
+  };
+  return { levels, queue };
+}
+
+/**
+ * O que o acesso escolhido passa do teto de quem edita (o mesmo que a API recusa com ACCESS_CAP): as
+ * telas acima do teto e se a fila passa. Vazio para o administrador e para papéis sem perfil.
+ */
+export function capExcess(
+  me: User | null | undefined,
+  profiles: AccessProfile[] | undefined,
+  role: UserRole,
+  draft: AccessDraft,
+  before: EffectiveAccess | null,
+): { items: AccessItemKey[]; queue: boolean } {
+  const cap = usesAccessProfile(role) ? capOf(me, before) : null;
+  if (!cap) return { items: [], queue: false };
+  const profile = profileFor(profiles, role, draft.profileId);
+  const value = { ...baseLevels(profile, role), ...(draft.overrides?.items ?? {}) } as Levels;
+  const queue = effectiveQueue(profile, draft.overrides);
+  return {
+    items: ACCESS_ITEM_KEYS.filter((k) => LEVEL_RANK[value[k]] > LEVEL_RANK[cap.levels[k]]),
+    queue: !cap.queue(queue.scope, queue.unowned),
+  };
+}
+
+/** "Pagamentos, Calendário e as filas que vê". */
+function excessText(excess: { items: AccessItemKey[]; queue: boolean }): string {
+  const parts = [...excess.items.map((k) => ACCESS_ITEM[k].label), ...(excess.queue ? ["as filas que vê"] : [])];
+  return parts.length > 1 ? `${parts.slice(0, -1).join(", ")} e ${parts[parts.length - 1]}` : (parts[0] ?? "");
+}
+
 /** "Analista · todas as filas · 2 telas ajustadas". */
 function summaryOf(profile: AccessProfile, queue: { scope: QueueScope; unowned: boolean }, count: number): string {
   const parts = [profile.name, queuesLabel(queue).toLowerCase()];
@@ -140,20 +196,14 @@ export function UserAccessFields({
   const count = adjustedCount(draft, base);
 
   // Teto de quem edita: o supervisor não dá mais do que tem (nem tira de quem já tinha).
-  const mine = accessOf(me);
-  const capped = !!mine && !mine.full;
-  const capOf = (k: AccessItemKey): AccessLevel => {
-    const own = mine?.items[k] ?? "none";
-    return before ? higher(own, before.items[k] ?? "none") : own;
-  };
-  const cap: Partial<Levels> | undefined = capped ? Object.fromEntries(ACCESS_ITEM_KEYS.map((k) => [k, capOf(k)])) : undefined;
-  const exceeds = (p: AccessProfile) => capped && ACCESS_ITEM_KEYS.some((k) => LEVEL_RANK[p.effective_items[k]] > LEVEL_RANK[capOf(k)]);
-  const mineQueue = mine && !mine.full ? mine.queues : { scope: "all" as QueueScope, unowned: true };
-  const queueAllowed = (scope: QueueScope, unowned: boolean) => {
-    if (!capped || mineQueue.scope === "all") return true;
-    if (scope === "all") return before?.queues.scope === "all";
-    return !unowned || mineQueue.unowned || !!before?.queues.unowned;
-  };
+  const capped = capOf(me, before);
+  const cap = capped?.levels;
+  const exceeds = (p: AccessProfile) => !!cap && ACCESS_ITEM_KEYS.some((k) => LEVEL_RANK[p.effective_items[k]] > LEVEL_RANK[cap[k]]);
+  const queueAllowed = (scope: QueueScope, unowned: boolean) => !capped || capped.queue(scope, unowned);
+  const ownProfileQueue = profileQueue(profile);
+  // O resultado inteiro (perfil, ajustes e fila), como a API confere ao salvar: cobre também o perfil
+  // padrão, que já vem marcado no cadastro novo.
+  const excess = capExcess(me, list, role, draft, before);
 
   const queue = effectiveQueue(profile, draft.overrides);
   const queueChoice: QueueChoice =
@@ -211,7 +261,9 @@ export function UserAccessFields({
         </Field>
         <Field label="Filas que vê">
           <Select value={queueChoice} onChange={(e) => setQueue(e.target.value as QueueChoice)} disabled={disabled}>
-            <option value="profile">Igual ao perfil ({queuesLabel(profileQueue(profile)).toLowerCase()})</option>
+            <option value="profile" disabled={queueChoice !== "profile" && !queueAllowed(ownProfileQueue.scope, ownProfileQueue.unowned)}>
+              Igual ao perfil ({queuesLabel(ownProfileQueue).toLowerCase()})
+            </option>
             <option value="all" disabled={!queueAllowed("all", true)}>
               Todas as filas da equipe
             </option>
@@ -221,6 +273,15 @@ export function UserAccessFields({
             <option value="own">Só a própria fila</option>
           </Select>
         </Field>
+      </div>
+      {/* O Salvar fica travado enquanto passar (a API recusaria com "Você não pode dar mais acesso do que tem"). */}
+      <div aria-live="polite">
+        {excess.items.length || excess.queue ? (
+          <p className="rounded-lg border border-amber-300/60 bg-amber-50 px-3 py-2.5 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+            <span className="font-semibold">Passa do seu acesso: {excessText(excess)}.</span> Escolha outro perfil ou ajuste as
+            filas e as telas.
+          </p>
+        ) : null}
       </div>
 
       <div className="rounded-lg border border-line">

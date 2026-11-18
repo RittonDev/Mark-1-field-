@@ -733,7 +733,8 @@ async def test_day_activities_carry_over_and_rescheduled(
 ) -> None:
     tech_h, tech_id = world.tech.headers, str(world.tech.user.id)
 
-    # Em atendimento desde ontem: aparece hoje (está em campo) com o início real de ontem.
+    # Em atendimento desde ontem (24 h): passou das 12 h, é dado parado (services/field.py). Sai da
+    # lista de hoje e conta no resumo (o caso dentro das 12 h está em test_field_presence.py).
     b = await create(client, world, title="Em campo desde ontem", assignee_id=tech_id)
     b = await transition(client, tech_h, b, "en_route")
     b = await transition(client, tech_h, b, "in_progress")
@@ -755,9 +756,8 @@ async def test_day_activities_carry_over_and_rescheduled(
 
     today = (await client.get(f"{API}/activities/day", headers=world.analyst.headers)).json()
     by_id = {x["ticket"]["id"]: x for x in today["activities"]}
-    assert by_id[b["id"]]["state"] == "in_progress"
-    assert by_id[b["id"]]["started_at"] is not None
-    assert by_id[b["id"]]["arrived_at"] is None  # a chegada não foi hoje
+    assert b["id"] not in by_id
+    assert today["summary"]["stuck_in_field"] == 1
     assert by_id[c["id"]]["state"] == "rescheduled"
     assert today["summary"]["rescheduled"] == 1
 

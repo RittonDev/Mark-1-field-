@@ -144,6 +144,9 @@ class TicketListItem(ORMModel):
     first_response_at: datetime | None
     resolved_at: datetime | None
     sla_paused_at: datetime | None
+    # Prazo de solução encerrado antes da conclusão (na OS migrada, a visita com que o Field
+    # Control deu o prazo como cumprido, no prazo ou fora dele): o relógio de solução para aí.
+    resolution_sla_met_at: datetime | None = None
     # Visitas improdutivas: a OS voltou para reagendar (contador para relatórios e a lista).
     unproductive_count: int = 0
     last_unproductive_at: datetime | None = None

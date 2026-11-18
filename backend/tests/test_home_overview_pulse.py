@@ -323,8 +323,9 @@ async def test_focus_counts_each_ticket_once(
     ]
     assert datetime.fromisoformat(stuck_items[0]["when"]) == ago(hours=14)
     assert g["due_soon"]["items"][0]["reason"] == "Vence hoje às 20:00"
-    # Os indicadores seguem sem o corte de 30 dias: as duas com SLA estourado.
-    assert data["kpis"]["late"] == 2 and data["kpis"]["in_field_now"] == 3
+    # Os indicadores seguem sem o corte de 30 dias: as duas com SLA estourado. Em campo agora é a
+    # regra única (services/field.py, até 12 h): as duas esquecidas ficam só no grupo acima.
+    assert data["kpis"]["late"] == 2 and data["kpis"]["in_field_now"] == 1
 
 
 @requires_db

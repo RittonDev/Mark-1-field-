@@ -1,10 +1,16 @@
 """Homologação: link de convite, ficha pública do técnico e análise pela gestão."""
 
+from datetime import date
+
+import pytest
 from httpx import AsyncClient
+from pydantic import ValidationError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.config import settings
+from app.schemas.onboarding import ApplicationIn
+from app.services import activities
 from tests.conftest import World, requires_db
 
 pytestmark = requires_db
@@ -166,3 +172,13 @@ async def test_reject_and_revoke(client: AsyncClient, world: World) -> None:
         i["state"] for i in (await client.get(f"{API}/onboarding/invites", headers=an)).json()
     }
     assert states == {"revoked"}
+
+
+def test_age_counts_on_the_operation_day(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A idade conta no dia da operação (Brasília), não no dia UTC do servidor: entre 21h e 24h o
+    UTC já é o dia seguinte e o técnico que faz 18 anos amanhã passava."""
+    monkeypatch.setattr(activities, "local_today", lambda: date(2030, 1, 10))
+    ok = ApplicationIn.model_validate(ficha(birth_date="2012-01-10"))  # 18 anos hoje
+    assert ok.birth_date == date(2012, 1, 10)
+    with pytest.raises(ValidationError, match="maiores de 18 anos"):
+        ApplicationIn.model_validate(ficha(birth_date="2012-01-11"))  # faz 18 amanhã

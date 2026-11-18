@@ -58,5 +58,6 @@ class MonthlyReport(BaseModel):
     customers: list[CountRef]
     technicians: list[CountRef]
     unproductive_reasons: list[CountRef]
-    expenses_total: Money
-    quotes_approved_total: Money
+    # null sem a tela de Custos extras / Orçamentos (o total nem é calculado).
+    expenses_total: Money | None = None
+    quotes_approved_total: Money | None = None

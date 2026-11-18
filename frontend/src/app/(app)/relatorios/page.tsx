@@ -194,8 +194,9 @@ function exportMonthly(data: MonthlyReport, partial: boolean, payouts: PayoutLis
     [],
     ["Indicador", monthName(data.month), `${monthName(previous)}${partial ? " (mês inteiro)" : ""}`],
     ...summaryRows(data.numbers, data.previous, partial),
-    ["Custos extras (R$)", csvMoney(data.expenses_total), ""],
-    ["Orçamentos aprovados (R$)", csvMoney(data.quotes_approved_total), ""],
+    // Sem a tela de Custos extras ou de Orçamentos, a API manda o total null: a linha sai.
+    ...(data.expenses_total != null ? [["Custos extras (R$)", csvMoney(data.expenses_total), ""]] : []),
+    ...(data.quotes_approved_total != null ? [["Orçamentos aprovados (R$)", csvMoney(data.quotes_approved_total), ""]] : []),
     ...(payouts
       ? [
           ["Valor dos técnicos, pago (R$)", csvMoney(payouts.paid), ""],
@@ -667,6 +668,9 @@ function MonthlyView({
   // Com um cliente escolhido, o valor dos técnicos (de todos os clientes) não entra.
   const summary = showPayouts ? payouts.data?.summary : undefined;
   const techniciansTotal = summary ? summary.paid + summary.to_pay : 0;
+  const moneyTiles = data
+    ? Number(data.expenses_total != null) + Number(data.quotes_approved_total != null) + Number(showPayouts)
+    : 0;
 
   return (
     <div className="flex flex-col gap-4">
@@ -705,30 +709,37 @@ function MonthlyView({
             top={data.top_customer}
             scoped={Boolean(scope)}
           />
-          <div className={clsx("grid gap-3", showPayouts ? "sm:grid-cols-3" : "sm:grid-cols-2")}>
-            <StatTile
-              label="Custos extras no mês"
-              value={data.expenses_total}
-              display={formatMoney(data.expenses_total)}
-              hint="Lançados no mês, sem os recusados"
-            />
-            <StatTile
-              label="Orçamentos aprovados"
-              value={data.quotes_approved_total}
-              display={formatMoney(data.quotes_approved_total)}
-              hint="Aprovados pelo cliente no mês"
-            />
-            {showPayouts ? (
-              <StatTile
-                label="Valor dos técnicos"
-                value={techniciansTotal}
-                display={payouts.error ? "—" : formatMoney(techniciansTotal)}
-                loading={payouts.isLoading}
-                hint={summary ? `pago ${formatMoney(summary.paid)} · a pagar ${formatMoney(summary.to_pay)}` : "OS concluídas no mês"}
-                href="/pagamentos"
-              />
-            ) : null}
-          </div>
+          {/* Cada valor só com a tela dele: sem Custos extras ou Orçamentos, a API manda o total null. */}
+          {moneyTiles ? (
+            <div className={clsx("grid gap-3", moneyTiles === 3 ? "sm:grid-cols-3" : "sm:grid-cols-2")}>
+              {data.expenses_total != null ? (
+                <StatTile
+                  label="Custos extras no mês"
+                  value={data.expenses_total}
+                  display={formatMoney(data.expenses_total)}
+                  hint="Lançados no mês, sem os recusados"
+                />
+              ) : null}
+              {data.quotes_approved_total != null ? (
+                <StatTile
+                  label="Orçamentos aprovados"
+                  value={data.quotes_approved_total}
+                  display={formatMoney(data.quotes_approved_total)}
+                  hint="Aprovados pelo cliente no mês"
+                />
+              ) : null}
+              {showPayouts ? (
+                <StatTile
+                  label="Valor dos técnicos"
+                  value={techniciansTotal}
+                  display={payouts.error ? "—" : formatMoney(techniciansTotal)}
+                  loading={payouts.isLoading}
+                  hint={summary ? `pago ${formatMoney(summary.paid)} · a pagar ${formatMoney(summary.to_pay)}` : "OS concluídas no mês"}
+                  href="/pagamentos"
+                />
+              ) : null}
+            </div>
+          ) : null}
           <Card className="p-4">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <div className="flex flex-col gap-1">

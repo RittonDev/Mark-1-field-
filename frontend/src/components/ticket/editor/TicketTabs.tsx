@@ -329,7 +329,9 @@ export function TicketTabs<K extends string>({
       e.stopPropagation();
       closeMenu(true);
     } else if (e.key === "Tab") {
-      closeMenu(false);
+      // O foco volta ao "Mais" antes do Tab do navegador, que segue a partir dele. Sem isso, no painel da
+      // OS o menu sai da tela com o foco dentro, e o Tab preso no painel acharia o foco no <body>.
+      closeMenu(true);
     } else if (entries.length && ["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) {
       e.preventDefault();
       const next =

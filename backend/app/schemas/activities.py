@@ -60,6 +60,9 @@ class DaySummary(BaseModel):
     unassigned: int
     # Visitas improdutivas registradas no dia (a OS aparece com o motivo).
     unproductive: int = 0
+    # Só hoje: OS a caminho ou em atendimento há mais de 12 h (dado parado: esqueceram de concluir
+    # ou de voltar a OS). Ficam fora da lista e dos números acima; a tela avisa para corrigir.
+    stuck_in_field: int = 0
 
 
 class DayActivities(BaseModel):
