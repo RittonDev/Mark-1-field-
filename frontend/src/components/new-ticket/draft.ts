@@ -1,5 +1,6 @@
-// Estado da Nova OS e as regras que valem em qualquer mudança (trocar cliente, localização ou tipo de OS).
-// Fica num módulo próprio porque também vira o rascunho guardado na aba (sessionStorage).
+// Estado da Nova OS e as regras que valem em qualquer mudança (trocar cliente, localização, tipo de OS ou
+// categoria, com os formulários que acompanham os dois). Fica num módulo próprio porque também vira o
+// rascunho guardado na aba (sessionStorage).
 
 import type { Category, FormTemplate, Location, Project, ServiceType, Tag, TicketPriority, TicketType, UUID } from "@/lib/types";
 
