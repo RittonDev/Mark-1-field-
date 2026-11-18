@@ -145,6 +145,9 @@ function shiftDays(day: string, days: number): string {
 const needsRenew = (q: QuoteListRow, today: string) =>
   QUOTE_EDITABLE.includes(q.status) && (q.status === "expired" || Boolean(q.valid_until && q.valid_until < today));
 
+/** Na coluna Situação do orçamento que ainda daria para mexer, quando a OS dele foi cancelada. */
+const CANCELLED_TICKET = "OS cancelada: reabra a OS para mexer no orçamento";
+
 /** Quantidade e valor por situação somados na lista que veio (sem o resumo da API). */
 function countByStatus(rows: QuoteListRow[]): Record<QuoteStatus, QuoteStatusTotal> {
   const by = Object.fromEntries(CHIPS.map(({ key }) => [key, { count: 0, total: 0 }])) as Record<QuoteStatus, QuoteStatusTotal>;
@@ -484,6 +487,8 @@ function QuoteList() {
   const retry = () => void (queue ? followUp.refetch() : quotes.error ? quotes.refetch() : narrowed.refetch());
   const latest = (q: QuoteListRow | null) => (q ? (rows?.find((r) => r.id === q.id) ?? q) : null);
   const openedQuote = latest(opened);
+  // Na visualização, editar, renovar, enviar, cobrar e duplicar seguem o Editar, menos na OS cancelada.
+  const changeOpened = canEdit && openedQuote?.ticket_status !== "cancelled";
   // O diálogo do link recebe exatamente o que foi passado: a linha do clique ou a resposta do envio (que
   // traz o link novo). A linha da lista ainda pode estar sem o link até a releitura.
   const sharingQuote = sharing?.row ?? null;
@@ -665,10 +670,15 @@ function QuoteList() {
                   </thead>
                   <tbody>
                     {visible.map((q) => {
-                      const situation = situationOf(q, today);
+                      // OS cancelada: a API recusa renovar, enviar, cobrar, editar e duplicar (reabra a OS antes).
+                      const cancelledTicket = q.ticket_status === "cancelled";
+                      const situation =
+                        cancelledTicket && QUOTE_EDITABLE.includes(q.status)
+                          ? { text: CANCELLED_TICKET, reason: false, title: undefined }
+                          : situationOf(q, today);
                       const place = placeOf(q);
                       // Na fila (ou com motivo de cobrança): a ação que o motivo pede.
-                      const action = followUpAction(q, today);
+                      const action = cancelledTicket ? null : followUpAction(q, today);
                       return (
                         <tr
                           key={q.id}
@@ -722,7 +732,15 @@ function QuoteList() {
                           {canEdit ? (
                             <Td className="edit-col">
                               <span className="inline-flex items-center gap-1.5">
-                                {action === "remind" ? (
+                                {cancelledTicket ? (
+                                  (q.status === "approved" || q.status === "rejected") && q.link ? (
+                                    <RowAction label={`Link do ${q.code} (já respondido)`} onClick={() => setSharing({ row: q, mode: "share" })}>
+                                      <Link2 className="size-4" />
+                                    </RowAction>
+                                  ) : (
+                                    <span className="size-8" aria-hidden />
+                                  )
+                                ) : action === "remind" ? (
                                   <RowAction label={`Cobrar o ${q.code}`} onClick={() => setSharing({ row: q, mode: "remind" })}>
                                     <BellRing className="size-4" />
                                   </RowAction>
@@ -761,7 +779,7 @@ function QuoteList() {
                                 ) : (
                                   <span className="size-8" aria-hidden />
                                 )}
-                                {QUOTE_EDITABLE.includes(q.status) ? (
+                                {QUOTE_EDITABLE.includes(q.status) && !cancelledTicket ? (
                                   <RowAction label={`Editar o ${q.code}`} onClick={() => setEditing(q)}>
                                     <SquarePen className="size-4" />
                                   </RowAction>
@@ -791,9 +809,10 @@ function QuoteList() {
             location: openedQuote.location ?? null,
           }}
           onClose={() => setOpened(null)}
-          // Só com Visualizar: sem editar, enviar, cobrar nem duplicar (fica o PDF e o link já gerado).
+          // Só com Visualizar (ou com a OS cancelada): sem editar, enviar, cobrar nem duplicar (fica o PDF e o
+          // link já gerado).
           onEdit={
-            canEdit
+            changeOpened
               ? () => {
                   setOpened(null);
                   setEditing(openedQuote);
@@ -802,21 +821,21 @@ function QuoteList() {
           }
           // Validade vencida: a visualização oferece "Renovar" no lugar de enviar (o envio seria recusado).
           onRenew={
-            canEdit
+            changeOpened
               ? () => {
                   setOpened(null);
                   setRenewing(openedQuote);
                 }
               : undefined
           }
-          onSend={canEdit ? () => send.mutate(openedQuote) : undefined}
+          onSend={changeOpened ? () => send.mutate(openedQuote) : undefined}
           sending={send.isPending}
           onShare={() => {
             setOpened(null);
             setSharing({ row: openedQuote, mode: "share" });
           }}
           onRemind={
-            canEdit
+            changeOpened
               ? () => {
                   setOpened(null);
                   setSharing({ row: openedQuote, mode: "remind" });
@@ -824,7 +843,7 @@ function QuoteList() {
               : undefined
           }
           onDuplicate={
-            canEdit
+            changeOpened
               ? () => {
                   setOpened(null);
                   setCreating({ ticket: ticketOf(openedQuote), prefill: duplicateOf(openedQuote) });
@@ -860,7 +879,7 @@ function QuoteList() {
           ticket={ticketOf(sharingQuote)}
           quote={sharingQuote}
           mode={sharing.mode}
-          readOnly={!canEdit}
+          readOnly={!canEdit || sharingQuote.ticket_status === "cancelled"}
           onClose={() => setSharing(null)}
           onRotated={() => refresh(sharingQuote.ticket_id)}
         />
