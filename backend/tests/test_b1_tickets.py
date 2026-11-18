@@ -842,7 +842,9 @@ async def test_search_by_accent_regex_finds_the_same_tickets(
         long_text = "Câmera da ENTRADA não grava; AÇÃO: trocar a fonte e testar. " * 60
         rows = [
             Ticket(title="Troca de CÂMERA", location_id=store.id, customer_id=customer.id),
-            Ticket(title="camera sem imagem", description=long_text, assignee_id=world.tech.user.id),
+            Ticket(
+                title="camera sem imagem", description=long_text, assignee_id=world.tech.user.id
+            ),
             Ticket(
                 title="Impressão falhando",
                 requester_name="Gerência Açaí",

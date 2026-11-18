@@ -433,9 +433,9 @@ async def test_home_late_and_missed_skip_the_unproductive_visit(
     }
 
 
-async def _bounce(db: AsyncSession, ticket: Ticket, when: datetime) -> None:
+async def _bounce(session: AsyncSession, ticket: Ticket, when: datetime) -> None:
     """Visita improdutiva registrada em `when` (o evento e os campos da OS, como no fluxo)."""
-    db.add(
+    session.add(
         TicketEvent(
             ticket_id=ticket.id,
             event_type=TicketEventType.UNPRODUCTIVE_VISIT,
@@ -447,7 +447,7 @@ async def _bounce(db: AsyncSession, ticket: Ticket, when: datetime) -> None:
     )
     ticket.last_unproductive_at = when
     ticket.unproductive_count = (ticket.unproductive_count or 0) + 1
-    await db.flush()
+    await session.flush()
 
 
 @pytest.mark.usefixtures("frozen_clock")
@@ -584,9 +584,9 @@ async def test_today_card_parts_add_up(
     world: World,
     db: AsyncSession,  # noqa: F811
 ) -> None:
-    """Cartão Hoje: planejadas = concluídas + em campo + sem início + aguardando + a seguir. A visita
-    que ainda não começou e teve improdutiva no horário ou depois sai das planejadas (como no fluxo
-    nativo, em que a improdutiva tira a agenda), e o técnico dela não conta como "com visita"."""
+    """Cartão Hoje: planejadas = concluídas + em campo + sem início + aguardando + a seguir. A
+    visita que ainda não começou e teve improdutiva no horário ou depois sai das planejadas (como
+    no fluxo nativo, em que a improdutiva tira a agenda); o técnico dela não tem visita hoje."""
     other = world.tech_other.user.id
     await add_ticket(
         db,
