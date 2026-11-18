@@ -9,6 +9,10 @@ Entram no dia D, no fuso de settings.TIMEZONE:
 Se D é hoje, a OS em campo há mais de 12 h (dado parado, a regra de services/field.py) sai da
 lista e só conta no resumo (stuck_in_field): ninguém está em campo nela agora.
 
+"Atrasada" segue a Minha fila e a Início (services/field.py): 30 min depois do horário sem saída
+nem início. A visita que deu improdutiva no dia, no horário ou depois, voltou para a fila: ela
+aconteceu e espera data nova (no fluxo nativo a improdutiva tira a agenda).
+
 Os horários reais vêm do histórico de status, então o agendado e o realizado ficam lado a lado.
 """
 
@@ -28,7 +32,7 @@ from app.models import Ticket, TicketEvent, User
 from app.schemas.activities import Activity, ActivityState, DayActivities, DaySummary
 from app.schemas.ticket import TicketListItem
 from app.services.durations import actual_seconds
-from app.services.field import FIELD, field_since_of, field_stuck
+from app.services.field import FIELD, field_since_of, field_stuck, late_to_start
 from app.services.schedule import works_on
 from app.services.tickets import list_noload, visibility_clause
 from app.services.workflow import SLA_PAUSED_STATUSES
@@ -76,7 +80,9 @@ def _state(
     day_start: datetime,
     day_end: datetime,
     now: datetime,
+    bounced_at: datetime | None = None,
 ) -> ActivityState:
+    """Situação da OS no dia. `bounced_at`: a última visita improdutiva registrada no dia."""
     if finished is not None or (
         ticket.status in (S.RESOLVED, S.CLOSED) and _in_day(ticket.resolved_at, day_start, day_end)
     ):
@@ -92,7 +98,11 @@ def _state(
     if ticket.status == S.SCHEDULED and not _in_day(ticket.scheduled_start, day_start, day_end):
         return "rescheduled"
     if _in_day(ticket.scheduled_start, day_start, day_end):
-        if started is None and ticket.scheduled_start < now:  # type: ignore[operator]
+        # Improdutiva no horário ou depois (OS migrada que manteve a agenda): a visita aconteceu e
+        # a OS voltou para a fila, como no fluxo nativo. Não é atrasada nem "a seguir".
+        if bounced_at is not None and bounced_at >= ticket.scheduled_start:  # type: ignore[operator]
+            return "pending"
+        if started is None and late_to_start(ticket.scheduled_start, now):
             return "late"
         return "scheduled"
     return "pending"
@@ -192,6 +202,7 @@ async def day_activities(
                     day_start=day_start,
                     day_end=day_end,
                     now=now,
+                    bounced_at=bounce.created_at if bounce else None,
                 ),
                 scheduled_start=t.scheduled_start,
                 scheduled_end=t.scheduled_end,

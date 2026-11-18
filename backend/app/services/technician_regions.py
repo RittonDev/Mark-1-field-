@@ -14,6 +14,7 @@ from __future__ import annotations
 import math
 import unicodedata
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -70,8 +71,9 @@ def fold_sql(column: ColumnElement) -> ColumnElement:
 
 
 def fold_words_sql(column: ColumnElement) -> ColumnElement:
-    """Sem acento e em minúsculas, sem mexer nos espaços: para procurar uma palavra solta (mais
-    leve em texto longo, como a descrição da OS). Nulo vira texto vazio."""
+    """Sem acento e em minúsculas, sem mexer nos espaços: para procurar uma palavra solta. Nulo
+    vira texto vazio. As buscas das OS usam search.has_word (expressão regular com as variantes
+    acentuadas), com o mesmo resultado e bem mais rápida em texto longo; esta é a referência."""
     return func.lower(func.translate(func.coalesce(column, ""), _FOLD_FROM, _FOLD_TO))
 
 
@@ -109,16 +111,23 @@ def _since(now: datetime) -> datetime:
     return now - timedelta(days=30 * HISTORY_MONTHS)
 
 
-def footprint(since: datetime, until: datetime | None = None):
+def footprint(
+    since: datetime,
+    until: datetime | None = None,
+    location_ids: Collection[uuid.UUID] | None = None,
+):
     """Visitas de cada técnico: (técnico, OS, loja, quando), uma por técnico e OS.
 
     Conta a OS em que ele foi à loja como responsável ou como outro técnico da visita (houve
     chegada, ou a OS foi concluída) e a OS em que ele apontou trabalho (visitas anteriores de
     outra pessoa ficam com quem foi). OS só atribuída, ainda não atendida, não é visita. Com
-    `until`, só o que já aconteceu.
+    `until`, só o que já aconteceu. Com `location_ids`, só as visitas a essas lojas (o mesmo
+    resultado filtrado, sem montar as visitas de todas as lojas).
     """
+    stores = () if location_ids is None else (Ticket.location_id.in_(location_ids),)
     visited = (
         Ticket.location_id.is_not(None),
+        *stores,
         Ticket.status != TicketStatus.CANCELLED,
         or_(
             Ticket.arrived_at.is_not(None),
@@ -147,7 +156,7 @@ def footprint(since: datetime, until: datetime | None = None):
             TicketWorklog.started_at,
         )
         .join(Ticket, Ticket.id == TicketWorklog.ticket_id)
-        .where(TicketWorklog.user_id.is_not(None), Ticket.location_id.is_not(None))
+        .where(TicketWorklog.user_id.is_not(None), Ticket.location_id.is_not(None), *stores)
     )
     both = union_all(assigned, helped, worked).subquery("visits_raw")
     pairs = (

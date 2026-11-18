@@ -30,7 +30,6 @@ from app.core.documents import is_valid_cnpj
 from app.core.enums import TicketPriority, TicketStatus, UserRole
 from app.db.base import utcnow
 from app.models import Customer, Location, Ticket, User
-from app.models.ticket import ticket_helpers
 from app.schemas.home import (
     ListFilters,
     SearchChip,
@@ -50,6 +49,7 @@ from app.services.tickets import (
     acted_by_clause,
     filter_conditions,
     visibility_clause,
+    word_clause,
 )
 from app.services.workflow import OPEN_STATUSES
 
@@ -93,24 +93,12 @@ DOMAIN_WORDS = frozenset(
 # Palavras de etiqueta que não bastam sozinhas para escolher a etiqueta.
 GENERIC_TAG_WORDS = frozenset({"ticket", "tickets", "tecnico", "nao", "cliente", "envio"})
 
-_ACCENTS = {
-    "a": "aáàâãäAÁÀÂÃÄ",
-    "e": "eéèêëEÉÈÊË",
-    "i": "iíìîïIÍÌÎÏ",
-    "o": "oóòôõöOÓÒÔÕÖ",
-    "u": "uúùûüUÚÙÛÜ",
-    "c": "cçCÇ",
-    "n": "nñNÑ",
-}
 _WORD = re.compile(r"[a-z0-9]+")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+# "relicario" -> regex que casa "Relicário" (services/search, a mesma da busca da lista).
+accent_regex = search.accent_regex
 
 # --------------------------------------------------------------------------- texto
-
-
-def accent_regex(word: str) -> str:
-    """ "relicario" -> regex que casa "Relicário" (as palavras da busca só têm [a-z0-9])."""
-    return "".join(f"[{_ACCENTS[ch]}]" if ch in _ACCENTS else ch for ch in word)
 
 
 def _prefix_regex(word: str) -> str:
@@ -1206,31 +1194,10 @@ def acted_clause(technician_id: uuid.UUID) -> ColumnElement[bool]:
 
 
 def text_clause(word: str) -> ColumnElement[bool]:
-    """Uma palavra do texto livre nos campos da busca da lista (services/tickets.search_clause):
-    loja (nome, código, cidade), cliente, técnicos, título, solicitante, nº do chamado do cliente
-    e descrição; sem acento e sem diferença de maiúsculas."""
-    rx = accent_regex(word)
-    stores = select(Location.id).where(
-        or_(
-            Location.name.regexp_match(rx, flags="i"),
-            Location.code.regexp_match(rx, flags="i"),
-            Location.city.regexp_match(rx, flags="i"),
-        )
-    )
-    customers = select(Customer.id).where(Customer.name.regexp_match(rx, flags="i"))
-    people = select(User.id).where(User.name.regexp_match(rx, flags="i"))
-    return or_(
-        Ticket.location_id.in_(stores),
-        Ticket.customer_id.in_(customers),
-        Ticket.assignee_id.in_(people),
-        Ticket.id.in_(
-            select(ticket_helpers.c.ticket_id).where(ticket_helpers.c.user_id.in_(people))
-        ),
-        Ticket.title.regexp_match(rx, flags="i"),
-        Ticket.requester_name.regexp_match(rx, flags="i"),
-        Ticket.client_reference.regexp_match(rx, flags="i"),
-        Ticket.description.regexp_match(rx, flags="i"),
-    )
+    """Uma palavra do texto livre nos campos da busca da lista: a mesma condição de
+    services/tickets.search_clause (loja, cliente, técnicos, título, solicitante, nº do chamado
+    do cliente e descrição; sem acento e sem diferença de maiúsculas)."""
+    return word_clause(word)
 
 
 def _original_words(query: str) -> dict[str, str]:

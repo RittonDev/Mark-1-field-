@@ -15,11 +15,34 @@ from app.services.technician_regions import fold_sql, fold_text
 
 _WORD = re.compile(r"[a-z0-9]+")
 MAX_WORDS = 8
+# As variantes de cada letra sem acento (as mesmas que fold_words_sql troca).
+_ACCENTS = {
+    "a": "aáàâãäAÁÀÂÃÄ",
+    "e": "eéèêëEÉÈÊË",
+    "i": "iíìîïIÍÌÎÏ",
+    "o": "oóòôõöOÓÒÔÕÖ",
+    "u": "uúùûüUÚÙÛÜ",
+    "c": "cçCÇ",
+    "n": "nñNÑ",
+}
 
 
 def words(q: str | None) -> list[str]:
     """Palavras da busca, sem acento e em minúsculas (pontuação separa as palavras)."""
     return _WORD.findall(fold_text(q))[:MAX_WORDS]
+
+
+def accent_regex(word: str) -> str:
+    """ "relicario" -> expressão regular que casa "Relicário" (as palavras da busca só têm
+    [a-z0-9]). Com o ~* do banco (sem diferença de maiúscula), dá o mesmo que
+    fold_words_sql(coluna) LIKE '%palavra%', cerca de 10x mais rápido nas descrições longas:
+    traduzir letra a letra 15 mil descrições leva quase 1 s por palavra."""
+    return "".join(f"[{_ACCENTS[ch]}]" if ch in _ACCENTS else ch for ch in word)
+
+
+def has_word(column: ColumnElement, word: str) -> ColumnElement[bool]:
+    """A palavra (de words) aparece na coluna, sem diferença de acento ou maiúscula."""
+    return column.regexp_match(accent_regex(word), flags="i")
 
 
 def all_words(

@@ -45,9 +45,6 @@ FIELD = field_rules.FIELD
 WAITING = (S.ON_HOLD_CUSTOMER, S.ON_HOLD_VENDOR)
 DONE = (S.RESOLVED, S.CLOSED)
 LATE_FROM = (S.ASSIGNED, S.SCHEDULED)
-# "Atrasada" só depois da tolerância de 30 min: a mesma da Início (visita de hoje sem início) e do
-# prazo de chegada (services/field.py: trânsito, estacionamento, portaria).
-LATE_AFTER = field_rules.SCHEDULE_TOLERANCE
 SECTION_ORDER = ("attention", "in_field", "today", "waiting", "upcoming", "unscheduled", "done")
 TONE_RANK = {"danger": 0, "warning": 1, "info": 2}
 LIMIT = 500
@@ -96,10 +93,13 @@ def _field_reasons(
     clocks: bool = True,
 ) -> list[QueueReason]:
     """Regras de campo: os dois relógios de 4h, o check-in longe da loja e pedido de peça. Sem
-    `clocks` (OS parada em campo), os relógios da visita ficam de fora: ela não está acontecendo."""
+    `clocks` (OS parada em campo), os relógios da visita ficam de fora: ela não está acontecendo.
+    Esperando data nova depois da improdutiva, não há chegada a cobrar (o técnico foi): o motivo
+    é o "Improdutiva: reagendar", como na Início."""
     reasons: list[QueueReason] = []
     if clocks:
-        arrival = field_rules.arrival_status(t, now)
+        new_date = field_rules.awaiting_new_visit(t)
+        arrival = None if new_date else field_rules.arrival_status(t, now)
         if arrival == "late" and t.arrived_at is None:
             reasons.append(
                 QueueReason(code="arrival_late", label="Chegada atrasada", tone="danger")
@@ -128,16 +128,6 @@ def _field_reasons(
     if part_request_open:
         reasons.append(QueueReason(code="part_request", label="Técnico pediu peça", tone="warning"))
     return reasons
-
-
-def bounced_after_schedule(t: Any) -> bool:
-    """Teve visita improdutiva no horário agendado ou depois: a visita aconteceu (e a OS espera
-    data nova), então não está "atrasada para começar"."""
-    return (
-        t.last_unproductive_at is not None
-        and t.scheduled_start is not None
-        and t.last_unproductive_at >= t.scheduled_start
-    )
 
 
 def reasons_for(
@@ -170,11 +160,12 @@ def reasons_for(
             reasons.append(QueueReason(code="sla_violated", label="SLA violado", tone="danger"))
         elif status == SlaStatus.AT_RISK:
             reasons.append(QueueReason(code="sla_at_risk", label="SLA em risco", tone="warning"))
+        # "Atrasada": 30 min depois do horário e sem improdutiva no horário ou depois (a mesma
+        # regra das Atividades do dia e do "sem início" da Início, services/field.py).
         if (
             t.status in LATE_FROM
-            and t.scheduled_start is not None
-            and t.scheduled_start < now - LATE_AFTER
-            and not bounced_after_schedule(t)
+            and field_rules.late_to_start(t.scheduled_start, now)
+            and not field_rules.bounced_after_schedule(t)
         ):
             reasons.append(QueueReason(code="late_start", label="Atrasada", tone="danger"))
         if t.status not in WAITING and assignee_role != UserRole.TECHNICIAN:
@@ -190,9 +181,9 @@ def reasons_for(
                     tone="warning",
                 )
             )
-        if t.last_unproductive_at is not None and (
-            t.scheduled_start is None or t.scheduled_start < t.last_unproductive_at
-        ):
+        # Esperando data nova depois da improdutiva (em campo de novo, não: a visita está
+        # acontecendo), como o grupo "Improdutivas sem reagendar" da Início.
+        if t.status not in FIELD and field_rules.awaiting_new_visit(t):
             reasons.append(
                 QueueReason(code="unproductive", label="Improdutiva: reagendar", tone="warning")
             )

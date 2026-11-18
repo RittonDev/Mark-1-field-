@@ -3,9 +3,13 @@
 import datetime as dt
 import uuid
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
+from pydantic_core import PydanticCustomError
 
 from app.schemas.common import Ref
+
+# Tamanho máximo da nota (do fixado) ou do motivo (do tirado da lista).
+NOTE_MAX = 300
 
 
 class FavoriteTechnician(BaseModel):
@@ -70,7 +74,8 @@ class FavoriteSet(BaseModel):
     state: str
     city: str = Field(min_length=1, max_length=120)
     favorite: bool = True
-    note: str | None = Field(default=None, max_length=300)
+    # Até NOTE_MAX caracteres (conferido em _note_size, com o rótulo da tela).
+    note: str | None = Field(default=None, json_schema_extra={"maxLength": NOTE_MAX})
     # Só para o Desfazer de um tirado: grava tirado mesmo fora do top 3.
     hide: bool = False
 
@@ -89,4 +94,18 @@ class FavoriteSet(BaseModel):
     def _note(cls, value: object) -> object:
         if isinstance(value, str):
             return value.strip() or None
+        return value
+
+    @field_validator("note")
+    @classmethod
+    def _note_size(cls, value: str | None, info: ValidationInfo) -> str | None:
+        """O 422 de sempre (string_too_long), com o nome que a tela dá ao campo: a nota do fixado
+        ou o motivo do tirado da lista (o rótulo geral de "note" é "Motivo")."""
+        if value is not None and len(value) > NOTE_MAX:
+            label = "Nota" if info.data.get("favorite", True) else "Motivo"
+            raise PydanticCustomError(
+                "string_too_long",
+                "String should have at most {max_length} characters",
+                {"max_length": NOTE_MAX, "label": label},
+            )
         return value

@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Literal
 
-from sqlalchemy import delete, func, select, tuple_
+from sqlalchemy import delete, func, select, text, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -52,7 +52,7 @@ TOP = 3
 MAX_PINNED_PER_CITY = 10
 SUGGESTION_POINTS = 25
 OTHERS_LIMIT = 10
-NOTE_MAX = 300
+# O tamanho da nota (NOTE_MAX) fica no schema: FavoriteSet confere com o rótulo da tela.
 
 _UF = re.compile(r"^[A-Z]{2}$")
 CityKey = tuple[str, str]  # (UF, cidade sem acento)
@@ -132,8 +132,13 @@ async def _cities(
         return (not state or place[0] == state) and (not key or place[1] == key)
 
     uf_col = func.upper(func.trim(Location.state))
+    columns = [Location.state, Location.city, func.count().filter(Location.is_active), func.count()]
+    if key:
+        # Uma cidade só (a da loja da OS, a do detalhe, a de uma decisão): as lojas dela, para as
+        # visitas saírem só dessas lojas em vez de montar as de todas e filtrar depois.
+        columns.append(func.array_agg(Location.id))
     stores = (
-        select(Location.state, Location.city, func.count().filter(Location.is_active), func.count())
+        select(*columns)
         .where(Location.state.is_not(None), Location.city.is_not(None))
         .group_by(Location.state, Location.city)
     )
@@ -141,12 +146,15 @@ async def _cities(
         stores = stores.where(uf_col == state)
     out: dict[CityKey, _City] = {}
     spellings: dict[CityKey, Counter[str]] = {}
-    for raw_state, raw_city, active, total in (await db.execute(stores)).all():
+    store_ids: list[uuid.UUID] = []
+    for raw_state, raw_city, active, total, *ids in (await db.execute(stores)).all():
         place = _key(raw_state, raw_city)
         if place is None or not wanted(place):
             continue
         out.setdefault(place, _City(state=place[0], key=place[1], city="")).stores += active
         spellings.setdefault(place, Counter())[raw_city.strip()] += total
+        if ids:
+            store_ids.extend(ids[0])
     for place, counts in spellings.items():
         # A grafia mais usada nas lojas (no empate, a primeira em ordem alfabética).
         out[place].city = min(counts.items(), key=lambda kv: (-kv[1], kv[0]))[0]
@@ -155,7 +163,9 @@ async def _cities(
 
     # Visitas: uma passada só, com o total de OS distintas de cada grafia no mesmo GROUP BY. A OS
     # é de uma loja só, então somar as grafias da mesma cidade não conta OS duas vezes.
-    fp = technician_regions.footprint(now - WINDOW, until=now)
+    fp = technician_regions.footprint(
+        now - WINDOW, until=now, location_ids=store_ids if key else None
+    )
     visited = (
         select(
             Location.state,
@@ -560,6 +570,15 @@ async def _delete(db: AsyncSession, user_id: uuid.UUID, uf: str, key: str, actor
         )
 
 
+async def _lock_city(db: AsyncSession, uf: str, key: str) -> None:
+    """Uma decisão por vez em cada cidade, até o fim da transação: o limite de fixados é conferido
+    lendo as decisões antes de gravar, e dois pedidos juntos passariam de MAX_PINNED_PER_CITY."""
+    await db.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+        {"key": f"technician-favorites:{uf}:{key}"},
+    )
+
+
 async def set_favorite(
     db: AsyncSession, technician_id: uuid.UUID, data: FavoriteSet, actor: User
 ) -> None:
@@ -567,6 +586,7 @@ async def set_favorite(
     troca a nota; automático agora vira tirado (o próximo sobe); fora disso, apaga a decisão."""
     tech = await technicians.get_technician(db, technician_id)
     uf, key = _place(data.state, data.city)
+    await _lock_city(db, uf, key)
     # O ranking só importa para tirar: fixar não mexe nos automáticos.
     city, decisions = await _city_state(db, uf, key, with_visits=not data.favorite)
     if city is None:

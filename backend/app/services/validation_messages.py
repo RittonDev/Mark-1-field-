@@ -83,6 +83,14 @@ def field_label(loc: Sequence[str | int]) -> str:
     return FIELD_LABELS.get(name, name)
 
 
+def given_label(error: Mapping[str, Any]) -> str | None:
+    """Rótulo que o próprio validador deu ao erro (ctx["label"]): o mesmo nome técnico pode ter
+    outro nome numa tela (a "note" dos favoritos é a Nota do fixado, não o Motivo)."""
+    ctx = error.get("ctx")
+    label = ctx.get("label") if isinstance(ctx, Mapping) else None
+    return label if isinstance(label, str) and label else None
+
+
 def _plural(n: Any, one: str, many: str) -> str:
     return one if str(n) == "1" else many
 
@@ -160,7 +168,7 @@ def readable(errors: Iterable[Mapping[str, Any]]) -> str:
     """Texto único ("Motivo: informe pelo menos 3 caracteres; Status: ..."), sem repetir."""
     parts: list[str] = []
     for error in errors:
-        label = field_label(error.get("loc") or ())
+        label = given_label(error) or field_label(error.get("loc") or ())
         text = message(error)
         line = f"{label}: {text}" if label else text[:1].upper() + text[1:]
         if line not in parts:
@@ -175,7 +183,7 @@ def detail(errors: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
     for error in errors:
         loc = list(error.get("loc") or ())
         prefix = [p for p in loc[:1] if p in _SKIP]
-        label = field_label(loc)
+        label = given_label(error) or field_label(loc)
         out.append(
             {
                 "loc": [*prefix, label] if label else prefix,

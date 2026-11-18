@@ -7,8 +7,10 @@
 - Permanência: cada chamado inclui até 4 horas de técnico na loja, somando as visitas (o tempo
   em "Em atendimento"). A cada entrada o limite é o que sobrou dessas horas.
 
-Aqui também fica a regra única de "em campo agora" (a caminho ou em atendimento há até 12 h),
-usada pelos cartões, pelas filas, pelas Atividades do dia e pela Início.
+Aqui também ficam as regras únicas usadas pelos cartões, pelas filas, pelas Atividades do dia e
+pela Início: "em campo agora" (a caminho ou em atendimento há até 12 h), "atrasada para começar"
+(30 min depois do horário, sem improdutiva no horário ou depois) e "esperando data nova" (a
+última visita deu improdutiva e nenhuma outra foi marcada depois dela).
 """
 
 import unicodedata
@@ -18,7 +20,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from pydantic import ValidationError
-from sqlalchemy import ColumnElement, and_, case, func, select
+from sqlalchemy import ColumnElement, and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import AuthorizationStatus, TicketEventType, TicketStatus
@@ -179,6 +181,39 @@ def on_reentry(ticket: Ticket, r: FieldRules, now: datetime) -> None:
 
 
 # ------------------------------------------------------------------ situação (para listas e filas)
+
+
+def late_to_start(scheduled_start: datetime | None, now: datetime) -> bool:
+    """A visita já devia ter começado: 30 min ou mais depois do horário (SCHEDULE_TOLERANCE). A
+    mesma conta do "Atrasada" da Minha fila e das Atividades do dia e do "sem início" da Início."""
+    return scheduled_start is not None and scheduled_start <= now - SCHEDULE_TOLERANCE
+
+
+def bounced_after_schedule(t: Any) -> bool:
+    """Teve visita improdutiva no horário agendado ou depois (OS migrada que manteve a agenda): a
+    visita aconteceu e a OS espera data nova, então não está "atrasada para começar"."""
+    return (
+        t.last_unproductive_at is not None
+        and t.scheduled_start is not None
+        and t.last_unproductive_at >= t.scheduled_start
+    )
+
+
+def awaiting_new_visit(t: Any) -> bool:
+    """A última visita deu improdutiva e nenhuma visita nova foi marcada depois dela ("Improdutiva:
+    reagendar"). Não há chegada a cobrar: o técnico foi. No fluxo nativo a improdutiva tira a agenda
+    e o prazo de chegada recalculado fica no passado; o "Chegada atrasada" volta a valer para a
+    visita nova, quando ela é marcada."""
+    bounced = t.last_unproductive_at
+    return bounced is not None and (t.scheduled_start is None or t.scheduled_start < bounced)
+
+
+def awaiting_new_visit_clause() -> ColumnElement[bool]:
+    """A regra de awaiting_new_visit no banco."""
+    return and_(
+        Ticket.last_unproductive_at.is_not(None),
+        or_(Ticket.scheduled_start.is_(None), Ticket.scheduled_start < Ticket.last_unproductive_at),
+    )
 
 
 def arrival_status(t: Any, now: datetime) -> str | None:

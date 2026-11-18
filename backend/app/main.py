@@ -316,9 +316,12 @@ def validation_issue(error: dict[str, Any]) -> dict[str, Any]:
         "type": str(error.get("type") or ""),
     }
     ctx = error.get("ctx")
-    if isinstance(ctx, dict) and ctx:
-        issue["ctx"] = {str(k): _plain(v) for k, v in ctx.items()}
-    label = _field_label(loc)
+    if isinstance(ctx, dict):
+        # O rótulo dado pelo próprio validador (ctx["label"]) vale mais que o do nome do campo.
+        limits = {str(k): _plain(v) for k, v in ctx.items() if k != "label"}
+        if limits:
+            issue["ctx"] = limits
+    label = validation_messages.given_label(error) or _field_label(loc)
     if label:
         issue["label"] = label
     return issue

@@ -321,22 +321,39 @@ def _technicians() -> Select[tuple[uuid.UUID]]:
 
 
 def late_arrival_clause(m: Moment) -> ColumnElement[bool]:
-    """Técnico definido, prazo de chegada vencido e ninguém chegou."""
+    """Técnico definido, prazo de chegada vencido e ninguém chegou. A OS que espera data nova
+    depois da improdutiva (field.awaiting_new_visit) não entra: o técnico foi, e o prazo que o
+    fluxo nativo recalcula depois da improdutiva fica no passado. Ela está nas improdutivas; com
+    a visita nova marcada, o atraso dessa visita volta a contar."""
     return and_(
         Ticket.status.in_(ARRIVAL_PENDING),
         Ticket.assignee_id.is_not(None),
         Ticket.arrival_due_at < m.now,
         Ticket.arrived_at.is_(None),
+        not_(field_svc.awaiting_new_visit_clause()),
     )
 
 
 def not_bounced_clause() -> ColumnElement[bool]:
     """Sem visita improdutiva no horário agendado ou depois (a mesma regra do "Atrasada" da Minha
-    fila, services/queues.bounced_after_schedule): a visita que deu improdutiva aconteceu e fica no
+    fila, services/field.bounced_after_schedule): a visita que deu improdutiva aconteceu e fica no
     grupo das improdutivas, não no de visita sem início ou sem baixa."""
     return or_(
         Ticket.last_unproductive_at.is_(None),
         Ticket.last_unproductive_at < Ticket.scheduled_start,
+    )
+
+
+def today_visit_clause(m: Moment) -> ColumnElement[bool]:
+    """Visita de hoje (o "planejadas" do cartão Hoje e kpis.scheduled_today): agendada para hoje e
+    não cancelada. A que ainda não começou e teve improdutiva no horário ou depois (OS migrada que
+    manteve a agenda) sai, como no fluxo nativo, em que a improdutiva tira a agenda: ela espera
+    data nova e não caberia em nenhuma parte do cartão."""
+    return and_(
+        Ticket.scheduled_start >= m.day_start,
+        Ticket.scheduled_start < m.day_end,
+        Ticket.status != S.CANCELLED,
+        or_(Ticket.status.not_in(NOT_STARTED), not_bounced_clause()),
     )
 
 
@@ -407,16 +424,9 @@ def old_overdue_raw(m: Moment) -> ColumnElement[bool]:
 
 
 def unproductive_pending_clause() -> ColumnElement[bool]:
-    """Última visita improdutiva e sem data nova depois dela (a mesma regra da Minha fila)."""
-    return and_(
-        _open(),
-        Ticket.status.not_in(FIELD),
-        Ticket.last_unproductive_at.is_not(None),
-        or_(
-            Ticket.scheduled_start.is_(None),
-            Ticket.scheduled_start < Ticket.last_unproductive_at,
-        ),
-    )
+    """Última visita improdutiva e sem data nova depois dela (a mesma regra da Minha fila,
+    services/field.awaiting_new_visit), fora de campo."""
+    return and_(_open(), Ticket.status.not_in(FIELD), field_svc.awaiting_new_visit_clause())
 
 
 def no_schedule_clause() -> ColumnElement[bool]:
@@ -824,11 +834,9 @@ async def _ticket_counts(db: AsyncSession, m: Moment, onsite_hours: int) -> dict
     """Indicadores, grupos de atenção e quase todos os sinais vitais numa varredura só das OS
     (COUNT ... FILTER), com os limites de tempo como parâmetros. Sem COUNT(DISTINCT), que obriga o
     banco a ordenar a tabela inteira: os técnicos distintos saem de _visit_technicians."""
-    today = and_(
-        Ticket.scheduled_start >= m.day_start,
-        Ticket.scheduled_start < m.day_end,
-        Ticket.status != S.CANCELLED,
-    )
+    # As partes do cartão Hoje fecham com as planejadas: concluídas + em campo + sem início +
+    # aguardando + a seguir.
+    today = today_visit_clause(m)
     tomorrow = and_(
         Ticket.scheduled_start >= m.day_end,
         Ticket.scheduled_start < m.tomorrow_end,
@@ -1465,7 +1473,7 @@ async def _visit_technicians(db: AsyncSession, m: Moment) -> tuple[int, int]:
     """Técnicos distintos com visita hoje e amanhã. Consulta pequena (só a agenda dos 2 dias),
     para o COUNT(DISTINCT) ficar fora da varredura grande."""
     technicians = Ticket.assignee_id.distinct()
-    today = and_(Ticket.scheduled_start < m.day_end, Ticket.status != S.CANCELLED)
+    today = today_visit_clause(m)  # as mesmas visitas das planejadas do cartão Hoje
     tomorrow = and_(Ticket.scheduled_start >= m.day_end, Ticket.status.not_in(FINISHED))
     window = and_(Ticket.scheduled_start >= m.day_start, Ticket.scheduled_start < m.tomorrow_end)
     stmt = select(

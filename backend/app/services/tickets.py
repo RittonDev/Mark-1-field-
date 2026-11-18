@@ -98,7 +98,6 @@ from app.services.errors import (
 )
 from app.services.realtime import queue_event, unowned_ticket
 from app.services.suggestions import km_between
-from app.services.technician_regions import fold_words_sql
 from app.services.workflow import (
     OPEN_STATUSES,
     SLA_PAUSED_STATUSES,
@@ -2182,29 +2181,32 @@ def _parse_number(q: str) -> int | None:
     return number if number <= MAX_NUMBER else None
 
 
-def _word_clause(word: str) -> ColumnElement[bool]:
-    """Uma palavra da busca (sem acento, minúscula) em algum dado da OS."""
-    like = f"%{word}%"
+def word_clause(word: str) -> ColumnElement[bool]:
+    """Uma palavra da busca (de search.words: sem acento, minúscula) em algum dado da OS: loja
+    (nome, código, cidade), cliente, técnicos, título, solicitante, nº do chamado do cliente e
+    descrição. Expressão regular com as variantes acentuadas de cada letra (search.has_word): o
+    mesmo resultado de fold_words_sql(...) LIKE, sem traduzir letra a letra as descrições longas
+    (a busca da lista levava quase 1 s). As comparações por id vêm antes dos textos."""
     stores = select(Location.id).where(
         or_(
-            fold_words_sql(Location.name).like(like),
-            fold_words_sql(Location.code).like(like),
-            fold_words_sql(Location.city).like(like),
+            search.has_word(Location.name, word),
+            search.has_word(Location.code, word),
+            search.has_word(Location.city, word),
         )
     )
-    customers = select(Customer.id).where(fold_words_sql(Customer.name).like(like))
-    people = select(User.id).where(fold_words_sql(User.name).like(like))
+    customers = select(Customer.id).where(search.has_word(Customer.name, word))
+    people = select(User.id).where(search.has_word(User.name, word))
     return or_(
-        fold_words_sql(Ticket.title).like(like),
-        fold_words_sql(Ticket.requester_name).like(like),
-        fold_words_sql(Ticket.client_reference).like(like),
         Ticket.location_id.in_(stores),
         Ticket.customer_id.in_(customers),
         Ticket.assignee_id.in_(people),
         Ticket.id.in_(
             select(ticket_helpers.c.ticket_id).where(ticket_helpers.c.user_id.in_(people))
         ),
-        fold_words_sql(Ticket.description).like(like),
+        search.has_word(Ticket.title, word),
+        search.has_word(Ticket.requester_name, word),
+        search.has_word(Ticket.client_reference, word),
+        search.has_word(Ticket.description, word),
     )
 
 
@@ -2219,7 +2221,7 @@ def search_clause(q: str) -> ColumnElement[bool]:
     match = _NUMBER.fullmatch(q.strip())
     terms = [] if match is not None and match.group("prefix") else search.words(q)
     if terms:
-        options.append(and_(*(_word_clause(term) for term in terms)))
+        options.append(and_(*(word_clause(term) for term in terms)))
     return or_(*options) if options else false()
 
 

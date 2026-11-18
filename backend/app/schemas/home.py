@@ -116,7 +116,8 @@ class HomeFocus(BaseModel):
 
 
 class HomeToday(BaseModel):
-    """Visitas de hoje (agendadas para hoje e não canceladas).
+    """Visitas de hoje (agendadas para hoje e não canceladas; a que ainda não começou e teve
+    improdutiva no horário ou depois sai, como no fluxo nativo, em que a improdutiva tira a agenda).
     planned = done + in_field + not_started + upcoming + on_hold."""
 
     planned: int  # = kpis.scheduled_today
