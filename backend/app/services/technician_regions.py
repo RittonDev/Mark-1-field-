@@ -124,8 +124,15 @@ def footprint(
     outra pessoa ficam com quem foi). OS só atribuída, ainda não atendida, não é visita. Com
     `until`, só o que já aconteceu. Com `location_ids` (ids ou uma consulta de ids), só as
     visitas a essas lojas: o mesmo resultado filtrado, sem montar as visitas de todas as lojas.
+
+    O `since` também corta cada linha antes de juntar: a maior data de um técnico numa OS passa
+    de `since` exatamente quando alguma das linhas dele passa (o resultado é o mesmo, com bem
+    menos linhas no agrupamento). O `until` só vale no agrupamento.
     """
     stores = () if location_ids is None else (Ticket.location_id.in_(location_ids),)
+    visit_at = func.coalesce(
+        Ticket.arrived_at, Ticket.resolved_at, Ticket.scheduled_start, Ticket.created_at
+    )
     visited = (
         Ticket.location_id.is_not(None),
         *stores,
@@ -134,9 +141,7 @@ def footprint(
             Ticket.arrived_at.is_not(None),
             Ticket.status.in_((TicketStatus.RESOLVED, TicketStatus.CLOSED)),
         ),
-    )
-    visit_at = func.coalesce(
-        Ticket.arrived_at, Ticket.resolved_at, Ticket.scheduled_start, Ticket.created_at
+        visit_at >= since,
     )
     assigned = select(
         Ticket.assignee_id.label("user_id"),
@@ -157,7 +162,12 @@ def footprint(
             TicketWorklog.started_at,
         )
         .join(Ticket, Ticket.id == TicketWorklog.ticket_id)
-        .where(TicketWorklog.user_id.is_not(None), Ticket.location_id.is_not(None), *stores)
+        .where(
+            TicketWorklog.user_id.is_not(None),
+            TicketWorklog.started_at >= since,
+            Ticket.location_id.is_not(None),
+            *stores,
+        )
     )
     both = union_all(assigned, helped, worked).subquery("visits_raw")
     pairs = (
