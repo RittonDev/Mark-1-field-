@@ -12,6 +12,7 @@ from app.models.catalog import (
 from app.models.customer import Customer, Location
 from app.models.expense import SystemSetting, TicketExpense
 from app.models.forms import FormTemplate, TicketForm
+from app.models.invoice import TechnicianInvoice
 from app.models.legacy import LegacyRef
 from app.models.offer import TicketOffer
 from app.models.onboarding import OnboardingInvite, TechnicianApplication
@@ -65,6 +66,7 @@ __all__ = [
     "TicketPayout",
     "TicketWorklog",
     "TechnicianFavorite",
+    "TechnicianInvoice",
     "UnproductiveReason",
     "TechnicianApplication",
     "TechnicianShift",

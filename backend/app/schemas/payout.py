@@ -6,7 +6,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
-from app.core.enums import PayoutStatus, TicketStatus
+from app.core.enums import InvoiceStatus, PayoutStatus, TicketStatus
 from app.schemas.common import ORMModel, Ref
 from app.schemas.expense import Money
 from app.schemas.my_profile import PixInfo
@@ -47,6 +47,14 @@ class PayoutTicketRef(BaseModel):
     resolved_at: datetime | None
 
 
+class PayoutInvoiceRef(BaseModel):
+    """A nota fiscal do técnico que cobre o valor (services/invoices.py)."""
+
+    id: uuid.UUID
+    number: str
+    status: InvoiceStatus
+
+
 class PayoutLine(BaseModel):
     id: uuid.UUID
     technician: Ref
@@ -59,6 +67,8 @@ class PayoutLine(BaseModel):
     # OS cancelada: o valor pendente não é previsão (só sai se a central decidir pagar).
     cancelled: bool = False
     ticket: PayoutTicketRef
+    # Nota fiscal do técnico que cobre este valor (a recusada solta o valor: volta a null).
+    invoice: PayoutInvoiceRef | None = None
 
 
 class PayoutSummary(BaseModel):

@@ -202,6 +202,15 @@ class PayoutStatus(StrEnum):
     PAID = "paid"  # pago
 
 
+class InvoiceStatus(StrEnum):
+    """Nota fiscal que o técnico parceiro envia pelo app (opcional; services/invoices.py). A recusa
+    é final: o técnico apaga a nota e envia outra."""
+
+    PENDING = "pending"  # aguardando conferência
+    CHECKED = "checked"  # conferida pela central
+    REJECTED = "rejected"  # recusada, com motivo
+
+
 class OfferStatus(StrEnum):
     """Oferta da OS com preço para um técnico parceiro (aceita pelo valor ou recusa, sem
     contraproposta). "expired" não é gravado: é a pendente com o prazo para responder vencido

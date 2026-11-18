@@ -43,5 +43,10 @@ class TicketPayout(UUIDPrimaryKey, Timestamps, Base):
     created_by_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL")
     )
+    # Nota fiscal do técnico que cobre este valor (services/invoices.py): no máximo uma. Sai ao
+    # recusar ou apagar a nota e quando o valor passa para outro técnico.
+    invoice_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("technician_invoices.id", ondelete="SET NULL"), index=True
+    )
 
     technician: Mapped[User] = relationship(foreign_keys=[technician_id], lazy="selectin")

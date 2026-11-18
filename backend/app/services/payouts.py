@@ -23,6 +23,7 @@ from app.db.base import utcnow
 from app.models.catalog import ServiceType
 from app.models.customer import Customer, Location
 from app.models.expense import TicketExpense
+from app.models.invoice import TechnicianInvoice
 from app.models.payout import TicketPayout
 from app.models.ticket import Ticket, TicketEvent
 from app.models.user import User
@@ -32,6 +33,7 @@ from app.schemas.payout import (
     MyEarnings,
     MyPayout,
     PayoutIn,
+    PayoutInvoiceRef,
     PayoutLine,
     PayoutList,
     PayoutSummary,
@@ -231,6 +233,8 @@ async def on_assignee_changed(
         if new_id is not None and paid_per_ticket and current is None:
             after = await _name(db, new_id)
             previous.technician_id = new_id
+            # A nota fiscal era de quem saiu: o valor chega ao novo técnico sem nota.
+            previous.invoice_id = None
             _event(
                 db,
                 ticket.id,
@@ -322,7 +326,23 @@ def my_payout(ticket: Ticket, user: User) -> MyPayout | None:
 
 def _line(row: Any) -> PayoutLine:
     payout: TicketPayout = row[0]
-    _, ticket_id, number, title, status, resolved_at, customer, location, city = row
+    (
+        _,
+        ticket_id,
+        number,
+        title,
+        status,
+        resolved_at,
+        customer,
+        location,
+        city,
+        invoice_id,
+        invoice_number,
+        invoice_status,
+    ) = row
+    invoice = None
+    if invoice_id is not None:
+        invoice = PayoutInvoiceRef(id=invoice_id, number=invoice_number, status=invoice_status)
     return PayoutLine(
         id=payout.id,
         technician=Ref(id=payout.technician.id, name=payout.technician.name),
@@ -342,6 +362,7 @@ def _line(row: Any) -> PayoutLine:
             city=city,
             resolved_at=resolved_at,
         ),
+        invoice=invoice,
     )
 
 
@@ -395,7 +416,8 @@ async def list_payouts(
         conds.append(when >= start)
     if end is not None:
         conds.append(when < end)
-    # Só as colunas da OS que a linha mostra (a OS inteira traria as ~19 relações dela).
+    # Só as colunas da OS que a linha mostra (a OS inteira traria as ~19 relações dela). A nota
+    # fiscal só vale se for do técnico do valor (a transferência já solta a ligação).
     stmt = (
         select(
             TicketPayout,
@@ -407,10 +429,20 @@ async def list_payouts(
             Customer.name,
             Location.name,
             Location.city,
+            TechnicianInvoice.id,
+            TechnicianInvoice.number,
+            TechnicianInvoice.status,
         )
         .join(Ticket, Ticket.id == TicketPayout.ticket_id)
         .outerjoin(Customer, Customer.id == Ticket.customer_id)
         .outerjoin(Location, Location.id == Ticket.location_id)
+        .outerjoin(
+            TechnicianInvoice,
+            and_(
+                TechnicianInvoice.id == TicketPayout.invoice_id,
+                TechnicianInvoice.technician_id == TicketPayout.technician_id,
+            ),
+        )
         .where(*conds)
         .order_by(when.desc(), TicketPayout.id)
         .limit(limit)

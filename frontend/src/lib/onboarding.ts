@@ -63,7 +63,7 @@ export function shareableInviteUrl(invite: { token?: string; url?: string | null
   return local ?? invite.url ?? null;
 }
 
-// Mudou o texto? Mude também PRIVACY_VERSION em backend/app/schemas/onboarding.py.
+// Mudou o texto? Mude também PRIVACY_VERSION em backend/app/schemas/onboarding.py (hoje "2026-11-18": a chave PIX).
 export const PRIVACY_NOTICE: { title: string; body: string }[] = [
   {
     title: "Quem trata seus dados",
@@ -71,7 +71,7 @@ export const PRIVACY_NOTICE: { title: string; body: string }[] = [
   },
   {
     title: "Quais dados",
-    body: "Os desta ficha: identificação (nome, CPF, nascimento e foto), contato, endereço, CNPJ ou MEI (se tiver), região de atendimento, experiência, skills, veículo e CNH, disponibilidade e a senha do app (que ninguém da equipe consegue ver).",
+    body: "Os desta ficha: identificação (nome, CPF, nascimento e foto), contato, endereço, CNPJ ou MEI (se tiver), região de atendimento, experiência, skills, veículo e CNH, disponibilidade, a senha do app (que ninguém da equipe consegue ver) e a chave PIX que você cadastrar no app para receber pelos chamados.",
   },
   {
     title: "Para quê",

@@ -10,7 +10,17 @@ import { STATUS } from "./constants";
 import { formatMoney, todayISO } from "./format";
 import { accessOf, can } from "./permissions";
 import { sessionStore } from "./session";
-import type { AccessItemKey, LiveTechnician, OfferRealtimeData, RealtimeEvent, TicketStatus, TrackingHistory, UUID } from "./types";
+import type {
+  AccessItemKey,
+  LiveTechnician,
+  OfferRealtimeData,
+  ProfileChangedData,
+  RealtimeEvent,
+  TicketStatus,
+  TrackingHistory,
+  UserChangeField,
+  UUID,
+} from "./types";
 import { copyText, GROUP_TEXT_COPIED, type GroupText, groupShareUrl, groupTextsQuery } from "./whatsapp";
 
 export type ConnectionState = "connecting" | "online" | "offline";
@@ -139,6 +149,45 @@ function offerNotice(event: RealtimeEvent, userId: string, byOther: boolean, oth
   return { ticketId: event.ticket_id, code, title: `${code}: ${who} recusou a oferta`, description: reason ? `Motivo: ${reason}` : undefined };
 }
 
+/** Campos do cadastro que, mudados pelo próprio técnico no app, viram aviso (o resto só atualiza as listas). */
+const PROFILE_NOTICE_PARTS: [UserChangeField, string][] = [
+  ["pix", "a chave PIX"],
+  ["email", "o e-mail de acesso"],
+  ["phone", "o celular"],
+];
+
+/** "a chave PIX", "a chave PIX e o celular", "a chave PIX, o e-mail de acesso e o celular". */
+function joinParts(parts: string[]): string {
+  return parts.length > 1 ? `${parts.slice(0, -1).join(", ")} e ${parts[parts.length - 1]}` : (parts[0] ?? "");
+}
+
+/**
+ * profile.changed pelo app (Meu cadastro): a chave PIX, o e-mail de login ou o celular mudaram. Uma conta
+ * invadida desviaria o pagamento: a troca da chave pede confirmação no grupo antes do próximo pagamento.
+ * O que a central muda e o que o técnico muda de foto, nome e endereço só atualizam as listas.
+ */
+function profileNotice(event: RealtimeEvent): NoticeDraft | null {
+  const data = (event.data ?? {}) as Partial<ProfileChangedData>;
+  const fields: unknown[] = Array.isArray(data.fields) ? data.fields : [];
+  if (data.via !== "app") return null;
+  const parts = PROFILE_NOTICE_PARTS.filter(([field]) => fields.includes(field)).map(([, part]) => part);
+  if (!parts.length) return null;
+  // A API manda só para quem tem Técnicos ou Pagamentos (a sessão aberta antes de mudar o perfil pode receber).
+  const technicians = sessionCan("base.technicians");
+  if (!technicians && !sessionCan("commercial.payouts")) return null;
+  const pix = fields.includes("pix");
+  return {
+    title: `${text(event.name) ?? "Um técnico"} alterou ${joinParts(parts)} pelo app`,
+    description: pix
+      ? "Confirme com ele no grupo antes do próximo pagamento."
+      : fields.includes("phone")
+        ? "Atualize o contato dele nos grupos do WhatsApp."
+        : undefined,
+    tone: pix ? "error" : undefined,
+    href: technicians && event.user_id ? `/tecnicos?tecnico=${encodeURIComponent(event.user_id)}` : "/pagamentos",
+  };
+}
+
 /**
  * Curadoria: só vira aviso o que alguém da central precisa ver. Salvar formulário, foto, assinatura,
  * apontamento, troca de técnico e o que o Sistema faz sozinho (fechamento automático) só atualizam a tela.
@@ -232,6 +281,8 @@ function noticeFor(event: RealtimeEvent, userId: string): NoticeDraft | null {
     case "onboarding.submitted":
       if (!sessionCan("base.onboarding")) return null;
       return { title: `Nova ficha de homologação: ${event.name ?? "técnico"}`, href: "/homologacao" };
+    case "profile.changed":
+      return profileNotice(event);
     default:
       return null;
   }
@@ -239,8 +290,14 @@ function noticeFor(event: RealtimeEvent, userId: string): NoticeDraft | null {
 
 // ------------------------------------------------------------------ o que cada evento desatualiza
 
+/**
+ * Cadastro do técnico mudou (profile.changed, pelo app ou pela central): o que mostra nome, contato, foto,
+ * região ou acesso dele. A chave PIX também em Pagamentos (e no cadastro em Técnicos, sob ["payouts"]).
+ */
+const PROFILE_KEYS = ["technicians", "users", "technician-favorites", "technician-suggest", "assignable", "tracking"];
+
 // Telas que listam OS ou dependem delas, além da própria OS: só as abertas buscam de novo.
-const ALL_EXTRA = ["expenses", "payouts", "quotes", "repairs", "reports", "projects", "project", "customer", "location", "technicians"];
+const ALL_EXTRA =["expenses", "payouts", "quotes", "repairs", "reports", "projects", "project", "customer", "location", "technicians"];
 const EXTRA_BY_FIELD: Record<string, string[]> = {
   expenses: ["expenses", "reports"],
   payouts: ["payouts", "reports"],
@@ -629,6 +686,10 @@ export function RealtimeProvider({
         invalidate(["quotes"]);
       } else if (type === "onboarding.submitted") {
         invalidate(["onboarding"]);
+      } else if (type === "profile.changed") {
+        for (const key of PROFILE_KEYS) invalidate([key]);
+        const fields = event.data?.fields;
+        if (Array.isArray(fields) && fields.includes("pix")) invalidate(["payouts"]);
       } else if (type === "part_request.created") {
         invalidate(["tickets"]);
         invalidate(["quotes"]);

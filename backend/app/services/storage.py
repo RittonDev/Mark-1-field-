@@ -32,25 +32,34 @@ def _safe_name(filename: str) -> str:
     return keep[-120:] or "arquivo"
 
 
-async def save_upload(ticket_id: uuid.UUID, upload: UploadFile) -> tuple[str, int]:
-    """Grava o arquivo e devolve (storage_key, tamanho em bytes)."""
-    key = f"tickets/{ticket_id}/{uuid.uuid4().hex}_{_safe_name(upload.filename or '')}"
+async def save_upload_in(
+    folder: str, upload: UploadFile, *, max_mb: int | None = None
+) -> tuple[str, int]:
+    """Grava o arquivo em `folder` ({folder}/{uuid}_{nome}) e devolve (storage_key, tamanho em
+    bytes). Limite: `max_mb` ou, sem ele, MAX_UPLOAD_MB."""
+    limit_mb = settings.MAX_UPLOAD_MB if max_mb is None else max_mb
+    key = f"{folder}/{uuid.uuid4().hex}_{_safe_name(upload.filename or '')}"
     dest = _root() / key
     await run_in_threadpool(dest.parent.mkdir, parents=True, exist_ok=True)
-    limit = settings.MAX_UPLOAD_MB * 1024 * 1024
+    limit = limit_mb * 1024 * 1024
     size = 0
     try:
         with dest.open("wb") as fh:
             while chunk := await upload.read(CHUNK):
                 size += len(chunk)
                 if size > limit:
-                    raise UploadTooLarge(f"Arquivo maior que {settings.MAX_UPLOAD_MB} MB")
+                    raise UploadTooLarge(f"Arquivo maior que {limit_mb} MB")
                 await run_in_threadpool(fh.write, chunk)
     except BaseException:
         # Grande demais, envio interrompido ou disco cheio: não sobra arquivo pela metade.
         dest.unlink(missing_ok=True)
         raise
     return key, size
+
+
+async def save_upload(ticket_id: uuid.UUID, upload: UploadFile) -> tuple[str, int]:
+    """Anexo da OS: grava em tickets/{id}/ e devolve (storage_key, tamanho em bytes)."""
+    return await save_upload_in(f"tickets/{ticket_id}", upload)
 
 
 def open_path(storage_key: str) -> Path:
@@ -97,6 +106,25 @@ def sniff_image(head: bytes) -> str | None:
             return mime
     if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
         return "image/webp"
+    return None
+
+
+# Começos que não são XML de documento: página, imagem vetorial ou script (abririam no navegador).
+_NOT_XML = (b"<!doctype html", b"<html", b"<svg", b"<script")
+
+
+def sniff_document(head: bytes) -> str | None:
+    """Tipo (MIME) de um documento pelo começo do arquivo (os primeiros 1024 bytes): a foto de
+    sniff_image, PDF (a assinatura %PDF- em qualquer ponto do começo, como os leitores aceitam) ou
+    XML (começa com "<" depois do BOM e dos espaços, sem ser HTML, SVG ou script). O resto: None."""
+    image = sniff_image(head)
+    if image is not None:
+        return image
+    if b"%PDF-" in head[:1024]:
+        return "application/pdf"
+    text = head.removeprefix(b"\xef\xbb\xbf").lstrip()
+    if text.startswith(b"<") and not text[:16].lower().startswith(_NOT_XML):
+        return "application/xml"
     return None
 
 
