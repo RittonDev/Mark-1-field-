@@ -47,7 +47,8 @@
         }
       ],
       "expo-notifications",
-      "expo-font"
+      "expo-font",
+      "expo-background-task"
     ]
   }
 }
