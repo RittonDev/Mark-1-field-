@@ -15,6 +15,7 @@ import { Combobox, searchText, type ComboItem } from "@/components/new-ticket/Co
 import { serviceTypeTiming } from "@/components/new-ticket/ServiceTypePicker";
 import { readStored, writeStored } from "@/components/new-ticket/storage";
 import { HelpersField, SuggestedTechnicians } from "@/components/new-ticket/SuggestedTechnicians";
+import { OffersBlock } from "@/components/ticket/OffersCard";
 import { PayoutLine } from "@/components/ticket/PayoutsCard";
 import { busyTitle, isVersionConflict } from "@/components/ticket/useConflictHandler";
 import { useNow } from "@/components/useNow";
@@ -517,6 +518,9 @@ export function GeneralTab({
           ? { title: "Trocar o técnico em campo?", text: `A OS volta para Atribuído e o atendimento de ${currentTech.name} é interrompido.` }
           : null
       : null;
+  // Colocar o técnico na mão fecha as ofertas em aberto da OS (a API cancela e os técnicos veem no app).
+  const openOffers = server.open_offers ?? 0;
+  const offersClosing = assigneeChanged && Boolean(form.assigneeId) && openOffers > 0;
 
   // ── validação (as mesmas regras da API, com a mensagem ao lado do campo) ──
   const startAt = join(form.startDate, form.startTime);
@@ -1112,11 +1116,22 @@ export function GeneralTab({
             />
           </div>
           {assigneeWarning ? <Caution className="col-span-12">{assigneeWarning.text}</Caution> : null}
+          {offersClosing ? (
+            <Caution className="col-span-12">
+              {openOffers === 1
+                ? "Ao salvar, a oferta em aberto é cancelada: o técnico vê no app que a OS foi atribuída."
+                : `Ao salvar, as ${openOffers} ofertas em aberto são canceladas: os técnicos veem no app que a OS foi atribuída.`}
+            </Caution>
+          ) : null}
           {server.assignee ? (
             <div className="col-span-12">
               <PayoutLine ticket={server} />
             </div>
-          ) : null}
+          ) : (
+            // Sem técnico: as ofertas com preço (quem aceitar primeiro pelo app fica com a OS). Cada ação
+            // grava na hora, fora do FormState: nada daqui entra no Salvar nem conta como alteração.
+            <OffersBlock ticket={server} locked={dirty} className="col-span-12" />
+          )}
 
           <div className="col-span-12">
             {suggestionsShown ? (

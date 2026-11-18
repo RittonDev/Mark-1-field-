@@ -11,6 +11,7 @@ import {
   Inbox,
   Navigation,
   RotateCcw,
+  Send,
   SquarePen,
   Timer,
   X,
@@ -220,6 +221,8 @@ export function TicketHeader({
   const tech = ticket.assignee;
   const open = isOpenStatus(ticket.status);
   const needsTech = open && ticket.status !== "on_hold_customer" && ticket.status !== "on_hold_vendor";
+  // Sem técnico, mas com oferta esperando resposta no app: o chip diz isso, sem o âmbar de "falta técnico".
+  const offers = tech ? 0 : (ticket.open_offers ?? 0);
   const loc = ticket.location;
   const place = [ticket.customer?.name, loc?.name].filter(Boolean).join(" · ");
   const address =
@@ -394,6 +397,21 @@ export function TicketHeader({
                     <span>sem acesso</span>
                   </>
                 ) : null}
+              </button>
+            ) : offers > 0 ? (
+              <button
+                type="button"
+                onClick={() => onJump("geral", ASSIGNEE_FIELD)}
+                title={
+                  offers === 1
+                    ? "Sem técnico: oferta enviada, aguardando o técnico aceitar pelo app (Ofertas, na aba Geral)"
+                    : `Sem técnico: ${offers} ofertas enviadas, aguardando os técnicos aceitarem pelo app (Ofertas, na aba Geral)`
+                }
+                className={clsx(CHIP, FULL, NEUTRAL, NEUTRAL_ACTION, FOCUS)}
+              >
+                <Send aria-hidden className="size-3.5 shrink-0 opacity-80" />
+                <span className="sr-only">Técnico: sem técnico, </span>
+                <span className="truncate">{offers === 1 ? "Oferta enviada" : `${offers} ofertas enviadas`}</span>
               </button>
             ) : (
               <button

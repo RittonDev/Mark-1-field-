@@ -78,6 +78,7 @@ export default function RootLayout() {
           <Stack.Protected guard={signedIn && !mustChange}>
             <Stack.Screen name="index" options={{ headerShown: false }} />
             <Stack.Screen name="ticket/[id]" options={{ title: "OS" }} />
+            <Stack.Screen name="oferta/[id]" options={{ title: "Oferta" }} />
             <Stack.Screen name="conta" options={{ title: "Conta" }} />
             <Stack.Screen name="termo-rastreamento" options={{ title: "Uso da localização", presentation: "modal" }} />
             <Stack.Screen name="formulario/[ticketId]/[formId]" options={{ title: "Formulário" }} />

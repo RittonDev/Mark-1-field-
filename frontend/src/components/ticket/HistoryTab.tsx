@@ -4,6 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import {
   ArrowRightLeft,
   Hand,
+  Handshake,
+  CircleOff,
   CirclePlus,
   ClipboardCheck,
   ClipboardList,
@@ -22,7 +24,9 @@ import {
   Package,
   Paperclip,
   Pencil,
+  Send,
   ShieldCheck,
+  ThumbsDown,
   Trash2,
   UserCog,
   Users,
@@ -33,7 +37,17 @@ import { EmptyState, ErrorBox, Skeleton } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { EVENT_TYPE, LEVEL, PRIORITY, RESPONSIBILITY, STATUS, TICKET_TYPE } from "@/lib/constants";
 import { formatDateTime, formatMinutes, formatMoney } from "@/lib/format";
-import type { Level, Responsibility, TicketEvent, TicketEventType, TicketPriority, TicketStatus, TicketType, UUID } from "@/lib/types";
+import type {
+  Level,
+  OfferCancelReason,
+  Responsibility,
+  TicketEvent,
+  TicketEventType,
+  TicketPriority,
+  TicketStatus,
+  TicketType,
+  UUID,
+} from "@/lib/types";
 import { eventPoint, km, storeDistance } from "./geo";
 
 type Icon = React.ComponentType<{ className?: string }>;
@@ -65,6 +79,10 @@ const ICONS: Record<TicketEventType, Icon> = {
   times_corrected: Clock,
   payout_set: Wallet,
   payout_removed: Wallet,
+  offer_sent: Send,
+  offer_accepted: Handshake,
+  offer_declined: ThumbsDown,
+  offer_cancelled: CircleOff,
 };
 
 /** Eventos que a API grava e o tipo do front ainda não lista (pedido de peça, autorização antiga). */
@@ -79,6 +97,56 @@ const EXTRA_LABELS: Record<string, string> = {
   part_request_updated: "atualizou o pedido de peça",
   authorization_recorded: "registrou a autorização do cliente",
 };
+
+/** O técnico entrou na OS aceitando a oferta com preço (o `assigned` do aceite traz `data.via = "offer"`). */
+const viaOffer = (event: TicketEvent) => event.event_type === "assigned" && event.data?.via === "offer";
+
+/** Ícone do evento: a atribuição pela oferta leva o do aceite. */
+function iconOf(event: TicketEvent): Icon {
+  if (viaOffer(event)) return Handshake;
+  return ICONS[event.event_type] ?? EXTRA_ICONS[event.event_type] ?? History;
+}
+
+/**
+ * Oferta encerrada sem a resposta do técnico, pelo motivo (`data.reason`). O "outro técnico aceitou" não
+ * tem autor (sai como "Sistema"): o motivo vai no texto para não parecer que alguém cancelou.
+ */
+const OFFER_CLOSED: Partial<Record<OfferCancelReason, string>> = {
+  central: "cancelou a oferta",
+  taken: "encerrou a oferta: outro técnico aceitou a OS",
+  assigned: "encerrou a oferta ao definir o técnico da OS",
+};
+
+/** "OS cancelada" fica como está; "A OS foi encerrada" vira "a OS foi encerrada" (meio da frase). */
+function lowerFirst(text: string): string {
+  return /^[A-ZÀ-Ý][a-zà-ÿ\s]/.test(text) ? text.charAt(0).toLowerCase() + text.slice(1) : text;
+}
+
+/** Texto do offer_cancelled pelo motivo; a OS encerrada usa a nota ("OS cancelada", "OS resolvida"...). */
+function offerClosedLabel(event: TicketEvent): string {
+  const reason = str(event.data?.reason) ?? event.to_value;
+  if (reason === "ticket_closed") {
+    const why = str(event.note);
+    return `encerrou a oferta: ${why ? lowerFirst(why) : "a OS foi encerrada"}`;
+  }
+  return (reason && OFFER_CLOSED[reason as OfferCancelReason]) || EVENT_TYPE.offer_cancelled;
+}
+
+/** Técnicos das ofertas do evento, sem repetir (offer_sent e offer_cancelled trazem a lista). */
+function offerPeople(value: unknown): { name: string; amount: string | null }[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const row = item as Record<string, unknown>;
+    const name = str(row.technician);
+    return name ? [{ name, amount: money(row.amount) }] : [];
+  });
+}
+
+/** "A", "A e B", "A, B e C". */
+function joinNames(names: string[]): string {
+  return names.length > 1 ? `${names.slice(0, -1).join(", ")} e ${names[names.length - 1]}` : (names[0] ?? "");
+}
 
 const PART_STATUS: Record<string, string> = {
   open: "aberto",
@@ -197,8 +265,11 @@ function label(event: TicketEvent): string {
       if (kind === "photo") return "excluiu a foto";
       break;
     case "assigned":
+      if (viaOffer(event)) return "assumiu a OS pela oferta";
       if (technicianRemoved(event)) return "tirou o técnico";
       return event.from_value || str(data.from_name) ? "trocou o técnico" : "definiu o técnico";
+    case "offer_cancelled":
+      return offerClosedLabel(event);
     case "unproductive_visit":
       return "registrou visita improdutiva";
     case "quote_approved":
@@ -220,7 +291,21 @@ function actorName(event: TicketEvent): string {
     const by = str(data.by);
     return by ? `${by} (cliente)` : "Cliente";
   }
+  // Aceite e recusa são do técnico da oferta (o nome também vem nos dados).
+  if (event.event_type === "offer_accepted" || event.event_type === "offer_declined") return str(data.technician) ?? "Técnico";
   return str(data.source) === "fieldcontrol" ? "Field Control" : "Sistema";
+}
+
+/**
+ * A nota embaixo do evento. Na oferta, o recado (no envio) e o motivo (na recusa) ganham o nome; o
+ * motivo do encerramento já está no texto, e o "Aceitou a oferta" da atribuição também.
+ */
+function noteOf(event: TicketEvent): string | null {
+  const note = event.note?.trim() ? event.note : null;
+  if (!note || viaOffer(event) || event.event_type === "offer_cancelled") return null;
+  if (event.event_type === "offer_sent") return `Recado: ${note}`;
+  if (event.event_type === "offer_declined") return `Motivo: ${note}`;
+  return note;
 }
 
 /** "Valor principal · detalhe · detalhe": o primeiro em destaque. */
@@ -259,6 +344,8 @@ function Detail({ event }: { event: TicketEvent }) {
       );
     }
     case "assigned": {
+      // Pela oferta: quem assumiu é o próprio autor (o texto já diz).
+      if (viaOffer(event)) return null;
       const to = personName(data.to_name ?? data.assignee_name, event.to_value);
       const from = personName(data.from_name ?? data.previous_assignee_name, event.from_value);
       if (technicianRemoved(event)) return from ? <Joined parts={[from]} /> : null;
@@ -297,6 +384,33 @@ function Detail({ event }: { event: TicketEvent }) {
     case "payout_set":
     case "payout_removed":
       return <Joined parts={[str(data.technician), money(data.amount)]} />;
+    case "offer_sent": {
+      // "R$ 90,00 · para Ana, Bruno e Carla · responder até 18/11/2026 15:30"
+      const people = offerPeople(data.offers).map((p) => p.name);
+      const expires = str(data.expires_at);
+      const replaced = Array.isArray(data.replaced) ? data.replaced.map(String) : [];
+      return (
+        <Joined
+          parts={[
+            money(data.amount) ?? money(event.to_value),
+            people.length ? `para ${joinNames(people)}` : null,
+            expires ? `responder até ${formatDateTime(expires)}` : "sem prazo",
+            replaced.length ? `no lugar da oferta anterior de ${joinNames(replaced)}` : null,
+          ]}
+        />
+      );
+    }
+    case "offer_accepted":
+    case "offer_declined":
+      // O técnico é o autor; aqui, o valor.
+      return <Joined parts={[money(data.amount) ?? money(event.to_value)]} />;
+    case "offer_cancelled": {
+      // De quem eram as ofertas e o valor (um só quando todas tinham o mesmo).
+      const people = offerPeople(data.offers);
+      const amounts = new Set(people.map((p) => p.amount).filter(Boolean));
+      if (amounts.size > 1) return <Joined parts={people.map((p) => (p.amount ? `${p.name} (${p.amount})` : p.name))} />;
+      return <Joined parts={[joinNames(people.map((p) => p.name)) || null, people[0]?.amount]} />;
+    }
     case "worklog_added":
       return typeof data.minutes === "number" ? <Joined parts={[formatMinutes(data.minutes)]} /> : null;
   }
@@ -404,7 +518,8 @@ export function HistoryTab({ ticketId, store = null }: { ticketId: UUID; store?:
   return (
     <ol className="relative ml-3 border-l border-line">
       {items.map((event) => {
-        const Icon = ICONS[event.event_type] ?? EXTRA_ICONS[event.event_type] ?? History;
+        const Icon = iconOf(event);
+        const note = noteOf(event);
         const point = event.actor?.role === "technician" ? eventPoint(event.data) : null;
         const meters = point ? storeDistance(event.data, store) : null;
         return (
@@ -418,9 +533,9 @@ export function HistoryTab({ ticketId, store = null }: { ticketId: UUID; store?:
               <Detail event={event} />
             </div>
             <p className="mt-0.5 text-xs text-ink-muted">{formatDateTime(event.created_at)}</p>
-            {event.note ? (
+            {note ? (
               <p className="mt-1.5 rounded-md bg-surface-2 px-2.5 py-1.5 text-sm whitespace-pre-wrap text-ink">
-                {event.note}
+                {note}
               </p>
             ) : null}
             {point ? (

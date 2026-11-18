@@ -13,12 +13,15 @@
 //
 // Gatilhos: login/abertura do app, rede voltando, app voltando ao primeiro plano,
 // cada ação do técnico, cada evento do WebSocket e um intervalo de segurança.
+//
+// Depois do download, a rodada confere as ofertas de OS com preço (GET /me/offers, lib/offers.ts).
 
 import NetInfo from "@react-native-community/netinfo";
 import { randomUUID } from "expo-crypto";
 import { useSyncExternalStore } from "react";
 import { AppState, type AppStateStatus } from "react-native";
-import { api, ApiError, errorMessage, uploadFile } from "./api";
+import { api, ApiError, errorMessage, serverNow, uploadFile } from "./api";
+import { notifyDataChanged } from "./changes";
 import { STATUS } from "./constants";
 import {
   addNotice,
@@ -83,6 +86,20 @@ import { formatShort } from "./format";
 import { pendingRequiredForms } from "./forms";
 import { haptic } from "./haptics";
 import { isDone, isHelper } from "./lists";
+import {
+  announceOffers,
+  applyOfferList,
+  dropOffer,
+  offersChanged,
+  offersDue,
+  offersFetchDone,
+  offersFetchStart,
+  putOffer,
+  resetOffersState,
+  setOfferAccepted,
+  setScopeRead,
+  type OfferListOutcome,
+} from "./offers";
 import { syncOnsiteAlerts } from "./onsiteAlerts";
 import { userRef } from "./ops";
 import { deleteAllPhotoFiles, deletePhotoFile, persistPhoto, photoExists } from "./photoFiles";
@@ -106,7 +123,9 @@ import { showToast, type ToastOptions } from "./toast";
 import { flushPendingShiftEnd, flushPings, resumeTracking, updateTrackingMode } from "./tracking";
 import type {
   Attachment,
+  FieldOffer,
   FieldRules,
+  OfferDecline,
   RealtimeEvent,
   TicketDetail,
   TicketTransitionPayload,
@@ -365,6 +384,8 @@ async function runOnce(myEpoch: number, manual: boolean) {
     await sendPhase(round, () => uploadPhotos(round));
     await sendPhase(round, () => pushWithSignatures(round));
     await pullChanges(round);
+    // Depois do pull: a OS em que a central pôs o técnico já está no aparelho quando a oferta dela fecha.
+    await refreshOffers(round, manual);
     await revalidateHelperTickets(round);
     await refreshFieldRules(round);
     await refreshReasons(round);
@@ -731,6 +752,12 @@ function announceProblems(problems: string[]) {
 let fullRequested = 0;
 let fullDone = 0;
 
+/**
+ * OS sendo aceitas por oferta agora (acceptOffer): a resposta do aceite grava a OS e a tela diz "OS aceita";
+ * um download que a traga no meio do caminho não a anuncia de novo como "Nova OS para você".
+ */
+const acceptingTickets = new Set<UUID>();
+
 async function pullChanges(round: Round) {
   const stored = await getKv(SINCE_KEY);
   // Sem cursor (primeiro acesso ou banco refeito por uma atualização do app) vale como "Baixar tudo".
@@ -776,7 +803,7 @@ async function pullChanges(round: Round) {
       changed,
     );
     since = data.server_time;
-    announceFieldNews(news);
+    announceFieldNews(news.filter((n) => !(n.kind === "assigned" && acceptingTickets.has(n.id))));
     announceRemoved(revoked, removed);
     if (last) {
       if (full) fullDone = Math.max(fullDone, wanted);
@@ -981,6 +1008,98 @@ async function revalidateHelperTickets(round: Round) {
 export async function storeServerTicket(ticket: TicketDetail) {
   const ctx = sessionCtx();
   await write(ctx, (db) => saveServerTicket(db, ticket, ctx.user));
+}
+
+// ───────────────────────────── ofertas de OS ─────────────────────────────
+
+/**
+ * Ofertas de OS com preço (GET /me/offers), depois do pull. A busca não se repete a cada rodada: valem o
+ * aviso do tempo real (ticket.offer), o "puxar para atualizar" e, sem eles, uma conferência por minuto.
+ * Falta de rede para a rodada; outro problema (servidor sem a rota, erro do servidor) não derruba o sync.
+ */
+async function refreshOffers(round: Round, manual: boolean) {
+  if (!offersDue(manual)) return;
+  const mark = offersFetchStart();
+  try {
+    await fetchOffers(round);
+  } catch (error) {
+    if (error instanceof WriteCancelled || (error instanceof ApiError && error.status === 0)) throw error;
+    console.warn("Não foi possível atualizar as ofertas de OS", error);
+  }
+  offersFetchDone(mark);
+}
+
+/** Busca a lista, guarda no aparelho e avisa a oferta nova e a que fechou sem o técnico responder. */
+async function fetchOffers(ctx: Ctx) {
+  ensureAlive(ctx);
+  const list = await api.get<FieldOffer[]>("/me/offers");
+  let outcome = null as OfferListOutcome | null;
+  await write(
+    ctx,
+    async (db) => {
+      outcome = await applyOfferList(db, list, ctx.user.id, serverNow());
+    },
+    false,
+  );
+  if (!outcome) return;
+  // Lista igual à guardada não acorda as telas (a conferência roda o dia todo).
+  if (outcome.changed) notifyDataChanged();
+  announceOffers(outcome);
+}
+
+/** Busca as ofertas agora, fora da rodada (a tela da oferta, depois que o servidor recusou a resposta). */
+export async function refreshOffersNow() {
+  const mark = offersFetchStart();
+  await fetchOffers(sessionCtx());
+  offersFetchDone(mark);
+}
+
+/** Abre a oferta (GET /me/offers/{id}): o servidor grava a leitura, sem a qual ele recusa o aceite. */
+export async function openOffer(offerId: UUID): Promise<FieldOffer> {
+  const ctx = sessionCtx();
+  const offer = await api.get<FieldOffer>(`/me/offers/${offerId}`);
+  await write(ctx, (db) => putOffer(db, offer));
+  return offer;
+}
+
+/** Oferta que não existe mais para o técnico (404): sai do aparelho. */
+export async function forgetOffer(offerId: UUID) {
+  const ctx = sessionCtx();
+  await write(ctx, (db) => dropOffer(db, offerId));
+}
+
+/**
+ * "Aceitar por R$ X" (só online). A OS volta já atribuída ao técnico, agora com cliente, loja e endereço, e
+ * entra no aparelho com a própria resposta: o download seguinte não a anuncia como "Nova OS para você".
+ */
+export async function acceptOffer(offerId: UUID, ticketId: UUID): Promise<TicketDetail> {
+  const ctx = sessionCtx();
+  acceptingTickets.add(ticketId);
+  try {
+    const ticket = await api.post<TicketDetail>(`/me/offers/${offerId}/accept`);
+    await write(ctx, async (db) => {
+      await saveServerTicket(db, ticket, ctx.user);
+      await setOfferAccepted(db, offerId, new Date().toISOString());
+    });
+    return ticket;
+  } finally {
+    acceptingTickets.delete(ticketId);
+  }
+}
+
+/** "Recusar" com o motivo escolhido (só online). */
+export async function declineOffer(offerId: UUID, reason: string | null): Promise<FieldOffer> {
+  const ctx = sessionCtx();
+  const body: OfferDecline = { reason };
+  const offer = await api.post<FieldOffer>(`/me/offers/${offerId}/decline`, body);
+  await write(ctx, (db) => putOffer(db, offer));
+  return offer;
+}
+
+/** O técnico abriu o escopo da oferta ("Escopo lido"): só então o app libera o aceite. */
+export async function markOfferScopeRead(offerId: UUID) {
+  const ctx = sessionCtx();
+  await write(ctx, (db) => setScopeRead(db, offerId));
 }
 
 // ───────────────────────────── fotos ─────────────────────────────
@@ -1481,6 +1600,8 @@ let wsDebounce: ReturnType<typeof setTimeout> | undefined;
 async function handleRealtimeEvent(event: RealtimeEvent) {
   const user = session.get().user;
   if (!user) return;
+  // Oferta de OS nova, aceita por outro técnico ou cancelada (o evento vem sem versão): a rodada busca a lista.
+  if (event.type === "ticket.offer") offersChanged();
   const ticketId = event.ticket_id;
   if (ticketId && typeof event.version === "number") {
     const known = await getServerVersion(ticketId).catch(() => null);
@@ -1508,6 +1629,8 @@ function resetSessionState() {
   forceReasons = false;
   fullRequested = 0;
   fullDone = 0;
+  acceptingTickets.clear();
+  resetOffersState();
   clearTimeout(wsDebounce);
 }
 
