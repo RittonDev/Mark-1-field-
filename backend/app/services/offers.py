@@ -161,9 +161,27 @@ _SEPARATOR = f"[{re.escape(_SEPARATORS)}]"
 _SEPARATOR_RUN = re.compile(rf"\s*({_SEPARATOR})(?:\s*{_SEPARATOR})+\s*")
 # "PDV parado , urgente" (o nome saiu antes da vírgula) → "PDV parado, urgente".
 _SPACE_BEFORE_PUNCTUATION = re.compile(r"\s+([,;:])")
-_EMPTY_BRACKETS = re.compile(r"\(\s*\)|\[\s*\]")
-# Código da loja curto ("41") também é número de PDV, andar...: só sai a partir de 3 caracteres.
+# Parênteses, colchetes e aspas que ficaram vazios ("Troca de PDV (Matriz)", "PDV "Matriz"").
+_PAIRS = ("()", "[]", "{}", "<>", '""', "''", "“”", "‘’", "«»")
+_EMPTY_PAIR = re.compile(
+    "|".join(rf"{re.escape(a)}(?:\s|{_SEPARATOR})*{re.escape(b)}" for a, b in _PAIRS)
+)
+# O separador que sobrou colado no parêntese: "(, 2º andar)" e "(2º andar - )" → "(2º andar)".
+# Só com espaço depois (na abertura) ou antes (no fechamento): "(-10%)" fica.
+_AFTER_OPEN = re.compile(rf"([(\[{{])\s*(?:{_SEPARATOR}\s*)*{_SEPARATOR}\s+")
+_BEFORE_CLOSE = re.compile(rf"(?:\s*[,;]|\s+{_SEPARATOR})\s*([)\]}}])")
+# Palavra que é só sinal e ficou solta numa ponta ("Troca de PDV &", "( Troca"): sai.
+_DANGLING = frozenset(f"{_SEPARATORS}+&@#()[]{{}}<>\"'“”‘’«»")
+# Código da loja e nº do chamado do cliente curtos ("41") também são número de PDV, andar...:
+# só saem a partir de 3 caracteres.
 _CODE_MIN = 3
+# Sufixo da razão social ("Cliente Exemplo Ltda", "S.A.", "S/A", "EIRELI", "ME", "EPP"): o título
+# costuma trazer o nome sem ele, que também sai.
+_COMPANY_SUFFIX = re.compile(
+    r"(?:\s*[,\-–]\s*|\s+)"
+    r"(?:ltda\.?(?:\s*[\-–]?\s*(?:me|epp)\.?)?|s\.?\s?/?\s?a\.?|eireli|epp|me)\s*$",
+    re.IGNORECASE,
+)
 
 
 def _fold(text: str) -> tuple[str, list[int]]:
@@ -218,16 +236,19 @@ def _cut_name(text: str, name: str) -> str:
 
 
 def _tidy(text: str) -> str:
-    """O que sobrou do corte: sem parênteses vazios, separadores repetidos ou nas pontas, nem
-    preposição solta no fim."""
-    text = " ".join(_EMPTY_BRACKETS.sub(" ", text).split())
+    """O que sobrou do corte: sem parênteses ou aspas vazios, separadores repetidos, colados no
+    parêntese ou nas pontas, sinal solto nas pontas nem preposição solta no fim."""
+    text = " ".join(_EMPTY_PAIR.sub(" ", text).split())
     text = _SEPARATOR_RUN.sub(
         lambda m: f"{m.group(1)} " if m.group(1) in ",;:" else f" {m.group(1)} ", text
     )
     text = _SPACE_BEFORE_PUNCTUATION.sub(r"\1", text)
+    text = _BEFORE_CLOSE.sub(r"\1", _AFTER_OPEN.sub(r"\1", text))
     while True:
         words = text.strip(f"{_SEPARATORS} ").split()
-        while words and _fold(words[-1])[0] in _TRAILING_LINKS:
+        while words and set(words[0]) <= _DANGLING:
+            words.pop(0)
+        while words and (set(words[-1]) <= _DANGLING or _fold(words[-1])[0] in _TRAILING_LINKS):
             words.pop()
         tidy = " ".join(words)
         if tidy == text:
@@ -236,18 +257,23 @@ def _tidy(text: str) -> str:
 
 
 def _hidden_names(ticket: Ticket) -> list[str]:
-    """O que o técnico de fora não lê: nome e código da loja, cliente, projeto e nº do chamado do
-    cliente. O mais longo primeiro (a loja "Cliente Exemplo Matriz" sai inteira)."""
+    """O que o técnico de fora não lê: nome e código da loja, cliente (também sem o sufixo da
+    razão social), projeto e nº do chamado do cliente. O mais longo primeiro (a loja "Cliente
+    Exemplo Matriz" sai inteira)."""
     store, customer, project = ticket.location, ticket.customer, ticket.project
     code = (store.code or "").strip() if store is not None else ""
+    reference = (ticket.client_reference or "").strip()
+    customer_name = " ".join((customer.name or "").split()) if customer is not None else ""
+    short_name = _COMPANY_SUFFIX.sub("", customer_name).strip()
     names = {
         " ".join(name.split())
         for name in (
             store.name if store is not None else None,
             code if len(code) >= _CODE_MIN else None,
-            customer.name if customer is not None else None,
+            customer_name,
+            short_name if len(short_name) >= TITLE_MIN else None,
             project.name if project is not None else None,
-            ticket.client_reference,
+            reference if len(reference) >= _CODE_MIN else None,
         )
         if name and name.strip()
     }

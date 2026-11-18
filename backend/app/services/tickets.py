@@ -31,6 +31,7 @@ from sqlalchemy import (
     select,
     update,
 )
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, noload, raiseload
@@ -1143,6 +1144,24 @@ async def _helper_users(
     return [found[i] for i in wanted]
 
 
+async def _check_assignee_not_added(
+    db: AsyncSession, ticket: Ticket, added_ids: set[uuid.UUID]
+) -> None:
+    """Com a OS travada: quem entra na visita não pode ter virado o responsável depois que a OS
+    foi lida (aceitou a oferta enquanto a central salvava). Mudar só os outros técnicos não muda
+    a versão da OS, então nada mais pegaria: ele ficaria nos dois papéis. 409, como na versão.
+
+    Compara com o responsável que esta sessão leu ou gravou por último, não com a mudança ainda
+    não gravada do mesmo salvamento (trocar o responsável e pôr o antigo na visita vale)."""
+    history = sa_inspect(ticket).attrs.assignee_id.history
+    read = next(iter(history.deleted or history.unchanged or ()), None)
+    now_id, version = (
+        await db.execute(select(Ticket.assignee_id, Ticket.version).where(Ticket.id == ticket.id))
+    ).one()
+    if now_id is not None and now_id != read and now_id in added_ids:
+        raise VersionConflict(version)
+
+
 async def _set_helpers(
     db: AsyncSession, ticket: Ticket, ids: list[uuid.UUID], actor: User, *, allow: bool
 ) -> bool:
@@ -1183,6 +1202,7 @@ async def _set_helpers(
             note=OFFER_HELPER_NOTE,
             technician_ids=[u.id for u in added],
         )
+        await _check_assignee_not_added(db, ticket, {u.id for u in added})
     data = {"added": [u.name for u in added], "removed": [h.name for h in removed]}
     # Os ids ficam no histórico: o sync do app avisa quem saiu (revoked_ticket_ids).
     ids = {"added_ids": [str(u.id) for u in added], "removed_ids": [str(h.id) for h in removed]}
