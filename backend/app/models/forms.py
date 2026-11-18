@@ -24,10 +24,15 @@ class FormTemplate(UUIDPrimaryKey, Timestamps, Base):
 
     name: Mapped[str] = mapped_column(String(160))
     description: Mapped[str | None] = mapped_column(Text)
-    # [{id, type, label, help, required, options, min_photos, max_photos}]
+    # [{id, type, label, help, required, options, min_photos, max_photos, prefill?}]; `prefill` (a
+    # resposta automática com um dado da OS) só é gravado quando preenchido.
     fields: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
-    # Tipos de serviço em que o formulário é sugerido (a gestão decide se anexa).
+    # Tipos de OS em que o formulário entra sozinho (services/forms.py, linked_templates).
     service_type_ids: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    # Categorias em que o formulário entra sozinho, valendo também as subcategorias.
+    category_ids: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default="[]")
+    # Entra na OS como obrigatório (padrão) ou opcional; a gestão ajusta em cada OS.
+    default_required: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     # Ao anexar como obrigatório, a OS passa a exigir a assinatura do responsável no local.
     requires_signature: Mapped[bool] = mapped_column(Boolean, default=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
@@ -44,12 +49,15 @@ class TicketForm(UUIDPrimaryKey, Timestamps, Base):
         ForeignKey("tickets.id", ondelete="CASCADE"), index=True
     )
     template_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("form_templates.id", ondelete="SET NULL")
+        ForeignKey("form_templates.id", ondelete="SET NULL"), index=True
     )
     template_version: Mapped[int] = mapped_column(Integer, default=1)
     name: Mapped[str] = mapped_column(String(160))
     fields: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
     required: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Entrou sozinho (pelo tipo de OS ou pela categoria). Só este sai sozinho da OS que ainda não
+    # começou, e só sem resposta nem foto; o posto à mão (ou migrado) nunca sai sozinho.
+    auto_attached: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     status: Mapped[FormStatus] = mapped_column(str_enum(FormStatus), default=FormStatus.PENDING)
     answers: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

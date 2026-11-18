@@ -33,6 +33,39 @@ FIELD_TYPE_LABEL: dict[str, str] = {
     "photo": "Fotos",
 }
 
+# Resposta automática: a pergunta já vem preenchida com um dado da OS que o técnico já vê (ele
+# corrige se precisar). Nada de nº do chamado do cliente, CNPJ, contato ou valores.
+PrefillSource = Literal[
+    "location_name",
+    "location_code",
+    "customer",
+    "address",
+    "city",
+    "ticket_code",
+    "technician",
+    "service_type",
+    "visit_date",
+]
+
+PREFILL_LABEL: dict[str, str] = {
+    "location_name": "Nome da loja",
+    "location_code": "Código da loja",
+    "customer": "Cliente",
+    "address": "Endereço do atendimento",
+    "city": "Cidade e UF",
+    "ticket_code": "Nº da OS",
+    "technician": "Técnico responsável",
+    "service_type": "Tipo de OS",
+    "visit_date": "Data da visita",
+}
+
+TEXT_FIELD_TYPES: tuple[str, ...] = ("text", "textarea")
+
+
+def prefill_types(source: str) -> tuple[str, ...]:
+    """Tipos de pergunta que aceitam a fonte: texto aceita todas; data, só a data da visita."""
+    return (*TEXT_FIELD_TYPES, "date") if source == "visit_date" else TEXT_FIELD_TYPES
+
 
 class FormField(BaseModel):
     id: str = Field(min_length=1, max_length=40, pattern=r"^[A-Za-z0-9_-]+$")
@@ -43,6 +76,8 @@ class FormField(BaseModel):
     options: list[str] = Field(default_factory=list, max_length=30)
     min_photos: int = Field(default=0, ge=0, le=20)
     max_photos: int = Field(default=10, ge=1, le=30)
+    # Resposta automática (ver PrefillSource). Combinação que o tipo não aceita vira null.
+    prefill: PrefillSource | None = None
 
     @model_validator(mode="after")
     def _check(self) -> "FormField":
@@ -59,7 +94,19 @@ class FormField(BaseModel):
                 raise ValueError(f'"{self.label}": mínimo de fotos maior que o máximo')
         if self.type == "section":
             self.required = False
+        if self.prefill is not None and self.type not in prefill_types(self.prefill):
+            self.prefill = None
         return self
+
+
+def field_dump(field: FormField) -> dict[str, Any]:
+    """O campo como fica gravado no JSON do modelo: sem `prefill` quando não há resposta
+    automática. Assim o JSON dos modelos antigos não muda de forma e salvar um deles não sobe a
+    versão à toa (nem faz o "levar às OS que não começaram" ver diferença onde não há)."""
+    data = field.model_dump()
+    if data.get("prefill") is None:
+        data.pop("prefill", None)
+    return data
 
 
 def _unique_ids(fields: list[FormField]) -> list[FormField]:
@@ -75,7 +122,13 @@ class FormTemplateIn(BaseModel):
     name: str = Field(min_length=3, max_length=160)
     description: str | None = Field(default=None, max_length=2000)
     fields: list[FormField] = Field(min_length=1, max_length=100)
+    # Tipos de OS em que o formulário entra sozinho.
     service_type_ids: list[uuid.UUID] = Field(default_factory=list)
+    # Categorias em que o formulário entra sozinho (valem também as subcategorias). Na criação,
+    # sem informar = nenhuma; no PUT, sem informar (ou null) mantém as que o modelo já tem.
+    category_ids: list[uuid.UUID] | None = None
+    # Entra na OS como obrigatório. Na criação, sem informar = sim; no PUT, mantém.
+    default_required: bool | None = None
     requires_signature: bool = True
     is_active: bool = True
 
@@ -97,6 +150,8 @@ class FormTemplateOut(ORMModel):
     description: str | None
     fields: list[FormField]
     service_type_ids: list[uuid.UUID]
+    category_ids: list[uuid.UUID] = []
+    default_required: bool = True
     requires_signature: bool
     is_active: bool
     version: int
@@ -104,6 +159,28 @@ class FormTemplateOut(ORMModel):
     updated_at: dt.datetime
     # Só ao salvar com "aplicar às OS que não começaram": quantas OS receberam a versão nova.
     applied_to: int | None = None
+    # Também só com essa opção: em quantas OS que ainda não começaram o formulário entrou pelo
+    # tipo de OS ou pela categoria, e de quantas saiu (entrou sozinho, não casa mais e ninguém
+    # começou a responder).
+    attached_to: int | None = None
+    detached_from: int | None = None
+
+
+class ServiceTypeUsage(BaseModel):
+    """Tipo de OS em que o modelo foi usado nos últimos 12 meses (OS não canceladas): `used` OS
+    com o formulário de `total` OS do tipo."""
+
+    id: uuid.UUID
+    name: str
+    customer: Ref | None = None
+    used: int
+    total: int
+
+
+class FormTemplateUsage(BaseModel):
+    """Histórico de uso do modelo, para ligar aos tipos de OS em que ele já é usado."""
+
+    service_types: list[ServiceTypeUsage]
 
 
 class TicketFormAdd(BaseModel):
@@ -139,6 +216,12 @@ class TicketFormOut(ORMModel):
     completed_by: Ref | None
     created_at: dt.datetime
     updated_at: dt.datetime
+    # Entrou sozinho, pelo tipo de OS ou pela categoria.
+    auto_attached: bool = False
+    # Resposta automática: {campo: valor} das perguntas ligadas a um dado da OS e ainda sem
+    # resposta. Acompanha a OS até a conclusão do formulário, que grava o valor nas respostas
+    # (concluído, vem vazio).
+    prefill: dict[str, Any] = {}
 
 
 class SignatureOut(BaseModel):
@@ -148,12 +231,26 @@ class SignatureOut(BaseModel):
     attachment_id: uuid.UUID | None
 
 
+class PrefillSourceInfo(BaseModel):
+    key: PrefillSource
+    label: str
+    # Tipos de pergunta que aceitam a fonte.
+    types: list[FieldType]
+
+
 class FormCatalog(BaseModel):
     field_types: list[dict[str, str]]
+    prefill_sources: list[PrefillSourceInfo] = []
 
 
 def field_type_catalog() -> FormCatalog:
-    return FormCatalog(field_types=[{"key": k, "label": v} for k, v in FIELD_TYPE_LABEL.items()])
+    return FormCatalog(
+        field_types=[{"key": k, "label": v} for k, v in FIELD_TYPE_LABEL.items()],
+        prefill_sources=[
+            PrefillSourceInfo.model_validate({"key": k, "label": v, "types": prefill_types(k)})
+            for k, v in PREFILL_LABEL.items()
+        ],
+    )
 
 
 SignatureState = Literal["not_required", "pending", "blocked", "collected"]

@@ -15,6 +15,7 @@ import {
   MapPin,
   MapPinned,
   RotateCcw,
+  Sparkles,
   Tag,
   Ticket,
   Type,
@@ -28,8 +29,10 @@ import { useTicketPanel } from "@/components/ticket/TicketPanel";
 import { formatDocument, formatShort } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
 import type { User } from "@/lib/types";
+import { AgentMark } from "./agent";
 import { openChangePassword } from "./events";
 import { ticketsListHref } from "./links";
+import { AGENT_NAME, dropWords, stripAgentName } from "./phrase";
 import {
   isSearchable,
   matchScreens,
@@ -69,6 +72,7 @@ export interface Entry {
 }
 
 const GROUP = {
+  agent: `Sugestão da ${AGENT_NAME}`,
   recent: "Recentes",
   tickets: "Ordens de serviço",
   customers: "Clientes",
@@ -112,10 +116,27 @@ function TicketDetail({ ticket }: { ticket: SmartTicket }) {
 
 const plural = (n: number, one: string, many: string) => `${n.toLocaleString("pt-BR")} ${n === 1 ? one : many}`;
 
+/**
+ * A resposta da Mia, sempre o trabalho à vista: o que virou filtro, o que foi procurado como texto e
+ * quantas OS deu. "understood": entendeu algum filtro; "partial": entendeu filtros, mas o texto que
+ * sobrou zerou a busca; "text": só procurou o texto.
+ */
+export interface AgentAnswer {
+  mode: "understood" | "partial" | "text";
+  /** Todos os chips da API, na ordem da frase. */
+  chips: SearchChip[];
+  /** O que foi procurado como texto (o chip de texto). */
+  text: string | null;
+  total: number;
+}
+
 export interface SearchController {
   query: string;
   setQuery: (value: string) => void;
+  /** O texto do campo, sem espaços nas pontas. */
   typed: string;
+  /** O que vai para a busca: o texto sem o nome da Mia no começo ("Mia, atrasadas" -> "atrasadas"). */
+  asked: string;
   entries: Entry[];
   chips: SearchChip[];
   current: number;
@@ -125,6 +146,10 @@ export interface SearchController {
   listId: string;
   /** O que está na tela ainda é da busca anterior (o texto mudou e a nova não voltou). */
   stale: boolean;
+  /** A Mia está procurando o texto atual (os brilhos piscam e a linha corre). */
+  thinking: boolean;
+  /** O que a Mia entendeu da última busca que voltou (null sem busca, com erro ou sem nada a dizer). */
+  reply: AgentAnswer | null;
   fetching: boolean;
   failed: boolean;
   retry: () => void;
@@ -164,14 +189,36 @@ export function useSearchController({
   const ranEnter = useRef(0);
   const listId = useId();
   const typed = query.trim();
+  // "Mia, atrasadas em campinas": o nome dela no começo da frase não vai para a busca.
+  const asked = stripAgentName(typed).trim();
   // Uma busca por pausa na digitação.
-  const q = useDebounced(typed, 200);
+  const q = useDebounced(asked, 200);
   const searching = isSearchable(q);
   const smart = useSmartSearch(q, searching);
   const data = searching ? smart.data : undefined;
   const fetching = searching && smart.isFetching;
-  const stale = typed !== q || (searching && (smart.isFetching || smart.isPlaceholderData));
+  const stale = asked !== q || (searching && (smart.isFetching || smart.isPlaceholderData));
   const failed = searching && smart.isError;
+  const thinking = isSearchable(asked) && stale && !failed;
+
+  // O que a Mia diz da busca que voltou: os filtros que entendeu, ou só o texto que procurou.
+  const reply = ((): AgentAnswer | null => {
+    if (!data || !isSearchable(asked) || failed) return null;
+    const text = data.chips.find((c) => c.kind === "text")?.label ?? null;
+    if (data.chips.some((c) => c.kind !== "text")) {
+      return { mode: data.total === 0 && text ? "partial" : "understood", chips: data.chips, text, total: data.total };
+    }
+    // Sem filtro entendido: só vale dizer o que procurou quando achou OS (a busca antiga não manda chips).
+    if (data.total > 0) return { mode: "text", chips: data.chips, text: text ?? (data.query || asked), total: data.total };
+    return null;
+  })();
+
+  const setQuery = (value: string) => {
+    setQueryState(value);
+    setActive(0);
+    // Texto novo: o Enter que esperava a busca anterior não vale mais.
+    setPendingEnter(null);
+  };
 
   // Fecha a busca antes de perguntar: a paleta fica por cima do diálogo de confirmação. Outra aba não
   // tira nada da tela; trocar de tela com alteração não salva (OS, Nova OS, diálogo) pergunta antes.
@@ -222,7 +269,25 @@ export function useSearchController({
 
   // Lista refeita a cada render (poucas dezenas de itens): as ações usam sempre o estado do momento.
   const entries = ((): Entry[] => {
-    const recents: Entry[] = !typed
+    // O texto que sobrou zerou o recorte ("quantas atrasadas em campinas?"): a 1ª opção refaz a busca sem
+    // ele. Só edita o campo; a busca continua aberta, com o foco no texto.
+    const suggestions: Entry[] = [];
+    if (reply?.mode === "partial" && reply.text && !stale) {
+      const rest = dropWords(asked, reply.text);
+      if (isSearchable(rest) && rest !== asked) {
+        const understood = reply.chips.filter((c) => c.kind !== "text").map((c) => c.label);
+        suggestions.push({
+          id: "m-sem-texto",
+          group: GROUP.agent,
+          label: `Buscar sem “${reply.text}”`,
+          detail: <span className="block truncate text-xs text-ink-muted">{understood.join(" · ")}</span>,
+          icon: <Sparkles className="size-4" />,
+          run: () => setQuery(rest),
+        });
+      }
+    }
+
+    const recents: Entry[] = !asked
       ? recent.map((t) => ({
           id: `r-${t.id}`,
           group: GROUP.recent,
@@ -256,7 +321,7 @@ export function useSearchController({
           id: "t-list",
           group: GROUP.tickets,
           label: data.total === 1 ? "Ver a OS na lista de Chamados" : `Ver as ${data.total.toLocaleString("pt-BR")} OS na lista de Chamados`,
-          detail: <span className="block truncate text-xs text-ink-muted">Com os filtros entendidos, para exportar ou agir em lote</span>,
+          detail: <span className="block truncate text-xs text-ink-muted">Com o que a {AGENT_NAME} entendeu, para exportar ou agir em lote</span>,
           icon: <ArrowRight className="size-4" />,
           href,
           run: (mods) => go(href, mods),
@@ -309,8 +374,8 @@ export function useSearchController({
     const { screens, actions } = screenCatalog(user.role, { passwordAllowed });
     let places: Entry[] = [];
     let screensFirst = false;
-    if (typed) {
-      const matches = matchScreens([...screens, ...actions], typed);
+    if (asked) {
+      const matches = matchScreens([...screens, ...actions], asked);
       places = matches.map((m) => screenEntry(m.entry, GROUP.screens));
       // Digitou o nome de uma tela ("pagam", "mapa") e a busca não entendeu nenhum filtro: a tela vem primeiro.
       const structured = (data?.chips ?? []).some((c) => c.kind !== "text");
@@ -321,7 +386,7 @@ export function useSearchController({
         ...actions.filter((a) => a.id === "a-new" || a.id === "a-theme").map((a) => screenEntry(a, GROUP.actions)),
       ];
     }
-    return screensFirst ? [...recents, ...places, ...found] : [...recents, ...found, ...places];
+    return [...suggestions, ...recents, ...(screensFirst ? [...places, ...found] : [...found, ...places])];
   })();
 
   const current = Math.min(active, Math.max(0, entries.length - 1));
@@ -334,7 +399,7 @@ export function useSearchController({
 
   // A busca do Enter voltou: abre o resultado escolhido (descartado se o texto mudou nesse meio-tempo).
   // Cada Enter roda uma vez só: a busca que volta a ficar pronta (outra leitura do mesmo texto) não reabre.
-  const enterReady = !!pendingEnter && pendingEnter.text === typed && !stale;
+  const enterReady = !!pendingEnter && pendingEnter.text === asked && !stale;
   const runPending = useEffectEvent(() => {
     const pending = pendingEnter;
     if (!pending || ranEnter.current === pending.seq) return;
@@ -344,13 +409,6 @@ export function useSearchController({
   useEffect(() => {
     if (enterReady) runPending();
   }, [enterReady]);
-
-  const setQuery = (value: string) => {
-    setQueryState(value);
-    setActive(0);
-    // Texto novo: o Enter que esperava a busca anterior não vale mais.
-    setPendingEnter(null);
-  };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): boolean => {
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -365,9 +423,9 @@ export function useSearchController({
       e.preventDefault();
       const mods = modsOf(e);
       // O que está na tela ainda é da busca anterior: espera a do texto digitado.
-      if (typed && stale && isSearchable(typed)) {
+      if (asked && stale && isSearchable(asked)) {
         enterSeq.current += 1;
-        setPendingEnter({ text: typed, mods, seq: enterSeq.current });
+        setPendingEnter({ text: asked, mods, seq: enterSeq.current });
       } else entries[current]?.run(mods);
       return true;
     }
@@ -378,6 +436,7 @@ export function useSearchController({
     query,
     setQuery,
     typed,
+    asked,
     entries,
     chips: data?.chips ?? [],
     current,
@@ -386,6 +445,8 @@ export function useSearchController({
     optionId,
     listId,
     stale,
+    thinking,
+    reply,
     fetching,
     failed,
     retry: () => void smart.refetch(),

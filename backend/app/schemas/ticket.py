@@ -21,7 +21,7 @@ from app.core.enums import (
 from app.db.base import utcnow
 from app.schemas.common import ORMModel, Ref, TagOut
 from app.schemas.expense import ExpenseOut
-from app.schemas.forms import TicketFormOut
+from app.schemas.forms import TicketFormAdd, TicketFormOut
 from app.schemas.part_request import PartRequestOut
 from app.schemas.payout import MyPayout, PayoutOut
 from app.schemas.user import UserRef
@@ -355,6 +355,10 @@ class TicketCreate(BaseModel):
     # Etiquetas da OS. Sem informar (ou null): as automáticas da abertura (as da OS de projeto,
     # com `project_id`). Uma lista, mesmo vazia, vale como está (a web manda a que o analista vê).
     tags: list[TagOut] | None = Field(default=None, max_length=20)
+    # Formulários, gravados junto com a OS e na ordem da lista. Sem informar (ou null): os ligados
+    # ao tipo de OS e à categoria. Uma lista, mesmo vazia, vale como está (a Nova OS manda a que o
+    # analista vê). O portal não usa.
+    forms: list[TicketFormAdd] | None = Field(default=None, max_length=20)
 
 
 # Campos que a OS sempre tem: null na edição é recusado com uma mensagem clara.

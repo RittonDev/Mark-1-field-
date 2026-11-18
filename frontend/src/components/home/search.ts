@@ -23,16 +23,11 @@ import { accessOf, can, seesUnowned, useAccess } from "@/lib/permissions";
 import { sessionStore } from "@/lib/session";
 import type { AccessItemKey, Customer, EffectiveAccess, Location, Page, TicketListItem, User, UserRole, UUID } from "@/lib/types";
 import { hasFilters, ticketsListHref, ticketsViewHref } from "./links";
+import { normalizeText } from "./phrase";
 import type { NameLike, SmartSearchResult } from "./types";
 
-/** Texto sem acento, em minúsculas e sem espaços nas pontas ("Técnico" -> "tecnico"). */
-export function normalizeText(s: string): string {
-  return s
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .toLowerCase()
-    .trim();
-}
+// O texto sem acento mora em phrase.ts (sem React, para o teste de unidade); continua saindo daqui.
+export { normalizeText };
 
 /** Nome que chega como texto ou como referência ({ id, name }). */
 export function nameOf(value: NameLike): string | null {
