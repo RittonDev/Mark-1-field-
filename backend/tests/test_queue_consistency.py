@@ -9,6 +9,8 @@
   resolvida hoje (o fechamento automático não conta de novo).
 - Prazo de solução encerrado pelo Field Control (resolution_sla_met_at) nas cláusulas em SQL, no
   SLA % do Dashboard (só com prazo), nos relatórios e na Início; reabrir limpa o veredito.
+- Atividades do dia com o mesmo "Atrasada" da fila; "Chegada atrasada" sem a OS que espera data
+  nova depois da improdutiva; as partes do cartão Hoje fecham com as planejadas.
 
 "Agora" fixo nos testes da fila: 17/11/2026 15:00 em São Paulo. Só nomes inventados.
 """
@@ -22,9 +24,9 @@ from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.routes import dashboard
-from app.core.enums import UserRole
-from app.models import Ticket
-from app.services import home, queues, reports
+from app.core.enums import TicketEventType, UserRole
+from app.models import Ticket, TicketEvent
+from app.services import activities, home, queues, reports
 from tests.conftest import World, requires_db
 from tests.test_home_search import (  # noqa: F401 (fixture db)
     API,
