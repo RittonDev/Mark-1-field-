@@ -1907,6 +1907,8 @@ export interface PayoutLine {
     city: string | null;
     resolved_at: ISODate | null;
   };
+  /** Nota fiscal do técnico que cobre este valor (GET /payouts e /me/earnings); a recusada solta o valor (null). */
+  invoice?: PayoutInvoiceRef | null;
 }
 
 export interface PayoutSummary {
@@ -2296,4 +2298,95 @@ export interface MonthlyReport extends Omit<DailyReport, "date"> {
   expenses_total: number | null;
   /** null sem a tela de Orçamentos. */
   quotes_approved_total: number | null;
+}
+
+// --------------------------------------------------------------------------- notas fiscais dos técnicos
+
+/** Nota fiscal do técnico (INVOICE_STATUS). A recusa é final: o técnico apaga a nota e envia outra. */
+export type InvoiceStatus = "pending" | "checked" | "rejected";
+
+/** O tipo do arquivo, pelo conteúdo (INVOICE_FILE_KIND): PDF, XML ou foto. */
+export type InvoiceFileKind = "pdf" | "xml" | "image";
+
+/** A nota que cobre um valor (PayoutLine.invoice e InvoicePayoutCandidate.invoice). */
+export interface PayoutInvoiceRef {
+  id: UUID;
+  number: string;
+  status: InvoiceStatus;
+}
+
+/** Uma OS da nota: o valor do técnico nela. */
+export interface InvoicePayoutRef {
+  payout_id: UUID;
+  ticket_id: UUID;
+  code: string;
+  title: string;
+  amount: number;
+  status: PayoutStatus;
+  /** OS resolvida ou fechada. */
+  concluded: boolean;
+}
+
+/** A nota para o próprio técnico (GET /me/invoices; POST /me/invoices devolve 201, ou 200 quando a client_upload_id repete). */
+export interface MyInvoice {
+  id: UUID;
+  number: string;
+  /** AAAA-MM-DD. */
+  issue_date: string;
+  amount: number;
+  /** AAAA-MM: o mês do serviço (competenceLabel). */
+  competence: string;
+  note: string | null;
+  status: InvoiceStatus;
+  reject_reason: string | null;
+  reviewed_at: ISODate | null;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+  file_kind: InvoiceFileKind;
+  /** Link assinado de 30 min, relativo à API (absoluteApiUrl). */
+  download_url: string;
+  payouts: InvoicePayoutRef[];
+  payouts_total: number;
+  created_at: ISODate;
+}
+
+/** A nota para a central (Pagamentos): com o técnico e quem conferiu ou recusou. */
+export interface TechnicianInvoice extends MyInvoice {
+  technician: Ref;
+  reviewed_by: Ref | null;
+}
+
+/** Quantas notas e quanto em cada situação, só com os filtros de técnico e mês (os contadores das abas). */
+export interface TechnicianInvoiceSummary {
+  pending: number;
+  checked: number;
+  rejected: number;
+  pending_amount: number;
+  checked_amount: number;
+}
+
+/** GET /technician-invoices?technician_id=&status=&month=: as mais novas primeiro (até 500); total_count com todos os filtros. */
+export interface TechnicianInvoiceList {
+  items: TechnicianInvoice[];
+  summary: TechnicianInvoiceSummary;
+  total_count: number;
+}
+
+/**
+ * GET /me/invoices/payouts?month=: os valores que podem entrar numa nota da competência. Os do mês (OS concluída ou valor
+ * pago, com qualquer situação de nota) vêm primeiro; depois os de meses anteriores ainda a receber e sem nota
+ * (`in_month` false).
+ */
+export interface InvoicePayoutCandidate {
+  payout_id: UUID;
+  ticket_id: UUID;
+  code: string;
+  title: string;
+  amount: number;
+  status: PayoutStatus;
+  resolved_at: ISODate | null;
+  in_month: boolean;
+  /** Já está numa nota ("Na nota nº 1200"). */
+  invoice: PayoutInvoiceRef | null;
 }

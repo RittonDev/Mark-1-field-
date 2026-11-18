@@ -4,6 +4,8 @@
 
 import type {
   AssetType,
+  InvoiceFileKind,
+  InvoiceStatus,
   Level,
   OfferCancelReason,
   OfferState,
@@ -307,3 +309,44 @@ export const USER_CHANGE_LABEL: Record<UserChangeField, string> = {
   avatar: "Foto",
   password: "Senha",
 };
+
+// --------------------------------------------------------------------------- notas fiscais dos técnicos
+
+/** Situação da nota fiscal do técnico. */
+export const INVOICE_STATUS: Record<InvoiceStatus, { label: string; color: string }> = {
+  pending: { label: "Aguardando conferência", color: "#DC6803" },
+  checked: { label: "Conferida", color: "#0E9384" },
+  rejected: { label: "Recusada", color: "#D92D20" },
+};
+
+/** Limites da nota (os mesmos de backend/app/services/invoices.py e do motivo da recusa). */
+export const INVOICE_LIMITS = { maxMb: 10, numberMax: 30, noteMax: 500, rejectMax: 300, perMonth: 20 } as const;
+
+/** O tipo do arquivo da nota, como a tela mostra. */
+export const INVOICE_FILE_KIND: Record<InvoiceFileKind, string> = {
+  pdf: "PDF",
+  xml: "XML",
+  image: "Foto",
+};
+
+const COMPETENCE_MONTHS = [
+  "janeiro",
+  "fevereiro",
+  "março",
+  "abril",
+  "maio",
+  "junho",
+  "julho",
+  "agosto",
+  "setembro",
+  "outubro",
+  "novembro",
+  "dezembro",
+];
+
+/** A competência da nota por extenso: "2026-11" → "novembro de 2026" (fora do formato, volta como veio). */
+export function competenceLabel(month: string): string {
+  const match = /^(\d{4})-(\d{2})$/.exec(month);
+  const name = match ? COMPETENCE_MONTHS[Number(match[2]) - 1] : undefined;
+  return match && name ? `${name} de ${match[1]}` : month;
+}
