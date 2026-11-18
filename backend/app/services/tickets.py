@@ -863,8 +863,13 @@ async def close_technician_offers(
     """O técnico ficou sem acesso ao app (desativado em Técnicos ou em Usuários, ou fora do papel
     de técnico): ninguém responde as ofertas dele, que fecham como canceladas pela central (e
     reativar não as traz de volta). Trava as OS, em ordem de id, antes das ofertas: a ordem do
-    aceite. Os avisos saem no commit da rota (`commit_and_publish`). Devolve quantas fecharam."""
+    aceite. Os avisos saem no commit da rota (`commit_and_publish`). Devolve quantas fecharam.
+
+    Chame antes de mexer no usuário: assim a linha dele trava depois das OS, como no aceite. O
+    que já estiver pendente na sessão vai ao banco antes (a releitura das ofertas traz o técnico
+    do banco e apagaria a mudança não gravada)."""
     now = now or utcnow()
+    await db.flush()
     ticket_ids = list(
         await db.scalars(
             select(TicketOffer.ticket_id)
@@ -895,14 +900,8 @@ async def close_technician_offers(
     )
     if not offers:
         return 0
-    tickets = {
-        t.id: t
-        for t in await db.scalars(
-            select(Ticket)
-            .where(Ticket.id.in_({o.ticket_id for o in offers}))
-            .execution_options(populate_existing=True)
-        )
-    }
+    closing_ids = {o.ticket_id for o in offers}
+    tickets = {t.id: t for t in await db.scalars(select(Ticket).where(Ticket.id.in_(closing_ids)))}
     by_ticket: dict[uuid.UUID, list[TicketOffer]] = {}
     for offer in offers:
         by_ticket.setdefault(offer.ticket_id, []).append(offer)

@@ -261,6 +261,13 @@ async def update(
         raise WorkflowError("E-mail já cadastrado")
     if "team_id" in fields:
         await _check_team(db, fields["team_id"])
+    if fields.get("is_active") is False:
+        from app.services import tickets  # import tardio, como o tracking em to_out
+
+        # Sem o app, ninguém responde as ofertas dele: fecham como canceladas pela central (a OS
+        # volta a "Sem técnico"). Antes de mexer no técnico: as OS travam antes da linha dele,
+        # como no aceite. Os avisos saem no commit da rota.
+        await tickets.close_technician_offers(db, user.id, actor)
     for key, value in fields.items():
         if key == "home_state" and isinstance(value, str):
             value = value.strip().upper()
@@ -284,12 +291,7 @@ async def update(
         # Uma grafia só por cidade ("SAO PAULO" vira "São Paulo"), como no resto da base.
         user.home_city = await cities.canonical_city(db, user.home_state, user.home_city)
     if fields.get("is_active") is False:
-        from app.services import tickets  # import tardio, como o tracking em to_out
-
         user.sessions_revoked_at = utcnow()  # desativado: sai do app na hora
-        # Sem o app, ninguém responde as ofertas dele: fecham como canceladas pela central (a OS
-        # volta a "Sem técnico"). Os avisos saem no commit da rota.
-        await tickets.close_technician_offers(db, user.id, actor)
     await db.flush()
     return user
 

@@ -249,6 +249,12 @@ async def update_user(user_id: uuid.UUID, body: UserUpdate, db: DB, actor: Users
     old_role, new_role = user.role, fields.get("role", user.role)
     if access_in is not None and new_role not in PROFILE_ROLES:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, access_svc.NO_PROFILE_ROLE)
+    # Técnico sem acesso ao app (desativado ou em outro papel): ninguém responde as ofertas dele,
+    # que fecham como canceladas pela central. Antes de mexer no usuário: as OS travam antes da
+    # linha dele, como no aceite. O tempo real das OS sai no commit.
+    left_field = old_role == UserRole.TECHNICIAN and new_role != UserRole.TECHNICIAN
+    if fields.get("is_active") is False or left_field:
+        await tickets_svc.close_technician_offers(db, user.id, actor)
     # Acesso de antes (o teto do supervisor compara com ele) e o acesso novo: perfil e ajustes
     # enviados ou, na troca de papel, o padrão do papel novo.
     before = await access_svc.effective(db, user)
@@ -283,17 +289,12 @@ async def update_user(user_id: uuid.UUID, body: UserUpdate, db: DB, actor: Users
         if fields.get("role", user.role) == UserRole.TECHNICIAN:
             user.must_change_password = True
     deactivated = fields.get("is_active") is False and user.is_active
-    left_field = old_role == UserRole.TECHNICIAN and new_role != UserRole.TECHNICIAN
     for key, value in fields.items():
         setattr(user, key, value)
     # Senha, e-mail ou papel trocados, ou acesso desativado: quem estava logado sai na hora
     # (ex.: a conta vazou e o admin trocou a senha).
     if deactivated or REVOKING_FIELDS.intersection(changed):
         user.sessions_revoked_at = utcnow()
-    # Técnico sem acesso ao app (desativado ou em outro papel): ninguém responde as ofertas dele,
-    # que fecham como canceladas pela central; o tempo real das OS sai no commit.
-    if fields.get("is_active") is False or left_field:
-        await tickets_svc.close_technician_offers(db, user.id, actor)
     await commit_and_publish(db)
     if changed:
         log.info("Usuários: %s alterou %s (%s)", actor.id, user.id, ", ".join(changed))
