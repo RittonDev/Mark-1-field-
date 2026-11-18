@@ -258,9 +258,7 @@ async def test_pix_set_change_and_remove(client: AsyncClient, world: World) -> N
     )
     assert bad.status_code == 422 and messages(bad) == ["CPF inválido: confira os números"]
     assert bad.json()["detail"][0]["label"] == "Chave PIX"
-    bad = await patch(
-        client, world, pix={**CPF_PIX, "holder_name": " "}, current_password=PASSWORD
-    )
+    bad = await patch(client, world, pix={**CPF_PIX, "holder_name": " "}, current_password=PASSWORD)
     assert messages(bad) == ["Informe o nome do titular da conta"]
 
     # null tira a chave (também com a senha).
@@ -487,7 +485,11 @@ async def test_central_changes_go_to_history(
     assert r.status_code == 200, r.text
     r = await client.patch(
         url,
-        json={"email": "tecnico.alfa@exemplo.com", "team_id": world.team_net_id, "is_active": False},
+        json={
+            "email": "tecnico.alfa@exemplo.com",
+            "team_id": world.team_net_id,
+            "is_active": False,
+        },
         headers=an,
     )
     assert r.status_code == 200, r.text

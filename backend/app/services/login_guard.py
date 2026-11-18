@@ -81,8 +81,8 @@ async def succeeded(email: str, ip: str | None = None) -> None:
 
 async def check_password_change(user_id: str, action: str = "de trocar a senha") -> None:
     """Senha atual pedida com a sessão aberta (troca de senha; e-mail e chave PIX no Meu cadastro):
-    bloqueia depois de várias senhas atuais erradas. A contagem é uma só para as duas telas (5 erros,
-    não 5 + 5); `action` só muda a mensagem."""
+    bloqueia depois de várias senhas atuais erradas. A contagem é uma só para as duas telas (5
+    erros, não 5 + 5); `action` só muda a mensagem."""
     count, ttl = await ephemeral.count(f"{_PREFIX}pwd:{user_id}")
     if count >= MAX_PASSWORD_CHANGE:
         raise LoginBlocked(ttl, action)
