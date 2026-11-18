@@ -1106,7 +1106,6 @@ function EditDialog({ tech, readOnly = false, onClose }: { tech: Technician; rea
     );
   }
 
-  const summary = canPayouts ? payouts.data?.summary : undefined;
   return (
     <Dialog
       open
@@ -1139,12 +1138,14 @@ function EditDialog({ tech, readOnly = false, onClose }: { tech: Technician; rea
       <form
         id="tech-edit-form"
         noValidate
+        className="flex min-w-0 flex-col gap-5"
         onSubmit={(e) => {
           e.preventDefault();
           if (!readOnly) void submit();
         }}
       >
-        {/* Só com Visualizar, o fieldset trava todos os campos de uma vez (os links continuam abrindo). */}
+        {/* Só com Visualizar, o fieldset trava todos os campos de uma vez (os links continuam abrindo). O
+            Pagamento e o Histórico do cadastro ficam fora: seguem as permissões deles (Pagamentos). */}
         <fieldset disabled={readOnly} className="flex min-w-0 flex-col gap-5">
           <div className="flex items-center gap-4">
             <Avatar tech={current} size="lg" />
@@ -1328,62 +1329,44 @@ function EditDialog({ tech, readOnly = false, onClose }: { tech: Technician; rea
               </div>
             </section>
           ) : null}
-
-          {summary && payouts.data?.items.length ? (
-            <section className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line p-3">
-              <div className="min-w-0">
-                <SectionTitle>Pagamentos por chamado</SectionTitle>
-                <p className="mt-1 text-xs text-ink-muted tabular-nums">
-                  A pagar <strong className="font-semibold text-ink">{formatMoney(summary.to_pay)}</strong> · Previsto{" "}
-                  {formatMoney(summary.expected)} · Pago {formatMoney(summary.paid)}
-                </p>
-              </div>
-              <Link
-                href="/pagamentos"
-                className={buttonClassName("ghost", "sm")}
-                target={dirty ? "_blank" : undefined}
-                rel={dirty ? "noreferrer" : undefined}
-              >
-                <Wallet className="size-3.5" />
-                Ver em Pagamentos
-              </Link>
-            </section>
-          ) : null}
-
-          <section className="rounded-lg border border-line p-3">
-            <SectionTitle>Acesso ao app</SectionTitle>
-            <p className="mt-1 text-xs text-ink-muted">
-              {current.location_consent_at ? (
-                <span className="inline-flex items-center gap-1">
-                  <MapPinned className="size-3.5" /> Autorizou o GPS durante a jornada
-                </span>
-              ) : (
-                "Ainda não autorizou o GPS (o app pede antes da primeira jornada; sem o aceite, não inicia a jornada)."
-              )}
-            </p>
-            {readOnly ? null : confirmReset ? (
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <span className="text-sm text-ink">Gerar senha provisória e encerrar as sessões abertas?</span>
-                <Button onClick={() => setConfirmReset(false)}>Não</Button>
-                <Button variant="danger" loading={reset.isPending} onClick={() => reset.mutate()}>
-                  Sim, redefinir
-                </Button>
-              </div>
-            ) : (
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <Button onClick={() => setConfirmReset(true)} disabled={dirty}>
-                  <KeyRound className="size-4" />
-                  Redefinir senha
-                </Button>
-                {dirty ? <span className="text-xs text-ink-muted">Salve as alterações antes de redefinir a senha.</span> : null}
-              </div>
-            )}
-          </section>
-
-          {problem || save.error || reset.error ? (
-            <ErrorBox message={problem ?? errorMessage(save.error ?? reset.error)} />
-          ) : null}
         </fieldset>
+
+        {canPayouts ? <TechnicianPayment tech={current} dirty={dirty} /> : null}
+
+        {/* Com Visualizar, sem os botões da senha. */}
+        <section className="rounded-lg border border-line p-3">
+          <SectionTitle>Acesso ao app</SectionTitle>
+          <p className="mt-1 text-xs text-ink-muted">
+            {current.location_consent_at ? (
+              <span className="inline-flex items-center gap-1">
+                <MapPinned className="size-3.5" /> Autorizou o GPS durante a jornada
+              </span>
+            ) : (
+              "Ainda não autorizou o GPS (o app pede antes da primeira jornada; sem o aceite, não inicia a jornada)."
+            )}
+          </p>
+          {readOnly ? null : confirmReset ? (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <span className="text-sm text-ink">Gerar senha provisória e encerrar as sessões abertas?</span>
+              <Button onClick={() => setConfirmReset(false)}>Não</Button>
+              <Button variant="danger" loading={reset.isPending} onClick={() => reset.mutate()}>
+                Sim, redefinir
+              </Button>
+            </div>
+          ) : (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Button onClick={() => setConfirmReset(true)} disabled={dirty}>
+                <KeyRound className="size-4" />
+                Redefinir senha
+              </Button>
+              {dirty ? <span className="text-xs text-ink-muted">Salve as alterações antes de redefinir a senha.</span> : null}
+            </div>
+          )}
+        </section>
+
+        <ProfileHistory technicianId={tech.id} />
+
+        {problem || save.error || reset.error ? <ErrorBox message={problem ?? errorMessage(save.error ?? reset.error)} /> : null}
       </form>
     </Dialog>
   );

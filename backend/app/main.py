@@ -409,6 +409,8 @@ CONSTRAINT_MESSAGES: dict[str, str] = {
     "uq_ticket_offers_ticket_tech_pending": "Este técnico já tem uma oferta em aberto nesta OS",
     "uq_users_entra_oid": "Esta conta Microsoft já está ligada a outro usuário",
     "uq_access_profiles_name": "Já existe um perfil com este nome",
+    # O mesmo envio de nota fiscal chegou duas vezes ao mesmo tempo (o app reenvia).
+    "uq_technician_invoices_technician_upload": "Esta nota já foi recebida. Atualize a lista.",
 }
 CONFLICT = "Conflito de dados: registro duplicado ou referência inválida"
 

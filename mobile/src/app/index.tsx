@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BackHandler, Pressable, RefreshControl, StyleSheet, View, type FlatList } from "react-native";
 import Animated from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Avatar } from "../components/Avatar";
 import { BrandLogo, BrandRule } from "../components/Brand";
 import { Calendar } from "../components/Calendar";
 import { ConnectionBar } from "../components/ConnectionBar";
@@ -22,7 +23,8 @@ import { ensurePushRegistration } from "../lib/auth";
 import { useLiveQuery, useNow } from "../lib/changes";
 import { listNotices, listTickets } from "../lib/db";
 import { arrivalUrgency } from "../lib/field";
-import { addDays, formatDay, formatTime, initials, startOfDay } from "../lib/format";
+import { ensureProfile, useProfile } from "../lib/profile";
+import { addDays, formatDay, formatTime, startOfDay } from "../lib/format";
 import { buildLists, ticketsOnDay, waitingReason } from "../lib/lists";
 import { useSession } from "../lib/session";
 import { requestSync, useSyncStatus } from "../lib/sync";
@@ -102,6 +104,8 @@ function HomeEmpty({
 
 export default function MyTicketsScreen() {
   const { user } = useSession();
+  // Foto do topo: vem do Meu cadastro (na memória); sem ele, as iniciais.
+  const profile = useProfile();
   const c = useTheme();
   const styles = useStyles(makeStyles);
   const insets = useSafeAreaInsets();
@@ -185,6 +189,13 @@ export default function MyTicketsScreen() {
       });
       return () => sub.remove();
     }, [tab, dayOffset]),
+  );
+
+  // De volta à tela inicial: relê o cadastro se ainda não veio (abriu sem internet) ou se o link da foto venceu.
+  useFocusEffect(
+    useCallback(() => {
+      ensureProfile();
+    }, []),
   );
 
   const timeline = tab === "today" && dayOffset === 0;
@@ -272,11 +283,8 @@ export default function MyTicketsScreen() {
           accessibilityLabel="Conta e sincronização"
           hitSlop={8}
           style={styles.avatar}
-          pressedStyle={{ backgroundColor: c.surface3 }}
         >
-          <Text style={styles.avatarText} maxFontSizeMultiplier={1.2}>
-            {initials(user.name)}
-          </Text>
+          <Avatar name={user.name} uri={profile?.avatar_url} size={36} />
         </PressableScale>
       </View>
       <View style={styles.titleBlock}>
@@ -475,17 +483,7 @@ const makeStyles = (c: Palette) =>
     list: { paddingBottom: 24 },
     header: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 4, gap: 14 },
     topBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-    avatar: {
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      alignItems: "center",
-      justifyContent: "center",
-      backgroundColor: c.surface2,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: c.lineStrong,
-    },
-    avatarText: { fontSize: 13, fontWeight: "700", color: c.ink },
+    avatar: { borderRadius: 18 },
     titleBlock: { gap: 6 },
     pageTitle: { fontSize: 22, fontWeight: "700", color: c.ink, letterSpacing: -0.3 },
     pageSubtitle: { fontSize: 13, color: c.inkMuted, marginTop: 2 },

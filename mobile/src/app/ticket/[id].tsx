@@ -164,7 +164,7 @@ function TicketView({ ticket: current, user }: { ticket: LocalTicket; user: User
   // Foto tirada antes de o Android fechar o app com a câmera aberta (aparelho com pouca memória).
   useEffect(() => {
     let alive = true;
-    recoverCapture((shot) => shot.ticketId === ticketId)
+    recoverCapture((shot) => shot.kind !== "avatar" && shot.ticketId === ticketId)
       .then(async (found) => {
         if (!found) return;
         const { target: shot, assets } = found;

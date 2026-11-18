@@ -111,11 +111,8 @@ def _today() -> date:
     return datetime.now(ZoneInfo(settings.TIMEZONE)).date()
 
 
-def parse_month(value: str | None, message: str = BAD_MONTH) -> date | None:
-    """ "AAAA-MM" → o dia 1 do mês (de 2000-01 a 2100-12). Vazio: None."""
-    raw = (value or "").strip()
-    if not raw:
-        return None
+def _month(raw: str, message: str) -> date:
+    """ "AAAA-MM" → o dia 1 do mês (de 2000-01 a 2100-12)."""
     match = _MONTH_RE.fullmatch(raw)
     if match is None:
         raise WorkflowError(message)
@@ -123,6 +120,12 @@ def parse_month(value: str | None, message: str = BAD_MONTH) -> date | None:
     if not (2000 <= year <= 2100 and 1 <= month <= 12):
         raise WorkflowError(message)
     return date(year, month, 1)
+
+
+def parse_month(value: str | None) -> date | None:
+    """O filtro `month` das listas ("AAAA-MM"). Vazio: None."""
+    raw = (value or "").strip()
+    return _month(raw, BAD_MONTH) if raw else None
 
 
 def month_text(month: date) -> str:
@@ -204,8 +207,7 @@ def _competence(value: str | None) -> date:
     raw = (value or "").strip()
     if not raw:
         raise WorkflowError(NO_COMPETENCE)
-    month = parse_month(raw, BAD_COMPETENCE)
-    assert month is not None
+    month = _month(raw, BAD_COMPETENCE)
     if month > _today().replace(day=1):
         raise WorkflowError(FUTURE_COMPETENCE)
     return month
@@ -281,12 +283,16 @@ async def _lock_payouts(
     e sem outra nota."""
     if not ids:
         return []
+    # Trava só as linhas dos valores; a leitura vem depois, já com as linhas travadas.
+    await db.execute(
+        select(TicketPayout.id).where(TicketPayout.id.in_(ids)).with_for_update()
+    )
     rows = (
         await db.execute(
             select(TicketPayout, Ticket.number, Ticket.status)
             .join(Ticket, Ticket.id == TicketPayout.ticket_id)
             .where(TicketPayout.id.in_(ids))
-            .with_for_update(of=TicketPayout)
+            .execution_options(populate_existing=True)
         )
     ).all()
     found = {payout.id: (payout, number, status) for payout, number, status in rows}
@@ -332,15 +338,34 @@ def _filename(upload: UploadFile) -> str:
 
 
 async def submit(
-    db: AsyncSession, technician: User, upload: UploadFile | None, form: InvoiceForm
+    db: AsyncSession,
+    technician: User,
+    upload: UploadFile | None,
+    *,
+    number: str | None,
+    issue_date: str | None,
+    amount: str | None,
+    competence: str | None,
+    note: str | None = None,
+    payout_ids: str | None = None,
+    client_upload_id: str | None = None,
 ) -> tuple[TechnicianInvoice, bool]:
-    """Recebe a nota do técnico. Devolve (nota, criada).
+    """Recebe a nota do técnico (os campos do multipart, em texto). Devolve (nota, criada).
 
     A mesma `client_upload_id` de novo devolve a nota já gravada, sem gravar nada (criada = False).
     Tudo no banco é conferido antes de gravar o arquivo; se a gravação no banco falhar depois, o
     arquivo sai do disco (a rota faz o mesmo se o commit falhar)."""
     if upload is None:
         raise WorkflowError(NO_FILE)
+    form = read_form(
+        number=number,
+        issue_date=issue_date,
+        amount=amount,
+        competence=competence,
+        note=note,
+        payout_ids=payout_ids,
+        client_upload_id=client_upload_id,
+    )
     await _lock_technician(db, technician.id)
     if form.client_upload_id is not None:
         existing = await db.scalar(
@@ -416,10 +441,17 @@ async def _locked(
     db: AsyncSession, invoice_id: uuid.UUID, *, technician_id: uuid.UUID | None = None
 ) -> TechnicianInvoice:
     """A nota travada (FOR UPDATE). Com `technician_id`, só a dele: a de outro técnico é 404."""
-    stmt = select(TechnicianInvoice).where(TechnicianInvoice.id == invoice_id)
+    stmt = select(TechnicianInvoice.id).where(TechnicianInvoice.id == invoice_id)
     if technician_id is not None:
         stmt = stmt.where(TechnicianInvoice.technician_id == technician_id)
-    invoice = await db.scalar(stmt.with_for_update())
+    if await db.scalar(stmt.with_for_update()) is None:
+        raise NotFound(NOT_FOUND)
+    # Lida depois da trava (a leitura vê o que a outra transação gravou antes de soltar a linha).
+    invoice = await db.scalar(
+        select(TechnicianInvoice)
+        .where(TechnicianInvoice.id == invoice_id)
+        .execution_options(populate_existing=True)
+    )
     if invoice is None:
         raise NotFound(NOT_FOUND)
     return invoice

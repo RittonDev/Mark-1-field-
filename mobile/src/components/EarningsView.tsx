@@ -10,6 +10,7 @@ import { showToast } from "../lib/toast";
 import type { MyEarnings, PayoutLine } from "../lib/types";
 import { RADIUS, useStyles, useTheme, type Palette } from "../theme/theme";
 import { Icon } from "./Icon";
+import { PixCard } from "./PixCard";
 import { Skeleton } from "./Skeleton";
 import { Text } from "./Text";
 import { Badge, Button, Card, EmptyState, ErrorBox, SectionTitle } from "./ui";
@@ -90,7 +91,8 @@ async function openTicket(id: string) {
 }
 
 /**
- * Meus ganhos: o técnico é parceiro e recebe por chamado. No topo, o total a receber de todos os meses;
+ * Meus ganhos: o técnico é parceiro e recebe por chamado. No topo, a chave PIX em que recebe (PixCard, do Meu
+ * cadastro) e o total a receber de todos os meses;
  * por mês, o que as OS concluídas no mês têm a receber, o que já foi pago e o previsto das que estão em
  * andamento, além dos reembolsos. Os valores são da central; sem internet, mostra o último resultado
  * guardado com a hora em que foi atualizado.
@@ -164,6 +166,7 @@ export function EarningsView({ refreshKey = 0, onSettled }: { refreshKey?: numbe
 
   return (
     <View style={styles.wrap}>
+      <PixCard refreshKey={refreshKey} />
       <Card style={styles.hero}>
         <Text style={styles.heroLabel}>Total a receber</Text>
         {all ? (

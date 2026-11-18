@@ -135,10 +135,13 @@ export const session = {
     update({ accessToken: data.access_token, refreshToken: data.refresh_token, user: data.user });
   },
 
-  /** Usuário atualizado (ex.: depois da troca de senha ou do aceite do termo de rastreamento). */
+  /**
+   * Usuário atualizado (ex.: depois da troca de senha, do aceite do termo de rastreamento ou do Meu cadastro).
+   * O e-mail vai junto para o último login: depois de trocar o e-mail, o login já vem com o novo.
+   */
   async updateUser(user: User) {
-    await write(KEYS.user, JSON.stringify(user));
-    update({ user });
+    await Promise.all([write(KEYS.user, JSON.stringify(user)), write(KEYS.lastEmail, user.email)]);
+    update({ user, lastEmail: user.email });
   },
 
   async setApiUrl(value: string) {

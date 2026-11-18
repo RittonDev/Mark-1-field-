@@ -76,6 +76,11 @@ GUARDED: dict[tuple[str, str], tuple[tuple[str, ...], str] | tuple[tuple[str, ..
     ("POST", "/tickets/{ticket_id}/offers/{offer_id}/cancel"): (("commercial.payouts",), E),
     # Chave PIX do técnico: a central só remove (quem cadastra é ele, no app).
     ("DELETE", "/technicians/{user_id}/pix"): (("commercial.payouts",), E),
+    # Notas fiscais dos técnicos: a central vê e confere em Pagamentos (nunca apaga).
+    ("GET", "/technician-invoices"): (("commercial.payouts",), V),
+    ("POST", "/technician-invoices/{invoice_id}/check"): (("commercial.payouts",), E),
+    ("POST", "/technician-invoices/{invoice_id}/uncheck"): (("commercial.payouts",), E),
+    ("POST", "/technician-invoices/{invoice_id}/reject"): (("commercial.payouts",), E),
     # Base
     ("GET", "/customers/{customer_id}"): (("base.customers",), V),
     ("POST", "/customers"): (("base.customers",), E),
@@ -263,6 +268,11 @@ OTHER: dict[tuple[str, str], str] = {
     ("PATCH", "/me/profile"): "TECHNICIAN",
     ("POST", "/me/profile/photo"): "TECHNICIAN",
     ("DELETE", "/me/profile/photo"): "TECHNICIAN",
+    # Notas fiscais (o próprio técnico, na aba Ganhos)
+    ("GET", "/me/invoices"): "TECHNICIAN",
+    ("GET", "/me/invoices/payouts"): "TECHNICIAN",
+    ("POST", "/me/invoices"): "TECHNICIAN",
+    ("DELETE", "/me/invoices/{invoice_id}"): "TECHNICIAN",
     # Sem login (ou link assinado)
     ("POST", "/auth/login"): "PUB",
     ("POST", "/auth/refresh"): "PUB",
@@ -284,6 +294,7 @@ OTHER: dict[tuple[str, str], str] = {
     ("GET", "/quotes/{quote_id}/signature"): "PUB",
     ("GET", "/repair-photos/{photo_id}"): "PUB",
     ("GET", "/users/{user_id}/avatar"): "PUB",
+    ("GET", "/technician-invoices/{invoice_id}/download"): "PUB",
     ("WS", "/ws"): "WS",
 }
 

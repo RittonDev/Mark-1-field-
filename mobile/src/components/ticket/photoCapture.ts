@@ -2,6 +2,7 @@
 // formulário e pedido de peça), mensagens claras quando algo falha e a recuperação da foto quando o
 // Android fecha o app com a câmera aberta (comum em aparelho simples): antes de abrir a câmera o alvo
 // fica guardado no aparelho e, ao voltar para a OS, ImagePicker.getPendingResultAsync devolve a foto.
+// A foto do Meu cadastro (alvo "avatar") passa pelo mesmo caminho, com recorte quadrado.
 
 import * as ImagePicker from "expo-image-picker";
 import { Platform } from "react-native";
@@ -24,7 +25,9 @@ export interface PartDraft {
 export type CaptureTarget =
   | { kind: "loose"; ticketId: string }
   | { kind: "form"; ticketId: string; formId: string; fieldId: string }
-  | { kind: "part"; ticketId: string; draft?: PartDraft };
+  | { kind: "part"; ticketId: string; draft?: PartDraft }
+  /** Foto do Meu cadastro (não é de OS): lib/profile.ts reduz para 512 px e envia. */
+  | { kind: "avatar" };
 
 type StoredTarget = CaptureTarget & { at: string };
 
@@ -42,6 +45,19 @@ const OPTIONS: ImagePicker.ImagePickerOptions = {
   exif: false,
   preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
 };
+
+/**
+ * Foto do cadastro: o técnico recorta o quadrado na hora (no iPhone o recorte é sempre quadrado) e a câmera
+ * abre na frontal. Qualidade maior que a da OS: a redução para 512 px é depois, em lib/profile.ts.
+ */
+const AVATAR_OPTIONS: ImagePicker.ImagePickerOptions = { ...OPTIONS, quality: 0.8, allowsEditing: true, aspect: [1, 1] };
+
+function pickerOptions(source: "camera" | "library", target: CaptureTarget, limit: number): ImagePicker.ImagePickerOptions {
+  if (target.kind === "avatar") {
+    return source === "camera" ? { ...AVATAR_OPTIONS, cameraType: ImagePicker.CameraType.front } : AVATAR_OPTIONS;
+  }
+  return source === "camera" ? OPTIONS : { ...OPTIONS, allowsMultipleSelection: limit > 1, selectionLimit: Math.max(1, limit) };
+}
 
 /**
  * Só fica a foto que a central abre (JPG, PNG ou WebP). Vale o arquivo que o seletor gerou, não o
@@ -73,10 +89,10 @@ async function forget() {
   await setKv(TARGET_KEY, null, undefined, QUIET).catch(() => undefined);
 }
 
-async function cameraAllowed(): Promise<boolean> {
+async function cameraAllowed(target: CaptureTarget): Promise<boolean> {
   const permission = await ImagePicker.requestCameraPermissionsAsync();
   if (permission.granted) return true;
-  const message = "Libere o acesso à câmera nas configurações do aparelho para fotografar o atendimento.";
+  const message = `Libere o acesso à câmera nas configurações do aparelho para ${target.kind === "avatar" ? "tirar a foto do cadastro" : "fotografar o atendimento"}.`;
   if (permission.canAskAgain) notify("Câmera bloqueada", message);
   else await askOpenSettings("Câmera bloqueada", message);
   return false;
@@ -93,17 +109,12 @@ export async function capturePhotos(
 ): Promise<ImagePicker.ImagePickerAsset[]> {
   let remembered = false;
   try {
-    if (source === "camera" && !(await cameraAllowed())) return [];
+    if (source === "camera" && !(await cameraAllowed(target))) return [];
     await remember(target);
     remembered = true;
+    const options = pickerOptions(source, target, limit);
     const result =
-      source === "camera"
-        ? await ImagePicker.launchCameraAsync(OPTIONS)
-        : await ImagePicker.launchImageLibraryAsync({
-            ...OPTIONS,
-            allowsMultipleSelection: limit > 1,
-            selectionLimit: Math.max(1, limit),
-          });
+      source === "camera" ? await ImagePicker.launchCameraAsync(options) : await ImagePicker.launchImageLibraryAsync(options);
     if (result.canceled) return [];
     return keepSupported(result.assets.slice(0, Math.max(1, limit)));
   } catch (error) {

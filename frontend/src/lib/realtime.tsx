@@ -297,7 +297,7 @@ function noticeFor(event: RealtimeEvent, userId: string): NoticeDraft | null {
 const PROFILE_KEYS = ["technicians", "users", "technician-favorites", "technician-suggest", "assignable", "tracking"];
 
 // Telas que listam OS ou dependem delas, além da própria OS: só as abertas buscam de novo.
-const ALL_EXTRA =["expenses", "payouts", "quotes", "repairs", "reports", "projects", "project", "customer", "location", "technicians"];
+const ALL_EXTRA = ["expenses", "payouts", "quotes", "repairs", "reports", "projects", "project", "customer", "location", "technicians"];
 const EXTRA_BY_FIELD: Record<string, string[]> = {
   expenses: ["expenses", "reports"],
   payouts: ["payouts", "reports"],

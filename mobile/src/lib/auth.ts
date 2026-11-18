@@ -6,6 +6,7 @@ import { notifyDataChanged } from "./changes";
 import { getKv, setKv } from "./db";
 import { deviceRegistration, registerDevice, unregisterDevice } from "./device";
 import { askNotificationPermission, clearNotificationsOnSignOut, ensureNotificationsReady, syncLocalAlerts } from "./notifications";
+import { loadProfile } from "./profile";
 import { session, type SessionStatus } from "./session";
 import { startSync, stopSync, wipeLocalData } from "./sync";
 import { hasConsent, resumeTracking, stopTracking } from "./tracking";
@@ -89,6 +90,8 @@ export async function startSession() {
   } catch {
     // sem rede
   }
+  // Meu cadastro (foto do topo, chave PIX em Ganhos): fica só na memória. Sem rede, fica para depois, sem aviso.
+  void loadProfile().catch(() => undefined);
   startSync();
   // Sincronização com o app fora da tela (tarefa periódica do sistema; não existe no Expo Go).
   void registerBackgroundSync();

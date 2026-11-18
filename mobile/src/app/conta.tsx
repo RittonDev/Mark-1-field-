@@ -1,8 +1,9 @@
 import NetInfo from "@react-native-community/netinfo";
 import { router } from "expo-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Alert, Platform, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Avatar } from "../components/Avatar";
 import { BackgroundSyncRow, NotificationsCard } from "../components/NotificationsCard";
 import { Text } from "../components/Text";
 import { Badge, Button, Card, EmptyState, InfoRow, SectionTitle, Segmented } from "../components/ui";
@@ -25,6 +26,7 @@ import { ROLE } from "../lib/constants";
 import { countPending, dismissNotice, listNotices, listPendingOps, type PendingOp } from "../lib/db";
 import type { DeviceRegistration } from "../lib/device";
 import { formatDateTime, formatTime } from "../lib/format";
+import { ensureProfile, useProfile } from "../lib/profile";
 import { canEditServer, useSession } from "../lib/session";
 import { describeOp, discardOp, isOnline, requestSync, resetCursor, useSyncStatus, type SyncStatus } from "../lib/sync";
 import { showToast } from "../lib/toast";
@@ -117,6 +119,11 @@ export default function AccountScreen() {
   const consentAt = locationConsentAt(user);
   // A última rodada falou com o servidor: uma ação que segue na fila depois disso não está só esperando sinal.
   const serverUp = sync.network !== "offline" && sync.server === "reachable";
+  // A foto do cartão Técnico vem do Meu cadastro (na memória; relido quando falta ou o link da foto venceu).
+  const profile = useProfile();
+  useEffect(() => {
+    ensureProfile();
+  }, []);
 
   if (!user) return null;
 
@@ -231,12 +238,18 @@ export default function AccountScreen() {
     <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}>
       <Card style={{ gap: 4 }}>
         <SectionTitle accent>Técnico</SectionTitle>
-        <Text style={styles.name}>{user.name}</Text>
-        <Text style={styles.muted}>{user.email}</Text>
-        <Text style={styles.muted}>
-          {ROLE[user.role]}
-          {user.team ? ` · ${user.team.name}` : ""}
-        </Text>
+        <View style={styles.identity}>
+          <Avatar name={user.name} uri={profile?.avatar_url} size={56} />
+          <View style={styles.identityText}>
+            <Text style={styles.name}>{user.name}</Text>
+            <Text style={styles.muted}>{user.email}</Text>
+            <Text style={styles.muted}>
+              {ROLE[user.role]}
+              {user.team ? ` · ${user.team.name}` : ""}
+            </Text>
+          </View>
+        </View>
+        <Button title="Meu cadastro" icon="user" onPress={() => router.push("/meu-cadastro")} disabled={leaving} style={styles.profileButton} />
         <View style={styles.divider} />
         <InfoRow label="Senha" value="Trocar senha" onPress={() => router.push("/trocar-senha")} />
       </Card>
@@ -400,6 +413,9 @@ export default function AccountScreen() {
 const makeStyles = (c: Palette) =>
   StyleSheet.create({
     content: { padding: 16, gap: 14 },
+    identity: { flexDirection: "row", alignItems: "center", gap: 14 },
+    identityText: { flex: 1, gap: 2 },
+    profileButton: { marginTop: 12 },
     name: { fontSize: 18, fontWeight: "700", color: c.ink },
     muted: { fontSize: 13, color: c.inkMuted },
     hint: { fontSize: 12, color: c.inkMuted, lineHeight: 17, marginTop: 4 },

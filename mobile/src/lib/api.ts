@@ -43,18 +43,20 @@ export class ApiError extends Error {
 interface ValidationIssue {
   loc?: (string | number)[];
   msg?: string;
+  /** Nome do campo como a pessoa vê ("Chave PIX", "CEP"); a API manda quando conhece o campo. */
+  label?: string;
 }
 
 function formatDetail(detail: unknown, status: number): string {
   // Texto da API. A página HTML de um proxy (502, 413…) não vira mensagem para o técnico.
   if (typeof detail === "string" && detail && !/^\s*</.test(detail)) return detail;
   if (Array.isArray(detail)) {
+    // Com o rótulo da API; sem ele, só a mensagem (o nome técnico do campo não diz nada ao técnico).
     const parts = (detail as ValidationIssue[]).map((issue) => {
-      const field = (issue.loc ?? []).filter((p) => p !== "body" && p !== "query").join(".");
       const msg = (issue.msg ?? "inválido").replace(/^Value error, /, "");
-      return field ? `${field}: ${msg}` : msg;
+      return issue.label ? `${issue.label}: ${msg}` : msg;
     });
-    if (parts.length) return parts.join(" · ");
+    if (parts.length) return Array.from(new Set(parts)).join(" · ");
   }
   if (status === 0) return "Sem conexão com o servidor";
   if (status === 401) return "Sessão expirada. Entre novamente.";
@@ -262,6 +264,7 @@ export interface CallOptions {
 export const api = {
   get: <T>(path: string, options: CallOptions = {}) => request<T>(path, options),
   post: <T>(path: string, body?: unknown, options: CallOptions = {}) => request<T>(path, { ...options, method: "POST", body }),
+  patch: <T>(path: string, body?: unknown, options: CallOptions = {}) => request<T>(path, { ...options, method: "PATCH", body }),
   delete: <T>(path: string, options: CallOptions = {}) => request<T>(path, { ...options, method: "DELETE" }),
 };
 

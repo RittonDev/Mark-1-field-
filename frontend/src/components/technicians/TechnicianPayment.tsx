@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import clsx from "clsx";
 import { Copy, MessageCircle, Trash2, Wallet } from "lucide-react";
 import Link from "next/link";
 import { useConfirm } from "@/components/Confirm";
@@ -54,8 +55,11 @@ export function TechnicianPayment({ tech, dirty }: { tech: Pick<Technician, "id"
     if (ok) remove.mutate();
   };
 
+  // Sem o mapa `pix` (API sem a chave PIX), fica só o resumo, como antes: "Sem chave PIX" seria engano.
+  const pixKnown = board.data?.pix !== undefined;
   const pix = board.data?.pix?.[tech.id] ?? null;
   const summary = board.data?.summary;
+  if (board.data && !pixKnown && !board.data.items.length) return null;
   return (
     <section className="flex flex-col gap-2.5 rounded-lg border border-line p-3">
       <SectionTitle>Pagamento</SectionTitle>
@@ -65,7 +69,7 @@ export function TechnicianPayment({ tech, dirty }: { tech: Pick<Technician, "id"
         <ErrorBox message={errorMessage(board.error)} onRetry={() => void board.refetch()} />
       ) : (
         <>
-          {pix ? (
+          {!pixKnown ? null : pix ? (
             <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
               <div className="min-w-0 flex-1 basis-56">
                 <p className="text-sm break-words text-ink">
@@ -118,7 +122,7 @@ export function TechnicianPayment({ tech, dirty }: { tech: Pick<Technician, "id"
             </p>
           )}
           {summary && board.data?.items.length ? (
-            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line pt-2.5">
+            <div className={clsx("flex flex-wrap items-center justify-between gap-2", pixKnown && "border-t border-line pt-2.5")}>
               <p className="text-xs text-ink-muted tabular-nums">
                 A pagar <strong className="font-semibold text-ink">{formatMoney(summary.to_pay)}</strong> · Previsto{" "}
                 {formatMoney(summary.expected)} · Pago {formatMoney(summary.paid)}

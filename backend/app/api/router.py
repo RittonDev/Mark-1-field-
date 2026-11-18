@@ -13,6 +13,7 @@ from app.api.routes import (
     field,
     forms,
     home,
+    invoices,
     messages,
     my_profile,
     offers,
@@ -51,6 +52,8 @@ for module in (
     # Ofertas de OS: /tickets/{id}/offers (dois segmentos depois do id, sem choque com as rotas
     # da OS) e /me/offers (ao lado de /me/earnings).
     offers,
+    # Notas fiscais dos técnicos: /me/invoices (app) e /technician-invoices (Pagamentos).
+    invoices,
     # Meu cadastro do técnico: /me/profile e /me/profile/photo.
     my_profile,
     portal,

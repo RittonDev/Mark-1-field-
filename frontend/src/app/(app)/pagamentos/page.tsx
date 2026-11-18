@@ -8,15 +8,18 @@ import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { StatTile } from "@/components/charts";
 import { useConfirm } from "@/components/Confirm";
 import { NoAccess } from "@/components/NoAccess";
+import { PayoutPixLine } from "@/components/payouts/PayoutPixLine";
 import { TicketLink } from "@/components/ticket/TicketLink";
 import { useToast } from "@/components/Toaster";
 import { Button, Card, EmptyState, ErrorBox, LoadingBlock, PageHeader, Pill, Select } from "@/components/ui";
+import { useNow } from "@/components/useNow";
 import { api, errorMessage } from "@/lib/api";
 import { PAYOUT_STATUS, STATUS } from "@/lib/constants";
 import { downloadCsv } from "@/lib/download";
 import { formatDate, formatMoney } from "@/lib/format";
 import { useCan } from "@/lib/permissions";
-import type { ExpenseReport, PayoutLine, PayoutList, User, UUID } from "@/lib/types";
+import { pixDay, pixRecent, pixText } from "@/lib/pix";
+import type { ExpenseReport, PayoutBoard, PayoutLine, PayoutList, PixInfo, User, UUID } from "@/lib/types";
 import { copyText, WHATSAPP_TEXT_LIMIT, whatsappUrl } from "@/lib/whatsapp";
 
 type View = "to_pay" | "expected" | "paid" | "all";
@@ -102,14 +105,17 @@ function monthRange(month: string): { date_from?: string; date_to?: string } {
   return { date_from: `${month}-01`, date_to: new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10) };
 }
 
-/** Com o técnico escolhido, a API filtra (a lista e o resumo dos cartões ficam inteiros, sem o corte em 1.000). */
+/**
+ * Com o técnico escolhido, a API filtra (a lista e o resumo dos cartões ficam inteiros, sem o corte em 1.000).
+ * `with_pix`: a chave PIX de cada técnico das linhas (e do escolhido), para pagar daqui.
+ */
 function usePayouts(source: Source, month: string, technicianId: string, enabled: boolean) {
   return useQuery({
     queryKey: ["payouts", source, month, technicianId],
     queryFn: ({ signal }) =>
-      api.get<PayoutList>(
+      api.get<PayoutBoard>(
         "/payouts",
-        { ...SOURCE_QUERY[source], ...monthRange(month), technician_id: technicianId || undefined },
+        { ...SOURCE_QUERY[source], ...monthRange(month), technician_id: technicianId || undefined, with_pix: true },
         { signal },
       ),
     placeholderData: keepPreviousData,
@@ -127,15 +133,18 @@ function subtitle(line: PayoutLine): string {
 
 /**
  * Extrato para mandar ao técnico no WhatsApp: as OS de cada situação, com o dia da conclusão e o
- * valor. No "a pagar" entram os reembolsos aprovados (custos extras), pagos no mesmo acerto.
+ * valor. No "a pagar" entram os reembolsos aprovados (custos extras), pagos no mesmo acerto. A chave PIX
+ * vai junto, para ele ver onde vai receber (`pix` undefined: a API não mandou a chave, a linha fica de fora).
  */
-function statement(name: string, lines: PayoutLine[], period: string, reimbursement: number): string {
+function statement(name: string, lines: PayoutLine[], period: string, reimbursement: number, pix: PixInfo | null | undefined): string {
   const row = (l: PayoutLine) =>
     `• ${l.ticket.code}${l.ticket.resolved_at ? ` · ${shortDate(l.ticket.resolved_at)}` : ""} · ${l.ticket.location ?? l.ticket.customer ?? l.ticket.title} · ${formatMoney(l.amount)}`;
   const sections = (["to_pay", "paid", "expected"] as const)
     .map((key) => ({ key, lines: lines.filter((l) => stateOf(l) === key) }))
     .filter((s) => s.lines.length > 0);
   const out = ["*Maxx Field · pagamento*", name, `Período: ${period}`];
+  if (pix) out.push(`Chave PIX: ${pixText(pix)}`);
+  else if (pix === null) out.push("Chave PIX: não cadastrada (cadastre no app, em Conta › Meu cadastro)");
   for (const s of sections) {
     out.push("", `*${SECTION[s.key]}*`, ...s.lines.map(row));
     out.push(sections.length === 1 ? `*Total: ${formatMoney(total(s.lines))}*` : `Subtotal: ${formatMoney(total(s.lines))}`);
@@ -215,6 +224,14 @@ function PayoutsView() {
   const pendingQuery = usePayouts("pending", month, technicianId, canView);
   const paidQuery = usePayouts("paid", month, technicianId, canView);
   const queries = [pendingQuery, paidQuery];
+  // "Chave nova" (a chave PIX mudou há menos de 7 dias) muda com o tempo.
+  const now = useNow(60_000);
+  // Chave PIX de cada técnico, das duas consultas. Sem o mapa (API sem a chave), nada aparece.
+  const pixMap = useMemo(() => {
+    const pending = pendingQuery.data?.pix;
+    const paid = paidQuery.data?.pix;
+    return pending || paid ? { ...paid, ...pending } : null;
+  }, [pendingQuery.data, paidQuery.data]);
   // Telefone (botão do WhatsApp) e e-mail (separa técnicos com o mesmo nome).
   const people = useQuery({
     queryKey: ["users", { role: "technician", active: true }],
@@ -341,6 +358,19 @@ function PayoutsView() {
     });
   const labelOf = (group: Group) => options.find((o) => o.id === group.id)?.label ?? group.name;
   const personOf = (id: UUID) => people.data?.find((u) => u.id === id);
+  /** A chave PIX do técnico; null sem chave; undefined quando a API não mandou as chaves. */
+  const pixOf = (id: UUID): PixInfo | null | undefined => (pixMap ? (pixMap[id] ?? null) : undefined);
+  /** "Chave nova": o aviso que vai junto da confirmação do pagamento (confirmar no grupo antes de pagar). */
+  const pixWarning = (group: Group) => {
+    const pix = pixOf(group.id);
+    if (!pix || !pixRecent(pix.updated_at, now)) return null;
+    return (
+      <strong className="font-semibold text-amber-800 dark:text-amber-300">
+        {" "}
+        A chave PIX dele mudou em {pixDay(pix.updated_at)}: confirme com ele no grupo antes de pagar.
+      </strong>
+    );
+  };
   // A lista de telefones é a dos técnicos ativos: o inativo não aparece nela.
   const whatsappTitle = (group: Group, phone: string | null) =>
     phone
@@ -351,7 +381,7 @@ function PayoutsView() {
   const period = month ? (months.find((m) => m.value === month)?.label ?? month) : "até hoje";
   const reimbursementOf = (group: Group) =>
     canExpenses ? (reimbursements.data?.by_technician.find((t) => t.technician?.id === group.id)?.to_pay ?? 0) : 0;
-  const textFor = (group: Group) => statement(group.name, group.lines, period, reimbursementOf(group));
+  const textFor = (group: Group) => statement(group.name, group.lines, period, reimbursementOf(group), pixOf(group.id));
 
   // Reembolsos aprovados do técnico (Custos extras) ainda não pagos: o extrato soma no "Total a receber".
   const reimbursementIds = (group: Group) =>
@@ -387,6 +417,7 @@ function PayoutsView() {
           {reimbursement > 0
             ? ` Os reembolsos aprovados (${formatMoney(reimbursement)}) não entram aqui: continuam a reembolsar em Custos extras.`
             : ""}
+          {pixWarning(group)}
         </>
       ),
       confirmLabel: "Marcar como pago",
@@ -417,6 +448,7 @@ function PayoutsView() {
         <>
           A OS foi cancelada: pague só se o técnico chegou a trabalhar nela. Ele passa a ver{" "}
           <strong className="font-semibold text-ink">{formatMoney(line.amount)}</strong> como pago no app.
+          {pixWarning(group)}
         </>
       ),
       confirmLabel: "Marcar como pago",
@@ -667,6 +699,7 @@ function PayoutsView() {
                   // Pagamento em lote deste técnico (o de uma linha só gira o botão da própria linha).
                   const batch = mine && !pay.variables?.lineId;
                   const phone = personOf(group.id)?.phone ?? null;
+                  const pix = pixOf(group.id);
                   const parts = (["to_pay", "paid", "expected", "cancelled"] as const)
                     .map((state) => ({ state, lines: group.lines.filter((l) => stateOf(l) === state) }))
                     .filter((p) => p.lines.length > 0)
@@ -696,6 +729,7 @@ function PayoutsView() {
                           <p className="text-xs text-ink-muted">
                             {plural(group.lines.length, "OS", "OS")} · {parts.join(" · ")}
                           </p>
+                          {pix !== undefined ? <PayoutPixLine name={group.name} pix={pix} phone={phone} now={now} /> : null}
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
                           <Button size="sm" variant="ghost" onClick={() => void copyStatement(group)}>
