@@ -183,6 +183,8 @@ Requisitos:
   permissão) e o estado do push.
 - **Ofertas de OS com preço** (detalhes abaixo): a central manda uma OS sem técnico com o valor; o técnico
   aceita pelo valor ou recusa, e quem aceitar primeiro fica com ela.
+- **Meu cadastro** (detalhes abaixo): o técnico mantém a foto, os dados de contato, o endereço e a chave PIX em
+  que recebe pelos chamados; e-mail e chave PIX pedem a senha atual, e a central é avisada na hora.
 
 ## Ofertas de OS com preço
 
@@ -385,6 +387,48 @@ sincronização fora da tela em [src/lib/backgroundSync.ts](src/lib/backgroundSy
 - **Saiu da conta**: nada agendado e a bandeja limpa (loja e endereço aparecem na tela bloqueada). As chaves
   `visit_reminders`, `notifications_asked` e `push_live` ficam no kv e somem na troca de técnico.
 
+## Meu cadastro
+
+**Conta › Meu cadastro** ([src/app/meu-cadastro.tsx](src/app/meu-cadastro.tsx)), aberto também pelo cartão de
+PIX em Ganhos. Contrato em [docs/API.md](../docs/API.md), "Meu cadastro do técnico".
+
+- **O que o técnico muda**: foto, nome, celular (WhatsApp), e-mail de login, endereço (CEP, rua e número, bairro),
+  cidade/UF, região que atende e a chave PIX (tipo, chave e titular). Grupo, cargo, acesso ao app, serviços e
+  jornada ficam com a central; CPF, CNPJ/MEI, nascimento, ferramentas, veículo e CNH continuam na ficha da
+  homologação.
+- **Um formulário só**: "Salvar alterações" (desativado sem mudança) manda em `PATCH /me/profile` só o que mudou.
+  O app confere antes, com as regras e as mensagens do servidor (nome, celular com DDD, e-mail quando muda,
+  cidade, UF, CEP com 8 números e a chave por tipo, em [src/lib/pix.ts](src/lib/pix.ts)); o servidor confere de
+  novo. Sair com alteração não salva pergunta "Descartar as alterações?".
+- **E-mail e chave PIX pedem a senha atual** (folha "Confirme com sua senha"): cadastrar a chave, trocar tipo,
+  chave ou titular e remover. Senha errada e o bloqueio depois de 5 erros em 15 min (o mesmo contador de
+  "Trocar senha") aparecem na folha. A central é avisada na hora quando mudam PIX, e-mail ou celular, e toda
+  mudança fica no histórico do cadastro.
+- **Chave PIX**: chips CPF, CNPJ, E-mail, Celular e Chave aleatória; a chave tem o teclado e a máscara do tipo
+  ("Colar" na chave aleatória); trocar o tipo limpa a chave; o titular começa com o nome. "Remover chave PIX" só
+  vale ao salvar (dá para desfazer). Celular do PIX: DDD sem zero e o número com o 9, como no servidor.
+- **Trocar o e-mail** não tira ninguém do app (a senha é a mesma): o login passa a ser o novo, já preenchido na
+  tela de login (`session.updateUser` grava também o `mc_last_email`).
+- **Foto**: câmera (a frontal) ou galeria pelo `photoCapture` (alvo `avatar`), com recorte quadrado na hora; o app
+  reduz para 512 px em JPEG (compressão 0,85) com o `expo-image-manipulator` e envia em `POST /me/profile/photo`.
+  "Remover foto" tira também a que veio do Field Control; no lugar ficam as iniciais. No Android, a foto tirada
+  antes de o sistema fechar o app com a câmera aberta é enviada quando o Meu cadastro abre de novo (até 30 min).
+- **Onde a foto aparece**: no Meu cadastro, no 1º cartão da Conta e no topo da tela inicial
+  ([src/components/Avatar.tsx](src/components/Avatar.tsx)). Sem foto, sem o cadastro carregado ou com o link
+  vencido (12 h), aparecem as iniciais.
+- **Ganhos**: no topo, "Recebimento por PIX" com o tipo e a chave (abre o Meu cadastro) ou "Sem chave PIX
+  cadastrada" com **Cadastrar chave PIX**. Só aparece com o cadastro carregado; puxar a tela para baixo relê o
+  cadastro junto.
+- **Sem internet**: abrir, salvar e trocar a foto pedem internet. Nada entra na fila offline: a senha não fica
+  guardada e o aviso à central tem de sair na hora. Sem rede e sem o cadastro na memória, a tela diz "Sem
+  internet"; com ele na memória, mostra os dados e avisa que não dá para salvar.
+- **O que fica no aparelho**: nome, e-mail e celular no usuário da sessão (`mc_user`, SecureStore). Endereço e
+  chave PIX ficam só na memória ([src/lib/profile.ts](src/lib/profile.ts)), nunca no SQLite, e somem ao sair da
+  conta. O cadastro é lido ao entrar (sem aviso se falhar), ao abrir o Meu cadastro, ao puxar Ganhos para baixo e,
+  na tela inicial, na Conta e em Ganhos, quando falta ou passou de 6 h (o link da foto vale 12 h).
+- O `expo-image-manipulator` é nativo e já vem no Expo Go; um development build feito antes dele precisa ser
+  refeito.
+
 ## Como a sincronização funciona
 
 ```
@@ -424,17 +468,22 @@ src/
     ticket/[id].tsx    detalhe, ações e abas
     oferta/[id].tsx    oferta de OS com preço: escopo, "Aceitar por R$ X" ou "Recusar"
     termo-rastreamento.tsx  termo de ciência do rastreamento (LGPD)
-    conta.tsx          sincronização, fila, avisos, rastreamento, notificações, aparência, sair
+    conta.tsx          técnico (foto, Meu cadastro, senha), sincronização, fila, avisos, rastreamento, notificações, aparência, sair
+    meu-cadastro.tsx   Meu cadastro: foto, dados, endereço e chave PIX (e-mail e PIX com a senha atual)
   components/          UI (marca, cartões, calendário, jornada, diálogo de transição, abas da OS)
     Text.tsx           Text do app: aplica a Manrope no peso do estilo (use este, não o do react-native)
     motion.tsx         entrada em cascata, transição de layout, PressableScale (0,97 com mola), Pulse
     Skeleton.tsx FieldStepper.tsx SuccessHost.tsx TabBar.tsx ActionSheet.tsx Icon.tsx RouteMapPattern.tsx
     NotificationsCard.tsx  Conta > Notificações (lembretes, permissão, alarme exato) e "Em segundo plano"
+    Avatar.tsx         foto do técnico ou as iniciais (topo da tela inicial, Conta, Meu cadastro)
+    PixCard.tsx        Ganhos > Recebimento por PIX (atalho para o Meu cadastro)
   theme/theme.ts       paleta Maxx Field, claro/escuro, preferência do técnico
   theme/fonts.ts       Manrope (pesos 400–700) e o mapeamento de fontWeight para a família
   lib/
     tracking.ts trackingTask.ts  jornada, coleta, fila de pontos e tarefa de segundo plano
     account.ts         /auth/me e troca de senha
+    profile.ts         Meu cadastro só na memória (GET/PATCH /me/profile) e a foto reduzida no aparelho (expo-image-manipulator)
+    pix.ts masks.ts    chave PIX por tipo (regras e mensagens de backend/app/core/pix.py) e máscaras de CPF, CNPJ, CEP e celular
     types.ts constants.ts workflow.ts   copiados de frontend/src/lib (manter iguais)
     syncTypes.ts       contrato de /sync/pull e /sync/push
     api.ts session.ts  HTTP com refresh + tokens no SecureStore

@@ -43,8 +43,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "O Maxx Field precisa acessar suas fotos para anexá-las às ordens de serviço.",
-          "cameraPermission": "O Maxx Field usa a câmera para registrar fotos do atendimento e dos formulários da OS."
+          "photosPermission": "O Maxx Field precisa acessar suas fotos para anexá-las às ordens de serviço e para a foto do seu cadastro.",
+          "cameraPermission": "O Maxx Field usa a câmera para registrar fotos do atendimento e dos formulários da OS, e para a foto do seu cadastro."
         }
       ],
       "expo-notifications",
