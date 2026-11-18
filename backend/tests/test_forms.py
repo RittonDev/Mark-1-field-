@@ -3,7 +3,7 @@
 import base64
 import uuid
 
-from httpx import AsyncClient
+from httpx import AsyncClient, Response
 
 from app.core.config import settings
 from tests.conftest import World, requires_db
@@ -202,3 +202,31 @@ async def test_form_answers_offline_and_optional_forms(client: AsyncClient, worl
     r = await client.delete(f"{API}/tickets/{t2['id']}/forms/{f2['id']}", headers=an)
     assert r.status_code == 204
     assert (await client.get(f"{API}/tickets/{t2['id']}/attachments", headers=an)).json() == []
+
+
+async def test_template_save_refuses_a_stale_base(client: AsyncClient, world: World) -> None:
+    """Duas pessoas editando o mesmo modelo: quem salva depois, a partir da versão antiga, recebe
+    409 em vez de desfazer a gravação da outra. Sem base (ou confirmando por cima), grava."""
+    an = world.analyst.headers
+    tpl = (await client.post(f"{API}/form-templates", json=PREVENTIVA, headers=an)).json()
+    url = f"{API}/form-templates/{tpl['id']}"
+    base = tpl["updated_at"]
+
+    async def save(name: str, base_updated_at: str | None) -> Response:
+        body = {**PREVENTIVA, "name": name, "base_updated_at": base_updated_at}
+        return await client.put(url, json=body, headers=an)
+
+    first = await save("Preventiva A", base)
+    assert first.status_code == 200, first.text
+    assert first.json()["updated_at"] != base
+
+    stale = await save("Preventiva B", base)
+    assert stale.status_code == 409
+    assert "Outra pessoa salvou" in stale.json()["detail"]
+    assert (await client.get(url, headers=an)).json()["name"] == "Preventiva A"
+
+    ok = await save("Preventiva C", first.json()["updated_at"])
+    assert ok.status_code == 200, ok.text
+    forced = await save("Preventiva D", None)
+    assert forced.status_code == 200, forced.text
+    assert forced.json()["name"] == "Preventiva D"

@@ -8,7 +8,7 @@ import { useConfirm } from "@/components/Confirm";
 import { FieldError, fold, plural, SearchField, UnsavedBar } from "@/components/settings/shared";
 import { useToast } from "@/components/Toaster";
 import { Button, buttonClassName, Card, Checkbox, ErrorBox, Field, Input, PageHeader, Select, Textarea } from "@/components/ui";
-import { api, errorMessage, request } from "@/lib/api";
+import { api, ApiError, errorMessage, request } from "@/lib/api";
 import { useUnsavedChanges } from "@/lib/hooks";
 import type { FormField, FormFieldType, FormTemplate, ServiceType } from "@/lib/types";
 import {
@@ -132,12 +132,14 @@ export function FormEditor({
   });
 
   const save = useMutation({
-    mutationFn: () => {
+    // `overwrite`: a pessoa confirmou salvar por cima da versão que outra pessoa salvou.
+    mutationFn: (overwrite: boolean | void) => {
       const body = payload(draft);
       if (!draft.id) return api.post<SavedTemplate>("/form-templates", body);
       return request<SavedTemplate>(`/form-templates/${draft.id}`, {
         method: "PUT",
-        body,
+        // A API recusa (409) se o modelo mudou depois da versão de onde o rascunho saiu.
+        body: { ...body, base_updated_at: overwrite === true ? null : (draft.updated_at ?? null) },
         query: { apply_to_pending: reachesTickets && applyPending },
       });
     },
@@ -151,11 +153,26 @@ export function FormEditor({
       onLeave();
     },
     // O erro aparece no topo: quem salvou pela barra do rodapé é levado até ele (e o leitor de tela também).
-    onError: () =>
+    onError: async (e) => {
+      if (e instanceof ApiError && e.status === 409 && draft.id) {
+        const overwrite = await confirm({
+          title: "Outra pessoa salvou este formulário",
+          description:
+            "Ele mudou depois que você começou a editar. Salvar por cima troca a versão dela pela sua. Para ver a versão dela, volte e descarte as suas alterações.",
+          confirmLabel: "Salvar por cima",
+          cancelLabel: "Voltar",
+          tone: "danger",
+        });
+        if (overwrite) {
+          save.mutate(true);
+          return;
+        }
+      }
       requestAnimationFrame(() => {
         summary.current?.scrollIntoView({ block: "center" });
         summary.current?.focus({ preventScroll: true });
-      }),
+      });
+    },
   });
 
   const setField = (id: string, patch: Partial<FormField>) =>

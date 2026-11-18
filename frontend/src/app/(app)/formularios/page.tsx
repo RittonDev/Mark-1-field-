@@ -204,6 +204,8 @@ function FormsList({
         service_type_ids: current.service_type_ids,
         requires_signature: current.requires_signature,
         is_active: !t.is_active,
+        // Se alguém salvar entre a leitura e esta gravação, a API recusa (409) em vez de desfazer.
+        base_updated_at: current.updated_at,
       });
     },
     onSuccess: (saved) => {

@@ -309,7 +309,7 @@ Ao receber um evento, recarregue a OS/lista (o evento não carrega o objeto inte
 
 Todos exigem analista ou gestor, salvo indicação. Valores em R$ chegam como número.
 
-- **Formulários:** `GET|POST /form-templates`, `GET|PUT /form-templates/{id}`, `GET /form-templates/catalog`.
+- **Formulários:** `GET|POST /form-templates`, `GET|PUT /form-templates/{id}` (o PUT aceita `base_updated_at`, o `updated_at` de onde a tela partiu: se outra pessoa salvou depois, 409), `GET /form-templates/catalog`.
   Na OS: `GET /tickets/{id}/forms/suggestions` · `POST /tickets/{id}/forms {template_id, required}` ·
   `PATCH|DELETE /tickets/{id}/forms/{form_id}` · `PUT /tickets/{id}/forms/{form_id}/answers {answers, complete}`
   (técnico responsável ou gestão; respostas gravadas mesmo quando a conclusão falha) ·

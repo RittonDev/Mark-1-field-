@@ -1,7 +1,7 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, File, Form, Response, UploadFile, status
+from fastapi import APIRouter, File, Form, HTTPException, Response, UploadFile, status
 from sqlalchemy import select
 
 from app.api.deps import DB, CurrentUser, TicketManagerUser, access_user
@@ -11,6 +11,7 @@ from app.schemas.forms import (
     FormCatalog,
     FormTemplateIn,
     FormTemplateOut,
+    FormTemplateUpdate,
     TicketFormAdd,
     TicketFormAnswers,
     TicketFormOut,
@@ -60,17 +61,29 @@ async def get_template(template_id: uuid.UUID, db: DB, _: FormsView) -> FormTemp
     return await svc.get_template(db, template_id)
 
 
+FORM_CHANGED = (
+    "Outra pessoa salvou este formulário depois que você abriu. Abra de novo para ver a versão atual."
+)
+
+
 @router.put("/form-templates/{template_id}", response_model=FormTemplateOut)
 async def update_template(
     template_id: uuid.UUID,
-    body: FormTemplateIn,
+    body: FormTemplateUpdate,
     db: DB,
     _: FormsEdit,
     apply_to_pending: bool = False,
 ) -> FormTemplateOut:
     """Salva o modelo. Com `apply_to_pending`, a correção chega também às OS em que o formulário
-    ainda não começou (`applied_to` diz quantas)."""
-    template = await svc.update_template(db, await svc.get_template(db, template_id), body)
+    ainda não começou (`applied_to` diz quantas). Com `base_updated_at` (a versão de onde a tela
+    partiu), uma gravação de outra pessoa feita depois dela dá 409, em vez de ser desfeita."""
+    template = await svc.get_template(db, template_id)
+    if body.base_updated_at is not None:
+        # Trava a linha: duas gravações que partiram da mesma versão não passam as duas.
+        await db.refresh(template, with_for_update=True)
+        if template.updated_at != body.base_updated_at:
+            raise HTTPException(status.HTTP_409_CONFLICT, FORM_CHANGED)
+    template = await svc.update_template(db, template, body)
     applied = await svc.apply_to_pending(db, template) if apply_to_pending else None
     await db.commit()
     out = FormTemplateOut.model_validate(template)

@@ -34,6 +34,8 @@ export const LIMITS = {
 
 export interface Draft {
   id?: string;
+  /** Versão salva de onde o rascunho saiu: ao salvar, a API recusa (409) se outra pessoa salvou depois. */
+  updated_at?: string;
   name: string;
   description: string;
   fields: FormField[];
@@ -97,6 +99,7 @@ export function emptyDraft(): Draft {
 export function fromTemplate(t: FormTemplate): Draft {
   return {
     id: t.id,
+    updated_at: t.updated_at,
     name: t.name,
     description: t.description ?? "",
     fields: t.fields,
@@ -112,6 +115,7 @@ export function duplicateOf(t: FormTemplate): Draft {
   return {
     ...fromTemplate(t),
     id: undefined,
+    updated_at: undefined,
     name: `${t.name.slice(0, LIMITS.name - suffix.length)}${suffix}`,
     is_active: true,
     fields: t.fields.map((f) => ({ ...f, id: newId() })),

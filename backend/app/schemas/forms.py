@@ -85,6 +85,12 @@ class FormTemplateIn(BaseModel):
         return self
 
 
+class FormTemplateUpdate(FormTemplateIn):
+    # O `updated_at` da versão de onde a tela partiu: se outra pessoa salvou depois, o PUT dá 409
+    # em vez de desfazer a gravação dela em silêncio. Sem ele (ou nulo), grava por cima.
+    base_updated_at: dt.datetime | None = None
+
+
 class FormTemplateOut(ORMModel):
     id: uuid.UUID
     name: str
