@@ -70,6 +70,10 @@ GUARDED: dict[tuple[str, str], tuple[tuple[str, ...], str] | tuple[tuple[str, ..
     ("DELETE", "/tickets/{ticket_id}/payouts/{technician_id}"): (("commercial.payouts",), E),
     ("POST", "/payouts/pay"): (("commercial.payouts",), E),
     ("POST", "/payouts/unpay"): (("commercial.payouts",), E),
+    # Ofertas de OS: o valor oferecido ao técnico é de Pagamentos.
+    ("GET", "/tickets/{ticket_id}/offers"): (("commercial.payouts",), V),
+    ("POST", "/tickets/{ticket_id}/offers"): (("commercial.payouts",), E),
+    ("POST", "/tickets/{ticket_id}/offers/{offer_id}/cancel"): (("commercial.payouts",), E),
     # Base
     ("GET", "/customers/{customer_id}"): (("base.customers",), V),
     ("POST", "/customers"): (("base.customers",), E),
@@ -245,6 +249,10 @@ OTHER: dict[tuple[str, str], str] = {
     ("POST", "/tracking/shift/start"): "TECHNICIAN",
     ("POST", "/tracking/shift/end"): "TECHNICIAN",
     ("POST", "/tracking/pings"): "TECHNICIAN",
+    ("GET", "/me/offers"): "TECHNICIAN",
+    ("GET", "/me/offers/{offer_id}"): "TECHNICIAN",
+    ("POST", "/me/offers/{offer_id}/accept"): "TECHNICIAN",
+    ("POST", "/me/offers/{offer_id}/decline"): "TECHNICIAN",
     # Sem login (ou link assinado)
     ("POST", "/auth/login"): "PUB",
     ("POST", "/auth/refresh"): "PUB",

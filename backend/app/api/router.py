@@ -14,6 +14,7 @@ from app.api.routes import (
     forms,
     home,
     messages,
+    offers,
     onboarding,
     parts,
     payouts,
@@ -46,6 +47,9 @@ for module in (
     tickets,
     parts,
     payouts,
+    # Ofertas de OS: /tickets/{id}/offers (dois segmentos depois do id, sem choque com as rotas
+    # da OS) e /me/offers (ao lado de /me/earnings).
+    offers,
     portal,
     queues,
     client_report,

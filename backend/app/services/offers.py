@@ -299,7 +299,11 @@ async def send(
         "amount": payouts_svc.money_text(amount),
         "expires_at": data.expires_at.isoformat() if data.expires_at else None,
         "offers": [
-            {"id": str(o.id), "technician_id": str(o.technician_id), "technician": o.technician.name}
+            {
+                "id": str(o.id),
+                "technician_id": str(o.technician_id),
+                "technician": o.technician.name,
+            }
             for o in offers
         ],
     }
@@ -327,9 +331,7 @@ async def send(
     return offers
 
 
-async def cancel(
-    db: AsyncSession, ticket: Ticket, offer_id: uuid.UUID, actor: User
-) -> TicketOffer:
+async def cancel(db: AsyncSession, ticket: Ticket, offer_id: uuid.UUID, actor: User) -> TicketOffer:
     """A central cancela uma oferta pendente (também a vencida). Já cancelada: devolve como está;
     já respondida pelo técnico: 422."""
     ticket = await _locked_ticket(db, ticket.id)
