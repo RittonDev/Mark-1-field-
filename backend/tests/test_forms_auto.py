@@ -19,7 +19,9 @@ API = settings.API_PREFIX
 FIELDS = [{"id": "obs", "type": "textarea", "label": "Observações"}]
 
 
-async def category(client: AsyncClient, world: World, name: str, parent: dict | None = None) -> dict:
+async def category(
+    client: AsyncClient, world: World, name: str, parent: dict | None = None
+) -> dict:
     body: dict = {"name": name}
     if parent is not None:
         body["parent_id"] = parent["id"]
@@ -68,7 +70,7 @@ def names(ticket: dict) -> list[str]:
     return [f["name"] for f in ticket["forms"]]
 
 
-async def printers_scene(client: AsyncClient, world: World) -> dict:
+async def printers_scene(client: AsyncClient, world: World) -> tuple[dict, dict, dict, dict, dict]:
     """A ligado ao tipo T (obrigatório, pede assinatura); B à categoria-mãe "Impressoras"
     (opcional); C a "Redes"; D inativo, ligado a T."""
     printers = await category(client, world, "Impressoras")
@@ -82,9 +84,7 @@ async def printers_scene(client: AsyncClient, world: World) -> dict:
         client, world, "Checklist B", category_ids=[printers["id"]], default_required=False
     )
     c = await template(client, world, "Checklist C", category_ids=[network["id"]])
-    d = await template(
-        client, world, "Checklist D", service_type_ids=[kind["id"]], is_active=False
-    )
+    d = await template(client, world, "Checklist D", service_type_ids=[kind["id"]], is_active=False)
     return {"printers": printers, "jam": jam, "network": network, "type": kind}, a, b, c, d
 
 
@@ -128,12 +128,11 @@ async def test_explicit_forms_list_is_what_goes_in(client: AsyncClient, world: W
     assert set(created[0]["data"]["forms_left_out"]) == {a["id"], b["id"]}
 
     # Exatamente a lista, na ordem: A é ligado (automático), C foi escolhido à mão.
-    t = await create(
-        client,
-        world,
-        forms=[{"template_id": c["id"], "required": True}, {"template_id": a["id"], "required": False}],
-        **base,
-    )
+    chosen = [
+        {"template_id": c["id"], "required": True},
+        {"template_id": a["id"], "required": False},
+    ]
+    t = await create(client, world, forms=chosen, **base)
     got = [(f["name"], f["required"], f["auto_attached"]) for f in t["forms"]]
     assert got == [("Checklist C", True, False), ("Checklist A", False, True)]
     assert t["signature_required"] is False
@@ -229,7 +228,8 @@ async def test_type_change_before_the_visit_reconciles_forms(
     assert names(t) == ["Checklist E"]
 
     # Em atendimento ou cancelada, a troca não mexe nos formulários.
-    visit = await create(client, world, service_type_id=kind["id"], assignee_id=str(world.tech.user.id))
+    tech = str(world.tech.user.id)
+    visit = await create(client, world, service_type_id=kind["id"], assignee_id=tech)
     visit = await transition(client, world.tech.headers, visit, "en_route")
     visit = await transition(client, world.tech.headers, visit, "in_progress")
     visit = await patch(client, world, visit["id"], service_type_id=other["id"])
@@ -304,13 +304,13 @@ async def test_apply_to_pending_reconciles_tickets_not_started(
     url = f"{API}/form-templates/{f['id']}"
     base = {"name": "Checklist F", "fields": FIELDS, "requires_signature": False}
 
+    tech = str(world.tech.user.id)
     os1 = await create(client, world, title="Loja 1", service_type_id=kind["id"])
-    os2 = await create(
-        client, world, title="Loja 2", service_type_id=kind["id"], assignee_id=str(world.tech.user.id)
-    )
+    os2 = await create(client, world, title="Loja 2", service_type_id=kind["id"], assignee_id=tech)
     os2 = await transition(client, world.tech.headers, os2, "in_progress")
     os3 = await create(client, world, title="Loja 3", service_type_id=kind["id"])
-    r = await client.post(f"{API}/tickets/{os3['id']}/forms", json={"template_id": f["id"]}, headers=an)
+    by_hand = {"template_id": f["id"]}
+    r = await client.post(f"{API}/tickets/{os3['id']}/forms", json=by_hand, headers=an)
     assert r.status_code == 201, r.text
     r = await client.delete(f"{API}/tickets/{os3['id']}/forms/{r.json()['id']}", headers=an)
     assert r.status_code == 204
@@ -384,7 +384,13 @@ async def test_prefill_until_the_form_is_completed(client: AsyncClient, world: W
     assert sources["location_name"]["label"] == "Nome da loja"
 
     fields = [
-        {"id": "loja", "type": "text", "label": "Loja", "required": True, "prefill": "location_name"},
+        {
+            "id": "loja",
+            "type": "text",
+            "label": "Loja",
+            "required": True,
+            "prefill": "location_name",
+        },
         {"id": "tecnico", "type": "text", "label": "Técnico", "prefill": "technician"},
         {"id": "data", "type": "date", "label": "Data", "required": True, "prefill": "visit_date"},
         {"id": "qtd", "type": "number", "label": "Quantidade", "prefill": "location_name"},
@@ -450,7 +456,9 @@ async def test_suggestions_follow_type_and_category(client: AsyncClient, world: 
     printers = await category(client, world, "Impressoras")
     jam = await category(client, world, "Atolamento", printers)
     kind = await service_type(client, world, "Instalação")
-    by_category = await template(client, world, "Checklist da categoria", category_ids=[printers["id"]])
+    by_category = await template(
+        client, world, "Checklist da categoria", category_ids=[printers["id"]]
+    )
     by_type = await template(client, world, "Checklist do tipo", service_type_ids=[kind["id"]])
     await template(client, world, "Checklist solto")
 

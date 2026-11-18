@@ -457,11 +457,7 @@ async def reconcile_ticket(
     )
     removed: list[TicketForm] = []
     for form in forms:
-        if (
-            form.auto_attached
-            and form.template_id not in linked_ids
-            and await untouched(db, form)
-        ):
+        if form.auto_attached and form.template_id not in linked_ids and await untouched(db, form):
             await _detach(db, ticket, form, actor=None, note=why, now=now, release=False)
             removed.append(form)
     present = {f.template_id for f in forms}

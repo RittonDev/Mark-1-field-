@@ -115,6 +115,7 @@ GUARDED: dict[tuple[str, str], tuple[tuple[str, ...], str] | tuple[tuple[str, ..
     # Configuração
     ("GET", "/form-templates/catalog"): (("setup.forms",), V),
     ("GET", "/form-templates/{template_id}"): (("setup.forms",), V),
+    ("GET", "/form-templates/{template_id}/usage"): (("setup.forms",), V),
     ("POST", "/form-templates"): (("setup.forms",), E),
     ("PUT", "/form-templates/{template_id}"): (("setup.forms",), E),
     ("GET", "/message-templates"): (("setup.messages",), V),

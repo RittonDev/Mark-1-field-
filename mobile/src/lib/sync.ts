@@ -12,7 +12,11 @@
 // fila por erro de transporte: só a recusa do servidor àquela ação tira ela da fila (com aviso).
 //
 // Gatilhos: login/abertura do app, rede voltando, app voltando ao primeiro plano,
-// cada ação do técnico, cada evento do WebSocket e um intervalo de segurança.
+// cada ação do técnico, cada evento do WebSocket e um intervalo de segurança. Com o app fora da
+// tela, a jornada e a tarefa periódica do sistema (backgroundSync.ts).
+//
+// As novidades do download (OS nova, reagendada, cancelada, peça decidida, oferta nova) viram toast com
+// o app na tela e notificação do sistema fora dela (announce, notifications.ts).
 //
 // A rodada também confere as ofertas de OS com preço (GET /me/offers, lib/offers.ts): antes do upload das fotos,
 // entre uma foto e outra, depois do download e quando o download falha por erro do servidor.
@@ -832,32 +836,85 @@ async function pullChanges(round: Round) {
   }
 }
 
-/** OS que saíram da lista: tiradas do técnico (o código vem do aparelho) ou que sumiram no download completo. */
-function announceRemoved(refs: TicketRef[], removed: number) {
-  announceGroup(refs, (code) => `${code} saiu da sua lista`, (count) => `${count} OS saíram da sua lista`, {
-    description: "A central mudou quem atende.",
-  });
-  if (removed > 0) {
-    showToast(removed === 1 ? "Uma OS que não é mais sua saiu da lista" : `${removed} OS que não são mais suas saíram da lista`);
-  }
+// ───────────────────────────── avisos ao técnico ─────────────────────────────
+
+/**
+ * Um aviso ao técnico, com o mesmo texto no toast (app na tela) e na notificação do sistema (fora dela). `id`: o da
+ * notificação (o mesmo id substitui a anterior). Tocar abre a OS (`ticketId`), a oferta (`offerId`) ou Hoje (`home`).
+ */
+interface Notice extends NewsItem {
+  tone?: ToastTone;
+  /** Peça aprovada: com o app na tela, o momento de sucesso em vez do toast. */
+  success?: boolean;
 }
 
-/** OS de um aviso. Com `id`, tocar no aviso abre a OS. */
+function showNotice(notice: Notice) {
+  if (notice.success) showSuccess(notice.title, notice.body);
+  else showToast(notice.title, { description: notice.body, tone: notice.tone, ticketId: notice.ticketId, offerId: notice.offerId });
+}
+
+/**
+ * Mostra os avisos. App na tela: toasts (e a vibração). Fora dela (rodada em segundo plano): notificação do sistema,
+ * a não ser que o push da central já avise este aparelho; sem permissão ou com erro, fica o toast.
+ */
+function announce(notices: Notice[], vibrate?: () => void) {
+  if (!notices.length) return;
+  if (inForeground()) {
+    vibrate?.();
+    notices.forEach(showNotice);
+    return;
+  }
+  void (async () => {
+    if (await pushLive()) return;
+    if (!(await presentNews(notices))) notices.forEach(showNotice);
+  })();
+}
+
+/** OS de um aviso. */
 interface TicketRef {
-  id?: UUID;
+  id: UUID;
   code: string;
 }
 
-/** Até dois avisos do mesmo tipo saem um a um; mais que isso, um resumo só. */
-function announceGroup(refs: TicketRef[], one: (code: string) => string, many: (count: number) => string, options: ToastOptions = {}) {
-  if (refs.length > 2) showToast(many(refs.length), options);
-  else for (const ref of refs) showToast(one(ref.code), { ...options, ticketId: ref.id });
+/** Notificações de uma OS que ficam velhas quando ela é cancelada ou sai da lista. */
+const ticketNews = (id: UUID) => [`news-new-${id}`, `news-helper-${id}`, `news-schedule-${id}`];
+
+/** Até dois avisos do mesmo tipo saem um a um; mais que isso, um resumo só (tocar abre Hoje). */
+function grouped<T extends TicketRef>(refs: T[], one: (ref: T) => Notice, many: (refs: T[]) => Notice): Notice[] {
+  return refs.length > 2 ? [{ ...many(refs), home: true }] : refs.map(one);
 }
 
+/** OS que saíram da lista: tiradas do técnico (o código vem do aparelho) ou que sumiram no download completo. */
+function announceRemoved(refs: TicketRef[], removed: number) {
+  const body = "A central mudou quem atende.";
+  const notices = grouped(
+    refs,
+    (ref) => ({ id: `news-removed-${ref.id}`, title: `${ref.code} saiu da sua lista`, body, replaces: ticketNews(ref.id) }),
+    (all) => ({
+      id: "news-removed-many",
+      title: `${all.length} OS saíram da sua lista`,
+      body,
+      replaces: all.flatMap((ref) => ticketNews(ref.id)),
+    }),
+  );
+  if (removed > 0) {
+    notices.push({
+      id: "news-removed-full",
+      title: removed === 1 ? "Uma OS que não é mais sua saiu da lista" : `${removed} OS que não são mais suas saíram da lista`,
+    });
+  }
+  announce(notices);
+}
+
+/**
+ * Novidade de uma OS. `line` (OS nova, auxiliar): "Visita amanhã às 08:00 · LJ001 · Loja Exemplo". `place`
+ * (agendada ou reagendada): a loja.
+ */
 type FieldNews =
-  | { kind: "part_approved" | "part_rejected"; id: UUID; code: string; description: string }
-  | { kind: "assigned" | "helper" | "cancelled"; id: UUID; code: string }
-  | { kind: "rescheduled"; id: UUID; code: string; at: string; first: boolean };
+  | { kind: "assigned" | "helper"; id: UUID; code: string; line: string }
+  | { kind: "cancelled"; id: UUID; code: string }
+  | { kind: "rescheduled"; id: UUID; code: string; at: string; first: boolean; place: string | null }
+  | { kind: "part_approved" | "part_rejected"; id: UUID; code: string; description: string };
 
 /**
  * O que mudou entre a última versão do servidor guardada no aparelho e a recebida, e merece aviso
@@ -868,13 +925,13 @@ function fieldNews(before: TicketDetail | null, after: TicketDetail, user: User)
   if (!mine && !isHelper(after, user)) return [];
   const ref = { id: after.id, code: after.code };
   if (!before) {
-    return isDone(after.status) ? [] : [{ kind: mine ? "assigned" : "helper", ...ref }];
+    return isDone(after.status) ? [] : [{ kind: mine ? "assigned" : "helper", ...ref, line: visitLine(after, Date.now()) }];
   }
   const news: FieldNews[] = [];
   if (before.status !== "cancelled" && after.status === "cancelled") {
     news.push({ kind: "cancelled", ...ref });
   } else if (after.scheduled_start && after.scheduled_start !== before.scheduled_start && !isDone(after.status)) {
-    news.push({ kind: "rescheduled", ...ref, at: after.scheduled_start, first: !before.scheduled_start });
+    news.push({ kind: "rescheduled", ...ref, at: after.scheduled_start, first: !before.scheduled_start, place: siteLine(after) });
   }
   if (!mine) return news;
   const previous = new Map((before.part_requests ?? []).map((r) => [r.id, r.status]));
@@ -890,51 +947,79 @@ function fieldNews(before: TicketDetail | null, after: TicketDetail, user: User)
 }
 
 function announceFieldNews(news: FieldNews[]) {
-  const refs = (kind: FieldNews["kind"]) => news.filter((n) => n.kind === kind);
-  announceGroup(refs("assigned"), (code) => `Nova OS para você: ${code}`, (count) => `${count} OS novas para você`);
-  announceGroup(refs("helper"), (code) => `Você vai na visita da ${code}`, (count) => `Você entrou em ${count} visitas`);
-  const cancelled = refs("cancelled");
-  if (cancelled.length) {
-    haptic.warning();
-    announceGroup(
-      cancelled,
-      (code) => `${code} foi cancelada pela central`,
-      (count) => `${count} OS foram canceladas pela central`,
-      { tone: "error", description: "Não precisa ir ao local." },
-    );
-  }
-  const rescheduled = news.filter((n): n is Extract<FieldNews, { kind: "rescheduled" }> => n.kind === "rescheduled");
-  if (rescheduled.length > 2) {
-    showToast(`${rescheduled.length} OS foram reagendadas`, { description: "Confira a agenda." });
-  } else {
-    for (const n of rescheduled) {
-      showToast(`${n.code} ${n.first ? "agendada" : "reagendada"} para ${formatShort(n.at)}`, { ticketId: n.id });
-    }
-  }
-
-  const parts = news.filter((n): n is Extract<FieldNews, { kind: "part_approved" | "part_rejected" }> =>
-    n.kind === "part_approved" || n.kind === "part_rejected",
-  );
+  type Of<K extends FieldNews["kind"]> = Extract<FieldNews, { kind: K }>;
+  const visits = news.filter((n): n is Of<"assigned" | "helper"> => n.kind === "assigned" || n.kind === "helper");
+  const cancelled = news.filter((n): n is Of<"cancelled"> => n.kind === "cancelled");
+  const rescheduled = news.filter((n): n is Of<"rescheduled"> => n.kind === "rescheduled");
+  const parts = news.filter((n): n is Of<"part_approved" | "part_rejected"> => n.kind === "part_approved" || n.kind === "part_rejected");
   const approved = parts.filter((n) => n.kind === "part_approved");
-  if (approved.length) {
-    haptic.success();
-    showSuccess(
-      approved.length === 1 ? "Peça aprovada" : `${approved.length} peças aprovadas`,
-      approved.length === 1
-        ? `${approved[0].code} · ${approved[0].description}: pode instalar.`
-        : "O cliente aprovou o orçamento: pode instalar.",
-    );
-  }
-  for (const n of parts) {
-    if (n.kind === "part_rejected") {
-      haptic.warning();
-      showToast(`${n.code}: peça recusada`, {
+  const rejected = parts.filter((n) => n.kind === "part_rejected");
+  const codes = (refs: TicketRef[]) => codesLine(refs.map((ref) => ref.code));
+  const notices: Notice[] = [
+    ...grouped(
+      visits.filter((n) => n.kind === "assigned"),
+      (n) => ({ id: `news-new-${n.id}`, title: `Nova OS para você: ${n.code}`, body: n.line, ticketId: n.id }),
+      (all) => ({ id: "news-new-many", title: `${all.length} OS novas para você`, body: codes(all) }),
+    ),
+    ...grouped(
+      visits.filter((n) => n.kind === "helper"),
+      (n) => ({ id: `news-helper-${n.id}`, title: `Você vai na visita da ${n.code}`, body: n.line, ticketId: n.id }),
+      (all) => ({ id: "news-helper-many", title: `Você entrou em ${all.length} visitas`, body: codes(all) }),
+    ),
+    ...grouped(
+      cancelled,
+      (n) => ({
+        id: `news-cancelled-${n.id}`,
+        title: `${n.code} foi cancelada pela central`,
+        body: "Não precisa ir ao local.",
         tone: "error",
-        description: `${n.description}: o cliente não aprovou o orçamento. Não instale; fale com a central no grupo.`,
         ticketId: n.id,
-      });
-    }
+        replaces: ticketNews(n.id),
+      }),
+      (all) => ({
+        id: "news-cancelled-many",
+        title: `${all.length} OS foram canceladas pela central`,
+        body: "Não precisa ir ao local.",
+        tone: "error",
+        replaces: all.flatMap((n) => ticketNews(n.id)),
+      }),
+    ),
+    ...grouped(
+      rescheduled,
+      (n) => ({
+        id: `news-schedule-${n.id}`,
+        title: `${n.code} ${n.first ? "agendada" : "reagendada"} para ${formatShort(n.at)}`,
+        body: n.place ?? undefined,
+        ticketId: n.id,
+      }),
+      (all) => ({ id: "news-schedule-many", title: `${all.length} OS foram reagendadas`, body: "Confira a agenda." }),
+    ),
+  ];
+  if (approved.length === 1) {
+    const [n] = approved;
+    notices.push({ id: `news-part-${n.id}`, title: "Peça aprovada", body: `${n.code} · ${n.description}: pode instalar.`, ticketId: n.id, success: true });
+  } else if (approved.length > 1) {
+    notices.push({
+      id: "news-part-many",
+      title: `${approved.length} peças aprovadas`,
+      body: "O cliente aprovou o orçamento: pode instalar.",
+      home: true,
+      success: true,
+    });
   }
+  for (const n of rejected) {
+    notices.push({
+      id: `news-part-rejected-${n.id}`,
+      title: `${n.code}: peça recusada`,
+      body: `${n.description}: o cliente não aprovou o orçamento. Não instale; fale com a central no grupo.`,
+      tone: "error",
+      ticketId: n.id,
+    });
+  }
+  announce(notices, () => {
+    if (cancelled.length || rejected.length) haptic.warning();
+    else if (approved.length) haptic.success();
+  });
 }
 
 const FIELD_RULES_KEY = "field_rules";
@@ -1007,7 +1092,7 @@ async function revalidateTicket(ctx: Ctx, ticketId: UUID): Promise<void> {
     if (!(error instanceof ApiError) || (error.status !== 403 && error.status !== 404)) return;
     const local = await getTicket(ticketId);
     await write(ctx, (db) => deleteTicket(db, ticketId));
-    if (local) showToast(`${local.code} saiu da sua lista`, { description: "A central mudou quem atende." });
+    if (local) announceRemoved([{ id: ticketId, code: local.code }], 0);
     return;
   }
   await write(ctx, (db) => saveServerTicket(db, ticket, ctx.user));
@@ -1077,7 +1162,12 @@ async function fetchOffers(ctx: Ctx, { quiet, early = false }: { quiet?: UUID; e
   if (outcome.held) offersHeld();
   // Lista igual à guardada não acorda as telas (a conferência roda o dia todo).
   if (outcome.changed) notifyDataChanged();
-  announceOffers(quiet ? { ...outcome, closed: outcome.closed.filter((offer) => offer.id !== quiet) } : outcome);
+  // A notificação de uma oferta que não espera mais a resposta sai da bandeja (o resumo fica enquanto houver alguma).
+  const pending = outcome.pending.map((id) => `news-offer-${id}`);
+  void dismissNewsExcept("news-offer-", pending.length ? [...pending, "news-offer-many"] : []);
+  announce(offerNewsItems(outcome.news, serverNow()));
+  // A que fechou sem resposta só vira aviso com o app na tela: fora dela, a notificação dela já saiu da bandeja.
+  if (inForeground()) announceClosedOffers(quiet ? outcome.closed.filter((offer) => offer.id !== quiet) : outcome.closed);
 }
 
 /**
@@ -1486,6 +1576,8 @@ export async function enqueueUnproductive(ticketId: UUID, payload: UnproductiveP
   await enqueue(ticketId, { type: "unproductive", payload });
   // Se estava em deslocamento, o ritmo do rastreamento volta ao normal.
   void updateTrackingMode();
+  // Sem visita nova marcada, os lembretes dela saem (também offline).
+  void syncLocalAlerts();
 }
 
 /**
@@ -1603,8 +1695,9 @@ export async function enqueueTransition(ticketId: UUID, payload: TicketTransitio
   await enqueue(ticketId, { type: "transition", payload });
   // Entrar/sair de "Em deslocamento" muda o ritmo do rastreamento, mesmo offline.
   void updateTrackingMode();
-  // Check-in agenda os alertas do tempo na loja; concluir cancela (também offline).
-  void syncOnsiteAlerts();
+  // Check-in agenda os alertas do tempo na loja; deslocamento, atendimento e conclusão cancelam os lembretes da
+  // visita; concluir cancela os da loja (também offline).
+  void syncLocalAlerts();
 }
 
 export function enqueueComment(ticketId: UUID, payload: CommentCreatePayload) {
@@ -1722,6 +1815,8 @@ export function startSync() {
       void requestSync();
       // Garante a coleta da jornada (o sistema pode ter encerrado o app em segundo plano).
       void resumeTracking();
+      // A permissão pode ter mudado nas configurações do celular, e a janela de 7 dias dos lembretes anda.
+      void syncLocalAlerts();
     } else if (next !== "active" && wasActive) {
       realtime?.stop();
     }
@@ -1759,6 +1854,8 @@ export function startSync() {
     if (myEpoch !== epoch) return;
     if (last && !status.lastSyncAt) setStatus({ lastSyncAt: last });
     await loadFieldRules();
+    // Alertas e lembretes a partir das OS guardadas, antes da primeira rodada (que pode demorar ou estar sem rede).
+    void syncLocalAlerts();
     await requestSync();
   })().catch((error: unknown) => console.warn("Falha ao abrir o banco local", error));
 }
@@ -1770,8 +1867,8 @@ export function stopSync() {
   // O que estava em andamento (rodada, envio, download) não grava mais nada desta sessão.
   resetSessionState();
   setStatus({ realtime: "off", syncing: false, server: "unknown", lastSyncAt: null, lastError: null, stuckOps: 0 });
-  // Saiu da conta: os alertas do tempo na loja deste técnico não valem mais neste aparelho.
-  setTimeout(() => void syncOnsiteAlerts(), 0);
+  // Saiu da conta: os alertas da loja e os lembretes da visita deste técnico não valem mais neste aparelho.
+  setTimeout(() => void syncLocalAlerts(), 0);
 }
 
 /** "Baixar tudo de novo" (tela Conta): download completo, com os cadastros, na próxima rodada. */
