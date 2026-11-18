@@ -7,6 +7,7 @@ import type {
   Level,
   OfferCancelReason,
   OfferState,
+  PixKeyType,
   Responsibility,
   SlaStatus,
   TicketEventType,
@@ -14,6 +15,7 @@ import type {
   TicketSource,
   TicketStatus,
   TicketType,
+  UserChangeField,
   UserRole,
   ViolationScope,
 } from "./types";
@@ -247,4 +249,61 @@ export const OFFER_CANCEL_REASON: Record<OfferCancelReason, string> = {
   assigned: "A central definiu o técnico",
   ticket_closed: "OS encerrada",
   replaced: "Trocada por uma oferta nova",
+};
+
+/** Tipo da chave PIX (os rótulos de backend/app/core/pix.py). */
+export const PIX_KEY_TYPE: Record<PixKeyType, string> = {
+  cpf: "CPF",
+  cnpj: "CNPJ",
+  email: "E-mail",
+  phone: "Celular",
+  random: "Chave aleatória",
+};
+
+/** Os tipos na ordem dos chips do app. */
+export const PIX_KEY_TYPES: PixKeyType[] = ["cpf", "cnpj", "email", "phone", "random"];
+
+/** "Chave nova" em Pagamentos e no cadastro do técnico: a chave mudou há menos destes dias. */
+export const PIX_RECENT_DAYS = 7;
+
+/**
+ * A chave gravada (normalizada) como a pessoa confere, igual a core/pix.display: CPF "123.456.789-09", CNPJ
+ * "12.345.678/0001-95", celular "+55 (11) 98888-7777"; e-mail e chave aleatória como estão.
+ */
+export function formatPixKey(type: PixKeyType, key: string): string {
+  if (type === "cpf" && key.length === 11) {
+    return `${key.slice(0, 3)}.${key.slice(3, 6)}.${key.slice(6, 9)}-${key.slice(9)}`;
+  }
+  if (type === "cnpj" && key.length === 14) {
+    return `${key.slice(0, 2)}.${key.slice(2, 5)}.${key.slice(5, 8)}/${key.slice(8, 12)}-${key.slice(12)}`;
+  }
+  if (type === "phone") {
+    let digits = key.replace(/\D/g, "");
+    if (digits.length === 13 && digits.startsWith("55")) digits = digits.slice(2);
+    if (digits.length === 11) return `+55 (${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+  }
+  return key;
+}
+
+/** Rótulo de cada campo do histórico do cadastro (GET /technicians/{id}/changes). */
+export const USER_CHANGE_LABEL: Record<UserChangeField, string> = {
+  name: "Nome",
+  email: "E-mail",
+  phone: "Celular",
+  job_title: "Cargo",
+  team: "Grupo",
+  is_active: "Acesso ao app",
+  role: "Papel",
+  home_city: "Cidade",
+  home_state: "UF",
+  coverage_area: "Região que atende",
+  address_line: "Endereço",
+  address_district: "Bairro",
+  address_zip: "CEP",
+  work_schedule: "Jornada",
+  services: "Serviços que faz",
+  pix: "Chave PIX",
+  pix_holder: "Titular da conta",
+  avatar: "Foto",
+  password: "Senha",
 };

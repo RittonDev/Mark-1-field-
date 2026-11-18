@@ -1083,6 +1083,10 @@ export interface Technician {
   service_areas: string[];
   skills: { name: string; level: string }[];
   application_id: UUID | null;
+  /** Tem chave PIX (ele cadastra no app, em Conta › Meu cadastro). A chave fica em Pagamentos (PayoutBoard.pix). */
+  has_pix?: boolean;
+  /** Quando a chave mudou ("Chave nova" por PIX_RECENT_DAYS); null sem chave. */
+  pix_updated_at?: ISODate | null;
 }
 
 export interface TemporaryPassword {
@@ -1923,6 +1927,136 @@ export interface PayoutList {
 export interface MyEarnings extends PayoutList {
   reimbursement_to_receive: number;
   reimbursement_paid: number;
+}
+
+/**
+ * GET /payouts da central. Com `with_pix=true`, `pix` traz a chave de cada técnico das linhas (e do filtro
+ * `technician_id`) que tem chave; sem ele, `{}`. Relatórios não pede.
+ */
+export interface PayoutBoard extends PayoutList {
+  pix: Record<UUID, PixInfo>;
+}
+
+// --------------------------------------------------------------------------- meu cadastro do técnico
+
+/** Tipo da chave PIX: só o técnico cadastra (app, com a senha); a central vê em Pagamentos e só remove. */
+export type PixKeyType = "cpf" | "cnpj" | "email" | "phone" | "random";
+
+/**
+ * A chave PIX como está gravada (normalizada; formatPixKey para mostrar; copiar leva a chave crua): CPF com 11
+ * dígitos, CNPJ com 14 caracteres em maiúsculas, e-mail em minúsculas, celular "+55" e 11 dígitos, chave aleatória
+ * 8-4-4-4-12.
+ */
+export interface PixInfo {
+  key_type: PixKeyType;
+  key: string;
+  /** Titular da conta: quem paga compara com o nome que o banco mostra. */
+  holder_name: string | null;
+  /** Quando a chave mudou ("Chave nova" por PIX_RECENT_DAYS). */
+  updated_at: ISODate | null;
+}
+
+/** GET /me/profile (só o técnico). Endereço e PIX não vão no /auth/me. */
+export interface MyProfile {
+  id: UUID;
+  name: string;
+  email: string;
+  phone: string | null;
+  job_title: string | null;
+  team: Ref | null;
+  home_city: string | null;
+  home_state: string | null;
+  coverage_area: string | null;
+  address_line: string | null;
+  address_district: string | null;
+  address_zip: string | null;
+  /** Link assinado de 12 h (ou a foto do Field Control). */
+  avatar_url: string | null;
+  pix: PixInfo | null;
+}
+
+/**
+ * PATCH /me/profile: mande só o que mudou. E-mail e chave PIX (cadastrar, trocar tipo, chave ou titular, remover)
+ * pedem `current_password`: sem ela, 422 "Confirme com a sua senha atual para mudar o e-mail ou a chave PIX"; errada,
+ * 422 "Senha atual incorreta"; 5 erros em 15 min (somando os da troca de senha), 429 com Retry-After.
+ */
+export interface MyProfileUpdate {
+  name?: string;
+  /** 10 a 13 dígitos (aceita +55); volta "(11) 98888-7777". */
+  phone?: string;
+  /** Só quando mudou (há logins de teste sem "@"). */
+  email?: string;
+  home_city?: string;
+  /** UF em maiúsculas. */
+  home_state?: string;
+  coverage_area?: string | null;
+  address_line?: string | null;
+  address_district?: string | null;
+  /** 8 dígitos; volta "00000-000". Vazio ou null tira o CEP. */
+  address_zip?: string | null;
+  /** null tira a chave. */
+  pix?: PixIn | null;
+  current_password?: string;
+}
+
+export interface PixIn {
+  key_type: PixKeyType;
+  /** Como a pessoa digitou: o servidor normaliza (e valida CPF, CNPJ, e-mail, celular com o 9 e chave aleatória). */
+  key: string;
+  /** 3 a 160 caracteres. */
+  holder_name: string;
+}
+
+/** Campos do histórico do cadastro (USER_CHANGE_LABEL). */
+export type UserChangeField =
+  | "name"
+  | "email"
+  | "phone"
+  | "job_title"
+  | "team"
+  | "is_active"
+  | "role"
+  | "home_city"
+  | "home_state"
+  | "coverage_area"
+  | "address_line"
+  | "address_district"
+  | "address_zip"
+  | "work_schedule"
+  | "services"
+  /** A chave mascarada ("CPF ***.456.789-**"); null sem chave. */
+  | "pix"
+  /** Titular da conta da chave PIX. */
+  | "pix_holder"
+  /** to "nova" na troca, null na remoção. */
+  | "avatar"
+  /** to "provisória" (redefinição em Técnicos) ou "definida pela central" (Usuários). */
+  | "password";
+
+/** Uma mudança, com o texto pronto para a tela (team: o nome do grupo; is_active: "Liberado" ou "Bloqueado"). */
+export interface UserChangeItem {
+  field: UserChangeField;
+  from: string | null;
+  to: string | null;
+}
+
+/** GET /technicians/{id}/changes: o histórico do cadastro, do mais novo para o mais antigo. */
+export interface UserChange {
+  id: UUID;
+  created_at: ISODate;
+  /** "app": o próprio técnico, no Meu cadastro; "central": Técnicos, Usuários ou Pagamentos. */
+  via: "app" | "central";
+  actor: Ref | null;
+  changes: UserChangeItem[];
+}
+
+/**
+ * `data` do evento de tempo real `profile.changed` (vai para quem tem Técnicos ou Pagamentos; `user_id` e `name` do
+ * técnico, `actor_id`/`actor_name` de quem mudou). `fields` usa os nomes da API ("pix" inclui o titular).
+ */
+export interface ProfileChangedData {
+  fields: UserChangeField[];
+  via: "app" | "central";
 }
 
 // --------------------------------------------------------------------------- ofertas de OS
