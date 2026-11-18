@@ -1915,7 +1915,8 @@ RECEIPT_OF_PAID = (
 async def remove_attachment(
     db: AsyncSession, ticket: Ticket, attachment: TicketAttachment, actor: User
 ) -> str | None:
-    """Exclui o anexo (só analistas e gestores). A assinatura do responsável fica protegida.
+    """Exclui o anexo (só analistas e gestores). A assinatura do responsável (também a de um
+    atendimento anterior) e o comprovante de custo já reembolsado ficam protegidos.
 
     Foto de formulário concluído: se o formulário deixa de ter o mínimo de fotos, volta para
     "em andamento" (o formulário obrigatório trava a conclusão da OS de novo).

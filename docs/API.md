@@ -21,9 +21,9 @@ Supervisor e analista: as telas que cada um vê e edita e as filas que vê depen
 perfis padrão reproduzem a tabela acima). Ver [Acesso: perfis por tela e visibilidade de filas](#acesso-perfis-por-tela-e-visibilidade-de-filas).
 
 **Técnico é terceiro: só o básico.** Na OS (detalhe, sync e respostas do push) o servidor zera para o
-técnico: prazos, motivos e veredito de SLA (`resolution_sla_met_at`), analista (`owner`), grupo, projeto, categoria, etiquetas, solicitante,
-quem abriu, nº do chamado do cliente, CNPJ e contato da loja (nome e telefone: quem fala com a loja é a
-central), reincidência e dados migrados (`services/tickets.py::field_view`). E-mail dos colegas e de quem
+técnico: prazos, motivos e veredito de SLA (`resolution_sla_met_at`), analista (`owner`), grupo, projeto,
+categoria, etiquetas, solicitante, quem abriu, nº do chamado do cliente, CNPJ e contato da loja (nome e telefone:
+quem fala com a loja é a central), reincidência e dados migrados (`services/tickets.py::field_view`). E-mail dos colegas e de quem
 lançou custos também sai. Anexos: só fotos, fotos dos formulários, assinatura e o que ele mesmo enviou
 (documentos do escritório ficam fora). Horas: não aponta (só a gestão) e vê só as dele. Comentários: nem lê nem escreve (403; no sync, `comments` vem vazio e a
 operação `comment` é recusada). Rotas de cadastro, usuários, grupos, painel, relatórios de SLA,
@@ -260,8 +260,8 @@ desativar encerra as sessões; e a ficha completa: endereço, jornada e serviço
 Colunas: cliente, cnpj_cliente, codigo, local, cnpj, endereco, bairro, cidade, uf, cep, latitude, longitude, contato,
 telefone, observacoes. Cliente por CNPJ ou nome (criado se não existir, só para quem tem Clientes em Editar; sem
 isso, a linha dá erro "Cliente não cadastrado: só quem edita Clientes cadastra cliente novo", na prévia e na
-gravação); local por código, CNPJ ou nome (atualiza só o
-que veio preenchido). CSV em UTF-8 ou Windows-1252, separado por `;` ou `,`; coordenadas com vírgula decimal.
+gravação); local por código, CNPJ ou nome (atualiza só o que veio preenchido). CSV em UTF-8 ou Windows-1252,
+separado por `;` ou `,`; coordenadas com vírgula decimal.
 
 ## Tempo real (WebSocket)
 
@@ -1054,8 +1054,9 @@ Vale em:
   linha de quem pede e a sem analista se ele a vê; `total` soma as linhas devolvidas e a sem analista.
 - `GET /my-queue?user_id=` (403 acima); Início (`/home/overview`: números, grupos, exemplos, sugestões e sinais
   vitais; com "própria fila" sem a opção, o grupo `no_owner` e o motivo antigo `no_owner` não saem, como no
-  `/queues` e no Dashboard, mesmo para a OS sem analista que a pessoa executa); `/search/smart` (OS, chip "OS nº" e OS abertas de cada cliente); `/dashboard/summary`,
-  `/reports/daily`, `/reports/monthly`, `/reports/sla-violations`; `/activities/day`; `/portal/inbox-count`.
+  `/queues` e no Dashboard, mesmo para a OS sem analista que a pessoa executa); `/search/smart` (OS, chip
+  "OS nº" e OS abertas de cada cliente); `/dashboard/summary`, `/reports/daily`, `/reports/monthly`,
+  `/reports/sla-violations`; `/activities/day`; `/portal/inbox-count`.
 - `GET /calendar` (só as OS visíveis); conflitos (`/calendar/conflicts` e o 409 `SCHEDULE_CONFLICT`): a OS de
   outra fila vem como `{who, id: null, code: null, title: "OS de outra fila", customer: null, location: null,
   start, end, hidden: true}`.
