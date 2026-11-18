@@ -1103,6 +1103,18 @@ def test_offer_title_cut() -> None:
     assert title("Loja São Paulo") == "Troca de PDV"
     assert title("Loja São Paulo", service=None) == "Atendimento técnico"
     assert title("Cliente Exemplo", service="Preventiva Cliente Exemplo") == "Preventiva"
+    # O que sobra do corte: aspas e parênteses vazios, separador colado no parêntese, sinal solto.
+    assert title('Troca de PDV "Loja São Paulo"') == "Troca de PDV"
+    assert title("Troca de PDV {Loja São Paulo}") == "Troca de PDV"
+    assert title("Troca de PDV (Loja São Paulo, 2º andar)") == "Troca de PDV (2º andar)"
+    assert title("Troca de PDV (2º andar - Loja São Paulo)") == "Troca de PDV (2º andar)"
+    assert title("Troca de PDV & Loja São Paulo") == "Troca de PDV"
+    assert title("Desconto (-10%) · Loja São Paulo") == "Desconto (-10%)"
+    # Razão social: o nome sem o sufixo também sai; nº do chamado curto fica (número de PDV).
+    assert title("Cliente Exemplo: PDV parado", customer="Cliente Exemplo Ltda") == "PDV parado"
+    assert title("Banco Exemplo · PDV parado", customer="Banco Exemplo S.A.") == "PDV parado"
+    assert title("Mesa de som parada", customer="Casa Mesa") == "Mesa de som parada"
+    assert title("PDV 12 travado", reference="12") == "PDV 12 travado"
 
 
 async def test_next_offer_deadline_in_the_detail(
