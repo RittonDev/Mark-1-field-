@@ -15,7 +15,7 @@ import { Combobox, searchText, type ComboItem } from "@/components/new-ticket/Co
 import { serviceTypeTiming } from "@/components/new-ticket/ServiceTypePicker";
 import { readStored, writeStored } from "@/components/new-ticket/storage";
 import { HelpersField, SuggestedTechnicians } from "@/components/new-ticket/SuggestedTechnicians";
-import { OffersBlock } from "@/components/ticket/OffersCard";
+import { OfferDialog, OffersBlock } from "@/components/ticket/OffersCard";
 import { PayoutLine } from "@/components/ticket/PayoutsCard";
 import { busyTitle, isVersionConflict } from "@/components/ticket/useConflictHandler";
 import { useNow } from "@/components/useNow";
@@ -358,6 +358,8 @@ export function GeneralTab({
   const [partial, setPartial] = useState(false);
   const [changingLocation, setChangingLocation] = useState(false);
   const [suggestOpen, setSuggestOpen] = useState(false);
+  // "Ofertar a OS com preço" aberto: fica aqui, e não no bloco Ofertas, que some quando a OS ganha técnico.
+  const [offering, setOffering] = useState(false);
   // "Mais detalhes" começa aberto; quem recolhe uma vez encontra recolhido nas próximas OS.
   const [moreOpen, setMoreOpen] = useState(() => readStored<boolean>("local", MORE_KEY) !== false);
   const base = snap.base;
@@ -766,13 +768,16 @@ export function GeneralTab({
     const moving = payoutOf(server.assignee?.id);
     return moving && moving.status === "pending" ? moving.amount : (chosenType?.technician_fee ?? null);
   };
+  // O serviço do convite é o tipo de OS (o gravado, se saiu da lista), nunca o título: ele pode trazer a
+  // loja ("Troca de PDV · Matriz"). Sem tipo, "Atendimento técnico".
+  const inviteService = chosenType?.name ?? (form.serviceTypeId === server.service_type?.id ? server.service_type.name : null);
   const invite = (name?: string, technicianId?: UUID) => {
     const city = [intakeLocation?.city, intakeLocation?.state].filter(Boolean).join(" - ");
     const place = [intakeLocation?.district, city].filter(Boolean).join(", ");
     const fee = feeFor(technicianId);
     return [
       name ? `Olá, ${name.split(" ")[0]}! Temos um chamado da Maxx para você:` : "Pessoal, temos um chamado da Maxx:",
-      `• ${chosenType?.name ?? form.title.trim()}`,
+      `• ${inviteService ?? "Atendimento técnico"}`,
       `• ${place || "local a confirmar"}`,
       `• ${startIso ? formatDateTime(startIso) : "data a combinar"}`,
       fee != null ? `• Valor: ${formatMoney(fee)}` : null,
@@ -1130,8 +1135,11 @@ export function GeneralTab({
           ) : (
             // Sem técnico: as ofertas com preço (quem aceitar primeiro pelo app fica com a OS). Cada ação
             // grava na hora, fora do FormState: nada daqui entra no Salvar nem conta como alteração.
-            <OffersBlock ticket={server} locked={dirty} className="col-span-12" />
+            <OffersBlock ticket={server} locked={dirty} onOffer={() => setOffering(true)} className="col-span-12" />
           )}
+          {/* Fora do ternário: se a OS ganha técnico com o diálogo aberto, ele continua e diz por que travou
+              (e o erro de um envio em andamento não se perde). Portal no <body>: não ocupa a grade. */}
+          {offering ? <OfferDialog ticket={server} onClose={() => setOffering(false)} /> : null}
 
           <div className="col-span-12">
             {suggestionsShown ? (
