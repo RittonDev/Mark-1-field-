@@ -1,4 +1,4 @@
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams, useNavigation } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import Animated from "react-native-reanimated";
@@ -30,6 +30,7 @@ import {
   markOfferScopeRead,
   openOffer,
   refreshOffersNow,
+  requestSync,
   useSyncStatus,
 } from "../../lib/sync";
 import { showToast } from "../../lib/toast";
@@ -254,6 +255,8 @@ function OfferView({
   const styles = useStyles(makeStyles);
   const insets = useSafeAreaInsets();
   const motion = useListMotion();
+  // Depois do envio, a tela só navega se ainda estiver à frente (o técnico pode ter saído durante o envio).
+  const navigation = useNavigation();
   const now = useNow(TICK_MS);
   const at = now + getServerOffsetMs();
   const ticket = offer.ticket;
@@ -355,10 +358,23 @@ function OfferView({
     try {
       const accepted = await acceptOffer(offer.id, ticketId);
       haptic.success();
-      showSuccess("OS aceita", `${accepted.code} está na sua agenda.`);
-      router.replace({ pathname: "/ticket/[id]", params: { id: accepted.id } });
+      if (navigation.isFocused()) {
+        showSuccess("OS aceita", `${accepted.code} está na sua agenda.`);
+        router.replace({ pathname: "/ticket/[id]", params: { id: accepted.id } });
+      } else {
+        // Saiu da tela durante o envio: só o aviso (tocar abre a OS), sem trocar a tela em que ele está.
+        setBusy(null);
+        showToast("OS aceita", { tone: "success", description: `${accepted.code} está na sua agenda.`, ticketId: accepted.id });
+      }
     } catch (error) {
       setBusy(null);
+      if (error instanceof ApiError && error.status === 0) {
+        // Sem resposta: o servidor pode ter gravado o aceite. Confere as ofertas e baixa a OS já.
+        showToast("Não deu para confirmar o aceite. Conferindo…");
+        void refreshOffersNow().catch(() => undefined);
+        void requestSync();
+        return;
+      }
       answerFailed(error);
     }
   }
@@ -370,7 +386,9 @@ function OfferView({
       await declineOffer(offer.id, reason);
       haptic.step();
       showToast("Oferta recusada", { description: `${ticket.code} · ${reason}` });
-      leave();
+      // Saiu da tela durante o envio: só o aviso, sem tirar da pilha a tela em que ele está.
+      if (navigation.isFocused()) leave();
+      else setBusy(null);
     } catch (error) {
       setBusy(null);
       answerFailed(error);
