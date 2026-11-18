@@ -391,7 +391,7 @@ function AddFormDialog({ ticket, finished, onClose }: { ticket: TicketDetail; fi
         ) : templates.data && templates.data.length === 0 ? (
           <p className="text-sm text-ink-muted">
             Nenhum modelo ainda. Crie em{" "}
-            <Link href="/formularios" className="font-medium text-brand hover:underline">
+            <Link href="/formularios" className="font-medium text-brand-ink hover:underline">
               Formulários
             </Link>
             .

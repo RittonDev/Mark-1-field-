@@ -281,7 +281,7 @@ function ServiceTypeDialog({
               <span className="text-xs text-ink-muted">
                 Nenhum. A ligação é feita no próprio formulário, em{" "}
                 {canForms ? (
-                  <Link href="/formularios" className="font-medium text-brand hover:underline">
+                  <Link href="/formularios" className="font-medium text-brand-ink hover:underline">
                     Formulários
                   </Link>
                 ) : (

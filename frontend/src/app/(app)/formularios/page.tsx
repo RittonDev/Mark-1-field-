@@ -423,7 +423,7 @@ function FormsList({
                   {i ? " · " : ""}
                   <button
                     type="button"
-                    className="rounded font-medium text-brand hover:underline focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
+                    className="rounded font-medium text-brand-ink hover:underline focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
                     onClick={() => onOpen(NEW_KEY, ex.build())}
                   >
                     {ex.name}

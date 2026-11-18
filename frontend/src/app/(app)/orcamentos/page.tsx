@@ -693,7 +693,7 @@ function QuoteList() {
                             </button>
                           </Td>
                           <Td>
-                            <TicketLink ticketId={q.ticket_id} className="font-mono text-xs text-brand hover:underline">
+                            <TicketLink ticketId={q.ticket_id} className="font-mono text-xs text-brand-ink hover:underline">
                               {q.ticket_code}
                             </TicketLink>
                             <span className="block max-w-44 truncate text-xs text-ink-muted xl:max-w-64" title={place || undefined}>

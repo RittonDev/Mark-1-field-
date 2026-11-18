@@ -224,7 +224,7 @@ function LocationTab({ ticket }: { ticket: TicketDetail }) {
                     href={`https://www.google.com/maps?q=${p.point[0]},${p.point[1]}`}
                     target="_blank"
                     rel="noreferrer"
-                    className="text-xs font-medium text-brand hover:underline"
+                    className="text-xs font-medium text-brand-ink hover:underline"
                     aria-label={`Ver no mapa: ${p.label}, ${formatDateTime(p.at)}`}
                   >
                     Ver
@@ -260,7 +260,7 @@ function LinksTab({ ticket }: { ticket: TicketDetail }) {
       <Card className="p-4">
         <SectionTitle>Projeto</SectionTitle>
         {ticket.project && canProjects ? (
-          <Link href={`/projetos/${ticket.project.id}`} className="mt-1 inline-flex items-center gap-1 text-sm font-semibold text-brand hover:underline">
+          <Link href={`/projetos/${ticket.project.id}`} className="mt-1 inline-flex items-center gap-1 text-sm font-semibold text-brand-ink hover:underline">
             {ticket.project.code} · {ticket.project.name}
             <ExternalLink className="size-3.5" />
           </Link>

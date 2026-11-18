@@ -674,7 +674,7 @@ export default function PublicReportPage() {
                     <button
                       type="button"
                       onClick={() => setExpanded((v) => !v)}
-                      className="mt-2 text-xs font-medium text-brand hover:underline print:hidden"
+                      className="mt-2 text-xs font-medium text-brand-ink hover:underline print:hidden"
                     >
                       {expanded ? "Ver menos" : "Ver mais"}
                     </button>

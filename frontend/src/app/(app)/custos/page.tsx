@@ -619,7 +619,7 @@ export default function ExpensesPage() {
               setCustomerId("");
               pickStatus("approved");
             }}
-            className="text-sm font-medium text-brand hover:underline sm:ml-auto"
+            className="text-sm font-medium text-brand-ink hover:underline sm:ml-auto"
           >
             A reembolsar em todos os meses: {formatMoney(backlogTotal)}
           </button>
@@ -780,7 +780,7 @@ export default function ExpensesPage() {
                             ) : null}
                             <Td className="text-xs whitespace-nowrap text-ink-muted">{formatDate(r.created_at)}</Td>
                             <Td>
-                              <TicketLink ticketId={r.ticket.id} className="font-mono text-xs text-brand hover:underline">
+                              <TicketLink ticketId={r.ticket.id} className="font-mono text-xs text-brand-ink hover:underline">
                                 {r.ticket.code}
                               </TicketLink>
                               <span className="block max-w-48 truncate text-xs text-ink-muted" title={r.ticket.customer?.name ?? r.ticket.title}>
@@ -799,7 +799,7 @@ export default function ExpensesPage() {
                                     e.stopPropagation();
                                     void openReceipt(r);
                                   }}
-                                  className="mt-0.5 inline-flex items-center gap-1 text-xs font-medium text-brand hover:underline"
+                                  className="mt-0.5 inline-flex items-center gap-1 text-xs font-medium text-brand-ink hover:underline"
                                 >
                                   <Paperclip className="size-3.5" aria-hidden />
                                   Comprovante

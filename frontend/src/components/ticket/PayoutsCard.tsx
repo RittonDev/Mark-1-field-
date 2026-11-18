@@ -177,7 +177,7 @@ export function PayoutsDialog({ ticket, onClose }: { ticket: TicketDetail; onClo
                 {paid ? (
                   <p id={hintId} className="w-full text-right text-xs text-ink-muted">
                     Pago{current?.paid_at ? ` em ${formatDate(current.paid_at)}` : ""}. Para mudar, desfaça o pagamento em{" "}
-                    <Link href="/pagamentos" className="font-medium text-brand hover:underline">
+                    <Link href="/pagamentos" className="font-medium text-brand-ink hover:underline">
                       Pagamentos
                     </Link>
                     .
@@ -239,7 +239,7 @@ export function PayoutLine({ ticket }: { ticket: TicketDetail }) {
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="ml-auto inline-flex h-7 items-center rounded-md px-2 text-xs font-medium text-brand transition-colors hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+          className="ml-auto inline-flex h-7 items-center rounded-md px-2 text-xs font-medium text-brand-ink transition-colors hover:bg-surface-2 focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
         >
           {mine ? "Alterar" : "Definir valor"}
         </button>

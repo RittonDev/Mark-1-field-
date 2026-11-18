@@ -262,12 +262,29 @@ export function NearbyFinder({
     <div className="flex flex-col gap-4">
       <Card className="p-4 sm:p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
+          {/* No celular, rótulos curtos: os três cabem na largura do cartão. */}
           <Tabs
             variant="segmented"
             items={[
-              { key: "store" as Mode, label: "Loja cadastrada" },
+              {
+                key: "store" as Mode,
+                label: (
+                  <>
+                    <span className="sm:hidden">Loja</span>
+                    <span className="hidden sm:inline">Loja cadastrada</span>
+                  </>
+                ),
+              },
               { key: "city" as Mode, label: "Cidade" },
-              { key: "coords" as Mode, label: "Coordenadas ou link do Maps" },
+              {
+                key: "coords" as Mode,
+                label: (
+                  <>
+                    <span className="sm:hidden">Coordenadas</span>
+                    <span className="hidden sm:inline">Coordenadas ou link do Maps</span>
+                  </>
+                ),
+              },
             ]}
             value={mode}
             onChange={setMode}

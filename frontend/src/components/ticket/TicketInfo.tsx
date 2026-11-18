@@ -89,7 +89,7 @@ export function TicketInfo({ ticket }: { ticket: TicketDetail }) {
                     href={mapsUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-brand hover:underline"
+                    className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-brand-ink hover:underline"
                   >
                     <MapPin className="size-3" />
                     Abrir no mapa

@@ -428,7 +428,7 @@ export function HistoryTab({ ticketId, store = null }: { ticketId: UUID; store?:
                 href={`https://www.google.com/maps?q=${point[0]},${point[1]}`}
                 target="_blank"
                 rel="noreferrer"
-                className="mt-1 inline-flex items-center gap-1 text-xs text-brand hover:underline"
+                className="mt-1 inline-flex items-center gap-1 text-xs text-brand-ink hover:underline"
               >
                 <MapPin className="size-3" />
                 Localização registrada{meters !== null ? ` · a ${km(meters)} da loja` : ""}

@@ -770,14 +770,17 @@ function RepairForm({ repair, vendors, onClose }: { repair: Repair | null; vendo
 
   const save = useMutation({
     mutationFn: () => {
-      const body = {
-        ...form,
+      // O valor do orçamento não está neste formulário (vem da etapa) e não vai no corpo; a previsão de
+      // retorno, na edição, só quando mudou aqui. A API só mexe nos dois quando vêm: o que outra pessoa
+      // lançou na etapa com o formulário aberto não se perde.
+      const { expected_return_date: returnDate, ...fields } = form;
+      const body: Record<string, unknown> = {
+        ...fields,
         customer_id: form.customer_id || null,
         location_id: form.location_id || null,
         ticket_id: ticket?.id ?? null,
-        expected_return_date: form.expected_return_date || null,
-        vendor_quote_value: repair?.vendor_quote_value != null ? repair.vendor_quote_value.toFixed(2) : null,
       };
+      if (!repair || returnDate !== initial.expected_return_date) body.expected_return_date = returnDate || null;
       return repair ? api.put<Repair>(`/repairs/${repair.id}`, body) : api.post<Repair>("/repairs", body);
     },
     onSuccess: (saved) => {

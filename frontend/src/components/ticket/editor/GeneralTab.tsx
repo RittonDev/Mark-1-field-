@@ -889,7 +889,7 @@ export function GeneralTab({
                   </span>
                 ) : null}
                 {canCustomers ? (
-                  <Link href={`/clientes/${intakeCustomer.id}`} className="font-medium text-brand hover:underline">
+                  <Link href={`/clientes/${intakeCustomer.id}`} className="font-medium text-brand-ink hover:underline">
                     Ver cliente
                   </Link>
                 ) : null}

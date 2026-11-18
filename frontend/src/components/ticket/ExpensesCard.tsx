@@ -107,7 +107,7 @@ export function ExpensesCard({ ticket }: { ticket: TicketDetail }) {
                         href={absoluteApiUrl(file.download_url) ?? undefined}
                         target="_blank"
                         rel="noreferrer"
-                        className="ml-1.5 inline-flex items-center gap-0.5 text-brand hover:underline"
+                        className="ml-1.5 inline-flex items-center gap-0.5 text-brand-ink hover:underline"
                         aria-label={`Abrir o comprovante de ${e.description}`}
                       >
                         <Paperclip className="size-3" />

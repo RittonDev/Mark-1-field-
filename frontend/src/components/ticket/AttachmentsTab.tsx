@@ -994,7 +994,7 @@ export function AttachmentsTab({
                           href={url}
                           target="_blank"
                           rel="noreferrer"
-                          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-brand hover:bg-surface-2"
+                          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-brand-ink hover:bg-surface-2"
                           aria-label={`Baixar ${a.filename}`}
                         >
                           <Download className="size-3.5" />

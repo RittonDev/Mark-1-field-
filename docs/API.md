@@ -145,6 +145,11 @@ Equivale ao "Tipo de OS" do Field Control. Sem `customer_id`, o tipo vale para t
 - `GET /tickets/{id}/events` → `EventOut[]` (histórico, mais recente primeiro)
 - `GET /tickets/{id}/worklogs` → `WorklogOut[]` · `POST` `{description, started_at, ended_at?|minutes?, latitude?, longitude?}`
 - `GET /tickets/{id}/attachments` → `AttachmentOut[]` · `POST` multipart `file` + `kind` (`file|photo|signature`)
+  - O comprovante de um custo extra (`receipt_attachment_id`) é custo: a gestão sem Custos extras não o recebe na
+    lista, e `PATCH|DELETE /attachments/{id}` dele respondem 404, como se não existisse.
+  - `DELETE /attachments/{id}`: assinatura não sai (nem a de um atendimento anterior, 422); comprovante de custo
+    reembolsado também não (422 "Comprovante de custo já reembolsado: volte o custo para Aprovado antes de
+    excluir"); nos outros custos, o custo fica sem comprovante (`receipt_attachment_id: null`).
 - `GET /attachments/{id}/download?token=` → arquivo (o `download_url` da listagem já vem assinado, expira em 15 min)
 
 `TicketListItem = {id, number, code:"OS-000123", title, status, priority, type, source, category:{id,name,full_name}|null, customer:{id,name}|null, location:{id,name,code,document,address_line,city,state,latitude,longitude,contact_name,contact_phone}|null, assignee:{id,name,email,role}|null, team:{id,name}|null, requester_name, scheduled_start, scheduled_end, response_due_at, resolution_due_at, first_response_at, resolved_at, sla_paused_at, resolution_sla_met_at, sla_paused_seconds, created_at, updated_at, version, sla_status, tags:[{name,color}], service_type:{id,name,estimated_minutes}|null, description}`
@@ -311,7 +316,9 @@ Todos exigem analista ou gestor, salvo indicação. Valores em R$ chegam como n�
   `GET /expenses?start&end&technician_id&status&customer_id` (relatório) · `POST /expenses/mark-paid {ids}` → `{updated}`
   (marca como reembolsados só os aprovados; os demais ids são ignorados, sem erro, e não entram em `updated`) ·
   `GET|PUT /settings/expenses {km_rate}` (PUT: supervisor/admin). `TicketDetail.expenses`. Lançar um custo inclui na OS as
-  etiquetas `on_extra_cost` que ela ainda não tem (ex.: "Custo Extra"; ver "Etiquetas automáticas").
+  etiquetas `on_extra_cost` que ela ainda não tem (ex.: "Custo Extra"; ver "Etiquetas automáticas"). No `POST`,
+  `technician_id` (a quem reembolsar): sem o campo, o técnico responsável pela OS; `null`, custo da empresa (não entra
+  no reembolso de ninguém).
 - **Visita improdutiva:** `GET|POST|PATCH /unproductive-reasons` · `POST /tickets/{id}/unproductive {reason_id, note?, latitude?, longitude?, expected_version?}`
   (técnico responsável ou gestão) → a OS volta para `assigned` sem agenda; `unproductive_count`. Sync: operação `unproductive`.
 - **Orçamentos:** `GET|POST /quote-items` e `PUT /quote-items/{id}` (catálogo, com `kind`) · `GET|POST /tickets/{id}/quotes` ·
@@ -381,7 +388,7 @@ Assumir (`/take`) ou iniciar uma OS sem analista também coloca na fila de quem 
 evento interno `owner_changed` (`data: {from_name, to_name}`, `note` ex.: "Bruno puxou a OS de Carla").
 
 **Minha fila.** `GET /my-queue?user_id=&date=AAAA-MM-DD` (gestão; sem `user_id`, a minha; sem `date`, hoje no
-fuso `TIMEZONE`) → `{user, date, generated_at, counts, items, total, truncated, executing_only}`. Entram as OS
+fuso `TIMEZONE`; `date` fora de 2000–2100: 422) → `{user, date, generated_at, counts, items, total, truncated, executing_only}`. Entram as OS
 em aberto em que a pessoa é responsável ou executa, mais as resolvidas no dia (`resolved_at` no dia: o
 fechamento automático, dias depois, não conta de novo). A lista vai até 500 itens, primeiro as em aberto de
 prazo mais apertado; `total` é o tamanho de verdade e `truncated` avisa do corte. Cada item é um
@@ -422,10 +429,13 @@ link pode ser copiado de novo a qualquer momento e trocado quando preciso.
 - `TicketDetail.report_link` (a gestão sempre; o técnico responsável só com a OS concluída, para enviar
   pelo app): `{token, path: "/relatorio/<token>", url, created_at, views, last_viewed_at}` ou `null`
   (link desativado).
-- `POST /tickets/{id}/report-link` (cria se não houver; a gestão em qualquer status; o técnico responsável
-  só com a OS concluída, senão 422 "Disponível quando a OS for concluída"; outro técnico, 403) ·
+- `POST /tickets/{id}/report-link` (a gestão em qualquer status, e cria um link novo se o anterior foi desativado;
+  o técnico responsável só com a OS concluída, senão 422 "Disponível quando a OS for concluída", e só pega o link
+  que existe: desativado pela central, 422 "O link do relatório foi desativado pela central"; outro técnico, 403) ·
   `POST /tickets/{id}/report-link/rotate` (gestão; novo link, o anterior para de funcionar) ·
-  `DELETE /tickets/{id}/report-link` (gestão; 204). Nenhum dos três muda a `version` da OS.
+  `DELETE /tickets/{id}/report-link` (gestão; 204). Nenhum dos três muda a `version` da OS. O link nasce na
+  abertura e na conclusão (`resolved`) quando não há um; o fechamento (inclusive o automático) não recria o link
+  desativado.
 - Na web, o botão "Link do relatório da atividade" (rodapé da OS) compartilha por e-mail, WhatsApp, copia
   o link, abre o relatório, baixa o PDF e gerencia o link (trocar ou desativar).
 - Público, sem login: `GET /public/reports/{token}` → `PublicReport {code, title, description, status,
@@ -437,11 +447,14 @@ link pode ser copiado de novo a qualquer momento e trocado quando preciso.
   generated_at}`. Respostas formatadas (Sim/Não, dd/mm/aaaa, vírgula decimal); `type: "section"` é título.
   Fotos com URL absoluta assinada (24 h; base `API_PUBLIC_URL` ou o endereço da requisição). 404 "Link
   inválido ou expirado" (token adulterado, trocado ou revogado). Vale em qualquer status: a OS reaberta
-  aparece como "reaberta" até ser concluída de novo. Cada visita soma em `views` sem mexer na OS. Nunca inclui acompanhamentos, apontamentos, custos, orçamentos,
+  aparece como "reaberta" até ser concluída de novo. `resolution_notes` e `signature` só com a OS concluída
+  (como no portal): a nota adiantada pela central numa OS aberta e o resultado anterior de uma OS reaberta não
+  saem. Cada visita soma em `views` sem mexer na OS. Nunca inclui acompanhamentos, apontamentos, custos, orçamentos,
   notas internas nem motivos de violação.
-- Textos do WhatsApp: variável `{link_relatorio}`, sempre preenchida (toda OS tem link: antes de concluir, a página
-  mostra o andamento; a OS sem link, revogado, ganha um novo ao montar os textos), já no texto padrão "Atividade
-  encerrada". `{analista}` agora é o responsável pela OS.
+- Textos do WhatsApp: variável `{link_relatorio}` (toda OS tem link: antes de concluir, a página mostra o
+  andamento), já no texto padrão "Atividade encerrada". Link desativado pela gestão: o texto sai sem a linha do
+  link e não cria outro sozinho (um novo sai pelo menu "Link do relatório da atividade"). `{analista}` agora é o
+  responsável pela OS.
 - Configuração: `COMPANY_NAME` (nome no relatório, padrão "Maxx Field") e `API_PUBLIC_URL` (opcional).
 
 ## Regras de campo, horário do técnico e pedido de peça
@@ -468,8 +481,11 @@ Com `tags_base` (os nomes das etiquetas que o editor carregou, até 40), `tags` 
 agora: o que o analista incluiu entra, o que tirou sai e o que mudou nesse meio-tempo sem mexer na `version` (custo
 extra, técnico pago, etiquetas em lote) fica. Sem `tags_base`, `tags` substitui a lista inteira.
 **Reabrir** uma OS fechada ou cancelada: `POST /tickets/{id}/transition` `{to_status: "reopened", note}`, só a
-gestão e com motivo (técnico 403; sem motivo 422). Limpa `resolved_at`, `closed_at` e `cancelled_at`, soma 1 em
-`reopen_count` e a OS volta ao fluxo; o prazo de SLA continua o original.
+gestão e com motivo (técnico 403; sem motivo 422). Limpa `resolved_at`, `closed_at`, `cancelled_at`,
+`resolution_sla_met_at` e a assinatura (`signed_at`, `signer_name`, `signer_role`, `signature_attachment_id`; o
+anexo e o evento da assinatura ficam no histórico), soma 1 em `reopen_count` e a OS volta ao fluxo; o prazo de SLA
+continua o original. Com a assinatura exigida, a nova conclusão pede outra (o técnico volta a mexer nos
+formulários); reaberta por engano, conclua com assinatura nova ou torne o formulário opcional.
 `GET /ticket-tags` (gestão) lista as etiquetas já usadas, as mais usadas primeiro. Na web a OS abre no formato
 do "Editar atividade" do Field Control (abas Geral, Prazos, Localização, Vínculos, Orçamentos, Peças e custos,
 Formulários, Anexos, Acompanhamentos e Histórico), na página e por cima das listas; a aba Geral traz os 5
@@ -840,8 +856,11 @@ computador" no portal: vira app com ícone na área de trabalho e no menu Inicia
 - `ServiceType.technician_fee` (opcional): valor padrão ao colocar o técnico na OS.
 - `PUT /tickets/{id}/payouts/{technician_id}` `{amount, note?}` (gestão) → `Payout[]`. O técnico precisa estar
   na OS (responsável ou junto); pago não muda (422: desfaça antes). `DELETE` tira o valor ainda não pago.
-- Regras automáticas: ao colocar o responsável, entra o padrão do tipo de serviço; trocar o responsável leva o
-  valor ainda não pago para o novo técnico; quem sai da visita perde o valor não pago (o pago fica).
+- Regras automáticas (só para técnico parceiro, papel `technician`): ao colocar o técnico como responsável, entra o
+  padrão do tipo de serviço; trocar o responsável leva o valor ainda não pago para o novo técnico; quem sai da
+  visita perde o valor não pago (o pago fica). Analista ou supervisor que assume a OS (equipe interna) não ganha o
+  padrão nem herda o valor de quem saiu (o valor não pago do técnico é retirado, com histórico); o "Definir valor"
+  continua valendo para qualquer um na OS.
 - `TicketDetail.payouts` (só a gestão) e `TicketDetail.my_payout` (só o técnico, o dele).
 - `GET /payouts?technician_id=&status=pending|paid&concluded=&date_from=&date_to=` (gestão) → `{items, summary}`
   com `summary = {to_pay (OS concluídas), expected (OS abertas), paid}`; o período vale pela conclusão da OS.
@@ -1004,7 +1023,12 @@ Vem também em `/auth/me` e no `user` do login, do refresh, da troca de senha e 
   - Senha e e-mail: o supervisor só troca os de quem cabe no teto dele (o acesso atual da pessoa, telas e
     fila); senão, 403 `ACCESS_CAP` (entrar como a pessoa daria a ele o acesso que o teto não deixa dar).
   - Mudança de acesso publica `access.changed` para a pessoa.
-- `GET /users?access_profile_id=` filtra por perfil.
+- `GET /users?access_profile_id=` filtra por perfil (num perfil padrão, também quem do papel está sem perfil,
+  que cai nele; o `users_count` do perfil padrão conta essas pessoas).
+- Supervisor ou analista sem perfil (`access_profile_id: null`, de antes dos perfis): `GET /users`,
+  `GET /users/{id}` e a resposta do `PATCH` mostram em `access` o perfil padrão gravado do papel, o mesmo que vale
+  no `/auth/me` e nas guardas. O autocadastro pelo login Microsoft e o escritório importado do Field Control já
+  entram com o perfil padrão do papel gravado.
 
 ### Visibilidade de filas
 
@@ -1021,7 +1045,8 @@ Vale em:
 - `GET /queues` → `TeamQueues {queues, unowned: QueueCounts | null, scope, total}`: com "própria fila", só a
   linha de quem pede e a sem analista se ele a vê; `total` soma as linhas devolvidas e a sem analista.
 - `GET /my-queue?user_id=` (403 acima); Início (`/home/overview`: números, grupos, exemplos, sugestões e sinais
-  vitais); `/search/smart` (OS, chip "OS nº" e OS abertas de cada cliente); `/dashboard/summary`,
+  vitais; com "própria fila" sem a opção, o grupo `no_owner` e o motivo antigo `no_owner` não saem, como no
+  `/queues` e no Dashboard, mesmo para a OS sem analista que a pessoa executa); `/search/smart` (OS, chip "OS nº" e OS abertas de cada cliente); `/dashboard/summary`,
   `/reports/daily`, `/reports/monthly`, `/reports/sla-violations`; `/activities/day`; `/portal/inbox-count`.
 - `GET /calendar` (só as OS visíveis); conflitos (`/calendar/conflicts` e o 409 `SCHEDULE_CONFLICT`): a OS de
   outra fila vem como `{who, id: null, code: null, title: "OS de outra fila", customer: null, location: null,
@@ -1048,7 +1073,9 @@ Os mesmos valores fora dessas telas:
 - `GET /projects` e `/projects/{id}`: sem Projetos, `contract_value`, `pricing_notes` e `margin` vêm `null` e
   os totais em dinheiro, 0 (a lista continua aberta para o seletor da Nova OS). Cada total de `stats`
   (`expenses_total`, `payouts_total`, `quotes_approved_total`) também pede a tela dele (sem ela, 0), e
-  `margin` pede Custos extras e Pagamentos.
+  `margin` pede Custos extras, Pagamentos e "Todas as filas" (com a própria fila, os totais são só das OS dela e o
+  contrato é do projeto inteiro: `margin` vem `null`).
+- Anexos da OS: sem Custos extras, o comprovante de custo não vem na lista (nem pelo id: 404).
 - `GET /reports/monthly`: `expenses_total` `null` sem Custos extras e `quotes_approved_total` `null` sem
   Orçamentos.
 - `pulse.finance` sem Orçamentos: `quotes_waiting*` e `quotes_approved_month*` saem 0.

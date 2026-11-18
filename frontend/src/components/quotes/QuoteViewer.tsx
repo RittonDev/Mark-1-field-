@@ -407,7 +407,7 @@ export function QuoteViewer({
                   if (isPlainClick(e)) onClose();
                 }}
               >
-                <TicketLink ticketId={ticket.id} className="font-mono text-brand hover:underline">
+                <TicketLink ticketId={ticket.id} className="font-mono text-brand-ink hover:underline">
                   {ticket.code}
                 </TicketLink>
               </span>

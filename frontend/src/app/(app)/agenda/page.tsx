@@ -276,7 +276,7 @@ function AgendaView() {
               className="mb-2"
               aside={
                 techIds.length ? (
-                  <button type="button" className="text-xs text-brand hover:underline" onClick={() => setTechIds([])}>
+                  <button type="button" className="text-xs text-brand-ink hover:underline" onClick={() => setTechIds([])}>
                     Mostrar todos
                   </button>
                 ) : (

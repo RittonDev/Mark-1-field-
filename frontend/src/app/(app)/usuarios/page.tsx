@@ -201,7 +201,7 @@ function technicianAccess(result: TemporaryPassword, reset: boolean): Credential
       <>
         Senha provisória de <strong className="font-semibold">{t.name}</strong>. No primeiro acesso ao app, ele cria
         uma senha nova. Cidade e área de atendimento ficam em{" "}
-        <Link href="/tecnicos" className="font-medium text-brand hover:underline">
+        <Link href="/tecnicos" className="font-medium text-brand-ink hover:underline">
           Técnicos
         </Link>
         .
@@ -638,7 +638,7 @@ function UserDialog({ user, onClose }: { user: User | null; onClose: () => void 
           <p className="rounded-lg border border-line bg-surface-2 px-3 py-2.5 text-sm text-ink-muted sm:col-span-2">
             O técnico recebe uma senha provisória e cria a dele no primeiro acesso ao app. Cidade, área de atendimento e
             convite pelo WhatsApp ficam em{" "}
-            <Link href="/tecnicos" className="font-medium text-brand hover:underline">
+            <Link href="/tecnicos" className="font-medium text-brand-ink hover:underline">
               Técnicos
             </Link>
             .

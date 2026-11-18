@@ -507,7 +507,7 @@ function KmRateNote() {
     <p className="px-1 text-xs text-ink-muted">
       Valor do km rodado{settings.data ? `: ${formatMoney(settings.data.km_rate)}` : ""}. Muda em{" "}
       {canExpenses ? (
-        <Link href="/custos" className="font-medium text-brand hover:underline">
+        <Link href="/custos" className="font-medium text-brand-ink hover:underline">
           Custos extras
         </Link>
       ) : (

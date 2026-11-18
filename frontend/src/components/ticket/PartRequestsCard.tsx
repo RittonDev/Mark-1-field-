@@ -255,7 +255,7 @@ export function PartRequestsCard({ ticket }: { ticket: TicketDetail }) {
                     {r.requested_by?.name ?? "Técnico"} · {formatShort(r.created_at)}
                     {r.quote_code ? " · " : ""}
                     {r.quote_code && quote ? (
-                      <button type="button" onClick={() => setViewing(quote)} className="font-medium text-brand hover:underline">
+                      <button type="button" onClick={() => setViewing(quote)} className="font-medium text-brand-ink hover:underline">
                         {r.quote_code}
                       </button>
                     ) : (

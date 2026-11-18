@@ -124,7 +124,7 @@ function TodaySoFar({ today }: { today: string }) {
       )}
       {canReports ? (
         <p className="mt-2 text-right text-xs">
-          <Link href="/relatorios" className="inline-flex items-center gap-1 font-medium text-brand hover:underline">
+          <Link href="/relatorios" className="inline-flex items-center gap-1 font-medium text-brand-ink hover:underline">
             Ver o fechamento de ontem
             <ArrowRight className="size-3.5" aria-hidden />
           </Link>
