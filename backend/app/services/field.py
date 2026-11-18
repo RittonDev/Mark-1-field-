@@ -227,6 +227,8 @@ def arrival_status(t: Any, now: datetime) -> str | None:
         return "met" if arrived <= due else "late"
     if t.status in FINISHED:
         return None  # resolvida sem visita (remoto) ou cancelada
+    if awaiting_new_visit(t):
+        return None  # esperando data nova depois da improdutiva: não há chegada a cobrar
     if now > due:
         return "late"
     if due - now <= AT_RISK:

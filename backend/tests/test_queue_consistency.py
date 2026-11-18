@@ -576,6 +576,14 @@ async def test_late_arrival_skips_the_visit_waiting_for_a_new_date(
     assert codes[back.title] == [] and codes[plain.title] == ["arrival_late"]
     section = {i["title"]: i["section"] for i in queue["items"]}
     assert section[back.title] == "in_field"
+    # A situação da chegada na própria OS segue a regra (as telas pintam o prazo por ela).
+    arrival = {i["title"]: i["arrival_status"] for i in queue["items"]}
+    assert [arrival[t.title] for t in (waiting, soon, kept, back)] == [None] * 4
+    assert arrival[revisit.title] == arrival[plain.title] == "late"
+    listed = await client.get(
+        f"{API}/tickets", params={"q": "Esperando data nova"}, headers=world.supervisor.headers
+    )
+    assert [i["arrival_status"] for i in listed.json()["items"]] == [None]
 
 
 @pytest.mark.usefixtures("frozen_clock")
