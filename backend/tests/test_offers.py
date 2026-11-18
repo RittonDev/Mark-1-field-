@@ -927,7 +927,11 @@ async def test_technician_without_app_access_loses_his_offers(
     assert sorted(management) == sorted(
         [(t1["id"], "cancelled", "central"), (t2["id"], "cancelled", "central")]
     )
-    told = [(e["ticket_id"], e["audience"]["user_ids"]) for e in published if e["type"] == "ticket.offer"]
+    told = [
+        (e["ticket_id"], e["audience"]["user_ids"])
+        for e in published
+        if e["type"] == "ticket.offer"
+    ]
     assert sorted(told) == sorted([(t1["id"], [alfa_id]), (t2["id"], [alfa_id])])
 
     # Reativar não traz as ofertas de volta.
@@ -970,7 +974,8 @@ async def test_technician_put_in_the_visit_loses_his_offer(
     tech_id, other_id = str(world.tech.user.id), str(world.tech_other.user.id)
     t = await create(client, world)
     by_tech = {
-        o["technician"]["id"]: o for o in await send(client, sup, t["id"], [world.tech, world.tech_other])
+        o["technician"]["id"]: o
+        for o in await send(client, sup, t["id"], [world.tech, world.tech_other])
     }
     await open_offer(client, world.tech_other, by_tech[other_id]["id"])
 
