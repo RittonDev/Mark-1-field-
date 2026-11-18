@@ -319,6 +319,20 @@ export default function MyProfileScreen() {
     };
   }, [attempt]);
 
+  async function sendPhoto(photo: AvatarPhoto) {
+    setPhotoBusy("upload");
+    try {
+      await uploadAvatar(photo);
+      haptic.success();
+      showToast("Foto atualizada", { tone: "success" });
+    } catch (error) {
+      if (await offlineFailure(error)) showToast(NO_INTERNET, { description: OFFLINE_PHOTO });
+      else showToast("Não foi possível enviar a foto", { tone: "error", description: errorMessage(error) });
+    } finally {
+      setPhotoBusy(null);
+    }
+  }
+
   // Android: foto tirada antes de o sistema fechar o app com a câmera aberta (aparelho com pouca memória).
   const onRecovered = useEffectEvent((photo: AvatarPhoto) => {
     void sendPhoto(photo);
@@ -344,20 +358,6 @@ export default function MyProfileScreen() {
   function update(patch: Partial<Form>) {
     setForm((current) => (current ? { ...current, ...patch } : current));
     setSaveError(null);
-  }
-
-  async function sendPhoto(photo: AvatarPhoto) {
-    setPhotoBusy("upload");
-    try {
-      await uploadAvatar(photo);
-      haptic.success();
-      showToast("Foto atualizada", { tone: "success" });
-    } catch (error) {
-      if (await offlineFailure(error)) showToast(NO_INTERNET, { description: OFFLINE_PHOTO });
-      else showToast("Não foi possível enviar a foto", { tone: "error", description: errorMessage(error) });
-    } finally {
-      setPhotoBusy(null);
-    }
   }
 
   async function pickPhoto(source: "camera" | "library") {
