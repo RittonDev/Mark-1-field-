@@ -142,6 +142,23 @@ function excessText(excess: { items: AccessItemKey[]; queue: boolean }): string 
   return parts.length > 1 ? `${parts.slice(0, -1).join(", ")} e ${parts[parts.length - 1]}` : (parts[0] ?? "");
 }
 
+/**
+ * Senha e e-mail de quem tem mais acesso que quem edita ficam com o administrador: entrar como a pessoa daria
+ * o acesso que o teto não deixa dar (a API recusa com ACCESS_CAP, como em routes/users.py). É o mesmo teto,
+ * comparado com o acesso atual da pessoa. O motivo, para o title; null quando pode trocar (administrador,
+ * cliente do portal, quem não passa do teto).
+ */
+export function takeoverLock(me: User | null | undefined, target: EffectiveAccess | null | undefined): string | null {
+  const cap = target ? capOf(me, null) : null;
+  if (!cap || !target) return null;
+  const excess = {
+    items: ACCESS_ITEM_KEYS.filter((k) => LEVEL_RANK[target.items[k] ?? "none"] > LEVEL_RANK[cap.levels[k]]),
+    queue: !cap.queue(target.queues.scope, target.queues.unowned),
+  };
+  if (!excess.items.length && !excess.queue) return null;
+  return `Só o administrador troca a senha ou o e-mail de quem tem mais acesso que você: ${excessText(excess)}.`;
+}
+
 /** "Analista · todas as filas · 2 telas ajustadas". */
 function summaryOf(profile: AccessProfile, queue: { scope: QueueScope; unowned: boolean }, count: number): string {
   const parts = [profile.name, queuesLabel(queue).toLowerCase()];

@@ -1,7 +1,7 @@
 "use client";
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Copy, KeyRound, MessageCircle, Plus, Users, UsersRound } from "lucide-react";
+import { Check, Copy, KeyRound, Lock, MessageCircle, Plus, Users, UsersRound } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useId, useMemo, useState } from "react";
@@ -11,6 +11,7 @@ import {
   accessPayload,
   capExcess,
   profileFor,
+  takeoverLock,
   UserAccessFields,
   usesAccessProfile,
 } from "@/components/access/UserAccessFields";
@@ -375,6 +376,9 @@ function UserDialog({ user, onClose }: { user: User | null; onClose: () => void 
   const ownerUnknown =
     editing && viewerQueue.scope === "own" && user.id !== me?.id && (user.role === "analyst" || user.role === "supervisor");
   const deactivating = editing && user.is_active && !form.is_active;
+  // Senha e e-mail de quem tem mais acesso que você ficam com o administrador (a API recusaria com
+  // ACCESS_CAP): sem "Definir nova senha" e com o e-mail travado, o motivo no title.
+  const takeover = editing && !self ? takeoverLock(me, user.access) : null;
   // A própria senha muda em "Trocar senha" (pede a atual e não derruba a sessão): aqui, só a dos outros.
   const settingPassword = editing && !self && changingPassword && password !== "";
   const sessionEnds =
@@ -569,6 +573,8 @@ function UserDialog({ user, onClose }: { user: User | null; onClose: () => void 
             type="email"
             value={form.email}
             onChange={(e) => set("email", e.target.value)}
+            disabled={!!takeover}
+            title={takeover ?? undefined}
             required
             maxLength={255}
             autoComplete="off"
@@ -658,6 +664,11 @@ function UserDialog({ user, onClose }: { user: User | null; onClose: () => void 
           <p className="rounded-lg border border-line bg-surface-2 px-3 py-2.5 text-sm text-ink-muted sm:col-span-2">
             Para trocar a sua senha, use <strong className="font-semibold text-ink">Trocar senha</strong> no menu da sua
             conta (no seu nome, no menu lateral): ela pede a senha atual e você continua conectado.
+          </p>
+        ) : takeover ? (
+          <p className="flex items-center gap-1.5 text-xs text-ink-muted sm:col-span-2" title={takeover}>
+            <Lock aria-hidden className="size-3.5 shrink-0" />
+            Só o administrador troca a senha e o e-mail desta pessoa.
           </p>
         ) : changingPassword ? (
           // Rótulo próprio (e não o Field): o botão "Gerar senha" fica ao lado do campo, fora do rótulo.
