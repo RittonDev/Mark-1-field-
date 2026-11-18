@@ -614,7 +614,8 @@ export function OfferDialog({
       open
       onClose={onClose}
       size="lg"
-      dirty={dirty && !send.isPending}
+      // Travado, o que foi preenchido não tem mais para onde ir: fecha sem perguntar.
+      dirty={dirty && !send.isPending && !blocked}
       busy={send.isPending}
       title="Ofertar a OS com preço"
       description={
@@ -622,8 +623,8 @@ export function OfferDialog({
           <span className="font-semibold text-ink">{ticket.code}</span> · {service} · {placeText || "sem localização"} ·{" "}
           {ticket.scheduled_start ? formatDateTime(ticket.scheduled_start) : "data a combinar"}
           <span className="mt-1 block text-xs">
-            No app, o técnico vê o serviço, o escopo, os formulários, o bairro e a cidade, a data e o valor. Cliente, loja e endereço, só
-            depois de aceitar.
+            No app, o técnico vê o título (sem loja e cliente), o serviço, o escopo, os formulários, o bairro e a cidade, a data e o valor.
+            Cliente, loja e endereço, só depois de aceitar.
           </span>
         </>
       }
@@ -633,7 +634,7 @@ export function OfferDialog({
           <Button onClick={onClose} disabled={send.isPending}>
             Cancelar
           </Button>
-          <Button variant="primary" type="submit" form={formId} loading={send.isPending}>
+          <Button variant="primary" type="submit" form={formId} loading={send.isPending} disabled={Boolean(blocked)}>
             {send.isPending ? null : <Send aria-hidden className="size-4" />}
             {picked.length > 1 ? `Enviar para ${picked.length} técnicos` : "Enviar oferta"}
           </Button>
@@ -641,12 +642,17 @@ export function OfferDialog({
       }
     >
       <form id={formId} onSubmit={submit} noValidate className="flex flex-col gap-5">
-        {ticket.description?.trim() ? null : (
-          <p className="flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200">
-            <AlertTriangle aria-hidden className="mt-px size-3.5 shrink-0" />
-            <span>A OS está sem escopo: o técnico vai ver só o serviço. Para ele saber o que fazer, preencha o escopo antes de ofertar.</span>
-          </p>
-        )}
+        {blocked || !scope || scopeCites ? (
+          <div className="flex flex-col gap-2">
+            {blocked ? <Caution alert>{blocked}</Caution> : null}
+            {scope ? null : (
+              <Caution>
+                A OS está sem escopo: o técnico vai ver só o serviço. Para ele saber o que fazer, preencha o escopo antes de ofertar.
+              </Caution>
+            )}
+            {scopeCites ? <Caution>O escopo cita o cliente ou a loja, e o técnico lê o escopo antes de aceitar.</Caution> : null}
+          </div>
+        ) : null}
 
         <div className="flex flex-col gap-2">
           <div className="flex items-baseline justify-between gap-2">
@@ -841,21 +847,38 @@ function OfferRow({
   );
 }
 
+/** O motivo no meio da frase: "outro técnico aceitou", "a OS foi atribuída"... */
+function closedBecause(reason: OfferCancelReason | null): string | null {
+  const text = reason ? CANCELLED_BECAUSE[reason] : undefined;
+  return text ? text.charAt(0).toLowerCase() + text.slice(1) : null;
+}
+
 /**
  * Bloco "Ofertas" da aba Geral (OS sem técnico): as ofertas da OS com o valor e a situação de cada uma
  * ("Vista às 14:41 · vence às 15:30", "Recusou: motivo", "Outro técnico aceitou"...), o "Cancelar" da
  * pendente, o texto para o grupo de técnicos e o "Ofertar com preço". Segue o acesso a Pagamentos: sem a
  * tela, só o contador das que aguardam resposta (sem valores); só com Visualizar, a lista sem as ações.
  * O "Ofertar" trava com alteração não salva na OS (como a Situação): a oferta leva a OS como está salva.
+ * O diálogo fica com a aba Geral (`onOffer`): este bloco some quando a OS ganha técnico, e o diálogo não.
  */
-export function OffersBlock({ ticket, locked, className }: { ticket: TicketDetail; locked: boolean; className?: string }) {
+export function OffersBlock({
+  ticket,
+  locked,
+  onOffer,
+  className,
+}: {
+  ticket: TicketDetail;
+  locked: boolean;
+  /** Abre o "Ofertar a OS com preço". */
+  onOffer: () => void;
+  className?: string;
+}) {
   const canView = useCan("commercial.payouts");
   const canEdit = useCan("commercial.payouts", "edit");
   const { toast } = useToast();
   const confirm = useConfirm();
   const queryClient = useQueryClient();
   const now = useNow(30_000);
-  const [open, setOpen] = useState(false);
   const [all, setAll] = useState(false);
   const offers = useTicketOffers(ticket.id, canView);
   const place = useOfferPlace(ticket, canView);
@@ -865,7 +888,16 @@ export function OffersBlock({ ticket, locked, className }: { ticket: TicketDetai
       queryClient.setQueryData<TicketOffer[]>(["ticket", ticket.id, "offers"], (list) =>
         list?.map((o) => (o.id === updated.id ? updated : o)),
       );
-      toast({ title: `Oferta para ${updated.technician.name} cancelada`, tone: "success" });
+      if (updated.cancel_reason === "central") {
+        toast({ title: `Oferta para ${updated.technician.name} cancelada`, tone: "success" });
+        return;
+      }
+      // A lista estava velha: a oferta já tinha fechado por outro motivo e a API a devolve como estava.
+      const why = closedBecause(updated.cancel_reason);
+      toast({
+        title: why ? `Esta oferta já tinha sido encerrada: ${why}` : "Esta oferta já tinha sido encerrada",
+        description: updated.cancel_reason === "replaced" ? `A oferta nova para ${updated.technician.name} continua em aberto.` : undefined,
+      });
     },
     onError: (error) => toast({ title: "Não foi possível cancelar a oferta", description: errorMessage(error), tone: "error" }),
     // O contador da OS (cabeçalho), o histórico e a lista como ficaram (o técnico pode ter respondido antes).
@@ -911,23 +943,26 @@ export function OffersBlock({ ticket, locked, className }: { ticket: TicketDetai
         wrap
         className="mb-1"
         aside={
-          <>
-            {batch.length ? (
-              <button
-                type="button"
-                onClick={() => void copyGroupText(groupText(ticket, place, batch), toast)}
-                className={buttonClassName("ghost", "sm", "h-7 px-2")}
-              >
-                Copiar texto para o grupo
-              </button>
-            ) : null}
-            {offerable ? (
-              <Button size="sm" onClick={() => setOpen(true)} disabled={locked}>
-                <Send aria-hidden className="size-3.5" />
-                Ofertar com preço
-              </Button>
-            ) : null}
-          </>
+          batch.length || offerable ? (
+            // No celular os dois botões não cabem lado a lado: quebram a linha, alinhados à direita.
+            <div className="flex flex-wrap items-center justify-end gap-1.5">
+              {batch.length ? (
+                <button
+                  type="button"
+                  onClick={() => void copyGroupText(groupText(ticket, place, batch), toast)}
+                  className={buttonClassName("ghost", "sm", "h-7 px-2")}
+                >
+                  Copiar texto para o grupo
+                </button>
+              ) : null}
+              {offerable ? (
+                <Button size="sm" onClick={onOffer} disabled={locked}>
+                  <Send aria-hidden className="size-3.5" />
+                  Ofertar com preço
+                </Button>
+              ) : null}
+            </div>
+          ) : null
         }
       >
         Ofertas
@@ -971,7 +1006,6 @@ export function OffersBlock({ ticket, locked, className }: { ticket: TicketDetai
           {all ? "Mostrar menos" : `Mostrar todas (${list.length})`}
         </button>
       ) : null}
-      {open ? <OfferDialog ticket={ticket} onClose={() => setOpen(false)} /> : null}
     </div>
   );
 }
