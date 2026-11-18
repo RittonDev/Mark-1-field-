@@ -32,6 +32,7 @@ from app.db.base import utcnow
 from app.models import Location, Ticket, User
 from app.models.technician_favorite import FavoriteKind, TechnicianFavorite
 from app.schemas.common import Ref
+from app.schemas.technician_favorite import NOTE_MAX as NOTE_MAX  # o FavoriteSet confere
 from app.schemas.technician_favorite import (
     FavoriteCity,
     FavoriteCityDetail,
@@ -52,7 +53,6 @@ TOP = 3
 MAX_PINNED_PER_CITY = 10
 SUGGESTION_POINTS = 25
 OTHERS_LIMIT = 10
-# O tamanho da nota (NOTE_MAX) fica no schema: FavoriteSet confere com o rótulo da tela.
 
 _UF = re.compile(r"^[A-Z]{2}$")
 CityKey = tuple[str, str]  # (UF, cidade sem acento)
