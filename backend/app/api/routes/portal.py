@@ -6,7 +6,6 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 
 from app.api.deps import DB, CurrentUser, TicketManagerUser
-from app.schemas.common import Page
 from app.schemas.portal import (
     PortalCancel,
     PortalInboxCount,
@@ -14,7 +13,7 @@ from app.schemas.portal import (
     PortalMe,
     PortalRequestCreate,
     PortalRequestDetail,
-    PortalRequestItem,
+    PortalRequestPage,
 )
 from app.services import login_guard
 from app.services import portal as svc
@@ -36,7 +35,7 @@ async def portal_locations(db: DB, user: CurrentUser, q: str | None = None) -> l
     return await svc.locations(db, user, q)
 
 
-@router.get("/portal/requests", response_model=Page[PortalRequestItem])
+@router.get("/portal/requests", response_model=PortalRequestPage)
 async def list_requests(
     db: DB,
     user: CurrentUser,
@@ -45,11 +44,17 @@ async def list_requests(
     q: str | None = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
-) -> Page[PortalRequestItem]:
-    items, total = await svc.list_requests(
+) -> PortalRequestPage:
+    items, total, waiting = await svc.list_requests(
         db, user, scope=scope, location_id=location_id, q=q, page=page, page_size=page_size
     )
-    return Page(items=[svc.to_item(t) for t in items], total=total, page=page, page_size=page_size)
+    return PortalRequestPage(
+        items=[svc.to_item(t) for t in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+        waiting=waiting,
+    )
 
 
 @router.post(

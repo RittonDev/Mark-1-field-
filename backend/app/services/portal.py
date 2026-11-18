@@ -165,7 +165,9 @@ async def list_requests(
     q: str | None = None,
     page: int = 1,
     page_size: int = 20,
-) -> tuple[list[Ticket], int]:
+) -> tuple[list[Ticket], int, int]:
+    """A página pedida, o total e quantas aguardam o cliente (contadas antes da paginação, com os
+    mesmos filtros: o aviso "N aguardam um retorno de vocês" não depende das páginas abertas)."""
     customer_id = customer_id_of(user)
     stmt = select(Ticket).where(Ticket.customer_id == customer_id)
     if scope == "open":
@@ -188,6 +190,8 @@ async def list_requests(
             conditions.append(Ticket.number == int(code.group(1)))
         stmt = stmt.where(or_(*conditions))
     total = await db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    waiting_stmt = stmt.where(Ticket.status == S.ON_HOLD_CUSTOMER)
+    waiting = await db.scalar(select(func.count()).select_from(waiting_stmt.subquery())) or 0
     # A lista mostra só a loja e o técnico: as outras relações da OS não são carregadas.
     rows = await db.scalars(
         stmt.options(raiseload("*"), selectinload(Ticket.location), selectinload(Ticket.assignee))
@@ -195,7 +199,7 @@ async def list_requests(
         .offset((page - 1) * page_size)
         .limit(page_size)
     )
-    return list(rows), total
+    return list(rows), total, waiting
 
 
 async def get_request(db: AsyncSession, user: User, request_id: uuid.UUID) -> Ticket:

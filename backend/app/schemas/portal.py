@@ -11,7 +11,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from app.core.enums import TicketStatus, Urgency
-from app.schemas.common import Ref
+from app.schemas.common import Page, Ref
 
 
 class PortalLocation(BaseModel):
@@ -45,6 +45,11 @@ class PortalRequestItem(BaseModel):
     arrived_at: datetime | None
     resolved_at: datetime | None
     cancelled_at: datetime | None
+
+
+class PortalRequestPage(Page[PortalRequestItem]):
+    # Quantas aguardam um retorno do cliente com os mesmos filtros, em todas as páginas.
+    waiting: int = 0
 
 
 class PortalTimelineEntry(BaseModel):

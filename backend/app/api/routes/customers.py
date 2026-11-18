@@ -1,7 +1,7 @@
 import re
 import uuid
 from datetime import timedelta
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import ColumnElement, func, or_, select, true
@@ -238,9 +238,12 @@ async def customer_locations(
     active: bool | None = None,
     q: str | None = None,
     limit: Annotated[int | None, Query(ge=1, le=5000)] = None,
+    order: Literal["name", "tickets"] = "name",
 ) -> list[LocationOut]:
     """Lojas do cliente. `active=true` só as ativas (seletores), `q` busca por nome, código,
-    cidade ou CNPJ e `limit` corta a lista (cliente grande tem mais de mil lojas)."""
+    cidade ou CNPJ e `limit` corta a lista (cliente grande tem mais de mil lojas).
+    `order=tickets`: as lojas com mais OS primeiro (contando só as que a pessoa vê), para a
+    ficha do cliente pedir só as primeiras em vez de todas."""
     stmt = select(Location).where(Location.customer_id == customer_id)
     if active is not None:
         stmt = stmt.where(Location.is_active.is_(active))
@@ -254,7 +257,18 @@ async def customer_locations(
         Location.document,
     )
     if matched is not None:
-        stmt = stmt.where(matched).order_by(
+        stmt = stmt.where(matched)
+    if order == "tickets":
+        conds: list[ColumnElement[bool]] = [Ticket.location_id == Location.id]
+        vis = visibility_clause(user)
+        if vis is not None:
+            conds.append(vis)
+        tickets = (
+            select(func.count(Ticket.id)).where(*conds).correlate(Location).scalar_subquery()
+        )
+        stmt = stmt.order_by(tickets.desc(), Location.name)
+    elif matched is not None:
+        stmt = stmt.order_by(
             search.rank(q, Location.name, exact=[Location.code, Location.document]), Location.name
         )
     else:

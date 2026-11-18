@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, computed_field
 
-from app.core.enums import QuoteStatus
+from app.core.enums import QuoteStatus, TicketStatus
 from app.schemas.common import ORMModel, Ref
 from app.schemas.company import CompanyProfile
 from app.schemas.expense import Money
@@ -243,6 +243,8 @@ class QuoteListRow(QuoteOut):
     customer_id: uuid.UUID | None = None
     # Local (loja) da OS do orçamento.
     location: str | None = None
+    # Situação da OS: cancelada, o orçamento não muda mais (a tela esconde Renovar, Editar...).
+    ticket_status: TicketStatus | None = None
 
 
 class QuoteStatusTotal(BaseModel):

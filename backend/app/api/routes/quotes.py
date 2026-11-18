@@ -376,6 +376,7 @@ async def list_quotes(
                 customer=customer,
                 customer_id=ticket_customer_id,
                 location=location,
+                ticket_status=ticket_status,
             )
         )
     await db.commit()  # grava os que venceram

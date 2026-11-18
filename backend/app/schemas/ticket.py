@@ -160,9 +160,10 @@ class TicketListItem(ORMModel):
     # Fim do trecho atual na loja (a cada entrada em atendimento, o que sobrou das horas).
     onsite_due_at: datetime | None = None
     onsite_warning_at: datetime | None = Field(default=None, exclude=True)
-    # Base do tempo na loja já usado (a OS completa traz os dois na resposta).
+    # Base do tempo na loja já usado (a OS completa traz os dois na resposta). O início da visita
+    # em curso vai também nas listas: o tempo na loja conta da entrada atual, não da 1ª chegada.
     work_seconds: int = Field(default=0, exclude=True)
-    work_started_at: datetime | None = Field(default=None, exclude=True)
+    work_started_at: datetime | None = None
     # Outras OS no mesmo local nos últimos 30 dias (preenchido nas listagens e na fila).
     recurrence_30d: int = 0
     # Etiquetas (ex.: "Avulso", "Faturamento Matriz").
