@@ -163,6 +163,7 @@ def field_out(offer: TicketOffer, ticket: Ticket, now: datetime) -> FieldOfferOu
         amount=offer.amount,
         expires_at=offer.expires_at,
         note=offer.note,
+        cancel_reason=offer.cancel_reason,
         viewed_at=offer.viewed_at,
         responded_at=offer.responded_at,
         created_at=offer.created_at,

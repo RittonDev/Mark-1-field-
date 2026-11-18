@@ -119,6 +119,9 @@ class FieldOfferOut(BaseModel):
     amount: Money
     expires_at: datetime | None
     note: str | None
+    # Na cancelada, por quê: "taken" (outro técnico aceitou), "central", "assigned" (a central
+    # definiu o técnico) ou "ticket_closed" (a OS foi encerrada).
+    cancel_reason: OfferCancelReason | None
     viewed_at: datetime | None
     responded_at: datetime | None
     created_at: datetime
