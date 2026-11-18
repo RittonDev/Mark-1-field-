@@ -1087,8 +1087,9 @@ técnico) e, só no aceite, a leitura.
 - Texto do grupo de técnicos (`offerText` em `components/new-ticket/invite.ts`): serviço, bairro e cidade, data (ou
   "data a combinar"), valor, para quem foi no app e "Aceite pelo app até HH:MM" (ou sem prazo). Nunca cliente, loja
   ou endereço.
-- Sem Pagamentos, a Geral e o cabeçalho mostram só o contador (`open_offers`): no cabeçalho, o chip "Sem técnico"
-  vira "Oferta enviada" / "N ofertas enviadas", em tom neutro.
+- Cabeçalho da OS (toda a gestão, pelo `open_offers`): sem técnico e com oferta esperando resposta, o chip "Sem
+  técnico" vira "Oferta enviada" / "N ofertas enviadas", em tom neutro. Sem Pagamentos, a Geral também mostra só
+  esse contador, sem valores.
 - Histórico: os quatro `offer_*` (técnicos e valor no envio, valor no aceite, motivo na recusa, motivo no
   encerramento) e o `assigned` com `via: "offer"` ("assumiu a OS pela oferta").
 - Tempo real: o `ticket.updated` com `fields: ["offers"]` recarrega só a OS; o aceite e a recusa viram aviso para o
