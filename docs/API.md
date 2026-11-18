@@ -1100,24 +1100,41 @@ técnico) e, só no aceite, a leitura e o valor pago do técnico nesta OS.
   "offers"]`) lista as ofertas (sem as `replaced`) com o técnico, o valor e a situação ("Vista às 14:41 · vence às
   15:30", "Recusou às 14:50: motivo", "Outro técnico aceitou"...), o "Cancelar" da pendente (com confirmação), o
   "Copiar texto para o grupo" e o "Ofertar com preço" (Pagamentos em Editar, OS em aberto e sem técnico; travado com
-  alteração não salva, como a Situação). Nada disso entra no formulário da OS. Escolher o técnico na mão com ofertas
-  em aberto mostra o aviso de que elas serão canceladas ao salvar.
+  alteração não salva, como a Situação). Os botões quebram a linha no celular. Nada disso entra no formulário da OS.
+  Escolher o técnico na mão com ofertas em aberto mostra o aviso de que elas serão canceladas ao salvar. O
+  "Cancelar" de uma oferta que já tinha fechado por outro motivo (lista velha; a API devolve como estava) avisa, em
+  tom neutro, "Esta oferta já tinha sido encerrada: <motivo>" e, na `replaced`, que a oferta nova para o técnico
+  continua em aberto.
 - Diálogo "Ofertar a OS com preço" (também no resumo da OS recém-criada): de 1 a 10 técnicos (`GET
   /technicians/suggest` com `exclude_ticket_id` e `limit=10`, mais a busca: `GET /technicians` com a tela Técnicos,
   senão os técnicos de `GET /users/assignable`; sem acesso ao app e já na OS aparecem travados), o valor (começa no
   `technician_fee` do tipo de serviço), o prazo (sem prazo, 30 min, 1 h, 2 h, 4 h ou até o fim do dia; o `expires_at` é
-  calculado no clique) e o recado. Depois do envio, o aviso "Oferta enviada" com "Copiar texto para o grupo".
-- Texto do grupo de técnicos (`offerText` em `components/new-ticket/invite.ts`): serviço, bairro e cidade, data (ou
-  "data a combinar"), valor, para quem foi no app e "Aceite pelo app até HH:MM" (ou sem prazo). Nunca cliente, loja
-  ou endereço.
+  calculado no clique) e o recado. Depois do envio, o aviso "Oferta enviada" com "Copiar texto para o grupo". O
+  diálogo diz que o técnico vê o título sem loja e cliente; escopo que cita o nome do cliente ou da loja (palavra
+  inteira, sem caixa nem acento) mostra "O escopo cita o cliente ou a loja, e o técnico lê o escopo antes de aceitar".
+  Na aba Geral o diálogo fica fora do bloco: se a OS ganha técnico ou sai de "em aberto" com ele aberto, ele continua
+  (com o erro de um envio em andamento), diz "A OS já tem técnico: <nome>." ou "A OS não está mais em aberto." e trava
+  o Enviar.
+- Texto do grupo de técnicos (`offerText` em `components/new-ticket/invite.ts`): o tipo de serviço (sem ele,
+  "Atendimento técnico"; nunca o título da OS, que pode trazer a loja), bairro e cidade, data (ou "data a combinar"),
+  valor, para quem foi no app e "Aceite pelo app até HH:MM" (ou sem prazo). Nunca cliente, loja ou endereço. O
+  convite antigo (Geral e Nova OS) segue a mesma regra do serviço.
 - Cabeçalho da OS (toda a gestão, pelo `open_offers`): sem técnico e com oferta esperando resposta, o chip "Sem
   técnico" vira "Oferta enviada" / "N ofertas enviadas", em tom neutro. Sem Pagamentos, a Geral também mostra só
-  esse contador, sem valores.
+  esse contador, sem valores. O editor da OS (página e painel, com ou sem Pagamentos) relê o detalhe (`["ticket",
+  id]`, exato) 1 s depois do `next_offer_expires_at`, em etapas quando passa do teto do `setTimeout`; se a resposta
+  ainda traz o mesmo prazo (relógio do computador adiantado), tenta de novo até 4 vezes, a cada 15 s. Trocar de OS ou
+  fechar desarma.
 - Histórico: os quatro `offer_*` (técnicos e valor no envio, valor no aceite, motivo na recusa, motivo no
-  encerramento) e o `assigned` com `via: "offer"` ("assumiu a OS pela oferta").
-- Tempo real: o `ticket.updated` com `fields: ["offers"]` recarrega a OS (a lista de ofertas e o contador ficam sob
-  `["ticket", id]`) e as listas de OS, como todo `ticket.*`, sem as telas extras (Pagamentos, relatórios...); o
-  aceite e a recusa viram aviso para o analista da OS (sem analista, para a central toda), sem o valor.
+  encerramento) e o `assigned` com `via: "offer"` ("assumiu a OS pela oferta"). No `offer_cancelled`, as notas
+  "A central incluiu o técnico na visita" e "Técnico sem acesso ao app" viram "encerrou a oferta ao incluir o técnico
+  na visita" e "encerrou a oferta: técnico sem acesso ao app".
+- Tempo real: o `ticket.updated` com `fields` exatamente `["offers"]` (inclusive o `viewed`) recarrega só a OS
+  (`["ticket", id]`: a lista de ofertas, o contador e o histórico); listas de OS, Início e lista de atribuição não
+  (o aceite chega também como `ticket.assigned`, que recarrega tudo). O aceite e a recusa viram aviso para o analista
+  da OS (sem analista, para a central toda) e para quem mandou a oferta (`sender_id` = usuário logado), sem o valor.
+- Técnicos e Usuários: a confirmação de desativar o técnico diz que as ofertas em aberto para ele são canceladas (em
+  Usuários ela só aparece quando há OS abertas).
 
 ## Acesso: perfis por tela e visibilidade de filas
 

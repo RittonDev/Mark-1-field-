@@ -945,7 +945,7 @@ export function OffersBlock({
         aside={
           batch.length || offerable ? (
             // No celular os dois botões não cabem lado a lado: quebram a linha, alinhados à direita.
-            <div className="flex flex-wrap items-center justify-end gap-1.5">
+            <div className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1.5">
               {batch.length ? (
                 <button
                   type="button"
