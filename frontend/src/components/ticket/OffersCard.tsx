@@ -186,13 +186,14 @@ function useOfferPlace(ticket: TicketDetail, enabled = true): OfferPlace {
 
 /**
  * Texto da oferta para o grupo de técnicos no WhatsApp (sem cliente, loja nem endereço). O prazo sai com a
- * hora (ou o dia) contado do relógio na hora da cópia.
+ * hora (ou o dia) contado do relógio na hora da cópia. Sem tipo de serviço, "Atendimento técnico": o título
+ * da OS pode trazer a loja ("Troca de PDV · Matriz").
  */
 function groupText(ticket: TicketDetail, place: OfferPlace, offers: TicketOffer[], now: number = Date.now()): string {
   const first = offers[0];
   return offerText({
     code: ticket.code,
-    service: ticket.service_type?.name ?? ticket.title,
+    service: ticket.service_type?.name ?? "",
     district: place.district,
     city: place.city,
     state: place.state,
@@ -375,13 +376,49 @@ function BlockError({ message }: { message?: string | null }) {
   ) : null;
 }
 
+/** Aviso âmbar no topo do diálogo. `alert`: o que aparece com o diálogo aberto (a OS mudou) é anunciado. */
+function Caution({ children, alert = false }: { children: React.ReactNode; alert?: boolean }) {
+  return (
+    <p
+      role={alert ? "alert" : undefined}
+      className="flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200"
+    >
+      <AlertTriangle aria-hidden className="mt-px size-3.5 shrink-0" />
+      <span>{children}</span>
+    </p>
+  );
+}
+
+/** Letra ou número: o nome encostado num deles faz parte de outra palavra. */
+const WORD_CHAR = /[\p{L}\p{N}]/u;
+
+/**
+ * O texto cita o nome como palavra inteira, sem caixa nem acento ("Sé" não conta em "Série"), como a API
+ * compara ao tirar a loja e o cliente do título da oferta.
+ */
+function cites(text: string, name: string | null | undefined): boolean {
+  const fold = (value: string) => searchText(value).replace(/\s+/g, " ").trim();
+  const needle = fold(name ?? "");
+  if (needle.length < 2) return false;
+  const hay = fold(text);
+  for (let at = hay.indexOf(needle); at !== -1; at = hay.indexOf(needle, at + 1)) {
+    const end = at + needle.length;
+    const glued =
+      (at > 0 && WORD_CHAR.test(hay[at - 1]) && WORD_CHAR.test(needle[0])) ||
+      (end < hay.length && WORD_CHAR.test(hay[end]) && WORD_CHAR.test(needle[needle.length - 1]));
+    if (!glued) return true;
+  }
+  return false;
+}
+
 // ------------------------------------------------------------------ diálogo
 
 /**
  * "Ofertar a OS com preço": de 1 a 10 técnicos (os mais indicados para a OS, com favorito, distância,
  * "ocupado" e cidade, e a busca para incluir outro), o valor para o técnico (começa no valor do tipo de
- * serviço), o prazo para responder e um recado. A OS precisa estar em aberto e sem técnico (a API confere).
- * Serve na aba Geral da OS e no resumo da OS recém-criada.
+ * serviço), o prazo para responder e um recado. A OS precisa estar em aberto e sem técnico (a API confere):
+ * se ela muda com o diálogo aberto (outro técnico aceitou, alguém definiu o técnico ou encerrou a OS), o
+ * diálogo continua, diz por quê e trava o Enviar. Serve na aba Geral da OS e no resumo da OS recém-criada.
  */
 export function OfferDialog({
   ticket,
@@ -543,13 +580,22 @@ export function OfferDialog({
       : previewAt
         ? `Vence ${atText(previewAt, now)}.`
         : undefined;
+  // A OS mudou com o diálogo aberto: não dá mais para ofertar (o que foi preenchido fica à vista).
+  const blocked = ticket.assignee
+    ? `A OS já tem técnico: ${ticket.assignee.name}.`
+    : isOpenStatus(ticket.status)
+      ? null
+      : "A OS não está mais em aberto.";
+  // O título vai sem a loja e o cliente; o escopo vai como foi escrito.
+  const scope = ticket.description?.trim() ?? "";
+  const scopeCites = Boolean(scope) && (cites(scope, ticket.customer?.name) || cites(scope, ticket.location?.name));
   const dirty = picked.length > 0 || amountText !== null || note.trim() !== "" || deadline !== "none";
 
   const submit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     // Aberto da aba Geral (portal no <body>): o envio não pode "subir" até o Salvar da OS.
     e.stopPropagation();
-    if (send.isPending) return;
+    if (send.isPending || blocked) return;
     setTried(true);
     if (errors.technicians || errors.amount || errors.deadline || amount.value === null) return;
     // O prazo conta de agora (do clique), não de quando o diálogo abriu.
