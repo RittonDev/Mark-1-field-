@@ -51,6 +51,8 @@
   --elev-2: 0 1px 2px rgb(16 24 40 / 0.04), 0 6px 16px -4px rgb(16 24 40 / 0.08);
   --elev-pop: 0 0 0 1px rgb(16 24 40 / 0.05), 0 18px 40px -12px rgb(16 24 40 / 0.22), 0 4px 10px -4px rgb(16 24 40 / 0.08);
   --elev-sheet: 0 0 0 1px rgb(16 24 40 / 0.04), 0 1px 3px rgb(16 24 40 / 0.05);
+  /* Barra presa com o conteúdo rolado por baixo (abas da OS): sombra curta só para baixo. */
+  --elev-scroll: 0 6px 12px -8px rgb(16 24 40 / 0.2);
   color-scheme: light;
 }
 
@@ -88,6 +90,7 @@
   --elev-2: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 20px -6px rgb(0 0 0 / 0.45);
   --elev-pop: 0 0 0 1px rgb(255 255 255 / 0.06), 0 20px 48px -12px rgb(0 0 0 / 0.7);
   --elev-sheet: 0 0 0 1px rgb(255 255 255 / 0.035);
+  --elev-scroll: 0 6px 14px -8px rgb(0 0 0 / 0.75);
   color-scheme: dark;
 }
 
@@ -125,6 +128,7 @@
   --shadow-elev-2: var(--elev-2);
   --shadow-pop: var(--elev-pop);
   --shadow-sheet: var(--elev-sheet);
+  --shadow-scroll: var(--elev-scroll);
   --font-sans: var(--font-brand), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
     sans-serif;
 }

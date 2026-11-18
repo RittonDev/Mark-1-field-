@@ -33,9 +33,9 @@ import {
   ErrorBox,
   Input,
   isTopLayer,
-  LoadingBlock,
   lockScroll,
   restoreFocus,
+  Skeleton,
   Textarea,
   trapTab,
 } from "@/components/ui";
@@ -555,6 +555,31 @@ interface Progress {
 
 const hasFiles = (e: React.DragEvent) => Array.from(e.dataTransfer.types).includes("Files");
 
+/** O formato da lista enquanto carrega: o filtro e as fotos em grade (foto, legenda e detalhes). */
+function AttachmentsSkeleton() {
+  return (
+    <div role="status" className="flex flex-col gap-4">
+      <span className="sr-only">Carregando os anexos...</span>
+      <Skeleton className="h-8 w-72 max-w-full" />
+      <ul aria-hidden className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
+        {[0, 1, 2, 3].map((i) => (
+          <li
+            key={i}
+            className={clsx("overflow-hidden rounded-xl border border-line bg-surface", i === 3 && "max-xl:hidden", i === 2 && "max-sm:hidden")}
+          >
+            {/* A foto encosta nas bordas do cartão (raio no style: o .skeleton ganha das classes rounded-*). */}
+            <Skeleton className="aspect-[4/3] w-full" style={{ borderRadius: 0 }} />
+            <div className="flex flex-col gap-1.5 p-2.5">
+              <Skeleton className="h-3 w-3/4" />
+              <Skeleton className="h-2.5 w-1/2" />
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 /**
  * Anexos da OS: o técnico envia pelo app; a gestão também envia daqui (arrastando do Windows ou colando
  * um print), decide se a foto vai para o relatório do cliente, descreve cada uma e exclui o que não serve.
@@ -832,7 +857,7 @@ export function AttachmentsTab({
       ) : null}
 
       {attachments.isLoading ? (
-        <LoadingBlock rows={3} />
+        <AttachmentsSkeleton />
       ) : attachments.error ? (
         <div className="flex flex-col items-start gap-2">
           <ErrorBox message={errorMessage(attachments.error)} />
@@ -842,7 +867,7 @@ export function AttachmentsTab({
           </Button>
         </div>
       ) : items.length === 0 ? (
-        <EmptyState icon={<Paperclip />} title="Nenhum anexo" description="Fotos e arquivos enviados pelo técnico ou pela equipe aparecem aqui." />
+        <EmptyState icon={<Paperclip />} title="Nenhum anexo" />
       ) : (
         <>
           <Tabs

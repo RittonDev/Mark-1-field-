@@ -3,24 +3,31 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 import {
-  ArrowLeft,
   Ban,
   CircleCheck,
+  ClipboardList,
   Clock,
   Copy,
   ExternalLink,
   FileText,
+  History,
+  LayoutList,
+  Link2,
+  type LucideIcon,
   MapPin,
+  MapPinOff,
   MessageCircle,
+  MessagesSquare,
   Navigation,
+  Package,
+  Paperclip,
   RotateCcw,
-  SquarePen,
-  X,
+  Timer,
 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useEffectEvent, useId, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { type TabItem, Tabs } from "@/components/motion";
+import { nextDue } from "@/components/badges";
 import { AttachmentsTab, useTicketAttachments } from "@/components/ticket/AttachmentsTab";
 import { CommentsTab } from "@/components/ticket/CommentsTab";
 import { ExpensesCard } from "@/components/ticket/ExpensesCard";
@@ -44,31 +51,34 @@ import { UNPRODUCTIVE_FROM, UnproductiveDialog } from "@/components/ticket/Unpro
 import { WhatsAppShare } from "@/components/ticket/WhatsAppShare";
 import { WorklogsTab } from "@/components/ticket/WorklogsTab";
 import { useToast } from "@/components/Toaster";
-import { Button, buttonClassName, Card, CardHeader, ErrorBox, isTopLayer, Kbd, SectionTitle, Skeleton } from "@/components/ui";
+import { Button, buttonClassName, Card, CardHeader, EmptyState, ErrorBox, isTopLayer, Kbd, SectionTitle, Skeleton } from "@/components/ui";
 import { useNow } from "@/components/useNow";
 import { api, errorMessage } from "@/lib/api";
 import { STATUS } from "@/lib/constants";
 import { formatDateTime, formatMinutes, formatShort } from "@/lib/format";
 import { useDocumentTitle } from "@/lib/hooks";
+import { useCan } from "@/lib/permissions";
 import type { Comment, Quote, ReportLink, TicketDetail, TicketEvent, TicketStatus } from "@/lib/types";
 import { copyText, type GroupText, groupTextsQuery, whatsappUrl } from "@/lib/whatsapp";
 import { GENERAL_FORM_ID, GeneralTab, GeneralView, type SaveState } from "./GeneralTab";
-import { StatusMenu } from "./StatusMenu";
+import { type HeaderJump, TicketHeader } from "./TicketHeader";
+import { type TicketTabAlert, type TicketTabItem, TicketTabs } from "./TicketTabs";
 import { useUnsavedGuard } from "./useUnsavedGuard";
 
 type TabKey = "geral" | "prazos" | "localizacao" | "vinculos" | "orcamentos" | "pecas" | "formularios" | "anexos" | "acompanhamentos" | "historico";
 
-const TABS: { key: TabKey; label: string }[] = [
-  { key: "geral", label: "Geral" },
-  { key: "prazos", label: "Prazos" },
-  { key: "localizacao", label: "Localização" },
-  { key: "vinculos", label: "Vínculos" },
-  { key: "orcamentos", label: "Orçamentos" },
-  { key: "pecas", label: "Peças e custos" },
-  { key: "formularios", label: "Formulários" },
-  { key: "anexos", label: "Anexos" },
-  { key: "acompanhamentos", label: "Acompanhamentos" },
-  { key: "historico", label: "Histórico" },
+/** Na ordem do "Editar atividade" do Field Control. Orçamentos e Formulários com o ícone do menu. */
+const TABS: { key: TabKey; label: string; icon: LucideIcon }[] = [
+  { key: "geral", label: "Geral", icon: LayoutList },
+  { key: "prazos", label: "Prazos", icon: Timer },
+  { key: "localizacao", label: "Localização", icon: MapPin },
+  { key: "vinculos", label: "Vínculos", icon: Link2 },
+  { key: "orcamentos", label: "Orçamentos", icon: FileText },
+  { key: "pecas", label: "Peças e custos", icon: Package },
+  { key: "formularios", label: "Formulários", icon: ClipboardList },
+  { key: "anexos", label: "Anexos", icon: Paperclip },
+  { key: "acompanhamentos", label: "Acompanhamentos", icon: MessagesSquare },
+  { key: "historico", label: "Histórico", icon: History },
 ];
 
 /** Abas em que se muda algo ali mesmo (salva na hora); Localização, Vínculos e Histórico só mostram. */
@@ -109,6 +119,8 @@ function storeOf(ticket: TicketDetail): [number, number] | null {
  */
 function LocationTab({ ticket }: { ticket: TicketDetail }) {
   const events = useQuery(eventsQuery(ticket.id));
+  // "Corrigir no cadastro" leva a Locais: só para quem altera locais.
+  const canFixLocation = useCan("base.locations", "edit");
   const loc = ticket.location;
   const store = storeOf(ticket);
   const points = (events.data ?? [])
@@ -143,19 +155,19 @@ function LocationTab({ ticket }: { ticket: TicketDetail }) {
             loading="lazy"
           />
         ) : (
-          <div className="flex flex-col items-start gap-3 p-6 text-sm text-ink-muted">
-            <p>
-              {loc
-                ? "A loja não tem coordenadas no cadastro: sem elas não há mapa nem a distância do técnico até a loja."
-                : "OS sem loja: escolha a loja na aba Geral."}
-            </p>
-            {loc ? (
-              <Link href={`/locais/${loc.id}`} className={buttonClassName("secondary", "sm")}>
-                <MapPin className="size-3.5" />
-                Corrigir no cadastro do local
-              </Link>
-            ) : null}
-          </div>
+          <EmptyState
+            icon={<MapPinOff />}
+            title={loc ? "Loja sem coordenadas" : "OS sem loja"}
+            description={loc ? "Sem elas não há mapa nem a distância do técnico até a loja." : "Escolha a loja na aba Geral."}
+            action={
+              loc && canFixLocation ? (
+                <Link href={`/locais/${loc.id}`} className={buttonClassName("secondary", "sm")}>
+                  <MapPin className="size-3.5" />
+                  Corrigir no cadastro do local
+                </Link>
+              ) : null
+            }
+          />
         )}
       </Card>
       <div className="flex flex-col gap-3">
@@ -175,15 +187,23 @@ function LocationTab({ ticket }: { ticket: TicketDetail }) {
         <Card className="p-4">
           <SectionTitle className="mb-2">GPS do técnico</SectionTitle>
           {events.isLoading ? (
-            <div className="flex flex-col gap-2" role="status">
+            // O formato da lista de pontos (ícone, o que foi e quando), no lugar do "Carregando...".
+            <div className="flex flex-col gap-3" role="status">
               <span className="sr-only">Carregando os pontos de GPS...</span>
-              <Skeleton className="h-3.5 w-3/4" />
-              <Skeleton className="h-3 w-1/2" />
+              {[0, 1].map((i) => (
+                <div key={i} className="flex items-start gap-2" style={{ opacity: 1 - i * 0.25 }}>
+                  <Skeleton className="mt-0.5 size-3.5 shrink-0" style={{ borderRadius: 9999 }} />
+                  <div className="flex flex-1 flex-col gap-1.5">
+                    <Skeleton className="h-3.5 w-3/4" />
+                    <Skeleton className="h-3 w-1/2" />
+                  </div>
+                </div>
+              ))}
             </div>
           ) : events.error ? (
             <ErrorBox message={errorMessage(events.error)} onRetry={() => void events.refetch()} />
           ) : points.length === 0 ? (
-            <p className="text-sm text-ink-muted">Nenhum ponto registrado pelo app do técnico.</p>
+            <EmptyState size="sm" icon={<Navigation />} title="Nenhum ponto de GPS" description="O app do técnico marca a saída, o início e a conclusão." />
           ) : (
             <ul className="space-y-2.5 text-sm">
               {points.map((p) => (
@@ -218,16 +238,33 @@ function LocationTab({ ticket }: { ticket: TicketDetail }) {
 
 /** Ligações da OS: projeto, outras OS da loja (30 dias) e os dados de origem do Field Control. */
 function LinksTab({ ticket }: { ticket: TicketDetail }) {
+  // O projeto vira link só para quem abre Projetos (sem acesso, a tela seria "Sem acesso").
+  const canProjects = useCan("commercial.projects");
   const history = ticket.recurrence;
+  if (!ticket.project && !history?.previous.length && !ticket.legacy) {
+    return (
+      <Card>
+        <EmptyState
+          icon={<Link2 />}
+          title="Nenhum vínculo"
+          description="OS avulsa (o projeto se escolhe na aba Geral) e sem outras OS nesta loja nos últimos 30 dias."
+        />
+      </Card>
+    );
+  }
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <Card className="p-4">
         <SectionTitle>Projeto</SectionTitle>
-        {ticket.project ? (
+        {ticket.project && canProjects ? (
           <Link href={`/projetos/${ticket.project.id}`} className="mt-1 inline-flex items-center gap-1 text-sm font-semibold text-brand hover:underline">
             {ticket.project.code} · {ticket.project.name}
             <ExternalLink className="size-3.5" />
           </Link>
+        ) : ticket.project ? (
+          <p className="mt-1 text-sm font-semibold text-ink">
+            {ticket.project.code} · {ticket.project.name}
+          </p>
         ) : (
           <p className="mt-1 text-sm text-ink-muted">OS avulsa (sem projeto). Troque na aba Geral.</p>
         )}
@@ -539,6 +576,74 @@ const footerAction =
   "inline-flex h-9 min-w-9 items-center justify-center gap-1.5 rounded-lg px-2 text-ink-muted transition-colors hover:bg-surface-3 " +
   "hover:text-ink focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none disabled:pointer-events-none disabled:opacity-40";
 
+const FINISHED: TicketStatus[] = ["resolved", "closed", "cancelled"];
+
+/**
+ * Alerta da aba Prazos, contado ao vivo como o resumo do cabeçalho: vencido (SLA, chegada ou tempo na
+ * loja) em vermelho; em risco em âmbar. A situação que a API mandou vale também (ex.: resolvida fora do prazo).
+ */
+function deadlineAlert(t: TicketDetail, now: number): TicketTabAlert | null {
+  const due = nextDue(t);
+  const arrivalDue = !t.arrived_at && !FINISHED.includes(t.status) && t.arrival_due_at ? Date.parse(t.arrival_due_at) : null;
+  const onsiteDue = t.status === "in_progress" && t.onsite_due_at ? Date.parse(t.onsite_due_at) : null;
+  const late =
+    t.sla_status === "breached" ||
+    (due !== null && !t.sla_paused_at && Date.parse(due.at) < now) ||
+    t.arrival_status === "late" ||
+    (arrivalDue !== null && arrivalDue < now) ||
+    t.onsite_status === "over" ||
+    (onsiteDue !== null && onsiteDue < now);
+  if (late) return { tone: "danger", label: "prazo vencido" };
+  const risk =
+    t.sla_status === "at_risk" ||
+    t.arrival_status === "at_risk" ||
+    (arrivalDue !== null && arrivalDue - now <= 60 * 60_000) ||
+    t.onsite_status === "warning";
+  return risk ? { tone: "warning", label: "prazo em risco" } : null;
+}
+
+/** A barra de abas com o alerta de prazo ao vivo: só ela redesenha a cada 30 s (a Geral, não). */
+function EditorTabs({
+  ticket,
+  items,
+  value,
+  onChange,
+  idPrefix,
+}: {
+  ticket: TicketDetail;
+  items: TicketTabItem<TabKey>[];
+  value: TabKey;
+  onChange: (key: TabKey) => void;
+  idPrefix: string;
+}) {
+  const now = useNow(30_000);
+  const alert = deadlineAlert(ticket, now);
+  return (
+    <TicketTabs
+      items={alert ? items.map((item) => (item.key === "prazos" ? { ...item, alert } : item)) : items}
+      value={value}
+      onChange={onChange}
+      idPrefix={idPrefix}
+      ariaLabel="Seções da OS"
+    />
+  );
+}
+
+/**
+ * Leva ao campo da Geral pelo rótulo (o resumo do cabeçalho abre o Colaborador e a data): rola até ele e
+ * foca o campo. Na Geral só de leitura, só rola até o dado.
+ */
+function focusGeneralField(panel: HTMLElement | null, label: string) {
+  if (!panel) return;
+  const target = Array.from(panel.querySelectorAll<HTMLElement>("label, dt")).find(
+    (el) => (el.tagName === "LABEL" ? el.firstElementChild?.textContent : el.textContent)?.trim() === label,
+  );
+  if (!target) return;
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  target.scrollIntoView({ block: "center", behavior: reduce ? "auto" : "smooth" });
+  target.querySelector<HTMLElement>("input, select, textarea, button")?.focus({ preventScroll: true });
+}
+
 /**
  * A OS no formato do "Editar atividade" do Field Control: cabeçalho, abas e rodapé com Salvar e as
  * ações. Tudo editável pela central a qualquer momento, aberta ou fechada.
@@ -563,6 +668,10 @@ export function TicketEditor({
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   const [tab, setTab] = useState<TabKey>("geral");
+  // Já trocou de aba: a Geral passa a entrar com a mesma animação das outras ao voltar (não ao abrir a OS).
+  const [switched, setSwitched] = useState(false);
+  // Conteúdo rolado: a borda das abas vira sombra (> 4 px) e, no celular, o resumo do cabeçalho recolhe (> 24 px).
+  const [scroll, setScroll] = useState({ shadow: false, collapsed: false });
   const [saveState, setSaveState] = useState<SaveState>({ dirty: false, pending: false, conflict: false });
   const onSaveState = useCallback((state: SaveState) => setSaveState(state), []);
   const [transition, setTransition] = useState<TicketStatus | null>(null);
@@ -596,6 +705,12 @@ export function TicketEditor({
     onDirtyChange?.(dirty);
   }, [dirty, onDirtyChange]);
 
+  // Perfil de acesso: a aba Orçamentos e os blocos de pagamento e de custos seguem as telas do Comercial
+  // (a API também esvazia o que a pessoa não vê).
+  const canQuotes = useCan("commercial.quotes");
+  const canPayouts = useCan("commercial.payouts");
+  const canExpenses = useCan("commercial.expenses");
+
   // Contadores das abas, como o "Anexos (6)" do Field Control (a consulta já adianta a aba).
   const attachments = useTicketAttachments(ticket.id);
   const comments = useQuery({
@@ -605,38 +720,73 @@ export function TicketEditor({
   const quotes = useQuery({
     queryKey: ["ticket", ticket.id, "quotes"],
     queryFn: () => api.get<Quote[]>(`/tickets/${ticket.id}/quotes`),
+    enabled: canQuotes,
   });
-  const pendingForms = ticket.forms.filter((f) => f.required && f.status !== "completed").length;
+  // Obrigatório pendente vira alerta (na OS cancelada, não trava mais nada).
+  const pendingForms =
+    ticket.status === "cancelled" ? 0 : ticket.forms.filter((f) => f.required && f.status !== "completed").length;
+  const openParts = (ticket.part_requests ?? []).filter((p) => p.status === "open").length;
   const counts: Partial<Record<TabKey, number>> = {
     orcamentos: quotes.data?.length,
-    pecas: (ticket.part_requests?.length ?? 0) + ticket.expenses.length,
-    formularios: ticket.forms.length,
+    // Só o que aparece na aba: pedidos de peça sempre; custos com acesso a Custos extras.
+    pecas: (ticket.part_requests?.length ?? 0) + (canExpenses ? ticket.expenses.length : 0),
+    formularios: pendingForms || ticket.forms.length,
     anexos: attachments.data?.length,
     acompanhamentos: comments.data?.length,
   };
-  const tabs: TabItem<TabKey>[] = TABS.map((t) => ({
-    key: t.key,
-    label:
-      t.key === "formularios" && pendingForms ? (
-        <>
-          {t.label}
-          <span className="sr-only">
-            , {pendingForms} {pendingForms === 1 ? "obrigatório pendente" : "obrigatórios pendentes"}
-          </span>
-        </>
-      ) : (
-        t.label
-      ),
+  const alerts: Partial<Record<TabKey, TicketTabAlert>> = {
+    // O contador passa a ser o de pendentes: "Formulários 2, obrigatórios pendentes".
+    formularios: pendingForms
+      ? { tone: "warning", label: pendingForms === 1 ? "obrigatório pendente" : "obrigatórios pendentes" }
+      : undefined,
+    pecas: openParts
+      ? { tone: "warning", label: openParts === 1 ? "pedido de peça aberto" : `${openParts} pedidos de peça abertos` }
+      : undefined,
+  };
+  const tabs: TicketTabItem<TabKey>[] = TABS.filter((t) => t.key !== "orcamentos" || canQuotes).map((t) => ({
+    ...t,
     count: counts[t.key] || null,
+    alert: alerts[t.key] ?? null,
   }));
+  // O acesso mudou com a OS aberta e a aba aberta sumiu: volta para a Geral.
+  if (!tabs.some((t) => t.key === tab)) setTab("geral");
 
   const changeTab = (next: TabKey) => {
     if (tab === "geral" && scroller.current) generalTop.current = scroller.current.scrollTop;
+    setSwitched(true);
     setTab(next);
   };
   useLayoutEffect(() => {
     if (scroller.current) scroller.current.scrollTop = tab === "geral" ? generalTop.current : 0;
   }, [tab]);
+
+  // Abas e resumo do cabeçalho conforme a rolagem do conteúdo (ouvinte passivo, lido uma vez por quadro).
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    let frame = 0;
+    const read = () => {
+      frame = 0;
+      const top = el.scrollTop;
+      setScroll((prev) =>
+        prev.shadow === top > 4 && prev.collapsed === top > 24 ? prev : { shadow: top > 4, collapsed: top > 24 },
+      );
+    };
+    const onScroll = () => {
+      if (!frame) frame = requestAnimationFrame(read);
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      cancelAnimationFrame(frame);
+    };
+  }, []);
+
+  // O resumo do cabeçalho leva à aba (e, na Geral, ao campo): Prazos, Localização, Colaborador, data.
+  const jump = (next: HeaderJump, field?: string) => {
+    if (next !== tab) flushSync(() => changeTab(next));
+    if (field) focusGeneralField(document.getElementById(`${tabsId}-panel-geral`), field);
+  };
 
   // Salvar de outra aba: volta para a Geral antes (os erros aparecem nos campos) e envia o formulário.
   const saveGeneral = () => {
@@ -661,8 +811,6 @@ export function TicketEditor({
     return () => window.removeEventListener("keydown", listener);
   }, []);
 
-  // Na página a OS é o título principal; no painel lateral, o título do diálogo.
-  const Heading = variant === "page" ? "h1" : "h2";
   const saveLabel = saveState.conflict ? (
     "Salvar mesmo assim"
   ) : tab === "geral" ? (
@@ -684,65 +832,38 @@ export function TicketEditor({
         variant === "dialog" ? "h-full" : "h-[calc(100dvh-8rem)] min-h-[32rem] rounded-2xl border border-line shadow-elev-2",
       )}
     >
-      {/* Azul forte no escuro: o branco fica em 5,2:1 (no brand, 4,1:1). Texto no mínimo white/90 e, no escuro, hover do link mais
-          leve (o sublinhado é que marca o hover): tudo acima de 4,5:1. Foco em branco: o anel padrão é azul e sumiria aqui. */}
-      <div className="flex items-center gap-3 bg-brand px-5 py-3 text-white dark:bg-brand-strong">
-        {variant === "page" ? (
-          <Link
-            href="/chamados"
-            className="rounded-md p-1 text-white/80 hover:bg-white/10 hover:text-white focus-visible:outline-white"
-            aria-label="Voltar para Chamados"
-          >
-            <ArrowLeft className="size-4" />
-          </Link>
-        ) : (
-          <SquarePen aria-hidden className="size-4 shrink-0 text-white/80" />
+      <TicketHeader
+        ticket={ticket}
+        variant={variant}
+        dirty={dirty}
+        reopenable={reopenable}
+        collapsed={scroll.collapsed}
+        onTransition={setTransition}
+        onClose={onClose}
+        onJump={jump}
+      />
+
+      {/* As abas ficam fora da área que rola (sempre à vista); com o conteúdo rolado, a borda vira sombra. */}
+      <div
+        className={clsx(
+          "relative z-20 shrink-0 border-b border-line bg-surface px-3 transition-shadow duration-150",
+          scroll.shadow && "shadow-scroll",
         )}
-        <Heading className="min-w-0 flex-1 truncate text-[15px] font-bold tracking-[-0.01em]" title={`${ticket.code} · ${ticket.title}`}>
-          <span className="font-mono">{ticket.code}</span>
-          <span className="ml-2 font-normal text-white/90">{ticket.title}</span>
-        </Heading>
-        {reopenable && !dirty ? (
-          <button
-            type="button"
-            onClick={() => setTransition("reopened")}
-            className="hidden h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs font-semibold text-white ring-1 ring-white/40 ring-inset transition-colors hover:bg-white/10 focus-visible:outline-white sm:inline-flex"
-          >
-            <RotateCcw aria-hidden className="size-3.5" />
-            Reabrir
-          </button>
-        ) : null}
-        <div className="shrink-0">
-          <StatusMenu status={ticket.status} targets={ticket.allowed_transitions} locked={dirty} onPick={setTransition} />
-        </div>
-        {variant === "dialog" ? (
-          <>
-            <Link
-              href={`/chamados/${ticket.id}`}
-              className="hidden shrink-0 rounded-md px-2 py-1 text-xs font-medium text-white hover:bg-white/10 hover:underline focus-visible:outline-white sm:inline-flex dark:hover:bg-white/5"
-            >
-              Abrir em página
-            </Link>
-            <button
-              type="button"
-              onClick={onClose}
-              className="shrink-0 rounded-md p-1 text-white/85 hover:bg-white/10 hover:text-white focus-visible:outline-white"
-              aria-label="Fechar"
-            >
-              <X className="size-5" />
-            </button>
-          </>
-        ) : null}
+      >
+        <EditorTabs ticket={ticket} items={tabs} value={tab} onChange={changeTab} idPrefix={tabsId} />
       </div>
 
-      <div className="border-b border-line px-3">
-        <Tabs items={tabs} value={tab} onChange={changeTab} ariaLabel="Seções da OS" idPrefix={tabsId} />
-      </div>
-
-      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto bg-[var(--canvas,transparent)] px-5 py-5">
+      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto bg-[var(--canvas,transparent)] px-4 py-5 sm:px-5">
         <StatusNotice ticket={ticket} />
-        {/* A Geral fica montada (escondida) nas outras abas: o que se digitou não se perde ao trocar de aba. */}
-        <div role="tabpanel" id={`${tabsId}-panel-geral`} aria-labelledby={`${tabsId}-tab-geral`} hidden={tab !== "geral"}>
+        {/* A Geral fica montada (escondida) nas outras abas: o que se digitou não se perde ao trocar de aba.
+            Ao voltar para ela, a animação de entrada recomeça (o hidden a desliga). */}
+        <div
+          role="tabpanel"
+          id={`${tabsId}-panel-geral`}
+          aria-labelledby={`${tabsId}-tab-geral`}
+          hidden={tab !== "geral"}
+          className={switched ? "animate-enter" : undefined}
+        >
           <ReportStrip ticket={ticket} />
           {editable ? (
             <GeneralTab ticket={ticket} formId={formId} onSaveState={onSaveState} onTransition={setTransition} />
@@ -751,16 +872,16 @@ export function TicketEditor({
           )}
         </div>
         {tab !== "geral" ? (
-          <div role="tabpanel" id={`${tabsId}-panel-${tab}`} aria-labelledby={`${tabsId}-tab-${tab}`}>
+          <div key={tab} role="tabpanel" id={`${tabsId}-panel-${tab}`} aria-labelledby={`${tabsId}-tab-${tab}`} className="animate-enter">
             {tab === "prazos" ? <DeadlinesTab ticket={ticket} onFixTimes={() => setTimesOpen(true)} /> : null}
             {tab === "localizacao" ? <LocationTab ticket={ticket} /> : null}
             {tab === "vinculos" ? <LinksTab ticket={ticket} /> : null}
-            {tab === "orcamentos" ? <QuotesCard ticket={ticket} /> : null}
+            {tab === "orcamentos" && canQuotes ? <QuotesCard ticket={ticket} /> : null}
             {tab === "pecas" ? (
               <div className="flex flex-col gap-4">
                 <PartRequestsCard ticket={ticket} />
-                <PayoutsCard ticket={ticket} />
-                <ExpensesCard ticket={ticket} />
+                {canPayouts ? <PayoutsCard ticket={ticket} /> : null}
+                {canExpenses ? <ExpensesCard ticket={ticket} /> : null}
               </div>
             ) : null}
             {tab === "formularios" ? <FormsCard ticket={ticket} /> : null}

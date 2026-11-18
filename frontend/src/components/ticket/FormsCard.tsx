@@ -8,7 +8,22 @@ import { useId, useState } from "react";
 import { useConfirm } from "@/components/Confirm";
 import { FILE_KIND_LABEL, fileKind, formAnchor } from "@/components/report/shared";
 import { useToast } from "@/components/Toaster";
-import { Button, buttonClassName, Card, CardHeader, Checkbox, Dialog, ErrorBox, Field, Input, Pill, Select, Textarea } from "@/components/ui";
+import {
+  Button,
+  buttonClassName,
+  Card,
+  CardHeader,
+  Checkbox,
+  Dialog,
+  EmptyState,
+  ErrorBox,
+  Field,
+  Input,
+  Pill,
+  Select,
+  Skeleton,
+  Textarea,
+} from "@/components/ui";
 import { absoluteApiUrl, api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { canManageTickets } from "@/lib/constants";
@@ -137,7 +152,9 @@ export function FormsCard({ ticket }: { ticket: TicketDetail }) {
       />
       <ul className="divide-y divide-line">
         {ticket.forms.length === 0 ? (
-          <li className="px-4 py-4 text-sm text-ink-muted">Nenhum formulário nesta OS.</li>
+          <li>
+            <EmptyState size="sm" icon={<ClipboardList />} title="Nenhum formulário nesta OS" />
+          </li>
         ) : (
           ticket.forms.map((form) => {
             const photos = photosOf(form.id);
@@ -150,11 +167,19 @@ export function FormsCard({ ticket }: { ticket: TicketDetail }) {
               <li key={form.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
                 <ClipboardList className="size-4 shrink-0 text-ink-muted" />
                 <button type="button" onClick={() => setOpenId(form.id)} className="group min-w-0 flex-1 text-left">
-                  <span className="block truncate text-sm font-semibold text-ink group-hover:text-brand">{form.name}</span>
-                  <span className="text-xs text-ink-muted">
-                    {done}/{qs.length} respondidas · {photos.length} {photos.length === 1 ? "foto" : "fotos"}
-                    {form.completed_by ? ` · concluído por ${form.completed_by.name} em ${formatDateTime(form.completed_at)}` : ""}
+                  <span className="block truncate text-sm font-semibold text-ink transition-colors duration-150 group-hover:text-brand">
+                    {form.name}
                   </span>
+                  {/* Respondidas e fotos dependem dos anexos: enquanto chegam, o formato da linha (sem "0 fotos" falso). */}
+                  {attachments.isLoading ? (
+                    // Dentro do botão, um span (o Skeleton é div).
+                    <span aria-hidden className="skeleton mt-1 block h-3 w-48 max-w-full" />
+                  ) : (
+                    <span className="text-xs text-ink-muted">
+                      {done}/{qs.length} respondidas · {photos.length} {photos.length === 1 ? "foto" : "fotos"}
+                      {form.completed_by ? ` · concluído por ${form.completed_by.name} em ${formatDateTime(form.completed_at)}` : ""}
+                    </span>
+                  )}
                 </button>
                 <Pill color={status.color}>{status.label}</Pill>
                 {canRequire ? (
@@ -207,7 +232,9 @@ export function FormsCard({ ticket }: { ticket: TicketDetail }) {
         <FileSignature className="size-4 shrink-0 text-ink-muted" />
         {ticket.signed_at ? (
           <div className="flex min-w-0 flex-1 items-center gap-3">
-            {signature?.download_url ? (
+            {attachments.isLoading ? (
+              <Skeleton className="h-12 w-28 shrink-0" />
+            ) : signature?.download_url ? (
               <AttachmentImage
                 attachment={signature}
                 alt={`Assinatura de ${ticket.signer_name ?? "responsável"}`}

@@ -2,12 +2,13 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { SquarePen, X } from "lucide-react";
+import { Lock, SquarePen, X } from "lucide-react";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Button, ErrorBox, isTopLayer, lockScroll, restoreFocus, Skeleton, trapTab } from "@/components/ui";
+import { Button, EmptyState, ErrorBox, isTopLayer, lockScroll, restoreFocus, Skeleton, trapTab } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { STATUS } from "@/lib/constants";
+import { ACCESS_ITEM, forbiddenCode, forbiddenItem } from "@/lib/permissions";
 import type { TicketDetail, TicketStatus, UUID } from "@/lib/types";
 import { StatusChip } from "./StatusMenu";
 import { TicketEditor } from "./TicketEditor";
@@ -43,13 +44,13 @@ function findPreview(data: unknown, id: string, depth = 0): Preview | null {
 /** Barra azul do painel enquanto a OS não abre (carregando ou com erro): sempre com o Fechar. */
 function PanelBar({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-3 bg-brand px-5 py-3 text-white dark:bg-brand-strong">
+    <div className="flex h-12 shrink-0 items-center gap-2.5 bg-brand px-4 text-white sm:gap-3 sm:px-5 dark:bg-brand-strong">
       <SquarePen aria-hidden className="size-4 shrink-0 text-white/80" />
       <div className="flex min-w-0 flex-1 items-center gap-3">{children}</div>
       <button
         type="button"
         onClick={onClose}
-        className="shrink-0 rounded-md p-1 text-white/85 hover:bg-white/10 hover:text-white focus-visible:outline-white"
+        className="-mr-1 shrink-0 rounded-md p-1 text-white/85 transition-colors duration-150 hover:bg-white/10 hover:text-white focus-visible:outline-white"
         aria-label="Fechar"
       >
         <X className="size-5" />
@@ -57,6 +58,10 @@ function PanelBar({ onClose, children }: { onClose: () => void; children: React.
     </div>
   );
 }
+
+/** Larguras do resumo (prioridade, SLA, técnico, cliente e loja) e das 6 abas que cabem no painel. */
+const SKELETON_CHIPS = [64, 112, 96, 128];
+const SKELETON_TABS = [40, 48, 70, 54, 68, 92];
 
 /**
  * Campos da Geral na ordem da abertura: cliente e localização, tipo de OS, escopo, data, hora e duração,
@@ -74,7 +79,10 @@ const SKELETON_FIELDS: { span: string; tall?: boolean }[] = [
   { span: "col-span-12 @xl:col-span-6" },
 ];
 
-/** O formato do editor enquanto a OS carrega (cabeçalho, abas, campos e rodapé): nada pula quando ela chega. */
+/**
+ * O formato do editor enquanto a OS carrega (cabeçalho em duas linhas, abas com o "Mais", campos e
+ * rodapé): nada pula quando ela chega.
+ */
 function EditorSkeleton({ preview, onClose }: { preview: Preview | null; onClose: () => void }) {
   return (
     <div role="status" aria-live="polite" className="flex h-full flex-col">
@@ -92,12 +100,24 @@ function EditorSkeleton({ preview, onClose }: { preview: Preview | null; onClose
           <span aria-hidden className="h-4 w-56 max-w-full rounded bg-white/20" />
         )}
       </PanelBar>
-      <div aria-hidden className="flex gap-5 overflow-hidden border-b border-line px-6 pt-3.5 pb-3">
-        {[44, 52, 74, 58, 72, 96, 82].map((width, i) => (
-          <Skeleton key={i} className="h-3.5 shrink-0" style={{ width }} />
+      {/* O resumo da OS: os chips do cabeçalho (no celular, os três primeiros). */}
+      <div aria-hidden className="flex shrink-0 gap-1.5 overflow-hidden border-t border-white/15 bg-brand px-4 py-2 sm:px-5 dark:bg-brand-strong">
+        {SKELETON_CHIPS.map((width, i) => (
+          <span key={i} className={clsx("h-6 shrink-0 rounded-full bg-white/20", i === 3 && "max-sm:hidden")} style={{ width }} />
         ))}
       </div>
-      <div aria-hidden className="@container min-h-0 flex-1 overflow-hidden bg-[var(--canvas,transparent)] px-5 py-5">
+      {/* As abas: ícone e rótulo (no celular, só o ícone depois da primeira) e a pílula do "Mais". */}
+      <div aria-hidden className="flex h-10 shrink-0 items-center gap-1 overflow-hidden border-b border-line px-3">
+        {SKELETON_TABS.map((width, i) => (
+          <span key={i} className="flex shrink-0 items-center gap-1.5 px-2.5">
+            <Skeleton className="size-4 rounded" />
+            <Skeleton className={clsx("h-3", i > 0 && "max-sm:hidden")} style={{ width }} />
+          </span>
+        ))}
+        {/* Raio no style: o .skeleton do globals.css (fora das camadas) ganha das classes rounded-*. */}
+        <Skeleton className="ml-1.5 h-6 w-16 shrink-0" style={{ borderRadius: 9999 }} />
+      </div>
+      <div aria-hidden className="@container min-h-0 flex-1 overflow-hidden bg-[var(--canvas,transparent)] px-4 py-5 sm:px-5">
         {/* A faixa do relatório do cliente, no topo da Geral. */}
         <div className="mb-4 flex items-center gap-3 rounded-xl border border-line bg-surface px-4 py-2.5 shadow-elev-1">
           <Skeleton className="size-4 shrink-0 rounded" />
@@ -131,6 +151,35 @@ function EditorSkeleton({ preview, onClose }: { preview: Preview | null; onClose
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Sem acesso à OS (403 da API): de outra fila (QUEUE_FORBIDDEN) ou de uma tela fora do perfil
+ * (MODULE_FORBIDDEN). Neutro, sem vermelho, e só o Fechar: tentar de novo não muda a resposta.
+ */
+function Forbidden({ error, preview, onClose }: { error: unknown; preview: Preview | null; onClose: () => void }) {
+  const item = forbiddenItem(error);
+  const title =
+    forbiddenCode(error) === "QUEUE_FORBIDDEN" ? "OS de outra fila" : item ? `Sem acesso a ${ACCESS_ITEM[item].label}` : "Sem acesso";
+  return (
+    <>
+      <PanelBar onClose={onClose}>
+        <p className="min-w-0 flex-1 truncate font-mono text-[15px] font-bold tracking-[-0.01em]">{preview ? preview.code : "OS"}</p>
+      </PanelBar>
+      <div className="flex flex-1 items-center justify-center p-6">
+        <EmptyState
+          icon={<Lock />}
+          title={title}
+          description={errorMessage(error)}
+          action={
+            <Button variant="primary" onClick={onClose}>
+              Fechar
+            </Button>
+          }
+        />
+      </div>
+    </>
   );
 }
 
@@ -224,6 +273,8 @@ export function TicketEditorDialog({
             onClose={onClose}
             onDirtyChange={onDirtyChange}
           />
+        ) : ticket.error && forbiddenCode(ticket.error) ? (
+          <Forbidden error={ticket.error} preview={preview} onClose={onClose} />
         ) : ticket.error ? (
           <>
             {/* Com erro também há como fechar: no celular o painel cobre tudo. */}

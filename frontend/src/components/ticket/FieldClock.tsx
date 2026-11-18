@@ -4,7 +4,7 @@ import clsx from "clsx";
 import { Clock3, Hourglass, MapPinCheck, RotateCcw } from "lucide-react";
 import { useNow } from "@/components/useNow";
 import { formatMinutes, formatTime } from "@/lib/format";
-import type { TicketListItem } from "@/lib/types";
+import type { TicketDetail, TicketListItem } from "@/lib/types";
 
 type Clockable = Pick<
   TicketListItem,
@@ -12,6 +12,60 @@ type Clockable = Pick<
 >;
 
 const minutesBetween = (a: number, b: number) => Math.round((b - a) / 60_000);
+
+/** O relógio de campo numa linha (variante compacta do cabeçalho da OS). */
+export interface FieldClockSummary {
+  /** "route": a caminho da loja; "store": em atendimento na loja. */
+  kind: "route" | "store";
+  text: string;
+  /** Cor só no aviso (âmbar) e no estouro (vermelho). */
+  tone: "neutral" | "warning" | "danger";
+  title: string;
+}
+
+/**
+ * Variante compacta do relógio de campo, só com a OS em campo (a caminho ou em atendimento):
+ * "A caminho · chegar até 14:35" e "Na loja há 1h 10min · limite 4h". A saída para o local não vem na
+ * OS (está no histórico), então a caminho conta o prazo de chegada. Na loja, o tempo é o da visita em
+ * curso e o limite é o que ela pode durar (o que sobrou das horas do chamado).
+ */
+export function fieldClockSummary(
+  ticket: Clockable & Partial<Pick<TicketDetail, "work_started_at">>,
+  now: number,
+): FieldClockSummary | null {
+  if (ticket.status === "en_route") {
+    if (ticket.arrived_at || !ticket.arrival_due_at) {
+      return { kind: "route", tone: "neutral", text: "A caminho", title: "Técnico a caminho do local" };
+    }
+    const left = minutesBetween(now, new Date(ticket.arrival_due_at).getTime());
+    const title = `Prazo de chegada à loja: ${formatTime(ticket.arrival_due_at)}`;
+    if (left < 0) return { kind: "route", tone: "danger", text: `A caminho · chegada atrasada ${formatMinutes(-left)}`, title };
+    const risk = ticket.arrival_status === "at_risk" || left <= 60;
+    return {
+      kind: "route",
+      tone: risk ? "warning" : "neutral",
+      text: `A caminho · chegar até ${formatTime(ticket.arrival_due_at)}`,
+      title,
+    };
+  }
+  if (ticket.status !== "in_progress") return null;
+  const since = ticket.work_started_at ?? ticket.arrived_at;
+  if (!since) return { kind: "store", tone: "neutral", text: "Em atendimento", title: "Técnico em atendimento na loja" };
+  const start = new Date(since).getTime();
+  const due = ticket.onsite_due_at ? new Date(ticket.onsite_due_at).getTime() : null;
+  const elapsed = Math.max(0, minutesBetween(start, now));
+  const limit = due !== null ? Math.max(0, minutesBetween(start, due)) : null;
+  const over = (due !== null && now > due) || ticket.onsite_status === "over";
+  const warning = !over && ticket.onsite_status === "warning";
+  return {
+    kind: "store",
+    tone: over ? "danger" : warning ? "warning" : "neutral",
+    text: `Na loja há ${formatMinutes(elapsed)}${limit !== null ? ` · limite ${formatMinutes(limit)}` : ""}`,
+    title: ticket.onsite_due_at
+      ? `Tempo do técnico na loja: limite às ${formatTime(ticket.onsite_due_at)}`
+      : "Tempo do técnico na loja nesta visita",
+  };
+}
 
 /** Prazo de chegada à loja (4h nas capitais): "Chegar até 14:35 · faltam 52 min" ou "Chegou 13:42 · no prazo". */
 export function ArrivalChip({ ticket, compact = false }: { ticket: Clockable; compact?: boolean }) {

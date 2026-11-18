@@ -29,7 +29,7 @@ import {
   Wallet,
 } from "lucide-react";
 import { StatusBadge } from "@/components/badges";
-import { EmptyState, ErrorBox, LoadingBlock } from "@/components/ui";
+import { EmptyState, ErrorBox, Skeleton } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { EVENT_TYPE, LEVEL, PRIORITY, RESPONSIBILITY, STATUS, TICKET_TYPE } from "@/lib/constants";
 import { formatDateTime, formatMinutes, formatMoney } from "@/lib/format";
@@ -368,6 +368,24 @@ function Detail({ event }: { event: TicketEvent }) {
   return null;
 }
 
+/** O formato da linha do tempo enquanto carrega: o traço, os ícones e as linhas de cada evento. */
+function HistorySkeleton() {
+  return (
+    <div role="status">
+      <span className="sr-only">Carregando o histórico...</span>
+      <ol aria-hidden className="relative ml-3 border-l border-line">
+        {[64, 48, 56].map((width, i) => (
+          <li key={i} className="mb-5 ml-5 last:mb-0" style={{ opacity: 1 - i * 0.22 }}>
+            <Skeleton className="absolute -left-3 size-6 border border-line" style={{ borderRadius: 9999 }} />
+            <Skeleton className="h-3.5" style={{ width: `${width}%` }} />
+            <Skeleton className="mt-1.5 h-2.5 w-28" />
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 /**
  * Linha do tempo da OS. O ponto de GPS só aparece quando foi o técnico que registrou no app (é a
  * prova de presença); com a loja no mapa, diz a que distância ele estava, como no Field Control.
@@ -378,10 +396,10 @@ export function HistoryTab({ ticketId, store = null }: { ticketId: UUID; store?:
     queryFn: () => api.get<TicketEvent[]>(`/tickets/${ticketId}/events`),
   });
 
-  if (events.isLoading) return <LoadingBlock />;
+  if (events.isLoading) return <HistorySkeleton />;
   if (events.error) return <ErrorBox message={errorMessage(events.error)} onRetry={() => void events.refetch()} />;
   const items = [...(events.data ?? [])].sort((a, b) => b.created_at.localeCompare(a.created_at));
-  if (items.length === 0) return <EmptyState icon={<History className="size-7" />} title="Sem eventos registrados" />;
+  if (items.length === 0) return <EmptyState icon={<History />} title="Sem eventos registrados" />;
 
   return (
     <ol className="relative ml-3 border-l border-line">

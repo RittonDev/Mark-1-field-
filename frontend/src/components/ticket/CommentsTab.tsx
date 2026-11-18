@@ -1,15 +1,37 @@
 "use client";
 
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Info, Lock, MessageSquare, Send } from "lucide-react";
+import { Info, Lock, MessagesSquare, Send } from "lucide-react";
 import { useState } from "react";
-import { Button, EmptyState, ErrorBox, Kbd, LoadingBlock, Textarea } from "@/components/ui";
+import { Button, EmptyState, ErrorBox, Kbd, Skeleton, Textarea } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { formatDateTime, initials } from "@/lib/format";
 import type { Comment, UUID } from "@/lib/types";
 import { useInvalidateTicket, useTicketErrorHandler } from "./useConflictHandler";
 
 const MAX_BODY = 10000;
+
+/** O formato da lista enquanto carrega: cartões com autor, data e o texto. */
+function CommentsSkeleton() {
+  return (
+    <div role="status" className="flex flex-col gap-3">
+      <span className="sr-only">Carregando os acompanhamentos...</span>
+      {[72, 48].map((width, i) => (
+        <div key={i} aria-hidden className="rounded-lg border border-line bg-surface p-3" style={{ opacity: 1 - i * 0.3 }}>
+          <div className="mb-2.5 flex items-center gap-2">
+            <Skeleton className="size-6 shrink-0" style={{ borderRadius: 9999 }} />
+            <Skeleton className="h-3 w-28" />
+            <Skeleton className="ml-auto h-2.5 w-24" />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Skeleton className="h-3" style={{ width: `${width + 20}%` }} />
+            <Skeleton className="h-3" style={{ width: `${width}%` }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 /**
  * Acompanhamentos da OS: o registro da central. Ninguém de fora vê (o técnico e o cliente falam com
@@ -42,11 +64,11 @@ export function CommentsTab({ ticketId }: { ticketId: UUID }) {
   return (
     <div className="flex flex-col gap-4">
       {comments.isLoading ? (
-        <LoadingBlock />
+        <CommentsSkeleton />
       ) : comments.error ? (
         <ErrorBox message={errorMessage(comments.error)} onRetry={() => void comments.refetch()} />
       ) : items.length === 0 ? (
-        <EmptyState icon={<MessageSquare className="size-7" />} title="Nenhum acompanhamento ainda" />
+        <EmptyState icon={<MessagesSquare />} title="Nenhum acompanhamento ainda" />
       ) : (
         <ul className="flex flex-col gap-3">
           {items.map((c) => (

@@ -8,15 +8,16 @@ import { STATUS, STATUS_ORDER } from "@/lib/constants";
 import type { TicketStatus } from "@/lib/types";
 
 /**
- * Situação da OS na barra azul do editor: pílula com o ponto na cor do status. O fundo é só um véu
- * (o branco fica acima de 4,5:1 no azul do claro e no azul forte do escuro); o hover mexe no contorno.
+ * Situação da OS na barra azul do editor: pílula com o ponto na cor do status, da altura do "Reabrir".
+ * O fundo é só um véu (o branco fica acima de 4,5:1 no azul do claro e no azul forte do escuro); o hover
+ * mexe no contorno.
  */
 export function StatusChip({ status, className, children }: { status: TicketStatus; className?: string; children?: React.ReactNode }) {
   const info = STATUS[status];
   return (
     <span
       className={clsx(
-        "inline-flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap text-white ring-1 ring-white/30 ring-inset dark:bg-white/5",
+        "inline-flex h-7 items-center gap-1.5 rounded-full bg-white/10 px-2.5 text-xs font-semibold whitespace-nowrap text-white ring-1 ring-white/30 ring-inset dark:bg-white/5",
         className,
       )}
     >
@@ -103,7 +104,7 @@ export function StatusMenu({
         aria-label={`Situação: ${STATUS[status].label}. Mudar a situação`}
         className="group rounded-full focus-visible:outline-white"
       >
-        <StatusChip status={status} className="pr-1.5 transition-shadow group-hover:ring-white/70">
+        <StatusChip status={status} className="pr-1.5 transition-[background-color,box-shadow] duration-150 group-hover:bg-white/[0.16] group-hover:ring-white/70">
           <ChevronDown className={clsx("size-3.5 text-white/85 transition-transform duration-150", open && "rotate-180")} aria-hidden />
         </StatusChip>
       </button>
@@ -114,7 +115,7 @@ export function StatusMenu({
           tabIndex={-1}
           aria-label="Mudar a situação da OS"
           onKeyDown={onMenuKey}
-          className="absolute top-full right-0 z-30 mt-2 w-64 animate-pop overflow-hidden rounded-xl border border-line bg-surface py-1.5 text-ink shadow-pop outline-none"
+          className="absolute top-full right-0 z-30 mt-2 w-64 animate-enter overflow-hidden rounded-xl border border-line bg-surface py-1.5 text-ink shadow-pop outline-none"
         >
           <p className="px-4 pt-1 pb-1.5 text-[11px] font-bold tracking-[0.06em] text-ink-muted uppercase">Mudar a situação</p>
           {locked ? (
