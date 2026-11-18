@@ -141,8 +141,13 @@ function TicketsView() {
     writeListParams({ page: Math.ceil(data.total / pageSize), view }, { keepPage: true });
   }, [data, query.isPlaceholderData, page, pageSize, view]);
 
-  /** Troca filtros. A aba de agora fica escrita na URL: um filtro novo nunca muda a aba sozinho. */
-  const update = (patch: Partial<Filters>) => writeListParams({ ...patch, view });
+  /**
+   * Troca filtros. A aba de agora fica escrita na URL: um filtro novo não muda a aba sozinho, menos a
+   * Resolução: OS resolvida não está em aberto, então ela leva para "Todas" (nas abas de abertas a lista
+   * ficaria vazia).
+   */
+  const update = (patch: Partial<Filters>) =>
+    writeListParams({ ...patch, view: patch.resolved_from || patch.resolved_to ? "todas" : view });
   const chooseView = (next: View) => {
     // As abas de OS em aberto não mostram status finais: eles saem do filtro.
     writeListParams({ view: next, status: next === "todas" ? filters.status : filters.status.filter(isOpenStatus) });

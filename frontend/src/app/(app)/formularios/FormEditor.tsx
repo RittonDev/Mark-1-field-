@@ -155,6 +155,8 @@ export function FormEditor({
     // O erro aparece no topo: quem salvou pela barra do rodapé é levado até ele (e o leitor de tela também).
     onError: async (e) => {
       if (e instanceof ApiError && e.status === 409 && draft.id) {
+        // A lista relê agora: quem voltar, descartar e abrir de novo já vê a versão da outra pessoa.
+        invalidateForms(queryClient);
         const overwrite = await confirm({
           title: "Outra pessoa salvou este formulário",
           description:

@@ -149,7 +149,9 @@ export function buildLists(tickets: LocalTicket[], user: User, now: Date = new D
 /** A OS ocupa o dia pela agenda (início/fim da visita)? Canceladas saem dos dias de hoje em diante. */
 function scheduledOn(ticket: LocalTicket, dayStart: number, dayEnd: number, todayStart: number): boolean {
   if (!ticket.scheduled_start) return false;
-  if (ticket.status === "cancelled" && dayStart >= todayStart) return false;
+  // Cancelada ou esperando a central marcar a visita nova (a agenda que sobrou é da visita improdutiva):
+  // de hoje em diante não ocupa o dia, como na aba Hoje. Nos dias passados a visita que houve continua.
+  if ((ticket.status === "cancelled" || awaitingReschedule(ticket)) && dayStart >= todayStart) return false;
   const s = new Date(ticket.scheduled_start).getTime();
   const e = ticket.scheduled_end ? new Date(ticket.scheduled_end).getTime() : s;
   return s < dayEnd && e >= dayStart;

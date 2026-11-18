@@ -604,7 +604,13 @@ function DailyView({
             scoped={Boolean(scope)}
             range={range}
           />
-          <Panels data={data} period="no dia" scoped={Boolean(scope)} range={range} resolved={`resolved_from=${day}&resolved_to=${day}`} />
+          <Panels
+            data={data}
+            period="no dia"
+            scoped={Boolean(scope)}
+            range={range}
+            resolved={`resolved_from=${day}&resolved_to=${day}${scope ? `&customer_id=${scope.id}` : ""}`}
+          />
         </div>
       ) : report.isLoading ? (
         <LoadingBlock />
@@ -816,7 +822,7 @@ function MonthlyView({
             period="no mês"
             scoped={Boolean(scope)}
             range={range}
-            resolved={`resolved_from=${monthSpan.date_from}&resolved_to=${monthSpan.date_to}`}
+            resolved={`resolved_from=${monthSpan.date_from}&resolved_to=${monthSpan.date_to}${scope ? `&customer_id=${scope.id}` : ""}`}
           />
         </div>
       ) : report.isLoading ? (
