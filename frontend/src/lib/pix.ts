@@ -36,7 +36,8 @@ export function pixDay(updatedAt: string | null | undefined): string {
 const plain = (text: string) =>
   text
     .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
+    // Sem acento: o NFD separa a letra da marca, e as marcas (Unicode M) saem.
+    .replace(/\p{M}/gu, "")
     .toLowerCase()
     .split(/\s+/)
     .filter(Boolean)
