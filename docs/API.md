@@ -953,7 +953,7 @@ ou, sem ela, o envio. Orçamento de OS cancelada nunca entra. Motivos, nesta ord
 **Por quê.** A central manda o chamado com o preço para os técnicos parceiros aceitarem, sem a opção de
 contraproposta. Quem aceita primeiro fica com a OS, como no "quem pega?" do grupo de WhatsApp, mas com o valor
 combinado de antemão. Código: `services/offers.py` (regras), `api/routes/offers.py`, `models/offer.py` e os
-ganchos na OS em `services/tickets.py` (`close_pending_offers`).
+ganchos na OS em `services/tickets.py` (`close_pending_offers`, `close_technician_offers`).
 
 **Regras.**
 - A central (gestão com Pagamentos em Editar, que pode atribuir técnico) oferta uma OS **sem técnico** e **em
@@ -992,7 +992,8 @@ ganchos na OS em `services/tickets.py` (`close_pending_offers`).
   cancelada com `cancel_reason: "replaced"`, sem evento próprio (o `offer_sent` traz `data.replaced`).
 - Prazo vencido não tem rotina: a oferta continua gravada como pendente e o estado efetivo é `expired` quando
   `expires_at <= agora` (relógio do servidor). A vencida não conta em `open_offers` e não é fechada pelos ganchos
-  (continua `expired`); a central ainda pode cancelá-la.
+  (continua `expired`); a central ainda pode cancelá-la. `TicketDetail.next_offer_expires_at` traz o prazo mais
+  próximo entre as pendentes no prazo, para a web reler a OS quando ele passa.
 - O preço é dado de Pagamentos: ver as ofertas com os valores pede Pagamentos (Visualizar); mandar e cancelar pedem
   Editar. Quem não tem a tela vê só `TicketDetail.open_offers` (contador sem valores) e não recebe os `offer_*` do
   histórico.

@@ -52,7 +52,8 @@ uma OS fechada ou cancelada (`closed`/`cancelled → reopened`). A tabela abaixo
   (`POST /tickets/{id}/assign`), então as regras acima valem iguais: `new`/`triage`/`reopened` → `assigned`, a agenda
   que a OS já tinha fica (não vira `scheduled` sozinha, como na tela) e em espera continua em espera. O aceite conta
   como 1ª resposta (o técnico é da equipe). Definir o técnico na mão e cancelar, resolver ou fechar a OS fecham as
-  ofertas pendentes; o status e o SLA não mudam por causa delas.
+  ofertas pendentes; colocar o técnico da oferta na visita fecha a dele; desativar o técnico ou tirar dele o papel
+  de técnico fecha as dele em todas as OS. O status e o SLA não mudam por causa delas.
 - Reabrir limpa `resolved_at`, `closed_at`, `cancelled_at` e `resolution_sla_met_at` (o prazo de solução
   encerrado pelo Field Control era do atendimento que terminou) e soma 1 em `reopen_count`. Limpa também a
   assinatura do responsável (`signed_at`, `signer_name`, `signer_role`, `signature_attachment_id`): com a
