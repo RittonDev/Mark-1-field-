@@ -89,7 +89,9 @@ Modelo inspirado no Field Control: o eixo da operação é o **local** (filial c
 - `GET /customers?q=` → `CustomerOut[]` · `POST /customers` · `GET/PATCH /customers/{id}`. `q` busca por palavras em nome e CNPJ/CPF (ver "Busca por palavras")
   - `CustomerOut = {id, name, document, email, phone, notes, is_active, created_at, locations_count, open_tickets, total_tickets, last_ticket_at, tags, contacts, address_line, district, city, state, zip_code, latitude, longitude, logo_url, legacy}` (ficha completa: ver "Fichas completas")
 - `GET /locations?q=&customer_id=&active=&page=&page_size=` → `Page<LocationOut>` (até 200 por página). `q` busca por palavras em nome, código, CNPJ (com ou sem pontuação), endereço, bairro, cidade e nome do cliente
-- `GET /locations/{id}` · `PATCH /locations/{id}` · `GET/POST /customers/{id}/locations` (lista sem paginação, para um cliente)
+- `GET /locations/{id}` · `PATCH /locations/{id}` · `GET/POST /customers/{id}/locations` (lista sem paginação, para um cliente;
+  `GET ?order=tickets&limit=8`: as lojas com mais OS primeiro, contando só as OS que a pessoa vê, e o empate pelo nome;
+  sem `order`, por nome)
   - `LocationOut = {id, customer_id, customer:{id,name}, name, code, document, address_line, district, city, state, zip_code, latitude, longitude, contact_name, contact_phone, notes, is_active, open_tickets, total_tickets, last_ticket_at, contacts, legacy}`
 - **Métricas derivadas:** `open_tickets`, `total_tickets` e `last_ticket_at` são calculadas a partir das OS, no escopo que o usuário pode ver. Não são digitadas.
 - **CPF/CNPJ** (`document`): aceita com ou sem pontuação e valida os dígitos verificadores, inclusive o **CNPJ alfanumérico** (Receita, jul/2026). Guardado sem pontuação e em maiúsculas. Inválido → 422.
@@ -155,7 +157,9 @@ Equivale ao "Tipo de OS" do Field Control. Sem `customer_id`, o tipo vale para t
 `TicketListItem = {id, number, code:"OS-000123", title, status, priority, type, source, category:{id,name,full_name}|null, customer:{id,name}|null, location:{id,name,code,document,address_line,city,state,latitude,longitude,contact_name,contact_phone}|null, assignee:{id,name,email,role}|null, team:{id,name}|null, requester_name, scheduled_start, scheduled_end, response_due_at, resolution_due_at, first_response_at, resolved_at, sla_paused_at, resolution_sla_met_at, sla_paused_seconds, created_at, updated_at, version, sla_status, tags:[{name,color}], service_type:{id,name,estimated_minutes}|null, description}`
 (na lista, `description` é o começo do escopo, até 300 caracteres; `service_type` vem preenchido em `GET /tickets` e
 pode vir null em outras listas; `resolution_sla_met_at`: o prazo de solução encerrado antes da conclusão, na OS
-migrada em que o Field Control deu o prazo como cumprido; o relógio de solução para aí, ver `docs/STATUS_E_SLA.md`)
+migrada em que o Field Control deu o prazo como cumprido; o relógio de solução para aí, ver `docs/STATUS_E_SLA.md`;
+`work_started_at`: a entrada na loja da visita em curso, só em `in_progress`, null fora dela; o tempo na loja das
+listas conta daí, e não da 1ª chegada, `arrived_at`)
 
 `TicketDetail = TicketListItem + {description, impact, urgency, asset:{id,name,asset_type,brand,model,serial_number,asset_tag,ip_address}|null, requester:UserRef|null, requester_contact, service_address, service_type:{id,name,estimated_minutes}|null, estimated_minutes, work_seconds, work_started_at, actual_minutes, created_by:UserRef|null, closed_at, cancelled_at, reopen_count, resolution_notes, allowed_transitions:[status], can_edit, can_assign}`
 
@@ -287,7 +291,8 @@ Tipos: `ticket.created`, `ticket.updated`, `ticket.assigned`, `ticket.status_cha
 Cada usuário só recebe eventos de OS que pode ver (o técnico, só das OS atribuídas a ele, inclusive a que
 acabou de sair dele); notas internas não chegam ao solicitante.
 
-Só para a gestão (analistas, supervisores, admin): `technician.location` `{user_id, name, latitude, longitude, recorded_at}`,
+Só para a gestão (analistas, supervisores, admin): `technician.location` `{user_id, name, latitude, longitude, recorded_at,
+accuracy_m, speed_mps, heading, battery_pct, is_mock}` (o ponto mais novo do lote, inteiro: o que não veio do app vai null),
 `technician.shift` `{user_id, name, on_shift}` (esses dois só com o Mapa ao vivo) e `onboarding.submitted` `{application_id, name}`
 (ficha nova na homologação).
 O cliente pode mandar `{"type":"ping"}` e recebe `{"type":"pong"}`.
@@ -348,7 +353,8 @@ Todos exigem analista ou gestor, salvo indicação. Valores em R$ chegam como n�
 - **Assistência externa:** `GET /repairs?status&customer_id&q&open_only` · `GET /repairs/summary` · `POST /repairs` ·
   `GET|PUT /repairs/{id}` · `POST /repairs/{id}/status {to_status, note?, vendor_quote_value?, expected_return_date?}` ·
   `POST /repairs/{id}/photos`. Etapas: withdrawn → received → sent_to_vendor → vendor_quote → in_repair → ready_at_vendor →
-  back_in_stock → delivered (e unrepairable/cancelled).
+  back_in_stock → delivered (e unrepairable/cancelled). No `PUT`, `vendor_quote_value` e `expected_return_date` (que a
+  etapa também grava) só mudam quando vêm no corpo; os outros campos são o cadastro inteiro.
 - **Relatórios:** `GET /reports/daily?date=` (sem data: o dia anterior, já fechado) · `GET /reports/monthly?month=AAAA-MM`.
 - **Sugestão de técnicos:** `GET /tickets/{id}/technician-suggestions` · `GET /technicians/suggest?city&state&latitude&longitude`
   → `[{id, name, home_city, home_state, open_tickets, on_shift, distance_km, score, reasons[]}]`.
@@ -832,8 +838,9 @@ parceiro pelo WhatsApp e, quando ele topa, coloca na OS. Os técnicos não têm 
 ### Portal (papel `requester`, ligado à empresa por `users.customer_id`)
 - `GET /portal/me` → `{customer: {id, name}, locations}`. Sem empresa → 403 com a orientação.
 - `GET /portal/locations?q=` → lojas ativas da empresa (`id, code, name, address, city, state`).
-- `GET /portal/requests?scope=open|done|all&location_id=&q=&page=&page_size=` → `Page[PortalRequestItem]`
-  (todas da empresa; `q` busca no assunto, no nº da OS e no nº do chamado do cliente).
+- `GET /portal/requests?scope=open|done|all&location_id=&q=&page=&page_size=` → `Page[PortalRequestItem] + {waiting}`
+  (todas da empresa; `q` busca no assunto, no nº da OS e no nº do chamado do cliente; `waiting`: quantas aguardam um
+  retorno do cliente com os mesmos filtros, em todas as páginas).
 - `POST /portal/requests` `{location_id, title, description?, urgency: low|medium|high, contact?, client_reference?}`
   → 201 `PortalRequestDetail`. Vira OS `source=portal`, `status=new`, prioridade pela matriz (impacto médio ×
   urgência), sem analista e sem técnico. Loja de outra empresa → 422.
@@ -879,7 +886,8 @@ computador" no portal: vira app com ícone na área de trabalho e no menu Inicia
   "Para cobrar").
 - `legacy_code` (código do Field Control), `legacy_description` (só quando difere do título) e
   `legacy_attachments: [{url, title, type}]`. Nada disso vai para o `PublicQuote`.
-- `QuoteListRow.customer_id`.
+- `QuoteListRow.customer_id` e `QuoteListRow.ticket_status` (situação da OS: cancelada, a lista não oferece renovar,
+  enviar, cobrar, editar nem duplicar, que a API recusa).
 
 **Fila "Para cobrar".** A mesma regra vale para a lista, o campo `follow_up` e o Início. Contato = a última cobrança
 ou, sem ela, o envio. Orçamento de OS cancelada nunca entra. Motivos, nesta ordem:
