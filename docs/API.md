@@ -66,7 +66,7 @@ Origem: `web`, `mobile`, `email`, `phone`, `whatsapp`, `monitoring`.
 - `POST /auth/refresh` `{refresh_token}` → `TokenResponse`. O canal vai gravado no refresh token: se o
   papel do usuário mudou e não é mais aceito no canal, responde **401** e o cliente faz logout.
 - `GET /auth/me` → `UserOut`
-- `POST /auth/change-password` `{current_password, new_password (min 8)}` → `TokenResponse` (200). Encerra as outras sessões do usuário (`sessions_revoked_at`) e devolve tokens novos para este aparelho. 422 com "Senha atual incorreta" ou "A nova senha precisa ser diferente da atual". `UserOut.must_change_password = true` (senha provisória): o app obriga a trocar antes de seguir.
+- `POST /auth/change-password` `{current_password, new_password (min 8)}` → `TokenResponse` (200). Encerra as outras sessões do usuário (`sessions_revoked_at`) e devolve tokens novos para este aparelho. 422 com "Senha atual incorreta" ou "A nova senha precisa ser diferente da atual". `UserOut.must_change_password = true` (senha provisória): o app obriga a trocar antes de seguir. Senhas atuais erradas: 5 em 15 min, somando as do Meu cadastro do técnico (e-mail e chave PIX), e depois 429 com `Retry-After`.
 - **Sessões encerradas:** tokens emitidos antes de `sessions_revoked_at` (troca/redefinição de senha, desativação) recebem **401** "Sessão encerrada" na API, no refresh e no WebSocket (fecha com 4401). Trate como logout.
 - `GET /auth/providers` → `{microsoft, password_for_staff, microsoft_domains}` (tela de login).
 - **Login Microsoft (Entra ID), só gestão:** o navegador abre `GET /auth/microsoft/start` (302 para a Microsoft, com PKCE). A volta `GET /auth/microsoft/callback` redireciona para `WEB_URL/login/microsoft#code=<código de uso único, 60 s>` ou `WEB_URL/login?sso_error=<not_registered|domain_not_allowed|wrong_tenant|role_not_allowed|inactive|account_mismatch|cancelled|invalid_state|invalid_token|provider_error>`. O site troca o código em `POST /auth/microsoft/exchange` `{code}` → `TokenResponse`. Com `ENTRA_ENFORCE_FOR_STAFF`, analistas e gestores do domínio recebem 403 no login com senha.
@@ -1200,6 +1200,104 @@ técnico) e, só no aceite, a leitura e o valor pago do técnico nesta OS.
 - Técnicos e Usuários: desativar um técnico sempre pede confirmação, que diz que as ofertas em aberto para ele são
   canceladas. Em Usuários, tirar o papel de técnico avisa o mesmo no texto do formulário.
 
+## Meu cadastro do técnico (2026-11-18)
+
+**Por quê.** O técnico mantém o próprio cadastro no app (Conta › Meu cadastro): foto, nome, celular (WhatsApp), e-mail
+de login, endereço, cidade/UF, região que atende e a chave PIX para receber por chamado. A central é avisada na hora
+quando mudam PIX, e-mail ou celular, e toda mudança, do app ou da central, fica no histórico do cadastro. Motivo da
+senha e do histórico: uma conta invadida não pode desviar o pagamento. Código: `services/my_profile.py`,
+`services/user_history.py`, `core/pix.py`, `api/routes/my_profile.py` e `models/user_change.py`.
+
+**Quem muda o quê.**
+- O técnico, pelo app: nome, celular, cidade/UF, região, endereço, bairro e CEP sem senha; e-mail e chave PIX
+  (cadastrar, trocar tipo, chave ou titular, remover) com a senha atual; a foto.
+- Só a central (Técnicos ou Usuários): grupo, cargo, acesso ao app, papel, serviços que faz, jornada, senha provisória
+  e o perfil da homologação. CPF, nascimento, CNPJ/MEI, ferramentas, veículo e CNH continuam só na ficha da
+  homologação, sem edição.
+- Chave PIX: só o técnico cadastra e troca. A central vê (Pagamentos em Visualizar) e só remove (Pagamentos em
+  Editar); `PATCH /technicians/{id}` ignora campos de PIX.
+
+**Rotas do técnico** (papel `technician`; gestão e cliente recebem 403). Nada entra na fila offline: tudo pede internet
+(a senha não fica guardada e o aviso tem de sair na hora). `GET /auth/me` e `UserOut` não mudam.
+- `GET /me/profile` → `MyProfile {id, name, email, phone, job_title, team: Ref|null, home_city, home_state,
+  coverage_area, address_line, address_district, address_zip, avatar_url, pix: PixInfo|null}`, com
+  `PixInfo = {key_type, key, holder_name, updated_at}`.
+- `PATCH /me/profile` `MyProfileUpdate` (campo fora da lista: 422 "Campo não aceito"). Só o que vier no corpo muda:
+  - `name`: 3 a 160, espaços colapsados (null: "Informe seu nome completo");
+  - `phone`: 10 a 13 dígitos (aceita +55), volta "(11) 98888-7777" (null ou inválido: "Informe o celular com DDD");
+  - `email`: em minúsculas, validado só quando vem (há logins de teste sem "@"; null: "Informe um e-mail válido");
+  - `home_city`: 2 a 120, na grafia padrão da base (null: "Informe a cidade"); `home_state`: uma UF ("UF inválida");
+  - `coverage_area` (até 1000), `address_line` (255) e `address_district` (120): vazio vira null;
+  - `address_zip`: 8 dígitos, volta "00000-000" ("CEP com 8 dígitos"); vazio ou null tira o CEP;
+  - `pix`: `{key_type: "cpf"|"cnpj"|"email"|"phone"|"random", key (até 120), holder_name (3 a 160)}`; null tira a chave;
+  - `current_password` (até 256).
+- Ordem do `PATCH`:
+  1. Conta só o que muda de verdade (o mesmo celular ou a mesma cidade escritos de outro jeito não contam). Sem nada
+     novo: 200, sem histórico e sem aviso.
+  2. E-mail de outro usuário ou de ficha pendente: 422 "E-mail já cadastrado".
+  3. E-mail ou PIX mudando: sem `current_password`, 422 "Confirme com a sua senha atual para mudar o e-mail ou a chave
+     PIX"; errada, 422 "Senha atual incorreta". O contador de erros é o da troca de senha (5 em 15 min, somando as
+     duas telas): bloqueado, 429 "Muitas tentativas de confirmar a senha. Tente de novo em N minutos." com
+     `Retry-After`, e o `POST /auth/change-password` também fica bloqueado.
+  4. Grava com o histórico. PIX mudou: `pix_updated_at` = agora. Mudou a cidade ou a UF (não só a grafia): as
+     coordenadas antigas de casa saem (vale também para o `PATCH /technicians/{id}` da central).
+  5. Depois do commit, o aviso `profile.changed`.
+- Trocar o e-mail não encerra as sessões (a senha é a mesma): o login passa a ser o e-mail novo.
+- `POST /me/profile/photo` (multipart `file`; JPG, PNG ou WebP pelo conteúdo, até 2 MB) → `MyProfile`. O app manda a
+  foto já recortada (quadrada) e reduzida (512 px). A anterior sai do disco quando nenhum outro usuário nem ficha de
+  homologação usa.
+- `DELETE /me/profile/photo` → `MyProfile`: tira a foto enviada e também a que veio do Field Control
+  (`avatar_external_url`); sem foto, 200 sem histórico.
+
+**Chave PIX** (`core/pix.py`; os mesmos formatos em `formatPixKey` de `constants.ts`). Erro na chave: 422 com `label`
+"Chave PIX"; titular vazio: "Informe o nome do titular da conta" (`label` "Titular da conta").
+
+| Tipo | Fica gravada | Mostra | Mascarada | Erro |
+|---|---|---|---|---|
+| `cpf` | 11 dígitos | 123.456.789-09 | ***.456.789-** | "CPF inválido: confira os números" |
+| `cnpj` | 14 caracteres em maiúsculas (aceita o alfanumérico) | 12.345.678/0001-95 | 12.345.678/****-** | "CNPJ inválido: confira os números" |
+| `email` | minúsculas, até 77 | como está | t***@exemplo.com | "E-mail inválido" |
+| `phone` | "+55" e 11 dígitos (DDD sem zero e o número com o 9; 12 ou 13 dígitos começando com 55 perdem o 55) | +55 (11) 98888-7777 | +55 (11) *****-7777 | "Celular inválido: use DDD e número, com o 9" |
+| `random` | 8-4-4-4-12 em minúsculas (32 hexadecimais) | como está | …4000 | "Chave aleatória inválida: copie a chave do app do seu banco" |
+
+**Histórico do cadastro** (tabela `user_changes`): uma linha por gravação, `UserChange {id, created_at, via:
+"app"|"central", actor: Ref|null, changes: [{field, from, to}]}`, com o texto pronto para a tela:
+- `name`, `email`, `phone`, `job_title`, `home_city`, `home_state`, `coverage_area`, `address_line`,
+  `address_district`, `address_zip`: o valor como está;
+- `team`: o nome do grupo; `is_active`: "Liberado" ou "Bloqueado"; `role`: o rótulo do papel; `work_schedule`:
+  "08:00–17:00, intervalo 12:00–13:00"; `services`: "12 serviços";
+- `pix`: a chave mascarada ("CPF ***.456.789-**"), null sem chave; `pix_holder`: o titular da conta;
+- `avatar`: `to` "nova" na troca e null na remoção (`from` "anterior"); `password`: `to` "provisória" (Redefinir senha
+  em Técnicos) ou "definida pela central" (Usuários).
+
+E-mail e celular ficam em claro (a central desfaz uma troca indevida); a chave PIX, nunca. Gravam o histórico: o
+`PATCH /me/profile` e a foto (via app, autor o técnico); `PATCH /technicians/{id}`,
+`POST /technicians/{id}/reset-password`, `POST`/`DELETE /technicians/{id}/photo`, `DELETE /technicians/{id}/pix` e o
+`PATCH /users/{id}` de técnico (via central, com o autor). A importação por planilha e a do Field Control não entram.
+
+**Central.**
+- `GET /technicians/{id}` (Técnicos, ver) → `TechnicianOut`; 404 "Técnico não encontrado" (também para quem não é
+  técnico). Declarada depois das rotas fixas (`/regions`, `/nearby`, `/suggest`).
+- `GET /technicians/{id}/changes?limit=50` (1 a 200; Técnicos, ver) → `UserChange[]`, do mais novo para o mais antigo.
+- `DELETE /technicians/{id}/pix` (Pagamentos, editar) → 204: tira tipo, chave, titular e data, com o histórico via
+  central e o aviso `["pix"]`; sem chave, 204 sem histórico.
+- `TechnicianOut` ganha `has_pix` e `pix_updated_at` (a chave não vai na base técnica).
+- `GET /payouts?with_pix=true` → `PayoutBoard = PayoutList + pix: {technician_id: PixInfo}`: os técnicos das linhas e o
+  do `technician_id`, só os que têm chave. Sem `with_pix`, `pix: {}`. `GET /me/earnings` não muda.
+- `POST /payouts/pay`: o `payout_set` do pagamento (`data.action: "paid"`) ganha `data.pix`, a chave mascarada daquele
+  momento ("CPF ***.456.789-**"), quando o técnico tem chave.
+- Rótulos dos erros de validação (`main.py`): `pix` "Chave PIX", `key_type` "Tipo da chave PIX", `holder_name`
+  "Titular da conta", `home_city` "Cidade", `home_state` "UF", `coverage_area` "Região que atende",
+  `address_district` "Bairro" e `address_zip` "CEP".
+
+**Tempo real.** Depois do commit sai `{"type": "profile.changed", "user_id", "name", "actor_id", "actor_name",
+"occurred_at", "data": {"fields": [...], "via": "app" | "central"}}` (`audience.managers_only`). Vai só para quem tem
+Técnicos ou Pagamentos; o técnico e o cliente não recebem. `fields` usa os nomes da API (o titular conta como "pix").
+O nome não começa com "technician." (a web mandaria o evento para o mapa).
+
+**Aviso de privacidade.** A ficha da homologação passa a citar a chave PIX que o técnico cadastrar no app para receber
+pelos chamados: `PRIVACY_VERSION` = "2026-11-18" (o `GET /public/onboarding/catalog` devolve a versão nova).
+
 ## Acesso: perfis por tela e visibilidade de filas
 
 O papel (`users.role`) continua decidindo o canal (web ou app), a hierarquia de cadastro (quem cria e altera
@@ -1365,7 +1463,8 @@ Os mesmos valores fora dessas telas:
   troca de analista, `data` traz `from_id` e `to_id` (além dos nomes).
 - Quem só vê a própria fila recebe só eventos das OS dele (responsável atual ou anterior, executor) e, com a
   opção, das sem analista. `quote.decided` só vai para quem tem Orçamentos; `onboarding.submitted`, para quem
-  tem Homologação; `technician.location` e `technician.shift`, para quem tem o Mapa ao vivo.
+  tem Homologação; `technician.location` e `technician.shift`, para quem tem o Mapa ao vivo; `profile.changed`, para
+  quem tem Técnicos ou Pagamentos (basta uma das duas).
 - `{"type": "access.changed"}` vai só para a pessoa afetada; logo depois o servidor fecha o socket com 4401 e o
   cliente renova o token e reconecta com o acesso novo. O vigia de 5 minutos também fecha quando o acesso muda.
 
@@ -1383,10 +1482,10 @@ V = Visualizar, E = Editar; "a \| b" = basta uma das telas.
 | `commercial.projects` | V: `GET /projects/{id}`. E: `POST /projects`, `PUT /projects/{id}` |
 | `commercial.expenses` | V: `GET /tickets/{id}/expenses` (só a gestão; o técnico como antes). E: `POST /tickets/{id}/expenses`, `PATCH`/`DELETE /expenses/{id}`, `POST /expenses/mark-paid` |
 | `commercial.expenses` \| `commercial.payouts` | V: `GET /expenses` |
-| `commercial.payouts` | V: `GET /payouts`, `GET /tickets/{id}/offers`. E: `PUT`/`DELETE /tickets/{id}/payouts/{tech}`, `POST /payouts/pay`, `/payouts/unpay`, `POST /tickets/{id}/offers`, `POST /tickets/{id}/offers/{offer_id}/cancel` |
+| `commercial.payouts` | V: `GET /payouts`, `GET /tickets/{id}/offers`. E: `PUT`/`DELETE /tickets/{id}/payouts/{tech}`, `POST /payouts/pay`, `/payouts/unpay`, `POST /tickets/{id}/offers`, `POST /tickets/{id}/offers/{offer_id}/cancel`, `DELETE /technicians/{id}/pix` |
 | `base.customers` | V: `GET /customers/{id}`, `GET /assets`, `/assets/{id}`. E: `POST /customers`, `PATCH /customers/{id}`, `POST`/`PATCH /assets` |
 | `base.locations` | E: `POST /customers/{id}/locations`, `PATCH /locations/{id}`, `POST /locations/import` |
-| `base.technicians` | V: `GET /technicians`, `/technicians/favorites`. E: `POST /technicians`, `PATCH /technicians/{id}`, `POST /technicians/{id}/reset-password`, `POST`/`DELETE /technicians/{id}/photo`, `POST /technicians/import`, `POST /technicians/regions/refresh`, `PUT`/`DELETE /technicians/favorites/{id}` |
+| `base.technicians` | V: `GET /technicians`, `/technicians/favorites`, `/technicians/{id}`, `/technicians/{id}/changes`. E: `POST /technicians`, `PATCH /technicians/{id}`, `POST /technicians/{id}/reset-password`, `POST`/`DELETE /technicians/{id}/photo`, `POST /technicians/import`, `POST /technicians/regions/refresh`, `PUT`/`DELETE /technicians/favorites/{id}` |
 | `base.technicians` \| `base.onboarding` | V: `GET /technicians/regions` |
 | `base.technicians` \| `base.locations` | V: `GET /technicians/nearby` |
 | `base.onboarding` | V: `GET /onboarding/invites`, `/onboarding/applications`, `/applications/pending-count`, `/applications/{id}`. E: `POST`/`DELETE /onboarding/invites`, `POST .../approve`, `.../reject`; `DELETE /onboarding/applications/{id}` (E e só admin e supervisor) |
