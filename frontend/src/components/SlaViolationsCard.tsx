@@ -4,8 +4,10 @@ import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle } from "lucide-react";
 import Link from "next/link";
 import { Card, CardHeader, ErrorBox, LoadingBlock, SectionTitle } from "@/components/ui";
+import { useNow } from "@/components/useNow";
 import { api, errorMessage } from "@/lib/api";
 import { RESPONSIBILITY } from "@/lib/constants";
+import { dayKey } from "@/lib/format";
 import type { ClockViolations, Responsibility, SlaViolationReport } from "@/lib/types";
 
 const intFmt = (n: number) => n.toLocaleString("pt-BR");
@@ -51,6 +53,7 @@ function Clock({ title, data, total }: { title: string; data: ClockViolations; t
  * criadas nos últimos `days` dias.
  */
 export function SlaViolationsCard({ days = 30 }: { days?: number }) {
+  const now = useNow(60_000);
   const { data, isLoading, error } = useQuery({
     queryKey: ["reports", "sla-violations", days],
     queryFn: () => api.get<SlaViolationReport>("/reports/sla-violations", { days }),
@@ -69,7 +72,8 @@ export function SlaViolationsCard({ days = 30 }: { days?: number }) {
         actions={
           data && data.pending_justification > 0 ? (
             <Link
-              href="/chamados?violation_pending=true"
+              // O mesmo período do número: as pendentes das OS criadas nos últimos N dias (não o histórico todo).
+              href={`/chamados?violation_pending=true&created_from=${dayKey(now - data.period_days * 86_400_000)}`}
               className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800 hover:underline dark:bg-amber-500/10 dark:text-amber-300"
             >
               <AlertTriangle className="size-3.5" />

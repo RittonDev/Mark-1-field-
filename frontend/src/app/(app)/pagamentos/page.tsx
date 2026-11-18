@@ -338,19 +338,61 @@ export default function PayoutsPage() {
     canExpenses ? (reimbursements.data?.by_technician.find((t) => t.technician?.id === group.id)?.to_pay ?? 0) : 0;
   const textFor = (group: Group) => statement(group.name, group.lines, period, reimbursementOf(group));
 
-  const confirmPay = async (group: Group, chosen: PayoutLine[]) => {
+  // Reembolsos aprovados do técnico (Custos extras) ainda não pagos: o extrato soma no "Total a receber".
+  const reimbursementIds = (group: Group) =>
+    (reimbursements.data?.items ?? []).filter((r) => r.status === "approved" && r.technician?.id === group.id).map((r) => r.id);
+  const markReimbursed = useMutation({
+    mutationFn: async (ids: UUID[]) => {
+      let updated = 0;
+      for (let i = 0; i < ids.length; i += BATCH) {
+        updated += (await api.post<{ updated: number }>("/expenses/mark-paid", { ids: ids.slice(i, i + BATCH) })).updated;
+      }
+      return updated;
+    },
+    onSuccess: (updated) =>
+      toast({ title: plural(updated, "reembolso marcado como reembolsado", "reembolsos marcados como reembolsados"), tone: "success" }),
+    onError: (error) => toast({ title: "Os reembolsos continuam a reembolsar", description: errorMessage(error), tone: "error" }),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["expenses"] });
+      void queryClient.invalidateQueries({ queryKey: ["ticket"] });
+    },
+  });
+
+  // `everything`: o "Pagar tudo" do técnico. Só nele (e com Custos extras: Editar) dá para baixar também os
+  // reembolsos do mesmo acerto; o pagamento em si nunca mexe neles.
+  const confirmPay = async (group: Group, chosen: PayoutLine[], everything: boolean) => {
     const codes = chosen.map((l) => l.ticket.code);
+    const reimbursement = reimbursementOf(group);
     const ok = await confirm({
       title: chosen.length === 1 ? `Marcar a ${codes[0]} de ${group.name} como paga?` : `Marcar ${chosen.length} OS de ${group.name} como pagas?`,
       description: (
         <>
           Total <strong className="font-semibold text-ink">{formatMoney(total(chosen))}</strong> · {codes.slice(0, 5).join(", ")}
           {codes.length > 5 ? ` e mais ${codes.length - 5}` : ""}. O técnico passa a ver como pago no app.
+          {reimbursement > 0
+            ? ` Os reembolsos aprovados (${formatMoney(reimbursement)}) não entram aqui: continuam a reembolsar em Custos extras.`
+            : ""}
         </>
       ),
       confirmLabel: "Marcar como pago",
     });
-    if (ok) pay.mutate({ ids: chosen.map((l) => l.id), paid: true, groupId: group.id });
+    if (!ok) return;
+    pay.mutate(
+      { ids: chosen.map((l) => l.id), paid: true, groupId: group.id },
+      {
+        onSuccess: async (changed) => {
+          const ids = everything && canPayExpenses && changed > 0 ? reimbursementIds(group) : [];
+          if (!ids.length) return;
+          const also = await confirm({
+            title: `Marcar também os reembolsos de ${group.name} (${formatMoney(reimbursement)}) como reembolsados?`,
+            description: "Os custos extras aprovados dele saem do “a reembolsar” em Custos extras e no app.",
+            confirmLabel: "Marcar como reembolsados",
+            cancelLabel: "Agora não",
+          });
+          if (also) markReimbursed.mutate(ids);
+        },
+      },
+    );
   };
   // OS cancelada não entra no "Pagar tudo": pagar é decisão da central, linha a linha (o técnico foi e o cliente cancelou na hora).
   const confirmPayCancelled = async (group: Group, line: PayoutLine) => {
@@ -673,7 +715,7 @@ export default function PayoutsPage() {
                               variant="primary"
                               disabled={stale || (busy && !batch)}
                               loading={batch && pay.variables?.paid === true}
-                              onClick={() => void confirmPay(group, chosenPayable.length ? chosenPayable : payable)}
+                              onClick={() => void confirmPay(group, chosenPayable.length ? chosenPayable : payable, !chosenPayable.length)}
                             >
                               <CheckCheck className="size-4" />
                               {chosenPayable.length
