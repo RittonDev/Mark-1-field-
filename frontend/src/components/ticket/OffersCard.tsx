@@ -71,8 +71,11 @@ function endOfDay(now: number): string | null {
   return iso && Date.parse(iso) - now >= END_OF_DAY_MIN_MS ? iso : null;
 }
 
-/** O `expires_at` do prazo escolhido, contado de `now` (null: sem prazo). */
-function deadlineAt(key: DeadlineKey, now: number): string | null {
+/**
+ * O `expires_at` do prazo escolhido, contado de `now` (null: sem prazo). Sem `now`, conta do relógio na hora
+ * da chamada (o clique em Enviar): fora do render, onde o React Compiler não aceita ler o relógio.
+ */
+function deadlineAt(key: DeadlineKey, now: number = Date.now()): string | null {
   if (key === "eod") return endOfDay(now);
   const minutes = DEADLINES.find((d) => d.key === key)?.minutes;
   return minutes ? new Date(now + minutes * 60_000).toISOString() : null;
@@ -180,8 +183,11 @@ function useOfferPlace(ticket: TicketDetail, enabled = true): OfferPlace {
   };
 }
 
-/** Texto da oferta para o grupo de técnicos no WhatsApp (sem cliente, loja nem endereço). */
-function groupText(ticket: TicketDetail, place: OfferPlace, offers: TicketOffer[], now: number): string {
+/**
+ * Texto da oferta para o grupo de técnicos no WhatsApp (sem cliente, loja nem endereço). O prazo sai com a
+ * hora (ou o dia) contado do relógio na hora da cópia.
+ */
+function groupText(ticket: TicketDetail, place: OfferPlace, offers: TicketOffer[], now: number = Date.now()): string {
   const first = offers[0];
   return offerText({
     code: ticket.code,
@@ -449,7 +455,7 @@ export function OfferDialog({
       void queryClient.invalidateQueries({ queryKey: ["ticket", ticket.id] });
       const first = created[0];
       if (first) {
-        const text = groupText(ticket, place, created, Date.now());
+        const text = groupText(ticket, place, created);
         toast({
           title: "Oferta enviada",
           description: `Para ${created.length === 1 ? first.technician.name : `${created.length} técnicos`} · ${formatMoney(first.amount)}. Quem aceitar primeiro pelo app fica com a OS.`,
@@ -546,7 +552,7 @@ export function OfferDialog({
     setTried(true);
     if (errors.technicians || errors.amount || errors.deadline || amount.value === null) return;
     // O prazo conta de agora (do clique), não de quando o diálogo abriu.
-    const expiresAt = deadlineAt(deadline, Date.now());
+    const expiresAt = deadlineAt(deadline);
     if (deadline !== "none" && !expiresAt) return;
     send.mutate({
       technician_ids: picked.map((p) => p.id),
@@ -758,7 +764,8 @@ function OfferRow({
   cancelling: boolean;
 }) {
   const state = offerStateAt(offer, now);
-  const info = OFFER_STATE[state];
+  // Estado que esta tela ainda não conhece (API mais nova): etiqueta neutra com o nome que veio, sem quebrar a aba.
+  const info = OFFER_STATE[state] ?? { label: state, color: OFFER_STATE.cancelled.color };
   const detail = offerDetail(offer, state, now);
   const sent = `Enviada${offer.created_by ? ` por ${offer.created_by.name}` : ""} em ${formatDateTime(offer.created_at)}`;
   const full = [detail, sent, offer.note ? `Recado: ${offer.note}` : null].filter(Boolean).join(" · ");
@@ -861,7 +868,7 @@ export function OffersBlock({ ticket, locked, className }: { ticket: TicketDetai
             {batch.length ? (
               <button
                 type="button"
-                onClick={() => void copyGroupText(groupText(ticket, place, batch, Date.now()), toast)}
+                onClick={() => void copyGroupText(groupText(ticket, place, batch), toast)}
                 className={buttonClassName("ghost", "sm", "h-7 px-2")}
               >
                 Copiar texto para o grupo
@@ -940,7 +947,7 @@ export function OfferSentNote({ ticket, offers }: { ticket: TicketDetail; offers
       </p>
       <button
         type="button"
-        onClick={() => void copyGroupText(groupText(ticket, place, offers, Date.now()), toast)}
+        onClick={() => void copyGroupText(groupText(ticket, place, offers), toast)}
         className={buttonClassName("ghost", "sm", "h-7 px-2")}
       >
         Copiar texto para o grupo
