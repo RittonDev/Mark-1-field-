@@ -445,20 +445,22 @@ function FormDialog({
   const confirm = useConfirm();
   const { toast } = useToast();
   const uid = useId();
-  // `base`: as respostas como estavam no servidor na última leitura; `answers`: o que está na tela.
-  const [base, setBase] = useState<Answers>(form.answers);
-  const [answers, setAnswers] = useState<Answers>(form.answers);
+  // `base`: as respostas como estavam no servidor na última leitura (com a resposta automática, que já vem
+  // preenchida e não conta como alteração); `answers`: o que está na tela.
+  const server = serverAnswers(form);
+  const [base, setBase] = useState<Answers>(server);
+  const [answers, setAnswers] = useState<Answers>(server);
   const [error, setError] = useState<string | null>(null);
   // Depois da primeira tentativa de concluir, os campos que faltam ficam marcados (e saem ao preencher).
   const [checked, setChecked] = useState(false);
   const [uploading, setUploading] = useState<Record<string, number>>({});
-  const serverKey = JSON.stringify(form.answers);
+  const serverKey = JSON.stringify(server);
   const [seenKey, setSeenKey] = useState(serverKey);
   if (serverKey !== seenKey) {
     // O técnico (ou outra pessoa) respondeu com o diálogo aberto: o que não foi mexido aqui segue o servidor.
     setSeenKey(serverKey);
-    setAnswers(rebase(answers, base, form.answers));
-    setBase(form.answers);
+    setAnswers(rebase(answers, base, server));
+    setBase(server);
   }
   const changes = changesOf(base, answers);
   const dirty = Object.keys(changes).length > 0;
@@ -481,9 +483,10 @@ function FormDialog({
         onClose();
         return;
       }
-      setAnswers((current) => rebase(current, base, saved.answers));
-      setBase(saved.answers);
-      setSeenKey(JSON.stringify(saved.answers));
+      const fresh = serverAnswers(saved);
+      setAnswers((current) => rebase(current, base, fresh));
+      setBase(fresh);
+      setSeenKey(JSON.stringify(fresh));
       if (partial) {
         // Gravado na tentativa de concluir: o aviso do que falta continua na tela.
         toast({ title: "Respostas salvas", description: "Complete o que falta para concluir o formulário.", tone: "info" });
@@ -652,7 +655,7 @@ function FormDialog({
                   onChange={(v) => set(field, v)}
                 />
               ) : (
-                <p className="text-sm text-ink">{formatAnswer(field, form.answers[field.id])}</p>
+                <p className="text-sm text-ink">{formatAnswer(field, server[field.id])}</p>
               )}
               {invalid ? <span className="text-xs font-semibold text-red-700 dark:text-red-400">Obrigatório</span> : null}
             </div>

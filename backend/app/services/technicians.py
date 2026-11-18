@@ -30,6 +30,7 @@ from app.schemas.technician import (
 from app.services import cities, search, storage, technician_regions
 from app.services.errors import NotFound, WorkflowError
 from app.services.spreadsheet import read_table
+from app.services.technician_regions import fold_text
 from app.services.workflow import OPEN_STATUSES
 
 # Sem letras e números que se confundem (O/0, l/1/I) para ditar por telefone.
@@ -69,6 +70,48 @@ def avatar_url(user: User) -> str | None:
         return user.avatar_external_url or None
     token = create_token(f"avatar:{user.id}", "download", timedelta(hours=12))
     return f"{settings.API_PREFIX}/users/{user.id}/avatar?token={token}"
+
+
+def has_photo(user: User) -> bool:
+    return bool(user.avatar_key or user.avatar_external_url)
+
+
+def has_pix(user: User) -> bool:
+    return bool(user.pix_key and user.pix_key_type)
+
+
+def clear_pix(user: User) -> None:
+    """Tira a chave PIX (a central só remove; quem cadastra é o técnico, no app)."""
+    user.pix_key_type = None
+    user.pix_key = None
+    user.pix_holder_name = None
+    user.pix_updated_at = None
+
+
+def normalize_zip(value: str | None) -> str | None:
+    """CEP com 8 dígitos vira "00000-000"; outro tamanho fica só com os dígitos; vazio, None."""
+    digits = re.sub(r"\D", "", value or "")
+    return f"{digits[:5]}-{digits[5:]}" if len(digits) == 8 else digits or None
+
+
+async def canonical_home(
+    db: AsyncSession, city: str | None, state: str | None
+) -> tuple[str | None, str | None]:
+    """Cidade de casa com a grafia padrão da base ("SAO PAULO" vira "São Paulo") e a UF."""
+    uf = (state or "").strip().upper() or None
+    return await cities.canonical_city(db, uf, city), uf
+
+
+def set_home(user: User, city: str | None, state: str | None) -> bool:
+    """Grava a cidade e a UF de casa (já na grafia padrão: canonical_home). Mudou de cidade ou de
+    UF (não só a grafia): as coordenadas antigas de casa saem, porque levariam a sugestões e
+    distâncias erradas (a região "pelo endereço" volta quando houver coordenada nova)."""
+    moved = state != user.home_state or fold_text(city) != fold_text(user.home_city)
+    user.home_city, user.home_state = city, state
+    if moved:
+        user.home_latitude = None
+        user.home_longitude = None
+    return moved
 
 
 async def get_technician(db: AsyncSession, user_id: uuid.UUID) -> User:
@@ -174,6 +217,8 @@ async def to_out(db: AsyncSession, users: list[User]) -> list[TechnicianOut]:
                     if str(sid) in service_names
                 ],
                 legacy=u.legacy,
+                has_pix=has_pix(u),
+                pix_updated_at=u.pix_updated_at if has_pix(u) else None,
             )
         )
     return out
@@ -252,15 +297,19 @@ async def update(
     if "work_schedule" in fields and fields["work_schedule"] is not None:
         schedule = fields["work_schedule"]
         fields["work_schedule"] = schedule if any(schedule.values()) else None
-    if isinstance(fields.get("address_zip"), str):
-        zip_digits = re.sub(r"\D", "", fields["address_zip"])
-        fields["address_zip"] = (
-            f"{zip_digits[:5]}-{zip_digits[5:]}" if len(zip_digits) == 8 else zip_digits or None
-        )
+    if "address_zip" in fields:
+        fields["address_zip"] = normalize_zip(fields["address_zip"])
     if fields.get("email") and await _email_in_use(db, fields["email"], exclude=user.id):
         raise WorkflowError("E-mail já cadastrado")
     if "team_id" in fields:
         await _check_team(db, fields["team_id"])
+    home = None
+    if "home_city" in fields or "home_state" in fields:
+        # Uma grafia só por cidade ("SAO PAULO" vira "São Paulo"), como no resto da base; mudou de
+        # cidade, as coordenadas antigas de casa saem (set_home, o mesmo do Meu cadastro).
+        home = await canonical_home(
+            db, fields.pop("home_city", user.home_city), fields.pop("home_state", user.home_state)
+        )
     if fields.get("is_active") is False:
         from app.services import tickets  # import tardio, como o tracking em to_out
 
@@ -269,14 +318,10 @@ async def update(
         # como no aceite. Os avisos saem no commit da rota.
         await tickets.close_technician_offers(db, user.id, actor)
     for key, value in fields.items():
-        if key == "home_state" and isinstance(value, str):
-            value = value.strip().upper()
         if key in (
             "name",
             "phone",
             "job_title",
-            "home_city",
-            "home_state",
             "coverage_area",
             "address_line",
             "address_district",
@@ -287,9 +332,8 @@ async def update(
         if key == "email" and not value:
             continue
         setattr(user, key, value)
-    if "home_city" in fields or "home_state" in fields:
-        # Uma grafia só por cidade ("SAO PAULO" vira "São Paulo"), como no resto da base.
-        user.home_city = await cities.canonical_city(db, user.home_state, user.home_city)
+    if home is not None:
+        set_home(user, *home)
     if fields.get("is_active") is False:
         user.sessions_revoked_at = utcnow()  # desativado: sai do app na hora
     await db.flush()
@@ -306,16 +350,44 @@ async def reset_password(db: AsyncSession, user: User) -> str:
     return password
 
 
-async def set_photo(db: AsyncSession, user: User, upload: UploadFile) -> User:
+async def set_photo(db: AsyncSession, user: User, upload: UploadFile) -> str | None:
+    """Foto nova (até 2 MB; JPG, PNG ou WebP pelo conteúdo). Devolve a chave da foto anterior, para
+    apagar do disco depois do commit (drop_unused_photo)."""
     raw = await upload.read(MAX_PHOTO_BYTES + 1)
     if len(raw) > MAX_PHOTO_BYTES:
         raise WorkflowError("Foto maior que 2 MB")
     ext = storage.image_extension(raw)
     if ext is None:
         raise WorkflowError("Envie uma imagem JPG, PNG ou WebP")
+    previous = user.avatar_key
     user.avatar_key = await storage.save_bytes("avatars", ext, raw)
     await db.flush()
-    return user
+    return previous
+
+
+def remove_photo(user: User) -> str | None:
+    """Tira a foto: a enviada aqui e também a que veio do Field Control (direito do titular). No
+    lugar ficam as iniciais. Devolve a chave a apagar do disco depois do commit."""
+    previous = user.avatar_key
+    user.avatar_key = None
+    user.avatar_external_url = None
+    return previous
+
+
+async def drop_unused_photo(db: AsyncSession, key: str | None, user_id: uuid.UUID) -> None:
+    """Depois do commit: a foto antiga sai do disco se nenhum outro usuário nem ficha de homologação
+    usa (a ficha aprovada guarda a foto com que ele se cadastrou). O próprio usuário fica de fora
+    da busca: com autoflush=False, antes do commit o banco ainda teria a chave antiga dele."""
+    if not key:
+        return
+    other_user = await db.scalar(
+        select(User.id).where(User.avatar_key == key, User.id != user_id).limit(1)
+    )
+    application = await db.scalar(
+        select(TechnicianApplication.id).where(TechnicianApplication.photo_key == key).limit(1)
+    )
+    if other_user is None and application is None:
+        storage.delete(key)
 
 
 async def import_file(db: AsyncSession, filename: str, data: bytes, dry_run: bool) -> ImportResult:

@@ -1,0 +1,159 @@
+"""Meu cadastro: o técnico mantém no app a foto, o nome, o celular, o e-mail, o endereço e a chave
+PIX para receber por chamado.
+
+Segurança (conta invadida desviando pagamento): e-mail e chave PIX, inclusive remover a chave, pedem
+a senha atual, com o mesmo limite de tentativas da troca de senha (login_guard, "pwd:{id}": 5 erros
+somando as duas telas). Toda mudança fica no histórico do cadastro (services/user_history.py) e a
+rota avisa a central depois do commit. Trocar o e-mail não encerra as sessões (a senha é a mesma): o
+login passa a ser o e-mail novo.
+
+Grupo, cargo, acesso ao app, papel, serviços, jornada e senha provisória continuam com a central;
+CPF, CNPJ/MEI, nascimento, ferramentas, veículo e CNH continuam só na ficha da homologação.
+"""
+
+import re
+from typing import Any
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.security import verify_password_async
+from app.db.base import utcnow
+from app.models import User
+from app.models.user_change import VIA_APP
+from app.schemas.common import Ref
+from app.schemas.my_profile import MyProfile, MyProfileUpdate, PixIn, PixInfo
+from app.services import login_guard, onboarding, technicians, user_history
+from app.services.errors import WorkflowError
+
+PASSWORD_REQUIRED = "Confirme com a sua senha atual para mudar o e-mail ou a chave PIX"
+WRONG_PASSWORD = "Senha atual incorreta"
+EMAIL_TAKEN = "E-mail já cadastrado"
+# "Muitas tentativas de confirmar a senha. Tente de novo em N minutos."
+CONFIRM_ACTION = "de confirmar a senha"
+
+# Campos de texto que só são copiados (a normalização é do schema).
+_PLAIN = ("name", "email", "phone", "coverage_area", "address_line", "address_district")
+
+
+def pix_info(user: User) -> PixInfo | None:
+    key_type, key = user.pix_key_type, user.pix_key
+    if key_type is None or not key:
+        return None
+    return PixInfo(
+        key_type=key_type,
+        key=key,
+        holder_name=user.pix_holder_name,
+        updated_at=user.pix_updated_at,
+    )
+
+
+def profile(user: User) -> MyProfile:
+    """O cadastro como o app mostra (o grupo já vem carregado com o usuário)."""
+    team = user.team
+    return MyProfile(
+        id=user.id,
+        name=user.name,
+        email=user.email,
+        phone=user.phone,
+        job_title=user.job_title,
+        team=Ref(id=team.id, name=team.name) if team is not None else None,
+        home_city=user.home_city,
+        home_state=user.home_state,
+        coverage_area=user.coverage_area,
+        address_line=user.address_line,
+        address_district=user.address_district,
+        address_zip=user.address_zip,
+        avatar_url=technicians.avatar_url(user),
+        pix=pix_info(user),
+    )
+
+
+def _phone_digits(value: str | None) -> str:
+    """O mesmo celular escrito de outro jeito ("(11) 98888-7777", "5511988887777") não é mudança."""
+    digits = re.sub(r"\D", "", value or "")
+    return digits[2:] if len(digits) in (12, 13) and digits.startswith("55") else digits
+
+
+async def confirm_password(user: User, password: str | None) -> None:
+    """Senha atual para e-mail e chave PIX: o contador de erros é o da troca de senha."""
+    if not password:
+        raise WorkflowError(PASSWORD_REQUIRED)
+    await login_guard.check_password_change(str(user.id), action=CONFIRM_ACTION)
+    if not await verify_password_async(password, user.password_hash):
+        await login_guard.password_change_failed(str(user.id))
+        raise WorkflowError(WRONG_PASSWORD)
+    await login_guard.password_change_succeeded(str(user.id))
+
+
+async def _wanted(db: AsyncSession, user: User, data: MyProfileUpdate) -> dict[str, Any]:
+    """Só o que muda de verdade (o mesmo valor escrito de outro jeito não conta)."""
+    sent = data.model_fields_set
+    new: dict[str, Any] = {}
+    for key in _PLAIN:
+        if key not in sent:
+            continue
+        value = getattr(data, key)
+        if key == "phone":
+            changed = _phone_digits(value) != _phone_digits(user.phone)
+        elif key == "email":
+            changed = value != (user.email or "").lower()
+        else:
+            changed = value != getattr(user, key)
+        if changed:
+            new[key] = value
+    if "address_zip" in sent and data.address_zip != technicians.normalize_zip(user.address_zip):
+        new["address_zip"] = data.address_zip
+    if "home_city" in sent or "home_state" in sent:
+        home = await technicians.canonical_home(
+            db,
+            data.home_city if "home_city" in sent else user.home_city,
+            data.home_state if "home_state" in sent else user.home_state,
+        )
+        if home != (user.home_city, user.home_state):
+            new["home"] = home
+    if "pix" in sent:
+        wanted = data.pix
+        if wanted is None:
+            if technicians.has_pix(user):
+                new["pix"] = None
+        elif (wanted.key_type, wanted.key, wanted.holder_name) != (
+            user.pix_key_type,
+            user.pix_key,
+            user.pix_holder_name,
+        ):
+            new["pix"] = wanted
+    return new
+
+
+def _set_pix(user: User, wanted: PixIn | None) -> None:
+    if wanted is None:
+        technicians.clear_pix(user)
+        return
+    user.pix_key_type = wanted.key_type
+    user.pix_key = wanted.key
+    user.pix_holder_name = wanted.holder_name
+    user.pix_updated_at = utcnow()
+
+
+async def update(db: AsyncSession, user: User, data: MyProfileUpdate) -> list[dict[str, Any]]:
+    """PATCH /me/profile: aplica e grava no histórico o que mudou; devolve as mudanças (vazio:
+    nada mudou, sem histórico nem aviso). O commit e o aviso à central são da rota.
+
+    Levanta WorkflowError (422) com e-mail já cadastrado, sem a senha ou com a senha errada, e
+    login_guard.LoginBlocked (429) depois de muitas senhas erradas."""
+    new = await _wanted(db, user, data)
+    if not new:
+        return []
+    if "email" in new and await onboarding.email_taken(db, new["email"]):
+        raise WorkflowError(EMAIL_TAKEN)
+    if "email" in new or "pix" in new:
+        await confirm_password(user, data.current_password)
+    before = await user_history.snapshot(db, user)
+    for key in (*_PLAIN, "address_zip"):
+        if key in new:
+            setattr(user, key, new[key])
+    if "home" in new:
+        technicians.set_home(user, *new["home"])
+    if "pix" in new:
+        _set_pix(user, new["pix"])
+    return await user_history.track(db, user, before, via=VIA_APP, actor=user)
