@@ -376,7 +376,7 @@ function HistorySkeleton() {
       <ol aria-hidden className="relative ml-3 border-l border-line">
         {[64, 48, 56].map((width, i) => (
           <li key={i} className="mb-5 ml-5 last:mb-0" style={{ opacity: 1 - i * 0.22 }}>
-            <Skeleton className="absolute -left-3 size-6 border border-line" style={{ borderRadius: 9999 }} />
+            <Skeleton className="absolute -left-3 size-6 rounded-full border border-line" />
             <Skeleton className="h-3.5" style={{ width: `${width}%` }} />
             <Skeleton className="mt-1.5 h-2.5 w-28" />
           </li>

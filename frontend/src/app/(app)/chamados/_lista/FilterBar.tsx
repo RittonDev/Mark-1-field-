@@ -275,7 +275,7 @@ function LocationFilter({
     <FilterPopover label="Localização" value={summary} panelLabel="Filtrar pela localização" width="lg">
       {(close) =>
         value && loading ? (
-          <Skeleton className="h-9 w-full rounded-lg" />
+          <Skeleton className="h-9 w-full" />
         ) : (
           <LocationForm
             key={location?.id ?? "nenhuma"}

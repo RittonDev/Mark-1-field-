@@ -1379,7 +1379,7 @@ function NewTicket() {
                 }
               >
                 {d.tagsAuto && tagRulesLoading ? (
-                  <Skeleton className="h-10 w-full rounded-lg" />
+                  <Skeleton className="h-10 w-full" />
                 ) : d.tagsAuto && tagRulesFailed ? (
                   // Sem as regras não há como mostrar o padrão certo: a API aplica ao criar.
                   <div

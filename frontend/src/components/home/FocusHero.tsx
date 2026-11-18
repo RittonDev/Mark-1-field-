@@ -44,7 +44,7 @@ export function FocusHero({ focus, groups }: { focus: HomeFocus | null; groups: 
         <Skeleton className="h-14 w-28" />
         <div className="mt-4 flex flex-wrap gap-2">
           {[0, 1, 2].map((i) => (
-            <Skeleton key={i} className="h-8 w-40 rounded-full" />
+            <Skeleton key={i} className="h-8 w-40" />
           ))}
         </div>
       </div>

@@ -351,7 +351,7 @@ function ReportSkeleton() {
     <div role="status" aria-label="Carregando o relatório" className="overflow-hidden rounded-2xl border border-line bg-surface p-8 shadow-elev-2">
       <div className="flex justify-between">
         <div className="flex gap-3">
-          <Skeleton className="size-12 rounded-xl" />
+          <Skeleton className="size-12" />
           <div className="space-y-2">
             <Skeleton className="h-4 w-40" />
             <Skeleton className="h-3 w-56" />
@@ -360,12 +360,12 @@ function ReportSkeleton() {
         <Skeleton className="h-10 w-36" />
       </div>
       <div className="mt-8 grid grid-cols-2 gap-4">
-        <Skeleton className="h-28 rounded-xl" />
-        <Skeleton className="h-28 rounded-xl" />
+        <Skeleton className="h-28" />
+        <Skeleton className="h-28" />
       </div>
       <div className="mt-6 grid grid-cols-4 gap-3">
         {[0, 1, 2, 3].map((i) => (
-          <Skeleton key={i} className="h-20 rounded-xl" />
+          <Skeleton key={i} className="h-20" />
         ))}
       </div>
     </div>

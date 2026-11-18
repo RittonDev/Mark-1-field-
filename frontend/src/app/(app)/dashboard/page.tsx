@@ -118,7 +118,7 @@ function TodaySoFar({ today }: { today: string }) {
       ) : (
         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6" role="status" aria-label="Carregando o dia de hoje">
           {Array.from({ length: 6 }, (_, i) => (
-            <Skeleton key={i} className="h-[92px] rounded-xl" />
+            <Skeleton key={i} className="h-[92px]" />
           ))}
         </div>
       )}

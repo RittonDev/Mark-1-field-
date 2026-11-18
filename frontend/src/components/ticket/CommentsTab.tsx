@@ -19,7 +19,7 @@ function CommentsSkeleton() {
       {[72, 48].map((width, i) => (
         <div key={i} aria-hidden className="rounded-lg border border-line bg-surface p-3" style={{ opacity: 1 - i * 0.3 }}>
           <div className="mb-2.5 flex items-center gap-2">
-            <Skeleton className="size-6 shrink-0" style={{ borderRadius: 9999 }} />
+            <Skeleton className="size-6 shrink-0 rounded-full" />
             <Skeleton className="h-3 w-28" />
             <Skeleton className="ml-auto h-2.5 w-24" />
           </div>

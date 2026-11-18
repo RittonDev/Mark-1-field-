@@ -201,8 +201,8 @@ export default function LoginPage() {
               ) : null}
               {providers.isLoading ? (
                 <>
-                  <Skeleton className="h-11 rounded-xl" />
-                  <Skeleton className="h-11 rounded-xl opacity-70" />
+                  <Skeleton className="h-11" />
+                  <Skeleton className="h-11 opacity-70" />
                 </>
               ) : (
                 <>

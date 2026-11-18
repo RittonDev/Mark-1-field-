@@ -145,7 +145,7 @@ function SkeletonRows({ count, columns, edit }: { count: number; columns: Column
       {Array.from({ length: count }).map((_, i) => (
         <tr key={i} className="bg-surface" style={{ opacity: Math.max(0.35, 1 - i * 0.07) }}>
           <Td className={clsx(STICKY_BOX, STICKY_BODY)}>
-            <Skeleton className="size-4 rounded" />
+            <Skeleton className="size-4" />
           </Td>
           <Td className={clsx(STICKY_ID, STICKY_BODY)}>
             <Skeleton className="h-3.5 w-12" />
@@ -160,7 +160,7 @@ function SkeletonRows({ count, columns, edit }: { count: number; columns: Column
           ))}
           {edit ? (
             <Td edit className="bg-inherit!">
-              <Skeleton className="mx-auto size-8 rounded-lg" />
+              <Skeleton className="mx-auto size-8" />
             </Td>
           ) : null}
         </tr>

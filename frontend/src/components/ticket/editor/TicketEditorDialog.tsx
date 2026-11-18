@@ -110,22 +110,21 @@ function EditorSkeleton({ preview, onClose }: { preview: Preview | null; onClose
       <div aria-hidden className="flex h-10 shrink-0 items-center gap-1 overflow-hidden border-b border-line px-3">
         {SKELETON_TABS.map((width, i) => (
           <span key={i} className="flex shrink-0 items-center gap-1.5 px-2.5">
-            <Skeleton className="size-4 rounded" />
+            <Skeleton className="size-4" />
             <Skeleton className={clsx("h-3", i > 0 && "max-sm:hidden")} style={{ width }} />
           </span>
         ))}
-        {/* Raio no style: o .skeleton do globals.css (fora das camadas) ganha das classes rounded-*. */}
-        <Skeleton className="ml-1.5 h-6 w-16 shrink-0" style={{ borderRadius: 9999 }} />
+        <Skeleton className="ml-1.5 h-6 w-16 shrink-0 rounded-full" />
       </div>
       <div aria-hidden className="@container min-h-0 flex-1 overflow-hidden bg-[var(--canvas,transparent)] px-4 py-5 sm:px-5">
         {/* A faixa do relatório do cliente, no topo da Geral. */}
         <div className="mb-4 flex items-center gap-3 rounded-xl border border-line bg-surface px-4 py-2.5 shadow-elev-1">
-          <Skeleton className="size-4 shrink-0 rounded" />
+          <Skeleton className="size-4 shrink-0" />
           <div className="flex min-w-0 flex-1 flex-col gap-1.5">
             <Skeleton className="h-3.5 w-36" />
             <Skeleton className="h-3 w-56 max-w-full" />
           </div>
-          <Skeleton className="h-8 w-24 shrink-0 rounded-lg" />
+          <Skeleton className="h-8 w-24 shrink-0" />
         </div>
         <div className="rounded-xl border border-line bg-surface shadow-elev-1">
           <div className="border-b border-line px-5 py-4">
@@ -135,18 +134,18 @@ function EditorSkeleton({ preview, onClose }: { preview: Preview | null; onClose
             {SKELETON_FIELDS.map(({ span, tall }, i) => (
               <div key={i} className={clsx("flex flex-col gap-2", span)}>
                 <Skeleton className="h-3 w-24" />
-                <Skeleton className={clsx("w-full rounded-lg", tall ? "h-24" : "h-9")} />
+                <Skeleton className={clsx("w-full", tall ? "h-24" : "h-9")} />
               </div>
             ))}
           </div>
         </div>
       </div>
       <div aria-hidden className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-line bg-surface-2/60 px-5 py-3">
-        <Skeleton className="h-9 w-20 rounded-lg" />
+        <Skeleton className="h-9 w-20" />
         <div className="ml-auto flex flex-wrap items-center justify-end gap-x-1 gap-y-1.5">
-          <Skeleton className="mr-1 h-8 w-40 rounded-lg" />
+          <Skeleton className="mr-1 h-8 w-40" />
           {[0, 1, 2].map((i) => (
-            <Skeleton key={i} className="size-9 rounded-lg" />
+            <Skeleton key={i} className="size-9" />
           ))}
         </div>
       </div>

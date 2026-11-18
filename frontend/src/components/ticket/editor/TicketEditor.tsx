@@ -195,7 +195,7 @@ function LocationTab({ ticket }: { ticket: TicketDetail }) {
               <span className="sr-only">Carregando os pontos de GPS...</span>
               {[0, 1].map((i) => (
                 <div key={i} className="flex items-start gap-2" style={{ opacity: 1 - i * 0.25 }}>
-                  <Skeleton className="mt-0.5 size-3.5 shrink-0" style={{ borderRadius: 9999 }} />
+                  <Skeleton className="mt-0.5 size-3.5 shrink-0 rounded-full" />
                   <div className="flex flex-1 flex-col gap-1.5">
                     <Skeleton className="h-3.5 w-3/4" />
                     <Skeleton className="h-3 w-1/2" />

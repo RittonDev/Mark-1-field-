@@ -316,7 +316,7 @@ export function LoadingBlock({ label = "Carregando...", rows = 3 }: { label?: st
         const [a, b] = SKELETON_WIDTHS[i % SKELETON_WIDTHS.length];
         return (
           <div key={i} className="flex items-center gap-3" style={{ opacity: 1 - i * 0.16 }}>
-            <Skeleton className="size-8 shrink-0 rounded-lg" />
+            <Skeleton className="size-8 shrink-0" />
             <div className="flex flex-1 flex-col gap-2">
               <Skeleton className="h-3" style={{ width: `${a}%` }} />
               <Skeleton className="h-2.5" style={{ width: `${b}%` }} />

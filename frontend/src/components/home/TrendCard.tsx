@@ -75,7 +75,7 @@ export function TrendCard({ week, weeks, today }: { week: WeekDay[] | null; week
       <CardHeader title="Tendência" description={points === null ? "Carregando..." : total} />
       {points === null ? (
         <div className="px-5 py-4" role="status" aria-label="Carregando o gráfico">
-          <Skeleton className="h-[180px] rounded-lg" />
+          <Skeleton className="h-[180px]" />
         </div>
       ) : (
         <>

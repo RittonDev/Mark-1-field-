@@ -97,7 +97,7 @@ function QuoteSkeleton() {
     <div role="status" aria-label="Carregando o orçamento" className="overflow-hidden rounded-2xl border border-line bg-surface shadow-elev-2">
       <div className="flex justify-between p-8">
         <div className="flex gap-4">
-          <Skeleton className="size-14 rounded-xl" />
+          <Skeleton className="size-14" />
           <div className="space-y-2">
             <Skeleton className="h-4 w-40" />
             <Skeleton className="h-3 w-56" />
@@ -105,10 +105,10 @@ function QuoteSkeleton() {
         </div>
         <Skeleton className="h-10 w-32" />
       </div>
-      <Skeleton className="h-10 rounded-none" />
+      <Skeleton className="h-10" />
       <div className="grid gap-4 p-8 md:grid-cols-2">
-        <Skeleton className="h-28 rounded-xl" />
-        <Skeleton className="h-28 rounded-xl" />
+        <Skeleton className="h-28" />
+        <Skeleton className="h-28" />
       </div>
     </div>
   );
