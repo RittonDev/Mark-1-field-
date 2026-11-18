@@ -179,6 +179,43 @@ Requisitos:
   e o número de itens pendentes. Tocar abre a tela **Conta**, com a fila de envio (dá para descartar a
   operação que o servidor falhou em processar 3 vezes; falta de rede e falha do envio inteiro não contam), os
   avisos de operações recusadas, "Sincronizar agora", "Baixar tudo" e o estado do push.
+- **Ofertas de OS com preço** (detalhes abaixo): a central manda uma OS sem técnico com o valor; o técnico
+  aceita pelo valor ou recusa, e quem aceitar primeiro fica com ela.
+
+## Ofertas de OS com preço
+
+A central manda uma OS ainda sem técnico, com o valor, para alguns técnicos (contrato em
+[docs/API.md](../docs/API.md), "Ofertas de OS"). **Não existe contraproposta nem chat**: a conversa com a central
+é pelo grupo de WhatsApp. Código: [src/lib/offers.ts](src/lib/offers.ts) (dados, regras e avisos),
+`refreshOffers`/`acceptOffer`/`declineOffer` em [src/lib/sync.ts](src/lib/sync.ts), a seção
+[src/components/Offers.tsx](src/components/Offers.tsx) e a tela `src/app/oferta/[id].tsx`.
+
+- **Lista**: `GET /me/offers` na rodada de sincronização, depois do download, e guardada no aparelho (kv
+  `field_offers`) para abrir sem rede. A busca não se repete a cada rodada: valem o evento `ticket.offer` do tempo
+  real (só para os técnicos da oferta), o "puxar para atualizar" e, sem eles, uma conferência por minuto.
+- **Hoje** ganha no topo **Ofertas para você**: um cartão por oferta pendente e no prazo, com o valor em
+  destaque, o serviço, bairro · cidade/UF, a janela da visita (ou "Data a combinar"), "Responder até 15:30" e o
+  selo **Nova** enquanto o técnico não abriu. O prazo é contado pelo relógio do servidor (`serverNow`): a oferta
+  vencida sai da lista sozinha.
+- **Avisos**: oferta nova → "Nova oferta de OS" com valor, serviço e bairro (tocar abre a oferta; nunca a OS,
+  que ainda não é dele). A que fecha sem resposta → "Outro técnico aceitou a OS-…", "A central cancelou a
+  oferta da OS-…". Não há push real: o técnico fica sabendo pelo tempo real com o app aberto e pelo texto que a
+  central cola no grupo.
+- **Tela da oferta** (`/oferta/<id>`): abrir chama `GET /me/offers/{id}`, que grava a leitura no servidor.
+  Mostra nº e título, tipo de serviço, bairro · cidade/UF, janela da visita, o recado da central, os
+  formulários (nome e se é obrigatório) e o cartão **Escopo** recolhido: abrir o escopo marca **Escopo lido**
+  (guardado por oferta). Rodapé fixo: **Aceitar por R$ X** (liberado com a leitura gravada e o escopo lido) e
+  **Recusar** (motivo: Agenda cheia, Muito longe, Valor não compensa, Outro motivo).
+- **Aceitar** (confirmação "Aceitar esta OS por R$ X? Ela vai para a sua agenda.") → `POST /me/offers/{id}/accept`;
+  a OS volta já atribuída e entra no aparelho com a própria resposta (sem o aviso duplicado "Nova OS para
+  você"), e a tela da oferta vira a da OS. O valor aparece em Detalhes e em Ganhos (`my_payout`).
+- **Recusas do servidor** (409/422 com `code`: outro técnico aceitou, prazo, cancelada, OS indisponível, já
+  respondida, oferta não aberta): a tela mostra o texto do servidor, sem "Tentar de novo", e atualiza a lista.
+- **Sem conexão**: os botões ficam desabilitados ("Sem conexão. Conecte para responder a oferta."). Oferta
+  vencida ou fechada: sem botões, com a situação ("O prazo para responder acabou", "Outro técnico aceitou esta
+  OS", "A central cancelou esta oferta"); a aceita leva à OS.
+- **LGPD**: só o recorte do convite fica no aparelho (sem cliente, loja, endereço ou contato); as que fecharam
+  vêm mínimas do servidor; tudo sai com o resto dos dados na troca de técnico e quando o acesso é retirado.
 
 ## Promessa de campo (chegada, 4h na loja, peças) e horário
 
@@ -309,6 +346,7 @@ src/
     trocar-senha.tsx   primeiro acesso (senha provisória)
     index.tsx          tela inicial: jornada + Hoje / Agenda (calendário) / Concluídas
     ticket/[id].tsx    detalhe, ações e abas
+    oferta/[id].tsx    oferta de OS com preço: escopo, "Aceitar por R$ X" ou "Recusar"
     termo-rastreamento.tsx  termo de ciência do rastreamento (LGPD)
     conta.tsx          sincronização, fila, avisos, rastreamento, aparência, sair
   components/          UI (marca, cartões, calendário, jornada, diálogo de transição, abas da OS)
@@ -328,6 +366,7 @@ src/
     field.ts           promessa de campo: relógios de chegada e de loja, rótulos de peças
     onsiteAlerts.ts    notificações locais do tempo na loja
     sync.ts            motor de sync, fila, fotos, gatilhos
+    offers.ts          ofertas de OS: lista guardada, prazo pelo relógio do servidor, "Escopo lido" e avisos
     realtime.ts        WebSocket
     sla.ts             porta de backend/app/services/sla.py::compute_sla_status
     device.ts          POST/DELETE /devices

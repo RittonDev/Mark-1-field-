@@ -81,6 +81,8 @@ Com o app aberto e online, mantenha `ws(s)://<host>/api/v1/ws?token=<access_toke
 
 - mande `{"type":"ping"}` a cada ~25 s;
 - ao receber `ticket.*`, faça um `pull` com o último `since` (o evento não carrega a OS inteira);
+- o `ticket.offer` (oferta de OS com preço, só para os técnicos dela, sem `version`) pede também
+  `GET /me/offers` na mesma rodada (docs/API.md, "Ofertas de OS");
 - código de fechamento **4401** = token inválido/expirado → `refresh` e reconecte;
 - reconecte com backoff exponencial ao perder a conexão.
 
