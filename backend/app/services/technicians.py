@@ -107,7 +107,8 @@ def set_home(user: User, city: str | None, state: str | None) -> bool:
     """Grava a cidade e a UF de casa (já na grafia padrão: canonical_home). Mudou de cidade ou de
     UF (não só a grafia): as coordenadas antigas de casa saem, porque levariam a sugestões e
     distâncias erradas (a região "pelo endereço" volta quando houver coordenada nova)."""
-    moved = state != user.home_state or fold_text(city) != fold_text(user.home_city)
+    same_state = fold_text(state) == fold_text(user.home_state)
+    moved = not same_state or fold_text(city) != fold_text(user.home_city)
     user.home_city, user.home_state = city, state
     if moved:
         user.home_latitude = None
