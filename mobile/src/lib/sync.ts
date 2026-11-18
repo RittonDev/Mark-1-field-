@@ -1014,8 +1014,9 @@ export async function storeServerTicket(ticket: TicketDetail) {
 
 /**
  * Ofertas de OS com preço (GET /me/offers), depois do pull. A busca não se repete a cada rodada: valem o
- * aviso do tempo real (ticket.offer), o "puxar para atualizar" e, sem eles, uma conferência por minuto.
- * Falta de rede para a rodada; outro problema (servidor sem a rota, erro do servidor) não derruba o sync.
+ * aviso do tempo real (ticket.offer), o app voltando à tela, a rede e o tempo real voltando (um aviso pode ter
+ * se perdido), o "puxar para atualizar" e, sem eles, uma conferência por minuto. Falta de rede para a rodada;
+ * outro problema (servidor sem a rota, erro do servidor) não derruba o sync.
  */
 async function refreshOffers(round: Round, manual: boolean) {
   if (!offersDue(manual)) return;
@@ -1646,7 +1647,11 @@ export function startSync() {
 
   realtime = new RealtimeClient({
     onState: (state) => setStatus({ realtime: state }),
-    onOpen: () => void requestSync(),
+    onOpen: () => {
+      // Sem a conexão (app em segundo plano, rede caída), um ticket.offer pode ter se perdido.
+      offersChanged();
+      void requestSync();
+    },
     onEvent: (event) => {
       handleRealtimeEvent(event).catch((error: unknown) => console.warn("Falha ao tratar evento do tempo real", error));
     },
@@ -1664,6 +1669,7 @@ export function startSync() {
     if (online && (wasOffline || switched)) {
       // Rede voltou ou trocou (Wi-Fi ↔ dados): a conexão de tempo real pode ter morrido sem avisar.
       realtime?.reconnectNow({ force: true });
+      offersChanged();
       void requestSync();
     }
   });
@@ -1674,6 +1680,8 @@ export function startSync() {
     if (next === "active" && !wasActive) {
       realtime?.start();
       realtime?.reconnectNow();
+      // O técnico costuma voltar ao app pelo recado da central no grupo: a oferta nova aparece já.
+      offersChanged();
       void requestSync();
       // Garante a coleta da jornada (o sistema pode ter encerrado o app em segundo plano).
       void resumeTracking();

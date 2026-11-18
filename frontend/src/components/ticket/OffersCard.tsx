@@ -3,7 +3,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 import { AlertTriangle, Search, Send, Star, X } from "lucide-react";
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { useConfirm } from "@/components/Confirm";
 import { searchText } from "@/components/new-ticket/Combobox";
 import { offerText } from "@/components/new-ticket/invite";
@@ -401,6 +401,7 @@ export function OfferDialog({
   const [note, setNote] = useState("");
   const [term, setTerm] = useState("");
   const [tried, setTried] = useState(false);
+  const errorRef = useRef<HTMLDivElement>(null);
   const search = useTechnicianSearch(term);
 
   // Os mais indicados para a OS (o mesmo ranking da aba Geral, com até 10). A própria OS não conta como
@@ -459,6 +460,8 @@ export function OfferDialog({
       onSent?.(created);
       onClose();
     },
+    // O erro fica no fim do diálogo: leva até ele (a lista de técnicos pode ter empurrado para baixo).
+    onError: () => requestAnimationFrame(() => errorRef.current?.scrollIntoView({ block: "nearest" })),
   });
 
   const fee = types.data?.find((t) => t.id === ticket.service_type?.id)?.technician_fee ?? null;
@@ -730,7 +733,11 @@ export function OfferDialog({
           </span>
         </div>
 
-        {send.error ? <ErrorBox title="Não foi possível enviar a oferta" message={errorMessage(send.error)} /> : null}
+        {send.error ? (
+          <div ref={errorRef}>
+            <ErrorBox title="Não foi possível enviar a oferta" message={errorMessage(send.error)} />
+          </div>
+        ) : null}
       </form>
     </Dialog>
   );

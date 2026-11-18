@@ -192,7 +192,8 @@ A central manda uma OS ainda sem técnico, com o valor, para alguns técnicos (c
 
 - **Lista**: `GET /me/offers` na rodada de sincronização, depois do download, e guardada no aparelho (kv
   `field_offers`) para abrir sem rede. A busca não se repete a cada rodada: valem o evento `ticket.offer` do tempo
-  real (só para os técnicos da oferta), o "puxar para atualizar" e, sem eles, uma conferência por minuto.
+  real (só para os técnicos da oferta), o app voltando à tela (o técnico costuma vir do recado no grupo), a rede
+  e o tempo real voltando, o "puxar para atualizar" e, sem eles, uma conferência por minuto.
 - **Hoje** ganha no topo **Ofertas para você**: um cartão por oferta pendente e no prazo, com o valor em
   destaque, o serviço, bairro · cidade/UF, a janela da visita (ou "Data a combinar"), "Responder até 15:30" e o
   selo **Nova** enquanto o técnico não abriu. O prazo é contado pelo relógio do servidor (`serverNow`): a oferta

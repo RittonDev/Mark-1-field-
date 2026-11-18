@@ -270,7 +270,10 @@ let fetchedAt = 0;
 let wanted = 0;
 let served = 0;
 
-/** Chegou um ticket.offer (oferta nova, aceita por outro, cancelada): a próxima rodada busca a lista. */
+/**
+ * Chegou um ticket.offer (oferta nova, aceita por outro, cancelada), ou um aviso pode ter se perdido (app
+ * voltando à tela, rede ou tempo real voltando): a próxima rodada busca a lista.
+ */
 export function offersChanged() {
   wanted += 1;
 }
