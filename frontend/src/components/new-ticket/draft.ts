@@ -49,14 +49,18 @@ export interface NewTicketDraft {
   tags: Tag[];
   /** O padrão que valia quando o analista mexeu nas etiquetas: avisa se a OS entrar ou sair de projeto. */
   tagsMode: TagMode;
+  /** A categoria veio do tipo de OS (não foi escolhida à mão): troca junto com o tipo. */
+  categoryFromType: boolean;
+  /** Formulários da OS, na ordem em que entram. */
   formIds: UUID[];
-  /** Formulários marcados sozinhos por serem do tipo de OS escolhido. */
+  /** Entraram pelo tipo de OS ou pela categoria e o analista não mexeu: saem se deixarem de casar. */
   autoFormIds: UUID[];
-  formsRequired: boolean;
+  /** Obrigatório ou opcional que o analista escolheu; sem escolha, vale o padrão do modelo. */
+  formRequired: Record<UUID, boolean>;
 }
 
-// Versão 2: título opcional, localização obrigatória e etiquetas pelo padrão (rascunhos da 1 não voltam).
-export const DRAFT_VERSION = 2;
+// Versão 3: formulários pelo tipo e pela categoria, cada um obrigatório ou opcional (rascunhos da 2 não voltam).
+export const DRAFT_VERSION = 3;
 export const draftKey = (userId: string) => `maxx.novaOs.rascunho.${userId}`;
 export const ORIGIN_KEY = "maxx.novaOs.origem";
 
@@ -98,9 +102,10 @@ export function blankDraft(source: Origin, keep?: { location: Location | null; c
     tagsAuto: true,
     tags: [],
     tagsMode: "create",
+    categoryFromType: false,
     formIds: [],
     autoFormIds: [],
-    formsRequired: true,
+    formRequired: {},
   };
 }
 
@@ -142,15 +147,16 @@ export function autoTitle(d: NewTicketDraft): string {
   return firstLine.slice(0, 200);
 }
 
-/** Tira o tipo de OS e, junto, a duração e os formulários que vieram dele. */
+/**
+ * Tira o tipo de OS e, junto, a duração que veio dele. A categoria fica (os formulários que deixam de
+ * casar saem em syncForms).
+ */
 function withoutServiceType(d: NewTicketDraft): NewTicketDraft {
   return {
     ...d,
     serviceType: null,
     minutesFromType: false,
     form: { ...d.form, estimated_minutes: d.minutesFromType ? "" : d.form.estimated_minutes },
-    formIds: d.formIds.filter((id) => !d.autoFormIds.includes(id)),
-    autoFormIds: [],
   };
 }
 
@@ -184,24 +190,121 @@ export function withLocation(d: NewTicketDraft, location: Location | null, proje
   return location ? withCustomer(base, location.customer_id, projects) : base;
 }
 
-/** Tipo de OS escolhido: a duração, a categoria e os formulários dele. */
-export function withServiceType(d: NewTicketDraft, st: ServiceType | null, templates: FormTemplate[] | undefined): NewTicketDraft {
+/**
+ * Tipo de OS escolhido: a duração e a categoria dele. A categoria acompanha o tipo quando estava vazia ou
+ * tinha vindo do tipo anterior; a escolhida à mão fica (a mesma regra da API ao trocar o tipo). Os
+ * formulários seguem em syncForms.
+ */
+export function withServiceType(d: NewTicketDraft, st: ServiceType | null): NewTicketDraft {
   const base = withoutServiceType(d);
   if (!st) return base;
-  const suggested = (templates ?? []).filter((t) => t.service_type_ids.includes(st.id)).map((t) => t.id);
-  const added = suggested.filter((id) => !base.formIds.includes(id));
+  const follow = d.categoryFromType || !d.form.category_id;
   return {
     ...base,
     serviceType: st,
     minutesFromType: true,
+    categoryFromType: follow && Boolean(st.category_id),
     form: {
       ...base.form,
       estimated_minutes: String(st.estimated_minutes),
-      category_id: base.form.category_id || st.category_id || "",
+      category_id: follow ? (st.category_id ?? "") : base.form.category_id,
       // Tipo do catálogo de um cliente: a OS é desse cliente.
       customer_id: base.form.customer_id || st.customer_id || "",
     },
-    formIds: [...base.formIds, ...added],
-    autoFormIds: added,
+  };
+}
+
+/** Categoria escolhida à mão: passa a ficar mesmo trocando o tipo de OS. */
+export function withCategory(d: NewTicketDraft, categoryId: string): NewTicketDraft {
+  return { ...d, categoryFromType: false, form: { ...d.form, category_id: categoryId } };
+}
+
+/**
+ * A categoria com que a OS nasce: a escolhida ou, sem ela, a do tipo de OS (a API completa assim). É a que
+ * decide os formulários que entram pela categoria.
+ */
+export function effectiveCategory(d: NewTicketDraft): string {
+  return d.form.category_id || d.serviceType?.category_id || "";
+}
+
+/** As de cima valem até este nível (o mesmo limite da API e da tela de Categorias). */
+const CATEGORY_LEVELS = 10;
+
+/** A categoria e as de cima (pai, avô...), da mais próxima para a mais distante. */
+export function categoryLine(categories: Category[] | undefined, id: string | null | undefined): Category[] {
+  if (!id) return [];
+  const byId = new Map((categories ?? []).map((c) => [c.id, c]));
+  const line: Category[] = [];
+  for (let node = byId.get(id); node && line.length <= CATEGORY_LEVELS; node = node.parent_id ? byId.get(node.parent_id) : undefined) {
+    if (line.includes(node)) break;
+    line.push(node);
+  }
+  return line;
+}
+
+/** Formulário que entra sozinho na OS: pelo tipo de OS (`label`: o nome do tipo) ou pela categoria (`label`: o nome completo dela). */
+export interface MatchedForm {
+  id: UUID;
+  via: "type" | "category";
+  label: string;
+}
+
+/**
+ * Modelos ativos que entram sozinhos numa OS com este tipo e esta categoria, em ordem de nome (a regra da
+ * API): o tipo está nos tipos do modelo, ou a categoria (ou uma acima dela) está nas categorias do modelo.
+ * Quando os dois casam, vale o tipo; pela categoria, a ligada mais próxima.
+ */
+export function matchedForms(
+  templates: FormTemplate[] | undefined,
+  serviceType: Pick<ServiceType, "id" | "name"> | null,
+  categoryId: string | null | undefined,
+  categories: Category[] | undefined,
+): MatchedForm[] {
+  // Sem a lista de categorias, só a própria categoria conta (as de cima ficam para a API).
+  const line = categoryLine(categories, categoryId);
+  const ids = line.length ? line.map((c) => c.id) : categoryId ? [categoryId] : [];
+  const out: (MatchedForm & { name: string })[] = [];
+  for (const t of templates ?? []) {
+    if (!t.is_active) continue;
+    if (serviceType && t.service_type_ids.includes(serviceType.id)) {
+      out.push({ id: t.id, via: "type", label: serviceType.name, name: t.name });
+      continue;
+    }
+    const linked = new Set(t.category_ids ?? []);
+    const at = ids.findIndex((id) => linked.has(id));
+    if (at >= 0) out.push({ id: t.id, via: "category", label: line[at]?.full_name ?? "", name: t.name });
+  }
+  return out
+    .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"))
+    .map(({ id, via, label }) => ({ id, via, label }));
+}
+
+/**
+ * Os formulários acompanham o tipo de OS e a categoria (`prev` -> `next`): saem os que tinham entrado
+ * sozinhos e deixaram de casar; entram, marcados, os que passaram a casar. O que o analista marcou ou
+ * desmarcou e continua casando fica como ele deixou. Sem os modelos carregados, nada muda.
+ */
+export function syncForms(
+  prev: NewTicketDraft,
+  next: NewTicketDraft,
+  templates: FormTemplate[] | undefined,
+  categories: Category[] | undefined,
+): NewTicketDraft {
+  if (!templates) return next;
+  const before = { type: prev.serviceType?.id ?? "", category: effectiveCategory(prev) };
+  const after = { type: next.serviceType?.id ?? "", category: effectiveCategory(next) };
+  if (before.type === after.type && before.category === after.category) return next;
+  const was = new Set(matchedForms(templates, prev.serviceType, before.category, categories).map((m) => m.id));
+  const now = matchedForms(templates, next.serviceType, after.category, categories).map((m) => m.id);
+  const leaving = next.autoFormIds.filter((id) => !now.includes(id));
+  const entering = now.filter((id) => !was.has(id) && !next.formIds.includes(id));
+  if (!leaving.length && !entering.length) return next;
+  const formRequired = { ...next.formRequired };
+  for (const id of leaving) delete formRequired[id];
+  return {
+    ...next,
+    formIds: [...next.formIds.filter((id) => !leaving.includes(id)), ...entering],
+    autoFormIds: [...next.autoFormIds.filter((id) => !leaving.includes(id)), ...entering],
+    formRequired,
   };
 }
