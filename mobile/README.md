@@ -221,9 +221,10 @@ A central manda uma OS ainda sem técnico, com o valor, para alguns técnicos (c
 - **Saiu da tela durante o envio**: a tela só navega se ainda estiver à frente (`useNavigation().isFocused()`).
   Fora dela, fica só o aviso: "OS aceita" (tocar abre a OS) ou "Oferta recusada", sem mexer na tela em que o
   técnico está.
-- **Aceite sem resposta** (rede caiu, tempo esgotado): o servidor pode ter gravado. O aviso é neutro, "Não deu
-  para confirmar o aceite. Conferindo…", e o app busca as ofertas e sincroniza na hora: a tela mostra como a
-  oferta ficou (aceita, com "Abrir a OS" e a OS baixada, ou ainda pendente para tentar de novo).
+- **Aceite sem resposta** (rede caiu, tempo esgotado no app ou 504 do proxy): o servidor pode ter gravado. O
+  aviso é neutro, "Não deu para confirmar o aceite. Conferindo…", e o app busca as ofertas e sincroniza na hora:
+  a tela mostra como a oferta ficou (aceita, com "Abrir a OS" e a OS baixada, ou ainda pendente para tentar de
+  novo).
 - **Recusas do servidor** (409/422 com `code`: outro técnico aceitou, prazo, cancelada, OS indisponível, já
   respondida, oferta não aberta): a tela mostra o texto do servidor, sem "Tentar de novo", e atualiza a lista.
 - **Sem conexão**: os botões ficam desabilitados ("Sem conexão. Conecte para responder a oferta."). Oferta

@@ -1045,6 +1045,8 @@ async function refreshOffers(round: Round, early: boolean) {
     await fetchOffers(round, { early });
   } catch (error) {
     if (error instanceof WriteCancelled || (error instanceof ApiError && error.status === 0)) throw error;
+    // A sessão mudou durante a busca (401 que encerrou, outro técnico entrou): nada dela vale para a sessão nova.
+    ensureAlive(round);
     console.warn("Não foi possível atualizar as ofertas de OS", error);
   }
   offersFetchDone(mark);
@@ -1068,6 +1070,8 @@ async function fetchOffers(ctx: Ctx, { quiet, early = false }: { quiet?: UUID; e
     false,
   );
   if (!outcome) return;
+  // A sessão mudou enquanto gravava: o pedido adiado, a hora da busca e os avisos não passam para a sessão nova.
+  ensureAlive(ctx);
   if (outcome.held) offersHeld();
   // Lista igual à guardada não acorda as telas (a conferência roda o dia todo).
   if (outcome.changed) notifyDataChanged();

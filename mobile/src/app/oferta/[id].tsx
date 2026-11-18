@@ -368,8 +368,9 @@ function OfferView({
       }
     } catch (error) {
       setBusy(null);
-      if (error instanceof ApiError && error.status === 0) {
-        // Sem resposta: o servidor pode ter gravado o aceite. Confere as ofertas e baixa a OS já.
+      if (error instanceof ApiError && (error.status === 0 || error.status === 504)) {
+        // Sem resposta (rede, tempo do app ou do proxy): o servidor pode ter gravado o aceite. Confere as ofertas e
+        // baixa a OS já.
         showToast("Não deu para confirmar o aceite. Conferindo…");
         void refreshOffersNow().catch(() => undefined);
         void requestSync();
