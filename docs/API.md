@@ -273,9 +273,12 @@ dentro do limite de 14 h, a mesma regra do mapa: a esquecida aberta não fica "e
 desativar encerra as sessões e fecha as ofertas de OS em aberto dele; e a ficha completa: endereço, jornada e
 serviços, ver "Fichas completas") ·
 `POST /technicians/{id}/reset-password` → `{technician, temporary_password}` (encerra as sessões) ·
-`POST|DELETE /technicians/{id}/photo` (JPG/PNG/WebP até 2 MB, tipo conferido pelo conteúdo) ·
+`POST|DELETE /technicians/{id}/photo` (JPG/PNG/WebP até 2 MB, tipo conferido pelo conteúdo; a anterior sai do disco
+quando ninguém mais usa; o DELETE tira também a foto do Field Control) ·
 `POST /technicians/import?dry_run=true|false` (CSV/XLSX: nome, email, telefone, grupo, cargo) →
 `{rows:[{line, action: create|update|error, errors}], created, updated, errors, credentials}` (senhas provisórias só na gravação).
+Um técnico, o histórico do cadastro e a chave PIX (`GET /technicians/{id}`, `GET /technicians/{id}/changes`,
+`DELETE /technicians/{id}/pix`): ver [Meu cadastro do técnico](#meu-cadastro-do-técnico-2026-11-18).
 
 ### Importação de locais
 `POST /locations/import?dry_run=true|false&customer_id=` (CSV/XLSX) → `{rows, created, updated, errors, customers_created}`.
@@ -316,8 +319,10 @@ acabou de sair dele, e o `ticket.offer` das ofertas dele); notas internas não c
 
 Só para a gestão (analistas, supervisores, admin): `technician.location` `{user_id, name, latitude, longitude, recorded_at,
 accuracy_m, speed_mps, heading, battery_pct, is_mock}` (o ponto mais novo do lote, inteiro: o que não veio do app vai null),
-`technician.shift` `{user_id, name, on_shift}` (esses dois só com o Mapa ao vivo) e `onboarding.submitted` `{application_id, name}`
-(ficha nova na homologação).
+`technician.shift` `{user_id, name, on_shift}` (esses dois só com o Mapa ao vivo), `onboarding.submitted` `{application_id, name}`
+(ficha nova na homologação) e `profile.changed` `{user_id, name, actor_id, actor_name, occurred_at, data: {fields, via}}`
+(cadastro do técnico alterado no app ou pela central; só com Técnicos ou Pagamentos: ver
+[Meu cadastro do técnico](#meu-cadastro-do-técnico-2026-11-18)).
 O cliente pode mandar `{"type":"ping"}` e recebe `{"type":"pong"}`.
 Ao receber um evento, recarregue a OS/lista (o evento não carrega o objeto inteiro).
 
@@ -934,8 +939,10 @@ computador" no portal: vira app com ícone na área de trabalho e no menu Inicia
   padrão nem herda o valor de quem saiu (o valor não pago do técnico é retirado, com histórico); o "Definir valor"
   continua valendo para qualquer um na OS.
 - `TicketDetail.payouts` (só a gestão) e `TicketDetail.my_payout` (só o técnico, o dele).
-- `GET /payouts?technician_id=&status=pending|paid&concluded=&date_from=&date_to=` (gestão) → `{items, summary}`
-  com `summary = {to_pay (OS concluídas), expected (OS abertas), paid}`; o período vale pela conclusão da OS.
+- `GET /payouts?technician_id=&status=pending|paid&concluded=&date_from=&date_to=&with_pix=` (gestão) → `{items, summary, pix}`
+  com `summary = {to_pay (OS concluídas), expected (OS abertas), paid}`; o período vale pela conclusão da OS. Com
+  `with_pix=true`, `pix` traz a chave PIX dos técnicos (ver [Meu cadastro do técnico](#meu-cadastro-do-técnico-2026-11-18));
+  sem ele, `{}`.
 - `POST /payouts/pay` e `POST /payouts/unpay` `{ids}` → `{changed}`. Pagar o último valor pendente de uma OS tira dela as
   etiquetas `remove_on_payout_paid` (ex.: "Pendente Envio PGTO"); desfazer o pagamento não traz de volta.
 - `GET /me/earnings?month=AAAA-MM` (técnico) → os chamados dele, o resumo e os reembolsos (custos extras
