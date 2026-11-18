@@ -58,7 +58,7 @@ import { STATUS } from "@/lib/constants";
 import { formatDateTime, formatMinutes, formatShort } from "@/lib/format";
 import { useDocumentTitle } from "@/lib/hooks";
 import { useCan } from "@/lib/permissions";
-import type { Comment, Quote, ReportLink, TicketDetail, TicketEvent, TicketStatus } from "@/lib/types";
+import type { Comment, Quote, ReportLink, TicketDetail, TicketEvent, TicketStatus, UUID } from "@/lib/types";
 import { copyText, type GroupText, groupTextsQuery, whatsappUrl } from "@/lib/whatsapp";
 import { GENERAL_FORM_ID, GeneralTab, GeneralView, type SaveState } from "./GeneralTab";
 import { type HeaderJump, slaView, TicketHeader } from "./TicketHeader";
@@ -108,6 +108,42 @@ const eventsQuery = (ticketId: string) => ({
   queryKey: ["ticket", ticketId, "events"],
   queryFn: () => api.get<TicketEvent[]>(`/tickets/${ticketId}/events`),
 });
+
+/** Maior espera do setTimeout (2^31 - 1 ms, uns 24 dias): acima disso ele dispara na hora. */
+const MAX_TIMER_MS = 2_147_483_647;
+/** A releitura chegou antes de a API dar a oferta por vencida (relógio do computador adiantado): tenta de novo. */
+const OFFER_RECHECK_MS = 15_000;
+const OFFER_RECHECKS = 4;
+
+/**
+ * A oferta vence sem rotina na API: o "Oferta enviada" do cabeçalho e o contador da Geral só mudam quando a
+ * OS é relida. Relê a OS 1 s depois do prazo mais próximo (`next_offer_expires_at`), para toda a gestão, com
+ * ou sem Pagamentos. Trocar de OS ou fechar desarma.
+ */
+function useOfferExpiryReload(ticketId: UUID, expiresAt: string | null | undefined) {
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    const at = expiresAt ? Date.parse(expiresAt) + 1000 : Number.NaN;
+    if (Number.isNaN(at)) return;
+    let timer: number | undefined;
+    let rechecks = 0;
+    const reload = () => {
+      void queryClient.invalidateQueries({ queryKey: ["ticket", ticketId], exact: true });
+      // Com outro prazo (ou nenhum) na resposta, este efeito recomeça com ele e desarma esta tentativa.
+      if (rechecks < OFFER_RECHECKS) {
+        rechecks += 1;
+        timer = window.setTimeout(reload, OFFER_RECHECK_MS);
+      }
+    };
+    // Prazo além do teto: espera em etapas.
+    const arm = () => {
+      const wait = at - Date.now();
+      timer = wait > MAX_TIMER_MS ? window.setTimeout(arm, MAX_TIMER_MS) : window.setTimeout(reload, Math.max(0, wait));
+    };
+    arm();
+    return () => window.clearTimeout(timer);
+  }, [queryClient, ticketId, expiresAt]);
+}
 
 /** A loja no mapa, quando o cadastro tem as coordenadas. */
 function storeOf(ticket: TicketDetail): [number, number] | null {
@@ -722,6 +758,7 @@ export function TicketEditor({
 
   useUnsavedGuard(dirty);
   useDocumentTitle(`${ticket.code} · ${ticket.title}`);
+  useOfferExpiryReload(ticket.id, ticket.next_offer_expires_at);
   useEffect(() => {
     onDirtyChange?.(dirty);
   }, [dirty, onDirtyChange]);

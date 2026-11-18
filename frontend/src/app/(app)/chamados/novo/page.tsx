@@ -746,10 +746,11 @@ function NewTicket() {
         ]
       : [];
 
+  // O serviço é o tipo de OS, nunca o título (ele pode trazer a loja); sem tipo, "Atendimento técnico".
   const invite = (name: string | null) =>
     inviteText({
       name,
-      service: st?.name ?? f.title,
+      service: st?.name ?? "",
       district: location?.district,
       city: location?.city,
       state: location?.state,

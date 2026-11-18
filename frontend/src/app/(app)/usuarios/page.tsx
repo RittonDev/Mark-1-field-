@@ -476,6 +476,7 @@ function UserDialog({ user, onClose }: { user: User | null; onClose: () => void 
           ownerUnknown && asOwner === 0
             ? "Você vê só a sua fila: confira com quem vê todas se a pessoa ainda é analista responsável de OS abertas. Depois de desativar, essas OS passam para Sem analista."
             : null,
+          savedTechnician ? "As ofertas em aberto para ela são canceladas." : null,
         ]
           .filter(Boolean)
           .join(" "),

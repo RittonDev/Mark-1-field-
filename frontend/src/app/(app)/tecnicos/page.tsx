@@ -1056,7 +1056,7 @@ function EditDialog({ tech, readOnly = false, onClose }: { tech: Technician; rea
             : open
               ? ` As ${open} OS abertas dele continuam com ele: reatribua em Chamados.`
               : ""
-        }`,
+        } As ofertas em aberto para ele são canceladas.`,
         confirmLabel: "Desativar",
       });
       if (!ok) return;

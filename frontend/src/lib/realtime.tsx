@@ -122,13 +122,14 @@ function sessionCan(item: AccessItemKey): boolean {
 
 /**
  * Aviso da oferta com preço (ticket.updated com `fields: ["offers"]`): o técnico aceitou (a OS passou a
- * ser dele) ou recusou (com o motivo, se deu). O evento não leva o valor. `mine`: a OS é da minha fila
- * (ou sem analista) e quem respondeu foi outra pessoa.
+ * ser dele) ou recusou (com o motivo, se deu). O evento não leva o valor. Vai para o analista da OS (sem
+ * analista, a central toda) e para quem mandou a oferta (`sender_id`), quando quem respondeu foi outra pessoa.
  */
-function offerNotice(event: RealtimeEvent, mine: boolean): NoticeDraft | null {
+function offerNotice(event: RealtimeEvent, userId: string, byOther: boolean, othersTicket: boolean): NoticeDraft | null {
   const raw = event.data?.offer;
   const offer = raw && typeof raw === "object" ? (raw as Partial<OfferRealtimeData["offer"]>) : null;
-  if (!mine || !offer || (offer.action !== "accepted" && offer.action !== "declined")) return null;
+  if (!byOther || !offer || (offer.action !== "accepted" && offer.action !== "declined")) return null;
+  if (othersTicket && offer.sender_id !== userId) return null;
   const code = event.ticket_code ?? "OS";
   const who = text(offer.technician_name) ?? text(event.actor_name) ?? "O técnico";
   if (offer.action === "accepted") {
@@ -189,8 +190,9 @@ function noticeFor(event: RealtimeEvent, userId: string): NoticeDraft | null {
     case "ticket.updated": {
       const fields = Array.isArray(data.fields) ? data.fields : [];
       // Oferta com preço: o técnico aceitou ou recusou (o envio, a leitura e o cancelamento só atualizam a
-      // tela). Avisa o analista da OS (sem analista, a central toda), sem o valor (é de Pagamentos).
-      if (fields.includes("offers")) return offerNotice(event, byOther && !othersTicket);
+      // tela). Avisa o analista da OS (sem analista, a central toda) e quem mandou a oferta, sem o valor
+      // (é de Pagamentos).
+      if (fields.includes("offers")) return offerNotice(event, userId, byOther, othersTicket);
       // Só a OS que outra pessoa passou para a minha fila (o analista responsável).
       if (!byOther || !fields.includes("owner_id")) return null;
       const me = sessionStore.get()?.user;
@@ -254,6 +256,15 @@ const EXTRA_BY_FIELD: Record<string, string[]> = {
   // vem também como ticket.assigned, que já recarrega Pagamentos e Técnicos.
   offers: [],
 };
+
+/**
+ * Só a oferta com preço mudou (enviada, vista, respondida ou cancelada): nada das listas de OS, do Início nem
+ * da lista de atribuição muda. O aceite também chega como ticket.assigned, que recarrega tudo isso.
+ */
+function offersOnly(event: RealtimeEvent): boolean {
+  const fields = event.data?.fields;
+  return event.type === "ticket.updated" && Array.isArray(fields) && fields.length === 1 && fields[0] === "offers";
+}
 
 function extraKeysFor(event: RealtimeEvent): string[] {
   switch (event.type) {
@@ -622,8 +633,12 @@ export function RealtimeProvider({
         invalidate(["tickets"]);
         invalidate(["quotes"]);
       } else if (type.startsWith("ticket.")) {
-        for (const key of ["tickets", "solicitacoes", "dashboard", "assignable", "portal", ...extraKeysFor(event)]) invalidate([key]);
-        invalidate(["tracking", "live"]);
+        // Só a oferta mudou: só a própria OS, logo abaixo (a lista de ofertas, o contador e o histórico ficam
+        // sob ["ticket", id]).
+        if (!offersOnly(event)) {
+          for (const key of ["tickets", "solicitacoes", "dashboard", "assignable", "portal", ...extraKeysFor(event)]) invalidate([key]);
+          invalidate(["tracking", "live"]);
+        }
       } else {
         return;
       }

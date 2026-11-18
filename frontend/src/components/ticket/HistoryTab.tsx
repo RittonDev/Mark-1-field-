@@ -122,13 +122,22 @@ function lowerFirst(text: string): string {
   return /^[A-ZÀ-Ý][a-zà-ÿ\s]/.test(text) ? text.charAt(0).toLowerCase() + text.slice(1) : text;
 }
 
+/**
+ * Notas da API que dizem mais que o motivo: o técnico da oferta entrou na visita (motivo "assigned") ou
+ * ficou sem acesso ao app, desativado ou fora do papel de técnico (motivo "central").
+ */
+const OFFER_CLOSED_BY_NOTE = new Map<string, string>([
+  ["A central incluiu o técnico na visita", "encerrou a oferta ao incluir o técnico na visita"],
+  ["Técnico sem acesso ao app", "encerrou a oferta: técnico sem acesso ao app"],
+]);
+
 /** Texto do offer_cancelled pelo motivo; a OS encerrada usa a nota ("OS cancelada", "OS resolvida"...). */
 function offerClosedLabel(event: TicketEvent): string {
   const reason = str(event.data?.reason) ?? event.to_value;
-  if (reason === "ticket_closed") {
-    const why = str(event.note);
-    return `encerrou a oferta: ${why ? lowerFirst(why) : "a OS foi encerrada"}`;
-  }
+  const why = str(event.note);
+  if (reason === "ticket_closed") return `encerrou a oferta: ${why ? lowerFirst(why) : "a OS foi encerrada"}`;
+  const byNote = why ? OFFER_CLOSED_BY_NOTE.get(why) : undefined;
+  if (byNote) return byNote;
   return (reason && OFFER_CLOSED[reason as OfferCancelReason]) || EVENT_TYPE.offer_cancelled;
 }
 
