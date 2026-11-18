@@ -42,6 +42,8 @@ from app.core.config import settings
 from app.core.enums import (
     ExpenseStatus,
     FormStatus,
+    OfferCancelReason,
+    OfferStatus,
     TicketEventType,
     TicketPriority,
     TicketStatus,
@@ -64,6 +66,7 @@ from app.models import (
     TicketEvent,
     TicketExpense,
     TicketForm,
+    TicketOffer,
     TicketWorklog,
     UnproductiveReason,
     User,
@@ -369,6 +372,8 @@ def field_view(detail: TicketDetail) -> TicketDetail:
         "recurrence_30d": 0,
         "recurrence": None,
         "legacy": None,
+        # Ofertas da OS a outros técnicos: coisa da central (as dele vêm em /me/offers).
+        "open_offers": 0,
     }
     for key, value in blank.items():
         setattr(detail, key, value)

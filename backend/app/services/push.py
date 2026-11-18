@@ -4,9 +4,10 @@ O provedor real ainda não está configurado: `LogPushProvider` só registra no 
 o que seria enviado. Para produção, implemente `PushProvider` com Firebase Cloud
 Messaging (cobre Android e iOS) e troque em `get_provider()`.
 
-O que avisa o técnico (o app é dele): OS nova, entrar ou sair de uma visita, visita
-agendada ou remarcada, OS cancelada e a decisão do pedido de peça. Acompanhamento não
-gera aviso: o app não tem conversa (a central fala com ele pelo grupo de WhatsApp).
+O que avisa o técnico (o app é dele): OS nova, oferta de OS para ele aceitar, entrar ou sair
+de uma visita, visita agendada ou remarcada, OS cancelada e a decisão do pedido de peça.
+Acompanhamento não gera aviso: o app não tem conversa (a central fala com ele pelo grupo de
+WhatsApp).
 """
 
 import logging
@@ -90,6 +91,13 @@ def _push_targets(event: dict[str, Any]) -> list[tuple[str, str, str]]:
         data.get("fields") or []
     ):
         notify(_visit_people(event), f"Visita remarcada: {code}", "Confira o novo horário no app")
+    elif kind == "ticket.offer" and data.get("action") == "sent":
+        # Oferta nova: o técnico ainda não está na OS (o evento vai só para os da oferta).
+        notify(
+            aud.get("user_ids") or [],
+            f"OS para aceitar: {code}",
+            "Veja o valor e o escopo no app e responda",
+        )
     elif kind == "ticket.part_request_decided":
         assignee = event.get("assignee_id")
         approved = data.get("status") == "approved"
