@@ -9,12 +9,15 @@ export interface Toast {
   tone: ToastTone;
   /** Aviso sobre uma OS: tocar abre a OS. */
   ticketId?: string;
+  /** Aviso de uma oferta de OS (o técnico ainda não está na OS): tocar abre a oferta. */
+  offerId?: string;
 }
 
 export interface ToastOptions {
   description?: string;
   tone?: ToastTone;
   ticketId?: string;
+  offerId?: string;
 }
 
 // Erro fica mais tempo na tela: é o que o técnico precisa ler até o fim.
@@ -42,13 +45,20 @@ export function showToast(title: string, options: ToastOptions = {}) {
   // O mesmo aviso de novo (ex.: duas rodadas sem rede) não empilha: atualiza o que está na tela.
   const same = toasts.find((t) => t.title === title && t.tone === tone);
   if (same) {
-    const updated: Toast = { ...same, description: options.description, ticketId: options.ticketId };
+    const updated: Toast = { ...same, description: options.description, ticketId: options.ticketId, offerId: options.offerId };
     toasts = toasts.map((t) => (t.id === same.id ? updated : t));
     emit();
     schedule(updated);
     return;
   }
-  const toast: Toast = { id: nextId++, title, description: options.description, tone, ticketId: options.ticketId };
+  const toast: Toast = {
+    id: nextId++,
+    title,
+    description: options.description,
+    tone,
+    ticketId: options.ticketId,
+    offerId: options.offerId,
+  };
   const dropped = toasts.slice(0, -2);
   dropped.forEach((t) => {
     clearTimeout(timers.get(t.id));

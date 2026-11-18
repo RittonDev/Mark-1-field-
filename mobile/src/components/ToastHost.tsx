@@ -14,7 +14,8 @@ const HEADER_HEIGHT = Platform.OS === "ios" ? 44 : 56;
 /**
  * Avisos rápidos no alto da tela: embaixo eles cobriam a barra de abas e a barra do próximo passo da OS
  * justamente quando ela é necessária; logo abaixo da altura do cabeçalho, não cobrem o "Voltar" nem a
- * faixa de conexão da tela inicial. Tocar fecha; aviso de uma OS abre a OS.
+ * faixa de conexão da tela inicial. Tocar fecha; aviso de uma OS abre a OS, e o de uma oferta abre a oferta
+ * (a OS da oferta ainda não é do técnico: abrir a OS daria "não disponível").
  */
 export function ToastHost() {
   const toasts = useToasts();
@@ -32,35 +33,39 @@ export function ToastHost() {
 
   function press(toast: Toast) {
     dismissToast(toast.id);
-    if (toast.ticketId) router.push({ pathname: "/ticket/[id]", params: { id: toast.ticketId } });
+    if (toast.offerId) router.push({ pathname: "/oferta/[id]", params: { id: toast.offerId } });
+    else if (toast.ticketId) router.push({ pathname: "/ticket/[id]", params: { id: toast.ticketId } });
   }
 
   return (
     <View style={[styles.host, { top: insets.top + HEADER_HEIGHT + 4 }]}>
-      {toasts.map((toast) => (
-        <Animated.View
-          key={toast.id}
-          entering={reduced ? undefined : FadeInUp.duration(180).withInitialValues({ opacity: 0, transform: [{ translateY: -ENTER_OFFSET }] })}
-          exiting={reduced ? undefined : FadeOut.duration(140)}
-          layout={reduced ? undefined : LinearTransition.duration(180)}
-          style={styles.item}
-        >
-          <Pressable
-            onPress={() => press(toast)}
-            accessibilityRole={toast.ticketId ? "button" : "alert"}
-            accessibilityLiveRegion="polite"
-            accessibilityHint={toast.ticketId ? "Abre a OS" : "Fecha o aviso"}
-            style={[styles.toast, { borderLeftColor: tone[toast.tone] }]}
+      {toasts.map((toast) => {
+        const opens = Boolean(toast.offerId || toast.ticketId);
+        return (
+          <Animated.View
+            key={toast.id}
+            entering={reduced ? undefined : FadeInUp.duration(180).withInitialValues({ opacity: 0, transform: [{ translateY: -ENTER_OFFSET }] })}
+            exiting={reduced ? undefined : FadeOut.duration(140)}
+            layout={reduced ? undefined : LinearTransition.duration(180)}
+            style={styles.item}
           >
-            <View style={{ flex: 1 }}>
-              <Text style={styles.title}>{toast.title}</Text>
-              {toast.description ? <Text style={styles.description}>{toast.description}</Text> : null}
-              {toast.ticketId ? <Text style={styles.open}>Toque para abrir</Text> : null}
-            </View>
-            {toast.ticketId ? <Icon name="chevronRight" size={18} color={c.toastMuted} /> : null}
-          </Pressable>
-        </Animated.View>
-      ))}
+            <Pressable
+              onPress={() => press(toast)}
+              accessibilityRole={opens ? "button" : "alert"}
+              accessibilityLiveRegion="polite"
+              accessibilityHint={toast.offerId ? "Abre a oferta" : toast.ticketId ? "Abre a OS" : "Fecha o aviso"}
+              style={[styles.toast, { borderLeftColor: tone[toast.tone] }]}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={styles.title}>{toast.title}</Text>
+                {toast.description ? <Text style={styles.description}>{toast.description}</Text> : null}
+                {opens ? <Text style={styles.open}>Toque para abrir</Text> : null}
+              </View>
+              {opens ? <Icon name="chevronRight" size={18} color={c.toastMuted} /> : null}
+            </Pressable>
+          </Animated.View>
+        );
+      })}
     </View>
   );
 }

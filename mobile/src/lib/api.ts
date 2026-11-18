@@ -23,12 +23,15 @@ const APP_HEADERS: Record<string, string> = { "X-App-Version": APP_VERSION, "X-A
 export class ApiError extends Error {
   status: number;
   detail: unknown;
+  /** `code` do corpo da resposta, quando vem (ex.: OFFER_TAKEN no 409 do aceite de uma oferta). */
+  code: string | null;
 
-  constructor(status: number, detail: unknown) {
+  constructor(status: number, detail: unknown, code: string | null = null) {
     super(formatDetail(detail, status));
     this.name = "ApiError";
     this.status = status;
     this.detail = detail;
+    this.code = code;
   }
 
   /** Sem rede, timeout ou servidor fora do ar: vale tentar de novo depois. */
@@ -133,6 +136,13 @@ async function parseBody(res: Response): Promise<unknown> {
 
 function detailOf(data: unknown): unknown {
   return data && typeof data === "object" && "detail" in data ? (data as { detail: unknown }).detail : data;
+}
+
+/** `code` do corpo de erro (`{detail, code}`), para o app reagir ao caso (ex.: oferta já aceita por outro). */
+function codeOf(data: unknown): string | null {
+  if (!data || typeof data !== "object" || !("code" in data)) return null;
+  const code = (data as { code: unknown }).code;
+  return typeof code === "string" ? code : null;
 }
 
 export type RefreshResult = "ok" | "invalid" | "offline";
@@ -240,7 +250,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     throw new ApiError(0, null);
   }
   if (res.status === 204) return undefined as T;
-  if (!res.ok) throw new ApiError(res.status, detailOf(res.data));
+  if (!res.ok) throw new ApiError(res.status, detailOf(res.data), codeOf(res.data));
   return res.data as T;
 }
 
@@ -323,7 +333,7 @@ export async function uploadFile<T>(
   } catch {
     data = result.body;
   }
-  if (result.status < 200 || result.status >= 300) throw new ApiError(result.status, detailOf(data));
+  if (result.status < 200 || result.status >= 300) throw new ApiError(result.status, detailOf(data), codeOf(data));
   return data as T;
 }
 
