@@ -254,6 +254,8 @@ function fromAssignable(u: AssignableUser): Candidate {
   return { id: u.id, name: u.name, detail: [u.team_name, `${u.open_tickets} em aberto`].filter(Boolean).join(" · ") };
 }
 
+const noop = () => undefined;
+
 interface TechnicianSearch {
   /** Busca já aplicada (depois da pausa na digitação). */
   q: string;
@@ -281,7 +283,7 @@ function useTechnicianSearch(term: string): TechnicianSearch {
   const assignable = useAssignable(null, !canBase);
   // Ainda digitando: a busca anterior não vale para o texto novo.
   const waiting = typed !== q;
-  if (q.length < 2) return { q, items: [], loading: waiting && typed.length >= 2, error: null, retry: () => {} };
+  if (q.length < 2) return { q, items: [], loading: waiting && typed.length >= 2, error: null, retry: noop };
   if (canBase) {
     return {
       q,
@@ -694,11 +696,12 @@ export function OfferDialog({
               aria-invalid={tried && amount.error ? true : undefined}
             />
           </Field>
-          <Field label="Prazo para responder" error={shown("deadline")} hint={deadlineHint}>
+          {/* O "fim do dia" pode passar com o diálogo aberto: o aviso aparece na hora, sem esperar o Enviar. */}
+          <Field label="Prazo para responder" error={errors.deadline} hint={deadlineHint}>
             <Select
               value={deadline}
               onChange={(e) => setDeadline(e.target.value as DeadlineKey)}
-              aria-invalid={tried && errors.deadline ? true : undefined}
+              aria-invalid={errors.deadline ? true : undefined}
             >
               {DEADLINES.map((d) => (
                 <option key={d.key} value={d.key} disabled={d.key === "eod" && !eodAvailable && deadline !== "eod"}>
@@ -710,13 +713,16 @@ export function OfferDialog({
         </div>
 
         <div className="flex flex-col gap-1">
-          <Field label="Recado para o técnico (opcional)" hint="Aparece na oferta, no app.">
+          <Field
+            label="Recado para o técnico (opcional)"
+            hint="Aparece na oferta, no app. Sem cliente, loja nem endereço: o técnico só vê isso depois de aceitar."
+          >
             <Textarea
               rows={2}
               value={note}
               onChange={(e) => setNote(e.target.value)}
               maxLength={NOTE_MAX}
-              placeholder="Ex.: levar escada; a loja abre às 8h."
+              placeholder="Ex.: levar escada e furadeira; atendimento a partir das 8h."
             />
           </Field>
           <span className="self-end text-[11px] text-ink-subtle tabular-nums">

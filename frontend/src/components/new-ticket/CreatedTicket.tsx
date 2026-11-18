@@ -183,7 +183,7 @@ export function CreatedTicket({
               ) : null}
             </div>
           )}
-          {offered?.length && !result.hidden ? <OfferSentNote ticket={t} offers={offered} /> : null}
+          {offered && offered.length > 0 && !result.hidden ? <OfferSentNote ticket={t} offers={offered} /> : null}
           <div className="flex flex-wrap gap-2">
             <Button variant="ghost" onClick={onNew}>
               <Plus aria-hidden className="size-4" />
