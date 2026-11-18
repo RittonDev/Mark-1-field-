@@ -75,6 +75,49 @@ async def test_new_technician_takes_the_unpaid_fee(client: AsyncClient, world: W
     ]
 
 
+async def test_internal_staff_is_not_paid_per_ticket(client: AsyncClient, world: World) -> None:
+    """O valor por chamado é do técnico parceiro: o analista ou supervisor que assume a OS não
+    ganha o padrão do tipo de serviço nem herda o valor do técnico que saiu."""
+    an, sup = world.analyst.headers, world.supervisor.headers
+    tech_id = str(world.tech.user.id)
+    service = await client.post(
+        f"{API}/service-types",
+        json={"name": "Instalação", "estimated_minutes": 60, "technician_fee": 120},
+        headers=an,
+    )
+    assert service.status_code == 201, service.text
+    st = service.json()["id"]
+
+    def values(detail: dict) -> list[tuple[str, float]]:
+        return [(p["technician"]["id"], p["amount"]) for p in detail["payouts"]]
+
+    # Assumir (o analista atende no remoto): sem valor.
+    taken = await create(client, world, title="Acesso VPN", service_type_id=st)
+    r = await client.post(f"{API}/tickets/{taken['id']}/take", headers=an)
+    assert r.status_code == 200, r.text
+    assert values(r.json()) == []
+    # "Atribuído" pelo menu e depois o técnico: o técnico recebe o padrão quando entra na OS.
+    t = await create(client, world, title="Troca de PDV", service_type_id=st)
+    t = await transition(client, an, t, "assigned")
+    assert t["assignee"]["id"] == str(world.analyst.user.id) and values(t) == []
+    r = await client.post(
+        f"{API}/tickets/{t['id']}/assign",
+        json={"assignee_id": tech_id, "expected_version": t["version"]},
+        headers=an,
+    )
+    assert r.status_code == 200, r.text
+    assert values(r.json()) == [(tech_id, 120.0)]
+    # A equipe interna assume a OS do técnico: o valor não pago sai, com histórico.
+    r = await client.post(f"{API}/tickets/{t['id']}/take", headers=sup)
+    assert r.status_code == 200, r.text
+    assert values(r.json()) == []
+    events = (await client.get(f"{API}/tickets/{t['id']}/events", headers=an)).json()
+    removed = [e for e in events if e["event_type"] == "payout_removed"]
+    assert [e["data"]["technician"] for e in removed] == ["Tecnico"]
+    listed = (await client.get(f"{API}/payouts", headers=an)).json()
+    assert (listed["items"], listed["summary"]["expected"]) == ([], 0)
+
+
 async def test_closing_payments_and_my_earnings(client: AsyncClient, world: World) -> None:
     an, th = world.analyst.headers, world.tech.headers
     tech_id = str(world.tech.user.id)

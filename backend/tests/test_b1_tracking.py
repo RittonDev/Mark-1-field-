@@ -52,6 +52,9 @@ async def test_forgotten_shift_closes_itself(
     assert r.json() == {"accepted": 0, "discarded": 1}
     me = _row((await client.get(f"{API}/tracking/live", headers=an)).json(), tech)
     assert (me["state"], me["on_shift"], me["last_position"]) == ("offline", False, None)
+    # A lista de Técnicos segue a mesma regra, mesmo antes de o app fechar a jornada.
+    listed = _row((await client.get(f"{API}/technicians", headers=an)).json(), tech)
+    assert listed["on_shift"] is False
 
     # O app confere a jornada: foi encerrada no limite, e uma nova pode começar.
     assert (await client.get(f"{API}/tracking/shift", headers=th)).json() == {"shift": None}
@@ -63,6 +66,8 @@ async def test_forgotten_shift_closes_itself(
     assert length == timedelta(hours=14)
     fresh = await start_shift(client, th)
     assert fresh["id"] != forgotten["id"]
+    listed = _row((await client.get(f"{API}/technicians", headers=an)).json(), tech)
+    assert listed["on_shift"] is True
 
 
 async def test_only_one_shift_stays_open(

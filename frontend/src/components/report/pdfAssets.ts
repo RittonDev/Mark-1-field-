@@ -6,17 +6,51 @@
 const MAX_SIDE = 1200;
 
 /**
+ * Sem chegar nenhum pedaço da foto por este tempo, ela desiste (rede móvel que trava a conexão, armazenamento
+ * pendurado): o PDF sai com o aviso no lugar dela, em vez de ficar parado em "Preparando as fotos". Foto
+ * grande que continua chegando, mesmo devagar, não é cortada.
+ */
+const IDLE_MS = 30_000;
+
+/** Baixa o arquivo, desistindo depois de IDLE_MS sem receber nada. */
+async function fetchBlob(url: string): Promise<Blob | null> {
+  const controller = typeof AbortController === "function" ? new AbortController() : null;
+  let timer = 0;
+  const arm = () => {
+    window.clearTimeout(timer);
+    if (controller) timer = window.setTimeout(() => controller.abort(), IDLE_MS);
+  };
+  try {
+    arm();
+    const res = await fetch(url, { mode: "cors", credentials: "omit", signal: controller?.signal });
+    if (!res.ok) return null;
+    if (!res.body) return await res.blob();
+    const reader = res.body.getReader();
+    const chunks: BlobPart[] = [];
+    for (;;) {
+      arm();
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+    }
+    return new Blob(chunks, { type: res.headers.get("content-type") ?? "" });
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
+/**
  * Baixa a imagem e devolve um data URL reduzido. `null` quando não dá: link expirado, servidor que não
- * libera a leitura (CORS) ou formato que o navegador não abre. O PDF mostra um aviso no lugar.
+ * libera a leitura (CORS), rede parada ou formato que o navegador não abre. O PDF mostra um aviso no lugar.
  */
 export async function imageDataUrl(
   url: string,
   { maxSide = MAX_SIDE, type = "image/jpeg", quality = 0.8 }: { maxSide?: number; type?: "image/jpeg" | "image/png"; quality?: number } = {},
 ): Promise<string | null> {
   try {
-    const res = await fetch(url, { mode: "cors", credentials: "omit" });
-    if (!res.ok) return null;
-    const bitmap = await createImageBitmap(await res.blob());
+    const blob = await fetchBlob(url);
+    if (!blob) return null;
+    const bitmap = await createImageBitmap(blob);
     const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
     const width = Math.max(1, Math.round(bitmap.width * scale));
     const height = Math.max(1, Math.round(bitmap.height * scale));

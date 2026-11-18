@@ -7,6 +7,7 @@ guarda vale na API (403 com código que a tela reconhece), não só no menu.
 import json
 import uuid
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from httpx import AsyncClient
@@ -17,9 +18,11 @@ from app.api.deps import require_access
 from app.core import permissions
 from app.core.config import settings
 from app.core.enums import TicketEventType
+from app.services.location_import import NEW_CUSTOMER_FORBIDDEN
 from tests.conftest import World, requires_db
 from tests.test_api import create
 from tests.test_b2_quotes import APPROVAL
+from tests.test_forms import PNG
 
 pytestmark = requires_db
 
@@ -428,6 +431,164 @@ async def test_ticket_expenses_route_follows_the_detail(client: AsyncClient, wor
     assert [e["description"] for e in helper] == ["Estacionamento do colega"]
     office = (await client.get(url, headers=world.analyst.headers)).json()
     assert len(office) == 2 and all(e["created_by"] is not None for e in office)
+
+
+async def test_cost_receipt_stays_with_extra_costs(
+    client: AsyncClient, world: World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """O comprovante de custo é custo: sem Custos extras, a gestão não o vê entre os anexos nem
+    mexe nele. Excluído por quem tem a tela, o custo fica sem comprovante; o reembolsado não troca
+    de comprovante."""
+    monkeypatch.setattr(settings, "MEDIA_ROOT", str(tmp_path))
+    sup, an = world.supervisor.headers, world.analyst.headers
+    t = await create(client, world, title="Troca de fonte")
+
+    async def photo(name: str) -> str:
+        r = await client.post(
+            f"{API}/tickets/{t['id']}/attachments",
+            files={"file": (name, PNG, "image/png")},
+            data={"kind": "photo"},
+            headers=sup,
+        )
+        assert r.status_code == 201, r.text
+        return r.json()["id"]
+
+    visit, receipt = await photo("rack.png"), await photo("recibo-pedagio.png")
+    toll = {"kind": "toll", "description": "Pedágio", "quantity": 1, "unit_value": "12.00"}
+    r = await client.post(
+        f"{API}/tickets/{t['id']}/expenses",
+        json={**toll, "receipt_attachment_id": receipt},
+        headers=sup,
+    )
+    assert r.status_code == 201, r.text
+    expense = f"{API}/expenses/{r.json()['id']}"
+
+    async def listed(headers: dict) -> list[str]:
+        r = await client.get(f"{API}/tickets/{t['id']}/attachments", headers=headers)
+        assert r.status_code == 200, r.text
+        return [a["id"] for a in r.json()]
+
+    assert await listed(an) == [visit, receipt]  # no padrão, com Custos extras
+    await restrict_analyst(client, world, **{"commercial.expenses": "none"})
+    assert await listed(an) == [visit]
+    assert await listed(sup) == [visit, receipt]
+    # Nem pelo id: para ele o comprovante não existe.
+    r = await client.patch(f"{API}/attachments/{receipt}", json={"description": "x"}, headers=an)
+    assert r.status_code == 404
+    assert (await client.delete(f"{API}/attachments/{receipt}", headers=an)).status_code == 404
+    assert (await client.delete(f"{API}/attachments/{visit}", headers=an)).status_code == 204
+
+    # Reembolsado: o comprovante fica (volte o custo para Aprovado antes).
+    for status in ("approved", "paid"):
+        r = await client.patch(expense, json={"status": status}, headers=sup)
+        assert r.status_code == 200, r.text
+    r = await client.delete(f"{API}/attachments/{receipt}", headers=sup)
+    assert r.status_code == 422 and "reembolsado" in r.json()["detail"]
+    assert (await client.patch(expense, json={"status": "approved"}, headers=sup)).status_code == 200
+    assert (await client.delete(f"{API}/attachments/{receipt}", headers=sup)).status_code == 204
+    rows = (await client.get(f"{API}/tickets/{t['id']}/expenses", headers=sup)).json()
+    assert [e["receipt_attachment_id"] for e in rows] == [None]  # sem apontar para o apagado
+
+
+async def test_location_import_creates_customers_only_with_customers_edit(
+    client: AsyncClient, world: World
+) -> None:
+    """Locais: Editar importa lojas; cliente novo pelas colunas da planilha pede Clientes: Editar,
+    como o POST /customers (a linha dá erro na prévia e na gravação)."""
+    an = world.analyst.headers
+    csv = (
+        "Cliente;Código;Local;Cidade;UF\n"
+        "Cliente Teste;L01;Loja Centro;São Paulo;SP\n"
+        "Rede X;R01;Rede X Centro;Campinas;SP\n"
+        "Rede X;R02;Rede X Norte;Campinas;SP\n"
+    )
+    files = {"file": ("locais.csv", csv.encode("cp1252"), "text/csv")}
+    await restrict_analyst(client, world, **{"base.customers": "view", "base.locations": "edit"})
+    r = await client.post(f"{API}/customers", json={"name": "Rede X"}, headers=an)
+    assert r.status_code == 403 and r.json()["code"] == "MODULE_FORBIDDEN"
+    for dry_run in (True, False):
+        r = await client.post(
+            f"{API}/locations/import", params={"dry_run": dry_run}, files=files, headers=an
+        )
+        assert r.status_code == 200, r.text
+        out = r.json()
+        assert (out["created"], out["errors"], out["customers_created"]) == (1, 2, 0)
+        errors = {row["line"]: row["errors"] for row in out["rows"] if row["errors"]}
+        assert errors == {3: [NEW_CUSTOMER_FORBIDDEN], 4: [NEW_CUSTOMER_FORBIDDEN]}
+    names = {c["name"] for c in (await client.get(f"{API}/customers", headers=an)).json()}
+    assert "Rede X" not in names
+    # Com Clientes: Editar (o padrão do analista), o mesmo arquivo cria o cliente.
+    await restrict_analyst(client, world)
+    r = await client.post(f"{API}/locations/import", files=files, headers=an)
+    assert (r.json()["customers_created"], r.json()["errors"]) == (1, 0)
+
+
+async def test_project_margin_needs_every_queue(client: AsyncClient, world: World) -> None:
+    """Com "Somente a própria fila", os totais do projeto são só das OS da fila e o contrato é do
+    projeto inteiro: a margem não sai (sairia maior que a real)."""
+    sup, an = world.supervisor.headers, world.analyst.headers
+    body = {"name": "Projeto Filas", "contract_value": "1000.00"}
+    r = await client.post(f"{API}/projects", json=body, headers=sup)
+    assert r.status_code == 201, r.text
+    pid = r.json()["id"]
+    # Uma OS na fila do supervisor (R$ 300 de técnico) e outra na do analista.
+    other = await create(client, world, project_id=pid, assignee_id=str(world.tech.user.id))
+    r = await client.put(
+        f"{API}/tickets/{other['id']}/payouts/{world.tech.user.id}",
+        json={"amount": "300.00"},
+        headers=sup,
+    )
+    assert r.status_code == 200, r.text
+    mine = {"title": "Do analista", "customer_id": world.customer_id, "project_id": pid}
+    assert (await client.post(f"{API}/tickets", json=mine, headers=an)).status_code == 201
+
+    full = (await client.get(f"{API}/projects/{pid}", headers=sup)).json()
+    assert (full["margin"], full["stats"]["payouts_total"], full["stats"]["tickets_total"]) == (
+        700.0,
+        300.0,
+        2,
+    )
+    await set_access(
+        client, world.admin.headers, world.analyst.user.id, scope="own", unowned=False
+    )
+    own = (await client.get(f"{API}/projects/{pid}", headers=an)).json()
+    assert (own["contract_value"], own["margin"]) == (1000.0, None)
+    assert (own["stats"]["payouts_total"], own["stats"]["tickets_total"]) == (0, 1)
+    rows = (await client.get(f"{API}/projects", headers=an)).json()
+    assert next(p for p in rows if p["id"] == pid)["margin"] is None
+
+
+async def test_users_screen_shows_the_saved_role_default(client: AsyncClient, world: World) -> None:
+    """Analista sem perfil (login Microsoft, importação) cai no perfil padrão gravado: Usuários
+    mostra o mesmo acesso do /auth/me (e das guardas), e o "Usado por N" do padrão conta ele."""
+    adm, an = world.admin.headers, world.analyst.headers
+    analyst_profile = (await profiles(client, world))["Analista"]
+    r = await client.patch(
+        f"{API}/access/profiles/{analyst_profile['id']}",
+        json={"items": {"commercial.payouts": "none"}},
+        headers=adm,
+    )
+    assert r.status_code == 200, r.text
+    uid = str(world.analyst.user.id)
+    me = (await client.get(f"{API}/auth/me", headers=an)).json()
+    assert me["access"]["items"]["commercial.payouts"] == "none"
+    assert (await client.get(f"{API}/payouts", headers=an)).status_code == 403
+
+    listed = next(u for u in (await client.get(f"{API}/users", headers=adm)).json() if u["id"] == uid)
+    one = (await client.get(f"{API}/users/{uid}", headers=adm)).json()
+    for seen in (listed, one):
+        assert (seen["access_profile_id"], seen["access"]) == (None, me["access"])
+    r = await client.patch(f"{API}/users/{uid}", json={"job_title": "Analista N1"}, headers=adm)
+    assert r.status_code == 200, r.text
+    assert r.json()["access"] == me["access"]
+
+    # "Usado por N" e a lista que ele abre contam quem está sem perfil.
+    count = {p["id"]: p["users_count"] for p in (await profiles(client, world)).values()}
+    assert count[analyst_profile["id"]] == 1
+    r = await client.get(
+        f"{API}/users", params={"access_profile_id": analyst_profile["id"]}, headers=adm
+    )
+    assert [u["id"] for u in r.json()] == [uid]
 
 
 async def test_shared_reads_stay_open_with_everything_none(

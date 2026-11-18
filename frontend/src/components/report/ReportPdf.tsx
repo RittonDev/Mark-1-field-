@@ -107,8 +107,9 @@ const s = StyleSheet.create({
   },
 });
 
+// Zero é tempo (chegou no mesmo minuto): "0min". Só sem o dado fica "—".
 const minutes = (m: number | null | undefined) => {
-  if (!m) return "—";
+  if (m == null) return "—";
   const h = Math.floor(m / 60);
   return h ? `${h}h ${String(m % 60).padStart(2, "0")}min` : `${m}min`;
 };
@@ -269,7 +270,7 @@ export function ReportPdf({ report, images, logo = null }: { report: PublicRepor
                   </View>
                   <View style={s.tile}>
                     <Text style={s.tileLabel}>Tempo no local</Text>
-                    <Text style={s.tileValue}>{minutes(report.on_site_minutes)}</Text>
+                    <Text style={s.tileValue}>{report.on_site_minutes ? minutes(report.on_site_minutes) : "—"}</Text>
                   </View>
                 </>
               ) : null}

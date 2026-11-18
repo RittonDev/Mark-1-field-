@@ -185,3 +185,36 @@ async def test_carry_over_inside_12_hours(
     assert datetime.fromisoformat(item["started_at"]) == datetime(2030, 3, 10, 22, 0, tzinfo=TZ)
     assert item["arrived_at"] is None  # a chegada não foi hoje
     assert day["summary"]["stuck_in_field"] == 1
+
+
+@requires_db
+async def test_live_map_follows_the_12_hour_rule(
+    client: AsyncClient, world: World, engine: AsyncEngine
+) -> None:
+    """No mapa, a OS parada em campo não é a OS atual do técnico nem decide o estado dele; a que
+    ele está fazendo agora, sim (a mesma conta do "Em campo agora" da Início)."""
+    th, sup = world.tech.headers, world.supervisor.headers
+    tech = str(world.tech.user.id)
+    stuck = await _in_field(client, world, "Esqueceram de concluir")
+    await _move_events(engine, stuck, 20)
+    assert (await client.post(f"{API}/tracking/consent", headers=th)).status_code == 204
+    r = await client.post(f"{API}/tracking/shift/start", json={}, headers=th)
+    assert r.status_code == 200, r.text
+
+    async def on_map() -> dict:
+        rows = (await client.get(f"{API}/tracking/live", headers=sup)).json()
+        return next(row for row in rows if row["id"] == tech)
+
+    me = await on_map()
+    assert (me["state"], me["current_ticket"], me["current_ticket_hidden"]) == (
+        "available",
+        None,
+        False,
+    )
+    home = (await client.get(f"{API}/home/overview", headers=sup)).json()
+    assert home["kpis"]["in_field_now"] == 0
+
+    fresh = await create(client, world, title="Saiu agora", assignee_id=tech)
+    await transition(client, th, fresh, "en_route")
+    me = await on_map()
+    assert (me["state"], me["current_ticket"]["id"]) == ("en_route", fresh["id"])

@@ -1362,7 +1362,7 @@ export async function enqueuePartRequest(
     });
     await rebaseTicket(db, ticketId, user);
   });
-  // A rodada que está subindo fotos envia o pedido no meio do upload (ele mesmo espera as fotos dele).
+  // Pedido sem foto sai no meio do upload das fotos de outra OS; com foto, ele espera as dele.
   actionsQueued += 1;
   await refreshPendingCounts();
   void requestSync();

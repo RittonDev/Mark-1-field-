@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  History,
   Loader2,
   Plus,
   ShieldCheck,
@@ -256,8 +257,9 @@ const EMPTY: FormState = {
 
 /*
  * Rascunho neste aparelho: o navegador do celular descarta a aba quando a pessoa vai ao WhatsApp ou à
- * câmera, e a ficha voltava em branco. Fica 24 h, sem senha e sem foto, e some ao enviar. A chave é
- * fixa: se o link expirar no meio, um link novo abre a ficha já preenchida.
+ * câmera, e a ficha voltava em branco. Fica 24 h, sem senha e sem foto, e some ao enviar. Volta sozinho
+ * só no mesmo link; com outro link (o anterior expirou no meio, ou é outra pessoa no mesmo aparelho), a
+ * ficha começa vazia e pergunta antes de usar o que ficou, sem mostrar os dados dele.
  */
 const DRAFT_KEY = "mf-cadastro-tecnico";
 const DRAFT_TTL_MS = 24 * 3_600_000;
@@ -290,12 +292,19 @@ function hasContent(form: FormState): boolean {
   return DRAFT_FIELDS.some((key) => JSON.stringify(form[key]) !== JSON.stringify(EMPTY[key]));
 }
 
+interface Draft {
+  form: FormState;
+  step: number;
+  /** Começado neste mesmo link (sem o link, o rascunho é de antes desta regra). */
+  sameLink: boolean;
+}
+
 /** Rascunho salvo (validado campo a campo: o que estiver fora do formato fica vazio). */
-function loadDraft(): { form: FormState; step: number } | null {
+function loadDraft(token: string): Draft | null {
   try {
     const raw = window.localStorage.getItem(DRAFT_KEY);
     if (!raw) return null;
-    const saved = JSON.parse(raw) as { savedAt?: number; step?: number; form?: Record<string, unknown> };
+    const saved = JSON.parse(raw) as { savedAt?: number; step?: number; form?: Record<string, unknown>; token?: unknown };
     if (!saved.savedAt || Date.now() - saved.savedAt > DRAFT_TTL_MS || !saved.form) {
       window.localStorage.removeItem(DRAFT_KEY);
       return null;
@@ -320,20 +329,20 @@ function loadDraft(): { form: FormState; step: number } | null {
       }
     }
     const step = Math.min(Math.max(Math.trunc(Number(saved.step) || 0), 0), STEPS.length - 1);
-    return { form, step };
+    return { form, step, sameLink: typeof saved.token === "string" && saved.token === token };
   } catch {
     return null;
   }
 }
 
-function saveDraft(form: FormState, step: number) {
+function saveDraft(form: FormState, step: number, token: string) {
   try {
     if (!hasContent(form)) {
       window.localStorage.removeItem(DRAFT_KEY);
       return;
     }
     const data = Object.fromEntries(DRAFT_FIELDS.map((key) => [key, form[key]]));
-    window.localStorage.setItem(DRAFT_KEY, JSON.stringify({ savedAt: Date.now(), step, form: data }));
+    window.localStorage.setItem(DRAFT_KEY, JSON.stringify({ savedAt: Date.now(), step, form: data, token }));
   } catch {
     // Sem armazenamento (aba anônima, bloqueio): a ficha funciona, só sem rascunho.
   }
@@ -382,9 +391,12 @@ export default function TechnicianSignupPage() {
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
   // O link expirou enquanto a pessoa preenchia: os dados ficam no rascunho para um link novo.
   const [expiredWhileFilling, setExpiredWhileFilling] = useState(false);
-  const [draft] = useState(loadDraft);
-  const [step, setStep] = useState(draft?.step ?? 0);
-  const [form, setForm] = useState<FormState>(draft?.form ?? EMPTY);
+  const [draft] = useState(() => loadDraft(token));
+  const own = draft?.sameLink ? draft : null;
+  // Ficha começada neste aparelho por outro link: espera a pessoa dizer se é a dela.
+  const [foreign, setForeign] = useState(() => (draft && !draft.sameLink ? draft : null));
+  const [step, setStep] = useState(own?.step ?? 0);
+  const [form, setForm] = useState<FormState>(own?.form ?? EMPTY);
   const [problem, setProblem] = useState<Problem | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [protocol, setProtocol] = useState<string | null>(null);
@@ -409,12 +421,26 @@ export default function TechnicianSignupPage() {
     };
   }, [token, attempt]);
 
-  // Rascunho neste aparelho enquanto a pessoa preenche (some depois do envio).
+  // Rascunho neste aparelho enquanto a pessoa preenche (some depois do envio). Com a ficha de outro link
+  // esperando a resposta, a ficha vazia não a apaga; a pessoa digitando, o rascunho passa a ser o dela.
+  const pendingForeign = foreign !== null && !hasContent(form);
   useEffect(() => {
-    if (protocol) return;
-    const id = window.setTimeout(() => saveDraft(form, step), 600);
+    if (protocol || pendingForeign) return;
+    const id = window.setTimeout(() => saveDraft(form, step, token), 600);
     return () => window.clearTimeout(id);
-  }, [form, step, protocol]);
+  }, [form, step, protocol, pendingForeign, token]);
+
+  const resumeForeign = () => {
+    if (!foreign) return;
+    setForm(foreign.form);
+    setProblem(null);
+    setForeign(null);
+    goTo(foreign.step);
+  };
+  const discardForeign = () => {
+    clearDraft();
+    setForeign(null);
+  };
 
   // Etapa nova: o foco vai para o título da etapa (o leitor de tela anuncia onde a pessoa está).
   useEffect(() => {
@@ -555,7 +581,7 @@ export default function TechnicianSignupPage() {
     } catch (error) {
       if (error instanceof ApiError && error.status === 410) {
         // O rascunho continua salvo: com um link novo, a ficha volta preenchida.
-        saveDraft(form, step);
+        saveDraft(form, step, token);
         setExpiredWhileFilling(true);
         setCheck("invalid");
         return;
@@ -578,6 +604,7 @@ export default function TechnicianSignupPage() {
     });
     if (!ok) return;
     clearDraft();
+    setForeign(null);
     setForm(EMPTY);
     setProblem(null);
     goTo(0);
@@ -607,7 +634,7 @@ export default function TechnicianSignupPage() {
             <Panel
               icon={<XCircle className="size-10 text-red-600 dark:text-red-400" />}
               title="O link expirou enquanto você preenchia"
-              text="Peça um novo link à equipe da Maxx Field. Seus dados ficam salvos neste aparelho por 24 horas: ao abrir o link novo, a ficha volta preenchida (só a senha e a foto você informa de novo)."
+              text="Peça um novo link à equipe da Maxx Field. Seus dados ficam salvos neste aparelho por 24 horas: ao abrir o link novo, escolha continuar a ficha começada (só a senha e a foto você informa de novo)."
             />
           ) : (
             <Panel
@@ -655,6 +682,24 @@ export default function TechnicianSignupPage() {
               else next();
             }}
           >
+            {/* Sem nome, CPF nem e-mail da outra ficha: pode ser de outra pessoa no mesmo aparelho. */}
+            {pendingForeign ? (
+              <div
+                role="status"
+                className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-line bg-surface px-4 py-3 text-sm shadow-elev-1"
+              >
+                <History aria-hidden className="size-4 shrink-0 text-ink-subtle" />
+                <p className="min-w-0 flex-1 text-ink">Há uma ficha começada neste aparelho.</p>
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={discardForeign}>
+                    Descartar
+                  </Button>
+                  <Button size="sm" variant="primary" onClick={resumeForeign}>
+                    Continuar com ela
+                  </Button>
+                </div>
+              </div>
+            ) : null}
             <Card className="overflow-hidden">
               <div className="border-b border-line px-5 py-4">
                 <h1 className="text-lg font-bold tracking-[-0.02em] text-ink">Cadastro de técnico parceiro</h1>

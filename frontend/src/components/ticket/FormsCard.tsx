@@ -54,6 +54,20 @@ function answered(field: FormField, value: FormAnswer | undefined, photos: numbe
 /** Fotos que o campo exige para concluir (a mesma regra da API). */
 const photosNeeded = (field: FormField) => Math.max(field.min_photos, field.required ? 1 : 0);
 
+/** O formulário aparece no relatório do cliente: alguma resposta legível ou foto (a regra da API). */
+function inReport(form: TicketForm, photos: Attachment[]): boolean {
+  return form.fields.some((f) => {
+    if (f.type === "section") return false;
+    if (photos.some((p) => p.field_id === f.id)) return true;
+    if (f.type === "photo") return false;
+    const value = form.answers[f.id];
+    if (value === undefined || value === null || value === "" || (Array.isArray(value) && value.length === 0)) return false;
+    if (f.type === "yes_no") return typeof value === "boolean";
+    if (f.type === "confirm") return value === true;
+    return true;
+  });
+}
+
 type Answers = Record<string, FormAnswer>;
 
 const empty = (v: FormAnswer | undefined) => v === undefined || v === "" || (Array.isArray(v) && v.length === 0);
@@ -112,6 +126,14 @@ export function FormsCard({ ticket }: { ticket: TicketDetail }) {
 
   const photosOf = (formId: string) => (attachments.data ?? []).filter((a) => a.form_id === formId);
   const signature = (attachments.data ?? []).find((a) => a.id === ticket.signature_attachment_id);
+  // Âncora no relatório do cliente, numerada como a página: entre os formulários que aparecem lá, na ordem
+  // da OS, o 2º de mesmo nome (ou de nome que dá a mesma âncora) ganha "-2".
+  const reportAnchor = (form: TicketForm) => {
+    const base = formAnchor(form.name);
+    const shown = ticket.forms.filter((f) => f.id === form.id || inReport(f, photosOf(f.id)));
+    const n = shown.slice(0, shown.findIndex((f) => f.id === form.id) + 1).filter((f) => formAnchor(f.name) === base).length;
+    return n > 1 ? `${base}-${n}` : base;
+  };
 
   const toggleRequired = useMutation({
     mutationFn: (form: TicketForm) => api.patch(`/tickets/${ticket.id}/forms/${form.id}`, { required: !form.required }),
@@ -272,6 +294,7 @@ export function FormsCard({ ticket }: { ticket: TicketDetail }) {
           ticket={ticket}
           form={opened}
           photos={photosOf(opened.id)}
+          reportAnchor={reportAnchor(opened)}
           canFill={ticket.can_edit && (manager || !ticket.signed_at)}
           onClose={() => setOpenId(null)}
         />
@@ -396,12 +419,15 @@ function FormDialog({
   ticket,
   form,
   photos,
+  reportAnchor,
   canFill,
   onClose,
 }: {
   ticket: TicketDetail;
   form: TicketForm;
   photos: Attachment[];
+  /** Âncora deste formulário no relatório do cliente ("form-checklist", "form-checklist-2"). */
+  reportAnchor: string;
   canFill: boolean;
   onClose: () => void;
 }) {
@@ -519,7 +545,7 @@ function FormDialog({
     if (dirty) save.mutate({ complete: false, partial: true });
   };
 
-  const reportHref = ticket.report_link ? `${previewPath(ticket.report_link)}#${formAnchor(form.name)}` : null;
+  const reportHref = ticket.report_link ? `${previewPath(ticket.report_link)}#${reportAnchor}` : null;
 
   return (
     <Dialog
