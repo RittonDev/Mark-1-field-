@@ -23,7 +23,9 @@ from app.schemas.user import (
     UserUpdate,
 )
 from app.services import access as access_svc
+from app.services import tickets as tickets_svc
 from app.services.errors import AccessDenied
+from app.services.realtime import commit_and_publish
 from app.services.workflow import OPEN_STATUSES
 
 log = logging.getLogger(__name__)
@@ -281,13 +283,18 @@ async def update_user(user_id: uuid.UUID, body: UserUpdate, db: DB, actor: Users
         if fields.get("role", user.role) == UserRole.TECHNICIAN:
             user.must_change_password = True
     deactivated = fields.get("is_active") is False and user.is_active
+    left_field = old_role == UserRole.TECHNICIAN and new_role != UserRole.TECHNICIAN
     for key, value in fields.items():
         setattr(user, key, value)
     # Senha, e-mail ou papel trocados, ou acesso desativado: quem estava logado sai na hora
     # (ex.: a conta vazou e o admin trocou a senha).
     if deactivated or REVOKING_FIELDS.intersection(changed):
         user.sessions_revoked_at = utcnow()
-    await db.commit()
+    # Técnico sem acesso ao app (desativado ou em outro papel): ninguém responde as ofertas dele,
+    # que fecham como canceladas pela central; o tempo real das OS sai no commit.
+    if fields.get("is_active") is False or left_field:
+        await tickets_svc.close_technician_offers(db, user.id, actor)
+    await commit_and_publish(db)
     if changed:
         log.info("Usuários: %s alterou %s (%s)", actor.id, user.id, ", ".join(changed))
     if access_changed:

@@ -15,7 +15,7 @@
 // cada ação do técnico, cada evento do WebSocket e um intervalo de segurança.
 //
 // A rodada também confere as ofertas de OS com preço (GET /me/offers, lib/offers.ts): antes do upload das fotos,
-// entre uma foto e outra, depois do download e quando o download falha por outro motivo que não a rede ou a sessão.
+// entre uma foto e outra, depois do download e quando o download falha por erro do servidor.
 
 import NetInfo from "@react-native-community/netinfo";
 import { randomUUID } from "expo-crypto";
@@ -393,7 +393,7 @@ async function runOnce(myEpoch: number, manual: boolean) {
     try {
       await pullChanges(round);
     } catch (error) {
-      // Download que falhou por outro motivo que não a rede ou a sessão (erro do servidor): as ofertas seguem chegando.
+      // O download falhou por erro do servidor (não rede nem sessão): as ofertas não esperam ele voltar.
       if (!(error instanceof WriteCancelled) && !(error instanceof ApiError && (error.status === 0 || error.status === 401))) {
         await refreshOffers(round, true);
       }
@@ -1029,10 +1029,10 @@ export async function storeServerTicket(ticket: TicketDetail) {
 
 /**
  * Ofertas de OS com preço (GET /me/offers): antes do upload das fotos, entre uma foto e outra, depois do pull e
- * quando o pull falha por erro do servidor. A busca não se repete a cada vez: valem o aviso do tempo real (ticket.offer),
- * o app voltando à tela, a rede e o tempo real voltando (um aviso pode ter se perdido), o "puxar para atualizar"
- * e, sem eles, uma conferência por minuto. Falta de rede para a rodada; outro problema (servidor sem a rota,
- * erro do servidor) não derruba o sync. `early`: antes do pull (applyOfferList).
+ * quando o pull falha por erro do servidor. A busca não se repete a cada vez: valem o aviso do tempo real
+ * (ticket.offer), o app voltando à tela, a rede e o tempo real voltando (um aviso pode ter se perdido), o "puxar
+ * para atualizar" (uma vez por rodada) e, sem eles, uma conferência por minuto. Falta de rede para a rodada; outro
+ * problema (servidor sem a rota, erro do servidor) não derruba o sync. `early`: antes do pull (applyOfferList).
  */
 async function refreshOffers(round: Round, early: boolean) {
   if (!offersDue(round.offersManual, early)) return;

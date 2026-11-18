@@ -155,8 +155,12 @@ _LINKS = frozenset(
 # Nas pontas do que sobra, só as preposições ("Visita na" → "Visita"; "O PDV" fica).
 _EDGE_LINKS = _LINKS - {"a", "o", "as", "os"}
 _SEPARATORS = "·•-–—|/:;,"
-_SEPARATOR_RUN = re.compile(rf"\s*([{re.escape(_SEPARATORS)}])(?:\s*[{re.escape(_SEPARATORS)}])+\s*")
+_SEPARATOR = f"[{re.escape(_SEPARATORS)}]"
+# Dois ou mais separadores seguidos ("PDV · · urgente", "PDV - : urgente") viram o primeiro.
+_SEPARATOR_RUN = re.compile(rf"\s*({_SEPARATOR})(?:\s*{_SEPARATOR})+\s*")
 _EMPTY_BRACKETS = re.compile(r"\(\s*\)|\[\s*\]")
+# Código da loja curto ("41") também é número de PDV, andar...: só sai a partir de 3 caracteres.
+_CODE_MIN = 3
 
 
 def _fold(text: str) -> tuple[str, list[int]]:
@@ -233,11 +237,12 @@ def _hidden_names(ticket: Ticket) -> list[str]:
     """O que o técnico de fora não lê: nome e código da loja, cliente, projeto e nº do chamado do
     cliente. O mais longo primeiro (a loja "Cliente Exemplo Matriz" sai inteira)."""
     store, customer, project = ticket.location, ticket.customer, ticket.project
+    code = (store.code or "").strip() if store is not None else ""
     names = {
         " ".join(name.split())
         for name in (
             store.name if store is not None else None,
-            store.code if store is not None else None,
+            code if len(code) >= _CODE_MIN else None,
             customer.name if customer is not None else None,
             project.name if project is not None else None,
             ticket.client_reference,
@@ -580,8 +585,9 @@ async def my_offers(db: AsyncSession, technician: User) -> list[FieldOfferOut]:
             ).limit(MY_OFFERS_LIMIT)
         )
     )
-    # A mesma ordem da consulta (mais nova primeiro; empate pelo id) nas duas listas juntas.
-    offers = sorted(sorted(live + closed, key=lambda o: o.id), key=lambda o: o.created_at)[::-1]
+    # As duas listas juntas na ordem da consulta: a mais nova primeiro e, no empate, pelo id.
+    by_id = sorted(live + closed, key=lambda o: o.id)
+    offers = sorted(by_id, key=lambda o: o.created_at, reverse=True)
     tickets = await _field_tickets(db, {o.ticket_id for o in offers})
     return [field_out(o, tickets[o.ticket_id], now) for o in offers if o.ticket_id in tickets]
 
@@ -636,16 +642,12 @@ async def _set_offer_payout(
 ) -> None:
     """O valor da oferta vira o valor do técnico na OS, depois da atribuição: vence o padrão do
     tipo de serviço (ou o valor transferido). Autor: quem mandou a oferta (sem ele, o técnico).
-    Valor dele já pago nesta OS (ele foi o técnico dela antes) não muda: a central acerta."""
-    paid = await db.scalar(
-        select(TicketPayout.id).where(
-            TicketPayout.ticket_id == ticket.id,
-            TicketPayout.technician_id == technician.id,
-            TicketPayout.status == PayoutStatus.PAID,
-        )
-    )
-    if paid is not None:
-        return
+
+    Valor dele já pago nesta OS não muda, e ele tem de ficar com o valor que aceitou: o aceite
+    confere isso antes de mexer em qualquer coisa; achar o pago aqui (pago no meio do aceite) é
+    409 OFFER_UNAVAILABLE, e a rota não grava nada do aceite."""
+    if await _paid_technicians(db, ticket.id, [technician.id]):
+        raise _error(UNAVAILABLE)
     creator = await db.get(User, offer.created_by_id) if offer.created_by_id else None
     await payouts_svc.set_payout(
         db,
@@ -660,9 +662,9 @@ async def accept(db: AsyncSession, offer_id: uuid.UUID, technician: User) -> Tic
     """ "Aceitar por R$ X": quem aceita primeiro fica com a OS (ver o docstring do módulo).
 
     409 OFFER_TAKEN (outro técnico aceitou), OFFER_EXPIRED, OFFER_CANCELLED (a central cancelou ou
-    trocou a oferta), OFFER_UNAVAILABLE (a OS foi encerrada ou já tem técnico), OFFER_ANSWERED (ele
-    recusou); 422 OFFER_NOT_VIEWED (não abriu a oferta). Aceite repetido da oferta que já é dele:
-    devolve a OS como está."""
+    trocou a oferta), OFFER_UNAVAILABLE (a OS foi encerrada ou já tem técnico, ou ele tem valor
+    pago nesta OS), OFFER_ANSWERED (ele recusou); 422 OFFER_NOT_VIEWED (não abriu a oferta). Aceite
+    repetido da oferta que já é dele: devolve a OS como está."""
     offer = await _own_offer(db, offer_id, technician)
     ticket = await _locked_ticket(db, offer.ticket_id)
     # Relida com a OS travada: o aceite que chegou antes já gravou o que fez.
@@ -677,6 +679,10 @@ async def accept(db: AsyncSession, offer_id: uuid.UUID, technician: User) -> Tic
     _check_answerable(offer, ticket, now)
     if offer.viewed_at is None:
         raise _error(NOT_VIEWED, status_code=422)
+    # Pago depois do envio: o valor pago não muda e ele não ficaria com o valor da oferta. A
+    # oferta continua pendente e a OS sem técnico.
+    if await _paid_technicians(db, ticket.id, [technician.id]):
+        raise _error(UNAVAILABLE)
 
     offer.status = OfferStatus.ACCEPTED
     offer.responded_at = now
@@ -716,7 +722,13 @@ async def accept(db: AsyncSession, offer_id: uuid.UUID, technician: User) -> Tic
     )
     await _set_offer_payout(db, ticket, offer, technician)
     tickets_svc.queue_offer_events(
-        db, ticket, technician, "accepted", [technician.id], technician_name=technician.name
+        db,
+        ticket,
+        technician,
+        "accepted",
+        [technician.id],
+        technician_name=technician.name,
+        sender_id=offer.created_by_id,
     )
     await db.flush()
     return ticket
@@ -764,6 +776,7 @@ async def decline(
         [technician.id],
         technician_name=technician.name,
         reason=text,
+        sender_id=offer.created_by_id,
     )
     await db.flush()
     return offer

@@ -25,6 +25,7 @@ from app.services import suggestions
 from app.services import technician_regions as regions_svc
 from app.services import technicians as svc
 from app.services import tickets as tickets_svc
+from app.services.realtime import commit_and_publish
 from app.services.spreadsheet import MAX_BYTES, SpreadsheetError, read_upload
 
 router = APIRouter(tags=["technicians"])
@@ -130,11 +131,12 @@ async def create_technician(
 
 @router.patch("/technicians/{user_id}", response_model=TechnicianOut)
 async def update_technician(
-    user_id: uuid.UUID, body: TechnicianUpdate, db: DB, _: TechniciansEdit
+    user_id: uuid.UUID, body: TechnicianUpdate, db: DB, actor: TechniciansEdit
 ) -> TechnicianOut:
+    """Desativar fecha as ofertas em aberto dele (o tempo real das OS sai no commit)."""
     user = await svc.get_technician(db, user_id)
-    await svc.update(db, user, body)
-    await db.commit()
+    await svc.update(db, user, body, actor)
+    await commit_and_publish(db)
     return await _one(db, user)
 
 

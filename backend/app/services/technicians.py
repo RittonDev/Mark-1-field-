@@ -236,7 +236,10 @@ async def create(db: AsyncSession, data: TechnicianCreate) -> tuple[User, str]:
     return user, password
 
 
-async def update(db: AsyncSession, user: User, data: TechnicianUpdate) -> User:
+async def update(
+    db: AsyncSession, user: User, data: TechnicianUpdate, actor: User | None = None
+) -> User:
+    """`actor`: quem alterou (autor do fechamento das ofertas do técnico desativado)."""
     fields = data.model_dump(exclude_unset=True)
     if fields.get("service_type_ids") is not None:
         wanted = list(dict.fromkeys(fields["service_type_ids"]))
@@ -281,7 +284,12 @@ async def update(db: AsyncSession, user: User, data: TechnicianUpdate) -> User:
         # Uma grafia só por cidade ("SAO PAULO" vira "São Paulo"), como no resto da base.
         user.home_city = await cities.canonical_city(db, user.home_state, user.home_city)
     if fields.get("is_active") is False:
+        from app.services import tickets  # import tardio, como o tracking em to_out
+
         user.sessions_revoked_at = utcnow()  # desativado: sai do app na hora
+        # Sem o app, ninguém responde as ofertas dele: fecham como canceladas pela central (a OS
+        # volta a "Sem técnico"). Os avisos saem no commit da rota.
+        await tickets.close_technician_offers(db, user.id, actor)
     await db.flush()
     return user
 

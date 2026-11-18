@@ -193,10 +193,10 @@ A central manda uma OS ainda sem técnico, com o valor, para alguns técnicos (c
 - **Lista**: `GET /me/offers` na rodada de sincronização, guardada no aparelho (kv `field_offers`) para abrir sem
   rede. Quem aceita primeiro fica com a OS, então a lista não espera o upload das fotos (minutos em rede lenta): a
   rodada busca logo depois do primeiro envio da fila, entre uma foto e outra, depois do download e também quando o
-  download falha por erro do servidor (falta de rede ou sessão encerrada param a rodada). Cada ponto só busca quando vale:
-  o evento `ticket.offer` do tempo real (só para os técnicos da oferta), o app voltando à tela (o técnico costuma
-  vir do recado no grupo), a rede e o tempo real voltando, o "puxar para atualizar" (uma busca por rodada) e, sem
-  eles, uma conferência por minuto.
+  download falha por erro do servidor (falta de rede ou sessão encerrada param a rodada). Cada ponto só busca
+  quando vale: o evento `ticket.offer` do tempo real (só para os técnicos da oferta), o app voltando à tela (o
+  técnico costuma vir do recado no grupo), a rede e o tempo real voltando, o "puxar para atualizar" (uma busca
+  por rodada) e, sem eles, uma conferência por minuto.
 - **Busca antes do download**: a OS em que a central pôs o próprio técnico pode ainda não estar no aparelho. A
   oferta que fechou assim (`cancel_reason = "assigned"`) e cuja OS não está no aparelho como dele fica como
   estava, sem aviso, e pede a busca depois do download, que decide: sem aviso se a OS é dele (o download já
