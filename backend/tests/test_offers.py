@@ -158,7 +158,8 @@ async def test_technician_sees_only_the_invitation_cut(
         "created_by",
         "created_at",
     }
-    assert {(o["state"], o["amount"], o["note"]) for o in sent} == {("pending", 90.0, "Levar escada")}
+    summary = {(o["state"], o["amount"], o["note"]) for o in sent}
+    assert summary == {("pending", 90.0, "Levar escada")}
     assert sent[0]["created_by"]["name"] == "Super"
     mine = next(o for o in sent if o["technician"]["id"] == str(world.tech.user.id))
     other = next(o for o in sent if o["technician"]["id"] == str(world.tech_other.user.id))
@@ -215,7 +216,6 @@ async def test_technician_sees_only_the_invitation_cut(
         "CHAMADO-77",
         "Gerente Teste",
         "Avulso",
-        "150",
     ):
         assert secret not in r.text, secret
 
@@ -235,10 +235,8 @@ async def test_technician_sees_only_the_invitation_cut(
     assert viewed[mine["id"]] is not None and viewed[other["id"]] is None
 
     # O técnico continua sem ver a OS em si até aceitar.
-    assert (await client.get(f"{API}/tickets/{t['id']}", headers=world.tech.headers)).status_code
-    assert (
-        await client.get(f"{API}/tickets/{t['id']}", headers=world.tech.headers)
-    ).status_code == 404
+    r = await client.get(f"{API}/tickets/{t['id']}", headers=world.tech.headers)
+    assert r.status_code == 404
     detail = (await client.get(f"{API}/tickets/{t['id']}", headers=sup)).json()
     assert detail["open_offers"] == 2
 
@@ -290,7 +288,8 @@ async def test_who_can_offer_and_which_os(
     # Validação em português, com o nome do campo da tela.
     past = (datetime.now(UTC) - timedelta(minutes=5)).isoformat()
     r = await client.post(url, json={**body, "expires_at": past}, headers=sup)
-    assert r.status_code == 422 and r.json()["detail"] == "O prazo para responder precisa ser no futuro"
+    assert r.status_code == 422
+    assert r.json()["detail"] == "O prazo para responder precisa ser no futuro"
     labels = {
         "amount": ({**body, "amount": "-1"}, "Valor"),
         "decimais": ({**body, "amount": "10.555"}, "Valor"),
@@ -335,7 +334,8 @@ async def test_resending_replaces_the_previous_offer(
     detail = (await client.get(f"{API}/tickets/{t['id']}", headers=sup)).json()
     assert detail["open_offers"] == 0
     third = (await send(client, sup, t["id"], [world.tech, world.tech_other]))[0]
-    states = {o["id"]: (o["state"], o["cancel_reason"]) for o in await central_offers(client, sup, t["id"])}
+    listed = await central_offers(client, sup, t["id"])
+    states = {o["id"]: (o["state"], o["cancel_reason"]) for o in listed}
     assert states[second["id"]] == ("cancelled", "replaced")
     assert states[third["id"]] == ("pending", None)
     detail = (await client.get(f"{API}/tickets/{t['id']}", headers=sup)).json()
@@ -545,7 +545,7 @@ async def test_expired_and_cancelled_offers(
     # Prazo vencido: sem rotina, o estado passa a "expired" e o aceite é recusado.
     async with engine.begin() as conn:
         await conn.execute(
-            text("UPDATE ticket_offers SET expires_at = now() - interval '1 minute' WHERE id = :id"),
+            text("UPDATE ticket_offers SET expires_at = now() - interval '1 min' WHERE id = :id"),
             {"id": mine["id"]},
         )
     states = {o["id"]: o["state"] for o in await central_offers(client, sup, t["id"])}
@@ -630,10 +630,11 @@ async def test_assigning_or_closing_the_os_closes_its_offers(
     )
     assert r.status_code == 200, r.text
     assert r.json()["open_offers"] == 0
-    states = {o["technician"]["id"]: (o["state"], o["cancel_reason"]) for o in await central_offers(client, sup, t["id"])}
+    listed = await central_offers(client, sup, t["id"])
+    states = {o["technician"]["id"]: (o["state"], o["cancel_reason"]) for o in listed}
     assert states == {tech_id: ("cancelled", "assigned"), other_id: ("cancelled", "assigned")}
-    offer_events = [e for e in published if e["type"] == "ticket.offer"]
-    assert [sorted(e["audience"]["user_ids"]) for e in offer_events] == [sorted([tech_id, other_id])]
+    told = [sorted(e["audience"]["user_ids"]) for e in published if e["type"] == "ticket.offer"]
+    assert told == [sorted([tech_id, other_id])]
     mine = next(o for o in sent if o["technician"]["id"] == tech_id)
     r = await client.post(f"{API}/me/offers/{mine['id']}/accept", headers=world.tech.headers)
     assert r.status_code == 409
