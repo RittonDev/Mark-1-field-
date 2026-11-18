@@ -715,7 +715,9 @@ def _footprint_before(since: datetime, until: datetime | None = None) -> Select:
     )
     both = union_all(assigned, helped, worked).subquery()
     pairs = (
-        select(both.c.user_id, both.c.ticket_id, both.c.location_id, func.max(both.c.at).label("at"))
+        select(
+            both.c.user_id, both.c.ticket_id, both.c.location_id, func.max(both.c.at).label("at")
+        )
         .group_by(both.c.user_id, both.c.ticket_id, both.c.location_id)
         .subquery()
     )
