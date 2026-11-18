@@ -48,7 +48,8 @@ PAID_LOCKED = "Este valor já foi pago: desfaça o pagamento antes de mudar"
 NOT_ON_TICKET = "Coloque o técnico na OS antes de definir o valor dele"
 
 
-def _money(value: Decimal | None) -> str:
+def money_text(value: Decimal | None) -> str:
+    """ "R$ 90,00": o valor como o histórico da OS mostra (pagamentos e ofertas)."""
     return f"R$ {value or 0:.2f}".replace(".", ",")
 
 
@@ -159,7 +160,10 @@ async def set_payout(
         TicketEventType.PAYOUT_SET,
         from_value=None if before is None else str(before),
         to_value=str(data.amount),
-        data={"technician": technician.name if technician else None, "amount": _money(data.amount)},
+        data={
+            "technician": technician.name if technician else None,
+            "amount": money_text(data.amount),
+        },
     )
     await _touch(db, [ticket.id])
     _changed(db, ticket, actor)
@@ -185,7 +189,7 @@ async def remove_payout(
         from_value=str(payout.amount),
         data={
             "technician": technician.name if technician else None,
-            "amount": _money(payout.amount),
+            "amount": money_text(payout.amount),
         },
     )
     await _touch(db, [ticket.id])
@@ -235,7 +239,7 @@ async def on_assignee_changed(
                 note=f"Valor transferido de {before or 'técnico removido'} para {after}",
                 data={
                     "technician": after,
-                    "amount": _money(previous.amount),
+                    "amount": money_text(previous.amount),
                     "action": "transferred",
                     "from_technician": before,
                 },
@@ -250,7 +254,7 @@ async def on_assignee_changed(
             TicketEventType.PAYOUT_REMOVED,
             from_value=str(previous.amount),
             note="Saiu da OS: o valor não pago foi retirado",
-            data={"technician": before, "amount": _money(previous.amount)},
+            data={"technician": before, "amount": money_text(previous.amount)},
         )
         await db.flush()
     if new_id is not None and paid_per_ticket and current is None:
@@ -273,7 +277,7 @@ async def on_assignee_changed(
                 TicketEventType.PAYOUT_SET,
                 to_value=str(fee),
                 note="Valor padrão do tipo de serviço",
-                data={"technician": await _name(db, new_id), "amount": _money(fee)},
+                data={"technician": await _name(db, new_id), "amount": money_text(fee)},
             )
             await db.flush()
 
@@ -299,7 +303,7 @@ async def on_helpers_removed(
                 TicketEventType.PAYOUT_REMOVED,
                 from_value=str(payout.amount),
                 note="Saiu da visita: o valor não pago foi retirado",
-                data={"technician": name, "amount": _money(payout.amount)},
+                data={"technician": name, "amount": money_text(payout.amount)},
             )
     await db.flush()
 
@@ -480,7 +484,7 @@ async def mark_paid(db: AsyncSession, ids: list[uuid.UUID], actor: User, *, paid
             note="Pagamento registrado" if paid else "Pagamento desfeito",
             data={
                 "technician": payout.technician.name if payout.technician else None,
-                "amount": _money(payout.amount),
+                "amount": money_text(payout.amount),
                 "action": "paid" if paid else "unpaid",
             },
         )

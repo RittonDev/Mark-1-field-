@@ -51,6 +51,9 @@ class PendingEvent:
     # Analista responsável de antes (troca de fila): quem só vê a própria fila também é avisado
     # e tira a OS da tela.
     previous_owner_id: uuid.UUID | None = None
+    # Evento endereçado: só estas pessoas recebem (audience.user_ids), mesmo sem estar na OS (a
+    # oferta vai a técnicos que ainda não estão nela).
+    user_ids: list[uuid.UUID] | None = None
 
 
 def queue_event(
@@ -66,6 +69,7 @@ def queue_event(
     managers_only: bool = False,
     previous_helper_ids: list[uuid.UUID] | None = None,
     previous_owner_id: uuid.UUID | None = None,
+    user_ids: list[uuid.UUID] | None = None,
 ) -> None:
     db.info.setdefault(_PENDING_KEY, []).append(
         PendingEvent(
@@ -79,6 +83,7 @@ def queue_event(
             managers_only,
             list(previous_helper_ids or []),
             previous_owner_id=previous_owner_id,
+            user_ids=list(user_ids) if user_ids is not None else None,
         )
     )
 
@@ -119,6 +124,25 @@ def unowned_ticket(ticket: Ticket) -> bool:
 def render_event(ev: PendingEvent) -> dict[str, Any]:
     """Renderiza após o commit (a `version` da OS já está atualizada)."""
     t = ev.ticket
+    audience: dict[str, Any] = {
+        "assignee_id": _s(t.assignee_id),
+        "previous_assignee_id": _s(ev.previous_assignee_id),
+        "helper_ids": _helper_ids(t),
+        "previous_helper_ids": [str(i) for i in ev.previous_helper_ids],
+        "team_id": _s(t.team_id),
+        "requester_id": _s(t.requester_id),
+        "created_by_id": _s(t.created_by_id),
+        "internal": ev.internal,
+        "managers_only": ev.managers_only,
+        # Filas: quem só vê a própria fila recebe a OS dele (dono atual ou anterior,
+        # executor) e, com a opção, as sem analista.
+        "owner_id": _s(t.owner_id),
+        "previous_owner_id": _s(ev.previous_owner_id),
+        "unowned": unowned_ticket(t),
+    }
+    if ev.user_ids is not None:
+        # Endereçado: should_deliver entrega só a quem está na lista.
+        audience["user_ids"] = [str(i) for i in ev.user_ids]
     return {
         "type": ev.event_type or f"ticket.{ev.kind}",
         "ticket_id": str(t.id),
@@ -134,22 +158,7 @@ def render_event(ev: PendingEvent) -> dict[str, Any]:
         "version": t.version,
         "occurred_at": utcnow().isoformat(),
         "data": ev.data,
-        "audience": {
-            "assignee_id": _s(t.assignee_id),
-            "previous_assignee_id": _s(ev.previous_assignee_id),
-            "helper_ids": _helper_ids(t),
-            "previous_helper_ids": [str(i) for i in ev.previous_helper_ids],
-            "team_id": _s(t.team_id),
-            "requester_id": _s(t.requester_id),
-            "created_by_id": _s(t.created_by_id),
-            "internal": ev.internal,
-            "managers_only": ev.managers_only,
-            # Filas: quem só vê a própria fila recebe a OS dele (dono atual ou anterior,
-            # executor) e, com a opção, as sem analista.
-            "owner_id": _s(t.owner_id),
-            "previous_owner_id": _s(ev.previous_owner_id),
-            "unowned": unowned_ticket(t),
-        },
+        "audience": audience,
     }
 
 
@@ -207,9 +216,21 @@ _FIELD_EVENT_KEYS = (
 )
 
 
+# Oferta de OS para técnicos que ainda não estão nela (services/offers.py): vai só para eles
+# (audience.user_ids) e o app, ao receber, sincroniza e busca as ofertas.
+OFFER_EVENT = "ticket.offer"
+
+
 def field_event(event: dict[str, Any]) -> dict[str, Any]:
     out = {k: event.get(k) for k in _FIELD_EVENT_KEYS}
     data = event.get("data") or {}
+    if out["type"] == OFFER_EVENT:
+        # Só que a oferta dele mudou (enviada, cancelada...). Sem a versão (a oferta não muda a OS
+        # e o app não pode descartar o aviso pela versão que já tem), sem quem fez nem quem ficou
+        # com a OS.
+        out.update(status=None, assignee_id=None, actor_id=None, version=None)
+        out["data"] = {"action": data.get("action")}
+        return out
     # Mudança na equipe da visita: o app confere se entrou ou saiu dela.
     out["data"] = {"added_ids": data["added_ids"]} if "added_ids" in data else {}
     return out

@@ -119,6 +119,12 @@ class TicketEventType(StrEnum):
     # Valor do técnico na OS (parceiro pago por chamado): só a gestão vê.
     PAYOUT_SET = "payout_set"
     PAYOUT_REMOVED = "payout_removed"
+    # Oferta da OS com preço para técnicos parceiros (services/offers.py). Levam o valor: só quem
+    # tem Pagamentos vê no histórico.
+    OFFER_SENT = "offer_sent"
+    OFFER_ACCEPTED = "offer_accepted"
+    OFFER_DECLINED = "offer_declined"
+    OFFER_CANCELLED = "offer_cancelled"
 
 
 class DevicePlatform(StrEnum):
@@ -184,6 +190,27 @@ class PayoutStatus(StrEnum):
 
     PENDING = "pending"  # a pagar
     PAID = "paid"  # pago
+
+
+class OfferStatus(StrEnum):
+    """Oferta da OS com preço para um técnico parceiro (aceita pelo valor ou recusa, sem
+    contraproposta). "expired" não é gravado: é a pendente com o prazo para responder vencido
+    (services/offers.effective_state)."""
+
+    PENDING = "pending"  # aguardando a resposta do técnico
+    ACCEPTED = "accepted"  # o técnico aceitou e ficou com a OS
+    DECLINED = "declined"  # o técnico recusou
+    CANCELLED = "cancelled"  # encerrada sem resposta dele (o motivo em OfferCancelReason)
+
+
+class OfferCancelReason(StrEnum):
+    """Por que a oferta foi cancelada."""
+
+    CENTRAL = "central"  # a central cancelou a oferta
+    TAKEN = "taken"  # outro técnico aceitou primeiro
+    ASSIGNED = "assigned"  # a central definiu o técnico da OS na mão
+    TICKET_CLOSED = "ticket_closed"  # a OS foi cancelada, resolvida ou fechada
+    REPLACED = "replaced"  # a central mandou ao técnico uma oferta nova da mesma OS
 
 
 class ExpenseStatus(StrEnum):
