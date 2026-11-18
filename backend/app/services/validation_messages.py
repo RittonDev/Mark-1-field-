@@ -67,6 +67,10 @@ FIELD_LABELS: dict[str, str] = {
     "payload": "Dados da operação",
     "operations": "Operações",
     "pings": "Pontos",
+    # Oferta de OS (o recado, "note", tem o rótulo dado pelo validador: "Recado").
+    "technician_ids": "Técnicos",
+    "amount": "Valor",
+    "expires_at": "Prazo para responder",
 }
 
 # Partes do caminho que não são campo (corpo da requisição, query, índice de lista...).

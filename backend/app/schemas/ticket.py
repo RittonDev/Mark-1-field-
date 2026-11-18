@@ -273,6 +273,9 @@ class TicketDetail(TicketListItem):
     # Valor de cada técnico na OS: a gestão vê todos; o técnico, só o dele (my_payout).
     payouts: list[PayoutOut] = []
     my_payout: MyPayout | None = None
+    # Ofertas da OS esperando o técnico responder (pendentes no prazo): toda a gestão vê o número;
+    # a lista com os valores (GET /tickets/{id}/offers) é de Pagamentos. O técnico recebe 0.
+    open_offers: int = 0
     # Só na tela da OS: outras OS no mesmo local nos últimos 30 dias.
     recurrence: TicketRecurrence | None = None
     # OS migrada (Field Control): valores, itens, solicitação original e arquivos. Só a equipe.

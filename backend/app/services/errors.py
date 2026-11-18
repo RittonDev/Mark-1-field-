@@ -35,6 +35,16 @@ class VersionConflict(DomainError):
         super().__init__("A OS foi alterada por outra pessoa. Recarregue e tente de novo.")
 
 
+class OfferError(DomainError):
+    """Oferta de OS que não pode mais ser respondida (HTTP 409) ou que o técnico ainda não abriu
+    (HTTP 422), com `code` no corpo para o app reagir (services/offers.py)."""
+
+    def __init__(self, message: str, *, code: str, status_code: int = 409) -> None:
+        self.code = code
+        self.status_code = status_code
+        super().__init__(message)
+
+
 class ScheduleConflict(DomainError):
     """O responsável já tem OS no horário (HTTP 409, code SCHEDULE_CONFLICT)."""
 

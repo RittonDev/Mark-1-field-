@@ -81,14 +81,20 @@ _INTERNAL_EVENT_TYPES = {
     "times_corrected",
     "payout_set",
     "payout_removed",
+    "offer_sent",
+    "offer_accepted",
+    "offer_declined",
+    "offer_cancelled",
 }
 
 
 async def _with_recurrence(db: DB, ticket: Ticket, user: User) -> TicketDetail:
     detail = svc.to_detail(ticket, user)
-    # Reincidência (outras OS no local) é da gestão; o técnico só vê a OS dele.
+    # Reincidência (outras OS no local) e ofertas em aberto são da gestão; o técnico só vê a OS
+    # dele.
     if user.can_manage_tickets:
         detail.recurrence = await svc.recurrence_for(db, ticket, user)
+        detail.open_offers = await svc.open_offers_count(db, ticket.id)
     return detail
 
 

@@ -317,6 +317,8 @@ async def cancel_request(db: AsyncSession, user: User, ticket: Ticket, reason: s
     now: datetime = utcnow()
     tickets_svc.change_status(db, ticket, S.CANCELLED, user, now=now, note=reason.strip())
     ticket.updated_at = now
+    # As ofertas da OS aos técnicos fecham junto (ninguém aceita uma OS cancelada).
+    await tickets_svc.close_offers_on_status(db, ticket, user, now=now)
     await db.flush()
     return ticket
 

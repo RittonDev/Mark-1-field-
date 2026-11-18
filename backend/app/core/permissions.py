@@ -151,6 +151,11 @@ EVENT_ITEMS: dict[str, str] = {
 HISTORY_ITEMS: dict[str, str] = {
     "payout_set": "commercial.payouts",
     "payout_removed": "commercial.payouts",
+    # Ofertas de OS: levam o valor oferecido ao técnico.
+    "offer_sent": "commercial.payouts",
+    "offer_accepted": "commercial.payouts",
+    "offer_declined": "commercial.payouts",
+    "offer_cancelled": "commercial.payouts",
     "expense_added": "commercial.expenses",
     "expense_updated": "commercial.expenses",
     "expense_removed": "commercial.expenses",

@@ -689,6 +689,163 @@ def _change_status(
 change_status = _change_status
 
 
+# --------------------------------------------------------------------------- ofertas de OS
+# Os ganchos da OS nas ofertas (services/offers.py) ficam aqui, só com o modelo: o serviço de
+# ofertas usa este módulo (atribuição, histórico) e este não importa aquele.
+
+# O que o histórico diz quando a oferta fecha sem a resposta do técnico.
+OFFER_CLOSED_NOTES: dict[OfferCancelReason, str] = {
+    OfferCancelReason.CENTRAL: "Cancelada pela central",
+    OfferCancelReason.TAKEN: "Outro técnico aceitou a OS",
+    OfferCancelReason.ASSIGNED: "A central definiu o técnico da OS",
+    OfferCancelReason.TICKET_CLOSED: "A OS foi encerrada",
+}
+# A OS saiu do ar: as ofertas pendentes fecham (motivo "ticket_closed").
+_OFFER_CLOSING_STATUS = {
+    S.RESOLVED: "OS resolvida",
+    S.CLOSED: "OS fechada",
+    S.CANCELLED: "OS cancelada",
+}
+
+
+def offer_live_clause(now: datetime) -> ColumnElement[bool]:
+    """Oferta pendente e no prazo. A vencida continua gravada como pendente (estado efetivo
+    "expired", sem rotina) e não conta como em aberto."""
+    return and_(
+        TicketOffer.status == OfferStatus.PENDING,
+        or_(TicketOffer.expires_at.is_(None), TicketOffer.expires_at > now),
+    )
+
+
+async def open_offers_count(
+    db: AsyncSession, ticket_id: uuid.UUID, now: datetime | None = None
+) -> int:
+    """Ofertas da OS esperando resposta: o contador do detalhe, para toda a gestão (os valores
+    ficam com Pagamentos)."""
+    count = await db.scalar(
+        select(func.count())
+        .select_from(TicketOffer)
+        .where(TicketOffer.ticket_id == ticket_id, offer_live_clause(now or utcnow()))
+    )
+    return count or 0
+
+
+def queue_offer_events(
+    db: AsyncSession,
+    ticket: Ticket,
+    actor: User | None,
+    action: str,
+    technician_ids: Sequence[uuid.UUID],
+    *,
+    technician_name: str | None = None,
+    reason: str | None = None,
+) -> None:
+    """Tempo real da oferta. A gestão recebe ticket.updated com `fields: ["offers"]` e o que
+    aconteceu (sem o valor, que é de Pagamentos); os técnicos da oferta, que ainda não estão na OS,
+    recebem ticket.offer só para eles (o app sincroniza e busca as ofertas)."""
+    offer = {"action": action, "technician_name": technician_name, "reason": reason}
+    queue_event(
+        db,
+        "updated",
+        ticket,
+        actor,
+        {"fields": ["offers"], "offer": offer},
+        internal=True,
+        managers_only=True,
+    )
+    if technician_ids:
+        queue_event(db, "offer", ticket, actor, {"action": action}, user_ids=list(technician_ids))
+
+
+def cancel_offers(
+    db: AsyncSession,
+    ticket: Ticket,
+    offers: Sequence[TicketOffer],
+    actor: User | None,
+    *,
+    reason: OfferCancelReason,
+    now: datetime,
+    note: str | None = None,
+) -> None:
+    """Fecha como canceladas as ofertas pendentes dadas (travadas por quem chama): um evento
+    offer_cancelled para todas, com os técnicos e os valores, e o aviso à gestão e a eles."""
+    if not offers:
+        return
+    for offer in offers:
+        offer.status = OfferStatus.CANCELLED
+        offer.cancel_reason = reason
+        offer.updated_at = now
+    record_event(
+        db,
+        ticket,
+        actor,
+        TicketEventType.OFFER_CANCELLED,
+        to_value=reason.value,
+        note=note or OFFER_CLOSED_NOTES.get(reason),
+        data={
+            "reason": reason.value,
+            "offers": [
+                {
+                    "id": str(offer.id),
+                    "technician_id": str(offer.technician_id),
+                    "technician": offer.technician.name,
+                    "amount": payouts_svc.money_text(offer.amount),
+                }
+                for offer in offers
+            ],
+        },
+        now=now,
+    )
+    queue_offer_events(
+        db,
+        ticket,
+        actor,
+        "cancelled",
+        [offer.technician_id for offer in offers],
+        technician_name=offers[0].technician.name if len(offers) == 1 else None,
+        reason=reason.value,
+    )
+
+
+async def close_pending_offers(
+    db: AsyncSession,
+    ticket: Ticket,
+    actor: User | None,
+    *,
+    reason: OfferCancelReason,
+    now: datetime,
+    note: str | None = None,
+) -> list[TicketOffer]:
+    """Ganchos: definir o técnico (`_assign`) e cancelar, resolver ou fechar a OS fecham as
+    ofertas pendentes no prazo (as vencidas ficam "expired"). Trava a OS antes das ofertas, na
+    mesma ordem do aceite, para não haver impasse com um técnico aceitando agora."""
+    await db.execute(select(Ticket.id).where(Ticket.id == ticket.id).with_for_update())
+    offers = list(
+        await db.scalars(
+            select(TicketOffer)
+            .where(TicketOffer.ticket_id == ticket.id, offer_live_clause(now))
+            .order_by(TicketOffer.created_at)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    )
+    if offers:
+        cancel_offers(db, ticket, offers, actor, reason=reason, now=now, note=note)
+        await db.flush()
+    return offers
+
+
+async def close_offers_on_status(
+    db: AsyncSession, ticket: Ticket, actor: User | None, *, now: datetime
+) -> None:
+    """Depois da mudança de status: OS cancelada, resolvida ou fechada não recebe mais aceite."""
+    note = _OFFER_CLOSING_STATUS.get(ticket.status)
+    if note is not None:
+        await close_pending_offers(
+            db, ticket, actor, reason=OfferCancelReason.TICKET_CLOSED, now=now, note=note
+        )
+
+
 async def _assign(
     db: AsyncSession,
     ticket: Ticket,
@@ -699,9 +856,14 @@ async def _assign(
     now: datetime,
     note: str | None = None,
     status_note: str | None = None,
+    via: str | None = None,
 ) -> None:
     """`status_note`: a nota da mudança para "Atribuído" que a atribuição faz numa OS nova,
-    em triagem ou reaberta (a do menu de situação, quando é ele que pede "Atribuído")."""
+    em triagem ou reaberta (a do menu de situação, quando é ele que pede "Atribuído").
+
+    `via`: como o técnico entrou na OS, gravado no evento (ex.: "offer", aceitou a oferta).
+    Definir o técnico fecha as ofertas pendentes da OS (o aceite fecha as outras antes, como
+    "outro técnico aceitou")."""
     prev_id = ticket.assignee_id
     assignee: User | None = None
     if assignee_id is not None:
@@ -736,6 +898,8 @@ async def _assign(
         "to_name": assignee.name if assignee else None,
         "team_id": _jsonable(ticket.team_id),
     }
+    if via is not None:
+        data["via"] = via
     record_event(
         db,
         ticket,
@@ -748,6 +912,8 @@ async def _assign(
         now=now,
     )
     queue_event(db, "assigned", ticket, actor, data, previous_assignee_id=prev_id)
+    if assignee_id is not None and prev_id != assignee_id:
+        await close_pending_offers(db, ticket, actor, reason=OfferCancelReason.ASSIGNED, now=now)
     # Técnico parceiro recebe por chamado: o valor não pago acompanha o novo responsável (ou
     # entra o padrão do tipo de serviço).
     if prev_id != assignee_id:
@@ -1722,6 +1888,8 @@ async def transition_ticket(
             else:
                 # Nova visita (ou retomada): o limite é o que sobrou das horas do chamado.
                 field_rules.on_reentry(ticket, rules, now)
+        # Cancelada, resolvida ou fechada: as ofertas pendentes da OS fecham.
+        await close_offers_on_status(db, ticket, actor, now=now)
     if payload.scheduled_start or payload.scheduled_end or auto_assign:
         await schedule.ensure_no_conflict(db, ticket, actor, payload.allow_conflict)
     return ticket

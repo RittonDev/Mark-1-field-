@@ -27,6 +27,7 @@ from app.services.errors import (
     AccessDenied,
     DomainError,
     NotFound,
+    OfferError,
     PermissionDenied,
     ScheduleConflict,
     VersionConflict,
@@ -373,6 +374,13 @@ async def _schedule_conflict(_: Request, exc: ScheduleConflict) -> JSONResponse:
     return _error(409, str(exc), code="SCHEDULE_CONFLICT", conflicts=exc.conflicts)
 
 
+@app.exception_handler(OfferError)
+async def _offer_error(_: Request, exc: OfferError) -> JSONResponse:
+    """Oferta de OS: 409 (outro técnico aceitou, prazo vencido, cancelada, OS indisponível, já
+    respondida) ou 422 (aceite sem abrir a oferta), com o code para o app."""
+    return _error(exc.status_code, str(exc), code=exc.code)
+
+
 @app.exception_handler(StaleDataError)
 async def _stale(_: Request, __: StaleDataError) -> JSONResponse:
     return _error(409, "A OS foi alterada por outra pessoa. Recarregue e tente de novo.")
@@ -389,6 +397,7 @@ CONSTRAINT_MESSAGES: dict[str, str] = {
     "uq_unproductive_reasons_name": "Já existe um motivo com este nome",
     "uq_quote_item_catalog_name": "Já existe um item com este nome no catálogo",
     "uq_ticket_payouts_ticket_tech": "O valor deste técnico já foi definido. Recarregue a OS.",
+    "uq_ticket_offers_ticket_tech_pending": "Este técnico já tem uma oferta em aberto nesta OS",
     "uq_users_entra_oid": "Esta conta Microsoft já está ligada a outro usuário",
     "uq_access_profiles_name": "Já existe um perfil com este nome",
 }
