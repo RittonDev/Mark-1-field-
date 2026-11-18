@@ -411,6 +411,22 @@ function cites(text: string, name: string | null | undefined): boolean {
   return false;
 }
 
+/** Sufixo da razão social ("Cliente Exemplo Ltda", "S.A.", "S/A", "EIRELI", "ME", "EPP"), o mesmo da API. */
+const COMPANY_SUFFIX = /(?:\s*[,–-]\s*|\s+)(?:ltda\.?(?:\s*[–-]?\s*(?:me|epp)\.?)?|s\.?\s?\/?\s?a\.?|eireli|epp|me)\s*$/i;
+/** O nome sem o sufixo e o código da loja só contam a partir de 3 caracteres ("41" também é PDV, andar...), como na API. */
+const CUT_MIN = 3;
+
+/**
+ * O que a API tira do título da oferta por ser do cliente ou da loja: os dois nomes, o do cliente também sem
+ * o sufixo da razão social ("Cliente Exemplo Ltda" e "Cliente Exemplo") e o código da loja.
+ */
+function storeNames(ticket: TicketDetail): string[] {
+  const customer = (ticket.customer?.name ?? "").split(/\s+/).filter(Boolean).join(" ");
+  const short = customer.replace(COMPANY_SUFFIX, "").trim();
+  const code = ticket.location?.code?.trim() ?? "";
+  return [customer, short.length >= CUT_MIN ? short : "", ticket.location?.name ?? "", code.length >= CUT_MIN ? code : ""];
+}
+
 // ------------------------------------------------------------------ diálogo
 
 /**
@@ -588,7 +604,7 @@ export function OfferDialog({
       : "A OS não está mais em aberto.";
   // O título vai sem a loja e o cliente; o escopo vai como foi escrito.
   const scope = ticket.description?.trim() ?? "";
-  const scopeCites = Boolean(scope) && (cites(scope, ticket.customer?.name) || cites(scope, ticket.location?.name));
+  const scopeCites = Boolean(scope) && storeNames(ticket).some((name) => cites(scope, name));
   const dirty = picked.length > 0 || amountText !== null || note.trim() !== "" || deadline !== "none";
 
   const submit = (e: React.FormEvent<HTMLFormElement>) => {
@@ -892,11 +908,12 @@ export function OffersBlock({
         toast({ title: `Oferta para ${updated.technician.name} cancelada`, tone: "success" });
         return;
       }
-      // A lista estava velha: a oferta já tinha fechado por outro motivo e a API a devolve como estava.
+      // A lista estava velha: a oferta já tinha fechado por outro motivo e a API a devolve como estava. A nova
+      // (na "replaced") não é conferida aqui: pode ter sido respondida nesse meio-tempo, e a lista relida mostra.
       const why = closedBecause(updated.cancel_reason);
       toast({
         title: why ? `Esta oferta já tinha sido encerrada: ${why}` : "Esta oferta já tinha sido encerrada",
-        description: updated.cancel_reason === "replaced" ? `A oferta nova para ${updated.technician.name} continua em aberto.` : undefined,
+        description: updated.cancel_reason === "replaced" ? `A oferta nova para ${updated.technician.name} continua como estava.` : undefined,
       });
     },
     onError: (error) => toast({ title: "Não foi possível cancelar a oferta", description: errorMessage(error), tone: "error" }),

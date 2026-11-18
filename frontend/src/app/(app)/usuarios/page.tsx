@@ -465,7 +465,8 @@ function UserDialog({ user, onClose }: { user: User | null; onClose: () => void 
 
   const submit = async () => {
     if (overCap) return;
-    if (deactivating && (asAssignee > 0 || asOwner > 0 || ownerUnknown)) {
+    // Técnico sempre confirma, como em Técnicos: as ofertas em aberto para ele são canceladas e reativar não as traz de volta.
+    if (deactivating && (asAssignee > 0 || asOwner > 0 || ownerUnknown || savedTechnician)) {
       const known = asAssignee > 0 || asOwner > 0;
       const ok = await confirm({
         title: known ? `Desativar ${user?.name} com OS abertas?` : `Desativar ${user?.name}?`,
@@ -751,6 +752,8 @@ function UserDialog({ user, onClose }: { user: User | null; onClose: () => void 
         {sessionEnds && !self ? (
           <p className="text-xs text-ink-muted sm:col-span-2">
             Com a troca de e-mail, papel ou senha, a pessoa precisa entrar de novo.
+            {/* A API fecha as ofertas de quem deixa de ser técnico (como ao desativar). */}
+            {savedTechnician && form.role !== "technician" ? " Fora do papel de técnico, as ofertas em aberto para ela são canceladas." : null}
           </p>
         ) : null}
         {sessionEnds && self ? (
