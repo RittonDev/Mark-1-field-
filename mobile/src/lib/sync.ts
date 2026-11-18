@@ -15,7 +15,7 @@
 // cada ação do técnico, cada evento do WebSocket e um intervalo de segurança.
 //
 // A rodada também confere as ofertas de OS com preço (GET /me/offers, lib/offers.ts): antes do upload das fotos,
-// entre uma foto e outra, depois do download e quando o servidor recusa o download.
+// entre uma foto e outra, depois do download e quando o download falha por outro motivo que não a rede ou a sessão.
 
 import NetInfo from "@react-native-community/netinfo";
 import { randomUUID } from "expo-crypto";
@@ -393,7 +393,7 @@ async function runOnce(myEpoch: number, manual: boolean) {
     try {
       await pullChanges(round);
     } catch (error) {
-      // Download recusado pelo servidor (não falta de rede nem sessão): as ofertas seguem chegando.
+      // Download que falhou por outro motivo que não a rede ou a sessão (erro do servidor): as ofertas seguem chegando.
       if (!(error instanceof WriteCancelled) && !(error instanceof ApiError && (error.status === 0 || error.status === 401))) {
         await refreshOffers(round, true);
       }
@@ -1029,7 +1029,7 @@ export async function storeServerTicket(ticket: TicketDetail) {
 
 /**
  * Ofertas de OS com preço (GET /me/offers): antes do upload das fotos, entre uma foto e outra, depois do pull e
- * quando o servidor recusa o pull. A busca não se repete a cada vez: valem o aviso do tempo real (ticket.offer),
+ * quando o pull falha por erro do servidor. A busca não se repete a cada vez: valem o aviso do tempo real (ticket.offer),
  * o app voltando à tela, a rede e o tempo real voltando (um aviso pode ter se perdido), o "puxar para atualizar"
  * e, sem eles, uma conferência por minuto. Falta de rede para a rodada; outro problema (servidor sem a rota,
  * erro do servidor) não derruba o sync. `early`: antes do pull (applyOfferList).

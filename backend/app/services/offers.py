@@ -143,6 +143,130 @@ def offer_out(offer: TicketOffer, now: datetime) -> TicketOfferOut:
     )
 
 
+# Título da OS na oferta. O automático da Nova OS é "<Tipo de OS> · <Localização>": o técnico que
+# ainda não está na OS não pode ler a loja nele.
+TITLE_MIN = 3
+TITLE_FALLBACK = "Atendimento técnico"
+# Ligação que sai junto com o nome ("PDV parado na Matriz" → "PDV parado").
+_LINKS = frozenset(
+    {"a", "o", "as", "os", "ao", "aos", "na", "no", "nas", "nos", "da", "do", "das", "dos", "de"}
+    | {"em", "para", "pra", "pela", "pelo", "pelas", "pelos"}
+)
+# Nas pontas do que sobra, só as preposições ("Visita na" → "Visita"; "O PDV" fica).
+_EDGE_LINKS = _LINKS - {"a", "o", "as", "os"}
+_SEPARATORS = "·•-–—|/:;,"
+_SEPARATOR_RUN = re.compile(rf"\s*([{re.escape(_SEPARATORS)}])(?:\s*[{re.escape(_SEPARATORS)}])+\s*")
+_EMPTY_BRACKETS = re.compile(r"\(\s*\)|\[\s*\]")
+
+
+def _fold(text: str) -> tuple[str, list[int]]:
+    """O texto para comparar (sem acento, casefold) e, para cada caractere dele, a posição no
+    original (ß vira "ss": dois caracteres da mesma posição)."""
+    folded: list[str] = []
+    origin: list[int] = []
+    for index, char in enumerate(text):
+        plain = "".join(
+            c for c in unicodedata.normalize("NFKD", char) if not unicodedata.combining(c)
+        ).casefold()
+        folded.append(plain)
+        origin.extend([index] * len(plain))
+    return "".join(folded), origin
+
+
+def _link_start(text: str, start: int) -> int:
+    """Onde começa o corte do nome em `start`: na ligação logo antes dele, se houver."""
+    end = start
+    while end > 0 and text[end - 1].isspace():
+        end -= 1
+    begin = end
+    while begin > 0 and text[begin - 1].isalpha():
+        begin -= 1
+    whole = begin == 0 or not text[begin - 1].isalnum()
+    if begin < end and whole and _fold(text[begin:end])[0] in _LINKS:
+        return begin
+    return start
+
+
+def _cut_name(text: str, name: str) -> str:
+    """Tira do texto o nome (sem caixa nem acento, só a palavra inteira: "Sé" não sai de
+    "Série") e a ligação antes dele."""
+    needle = _fold(" ".join(name.split()))[0]
+    if len(needle) < 2:
+        return text
+    folded, origin = _fold(text)
+    spans: list[tuple[int, int]] = []
+    pos = 0
+    while (found := folded.find(needle, pos)) != -1:
+        end = found + len(needle)
+        glued_before = found > 0 and folded[found - 1].isalnum() and needle[0].isalnum()
+        glued_after = end < len(folded) and folded[end].isalnum() and needle[-1].isalnum()
+        if glued_before or glued_after:
+            pos = found + 1
+            continue
+        spans.append((origin[found], origin[end - 1] + 1))
+        pos = end
+    for start, stop in reversed(spans):
+        text = f"{text[: _link_start(text, start)]} {text[stop:]}"
+    return text
+
+
+def _tidy(text: str) -> str:
+    """O que sobrou do corte: sem parênteses vazios, separadores repetidos ou nas pontas, nem
+    preposição solta nas pontas."""
+    text = " ".join(_EMPTY_BRACKETS.sub(" ", text).split())
+    text = _SEPARATOR_RUN.sub(
+        lambda m: f"{m.group(1)} " if m.group(1) in ",;:" else f" {m.group(1)} ", text
+    )
+    while True:
+        words = text.strip(f"{_SEPARATORS} ").split()
+        while words and _fold(words[0])[0] in _EDGE_LINKS:
+            words.pop(0)
+        while words and _fold(words[-1])[0] in _EDGE_LINKS:
+            words.pop()
+        tidy = " ".join(words)
+        if tidy == text:
+            return tidy
+        text = tidy
+
+
+def _hidden_names(ticket: Ticket) -> list[str]:
+    """O que o técnico de fora não lê: nome e código da loja, cliente, projeto e nº do chamado do
+    cliente. O mais longo primeiro (a loja "Cliente Exemplo Matriz" sai inteira)."""
+    store, customer, project = ticket.location, ticket.customer, ticket.project
+    names = {
+        " ".join(name.split())
+        for name in (
+            store.name if store is not None else None,
+            store.code if store is not None else None,
+            customer.name if customer is not None else None,
+            project.name if project is not None else None,
+            ticket.client_reference,
+        )
+        if name and name.strip()
+    }
+    return sorted(names, key=len, reverse=True)
+
+
+def _scrub(text: str, names: list[str]) -> str:
+    original = " ".join(unicodedata.normalize("NFC", text or "").split())
+    cut = original
+    for name in names:
+        cut = _cut_name(cut, name)
+    return original if cut == original else _tidy(cut)
+
+
+def _offer_title(ticket: Ticket) -> str:
+    """O título da OS na oferta sem os nomes de `_hidden_names` e o que sobra deles (" · ", " - ",
+    "na"...). Se sobrar menos de 3 caracteres: o tipo de serviço ou "Atendimento técnico"."""
+    names = _hidden_names(ticket)
+    title = _scrub(ticket.title, names)
+    if len(title) >= TITLE_MIN:
+        return title
+    service = ticket.service_type
+    fallback = _scrub(service.name, names) if service is not None else ""
+    return fallback if len(fallback) >= TITLE_MIN else TITLE_FALLBACK
+
+
 def _field_ticket(ticket: Ticket, *, full: bool) -> FieldOfferTicket:
     """O recorte da OS para o técnico que ainda não está nela. `full=False` (oferta que já
     fechou): sem escopo, formulários e bairro."""
@@ -151,7 +275,7 @@ def _field_ticket(ticket: Ticket, *, full: bool) -> FieldOfferTicket:
     return FieldOfferTicket(
         id=ticket.id,
         code=format_ticket_code(ticket.number),
-        title=ticket.title,
+        title=_offer_title(ticket),
         description=((ticket.description or "").strip() or None) if full else None,
         service_type=Ref(id=service.id, name=service.name) if service is not None else None,
         forms=[OfferForm(name=f.name, required=f.required) for f in ticket.forms] if full else [],
@@ -224,12 +348,31 @@ async def _locked_ticket(db: AsyncSession, ticket_id: uuid.UUID) -> Ticket:
     return ticket
 
 
+async def _paid_technicians(
+    db: AsyncSession, ticket_id: uuid.UUID, technician_ids: list[uuid.UUID]
+) -> set[uuid.UUID]:
+    """Quem já tem valor pago nesta OS (foi o técnico dela antes). O pago não muda e o valor é um
+    por técnico na OS: com a oferta, ele não ficaria com o valor que aceitou."""
+    if not technician_ids:
+        return set()
+    return set(
+        await db.scalars(
+            select(TicketPayout.technician_id).where(
+                TicketPayout.ticket_id == ticket_id,
+                TicketPayout.technician_id.in_(technician_ids),
+                TicketPayout.status == PayoutStatus.PAID,
+            )
+        )
+    )
+
+
 async def _technicians(db: AsyncSession, ticket: Ticket, ids: list[uuid.UUID]) -> list[User]:
-    """Os técnicos da oferta, sem repetir: técnicos de campo ativos (o inativo não entra no app)
-    e que ainda não estão na OS."""
+    """Os técnicos da oferta, sem repetir: técnicos de campo ativos (o inativo não entra no app),
+    que ainda não estão na OS e sem valor pago nela."""
     wanted = list(dict.fromkeys(ids))
     found = {u.id: u for u in await db.scalars(select(User).where(User.id.in_(wanted)))}
     helpers = {h.id for h in ticket.helpers}
+    paid = await _paid_technicians(db, ticket.id, wanted)
     out: list[User] = []
     for user_id in wanted:
         user = found.get(user_id)
@@ -243,6 +386,8 @@ async def _technicians(db: AsyncSession, ticket: Ticket, ids: list[uuid.UUID]) -
             )
         if user.id in helpers:
             raise WorkflowError(f"{user.name} já está na OS")
+        if user.id in paid:
+            raise WorkflowError(PAID_HERE.format(name=user.name))
         out.append(user)
     return out
 
@@ -380,7 +525,8 @@ async def _own_offer(db: AsyncSession, offer_id: uuid.UUID, technician: User) ->
 
 
 async def _field_tickets(db: AsyncSession, ids: set[uuid.UUID]) -> dict[uuid.UUID, Ticket]:
-    """As OS das ofertas só com o que o recorte usa (loja, tipo de serviço e formulários)."""
+    """As OS das ofertas só com o que o recorte usa (loja, tipo de serviço e formulários) e os
+    nomes que saem do título (cliente e projeto), cada um numa consulta para todas."""
     if not ids:
         return {}
     rows = await db.scalars(
@@ -388,6 +534,8 @@ async def _field_tickets(db: AsyncSession, ids: set[uuid.UUID]) -> dict[uuid.UUI
         .options(
             noload("*"),
             selectinload(Ticket.location),
+            selectinload(Ticket.customer),
+            selectinload(Ticket.project).noload("*"),
             selectinload(Ticket.service_type),
             selectinload(Ticket.forms),
         )
@@ -397,33 +545,43 @@ async def _field_tickets(db: AsyncSession, ids: set[uuid.UUID]) -> dict[uuid.UUI
 
 
 async def my_offers(db: AsyncSession, technician: User) -> list[FieldOfferOut]:
-    """As ofertas do técnico: as pendentes no prazo e as que fecharam nas últimas 24 h (para o app
-    dizer "outro técnico aceitou", "prazo encerrado"...), a mais nova primeiro, até 50. A
-    substituída por uma oferta nova da mesma OS não aparece (a nova aparece)."""
+    """As ofertas do técnico, a mais nova primeiro: todas as pendentes no prazo e até 50 das que
+    fecharam nas últimas 24 h (para o app dizer "outro técnico aceitou", "prazo encerrado"...). O
+    limite é só das fechadas: o app tira do aparelho a oferta que não vem, e a pendente antiga
+    não pode sumir atrás de fechadas mais novas. A substituída por uma oferta nova da mesma OS não
+    aparece (a nova aparece)."""
     now = utcnow()
     since = now - RECENT_WINDOW
-    offers = list(
+    mine = (
+        select(TicketOffer)
+        .options(noload(TicketOffer.technician), noload(TicketOffer.created_by))
+        .where(
+            TicketOffer.technician_id == technician.id,
+            TicketOffer.cancel_reason.is_distinct_from(OfferCancelReason.REPLACED),
+        )
+        .order_by(TicketOffer.created_at.desc(), TicketOffer.id)
+    )
+    live = list(await db.scalars(mine.where(tickets_svc.offer_live_clause(now))))
+    closed = list(
         await db.scalars(
-            select(TicketOffer)
-            .options(noload(TicketOffer.technician), noload(TicketOffer.created_by))
-            .where(
-                TicketOffer.technician_id == technician.id,
-                TicketOffer.cancel_reason.is_distinct_from(OfferCancelReason.REPLACED),
+            mine.where(
                 or_(
+                    # Vencida (sem rotina: continua gravada como pendente).
                     and_(
                         TicketOffer.status == OfferStatus.PENDING,
-                        or_(TicketOffer.expires_at.is_(None), TicketOffer.expires_at > since),
+                        TicketOffer.expires_at > since,
+                        TicketOffer.expires_at <= now,
                     ),
                     and_(
                         TicketOffer.status != OfferStatus.PENDING,
                         TicketOffer.updated_at > since,
                     ),
-                ),
-            )
-            .order_by(TicketOffer.created_at.desc(), TicketOffer.id)
-            .limit(MY_OFFERS_LIMIT)
+                )
+            ).limit(MY_OFFERS_LIMIT)
         )
     )
+    # A mesma ordem da consulta (mais nova primeiro; empate pelo id) nas duas listas juntas.
+    offers = sorted(sorted(live + closed, key=lambda o: o.id), key=lambda o: o.created_at)[::-1]
     tickets = await _field_tickets(db, {o.ticket_id for o in offers})
     return [field_out(o, tickets[o.ticket_id], now) for o in offers if o.ticket_id in tickets]
 
