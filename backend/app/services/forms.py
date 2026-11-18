@@ -675,8 +675,8 @@ def _attach(
     if (
         required
         and template.requires_signature
-        and ticket.signed_at is None
         and not ticket.signature_required
+        and ticket.signed_at is None
     ):
         ticket.signature_required = True
     record_event(

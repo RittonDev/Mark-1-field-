@@ -1375,9 +1375,9 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
         created_data["helpers"] = [h.name for h in helpers]
     # Os ligados que a Nova OS deixou de fora: não entram sozinhos depois (troca de tipo ou de
     # categoria antes da visita).
-    left_out = forms_svc.opening_left_out(chosen_forms, linked_forms)
-    if left_out:
-        created_data["forms_left_out"] = left_out
+    forms_left_out = forms_svc.opening_left_out(chosen_forms, linked_forms)
+    if forms_left_out:
+        created_data["forms_left_out"] = forms_left_out
     record_event(
         db,
         ticket,
@@ -1457,6 +1457,7 @@ async def update_ticket(
         if fields["signature_required"] is None:
             fields.pop("signature_required")
 
+    category_sent = "category_id" in fields
     ref_keys = {"customer_id", "location_id", "asset_id", "category_id", "team_id"}
     if ref_keys & fields.keys():
         refs = await _resolve_refs(
@@ -1482,6 +1483,17 @@ async def update_ticket(
         # Trocar o tipo traz a estimativa dele, a menos que outra tenha sido informada.
         if "estimated_minutes" not in fields:
             fields["estimated_minutes"] = service_type.estimated_minutes
+        # A categoria acompanha o tipo: vazia, ou a padrão do tipo anterior, passa a ser a padrão
+        # do novo (vazia se ele não tem). A escolhida à mão fica, e a informada no corpo vence.
+        if service_type.id != ticket.service_type_id and not category_sent:
+            previous = (
+                await db.get(ServiceType, ticket.service_type_id)
+                if ticket.service_type_id
+                else None
+            )
+            current = fields.get("category_id", ticket.category_id)
+            if current is None or (previous is not None and current == previous.category_id):
+                fields["category_id"] = service_type.category_id
 
     if ("impact" in fields or "urgency" in fields) and "priority" not in fields:
         fields["priority"] = compute_priority(
@@ -1533,14 +1545,53 @@ async def update_ticket(
     # "Agendado" sem data não existe: a agenda saiu, a OS volta para "Atribuído".
     if ticket.status == S.SCHEDULED and ticket.scheduled_start is None:
         _change_status(db, ticket, S.ASSIGNED, actor, now=now, note="Agenda removida")
+    # Antes da visita, trocar o tipo ou a categoria traz os formulários ligados ao novo e tira os
+    # que entraram sozinhos e não casam mais (ninguém começou). Depois da chegada, nada muda.
+    forms_changed = await _reconcile_forms(db, ticket, changes, fields, now=now)
 
     agenda = {"scheduled_start", "scheduled_end", "estimated_minutes"}
     if changes.keys() & agenda or ticket.assignee_id != previous_assignee:
         await schedule.ensure_no_conflict(db, ticket, actor, data.allow_conflict)
     if changes:
         record_event(db, ticket, actor, TicketEventType.UPDATED, data={"changes": changes}, now=now)
-        queue_event(db, "updated", ticket, actor, {"fields": sorted(changes)})
+        updated = sorted(changes) + (["forms"] if forms_changed else [])
+        queue_event(db, "updated", ticket, actor, {"fields": updated})
     return ticket
+
+
+# Motivo no histórico do formulário que saiu sozinho na edição da OS.
+FORMS_LEFT_WITH = {
+    frozenset({"service_type_id"}): "Saiu com a troca do tipo de OS",
+    frozenset({"category_id"}): "Saiu com a troca da categoria",
+    frozenset({"service_type_id", "category_id"}): "Saiu com a troca do tipo de OS e da categoria",
+}
+
+
+async def _reconcile_forms(
+    db: AsyncSession,
+    ticket: Ticket,
+    changes: dict[str, list[Any]],
+    fields: dict[str, Any],
+    *,
+    now: datetime,
+) -> bool:
+    """Os formulários da OS depois de trocar o tipo ou a categoria (services/forms.py,
+    `reconcile_ticket`). A exigência de assinatura que muda junto entra em `changes`; a informada
+    no mesmo salvamento vence. Devolve se algum formulário entrou ou saiu."""
+    changed = frozenset(changes.keys() & {"service_type_id", "category_id"})
+    if not changed:
+        return False
+    from app.services import forms as forms_svc  # forms usa este módulo: import tardio
+
+    signature_before = ticket.signature_required
+    added, removed = await forms_svc.reconcile_ticket(
+        db, ticket, why=FORMS_LEFT_WITH[changed], now=now
+    )
+    if "signature_required" in fields:
+        ticket.signature_required = fields["signature_required"]
+    if ticket.signature_required != signature_before:
+        changes["signature_required"] = [signature_before, ticket.signature_required]
+    return bool(added or removed)
 
 
 async def assign_ticket(
