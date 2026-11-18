@@ -431,3 +431,224 @@ async def test_home_late_and_missed_skip_the_unproductive_visit(
         "scheduled_from": "2026-11-10",
         "scheduled_to": "2026-11-16",
     }
+
+
+async def _bounce(db: AsyncSession, ticket: Ticket, when: datetime) -> None:
+    """Visita improdutiva registrada em `when` (o evento e os campos da OS, como no fluxo)."""
+    db.add(
+        TicketEvent(
+            ticket_id=ticket.id,
+            event_type=TicketEventType.UNPRODUCTIVE_VISIT,
+            from_value=S.ASSIGNED.value,
+            to_value="Loja fechada",
+            data={"reason": "Loja fechada"},
+            created_at=when,
+        )
+    )
+    ticket.last_unproductive_at = when
+    ticket.unproductive_count = (ticket.unproductive_count or 0) + 1
+    await db.flush()
+
+
+@pytest.mark.usefixtures("frozen_clock")
+async def test_day_activities_wait_the_tolerance_like_the_queue(
+    client: AsyncClient,
+    world: World,
+    db: AsyncSession,  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Atividades do dia: "Atrasada" só 30 min depois do horário, como a Minha fila e a Início; a
+    visita que deu improdutiva no horário ou depois voltou para a fila (não é atrasada)."""
+    monkeypatch.setattr(activities, "utcnow", lambda: NOW)
+    monkeypatch.setattr(activities, "local_today", lambda: TODAY)
+    tolerated = await add_ticket(db, world, title="Há 15 min", scheduled_start=_ago(minutes=15))
+    late = await add_ticket(db, world, title="Há 45 min", scheduled_start=_ago(minutes=45))
+    # OS migrada que manteve a agenda: improdutiva às 10h da visita das 9h.
+    bounced = await add_ticket(
+        db, world, title="Improdutiva das 9h", status=S.ASSIGNED, scheduled_start=at(TODAY, 9)
+    )
+    await _bounce(db, bounced, at(TODAY, 10))
+    # Improdutiva ainda dentro da tolerância: também voltou para a fila, não é "agendada".
+    recent = await add_ticket(
+        db, world, title="Improdutiva agora", status=S.ASSIGNED, scheduled_start=_ago(minutes=20)
+    )
+    await _bounce(db, recent, _ago(minutes=10))
+    await db.commit()
+
+    r = await client.get(f"{API}/activities/day", headers=world.analyst.headers)
+    assert r.status_code == 200, r.text
+    day = r.json()
+    state = {a["ticket"]["title"]: a["state"] for a in day["activities"]}
+    assert state == {
+        tolerated.title: "scheduled",
+        late.title: "late",
+        bounced.title: "pending",  # a tela mostra "Improdutiva", com o motivo
+        recent.title: "pending",
+    }
+    summary = day["summary"]
+    assert (summary["late"], summary["scheduled"], summary["pending"]) == (1, 1, 2)
+    assert summary["unproductive"] == 2
+
+    # A Minha fila e a Início dizem o mesmo das mesmas OS.
+    queue = await _my_queue(client, world)
+    codes = {i["title"]: [r["code"] for r in i["reasons"]] for i in queue["items"]}
+    assert codes[late.title] == ["late_start"] and codes[tolerated.title] == []
+    assert codes[bounced.title] == codes[recent.title] == ["unproductive"]
+    overview = (await client.get(f"{API}/home/overview", headers=world.supervisor.headers)).json()
+    not_started = groups(overview)["today_not_started"]
+    assert [i["ticket_id"] for i in not_started["items"]] == [str(late.id)]
+
+
+@pytest.mark.usefixtures("frozen_clock")
+async def test_late_arrival_skips_the_visit_waiting_for_a_new_date(
+    client: AsyncClient,
+    world: World,
+    db: AsyncSession,  # noqa: F811
+) -> None:
+    """Chegada atrasada (Início e Minha fila) não pega a OS que espera data nova depois da
+    improdutiva: o técnico foi, e o prazo que o fluxo recalcula fica no passado. Com a visita nova
+    marcada, o atraso dela conta, e a OS sem improdutiva segue como sempre."""
+    waiting = await add_ticket(
+        db,
+        world,
+        title="Esperando data nova",
+        status=S.ASSIGNED,
+        scheduled_start=None,
+        arrival_due_at=_ago(hours=3),
+    )
+    await _bounce(db, waiting, _ago(hours=1))
+    # Prazo recalculado para daqui a 30 min: nem "em risco".
+    soon = await add_ticket(
+        db,
+        world,
+        title="Improdutiva e prazo perto",
+        status=S.ASSIGNED,
+        scheduled_start=None,
+        arrival_due_at=NOW + timedelta(minutes=30),
+    )
+    await _bounce(db, soon, _ago(minutes=30))
+    # OS migrada que manteve a agenda da visita improdutiva.
+    kept = await add_ticket(
+        db,
+        world,
+        title="Agenda antiga mantida",
+        status=S.ASSIGNED,
+        scheduled_start=at(TODAY, 9),
+        arrival_due_at=at(TODAY, 9, 30),
+    )
+    await _bounce(db, kept, at(TODAY, 10))
+    # Visita nova marcada depois da improdutiva e já atrasada: atraso real.
+    revisit = await add_ticket(
+        db,
+        world,
+        title="Visita nova atrasada",
+        scheduled_start=at(TODAY, 13),
+        arrival_due_at=at(TODAY, 13, 30),
+    )
+    await _bounce(db, revisit, _ago(days=1))
+    # Voltou para a loja sem data nova: em campo, sem prazo a cobrar e sem "reagendar".
+    back = await add_ticket(
+        db,
+        world,
+        title="Voltou sem data",
+        status=S.EN_ROUTE,
+        scheduled_start=None,
+        arrival_due_at=_ago(hours=5),
+    )
+    await _bounce(db, back, _ago(hours=2))
+    plain = await add_ticket(
+        db, world, title="A caminho atrasada", status=S.EN_ROUTE, arrival_due_at=_ago(minutes=40)
+    )
+    await db.commit()
+
+    overview = (await client.get(f"{API}/home/overview", headers=world.supervisor.headers)).json()
+    g = groups(overview)
+    assert g["late_arrival"]["count"] == 2
+    assert {i["ticket_id"] for i in g["late_arrival"]["items"]} == {str(revisit.id), str(plain.id)}
+    assert g["unproductive_pending"]["count"] == 3
+    pending = {i["ticket_id"] for i in g["unproductive_pending"]["items"]}
+    assert pending == {str(waiting.id), str(soon.id), str(kept.id)}
+
+    queue = await _my_queue(client, world)
+    codes = {i["title"]: [r["code"] for r in i["reasons"]] for i in queue["items"]}
+    assert codes[waiting.title] == codes[soon.title] == codes[kept.title] == ["unproductive"]
+    assert "arrival_late" in codes[revisit.title] and "unproductive" not in codes[revisit.title]
+    assert codes[back.title] == [] and codes[plain.title] == ["arrival_late"]
+    section = {i["title"]: i["section"] for i in queue["items"]}
+    assert section[back.title] == "in_field"
+
+
+@pytest.mark.usefixtures("frozen_clock")
+async def test_today_card_parts_add_up(
+    client: AsyncClient,
+    world: World,
+    db: AsyncSession,  # noqa: F811
+) -> None:
+    """Cartão Hoje: planejadas = concluídas + em campo + sem início + aguardando + a seguir. A visita
+    que ainda não começou e teve improdutiva no horário ou depois sai das planejadas (como no fluxo
+    nativo, em que a improdutiva tira a agenda), e o técnico dela não conta como "com visita"."""
+    other = world.tech_other.user.id
+    await add_ticket(
+        db,
+        world,
+        title="Feita",
+        status=S.RESOLVED,
+        scheduled_start=at(TODAY, 8),
+        resolved_at=at(TODAY, 10),
+    )
+    await add_ticket(
+        db,
+        world,
+        title="Na loja",
+        status=S.IN_PROGRESS,
+        scheduled_start=at(TODAY, 11),
+        work_started_at=_ago(hours=1),
+    )
+    await add_ticket(db, world, title="Sem início", scheduled_start=at(TODAY, 9))
+    await add_ticket(
+        db, world, title="Aguardando", status=S.ON_HOLD_CUSTOMER, scheduled_start=at(TODAY, 10)
+    )
+    await add_ticket(db, world, title="Mais tarde", scheduled_start=at(TODAY, 16))
+    await add_ticket(db, world, title="Na tolerância", scheduled_start=at(TODAY, 14, 45))
+    await add_ticket(
+        db, world, title="Cancelada", status=S.CANCELLED, scheduled_start=at(TODAY, 12)
+    )
+    bounced = await add_ticket(
+        db,
+        world,
+        title="Improdutiva das 9h",
+        status=S.ASSIGNED,
+        scheduled_start=at(TODAY, 9),
+        assignee_id=other,
+    )
+    await _bounce(db, bounced, at(TODAY, 10))
+    recent = await add_ticket(
+        db,
+        world,
+        title="Improdutiva há 10 min",
+        status=S.ASSIGNED,
+        scheduled_start=at(TODAY, 14, 40),
+        assignee_id=other,
+    )
+    await _bounce(db, recent, at(TODAY, 14, 50))
+    # Voltou para a loja no mesmo dia, sem data nova: é visita de hoje, em campo.
+    back = await add_ticket(
+        db, world, title="Voltou à loja", status=S.EN_ROUTE, scheduled_start=at(TODAY, 8)
+    )
+    await _bounce(db, back, at(TODAY, 9))
+    await db.commit()
+
+    data = (await client.get(f"{API}/home/overview", headers=world.supervisor.headers)).json()
+    today = data["pulse"]["today"]
+    parts = ("done", "in_field", "not_started", "on_hold", "upcoming")
+    assert {key: today[key] for key in ("planned", *parts)} == {
+        "planned": 7,
+        "done": 1,
+        "in_field": 2,  # na loja e a que voltou
+        "not_started": 1,
+        "on_hold": 1,
+        "upcoming": 2,  # 16h e a que está na tolerância
+    }
+    assert today["planned"] == sum(today[key] for key in parts)
+    assert data["kpis"]["scheduled_today"] == today["planned"]
+    assert today["technicians"] == 1  # o das improdutivas não tem visita hoje
