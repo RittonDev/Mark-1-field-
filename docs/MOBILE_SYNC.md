@@ -86,8 +86,8 @@ Com o app aberto e online, mantenha `ws(s)://<host>/api/v1/ws?token=<access_toke
   não espera o upload das fotos. A rodada busca logo depois do primeiro envio da fila, entre uma foto e outra
   (se chegou outro aviso ou já passou 1 min), depois do pull e quando o pull falha por erro do servidor (não de
   rede nem de sessão). Numa busca antes do pull, a oferta cancelada com `cancel_reason = "assigned"` cuja OS
-  ainda não está no aparelho como do técnico fica como estava, sem aviso, e a busca depois do pull decide (a OS
-  pode ser justamente dele);
+  ainda não está no aparelho com o técnico (responsável ou na visita) fica como estava, sem aviso, e a busca
+  depois do pull decide (a OS pode ser justamente dele);
 - código de fechamento **4401** = token inválido/expirado → `refresh` e reconecte;
 - reconecte com backoff exponencial ao perder a conexão.
 

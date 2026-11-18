@@ -197,11 +197,11 @@ A central manda uma OS ainda sem técnico, com o valor, para alguns técnicos (c
   quando vale: o evento `ticket.offer` do tempo real (só para os técnicos da oferta), o app voltando à tela (o
   técnico costuma vir do recado no grupo), a rede e o tempo real voltando, o "puxar para atualizar" (uma busca
   por rodada) e, sem eles, uma conferência por minuto.
-- **Busca antes do download**: a OS em que a central pôs o próprio técnico pode ainda não estar no aparelho. A
-  oferta que fechou assim (`cancel_reason = "assigned"`) e cuja OS não está no aparelho como dele fica como
-  estava, sem aviso, e pede a busca depois do download, que decide: sem aviso se a OS é dele (o download já
-  avisou "Nova OS para você"), "OS-… já tem técnico" se não. Esse pedido não dispara outra busca antes do
-  download (nada de uma busca por foto).
+- **Busca antes do download**: a OS em que a central pôs o próprio técnico (como responsável ou na visita) pode
+  ainda não estar no aparelho. A oferta que fechou assim (`cancel_reason = "assigned"`) e cuja OS não está no
+  aparelho com ele fica como estava, sem aviso, e pede a busca depois do download, que decide: sem aviso se ele
+  está na OS (o download já avisou "Nova OS para você" ou "Você vai na visita da OS-…"), "OS-… já tem técnico"
+  se não. Esse pedido não dispara outra busca antes do download (nada de uma busca por foto).
 - **Hoje** ganha no topo **Ofertas para você**: um cartão por oferta pendente e no prazo, com o valor em
   destaque, o serviço, bairro · cidade/UF, a janela da visita (ou "Data a combinar"), "Responder até 15:30" e o
   selo **Nova** enquanto o técnico não abriu. O prazo é contado pelo relógio do servidor (`serverNow`): a oferta

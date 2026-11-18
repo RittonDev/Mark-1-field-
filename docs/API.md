@@ -1109,14 +1109,16 @@ técnico) e, só no aceite, a leitura e o valor pago do técnico nesta OS.
   Escolher o técnico na mão com ofertas em aberto mostra o aviso de que elas serão canceladas ao salvar. O
   "Cancelar" de uma oferta que já tinha fechado por outro motivo (lista velha; a API devolve como estava) avisa, em
   tom neutro, "Esta oferta já tinha sido encerrada: <motivo>" e, na `replaced`, que a oferta nova para o técnico
-  continua em aberto.
+  continua como estava.
 - Diálogo "Ofertar a OS com preço" (também no resumo da OS recém-criada): de 1 a 10 técnicos (`GET
   /technicians/suggest` com `exclude_ticket_id` e `limit=10`, mais a busca: `GET /technicians` com a tela Técnicos,
   senão os técnicos de `GET /users/assignable`; sem acesso ao app e já na OS aparecem travados), o valor (começa no
   `technician_fee` do tipo de serviço), o prazo (sem prazo, 30 min, 1 h, 2 h, 4 h ou até o fim do dia; o `expires_at` é
-  calculado no clique) e o recado. Depois do envio, o aviso "Oferta enviada" com "Copiar texto para o grupo". O
-  diálogo diz que o técnico vê o título sem loja e cliente; escopo que cita o nome do cliente ou da loja (palavra
-  inteira, sem caixa nem acento) mostra "O escopo cita o cliente ou a loja, e o técnico lê o escopo antes de aceitar".
+  calculado no clique) e o recado. Depois do envio, o aviso "Oferta enviada" com "Copiar texto para o grupo". Sem
+  texto de exemplo nem explicação fixa nos campos. Escopo ou recado que cita o cliente ou a loja (os nomes que a API
+  tira do título: o do cliente também sem o sufixo da razão social e o código da loja a partir de 3 caracteres;
+  palavra inteira, sem caixa nem acento) mostra "O escopo cita o cliente ou a loja, e o técnico lê o escopo antes de
+  aceitar" (ou o mesmo aviso do recado, embaixo do campo).
   Na aba Geral o diálogo fica fora do bloco: se a OS ganha técnico ou sai de "em aberto" com ele aberto, ele continua
   (com o erro de um envio em andamento), diz "A OS já tem técnico: <nome>." ou "A OS não está mais em aberto." e trava
   o Enviar.
@@ -1138,8 +1140,8 @@ técnico) e, só no aceite, a leitura e o valor pago do técnico nesta OS.
   (`["ticket", id]`: a lista de ofertas, o contador e o histórico); listas de OS, Início e lista de atribuição não
   (o aceite chega também como `ticket.assigned`, que recarrega tudo). O aceite e a recusa viram aviso para o analista
   da OS (sem analista, para a central toda) e para quem mandou a oferta (`sender_id` = usuário logado), sem o valor.
-- Técnicos e Usuários: a confirmação de desativar o técnico diz que as ofertas em aberto para ele são canceladas (em
-  Usuários ela só aparece quando há OS abertas).
+- Técnicos e Usuários: desativar um técnico sempre pede confirmação, que diz que as ofertas em aberto para ele são
+  canceladas. Em Usuários, tirar o papel de técnico avisa o mesmo no texto do formulário.
 
 ## Acesso: perfis por tela e visibilidade de filas
 
