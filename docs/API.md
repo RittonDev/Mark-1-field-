@@ -999,8 +999,8 @@ técnico aceitou) | `assigned` (a central definiu o técnico) | `ticket_closed` 
   sem técnico", "Só dá para ofertar uma OS em aberto (não resolvida, fechada nem cancelada)", "O prazo para responder
   precisa ser no futuro", "Técnico não encontrado", "<nome> não é técnico de campo", "<nome> está sem acesso ao app:
   libere o acesso em Técnicos antes de ofertar", "<nome> já está na OS"; validação com `label` "Técnicos", "Valor",
-  "Prazo para responder" e "Recado". 409 "Este técnico já tem uma oferta em aberto nesta OS" (dois envios ao mesmo
-  tempo; o índice único parcial segura).
+  "Prazo para responder" e "Recado". O envio trava a OS: dois envios juntos para o mesmo técnico viram uma troca
+  (`replaced`); o índice único parcial é a rede de segurança (409 "Este técnico já tem uma oferta em aberto nesta OS").
 - `POST /tickets/{id}/offers/{offer_id}/cancel` (Pagamentos em Editar, sem corpo) → `TicketOfferOut` (pendente ou
   vencida → `cancelled`/`central`; já cancelada: devolve como está). Já respondida pelo técnico: 422 "O técnico já
   respondeu esta oferta. Recarregue a OS."; oferta de outra OS: 404 "Oferta não encontrada".
