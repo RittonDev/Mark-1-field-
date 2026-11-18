@@ -276,6 +276,9 @@ class TicketDetail(TicketListItem):
     # Ofertas da OS esperando o técnico responder (pendentes no prazo): toda a gestão vê o número;
     # a lista com os valores (GET /tickets/{id}/offers) é de Pagamentos. O técnico recebe 0.
     open_offers: int = 0
+    # O prazo mais próximo entre essas ofertas (null se nenhuma tem prazo): sem rotina de
+    # vencimento, a web relê a OS nesse horário. O técnico recebe null.
+    next_offer_expires_at: datetime | None = None
     # Só na tela da OS: outras OS no mesmo local nos últimos 30 dias.
     recurrence: TicketRecurrence | None = None
     # OS migrada (Field Control): valores, itens, solicitação original e arquivos. Só a equipe.

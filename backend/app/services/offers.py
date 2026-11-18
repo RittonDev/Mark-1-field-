@@ -4,8 +4,8 @@ A central (quem atribui técnico e tem Pagamentos em Editar) manda uma OS sem t�
 para 1 a 10 técnicos ativos, com o valor que o técnico recebe, um prazo para responder (opcional) e
 um recado. O técnico vê a oferta no app antes de estar na OS, só com o recorte do convite pelo
 WhatsApp (serviço, escopo, formulários, bairro e cidade, data e valor; nada de cliente, loja,
-endereço, contato, SLA, analista, etiquetas ou projeto), e responde "Aceitar por R$ X" ou "Recusar".
-Não existe contraproposta.
+endereço, contato, SLA, analista, etiquetas ou projeto, nem no título), e responde "Aceitar por
+R$ X" ou "Recusar". Não existe contraproposta.
 
 - Para aceitar, ele precisa ter aberto a oferta: o detalhe grava `viewed_at` (e o app pede o
   "Escopo lido").
@@ -14,14 +14,19 @@ Não existe contraproposta.
   `data.via = "offer"`): o status final é o mesmo de quando a central coloca o técnico pela tela.
   Depois dela, o valor da oferta vira o valor do técnico na OS (vence o padrão do tipo de serviço).
   As outras ofertas pendentes da OS fecham como canceladas ("outro técnico aceitou").
-- Definir o técnico na mão e cancelar, resolver ou fechar a OS também fecham as pendentes (os
-  ganchos ficam em services/tickets.py). Reenviar para quem já tem oferta pendente (ou vencida)
-  da OS substitui a anterior.
+- O técnico fica sempre com o valor que aceitou: quem já tem valor pago nesta OS (foi o técnico
+  dela antes) não recebe oferta dela e, pago depois do envio, não aceita.
+- Definir o técnico na mão, colocar o técnico da oferta na visita, deixá-lo sem acesso ao app e
+  cancelar, resolver ou fechar a OS também fecham as pendentes (os ganchos ficam em
+  services/tickets.py). Reenviar para quem já tem oferta pendente (ou vencida) da OS substitui a
+  anterior.
 - Prazo vencido não tem rotina: a pendente com `expires_at` passado tem o estado "expired".
 - Não há chat no app: a conversa com o técnico é pelo WhatsApp. Ele fica sabendo pelo tempo real
   (ticket.offer só para ele) e pelo texto que a central cola no grupo dos técnicos.
 """
 
+import re
+import unicodedata
 import uuid
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -55,7 +60,8 @@ from app.services import tickets as tickets_svc
 from app.services.errors import NotFound, OfferError, PermissionDenied, WorkflowError
 from app.services.workflow import OPEN_STATUSES
 
-# As ofertas que fecharam e ainda aparecem no app ("outro técnico aceitou", "prazo encerrado").
+# As ofertas que fecharam e ainda aparecem no app ("outro técnico aceitou", "prazo encerrado"):
+# as das últimas 24 h, até 50 (as pendentes no prazo vêm todas).
 RECENT_WINDOW = timedelta(hours=24)
 MY_OFFERS_LIMIT = 50
 # Nota do valor do técnico na OS que veio da oferta (tela de Pagamentos).
@@ -67,6 +73,9 @@ HAS_TECHNICIAN = "A OS já tem técnico: só dá para ofertar uma OS sem técnic
 NOT_OPEN = "Só dá para ofertar uma OS em aberto (não resolvida, fechada nem cancelada)"
 EXPIRES_IN_PAST = "O prazo para responder precisa ser no futuro"
 NOT_A_TECHNICIAN = "Técnico não encontrado"
+# O valor pago não muda (set_payout recusa) e é um por técnico na OS: ele não ficaria com o valor
+# da oferta.
+PAID_HERE = "{name} já tem valor pago nesta OS e não pode receber oferta dela"
 ALREADY_ANSWERED = "O técnico já respondeu esta oferta. Recarregue a OS."
 
 # Erros do aceite e da recusa: (texto, code). O app reage pelo code.

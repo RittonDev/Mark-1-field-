@@ -374,6 +374,7 @@ def field_view(detail: TicketDetail) -> TicketDetail:
         "legacy": None,
         # Ofertas da OS a outros técnicos: coisa da central (as dele vêm em /me/offers).
         "open_offers": 0,
+        "next_offer_expires_at": None,
     }
     for key, value in blank.items():
         setattr(detail, key, value)
@@ -700,6 +701,10 @@ OFFER_CLOSED_NOTES: dict[OfferCancelReason, str] = {
     OfferCancelReason.ASSIGNED: "A central definiu o técnico da OS",
     OfferCancelReason.TICKET_CLOSED: "A OS foi encerrada",
 }
+# O técnico da oferta entrou na visita (outros técnicos da OS): motivo "assigned".
+OFFER_HELPER_NOTE = "A central incluiu o técnico na visita"
+# O técnico ficou sem acesso ao app (desativado ou fora do papel de técnico): motivo "central".
+OFFER_NO_ACCESS_NOTE = "Técnico sem acesso ao app"
 # A OS saiu do ar: as ofertas pendentes fecham (motivo "ticket_closed").
 _OFFER_CLOSING_STATUS = {
     S.RESOLVED: "OS resolvida",
@@ -717,17 +722,20 @@ def offer_live_clause(now: datetime) -> ColumnElement[bool]:
     )
 
 
-async def open_offers_count(
+async def open_offers_summary(
     db: AsyncSession, ticket_id: uuid.UUID, now: datetime | None = None
-) -> int:
-    """Ofertas da OS esperando resposta: o contador do detalhe, para toda a gestão (os valores
-    ficam com Pagamentos)."""
-    count = await db.scalar(
-        select(func.count())
-        .select_from(TicketOffer)
-        .where(TicketOffer.ticket_id == ticket_id, offer_live_clause(now or utcnow()))
-    )
-    return count or 0
+) -> tuple[int, datetime | None]:
+    """Ofertas da OS esperando resposta, para toda a gestão (os valores ficam com Pagamentos): o
+    contador do detalhe e o prazo mais próximo entre elas (null se nenhuma tem prazo). Sem rotina
+    de vencimento, a web relê a OS nesse horário."""
+    count, next_expiry = (
+        await db.execute(
+            select(func.count(), func.min(TicketOffer.expires_at)).where(
+                TicketOffer.ticket_id == ticket_id, offer_live_clause(now or utcnow())
+            )
+        )
+    ).one()
+    return count or 0, next_expiry
 
 
 def queue_offer_events(
@@ -739,11 +747,20 @@ def queue_offer_events(
     *,
     technician_name: str | None = None,
     reason: str | None = None,
+    sender_id: uuid.UUID | None = None,
 ) -> None:
     """Tempo real da oferta. A gestão recebe ticket.updated com `fields: ["offers"]` e o que
     aconteceu (sem o valor, que é de Pagamentos); os técnicos da oferta, que ainda não estão na OS,
-    recebem ticket.offer só para eles (o app sincroniza e busca as ofertas)."""
-    offer = {"action": action, "technician_name": technician_name, "reason": reason}
+    recebem ticket.offer só para eles (o app sincroniza e busca as ofertas).
+
+    `sender_id`: quem mandou a oferta, no aceite e na recusa (a web avisa também essa pessoa,
+    mesmo sem ser o analista da OS)."""
+    offer = {
+        "action": action,
+        "technician_name": technician_name,
+        "reason": reason,
+        "sender_id": _jsonable(sender_id),
+    }
     queue_event(
         db,
         "updated",
@@ -815,16 +832,21 @@ async def close_pending_offers(
     reason: OfferCancelReason,
     now: datetime,
     note: str | None = None,
+    technician_ids: Sequence[uuid.UUID] | None = None,
 ) -> list[TicketOffer]:
     """Ganchos: definir o técnico (`_assign`) e cancelar, resolver ou fechar a OS fecham as
-    ofertas pendentes no prazo (as vencidas ficam "expired"). Trava a OS antes das ofertas, na
-    mesma ordem do aceite, para não haver impasse com um técnico aceitando agora."""
+    ofertas pendentes no prazo (as vencidas ficam "expired"); com `technician_ids`, só as desses
+    técnicos (quem entrou na visita). Trava a OS antes das ofertas, na mesma ordem do aceite, para
+    não haver impasse com um técnico aceitando agora."""
+    if technician_ids is not None and not technician_ids:
+        return []
     await db.execute(select(Ticket.id).where(Ticket.id == ticket.id).with_for_update())
+    stmt = select(TicketOffer).where(TicketOffer.ticket_id == ticket.id, offer_live_clause(now))
+    if technician_ids is not None:
+        stmt = stmt.where(TicketOffer.technician_id.in_(list(technician_ids)))
     offers = list(
         await db.scalars(
-            select(TicketOffer)
-            .where(TicketOffer.ticket_id == ticket.id, offer_live_clause(now))
-            .order_by(TicketOffer.created_at)
+            stmt.order_by(TicketOffer.created_at)
             .with_for_update()
             .execution_options(populate_existing=True)
         )
@@ -833,6 +855,69 @@ async def close_pending_offers(
         cancel_offers(db, ticket, offers, actor, reason=reason, now=now, note=note)
         await db.flush()
     return offers
+
+
+async def close_technician_offers(
+    db: AsyncSession, technician_id: uuid.UUID, actor: User | None, *, now: datetime | None = None
+) -> int:
+    """O técnico ficou sem acesso ao app (desativado em Técnicos ou em Usuários, ou fora do papel
+    de técnico): ninguém responde as ofertas dele, que fecham como canceladas pela central (e
+    reativar não as traz de volta). Trava as OS, em ordem de id, antes das ofertas: a ordem do
+    aceite. Os avisos saem no commit da rota (`commit_and_publish`). Devolve quantas fecharam."""
+    now = now or utcnow()
+    ticket_ids = list(
+        await db.scalars(
+            select(TicketOffer.ticket_id)
+            .where(TicketOffer.technician_id == technician_id, offer_live_clause(now))
+            .distinct()
+        )
+    )
+    if not ticket_ids:
+        return 0
+    locked = list(
+        await db.scalars(
+            select(Ticket.id).where(Ticket.id.in_(ticket_ids)).order_by(Ticket.id).with_for_update()
+        )
+    )
+    # Relidas com as OS travadas: a aceita ou recusada enquanto esperava a trava não fecha.
+    offers = list(
+        await db.scalars(
+            select(TicketOffer)
+            .where(
+                TicketOffer.technician_id == technician_id,
+                TicketOffer.ticket_id.in_(locked),
+                offer_live_clause(now),
+            )
+            .order_by(TicketOffer.ticket_id, TicketOffer.created_at)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    )
+    if not offers:
+        return 0
+    tickets = {
+        t.id: t
+        for t in await db.scalars(
+            select(Ticket)
+            .where(Ticket.id.in_({o.ticket_id for o in offers}))
+            .execution_options(populate_existing=True)
+        )
+    }
+    by_ticket: dict[uuid.UUID, list[TicketOffer]] = {}
+    for offer in offers:
+        by_ticket.setdefault(offer.ticket_id, []).append(offer)
+    for ticket_id, closing in by_ticket.items():
+        cancel_offers(
+            db,
+            tickets[ticket_id],
+            closing,
+            actor,
+            reason=OfferCancelReason.CENTRAL,
+            now=now,
+            note=OFFER_NO_ACCESS_NOTE,
+        )
+    await db.flush()
+    return len(offers)
 
 
 async def close_offers_on_status(
@@ -1087,6 +1172,18 @@ async def _set_helpers(
     if removed:
         await payouts_svc.on_helpers_removed(db, ticket, [h.id for h in removed])
     now = utcnow()
+    if added:
+        # Quem entra na visita não responde mais a oferta desta OS (aceitar o tiraria da visita
+        # para ser o responsável): fecha como "assigned", com a OS travada antes das ofertas.
+        await close_pending_offers(
+            db,
+            ticket,
+            actor,
+            reason=OfferCancelReason.ASSIGNED,
+            now=now,
+            note=OFFER_HELPER_NOTE,
+            technician_ids=[u.id for u in added],
+        )
     data = {"added": [u.name for u in added], "removed": [h.name for h in removed]}
     # Os ids ficam no histórico: o sync do app avisa quem saiu (revoked_ticket_ids).
     ids = {"added_ids": [str(u.id) for u in added], "removed_ids": [str(h.id) for h in removed]}

@@ -94,7 +94,8 @@ async def _with_recurrence(db: DB, ticket: Ticket, user: User) -> TicketDetail:
     # dele.
     if user.can_manage_tickets:
         detail.recurrence = await svc.recurrence_for(db, ticket, user)
-        detail.open_offers = await svc.open_offers_count(db, ticket.id)
+        summary = await svc.open_offers_summary(db, ticket.id)
+        detail.open_offers, detail.next_offer_expires_at = summary
     return detail
 
 

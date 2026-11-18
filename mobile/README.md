@@ -190,10 +190,18 @@ A central manda uma OS ainda sem técnico, com o valor, para alguns técnicos (c
 `refreshOffers`/`acceptOffer`/`declineOffer` em [src/lib/sync.ts](src/lib/sync.ts), a seção
 [src/components/Offers.tsx](src/components/Offers.tsx) e a tela `src/app/oferta/[id].tsx`.
 
-- **Lista**: `GET /me/offers` na rodada de sincronização, depois do download, e guardada no aparelho (kv
-  `field_offers`) para abrir sem rede. A busca não se repete a cada rodada: valem o evento `ticket.offer` do tempo
-  real (só para os técnicos da oferta), o app voltando à tela (o técnico costuma vir do recado no grupo), a rede
-  e o tempo real voltando, o "puxar para atualizar" e, sem eles, uma conferência por minuto.
+- **Lista**: `GET /me/offers` na rodada de sincronização, guardada no aparelho (kv `field_offers`) para abrir sem
+  rede. Quem aceita primeiro fica com a OS, então a lista não espera o upload das fotos (minutos em rede lenta): a
+  rodada busca logo depois do primeiro envio da fila, entre uma foto e outra, depois do download e também quando o
+  servidor recusa o download (falta de rede ou sessão encerrada param a rodada). Cada ponto só busca quando vale:
+  o evento `ticket.offer` do tempo real (só para os técnicos da oferta), o app voltando à tela (o técnico costuma
+  vir do recado no grupo), a rede e o tempo real voltando, o "puxar para atualizar" (uma busca por rodada) e, sem
+  eles, uma conferência por minuto.
+- **Busca antes do download**: a OS em que a central pôs o próprio técnico pode ainda não estar no aparelho. A
+  oferta que fechou assim (`cancel_reason = "assigned"`) e cuja OS não está no aparelho como dele fica como
+  estava, sem aviso, e pede a busca depois do download, que decide: sem aviso se a OS é dele (o download já
+  avisou "Nova OS para você"), "OS-… já tem técnico" se não. Esse pedido não dispara outra busca antes do
+  download (nada de uma busca por foto).
 - **Hoje** ganha no topo **Ofertas para você**: um cartão por oferta pendente e no prazo, com o valor em
   destaque, o serviço, bairro · cidade/UF, a janela da visita (ou "Data a combinar"), "Responder até 15:30" e o
   selo **Nova** enquanto o técnico não abriu. O prazo é contado pelo relógio do servidor (`serverNow`): a oferta
@@ -210,6 +218,12 @@ A central manda uma OS ainda sem técnico, com o valor, para alguns técnicos (c
 - **Aceitar** (confirmação "Aceitar esta OS por R$ X? Ela vai para a sua agenda.") → `POST /me/offers/{id}/accept`;
   a OS volta já atribuída e entra no aparelho com a própria resposta (sem o aviso duplicado "Nova OS para
   você"), e a tela da oferta vira a da OS. O valor aparece em Detalhes e em Ganhos (`my_payout`).
+- **Saiu da tela durante o envio**: a tela só navega se ainda estiver à frente (`useNavigation().isFocused()`).
+  Fora dela, fica só o aviso: "OS aceita" (tocar abre a OS) ou "Oferta recusada", sem mexer na tela em que o
+  técnico está.
+- **Aceite sem resposta** (rede caiu, tempo esgotado): o servidor pode ter gravado. O aviso é neutro, "Não deu
+  para confirmar o aceite. Conferindo…", e o app busca as ofertas e sincroniza na hora: a tela mostra como a
+  oferta ficou (aceita, com "Abrir a OS" e a OS baixada, ou ainda pendente para tentar de novo).
 - **Recusas do servidor** (409/422 com `code`: outro técnico aceitou, prazo, cancelada, OS indisponível, já
   respondida, oferta não aberta): a tela mostra o texto do servidor, sem "Tentar de novo", e atualiza a lista.
 - **Sem conexão**: os botões ficam desabilitados ("Sem conexão. Conecte para responder a oferta."). Oferta
