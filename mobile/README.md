@@ -15,7 +15,7 @@ O login envia `channel: "mobile"` e a API recusa os outros papéis com 403.
 | Navegação | expo-router (rotas em `src/app/`) |
 | Banco local | expo-sqlite |
 | Tokens | expo-secure-store (Keychain / Keystore) |
-| Recursos do aparelho | expo-location (check-in e rastreamento), expo-task-manager (segundo plano), expo-battery, expo-image-picker (fotos), expo-notifications (registro do aparelho), NetInfo |
+| Recursos do aparelho | expo-location (check-in e rastreamento), expo-task-manager e expo-background-task (segundo plano), expo-battery, expo-image-picker (fotos), expo-notifications (lembretes da visita, avisos e registro do aparelho), NetInfo |
 | Visual | tokens da web (claro e grafite no escuro, sem azul-marinho) em `src/theme/theme.ts`, Manrope 400–700 (`@expo-google-fonts/manrope` 0.4.3 via expo-font), ícones de traço próprios em react-native-svg, degradê só em detalhes |
 | Movimento | react-native-reanimated 4.7.1 + react-native-worklets 0.13.0, expo-haptics; respeita "Reduzir movimento" |
 
@@ -91,6 +91,7 @@ ou atrás de `Platform.OS === "web"`.
 | GPS do expo-location, app de mapas | `navigator.geolocation`, Google Maps numa nova aba |
 | Confirmações com `Alert` | `window.confirm` (o `Alert` do react-native-web não faz nada) |
 | Registro do aparelho para push | não existe (aparece como indisponível na tela Conta) |
+| Notificações (lembretes da visita, avisos) e sincronização em segundo plano | não existem (`backgroundSync.web.ts`; a Conta mostra "Indisponível nesta versão do app"); os avisos ficam nos toasts |
 
 Requisitos:
 
@@ -178,7 +179,8 @@ Requisitos:
 - **Indicador de conexão** no topo: offline, servidor inacessível, sincronizando, online com tempo real,
   e o número de itens pendentes. Tocar abre a tela **Conta**, com a fila de envio (dá para descartar a
   operação que o servidor falhou em processar 3 vezes; falta de rede e falha do envio inteiro não contam), os
-  avisos de operações recusadas, "Sincronizar agora", "Baixar tudo" e o estado do push.
+  avisos de operações recusadas, "Sincronizar agora", "Baixar tudo", as notificações (lembretes das visitas e
+  permissão) e o estado do push.
 - **Ofertas de OS com preço** (detalhes abaixo): a central manda uma OS sem técnico com o valor; o técnico
   aceita pelo valor ou recusa, e quem aceitar primeiro fica com ela.
 
@@ -206,10 +208,11 @@ A central manda uma OS ainda sem técnico, com o valor, para alguns técnicos (c
   destaque, o serviço, bairro · cidade/UF, a janela da visita (ou "Data a combinar"), "Responder até 15:30" e o
   selo **Nova** enquanto o técnico não abriu. O prazo é contado pelo relógio do servidor (`serverNow`): a oferta
   vencida sai da lista sozinha.
-- **Avisos**: oferta nova → "Nova oferta de OS" com valor, serviço e bairro (tocar abre a oferta; nunca a OS,
-  que ainda não é dele). A que fecha sem resposta → "Outro técnico aceitou a OS-…", "A central cancelou a
-  oferta da OS-…". Não há push real: o técnico fica sabendo pelo tempo real com o app aberto e pelo texto que a
-  central cola no grupo.
+- **Avisos**: oferta nova → "Nova oferta de OS" com valor, serviço, bairro e o prazo ("responder até 15:30");
+  tocar abre a oferta, nunca a OS, que ainda não é dele. Com o app fora da tela, vira notificação do sistema
+  quando a sincronização roda em segundo plano (seção Notificações), e sai da bandeja quando a oferta fecha. A
+  que fecha sem resposta → "Outro técnico aceitou a OS-…", "A central cancelou a oferta da OS-…" (só com o app
+  na tela). Não há push real: com o app fechado, o técnico fica sabendo pelo texto que a central cola no grupo.
 - **Tela da oferta** (`/oferta/<id>`): abrir chama `GET /me/offers/{id}`, que grava a leitura no servidor.
   Mostra nº e título, tipo de serviço, bairro · cidade/UF, janela da visita, o recado da central, os
   formulários (nome e se é obrigatório) e o cartão **Escopo** recolhido: abrir o escopo marca **Escopo lido**
