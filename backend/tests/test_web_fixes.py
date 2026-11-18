@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.config import settings
 from app.services import realtime
-from app.services.activities import local_today
+from app.services.activities import day_bounds, local_today
 from tests.conftest import World, requires_db
 from tests.test_api import create, transition
 
@@ -278,3 +278,36 @@ async def test_quote_list_carries_the_ticket_status(client: AsyncClient, world: 
     rows = {q["ticket_id"]: q for q in (await client.get(f"{API}/quotes", headers=an)).json()}
     assert rows[live["id"]]["ticket_status"] == "new"
     assert rows[gone["id"]]["ticket_status"] == "cancelled"
+
+
+async def test_sla_violations_window_matches_the_list_cut(
+    client: AsyncClient, world: World, engine: AsyncEngine
+) -> None:
+    """O cartão de violações conta desde a 0h do dia de `days` atrás, o mesmo corte da lista que
+    ele abre (created_from). Antes a janela corria com a hora e perdia o começo daquele dia."""
+    an = world.analyst.headers
+    days = 30
+    first_day = local_today() - timedelta(days=days)
+    start, _ = day_bounds(first_day)
+    owner = str(world.analyst.user.id)
+    inside = await create(client, world, title="Dentro da janela", owner_id=owner)
+    outside = await create(client, world, title="Fora da janela", owner_id=owner)
+
+    async def total() -> int:
+        r = await client.get(f"{API}/reports/sla-violations", params={"days": days}, headers=an)
+        assert r.status_code == 200, r.text
+        return r.json()["tickets_total"]
+
+    before = await total()
+    for t, at in ((inside, start + timedelta(minutes=1)), (outside, start - timedelta(minutes=1))):
+        await _sql(
+            engine, "UPDATE tickets SET created_at = :at WHERE id = :i", at=at, i=uuid.UUID(t["id"])
+        )
+    assert await total() == before - 1
+
+    day = first_day.isoformat()
+    params = {"created_from": day, "created_to": day}
+    listing = (await client.get(f"{API}/tickets", params=params, headers=an)).json()["items"]
+    ids = {i["id"] for i in listing}
+    assert inside["id"] in ids
+    assert outside["id"] not in ids

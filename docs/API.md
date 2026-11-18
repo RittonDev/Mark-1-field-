@@ -185,7 +185,7 @@ O "Motivo da violação" do Field Control: um campo por relógio, escolhido de u
   - ao resolver: `POST /tickets/{id}/transition` com `response_violation_reason_id`, `resolution_violation_reason_id` e `violation_note`. O motivo precisa valer para aquele relógio; se não valer, a resposta é 422;
   - depois, inclusive com a OS fechada: `PATCH /tickets/{id}/violation` (analista ou supervisor; técnico só nas OS dele ou do grupo).
 - O técnico pode resolver sem informar o motivo. A OS fica pendente, e `GET /tickets?violation_pending=true` lista as que faltam justificar.
-- `GET /reports/sla-violations?days=30` → `{period_days, tickets_total, response, resolution, by_responsibility, pending_justification}`. Cada relógio vem como `{breached, justified, by_reason:[{reason_id, name, responsibility, count}]}`.
+- `GET /reports/sla-violations?days=30` → `{period_days, tickets_total, response, resolution, by_responsibility, pending_justification}`. A janela começa à 0h (fuso da operação) do dia de `days` atrás, o mesmo corte de `created_from` na lista de OS. Cada relógio vem como `{breached, justified, by_reason:[{reason_id, name, responsibility, count}]}`.
 
 ### Atividades do dia
 Tela própria da operação, como no Field Control (aquela em que, segundo o levantamento, quem opera passa o dia).

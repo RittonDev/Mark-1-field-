@@ -20,6 +20,7 @@ from app.schemas.dashboard import (
     SlaViolationReport,
     ViolationReasonCount,
 )
+from app.services.activities import day_bounds, local_today
 from app.services.field import FIELD, field_since, field_stuck
 from app.services.sla import (
     compute_sla_status,
@@ -156,8 +157,11 @@ async def sla_violations(
     """Motivos de violação viram estatística: por motivo, por responsabilidade e pendências."""
     now = utcnow()
     vis = visibility_clause(user)
+    # Desde a 0h do dia de `days` atrás, no fuso da operação: o mesmo corte da lista que o cartão
+    # abre (created_from), então o número do cartão é o total da lista.
+    since, _ = day_bounds(local_today() - timedelta(days=days))
     conds = [
-        Ticket.created_at >= now - timedelta(days=days),
+        Ticket.created_at >= since,
         Ticket.status != TicketStatus.CANCELLED,
     ]
     if vis is not None:
