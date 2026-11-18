@@ -1,7 +1,7 @@
 // Estado da Nova OS e as regras que valem em qualquer mudança (trocar cliente, localização ou tipo de OS).
 // Fica num módulo próprio porque também vira o rascunho guardado na aba (sessionStorage).
 
-import type { FormTemplate, Location, Project, ServiceType, Tag, TicketPriority, TicketType, UUID } from "@/lib/types";
+import type { Category, FormTemplate, Location, Project, ServiceType, Tag, TicketPriority, TicketType, UUID } from "@/lib/types";
 
 export type OwnerMode = "me" | "none" | "other";
 /** Por onde o chamado chegou ("web" = outro canal). */

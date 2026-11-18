@@ -137,13 +137,16 @@ ROLE_DEFAULTS: dict[str, dict[str, Level]] = {
 CUSTOM_BASE = UserRole.ANALYST.value
 DEFAULT_QUEUE: tuple[QueueScope, bool] = ("all", True)
 
-# Eventos de tempo real que pertencem a uma tela: só vão para quem tem o item.
-EVENT_ITEMS: dict[str, str] = {
-    "quote.decided": "commercial.quotes",
-    "onboarding.submitted": "base.onboarding",
+# Eventos de tempo real que pertencem a telas: só vão para quem tem pelo menos uma delas.
+EVENT_ITEMS: dict[str, tuple[str, ...]] = {
+    "quote.decided": ("commercial.quotes",),
+    "onboarding.submitted": ("base.onboarding",),
     # Posição e jornada dos técnicos: só o Mapa ao vivo usa (e /tracking/* já pede o item).
-    "technician.location": "operation.map",
-    "technician.shift": "operation.map",
+    "technician.location": ("operation.map",),
+    "technician.shift": ("operation.map",),
+    # Cadastro do técnico mudou (Meu cadastro no app ou a central): a lista de Técnicos e a chave
+    # PIX em Pagamentos. Nunca "technician.*": a web manda esses para o mapa.
+    "profile.changed": ("base.technicians", "commercial.payouts"),
 }
 
 # Eventos do histórico da OS que levam valores de uma tela comercial: só vão para quem tem o

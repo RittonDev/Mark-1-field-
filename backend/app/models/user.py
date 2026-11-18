@@ -2,12 +2,22 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core import permissions
-from app.core.enums import UserRole
+from app.core.enums import PixKeyType, UserRole
 from app.db.base import Base, Timestamps, UUIDPrimaryKey
 from app.models._types import str_enum
 from app.models.access import AccessProfile
@@ -31,7 +41,11 @@ class Team(UUIDPrimaryKey, Timestamps, Base):
 
 class User(UUIDPrimaryKey, Timestamps, Base):
     __tablename__ = "users"
-    __table_args__ = (Index("ix_users_base_state_city", "base_state", "base_city"),)
+    __table_args__ = (
+        Index("ix_users_base_state_city", "base_state", "base_city"),
+        # Chave PIX: tipo e chave andam juntos (os dois preenchidos ou os dois vazios).
+        CheckConstraint("(pix_key IS NULL) = (pix_key_type IS NULL)", name="pix_pair"),
+    )
 
     name: Mapped[str] = mapped_column(String(160))
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
@@ -85,6 +99,12 @@ class User(UUIDPrimaryKey, Timestamps, Base):
     work_schedule: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
     service_type_ids: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default="[]")
     avatar_external_url: Mapped[str | None] = mapped_column(String(1000))
+    # Chave PIX para receber por chamado: só o próprio técnico cadastra e troca (app, com a senha);
+    # a central vê em Pagamentos e pode remover. A chave fica normalizada (core/pix.py).
+    pix_key_type: Mapped[PixKeyType | None] = mapped_column(str_enum(PixKeyType))
+    pix_key: Mapped[str | None] = mapped_column(String(80))
+    pix_holder_name: Mapped[str | None] = mapped_column(String(160))
+    pix_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     legacy: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     # Conta Microsoft (Entra ID) vinculada no primeiro login: "oid" do token.
     entra_oid: Mapped[str | None] = mapped_column(String(64), unique=True)

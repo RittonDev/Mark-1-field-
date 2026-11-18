@@ -31,6 +31,7 @@ from app.models.ticket import (
 )
 from app.models.tracking import LocationPing, TechnicianShift
 from app.models.user import Team, User
+from app.models.user_change import UserChange
 
 __all__ = [
     "AccessProfile",
@@ -69,5 +70,6 @@ __all__ = [
     "TechnicianShift",
     "LocationPing",
     "User",
+    "UserChange",
     "ViolationReason",
 ]

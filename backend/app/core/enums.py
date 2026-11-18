@@ -133,6 +133,16 @@ class DevicePlatform(StrEnum):
     WEB = "web"
 
 
+class PixKeyType(StrEnum):
+    """Tipo da chave PIX que o técnico cadastra no app para receber por chamado (core/pix.py)."""
+
+    CPF = "cpf"
+    CNPJ = "cnpj"
+    EMAIL = "email"
+    PHONE = "phone"  # celular, gravado como +55 e 11 dígitos
+    RANDOM = "random"  # chave aleatória (EVP), gravada com os hífens
+
+
 class SlaStatus(StrEnum):
     OK = "ok"
     AT_RISK = "at_risk"

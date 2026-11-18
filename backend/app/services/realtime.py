@@ -181,8 +181,8 @@ def should_deliver(
     if role in (UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.ANALYST):
         if access is None:
             return True
-        item = EVENT_ITEMS.get(str(event.get("type")))
-        if item is not None and not access.can(item):
+        items = EVENT_ITEMS.get(str(event.get("type")))
+        if items is not None and not any(access.can(item) for item in items):
             return False
         if not event.get("ticket_id"):
             return True
