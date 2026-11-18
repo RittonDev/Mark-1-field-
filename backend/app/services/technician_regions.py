@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import (
     ColumnElement,
     Float,
+    Select,
     and_,
     case,
     false,
@@ -114,15 +115,15 @@ def _since(now: datetime) -> datetime:
 def footprint(
     since: datetime,
     until: datetime | None = None,
-    location_ids: Collection[uuid.UUID] | None = None,
+    location_ids: Collection[uuid.UUID] | Select[tuple[uuid.UUID]] | None = None,
 ):
     """Visitas de cada técnico: (técnico, OS, loja, quando), uma por técnico e OS.
 
     Conta a OS em que ele foi à loja como responsável ou como outro técnico da visita (houve
     chegada, ou a OS foi concluída) e a OS em que ele apontou trabalho (visitas anteriores de
     outra pessoa ficam com quem foi). OS só atribuída, ainda não atendida, não é visita. Com
-    `until`, só o que já aconteceu. Com `location_ids`, só as visitas a essas lojas (o mesmo
-    resultado filtrado, sem montar as visitas de todas as lojas).
+    `until`, só o que já aconteceu. Com `location_ids` (ids ou uma consulta de ids), só as
+    visitas a essas lojas: o mesmo resultado filtrado, sem montar as visitas de todas as lojas.
     """
     stores = () if location_ids is None else (Ticket.location_id.in_(location_ids),)
     visited = (

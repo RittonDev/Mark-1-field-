@@ -132,13 +132,8 @@ async def _cities(
         return (not state or place[0] == state) and (not key or place[1] == key)
 
     uf_col = func.upper(func.trim(Location.state))
-    columns = [Location.state, Location.city, func.count().filter(Location.is_active), func.count()]
-    if key:
-        # Uma cidade só (a da loja da OS, a do detalhe, a de uma decisão): as lojas dela, para as
-        # visitas saírem só dessas lojas em vez de montar as de todas e filtrar depois.
-        columns.append(func.array_agg(Location.id))
     stores = (
-        select(*columns)
+        select(Location.state, Location.city, func.count().filter(Location.is_active), func.count())
         .where(Location.state.is_not(None), Location.city.is_not(None))
         .group_by(Location.state, Location.city)
     )
@@ -146,15 +141,14 @@ async def _cities(
         stores = stores.where(uf_col == state)
     out: dict[CityKey, _City] = {}
     spellings: dict[CityKey, Counter[str]] = {}
-    store_ids: list[uuid.UUID] = []
-    for raw_state, raw_city, active, total, *ids in (await db.execute(stores)).all():
+    written: list[tuple[str, str]] = []  # (UF, cidade) como estão nas lojas das cidades pedidas
+    for raw_state, raw_city, active, total in (await db.execute(stores)).all():
         place = _key(raw_state, raw_city)
         if place is None or not wanted(place):
             continue
         out.setdefault(place, _City(state=place[0], key=place[1], city="")).stores += active
         spellings.setdefault(place, Counter())[raw_city.strip()] += total
-        if ids:
-            store_ids.extend(ids[0])
+        written.append((raw_state, raw_city))
     for place, counts in spellings.items():
         # A grafia mais usada nas lojas (no empate, a primeira em ordem alfabética).
         out[place].city = min(counts.items(), key=lambda kv: (-kv[1], kv[0]))[0]
@@ -162,10 +156,15 @@ async def _cities(
         return out
 
     # Visitas: uma passada só, com o total de OS distintas de cada grafia no mesmo GROUP BY. A OS
-    # é de uma loja só, então somar as grafias da mesma cidade não conta OS duas vezes.
-    fp = technician_regions.footprint(
-        now - WINDOW, until=now, location_ids=store_ids if key else None
+    # é de uma loja só, então somar as grafias da mesma cidade não conta OS duas vezes. Uma cidade
+    # só (a da loja da OS, a do detalhe, a de uma decisão): só as lojas dela, pelas grafias, em vez
+    # de montar as visitas de todas as lojas e filtrar depois.
+    city_stores = (
+        select(Location.id).where(tuple_(Location.state, Location.city).in_(written))
+        if key
+        else None
     )
+    fp = technician_regions.footprint(now - WINDOW, until=now, location_ids=city_stores)
     visited = (
         select(
             Location.state,
