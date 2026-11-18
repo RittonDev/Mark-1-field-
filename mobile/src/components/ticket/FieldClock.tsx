@@ -14,7 +14,14 @@ import { Text } from "../Text";
 
 type Clockable = Pick<
   TicketListItem,
-  "status" | "arrival_due_at" | "arrived_at" | "onsite_due_at" | "arrival_status" | "onsite_status"
+  | "status"
+  | "arrival_due_at"
+  | "arrived_at"
+  | "onsite_due_at"
+  | "arrival_status"
+  | "onsite_status"
+  | "last_unproductive_at"
+  | "scheduled_start"
 >;
 
 /** Cor só quando há problema: atraso/estouro em vermelho, risco/aviso em laranja; o resto neutro. */

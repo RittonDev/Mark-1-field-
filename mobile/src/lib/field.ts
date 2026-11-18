@@ -46,7 +46,14 @@ const minutesBetween = (from: number, to: number) => Math.round((to - from) / 60
 
 type Clockable = Pick<
   TicketListItem,
-  "status" | "arrival_due_at" | "arrived_at" | "onsite_due_at" | "arrival_status" | "onsite_status"
+  | "status"
+  | "arrival_due_at"
+  | "arrived_at"
+  | "onsite_due_at"
+  | "arrival_status"
+  | "onsite_status"
+  | "last_unproductive_at"
+  | "scheduled_start"
 >;
 
 export type ClockTone = "normal" | "risk" | "late";
@@ -58,9 +65,19 @@ export interface ArrivalClock {
   dueAt: string;
 }
 
-/** Prazo de chegada, só antes do check-in (atribuída, agendada ou em deslocamento). */
+/**
+ * A última visita deu improdutiva e nenhuma outra foi marcada depois dela: o técnico foi, e não há chegada a
+ * cobrar até a central marcar a visita nova (a regra da API, field.py::awaiting_new_visit, que também deixa o
+ * arrival_status nulo). Vale também para a OS migrada que manteve a agenda da visita improdutiva.
+ */
+export function awaitingNewVisit(ticket: Pick<TicketListItem, "last_unproductive_at" | "scheduled_start">): boolean {
+  if (!ticket.last_unproductive_at) return false;
+  return !ticket.scheduled_start || new Date(ticket.scheduled_start).getTime() < new Date(ticket.last_unproductive_at).getTime();
+}
+
+/** Prazo de chegada, só antes do check-in (atribuída, agendada ou em deslocamento) e com visita a cobrar. */
 export function arrivalClock(ticket: Clockable, now: number): ArrivalClock | null {
-  if (ticket.arrived_at || !ticket.arrival_due_at || !BEFORE_ARRIVAL.includes(ticket.status)) return null;
+  if (ticket.arrived_at || !ticket.arrival_due_at || !BEFORE_ARRIVAL.includes(ticket.status) || awaitingNewVisit(ticket)) return null;
   const left = minutesBetween(now, new Date(ticket.arrival_due_at).getTime());
   const tone: ClockTone =
     left < 0 || ticket.arrival_status === "late" ? "late" : ticket.arrival_status === "at_risk" || left <= ARRIVAL_RISK_MINUTES ? "risk" : "normal";
