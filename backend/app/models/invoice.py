@@ -1,9 +1,9 @@
 """Nota fiscal do técnico parceiro (opcional).
 
-O técnico emite a nota no portal da prefeitura e envia pelo app (aba Ganhos), com o arquivo (PDF, XML
-ou foto) e as OS que ela cobre; a central confere em Pagamentos. A nota nunca trava pagamento. Cada
-valor (ticket_payouts.invoice_id) fica em no máximo uma nota; uma nota cobre vários valores do mesmo
-técnico. Regras em services/invoices.py.
+O técnico emite a nota no portal da prefeitura e envia pelo app (aba Ganhos), com o arquivo (PDF,
+XML ou foto) e as OS que ela cobre; a central confere em Pagamentos. A nota nunca trava pagamento.
+Cada valor (ticket_payouts.invoice_id) fica em no máximo uma nota; uma nota cobre vários valores do
+mesmo técnico. Regras em services/invoices.py.
 """
 
 import uuid

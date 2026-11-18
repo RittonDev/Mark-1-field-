@@ -1,4 +1,5 @@
-"""Notas fiscais dos técnicos: o técnico envia pelo app (aba Ganhos) e a central confere em Pagamentos.
+"""Notas fiscais dos técnicos: o técnico envia pelo app (aba Ganhos) e a central confere em
+Pagamentos.
 
 Só dados fictícios ("Tecnico", "Redes", números de nota inventados).
 """
@@ -24,6 +25,7 @@ PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 24
 JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 24
 HTML = b"<!DOCTYPE html><html><body>nota</body></html>"
 TYPE_ERROR = "Envie a nota em PDF, XML ou foto (JPG, PNG ou WebP)"
+TOO_MANY = "Escolha até 200 OS por nota"
 
 
 def _today() -> datetime:
@@ -72,7 +74,9 @@ async def concluded(
     return t, payout
 
 
-async def still_open(client: AsyncClient, world: World, title: str, amount: int) -> tuple[dict, str]:
+async def still_open(
+    client: AsyncClient, world: World, title: str, amount: int
+) -> tuple[dict, str]:
     t = await create(client, world, title=title, assignee_id=str(world.tech.user.id))
     return t, await _payout(client, world, t, world.tech, amount)
 
@@ -145,7 +149,8 @@ async def test_technician_sends_lists_opens_and_deletes(
     ]
     listed = await client.get(f"{API}/me/invoices", params={"month": month}, headers=th)
     assert [i["id"] for i in listed.json()] == [sent["id"]]
-    assert (await client.get(f"{API}/me/invoices", params={"month": "2026-13"}, headers=th)).status_code == 422
+    bad_month = await client.get(f"{API}/me/invoices", params={"month": "2026-13"}, headers=th)
+    assert bad_month.status_code == 422 and detail(bad_month) == "Mês inválido (use AAAA-MM)"
     assert len(_files(media)) == 1
 
     # Só o próprio técnico: o colega não vê nem apaga; a central não usa as rotas do app.
@@ -235,7 +240,7 @@ async def test_invoice_validation(
         ({"competence": "2026-13"}, "Competência inválida (use AAAA-MM)"),
         ({"competence": _month(1)}, "A competência não pode ser um mês que ainda não chegou"),
         ({"note": "x" * 501}, "A observação tem no máximo 500 caracteres"),
-        ({"payout_ids": ",".join(str(uuid.uuid4()) for _ in range(201))}, "Escolha até 200 OS por nota"),
+        ({"payout_ids": ",".join(str(uuid.uuid4()) for _ in range(201))}, TOO_MANY),
         ({"payout_ids": colleague_payout}, "Uma das OS escolhidas não é sua"),
         ({"payout_ids": "nao-e-um-id"}, "Uma das OS escolhidas não é sua"),
         ({"payout_ids": open_payout}, f"A {open_ticket['code']} ainda não foi concluída"),
@@ -316,7 +321,9 @@ async def test_central_checks_unchecks_and_rejects(
     assert [p["code"] for p in item["payouts"]] == [done["code"]]
     assert item["reviewed_by"] is None and item["download_url"]
     r = await client.get(f"{API}/technician-invoices", params={"status": "checked"}, headers=an)
-    assert (r.json()["items"], r.json()["total_count"], r.json()["summary"]["pending"]) == ([], 0, 2)
+    checked_only = r.json()
+    assert (checked_only["items"], checked_only["total_count"]) == ([], 0)
+    assert checked_only["summary"]["pending"] == 2
     other_month = await client.get(
         f"{API}/technician-invoices", params={"month": "2001-01"}, headers=an
     )
@@ -350,15 +357,16 @@ async def test_central_checks_unchecks_and_rejects(
     assert (await client.post(f"{base}/uncheck", headers=an)).json()["status"] == "pending"
 
     # Recusar pede o motivo; recusada, as OS ficam livres.
-    assert (await client.post(f"{base}/reject", json={}, headers=an)).status_code == 422
-    assert (await client.post(f"{base}/reject", json={"reason": "  "}, headers=an)).status_code == 422
+    for body in ({}, {"reason": "  "}, {"reason": "ok"}, {"reason": "x" * 301}):
+        r = await client.post(f"{base}/reject", json=body, headers=an)
+        assert r.status_code == 422, (body, r.text)
     r = await client.post(f"{base}/reject", json={"reason": "  Número não confere  "}, headers=an)
     assert r.status_code == 200, r.text
     rejected = r.json()
     assert (rejected["status"], rejected["reject_reason"]) == ("rejected", "Número não confere")
     assert rejected["reviewed_by"]["id"] == analyst_id and rejected["payouts"] == []
-    board = (await client.get(f"{API}/payouts", params={"technician_id": tech_id}, headers=an)).json()
-    assert {i["ticket"]["id"]: i["invoice"] for i in board["items"]}[done["id"]] is None
+    r = await client.get(f"{API}/payouts", params={"technician_id": tech_id}, headers=an)
+    assert {i["ticket"]["id"]: i["invoice"] for i in r.json()["items"]}[done["id"]] is None
     mine = (await client.get(f"{API}/me/invoices", headers=th)).json()
     assert (mine[0]["status"], mine[0]["reject_reason"]) == ("rejected", "Número não confere")
     assert "reviewed_by" not in mine[0]
@@ -414,8 +422,8 @@ async def test_reassign_clears_the_invoice_link(
     )
     assert r.status_code == 200, r.text
     assert [(p["id"], p["technician"]["id"]) for p in r.json()["payouts"]] == [(payout, other_id)]
-    board = (await client.get(f"{API}/payouts", params={"technician_id": other_id}, headers=an)).json()
-    assert [(i["id"], i["invoice"]) for i in board["items"]] == [(payout, None)]
+    r = await client.get(f"{API}/payouts", params={"technician_id": other_id}, headers=an)
+    assert [(i["id"], i["invoice"]) for i in r.json()["items"]] == [(payout, None)]
     theirs = (await client.get(f"{API}/me/earnings", headers=world.tech_other.headers)).json()
     assert [i["invoice"] for i in theirs["items"]] == [None]
     r = await client.get(

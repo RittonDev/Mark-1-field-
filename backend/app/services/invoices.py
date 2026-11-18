@@ -1,14 +1,14 @@
 """Notas fiscais dos técnicos parceiros (opcionais).
 
-O técnico emite a nota no portal da prefeitura e envia pelo app (aba Ganhos): número, emissão, valor,
-competência (o mês do serviço), observação, o arquivo (PDF, XML ou foto, conferido pelo conteúdo) e
-as OS que ela cobre (ticket_payouts.invoice_id: cada valor em no máximo uma nota). A central confere
-em Pagamentos: conferir, desfazer a conferência ou recusar com motivo. A recusa é final e solta as
-OS: o técnico apaga a nota e envia outra. Só o técnico apaga, e só enquanto a central não conferiu; a
-central nunca apaga (documento fiscal).
+O técnico emite a nota no portal da prefeitura e envia pelo app (aba Ganhos): número, emissão,
+valor, competência (o mês do serviço), observação, o arquivo (PDF, XML ou foto, conferido pelo
+conteúdo) e as OS que ela cobre (ticket_payouts.invoice_id: cada valor em no máximo uma nota). A
+central confere em Pagamentos: conferir, desfazer a conferência ou recusar com motivo. A recusa é
+final e solta as OS: o técnico apaga a nota e envia outra. Só o técnico apaga, e só enquanto a
+central não conferiu; a central nunca apaga (documento fiscal).
 
-A nota nunca trava pagamento. Sem push, tempo real ou histórico da OS. O técnico só vê as dele; quem
-tem Pagamentos vê as de todos os técnicos (a nota é do técnico, não da OS: não segue a fila).
+A nota nunca trava pagamento. Sem push, tempo real ou histórico da OS. O técnico só vê as dele;
+quem tem Pagamentos vê as de todos os técnicos (a nota é do técnico, não da OS: não segue a fila).
 """
 
 import re
@@ -88,9 +88,7 @@ NOT_YOURS = "Uma das OS escolhidas não é sua"
 NOT_CONCLUDED = "A {code} ainda não foi concluída"
 IN_OTHER_INVOICE = "A {code} já está na nota nº {number}"
 REPEATED_NUMBER = "A nota nº {number} já foi enviada"
-MONTH_FULL = (
-    f"Limite de {PER_MONTH} notas por competência: apague as recusadas para enviar outra"
-)
+MONTH_FULL = f"Limite de {PER_MONTH} notas por competência: apague as recusadas para enviar outra"
 NOT_FOUND = "Nota fiscal não encontrada"
 CHECKED_LOCKED = "A central já conferiu esta nota: ela não pode mais ser apagada"
 REJECTED_FINAL = "Nota recusada: o técnico envia outra"
@@ -284,9 +282,7 @@ async def _lock_payouts(
     if not ids:
         return []
     # Trava só as linhas dos valores; a leitura vem depois, já com as linhas travadas.
-    await db.execute(
-        select(TicketPayout.id).where(TicketPayout.id.in_(ids)).with_for_update()
-    )
+    await db.execute(select(TicketPayout.id).where(TicketPayout.id.in_(ids)).with_for_update())
     rows = (
         await db.execute(
             select(TicketPayout, Ticket.number, Ticket.status)
@@ -614,6 +610,10 @@ def _fields(
     }
 
 
+def _ref(user: User) -> Ref:
+    return Ref(id=user.id, name=user.name)
+
+
 async def my_out(
     db: AsyncSession, invoices: list[TechnicianInvoice], viewer: User
 ) -> list[MyInvoiceOut]:
@@ -629,8 +629,8 @@ async def central_out(
     return [
         InvoiceOut(
             **_fields(i, refs[i.id], viewer),
-            technician=Ref(id=i.technician.id, name=i.technician.name),
-            reviewed_by=Ref(id=i.reviewed_by.id, name=i.reviewed_by.name) if i.reviewed_by else None,
+            technician=_ref(i.technician),
+            reviewed_by=_ref(i.reviewed_by) if i.reviewed_by else None,
         )
         for i in invoices
     ]
