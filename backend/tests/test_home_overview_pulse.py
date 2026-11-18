@@ -1082,6 +1082,53 @@ async def test_late_technician_uses_schedule_without_arrival_due(
 
 
 @requires_db
+async def test_late_technician_skips_the_visit_waiting_for_a_new_date(
+    client: AsyncClient,
+    world: World,
+    db: AsyncSession,  # noqa: F811
+) -> None:
+    """A improdutiva sem chegada não conta como atraso do técnico: o prazo que o fluxo recalcula
+    sem a agenda fica no passado (a regra do grupo "Chegada atrasada"). Com a visita nova marcada
+    depois da improdutiva, o atraso dela volta a contar."""
+    for days in (2, 4):
+        await add_ticket(
+            db,
+            world,
+            status=S.ASSIGNED,
+            scheduled_start=None,
+            arrival_due_at=ago(days=days),
+            last_unproductive_at=ago(days=days) + timedelta(hours=1),
+            unproductive_count=1,
+        )
+    revisit = ago(days=1)
+    await add_ticket(
+        db,
+        world,
+        scheduled_start=revisit,
+        arrival_due_at=revisit + timedelta(minutes=30),
+        last_unproductive_at=ago(days=3),
+        unproductive_count=1,
+    )
+    start = ago(days=5)
+    await add_ticket(
+        db,
+        world,
+        status=S.CLOSED,
+        created_at=ago(days=45),
+        scheduled_start=start,
+        arrival_due_at=start + timedelta(minutes=30),
+        arrived_at=start + timedelta(minutes=45),
+        resolved_at=start + timedelta(hours=2),
+    )
+    await db.commit()
+
+    found = {s["key"]: s for s in (await overview(client, world))["suggestions"]}
+    assert found["late_technician"]["title"] == (
+        "Tecnico chegou atrasado em 2 OS nos últimos 30 dias"
+    )
+
+
+@requires_db
 async def test_filters_reproduce_list_totals(
     client: AsyncClient,
     world: World,

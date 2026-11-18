@@ -1276,6 +1276,7 @@ async def _recent_rows(db: AsyncSession, m: Moment) -> list[Any]:
         Ticket.arrival_due_at,
         Ticket.arrived_at,
         Ticket.scheduled_start,
+        Ticket.last_unproductive_at,
         Ticket.status,
     ).where(
         or_(
@@ -1302,7 +1303,9 @@ def _week(rows: list[Any], m: Moment) -> list[WeekDay]:
 
 def _arrived_late(row: Any, m: Moment, since: datetime) -> bool:
     """Com prazo de chegada: chegou depois dele (ou ainda não chegou). Sem prazo (OS importada):
-    chegou mais de 30 min depois do horário agendado (field.SCHEDULE_TOLERANCE)."""
+    chegou mais de 30 min depois do horário agendado (field.SCHEDULE_TOLERANCE). A OS que espera
+    data nova depois da improdutiva sem chegada não conta: o técnico foi, e o prazo que o fluxo
+    recalcula sem a agenda não diz se ele se atrasou (a regra do grupo "Chegada atrasada")."""
     if row.assignee_id is None:
         return False
     due = row.arrival_due_at
@@ -1311,7 +1314,7 @@ def _arrived_late(row: Any, m: Moment, since: datetime) -> bool:
             return False
         if row.arrived_at is not None:
             return row.arrived_at > due
-        return row.status not in FINISHED
+        return row.status not in FINISHED and not field_svc.awaiting_new_visit(row)
     arrived, start = row.arrived_at, row.scheduled_start
     if arrived is None or start is None or not since <= arrived <= m.now:
         return False
