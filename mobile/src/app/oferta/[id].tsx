@@ -55,6 +55,8 @@ const CLOSING = new Set<string>([
 
 interface OpenResult {
   status: "ok" | "missing" | "offline" | "error";
+  /** A oferta como o servidor devolveu (só com "ok"). */
+  offer: FieldOffer | null;
   /** Texto do erro, quando a abertura falhou por outro motivo que não a falta de rede. */
   detail: string | null;
 }
@@ -62,15 +64,14 @@ interface OpenResult {
 /** Abre a oferta no servidor (grava a leitura e traz a oferta atualizada) e diz como foi. */
 async function openOnServer(id: string): Promise<OpenResult> {
   try {
-    await openOffer(id);
-    return { status: "ok", detail: null };
+    return { status: "ok", offer: await openOffer(id), detail: null };
   } catch (error) {
     if (error instanceof ApiError && error.status === 404) {
       await forgetOffer(id).catch(() => undefined);
-      return { status: "missing", detail: null };
+      return { status: "missing", offer: null, detail: null };
     }
-    if (error instanceof ApiError && error.status === 0) return { status: "offline", detail: null };
-    return { status: "error", detail: errorMessage(error) };
+    if (error instanceof ApiError && error.status === 0) return { status: "offline", offer: null, detail: null };
+    return { status: "error", offer: null, detail: errorMessage(error) };
   }
 }
 
@@ -79,8 +80,8 @@ function leave() {
   else router.replace("/");
 }
 
-/** Por que a oferta não pode mais ser respondida. */
-function situation(offer: FieldOffer, state: OfferState, mine: boolean): string {
+/** Por que a oferta não pode mais ser respondida. `hasNext`: a central mandou outra oferta da mesma OS. */
+function situation(offer: FieldOffer, state: OfferState, mine: boolean, hasNext: boolean): string {
   if (state === "expired") return "O prazo para responder acabou.";
   if (state === "accepted") return "Você aceitou esta oferta. A OS está na sua agenda.";
   if (state === "declined") return "Você recusou esta oferta.";
@@ -94,7 +95,9 @@ function situation(offer: FieldOffer, state: OfferState, mine: boolean): string 
     case "ticket_closed":
       return "A OS foi encerrada pela central.";
     case "replaced":
-      return "A central trocou esta oferta por uma nova. Veja em Ofertas para você, na tela inicial.";
+      return hasNext
+        ? "A central trocou esta oferta por uma nova."
+        : "A central trocou esta oferta por uma nova. Veja em Ofertas para você, na tela inicial.";
     default:
       return "Esta oferta foi cancelada.";
   }
@@ -105,38 +108,66 @@ function situation(offer: FieldOffer, state: OfferState, mine: boolean): string 
  * data e valor; cliente, loja e endereço só depois de estar na OS) e responde "Aceitar por R$ X" ou "Recusar".
  * Não existe contraproposta. Abrir grava a leitura no servidor; o aceite pede também o escopo lido.
  */
-export default function OfferScreen() {
+export default function OfferRoute() {
   const params = useLocalSearchParams<{ id: string }>();
   const id = String(params.id);
+  // Uma tela por oferta: ir da antiga para a nova ("Ver a oferta nova") começa do zero.
+  return <OfferScreen key={id} id={id} />;
+}
+
+function OfferScreen({ id }: { id: string }) {
   const { user } = useSession();
   const styles = useStyles(makeStyles);
   const store = useLiveQuery(loadOfferStore);
   const online = isOnline(useSyncStatus());
-  // Cada abertura no servidor: ao entrar, com a conexão de volta e quando o aceite pede a leitura de novo.
+  // Cada abertura no servidor: ao entrar, com a conexão de volta, quando o aceite pede a leitura de novo e quando
+  // a oferta pendente some da lista guardada.
   const [attempt, setAttempt] = useState(0);
   const [opened, setOpened] = useState<(OpenResult & { attempt: number }) | null>(null);
+  // A oferta da última abertura no servidor: a tela segue com ela quando a lista guardada não a traz mais (a lista
+  // do servidor não mostra a oferta que a central trocou por uma nova da mesma OS).
+  const [served, setServed] = useState<FieldOffer | null>(null);
+
+  const settle = useCallback((result: OpenResult, forAttempt: number) => {
+    if (result.offer) setServed(result.offer);
+    setOpened({ ...result, attempt: forAttempt });
+  }, []);
 
   // Abrir grava a leitura no servidor (sem ela, o aceite é recusado) e atualiza a oferta guardada.
   useEffect(() => {
     if (!online) return;
     let alive = true;
     void openOnServer(id).then((result) => {
-      if (alive) setOpened({ ...result, attempt });
+      if (alive) settle(result, attempt);
     });
     return () => {
       alive = false;
     };
-  }, [id, online, attempt]);
+  }, [id, online, attempt, settle]);
 
   const reopen = useCallback(() => setAttempt((n) => n + 1), []);
   const reload = useCallback(async () => {
-    const result = await openOnServer(id);
-    setOpened({ ...result, attempt });
-  }, [id, attempt]);
+    settle(await openOnServer(id), attempt);
+  }, [id, attempt, settle]);
 
   const current = opened?.attempt === attempt ? opened : null;
   const opening = online && !current;
-  const offer = store?.offers.find((o) => o.id === id) ?? null;
+  const stored = store?.offers.find((o) => o.id === id) ?? null;
+
+  // A oferta que esperava a resposta saiu da lista guardada (a central trocou por uma nova, por exemplo): abre de
+  // novo para saber como ela ficou, em vez de seguir com o aceite de uma oferta que já não vale.
+  const storedState = stored?.state ?? null;
+  const [prevState, setPrevState] = useState(storedState);
+  if (storedState !== prevState) {
+    setPrevState(storedState);
+    if (storedState === null && prevState === "pending" && current?.status !== "missing") setAttempt((n) => n + 1);
+  }
+
+  const offer = stored ?? served;
+  // Outra oferta pendente da mesma OS (a central trocou o valor ou mandou de novo): a tela leva até ela.
+  const replacement = offer
+    ? (store?.offers.find((o) => o.id !== offer.id && o.ticket.id === offer.ticket.id && o.state === "pending") ?? null)
+    : null;
 
   if (!user) return null;
   if (current?.status === "missing") {
@@ -155,8 +186,7 @@ export default function OfferScreen() {
     );
   }
   if (!offer) {
-    // A gravação da oferta aberta chega às telas logo depois da resposta: o esqueleto cobre esse instante.
-    if (store === undefined || opening || current?.status === "ok") return <DetailSkeleton />;
+    if (store === undefined || opening) return <DetailSkeleton />;
     return (
       <View style={styles.screen}>
         <ConnectionBar />
@@ -183,8 +213,8 @@ export default function OfferScreen() {
         : null;
   return (
     <OfferView
-      key={offer.id}
       offer={offer}
+      replacement={replacement}
       scopeRead={Boolean(store?.scope.includes(offer.id))}
       userId={user.id}
       online={online}
@@ -198,6 +228,7 @@ export default function OfferScreen() {
 
 function OfferView({
   offer,
+  replacement,
   scopeRead,
   userId,
   online,
@@ -207,6 +238,8 @@ function OfferView({
   onReload,
 }: {
   offer: FieldOffer;
+  /** Oferta pendente mais nova da mesma OS, para levar o técnico a ela quando esta fecha. */
+  replacement: FieldOffer | null;
   scopeRead: boolean;
   userId: string;
   online: boolean;
@@ -242,6 +275,8 @@ function OfferView({
   // A OS da oferta já é dele (aceitou, ou a central o colocou nela): o próximo passo é abri-la.
   const mine = local?.assignee?.id === userId;
   const goesToTicket = !answerable && (state === "accepted" || mine);
+  // Esta fechou e a central mandou outra da mesma OS (valor trocado, envio de novo): o próximo passo é a nova.
+  const next = !answerable && !goesToTicket && replacement && offerState(replacement, at) === "pending" ? replacement : null;
   const amount = formatBRL(offer.amount);
   const acceptTitle = `Aceitar por ${amount}`;
   const place = placeLine(ticket);
@@ -255,7 +290,12 @@ function OfferView({
       : state === "cancelled" && offer.cancel_reason
         ? { label: OFFER_CANCEL_REASON[offer.cancel_reason], color: OFFER_STATE.cancelled.color }
         : { label: OFFER_STATE[state].label, color: OFFER_STATE[state].color };
-  const situationText = answerable ? null : problem && closedByServer ? problem.message : situation(offer, state, mine);
+  // O texto do servidor vale enquanto a oferta guardada ainda não mostra como ela fechou (a lista vem logo depois).
+  const situationText = answerable
+    ? null
+    : problem && closedByServer && state === "pending"
+      ? problem.message
+      : situation(offer, state, mine, Boolean(next));
   const situationIcon: IconName = state === "accepted" || mine ? "checkCircle" : state === "expired" ? "hourglass" : "alert";
 
   // O que segura o aceite, na ordem: conexão, a leitura gravada no servidor e o escopo lido no app.
@@ -271,7 +311,7 @@ function OfferView({
   const blockIcon: IconName = !online ? "wifiOff" : !viewed ? (opening ? "hourglass" : "alert") : "lock";
   // Aceite sem a leitura gravada: some quando a oferta é aberta de novo.
   const showProblem = Boolean(problem && !closedByServer && !(problem.code === "OFFER_NOT_VIEWED" && viewed));
-  const showBar = answerable || goesToTicket;
+  const showBar = answerable || goesToTicket || next !== null;
 
   async function refresh() {
     setRefreshing(true);
@@ -339,6 +379,10 @@ function OfferView({
 
   function openTicket() {
     router.replace({ pathname: "/ticket/[id]", params: { id: ticketId } });
+  }
+
+  function openNext(nextId: string) {
+    router.replace({ pathname: "/oferta/[id]", params: { id: nextId } });
   }
 
   const declineActions: SheetAction[] = DECLINE_REASONS.map((reason) => ({
@@ -497,9 +541,11 @@ function OfferView({
                 </View>
               </View>
             </>
-          ) : (
+          ) : goesToTicket ? (
             <Button title="Abrir a OS" variant="primary" onPress={openTicket} />
-          )}
+          ) : next ? (
+            <Button title={`Ver a oferta nova · ${formatBRL(next.amount)}`} variant="primary" onPress={() => openNext(next.id)} />
+          ) : null}
         </View>
       ) : null}
 
