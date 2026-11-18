@@ -14,6 +14,7 @@ from app.api.routes import (
     forms,
     home,
     messages,
+    my_profile,
     offers,
     onboarding,
     parts,
@@ -50,6 +51,8 @@ for module in (
     # Ofertas de OS: /tickets/{id}/offers (dois segmentos depois do id, sem choque com as rotas
     # da OS) e /me/offers (ao lado de /me/earnings).
     offers,
+    # Meu cadastro do técnico: /me/profile e /me/profile/photo.
+    my_profile,
     portal,
     queues,
     client_report,

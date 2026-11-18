@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 import { ArrowDown, ArrowLeft, ArrowUp, Camera, ChevronDown, Copy, Plus, Trash2, X } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
@@ -10,9 +10,10 @@ import { useToast } from "@/components/Toaster";
 import { Button, buttonClassName, Card, Checkbox, ErrorBox, Field, Input, PageHeader, Select, Textarea } from "@/components/ui";
 import { api, ApiError, errorMessage, request } from "@/lib/api";
 import { useUnsavedChanges } from "@/lib/hooks";
-import type { FormField, FormFieldType, FormTemplate, ServiceType } from "@/lib/types";
+import type { Category, FormField, FormFieldType, FormPrefill, FormTemplate, FormTemplateUsage, ServiceType } from "@/lib/types";
 import {
   ADD_ORDER,
+  changesLinks,
   changesTickets,
   type Draft,
   hasProblems,
@@ -23,6 +24,9 @@ import {
   newId,
   payload,
   photoNeed,
+  PREFILL_LABEL,
+  prefillOf,
+  prefillSources,
   resumeDraft,
   retype,
   sameDraft,
@@ -35,24 +39,41 @@ import {
 type FocusTarget = "label" | "help" | "options" | "up" | "down";
 const FOCUS_TARGETS: readonly string[] = ["label", "help", "options", "up", "down"];
 
-/** Modelo salvo. Com "levar às OS que não começaram", `applied_to` diz quantas OS receberam a mudança. */
-type SavedTemplate = FormTemplate & { applied_to?: number | null };
+/** "1 OS que ainda não começou", "3 OS que ainda não começaram". */
+const notStarted = (n: number) => `${n.toLocaleString("pt-BR")} OS que ainda não ${n === 1 ? "começou" : "começaram"}`;
 
-/** Aviso depois de salvar: a versão nova e, quando pedido, as OS que receberam a mudança. */
-function savedDescription(saved: SavedTemplate, newVersion: boolean): string | undefined {
+/**
+ * Aviso depois de salvar: a versão nova e, quando pedido ("Levar também..."), as OS que receberam a mudança
+ * das perguntas (`fields`) e aquelas em que o formulário entrou ou de que saiu pelos vínculos (`links`).
+ */
+function savedDescription(saved: FormTemplate, newVersion: boolean, asked: { fields: boolean; links: boolean }): string | undefined {
+  const parts: string[] = [];
   const applied = saved.applied_to;
-  if (applied === undefined || applied === null) {
-    return newVersion
-      ? `Versão ${saved.version}: vale para as próximas OS; as que já têm o formulário seguem com a anterior.`
-      : undefined;
+  if (!asked.fields || applied === undefined || applied === null) {
+    if (newVersion) parts.push(`Versão ${saved.version}: vale para as próximas OS; as que já têm o formulário seguem com a anterior.`);
+  } else {
+    const reached =
+      applied === 0
+        ? "Nenhuma OS aberta estava com ele sem começar."
+        : applied === 1
+          ? "A OS em que ele ainda não tinha começado também recebeu a mudança."
+          : `As ${applied.toLocaleString("pt-BR")} OS em que ele ainda não tinha começado também receberam a mudança.`;
+    parts.push(newVersion ? `Versão ${saved.version}. ${reached} As que já começaram seguem com a anterior.` : reached);
   }
-  const reached =
-    applied === 0
-      ? "Nenhuma OS aberta estava com ele sem começar."
-      : applied === 1
-        ? "A OS em que ele ainda não tinha começado também recebeu a mudança."
-        : `As ${applied.toLocaleString("pt-BR")} OS em que ele ainda não tinha começado também receberam a mudança.`;
-  return newVersion ? `Versão ${saved.version}. ${reached} As que já começaram seguem com a anterior.` : reached;
+  if (asked.links) {
+    const attached = saved.attached_to ?? 0;
+    const detached = saved.detached_from ?? 0;
+    parts.push(
+      attached && detached
+        ? `Entrou em ${notStarted(attached)} e saiu de ${detached.toLocaleString("pt-BR")}.`
+        : attached
+          ? `Entrou em ${notStarted(attached)}.`
+          : detached
+            ? `Saiu de ${notStarted(detached)}.`
+            : "Nenhuma OS que ainda não começou precisou mudar.",
+    );
+  }
+  return parts.length ? parts.join(" ") : undefined;
 }
 
 /** Nome da pergunta para os botões ("Subir “Foto do rack”"), lido pelo leitor de tela. */
@@ -67,6 +88,7 @@ export function FormEditor({
   editKey,
   template,
   serviceTypes,
+  categories,
   onLeave,
 }: {
   editKey: string;
@@ -74,6 +96,8 @@ export function FormEditor({
   template: FormTemplate | null;
   /** Catálogo de tipos de serviço (null: não carregou; os tipos já ligados continuam ligados). */
   serviceTypes: ServiceType[] | null;
+  /** Categorias (null: não carregou; as já ligadas continuam ligadas). */
+  categories: Category[] | null;
   /** Volta para a lista (quem chama decide entre voltar no histórico e trocar a URL). */
   onLeave: () => void;
 }) {
@@ -85,7 +109,8 @@ export function FormEditor({
   const [draft, setDraft] = useState(start);
   const [removed, setRemoved] = useState<{ field: FormField; index: number } | null>(null);
   const [showErrors, setShowErrors] = useState(false);
-  // Levar a mudança também às OS em que o formulário ainda não começou (pendente, sem resposta e sem foto).
+  // Levar a mudança também às OS que ainda não começaram: as perguntas novas onde o formulário não foi
+  // começado, e os vínculos (entra onde passou a casar e sai de onde entrou sozinho e não casa mais).
   const [applyPending, setApplyPending] = useState(false);
   const rows = useRef(new Map<string, HTMLLIElement>());
   const pendingFocus = useRef<{ id: string; target: FocusTarget } | "undo" | null>(null);
@@ -98,8 +123,11 @@ export function FormEditor({
   const invalid = showErrors && hasProblems(problems);
   const questions = draft.fields.filter((f) => f.type !== "section").length;
   const full = draft.fields.length >= LIMITS.fields;
-  // Perguntas ou nome mudaram num modelo salvo: dá para levar a mudança às OS que ainda não começaram.
+  // Perguntas ou nome mudaram num modelo salvo, ou os tipos de OS e as categorias em que ele entra mudaram
+  // (num formulário novo, ter algum): dá para levar a mudança às OS que ainda não começaram.
   const reachesTickets = template !== null && changesTickets(draft, initial);
+  const linksMoved = changesLinks(draft, template ? initial : null);
+  const offerApply = reachesTickets || linksMoved;
   // Fechar a aba ou sair da central pergunta antes (o rascunho da aba volta ao recarregar ou ao voltar).
   useUnsavedChanges(dirty);
 
@@ -133,23 +161,30 @@ export function FormEditor({
 
   const save = useMutation({
     // `overwrite`: a pessoa confirmou salvar por cima da versão que outra pessoa salvou.
-    mutationFn: (overwrite: boolean | void) => {
+    mutationFn: async ({ overwrite = false }: { overwrite?: boolean }) => {
       const body = payload(draft);
-      if (!draft.id) return api.post<SavedTemplate>("/form-templates", body);
-      return request<SavedTemplate>(`/form-templates/${draft.id}`, {
-        method: "PUT",
-        // A API recusa (409) se o modelo mudou depois da versão de onde o rascunho saiu.
-        body: { ...body, base_updated_at: overwrite === true ? null : (draft.updated_at ?? null) },
-        query: { apply_to_pending: reachesTickets && applyPending },
-      });
+      const apply = applyPending && offerApply;
+      const asked = { fields: apply && reachesTickets, links: apply && linksMoved };
+      const saved = draft.id
+        ? await request<FormTemplate>(`/form-templates/${draft.id}`, {
+            method: "PUT",
+            // A API recusa (409) se o modelo mudou depois da versão de onde o rascunho saiu.
+            body: { ...body, base_updated_at: overwrite ? null : (draft.updated_at ?? null) },
+            query: { apply_to_pending: apply },
+          })
+        : await request<FormTemplate>("/form-templates", { method: "POST", body, query: { apply_to_pending: apply } });
+      return { saved, asked };
     },
-    onSuccess: (saved) => {
+    onSuccess: ({ saved, asked }) => {
       invalidateForms(queryClient);
-      // As OS que receberam a versão nova (painel e listas) releem os formulários.
-      if (saved.applied_to) queryClient.invalidateQueries({ queryKey: ["ticket"] });
+      // As OS que mudaram (a versão nova, ou o formulário que entrou ou saiu) releem: painel e listas.
+      if (saved.applied_to || saved.attached_to || saved.detached_from) {
+        queryClient.invalidateQueries({ queryKey: ["ticket"] });
+        queryClient.invalidateQueries({ queryKey: ["tickets"] });
+      }
       writeStored(null);
       const newVersion = template !== null && saved.version !== template.version;
-      toast({ title: `Formulário “${saved.name}” salvo`, description: savedDescription(saved, newVersion), tone: "success" });
+      toast({ title: `Formulário “${saved.name}” salvo`, description: savedDescription(saved, newVersion, asked), tone: "success" });
       onLeave();
     },
     // O erro aparece no topo: quem salvou pela barra do rodapé é levado até ele (e o leitor de tela também).
@@ -166,7 +201,7 @@ export function FormEditor({
           tone: "danger",
         });
         if (overwrite) {
-          save.mutate(true);
+          save.mutate({ overwrite: true });
           return;
         }
       }
@@ -226,7 +261,7 @@ export function FormEditor({
       });
       return;
     }
-    save.mutate();
+    save.mutate({});
   };
 
   const leave = async () => {
@@ -305,7 +340,6 @@ export function FormEditor({
               <Input
                 value={draft.name}
                 onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
-                placeholder="Ex.: Preventiva de rack"
                 maxLength={LIMITS.name}
                 aria-invalid={nameProblem ? true : undefined}
                 aria-describedby={nameProblem ? nameErrorId : undefined}
@@ -321,20 +355,29 @@ export function FormEditor({
               />
             </Field>
             <div className="sm:col-span-2">
-              <ServiceTypePicker
-                types={serviceTypes}
-                value={draft.service_type_ids}
-                onChange={(ids) => setDraft((d) => ({ ...d, service_type_ids: ids }))}
+              <LinksSection
+                templateId={template?.id ?? null}
+                serviceTypes={serviceTypes}
+                categories={categories}
+                typeIds={draft.service_type_ids}
+                categoryIds={draft.category_ids}
+                onTypes={(ids) => setDraft((d) => ({ ...d, service_type_ids: ids }))}
+                onCategories={(ids) => setDraft((d) => ({ ...d, category_ids: ids }))}
               />
             </div>
             <div className="flex flex-col gap-2 sm:col-span-2">
+              <Checkbox
+                label="Entra na OS como obrigatório"
+                checked={draft.default_required}
+                onChange={(v) => setDraft((d) => ({ ...d, default_required: v }))}
+              />
               <Checkbox
                 label="Pedir a assinatura do responsável no local depois deste formulário (quando ele for obrigatório na OS)"
                 checked={draft.requires_signature}
                 onChange={(v) => setDraft((d) => ({ ...d, requires_signature: v }))}
               />
               <Checkbox
-                label="Ativo: aparece para anexar nas OS"
+                label="Ativo: entra nas OS e aparece para adicionar"
                 checked={draft.is_active}
                 onChange={(v) => setDraft((d) => ({ ...d, is_active: v }))}
               />
@@ -435,6 +478,26 @@ export function FormEditor({
                           >
                             Obrigatória
                           </RowCheck>
+                          {prefillSources(f.type).length ? (
+                            <span className="inline-flex items-center gap-1.5">
+                              <span aria-hidden className="font-semibold text-ink/80">
+                                Preencher com
+                              </span>
+                              <Select
+                                value={prefillOf(f) ?? ""}
+                                onChange={(e) => setField(f.id, { prefill: (e.target.value || null) as FormPrefill | null })}
+                                aria-label={`Preencher a pergunta ${n} com`}
+                                className="w-56"
+                              >
+                                <option value="">Resposta do técnico</option>
+                                {prefillSources(f.type).map((source) => (
+                                  <option key={source} value={source}>
+                                    {PREFILL_LABEL[source]}
+                                  </option>
+                                ))}
+                              </Select>
+                            </span>
+                          ) : null}
                           {f.type === "photo" ? (
                             <>
                               <span className="inline-flex items-center gap-1.5">
@@ -534,13 +597,9 @@ export function FormEditor({
 
       {unsaved ? (
         <UnsavedBar message={draft.id ? "Alterações não salvas" : "Formulário novo, ainda não salvo"}>
-          {reachesTickets ? (
+          {offerApply ? (
             <span className="mr-2">
-              <Checkbox
-                label="Levar também às OS em que ele ainda não começou"
-                checked={applyPending}
-                onChange={setApplyPending}
-              />
+              <Checkbox label="Levar também às OS que ainda não começaram" checked={applyPending} onChange={setApplyPending} />
             </span>
           ) : null}
           <Button variant="ghost" onClick={leave}>
@@ -699,43 +758,215 @@ function IconButton({
   );
 }
 
-/** "Sugerir nas OS destes tipos": busca entre todos os tipos e os escolhidos à vista. */
-function ServiceTypePicker({
-  types,
+/** Uma opção da lista de vínculos (tipo de OS ou categoria). */
+interface LinkOption {
+  id: string;
+  label: string;
+  /** Texto em que a busca procura. */
+  search: string;
+}
+
+const typeLabel = (t: ServiceType) => `${t.name}${t.customer ? ` · ${t.customer.name}` : ""}${t.is_active ? "" : " (inativo)"}`;
+const categoryLabel = (c: Category) => `${c.full_name}${c.is_active ? "" : " (inativa)"}`;
+
+/** Quantas subcategorias (filhas, netas... até 10 níveis, como a API) cada categoria cobre. */
+function subcategoryCounts(categories: Category[]): Map<string, number> {
+  const children = new Map<string, string[]>();
+  for (const c of categories) if (c.parent_id) children.set(c.parent_id, [...(children.get(c.parent_id) ?? []), c.id]);
+  const out = new Map<string, number>();
+  for (const c of categories) {
+    const seen = new Set<string>([c.id]);
+    let level = children.get(c.id) ?? [];
+    for (let depth = 0; level.length && depth < 10; depth += 1) {
+      const next: string[] = [];
+      for (const id of level) {
+        if (seen.has(id)) continue;
+        seen.add(id);
+        next.push(...(children.get(id) ?? []));
+      }
+      level = next;
+    }
+    out.set(c.id, seen.size - 1);
+  }
+  return out;
+}
+
+/**
+ * "Entra sozinho nas OS": os tipos de OS e as categorias (valem as subcategorias) em que o formulário entra
+ * sozinho e, num modelo salvo, os tipos em que o histórico mostra que ele já é usado (um clique liga).
+ */
+function LinksSection({
+  templateId,
+  serviceTypes,
+  categories,
+  typeIds,
+  categoryIds,
+  onTypes,
+  onCategories,
+}: {
+  /** Modelo salvo (o histórico de uso é dele); null: formulário novo. */
+  templateId: string | null;
+  serviceTypes: ServiceType[] | null;
+  categories: Category[] | null;
+  typeIds: string[];
+  categoryIds: string[];
+  onTypes: (ids: string[]) => void;
+  onCategories: (ids: string[]) => void;
+}) {
+  const titleId = useId();
+  const usage = useQuery({
+    queryKey: ["form-templates", templateId, "usage"],
+    queryFn: () => api.get<FormTemplateUsage>(`/form-templates/${templateId}/usage`),
+    enabled: templateId !== null,
+    staleTime: 5 * 60_000,
+  });
+  const typeById = useMemo(() => new Map((serviceTypes ?? []).map((t) => [t.id, t])), [serviceTypes]);
+  const categoryById = useMemo(() => new Map((categories ?? []).map((c) => [c.id, c])), [categories]);
+  const below = useMemo(() => subcategoryCounts(categories ?? []), [categories]);
+  // Os ativos e os inativos que já estavam escolhidos (para poder ver e tirar).
+  const typeOptions = useMemo<LinkOption[] | null>(
+    () =>
+      serviceTypes
+        ? serviceTypes
+            .filter((t) => t.is_active || typeIds.includes(t.id))
+            .map((t) => ({ id: t.id, label: typeLabel(t), search: `${t.name} ${t.customer?.name ?? ""}` }))
+        : null,
+    [serviceTypes, typeIds],
+  );
+  const categoryOptions = useMemo<LinkOption[] | null>(
+    () =>
+      categories
+        ? categories
+            .filter((c) => c.is_active || categoryIds.includes(c.id))
+            .sort((a, b) => a.full_name.localeCompare(b.full_name, "pt-BR"))
+            .map((c) => ({ id: c.id, label: categoryLabel(c), search: c.full_name }))
+        : null,
+    [categories, categoryIds],
+  );
+  const typeChip = (id: string) => {
+    const t = typeById.get(id);
+    return t ? typeLabel(t) : serviceTypes ? "Tipo removido do catálogo" : "Tipo ligado";
+  };
+  const categoryChip = (id: string) => {
+    const c = categoryById.get(id);
+    if (!c) return categories ? "Categoria removida" : "Categoria ligada";
+    const k = below.get(id) ?? 0;
+    return k ? `${categoryLabel(c)} · +${plural(k, "subcategoria", "subcategorias")}` : categoryLabel(c);
+  };
+  const counts = [
+    typeIds.length ? plural(typeIds.length, "tipo de OS", "tipos de OS") : null,
+    categoryIds.length ? plural(categoryIds.length, "categoria", "categorias") : null,
+  ]
+    .filter(Boolean)
+    .join(" e ");
+  // Tipos em que o formulário já é usado (pelo menos 3 OS e metade das OS do tipo, nos últimos 12 meses).
+  const fromHistory = (usage.data?.service_types ?? []).filter((u) => !typeIds.includes(u.id));
+  const include = (ids: string[]) => onTypes([...typeIds, ...ids.filter((id) => !typeIds.includes(id))]);
+
+  return (
+    <section aria-labelledby={titleId} className="flex flex-col gap-3 rounded-lg border border-line p-3">
+      <h2 id={titleId} className="text-sm font-bold text-ink">
+        Entra sozinho nas OS
+        {counts ? <span className="font-normal text-ink-muted"> · {counts}</span> : null}
+      </h2>
+      <LinkPicker
+        title="Tipos de OS"
+        options={typeOptions}
+        value={typeIds}
+        onChange={onTypes}
+        chipLabel={typeChip}
+        openLabel="Escolher tipos"
+        searchPlaceholder="Buscar tipo ou cliente"
+        searchLabel="Buscar tipo de OS"
+        notFound="Nenhum tipo encontrado."
+        failed="Não foi possível carregar os tipos de OS agora. Os que já estão ligados continuam ligados ao salvar."
+      />
+      <LinkPicker
+        title="Categorias"
+        options={categoryOptions}
+        value={categoryIds}
+        onChange={onCategories}
+        chipLabel={categoryChip}
+        openLabel="Escolher categorias"
+        searchPlaceholder="Buscar categoria"
+        searchLabel="Buscar categoria"
+        notFound="Nenhuma categoria encontrada."
+        failed="Não foi possível carregar as categorias agora. As que já estão ligadas continuam ligadas ao salvar."
+      />
+      {typeIds.length || categoryIds.length ? null : (
+        <p className="text-xs text-ink-muted">Nenhum tipo nem categoria: só entra quando alguém adicionar na OS.</p>
+      )}
+      {fromHistory.length ? (
+        <div className="flex flex-col gap-1.5 rounded-lg bg-surface-2/60 px-3 py-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-xs font-semibold text-ink/80">Pelo histórico:</span>
+            {fromHistory.length >= 2 ? (
+              <Button size="sm" variant="ghost" onClick={() => include(fromHistory.map((u) => u.id))}>
+                Incluir todos
+              </Button>
+            ) : null}
+          </div>
+          <ul className="flex flex-col gap-1">
+            {fromHistory.map((u) => (
+              <li key={u.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-ink">
+                <span className="min-w-0">
+                  {u.name}
+                  {u.customer ? ` · ${u.customer.name}` : ""} · {u.used.toLocaleString("pt-BR")} de {u.total.toLocaleString("pt-BR")} OS
+                </span>
+                <Button size="sm" variant="ghost" onClick={() => include([u.id])} aria-label={`Incluir ${u.name}`}>
+                  Incluir
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+/** Uma linha de vínculos: busca entre todas as opções e as escolhidas à vista, com o X para tirar. */
+function LinkPicker({
+  title,
+  options,
   value,
   onChange,
+  chipLabel,
+  openLabel,
+  searchPlaceholder,
+  searchLabel,
+  notFound,
+  failed,
 }: {
-  /** null: o catálogo não carregou (dá para salvar o resto; os tipos ligados continuam). */
-  types: ServiceType[] | null;
+  title: string;
+  /** null: a lista não carregou (dá para salvar o resto; os já ligados continuam). */
+  options: LinkOption[] | null;
   value: string[];
   onChange: (ids: string[]) => void;
+  chipLabel: (id: string) => string;
+  openLabel: string;
+  searchPlaceholder: string;
+  searchLabel: string;
+  notFound: string;
+  failed: string;
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const titleId = useId();
   const listId = useId();
-  const byId = useMemo(() => new Map((types ?? []).map((t) => [t.id, t])), [types]);
-  const labelOf = (t: ServiceType) =>
-    `${t.name}${t.customer ? ` · ${t.customer.name}` : ""}${t.is_active ? "" : " (inativo)"}`;
-  // Tipos ativos e os inativos que já estavam escolhidos (para poder ver e tirar).
-  const options = useMemo(() => {
+  const shown = useMemo(() => {
     const q = fold(search.trim());
-    return (types ?? []).filter(
-      (t) =>
-        (t.is_active || value.includes(t.id)) &&
-        (!q || fold(`${t.name} ${t.customer?.name ?? ""}`).includes(q)),
-    );
-  }, [types, value, search]);
+    return (options ?? []).filter((o) => !q || fold(o.search).includes(q));
+  }, [options, search]);
   const toggle = (id: string) => onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id]);
 
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span id={titleId} className="text-xs font-semibold text-ink/80">
-          Sugerir nas OS destes tipos de serviço
-          {value.length ? <span className="font-normal text-ink-muted"> · {plural(value.length, "escolhido", "escolhidos")}</span> : null}
+          {title}
         </span>
-        {types ? (
+        {options ? (
           <Button
             size="sm"
             variant="ghost"
@@ -745,20 +976,15 @@ function ServiceTypePicker({
             aria-controls={open ? listId : undefined}
           >
             <ChevronDown className={clsx("size-3.5 transition-transform duration-150", open && "rotate-180")} />
-            {open ? "Fechar a lista" : "Escolher tipos"}
+            {open ? "Fechar a lista" : openLabel}
           </Button>
         ) : null}
       </div>
-      {types ? null : (
-        <p className="text-xs text-ink-muted">
-          Não foi possível carregar os tipos de serviço agora. Os que já estão ligados continuam ligados ao salvar.
-        </p>
-      )}
+      {options ? null : <p className="text-xs text-ink-muted">{failed}</p>}
       {value.length ? (
         <ul className="flex flex-wrap gap-1.5" aria-labelledby={titleId}>
           {value.map((id) => {
-            const t = byId.get(id);
-            const text = t ? labelOf(t) : types ? "Tipo removido do catálogo" : "Tipo ligado";
+            const text = chipLabel(id);
             return (
               <li key={id}>
                 <span className="inline-flex items-center gap-1 rounded-full border border-line bg-surface-2 py-0.5 pr-1 pl-2.5 text-xs font-medium text-ink">
@@ -776,30 +1002,23 @@ function ServiceTypePicker({
             );
           })}
         </ul>
-      ) : (
-        <p className="text-xs text-ink-muted">
-          Nenhum tipo escolhido: o formulário só entra na OS quando alguém anexar.
-        </p>
-      )}
+      ) : null}
       {open ? (
         <div id={listId} className="flex flex-col gap-2">
-          <SearchField value={search} onChange={setSearch} placeholder="Buscar tipo ou cliente" label="Buscar tipo de serviço" />
+          <SearchField value={search} onChange={setSearch} placeholder={searchPlaceholder} label={searchLabel} />
           <div role="group" aria-labelledby={titleId} className="max-h-60 overflow-y-auto rounded-lg border border-line py-1">
-            {options.length === 0 ? (
-              <p className="px-3 py-2 text-xs text-ink-muted">Nenhum tipo encontrado.</p>
+            {shown.length === 0 ? (
+              <p className="px-3 py-2 text-xs text-ink-muted">{notFound}</p>
             ) : (
-              options.map((t) => (
-                <label
-                  key={t.id}
-                  className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm text-ink hover:bg-surface-2"
-                >
+              shown.map((o) => (
+                <label key={o.id} className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm text-ink hover:bg-surface-2">
                   <input
                     type="checkbox"
-                    checked={value.includes(t.id)}
-                    onChange={() => toggle(t.id)}
+                    checked={value.includes(o.id)}
+                    onChange={() => toggle(o.id)}
                     className="size-4 shrink-0 rounded border-line accent-[var(--brand)]"
                   />
-                  <span className="min-w-0 truncate">{labelOf(t)}</span>
+                  <span className="min-w-0 truncate">{o.label}</span>
                 </label>
               ))
             )}

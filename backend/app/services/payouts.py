@@ -16,6 +16,7 @@ from sqlalchemy import and_, func, not_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import raiseload
 
+from app.core import pix
 from app.core.config import settings
 from app.core.enums import ExpenseStatus, PayoutStatus, TicketEventType, TicketStatus, UserRole
 from app.db.base import utcnow
@@ -26,6 +27,7 @@ from app.models.payout import TicketPayout
 from app.models.ticket import Ticket, TicketEvent
 from app.models.user import User
 from app.schemas.common import Ref
+from app.schemas.my_profile import PixInfo
 from app.schemas.payout import (
     MyEarnings,
     MyPayout,
@@ -450,6 +452,25 @@ async def list_payouts(
     return PayoutList(items=lines, summary=summary, total_count=total_count)
 
 
+async def pix_map(
+    db: AsyncSession, technician_ids: set[uuid.UUID] | list[uuid.UUID]
+) -> dict[uuid.UUID, PixInfo]:
+    """A chave PIX de cada técnico que tem chave (Pagamentos: para onde pagar). Ele cadastra no
+    app; a central só vê e remove."""
+    ids = {i for i in technician_ids if i is not None}
+    if not ids:
+        return {}
+    rows = await db.execute(
+        select(
+            User.id, User.pix_key_type, User.pix_key, User.pix_holder_name, User.pix_updated_at
+        ).where(User.id.in_(ids), User.pix_key.is_not(None), User.pix_key_type.is_not(None))
+    )
+    return {
+        user_id: PixInfo(key_type=key_type, key=key, holder_name=holder, updated_at=updated_at)
+        for user_id, key_type, key, holder, updated_at in rows
+    }
+
+
 async def mark_paid(db: AsyncSession, ids: list[uuid.UUID], actor: User, *, paid: bool) -> int:
     """Marca como pago (ou desfaz). Devolve quantos mudaram. Cada mudança fica no histórico da
     OS (quem pagou, quando e quanto) e a gestão vê na hora. Só os das OS que quem marca vê (os
@@ -474,6 +495,15 @@ async def mark_paid(db: AsyncSession, ids: list[uuid.UUID], actor: User, *, paid
         else:
             continue
         changed.append(payout)
+        technician = payout.technician
+        data: dict[str, Any] = {
+            "technician": technician.name if technician else None,
+            "amount": money_text(payout.amount),
+            "action": "paid" if paid else "unpaid",
+        }
+        if paid and technician is not None and technician.pix_key_type and technician.pix_key:
+            # A chave daquele momento, mascarada (o histórico da OS não guarda a chave inteira).
+            data["pix"] = pix.describe(technician.pix_key_type, technician.pix_key)
         _event(
             db,
             payout.ticket_id,
@@ -482,11 +512,7 @@ async def mark_paid(db: AsyncSession, ids: list[uuid.UUID], actor: User, *, paid
             from_value=before.value,
             to_value=payout.status.value,
             note="Pagamento registrado" if paid else "Pagamento desfeito",
-            data={
-                "technician": payout.technician.name if payout.technician else None,
-                "amount": money_text(payout.amount),
-                "action": "paid" if paid else "unpaid",
-            },
+            data=data,
         )
     ticket_ids = list({p.ticket_id for p in changed})
     await _touch(db, ticket_ids)

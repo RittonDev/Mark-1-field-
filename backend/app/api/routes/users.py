@@ -12,6 +12,7 @@ from app.core.security import hash_password_async
 from app.db.base import utcnow
 from app.models import Customer, Team, Ticket, User
 from app.models.access import AccessProfile
+from app.models.user_change import VIA_CENTRAL
 from app.schemas.access import UserAccessIn
 from app.schemas.user import (
     AssignableUser,
@@ -24,6 +25,7 @@ from app.schemas.user import (
 )
 from app.services import access as access_svc
 from app.services import tickets as tickets_svc
+from app.services import user_history
 from app.services.errors import AccessDenied
 from app.services.realtime import commit_and_publish
 from app.services.workflow import OPEN_STATUSES
@@ -247,6 +249,12 @@ async def update_user(user_id: uuid.UUID, body: UserUpdate, db: DB, actor: Users
         if key in fields:
             fields[key] = (fields[key] or "").strip() or None
     old_role, new_role = user.role, fields.get("role", user.role)
+    # Cadastro de técnico (antes ou depois da mudança): vai para o histórico do cadastro.
+    history_before = (
+        await user_history.snapshot(db, user)
+        if UserRole.TECHNICIAN in (old_role, new_role)
+        else None
+    )
     if access_in is not None and new_role not in PROFILE_ROLES:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, access_svc.NO_PROFILE_ROLE)
     # Técnico sem acesso ao app (desativado ou em outro papel): ninguém responde as ofertas dele,
@@ -295,12 +303,23 @@ async def update_user(user_id: uuid.UUID, body: UserUpdate, db: DB, actor: Users
     # (ex.: a conta vazou e o admin trocou a senha).
     if deactivated or REVOKING_FIELDS.intersection(changed):
         user.sessions_revoked_at = utcnow()
+    history: list[dict] = []
+    if history_before is not None:
+        history = await user_history.track(
+            db,
+            user,
+            history_before,
+            via=VIA_CENTRAL,
+            actor=actor,
+            extra=[dict(user_history.PASSWORD_SET)] if password else None,
+        )
     await commit_and_publish(db)
     if changed:
         log.info("Usuários: %s alterou %s (%s)", actor.id, user.id, ", ".join(changed))
     if access_changed:
         # A web da pessoa relê o acesso e o socket dela reconecta com o acesso novo.
         await access_svc.publish_changed([user.id])
+    await user_history.publish_changed(user, history, via=VIA_CENTRAL, actor=actor)
     saved = await db.get(User, user.id, populate_existing=True)
     assert saved is not None
     await access_svc.attach_role_defaults(db, [saved])

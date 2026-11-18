@@ -9,7 +9,9 @@ from app.api.deps import DB, TicketManagerUser, access_user
 from app.api.files import stored_file
 from app.core.enums import UserRole
 from app.core.security import InvalidToken, decode_token
-from app.models import Category, Location, Project, ServiceType, User
+from app.models import Category, Location, Project, ServiceType, User, UserChange
+from app.models.user_change import VIA_CENTRAL
+from app.schemas.my_profile import UserChangeOut
 from app.schemas.technician import (
     ImportResult,
     NearbyOut,
@@ -21,7 +23,7 @@ from app.schemas.technician import (
     TechnicianUpdate,
     TemporaryPassword,
 )
-from app.services import suggestions
+from app.services import suggestions, user_history
 from app.services import technician_regions as regions_svc
 from app.services import technicians as svc
 from app.services import tickets as tickets_svc
@@ -36,6 +38,8 @@ TechniciansView = access_user("base.technicians")
 TechniciansEdit = access_user("base.technicians", level="edit")
 RegionsView = access_user("base.technicians", "base.onboarding")
 NearbyView = access_user("base.technicians", "base.locations")
+# Chave PIX do técnico: é dado de Pagamentos. A central só remove (quem cadastra é o técnico).
+PixEdit = access_user("commercial.payouts", level="edit")
 
 
 async def _one(db: DB, user: User) -> TechnicianOut:
@@ -133,37 +137,51 @@ async def create_technician(
 async def update_technician(
     user_id: uuid.UUID, body: TechnicianUpdate, db: DB, actor: TechniciansEdit
 ) -> TechnicianOut:
-    """Desativar fecha as ofertas em aberto dele (o tempo real das OS sai no commit)."""
+    """Desativar fecha as ofertas em aberto dele (o tempo real das OS sai no commit). O que mudou
+    fica no histórico do cadastro (via central)."""
     user = await svc.get_technician(db, user_id)
+    before = await user_history.snapshot(db, user)
     await svc.update(db, user, body, actor)
+    changes = await user_history.track(db, user, before, via=VIA_CENTRAL, actor=actor)
     await commit_and_publish(db)
+    await user_history.publish_changed(user, changes, via=VIA_CENTRAL, actor=actor)
     return await _one(db, user)
 
 
 @router.post("/technicians/{user_id}/reset-password", response_model=TemporaryPassword)
-async def reset_password(user_id: uuid.UUID, db: DB, _: TechniciansEdit) -> TemporaryPassword:
+async def reset_password(user_id: uuid.UUID, db: DB, actor: TechniciansEdit) -> TemporaryPassword:
     """Esqueceu a senha: gera uma provisória e encerra as sessões abertas do técnico."""
     user = await svc.get_technician(db, user_id)
     password = await svc.reset_password(db, user)
+    changes = [dict(user_history.PASSWORD_TEMPORARY)]
+    user_history.record(db, user, changes, via=VIA_CENTRAL, actor=actor)
     await db.commit()
+    await user_history.publish_changed(user, changes, via=VIA_CENTRAL, actor=actor)
     return TemporaryPassword(technician=await _one(db, user), temporary_password=password)
 
 
 @router.post("/technicians/{user_id}/photo", response_model=TechnicianOut)
 async def upload_photo(
-    user_id: uuid.UUID, db: DB, _: TechniciansEdit, file: Annotated[UploadFile, File()]
+    user_id: uuid.UUID, db: DB, actor: TechniciansEdit, file: Annotated[UploadFile, File()]
 ) -> TechnicianOut:
+    """A anterior sai do disco quando ninguém mais usa (a ficha da homologação guarda a dela)."""
     user = await svc.get_technician(db, user_id)
-    await svc.set_photo(db, user, file)
+    changes, previous = await svc.set_photo(db, user, file, via=VIA_CENTRAL, actor=actor)
     await db.commit()
+    await svc.drop_unused_photo(db, previous, user.id)
+    await user_history.publish_changed(user, changes, via=VIA_CENTRAL, actor=actor)
     return await _one(db, user)
 
 
 @router.delete("/technicians/{user_id}/photo", response_model=TechnicianOut)
-async def remove_photo(user_id: uuid.UUID, db: DB, _: TechniciansEdit) -> TechnicianOut:
+async def remove_photo(user_id: uuid.UUID, db: DB, actor: TechniciansEdit) -> TechnicianOut:
+    """Tira a foto, também a que veio do Field Control (no lugar ficam as iniciais)."""
     user = await svc.get_technician(db, user_id)
-    user.avatar_key = None
-    await db.commit()
+    changes, previous = svc.remove_photo(db, user, via=VIA_CENTRAL, actor=actor)
+    if changes:
+        await db.commit()
+        await svc.drop_unused_photo(db, previous, user.id)
+        await user_history.publish_changed(user, changes, via=VIA_CENTRAL, actor=actor)
     return await _one(db, user)
 
 
@@ -263,3 +281,41 @@ async def suggest_for_place(
         exclude_ticket_id=exclude_ticket_id,
     )
     return await suggestions.suggest(db, target, limit=limit)
+
+
+# ------------------------------------------------- um técnico (sempre depois das rotas fixas)
+# GET /technicians/{user_id} declarado antes de /regions, /nearby ou /suggest faria essas rotas
+# responderem 422 (o caminho fixo seria lido como id).
+
+
+@router.get("/technicians/{user_id}/changes", response_model=list[UserChangeOut])
+async def technician_changes(
+    user_id: uuid.UUID,
+    db: DB,
+    _: TechniciansView,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> list[UserChange]:
+    """Histórico do cadastro, do mais novo para o mais antigo: pelo técnico (app) e pela central,
+    com quem fez. A chave PIX vem só mascarada."""
+    user = await svc.get_technician(db, user_id)
+    return await user_history.list_changes(db, user.id, limit)
+
+
+@router.delete("/technicians/{user_id}/pix", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_technician_pix(user_id: uuid.UUID, db: DB, actor: PixEdit) -> Response:
+    """A central só remove a chave PIX (ex.: chave errada ou suspeita); quem cadastra uma nova é o
+    técnico, no app. Sem chave: nada muda."""
+    user = await svc.get_technician(db, user_id)
+    if svc.has_pix(user):
+        before = await user_history.snapshot(db, user)
+        svc.clear_pix(user)
+        changes = await user_history.track(db, user, before, via=VIA_CENTRAL, actor=actor)
+        await db.commit()
+        await user_history.publish_changed(user, changes, via=VIA_CENTRAL, actor=actor)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/technicians/{user_id}", response_model=TechnicianOut)
+async def get_technician(user_id: uuid.UUID, db: DB, _: TechniciansView) -> TechnicianOut:
+    """Um técnico (o cadastro aberto por link, ?tecnico= na web). 404 se não for técnico."""
+    return await _one(db, await svc.get_technician(db, user_id))

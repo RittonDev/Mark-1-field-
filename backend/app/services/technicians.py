@@ -8,6 +8,7 @@ import re
 import secrets
 import uuid
 from datetime import timedelta
+from typing import Any
 
 from fastapi import UploadFile
 from sqlalchemy import func, select
@@ -27,7 +28,7 @@ from app.schemas.technician import (
     TechnicianOut,
     TechnicianUpdate,
 )
-from app.services import cities, search, storage, technician_regions
+from app.services import cities, search, storage, technician_regions, user_history
 from app.services.errors import NotFound, WorkflowError
 from app.services.spreadsheet import read_table
 from app.services.technician_regions import fold_text
@@ -350,9 +351,12 @@ async def reset_password(db: AsyncSession, user: User) -> str:
     return password
 
 
-async def set_photo(db: AsyncSession, user: User, upload: UploadFile) -> str | None:
-    """Foto nova (até 2 MB; JPG, PNG ou WebP pelo conteúdo). Devolve a chave da foto anterior, para
-    apagar do disco depois do commit (drop_unused_photo)."""
+async def set_photo(
+    db: AsyncSession, user: User, upload: UploadFile, *, via: str, actor: User | None
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Foto nova (até 2 MB; JPG, PNG ou WebP pelo conteúdo), com o histórico do cadastro. Devolve
+    as mudanças e a chave da foto anterior, para apagar do disco depois do commit
+    (drop_unused_photo)."""
     raw = await upload.read(MAX_PHOTO_BYTES + 1)
     if len(raw) > MAX_PHOTO_BYTES:
         raise WorkflowError("Foto maior que 2 MB")
@@ -361,17 +365,26 @@ async def set_photo(db: AsyncSession, user: User, upload: UploadFile) -> str | N
         raise WorkflowError("Envie uma imagem JPG, PNG ou WebP")
     previous = user.avatar_key
     user.avatar_key = await storage.save_bytes("avatars", ext, raw)
+    changes = [dict(user_history.PHOTO_ADDED)]
+    user_history.record(db, user, changes, via=via, actor=actor)
     await db.flush()
-    return previous
+    return changes, previous
 
 
-def remove_photo(user: User) -> str | None:
-    """Tira a foto: a enviada aqui e também a que veio do Field Control (direito do titular). No
-    lugar ficam as iniciais. Devolve a chave a apagar do disco depois do commit."""
+def remove_photo(
+    db: AsyncSession, user: User, *, via: str, actor: User | None
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Tira a foto: a enviada aqui e também a que veio do Field Control (direito do titular); no
+    lugar ficam as iniciais. Sem foto, nada muda (sem histórico). Devolve as mudanças e a chave a
+    apagar do disco depois do commit (drop_unused_photo)."""
+    if not has_photo(user):
+        return [], None
     previous = user.avatar_key
     user.avatar_key = None
     user.avatar_external_url = None
-    return previous
+    changes = [dict(user_history.PHOTO_REMOVED)]
+    user_history.record(db, user, changes, via=via, actor=actor)
+    return changes, previous
 
 
 async def drop_unused_photo(db: AsyncSession, key: str | None, user_id: uuid.UUID) -> None:

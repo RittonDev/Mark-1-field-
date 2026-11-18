@@ -289,6 +289,15 @@ FIELD_LABELS: dict[str, str] = {
     "valid_until": "Validade",
     "problem": "Defeito",
     "signature": "Assinatura",
+    # Meu cadastro do técnico (PATCH /me/profile) e a ficha em Técnicos.
+    "pix": "Chave PIX",
+    "key_type": "Tipo da chave PIX",
+    "holder_name": "Titular da conta",
+    "home_city": "Cidade",
+    "home_state": "UF",
+    "coverage_area": "Região que atende",
+    "address_district": "Bairro",
+    "address_zip": "CEP",
 }
 
 

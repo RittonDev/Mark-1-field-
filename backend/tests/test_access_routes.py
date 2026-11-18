@@ -74,6 +74,8 @@ GUARDED: dict[tuple[str, str], tuple[tuple[str, ...], str] | tuple[tuple[str, ..
     ("GET", "/tickets/{ticket_id}/offers"): (("commercial.payouts",), V),
     ("POST", "/tickets/{ticket_id}/offers"): (("commercial.payouts",), E),
     ("POST", "/tickets/{ticket_id}/offers/{offer_id}/cancel"): (("commercial.payouts",), E),
+    # Chave PIX do técnico: a central só remove (quem cadastra é ele, no app).
+    ("DELETE", "/technicians/{user_id}/pix"): (("commercial.payouts",), E),
     # Base
     ("GET", "/customers/{customer_id}"): (("base.customers",), V),
     ("POST", "/customers"): (("base.customers",), E),
@@ -89,6 +91,8 @@ GUARDED: dict[tuple[str, str], tuple[tuple[str, ...], str] | tuple[tuple[str, ..
     ("GET", "/technicians/regions"): (("base.technicians", "base.onboarding"), V),
     ("GET", "/technicians/nearby"): (("base.technicians", "base.locations"), V),
     ("GET", "/technicians/favorites"): (("base.technicians",), V),
+    ("GET", "/technicians/{user_id}"): (("base.technicians",), V),
+    ("GET", "/technicians/{user_id}/changes"): (("base.technicians",), V),
     ("POST", "/technicians/regions/refresh"): (("base.technicians",), E),
     ("POST", "/technicians"): (("base.technicians",), E),
     ("PATCH", "/technicians/{user_id}"): (("base.technicians",), E),
@@ -254,6 +258,11 @@ OTHER: dict[tuple[str, str], str] = {
     ("GET", "/me/offers/{offer_id}"): "TECHNICIAN",
     ("POST", "/me/offers/{offer_id}/accept"): "TECHNICIAN",
     ("POST", "/me/offers/{offer_id}/decline"): "TECHNICIAN",
+    # Meu cadastro (o próprio técnico)
+    ("GET", "/me/profile"): "TECHNICIAN",
+    ("PATCH", "/me/profile"): "TECHNICIAN",
+    ("POST", "/me/profile/photo"): "TECHNICIAN",
+    ("DELETE", "/me/profile/photo"): "TECHNICIAN",
     # Sem login (ou link assinado)
     ("POST", "/auth/login"): "PUB",
     ("POST", "/auth/refresh"): "PUB",

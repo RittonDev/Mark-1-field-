@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from app.api.deps import DB, CurrentUser, access_user
 from app.core.enums import PayoutStatus, UserRole
-from app.schemas.payout import MyEarnings, PayoutIds, PayoutIn, PayoutList, PayoutOut
+from app.schemas.payout import MyEarnings, PayoutBoard, PayoutIds, PayoutIn, PayoutOut
 from app.services import payouts as svc
 from app.services import tickets as tickets_svc
 from app.services.realtime import commit_and_publish
@@ -55,7 +55,7 @@ async def remove_payout(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.get("/payouts", response_model=PayoutList)
+@router.get("/payouts", response_model=PayoutBoard)
 async def list_payouts(
     db: DB,
     user: PayoutsView,
@@ -64,10 +64,13 @@ async def list_payouts(
     concluded: bool | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
-) -> PayoutList:
+    with_pix: bool = False,
+) -> PayoutBoard:
+    """`with_pix=true`: `pix` com a chave PIX dos técnicos das linhas e do `technician_id` (só os
+    que têm chave); sem ele, `pix` vem vazio (Relatórios não pede)."""
     if any(d is not None and not 2000 <= d.year <= 2100 for d in (date_from, date_to)):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, BAD_PERIOD)
-    return await svc.list_payouts(
+    listed = await svc.list_payouts(
         db,
         technician_id=technician_id,
         status=status_,
@@ -75,6 +78,17 @@ async def list_payouts(
         date_from=date_from,
         date_to=date_to,
         viewer=user,
+    )
+    ids: set[uuid.UUID] = set()
+    if with_pix:
+        ids = {line.technician.id for line in listed.items}
+        if technician_id is not None:
+            ids.add(technician_id)
+    return PayoutBoard(
+        items=listed.items,
+        summary=listed.summary,
+        total_count=listed.total_count,
+        pix=await svc.pix_map(db, ids),
     )
 
 
