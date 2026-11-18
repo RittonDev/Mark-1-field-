@@ -293,6 +293,38 @@ function TechniciansView() {
     }
   };
 
+  // ?tecnico={id} (o aviso "alterou a chave PIX pelo app", um link): abre o cadastro, da lista carregada ou
+  // buscado na API. Aberto, vira um cadastro como o do clique: sair da URL (ex.: "Favorito em" com alteração
+  // não salva) não fecha. Fechar tira o parâmetro.
+  const linkedId = canView ? searchParams.get("tecnico") : null;
+  const [adoptedId, setAdoptedId] = useState<string | null>(null);
+  const linkedInList = linkedId ? list.data?.find((t) => t.id === linkedId) : undefined;
+  const pendingLink = !!linkedId && adoptedId !== linkedId;
+  const linked = useQuery({
+    queryKey: ["technicians", "one", linkedId],
+    queryFn: ({ signal }) => api.get<Technician>(`/technicians/${linkedId}`, undefined, { signal }),
+    enabled: pendingLink && !linkedInList,
+    staleTime: 30_000,
+  });
+  const fromLink = pendingLink ? (linkedInList ?? linked.data ?? null) : null;
+  if (fromLink && linkedId) {
+    setAdoptedId(linkedId);
+    setEditing(fromLink);
+  } else if (!linkedId && adoptedId) {
+    // O parâmetro saiu: o mesmo link, de novo, abre de novo.
+    setAdoptedId(null);
+  }
+  const linkError = pendingLink && !linkedInList ? linked.error : null;
+  useEffect(() => {
+    if (!linkError) return;
+    toast({ title: "Não foi possível abrir o cadastro do link", description: errorMessage(linkError), tone: "error" });
+    replaceSearch({ tecnico: null });
+  }, [linkError, toast]);
+  const closeEditing = () => {
+    setEditing(null);
+    if (linkedId) replaceSearch({ tecnico: null });
+  };
+
   if (!canView) return <NoAccess kind="module" item="base.technicians" />;
 
   return (
@@ -682,7 +714,7 @@ function TechniciansView() {
         </div>
       )}
 
-      {editing ? <EditDialog key={editing.id} tech={editing} readOnly={!canEdit} onClose={() => setEditing(null)} /> : null}
+      {editing ? <EditDialog key={editing.id} tech={editing} readOnly={!canEdit} onClose={closeEditing} /> : null}
       {creating ? <CreateDialog onClose={() => setCreating(false)} /> : null}
       {importing ? <ImportDialog onClose={() => setImporting(false)} /> : null}
       {inviting ? <InviteDialog onClose={() => setInviting(false)} /> : null}
@@ -812,12 +844,7 @@ function TechnicianFields({
         </Field>
       </div>
       <Field label="Região que atende" className="sm:col-span-2">
-        <Input
-          value={value.coverage_area}
-          onChange={(e) => set("coverage_area", e.target.value)}
-          placeholder="Ex.: Santos, São Vicente e Guarujá"
-          maxLength={1000}
-        />
+        <Input value={value.coverage_area} onChange={(e) => set("coverage_area", e.target.value)} maxLength={1000} />
       </Field>
     </div>
   );
@@ -968,7 +995,7 @@ function EditDialog({ tech, readOnly = false, onClose }: { tech: Technician; rea
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const confirm = useConfirm();
-  // O resumo de pagamentos é de Pagamentos, e a ficha da homologação, da Homologação.
+  // A chave PIX e o resumo de pagamentos são de Pagamentos, e a ficha da homologação, da Homologação.
   const canPayouts = useCan("commercial.payouts");
   const canOnboarding = useCan("base.onboarding");
   const catalog = useOnboardingCatalog();
@@ -984,13 +1011,6 @@ function EditDialog({ tech, readOnly = false, onClose }: { tech: Technician; rea
   const [confirmReset, setConfirmReset] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const serviceTypes = useServiceTypes({ active: true });
-  // Parceiro recebe por chamado: o que ele tem a receber, sem sair do cadastro.
-  const payouts = useQuery({
-    queryKey: ["payouts", "technician", tech.id],
-    queryFn: () => api.get<PayoutList>("/payouts", { technician_id: tech.id }),
-    staleTime: 60_000,
-    enabled: canPayouts,
-  });
   // Cidades em que ele é favorito (pela regra ou fixado pela central).
   const favorites = useFavorites({ technicianId: tech.id });
   const favoriteIn = (favorites.data?.cities ?? []).flatMap((c) => {
@@ -1027,11 +1047,8 @@ function EditDialog({ tech, readOnly = false, onClose }: { tech: Technician; rea
     },
     onSuccess: (t, file) => {
       refresh(t);
-      if (!file && t.avatar_url) {
-        toast({ title: "Esta foto veio do Field Control e ainda não pode ser removida aqui.", tone: "error" });
-      } else {
-        toast({ title: file ? "Foto atualizada" : "Foto removida", tone: "success" });
-      }
+      // Remover tira também a foto que veio do Field Control.
+      toast({ title: file ? "Foto atualizada" : "Foto removida", tone: "success" });
     },
     onError: (e) => toast({ title: errorMessage(e), tone: "error" }),
   });
