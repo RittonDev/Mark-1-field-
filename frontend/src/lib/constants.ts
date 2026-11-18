@@ -5,6 +5,8 @@
 import type {
   AssetType,
   Level,
+  OfferCancelReason,
+  OfferState,
   Responsibility,
   SlaStatus,
   TicketEventType,
@@ -182,6 +184,10 @@ export const EVENT_TYPE: Record<TicketEventType, string> = {
   times_corrected: "corrigiu os horários",
   payout_set: "definiu o valor do técnico",
   payout_removed: "tirou o valor do técnico",
+  offer_sent: "ofertou a OS",
+  offer_accepted: "aceitou a oferta",
+  offer_declined: "recusou a oferta",
+  offer_cancelled: "cancelou a oferta",
 };
 
 export const SLA_STATUS: Record<SlaStatus, { label: string; color: string }> = {
@@ -223,4 +229,22 @@ export const VIOLATION_SCOPE: Record<ViolationScope, string> = {
 export const PAYOUT_STATUS: Record<"pending" | "paid", { label: string; color: string }> = {
   pending: { label: "A pagar", color: "#DC6803" },
   paid: { label: "Pago", color: "#0E9384" },
+};
+
+/** Estado da oferta de OS ("expired": pendente com o prazo para responder vencido, calculado pelo servidor). */
+export const OFFER_STATE: Record<OfferState, { label: string; color: string }> = {
+  pending: { label: "Aguardando resposta", color: "#DC6803" },
+  expired: { label: "Prazo encerrado", color: "#667085" },
+  accepted: { label: "Aceita", color: "#0E9384" },
+  declined: { label: "Recusada", color: "#D92D20" },
+  cancelled: { label: "Cancelada", color: "#667085" },
+};
+
+/** Por que a oferta foi cancelada (a central e o app mostram assim). */
+export const OFFER_CANCEL_REASON: Record<OfferCancelReason, string> = {
+  central: "Cancelada pela central",
+  taken: "Outro técnico aceitou",
+  assigned: "A central definiu o técnico",
+  ticket_closed: "OS encerrada",
+  replaced: "Trocada por uma oferta nova",
 };

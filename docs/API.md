@@ -14,7 +14,7 @@ Autenticação: `Authorization: Bearer <access_token>`. Erros seguem `{"detail":
 | Administrador | `admin` | tudo | tudo, inclusive usuários e SLA |
 | Supervisor | `supervisor` | tudo | o mesmo do analista + grupos e categorias |
 | Analista | `analyst` | **todas as OS** (interface web) | gestão completa das OS: abrir, editar, atribuir a qualquer técnico ou analista, mudar qualquer status, comentar, apontar horas; cadastrar clientes, locais e ativos |
-| Técnico de campo (terceiro) | `technician` | **só as OS atribuídas a ele** (app mobile), e delas **só o básico**: cliente, local (nome e endereço da loja), agenda e escopo; grupo ou fila não bastam | sair, iniciar e concluir a visita, formulários, fotos, assinatura e pedir peça **nas OS dele**. Nunca mexe no horário (agenda, pausa e horas são da central; o tempo dele corre do início à conclusão). Não assume nem se atribui OS: quem coloca o técnico na OS é a gestão. Sem acompanhamentos (a central fala com ele pelo WhatsApp) |
+| Técnico de campo (terceiro) | `technician` | **só as OS atribuídas a ele** (app mobile), e delas **só o básico**: cliente, local (nome e endereço da loja), agenda e escopo; grupo ou fila não bastam | sair, iniciar e concluir a visita, formulários, fotos, assinatura e pedir peça **nas OS dele**. Nunca mexe no horário (agenda, pausa e horas são da central; o tempo dele corre do início à conclusão). Não assume nem se atribui OS: quem coloca o técnico na OS é a gestão, ou ele aceita pelo valor uma oferta que a central mandou para ele ([Ofertas de OS](#ofertas-de-os-2026-11-18)). Sem acompanhamentos (a central fala com ele pelo WhatsApp) |
 | Cliente (portal) | `requester` | **pelo portal**, as solicitações de todas as lojas da empresa dele (`users.customer_id`), com lista fechada de campos | abrir solicitação e acompanhar a visita; cancelar enquanto a central não começou (nova ou em triagem). Não usa as rotas internas: `/tickets`, cadastros, painel e grupos respondem 403 (ou 404 por id) |
 
 Supervisor e analista: as telas que cada um vê e edita e as filas que vê dependem do **perfil de acesso** (os
@@ -161,7 +161,9 @@ migrada em que o Field Control deu o prazo como cumprido; o relógio de soluçã
 `work_started_at`: a entrada na loja da visita em curso, só em `in_progress`, null fora dela; o tempo na loja das
 listas conta daí, e não da 1ª chegada, `arrived_at`)
 
-`TicketDetail = TicketListItem + {description, impact, urgency, asset:{id,name,asset_type,brand,model,serial_number,asset_tag,ip_address}|null, requester:UserRef|null, requester_contact, service_address, service_type:{id,name,estimated_minutes}|null, estimated_minutes, work_seconds, work_started_at, actual_minutes, created_by:UserRef|null, closed_at, cancelled_at, reopen_count, resolution_notes, allowed_transitions:[status], can_edit, can_assign}`
+`TicketDetail = TicketListItem + {description, impact, urgency, asset:{id,name,asset_type,brand,model,serial_number,asset_tag,ip_address}|null, requester:UserRef|null, requester_contact, service_address, service_type:{id,name,estimated_minutes}|null, estimated_minutes, work_seconds, work_started_at, actual_minutes, created_by:UserRef|null, closed_at, cancelled_at, reopen_count, resolution_notes, open_offers, allowed_transitions:[status], can_edit, can_assign}`
+(`open_offers`: ofertas da OS esperando o técnico responder, pendentes e no prazo; toda a gestão recebe o número,
+e o técnico recebe 0. Ver [Ofertas de OS](#ofertas-de-os-2026-11-18).)
 
 `CommentOut = {id, ticket_id, author:UserRef|null, body, is_internal, created_at}`
 `EventOut = {id, ticket_id, actor:UserRef|null, event_type, from_value, to_value, note, data, created_at}` — `event_type` ∈ `created, updated, status_changed, assigned, comment_added, worklog_added, attachment_added`
@@ -287,9 +289,10 @@ Servidor envia ao conectar `{"type":"hello","user_id":"..."}` e depois um evento
 ```
 
 Tipos: `ticket.created`, `ticket.updated`, `ticket.assigned`, `ticket.status_changed`,
-`ticket.comment_added`, `ticket.worklog_added`, `ticket.attachment_added`.
+`ticket.comment_added`, `ticket.worklog_added`, `ticket.attachment_added`, `ticket.offer` (oferta de OS, só para os
+técnicos dela: ver [Ofertas de OS](#ofertas-de-os-2026-11-18)).
 Cada usuário só recebe eventos de OS que pode ver (o técnico, só das OS atribuídas a ele, inclusive a que
-acabou de sair dele); notas internas não chegam ao solicitante.
+acabou de sair dele, e o `ticket.offer` das ofertas dele); notas internas não chegam ao solicitante.
 
 Só para a gestão (analistas, supervisores, admin): `technician.location` `{user_id, name, latitude, longitude, recorded_at,
 accuracy_m, speed_mps, heading, battery_pct, is_mock}` (o ponto mais novo do lote, inteiro: o que não veio do app vai null),
@@ -941,6 +944,134 @@ ou, sem ela, o envio. Orçamento de OS cancelada nunca entra. Motivos, nesta ord
 - Cancelar um orçamento devolve os pedidos de peça ligados a ele (abertos ou orçados) para `open`, sem `quote_id`,
   com o evento `part_request_updated`.
 
+## Ofertas de OS (2026-11-18)
+
+**Por quê.** A central manda o chamado com o preço para os técnicos parceiros aceitarem, sem a opção de
+contraproposta. Quem aceita primeiro fica com a OS, como no "quem pega?" do grupo de WhatsApp, mas com o valor
+combinado de antemão. Código: `services/offers.py` (regras), `api/routes/offers.py`, `models/offer.py` e os
+ganchos na OS em `services/tickets.py` (`close_pending_offers`).
+
+**Regras.**
+- A central (gestão com Pagamentos em Editar, que pode atribuir técnico) oferta uma OS **sem técnico** e **em
+  aberto** (não resolvida, fechada nem cancelada) para 1 a 10 técnicos de campo ativos que ainda não estão na OS,
+  com o valor do técnico (R$, ≥ 0, 2 casas), o prazo para responder (opcional, no futuro) e um recado (até 500).
+- O técnico responde "Aceitar por R$ X" ou "Recusar" (motivo opcional, até 300). Não há contraproposta nem chat (a
+  conversa é pelo WhatsApp).
+- Para aceitar, ele precisa ter aberto a oferta: `GET /me/offers/{id}` grava `viewed_at` (sem ele, 422
+  `OFFER_NOT_VIEWED`). O "Escopo lido" é do app.
+- **Quem aceita primeiro leva.** O aceite trava a OS (`SELECT ... FOR UPDATE`), confere que a oferta está pendente e
+  no prazo e que a OS continua em aberto e sem técnico, e faz a atribuição normal (`tickets._assign`, a mesma do
+  `POST /tickets/{id}/assign`, com o técnico como autor e `data.via = "offer"` no evento `assigned`). Depois dela, o
+  valor da oferta vira o valor do técnico na OS (`payouts.set_payout`, nota "Valor da oferta aceita", autor = quem
+  mandou a oferta ou, sem ele, o técnico): vence o padrão do tipo de serviço ou o valor transferido. Se o técnico já
+  tem nesta OS um valor **pago** (foi o técnico dela antes), o valor não muda (a central acerta). As outras ofertas
+  pendentes da OS fecham como canceladas (`taken`, "outro técnico aceitou"); o segundo aceite recebe 409
+  `OFFER_TAKEN`.
+- **Status depois do aceite** = o da central colocando o técnico pela tela (o editor manda o técnico pelo
+  `POST /assign`; o PATCH e o `PUT /times` não mudam o status): `new`/`triage`/`reopened` → `assigned`; a agenda que a
+  OS já tinha fica, e ela **não** vira `scheduled` sozinha (o "Agendado" continua sendo a transição da central, como
+  na tela); em espera (`on_hold_*`) continua em espera. Conta como 1ª resposta (o técnico é da equipe), como a
+  atribuição pela central. O aceite não confere conflito de agenda (as ações do técnico não conferem; a central vê
+  no calendário).
+- Definir o técnico na mão (`/assign`, `PATCH assignee_id`, `/take`, o "Atribuído" do menu) fecha as pendentes como
+  `assigned`; cancelar, resolver ou fechar a OS (`/transition` e o cancelamento pelo portal) fecha como
+  `ticket_closed`. Cada fechamento grava um `offer_cancelled` e avisa a gestão e os técnicos afetados.
+- Reenviar para quem já tem oferta pendente (ou vencida) da mesma OS **substitui** a anterior: a antiga vira
+  cancelada com `cancel_reason: "replaced"`, sem evento próprio (o `offer_sent` traz `data.replaced`).
+- Prazo vencido não tem rotina: a oferta continua gravada como pendente e o estado efetivo é `expired` quando
+  `expires_at <= agora` (relógio do servidor). A vencida não conta em `open_offers` e não é fechada pelos ganchos
+  (continua `expired`); a central ainda pode cancelá-la.
+- O preço é dado de Pagamentos: ver as ofertas com os valores pede Pagamentos (Visualizar); mandar e cancelar pedem
+  Editar. Quem não tem a tela vê só `TicketDetail.open_offers` (contador sem valores) e não recebe os `offer_*` do
+  histórico.
+
+**Estados** (`state`): `pending` | `expired` | `accepted` | `declined` | `cancelled`. Gravados (`OfferStatus`):
+`pending`, `accepted`, `declined`, `cancelled`. `cancel_reason`: `central` (a central cancelou) | `taken` (outro
+técnico aceitou) | `assigned` (a central definiu o técnico) | `ticket_closed` (OS cancelada, resolvida ou fechada) |
+`replaced` (trocada por uma oferta nova da mesma OS).
+
+**Central** (gestão, sempre dentro da fila de quem pede: OS de outra fila → 403 `QUEUE_FORBIDDEN`):
+- `GET /tickets/{id}/offers` (Pagamentos em Visualizar) → `TicketOfferOut[]`, todas as ofertas da OS (também as
+  fechadas e as substituídas), a mais nova primeiro (as de um mesmo envio, pelo nome do técnico).
+- `POST /tickets/{id}/offers` (Pagamentos em Editar) `{technician_ids: uuid[1..10], amount, expires_at?, note?}` →
+  **201** `TicketOfferOut[]` (as criadas, na ordem dos ids, sem repetir). `amount` aceita número ou texto
+  (`"90.00"`); `expires_at` sem fuso vale como hora de Brasília. 422: "A OS já tem técnico: só dá para ofertar uma OS
+  sem técnico", "Só dá para ofertar uma OS em aberto (não resolvida, fechada nem cancelada)", "O prazo para responder
+  precisa ser no futuro", "Técnico não encontrado", "<nome> não é técnico de campo", "<nome> está sem acesso ao app:
+  libere o acesso em Técnicos antes de ofertar", "<nome> já está na OS"; validação com `label` "Técnicos", "Valor",
+  "Prazo para responder" e "Recado". 409 "Este técnico já tem uma oferta em aberto nesta OS" (dois envios ao mesmo
+  tempo; o índice único parcial segura).
+- `POST /tickets/{id}/offers/{offer_id}/cancel` (Pagamentos em Editar, sem corpo) → `TicketOfferOut` (pendente ou
+  vencida → `cancelled`/`central`; já cancelada: devolve como está). Já respondida pelo técnico: 422 "O técnico já
+  respondeu esta oferta. Recarregue a OS."; oferta de outra OS: 404 "Oferta não encontrada".
+
+`TicketOfferOut = {id, ticket_id, technician: {id, name}, amount: number, state, expires_at|null, note|null,
+decline_reason|null, cancel_reason|null, viewed_at|null, responded_at|null, created_by: {id, name}|null, created_at}`
+(`amount` sai como número, como os outros valores da API: `90.0`).
+
+**Técnico** (só papel `technician`; os outros: 403 "Sem permissão para esta ação"):
+- `GET /me/offers` → `FieldOfferOut[]`: as pendentes no prazo e as que fecharam nas últimas 24 h (aceitas,
+  recusadas, canceladas pelo `updated_at`; vencidas pelo `expires_at`), a mais nova primeiro, até 50. A substituída
+  (`replaced`) não aparece (a nova aparece). Nas que não estão pendentes, o recorte da OS vem mínimo: sem escopo
+  (`description: null`), sem formulários (`forms: []`) e sem bairro (`district: null`).
+- `GET /me/offers/{id}` → `FieldOfferOut`; grava `viewed_at` na primeira vez (só a pendente no prazo) e a gestão
+  recebe o `ticket.updated` com `offer.action: "viewed"`. Oferta de outro técnico: 404.
+- `POST /me/offers/{id}/accept` (sem corpo) → `TicketDetail` da OS na visão do técnico (como o `GET /tickets/{id}`
+  devolve a ele), já atribuída: agora vêm cliente, loja e endereço, e `my_payout` com o valor da oferta. Aceite
+  repetido da oferta que já é dele (toque duplo, outro aparelho): 200 com a OS, sem mudar nada.
+- `POST /me/offers/{id}/decline` `{reason?: até 300}` (corpo opcional) → `FieldOfferOut` (`declined`). Recusa repetida:
+  200 como está. Recusar não exige abrir a oferta.
+
+`FieldOfferOut = {id, state, amount: number, expires_at|null, note|null, cancel_reason|null, viewed_at|null,
+responded_at|null, created_at, ticket: {id, code, title, description|null, service_type: {id, name}|null,
+forms: [{name, required}], district|null, city|null, state|null, scheduled_start|null, scheduled_end|null}}`.
+Sem cliente, loja (nome, código, CNPJ), endereço, contato, recado da visita (`visit_note`), SLA, analista, etiquetas,
+projeto nem valores de outros técnicos (a regra do convite: "só serviço, bairro e cidade, data e valor"). Sem agenda,
+`scheduled_start` vem null ("data a combinar"); bairro, cidade e UF são os da loja (OS sem loja: null).
+`cancel_reason` (acréscimo ao contrato inicial) diz ao app por que fechou ("outro técnico aceitou" = `taken`).
+
+**Erros do aceite e da recusa** (`{"detail": "...", "code": "..."}`):
+
+| HTTP | code | detail | Quando |
+|---|---|---|---|
+| 409 | `OFFER_TAKEN` | Outro técnico já aceitou esta OS. | cancelada como `taken` |
+| 409 | `OFFER_EXPIRED` | O prazo para responder esta oferta acabou. | pendente com `expires_at` vencido |
+| 409 | `OFFER_CANCELLED` | A central cancelou esta oferta. | cancelada como `central` ou `replaced` (o app busca as ofertas de novo e acha a nova) |
+| 409 | `OFFER_UNAVAILABLE` | Esta OS não está mais disponível. | cancelada como `assigned`/`ticket_closed`; a OS já tem técnico ou foi encerrada; aceite de uma oferta aceita cuja OS não é mais dele |
+| 409 | `OFFER_ANSWERED` | Você já respondeu esta oferta. | aceitar a recusada ou recusar a aceita (acréscimo ao contrato inicial) |
+| 422 | `OFFER_NOT_VIEWED` | Abra a oferta e leia o escopo antes de aceitar. | aceite sem `viewed_at` |
+
+A ordem das conferências: o estado da oferta (aceita, recusada, cancelada), o prazo, a OS (em aberto e sem
+técnico) e, só no aceite, a leitura.
+
+**Histórico** (eventos novos, só para quem tem Pagamentos: levam o valor; `HISTORY_ITEMS`):
+- `offer_sent` (autor: quem mandou): `to_value` "90.00", `note` = recado, `data {amount: "R$ 90,00", expires_at,
+  offers: [{id, technician_id, technician}], replaced?: [nomes]}`.
+- `offer_accepted` (autor: o técnico): `to_value` "90.00", `data {offer_id, technician_id, technician, amount}`.
+- `offer_declined` (autor: o técnico): `to_value` "90.00", `note` = motivo, `data {offer_id, technician_id,
+  technician, amount}`.
+- `offer_cancelled` (autor: quem cancelou, definiu o técnico ou encerrou a OS; null no `taken`): `to_value` = motivo,
+  `note` ("Cancelada pela central", "Outro técnico aceitou a OS", "A central definiu o técnico da OS", "OS cancelada",
+  "OS resolvida", "OS fechada"), `data {reason, offers: [{id, technician_id, technician, amount}]}`.
+- O aceite também grava o `assigned` normal (autor: o técnico, `note` "Aceitou a oferta", `data.via = "offer"`), o
+  `status_changed` da atribuição e os `payout_set` (o padrão do tipo de serviço, quando houver, e o valor da oferta).
+
+**Tempo real.**
+- Gestão: `ticket.updated` com `data {fields: ["offers"], offer: {action, technician_name|null, reason|null}}`,
+  interno e só da gestão, **sem valor**. `action`: `sent` | `viewed` | `accepted` | `declined` | `cancelled`
+  (`viewed` é acréscimo ao contrato inicial). `technician_name` quando é um técnico só; `reason` = o
+  `cancel_reason` no `cancelled` e o motivo do técnico no `declined`. Vai a toda a gestão que vê a OS (com ou sem
+  Pagamentos: não leva valor).
+- Técnicos da oferta: `ticket.offer` com `audience.user_ids` = os técnicos afetados (só eles recebem), em `sent`,
+  `accepted`, `declined` e `cancelled` (inclusive `taken`, `assigned` e `ticket_closed`). No app o evento chega como
+  `{type: "ticket.offer", ticket_id, ticket_code, status: null, assignee_id: null, actor_id: null, version: null,
+  occurred_at, data: {action}}`: sem versão (a oferta não muda a OS, e o app não descarta o aviso pela versão que já
+  tem). O app repassa os `ticket.*`: ao receber, sincroniza e busca `GET /me/offers`.
+- O aceite gera também o `ticket.assigned` normal (o técnico que aceitou recebe, como numa atribuição) e o
+  `ticket.status_changed`.
+- Push (o provedor ainda só registra no log): `ticket.offer` com `action: "sent"` avisa os técnicos da oferta ("OS
+  para aceitar: OS-000123" · "Veja o valor e o escopo no app e responda").
+
 ## Acesso: perfis por tela e visibilidade de filas
 
 O papel (`users.role`) continua decidindo o canal (web ou app), a hierarquia de cadastro (quem cria e altera
@@ -1085,8 +1216,9 @@ Pagamentos, `payouts: []`; sem Orçamentos, `legacy.values` e o `value`/`total` 
 grupos `costs_pending`, `payouts_pending`, `quotes_waiting` e a sugestão `slow_service_type` só com a tela deles.
 Os mesmos valores fora dessas telas:
 - `GET /tickets/{id}/events` (Histórico): sem a tela, saem inteiros os eventos com o valor dela
-  (`payout_set`/`payout_removed`; `expense_added`/`expense_updated`/`expense_removed`;
-  `quote_sent`/`quote_approved`/`quote_rejected`/`quote_reminded`).
+  (`payout_set`/`payout_removed` e `offer_sent`/`offer_accepted`/`offer_declined`/`offer_cancelled`;
+  `expense_added`/`expense_updated`/`expense_removed`; `quote_sent`/`quote_approved`/`quote_rejected`/`quote_reminded`).
+- Ofertas de OS: sem Pagamentos, só o contador `open_offers` do detalhe (a lista `GET /tickets/{id}/offers` é 403).
 - `GET /projects` e `/projects/{id}`: sem Projetos, `contract_value`, `pricing_notes` e `margin` vêm `null` e
   os totais em dinheiro, 0 (a lista continua aberta para o seletor da Nova OS). Cada total de `stats`
   (`expenses_total`, `payouts_total`, `quotes_approved_total`) também pede a tela dele (sem ela, 0), e
@@ -1123,7 +1255,7 @@ V = Visualizar, E = Editar; "a \| b" = basta uma das telas.
 | `commercial.projects` | V: `GET /projects/{id}`. E: `POST /projects`, `PUT /projects/{id}` |
 | `commercial.expenses` | V: `GET /tickets/{id}/expenses` (só a gestão; o técnico como antes). E: `POST /tickets/{id}/expenses`, `PATCH`/`DELETE /expenses/{id}`, `POST /expenses/mark-paid` |
 | `commercial.expenses` \| `commercial.payouts` | V: `GET /expenses` |
-| `commercial.payouts` | V: `GET /payouts`. E: `PUT`/`DELETE /tickets/{id}/payouts/{tech}`, `POST /payouts/pay`, `/payouts/unpay` |
+| `commercial.payouts` | V: `GET /payouts`, `GET /tickets/{id}/offers`. E: `PUT`/`DELETE /tickets/{id}/payouts/{tech}`, `POST /payouts/pay`, `/payouts/unpay`, `POST /tickets/{id}/offers`, `POST /tickets/{id}/offers/{offer_id}/cancel` |
 | `base.customers` | V: `GET /customers/{id}`, `GET /assets`, `/assets/{id}`. E: `POST /customers`, `PATCH /customers/{id}`, `POST`/`PATCH /assets` |
 | `base.locations` | E: `POST /customers/{id}/locations`, `PATCH /locations/{id}`, `POST /locations/import` |
 | `base.technicians` | V: `GET /technicians`, `/technicians/favorites`. E: `POST /technicians`, `PATCH /technicians/{id}`, `POST /technicians/{id}/reset-password`, `POST`/`DELETE /technicians/{id}/photo`, `POST /technicians/import`, `POST /technicians/regions/refresh`, `PUT`/`DELETE /technicians/favorites/{id}` |

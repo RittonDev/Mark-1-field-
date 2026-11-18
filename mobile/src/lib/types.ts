@@ -63,7 +63,12 @@ export type TicketEventType =
   | "quote_reminded"
   | "times_corrected"
   | "payout_set"
-  | "payout_removed";
+  | "payout_removed"
+  // Oferta de OS com preço (levam o valor: só com Pagamentos).
+  | "offer_sent"
+  | "offer_accepted"
+  | "offer_declined"
+  | "offer_cancelled";
 export type SlaStatus = "ok" | "at_risk" | "breached" | "paused" | "met";
 export type AttachmentKind = "file" | "photo" | "signature";
 
@@ -507,6 +512,11 @@ export interface TicketDetail extends TicketListItem {
   payouts?: Payout[];
   /** O valor do próprio técnico (só no app dele). */
   my_payout?: MyPayout | null;
+  /**
+   * Ofertas da OS esperando o técnico responder (pendentes no prazo). Toda a gestão recebe o número; a lista com
+   * os valores (GET /tickets/{id}/offers) é de Pagamentos. O técnico recebe 0; servidor antigo não manda.
+   */
+  open_offers?: number;
   recurrence?: { count_30d: number; previous: { id: UUID; code: string; title: string; status: TicketStatus; created_at: ISODate }[] } | null;
   /** Dados de origem da OS migrada do Field Control (valores, itens, solicitação, arquivos). */
   legacy?: LegacyOrder | null;
@@ -1854,6 +1864,115 @@ export interface PayoutList {
 export interface MyEarnings extends PayoutList {
   reimbursement_to_receive: number;
   reimbursement_paid: number;
+}
+
+// --------------------------------------------------------------------------- ofertas de OS
+
+/**
+ * Estado da oferta de OS. "expired" não é gravado: é a pendente com o prazo para responder vencido (o servidor
+ * calcula). Sem contraproposta: o técnico aceita pelo valor ou recusa.
+ */
+export type OfferState = "pending" | "expired" | "accepted" | "declined" | "cancelled";
+
+/**
+ * Por que a oferta foi cancelada: a central cancelou, outro técnico aceitou, a central definiu o técnico na mão,
+ * a OS foi cancelada/resolvida/fechada, ou trocada por uma oferta nova da mesma OS.
+ */
+export type OfferCancelReason = "central" | "taken" | "assigned" | "ticket_closed" | "replaced";
+
+/** A oferta para a central (GET /tickets/{id}/offers): leva o valor, só com Pagamentos. */
+export interface TicketOffer {
+  id: UUID;
+  ticket_id: UUID;
+  technician: Ref;
+  /** Valor do técnico se aceitar (número, como os outros valores da API). */
+  amount: number;
+  state: OfferState;
+  /** Prazo para responder (null: até alguém aceitar ou a central cancelar). */
+  expires_at: ISODate | null;
+  /** Recado da central para o técnico. */
+  note: string | null;
+  decline_reason: string | null;
+  cancel_reason: OfferCancelReason | null;
+  /** O técnico abriu a oferta (só então ele pode aceitar). */
+  viewed_at: ISODate | null;
+  /** Aceite ou recusa do técnico. */
+  responded_at: ISODate | null;
+  created_by: Ref | null;
+  created_at: ISODate;
+}
+
+/** POST /tickets/{id}/offers: a OS (sem técnico, em aberto) para 1 a 10 técnicos ativos. */
+export interface OfferCreate {
+  technician_ids: UUID[];
+  /** R$, ≥ 0, 2 casas (número ou texto "90.00"). */
+  amount: number | string;
+  /** No futuro; sem fuso, vale a hora de Brasília. */
+  expires_at?: ISODate | null;
+  /** Até 500 caracteres. */
+  note?: string | null;
+}
+
+/** POST /me/offers/{id}/decline (corpo opcional). */
+export interface OfferDecline {
+  /** Até 300 caracteres. */
+  reason?: string | null;
+}
+
+/**
+ * O recorte da OS na oferta (o técnico ainda não está nela): serviço, escopo, formulários, bairro e cidade, data e
+ * valor. Nunca cliente, loja, endereço ou contato. Na oferta que já fechou: sem escopo, formulários e bairro.
+ */
+export interface FieldOfferTicket {
+  id: UUID;
+  code: string;
+  title: string;
+  /** Escopo (o que deve ser feito). */
+  description: string | null;
+  service_type: Ref | null;
+  forms: { name: string; required: boolean }[];
+  district: string | null;
+  city: string | null;
+  state: string | null;
+  /** Janela da visita; sem agenda, null ("data a combinar"). */
+  scheduled_start: ISODate | null;
+  scheduled_end: ISODate | null;
+}
+
+/** A oferta no app do técnico (GET /me/offers e /me/offers/{id}). */
+export interface FieldOffer {
+  id: UUID;
+  state: OfferState;
+  amount: number;
+  expires_at: ISODate | null;
+  note: string | null;
+  /** Na cancelada, por quê ("taken": outro técnico aceitou). */
+  cancel_reason: OfferCancelReason | null;
+  viewed_at: ISODate | null;
+  responded_at: ISODate | null;
+  created_at: ISODate;
+  ticket: FieldOfferTicket;
+}
+
+/** `code` do 409/422 do aceite e da recusa ({detail, code}). */
+export type OfferErrorCode =
+  | "OFFER_TAKEN"
+  | "OFFER_EXPIRED"
+  | "OFFER_CANCELLED"
+  | "OFFER_UNAVAILABLE"
+  | "OFFER_ANSWERED"
+  | "OFFER_NOT_VIEWED";
+
+/** O que aconteceu com a oferta, no tempo real (ticket.updated da gestão e ticket.offer do técnico). */
+export type OfferAction = "sent" | "viewed" | "accepted" | "declined" | "cancelled";
+
+/**
+ * `data` do ticket.updated da gestão com `fields: ["offers"]` (sem valor). `reason`: o `cancel_reason` no
+ * "cancelled"; o motivo do técnico no "declined".
+ */
+export interface OfferRealtimeData {
+  fields: ["offers"];
+  offer: { action: OfferAction; technician_name: string | null; reason: string | null };
 }
 
 // --------------------------------------------------------------------------- portal do cliente

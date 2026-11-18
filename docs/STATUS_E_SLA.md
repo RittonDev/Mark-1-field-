@@ -48,6 +48,11 @@ uma OS fechada ou cancelada (`closed`/`cancelled → reopened`). A tabela abaixo
 - Comentário do solicitante numa OS `on_hold_customer` volta para `assigned` (como no ServiceNow).
 - OS `resolved` há mais de `AUTO_CLOSE_RESOLVED_DAYS` (padrão 3) fecha sozinha (aceite tácito).
 - Ao atribuir, se a OS não tem grupo, herda o grupo do analista. A categoria pode definir o grupo padrão.
+- Oferta de OS (`services/offers.py`): o técnico que aceita a oferta entra pela mesma atribuição da central
+  (`POST /tickets/{id}/assign`), então as regras acima valem iguais: `new`/`triage`/`reopened` → `assigned`, a agenda
+  que a OS já tinha fica (não vira `scheduled` sozinha, como na tela) e em espera continua em espera. O aceite conta
+  como 1ª resposta (o técnico é da equipe). Definir o técnico na mão e cancelar, resolver ou fechar a OS fecham as
+  ofertas pendentes; o status e o SLA não mudam por causa delas.
 - Reabrir limpa `resolved_at`, `closed_at`, `cancelled_at` e `resolution_sla_met_at` (o prazo de solução
   encerrado pelo Field Control era do atendimento que terminou) e soma 1 em `reopen_count`. Limpa também a
   assinatura do responsável (`signed_at`, `signer_name`, `signer_role`, `signature_attachment_id`): com a
