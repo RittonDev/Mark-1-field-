@@ -590,21 +590,18 @@ export function OfferDialog({
 
   const service = ticket.service_type?.name ?? ticket.title;
   const placeText = [place.district, [place.city, place.state].filter(Boolean).join(" - ")].filter(Boolean).join(", ");
-  const deadlineHint =
-    deadline === "none"
-      ? "Vale até alguém aceitar ou você cancelar."
-      : previewAt
-        ? `Vence ${atText(previewAt, now)}.`
-        : undefined;
+  const deadlineHint = deadline !== "none" && previewAt ? `Vence ${atText(previewAt, now)}.` : undefined;
   // A OS mudou com o diálogo aberto: não dá mais para ofertar (o que foi preenchido fica à vista).
   const blocked = ticket.assignee
     ? `A OS já tem técnico: ${ticket.assignee.name}.`
     : isOpenStatus(ticket.status)
       ? null
       : "A OS não está mais em aberto.";
-  // O título vai sem a loja e o cliente; o escopo vai como foi escrito.
+  // O título vai sem a loja e o cliente; o escopo e o recado vão como foram escritos.
+  const hidden = hiddenNames(ticket);
   const scope = ticket.description?.trim() ?? "";
-  const scopeCites = Boolean(scope) && hiddenNames(ticket).some((name) => cites(scope, name));
+  const scopeCites = Boolean(scope) && hidden.some((name) => cites(scope, name));
+  const noteCites = note.trim() !== "" && hidden.some((name) => cites(note, name));
   const dirty = picked.length > 0 || amountText !== null || note.trim() !== "" || deadline !== "none";
 
   const submit = (e: React.FormEvent<HTMLFormElement>) => {
@@ -638,10 +635,6 @@ export function OfferDialog({
         <>
           <span className="font-semibold text-ink">{ticket.code}</span> · {service} · {placeText || "sem localização"} ·{" "}
           {ticket.scheduled_start ? formatDateTime(ticket.scheduled_start) : "data a combinar"}
-          <span className="mt-1 block text-xs">
-            No app, o técnico vê o título (sem loja e cliente), o serviço, o escopo, os formulários, o bairro e a cidade, a data e o valor.
-            Cliente, loja e endereço, só depois de aceitar.
-          </span>
         </>
       }
       footer={
@@ -763,7 +756,7 @@ export function OfferDialog({
             label="Valor para o técnico"
             required
             error={shown("amount")}
-            hint={fee != null ? `Padrão do tipo de serviço: ${formatMoney(fee)}` : "Quanto o técnico recebe pela OS se aceitar."}
+            hint={fee != null ? `Padrão do tipo de serviço: ${formatMoney(fee)}` : undefined}
           >
             <Input
               inputMode="decimal"
@@ -791,21 +784,13 @@ export function OfferDialog({
         </div>
 
         <div className="flex flex-col gap-1">
-          <Field
-            label="Recado para o técnico (opcional)"
-            hint="Aparece na oferta, no app. Sem cliente, loja nem endereço: o técnico só vê isso depois de aceitar."
-          >
-            <Textarea
-              rows={2}
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              maxLength={NOTE_MAX}
-              placeholder="Ex.: levar escada e furadeira; atendimento a partir das 8h."
-            />
+          <Field label="Recado para o técnico (opcional)">
+            <Textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} maxLength={NOTE_MAX} />
           </Field>
           <span className="self-end text-[11px] text-ink-subtle tabular-nums">
             {note.length.toLocaleString("pt-BR")} / {NOTE_MAX.toLocaleString("pt-BR")}
           </span>
+          {noteCites ? <Caution>O recado cita o cliente ou a loja, e o técnico lê o recado antes de aceitar.</Caution> : null}
         </div>
 
         {send.error ? (

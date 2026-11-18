@@ -170,6 +170,9 @@ _EMPTY_PAIR = re.compile(
 # Só com espaço depois (na abertura) ou antes (no fechamento): "(-10%)" fica.
 _AFTER_OPEN = re.compile(rf"([(\[{{])\s*(?:{_SEPARATOR}\s*)*{_SEPARATOR}\s+")
 _BEFORE_CLOSE = re.compile(rf"(?:\s*[,;]|\s+{_SEPARATOR})\s*([)\]}}])")
+# O separador que ficou antes do parêntese ("Troca de PDV - Matriz (SP)" → "Troca de PDV (SP)").
+# Só solto entre espaços: "Wi-Fi (sala)" fica.
+_BEFORE_OPEN = re.compile(rf"\s+{_SEPARATOR}\s+([(\[{{])")
 # Palavra que é só sinal e ficou solta numa ponta ("Troca de PDV &", "( Troca"): sai.
 _DANGLING = frozenset(f"{_SEPARATORS}+&@#()[]{{}}<>\"'“”‘’«»")
 # Código da loja e nº do chamado do cliente curtos ("41") também são número de PDV, andar...:
@@ -243,6 +246,7 @@ def _tidy(text: str) -> str:
         lambda m: f"{m.group(1)} " if m.group(1) in ",;:" else f" {m.group(1)} ", text
     )
     text = _SPACE_BEFORE_PUNCTUATION.sub(r"\1", text)
+    text = _BEFORE_OPEN.sub(r" \1", text)
     text = _BEFORE_CLOSE.sub(r"\1", _AFTER_OPEN.sub(r"\1", text))
     while True:
         words = text.strip(f"{_SEPARATORS} ").split()

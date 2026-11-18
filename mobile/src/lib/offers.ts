@@ -166,8 +166,10 @@ export async function applyOfferList(
     // Trocada por uma oferta nova da mesma OS: a nova chega com o próprio aviso.
     if (offer.cancel_reason === "replaced") continue;
     if (offer.cancel_reason === "assigned") {
-      // A central pôs o próprio técnico na OS: o pull da rodada já avisou "Nova OS para você".
-      if ((await getTicket(offer.ticket.id, db))?.assignee?.id === userId) continue;
+      // A central pôs o próprio técnico na OS, como responsável ou na visita: o pull da rodada já avisou
+      // ("Nova OS para você", "Você vai na visita da ...").
+      const local = await getTicket(offer.ticket.id, db);
+      if (local && (local.assignee?.id === userId || (local.helpers ?? []).some((h) => h.id === userId))) continue;
       // Antes do pull, essa OS pode ainda não ter chegado: fica a versão guardada, sem aviso, até a busca depois do pull.
       if (early) {
         offers[index] = before;

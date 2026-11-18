@@ -1153,6 +1153,8 @@ def test_offer_title_cut() -> None:
     assert title("Troca de PDV (2º andar - Loja São Paulo)") == "Troca de PDV (2º andar)"
     assert title("Troca de PDV & Loja São Paulo") == "Troca de PDV"
     assert title("Desconto (-10%) · Loja São Paulo") == "Desconto (-10%)"
+    assert title("Troca de PDV - Loja São Paulo (SP)") == "Troca de PDV (SP)"
+    assert title("Wi-Fi (sala) · Loja São Paulo") == "Wi-Fi (sala)"
     # Razão social: o nome sem o sufixo também sai; nº do chamado curto fica (número de PDV).
     assert title("Cliente Exemplo: PDV parado", customer="Cliente Exemplo Ltda") == "PDV parado"
     assert title("Banco Exemplo · PDV parado", customer="Banco Exemplo S.A.") == "PDV parado"
