@@ -830,11 +830,10 @@ async def test_technician_with_paid_value_on_the_os(
     real = offers_svc._paid_technicians
     calls: list[int] = []
 
-    async def paid_after_the_check(
-        db: object, ticket_id: uuid.UUID, technician_ids: list[uuid.UUID]
-    ) -> set[uuid.UUID]:
+    async def paid_after_the_check(*args: object) -> set[uuid.UUID]:
+        """A conferência do aceite não acha o pago; a gravação do valor, sim."""
         calls.append(1)
-        return set() if len(calls) == 1 else await real(db, ticket_id, technician_ids)  # type: ignore[arg-type]
+        return set() if len(calls) == 1 else await real(*args)  # type: ignore[arg-type]
 
     monkeypatch.setattr(offers_svc, "_paid_technicians", paid_after_the_check)
     r = await client.post(f"{API}/me/offers/{offer['id']}/accept", headers=world.tech.headers)
@@ -872,7 +871,7 @@ async def test_my_offers_keep_every_live_offer(
     assert len(listed) == 51
     assert [o["state"] for o in listed] == ["declined"] * 50 + ["pending"]
     assert listed[-1]["id"] == live["id"]
-    created = [o["created_at"] for o in listed]
+    created = [datetime.fromisoformat(o["created_at"]) for o in listed]
     assert created == sorted(created, reverse=True)
 
 
@@ -1034,6 +1033,9 @@ async def test_offer_title_hides_the_store_and_the_customer(
         offer = (await send(client, sup, t["id"], [world.tech]))[0]
         expected[offer["id"]] = shown
         offer_ids.append(offer["id"])
+    # O título da OS em si não muda (a central vê como gravou).
+    full = (await client.get(f"{API}/tickets/{t['id']}", headers=sup)).json()
+    assert full["title"] == "matriz"
 
     def check(body: str) -> None:
         assert "matriz" not in body.lower() and "cliente teste" not in body.lower(), body
@@ -1045,9 +1047,6 @@ async def test_offer_title_hides_the_store_and_the_customer(
         r = await client.get(f"{API}/me/offers/{offer_id}", headers=th)
         check(r.text)
         assert r.json()["ticket"]["title"] == expected[offer_id]
-    # A central vê o título da OS como está.
-    full = await central_offers(client, sup, (await client.get(f"{API}/tickets", headers=sup)).json()["items"][0]["id"])
-    assert full
 
     # A oferta fechada (recorte mínimo) também.
     first = offer_ids[0]

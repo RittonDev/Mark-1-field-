@@ -158,6 +158,8 @@ _SEPARATORS = "·•-–—|/:;,"
 _SEPARATOR = f"[{re.escape(_SEPARATORS)}]"
 # Dois ou mais separadores seguidos ("PDV · · urgente", "PDV - : urgente") viram o primeiro.
 _SEPARATOR_RUN = re.compile(rf"\s*({_SEPARATOR})(?:\s*{_SEPARATOR})+\s*")
+# "PDV parado , urgente" (o nome saiu antes da vírgula) → "PDV parado, urgente".
+_SPACE_BEFORE_PUNCTUATION = re.compile(r"\s+([,;:])")
 _EMPTY_BRACKETS = re.compile(r"\(\s*\)|\[\s*\]")
 # Código da loja curto ("41") também é número de PDV, andar...: só sai a partir de 3 caracteres.
 _CODE_MIN = 3
@@ -221,6 +223,7 @@ def _tidy(text: str) -> str:
     text = _SEPARATOR_RUN.sub(
         lambda m: f"{m.group(1)} " if m.group(1) in ",;:" else f" {m.group(1)} ", text
     )
+    text = _SPACE_BEFORE_PUNCTUATION.sub(r"\1", text)
     while True:
         words = text.strip(f"{_SEPARATORS} ").split()
         while words and _fold(words[0])[0] in _EDGE_LINKS:
