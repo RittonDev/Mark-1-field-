@@ -244,13 +244,15 @@ export function TicketHeader({
           <SquarePen aria-hidden className="size-4 shrink-0 text-white/80" />
         )}
         {/* O nº nunca encolhe (min-w-max conta só ele: o título tem largura 0 na conta e fica com a
-            sobra); quem cede na barra estreita é o título e, depois, o nome da situação. */}
+            sobra); quem cede na barra estreita é o título e, depois, o nome da situação. No celular o
+            título desce para a linha de baixo (na barra ele sobraria com 0 px) e aqui fica só para o
+            leitor de tela. */}
         <Heading
           className="flex min-w-max flex-1 items-center gap-2 text-[15px] font-bold tracking-[-0.01em]"
           title={`${ticket.code} · ${ticket.title}`}
         >
           <CopyCode code={ticket.code} />
-          <span className="w-0 min-w-0 flex-1 truncate font-normal text-white/90">{ticket.title}</span>
+          <span className="w-0 min-w-0 flex-1 truncate font-normal text-white/90 max-sm:sr-only">{ticket.title}</span>
         </Heading>
         {reopenable && !dirty ? (
           <button
@@ -290,6 +292,12 @@ export function TicketHeader({
           </>
         ) : null}
       </div>
+      {/* Título no celular: linha própria, abaixo do nº e da situação (o do cabeçalho é lido pelo leitor de tela). */}
+      {ticket.title ? (
+        <p aria-hidden className="-mt-1.5 truncate px-4 pb-2 text-[13px] leading-5 text-white/90 sm:hidden" title={ticket.title}>
+          {ticket.title}
+        </p>
+      ) : null}
 
       {/* O resumo recolhe no celular quando o conteúdo rola (altura e opacidade; sem animação em "reduzir movimento"). */}
       <div
