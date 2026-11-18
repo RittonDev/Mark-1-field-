@@ -389,7 +389,12 @@ async def test_category_link_covers_subcategories(client: AsyncClient, world: Wo
     assert t["forms"] == []
 
     # Ligar à categoria-mãe leva às OS das netas que não começaram.
-    body = {"name": "Checklist F", "fields": FIELDS, "category_ids": [printers["id"]]}
+    body = {
+        "name": "Checklist F",
+        "fields": FIELDS,
+        "requires_signature": False,
+        "category_ids": [printers["id"]],
+    }
     url = f"{API}/form-templates/{f['id']}"
     r = await client.put(url, params={"apply_to_pending": True}, json=body, headers=an)
     assert (r.json()["attached_to"], r.json()["detached_from"]) == (1, 0)
