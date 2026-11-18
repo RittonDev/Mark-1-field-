@@ -10,6 +10,7 @@ import { ConnectionBar } from "../components/ConnectionBar";
 import { EarningsView } from "../components/EarningsView";
 import { Icon } from "../components/Icon";
 import { PressableScale, useListMotion } from "../components/motion";
+import { OffersSection } from "../components/Offers";
 import { ShiftCard } from "../components/ShiftCard";
 import { TicketListSkeleton } from "../components/Skeleton";
 import { TabBar } from "../components/TabBar";
@@ -93,7 +94,7 @@ function HomeEmpty({
     <EmptyState
       icon="today"
       title="Nada para hoje"
-      description={syncText ?? nextText ?? "Quando a central atribuir uma OS a você, ela aparece aqui."}
+      description={syncText ?? nextText ?? "Quando a central atribuir uma OS a você (ou você aceitar uma oferta), ela aparece aqui."}
       action={next && !syncText ? { label: "Ver agenda", onPress: onAgenda } : undefined}
     />
   );
@@ -300,6 +301,8 @@ export default function MyTicketsScreen() {
           <Icon name="chevronRight" size={16} color={c.danger} />
         </Pressable>
       ) : null}
+      {/* Ofertas de OS com preço esperando a resposta do técnico: quem aceitar primeiro leva. */}
+      {tab === "today" && dayOffset === 0 ? <OffersSection /> : null}
       {tab === "today" ? (
         <View style={{ gap: 10 }}>
           <View style={styles.dayNav}>

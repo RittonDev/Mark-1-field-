@@ -1072,6 +1072,28 @@ técnico) e, só no aceite, a leitura.
 - Push (o provedor ainda só registra no log): `ticket.offer` com `action: "sent"` avisa os técnicos da oferta ("OS
   para aceitar: OS-000123" · "Veja o valor e o escopo no app e responda").
 
+**Na central (web).** Nenhuma rota nova; o que a tela usa:
+- Aba Geral da OS sem técnico: o bloco "Ofertas" (`components/ticket/OffersCard.tsx`, chave `["ticket", id,
+  "offers"]`) lista as ofertas (sem as `replaced`) com o técnico, o valor e a situação ("Vista às 14:41 · vence às
+  15:30", "Recusou às 14:50: motivo", "Outro técnico aceitou"...), o "Cancelar" da pendente (com confirmação), o
+  "Copiar texto para o grupo" e o "Ofertar com preço" (Pagamentos em Editar, OS em aberto e sem técnico; travado com
+  alteração não salva, como a Situação). Nada disso entra no formulário da OS. Escolher o técnico na mão com ofertas
+  em aberto mostra o aviso de que elas serão canceladas ao salvar.
+- Diálogo "Ofertar a OS com preço" (também no resumo da OS recém-criada): de 1 a 10 técnicos (`GET
+  /technicians/suggest` com `exclude_ticket_id` e `limit=10`, mais a busca: `GET /technicians` com a tela Técnicos,
+  senão os técnicos de `GET /users/assignable`; sem acesso ao app e já na OS aparecem travados), o valor (começa no
+  `technician_fee` do tipo de serviço), o prazo (sem prazo, 30 min, 1 h, 2 h, 4 h ou até o fim do dia; o `expires_at` é
+  calculado no clique) e o recado. Depois do envio, o aviso "Oferta enviada" com "Copiar texto para o grupo".
+- Texto do grupo de técnicos (`offerText` em `components/new-ticket/invite.ts`): serviço, bairro e cidade, data (ou
+  "data a combinar"), valor, para quem foi no app e "Aceite pelo app até HH:MM" (ou sem prazo). Nunca cliente, loja
+  ou endereço.
+- Sem Pagamentos, a Geral e o cabeçalho mostram só o contador (`open_offers`): no cabeçalho, o chip "Sem técnico"
+  vira "Oferta enviada" / "N ofertas enviadas", em tom neutro.
+- Histórico: os quatro `offer_*` (técnicos e valor no envio, valor no aceite, motivo na recusa, motivo no
+  encerramento) e o `assigned` com `via: "offer"` ("assumiu a OS pela oferta").
+- Tempo real: o `ticket.updated` com `fields: ["offers"]` recarrega só a OS; o aceite e a recusa viram aviso para o
+  analista da OS (sem analista, para a central toda), sem o valor.
+
 ## Acesso: perfis por tela e visibilidade de filas
 
 O papel (`users.role`) continua decidindo o canal (web ou app), a hierarquia de cadastro (quem cria e altera

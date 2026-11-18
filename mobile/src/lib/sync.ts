@@ -1492,7 +1492,10 @@ export function enqueueFormAnswers(ticketId: UUID, payload: FormAnswersPayload) 
   return enqueue(ticketId, { type: "form_answers", payload });
 }
 
-/** Apaga banco local e fotos pendentes (troca de usuário ou usuário sem acesso ao app). */
+/**
+ * Apaga banco local e fotos pendentes (troca de usuário ou usuário sem acesso ao app). As ofertas de OS e o
+ * "Escopo lido" estão no kv e saem junto.
+ */
 export async function wipeLocalData() {
   // O que a sessão anterior ainda tinha em andamento (download, envio) não grava nada depois da limpeza.
   resetSessionState();
