@@ -5,10 +5,13 @@ automática, ao vivo até a conclusão do formulário."""
 
 import uuid
 from datetime import UTC, datetime
+from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 from httpx import AsyncClient
 
 from app.core.config import settings
+from app.services.form_prefill import prefill_for
 from tests.conftest import World, requires_db
 from tests.test_api import create, transition
 from tests.test_queue_visibility import access_a
@@ -376,6 +379,40 @@ async def test_apply_to_pending_reconciles_tickets_not_started(
     assert "Checklist F2" not in names(await detail(client, world, os2["id"]))
 
 
+async def test_category_link_covers_subcategories(client: AsyncClient, world: World) -> None:
+    an = world.analyst.headers
+    printers = await category(client, world, "Impressoras")
+    laser = await category(client, world, "Laser", printers)
+    toner = await category(client, world, "Toner", laser)
+    f = await template(client, world, "Checklist F")
+    t = await create(client, world, category_id=toner["id"])
+    assert t["forms"] == []
+
+    # Ligar à categoria-mãe leva às OS das netas que não começaram.
+    body = {"name": "Checklist F", "fields": FIELDS, "category_ids": [printers["id"]]}
+    url = f"{API}/form-templates/{f['id']}"
+    r = await client.put(url, params={"apply_to_pending": True}, json=body, headers=an)
+    assert (r.json()["attached_to"], r.json()["detached_from"]) == (1, 0)
+    added = await events(client, world, t["id"], "form_added")
+    assert [(x["actor"], x["note"]) for x in added] == [(None, "Pela categoria “Impressoras”")]
+
+    # A troca de categoria antes da visita também traz o formulário.
+    other = await create(client, world)
+    other = await patch(client, world, other["id"], category_id=laser["id"])
+    assert [(x["name"], x["auto_attached"]) for x in other["forms"]] == [("Checklist F", True)]
+    # E tirar a categoria tira o automático que ninguém começou.
+    other = await patch(client, world, other["id"], category_id=None)
+    assert other["forms"] == []
+    removed = await events(client, world, other["id"], "form_removed")
+    assert [x["note"] for x in removed] == ["Saiu com a troca da categoria"]
+
+    r = await client.put(
+        url, params={"apply_to_pending": True}, json={**body, "category_ids": []}, headers=an
+    )
+    assert (r.json()["attached_to"], r.json()["detached_from"]) == (0, 1)
+    assert (await detail(client, world, t["id"]))["forms"] == []
+
+
 async def test_prefill_until_the_form_is_completed(client: AsyncClient, world: World) -> None:
     an, th = world.analyst.headers, world.tech.headers
     catalog = (await client.get(f"{API}/form-templates/catalog", headers=an)).json()
@@ -430,6 +467,66 @@ async def test_prefill_until_the_form_is_completed(client: AsyncClient, world: W
     # Depois de concluído, trocar o técnico não muda as respostas.
     t = await patch(client, world, t["id"], assignee_id=str(world.tech_other.user.id))
     assert t["forms"][0]["answers"] == expected and t["forms"][0]["prefill"] == {}
+
+
+def test_prefill_values_of_each_source() -> None:
+    store = SimpleNamespace(
+        name="Loja Exemplo",
+        code="L-41",
+        address_line="Rua Exemplo, 100",
+        district="Centro",
+        city="Cidade Exemplo",
+        state="sp",
+    )
+    ticket = SimpleNamespace(
+        location=store,
+        customer=SimpleNamespace(name="Cliente Exemplo"),
+        service_address=None,
+        number=123,
+        assignee=None,
+        service_type=SimpleNamespace(name="Preventiva"),
+        # 23h30 de 03/12 em Brasília: vale o dia local da chegada, não o da agenda.
+        arrived_at=datetime(2026, 12, 4, 2, 30, tzinfo=UTC),
+        scheduled_start=datetime(2026, 12, 1, 13, 0, tzinfo=UTC),
+    )
+    sources = [
+        "location_name",
+        "location_code",
+        "customer",
+        "address",
+        "city",
+        "ticket_code",
+        "technician",
+        "service_type",
+        "visit_date",
+    ]
+    fields = [{"id": s, "type": "text", "prefill": s} for s in sources] + [
+        {"id": "dia", "type": "date", "prefill": "visit_date"},
+        {"id": "qtd", "type": "number", "prefill": "customer"},
+        {"id": "obs", "type": "textarea"},
+    ]
+    # Sem técnico, o campo fica sem valor; a pergunta já respondida não recebe nada.
+    assert prefill_for(ticket, fields, {"customer": "Respondido"}) == {  # type: ignore[arg-type]
+        "location_name": "Loja Exemplo",
+        "location_code": "L-41",
+        "address": "Rua Exemplo, 100, Centro, Cidade Exemplo-SP",
+        "city": "Cidade Exemplo-SP",
+        "ticket_code": "OS-000123",
+        "service_type": "Preventiva",
+        "visit_date": "03/12/2026",
+        "dia": "2026-12-03",
+    }
+
+    # O endereço do atendimento vence o da loja; sem chegada nem agenda, a data só sai na
+    # conclusão (o dia de hoje).
+    ticket.service_address = "Av. Exemplo, 200"
+    ticket.arrived_at = ticket.scheduled_start = None
+    live = prefill_for(ticket, fields, {})  # type: ignore[arg-type]
+    assert live["address"] == "Av. Exemplo, 200"
+    assert "visit_date" not in live and "dia" not in live
+    today = datetime.now(UTC).astimezone(ZoneInfo(settings.TIMEZONE)).date()
+    final = prefill_for(ticket, fields, {}, final=True)  # type: ignore[arg-type]
+    assert final["dia"] == today.isoformat()
 
 
 async def test_usage_lists_types_from_history(client: AsyncClient, world: World) -> None:
