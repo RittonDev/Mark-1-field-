@@ -152,8 +152,9 @@ _LINKS = frozenset(
     {"a", "o", "as", "os", "ao", "aos", "na", "no", "nas", "nos", "da", "do", "das", "dos", "de"}
     | {"em", "para", "pra", "pela", "pelo", "pelas", "pelos"}
 )
-# Nas pontas do que sobra, só as preposições ("Visita na" → "Visita"; "O PDV" fica).
-_EDGE_LINKS = _LINKS - {"a", "o", "as", "os"}
+# No fim do que sobra, a preposição solta sai ("Visita na" → "Visita"). No começo, nada sai: o
+# título pode começar com "Ao chegar", "Em campo".
+_TRAILING_LINKS = (_LINKS - {"a", "o", "as", "os"}) | {"e"}
 _SEPARATORS = "·•-–—|/:;,"
 _SEPARATOR = f"[{re.escape(_SEPARATORS)}]"
 # Dois ou mais separadores seguidos ("PDV · · urgente", "PDV - : urgente") viram o primeiro.
@@ -218,7 +219,7 @@ def _cut_name(text: str, name: str) -> str:
 
 def _tidy(text: str) -> str:
     """O que sobrou do corte: sem parênteses vazios, separadores repetidos ou nas pontas, nem
-    preposição solta nas pontas."""
+    preposição solta no fim."""
     text = " ".join(_EMPTY_BRACKETS.sub(" ", text).split())
     text = _SEPARATOR_RUN.sub(
         lambda m: f"{m.group(1)} " if m.group(1) in ",;:" else f" {m.group(1)} ", text
@@ -226,9 +227,7 @@ def _tidy(text: str) -> str:
     text = _SPACE_BEFORE_PUNCTUATION.sub(r"\1", text)
     while True:
         words = text.strip(f"{_SEPARATORS} ").split()
-        while words and _fold(words[0])[0] in _EDGE_LINKS:
-            words.pop(0)
-        while words and _fold(words[-1])[0] in _EDGE_LINKS:
+        while words and _fold(words[-1])[0] in _TRAILING_LINKS:
             words.pop()
         tidy = " ".join(words)
         if tidy == text:

@@ -1090,6 +1090,8 @@ def test_offer_title_cut() -> None:
     assert title("Troca de PDV · Loja São Paulo") == "Troca de PDV"
     assert title("LOJA SAO PAULO - Troca de PDV") == "Troca de PDV"
     assert title("PDV parado na loja são paulo, urgente") == "PDV parado, urgente"
+    assert title("Ao chegar na Loja São Paulo, ligar") == "Ao chegar, ligar"
+    assert title("Troca de PDV · Loja São Paulo e") == "Troca de PDV"
     assert title("Cliente Exemplo | Loja São Paulo | PDV 3 sem rede") == "PDV 3 sem rede"
     assert title("Troca de PDV (Loja São Paulo)") == "Troca de PDV"
     assert title("Série de testes na Sé", store="Sé") == "Série de testes"
