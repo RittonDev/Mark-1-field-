@@ -214,7 +214,10 @@ A central manda uma OS ainda sem técnico, com o valor, para alguns técnicos (c
   respondida, oferta não aberta): a tela mostra o texto do servidor, sem "Tentar de novo", e atualiza a lista.
 - **Sem conexão**: os botões ficam desabilitados ("Sem conexão. Conecte para responder a oferta."). Oferta
   vencida ou fechada: sem botões, com a situação ("O prazo para responder acabou", "Outro técnico aceitou esta
-  OS", "A central cancelou esta oferta"); a aceita leva à OS.
+  OS", "A central cancelou esta oferta"); a aceita leva à OS e, quando a central troca a oferta (novo valor) ou
+  manda a OS de novo, **Ver a oferta nova · R$ X** leva à nova. A lista do servidor não traz a oferta trocada:
+  se ela some com a tela aberta, a tela segue com a última resposta do servidor e abre a oferta de novo para
+  mostrar como ela ficou.
 - **LGPD**: só o recorte do convite fica no aparelho (sem cliente, loja, endereço ou contato); as que fecharam
   vêm mínimas do servidor; tudo sai com o resto dos dados na troca de técnico e quando o acesso é retirado.
 
