@@ -420,7 +420,7 @@ const CUT_MIN = 3;
  * O que a API tira do título da oferta por ser do cliente ou da loja: os dois nomes, o do cliente também sem
  * o sufixo da razão social ("Cliente Exemplo Ltda" e "Cliente Exemplo") e o código da loja.
  */
-function storeNames(ticket: TicketDetail): string[] {
+function hiddenNames(ticket: TicketDetail): string[] {
   const customer = (ticket.customer?.name ?? "").split(/\s+/).filter(Boolean).join(" ");
   const short = customer.replace(COMPANY_SUFFIX, "").trim();
   const code = ticket.location?.code?.trim() ?? "";
@@ -604,7 +604,7 @@ export function OfferDialog({
       : "A OS não está mais em aberto.";
   // O título vai sem a loja e o cliente; o escopo vai como foi escrito.
   const scope = ticket.description?.trim() ?? "";
-  const scopeCites = Boolean(scope) && storeNames(ticket).some((name) => cites(scope, name));
+  const scopeCites = Boolean(scope) && hiddenNames(ticket).some((name) => cites(scope, name));
   const dirty = picked.length > 0 || amountText !== null || note.trim() !== "" || deadline !== "none";
 
   const submit = (e: React.FormEvent<HTMLFormElement>) => {
