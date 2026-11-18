@@ -3,6 +3,7 @@
 import { type QueryClient, type QueryKey, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useConfirmLeave } from "@/components/Confirm";
 import { useToast } from "@/components/Toaster";
 import { API_REACHABLE_EVENT, errorMessage, refreshSessionResult, WS_URL } from "./api";
 import { STATUS } from "./constants";
@@ -376,17 +377,20 @@ export function RealtimeProvider({
   const queryClient = useQueryClient();
   const router = useRouter();
   const { toast } = useToast();
+  const confirmLeave = useConfirmLeave();
   const [state, setState] = useState<ConnectionState>("connecting");
   const [feed, setFeed] = useState<StoredFeed>(() => readFeed(userId));
   const toastRef = useRef(toast);
   const routerRef = useRef(router);
+  const confirmLeaveRef = useRef(confirmLeave);
   const reconnectRef = useRef<() => void>(() => {});
   const pushNoticeRef = useRef<(draft: NoticeDraft) => void>(() => {});
 
   useEffect(() => {
     toastRef.current = toast;
     routerRef.current = router;
-  }, [toast, router]);
+    confirmLeaveRef.current = confirmLeave;
+  }, [toast, router, confirmLeave]);
 
   useEffect(() => {
     writeFeed(userId, feed);
@@ -459,11 +463,17 @@ export function RealtimeProvider({
       requestOpenTicket(ticketId);
     };
 
+    // "Ver" troca de tela: com alteração não salva (ex.: a OS aberta no painel), pergunta antes.
+    const goTo = (href: string) =>
+      void confirmLeaveRef.current().then((ok) => {
+        if (ok) routerRef.current.push(href);
+      });
+
     const actionFor = (notice: RealtimeNotice) => {
       const { ticketId, href } = notice;
       if (ticketId && notice.groupText) return { label: "Abrir e copiar texto", onClick: () => openAndCopy(notice, ticketId) };
       if (ticketId) return { label: "Abrir", onClick: () => requestOpenTicket(ticketId) };
-      if (href) return { label: "Ver", onClick: () => routerRef.current.push(href) };
+      if (href) return { label: "Ver", onClick: () => goTo(href) };
       return undefined;
     };
 

@@ -26,7 +26,7 @@ import { useEffect, useEffectEvent, useId, useLayoutEffect, useRef, useState, us
 import { createPortal } from "react-dom";
 import { applyTheme, clearThemeChoice, Logo, ThemeToggle, type ThemeChoice, useThemeChoice } from "@/components/Brand";
 import { openCommandPalette } from "@/components/CommandPalette";
-import { useConfirm } from "@/components/Confirm";
+import { useConfirm, useConfirmLeave } from "@/components/Confirm";
 import { onChangePasswordRequest } from "@/components/home/events";
 import { GROUPS, type NavItem, visibleNav } from "@/components/nav";
 import { useToast } from "@/components/Toaster";
@@ -837,6 +837,7 @@ function NoticesButton() {
   const listId = useId();
   const ticketPanel = useTicketPanel();
   const router = useRouter();
+  const confirmLeave = useConfirmLeave();
   const now = useNow(30_000);
 
   const show = () => {
@@ -873,18 +874,25 @@ function NoticesButton() {
     };
   }, [open]);
 
+  // A OS abre no painel (que já pergunta antes de trocar de OS); sair da tela pergunta antes de perder
+  // alteração não salva.
   const openNotice = (notice: RealtimeNotice) => {
     hide();
-    if (notice.ticketId) {
-      if (ticketPanel) ticketPanel.open(notice.ticketId);
-      else router.push(`/chamados/${notice.ticketId}`);
-    } else if (notice.href) {
-      router.push(notice.href);
+    if (notice.ticketId && ticketPanel) {
+      ticketPanel.open(notice.ticketId);
+      return;
     }
+    const href = notice.ticketId ? `/chamados/${notice.ticketId}` : notice.href;
+    if (href)
+      void confirmLeave().then((ok) => {
+        if (ok) router.push(href);
+      });
   };
 
+  // No celular a lista fica presa à linha da barra (e não ao sino, que fica longe da borda direita):
+  // assim cabe inteira na tela.
   return (
-    <div ref={root} className="relative">
+    <div ref={root} className="relative max-sm:static">
       <button
         ref={trigger}
         type="button"
@@ -910,7 +918,7 @@ function NoticesButton() {
           id={listId}
           role="region"
           aria-label="Avisos"
-          className="absolute top-full right-0 z-50 mt-2 w-[min(22rem,calc(100vw-1.5rem))] animate-pop overflow-hidden rounded-xl border border-line bg-surface shadow-pop"
+          className="absolute top-full right-0 z-50 mt-2 w-[min(22rem,calc(100vw-1.5rem))] animate-pop overflow-hidden rounded-xl border border-line bg-surface shadow-pop max-sm:right-3"
         >
           <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-2.5">
             <p className="text-sm font-bold text-ink">Avisos</p>
@@ -1009,7 +1017,7 @@ export function Topbar({ onOpenMenu, menuOpen = false }: { onOpenMenu?: () => vo
   const canCreate = canManageTickets(user?.role) && pathname !== "/chamados/novo";
   return (
     <header ref={headerRef} className="sticky top-0 z-30 border-b border-line bg-sheet/85 backdrop-blur-md print:hidden">
-      <div className="flex h-14 items-center gap-2 px-3 sm:gap-3 sm:px-4 md:px-6">
+      <div className="relative flex h-14 items-center gap-2 px-3 sm:gap-3 sm:px-4 md:px-6">
         {onOpenMenu ? (
           <button
             type="button"

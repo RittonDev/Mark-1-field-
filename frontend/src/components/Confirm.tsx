@@ -3,6 +3,7 @@
 import { TriangleAlert } from "lucide-react";
 import { createContext, useCallback, useContext, useState } from "react";
 import { Button, Dialog } from "@/components/ui";
+import { hasUnsavedChanges } from "@/lib/hooks";
 
 export interface ConfirmOptions {
   title: string;
@@ -79,4 +80,22 @@ export function useConfirm(): ConfirmFn {
   if (ctx) return ctx;
   // Fora do provedor (não deveria acontecer): a confirmação do navegador.
   return (o) => Promise.resolve(window.confirm(o.title));
+}
+
+const LEAVE_CONFIRM: ConfirmOptions = {
+  title: "Sair sem salvar?",
+  description: "Há alterações não salvas na tela. Se sair agora, elas se perdem.",
+  confirmLabel: "Sair sem salvar",
+  cancelLabel: "Continuar editando",
+  tone: "danger",
+};
+
+/**
+ * Antes de trocar de tela por código (router.push da busca Ctrl+K e do "Ver" dos avisos): pergunta
+ * quando há formulário com alterações não salvas (OS, Nova OS, diálogo aberto). Os links (<a>) já
+ * passam pela guarda do editor; sem nada pendente, devolve true na hora.
+ */
+export function useConfirmLeave(): () => Promise<boolean> {
+  const confirm = useConfirm();
+  return useCallback(async () => !hasUnsavedChanges() || confirm(LEAVE_CONFIRM), [confirm]);
 }

@@ -23,6 +23,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
 import { StatusBadge } from "@/components/badges";
 import { toggleTheme } from "@/components/Brand";
+import { useConfirmLeave } from "@/components/Confirm";
 import { useTicketPanel } from "@/components/ticket/TicketPanel";
 import { formatDocument, formatShort } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
@@ -152,6 +153,7 @@ export function useSearchController({
   onLeave: () => void;
 }): SearchController {
   const router = useRouter();
+  const confirmLeave = useConfirmLeave();
   const ticketPanel = useTicketPanel();
   const passwordAllowed = usePasswordAllowed();
   const [query, setQueryState] = useState("");
@@ -171,10 +173,15 @@ export function useSearchController({
   const stale = typed !== q || (searching && (smart.isFetching || smart.isPlaceholderData));
   const failed = searching && smart.isError;
 
+  // Fecha a busca antes de perguntar: a paleta fica por cima do diálogo de confirmação. Outra aba não
+  // tira nada da tela; trocar de tela com alteração não salva (OS, Nova OS, diálogo) pergunta antes.
   const go = (href: string, mods: Mods) => {
     onLeave();
     if (mods.shift) window.open(href, "_blank", "noopener");
-    else router.push(href);
+    else
+      void confirmLeave().then((ok) => {
+        if (ok) router.push(href);
+      });
   };
 
   // A OS abre no painel lateral, sem sair da tela; Ctrl abre a página, Shift abre outra aba.

@@ -47,6 +47,9 @@ export function CommandPalette({ user }: { user: User }) {
  */
 function Palette({ user, onClose }: { user: User; onClose: () => void }) {
   const [recent] = useState(() => readRecent(user.id));
+  // Quem tinha o foco quando a busca abriu, lido no render: o autoFocus do campo roda antes dos efeitos
+  // e já teria levado o foco para a busca.
+  const [opener] = useState(() => document.activeElement);
   const dialogRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const ctl = useSearchController({ user, recent, mode: "palette", onLeave: onClose, listRef });
@@ -54,7 +57,6 @@ function Palette({ user, onClose }: { user: User; onClose: () => void }) {
   // Modal: trava a rolagem da página, prende o Tab e devolve o foco a quem abriu.
   const close = useEffectEvent(() => onClose());
   useEffect(() => {
-    const opener = document.activeElement;
     const unlock = lockScroll();
     const onKey = (e: KeyboardEvent) => {
       const node = dialogRef.current;
@@ -73,7 +75,7 @@ function Palette({ user, onClose }: { user: User; onClose: () => void }) {
       const focused = document.activeElement;
       if (!focused || focused === document.body) restoreFocus(opener);
     };
-  }, []);
+  }, [opener]);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Escape") {
