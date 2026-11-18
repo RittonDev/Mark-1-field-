@@ -1,10 +1,10 @@
 "use client";
 
-import { Loader2, Search } from "lucide-react";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { AGENT_LABEL, AGENT_PROMPT, AgentBadge, AgentMark, AgentScan } from "@/components/home/agent";
 import { readRecent } from "@/components/home/search";
-import { SearchResults, useSearchController } from "@/components/home/SearchResults";
+import { AgentReply, SearchResults, useSearchController } from "@/components/home/SearchResults";
 import { isTopLayer, Kbd, lockScroll, restoreFocus, trapTab } from "@/components/ui";
 import type { User } from "@/lib/types";
 
@@ -13,7 +13,7 @@ export { type RecentTicket, rememberRecentTicket } from "@/components/home/searc
 
 const OPEN_EVENT = "mf:command-open";
 
-/** Abre a busca rápida (o atalho Ctrl+K / ⌘K também abre). */
+/** Abre a Mia, a busca da central (o atalho Ctrl+K / ⌘K também abre). */
 export function openCommandPalette() {
   window.dispatchEvent(new Event(OPEN_EVENT));
 }
@@ -41,9 +41,10 @@ export function CommandPalette({ user }: { user: User }) {
 }
 
 /**
- * Busca rápida (Ctrl+K): a mesma busca da caixa do Início. A frase vai para a busca inteligente da API
- * ("atrasadas em santos", "16976", "técnico joão novembro"), que devolve o que entendeu, as OS, os
- * clientes, os locais e os técnicos; as telas e ações são achadas aqui mesmo, sem acento importar.
+ * A Mia em qualquer tela (Ctrl+K): a mesma busca da caixa do Início. A frase vai para a busca inteligente
+ * da API ("atrasadas em santos", "16976", "técnico joão novembro"), que devolve o que entendeu, as OS, os
+ * clientes, os locais e os técnicos; as telas e ações são achadas aqui mesmo, sem acento importar. A
+ * moldura do diálogo fica neutra: a cara da Mia é só a linha do campo e a resposta.
  */
 function Palette({ user, onClose }: { user: User; onClose: () => void }) {
   const [recent] = useState(() => readRecent(user.id));
@@ -93,20 +94,20 @@ function Palette({ user, onClose }: { user: User; onClose: () => void }) {
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Busca rápida"
+        aria-label={AGENT_LABEL}
         className="relative flex max-h-[72vh] w-full max-w-2xl animate-pop flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-pop"
       >
-        <div className="flex items-center gap-3 border-b border-line px-4">
-          <Search aria-hidden className="size-4 shrink-0 text-ink-subtle" />
+        <div className="relative flex items-center gap-3 border-b border-line px-4">
+          <AgentMark size="md" thinking={ctl.thinking} />
           <input
             autoFocus
             value={ctl.query}
             onChange={(e) => ctl.setQuery(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="Busque OS, cliente, loja, técnico ou tela..."
+            placeholder={`${AGENT_PROMPT}: OS, cliente, loja, técnico, período ou tela`}
             className="h-13 min-w-0 flex-1 bg-transparent text-[15px] text-ink outline-none placeholder:text-ink-subtle"
             role="combobox"
-            aria-label="Buscar OS, cliente, loja, técnico ou tela"
+            aria-label={AGENT_PROMPT}
             aria-expanded="true"
             aria-controls={ctl.listId}
             aria-autocomplete="list"
@@ -115,11 +116,15 @@ function Palette({ user, onClose }: { user: User; onClose: () => void }) {
             spellCheck={false}
             enterKeyHint="search"
           />
-          {ctl.fetching ? <Loader2 aria-hidden className="size-4 shrink-0 animate-spin text-ink-subtle" /> : null}
+          <AgentBadge from="sm" />
           <span aria-hidden className="hidden sm:inline-flex">
             <Kbd>Esc</Kbd>
           </span>
+          {/* O fio da Mia sob o campo; enquanto ela procura, a linha que corre. */}
+          <span aria-hidden className="mf-agent-rule" />
+          {ctl.thinking ? <AgentScan /> : null}
         </div>
+        <AgentReply ctl={ctl} />
         <div ref={listRef} className="flex-1 overflow-y-auto p-2">
           <SearchResults ctl={ctl} onLeave={onClose} />
         </div>

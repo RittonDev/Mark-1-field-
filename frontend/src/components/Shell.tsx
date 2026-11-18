@@ -15,7 +15,6 @@ import {
   PanelLeftOpen,
   Plus,
   RefreshCw,
-  Search,
   Sun,
   WifiOff,
   X,
@@ -27,7 +26,9 @@ import { createPortal } from "react-dom";
 import { applyTheme, clearThemeChoice, Logo, ThemeToggle, type ThemeChoice, useThemeChoice } from "@/components/Brand";
 import { openCommandPalette } from "@/components/CommandPalette";
 import { useConfirm, useConfirmLeave } from "@/components/Confirm";
+import { AgentBadge, AgentMark } from "@/components/home/agent";
 import { onChangePasswordRequest } from "@/components/home/events";
+import { AGENT_NAME } from "@/components/home/phrase";
 import { GROUPS, type NavItem, visibleNav } from "@/components/nav";
 import { useToast } from "@/components/Toaster";
 import { useTicketPanel } from "@/components/ticket/TicketPanel";
@@ -1031,14 +1032,19 @@ export function Topbar({ onOpenMenu, menuOpen = false }: { onOpenMenu?: () => vo
             <Menu aria-hidden className="size-5" />
           </button>
         ) : null}
+        {/* A Mia, a busca com IA (abre o Ctrl+K). Borda, fundo e sombra vêm do .mf-agent-field (globals.css). */}
         <button
           type="button"
           onClick={openCommandPalette}
+          aria-haspopup="dialog"
           aria-keyshortcuts="Control+K"
-          className="group inline-flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg border border-line bg-surface px-3 text-sm text-ink-subtle shadow-elev-1 transition-[border-color,color] hover:border-line-strong hover:text-ink-muted sm:max-w-md"
+          className="mf-agent-field inline-flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2.5 text-sm text-ink-muted hover:text-ink sm:max-w-md"
         >
-          <Search aria-hidden className="size-4 shrink-0" />
-          <span className="flex-1 truncate text-left">Buscar OS, cliente, loja, técnico ou tela...</span>
+          <AgentMark size="sm" />
+          <span className="min-w-0 flex-1 truncate text-left">
+            Diga à <span className="font-semibold text-ink">{AGENT_NAME}</span> o que procura<span className="sr-only">, busca com IA</span>
+          </span>
+          <AgentBadge from="md" />
           <span aria-hidden className="hidden items-center gap-1 sm:inline-flex">
             <Kbd>Ctrl</Kbd>
             <Kbd>K</Kbd>

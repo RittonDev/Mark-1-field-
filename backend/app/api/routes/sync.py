@@ -8,11 +8,15 @@ from app.db.base import utcnow
 from app.models import DeviceToken
 from app.schemas.sync import (
     DeviceRegister,
+    DeviceRegistered,
     SyncPullResponse,
     SyncPushRequest,
     SyncPushResponse,
 )
 from app.services import sync as sync_service
+
+# Pelo nome da função: `push` já é a rota /sync/push deste módulo.
+from app.services.push import get_provider
 
 # Sincronização e aparelhos são do app de campo (a equipe). O cliente usa só o portal.
 router = APIRouter(tags=["mobile-sync"])
@@ -30,8 +34,10 @@ async def push(body: SyncPushRequest, db: DB, user: StaffUser) -> SyncPushRespon
     return await sync_service.push(db, user, body)
 
 
-@router.post("/devices", status_code=status.HTTP_204_NO_CONTENT)
-async def register_device(body: DeviceRegister, db: DB, user: StaffUser) -> Response:
+@router.post("/devices", response_model=DeviceRegistered)
+async def register_device(body: DeviceRegister, db: DB, user: StaffUser) -> DeviceRegistered:
+    """Registra (ou reatribui) o token do aparelho e diz se o push chega de fato a ele: com
+    "simulated", o app avisa sozinho as novidades; com "live", não repete o aviso do push."""
     device = await db.scalar(select(DeviceToken).where(DeviceToken.token == body.token))
     if device is None:
         device = DeviceToken(token=body.token, user_id=user.id, platform=body.platform)
@@ -41,7 +47,7 @@ async def register_device(body: DeviceRegister, db: DB, user: StaffUser) -> Resp
     device.app_version = body.app_version
     device.last_seen_at = utcnow()
     await db.commit()
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return DeviceRegistered(push="live" if get_provider().delivers(body.platform) else "simulated")
 
 
 @router.delete("/devices/{token}", status_code=status.HTTP_204_NO_CONTENT)

@@ -9,10 +9,10 @@ from typing import Any
 import pytest
 
 from app.api.routes import ws
-from app.core.enums import UserRole
+from app.core.enums import DevicePlatform, UserRole
 from app.models import User
 from app.services import realtime
-from app.services.push import _push_targets
+from app.services.push import LogPushProvider, _push_targets
 from app.services.realtime import Connection, ConnectionManager
 
 
@@ -220,3 +220,9 @@ def test_push_tells_the_technician_what_changed_in_his_visits() -> None:
         ("novo", "Nova OS atribuída: OS-000123", "Atribuída por Analista"),
         ("antigo", "OS-000123 saiu da sua lista", "Reatribuída por Analista"),
     ]
+
+
+def test_simulated_push_reaches_no_device() -> None:
+    # Sem provedor real, o POST /devices responde "simulated" e o app avisa sozinho.
+    provider = LogPushProvider()
+    assert not any(provider.delivers(platform) for platform in DevicePlatform)

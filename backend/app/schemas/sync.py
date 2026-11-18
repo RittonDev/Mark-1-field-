@@ -60,3 +60,11 @@ class DeviceRegister(BaseModel):
     platform: DevicePlatform
     token: str = Field(min_length=10, max_length=512)
     app_version: str | None = Field(default=None, max_length=40)
+
+
+class DeviceRegistered(BaseModel):
+    """Resposta do POST /devices. `live`: o servidor entrega push a este aparelho, então o app não
+    repete o aviso com uma notificação própria. `simulated`: o push ainda não está ligado (o app
+    avisa sozinho as novidades da sincronização)."""
+
+    push: Literal["live", "simulated"]

@@ -3,7 +3,12 @@
 Regras:
 - Só a gestão (analistas, supervisores, admin) monta modelos e decide anexar à OS, como
   obrigatório ou opcional. O técnico responsável preenche no app.
-- Concluir o formulário valida os campos obrigatórios e o mínimo de fotos de cada campo.
+- O modelo ligado a um tipo de OS ou a uma categoria (valendo as subcategorias) entra sozinho
+  nas OS: na abertura sem lista explícita e, antes da visita, quando o tipo ou a categoria mudam.
+  Sai sozinho só o que entrou sozinho, não casa mais e ninguém começou; o que uma pessoa tirou da
+  OS (ou deixou de fora na abertura) não volta sozinho.
+- Concluir o formulário valida os campos obrigatórios e o mínimo de fotos de cada campo, e grava
+  a resposta automática (services/form_prefill.py) das perguntas que ficaram sem resposta.
 - A assinatura do responsável no local só pode ser colhida com os obrigatórios concluídos.
 - A OS só é concluída (Resolvido/Fechado) com os obrigatórios concluídos e, se exigida,
   com a assinatura. Depois da assinatura, o técnico não altera mais os formulários.
@@ -12,20 +17,41 @@ Regras:
 import datetime as dt
 import math
 import uuid
+from collections import defaultdict
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from fastapi import UploadFile
-from sqlalchemy import exists, func, select, update
+from sqlalchemy import and_, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import FormStatus, TicketEventType, TicketStatus
 from app.db.base import utcnow
-from app.models import FormTemplate, Ticket, TicketAttachment, TicketForm, User
-from app.schemas.forms import FormField, FormTemplateIn, TicketFormAdd, TicketFormAnswers
+from app.models import (
+    Category,
+    FormTemplate,
+    ServiceType,
+    Ticket,
+    TicketAttachment,
+    TicketEvent,
+    TicketForm,
+    User,
+)
+from app.schemas.common import Ref
+from app.schemas.forms import (
+    FormField,
+    FormTemplateIn,
+    ServiceTypeUsage,
+    TicketFormAdd,
+    TicketFormAnswers,
+    field_dump,
+)
 from app.services import storage
 from app.services.errors import NotFound, PermissionDenied, WorkflowError
+from app.services.form_prefill import prefill_for
 from app.services.realtime import queue_event
-from app.services.tickets import _touch, add_attachment, can_work, record_event
+from app.services.tickets import _touch, add_attachment, can_work, get_ticket, record_event
 
 CLOSED_STATES = (TicketStatus.RESOLVED, TicketStatus.CLOSED, TicketStatus.CANCELLED)
 FINISHED_STATES = (TicketStatus.RESOLVED, TicketStatus.CLOSED)
@@ -56,19 +82,32 @@ async def get_template(db: AsyncSession, template_id: uuid.UUID) -> FormTemplate
     return template
 
 
+def _id_list(values: Iterable[uuid.UUID]) -> list[str]:
+    """Ids sem repetição, na ordem, como texto (o JSONB do modelo guarda texto)."""
+    return [str(i) for i in dict.fromkeys(values)]
+
+
 def _dump(data: FormTemplateIn) -> dict[str, Any]:
-    return {
+    values: dict[str, Any] = {
         "name": data.name.strip(),
         "description": (data.description or "").strip() or None,
-        "fields": [f.model_dump() for f in data.fields],
-        "service_type_ids": [str(i) for i in data.service_type_ids],
+        "fields": [field_dump(f) for f in data.fields],
+        "service_type_ids": _id_list(data.service_type_ids),
         "requires_signature": data.requires_signature,
         "is_active": data.is_active,
     }
+    # Sem informar, o PUT mantém o que o modelo tem: o desativar da lista, ou uma aba aberta antes
+    # destes campos existirem, não apagam as categorias nem o padrão de obrigatório.
+    if data.category_ids is not None:
+        values["category_ids"] = _id_list(data.category_ids)
+    if data.default_required is not None:
+        values["default_required"] = data.default_required
+    return values
 
 
 async def create_template(db: AsyncSession, data: FormTemplateIn, actor: User) -> FormTemplate:
-    template = FormTemplate(id=uuid.uuid4(), version=1, created_by_id=actor.id, **_dump(data))
+    values = {"category_ids": [], "default_required": True, **_dump(data)}
+    template = FormTemplate(id=uuid.uuid4(), version=1, created_by_id=actor.id, **values)
     db.add(template)
     await db.flush()
     return template
@@ -156,33 +195,34 @@ async def get_ticket_form(db: AsyncSession, ticket: Ticket, form_id: uuid.UUID) 
 
 
 async def suggestions(db: AsyncSession, ticket: Ticket) -> list[FormTemplate]:
-    """Modelos ativos ligados ao tipo de serviço da OS que ainda não foram anexados."""
-    if ticket.service_type_id is None:
-        return []
+    """Modelos ativos ligados ao tipo de OS e à categoria da OS (ou a uma categoria acima dela)
+    que ainda não estão na OS."""
     attached = {f.template_id for f in ticket.forms}
-    rows = await db.scalars(
-        select(FormTemplate).where(
-            FormTemplate.is_active.is_(True),
-            FormTemplate.service_type_ids.contains([str(ticket.service_type_id)]),
-        )
+    linked = await linked_templates(
+        db, service_type_id=ticket.service_type_id, category_id=ticket.category_id
     )
-    return [t for t in rows if t.id not in attached]
+    return [item.template for item in linked if item.template.id not in attached]
 
 
-async def add_to_ticket(
-    db: AsyncSession, ticket: Ticket, data: TicketFormAdd, actor: User
+def _attach(
+    db: AsyncSession,
+    ticket: Ticket,
+    template: FormTemplate,
+    *,
+    required: bool,
+    auto: bool,
+    actor: User | None,
+    note: str | None,
+    now: dt.datetime,
+    order: int = 0,
 ) -> TicketForm:
-    """Anexa o formulário. Na OS concluída a central ainda registra o checklist que chegou depois
-    (ex.: pelo WhatsApp), sempre como opcional; OS cancelada não recebe."""
-    _require_manager(actor)
-    if ticket.status == TicketStatus.CANCELLED:
-        raise WorkflowError("OS cancelada não recebe formulário")
-    template = await get_template(db, data.template_id)
-    if not template.is_active:
-        raise WorkflowError("Modelo de formulário inativo")
-    if any(f.template_id == template.id for f in ticket.forms):
-        raise WorkflowError("Este formulário já está na OS")
-    required = data.required and ticket.status not in FINISHED_STATES
+    """Põe o formulário na OS (cópia das perguntas do modelo), com o evento no histórico. Sem
+    autor, o histórico mostra "Sistema" e o motivo (`note`). `order` desempata o horário dos que
+    entram juntos (a OS lista os formulários pela ordem de entrada).
+
+    Não lê `ticket.forms`: na abertura a relação ainda não foi carregada (e no AsyncSession o
+    lazy load quebra)."""
+    at = now + dt.timedelta(microseconds=order)
     form = TicketForm(
         id=uuid.uuid4(),
         ticket_id=ticket.id,
@@ -193,10 +233,18 @@ async def add_to_ticket(
         required=required,
         status=FormStatus.PENDING,
         answers={},
-        added_by_id=actor.id,
+        auto_attached=auto,
+        added_by_id=actor.id if actor else None,
+        created_at=at,
+        updated_at=at,
     )
     db.add(form)
-    if required and template.requires_signature:
+    if (
+        required
+        and template.requires_signature
+        and ticket.signed_at is None
+        and not ticket.signature_required
+    ):
         ticket.signature_required = True
     record_event(
         db,
@@ -204,9 +252,69 @@ async def add_to_ticket(
         actor,
         TicketEventType.FORM_ADDED,
         to_value=template.name[:64],
-        data={"form_id": str(form.id), "required": required},
+        note=note,
+        data={
+            "form_id": str(form.id),
+            "template_id": str(template.id),
+            "required": required,
+            "auto": auto,
+        },
+        now=at,
     )
-    await _touch(db, ticket, utcnow())  # o app recebe a mudança no próximo sync
+    return form
+
+
+async def _detach(
+    db: AsyncSession,
+    ticket: Ticket,
+    form: TicketForm,
+    *,
+    actor: User | None,
+    note: str | None = None,
+    now: dt.datetime | None = None,
+    release: bool = True,
+) -> None:
+    """Tira o formulário da OS (as fotos dele saem junto, em cascata), com o evento no histórico.
+    O evento com autor marca a decisão de uma pessoa: o modelo não volta sozinho para esta OS.
+    `release`: sem outro obrigatório que peça, a OS deixa de exigir a assinatura (a reconciliação
+    recalcula no fim, depois de todas as mudanças)."""
+    if release and form.required:
+        await _release_signature(db, ticket, form, await _template_of(db, form))
+    data = {"form_id": str(form.id)}
+    if form.template_id is not None:
+        data["template_id"] = str(form.template_id)
+    record_event(
+        db,
+        ticket,
+        actor,
+        TicketEventType.FORM_REMOVED,
+        from_value=form.name[:64],
+        note=note,
+        data=data,
+        now=now,
+    )
+    await db.delete(form)
+
+
+async def add_to_ticket(
+    db: AsyncSession, ticket: Ticket, data: TicketFormAdd, actor: User
+) -> TicketForm:
+    """Anexa o formulário. Na OS concluída a central ainda registra o checklist que chegou depois
+    pelo WhatsApp, sempre como opcional; OS cancelada não recebe."""
+    _require_manager(actor)
+    if ticket.status == TicketStatus.CANCELLED:
+        raise WorkflowError("OS cancelada não recebe formulário")
+    template = await get_template(db, data.template_id)
+    if not template.is_active:
+        raise WorkflowError("Modelo de formulário inativo")
+    if any(f.template_id == template.id for f in ticket.forms):
+        raise WorkflowError("Este formulário já está na OS")
+    required = data.required and ticket.status not in FINISHED_STATES
+    now = utcnow()
+    form = _attach(
+        db, ticket, template, required=required, auto=False, actor=actor, note=None, now=now
+    )
+    await _touch(db, ticket, now)  # o app recebe a mudança no próximo sync
     queue_event(db, "updated", ticket, actor, {"fields": ["forms"]})
     await db.flush()
     return form
@@ -272,17 +380,7 @@ async def remove_from_ticket(
     db: AsyncSession, ticket: Ticket, form: TicketForm, actor: User
 ) -> None:
     _require_manager(actor)
-    if form.required:
-        await _release_signature(db, ticket, form, await _template_of(db, form))
-    record_event(
-        db,
-        ticket,
-        actor,
-        TicketEventType.FORM_REMOVED,
-        from_value=form.name[:64],
-        data={"form_id": str(form.id)},
-    )
-    await db.delete(form)  # as fotos do formulário saem junto (cascade)
+    await _detach(db, ticket, form, actor=actor)
     await _touch(db, ticket, utcnow())  # o app recebe a mudança no próximo sync
     queue_event(db, "updated", ticket, actor, {"fields": ["forms"]})
     await db.flush()

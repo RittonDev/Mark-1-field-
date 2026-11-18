@@ -8,6 +8,12 @@ O que avisa o técnico (o app é dele): OS nova, oferta de OS para ele aceitar, 
 de uma visita, visita agendada ou remarcada, OS cancelada e a decisão do pedido de peça.
 Acompanhamento não gera aviso: o app não tem conversa (a central fala com ele pelo grupo de
 WhatsApp).
+
+`delivers(platform)` diz se o provedor entrega mesmo o push àquele tipo de aparelho. O POST
+/devices responde isso ao app (`push`: "live" ou "simulated"): enquanto não entrega, o próprio
+app transforma as novidades da sincronização em notificação do sistema; quando passa a entregar,
+o app para de repetir o aviso. Os lembretes da visita (1 dia, 1h40 e 10 min antes) são sempre
+locais, agendados no aparelho.
 """
 
 import logging
@@ -20,18 +26,27 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.enums import DevicePlatform
 from app.models.sync import DeviceToken
 
 log = logging.getLogger(__name__)
 
 
 class PushProvider(Protocol):
+    def delivers(self, platform: DevicePlatform) -> bool:
+        """O push chega de fato a um aparelho desta plataforma?"""
+        ...
+
     async def send(
         self, tokens: list[str], title: str, body: str, data: dict[str, str]
     ) -> None: ...
 
 
 class LogPushProvider:
+    def delivers(self, platform: DevicePlatform) -> bool:
+        # Só registra no log: nenhum aparelho recebe, então o app avisa por conta própria.
+        return False
+
     async def send(self, tokens: list[str], title: str, body: str, data: dict[str, str]) -> None:
         log.info("push (simulado) para %d aparelho(s): %s — %s", len(tokens), title, body)
 

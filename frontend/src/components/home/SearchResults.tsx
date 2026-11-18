@@ -467,37 +467,97 @@ const CHIP_ICON: Record<ChipKind, React.ComponentType<{ className?: string }>> =
   text: Type,
 };
 
-/** "Entendi: Boticário · Atrasadas · Novembro": como a busca leu a frase. */
-function Understood({ chips, stale }: { chips: SearchChip[]; stale: boolean }) {
+/** Um filtro que a Mia entendeu (status, cidade, técnico, período...). */
+function FilterChip({ chip }: { chip: SearchChip }) {
+  const Icon = CHIP_ICON[chip.kind] ?? Type;
   return (
-    <div className={clsx("mx-1 mb-1.5 flex flex-wrap items-center gap-1.5 px-2 pt-1 transition-opacity duration-150", stale && "opacity-60")}>
-      <span className="text-[11px] font-semibold text-ink-muted">Entendi:</span>
-      {chips.map((chip, i) => {
-        const Icon = CHIP_ICON[chip.kind] ?? Type;
-        return (
-          <span
-            key={`${chip.kind}-${chip.label}-${i}`}
-            className="inline-flex items-center gap-1 rounded-md bg-brand-soft px-1.5 py-0.5 text-[11px] font-medium text-brand-ink ring-1 ring-brand/20 ring-inset"
-          >
-            <Icon aria-hidden className="size-3 shrink-0" />
-            {chip.kind === "text" ? `"${chip.label}"` : chip.label}
-          </span>
-        );
-      })}
+    <span className="inline-flex items-center gap-1 rounded-md bg-surface px-1.5 py-0.5 text-[11px] leading-4 font-medium text-brand-ink ring-1 ring-brand/25 ring-inset">
+      <Icon aria-hidden className="size-3 shrink-0" />
+      {chip.label}
+    </span>
+  );
+}
+
+/** O que a Mia procurou como texto: tracejado, porque não virou filtro. */
+function TextChip({ label }: { label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-md border border-dashed border-line-strong bg-surface px-[5px] py-px text-[11px] leading-4 font-medium text-ink-muted">
+      <Type aria-hidden className="size-3 shrink-0" />“{label}”
+    </span>
+  );
+}
+
+const osCount = (total: number) => (total === 0 ? "nenhuma OS" : `${total.toLocaleString("pt-BR")} OS`);
+
+/**
+ * A resposta da Mia, entre o campo e a lista, fora da área que rola: "Entendi:" com os filtros (e o
+ * texto, tracejado) ou "Procurei" com o texto, e quantas OS deu. Enquanto ela procura, a resposta
+ * anterior fica esmaecida; sem resposta anterior, "Procurando…".
+ */
+export function AgentReply({ ctl }: { ctl: SearchController }) {
+  const { reply, thinking } = ctl;
+  if (!reply && !thinking) return null;
+  return (
+    <div className="px-2 pt-2">
+      <div
+        className={clsx(
+          "mx-1 flex items-start gap-2 rounded-lg bg-brand-soft/50 px-2 py-1.5 text-xs leading-5 text-ink transition-opacity duration-150",
+          reply && thinking && "opacity-60",
+        )}
+      >
+        <AgentMark size="xs" thinking={thinking} />
+        {reply ? (
+          <div className="min-w-0 flex-1">
+            <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+              <strong className="font-semibold">{reply.mode === "text" ? "Procurei" : "Entendi:"}</strong>
+              {reply.mode === "text" ? (
+                <TextChip label={reply.text ?? ""} />
+              ) : (
+                reply.chips.map((chip, i) =>
+                  chip.kind === "text" ? (
+                    <TextChip key={`text-${i}`} label={chip.label} />
+                  ) : (
+                    <FilterChip key={`${chip.kind}-${chip.label}-${i}`} chip={chip} />
+                  ),
+                )
+              )}
+              <span className="text-ink-muted tabular-nums">· {osCount(reply.total)}</span>
+            </p>
+            {reply.mode === "partial" ? <p className="text-ink-muted">Nenhuma OS com o texto “{reply.text}” nesse recorte.</p> : null}
+          </div>
+        ) : (
+          <p className="text-ink-muted">Procurando…</p>
+        )}
+      </div>
     </div>
   );
 }
 
+/** O que o leitor de tela ouve quando a busca volta: o resumo da Mia e quantos resultados há. */
+function spokenSummary(ctl: SearchController): string {
+  const results = `${plural(ctl.entries.length, "resultado", "resultados")}.`;
+  const reply = ctl.reply;
+  if (!reply) return results;
+  const say = (chip: SearchChip) => (chip.kind === "text" ? `“${chip.label}”` : chip.label);
+  const count = reply.total === 0 ? "Nenhuma OS." : `${reply.total.toLocaleString("pt-BR")} OS.`;
+  if (reply.mode === "text") return `Procurei “${reply.text ?? ""}”. ${count} ${results}`;
+  if (reply.mode === "partial") {
+    const understood = reply.chips.filter((c) => c.kind !== "text").map(say);
+    return `Entendi: ${understood.join(", ")}. Nenhuma OS com o texto “${reply.text ?? ""}” nesse recorte. ${results}`;
+  }
+  return `Entendi: ${reply.chips.map(say).join(", ")}. ${count} ${results}`;
+}
+
 /**
- * Resultados da busca (lista de opções do combobox): grupos, "Entendi", erro com "Tentar de novo",
- * "Buscando...", nada encontrado e a contagem para o leitor de tela. Quem usa põe em volta a área que
- * rola (com o listRef passado ao controlador).
+ * Resultados da busca (lista de opções do combobox): grupos, erro com "Tentar de novo", nada encontrado e
+ * o resumo para o leitor de tela. A resposta da Mia (AgentReply) fica fora daqui, entre o campo e a lista.
+ * Quem usa põe em volta a área que rola (com o listRef passado ao controlador).
  */
 export function SearchResults({ ctl, onLeave }: { ctl: SearchController; onLeave?: () => void }) {
   const groups = groupEntries(ctl.entries);
-  const showChips = ctl.typed !== "" && ctl.chips.some((c) => c.kind !== "text");
-  const onlyPlaces = ctl.entries.every((e) => e.group === GROUP.screens || e.group === GROUP.pages || e.group === GROUP.actions);
-  const waiting = isSearchable(ctl.typed) && (ctl.stale || ctl.fetching) && onlyPlaces && !ctl.failed;
+  // Com algum filtro entendido, a resposta da Mia já diz "nenhuma OS".
+  const empty =
+    ctl.asked !== "" && !ctl.thinking && !ctl.failed && ctl.entries.length === 0 && !ctl.chips.some((c) => c.kind !== "text");
   return (
     <>
       {ctl.failed ? (
@@ -505,7 +565,7 @@ export function SearchResults({ ctl, onLeave }: { ctl: SearchController; onLeave
           role="alert"
           className="mx-1 mb-2 flex items-center gap-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300"
         >
-          <span className="flex-1">Não foi possível buscar agora.</span>
+          <span className="flex-1">A {AGENT_NAME} não conseguiu buscar agora.</span>
           <button
             type="button"
             onClick={ctl.retry}
@@ -516,7 +576,6 @@ export function SearchResults({ ctl, onLeave }: { ctl: SearchController; onLeave
           </button>
         </div>
       ) : null}
-      {showChips ? <Understood chips={ctl.chips} stale={ctl.stale} /> : null}
       <div id={ctl.listId} role="listbox" aria-label="Resultados">
         {groups.map(({ group, items }) => (
           <div key={group} role="group" aria-label={group}>
@@ -568,18 +627,17 @@ export function SearchResults({ ctl, onLeave }: { ctl: SearchController; onLeave
           </div>
         ))}
       </div>
-      {waiting ? (
-        <p className="px-3 py-3 text-center text-sm text-ink-muted">Buscando...</p>
-      ) : ctl.typed && ctl.entries.length === 0 && !ctl.failed ? (
+      {empty ? (
         <div className="px-4 py-7 text-center">
-          <p className="text-sm font-semibold text-ink">Nada encontrado para &quot;{ctl.typed}&quot;.</p>
+          <p className="text-sm font-semibold text-ink">A {AGENT_NAME} não achou nada para “{ctl.asked}”.</p>
           <p className="mx-auto mt-1 max-w-sm text-xs text-ink-muted">
-            Tente o nº da OS, o nome do cliente ou da loja, um técnico, uma cidade ou um período (ex.: &quot;novembro&quot;).
+            Tente o nº da OS, o nome do cliente ou da loja, um técnico, uma cidade, uma etiqueta ou um período.
           </p>
         </div>
       ) : null}
-      <p className="sr-only" aria-live="polite">
-        {ctl.typed && !ctl.stale ? plural(ctl.entries.length, "resultado", "resultados") : ""}
+      {/* Uma fala por busca, só com o resultado do texto atual (digitando, fica quieta). */}
+      <p className="sr-only" aria-live="polite" aria-atomic="true">
+        {ctl.asked && !ctl.stale ? spokenSummary(ctl) : ""}
       </p>
     </>
   );

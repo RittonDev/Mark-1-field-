@@ -1,12 +1,12 @@
 "use client";
 
-import clsx from "clsx";
-import { Loader2, Search, X } from "lucide-react";
+import { X } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { Kbd } from "@/components/ui";
 import type { User } from "@/lib/types";
+import { AGENT_PROMPT, AgentBadge, AgentMark, AgentScan } from "./agent";
 import { readRecent, type RecentTicket } from "./search";
-import { SearchResults, useSearchController } from "./SearchResults";
+import { AgentReply, SearchResults, useSearchController } from "./SearchResults";
 
 /** Exemplos do que a busca entende (um clique preenche o campo). */
 const EXAMPLES = ["atrasadas", "agendadas amanhã", "sem técnico", "técnico joão novembro", "pendente pgto semana passada"];
@@ -18,9 +18,10 @@ function isTypingTarget(target: EventTarget | null): boolean {
 }
 
 /**
- * Busca grande do Início: OS, clientes, locais, técnicos, telas e ações, com a frase entendida pela API
- * ("atrasadas em santos", "16976", "técnico joão novembro"). "/" leva o foco para ela; os resultados
- * abrem logo abaixo, com setas, Enter (Ctrl+Enter abre a página; Shift+Enter, outra aba) e Esc.
+ * A Mia no Início, a busca grande: OS, clientes, locais, técnicos, telas e ações, com a frase entendida
+ * pela API ("atrasadas em santos", "16976", "técnico joão novembro"). "/" leva o foco para ela; a
+ * resposta da Mia e os resultados abrem logo abaixo, com setas, Enter (Ctrl+Enter abre a página;
+ * Shift+Enter, outra aba) e Esc.
  */
 export function HomeSearch({ user }: { user: User }) {
   const [open, setOpen] = useState(false);
@@ -31,7 +32,8 @@ export function HomeSearch({ user }: { user: User }) {
   const hintId = useId();
   const close = () => setOpen(false);
   const ctl = useSearchController({ user, recent, mode: "home", onLeave: close, listRef });
-  const showPanel = open && (ctl.typed !== "" || recent.length > 0);
+  // Só "Mia," no campo ainda não é busca: a lista mostra as recentes, como com o campo vazio.
+  const showPanel = open && (ctl.asked !== "" || recent.length > 0);
 
   // "/" em qualquer lugar da tela (fora de um campo, sem diálogo ou menu aberto) leva à busca.
   useEffect(() => {
@@ -77,14 +79,9 @@ export function HomeSearch({ user }: { user: User }) {
         if (!wrapRef.current?.contains(e.relatedTarget as Node | null)) setOpen(false);
       }}
     >
-      <div
-        className={clsx(
-          "flex items-center gap-3 rounded-xl border border-line bg-surface px-4 shadow-elev-1 transition-[border-color,box-shadow] duration-150",
-          "hover:border-line-strong focus-within:border-brand focus-within:ring-4 focus-within:ring-brand/15",
-          "dark:border-line-strong dark:bg-surface-2",
-        )}
-      >
-        <Search aria-hidden className="size-5 shrink-0 text-ink-subtle" />
+      {/* Borda, fundo, sombra e foco da caixa vêm do .mf-agent-field (globals.css). */}
+      <div className="mf-agent-field relative flex items-center gap-3 rounded-xl px-3">
+        <AgentMark size="md" thinking={ctl.thinking} />
         <input
           ref={inputRef}
           value={ctl.query}
@@ -97,10 +94,10 @@ export function HomeSearch({ user }: { user: User }) {
             setOpen(true);
           }}
           onKeyDown={onKeyDown}
-          placeholder="Busque OS, cliente, loja, técnico ou tela… ex.: “atrasadas em santos”, “16976”, “técnico joão novembro”"
+          placeholder={`${AGENT_PROMPT}: OS, cliente, loja, técnico, cidade ou período`}
           className="h-12 min-w-0 flex-1 truncate bg-transparent text-[15px] text-ink outline-none placeholder:text-ink-subtle"
           role="combobox"
-          aria-label="Buscar OS, cliente, loja, técnico ou tela"
+          aria-label={AGENT_PROMPT}
           aria-describedby={hintId}
           aria-expanded={showPanel}
           aria-controls={showPanel ? ctl.listId : undefined}
@@ -111,7 +108,7 @@ export function HomeSearch({ user }: { user: User }) {
           spellCheck={false}
           enterKeyHint="search"
         />
-        {ctl.fetching ? <Loader2 aria-hidden className="size-4 shrink-0 animate-spin text-ink-subtle" /> : null}
+        <AgentBadge from="sm" />
         {ctl.query ? (
           <button
             type="button"
@@ -129,10 +126,12 @@ export function HomeSearch({ user }: { user: User }) {
             <Kbd>/</Kbd>
           </span>
         )}
+        {ctl.thinking ? <AgentScan /> : null}
       </div>
 
       {showPanel ? (
         <div className="absolute inset-x-0 top-full z-30 mt-2 flex animate-pop flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-pop">
+          <AgentReply ctl={ctl} />
           <div ref={listRef} className="max-h-[min(62vh,540px)] overflow-y-auto p-2">
             <SearchResults ctl={ctl} onLeave={close} />
           </div>

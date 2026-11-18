@@ -1,16 +1,18 @@
-"""Sincronização do app do técnico: lote robusto, idempotência, resposta enxuta, revogação e
-paginação do pull."""
+"""Sincronização do app do técnico: lote robusto, idempotência, resposta enxuta, revogação,
+paginação do pull e registro do aparelho para o push."""
 
 import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
+from app.api.routes import sync as sync_routes
 from app.core.config import settings
-from app.models import SyncOperation
+from app.core.enums import DevicePlatform
+from app.models import DeviceToken, SyncOperation
 from app.services import parts, sync
 from tests.conftest import World, requires_db
 from tests.test_api import create, transition
@@ -255,3 +257,46 @@ async def test_pull_pages_through_a_mass_update(
         )
     ).json()
     assert rest["tickets"] == [] and rest["has_more"] is False
+
+
+class AndroidOnlyPush:
+    """Provedor de teste: entrega o push só nos aparelhos Android."""
+
+    def delivers(self, platform: DevicePlatform) -> bool:
+        return platform == DevicePlatform.ANDROID
+
+    async def send(self, tokens: list[str], title: str, body: str, data: dict[str, str]) -> None:
+        return None
+
+
+async def test_device_registration_says_whether_push_is_live(
+    client: AsyncClient, world: World, engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """O app só deixa de avisar sozinho (notificação local) quando o servidor entrega o push."""
+    th = world.tech.headers
+    android = {"platform": "android", "token": "token-de-teste-0001", "app_version": "0.1.0"}
+    r = await client.post(f"{API}/devices", json=android, headers=th)
+    assert r.status_code == 200, r.text
+    assert r.json() == {"push": "simulated"}  # LogPushProvider: nenhum aparelho recebe
+
+    # O app registra de novo a cada abertura: o mesmo token não vira outro aparelho.
+    r = await client.post(f"{API}/devices", json=android, headers=th)
+    assert r.status_code == 200, r.text
+    same_token = DeviceToken.token == android["token"]
+    async with engine.connect() as conn:
+        rows = await conn.scalar(select(func.count()).select_from(DeviceToken).where(same_token))
+    assert rows == 1
+
+    monkeypatch.setattr(sync_routes, "get_provider", AndroidOnlyPush)
+    r = await client.post(f"{API}/devices", json=android, headers=th)
+    assert r.json() == {"push": "live"}
+    ios = {"platform": "ios", "token": "token-de-teste-0002", "app_version": "0.1.0"}
+    r = await client.post(f"{API}/devices", json=ios, headers=th)
+    assert r.status_code == 200 and r.json() == {"push": "simulated"}
+
+    # Sair da conta tira só o aparelho do próprio técnico.
+    other = {"platform": "android", "token": "token-de-teste-0003"}
+    r = await client.post(f"{API}/devices", json=other, headers=world.tech_other.headers)
+    assert r.status_code == 200, r.text
+    assert (await client.delete(f"{API}/devices/{other['token']}", headers=th)).status_code == 404
+    assert (await client.delete(f"{API}/devices/{android['token']}", headers=th)).status_code == 204
