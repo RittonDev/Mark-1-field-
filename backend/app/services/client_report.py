@@ -52,7 +52,7 @@ FINISHED = (S.RESOLVED, S.CLOSED)
 LINK_KIND = "report"
 PHOTO_LINK_MINUTES = 24 * 60
 NOT_FINISHED = "Disponível quando a OS for concluída"
-LINK_DISABLED = "O link do relatório foi desativado pela central"
+LINK_DISABLED = "O link do relatório foi desativado pela central. Fale com a central no grupo."
 # A mesma pessoa recarregando a página (ou baixando o PDF) não conta como outra visualização.
 VIEW_DEDUPE = timedelta(minutes=10)
 

@@ -2,6 +2,7 @@
 // atribuiu a ele (o backend já filtra; aqui também, por segurança, caso o aparelho tenha dados antigos).
 
 import { PRIORITY, STATUS } from "./constants";
+import { awaitingNewVisit } from "./field";
 import { addDays, startOfDay } from "./format";
 import type { LocalTicket } from "./syncTypes";
 import type { TicketStatus, User } from "./types";
@@ -40,11 +41,13 @@ export const isHelper = (ticket: Pick<LocalTicket, "assignee" | "helpers">, user
 export const onVisit = (ticket: LocalTicket, user: User) => isMine(ticket, user) || isHelper(ticket, user);
 
 /**
- * Visita improdutiva registrada e ainda sem nova agenda: a OS voltou para a central reagendar,
- * então sai de "Hoje" e do calendário até ganhar uma nova visita.
+ * Visita improdutiva e nenhuma visita nova marcada depois dela (a regra da API, field.py::awaiting_new_visit):
+ * a OS voltou para a central reagendar, então sai de "Hoje" e do calendário até ganhar uma nova visita. Vale
+ * também para a OS migrada que manteve a agenda da visita improdutiva. Em deslocamento ou em atendimento o
+ * técnico já está indo de novo, então não está esperando.
  */
 export const awaitingReschedule = (ticket: LocalTicket) =>
-  ticket.status === "assigned" && !ticket.scheduled_start && Boolean(ticket.last_unproductive_at);
+  (ticket.status === "assigned" || ticket.status === "scheduled") && awaitingNewVisit(ticket);
 
 /**
  * Parada esperando a central: improdutiva sem nova agenda, ou aguardando peça/cliente sem visita marcada

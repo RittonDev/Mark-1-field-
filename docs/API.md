@@ -438,7 +438,7 @@ link pode ser copiado de novo a qualquer momento e trocado quando preciso.
   (link desativado).
 - `POST /tickets/{id}/report-link` (a gestão em qualquer status, e cria um link novo se o anterior foi desativado;
   o técnico responsável só com a OS concluída, senão 422 "Disponível quando a OS for concluída", e só pega o link
-  que existe: desativado pela central, 422 "O link do relatório foi desativado pela central"; outro técnico, 403) ·
+  que existe: desativado pela central, 422 "O link do relatório foi desativado pela central. Fale com a central no grupo."; outro técnico, 403) ·
   `POST /tickets/{id}/report-link/rotate` (gestão; novo link, o anterior para de funcionar) ·
   `DELETE /tickets/{id}/report-link` (gestão; 204). Nenhum dos três muda a `version` da OS. O link nasce na
   abertura e na conclusão (`resolved`) quando não há um; o fechamento (inclusive o automático) não recria o link
