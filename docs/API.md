@@ -354,8 +354,9 @@ Todos exigem analista ou gestor, salvo indicação. Valores em R$ chegam como n�
     (PUT: a versão nova nas cópias que ninguém começou), os vínculos valem nas OS antes da visita: `attached_to` (em
     quantas o formulário entrou: casam e não o têm, menos onde uma pessoa tirou ou deixou de fora na abertura) e
     `detached_from` (de quantas saiu: entrou sozinho, não casa mais e ninguém começou; `note` "O modelo não está mais
-    ligado ao tipo nem à categoria desta OS"). Sem a opção, os três vêm `null`. Cada OS alterada ganha o histórico e um
-    `ticket.updated` `{fields: ["forms"]}`. Salvar só os vínculos (ou o padrão de obrigatório) não sobe a `version`.
+    ligado ao tipo nem à categoria desta OS"). O POST devolve só `attached_to`; sem a opção, os três vêm `null`. Cada
+    OS alterada ganha o histórico e um `ticket.updated` `{fields: ["forms"]}`. Salvar só os vínculos (ou o padrão de
+    obrigatório) não sobe a `version`.
   - `GET /form-templates/{id}/usage` (Formulários, ver) → `{service_types: [{id, name, customer: {id, name}|null, used,
     total}]}`: os tipos de OS ativos em que o modelo está em pelo menos 3 OS e em pelo menos metade das OS do tipo, nos
     últimos 12 meses (OS não canceladas), os 10 mais usados. Serve para ligar os modelos migrados, que chegam sem vínculo.
