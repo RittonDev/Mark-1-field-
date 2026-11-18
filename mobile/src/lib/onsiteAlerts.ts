@@ -25,7 +25,7 @@ interface Wanted {
  * agenda o que falta. Sem técnico ou sem permissão, não fica nenhum. `force`: agenda tudo de novo (ex.: o alarme
  * exato acabou de ser liberado).
  */
-export async function reconcileOnsiteAlerts({ N, user, tickets, granted, force }: AlertsContext): Promise<void> {
+export async function reconcileOnsiteAlerts({ N, user, tickets, granted, force, alive }: AlertsContext): Promise<void> {
   const wanted = new Map<string, Wanted>();
   if (user && granted) {
     const { onsite_warning_minutes: warnMin } = getFieldRules();
@@ -63,6 +63,7 @@ export async function reconcileOnsiteAlerts({ N, user, tickets, granted, force }
   }
   for (const [identifier, want] of wanted) {
     if (kept.has(identifier)) continue;
+    if (!alive()) return; // saiu da conta no meio da volta
     await N.scheduleNotificationAsync({
       identifier,
       content: { title: want.title, body: want.body, data: { at: want.date.toISOString(), ticketId: want.ticketId } },

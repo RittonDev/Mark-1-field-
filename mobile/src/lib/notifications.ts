@@ -254,6 +254,8 @@ export interface AlertsContext {
   granted: boolean;
   /** Agenda tudo de novo, mesmo o que não mudou. */
   force: boolean;
+  /** A sessão desta volta ainda vale: saiu da conta no meio, não agenda mais nada. */
+  alive: () => boolean;
 }
 
 let alertsRun: Promise<void> | null = null;
@@ -291,7 +293,8 @@ async function reconcileLocalAlerts(force: boolean): Promise<void> {
     const user = session.get().user;
     const tickets = user ? await listTickets() : [];
     const granted = (await N.getPermissionsAsync()).granted;
-    const context: AlertsContext = { N, user, tickets, granted, force };
+    const alive = () => session.get().user?.id === user?.id;
+    const context: AlertsContext = { N, user, tickets, granted, force, alive };
     await reconcileOnsiteAlerts(context).catch((error: unknown) => console.warn("Alertas do tempo na loja indisponíveis", error));
     await reconcileVisitReminders(context).catch((error: unknown) => console.warn("Lembretes da visita indisponíveis", error));
   } catch (error) {
@@ -304,7 +307,7 @@ async function reconcileLocalAlerts(force: boolean): Promise<void> {
  * e agenda o que falta. Sem técnico, sem permissão ou com a chave desligada, não fica nenhum. Na bandeja, tira o
  * lembrete de uma visita que não vale mais (começou, foi cancelada, saiu da lista ou mudou de horário).
  */
-async function reconcileVisitReminders({ N, user, tickets, granted, force }: AlertsContext): Promise<void> {
+async function reconcileVisitReminders({ N, user, tickets, granted, force, alive }: AlertsContext): Promise<void> {
   const wanted =
     user && granted && (await visitRemindersEnabled()) ? planVisitReminders(tickets, user.id, Date.now(), getServerOffsetMs()) : [];
   const byId = new Map(wanted.map((reminder) => [reminder.identifier, reminder]));
@@ -318,6 +321,7 @@ async function reconcileVisitReminders({ N, user, tickets, granted, force }: Ale
   }
   for (const reminder of wanted) {
     if (kept.has(reminder.identifier)) continue;
+    if (!alive()) return;
     await N.scheduleNotificationAsync({
       identifier: reminder.identifier,
       content: {

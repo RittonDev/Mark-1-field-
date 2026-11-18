@@ -91,7 +91,7 @@ import { formatShort } from "./format";
 import { pendingRequiredForms } from "./forms";
 import { haptic } from "./haptics";
 import { isDone, isHelper } from "./lists";
-import { dismissNewsExcept, inForeground, presentNews, syncLocalAlerts, type NewsItem } from "./notifications";
+import { dismissNews, dismissNewsExcept, inForeground, presentNews, syncLocalAlerts, type NewsItem } from "./notifications";
 import {
   announceClosedOffers,
   applyOfferList,
@@ -862,6 +862,9 @@ function announce(notices: Notice[], vibrate?: () => void) {
   if (inForeground()) {
     vibrate?.();
     notices.forEach(showNotice);
+    // A notificação que ficou velha sai da bandeja também com o app na tela (ex.: "Nova OS" da OS cancelada).
+    const stale = notices.flatMap((notice) => notice.replaces ?? []);
+    if (stale.length) void dismissNews(stale);
     return;
   }
   void (async () => {

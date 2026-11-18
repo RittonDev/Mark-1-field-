@@ -674,10 +674,15 @@ export interface TicketCreatePayload {
   project_id?: UUID | null;
   /** Etiquetas já na abertura (ex.: "Ticket Avulso"); a API que ainda não aceita ignora o campo. */
   tags?: Tag[];
+  /**
+   * Formulários gravados junto com a OS, na ordem. Omitido ou null: entram os ligados ao tipo de OS e à categoria.
+   * Uma lista, mesmo vazia, vale como está (até 20). Repetido, inexistente ou inativo: 422, sem gastar número.
+   */
+  forms?: { template_id: UUID; required: boolean }[] | null;
 }
 
 export type TicketUpdatePayload = Partial<
-  Omit<TicketCreatePayload, "source" | "requester_id" | "assignee_id" | "tags">
+  Omit<TicketCreatePayload, "source" | "requester_id" | "assignee_id" | "tags" | "forms">
 > & {
   expected_version?: number;
   /** Só a gestão, a qualquer momento (inclusive OS fechada). */
@@ -1117,6 +1122,21 @@ export type FormFieldType =
   | "confirm"
   | "photo";
 
+/**
+ * Resposta automática: a pergunta já vem preenchida com um dado da OS que o técnico já vê (ele corrige). Texto e
+ * texto longo aceitam todas as fontes; data, só `visit_date`. Nada de nº do chamado do cliente, CNPJ ou contato.
+ */
+export type FormPrefill =
+  | "location_name"
+  | "location_code"
+  | "customer"
+  | "address"
+  | "city"
+  | "ticket_code"
+  | "technician"
+  | "service_type"
+  | "visit_date";
+
 export interface FormField {
   id: string;
   type: FormFieldType;
@@ -1126,6 +1146,8 @@ export interface FormField {
   options: string[];
   min_photos: number;
   max_photos: number;
+  /** Resposta automática (null: a pergunta é do técnico). Combinação que o tipo não aceita volta null. */
+  prefill?: FormPrefill | null;
 }
 
 export interface FormTemplate {
@@ -1133,7 +1155,12 @@ export interface FormTemplate {
   name: string;
   description: string | null;
   fields: FormField[];
+  /** Tipos de OS em que o formulário entra sozinho. */
   service_type_ids: UUID[];
+  /** Categorias em que o formulário entra sozinho (valem também as subcategorias). No PUT, omitido mantém. */
+  category_ids: UUID[];
+  /** Entra na OS como obrigatório (padrão) ou opcional. No PUT, omitido mantém. */
+  default_required: boolean;
   requires_signature: boolean;
   is_active: boolean;
   version: number;
@@ -1141,6 +1168,26 @@ export interface FormTemplate {
   updated_at: ISODate;
   /** Só ao salvar com `apply_to_pending=true`: quantas OS (formulário ainda não começado) receberam a versão nova. */
   applied_to?: number | null;
+  /**
+   * Também só com `apply_to_pending=true` (no POST e no PUT): em quantas OS que ainda não começaram o formulário
+   * entrou pelo tipo de OS ou pela categoria, e de quantas saiu (entrou sozinho, não casa mais, sem resposta).
+   */
+  attached_to?: number | null;
+  detached_from?: number | null;
+}
+
+/** Tipo de OS em que o modelo foi usado nos últimos 12 meses (OS não canceladas): `used` de `total` OS do tipo. */
+export interface ServiceTypeUsage {
+  id: UUID;
+  name: string;
+  customer: Ref | null;
+  used: number;
+  total: number;
+}
+
+/** GET /form-templates/{id}/usage: tipos com o modelo em pelo menos 3 OS e na metade delas (os 10 mais usados). */
+export interface FormTemplateUsage {
+  service_types: ServiceTypeUsage[];
 }
 
 export type FormStatus = "pending" | "in_progress" | "completed";
@@ -1161,6 +1208,13 @@ export interface TicketForm {
   completed_by: Ref | null;
   created_at: ISODate;
   updated_at: ISODate;
+  /** Entrou sozinho, pelo tipo de OS ou pela categoria (servidor antigo não manda). */
+  auto_attached?: boolean;
+  /**
+   * Resposta automática das perguntas ainda sem resposta: {campo: valor}, ao vivo até a conclusão, que grava o valor
+   * nas respostas (concluído, vem vazio). Vale como resposta do servidor: `{...prefill, ...answers}`.
+   */
+  prefill?: Record<string, FormAnswer>;
 }
 
 // Custos extras da OS (reembolso ao técnico)
