@@ -101,10 +101,16 @@ function monthRange(month: string): { date_from?: string; date_to?: string } {
   return { date_from: `${month}-01`, date_to: new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10) };
 }
 
-function usePayouts(source: Source, month: string, enabled: boolean) {
+/** Com o técnico escolhido, a API filtra (a lista e o resumo dos cartões ficam inteiros, sem o corte em 1.000). */
+function usePayouts(source: Source, month: string, technicianId: string, enabled: boolean) {
   return useQuery({
-    queryKey: ["payouts", source, month],
-    queryFn: ({ signal }) => api.get<PayoutList>("/payouts", { ...SOURCE_QUERY[source], ...monthRange(month) }, { signal }),
+    queryKey: ["payouts", source, month, technicianId],
+    queryFn: ({ signal }) =>
+      api.get<PayoutList>(
+        "/payouts",
+        { ...SOURCE_QUERY[source], ...monthRange(month), technician_id: technicianId || undefined },
+        { signal },
+      ),
     placeholderData: keepPreviousData,
     enabled,
   });
@@ -182,15 +188,17 @@ export default function PayoutsPage() {
   const canEdit = useCan("commercial.payouts", "edit");
   // Os reembolsos de Custos extras entram no extrato só para quem tem acesso a Custos extras.
   const canExpenses = useCan("commercial.expenses");
+  const canPayExpenses = useCan("commercial.expenses", "edit");
   const months = useMemo(() => lastMonths(), []);
   const [view, setView] = useState<View>("to_pay");
   const [month, setMonth] = useState("");
   // Guarda o nome junto: o técnico escolhido continua na lista mesmo num mês sem lançamentos dele.
   const [technician, setTechnician] = useState<{ id: UUID; name: string } | null>(null);
   const [selected, setSelected] = useState<Set<UUID>>(new Set());
+  const technicianId = technician?.id ?? "";
 
-  const pendingQuery = usePayouts("pending", month, canView);
-  const paidQuery = usePayouts("paid", month, canView);
+  const pendingQuery = usePayouts("pending", month, technicianId, canView);
+  const paidQuery = usePayouts("paid", month, technicianId, canView);
   const queries = [pendingQuery, paidQuery];
   // Telefone (botão do WhatsApp) e e-mail (separa técnicos com o mesmo nome).
   const people = useQuery({
@@ -222,8 +230,14 @@ export default function PayoutsPage() {
     for (const source of sources) for (const line of source.items) byId.set(line.id, line);
     return [...byId.values()];
   }, [pendingQuery.data, pendingQuery.dataUpdatedAt, paidQuery.data, paidQuery.dataUpdatedAt]);
-  const technicianId = technician?.id ?? "";
+  // A API já filtra pelo técnico; o filtro aqui só cobre a lista anterior enquanto a nova não chega.
   const lines = useMemo(() => (technicianId ? all.filter((l) => l.technician.id === technicianId) : all), [all, technicianId]);
+  // Técnicos vistos sem o filtro (com um escolhido, a lista só traz ele): o seletor continua com todos.
+  const [seen, setSeen] = useState<Record<UUID, string>>({});
+  if (!technicianId) {
+    const fresh = all.filter((l) => seen[l.technician.id] !== l.technician.name);
+    if (fresh.length) setSeen((s) => ({ ...s, ...Object.fromEntries(fresh.map((l) => [l.technician.id, l.technician.name])) }));
+  }
   // Os cartões somam pela mesma regra da API, só com o técnico escolhido.
   const byState = useMemo(() => {
     const of = (state: LineState) => lines.filter((l) => stateOf(l) === state);
@@ -245,7 +259,10 @@ export default function PayoutsPage() {
     return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
   }, [lines, view]);
   const options = useMemo(() => {
+    // Técnicos ativos, os das linhas (inclusive inativos) e os vistos antes de escolher um.
     const map = new Map<UUID, string>();
+    for (const person of people.data ?? []) map.set(person.id, person.name);
+    for (const [id, name] of Object.entries(seen)) map.set(id, name);
     for (const line of all) map.set(line.technician.id, line.technician.name);
     if (technician && !map.has(technician.id)) map.set(technician.id, technician.name);
     const repeated = new Map<string, number>();
@@ -257,7 +274,7 @@ export default function PayoutsPage() {
         return { id, name, label: (repeated.get(name) ?? 0) > 1 && email ? `${name} · ${email}` : name };
       })
       .sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
-  }, [all, technician, people.data]);
+  }, [all, technician, seen, people.data]);
 
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ["payouts"] });
@@ -422,10 +439,10 @@ export default function PayoutsPage() {
   const pendingCut = isCut(pendingQuery.data);
   const paidCut = isCut(paidQuery.data);
   const truncated = pendingCut || paidCut;
-  // Lista cortada no limite e sem técnico escolhido: o valor dos cartões vem somado pela API, que conta
-  // todos os lançamentos do filtro (as linhas na tela são só as mais recentes).
-  const pendingSums = !technicianId && pendingCut ? pendingQuery.data?.summary : undefined;
-  const paidSums = !technicianId && paidCut ? paidQuery.data?.summary : undefined;
+  // Lista cortada no limite: o valor dos cartões vem somado pela API, que conta todos os lançamentos do
+  // filtro, com o técnico escolhido ou não (as linhas na tela são só as mais recentes).
+  const pendingSums = pendingCut ? pendingQuery.data?.summary : undefined;
+  const paidSums = paidCut ? paidQuery.data?.summary : undefined;
   const sums = {
     to_pay: pendingSums?.to_pay ?? total(byState.to_pay),
     expected: pendingSums?.expected ?? total(byState.expected),
@@ -544,7 +561,7 @@ export default function PayoutsPage() {
         <p className="mt-2 text-xs text-ink-muted">
           {month ? "O mês vale pela conclusão da OS; a OS ainda aberta entra pela data em que o valor foi lançado." : ""}
           {truncated
-            ? ` A lista traz até ${intFmt(LIMIT)} lançamentos a pagar e ${intFmt(LIMIT)} pagos (os mais recentes)${technicianId ? "" : "; os valores dos cartões somam todos"}: escolha um mês para ver a lista inteira.`
+            ? ` A lista traz até ${intFmt(LIMIT)} lançamentos a pagar e ${intFmt(LIMIT)} pagos (os mais recentes); os valores dos cartões somam todos: escolha um mês para ver a lista inteira.`
             : ""}
         </p>
       ) : null}

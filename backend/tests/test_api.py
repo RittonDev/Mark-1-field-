@@ -440,7 +440,9 @@ async def test_self_assign_records_the_change_once(
     start = (datetime.now(UTC) + timedelta(days=1)).isoformat()
     await transition(client, an, u, "scheduled", scheduled_start=start)
     events = (await client.get(f"{API}/tickets/{u['id']}/events", headers=an)).json()
-    changes = [(e["from_value"], e["to_value"]) for e in events if e["event_type"] == "status_changed"]
+    changes = [
+        (e["from_value"], e["to_value"]) for e in events if e["event_type"] == "status_changed"
+    ]
     assert changes == [("new", "assigned"), ("assigned", "scheduled")]
 
 

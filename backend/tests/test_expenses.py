@@ -113,9 +113,7 @@ async def test_company_cost_refunds_no_one(client: AsyncClient, world: World) ->
         "end": (now + timedelta(hours=1)).isoformat(),
     }
     rep = (await client.get(f"{API}/expenses", params=params, headers=an)).json()
-    to_pay = {
-        (row["technician"] or {}).get("id"): row["to_pay"] for row in rep["by_technician"]
-    }
+    to_pay = {(row["technician"] or {}).get("id"): row["to_pay"] for row in rep["by_technician"]}
     assert to_pay == {str(world.tech.user.id): 5.0, None: 10.0}
 
 

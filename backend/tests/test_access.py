@@ -484,7 +484,9 @@ async def test_cost_receipt_stays_with_extra_costs(
         assert r.status_code == 200, r.text
     r = await client.delete(f"{API}/attachments/{receipt}", headers=sup)
     assert r.status_code == 422 and "reembolsado" in r.json()["detail"]
-    assert (await client.patch(expense, json={"status": "approved"}, headers=sup)).status_code == 200
+    assert (
+        await client.patch(expense, json={"status": "approved"}, headers=sup)
+    ).status_code == 200
     assert (await client.delete(f"{API}/attachments/{receipt}", headers=sup)).status_code == 204
     rows = (await client.get(f"{API}/tickets/{t['id']}/expenses", headers=sup)).json()
     assert [e["receipt_attachment_id"] for e in rows] == [None]  # sem apontar para o apagado
@@ -548,9 +550,7 @@ async def test_project_margin_needs_every_queue(client: AsyncClient, world: Worl
         300.0,
         2,
     )
-    await set_access(
-        client, world.admin.headers, world.analyst.user.id, scope="own", unowned=False
-    )
+    await set_access(client, world.admin.headers, world.analyst.user.id, scope="own", unowned=False)
     own = (await client.get(f"{API}/projects/{pid}", headers=an)).json()
     assert (own["contract_value"], own["margin"]) == (1000.0, None)
     assert (own["stats"]["payouts_total"], own["stats"]["tickets_total"]) == (0, 1)
@@ -574,7 +574,9 @@ async def test_users_screen_shows_the_saved_role_default(client: AsyncClient, wo
     assert me["access"]["items"]["commercial.payouts"] == "none"
     assert (await client.get(f"{API}/payouts", headers=an)).status_code == 403
 
-    listed = next(u for u in (await client.get(f"{API}/users", headers=adm)).json() if u["id"] == uid)
+    listed = next(
+        u for u in (await client.get(f"{API}/users", headers=adm)).json() if u["id"] == uid
+    )
     one = (await client.get(f"{API}/users/{uid}", headers=adm)).json()
     for seen in (listed, one):
         assert (seen["access_profile_id"], seen["access"]) == (None, me["access"])

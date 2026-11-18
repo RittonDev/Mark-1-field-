@@ -1907,7 +1907,9 @@ async def update_attachment(
     return attachment
 
 
-RECEIPT_OF_PAID = "Comprovante de custo já reembolsado: volte o custo para Aprovado antes de excluir"
+RECEIPT_OF_PAID = (
+    "Comprovante de custo já reembolsado: volte o custo para Aprovado antes de excluir"
+)
 
 
 async def remove_attachment(
