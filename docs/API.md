@@ -1122,9 +1122,9 @@ técnico) e, só no aceite, a leitura e o valor pago do técnico nesta OS.
 - Cabeçalho da OS (toda a gestão, pelo `open_offers`): sem técnico e com oferta esperando resposta, o chip "Sem
   técnico" vira "Oferta enviada" / "N ofertas enviadas", em tom neutro. Sem Pagamentos, a Geral também mostra só
   esse contador, sem valores. O editor da OS (página e painel, com ou sem Pagamentos) relê o detalhe (`["ticket",
-  id]`, exato) 1 s depois do `next_offer_expires_at`, em etapas quando passa do teto do `setTimeout`; se a resposta
-  ainda traz o mesmo prazo (relógio do computador adiantado), tenta de novo até 4 vezes, a cada 15 s. Trocar de OS ou
-  fechar desarma.
+  id]`, exato) e a lista de ofertas 1 s depois do `next_offer_expires_at`, em etapas quando passa do teto do
+  `setTimeout`; se a resposta ainda traz o mesmo prazo (relógio do computador adiantado), tenta de novo até 4 vezes,
+  a cada 15 s. Trocar de OS ou fechar desarma.
 - Histórico: os quatro `offer_*` (técnicos e valor no envio, valor no aceite, motivo na recusa, motivo no
   encerramento) e o `assigned` com `via: "offer"` ("assumiu a OS pela oferta"). No `offer_cancelled`, as notas
   "A central incluiu o técnico na visita" e "Técnico sem acesso ao app" viram "encerrou a oferta ao incluir o técnico

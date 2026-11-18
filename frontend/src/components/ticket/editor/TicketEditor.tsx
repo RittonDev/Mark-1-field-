@@ -118,7 +118,8 @@ const OFFER_RECHECKS = 4;
 /**
  * A oferta vence sem rotina na API: o "Oferta enviada" do cabeçalho e o contador da Geral só mudam quando a
  * OS é relida. Relê a OS 1 s depois do prazo mais próximo (`next_offer_expires_at`), para toda a gestão, com
- * ou sem Pagamentos. Trocar de OS ou fechar desarma.
+ * ou sem Pagamentos, e a lista de ofertas junto (com Pagamentos), para o bloco Ofertas não ficar para trás
+ * do cabeçalho. Trocar de OS ou fechar desarma.
  */
 function useOfferExpiryReload(ticketId: UUID, expiresAt: string | null | undefined) {
   const queryClient = useQueryClient();
@@ -129,6 +130,7 @@ function useOfferExpiryReload(ticketId: UUID, expiresAt: string | null | undefin
     let rechecks = 0;
     const reload = () => {
       void queryClient.invalidateQueries({ queryKey: ["ticket", ticketId], exact: true });
+      void queryClient.invalidateQueries({ queryKey: ["ticket", ticketId, "offers"], exact: true });
       // Com outro prazo (ou nenhum) na resposta, este efeito recomeça com ele e desarma esta tentativa.
       if (rechecks < OFFER_RECHECKS) {
         rechecks += 1;
