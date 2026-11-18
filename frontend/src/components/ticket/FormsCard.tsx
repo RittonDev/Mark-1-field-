@@ -70,6 +70,12 @@ function inReport(form: TicketForm, photos: Attachment[]): boolean {
 
 type Answers = Record<string, FormAnswer>;
 
+/**
+ * As respostas como o servidor as entende: a resposta automática (dado da OS, ao vivo até a conclusão) por
+ * baixo do que já foi respondido. O campo já vem preenchido e conta para o que falta.
+ */
+const serverAnswers = (form: TicketForm): Answers => ({ ...(form.prefill ?? {}), ...form.answers });
+
 const empty = (v: FormAnswer | undefined) => v === undefined || v === "" || (Array.isArray(v) && v.length === 0);
 
 /** Mesma resposta: texto sem os espaços das pontas (como a API guarda) e múltipla escolha em qualquer ordem. */
@@ -181,9 +187,8 @@ export function FormsCard({ ticket }: { ticket: TicketDetail }) {
           ticket.forms.map((form) => {
             const photos = photosOf(form.id);
             const qs = questions(form);
-            const done = qs.filter((f) =>
-              answered(f, form.answers[f.id], photos.filter((p) => p.field_id === f.id).length),
-            ).length;
+            const values = serverAnswers(form);
+            const done = qs.filter((f) => answered(f, values[f.id], photos.filter((p) => p.field_id === f.id).length)).length;
             const status = FORM_STATUS[form.status];
             return (
               <li key={form.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
@@ -199,6 +204,7 @@ export function FormsCard({ ticket }: { ticket: TicketDetail }) {
                   ) : (
                     <span className="text-xs text-ink-muted">
                       {done}/{qs.length} respondidas · {photos.length} {photos.length === 1 ? "foto" : "fotos"}
+                      {form.auto_attached ? " · automático" : ""}
                       {form.completed_by ? ` · concluído por ${form.completed_by.name} em ${formatDateTime(form.completed_at)}` : ""}
                     </span>
                   )}
@@ -318,6 +324,12 @@ function AddFormDialog({ ticket, finished, onClose }: { ticket: TicketDetail; fi
     queryFn: () => api.get<FormTemplate[]>(`/tickets/${ticket.id}/forms/suggestions`),
   });
   const attached = new Set(ticket.forms.map((f) => f.template_id));
+  // O Obrigatório começa no padrão do modelo escolhido (e continua ajustável).
+  const choose = (id: string) => {
+    setTemplateId(id);
+    const template = (templates.data ?? []).find((t) => t.id === id) ?? (suggested.data ?? []).find((t) => t.id === id);
+    if (template) setRequired(template.default_required ?? true);
+  };
   const add = useMutation({
     mutationFn: (id: string) => api.post<TicketForm>(`/tickets/${ticket.id}/forms`, { template_id: id, required: required && !finished }),
     onSuccess: (form) => {
@@ -336,7 +348,7 @@ function AddFormDialog({ ticket, finished, onClose }: { ticket: TicketDetail; fi
       title="Adicionar formulário à OS"
       description={
         finished
-          ? "OS concluída: o formulário entra como registro (ex.: checklist que chegou pelo WhatsApp) e a central preenche."
+          ? "OS concluída: o formulário entra como registro e a central preenche."
           : "O técnico vê o formulário no app e preenche no atendimento."
       }
       footer={
@@ -351,15 +363,13 @@ function AddFormDialog({ ticket, finished, onClose }: { ticket: TicketDetail; fi
       <div className="flex flex-col gap-4">
         {(suggested.data ?? []).length ? (
           <div>
-            <p className="mb-1.5 text-xs font-semibold text-ink/80">
-              Sugeridos para {ticket.service_type?.name ?? "este tipo de serviço"}
-            </p>
+            <p className="mb-1.5 text-xs font-semibold text-ink/80">Do tipo e da categoria desta OS</p>
             <div className="flex flex-wrap gap-2">
               {(suggested.data ?? []).map((t) => (
                 <button
                   key={t.id}
                   type="button"
-                  onClick={() => setTemplateId(t.id)}
+                  onClick={() => choose(t.id)}
                   aria-pressed={templateId === t.id}
                   disabled={attached.has(t.id)}
                   title={attached.has(t.id) ? "Já está nesta OS" : undefined}
@@ -377,7 +387,7 @@ function AddFormDialog({ ticket, finished, onClose }: { ticket: TicketDetail; fi
           </div>
         ) : null}
         <Field label="Formulário">
-          <Select value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
+          <Select value={templateId} onChange={(e) => choose(e.target.value)}>
             <option value="">Escolha um modelo...</option>
             {available.map((t) => (
               <option key={t.id} value={t.id}>

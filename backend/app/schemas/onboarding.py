@@ -69,8 +69,9 @@ UFS = frozenset(
     }
 )  # fmt: skip
 
-# Versão do aviso de privacidade exibido no formulário (muda quando o texto mudar).
-PRIVACY_VERSION = "2026-11"
+# Versão do aviso de privacidade exibido no formulário (muda quando o texto mudar). 2026-11-18: o
+# aviso passa a citar a chave PIX que o técnico cadastra no app para receber pelos chamados.
+PRIVACY_VERSION = "2026-11-18"
 
 
 class CatalogItem(BaseModel):

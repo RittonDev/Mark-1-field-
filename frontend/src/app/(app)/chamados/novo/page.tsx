@@ -481,6 +481,10 @@ function NewTicket() {
     : "";
   const automaticTitle = autoTitle(d);
   const titleText = f.title.trim();
+  // A categoria com que a OS nasce (a escolhida ou a do tipo) e os formulários ligados a ela e ao tipo que
+  // estão na OS (o passo 3 diz quantos).
+  const formsCategoryId = effectiveCategory(d);
+  const linkedForms = matchedForms(templates.data, st, formsCategoryId, categories.data).filter((m) => d.formIds.includes(m.id)).length;
 
   // Validação antes de criar (mensagem junto do campo; o foco vai para o primeiro problema).
   const errors: Partial<Record<ErrorKey, string>> = {};
@@ -512,53 +516,20 @@ function NewTicket() {
 
   const create = useMutation({
     mutationFn: async (input: {
+      /** Os formulários vão junto (`forms`): a OS nasce com eles, numa gravação só. */
       payload: TicketCreatePayload;
-      forms: { id: UUID; name: string }[];
-      formsRequired: boolean;
-      /**
-       * "Sem analista" de quem não vê as OS sem analista: a OS nasce na fila de quem abre, recebe os
-       * formulários e só no fim fica sem analista (depois disso, ela some para quem criou).
-       */
-      unownLast: boolean;
       /** A OS sai da fila de quem cria (o resumo não oferece o que daria "OS de outra fila"). */
       leavesQueue: boolean;
     }): Promise<CreatedResult> => {
-      const payload = { ...input.payload };
-      if (input.unownLast) delete payload.owner_id;
-      const ticket = await api.post<TicketDetail>("/tickets", payload);
+      const ticket = await api.post<TicketDetail>("/tickets", input.payload);
       // A OS já existe: daqui em diante nada pode falhar a criação (o analista reenviaria e duplicaria).
       const problems: string[] = [];
-      let current = ticket;
       const saved = ticket.tags ?? [];
       const lost = (input.payload.tags ?? []).filter((t) => !saved.some((s) => s.name.toLowerCase() === t.name.toLowerCase()));
       if (lost.length) problems.push(`Etiquetas que não entraram: ${lost.map((t) => t.name).join(", ")}`);
-      // Um formulário por vez: duas gravações ao mesmo tempo na mesma OS dão conflito de versão.
-      let attached = 0;
-      for (const form of input.forms) {
-        try {
-          await api.post(`/tickets/${ticket.id}/forms`, { template_id: form.id, required: input.formsRequired });
-          attached += 1;
-        } catch (err) {
-          problems.push(`Formulário “${form.name}”: ${errorMessage(err)}`);
-        }
-      }
-      if (attached) {
-        try {
-          current = await api.get<TicketDetail>(`/tickets/${ticket.id}`);
-        } catch {
-          // O resumo segue com a versão de antes dos formulários.
-        }
-      }
-      if (input.unownLast) {
-        try {
-          current = await api.patch<TicketDetail>(`/tickets/${ticket.id}`, { owner_id: null, expected_version: current.version });
-        } catch (err) {
-          problems.push(`Analista responsável: ${errorMessage(err)}`);
-        }
-      }
       // Sem analista e sem ser quem executa, a OS ficou fora da fila de quem a criou.
-      const hidden = input.leavesQueue && !current.owner && current.assignee?.id !== userId;
-      return { ticket: current, problems, hidden };
+      const hidden = input.leavesQueue && !ticket.owner && ticket.assignee?.id !== userId;
+      return { ticket, problems, hidden };
     },
     onSuccess: (result) => {
       writeStored("session", draftKey(userId), null);
@@ -581,10 +552,13 @@ function NewTicket() {
     },
   });
 
-  /** Mudança feita pelo analista (o pré-preenchimento usa setD direto e não conta como mexer). */
+  /**
+   * Mudança feita pelo analista (o pré-preenchimento usa setD direto e não conta como mexer). Os formulários
+   * acompanham o tipo de OS e a categoria em qualquer mudança (trocar o tipo, a categoria, o cliente).
+   */
   const update = (fn: (x: NewTicketDraft) => NewTicketDraft) => {
     setTouched(true);
-    setD(fn);
+    setD((x) => syncForms(x, fn(x), templates.data, categories.data));
   };
   const setForm = <K extends keyof NewTicketForm>(key: K, value: NewTicketForm[K]) => {
     if (key === "assignee_id" || key === "date" || key === "time" || key === "estimated_minutes") setConflicts(null);
@@ -612,7 +586,7 @@ function NewTicket() {
   };
   const onServiceType = (type: ServiceType | null) => {
     setConflicts(null);
-    update((x) => withServiceType(x, type, templates.data));
+    update((x) => withServiceType(x, type));
   };
   const onAssignee = (id: string) => {
     setConflicts(null);
@@ -624,12 +598,21 @@ function NewTicket() {
     setForm("source", source);
     writeStored("local", ORIGIN_KEY, source);
   };
+  // Marcar ou tirar um formulário é decisão do analista: ele deixa de seguir o tipo e a categoria.
   const toggleForm = (id: UUID) =>
-    update((x) => ({
-      ...x,
-      formIds: x.formIds.includes(id) ? x.formIds.filter((v) => v !== id) : [...x.formIds, id],
-      autoFormIds: x.autoFormIds.filter((v) => v !== id),
-    }));
+    update((x) => {
+      const removing = x.formIds.includes(id);
+      const formRequired = { ...x.formRequired };
+      if (removing) delete formRequired[id];
+      return {
+        ...x,
+        formIds: removing ? x.formIds.filter((v) => v !== id) : [...x.formIds, id],
+        autoFormIds: x.autoFormIds.filter((v) => v !== id),
+        formRequired,
+      };
+    });
+  const setFormRequired = (id: UUID, required: boolean) =>
+    update((x) => ({ ...x, formRequired: { ...x.formRequired, [id]: required } }));
 
   function pickDay(offset: 0 | 1) {
     // Dias e horas no fuso da operação (o mesmo dos campos), mesmo num computador em outro fuso.
@@ -822,10 +805,19 @@ function NewTicket() {
     // "Assumir" é o padrão: sem owner_id, quem cria leva a OS para a própria fila.
     if (ownerMode === "none") payload.owner_id = null;
     else if (ownerMode === "other") payload.owner_id = d.ownerId;
-    const forms = d.formIds.map((id) => ({ id, name: templates.data?.find((t) => t.id === id)?.name ?? "formulário" }));
+    // Os formulários que o analista vê, na ordem e com o obrigatório de cada um (mesmo nenhum). Sem os modelos
+    // (ou sem as categorias, com categoria na OS) a tela não sabe quais casam: vai sem a lista e a API põe os
+    // ligados ao tipo de OS e à categoria.
+    if (templates.data && (categories.data || !formsCategoryId)) {
+      const byId = new Map(templates.data.map((t) => [t.id, t]));
+      payload.forms = d.formIds.flatMap((id) => {
+        const template = byId.get(id);
+        return template ? [{ template_id: id, required: d.formRequired[id] ?? template.default_required ?? true }] : [];
+      });
+    }
     // "Sem analista" sem ver essas OS: depois de criada, a OS é de outra fila para quem a abriu.
     const leavesQueue = ownerMode === "none" && ownOnly && !queueScope.unowned;
-    create.mutate({ payload, forms, formsRequired: d.formsRequired, unownLast: leavesQueue && forms.length > 0, leavesQueue });
+    create.mutate({ payload, leavesQueue });
   }
 
   /** Volta ao formulário limpo com `next` (sem contar como mexida: nada é gravado até o analista agir). */
@@ -1117,9 +1109,7 @@ function NewTicket() {
                     ? [
                         `Duração estimada ${formatMinutes(st.estimated_minutes)}`,
                         st.technician_fee != null ? `valor do técnico ${formatMoney(st.technician_fee)}` : null,
-                        d.autoFormIds.length
-                          ? `${d.autoFormIds.length} ${d.autoFormIds.length === 1 ? "formulário sugerido" : "formulários sugeridos"}`
-                          : null,
+                        linkedForms ? `${linkedForms} ${linkedForms === 1 ? "formulário" : "formulários"}` : null,
                       ]
                         .filter(Boolean)
                         .join(" · ")
@@ -1624,7 +1614,13 @@ function NewTicket() {
                     </Select>
                   </Field>
                   <Field label="Categoria">
-                    <Select value={f.category_id} onChange={(e) => setForm("category_id", e.target.value)}>
+                    <Select
+                      value={f.category_id}
+                      onChange={(e) => {
+                        const categoryId = e.target.value;
+                        update((x) => withCategory(x, categoryId));
+                      }}
+                    >
                       <option value="">Sem categoria</option>
                       {sortedCategories.map((c) => (
                         <option key={c.id} value={c.id}>
@@ -1698,10 +1694,12 @@ function NewTicket() {
                     templates={templates.data}
                     loading={templates.isLoading}
                     serviceType={st}
+                    categoryId={formsCategoryId}
+                    categories={categories.data}
                     value={d.formIds}
                     onToggle={toggleForm}
-                    required={d.formsRequired}
-                    onRequiredChange={(formsRequired) => update((x) => ({ ...x, formsRequired }))}
+                    required={d.formRequired}
+                    onRequiredChange={setFormRequired}
                   />
                 </div>
               </div>

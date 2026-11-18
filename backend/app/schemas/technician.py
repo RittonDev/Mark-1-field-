@@ -44,6 +44,10 @@ class TechnicianOut(BaseModel):
     work_schedule: WorkScheduleOut | None = None
     services: list[Ref] = []
     legacy: dict[str, Any] | None = None
+    # Tem chave PIX cadastrada (ele cadastra no app) e quando ela mudou. A chave em si fica em
+    # Pagamentos (GET /payouts?with_pix=true), não na base técnica.
+    has_pix: bool = False
+    pix_updated_at: dt.datetime | None = None
 
 
 class TechnicianCreate(BaseModel):

@@ -308,6 +308,22 @@ interface SavePlan {
   confirmed: boolean;
   /** O formulário como foi enviado (o que mudar depois disso continua não salvo). */
   sent: FormState;
+  /**
+   * Os formulários da OS antes de salvar: trocar o tipo de OS ou a categoria antes da visita faz a API pôr os
+   * ligados aos novos e tirar os que tinham entrado sozinhos; o aviso diz o que entrou e o que saiu.
+   */
+  formsBefore: { id: UUID; name: string }[];
+}
+
+/** "Formulários: entrou “A”; saiu “B”." (vazio quando nada mudou). */
+function formsChangeText(before: { id: UUID; name: string }[], after: { id: UUID; name: string }[]): string | undefined {
+  const entered = after.filter((f) => !before.some((b) => b.id === f.id)).map((f) => f.name);
+  const left = before.filter((b) => !after.some((f) => f.id === b.id)).map((b) => b.name);
+  const parts = [
+    entered.length ? `${entered.length > 1 ? "entraram" : "entrou"} ${quoted(entered)}` : null,
+    left.length ? `${left.length > 1 ? "saíram" : "saiu"} ${quoted(left)}` : null,
+  ].filter(Boolean);
+  return parts.length ? `Formulários: ${parts.join("; ")}.` : undefined;
 }
 
 /**
@@ -659,7 +675,7 @@ export function GeneralTab({
       void queryClient.invalidateQueries({ queryKey: ["ticket", ticket.id] });
       void queryClient.invalidateQueries({ queryKey: ["tickets"] });
       void queryClient.invalidateQueries({ queryKey: ["assignable"] });
-      toast({ title: `${updated.code} salva`, tone: "success" });
+      toast({ title: `${updated.code} salva`, description: formsChangeText(plan.formsBefore, updated.forms ?? []), tone: "success" });
     },
     onError: (error) => {
       const found = scheduleConflicts(error);
@@ -752,6 +768,7 @@ export function GeneralTab({
       times: timesChanged ? buildTimes() : null,
       confirmed: Boolean(conflicts),
       sent: form,
+      formsBefore: (server.forms ?? []).map((f) => ({ id: f.id, name: f.name })),
     });
   }
 
@@ -996,6 +1013,14 @@ export function GeneralTab({
               valueLabel={typeLabel}
               onChange={(t) => {
                 if ((t?.id ?? "") === form.serviceTypeId) return;
+                if (t) {
+                  // A categoria acompanha o tipo quando estava vazia ou era a padrão do tipo anterior; a escolhida à
+                  // mão fica. Tipo anterior fora da lista (inativo, de outro cliente): a API aplica a mesma regra.
+                  const previous = serviceTypes.data?.find((s) => s.id === form.serviceTypeId);
+                  if (!form.categoryId || (previous && (previous.category_id ?? "") === form.categoryId)) {
+                    set("categoryId", t.category_id ?? "");
+                  }
+                }
                 set("serviceTypeId", t?.id ?? "");
                 // O tipo traz a duração dele (ajustável no agendamento).
                 if (t) set("estimated", String(t.estimated_minutes));

@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from app.core.enums import PayoutStatus, TicketStatus
 from app.schemas.common import ORMModel, Ref
 from app.schemas.expense import Money
+from app.schemas.my_profile import PixInfo
 
 
 class PayoutOut(ORMModel):
@@ -73,6 +74,13 @@ class PayoutList(BaseModel):
     summary: PayoutSummary
     # Quantos valores batem com o filtro (a lista mostra até o limite; o resumo soma todos).
     total_count: int = 0
+
+
+class PayoutBoard(PayoutList):
+    """GET /payouts (central). Com with_pix=true, a chave PIX de cada técnico das linhas (e do
+    filtro technician_id) que tem chave; sem ele, vazio."""
+
+    pix: dict[uuid.UUID, PixInfo] = {}
 
 
 class MyEarnings(PayoutList):
