@@ -32,6 +32,7 @@ from app.core.config import settings
 from app.core.enums import UserRole
 from app.core.security import create_token, decode_token, hash_password_async
 from app.models.user import TICKET_MANAGER_ROLES, User
+from app.services import access as access_svc
 
 # Autocadastro no primeiro login: só como analista (gestor é dado à mão, em Usuários).
 AUTO_PROVISION_ROLES = frozenset({UserRole.ANALYST.value})
@@ -205,6 +206,8 @@ async def resolve_user(db: AsyncSession, claims: dict[str, Any]) -> User:
         role = (settings.ENTRA_AUTO_PROVISION_ROLE or "").strip().lower()
         if role not in AUTO_PROVISION_ROLES:
             raise SsoError("not_registered")
+        # Com o perfil padrão do papel gravado, como no cadastro pela tela de Usuários.
+        profile = await access_svc.resolve_profile(db, role, None)
         user = User(
             id=uuid.uuid4(),
             name=str(claims.get("name") or email.split("@")[0])[:160],
@@ -213,6 +216,7 @@ async def resolve_user(db: AsyncSession, claims: dict[str, Any]) -> User:
             password_hash=await hash_password_async(secrets.token_urlsafe(32)),
             role=UserRole(role),
             is_active=True,
+            access_profile_id=profile.id if profile is not None else None,
         )
         db.add(user)
     if not user.is_active:

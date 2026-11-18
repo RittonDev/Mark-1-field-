@@ -1,6 +1,7 @@
 // Tarefa de segundo plano do rastreamento. Precisa ser definida no escopo do módulo, na
-// abertura do app (importada pelo _layout), para o sistema achá-la quando acordar o app
-// com novas posições — inclusive com o app fechado.
+// carga do app (importada pelo index.ts, a entrada, e não só pelo _layout: no relançamento sem
+// tela do Android as rotas não montam), para o sistema achá-la quando acordar o app com novas
+// posições — inclusive com o app fechado.
 
 import type { LocationObject } from "expo-location";
 import * as TaskManager from "expo-task-manager";

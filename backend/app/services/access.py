@@ -8,6 +8,7 @@ o socket reconecta com o acesso novo).
 
 import logging
 import uuid
+from collections.abc import Iterable
 from types import SimpleNamespace
 from typing import Any
 
@@ -98,6 +99,20 @@ async def attach(db: AsyncSession, user: User) -> Access:
     return acc
 
 
+async def attach_role_defaults(db: AsyncSession, users: Iterable[User]) -> None:
+    """Supervisor ou analista sem perfil (login Microsoft, importação) cai no perfil padrão do
+    papel gravado no banco, não nos padrões do código: pendura esse acesso nos usuários para a
+    tela de Usuários mostrar o mesmo que o /auth/me e as guardas usam (uma consulta por papel)."""
+    defaults: dict[str, AccessProfile | None] = {}
+    for user in users:
+        if user.role not in PROFILE_ROLES or user.access_profile_id is not None:
+            continue
+        key = _role_key(user.role)
+        if key not in defaults:
+            defaults[key] = await system_profile(db, key)
+        user._access = permissions.resolve(user, defaults[key])  # type: ignore[attr-defined]
+
+
 # ------------------------------------------------------------------ validação do que vem da tela
 
 
@@ -137,7 +152,8 @@ def effective_items(profile: AccessProfile) -> dict[str, str]:
 
 
 async def users_count(db: AsyncSession, profile_ids: list[uuid.UUID]) -> dict[uuid.UUID, int]:
-    """Quantas pessoas usam cada perfil (ativas e inativas)."""
+    """Quantas pessoas usam cada perfil (ativas e inativas). No perfil padrão entram também o
+    supervisor ou analista do papel sem perfil, que cai nele (como em `profile_users`)."""
     if not profile_ids:
         return {}
     rows = await db.execute(
@@ -145,7 +161,27 @@ async def users_count(db: AsyncSession, profile_ids: list[uuid.UUID]) -> dict[uu
         .where(User.access_profile_id.in_(profile_ids))
         .group_by(User.access_profile_id)
     )
-    return {pid: int(n) for pid, n in rows.all()}
+    out = {pid: int(n) for pid, n in rows.all()}
+    system = dict(
+        (
+            await db.execute(
+                select(AccessProfile.system_key, AccessProfile.id).where(
+                    AccessProfile.id.in_(profile_ids), AccessProfile.system_key.is_not(None)
+                )
+            )
+        ).all()
+    )
+    roles = [role for role in PROFILE_ROLES if role.value in system]
+    if roles:
+        loose = await db.execute(
+            select(User.role, func.count())
+            .where(User.access_profile_id.is_(None), User.role.in_(roles))
+            .group_by(User.role)
+        )
+        for role, n in loose.all():
+            pid = system[_role_key(role)]
+            out[pid] = out.get(pid, 0) + int(n)
+    return out
 
 
 def profile_out(profile: AccessProfile, count: int) -> dict[str, Any]:

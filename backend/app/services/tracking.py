@@ -30,6 +30,7 @@ from app.schemas.tracking import (
     PingResult,
     TrackingHistory,
 )
+from app.services import field as field_svc
 from app.services import geo
 from app.services.activities import day_bounds
 from app.services.realtime import bus
@@ -263,9 +264,9 @@ async def publish_shift(user: User, on_shift: bool) -> None:
 async def live(
     db: AsyncSession, team_id: uuid.UUID | None = None, viewer: User | None = None
 ) -> list[LiveTechnician]:
-    """Todos os técnicos ativos com jornada, última posição, OS em campo e estado. A OS em campo
-    de uma fila que `viewer` não vê sai sem os detalhes (current_ticket_hidden); a contagem de OS
-    abertas de cada técnico continua agregada."""
+    """Todos os técnicos ativos com jornada, última posição, OS em campo (há até 12 h) e estado.
+    A OS em campo de uma fila que `viewer` não vê sai sem os detalhes (current_ticket_hidden); a
+    contagem de OS abertas de cada técnico continua agregada."""
     now = utcnow()
     stmt = select(User).where(User.role == UserRole.TECHNICIAN, User.is_active.is_(True))
     if team_id is not None:
@@ -281,11 +282,13 @@ async def live(
     # OS em campo de cada um, como responsável ou como outro técnico da visita.
     wanted = set(ids)
     in_field: dict[uuid.UUID, Ticket] = {}
+    # Só a OS em campo há até 12 h (a regra única de services/field.py): a parada há mais tempo
+    # não é o atendimento de agora nem decide o estado (a Início a mostra como alerta).
     field_tickets = await db.scalars(
         select(Ticket)
         .options(*LIST_NOLOAD)
         .where(
-            Ticket.status.in_((TicketStatus.IN_PROGRESS, TicketStatus.EN_ROUTE)),
+            field_svc.in_field_now_clause(now),
             or_(
                 Ticket.assignee_id.in_(ids),
                 Ticket.id.in_(

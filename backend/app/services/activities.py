@@ -32,6 +32,7 @@ from app.models import Ticket, TicketEvent, User
 from app.schemas.activities import Activity, ActivityState, DayActivities, DaySummary
 from app.schemas.ticket import TicketListItem
 from app.services.durations import actual_seconds
+from app.services.errors import WorkflowError
 from app.services.field import FIELD, field_since_of, field_stuck, late_to_start
 from app.services.schedule import works_on
 from app.services.tickets import list_noload, visibility_clause
@@ -40,6 +41,18 @@ from app.services.workflow import SLA_PAUSED_STATUSES
 S = TicketStatus
 WORK_TARGETS = (S.EN_ROUTE.value, S.IN_PROGRESS.value, S.RESOLVED.value)
 DAY_EVENTS = (TicketEventType.STATUS_CHANGED, TicketEventType.UNPRODUCTIVE_VISIT)
+
+# Dia que as telas aceitam (Relatórios, Atividades do dia, Minha fila, histórico do mapa): fora
+# disso não há OS, e datas como 9999-12-31 estouram as contas de fuso (500 em vez de 422).
+FIRST_DAY = date(2000, 1, 1)
+LAST_DAY = date(2100, 12, 31)
+OUT_OF_RANGE = "Escolha uma data entre 2000 e 2100"
+
+
+def check_day(day: date | None) -> None:
+    """422 para dia fora do período aceito (None = hoje, sempre vale)."""
+    if day is not None and not FIRST_DAY <= day <= LAST_DAY:
+        raise WorkflowError(OUT_OF_RANGE)
 
 
 def day_bounds(day: date) -> tuple[datetime, datetime]:

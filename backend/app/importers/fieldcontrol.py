@@ -73,6 +73,7 @@ from app.models import (
 )
 from app.schemas.forms import FormField
 from app.schemas.records import dedupe_contacts, primary_contact
+from app.services import access as access_svc
 from app.services import cities, geo, technician_regions
 
 log = logging.getLogger("fieldcontrol")
@@ -749,6 +750,13 @@ class Importer:
         by_email: dict[str, uuid.UUID] = dict(existing)
         rows: list[dict[str, Any]] = []
         now = self.now
+        # O escritório entra com o perfil padrão do papel gravado (como no cadastro pela tela), e
+        # não sem perfil: a tela de Usuários e o "Usado por N" mostram o acesso que vale.
+        await access_svc.ensure_system_profiles(self.db)
+        office_profiles: dict[UserRole, uuid.UUID | None] = {}
+        for office_role in (UserRole.SUPERVISOR, UserRole.ANALYST):
+            found = await access_svc.system_profile(self.db, office_role)
+            office_profiles[office_role] = found.id if found is not None else None
 
         def mapped(email: str, fc_ids: list[Any]) -> uuid.UUID | None:
             uid = by_email.get(email)
@@ -784,6 +792,7 @@ class Importer:
                         "phone": fmt_phone(None, phones[0].get("number")) if phones else None,
                         "password_hash": UNUSABLE_PASSWORD,
                         "role": role,
+                        "access_profile_id": office_profiles[role],
                         "job_title": clip(u.get("workPosition"), 120),
                         "is_active": True,
                         "avatar_external_url": clip(u.get("avatarUrl"), 1000),

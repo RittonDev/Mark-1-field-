@@ -2,7 +2,7 @@ import logging
 import uuid
 
 from fastapi import APIRouter, HTTPException, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 
 from app.api.deps import DB, MANAGER_ROLES, NoTechnicianUser, TicketManagerUser, access_user
 from app.core import permissions
@@ -11,6 +11,7 @@ from app.core.permissions import PROFILE_ROLES
 from app.core.security import hash_password_async
 from app.db.base import utcnow
 from app.models import Customer, Team, Ticket, User
+from app.models.access import AccessProfile
 from app.schemas.access import UserAccessIn
 from app.schemas.user import (
     AssignableUser,
@@ -93,7 +94,15 @@ async def list_users(
     if role is not None:
         stmt = stmt.where(User.role == role)
     if access_profile_id is not None:
-        stmt = stmt.where(User.access_profile_id == access_profile_id)
+        uses = User.access_profile_id == access_profile_id
+        profile = await db.get(AccessProfile, access_profile_id)
+        if profile is not None and profile.system_key:
+            # Perfil padrão: também quem é do papel e está sem perfil (cai nele; o "Usado por N"
+            # conta os dois).
+            uses = or_(
+                uses, and_(User.access_profile_id.is_(None), User.role == profile.system_key)
+            )
+        stmt = stmt.where(uses)
     if team_id is not None:
         stmt = stmt.where(User.team_id == team_id)
     if active is not None:
@@ -105,7 +114,9 @@ async def list_users(
         stmt = stmt.where(
             or_(User.name.ilike(like, escape="\\"), User.email.ilike(like, escape="\\"))
         )
-    return list(await db.scalars(stmt))
+    users = list(await db.scalars(stmt))
+    await access_svc.attach_role_defaults(db, users)
+    return users
 
 
 @router.get("/users/assignable", response_model=list[AssignableUser])
@@ -191,6 +202,7 @@ async def get_user(user_id: uuid.UUID, db: DB, current: NoTechnicianUser) -> Use
     user = await db.get(User, user_id)
     if user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Usuário não encontrado")
+    await access_svc.attach_role_defaults(db, [user])
     return user
 
 
@@ -281,7 +293,10 @@ async def update_user(user_id: uuid.UUID, body: UserUpdate, db: DB, actor: Users
     if access_changed:
         # A web da pessoa relê o acesso e o socket dela reconecta com o acesso novo.
         await access_svc.publish_changed([user.id])
-    return await db.get(User, user.id, populate_existing=True)  # type: ignore[return-value]
+    saved = await db.get(User, user.id, populate_existing=True)
+    assert saved is not None
+    await access_svc.attach_role_defaults(db, [saved])
+    return saved
 
 
 @router.get("/teams", response_model=list[TeamOut])

@@ -2,11 +2,11 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { Lock, SquarePen, X } from "lucide-react";
+import { FileSearch, Lock, SquarePen, X } from "lucide-react";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Button, EmptyState, ErrorBox, isTopLayer, lockScroll, restoreFocus, Skeleton, trapTab } from "@/components/ui";
-import { api, errorMessage } from "@/lib/api";
+import { ApiError, api, errorMessage } from "@/lib/api";
 import { STATUS } from "@/lib/constants";
 import { ACCESS_ITEM, forbiddenCode, forbiddenItem } from "@/lib/permissions";
 import type { TicketDetail, TicketStatus, UUID } from "@/lib/types";
@@ -183,6 +183,32 @@ function Forbidden({ error, preview, onClose }: { error: unknown; preview: Previ
 }
 
 /**
+ * A OS não existe mais (404: link antigo, recente, aviso ou OS removida). Neutro e só com o Fechar, como o
+ * Forbidden: a resposta não muda tentando de novo.
+ */
+function Missing({ preview, onClose }: { preview: Preview | null; onClose: () => void }) {
+  return (
+    <>
+      <PanelBar onClose={onClose}>
+        <p className="min-w-0 flex-1 truncate font-mono text-[15px] font-bold tracking-[-0.01em]">{preview ? preview.code : "OS"}</p>
+      </PanelBar>
+      <div className="flex flex-1 items-center justify-center p-6">
+        <EmptyState
+          icon={<FileSearch />}
+          title="OS não encontrada"
+          description="O link pode ser antigo ou a OS foi removida."
+          action={
+            <Button variant="primary" onClick={onClose}>
+              Fechar
+            </Button>
+          }
+        />
+      </div>
+    </>
+  );
+}
+
+/**
  * A OS aberta num painel à direita, como o "Editar atividade" do Field Control: a lista continua à
  * vista (escurecida) e o painel ocupa a altura toda. No celular, a tela inteira. Quem abre é o
  * TicketPanelProvider (um painel por tela, pela URL ?os=).
@@ -218,6 +244,7 @@ export function TicketEditorDialog({
   // 403 na releitura (a OS passou para outra fila, o acesso mudou): a OS guardada no cache não vale
   // mais. O editor sai, como na página, e o rascunho que não pode mais ser salvo não segura o Fechar.
   const denied = forbiddenCode(ticket.error);
+  const missing = !ticket.data && ticket.error instanceof ApiError && ticket.error.status === 404;
   const shown = ticket.data ? { code: ticket.data.code, title: ticket.data.title, status: ticket.data.status } : preview;
   const clearDirty = useEffectEvent(() => onDirtyChange?.(false));
   useEffect(() => {
@@ -266,9 +293,11 @@ export function TicketEditorDialog({
         aria-label={
           denied
             ? `${shown ? `${shown.code}: ` : ""}${denied === "QUEUE_FORBIDDEN" ? "OS de outra fila" : "Sem acesso à OS"}`
-            : shown
-              ? `${shown.code}: ${shown.title}`
-              : "Abrindo a OS"
+            : missing
+              ? "OS não encontrada"
+              : shown
+                ? `${shown.code}: ${shown.title}`
+                : "Abrindo a OS"
         }
         data-drawer
         // Celular e tablet: a tela toda. Telas largas: a lista continua à vista ao lado.
@@ -279,6 +308,8 @@ export function TicketEditorDialog({
       >
         {denied ? (
           <Forbidden error={ticket.error} preview={shown} onClose={onClose} />
+        ) : missing ? (
+          <Missing preview={preview} onClose={onClose} />
         ) : ticket.data ? (
           // Outro erro de releitura (rede, 500) mantém a OS guardada: o Salvar mostra o problema.
           <TicketEditor

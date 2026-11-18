@@ -163,7 +163,8 @@ export function PartRequestsCard({ ticket }: { ticket: TicketDetail }) {
   // o orçamento ligado, o Visualizar.
   const canAct = ticket.can_assign;
   const quotesView = useCan("commercial.quotes");
-  const quotesEdit = useCan("commercial.quotes", "edit");
+  // OS cancelada: a API recusa criar, editar e enviar orçamento (reabra a OS antes); recusar o pedido segue.
+  const quotesEdit = useCan("commercial.quotes", "edit") && ticket.status !== "cancelled";
   const canQuote = canAct && quotesEdit;
   const [editor, setEditor] = useState<{ quote: Quote | null; prefill?: QuotePrefill; requests: PartRequest[] } | null>(null);
   const [rejecting, setRejecting] = useState<PartRequest | null>(null);
@@ -279,7 +280,8 @@ export function PartRequestsCard({ ticket }: { ticket: TicketDetail }) {
                     </div>
                   ) : null}
                 </div>
-                <div className="flex shrink-0 flex-col items-end gap-2">
+                {/* No celular a coluna ocupa a linha toda, para os botões quebrarem a linha em vez de sair do cartão. */}
+                <div className="flex w-full flex-col items-end gap-2 sm:w-auto sm:shrink-0">
                   <Pill color={STATUS[r.status].color}>{STATUS[r.status].label}</Pill>
                   {r.status === "open" && canAct ? (
                     <div className="flex flex-wrap justify-end gap-1.5">

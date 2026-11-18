@@ -4,7 +4,8 @@ import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
 import { View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-// Registra a tarefa de segundo plano do rastreamento assim que o app carrega.
+// A tarefa de segundo plano do rastreamento já é definida pela entrada (index.ts); o import aqui só
+// garante a ordem se a tela montar por outro caminho (isTaskDefined evita definir duas vezes).
 import "../lib/trackingTask";
 import { SuccessHost } from "../components/SuccessHost";
 import { ToastHost } from "../components/ToastHost";

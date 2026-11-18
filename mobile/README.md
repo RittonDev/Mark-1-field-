@@ -121,9 +121,12 @@ Requisitos:
   (`must_change_password`); o app exige a troca (`POST /auth/change-password`) antes de liberar o resto e
   confere de novo em `/auth/me` a cada abertura. A troca encerra as outras sessões do usuário, então o app
   grava os tokens novos devolvidos pela API. Quem se cadastra pela homologação já entra com a própria senha.
-- **Sessão encerrada pelo servidor** (senha redefinida pelo analista, usuário desativado): a API, o refresh e
+- **Sessão encerrada pelo servidor** (senha redefinida pelo analista): a API, o refresh e
   o WebSocket (4401) respondem "Sessão encerrada. Entre novamente."; o app volta ao login com esse texto e
   para o rastreamento. A fila local fica guardada para quando o mesmo técnico entrar de novo.
+- **Técnico desativado pela central**: o refresh responde "Seu acesso está desativado. Fale com a central da
+  Maxx."; o app sai, para o rastreamento e apaga do aparelho as OS, os dados de clientes, as fotos e a fila
+  (LGPD). Quem já tinha saído antes tem os dados apagados ao entrar com a senha certa (o login dá o mesmo motivo).
 - **Só as OS atribuídas ao técnico**: o cliente abre a OS, o analista escolhe o técnico, e o técnico vê só
   as OS em que é o responsável (sem fila de grupo e sem "assumir"). Tela inicial com "Bom dia, {nome}",
   a data, o cartão da jornada e três abas na barra inferior (pílula animada na aba ativa):
@@ -169,10 +172,13 @@ Requisitos:
   Recusado) e total. **Somente leitura**: a gestão lança e altera; o técnico só acompanha o reembolso.
 - **Apontamento de horas** (atalhos de 15 min a 2 h) e
   **fotos** da câmera ou da galeria. As fotos são copiadas para a pasta do app e enviadas por
-  `POST /tickets/{id}/attachments` com `kind=photo` quando houver conexão.
+  `POST /tickets/{id}/attachments` com `kind=photo` quando houver conexão. Na galeria do iPhone a foto vem
+  convertida para JPEG (o servidor não aceita HEIC como foto); foto em formato que a central não abre fica de
+  fora, com aviso. OS fechada ou cancelada não recebe foto do técnico (a aba Fotos diz que só a central anexa).
 - **Indicador de conexão** no topo: offline, servidor inacessível, sincronizando, online com tempo real,
-  e o número de itens pendentes. Tocar abre a tela **Conta**, com a fila de envio (dá para descartar uma
-  operação), os avisos de operações recusadas, "Sincronizar agora", "Baixar tudo" e o estado do push.
+  e o número de itens pendentes. Tocar abre a tela **Conta**, com a fila de envio (dá para descartar a
+  operação que o servidor falhou em processar 3 vezes; falta de rede e falha do envio inteiro não contam), os
+  avisos de operações recusadas, "Sincronizar agora", "Baixar tudo" e o estado do push.
 
 ## Promessa de campo (chegada, 4h na loja, peças) e horário
 
@@ -186,7 +192,9 @@ Regras de [src/lib/field.ts](src/lib/field.ts), espelhando `backend/app/services
   "Faltam 30 min do tempo do chamado: avise o analista no grupo"; ao estourar, fica vermelho. Também agenda
   duas **notificações locais** (expo-notifications, funcionam offline e no Expo Go): no aviso e no estouro
   ([src/lib/onsiteAlerts.ts](src/lib/onsiteAlerts.ts)). Check-in offline prevê o limite com as regras locais;
-  o servidor confirma no próximo sync.
+  o servidor confirma no próximo sync. O relógio só anda em "Em atendimento": na pausa da central (aguardando
+  peça ou cliente) o anel, a linha e os alertas somem, e na retomada o servidor refaz o limite com o que sobrou.
+  Visita improdutiva esperando a central reagendar não mostra prazo de chegada (nem no cartão).
 - **Horário é da central**: o técnico nunca mexe no horário. Na OS ele só tem "Iniciar deslocamento",
   "Iniciar atendimento" (check-in) e "Concluir"; agendar, reagendar, pausar e cancelar ficam com a central
   (o servidor recusa com 403). A aba **Tempo** mostra o tempo de atendimento, que corre sozinho do início
@@ -235,7 +243,9 @@ Regras de [src/lib/field.ts](src/lib/field.ts), espelhando `backend/app/services
 - **Relatório para o cliente**: com a OS concluída, o técnico responsável vê o cartão **Relatório para o
   cliente** no topo da OS: **WhatsApp** (o técnico escolhe a conversa com o cliente; o app não tem
   os contatos), **Compartilhar** (outros apps; sem folha de compartilhamento, copia), **Copiar link** e **Ver
-  como o cliente vê**. O link vem na OS (`report_link`); OS antiga sem link pede `POST /tickets/{id}/report-link`.
+  como o cliente vê**. O link vem na OS (`report_link`); se o aparelho ainda não o recebeu (a conclusão acabou
+  de subir), pede `POST /tickets/{id}/report-link`. Link desativado pela central não volta pelo app: o servidor
+  recusa e o cartão mostra o motivo, sem "Tentar de novo".
 
 ## Rastreamento da jornada
 
@@ -259,6 +269,8 @@ Regras de [src/lib/field.ts](src/lib/field.ts), espelhando `backend/app/services
   notificação fixa no Android e permissão "Sempre" + `UIBackgroundModes: location` no iOS (já configurado
   no `app.json` via plugin do expo-location). **Isso exige build de desenvolvimento ou de produção.** No
   Expo Go (e na pré-visualização web) o app cai para o primeiro plano e avisa: "só funciona com o app aberto".
+  A tarefa é definida na entrada do app (`index.ts`, o `main` do package.json), não só nas rotas: quando o
+  Android acorda o app fechado com novas posições, ele roda sem tela e as rotas não carregam.
   Para gerar o build: `npx expo run:android` / `npx expo run:ios` ou `eas build --profile development`.
 
 ## Como a sincronização funciona
@@ -289,9 +301,10 @@ WebSocket /api/v1/ws?token= ── evento ticket.* ──► nova rodada de sync
 ## Estrutura
 
 ```
+index.ts               entrada: expo-router + tarefa de rastreamento (definida antes das rotas, para o relançamento sem tela do Android)
 src/
   app/                 rotas (expo-router)
-    _layout.tsx        sessão, tema, Stack com rotas protegidas, tarefa de rastreamento, toasts
+    _layout.tsx        sessão, tema, Stack com rotas protegidas, toasts
     login.tsx          login + servidor da API
     trocar-senha.tsx   primeiro acesso (senha provisória)
     index.tsx          tela inicial: jornada + Hoje / Agenda (calendário) / Concluídas
@@ -311,7 +324,7 @@ src/
     syncTypes.ts       contrato de /sync/pull e /sync/push
     api.ts session.ts  HTTP com refresh + tokens no SecureStore
     db.ts              schema SQLite e consultas
-    ops.ts             aplicação otimista e rebase; allowed_transitions igual ao backend
+    ops.ts             aplicação otimista e rebase; user_can_transition e allowed_transitions iguais ao backend
     field.ts           promessa de campo: relógios de chegada e de loja, rótulos de peças
     onsiteAlerts.ts    notificações locais do tempo na loja
     sync.ts            motor de sync, fila, fotos, gatilhos

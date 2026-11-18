@@ -116,8 +116,10 @@ export function ReportMenu({ ticket, buttonClassName }: { ticket: TicketDetail; 
     }
   }
 
+  // No celular o menu se prende ao grupo de ações do rodapé (relative lá), não ao botão: ancorado no
+  // botão, que pode ficar no meio da tela, ele sairia pela esquerda.
   return (
-    <div ref={wrap} className="relative">
+    <div ref={wrap} className="relative max-sm:static">
       <button
         ref={trigger}
         type="button"

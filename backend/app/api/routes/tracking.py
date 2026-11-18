@@ -19,7 +19,7 @@ from app.schemas.tracking import (
     TrackingHistory,
 )
 from app.services import map_distances, tracking
-from app.services.activities import local_today
+from app.services.activities import check_day, local_today
 
 router = APIRouter(prefix="/tracking", tags=["tracking"])
 
@@ -114,4 +114,5 @@ async def distances(
 async def history(
     db: DB, user: MapView, user_id: uuid.UUID, date: dt.date | None = None
 ) -> TrackingHistory:
+    check_day(date)
     return await tracking.history(db, user_id, date or local_today(), user)

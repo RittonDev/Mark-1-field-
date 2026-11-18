@@ -11,6 +11,7 @@ from app.core import permissions
 from app.models import User
 from app.schemas.queues import MyQueue, TeamQueues
 from app.services import queues as svc
+from app.services.activities import check_day
 from app.services.errors import AccessDenied, NotFound
 
 router = APIRouter(tags=["queues"])
@@ -33,6 +34,7 @@ async def my_queue(
     day: Annotated[dt.date | None, Query(alias="date")] = None,
 ) -> MyQueue:
     """A fila do dia: minhas OS (ou de um colega, com `user_id`) organizadas por seção."""
+    check_day(day)
     target = user
     if user_id is not None and user_id != user.id:
         if not permissions.of(user).all_queues:

@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import raiseload
 
 from app.core.config import settings
-from app.core.enums import ExpenseStatus, PayoutStatus, TicketEventType, TicketStatus
+from app.core.enums import ExpenseStatus, PayoutStatus, TicketEventType, TicketStatus, UserRole
 from app.db.base import utcnow
 from app.models.catalog import ServiceType
 from app.models.customer import Customer, Location
@@ -208,15 +208,21 @@ async def on_assignee_changed(
     """Troca de responsável: o valor ainda não pago acompanha o novo técnico; sem valor nenhum,
     entra o padrão do tipo de serviço. Quem saiu da OS deixa de ter valor a receber (o pago fica).
     Tudo fica no histórico da OS (quem fez a visita improdutiva vê para onde foi o valor).
+
+    Só o técnico parceiro recebe por chamado: o analista ou supervisor que assume a OS (equipe
+    interna) não ganha o valor padrão nem herda o do técnico que saiu, que é retirado como em
+    "saiu da OS". O "Definir valor" da gestão continua valendo para qualquer um na OS.
     """
+    newcomer = await db.get(User, new_id) if new_id else None
+    paid_per_ticket = newcomer is not None and newcomer.role == UserRole.TECHNICIAN
     previous = await _find(db, ticket.id, previous_id) if previous_id else None
     if previous is not None and previous.status == PayoutStatus.PAID:
         previous = None
-    current = await _find(db, ticket.id, new_id) if new_id else None
+    current = await _find(db, ticket.id, new_id) if new_id and paid_per_ticket else None
     still_helper = previous_id is not None and any(h.id == previous_id for h in ticket.helpers)
     if previous is not None and not still_helper:
         before = await _name(db, previous_id)
-        if new_id is not None and current is None:
+        if new_id is not None and paid_per_ticket and current is None:
             after = await _name(db, new_id)
             previous.technician_id = new_id
             _event(
@@ -247,7 +253,7 @@ async def on_assignee_changed(
             data={"technician": before, "amount": _money(previous.amount)},
         )
         await db.flush()
-    if new_id is not None and current is None:
+    if new_id is not None and paid_per_ticket and current is None:
         fee = await default_fee(db, ticket)
         if fee is not None:
             db.add(

@@ -1,6 +1,6 @@
 import { ACCESS_DISABLED_MESSAGE, canUseMobile, MOBILE_CHANNEL, MOBILE_DENIED_MESSAGE } from "./access";
 import { mustChangePassword, refreshMe } from "./account";
-import { request, setAccessRevokedHandler } from "./api";
+import { ApiError, request, setAccessRevokedHandler } from "./api";
 import { notifyDataChanged } from "./changes";
 import { getKv, setKv } from "./db";
 import { deviceRegistration, registerDevice, unregisterDevice } from "./device";
@@ -97,11 +97,28 @@ export async function ensurePushRegistration() {
  */
 export async function login(email: string, password: string, apiUrl: string) {
   await session.setApiUrl(apiUrl);
-  const data = await request<TokenResponse>("/auth/login", {
-    method: "POST",
-    body: { email: email.trim(), password, channel: MOBILE_CHANNEL },
-    auth: false,
-  });
+  let data: TokenResponse;
+  try {
+    data = await request<TokenResponse>("/auth/login", {
+      method: "POST",
+      body: { email: email.trim(), password, channel: MOBILE_CHANNEL },
+      auth: false,
+    });
+  } catch (error) {
+    // Senha certa de conta desativada, de quem é dono dos dados do aparelho (saiu antes de a central
+    // desativar): apaga as OS e os dados de clientes guardados (LGPD) antes de mostrar o motivo.
+    const lastEmail = session.get().lastEmail;
+    if (
+      error instanceof ApiError &&
+      error.status === 403 &&
+      error.detail === ACCESS_DISABLED_MESSAGE &&
+      lastEmail &&
+      lastEmail.trim().toLowerCase() === email.trim().toLowerCase()
+    ) {
+      await forgetDisabledAccess();
+    }
+    throw error;
+  }
   // Defesa extra caso a API não aplique o canal (versão antiga do backend).
   if (!canUseMobile(data.user.role)) throw new Error(MOBILE_DENIED_MESSAGE);
   // Outro técnico no mesmo aparelho: os dados locais (e a fila) eram do anterior.

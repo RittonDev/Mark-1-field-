@@ -8,7 +8,7 @@ from app.api.deps import DB, access_user
 from app.core import permissions
 from app.schemas.reports import DailyReport, MonthlyReport
 from app.services import reports as svc
-from app.services.activities import local_today
+from app.services.activities import FIRST_DAY, LAST_DAY, OUT_OF_RANGE, local_today
 from app.services.tickets import visibility_clause
 
 router = APIRouter(prefix="/reports", tags=["reports"])
@@ -16,11 +16,6 @@ router = APIRouter(prefix="/reports", tags=["reports"])
 # O Dashboard também mostra o fechamento do dia.
 DailyView = access_user("analysis.reports", "analysis.dashboard")
 ReportsView = access_user("analysis.reports")
-
-# Período aceito (fora dele não há OS, e datas como 0001-01-01 estouram as contas de fuso).
-FIRST_DAY = dt.date(2000, 1, 1)
-LAST_DAY = dt.date(2100, 12, 31)
-OUT_OF_RANGE = "Escolha uma data entre 2000 e 2100"
 
 
 @router.get("/daily", response_model=DailyReport)

@@ -17,7 +17,7 @@ from app.core.config import settings
 from app.core.enums import ApplicationStatus, UserRole
 from app.core.security import create_token, hash_password_async
 from app.db.base import utcnow
-from app.models import ServiceType, Team, TechnicianApplication, TechnicianShift, Ticket, User
+from app.models import ServiceType, Team, TechnicianApplication, Ticket, User
 from app.schemas.onboarding import SkillOut
 from app.schemas.technician import (
     Credential,
@@ -91,16 +91,14 @@ async def _check_team(db: AsyncSession, team_id: uuid.UUID | None) -> None:
 
 
 async def to_out(db: AsyncSession, users: list[User]) -> list[TechnicianOut]:
+    from app.services import tracking  # import tardio, como nas sugestões (tracking puxa tickets)
+
     ids = [u.id for u in users]
     if not ids:
         return []
-    on_shift = set(
-        await db.scalars(
-            select(TechnicianShift.user_id).where(
-                TechnicianShift.user_id.in_(ids), TechnicianShift.ended_at.is_(None)
-            )
-        )
-    )
+    # Em jornada: aberta e dentro do limite, a regra do mapa e das sugestões (a jornada esquecida
+    # aberta não fica "Em jornada" para sempre).
+    on_shift = set(await tracking.active_shifts(db, ids))
     open_counts = dict(
         (
             await db.execute(

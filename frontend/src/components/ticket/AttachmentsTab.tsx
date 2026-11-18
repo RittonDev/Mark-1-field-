@@ -720,7 +720,9 @@ export function AttachmentsTab({
   const photos = items.filter(isViewableImage);
   const files = items.filter((a) => !isViewableImage(a));
   const fromForms = items.filter((a) => a.form_id !== null);
-  const shown = filter === "photos" ? photos : filter === "files" ? files : filter === "forms" ? fromForms : items;
+  // Excluída a última foto de formulário, o segmento some: o filtro volta a "Todos" (e não fica sem nenhum).
+  const active: Filter = filter === "forms" && !fromForms.length ? "all" : filter;
+  const shown = active === "photos" ? photos : active === "files" ? files : active === "forms" ? fromForms : items;
   const shownPhotos = shown.filter(isViewableImage);
   const shownFiles = shown.filter((a) => !isViewableImage(a));
   const busy = progress !== null && progress.done < progress.total;
@@ -870,16 +872,17 @@ export function AttachmentsTab({
         <EmptyState icon={<Paperclip />} title="Nenhum anexo" />
       ) : (
         <>
+          {/* No celular, com "Dos formulários", os quatro passam da largura: a fileira rola por dentro. */}
           <Tabs
             variant="segmented"
-            className="self-start"
+            className="max-w-full self-start overflow-x-auto overflow-y-hidden"
             items={[
               { key: "all" as Filter, label: "Todos", count: items.length },
               { key: "photos" as Filter, label: "Fotos", count: photos.length },
               ...(fromForms.length ? [{ key: "forms" as Filter, label: "Dos formulários", count: fromForms.length }] : []),
               { key: "files" as Filter, label: "Arquivos", count: files.length },
             ]}
-            value={filter}
+            value={active}
             onChange={setFilter}
             ariaLabel="Filtrar anexos"
           />

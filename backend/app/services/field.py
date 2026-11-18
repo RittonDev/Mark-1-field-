@@ -7,8 +7,9 @@
 - Permanência: cada chamado inclui até 4 horas de técnico na loja, somando as visitas (o tempo
   em "Em atendimento"). A cada entrada o limite é o que sobrou dessas horas.
 
-Aqui também ficam as regras únicas usadas pelos cartões, pelas filas, pelas Atividades do dia e
-pela Início: "em campo agora" (a caminho ou em atendimento há até 12 h), "atrasada para começar"
+Aqui também ficam as regras únicas usadas pelos cartões, pelas filas, pelas Atividades do dia,
+pela Início e pelo Mapa ao vivo: "em campo agora" (a caminho ou em atendimento há até 12 h; no
+mapa, a OS atual do técnico), "atrasada para começar"
 (30 min depois do horário, sem improdutiva no horário ou depois) e "esperando data nova" (a
 última visita deu improdutiva e nenhuma outra foi marcada depois dela).
 """

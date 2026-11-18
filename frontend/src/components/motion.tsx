@@ -145,7 +145,11 @@ export function Tabs<K extends string>({
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (items.length === 0) return;
-    const index = items.findIndex((i) => i.key === value);
+    // Sem aba ativa (ex.: módulo "Misto" na matriz de acesso), a seta parte da aba com o foco: → a partir
+    // da primeira vai para a segunda, como nos rádios, e não escolhe a própria aba em que está.
+    const selected = items.findIndex((i) => i.key === value);
+    const focused = (e.target as HTMLElement).closest<HTMLElement>("[data-tab]")?.dataset.tab;
+    const index = selected >= 0 ? selected : items.findIndex((i) => i.key === focused);
     let next: number;
     if (e.key === "ArrowRight") next = (index + 1) % items.length;
     else if (e.key === "ArrowLeft") next = index <= 0 ? items.length - 1 : index - 1;

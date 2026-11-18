@@ -568,14 +568,19 @@ function GroupTexts({ ticket, synced }: { ticket: TicketDetail; synced: boolean 
   );
 }
 
+/** O menu é do editor: está dentro dele ou é aberto por um botão dele (os textos para o grupo vão no <body>). */
+function ownMenu(root: HTMLElement, menu: Element) {
+  return root.contains(menu) || (!!menu.id && !!root.querySelector(`[aria-controls="${CSS.escape(menu.id)}"]`));
+}
+
 /**
  * O editor está por cima de tudo (nenhum diálogo, nem menu de fora, aberto sobre ele): os atalhos valem.
- * Os menus do próprio editor (situação, "Mais", relatório) não contam: com eles abertos, o Ctrl+S ainda
- * salva, em vez de abrir o "Salvar página" do navegador.
+ * Os menus do próprio editor (situação, "Mais", relatório, textos para o grupo) não contam: com eles
+ * abertos, o Ctrl+S ainda salva, em vez de abrir o "Salvar página" do navegador.
  */
 function editorOnTop(root: HTMLElement) {
   const layers = Array.from(document.querySelectorAll('[aria-modal="true"], [role="menu"]')).filter(
-    (el) => el.getAttribute("role") !== "menu" || !root.contains(el),
+    (el) => el.getAttribute("role") !== "menu" || !ownMenu(root, el),
   );
   const modal = root.closest('[aria-modal="true"]');
   return modal ? layers[layers.length - 1] === modal : layers.length === 0;
@@ -710,7 +715,6 @@ export function TicketEditor({
   const editable = ticket.can_edit;
   const dirty = editable && saveState.dirty;
   const canUnproductive = UNPRODUCTIVE_FROM.includes(ticket.status) && Boolean(ticket.assignee);
-  const canFixTimes = hasRealTimes(ticket);
   const reopenable = (ticket.status === "closed" || ticket.status === "cancelled") && ticket.allowed_transitions.includes("reopened");
 
   useUnsavedGuard(dirty);
@@ -815,11 +819,22 @@ export function TicketEditor({
 
   // Ctrl+S (e Ctrl+Enter num campo da Geral) salva; o Ctrl+S nunca abre o "salvar página" do navegador.
   const onShortcut = useEffectEvent((e: KeyboardEvent) => {
-    if (e.defaultPrevented || !(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+    if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
     const key = e.key.toLowerCase();
     if (key !== "s" && key !== "enter") return;
     const node = root.current;
-    if (!node || !editorOnTop(node)) return;
+    if (!node) return;
+    if (!editorOnTop(node)) {
+      // Diálogo por cima (mudar situação, horários, WhatsApp, confirmação): não salva por trás dele, mas o
+      // navegador também não abre o "Salvar página". Com outro editor por cima (o painel sobre a página da
+      // OS), quem trata é ele.
+      const other = Array.from(document.querySelectorAll<HTMLElement>("[data-ticket-editor]")).some(
+        (el) => el !== node && editorOnTop(el),
+      );
+      if (key === "s" && !other) e.preventDefault();
+      return;
+    }
+    if (e.defaultPrevented) return;
     if (key === "enter" && !document.getElementById(formId)?.contains(document.activeElement)) return;
     e.preventDefault();
     if (saveState.dirty && !saveState.pending) saveGeneral();
@@ -844,6 +859,7 @@ export function TicketEditor({
   return (
     <div
       ref={root}
+      data-ticket-editor
       className={clsx(
         "flex flex-col overflow-hidden bg-surface",
         // No painel lateral ocupa a altura toda (o painel já tem a borda e a sombra). Na página, a altura
@@ -946,8 +962,9 @@ export function TicketEditor({
         ) : INLINE_TABS.includes(tab) ? (
           <span className="text-xs text-ink-muted">O que muda nesta aba é salvo na hora.</span>
         ) : null}
-        {/* Numa tela estreita as ações quebram a linha (alinhadas à direita) em vez de sair do painel. */}
-        <div className="ml-auto flex flex-wrap items-center justify-end gap-x-0.5 gap-y-1.5">
+        {/* Numa tela estreita as ações quebram a linha (alinhadas à direita) em vez de sair do painel; no
+            celular, o menu do relatório se prende a este grupo (e não ao botão) para caber na tela. */}
+        <div className="relative ml-auto flex flex-wrap items-center justify-end gap-x-0.5 gap-y-1.5">
           {/* Os textos para o grupo junto do link do relatório (o "Atividade encerrada" já leva o link). */}
           {ticket.can_assign ? <GroupTexts key={ticket.id} ticket={ticket} synced={synced} /> : null}
           {/* O nome ao lado do ícone (telas largas) vem do CSS: o menu do relatório só desenha o ícone. */}
@@ -956,12 +973,13 @@ export function TicketEditor({
             <MessageCircle aria-hidden className="size-[18px]" />
             <span className="hidden text-xs font-medium lg:inline">WhatsApp</span>
           </button>
+          {/* Sempre clicável: antes da saída para o local, a janela explica que não há horário para corrigir
+              (desabilitado, o motivo ficaria num title que o toque e o teclado não alcançam). */}
           <button
             type="button"
             className={footerAction}
             onClick={() => setTimesOpen(true)}
-            disabled={!canFixTimes}
-            title={canFixTimes ? "Corrigir horários" : "Corrigir horários: o técnico ainda não saiu para o local"}
+            title="Corrigir horários"
             aria-label="Corrigir horários"
           >
             <Clock aria-hidden className="size-[18px]" />

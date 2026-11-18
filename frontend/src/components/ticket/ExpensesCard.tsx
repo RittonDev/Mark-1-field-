@@ -215,6 +215,7 @@ function ExpenseDialog({ ticket, expense, onClose }: { ticket: TicketDetail; exp
   });
   const attachments = useTicketAttachments(ticket.id);
   const fileInput = useRef<HTMLInputElement>(null);
+  const initialTech = expense ? expense.technician : ticket.assignee;
   // Valores iniciais no padrão brasileiro ("1,5"; "12,30"). Custo existente sem técnico continua da empresa.
   const [initial] = useState(() => ({
     kind: expense?.kind ?? ("material" as ExpenseKind),
@@ -389,8 +390,10 @@ function ExpenseDialog({ ticket, expense, onClose }: { ticket: TicketDetail; exp
                 {p.name}
               </option>
             ))}
-            {expense?.technician && !(people.data ?? []).some((p) => p.id === expense.technician?.id) ? (
-              <option value={expense.technician.id}>{expense.technician.name}</option>
+            {/* Quem já vem escolhido (o técnico do custo ou o da OS) fica na lista mesmo sem acesso ao app, ou
+                enquanto ela carrega: senão o seletor mostraria "Ninguém" e gravaria o técnico. */}
+            {initialTech && !(people.data ?? []).some((p) => p.id === initialTech.id) ? (
+              <option value={initialTech.id}>{initialTech.name}</option>
             ) : null}
           </Select>
         </Field>

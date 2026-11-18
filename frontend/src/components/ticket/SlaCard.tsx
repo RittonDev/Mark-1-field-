@@ -3,6 +3,8 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, PencilLine } from "lucide-react";
 import { useState } from "react";
+import { isOpenStatus } from "@/components/operacao/hooks";
+import { SLA_AT_RISK_RATIO } from "@/components/ticket/editor/TicketHeader";
 import { useToast } from "@/components/Toaster";
 import { Button, Card, CardHeader, Dialog, ErrorBox, Pill } from "@/components/ui";
 import { useNow } from "@/components/useNow";
@@ -148,11 +150,18 @@ export function SlaCard({ ticket }: { ticket: TicketDetail }) {
       reason: ticket.resolution_violation_reason,
     },
   ];
+  type Clock = (typeof clocks)[number];
+  // Vencido agora, contado ao vivo como o chip do cabeçalho e o alerta da aba: a marca da API só muda
+  // quando a OS é relida. Pausado, o limite anda quando retomar.
+  const lapsed = (c: Clock) =>
+    !c.done && !c.stoppedAt && !ticket.sla_paused_at && isOpenStatus(ticket.status) && !!c.due && Date.parse(c.due) < now;
+  const violated = (c: Clock) => c.breached || lapsed(c);
   // "Em risco" vale para a OS toda: fica em âmbar o relógio aberto que mais consumiu o prazo.
-  const open = clocks.filter((c) => !c.done && !c.stoppedAt && c.due && !c.breached);
+  const open = clocks.filter((c) => !c.done && !c.stoppedAt && c.due && !violated(c));
   const ratios = open.map((c) => elapsedRatio(ticket.created_at, c.due!, ticket.sla_paused_seconds, now));
-  const atRisk = ticket.sla_status === "at_risk" && open.length ? open[ratios.indexOf(Math.max(...ratios))] : null;
-  const situation = (c: (typeof clocks)[number]): { text: string; tone: string; hint?: string } => {
+  const top = Math.max(...ratios);
+  const atRisk = open.length && (ticket.sla_status === "at_risk" || top >= SLA_AT_RISK_RATIO) ? open[ratios.indexOf(top)] : null;
+  const situation = (c: Clock): { text: string; tone: string; hint?: string } => {
     if (c.stoppedAt && ticket.status !== "cancelled") {
       // O veredito do Field Control: a contagem não anda mais (no prazo ou fora dele).
       const when = formatShort(c.stoppedAt);
@@ -164,7 +173,7 @@ export function SlaCard({ ticket }: { ticket: TicketDetail }) {
     if (c.done) return c.breached ? { text: "Concluído fora do prazo", tone: RED } : { text: "Concluído no prazo", tone: "text-ink" };
     if (ticket.status === "cancelled") return { text: "OS cancelada (sem prazo)", tone: "text-ink-muted" };
     if (!c.due) return { text: "Sem prazo", tone: "text-ink-muted" };
-    if (c.breached) return { text: `Violado: venceu ${formatRelative(c.due, now)}`, tone: RED };
+    if (violated(c)) return { text: `Violado: venceu ${formatRelative(c.due, now)}`, tone: RED };
     // Concluída sem a marca deste relógio (ex.: OS migrada sem a 1ª resposta registrada).
     if (ticket.status === "resolved" || ticket.status === "closed") return { text: "Sem registro", tone: "text-ink-muted" };
     if (ticket.sla_paused_at) {

@@ -5,13 +5,35 @@
 // Assim um pull no meio do caminho não apaga o que o técnico fez offline,
 // e uma operação rejeitada some sozinha no próximo rebase.
 
-import { SELF_ASSIGN_ROLES, STATUS, TRANSITIONS, UNTOUCHED_STATUSES } from "./constants";
+import { canManageTickets, STATUS, TRANSITIONS } from "./constants";
 import { actualSeconds, defaultEnd } from "./duration";
 import { onsiteDueFrom } from "./field";
 import { resolutionBreached, responseBreached } from "./sla";
 import type { LocalPartRequest, LocalTicket, OutboxOp } from "./syncTypes";
-import type { TicketDetail, TicketStatus, User, UserRef } from "./types";
-import { userCanTransition } from "./workflow";
+import type { TicketDetail, TicketListItem, TicketStatus, User, UserRef, UserRole } from "./types";
+
+// Regras de quem muda o status, só do app (constants.ts e workflow.ts são cópias exatas dos da web).
+
+/** Ainda sem primeiro atendimento: sair deles marca a primeira resposta (SLA). */
+const UNTOUCHED_STATUSES: TicketStatus[] = ["new", "triage"];
+
+/** Quem assume sozinho uma OS sem responsável ao iniciar o atendimento (espelho de SELF_ASSIGN_ROLES). */
+const SELF_ASSIGN_ROLES: UserRole[] = ["analyst"];
+
+/** Espelho de workflow.TECHNICIAN_TARGETS. */
+const TECHNICIAN_TARGETS: TicketStatus[] = ["en_route", "in_progress", "resolved"];
+
+/** Espelho de workflow.user_can_transition: pré-filtra as ações de status (a API valida de novo). */
+export function userCanTransition(user: User, ticket: TicketListItem, to: TicketStatus): boolean {
+  if (canManageTickets(user.role)) return true;
+  // Técnico de campo: só nas OS em que o analista o colocou como responsável, e só andando com a
+  // visita (sair, iniciar, concluir). Agenda, pausa e cancelamento são da central: o técnico nunca
+  // mexe no horário.
+  if (user.role === "technician") return ticket.assignee?.id === user.id && TECHNICIAN_TARGETS.includes(to);
+  // Solicitante: a lista não traz requester_id (o app não é usado por solicitantes).
+  if (to === "cancelled") return UNTOUCHED_STATUSES.includes(ticket.status);
+  return ticket.status === "resolved" && (to === "closed" || to === "reopened");
+}
 
 const selfAssigns = (user: User) => SELF_ASSIGN_ROLES.includes(user.role);
 

@@ -18,6 +18,7 @@ import {
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { nextDue } from "@/components/badges";
+import { isOpenStatus } from "@/components/operacao/hooks";
 import { fieldClockSummary } from "@/components/ticket/FieldClock";
 import { useToast } from "@/components/Toaster";
 import { useNow } from "@/components/useNow";
@@ -80,9 +81,9 @@ function agendaText(iso: string | null, now: number): string {
 /**
  * Fração do prazo a partir da qual a OS fica "em risco": espelho de SLA_AT_RISK_RATIO do backend
  * (backend/app/core/config.py). O sla_status da API só muda quando a OS é relida; com o painel aberto, o
- * chip e a aba Prazos ficam âmbar na hora certa pela conta ao vivo.
+ * chip, a aba Prazos e o cartão de SLA ficam âmbar na hora certa pela conta ao vivo.
  */
-const SLA_AT_RISK_RATIO = 0.75;
+export const SLA_AT_RISK_RATIO = 0.75;
 
 /** Parte do prazo já consumida, sem o tempo pausado (como o backend calcula o "em risco"). */
 function elapsedRatio(createdAt: string, due: number, pausedSeconds: number, moment: number): number {
@@ -217,6 +218,8 @@ export function TicketHeader({
   const sla = slaView(ticket, now);
   const field = fieldClockSummary(ticket, now);
   const tech = ticket.assignee;
+  const open = isOpenStatus(ticket.status);
+  const needsTech = open && ticket.status !== "on_hold_customer" && ticket.status !== "on_hold_vendor";
   const loc = ticket.location;
   const place = [ticket.customer?.name, loc?.name].filter(Boolean).join(" · ");
   const address =
@@ -362,6 +365,8 @@ export function TicketHeader({
             </li>
           ) : null}
 
+          {/* Técnico sem acesso ao app e OS sem técnico só pedem ação na OS em aberto (como na lista);
+              esperando o cliente ou o fornecedor, sem técnico ainda é o normal. */}
           <li className="flex min-w-0">
             {tech ? (
               <button
@@ -375,7 +380,7 @@ export function TicketHeader({
                 </span>
                 <span className="sr-only">Técnico: </span>
                 <span className="truncate">{shortName(tech.name)}</span>
-                {tech.is_active === false ? (
+                {tech.is_active === false && open ? (
                   <>
                     <WarnDot />
                     <span>sem acesso</span>
@@ -387,7 +392,12 @@ export function TicketHeader({
                 type="button"
                 onClick={() => onJump("geral", ASSIGNEE_FIELD)}
                 title="Escolher o técnico na aba Geral"
-                className={clsx(CHIP, FULL, FOCUS, "bg-amber-300 font-semibold text-amber-950 ring-amber-200/60 hover:bg-amber-200")}
+                className={clsx(
+                  CHIP,
+                  FULL,
+                  FOCUS,
+                  needsTech ? "bg-amber-300 font-semibold text-amber-950 ring-amber-200/60 hover:bg-amber-200" : clsx(NEUTRAL, NEUTRAL_ACTION),
+                )}
               >
                 Sem técnico
               </button>

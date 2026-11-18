@@ -32,14 +32,13 @@ import { notify } from "../../lib/dialogs";
 import { concludeBlock, missingForConclusion, signatureBlock } from "../../lib/forms";
 import { haptic } from "../../lib/haptics";
 import { awaitingReschedule, isDone, isHelper } from "../../lib/lists";
-import { UNPRODUCTIVE_FROM } from "../../lib/ops";
+import { UNPRODUCTIVE_FROM, userCanTransition } from "../../lib/ops";
 import { fieldActionLabel, takeConcludeIntent } from "../../lib/progress";
 import { useSession } from "../../lib/session";
 import { isOnline, queuePhoto, requestSync, storeServerTicket, useSyncStatus } from "../../lib/sync";
 import type { LocalTicket } from "../../lib/syncTypes";
 import { showToast } from "../../lib/toast";
 import type { TicketDetail, TicketStatus, User } from "../../lib/types";
-import { userCanTransition } from "../../lib/workflow";
 import { RADIUS, useStyles, useTheme, type Palette } from "../../theme/theme";
 
 type Tab = "info" | "time" | "photos";

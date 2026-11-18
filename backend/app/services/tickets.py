@@ -356,6 +356,9 @@ def field_view(detail: TicketDetail) -> TicketDetail:
         "asset": None,
         "response_due_at": None,
         "resolution_due_at": None,
+        # Veredito do Field Control sobre o prazo de solução: também é SLA (com ele o sla_status
+        # sairia "met" e diria ao app quais OS tinham prazo).
+        "resolution_sla_met_at": None,
         "first_response_at": None,
         "sla_paused_at": None,
         "sla_paused_seconds": 0,
@@ -690,7 +693,10 @@ async def _assign(
     *,
     now: datetime,
     note: str | None = None,
+    status_note: str | None = None,
 ) -> None:
+    """`status_note`: a nota da mudança para "Atribuído" que a atribuição faz numa OS nova,
+    em triagem ou reaberta (a do menu de situação, quando é ele que pede "Atribuído")."""
     prev_id = ticket.assignee_id
     assignee: User | None = None
     if assignee_id is not None:
@@ -746,7 +752,7 @@ async def _assign(
         if ticket.status in FIELD_ACTIVE:
             _change_status(db, ticket, S.NEW, actor, now=now, note="Responsável removido")
     elif ticket.status in (S.NEW, S.TRIAGE, S.REOPENED):
-        _change_status(db, ticket, S.ASSIGNED, actor, now=now)
+        _change_status(db, ticket, S.ASSIGNED, actor, now=now, note=status_note)
     elif ticket.status in (S.EN_ROUTE, S.IN_PROGRESS) and prev_id not in (None, assignee_id):
         _change_status(db, ticket, S.ASSIGNED, actor, now=now, note="Troca de responsável")
 
@@ -1664,7 +1670,17 @@ async def transition_ticket(
         ticket.scheduled_start = None
         ticket.scheduled_end = None
     if auto_assign:
-        await _assign(db, ticket, actor.id, None, actor, now=now, note="Assumida ao mudar o status")
+        # Pedindo "Atribuído", a própria atribuição já muda a situação: a nota vai nela.
+        await _assign(
+            db,
+            ticket,
+            actor.id,
+            None,
+            actor,
+            now=now,
+            note="Assumida ao mudar o status",
+            status_note=payload.note if to == S.ASSIGNED else None,
+        )
         if ticket.owner_id is None:
             await _set_owner(db, ticket, actor.id, actor, now=now)
 
@@ -1691,7 +1707,9 @@ async def transition_ticket(
     if to == S.SCHEDULED and ticket.scheduled_start is not None:
         data["scheduled_start"] = ticket.scheduled_start.isoformat()
     data.update(_declared(declared_at, ticket, now))
-    if from_status != to:
+    # Compara com a situação de agora: a atribuição automática já pode ter levado a OS ao destino
+    # (Atribuído), e a mudança não se repete no histórico nem no tempo real.
+    if ticket.status != to:
         _change_status(db, ticket, to, actor, now=now, note=payload.note, data=data)
         if to == S.IN_PROGRESS:
             if ticket.arrived_at is None:

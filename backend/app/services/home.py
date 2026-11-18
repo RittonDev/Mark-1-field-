@@ -189,6 +189,13 @@ class Moment:
         return self.access is None or permissions.allows_link(self.access, link)
 
     @property
+    def sees_unowned(self) -> bool:
+        """Vê as OS sem analista? Com "Somente a própria fila" sem essa opção, a lista devolve
+        vazio para o filtro "sem analista": o grupo e o motivo não saem (como no /queues e no
+        Dashboard), mesmo que ele execute uma OS assim."""
+        return self.access is None or self.access.all_queues or self.access.queue_unowned
+
+    @property
     def tz(self) -> ZoneInfo:
         return ZoneInfo(settings.TIMEZONE)
 
@@ -1215,6 +1222,8 @@ async def _attention(db: AsyncSession, m: Moment, counts: dict[str, Any]) -> lis
     groups: list[AttentionGroup] = []
     for key, group in TICKET_GROUPS.items():
         count = counts[key]
+        if key == "no_owner" and not m.sees_unowned:
+            continue
         if count and m.allows(GROUPS[key].link):
             extra = group.extra() if group.extra else ()
             items = await _ticket_items(db, m, group.cond(m), group.order(m), group.reason, extra)
@@ -1879,7 +1888,10 @@ def _backlog(m: Moment, counts: dict[str, Any]) -> HomeBacklog:
         resolved_30d=counts["resolved_30d"],
         cancelled_30d=counts["cancelled_30d"],
         # Maior primeiro; no empate, a ordem acima (o sort é estável).
-        old_reasons=sorted((r for r in reasons if r.count), key=lambda r: -r.count),
+        old_reasons=sorted(
+            (r for r in reasons if r.count and (r.key != "no_owner" or m.sees_unowned)),
+            key=lambda r: -r.count,
+        ),
         old_filters=ListFilters(open_only=True, created_to=m.old_to, order_by=oldest_first),
     )
 
