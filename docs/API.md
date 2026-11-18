@@ -1092,8 +1092,9 @@ técnico) e, só no aceite, a leitura.
   esse contador, sem valores.
 - Histórico: os quatro `offer_*` (técnicos e valor no envio, valor no aceite, motivo na recusa, motivo no
   encerramento) e o `assigned` com `via: "offer"` ("assumiu a OS pela oferta").
-- Tempo real: o `ticket.updated` com `fields: ["offers"]` recarrega só a OS; o aceite e a recusa viram aviso para o
-  analista da OS (sem analista, para a central toda), sem o valor.
+- Tempo real: o `ticket.updated` com `fields: ["offers"]` recarrega a OS (a lista de ofertas e o contador ficam sob
+  `["ticket", id]`) e as listas de OS, como todo `ticket.*`, sem as telas extras (Pagamentos, relatórios...); o
+  aceite e a recusa viram aviso para o analista da OS (sem analista, para a central toda), sem o valor.
 
 ## Acesso: perfis por tela e visibilidade de filas
 
