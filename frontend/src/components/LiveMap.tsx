@@ -290,7 +290,7 @@ export default function LiveMap({
       const L = ((mod as unknown as { default?: Leaflet }).default ?? mod) as Leaflet;
       if (cancelled || !containerRef.current) return;
       map = L.map(containerRef.current, { zoomControl: false }).setView(DEFAULT_CENTER, 11);
-      L.control.zoom({ position: "bottomright" }).addTo(map);
+      L.control.zoom({ position: "bottomright", zoomInTitle: "Aproximar", zoomOutTitle: "Afastar" }).addTo(map);
       // Clique no mapa (fora dos pinos) fecha o cartão da OS.
       map.on("click", () => setPicked(null));
       setReady({
@@ -572,8 +572,9 @@ export default function LiveMap({
     const { L, layers } = ready;
     layers.trail.clearLayers();
     if (!history) {
-      // Sem técnico escolhido: ao escolher de novo, quem enquadra é a câmera do foco (não o trajeto).
-      trailKeyRef.current = null;
+      // Sem técnico escolhido: ao escolher de novo, quem enquadra é a câmera do foco (não o trajeto). Com
+      // ele escolhido, é o outro dia carregando: a chave fica, para a câmera ir até o trajeto quando chegar.
+      if (!selectedId) trailKeyRef.current = null;
       return;
     }
     const color = TRAIL_COLOR[theme];
@@ -604,7 +605,7 @@ export default function LiveMap({
     const previous = trailKeyRef.current;
     trailKeyRef.current = key;
     if (previous && previous !== key && previous.startsWith(`${history.user_id}|`) && line.length) moveCamera(ready, line, 14);
-  }, [ready, history, theme, today]);
+  }, [ready, history, theme, today, selectedId]);
 
   // Loja do filtro, casa do técnico escolhido e as linhas: de onde ele está e de casa até a loja
   // (sem loja: de onde ele está até a casa).
@@ -658,6 +659,8 @@ export default function LiveMap({
     if (!usable(ready)) return;
     const points = pinPoints(techPins.current, osPins.current, destPins.current);
     if (focus?.place) points.push([focus.place.latitude, focus.place.longitude]);
+    // O trajeto do técnico escolhido (de outro dia, pode estar longe dos pinos de agora) também entra.
+    if (history && history.user_id === selectedId) history.points.forEach((p) => points.push([p.latitude, p.longitude]));
     if (points.length) moveCamera(ready, points, 13);
   };
 

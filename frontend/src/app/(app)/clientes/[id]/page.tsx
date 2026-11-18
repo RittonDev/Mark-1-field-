@@ -69,6 +69,9 @@ function CustomerLogo({ customer }: { customer: Customer }) {
 
 const plural = (n: number, one: string, many: string) => `${n.toLocaleString("pt-BR")} ${n === 1 ? one : many}`;
 
+/** Lojas que a ficha mostra (as com mais OS). */
+const TOP_STORES = 8;
+
 /** Ficha completa do cliente: contatos, matriz, indicadores, lojas e histórico (inclusive o que veio do Field Control). */
 export default function CustomerDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -83,11 +86,11 @@ export default function CustomerDetailPage() {
   const [editing, setEditing] = useState(false);
   const [newStore, setNewStore] = useState(false);
   const customer = useQuery({ queryKey: ["customer", id], queryFn: () => api.get<Customer>(`/customers/${id}`), enabled: canView });
-  // Todas as lojas do cliente (há cliente com mais de mil): não recarrega a cada volta para a aba. Cadastrar
-  // ou editar loja invalida esta lista na hora.
+  // Só as 8 lojas com mais OS, já na ordem (há cliente com mais de mil; o total vem do cliente). Cadastrar ou
+  // editar loja invalida esta lista na hora.
   const locations = useQuery({
-    queryKey: ["customer", id, "locations"],
-    queryFn: () => api.get<Location[]>(`/customers/${id}/locations`),
+    queryKey: ["customer", id, "locations", "top"],
+    queryFn: () => api.get<Location[]>(`/customers/${id}/locations`, { order: "tickets", limit: TOP_STORES }),
     staleTime: 5 * 60_000,
     enabled: canView,
   });
@@ -116,8 +119,8 @@ export default function CustomerDetailPage() {
   const c = customer.data;
   const legacy = c.legacy;
   const address = [c.address_line, c.district, [c.city, c.state].filter(Boolean).join("-"), c.zip_code].filter(Boolean).join(", ");
-  // Lojas com mais OS primeiro (as mais movimentadas do cliente).
-  const stores = [...(locations.data ?? [])].sort((a, b) => b.total_tickets - a.total_tickets);
+  // Lojas com mais OS primeiro (as mais movimentadas do cliente), na ordem da API.
+  const stores = locations.data ?? [];
   const storeCount = c.locations_count ?? stores.length;
   const since = legacy?.created_at ?? c.created_at;
 
@@ -231,7 +234,7 @@ export default function CustomerDetailPage() {
               <p className="px-5 py-4 text-sm text-ink-subtle">Nenhuma loja cadastrada.</p>
             ) : (
               <ul className="divide-y divide-line">
-                {stores.slice(0, 8).map((l) => {
+                {stores.map((l) => {
                   const body = (
                     <>
                       <MapPin className="size-4 shrink-0 text-ink-subtle" />
@@ -316,7 +319,7 @@ export default function CustomerDetailPage() {
                   }
                   target="_blank"
                   rel="noreferrer"
-                  className="mt-2 inline-flex items-center gap-1 text-xs text-brand hover:underline"
+                  className="mt-2 inline-flex items-center gap-1 text-xs text-brand-ink hover:underline"
                 >
                   Abrir no mapa
                   <ExternalLink className="size-3" />
@@ -340,7 +343,7 @@ export default function CustomerDetailPage() {
               <ul className="flex flex-col gap-1">
                 {legacy.attachments.map((a, i) => (
                   <li key={i}>
-                    <a href={a.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-sm text-brand hover:underline">
+                    <a href={a.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-sm text-brand-ink hover:underline">
                       <FileText className="size-4" />
                       {a.title ?? "Arquivo"}
                     </a>

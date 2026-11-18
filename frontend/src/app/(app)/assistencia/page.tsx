@@ -401,7 +401,7 @@ function RepairDetail({
                     if (isPlainClick(e)) onClose();
                   }}
                 >
-                  <TicketLink ticketId={r.ticket.id} className="font-mono text-brand hover:underline">
+                  <TicketLink ticketId={r.ticket.id} className="font-mono text-brand-ink hover:underline">
                     {r.ticket.name}
                   </TicketLink>
                 </span>

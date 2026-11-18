@@ -311,7 +311,7 @@ export default function LocationDetailPage() {
                 {canEdit ? (hasPoint ? " Corrija em Editar." : " Ajuste em Editar.") : ""}
               </p>
             ) : null}
-            <a href={mapUrl} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs text-brand hover:underline">
+            <a href={mapUrl} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs text-brand-ink hover:underline">
               Abrir no mapa
               <ExternalLink className="size-3" />
             </a>

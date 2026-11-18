@@ -477,7 +477,7 @@ export function LocationDialog({
                 href={mapsSearch}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-1 text-xs font-medium text-brand hover:underline"
+                className="inline-flex items-center gap-1 text-xs font-medium text-brand-ink hover:underline"
               >
                 Achar no Google Maps
                 <ExternalLink className="size-3" />

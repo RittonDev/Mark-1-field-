@@ -70,7 +70,7 @@ function StorePicker({
           <button
             type="button"
             onClick={() => onChange(null)}
-            className="shrink-0 rounded text-xs font-medium text-brand hover:underline focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
+            className="shrink-0 rounded text-xs font-medium text-brand-ink hover:underline focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
             aria-label={`Trocar a loja (${value.name})`}
           >
             Trocar

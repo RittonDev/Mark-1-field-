@@ -117,7 +117,7 @@ function Avatar({ tech, size = "md" }: { tech: Pick<Technician, "name" | "avatar
   return (
     <span
       className={clsx(
-        "flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-brand/10 font-semibold text-brand",
+        "flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-brand-soft font-semibold text-brand-ink",
         size === "lg" ? "size-16 text-lg" : "size-8 text-xs",
       )}
     >
@@ -159,6 +159,14 @@ function TechniciansView() {
   const searchParams = useSearchParams();
   const now = useNow(60_000);
   const [qInput, setQInput] = useState(() => searchParams.get("q") ?? "");
+  // O Ctrl+K com a tela aberta troca só o ?q=: a busca acompanha. Só um q novo na URL troca o que foi
+  // digitado (abrir uma OS, trocar de aba ou de UF não apaga a busca).
+  const urlQ = searchParams.get("q") ?? "";
+  const [syncedQ, setSyncedQ] = useState(urlQ);
+  if (urlQ !== syncedQ) {
+    setSyncedQ(urlQ);
+    setQInput(urlQ);
+  }
   const [teamId, setTeamId] = useState("");
   // Depois da migração, quem está "inativo" no Field Control continua na rede (só sem licença): mostra todos.
   const [active, setActive] = useState<Active>("");
@@ -917,6 +925,34 @@ function editableOf(tech: Technician) {
 type Editable = ReturnType<typeof editableOf>;
 const snapshot = (value: Editable) => JSON.stringify({ ...value, serviceIds: [...value.serviceIds].sort() });
 
+/** O corpo do PATCH a partir do que o diálogo edita (o mesmo cálculo para a abertura e para a tela). */
+function bodyOf({ form, address, schedule, serviceIds, isActive }: Editable): Record<string, unknown> {
+  return {
+    name: form.name.trim(),
+    email: form.email.trim(),
+    phone: form.phone || null,
+    team_id: form.team_id || null,
+    job_title: form.job_title || null,
+    home_city: form.home_city || null,
+    home_state: form.home_state || null,
+    coverage_area: form.coverage_area || null,
+    is_active: isActive,
+    address_line: address.line.trim() || null,
+    address_district: address.district.trim() || null,
+    address_zip: address.zip.replace(/\D/g, "") || null,
+    work_schedule:
+      schedule.start || schedule.end
+        ? {
+            start: schedule.start || null,
+            end: schedule.end || null,
+            break_start: schedule.break_start || null,
+            break_end: schedule.break_end || null,
+          }
+        : null,
+    service_type_ids: [...serviceIds].sort(),
+  };
+}
+
 /**
  * Cadastro do técnico. `readOnly` (Técnicos só com Visualizar): a mesma ficha para consulta, com os campos
  * travados e sem foto, senha nem salvar.
@@ -962,31 +998,7 @@ function EditDialog({ tech, readOnly = false, onClose }: { tech: Technician; rea
   };
 
   const save = useMutation({
-    mutationFn: () =>
-      api.patch<Technician>(`/technicians/${tech.id}`, {
-        name: form.name.trim(),
-        email: form.email.trim(),
-        phone: form.phone || null,
-        team_id: form.team_id || null,
-        job_title: form.job_title || null,
-        home_city: form.home_city || null,
-        home_state: form.home_state || null,
-        coverage_area: form.coverage_area || null,
-        is_active: isActive,
-        address_line: address.line.trim() || null,
-        address_district: address.district.trim() || null,
-        address_zip: address.zip.replace(/\D/g, "") || null,
-        work_schedule:
-          schedule.start || schedule.end
-            ? {
-                start: schedule.start || null,
-                end: schedule.end || null,
-                break_start: schedule.break_start || null,
-                break_end: schedule.break_end || null,
-              }
-            : null,
-        service_type_ids: serviceIds,
-      }),
+    mutationFn: (body: Record<string, unknown>) => api.patch<Technician>(`/technicians/${tech.id}`, body),
     onSuccess: (t) => {
       refresh(t);
       toast({ title: "Técnico atualizado", tone: "success" });
@@ -1021,6 +1033,18 @@ function EditDialog({ tech, readOnly = false, onClose }: { tech: Technician; rea
     const found = validateTechnician(form);
     setProblem(found);
     if (found || save.isPending) return;
+    // Só o que mudou: quem mexeu em outro campo enquanto o cadastro estava aberto (ou liberou o acesso do
+    // técnico) não perde a alteração. Sem nada mudado, fecha sem gravar.
+    const before = bodyOf(baseline);
+    const changed = Object.fromEntries(
+      Object.entries(bodyOf({ form, address, schedule, serviceIds, isActive })).filter(
+        ([key, value]) => JSON.stringify(value) !== JSON.stringify(before[key]),
+      ),
+    );
+    if (!Object.keys(changed).length) {
+      onClose();
+      return;
+    }
     if (tech.is_active && !isActive) {
       const open = current.open_tickets;
       const ok = await confirm({
@@ -1037,7 +1061,7 @@ function EditDialog({ tech, readOnly = false, onClose }: { tech: Technician; rea
       });
       if (!ok) return;
     }
-    save.mutate();
+    save.mutate(changed);
   };
 
   if (reset.data) {
@@ -1254,7 +1278,13 @@ function EditDialog({ tech, readOnly = false, onClose }: { tech: Technician; rea
               <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
                 <h3 className="text-xs font-bold tracking-wide text-ink-muted uppercase">Perfil da homologação</h3>
                 {current.application_id && canOnboarding ? (
-                  <Link href={`/homologacao?ficha=${current.application_id}`} className={buttonClassName("ghost", "sm")}>
+                  // Com alteração não salva, abre em outra aba: sair daqui descartaria o cadastro.
+                  <Link
+                    href={`/homologacao?ficha=${current.application_id}`}
+                    className={buttonClassName("ghost", "sm")}
+                    target={dirty ? "_blank" : undefined}
+                    rel={dirty ? "noreferrer" : undefined}
+                  >
                     <BadgeCheck className="size-3.5" />
                     Ver ficha da homologação
                   </Link>
@@ -1284,7 +1314,12 @@ function EditDialog({ tech, readOnly = false, onClose }: { tech: Technician; rea
                   {formatMoney(summary.expected)} · Pago {formatMoney(summary.paid)}
                 </p>
               </div>
-              <Link href="/pagamentos" className={buttonClassName("ghost", "sm")}>
+              <Link
+                href="/pagamentos"
+                className={buttonClassName("ghost", "sm")}
+                target={dirty ? "_blank" : undefined}
+                rel={dirty ? "noreferrer" : undefined}
+              >
                 <Wallet className="size-3.5" />
                 Ver em Pagamentos
               </Link>

@@ -218,7 +218,7 @@ function LocationsView() {
           <button
             type="button"
             onClick={() => setParams({ customer_id: null, pagina: null })}
-            className="mt-2 inline-flex items-center gap-1 rounded-full bg-brand/10 px-2.5 py-1 text-xs text-brand"
+            className="mt-2 inline-flex items-center gap-1 rounded-full bg-brand-soft px-2.5 py-1 text-xs text-brand-ink"
             aria-label="Tirar o filtro de cliente"
           >
             {customerName ? `Cliente: ${customerName}` : "Filtrando por cliente"}
@@ -293,7 +293,7 @@ function LocationsView() {
                       {l.open_tickets > 0 ? (
                         <Link
                           href={`/chamados?location_id=${l.id}&open_only=true`}
-                          className="font-medium text-brand hover:underline"
+                          className="font-medium text-brand-ink hover:underline"
                           aria-label={`${l.open_tickets} ${l.open_tickets === 1 ? "OS aberta" : "OS abertas"} em ${l.name}`}
                         >
                           {l.open_tickets}

@@ -31,6 +31,7 @@ from app.models import (
     TicketForm,
     User,
 )
+from app.models.access import AccessProfile
 from tests.conftest import World, requires_db
 
 NOW = datetime(2026, 11, 12, 12, 0, tzinfo=UTC)
@@ -671,6 +672,13 @@ async def test_full_import(
         users = {u.email: u for u in await db.scalars(select(User))}
         assert users["ana@empresa.test"].role == UserRole.SUPERVISOR  # admin no Field Control
         assert users["beto@empresa.test"].role == UserRole.ANALYST
+        # O escritório entra com o perfil padrão do papel (não sem perfil); técnico não tem perfil.
+        defaults = dict(
+            (await db.execute(select(AccessProfile.system_key, AccessProfile.id))).all()
+        )
+        assert users["ana@empresa.test"].access_profile_id == defaults["supervisor"]
+        assert users["beto@empresa.test"].access_profile_id == defaults["analyst"]
+        assert users["tec1@teste.dev"].access_profile_id is None
         assert (
             users["tec1@teste.dev"].role == UserRole.TECHNICIAN
             and users["tec1@teste.dev"].is_active

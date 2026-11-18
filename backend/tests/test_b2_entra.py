@@ -54,6 +54,8 @@ async def test_auto_provision_only_as_analyst(
     )
     assert r.status_code == 200, r.text
     assert (r.json()["user"]["email"], r.json()["user"]["role"]) == ("novo@teste.com.br", "analyst")
+    # Já com o perfil padrão do papel gravado (como no cadastro pela tela de Usuários).
+    assert r.json()["user"]["access_profile"]["name"] == "Analista"
 
 
 @requires_db

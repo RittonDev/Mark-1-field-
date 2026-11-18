@@ -21,7 +21,7 @@ Supervisor e analista: as telas que cada um vê e edita e as filas que vê depen
 perfis padrão reproduzem a tabela acima). Ver [Acesso: perfis por tela e visibilidade de filas](#acesso-perfis-por-tela-e-visibilidade-de-filas).
 
 **Técnico é terceiro: só o básico.** Na OS (detalhe, sync e respostas do push) o servidor zera para o
-técnico: prazos e motivos de SLA, analista (`owner`), grupo, projeto, categoria, etiquetas, solicitante,
+técnico: prazos, motivos e veredito de SLA (`resolution_sla_met_at`), analista (`owner`), grupo, projeto, categoria, etiquetas, solicitante,
 quem abriu, nº do chamado do cliente, CNPJ e contato da loja (nome e telefone: quem fala com a loja é a
 central), reincidência e dados migrados (`services/tickets.py::field_view`). E-mail dos colegas e de quem
 lançou custos também sai. Anexos: só fotos, fotos dos formulários, assinatura e o que ele mesmo enviou
@@ -181,7 +181,7 @@ O "Motivo da violação" do Field Control: um campo por relógio, escolhido de u
 ### Atividades do dia
 Tela própria da operação, como no Field Control (aquela em que, segundo o levantamento, quem opera passa o dia).
 
-- `GET /activities/day?date=YYYY-MM-DD&team_id=&assignee_id=` → `DayActivities {date, timezone, is_today, summary, activities[]}`. Sem `date`, usa o dia de hoje no fuso `TIMEZONE`.
+- `GET /activities/day?date=YYYY-MM-DD&team_id=&assignee_id=` → `DayActivities {date, timezone, is_today, summary, activities[]}`. Sem `date`, usa o dia de hoje no fuso `TIMEZONE`. `date` fora de 2000–2100 → 422 "Escolha uma data entre 2000 e 2100" (o mesmo período de `/reports/daily`, `/my-queue` e `/tracking/history`).
   - Entram no dia: as OS agendadas para ele; as que tiveram deslocamento, atendimento ou conclusão nele (pelo histórico); e, se for hoje, as que estão em campo agora (há até 12 h, a regra de `services/field.py`).
   - `Activity = {ticket: TicketListItem, state, scheduled_start, scheduled_end, started_at, arrived_at, finished_at, start_delay_minutes, start_has_gps, service_type_name, estimated_minutes, actual_minutes}`: o previsto e o realizado na mesma linha.
   - `state` ∈ `scheduled` (agendada), `late` (horário passou e não saiu), `en_route`, `in_progress`, `on_hold`, `rescheduled` (teve atividade no dia e foi remarcada), `done` (concluída no dia), `pending` (voltou para a fila).
@@ -210,8 +210,10 @@ não duplica (reenvio seguro do lote). Histórico apagado após `TRACKING_RETENT
   `POST /tracking/pings {pings:[{recorded_at, latitude, longitude, accuracy_m?, speed_mps?, heading?, battery_pct?, is_mock}]}` (1–500) → `{accepted, discarded}`
 - Gestão: `GET /tracking/live?team_id=` → técnicos com `state` (`offline|no_signal|available|en_route|in_progress`),
   `on_shift`, `last_position` (null fora da jornada), `current_ticket` (com o local e coordenadas) e `open_tickets`.
+  `current_ticket` e o estado `en_route|in_progress` só contam a OS em campo há até 12 h (a regra única de
+  `services/field.py`): a parada há mais tempo não vira a OS atual (a Início a mostra como alerta).
   `no_signal` = em jornada sem posição há mais de 5 min. `GET /tracking/history?user_id=&date=` → pontos do dia e
-  as mudanças de status que o técnico fez, com o GPS de cada uma.
+  as mudanças de status que o técnico fez, com o GPS de cada uma (`date` fora de 2000–2100: 422).
 - As transições de status aceitam `latitude`/`longitude` (check-in); o app deve mandar em deslocamento, atendimento e resolução.
 
 ### Calendário e conflito de horário (gestão)
@@ -235,7 +237,8 @@ Gestão: `GET|POST /onboarding/invites` (`{label?, reusable, days_valid}`; o `to
 
 ### Técnicos (gestão do acesso)
 Analistas e gestores, e só sobre usuários técnicos: `GET /technicians?q=&team_id=&active=` (com jornada, OS abertas,
-foto e o perfil da homologação; `q` busca por palavras em nome, e-mail e telefone) · `POST /technicians` →
+foto e o perfil da homologação; `q` busca por palavras em nome, e-mail e telefone; `on_shift` é a jornada aberta e
+dentro do limite de 14 h, a mesma regra do mapa: a esquecida aberta não fica "em jornada") · `POST /technicians` →
 `{technician, temporary_password}` · `PATCH /technicians/{id}` (nome, e-mail, telefone, grupo, cargo, `is_active`;
 desativar encerra as sessões; e a ficha completa: endereço, jornada e serviços, ver "Fichas completas") ·
 `POST /technicians/{id}/reset-password` → `{technician, temporary_password}` (encerra as sessões) ·
@@ -246,7 +249,9 @@ desativar encerra as sessões; e a ficha completa: endereço, jornada e serviço
 ### Importação de locais
 `POST /locations/import?dry_run=true|false&customer_id=` (CSV/XLSX) → `{rows, created, updated, errors, customers_created}`.
 Colunas: cliente, cnpj_cliente, codigo, local, cnpj, endereco, bairro, cidade, uf, cep, latitude, longitude, contato,
-telefone, observacoes. Cliente por CNPJ ou nome (criado se não existir); local por código, CNPJ ou nome (atualiza só o
+telefone, observacoes. Cliente por CNPJ ou nome (criado se não existir, só para quem tem Clientes em Editar; sem
+isso, a linha dá erro "Cliente não cadastrado: só quem edita Clientes cadastra cliente novo", na prévia e na
+gravação); local por código, CNPJ ou nome (atualiza só o
 que veio preenchido). CSV em UTF-8 ou Windows-1252, separado por `;` ou `,`; coordenadas com vírgula decimal.
 
 ## Tempo real (WebSocket)

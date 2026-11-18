@@ -311,6 +311,44 @@ async def test_home_respects_queue_and_screens(
     assert (await client.get(f"{API}/home/overview", headers=s.a)).json()["pulse"]["quotes"] is None
 
 
+async def test_home_no_owner_needs_the_unowned_option(
+    client: AsyncClient, world: World, engine: AsyncEngine
+) -> None:
+    """Sem a opção "sem analista", a lista devolve vazio para o filtro no_owner: a Início não
+    mostra o grupo nem o motivo antigo, nem para a OS sem analista que o próprio A executa (como o
+    /queues e o Dashboard). Com a opção, o número e o "Ver todas" batem."""
+    a_id = str(world.analyst.user.id)
+    recent = await _ticket(client, world, "Sem analista", owner_id=None, assignee_id=a_id)
+    old = await _ticket(client, world, "Antiga sem analista", owner_id=None, assignee_id=a_id)
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("UPDATE tickets SET created_at = now() - interval '40 days' WHERE id = :i"),
+            {"i": uuid.UUID(old["id"])},
+        )
+
+    async def no_owner(headers: dict) -> tuple[dict | None, dict | None]:
+        data = (await client.get(f"{API}/home/overview", headers=headers)).json()
+        group = next((g for g in data["attention"] if g["key"] == "no_owner"), None)
+        reasons = data["pulse"]["backlog"]["old_reasons"]
+        return group, next((r for r in reasons if r["key"] == "no_owner"), None)
+
+    group, reason = await no_owner(world.supervisor.headers)
+    assert group is not None and reason is not None
+    assert (group["count"], reason["count"]) == (1, 1)
+    await access_a(client, world, unowned=False)
+    assert await no_owner(world.analyst.headers) == (None, None)
+    kpis = (await client.get(f"{API}/home/overview", headers=world.analyst.headers)).json()["kpis"]
+    assert kpis["open"] == 2  # as duas continuam na conta dele (ele executa)
+
+    await access_a(client, world, unowned=True)
+    group, reason = await no_owner(world.analyst.headers)
+    assert group is not None and reason is not None
+    params = {k: v for k, v in group["filters"].items() if v is not None}
+    listed = await client.get(f"{API}/tickets", params=params, headers=world.analyst.headers)
+    assert (group["count"], listed.json()["total"]) == (1, 1)
+    assert listed.json()["items"][0]["id"] == recent["id"]
+
+
 async def test_calendar_and_conflicts_redact_other_queues(
     client: AsyncClient, world: World, scene: Scene
 ) -> None:

@@ -273,19 +273,26 @@ function applyTrackingEvent(queryClient: QueryClient, event: RealtimeEvent, inva
   const latitude = event.latitude;
   const longitude = event.longitude;
   const recordedAt = event.recorded_at ?? new Date().toISOString();
+  const speed = event.speed_mps ?? null;
   let stale = false;
   queryClient.setQueriesData<LiveTechnician[]>({ queryKey: ["tracking", "live"] }, (rows) =>
     rows?.map((tech) => {
       if (tech.id !== userId) return tech;
       // Voltou o sinal ou o primeiro ponto da jornada: o estado muda, então relê da API.
       if (tech.state === "no_signal" || !tech.last_position) stale = true;
+      // O ponto novo inteiro: velocidade, direção, precisão e "GPS simulado" do anterior não valem na posição
+      // nova. A bateria que não veio fica a última conhecida.
       return {
         ...tech,
         last_position: {
-          ...(tech.last_position ?? { accuracy_m: null, speed_mps: null, heading: null, battery_pct: null, is_mock: false }),
           latitude,
           longitude,
           recorded_at: recordedAt,
+          accuracy_m: event.accuracy_m ?? null,
+          speed_mps: speed,
+          heading: event.heading ?? null,
+          battery_pct: event.battery_pct ?? tech.last_position?.battery_pct ?? null,
+          is_mock: event.is_mock ?? false,
         },
       };
     }),
@@ -305,7 +312,7 @@ function applyTrackingEvent(queryClient: QueryClient, event: RealtimeEvent, inva
         return history;
       }
     }
-    return { ...history, points: [...history.points, { latitude, longitude, recorded_at: recordedAt, speed_mps: null }] };
+    return { ...history, points: [...history.points, { latitude, longitude, recorded_at: recordedAt, speed_mps: speed }] };
   });
   if (gap) invalidate(["tracking", "history", userId]);
 }

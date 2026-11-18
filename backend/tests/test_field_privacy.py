@@ -1,5 +1,6 @@
 """O técnico é terceiro: o app recebe só o básico da OS (cliente, local, agenda e escopo)."""
 
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -142,6 +143,30 @@ async def test_technician_gets_only_the_basics(
     pulled = (await client.get(f"{API}/sync/pull", headers=helper)).json()
     assert pulled["worklogs"] == []
     assert pulled["comments"] == []
+
+
+async def test_technician_does_not_get_the_fc_sla_verdict(
+    client: AsyncClient, world: World, engine: AsyncEngine
+) -> None:
+    """O veredito do Field Control sobre o prazo de solução também é SLA: o app não recebe (com
+    ele, o sla_status sairia "met" e diria quais OS tinham prazo)."""
+    tech = world.tech.headers
+    plain = await create(client, world, assignee_id=str(world.tech.user.id))
+    verdict = await create(client, world, assignee_id=str(world.tech.user.id))
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("UPDATE tickets SET resolution_sla_met_at = now() WHERE id = :i"),
+            {"i": uuid.UUID(verdict["id"])},
+        )
+    url = f"{API}/tickets/{verdict['id']}"
+    office = (await client.get(url, headers=world.analyst.headers)).json()
+    assert office["resolution_sla_met_at"] and office["sla_status"] == "met"
+    expected = (await client.get(f"{API}/tickets/{plain['id']}", headers=tech)).json()
+    seen = (await client.get(url, headers=tech)).json()
+    assert (seen["resolution_sla_met_at"], seen["sla_status"]) == (None, expected["sla_status"])
+    pulled = (await client.get(f"{API}/sync/pull", headers=tech)).json()
+    synced = next(x for x in pulled["tickets"] if x["id"] == verdict["id"])
+    assert (synced["resolution_sla_met_at"], synced["sla_status"]) == (None, expected["sla_status"])
 
 
 def test_realtime_event_for_technician_has_no_internal_data() -> None:

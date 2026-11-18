@@ -10,6 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.config import settings
+from app.services import realtime
 from tests.conftest import World, requires_db
 
 pytestmark = requires_db
@@ -408,6 +409,39 @@ async def test_analyst_self_assigns_when_starting(client: AsyncClient, world: Wo
     t = await create(client, world)
     t = await transition(client, world.analyst.headers, t, "assigned")
     assert t["assignee"]["id"] == str(world.analyst.user.id)
+
+
+async def test_self_assign_records_the_change_once(
+    client: AsyncClient, world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pedir "Atribuído" pelo menu numa OS sem técnico: a atribuição já muda a situação, e a
+    mudança sai uma vez só (com a nota), no histórico e no tempo real."""
+    an = world.analyst.headers
+    published: list[dict] = []
+
+    async def capture(event: dict) -> None:
+        published.append(event)
+
+    monkeypatch.setattr(realtime.bus, "publish", capture)
+    t = await create(client, world)
+    published.clear()
+    await transition(client, an, t, "assigned", note="Vou atender remoto")
+    events = (await client.get(f"{API}/tickets/{t['id']}/events", headers=an)).json()
+    changes = [
+        (e["from_value"], e["to_value"], e["note"])
+        for e in events
+        if e["event_type"] == "status_changed"
+    ]
+    assert changes == [("new", "assigned", "Vou atender remoto")]
+    assert [e["type"] for e in published].count("ticket.status_changed") == 1
+
+    # Com agenda: duas mudanças diferentes (Atribuído e Agendado), cada uma uma vez.
+    u = await create(client, world)
+    start = (datetime.now(UTC) + timedelta(days=1)).isoformat()
+    await transition(client, an, u, "scheduled", scheduled_start=start)
+    events = (await client.get(f"{API}/tickets/{u['id']}/events", headers=an)).json()
+    changes = [(e["from_value"], e["to_value"]) for e in events if e["event_type"] == "status_changed"]
+    assert changes == [("new", "assigned"), ("assigned", "scheduled")]
 
 
 async def test_technician_scope_is_restricted(client: AsyncClient, world: World) -> None:

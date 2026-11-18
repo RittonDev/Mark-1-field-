@@ -14,7 +14,7 @@ import { api, errorMessage } from "@/lib/api";
 import { formatDateTime, formatRelative, formatTime } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
 import { canOpenRequests, PORTAL_SUSPENDED, usePortalMe, visitWindow } from "@/lib/portal";
-import type { Page, PortalLocation, PortalRequestItem } from "@/lib/types";
+import type { PortalLocation, PortalRequestItem, PortalRequestPage } from "@/lib/types";
 
 type Scope = "open" | "done" | "all";
 
@@ -232,7 +232,7 @@ export default function PortalRequestsPage() {
   const list = useInfiniteQuery({
     queryKey: ["portal", "requests", scope, q, store?.id ?? ""],
     queryFn: ({ pageParam }) =>
-      api.get<Page<PortalRequestItem>>("/portal/requests", {
+      api.get<PortalRequestPage>("/portal/requests", {
         scope,
         q: q || undefined,
         location_id: store?.id,
@@ -249,7 +249,10 @@ export default function PortalRequestsPage() {
   const pages = list.data?.pages ?? [];
   const items = [...new Map(pages.flatMap((p) => p.items).map((item) => [item.id, item] as const)).values()];
   const total = pages.length ? pages[pages.length - 1].total : 0;
-  const waiting = items.filter((item) => item.status === "on_hold_customer").length;
+  // Contadas na API, em todas as páginas (as paradas esperando o cliente tendem a ser as mais antigas, que
+  // ainda não vieram); a API antiga, sem o número, conta só as que estão na tela.
+  const last = pages.length ? pages[pages.length - 1] : null;
+  const waiting = last?.waiting ?? items.filter((item) => item.status === "on_hold_customer").length;
   const storeCount = me.data?.locations ?? 0;
   // Empresa sem contrato: o histórico continua aqui, mas abrir solicitação não.
   const canOpen = canOpenRequests(me.data);

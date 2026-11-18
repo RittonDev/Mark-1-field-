@@ -303,7 +303,7 @@ function OnboardingView() {
                       >
                         <Td>
                           <span className="flex items-center gap-2.5">
-                            <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-brand/10 text-xs font-semibold text-brand">
+                            <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-brand-soft text-xs font-semibold text-brand-ink">
                               {initials(a.full_name)}
                             </span>
                             <span className="min-w-0">
@@ -510,7 +510,7 @@ function ApplicantPhoto({ name, url }: { name: string; url: string | null }) {
   const src = absoluteApiUrl(url);
   const [broken, setBroken] = useState(false);
   return (
-    <div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-brand/10 text-lg font-semibold text-brand">
+    <div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-brand-soft text-lg font-semibold text-brand-ink">
       {src && !broken ? (
         // eslint-disable-next-line @next/next/no-img-element -- link assinado da API
         <img src={src} alt={`Foto de ${name}`} onError={() => setBroken(true)} className="size-full object-cover" />

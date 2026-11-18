@@ -9,7 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.config import settings
-from app.services.activities import local_today
+from app.services.activities import OUT_OF_RANGE, local_today
 from tests.conftest import World, requires_db
 from tests.test_api import create, transition
 
@@ -77,6 +77,24 @@ async def test_dates_out_of_range_are_refused(client: AsyncClient, world: World)
     assert r.status_code == 422
     r = await client.get(f"{API}/reports/monthly", params={"month": "2026-13"}, headers=an)
     assert r.status_code == 422
+
+
+async def test_day_screens_refuse_dates_out_of_range(client: AsyncClient, world: World) -> None:
+    """Atividades do dia, Minha fila e o histórico do mapa aceitam o mesmo período dos relatórios
+    (9999-12-31 estourava a conta do dia seguinte: 500)."""
+    sup = world.supervisor.headers
+    urls = (
+        f"{API}/activities/day",
+        f"{API}/my-queue",
+        f"{API}/tracking/history?user_id={world.tech.user.id}",
+        f"{API}/reports/daily",
+    )
+    for url in urls:
+        for day in ("9999-12-31", "1999-12-31", "2101-01-01"):
+            r = await client.get(url, params={"date": day}, headers=sup)
+            assert (r.status_code, r.json()["detail"]) == (422, OUT_OF_RANGE), (url, day)
+        r = await client.get(url, params={"date": "2100-12-31"}, headers=sup)
+        assert r.status_code == 200, (url, r.text)
 
 
 async def test_reports_for_one_customer(client: AsyncClient, world: World) -> None:

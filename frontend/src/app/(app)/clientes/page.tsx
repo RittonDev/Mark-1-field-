@@ -239,7 +239,7 @@ function CustomersView() {
                       {canLocations ? (
                         <Link
                           href={`/locais?customer_id=${c.id}`}
-                          className="inline-flex items-center gap-1 text-brand hover:underline"
+                          className="inline-flex items-center gap-1 text-brand-ink hover:underline"
                           aria-label={`${plural(c.locations_count, "local", "locais")} de ${c.name}`}
                         >
                           <MapPin className="size-3.5" />
@@ -253,7 +253,7 @@ function CustomersView() {
                       {c.open_tickets > 0 ? (
                         <Link
                           href={`/chamados?customer_id=${c.id}&open_only=true`}
-                          className="font-medium text-brand hover:underline"
+                          className="font-medium text-brand-ink hover:underline"
                           aria-label={`${plural(c.open_tickets, "OS aberta", "OS abertas")} de ${c.name}`}
                         >
                           {c.open_tickets.toLocaleString("pt-BR")}

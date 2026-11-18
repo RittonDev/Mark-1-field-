@@ -210,7 +210,7 @@ export default function ProjectPage() {
                 {items.map((t) => (
                   <tr key={t.id} className="transition-colors hover:bg-[var(--row-hover)]">
                     <Td>
-                      <TicketLink ticketId={t.id} className="font-mono text-xs text-brand hover:underline">
+                      <TicketLink ticketId={t.id} className="font-mono text-xs text-brand-ink hover:underline">
                         {t.code}
                       </TicketLink>
                       <span className="block max-w-72 truncate font-semibold text-ink">{t.title}</span>
