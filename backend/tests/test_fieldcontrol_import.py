@@ -713,6 +713,8 @@ async def test_full_import(
             {"name": "Faturamento Matriz", "color": "purple"}
         ]
         assert a.signer_name == "Gerente da Loja" and a.signature_attachment_id is not None
+        # Toda OS tem o link do relatório, também a importada (o técnico só pega o que existe).
+        assert all(t.report_link_id for t in tickets.values())
         assert a.legacy["identifier"] == "101" and a.legacy["request"]["subject"] == "PDV parado"
         assert len(a.legacy["files"]) == 2
         assert a.legacy["files"][1]["url"].startswith(

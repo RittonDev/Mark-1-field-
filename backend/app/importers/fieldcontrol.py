@@ -74,7 +74,7 @@ from app.models import (
 from app.schemas.forms import FormField
 from app.schemas.records import dedupe_contacts, primary_contact
 from app.services import access as access_svc
-from app.services import cities, geo, technician_regions
+from app.services import cities, client_report, geo, technician_regions
 
 log = logging.getLogger("fieldcontrol")
 
@@ -1526,6 +1526,10 @@ class Importer:
             "authorization_status": AuthorizationStatus.NOT_REQUIRED,
             "tags": tags_of(order.get("labels")),
             "legacy": legacy,
+            # Toda OS tem o link do relatório desde a abertura (as antigas ganharam na migração
+            # d5f1a7c3e9b2): sem ele, a importada parecia ter o link desativado pela central.
+            "report_link_id": client_report.new_link_id(),
+            "report_link_created_at": self.now,
             "version": 1,
             "created_at": created,
             "updated_at": updated,

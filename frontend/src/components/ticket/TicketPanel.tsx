@@ -16,8 +16,9 @@ import { DISCARD_CONFIRM } from "./editor/useUnsavedGuard";
  * - recarregar a página ou mandar o link mantém a OS aberta;
  * - um link de dentro do painel (cliente, loja, projeto) leva para a tela sem o painel;
  * - com alteração não salva na aba Geral, fechar o painel ou trocar de OS (busca Ctrl+K, aviso,
- *   "Outras OS desta loja") pergunta antes de descartar. O Voltar do navegador não dá para segurar:
- *   o popstate não pode ser cancelado.
+ *   "Outras OS desta loja") pergunta antes de descartar; ir para outra tela pela busca ou pelo "Ver" de
+ *   um aviso também (useConfirmLeave). O Voltar do navegador não dá para segurar: o popstate não pode
+ *   ser cancelado.
  */
 const PARAM = "os";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
