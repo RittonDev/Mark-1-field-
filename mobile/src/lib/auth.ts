@@ -1,9 +1,11 @@
 import { ACCESS_DISABLED_MESSAGE, canUseMobile, MOBILE_CHANNEL, MOBILE_DENIED_MESSAGE } from "./access";
 import { mustChangePassword, refreshMe } from "./account";
 import { ApiError, request, setAccessRevokedHandler } from "./api";
+import { registerBackgroundSync, unregisterBackgroundSync } from "./backgroundSync";
 import { notifyDataChanged } from "./changes";
 import { getKv, setKv } from "./db";
 import { deviceRegistration, registerDevice, unregisterDevice } from "./device";
+import { askNotificationPermission, clearNotificationsOnSignOut, ensureNotificationsReady, syncLocalAlerts } from "./notifications";
 import { session, type SessionStatus } from "./session";
 import { startSync, stopSync, wipeLocalData } from "./sync";
 import { hasConsent, resumeTracking, stopTracking } from "./tracking";
@@ -23,12 +25,22 @@ let pushRequestedFor: string | null = null;
 export const getDeviceRegistration = () => deviceRegistration();
 
 /**
+ * Fim da sessão no aparelho: nenhuma notificação agendada nem na bandeja (loja e endereço aparecem na tela
+ * bloqueada) e a sincronização em segundo plano desligada. Não lança erro.
+ */
+async function endDeviceSession() {
+  await clearNotificationsOnSignOut();
+  await unregisterBackgroundSync();
+}
+
+/**
  * O usuário não pode usar o app (não é técnico de campo, ou deixou de ser):
  * encerra a sessão, apaga o banco local e as fotos pendentes e volta ao login com o motivo.
  */
 async function revokeAccess(message: string) {
   stopSync();
   await stopTracking({ endOnServer: false });
+  await endDeviceSession();
   await wipeLocalData();
   await session.signOut(false, message);
 }
@@ -40,20 +52,22 @@ setAccessRevokedHandler(revokeAccess);
 async function forgetDisabledAccess() {
   stopSync();
   await stopTracking({ endOnServer: false }).catch(() => undefined);
+  await endDeviceSession();
   await wipeLocalData().catch((error: unknown) => console.warn("Falha ao apagar os dados do aparelho", error));
 }
 
 let previousStatus: SessionStatus = session.get().status;
 
 // Qualquer saída da conta (Sair, sessão expirada, acesso retirado): o próximo login registra o aparelho
-// de novo para o push, mesmo sem reabrir o app. Se o servidor encerrou a sessão porque a central
-// desativou o técnico, apaga também os dados locais.
+// de novo para o push, mesmo sem reabrir o app, e as notificações do técnico saem do aparelho. Se o
+// servidor encerrou a sessão porque a central desativou o técnico, apaga também os dados locais.
 session.subscribe(() => {
   const { status, notice } = session.get();
   const ended = previousStatus === "signedIn" && status === "signedOut";
   previousStatus = status;
   if (!ended) return;
   pushRequestedFor = null;
+  void endDeviceSession();
   if (notice === ACCESS_DISABLED_MESSAGE) void forgetDisabledAccess();
 });
 
@@ -65,6 +79,8 @@ export async function restoreSession() {
 
 /** Depois do login (ou ao abrir o app já logado): sync, tempo real e registro do aparelho. */
 export async function startSession() {
+  // Handler, canais e toque nas notificações, inclusive o toque que abriu o app (abre a OS ou a oferta).
+  void ensureNotificationsReady({ launch: true });
   // Confere o usuário no servidor: se o analista redefiniu a senha (must_change_password),
   // o layout leva para "Crie sua senha" e nada mais começa. Offline, segue com o usuário salvo.
   try {
@@ -74,6 +90,8 @@ export async function startSession() {
     // sem rede
   }
   startSync();
+  // Sincronização com o app fora da tela (tarefa periódica do sistema; não existe no Expo Go).
+  void registerBackgroundSync();
   // Jornada em andamento (app reaberto ou aparelho reiniciado): retoma a coleta.
   void resumeTracking().catch((error: unknown) => console.warn("Falha ao retomar a jornada", error));
   // Sem o termo de localização aceito, o push espera o termo ser visto (tela inicial): o celular não
@@ -81,13 +99,25 @@ export async function startSession() {
   if (hasConsent()) await ensurePushRegistration();
 }
 
-/** Registro do aparelho para push (pede a permissão de notificações). Uma vez por sessão. */
+/**
+ * Notificações do aparelho, uma vez por sessão: o único pedido automático da permissão (no máximo uma vez por
+ * técnico, também no Expo Go), os lembretes e alertas locais já com a permissão e o registro para o push.
+ */
 export async function ensurePushRegistration() {
   const { status, user } = session.get();
   if (status !== "signedIn" || !user || pushRequestedFor === user.id) return;
   pushRequestedFor = user.id;
+  await askNotificationPermission({ auto: true });
+  await syncLocalAlerts();
   await registerDevice();
   // A Conta mostra o estado do registro: redesenha quando ele termina.
+  notifyDataChanged();
+}
+
+/** Notificações liberadas depois (Conta, configurações do celular): registra o aparelho para o push já. */
+export async function refreshPushRegistration() {
+  if (session.get().status !== "signedIn") return;
+  await registerDevice();
   notifyDataChanged();
 }
 
@@ -136,5 +166,6 @@ export async function logout() {
   // Sem rede, o servidor reatribui o token de push no próximo login neste aparelho.
   await Promise.race([unregisterDevice(), delay(LOGOUT_DEVICE_WAIT_MS)]);
   stopSync();
+  await endDeviceSession();
   await session.signOut();
 }
