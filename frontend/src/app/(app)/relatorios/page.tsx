@@ -18,7 +18,7 @@ import { formatDocument, formatMinutes, formatMoney, OPERATION_TZ } from "@/lib/
 import { historyMonths } from "@/lib/months";
 import { useCan } from "@/lib/permissions";
 import { useCustomers } from "@/lib/queries";
-import type { DailyReport, DayNumbers, MonthlyReport, PayoutList, ReportCountRef, ReportDayPoint, UUID } from "@/lib/types";
+import type { DailyReport, DayNumbers, FieldRules, MonthlyReport, PayoutList, ReportCountRef, ReportDayPoint, UUID } from "@/lib/types";
 import { copyText } from "@/lib/whatsapp";
 
 type Tab = "diario" | "mensal" | "sla";
@@ -359,6 +359,18 @@ function Tiles({ n, prev, partial, period }: { n: DayNumbers; prev: DayNumbers; 
   );
 }
 
+/** O prazo de chegada de agora (Configurações › Campo), para o title da "Chegada no prazo". */
+function useArrivalRule(): string | null {
+  const rules = useQuery({
+    queryKey: ["settings", "field"],
+    queryFn: () => api.get<FieldRules>("/settings/field"),
+    staleTime: 5 * 60_000,
+  });
+  if (!rules.data) return null;
+  const hours = (h: number | null) => (h ? `${h}h` : "sem prazo");
+  return `Prazo de chegada: ${hours(rules.data.arrival_hours_capital)} nas capitais, ${hours(rules.data.arrival_hours_interior)} no interior (Configurações › Campo)`;
+}
+
 /**
  * O cliente destaque e as promessas do chamado (solução, chegada e tempo na loja), medidas no período.
  * Com o recorte por cliente, o destaque sai (seria o próprio cliente).
@@ -370,6 +382,7 @@ function DeadlineTiles({
   period,
   top,
   scoped,
+  range,
 }: {
   n: DayNumbers;
   prev: DayNumbers;
@@ -377,9 +390,12 @@ function DeadlineTiles({
   period: "day" | "month";
   top: ReportCountRef | null;
   scoped: boolean;
+  /** Dias contados ("created_from=...&created_to=..."): o atalho abre a lista das OS do número. */
+  range: string;
 }) {
   const { flow } = comparison(period, partial);
   const pct = n.arrival_on_time_pct;
+  const arrivalRule = useArrivalRule();
   return (
     <div className={clsx("grid grid-cols-2 gap-3 sm:grid-cols-3", scoped ? "xl:grid-cols-4" : "xl:grid-cols-5")}>
       {scoped ? null : (
@@ -389,7 +405,7 @@ function DeadlineTiles({
           display={top?.name ?? "—"}
           compact
           hint={top ? plural(top.count, "chamado aberto", "chamados abertos") : "Nenhum chamado aberto"}
-          href={top?.id ? `/chamados?customer_id=${top.id}` : undefined}
+          href={top?.id ? `/chamados?customer_id=${top.id}&${range}` : undefined}
         />
       )}
       <StatTile
@@ -405,11 +421,14 @@ function DeadlineTiles({
         display={pct === null ? "—" : pctFmt(pct)}
         tone={pct === null || pct >= TARGET ? undefined : pct >= FLOOR ? "warning" : "danger"}
         hint={
-          n.arrivals === 0
-            ? "Nenhuma chegada no período"
-            : pct === null
-              ? "Nenhuma chegada com prazo"
-              : "Sobre as chegadas com prazo (4h nas capitais)"
+          n.arrivals === 0 ? (
+            "Nenhuma chegada no período"
+          ) : pct === null ? (
+            "Nenhuma chegada com prazo"
+          ) : (
+            // A regra de agora (Configurações › Campo) no title: o prazo muda por lá.
+            <span title={arrivalRule ?? undefined}>Sobre as chegadas com prazo</span>
+          )
         }
       />
       <StatTile
@@ -428,7 +447,11 @@ function DeadlineTiles({
   );
 }
 
-function Panels({ data, period, scoped }: { data: DailyReport | MonthlyReport; period: string; scoped: boolean }) {
+/**
+ * Os atalhos dos rankings levam à lista das OS do número: os clientes pelas OS criadas no período; os
+ * técnicos pelas resolvidas e fechadas (a lista não filtra pela data da conclusão).
+ */
+function Panels({ data, period, scoped, range }: { data: DailyReport | MonthlyReport; period: string; scoped: boolean; range: string }) {
   return (
     <div className={clsx("grid gap-4", scoped ? "lg:grid-cols-2" : "lg:grid-cols-3")}>
       {scoped ? null : (
@@ -440,7 +463,7 @@ function Panels({ data, period, scoped }: { data: DailyReport | MonthlyReport; p
             items={data.customers}
             empty="Nenhum chamado aberto."
             label={`Clientes com mais chamados ${period}`}
-            href={(item) => (item.id ? `/chamados?customer_id=${item.id}` : undefined)}
+            href={(item) => (item.id ? `/chamados?customer_id=${item.id}&${range}` : undefined)}
           />
         </Card>
       )}
@@ -453,7 +476,7 @@ function Panels({ data, period, scoped }: { data: DailyReport | MonthlyReport; p
           items={data.technicians}
           empty="Nenhuma OS resolvida."
           label="OS resolvidas por técnico"
-          href={(item) => (item.id ? `/chamados?assignee_id=${item.id}` : undefined)}
+          href={(item) => (item.id ? `/chamados?assignee_id=${item.id}&status=resolved&status=closed` : undefined)}
         />
       </Card>
       <Card className="p-4">
@@ -494,6 +517,8 @@ function DailyView({
   const yesterday = shiftDay(today, -1);
   const stale = report.isPlaceholderData;
   const partial = data?.date === today;
+  // Os atalhos (cliente destaque, rankings) abrem as OS criadas no dia contado.
+  const range = `created_from=${day}&created_to=${day}`;
 
   const copySummary = async () => {
     if (!data) return;
@@ -558,8 +583,16 @@ function DailyView({
       {data ? (
         <div className={clsx("flex flex-col gap-4 transition-opacity duration-150", stale && "opacity-60")} aria-busy={report.isFetching}>
           <Tiles n={data.numbers} prev={data.previous} partial={partial} period="day" />
-          <DeadlineTiles n={data.numbers} prev={data.previous} partial={partial} period="day" top={data.top_customer} scoped={Boolean(scope)} />
-          <Panels data={data} period="no dia" scoped={Boolean(scope)} />
+          <DeadlineTiles
+            n={data.numbers}
+            prev={data.previous}
+            partial={partial}
+            period="day"
+            top={data.top_customer}
+            scoped={Boolean(scope)}
+            range={range}
+          />
+          <Panels data={data} period="no dia" scoped={Boolean(scope)} range={range} />
         </div>
       ) : report.isLoading ? (
         <LoadingBlock />
@@ -708,6 +741,7 @@ function MonthlyView({
             period="month"
             top={data.top_customer}
             scoped={Boolean(scope)}
+            range={range}
           />
           {/* Cada valor só com a tela dele: sem Custos extras ou Orçamentos, a API manda o total null. */}
           {moneyTiles ? (
@@ -735,7 +769,7 @@ function MonthlyView({
                   display={payouts.error ? "—" : formatMoney(techniciansTotal)}
                   loading={payouts.isLoading}
                   hint={summary ? `pago ${formatMoney(summary.paid)} · a pagar ${formatMoney(summary.to_pay)}` : "OS concluídas no mês"}
-                  href="/pagamentos"
+                  href={`/pagamentos?mes=${month}`}
                 />
               ) : null}
             </div>
@@ -762,7 +796,7 @@ function MonthlyView({
               />
             )}
           </Card>
-          <Panels data={data} period="no mês" scoped={Boolean(scope)} />
+          <Panels data={data} period="no mês" scoped={Boolean(scope)} range={range} />
         </div>
       ) : report.isLoading ? (
         <LoadingBlock />
