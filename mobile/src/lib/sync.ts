@@ -14,7 +14,8 @@
 // Gatilhos: login/abertura do app, rede voltando, app voltando ao primeiro plano,
 // cada ação do técnico, cada evento do WebSocket e um intervalo de segurança.
 //
-// Depois do download, a rodada confere as ofertas de OS com preço (GET /me/offers, lib/offers.ts).
+// A rodada também confere as ofertas de OS com preço (GET /me/offers, lib/offers.ts): antes do upload das fotos,
+// entre uma foto e outra, depois do download e quando o servidor recusa o download.
 
 import NetInfo from "@react-native-community/netinfo";
 import { randomUUID } from "expo-crypto";
@@ -94,6 +95,7 @@ import {
   offersDue,
   offersFetchDone,
   offersFetchStart,
+  offersHeld,
   putOffer,
   resetOffersState,
   setOfferAccepted,
@@ -293,6 +295,8 @@ interface Round extends Ctx {
   attachments: Map<UUID, Attachment[] | null>;
   /** Ações do técnico já levadas em conta (muda quando ele faz algo enquanto as fotos sobem). */
   actions: number;
+  /** "Puxar para atualizar": vale para a primeira busca de ofertas da rodada, não para cada foto. */
+  offersManual: boolean;
 }
 
 /** Conta as ações do técnico (fila, pedido de peça, assinatura): a rodada vê o que entrou no meio dela. */
@@ -371,6 +375,7 @@ async function runOnce(myEpoch: number, manual: boolean) {
     error: null,
     attachments: new Map(),
     actions: actionsQueued,
+    offersManual: manual,
   };
   const pending = await countPending().catch(() => ({ ops: 0, photos: 0 }));
   // A faixa "Sincronizando…" só acende quando há o que enviar ou o técnico pediu: a rotina
@@ -381,11 +386,21 @@ async function runOnce(myEpoch: number, manual: boolean) {
     // assinatura → o restante (ex.: "Resolver"), que o servidor só aceita depois dela. O que não
     // espera foto (as OS sem foto pendente) sai antes do upload, que em rede lenta leva minutos.
     await sendPhase(round, () => pushWithSignatures(round));
+    // A oferta nova não espera o upload das fotos (minutos em rede lenta): quem aceita primeiro fica com a OS.
+    await refreshOffers(round, true);
     await sendPhase(round, () => uploadPhotos(round));
     await sendPhase(round, () => pushWithSignatures(round));
-    await pullChanges(round);
+    try {
+      await pullChanges(round);
+    } catch (error) {
+      // Download recusado pelo servidor (não falta de rede nem sessão): as ofertas seguem chegando.
+      if (!(error instanceof WriteCancelled) && !(error instanceof ApiError && (error.status === 0 || error.status === 401))) {
+        await refreshOffers(round, true);
+      }
+      throw error;
+    }
     // Depois do pull: a OS em que a central pôs o técnico já está no aparelho quando a oferta dela fecha.
-    await refreshOffers(round, manual);
+    await refreshOffers(round, false);
     await revalidateHelperTickets(round);
     await refreshFieldRules(round);
     await refreshReasons(round);
@@ -1013,16 +1028,18 @@ export async function storeServerTicket(ticket: TicketDetail) {
 // ───────────────────────────── ofertas de OS ─────────────────────────────
 
 /**
- * Ofertas de OS com preço (GET /me/offers), depois do pull. A busca não se repete a cada rodada: valem o
- * aviso do tempo real (ticket.offer), o app voltando à tela, a rede e o tempo real voltando (um aviso pode ter
- * se perdido), o "puxar para atualizar" e, sem eles, uma conferência por minuto. Falta de rede para a rodada;
- * outro problema (servidor sem a rota, erro do servidor) não derruba o sync.
+ * Ofertas de OS com preço (GET /me/offers): antes do upload das fotos, entre uma foto e outra, depois do pull e
+ * quando o servidor recusa o pull. A busca não se repete a cada vez: valem o aviso do tempo real (ticket.offer),
+ * o app voltando à tela, a rede e o tempo real voltando (um aviso pode ter se perdido), o "puxar para atualizar"
+ * e, sem eles, uma conferência por minuto. Falta de rede para a rodada; outro problema (servidor sem a rota,
+ * erro do servidor) não derruba o sync. `early`: antes do pull (applyOfferList).
  */
-async function refreshOffers(round: Round, manual: boolean) {
-  if (!offersDue(manual)) return;
+async function refreshOffers(round: Round, early: boolean) {
+  if (!offersDue(round.offersManual, early)) return;
+  round.offersManual = false;
   const mark = offersFetchStart();
   try {
-    await fetchOffers(round);
+    await fetchOffers(round, { early });
   } catch (error) {
     if (error instanceof WriteCancelled || (error instanceof ApiError && error.status === 0)) throw error;
     console.warn("Não foi possível atualizar as ofertas de OS", error);
@@ -1033,19 +1050,21 @@ async function refreshOffers(round: Round, manual: boolean) {
 /**
  * Busca a lista, guarda no aparelho e avisa a oferta nova e a que fechou sem o técnico responder. `quiet`: oferta
  * cujo fechamento a tela dela já mostra (o servidor acabou de recusar a resposta): não vira aviso de novo.
+ * `early`: busca antes do pull; a oferta que ela deixa para depois pede a busca depois do pull.
  */
-async function fetchOffers(ctx: Ctx, quiet?: UUID) {
+async function fetchOffers(ctx: Ctx, { quiet, early = false }: { quiet?: UUID; early?: boolean } = {}) {
   ensureAlive(ctx);
   const list = await api.get<FieldOffer[]>("/me/offers");
   let outcome = null as OfferListOutcome | null;
   await write(
     ctx,
     async (db) => {
-      outcome = await applyOfferList(db, list, ctx.user.id, serverNow());
+      outcome = await applyOfferList(db, list, ctx.user.id, serverNow(), early);
     },
     false,
   );
   if (!outcome) return;
+  if (outcome.held) offersHeld();
   // Lista igual à guardada não acorda as telas (a conferência roda o dia todo).
   if (outcome.changed) notifyDataChanged();
   announceOffers(quiet ? { ...outcome, closed: outcome.closed.filter((offer) => offer.id !== quiet) } : outcome);
@@ -1053,11 +1072,11 @@ async function fetchOffers(ctx: Ctx, quiet?: UUID) {
 
 /**
  * Busca as ofertas agora, fora da rodada: a tela da oferta, depois que o servidor recusou a resposta (`quiet`: a
- * oferta dela, cujo fechamento já está na tela).
+ * oferta dela, cujo fechamento já está na tela) ou quando o aceite ficou sem resposta.
  */
 export async function refreshOffersNow(quiet?: UUID) {
   const mark = offersFetchStart();
-  await fetchOffers(sessionCtx(), quiet);
+  await fetchOffers(sessionCtx(), { quiet });
   offersFetchDone(mark);
 }
 
@@ -1119,6 +1138,8 @@ export async function markOfferScopeRead(offerId: UUID) {
 async function uploadPhotos(round: Round) {
   for (const photo of await listPhotos()) {
     ensureAlive(round);
+    // Entre uma foto e outra: a oferta que chegou (ou 1 min sem conferir) não espera o resto do upload.
+    await refreshOffers(round, true);
     if (round.blocked.has(photo.ticket_id)) continue;
     if (!isDue(photo.id)) {
       holdTicket(round, photo.ticket_id, photo.id);
