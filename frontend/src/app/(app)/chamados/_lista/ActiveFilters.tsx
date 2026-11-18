@@ -147,6 +147,12 @@ export function ActiveFilters({
           onClear={() => onChange({ scheduled_from: "", scheduled_to: "" })}
         />
       ) : null}
+      {f.resolved_from || f.resolved_to ? (
+        <Chip
+          label={`Resolvida: ${rangeLabel({ from: f.resolved_from, to: f.resolved_to })}`}
+          onClear={() => onChange({ resolved_from: "", resolved_to: "" })}
+        />
+      ) : null}
       {f.team_id ? <TeamChip id={f.team_id} onClear={() => onChange({ team_id: "" })} /> : null}
       {f.category_id ? <CategoryChip id={f.category_id} onClear={() => onChange({ category_id: "" })} /> : null}
       {f.type ? <Chip label={`Atendimento: ${TICKET_TYPE[f.type]}`} onClear={() => onChange({ type: "" })} /> : null}

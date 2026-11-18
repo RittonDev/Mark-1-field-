@@ -11,7 +11,7 @@ import { PRIORITY, PRIORITY_ORDER, ROLE, TICKET_TYPE } from "@/lib/constants";
 import { useProjects } from "@/lib/projects";
 import { useAssignable, useCategories, useServiceTypes, useTeams } from "@/lib/queries";
 import type { QueuesOut, TicketPriority, TicketSource, TicketType, UUID } from "@/lib/types";
-import { DateRangeForm, SCHEDULED_PRESETS } from "./DateRange";
+import { CREATED_PRESETS, DateRangeForm, SCHEDULED_PRESETS } from "./DateRange";
 import { type Filters, moreFilterCount, SOURCES, type View } from "./params";
 import { TagPicker, useKnownTags } from "./tags";
 
@@ -352,6 +352,17 @@ export function MoreFilters({
             presets={SCHEDULED_PRESETS}
             legend="Data do agendamento"
             onApply={(range) => onChange({ scheduled_from: range.from, scheduled_to: range.to })}
+          />
+        </section>
+
+        <section className={section}>
+          <SectionTitle as="h3">Resolução</SectionTitle>
+          <DateRangeForm
+            key={`${filters.resolved_from}|${filters.resolved_to}`}
+            value={{ from: filters.resolved_from, to: filters.resolved_to }}
+            presets={CREATED_PRESETS}
+            legend="Data em que foi resolvida"
+            onApply={(range) => onChange({ resolved_from: range.from, resolved_to: range.to })}
           />
         </section>
 

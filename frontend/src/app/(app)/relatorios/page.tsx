@@ -448,10 +448,22 @@ function DeadlineTiles({
 }
 
 /**
- * Os atalhos dos rankings levam à lista das OS do número: os clientes pelas OS criadas no período; os
- * técnicos pelas resolvidas e fechadas (a lista não filtra pela data da conclusão).
+ * Os atalhos dos rankings levam à lista das OS do número: os clientes pelas OS criadas no período (`range`);
+ * os técnicos pelas OS resolvidas no período (`resolved`), a mesma conta do ranking.
  */
-function Panels({ data, period, scoped, range }: { data: DailyReport | MonthlyReport; period: string; scoped: boolean; range: string }) {
+function Panels({
+  data,
+  period,
+  scoped,
+  range,
+  resolved,
+}: {
+  data: DailyReport | MonthlyReport;
+  period: string;
+  scoped: boolean;
+  range: string;
+  resolved: string;
+}) {
   return (
     <div className={clsx("grid gap-4", scoped ? "lg:grid-cols-2" : "lg:grid-cols-3")}>
       {scoped ? null : (
@@ -476,7 +488,7 @@ function Panels({ data, period, scoped, range }: { data: DailyReport | MonthlyRe
           items={data.technicians}
           empty="Nenhuma OS resolvida."
           label="OS resolvidas por técnico"
-          href={(item) => (item.id ? `/chamados?assignee_id=${item.id}&status=resolved&status=closed` : undefined)}
+          href={(item) => (item.id ? `/chamados?assignee_id=${item.id}&${resolved}` : undefined)}
         />
       </Card>
       <Card className="p-4">
@@ -592,7 +604,7 @@ function DailyView({
             scoped={Boolean(scope)}
             range={range}
           />
-          <Panels data={data} period="no dia" scoped={Boolean(scope)} range={range} />
+          <Panels data={data} period="no dia" scoped={Boolean(scope)} range={range} resolved={`resolved_from=${day}&resolved_to=${day}`} />
         </div>
       ) : report.isLoading ? (
         <LoadingBlock />
@@ -799,7 +811,13 @@ function MonthlyView({
               />
             )}
           </Card>
-          <Panels data={data} period="no mês" scoped={Boolean(scope)} range={range} />
+          <Panels
+            data={data}
+            period="no mês"
+            scoped={Boolean(scope)}
+            range={range}
+            resolved={`resolved_from=${monthSpan.date_from}&resolved_to=${monthSpan.date_to}`}
+          />
         </div>
       ) : report.isLoading ? (
         <LoadingBlock />

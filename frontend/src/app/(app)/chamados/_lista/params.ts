@@ -60,6 +60,8 @@ const FILTER_KEYS = [
   "created_to",
   "scheduled_from",
   "scheduled_to",
+  "resolved_from",
+  "resolved_to",
 ];
 
 /** Como no Field Control: a lista abre pelo identificador, do maior (a OS mais nova) para o menor. */
@@ -125,6 +127,9 @@ export interface Filters {
   created_to: string;
   scheduled_from: string;
   scheduled_to: string;
+  /** Resolvida nesses dias (a resolução, mesmo se a OS foi reaberta depois): como os rankings dos relatórios contam. */
+  resolved_from: string;
+  resolved_to: string;
 }
 
 export type FilterKey = keyof Filters;
@@ -161,6 +166,8 @@ export const CLEAR_FILTERS: Record<FilterKey, null> = {
   created_to: null,
   scheduled_from: null,
   scheduled_to: null,
+  resolved_from: null,
+  resolved_to: null,
 };
 
 /** Os filtros que ficam em "Mais filtros" (os outros têm botão próprio na fileira de filtros). */
@@ -175,6 +182,8 @@ export const MORE_FILTER_KEYS: FilterKey[] = [
   "project_id",
   "scheduled_from",
   "scheduled_to",
+  "resolved_from",
+  "resolved_to",
   "type",
   "source",
   "team_id",
@@ -274,6 +283,8 @@ export function readListState(params: Params): ListState {
       created_to: day("created_to"),
       scheduled_from: day("scheduled_from"),
       scheduled_to: day("scheduled_to"),
+      resolved_from: day("resolved_from"),
+      resolved_to: day("resolved_to"),
     },
     q: (params.get("q") ?? "").trim(),
     page: Math.max(1, Math.floor(Number(params.get("page"))) || 1),
@@ -307,7 +318,8 @@ export function moreFilterCount(f: Filters): number {
     [f.type, f.source, f.assignee_id, f.technician_id, f.team_id, f.service_type_id, f.category_id, f.project_id, f.owner_id].filter(Boolean).length +
     (f.no_owner ? 1 : 0) +
     (f.violation_pending ? 1 : 0) +
-    (f.scheduled_from || f.scheduled_to ? 1 : 0)
+    (f.scheduled_from || f.scheduled_to ? 1 : 0) +
+    (f.resolved_from || f.resolved_to ? 1 : 0)
   );
 }
 
@@ -346,6 +358,8 @@ export function apiQuery(state: ListState): Query {
     created_to: f.created_to || undefined,
     scheduled_from: f.scheduled_from || undefined,
     scheduled_to: f.scheduled_to || undefined,
+    resolved_from: f.resolved_from || undefined,
+    resolved_to: f.resolved_to || undefined,
     // O identificador (ou a busca pelo nº da OS) vale para todas as OS: a aba não limita.
     ...(ignoresView(state) ? {} : VIEW_FLAGS[state.view]),
     q: state.q || undefined,
