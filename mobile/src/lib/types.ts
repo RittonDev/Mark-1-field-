@@ -517,6 +517,11 @@ export interface TicketDetail extends TicketListItem {
    * os valores (GET /tickets/{id}/offers) é de Pagamentos. O técnico recebe 0; servidor antigo não manda.
    */
   open_offers?: number;
+  /**
+   * O prazo mais próximo entre essas ofertas (null se nenhuma tem prazo). Sem rotina de vencimento: reler a OS
+   * nesse horário. O técnico recebe null; servidor antigo não manda.
+   */
+  next_offer_expires_at?: ISODate | null;
   recurrence?: { count_30d: number; previous: { id: UUID; code: string; title: string; status: TicketStatus; created_at: ISODate }[] } | null;
   /** Dados de origem da OS migrada do Field Control (valores, itens, solicitação, arquivos). */
   legacy?: LegacyOrder | null;
@@ -1968,11 +1973,17 @@ export type OfferAction = "sent" | "viewed" | "accepted" | "declined" | "cancell
 
 /**
  * `data` do ticket.updated da gestão com `fields: ["offers"]` (sem valor). `reason`: o `cancel_reason` no
- * "cancelled"; o motivo do técnico no "declined".
+ * "cancelled"; o motivo do técnico no "declined". `sender_id`: quem mandou a oferta, no "accepted" e no "declined"
+ * (null nas outras ações; servidor antigo não manda).
  */
 export interface OfferRealtimeData {
   fields: ["offers"];
-  offer: { action: OfferAction; technician_name: string | null; reason: string | null };
+  offer: {
+    action: OfferAction;
+    technician_name: string | null;
+    reason: string | null;
+    sender_id?: UUID | null;
+  };
 }
 
 // --------------------------------------------------------------------------- portal do cliente
