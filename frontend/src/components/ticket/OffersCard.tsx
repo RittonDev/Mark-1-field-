@@ -72,8 +72,9 @@ function endOfDay(now: number): string | null {
 }
 
 /**
- * O `expires_at` do prazo escolhido, contado de `now` (null: sem prazo). Sem `now`, conta do relógio na hora
- * da chamada (o clique em Enviar): fora do render, onde o React Compiler não aceita ler o relógio.
+ * O `expires_at` do prazo escolhido, contado de `now` (null: sem prazo). Sem `now`, lê o relógio na hora da
+ * chamada (o clique em Enviar). A leitura fica aqui, fora do componente: o React Compiler (react-hooks/purity)
+ * não aceita `Date.now()` nas funções do corpo dele, nem nas que só rodam no clique.
  */
 function deadlineAt(key: DeadlineKey, now: number = Date.now()): string | null {
   if (key === "eod") return endOfDay(now);
