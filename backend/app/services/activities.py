@@ -99,7 +99,7 @@ def _state(
         return "rescheduled"
     if _in_day(ticket.scheduled_start, day_start, day_end):
         # Improdutiva no horário ou depois (OS migrada que manteve a agenda): a visita aconteceu e
-        # a OS voltou para a fila, como no fluxo nativo. Não é atrasada nem "a seguir".
+        # a OS voltou para a fila, como no fluxo nativo. Não é atrasada nem agendada.
         if bounced_at is not None and bounced_at >= ticket.scheduled_start:  # type: ignore[operator]
             return "pending"
         if started is None and late_to_start(ticket.scheduled_start, now):
