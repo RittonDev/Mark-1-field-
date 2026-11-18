@@ -435,7 +435,16 @@ async def test_client_report_link(client: AsyncClient, world: World) -> None:
     detail = (await client.get(f"{API}/tickets/{tid}", headers=an)).json()
     assert detail["report_link"] is None
     detail = await transition(client, th, detail, "in_progress")
-    detail = await transition(client, th, detail, "resolved", resolution_notes="Trocado o patch")
+    # A reabertura tirou a assinatura (era do atendimento anterior): a nova conclusão pede outra.
+    assert detail["signed_at"] is None
+    r = await client.post(
+        f"{API}/tickets/{tid}/signature",
+        files={"file": ("assinatura.png", PNG, "image/png")},
+        data={"signer_name": "Paula Gerente", "signer_role": "Gerente da loja"},
+        headers=th,
+    )
+    assert r.status_code == 200, r.text
+    detail = await transition(client, th, r.json(), "resolved", resolution_notes="Trocado o patch")
     again = detail["report_link"]  # o técnico concluiu: a resposta dele já traz o link novo
     assert again["token"] not in (token, new["token"])
     office = (await client.get(f"{API}/tickets/{tid}", headers=an)).json()["report_link"]
