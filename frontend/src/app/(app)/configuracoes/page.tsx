@@ -38,7 +38,7 @@ import { PRIORITY, PRIORITY_ORDER, STATUS, STATUS_ORDER, TRANSITIONS } from "@/l
 import { formatMinutes, formatMoney } from "@/lib/format";
 import { useCan } from "@/lib/permissions";
 import { useCategories, useTeams } from "@/lib/queries";
-import type { Category, SlaPolicy, TicketPriority } from "@/lib/types";
+import type { Category, FormTemplate, SlaPolicy, TicketPriority } from "@/lib/types";
 
 // Limites de backend/app/schemas/catalog.py (SlaPolicyUpdate): 60 e 120 dias.
 const MAX_RESPONSE = 60 * 24 * 60;
@@ -245,20 +245,61 @@ function SlaCard({ editable }: { editable: boolean }) {
   );
 }
 
+/** Formulário que entra nas OS da categoria: ligado a ela (`from` null) ou a uma categoria de cima. */
+interface CategoryForm {
+  template: FormTemplate;
+  from: Category | null;
+}
+
+/**
+ * Formulários ativos que entram sozinhos nas OS de cada categoria: os ligados a ela e os herdados das de cima
+ * (a ligação na categoria-mãe vale para as subcategorias, até 10 níveis, como na API), por nome.
+ */
+function formsByCategory(categories: Category[], templates: FormTemplate[]): Map<string, CategoryForm[]> {
+  const byId = new Map(categories.map((c) => [c.id, c]));
+  const out = new Map<string, CategoryForm[]>();
+  for (const category of categories) {
+    const list: CategoryForm[] = [];
+    const visited = new Set<string>();
+    for (let node: Category | undefined = category; node && visited.size <= 10; node = node.parent_id ? byId.get(node.parent_id) : undefined) {
+      if (visited.has(node.id)) break;
+      visited.add(node.id);
+      for (const template of templates) {
+        if (!list.some((f) => f.template.id === template.id) && (template.category_ids ?? []).includes(node.id)) {
+          list.push({ template, from: node.id === category.id ? null : node });
+        }
+      }
+    }
+    out.set(category.id, list.sort((a, b) => a.template.name.localeCompare(b.template.name, "pt-BR")));
+  }
+  return out;
+}
+
+/** Nome do formulário na lista da categoria: o herdado diz de qual categoria vem. */
+const categoryFormLabel = (f: CategoryForm) => (f.from ? `${f.template.name} · de ${f.from.full_name}` : f.template.name);
+
 function CategoryDialog({
   category,
   categories,
+  forms,
+  formsFailed,
   onClose,
 }: {
   /** null: categoria nova. */
   category: Category | null;
   categories: Category[];
+  /** Formulários que entram nas OS desta categoria (null: carregando). */
+  forms: CategoryForm[] | null;
+  formsFailed: boolean;
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const teams = useTeams();
   const nameErrorId = useId();
+  // Os formulários são de outra tela: o link só aparece com acesso a ela (abrir o construtor pede Editar).
+  const canForms = useCan("setup.forms");
+  const canEditForms = useCan("setup.forms", "edit");
   const [initial] = useState(() => ({
     name: category?.name ?? "",
     parent_id: category?.parent_id ?? "",
@@ -390,6 +431,43 @@ function CategoryDialog({
           <Textarea rows={2} value={form.description} onChange={(e) => set("description", e.target.value)} />
         </Field>
         {category ? (
+          <div className="flex flex-col gap-1.5">
+            <span className="text-xs font-semibold text-ink/80">Formulários que entram nas OS desta categoria</span>
+            {forms === null ? (
+              <span className="text-xs text-ink-muted">{formsFailed ? "Não foi possível carregar os formulários agora." : "Carregando..."}</span>
+            ) : forms.length ? (
+              <ul className="flex flex-wrap gap-1.5">
+                {forms.map((f) => (
+                  <li key={f.template.id}>
+                    {canEditForms ? (
+                      <Link
+                        href={`/formularios?editar=${f.template.id}`}
+                        className="inline-flex rounded-full border border-line px-2.5 py-0.5 text-xs font-medium text-ink hover:border-brand/40 hover:text-brand focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
+                      >
+                        {categoryFormLabel(f)}
+                      </Link>
+                    ) : (
+                      <span className="inline-flex rounded-full border border-line px-2.5 py-0.5 text-xs font-medium text-ink">{categoryFormLabel(f)}</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <span className="text-xs text-ink-muted">
+                Nenhum. A ligação é feita no próprio formulário, em{" "}
+                {canForms ? (
+                  <Link href="/formularios" className="font-medium text-brand-ink hover:underline">
+                    Formulários
+                  </Link>
+                ) : (
+                  "Formulários"
+                )}
+                .
+              </span>
+            )}
+          </div>
+        ) : null}
+        {category ? (
           <div className="flex flex-col gap-1">
             <Checkbox label="Ativa" checked={form.is_active} onChange={(v) => set("is_active", v)} />
             <span className="text-xs text-ink-muted">Inativa não aparece para escolher nas OS novas; as que já têm a categoria continuam com ela.</span>
@@ -408,6 +486,12 @@ function CategoriesCard({ canEdit }: { canEdit: boolean }) {
     () => [...(categories.data ?? [])].sort((a, b) => a.full_name.localeCompare(b.full_name)),
     [categories.data],
   );
+  // Formulários que entram sozinhos nas OS de cada categoria (a ligação fica no formulário).
+  const templates = useQuery({
+    queryKey: ["form-templates", "active"],
+    queryFn: () => api.get<FormTemplate[]>("/form-templates", { active: true }),
+  });
+  const linkedForms = useMemo(() => (templates.data ? formsByCategory(sorted, templates.data) : null), [sorted, templates.data]);
   // Nível de cada categoria na árvore (para o recuo na lista).
   const depth = useMemo(() => {
     const byId = new Map(sorted.map((c) => [c.id, c]));
@@ -457,6 +541,7 @@ function CategoriesCard({ canEdit }: { canEdit: boolean }) {
             <tr>
               <Th>Categoria</Th>
               <Th>Grupo padrão</Th>
+              <Th className="text-right">Formulários</Th>
               <Th>Situação</Th>
               {canEdit ? <Th className="edit-col">Editar</Th> : null}
             </tr>
@@ -464,6 +549,7 @@ function CategoriesCard({ canEdit }: { canEdit: boolean }) {
           <tbody>
             {sorted.map((c) => {
               const level = depth.get(c.id) ?? 0;
+              const forms = linkedForms?.get(c.id) ?? [];
               return (
                 <tr key={c.id} className="transition-colors hover:bg-[var(--row-hover)]">
                   <Td>
@@ -475,6 +561,13 @@ function CategoriesCard({ canEdit }: { canEdit: boolean }) {
                     </span>
                   </Td>
                   <Td>{c.default_team?.name ?? <span className="text-ink-subtle">—</span>}</Td>
+                  <Td className="text-right tabular-nums">
+                    {linkedForms === null ? null : forms.length ? (
+                      <span title={forms.map(categoryFormLabel).join(", ")}>{forms.length}</span>
+                    ) : (
+                      <span className="text-ink-subtle">—</span>
+                    )}
+                  </Td>
                   <Td>
                     <ActiveState active={c.is_active} feminine />
                   </Td>
@@ -490,7 +583,13 @@ function CategoriesCard({ canEdit }: { canEdit: boolean }) {
         </Table>
       )}
       {editing ? (
-        <CategoryDialog category={editing === "new" ? null : editing} categories={sorted} onClose={() => setEditing(null)} />
+        <CategoryDialog
+          category={editing === "new" ? null : editing}
+          categories={sorted}
+          forms={editing !== "new" && linkedForms ? (linkedForms.get(editing.id) ?? []) : null}
+          formsFailed={templates.isError}
+          onClose={() => setEditing(null)}
+        />
       ) : null}
     </Card>
   );

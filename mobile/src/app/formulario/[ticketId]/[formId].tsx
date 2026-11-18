@@ -28,6 +28,7 @@ import {
   photoCounts,
   photoNeed,
   resumeStep,
+  serverAnswers,
   stepAnswered,
   stepProblem,
 } from "../../../lib/forms";
@@ -101,7 +102,8 @@ function FormEditor({ ticket, form }: { ticket: LocalTicket; form: TicketForm })
   const online = isOnline(useSyncStatus());
   const { user } = useSession();
   const scrollRef = useRef<ScrollViewInstance>(null);
-  const [draft, setDraft] = useState<Record<string, FormAnswer | null>>(() => ({ ...form.answers }));
+  // A resposta automática (dado da OS) já entra no rascunho: o técnico vê preenchida e corrige se precisar.
+  const [draft, setDraft] = useState<Record<string, FormAnswer | null>>(() => serverAnswers(form));
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState<"save" | "complete" | null>(null);
   const [photoBusy, setPhotoBusy] = useState(false);
@@ -179,8 +181,10 @@ function FormEditor({ ticket, form }: { ticket: LocalTicket; form: TicketForm })
     return out;
   }, [draft, form.fields]);
   const missing = missingItems(form, counts, normalized);
+  // Comparado com a resposta do servidor (com a automática): abrir o formulário não conta como alteração.
+  const server = useMemo(() => serverAnswers(form), [form]);
   const dirty = form.fields.some(
-    (f) => isInputField(f) && JSON.stringify(normalized[f.id] ?? null) !== JSON.stringify(form.answers[f.id] ?? null),
+    (f) => isInputField(f) && JSON.stringify(normalized[f.id] ?? null) !== JSON.stringify(server[f.id] ?? null),
   );
   const problemAt = (i: number) => stepProblem(steps[i].field, normalized[steps[i].field.id], counts[steps[i].field.id] ?? 0);
 

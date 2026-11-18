@@ -273,8 +273,19 @@ Regras de [src/lib/field.ts](src/lib/field.ts), espelhando `backend/app/services
 
 ## Formulários (checklists) e assinatura
 
-- O analista decide se a OS tem formulário e se ele é obrigatório. No detalhe da OS, o cartão
-  **Formulários e assinatura** lista cada formulário com status e progresso (itens obrigatórios cumpridos).
+- Os formulários **entram sozinhos** pelo tipo de OS e pela categoria (a ligação fica no modelo, na central;
+  a categoria-mãe vale para as subcategorias), e o analista ainda põe, tira e decide se cada um é obrigatório.
+  O app não faz nada de diferente: eles chegam no sync, como o resto da OS. Antes da visita, trocar o tipo ou a
+  categoria pode tirar um formulário que ninguém começou; ao abrir, a tela diz que ele pode ter sido removido
+  da OS pela central. No detalhe da OS, o cartão **Formulários e assinatura** lista cada formulário com status e
+  progresso (itens obrigatórios cumpridos).
+- **Resposta automática**: a pergunta ligada a um dado da OS que o técnico já vê (loja, código da loja, cliente,
+  endereço, cidade, nº da OS, técnico, tipo de OS ou data da visita) já vem preenchida (`prefill` do formulário,
+  calculado pelo servidor até a conclusão). O app trata `{...prefill, ...answers}` como a resposta do servidor
+  (`serverAnswers` em `lib/forms.ts`): o rascunho começa dela, ela conta para o progresso e para o que falta, e
+  abrir o formulário não conta como alteração. O técnico corrige se precisar; ao salvar, todas as respostas vão
+  (a preenchida vira resposta). Na conclusão o servidor grava o valor do momento, e trocar o técnico ou remarcar
+  depois não muda nada.
 - **Preenchimento** (`/formulario/<OS>/<form>`): texto, número, Sim/Não em botões grandes, opções, data,
   "Confirmo" e fotos por campo (câmera/galeria, com a contagem contra o mínimo e o máximo).
 - **Uma pergunta por tela** (padrão, como o passo a passo do Field Control): "Pergunta 3 de 12", um traço

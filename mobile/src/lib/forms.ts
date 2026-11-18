@@ -2,12 +2,23 @@
 //
 // - Campo respondido: não vazio; "confirm" só conta se for true.
 // - Foto: mínimo = max(min_photos, obrigatório ? 1 : 0), contando os anexos do campo.
+// - Resposta automática: a pergunta ligada a um dado da OS (loja, técnico, data da visita...) já vem
+//   preenchida pelo servidor (`prefill`) e conta como resposta; o técnico corrige se precisar.
 // - Concluir a OS exige os formulários obrigatórios concluídos e, se pedida, a assinatura.
 // - Depois da assinatura (ou com a OS concluída) o técnico não altera mais os formulários.
 
 import type { Attachment, FormAnswer, FormField, TicketDetail, TicketForm, TicketStatus } from "./types";
 
 export const isInputField = (f: FormField) => f.type !== "section" && f.type !== "photo";
+
+/**
+ * As respostas como o servidor as entende: a resposta automática por baixo do que já foi respondido. O
+ * rascunho começa daqui e salvar manda tudo (a resposta automática vira resposta).
+ */
+export const serverAnswers = (form: Pick<TicketForm, "answers" | "prefill">): Record<string, FormAnswer> => ({
+  ...(form.prefill ?? {}),
+  ...form.answers,
+});
 
 export const photoNeed = (f: FormField) => Math.max(f.min_photos ?? 0, f.required ? 1 : 0);
 
@@ -65,9 +76,9 @@ export function photoCounts(
 
 /** O que falta para concluir, no mesmo texto do servidor ("Foto do rack antes (2 fotos)"). */
 export function missingItems(
-  form: Pick<TicketForm, "fields" | "answers">,
+  form: Pick<TicketForm, "fields" | "answers" | "prefill">,
   counts: Record<string, number>,
-  answers: Record<string, FormAnswer | null> = form.answers,
+  answers: Record<string, FormAnswer | null> = serverAnswers(form),
 ): string[] {
   const missing: string[] = [];
   for (const field of form.fields) {
@@ -82,8 +93,9 @@ export function missingItems(
   return missing;
 }
 
-/** Itens obrigatórios cumpridos / total (campos obrigatórios + fotos mínimas). */
+/** Itens obrigatórios cumpridos / total (campos obrigatórios + fotos mínimas; a resposta automática conta). */
 export function formProgress(form: TicketForm, counts: Record<string, number>): { done: number; total: number } {
+  const answers = serverAnswers(form);
   let done = 0;
   let total = 0;
   for (const field of form.fields) {
@@ -95,7 +107,7 @@ export function formProgress(form: TicketForm, counts: Record<string, number>): 
       if ((counts[field.id] ?? 0) >= need) done += 1;
     } else if (field.required) {
       total += 1;
-      if (isAnswered(field, form.answers[field.id])) done += 1;
+      if (isAnswered(field, answers[field.id])) done += 1;
     }
   }
   return { done, total };
