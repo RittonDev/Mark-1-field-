@@ -80,6 +80,45 @@ async def test_extra_costs(client: AsyncClient, world: World) -> None:
     assert [i["id"] for i in pending["items"]] == [eid]
 
 
+async def test_company_cost_refunds_no_one(client: AsyncClient, world: World) -> None:
+    """Com "Reembolsar a: Ninguém" (null) o custo é da empresa, mesmo com técnico na OS; sem o
+    campo, continua indo para o responsável."""
+    an = world.analyst.headers
+    t = await create(client, world, title="Rack", assignee_id=str(world.tech.user.id))
+    url = f"{API}/tickets/{t['id']}/expenses"
+    # O corpo do "Lançar" da OS, com "Ninguém (custo da empresa)".
+    company = {
+        "kind": "material",
+        "description": "Velcro 3m",
+        "quantity": "1",
+        "unit_value": "10",
+        "technician_id": None,
+        "status": "approved",
+        "notes": None,
+        "receipt_attachment_id": None,
+    }
+    r = await client.post(url, json=company, headers=an)
+    assert r.status_code == 201, r.text
+    assert r.json()["technician"] is None
+    omitted = {"kind": "toll", "description": "Pedágio", "quantity": 1, "unit_value": "5"}
+    r = await client.post(url, json={**omitted, "status": "approved"}, headers=an)
+    assert r.json()["technician"]["id"] == str(world.tech.user.id)
+
+    # O técnico não tem a receber o que foi da empresa (nem no app, nem no extrato).
+    mine = (await client.get(f"{API}/me/earnings", headers=world.tech.headers)).json()
+    assert mine["reimbursement_to_receive"] == 5.0
+    now = datetime.now(UTC)
+    params = {
+        "start": (now - timedelta(hours=1)).isoformat(),
+        "end": (now + timedelta(hours=1)).isoformat(),
+    }
+    rep = (await client.get(f"{API}/expenses", params=params, headers=an)).json()
+    to_pay = {
+        (row["technician"] or {}).get("id"): row["to_pay"] for row in rep["by_technician"]
+    }
+    assert to_pay == {str(world.tech.user.id): 5.0, None: 10.0}
+
+
 async def test_mark_paid_only_approved(client: AsyncClient, world: World) -> None:
     """Lista desatualizada: só o aprovado vira reembolsado; pendente e rejeitado não mudam."""
     an = world.analyst.headers

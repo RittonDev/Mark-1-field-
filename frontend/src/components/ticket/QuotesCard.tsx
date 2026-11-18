@@ -12,6 +12,7 @@ import {
   FileText,
   Info,
   Link2,
+  Lock,
   Mail,
   MessageCircle,
   Plus,
@@ -114,6 +115,10 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
   const now = useNow(60_000);
   const canView = useCan("commercial.quotes");
   const canEdit = useCan("commercial.quotes", "edit");
+  // OS cancelada: a API recusa criar, editar, enviar, renovar e cobrar (reabra a OS antes). Ver, PDF, copiar
+  // o link e cancelar o orçamento continuam.
+  const cancelledTicket = ticket.status === "cancelled";
+  const canChange = canEdit && !cancelledTicket;
   const [editing, setEditing] = useState<{ quote: Quote | null; prefill?: QuotePrefill; renew?: boolean } | null>(null);
   const [sharing, setSharing] = useState<{ quote: Quote; mode: ShareMode } | null>(null);
   const [opened, setOpened] = useState<Quote | null>(null);
@@ -175,11 +180,16 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
           ) : undefined
         }
         actions={
-          canEdit ? (
+          canChange ? (
             <Button size="sm" onClick={() => setEditing({ quote: null })}>
               <Plus className="size-4" />
               Novo
             </Button>
+          ) : canEdit ? (
+            <span className="inline-flex items-center gap-1 text-xs text-ink-muted" title="OS cancelada: reabra para mexer no orçamento">
+              <Lock aria-hidden className="size-3.5" />
+              OS cancelada
+            </span>
           ) : undefined
         }
       />
@@ -208,11 +218,11 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
             const detail = [rowDetail(q, today), trackingText(q)].filter(Boolean).join(" · ");
             // A linha corta no celular: o title traz o texto inteiro e as datas de abertura e cobrança.
             const detailTitle = [detail, trackingTitle(q)].filter(Boolean).join(" · ");
-            // O ícone do link: com Editar, onde o botão principal não é o próprio link; só com Visualizar,
-            // em todo orçamento que já tem link (copiar o link não altera nada).
+            // O ícone do link: com Editar, onde o botão principal não é o próprio link; só com Visualizar (ou
+            // com a OS cancelada), em todo orçamento que já tem link (copiar o link não altera nada).
             const linkIcon =
               Boolean(linkOf(q)) &&
-              (canEdit
+              (canChange
                 ? action === "remind" || q.status === "approved" || q.status === "rejected"
                 : q.status === "sent" || q.status === "approved" || q.status === "rejected");
             return (
@@ -236,12 +246,12 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
                 <Pill color={QUOTE_STATUS[q.status].color}>{QUOTE_STATUS[q.status].label}</Pill>
                 {canEdit || linkIcon ? (
                   <div className="flex w-full items-center justify-end gap-1 sm:w-auto">
-                    {canEdit && editable ? (
+                    {canChange && editable ? (
                       <Button size="sm" variant="ghost" onClick={() => setEditing({ quote: q })}>
                         Editar
                       </Button>
                     ) : null}
-                    {!canEdit ? null : action === "remind" ? (
+                    {!canChange ? null : action === "remind" ? (
                       <Button size="sm" variant="primary" onClick={() => setSharing({ quote: q, mode: "remind" })}>
                         <BellRing className="size-3.5" />
                         Cobrar
@@ -284,7 +294,7 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
                         <Link2 className="size-4" />
                       </button>
                     ) : null}
-                    {canEdit ? (
+                    {canChange ? (
                       <button
                         type="button"
                         onClick={() => setEditing({ quote: null, prefill: duplicateOf(q) })}
@@ -336,13 +346,14 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
           ticket={ticket}
           quote={sharing.quote}
           mode={sharing.mode}
-          readOnly={!canEdit}
+          readOnly={!canChange}
           onClose={() => setSharing(null)}
           onRotated={refresh}
         />
       ) : null}
       {opened ? (
-        // Só com Visualizar, a janela fica com o PDF e o link já gerado (sem editar, enviar nem cobrar).
+        // Só com Visualizar (ou com a OS cancelada), a janela fica com o PDF e o link já gerado (sem editar,
+        // enviar nem cobrar).
         <QuoteViewer
           quote={opened}
           ticket={{
@@ -356,7 +367,7 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
           sending={send.isPending}
           onClose={() => setOpened(null)}
           onEdit={
-            canEdit
+            canChange
               ? () => {
                   setOpened(null);
                   setEditing({ quote: opened });
@@ -364,7 +375,7 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
               : undefined
           }
           onRenew={
-            canEdit
+            canChange
               ? () => {
                   setOpened(null);
                   setEditing({ quote: opened, renew: true });
@@ -372,7 +383,7 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
               : undefined
           }
           onSend={
-            canEdit
+            canChange
               ? () => {
                   setOpened(null);
                   send.mutate(opened);
@@ -384,7 +395,7 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
             setSharing({ quote: opened, mode: "share" });
           }}
           onRemind={
-            canEdit
+            canChange
               ? () => {
                   setOpened(null);
                   setSharing({ quote: opened, mode: "remind" });
@@ -392,7 +403,7 @@ export function QuotesCard({ ticket }: { ticket: TicketDetail }) {
               : undefined
           }
           onDuplicate={
-            canEdit
+            canChange
               ? () => {
                   setOpened(null);
                   setEditing({ quote: null, prefill: duplicateOf(opened) });

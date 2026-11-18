@@ -7,11 +7,11 @@ import { useState } from "react";
 import { useToast } from "@/components/Toaster";
 import { Button, Card, CardHeader, Dialog, ErrorBox, Input, Pill } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
-import { PAYOUT_STATUS } from "@/lib/constants";
+import { PAYOUT_STATUS, STATUS } from "@/lib/constants";
 import { formatDate, formatMoney, moneyInput } from "@/lib/format";
 import { useCan } from "@/lib/permissions";
 import { readDecimal } from "@/lib/quotes";
-import type { Payout, TicketDetail, UUID } from "@/lib/types";
+import type { Payout, TicketDetail, TicketStatus, UUID } from "@/lib/types";
 
 interface Person {
   id: UUID;
@@ -43,14 +43,27 @@ function payoutOf(ticket: TicketDetail, technicianId: UUID): Payout | undefined 
 
 const cents = (value: number) => Math.round(value * 100);
 
-function StatusPill({ payout }: { payout: Payout }) {
-  const info = PAYOUT_STATUS[payout.status];
-  return (
-    <Pill color={info.color}>
-      {info.label}
-      {payout.status === "paid" && payout.paid_at ? ` ${formatDate(payout.paid_at)}` : ""}
-    </Pill>
-  );
+/** Cinza do "Previsto", como em Pagamentos: o valor normal de uma OS em andamento não ganha cor. */
+const EXPECTED = "#64748b";
+
+/**
+ * Situação do valor como em Pagamentos: "A pagar" só com a OS concluída; antes, "Previsto"; na OS
+ * cancelada, o valor não vai ser pago.
+ */
+function StatusPill({ payout, ticketStatus }: { payout: Payout; ticketStatus: TicketStatus }) {
+  if (payout.status === "paid") {
+    return (
+      <Pill color={PAYOUT_STATUS.paid.color}>
+        {PAYOUT_STATUS.paid.label}
+        {payout.paid_at ? ` ${formatDate(payout.paid_at)}` : ""}
+      </Pill>
+    );
+  }
+  if (ticketStatus === "resolved" || ticketStatus === "closed") {
+    return <Pill color={PAYOUT_STATUS.pending.color}>{PAYOUT_STATUS.pending.label}</Pill>;
+  }
+  if (ticketStatus === "cancelled") return <Pill color={STATUS.cancelled.color}>OS cancelada</Pill>;
+  return <Pill color={EXPECTED}>Previsto</Pill>;
 }
 
 /** Valor digitado: vazio tira o valor (null); inválido traz a mensagem para mostrar no campo. */
@@ -141,7 +154,7 @@ export function PayoutsDialog({ ticket, onClose }: { ticket: TicketDetail; onClo
                 </div>
                 {current ? (
                   <span className="pt-1.5">
-                    <StatusPill payout={current} />
+                    <StatusPill payout={current} ticketStatus={ticket.status} />
                   </span>
                 ) : null}
                 <div className="flex w-36 flex-col gap-1">
@@ -179,7 +192,7 @@ export function PayoutsDialog({ ticket, onClose }: { ticket: TicketDetail; onClo
                 <p className="truncate text-sm font-semibold text-ink">{p.technician.name}</p>
                 <p className="text-xs text-ink-muted">Saiu da OS</p>
               </div>
-              <StatusPill payout={p} />
+              <StatusPill payout={p} ticketStatus={ticket.status} />
               <span className="w-36 text-right text-sm font-medium text-ink tabular-nums">{formatMoney(p.amount)}</span>
             </li>
           ))}
@@ -221,7 +234,7 @@ export function PayoutLine({ ticket }: { ticket: TicketDetail }) {
       <span className="text-ink-muted">Valor do técnico</span>
       <span className="font-medium text-ink tabular-nums">{mine ? formatMoney(mine.amount) : "não definido"}</span>
       {payouts.length > 1 ? <span className="text-xs text-ink-muted">· equipe {formatMoney(total)}</span> : null}
-      {mine ? <StatusPill payout={mine} /> : null}
+      {mine ? <StatusPill payout={mine} ticketStatus={ticket.status} /> : null}
       {canEdit ? (
         <button
           type="button"
@@ -269,7 +282,7 @@ export function PayoutsCard({ ticket }: { ticket: TicketDetail }) {
                     <p className="truncate text-sm font-semibold text-ink">{p.name}</p>
                     <p className="text-xs text-ink-muted">{p.role}</p>
                   </div>
-                  {payout ? <StatusPill payout={payout} /> : null}
+                  {payout ? <StatusPill payout={payout} ticketStatus={ticket.status} /> : null}
                   <span className="w-28 text-right text-sm font-medium text-ink tabular-nums">
                     {payout ? formatMoney(payout.amount) : <span className="font-normal text-ink-muted">sem valor</span>}
                   </span>
@@ -282,7 +295,7 @@ export function PayoutsCard({ ticket }: { ticket: TicketDetail }) {
                   <p className="truncate text-sm font-semibold text-ink">{p.technician.name}</p>
                   <p className="text-xs text-ink-muted">Saiu da OS</p>
                 </div>
-                <StatusPill payout={p} />
+                <StatusPill payout={p} ticketStatus={ticket.status} />
                 <span className="w-28 text-right text-sm font-medium text-ink tabular-nums">{formatMoney(p.amount)}</span>
               </li>
             ))}
