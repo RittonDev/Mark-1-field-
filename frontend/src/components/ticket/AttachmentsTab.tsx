@@ -196,7 +196,17 @@ function inReport(a: Attachment, receipts: UUID[], signatureId: UUID | null): bo
   return a.form_id !== null ? Boolean(a.field_id) : a.kind === "photo";
 }
 
-function VisibilityChip({ attachment, receipts, signatureId }: { attachment: Attachment; receipts: UUID[]; signatureId: UUID | null }) {
+function VisibilityChip({
+  attachment,
+  receipts,
+  paidReceipts,
+  signatureId,
+}: {
+  attachment: Attachment;
+  receipts: UUID[];
+  paidReceipts: UUID[];
+  signatureId: UUID | null;
+}) {
   const chip = "rounded-md px-1.5 py-0.5 text-[11px] font-semibold";
   if (fromClient(attachment)) {
     return (
@@ -213,9 +223,11 @@ function VisibilityChip({ attachment, receipts, signatureId }: { attachment: Att
     <span
       className={clsx(chip, "bg-surface-2 text-ink-muted")}
       title={
-        receipts.includes(attachment.id)
-          ? "Comprovante de custo extra: fica só com a central, fora do relatório do cliente"
-          : "Fica só com a central: fora do relatório do cliente e do app do técnico"
+        paidReceipts.includes(attachment.id)
+          ? "Comprovante de custo extra já reembolsado: fica só com a central, fora do relatório do cliente. Para excluir, volte o custo para Aprovado."
+          : receipts.includes(attachment.id)
+            ? "Comprovante de custo extra: fica só com a central, fora do relatório do cliente"
+            : "Fica só com a central: fora do relatório do cliente e do app do técnico"
       }
     >
       Interno
@@ -227,19 +239,21 @@ const NO_RECEIPTS: UUID[] = [];
 
 /**
  * O que a aba precisa da OS aberta (já carregada): os formulários, para dizer de qual campo é cada foto,
- * e os comprovantes dos custos extras, que não vão para o relatório do cliente.
+ * e os comprovantes dos custos extras, que não vão para o relatório do cliente. O do custo já reembolsado
+ * não sai da OS (a API recusa): o custo volta para Aprovado antes.
  */
-function useTicketContext(ticketId: UUID): { forms: TicketForm[]; receipts: UUID[] } {
+function useTicketContext(ticketId: UUID): { forms: TicketForm[]; receipts: UUID[]; paidReceipts: UUID[] } {
   const ticket = useQuery({
     queryKey: ["ticket", ticketId],
     queryFn: () => api.get<TicketDetail>(`/tickets/${ticketId}`),
     staleTime: Infinity,
   });
   const detail = ticket.data;
-  return {
-    forms: detail?.forms ?? [],
-    receipts: detail ? detail.expenses.flatMap((e) => (e.receipt_attachment_id ? [e.receipt_attachment_id] : [])) : NO_RECEIPTS,
-  };
+  const receiptsOf = (paidOnly: boolean) =>
+    detail
+      ? detail.expenses.flatMap((e) => (e.receipt_attachment_id && (!paidOnly || e.status === "paid") ? [e.receipt_attachment_id] : []))
+      : NO_RECEIPTS;
+  return { forms: detail?.forms ?? [], receipts: receiptsOf(false), paidReceipts: receiptsOf(true) };
 }
 
 /** A aba está na camada de cima (nenhum diálogo ou menu aberto por cima da OS). */
@@ -613,7 +627,10 @@ export function AttachmentsTab({
   const canUpload = !closed || canManage;
 
   const attachments = useTicketAttachments(ticketId);
-  const { forms, receipts } = useTicketContext(ticketId);
+  const { forms, receipts, paidReceipts } = useTicketContext(ticketId);
+  // A assinatura (também a de um atendimento anterior, que a reabertura tirou da OS) e o comprovante do
+  // custo já reembolsado não saem da OS: a API recusa.
+  const removable = (a: Attachment) => canManage && a.kind !== "signature" && a.id !== signatureId && !paidReceipts.includes(a.id);
 
   const remove = useMutation({
     // Foto de formulário sai pelo formulário: ele volta para "Em preenchimento" se estava concluído.
@@ -638,6 +655,8 @@ export function AttachmentsTab({
         `A foto sai do formulário “${context.form.name}”${field ? ` (campo ${field.label})` : ""} e do relatório do cliente` +
         (reopens ? `. O campo pede ${need} ${need === 1 ? "foto" : "fotos"}: o formulário volta para Em preenchimento.` : ".") +
         " Não dá para desfazer.";
+    } else if (receipts.includes(a.id)) {
+      description = `“${a.filename}” é o comprovante de um custo extra: sai da OS e o custo fica sem comprovante. Não dá para desfazer.`;
     } else {
       description = `“${a.filename}” sai da OS${inReport(a, receipts, signatureId) ? " e do relatório do cliente" : ""}. Não dá para desfazer.`;
     }
@@ -891,7 +910,7 @@ export function AttachmentsTab({
             <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
               {shownPhotos.map((a, i) => {
                 const url = absoluteApiUrl(a.download_url);
-                const isSignature = a.id === signatureId;
+                const isSignature = a.kind === "signature" || a.id === signatureId;
                 const context = formContext(a, forms);
                 const tilePhase = photoPhase(a.description);
                 const label = captionText(a.description) || context?.label || a.filename;
@@ -928,7 +947,7 @@ export function AttachmentsTab({
                         {meta(a)}
                       </p>
                       <div className="mt-auto flex items-center justify-between gap-1">
-                        <VisibilityChip attachment={a} receipts={receipts} signatureId={signatureId} />
+                        <VisibilityChip attachment={a} receipts={receipts} paidReceipts={paidReceipts} signatureId={signatureId} />
                         <span className="flex items-center gap-0.5">
                           {url ? (
                             <a
@@ -942,7 +961,7 @@ export function AttachmentsTab({
                               <ExternalLink className="size-3.5" />
                             </a>
                           ) : null}
-                          {canManage && !isSignature ? (
+                          {removable(a) ? (
                             <button
                               type="button"
                               disabled={remove.isPending && remove.variables?.id === a.id}
@@ -988,7 +1007,7 @@ export function AttachmentsTab({
                       </div>
                     </div>
                     <span className="flex shrink-0 items-center gap-1">
-                      <VisibilityChip attachment={a} receipts={receipts} signatureId={signatureId} />
+                      <VisibilityChip attachment={a} receipts={receipts} paidReceipts={paidReceipts} signatureId={signatureId} />
                       {url ? (
                         <a
                           href={url}
@@ -1001,7 +1020,7 @@ export function AttachmentsTab({
                           Baixar
                         </a>
                       ) : null}
-                      {canManage && a.id !== signatureId ? (
+                      {removable(a) ? (
                         <button
                           type="button"
                           disabled={remove.isPending && remove.variables?.id === a.id}

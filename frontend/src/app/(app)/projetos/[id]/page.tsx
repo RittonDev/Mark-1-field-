@@ -14,7 +14,7 @@ import { QuickEditButton } from "@/components/ticket/QuickEditButton";
 import { TicketLink } from "@/components/ticket/TicketLink";
 import { api, errorMessage } from "@/lib/api";
 import { formatDate, formatMoney, formatShort, todayISO } from "@/lib/format";
-import { useCan } from "@/lib/permissions";
+import { useCan, useQueueScope } from "@/lib/permissions";
 import { plannedTickets, PROJECT_STATUS, projectLate } from "@/lib/projects";
 import type { Page, Project, TicketListItem } from "@/lib/types";
 
@@ -48,6 +48,8 @@ export default function ProjectPage() {
   const canExpenses = useCan("commercial.expenses");
   const canPayouts = useCan("commercial.payouts");
   const canQuotes = useCan("commercial.quotes");
+  // Com "Somente a própria fila" os totais são só das OS que a pessoa vê (o contrato é do projeto inteiro).
+  const allQueues = useQueueScope().scope === "all";
   const [editing, setEditing] = useState(false);
   // Hoje no fuso da operação (a entrega prevista é um dia do calendário).
   const [today] = useState(todayISO);
@@ -83,13 +85,25 @@ export default function ProjectPage() {
   const totalTickets = tickets.data?.total ?? 0;
   const progress = Math.round(p.stats.progress * 100);
   // Cada valor só com a tela dele (a API manda 0 sem ela); a margem desconta custos e técnicos, então
-  // pede as duas.
+  // pede as duas, e o projeto inteiro (com só a própria fila, a API não manda a margem).
   const money = [
-    canExpenses ? <Stat key="custos" label="Custos extras" value={formatMoney(p.stats.expenses_total)} hint="lançados nas OS do projeto" /> : null,
-    canPayouts ? (
-      <Stat key="tecnicos" label="Valor dos técnicos" value={formatMoney(p.stats.payouts_total ?? 0)} hint="pago e a pagar, por OS" />
+    canExpenses ? (
+      <Stat
+        key="custos"
+        label="Custos extras"
+        value={formatMoney(p.stats.expenses_total)}
+        hint={allQueues ? "lançados nas OS do projeto" : "lançados nas OS do projeto que você vê"}
+      />
     ) : null,
-    canExpenses && canPayouts ? (
+    canPayouts ? (
+      <Stat
+        key="tecnicos"
+        label="Valor dos técnicos"
+        value={formatMoney(p.stats.payouts_total ?? 0)}
+        hint={allQueues ? "pago e a pagar, por OS" : "pago e a pagar, nas OS que você vê"}
+      />
+    ) : null,
+    canExpenses && canPayouts && allQueues ? (
       <Stat
         key="margem"
         label="Margem"

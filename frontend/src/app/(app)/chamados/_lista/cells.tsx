@@ -5,7 +5,7 @@ import { Hand, Pause, RotateCcw } from "lucide-react";
 import { useLayoutEffect, useState } from "react";
 import { PriorityBadge, SlaBadge, SlaCountdown, StatusBadge } from "@/components/badges";
 import { InactiveChip } from "@/components/operacao/status";
-import { ArrivalChip, OnsiteBar } from "@/components/ticket/FieldClock";
+import { ArrivalChip, awaitingNewVisit, OnsiteBar } from "@/components/ticket/FieldClock";
 import { TicketLink } from "@/components/ticket/TicketLink";
 import { SLA_STATUS, STATUS } from "@/lib/constants";
 import { dayKey, formatDate, formatDateTime, formatMinutes, formatShort, formatTime, initials } from "@/lib/format";
@@ -14,20 +14,30 @@ import type { TicketListItem, UserRef, UUID } from "@/lib/types";
 /** OS ainda aberta (nem resolvida, nem fechada, nem cancelada). */
 export const isOpenTicket = (t: TicketListItem) => ["open", "active", "pending"].includes(STATUS[t.status].group);
 
+/** Tolerância do "Atrasada": 30 min depois do horário (services/field.SCHEDULE_TOLERANCE). */
+const LATE_AFTER_MINUTES = 30;
+
 /**
- * Minutos de atraso da visita: atribuída ou agendada e o horário marcado já passou (a mesma regra do
- * "Atrasada" da Minha fila). Em deslocamento ou em atendimento não é atraso de início.
+ * Minutos de atraso da visita: atribuída ou agendada, 30 min ou mais depois do horário e sem improdutiva no
+ * horário ou depois (a mesma regra do "Atrasada" da Minha fila, da Início e das Atividades do dia). Em
+ * deslocamento ou em atendimento não é atraso de início.
  */
 export function lateMinutes(t: TicketListItem, now: number): number | null {
   if (!t.scheduled_start || (t.status !== "assigned" && t.status !== "scheduled")) return null;
-  const late = (now - new Date(t.scheduled_start).getTime()) / 60_000;
-  return late > 0 ? late : null;
+  const start = Date.parse(t.scheduled_start);
+  // A visita aconteceu e deu improdutiva: a OS espera data nova, não está atrasada para começar.
+  if (t.last_unproductive_at && Date.parse(t.last_unproductive_at) >= start) return null;
+  const late = (now - start) / 60_000;
+  return late >= LATE_AFTER_MINUTES ? late : null;
 }
 
-/** Foi ao local, não atendeu e ainda não ganhou outra data (o "Improdutiva: reagendar" da Minha fila). */
+/**
+ * Foi ao local, não atendeu e ainda não ganhou outra data (o "Improdutiva: reagendar" da Minha fila): em
+ * aberto e fora de campo (de volta à loja, a visita está acontecendo).
+ */
 export function needsReschedule(t: TicketListItem): boolean {
-  if (!t.last_unproductive_at || !isOpenTicket(t)) return false;
-  return !t.scheduled_start || new Date(t.scheduled_start) < new Date(t.last_unproductive_at);
+  if (!isOpenTicket(t) || t.status === "en_route" || t.status === "in_progress") return false;
+  return awaitingNewVisit(t);
 }
 
 /** Aguardando cliente ou fornecedor: sem técnico é o esperado. */

@@ -31,7 +31,7 @@ import { nextDue } from "@/components/badges";
 import { AttachmentsTab, useTicketAttachments } from "@/components/ticket/AttachmentsTab";
 import { CommentsTab } from "@/components/ticket/CommentsTab";
 import { ExpensesCard } from "@/components/ticket/ExpensesCard";
-import { ArrivalChip, OnsiteBar } from "@/components/ticket/FieldClock";
+import { ArrivalChip, awaitingNewVisit, OnsiteBar } from "@/components/ticket/FieldClock";
 import { FormsCard } from "@/components/ticket/FormsCard";
 import { eventPoint, FAR_FROM_STORE_M, km, storeDistance } from "@/components/ticket/geo";
 import { HistoryTab } from "@/components/ticket/HistoryTab";
@@ -601,7 +601,9 @@ function deadlineAlert(t: TicketDetail, now: number): TicketTabAlert | null {
   const due = nextDue(t);
   // O SLA com a mesma conta ao vivo do chip do cabeçalho (em risco a 75% do prazo, sem esperar a releitura).
   const sla = slaView(t, now);
-  const arrivalDue = !t.arrived_at && !FINISHED.includes(t.status) && t.arrival_due_at ? Date.parse(t.arrival_due_at) : null;
+  // Esperando data nova depois da improdutiva não há chegada a cobrar (a API manda arrival_status nulo).
+  const arrivalDue =
+    !t.arrived_at && !FINISHED.includes(t.status) && t.arrival_due_at && !awaitingNewVisit(t) ? Date.parse(t.arrival_due_at) : null;
   const onsiteDue = t.status === "in_progress" && t.onsite_due_at ? Date.parse(t.onsite_due_at) : null;
   const late =
     t.sla_status === "breached" ||

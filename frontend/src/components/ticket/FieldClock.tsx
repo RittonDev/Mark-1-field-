@@ -8,10 +8,28 @@ import type { TicketListItem } from "@/lib/types";
 
 type Clockable = Pick<
   TicketListItem,
-  "arrival_due_at" | "arrived_at" | "onsite_due_at" | "arrival_status" | "onsite_status" | "status" | "work_started_at"
+  | "arrival_due_at"
+  | "arrived_at"
+  | "onsite_due_at"
+  | "arrival_status"
+  | "onsite_status"
+  | "status"
+  | "work_started_at"
+  | "last_unproductive_at"
+  | "scheduled_start"
 >;
 
 const minutesBetween = (a: number, b: number) => Math.round((b - a) / 60_000);
+
+/**
+ * A última visita deu improdutiva e nenhuma outra foi marcada depois dela ("Improdutiva: reagendar"): o
+ * técnico foi, então não há chegada a cobrar. A regra da API (services/field.awaiting_new_visit), que
+ * também deixa o arrival_status nulo; com a visita nova marcada, o prazo volta a valer.
+ */
+export function awaitingNewVisit(t: Pick<TicketListItem, "last_unproductive_at" | "scheduled_start">): boolean {
+  if (!t.last_unproductive_at) return false;
+  return !t.scheduled_start || Date.parse(t.scheduled_start) < Date.parse(t.last_unproductive_at);
+}
 
 /** O relógio de campo numa linha (variante compacta do cabeçalho da OS). */
 export interface FieldClockSummary {
@@ -31,7 +49,7 @@ export interface FieldClockSummary {
  */
 export function fieldClockSummary(ticket: Clockable, now: number): FieldClockSummary | null {
   if (ticket.status === "en_route") {
-    if (ticket.arrived_at || !ticket.arrival_due_at) {
+    if (ticket.arrived_at || !ticket.arrival_due_at || awaitingNewVisit(ticket)) {
       return { kind: "route", tone: "neutral", text: "A caminho", title: "Técnico a caminho do local" };
     }
     const left = minutesBetween(now, new Date(ticket.arrival_due_at).getTime());
@@ -85,7 +103,8 @@ export function ArrivalChip({ ticket, compact = false }: { ticket: Clockable; co
       </span>
     );
   }
-  if (!ticket.arrival_due_at) return null;
+  // Esperando data nova depois da improdutiva: sem prazo a cobrar até a visita nova ser marcada.
+  if (!ticket.arrival_due_at || awaitingNewVisit(ticket)) return null;
   const left = minutesBetween(now, new Date(ticket.arrival_due_at).getTime());
   const late = left < 0;
   const risk = !late && (ticket.arrival_status === "at_risk" || left <= 60);

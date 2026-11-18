@@ -193,7 +193,7 @@ Tela própria da operação, como no Field Control (aquela em que, segundo o lev
 - `GET /activities/day?date=YYYY-MM-DD&team_id=&assignee_id=` → `DayActivities {date, timezone, is_today, summary, activities[]}`. Sem `date`, usa o dia de hoje no fuso `TIMEZONE`. `date` fora de 2000–2100 → 422 "Escolha uma data entre 2000 e 2100" (o mesmo período de `/reports/daily`, `/my-queue` e `/tracking/history`).
   - Entram no dia: as OS agendadas para ele; as que tiveram deslocamento, atendimento ou conclusão nele (pelo histórico); e, se for hoje, as que estão em campo agora (há até 12 h, a regra de `services/field.py`).
   - `Activity = {ticket: TicketListItem, state, scheduled_start, scheduled_end, started_at, arrived_at, finished_at, start_delay_minutes, start_has_gps, service_type_name, estimated_minutes, actual_minutes}`: o previsto e o realizado na mesma linha.
-  - `state` ∈ `scheduled` (agendada), `late` (horário passou e não saiu), `en_route`, `in_progress`, `on_hold`, `rescheduled` (teve atividade no dia e foi remarcada), `done` (concluída no dia), `pending` (voltou para a fila).
+  - `state` ∈ `scheduled` (agendada), `late` (30 min ou mais depois do horário, sem saída nem início: a tolerância do "Atrasada" da Minha fila e da Início), `en_route`, `in_progress`, `on_hold`, `rescheduled` (teve atividade no dia e foi remarcada), `done` (concluída no dia), `pending` (voltou para a fila; também a visita do dia que deu improdutiva no horário ou depois).
   - `summary` traz a contagem por `state` e `unassigned`. Hoje, `stuck_in_field` conta as OS a caminho ou em atendimento há mais de 12 h (dado parado): ficam fora da lista e dos outros números.
   - Ordem: pela hora de atuação, a manhã primeiro (a agendada ou, sem agenda, a de início; sem hora no fim),
     e só depois pelo técnico. A tela agrupa por técnico na ordem em que aparecem: quem começa mais cedo
@@ -408,7 +408,8 @@ prazo mais apertado; `total` é o tamanho de verdade e `truncated` avisa do cort
   agendada que passou 30 min do horário sem sair, a tolerância da Início e do prazo de chegada; não vale com
   visita improdutiva no horário ou depois), `no_technician` (warning, sem técnico de campo),
   `inactive_technician` (warning, "Técnico sem acesso: libere ou troque": técnico inativo no cadastro, sem
-  acesso ao app), `unproductive` (warning, improdutiva sem nova agenda), `violation_pending` (info, concluída
+  acesso ao app), `unproductive` (warning, improdutiva sem nova agenda, fora de campo; enquanto espera a data
+  nova, sem os motivos de chegada), `violation_pending` (info, concluída
   com SLA a justificar), `field_stuck` (danger, "Em campo há 13 h: conclua ou corrija", em dias a partir de
   24 h; dado parado, a regra de `services/field.py`) e as regras de campo (ver abaixo): `arrival_late`,
   `arrival_at_risk`, `onsite_over`, `onsite_warning`, `checkin_far` (warning, check-in a mais de 1 km da
@@ -543,8 +544,13 @@ do local (as 27 capitais, sem acento); OS sem local conta como interior.
   - Recalculado ao trocar o local antes da chegada.
 - `arrived_at`: a primeira vez "Em atendimento".
 - `onsite_due_at`: chegada + `onsite_hours`.
-- `arrival_status`: `met` | `late` | `at_risk` (falta menos de 1h) | `pending` | `null` (sem prazo, ou OS
-  concluída/cancelada sem visita).
+- `arrival_status`: `met` | `late` | `at_risk` (falta menos de 1h) | `pending` | `null` (sem prazo, OS
+  concluída/cancelada sem visita, ou OS esperando data nova depois da improdutiva: a última visita deu
+  improdutiva e nenhuma outra foi marcada depois dela, `services/field.awaiting_new_visit`; o técnico foi e
+  não há chegada a cobrar. Com a visita nova marcada, o prazo volta a valer).
+- Esperando data nova, a OS também fica sem "Chegada atrasada" e "Chegada em risco" na Minha fila e sem o
+  grupo `late_arrival` ("Chegada atrasada") da Início; o motivo é o `unproductive` ("Improdutiva:
+  reagendar"), que não aparece com a OS em campo.
 - `onsite_status`: `ok` | `warning` (dentro de `onsite_warning_minutes` do limite) | `over` | `null`.
   - Ao vivo em "Em atendimento".
   - Numa OS concluída, compara a conclusão com o limite.
@@ -743,7 +749,9 @@ Até 3 técnicos por cidade pela regra automática, mais os que a central fixar.
   - 404: "Técnico não encontrado" (não existe ou não é técnico), "Loja não encontrada", "Nenhuma loja em
     Santos-SP";
   - 422: "UF inválida", "Até 10 técnicos fixados por cidade", "A loja não tem cidade e UF", "Informe a loja ou a
-    cidade com a UF" e nota com mais de 300 caracteres.
+    cidade com a UF" e nota com mais de 300 caracteres ("No máximo 300 caracteres", com `label` "Nota" ao
+    fixar e "Motivo" ao tirar, como a tela chama esse texto).
+  - O limite de 10 fixados vale também para dois "Fixar" ao mesmo tempo (trava por cidade na gravação).
 
 **Nas sugestões da OS** (`GET /tickets/{id}/technician-suggestions` e `GET /technicians/suggest`):
 - `TechnicianSuggestion` ganhou `favorite: "auto" | "manual" | null` (manual = fixado) e `favorite_note`.

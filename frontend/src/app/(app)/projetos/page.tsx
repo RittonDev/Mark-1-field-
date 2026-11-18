@@ -10,7 +10,7 @@ import { Button, Card, EmptyState, ErrorBox, Input, LoadingBlock, PageHeader, Pi
 import { errorMessage } from "@/lib/api";
 import { formatDate, formatMoney, todayISO } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
-import { useCan } from "@/lib/permissions";
+import { useCan, useQueueScope } from "@/lib/permissions";
 import { plannedTickets, PROJECT_STATUS, projectCosts, projectLate, useProjects } from "@/lib/projects";
 import { useCustomers } from "@/lib/queries";
 import type { ProjectStatus } from "@/lib/types";
@@ -22,6 +22,10 @@ export default function ProjectsPage() {
   const canExpenses = useCan("commercial.expenses");
   const canPayouts = useCan("commercial.payouts");
   const canCosts = canExpenses && canPayouts;
+  // Com "Somente a própria fila" os custos são só das OS que a pessoa vê, e o contrato é do projeto
+  // inteiro: a API não manda a margem, e a coluna sai.
+  const allQueues = useQueueScope().scope === "all";
+  const withMargin = canCosts && allQueues;
   const [status, setStatus] = useState<ProjectStatus | "">("active");
   const [search, setSearch] = useState("");
   const [customerId, setCustomerId] = useState("");
@@ -127,29 +131,35 @@ export default function ProjectsPage() {
                       <div className="h-full rounded-full bg-brand" style={{ width: `${p.stats.progress * 100}%` }} />
                     </div>
                   </div>
-                  <dl className={clsx("mt-4 grid gap-2 text-xs", canCosts ? "grid-cols-3" : "grid-cols-1")}>
+                  <dl className={clsx("mt-4 grid gap-2 text-xs", withMargin ? "grid-cols-3" : canCosts ? "grid-cols-2" : "grid-cols-1")}>
                     <div>
                       <dt className="text-ink-muted">Valor</dt>
                       <dd className="font-medium text-ink tabular-nums">{p.contract_value != null ? formatMoney(p.contract_value) : "—"}</dd>
                     </div>
                     {canCosts ? (
-                      <>
-                        <div title="Custos extras lançados nas OS e o valor dos técnicos">
-                          <dt className="text-ink-muted">Custos</dt>
-                          <dd className="font-medium text-ink tabular-nums">{formatMoney(projectCosts(p.stats))}</dd>
-                        </div>
-                        <div>
-                          <dt className="text-ink-muted">Margem</dt>
-                          <dd
-                            className={clsx(
-                              "font-medium tabular-nums",
-                              p.margin != null && p.margin < 0 ? "text-red-600 dark:text-red-400" : "text-ink",
-                            )}
-                          >
-                            {p.margin != null ? formatMoney(p.margin) : "—"}
-                          </dd>
-                        </div>
-                      </>
+                      <div
+                        title={
+                          allQueues
+                            ? "Custos extras lançados nas OS e o valor dos técnicos"
+                            : "Custos extras e valor dos técnicos nas OS do projeto que você vê"
+                        }
+                      >
+                        <dt className="text-ink-muted">Custos</dt>
+                        <dd className="font-medium text-ink tabular-nums">{formatMoney(projectCosts(p.stats))}</dd>
+                      </div>
+                    ) : null}
+                    {withMargin ? (
+                      <div>
+                        <dt className="text-ink-muted">Margem</dt>
+                        <dd
+                          className={clsx(
+                            "font-medium tabular-nums",
+                            p.margin != null && p.margin < 0 ? "text-red-600 dark:text-red-400" : "text-ink",
+                          )}
+                        >
+                          {p.margin != null ? formatMoney(p.margin) : "—"}
+                        </dd>
+                      </div>
                     ) : null}
                   </dl>
                   {p.end_date ? (

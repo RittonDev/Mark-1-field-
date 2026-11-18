@@ -49,7 +49,10 @@ uma OS fechada ou cancelada (`closed`/`cancelled → reopened`). A tabela abaixo
 - OS `resolved` há mais de `AUTO_CLOSE_RESOLVED_DAYS` (padrão 3) fecha sozinha (aceite tácito).
 - Ao atribuir, se a OS não tem grupo, herda o grupo do analista. A categoria pode definir o grupo padrão.
 - Reabrir limpa `resolved_at`, `closed_at`, `cancelled_at` e `resolution_sla_met_at` (o prazo de solução
-  encerrado pelo Field Control era do atendimento que terminou) e soma 1 em `reopen_count`. O prazo de SLA
+  encerrado pelo Field Control era do atendimento que terminou) e soma 1 em `reopen_count`. Limpa também a
+  assinatura do responsável (`signed_at`, `signer_name`, `signer_role`, `signature_attachment_id`): com a
+  assinatura exigida, a nova conclusão pede outra. O anexo e o evento da assinatura antiga ficam no
+  histórico, fora do relatório do cliente, e não podem ser excluídos. O prazo de SLA
   continua o original (se já venceu, a OS aparece estourada) e o relatório do cliente continua no ar,
   mostrando a OS como reaberta até ela ser concluída de novo. Ao resolver de novo, a solução anterior vem preenchida para ajustar.
 

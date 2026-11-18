@@ -7,6 +7,7 @@ import { useState } from "react";
 import { Button, Checkbox, Dialog, ErrorBox, Field, Select } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { downloadCsv } from "@/lib/download";
+import { useCan } from "@/lib/permissions";
 import { useCustomers } from "@/lib/queries";
 
 interface Row {
@@ -70,6 +71,8 @@ export function LocationImportDialog({
 }) {
   const queryClient = useQueryClient();
   const customers = useCustomers();
+  // Cliente novo pela planilha só para quem edita Clientes (a API recusa a linha dos outros).
+  const canCreateCustomers = useCan("base.customers", "edit");
   const [customerId, setCustomerId] = useState(initialCustomer ?? "");
   const [file, setFile] = useState<File | null>(null);
   // null: o padrão (só os erros quando houver erro); depois, a escolha de quem está conferindo.
@@ -156,7 +159,14 @@ export function LocationImportDialog({
       <div className="flex flex-col gap-4">
         {!done ? (
           <>
-            <Field label="Cliente" hint="Todos os locais são deste cliente. Em branco: o cliente vem das colunas da planilha (e é criado se não existir).">
+            <Field
+              label="Cliente"
+              hint={
+                canCreateCustomers
+                  ? "Todos os locais são deste cliente. Em branco: o cliente vem das colunas da planilha (e é criado se não existir)."
+                  : "Todos os locais são deste cliente. Em branco: o cliente vem das colunas da planilha e precisa já estar cadastrado."
+              }
+            >
               <Select
                 value={customerId}
                 onChange={(e) => {
