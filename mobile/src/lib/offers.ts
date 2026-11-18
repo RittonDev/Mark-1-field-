@@ -136,13 +136,22 @@ export interface OfferListOutcome {
   news: FieldOffer[];
   /** Esperavam a resposta do técnico e fecharam sem ela: outro técnico aceitou, a central cancelou... */
   closed: FieldOffer[];
+  /** Busca antes do pull: ficou oferta para a busca depois do pull decidir (a central definiu o técnico). */
+  held: boolean;
 }
 
 /**
  * Grava a lista da busca (GET /me/offers) e diz o que avisar. Roda dentro da transação da rodada: lê e grava
  * junto com o "Escopo lido" e as respostas que a tela da oferta grava. `at`: agora pelo relógio do servidor.
+ * `early`: busca antes do pull, quando a OS em que a central pôs o técnico pode ainda não estar no aparelho.
  */
-export async function applyOfferList(db: DB, list: FieldOffer[], userId: UUID, at: number): Promise<OfferListOutcome> {
+export async function applyOfferList(
+  db: DB,
+  list: FieldOffer[],
+  userId: UUID,
+  at: number,
+  early = false,
+): Promise<OfferListOutcome> {
   const current = await readStore(db);
   const known = new Map((current?.offers ?? []).map((offer) => [offer.id, offer]));
   const offers = list.map((offer) => settle(offer, known.get(offer.id)));
@@ -150,13 +159,22 @@ export async function applyOfferList(db: DB, list: FieldOffer[], userId: UUID, a
   // Primeira lista no aparelho (primeiro acesso, troca de técnico): as pendentes já aparecem em Hoje.
   const news = current?.listed ? offers.filter((offer) => offerState(offer, at) === "pending" && !seen.has(offer.id)) : [];
   const closed: FieldOffer[] = [];
-  for (const offer of offers) {
+  let held = false;
+  for (const [index, offer] of offers.entries()) {
     const before = known.get(offer.id);
     if (!before || offerState(before, at) !== "pending" || offer.state !== "cancelled") continue;
     // Trocada por uma oferta nova da mesma OS: a nova chega com o próprio aviso.
     if (offer.cancel_reason === "replaced") continue;
-    // A central pôs o próprio técnico na OS: o pull da rodada já avisou "Nova OS para você".
-    if (offer.cancel_reason === "assigned" && (await getTicket(offer.ticket.id, db))?.assignee?.id === userId) continue;
+    if (offer.cancel_reason === "assigned") {
+      // A central pôs o próprio técnico na OS: o pull da rodada já avisou "Nova OS para você".
+      if ((await getTicket(offer.ticket.id, db))?.assignee?.id === userId) continue;
+      // Antes do pull, essa OS pode ainda não ter chegado: fica a versão guardada, sem aviso, até a busca depois do pull.
+      if (early) {
+        offers[index] = before;
+        held = true;
+        continue;
+      }
+    }
     closed.push(offer);
   }
   const ids = new Set(offers.map((offer) => offer.id));
@@ -168,7 +186,7 @@ export async function applyOfferList(db: DB, list: FieldOffer[], userId: UUID, a
   };
   const changed = JSON.stringify(next) !== JSON.stringify(current);
   if (changed) await writeStore(db, next);
-  return { changed, news, closed };
+  return { changed, news, closed, held };
 }
 
 /** Grava uma oferta que a tela leu do servidor (aberta ou recusada) sem esperar a próxima lista. */
@@ -269,6 +287,8 @@ let fetchedAt = 0;
 /** Avisos do tempo real (ticket.offer) recebidos e os já atendidos por uma busca. */
 let wanted = 0;
 let served = 0;
+/** O pedido que a última busca antes do pull deixou para a busca depois do pull (offersHeld). */
+let heldMark = 0;
 
 /**
  * Chegou um ticket.offer (oferta nova, aceita por outro, cancelada), ou um aviso pode ter se perdido (app
@@ -278,9 +298,22 @@ export function offersChanged() {
   wanted += 1;
 }
 
-/** A rodada busca a lista? Pedido do técnico, aviso do tempo real ou a última busca já tem 1 min. */
-export function offersDue(manual: boolean): boolean {
-  return manual || wanted > served || Date.now() - fetchedAt >= MAX_AGE_MS;
+/**
+ * Uma busca antes do pull deixou oferta para a busca depois do pull decidir: pede essa busca. Outra busca antes
+ * do pull deixaria de novo, então esse pedido não vale para ela (sem uma busca por foto no upload).
+ */
+export function offersHeld() {
+  offersChanged();
+  heldMark = wanted;
+}
+
+/**
+ * A rodada busca a lista? Pedido do técnico, aviso do tempo real ou a última busca já tem 1 min. `early`: busca
+ * antes do pull, que não atende o pedido deixado para a busca depois do pull.
+ */
+export function offersDue(manual: boolean, early = false): boolean {
+  if (manual || Date.now() - fetchedAt >= MAX_AGE_MS) return true;
+  return wanted - served > (early && heldMark > served ? 1 : 0);
 }
 
 /** Começo de uma busca: os avisos que ela atende (um aviso que chega durante a busca pede outra). */
@@ -299,4 +332,5 @@ export function resetOffersState() {
   fetchedAt = 0;
   wanted = 0;
   served = 0;
+  heldMark = 0;
 }
