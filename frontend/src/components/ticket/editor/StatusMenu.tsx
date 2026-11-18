@@ -10,19 +10,23 @@ import type { TicketStatus } from "@/lib/types";
 /**
  * Situação da OS na barra azul do editor: pílula com o ponto na cor do status, da altura do "Reabrir".
  * O fundo é só um véu (o branco fica acima de 4,5:1 no azul do claro e no azul forte do escuro); o hover
- * mexe no contorno.
+ * mexe no contorno. Na barra estreita (celular) o nome encolhe com reticências: o nome inteiro fica no
+ * title e no aria-label do menu.
  */
 export function StatusChip({ status, className, children }: { status: TicketStatus; className?: string; children?: React.ReactNode }) {
   const info = STATUS[status];
+  const label = info?.label ?? status;
   return (
     <span
       className={clsx(
-        "inline-flex h-7 items-center gap-1.5 rounded-full bg-white/10 px-2.5 text-xs font-semibold whitespace-nowrap text-white ring-1 ring-white/30 ring-inset dark:bg-white/5",
+        "inline-flex h-7 max-w-full items-center gap-1.5 rounded-full bg-white/10 px-2.5 text-xs font-semibold whitespace-nowrap text-white ring-1 ring-white/30 ring-inset dark:bg-white/5",
         className,
       )}
     >
-      <span className="size-1.5 rounded-full ring-1 ring-white/60" style={{ backgroundColor: info?.color }} aria-hidden />
-      {info?.label ?? status}
+      <span className="size-1.5 shrink-0 rounded-full ring-1 ring-white/60" style={{ backgroundColor: info?.color }} aria-hidden />
+      <span className="min-w-0 truncate" title={label}>
+        {label}
+      </span>
       {children}
     </span>
   );
@@ -104,14 +108,17 @@ export function StatusMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={`Situação: ${STATUS[status].label}. Mudar a situação`}
-        className="group rounded-full focus-visible:outline-white"
+        className="group max-w-full rounded-full focus-visible:outline-white"
       >
         <StatusChip
           status={status}
           // No escuro, o fundo continua com o véu de 5% (branco sobre o azul acima de 4,5:1): o contorno marca o hover.
           className="pr-1.5 transition-[background-color,box-shadow] duration-150 group-hover:bg-white/[0.16] group-hover:ring-white/70 dark:group-hover:bg-white/5"
         >
-          <ChevronDown className={clsx("size-3.5 text-white/85 transition-transform duration-150", open && "rotate-180")} aria-hidden />
+          <ChevronDown
+            className={clsx("size-3.5 shrink-0 text-white/85 transition-transform duration-150", open && "rotate-180")}
+            aria-hidden
+          />
         </StatusChip>
       </button>
       {open ? (

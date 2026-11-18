@@ -18,8 +18,9 @@ import { Text } from "./Text";
 import { Button, ErrorBox } from "./ui";
 
 /**
- * Jornada aberta há mais que isso (ou desde outro dia) provavelmente foi esquecida. Mesmo prazo do
- * lembrete do celular (lib/tracking); com 14 h ela é encerrada sozinha.
+ * Jornada aberta há mais que isso provavelmente foi esquecida. Mesmo prazo do lembrete do celular
+ * (lib/tracking); com 14 h ela é encerrada sozinha. A virada do dia não conta: visita noturna
+ * atravessa a meia-noite com a jornada aberta.
  */
 const FORGOTTEN_MINUTES = 10 * 60;
 /** Jornada ativa sem a coleta começar por mais que isso: algo bloqueia o GPS. */
@@ -248,7 +249,7 @@ export function ShiftCard() {
   }
 
   const elapsed = Math.max(0, (now - new Date(shift.started_at).getTime()) / 60_000);
-  const forgotten = elapsed >= FORGOTTEN_MINUTES || !isSameDay(shift.started_at, new Date(now));
+  const forgotten = elapsed >= FORGOTTEN_MINUTES;
   const summary = `desde ${formatTime(shift.started_at)} · ${formatMinutes(elapsed)}`;
 
   return (

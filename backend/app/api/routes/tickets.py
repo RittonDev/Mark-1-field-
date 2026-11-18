@@ -470,7 +470,12 @@ async def list_attachments(ticket_id: uuid.UUID, db: DB, user: CurrentUser) -> l
         .where(TicketAttachment.ticket_id == ticket_id)
         .order_by(TicketAttachment.created_at)
     )
-    return [_attachment_out(a, user) for a in rows if svc.attachment_visible(a, user)]
+    receipts = await svc.receipt_ids(db, ticket_id) if svc.hides_receipts(user) else set()
+    return [
+        _attachment_out(a, user)
+        for a in rows
+        if svc.attachment_visible(a, user) and a.id not in receipts
+    ]
 
 
 @router.post(
@@ -506,6 +511,10 @@ async def _attachment_with_ticket(
     if attachment is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Anexo não encontrado")
     ticket = await svc.get_visible_ticket(db, user, attachment.ticket_id)
+    # Comprovante de custo, para quem não tem Custos extras: como se não existisse (a lista também
+    # não mostra).
+    if svc.hides_receipts(user) and attachment.id in await svc.receipt_ids(db, ticket.id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Anexo não encontrado")
     return ticket, attachment
 
 

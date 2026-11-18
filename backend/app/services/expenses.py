@@ -144,7 +144,11 @@ async def create(db: AsyncSession, ticket: Ticket, data: ExpenseIn, actor: User)
         if data.kind != ExpenseKind.KM:
             raise WorkflowError("Informe o valor unitário")
         unit_value = await km_rate(db)
-    technician_id = data.technician_id or ticket.assignee_id
+    # Sem o campo, reembolsa o responsável pela OS; null ("Ninguém") é custo da empresa e não
+    # entra no reembolso de ninguém.
+    technician_id = (
+        data.technician_id if "technician_id" in data.model_fields_set else ticket.assignee_id
+    )
     await _check_refs(db, ticket, technician_id, data.receipt_attachment_id)
     expense = TicketExpense(
         id=uuid.uuid4(),

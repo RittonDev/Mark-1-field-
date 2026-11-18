@@ -110,8 +110,12 @@ async def refresh(body: RefreshRequest, db: DB) -> TokenResponse:
         user = await db.get(User, uuid.UUID(payload["sub"]))
     except (InvalidToken, KeyError, ValueError) as exc:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, SESSION_EXPIRED) from exc
-    if user is None or not user.is_active:
+    if user is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, SESSION_EXPIRED)
+    # Desativado pela central: diz o motivo (o refresh válido é da própria conta, como a senha certa
+    # no login). Com essa mensagem o app apaga do aparelho as OS e os dados de clientes (LGPD).
+    if not user.is_active:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, INACTIVE)
     # Se o papel mudou (ex.: técnico virou analista), a sessão no canal antigo termina. Vem antes
     # da revogação: com essa mensagem o app apaga os dados locais do técnico.
     channel = payload.get("ch")

@@ -240,12 +240,14 @@ export function TicketHeader({
         ) : (
           <SquarePen aria-hidden className="size-4 shrink-0 text-white/80" />
         )}
+        {/* O nº nunca encolhe (min-w-max conta só ele: o título tem largura 0 na conta e fica com a
+            sobra); quem cede na barra estreita é o título e, depois, o nome da situação. */}
         <Heading
-          className="flex min-w-0 flex-1 items-center gap-2 text-[15px] font-bold tracking-[-0.01em]"
+          className="flex min-w-max flex-1 items-center gap-2 text-[15px] font-bold tracking-[-0.01em]"
           title={`${ticket.code} · ${ticket.title}`}
         >
           <CopyCode code={ticket.code} />
-          <span className="min-w-0 truncate font-normal text-white/90">{ticket.title}</span>
+          <span className="w-0 min-w-0 flex-1 truncate font-normal text-white/90">{ticket.title}</span>
         </Heading>
         {reopenable && !dirty ? (
           <button
@@ -260,7 +262,7 @@ export function TicketHeader({
             Reabrir
           </button>
         ) : null}
-        <div className="shrink-0">
+        <div className="min-w-0">
           <StatusMenu status={ticket.status} targets={ticket.allowed_transitions} locked={dirty} onPick={onTransition} />
         </div>
         {variant === "dialog" ? (

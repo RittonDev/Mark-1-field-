@@ -28,8 +28,9 @@ import { describeOp, discardOp, isOnline, requestSync, resetCursor, useSyncStatu
 import { showToast } from "../lib/toast";
 
 /**
- * Depois de tantas tentativas com o servidor no ar, a ação provavelmente não vai passar sozinha: aí dá
- * para descartar. Esperando sinal não conta: a falta de rede também soma tentativas e grava o erro.
+ * Depois de tantas falhas da própria ação com o servidor no ar, ela provavelmente não vai passar
+ * sozinha: aí dá para descartar. Falta de rede e falha do envio inteiro não somam tentativas (o motor
+ * só anota o erro), e com o servidor fora do ar nada se descarta.
  */
 const DISCARD_AFTER_ATTEMPTS = 3;
 

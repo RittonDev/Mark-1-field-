@@ -40,6 +40,7 @@ from sqlalchemy.sql.elements import ColumnElement
 from app.core import permissions
 from app.core.config import settings
 from app.core.enums import (
+    ExpenseStatus,
     FormStatus,
     TicketEventType,
     TicketPriority,
@@ -61,6 +62,7 @@ from app.models import (
     TicketAttachment,
     TicketComment,
     TicketEvent,
+    TicketExpense,
     TicketForm,
     TicketWorklog,
     UnproductiveReason,
@@ -166,6 +168,24 @@ def attachment_visible(attachment: TicketAttachment, user: User) -> bool:
         attachment.uploaded_by_id == user.id
         or attachment.form_id is not None
         or attachment.kind in ("photo", "signature")
+    )
+
+
+def hides_receipts(user: User) -> bool:
+    """Comprovante de custo extra é custo: a gestão sem a tela de Custos extras não o vê entre os
+    anexos nem mexe nele (o detalhe da OS já sai sem os custos)."""
+    return user.can_manage_tickets and not permissions.of(user).can("commercial.expenses")
+
+
+async def receipt_ids(db: AsyncSession, ticket_id: uuid.UUID) -> set[uuid.UUID]:
+    """Anexos da OS que são comprovante de algum custo extra."""
+    return set(
+        await db.scalars(
+            select(TicketExpense.receipt_attachment_id).where(
+                TicketExpense.ticket_id == ticket_id,
+                TicketExpense.receipt_attachment_id.is_not(None),
+            )
+        )
     )
 
 
@@ -619,8 +639,9 @@ def _change_status(
         ticket.resolved_at = now
         client_report.assign_link(ticket, now)
     elif to == S.CLOSED:
+        # Sem assign_link: fechar só vem de resolvida, que já ganhou o link; sem link aqui é
+        # porque a gestão desativou, e o fechamento (inclusive o automático) não desfaz isso.
         ticket.closed_at = now
-        client_report.assign_link(ticket, now)
     elif to == S.CANCELLED:
         ticket.cancelled_at = now
     elif to == S.REOPENED:
@@ -632,6 +653,13 @@ def _change_status(
         # O veredito do Field Control (prazo de solução cumprido na visita) era do atendimento que
         # terminou: reaberta, vale o prazo original, como nas outras OS (se já venceu, estourada).
         ticket.resolution_sla_met_at = None
+        # A assinatura também era daquele atendimento: o técnico volta a mexer nos formulários e,
+        # com assinatura exigida, a nova conclusão pede outra. O anexo e o evento da assinatura
+        # antiga ficam no histórico.
+        ticket.signed_at = None
+        ticket.signer_name = None
+        ticket.signer_role = None
+        ticket.signature_attachment_id = None
 
     ticket.status = to
     payload = {"from": from_status.value, "to": to.value, **(data or {})}
@@ -1861,6 +1889,9 @@ async def update_attachment(
     return attachment
 
 
+RECEIPT_OF_PAID = "Comprovante de custo já reembolsado: volte o custo para Aprovado antes de excluir"
+
+
 async def remove_attachment(
     db: AsyncSession, ticket: Ticket, attachment: TicketAttachment, actor: User
 ) -> str | None:
@@ -1876,8 +1907,25 @@ async def remove_attachment(
 
     if not actor.can_manage_tickets:
         raise PermissionDenied("Só analistas e gestores excluem anexos")
-    if ticket.signature_attachment_id == attachment.id:
+    # Também a de um atendimento anterior (a reabertura tira a assinatura da OS, não o anexo).
+    if ticket.signature_attachment_id == attachment.id or attachment.kind == "signature":
         raise WorkflowError("A assinatura do responsável não pode ser excluída")
+    # Comprovante de custo extra: o custo reembolsado não troca de comprovante (volta para
+    # Aprovado antes); nos outros, o custo fica sem comprovante em vez de apontar para o nada.
+    receipt_of = list(
+        await db.scalars(
+            select(TicketExpense).where(
+                TicketExpense.ticket_id == ticket.id,
+                TicketExpense.receipt_attachment_id == attachment.id,
+            )
+        )
+    )
+    if any(e.status == ExpenseStatus.PAID for e in receipt_of):
+        raise WorkflowError(RECEIPT_OF_PAID)
+    for expense in receipt_of:
+        expense.receipt_attachment_id = None
+    if receipt_of:
+        queue_event(db, "updated", ticket, actor, {"fields": ["expenses"]}, internal=True)
     now = utcnow()
     key = attachment.storage_key
     form_id = attachment.form_id

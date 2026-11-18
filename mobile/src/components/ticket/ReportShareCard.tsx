@@ -1,6 +1,6 @@
 import { memo, useEffect, useState } from "react";
 import { Linking, Pressable, Share, StyleSheet, View } from "react-native";
-import { api, errorMessage } from "../../lib/api";
+import { api, ApiError, errorMessage } from "../../lib/api";
 import { copyText, openWhatsApp } from "../../lib/device-actions";
 import { isOnline, useSyncStatus } from "../../lib/sync";
 import type { LocalTicket } from "../../lib/syncTypes";
@@ -39,13 +39,16 @@ export const ReportShareCard = memo(function ReportShareCard({ ticket }: { ticke
   const online = isOnline(useSyncStatus());
   const [fetched, setFetched] = useState<ReportLink | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // O servidor não dá link pelo app: a central desativou o link (ex.: foi para o cliente errado) ou
+  // reabriu a OS. Vale o motivo dele, sem "Tentar de novo" (não é falha) e sem criar outro link.
+  const [disabled, setDisabled] = useState<string | null>(null);
   const link = ticket.report_link ?? fetched;
   // A conclusão ainda está na fila do aparelho: o servidor só cria o link quando a receber.
   const waiting = ticket.pending_ops > 0;
 
-  // OS antiga (sem link) ou o aparelho ainda não recebeu o link: pede ao servidor.
+  // O aparelho ainda não recebeu o link (a conclusão subiu e o download não veio): pede ao servidor.
   useEffect(() => {
-    if (link || waiting || !online || error) return;
+    if (link || waiting || !online || error || disabled) return;
     let alive = true;
     api
       .post<ReportLink>(`/tickets/${ticket.id}/report-link`)
@@ -53,12 +56,14 @@ export const ReportShareCard = memo(function ReportShareCard({ ticket }: { ticke
         if (alive) setFetched(out);
       })
       .catch((e) => {
-        if (alive) setError(errorMessage(e));
+        if (!alive) return;
+        if (e instanceof ApiError && (e.status === 409 || e.status === 422)) setDisabled(errorMessage(e));
+        else setError(errorMessage(e));
       });
     return () => {
       alive = false;
     };
-  }, [link, waiting, online, error, ticket.id]);
+  }, [link, waiting, online, error, disabled, ticket.id]);
 
   async function copy(url: string) {
     const ok = await copyText(url);
@@ -116,6 +121,9 @@ export const ReportShareCard = memo(function ReportShareCard({ ticket }: { ticke
     body = <Text style={styles.status}>A conclusão ainda está sendo enviada. O link aparece assim que a central receber.</Text>;
   } else if (!online) {
     body = <Text style={styles.status}>Sem conexão. O link do relatório aparece quando o app voltar a sincronizar.</Text>;
+  } else if (disabled) {
+    // Decisão da central, não falha: texto neutro e sem "Tentar de novo".
+    body = <Text style={styles.status}>{disabled}</Text>;
   } else if (error) {
     body = (
       <View style={{ gap: 10 }}>

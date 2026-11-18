@@ -22,16 +22,19 @@ ONLY_ASSIGNEE = "Só a gestão ou o técnico responsável pela OS enviam o relat
 
 @router.post("/tickets/{ticket_id}/report-link", response_model=ReportLinkOut)
 async def create_report_link(ticket_id: uuid.UUID, db: DB, user: CurrentUser) -> ReportLinkOut:
-    """Link do relatório para o cliente (cria se ainda não houver). Toda OS tem relatório.
+    """Link do relatório para o cliente. Toda OS nasce com link.
 
-    A gestão pega a qualquer momento; o técnico responsável, pelo app, depois de concluir.
-    Trocar ou revogar: só a gestão.
+    A gestão pega a qualquer momento (e cria um link novo se o anterior foi desativado); o técnico
+    responsável, pelo app, depois de concluir, e só o link que existe: o desativado pela central
+    não volta por ele. Trocar ou revogar: só a gestão.
     """
     ticket = await tickets_svc.get_visible_ticket(db, user, ticket_id)
     if not user.can_manage_tickets and ticket.assignee_id != user.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, ONLY_ASSIGNEE)
     if not user.can_manage_tickets and ticket.status not in svc.FINISHED:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, svc.NOT_FINISHED)
+    if not user.can_manage_tickets and ticket.report_link_id is None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, svc.LINK_DISABLED)
     out = await svc.ensure_link(db, ticket)
     await db.commit()
     return out

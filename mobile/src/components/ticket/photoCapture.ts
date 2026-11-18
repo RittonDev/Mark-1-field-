@@ -7,6 +7,7 @@ import * as ImagePicker from "expo-image-picker";
 import { Platform } from "react-native";
 import { getKv, setKv } from "../../lib/db";
 import { askOpenSettings, notify } from "../../lib/dialogs";
+import { isSupportedPhoto } from "../../lib/photoFormat";
 
 /**
  * Pedido de peça que estava sendo preenchido quando a câmera abriu: se o Android fechar o app, a
@@ -30,8 +31,33 @@ type StoredTarget = CaptureTarget & { at: string };
 const TARGET_KEY = "camera_target";
 const RECOVER_WINDOW_MS = 30 * 60_000;
 
-/** Qualidade 0,5: a foto fica bem menor e continua servindo de evidência. */
-const OPTIONS: ImagePicker.ImagePickerOptions = { mediaTypes: ["images"], quality: 0.5, exif: false };
+/**
+ * Qualidade 0,5: a foto fica bem menor e continua servindo de evidência. Na galeria do iPhone, a
+ * representação "compatível" faz o sistema entregar JPEG no lugar do HEIC (o servidor não aceita
+ * HEIC como foto e o relatório do cliente não mostra); a câmera e o Android ignoram a opção.
+ */
+const OPTIONS: ImagePicker.ImagePickerOptions = {
+  mediaTypes: ["images"],
+  quality: 0.5,
+  exif: false,
+  preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
+};
+
+/**
+ * Só fica a foto que a central abre (JPG, PNG ou WebP). Vale o arquivo que o seletor gerou, não o
+ * tipo declarado: no Android a foto já sai regravada em JPEG com o tipo da original ("image/heic").
+ */
+function keepSupported(assets: ImagePicker.ImagePickerAsset[]): ImagePicker.ImagePickerAsset[] {
+  const kept = assets.filter((asset) => isSupportedPhoto(asset.uri, asset.mimeType));
+  const dropped = assets.length - kept.length;
+  if (dropped) {
+    notify(
+      dropped === 1 ? "Foto em formato não aceito" : `${dropped} fotos em formato não aceito`,
+      "A central só recebe fotos JPG, PNG ou WebP. Tire a foto pela câmera do app ou escolha outra.",
+    );
+  }
+  return kept;
+}
 
 // Nenhuma tela mostra o alvo guardado: a escrita não avisa as telas (não redesenha nada).
 const QUIET = { notify: false } as const;
@@ -79,7 +105,7 @@ export async function capturePhotos(
             selectionLimit: Math.max(1, limit),
           });
     if (result.canceled) return [];
-    return result.assets.slice(0, Math.max(1, limit));
+    return keepSupported(result.assets.slice(0, Math.max(1, limit)));
   } catch (error) {
     // O erro técnico fica no log; o técnico recebe o que fazer.
     console.warn("Falha ao abrir a câmera/galeria", error);

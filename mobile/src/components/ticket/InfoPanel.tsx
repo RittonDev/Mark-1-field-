@@ -74,7 +74,9 @@ export const InfoPanel = memo(function InfoPanel({ ticket, userId }: { ticket: L
   const registeredAddress = addressOf(location);
   const when = visitWindow(ticket);
 
-  const payout = ticket.my_payout ?? null;
+  // Valor pendente de OS cancelada não aparece, como em Ganhos (payouts.my_earnings): ele só é pago
+  // se a central decidir. O já pago continua aparecendo.
+  const payout = ticket.my_payout && !(ticket.status === "cancelled" && ticket.my_payout.status !== "paid") ? ticket.my_payout : null;
   const expenses = ticket.expenses ?? [];
 
   return (

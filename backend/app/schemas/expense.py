@@ -28,6 +28,7 @@ class ExpenseIn(BaseModel):
     quantity: Decimal = Field(gt=0, max_digits=12, decimal_places=3)
     # Vazio no km: usa o valor do km configurado.
     unit_value: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+    # A quem reembolsar. Sem o campo: o responsável pela OS; null: custo da empresa.
     technician_id: uuid.UUID | None = None
     status: ExpenseStatus = ExpenseStatus.PENDING
     notes: str | None = Field(default=None, max_length=2000)

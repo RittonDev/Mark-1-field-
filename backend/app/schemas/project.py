@@ -59,8 +59,9 @@ class ProjectOut(BaseModel):
     members: list[Ref]
     stats: ProjectStats
     # Valor do contrato menos os custos extras e os valores dos técnicos nas OS do projeto.
-    # null sem valor de contrato ou sem a tela de Custos extras ou de Pagamentos (as duas entram
-    # na conta). services/projects.to_out calcula, porque depende do acesso de quem vê.
+    # null sem valor de contrato, sem a tela de Custos extras ou de Pagamentos (as duas entram
+    # na conta) ou com "Somente a própria fila" (os totais seriam só os da fila).
+    # services/projects.to_out calcula, porque depende do acesso de quem vê.
     margin: float | None = None
     created_at: dt.datetime
 

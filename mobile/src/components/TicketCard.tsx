@@ -6,7 +6,7 @@ import { STATUS } from "../lib/constants";
 import { addressOf } from "../lib/device-actions";
 import { actualMinutes } from "../lib/duration";
 import { arrivalClock, arrivalUrgency, onsiteClock } from "../lib/field";
-import { finishedAt, isDone, isHelper } from "../lib/lists";
+import { awaitingReschedule, finishedAt, isDone, isHelper } from "../lib/lists";
 import { formatDate, formatMinutes, formatShort, formatTime, isSameDay, startOfDay } from "../lib/format";
 import { haptic } from "../lib/haptics";
 import type { LocalTicket } from "../lib/syncTypes";
@@ -107,8 +107,10 @@ function TicketCardBase({ ticket, now, userId, showDate = false, showTime = true
   const meta = [ticket.customer?.name, ticket.service_type?.name].filter(Boolean).join(" · ");
   const route = showRoute && hasRoute(ticket);
   const done = variant === "done";
-  // A linha do relógio mostra a chegada antes do check-in e a permanência na loja depois dele.
-  const onsiteShown = !done && !arrivalClock(ticket, now) && onsiteClock(ticket, now) !== null;
+  // A linha do relógio mostra a chegada antes do check-in e a permanência na loja depois dele. Visita
+  // improdutiva esperando a central reagendar não tem chegada a cobrar (o técnico foi), como no detalhe.
+  const clockShown = !done && !awaitingReschedule(ticket);
+  const onsiteShown = clockShown && !arrivalClock(ticket, now) && onsiteClock(ticket, now) !== null;
   const corner = done ? doneText(ticket) : scheduleText(ticket, now, showTime, showDate, onsiteShown);
   const workMinutes = done && ticket.work_seconds > 0 ? Math.round(ticket.work_seconds / 60) : 0;
   const pending = ticket.pending_ops
@@ -123,7 +125,7 @@ function TicketCardBase({ ticket, now, userId, showDate = false, showTime = true
     site,
     address,
     status?.label ?? ticket.status,
-    done ? null : spokenClock(ticket, now),
+    clockShown ? spokenClock(ticket, now) : null,
     helping ? "você vai junto" : null,
     pending,
   ]
@@ -229,9 +231,9 @@ function TicketCardBase({ ticket, now, userId, showDate = false, showTime = true
                 <Text style={styles.lineText}>Atendimento: {formatMinutes(workMinutes)}</Text>
               </View>
             ) : null
-          ) : (
+          ) : clockShown ? (
             <FieldClockLine ticket={ticket} now={now} />
-          )}
+          ) : null}
           <View style={styles.badges}>
             <Animated.View key={ticket.status} entering={swap.entering} exiting={swap.exiting}>
               <StatusBadge status={ticket.status} />
@@ -291,6 +293,7 @@ const CARD_FIELDS = [
   "cancelled_at",
   "service_address",
   "visit_note",
+  "last_unproductive_at",
 ] as const satisfies readonly (keyof LocalTicket)[];
 
 const helperIds = (t: LocalTicket) => (t.helpers ?? []).map((h) => h.id).join(",");

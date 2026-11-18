@@ -1,7 +1,8 @@
 """Importação da base de locais de atendimento (filiais, lojas, unidades) por planilha.
 
 Cada linha é um local de um cliente. O cliente vem do parâmetro (importar só para ele) ou
-das colunas da planilha (CNPJ do cliente ou nome; se não existir, é criado). O local é
+das colunas da planilha (CNPJ do cliente ou nome; se não existir, é criado, mas só por quem
+edita Clientes). O local é
 encontrado no cliente pelo código, depois pelo CNPJ, depois pelo nome: achou, atualiza só o
 que veio preenchido; não achou, cria. Na prévia (dry_run) nada é gravado.
 """
@@ -130,6 +131,8 @@ def _fields(row: dict[str, str]) -> dict[str, Any]:
     return data
 
 
+NEW_CUSTOMER_FORBIDDEN = "Cliente não cadastrado: só quem edita Clientes cadastra cliente novo"
+
 LABELS = {
     "name": "Nome do local",
     "code": "Código",
@@ -162,7 +165,11 @@ async def import_locations(
     data: bytes,
     dry_run: bool,
     customer_id: uuid.UUID | None = None,
+    *,
+    allow_new_customers: bool = True,
 ) -> LocationImportResult:
+    """`allow_new_customers`: quem não edita Clientes não cria cliente pela planilha (a linha com
+    cliente que não existe dá erro, na prévia e na gravação)."""
     rows = read_table(filename, data, ALIASES)
     fixed_customer = None
     if customer_id is not None:
@@ -205,6 +212,8 @@ async def import_locations(
             if customer is None and not errors:
                 if len(name) < 2:
                     errors.append("Informe o cliente (nome ou CNPJ cadastrado)")
+                elif not allow_new_customers:
+                    errors.append(NEW_CUSTOMER_FORBIDDEN)
                 else:
                     customer = Customer(id=uuid.uuid4(), name=name, document=doc, is_active=True)
                     new_customer = True

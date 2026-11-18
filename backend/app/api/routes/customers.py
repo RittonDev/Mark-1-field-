@@ -263,9 +263,7 @@ async def customer_locations(
         vis = visibility_clause(user)
         if vis is not None:
             conds.append(vis)
-        tickets = (
-            select(func.count(Ticket.id)).where(*conds).correlate(Location).scalar_subquery()
-        )
+        tickets = select(func.count(Ticket.id)).where(*conds).correlate(Location).scalar_subquery()
         stmt = stmt.order_by(tickets.desc(), Location.name)
     elif matched is not None:
         stmt = stmt.order_by(
@@ -590,17 +588,22 @@ async def update_asset(asset_id: uuid.UUID, body: AssetUpdate, db: DB, _: Custom
 @router.post("/locations/import", response_model=LocationImportResult)
 async def import_locations(
     db: DB,
-    _: LocationsEdit,
+    user: LocationsEdit,
     file: Annotated[UploadFile, File()],
     dry_run: bool = True,
     customer_id: uuid.UUID | None = None,
 ) -> LocationImportResult:
     """Base de locais por planilha CSV ou XLSX (até 5 MB). Por padrão só a prévia; dry_run=false
-    grava."""
+    grava. Cliente novo pelas colunas só com Clientes em Editar (sem isso, a linha dá erro)."""
     try:
         data = await read_upload(file, MAX_BYTES)
         result = await location_import.import_locations(
-            db, file.filename or "", data, dry_run, customer_id
+            db,
+            file.filename or "",
+            data,
+            dry_run,
+            customer_id,
+            allow_new_customers=permissions.of(user).can("base.customers", "edit"),
         )
     except SpreadsheetError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc

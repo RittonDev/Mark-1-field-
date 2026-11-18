@@ -448,6 +448,8 @@ export interface TicketListItem {
   onsite_status?: OnsiteStatus | null;
   /** Tempo de técnico na loja já usado no chamado, somando as visitas (minutos). */
   onsite_used_minutes?: number | null;
+  /** Entrada na loja da visita em curso (só em atendimento): o tempo na loja conta daqui. */
+  work_started_at?: ISODate | null;
   /** Outras OS na mesma loja nos últimos 30 dias. */
   recurrence_30d?: number;
   /** Etiquetas (ex.: "Avulso", "Faturamento Matriz"), vindas do Field Control. */
@@ -616,6 +618,12 @@ export interface RealtimeEvent {
   latitude?: number;
   longitude?: number;
   recorded_at?: ISODate;
+  /** O ponto inteiro: sem eles, o mapa repetiria os dados do ponto anterior na posição nova. */
+  accuracy_m?: number | null;
+  speed_mps?: number | null;
+  heading?: number | null;
+  battery_pct?: number | null;
+  is_mock?: boolean;
   on_shift?: boolean;
 }
 
@@ -1268,6 +1276,8 @@ export interface QuoteListRow extends Quote {
   /** Local (loja) da OS do orçamento. */
   location?: string | null;
   customer_id?: UUID | null;
+  /** Situação da OS: cancelada, o orçamento não muda mais. */
+  ticket_status?: TicketStatus | null;
 }
 
 export interface QuoteStatusTotal {
@@ -1879,6 +1889,11 @@ export interface PortalRequestItem {
   arrived_at: ISODate | null;
   resolved_at: ISODate | null;
   cancelled_at: ISODate | null;
+}
+
+/** GET /portal/requests: a página e quantas aguardam o cliente (com os mesmos filtros, em todas as páginas). */
+export interface PortalRequestPage extends Page<PortalRequestItem> {
+  waiting: number;
 }
 
 /** Arquivo que a empresa do cliente mandou na solicitação (só nome e data). */

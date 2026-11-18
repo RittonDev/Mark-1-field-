@@ -119,13 +119,23 @@ export const PhotosPanel = memo(function PhotosPanel({
         }));
   // A tentativa conta antes do envio (uma foto subindo já tem 1): falhou só quem tem o erro anotado.
   const failed = queue.some((p) => Boolean(p.last_error));
+  // OS fechada ou cancelada não recebe foto do técnico (o servidor recusa e a foto se perderia). A
+  // resolvida ainda recebe.
+  const closed = ticket.status === "closed" || ticket.status === "cancelled";
 
   return (
     <View style={{ gap: 12 }}>
-      <View style={styles.actions}>
-        <Button title="Tirar foto" icon="camera" variant="primary" onPress={() => void pick("camera")} disabled={busy} style={{ flex: 1 }} />
-        <Button title="Da galeria" onPress={() => void pick("library")} disabled={busy} style={{ flex: 1 }} />
-      </View>
+      {closed ? (
+        <View style={styles.lockedLine}>
+          <Icon name="lock" size={14} color={c.inkMuted} />
+          <Text style={[styles.note, styles.lockedText]}>OS encerrada: só a central anexa fotos.</Text>
+        </View>
+      ) : (
+        <View style={styles.actions}>
+          <Button title="Tirar foto" icon="camera" variant="primary" onPress={() => void pick("camera")} disabled={busy} style={{ flex: 1 }} />
+          <Button title="Da galeria" onPress={() => void pick("library")} disabled={busy} style={{ flex: 1 }} />
+        </View>
+      )}
 
       {queue.length > 0 ? (
         <Card style={{ gap: 12 }}>
@@ -186,7 +196,11 @@ export const PhotosPanel = memo(function PhotosPanel({
       {!online ? <Text style={styles.note}>Sem conexão: fotos novas da OS aparecem quando a conexão voltar.</Text> : null}
       {online && loadError && !sent.length ? <ErrorBox message={loadError} /> : null}
       {cached === undefined ? null : sent.length === 0 ? (
-        <EmptyState icon="camera" title="Nenhuma foto enviada ainda" description="Fotografe o antes e o depois do atendimento." />
+        <EmptyState
+          icon="camera"
+          title={closed ? "Nenhuma foto enviada" : "Nenhuma foto enviada ainda"}
+          description={closed ? undefined : "Fotografe o antes e o depois do atendimento."}
+        />
       ) : (
         <View style={styles.grid}>
           {sent.map((photo, i) => {
@@ -226,6 +240,8 @@ export const PhotosPanel = memo(function PhotosPanel({
 const makeStyles = (c: Palette) =>
   StyleSheet.create({
     actions: { flexDirection: "row", gap: 10 },
+    lockedLine: { flexDirection: "row", alignItems: "center", gap: 6 },
+    lockedText: { flex: 1 },
     pendingRow: { flexDirection: "row", alignItems: "center", gap: 12 },
     thumb: { width: 64, height: 64, borderRadius: RADIUS.control, backgroundColor: c.line },
     name: { fontSize: 14, fontWeight: "600", color: c.ink },

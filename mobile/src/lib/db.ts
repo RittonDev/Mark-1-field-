@@ -192,6 +192,11 @@ const MIGRATIONS: string[] = [
   `
   ALTER TABLE signatures ADD COLUMN blocked_reason TEXT;
   `,
+  // 9: as tentativas da fila passaram a contar só as falhas da própria ação (falta de rede e falha
+  // do envio inteiro não contam). Zera a contagem antiga, que levava ao "Descartar" à toa.
+  `
+  UPDATE outbox SET attempts = 0;
+  `,
 ];
 
 let dbPromise: Promise<DB> | null = null;
@@ -443,10 +448,14 @@ export async function formAnswersQueued(db: DB, ticketId: UUID, formId: UUID): P
   return Boolean(row);
 }
 
-export async function markOpsAttempt(db: DB, clientOpIds: string[], error: string | null): Promise<void> {
+/**
+ * Anota o erro do envio. `count`: a falha foi da própria ação (o servidor não conseguiu processá-la
+ * sozinha) e soma uma tentativa; falta de rede e falha do envio inteiro só anotam o erro.
+ */
+export async function markOpsAttempt(db: DB, clientOpIds: string[], error: string | null, count = true): Promise<void> {
   if (!clientOpIds.length) return;
   await db.runAsync(
-    "UPDATE outbox SET attempts = attempts + 1, last_error = ? WHERE client_op_id IN (SELECT value FROM json_each(?))",
+    `UPDATE outbox SET ${count ? "attempts = attempts + 1, " : ""}last_error = ? WHERE client_op_id IN (SELECT value FROM json_each(?))`,
     error,
     JSON.stringify(clientOpIds),
   );

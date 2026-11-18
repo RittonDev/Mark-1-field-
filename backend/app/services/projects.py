@@ -150,8 +150,13 @@ async def to_out(
     numbers = await stats(db, [p.id for p in projects], viewer)
     shown = _shown(viewer)
     # A margem desconta os custos extras e os valores dos técnicos: sem uma das duas telas, não
-    # sai (seria o contrato inteiro).
-    with_margin = shown["expenses_total"] and shown["payouts_total"]
+    # sai (seria o contrato inteiro). Com "Somente a própria fila" também não: os totais são só
+    # das OS da fila da pessoa, e o contrato é do projeto inteiro.
+    with_margin = (
+        shown["expenses_total"]
+        and shown["payouts_total"]
+        and (viewer is None or permissions.of(viewer).all_queues)
+    )
     member_ids = {uuid.UUID(m) for p in projects for m in (p.member_ids or [])}
     names = {}
     if member_ids:

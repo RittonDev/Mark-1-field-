@@ -52,6 +52,7 @@ FINISHED = (S.RESOLVED, S.CLOSED)
 LINK_KIND = "report"
 PHOTO_LINK_MINUTES = 24 * 60
 NOT_FINISHED = "Disponível quando a OS for concluída"
+LINK_DISABLED = "O link do relatório foi desativado pela central"
 # A mesma pessoa recarregando a página (ou baixando o PDF) não conta como outra visualização.
 VIEW_DEDUPE = timedelta(minutes=10)
 
@@ -95,7 +96,9 @@ def link_out(ticket: Ticket) -> ReportLinkOut | None:
 
 
 def assign_link(ticket: Ticket, now: datetime) -> None:
-    """Na abertura e na conclusão (dentro da mudança de status): cria o link se ainda não houver."""
+    """Na abertura e na conclusão (resolved, dentro da mudança de status): cria o link se ainda
+    não houver. O fechamento não cria: a OS fechada já passou pela conclusão, e sem link ali é
+    porque a gestão desativou."""
     if ticket.report_link_id is None:
         ticket.report_link_id = new_link_id()
         ticket.report_link_created_at = now

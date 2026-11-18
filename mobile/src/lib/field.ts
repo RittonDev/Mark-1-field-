@@ -35,8 +35,12 @@ export function setFieldRules(next: Partial<FieldRules> | null | undefined) {
 export const ARRIVAL_RISK_MINUTES = 60;
 
 const BEFORE_ARRIVAL: TicketStatus[] = ["assigned", "scheduled", "en_route"];
-/** Status em que o técnico está (ou esteve há pouco) na loja: o relógio de permanência aparece. */
-export const ONSITE_STATUSES: TicketStatus[] = ["in_progress", "on_hold_customer", "on_hold_vendor"];
+/**
+ * Status em que o relógio da loja anda (field.py::onsite_status). Na pausa (aguardando peça ou
+ * cliente) o tempo de trabalho para e, na retomada, o servidor refaz o limite com o que sobrou:
+ * relógio, anel e alertas somem até lá.
+ */
+export const ONSITE_STATUSES: TicketStatus[] = ["in_progress"];
 
 const minutesBetween = (from: number, to: number) => Math.round((to - from) / 60_000);
 

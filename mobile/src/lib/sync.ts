@@ -86,6 +86,7 @@ import { isDone, isHelper } from "./lists";
 import { syncOnsiteAlerts } from "./onsiteAlerts";
 import { userRef } from "./ops";
 import { deleteAllPhotoFiles, deletePhotoFile, persistPhoto, photoExists } from "./photoFiles";
+import { photoFileType } from "./photoFormat";
 import { RealtimeClient, type RealtimeState } from "./realtime";
 import { session } from "./session";
 import { showSuccess } from "./success";
@@ -571,9 +572,10 @@ async function pushBatch(round: Round, candidates: OutboxOp[]): Promise<boolean>
 async function pushFailed(round: Round, ops: OutboxOp[], error: unknown): Promise<boolean> {
   if (!(error instanceof ApiError)) throw error;
   const ids = ops.map((op) => op.client_op_id);
-  // Sem rede ou sessão encerrada: a rodada para; a fila fica como está, sem espera extra.
+  // Sem rede ou sessão encerrada: a rodada para; a fila fica como está, sem espera extra. Não conta
+  // como tentativa da ação (o "Descartar" da Conta é só para a que o servidor não consegue processar).
   if (error.status === 0 || error.status === 401) {
-    await write(round, (db) => markOpsAttempt(db, ids, error.message));
+    await write(round, (db) => markOpsAttempt(db, ids, error.message, false));
     throw error;
   }
   // Lote recusado na validação de uma operação (ex.: tipo que este servidor ainda não conhece) ou
@@ -599,7 +601,8 @@ async function pushFailed(round: Round, ops: OutboxOp[], error: unknown): Promis
   }
   const alone = ops.length === 1 && (suspect || error.status === 413);
   const message = batchFailure(error, alone);
-  await write(round, (db) => markOpsAttempt(db, ids, message));
+  // Só a falha da ação sozinha conta tentativa; a do envio inteiro (502, 503, 429…) não é culpa dela.
+  await write(round, (db) => markOpsAttempt(db, ids, message, alone));
   for (const id of ids) scheduleRetry(id, message, alone);
   for (const op of ops) round.blocked.add(op.ticket_id);
   round.error ??= message;
@@ -1131,8 +1134,8 @@ export async function queuePhoto(
   target?: { formId: UUID; fieldId: string },
 ) {
   const id = randomUUID();
-  const mime = mimeType ?? "image/jpeg";
-  const ext = mime === "image/png" ? "png" : mime === "image/heic" ? "heic" : "jpg";
+  // Pelo arquivo que o seletor gerou, não pelo tipo declarado (no Android vem o da foto original).
+  const { ext, mime } = photoFileType(sourceUri, mimeType);
   // O nome do arquivo é o que chega ao servidor no multipart.
   const filename = `foto-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}-${id.slice(0, 8)}.${ext}`;
   const fileUri = await persistPhoto(sourceUri, filename);
@@ -1343,8 +1346,7 @@ export async function enqueuePartRequest(
   const rows: Omit<PendingPhoto, "attempts" | "last_error">[] = [];
   for (const [i, photo] of photos.entries()) {
     const id = randomUUID();
-    const mime = photo.mimeType ?? "image/jpeg";
-    const ext = mime === "image/png" ? "png" : mime === "image/heic" ? "heic" : "jpg";
+    const { ext, mime } = photoFileType(photo.uri, photo.mimeType);
     const filename = `peca-${createdAt.slice(0, 19).replace(/[:T]/g, "-")}-${i + 1}-${id.slice(0, 6)}.${ext}`;
     const fileUri = await persistPhoto(photo.uri, filename);
     rows.push({ id, ticket_id: ticketId, file_uri: fileUri, filename, mime_type: mime, created_at: createdAt, form_id: null, field_id: null, part_op_id: clientOpId });
@@ -1360,6 +1362,8 @@ export async function enqueuePartRequest(
     });
     await rebaseTicket(db, ticketId, user);
   });
+  // A rodada que está subindo fotos envia o pedido no meio do upload (ele mesmo espera as fotos dele).
+  actionsQueued += 1;
   await refreshPendingCounts();
   void requestSync();
 }
@@ -1425,6 +1429,8 @@ async function enqueue(ticketId: UUID, operation: SyncOperation) {
     }
     await rebaseTicket(db, ticketId, user);
   });
+  // Ex.: "Iniciar atendimento" enquanto as fotos de outra OS sobem: a rodada envia já, sem esperar o upload.
+  actionsQueued += 1;
   await refreshPendingCounts();
   void requestSync();
 }
