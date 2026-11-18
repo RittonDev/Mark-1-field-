@@ -74,16 +74,19 @@ export function pixInputValue(type: PixKeyType, key: string): string {
   return type === "email" || type === "random" ? key : maskPixInput(type, key);
 }
 
-/** Teclado e preenchimento automático do campo da chave, conforme o tipo. */
+/**
+ * Teclado e preenchimento automático do campo da chave, conforme o tipo. CPF, CNPJ e celular não têm maxLength: a
+ * máscara já corta, e o limite cortaria antes dela uma chave colada com espaços ou com o +55.
+ */
 export function pixKeyInputProps(type: PixKeyType): TextInputProps {
   switch (type) {
     case "cpf":
-      return { keyboardType: "number-pad", maxLength: 14 };
+      return { keyboardType: "number-pad" };
     case "cnpj":
       // O CNPJ alfanumérico pode ter letras: teclado completo, em maiúsculas.
-      return { keyboardType: "default", autoCapitalize: "characters", autoCorrect: false, maxLength: 18 };
+      return { keyboardType: "default", autoCapitalize: "characters", autoCorrect: false };
     case "phone":
-      return { keyboardType: "phone-pad", autoComplete: "tel", textContentType: "telephoneNumber", maxLength: 15 };
+      return { keyboardType: "phone-pad", autoComplete: "tel", textContentType: "telephoneNumber" };
     case "email":
       return {
         keyboardType: "email-address",

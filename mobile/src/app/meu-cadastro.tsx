@@ -591,7 +591,6 @@ export default function MyProfileScreen() {
               keyboardType="phone-pad"
               autoComplete="tel"
               textContentType="telephoneNumber"
-              maxLength={15}
               returnKeyType="next"
               submitBehavior="submit"
               onSubmitEditing={() => emailRef.current?.focus()}
@@ -628,7 +627,6 @@ export default function MyProfileScreen() {
               keyboardType="number-pad"
               autoComplete="postal-code"
               textContentType="postalCode"
-              maxLength={9}
               returnKeyType="next"
               submitBehavior="submit"
               onSubmitEditing={() => addressRef.current?.focus()}
