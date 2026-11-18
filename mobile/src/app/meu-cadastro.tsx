@@ -430,6 +430,8 @@ export default function MyProfileScreen() {
       const offline = await offlineFailure(error);
       if (inSheet) {
         setPasswordError(offline ? `${NO_INTERNET}. ${OFFLINE_SAVE}` : errorMessage(error));
+        // Fechando a folha para corrigir o formulário (ex.: e-mail já cadastrado), o motivo continua no rodapé.
+        if (!offline) setSaveError(errorMessage(error));
         setPassword("");
         passwordRef.current?.focus();
       } else if (offline) {

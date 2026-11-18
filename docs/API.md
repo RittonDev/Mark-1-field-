@@ -947,6 +947,8 @@ computador" no portal: vira app com ícone na área de trabalho e no menu Inicia
   etiquetas `remove_on_payout_paid` (ex.: "Pendente Envio PGTO"); desfazer o pagamento não traz de volta.
 - `GET /me/earnings?month=AAAA-MM` (técnico) → os chamados dele, o resumo e os reembolsos (custos extras
   aprovados a receber e pagos no mês).
+- `PayoutLine.invoice` (`{id, number, status}` ou null), em `GET /payouts` e `GET /me/earnings`: a nota fiscal do
+  técnico que cobre o valor (ver [Notas fiscais dos técnicos](#notas-fiscais-dos-técnicos-2026-11-18)).
 - Mudar o valor ou pagar marca a OS como alterada (`updated_at`), para o app do técnico baixar de novo.
 
 ## Orçamentos: cobrança, aberturas e preço do cliente (2026-11-17)
@@ -1199,6 +1201,108 @@ técnico) e, só no aceite, a leitura e o valor pago do técnico nesta OS.
   da OS (sem analista, para a central toda) e para quem mandou a oferta (`sender_id` = usuário logado), sem o valor.
 - Técnicos e Usuários: desativar um técnico sempre pede confirmação, que diz que as ofertas em aberto para ele são
   canceladas. Em Usuários, tirar o papel de técnico avisa o mesmo no texto do formulário.
+
+## Notas fiscais dos técnicos (2026-11-18)
+
+**Por quê.** O técnico parceiro emite a nota de serviço (no portal da prefeitura) pelos chamados do mês e envia pelo
+app (aba Ganhos); a central confere em Pagamentos. A nota é opcional e nunca trava pagamento. O Field Control não tem
+nota do técnico: segue-se o padrão dele "o colaborador envia pelo app, o escritório confere no painel", com o documento
+com metadados do GLPI. Código: `services/invoices.py`, `api/routes/invoices.py`, `models/invoice.py` e, em
+`services/storage.py`, `save_upload_in` e `sniff_document`.
+
+**Dados.**
+- Tabela `technician_invoices`: `technician_id`, `number` (até 30), `issue_date`, `amount`, `competence` (o mês do
+  serviço, gravado como o dia 1; a API usa "AAAA-MM"), `note` (até 500), `status` (`pending` aguardando conferência,
+  `checked` conferida, `rejected` recusada), `reject_reason`, `reviewed_at`, `reviewed_by_id`, o arquivo (`filename`,
+  `content_type` real, `size_bytes`, `storage_key` em `media/invoices/{técnico}/`) e `client_upload_id` (a chave de
+  idempotência do app, única por técnico).
+- `ticket_payouts.invoice_id`: a nota que cobre aquele valor. Um valor fica em no máximo uma nota; uma nota cobre
+  vários valores do mesmo técnico. A ligação é opcional.
+
+**Rotas do técnico** (papel `technician`; gestão e cliente recebem 403). Tudo pede internet: o envio não entra na fila
+offline (`docs/MOBILE_SYNC.md`).
+- `GET /me/invoices?month=AAAA-MM` → `MyInvoice[]`, as da competência (sem `month`, todas, até 200), as mais novas
+  primeiro. `MyInvoice = {id, number, issue_date, amount, competence, note, status, reject_reason, reviewed_at, filename,
+  content_type, size_bytes, file_kind: "pdf"|"xml"|"image", download_url, payouts: InvoicePayoutRef[], payouts_total,
+  created_at}`, com `InvoicePayoutRef = {payout_id, ticket_id, code, title, amount, status, concluded}`. Sem o nome de
+  quem conferiu. Mês inválido: 422 "Mês inválido (use AAAA-MM)".
+- `GET /me/invoices/payouts?month=AAAA-MM` (obrigatório) → `InvoicePayoutCandidate[] = {payout_id, ticket_id, code,
+  title, amount, status, resolved_at, in_month, invoice: {id, number, status}|null}`. Primeiro os valores do mês (OS
+  resolvida ou fechada, ou valor já pago; a data é a da conclusão, sem ela a do lançamento, no fuso da operação), com
+  qualquer situação de nota; depois os de meses anteriores ainda a receber, de OS concluída e sem nota (`in_month`
+  false). Por data, até 300.
+- `POST /me/invoices` (multipart): `file`, `number`, `issue_date` (AAAA-MM-DD), `amount` ("1234.56"), `competence`
+  (AAAA-MM), `note`, `payout_ids` (UUIDs separados por vírgula) e `client_upload_id` (UUID do app, um por abertura da
+  tela, repetido nas novas tentativas) → 201 `MyInvoice`. A mesma `client_upload_id` de novo (resposta perdida): 200 com
+  a nota já gravada, sem gravar nada. Dois envios iguais ao mesmo tempo: 409 "Esta nota já foi recebida. Atualize a
+  lista.".
+- `DELETE /me/invoices/{id}` → 204. Só a própria (a de outro técnico: 404 "Nota fiscal não encontrada") e só enquanto
+  a central não conferiu (422 "A central já conferiu esta nota: ela não pode mais ser apagada"); a recusada também. As
+  OS ficam livres e o arquivo sai do disco depois do commit.
+
+**Envio, nesta ordem** (422 com a mensagem). Tudo do banco é conferido antes de gravar o arquivo; se a gravação falhar
+depois, o arquivo sai do disco. Um envio de cada técnico por vez (trava por técnico até o fim da transação).
+1. Campos:
+   - sem arquivo: "Escolha o arquivo da nota";
+   - número, 1 a 30 caracteres sem os espaços das pontas: "Informe o número da nota", "O número da nota tem no máximo
+     30 caracteres";
+   - emissão, de 2000-01-01 até hoje no fuso da operação: "Informe a data de emissão", "Data de emissão inválida (use
+     AAAA-MM-DD)", "A data de emissão não pode ser no futuro";
+   - valor maior que zero, com ponto e até 2 casas: "Informe o valor da nota", "Valor inválido", "O valor da nota
+     precisa ser maior que zero";
+   - competência, de 2000-01 até o mês atual: "Informe a competência", "Competência inválida (use AAAA-MM)", "A
+     competência não pode ser um mês que ainda não chegou";
+   - "A observação tem no máximo 500 caracteres"; "Escolha até 200 OS por nota"; `client_upload_id` que não é UUID:
+     "Envio inválido: atualize o app e tente de novo".
+2. A mesma `client_upload_id` do técnico: 200 com a nota existente.
+3. Até 20 notas por técnico em cada competência, contando as recusadas: "Limite de 20 notas por competência: apague
+   as recusadas para enviar outra".
+4. Número único entre as notas não recusadas do técnico, comparado sem espaços, em maiúsculas e sem zeros à esquerda
+   ("01 234" = "1234"): "A nota nº 1234 já foi enviada". Outro técnico pode ter o mesmo número.
+5. As OS escolhidas, travadas (`FOR UPDATE`): do técnico ("Uma das OS escolhidas não é sua", também para id inválido
+   ou valor que não existe mais), com a OS resolvida ou fechada ou o valor já pago ("A OS-000123 ainda não foi
+   concluída") e sem outra nota ("A OS-000123 já está na nota nº 1200").
+6. O tipo pelo conteúdo (`storage.sniff_document`, os primeiros 1024 bytes): PDF (`%PDF-`), XML (começa com `<` depois
+   do BOM e dos espaços, sem ser HTML, SVG ou script) ou foto JPG, PNG ou WebP. Vazio: "O arquivo da nota está vazio";
+   outro tipo: "Envie a nota em PDF, XML ou foto (JPG, PNG ou WebP)".
+7. Até 10 MB: "Arquivo maior que 10 MB".
+
+**Rotas da central** (Pagamentos: Visualizar para ver e baixar, Editar para conferir, desfazer e recusar; nenhum item
+novo na matriz). A lista não segue a fila do analista: a nota é do técnico, não de uma OS (abrir a OS continua
+obedecendo a visibilidade de cada um).
+- `GET /technician-invoices?technician_id=&status=pending|checked|rejected&month=AAAA-MM` → `TechnicianInvoiceList =
+  {items, summary, total_count}`. `items`: `TechnicianInvoice` (`MyInvoice` + `technician: Ref` + `reviewed_by:
+  Ref|null`), as mais novas primeiro, até 500; `month` é a competência. `summary = {pending, checked, rejected,
+  pending_amount, checked_amount}` só com os filtros de técnico e mês (os contadores das abas); `total_count` com
+  todos.
+- `POST /technician-invoices/{id}/check` → `TechnicianInvoice`: aguardando vira conferida (`reviewed_at`,
+  `reviewed_by`); já conferida fica como está; recusada, 422 "Nota recusada: o técnico envia outra".
+- `POST /technician-invoices/{id}/uncheck` → volta a aguardar, sem `reviewed_*`; aguardando fica como está; recusada,
+  422 (a mesma mensagem).
+- `POST /technician-invoices/{id}/reject` `{reason}` (3 a 300 caracteres, sem os espaços das pontas) → recusada, com o
+  motivo e `reviewed_*`, e as OS ficam livres. Só a que aguarda: conferida, 422 "Desfaça a conferência antes de
+  recusar"; recusada, 422 "Esta nota já foi recusada". A recusa é final: o técnico apaga e envia outra (o número da
+  recusada pode ser usado de novo).
+- 404 "Nota fiscal não encontrada". A central nunca apaga nem edita a nota ou a ligação com as OS (ligação errada:
+  recusa com o motivo) e não envia nota em nome do técnico.
+
+**Arquivo.** `download_url` = `/api/v1/technician-invoices/{id}/download?token=` (rota pública com link assinado de
+30 min: JWT `download` com `sub` "invoice:{id}" e `uid` de quem pediu), gerado só nas respostas de quem pode ver (o
+técnico dono e quem tem Pagamentos). Token adulterado ou vencido: 401 "Link expirado"; de outra nota: 401 "Link
+inválido"; nota apagada: 404 "Nota fiscal não encontrada"; arquivo sumido do disco: 404 "Arquivo não encontrado". A
+foto abre na tela; PDF e XML baixam (`attachment`), sempre com `nosniff` e CSP `sandbox`, como os anexos da OS.
+
+**Valores.** `PayoutLine.invoice = {id, number, status} | null` em `GET /payouts` e `GET /me/earnings` (só a nota do
+próprio técnico do valor). Trocar o responsável da OS leva o valor não pago para o novo técnico sem a nota
+(`invoice_id` volta a null; a nota fica com o técnico, sem aquela OS). Remover o valor ou tirar o técnico da visita
+apaga a linha e a ligação. Mudar o valor de um pagamento ligado continua permitido (a central vê a diferença). Pagar
+não depende da nota.
+
+**Privacidade (LGPD).** A nota traz CPF/CNPJ e endereço do técnico. Só o próprio técnico (as rotas `/me` sempre
+filtram por ele) e quem tem Pagamentos veem; nada vai para o portal do cliente nem para outros técnicos. A nota
+conferida fica guardada (documento fiscal: o técnico só apaga se a central desfizer a conferência); a que aguarda
+conferência ou foi recusada, o técnico apaga, com o arquivo. Sem push, tempo real ou evento no histórico da OS: a
+central vê a nota nova ao focar ou recarregar a tela, e o técnico vê a conferência ou a recusa ao abrir Ganhos.
 
 ## Meu cadastro do técnico (2026-11-18)
 
@@ -1482,7 +1586,7 @@ V = Visualizar, E = Editar; "a \| b" = basta uma das telas.
 | `commercial.projects` | V: `GET /projects/{id}`. E: `POST /projects`, `PUT /projects/{id}` |
 | `commercial.expenses` | V: `GET /tickets/{id}/expenses` (só a gestão; o técnico como antes). E: `POST /tickets/{id}/expenses`, `PATCH`/`DELETE /expenses/{id}`, `POST /expenses/mark-paid` |
 | `commercial.expenses` \| `commercial.payouts` | V: `GET /expenses` |
-| `commercial.payouts` | V: `GET /payouts`, `GET /tickets/{id}/offers`. E: `PUT`/`DELETE /tickets/{id}/payouts/{tech}`, `POST /payouts/pay`, `/payouts/unpay`, `POST /tickets/{id}/offers`, `POST /tickets/{id}/offers/{offer_id}/cancel`, `DELETE /technicians/{id}/pix` |
+| `commercial.payouts` | V: `GET /payouts`, `GET /tickets/{id}/offers`, `GET /technician-invoices`. E: `PUT`/`DELETE /tickets/{id}/payouts/{tech}`, `POST /payouts/pay`, `/payouts/unpay`, `POST /tickets/{id}/offers`, `POST /tickets/{id}/offers/{offer_id}/cancel`, `DELETE /technicians/{id}/pix`, `POST /technician-invoices/{id}/check`, `/uncheck`, `/reject` |
 | `base.customers` | V: `GET /customers/{id}`, `GET /assets`, `/assets/{id}`. E: `POST /customers`, `PATCH /customers/{id}`, `POST`/`PATCH /assets` |
 | `base.locations` | E: `POST /customers/{id}/locations`, `PATCH /locations/{id}`, `POST /locations/import` |
 | `base.technicians` | V: `GET /technicians`, `/technicians/favorites`, `/technicians/{id}`, `/technicians/{id}/changes`. E: `POST /technicians`, `PATCH /technicians/{id}`, `POST /technicians/{id}/reset-password`, `POST`/`DELETE /technicians/{id}/photo`, `POST /technicians/import`, `POST /technicians/regions/refresh`, `PUT`/`DELETE /technicians/favorites/{id}` |

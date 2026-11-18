@@ -77,6 +77,9 @@ Resultado por operação:
   Para mudanças de status do próprio técnico, omitir costuma ser o desejado (última ação vale).
 - Fotos/assinaturas: `POST /tickets/{id}/attachments` (multipart, `kind=photo|signature`)
   quando houver conexão, fora do lote.
+- Nota fiscal do técnico (`POST /me/invoices`, aba Ganhos): só online, fora do lote e da fila de fotos (não é de
+  uma OS). Sem rede, o app avisa e o formulário fica preenchido; a `client_upload_id` repetida nas novas tentativas
+  evita nota duplicada quando a resposta se perde (docs/API.md, "Notas fiscais dos técnicos").
 
 ## 4. Tempo real
 
