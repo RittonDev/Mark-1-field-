@@ -179,6 +179,439 @@ async def apply_to_pending(db: AsyncSession, template: FormTemplate) -> int:
     return len(changed)
 
 
+# --------------------------------------------- entram sozinhos (tipo de OS e categoria)
+
+S = TicketStatus
+# A OS muda sozinha só antes da visita: nova, triagem, atribuída, agendada ou a caminho, sem
+# chegada. Em atendimento, pausada, reaberta, concluída ou cancelada, nada muda sem uma pessoa.
+BEFORE_VISIT = frozenset({S.NEW, S.TRIAGE, S.ASSIGNED, S.SCHEDULED, S.EN_ROUTE})
+# A categoria-mãe vale para as subcategorias até este nível (o limite da tela de Categorias).
+CATEGORY_LEVELS = 10
+TEMPLATE_UNLINKED = "O modelo não está mais ligado ao tipo nem à categoria desta OS"
+# Histórico de uso do modelo ("Pelo histórico" no editor do formulário).
+USAGE_DAYS = 365
+USAGE_MIN = 3
+USAGE_LIMIT = 10
+
+
+def before_visit(ticket: Ticket) -> bool:
+    return ticket.status in BEFORE_VISIT and ticket.arrived_at is None
+
+
+@dataclass
+class Linked:
+    """Modelo que entra sozinho na OS e o motivo, que vai para o histórico."""
+
+    template: FormTemplate
+    reason: str
+
+
+def _uuids(values: Iterable[Any] | None) -> list[uuid.UUID]:
+    out: list[uuid.UUID] = []
+    for value in values or []:
+        try:
+            out.append(uuid.UUID(str(value)))
+        except ValueError:
+            continue
+    return out
+
+
+async def category_line(db: AsyncSession, category_id: uuid.UUID) -> list[Category]:
+    """A categoria e as de cima (pai, avô...), da mais próxima para a mais distante."""
+    line: list[Category] = []
+    node_id: uuid.UUID | None = category_id
+    while node_id is not None and len(line) <= CATEGORY_LEVELS:
+        if any(c.id == node_id for c in line):
+            break  # ciclo (a API não deixa criar, mas não custa)
+        node = await db.get(Category, node_id)
+        if node is None:
+            break
+        line.append(node)
+        node_id = node.parent_id
+    return line
+
+
+async def category_tree(db: AsyncSession, roots: Iterable[uuid.UUID]) -> set[uuid.UUID]:
+    """As categorias e todas as de baixo (filhas, netas...). Id de categoria apagada fica de
+    fora. Carrega o id e o pai de todas as categorias de uma vez."""
+    wanted = set(roots)
+    if not wanted:
+        return set()
+    children: dict[uuid.UUID, list[uuid.UUID]] = defaultdict(list)
+    known: set[uuid.UUID] = set()
+    for category_id, parent_id in await db.execute(select(Category.id, Category.parent_id)):
+        known.add(category_id)
+        if parent_id is not None:
+            children[parent_id].append(category_id)
+    found: set[uuid.UUID] = set()
+    level = [c for c in wanted if c in known]
+    depth = 0
+    while level and depth <= CATEGORY_LEVELS:
+        below: list[uuid.UUID] = []
+        for category_id in level:
+            if category_id not in found:
+                found.add(category_id)
+                below.extend(children.get(category_id, []))
+        level = below
+        depth += 1
+    return found
+
+
+def _reason(
+    template: FormTemplate, service_type: ServiceType | None, line: Sequence[Category]
+) -> str | None:
+    """Por que o modelo entra: o tipo de OS vence; senão, a categoria ligada mais próxima."""
+    if service_type is not None and str(service_type.id) in (template.service_type_ids or []):
+        return f"Pelo tipo de OS “{service_type.name}”"
+    linked = set(template.category_ids or [])
+    for index, category in enumerate(line):
+        if str(category.id) in linked:
+            path = " > ".join(c.name for c in reversed(line[index:]))
+            return f"Pela categoria “{path}”"
+    return None
+
+
+async def linked_templates(
+    db: AsyncSession, *, service_type_id: uuid.UUID | None, category_id: uuid.UUID | None
+) -> list[Linked]:
+    """Modelos ativos que entram sozinhos numa OS com este tipo e esta categoria, em ordem de
+    nome: o tipo está nos tipos do modelo, ou a categoria (ou uma acima dela) está nas categorias
+    do modelo. Tipo e categoria somam. Recebe os ids: na edição da OS, a relação ainda aponta
+    para o tipo antigo até gravar."""
+    service_type = await db.get(ServiceType, service_type_id) if service_type_id else None
+    line = await category_line(db, category_id) if category_id else []
+    conditions = []
+    if service_type is not None:
+        conditions.append(FormTemplate.service_type_ids.contains([str(service_type.id)]))
+    conditions.extend(FormTemplate.category_ids.contains([str(c.id)]) for c in line)
+    if not conditions:
+        return []
+    rows = await db.scalars(
+        select(FormTemplate)
+        .where(FormTemplate.is_active.is_(True), or_(*conditions))
+        .order_by(FormTemplate.name, FormTemplate.id)
+    )
+    out: list[Linked] = []
+    for template in rows:
+        reason = _reason(template, service_type, line)
+        if reason is not None:
+            out.append(Linked(template, reason))
+    return out
+
+
+async def left_out(db: AsyncSession, ticket_id: uuid.UUID) -> set[uuid.UUID]:
+    """Modelos que uma pessoa decidiu tirar desta OS: removidos à mão (o evento tem autor) ou
+    deixados de fora na abertura. Esses não voltam sozinhos."""
+    rows = await db.execute(
+        select(TicketEvent.event_type, TicketEvent.data).where(
+            TicketEvent.ticket_id == ticket_id,
+            or_(
+                and_(
+                    TicketEvent.event_type == TicketEventType.FORM_REMOVED,
+                    TicketEvent.actor_id.is_not(None),
+                ),
+                TicketEvent.event_type == TicketEventType.CREATED,
+            ),
+        )
+    )
+    ids: list[Any] = []
+    for event_type, data in rows:
+        data = data if isinstance(data, dict) else {}
+        if event_type == TicketEventType.FORM_REMOVED:
+            ids.append(data.get("template_id"))
+        else:
+            ids.extend(data.get("forms_left_out") or [])
+    return set(_uuids(i for i in ids if i))
+
+
+async def untouched(db: AsyncSession, form: TicketForm) -> bool:
+    """Ninguém começou o formulário: pendente, sem resposta e sem foto."""
+    if form.status != FormStatus.PENDING or form.answers:
+        return False
+    return not await db.scalar(select(exists().where(TicketAttachment.form_id == form.id)))
+
+
+async def resolve_create_list(
+    db: AsyncSession, items: Sequence[TicketFormAdd] | None
+) -> list[tuple[FormTemplate, bool]] | None:
+    """A lista de formulários da abertura (modelo e obrigatório), validada antes de a OS ganhar
+    número (a sequência do banco não volta): sem repetido, só modelos que existem e estão
+    ativos. None: sem lista (entram os ligados ao tipo e à categoria)."""
+    if items is None:
+        return None
+    ids = [item.template_id for item in items]
+    if len(ids) != len(set(ids)):
+        raise WorkflowError("Formulário repetido na lista")
+    found: dict[uuid.UUID, FormTemplate] = {}
+    if ids:
+        found = {
+            t.id: t for t in await db.scalars(select(FormTemplate).where(FormTemplate.id.in_(ids)))
+        }
+    chosen: list[tuple[FormTemplate, bool]] = []
+    for item in items:
+        template = found.get(item.template_id)
+        if template is None:
+            raise WorkflowError("Modelo de formulário não encontrado")
+        if not template.is_active:
+            raise WorkflowError(f"Modelo de formulário inativo: {template.name}")
+        chosen.append((template, item.required))
+    return chosen
+
+
+def _opening(
+    chosen: list[tuple[FormTemplate, bool]] | None, linked: list[Linked]
+) -> list[tuple[FormTemplate, bool, bool, str | None]]:
+    """(modelo, obrigatório, entrou sozinho, motivo) dos formulários da abertura. Sem lista, os
+    ligados, como obrigatórios ou opcionais pelo padrão do modelo; com lista, exatamente ela, na
+    ordem, e os que também são ligados ficam marcados como automáticos (saem sozinhos se o tipo
+    ou a categoria mudarem antes da visita)."""
+    if chosen is None:
+        return [(i.template, i.template.default_required, True, i.reason) for i in linked]
+    linked_ids = {i.template.id for i in linked}
+    return [(t, required, t.id in linked_ids, None) for t, required in chosen]
+
+
+def opening_asks_signature(
+    chosen: list[tuple[FormTemplate, bool]] | None, linked: list[Linked]
+) -> bool:
+    """A OS nasce exigindo a assinatura (formulário obrigatório que pede)."""
+    return any(
+        required and template.requires_signature
+        for template, required, _, _ in _opening(chosen, linked)
+    )
+
+
+def opening_left_out(
+    chosen: list[tuple[FormTemplate, bool]] | None, linked: list[Linked]
+) -> list[str]:
+    """Os ligados que a Nova OS deixou de fora (vão para o evento da abertura)."""
+    if chosen is None:
+        return []
+    ids = {t.id for t, _ in chosen}
+    return [str(i.template.id) for i in linked if i.template.id not in ids]
+
+
+def attach_on_create(
+    db: AsyncSession,
+    ticket: Ticket,
+    chosen: list[tuple[FormTemplate, bool]] | None,
+    linked: list[Linked],
+    actor: User,
+    now: dt.datetime,
+) -> None:
+    """Os formulários da abertura. Sem lista, o sistema anexa os ligados (o histórico mostra o
+    motivo); com lista, quem abriu é o autor."""
+    by_system = chosen is None
+    for order, (template, required, auto, note) in enumerate(_opening(chosen, linked), 1):
+        _attach(
+            db,
+            ticket,
+            template,
+            required=required,
+            auto=auto,
+            actor=None if by_system else actor,
+            note=note,
+            now=now,
+            order=order,
+        )
+
+
+async def _signature_after_removal(
+    db: AsyncSession, ticket: Ticket, kept: list[TicketForm], removed: list[TicketForm]
+) -> None:
+    """A exigência de assinatura vinha só dos formulários que saíram (e ninguém assinou): a OS
+    deixa de exigir. Outro obrigatório que peça, ou a exigência sem formulário, mantém."""
+    if ticket.signed_at is not None or not ticket.signature_required:
+        return
+    gone = [f.template_id for f in removed if f.required and f.template_id is not None]
+    asking = select(func.count()).select_from(FormTemplate)
+    asking = asking.where(FormTemplate.requires_signature.is_(True))
+    if not gone or not await db.scalar(asking.where(FormTemplate.id.in_(gone))):
+        return
+    others = [f.template_id for f in kept if f.required and f.template_id is not None]
+    if others and await db.scalar(asking.where(FormTemplate.id.in_(others))):
+        return
+    ticket.signature_required = False
+
+
+async def reconcile_ticket(
+    db: AsyncSession, ticket: Ticket, *, why: str, now: dt.datetime
+) -> tuple[list[str], list[str]]:
+    """Antes da visita, a OS fica com os formulários que uma OS nova com o mesmo tipo e a mesma
+    categoria teria, respeitando o que uma pessoa decidiu: entram os ligados que faltam (menos os
+    que alguém tirou da OS ou deixou de fora na abertura); saem só os que entraram sozinhos, não
+    casam mais e ninguém começou (`why` vai para o histórico). Posto à mão ou respondido nunca
+    sai. Devolve os nomes dos que entraram e dos que saíram."""
+    if not before_visit(ticket):
+        return [], []
+    linked = await linked_templates(
+        db, service_type_id=ticket.service_type_id, category_id=ticket.category_id
+    )
+    linked_ids = {item.template.id for item in linked}
+    forms = list(
+        await db.scalars(
+            select(TicketForm)
+            .where(TicketForm.ticket_id == ticket.id)
+            .order_by(TicketForm.created_at)
+        )
+    )
+    removed: list[TicketForm] = []
+    for form in forms:
+        if (
+            form.auto_attached
+            and form.template_id not in linked_ids
+            and await untouched(db, form)
+        ):
+            await _detach(db, ticket, form, actor=None, note=why, now=now, release=False)
+            removed.append(form)
+    present = {f.template_id for f in forms}
+    skip = await left_out(db, ticket.id)
+    added: list[TicketForm] = []
+    for item in linked:
+        if item.template.id in present or item.template.id in skip:
+            continue
+        added.append(
+            _attach(
+                db,
+                ticket,
+                item.template,
+                required=item.template.default_required,
+                auto=True,
+                actor=None,
+                note=item.reason,
+                now=now,
+                order=len(added) + 1,
+            )
+        )
+    if removed:
+        kept = [f for f in forms if f not in removed] + added
+        await _signature_after_removal(db, ticket, kept, removed)
+    return [f.name for f in added], [f.name for f in removed]
+
+
+async def reconcile_template(
+    db: AsyncSession, template: FormTemplate, actor: User | None = None
+) -> tuple[int, int]:
+    """Leva os vínculos do modelo (tipos de OS e categorias) às OS que ainda não começaram: entra
+    onde casa e falta (menos onde uma pessoa tirou ou deixou de fora na abertura) e sai de onde
+    entrou sozinho, não casa mais e ninguém começou. Uma OS por vez, com o histórico de cada uma.
+    Devolve (em quantas OS entrou, de quantas saiu). Modelo inativo não entra nem sai."""
+    if not template.is_active:
+        return 0, 0
+    type_ids = set(_uuids(template.service_type_ids))
+    category_ids = await category_tree(db, _uuids(template.category_ids))
+    pending = and_(Ticket.status.in_(list(BEFORE_VISIT)), Ticket.arrived_at.is_(None))
+    matches = []
+    if type_ids:
+        matches.append(Ticket.service_type_id.in_(list(type_ids)))
+    if category_ids:
+        matches.append(Ticket.category_id.in_(list(category_ids)))
+    copy = exists().where(TicketForm.ticket_id == Ticket.id, TicketForm.template_id == template.id)
+    to_attach: list[uuid.UUID] = []
+    if matches:
+        to_attach = list(
+            await db.scalars(
+                select(Ticket.id).where(pending, or_(*matches), ~copy).order_by(Ticket.number)
+            )
+        )
+    auto_copy = copy.where(TicketForm.auto_attached.is_(True))
+    candidates = await db.execute(
+        select(Ticket.id, Ticket.service_type_id, Ticket.category_id)
+        .where(pending, auto_copy)
+        .order_by(Ticket.number)
+    )
+    to_detach = [
+        ticket_id
+        for ticket_id, service_type_id, category_id in candidates
+        if service_type_id not in type_ids and category_id not in category_ids
+    ]
+    now = utcnow()
+    attached = detached = 0
+    for ticket_id in to_attach:
+        ticket = await get_ticket(db, ticket_id)
+        if template.id in await left_out(db, ticket.id):
+            continue
+        line = await category_line(db, ticket.category_id) if ticket.category_id else []
+        reason = _reason(template, ticket.service_type, line)
+        _attach(
+            db,
+            ticket,
+            template,
+            required=template.default_required,
+            auto=True,
+            actor=None,
+            note=reason,
+            now=now,
+        )
+        await _touch(db, ticket, now)  # o app recebe a mudança no próximo sync
+        queue_event(db, "updated", ticket, actor, {"fields": ["forms"]})
+        await db.flush()
+        attached += 1
+    for ticket_id in to_detach:
+        ticket = await get_ticket(db, ticket_id)
+        gone = False
+        for form in [f for f in ticket.forms if f.template_id == template.id and f.auto_attached]:
+            if await untouched(db, form):
+                await _detach(db, ticket, form, actor=None, note=TEMPLATE_UNLINKED, now=now)
+                gone = True
+        if gone:
+            await _touch(db, ticket, now)
+            queue_event(db, "updated", ticket, actor, {"fields": ["forms"]})
+            await db.flush()
+            detached += 1
+    return attached, detached
+
+
+async def usage(db: AsyncSession, template: FormTemplate) -> list[ServiceTypeUsage]:
+    """Tipos de OS em que o modelo já é usado (para ligar com um clique): nos últimos 12 meses,
+    só OS não canceladas, os tipos ativos em que ele está em pelo menos 3 OS e em pelo menos
+    metade das OS do tipo; os 10 mais usados."""
+    since = utcnow() - dt.timedelta(days=USAGE_DAYS)
+    scope = (
+        Ticket.service_type_id.is_not(None),
+        Ticket.status != TicketStatus.CANCELLED,
+        Ticket.created_at >= since,
+    )
+    with_form = func.count(func.distinct(Ticket.id))
+    used: dict[uuid.UUID, int] = {
+        service_type_id: count
+        for service_type_id, count in await db.execute(
+            select(Ticket.service_type_id, with_form)
+            .join(TicketForm, TicketForm.ticket_id == Ticket.id)
+            .where(TicketForm.template_id == template.id, *scope)
+            .group_by(Ticket.service_type_id)
+            .having(with_form >= USAGE_MIN)
+        )
+    }
+    if not used:
+        return []
+    totals: dict[uuid.UUID, int] = {
+        service_type_id: count
+        for service_type_id, count in await db.execute(
+            select(Ticket.service_type_id, func.count())
+            .where(Ticket.service_type_id.in_(list(used)), *scope)
+            .group_by(Ticket.service_type_id)
+        )
+    }
+    items = [
+        ServiceTypeUsage(
+            id=st.id,
+            name=st.name,
+            customer=Ref.model_validate(st.customer) if st.customer else None,
+            used=used[st.id],
+            total=totals.get(st.id, used[st.id]),
+        )
+        for st in await db.scalars(
+            select(ServiceType).where(
+                ServiceType.id.in_(list(used)), ServiceType.is_active.is_(True)
+            )
+        )
+        if used[st.id] * 2 >= totals.get(st.id, used[st.id])
+    ]
+    items.sort(key=lambda u: (-u.used, u.name.lower()))
+    return items[:USAGE_LIMIT]
+
+
 # ------------------------------------------------------------- formulário na OS
 
 
@@ -543,6 +976,12 @@ async def save_partial(
 
 async def complete(db: AsyncSession, ticket: Ticket, form: TicketForm, actor: User) -> TicketForm:
     _ensure_can_fill(ticket, actor)
+    # A resposta automática congela na conclusão: o valor de agora vira resposta (trocar o técnico
+    # ou remarcar depois não muda nada) e conta para os obrigatórios. Faltando algo, a exceção
+    # desfaz a transação e nada fica congelado.
+    auto = prefill_for(ticket, form.fields, form.answers, final=True)
+    if auto:  # só as perguntas ainda sem resposta
+        form.answers = {**(form.answers or {}), **auto}
     missing = await missing_items(db, form)
     if missing:
         raise FormIncomplete("Falta preencher: " + "; ".join(missing))

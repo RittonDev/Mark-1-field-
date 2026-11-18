@@ -614,3 +614,180 @@ th.edit-col {
 tr:hover > td.edit-col {
   background: var(--row-hover);
 }
+
+/*
+ * Mia, a busca com IA da central: o botão do topo, o Ctrl+K, a caixa da Início e a resposta dela. É o
+ * único lugar com os brilhos e o degradê fino da marca (azul -> ciano -> verde-água, sem roxo nem menta);
+ * o resto da central segue sem cara de IA. Nada se mexe com a tela parada: os brilhos piscam e a linha
+ * corre só enquanto a busca está em andamento.
+ * Fora de camada, de propósito, para valer por cima dos utilitários: os elementos com estas classes não
+ * levam bg-*, border-*, shadow-* nem transition-* (não teriam efeito).
+ */
+@property --agent-mix {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 40%;
+}
+:root {
+  /* Foco do campo da Mia: anel de 1 px na cor do foco (8:1 no claro) e o brilho azul-ciano. */
+  --agent-glow:
+    0 0 0 1px var(--focus), 0 0 0 4px color-mix(in srgb, var(--brand) 12%, transparent),
+    0 10px 28px -14px color-mix(in srgb, var(--brand-cyan) 55%, transparent);
+}
+:root[data-theme="dark"] {
+  --agent-glow:
+    0 0 0 1px var(--focus), 0 0 0 4px color-mix(in srgb, var(--brand) 22%, transparent),
+    0 10px 28px -14px color-mix(in srgb, var(--brand-cyan) 45%, transparent);
+}
+/* O campo da Mia: fio de 1 px em degradê, que fica mais forte no hover e inteiro no foco. */
+.mf-agent-field {
+  --agent-fill: var(--surface);
+  --agent-mix: 40%;
+  border: 1px solid transparent;
+  background:
+    linear-gradient(var(--agent-fill), var(--agent-fill)) padding-box,
+    linear-gradient(
+        100deg,
+        color-mix(in srgb, var(--brand) var(--agent-mix), var(--line-strong)),
+        color-mix(in srgb, var(--brand-cyan) var(--agent-mix), var(--line-strong)) 55%,
+        color-mix(in srgb, var(--brand-teal) var(--agent-mix), var(--line-strong))
+      )
+      border-box;
+  box-shadow: var(--elev-1);
+  transition:
+    --agent-mix 150ms ease-out,
+    box-shadow 150ms ease-out,
+    color 150ms ease-out;
+}
+.mf-agent-field:hover {
+  --agent-mix: 70%;
+}
+.mf-agent-field:focus-within {
+  --agent-mix: 100%;
+}
+/* O brilho é do campo de digitar (a caixa da Início); o botão do topo usa o contorno de foco de sempre. */
+.mf-agent-field:focus-within:not(:focus) {
+  box-shadow: var(--agent-glow);
+}
+:root[data-theme="dark"] .mf-agent-field {
+  --agent-fill: var(--surface-2);
+}
+/* A placa dos brilhos (AgentMark). */
+.mf-agent-mark {
+  color: var(--brand);
+  background-image: linear-gradient(135deg, var(--brand-soft), color-mix(in srgb, var(--brand-cyan) 14%, var(--surface)));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand) 18%, transparent);
+}
+:root[data-theme="dark"] .mf-agent-mark {
+  color: var(--brand-ink);
+  background-image: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--brand) 24%, transparent),
+    color-mix(in srgb, var(--brand-cyan) 14%, transparent)
+  );
+}
+/* Pensando: a estrela grande respira e as cruzinhas (Sparkles do lucide: estrela, depois 2 pares de
+   traços) piscam, um par de cada vez. */
+.mf-agent-mark.is-thinking svg > * {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.mf-agent-mark.is-thinking svg > :first-child {
+  animation: mf-agent-breathe 1.2s ease-in-out infinite;
+}
+.mf-agent-mark.is-thinking svg > :nth-child(n + 2) {
+  animation: mf-agent-twinkle 1.2s ease-in-out infinite;
+}
+.mf-agent-mark.is-thinking svg > :nth-child(n + 4) {
+  animation-delay: -0.6s;
+}
+@keyframes mf-agent-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(0.88);
+  }
+}
+@keyframes mf-agent-twinkle {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+/* O fio sob o campo do Ctrl+K (por cima da borda de baixo da linha do campo). */
+.mf-agent-rule {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  pointer-events: none;
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--brand) 55%, var(--line)),
+    color-mix(in srgb, var(--brand-cyan) 55%, var(--line)) 55%,
+    color-mix(in srgb, var(--brand-teal) 45%, var(--line))
+  );
+}
+/* A linha de "pensando" na base do campo; entra depois de 150 ms, para não piscar na resposta rápida. */
+.mf-agent-scan {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 9999px;
+  pointer-events: none;
+  background-image: linear-gradient(90deg, transparent, var(--brand) 35%, var(--brand-cyan) 55%, transparent 80%);
+  background-size: 200% 100%;
+  opacity: 0;
+  animation:
+    mf-fade 0.2s ease-out 0.15s forwards,
+    mf-agent-scan 1.1s linear infinite;
+}
+@keyframes mf-agent-scan {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+/* Reduzir movimento: nada anima; a linha fica parada (e a resposta diz "Procurando…"). */
+@media (prefers-reduced-motion: reduce) {
+  .mf-agent-mark.is-thinking svg > *,
+  .mf-agent-scan {
+    animation: none !important;
+  }
+  .mf-agent-scan {
+    opacity: 0.7;
+    background-image: linear-gradient(90deg, var(--brand), var(--brand-cyan));
+    background-size: 100% 100%;
+  }
+}
+@media (prefers-contrast: more) {
+  .mf-agent-field {
+    border-color: var(--ink-muted);
+  }
+}
+/* Contraste alto do Windows: a borda transparente sumiria. */
+@media (forced-colors: active) {
+  .mf-agent-field {
+    border-color: CanvasText;
+    background: Canvas;
+    box-shadow: none;
+  }
+  .mf-agent-rule {
+    background: CanvasText;
+  }
+  .mf-agent-scan {
+    background: Highlight;
+    opacity: 1;
+    animation: none;
+  }
+}
