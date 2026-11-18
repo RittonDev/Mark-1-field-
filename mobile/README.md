@@ -332,6 +332,48 @@ Regras de [src/lib/field.ts](src/lib/field.ts), espelhando `backend/app/services
   Android acorda o app fechado com novas posições, ele roda sem tela e as rotas não carregam.
   Para gerar o build: `npx expo run:android` / `npx expo run:ios` ou `eas build --profile development`.
 
+## Notificações
+
+Tudo passa por [src/lib/notifications.ts](src/lib/notifications.ts) (handler, canais do Android, permissão,
+toque e agendamento); o plano dos lembretes fica em [src/lib/visitReminders.ts](src/lib/visitReminders.ts) e a
+sincronização fora da tela em [src/lib/backgroundSync.ts](src/lib/backgroundSync.ts).
+
+- **Lembretes da visita**: três notificações locais por OS, **1 dia (24 h), 1h40 e 10 min antes** do início da
+  visita, para o responsável e para os outros técnicos da visita: "Amanhã às 08:00 · OS-000123", "Em 1h40 ·
+  OS-000123 às 08:00" e "Em 10 min · OS-000123 às 08:00", com a loja e o endereço no texto (sem os dois, o
+  título da OS); tocar abre a OS. Só a visita ainda não iniciada tem lembrete (atribuída, agendada, reaberta
+  ou pausada pela central com visita marcada): deslocamento (também offline), atendimento, conclusão,
+  cancelamento, improdutiva sem visita nova e saída da lista cancelam, e o lembrete já na bandeja sai.
+- **Nunca atrasado**: só agenda o que cai entre 1 min e 7 dias à frente. OS marcada para daqui a 30 min ganha
+  só o de 10 min; atribuída ontem às 18:00 para hoje às 08:00, os de 1h40 e 10 min. A hora vem do relógio do
+  servidor (corrige o celular adiantado ou atrasado). No máximo 48 lembretes, os mais próximos (o iOS guarda 64
+  agendamentos por app; sobra lugar para os alertas da loja e o da jornada).
+- **Sempre em dia**: o aparelho refaz os agendamentos com as OS guardadas (com o que ainda está na fila) ao fim
+  de cada sincronização, a cada ação do técnico, ao abrir o app e quando ele volta à tela. Reagendar troca o
+  lembrete; o horário que já passou fica de fora. São locais: funcionam offline, com o app fechado e no Expo Go.
+- **Novidades com o app fora da tela**: o que a sincronização já avisa com toast (OS nova, "Você vai na visita
+  da…", agendada ou reagendada, cancelada, saiu da lista, peça aprovada ou recusada, oferta nova) vira notificação
+  do sistema com o mesmo texto, por exemplo "Nova OS para você: OS-000123" · "Visita amanhã às 08:00 · LJ001 ·
+  Loja Exemplo". Até duas do mesmo tipo saem uma a uma; mais que isso, um resumo que abre Hoje. A notificação de
+  uma OS é trocada pela seguinte (a cancelada tira a de OS nova da bandeja), e a de uma oferta sai da bandeja
+  quando ela fecha. Com o app na tela, ficam só os toasts.
+- **Sincronização em segundo plano**: na jornada, num build instalado, a localização mantém o app vivo e sai uma
+  rodada a cada ~3 min; fora dela, a tarefa periódica do sistema (`expo-background-task`, 15 min ou mais:
+  WorkManager no Android; no iOS o sistema decide e roda pouco). No Expo Go a tarefa periódica não existe, e com
+  o app fechado pelo técnico nada roda. A Conta mostra a situação em **Sincronização > Em segundo plano**.
+- **Conta > Notificações**: a chave **Lembretes das visitas** (ligada; desliga os três de uma vez), o próximo
+  lembrete, a permissão do celular (**Permitir notificações** ou **Abrir configurações**) e, no Android 12 ou mais
+  novo sem o alarme exato, **Horário exato · Pode atrasar alguns minutos** com **Liberar** (`SCHEDULE_EXACT_ALARM`
+  no `app.json`). No Android cada tipo tem canal próprio, que dá para silenciar no sistema: Ordens de serviço,
+  Lembretes das visitas, Tempo na loja e Jornada.
+- **Permissão**: um pedido automático só, uma vez por técnico, depois do termo de localização (nunca junto com o
+  pedido de localização); depois, só pelos botões da Conta.
+- **Push da central**: ainda não ligado. O `POST /devices` responde `{"push": "simulated"}` e o próprio app avisa;
+  quando a central responder `live`, o app para de repetir o aviso (kv `push_live`). O cartão **Aparelho** mostra
+  o estado ("Ainda não ligado na central"; no Expo Go, "Indisponível nesta versão do app").
+- **Saiu da conta**: nada agendado e a bandeja limpa (loja e endereço aparecem na tela bloqueada). As chaves
+  `visit_reminders`, `notifications_asked` e `push_live` ficam no kv e somem na troca de técnico.
+
 ## Como a sincronização funciona
 
 ```
@@ -353,14 +395,15 @@ WebSocket /api/v1/ws?token= ── evento ticket.* ──► nova rodada de sync
 - Acompanhamentos e horas aparecem na hora como rascunho local ("Aguardando envio" → "Enviado") e são
   trocados pelo registro oficial no pull seguinte.
 - Rodadas de sync nunca correm em paralelo. Gatilhos: abertura/login, rede voltando, app voltando ao
-  primeiro plano, cada ação, cada evento do WebSocket, puxar a lista para baixo e um intervalo de 90 s.
+  primeiro plano, cada ação, cada evento do WebSocket, puxar a lista para baixo e um intervalo de 90 s; com o
+  app fora da tela, a jornada e a tarefa periódica do sistema (seção Notificações).
 - Todas as escritas no SQLite passam por uma fila de transações exclusivas em JS.
 - OS fechadas/canceladas há mais de 30 dias e sem pendências saem do aparelho.
 
 ## Estrutura
 
 ```
-index.ts               entrada: expo-router + tarefa de rastreamento (definida antes das rotas, para o relançamento sem tela do Android)
+index.ts               entrada: expo-router + tarefas de segundo plano (rastreamento e sincronização, definidas antes das rotas, para o relançamento sem tela do Android)
 src/
   app/                 rotas (expo-router)
     _layout.tsx        sessão, tema, Stack com rotas protegidas, toasts
@@ -370,11 +413,12 @@ src/
     ticket/[id].tsx    detalhe, ações e abas
     oferta/[id].tsx    oferta de OS com preço: escopo, "Aceitar por R$ X" ou "Recusar"
     termo-rastreamento.tsx  termo de ciência do rastreamento (LGPD)
-    conta.tsx          sincronização, fila, avisos, rastreamento, aparência, sair
+    conta.tsx          sincronização, fila, avisos, rastreamento, notificações, aparência, sair
   components/          UI (marca, cartões, calendário, jornada, diálogo de transição, abas da OS)
     Text.tsx           Text do app: aplica a Manrope no peso do estilo (use este, não o do react-native)
     motion.tsx         entrada em cascata, transição de layout, PressableScale (0,97 com mola), Pulse
     Skeleton.tsx FieldStepper.tsx SuccessHost.tsx TabBar.tsx ActionSheet.tsx Icon.tsx RouteMapPattern.tsx
+    NotificationsCard.tsx  Conta > Notificações (lembretes, permissão, alarme exato) e "Em segundo plano"
   theme/theme.ts       paleta Maxx Field, claro/escuro, preferência do técnico
   theme/fonts.ts       Manrope (pesos 400–700) e o mapeamento de fontWeight para a família
   lib/
@@ -386,12 +430,15 @@ src/
     db.ts              schema SQLite e consultas
     ops.ts             aplicação otimista e rebase; user_can_transition e allowed_transitions iguais ao backend
     field.ts           promessa de campo: relógios de chegada e de loja, rótulos de peças
+    notifications.ts   notificações: handler, canais, permissão, toque, alertas locais e novidades fora da tela
+    visitReminders.ts  lembretes da visita (1 dia, 1h40 e 10 min antes): plano e textos, sem import nativo
     onsiteAlerts.ts    notificações locais do tempo na loja
+    backgroundSync.ts  sincronização fora da tela (jornada e tarefa periódica); .web.ts sem efeito
     sync.ts            motor de sync, fila, fotos, gatilhos
     offers.ts          ofertas de OS: lista guardada, prazo pelo relógio do servidor, "Escopo lido" e avisos
     realtime.ts        WebSocket
     sla.ts             porta de backend/app/services/sla.py::compute_sla_status
-    device.ts          POST/DELETE /devices
+    device.ts          POST/DELETE /devices (o servidor diz se o push chega: live ou simulated)
 ```
 
 `types.ts`, `constants.ts` e `workflow.ts` são cópias exatas dos arquivos da web. Ao mudar regras de
@@ -430,10 +477,17 @@ docker start -a mc-mobile-check
 - **Push**: o Expo Go não fornece token de push do próprio app (no Android o `expo-notifications` nem
   permite desde o SDK 53). O registro em `POST /devices` só acontece num development build
   (`npx expo run:android` ou `eas build --profile development`). No iOS o token é APNs; para o FCM do
-  backend atender iOS será preciso o SDK do Firebase no app ou um provedor APNs no backend.
+  backend atender iOS será preciso o SDK do Firebase no app ou um provedor APNs no backend. Para ligar:
+  Firebase (`google-services.json`), plugin do expo-notifications com `defaultChannel: "default"`, provedor
+  FCM no backend com `delivers()` verdadeiro e mensagem no canal `default` com `data` `{ticket_id, type}`.
+- **`SCHEDULE_EXACT_ALARM`** e **expo-background-task** são nativos: valem a partir de um development build
+  novo (o Expo Go já traz os módulos, mas não roda a tarefa periódica).
 - **HTTP sem TLS**: o Expo Go aceita `http://` na rede local. Builds de produção devem apontar para
   `https://`/`wss://` (Android bloqueia texto puro por padrão e o iOS exige ATS).
-- Sem sincronização em segundo plano: a fila é enviada com o app aberto.
+- **Segundo plano limitado**: só na jornada (build instalado) e na tarefa periódica do sistema (15 min ou mais;
+  no iOS, rara). Com o app fechado pelo técnico, ou no iPhone fora da jornada, OS nova e oferta só aparecem
+  quando o app abre (avisar na hora exige o push real). Um lembrete de uma OS mudada enquanto o aparelho não
+  sincronizou ainda sai com o horário antigo.
 - Rótulos e transições vêm das constantes copiadas da web, não de `GET /meta`; as ações exibidas vêm de
   `allowed_transitions` do servidor (recalculadas no aparelho só depois de uma ação offline).
 - Sem assinatura do cliente, edição dos dados da OS (`update`) ou abertura de OS pelo app.

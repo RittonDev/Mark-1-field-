@@ -213,7 +213,7 @@ Tela própria da operação, como no Field Control (aquela em que, segundo o lev
 Ver `docs/MOBILE_SYNC.md`.
 - `GET /sync/pull?since=<iso>` → `{server_time, tickets:TicketDetail[], comments, worklogs, revoked_ticket_ids}`
 - `POST /sync/push` `{operations:[{client_op_id, type:"transition"|"comment"|"worklog"|"update"|"form_answers"|"unproductive"|"part_request", ticket_id, payload, client_timestamp?}]}` → `{server_time, results:[{client_op_id, status:"applied"|"duplicate"|"rejected"|"conflict", error?, ticket?}]}`
-- `POST /devices` `{platform:"ios"|"android"|"web", token, app_version?}` · `DELETE /devices/{token}`
+- `POST /devices` `{platform:"ios"|"android"|"web", token, app_version?}` → `200 {push:"live"|"simulated"}` (`live`: o provedor entrega push a essa plataforma e o app não repete o aviso com notificação própria; hoje sempre `simulated`, o push ainda não está ligado) · `DELETE /devices/{token}` → 204 (404 para token de outro usuário)
 
 ### Rastreamento do técnico (jornada e GPS)
 Coleta só durante a jornada e só depois do aceite do termo (LGPD). Posições fora de uma jornada aberta

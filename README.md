@@ -93,6 +93,7 @@ domínio `@maxxgroup.com.br`); técnicos entram no app com o e-mail e a senha qu
 - **Cadastros:** clientes (CPF/CNPJ validado, inclusive alfanumérico), locais (com coordenadas), ativos (impressora, desktop, switch, câmera, DVR/NVR…), usuários, grupos, categorias e SLA.
 - **Tempo real:** toda mudança aparece na hora para quem pode ver a OS (web e apps).
 - **Pronto para mobile:** sync offline idempotente, revogação de OS reatribuídas, registro de aparelhos para push. Ver [docs/MOBILE_SYNC.md](docs/MOBILE_SYNC.md).
+- **Lembretes e avisos no celular do técnico:** o app lembra cada visita **1 dia, 1h40 e 10 min antes** do horário agendado (responsável e quem vai junto; funciona sem internet e com o app fechado, e sai sozinho quando a OS é reagendada, cancelada ou o técnico já saiu para o local). Com o app fora da tela, OS nova, oferta, reagendamento, cancelamento e decisão de peça chegam como notificação do celular, sincronizadas em segundo plano durante a jornada e de tempos em tempos; tocar abre a OS ou a oferta. O técnico desliga os lembretes em Conta > Notificações. A central (web) não muda.
 - **Papéis:** administrador, supervisor, analista (gestão completa na web), técnico de campo (app) e solicitante.
 
 ### Papéis, perfis de acesso e filas

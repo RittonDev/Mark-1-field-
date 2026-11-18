@@ -12,7 +12,8 @@ Os apps ainda não foram construídos. Este documento é o contrato que eles dev
  fila de operações ───── POST /sync/push ──────────► aplica (idempotente) ──┐
                                                                             ├─► Redis Pub/Sub ──► WebSocket ──► web e apps online
  WebSocket /ws ◄──────────────── evento ticket.* ───────────────────────────┘
- push (FCM/APNs) ◄────────────── OS atribuída / novo comentário (app fechado)
+ push (FCM/APNs) ◄────────────── OS nova, oferta, visita, peça (app fechado; ainda não ligado, §5)
+ lembretes locais ◄───────────── agendados no próprio aparelho: 1 dia, 1h40 e 10 min antes da visita
 ```
 
 ## 1. Login e aparelho
@@ -20,7 +21,9 @@ Os apps ainda não foram construídos. Este documento é o contrato que eles dev
 1. `POST /auth/login` → guarde `access_token` (60 min) e `refresh_token` (30 dias) no Keychain/Keystore.
 2. `POST /auth/refresh` quando receber 401.
 3. `POST /devices {platform: "ios"|"android", token: <FCM token>, app_version}` após o login e
-   sempre que o token de push mudar. `DELETE /devices/{token}` no logout.
+   sempre que o token de push mudar. Responde `200 {"push": "live"|"simulated"}`: com `simulated` (o push
+   ainda não chega ao aparelho) o app transforma as novidades do pull em notificação do sistema; com `live`
+   ele não repete o aviso do push (§5). `DELETE /devices/{token}` no logout.
 4. `GET /meta` (público) traz status, rótulos, cores e transições para montar a interface.
 
 ## 2. Download (pull)
@@ -91,12 +94,28 @@ Com o app aberto e online, mantenha `ws(s)://<host>/api/v1/ws?token=<access_toke
 - código de fechamento **4401** = token inválido/expirado → `refresh` e reconecte;
 - reconecte com backoff exponencial ao perder a conexão.
 
-## 5. Notificações push
+## 5. Notificações
 
-`app/services/push.py` decide quem recebe (hoje: OS atribuída ao técnico e novo comentário na OS dele).
-O provedor real **ainda não está ligado**: `LogPushProvider` só escreve no log. Para produção,
-implemente `PushProvider` com Firebase Cloud Messaging (atende Android e iOS) e configure a credencial
-por variável de ambiente.
+**Push da central.** `app/services/push.py` (`_push_targets`) decide quem recebe e o texto: OS nova para o
+técnico (e "saiu da sua lista" para o anterior), entrar ou sair da visita, OS cancelada, visita agendada ou
+remarcada, oferta de OS (só para os técnicos dela) e a decisão do pedido de peça. Quem fez a ação não recebe, e
+acompanhamento não vira aviso (o app não tem conversa: a central fala pelo grupo de WhatsApp). O `data` é
+`{ticket_id, type}`. O provedor real **ainda não está ligado**: `LogPushProvider` só escreve no log e
+`delivers(platform)` é falso, então o `POST /devices` responde `simulated`. Para produção, implemente
+`PushProvider` com Firebase Cloud Messaging (`delivers` verdadeiro nas plataformas que ele atende), configure a
+credencial por variável de ambiente e mande a mensagem no canal `default` do Android.
+
+**Avisos do próprio app.** Enquanto o push não chega, o app compara a OS guardada com a do pull (só no delta,
+nunca no download completo) e a lista de ofertas com a anterior, e avisa: com o app na tela, toast; fora dela
+(rodada em segundo plano: jornada aberta ou tarefa periódica do sistema), notificação do sistema com o mesmo
+texto. **Não repetir**: com `push: live` o app não apresenta a notificação dele (o push já avisou), e o push que
+chega com o app na tela não aparece (o toast do pull já avisa).
+
+**Lembretes da visita.** Sempre locais, agendados no aparelho a partir das OS guardadas: 1 dia (24 h), 1h40 e
+10 min antes do `scheduled_start`, para o responsável e os auxiliares, só na visita ainda não iniciada
+(atribuída, agendada, reaberta ou pausada pela central com visita marcada). Refeitos a cada pull e a cada ação
+(o deslocamento cancela, também offline); nunca disparam atrasados; até 48, nos próximos 7 dias. O servidor não
+agenda nada.
 
 ## Stack sugerida para os apps
 
