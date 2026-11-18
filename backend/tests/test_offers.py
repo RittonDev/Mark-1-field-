@@ -5,6 +5,7 @@ import asyncio
 import json
 import uuid
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 from httpx import AsyncClient
@@ -15,6 +16,7 @@ from app.core.config import settings
 from app.core.enums import UserRole
 from app.core.security import create_access_token
 from app.models import User
+from app.services import offers as offers_svc
 from app.services import realtime
 from app.services.push import _push_targets
 from app.services.realtime import field_event, should_deliver

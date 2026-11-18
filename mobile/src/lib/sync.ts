@@ -393,9 +393,12 @@ async function runOnce(myEpoch: number, manual: boolean) {
     try {
       await pullChanges(round);
     } catch (error) {
-      // O download falhou por erro do servidor (não rede nem sessão): as ofertas não esperam ele voltar.
+      // O download falhou por erro do servidor (não rede nem sessão): as ofertas não esperam ele voltar. O erro que
+      // vale para a rodada é o do download (a não ser que a sessão tenha mudado).
       if (!(error instanceof WriteCancelled) && !(error instanceof ApiError && (error.status === 0 || error.status === 401))) {
-        await refreshOffers(round, true);
+        await refreshOffers(round, true).catch((offersError: unknown) => {
+          if (offersError instanceof WriteCancelled) throw offersError;
+        });
       }
       throw error;
     }
@@ -1054,7 +1057,8 @@ async function refreshOffers(round: Round, early: boolean) {
  */
 async function fetchOffers(ctx: Ctx, { quiet, early = false }: { quiet?: UUID; early?: boolean } = {}) {
   ensureAlive(ctx);
-  const list = await api.get<FieldOffer[]>("/me/offers");
+  // O mesmo tempo do envio e do download: em rede lenta, a lista não para a rodada antes das fotos.
+  const list = await api.get<FieldOffer[]>("/me/offers", { timeoutMs: SYNC_TIMEOUT_MS });
   let outcome = null as OfferListOutcome | null;
   await write(
     ctx,
