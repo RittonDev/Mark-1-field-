@@ -4,11 +4,11 @@ import clsx from "clsx";
 import { Clock3, Hourglass, MapPinCheck, RotateCcw } from "lucide-react";
 import { useNow } from "@/components/useNow";
 import { formatMinutes, formatTime } from "@/lib/format";
-import type { TicketDetail, TicketListItem } from "@/lib/types";
+import type { TicketListItem } from "@/lib/types";
 
 type Clockable = Pick<
   TicketListItem,
-  "arrival_due_at" | "arrived_at" | "onsite_due_at" | "arrival_status" | "onsite_status" | "status"
+  "arrival_due_at" | "arrived_at" | "onsite_due_at" | "arrival_status" | "onsite_status" | "status" | "work_started_at"
 >;
 
 const minutesBetween = (a: number, b: number) => Math.round((b - a) / 60_000);
@@ -29,10 +29,7 @@ export interface FieldClockSummary {
  * OS (está no histórico), então a caminho conta o prazo de chegada. Na loja, o tempo é o da visita em
  * curso e o limite é o que ela pode durar (o que sobrou das horas do chamado).
  */
-export function fieldClockSummary(
-  ticket: Clockable & Partial<Pick<TicketDetail, "work_started_at">>,
-  now: number,
-): FieldClockSummary | null {
+export function fieldClockSummary(ticket: Clockable, now: number): FieldClockSummary | null {
   if (ticket.status === "en_route") {
     if (ticket.arrived_at || !ticket.arrival_due_at) {
       return { kind: "route", tone: "neutral", text: "A caminho", title: "Técnico a caminho do local" };
@@ -108,12 +105,15 @@ export function ArrivalChip({ ticket, compact = false }: { ticket: Clockable; co
   );
 }
 
-/** Tempo na loja contra o limite do chamado (4h a partir da chegada). */
+/**
+ * Tempo na loja na visita em curso contra o que ela pode durar (o que sobrou das horas do chamado).
+ * Só em atendimento, como o onsite_status da API: fora da loja (a caminho, aguardando peça) não corre.
+ */
 export function OnsiteBar({ ticket, className }: { ticket: Clockable; className?: string }) {
   const now = useNow(30_000);
-  if (!ticket.arrived_at || !ticket.onsite_due_at) return null;
-  if (!["in_progress", "on_hold_customer", "on_hold_vendor", "en_route"].includes(ticket.status)) return null;
-  const start = new Date(ticket.arrived_at).getTime();
+  const since = ticket.work_started_at ?? ticket.arrived_at;
+  if (ticket.status !== "in_progress" || !since || !ticket.onsite_due_at) return null;
+  const start = new Date(since).getTime();
   const end = new Date(ticket.onsite_due_at).getTime();
   const total = Math.max(1, end - start);
   const elapsed = Math.max(0, now - start);
