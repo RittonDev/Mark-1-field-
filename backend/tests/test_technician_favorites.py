@@ -4,6 +4,7 @@
 Dados sintéticos: técnicos e lojas fictícios, em cidades públicas.
 """
 
+import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -14,8 +15,12 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from app.core.config import settings
 from app.core.enums import TicketStatus, UserRole
 from app.db.base import utcnow
+from app.main import validation_issue
 from app.models import Location, TechnicianFavorite, Ticket, TicketWorklog, User
+from app.models.technician_favorite import FavoriteKind
 from app.models.ticket import ticket_helpers
+from app.services import technician_favorites as favorites_svc
+from app.services import validation_messages
 from app.services.technician_favorites import Visit, rank_city
 from tests.conftest import World, requires_db
 
@@ -565,3 +570,110 @@ async def test_deleting_the_technician_deletes_the_decisions(
         await conn.execute(delete(User).where(User.id == uuid.UUID(extra)))
         left = await conn.scalar(select(func.count()).select_from(TechnicianFavorite))
     assert left == 0
+
+
+@requires_db
+async def test_long_note_names_the_field_of_the_screen(
+    client: AsyncClient, engine: AsyncEngine, world: World
+) -> None:
+    """Nota longa: o 422 de sempre, com o nome que a tela dá ao campo (a Nota do fixado, o Motivo
+    do tirado). O "note" das outras telas segue "Motivo"."""
+    await _seed(engine, world)
+    an = world.analyst.headers
+    other = str(world.tech_other.user.id)
+    too_long = "x" * 301
+    r = await client.put(f"{FAV}/{other}", json={**SANTOS, "note": too_long}, headers=an)
+    assert r.status_code == 422
+    assert r.json()["detail"] == [
+        {
+            "loc": ["body", "note"],
+            "msg": "No máximo 300 caracteres",
+            "type": "string_too_long",
+            "ctx": {"max_length": 300},
+            "label": "Nota",
+        }
+    ]
+    hide = {**SANTOS, "favorite": False, "note": too_long}
+    r = await client.put(f"{FAV}/{other}", json=hide, headers=an)
+    assert r.status_code == 422 and r.json()["detail"][0]["label"] == "Motivo"
+    # 300 cabem (os espaços das pontas saem antes de contar).
+    r = await client.put(f"{FAV}/{other}", json={**SANTOS, "note": f"  {'x' * 300} "}, headers=an)
+    assert r.status_code == 200, r.text
+
+    # Sem rótulo do validador, vale o geral (o "note" da OS é o motivo da mudança).
+    general = {"loc": ("body", "note"), "msg": "", "type": "string_too_long"}
+    issue = validation_issue({**general, "ctx": {"max_length": 500}})
+    assert (issue["label"], issue["msg"], issue["ctx"]) == (
+        "Motivo",
+        "No máximo 500 caracteres",
+        {"max_length": 500},
+    )
+    labeled = {**general, "ctx": {"max_length": 300, "label": "Nota"}}
+    assert validation_messages.readable([labeled]) == "Nota: no máximo 300 caracteres"
+    assert validation_messages.readable([{**general, "ctx": {"max_length": 300}}]) == (
+        "Motivo: no máximo 300 caracteres"
+    )
+
+
+@requires_db
+async def test_pin_limit_holds_when_two_arrive_together(
+    client: AsyncClient, engine: AsyncEngine, world: World
+) -> None:
+    """Dois "Fixar" ao mesmo tempo na cidade que já tem 9 fixados: a trava da cidade deixa um só
+    passar (sem ela, os dois liam 9 antes de gravar e a cidade ficava com 11)."""
+    await _seed(engine, world)
+    an = world.analyst.headers
+    extra = await _new_technicians(engine, 11)
+    for user_id in extra[:9]:
+        r = await client.put(f"{FAV}/{user_id}", json=SANTOS, headers=an)
+        assert r.status_code == 200, r.text
+
+    async def pin(user_id: str) -> int:
+        return (await client.put(f"{FAV}/{user_id}", json=SANTOS, headers=an)).status_code
+
+    assert sorted(await asyncio.gather(pin(extra[9]), pin(extra[10]))) == [200, 422]
+    async with engine.connect() as conn:
+        pinned = await conn.scalar(
+            select(func.count())
+            .select_from(TechnicianFavorite)
+            .where(
+                TechnicianFavorite.city_key == "santos",
+                TechnicianFavorite.kind == FavoriteKind.INCLUDE,
+            )
+        )
+    assert pinned == 10
+
+
+@requires_db
+async def test_one_city_reads_only_its_stores_with_the_same_result(
+    client: AsyncClient, engine: AsyncEngine, world: World
+) -> None:
+    """A consulta de uma cidade (detalhe, sugestões da OS, decisões) monta as visitas só das lojas
+    dela, em vez das de todas; o resultado é o mesmo da lista de todas as cidades."""
+    ids = await _seed(engine, world)
+    an = world.analyst.headers
+    # Um tirado e um fixado, para a regra inteira entrar na comparação.
+    await client.put(f"{FAV}/{ids['A']}", json={**SANTOS, "favorite": False}, headers=an)
+    await client.put(f"{FAV}/{world.tech.user.id}", json=SANTOS, headers=an)
+
+    now = utcnow()
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as db:
+        everything = await favorites_svc._cities(db, now)
+        assert len(everything) == 6
+        for (uf, key), city in everything.items():
+            (one,) = (await favorites_svc._cities(db, now, state=uf, key=key)).values()
+            assert (one.city, one.stores, one.visits) == (city.city, city.stores, city.visits)
+            assert sorted(one.rows, key=_by_user) == sorted(city.rows, key=_by_user), key
+    listing = (await client.get(FAV, headers=an)).json()["cities"]
+    async with maker() as db:
+        for city in listing:
+            place = {"state": city["state"], "city": city["city"]}
+            detail = (await client.get(f"{FAV}/city", params=place, headers=an)).json()
+            assert {k: detail[k] for k in city} == city
+            marks = await favorites_svc.marks_for_place(db, city["state"], city["city"])
+            assert set(map(str, marks)) == set(_ids(city["favorites"]))
+
+
+def _by_user(visit: Visit) -> str:
+    return str(visit.user_id)

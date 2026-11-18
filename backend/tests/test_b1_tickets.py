@@ -9,10 +9,16 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy import ColumnElement, and_, or_, select, text
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from app.core.config import settings
+from app.core.enums import UserRole
+from app.models import Customer, Location, Ticket, User
+from app.models.ticket import ticket_helpers
+from app.services import search
+from app.services import tickets as tickets_svc
+from app.services.technician_regions import fold_words_sql
 from tests.conftest import World, requires_db
 from tests.test_api import create, transition
 
@@ -780,6 +786,100 @@ async def test_search_finds_store_customer_and_technician(
     for q in (f"os {number}", f"OS-{number:06d}", f"#{number}"):
         assert (await found(q))[0] == other["id"], q
     assert await found("9" * 40) == []  # número fora do intervalo: sem erro
+
+
+def _folded_word(word: str) -> ColumnElement[bool]:
+    """A busca de antes (o texto sem acento, letra a letra, com LIKE): a referência do resultado."""
+    like = f"%{word}%"
+    stores = select(Location.id).where(
+        or_(
+            fold_words_sql(Location.name).like(like),
+            fold_words_sql(Location.code).like(like),
+            fold_words_sql(Location.city).like(like),
+        )
+    )
+    customers = select(Customer.id).where(fold_words_sql(Customer.name).like(like))
+    people = select(User.id).where(fold_words_sql(User.name).like(like))
+    return or_(
+        fold_words_sql(Ticket.title).like(like),
+        fold_words_sql(Ticket.requester_name).like(like),
+        fold_words_sql(Ticket.client_reference).like(like),
+        Ticket.location_id.in_(stores),
+        Ticket.customer_id.in_(customers),
+        Ticket.assignee_id.in_(people),
+        Ticket.id.in_(
+            select(ticket_helpers.c.ticket_id).where(ticket_helpers.c.user_id.in_(people))
+        ),
+        fold_words_sql(Ticket.description).like(like),
+    )
+
+
+async def test_search_by_accent_regex_finds_the_same_tickets(
+    world: World, engine: AsyncEngine
+) -> None:
+    """A busca usa expressão regular com as variantes acentuadas de cada letra (bem mais rápida nas
+    descrições longas); o resultado é o mesmo da comparação com o texto sem acento de antes."""
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as db:
+        customer = Customer(name="Açaí & Pão LTDA", is_active=True)
+        db.add(customer)
+        await db.flush()
+        store = Location(
+            customer_id=customer.id,
+            name="Padaria São JOÃO",
+            code="LJ-Ç01",
+            city="Ribeirão Preto",
+            state="SP",
+        )
+        helper = User(
+            name="Júlia Ñúñez",
+            email="julia.nunez@teste.com.br",
+            password_hash="x",
+            role=UserRole.TECHNICIAN,
+        )
+        db.add_all([store, helper])
+        await db.flush()
+        long_text = "Câmera da ENTRADA não grava; AÇÃO: trocar a fonte e testar. " * 60
+        rows = [
+            Ticket(title="Troca de CÂMERA", location_id=store.id, customer_id=customer.id),
+            Ticket(title="camera sem imagem", description=long_text, assignee_id=world.tech.user.id),
+            Ticket(
+                title="Impressão falhando",
+                requester_name="Gerência Açaí",
+                client_reference="CHAMADO-Ñ42",
+            ),
+            Ticket(title="Outra coisa", description=None, requester_name=None),
+        ]
+        db.add_all(rows)
+        await db.flush()
+        await db.execute(ticket_helpers.insert().values(ticket_id=rows[3].id, user_id=helper.id))
+        await db.commit()
+
+    queries = (
+        "camera",
+        "CÂMERA",
+        "acao fonte",
+        "entrada",
+        "joao",
+        "sao joao padaria",
+        "ribeirao",
+        "lj c01",
+        "acai",
+        "gerencia",
+        "n42",
+        "impressao",
+        "tecnico",
+        "julia nunez",
+        "outra",
+        "xyz",
+    )
+    async with maker() as db:
+        for q in queries:
+            new = set(await db.scalars(select(Ticket.id).where(tickets_svc.search_clause(q))))
+            old_clause = and_(*(_folded_word(term) for term in search.words(q)))
+            old = set(await db.scalars(select(Ticket.id).where(old_clause)))
+            assert new == old, q
+            assert new or q == "xyz", q  # cada busca acha alguma coisa (menos a de controle)
 
 
 async def test_recurrence_ignores_cancelled_tickets(client: AsyncClient, world: World) -> None:
