@@ -102,6 +102,7 @@ from app.services.errors import (
     VersionConflict,
     WorkflowError,
 )
+from app.services.form_prefill import prefill_for
 from app.services.realtime import queue_event, unowned_ticket
 from app.services.suggestions import km_between
 from app.services.workflow import (
@@ -286,6 +287,10 @@ def to_detail(ticket: Ticket, user: User) -> TicketDetail:
     detail.allowed_transitions = allowed_transitions(user, ticket)
     detail.can_edit = can_edit(user, ticket)
     detail.can_assign = can_assign(user, ticket)
+    # Resposta automática: ao vivo até a conclusão do formulário (que grava o valor).
+    for form in detail.forms:
+        if form.status != FormStatus.COMPLETED:
+            form.prefill = prefill_for(ticket, form.fields, form.answers)
     if not user.is_staff:
         detail.expenses = []  # custo é interno
         detail.legacy = None  # dados de origem da migração: só a equipe
@@ -1299,6 +1304,16 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
         allow=data.allow_conflict,
         helper_ids=[h.id for h in helpers],
     )
+    # Formulários: a lista da Nova OS (mesmo vazia), validada antes de a OS ganhar número; sem
+    # lista (portal, API), os ligados ao tipo de OS e à categoria.
+    from app.services import forms as forms_svc  # forms usa este módulo: import tardio
+
+    chosen_forms = await forms_svc.resolve_create_list(db, None if is_requester else data.forms)
+    linked_forms = await forms_svc.linked_templates(
+        db,
+        service_type_id=service_type.id if service_type else None,
+        category_id=category.id if category else None,
+    )
 
     rules = await field_rules.rules(db)
     project_id = await _check_project(db, data.project_id, actor)
@@ -1340,6 +1355,8 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
         work_seconds=0,
         sla_paused_seconds=0,
         reopen_count=0,
+        # Formulário obrigatório que pede assinatura: a OS já nasce exigindo (sem versão nova).
+        signature_required=forms_svc.opening_asks_signature(chosen_forms, linked_forms),
         created_at=now,
         updated_at=now,
     )
@@ -1356,6 +1373,11 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
     created_data: dict[str, Any] = {"priority": priority.value, "source": data.source.value}
     if helpers:
         created_data["helpers"] = [h.name for h in helpers]
+    # Os ligados que a Nova OS deixou de fora: não entram sozinhos depois (troca de tipo ou de
+    # categoria antes da visita).
+    left_out = forms_svc.opening_left_out(chosen_forms, linked_forms)
+    if left_out:
+        created_data["forms_left_out"] = left_out
     record_event(
         db,
         ticket,
@@ -1379,6 +1401,7 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
                 "added_ids": [str(h.id) for h in helpers],
             },
         )
+    forms_svc.attach_on_create(db, ticket, chosen_forms, linked_forms, actor, now)
 
     if data.assignee_id is not None and not is_requester:
         if not actor.can_manage_tickets and data.assignee_id != actor.id:
