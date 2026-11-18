@@ -1030,8 +1030,11 @@ async function refreshOffers(round: Round, manual: boolean) {
   offersFetchDone(mark);
 }
 
-/** Busca a lista, guarda no aparelho e avisa a oferta nova e a que fechou sem o técnico responder. */
-async function fetchOffers(ctx: Ctx) {
+/**
+ * Busca a lista, guarda no aparelho e avisa a oferta nova e a que fechou sem o técnico responder. `quiet`: oferta
+ * cujo fechamento a tela dela já mostra (o servidor acabou de recusar a resposta): não vira aviso de novo.
+ */
+async function fetchOffers(ctx: Ctx, quiet?: UUID) {
   ensureAlive(ctx);
   const list = await api.get<FieldOffer[]>("/me/offers");
   let outcome = null as OfferListOutcome | null;
@@ -1045,13 +1048,16 @@ async function fetchOffers(ctx: Ctx) {
   if (!outcome) return;
   // Lista igual à guardada não acorda as telas (a conferência roda o dia todo).
   if (outcome.changed) notifyDataChanged();
-  announceOffers(outcome);
+  announceOffers(quiet ? { ...outcome, closed: outcome.closed.filter((offer) => offer.id !== quiet) } : outcome);
 }
 
-/** Busca as ofertas agora, fora da rodada (a tela da oferta, depois que o servidor recusou a resposta). */
-export async function refreshOffersNow() {
+/**
+ * Busca as ofertas agora, fora da rodada: a tela da oferta, depois que o servidor recusou a resposta (`quiet`: a
+ * oferta dela, cujo fechamento já está na tela).
+ */
+export async function refreshOffersNow(quiet?: UUID) {
   const mark = offersFetchStart();
-  await fetchOffers(sessionCtx());
+  await fetchOffers(sessionCtx(), quiet);
   offersFetchDone(mark);
 }
 

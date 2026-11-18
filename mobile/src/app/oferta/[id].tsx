@@ -290,10 +290,10 @@ function OfferView({
       : state === "cancelled" && offer.cancel_reason
         ? { label: OFFER_CANCEL_REASON[offer.cancel_reason], color: OFFER_STATE.cancelled.color }
         : { label: OFFER_STATE[state].label, color: OFFER_STATE[state].color };
-  // O texto do servidor vale enquanto a oferta guardada ainda não mostra como ela fechou (a lista vem logo depois).
+  // O texto do servidor vale enquanto a oferta guardada ainda não diz como ela fechou (a lista vem logo depois).
   const situationText = answerable
     ? null
-    : problem && closedByServer && state === "pending"
+    : problem && closedByServer && offer.state === "pending"
       ? problem.message
       : situation(offer, state, mine, Boolean(next));
   const situationIcon: IconName = state === "accepted" || mine ? "checkCircle" : state === "expired" ? "hourglass" : "alert";
@@ -320,9 +320,9 @@ function OfferView({
   }
 
   function toggleScope() {
-    const next = !scopeOpen;
-    setScopeOpen(next);
-    if (next && !scopeRead) {
+    const show = !scopeOpen;
+    setScopeOpen(show);
+    if (show && !scopeRead) {
       haptic.select();
       void markOfferScopeRead(offer.id).catch(() => undefined);
     }
@@ -336,7 +336,7 @@ function OfferView({
       setProblem({ code: error.code, message: error.message });
       // Aceite sem a leitura gravada: abre de novo (o servidor grava) e o técnico tenta outra vez.
       if (error.code === "OFFER_NOT_VIEWED") onReopen();
-      void refreshOffersNow().catch(() => undefined);
+      void refreshOffersNow(offer.id).catch(() => undefined);
       return;
     }
     const offline = error instanceof ApiError && error.status === 0;
