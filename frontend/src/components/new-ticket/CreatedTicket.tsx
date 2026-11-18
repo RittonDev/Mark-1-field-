@@ -21,7 +21,10 @@ import { dayTimeLabel } from "./dayTime";
 
 export interface CreatedResult {
   ticket: TicketDetail;
-  /** O que não foi salvo depois de criar a OS (formulários): a OS existe, falta completar nela. */
+  /**
+   * O que não entrou na OS criada (etiquetas que a API não aceitou): a OS existe, falta completar nela.
+   * Os formulários vão junto com a OS (a criação inteira passa ou volta com o erro).
+   */
   problems: string[];
   /**
    * A OS ficou sem analista e quem a criou só vê a própria fila: abrir a OS e os textos dela dariam

@@ -35,9 +35,13 @@ import {
   blankDraft,
   DRAFT_VERSION,
   draftKey,
+  effectiveCategory,
   isFilled,
   locationLabel,
+  matchedForms,
   ORIGIN_KEY,
+  syncForms,
+  withCategory,
   withCustomer,
   withLocation,
   withServiceType,
@@ -333,16 +337,23 @@ function NewTicket() {
     enabled: Boolean(prefill.locationId) && (Boolean(pendingLocationId) || offerPrefill),
   });
 
-  // Pré-preenchimento: aplica a localização e o tipo de OS quando chegam (uma vez só).
+  // Pré-preenchimento: aplica a localização e o tipo de OS quando chegam (uma vez só). O tipo espera os
+  // formulários e as categorias, para já entrar com os formulários dele.
   if (pendingLocationId && (prefillLocation.data || prefillLocation.error)) {
     setPendingLocationId("");
     const loc = prefillLocation.data;
-    if (loc?.is_active) setD((x) => (x.form.location_id ? x : withLocation(x, loc, projects.data)));
+    if (loc?.is_active) setD((x) => (x.form.location_id ? x : syncForms(x, withLocation(x, loc, projects.data), templates.data, categories.data)));
   }
-  if (pendingTypeId && serviceTypes.data && !serviceTypes.isPlaceholderData && (templates.data || templates.error)) {
+  if (
+    pendingTypeId &&
+    serviceTypes.data &&
+    !serviceTypes.isPlaceholderData &&
+    (templates.data || templates.error) &&
+    (categories.data || categories.error)
+  ) {
     setPendingTypeId("");
     const type = serviceTypes.data.find((t) => t.id === pendingTypeId);
-    if (type) setD((x) => (x.serviceType ? x : withServiceType(x, type, templates.data)));
+    if (type) setD((x) => (x.serviceType ? x : syncForms(x, withServiceType(x, type), templates.data, categories.data)));
   }
 
   // Cliente com uma localização ativa só: ela entra sozinha e o passo 2 já fica pronto.
@@ -357,7 +368,11 @@ function NewTicket() {
     setOnlyFor("");
     const only = onlyLocation.data?.total === 1 ? onlyLocation.data.items[0] : null;
     if (only && d.form.customer_id === only.customer_id && !d.form.location_id) {
-      setD((x) => (x.form.customer_id === only.customer_id && !x.form.location_id ? withLocation(x, only, projects.data) : x));
+      setD((x) =>
+        x.form.customer_id === only.customer_id && !x.form.location_id
+          ? syncForms(x, withLocation(x, only, projects.data), templates.data, categories.data)
+          : x,
+      );
       setAutoLocationId(only.id);
     }
   }
