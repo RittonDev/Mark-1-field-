@@ -687,6 +687,9 @@ export function RealtimeProvider({
       } else if (type === "onboarding.submitted") {
         invalidate(["onboarding"]);
       } else if (type === "profile.changed") {
+        // O que eu mesmo mudei (Técnicos, Usuários, Pagamentos) a própria tela já atualizou: buscar de novo a
+        // base inteira de técnicos seria repetido.
+        if (event.actor_id && event.actor_id === userId) return;
         for (const key of PROFILE_KEYS) invalidate([key]);
         const fields = event.data?.fields;
         if (Array.isArray(fields) && fields.includes("pix")) invalidate(["payouts"]);
