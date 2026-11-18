@@ -435,15 +435,24 @@ async def test_self_assign_records_the_change_once(
     assert changes == [("new", "assigned", "Vou atender remoto")]
     assert [e["type"] for e in published].count("ticket.status_changed") == 1
 
-    # Com agenda: duas mudanças diferentes (Atribuído e Agendado), cada uma uma vez.
+    # Pedindo mais que "Atribuído" (OS reaberta sem técnico, atendimento remoto): as duas mudanças
+    # saem, cada uma uma vez.
     u = await create(client, world)
-    start = (datetime.now(UTC) + timedelta(days=1)).isoformat()
-    await transition(client, an, u, "scheduled", scheduled_start=start)
+    u = await transition(client, an, u, "cancelled", note="Duplicada")
+    u = await transition(client, an, u, "reopened", note="Não era duplicada")
+    await transition(client, an, u, "in_progress")
     events = (await client.get(f"{API}/tickets/{u['id']}/events", headers=an)).json()
     changes = [
         (e["from_value"], e["to_value"]) for e in events if e["event_type"] == "status_changed"
     ]
-    assert changes == [("new", "assigned"), ("assigned", "scheduled")]
+    assert sorted(changes) == sorted(
+        [
+            ("new", "cancelled"),
+            ("cancelled", "reopened"),
+            ("reopened", "assigned"),
+            ("assigned", "in_progress"),
+        ]
+    )
 
 
 async def test_technician_scope_is_restricted(client: AsyncClient, world: World) -> None:

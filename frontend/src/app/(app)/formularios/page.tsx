@@ -193,16 +193,19 @@ function FormsList({
 
   // Desativar no lugar de excluir: some da lista de anexar, e as OS que já têm o formulário não mudam.
   const toggle = useMutation({
-    // Mesmas perguntas, só a situação: a versão não muda.
-    mutationFn: (t: FormTemplate) =>
-      api.put<FormTemplate>(`/form-templates/${t.id}`, {
-        name: t.name,
-        description: t.description,
-        fields: t.fields,
-        service_type_ids: t.service_type_ids,
-        requires_signature: t.requires_signature,
+    // Mesmas perguntas, só a situação: a versão não muda. As perguntas vêm do modelo relido agora, e não da
+    // lista guardada: o que outra pessoa salvou nesse meio-tempo não volta atrás.
+    mutationFn: async (t: FormTemplate) => {
+      const current = await api.get<FormTemplate>(`/form-templates/${t.id}`);
+      return api.put<FormTemplate>(`/form-templates/${t.id}`, {
+        name: current.name,
+        description: current.description,
+        fields: current.fields,
+        service_type_ids: current.service_type_ids,
+        requires_signature: current.requires_signature,
         is_active: !t.is_active,
-      }),
+      });
+    },
     onSuccess: (saved) => {
       invalidateForms(queryClient);
       toast({

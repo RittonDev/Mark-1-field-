@@ -37,6 +37,7 @@ import { STATUS } from "@/lib/constants";
 import { downloadCsv } from "@/lib/download";
 import { dayKey, formatDate, formatDateTime, formatMoney, moneyInput, OPERATION_TZ, todayISO } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
+import { historyMonths, monthLabel } from "@/lib/months";
 import { useCan } from "@/lib/permissions";
 import {
   dayMonth,
@@ -89,14 +90,10 @@ const matches = (term: string, text: string) => term.split(/\s+/).every((word) =
 const shortDate = (iso: string) =>
   new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", timeZone: OPERATION_TZ }).format(new Date(iso));
 
-/** Últimos 24 meses ("2026-11", "Novembro de 2026"), do atual para trás. */
+/** Do mês atual até o começo do histórico ("2026-11", "Novembro de 2026"), do atual para trás. */
 function monthOptions(): { value: string; label: string }[] {
-  const [y, m] = new Intl.DateTimeFormat("en-CA", { timeZone: OPERATION_TZ }).format(new Date()).split("-").map(Number);
-  return Array.from({ length: 24 }, (_, i) => {
-    const d = new Date(Date.UTC(y, m - 1 - i, 15));
-    const label = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric", timeZone: "UTC" }).format(d);
-    return { value: d.toISOString().slice(0, 7), label: label.charAt(0).toUpperCase() + label.slice(1) };
-  });
+  const current = new Intl.DateTimeFormat("en-CA", { timeZone: OPERATION_TZ }).format(new Date()).slice(0, 7);
+  return historyMonths(current).map((value) => ({ value, label: monthLabel(value) }));
 }
 
 const OFFSET = new Intl.DateTimeFormat("en-US", { timeZone: OPERATION_TZ, timeZoneName: "longOffset" });
@@ -1053,7 +1050,7 @@ function PickTicketDialog({ onClose, onPick }: { onClose: () => void; onPick: (t
                     type="button"
                     disabled={cancelled}
                     onClick={() => onPick({ id: t.id, code: t.code, title: t.title, customer: t.customer, location: t.location })}
-                    className="flex w-full items-start justify-between gap-3 px-3 py-2.5 text-left transition-colors hover:bg-[var(--row-hover)] focus-visible:bg-[var(--row-hover)] focus-visible:outline-none disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                    className="flex w-full items-start justify-between gap-3 px-3 py-2.5 text-left transition-colors hover:bg-[var(--row-hover)] focus-visible:bg-[var(--row-hover)] focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:hover:bg-transparent"
                   >
                     <span className="min-w-0">
                       <span className="block font-mono text-xs text-ink-subtle">{t.code}</span>
@@ -1258,12 +1255,24 @@ function Catalog() {
 function ItemDialog({ item, onClose }: { item: QuoteCatalogItem | null; onClose: () => void }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const [name, setName] = useState(item?.name ?? "");
-  const [unit, setUnit] = useState(item?.unit ?? "un");
-  const [kind, setKind] = useState<QuoteItemKind>(item?.kind ?? "product");
-  const [price, setPrice] = useState(item ? moneyInput(item.price) : "");
-  const [description, setDescription] = useState(item?.description ?? "");
-  const [active, setActive] = useState(item?.is_active ?? true);
+  // Como o item abriu: Esc ou clique fora com algo mudado perguntam antes de descartar.
+  const [initial] = useState(() => ({
+    name: item?.name ?? "",
+    unit: item?.unit ?? "un",
+    kind: item?.kind ?? ("product" as QuoteItemKind),
+    price: item ? moneyInput(item.price) : "",
+    description: item?.description ?? "",
+    active: item?.is_active ?? true,
+  }));
+  const [name, setName] = useState(initial.name);
+  const [unit, setUnit] = useState(initial.unit);
+  const [kind, setKind] = useState<QuoteItemKind>(initial.kind);
+  const [price, setPrice] = useState(initial.price);
+  const [description, setDescription] = useState(initial.description);
+  const [active, setActive] = useState(initial.active);
+  const dirty =
+    JSON.stringify([name, unit, kind, price, description, active]) !==
+    JSON.stringify([initial.name, initial.unit, initial.kind, initial.price, initial.description, initial.active]);
   // Os erros aparecem depois da primeira tentativa de salvar (não enquanto a pessoa digita).
   const [tried, setTried] = useState(false);
   const priceRead = readDecimal(price, { decimals: 2, allowZero: true, emptyMessage: "Informe o preço (pode ser 0)" });
@@ -1302,6 +1311,8 @@ function ItemDialog({ item, onClose }: { item: QuoteCatalogItem | null; onClose:
     <Dialog
       open
       onClose={onClose}
+      dirty={dirty}
+      busy={save.isPending}
       title={item ? "Editar item" : "Novo item"}
       footer={
         <>

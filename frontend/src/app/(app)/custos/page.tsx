@@ -203,6 +203,9 @@ function RejectDialog({ rows, onClose, onDone }: { rows: Row[]; onClose: () => v
     <Dialog
       open
       onClose={onClose}
+      // Motivo escrito: Esc ou clique fora perguntam antes de descartar; recusando, não fecha.
+      dirty={reason.trim() !== ""}
+      busy={reject.isPending}
       title={rows.length === 1 ? "Recusar o custo?" : `Recusar ${rows.length} custos?`}
       description={
         <>

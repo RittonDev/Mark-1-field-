@@ -15,6 +15,7 @@ import { Button, Card, ErrorBox, Input, LoadingBlock, PageHeader, SectionTitle, 
 import { api, errorMessage } from "@/lib/api";
 import { downloadCsv } from "@/lib/download";
 import { formatDocument, formatMinutes, formatMoney, OPERATION_TZ } from "@/lib/format";
+import { historyMonths } from "@/lib/months";
 import { useCan } from "@/lib/permissions";
 import { useCustomers } from "@/lib/queries";
 import type { DailyReport, DayNumbers, MonthlyReport, PayoutList, ReportCountRef, ReportDayPoint, UUID } from "@/lib/types";
@@ -76,10 +77,9 @@ function shiftDay(day: string, delta: number): string {
   return new Date(Date.UTC(y, m - 1, d + delta)).toISOString().slice(0, 10);
 }
 
-/** Os últimos 24 meses, do atual para trás (e o mês escolhido, se for mais antigo que isso). */
+/** Do mês atual até o começo do histórico (e o mês escolhido, se for de fora disso). */
 function monthOptions(current: string, chosen: string): string[] {
-  const [y, m] = current.split("-").map(Number);
-  const list = Array.from({ length: 24 }, (_, i) => new Date(Date.UTC(y, m - 1 - i, 15)).toISOString().slice(0, 7));
+  const list = historyMonths(current);
   return list.includes(chosen) ? list : [...list, chosen];
 }
 

@@ -471,6 +471,23 @@ function Editor({ server, readOnly }: { server: TemplatesOut; readOnly: boolean 
       });
       if (!ok) return;
     }
+    // Relê o que está salvo antes de gravar: a tela não relê sozinha no meio da edição e o salvar troca a
+    // lista inteira, então a versão de outra pessoa sumiria sem aviso. Sem conseguir reler, o salvar tenta
+    // e mostra o erro dele.
+    const latest = await queryClient
+      .fetchQuery({ queryKey: ["message-templates"], queryFn: () => api.get<TemplatesOut>("/message-templates"), staleTime: 0 })
+      .catch(() => null);
+    if (latest && !sameTemplates(latest.templates, baseline)) {
+      setRemoteChanged(true);
+      const ok = await confirm({
+        title: "Substituir a versão salva?",
+        description: "Outra pessoa salvou os textos enquanto você editava. Se salvar agora, a versão dela será substituída.",
+        confirmLabel: "Salvar e substituir",
+        cancelLabel: "Voltar",
+        tone: "danger",
+      });
+      if (!ok) return;
+    }
     save.mutate(outgoing(items));
   };
 
