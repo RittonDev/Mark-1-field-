@@ -3,7 +3,8 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 import { CheckCheck, Copy, Download, MessageCircle, RotateCcw, Wallet } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { StatTile } from "@/components/charts";
 import { useConfirm } from "@/components/Confirm";
 import { NoAccess } from "@/components/NoAccess";
@@ -180,6 +181,15 @@ function StatePill({ line }: { line: PayoutLine }) {
  * um (OS concluídas), o que ainda vai pagar (OS abertas) e marca como pago.
  */
 export default function PayoutsPage() {
+  // useSearchParams pede um Suspense em volta.
+  return (
+    <Suspense fallback={<LoadingBlock rows={4} />}>
+      <PayoutsView />
+    </Suspense>
+  );
+}
+
+function PayoutsView() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const confirm = useConfirm();
@@ -191,7 +201,12 @@ export default function PayoutsPage() {
   const canPayExpenses = useCan("commercial.expenses", "edit");
   const months = useMemo(() => lastMonths(), []);
   const [view, setView] = useState<View>("to_pay");
-  const [month, setMonth] = useState("");
+  // ?mes=2026-11 (o "Valor dos técnicos" do relatório mensal): abre já no mês.
+  const searchParams = useSearchParams();
+  const [month, setMonth] = useState(() => {
+    const asked = searchParams.get("mes") ?? "";
+    return months.some((m) => m.value === asked) ? asked : "";
+  });
   // Guarda o nome junto: o técnico escolhido continua na lista mesmo num mês sem lançamentos dele.
   const [technician, setTechnician] = useState<{ id: UUID; name: string } | null>(null);
   const [selected, setSelected] = useState<Set<UUID>>(new Set());

@@ -690,6 +690,9 @@ function MonthlyView({
     enabled: showPayouts,
   });
   const options = useMemo(() => monthOptions(today.slice(0, 7), month), [today, month]);
+  // Os atalhos (cliente destaque, rankings) abrem as OS criadas no mês contado.
+  const monthSpan = monthDays(month);
+  const range = `created_from=${monthSpan.date_from}&created_to=${monthSpan.date_to}`;
   const data = report.data;
   const stale = report.isPlaceholderData;
   const partial = !!data && !data.closed;

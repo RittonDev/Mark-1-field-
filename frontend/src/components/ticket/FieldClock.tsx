@@ -64,7 +64,7 @@ export function fieldClockSummary(ticket: Clockable, now: number): FieldClockSum
   };
 }
 
-/** Prazo de chegada à loja (4h nas capitais): "Chegar até 14:35 · faltam 52 min" ou "Chegou 13:42 · no prazo". */
+/** Prazo de chegada à loja (Configurações › Campo): "Chegar até 14:35 · faltam 52 min" ou "Chegou 13:42 · no prazo". */
 export function ArrivalChip({ ticket, compact = false }: { ticket: Clockable; compact?: boolean }) {
   const now = useNow(30_000);
   if (!ticket.arrival_due_at && !ticket.arrived_at) return null;

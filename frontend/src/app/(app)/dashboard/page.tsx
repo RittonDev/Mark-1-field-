@@ -108,7 +108,7 @@ function TodaySoFar({ today }: { today: string }) {
             display={top?.name ?? "—"}
             compact
             hint={top ? `${intFmt(top.count)} ${top.count === 1 ? "chamado" : "chamados"} hoje` : "Nenhum chamado hoje"}
-            href={top?.id ? `/chamados?customer_id=${top.id}` : undefined}
+            href={top?.id ? `/chamados?customer_id=${top.id}&created_from=${today}&created_to=${today}` : undefined}
           />
         </div>
       ) : report.error ? (
