@@ -580,7 +580,7 @@ export default function TechnicianSignupPage() {
       window.scrollTo({ top: 0 });
     } catch (error) {
       if (error instanceof ApiError && error.status === 410) {
-        // O rascunho continua salvo: com um link novo, a ficha volta preenchida.
+        // O rascunho continua salvo: com um link novo, a ficha oferece continuar de onde parou.
         saveDraft(form, step, token);
         setExpiredWhileFilling(true);
         setCheck("invalid");
