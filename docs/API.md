@@ -138,8 +138,24 @@ Equivale ao "Tipo de OS" do Field Control. Sem `customer_id`, o tipo vale para t
 - `POST /tickets` `TicketCreate` → `TicketDetail` (201). `tags: [{name, color}] | null` (até 20): sem informar (ou `null`),
   a OS nasce com as etiquetas automáticas da abertura (`on_project` com `project_id`, senão `on_create`); uma lista, mesmo
   vazia, vale como está (a web manda a que o analista vê, já preenchida pelas regras).
+  `forms: [{template_id, required}] | null` (até 20): os formulários, gravados junto com a OS.
+  - Omitido ou `null`: entram os ligados ao tipo de OS e à categoria ([Formulários](#módulos-de-operação-2026-11)), como
+    obrigatórios ou opcionais pelo `default_required` de cada modelo, sem autor no histórico e com o motivo.
+  - Uma lista, mesmo vazia: exatamente ela, na ordem (a Nova OS manda a que o analista vê). Os ligados que ficaram de fora
+    vão para `created.data.forms_left_out` e não entram sozinhos depois.
+  - 422 "Formulário repetido na lista", "Modelo de formulário não encontrado" ou "Modelo de formulário inativo: {nome}"
+    antes de gravar: a OS recusada não gasta número. O portal não usa (a solicitação nasce sem tipo e sem categoria).
 - `GET /tickets/{id}` → `TicketDetail`
-- `PATCH /tickets/{id}` `TicketUpdate` → `TicketDetail`
+- `PATCH /tickets/{id}` `TicketUpdate` → `TicketDetail`. Efeitos da troca do tipo de OS (`service_type_id`):
+  - a categoria acompanha: vazia, ou a padrão do tipo anterior, passa a ser a padrão do novo (`null` se ele não tem). A
+    escolhida à mão fica, `category_id` no mesmo corpo vence e tirar o tipo não mexe na categoria;
+  - antes da visita (`new`, `triage`, `assigned`, `scheduled` ou `en_route`, sem chegada), trocar o tipo ou a categoria
+    reconcilia os formulários: entram os ligados que faltam, menos os que uma pessoa tirou da OS (`form_removed` com autor)
+    ou deixou de fora na abertura; saem só os que entraram sozinhos (`auto_attached`), não casam mais e ninguém começou
+    (pendente, sem resposta e sem foto), com `note` "Saiu com a troca do tipo de OS" (ou "da categoria", ou "do tipo de OS
+    e da categoria"). Posto à mão ou respondido nunca sai. A exigência de assinatura acompanha e entra no `changes` do
+    `updated`; o `ticket.updated` leva `"forms"` em `fields` quando algum formulário entrou ou saiu. Depois da chegada, em
+    OS pausada, reaberta, concluída ou cancelada, nada muda sozinho.
 - `POST /tickets/{id}/assign` `{assignee_id|null, team_id?, note?, expected_version?}` → `TicketDetail`
 - `POST /tickets/{id}/take` → `TicketDetail` (atribui ao usuário logado); se a OS não tem analista responsável, ele passa a ser
 - `POST /tickets/{id}/claim` → `TicketDetail` (puxa para a fila do usuário logado: vira o `owner`; o técnico não muda)
@@ -324,6 +340,39 @@ Todos exigem analista ou gestor, salvo indicação. Valores em R$ chegam como n�
   `POST /tickets/{id}/signature` (multipart `file`, `signer_name`, `signer_role?`, `latitude?`, `longitude?`).
   `TicketDetail.forms`, `signature_required`, `signer_*`, `signed_at`. Concluir a OS (resolved/closed) devolve 422 sem os
   obrigatórios ou sem a assinatura exigida. Sync offline: operação `form_answers {form_id, answers, complete}`.
+  - **Entram sozinhos** (2026-11-18). O modelo ativo entra na OS cujo tipo de OS está em `service_type_ids` ou cuja
+    categoria, ou qualquer uma acima dela (até 10 níveis), está em `category_ids`: ligar à categoria-mãe vale para as
+    subcategorias, e tipo e categoria somam. Entra como obrigatório ou opcional pelo `default_required` (padrão `true`); o
+    obrigatório que pede assinatura liga `signature_required`. Quando: na abertura sem lista (`POST /tickets` sem `forms`),
+    na troca do tipo ou da categoria antes da visita (`PATCH /tickets/{id}`) e com "Levar também às OS que ainda não
+    começaram" no modelo. Os eventos `form_added` desses vêm sem autor ("Sistema"), com `note` 'Pelo tipo de OS “{nome}”'
+    ou 'Pela categoria “{nome completo}”' e `data {form_id, template_id, required, auto}`; `form_removed` leva
+    `data.template_id`. Modelo desativado não entra mais e as OS que já têm o formulário continuam com ele.
+  - `FormTemplate` ganha `category_ids: uuid[]` (as categorias ligadas; id de categoria apagada é ignorado) e
+    `default_required`. No POST, omitidos valem `[]` e `true`; no PUT, omitidos (ou `null`) mantêm o que o modelo tem.
+  - `POST /form-templates?apply_to_pending=true` e `PUT /form-templates/{id}?apply_to_pending=true`: além do `applied_to`
+    (PUT: a versão nova nas cópias que ninguém começou), os vínculos valem nas OS antes da visita: `attached_to` (em
+    quantas o formulário entrou: casam e não o têm, menos onde uma pessoa tirou ou deixou de fora na abertura) e
+    `detached_from` (de quantas saiu: entrou sozinho, não casa mais e ninguém começou; `note` "O modelo não está mais
+    ligado ao tipo nem à categoria desta OS"). Sem a opção, os três vêm `null`. Cada OS alterada ganha o histórico e um
+    `ticket.updated` `{fields: ["forms"]}`. Salvar só os vínculos (ou o padrão de obrigatório) não sobe a `version`.
+  - `GET /form-templates/{id}/usage` (Formulários, ver) → `{service_types: [{id, name, customer: {id, name}|null, used,
+    total}]}`: os tipos de OS ativos em que o modelo está em pelo menos 3 OS e em pelo menos metade das OS do tipo, nos
+    últimos 12 meses (OS não canceladas), os 10 mais usados. Serve para ligar os modelos migrados, que chegam sem vínculo.
+  - `GET /tickets/{id}/forms/suggestions`: os modelos ativos ligados ao tipo e à categoria da OS (com as de cima) que ainda
+    não estão nela.
+  - `TicketFormOut` ganha `auto_attached` (entrou sozinho) e `prefill`.
+  - **Resposta automática:** `FormField.prefill` (`null` ou omitido: a pergunta é do técnico) liga a pergunta a um dado da
+    OS que o técnico já vê: `location_name`, `location_code`, `customer`, `address` (o endereço do atendimento; sem ele,
+    "rua, bairro, cidade-UF" da loja), `city` ("cidade-UF"), `ticket_code` (OS-000123), `technician`, `service_type` e
+    `visit_date` (o dia local da chegada; sem ela, o da visita agendada). Texto e texto longo aceitam todas; data, só
+    `visit_date` (combinação inválida volta `null`). O modelo grava `prefill` só quando preenchido.
+    `GET /form-templates/catalog` traz `prefill_sources: [{key, label, types}]`.
+  - `TicketFormOut.prefill` = `{campo: valor}` das perguntas com fonte e ainda sem resposta (valor vazio não entra), ao
+    vivo enquanto o formulário não está concluído (vem em `TicketDetail.forms`, no sync e nas rotas do formulário). A
+    conclusão grava o valor nas respostas antes de conferir os obrigatórios (sem chegada nem agenda, a data é a de hoje);
+    depois disso, trocar o técnico ou remarcar não muda nada e `prefill` vem `{}`. O técnico pode corrigir: o app trata
+    `{...prefill, ...answers}` como a resposta do servidor e manda tudo ao salvar.
 - **Custos extras:** `GET|POST /tickets/{id}/expenses` (técnico só lê; solicitante recebe vazio) · `PATCH|DELETE /expenses/{id}` ·
   `GET /expenses?start&end&technician_id&status&customer_id` (relatório) · `POST /expenses/mark-paid {ids}` → `{updated}`
   (marca como reembolsados só os aprovados; os demais ids são ignorados, sem erro, e não entram em `updated`) ·
@@ -1336,7 +1385,7 @@ V = Visualizar, E = Editar; "a \| b" = basta uma das telas.
 | `analysis.dashboard` | V: `GET /dashboard/summary` |
 | `analysis.dashboard` \| `analysis.reports` | V: `GET /reports/sla-violations`, `GET /reports/daily` |
 | `analysis.reports` | V: `GET /reports/monthly` |
-| `setup.forms` | V: `GET /form-templates/catalog`, `/form-templates/{id}`. E: `POST /form-templates`, `PUT /form-templates/{id}` |
+| `setup.forms` | V: `GET /form-templates/catalog`, `/form-templates/{id}`, `/form-templates/{id}/usage`. E: `POST /form-templates`, `PUT /form-templates/{id}` |
 | `setup.messages` | V: `GET /message-templates`. E: `PUT /message-templates`, `POST /message-templates/reset` |
 | `setup.service_types` | E: `POST /service-types`, `PATCH /service-types/{id}`, `POST /service-types/{id}/apply-observed` |
 | `setup.users` | V: `GET /access/profiles`. E: `POST /users`, `PATCH /users/{id}` (admin e supervisor), `POST`/`PATCH /teams` |
