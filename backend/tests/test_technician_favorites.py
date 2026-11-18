@@ -9,7 +9,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from httpx import AsyncClient
-from sqlalchemy import delete, func, select
+from sqlalchemy import Select, delete, func, or_, select, union_all
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from app.core.config import settings
@@ -20,7 +20,7 @@ from app.models import Location, TechnicianFavorite, Ticket, TicketWorklog, User
 from app.models.technician_favorite import FavoriteKind
 from app.models.ticket import ticket_helpers
 from app.services import technician_favorites as favorites_svc
-from app.services import validation_messages
+from app.services import technician_regions, validation_messages
 from app.services.technician_favorites import Visit, rank_city
 from tests.conftest import World, requires_db
 
@@ -677,3 +677,107 @@ async def test_one_city_reads_only_its_stores_with_the_same_result(
 
 def _by_user(visit: Visit) -> str:
     return str(visit.user_id)
+
+
+def _footprint_before(since: datetime, until: datetime | None = None) -> Select:
+    """O footprint de antes (o corte de `since` só depois de juntar): a referência do resultado."""
+    visit_at = func.coalesce(
+        Ticket.arrived_at, Ticket.resolved_at, Ticket.scheduled_start, Ticket.created_at
+    )
+    visited = (
+        Ticket.location_id.is_not(None),
+        Ticket.status != TicketStatus.CANCELLED,
+        or_(
+            Ticket.arrived_at.is_not(None),
+            Ticket.status.in_((TicketStatus.RESOLVED, TicketStatus.CLOSED)),
+        ),
+    )
+    assigned = select(
+        Ticket.assignee_id.label("user_id"),
+        Ticket.id.label("ticket_id"),
+        Ticket.location_id.label("location_id"),
+        visit_at.label("at"),
+    ).where(Ticket.assignee_id.is_not(None), *visited)
+    helped = (
+        select(ticket_helpers.c.user_id, Ticket.id, Ticket.location_id, visit_at)
+        .join(Ticket, Ticket.id == ticket_helpers.c.ticket_id)
+        .where(*visited)
+    )
+    worked = (
+        select(
+            TicketWorklog.user_id,
+            TicketWorklog.ticket_id,
+            Ticket.location_id,
+            TicketWorklog.started_at,
+        )
+        .join(Ticket, Ticket.id == TicketWorklog.ticket_id)
+        .where(TicketWorklog.user_id.is_not(None), Ticket.location_id.is_not(None))
+    )
+    both = union_all(assigned, helped, worked).subquery()
+    pairs = (
+        select(both.c.user_id, both.c.ticket_id, both.c.location_id, func.max(both.c.at).label("at"))
+        .group_by(both.c.user_id, both.c.ticket_id, both.c.location_id)
+        .subquery()
+    )
+    conds = [pairs.c.at >= since]
+    if until is not None:
+        conds.append(pairs.c.at <= until)
+    return select(pairs).where(*conds)
+
+
+@requires_db
+async def test_footprint_cuts_the_window_early_with_the_same_visits(
+    engine: AsyncEngine, world: World
+) -> None:
+    """O footprint corta a janela em cada linha antes de juntar (e, para uma cidade, só as lojas
+    dela): as mesmas visitas, com a mesma data, da conta de antes. Inclusive quando as linhas de um
+    técnico na mesma OS ficam dos dois lados do começo da janela."""
+    ids = await _seed(engine, world)
+    now = utcnow()
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as db:
+        centro = uuid.UUID(ids["centro"])
+        tech = uuid.UUID(ids["E"])
+        # Chegada há 400 dias e apontamento há 10; chegada há 10 dias e apontamento há 400.
+        for arrived, logged in ((400, 10), (10, 400)):
+            at = now - timedelta(days=arrived)
+            item = Ticket(
+                title="Visita",
+                status=TicketStatus.CLOSED,
+                customer_id=uuid.UUID(world.customer_id),
+                location_id=centro,
+                assignee_id=tech,
+                arrived_at=at,
+                resolved_at=at,
+                created_at=at,
+                updated_at=at,
+            )
+            db.add(item)
+            await db.flush()
+            start = now - timedelta(days=logged)
+            db.add(
+                TicketWorklog(
+                    ticket_id=item.id,
+                    user_id=tech,
+                    description="Apontamento",
+                    started_at=start,
+                    ended_at=start + timedelta(minutes=30),
+                    minutes=30,
+                )
+            )
+        await db.commit()
+
+    window = now - timedelta(days=365)
+    santos = select(Location.id).where(Location.city.in_(("Santos", "SANTOS")))
+    async with maker() as db:
+        stores = set(await db.scalars(santos))
+        for until in (None, now):
+            before = set((await db.execute(_footprint_before(window, until))).all())
+            fp = technician_regions.footprint(window, until=until)
+            assert set((await db.execute(select(fp))).all()) == before
+            only = technician_regions.footprint(window, until=until, location_ids=santos)
+            in_santos = {row for row in before if row.location_id in stores}
+            assert set((await db.execute(select(only))).all()) == in_santos
+            # As duas OS novas entram, cada uma com a data de dentro da janela.
+            mine = [r.at for r in before if r.user_id == tech and r.location_id == centro]
+            assert mine == [now - timedelta(days=10)] * 2
