@@ -132,7 +132,7 @@ function offerClosedLabel(event: TicketEvent): string {
   return (reason && OFFER_CLOSED[reason as OfferCancelReason]) || EVENT_TYPE.offer_cancelled;
 }
 
-/** Técnicos das ofertas do evento, sem repetir (offer_sent e offer_cancelled trazem a lista). */
+/** Técnicos (e o valor de cada um) das ofertas do evento: o offer_sent e o offer_cancelled trazem a lista. */
 function offerPeople(value: unknown): { name: string; amount: string | null }[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {

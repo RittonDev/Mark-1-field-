@@ -1,19 +1,22 @@
 "use client";
 
-import { CircleCheckBig, Copy, CopyPlus, Link2, List, MessageCircle, PanelRightOpen, Plus, TriangleAlert } from "lucide-react";
+import { CircleCheckBig, Copy, CopyPlus, Link2, List, MessageCircle, PanelRightOpen, Plus, Send, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { PriorityBadge } from "@/components/badges";
+import { isOpenStatus } from "@/components/operacao/hooks";
 import { TagChips } from "@/components/TagChips";
 import { useToast } from "@/components/Toaster";
 import { CopyGroupTextButton, GroupTextsMenu } from "@/components/ticket/MessagesPanel";
+import { OfferDialog, OfferSentNote } from "@/components/ticket/OffersCard";
 import { useTicketPanel } from "@/components/ticket/TicketPanel";
 import { WhatsAppShare } from "@/components/ticket/WhatsAppShare";
 import { Button, buttonClassName, Card } from "@/components/ui";
 import { useNow } from "@/components/useNow";
+import { useCan } from "@/lib/permissions";
 import { copyText } from "@/lib/whatsapp";
-import type { TicketDetail } from "@/lib/types";
+import type { TicketDetail, TicketOffer } from "@/lib/types";
 import { dayTimeLabel } from "./dayTime";
 
 export interface CreatedResult {
@@ -29,9 +32,9 @@ export interface CreatedResult {
 
 /**
  * Depois de criar a OS: o resumo e o que o analista faz em seguida (abrir a OS no painel, copiar o
- * texto "Atividade confirmada" para o grupo do cliente no WhatsApp, mandar o resumo aos técnicos ou já
- * criar a próxima). Os textos do grupo são sempre os modelos de Textos do WhatsApp (os que a gestão
- * edita), nunca um texto fixo daqui.
+ * texto "Atividade confirmada" para o grupo do cliente no WhatsApp, mandar o resumo aos técnicos, ofertar
+ * a OS sem técnico com preço ou já criar a próxima). Os textos do grupo do cliente são sempre os modelos de
+ * Textos do WhatsApp (os que a gestão edita), nunca um texto fixo daqui.
  */
 export function CreatedTicket({
   result,
@@ -48,6 +51,10 @@ export function CreatedTicket({
   const { toast } = useToast();
   const now = useNow(60_000);
   const [sharing, setSharing] = useState(false);
+  const [offering, setOffering] = useState(false);
+  // O último envio de oferta feito daqui (o resumo diz para quem foi e oferece o texto para o grupo).
+  const [offered, setOffered] = useState<TicketOffer[] | null>(null);
+  const canOfferEdit = useCan("commercial.payouts", "edit");
   const titleRef = useRef<HTMLHeadingElement>(null);
 
   // O foco vai para o título: quem usa leitor de tela ouve que a OS foi criada.
@@ -64,11 +71,21 @@ export function CreatedTicket({
   const town = t.location?.city ? `${t.location.city}${t.location.state ? `/${t.location.state}` : ""}` : null;
   // "Atividade confirmada" só faz sentido com o técnico e o horário combinados.
   const confirmed = Boolean(t.assignee && t.scheduled_start);
+  // OS sem técnico e em aberto: a central pode mandá-la com o preço para os técnicos aceitarem no app
+  // (Pagamentos em Editar). Saiu da fila de quem criou: a API recusaria (OS de outra fila).
+  const canOffer = canOfferEdit && t.can_assign && !t.assignee && isOpenStatus(t.status) && !result.hidden;
   const rows: [string, React.ReactNode][] = [
     ["Cliente e localização", [t.customer?.name, store, town].filter(Boolean).join(" · ") || "—"],
     ["Tipo de OS", t.service_type?.name ?? "—"],
     ["Agendamento", t.scheduled_start ? dayTimeLabel(t.scheduled_start, now) : "Sem agendamento: fica na fila para agendar"],
-    ["Colaborador", t.assignee ? `${t.assignee.name}${t.helpers?.length ? ` + ${t.helpers.length} junto` : ""}` : "Sem colaborador: fica na fila"],
+    [
+      "Colaborador",
+      t.assignee
+        ? `${t.assignee.name}${t.helpers?.length ? ` + ${t.helpers.length} junto` : ""}`
+        : offered?.length
+          ? "Sem colaborador: oferta enviada, aguardando o aceite pelo app"
+          : "Sem colaborador: fica na fila",
+    ],
     ["Etiquetas", t.tags?.length ? <TagChips key="etiquetas" tags={t.tags} max={10} /> : "Sem etiquetas"],
     ["Analista", t.owner?.name ?? "Sem analista"],
     [
@@ -158,8 +175,15 @@ export function CreatedTicket({
                 <MessageCircle aria-hidden className="size-4" />
                 Resumo para os técnicos
               </Button>
+              {canOffer ? (
+                <Button onClick={() => setOffering(true)}>
+                  <Send aria-hidden className="size-4" />
+                  Ofertar com preço
+                </Button>
+              ) : null}
             </div>
           )}
+          {offered?.length && !result.hidden ? <OfferSentNote ticket={t} offers={offered} /> : null}
           <div className="flex flex-wrap gap-2">
             <Button variant="ghost" onClick={onNew}>
               <Plus aria-hidden className="size-4" />
@@ -180,6 +204,9 @@ export function CreatedTicket({
       </Card>
       {/* Fora de qualquer formulário: o Ctrl+Enter do texto não pode reenviar nada. */}
       {sharing && !result.hidden ? <WhatsAppShare ticket={t} onClose={() => setSharing(false)} /> : null}
+      {offering && canOffer ? (
+        <OfferDialog ticket={t} onClose={() => setOffering(false)} onSent={setOffered} />
+      ) : null}
     </div>
   );
 }

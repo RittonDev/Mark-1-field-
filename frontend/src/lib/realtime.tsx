@@ -10,7 +10,7 @@ import { STATUS } from "./constants";
 import { formatMoney, todayISO } from "./format";
 import { accessOf, can } from "./permissions";
 import { sessionStore } from "./session";
-import type { AccessItemKey, LiveTechnician, RealtimeEvent, TicketStatus, TrackingHistory, UUID } from "./types";
+import type { AccessItemKey, LiveTechnician, OfferRealtimeData, RealtimeEvent, TicketStatus, TrackingHistory, UUID } from "./types";
 import { copyText, GROUP_TEXT_COPIED, type GroupText, groupShareUrl, groupTextsQuery } from "./whatsapp";
 
 export type ConnectionState = "connecting" | "online" | "offline";
@@ -121,6 +121,24 @@ function sessionCan(item: AccessItemKey): boolean {
 }
 
 /**
+ * Aviso da oferta com preço (ticket.updated com `fields: ["offers"]`): o técnico aceitou (a OS passou a
+ * ser dele) ou recusou (com o motivo, se deu). O evento não leva o valor. `mine`: a OS é da minha fila
+ * (ou sem analista) e quem respondeu foi outra pessoa.
+ */
+function offerNotice(event: RealtimeEvent, mine: boolean): NoticeDraft | null {
+  const raw = event.data?.offer;
+  const offer = raw && typeof raw === "object" ? (raw as Partial<OfferRealtimeData["offer"]>) : null;
+  if (!mine || !offer || (offer.action !== "accepted" && offer.action !== "declined")) return null;
+  const code = event.ticket_code ?? "OS";
+  const who = text(offer.technician_name) ?? text(event.actor_name) ?? "O técnico";
+  if (offer.action === "accepted") {
+    return { ticketId: event.ticket_id, code, title: `${code}: ${who} aceitou a oferta`, description: "Assumiu a OS pelo app.", tone: "success" };
+  }
+  const reason = text(offer.reason);
+  return { ticketId: event.ticket_id, code, title: `${code}: ${who} recusou a oferta`, description: reason ? `Motivo: ${reason}` : undefined };
+}
+
+/**
  * Curadoria: só vira aviso o que alguém da central precisa ver. Salvar formulário, foto, assinatura,
  * apontamento, troca de técnico e o que o Sistema faz sozinho (fechamento automático) só atualizam a tela.
  * Quando o evento diz quem é o analista responsável, status e acompanhamento avisam só ele (a OS dos
@@ -169,8 +187,11 @@ function noticeFor(event: RealtimeEvent, userId: string): NoticeDraft | null {
       if (!byOther || othersTicket || data.internal === true) return null;
       return { ticketId, code, title: `Novo acompanhamento em ${code}${by}`, description: text(data.preview) };
     case "ticket.updated": {
-      // Só a OS que outra pessoa passou para a minha fila (o analista responsável).
       const fields = Array.isArray(data.fields) ? data.fields : [];
+      // Oferta com preço: o técnico aceitou ou recusou (o envio, a leitura e o cancelamento só atualizam a
+      // tela). Avisa o analista da OS (sem analista, a central toda), sem o valor (é de Pagamentos).
+      if (fields.includes("offers")) return offerNotice(event, byOther && !othersTicket);
+      // Só a OS que outra pessoa passou para a minha fila (o analista responsável).
       if (!byOther || !fields.includes("owner_id")) return null;
       const me = sessionStore.get()?.user;
       const mine = data.to_id ? data.to_id === userId : !!me?.name && data.to_name === me.name;
@@ -229,6 +250,9 @@ const EXTRA_BY_FIELD: Record<string, string[]> = {
   forms: [],
   signature: [],
   owner_id: [],
+  // Oferta com preço: só a própria OS (a lista de ofertas e o contador ficam sob ["ticket", id]). O aceite
+  // vem também como ticket.assigned, que já recarrega Pagamentos e Técnicos.
+  offers: [],
 };
 
 function extraKeysFor(event: RealtimeEvent): string[] {
