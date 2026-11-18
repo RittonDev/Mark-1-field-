@@ -71,7 +71,7 @@ from app.models import (
     User,
     ViolationReason,
 )
-from app.schemas.forms import FormField
+from app.schemas.forms import FormField, field_dump
 from app.schemas.records import dedupe_contacts, primary_contact
 from app.services import access as access_svc
 from app.services import cities, client_report, geo, technician_regions
@@ -493,12 +493,12 @@ def question_to_field(q: dict[str, Any], used: set[str], position: int) -> dict[
     else:  # short-answer, checkboxes, hour, date, email, phone...
         data["type"] = "text"
     try:
-        return FormField.model_validate(data).model_dump()
+        return field_dump(FormField.model_validate(data))
     except ValidationError:
         data.update(type="text", options=[])
         data.pop("min_photos", None)
         data.pop("max_photos", None)
-        return FormField.model_validate(data).model_dump()
+        return field_dump(FormField.model_validate(data))
 
 
 # ------------------------------------------------------------------------------------ status

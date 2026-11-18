@@ -6,12 +6,14 @@ from sqlalchemy import select
 
 from app.api.deps import DB, CurrentUser, TicketManagerUser, access_user
 from app.api.routes.tickets import _attachment_out, _detail
-from app.models import FormTemplate, TicketAttachment
+from app.core.enums import FormStatus
+from app.models import FormTemplate, Ticket, TicketAttachment, TicketForm
 from app.schemas.forms import (
     FormCatalog,
     FormTemplateIn,
     FormTemplateOut,
     FormTemplateUpdate,
+    FormTemplateUsage,
     TicketFormAdd,
     TicketFormAnswers,
     TicketFormOut,
@@ -22,6 +24,7 @@ from app.schemas.ticket import AttachmentOut, TicketDetail
 from app.services import forms as svc
 from app.services import tickets as tickets_svc
 from app.services.errors import NotFound
+from app.services.form_prefill import prefill_for
 from app.services.realtime import commit_and_publish
 
 router = APIRouter(tags=["forms"])
@@ -29,6 +32,14 @@ router = APIRouter(tags=["forms"])
 # Tela de Formulários (a lista de modelos fica com toda a gestão: a Nova OS e a OS usam).
 FormsView = access_user("setup.forms")
 FormsEdit = access_user("setup.forms", level="edit")
+
+
+def _form_out(ticket: Ticket, form: TicketForm) -> TicketFormOut:
+    """O formulário da OS com a resposta automática (ao vivo até a conclusão)."""
+    out = TicketFormOut.model_validate(form)
+    if out.status != FormStatus.COMPLETED:
+        out.prefill = prefill_for(ticket, out.fields, out.answers)
+    return out
 
 
 # ------------------------------------------------------------------ modelos
@@ -50,15 +61,32 @@ async def list_templates(
 
 
 @router.post("/form-templates", response_model=FormTemplateOut, status_code=status.HTTP_201_CREATED)
-async def create_template(body: FormTemplateIn, db: DB, user: FormsEdit) -> FormTemplate:
+async def create_template(
+    body: FormTemplateIn, db: DB, user: FormsEdit, apply_to_pending: bool = False
+) -> FormTemplateOut:
+    """Cria o modelo. Com `apply_to_pending`, ele já entra nas OS que ainda não começaram e casam
+    com os tipos de OS e as categorias dele (`attached_to` diz em quantas)."""
     template = await svc.create_template(db, body, user)
-    await db.commit()
-    return template
+    attached = None
+    if apply_to_pending:
+        attached, _ = await svc.reconcile_template(db, template, user)
+    await commit_and_publish(db)
+    out = FormTemplateOut.model_validate(template)
+    out.attached_to = attached
+    return out
 
 
 @router.get("/form-templates/{template_id}", response_model=FormTemplateOut)
 async def get_template(template_id: uuid.UUID, db: DB, _: FormsView) -> FormTemplate:
     return await svc.get_template(db, template_id)
+
+
+@router.get("/form-templates/{template_id}/usage", response_model=FormTemplateUsage)
+async def template_usage(template_id: uuid.UUID, db: DB, _: FormsView) -> FormTemplateUsage:
+    """Tipos de OS em que o modelo já é usado (12 meses, OS não canceladas): pelo menos 3 OS e
+    pelo menos metade das OS do tipo, os 10 mais usados. Para ligar com um clique."""
+    template = await svc.get_template(db, template_id)
+    return FormTemplateUsage(service_types=await svc.usage(db, template))
 
 
 FORM_CHANGED = (
@@ -72,12 +100,15 @@ async def update_template(
     template_id: uuid.UUID,
     body: FormTemplateUpdate,
     db: DB,
-    _: FormsEdit,
+    user: FormsEdit,
     apply_to_pending: bool = False,
 ) -> FormTemplateOut:
     """Salva o modelo. Com `apply_to_pending`, a correção chega também às OS em que o formulário
-    ainda não começou (`applied_to` diz quantas). Com `base_updated_at` (a versão de onde a tela
-    partiu), uma gravação de outra pessoa feita depois dela dá 409, em vez de ser desfeita."""
+    ainda não começou (`applied_to` diz quantas) e os vínculos valem nas OS que ainda não
+    começaram: o formulário entra onde passou a casar (`attached_to`) e sai de onde entrou sozinho
+    e não casa mais, sem resposta (`detached_from`). Com `base_updated_at` (a versão de onde a
+    tela partiu), uma gravação de outra pessoa feita depois dela dá 409, em vez de ser desfeita.
+    `category_ids` e `default_required` omitidos mantêm o que o modelo tem."""
     template = await svc.get_template(db, template_id)
     if body.base_updated_at is not None:
         # Trava a linha: duas gravações que partiram da mesma versão não passam as duas.
@@ -85,10 +116,13 @@ async def update_template(
         if template.updated_at != body.base_updated_at:
             raise HTTPException(status.HTTP_409_CONFLICT, FORM_CHANGED)
     template = await svc.update_template(db, template, body)
-    applied = await svc.apply_to_pending(db, template) if apply_to_pending else None
-    await db.commit()
+    applied = attached = detached = None
+    if apply_to_pending:
+        applied = await svc.apply_to_pending(db, template)
+        attached, detached = await svc.reconcile_template(db, template, user)
+    await commit_and_publish(db)
     out = FormTemplateOut.model_validate(template)
-    out.applied_to = applied
+    out.applied_to, out.attached_to, out.detached_from = applied, attached, detached
     return out
 
 
@@ -97,7 +131,8 @@ async def update_template(
 
 @router.get("/tickets/{ticket_id}/forms/suggestions", response_model=list[FormTemplateOut])
 async def suggestions(ticket_id: uuid.UUID, db: DB, user: TicketManagerUser) -> list[FormTemplate]:
-    """Modelos ligados ao tipo de serviço da OS (a gestão decide se anexa)."""
+    """Modelos ligados ao tipo de OS e à categoria da OS (ou a uma categoria acima dela) que
+    ainda não estão nela."""
     ticket = await tickets_svc.get_visible_ticket(db, user, ticket_id)
     return await svc.suggestions(db, ticket)
 
@@ -111,7 +146,7 @@ async def add_form(
     ticket = await tickets_svc.get_visible_ticket(db, user, ticket_id)
     form = await svc.add_to_ticket(db, ticket, body, user)
     await commit_and_publish(db)
-    return TicketFormOut.model_validate(form)
+    return _form_out(ticket, form)
 
 
 @router.patch("/tickets/{ticket_id}/forms/{form_id}", response_model=TicketFormOut)
@@ -127,7 +162,7 @@ async def update_form(
         db, ticket, await svc.get_ticket_form(db, ticket, form_id), body.required, user
     )
     await commit_and_publish(db)
-    return TicketFormOut.model_validate(form)
+    return _form_out(ticket, form)
 
 
 @router.delete("/tickets/{ticket_id}/forms/{form_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -154,7 +189,7 @@ async def save_answers(
     if body.complete:
         await svc.complete(db, ticket, form, user)
         await commit_and_publish(db)
-    return TicketFormOut.model_validate(form)
+    return _form_out(ticket, form)
 
 
 @router.post(
