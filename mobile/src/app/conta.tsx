@@ -3,6 +3,7 @@ import { router } from "expo-router";
 import { useState } from "react";
 import { Alert, Platform, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { BackgroundSyncRow, NotificationsCard } from "../components/NotificationsCard";
 import { Text } from "../components/Text";
 import { Badge, Button, Card, EmptyState, InfoRow, SectionTitle, Segmented } from "../components/ui";
 import {
@@ -22,6 +23,7 @@ import { APP_VERSION } from "../lib/config";
 import { confirmAction } from "../lib/dialogs";
 import { ROLE } from "../lib/constants";
 import { countPending, dismissNotice, listNotices, listPendingOps, type PendingOp } from "../lib/db";
+import type { DeviceRegistration } from "../lib/device";
 import { formatDateTime, formatTime } from "../lib/format";
 import { canEditServer, useSession } from "../lib/session";
 import { describeOp, discardOp, isOnline, requestSync, resetCursor, useSyncStatus, type SyncStatus } from "../lib/sync";
@@ -42,6 +44,23 @@ function networkLabel(s: SyncStatus): string {
 }
 
 const REALTIME_LABEL = { off: "Desligada", connecting: "Conectando…", online: "Ativa" } as const;
+
+/** Push da central neste aparelho (as notificações locais, lembretes e avisos, ficam no cartão Notificações). */
+function pushLabel(registration: DeviceRegistration | null): string {
+  if (!registration) return "Verificando…";
+  switch (registration.state) {
+    case "registered":
+      return registration.push === "live" ? "Ativo neste aparelho" : "Ainda não ligado na central";
+    case "unsupported":
+      return "Indisponível nesta versão do app";
+    case "blocked":
+      return "Bloqueado nas notificações do celular";
+    case "undetermined":
+      return "Notificações ainda não permitidas";
+    case "error":
+      return "Não foi possível ativar agora";
+  }
+}
 
 const itemsLabel = (n: number) => (n === 1 ? "1 item não enviado" : `${n} itens não enviados`);
 
@@ -229,6 +248,7 @@ export default function AccountScreen() {
         <InfoRow label="Última sincronização" value={sync.lastSyncAt ? formatDateTime(sync.lastSyncAt) : "Ainda não sincronizado"} />
         <InfoRow label="Ações para enviar" value={String(sync.pendingOps)} />
         <InfoRow label="Fotos e assinaturas para enviar" value={String(sync.pendingPhotos)} />
+        <BackgroundSyncRow />
         {sync.lastError ? <InfoRow label="Último erro" value={sync.lastError} /> : null}
         <View style={styles.buttons}>
           <Button
@@ -344,6 +364,8 @@ export default function AccountScreen() {
         ) : null}
       </Card>
 
+      <NotificationsCard />
+
       <Card style={{ gap: 10 }}>
         <SectionTitle accent>Aparência</SectionTitle>
         <Segmented<ThemePreference>
@@ -360,16 +382,7 @@ export default function AccountScreen() {
 
       <Card style={{ gap: 4 }}>
         <SectionTitle accent>Aparelho</SectionTitle>
-        <InfoRow
-          label="Notificações"
-          value={
-            registration === null
-              ? "Verificando…"
-              : registration.state === "registered"
-                ? "Ativas neste aparelho"
-                : registration.message
-          }
-        />
+        <InfoRow label="Push da central" value={pushLabel(registration)} />
         {canEditServer ? <InfoRow label="Servidor" value={apiUrl} /> : null}
         <InfoRow label="Versão do app" value={APP_VERSION} />
       </Card>

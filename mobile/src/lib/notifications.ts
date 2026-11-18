@@ -369,7 +369,7 @@ export async function presentNews(items: readonly NewsItem[]): Promise<boolean> 
   try {
     if (!(await N.getPermissionsAsync()).granted) return false;
     for (const item of items) {
-      for (const id of item.replaces ?? []) await N.dismissNotificationAsync(id).catch(() => undefined);
+      if (item.replaces?.length) await dismissNews(item.replaces);
       const data: Record<string, unknown> = { kind: "news" };
       if (item.ticketId) data.ticketId = item.ticketId;
       if (item.offerId) data.offerId = item.offerId;
