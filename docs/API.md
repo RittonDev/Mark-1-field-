@@ -982,12 +982,14 @@ ganchos na OS em `services/tickets.py` (`close_pending_offers`, `close_technicia
   no calendário).
 - Definir o técnico na mão (`/assign`, `PATCH assignee_id`, `/take`, o "Atribuído" do menu) fecha as pendentes como
   `assigned`; colocar o técnico da oferta entre os outros técnicos da visita (`PATCH helper_ids`) fecha a dele como
-  `assigned` (nota "A central incluiu o técnico na visita"); cancelar, resolver ou fechar a OS (`/transition` e o
-  cancelamento pelo portal) fecha como `ticket_closed`. Desativar o técnico (`PATCH /technicians/{id}` ou
-  `PATCH /users/{id}` com `is_active: false`) ou tirar dele o papel `technician` fecha as pendentes dele em todas as
-  OS como `central` (nota "Técnico sem acesso ao app", autor = quem alterou); reativar não as traz de volta. Cada
-  fechamento grava um `offer_cancelled` por OS e avisa a gestão e os técnicos afetados (o tempo real sai no commit
-  da rota, inclusive nas de Técnicos e Usuários).
+  `assigned` (nota "A central incluiu o técnico na visita"). Se ele aceitou enquanto a central salvava a visita com a
+  OS lida antes, o `PATCH` recebe 409 "A OS foi alterada por outra pessoa..." (`current_version`): mudar só a visita
+  não muda a versão, e ele ficaria responsável e na visita ao mesmo tempo. Cancelar, resolver ou fechar a OS
+  (`/transition` e o cancelamento pelo portal) fecha como `ticket_closed`. Desativar o técnico
+  (`PATCH /technicians/{id}` ou `PATCH /users/{id}` com `is_active: false`) ou tirar dele o papel `technician` fecha
+  as pendentes dele em todas as OS como `central` (nota "Técnico sem acesso ao app", autor = quem alterou); reativar
+  não as traz de volta. Cada fechamento grava um `offer_cancelled` por OS e avisa a gestão e os técnicos afetados (o
+  tempo real sai no commit da rota, inclusive nas de Técnicos e Usuários).
 - Reenviar para quem já tem oferta pendente (ou vencida) da mesma OS **substitui** a anterior: a antiga vira
   cancelada com `cancel_reason: "replaced"`, sem evento próprio (o `offer_sent` traz `data.replaced`).
 - Prazo vencido não tem rotina: a oferta continua gravada como pendente e o estado efetivo é `expired` quando
@@ -999,9 +1001,10 @@ ganchos na OS em `services/tickets.py` (`close_pending_offers`, `close_technicia
   histórico.
 
 **Estados** (`state`): `pending` | `expired` | `accepted` | `declined` | `cancelled`. Gravados (`OfferStatus`):
-`pending`, `accepted`, `declined`, `cancelled`. `cancel_reason`: `central` (a central cancelou) | `taken` (outro
-técnico aceitou) | `assigned` (a central definiu o técnico) | `ticket_closed` (OS cancelada, resolvida ou fechada) |
-`replaced` (trocada por uma oferta nova da mesma OS).
+`pending`, `accepted`, `declined`, `cancelled`. `cancel_reason`: `central` (a central cancelou, ou o técnico ficou
+sem acesso ao app) | `taken` (outro técnico aceitou) | `assigned` (a central definiu o técnico, ou pôs o técnico da
+oferta na visita) | `ticket_closed` (OS cancelada, resolvida ou fechada) | `replaced` (trocada por uma oferta nova da
+mesma OS).
 
 **Central** (gestão, sempre dentro da fila de quem pede: OS de outra fila → 403 `QUEUE_FORBIDDEN`):
 - `GET /tickets/{id}/offers` (Pagamentos em Visualizar) → `TicketOfferOut[]`, todas as ofertas da OS (também as
@@ -1044,8 +1047,10 @@ Sem cliente, loja (nome, código, CNPJ), endereço, contato, recado da visita (`
 projeto nem valores de outros técnicos (a regra do convite: "só serviço, bairro e cidade, data e valor"). Sem agenda,
 `scheduled_start` vem null ("data a combinar"); bairro, cidade e UF são os da loja (OS sem loja: null).
 `ticket.title` (também no recorte mínimo) sai sem o nome da loja, o código da loja (a partir de 3 caracteres), o nome
-do cliente, o nome do projeto e o nº do chamado do cliente, sem diferença de caixa ou acento e só palavra inteira, junto
-com a preposição logo antes ("na Matriz") e os separadores que sobram (" · ", " - ", "–", "|", ":", ","...): o
+do cliente (também sem o sufixo da razão social: "Cliente Exemplo Ltda" tira "Cliente Exemplo"; Ltda, S.A., S/A,
+EIRELI, ME, EPP), o nome do projeto e o nº do chamado do cliente (a partir de 3 caracteres), sem diferença de caixa ou
+acento e só palavra inteira, junto com a preposição logo antes ("na Matriz"), os separadores que sobram (" · ", " - ",
+"–", "|", ":", ","...), os parênteses e aspas que ficam vazios e o sinal solto nas pontas ("&", "+"): o
 título automático da Nova OS é "<Tipo de OS> · <Localização>", e "Troca de PDV · Matriz" chega como "Troca de PDV".
 Se sobrar menos de 3 caracteres, vem o nome do tipo de serviço (com o mesmo corte) ou "Atendimento técnico". O
 título da OS em si não muda.

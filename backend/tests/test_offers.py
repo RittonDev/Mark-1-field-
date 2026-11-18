@@ -1016,6 +1016,49 @@ async def test_technician_put_in_the_visit_loses_his_offer(
     assert [h["id"] for h in full["helpers"]] == [other_id]
 
 
+async def test_putting_in_the_visit_who_is_accepting_now(client: AsyncClient, world: World) -> None:
+    """A central põe o técnico na visita (com a OS lida antes) enquanto ele aceita a oferta: um
+    dos dois perde. Mudar só a visita não muda a versão da OS, e sem a conferência com a OS
+    travada ele ficava responsável e na visita ao mesmo tempo."""
+    sup, tech_id = world.supervisor.headers, str(world.tech.user.id)
+    for _ in range(3):
+        t = await create(client, world)
+        offer = (await send(client, sup, t["id"], [world.tech]))[0]
+        await open_offer(client, world.tech, offer["id"])
+        patch, accept = await asyncio.gather(
+            client.patch(
+                f"{API}/tickets/{t['id']}",
+                json={"helper_ids": [tech_id], "expected_version": t["version"]},
+                headers=sup,
+            ),
+            client.post(f"{API}/me/offers/{offer['id']}/accept", headers=world.tech.headers),
+        )
+        full = (await client.get(f"{API}/tickets/{t['id']}", headers=sup)).json()
+        helpers = [h["id"] for h in full["helpers"]]
+        if accept.status_code == 200:
+            assert patch.status_code == 409, patch.text
+            assert (full["assignee"]["id"], helpers) == (tech_id, [])
+        else:
+            assert (patch.status_code, accept.json()["code"]) == (200, "OFFER_UNAVAILABLE")
+            assert (full["assignee"], helpers) == (None, [tech_id])
+
+    # Trocar o responsável e pôr o de antes na visita, no mesmo salvamento, continua valendo.
+    u = await create(client, world, assignee_id=tech_id)
+    r = await client.patch(
+        f"{API}/tickets/{u['id']}",
+        json={
+            "assignee_id": str(world.tech_other.user.id),
+            "helper_ids": [tech_id],
+            "expected_version": u["version"],
+            "allow_conflict": True,
+        },
+        headers=sup,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["assignee"]["id"] == str(world.tech_other.user.id)
+    assert [h["id"] for h in r.json()["helpers"]] == [tech_id]
+
+
 async def test_offer_title_hides_the_store_and_the_customer(
     client: AsyncClient, world: World
 ) -> None:
