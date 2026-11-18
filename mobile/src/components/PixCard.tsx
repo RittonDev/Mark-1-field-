@@ -2,7 +2,7 @@
 // técnico cadastra e troca a chave). Só aparece com o cadastro carregado: a chave fica na memória, nunca no aparelho.
 
 import { router } from "expo-router";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { formatPixKey, PIX_KEY_TYPE } from "../lib/constants";
 import { ensureProfile, loadProfile, useProfile } from "../lib/profile";
@@ -18,10 +18,16 @@ export function PixCard({ refreshKey = 0 }: { refreshKey?: number }) {
   const c = useTheme();
   const styles = useStyles(makeStyles);
   const profile = useProfile();
+  // O "puxar para atualizar" já tratado: voltar à aba Ganhos depois de um não relê de novo.
+  const handledRefresh = useRef(refreshKey);
 
   useEffect(() => {
-    if (refreshKey > 0) void loadProfile().catch(() => undefined);
-    else ensureProfile();
+    if (refreshKey !== handledRefresh.current) {
+      handledRefresh.current = refreshKey;
+      void loadProfile().catch(() => undefined);
+    } else {
+      ensureProfile();
+    }
   }, [refreshKey]);
 
   if (!profile) return null;

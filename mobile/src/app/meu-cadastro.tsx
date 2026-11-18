@@ -739,8 +739,9 @@ export default function MyProfileScreen() {
                 <>
                   <Field label="Chave PIX" required hint={pixChangedAt} error={errors.pixKey}>
                     <Input
-                      // Teclado do tipo: o campo é refeito quando o tipo muda.
+                      // Teclado do tipo: o campo é refeito quando o tipo muda e, num tipo novo, já abre para digitar.
                       key={pixType}
+                      autoFocus={pixType !== (profile.pix?.key_type ?? null)}
                       value={form.pixKey}
                       onChangeText={(text) => update({ pixKey: maskPixInput(pixType, text) })}
                       accessibilityLabel={`Chave PIX: ${PIX_KEY_TYPE[pixType]}`}
