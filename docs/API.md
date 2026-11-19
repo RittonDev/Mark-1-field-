@@ -197,7 +197,9 @@ O "Motivo da violação" do Field Control: um campo por relógio, escolhido de u
 
 - `GET /violation-reasons?active=` → `[{id, name, description, applies_to, responsibility, is_active}]`.
   - `applies_to` ∈ `response`, `resolution`, `both`.
-  - `responsibility` ∈ `internal`, `customer`, `third_party`.
+  - `responsibility` ∈ `internal`, `customer`, `third_party`, `technician` (o técnico; nos motivos de visita
+    improdutiva é o que pesa no elo dele, ver [Elo dos técnicos](#elo-dos-técnicos-2026-11-18)). O
+    `by_responsibility` do relatório traz as quatro chaves.
   - `POST` e `PATCH /violation-reasons/{id}`: supervisor e admin.
 - Na OS:
   - os campos `response_violation_reason`, `resolution_violation_reason` (`{id, name, responsibility}`) e `violation_note`;
@@ -279,6 +281,8 @@ quando ninguém mais usa; o DELETE tira também a foto do Field Control) ·
 `{rows:[{line, action: create|update|error, errors}], created, updated, errors, credentials}` (senhas provisórias só na gravação).
 Um técnico, o histórico do cadastro e a chave PIX (`GET /technicians/{id}`, `GET /technicians/{id}/changes`,
 `DELETE /technicians/{id}/pix`): ver [Meu cadastro do técnico](#meu-cadastro-do-técnico-2026-11-18).
+`TechnicianOut.level` (o selo do elo) e as rotas `/technicians/{id}/level`: ver
+[Elo dos técnicos](#elo-dos-técnicos-2026-11-18).
 
 ### Importação de locais
 `POST /locations/import?dry_run=true|false&customer_id=` (CSV/XLSX) → `{rows, created, updated, errors, customers_created}`.
@@ -1589,7 +1593,7 @@ V = Visualizar, E = Editar; "a \| b" = basta uma das telas.
 | `commercial.payouts` | V: `GET /payouts`, `GET /tickets/{id}/offers`, `GET /technician-invoices`. E: `PUT`/`DELETE /tickets/{id}/payouts/{tech}`, `POST /payouts/pay`, `/payouts/unpay`, `POST /tickets/{id}/offers`, `POST /tickets/{id}/offers/{offer_id}/cancel`, `DELETE /technicians/{id}/pix`, `POST /technician-invoices/{id}/check`, `/uncheck`, `/reject` |
 | `base.customers` | V: `GET /customers/{id}`, `GET /assets`, `/assets/{id}`. E: `POST /customers`, `PATCH /customers/{id}`, `POST`/`PATCH /assets` |
 | `base.locations` | E: `POST /customers/{id}/locations`, `PATCH /locations/{id}`, `POST /locations/import` |
-| `base.technicians` | V: `GET /technicians`, `/technicians/favorites`, `/technicians/{id}`, `/technicians/{id}/changes`. E: `POST /technicians`, `PATCH /technicians/{id}`, `POST /technicians/{id}/reset-password`, `POST`/`DELETE /technicians/{id}/photo`, `POST /technicians/import`, `POST /technicians/regions/refresh`, `PUT`/`DELETE /technicians/favorites/{id}` |
+| `base.technicians` | V: `GET /technicians`, `/technicians/favorites`, `/technicians/{id}`, `/technicians/{id}/changes`, `/technicians/{id}/level`. E: `POST /technicians`, `PATCH /technicians/{id}`, `POST /technicians/{id}/reset-password`, `POST`/`DELETE /technicians/{id}/photo`, `POST /technicians/import`, `POST /technicians/regions/refresh`, `PUT`/`DELETE /technicians/favorites/{id}`, `POST /technicians/{id}/level/waivers`, `DELETE /technicians/{id}/level/waivers/{waiver_id}`, `POST /technicians/levels/refresh` |
 | `base.technicians` \| `base.onboarding` | V: `GET /technicians/regions` |
 | `base.technicians` \| `base.locations` | V: `GET /technicians/nearby` |
 | `base.onboarding` | V: `GET /onboarding/invites`, `/onboarding/applications`, `/applications/pending-count`, `/applications/{id}`. E: `POST`/`DELETE /onboarding/invites`, `POST .../approve`, `.../reject`; `DELETE /onboarding/applications/{id}` (E e só admin e supervisor) |
