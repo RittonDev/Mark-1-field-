@@ -680,9 +680,9 @@ export interface TicketCreatePayload {
    */
   forms?: { template_id: UUID; required: boolean }[] | null;
   /**
-   * Só com `forms`: os ligados ao tipo de OS ou à categoria que o analista desmarcou (até 20). Ficam de fora e não entram
-   * sozinhos depois; os ligados que não vieram em nenhuma das duas listas entram como automáticos. Omitido, com `forms`:
-   * todos os ligados fora da lista ficam de fora (regra anterior).
+   * Só com `forms`: os que o analista tirou (até 20); a API considera só os ligados ao tipo de OS ou à categoria e ignora
+   * o resto. Esses ficam de fora e não entram sozinhos depois; os ligados que não vieram em nenhuma das duas listas entram
+   * como automáticos. Omitido, com `forms`: todos os ligados fora da lista ficam de fora (regra anterior).
    */
   forms_left_out?: UUID[];
 }
@@ -2394,7 +2394,10 @@ export interface TechnicianInvoiceSummary {
   checked_amount: number;
 }
 
-/** GET /technician-invoices?technician_id=&status=&month=: as mais novas primeiro (até 500); total_count com todos os filtros. */
+/**
+ * GET /technician-invoices?technician_id=&status=&month=&offset=: até 500 a partir de offset; status=pending na ordem da
+ * fila (as mais antigas primeiro), os demais as mais novas primeiro; total_count com todos os filtros (sem o offset).
+ */
 export interface TechnicianInvoiceList {
   items: TechnicianInvoice[];
   summary: TechnicianInvoiceSummary;

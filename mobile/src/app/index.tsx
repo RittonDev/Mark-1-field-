@@ -13,6 +13,7 @@ import { Icon } from "../components/Icon";
 import { LevelChip } from "../components/LevelBadge";
 import { PressableScale, useListMotion } from "../components/motion";
 import { OffersSection } from "../components/Offers";
+import { PrivacyUpdateCard } from "../components/PrivacyUpdateCard";
 import { ShiftCard } from "../components/ShiftCard";
 import { TicketListSkeleton } from "../components/Skeleton";
 import { TabBar } from "../components/TabBar";
@@ -316,6 +317,8 @@ export default function MyTicketsScreen() {
       ) : null}
       {/* Ofertas de OS com preço esperando a resposta do técnico: quem aceitar primeiro leva. */}
       {tab === "today" && dayOffset === 0 ? <OffersSection /> : null}
+      {/* Aviso de privacidade com texto novo que este técnico ainda não abriu: discreto, depois do que é do dia. */}
+      {tab === "today" ? <PrivacyUpdateCard userId={user.id} /> : null}
       {tab === "today" ? (
         <View style={{ gap: 10 }}>
           <View style={styles.dayNav}>

@@ -153,7 +153,7 @@ let refreshing: { token: string; promise: Promise<RefreshResult> } | null = null
 
 /**
  * Chamado quando o servidor diz que este usuário não pode mais usar o app
- * (ex.: técnico promovido a analista). auth.ts registra o handler que apaga os dados locais.
+ * (ex.: técnico promovido a analista). sessionEnd.ts registra o handler que apaga os dados locais.
  */
 let accessRevokedHandler: ((message: string) => Promise<void>) | null = null;
 export function setAccessRevokedHandler(handler: (message: string) => Promise<void>) {

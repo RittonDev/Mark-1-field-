@@ -3,12 +3,14 @@
 Só dados, sem DDL. Preenche dois ids que os eventos antigos guardavam apenas pelo nome:
 
 - Atribuições importadas do Field Control (event_type 'assigned', data.source 'fieldcontrol'):
-  ganham data.technician_id, o id do técnico (papel 'technician') cujo nome é igual ao de
-  to_value, ignorando caixa e espaços nas pontas. to_value guarda o nome cortado em 64 letras, então
-  o nome do técnico é comparado cortado do mesmo jeito. Só quando um único técnico tem esse nome: o
-  repetido e o sem casamento ficam como estão (a busca "técnico que atuou" continua casando esses
-  pelo nome). Com o id, a OS migrada não some da busca quando o técnico troca o nome (Meu cadastro,
-  Técnicos) e o homônimo não entra nela (services/tickets.py, acted_by_clause).
+  ganham data.technician_id, o id do usuário cujo nome é igual ao de to_value, ignorando caixa e
+  espaços nas pontas. to_value guarda o nome cortado em 64 letras, então o nome do usuário é
+  comparado cortado do mesmo jeito. Só quando um único usuário, de qualquer papel, tem esse nome e
+  ele é técnico (papel 'technician'): o nome repetido (também entre um técnico e um usuário de
+  escritório, que pode ter sido o colaborador no Field Control), o de quem não é técnico e o sem
+  casamento ficam como estão (a busca "técnico que atuou" continua casando esses pelo nome). Com o
+  id, a OS migrada não some da busca quando o técnico troca o nome (Meu cadastro, Técnicos) e o
+  homônimo não entra nela (services/tickets.py, acted_by_clause).
 - Formulários tirados da OS antes dos formulários automáticos (event_type 'form_removed' só com
   data.form_id): ganham data.template_id, o modelo cujo nome é igual ao de from_value (o nome do
   formulário cortado em 64 letras, como o remove_from_ticket antigo gravava), com a mesma regra.
@@ -32,15 +34,16 @@ down_revision: str | None = "e3d5f7a9b2c4"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
+# users.role é VARCHAR com o valor do enum ('technician': app/models/_types.py, str_enum); o CAST
+# para text mantém a comparação certa também se a coluna virar um ENUM nativo.
 FC_TECHNICIANS = """
 UPDATE ticket_events e
    SET data = jsonb_set(e.data, '{technician_id}', to_jsonb(m.id))
   FROM (
         SELECT lower(btrim(left(btrim(u.name), 64))) AS name, min(CAST(u.id AS text)) AS id
           FROM users u
-         WHERE u.role = 'technician'
          GROUP BY lower(btrim(left(btrim(u.name), 64)))
-        HAVING count(*) = 1
+        HAVING count(*) = 1 AND bool_and(CAST(u.role AS text) = 'technician')
        ) m
  WHERE e.event_type = 'assigned'
    AND e.data ->> 'source' = 'fieldcontrol'

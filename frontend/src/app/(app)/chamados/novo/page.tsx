@@ -817,9 +817,10 @@ function NewTicket() {
     // "Assumir" é o padrão: sem owner_id, quem cria leva a OS para a própria fila.
     if (ownerMode === "none") payload.owner_id = null;
     else if (ownerMode === "other") payload.owner_id = d.ownerId;
-    // Os formulários que o analista vê (na ordem e com o obrigatório de cada um, mesmo nenhum) e os ligados que ele
-    // tirou. Os ligados que a tela não conhecia (vínculo novo, ou os da categoria de cima sem a lista de categorias) a API
-    // põe sozinha. Sem os modelos, vai sem as listas e a API põe os ligados ao tipo de OS e à categoria.
+    // Os formulários que o analista vê (na ordem e com o obrigatório de cada um, mesmo nenhum) e os que ele tirou (a API
+    // fica só com os ligados). Os ligados que a tela não conhecia (vínculo novo, ou os da categoria de cima sem a lista de
+    // categorias) e que ele não tirou a API põe sozinha. Sem os modelos, vai sem as listas e a API põe os ligados ao tipo
+    // de OS e à categoria.
     const formNames: Record<UUID, string> = {};
     if (templates.data) {
       const opening = openingForms(d, templates.data, categories.data);

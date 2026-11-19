@@ -204,6 +204,9 @@ export function useSearchController({
   // "Tentar de novo" em andamento (ou esperando a internet) não é erro: o alerta sai e volta se falhar de novo.
   const failed = searching && smart.isError && !smart.isFetching && !smart.isPaused;
   const thinking = isSearchable(asked) && stale && !failed && !paused;
+  // Sem internet, mas a lista na tela é a resposta guardada do próprio texto (não a do texto anterior, nem a de antes
+  // de a digitação parar): o Enter abre o que está na tela, sem esperar a conexão.
+  const ownOffline = paused && asked === q && !smart.isPlaceholderData && !!data;
 
   // O que a Mia diz da busca que voltou: os filtros que entendeu, ou só o texto que procurou.
   const reply = ((): AgentAnswer | null => {
@@ -402,9 +405,10 @@ export function useSearchController({
     if (activeId) listRef.current?.querySelector(`#${CSS.escape(activeId)}`)?.scrollIntoView({ block: "nearest" });
   }, [activeId, listRef]);
 
-  // A busca do Enter voltou: abre o resultado escolhido (descartado se o texto mudou nesse meio-tempo).
-  // Cada Enter roda uma vez só: a busca que volta a ficar pronta (outra leitura do mesmo texto) não reabre.
-  const enterReady = !!pendingEnter && pendingEnter.text === asked && !stale;
+  // A busca do Enter voltou (ou a internet caiu com a lista do próprio texto na tela): abre o resultado escolhido
+  // (descartado se o texto mudou nesse meio-tempo). Cada Enter roda uma vez só: a busca que volta a ficar pronta
+  // (outra leitura do mesmo texto) não reabre.
+  const enterReady = !!pendingEnter && pendingEnter.text === asked && (!stale || ownOffline);
   const runPending = useEffectEvent(() => {
     const pending = pendingEnter;
     if (!pending || ranEnter.current === pending.seq) return;
@@ -415,13 +419,16 @@ export function useSearchController({
     if (enterReady) runPending();
   }, [enterReady]);
 
-  // Sem internet o Enter não espera: senão a OS abriria sozinha, sabe-se lá quando, ao voltar a conexão.
+  // Sem internet, o Enter que esperava outra lista (a do texto anterior, ou a de antes de a digitação parar) é
+  // descartado: senão a OS abriria sozinha, sabe-se lá quando, ao voltar a conexão. Com a lista guardada do próprio
+  // texto na tela, ele abre na hora (enterReady).
+  const dropEnter = paused && !ownOffline;
   const dropPending = useEffectEvent(() => {
     if (pendingEnter) ranEnter.current = pendingEnter.seq;
   });
   useEffect(() => {
-    if (paused) dropPending();
-  }, [paused]);
+    if (dropEnter) dropPending();
+  }, [dropEnter]);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): boolean => {
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -435,8 +442,9 @@ export function useSearchController({
     if (e.key === "Enter") {
       e.preventDefault();
       const mods = modsOf(e);
-      // O que está na tela ainda é da busca anterior: espera a do texto digitado (sem internet, não espera).
-      if (asked && stale && isSearchable(asked)) {
+      // O que está na tela ainda é da busca anterior: espera a do texto digitado. Sem internet, não espera (nada
+      // acontece), a não ser que a lista seja a resposta guardada do próprio texto: essa abre na hora.
+      if (asked && stale && isSearchable(asked) && !ownOffline) {
         if (!paused) {
           enterSeq.current += 1;
           setPendingEnter({ text: asked, mods, seq: enterSeq.current });

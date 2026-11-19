@@ -69,10 +69,11 @@ UFS = frozenset(
     }
 )  # fmt: skip
 
-# Versão do aviso de privacidade exibido no formulário (muda quando o texto mudar; o texto fica em
-# frontend/src/lib/onboarding.ts, PRIVACY_NOTICE). 2026-11-18: o aviso passa a citar a chave PIX
-# que o técnico cadastra no app para receber pelos chamados. 2026-11-19: texto revisto na revisão
-# de segurança.
+# Versão do aviso de privacidade exibido no formulário: muda quando o texto mudar. O texto
+# (PRIVACY_NOTICE) fica em frontend/src/lib/constants.ts e em mobile/src/lib/constants.ts, cópias
+# idênticas, cada uma com o próprio PRIVACY_VERSION: mude os três no mesmo dia. 2026-11-18: o aviso
+# passa a citar a chave PIX que o técnico cadastra no app para receber pelos chamados. 2026-11-19:
+# texto revisto na revisão de segurança.
 PRIVACY_VERSION = "2026-11-19"
 
 

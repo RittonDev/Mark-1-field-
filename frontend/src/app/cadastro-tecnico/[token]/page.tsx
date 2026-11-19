@@ -10,6 +10,7 @@ import {
   History,
   Loader2,
   Plus,
+  RefreshCw,
   ShieldCheck,
   Trash2,
   WifiOff,
@@ -30,6 +31,7 @@ import {
   maskCpf,
   maskPhone,
   PRIVACY_NOTICE,
+  PRIVACY_VERSION,
   resizePhoto,
   UFS,
   useOnboardingCatalog,
@@ -356,6 +358,28 @@ function clearDraft() {
   }
 }
 
+/**
+ * O servidor tem um aviso de privacidade mais novo que o texto desta página (aberta antes de uma atualização): o aceite
+ * gravaria a versão nova sobre o texto antigo. Versões AAAA-MM-DD, comparadas como texto. Igual, mais antiga ou sem
+ * versão (API anterior a ela): segue normal.
+ */
+function privacyOutdated(server: unknown): boolean {
+  return typeof server === "string" && server > PRIVACY_VERSION;
+}
+
+/** A versão do aviso que o servidor tem agora; null sem resposta (sem internet, servidor fora, tempo esgotado). */
+async function serverPrivacyVersion(): Promise<string | null> {
+  try {
+    const catalog = await request<{ privacy_version?: unknown } | null>("/public/onboarding/catalog", {
+      auth: false,
+      timeoutMs: 10_000,
+    });
+    return typeof catalog?.privacy_version === "string" ? catalog.privacy_version : null;
+  } catch {
+    return null;
+  }
+}
+
 function Chip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button
@@ -403,6 +427,9 @@ export default function TechnicianSignupPage() {
   const formRef = useRef<HTMLFormElement>(null);
   const stepRef = useRef<HTMLParagraphElement>(null);
   const focusStepRef = useRef(false);
+  // A versão do aviso relida no servidor (ao chegar à última etapa e no envio); antes disso, vale a do catálogo.
+  const [latestPrivacy, setLatestPrivacy] = useState<string | null>(null);
+  const last = step === STEPS.length - 1;
 
   useEffect(() => {
     let alive = true;
@@ -459,6 +486,14 @@ export default function TechnicianSignupPage() {
       root.querySelector<HTMLElement>(`[data-field="${field}"] input, [data-field="${field}"] button`);
     target?.focus();
   }, [problem]);
+
+  // Na última etapa (o aviso e o aceite), relê a versão do aviso: a ficha pode ter ficado aberta durante uma atualização.
+  useEffect(() => {
+    if (!last) return;
+    void serverPrivacyVersion().then((version) => {
+      if (version !== null) setLatestPrivacy(version);
+    });
+  }, [last]);
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm((f) => ({ ...f, [key]: value }));
   const toggle = (key: "service_areas" | "availability", value: string) =>
@@ -545,6 +580,14 @@ export default function TechnicianSignupPage() {
     setProblem(null);
     setSubmitting(true);
     try {
+      // O aceite grava a versão do aviso que o servidor tem agora: se ela passou à frente do texto desta página, a ficha
+      // não sai e a página pede para recarregar. Sem resposta, segue: o próprio envio mostra o problema.
+      const latest = await serverPrivacyVersion();
+      if (latest !== null) setLatestPrivacy(latest);
+      if (privacyOutdated(latest)) {
+        window.scrollTo({ top: 0 });
+        return;
+      }
       const res = await request<{ protocol: string }>(`/public/onboarding/${encodeURIComponent(token)}`, {
         method: "POST",
         auth: false,
@@ -610,8 +653,15 @@ export default function TechnicianSignupPage() {
     goTo(0);
   };
 
+  // Recarrega com o rascunho em dia (ele não guarda a senha, a foto nem o aceite): a ficha volta na mesma etapa.
+  const reload = () => {
+    if (!pendingForeign) saveDraft(form, step, token);
+    window.location.reload();
+  };
+
   const cat = catalog.data;
-  const last = step === STEPS.length - 1;
+  // O texto do aviso desta página ficou para trás do servidor: só recarregando dá para ler o novo e enviar.
+  const outdated = privacyOutdated(latestPrivacy ?? cat?.privacy_version);
 
   return (
     <div className="min-h-screen bg-canvas">
@@ -668,6 +718,17 @@ export default function TechnicianSignupPage() {
             action={
               <Button variant="primary" loading={catalog.isFetching} onClick={() => void catalog.refetch()}>
                 Tentar de novo
+              </Button>
+            }
+          />
+        ) : outdated ? (
+          <Panel
+            icon={<RefreshCw className="size-10 text-ink-muted" />}
+            title="O aviso de privacidade mudou"
+            text="Recarregue a página para ler o texto novo."
+            action={
+              <Button variant="primary" onClick={reload}>
+                Recarregar
               </Button>
             }
           />

@@ -689,7 +689,8 @@ def test_prefill_values_of_each_source() -> None:
 
     # O endereço do atendimento vence o da loja.
     ticket.service_address = "Av. Exemplo, 200"
-    assert prefill_for(ticket, fields, {})["address"] == "Av. Exemplo, 200"  # type: ignore[arg-type]
+    got = prefill_for(ticket, fields, {})  # type: ignore[arg-type]
+    assert got["address"] == "Av. Exemplo, 200"
 
 
 async def _shift(engine: AsyncEngine, ticket_id: str, days: int, *columns: str) -> None:

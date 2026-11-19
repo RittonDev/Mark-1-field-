@@ -147,10 +147,12 @@ Equivale ao "Tipo de OS" do Field Control. Sem `customer_id`, o tipo vale para t
     como obrigatórios ou opcionais pelo `default_required` de cada modelo, sem autor no histórico e com o motivo.
     `forms_left_out` é ignorado.
   - Com `forms` (uma lista, mesmo vazia): ela, na ordem, com quem abriu como autor (os da lista que são ligados ficam com
-    `auto_attached`: saem sozinhos se o tipo ou a categoria mudarem antes da visita). `forms_left_out` são os ligados ao
-    tipo ou à categoria que o analista desmarcou: vão para `created.data.forms_left_out` (só os ligados e fora da lista)
-    e não entram sozinhos depois. Os ligados que não vieram em nenhuma das duas listas (a tela não conhecia o vínculo)
-    entram depois da lista como automáticos (`auto_attached`), pelo `default_required`, sem autor e com o motivo.
+    `auto_attached`: saem sozinhos se o tipo ou a categoria mudarem antes da visita). Em `forms_left_out` a Nova OS manda
+    todos os formulários que o analista tirou (desmarcou ou pôs e tirou), até 20, sem filtrar pelos vínculos que a tela
+    conhece. A API considera só os ligados ao tipo de OS ou à categoria e ignora o resto (o não ligado, o inativo, o id
+    desconhecido e o que também está em `forms`): esses ligados vão para `created.data.forms_left_out` e não entram
+    sozinhos depois. Os ligados que não vieram em nenhuma das duas listas (a tela não conhecia o vínculo) entram depois
+    da lista como automáticos (`auto_attached`), pelo `default_required`, sem autor e com o motivo.
   - `forms` sem `forms_left_out` (ou com `null`, a Nova OS anterior a ele): todos os ligados fora da lista ficam de fora e
     vão para `created.data.forms_left_out`.
   - O `PATCH /tickets/{id}` não tem os dois campos.
@@ -397,19 +399,24 @@ Todos exigem analista ou gestor, salvo indicação. Valores em R$ chegam como n�
     "rua, bairro, cidade-UF" da loja), `city` ("cidade-UF"), `ticket_code` (OS-000123), `technician`, `service_type` e
     `visit_date`. Texto e texto longo aceitam todas; data, só `visit_date` (combinação inválida volta `null`). O modelo
     grava `prefill` só quando preenchido. `GET /form-templates/catalog` traz `prefill_sources: [{key, label, types}]`.
-    - `visit_date` é o dia local do atendimento em curso: em atendimento, o início do trecho atual (na volta ao local, o
-      dia da volta; na OS do Field Control em atendimento, a chegada); antes da primeira chegada, o da visita agendada;
-      fora de atendimento depois de uma chegada (pausada, improdutiva, reaberta, concluída), não vem.
+    - `visit_date` é o dia local da visita, pela mesma regra ao vivo e na conclusão do formulário (a resposta gravada é
+      a que a pergunta mostrava):
+      - em atendimento (`in_progress`): `work_started_at`, o início do trecho atual (na volta ao local, o dia da volta);
+        na OS do Field Control em atendimento, sem ele, `arrived_at`;
+      - resolvida ou fechada: `resolved_at` (sem ele, `closed_at`), também quando a central conclui o formulário depois;
+      - sem chegada ainda (`arrived_at` nulo): `scheduled_start`, a visita agendada;
+      - nos outros casos (pausada, a caminho depois de uma chegada, reaberta sem nova ida, improdutiva depois da
+        chegada): não vem, nem na conclusão. A pergunta opcional fica sem resposta e a obrigatória precisa ser digitada.
     - No POST do modelo, a pergunta sem a chave `prefill` é do técnico. No `PUT /form-templates/{id}`, a pergunta enviada
       sem a chave mantém a fonte gravada na pergunta de mesmo `id` (se o tipo ainda aceitar a fonte), sem subir a versão
       por isso; `prefill: null` explícito limpa. O construtor da web sempre manda a chave (uma aba aberta antes da
       resposta automática não apaga a fonte).
   - `TicketFormOut.prefill` = `{campo: valor}` das perguntas com fonte e ainda sem resposta (valor vazio não entra), ao
     vivo enquanto o formulário não está concluído (vem em `TicketDetail.forms`, no sync e nas rotas do formulário). A
-    conclusão grava o valor nas respostas antes de conferir os obrigatórios (a data da visita é a mostrada; sem ela, o dia
-    da última entrada em atendimento depois da última reabertura; sem nenhuma, hoje); depois disso, trocar o técnico ou
-    remarcar não muda nada e `prefill` vem `{}`. O técnico pode corrigir: o app trata
-    `{...prefill, ...answers}` como a resposta do servidor e manda tudo ao salvar.
+    conclusão grava nas respostas, antes de conferir os obrigatórios, o mesmo valor que a pergunta mostrava, sem consulta
+    a mais (sem data da visita, a pergunta de data fica sem resposta; se for obrigatória, a conclusão volta 422 "Falta
+    preencher: …"); depois disso, trocar o técnico ou remarcar não muda nada e `prefill` vem `{}`. O técnico pode
+    corrigir: o app trata `{...prefill, ...answers}` como a resposta do servidor e manda tudo ao salvar.
 - **Custos extras:** `GET|POST /tickets/{id}/expenses` (técnico só lê; solicitante recebe vazio) · `PATCH|DELETE /expenses/{id}` ·
   `GET /expenses?start&end&technician_id&status&customer_id` (relatório) · `POST /expenses/mark-paid {ids}` → `{updated}`
   (marca como reembolsados só os aprovados; os demais ids são ignorados, sem erro, e não entram em `updated`) ·
@@ -723,9 +730,10 @@ python -m app.importers.fieldcontrol /tmp/fc_export --wipe-demo --report /tmp/fc
 - Histórico:
   - a atribuição de cada atividade vira `assigned` com `to_value` = nome do colaborador e
     `data {source: "fieldcontrol", task, technician_id}` (`technician_id` quando o colaborador veio no export). A migração
-    `e4b6d8f0a2c3` (só dados) preencheu o `technician_id` das atribuições antigas quando o nome é de um técnico só, e o
-    `template_id` dos `form_removed` antigos (só com `form_id`) quando o nome é de um modelo só. A busca "técnico que
-    atuou" usa o id; o nome só vale no evento sem ele;
+    `e4b6d8f0a2c3` (só dados) preencheu o `technician_id` das atribuições antigas quando o nome é de um usuário só e ele
+    é técnico (o nome repetido, também entre um técnico e um usuário de escritório, fica sem o id), e o `template_id` dos
+    `form_removed` antigos (só com `form_id`) quando o nome é de um modelo só. A busca "técnico que atuou" usa o id; o
+    nome só vale no evento sem ele;
   - cada atividade concluída vira apontamento e eventos (em atendimento, resolvida);
   - improdutivas viram `unproductive_visit`; canceladas viram evento de status;
   - comentários entram como notas internas;

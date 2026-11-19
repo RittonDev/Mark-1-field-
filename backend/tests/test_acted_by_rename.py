@@ -170,6 +170,9 @@ async def test_migration_fills_the_technician_of_fc_assignments(
     await _user(engine, "Tecnico Duplo", UserRole.TECHNICIAN)
     await _user(engine, " tecnico duplo", UserRole.TECHNICIAN)
     await _user(engine, "Analista Campo", UserRole.ANALYST)
+    # Técnico e analista com o mesmo nome: o colaborador do Field Control pode ter sido qualquer um.
+    await _user(engine, "Tecnico Beta", UserRole.TECHNICIAN)
+    await _user(engine, "tecnico beta ", UserRole.ANALYST)
     t = await create(client, world, title="OS migrada")
     tid, tech_id = t["id"], str(world.tech.user.id)
 
@@ -178,6 +181,7 @@ async def test_migration_fills_the_technician_of_fc_assignments(
     repeated = await _fc_assigned(engine, tid, "Tecnico Duplo")
     unknown = await _fc_assigned(engine, tid, "Tecnico Sem Cadastro")
     office = await _fc_assigned(engine, tid, "Analista Campo")  # não é técnico
+    namesake = await _fc_assigned(engine, tid, "Tecnico Beta")
     kept = await _fc_assigned(engine, tid, "Tecnico", technician_id=str(world.tech_other.user.id))
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as db:
@@ -194,7 +198,7 @@ async def test_migration_fills_the_technician_of_fc_assignments(
     assert await _run(engine, sql) == 2
     assert (await _data(engine, unique))["technician_id"] == tech_id
     assert (await _data(engine, cut))["technician_id"] == str(long_id)
-    for event_id in (repeated, unknown, office):
+    for event_id in (repeated, unknown, office, namesake):
         assert "technician_id" not in await _data(engine, event_id)
     assert (await _data(engine, kept))["technician_id"] == str(world.tech_other.user.id)
     assert await _data(engine, here.id) == {"to_name": "Tecnico"}

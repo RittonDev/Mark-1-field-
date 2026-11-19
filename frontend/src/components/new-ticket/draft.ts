@@ -58,7 +58,7 @@ export interface NewTicketDraft {
   autoFormIds: UUID[];
   /**
    * Os que o analista tirou (desmarcou o ligado ou tirou o escolhido): não voltam sozinhos quando os modelos chegam ou
-   * mudam, e os ligados vão para a API como deixados de fora (`forms_left_out`).
+   * mudam, e vão para a API como deixados de fora (`forms_left_out`; ela considera só os ligados).
    */
   uncheckedFormIds: UUID[];
   /** Obrigatório ou opcional que o analista escolheu; sem escolha, vale o padrão do modelo. */
@@ -375,8 +375,10 @@ export interface OpeningForms {
 
 /**
  * O que vai na criação: a lista que o analista vê, na ordem e com o obrigatório de cada um (sem escolha, o padrão do
- * modelo), e os ligados que ele tirou, mesmo nenhum. Os ligados fora das duas listas (a tela não conhecia o vínculo)
- * a API põe sozinha. Modelo que saiu dos ativos não vai.
+ * modelo; modelo que saiu dos ativos não vai), e todos os que ele tirou, mesmo nenhum. Dos tirados, a API fica só com
+ * os ligados: a tela pode não conhecer o vínculo (modelos lidos antes dele, ou a categoria de cima sem a lista de
+ * categorias), então vão todos, até 20, primeiro os que a tela sabe ligados. Os ligados fora das duas listas a API
+ * põe sozinha.
  */
 export function openingForms(d: NewTicketDraft, templates: FormTemplate[], categories: Category[] | undefined): OpeningForms {
   const byId = new Map(templates.map((t) => [t.id, t]));
@@ -385,6 +387,7 @@ export function openingForms(d: NewTicketDraft, templates: FormTemplate[], categ
     return template ? [{ template_id: id, required: d.formRequired[id] ?? template.default_required ?? true }] : [];
   });
   const linked = new Set(matchedForms(templates, d.serviceType, effectiveCategory(d), categories).map((m) => m.id));
-  const leftOut = [...new Set(d.uncheckedFormIds)].filter((id) => linked.has(id) && !d.formIds.includes(id));
+  const unchecked = [...new Set(d.uncheckedFormIds)].filter((id) => !d.formIds.includes(id));
+  const leftOut = [...unchecked.filter((id) => linked.has(id)), ...unchecked.filter((id) => !linked.has(id))];
   return { forms, forms_left_out: leftOut.slice(0, MAX_FORMS) };
 }
