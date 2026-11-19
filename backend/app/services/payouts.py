@@ -227,10 +227,15 @@ async def on_assignee_changed(
     """
     newcomer = await db.get(User, new_id) if new_id else None
     paid_per_ticket = newcomer is not None and newcomer.role == UserRole.TECHNICIAN
-    # O valor de quem sai, travado e relido: o envio de uma nota dele pode ter ligado o valor
-    # depois de a OS ser carregada (ou estar ligando agora). Sem isso, "invoice_id = None" não
-    # mudaria nada para o ORM e o valor passaria ao novo técnico ligado à nota do anterior.
-    previous = await _find(db, ticket.id, previous_id, lock=True) if previous_id else None
+    previous: TicketPayout | None = None
+    if previous_id is not None:
+        # A OS antes do valor (a ordem de close_pending_offers e do "Definir valor"): sem impasse
+        # com quem mexe no valor agora.
+        await db.execute(select(Ticket.id).where(Ticket.id == ticket.id).with_for_update())
+        # O valor de quem sai, travado e relido: o envio de uma nota dele pode ter ligado o valor
+        # depois de a OS ser carregada (ou estar ligando agora). Sem isso, "invoice_id = None" não
+        # mudaria nada para o ORM e o valor passaria ao novo técnico ligado à nota do anterior.
+        previous = await _find(db, ticket.id, previous_id, lock=True)
     if previous is not None and previous.status == PayoutStatus.PAID:
         previous = None
     current = await _find(db, ticket.id, new_id) if new_id and paid_per_ticket else None

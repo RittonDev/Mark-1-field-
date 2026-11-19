@@ -485,9 +485,7 @@ async def _signature_after_removal(
     ticket.signature_required = False
 
 
-async def _inactive_templates(
-    db: AsyncSession, ids: Iterable[uuid.UUID | None]
-) -> set[uuid.UUID]:
+async def _inactive_templates(db: AsyncSession, ids: Iterable[uuid.UUID | None]) -> set[uuid.UUID]:
     """Dos modelos informados, os desativados."""
     wanted = {i for i in ids if i is not None}
     if not wanted:

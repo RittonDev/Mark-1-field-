@@ -44,9 +44,7 @@ async def _run(engine: AsyncEngine, sql: str) -> int:
         return (await conn.execute(text(sql))).rowcount
 
 
-async def _fc_assigned(
-    engine: AsyncEngine, ticket_id: str, name: str, **data: Any
-) -> uuid.UUID:
+async def _fc_assigned(engine: AsyncEngine, ticket_id: str, name: str, **data: Any) -> uuid.UUID:
     """Atribuição como a importação do Field Control grava: o nome em to_value."""
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as db:
@@ -76,6 +74,7 @@ async def _found(client: AsyncClient, world: World, tech_id: str, ticket_id: str
     return ticket_id in {item["id"] for item in r.json()["items"]}
 
 
+@requires_db
 async def test_fc_ticket_stays_with_the_technician_after_a_rename(
     client: AsyncClient, world: World, engine: AsyncEngine
 ) -> None:
@@ -162,6 +161,7 @@ async def _user(engine: AsyncEngine, name: str, role: UserRole) -> uuid.UUID:
         return user.id
 
 
+@requires_db
 async def test_migration_fills_the_technician_of_fc_assignments(
     client: AsyncClient, world: World, engine: AsyncEngine
 ) -> None:
@@ -208,6 +208,7 @@ async def test_migration_fills_the_technician_of_fc_assignments(
     assert await _found(client, world, tech_id, tid)
 
 
+@requires_db
 async def test_migration_fills_the_template_of_old_removals(
     client: AsyncClient, world: World, engine: AsyncEngine
 ) -> None:

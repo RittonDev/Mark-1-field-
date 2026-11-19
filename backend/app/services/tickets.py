@@ -1410,9 +1410,7 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
                 "added_ids": [str(h.id) for h in helpers],
             },
         )
-    forms_svc.attach_on_create(
-        db, ticket, chosen_forms, linked_forms, actor, now, unchecked_forms
-    )
+    forms_svc.attach_on_create(db, ticket, chosen_forms, linked_forms, actor, now, unchecked_forms)
 
     if data.assignee_id is not None and not is_requester:
         if not actor.can_manage_tickets and data.assignee_id != actor.id:

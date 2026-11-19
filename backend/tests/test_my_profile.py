@@ -593,10 +593,12 @@ async def test_technician_by_id(client: AsyncClient, world: World) -> None:
     assert (await client.get(changes, headers=an)).json() == []
 
 
-# ------------------------------------------------------------------ revisão de segurança (2026-11-19)
+# ---------------------------------------------------------- revisão de segurança (2026-11-19)
 
 
-async def test_taken_email_is_told_only_after_the_password(client: AsyncClient, world: World) -> None:
+async def test_taken_email_is_told_only_after_the_password(
+    client: AsyncClient, world: World
+) -> None:
     """Sem a senha, ou com a errada, ninguém descobre se um e-mail já está cadastrado; com a certa,
     só algumas trocas por hora."""
     taken = "analista@teste.com.br"
@@ -658,9 +660,9 @@ async def test_temporary_password_cannot_change_email_or_pix(
 async def test_password_lines_and_the_reset_warning(
     client: AsyncClient, world: World, engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A senha criada ou trocada no app entra no histórico, e a troca de e-mail ou PIX até 72 h depois
-    de a central redefinir a senha avisa quem redefiniu (sem bloquear: o técnico novo recebe a senha
-    da central e cadastra o PIX)."""
+    """A senha criada ou trocada no app entra no histórico, e a troca de e-mail ou PIX até 72 h
+    depois de a central redefinir a senha avisa quem redefiniu (sem bloquear: o técnico novo
+    recebe a senha da central e cadastra o PIX)."""
     events = capture_events(monkeypatch)
     temp = await reset_by_central(client, world)
     h = await login_mobile(client, "tecnico@teste.com.br", temp)
@@ -766,7 +768,8 @@ async def test_parallel_wrong_passwords_respect_the_limit(
 async def test_name_takes_only_letters(
     client: AsyncClient, world: World, engine: AsyncEngine
 ) -> None:
-    """O nome vai para os textos do grupo do cliente, o relatório e o portal: sem contato nem link."""
+    """O nome vai para os textos do grupo do cliente, o relatório e o portal: sem contato nem
+    link."""
     for bad in (
         "Tecnico Alfa chame wa.me/5500000000000",
         "Tecnico Alfa 2",
