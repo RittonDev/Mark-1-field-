@@ -3,10 +3,24 @@
 
 import { secureStorage } from "./secureStorage";
 import { useSyncExternalStore } from "react";
+import { ACCESS_DISABLED_MESSAGE, MOBILE_DENIED_MESSAGE } from "./access";
 import { defaultApiUrl, normalizeApiUrl } from "./config";
 import type { TokenResponse, User } from "./types";
 
 export type SessionStatus = "loading" | "signedOut" | "signedIn";
+
+/**
+ * Fim de sessão que o aparelho ainda precisa concluir (sessionEnd.ts). É gravado antes de os tokens saírem: vale mesmo
+ * se o app morrer no meio da limpeza, inclusive na rodada sem tela, e a abertura seguinte conclui e mostra o motivo.
+ */
+export interface SessionEnding {
+  /** Apagar do aparelho as OS, os dados de clientes, as fotos e a fila (técnico desativado ou sem acesso ao app: LGPD). */
+  wipe: boolean;
+  /** Motivo para o login. */
+  notice: string | null;
+  /** Encerrada pelo servidor: sem motivo, o login diz que a sessão expirou. */
+  expired: boolean;
+}
 
 /**
  * O técnico só vê e muda o endereço do servidor em desenvolvimento (Expo Go na rede local) ou num build
@@ -35,7 +49,11 @@ const KEYS = {
   user: "mc_user",
   apiUrl: "mc_api_url",
   lastEmail: "mc_last_email",
+  ending: "mc_session_end",
 } as const;
+
+/** Motivos de saída que apagam os dados do aparelho (LGPD): técnico desativado pela central ou sem acesso ao app. */
+const WIPE_NOTICES: readonly string[] = [ACCESS_DISABLED_MESSAGE, MOBILE_DENIED_MESSAGE];
 
 let state: SessionState = {
   status: "loading",
@@ -68,6 +86,36 @@ function parseUser(raw: string | null): User | null {
   }
 }
 
+const clearTokens = () => Promise.all([write(KEYS.access, null), write(KEYS.refresh, null), write(KEYS.user, null)]);
+
+/** Fim de sessão pendente na memória (undefined: ainda não lido do armazenamento). */
+let ending: SessionEnding | null | undefined;
+
+function parseEnding(raw: string | null): SessionEnding | null {
+  if (!raw) return null;
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (!value || typeof value !== "object") return null;
+    const { wipe, notice, expired } = value as Record<string, unknown>;
+    return { wipe: wipe === true, notice: typeof notice === "string" ? notice : null, expired: expired === true };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Guarda o fim pendente na memória e no armazenamento. A gravação que falha não impede a saída: a limpeza com o app
+ * aberto lê a memória. Não lança erro.
+ */
+async function keepEnding(value: SessionEnding | null) {
+  ending = value;
+  try {
+    await write(KEYS.ending, value ? JSON.stringify(value) : null);
+  } catch (error) {
+    console.warn("Não foi possível guardar o fim da sessão", error);
+  }
+}
+
 export const session = {
   get: (): SessionState => state,
 
@@ -81,15 +129,33 @@ export const session = {
   /**
    * Lê a sessão salva. Se `allowUser` recusar o usuário salvo, a sessão não é aberta
    * (status continua "loading") e a função devolve false para quem chamou encerrá-la.
+   * Com um fim de sessão gravado, a sessão não reabre e o login mostra o motivo (sessionEnd.ts conclui a limpeza).
    */
   async load(allowUser: (user: User) => boolean = () => true): Promise<boolean> {
-    const [access, refresh, user, apiUrl, lastEmail] = await Promise.all([
+    const [access, refresh, user, apiUrl, lastEmail, pending] = await Promise.all([
       secureStorage.getItem(KEYS.access),
       secureStorage.getItem(KEYS.refresh),
       secureStorage.getItem(KEYS.user),
       secureStorage.getItem(KEYS.apiUrl),
       secureStorage.getItem(KEYS.lastEmail),
+      secureStorage.getItem(KEYS.ending),
     ]);
+    ending = parseEnding(pending);
+    if (ending) {
+      // O servidor encerrou a sessão e o app morreu antes de apagar os tokens: termina de apagar.
+      if (access || refresh || user) await clearTokens();
+      update({
+        status: "signedOut",
+        accessToken: null,
+        refreshToken: null,
+        user: null,
+        apiUrl: apiUrl ?? defaultApiUrl(),
+        lastEmail,
+        expired: ending.expired,
+        notice: ending.notice,
+      });
+      return true;
+    }
     const parsed = parseUser(user);
     const hasSession = Boolean(access && refresh && parsed);
     if (hasSession && parsed && !allowUser(parsed)) {
@@ -108,6 +174,8 @@ export const session = {
   },
 
   async signIn(data: TokenResponse) {
+    // Entrou de novo: o fim da sessão anterior não vale mais (o login espera a limpeza dele terminar).
+    await keepEnding(null);
     await Promise.all([
       write(KEYS.access, data.access_token),
       write(KEYS.refresh, data.refresh_token),
@@ -151,14 +219,29 @@ export const session = {
   },
 
   /**
-   * Encerra a sessão. Os dados locais e a fila de operações ficam no aparelho:
-   * se o mesmo técnico entrar de novo, o que estava pendente é enviado.
-   * `notice` aparece na tela de login.
+   * Encerra a sessão. Sem `wipe`, os dados locais e a fila de operações ficam no aparelho: se o mesmo técnico entrar
+   * de novo, o que estava pendente é enviado. `notice` aparece na tela de login. `wipe` (apagar os dados do aparelho)
+   * vem ligado com o motivo de técnico desativado ou sem acesso ao app.
+   * Encerrada pelo servidor (`expired`), com motivo ou com `wipe`, o fim fica gravado antes de os tokens saírem: a
+   * limpeza (sessionEnd.ts) e o motivo no login valem mesmo se o app morrer no meio.
    */
-  async signOut(expired = false, notice: string | null = null) {
-    await Promise.all([write(KEYS.access, null), write(KEYS.refresh, null), write(KEYS.user, null)]);
+  async signOut(expired = false, notice: string | null = null, wipe = notice !== null && WIPE_NOTICES.includes(notice)) {
+    if (expired || notice || wipe) await keepEnding({ wipe, notice, expired });
+    await clearTokens();
     update({ status: "signedOut", accessToken: null, refreshToken: null, user: null, expired, notice });
   },
+
+  /** Fim de sessão gravado e ainda não concluído (sessionEnd.ts), ou null. */
+  async pendingEnd(): Promise<SessionEnding | null> {
+    if (ending !== undefined) return ending;
+    const stored = parseEnding(await secureStorage.getItem(KEYS.ending));
+    // Gravado enquanto lia: vale o mais novo.
+    if (ending === undefined) ending = stored;
+    return ending;
+  },
+
+  /** Grava o fim pendente (null: concluído). Não lança erro. */
+  setPendingEnd: (value: SessionEnding | null): Promise<void> => keepEnding(value),
 };
 
 export function useSession(): SessionState {

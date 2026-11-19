@@ -559,6 +559,50 @@ async def test_prefill_until_the_form_is_completed(client: AsyncClient, world: W
     assert t["forms"][0]["answers"] == expected and t["forms"][0]["prefill"] == {}
 
 
+async def test_template_put_without_the_prefill_key_keeps_it(
+    client: AsyncClient, world: World
+) -> None:
+    an = world.analyst.headers
+    fields = [
+        {"id": "loja", "type": "text", "label": "Loja", "prefill": "location_name"},
+        {"id": "data", "type": "date", "label": "Data", "prefill": "visit_date"},
+        {"id": "obs", "type": "textarea", "label": "Obs"},
+    ]
+    tpl = await template(client, world, "Relatório da visita", fields=fields)
+    url = f"{API}/form-templates/{tpl['id']}"
+    body = {"name": tpl["name"], "service_type_ids": [], "requires_signature": False}
+    # O editor aberto antes da resposta automática existir manda cada pergunta com estas chaves.
+    keys = ("id", "type", "label", "help", "required", "options", "min_photos", "max_photos")
+
+    def old_tab(current: list[dict]) -> list[dict]:
+        return [{k: f[k] for k in keys} for f in current]
+
+    def sources(out: dict) -> dict[str, str | None]:
+        return {f["id"]: f["prefill"] for f in out["fields"]}
+
+    # Sem a chave, a resposta automática fica; sem outra mudança, a versão não sobe.
+    r = await client.put(url, json={**body, "fields": old_tab(tpl["fields"])}, headers=an)
+    assert r.status_code == 200, r.text
+    assert r.json()["version"] == 1
+    assert sources(r.json()) == {"loja": "location_name", "data": "visit_date", "obs": None}
+
+    # Corrigir um texto sobe a versão e mantém a fonte; a pergunta que virou número perde a dela
+    # (o tipo não aceita).
+    changed = old_tab(r.json()["fields"])
+    changed[0]["type"], changed[2]["label"] = "number", "Observações"
+    r = await client.put(url, json={**body, "fields": changed}, headers=an)
+    assert r.status_code == 200, r.text
+    assert r.json()["version"] == 2
+    assert sources(r.json()) == {"loja": None, "data": "visit_date", "obs": None}
+
+    # null explícito limpa.
+    cleared = [{**f, "prefill": None} for f in r.json()["fields"]]
+    r = await client.put(url, json={**body, "fields": cleared}, headers=an)
+    assert r.status_code == 200, r.text
+    assert r.json()["version"] == 3
+    assert sources(r.json()) == {"loja": None, "data": None, "obs": None}
+
+
 def test_prefill_values_of_each_source() -> None:
     store = SimpleNamespace(
         name="Loja Exemplo",
@@ -625,7 +669,7 @@ def test_prefill_values_of_each_source() -> None:
     # data seria a de uma ida anterior: não vem. Antes da primeira chegada, a da agenda.
     for status in (TicketStatus.ON_HOLD_VENDOR, TicketStatus.SCHEDULED, TicketStatus.RESOLVED):
         assert visit(status=status) == (None, today)
-    assert visit(arrived_at=None) == ("2026-12-01", today)
+    assert visit(status=TicketStatus.SCHEDULED, arrived_at=None) == ("2026-12-01", today)
     # Na conclusão vale o momento que ela apurou (form_prefill.visit_moment).
     moment = datetime(2026, 11, 30, 12, 0, tzinfo=UTC)
     final = prefill_for(ticket, fields, {}, final=True, visit_at=moment)  # type: ignore[arg-type]
@@ -641,20 +685,14 @@ def test_prefill_values_of_each_source() -> None:
 
 
 async def _move_back(engine: AsyncEngine, ticket_id: str, days: int, *, first: bool) -> None:
-    """Recua o atendimento da OS: a chegada e o primeiro "Em atendimento" (`first`), ou o início
-    do trecho atual e o último "Em atendimento"."""
+    """Recua o atendimento da OS em `days` dias: o início do trecho atual e, com `first`, a
+    chegada e o primeiro "Em atendimento"; sem `first`, o último "Em atendimento"."""
+    columns = ["work_started_at", *(["arrived_at"] if first else [])]
+    moved = ", ".join(f"{c} = {c} - make_interval(days => :days)" for c in columns)
     order = "ASC" if first else "DESC"
-    column = "arrived_at" if first else "work_started_at"
     async with engine.begin() as conn:
         await conn.execute(
-            text(
-                f"UPDATE tickets SET {column} = {column} - make_interval(days => :days), "
-                "work_started_at = work_started_at - make_interval(days => :days) WHERE id = :id"
-                if first
-                else f"UPDATE tickets SET {column} = {column} - make_interval(days => :days) "
-                "WHERE id = :id"
-            ),
-            {"id": ticket_id, "days": days},
+            text(f"UPDATE tickets SET {moved} WHERE id = :id"), {"id": ticket_id, "days": days}
         )
         await conn.execute(
             text(
