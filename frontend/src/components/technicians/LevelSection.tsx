@@ -366,7 +366,7 @@ export function LevelSection({
                   return (
                     <Fragment key={key}>
                       <tr className={clsx(o.waiver ? "bg-surface-2/50 text-ink-muted" : "text-ink")}>
-                        <td className={clsx("px-2 py-1.5 align-top", !o.waiver && "font-medium")}>
+                        <td className={clsx("min-w-28 px-2 py-1.5 align-top", !o.waiver && "font-medium")}>
                           {LEVEL_OCCURRENCE[o.kind]}
                         </td>
                         <td className="px-2 py-1.5 align-top whitespace-nowrap">
