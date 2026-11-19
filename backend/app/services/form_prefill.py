@@ -68,11 +68,14 @@ def _live_visit(ticket: Ticket) -> datetime | None:
 
 
 async def visit_moment(db: AsyncSession, ticket: Ticket) -> datetime:
-    """O momento da visita na conclusão do formulário: o início do atendimento em curso; fora dele,
-    a última entrada em atendimento depois da última reabertura (a mesma visita que o relatório do
-    cliente mostra); sem nenhuma, agora. Em atendimento, sem consulta."""
-    if ticket.work_started_at is not None:
-        return ticket.work_started_at
+    """O momento da visita na conclusão do formulário: o do valor ao vivo (em atendimento, o início
+    do trecho atual; antes da primeira chegada, a agenda), para a resposta gravada ser a que a
+    pergunta mostrava; fora de atendimento depois de uma chegada, a última entrada em atendimento
+    depois da última reabertura (a visita que o relatório do cliente mostra); sem nenhuma, agora.
+    Com o valor ao vivo, sem consulta."""
+    live = _live_visit(ticket)
+    if live is not None:
+        return live
     last = (
         await db.execute(
             select(TicketEvent.to_value, TicketEvent.created_at)
@@ -94,8 +97,9 @@ async def visit_moment(db: AsyncSession, ticket: Ticket) -> datetime:
 
 def _visit_day(ticket: Ticket, *, final: bool, visit_at: datetime | None) -> date | None:
     """Dia (no fuso da operação) da visita: ao vivo, o de `_live_visit`; na conclusão, o de
-    `visit_at` (sem ele, hoje)."""
-    moment = (visit_at or utcnow()) if final else _live_visit(ticket)
+    `visit_at` (sem ele, o ao vivo ou hoje)."""
+    live = _live_visit(ticket)
+    moment = (visit_at or live or utcnow()) if final else live
     if moment is None:
         return None
     return moment.astimezone(ZoneInfo(settings.TIMEZONE)).date()
@@ -146,7 +150,8 @@ def prefill_for(
 ) -> dict[str, Any]:
     """{campo: valor} das perguntas com resposta automática e ainda sem resposta. Valor vazio
     (a OS sem loja, sem técnico, sem agenda) não entra. `final`: na conclusão do formulário, com
-    a data da visita tirada de `visit_at` (o momento que `visit_moment` apurou; sem ele, hoje)."""
+    a data da visita tirada de `visit_at` (o momento que `visit_moment` apurou; sem ele, a do valor
+    ao vivo ou hoje)."""
     answers = answers or {}
     out: dict[str, Any] = {}
     for field in fields:

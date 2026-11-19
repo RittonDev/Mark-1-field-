@@ -664,12 +664,12 @@ def test_prefill_values_of_each_source() -> None:
 
     today = datetime.now(UTC).astimezone(ZoneInfo(settings.TIMEZONE)).date().isoformat()
     # A OS migrada do Field Control em atendimento não tem o início do trecho: vale a chegada.
-    assert visit(work_started_at=None) == ("2026-11-24", today)
+    assert visit(work_started_at=None) == ("2026-11-24", "2026-11-24")
     # Fora de atendimento depois de uma chegada (pausada, improdutiva, reaberta, concluída), a
     # data seria a de uma ida anterior: não vem. Antes da primeira chegada, a da agenda.
     for status in (TicketStatus.ON_HOLD_VENDOR, TicketStatus.SCHEDULED, TicketStatus.RESOLVED):
         assert visit(status=status) == (None, today)
-    assert visit(status=TicketStatus.SCHEDULED, arrived_at=None) == ("2026-12-01", today)
+    assert visit(status=TicketStatus.SCHEDULED, arrived_at=None) == ("2026-12-01", "2026-12-01")
     # Na conclusão vale o momento que ela apurou (form_prefill.visit_moment).
     moment = datetime(2026, 11, 30, 12, 0, tzinfo=UTC)
     final = prefill_for(ticket, fields, {}, final=True, visit_at=moment)  # type: ignore[arg-type]
