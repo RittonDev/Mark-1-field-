@@ -33,6 +33,8 @@ const LIST_KEYS = new Set([
   "customer",
   "location",
   "payouts",
+  // Trocar o técnico da OS solta o valor da nota fiscal dele (Pagamentos › Notas fiscais).
+  "technician-invoices",
   "solicitacoes",
   "dashboard",
   "tracking",

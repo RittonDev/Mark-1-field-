@@ -36,8 +36,8 @@ from app.services.technician_levels import (
     computed_tier,
     criteria,
     late_detail,
-    risk,
     rework_detail,
+    risk,
     tier_summary,
 )
 from tests.conftest import World, requires_db
@@ -314,7 +314,9 @@ async def test_counts_and_attribution(
         alfa, bravo, charlie = _tech("Alfa"), _tech("Bravo"), _tech("Charlie")
         db.add_all([alfa, bravo, charlie])
         await db.flush()
-        on_time = _done(world, alfa, now=now, scheduled=sched, arrived=sched + timedelta(minutes=30))
+        on_time = _done(
+            world, alfa, now=now, scheduled=sched, arrived=sched + timedelta(minutes=30)
+        )
         late = _done(
             world,
             alfa,
@@ -772,7 +774,10 @@ async def test_grace_through_refresh(engine: AsyncEngine, world: World) -> None:
         assert (detail.tier, detail.at_risk is not None) == (G, True)
         assert detail.at_risk.falls_to == S
         assert [c.key for c in detail.criteria if not c.met] == ["services", "measured"]
-        assert detail.at_risk.failing == ["Atendimentos nos últimos 12 meses", "Atendimentos medidos"]
+        assert detail.at_risk.failing == [
+            "Atendimentos nos últimos 12 meses",
+            "Atendimentos medidos",
+        ]
         later = now + timedelta(days=30)
         fell = await levels.refresh_one(db, alfa.id, later)
         assert fell.standing == Standing(S, later, None)
@@ -790,7 +795,9 @@ async def test_grace_through_refresh(engine: AsyncEngine, world: World) -> None:
 
 
 @requires_db
-async def test_lists_and_suggestions(engine: AsyncEngine, client: AsyncClient, world: World) -> None:
+async def test_lists_and_suggestions(
+    engine: AsyncEngine, client: AsyncClient, world: World
+) -> None:
     an = world.analyst.headers
     r = await client.get(f"{API}/technicians", headers=an)
     assert r.status_code == 200, r.text
@@ -837,7 +844,9 @@ async def test_lists_and_suggestions(engine: AsyncEngine, client: AsyncClient, w
 
 
 @requires_db
-async def test_refresh_route_and_job(engine: AsyncEngine, client: AsyncClient, world: World) -> None:
+async def test_refresh_route_and_job(
+    engine: AsyncEngine, client: AsyncClient, world: World
+) -> None:
     an = world.analyst.headers
     url = f"{API}/technicians/levels/refresh"
     assert (await client.post(url, headers=world.tech.headers)).status_code == 403

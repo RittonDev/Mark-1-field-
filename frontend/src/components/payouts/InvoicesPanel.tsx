@@ -196,6 +196,7 @@ function InvoiceRow({
               e.stopPropagation();
               onOpen(invoice);
             }}
+            aria-label={`${invoice.technician.name}: abrir a nota ${invoiceNo(invoice)}`}
             className="rounded font-bold text-ink hover:underline focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
           >
             {invoice.technician.name}
