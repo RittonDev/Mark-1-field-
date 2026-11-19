@@ -118,7 +118,8 @@ Requisitos:
 - **Só técnicos**: o 403 do login aparece na tela. Ao abrir o app, uma sessão salva de quem não é técnico
   (por exemplo, de antes desta regra) é encerrada e o banco local apagado. Se o papel mudar no servidor
   (técnico promovido a analista), o refresh responde 401 com o motivo: o app encerra a sessão, apaga os
-  dados locais, **inclusive operações ainda não enviadas**, e mostra o texto no login.
+  dados locais, **inclusive operações ainda não enviadas**, e mostra o texto no login. Vale também com o app fora da
+  tela: a rodada em segundo plano apaga os dados ali mesmo (ver "Sessão encerrada pelo servidor").
 - **Primeiro acesso**: técnicos criados pelo analista ou importados recebem senha provisória
   (`must_change_password`); o app exige a troca (`POST /auth/change-password`) antes de liberar o resto e
   confere de novo em `/auth/me` a cada abertura. A troca encerra as outras sessões do usuário, então o app
@@ -126,9 +127,15 @@ Requisitos:
 - **Sessão encerrada pelo servidor** (senha redefinida pelo analista): a API, o refresh e
   o WebSocket (4401) respondem "Sessão encerrada. Entre novamente."; o app volta ao login com esse texto e
   para o rastreamento. A fila local fica guardada para quando o mesmo técnico entrar de novo.
+  - Vale também com o app fora da tela (tarefa periódica ou jornada): a limpeza (sync, notificações da bandeja e
+    agendadas, jornada e tarefa em segundo plano) roda ali mesmo, em `sessionEnd.ts`.
+  - O fim fica gravado no Keychain/Keystore (`mc_session_end`) antes de os tokens saírem: se o sistema matar o app no
+    meio, a próxima rodada sem tela ou a abertura seguinte conclui, e o login mostra o motivo uma vez.
 - **Técnico desativado pela central**: o refresh responde "Seu acesso está desativado. Fale com a central da
   Maxx."; o app sai, para o rastreamento e apaga do aparelho as OS, os dados de clientes, as fotos e a fila
-  (LGPD). Quem já tinha saído antes tem os dados apagados ao entrar com a senha certa (o login dá o mesmo motivo).
+  (LGPD), também com o app fechado (na rodada em segundo plano). Se apagar falhar, a tarefa periódica continua ligada
+  e tenta de novo, e a abertura seguinte também tenta. Quem já tinha saído antes tem os dados apagados ao entrar com a
+  senha certa (o login dá o mesmo motivo).
 - **Só as OS atribuídas ao técnico**: o cliente abre a OS, o analista escolhe o técnico, e o técnico vê só
   as OS em que é o responsável (sem fila de grupo e sem "assumir"). Tela inicial com "Bom dia, {nome}",
   a data, o cartão da jornada e três abas na barra inferior (pílula animada na aba ativa):
@@ -186,6 +193,7 @@ Requisitos:
   aceita pelo valor ou recusa, e quem aceitar primeiro fica com ela.
 - **Meu cadastro** (detalhes abaixo): o técnico mantém a foto, os dados de contato, o endereço e a chave PIX em
   que recebe pelos chamados; e-mail e chave PIX pedem a senha atual, e a central é avisada na hora.
+- **Aviso de privacidade** (detalhes abaixo): o texto da LGPD da homologação, só para leitura.
 - **Notas fiscais (aba Ganhos)** (detalhes abaixo): o técnico envia a nota do mês (PDF, XML ou foto), marca as OS
   que ela cobre e acompanha a conferência da central; a nota é opcional e nunca trava o pagamento.
 - **Meu elo** (detalhes abaixo): o brasão do técnico (Bronze, Prata, Ouro ou Diamante) pelos atendimentos dos
@@ -217,9 +225,10 @@ A central manda uma OS ainda sem técnico, com o valor, para alguns técnicos (c
   vencida sai da lista sozinha.
 - **Avisos**: oferta nova → "Nova oferta de OS" com valor, serviço, bairro e o prazo ("responder até 15:30");
   tocar abre a oferta, nunca a OS, que ainda não é dele. Com o app fora da tela, vira notificação do sistema
-  quando a sincronização roda em segundo plano (seção Notificações), e sai da bandeja quando a oferta fecha. A
-  que fecha sem resposta → "Outro técnico aceitou a OS-…", "A central cancelou a oferta da OS-…" (só com o app
-  na tela). Não há push real: com o app fechado, o técnico fica sabendo pelo texto que a central cola no grupo.
+  quando a sincronização roda em segundo plano, o que exige um app instalado (seção Notificações; no Expo Go, só com o
+  app aberto), e sai da bandeja quando a oferta fecha. A que fecha sem resposta → "Outro técnico aceitou a OS-…", "A
+  central cancelou a oferta da OS-…" (só com o app na tela). Não há push real: com o app fechado, o técnico fica sabendo
+  pelo texto que a central cola no grupo.
 - **Tela da oferta** (`/oferta/<id>`): abrir chama `GET /me/offers/{id}`, que grava a leitura no servidor.
   Mostra nº e título, tipo de serviço, bairro · cidade/UF, janela da visita, o recado da central, os
   formulários (nome e se é obrigatório) e o cartão **Escopo** recolhido: abrir o escopo marca **Escopo lido**
@@ -257,7 +266,8 @@ Regras de [src/lib/field.ts](src/lib/field.ts), espelhando `backend/app/services
   vai de `arrived_at` a `onsite_due_at` com o tempo restante. Faltando 30 min, vibra uma vez e mostra
   "Faltam 30 min do tempo do chamado: avise o analista no grupo"; ao estourar, fica vermelho. Também agenda
   duas **notificações locais** (expo-notifications, funcionam offline e no Expo Go): no aviso e no estouro
-  ([src/lib/onsiteAlerts.ts](src/lib/onsiteAlerts.ts)). Check-in offline prevê o limite com as regras locais;
+  ([src/lib/onsiteAlerts.ts](src/lib/onsiteAlerts.ts)), com a regra dos lembretes da visita: um alerta novo só com 1 min
+  de antecedência, e o já agendado fica até 15 min depois da hora. Check-in offline prevê o limite com as regras locais;
   o servidor confirma no próximo sync. O relógio só anda em "Em atendimento": na pausa da central (aguardando
   peça ou cliente) o anel, a linha e os alertas somem, e na retomada o servidor refaz o limite com o que sobrou.
   Visita improdutiva esperando a central reagendar não mostra prazo de chegada (nem no cartão).
@@ -292,7 +302,8 @@ Regras de [src/lib/field.ts](src/lib/field.ts), espelhando `backend/app/services
   (`serverAnswers` em `lib/forms.ts`): o rascunho começa dela, ela conta para o progresso e para o que falta, e
   abrir o formulário não conta como alteração. O técnico corrige se precisar; ao salvar, todas as respostas vão
   (a preenchida vira resposta). Na conclusão o servidor grava o valor do momento, e trocar o técnico ou remarcar
-  depois não muda nada.
+  depois não muda nada. A data da visita é a do atendimento em curso (na volta ao local, o dia da volta); com a OS
+  pausada ou reaberta depois de uma chegada, a data não vem preenchida.
 - **Preenchimento** (`/formulario/<OS>/<form>`): texto, número, Sim/Não em botões grandes, opções, data,
   "Confirmo" e fotos por campo (câmera/galeria, com a contagem contra o mínimo e o máximo).
 - **Uma pergunta por tela** (padrão, como o passo a passo do Field Control): "Pergunta 3 de 12", um traço
@@ -347,7 +358,9 @@ Regras de [src/lib/field.ts](src/lib/field.ts), espelhando `backend/app/services
   no `app.json` via plugin do expo-location). **Isso exige build de desenvolvimento ou de produção.** No
   Expo Go (e na pré-visualização web) o app cai para o primeiro plano e avisa: "só funciona com o app aberto".
   A tarefa é definida na entrada do app (`index.ts`, o `main` do package.json), não só nas rotas: quando o
-  Android acorda o app fechado com novas posições, ele roda sem tela e as rotas não carregam.
+  Android acorda o app fechado com novas posições, ele roda sem tela e as rotas não carregam. Depois das tarefas, o
+  `index.ts` carrega também o `sessionEnd.ts`: sem tela, é ele que conclui o fim de sessão (limpeza e, se for o caso,
+  apagar os dados).
   Para gerar o build: `npx expo run:android` / `npx expo run:ios` ou `eas build --profile development`.
 
 ## Notificações
@@ -356,29 +369,52 @@ Tudo passa por [src/lib/notifications.ts](src/lib/notifications.ts) (handler, ca
 toque e agendamento); o plano dos lembretes fica em [src/lib/visitReminders.ts](src/lib/visitReminders.ts) e a
 sincronização fora da tela em [src/lib/backgroundSync.ts](src/lib/backgroundSync.ts).
 
+**No Expo Go, OS nova e oferta só aparecem com o app aberto.** Com o app fora da tela, o aviso depende de uma rodada
+de sincronização em segundo plano, e o Expo Go não roda nenhuma (nem a tarefa periódica nem a jornada em segundo
+plano). Num app instalado (development build), a tarefa periódica avisa a cada 15 min ou mais e a jornada aberta, a
+cada ~3 min. O aviso na hora, com o app fechado, precisa do push real (FCM), ainda desligado (ver Limitações). Os
+lembretes da visita são locais e funcionam também no Expo Go, mas só depois que o app sincronizou a OS.
+
 - **Lembretes da visita**: três notificações locais por OS, **1 dia (24 h), 1h40 e 10 min antes** do início da
-  visita, para o responsável e para os outros técnicos da visita: "Amanhã às 08:00 · OS-000123", "Em 1h40 ·
-  OS-000123 às 08:00" e "Em 10 min · OS-000123 às 08:00", com a loja e o endereço no texto (sem os dois, o
-  título da OS); tocar abre a OS. Só a visita ainda não iniciada tem lembrete (atribuída, agendada, reaberta
-  ou pausada pela central com visita marcada): deslocamento (também offline), atendimento, conclusão,
-  cancelamento, improdutiva sem visita nova e saída da lista cancelam, e o lembrete já na bandeja sai.
-- **Nunca atrasado**: só agenda o que cai entre 1 min e 7 dias à frente. OS marcada para daqui a 30 min ganha
-  só o de 10 min; atribuída ontem às 18:00 para hoje às 08:00, os de 1h40 e 10 min. A hora vem do relógio do
-  servidor (corrige o celular adiantado ou atrasado). No máximo 48 lembretes, os mais próximos (o iOS guarda 64
-  agendamentos por app; sobra lugar para os alertas da loja e o da jornada).
+  visita, para o responsável e para os outros técnicos da visita: "Sex 20/11 às 08:00 · OS-000123" (o de 1 dia leva a
+  data da visita, e não "Amanhã", porque fica na bandeja), "Em 1h40 · OS-000123 às 08:00" e "Em 10 min · OS-000123 às
+  08:00", com a loja e o endereço no texto (sem os dois, o título da OS); tocar abre a OS. Só a visita ainda não
+  iniciada tem lembrete (atribuída, agendada, reaberta ou pausada pela central com visita marcada): deslocamento
+  (também offline), atendimento, conclusão, cancelamento, improdutiva sem visita nova e saída da lista cancelam, e o
+  lembrete já na bandeja sai.
+- **Nunca em cima da hora**: lembrete novo só é agendado entre 1 min e 7 dias à frente. OS marcada para daqui a
+  30 min ganha só o de 10 min; atribuída ontem às 18:00 para hoje às 08:00, os de 1h40 e 10 min. O que já está
+  agendado não é cancelado no último minuto nem até 15 min depois da hora (o Android sem alarme exato dispara com
+  atraso), enquanto a visita não começa; "Liberar" (alarme exato) não refaz o que vence em menos de 1 min. A hora vem
+  do relógio do servidor (corrige o celular adiantado ou atrasado). No máximo 48 lembretes, os mais próximos (o iOS
+  guarda 64 agendamentos por app; sobra lugar para os alertas da loja e o da jornada).
 - **Sempre em dia**: o aparelho refaz os agendamentos com as OS guardadas (com o que ainda está na fila) ao fim
   de cada sincronização, a cada ação do técnico, ao abrir o app e quando ele volta à tela. Reagendar troca o
-  lembrete; o horário que já passou fica de fora. São locais: funcionam offline, com o app fechado e no Expo Go.
+  lembrete; o horário que já passou fica de fora. A bandeja também é limpa: o lembrete de 1 dia sai na hora do de
+  1h40, o de 1h40 na do de 10 min e todos no início da visita. São locais: funcionam offline, com o app fechado e no
+  Expo Go, para as OS que já estão no aparelho (a OS atribuída com o app fechado só ganha lembrete depois da
+  sincronização; no Expo Go, ao abrir o app).
 - **Novidades com o app fora da tela**: o que a sincronização já avisa com toast (OS nova, "Você vai na visita
   da…", agendada ou reagendada, cancelada, saiu da lista, peça aprovada ou recusada, oferta nova) vira notificação
-  do sistema com o mesmo texto, por exemplo "Nova OS para você: OS-000123" · "Visita amanhã às 08:00 · LJ001 ·
-  Loja Exemplo". Até duas do mesmo tipo saem uma a uma; mais que isso, um resumo que abre Hoje. A notificação de
-  uma OS é trocada pela seguinte (a cancelada tira a de OS nova da bandeja), e a de uma oferta sai da bandeja
-  quando ela fecha. Com o app na tela, ficam só os toasts.
-- **Sincronização em segundo plano**: na jornada, num build instalado, a localização mantém o app vivo e sai uma
+  do sistema, por exemplo "Nova OS para você: OS-000123" · "Visita sex 20/11 às 08:00 · LJ001 · Loja Exemplo" (o toast
+  na hora continua "Visita amanhã às 08:00 · …"). Até duas do mesmo tipo saem uma a uma; mais que isso, um resumo que
+  abre Hoje. A notificação de uma OS é trocada pela seguinte (a cancelada tira a de OS nova da bandeja), e a de uma
+  oferta sai da bandeja quando ela fecha. Com o app na tela, ficam só os toasts.
+  - Peça recusada: um aviso por OS, "OS-000123: peça recusada" ou "OS-000123: 2 peças recusadas", com o corpo "Fonte
+    ATX e Memória 8 GB: o cliente não aprovou o orçamento. Não instale; fale com a central no grupo." Com mais de 3
+    peças: "A, B, C e mais N".
+  - Sem a permissão de notificações, o que a rodada fora da tela apura fica guardado no aparelho (kv
+    `deferred_notices`, até 20 avisos, por 6 h) e vira toast quando o app volta à tela. Com mais de 3, aparecem "Mais N
+    avisos · Veja em Hoje." e os 2 mais importantes. O aviso de OS que saiu do aparelho e o de oferta que fechou são
+    descartados.
+- **Sincronização em segundo plano** (só num app instalado): na jornada, a localização mantém o app vivo e sai uma
   rodada a cada ~3 min; fora dela, a tarefa periódica do sistema (`expo-background-task`, 15 min ou mais:
-  WorkManager no Android; no iOS o sistema decide e roda pouco). No Expo Go a tarefa periódica não existe, e com
-  o app fechado pelo técnico nada roda. A Conta mostra a situação em **Sincronização > Em segundo plano**.
+  WorkManager no Android; no iOS o sistema decide e roda pouco). Com o app fechado à força pelo técnico, nada roda. A
+  Conta mostra a situação em **Sincronização > Em segundo plano**; no Expo Go, "Só com o app aberto": OS nova e oferta
+  só aparecem com o app aberto (o aviso na hora com o app fora da tela depende do push real).
+- **Fim de sessão na rodada**: se a sessão termina durante a rodada em segundo plano (401 do `/auth/refresh`), ou já
+  estava encerrada com limpeza pendente, a rodada conclui a limpeza do fim de sessão (`sessionEnd.ts`) antes de
+  terminar e desliga a tarefa.
 - **Conta > Notificações**: a chave **Lembretes das visitas** (ligada; desliga os três de uma vez), o próximo
   lembrete, a permissão do celular (**Permitir notificações** ou **Abrir configurações**) e, no Android 12 ou mais
   novo sem o alarme exato, **Horário exato · Pode atrasar alguns minutos** com **Liberar** (`SCHEDULE_EXACT_ALARM`

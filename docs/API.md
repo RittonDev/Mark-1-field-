@@ -166,9 +166,9 @@ Equivale ao "Tipo de OS" do Field Control. Sem `customer_id`, o tipo vale para t
     reconcilia os formulários: entram os ligados que faltam, menos os que uma pessoa tirou da OS (`form_removed` com autor)
     ou deixou de fora na abertura; saem só os que entraram sozinhos (`auto_attached`), não casam mais e ninguém começou
     (pendente, sem resposta e sem foto), com `note` "Saiu com a troca do tipo de OS" (ou "da categoria", ou "do tipo de OS
-    e da categoria"). Posto à mão, respondido ou de modelo desativado nunca sai (só uma pessoa tira). A exigência de assinatura acompanha e entra no `changes` do
-    `updated`; o `ticket.updated` leva `"forms"` em `fields` quando algum formulário entrou ou saiu. Depois da chegada, em
-    OS pausada, reaberta, concluída ou cancelada, nada muda sozinho.
+    e da categoria"). Posto à mão, respondido ou de modelo desativado nunca sai (só uma pessoa tira). A exigência de
+    assinatura acompanha e entra no `changes` do `updated`; o `ticket.updated` leva `"forms"` em `fields` quando algum
+    formulário entrou ou saiu. Depois da chegada, em OS pausada, reaberta, concluída ou cancelada, nada muda sozinho.
 - `POST /tickets/{id}/assign` `{assignee_id|null, team_id?, note?, expected_version?}` → `TicketDetail`
 - `POST /tickets/{id}/take` → `TicketDetail` (atribui ao usuário logado); se a OS não tem analista responsável, ele passa a ser
 - `POST /tickets/{id}/claim` → `TicketDetail` (puxa para a fila do usuário logado: vira o `owner`; o técnico não muda)
