@@ -66,7 +66,9 @@ Origem: `web`, `mobile`, `email`, `phone`, `whatsapp`, `monitoring`.
 - `POST /auth/refresh` `{refresh_token}` → `TokenResponse`. O canal vai gravado no refresh token: se o
   papel do usuário mudou e não é mais aceito no canal, responde **401** e o cliente faz logout.
 - `GET /auth/me` → `UserOut`
-- `POST /auth/change-password` `{current_password, new_password (min 8)}` → `TokenResponse` (200). Encerra as outras sessões do usuário (`sessions_revoked_at`) e devolve tokens novos para este aparelho. 422 com "Senha atual incorreta" ou "A nova senha precisa ser diferente da atual". `UserOut.must_change_password = true` (senha provisória): o app obriga a trocar antes de seguir. Senhas atuais erradas: 5 em 15 min, somando as do Meu cadastro do técnico (e-mail e chave PIX), e depois 429 com `Retry-After`.
+- `POST /auth/change-password` `{current_password, new_password (min 8)}` → `TokenResponse` (200). Encerra as outras sessões do usuário (`sessions_revoked_at`) e devolve tokens novos para este aparelho. 422 com "Senha atual incorreta" ou "A nova senha precisa ser diferente da atual". `UserOut.must_change_password = true` (senha provisória): o app obriga a trocar antes de seguir.
+  - Limite: a tentativa conta antes de conferir a senha, então pedidos em paralelo não furam o limite. São 5 em 15 min, somando as do Meu cadastro do técnico (e-mail e chave PIX); a partir da 6ª sai 429 com `Retry-After`, sem conferir a senha. A senha certa zera a conta.
+  - Técnico: grava no histórico do cadastro (via app, autor o técnico) `password` "criada no app" (era a provisória) ou "trocada no app", e sai `profile.changed` com `fields: ["password"]` via app (só atualiza as listas da central). Ver [Meu cadastro do técnico](#meu-cadastro-do-técnico-2026-11-18).
 - **Sessões encerradas:** tokens emitidos antes de `sessions_revoked_at` (troca/redefinição de senha, desativação) recebem **401** "Sessão encerrada" na API, no refresh e no WebSocket (fecha com 4401). Trate como logout.
 - `GET /auth/providers` → `{microsoft, password_for_staff, microsoft_domains}` (tela de login).
 - **Login Microsoft (Entra ID), só gestão:** o navegador abre `GET /auth/microsoft/start` (302 para a Microsoft, com PKCE). A volta `GET /auth/microsoft/callback` redireciona para `WEB_URL/login/microsoft#code=<código de uso único, 60 s>` ou `WEB_URL/login?sso_error=<not_registered|domain_not_allowed|wrong_tenant|role_not_allowed|inactive|account_mismatch|cancelled|invalid_state|invalid_token|provider_error>`. O site troca o código em `POST /auth/microsoft/exchange` `{code}` → `TokenResponse`. Com `ENTRA_ENFORCE_FOR_STAFF`, analistas e gestores do domínio recebem 403 no login com senha.
@@ -120,8 +122,9 @@ Equivale ao "Tipo de OS" do Field Control. Sem `customer_id`, o tipo vale para t
     `scheduled_from`/`scheduled_to`, `resolved_from`/`resolved_to` (resolvida nesses dias: houve a resolução no período, mesmo se reaberta depois, como os rankings dos relatórios) (AAAA-MM-DD, dias inteiros no fuso da operação, inclusive; OS sem agenda saem do filtro de
     agendamento; datas fora de 2000–2100 → 422), `tag` (repetível, até 20: OS com qualquer uma dessas etiquetas, sem
     diferenciar maiúsculas nem espaços sobrando), `technician_id` (técnico que atuou: o responsável atual, quem foi junto
-    ou quem já foi o responsável antes de uma troca, inclusive no histórico importado do FC; `assignee_id` continua sendo só
-    o atual)
+    ou quem já foi o responsável antes de uma troca, inclusive no histórico importado do FC, pelo `data.technician_id` do
+    evento; o nome só vale no evento sem esse id, e trocar o nome do técnico não tira a OS da busca; `assignee_id` continua
+    sendo só o atual)
   - `page` (1..), `page_size` (1..500, padrão 25), `order_by` ∈ `updated_at, created_at, priority, resolution_due_at, number, scheduled_start, customer` (nome do cliente) com `-` para desc (padrão `-updated_at`); vazios (sem agenda, sem cliente) por último nas duas direções
 - `GET /tickets/export` (gestão) → `text/csv; charset=utf-8` com BOM, separado por `;`, `Content-Disposition: attachment;
   filename="chamados-AAAA-MM-DD.csv"` (dia de hoje no fuso da operação). Os mesmos filtros e o mesmo `order_by` da lista,
@@ -138,13 +141,23 @@ Equivale ao "Tipo de OS" do Field Control. Sem `customer_id`, o tipo vale para t
 - `POST /tickets` `TicketCreate` → `TicketDetail` (201). `tags: [{name, color}] | null` (até 20): sem informar (ou `null`),
   a OS nasce com as etiquetas automáticas da abertura (`on_project` com `project_id`, senão `on_create`); uma lista, mesmo
   vazia, vale como está (a web manda a que o analista vê, já preenchida pelas regras).
-  `forms: [{template_id, required}] | null` (até 20): os formulários, gravados junto com a OS.
-  - Omitido ou `null`: entram os ligados ao tipo de OS e à categoria ([Formulários](#módulos-de-operação-2026-11)), como
-    obrigatórios ou opcionais pelo `default_required` de cada modelo, sem autor no histórico e com o motivo.
-  - Uma lista, mesmo vazia: exatamente ela, na ordem (a Nova OS manda a que o analista vê). Os ligados que ficaram de fora
-    vão para `created.data.forms_left_out` e não entram sozinhos depois.
+  `forms: [{template_id, required}] | null` (até 20) e `forms_left_out: uuid[] | null` (até 20, só vale com `forms`): os
+  formulários, gravados junto com a OS.
+  - Sem `forms` (omitido ou `null`): entram os ligados ao tipo de OS e à categoria ([Formulários](#módulos-de-operação-2026-11)),
+    como obrigatórios ou opcionais pelo `default_required` de cada modelo, sem autor no histórico e com o motivo.
+    `forms_left_out` é ignorado.
+  - Com `forms` (uma lista, mesmo vazia): ela, na ordem, com quem abriu como autor. `forms_left_out` são os ligados ao tipo
+    ou à categoria que o analista desmarcou: vão para `created.data.forms_left_out` (só os ligados e fora da lista) e não
+    entram sozinhos depois. Os ligados que não vieram em nenhuma das duas listas (a tela não conhecia o vínculo) entram
+    depois da lista como automáticos (`auto_attached`), pelo `default_required`, sem autor e com o motivo.
+  - `forms` sem `forms_left_out` (ou com `null`, a Nova OS anterior a ele): todos os ligados fora da lista ficam de fora e
+    vão para `created.data.forms_left_out`.
+  - O `PATCH /tickets/{id}` não tem os dois campos.
   - 422 "Formulário repetido na lista", "Modelo de formulário não encontrado" ou "Modelo de formulário inativo: {nome}"
     antes de gravar: a OS recusada não gasta número. O portal não usa (a solicitação nasce sem tipo e sem categoria).
+  - Na web, a Nova OS manda as duas listas sempre que tem os modelos, mesmo sem a lista de categorias (sem os modelos, vai
+    sem elas). O `template_id` enviado que não volta em `TicketDetail.forms` (API anterior à lista na abertura) aparece
+    no resumo da OS criada como "Formulários que não entraram: …".
 - `GET /tickets/{id}` → `TicketDetail`
 - `PATCH /tickets/{id}` `TicketUpdate` → `TicketDetail`. Efeitos da troca do tipo de OS (`service_type_id`):
   - a categoria acompanha: vazia, ou a padrão do tipo anterior, passa a ser a padrão do novo (`null` se ele não tem). A
@@ -153,7 +166,7 @@ Equivale ao "Tipo de OS" do Field Control. Sem `customer_id`, o tipo vale para t
     reconcilia os formulários: entram os ligados que faltam, menos os que uma pessoa tirou da OS (`form_removed` com autor)
     ou deixou de fora na abertura; saem só os que entraram sozinhos (`auto_attached`), não casam mais e ninguém começou
     (pendente, sem resposta e sem foto), com `note` "Saiu com a troca do tipo de OS" (ou "da categoria", ou "do tipo de OS
-    e da categoria"). Posto à mão ou respondido nunca sai. A exigência de assinatura acompanha e entra no `changes` do
+    e da categoria"). Posto à mão, respondido ou de modelo desativado nunca sai (só uma pessoa tira). A exigência de assinatura acompanha e entra no `changes` do
     `updated`; o `ticket.updated` leva `"forms"` em `fields` quando algum formulário entrou ou saiu. Depois da chegada, em
     OS pausada, reaberta, concluída ou cancelada, nada muda sozinho.
 - `POST /tickets/{id}/assign` `{assignee_id|null, team_id?, note?, expected_version?}` → `TicketDetail`
@@ -261,7 +274,9 @@ não duplica (reenvio seguro do lote). Histórico apagado após `TRACKING_RETENT
 Público (sem login, pelo link): `GET /public/onboarding/catalog` (áreas, disponibilidade, níveis, sugestões de skill,
 versão do aviso de privacidade) · `GET /public/onboarding/{token}` → `{valid, expires_at}` ·
 `POST /public/onboarding/{token}` (ficha + `password` + `privacy_consent: true` + `photo` em data URL) → `{protocol}`;
-410 se o link expirou, foi cancelado ou já usado; 422 com CPF/UF/e-mail inválido ou e-mail já cadastrado.
+410 se o link expirou, foi cancelado ou já usado; 422 com CPF/UF/e-mail inválido ou e-mail já cadastrado. E-mail de
+domínio da empresa (`ENTRA_ALLOWED_DOMAINS`, o domínio exato): 422 "Use um e-mail que não seja da empresa", antes da
+checagem de e-mail já usado, e o link não é gasto.
 Gestão: `GET|POST /onboarding/invites` (`{label?, reusable, days_valid}`; o `token` só aparece na criação) ·
 `DELETE /onboarding/invites/{id}` · `GET /onboarding/applications?status=` · `GET /onboarding/applications/pending-count` ·
 `GET /onboarding/applications/{id}` (com `photo_url` assinado) · `POST .../{id}/approve {team_id?, job_title?}` → `UserOut`
@@ -324,8 +339,8 @@ acabou de sair dele, e o `ticket.offer` das ofertas dele); notas internas não c
 Só para a gestão (analistas, supervisores, admin): `technician.location` `{user_id, name, latitude, longitude, recorded_at,
 accuracy_m, speed_mps, heading, battery_pct, is_mock}` (o ponto mais novo do lote, inteiro: o que não veio do app vai null),
 `technician.shift` `{user_id, name, on_shift}` (esses dois só com o Mapa ao vivo), `onboarding.submitted` `{application_id, name}`
-(ficha nova na homologação) e `profile.changed` `{user_id, name, actor_id, actor_name, occurred_at, data: {fields, via}}`
-(cadastro do técnico alterado no app ou pela central; só com Técnicos ou Pagamentos: ver
+(ficha nova na homologação) e `profile.changed` `{user_id, name, actor_id, actor_name, occurred_at, data: {fields, via,
+after_reset?}}` (cadastro do técnico alterado no app ou pela central; só com Técnicos ou Pagamentos: ver
 [Meu cadastro do técnico](#meu-cadastro-do-técnico-2026-11-18)).
 O cliente pode mandar `{"type":"ping"}` e recebe `{"type":"pong"}`.
 Ao receber um evento, recarregue a OS/lista (o evento não carrega o objeto inteiro).
@@ -352,11 +367,15 @@ Todos exigem analista ou gestor, salvo indicação. Valores em R$ chegam como n�
   - **Entram sozinhos** (2026-11-18). O modelo ativo entra na OS cujo tipo de OS está em `service_type_ids` ou cuja
     categoria, ou qualquer uma acima dela (até 10 níveis), está em `category_ids`: ligar à categoria-mãe vale para as
     subcategorias, e tipo e categoria somam. Entra como obrigatório ou opcional pelo `default_required` (padrão `true`); o
-    obrigatório que pede assinatura liga `signature_required`. Quando: na abertura sem lista (`POST /tickets` sem `forms`),
-    na troca do tipo ou da categoria antes da visita (`PATCH /tickets/{id}`) e com "Levar também às OS que ainda não
-    começaram" no modelo. Os eventos `form_added` desses vêm sem autor ("Sistema"), com `note` 'Pelo tipo de OS “{nome}”'
-    ou 'Pela categoria “{nome completo}”' e `data {form_id, template_id, required, auto}`; `form_removed` leva
-    `data.template_id`. Modelo desativado não entra mais e as OS que já têm o formulário continuam com ele.
+    obrigatório que pede assinatura liga `signature_required`. Quando: na abertura (sem lista, ou os ligados que a Nova OS
+    não trouxe nem desmarcou: ver `forms_left_out` em `POST /tickets`), na troca do tipo ou da categoria antes da visita
+    (`PATCH /tickets/{id}`) e com "Levar também às OS que ainda não começaram" no modelo. Os eventos `form_added` desses
+    vêm sem autor ("Sistema"), com `note` 'Pelo tipo de OS “{nome}”' ou 'Pela categoria “{nome completo}”' e
+    `data {form_id, template_id, required, auto}`; `form_removed` leva `data.template_id` (os antigos, só com `form_id`,
+    ganharam o `template_id` na migração `e4b6d8f0a2c3` quando o nome é de um modelo só: a remoção feita por uma pessoa
+    antes da subida também não volta sozinha). Modelo desativado não entra mais. As OS que já têm o formulário continuam
+    com ele: a troca do tipo ou da categoria antes da visita não o tira, nem salvar o modelo com "Levar também…" (modelo
+    inativo não entra nem sai); só uma pessoa tira.
   - `FormTemplate` ganha `category_ids: uuid[]` (as categorias ligadas; id de categoria apagada é ignorado) e
     `default_required`. No POST, omitidos valem `[]` e `true`; no PUT, omitidos (ou `null`) mantêm o que o modelo tem.
   - `POST /form-templates?apply_to_pending=true` e `PUT /form-templates/{id}?apply_to_pending=true`: além do `applied_to`
@@ -372,16 +391,23 @@ Todos exigem analista ou gestor, salvo indicação. Valores em R$ chegam como n�
   - `GET /tickets/{id}/forms/suggestions`: os modelos ativos ligados ao tipo e à categoria da OS (com as de cima) que ainda
     não estão nela.
   - `TicketFormOut` ganha `auto_attached` (entrou sozinho) e `prefill`.
-  - **Resposta automática:** `FormField.prefill` (`null` ou omitido: a pergunta é do técnico) liga a pergunta a um dado da
-    OS que o técnico já vê: `location_name`, `location_code`, `customer`, `address` (o endereço do atendimento; sem ele,
+  - **Resposta automática:** `FormField.prefill` (`null`: a pergunta é do técnico) liga a pergunta a um dado da OS que o
+    técnico já vê: `location_name`, `location_code`, `customer`, `address` (o endereço do atendimento; sem ele,
     "rua, bairro, cidade-UF" da loja), `city` ("cidade-UF"), `ticket_code` (OS-000123), `technician`, `service_type` e
-    `visit_date` (o dia local da chegada; sem ela, o da visita agendada). Texto e texto longo aceitam todas; data, só
-    `visit_date` (combinação inválida volta `null`). O modelo grava `prefill` só quando preenchido.
-    `GET /form-templates/catalog` traz `prefill_sources: [{key, label, types}]`.
+    `visit_date`. Texto e texto longo aceitam todas; data, só `visit_date` (combinação inválida volta `null`). O modelo
+    grava `prefill` só quando preenchido. `GET /form-templates/catalog` traz `prefill_sources: [{key, label, types}]`.
+    - `visit_date` é o dia local do atendimento em curso: em atendimento, o início do trecho atual (na volta ao local, o
+      dia da volta; na OS do Field Control em atendimento, a chegada); antes da primeira chegada, o da visita agendada;
+      fora de atendimento depois de uma chegada (pausada, improdutiva, reaberta, concluída), não vem.
+    - No POST do modelo, a pergunta sem a chave `prefill` é do técnico. No `PUT /form-templates/{id}`, a pergunta enviada
+      sem a chave mantém a fonte gravada na pergunta de mesmo `id` (se o tipo ainda aceitar a fonte), sem subir a versão
+      por isso; `prefill: null` explícito limpa. O construtor da web sempre manda a chave (uma aba aberta antes da
+      resposta automática não apaga a fonte).
   - `TicketFormOut.prefill` = `{campo: valor}` das perguntas com fonte e ainda sem resposta (valor vazio não entra), ao
     vivo enquanto o formulário não está concluído (vem em `TicketDetail.forms`, no sync e nas rotas do formulário). A
-    conclusão grava o valor nas respostas antes de conferir os obrigatórios (sem chegada nem agenda, a data é a de hoje);
-    depois disso, trocar o técnico ou remarcar não muda nada e `prefill` vem `{}`. O técnico pode corrigir: o app trata
+    conclusão grava o valor nas respostas antes de conferir os obrigatórios (a data da visita é a mostrada; sem ela, o dia
+    da última entrada em atendimento depois da última reabertura; sem nenhuma, hoje); depois disso, trocar o técnico ou
+    remarcar não muda nada e `prefill` vem `{}`. O técnico pode corrigir: o app trata
     `{...prefill, ...answers}` como a resposta do servidor e manda tudo ao salvar.
 - **Custos extras:** `GET|POST /tickets/{id}/expenses` (técnico só lê; solicitante recebe vazio) · `PATCH|DELETE /expenses/{id}` ·
   `GET /expenses?start&end&technician_id&status&customer_id` (relatório) · `POST /expenses/mark-paid {ids}` → `{updated}`
