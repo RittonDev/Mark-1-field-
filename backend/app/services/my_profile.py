@@ -3,9 +3,13 @@ PIX para receber por chamado.
 
 Segurança (conta invadida desviando pagamento): e-mail e chave PIX, inclusive remover a chave, pedem
 a senha atual, com o mesmo limite de tentativas da troca de senha (login_guard, "pwd:{id}": 5 erros
-somando as duas telas). Toda mudança fica no histórico do cadastro (services/user_history.py) e a
-rota avisa a central depois do commit. Trocar o e-mail não encerra as sessões (a senha é a mesma): o
-login passa a ser o e-mail novo.
+somando as duas telas, contados antes de conferir). Com a senha provisória (a que a central gerou e
+conhece) os dois ficam fechados até o técnico criar a dele. A senha vem antes de "E-mail já
+cadastrado": sem ela, ninguém descobre quais e-mails existem. E-mail de domínio da empresa não
+entra (services/onboarding.company_email). Toda mudança fica no histórico do cadastro
+(services/user_history.py) e a rota avisa a central depois do commit; a troca de e-mail ou PIX até
+72 h depois de a central redefinir a senha vai com quem redefiniu (user_history.after_reset).
+Trocar o e-mail não encerra as sessões (a senha é a mesma): o login passa a ser o e-mail novo.
 
 Grupo, cargo, acesso ao app, papel, serviços, jornada e senha provisória continuam com a central;
 CPF, CNPJ/MEI, nascimento, ferramentas, veículo e CNH continuam só na ficha da homologação.
@@ -28,8 +32,12 @@ from app.services.errors import WorkflowError
 PASSWORD_REQUIRED = "Confirme com a sua senha atual para mudar o e-mail ou a chave PIX"
 WRONG_PASSWORD = "Senha atual incorreta"
 EMAIL_TAKEN = "E-mail já cadastrado"
+TEMPORARY_PASSWORD = "Crie sua senha no app antes de mudar o e-mail ou a chave PIX"
 # "Muitas tentativas de confirmar a senha. Tente de novo em N minutos."
 CONFIRM_ACTION = "de confirmar a senha"
+# Trocas de e-mail por hora, já com a senha certa: quem sabe a própria senha também não testa à
+# vontade quais e-mails de outras pessoas estão cadastrados.
+MAX_EMAIL_CHECKS_PER_HOUR = 10
 
 # Campos de texto que só são copiados (a normalização é do schema).
 _PLAIN = ("name", "email", "phone", "coverage_area", "address_line", "address_district")
@@ -75,12 +83,12 @@ def _phone_digits(value: str | None) -> str:
 
 
 async def confirm_password(user: User, password: str | None) -> None:
-    """Senha atual para e-mail e chave PIX: o contador de erros é o da troca de senha."""
+    """Senha atual para e-mail e chave PIX: o contador de erros é o da troca de senha, e a
+    tentativa conta antes do bcrypt (pedidos em paralelo não furam o limite)."""
     if not password:
         raise WorkflowError(PASSWORD_REQUIRED)
-    await login_guard.check_password_change(str(user.id), action=CONFIRM_ACTION)
+    await login_guard.password_attempt(str(user.id), action=CONFIRM_ACTION)
     if not await verify_password_async(password, user.password_hash):
-        await login_guard.password_change_failed(str(user.id))
         raise WorkflowError(WRONG_PASSWORD)
     await login_guard.password_change_succeeded(str(user.id))
 
@@ -139,15 +147,25 @@ async def update(db: AsyncSession, user: User, data: MyProfileUpdate) -> list[di
     """PATCH /me/profile: aplica e grava no histórico o que mudou; devolve as mudanças (vazio:
     nada mudou, sem histórico nem aviso). O commit e o aviso à central são da rota.
 
-    Levanta WorkflowError (422) com e-mail já cadastrado, sem a senha ou com a senha errada, e
-    login_guard.LoginBlocked (429) depois de muitas senhas erradas."""
+    Ordem, quando o e-mail ou a chave PIX mudam: senha provisória (TEMPORARY_PASSWORD), e-mail da
+    empresa (onboarding.COMPANY_EMAIL), senha atual (PASSWORD_REQUIRED, WRONG_PASSWORD; conta a
+    tentativa) e só então e-mail já cadastrado (EMAIL_TAKEN). Levanta WorkflowError (422) nesses
+    casos, login_guard.LoginBlocked (429) depois de muitas senhas erradas e login_guard.RateLimited
+    (429) depois de MAX_EMAIL_CHECKS_PER_HOUR trocas de e-mail na hora."""
     new = await _wanted(db, user, data)
     if not new:
         return []
-    if "email" in new and await onboarding.email_taken(db, new["email"]):
-        raise WorkflowError(EMAIL_TAKEN)
-    if "email" in new or "pix" in new:
+    guarded = "email" in new or "pix" in new
+    if guarded and user.must_change_password:
+        raise WorkflowError(TEMPORARY_PASSWORD)
+    if "email" in new and onboarding.company_email(new["email"]):
+        raise WorkflowError(onboarding.COMPANY_EMAIL)
+    if guarded:
         await confirm_password(user, data.current_password)
+    if "email" in new:
+        await login_guard.hit("profile-email", str(user.id), MAX_EMAIL_CHECKS_PER_HOUR, 3600)
+        if await onboarding.email_taken(db, new["email"]):
+            raise WorkflowError(EMAIL_TAKEN)
     before = await user_history.snapshot(db, user)
     for key in (*_PLAIN, "address_zip"):
         if key in new:

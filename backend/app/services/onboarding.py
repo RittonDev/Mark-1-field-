@@ -34,6 +34,7 @@ from app.services.realtime import bus
 MAX_PHOTO_BYTES = 2 * 1024 * 1024
 LINK_KIND = "onboarding"
 EXPIRED_NOTE = "Expirada sem análise"
+COMPANY_EMAIL = "Use um e-mail que não seja da empresa"
 
 
 class InviteUnavailable(Exception):
@@ -106,6 +107,16 @@ def _decode_photo(data_url: str) -> tuple[bytes, str]:
         raise WorkflowError(str(exc)) from exc
 
 
+def company_email(email: str) -> bool:
+    """E-mail de um domínio da empresa (os do login Microsoft, settings.entra_domains). O técnico é
+    terceiro: com um desses no login dele, a pessoa contratada com esse e-mail não entraria pela
+    Microsoft (o login acha o técnico pelo e-mail) e a central não conseguiria cadastrá-la. Mesma
+    comparação do login Microsoft (services/entra.py): o domínio exato."""
+    if "@" not in email:
+        return False
+    return email.rsplit("@", 1)[1].strip().lower() in settings.entra_domains
+
+
 async def email_taken(db: AsyncSession, email: str, exclude_id: uuid.UUID | None = None) -> bool:
     if await db.scalar(select(User.id).where(func.lower(User.email) == email.lower())):
         return True
@@ -134,6 +145,8 @@ async def document_taken(db: AsyncSession, document: str) -> bool:
 async def submit(
     db: AsyncSession, invite: OnboardingInvite, data: ApplicationIn
 ) -> TechnicianApplication:
+    if company_email(data.email):
+        raise WorkflowError(COMPANY_EMAIL)
     if await email_taken(db, data.email):
         raise WorkflowError(
             "Já existe um cadastro com este e-mail. Se você já enviou a ficha, aguarde a análise."

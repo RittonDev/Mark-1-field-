@@ -29,19 +29,24 @@ async def get_my_profile(user: TechnicianUser) -> MyProfile:
 @router.patch("/me/profile", response_model=MyProfile)
 async def update_my_profile(body: MyProfileUpdate, db: DB, user: TechnicianUser) -> MyProfile:
     """Só o que vier no corpo muda. E-mail e chave PIX pedem `current_password` (422 sem ela ou
-    errada; 429 depois de 5 erros em 15 min, somando os da troca de senha). Sem nada novo: 200, sem
-    histórico e sem aviso."""
+    errada, e com a senha provisória; 429 depois de 5 erros em 15 min, somando os da troca de
+    senha). A senha é conferida antes de "E-mail já cadastrado". Sem nada novo: 200, sem histórico
+    e sem aviso. A troca de e-mail ou PIX até 72 h depois de a central redefinir a senha vai no
+    aviso com `after_reset` (quem redefiniu e quando)."""
     try:
         changes = await svc.update(db, user, body)
-    except login_guard.LoginBlocked as exc:
+    except (login_guard.LoginBlocked, login_guard.RateLimited) as exc:
         raise HTTPException(
             status.HTTP_429_TOO_MANY_REQUESTS,
             str(exc),
             headers={"Retry-After": str(exc.retry_after)},
         ) from exc
     if changes:
+        after_reset = await user_history.after_reset(db, user, changes)
         await db.commit()
-        await user_history.publish_changed(user, changes, via=VIA_APP, actor=user)
+        await user_history.publish_changed(
+            user, changes, via=VIA_APP, actor=user, after_reset=after_reset
+        )
     return svc.profile(user)
 
 

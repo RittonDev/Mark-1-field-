@@ -16,7 +16,8 @@
 // tela, a jornada e a tarefa periódica do sistema (backgroundSync.ts).
 //
 // As novidades do download (OS nova, reagendada, cancelada, peça decidida, oferta nova) viram toast com
-// o app na tela e notificação do sistema fora dela (announce, notifications.ts).
+// o app na tela e notificação do sistema fora dela (announce, notifications.ts); sem a permissão, ficam
+// guardadas e viram toast quando o app volta à tela.
 //
 // A rodada também confere as ofertas de OS com preço (GET /me/offers, lib/offers.ts): antes do upload das fotos,
 // entre uma foto e outra, depois do download e quando o download falha por erro do servidor. E, com o app na tela,
@@ -93,7 +94,16 @@ import { pendingRequiredForms } from "./forms";
 import { haptic } from "./haptics";
 import { celebrateLevel, levelStored, saveLevel, type LevelRefreshResult, type LevelSaved } from "./level";
 import { isDone, isHelper } from "./lists";
-import { dismissNews, dismissNewsExcept, inForeground, presentNews, syncLocalAlerts, type NewsItem } from "./notifications";
+import {
+  deferNews,
+  dismissNews,
+  dismissNewsExcept,
+  inForeground,
+  presentNews,
+  syncLocalAlerts,
+  takeDeferredNews,
+  type NewsItem,
+} from "./notifications";
 import {
   announceClosedOffers,
   applyOfferList,
@@ -851,16 +861,23 @@ interface Notice extends NewsItem {
   tone?: ToastTone;
   /** Peça aprovada: com o app na tela, o momento de sucesso em vez do toast. */
   success?: boolean;
+  /**
+   * Texto do toast na hora, quando difere do `body` (que fica na bandeja e no aviso guardado): "Visita amanhã às…"
+   * no toast, "Visita sex 21/11 às…" na notificação.
+   */
+  toast?: string;
 }
 
 function showNotice(notice: Notice) {
-  if (notice.success) showSuccess(notice.title, notice.body);
-  else showToast(notice.title, { description: notice.body, tone: notice.tone, ticketId: notice.ticketId, offerId: notice.offerId });
+  const description = notice.toast ?? notice.body;
+  if (notice.success) showSuccess(notice.title, description);
+  else showToast(notice.title, { description, tone: notice.tone, ticketId: notice.ticketId, offerId: notice.offerId });
 }
 
 /**
  * Mostra os avisos. App na tela: toasts (e a vibração). Fora dela (rodada em segundo plano): notificação do sistema,
- * a não ser que o push da central já avise este aparelho; sem permissão ou com erro, fica o toast.
+ * a não ser que o push da central já avise este aparelho. Sem permissão ou com erro, o toast ali sumiria sem ninguém
+ * ver: o aviso fica guardado e vira toast quando o app volta à tela (showDeferredNotices).
  */
 function announce(notices: Notice[], vibrate?: () => void) {
   if (!notices.length) return;
@@ -872,10 +889,54 @@ function announce(notices: Notice[], vibrate?: () => void) {
     if (stale.length) void dismissNews(stale);
     return;
   }
+  const userId = session.get().user?.id;
   void (async () => {
     if (await pushLive()) return;
-    if (!(await presentNews(notices))) notices.forEach(showNotice);
-  })();
+    if (await presentNews(notices)) return;
+    if (!userId) return;
+    // Guardado com o texto da bandeja: o relativo ("amanhã") pode virar outro dia até o técnico voltar.
+    await deferNews(
+      userId,
+      notices.map((notice) => ({ ...notice, toast: undefined })),
+    );
+    // O app voltou à tela enquanto guardava: mostra já.
+    if (inForeground()) await showDeferredNotices();
+  })().catch((error: unknown) => console.warn("Não foi possível guardar os avisos", error));
+}
+
+/**
+ * Avisos guardados por rodadas fora da tela (notifications.ts, deferNews): viram toast quando o app volta à tela e
+ * na abertura. O toast mostra até 3 de cada vez: com mais que isso, um resumo e os 2 mais importantes (os de erro,
+ * como "não instale" e "foi cancelada", e depois os mais novos).
+ */
+async function showDeferredNotices() {
+  const user = session.get().user;
+  if (!user || !inForeground()) return;
+  const notices = await takeDeferredNews<Notice>(user.id);
+  if (!notices.length) return;
+  if (!inForeground() || session.get().user?.id !== user.id) {
+    // Saiu da tela (ou da conta) enquanto lia: volta para a fila.
+    if (session.get().user?.id === user.id) await deferNews(user.id, notices);
+    return;
+  }
+  const stale = notices.flatMap((notice) => notice.replaces ?? []);
+  if (stale.length) void dismissNews(stale);
+  let shown = notices;
+  if (notices.length > 3) {
+    const weight = (notice: Notice) => (notice.tone === "error" ? 1 : 0);
+    const chosen = new Set(
+      notices
+        .map((notice, index) => ({ notice, index }))
+        .sort((a, b) => weight(b.notice) - weight(a.notice) || b.index - a.index)
+        .slice(0, 2)
+        .map(({ notice }) => notice),
+    );
+    shown = notices.filter((notice) => chosen.has(notice));
+    showToast(`Mais ${notices.length - shown.length} avisos`, { description: "Veja em Hoje." });
+  }
+  if (shown.some((notice) => notice.tone === "error")) haptic.warning();
+  else if (shown.some((notice) => notice.success)) haptic.success();
+  shown.forEach(showNotice);
 }
 
 /** OS de um aviso. */

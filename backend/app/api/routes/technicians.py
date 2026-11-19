@@ -303,13 +303,14 @@ async def suggest_for_place(
 async def technician_changes(
     user_id: uuid.UUID,
     db: DB,
-    _: TechniciansView,
+    viewer: TechniciansView,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
-) -> list[UserChange]:
+) -> list[UserChange] | list[UserChangeOut]:
     """Histórico do cadastro, do mais novo para o mais antigo: pelo técnico (app) e pela central,
-    com quem fez. A chave PIX vem só mascarada."""
+    com quem fez. A chave PIX vem só mascarada; para quem não tem Pagamentos, nem isso: a chave
+    vira "***" e o titular não vem (user_history.for_viewer)."""
     user = await svc.get_technician(db, user_id)
-    return await user_history.list_changes(db, user.id, limit)
+    return user_history.for_viewer(await user_history.list_changes(db, user.id, limit), viewer)
 
 
 @router.delete("/technicians/{user_id}/pix", status_code=status.HTTP_204_NO_CONTENT)

@@ -472,8 +472,9 @@ async def test_central_list_pending_queue_and_pages(
     assert await page(offset=2) == (["103", "102"], 5)
     assert await page(offset=4) == (["101"], 5)
     assert await page(offset=5) == ([], 5)
+    assert await page(offset=2**63 - 1) == ([], 5)
     assert await page(status="checked") == (["105", "104"], 2)
-    for offset in (-1, 2**31):
+    for offset in (-1, 2**63):
         r = await client.get(f"{API}/technician-invoices", params={"offset": offset}, headers=an)
         assert r.status_code == 422, (offset, r.text)
 
@@ -614,9 +615,7 @@ async def test_link_to_another_technicians_invoice_counts_as_free(
         (payout, True, None),
         (old_payout, False, None),
     ]
-    r = await send(
-        client, other, number="77", amount="300.00", payout_ids=f"{payout},{old_payout}"
-    )
+    r = await send(client, other, number="77", amount="300.00", payout_ids=f"{payout},{old_payout}")
     assert r.status_code == 201, r.text
     sent = r.json()
     assert [p["payout_id"] for p in sent["payouts"]] == [payout, old_payout]

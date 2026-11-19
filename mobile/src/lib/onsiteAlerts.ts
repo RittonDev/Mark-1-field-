@@ -8,6 +8,8 @@
 import { getFieldRules, ONSITE_STATUSES } from "./field";
 import { formatMinutes } from "./format";
 import type { AlertsContext } from "./notifications";
+// A mesma regra dos lembretes da visita: o agendado fica até 15 min depois da hora; o novo, com 1 min de antecedência.
+import { VISIT_KEEP_GRACE_MS as KEEP_GRACE_MS, VISIT_MIN_LEAD_MS as MIN_LEAD_MS } from "./visitReminders";
 
 const PREFIX = "onsite-";
 /** Canal do Android "Tempo na loja" (criado em notifications.ts). */
@@ -21,20 +23,20 @@ interface Wanted {
 }
 
 /**
- * Reconcilia os alertas agendados com as OS do técnico (idempotente): mantém o que não mudou, cancela o resto e
- * agenda o que falta. Sem técnico ou sem permissão, não fica nenhum. `force`: agenda tudo de novo (ex.: o alarme
- * exato acabou de ser liberado).
+ * Reconcilia os alertas agendados com as OS do técnico (idempotente). O agendado que não mudou fica, inclusive no
+ * último minuto e até 15 min depois da hora (o alarme inexato do Android ainda não disparou); o resto é cancelado.
+ * Novo só entra com 1 min de antecedência ou mais. Sem técnico ou sem permissão, não fica nenhum. `force`: agenda de
+ * novo o que ainda dá tempo (ex.: o alarme exato acabou de ser liberado).
  */
-export async function reconcileOnsiteAlerts({ N, user, tickets, granted, force, alive }: AlertsContext): Promise<void> {
+export async function reconcileOnsiteAlerts({ N, user, tickets, granted, force, alive, now }: AlertsContext): Promise<void> {
   const wanted = new Map<string, Wanted>();
   if (user && granted) {
     const { onsite_warning_minutes: warnMin } = getFieldRules();
-    const now = Date.now();
     for (const t of tickets) {
       if (t.assignee?.id !== user.id || !ONSITE_STATUSES.includes(t.status) || !t.arrived_at || !t.onsite_due_at) continue;
       const due = new Date(t.onsite_due_at).getTime();
       const warnAt = due - warnMin * 60_000;
-      if (warnAt > now) {
+      if (warnAt >= now - KEEP_GRACE_MS) {
         wanted.set(`${PREFIX}warning-${t.id}`, {
           ticketId: t.id,
           date: new Date(warnAt),
@@ -42,7 +44,7 @@ export async function reconcileOnsiteAlerts({ N, user, tickets, granted, force, 
           body: `Faltam ${formatMinutes(warnMin)} do tempo do chamado: avise o analista no grupo.`,
         });
       }
-      if (due > now) {
+      if (due >= now - KEEP_GRACE_MS) {
         wanted.set(`${PREFIX}over-${t.id}`, {
           ticketId: t.id,
           date: new Date(due),
@@ -57,12 +59,12 @@ export async function reconcileOnsiteAlerts({ N, user, tickets, granted, force, 
   const kept = new Set<string>();
   for (const n of scheduled) {
     const want = wanted.get(n.identifier);
-    const same = !force && want && n.content.data?.at === want.date.toISOString() && n.content.data?.ticketId === want.ticketId;
-    if (same) kept.add(n.identifier);
+    const same = !!want && n.content.data?.at === want.date.toISOString() && n.content.data?.ticketId === want.ticketId;
+    if (same && !(force && want.date.getTime() >= now + MIN_LEAD_MS)) kept.add(n.identifier);
     else await N.cancelScheduledNotificationAsync(n.identifier);
   }
   for (const [identifier, want] of wanted) {
-    if (kept.has(identifier)) continue;
+    if (kept.has(identifier) || want.date.getTime() < now + MIN_LEAD_MS) continue;
     if (!alive()) return; // saiu da conta no meio da volta
     await N.scheduleNotificationAsync({
       identifier,

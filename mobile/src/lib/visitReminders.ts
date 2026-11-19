@@ -7,7 +7,7 @@
 
 import { addressOf } from "./address";
 import { awaitingNewVisit, relativeDay } from "./field";
-import { formatTime } from "./format";
+import { formatTime, formatWeekdayDate } from "./format";
 import type { TicketDetail, TicketStatus, UUID } from "./types";
 
 export type VisitReminderKind = "day" | "leave" | "soon";
@@ -28,10 +28,21 @@ export const VISIT_PREFIX = "visit-";
 export const MAX_VISIT_REMINDERS = 48;
 /** Só agenda o que cabe nos próximos 7 dias (a janela anda a cada reconciliação). */
 export const VISIT_HORIZON_MS = 7 * 86_400_000;
-/** Lembrete para daqui a menos de 1 min fica de fora: nunca dispara atrasado. */
+/** Lembrete novo só com 1 min de antecedência ou mais: nunca dispara atrasado. */
 export const VISIT_MIN_LEAD_MS = 60_000;
+/**
+ * O lembrete já agendado fica até 15 min depois da hora dele (enquanto a visita não começa): sem o alarme exato, o
+ * Android dispara com atraso e o pedido segue na lista do sistema até lá. Cancelado ali, ele se perderia.
+ */
+export const VISIT_KEEP_GRACE_MS = 15 * 60_000;
 /** Diferença do relógio do aparelho para o do servidor que vale corrigir. */
 const MIN_OFFSET_MS = 60_000;
+
+const effectiveOffset = (offsetMs: number) => (Math.abs(offsetMs) >= MIN_OFFSET_MS ? offsetMs : 0);
+
+/** `minutes` antes do início, no relógio do aparelho, arredondado para baixo ao minuto. */
+const fireTime = (startMs: number, minutes: number, offset: number) =>
+  Math.floor((startMs - minutes * 60_000 - offset) / 60_000) * 60_000;
 
 /**
  * Visita ainda não iniciada. Em deslocamento, em atendimento, concluída, cancelada ou nova (ainda sem técnico)
@@ -76,25 +87,28 @@ export function remindableVisits(tickets: readonly VisitTicket[], userId: UUID):
 }
 
 /**
- * Os lembretes que o aparelho deve ter agendados agora, os mais próximos primeiro (no máximo 48). `offsetMs`: quanto
- * o relógio do servidor está à frente do aparelho (getServerOffsetMs); a hora do disparo é a do aparelho.
+ * Os lembretes da visita agora, os mais próximos primeiro (no máximo 48). `offsetMs`: quanto o relógio do servidor
+ * está à frente do aparelho (getServerOffsetMs); a hora do disparo é a do aparelho. `minLeadMs`: a antecedência
+ * mínima. O padrão (1 min) dá o que pode ser agendado; com -VISIT_KEEP_GRACE_MS vêm também os que venceram há pouco,
+ * que só podem ficar (o agendado que o sistema ainda não disparou). Visita que já começou, pela hora, não tem nenhum.
  */
 export function planVisitReminders(
   tickets: readonly VisitTicket[],
   userId: UUID,
   now: number,
   offsetMs: number,
+  minLeadMs: number = VISIT_MIN_LEAD_MS,
 ): PlannedReminder[] {
-  const offset = Math.abs(offsetMs) >= MIN_OFFSET_MS ? offsetMs : 0;
+  const offset = effectiveOffset(offsetMs);
   const byId = new Map(tickets.map((ticket) => [ticket.id, ticket]));
   const planned: PlannedReminder[] = [];
   for (const [ticketId, start] of remindableVisits(tickets, userId)) {
     const ticket = byId.get(ticketId);
     const startMs = new Date(start).getTime();
-    if (!ticket || !Number.isFinite(startMs)) continue;
+    if (!ticket || !Number.isFinite(startMs) || now >= fireTime(startMs, 0, offset)) continue;
     for (const { kind, minutes } of VISIT_REMINDERS) {
-      const fireAt = Math.floor((startMs - minutes * 60_000 - offset) / 60_000) * 60_000;
-      if (fireAt < now + VISIT_MIN_LEAD_MS || fireAt > now + VISIT_HORIZON_MS) continue;
+      const fireAt = fireTime(startMs, minutes, offset);
+      if (fireAt < now + minLeadMs || fireAt > now + VISIT_HORIZON_MS) continue;
       planned.push({
         identifier: `${VISIT_PREFIX}${kind}-${ticketId}`,
         ticketId,
@@ -103,7 +117,7 @@ export function planVisitReminders(
         fireAt,
         at: new Date(fireAt).toISOString(),
         start,
-        title: reminderTitle(kind, ticket.code, start, fireAt),
+        title: reminderTitle(kind, ticket.code, start),
         body: reminderBody(ticket),
       });
     }
@@ -111,12 +125,29 @@ export function planVisitReminders(
   return planned.sort((a, b) => a.fireAt - b.fireAt || a.identifier.localeCompare(b.identifier)).slice(0, MAX_VISIT_REMINDERS);
 }
 
+/** Até quando cada lembrete vale na bandeja, em minutos antes do início: até a hora do seguinte, e o último até o início. */
+const SHOWN_UNTIL: Record<VisitReminderKind, number> = { day: 100, leave: 10, soon: 0 };
+const REMINDER_KIND = /^visit-(day|leave|soon)-/;
+
+/**
+ * O lembrete na bandeja (`identifier`: visit-<tipo>-<id>) ficou velho: o de 1 dia quando chega a hora do de 1h40, o de
+ * 1h40 quando chega a do de 10 min e todos quando a visita começa (`start`, pelo relógio do servidor).
+ */
+export function reminderOutdated(identifier: string, start: string, now: number, offsetMs: number): boolean {
+  const kind = REMINDER_KIND.exec(identifier)?.[1] as VisitReminderKind | undefined;
+  const startMs = new Date(start).getTime();
+  return !Number.isFinite(startMs) || now >= fireTime(startMs, kind ? SHOWN_UNTIL[kind] : 0, effectiveOffset(offsetMs));
+}
+
 const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
-/** "Amanhã às 08:00 · OS-000123", "Em 1h40 · OS-000123 às 08:00", "Em 10 min · OS-000123 às 08:00". */
-function reminderTitle(kind: VisitReminderKind, code: string, start: string, fireAt: number): string {
+/**
+ * "Sex 21/11 às 08:00 · OS-000123", "Em 1h40 · OS-000123 às 08:00", "Em 10 min · OS-000123 às 08:00". O de 1 dia leva a
+ * data, e não "Amanhã": ele fica na bandeja e no dia da visita diria o dia errado.
+ */
+function reminderTitle(kind: VisitReminderKind, code: string, start: string): string {
   const time = formatTime(start);
-  if (kind === "day") return `${capitalize(relativeDay(start, fireAt))} às ${time} · ${code}`;
+  if (kind === "day") return `${capitalize(formatWeekdayDate(start))} às ${time} · ${code}`;
   return `${kind === "leave" ? "Em 1h40" : "Em 10 min"} · ${code} às ${time}`;
 }
 
@@ -133,14 +164,19 @@ export function siteLine(ticket: Pick<TicketDetail, "location">): string | null 
   return [location.code, location.name].filter(Boolean).join(" · ") || null;
 }
 
-/** "Visita amanhã às 08:00 · LJ001 · Loja Exemplo"; sem agenda, só a loja (sem loja, o título da OS). */
-export function visitLine(ticket: Pick<TicketDetail, "title" | "location" | "scheduled_start">, now: number): string {
+/**
+ * "Visita sex 21/11 às 08:00 · LJ001 · Loja Exemplo": com a data, para o texto que fica na bandeja (notificação do
+ * sistema e aviso guardado). Com `now`, o dia relativo ("Visita amanhã às 08:00 · …"), para o toast na hora. Sem
+ * agenda, só a loja (sem loja, o título da OS).
+ */
+export function visitLine(ticket: Pick<TicketDetail, "title" | "location" | "scheduled_start">, now?: number): string {
   const site = siteLine(ticket);
   const start = ticket.scheduled_start;
   if (!start) return site ?? ticket.title;
-  const day = relativeDay(start, now);
-  // "hoje", "amanhã", "ontem"; uma data vira "em 20/11".
-  const when = `Visita ${/^\d/.test(day) ? `em ${day}` : day} às ${formatTime(start)}`;
+  // Relativo: "hoje", "amanhã", "ontem"; outra data vira "em 20/11".
+  const relative = now === undefined ? null : relativeDay(start, now);
+  const day = relative === null ? formatWeekdayDate(start) : /^\d/.test(relative) ? `em ${relative}` : relative;
+  const when = `Visita ${day} às ${formatTime(start)}`;
   return site ? `${when} · ${site}` : when;
 }
 

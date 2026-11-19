@@ -359,6 +359,12 @@ class TicketCreate(BaseModel):
     # ao tipo de OS e à categoria. Uma lista, mesmo vazia, vale como está (a Nova OS manda a que o
     # analista vê). O portal não usa.
     forms: list[TicketFormAdd] | None = Field(default=None, max_length=20)
+    # Só com `forms`: os modelos ligados ao tipo de OS ou à categoria que o analista desmarcou.
+    # Ficam de fora (created.data.forms_left_out) e não entram sozinhos depois; os ligados que não
+    # vieram em nenhuma das duas listas (a tela não conhecia o vínculo) entram como automáticos.
+    # Sem informar (ou null), com `forms`: todos os ligados fora da lista ficam de fora (a Nova OS
+    # anterior a este campo).
+    forms_left_out: list[uuid.UUID] | None = Field(default=None, max_length=20)
 
 
 # Campos que a OS sempre tem: null na edição é recusado com uma mensagem clara.

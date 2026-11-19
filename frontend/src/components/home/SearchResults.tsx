@@ -198,7 +198,7 @@ export function useSearchController({
   const searching = isSearchable(q);
   const smart = useSmartSearch(q, searching);
   const data = searching ? smart.data : undefined;
-  // Sem internet o pedido fica parado (não sai), com a resposta anterior na tela: a Mia não "pensa".
+  // Sem internet o pedido fica parado (não sai): a Mia não "pensa" e avisa que espera a conexão.
   const paused = isSearchable(asked) && searching && smart.isPaused;
   const stale = asked !== q || (searching && (smart.isFetching || smart.isPlaceholderData || smart.isPaused));
   // "Tentar de novo" em andamento (ou esperando a internet) não é erro: o alerta sai e volta se falhar de novo.

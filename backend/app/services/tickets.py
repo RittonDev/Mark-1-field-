@@ -1309,11 +1309,13 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
         allow=data.allow_conflict,
         helper_ids=[h.id for h in helpers],
     )
-    # Formulários: a lista da Nova OS (mesmo vazia), validada antes de a OS ganhar número; sem
-    # lista (portal, API), os ligados ao tipo de OS e à categoria.
+    # Formulários: a lista da Nova OS (mesmo vazia), validada antes de a OS ganhar número, mais os
+    # ligados que ela não trouxe nem desmarcou (forms_left_out); sem lista (portal, API), os
+    # ligados ao tipo de OS e à categoria.
     from app.services import forms as forms_svc  # forms usa este módulo: import tardio
 
     chosen_forms = await forms_svc.resolve_create_list(db, None if is_requester else data.forms)
+    unchecked_forms = None if is_requester else data.forms_left_out
     linked_forms = await forms_svc.linked_templates(
         db,
         service_type_id=service_type.id if service_type else None,
@@ -1361,7 +1363,9 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
         sla_paused_seconds=0,
         reopen_count=0,
         # Formulário obrigatório que pede assinatura: a OS já nasce exigindo (sem versão nova).
-        signature_required=forms_svc.opening_asks_signature(chosen_forms, linked_forms),
+        signature_required=forms_svc.opening_asks_signature(
+            chosen_forms, linked_forms, unchecked_forms
+        ),
         created_at=now,
         updated_at=now,
     )
@@ -1380,7 +1384,7 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
         created_data["helpers"] = [h.name for h in helpers]
     # Os ligados que a Nova OS deixou de fora: não entram sozinhos depois (troca de tipo ou de
     # categoria antes da visita).
-    forms_left_out = forms_svc.opening_left_out(chosen_forms, linked_forms)
+    forms_left_out = forms_svc.opening_left_out(chosen_forms, linked_forms, unchecked_forms)
     if forms_left_out:
         created_data["forms_left_out"] = forms_left_out
     record_event(
@@ -1406,7 +1410,9 @@ async def create_ticket(db: AsyncSession, data: TicketCreate, actor: User) -> Ti
                 "added_ids": [str(h.id) for h in helpers],
             },
         )
-    forms_svc.attach_on_create(db, ticket, chosen_forms, linked_forms, actor, now)
+    forms_svc.attach_on_create(
+        db, ticket, chosen_forms, linked_forms, actor, now, unchecked_forms
+    )
 
     if data.assignee_id is not None and not is_requester:
         if not actor.can_manage_tickets and data.assignee_id != actor.id:
@@ -2665,16 +2671,21 @@ def search_clause(q: str) -> ColumnElement[bool]:
 def acted_by_clause(user_id: uuid.UUID) -> ColumnElement[bool]:
     """OS em que o técnico atuou: é o responsável agora, vai junto (ajudante) ou já foi responsável
     ou ajudante antes (histórico). Nas atribuições feitas aqui o evento guarda o id (to_value,
-    from_value, added_ids); nas importadas do Field Control, o nome do técnico em to_value."""
+    from_value, added_ids). Nas importadas do Field Control, o id fica em data.technician_id (a
+    importação grava quando acha o técnico; a migração e4b6d8f0a2c3 preencheu as antigas) e o
+    nome em to_value: o nome vale só no evento sem o id, porque o técnico troca o nome (Meu
+    cadastro, Técnicos) e há nomes repetidos."""
     uid = str(user_id)
     name = select(func.left(User.name, 64)).where(User.id == user_id).scalar_subquery()
     helping = select(ticket_helpers.c.ticket_id).where(ticket_helpers.c.user_id == user_id)
+    imported_id = TicketEvent.data["technician_id"].astext
     assigned = select(TicketEvent.ticket_id).where(
         TicketEvent.event_type == TicketEventType.ASSIGNED,
         or_(
             TicketEvent.to_value == uid,
             TicketEvent.from_value == uid,
-            TicketEvent.to_value == name,
+            imported_id == uid,
+            and_(TicketEvent.to_value == name, imported_id.is_(None)),
         ),
     )
     helped = select(TicketEvent.ticket_id).where(

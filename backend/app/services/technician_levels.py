@@ -919,11 +919,32 @@ async def refresh_all(db: AsyncSession, now: datetime | None = None) -> dict[str
     return result
 
 
+_WINDOW_KEYS = frozenset({"window_start", "window_end"})
+
+
+def _numbers(metrics: dict[str, Any] | None) -> dict[str, Any]:
+    """Os números guardados, sem a janela (que anda a cada cálculo)."""
+    return {k: v for k, v in (metrics or {}).items() if k not in _WINDOW_KEYS}
+
+
+def _unchanged(row: TechnicianLevel, values: dict[str, Any]) -> bool:
+    """A conta guardada já diz o mesmo: faixa, calculada, desde quando, risco e números."""
+    return (
+        row.tier == values["tier"]
+        and row.computed_tier == values["computed_tier"]
+        and row.tier_since == values["tier_since"]
+        and row.at_risk_since == values["at_risk_since"]
+        and _numbers(row.metrics) == _numbers(values["metrics"])
+    )
+
+
 async def refresh_one(
     db: AsyncSession, user_id: uuid.UUID, now: datetime | None = None
 ) -> Snapshot:
     """Recalcula um técnico agora (app, cadastro na central, desconsiderar), com a linha dele
-    travada até o fim da transação."""
+    travada até o fim da transação. Só grava se algo mudou: abrir o cadastro ou a rodada do app
+    sem novidade não regravam a linha (computed_at fica o da última gravação, e a rotina de 6 h
+    continua contando pela conta mais antiga)."""
     now = now or utcnow()
     row = await db.scalar(
         select(TechnicianLevel)
@@ -936,7 +957,9 @@ async def refresh_one(
     computed = computed_tier(counts)
     prev = Standing(row.tier, row.tier_since, row.at_risk_since) if row is not None else None
     standing = apply_grace(prev, computed, now)
-    await _upsert(db, [_row(user_id, standing, computed, counts, collected.window_start, now)])
+    values = _row(user_id, standing, computed, counts, collected.window_start, now)
+    if row is None or not _unchanged(row, values):
+        await _upsert(db, [values])
     return Snapshot(
         user_id=user_id,
         standing=standing,
@@ -973,12 +996,31 @@ async def refresh_if_stale(db: AsyncSession, now: datetime | None = None) -> boo
     return True
 
 
+async def _missing(db: AsyncSession) -> bool:
+    """Algum técnico (também os sem acesso ao app) sem a conta: o teste de refresh_if_stale."""
+    return (
+        await db.scalar(
+            select(User.id)
+            .outerjoin(TechnicianLevel, TechnicianLevel.user_id == User.id)
+            .where(User.role == UserRole.TECHNICIAN, TechnicianLevel.user_id.is_(None))
+            .limit(1)
+        )
+        is not None
+    )
+
+
 async def ensure_computed(db: AsyncSession) -> bool:
-    """Antes da primeira lista de Técnicos ou das sugestões: sem nenhuma conta ainda, calcula
-    todos. Depois disso, a rotina periódica mantém em dia (a requisição só lê)."""
-    if await db.scalar(select(TechnicianLevel.user_id).limit(1)) is not None:
+    """Antes da lista de Técnicos e das sugestões: se falta a conta de algum técnico (primeiro uso,
+    técnico novo, ou o app já gravou só a do técnico dele), calcula todos. Um cálculo por vez
+    (ENSURE_LOCK, sem esperar): quem chega junto lê o que já está guardado. No resto, a rotina
+    periódica mantém em dia (a requisição só lê)."""
+    if not await _missing(db):
         return False
-    if await db.scalar(select(User.id).where(User.role == UserRole.TECHNICIAN).limit(1)) is None:
+    locked = await db.scalar(
+        text("SELECT pg_try_advisory_xact_lock(hashtextextended(:key, 0))"), {"key": ENSURE_LOCK}
+    )
+    # Com a trava, confere de novo: quem a soltou agora pode ter acabado de calcular todos.
+    if not locked or not await _missing(db):
         return False
     await refresh_all(db)
     return True
@@ -1075,22 +1117,34 @@ def _occurrence(occ: Occurrence) -> LevelOccurrence:
     )
 
 
-def _central_occurrence(occ: Occurrence) -> CentralLevelOccurrence:
+def _central_ticket_ref(occ: Occurrence, hidden: bool) -> CentralLevelTicketRef:
+    if hidden:
+        # Como no calendário (schedule.conflict_item): sem id, código nem título.
+        return CentralLevelTicketRef(id=None, code=None, title=HIDDEN_TITLE, hidden=True)
+    return CentralLevelTicketRef(
+        id=occ.ticket_id, code=format_ticket_code(occ.number), title=occ.title
+    )
+
+
+def _central_occurrence(occ: Occurrence, *, hidden: bool = False) -> CentralLevelOccurrence:
+    """Na central, com a nota da reabertura e a desconsideração. OS de outra fila (`hidden`): o
+    tipo, a data e o detalhe, sem a OS, sem a nota da reabertura e sem a nota da desconsideração
+    (fica a marca: quem desconsiderou e quando)."""
     detail = occ.detail
-    note = _short_note(occ.note) if occ.kind == LevelOccurrenceKind.REWORK else None
+    note = _short_note(occ.note) if occ.kind == LevelOccurrenceKind.REWORK and not hidden else None
     if note:
         detail = f"{detail} · Motivo: {note}"
     waiver = occ.waiver
     return CentralLevelOccurrence(
         kind=occ.kind,
         ref_id=occ.ref_id,
-        ticket=_ticket_ref(occ),
+        ticket=_central_ticket_ref(occ, hidden),
         at=occ.at,
         detail=detail,
         waiver=(
             LevelWaiverOut(
                 id=waiver.id,
-                note=waiver.note,
+                note=None if hidden else waiver.note,
                 created_by=(
                     Ref(id=waiver.created_by.id, name=waiver.created_by.name)
                     if waiver.created_by is not None
@@ -1132,18 +1186,55 @@ async def technician_reasons(db: AsyncSession) -> int:
     )
 
 
+def _visibility(viewer: User | None) -> ColumnElement[bool] | None:
+    """As OS que `viewer` vê (a fila, services/tickets.visibility_clause); None: todas. Import
+    aqui: tickets importa este módulo (pelas sugestões)."""
+    if viewer is None:
+        return None
+    from app.services.tickets import visibility_clause
+
+    return visibility_clause(viewer)
+
+
+async def hidden_tickets(
+    db: AsyncSession, viewer: User | None, ticket_ids: Iterable[uuid.UUID]
+) -> set[uuid.UUID]:
+    """As OS da lista que `viewer` não vê (fila de outro analista). Uma consulta, e nenhuma para
+    quem vê todas as filas."""
+    wanted = list(dict.fromkeys(ticket_ids))
+    vis = _visibility(viewer)
+    if vis is None or not wanted:
+        return set()
+    seen = set(await db.scalars(select(Ticket.id).where(Ticket.id.in_(wanted), vis)))
+    return set(wanted) - seen
+
+
+async def _require_visible(db: AsyncSession, viewer: User | None, ticket_id: uuid.UUID) -> None:
+    """Desconsiderar e voltar a contar só nas OS da fila de quem pede: fora dela, o mesmo 403 de
+    abrir a OS."""
+    if ticket_id in await hidden_tickets(db, viewer, [ticket_id]):
+        from app.services.tickets import QUEUE_FORBIDDEN
+
+        raise AccessDenied(QUEUE_FORBIDDEN, code="QUEUE_FORBIDDEN")
+
+
 async def central_detail(
-    db: AsyncSession, technician: User, now: datetime | None = None
+    db: AsyncSession, technician: User, viewer: User | None, now: datetime | None = None
 ) -> TechnicianLevelDetail:
-    """O elo do técnico na central, recalculado agora, com as desconsiderações."""
+    """O elo do técnico na central, recalculado agora, com as desconsiderações. `viewer`: quem
+    pede; com "Somente a própria fila", a ocorrência de OS de outra fila vem mascarada
+    (_central_occurrence). Contagens, faixa e critérios continuam com todas. None: sem fila (uso
+    interno)."""
     snapshot = await refresh_one(db, technician.id, now)
+    shown = snapshot.occurrences[:CENTRAL_OCCURRENCES]
+    hidden = await hidden_tickets(db, viewer, (o.ticket_id for o in shown))
     return TechnicianLevelDetail(
         **_common(snapshot),
         technician=Ref(id=technician.id, name=technician.name),
         computed_tier=snapshot.computed,
         waived=snapshot.counts.waived,
         technician_reasons=await technician_reasons(db),
-        occurrences=[_central_occurrence(o) for o in snapshot.occurrences[:CENTRAL_OCCURRENCES]],
+        occurrences=[_central_occurrence(o, hidden=o.ticket_id in hidden) for o in shown],
         occurrences_total=len(snapshot.occurrences),
     )
 
@@ -1164,7 +1255,8 @@ async def add_waiver(
     now: datetime | None = None,
 ) -> TechnicianLevelDetail:
     """Desconsidera uma ocorrência do técnico (com o motivo) e recalcula. Só vale uma ocorrência
-    dele na janela; a repetida cai na restrição única (409 em app.main)."""
+    dele na janela, de OS da fila de quem pede (fora dela, 403 QUEUE_FORBIDDEN); a repetida cai
+    na restrição única (409 em app.main)."""
     now = now or utcnow()
     match = next(
         (
@@ -1176,6 +1268,7 @@ async def add_waiver(
     )
     if match is None:
         raise WorkflowError("Ocorrência não encontrada nos últimos 12 meses")
+    await _require_visible(db, actor, match.ticket_id)
     db.add(
         TechnicianLevelWaiver(
             technician_id=technician.id,
@@ -1188,16 +1281,22 @@ async def add_waiver(
         )
     )
     await db.flush()
-    return await central_detail(db, technician, now)
+    return await central_detail(db, technician, actor, now)
 
 
 async def remove_waiver(
-    db: AsyncSession, technician: User, waiver_id: uuid.UUID, now: datetime | None = None
+    db: AsyncSession,
+    technician: User,
+    waiver_id: uuid.UUID,
+    actor: User | None,
+    now: datetime | None = None,
 ) -> TechnicianLevelDetail:
-    """A ocorrência volta a contar (apaga a desconsideração) e o técnico é recalculado."""
+    """A ocorrência volta a contar (apaga a desconsideração) e o técnico é recalculado. OS fora da
+    fila de quem pede: 403 QUEUE_FORBIDDEN."""
     waiver = await db.get(TechnicianLevelWaiver, waiver_id)
     if waiver is None or waiver.technician_id != technician.id:
         raise NotFound("Ocorrência desconsiderada não encontrada")
+    await _require_visible(db, actor, waiver.ticket_id)
     await db.delete(waiver)
     await db.flush()
-    return await central_detail(db, technician, now)
+    return await central_detail(db, technician, actor, now)

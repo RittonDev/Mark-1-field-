@@ -96,9 +96,21 @@ class LevelMetrics(BaseModel):
 
 
 class LevelTicketRef(BaseModel):
+    """A OS da ocorrência no app (sempre do próprio técnico)."""
+
     id: uuid.UUID
     code: str
     title: str
+
+
+class CentralLevelTicketRef(BaseModel):
+    """A OS da ocorrência na central. `hidden`: OS de outra fila (quem pede vê só a própria
+    fila): sem id e sem código, com o título "OS de outra fila", como no calendário."""
+
+    id: uuid.UUID | None
+    code: str | None
+    title: str
+    hidden: bool = False
 
 
 class LevelOccurrence(BaseModel):
@@ -114,14 +126,18 @@ class LevelOccurrence(BaseModel):
 
 class LevelWaiverOut(BaseModel):
     id: uuid.UUID
-    note: str
+    # O motivo; null na OS de outra fila (fica só quem desconsiderou e quando).
+    note: str | None
     created_by: Ref | None
     created_at: dt.datetime
 
 
 class CentralLevelOccurrence(LevelOccurrence):
-    """Na central: também as desconsideradas, com quem desconsiderou e o motivo."""
+    """Na central: também as desconsideradas, com quem desconsiderou e o motivo. Na OS de outra
+    fila (`ticket.hidden`), o detalhe vem sem a nota da reabertura e a desconsideração sem o
+    motivo; desconsiderar ou voltar a contar dá 403 QUEUE_FORBIDDEN."""
 
+    ticket: CentralLevelTicketRef  # type: ignore[assignment]
     waiver: LevelWaiverOut | None = None
 
 

@@ -3,9 +3,14 @@
 O técnico mantém no app a foto, o nome, o celular (WhatsApp), o e-mail de login, o endereço, a
 cidade/UF, a região que atende e a chave PIX. E-mail e chave PIX pedem a senha atual
 (services/my_profile.py). As mensagens são as mesmas do app (mobile/src/lib/pix.ts e a tela).
+
+O nome vai para os textos do grupo do cliente, o relatório e o portal: pelo app, só letras (com
+acento), espaço, apóstrofo, hífen e ponto, sem "www", "http" nem endereço colado ("site.com"). Vale
+para o nome que o app manda (só quando muda): os nomes antigos ficam como estão.
 """
 
 import re
+import unicodedata
 import uuid
 from datetime import datetime
 from typing import Literal
@@ -19,6 +24,7 @@ from app.schemas.onboarding import UFS
 from app.schemas.records import format_phone
 
 NAME_REQUIRED = "Informe seu nome completo"
+NAME_LETTERS = "Use só letras no nome"
 PHONE_REQUIRED = "Informe o celular com DDD"
 EMAIL_REQUIRED = "Informe um e-mail válido"
 CITY_REQUIRED = "Informe a cidade"
@@ -30,6 +36,21 @@ HOLDER_REQUIRED = "Informe o nome do titular da conta"
 
 def _spaces(value: str | None) -> str:
     return " ".join((value or "").split())
+
+
+# Além das letras: espaço, apóstrofo (o do teclado e os que o celular põe sozinho), hífen e ponto.
+_NAME_MARKS = frozenset(" '’‘´`ʼ-.")
+# Endereço colado ("site.com.br", "wa.me"): duas letras, ponto e letra. Iniciais ("J.R.") passam.
+_NAME_ADDRESS = re.compile(r"[^\W\d_]{2}\.[^\W\d_]")
+
+
+def _letters_only(name: str) -> bool:
+    """Sem dígito, "@", "/", ":" nem link: o nome não leva contato para o cliente."""
+    if not all(ch.isalpha() or ch in _NAME_MARKS for ch in name):
+        return False
+    # Letras de outra largura ("ｗｗｗ") contam como as comuns.
+    folded = unicodedata.normalize("NFKC", name).casefold()
+    return "www" not in folded and "http" not in folded and not _NAME_ADDRESS.search(folded)
 
 
 class PixInfo(BaseModel):
@@ -90,9 +111,12 @@ class MyProfileUpdate(BaseModel):
     @field_validator("name")
     @classmethod
     def _name(cls, value: str | None) -> str:
-        name = _spaces(value)
+        # NFC: o acento digitado separado da letra vira uma letra só.
+        name = unicodedata.normalize("NFC", _spaces(value))
         if len(name) < 3:
             raise ValueError(NAME_REQUIRED)
+        if not _letters_only(name):
+            raise ValueError(NAME_LETTERS)
         return name
 
     @field_validator("phone")

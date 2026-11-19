@@ -13,7 +13,7 @@ describe("stripAgentName", () => {
     assert.equal(stripAgentName("e aí Mia, pendente pgto"), "pendente pgto");
   });
 
-  it("aceita a pontuação colada no texto, menos o ponto", () => {
+  it("aceita a pontuação colada no texto; o ponto, só com espaço depois", () => {
     assert.equal(stripAgentName("Mia,16976"), "16976");
     assert.equal(stripAgentName("Mia,atrasadas"), "atrasadas");
     assert.equal(stripAgentName("Mia , atrasadas"), "atrasadas");

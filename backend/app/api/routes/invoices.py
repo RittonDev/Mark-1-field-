@@ -131,8 +131,8 @@ async def list_invoices(
     technician_id: uuid.UUID | None = None,
     status_: Annotated[InvoiceStatus | None, Query(alias="status")] = None,
     month: str | None = None,
-    # Até o maior INTEGER do Postgres (acima disso o banco recusaria o OFFSET).
-    offset: Annotated[int, Query(ge=0, le=2_147_483_647)] = 0,
+    # Até o maior BIGINT do Postgres (acima disso o banco recusa o OFFSET: seria um 500).
+    offset: Annotated[int, Query(ge=0, le=2**63 - 1)] = 0,
 ) -> InvoiceList:
     """As notas de todos os técnicos (não segue a fila: a nota é do técnico, não da OS), até 500
     por vez. `status=pending` vem na ordem da fila (as mais antigas primeiro); sem `status` e nas

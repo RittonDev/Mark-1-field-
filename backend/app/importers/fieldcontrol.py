@@ -1565,12 +1565,17 @@ class Importer:
             completed = parse_ts(task.get("completedAt"))
             desc = clip(task.get("statusDescription"), 20000)
             if emp:
+                # O nome é o que o histórico mostra; o id (quando o colaborador veio no export) é o
+                # que a busca "técnico que atuou" usa: o nome muda e se repete.
+                assigned_data: dict[str, Any] = {"task": task.get("id")}
+                if tech is not None:
+                    assigned_data["technician_id"] = str(tech)
                 event(
                     TicketEventType.ASSIGNED,
                     t_created,
                     created_by,
                     to_value=emp.get("name"),
-                    data={"task": task.get("id")},
+                    data=assigned_data,
                 )
             status = task.get("status")
             if started and status in ("done", "in-progress", "reported"):

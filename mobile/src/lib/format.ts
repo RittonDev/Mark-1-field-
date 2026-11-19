@@ -38,6 +38,14 @@ export function formatDate(value: string | Date | null | undefined): string {
   return dateFmt.format(typeof value === "string" ? new Date(value) : value);
 }
 
+const WEEKDAYS = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
+
+/** "sex 21/11": dia da semana e data, sem a pontuação do Intl ("sex., 21/11"), no fuso do aparelho. */
+export function formatWeekdayDate(value: string | Date): string {
+  const date = typeof value === "string" ? new Date(value) : value;
+  return `${WEEKDAYS[date.getDay()]} ${formatDate(date)}`;
+}
+
 /** Mesmo dia do calendário (no fuso do aparelho). */
 export function isSameDay(a: string | Date, b: string | Date): boolean {
   return startOfDay(new Date(a)).getTime() === startOfDay(new Date(b)).getTime();

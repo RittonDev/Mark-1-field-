@@ -7,17 +7,26 @@ remarcar a visita não muda nada. O técnico pode corrigir; pergunta sem fonte c
 
 Só dados que o técnico já vê na OS: nada de nº do chamado do cliente, CNPJ, contato ou valores.
 
+Data da visita: a do atendimento em curso, não a da primeira chegada (a OS pausada, a improdutiva e
+a reaberta voltam ao local em outro dia). Ao vivo: em atendimento, o dia em que o trecho atual
+começou; antes da primeira chegada, o da agenda; fora de atendimento depois de uma chegada, nada (a
+data seria a de uma ida anterior). Na conclusão do formulário, o momento que `visit_moment` apura.
+
 Importa só modelos e schemas: services/tickets.py e services/forms.py usam sem ciclo.
 """
 
 from collections.abc import Iterable, Mapping
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.config import settings
+from app.core.enums import TicketEventType, TicketStatus
 from app.db.base import utcnow
-from app.models import Ticket
+from app.models import Ticket, TicketEvent
 from app.schemas.forms import FormField, prefill_types
 from app.schemas.ticket import format_ticket_code
 
@@ -47,17 +56,54 @@ def _address(ticket: Ticket) -> str | None:
     return ", ".join(p for p in parts if p) or None
 
 
-def _visit_day(ticket: Ticket, *, final: bool) -> date | None:
-    """Dia (no fuso da operação) da chegada; sem ela, o da visita agendada; na conclusão do
-    formulário sem nenhum dos dois, hoje."""
-    moment = ticket.arrived_at or ticket.scheduled_start
-    tz = ZoneInfo(settings.TIMEZONE)
+def _live_visit(ticket: Ticket) -> datetime | None:
+    """A data da visita ao vivo: em atendimento, o início do trecho atual (a OS migrada do Field
+    Control em atendimento não tem esse início: vale a chegada, que é a do atendimento em curso);
+    antes da primeira chegada, a agenda; fora de atendimento depois de uma chegada, nada."""
+    if ticket.status == TicketStatus.IN_PROGRESS:
+        return ticket.work_started_at or ticket.arrived_at
+    if ticket.arrived_at is None:
+        return ticket.scheduled_start
+    return None
+
+
+async def visit_moment(db: AsyncSession, ticket: Ticket) -> datetime:
+    """O momento da visita na conclusão do formulário: o início do atendimento em curso; fora dele,
+    a última entrada em atendimento depois da última reabertura (a mesma visita que o relatório do
+    cliente mostra); sem nenhuma, agora. Em atendimento, sem consulta."""
+    if ticket.work_started_at is not None:
+        return ticket.work_started_at
+    last = (
+        await db.execute(
+            select(TicketEvent.to_value, TicketEvent.created_at)
+            .where(
+                TicketEvent.ticket_id == ticket.id,
+                TicketEvent.event_type == TicketEventType.STATUS_CHANGED,
+                TicketEvent.to_value.in_(
+                    (TicketStatus.IN_PROGRESS.value, TicketStatus.REOPENED.value)
+                ),
+            )
+            .order_by(TicketEvent.created_at.desc())
+            .limit(1)
+        )
+    ).first()
+    if last is not None and last.to_value == TicketStatus.IN_PROGRESS.value:
+        return last.created_at
+    return utcnow()
+
+
+def _visit_day(ticket: Ticket, *, final: bool, visit_at: datetime | None) -> date | None:
+    """Dia (no fuso da operação) da visita: ao vivo, o de `_live_visit`; na conclusão, o de
+    `visit_at` (sem ele, hoje)."""
+    moment = (visit_at or utcnow()) if final else _live_visit(ticket)
     if moment is None:
-        return utcnow().astimezone(tz).date() if final else None
-    return moment.astimezone(tz).date()
+        return None
+    return moment.astimezone(ZoneInfo(settings.TIMEZONE)).date()
 
 
-def _value(ticket: Ticket, source: str, field_type: str, *, final: bool) -> Any:
+def _value(
+    ticket: Ticket, source: str, field_type: str, *, final: bool, visit_at: datetime | None
+) -> Any:
     if source == "location_name":
         return _clean(ticket.location.name) if ticket.location else None
     if source == "location_code":
@@ -75,7 +121,7 @@ def _value(ticket: Ticket, source: str, field_type: str, *, final: bool) -> Any:
     if source == "service_type":
         return _clean(ticket.service_type.name) if ticket.service_type else None
     if source == "visit_date":
-        day = _visit_day(ticket, final=final)
+        day = _visit_day(ticket, final=final, visit_at=visit_at)
         if day is None:
             return None
         return day.isoformat() if field_type == "date" else day.strftime("%d/%m/%Y")
@@ -96,10 +142,11 @@ def prefill_for(
     answers: Mapping[str, Any] | None,
     *,
     final: bool = False,
+    visit_at: datetime | None = None,
 ) -> dict[str, Any]:
     """{campo: valor} das perguntas com resposta automática e ainda sem resposta. Valor vazio
-    (a OS sem loja, sem técnico, sem agenda) não entra. `final`: na conclusão do formulário (a
-    data da visita sem chegada nem agenda vira o dia de hoje)."""
+    (a OS sem loja, sem técnico, sem agenda) não entra. `final`: na conclusão do formulário, com
+    a data da visita tirada de `visit_at` (o momento que `visit_moment` apurou; sem ele, hoje)."""
     answers = answers or {}
     out: dict[str, Any] = {}
     for field in fields:
@@ -110,7 +157,7 @@ def prefill_for(
             continue
         if _answered(answers.get(field_id)):
             continue
-        value = _value(ticket, source, field_type, final=final)
+        value = _value(ticket, source, field_type, final=final, visit_at=visit_at)
         if value is not None and value != "":
             out[field_id] = value
     return out

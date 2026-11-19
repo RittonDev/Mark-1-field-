@@ -4,9 +4,10 @@ Regras:
 - Só a gestão (analistas, supervisores, admin) monta modelos e decide anexar à OS, como
   obrigatório ou opcional. O técnico responsável preenche no app.
 - O modelo ligado a um tipo de OS ou a uma categoria (valendo as subcategorias) entra sozinho
-  nas OS: na abertura sem lista explícita e, antes da visita, quando o tipo ou a categoria mudam.
-  Sai sozinho só o que entrou sozinho, não casa mais e ninguém começou; o que uma pessoa tirou da
-  OS (ou deixou de fora na abertura) não volta sozinho.
+  nas OS: na abertura sem lista explícita (com a lista da Nova OS, entram os ligados que ela não
+  trouxe nem desmarcou) e, antes da visita, quando o tipo ou a categoria mudam. Sai sozinho só o
+  que entrou sozinho, não casa mais e ninguém começou (o de modelo desativado fica); o que uma
+  pessoa tirou da OS (ou desmarcou na abertura) não volta sozinho.
 - Concluir o formulário valida os campos obrigatórios e o mínimo de fotos de cada campo, e grava
   a resposta automática (services/form_prefill.py) das perguntas que ficaram sem resposta.
 - A assinatura do responsável no local só pode ser colhida com os obrigatórios concluídos.
@@ -40,16 +41,18 @@ from app.models import (
 )
 from app.schemas.common import Ref
 from app.schemas.forms import (
+    PREFILL_LABEL,
     FormField,
     FormTemplateIn,
     ServiceTypeUsage,
     TicketFormAdd,
     TicketFormAnswers,
     field_dump,
+    prefill_types,
 )
 from app.services import storage
 from app.services.errors import NotFound, PermissionDenied, WorkflowError
-from app.services.form_prefill import prefill_for
+from app.services.form_prefill import prefill_for, visit_moment
 from app.services.realtime import queue_event
 from app.services.tickets import _touch, add_attachment, can_work, get_ticket, record_event
 
@@ -113,10 +116,26 @@ async def create_template(db: AsyncSession, data: FormTemplateIn, actor: User) -
     return template
 
 
+def _keep_prefill(
+    sent: Sequence[FormField], dumped: list[dict[str, Any]], stored: Iterable[Any] | None
+) -> None:
+    """Pergunta enviada sem a chave `prefill` (aba aberta antes da resposta automática existir)
+    fica com a resposta automática gravada na pergunta de mesmo id, se o tipo ainda aceitar a
+    fonte. `prefill: null` explícito limpa."""
+    saved = {f.get("id"): f.get("prefill") for f in stored or [] if isinstance(f, dict)}
+    for field, out in zip(sent, dumped, strict=True):
+        if "prefill" in field.model_fields_set:
+            continue
+        source = saved.get(field.id)
+        if source in PREFILL_LABEL and field.type in prefill_types(source):
+            out["prefill"] = source
+
+
 async def update_template(
     db: AsyncSession, template: FormTemplate, data: FormTemplateIn
 ) -> FormTemplate:
     values = _dump(data)
+    _keep_prefill(data.fields, values["fields"], template.fields)
     if values["fields"] != template.fields:
         template.version += 1  # as OS já anexadas guardam a versão antiga
     for key, value in values.items():
@@ -358,37 +377,68 @@ async def resolve_create_list(
     return chosen
 
 
+@dataclass
+class Opening:
+    """Formulário da abertura: o modelo, se entra obrigatório, se entrou sozinho (ligado ao tipo
+    ou à categoria: sai sozinho se eles mudarem antes da visita), se veio na lista da Nova OS (o
+    autor é quem abriu) e o motivo que vai para o histórico (os que o sistema anexa)."""
+
+    template: FormTemplate
+    required: bool
+    auto: bool
+    listed: bool
+    note: str | None
+
+
 def _opening(
-    chosen: list[tuple[FormTemplate, bool]] | None, linked: list[Linked]
-) -> list[tuple[FormTemplate, bool, bool, str | None]]:
-    """(modelo, obrigatório, entrou sozinho, motivo) dos formulários da abertura. Sem lista, os
-    ligados, como obrigatórios ou opcionais pelo padrão do modelo; com lista, exatamente ela, na
-    ordem, e os que também são ligados ficam marcados como automáticos (saem sozinhos se o tipo
-    ou a categoria mudarem antes da visita)."""
+    chosen: list[tuple[FormTemplate, bool]] | None,
+    linked: list[Linked],
+    unchecked: Sequence[uuid.UUID] | None,
+) -> list[Opening]:
+    """Os formulários da abertura. Sem lista, os ligados, como obrigatórios ou opcionais pelo
+    padrão do modelo. Com lista, ela na ordem e, depois, os ligados que não vieram nela nem entre
+    os desmarcados (`unchecked`, o `forms_left_out` da Nova OS: a tela não conhecia o vínculo),
+    pelo padrão do modelo. Lista sem `unchecked` (Nova OS anterior a ele): só a lista."""
+    by_system = [
+        Opening(i.template, i.template.default_required, True, False, i.reason) for i in linked
+    ]
     if chosen is None:
-        return [(i.template, i.template.default_required, True, i.reason) for i in linked]
+        return by_system
     linked_ids = {i.template.id for i in linked}
-    return [(t, required, t.id in linked_ids, None) for t, required in chosen]
+    out = [Opening(t, required, t.id in linked_ids, True, None) for t, required in chosen]
+    if unchecked is None:
+        return out
+    skip = {t.id for t, _ in chosen} | set(unchecked)
+    return out + [o for o in by_system if o.template.id not in skip]
 
 
 def opening_asks_signature(
-    chosen: list[tuple[FormTemplate, bool]] | None, linked: list[Linked]
+    chosen: list[tuple[FormTemplate, bool]] | None,
+    linked: list[Linked],
+    unchecked: Sequence[uuid.UUID] | None = None,
 ) -> bool:
     """A OS nasce exigindo a assinatura (formulário obrigatório que pede)."""
     return any(
-        required and template.requires_signature
-        for template, required, _, _ in _opening(chosen, linked)
+        o.required and o.template.requires_signature for o in _opening(chosen, linked, unchecked)
     )
 
 
 def opening_left_out(
-    chosen: list[tuple[FormTemplate, bool]] | None, linked: list[Linked]
+    chosen: list[tuple[FormTemplate, bool]] | None,
+    linked: list[Linked],
+    unchecked: Sequence[uuid.UUID] | None = None,
 ) -> list[str]:
-    """Os ligados que a Nova OS deixou de fora (vão para o evento da abertura)."""
+    """Os ligados que a Nova OS deixou de fora (vão para o evento da abertura e não entram
+    sozinhos depois): os desmarcados pelo analista que são ligados e não vieram na lista; sem
+    `unchecked` (Nova OS anterior a ele), todos os ligados fora da lista."""
     if chosen is None:
         return []
     ids = {t.id for t, _ in chosen}
-    return [str(i.template.id) for i in linked if i.template.id not in ids]
+    out = [i.template.id for i in linked if i.template.id not in ids]
+    if unchecked is not None:
+        wanted = set(unchecked)
+        out = [i for i in out if i in wanted]
+    return [str(i) for i in out]
 
 
 def attach_on_create(
@@ -398,19 +448,20 @@ def attach_on_create(
     linked: list[Linked],
     actor: User,
     now: dt.datetime,
+    unchecked: Sequence[uuid.UUID] | None = None,
 ) -> None:
-    """Os formulários da abertura. Sem lista, o sistema anexa os ligados (o histórico mostra o
-    motivo); com lista, quem abriu é o autor."""
-    by_system = chosen is None
-    for order, (template, required, auto, note) in enumerate(_opening(chosen, linked), 1):
+    """Os formulários da abertura. Os da lista da Nova OS têm quem abriu como autor; os que o
+    sistema anexa (sem lista, ou ligados que a tela não conhecia) ficam sem autor, com o motivo
+    no histórico."""
+    for order, item in enumerate(_opening(chosen, linked, unchecked), 1):
         _attach(
             db,
             ticket,
-            template,
-            required=required,
-            auto=auto,
-            actor=None if by_system else actor,
-            note=note,
+            item.template,
+            required=item.required,
+            auto=item.auto,
+            actor=actor if item.listed else None,
+            note=item.note,
             now=now,
             order=order,
         )
@@ -434,6 +485,22 @@ async def _signature_after_removal(
     ticket.signature_required = False
 
 
+async def _inactive_templates(
+    db: AsyncSession, ids: Iterable[uuid.UUID | None]
+) -> set[uuid.UUID]:
+    """Dos modelos informados, os desativados."""
+    wanted = {i for i in ids if i is not None}
+    if not wanted:
+        return set()
+    return set(
+        await db.scalars(
+            select(FormTemplate.id).where(
+                FormTemplate.id.in_(wanted), FormTemplate.is_active.is_(False)
+            )
+        )
+    )
+
+
 async def reconcile_ticket(
     db: AsyncSession, ticket: Ticket, *, why: str, now: dt.datetime
 ) -> tuple[list[str], list[str]]:
@@ -441,7 +508,8 @@ async def reconcile_ticket(
     categoria teria, respeitando o que uma pessoa decidiu: entram os ligados que faltam (menos os
     que alguém tirou da OS ou deixou de fora na abertura); saem só os que entraram sozinhos, não
     casam mais e ninguém começou (`why` vai para o histórico). Posto à mão ou respondido nunca
-    sai. Devolve os nomes dos que entraram e dos que saíram."""
+    sai, nem o de modelo desativado (as OS que já têm continuam com ele; só uma pessoa tira).
+    Devolve os nomes dos que entraram e dos que saíram."""
     if not before_visit(ticket):
         return [], []
     linked = await linked_templates(
@@ -455,9 +523,12 @@ async def reconcile_ticket(
             .order_by(TicketForm.created_at)
         )
     )
+    # linked_templates só traz os ativos: o de modelo desativado "não casa" só por estar inativo.
+    unmatched = [f for f in forms if f.auto_attached and f.template_id not in linked_ids]
+    inactive = await _inactive_templates(db, [f.template_id for f in unmatched])
     removed: list[TicketForm] = []
-    for form in forms:
-        if form.auto_attached and form.template_id not in linked_ids and await untouched(db, form):
+    for form in unmatched:
+        if form.template_id not in inactive and await untouched(db, form):
             await _detach(db, ticket, form, actor=None, note=why, now=now, release=False)
             removed.append(form)
     present = {f.template_id for f in forms}
@@ -974,8 +1045,10 @@ async def complete(db: AsyncSession, ticket: Ticket, form: TicketForm, actor: Us
     _ensure_can_fill(ticket, actor)
     # A resposta automática congela na conclusão: o valor de agora vira resposta (trocar o técnico
     # ou remarcar depois não muda nada) e conta para os obrigatórios. Faltando algo, a exceção
-    # desfaz a transação e nada fica congelado.
-    auto = prefill_for(ticket, form.fields, form.answers, final=True)
+    # desfaz a transação e nada fica congelado. A data da visita é a do atendimento em curso ou do
+    # último (form_prefill.visit_moment), não a da primeira chegada.
+    visit_at = await visit_moment(db, ticket)
+    auto = prefill_for(ticket, form.fields, form.answers, final=True, visit_at=visit_at)
     if auto:  # só as perguntas ainda sem resposta
         form.answers = {**(form.answers or {}), **auto}
     missing = await missing_items(db, form)

@@ -10,6 +10,7 @@ from app.api.deps import DB, SESSION_ENDED, CurrentUser
 from app.core import sessions
 from app.core.access import CHANNEL_DENIED_MESSAGE, channel_allows, home_channel
 from app.core.config import settings
+from app.core.enums import UserRole
 from app.core.security import (
     InvalidToken,
     create_access_token,
@@ -22,6 +23,7 @@ from app.core.security import (
 )
 from app.db.base import utcnow
 from app.models.user import TICKET_MANAGER_ROLES, User
+from app.models.user_change import VIA_APP
 from app.schemas.auth import (
     AuthProviders,
     ChangePasswordRequest,
@@ -33,7 +35,7 @@ from app.schemas.auth import (
 )
 from app.schemas.user import UserOut
 from app.services import access as access_svc
-from app.services import entra, login_guard
+from app.services import entra, login_guard, user_history
 
 log = logging.getLogger(__name__)
 
@@ -174,24 +176,33 @@ async def change_password(body: ChangePasswordRequest, db: DB, user: CurrentUser
     """Troca a senha (obrigatória no primeiro acesso com senha provisória).
 
     Encerra as outras sessões do usuário e devolve tokens novos para este aparelho. Várias
-    senhas atuais erradas seguidas bloqueiam a troca por um tempo (aparelho na mão de outro).
+    senhas atuais erradas seguidas bloqueiam a troca por um tempo (aparelho na mão de outro); a
+    tentativa conta antes de conferir (pedidos em paralelo não furam o limite), no mesmo contador
+    da senha pedida no Meu cadastro. A do técnico entra no histórico do cadastro: "criada no app"
+    (era a provisória) ou "trocada no app".
     """
     try:
-        await login_guard.check_password_change(str(user.id))
+        await login_guard.password_attempt(str(user.id))
     except login_guard.LoginBlocked as exc:
         raise _blocked(exc) from exc
     if not await verify_password_async(body.current_password, user.password_hash):
-        await login_guard.password_change_failed(str(user.id))
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Senha atual incorreta")
     await login_guard.password_change_succeeded(str(user.id))
     if body.new_password == body.current_password:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT, "A nova senha precisa ser diferente da atual"
         )
+    was_temporary = user.must_change_password
     user.password_hash = await hash_password_async(body.new_password)
     user.must_change_password = False
     user.sessions_revoked_at = utcnow()
+    changes: list[dict] = []
+    if user.role == UserRole.TECHNICIAN:
+        line = user_history.PASSWORD_CREATED if was_temporary else user_history.PASSWORD_CHANGED
+        changes = [dict(line)]
+        user_history.record(db, user, changes, via=VIA_APP, actor=user)
     await db.commit()
+    await user_history.publish_changed(user, changes, via=VIA_APP, actor=user)
     return _tokens(user, home_channel(user.role))
 
 

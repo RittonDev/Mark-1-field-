@@ -5,7 +5,8 @@
 // - Locais: funcionam offline, com o app fechado e no Expo Go (Android e iOS). O push da central ainda não está
 //   ligado (device.ts); quando estiver, o POST /devices responde "live" e a sincronização para de repetir o aviso.
 // - Permissão: um único pedido automático, uma vez por técnico (auth.ts, depois do termo de localização). Depois
-//   disso, só pelos botões da Conta.
+//   disso, só pelos botões da Conta. Sem ela, a novidade de fora da tela fica guardada (deferNews) e vira toast
+//   quando o app volta à tela.
 // - Toque: aviso de OS abre a OS, de oferta abre a oferta, resumo abre Hoje.
 //
 // Não importa sync, auth nem device: eles importam este módulo.
@@ -14,13 +15,21 @@ import type * as NotificationsApi from "expo-notifications";
 import { router } from "expo-router";
 import { AppState, Linking, Platform } from "react-native";
 import { getServerOffsetMs, serverNow } from "./api";
-import { getKv, listTickets, setKv } from "./db";
+import { getKv, getTicket, listTickets, setKv } from "./db";
 import { loadOfferStore, pendingOffers } from "./offers";
 import { ONSITE_CHANNEL, reconcileOnsiteAlerts } from "./onsiteAlerts";
 import { session } from "./session";
 import type { LocalTicket } from "./syncTypes";
 import type { User } from "./types";
-import { planVisitReminders, remindableVisits, VISIT_PREFIX, type PlannedReminder } from "./visitReminders";
+import {
+  planVisitReminders,
+  remindableVisits,
+  reminderOutdated,
+  VISIT_KEEP_GRACE_MS,
+  VISIT_MIN_LEAD_MS,
+  VISIT_PREFIX,
+  type PlannedReminder,
+} from "./visitReminders";
 
 export type NotificationsModule = typeof NotificationsApi;
 type NotificationRequest = NotificationsApi.NotificationRequest;
@@ -252,10 +261,15 @@ export interface AlertsContext {
   /** Estado efetivo das OS no aparelho (com as ações ainda na fila). */
   tickets: LocalTicket[];
   granted: boolean;
-  /** Agenda tudo de novo, mesmo o que não mudou. */
+  /**
+   * Agenda de novo o que não mudou (o alarme exato acabou de ser liberado), menos o que vence em menos de 1 min:
+   * esse não daria para agendar de novo e fica como está.
+   */
   force: boolean;
   /** A sessão desta volta ainda vale: saiu da conta no meio, não agenda mais nada. */
   alive: () => boolean;
+  /** Agora, no relógio do aparelho (o mesmo para as duas reconciliações). */
+  now: number;
 }
 
 let alertsRun: Promise<void> | null = null;
@@ -294,7 +308,7 @@ async function reconcileLocalAlerts(force: boolean): Promise<void> {
     const tickets = user ? await listTickets() : [];
     const granted = (await N.getPermissionsAsync()).granted;
     const alive = () => session.get().user?.id === user?.id;
-    const context: AlertsContext = { N, user, tickets, granted, force, alive };
+    const context: AlertsContext = { N, user, tickets, granted, force, alive, now: Date.now() };
     await reconcileOnsiteAlerts(context).catch((error: unknown) => console.warn("Alertas do tempo na loja indisponíveis", error));
     await reconcileVisitReminders(context).catch((error: unknown) => console.warn("Lembretes da visita indisponíveis", error));
   } catch (error) {
@@ -303,20 +317,25 @@ async function reconcileLocalAlerts(force: boolean): Promise<void> {
 }
 
 /**
- * Lembretes da visita (visitReminders.ts): mantém o agendado que não mudou (hora, título e texto), cancela o resto
- * e agenda o que falta. Sem técnico, sem permissão ou com a chave desligada, não fica nenhum. Na bandeja, tira o
- * lembrete de uma visita que não vale mais (começou, foi cancelada, saiu da lista ou mudou de horário).
+ * Lembretes da visita (visitReminders.ts). O agendado que não mudou (hora, título e texto) fica, inclusive no último
+ * minuto e até 15 min depois da hora (o alarme inexato do Android ainda não disparou); o resto é cancelado. Novo só
+ * entra com 1 min de antecedência ou mais. Sem técnico, sem permissão ou com a chave desligada, não fica nenhum. Na
+ * bandeja, tira o lembrete de uma visita que não vale mais (foi iniciada, cancelada, saiu da lista ou mudou de
+ * horário) e o que ficou velho: o de 1 dia na hora do de 1h40, o de 1h40 na do de 10 min e todos no início da visita.
  */
-async function reconcileVisitReminders({ N, user, tickets, granted, force, alive }: AlertsContext): Promise<void> {
-  const wanted =
-    user && granted && (await visitRemindersEnabled()) ? planVisitReminders(tickets, user.id, Date.now(), getServerOffsetMs()) : [];
-  const byId = new Map(wanted.map((reminder) => [reminder.identifier, reminder]));
+async function reconcileVisitReminders({ N, user, tickets, granted, force, alive, now }: AlertsContext): Promise<void> {
+  const offset = getServerOffsetMs();
+  const remindFor = user && granted && (await visitRemindersEnabled()) ? user.id : null;
+  const wanted = remindFor ? planVisitReminders(tickets, remindFor, now, offset) : [];
+  // O que pode ficar: o que dá para agendar e o que venceu há pouco (o mesmo lembrete nos dois, com a mesma hora).
+  const keepable = remindFor ? planVisitReminders(tickets, remindFor, now, offset, -VISIT_KEEP_GRACE_MS) : [];
+  const byId = new Map([...keepable, ...wanted].map((reminder) => [reminder.identifier, reminder]));
   const kept = new Set<string>();
   for (const n of await N.getAllScheduledNotificationsAsync()) {
     if (!n.identifier.startsWith(VISIT_PREFIX)) continue;
     const want = byId.get(n.identifier);
-    const same = !force && want && n.content.data?.at === want.at && n.content.title === want.title && n.content.body === want.body;
-    if (same) kept.add(n.identifier);
+    const same = !!want && n.content.data?.at === want.at && n.content.title === want.title && n.content.body === want.body;
+    if (same && !(force && want.fireAt >= now + VISIT_MIN_LEAD_MS)) kept.add(n.identifier);
     else await N.cancelScheduledNotificationAsync(n.identifier);
   }
   for (const reminder of wanted) {
@@ -338,7 +357,9 @@ async function reconcileVisitReminders({ N, user, tickets, granted, force, alive
     if (!identifier.startsWith(VISIT_PREFIX)) continue;
     const ticketId = text(content.data?.ticketId);
     const start = ticketId ? visits.get(ticketId) : undefined;
-    if (!start || start !== content.data?.start) await N.dismissNotificationAsync(identifier);
+    if (!start || start !== content.data?.start || reminderOutdated(identifier, start, now, offset)) {
+      await N.dismissNotificationAsync(identifier);
+    }
   }
 }
 
@@ -411,6 +432,90 @@ export async function dismissNewsExcept(prefix: string, keep: readonly string[])
   } catch (error) {
     console.warn("Não foi possível limpar as notificações", error);
   }
+}
+
+// ───────────────────────────── avisos guardados para a volta à tela ─────────────────────────────
+
+/**
+ * Novidades de uma rodada fora da tela que não viraram notificação (sem permissão ou com erro): o toast ali sumiria
+ * sem ninguém ver. Ficam no kv e saem como toast quando o app volta à tela (sync.ts). No máximo 20, por 6 h.
+ */
+const DEFERRED_KEY = "deferred_notices";
+const DEFERRED_MAX = 20;
+const DEFERRED_TTL_MS = 6 * 3600_000;
+
+interface Deferred<T extends NewsItem> {
+  /** Técnico da rodada: o aviso não passa para outro técnico no mesmo aparelho. */
+  userId: string;
+  /** Quando foi guardado (relógio do aparelho). */
+  at: number;
+  item: T;
+}
+
+let deferredTail: Promise<unknown> = Promise.resolve();
+
+/** Uma leitura e gravação da fila por vez: a rodada que guarda e a volta à tela que mostra não se atropelam. */
+function oneAtATime<R>(task: () => Promise<R>): Promise<R> {
+  const run = deferredTail.then(task, task);
+  deferredTail = run.catch(() => undefined);
+  return run;
+}
+
+async function readDeferred<T extends NewsItem>(): Promise<Deferred<T>[]> {
+  try {
+    const parsed: unknown = JSON.parse((await getKv(DEFERRED_KEY)) ?? "[]");
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((entry: unknown): entry is Deferred<T> => {
+      const candidate = entry as Partial<Deferred<T>> | null;
+      return typeof candidate?.userId === "string" && typeof candidate.at === "number" && typeof candidate.item?.id === "string";
+    });
+  } catch {
+    return [];
+  }
+}
+
+function writeDeferred<T extends NewsItem>(list: readonly Deferred<T>[]): Promise<void> {
+  return setKv(DEFERRED_KEY, list.length ? JSON.stringify(list) : null, undefined, { notify: false });
+}
+
+/**
+ * Guarda as novidades para a volta à tela. Como na bandeja, o mesmo id troca o anterior e `replaces` tira os que
+ * ficaram velhos (a OS cancelada tira o "Nova OS" dela).
+ */
+export function deferNews<T extends NewsItem>(userId: string, items: readonly T[]): Promise<void> {
+  return oneAtATime(async () => {
+    const now = Date.now();
+    let list = (await readDeferred<T>()).filter((entry) => entry.userId === userId && now - entry.at < DEFERRED_TTL_MS);
+    for (const item of items) {
+      const stale = new Set([item.id, ...(item.replaces ?? [])]);
+      list = list.filter((entry) => !stale.has(entry.item.id));
+      list.push({ userId, at: now, item });
+    }
+    await writeDeferred(list.slice(-DEFERRED_MAX));
+  });
+}
+
+/**
+ * Tira da fila as novidades guardadas do técnico que ainda valem, as mais antigas primeiro. Ficam de fora as de mais
+ * de 6 h, as de uma OS que não está mais no aparelho e as de uma oferta que fechou.
+ */
+export function takeDeferredNews<T extends NewsItem>(userId: string): Promise<T[]> {
+  return oneAtATime(async () => {
+    const list = await readDeferred<T>();
+    if (!list.length) return [];
+    await writeDeferred([]);
+    const now = Date.now();
+    const fresh = list.filter((entry) => entry.userId === userId && now - entry.at < DEFERRED_TTL_MS).map((entry) => entry.item);
+    if (!fresh.length) return [];
+    const onDevice = new Set<string>();
+    for (const id of new Set(fresh.flatMap((item) => (item.ticketId ? [item.ticketId] : [])))) {
+      if (await getTicket(id)) onDevice.add(id);
+    }
+    const offers = fresh.some((item) => item.offerId)
+      ? new Set(pendingOffers((await loadOfferStore()).offers, serverNow()).map((offer) => offer.id))
+      : new Set<string>();
+    return fresh.filter((item) => (!item.ticketId || onDevice.has(item.ticketId)) && (!item.offerId || offers.has(item.offerId)));
+  });
 }
 
 /** Saiu da conta: nada agendado e a bandeja limpa (loja e endereço aparecem na tela bloqueada). */

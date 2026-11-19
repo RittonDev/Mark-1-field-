@@ -25,7 +25,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core import pix
+from app.core import permissions, pix
 from app.core.enums import UserRole
 from app.core.labels import ROLE_LABELS
 from app.db.base import utcnow
@@ -199,25 +199,35 @@ def _hidden(value: str | None) -> str | None:
 
 def hide_pix(rows: list[UserChange]) -> list[UserChangeOut]:
     """O histórico para quem tem Técnicos mas não Pagamentos: sem o titular e com a chave como "***"
-    (null continua null: "cadastrada" e "removida" seguem legíveis). Linha que só mudou o titular
-    vira "***" → "***" na chave, para não ficar vazia. Devolve cópias: as linhas do banco ficam como
-    estão."""
+    (null continua null: "cadastrada" e "removida" seguem legíveis). A troca só do titular vira
+    "***" → "***" na chave, para a linha não ficar vazia. Devolve cópias: os objetos do banco ficam
+    como estão."""
     out: list[UserChangeOut] = []
     for row in rows:
         full = UserChangeOut.model_validate(row)
-        items = [item for item in full.changes if item.field != "pix_holder"]
-        if len(items) < len(full.changes) and not any(item.field == "pix" for item in items):
-            items.append(
-                UserChangeItem.model_validate({"field": "pix", "from": PIX_HIDDEN, "to": PIX_HIDDEN})
-            )
-        changes = [
-            item.model_copy(update={"from_": _hidden(item.from_), "to": _hidden(item.to)})
-            if item.field == "pix"
-            else item
-            for item in items
-        ]
+        has_pix = any(item.field == "pix" for item in full.changes)
+        changes: list[UserChangeItem] = []
+        for item in full.changes:
+            if item.field == "pix_holder":
+                if not has_pix:
+                    hidden = {"field": "pix", "from": PIX_HIDDEN, "to": PIX_HIDDEN}
+                    changes.append(UserChangeItem.model_validate(hidden))
+                    has_pix = True
+            elif item.field == "pix":
+                update = {"from_": _hidden(item.from_), "to": _hidden(item.to)}
+                changes.append(item.model_copy(update=update))
+            else:
+                changes.append(item)
         out.append(full.model_copy(update={"changes": changes}))
     return out
+
+
+def for_viewer(rows: list[UserChange], viewer: User) -> list[UserChange] | list[UserChangeOut]:
+    """GET /technicians/{id}/changes: como está para quem tem Pagamentos (o cadastro mostra a
+    seção Pagamento); para quem só tem Técnicos, `hide_pix`."""
+    if permissions.of(viewer).can("commercial.payouts"):
+        return rows
+    return hide_pix(rows)
 
 
 async def after_reset(
