@@ -1508,10 +1508,13 @@ sugestões. Código: `services/technician_levels.py`, `api/routes/technician_lev
 - Chegada no horário combinado: medidos com agenda e chegada (`arrivals`). Atraso (`late`) é chegar mais de 30 min
   depois do horário agendado (a regra do "Atrasada", `field.SCHEDULE_TOLERANCE`); `on_time` = `arrivals` - `late`.
   OS sem horário agendado não entram (atraso de despacho é da central). Não é o prazo de chegada do SLA.
-- Retorno (`reworks`): reabertura (`status_changed` para `reopened`) de OS resolvida ou fechada na janela, até 30 dias
-  depois da conclusão reaberta (a última `status_changed` para `resolved` antes dela). Reabrir a cancelada não conta.
-- Visita perdida (`lost`): visita improdutiva na janela cujo motivo está **hoje** com responsabilidade `technician`
-  (vale a classificação atual do catálogo, como no relatório de violações). `visits` = `measured` + `lost`.
+- Retorno (`reworks`): reabertura (`status_changed` para `reopened`) de OS **deste sistema** (`legacy` nulo) resolvida
+  ou fechada na janela, até 30 dias depois da conclusão reaberta (a última `status_changed` para `resolved` antes
+  dela). Reabrir a cancelada não conta. A OS migrada do Field Control reaberta não conta, nem a concluída aqui depois da
+  migração: ela não entra na base (`measured`).
+- Visita perdida (`lost`): visita improdutiva **em OS deste sistema**, na janela, cujo motivo está **hoje** com
+  responsabilidade `technician` (vale a classificação atual do catálogo, como no relatório de violações). `visits` =
+  `measured` + `lost`, as duas pontas só com OS deste sistema.
 - Atribuição dos eventos: o `data.technician_id` gravado no evento (daqui em diante); sem ele, o autor da conclusão
   (retorno) ou do registro (visita perdida), se for técnico; senão, o responsável atual da OS.
 - Não contam: ofertas recusadas, cancelamentos, tempo na loja, formulários e assinatura (já travam a conclusão),
@@ -1545,11 +1548,14 @@ vira chegada no horário; o retorno e a visita perdida deixam de contar. Fica re
 `ix_ticket_events_reopened` (a consulta dos retornos usa o mesmo predicado escrito por extenso). Sem backfill.
 
 **Quando recalcula.** A rotina periódica (`app.main`, "Elos dos técnicos", a cada 10 min sob a trava) refaz todos
-quando a conta mais antiga tem 6 h ou mais, ou quando falta algum técnico (inclusive inativos). A primeira lista de
-Técnicos ou de sugestões calcula todos se a tabela está vazia. `GET /me/level`, `GET /technicians/{id}/level`,
-desconsiderar e voltar a contar recalculam o técnico na hora. Mudar a responsabilidade de um motivo de improdutiva
-(`PATCH /unproductive-reasons/{id}`) marca todos para a próxima rodada. A lista e as sugestões só leem a conta
-guardada (até 6 h de atraso).
+quando a conta mais antiga tem 6 h ou mais, ou quando falta algum técnico (inclusive inativos). A lista de Técnicos e
+as sugestões calculam todos quando falta a conta de algum técnico, inclusive inativos (primeiro uso, técnico novo, ou só
+a conta solta que o app gravou com `GET /me/level`). Um cálculo por vez (`pg_try_advisory_xact_lock`, sem esperar): quem
+chega junto lê o que está guardado. `GET /me/level`, `GET /technicians/{id}/level`, desconsiderar e voltar a contar
+recalculam o técnico na hora, mas só regravam a linha quando faixa, risco ou números mudam: o `computed_at` da resposta
+é a hora do cálculo, e o da linha, o da última gravação. Mudar a responsabilidade de um motivo de improdutiva
+(`PATCH /unproductive-reasons/{id}`) marca todos para a próxima rodada. Fora isso, a lista e as sugestões só leem a
+conta guardada (até 6 h de atraso).
 
 **Eventos.** A visita improdutiva (`unproductive_visit`) grava `data.technician_id` (o responsável da OS, também
 quando a central registra) e a reabertura de OS resolvida ou fechada (`status_changed` para `reopened`) grava
@@ -1563,15 +1569,22 @@ quando a central registra) e a reabertura de OS resolvida ou fechada (`status_ch
 - `GET /technicians/{id}/level` (Técnicos, ver) → `TechnicianLevelDetail` = `MyLevel` + `technician: Ref`,
   `computed_tier`, `waived`, `technician_reasons` (motivos de improdutiva ativos com responsabilidade `technician`;
   0 = visitas perdidas não contam) e `occurrences` com as desconsideradas (até 200, cada uma com
-  `waiver: {id, note, created_by: Ref|null, created_at}|null`; no retorno, o detalhe leva " · Motivo: {nota}", até 200
-  caracteres). 404 "Técnico não encontrado" (também para quem não é técnico).
+  `waiver: {id, note|null, created_by: Ref|null, created_at}|null`; no retorno, o detalhe leva " · Motivo: {nota}", até
+  200 caracteres). 404 "Técnico não encontrado" (também para quem não é técnico).
+  - Na central, o `ticket` da ocorrência é `{id, code, title, hidden}`, com `hidden` false na OS visível (no app, em
+    `/me/level`, continua `{id, code, title}`).
+  - As ocorrências seguem a fila de quem pede. Com "Somente a própria fila", a de OS fora dela vem com
+    `ticket: {id: null, code: null, title: "OS de outra fila", hidden: true}`, o detalhe sem " · Motivo: …" e
+    `waiver.note` null (ficam `waiver.id`, `created_by` e `created_at`). `ref_id` não é mascarado (no atraso, é o id da
+    OS).
+  - Contagens, faixa, critérios, `waived` e `occurrences_total` continuam com todas.
 - `POST /technicians/{id}/level/waivers` (Técnicos, editar) `{kind: "late"|"rework"|"unproductive", ref_id, note}` →
   201 `TechnicianLevelDetail`. `ref_id`: a OS no atraso; o evento do histórico no retorno e na visita perdida. `note`
   de 1 a 300 caracteres, sem os espaços das pontas (422 com `label` "Motivo"). Ocorrência que não é do técnico na
-  janela: 422 "Ocorrência não encontrada nos últimos 12 meses"; repetida: 409 "Esta ocorrência já foi
-  desconsiderada" (`uq_technician_level_waivers_occurrence`).
+  janela: 422 "Ocorrência não encontrada nos últimos 12 meses"; OS de outra fila: 403 `QUEUE_FORBIDDEN` "Esta OS é de
+  outra fila."; repetida: 409 "Esta ocorrência já foi desconsiderada" (`uq_technician_level_waivers_occurrence`).
 - `DELETE /technicians/{id}/level/waivers/{waiver_id}` (Técnicos, editar) → 200 `TechnicianLevelDetail` (volta a
-  contar); 404 "Ocorrência desconsiderada não encontrada".
+  contar); 404 "Ocorrência desconsiderada não encontrada"; OS da desconsideração em outra fila: 403 `QUEUE_FORBIDDEN`.
 - `POST /technicians/levels/refresh` (Técnicos, editar) → `{technicians, bronze, silver, gold, diamond, at_risk}`.
 - `TechnicianOut.level` (`GET /technicians` e as respostas de um técnico) e `TechnicianSuggestion.level`
   (`GET /technicians/suggest`, `GET /tickets/{id}/technician-suggestions`): `LevelSummary {tier, since, at_risk}`,
@@ -1593,7 +1606,15 @@ quando a central registra) e a reabertura de OS resolvida ou fechada (`status_ch
 - `LevelTierRule {tier, services, measured, on_time_pct, rework_pct, lost_pct, summary}` e `rules` ("Como
   funciona"), prontos para a tela.
 - `LevelOccurrence {kind, ref_id, ticket: {id, code, title}, at, detail}`: "Chegou 52 min depois do horário
-  combinado (10:00 de 12/11)", "Reaberta 6 dias depois da conclusão", "Visita improdutiva: {motivo}".
+  combinado (10:00 de 12/11)", "Reaberta 6 dias depois da conclusão", "Visita improdutiva: {motivo}". Na central,
+  `CentralLevelOccurrence` = o mesmo com `ticket: {id|null, code|null, title, hidden}` e `waiver`.
+
+**Na central (web).** A ocorrência de OS de outra fila (`ticket.hidden`) aparece como "OS de outra fila", sem link e sem
+Desconsiderar ou Voltar a contar; a desconsiderada mostra só quem e quando. O cadastro do técnico relê
+`GET /technicians/{id}/level` em evento de OS só quando o técnico é o responsável (`assignee_id`) ou entrou na visita
+(`data.added_ids`). Não relê em comentário, anexo, apontamento, decisão de pedido de peça, nem em `ticket.updated` só de
+`forms`, `signature`, `expenses`, `part_requests`, `payouts`, `quotes`, `offers`, `repairs` ou `tags`. Fora isso, relê ao
+voltar para a janela ou ao abrir o cadastro, quando a leitura tem mais de 1 min (cada leitura recalcula no servidor).
 
 **Responsabilidade `technician`.** Valor novo de `Responsibility` (rótulo "Técnico" em `/meta`), para motivos de
 improdutiva e de violação. Nenhum motivo foi reclassificado: enquanto a gestão não marcar algum motivo de improdutiva
@@ -1654,7 +1675,7 @@ que ele já cuidava (analista e cliente) e os grupos técnicos; "Editar" no Cale
 |---|---|
 | `{"detail": "Sem acesso a Pagamentos.", "code": "MODULE_FORBIDDEN", "item": "commercial.payouts", "module": "commercial", "required": "view"}` | tela fora do perfil |
 | `{"detail": "Seu acesso a Orçamentos é só de visualização.", "code": "MODULE_FORBIDDEN", "item": "commercial.quotes", "module": "commercial", "required": "edit"}` | gravação com Visualizar |
-| `{"detail": "Esta OS é de outra fila.", "code": "QUEUE_FORBIDDEN"}` | OS fora da fila de quem pede (qualquer rota da OS e as ações por orçamento ou custo) |
+| `{"detail": "Esta OS é de outra fila.", "code": "QUEUE_FORBIDDEN"}` | OS fora da fila de quem pede (qualquer rota da OS, as ações por orçamento ou custo e as desconsiderações do elo) |
 | `{"detail": "Seu acesso mostra só a sua fila.", "code": "QUEUE_FORBIDDEN"}` | `GET /my-queue?user_id=<outro>` com "Somente a própria fila" |
 | `{"detail": "Você não pode dar mais acesso do que tem.", "code": "ACCESS_CAP"}` | supervisor dando acesso acima do dele |
 | `{"detail": "Só o administrador troca a senha ou o e-mail de quem tem mais acesso que você.", "code": "ACCESS_CAP"}` | supervisor trocando a senha ou o e-mail de quem tem mais acesso que ele |
@@ -1738,6 +1759,11 @@ Vale em:
 - Clientes e locais: contagens de OS; `GET /intake/context` (agendadas, 30 dias e última visita) e o novo
   `other_queues_open` (OS abertas da loja em filas que a pessoa não vê; só com "própria fila").
 - Reincidência do detalhe e das listas.
+- Elo dos técnicos: `GET /technicians/{id}/level` e as respostas de desconsiderar e de voltar a contar mascaram a
+  ocorrência de OS de outra fila (`ticket: {id: null, code: null, title: "OS de outra fila", hidden: true}`, sem a nota
+  da reabertura e com `waiver.note` null). `POST /technicians/{id}/level/waivers` e
+  `DELETE /technicians/{id}/level/waivers/{waiver_id}` em OS de outra fila: 403 `QUEUE_FORBIDDEN`. As contagens do elo
+  continuam globais (agregado).
 - Ficam globais, por serem agregados: `/users/assignable` (carga), OS abertas por técnico, sugestões de técnico.
 - Passar a OS para outra fila (`PATCH owner_id`) continua permitido; depois disso a OS some para quem passou.
 
