@@ -1420,11 +1420,11 @@ senha e do histórico: uma conta invadida não pode desviar o pagamento. Código
 
 | Tipo | Fica gravada | Mostra | Mascarada | Erro |
 |---|---|---|---|---|
-| `cpf` | 11 dígitos | 123.456.789-09 | ***.456.789-** | "CPF inválido: confira os números" |
-| `cnpj` | 14 caracteres em maiúsculas (aceita o alfanumérico) | 12.345.678/0001-95 | 12.345.678/****-** | "CNPJ inválido: confira os números" |
-| `email` | minúsculas, até 77 | como está | t***@exemplo.com | "E-mail inválido" |
-| `phone` | "+55" e 11 dígitos (DDD sem zero e o número com o 9; 12 ou 13 dígitos começando com 55 perdem o 55) | +55 (11) 98888-7777 | +55 (11) *****-7777 | "Celular inválido: use DDD e número, com o 9" |
-| `random` | 8-4-4-4-12 em minúsculas (32 hexadecimais) | como está | …4000 | "Chave aleatória inválida: copie a chave do app do seu banco" |
+| `cpf` | 11 dígitos | 123.456.789-09 | `***.456.789-**` | "CPF inválido: confira os números" |
+| `cnpj` | 14 caracteres em maiúsculas (aceita o alfanumérico) | 12.345.678/0001-95 | `12.345.678/****-**` | "CNPJ inválido: confira os números" |
+| `email` | minúsculas, até 77 | como está | `t***@exemplo.com` | "E-mail inválido" |
+| `phone` | "+55" e 11 dígitos (DDD sem zero e o número com o 9; 12 ou 13 dígitos começando com 55 perdem o 55) | +55 (11) 98888-7777 | `+55 (11) *****-7777` | "Celular inválido: use DDD e número, com o 9" |
+| `random` | 8-4-4-4-12 em minúsculas (32 hexadecimais) | como está | `…4000` | "Chave aleatória inválida: copie a chave do app do seu banco" |
 
 **Histórico do cadastro** (tabela `user_changes`): uma linha por gravação, `UserChange {id, created_at, via:
 "app"|"central", actor: Ref|null, changes: [{field, from, to}]}`, com o texto pronto para a tela:
@@ -1432,7 +1432,7 @@ senha e do histórico: uma conta invadida não pode desviar o pagamento. Código
   `address_district`, `address_zip`: o valor como está;
 - `team`: o nome do grupo; `is_active`: "Liberado" ou "Bloqueado"; `role`: o rótulo do papel; `work_schedule`:
   "08:00–17:00, intervalo 12:00–13:00"; `services`: "12 serviços";
-- `pix`: a chave mascarada ("CPF ***.456.789-**"), null sem chave; `pix_holder`: o titular da conta;
+- `pix`: a chave mascarada (`"CPF ***.456.789-**"`), null sem chave; `pix_holder`: o titular da conta;
 - `avatar`: `to` "nova" na troca e null na remoção (`from` "anterior"); `password`: `to` "provisória" (Redefinir senha
   em Técnicos), "definida pela central" (Usuários), "criada no app" (o técnico trocou a provisória) ou "trocada no app".
 
@@ -1451,19 +1451,19 @@ Na web (cadastro do técnico), a senha aparece como "Senha redefinida (provisór
 - `GET /technicians/{id}/changes?limit=50` (1 a 200; Técnicos, ver) → `UserChange[]`, do mais novo para o mais antigo.
   - Com Pagamentos (Visualizar ou Editar), como acima.
   - Com Técnicos e sem Pagamentos (`commercial.payouts` Sem acesso): os itens `pix_holder` não vêm e o `from`/`to` de
-    `pix` vira "***" (null continua null). A troca só do titular aparece como `{"field": "pix", "from": "***", "to":
-    "***"}`. Na web, a chave aparece como "Chave PIX cadastrada", "Chave PIX alterada" ou "Chave PIX removida", sem
-    valor e sem titular.
+    `pix` vira `"***"` (null continua null). A troca só do titular aparece como
+    `{"field": "pix", "from": "***", "to": "***"}`. Na web, a chave aparece como "Chave PIX cadastrada", "Chave PIX
+    alterada" ou "Chave PIX removida", sem valor e sem titular.
 - `DELETE /technicians/{id}/pix` (Pagamentos, editar) → 204: tira tipo, chave, titular e data, com o histórico via
   central e o aviso `["pix"]`; sem chave, 204 sem histórico.
 - `TechnicianOut` ganha `has_pix` e `pix_updated_at` (a chave não vai na base técnica).
 - `GET /payouts?with_pix=true` → `PayoutBoard = PayoutList + pix: {technician_id: PixInfo}`: os técnicos das linhas e o
   do `technician_id`, só os que têm chave. Sem `with_pix`, `pix: {}`. `GET /me/earnings` não muda.
 - Na web (Pagamentos), o extrato do WhatsApp (botão WhatsApp e "Copiar extrato") passa pelo endereço do wa.me: leva a
-  chave com CPF e CNPJ mascarados como `core/pix.mask` ("CPF ***.456.789-**", "CNPJ 12.345.678/****-**"); e-mail,
+  chave com CPF e CNPJ mascarados como `core/pix.mask` (`CPF ***.456.789-**`, `CNPJ 12.345.678/****-**`); e-mail,
   celular e chave aleatória vão inteiros. "Copiar PIX" copia a chave crua.
 - `POST /payouts/pay`: o `payout_set` do pagamento (`data.action: "paid"`) ganha `data.pix`, a chave mascarada daquele
-  momento ("CPF ***.456.789-**"), quando o técnico tem chave.
+  momento (`"CPF ***.456.789-**"`), quando o técnico tem chave.
 - Rótulos dos erros de validação (`main.py`): `pix` "Chave PIX", `key_type` "Tipo da chave PIX", `holder_name`
   "Titular da conta", `home_city` "Cidade", `home_state` "UF", `coverage_area` "Região que atende",
   `address_district` "Bairro" e `address_zip` "CEP".
