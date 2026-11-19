@@ -8,8 +8,8 @@ import { deviceRegistration, registerDevice, unregisterDevice } from "./device";
 import { askNotificationPermission, ensureNotificationsReady, syncLocalAlerts } from "./notifications";
 import { loadProfile } from "./profile";
 import { session } from "./session";
-import { applyPendingEnd, endDeviceSession, forgetDisabledAccess, revokeAccess, sessionEndSettled } from "./sessionEnd";
-import { startSync, stopSync, wipeLocalData } from "./sync";
+import { applyPendingEnd, finishSessionEnd, forgetDisabledAccess, revokeAccess, sessionEndSettled } from "./sessionEnd";
+import { startSync, wipeLocalData } from "./sync";
 import { hasConsent, resumeTracking, stopTracking } from "./tracking";
 import type { TokenResponse } from "./types";
 
@@ -134,7 +134,7 @@ export async function logout() {
   await Promise.race([stopTracking({ endOnServer: true }), delay(LOGOUT_TRACKING_WAIT_MS)]);
   // Sem rede, o servidor reatribui o token de push no próximo login neste aparelho.
   await Promise.race([unregisterDevice(), delay(LOGOUT_DEVICE_WAIT_MS)]);
-  stopSync();
-  await endDeviceSession();
   await session.signOut();
+  // A mesma limpeza de qualquer fim de sessão: sync, notificações, jornada e tarefa em segundo plano.
+  await finishSessionEnd();
 }

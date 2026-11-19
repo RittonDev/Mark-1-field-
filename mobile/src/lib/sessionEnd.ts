@@ -20,12 +20,6 @@ import { session, type SessionStatus } from "./session";
 import { stopSync, wipeLocalData } from "./sync";
 import { stopTracking } from "./tracking";
 
-/** Nenhuma notificação agendada nem na bandeja e a sincronização em segundo plano desligada. Não lança erro. */
-export async function endDeviceSession(): Promise<void> {
-  await clearNotificationsOnSignOut();
-  await unregisterBackgroundSync();
-}
-
 let cleaning: Promise<boolean> | null = null;
 let cleanAgain = false;
 
