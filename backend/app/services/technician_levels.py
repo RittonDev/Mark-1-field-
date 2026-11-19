@@ -850,7 +850,11 @@ async def refresh_all(db: AsyncSession, now: datetime | None = None) -> dict[str
     em cada faixa. As linhas ficam travadas até o fim da transação (um recálculo de um técnico no
     meio espera)."""
     now = now or utcnow()
-    tech_ids = list(await db.scalars(select(User.id).where(User.role == UserRole.TECHNICIAN)))
+    # Sempre na ordem do id (a trava e a gravação): dois recálculos ao mesmo tempo esperam um pelo
+    # outro em vez de travar em cruz.
+    tech_ids = list(
+        await db.scalars(select(User.id).where(User.role == UserRole.TECHNICIAN).order_by(User.id))
+    )
     previous = {
         row.user_id: Standing(row.tier, row.tier_since, row.at_risk_since)
         for row in (
@@ -860,7 +864,9 @@ async def refresh_all(db: AsyncSession, now: datetime | None = None) -> dict[str
                     TechnicianLevel.tier,
                     TechnicianLevel.tier_since,
                     TechnicianLevel.at_risk_since,
-                ).with_for_update()
+                )
+                .order_by(TechnicianLevel.user_id)
+                .with_for_update()
             )
         ).all()
     }
