@@ -9,8 +9,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.config import settings
-from app.schemas.onboarding import ApplicationIn
-from app.services import activities
+from app.schemas.onboarding import PRIVACY_VERSION, ApplicationIn
+from app.services import activities, onboarding
 from tests.conftest import World, requires_db
 
 pytestmark = requires_db
@@ -103,6 +103,8 @@ async def test_invite_form_and_approval(
         "52998224725",
     )
     assert detail["invite_label"] == "Marcos (indicação)"
+    # A ficha guarda a versão do aviso que o formulário mostrou.
+    assert detail["privacy_version"] == catalog["privacy_version"] == PRIVACY_VERSION
     assert "password" not in str(detail)
     photo = await client.get(detail["photo_url"])
     assert photo.status_code == 200 and photo.content.startswith(b"\x89PNG")
@@ -172,6 +174,22 @@ async def test_reject_and_revoke(client: AsyncClient, world: World) -> None:
         i["state"] for i in (await client.get(f"{API}/onboarding/invites", headers=an)).json()
     }
     assert states == {"revoked"}
+
+
+async def test_company_email_is_refused_on_the_form(
+    client: AsyncClient, world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """E-mail do domínio da empresa (login Microsoft) não vira login de técnico: travaria o login
+    da pessoa contratada com ele."""
+    monkeypatch.setattr(settings, "ENTRA_ALLOWED_DOMAINS", "empresa.exemplo.com")
+    token = await new_invite(client, world)
+    url = f"{API}/public/onboarding/{token}"
+    r = await client.post(url, json=ficha(email="Candidato@Empresa.Exemplo.com", photo=None))
+    assert r.status_code == 422 and r.json()["detail"] == onboarding.COMPANY_EMAIL
+    # O link de uso único não foi gasto.
+    assert (await client.get(url)).json()["valid"] is True
+    r = await client.post(url, json=ficha(email="candidato@exemplo.com", photo=None))
+    assert r.status_code == 201, r.text
 
 
 def test_age_counts_on_the_operation_day(monkeypatch: pytest.MonkeyPatch) -> None:

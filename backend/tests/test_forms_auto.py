@@ -1,16 +1,19 @@
 """Formulários que entram sozinhos na OS pelo tipo de OS e pela categoria (valendo as de baixo),
-a lista explícita da Nova OS, a reconciliação antes da visita (troca de tipo ou de categoria e
-"Levar também às OS que ainda não começaram"), o histórico de uso do modelo e a resposta
-automática, ao vivo até a conclusão do formulário."""
+a lista explícita da Nova OS (com os desmarcados), a reconciliação antes da visita (troca de tipo
+ou de categoria e "Levar também às OS que ainda não começaram"), o modelo desativado, o histórico
+de uso do modelo e a resposta automática, ao vivo até a conclusão do formulário."""
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 from httpx import AsyncClient
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.config import settings
+from app.core.enums import TicketStatus
 from app.services.form_prefill import prefill_for
 from tests.conftest import World, requires_db
 from tests.test_api import create, transition
@@ -172,6 +175,88 @@ async def test_explicit_forms_list_is_what_goes_in(client: AsyncClient, world: W
     r = await client.post(f"{API}/tickets", json=body, headers=world.analyst.headers)
     assert r.status_code == 201, r.text
     assert r.json()["owner"] is None and names(r.json()) == ["Checklist C"]
+
+
+async def test_explicit_list_with_the_unchecked_forms(client: AsyncClient, world: World) -> None:
+    scene, a, b, c, d = await printers_scene(client, world)
+    base = {"service_type_id": scene["type"]["id"], "category_id": scene["jam"]["id"]}
+
+    # A Nova OS mostrou B e o analista desmarcou; A ela não conhecia (o vínculo veio depois de a
+    # tela carregar os modelos): A entra sozinho, pelo padrão do modelo, depois da lista. Só o
+    # desmarcado que é ligado vai para o histórico (D está inativo; o outro id não é ligado).
+    unchecked = [b["id"], d["id"], str(uuid.uuid4())]
+    listed = [{"template_id": c["id"], "required": False}]
+    t = await create(client, world, forms=listed, forms_left_out=unchecked, **base)
+    got = [(f["name"], f["required"], f["auto_attached"]) for f in t["forms"]]
+    assert got == [("Checklist C", False, False), ("Checklist A", True, True)]
+    assert t["signature_required"] is True  # A pede assinatura e entrou obrigatório
+    created = await events(client, world, t["id"], "created")
+    assert created[0]["data"]["forms_left_out"] == [b["id"]]
+    added = await events(client, world, t["id"], "form_added")
+    assert sorted((e["to_value"], e["actor"] is None, e["note"]) for e in added) == [
+        ("Checklist A", True, "Pelo tipo de OS “Instalação de impressora”"),
+        ("Checklist C", False, None),
+    ]
+    # O desmarcado não volta sozinho com a troca de categoria antes da visita.
+    t = await patch(client, world, t["id"], category_id=scene["printers"]["id"])
+    assert names(t) == ["Checklist C", "Checklist A"]
+
+    # Desmarcado e também na lista: vale a lista (nada fica de fora).
+    t = await create(
+        client, world, forms=[{"template_id": a["id"]}], forms_left_out=[a["id"]], **base
+    )
+    assert [(f["name"], f["auto_attached"]) for f in t["forms"]] == [
+        ("Checklist A", True),
+        ("Checklist B", True),
+    ]
+    created = await events(client, world, t["id"], "created")
+    assert "forms_left_out" not in created[0]["data"]
+
+    # Sem lista, os desmarcados não valem: entram os ligados, como sempre.
+    t = await create(client, world, forms_left_out=[a["id"], b["id"]], **base)
+    assert names(t) == ["Checklist A", "Checklist B"]
+    created = await events(client, world, t["id"], "created")
+    assert "forms_left_out" not in created[0]["data"]
+
+    r = await client.post(
+        f"{API}/tickets",
+        json={
+            "title": "Impressora parada",
+            "customer_id": world.customer_id,
+            "forms": [],
+            "forms_left_out": [str(uuid.uuid4()) for _ in range(21)],
+        },
+        headers=world.supervisor.headers,
+    )
+    assert r.status_code == 422
+
+
+async def test_inactive_template_stays_when_type_or_category_change(
+    client: AsyncClient, world: World
+) -> None:
+    kind = await service_type(client, world, "Preventiva")
+    other = await service_type(client, world, "Corretiva")
+    a = await template(
+        client, world, "Checklist A", service_type_ids=[kind["id"]], requires_signature=True
+    )
+    t = await create(client, world, service_type_id=kind["id"])
+    assert names(t) == ["Checklist A"] and t["signature_required"] is True
+
+    # Desativado pela lista de Formulários (que manda os vínculos e o padrão de obrigatório).
+    keys = ("name", "fields", "service_type_ids", "category_ids", "default_required")
+    body = {**{k: a[k] for k in keys}, "requires_signature": True, "is_active": False}
+    r = await client.put(
+        f"{API}/form-templates/{a['id']}", json=body, headers=world.analyst.headers
+    )
+    assert r.status_code == 200, r.text
+
+    # As OS que já têm o formulário continuam com ele: só uma pessoa tira.
+    printers = await category(client, world, "Impressoras")
+    t = await patch(client, world, t["id"], category_id=printers["id"])
+    assert names(t) == ["Checklist A"] and t["signature_required"] is True
+    t = await patch(client, world, t["id"], service_type_id=other["id"])
+    assert names(t) == ["Checklist A"] and t["signature_required"] is True
+    assert await events(client, world, t["id"], "form_removed") == []
 
 
 async def test_type_change_before_the_visit_reconciles_forms(
@@ -490,8 +575,11 @@ def test_prefill_values_of_each_source() -> None:
         number=123,
         assignee=None,
         service_type=SimpleNamespace(name="Preventiva"),
-        # 23h30 de 03/12 em Brasília: vale o dia local da chegada, não o da agenda.
-        arrived_at=datetime(2026, 12, 4, 2, 30, tzinfo=UTC),
+        status=TicketStatus.IN_PROGRESS,
+        # Em atendimento vale o dia local do início do trecho atual (23h30 de 03/12 em Brasília),
+        # e não o da primeira chegada nem o da agenda.
+        work_started_at=datetime(2026, 12, 4, 2, 30, tzinfo=UTC),
+        arrived_at=datetime(2026, 11, 24, 13, 0, tzinfo=UTC),
         scheduled_start=datetime(2026, 12, 1, 13, 0, tzinfo=UTC),
     )
     sources = [
@@ -522,16 +610,138 @@ def test_prefill_values_of_each_source() -> None:
         "dia": "2026-12-03",
     }
 
+    def visit(**changes: object) -> tuple[str | None, str | None]:
+        """(ao vivo, na conclusão sem o momento apurado) da pergunta de data."""
+        for key, value in changes.items():
+            setattr(ticket, key, value)
+        live = prefill_for(ticket, fields, {})  # type: ignore[arg-type]
+        final = prefill_for(ticket, fields, {}, final=True)  # type: ignore[arg-type]
+        return live.get("dia"), final.get("dia")
+
+    today = datetime.now(UTC).astimezone(ZoneInfo(settings.TIMEZONE)).date().isoformat()
+    # A OS migrada do Field Control em atendimento não tem o início do trecho: vale a chegada.
+    assert visit(work_started_at=None) == ("2026-11-24", today)
+    # Fora de atendimento depois de uma chegada (pausada, improdutiva, reaberta, concluída), a
+    # data seria a de uma ida anterior: não vem. Antes da primeira chegada, a da agenda.
+    for status in (TicketStatus.ON_HOLD_VENDOR, TicketStatus.SCHEDULED, TicketStatus.RESOLVED):
+        assert visit(status=status) == (None, today)
+    assert visit(arrived_at=None) == ("2026-12-01", today)
+    # Na conclusão vale o momento que ela apurou (form_prefill.visit_moment).
+    moment = datetime(2026, 11, 30, 12, 0, tzinfo=UTC)
+    final = prefill_for(ticket, fields, {}, final=True, visit_at=moment)  # type: ignore[arg-type]
+    assert (final["dia"], final["visit_date"]) == ("2026-11-30", "30/11/2026")
+
     # O endereço do atendimento vence o da loja; sem chegada nem agenda, a data só sai na
     # conclusão (o dia de hoje).
     ticket.service_address = "Av. Exemplo, 200"
-    ticket.arrived_at = ticket.scheduled_start = None
     live = prefill_for(ticket, fields, {})  # type: ignore[arg-type]
     assert live["address"] == "Av. Exemplo, 200"
-    assert "visit_date" not in live and "dia" not in live
-    today = datetime.now(UTC).astimezone(ZoneInfo(settings.TIMEZONE)).date()
-    final = prefill_for(ticket, fields, {}, final=True)  # type: ignore[arg-type]
-    assert final["dia"] == today.isoformat()
+    assert visit(status=TicketStatus.NEW, scheduled_start=None) == (None, today)
+    assert "visit_date" not in prefill_for(ticket, fields, {})  # type: ignore[arg-type]
+
+
+async def _move_back(engine: AsyncEngine, ticket_id: str, days: int, *, first: bool) -> None:
+    """Recua o atendimento da OS: a chegada e o primeiro "Em atendimento" (`first`), ou o início
+    do trecho atual e o último "Em atendimento"."""
+    order = "ASC" if first else "DESC"
+    column = "arrived_at" if first else "work_started_at"
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                f"UPDATE tickets SET {column} = {column} - make_interval(days => :days), "
+                "work_started_at = work_started_at - make_interval(days => :days) WHERE id = :id"
+                if first
+                else f"UPDATE tickets SET {column} = {column} - make_interval(days => :days) "
+                "WHERE id = :id"
+            ),
+            {"id": ticket_id, "days": days},
+        )
+        await conn.execute(
+            text(
+                "UPDATE ticket_events SET created_at = created_at - make_interval(days => :days) "
+                "WHERE id = (SELECT id FROM ticket_events WHERE ticket_id = :id "
+                "AND event_type = 'status_changed' AND to_value = 'in_progress' "
+                f"ORDER BY created_at {order} LIMIT 1)"
+            ),
+            {"id": ticket_id, "days": days},
+        )
+
+
+async def _local_day(engine: AsyncEngine, ticket_id: str, column: str) -> date:
+    async with engine.connect() as conn:
+        moment = await conn.scalar(
+            text(f"SELECT {column} FROM tickets WHERE id = :id"), {"id": ticket_id}
+        )
+    return moment.astimezone(ZoneInfo(settings.TIMEZONE)).date()
+
+
+async def test_visit_date_follows_the_current_visit(
+    client: AsyncClient, world: World, engine: AsyncEngine
+) -> None:
+    an, th = world.analyst.headers, world.tech.headers
+    fields = [
+        {"id": "data", "type": "date", "label": "Data", "required": True, "prefill": "visit_date"},
+        {"id": "dia", "type": "text", "label": "Dia", "prefill": "visit_date"},
+    ]
+    report = await template(client, world, "Relatório da visita", fields=fields)
+    store = await template(client, world, "Checklist da loja", fields=fields[:1])
+    later = await template(client, world, "Checklist do retorno", fields=fields[:1])
+    t = await create(
+        client,
+        world,
+        assignee_id=str(world.tech.user.id),
+        forms=[
+            {"template_id": report["id"], "required": True},
+            {"template_id": store["id"], "required": False},
+            {"template_id": later["id"], "required": False},
+        ],
+    )
+
+    async def forms() -> dict[str, dict]:
+        d = (await client.get(f"{API}/tickets/{t['id']}", headers=th)).json()
+        return {f["template_id"]: f for f in d["forms"]}
+
+    async def complete(form: dict, headers: dict) -> dict:
+        r = await client.put(
+            f"{API}/tickets/{t['id']}/forms/{form['id']}/answers",
+            json={"answers": {}, "complete": True},
+            headers=headers,
+        )
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    # A primeira ida foi há 10 dias; a central pausou (aguardando peça).
+    t = await transition(client, th, t, "en_route")
+    t = await transition(client, th, t, "in_progress")
+    await _move_back(engine, t["id"], 10, first=True)
+    first_day = await _local_day(engine, t["id"], "arrived_at")
+    t = await transition(client, world.supervisor.headers, t, "on_hold_vendor", note="Peça")
+    assert (await forms())[report["id"]]["prefill"] == {}
+
+    # O técnico voltou há 3 dias e retomou: vale o dia da volta, não o da primeira ida.
+    t = await transition(client, th, t, "in_progress")
+    await _move_back(engine, t["id"], 3, first=False)
+    back = await _local_day(engine, t["id"], "work_started_at")
+    assert back != first_day
+    expected = {"data": back.isoformat(), "dia": back.strftime("%d/%m/%Y")}
+    assert (await forms())[report["id"]]["prefill"] == expected
+    assert (await complete((await forms())[report["id"]], th))["answers"] == expected
+
+    # Concluída a OS, o formulário que sobrou não mostra data; a central conclui depois e vale
+    # o dia da última ida.
+    t = await transition(client, th, t, "resolved", resolution_notes="Peça trocada")
+    assert (await forms())[store["id"]]["prefill"] == {}
+    done = await complete((await forms())[store["id"]], an)
+    assert done["answers"] == {"data": back.isoformat()}
+
+    # Reaberta, ainda sem a nova ida: a data é a de hoje (a ida anterior era do atendimento que
+    # terminou).
+    t = await transition(client, an, t, "reopened", note="Voltou a falhar")
+    before = datetime.now(UTC).astimezone(ZoneInfo(settings.TIMEZONE)).date()
+    done = await complete((await forms())[later["id"]], an)
+    after = datetime.now(UTC).astimezone(ZoneInfo(settings.TIMEZONE)).date()
+    assert done["answers"]["data"] in {before.isoformat(), after.isoformat()}
+    assert done["answers"]["data"] != back.isoformat()
 
 
 async def test_usage_lists_types_from_history(client: AsyncClient, world: World) -> None:

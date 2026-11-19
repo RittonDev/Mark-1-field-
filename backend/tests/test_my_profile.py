@@ -591,3 +591,268 @@ async def test_technician_by_id(client: AsyncClient, world: World) -> None:
     assert (await client.get(changes, params={"limit": 0}, headers=an)).status_code == 422
     assert (await client.get(changes, params={"limit": 201}, headers=an)).status_code == 422
     assert (await client.get(changes, headers=an)).json() == []
+
+
+# ------------------------------------------------------------------ revisão de segurança (2026-11-19)
+
+
+async def test_taken_email_is_told_only_after_the_password(client: AsyncClient, world: World) -> None:
+    """Sem a senha, ou com a errada, ninguém descobre se um e-mail já está cadastrado; com a certa,
+    só algumas trocas por hora."""
+    taken = "analista@teste.com.br"
+    r = await patch(client, world, email=taken)
+    assert r.status_code == 422 and messages(r) == [my_profile.PASSWORD_REQUIRED]
+    r = await patch(client, world, email=taken, current_password="errada")
+    assert r.status_code == 422 and messages(r) == [my_profile.WRONG_PASSWORD]
+
+    for _ in range(my_profile.MAX_EMAIL_CHECKS_PER_HOUR):
+        r = await patch(client, world, email=taken, current_password=PASSWORD)
+        assert r.status_code == 422 and messages(r) == [my_profile.EMAIL_TAKEN]
+    r = await patch(client, world, email="tecnico.alfa@exemplo.com", current_password=PASSWORD)
+    assert r.status_code == 429 and int(r.headers["retry-after"]) > 0
+    me = (await client.get(f"{API}/me/profile", headers=world.tech.headers)).json()
+    assert me["email"] == "tecnico@teste.com.br"
+
+
+async def test_temporary_password_cannot_change_email_or_pix(
+    client: AsyncClient, world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A provisória quem gerou foi a central: com ela, e-mail e chave PIX ficam fechados até o
+    técnico criar a senha dele (o app já pede isso antes de abrir o Meu cadastro)."""
+    events = capture_events(monkeypatch)
+    url = f"{API}/me/profile"
+    temp = await reset_by_central(client, world)
+    h = await login_mobile(client, "tecnico@teste.com.br", temp)
+    r = await client.patch(url, json={"pix": CPF_PIX, "current_password": temp}, headers=h)
+    assert r.status_code == 422 and messages(r) == [my_profile.TEMPORARY_PASSWORD]
+    body = {"email": "outro.login@exemplo.com", "current_password": temp}
+    r = await client.patch(url, json=body, headers=h)
+    assert r.status_code == 422 and messages(r) == [my_profile.TEMPORARY_PASSWORD]
+    # O resto do cadastro continua aberto.
+    r = await client.patch(url, json={"phone": "(11) 98888-7777"}, headers=h)
+    assert r.status_code == 200 and r.json()["pix"] is None
+    assert r.json()["email"] == "tecnico@teste.com.br"
+
+    # A senha definida pela central em Usuários também é provisória.
+    r = await client.patch(
+        f"{API}/users/{world.tech.user.id}",
+        json={"password": "provisoria-456"},
+        headers=world.admin.headers,
+    )
+    assert r.status_code == 200 and r.json()["must_change_password"] is True
+    h = await login_mobile(client, "tecnico@teste.com.br", "provisoria-456")
+    r = await client.patch(
+        url, json={"pix": CPF_PIX, "current_password": "provisoria-456"}, headers=h
+    )
+    assert r.status_code == 422 and messages(r) == [my_profile.TEMPORARY_PASSWORD]
+
+    # Com a senha dele, passa; o aviso diz quem redefiniu por último.
+    h = await change_password(client, h, "provisoria-456", "senha-do-tecnico-1")
+    r = await client.patch(
+        url, json={"pix": CPF_PIX, "current_password": "senha-do-tecnico-1"}, headers=h
+    )
+    assert r.status_code == 200, r.text
+    assert events[-1]["fields"] == ["pix"] and events[-1]["after_reset"]["by"] == "Admin"
+
+
+async def test_password_lines_and_the_reset_warning(
+    client: AsyncClient, world: World, engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A senha criada ou trocada no app entra no histórico, e a troca de e-mail ou PIX até 72 h depois
+    de a central redefinir a senha avisa quem redefiniu (sem bloquear: o técnico novo recebe a senha
+    da central e cadastra o PIX)."""
+    events = capture_events(monkeypatch)
+    temp = await reset_by_central(client, world)
+    h = await login_mobile(client, "tecnico@teste.com.br", temp)
+    h = await change_password(client, h, temp, "senha-do-tecnico-1")
+    rows = await history(client, world)
+    assert [(row["via"], row["actor"]["name"], row["changes"]) for row in rows] == [
+        ("app", "Tecnico", [{"field": "password", "from": None, "to": "criada no app"}]),
+        ("central", "Analista", [{"field": "password", "from": None, "to": "provisória"}]),
+    ]
+    assert events == [
+        {"fields": ["password"], "via": "central"},
+        {"fields": ["password"], "via": "app"},
+    ]
+    reset_at = datetime.fromisoformat(rows[1]["created_at"])
+
+    events.clear()
+    r = await client.patch(
+        f"{API}/me/profile",
+        json={"pix": CPF_PIX, "current_password": "senha-do-tecnico-1"},
+        headers=h,
+    )
+    assert r.status_code == 200, r.text
+    r = await client.patch(f"{API}/me/profile", json={"name": "Tecnico Alfa"}, headers=h)
+    assert r.status_code == 200, r.text
+    pix_event, name_event = events
+    warning = pix_event.pop("after_reset")
+    assert pix_event == {"fields": ["pix"], "via": "app"}
+    assert warning["by"] == "Analista" and datetime.fromisoformat(warning["at"]) == reset_at
+    # Só e-mail e PIX levam o sinal.
+    assert name_event == {"fields": ["name"], "via": "app"}
+
+    # A senha dele trocada de novo.
+    h = await change_password(client, h, "senha-do-tecnico-1", "senha-do-tecnico-2")
+    assert (await history(client, world))[0]["changes"] == [
+        {"field": "password", "from": None, "to": "trocada no app"}
+    ]
+    assert events[-1] == {"fields": ["password"], "via": "app"}
+
+    # Passadas as 72 h da redefinição, a troca sai sem o sinal.
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "UPDATE user_changes SET created_at = created_at - interval '73 hours' "
+                "WHERE via = 'central'"
+            )
+        )
+    events.clear()
+    r = await client.patch(
+        f"{API}/me/profile",
+        json={"email": "tecnico.alfa@exemplo.com", "current_password": "senha-do-tecnico-2"},
+        headers=h,
+    )
+    assert r.status_code == 200, r.text
+    assert events == [{"fields": ["email"], "via": "app"}]
+
+    # Quem não é técnico troca a senha sem histórico de cadastro.
+    events.clear()
+    await change_password(client, world.analyst.headers, PASSWORD, "senha-do-analista-1")
+    assert events == []
+    async with engine.connect() as conn:
+        count = await conn.scalar(
+            text("SELECT count(*) FROM user_changes WHERE user_id = :u"),
+            {"u": world.analyst.user.id},
+        )
+    assert count == 0
+
+
+async def test_parallel_wrong_passwords_respect_the_limit(
+    client: AsyncClient, world: World
+) -> None:
+    """A tentativa conta antes do bcrypt: uma rajada em paralelo não passa inteira pela checagem."""
+
+    async def wrong_pix(i: int) -> Response:
+        return await patch(client, world, pix=CPF_PIX, current_password=f"errada-{i}")
+
+    async def wrong_change(i: int) -> Response:
+        return await client.post(
+            f"{API}/auth/change-password",
+            json={"current_password": f"errada-{i}", "new_password": "nova-senha-forte"},
+            headers=world.tech.headers,
+        )
+
+    burst = await asyncio.gather(*(wrong_pix(i) for i in range(15)))
+    codes = [r.status_code for r in burst]
+    assert codes.count(422) <= login_guard.MAX_PASSWORD_CHANGE
+    assert codes.count(429) == len(codes) - codes.count(422)
+    assert all(int(r.headers["retry-after"]) > 0 for r in burst if r.status_code == 429)
+    # Bloqueado até a janela acabar, mesmo com a senha certa.
+    r = await patch(client, world, pix=CPF_PIX, current_password=PASSWORD)
+    assert r.status_code == 429
+
+    # O contador é o mesmo da troca de senha, também em paralelo.
+    login_guard.reset_memory()
+    burst = await asyncio.gather(
+        *(wrong_pix(i) for i in range(8)), *(wrong_change(i) for i in range(8))
+    )
+    codes = [r.status_code for r in burst]
+    assert codes.count(422) <= login_guard.MAX_PASSWORD_CHANGE
+    assert codes.count(429) == len(codes) - codes.count(422)
+    assert (await client.get(f"{API}/me/profile", headers=world.tech.headers)).json()["pix"] is None
+
+
+async def test_name_takes_only_letters(
+    client: AsyncClient, world: World, engine: AsyncEngine
+) -> None:
+    """O nome vai para os textos do grupo do cliente, o relatório e o portal: sem contato nem link."""
+    for bad in (
+        "Tecnico Alfa chame wa.me/5500000000000",
+        "Tecnico Alfa 2",
+        "tecnico@exemplo",
+        "Tecnico: Alfa",
+        "Tecnico www Alfa",
+        "Tecnico HTTP Alfa",
+        "Tecnico Alfa exemplo.com",
+        "Tecnico ｗｗｗ Alfa",  # "www" em letras largas
+    ):
+        r = await patch(client, world, name=bad)
+        assert r.status_code == 422 and messages(r) == [NAME_LETTERS], bad
+    r = await patch(client, world, name="Técnico Ômega D’Alfa-Beta Jr.")
+    assert r.status_code == 200 and r.json()["name"] == "Técnico Ômega D’Alfa-Beta Jr."
+    r = await patch(client, world, name="J.R. d'Alfa")
+    assert r.status_code == 200, r.text
+    # Acento digitado separado da letra: grava a letra acentuada.
+    r = await patch(client, world, name="Técnico Alfa")
+    assert r.status_code == 200 and r.json()["name"] == "Técnico Alfa"
+
+    # O nome antigo fora da regra fica: só o que muda é conferido.
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as db:
+        user = await db.get(User, world.tech.user.id)
+        assert user is not None
+        user.name = "Tecnico 01"
+        await db.commit()
+    r = await patch(client, world, phone="(11) 98888-7777")
+    assert r.status_code == 200 and r.json()["name"] == "Tecnico 01"
+
+
+async def test_history_without_payouts_hides_the_pix(client: AsyncClient, world: World) -> None:
+    """Quem tem Técnicos sem Pagamentos não vê o titular nem a chave mascarada no histórico (a seção
+    Pagamento do cadastro também fica fechada para ele)."""
+    holder = {**CPF_PIX, "holder_name": "Conjuge Ficticia"}
+    assert (await patch(client, world, pix=holder, current_password=PASSWORD)).status_code == 200
+    other = {**holder, "holder_name": "Outra Pessoa Ficticia"}
+    assert (await patch(client, world, pix=other, current_password=PASSWORD)).status_code == 200
+    assert (await patch(client, world, pix=None, current_password=PASSWORD)).status_code == 200
+    assert (await patch(client, world, name="Tecnico Alfa")).status_code == 200
+
+    full = await history(client, world)
+    assert full[2]["changes"] == [
+        {"field": "pix_holder", "from": "Conjuge Ficticia", "to": "Outra Pessoa Ficticia"}
+    ]
+    await restrict_analyst(
+        client, world, **{"base.technicians": "view", "commercial.payouts": "none"}
+    )
+    hidden = await history(client, world)
+    assert [row["id"] for row in hidden] == [row["id"] for row in full]
+    assert [row["changes"] for row in hidden] == [
+        [{"field": "name", "from": "Tecnico", "to": "Tecnico Alfa"}],
+        [{"field": "pix", "from": "***", "to": None}],
+        [{"field": "pix", "from": "***", "to": "***"}],
+        [{"field": "pix", "from": None, "to": "***"}],
+    ]
+    assert "Ficticia" not in str(hidden) and "456.789" not in str(hidden)
+    # Quem tem Pagamentos continua vendo tudo: as linhas gravadas não mudaram.
+    sup = await client.get(
+        f"{API}/technicians/{world.tech.user.id}/changes", headers=world.supervisor.headers
+    )
+    assert sup.status_code == 200 and sup.json() == full
+
+
+async def test_company_email_stays_with_the_central(
+    client: AsyncClient, world: World, engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """E-mail do domínio da empresa (login Microsoft) não entra pelo app: travaria o login da pessoa
+    contratada com ele. Quem já tem um (técnico interno) continua com ele."""
+    monkeypatch.setattr(settings, "ENTRA_ALLOWED_DOMAINS", "empresa.exemplo.com")
+    for email in ("novo.analista@empresa.exemplo.com", "Novo.Analista@Empresa.Exemplo.com"):
+        r = await patch(client, world, email=email, current_password=PASSWORD)
+        assert r.status_code == 422 and messages(r) == [onboarding.COMPANY_EMAIL]
+    # Regra fixa: a resposta é a mesma sem a senha (não revela nada).
+    r = await patch(client, world, email="novo.analista@empresa.exemplo.com")
+    assert r.status_code == 422 and messages(r) == [onboarding.COMPANY_EMAIL]
+    r = await patch(client, world, email="tecnico.alfa@exemplo.com", current_password=PASSWORD)
+    assert r.status_code == 200, r.text
+
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as db:
+        user = await db.get(User, world.tech.user.id)
+        assert user is not None
+        user.email = "tecnico.interno@empresa.exemplo.com"
+        await db.commit()
+    r = await patch(
+        client, world, email="tecnico.interno@empresa.exemplo.com", phone="(11) 97777-6666"
+    )
+    assert r.status_code == 200 and r.json()["email"] == "tecnico.interno@empresa.exemplo.com"

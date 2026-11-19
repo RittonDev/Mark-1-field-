@@ -575,9 +575,7 @@ async def test_lost_visits(engine: AsyncEngine, client: AsyncClient, world: Worl
 
 
 @requires_db
-async def test_quality_only_native(
-    engine: AsyncEngine, client: AsyncClient, world: World
-) -> None:
+async def test_quality_only_native(engine: AsyncEngine, client: AsyncClient, world: World) -> None:
     """Retorno e visita perdida só contam em OS deste sistema: a base das taxas (os atendimentos
     medidos) não tem as OS migradas do Field Control, nem as concluídas aqui depois da migração."""
     an = world.analyst.headers
@@ -604,9 +602,7 @@ async def test_quality_only_native(
         )
         fc_closed.closed_at = now - timedelta(days=11)
         # Aberta na migração e concluída já aqui, há 5 dias.
-        fc_here = _done(
-            world, alfa, now=now, days_ago=5, status=TicketStatus.RESOLVED, legacy=FC
-        )
+        fc_here = _done(world, alfa, now=now, days_ago=5, status=TicketStatus.RESOLVED, legacy=FC)
         # Controle: a mesma história numa OS deste sistema, de Bravo.
         native = _done(world, bravo, now=now, days_ago=5, status=TicketStatus.RESOLVED)
         db.add_all([fc_closed, fc_here, native])
@@ -669,7 +665,7 @@ async def test_quality_only_native(
     # O veterano continua na Prata (0 em 5); o controle cai para o Bronze.
     vet = (await client.get(f"{API}/technicians/{alfa.id}/level", headers=an)).json()
     assert (vet["tier"], vet["occurrences"]) == ("silver", [])
-    rework = _by_key(vet["criteria"])["rework"]
+    rework = next(c for c in vet["criteria"] if c["key"] == "rework")
     assert (rework["met"], rework["text"]) == (True, "0% (0 em 5) · limite 10%")
     ctl = (await client.get(f"{API}/technicians/{bravo.id}/level", headers=an)).json()
     assert ctl["tier"] == "bronze"
@@ -1061,8 +1057,7 @@ async def test_refresh_one_keeps_unchanged_row(engine: AsyncEngine, world: World
         db.add(alfa)
         await db.flush()
         db.add_all(
-            _done(world, alfa, now=now, days_ago=5 + i, visited=False, legacy=FC)
-            for i in range(3)
+            _done(world, alfa, now=now, days_ago=5 + i, visited=False, legacy=FC) for i in range(3)
         )
         await db.commit()
     async with maker() as db:
