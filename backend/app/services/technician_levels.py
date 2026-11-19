@@ -12,10 +12,12 @@ O que conta (janela rolando de 365 dias até agora):
 - Chegada no horário combinado: medidos com agenda e chegada. Atraso é chegar mais de 30 min
   depois do horário agendado (field.SCHEDULE_TOLERANCE, a regra do "Atrasada"). OS sem agenda não
   entram (atraso de despacho é da central).
-- Retorno: OS concluída e reaberta (de resolvida ou fechada) em até 30 dias da conclusão. Reabrir
-  a cancelada não conta.
-- Visita perdida: visita improdutiva com motivo de responsabilidade "Técnico", pela classificação
-  atual do catálogo.
+- Retorno: OS deste sistema concluída e reaberta (de resolvida ou fechada) em até 30 dias da
+  conclusão. Reabrir a cancelada não conta. A OS migrada não conta nem se for concluída aqui: ela
+  não entra na base da taxa (os atendimentos medidos).
+- Visita perdida: visita improdutiva em OS deste sistema com motivo de responsabilidade "Técnico",
+  pela classificação atual do catálogo. A base (visitas) são os medidos mais as perdidas: as duas
+  pontas só com OS deste sistema.
 - A central pode desconsiderar uma ocorrência, com motivo: o atraso vira chegada no horário, o
   retorno e a visita perdida deixam de contar.
 
@@ -23,8 +25,14 @@ Taxas só com 5 casos ou mais (abaixo disso, "ainda sem dados suficientes" e o c
 cumprido). A faixa calculada é a mais alta com todos os critérios cumpridos (TIERS). Sobe na hora;
 abaixo da faixa em vigor, fica 30 dias em risco e depois desce direto para a calculada.
 
+Na central vale a fila de quem pede ("Somente a própria fila"): a ocorrência de OS de outra fila
+vem sem a OS (id, código e título), sem a nota da reabertura e sem a da desconsideração, e não pode
+ser desconsiderada nem voltar a contar (403 QUEUE_FORBIDDEN). Contagens, faixa e critérios
+continuam com todas.
+
 O elo é só o selo: não muda a pontuação nem a ordem das sugestões. Este módulo não importa
-technicians, suggestions nem tickets (eles importam este).
+technicians, suggestions nem tickets no topo (eles importam este); a fila vem de tickets com import
+dentro da função.
 """
 
 from __future__ import annotations
@@ -38,7 +46,7 @@ from datetime import datetime, timedelta
 from typing import Any, NamedTuple
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import String, and_, cast, func, or_, select, text, update
+from sqlalchemy import ColumnElement, String, and_, cast, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -60,6 +68,7 @@ from app.models.ticket import ticket_helpers
 from app.schemas.common import Ref
 from app.schemas.technician_level import (
     CentralLevelOccurrence,
+    CentralLevelTicketRef,
     LevelCriterion,
     LevelMetrics,
     LevelNext,
@@ -75,7 +84,8 @@ from app.schemas.technician_level import (
 )
 from app.schemas.ticket import format_ticket_code
 from app.services import field as field_rules
-from app.services.errors import NotFound, WorkflowError
+from app.services.errors import AccessDenied, NotFound, WorkflowError
+from app.services.schedule import HIDDEN_TITLE
 
 log = logging.getLogger(__name__)
 
@@ -90,6 +100,8 @@ CENTRAL_OCCURRENCES = 200
 UPSERT_CHUNK = 500
 # Trecho da nota da reabertura no detalhe da central.
 REWORK_NOTE_MAX = 200
+# Trava do Postgres (até o fim da transação) do cálculo de todos antes da lista e das sugestões.
+ENSURE_LOCK = "technician-levels:ensure"
 
 _RANK = {tier: index for index, tier in enumerate(LevelTier)}
 _CONCLUDED = (TicketStatus.RESOLVED, TicketStatus.CLOSED)
@@ -597,12 +609,13 @@ async def collect(db: AsyncSession, now: datetime, user_id: uuid.UUID | None = N
             )
         )
 
-    # 4) Retornos: reaberturas de OS concluída na janela, até 30 dias depois da conclusão.
+    # 4) Retornos: reaberturas de OS deste sistema concluída, até 30 dias depois da conclusão.
     for occ in await _reworks(db, start, now):
         if user_id is None or occ.technician_id == user_id:
             found[occ.technician_id].append(occ)
 
-    # 5) Visitas perdidas: improdutivas com motivo de responsabilidade do técnico.
+    # 5) Visitas perdidas: improdutivas em OS deste sistema com motivo de responsabilidade do
+    # técnico.
     for occ in await _lost_visits(db, start, now):
         if user_id is None or occ.technician_id == user_id:
             found[occ.technician_id].append(occ)
@@ -632,9 +645,14 @@ async def collect(db: AsyncSession, now: datetime, user_id: uuid.UUID | None = N
 
 
 async def _reworks(db: AsyncSession, start: datetime, now: datetime) -> list[Occurrence]:
-    """Reaberturas na janela de OS resolvida ou fechada, ligadas à conclusão que reabriram (a
-    última "resolvida" antes delas) e atribuídas: ao técnico gravado no evento (daqui em diante),
-    senão ao autor da conclusão se for técnico, senão ao responsável atual."""
+    """Reaberturas na janela de OS deste sistema resolvida ou fechada, ligadas à conclusão que
+    reabriram (a última "resolvida" antes delas) e atribuídas: ao técnico gravado no evento (daqui
+    em diante), senão ao autor da conclusão se for técnico, senão ao responsável atual.
+
+    A OS migrada do Field Control fica fora, também a concluída aqui: a base da taxa (os
+    atendimentos medidos) só tem OS deste sistema, e o retorno não pode contar sem a OS na base."""
+    # Também alimenta a subconsulta das conclusões, que não junta tickets: o filtro de OS deste
+    # sistema vai só na consulta principal (aqui, ele poria tickets no FROM da subconsulta).
     reopened = (
         _REOPENED,
         TicketEvent.from_value.in_([s.value for s in _CONCLUDED]),
@@ -654,7 +672,7 @@ async def _reworks(db: AsyncSession, start: datetime, now: datetime) -> list[Occ
                 Ticket.title,
             )
             .join(Ticket, Ticket.id == TicketEvent.ticket_id)
-            .where(*reopened)
+            .where(*reopened, Ticket.legacy.is_(None))
         )
     ).all()
     if not rows:
@@ -713,9 +731,10 @@ async def _reworks(db: AsyncSession, start: datetime, now: datetime) -> list[Occ
 
 
 async def _lost_visits(db: AsyncSession, start: datetime, now: datetime) -> list[Occurrence]:
-    """Improdutivas na janela cujo motivo está hoje com responsabilidade "Técnico", atribuídas ao
-    técnico gravado no evento, senão ao autor se for técnico, senão ao responsável atual. O motivo
-    é comparado como texto: um reason_id fora do formato não derruba a conta."""
+    """Improdutivas na janela, em OS deste sistema, cujo motivo está hoje com responsabilidade
+    "Técnico", atribuídas ao técnico gravado no evento, senão ao autor se for técnico, senão ao
+    responsável atual. O motivo é comparado como texto: um reason_id fora do formato não derruba a
+    conta. A OS migrada fica fora, como na base da taxa (visitas = medidos + perdidas)."""
     rows = (
         await db.execute(
             select(
@@ -743,6 +762,7 @@ async def _lost_visits(db: AsyncSession, start: datetime, now: datetime) -> list
                 TicketEvent.event_type == TicketEventType.UNPRODUCTIVE_VISIT,
                 TicketEvent.created_at >= start,
                 TicketEvent.created_at <= now,
+                Ticket.legacy.is_(None),
             )
         )
     ).all()

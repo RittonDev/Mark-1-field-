@@ -7,6 +7,9 @@ um IP, só tranca aquela origem: o dono continua entrando do computador dele (o 
 e-mail, mais alto, segura o ataque espalhado por vários IPs). Conta também e-mails que não
 existem, para o bloqueio não revelar quais contas existem.
 
+Senha atual com a sessão aberta (troca de senha, e-mail e chave PIX): `password_attempt` conta antes
+de conferir, então pedidos em paralelo não furam o limite.
+
 `hit` limita envios por janela (ex.: fichas públicas de técnico por IP e por link).
 
 Com REDIS_URL a contagem é compartilhada entre as instâncias da API; sem Redis (ou se ele cair),
@@ -79,21 +82,26 @@ async def succeeded(email: str, ip: str | None = None) -> None:
     await ephemeral.delete(*keys)
 
 
-async def check_password_change(user_id: str, action: str = "de trocar a senha") -> None:
-    """Senha atual pedida com a sessão aberta (troca de senha; e-mail e chave PIX no Meu cadastro):
-    bloqueia depois de várias senhas atuais erradas. A contagem é uma só para as duas telas (5
-    erros, não 5 + 5); `action` só muda a mensagem."""
-    count, ttl = await ephemeral.count(f"{_PREFIX}pwd:{user_id}")
-    if count >= MAX_PASSWORD_CHANGE:
+def _password_key(user_id: str) -> str:
+    return f"{_PREFIX}pwd:{user_id}"
+
+
+async def password_attempt(user_id: str, action: str = "de trocar a senha") -> None:
+    """Senha atual pedida com a sessão aberta (troca de senha; e-mail e chave PIX no Meu cadastro).
+
+    Conta a tentativa ANTES de conferir a senha: pedidos em paralelo não passam todos pela
+    checagem com o contador ainda em 0 (o bcrypt roda numa thread, entre ler e somar). Passou de
+    MAX_PASSWORD_CHANGE na janela, levanta LoginBlocked sem rodar o bcrypt, mesmo com a senha
+    certa. Senha certa: `password_change_succeeded` apaga a contagem; errada: nada mais, ela já
+    contou. A contagem é uma só para as duas telas (5 erros, não 5 + 5); `action` só muda a
+    mensagem."""
+    count, ttl = await ephemeral.incr(_password_key(user_id), WINDOW_SECONDS)
+    if count > MAX_PASSWORD_CHANGE:
         raise LoginBlocked(ttl, action)
 
 
-async def password_change_failed(user_id: str) -> None:
-    await ephemeral.incr(f"{_PREFIX}pwd:{user_id}", WINDOW_SECONDS)
-
-
 async def password_change_succeeded(user_id: str) -> None:
-    await ephemeral.delete(f"{_PREFIX}pwd:{user_id}")
+    await ephemeral.delete(_password_key(user_id))
 
 
 async def hit(scope: str, key: str, limit: int, window: int) -> None:

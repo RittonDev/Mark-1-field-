@@ -4,6 +4,7 @@ Pagamentos.
 Só dados fictícios ("Tecnico", "Redes", números de nota inventados).
 """
 
+import asyncio
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -11,9 +12,12 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from httpx import AsyncClient, Response
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.config import settings
 from app.services import invoices, storage
+from app.services import payouts as payouts_svc
 from tests.conftest import Actor, World, requires_db
 from tests.test_access import restrict_analyst
 from tests.test_api import create, transition
@@ -434,6 +438,193 @@ async def test_reassign_clears_the_invoice_link(
     # A nota continua com o técnico, sem a OS.
     (mine,) = (await client.get(f"{API}/me/invoices", headers=th)).json()
     assert (mine["id"], mine["payouts"], mine["payouts_total"]) == (sent["id"], [], 0.0)
+
+
+@requires_db
+async def test_central_list_pending_queue_and_pages(
+    client: AsyncClient, world: World, media: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A aba "A conferir" pede status=pending: a fila vem da mais antiga para a mais nova, e as
+    pendentes antigas não somem atrás das mais novas. O resto vem pelo offset."""
+    an = world.analyst.headers
+    monkeypatch.setattr(invoices, "LIST_LIMIT", 2)
+    ids: dict[str, str] = {}
+    for number in ("101", "102", "103", "104", "105"):
+        r = await send(client, world.tech, number=number)
+        assert r.status_code == 201, r.text
+        ids[number] = r.json()["id"]
+    # As duas mais novas já conferidas: aguardam as três mais antigas.
+    for number in ("104", "105"):
+        r = await client.post(f"{API}/technician-invoices/{ids[number]}/check", headers=an)
+        assert r.status_code == 200, r.text
+
+    async def page(**params: str | int) -> tuple[list[str], int]:
+        r = await client.get(f"{API}/technician-invoices", params=params, headers=an)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert (body["summary"]["pending"], body["summary"]["checked"]) == (3, 2)
+        return [i["number"] for i in body["items"]], body["total_count"]
+
+    assert await page(status="pending") == (["101", "102"], 3)
+    assert await page(status="pending", offset=2) == (["103"], 3)
+    # Sem situação e nas outras: as mais novas primeiro.
+    assert await page() == (["105", "104"], 5)
+    assert await page(offset=2) == (["103", "102"], 5)
+    assert await page(offset=4) == (["101"], 5)
+    assert await page(offset=5) == ([], 5)
+    assert await page(status="checked") == (["105", "104"], 2)
+    for offset in (-1, 2**31):
+        r = await client.get(f"{API}/technician-invoices", params={"offset": offset}, headers=an)
+        assert r.status_code == 422, (offset, r.text)
+
+
+async def _link(engine: AsyncEngine, payout_id: str, invoice_id: str) -> None:
+    """Liga o valor à nota numa conexão à parte, já confirmada (o que o envio da nota grava)."""
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("UPDATE ticket_payouts SET invoice_id = :i WHERE id = :p"),
+            {"i": invoice_id, "p": payout_id},
+        )
+
+
+async def _payout_row(engine: AsyncEngine, payout_id: str) -> tuple[str, str | None]:
+    """(técnico, nota) do valor, direto do banco."""
+    async with engine.connect() as conn:
+        technician_id, invoice_id = (
+            await conn.execute(
+                text("SELECT technician_id, invoice_id FROM ticket_payouts WHERE id = :p"),
+                {"p": payout_id},
+            )
+        ).one()
+    return str(technician_id), None if invoice_id is None else str(invoice_id)
+
+
+async def _reassign(client: AsyncClient, world: World, ticket_id: str, to: Actor) -> Response:
+    an = world.analyst.headers
+    t = (await client.get(f"{API}/tickets/{ticket_id}", headers=an)).json()
+    return await client.post(
+        f"{API}/tickets/{ticket_id}/assign",
+        json={"assignee_id": str(to.user.id), "expected_version": t["version"]},
+        headers=an,
+    )
+
+
+async def _someone_waits_for_a_lock(engine: AsyncEngine) -> bool:
+    """Alguma conexão deste banco esperando uma trava (até uns 10 s)."""
+    for _ in range(200):
+        async with engine.connect() as conn:
+            waiting = await conn.scalar(
+                text(
+                    "SELECT count(*) FROM pg_stat_activity"
+                    " WHERE datname = current_database() AND wait_event_type = 'Lock'"
+                )
+            )
+        if waiting:
+            return True
+        await asyncio.sleep(0.05)
+    return False
+
+
+@requires_db
+async def test_reassign_clears_a_link_confirmed_meanwhile(
+    client: AsyncClient,
+    world: World,
+    media: Path,
+    engine: AsyncEngine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """O envio da nota liga o valor e confirma depois de a troca de técnico carregar a OS (o valor
+    já está na sessão) e antes de mexer nele: a troca relê o valor e solta a ligação mesmo assim."""
+    done, payout = await concluded(client, world, "Nobreak", 200)
+    r = await send(client, world.tech, number="55", amount="200.00")
+    assert r.status_code == 201, r.text
+    sent = r.json()
+    real = payouts_svc.on_assignee_changed
+    calls: list[int] = []
+
+    async def linked_first(*args: object) -> None:
+        calls.append(1)
+        await _link(engine, payout, sent["id"])
+        await real(*args)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(payouts_svc, "on_assignee_changed", linked_first)
+    r = await _reassign(client, world, done["id"], world.tech_other)
+    assert r.status_code == 200, r.text
+    assert calls == [1]
+    assert await _payout_row(engine, payout) == (str(world.tech_other.user.id), None)
+    (mine,) = (await client.get(f"{API}/me/invoices", headers=world.tech.headers)).json()
+    assert (mine["id"], mine["payouts"]) == (sent["id"], [])
+
+
+@requires_db
+async def test_reassign_waits_for_the_invoice_being_sent(
+    client: AsyncClient, world: World, media: Path, engine: AsyncEngine
+) -> None:
+    """O envio da nota segura o valor (FOR UPDATE) e liga: a troca de técnico espera o commit dele
+    e, depois, solta a ligação."""
+    done, payout = await concluded(client, world, "Nobreak", 200)
+    r = await send(client, world.tech, number="56", amount="200.00")
+    assert r.status_code == 201, r.text
+    sent = r.json()
+    async with engine.connect() as conn:
+        sending = await conn.begin()
+        await conn.execute(
+            text("SELECT id FROM ticket_payouts WHERE id = :p FOR UPDATE"), {"p": payout}
+        )
+        await conn.execute(
+            text("UPDATE ticket_payouts SET invoice_id = :i WHERE id = :p"),
+            {"i": sent["id"], "p": payout},
+        )
+        task = asyncio.create_task(_reassign(client, world, done["id"], world.tech_other))
+        try:
+            waited = await _someone_waits_for_a_lock(engine)
+        finally:
+            await sending.commit()
+        r = await asyncio.wait_for(task, 30)
+    assert waited
+    assert r.status_code == 200, r.text
+    assert await _payout_row(engine, payout) == (str(world.tech_other.user.id), None)
+
+
+@requires_db
+async def test_link_to_another_technicians_invoice_counts_as_free(
+    client: AsyncClient, world: World, media: Path, engine: AsyncEngine
+) -> None:
+    """Valor ligado à nota de outro técnico (forçado no banco): para o dono do valor, a OS está
+    livre, e o envio dele sobrescreve a ligação sem mostrar o número da nota do outro."""
+    other = world.tech_other
+    done, payout = await concluded(client, world, "Nobreak", 200, tech=other)
+    old, old_payout = await concluded(client, world, "Rack", 100, tech=other)
+    r = await send(client, world.tech, number="4567", amount="300.00")
+    assert r.status_code == 201, r.text
+    theirs = r.json()
+    async with engine.begin() as conn:
+        # A OS "Rack" foi concluída num mês anterior.
+        await conn.execute(
+            text("UPDATE tickets SET resolved_at = resolved_at - interval '40 days' WHERE id = :t"),
+            {"t": old["id"]},
+        )
+    for payout_id in (payout, old_payout):
+        await _link(engine, payout_id, theirs["id"])
+
+    r = await client.get(
+        f"{API}/me/invoices/payouts", params={"month": _month()}, headers=other.headers
+    )
+    assert [(c["payout_id"], c["in_month"], c["invoice"]) for c in r.json()] == [
+        (payout, True, None),
+        (old_payout, False, None),
+    ]
+    r = await send(
+        client, other, number="77", amount="300.00", payout_ids=f"{payout},{old_payout}"
+    )
+    assert r.status_code == 201, r.text
+    sent = r.json()
+    assert [p["payout_id"] for p in sent["payouts"]] == [payout, old_payout]
+    for payout_id in (payout, old_payout):
+        assert await _payout_row(engine, payout_id) == (str(other.user.id), sent["id"])
+    # A nota do outro técnico continua sem essas OS.
+    (mine,) = (await client.get(f"{API}/me/invoices", headers=world.tech.headers)).json()
+    assert (mine["id"], mine["payouts"]) == (theirs["id"], [])
 
 
 def test_storage_sniff_document() -> None:
