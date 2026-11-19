@@ -4,7 +4,7 @@ import { type QueryClient, type QueryKey, useMutation, useQuery, useQueryClient 
 import clsx from "clsx";
 import { AlertTriangle, Check, Circle, ExternalLink, Info } from "lucide-react";
 import Link from "next/link";
-import { Fragment, useId, useState } from "react";
+import { Fragment, useEffect, useId, useRef, useState } from "react";
 import { useConfirm } from "@/components/Confirm";
 import { useToast } from "@/components/Toaster";
 import { Button, ErrorBox, Field, Input, SectionTitle, Skeleton } from "@/components/ui";
@@ -175,8 +175,17 @@ export function LevelSection({
   const pending = dirty || Boolean(waiving?.note.trim());
 
   const actionId = (key: string) => `${ids}-${key}`;
-  // O foco volta ao botão da linha (o "Desconsiderar" vira "Voltar a contar" e vice-versa).
-  const focusAction = (key: string) => requestAnimationFrame(() => document.getElementById(actionId(key))?.focus());
+  // Depois de fechar o campo ou de concluir, o foco volta ao botão da linha (o "Desconsiderar" vira "Voltar a
+  // contar" e vice-versa) assim que ele estiver na tela e habilitado.
+  const focusNext = useRef<string | null>(null);
+  useEffect(() => {
+    const key = focusNext.current;
+    const button = key ? document.getElementById(actionId(key)) : null;
+    if (button instanceof HTMLButtonElement && !button.disabled) {
+      button.focus();
+      focusNext.current = null;
+    }
+  });
   const setWaiving = (next: { key: string; note: string } | null) => {
     setWaivingState(next);
     onDraftChange?.(Boolean(next?.note.trim()));
@@ -192,7 +201,7 @@ export function LevelSection({
       description: before && before !== next.tier ? `Elo de ${firstName} agora: ${LEVEL_TIER[next.tier].label}` : undefined,
       tone: "success",
     });
-    focusAction(key);
+    focusNext.current = key;
   };
   const waive = useMutation({
     mutationFn: (body: LevelWaiverCreate) =>
@@ -201,12 +210,13 @@ export function LevelSection({
       setWaiving(null);
       applied(next, "Ocorrência desconsiderada", occurrenceKey(body));
     },
-    onError: (error) => {
+    onError: (error, body) => {
       // Já desconsiderada por outra pessoa (409) ou saiu dos 12 meses (422): o campo fecha e a lista volta como
       // está agora. Falha de rede ou do servidor: o campo fica, com o motivo, para tentar de novo.
       if (error instanceof ApiError && (error.status === 409 || error.status === 422)) {
         toast({ title: errorMessage(error), tone: "error" });
         setWaiving(null);
+        focusNext.current = occurrenceKey(body);
       }
       void queryClient.invalidateQueries({ queryKey: levelKey(tech.id) });
     },
@@ -227,10 +237,9 @@ export function LevelSection({
     setWaiving({ key, note: "" });
   };
   const cancelWaiving = () => {
-    const key = waiving?.key;
+    focusNext.current = waiving?.key ?? null;
     waive.reset();
     setWaiving(null);
-    if (key) focusAction(key);
   };
   const submitWaiver = (o: CentralLevelOccurrence) => {
     const note = waiving?.note.trim() ?? "";
