@@ -519,8 +519,12 @@ export function takeDeferredNews<T extends NewsItem>(userId: string): Promise<T[
   });
 }
 
-/** Saiu da conta: nada agendado e a bandeja limpa (loja e endereço aparecem na tela bloqueada). */
+/**
+ * Saiu da conta: nada agendado, a bandeja limpa (loja e endereço aparecem na tela bloqueada) e nenhum aviso guardado
+ * para a volta à tela.
+ */
 export async function clearNotificationsOnSignOut(): Promise<void> {
+  await oneAtATime(() => writeDeferred([])).catch((error: unknown) => console.warn("Falha ao limpar os avisos guardados", error));
   const N = await ensureNotificationsReady();
   if (!N) return;
   await N.cancelAllScheduledNotificationsAsync().catch((error: unknown) => console.warn("Falha ao cancelar as notificações", error));
