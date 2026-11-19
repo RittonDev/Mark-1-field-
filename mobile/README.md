@@ -561,10 +561,15 @@ Tela `/privacidade` ([src/app/privacidade.tsx](src/app/privacidade.tsx)), só de
 - **Cartão em Hoje** ([src/components/PrivacyUpdateCard.tsx](src/components/PrivacyUpdateCard.tsx)): quando o texto
   muda (`PRIVACY_VERSION` diferente da versão que este técnico abriu), a aba Hoje mostra, depois da jornada e das
   ofertas, "Aviso de privacidade atualizado" · "Agora ele fala da chave PIX, das notas fiscais e do Elo." com **Ler
-  aviso**. É discreto e não bloqueia nada. Abrir o aviso por qualquer caminho grava a versão como vista, e o cartão some.
-- **Versão vista**: só no aparelho, por técnico, no Keychain/Keystore (`mc_privacy_seen_<id do técnico>`, como a
-  preferência de tema). Vale offline e sobrevive ao Sair e à troca de técnico. A leitura começa quando a sessão abre,
-  antes de Hoje desenhar: o cartão entra junto com a tela (se a leitura atrasar, aparece com um fade curto).
+  aviso**. É discreto e não bloqueia nada. Abrir o aviso por qualquer caminho grava a versão como vista quando a tela
+  termina de entrar (evento `transitionEnd` da pilha; sem ele, como na web, 600 ms depois de abrir): o cartão some com
+  Hoje já coberto, sem mexer na tela durante a transição.
+- **Versão vista** ([src/lib/privacySeen.ts](src/lib/privacySeen.ts)): só no aparelho, por técnico, no
+  Keychain/Keystore (`mc_privacy_seen_<id do técnico>`, como a preferência de tema). Vale offline e sobrevive ao
+  Sair e à troca de técnico. O cartão só lê a memória desse módulo, carregado com o `_layout.tsx`. A abertura do
+  app com técnico salvo (a splash) e o login esperam a leitura no máximo 300 ms: o cartão já entra no primeiro
+  quadro de Hoje. Se ela demorar mais, Hoje abre sem esperar e o cartão entra depois, com um fade curto; se falhar,
+  o cartão não aparece e Hoje tenta ler de novo quando monta.
 - **Não grava ciência no servidor**: o aceite continua sendo o da ficha da homologação.
 
 ## Como a sincronização funciona
@@ -618,7 +623,7 @@ src/
     NotificationsCard.tsx  Conta > Notificações (lembretes, permissão, alarme exato) e "Em segundo plano"
     Avatar.tsx         foto do técnico ou as iniciais (topo da tela inicial, Conta, Meu cadastro)
     PixCard.tsx        Ganhos > Recebimento por PIX (atalho para o Meu cadastro)
-    PrivacyUpdateCard.tsx  Hoje > "Aviso de privacidade atualizado" e a versão vista por técnico (Keychain/Keystore)
+    PrivacyUpdateCard.tsx  Hoje > "Aviso de privacidade atualizado" (lê a versão vista de lib/privacySeen.ts)
     InvoicesCard.tsx   Ganhos > Notas fiscais do mês (situação, motivo da recusa, abrir arquivo, apagar, enviar)
     LevelBadge.tsx     brasão do elo (escudo com as marcas da faixa), selo e o chip do topo de Hoje
   theme/theme.ts       paleta Maxx Field, claro/escuro, preferência do técnico
@@ -627,6 +632,7 @@ src/
     tracking.ts trackingTask.ts  jornada, coleta, fila de pontos e tarefa de segundo plano
     account.ts         /auth/me e troca de senha
     profile.ts         Meu cadastro só na memória (GET/PATCH /me/profile) e a foto reduzida no aparelho (expo-image-manipulator)
+    privacySeen.ts     versão do aviso de privacidade vista por técnico (Keychain/Keystore), lida na abertura e no login
     pix.ts masks.ts    chave PIX por tipo (regras e mensagens de backend/app/core/pix.py) e máscaras de CPF, CNPJ, CEP e celular
     types.ts constants.ts workflow.ts   copiados de frontend/src/lib (manter iguais)
     syncTypes.ts       contrato de /sync/pull e /sync/push
