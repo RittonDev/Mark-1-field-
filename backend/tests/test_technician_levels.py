@@ -265,7 +265,7 @@ def _done(
     at = now - timedelta(days=days_ago)
     if arrived is None and visited:
         arrived = at - timedelta(hours=1)
-    return Ticket(
+    ticket = Ticket(
         title=title,
         status=status,
         customer_id=uuid.UUID(world.customer_id),
@@ -275,10 +275,13 @@ def _done(
         arrived_at=arrived,
         resolved_at=at,
         closed_at=at if status == TicketStatus.CLOSED else None,
-        legacy=legacy,
         created_at=at - timedelta(days=1),
         updated_at=at,
     )
+    if legacy is not None:
+        # Só a OS migrada leva o campo: na OS daqui ele fica NULL no banco (como na abertura).
+        ticket.legacy = legacy
+    return ticket
 
 
 def _status_event(
