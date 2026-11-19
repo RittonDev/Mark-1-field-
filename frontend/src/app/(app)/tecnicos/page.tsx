@@ -1236,12 +1236,8 @@ function EditDialog({ tech, readOnly = false, onClose }: { tech: Technician; rea
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const confirm = useConfirm();
-  // A chave PIX e o resumo de pagamentos são de Pagamentos, e a ficha da homologação, da Homologação.
+  // A chave PIX e o resumo de pagamentos são de Pagamentos (a ficha da homologação fica na aba Perfil técnico).
   const canPayouts = useCan("commercial.payouts");
-  const canOnboarding = useCan("base.onboarding");
-  const catalog = useOnboardingCatalog();
-  const areas = useMemo(() => labelMap(catalog.data?.service_areas), [catalog.data]);
-  const levels = useMemo(() => labelMap(catalog.data?.skill_levels), [catalog.data]);
   const [baseline] = useState(() => editableOf(tech));
   const [current, setCurrent] = useState(tech);
   const [form, setForm] = useState(baseline.form);
@@ -1273,6 +1269,46 @@ function EditDialog({ tech, readOnly = false, onClose }: { tech: Technician; rea
     setCurrent(t);
     refreshTechnicianViews(queryClient);
   };
+
+  // Abas da ficha. Cadastro (o padrão, também pelo ?tecnico=) e Elo ficam montados: o Elo guarda o motivo digitado de
+  // "Desconsiderar". Perfil técnico, Histórico e os atendimentos por mês montam na primeira vez que a aba abre e depois
+  // só se escondem (sem perder o estado nem buscar de novo).
+  const [tab, setTab] = useState<FichaTab>("cadastro");
+  const [opened, setOpened] = useState<ReadonlySet<FichaTab>>(() => new Set<FichaTab>(["cadastro"]));
+  const formRef = useRef<HTMLFormElement>(null);
+  const tabsBar = useRef<HTMLDivElement>(null);
+  useStickyBelowDialogHeader(tabsBar);
+  const changeTab = (next: FichaTab) => {
+    // Com o corpo rolado (as abas presas no topo), a aba nova abre do começo, logo abaixo delas.
+    const bar = tabsBar.current;
+    const formNode = formRef.current;
+    const scroller = bar?.closest('[role="dialog"]')?.parentElement;
+    if (bar && formNode && scroller) {
+      const shift = bar.getBoundingClientRect().top - (formNode.getBoundingClientRect().top - TABS_BAR_PULL);
+      if (shift > 1) scroller.scrollTop -= shift;
+    }
+    setTab(next);
+    setOpened((seen) => (seen.has(next) ? seen : new Set(seen).add(next)));
+  };
+  const fichaTabs: TabItem<FichaTab>[] = [
+    {
+      key: "cadastro",
+      label: (
+        <>
+          Cadastro
+          {dirty ? (
+            <>
+              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-amber-500 dark:bg-amber-400" />
+              <span className="sr-only"> (alterações não salvas)</span>
+            </>
+          ) : null}
+        </>
+      ),
+    },
+    { key: "perfil", label: "Perfil técnico" },
+    { key: "elo", label: "Elo" },
+    { key: "historico", label: "Histórico" },
+  ];
 
   const save = useMutation({
     mutationFn: (body: Record<string, unknown>) => api.patch<Technician>(`/technicians/${tech.id}`, body),
@@ -1306,6 +1342,8 @@ function EditDialog({ tech, readOnly = false, onClose }: { tech: Technician; rea
   const submit = async () => {
     const found = validateTechnician(form);
     setProblem(found);
+    // O Salvar fica em todas as abas e salva o Cadastro: o campo a corrigir está nele.
+    if (found && tab !== "cadastro") changeTab("cadastro");
     if (found || save.isPending) return;
     // Só o que mudou: quem mexeu em outro campo enquanto o cadastro estava aberto (ou liberou o acesso do
     // técnico) não perde a alteração. Sem nada mudado, fecha sem gravar.
@@ -1391,6 +1429,7 @@ function EditDialog({ tech, readOnly = false, onClose }: { tech: Technician; rea
       }
     >
       <form
+        ref={formRef}
         id="tech-edit-form"
         noValidate
         className="flex min-w-0 flex-col gap-5"
@@ -1399,8 +1438,27 @@ function EditDialog({ tech, readOnly = false, onClose }: { tech: Technician; rea
           if (!readOnly) void submit();
         }}
       >
-        {/* A foto (os botões só aparecem com Editar) e o Elo ficam fora do fieldset travado: só com Visualizar, o
-            "Ver mais" das ocorrências continua; desconsiderar pede Editar. */}
+        {/* As abas encostam no cabeçalho e vão de borda a borda (-mt-4 = TABS_BAR_PULL); presas logo abaixo dele quando
+            o corpo rola. O rodapé (Cancelar/Salvar ou Fechar) é o mesmo em todas e salva o Cadastro. */}
+        <div ref={tabsBar} className="relative z-10 -mx-5 -mt-4 border-b border-line bg-surface px-5 pt-2">
+          <Tabs
+            items={fichaTabs}
+            value={tab}
+            onChange={changeTab}
+            ariaLabel="Ficha do técnico"
+            idPrefix="tecnico"
+            className="-mb-px"
+          />
+        </div>
+
+        <div
+          role="tabpanel"
+          id="tecnico-panel-cadastro"
+          aria-labelledby="tecnico-tab-cadastro"
+          hidden={tab !== "cadastro"}
+          className="flex min-w-0 flex-col gap-5"
+        >
+        {/* A foto: os botões só aparecem com Editar. */}
         <div className="flex items-center gap-4">
           <Avatar tech={current} size="lg" />
           {readOnly ? null : (
