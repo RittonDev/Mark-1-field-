@@ -39,9 +39,11 @@ Resposta: `{server_time, has_more, tickets[], comments[], worklogs[], revoked_ti
 - Apague do aparelho os ids de `revoked_ticket_ids` (OS reatribuída a outro técnico).
 - Se `has_more = true`, chame de novo com o novo `server_time` até vir `false`.
 - O técnico de campo recebe as OS atribuídas a ele, as do grupo dele e a fila sem grupo. Analistas e supervisores recebem todas (como na web).
-- Elo do técnico (`GET /me/level`, docs/API.md "Elo dos técnicos"): na mesma rodada, a cada 30 min, e quando o
-  técnico puxa a tela "Meu elo". O app guarda a resposta no kv do aparelho com a hora (offline, mostra a última com a
-  data). Só leitura: fora da fila de operações. Servidor antigo sem a rota (404) só adia a próxima tentativa.
+- Elo do técnico (`GET /me/level`, docs/API.md "Elo dos técnicos"): na mesma rodada, a cada 30 min e no "puxar para
+  atualizar", só com o app na tela (a rodada em segundo plano não busca), e quando o técnico abre (se o guardado tem
+  mais de 2 min) ou puxa a tela "Meu elo". O app guarda a resposta no kv do aparelho com a hora (offline, mostra a
+  última com a data). Só leitura: fora da fila de operações. Servidor antigo sem a rota (404) só adia a próxima
+  tentativa em 30 min.
 
 ## 3. Envio (push) de operações feitas offline
 

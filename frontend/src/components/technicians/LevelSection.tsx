@@ -257,10 +257,12 @@ export function LevelSection({
     );
   }
   if (!detail) {
+    // Sem a busca (sem Técnicos) ou com a API ainda sem o elo (404): a seção não aparece.
+    if (!level.error || (level.error instanceof ApiError && level.error.status === 404)) return null;
     return (
       <section className="flex flex-col gap-3 rounded-lg border border-line p-3">
         <SectionTitle>Elo</SectionTitle>
-        {level.error ? <ErrorBox message={errorMessage(level.error)} onRetry={() => void level.refetch()} /> : null}
+        <ErrorBox message={errorMessage(level.error)} onRetry={() => void level.refetch()} />
       </section>
     );
   }
@@ -490,7 +492,7 @@ export function LevelSection({
       </div>
 
       <details className="text-xs">
-        <summary className="cursor-pointer self-start rounded font-semibold text-ink-muted select-none hover:text-ink focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none">
+        <summary className="w-fit cursor-pointer rounded font-semibold text-ink-muted select-none hover:text-ink focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none">
           Como funciona o elo
         </summary>
         <div className="mt-2 flex flex-col gap-2.5">

@@ -468,15 +468,27 @@ Contrato em [docs/API.md](../docs/API.md), "Notas fiscais dos técnicos". Códig
 O elo do técnico (Bronze, Prata, Ouro ou Diamante) sai dos atendimentos dos últimos 12 meses: quantos (como
 responsável ou junto, também os do Field Control) e como (chegada no horário combinado, OS reaberta em até 30 dias,
 visita perdida por motivo do técnico). Regras, faixas e textos vêm prontos do servidor em `GET /me/level`
-([docs/API.md](../docs/API.md), "Elo dos técnicos"): o app não repete números.
+([docs/API.md](../docs/API.md), "Elo dos técnicos"): o app não repete números. Código:
+[src/lib/level.ts](src/lib/level.ts) (guardado, leitura nas telas e comemoração), `refreshLevel`/`refreshLevelNow` em
+[src/lib/sync.ts](src/lib/sync.ts), o brasão em [src/components/LevelBadge.tsx](src/components/LevelBadge.tsx) e a
+tela `src/app/elo.tsx`.
 
-- **Onde aparece**: o chip com o brasão no topo do Hoje (some sem elo guardado; ponto âmbar em risco), a linha "Elo"
-  no cartão do técnico na Conta e a tela **Meu elo**: a faixa e desde quando, o aviso de risco, o que falta para a
-  próxima faixa (ou para continuar no Diamante), os números, o que pesou (tocar abre a OS se ela está no aparelho) e
-  "Como funciona". Dúvida sobre o elo é com a central, no grupo de WhatsApp.
-- **Dados**: a rodada do sync busca `GET /me/level` a cada 30 min (e ao puxar a tela para baixo) e guarda no kv do
-  aparelho com a hora; offline, a tela mostra o último guardado com a data. Só leitura, fora da fila de operações.
-- **Subiu de faixa**: aviso dentro do app ("Você chegou ao Ouro!"); a primeira carga não avisa e não há push.
+- **Onde aparece**: o chip com o brasão no topo do Hoje, ao lado da foto (some sem elo guardado; ponto âmbar em
+  risco; o leitor de tela diz "Elo Ouro. Abre Meu elo"), a linha "Elo" no cartão do técnico na Conta ("Ouro" ou "Ouro
+  · em risco"; antes da primeira busca, "Ver meu elo") e a tela **Meu elo**: o brasão, "Elo Ouro", desde quando e a
+  hora da atualização; em risco, a caixa "Elo Ouro em risco" com o texto do servidor; o que falta para a próxima faixa
+  ("Para chegar ao Diamante", com barra nos atendimentos) e, em risco ou no Diamante, o que a faixa atual pede ("Para
+  continuar no Ouro"); os números dos últimos 12 meses; o que pesou (as 30 mais recentes; tocar abre a OS se ela está
+  no aparelho) e "Como funciona" (as quatro faixas e as regras). Dúvida sobre o elo é com a central, no grupo de
+  WhatsApp.
+- **Dados**: a rodada do sync busca `GET /me/level` a cada 30 min e no "puxar para atualizar", só com o app na tela
+  (fora dela não gasta bateria e dados com isso), e a tela Meu elo busca ao abrir (se o guardado tem mais de 2 min) e
+  ao puxar para baixo. Fica no kv `my_level` com a hora e o técnico; offline (ou com erro), a tela mostra o último
+  guardado com "Sem internet · dados de 18/11 às 10:00". Só leitura, fora da fila de operações; sai do aparelho na
+  troca de técnico. As telas do elo releem a cada busca, o resto do app só quando o elo mudou.
+- **Subiu de faixa**: "Você chegou ao Ouro!" com "Veja em Meu elo o que conta para o próximo." (no Diamante, "É o elo
+  mais alto."), dentro do app. A primeira carga não comemora; a subida que chega com o app saindo da tela espera ele
+  voltar; não há push.
 - **O que o técnico não vê**: outros técnicos, ranking, notas da central nem o que ela desconsiderou.
 
 ## Como a sincronização funciona
@@ -518,8 +530,9 @@ src/
     ticket/[id].tsx    detalhe, ações e abas
     oferta/[id].tsx    oferta de OS com preço: escopo, "Aceitar por R$ X" ou "Recusar"
     termo-rastreamento.tsx  termo de ciência do rastreamento (LGPD)
-    conta.tsx          técnico (foto, Meu cadastro, senha), sincronização, fila, avisos, rastreamento, notificações, aparência, sair
+    conta.tsx          técnico (foto, Meu cadastro, elo, senha), sincronização, fila, avisos, rastreamento, notificações, aparência, sair
     meu-cadastro.tsx   Meu cadastro: foto, dados, endereço e chave PIX (e-mail e PIX com a senha atual)
+    elo.tsx            Meu elo: brasão, risco, o que falta para a próxima faixa, números, o que pesou e "Como funciona"
     nota-fiscal.tsx    Enviar nota fiscal: arquivo, número, emissão, valor, competência e as OS que a nota cobre
   components/          UI (marca, cartões, calendário, jornada, diálogo de transição, abas da OS)
     Text.tsx           Text do app: aplica a Manrope no peso do estilo (use este, não o do react-native)
@@ -529,6 +542,7 @@ src/
     Avatar.tsx         foto do técnico ou as iniciais (topo da tela inicial, Conta, Meu cadastro)
     PixCard.tsx        Ganhos > Recebimento por PIX (atalho para o Meu cadastro)
     InvoicesCard.tsx   Ganhos > Notas fiscais do mês (situação, motivo da recusa, abrir arquivo, apagar, enviar)
+    LevelBadge.tsx     brasão do elo (escudo com as marcas da faixa), selo e o chip do topo de Hoje
   theme/theme.ts       paleta Maxx Field, claro/escuro, preferência do técnico
   theme/fonts.ts       Manrope (pesos 400–700) e o mapeamento de fontWeight para a família
   lib/
@@ -550,6 +564,7 @@ src/
     offers.ts          ofertas de OS: lista guardada, prazo pelo relógio do servidor, "Escopo lido" e avisos
     invoices.ts        notas fiscais: /me/invoices (lista guardada por competência, envio, exclusão, abrir arquivo) e a versão que relê Ganhos
     invoiceFile.ts     arquivo da nota: seletor do sistema ou foto, cópia no cache; .web.ts com <input type="file">
+    level.ts           Meu elo: o elo guardado (kv my_level), leitura nas telas, comemoração da subida e datas
     realtime.ts        WebSocket
     sla.ts             porta de backend/app/services/sla.py::compute_sla_status
     device.ts          POST/DELETE /devices (o servidor diz se o push chega: live ou simulated)
