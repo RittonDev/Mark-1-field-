@@ -700,13 +700,13 @@ export interface LevelTierInfo {
   to: string;
   /** "Para continuar no Diamante". */
   at: string;
-  /** Cor do brasão no claro e no escuro (3:1 ou mais contra a superfície e contra as marcas). */
+  /** Cor da faixa (barra de progresso do Meu elo). */
   color: { light: string; dark: string };
-  /** Token da web (globals.css), com a mesma cor. */
+  /** @deprecated Sai no fechamento desta construção: a medalha (LEVEL_MEDAL_*) substitui. */
   cssVar: string;
 }
 
-/** Faixa do elo do técnico: o nome vai sempre escrito junto do brasão (a cor fica só no escudo). */
+/** Faixa do elo do técnico: o nome vai sempre escrito junto da medalha. */
 export const LEVEL_TIER: Record<LevelTier, LevelTierInfo> = {
   bronze: { label: "Bronze", to: "ao Bronze", at: "no Bronze", color: { light: "#A9622B", dark: "#D08A52" }, cssVar: "--tier-bronze" },
   silver: { label: "Prata", to: "à Prata", at: "na Prata", color: { light: "#6E7B8C", dark: "#AEB8C6" }, cssVar: "--tier-silver" },
@@ -714,13 +714,10 @@ export const LEVEL_TIER: Record<LevelTier, LevelTierInfo> = {
   diamond: { label: "Diamante", to: "ao Diamante", at: "no Diamante", color: { light: "#5B4BDB", dark: "#9D8CFF" }, cssVar: "--tier-diamond" },
 };
 
-/** O escudo do brasão (viewBox 24x24), preenchido com a cor da faixa. */
+/** @deprecated Sai no fechamento desta construção: a medalha (LEVEL_MEDAL_*) substitui. */
 export const LEVEL_SHIELD_PATH = "M12 2.5 19.5 5.3v6.1c0 4.6-3.1 8.6-7.5 10.1-4.4-1.5-7.5-5.5-7.5-10.1V5.3z";
 
-/**
- * As marcas do brasão, em traço (1,7, pontas redondas) na cor da superfície (LEVEL_MARK_COLOR): 1, 2 e 3 divisas e a
- * pedra do Diamante. A forma diferencia as faixas sem depender da cor.
- */
+/** @deprecated Sai no fechamento desta construção: a medalha (LEVEL_MEDAL_*) substitui. */
 export const LEVEL_MARKS: Record<LevelTier, string[]> = {
   bronze: ["M8.5 11.5 12 13.6l3.5-2.1"],
   silver: ["M8.5 9.6 12 11.7l3.5-2.1", "M8.5 13.2 12 15.3l3.5-2.1"],
@@ -728,8 +725,113 @@ export const LEVEL_MARKS: Record<LevelTier, string[]> = {
   diamond: ["M9.2 10.2 10.6 8h2.8l1.4 2.2L12 15.5z", "M9.2 10.2h5.6"],
 };
 
-/** Cor das marcas do brasão: a superfície no claro e no escuro. */
+/** @deprecated Sai no fechamento desta construção: a medalha (LEVEL_MEDAL_*) substitui. */
 export const LEVEL_MARK_COLOR = { light: "#FFFFFF", dark: "#141519" } as const;
+
+// --------------------------------------------------------------------------- patente: a medalha do elo
+
+/**
+ * A patente do técnico (o elo como medalha), desenhada no Maxx Field: hexágono de ponta para cima, aro em relevo, face e o
+ * emblema da faixa (viewBox 48x48, centro 24,24). A mesma arte na central e no app: os dois leem daqui. A forma e o
+ * emblema diferenciam a faixa sem depender da cor, e o nome vai sempre escrito junto.
+ */
+export const LEVEL_MEDAL_VIEWBOX = "0 0 48 48";
+
+/** O aro (contorno de fora), com cantos arredondados. */
+export const LEVEL_MEDAL_RIM_PATH =
+  "M21.4 3.5Q24 2 26.6 3.5L40.5 11.5Q43.1 13 43.1 16V32Q43.1 35 40.5 36.5L26.6 44.5Q24 46 21.4 44.5L7.5 36.5Q4.9 35 4.9 32V16Q4.9 13 7.5 11.5Z";
+
+/** A face (o miolo, um pouco para dentro do aro). */
+export const LEVEL_MEDAL_FACE_PATH =
+  "M21.9 8.2Q24 7 26.1 8.2L36.6 14.3Q38.7 15.5 38.7 17.9V30.1Q38.7 32.5 36.6 33.7L26.1 39.8Q24 41 21.9 39.8L11.4 33.7Q9.3 32.5 9.3 30.1V17.9Q9.3 15.5 11.4 14.3Z";
+
+/** O relevo do aro: o brilho na faceta de cima, à esquerda (branco), e a sombra na de baixo, à direita (preto). */
+export const LEVEL_MEDAL_SHEEN_PATH = "M7.5 11.5L21.4 3.5L21.9 8.2L11.4 14.3Z";
+export const LEVEL_MEDAL_SHADE_PATH = "M40.5 36.5L26.6 44.5L26.1 39.8L36.6 33.7Z";
+
+/** Opacidade do brilho e da sombra do aro, por tema. */
+export const LEVEL_MEDAL_RELIEF = {
+  light: { sheen: 0.45, shade: 0.12 },
+  dark: { sheen: 0.3, shade: 0.25 },
+} as const;
+
+/**
+ * Relevo com degradê (aro em diagonal, face de cima para baixo) a partir de LEVEL_MEDAL_FLAT_BELOW. false: aro e face
+ * chapados (rim[0] e face[0]), com o brilho, a sombra, a linha da face e as facetas. Decisão do dono.
+ */
+export const LEVEL_MEDAL_GRADIENT: boolean = true;
+
+/** Traço das divisas e das facetas da pedra (unidades do viewBox). */
+export const LEVEL_MEDAL_STROKE = 3.4;
+export const LEVEL_MEDAL_FACET_STROKE = 1.2;
+
+/** Abaixo deste tamanho (pt no app, px na web), a medalha sai lisa: sem degradê, brilho, sombra nem facetas. */
+export const LEVEL_MEDAL_FLAT_BELOW = 28;
+
+/** Tamanhos: chip de Hoje e selos (18), listas (24), Perfil (64), comemoração (72) e Meu elo (96). */
+export const LEVEL_MEDAL_SIZE = { chip: 18, list: 24, profile: 64, celebrate: 72, hero: 96 } as const;
+
+export interface LevelMedalEmblem {
+  /** Divisas: traço LEVEL_MEDAL_STROKE, pontas e cantos redondos, na cor `emblem`. */
+  strokes: string[];
+  /** Formas cheias na cor `emblem` (a pedra do Diamante). */
+  fills: string[];
+  /** Facetas da pedra, em traço fino na cor de cima da face (só a partir de LEVEL_MEDAL_FLAT_BELOW). */
+  facets: string[];
+}
+
+/** O emblema cresce com a faixa: 1, 2 e 3 divisas para cima e a pedra do Diamante; sem elo, um traço. */
+export const LEVEL_MEDAL_EMBLEM: Record<LevelMedalKind, LevelMedalEmblem> = {
+  none: { strokes: ["M19 24H29"], fills: [], facets: [] },
+  bronze: { strokes: ["M17 27L24 21L31 27"], fills: [], facets: [] },
+  silver: { strokes: ["M17 24L24 18L31 24", "M17 30L24 24L31 30"], fills: [], facets: [] },
+  gold: { strokes: ["M17 21L24 15L31 21", "M17 27L24 21L31 27", "M17 33L24 27L31 33"], fills: [], facets: [] },
+  diamond: {
+    strokes: [],
+    fills: ["M19 16.5H29L33 21.5L24 31.5L15 21.5Z"],
+    facets: ["M15 21.5H33", "M21.5 16.5L20.5 21.5L24 31.5L27.5 21.5L26.5 16.5"],
+  },
+};
+
+export interface LevelMedalColors {
+  /** Aro: da luz (em cima, à esquerda) para a sombra (embaixo, à direita). */
+  rim: readonly [string, string];
+  /** Face: de cima para baixo. */
+  face: readonly [string, string];
+  /** Divisas e pedra: 4:1 ou mais contra a face. */
+  emblem: string;
+  /** Silhueta (e o aro cheio da medalha lisa): 4:1 ou mais contra a superfície, o canvas e o fundo dos selos. */
+  outline: string;
+  /** A linha entre o aro e a face. */
+  edge: string;
+}
+
+/** Cores da medalha por faixa e tema. "none" (sem elo ainda) é apagada de propósito: o "SEM ELO" escrito diz o que é. */
+export const LEVEL_MEDAL_COLOR: Record<LevelMedalKind, { light: LevelMedalColors; dark: LevelMedalColors }> = {
+  none: {
+    light: { rim: ["#E3E6EA", "#A3AAB5"], face: ["#F4F5F7", "#E6E8EC"], emblem: "#8B93A1", outline: "#A3AAB5", edge: "#A3AAB5" },
+    dark: { rim: ["#3A3E46", "#2A2D33"], face: ["#2A2D33", "#24272C"], emblem: "#6C727D", outline: "#4A4F58", edge: "#2A2D33" },
+  },
+  bronze: {
+    light: { rim: ["#D9935A", "#8C4B1F"], face: ["#F2B98A", "#CF8547"], emblem: "#4A230A", outline: "#7E4219", edge: "#7E4219" },
+    dark: { rim: ["#D9935A", "#8C4B1F"], face: ["#E8AD7C", "#C27A3F"], emblem: "#3F1D07", outline: "#C27A3F", edge: "#8C4B1F" },
+  },
+  silver: {
+    light: { rim: ["#E3E7ED", "#7A8594"], face: ["#F7F8FA", "#CDD3DC"], emblem: "#3F4856", outline: "#6E7987", edge: "#6E7987" },
+    dark: { rim: ["#DCE1E8", "#6E7987"], face: ["#E9ECF1", "#B9C1CC"], emblem: "#3B4451", outline: "#AEB8C6", edge: "#6E7987" },
+  },
+  gold: {
+    light: { rim: ["#F4CD5C", "#9A6F00"], face: ["#FCE49A", "#E5B634"], emblem: "#5C4000", outline: "#8A6400", edge: "#8A6400" },
+    dark: { rim: ["#EFC453", "#8F6700"], face: ["#F6DC8C", "#D9A92B"], emblem: "#573C00", outline: "#E2B33C", edge: "#8F6700" },
+  },
+  diamond: {
+    light: { rim: ["#BDB3FF", "#4B3CC6"], face: ["#E3DEFF", "#A598FF"], emblem: "#2D2191", outline: "#4234B8", edge: "#4234B8" },
+    dark: { rim: ["#B3A8FF", "#4536B8"], face: ["#D6CFFF", "#9C8CFF"], emblem: "#251A80", outline: "#9D8CFF", edge: "#4536B8" },
+  },
+};
+
+/** O nome da medalha sem elo (a tela mostra em maiúsculas: "SEM ELO"). */
+export const LEVEL_NONE_LABEL = "Sem elo";
 
 /** O que pesou no elo, como a central e o app mostram. */
 export const LEVEL_OCCURRENCE: Record<LevelOccurrenceKind, string> = {
@@ -743,9 +845,13 @@ export const LEVEL_OCCURRENCE: Record<LevelOccurrenceKind, string> = {
 /**
  * Versão do aviso: a mesma de PRIVACY_VERSION em backend/app/schemas/onboarding.py (a ficha grava a do servidor no
  * aceite). Mudou o texto de PRIVACY_NOTICE? Mude a versão aqui e lá, no mesmo dia, e publique a web antes da API (ou
- * junto): com a API na frente, a ficha da web pede para recarregar e não envia até a web nova entrar.
+ * junto): com a API na frente, a ficha da web pede para recarregar e não envia até a web nova entrar. Formato
+ * "AAAA-MM-DD"; uma segunda versão no mesmo dia ganha ".2" (as versões se comparam como texto).
  */
-export const PRIVACY_VERSION = "2026-11-19";
+export const PRIVACY_VERSION = "2026-11-19.2";
+
+/** A data da versão para mostrar ("19/11/2026"): os 10 primeiros caracteres, sem o ".2". */
+export const PRIVACY_DATE = PRIVACY_VERSION.slice(0, 10).split("-").reverse().join("/");
 
 /** O aviso de privacidade do técnico: a ficha da homologação mostra junto do aceite, e o app, para consulta. */
 export const PRIVACY_NOTICE: { title: string; body: string }[] = [
@@ -755,11 +861,11 @@ export const PRIVACY_NOTICE: { title: string; body: string }[] = [
   },
   {
     title: "Quais dados",
-    body: "Os do seu cadastro: identificação (nome, CPF, nascimento e foto), contato, endereço, CNPJ ou MEI (se tiver), região de atendimento, experiência, skills, veículo e CNH, disponibilidade, a senha do app (que ninguém da equipe consegue ver) e a chave PIX que você cadastrar no app para receber pelos chamados.",
+    body: "Os do seu cadastro: identificação (nome, CPF, nascimento e foto), contato, endereço, CNPJ ou MEI (se tiver), região de atendimento, experiência, a senha do app (que ninguém da equipe consegue ver) e a chave PIX que você cadastrar no app para receber pelos chamados. E o seu perfil técnico, informado na ficha ou no app: aptidões, formação (curso, nível, instituição e período), ferramental, meios de transporte e CNH, e os dias e turnos em que você está disponível.",
   },
   {
     title: "Para quê",
-    body: "Homologação técnica, cadastro na base de técnicos, distribuição de ordens de serviço, contato sobre os atendimentos e pagamento dos chamados por PIX. Não vendemos nem compartilhamos seus dados para marketing.",
+    body: "Homologação técnica, cadastro na base de técnicos, distribuição de ordens de serviço (o perfil técnico e a disponibilidade ajudam a central a escolher quem convidar para cada OS), contato sobre os atendimentos e pagamento dos chamados por PIX. Não vendemos nem compartilhamos seus dados para marketing.",
   },
   {
     title: "Com quem compartilhamos",
@@ -783,6 +889,6 @@ export const PRIVACY_NOTICE: { title: string; body: string }[] = [
   },
   {
     title: "Seus direitos",
-    body: "Você pode pedir acesso, correção, portabilidade ou exclusão dos seus dados e revogar consentimentos a qualquer momento, falando com a equipe da Maxx Field.",
+    body: "Você pode pedir acesso, correção, portabilidade ou exclusão dos seus dados e revogar consentimentos a qualquer momento, falando com a equipe da Maxx Field. Se aprovado, você mesmo atualiza o seu perfil técnico no app, em Configurações.",
   },
 ];

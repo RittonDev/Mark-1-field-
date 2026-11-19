@@ -4,24 +4,35 @@
 
 import type {
   AssetType,
+  AvailabilitySlot,
+  DayPeriod,
+  EarningsMonth,
+  EarningsMonthState,
+  EducationLevel,
   InvoiceFileKind,
   InvoiceStatus,
   Level,
+  LevelMedalKind,
   LevelOccurrenceKind,
   LevelTier,
   OfferCancelReason,
   OfferState,
   PixKeyType,
   Responsibility,
+  SkillLevel,
   SlaStatus,
+  TechProfilePart,
   TicketEventType,
   TicketPriority,
   TicketSource,
   TicketStatus,
   TicketType,
+  TransportInfo,
+  TransportMode,
   UserChangeField,
   UserRole,
   ViolationScope,
+  Weekday,
 } from "./types";
 
 export type StatusGroup = "open" | "active" | "pending" | "done" | "final";
@@ -290,6 +301,22 @@ export function formatPixKey(type: PixKeyType, key: string): string {
   return key;
 }
 
+/**
+ * A chave só o bastante para reconhecer, igual a core/pix.mask com "•" no lugar de "*": CPF "•••.456.789-••", CNPJ
+ * "12.345.678/••••-••", e-mail "t•••@exemplo.com", celular "+55 (11) •••••-7777", chave aleatória "…a1b2".
+ */
+export function maskPixKey(type: PixKeyType, key: string): string {
+  if (type === "cpf" && key.length === 11) return `•••.${key.slice(3, 6)}.${key.slice(6, 9)}-••`;
+  if (type === "cnpj" && key.length === 14) return `${key.slice(0, 2)}.${key.slice(2, 5)}.${key.slice(5, 8)}/••••-••`;
+  if (type === "email" && key.includes("@")) return `${key.slice(0, 1)}•••@${key.slice(key.indexOf("@") + 1)}`;
+  if (type === "phone") {
+    let digits = key.replace(/\D/g, "");
+    if (digits.length === 13 && digits.startsWith("55")) digits = digits.slice(2);
+    if (digits.length === 11) return `+55 (${digits.slice(0, 2)}) •••••-${digits.slice(7)}`;
+  }
+  return `…${key.slice(-4)}`;
+}
+
 /** Rótulo de cada campo do histórico do cadastro (GET /technicians/{id}/changes). */
 export const USER_CHANGE_LABEL: Record<UserChangeField, string> = {
   name: "Nome",
@@ -309,9 +336,183 @@ export const USER_CHANGE_LABEL: Record<UserChangeField, string> = {
   services: "Serviços que faz",
   pix: "Chave PIX",
   pix_holder: "Titular da conta",
+  tools: "Ferramental",
+  availability: "Disponibilidade",
+  transport: "Transporte",
+  skills: "Aptidões",
+  education: "Formação",
   avatar: "Foto",
   password: "Senha",
 };
+
+// --------------------------------------------------------------------------- perfil técnico (o técnico mantém no app; a central vê)
+
+/** Os dias da grade, de segunda a domingo. */
+export const WEEKDAY_ORDER: Weekday[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+
+/** Segunda a sexta ("Copiar para os dias úteis"). */
+export const WORKDAYS: Weekday[] = ["mon", "tue", "wed", "thu", "fri"];
+
+export const WEEKDAY: Record<Weekday, { label: string; short: string }> = {
+  mon: { label: "Segunda-feira", short: "seg" },
+  tue: { label: "Terça-feira", short: "ter" },
+  wed: { label: "Quarta-feira", short: "qua" },
+  thu: { label: "Quinta-feira", short: "qui" },
+  fri: { label: "Sexta-feira", short: "sex" },
+  sat: { label: "Sábado", short: "sáb" },
+  sun: { label: "Domingo", short: "dom" },
+};
+
+/**
+ * Os turnos da disponibilidade, nesta ordem (a madrugada por último). `from`/`to`: horas locais (o fim não entra);
+ * `spoken`: como o leitor de tela fala. Não é a jornada (o turno com GPS).
+ */
+export const DAY_PERIOD_ORDER: DayPeriod[] = ["morning", "afternoon", "evening", "night"];
+
+export const DAY_PERIOD: Record<DayPeriod, { label: string; hours: string; spoken: string; from: number; to: number }> = {
+  morning: { label: "Manhã", hours: "06h–12h", spoken: "das 6h ao meio-dia", from: 6, to: 12 },
+  afternoon: { label: "Tarde", hours: "12h–18h", spoken: "do meio-dia às 18h", from: 12, to: 18 },
+  evening: { label: "Noite", hours: "18h–24h", spoken: "das 18h à meia-noite", from: 18, to: 24 },
+  night: { label: "Madrugada", hours: "00h–06h", spoken: "da meia-noite às 6h", from: 0, to: 6 },
+};
+
+/** Os 28 turnos da semana, na ordem da grade. */
+export const ALL_SLOTS: AvailabilitySlot[] = WEEKDAY_ORDER.flatMap((day) =>
+  DAY_PERIOD_ORDER.map((period): AvailabilitySlot => `${day}:${period}`),
+);
+
+/** Sem repetidos nem códigos desconhecidos, na ordem da grade. */
+export function sortSlots(slots: readonly string[]): AvailabilitySlot[] {
+  const wanted = new Set(slots);
+  return ALL_SLOTS.filter((slot) => wanted.has(slot));
+}
+
+/** Os turnos marcados de um dia, na ordem. */
+export function slotPeriods(slots: readonly string[], day: Weekday): DayPeriod[] {
+  const wanted = new Set(slots);
+  return DAY_PERIOD_ORDER.filter((period) => wanted.has(`${day}:${period}`));
+}
+
+/** "a", "a e b", "a, b e c". */
+function joinWords(words: readonly string[]): string {
+  return words.length > 1 ? `${words.slice(0, -1).join(", ")} e ${words[words.length - 1]}` : (words[0] ?? "");
+}
+
+/** "manhã e tarde", "manhã, tarde, noite e madrugada" (na ordem; "" sem turno). */
+export function periodsPhrase(periods: readonly DayPeriod[]): string {
+  return joinWords(DAY_PERIOD_ORDER.filter((p) => periods.includes(p)).map((p) => DAY_PERIOD[p].label.toLowerCase()));
+}
+
+/** Os turnos de um dia no cartão: "Manhã · Tarde" ("" sem turno). */
+export function dayPeriodsText(periods: readonly DayPeriod[]): string {
+  return DAY_PERIOD_ORDER.filter((p) => periods.includes(p))
+    .map((p) => DAY_PERIOD[p].label)
+    .join(" · ");
+}
+
+/**
+ * Turnos em texto curto, igual ao servidor (services/tech_profile.slots_text): "sáb · tarde", "sáb · tarde e noite",
+ * "sex · noite; sáb · madrugada", "seg a sex · manhã e tarde; sáb · manhã", "sáb e dom · manhã". Dias seguidos com os
+ * mesmos turnos se juntam. Vazio: "".
+ */
+export function slotsText(slots: readonly string[]): string {
+  const days = WEEKDAY_ORDER.map((day) => ({ day, periods: slotPeriods(slots, day) }));
+  const parts: string[] = [];
+  let i = 0;
+  while (i < days.length) {
+    const periods = days[i].periods;
+    if (!periods.length) {
+      i += 1;
+      continue;
+    }
+    let j = i;
+    while (j + 1 < days.length && days[j + 1].periods.join() === periods.join()) j += 1;
+    const first = WEEKDAY[days[i].day].short;
+    const last = WEEKDAY[days[j].day].short;
+    const span = j === i ? first : j === i + 1 ? `${first} e ${last}` : `${first} a ${last}`;
+    parts.push(`${span} · ${periodsPhrase(periods)}`);
+    i = j + 1;
+  }
+  return parts.join("; ");
+}
+
+/**
+ * Resumo da linha Disponibilidade (Configurações do app): "Seg a sex · manhã e tarde", "Sáb e dom · noite"; os 28:
+ * "Todos os dias · todos os turnos"; dias com turnos diferentes: "6 dias · turnos variados"; nada: "Não informada".
+ */
+export function availabilitySummary(slots: readonly string[]): string {
+  const list = sortSlots(slots);
+  if (!list.length) return "Não informada";
+  if (list.length === ALL_SLOTS.length) return "Todos os dias · todos os turnos";
+  const text = slotsText(list);
+  if (!text.includes(";")) return text.charAt(0).toUpperCase() + text.slice(1);
+  const days = WEEKDAY_ORDER.filter((day) => slotPeriods(list, day).length > 0).length;
+  return `${days} dias · turnos variados`;
+}
+
+export const TRANSPORT_MODE_ORDER: TransportMode[] = ["car", "motorcycle", "bicycle", "public_transport", "ride_app", "on_foot"];
+
+export const TRANSPORT_MODE: Record<TransportMode, string> = {
+  car: "Carro",
+  motorcycle: "Moto",
+  bicycle: "Bicicleta",
+  public_transport: "Transporte público",
+  ride_app: "Carro de aplicativo",
+  on_foot: "A pé",
+};
+
+/** "Carro, Moto · com CNH", "Nenhum · sem CNH"; null sem a parte informada (o mesmo texto do histórico). */
+export function transportText(transport: TransportInfo | null | undefined): string | null {
+  if (!transport) return null;
+  const modes = TRANSPORT_MODE_ORDER.filter((m) => transport.modes.includes(m)).map((m) => TRANSPORT_MODE[m]);
+  return `${modes.length ? modes.join(", ") : "Nenhum"} · ${transport.driver_license ? "com CNH" : "sem CNH"}`;
+}
+
+export const SKILL_LEVEL_ORDER: SkillLevel[] = ["basico", "intermediario", "avancado"];
+
+export const SKILL_LEVEL: Record<SkillLevel, string> = { basico: "Básico", intermediario: "Intermediário", avancado: "Avançado" };
+
+export const EDUCATION_LEVEL_ORDER: EducationLevel[] = [
+  "high_school",
+  "technical",
+  "undergraduate",
+  "postgraduate",
+  "certification",
+  "free_course",
+];
+
+export const EDUCATION_LEVEL: Record<EducationLevel, string> = {
+  high_school: "Ensino médio",
+  technical: "Técnico",
+  undergraduate: "Graduação",
+  postgraduate: "Pós-graduação",
+  certification: "Certificação",
+  free_course: "Curso livre",
+};
+
+export const TECH_PROFILE_PART: Record<TechProfilePart, string> = {
+  tools: "Ferramental",
+  availability: "Disponibilidade",
+  transport: "Transporte",
+  skills: "Aptidões",
+  education: "Formação",
+};
+
+/** Limites do perfil técnico (os mesmos de backend/app/services/tech_profile.py). */
+export const TECH_PROFILE_LIMITS = {
+  tools: 200,
+  toolName: 80,
+  slots: 28,
+  modes: 6,
+  skills: 30,
+  skillName: 80,
+  education: 20,
+  course: 120,
+  institution: 120,
+  textMin: 2,
+  /** Primeiro mês aceito na formação (o último é o mês atual). */
+  firstMonth: "1950-01",
+} as const;
 
 // --------------------------------------------------------------------------- notas fiscais dos técnicos
 
@@ -354,6 +555,140 @@ export function competenceLabel(month: string): string {
   return match && name ? `${name} de ${match[1]}` : month;
 }
 
+// --------------------------------------------------------------------------- meses (gráficos, histórico, formação, faturamento)
+
+/** Meses abreviados do eixo dos gráficos, sem ponto. */
+export const MONTH_ABBR = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"] as const;
+
+/** "2026-11" → "nov"; com o ano, "nov/26" (fora do formato, volta como veio). */
+export function monthAbbr(month: string, withYear = false): string {
+  const match = /^(\d{4})-(\d{2})$/.exec(month);
+  const name = match ? MONTH_ABBR[Number(match[2]) - 1] : undefined;
+  if (!match || !name) return month;
+  return withYear ? `${name}/${match[1].slice(2)}` : name;
+}
+
+/** "2026-11" → "Novembro de 2026" (seções do histórico e meses do faturamento): competenceLabel com a inicial maiúscula. */
+export function monthTitle(month: string): string {
+  const label = competenceLabel(month);
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+/** "2024-02" ou "2024-02-19" → "02/2024" (fora do formato, volta como veio). */
+export function monthText(value: string): string {
+  const match = /^(\d{4})-(\d{2})(?:-\d{2})?$/.exec(value);
+  return match ? `${match[2]}/${match[1]}` : value;
+}
+
+/** Período da formação: "02/2022 a 12/2023"; sem fim, "desde 02/2024 (em andamento)". Igual ao servidor. */
+export function educationPeriodText(start: string, end: string | null | undefined): string {
+  return end ? `${monthText(start)} a ${monthText(end)}` : `desde ${monthText(start)} (em andamento)`;
+}
+
+/** O "desde" da aptidão: "2026-11-19" → "desde 11/2026". */
+export function sinceText(since: string): string {
+  return `desde ${monthText(since)}`;
+}
+
+// --------------------------------------------------------------------------- faturamento do técnico
+
+/** Os valores por OS existem desde aqui (o Field Control não trazia valores): os meses antes vêm vazios. */
+export const EARNINGS_HISTORY_SINCE = "2026-11-13";
+
+/**
+ * Situação do mês no Faturamento (GET /me/earnings/months): o selo e a cor do ícone redondo (o desenho do ícone fica
+ * no app). Mesmas cores de Pagamentos e das notas: âmbar = esperando a central, verde-água = pago, vermelho = recusa,
+ * azul = informativo (a nota nunca trava o pagamento), cinza = nada a fazer.
+ */
+export const EARNINGS_MONTH_STATE: Record<EarningsMonthState, { label: string; color: string }> = {
+  empty: { label: "Sem valores", color: "#667085" },
+  in_progress: { label: "Em andamento", color: "#667085" },
+  no_invoice: { label: "Sem nota", color: "#0086C9" },
+  in_review: { label: "Nota em conferência", color: "#DC6803" },
+  rejected: { label: "Nota recusada", color: "#D92D20" },
+  to_pay: { label: "A pagar", color: "#DC6803" },
+  partial: { label: "Pago em parte", color: "#DC6803" },
+  paid_no_invoice: { label: "Pago sem nota", color: "#0E9384" },
+  paid: { label: "Pago", color: "#0E9384" },
+};
+
+/** "nenhuma OS", "1 OS", "12 OS". */
+export function osCount(n: number): string {
+  return n === 0 ? "nenhuma OS" : `${n} OS`;
+}
+
+/** Formatação vinda de quem mostra: `money` pode ocultar o valor (olho do app); `day` dá "18/11". */
+export interface EarningsFormat {
+  money: (value: number) => string;
+  day: (iso: string) => string;
+}
+
+/** Linha curta do cartão do mês (só dados). */
+export function earningsMonthLine(m: EarningsMonth, { money, day }: EarningsFormat): string | null {
+  switch (m.state) {
+    case "in_progress":
+      return `${osCount(m.expected.count)} em andamento`;
+    case "no_invoice":
+      return `${osCount(m.due_without_invoice.count)} sem nota · ${money(m.due_without_invoice.amount)}`;
+    case "in_review":
+      return `${osCount(m.due_in_review.count)} com nota em conferência`;
+    case "rejected":
+      return `${m.rejection ? `Nota nº ${m.rejection.number}` : "Nota"} recusada · ver motivo`;
+    case "to_pay":
+      return `${money(m.to_pay.amount)} a receber`;
+    case "partial":
+      return [
+        `${money(m.paid.amount)} pago`,
+        m.to_pay.count ? `${money(m.to_pay.amount)} a receber` : null,
+        m.expected.count ? `${money(m.expected.amount)} previsto` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+    case "paid_no_invoice":
+      return m.last_paid_at ? `Pago em ${day(m.last_paid_at)} · sem nota` : "Pago · sem nota";
+    case "paid":
+      return m.last_paid_at ? `Pago em ${day(m.last_paid_at)}` : null;
+    default:
+      return null;
+  }
+}
+
+/** O texto da situação no topo do mês: o que aconteceu e o que o técnico pode fazer. */
+export function earningsSituation(m: EarningsMonth, { money, day }: EarningsFormat): string | null {
+  const paidOn = m.last_paid_at ? ` em ${day(m.last_paid_at)}` : "";
+  switch (m.state) {
+    case "in_progress":
+      return "Nenhuma OS concluída ainda. O valor fica previsto até a conclusão.";
+    case "no_invoice":
+      return `${osCount(m.due_without_invoice.count)} sem nota fiscal (${money(m.due_without_invoice.amount)}). A central paga com ou sem nota; se quiser, envie a nota abaixo.`;
+    case "in_review":
+      return `A central está conferindo a nota de ${osCount(m.due_in_review.count)}. Nota errada? Apague e envie outra.`;
+    case "rejected": {
+      const reason = m.rejection?.reason?.trim();
+      const head = m.rejection ? `A central recusou a nota nº ${m.rejection.number}.` : "A central recusou a nota.";
+      const why = reason ? ` Motivo: ${/[.!?]$/.test(reason) ? reason : `${reason}.`}` : "";
+      return `${head}${why} Apague a nota recusada e envie outra.`;
+    }
+    case "to_pay":
+      return `Nota conferida. Falta a central pagar ${money(m.to_pay.amount)}.`;
+    case "partial": {
+      const parts = [
+        `${money(m.paid.amount)} pago`,
+        m.to_pay.count ? `${money(m.to_pay.amount)} a receber` : null,
+        m.expected.count ? `${money(m.expected.amount)} previsto` : null,
+      ].filter(Boolean);
+      const missing = m.due_without_invoice.count + m.paid_without_invoice.count;
+      return `${parts.join(", ")}.${missing ? ` ${osCount(missing)} sem nota.` : ""}`;
+    }
+    case "paid_no_invoice":
+      return `Tudo pago${paidOn}. Se quiser, envie a nota fiscal destas OS.`;
+    case "paid":
+      return `Tudo pago${paidOn}.`;
+    default:
+      return null;
+  }
+}
+
 // --------------------------------------------------------------------------- elo dos técnicos
 
 /** As faixas do elo, da mais baixa à mais alta. */
@@ -365,13 +700,13 @@ export interface LevelTierInfo {
   to: string;
   /** "Para continuar no Diamante". */
   at: string;
-  /** Cor do brasão no claro e no escuro (3:1 ou mais contra a superfície e contra as marcas). */
+  /** Cor da faixa (barra de progresso do Meu elo). */
   color: { light: string; dark: string };
-  /** Token da web (globals.css), com a mesma cor. */
+  /** @deprecated Sai no fechamento desta construção: a medalha (LEVEL_MEDAL_*) substitui. */
   cssVar: string;
 }
 
-/** Faixa do elo do técnico: o nome vai sempre escrito junto do brasão (a cor fica só no escudo). */
+/** Faixa do elo do técnico: o nome vai sempre escrito junto da medalha. */
 export const LEVEL_TIER: Record<LevelTier, LevelTierInfo> = {
   bronze: { label: "Bronze", to: "ao Bronze", at: "no Bronze", color: { light: "#A9622B", dark: "#D08A52" }, cssVar: "--tier-bronze" },
   silver: { label: "Prata", to: "à Prata", at: "na Prata", color: { light: "#6E7B8C", dark: "#AEB8C6" }, cssVar: "--tier-silver" },
@@ -379,13 +714,10 @@ export const LEVEL_TIER: Record<LevelTier, LevelTierInfo> = {
   diamond: { label: "Diamante", to: "ao Diamante", at: "no Diamante", color: { light: "#5B4BDB", dark: "#9D8CFF" }, cssVar: "--tier-diamond" },
 };
 
-/** O escudo do brasão (viewBox 24x24), preenchido com a cor da faixa. */
+/** @deprecated Sai no fechamento desta construção: a medalha (LEVEL_MEDAL_*) substitui. */
 export const LEVEL_SHIELD_PATH = "M12 2.5 19.5 5.3v6.1c0 4.6-3.1 8.6-7.5 10.1-4.4-1.5-7.5-5.5-7.5-10.1V5.3z";
 
-/**
- * As marcas do brasão, em traço (1,7, pontas redondas) na cor da superfície (LEVEL_MARK_COLOR): 1, 2 e 3 divisas e a
- * pedra do Diamante. A forma diferencia as faixas sem depender da cor.
- */
+/** @deprecated Sai no fechamento desta construção: a medalha (LEVEL_MEDAL_*) substitui. */
 export const LEVEL_MARKS: Record<LevelTier, string[]> = {
   bronze: ["M8.5 11.5 12 13.6l3.5-2.1"],
   silver: ["M8.5 9.6 12 11.7l3.5-2.1", "M8.5 13.2 12 15.3l3.5-2.1"],
@@ -393,8 +725,113 @@ export const LEVEL_MARKS: Record<LevelTier, string[]> = {
   diamond: ["M9.2 10.2 10.6 8h2.8l1.4 2.2L12 15.5z", "M9.2 10.2h5.6"],
 };
 
-/** Cor das marcas do brasão: a superfície no claro e no escuro. */
+/** @deprecated Sai no fechamento desta construção: a medalha (LEVEL_MEDAL_*) substitui. */
 export const LEVEL_MARK_COLOR = { light: "#FFFFFF", dark: "#141519" } as const;
+
+// --------------------------------------------------------------------------- patente: a medalha do elo
+
+/**
+ * A patente do técnico (o elo como medalha), desenhada no Maxx Field: hexágono de ponta para cima, aro em relevo, face e o
+ * emblema da faixa (viewBox 48x48, centro 24,24). A mesma arte na central e no app: os dois leem daqui. A forma e o
+ * emblema diferenciam a faixa sem depender da cor, e o nome vai sempre escrito junto.
+ */
+export const LEVEL_MEDAL_VIEWBOX = "0 0 48 48";
+
+/** O aro (contorno de fora), com cantos arredondados. */
+export const LEVEL_MEDAL_RIM_PATH =
+  "M21.4 3.5Q24 2 26.6 3.5L40.5 11.5Q43.1 13 43.1 16V32Q43.1 35 40.5 36.5L26.6 44.5Q24 46 21.4 44.5L7.5 36.5Q4.9 35 4.9 32V16Q4.9 13 7.5 11.5Z";
+
+/** A face (o miolo, um pouco para dentro do aro). */
+export const LEVEL_MEDAL_FACE_PATH =
+  "M21.9 8.2Q24 7 26.1 8.2L36.6 14.3Q38.7 15.5 38.7 17.9V30.1Q38.7 32.5 36.6 33.7L26.1 39.8Q24 41 21.9 39.8L11.4 33.7Q9.3 32.5 9.3 30.1V17.9Q9.3 15.5 11.4 14.3Z";
+
+/** O relevo do aro: o brilho na faceta de cima, à esquerda (branco), e a sombra na de baixo, à direita (preto). */
+export const LEVEL_MEDAL_SHEEN_PATH = "M7.5 11.5L21.4 3.5L21.9 8.2L11.4 14.3Z";
+export const LEVEL_MEDAL_SHADE_PATH = "M40.5 36.5L26.6 44.5L26.1 39.8L36.6 33.7Z";
+
+/** Opacidade do brilho e da sombra do aro, por tema. */
+export const LEVEL_MEDAL_RELIEF = {
+  light: { sheen: 0.45, shade: 0.12 },
+  dark: { sheen: 0.3, shade: 0.25 },
+} as const;
+
+/**
+ * Relevo com degradê (aro em diagonal, face de cima para baixo) a partir de LEVEL_MEDAL_FLAT_BELOW. false: aro e face
+ * chapados (rim[0] e face[0]), com o brilho, a sombra, a linha da face e as facetas. Decisão do dono.
+ */
+export const LEVEL_MEDAL_GRADIENT: boolean = true;
+
+/** Traço das divisas e das facetas da pedra (unidades do viewBox). */
+export const LEVEL_MEDAL_STROKE = 3.4;
+export const LEVEL_MEDAL_FACET_STROKE = 1.2;
+
+/** Abaixo deste tamanho (pt no app, px na web), a medalha sai lisa: sem degradê, brilho, sombra nem facetas. */
+export const LEVEL_MEDAL_FLAT_BELOW = 28;
+
+/** Tamanhos: chip de Hoje e selos (18), listas (24), Perfil (64), comemoração (72) e Meu elo (96). */
+export const LEVEL_MEDAL_SIZE = { chip: 18, list: 24, profile: 64, celebrate: 72, hero: 96 } as const;
+
+export interface LevelMedalEmblem {
+  /** Divisas: traço LEVEL_MEDAL_STROKE, pontas e cantos redondos, na cor `emblem`. */
+  strokes: string[];
+  /** Formas cheias na cor `emblem` (a pedra do Diamante). */
+  fills: string[];
+  /** Facetas da pedra, em traço fino na cor de cima da face (só a partir de LEVEL_MEDAL_FLAT_BELOW). */
+  facets: string[];
+}
+
+/** O emblema cresce com a faixa: 1, 2 e 3 divisas para cima e a pedra do Diamante; sem elo, um traço. */
+export const LEVEL_MEDAL_EMBLEM: Record<LevelMedalKind, LevelMedalEmblem> = {
+  none: { strokes: ["M19 24H29"], fills: [], facets: [] },
+  bronze: { strokes: ["M17 27L24 21L31 27"], fills: [], facets: [] },
+  silver: { strokes: ["M17 24L24 18L31 24", "M17 30L24 24L31 30"], fills: [], facets: [] },
+  gold: { strokes: ["M17 21L24 15L31 21", "M17 27L24 21L31 27", "M17 33L24 27L31 33"], fills: [], facets: [] },
+  diamond: {
+    strokes: [],
+    fills: ["M19 16.5H29L33 21.5L24 31.5L15 21.5Z"],
+    facets: ["M15 21.5H33", "M21.5 16.5L20.5 21.5L24 31.5L27.5 21.5L26.5 16.5"],
+  },
+};
+
+export interface LevelMedalColors {
+  /** Aro: da luz (em cima, à esquerda) para a sombra (embaixo, à direita). */
+  rim: readonly [string, string];
+  /** Face: de cima para baixo. */
+  face: readonly [string, string];
+  /** Divisas e pedra: 4:1 ou mais contra a face. */
+  emblem: string;
+  /** Silhueta (e o aro cheio da medalha lisa): 4:1 ou mais contra a superfície, o canvas e o fundo dos selos. */
+  outline: string;
+  /** A linha entre o aro e a face. */
+  edge: string;
+}
+
+/** Cores da medalha por faixa e tema. "none" (sem elo ainda) é apagada de propósito: o "SEM ELO" escrito diz o que é. */
+export const LEVEL_MEDAL_COLOR: Record<LevelMedalKind, { light: LevelMedalColors; dark: LevelMedalColors }> = {
+  none: {
+    light: { rim: ["#E3E6EA", "#A3AAB5"], face: ["#F4F5F7", "#E6E8EC"], emblem: "#8B93A1", outline: "#A3AAB5", edge: "#A3AAB5" },
+    dark: { rim: ["#3A3E46", "#2A2D33"], face: ["#2A2D33", "#24272C"], emblem: "#6C727D", outline: "#4A4F58", edge: "#2A2D33" },
+  },
+  bronze: {
+    light: { rim: ["#D9935A", "#8C4B1F"], face: ["#F2B98A", "#CF8547"], emblem: "#4A230A", outline: "#7E4219", edge: "#7E4219" },
+    dark: { rim: ["#D9935A", "#8C4B1F"], face: ["#E8AD7C", "#C27A3F"], emblem: "#3F1D07", outline: "#C27A3F", edge: "#8C4B1F" },
+  },
+  silver: {
+    light: { rim: ["#E3E7ED", "#7A8594"], face: ["#F7F8FA", "#CDD3DC"], emblem: "#3F4856", outline: "#6E7987", edge: "#6E7987" },
+    dark: { rim: ["#DCE1E8", "#6E7987"], face: ["#E9ECF1", "#B9C1CC"], emblem: "#3B4451", outline: "#AEB8C6", edge: "#6E7987" },
+  },
+  gold: {
+    light: { rim: ["#F4CD5C", "#9A6F00"], face: ["#FCE49A", "#E5B634"], emblem: "#5C4000", outline: "#8A6400", edge: "#8A6400" },
+    dark: { rim: ["#EFC453", "#8F6700"], face: ["#F6DC8C", "#D9A92B"], emblem: "#573C00", outline: "#E2B33C", edge: "#8F6700" },
+  },
+  diamond: {
+    light: { rim: ["#BDB3FF", "#4B3CC6"], face: ["#E3DEFF", "#A598FF"], emblem: "#2D2191", outline: "#4234B8", edge: "#4234B8" },
+    dark: { rim: ["#B3A8FF", "#4536B8"], face: ["#D6CFFF", "#9C8CFF"], emblem: "#251A80", outline: "#9D8CFF", edge: "#4536B8" },
+  },
+};
+
+/** O nome da medalha sem elo (a tela mostra em maiúsculas: "SEM ELO"). */
+export const LEVEL_NONE_LABEL = "Sem elo";
 
 /** O que pesou no elo, como a central e o app mostram. */
 export const LEVEL_OCCURRENCE: Record<LevelOccurrenceKind, string> = {
@@ -408,9 +845,13 @@ export const LEVEL_OCCURRENCE: Record<LevelOccurrenceKind, string> = {
 /**
  * Versão do aviso: a mesma de PRIVACY_VERSION em backend/app/schemas/onboarding.py (a ficha grava a do servidor no
  * aceite). Mudou o texto de PRIVACY_NOTICE? Mude a versão aqui e lá, no mesmo dia, e publique a web antes da API (ou
- * junto): com a API na frente, a ficha da web pede para recarregar e não envia até a web nova entrar.
+ * junto): com a API na frente, a ficha da web pede para recarregar e não envia até a web nova entrar. Formato
+ * "AAAA-MM-DD"; uma segunda versão no mesmo dia ganha ".2" (as versões se comparam como texto).
  */
-export const PRIVACY_VERSION = "2026-11-19";
+export const PRIVACY_VERSION = "2026-11-19.2";
+
+/** A data da versão para mostrar ("19/11/2026"): os 10 primeiros caracteres, sem o ".2". */
+export const PRIVACY_DATE = PRIVACY_VERSION.slice(0, 10).split("-").reverse().join("/");
 
 /** O aviso de privacidade do técnico: a ficha da homologação mostra junto do aceite, e o app, para consulta. */
 export const PRIVACY_NOTICE: { title: string; body: string }[] = [
@@ -420,11 +861,11 @@ export const PRIVACY_NOTICE: { title: string; body: string }[] = [
   },
   {
     title: "Quais dados",
-    body: "Os do seu cadastro: identificação (nome, CPF, nascimento e foto), contato, endereço, CNPJ ou MEI (se tiver), região de atendimento, experiência, skills, veículo e CNH, disponibilidade, a senha do app (que ninguém da equipe consegue ver) e a chave PIX que você cadastrar no app para receber pelos chamados.",
+    body: "Os do seu cadastro: identificação (nome, CPF, nascimento e foto), contato, endereço, CNPJ ou MEI (se tiver), região de atendimento, experiência, a senha do app (que ninguém da equipe consegue ver) e a chave PIX que você cadastrar no app para receber pelos chamados. E o seu perfil técnico, informado na ficha ou no app: aptidões, formação (curso, nível, instituição e período), ferramental, meios de transporte e CNH, e os dias e turnos em que você está disponível.",
   },
   {
     title: "Para quê",
-    body: "Homologação técnica, cadastro na base de técnicos, distribuição de ordens de serviço, contato sobre os atendimentos e pagamento dos chamados por PIX. Não vendemos nem compartilhamos seus dados para marketing.",
+    body: "Homologação técnica, cadastro na base de técnicos, distribuição de ordens de serviço (o perfil técnico e a disponibilidade ajudam a central a escolher quem convidar para cada OS), contato sobre os atendimentos e pagamento dos chamados por PIX. Não vendemos nem compartilhamos seus dados para marketing.",
   },
   {
     title: "Com quem compartilhamos",
@@ -448,6 +889,6 @@ export const PRIVACY_NOTICE: { title: string; body: string }[] = [
   },
   {
     title: "Seus direitos",
-    body: "Você pode pedir acesso, correção, portabilidade ou exclusão dos seus dados e revogar consentimentos a qualquer momento, falando com a equipe da Maxx Field.",
+    body: "Você pode pedir acesso, correção, portabilidade ou exclusão dos seus dados e revogar consentimentos a qualquer momento, falando com a equipe da Maxx Field. Se aprovado, você mesmo atualiza o seu perfil técnico no app, em Configurações.",
   },
 ];

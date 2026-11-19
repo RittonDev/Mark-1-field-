@@ -19,6 +19,7 @@ import type {
   Page,
   ServiceType,
   Team,
+  TechnicianTool,
   TrackingHistory,
   UnproductiveReason,
   User,
@@ -253,6 +254,15 @@ export function useUnproductiveReasons(active?: boolean) {
   return useQuery({
     queryKey: ["unproductive-reasons", active ?? ""],
     queryFn: ({ signal }) => api.get<UnproductiveReason[]>("/unproductive-reasons", { active }, { signal }),
+    staleTime: LOOKUP_STALE,
+  });
+}
+
+/** Catálogo de ferramentas (Configurações › Técnicos e filtro de Técnicos): ordem alfabética, com quantos técnicos marcaram. */
+export function useTechnicianTools(active?: boolean) {
+  return useQuery({
+    queryKey: ["technician-tools", active ?? ""],
+    queryFn: ({ signal }) => api.get<TechnicianTool[]>("/technician-tools", { active }, { signal }),
     staleTime: LOOKUP_STALE,
   });
 }
