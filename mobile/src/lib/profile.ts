@@ -1,9 +1,15 @@
-// Meu cadastro: o cadastro do técnico (GET/PATCH /me/profile) e a foto (POST/DELETE /me/profile/photo).
+// O cadastro do técnico (Configurações): GET/PATCH /me/profile, com o perfil técnico, e a foto (POST/DELETE
+// /me/profile/photo).
 //
 // Fica só na memória: endereço e chave PIX nunca vão para o SQLite nem para o SecureStore, e somem ao sair da conta.
 // Nada entra na fila offline (a senha pedida para e-mail e PIX não fica guardada, e o aviso à central sai na hora):
 // abrir, salvar e trocar a foto pedem internet. Nome, e-mail e celular atualizam também o usuário da sessão
 // (session.updateUser grava o e-mail novo para preencher o login).
+//
+// Gravações em fila (salvar, trocar e tirar a foto): uma só sai depois de a anterior responder. O "salvar ao tocar"
+// do perfil técnico nunca corre junto de outra gravação, e cada resposta já inclui a anterior. Uma leitura durante a
+// qual uma gravação saiu, voltou ou ficou no ar não é publicada: ela pode ser de antes da gravação e desfaria a
+// mudança na tela (fica o que a gravação devolveu).
 
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import { useSyncExternalStore } from "react";
@@ -73,13 +79,56 @@ async function keep(profile: MyProfile, askedBy: string | null): Promise<MyProfi
   return profile;
 }
 
+/** O servidor já manda o perfil técnico (API nova): as telas de Atendimento só abrem com ele. */
+export function hasTechnicalProfile(p: MyProfile | null | undefined): p is MyProfile {
+  return (
+    !!p &&
+    Array.isArray(p.skills) &&
+    Array.isArray(p.tool_ids) &&
+    Array.isArray(p.availability) &&
+    !!p.tech_profile_updated
+  );
+}
+
+/** Sobe quando uma gravação sai e quando ela volta (com ou sem erro): ímpar = gravação no ar. */
+let writes = 0;
+/** A última gravação da fila (nunca rejeita: a falha de uma não trava a seguinte). */
+let writeChain: Promise<unknown> = Promise.resolve();
+
+/**
+ * Põe a gravação na fila: ela sai depois de a anterior responder. Se a sessão mudou enquanto esperava (saiu da conta ou
+ * entrou outro técnico), ela não sai: o pedido levaria o token de outra pessoa.
+ */
+function queueWrite<T>(askedBy: string | null, task: () => Promise<T>): Promise<T> {
+  const run = writeChain.then(async () => {
+    if ((session.get().user?.id ?? null) !== askedBy) throw new Error("Sessão encerrada");
+    writes += 1;
+    try {
+      return await task();
+    } finally {
+      writes += 1;
+    }
+  });
+  writeChain = run.catch(() => undefined);
+  return run;
+}
+
 let inflight: { userId: string | null; promise: Promise<MyProfile> } | null = null;
 
-/** Lê o cadastro no servidor. Pedidos ao mesmo tempo dividem a mesma leitura. */
+/**
+ * Lê o cadastro no servidor. Pedidos ao mesmo tempo dividem a mesma leitura. Se uma gravação saiu, voltou ou ainda está
+ * no ar durante a leitura, a resposta não é publicada e volta o cadastro da memória (o que a gravação devolveu).
+ */
 export function loadProfile(): Promise<MyProfile> {
   const userId = session.get().user?.id ?? null;
   if (inflight?.userId === userId) return inflight.promise;
-  const promise = api.get<MyProfile>("/me/profile").then((profile) => keep(profile, userId));
+  const startedAt = writes;
+  const promise = api.get<MyProfile>("/me/profile").then((profile) => {
+    const shown = current.profile;
+    const raced = writes !== startedAt || writes % 2 === 1;
+    if (raced && shown && shown.id === profile.id) return shown;
+    return keep(profile, userId);
+  });
   inflight = { userId, promise };
   const settle = () => {
     if (inflight?.promise === promise) inflight = null;
@@ -95,10 +144,13 @@ export function ensureProfile(): void {
   void loadProfile().catch(() => undefined);
 }
 
-/** PATCH /me/profile: só o que mudou (e-mail e PIX com `current_password`). Devolve o cadastro como ficou. */
-export async function saveProfile(body: MyProfileUpdate): Promise<MyProfile> {
+/**
+ * PATCH /me/profile: só o que mudou (e-mail e PIX com `current_password`; as partes do perfil técnico inteiras). Sai
+ * depois da gravação anterior. Devolve o cadastro como ficou.
+ */
+export function saveProfile(body: MyProfileUpdate): Promise<MyProfile> {
   const userId = session.get().user?.id ?? null;
-  return keep(await api.patch<MyProfile>("/me/profile", body), userId);
+  return queueWrite(userId, async () => keep(await api.patch<MyProfile>("/me/profile", body), userId));
 }
 
 export interface AvatarPhoto {
@@ -147,7 +199,10 @@ async function reduceAvatar(photo: AvatarPhoto): Promise<string> {
   return renderAvatar(photo.uri, null, side);
 }
 
-/** Troca a foto do cadastro: reduz no aparelho e envia. O arquivo reduzido sai do cache depois do envio. */
+/**
+ * Troca a foto do cadastro: reduz no aparelho (fora da fila) e envia na fila das gravações. O arquivo reduzido sai do
+ * cache depois do envio, ou se ele não chegar a sair.
+ */
 export async function uploadAvatar(photo: AvatarPhoto): Promise<MyProfile> {
   const userId = session.get().user?.id ?? null;
   let reduced: string;
@@ -157,17 +212,17 @@ export async function uploadAvatar(photo: AvatarPhoto): Promise<MyProfile> {
     console.warn("Falha ao reduzir a foto do cadastro", error);
     throw new Error("Não foi possível preparar a foto. Escolha outra ou tire de novo.");
   }
-  let profile: MyProfile;
   try {
-    profile = await uploadFile<MyProfile>("/me/profile/photo", reduced, {}, "image/jpeg", "foto.jpg");
+    return await queueWrite(userId, async () =>
+      keep(await uploadFile<MyProfile>("/me/profile/photo", reduced, {}, "image/jpeg", "foto.jpg"), userId),
+    );
   } finally {
     deletePhotoFile(reduced);
   }
-  return keep(profile, userId);
 }
 
-/** Tira a foto (também a que veio do Field Control): no lugar ficam as iniciais. */
-export async function removeAvatar(): Promise<MyProfile> {
+/** Tira a foto (também a que veio do Field Control): no lugar ficam as iniciais. Sai na fila das gravações. */
+export function removeAvatar(): Promise<MyProfile> {
   const userId = session.get().user?.id ?? null;
-  return keep(await api.delete<MyProfile>("/me/profile/photo"), userId);
+  return queueWrite(userId, async () => keep(await api.delete<MyProfile>("/me/profile/photo"), userId));
 }

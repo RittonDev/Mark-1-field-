@@ -1,14 +1,17 @@
-// Conta > Notificações: a chave dos lembretes da visita (1 dia, 1h40 e 10 min antes), o próximo lembrete, a
-// permissão do celular com o caminho para liberar e, no Android, o alarme exato. Também a linha "Em segundo
-// plano" do cartão Sincronização. O estado é relido ao abrir a tela, quando as OS mudam e quando o app volta à
-// tela (a permissão pode ter mudado nas configurações do celular).
+// Cartão Notificações (Sincronização e Configurações › Notificações): a chave dos lembretes da visita (1 dia, 1h40 e
+// 10 min antes), o próximo lembrete, a permissão do celular com o caminho para liberar e, no Android, o alarme exato. O
+// estado é relido ao abrir a tela, quando as OS mudam e quando o app volta à tela (a permissão pode ter mudado nas
+// configurações do celular). Também: a linha "Push da central" (PushRow), o resumo da linha Notificações das
+// Configurações (useNotificationsSummary) e a linha "Em segundo plano" do cartão Sincronização.
 
 import { isRunningInExpoGo } from "expo";
-import { useEffect, useRef, useState } from "react";
+import { useFocusEffect } from "expo-router";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState, Linking, StyleSheet, View } from "react-native";
-import { refreshPushRegistration } from "../lib/auth";
+import { getDeviceRegistration, refreshPushRegistration } from "../lib/auth";
 import { backgroundSyncStatus, type BackgroundSyncStatus } from "../lib/backgroundSync";
 import { useDataVersion } from "../lib/changes";
+import type { DeviceRegistration } from "../lib/device";
 import { relativeDay } from "../lib/field";
 import { formatTime } from "../lib/format";
 import {
@@ -57,7 +60,8 @@ function blockedToast() {
   });
 }
 
-export function NotificationsCard() {
+/** `title`: "Notificações" na Sincronização; "Neste celular" em Configurações › Notificações. */
+export function NotificationsCard({ title = "Notificações" }: { title?: string }) {
   const dataVersion = useDataVersion();
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   // Muda depois de cada ação do cartão: relê o estado.
@@ -134,7 +138,7 @@ export function NotificationsCard() {
 
   return (
     <Card style={{ gap: 4 }}>
-      <SectionTitle accent>Notificações</SectionTitle>
+      <SectionTitle accent>{title}</SectionTitle>
       <SwitchRow
         label="Lembretes das visitas"
         hint="1 dia, 1h40 e 10 min antes do horário da visita"
@@ -155,6 +159,77 @@ export function NotificationsCard() {
       ) : null}
     </Card>
   );
+}
+
+/** Push da central neste aparelho (as notificações locais, lembretes e avisos, ficam no cartão Notificações). */
+function pushLabel(registration: DeviceRegistration | null): string {
+  if (!registration) return "Verificando…";
+  switch (registration.state) {
+    case "registered":
+      return registration.push === "live" ? "Ativo neste aparelho" : "Ainda não ligado na central";
+    case "unsupported":
+      return "Indisponível nesta versão do app";
+    case "blocked":
+      return "Bloqueado nas notificações do celular";
+    case "undetermined":
+      return "Notificações ainda não permitidas";
+    case "error":
+      return "Não foi possível ativar agora";
+  }
+}
+
+/** A linha "Push da central" (cartão Aparelho da Sincronização e "Avisos da central" em Configurações › Notificações). */
+export function PushRow() {
+  useDataVersion(); // redesenha quando o registro do aparelho termina
+  return <InfoRow label="Push da central" value={pushLabel(getDeviceRegistration())} />;
+}
+
+export interface NotificationsSummary {
+  /** "Ligadas" | "Desligadas" | "Bloqueadas" | "Indisponíveis"; null enquanto lê. */
+  value: string | null;
+  /** "warning" só em "Bloqueadas". */
+  tone: "muted" | "warning";
+}
+
+const READING: NotificationsSummary = { value: null, tone: "muted" };
+
+function summaryOf(state: NotificationState, enabled: boolean): NotificationsSummary {
+  if (state.permission === "unavailable") return { value: "Indisponíveis", tone: "muted" };
+  if (!enabled) return { value: "Desligadas", tone: "muted" };
+  if (state.permission === "granted") return { value: "Ligadas", tone: "muted" };
+  return { value: "Bloqueadas", tone: "warning" };
+}
+
+/**
+ * Resumo da linha Notificações das Configurações. Relê ao abrir e ao voltar para a tela (o técnico mexeu na tela
+ * Notificações) e quando o app volta ao primeiro plano (a permissão pode ter mudado nas configurações do celular).
+ */
+export function useNotificationsSummary(): NotificationsSummary {
+  const [summary, setSummary] = useState<NotificationsSummary>(READING);
+  // Só a leitura mais recente vale (duas leituras seguidas podem terminar fora de ordem).
+  const latest = useRef(0);
+
+  const read = useCallback(() => {
+    latest.current += 1;
+    const round = latest.current;
+    Promise.all([notificationState(), visitRemindersEnabled()]).then(
+      ([state, enabled]) => {
+        if (round === latest.current) setSummary(summaryOf(state, enabled));
+      },
+      (error: unknown) => console.warn("Não foi possível ler o estado das notificações", error),
+    );
+  }, []);
+
+  useFocusEffect(read);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (next) => {
+      if (next === "active") read();
+    });
+    return () => sub.remove();
+  }, [read]);
+
+  return summary;
 }
 
 const BACKGROUND_LABEL: Record<BackgroundSyncStatus, string> = {

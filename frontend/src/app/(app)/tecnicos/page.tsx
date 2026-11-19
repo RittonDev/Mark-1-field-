@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useConfirm } from "@/components/Confirm";
 import { NoAccess } from "@/components/NoAccess";
 import { fold, replaceSearch, useSearchChange } from "@/components/operacao/hooks";
@@ -51,30 +51,45 @@ import {
 } from "@/components/ui";
 import { useNow } from "@/components/useNow";
 import { absoluteApiUrl, api, errorMessage } from "@/lib/api";
-import { LEVEL_TIER, LEVEL_TIER_ORDER } from "@/lib/constants";
+import {
+  DAY_PERIOD,
+  DAY_PERIOD_ORDER,
+  LEVEL_TIER,
+  LEVEL_TIER_ORDER,
+  SKILL_LEVEL,
+  slotsText,
+  TRANSPORT_MODE,
+  TRANSPORT_MODE_ORDER,
+  WEEKDAY,
+  WEEKDAY_ORDER,
+} from "@/lib/constants";
 import { downloadCsv } from "@/lib/download";
 import { formatDate, formatRelative, initials } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
-import { labelMap, maskCep, maskPhone, resizePhotoBlob, UFS, useOnboardingCatalog } from "@/lib/onboarding";
+import { maskCep, maskPhone, resizePhotoBlob, UFS } from "@/lib/onboarding";
 import { useCan } from "@/lib/permissions";
-import { useFavorites, useServiceTypes, useTeams } from "@/lib/queries";
+import { useFavorites, useServiceTypes, useTeams, useTechnicianTools } from "@/lib/queries";
 import { Tabs } from "@/components/motion";
 import { favoritesHref, FavoritesView } from "@/components/technicians/FavoritesView";
 import { TempPasswordPanel } from "@/components/technicians/GrantAccessDialog";
 import { InviteDialog } from "@/components/technicians/InviteDialog";
-import { LevelBadge, LevelShield } from "@/components/technicians/LevelBadge";
+import { LevelBadge, LevelMedal } from "@/components/technicians/LevelBadge";
 import { LevelSection, useTechnicianLevel } from "@/components/technicians/LevelSection";
 import { NearbyFinder } from "@/components/technicians/NearbyFinder";
 import { ProfileHistory } from "@/components/technicians/ProfileHistory";
 import { refreshTechnicianViews } from "@/components/technicians/refresh";
 import { TechnicianPayment } from "@/components/technicians/TechnicianPayment";
+import { TechnicianStatsSection } from "@/components/technicians/TechnicianStats";
+import { TechProfileView } from "@/components/technicians/TechProfileView";
 import type {
+  DayPeriod,
   ImportResult,
   LevelTier,
   Technician,
   TechnicianRegion,
   TemporaryPassword,
   UUID,
+  Weekday,
 } from "@/lib/types";
 import { whatsappUrl } from "@/lib/whatsapp";
 
@@ -132,6 +147,10 @@ const byName = new Intl.Collator("pt-BR", { sensitivity: "base" }).compare;
 function regionText(city: string | null | undefined, state: string | null | undefined): string {
   return [city, state].filter(Boolean).join("-");
 }
+
+const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** O filtro de ferramenta da URL (?ferramenta=, o link de Configurações › Técnicos): outro texto não vale. */
+const toolParam = (value: string | null): string => (value && UUID_TEXT.test(value) ? value : "");
 
 /** Chip de filtro rápido (Cadastro incompleto, Elo): o marcado fica com a borda da marca. */
 function chipClass(on: boolean) {
@@ -227,6 +246,18 @@ function TechniciansView() {
   const [teamId, setTeamId] = useState("");
   // Depois da migração, quem está "inativo" no Field Control continua na rede (só sem licença): mostra todos.
   const [active, setActive] = useState<Active>("");
+  // Perfil técnico (o técnico informa no app): a ferramenta fica na URL (?ferramenta=, o link "N técnicos" de
+  // Configurações › Técnicos); um ?ferramenta= novo na URL (Voltar, o menu) troca o filtro, como a busca.
+  const urlTool = toolParam(searchParams.get("ferramenta"));
+  const [syncedTool, setSyncedTool] = useState(urlTool);
+  const [toolId, setToolId] = useState(urlTool);
+  if (urlTool !== syncedTool) {
+    setSyncedTool(urlTool);
+    setToolId(urlTool);
+  }
+  const [day, setDay] = useState<Weekday | "">("");
+  const [period, setPeriod] = useState<DayPeriod | "">("");
+  const tools = useTechnicianTools(true);
   const [view, setView] = useState<View>(() => viewOf(searchParams.get("aba")));
   // A URL mudou com a tela aberta (o menu, Voltar, o "Favorito em ..." do cadastro): mostra a aba dela.
   const urlChange = useSearchChange();
@@ -244,7 +275,7 @@ function TechniciansView() {
   const teams = useTeams();
 
   const list = useQuery({
-    queryKey: ["technicians", "list", { q, teamId, active, uf, city }],
+    queryKey: ["technicians", "list", { q, teamId, active, uf, city, toolId, day, period }],
     queryFn: () =>
       api.get<Technician[]>("/technicians", {
         q: q || undefined,
@@ -252,6 +283,9 @@ function TechniciansView() {
         active: active || undefined,
         state: uf || undefined,
         city: city || undefined,
+        tool_id: toolId || undefined,
+        day: day || undefined,
+        period: period || undefined,
         limit: API_LIMIT,
       }),
     placeholderData: (previous) => previous,
@@ -305,11 +339,19 @@ function TechniciansView() {
     return all.sort((a, b) => Number(b.is_active) - Number(a.is_active));
   }, [list.data, gap, levelFilter, sort]);
   // Quantas linhas mostrar; volta ao começo quando a lista muda (outro filtro).
-  const listKey = JSON.stringify([q, teamId, active, uf, city, gap, levelFilter, sort]);
+  const listKey = JSON.stringify([q, teamId, active, uf, city, toolId, day, period, gap, levelFilter, sort]);
   const [shown, setShown] = useState({ key: listKey, count: PAGE });
   const shownCount = shown.key === listKey ? shown.count : PAGE;
-  const filtered = !!(q || teamId || active || uf || city || gap || levelFilter);
+  const filtered = !!(q || teamId || active || uf || city || toolId || day || period || gap || levelFilter);
   const toggleSort = (next: Sort) => setSort((current) => (current === next ? "name" : next));
+  // As ferramentas ativas do catálogo (o filtro e o nome no CSV). A escolhida que não está nele (ainda carregando,
+  // ou desativada depois do link) continua no filtro.
+  const toolOptions = tools.data ?? [];
+  const toolNames = useMemo(() => new Map((tools.data ?? []).map((tool) => [tool.id, tool.name])), [tools.data]);
+  const changeTool = (next: string) => {
+    setToolId(next);
+    replaceSearch({ ferramenta: next || null });
+  };
 
   const clearFilters = () => {
     setQInput("");
@@ -317,6 +359,9 @@ function TechniciansView() {
     setActive("");
     setUf("");
     setCity("");
+    changeTool("");
+    setDay("");
+    setPeriod("");
     setGap(null);
     setLevelFilter(null);
   };
@@ -336,22 +381,45 @@ function TechniciansView() {
         "os_abertas",
         "elo",
         "elo_em_risco",
+        "ferramental",
+        "disponibilidade",
+        "transporte",
+        "cnh",
+        "aptidoes",
+        "perfil_tecnico_atualizado_em",
       ],
-      ...rows.map((t) => [
-        t.name,
-        t.email,
-        t.phone,
-        t.team?.name,
-        t.home_city,
-        t.home_state,
-        regionText(t.base_city, t.base_state),
-        t.is_active ? "Ativo" : "Desativado",
-        t.last_login_at ? formatDate(t.last_login_at) : "",
-        t.last_visit_at ? formatDate(t.last_visit_at) : "",
-        t.open_tickets,
-        t.level ? LEVEL_TIER[t.level.tier].label : "",
-        t.level?.at_risk ? "sim" : "",
-      ]),
+      ...rows.map((t) => {
+        const transport = t.transport;
+        return [
+          t.name,
+          t.email,
+          t.phone,
+          t.team?.name,
+          t.home_city,
+          t.home_state,
+          regionText(t.base_city, t.base_state),
+          t.is_active ? "Ativo" : "Desativado",
+          t.last_login_at ? formatDate(t.last_login_at) : "",
+          t.last_visit_at ? formatDate(t.last_visit_at) : "",
+          t.open_tickets,
+          t.level ? LEVEL_TIER[t.level.tier].label : "",
+          t.level?.at_risk ? "sim" : "",
+          // Perfil técnico: vazio quando o técnico não informou a parte (ou a API ainda não manda).
+          (t.tool_ids ?? [])
+            .flatMap((id) => toolNames.get(id) ?? [])
+            .sort((a, b) => a.localeCompare(b, "pt-BR"))
+            .join("; "),
+          slotsText(t.availability ?? []),
+          transport
+            ? TRANSPORT_MODE_ORDER.filter((mode) => transport.modes.includes(mode))
+                .map((mode) => TRANSPORT_MODE[mode])
+                .join(", ")
+            : "",
+          transport ? (transport.driver_license ? "sim" : "não") : "",
+          (t.skills ?? []).map((skill) => `${skill.name} (${SKILL_LEVEL[skill.level] ?? skill.level})`).join("; "),
+          t.tech_profile_updated_at ? formatDate(t.tech_profile_updated_at) : "",
+        ];
+      }),
     ]);
   // Trocar de aba: a URL acompanha (mantém o ?os= do painel); UF e cidade são só dos favoritos.
   const changeView = (next: View) => {
@@ -368,7 +436,7 @@ function TechniciansView() {
     }
     try {
       const found = await queryClient.fetchQuery({
-        queryKey: ["technicians", "list", { q: tech.email, teamId: "", active: "", uf: "", city: "" }],
+        queryKey: ["technicians", "list", { q: tech.email, teamId: "", active: "", uf: "", city: "", toolId: "", day: "", period: "" }],
         queryFn: () => api.get<Technician[]>("/technicians", { q: tech.email }),
         staleTime: 60_000,
       });
@@ -570,7 +638,43 @@ function TechniciansView() {
                 <option value="">Todos</option>
               </Select>
             </div>
+            <div className="w-full sm:w-56">
+              <Select value={toolId} onChange={(e) => changeTool(e.target.value)} aria-label="Ferramenta">
+                <option value="">Todas as ferramentas</option>
+                {toolId && !toolNames.has(toolId) ? <option value={toolId}>Ferramenta escolhida</option> : null}
+                {toolOptions.map((tool) => (
+                  <option key={tool.id} value={tool.id}>
+                    {tool.technicians === null ? tool.name : `${tool.name} (${tool.technicians})`}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div className="w-full sm:w-40">
+              <Select value={day} onChange={(e) => setDay(e.target.value as Weekday | "")} aria-label="Disponível no dia">
+                <option value="">Qualquer dia</option>
+                {WEEKDAY_ORDER.map((d) => (
+                  <option key={d} value={d}>
+                    {WEEKDAY[d].label}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div className="w-full sm:w-44">
+              <Select
+                value={period}
+                onChange={(e) => setPeriod(e.target.value as DayPeriod | "")}
+                aria-label="Disponível no turno"
+              >
+                <option value="">Qualquer turno</option>
+                {DAY_PERIOD_ORDER.map((p) => (
+                  <option key={p} value={p}>
+                    {`${DAY_PERIOD[p].label} (${DAY_PERIOD[p].hours})`}
+                  </option>
+                ))}
+              </Select>
+            </div>
           </div>
+          {day || period ? <p className="-mt-1 mb-3 text-xs text-ink-muted">Só quem informou a disponibilidade no app.</p> : null}
 
           {GAPS.some((g) => gapCounts[g.key] > 0) || gap || levelCounts || levelFilter ? (
             <div className="mb-4 flex flex-col gap-2">
@@ -608,7 +712,7 @@ function TechniciansView() {
                         onClick={() => setLevelFilter(on ? null : tier)}
                         className={clsx(chipClass(on), "disabled:pointer-events-none disabled:opacity-50")}
                       >
-                        <LevelShield tier={tier} size={14} />
+                        <LevelMedal tier={tier} size={14} />
                         {LEVEL_TIER[tier].label}
                         <span className="font-semibold text-ink tabular-nums">{count}</span>
                       </button>
