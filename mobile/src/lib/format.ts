@@ -40,7 +40,7 @@ export function formatDate(value: string | Date | null | undefined): string {
 
 const WEEKDAYS = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
 
-/** "sex 21/11": dia da semana e data, sem a pontuação do Intl ("sex., 21/11"), no fuso do aparelho. */
+/** "sex 20/11": dia da semana e data, sem a pontuação do Intl ("sex., 20/11"), no fuso do aparelho. */
 export function formatWeekdayDate(value: string | Date): string {
   const date = typeof value === "string" ? new Date(value) : value;
   return `${WEEKDAYS[date.getDay()]} ${formatDate(date)}`;

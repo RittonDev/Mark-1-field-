@@ -142,7 +142,7 @@ export function reminderOutdated(identifier: string, start: string, now: number,
 const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
 /**
- * "Sex 21/11 às 08:00 · OS-000123", "Em 1h40 · OS-000123 às 08:00", "Em 10 min · OS-000123 às 08:00". O de 1 dia leva a
+ * "Sex 20/11 às 08:00 · OS-000123", "Em 1h40 · OS-000123 às 08:00", "Em 10 min · OS-000123 às 08:00". O de 1 dia leva a
  * data, e não "Amanhã": ele fica na bandeja e no dia da visita diria o dia errado.
  */
 function reminderTitle(kind: VisitReminderKind, code: string, start: string): string {
@@ -165,7 +165,7 @@ export function siteLine(ticket: Pick<TicketDetail, "location">): string | null 
 }
 
 /**
- * "Visita sex 21/11 às 08:00 · LJ001 · Loja Exemplo": com a data, para o texto que fica na bandeja (notificação do
+ * "Visita sex 20/11 às 08:00 · LJ001 · Loja Exemplo": com a data, para o texto que fica na bandeja (notificação do
  * sistema e aviso guardado). Com `now`, o dia relativo ("Visita amanhã às 08:00 · …"), para o toast na hora. Sem
  * agenda, só a loja (sem loja, o título da OS).
  */

@@ -5,6 +5,8 @@ export const BACKGROUND_SYNC_TASK = "maxxfield-sync";
 
 export type BackgroundSyncStatus = "active" | "restricted" | "unavailable";
 
+export function setSessionEndCleanup(_cleanup: () => Promise<void>): void {}
+
 export async function runBackgroundRound(): Promise<void> {}
 
 export async function maybeBackgroundSync(): Promise<void> {}

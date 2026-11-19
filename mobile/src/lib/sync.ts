@@ -863,7 +863,7 @@ interface Notice extends NewsItem {
   success?: boolean;
   /**
    * Texto do toast na hora, quando difere do `body` (que fica na bandeja e no aviso guardado): "Visita amanhã às…"
-   * no toast, "Visita sex 21/11 às…" na notificação.
+   * no toast, "Visita sex 20/11 às…" na notificação.
    */
   toast?: string;
 }
@@ -980,7 +980,7 @@ function announceRemoved(refs: TicketRef[], removed: number) {
 }
 
 /**
- * Novidade de uma OS. `line` (OS nova, auxiliar): "Visita sex 21/11 às 08:00 · LJ001 · Loja Exemplo", o texto da
+ * Novidade de uma OS. `line` (OS nova, auxiliar): "Visita sex 20/11 às 08:00 · LJ001 · Loja Exemplo", o texto da
  * bandeja; `toast`: o mesmo com o dia relativo ("Visita amanhã às 08:00 · …"), para o toast na hora. `place`
  * (agendada ou reagendada): a loja.
  */

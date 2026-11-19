@@ -1,16 +1,20 @@
 import { ACCESS_DISABLED_MESSAGE, canUseMobile, MOBILE_CHANNEL, MOBILE_DENIED_MESSAGE } from "./access";
 import { mustChangePassword, refreshMe } from "./account";
-import { ApiError, request, setAccessRevokedHandler } from "./api";
-import { registerBackgroundSync, unregisterBackgroundSync } from "./backgroundSync";
+import { ApiError, request } from "./api";
+import { registerBackgroundSync } from "./backgroundSync";
 import { notifyDataChanged } from "./changes";
 import { getKv, setKv } from "./db";
 import { deviceRegistration, registerDevice, unregisterDevice } from "./device";
-import { askNotificationPermission, clearNotificationsOnSignOut, ensureNotificationsReady, syncLocalAlerts } from "./notifications";
+import { askNotificationPermission, ensureNotificationsReady, syncLocalAlerts } from "./notifications";
 import { loadProfile } from "./profile";
-import { session, type SessionStatus } from "./session";
+import { session } from "./session";
+import { applyPendingEnd, endDeviceSession, forgetDisabledAccess, revokeAccess, sessionEndSettled } from "./sessionEnd";
 import { startSync, stopSync, wipeLocalData } from "./sync";
 import { hasConsent, resumeTracking, stopTracking } from "./tracking";
 import type { TokenResponse } from "./types";
+
+// O fim de sessão (Sair, sessão expirada, acesso desativado ou retirado: notificações, tarefa em segundo plano e, se
+// for o caso, os dados do aparelho) fica em sessionEnd.ts, que também roda com o app sem tela.
 
 const OWNER_KEY = "owner_user_id";
 /** No logout com sinal ruim, quanto esperar o fim da jornada e o descadastro do push antes de sair. */
@@ -19,63 +23,21 @@ const LOGOUT_DEVICE_WAIT_MS = 5_000;
 
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-/** Técnico cujo aparelho já foi registrado para o push nesta sessão. */
+/** Técnico cujo aparelho já foi registrado para o push nesta sessão (zera a cada login). */
 let pushRequestedFor: string | null = null;
 
 /** Estado do registro do push (vale também o reenvio que deu certo depois, na sincronização). */
 export const getDeviceRegistration = () => deviceRegistration();
 
 /**
- * Fim da sessão no aparelho: nenhuma notificação agendada nem na bandeja (loja e endereço aparecem na tela
- * bloqueada) e a sincronização em segundo plano desligada. Não lança erro.
+ * Abertura do app: lê a sessão salva, barra quem não é técnico (ex.: login antigo de analista) e conclui o fim de
+ * sessão que ficou gravado (servidor encerrou a sessão com o app sem tela, ou o app morreu no meio da limpeza): apaga
+ * os dados do técnico desativado, e o login mostra o motivo.
  */
-async function endDeviceSession() {
-  await clearNotificationsOnSignOut();
-  await unregisterBackgroundSync();
-}
-
-/**
- * O usuário não pode usar o app (não é técnico de campo, ou deixou de ser):
- * encerra a sessão, apaga o banco local e as fotos pendentes e volta ao login com o motivo.
- */
-async function revokeAccess(message: string) {
-  stopSync();
-  await stopTracking({ endOnServer: false });
-  await endDeviceSession();
-  await wipeLocalData();
-  await session.signOut(false, message);
-}
-
-// 401 do /auth/refresh com a mensagem de canal (papel mudou no servidor).
-setAccessRevokedHandler(revokeAccess);
-
-/** Técnico desativado: os dados de clientes não ficam no aparelho (LGPD) e o pendente não tem mais destino. */
-async function forgetDisabledAccess() {
-  stopSync();
-  await stopTracking({ endOnServer: false }).catch(() => undefined);
-  await endDeviceSession();
-  await wipeLocalData().catch((error: unknown) => console.warn("Falha ao apagar os dados do aparelho", error));
-}
-
-let previousStatus: SessionStatus = session.get().status;
-
-// Qualquer saída da conta (Sair, sessão expirada, acesso retirado): o próximo login registra o aparelho
-// de novo para o push, mesmo sem reabrir o app, e as notificações do técnico saem do aparelho. Se o
-// servidor encerrou a sessão porque a central desativou o técnico, apaga também os dados locais.
-session.subscribe(() => {
-  const { status, notice } = session.get();
-  const ended = previousStatus === "signedIn" && status === "signedOut";
-  previousStatus = status;
-  if (!ended) return;
-  pushRequestedFor = null;
-  void endDeviceSession();
-  if (notice === ACCESS_DISABLED_MESSAGE) void forgetDisabledAccess();
-});
-
-/** Abertura do app: lê a sessão salva e barra quem não é técnico (ex.: login antigo de analista). */
 export async function restoreSession() {
   const allowed = await session.load((user) => canUseMobile(user.role));
   if (!allowed) await revokeAccess(MOBILE_DENIED_MESSAGE);
+  await applyPendingEnd();
 }
 
 /** Depois do login (ou ao abrir o app já logado): sync, tempo real e registro do aparelho. */
@@ -129,6 +91,8 @@ export async function refreshPushRegistration() {
  * e o `detail` vira a mensagem da tela de login.
  */
 export async function login(email: string, password: string, apiUrl: string) {
+  // A limpeza da sessão anterior (dados do técnico desativado, tarefa em segundo plano) termina antes de outra começar.
+  await sessionEndSettled();
   await session.setApiUrl(apiUrl);
   let data: TokenResponse;
   try {
@@ -158,6 +122,8 @@ export async function login(email: string, password: string, apiUrl: string) {
   const owner = await getKv(OWNER_KEY);
   if (owner && owner !== data.user.id) await wipeLocalData();
   await setKv(OWNER_KEY, data.user.id);
+  // Sessão nova: o aparelho é registrado de novo para o push, mesmo sem reabrir o app.
+  pushRequestedFor = null;
   await session.signIn(data);
 }
 

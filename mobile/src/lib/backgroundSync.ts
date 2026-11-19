@@ -9,6 +9,10 @@
 //
 // A tarefa é definida no escopo do módulo, na carga do app (importado pelo index.ts, a entrada), para o
 // sistema achá-la quando acordar o app sem tela. Na web, backgroundSync.web.ts não faz nada.
+//
+// Sessão encerrada pelo servidor durante a rodada (ou antes, com o app morto no meio da limpeza): a rodada espera a
+// limpeza do fim de sessão (sessionEnd.ts, que se registra em setSessionEndCleanup; este módulo não o importa, para
+// não criar ciclo de imports).
 
 import { isRunningInExpoGo } from "expo";
 import * as BackgroundTask from "expo-background-task";
@@ -16,7 +20,7 @@ import * as TaskManager from "expo-task-manager";
 import { AppState } from "react-native";
 import { canUseMobile } from "./access";
 import { mustChangePassword } from "./account";
-import { ensureNotificationsReady, syncLocalAlerts } from "./notifications";
+import { clearNotificationsOnSignOut, ensureNotificationsReady, syncLocalAlerts } from "./notifications";
 import { offersChanged } from "./offers";
 import { session } from "./session";
 import { loadFieldRules, requestSync } from "./sync";
@@ -35,9 +39,22 @@ let lastRoundAt = 0;
 let round: Promise<void> | null = null;
 
 /**
+ * Limpeza do fim de sessão (sessionEnd.ts a registra). Sem ela, a rodada ao menos limpa a bandeja e os agendados e
+ * desliga a tarefa.
+ */
+let sessionEndCleanup: () => Promise<void> = async () => {
+  await clearNotificationsOnSignOut();
+  await unregisterBackgroundSync();
+};
+
+export function setSessionEndCleanup(cleanup: () => Promise<void>): void {
+  sessionEndCleanup = cleanup;
+}
+
+/**
  * Uma rodada com o app fora da tela: sync completo (envio, download, ofertas) e os alertas locais. A sessão é lida
  * do armazenamento se o app acordou sem tela. Não roda sem técnico, com senha provisória ou com o app na tela (aí
- * a sincronização normal cuida). Não lança erro.
+ * a sincronização normal cuida). Com a sessão encerrada, conclui a limpeza do fim de sessão. Não lança erro.
  */
 export function runBackgroundRound(): Promise<void> {
   round ??= backgroundRound().finally(() => {
@@ -50,16 +67,23 @@ async function backgroundRound() {
   try {
     if (session.get().status === "loading") await session.load((user) => canUseMobile(user.role));
     const { status, user } = session.get();
-    if (status !== "signedIn" || !user || mustChangePassword(user) || AppState.currentState === "active") return;
-    lastRoundAt = Date.now();
-    await ensureNotificationsReady();
-    await loadFieldRules();
-    // Sem o tempo real (que para fora da tela), um aviso de oferta pode ter se perdido: confere a lista.
-    offersChanged();
-    await requestSync();
-    await syncLocalAlerts();
+    if (status === "signedIn" && user && !mustChangePassword(user) && AppState.currentState !== "active") {
+      lastRoundAt = Date.now();
+      await ensureNotificationsReady();
+      await loadFieldRules();
+      // Sem o tempo real (que para fora da tela), um aviso de oferta pode ter se perdido: confere a lista.
+      offersChanged();
+      await requestSync();
+      await syncLocalAlerts();
+    }
   } catch (error) {
     console.warn("Falha na sincronização em segundo plano", error);
+  }
+  // Sessão encerrada pelo servidor durante a rodada (401 do /auth/refresh: expirada, senha redefinida, acesso
+  // desativado) ou antes, com o app morto no meio da limpeza: a mesma limpeza do fim de sessão (bandeja inteira, dados
+  // do técnico desativado, jornada e esta tarefa desligada) termina antes de a tarefa acabar.
+  if (session.get().status === "signedOut") {
+    await sessionEndCleanup().catch((error: unknown) => console.warn("Falha ao encerrar a sessão em segundo plano", error));
   }
 }
 
