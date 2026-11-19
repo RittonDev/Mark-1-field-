@@ -146,10 +146,11 @@ Equivale ao "Tipo de OS" do Field Control. Sem `customer_id`, o tipo vale para t
   - Sem `forms` (omitido ou `null`): entram os ligados ao tipo de OS e à categoria ([Formulários](#módulos-de-operação-2026-11)),
     como obrigatórios ou opcionais pelo `default_required` de cada modelo, sem autor no histórico e com o motivo.
     `forms_left_out` é ignorado.
-  - Com `forms` (uma lista, mesmo vazia): ela, na ordem, com quem abriu como autor. `forms_left_out` são os ligados ao tipo
-    ou à categoria que o analista desmarcou: vão para `created.data.forms_left_out` (só os ligados e fora da lista) e não
-    entram sozinhos depois. Os ligados que não vieram em nenhuma das duas listas (a tela não conhecia o vínculo) entram
-    depois da lista como automáticos (`auto_attached`), pelo `default_required`, sem autor e com o motivo.
+  - Com `forms` (uma lista, mesmo vazia): ela, na ordem, com quem abriu como autor (os da lista que são ligados ficam com
+    `auto_attached`: saem sozinhos se o tipo ou a categoria mudarem antes da visita). `forms_left_out` são os ligados ao
+    tipo ou à categoria que o analista desmarcou: vão para `created.data.forms_left_out` (só os ligados e fora da lista)
+    e não entram sozinhos depois. Os ligados que não vieram em nenhuma das duas listas (a tela não conhecia o vínculo)
+    entram depois da lista como automáticos (`auto_attached`), pelo `default_required`, sem autor e com o motivo.
   - `forms` sem `forms_left_out` (ou com `null`, a Nova OS anterior a ele): todos os ligados fora da lista ficam de fora e
     vão para `created.data.forms_left_out`.
   - O `PATCH /tickets/{id}` não tem os dois campos.
