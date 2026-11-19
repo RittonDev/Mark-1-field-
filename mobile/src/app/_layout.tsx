@@ -12,6 +12,7 @@ import { SuccessHost } from "../components/SuccessHost";
 import { ToastHost } from "../components/ToastHost";
 import { mustChangePassword } from "../lib/account";
 import { restoreSession, startSession } from "../lib/auth";
+import { loadHideValues } from "../lib/hideValues";
 import { waitPrivacySeen } from "../lib/privacySeen";
 import { session, useSession } from "../lib/session";
 import { stopSync } from "../lib/sync";
@@ -32,8 +33,14 @@ export default function RootLayout() {
   // Técnico importado nasce com senha provisória: troca antes de entrar no app.
   const mustChange = signedIn && mustChangePassword(user);
 
+  // Preferências do aparelho (tema e "ocultar valores" do Faturamento): a splash espera as duas, para nada piscar na
+  // abertura. Nenhuma das duas lança erro (sem leitura, vale o padrão).
+  const [prefsLoaded, setPrefsLoaded] = useState(false);
   useEffect(() => {
-    Promise.all([loadThemePreference(), restoreSession()]).catch((error: unknown) => {
+    void Promise.all([loadThemePreference(), loadHideValues()])
+      .catch(() => undefined)
+      .then(() => setPrefsLoaded(true));
+    restoreSession().catch((error: unknown) => {
       console.warn("Falha ao ler a sessão", error);
       return session.signOut();
     });
@@ -58,9 +65,9 @@ export default function RootLayout() {
     };
   }, [privacyChecked, status, userId]);
 
-  // A splash só sai quando a sessão foi lida, a fonte resolvida e a versão vista do aviso lida (ou o teto passou): nada
-  // de texto sem estilo piscando nem o cartão de Hoje empurrando a tela depois.
-  const ready = status !== "loading" && fontsSettled && privacyChecked;
+  // A splash só sai quando a sessão foi lida, a fonte resolvida, as preferências do aparelho lidas e a versão vista do
+  // aviso lida (ou o teto passou): nada de texto sem estilo piscando nem o cartão de Hoje empurrando a tela depois.
+  const ready = status !== "loading" && fontsSettled && prefsLoaded && privacyChecked;
   useEffect(() => {
     if (ready) void SplashScreen.hideAsync();
   }, [ready]);
@@ -97,17 +104,36 @@ export default function RootLayout() {
           <Stack.Protected guard={signedIn && !mustChange}>
             <Stack.Screen name="index" options={{ headerShown: false }} />
             <Stack.Screen name="ticket/[id]" options={{ title: "OS" }} />
-            <Stack.Screen name="oferta/[id]" options={{ title: "Oferta" }} />
-            <Stack.Screen name="conta" options={{ title: "Conta" }} />
-            <Stack.Screen name="meu-cadastro" options={{ title: "Meu cadastro" }} />
+            {/* A oferta desenha o próprio voltar (redondo, sobre o mapa). */}
+            <Stack.Screen name="oferta/[id]" options={{ title: "Oferta", headerShown: false }} />
+            {/* O arquivo e a rota continuam "conta"; a tela é a Sincronização (a identidade fica no Perfil). */}
+            <Stack.Screen name="conta" options={{ title: "Sincronização" }} />
+            <Stack.Screen name="historico" options={{ title: "Histórico de atendimentos" }} />
+            <Stack.Screen name="estatisticas" options={{ title: "Estatísticas" }} />
             <Stack.Screen name="elo" options={{ title: "Meu elo" }} />
+            <Stack.Screen name="configuracoes/index" options={{ title: "Configurações" }} />
+            <Stack.Screen name="configuracoes/foto" options={{ title: "Foto do perfil" }} />
+            <Stack.Screen name="configuracoes/dados-pessoais" options={{ title: "Dados pessoais" }} />
+            <Stack.Screen name="configuracoes/contato" options={{ title: "Contato" }} />
+            <Stack.Screen name="configuracoes/endereco" options={{ title: "Endereço" }} />
+            <Stack.Screen name="configuracoes/pix" options={{ title: "Chave PIX" }} />
+            <Stack.Screen name="configuracoes/notificacoes" options={{ title: "Notificações" }} />
+            <Stack.Screen name="configuracoes/disponibilidade" options={{ title: "Disponibilidade" }} />
+            <Stack.Screen name="configuracoes/transporte" options={{ title: "Transporte" }} />
+            <Stack.Screen name="configuracoes/aptidoes" options={{ title: "Aptidões" }} />
+            <Stack.Screen name="configuracoes/formacao" options={{ title: "Formação" }} />
+            <Stack.Screen name="configuracoes/ferramental" options={{ title: "Ferramental" }} />
+            {/* Links antigos do Meu cadastro: a tela só redireciona para Configurações. */}
+            <Stack.Screen name="meu-cadastro" options={{ headerShown: false }} />
+            {/* O título vira o mês por extenso na própria tela. */}
+            <Stack.Screen name="faturamento/[mes]" options={{ title: "Faturamento" }} />
             <Stack.Screen name="nota-fiscal" options={{ title: "Enviar nota fiscal" }} />
             <Stack.Screen name="termo-rastreamento" options={{ title: "Uso da localização", presentation: "modal" }} />
             <Stack.Screen name="privacidade" options={{ title: "Aviso de privacidade" }} />
             <Stack.Screen name="formulario/[ticketId]/[formId]" options={{ title: "Formulário" }} />
             <Stack.Screen name="assinatura/[ticketId]" options={{ title: "Assinatura" }} />
           </Stack.Protected>
-          {/* Senha provisória: é a única tela até trocar. Depois, o técnico troca quando quiser (Conta). */}
+          {/* Senha provisória: é a única tela até trocar. Depois, o técnico troca quando quiser (Configurações › Senha). */}
           <Stack.Protected guard={signedIn}>
             <Stack.Screen name="trocar-senha" options={{ headerShown: !mustChange, title: "Trocar senha" }} />
           </Stack.Protected>

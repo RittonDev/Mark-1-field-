@@ -312,6 +312,9 @@ function noticeFor(event: RealtimeEvent, userId: string): NoticeDraft | null {
  */
 const PROFILE_KEYS = ["technicians", "users", "technician-favorites", "technician-suggest", "assignable", "tracking"];
 
+/** Partes do perfil técnico: mudadas pelo técnico, só atualizam a base técnica (e as sugestões, se for a disponibilidade). */
+const TECH_PROFILE_FIELDS: readonly string[] = ["tools", "availability", "transport", "skills", "education"];
+
 // Telas que listam OS ou dependem delas, além da própria OS: só as abertas buscam de novo.
 const ALL_EXTRA = ["expenses", "payouts", "quotes", "repairs", "reports", "projects", "project", "customer", "location", "technicians"];
 const EXTRA_BY_FIELD: Record<string, string[]> = {
@@ -336,6 +339,14 @@ const EXTRA_BY_FIELD: Record<string, string[]> = {
  */
 export function technicianLevelKey(technicianId: UUID) {
   return ["technician-level", technicianId] as const;
+}
+
+/**
+ * Os atendimentos por mês do técnico na central (components/technicians/TechnicianStats). Também fora de
+ * ["technicians"]: relê junto com o elo do técnico do evento (os dois contam as mesmas OS).
+ */
+export function technicianStatsKey(technicianId: UUID) {
+  return ["technician-stats", technicianId] as const;
 }
 
 // Eventos de OS que não mexem em visita, conclusão, técnico, agenda nem horários: o elo de ninguém muda.
@@ -758,9 +769,18 @@ export function RealtimeProvider({
         // O que eu mesmo mudei (Técnicos, Usuários, Pagamentos) a própria tela já atualizou: buscar de novo a
         // base inteira de técnicos seria repetido.
         if (event.actor_id && event.actor_id === userId) return;
-        for (const key of PROFILE_KEYS) invalidate([key]);
-        const fields = event.data?.fields;
-        if (Array.isArray(fields) && fields.includes("pix")) invalidate(["payouts"]);
+        const raw: unknown = event.data?.fields;
+        const fields: string[] = Array.isArray(raw) ? raw.map(String) : [];
+        if (fields.length && fields.every((f) => TECH_PROFILE_FIELDS.includes(f))) {
+          // ["technicians"] cobre a lista, o cadastro aberto (["technicians", "one", id]) e o histórico dele.
+          invalidate(["technicians"]);
+          if (fields.includes("availability")) invalidate(["technician-suggest"]);
+        } else {
+          for (const key of PROFILE_KEYS) invalidate([key]);
+        }
+        // Quantos técnicos marcaram cada ferramenta (filtro de Técnicos e Configurações › Técnicos).
+        if (fields.includes("tools")) invalidate(["technician-tools"]);
+        if (fields.includes("pix")) invalidate(["payouts"]);
       } else if (type === "part_request.created") {
         invalidate(["tickets"]);
         invalidate(["quotes"]);
@@ -770,8 +790,11 @@ export function RealtimeProvider({
         if (!offersOnly(event)) {
           for (const key of ["tickets", "solicitacoes", "dashboard", "assignable", "portal", ...extraKeysFor(event)]) invalidate([key]);
           invalidate(["tracking", "live"]);
-          // O elo só do técnico do evento (só o cadastro aberto dele busca de novo).
-          for (const id of levelTechnicians(event)) invalidate(technicianLevelKey(id));
+          // O elo e os atendimentos por mês só do técnico do evento (só o cadastro aberto dele busca de novo).
+          for (const id of levelTechnicians(event)) {
+            invalidate(technicianLevelKey(id));
+            invalidate(technicianStatsKey(id));
+          }
         }
       } else {
         return;

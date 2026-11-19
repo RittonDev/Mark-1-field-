@@ -35,12 +35,6 @@
   --viz-1: #2447ff;
   --viz-2: #13895f;
   --viz-grid: #eceef1;
-  /* Elo dos técnicos: a cor do brasão de cada faixa (a mesma de LEVEL_TIER em lib/constants.ts), com 3:1 ou
-     mais contra a superfície e contra as marcas, que são desenhadas na cor da superfície. */
-  --tier-bronze: #a9622b;
-  --tier-silver: #6e7b8c;
-  --tier-gold: #a87a00;
-  --tier-diamond: #5b4bdb;
   /* Seleção dentro das páginas (filtros ativos, item escolhido). */
   --nav-active: var(--brand-soft);
   /* Moldura do app (menu lateral e borda da área de trabalho). 2026-11-13: mais 13% escura a pedido
@@ -86,10 +80,6 @@
   --viz-1: #5470ff;
   --viz-2: #199e70;
   --viz-grid: #23262c;
-  --tier-bronze: #d08a52;
-  --tier-silver: #aeb8c6;
-  --tier-gold: #e2b33c;
-  --tier-diamond: #9d8cff;
   --chrome: #08090b;
   --chrome-ink: #ececf0;
   --chrome-muted: #9ba1ac;
@@ -576,10 +566,6 @@ body:has([data-drawer]) .mf-toasts {
     --brand-strong: #1a36d6;
     --brand-soft: #eef1ff;
     --brand-ink: #1f3be0;
-    --tier-bronze: #a9622b;
-    --tier-silver: #6e7b8c;
-    --tier-gold: #a87a00;
-    --tier-diamond: #5b4bdb;
     --chrome: #ffffff;
     color-scheme: light;
   }

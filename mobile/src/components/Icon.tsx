@@ -42,9 +42,31 @@ export type IconName =
   | "close"
   | "note"
   | "users"
-  | "wallet";
+  | "wallet"
+  // Perfil, Configurações, Faturamento e oferta.
+  | "settings"
+  | "history"
+  | "chart"
+  | "medal"
+  | "sync"
+  | "logout"
+  | "car"
+  | "target"
+  | "graduation"
+  | "theme"
+  | "bell"
+  | "trash"
+  | "pencil"
+  | "search"
+  | "receipt"
+  | "wrench"
+  | "map"
+  | "timer"
+  | "pie"
+  | "message";
 
-function Shape({ name }: { name: IconName }) {
+/** `color` só serve às partes cheias (a metade pintada do "pie"); o traço vem do Svg. */
+function Shape({ name, color }: { name: IconName; color: string }) {
   switch (name) {
     case "mail":
       return (
@@ -223,6 +245,132 @@ function Shape({ name }: { name: IconName }) {
           <Path d="M21 11.5h-4a1.75 1.75 0 0 0 0 3.5h4" />
         </>
       );
+    case "settings": // ajustes: três controles deslizantes (não engrenagem)
+      return (
+        <>
+          <Path d="M4 7h9M17 7h3M4 12h3M11 12h9M4 17h10M18 17h2" />
+          <Circle cx={15} cy={7} r={2} />
+          <Circle cx={9} cy={12} r={2} />
+          <Circle cx={16} cy={17} r={2} />
+        </>
+      );
+    case "history": // relógio com a seta voltando
+      return (
+        <>
+          <Path d="M4.5 12a7.5 7.5 0 1 0 7.5-7.5" />
+          <Path d="M14.6 2.2 12 4.5l2.6 2.3" />
+          <Path d="M12 8.5V12l2.5 1.5" />
+        </>
+      );
+    case "chart": // três colunas na linha de base
+      return (
+        <>
+          <Rect x={4.75} y={12.5} width={3} height={6} rx={0.8} />
+          <Rect x={10.5} y={6.5} width={3} height={12} rx={0.8} />
+          <Rect x={16.25} y={9.5} width={3} height={9} rx={0.8} />
+          <Path d="M3.5 21h17" />
+        </>
+      );
+    case "medal": // contorno da medalha do elo: hexágono com uma divisa
+      return (
+        <>
+          <Path d="M12 3.5l7.4 4.25v8.5L12 20.5l-7.4-4.25v-8.5z" />
+          <Path d="M8.8 13.6 12 10.6l3.2 3" />
+        </>
+      );
+    case "sync": // dois arcos com as pontas em sentidos opostos
+      return (
+        <>
+          <Path d="M19.05 9.43A7.5 7.5 0 0 0 4.95 9.43" />
+          <Path d="M4.95 6.2v3.23h3.25" />
+          <Path d="M4.95 14.57a7.5 7.5 0 0 0 14.1 0" />
+          <Path d="M19.05 17.8v-3.23H15.8" />
+        </>
+      );
+    case "logout": // porta e seta para fora
+      return (
+        <>
+          <Path d="M9.5 20.5H6a1.5 1.5 0 0 1-1.5-1.5V5A1.5 1.5 0 0 1 6 3.5h3.5" />
+          <Path d="M15.5 16.5 20 12l-4.5-4.5M20 12H9.5" />
+        </>
+      );
+    case "car":
+      return (
+        <>
+          <Path d="M4 15.5v-3l1.9-4.5A2 2 0 0 1 7.8 6.5h8.4a2 2 0 0 1 1.9 1.5l1.9 4.5v3a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z" />
+          <Path d="M4.5 12h15" />
+          <Circle cx={7.5} cy={16.5} r={1.7} />
+          <Circle cx={16.5} cy={16.5} r={1.7} />
+        </>
+      );
+    case "target":
+      return (
+        <>
+          <Circle cx={12} cy={12} r={8.5} />
+          <Circle cx={12} cy={12} r={5} />
+          <Circle cx={12} cy={12} r={1.5} />
+        </>
+      );
+    case "graduation":
+      return (
+        <>
+          <Path d="M2.5 9.5 12 5l9.5 4.5L12 14z" />
+          <Path d="M6.5 11.6v4c0 1.4 2.5 2.9 5.5 2.9s5.5-1.5 5.5-2.9v-4" />
+          <Path d="M21.5 9.5v5" />
+        </>
+      );
+    case "theme": // círculo meio hachurado (claro/escuro)
+      return (
+        <>
+          <Circle cx={12} cy={12} r={8.5} />
+          <Path d="M12 3.5v17M12 7h4.5M12 10.5h6M12 14h6M12 17.5h4.5" />
+        </>
+      );
+    case "bell":
+      return (
+        <>
+          <Path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15z" />
+          <Path d="M10 20.5a2 2 0 0 0 4 0" />
+        </>
+      );
+    case "trash":
+      return <Path d="M4.5 7h15M9.5 7V5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v2M6.5 7l.9 12a1.5 1.5 0 0 0 1.5 1.4h6.2a1.5 1.5 0 0 0 1.5-1.4l.9-12M10 11v5.5M14 11v5.5" />;
+    case "pencil":
+      return (
+        <>
+          <Path d="M4.5 19.5l.8-3.6L15.6 5.6a1.8 1.8 0 0 1 2.6 0l.2.2a1.8 1.8 0 0 1 0 2.6L8.1 18.7z" />
+          <Path d="M13.8 7.4l2.8 2.8" />
+        </>
+      );
+    case "search":
+      return (
+        <>
+          <Circle cx={10.5} cy={10.5} r={6} />
+          <Path d="M15 15l5 5" />
+        </>
+      );
+    case "receipt": // aba Faturamento
+      return <Path d="M6 3.5h12v17l-2-1.4-2 1.4-2-1.4-2 1.4-2-1.4-2 1.4zM9 8h6M9 11.5h6M9 15h3.5" />;
+    case "wrench": // chave: cartão "Serviços" da oferta e Ferramental
+      return <Path d="M10.6 11.3L4.4 17.5a1.6 1.6 0 0 0 2.3 2.3l6.1-6.2a4.6 4.6 0 0 0 6.5-5.4l-2.6 2.6-2.3-.5-.5-2.3 2.6-2.6a4.6 4.6 0 0 0-5.4 6.5z" />;
+    case "map":
+      return <Path d="M3.5 6.2l5.5-2.2 6 2.2 5.5-2.2v13.8l-5.5 2.2-6-2.2-5.5 2.2zM9 4v13.8M15 6.2V20" />;
+    case "timer": // duração estimada (a ampulheta continua sendo o prazo de resposta)
+      return (
+        <>
+          <Circle cx={12} cy={13.5} r={7} />
+          <Path d="M12 10v3.5l2.2 1.4M9.5 3.5h5M12 3.5v3M18.2 6.8l1.3-1.3" />
+        </>
+      );
+    case "pie": // "Pago em parte"
+      return (
+        <>
+          <Circle cx={12} cy={12} r={8.5} />
+          <Path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill={color} stroke="none" />
+        </>
+      );
+    case "message": // link do WhatsApp na oferta
+      return <Path d="M5 5h14a1.5 1.5 0 0 1 1.5 1.5v9a1.5 1.5 0 0 1-1.5 1.5H10l-4.5 3.5V17H5a1.5 1.5 0 0 1-1.5-1.5v-9A1.5 1.5 0 0 1 5 5z" />;
   }
 }
 
@@ -239,7 +387,7 @@ export function Icon({ name, size = 20, color, strokeWidth = 1.8 }: { name: Icon
       strokeLinejoin="round"
       {...SVG_HIDDEN}
     >
-      <Shape name={name} />
+      <Shape name={name} color={color} />
     </Svg>
   );
 }

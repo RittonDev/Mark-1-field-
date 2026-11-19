@@ -23,7 +23,7 @@ import type {
   TechnicianLevelDetail,
   UUID,
 } from "@/lib/types";
-import { LevelBadge, LevelShield } from "./LevelBadge";
+import { LevelMedal } from "./LevelBadge";
 
 /** Motivo de desconsiderar uma ocorrência: até 300 caracteres (o mesmo limite da API). */
 const NOTE_MAX = 300;
@@ -292,10 +292,23 @@ export function LevelSection({
 
   return (
     <section className="flex flex-col gap-3 rounded-lg border border-line p-3">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <SectionTitle>Elo</SectionTitle>
-        <LevelBadge tier={detail.tier} atRisk={detail.at_risk !== null} size="md" />
-        <span className="text-xs text-ink-muted">desde {formatDate(detail.since)}</span>
+      {/* A patente em relevo e, ao lado, a faixa (o nome sempre escrito junto da medalha), desde quando e o risco. */}
+      <div className="flex items-center gap-3">
+        <LevelMedal tier={detail.tier} size={40} />
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <SectionTitle>Elo</SectionTitle>
+          <p className="flex flex-wrap items-center gap-x-1.5 text-xs text-ink-muted">
+            <span>
+              <span className="font-semibold text-ink">{tier.label}</span> · desde {formatDate(detail.since)}
+            </span>
+            {detail.at_risk ? (
+              <span className="inline-flex items-center gap-1">
+                <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-amber-500 dark:bg-amber-400" />
+                em risco
+              </span>
+            ) : null}
+          </p>
+        </div>
       </div>
 
       {detail.at_risk ? (
@@ -518,7 +531,7 @@ export function LevelSection({
           <ul className="flex flex-col gap-1.5">
             {detail.tiers.map((rule) => (
               <li key={rule.tier} className="flex items-start gap-2">
-                <LevelShield tier={rule.tier} size={18} />
+                <LevelMedal tier={rule.tier} size={20} />
                 <span className="min-w-0 text-ink-muted">
                   <span className="font-semibold text-ink">{LEVEL_TIER[rule.tier].label}</span> · {rule.summary}
                 </span>

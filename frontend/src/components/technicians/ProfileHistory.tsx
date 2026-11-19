@@ -19,7 +19,11 @@ const EMPTY: Partial<Record<UserChangeField, string>> = {
   team: "sem grupo",
   services: "nenhum",
   work_schedule: "sem jornada",
+  transport: "não informado",
 };
+
+/** Partes do perfil técnico em que a API grava o que entrou (`to`) e o que saiu (`from`), não o de → para. */
+const DELTA_FIELDS: ReadonlySet<UserChangeField> = new Set<UserChangeField>(["tools", "availability", "skills", "education"]);
 
 /** A senha, pelo `to` da API: redefinida em Técnicos, definida em Usuários ou trocada pelo técnico no app. */
 const PASSWORD_LINE: Record<string, string> = {
@@ -36,37 +40,45 @@ const pixHidden = (item: UserChangeItem) => item.from === PIX_HIDDEN || item.to 
 
 interface ChangeLine {
   label: string;
-  /** O de → para; sem ele, o rótulo já diz tudo ("Foto trocada"). */
+  /** O de → para (ou "incluiu …" / "tirou …"); sem ele, o rótulo já diz tudo ("Foto trocada"). */
   text?: string;
 }
 
 /**
  * Uma mudança como a central lê: "Cidade: Santos → Guarujá". Foto, senha e chave PIX têm frase própria; o
  * titular entra na chave cadastrada e sai junto com a chave removida. Sem Pagamentos, a chave vem sem valor
- * ("Chave PIX alterada") e sem titular.
+ * ("Chave PIX alterada") e sem titular. Ferramental, disponibilidade, aptidões e formação dizem o que entrou e o
+ * que saiu, uma linha cada: "Ferramental: incluiu Escada, Multímetro" e "Ferramental: tirou Furadeira".
  */
-function lineOf(item: UserChangeItem, all: UserChangeItem[]): ChangeLine | null {
+function linesOf(item: UserChangeItem, all: UserChangeItem[]): ChangeLine[] {
+  const label = USER_CHANGE_LABEL[item.field] ?? item.field;
+  if (DELTA_FIELDS.has(item.field)) {
+    const lines: ChangeLine[] = [];
+    if (item.to) lines.push({ label, text: `incluiu ${item.to}` });
+    if (item.from) lines.push({ label, text: `tirou ${item.from}` });
+    return lines;
+  }
   const empty = EMPTY[item.field] ?? "vazio";
   switch (item.field) {
     case "avatar":
-      return { label: item.to ? "Foto trocada" : "Foto removida" };
+      return [{ label: item.to ? "Foto trocada" : "Foto removida" }];
     case "password":
-      return { label: (item.to && PASSWORD_LINE[item.to]) || (item.to ? `Senha ${item.to}` : "Senha alterada") };
+      return [{ label: (item.to && PASSWORD_LINE[item.to]) || (item.to ? `Senha ${item.to}` : "Senha alterada") }];
     case "pix": {
-      if (!item.to) return { label: "Chave PIX removida" };
+      if (!item.to) return [{ label: "Chave PIX removida" }];
       if (!item.from) {
-        if (pixHidden(item)) return { label: "Chave PIX cadastrada" };
+        if (pixHidden(item)) return [{ label: "Chave PIX cadastrada" }];
         const holder = all.find((c) => c.field === "pix_holder" && !c.from)?.to;
-        return { label: "Chave PIX cadastrada", text: holder ? `${item.to} · titular ${holder}` : item.to };
+        return [{ label: "Chave PIX cadastrada", text: holder ? `${item.to} · titular ${holder}` : item.to }];
       }
-      if (pixHidden(item)) return { label: "Chave PIX alterada" };
+      if (pixHidden(item)) return [{ label: "Chave PIX alterada" }];
       break;
     }
     case "pix_holder":
-      if (all.some((c) => c.field === "pix" && (!c.to || !c.from || pixHidden(c)))) return null;
+      if (all.some((c) => c.field === "pix" && (!c.to || !c.from || pixHidden(c)))) return [];
       break;
   }
-  return { label: USER_CHANGE_LABEL[item.field] ?? item.field, text: `${item.from ?? empty} → ${item.to ?? empty}` };
+  return [{ label, text: `${item.from ?? empty} → ${item.to ?? empty}` }];
 }
 
 function whoOf(row: UserChange): string {
@@ -103,7 +115,7 @@ export function ProfileHistory({ technicianId }: { technicianId: UUID }) {
       ) : (
         <ol className="divide-y divide-line" aria-busy={changes.isPlaceholderData || undefined}>
           {rows.slice(0, shown).map((row) => {
-            const lines = row.changes.map((item) => lineOf(item, row.changes)).filter((line): line is ChangeLine => !!line);
+            const lines = row.changes.flatMap((item) => linesOf(item, row.changes));
             return (
               <li key={row.id} className="py-2 first:pt-0 last:pb-0">
                 <p className="text-xs text-ink-muted">
