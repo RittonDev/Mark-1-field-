@@ -237,7 +237,8 @@ function PayoutsView() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const confirm = useConfirm();
-  // Visualizar: o fechamento, o extrato e a exportação. Editar: pagar, desfazer e tirar valor.
+  // Visualizar: o fechamento, as notas fiscais, o extrato e a exportação. Editar: pagar, desfazer, tirar
+  // valor e conferir, desfazer a conferência ou recusar nota.
   const canView = useCan("commercial.payouts");
   const canEdit = useCan("commercial.payouts", "edit");
   // Os reembolsos de Custos extras entram no extrato só para quem tem acesso a Custos extras.
@@ -899,7 +900,11 @@ function PayoutsView() {
                               </div>
                             </div>
                             {groupInvoices.length ? (
-                              <InvoiceStrip invoices={groupInvoices} onOpen={(invoice) => openInvoice(invoice)} onMore={() => showInvoicesOf(group)} />
+                              <InvoiceStrip
+                                invoices={groupInvoices}
+                                onOpen={(invoice) => openInvoice(invoice)}
+                                onMore={() => showInvoicesOf(group)}
+                              />
                             ) : null}
                             <ul className="divide-y divide-line">
                               {group.lines.map((line) => {
