@@ -247,6 +247,7 @@ function PayoutsView() {
   const [view, setView] = useState<View>("to_pay");
   // ?mes=2026-11 (o "Valor dos técnicos" do relatório mensal): abre já no mês.
   const searchParams = useSearchParams();
+  const tab: Tab = searchParams.get("aba") === "notas-fiscais" ? "invoices" : "closing";
   const [month, setMonth] = useState(() => {
     const asked = searchParams.get("mes") ?? "";
     return months.some((m) => m.value === asked) ? asked : "";
@@ -259,6 +260,19 @@ function PayoutsView() {
   const pendingQuery = usePayouts("pending", month, technicianId, canView);
   const paidQuery = usePayouts("paid", month, technicianId, canView);
   const queries = [pendingQuery, paidQuery];
+  // Notas fiscais dos técnicos, com os mesmos filtros (o mês é a competência): a aba Notas fiscais e, no
+  // fechamento, a faixa de cada técnico, o aviso do Pagar, o extrato e o CSV.
+  const invoices = useTechnicianInvoices(month, technicianId, canView);
+  const review = useInvoiceReview();
+  const openInvoiceFile = useOpenInvoiceFile(month, technicianId);
+  // A nota aberta no diálogo (`rejecting`: aberta pelo "Recusar" da lista, já no motivo).
+  const [shownInvoice, setShownInvoice] = useState<{ invoice: TechnicianInvoice; rejecting: boolean } | null>(null);
+  const invoiceItems = useMemo(() => invoices.data?.items ?? [], [invoices.data]);
+  const invoicesOf = useMemo(() => invoicesByTechnician(reviewOrder(invoiceItems)), [invoiceItems]);
+  // O que vai no extrato e no aviso do Pagar só vale com a lista do filtro atual (não a do anterior);
+  // "sem nota" só se afirma com a lista inteira (sem o corte das 500 mais novas).
+  const invoicesFresh = Boolean(invoices.data) && !invoices.isPlaceholderData;
+  const invoicesComplete = invoicesFresh && (invoices.data?.total_count ?? 0) <= invoiceItems.length;
   // "Chave nova" (a chave PIX mudou há menos de 7 dias) muda com o tempo.
   const now = useNow(60_000);
   // Chave PIX de cada técnico, das duas consultas. Sem o mapa (API sem a chave), nada aparece.
@@ -326,11 +340,12 @@ function PayoutsView() {
     return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
   }, [lines, view]);
   const options = useMemo(() => {
-    // Técnicos ativos, os das linhas (inclusive inativos) e os vistos antes de escolher um.
+    // Técnicos ativos, os das linhas e das notas fiscais (inclusive inativos) e os vistos antes de escolher um.
     const map = new Map<UUID, string>();
     for (const person of people.data ?? []) map.set(person.id, person.name);
     for (const [id, name] of Object.entries(seen)) map.set(id, name);
     for (const line of all) map.set(line.technician.id, line.technician.name);
+    for (const invoice of invoiceItems) map.set(invoice.technician.id, invoice.technician.name);
     if (technician && !map.has(technician.id)) map.set(technician.id, technician.name);
     const repeated = new Map<string, number>();
     for (const name of map.values()) repeated.set(name, (repeated.get(name) ?? 0) + 1);
@@ -341,7 +356,7 @@ function PayoutsView() {
         return { id, name, label: (repeated.get(name) ?? 0) > 1 && email ? `${name} · ${email}` : name };
       })
       .sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
-  }, [all, technician, seen, people.data]);
+  }, [all, invoiceItems, technician, seen, people.data]);
 
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ["payouts"] });
@@ -384,6 +399,15 @@ function PayoutsView() {
     setView(next);
     setSelected(new Set());
   };
+  const changeTab = (next: Tab) => {
+    setParams({ aba: next === "invoices" ? "notas-fiscais" : null });
+    setSelected(new Set());
+  };
+  /** O "+N" da faixa de notas: a aba Notas fiscais só com o técnico. */
+  const showInvoicesOf = (group: Group) => {
+    setTechnician({ id: group.id, name: group.name });
+    changeTab("invoices");
+  };
   const toggle = (id: UUID) =>
     setSelected((s) => {
       const next = new Set(s);
@@ -416,7 +440,12 @@ function PayoutsView() {
   const period = month ? (months.find((m) => m.value === month)?.label ?? month) : "até hoje";
   const reimbursementOf = (group: Group) =>
     canExpenses ? (reimbursements.data?.by_technician.find((t) => t.technician?.id === group.id)?.to_pay ?? 0) : 0;
-  const textFor = (group: Group) => statement(group.name, group.lines, period, reimbursementOf(group), pixOf(group.id));
+  /** As notas fiscais do técnico no período (a competência é o mês escolhido). */
+  const invoicesOfGroup = (group: Group) => invoicesOf.get(group.id) ?? [];
+  const textFor = (group: Group) =>
+    statement(group.name, group.lines, period, reimbursementOf(group), pixOf(group.id), invoicesFresh ? invoicesOfGroup(group) : []);
+  /** No Pagar: a nota do técnico no período, ou a falta dela com um mês escolhido. Só informa, nunca trava. */
+  const invoiceNote = (group: Group) => (invoicesFresh ? payInvoiceNote(invoicesOfGroup(group), month, invoicesComplete) : null);
 
   // Reembolsos aprovados do técnico (Custos extras) ainda não pagos: o extrato soma no "Total a receber".
   const reimbursementIds = (group: Group) =>
@@ -443,12 +472,14 @@ function PayoutsView() {
   const confirmPay = async (group: Group, chosen: PayoutLine[], everything: boolean) => {
     const codes = chosen.map((l) => l.ticket.code);
     const reimbursement = reimbursementOf(group);
+    const note = invoiceNote(group);
     const ok = await confirm({
       title: chosen.length === 1 ? `Marcar a ${codes[0]} de ${group.name} como paga?` : `Marcar ${chosen.length} OS de ${group.name} como pagas?`,
       description: (
         <>
           Total <strong className="font-semibold text-ink">{formatMoney(total(chosen))}</strong> · {codes.slice(0, 5).join(", ")}
           {codes.length > 5 ? ` e mais ${codes.length - 5}` : ""}. O técnico passa a ver como pago no app.
+          {note ? ` ${note}` : ""}
           {reimbursement > 0
             ? ` Os reembolsos aprovados (${formatMoney(reimbursement)}) não entram aqui: continuam a reembolsar em Custos extras.`
             : ""}
@@ -536,9 +567,29 @@ function PayoutsView() {
         : { title: "Não foi possível copiar o extrato", description: "Use o Copiar extrato e cole na conversa.", tone: "error" },
     );
   };
-  const exportCsv = () =>
+  // O Exportar CSV do cabeçalho exporta a aba aberta: no fechamento, as linhas da visão; nas notas, todas
+  // as notas do filtro (de qualquer situação), na ordem da aba Todas.
+  const exportCsv = () => {
+    if (tab === "invoices") {
+      downloadCsv(`notas-fiscais-${month || "todos"}.csv`, invoiceCsvRows(reviewOrder(invoiceItems)));
+      return;
+    }
     downloadCsv(`pagamentos-${month || "todos"}-${VIEW_SLUG[view]}.csv`, [
-      ["tecnico", "os", "titulo", "cliente", "local", "cidade", "situacao_os", "concluida_em", "situacao", "pago_em", "valor", "observacao"],
+      [
+        "tecnico",
+        "os",
+        "titulo",
+        "cliente",
+        "local",
+        "cidade",
+        "situacao_os",
+        "concluida_em",
+        "situacao",
+        "pago_em",
+        "valor",
+        "observacao",
+        "nota_fiscal",
+      ],
       ...groups
         .flatMap((g) => g.lines)
         .map((l) => [
@@ -554,8 +605,10 @@ function PayoutsView() {
           l.paid_at ? formatDate(l.paid_at) : "",
           l.amount.toFixed(2).replace(".", ","),
           l.note ?? "",
+          l.invoice?.number ?? "",
         ]),
     ]);
+  };
 
   const loading = queries.some((q) => q.isLoading);
   const error = queries.find((q) => q.error)?.error ?? null;
