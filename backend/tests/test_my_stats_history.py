@@ -193,7 +193,9 @@ def _b64(text: str) -> str:
 # ------------------------------------------------------------------ estatísticas
 
 
-async def test_stats_lifetime_and_months(engine: AsyncEngine, world: World, brasilia: ZoneInfo) -> None:
+async def test_stats_lifetime_and_months(
+    engine: AsyncEngine, world: World, brasilia: ZoneInfo
+) -> None:
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as db:
         alfa, bravo = _tech("Alfa"), _tech("Bravo")
@@ -201,7 +203,11 @@ async def test_stats_lifetime_and_months(engine: AsyncEngine, world: World, bras
         await db.flush()
         sched = _utc(2026, 11, 18, 12)
         on_time = _resolved(
-            world, alfa, _utc(2026, 11, 18, 14), scheduled=sched, arrived=sched + timedelta(minutes=10)
+            world,
+            alfa,
+            _utc(2026, 11, 18, 14),
+            scheduled=sched,
+            arrived=sched + timedelta(minutes=10),
         )
         late_sched = _utc(2026, 9, 15, 12)
         late = _resolved(
@@ -323,7 +329,11 @@ async def test_stats_events_by_month(engine: AsyncEngine, world: World, brasilia
         # Chegou em 30/04 às 17:00 em Brasília (2 h depois do combinado) e concluiu em 02/05.
         late_sched = _utc(2026, 4, 30, 18)
         late = _resolved(
-            world, alfa, _utc(2026, 5, 2), scheduled=late_sched, arrived=late_sched + timedelta(hours=2)
+            world,
+            alfa,
+            _utc(2026, 5, 2),
+            scheduled=late_sched,
+            arrived=late_sched + timedelta(hours=2),
         )
         # Atraso de junho que a central desconsiderou.
         waived_sched = _utc(2026, 6, 15, 12)
@@ -443,7 +453,8 @@ async def test_stats_read_only(engine: AsyncEngine, client: AsyncClient, world: 
         ticket = _done(world, alfa, now=now, days_ago=3)
         db.add(ticket)
         await db.flush()
-        db.add(_status_event(ticket, alfa, to="resolved", frm="in_progress", at=now - timedelta(3)))
+        resolved = now - timedelta(days=3)
+        db.add(_status_event(ticket, alfa, to="resolved", frm="in_progress", at=resolved))
         await db.commit()
 
     async def tally() -> tuple[int | None, int | None, int | None]:

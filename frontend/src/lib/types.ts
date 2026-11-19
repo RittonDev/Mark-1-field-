@@ -527,7 +527,7 @@ export interface TicketDetail extends TicketListItem {
    * oferta aceita; o técnico recebe null; servidor antigo não manda.
    */
   accepted_offer?: AcceptedOffer | null;
-  recurrence?:{ count_30d: number; previous: { id: UUID; code: string; title: string; status: TicketStatus; created_at: ISODate }[] } | null;
+  recurrence?: { count_30d: number; previous: { id: UUID; code: string; title: string; status: TicketStatus; created_at: ISODate }[] } | null;
   /** Dados de origem da OS migrada do Field Control (valores, itens, solicitação, arquivos). */
   legacy?: LegacyOrder | null;
   allowed_transitions: TicketStatus[];

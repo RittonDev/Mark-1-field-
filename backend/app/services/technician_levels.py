@@ -1225,9 +1225,7 @@ async def my_level(db: AsyncSession, user: User, now: datetime | None = None) ->
 # ------------------------------------------------------------------ estatísticas (só leitura)
 
 
-async def stats(
-    db: AsyncSession, technician_id: uuid.UUID, now: datetime | None = None
-) -> MyStats:
+async def stats(db: AsyncSession, technician_id: uuid.UUID, now: datetime | None = None) -> MyStats:
     """As Estatísticas do técnico, sem gravar nada: o total desde sempre, os 12 meses corridos do
     elo e 12 meses de calendário. Reaproveita collect() (as consultas do elo, só do técnico; sem
     refresh_one: nem trava nem upsert) e soma uma consulta agrupada por mês.
