@@ -366,7 +366,7 @@ export function LevelSection({
                   return (
                     <Fragment key={key}>
                       <tr className={clsx(o.waiver ? "bg-surface-2/50 text-ink-muted" : "text-ink")}>
-                        <td className={clsx("px-2 py-1.5 align-top whitespace-nowrap", !o.waiver && "font-medium")}>
+                        <td className={clsx("px-2 py-1.5 align-top", !o.waiver && "font-medium")}>
                           {LEVEL_OCCURRENCE[o.kind]}
                         </td>
                         <td className="px-2 py-1.5 align-top whitespace-nowrap">
@@ -383,7 +383,7 @@ export function LevelSection({
                           </Link>
                         </td>
                         <td className="px-2 py-1.5 align-top whitespace-nowrap tabular-nums">{formatDate(o.at)}</td>
-                        <td className="min-w-48 px-2 py-1.5 align-top">
+                        <td className="min-w-40 px-2 py-1.5 align-top">
                           <span className="break-words">{o.detail}</span>
                           {o.waiver ? (
                             <span className="mt-0.5 block break-words">
