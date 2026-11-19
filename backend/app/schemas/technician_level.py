@@ -1,6 +1,10 @@
 """Elo dos técnicos (services/technician_levels.py): o selo nas listas, o "Meu elo" do app e o
 detalhe da central. Os textos (critérios, risco, ocorrências, regras) chegam prontos do servidor:
-a web e o app mostram como estão, sem repetir números."""
+a web e o app mostram como estão, sem repetir números.
+
+Também as Estatísticas do técnico (GET /me/stats no app e GET /technicians/{id}/stats na ficha da
+central): o total desde sempre, os 12 meses corridos do elo e 12 meses de calendário. Só
+contagens, sem OS."""
 
 import datetime as dt
 import uuid
@@ -174,6 +178,50 @@ class TechnicianLevelDetail(MyLevel):
     # Todas, inclusive as desconsideradas, as mais recentes primeiro, até 200 (o total em
     # occurrences_total).
     occurrences: list[CentralLevelOccurrence]  # type: ignore[assignment]
+
+
+class StatsMonth(BaseModel):
+    """Um mês de calendário das Estatísticas, no fuso da operação. Atendimentos, medidos e
+    chegadas pelo mês da conclusão; chegada fora do horário pelo da chegada; retorno pelo da
+    reabertura; visita perdida pelo da visita. Sem as ocorrências desconsideradas pela central."""
+
+    month: str  # "2026-11"
+    current: bool  # o mês de hoje, ainda em andamento (só o último)
+    services: int
+    as_assignee: int
+    as_helper: int
+    legacy: int  # atendimentos do sistema antigo (Field Control)
+    legacy_only: bool  # services > 0 e todos do sistema antigo: o mês não mede a qualidade
+    measured: int
+    arrivals: int
+    late: int
+    reworks: int
+    lost: int
+
+
+class StatsLifetime(BaseModel):
+    """Desde sempre: o atendimento do elo sem a janela de 12 meses."""
+
+    services: int
+    as_assignee: int
+    as_helper: int
+    legacy: int
+    first_month: str | None  # "2019-03": o mês da conclusão mais antiga; null sem atendimento
+
+
+class MyStats(BaseModel):
+    """GET /me/stats: só leitura."""
+
+    computed_at: dt.datetime
+    lifetime: StatsLifetime
+    metrics: LevelMetrics  # os 12 meses corridos do elo (a mesma conta de Meu elo)
+    months: list[StatsMonth]  # 12, do mais antigo ao atual
+
+
+class TechnicianStats(MyStats):
+    """GET /technicians/{id}/stats: o mesmo, na ficha da central."""
+
+    technician: Ref
 
 
 class LevelWaiverCreate(BaseModel):

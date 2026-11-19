@@ -33,6 +33,13 @@ continuam com todas.
 O elo é só o selo: não muda a pontuação nem a ordem das sugestões. Este módulo não importa
 technicians, suggestions nem tickets no topo (eles importam este); a fila vem de tickets com import
 dentro da função.
+
+Estatísticas do técnico (stats; GET /me/stats e a ficha da central), só leitura: o atendimento sem
+a janela (attended_clause: responsável ou junto hoje, schedule.works_on) dá o total desde sempre e
+os 12 meses de calendário no fuso da operação; os 12 meses corridos do elo vêm de collect(), sem
+gravar a conta. O Histórico de atendimentos (services/my_history.py) usa o mesmo predicado: a
+lista e o total batem. A busca "técnico que atuou" da central continua com
+tickets.acted_by_clause (inclui quem foi trocado antes de ir).
 """
 
 from __future__ import annotations
@@ -80,12 +87,15 @@ from app.schemas.technician_level import (
     LevelWaiverCreate,
     LevelWaiverOut,
     MyLevel,
+    MyStats,
+    StatsLifetime,
+    StatsMonth,
     TechnicianLevelDetail,
 )
 from app.schemas.ticket import format_ticket_code
 from app.services import field as field_rules
 from app.services.errors import AccessDenied, NotFound, WorkflowError
-from app.services.schedule import HIDDEN_TITLE
+from app.services.schedule import HIDDEN_TITLE, works_on
 
 log = logging.getLogger(__name__)
 
@@ -98,6 +108,8 @@ STALE_AFTER = timedelta(hours=6)
 APP_OCCURRENCES = 30
 CENTRAL_OCCURRENCES = 200
 UPSERT_CHUNK = 500
+# Meses de calendário das Estatísticas (do mais antigo ao atual).
+STATS_MONTHS = 12
 # Trecho da nota da reabertura no detalhe da central.
 REWORK_NOTE_MAX = 200
 # Trava do Postgres (até o fim da transação) do cálculo de todos antes da lista e das sugestões.
@@ -530,6 +542,40 @@ def _as_uuid(value: Any) -> uuid.UUID | None:
         return uuid.UUID(str(value)) if value else None
     except ValueError:
         return None
+
+
+def attended_clause(user_id: uuid.UUID) -> ColumnElement[bool]:
+    """Atendimento do técnico, sem a janela do elo: OS resolvida ou fechada, com conclusão e com
+    visita (chegada registrada ou OS migrada do Field Control), em que ele é hoje o responsável ou
+    outro técnico da visita (schedule.works_on, a mesma regra de quem vê a OS no app e os dois
+    primeiros ramos de tickets.acted_by_clause). O total da vida toda (Perfil e Estatísticas) e o
+    Histórico de atendimentos usam este predicado: a lista e o número sempre batem. O `done` de
+    collect() é este com a janela."""
+    return and_(
+        Ticket.status.in_(_CONCLUDED),
+        Ticket.resolved_at.is_not(None),
+        or_(Ticket.arrived_at.is_not(None), Ticket.legacy.is_not(None)),
+        works_on(user_id),
+    )
+
+
+def month_key(column: Any) -> ColumnElement[str]:
+    """ "AAAA-MM" no fuso da operação (às 23h30 do último dia do mês, em UTC, já é o mês
+    seguinte). Use o mesmo objeto no SELECT e no GROUP BY: os parâmetros saem iguais."""
+    return func.to_char(func.timezone(settings.TIMEZONE, column), "YYYY-MM")
+
+
+def local_month(at: datetime) -> str:
+    """O "AAAA-MM" de um instante no fuso da operação (o mesmo de month_key)."""
+    return at.astimezone(_tz()).strftime("%Y-%m")
+
+
+def last_months(now: datetime, count: int = STATS_MONTHS) -> list[str]:
+    """Os `count` meses de calendário até o de `now` (no fuso da operação), do mais antigo ao
+    atual."""
+    local = now.astimezone(_tz())
+    last = local.year * 12 + local.month - 1
+    return [f"{i // 12:04d}-{i % 12 + 1:02d}" for i in range(last - count + 1, last + 1)]
 
 
 async def collect(db: AsyncSession, now: datetime, user_id: uuid.UUID | None = None) -> Collected:
@@ -1064,11 +1110,13 @@ def summary_of(levels: dict[uuid.UUID, LevelSummary], user_id: uuid.UUID) -> Lev
 # ------------------------------------------------------------------ respostas
 
 
-def _metrics(snapshot: Snapshot) -> LevelMetrics:
-    c = snapshot.counts
+def metrics_of(counts: Counts, start: datetime, end: datetime) -> LevelMetrics:
+    """Os números da janela com as taxas (null com menos de 5 casos): o `metrics` de Meu elo, do
+    detalhe da central e das Estatísticas."""
+    c = counts
     return LevelMetrics(
-        window_start=snapshot.window_start,
-        window_end=snapshot.computed_at,
+        window_start=start,
+        window_end=end,
         services=c.services,
         as_assignee=c.as_assignee,
         as_helper=c.as_helper,
@@ -1083,6 +1131,10 @@ def _metrics(snapshot: Snapshot) -> LevelMetrics:
         rework_pct=_pct_ceil(c.reworks, c.measured),
         lost_pct=_pct_ceil(c.lost, c.visits),
     )
+
+
+def _metrics(snapshot: Snapshot) -> LevelMetrics:
+    return metrics_of(snapshot.counts, snapshot.window_start, snapshot.computed_at)
 
 
 def _common(snapshot: Snapshot) -> dict[str, Any]:
@@ -1167,6 +1219,90 @@ async def my_level(db: AsyncSession, user: User, now: datetime | None = None) ->
         **_common(snapshot),
         occurrences=[_occurrence(o) for o in counting[:APP_OCCURRENCES]],
         occurrences_total=len(counting),
+    )
+
+
+# ------------------------------------------------------------------ estatísticas (só leitura)
+
+
+async def stats(
+    db: AsyncSession, technician_id: uuid.UUID, now: datetime | None = None
+) -> MyStats:
+    """As Estatísticas do técnico, sem gravar nada: o total desde sempre, os 12 meses corridos do
+    elo e 12 meses de calendário. Reaproveita collect() (as consultas do elo, só do técnico; sem
+    refresh_one: nem trava nem upsert) e soma uma consulta agrupada por mês.
+
+    Os atendimentos contam pelo mês da conclusão; a chegada fora do horário, pelo da chegada; o
+    retorno, pelo da reabertura; a visita perdida, pelo da visita (as ocorrências que collect()
+    traz cobrem os 12 meses de calendário, que cabem na janela do elo). As desconsideradas pela
+    central não contam. A soma das barras pode ser menor que `metrics`: o elo conta 365 dias
+    corridos, com a ponta do 13º mês."""
+    now = now or utcnow()
+    collected = await collect(db, now, technician_id)
+    counts = collected.counts.get(technician_id) or Counts()
+    month = month_key(Ticket.resolved_at)
+    mine = Ticket.assignee_id == technician_id
+    native = Ticket.legacy.is_(None)
+    timed = and_(native, Ticket.scheduled_start.is_not(None), Ticket.arrived_at.is_not(None))
+    rows = (
+        await db.execute(
+            select(
+                month.label("month"),
+                func.count().label("services"),
+                func.count().filter(mine).label("as_assignee"),
+                func.count().filter(Ticket.legacy.is_not(None)).label("legacy"),
+                func.count().filter(and_(mine, native)).label("measured"),
+                func.count().filter(and_(mine, timed)).label("arrivals"),
+            )
+            .select_from(Ticket)
+            .where(attended_clause(technician_id), Ticket.resolved_at <= now)
+            .group_by(month)
+        )
+    ).all()
+    by_month = {row.month: row for row in rows}
+    events: dict[str, Counter[LevelOccurrenceKind]] = defaultdict(Counter)
+    for occ in collected.occurrences.get(technician_id, []):
+        if occ.waiver is None:
+            events[local_month(occ.at)][occ.kind] += 1
+
+    services = sum(row.services for row in rows)
+    as_assignee = sum(row.as_assignee for row in rows)
+    lifetime = StatsLifetime(
+        services=services,
+        as_assignee=as_assignee,
+        as_helper=services - as_assignee,
+        legacy=sum(row.legacy for row in rows),
+        first_month=min(by_month, default=None),
+    )
+    keys = last_months(now)
+    months: list[StatsMonth] = []
+    for key in keys:
+        row = by_month.get(key)
+        happened = events.get(key) or Counter()
+        done = row.services if row is not None else 0
+        own = row.as_assignee if row is not None else 0
+        legacy = row.legacy if row is not None else 0
+        months.append(
+            StatsMonth(
+                month=key,
+                current=key == keys[-1],
+                services=done,
+                as_assignee=own,
+                as_helper=done - own,
+                legacy=legacy,
+                legacy_only=done > 0 and legacy == done,
+                measured=row.measured if row is not None else 0,
+                arrivals=row.arrivals if row is not None else 0,
+                late=happened[LevelOccurrenceKind.LATE],
+                reworks=happened[LevelOccurrenceKind.REWORK],
+                lost=happened[LevelOccurrenceKind.UNPRODUCTIVE],
+            )
+        )
+    return MyStats(
+        computed_at=now,
+        lifetime=lifetime,
+        metrics=metrics_of(counts, collected.window_start, collected.window_end),
+        months=months,
     )
 
 
