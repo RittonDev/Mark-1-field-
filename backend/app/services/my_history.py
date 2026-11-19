@@ -27,7 +27,7 @@ from app.services.technician_levels import attended_clause, month_key
 
 HISTORY_PAGE = 30
 HISTORY_PAGE_MAX = 50
-# O cursor que a rota aceita (o nosso tem uns 70 caracteres).
+# O cursor que a rota aceita (o nosso tem uns 90 caracteres).
 CURSOR_MAX = 200
 CURSOR_ERROR = "Página do histórico inválida. Puxe a lista para recarregar."
 
