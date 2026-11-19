@@ -358,6 +358,70 @@ function clearDraft() {
   }
 }
 
+/*
+ * Foto para o "Recarregar" do aviso de privacidade: o rascunho não leva a foto, que sumia no reload. Ela fica na
+ * sessionStorage desta aba (some ao fechá-la), com a chave pelo link, gravada logo antes do reload e apagada assim que a
+ * ficha abre. Sem sessionStorage (bloqueada ou cheia), a ficha volta sem a foto, e o painel avisa antes.
+ */
+const PHOTO_KEY = "mf-cadastro-tecnico-foto:";
+
+/** Dá para gravar este valor agora (sem bloqueio nem cota cheia)? Grava e apaga na hora. */
+function fits(area: "localStorage" | "sessionStorage", key: string, value: string): boolean {
+  try {
+    window[area].setItem(key, value);
+    window[area].removeItem(key);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * "Recarregar" do painel do aviso: grava o rascunho (menos com a ficha de outro link esperando resposta) e a foto, e
+ * recarrega. A senha e o aceite não voltam, de propósito: o técnico lê o texto novo e aceita de novo.
+ */
+function reloadKeeping(form: FormState, step: number, token: string, saveForm: boolean) {
+  if (saveForm) saveDraft(form, step, token);
+  if (form.photo) {
+    try {
+      window.sessionStorage.setItem(PHOTO_KEY + token, form.photo);
+    } catch {
+      // Sem sessionStorage: a ficha volta sem a foto (o painel já avisou).
+    }
+  }
+  window.location.reload();
+}
+
+/** A linha do painel: o que o técnico informa de novo depois do recarregar (testa as gravações quando o painel aparece). */
+function reloadNote(form: FormState, token: string): string {
+  if (hasContent(form) && !fits("localStorage", `${DRAFT_KEY}:teste`, "1")) return "A ficha volta em branco.";
+  if (form.photo && !fits("sessionStorage", PHOTO_KEY + token, form.photo)) return "A senha e a foto você informa de novo.";
+  return "A senha você digita de novo.";
+}
+
+/** A ficha ao abrir, com a foto que este link guardou para o recarregar. Só lê: quem apaga é dropKeptPhotos. */
+function withKeptPhoto(form: FormState, token: string): FormState {
+  try {
+    const photo = window.sessionStorage.getItem(PHOTO_KEY + token);
+    return photo?.startsWith("data:image/") ? { ...form, photo } : form;
+  } catch {
+    return form;
+  }
+}
+
+/** Tira da aba as fotos guardadas para recarregar: a deste link, já lida, e sobras de outros links. */
+function dropKeptPhotos() {
+  try {
+    const storage = window.sessionStorage;
+    for (let i = storage.length - 1; i >= 0; i--) {
+      const key = storage.key(i);
+      if (key?.startsWith(PHOTO_KEY)) storage.removeItem(key);
+    }
+  } catch {
+    // Sem sessionStorage: não há o que tirar.
+  }
+}
+
 /**
  * O servidor tem um aviso de privacidade mais novo que o texto desta página (aberta antes de uma atualização): o aceite
  * gravaria a versão nova sobre o texto antigo. Versões AAAA-MM-DD, comparadas como texto. Igual, mais antiga ou sem
@@ -420,7 +484,8 @@ export default function TechnicianSignupPage() {
   // Ficha começada neste aparelho por outro link: espera a pessoa dizer se é a dela.
   const [foreign, setForeign] = useState(() => (draft && !draft.sameLink ? draft : null));
   const [step, setStep] = useState(own?.step ?? 0);
-  const [form, setForm] = useState<FormState>(own?.form ?? EMPTY);
+  // Com a foto que este link guardou para o "Recarregar" (o rascunho não leva a foto).
+  const [form, setForm] = useState<FormState>(() => withKeptPhoto(own?.form ?? EMPTY, token));
   const [problem, setProblem] = useState<Problem | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [protocol, setProtocol] = useState<string | null>(null);
@@ -456,6 +521,12 @@ export default function TechnicianSignupPage() {
     const id = window.setTimeout(() => saveDraft(form, step, token), 600);
     return () => window.clearTimeout(id);
   }, [form, step, protocol, pendingForeign, token]);
+
+  // A foto guardada para o "Recarregar" vale só para esta abertura: sai da aba logo depois de a ficha montar. Num efeito,
+  // e não na leitura: um render descartado (hidratação refeita) leria de novo e não a acharia mais.
+  useEffect(() => {
+    dropKeptPhotos();
+  }, []);
 
   const resumeForeign = () => {
     if (!foreign) return;
@@ -653,11 +724,8 @@ export default function TechnicianSignupPage() {
     goTo(0);
   };
 
-  // Recarrega com o rascunho em dia (ele não guarda a senha, a foto nem o aceite): a ficha volta na mesma etapa.
-  const reload = () => {
-    if (!pendingForeign) saveDraft(form, step, token);
-    window.location.reload();
-  };
+  // A ficha volta na mesma etapa, com a foto (sem a senha e o aceite).
+  const reload = () => reloadKeeping(form, step, token, !pendingForeign);
 
   const cat = catalog.data;
   // O texto do aviso desta página ficou para trás do servidor: só recarregando dá para ler o novo e enviar.
@@ -722,17 +790,7 @@ export default function TechnicianSignupPage() {
             }
           />
         ) : outdated ? (
-          <Panel
-            icon={<RefreshCw className="size-10 text-ink-muted" />}
-            title="O aviso de privacidade mudou"
-            text="Recarregue a página para ler o texto novo."
-            action={
-              // No envio, o painel toma o lugar da ficha: o foco vai para a única ação, e não se perde.
-              <Button variant="primary" onClick={reload} autoFocus>
-                Recarregar
-              </Button>
-            }
-          />
+          <OutdatedPanel form={form} token={token} onReload={reload} />
         ) : (
           <form
             ref={formRef}
@@ -1189,12 +1247,55 @@ export default function TechnicianSignupPage() {
   );
 }
 
-function Panel({ icon, title, text, action }: { icon: React.ReactNode; title: string; text: string; action?: React.ReactNode }) {
+/**
+ * O aviso desta página ficou para trás do servidor: só recarregando dá para ler o texto novo e enviar. A linha de baixo
+ * é decidida quando o painel aparece (a ficha some e não muda mais).
+ */
+function OutdatedPanel({ form, token, onReload }: { form: FormState; token: string; onReload: () => void }) {
+  const [note] = useState(() => reloadNote(form, token));
+  const textId = useId();
+  return (
+    <Panel
+      icon={<RefreshCw className="size-10 text-ink-muted" />}
+      title="O aviso de privacidade mudou"
+      text="Recarregue a página para ler o texto novo."
+      note={note}
+      textId={textId}
+      action={
+        // No envio, o painel toma o lugar da ficha: o foco vai para a única ação, que lê o texto junto, e não se perde.
+        <Button variant="primary" onClick={onReload} autoFocus aria-describedby={textId}>
+          Recarregar
+        </Button>
+      }
+    />
+  );
+}
+
+function Panel({
+  icon,
+  title,
+  text,
+  note,
+  textId,
+  action,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  text: string;
+  /** Uma linha curta abaixo do texto. */
+  note?: string;
+  /** id do texto e da linha (para a ação apontar para eles com aria-describedby). */
+  textId?: string;
+  action?: React.ReactNode;
+}) {
   return (
     <Card className="flex flex-col items-center gap-3 px-6 py-10 text-center">
       {icon}
       <h1 className="text-lg font-bold tracking-[-0.02em] text-ink">{title}</h1>
-      <p className="max-w-md text-sm text-ink-muted">{text}</p>
+      <div id={textId} className="max-w-md space-y-1 text-sm text-ink-muted">
+        <p>{text}</p>
+        {note ? <p>{note}</p> : null}
+      </div>
       {action ? <div className="mt-2">{action}</div> : null}
     </Card>
   );
