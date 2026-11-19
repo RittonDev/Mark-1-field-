@@ -130,7 +130,9 @@ funcionam (também no Expo Go), mas só depois que o app sincronizou a OS.
 
 **Fim de sessão na rodada em segundo plano.** Se a sessão termina durante a rodada (401 do `/auth/refresh`), ou já
 estava encerrada com limpeza pendente, a rodada conclui a limpeza do fim de sessão (`sessionEnd.ts`: notificações,
-jornada e, com o técnico desativado ou sem acesso ao app, os dados do aparelho) antes de terminar e desliga a tarefa.
+jornada e, com o técnico desativado ou sem acesso ao app, os dados do aparelho) antes de terminar e desliga a tarefa
+(se apagar os dados falhar, ela fica ligada e a rodada seguinte tenta de novo). O fim fica gravado no armazenamento
+seguro antes de os tokens saírem: se o sistema matar o app no meio, a rodada seguinte ou a abertura conclui.
 
 **Lembretes da visita.** Sempre locais, agendados no aparelho a partir das OS guardadas: 1 dia (24 h), 1h40 e
 10 min antes do `scheduled_start`, para o responsável e os auxiliares, só na visita ainda não iniciada
@@ -140,8 +142,9 @@ antecedência ou mais; o que já está agendado não é cancelado no último min
 Android sem alarme exato dispara com atraso), enquanto a visita não começa. A bandeja também é limpa: o de 1 dia sai
 na hora do de 1h40, o de 1h40 na do de 10 min e todos no início da visita. O servidor não agenda nada.
 
-## Stack sugerida para os apps
+## Stack do app
 
 React Native + Expo (TypeScript) reaproveita tipos e lógica do frontend Next.js (`src/lib/types.ts`,
 `constants.ts`, `workflow.ts`), com SQLite local (expo-sqlite), fila de operações persistida,
-`expo-location` para check-in e `expo-notifications` + FCM para push.
+`expo-location` para check-in e `expo-notifications` para os lembretes e avisos locais (o FCM entra quando o push for
+ligado).
