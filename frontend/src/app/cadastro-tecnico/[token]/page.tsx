@@ -727,7 +727,8 @@ export default function TechnicianSignupPage() {
             title="O aviso de privacidade mudou"
             text="Recarregue a página para ler o texto novo."
             action={
-              <Button variant="primary" onClick={reload}>
+              // No envio, o painel toma o lugar da ficha: o foco vai para a única ação, e não se perde.
+              <Button variant="primary" onClick={reload} autoFocus>
                 Recarregar
               </Button>
             }
