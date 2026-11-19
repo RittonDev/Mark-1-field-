@@ -188,6 +188,8 @@ Requisitos:
   que recebe pelos chamados; e-mail e chave PIX pedem a senha atual, e a central é avisada na hora.
 - **Notas fiscais (aba Ganhos)** (detalhes abaixo): o técnico envia a nota do mês (PDF, XML ou foto), marca as OS
   que ela cobre e acompanha a conferência da central; a nota é opcional e nunca trava o pagamento.
+- **Meu elo** (detalhes abaixo): o brasão do técnico (Bronze, Prata, Ouro ou Diamante) pelos atendimentos dos
+  últimos 12 meses, com o que falta para a próxima faixa e o que pesou; só o dele, sem ranking.
 
 ## Ofertas de OS com preço
 
@@ -460,6 +462,22 @@ Contrato em [docs/API.md](../docs/API.md), "Notas fiscais dos técnicos". Códig
   tentativas: a resposta perdida, mandada de novo, devolve a mesma nota (200) em vez de criar outra.
 - **Depois de enviar ou apagar**: Ganhos relê as notas e os valores, e cada OS coberta mostra "NF 1234" na linha.
   A recusa é final: o técnico apaga a recusada e envia outra. A conversa sobre a nota continua no grupo de WhatsApp.
+
+## Meu elo
+
+O elo do técnico (Bronze, Prata, Ouro ou Diamante) sai dos atendimentos dos últimos 12 meses: quantos (como
+responsável ou junto, também os do Field Control) e como (chegada no horário combinado, OS reaberta em até 30 dias,
+visita perdida por motivo do técnico). Regras, faixas e textos vêm prontos do servidor em `GET /me/level`
+([docs/API.md](../docs/API.md), "Elo dos técnicos"): o app não repete números.
+
+- **Onde aparece**: o chip com o brasão no topo do Hoje (some sem elo guardado; ponto âmbar em risco), a linha "Elo"
+  no cartão do técnico na Conta e a tela **Meu elo**: a faixa e desde quando, o aviso de risco, o que falta para a
+  próxima faixa (ou para continuar no Diamante), os números, o que pesou (tocar abre a OS se ela está no aparelho) e
+  "Como funciona". Dúvida sobre o elo é com a central, no grupo de WhatsApp.
+- **Dados**: a rodada do sync busca `GET /me/level` a cada 30 min (e ao puxar a tela para baixo) e guarda no kv do
+  aparelho com a hora; offline, a tela mostra o último guardado com a data. Só leitura, fora da fila de operações.
+- **Subiu de faixa**: aviso dentro do app ("Você chegou ao Ouro!"); a primeira carga não avisa e não há push.
+- **O que o técnico não vê**: outros técnicos, ranking, notas da central nem o que ela desconsiderou.
 
 ## Como a sincronização funciona
 

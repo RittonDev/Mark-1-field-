@@ -1406,6 +1406,119 @@ O nome não começa com "technician." (a web mandaria o evento para o mapa).
 **Aviso de privacidade.** A ficha da homologação passa a citar a chave PIX que o técnico cadastrar no app para receber
 pelos chamados: `PRIVACY_VERSION` = "2026-11-18" (o `GET /public/onboarding/catalog` devolve a versão nova).
 
+## Elo dos técnicos (2026-11-18)
+
+**Por quê.** O técnico ganha um elo (na interface, "Elo" com o brasão) pela quantidade e pela qualidade dos
+atendimentos: Bronze, Prata, Ouro e Diamante. É só reconhecimento: o elo não muda a pontuação nem a ordem das
+sugestões. Código: `services/technician_levels.py`, `api/routes/technician_levels.py`,
+`models/technician_level.py` e `schemas/technician_level.py`. Na API os valores ficam em inglês
+(`LevelTier` = `bronze` | `silver` | `gold` | `diamond`).
+
+**O que conta** (janela rolando de 365 dias até agora, "últimos 12 meses"):
+- Atendimento (`services`): OS distintas resolvidas ou fechadas, concluídas na janela, com visita (chegada
+  registrada ou OS migrada do Field Control), em que o técnico foi o responsável (`as_assignee`) ou outro técnico da
+  visita (`as_helper`, sem contar duas vezes quem também é o responsável). As OS do Field Control entram.
+- Atendimento medido (`measured`): os mesmos, só como responsável e só OS deste sistema (`legacy` nulo). A qualidade
+  é medida nele: nas OS migradas a agenda sem hora virou 08:00 e o Field Control não trouxe reaberturas nem os
+  motivos das improdutivas.
+- Chegada no horário combinado: medidos com agenda e chegada (`arrivals`). Atraso (`late`) é chegar mais de 30 min
+  depois do horário agendado (a regra do "Atrasada", `field.SCHEDULE_TOLERANCE`); `on_time` = `arrivals` - `late`.
+  OS sem horário agendado não entram (atraso de despacho é da central). Não é o prazo de chegada do SLA.
+- Retorno (`reworks`): reabertura (`status_changed` para `reopened`) de OS resolvida ou fechada na janela, até 30 dias
+  depois da conclusão reaberta (a última `status_changed` para `resolved` antes dela). Reabrir a cancelada não conta.
+- Visita perdida (`lost`): visita improdutiva na janela cujo motivo está **hoje** com responsabilidade `technician`
+  (vale a classificação atual do catálogo, como no relatório de violações). `visits` = `measured` + `lost`.
+- Atribuição dos eventos: o `data.technician_id` gravado no evento (daqui em diante); sem ele, o autor da conclusão
+  (retorno) ou do registro (visita perdida), se for técnico; senão, o responsável atual da OS.
+- Não contam: ofertas recusadas, cancelamentos, tempo na loja, formulários e assinatura (já travam a conclusão),
+  violação de SLA, despesas, favoritos, "nova OS na mesma loja" (reincidência) e dados do Field Control na qualidade.
+
+**Faixas** (`TIERS` no serviço, devolvido em `tiers`; as telas não repetem os números). Taxas só com 5 casos ou mais:
+abaixo disso, "Ainda sem dados suficientes" e o critério conta como cumprido. A comparação é em inteiros
+(`100*on_time >= meta*arrivals`, `100*reworks <= limite*measured`, `100*lost <= limite*visits`); a chegada no horário
+aparece arredondada para baixo e as outras taxas para cima, e o número mostrado nunca contradiz o "cumprido".
+
+| Faixa | Atendimentos | Medidos | Chegada no horário | Retorno | Visitas perdidas |
+|---|---|---|---|---|---|
+| Bronze | 0 | 0 | - | - | - |
+| Prata | 15 | 0 | 80% ou mais | até 10% | até 8% |
+| Ouro | 50 | 15 | 90% ou mais | até 5% | até 4% |
+| Diamante | 120 | 30 | 95% ou mais | até 3% | até 2% |
+
+Faixa calculada = a mais alta com todos os critérios cumpridos. **Carência** de 30 dias: sobe na hora; se a calculada
+ficar abaixo da faixa em vigor, a faixa fica e começa o risco (`at_risk_since`); com 30 dias seguidos abaixo, desce
+direto para a calculada (`tier_since` = agora); voltando a cumprir, o risco sai. No primeiro cálculo, vale a
+calculada. Todo técnico começa no Bronze; quem tem só histórico do Field Control chega no máximo à Prata até ter
+atendimentos medidos.
+
+**Desconsiderar.** A central (Técnicos em Editar) pode desconsiderar uma ocorrência do técnico, com motivo: o atraso
+vira chegada no horário; o retorno e a visita perdida deixam de contar. Fica registrado quem, quando e o motivo
+(tabela `technician_level_waivers`, uma por ocorrência). O técnico não vê as desconsiderações nem as notas.
+
+**Dados.** `technician_levels` (uma linha por técnico; sem linha, Bronze): `tier`, `computed_tier`, `tier_since`,
+`at_risk_since`, `metrics` (JSONB com `window_start`, `window_end`, `services`, `as_assignee`, `as_helper`,
+`measured`, `arrivals`, `late`, `reworks`, `lost`, `waived`) e `computed_at`. Caem junto com o usuário. Índice parcial
+`ix_ticket_events_reopened` (a consulta dos retornos usa o mesmo predicado escrito por extenso). Sem backfill.
+
+**Quando recalcula.** A rotina periódica (`app.main`, "Elos dos técnicos", a cada 10 min sob a trava) refaz todos
+quando a conta mais antiga tem 6 h ou mais, ou quando falta algum técnico (inclusive inativos). A primeira lista de
+Técnicos ou de sugestões calcula todos se a tabela está vazia. `GET /me/level`, `GET /technicians/{id}/level`,
+desconsiderar e voltar a contar recalculam o técnico na hora. Mudar a responsabilidade de um motivo de improdutiva
+(`PATCH /unproductive-reasons/{id}`) marca todos para a próxima rodada. A lista e as sugestões só leem a conta
+guardada (até 6 h de atraso).
+
+**Eventos.** A visita improdutiva (`unproductive_visit`) grava `data.technician_id` (o responsável da OS, também
+quando a central registra) e a reabertura de OS resolvida ou fechada (`status_changed` para `reopened`) grava
+`data.technician_id` do responsável no momento. Só no histórico: o tempo real não muda.
+
+**Rotas.**
+- `GET /me/level` (papel `technician`; gestão e cliente: 403) → `MyLevel {tier, since, at_risk: LevelRisk|null,
+  computed_at, metrics: LevelMetrics, criteria (os da faixa em vigor; vazio no Bronze), next: {tier, criteria}|null
+  (null no Diamante), tiers, rules, occurrences (as que contam, as mais recentes primeiro, até 30),
+  occurrences_total}`. Só o do próprio técnico: sem outros técnicos, ranking, notas da central ou desconsiderações.
+- `GET /technicians/{id}/level` (Técnicos, ver) → `TechnicianLevelDetail` = `MyLevel` + `technician: Ref`,
+  `computed_tier`, `waived`, `technician_reasons` (motivos de improdutiva ativos com responsabilidade `technician`;
+  0 = visitas perdidas não contam) e `occurrences` com as desconsideradas (até 200, cada uma com
+  `waiver: {id, note, created_by: Ref|null, created_at}|null`; no retorno, o detalhe leva " · Motivo: {nota}", até 200
+  caracteres). 404 "Técnico não encontrado" (também para quem não é técnico).
+- `POST /technicians/{id}/level/waivers` (Técnicos, editar) `{kind: "late"|"rework"|"unproductive", ref_id, note}` →
+  201 `TechnicianLevelDetail`. `ref_id`: a OS no atraso; o evento do histórico no retorno e na visita perdida. `note`
+  de 1 a 300 caracteres, sem os espaços das pontas (422 com `label` "Motivo"). Ocorrência que não é do técnico na
+  janela: 422 "Ocorrência não encontrada nos últimos 12 meses"; repetida: 409 "Esta ocorrência já foi
+  desconsiderada" (`uq_technician_level_waivers_occurrence`).
+- `DELETE /technicians/{id}/level/waivers/{waiver_id}` (Técnicos, editar) → 200 `TechnicianLevelDetail` (volta a
+  contar); 404 "Ocorrência desconsiderada não encontrada".
+- `POST /technicians/levels/refresh` (Técnicos, editar) → `{technicians, bronze, silver, gold, diamond, at_risk}`.
+- `TechnicianOut.level` (`GET /technicians` e as respostas de um técnico) e `TechnicianSuggestion.level`
+  (`GET /technicians/suggest`, `GET /tickets/{id}/technician-suggestions`): `LevelSummary {tier, since, at_risk}`,
+  sempre presente (sem conta ainda: `bronze`, `since` null). Nas sugestões, só o selo: a pontuação e a ordem não
+  mudam. `TicketOfferOut` não muda.
+
+**Formatos.**
+- `LevelCriterion {key: "services"|"measured"|"on_time"|"rework"|"lost", label, met, enough_data, value, base,
+  target, text, missing}`: `value` é a contagem ou os casos da taxa; `base`, a base da taxa (null nas contagens);
+  `target`, o mínimo ou a meta/limite em %. Textos: "38 de 50" / "Faltam 12 atendimentos" ("Falta 1 atendimento");
+  "10 de 15" / "Faltam 5 atendimentos medidos"; "92% (23 de 25) · meta 90% ou mais" / "Faltam {x} chegadas no
+  horário seguidas"; "3% (1 em 40) · limite 5%" / "Com mais {y} atendimentos sem retorno, volta ao limite"; "6% (3
+  em 50) · limite 4%" / "Com mais {y} atendimentos sem visita perdida, volta ao limite"; "Ainda sem dados suficientes
+  (3 de 5 chegadas)".
+- `LevelRisk {since, until, falls_to, failing, text}`: "Abaixo do critério desde 01/12: chegada no horário
+  combinado. Se não voltar a cumprir até 31/12, passa para Prata." (datas no fuso da operação).
+- `LevelMetrics {window_start, window_end, services, as_assignee, as_helper, measured, arrivals, on_time, late,
+  reworks, lost, visits, on_time_pct, rework_pct, lost_pct}` (taxas null com menos de 5 casos).
+- `LevelTierRule {tier, services, measured, on_time_pct, rework_pct, lost_pct, summary}` e `rules` ("Como
+  funciona"), prontos para a tela.
+- `LevelOccurrence {kind, ref_id, ticket: {id, code, title}, at, detail}`: "Chegou 52 min depois do horário
+  combinado (10:00 de 12/11)", "Reaberta 6 dias depois da conclusão", "Visita improdutiva: {motivo}".
+
+**Responsabilidade `technician`.** Valor novo de `Responsibility` (rótulo "Técnico" em `/meta`), para motivos de
+improdutiva e de violação. Nenhum motivo foi reclassificado: enquanto a gestão não marcar algum motivo de improdutiva
+como "Técnico", visitas perdidas não pesam (o cadastro na central avisa). No app, o técnico continua sem ver a
+responsabilidade ao escolher o motivo.
+
+**Privacidade (LGPD).** É dado de desempenho de um terceiro: só a gestão com Técnicos e o próprio técnico veem;
+cliente e portal nunca. A conta lê só 12 meses; as linhas caem junto com o usuário ou a OS.
+
 ## Acesso: perfis por tela e visibilidade de filas
 
 O papel (`users.role`) continua decidindo o canal (web ou app), a hierarquia de cadastro (quem cria e altera
