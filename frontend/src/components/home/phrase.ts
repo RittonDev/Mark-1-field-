@@ -16,9 +16,14 @@ export function normalizeText(s: string): string {
 
 const NAME = AGENT_NAME.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-// Só no começo da frase e só com pontuação depois do nome ("Mia, ...", "MIA: ...") ou saudação antes
-// ("oi Mia ...", "Olá, Mia! ...", "e aí Mia, ..."): "mia", "mia atrasadas", "Miami" e "técnico mia" ficam.
-const VOCATIVE = new RegExp(String.raw`^\s*(?:(?:oi|ol[aá]|ei|e\s+a[ií])[\s,!.]+${NAME}\b|${NAME}\s*[,:;!.]+)[\s,:;!.-]*`, "i");
+// Só no começo da frase e só com pontuação depois do nome ("Mia, ...", "Mia,16976", "MIA: ...") ou
+// saudação antes ("oi Mia ...", "Olá, Mia! ...", "e aí Mia, ..."): "mia", "mia atrasadas", "Miami" e
+// "técnico mia" ficam. O ponto só conta seguido de espaço ou no fim: "mia.com.br", "mia.silva@exemplo.com"
+// e "MIA.01" são o que se procura. Depois da saudação, o nome não pode seguir com letra, número ou ".x".
+const VOCATIVE = new RegExp(
+  String.raw`^\s*(?:(?:oi|ol[aá]|ei|e\s+a[ií])[\s,!.]+${NAME}(?![\p{L}\p{N}_]|\.[^\s,:;!.])|${NAME}(?:\s*[,:;!]|\.+(?=\s|$)))[\s,:;!.-]*`,
+  "iu",
+);
 
 /** A frase sem o nome da agente quando a pessoa fala com ela ("Mia, atrasadas" -> "atrasadas"). */
 export function stripAgentName(text: string): string {

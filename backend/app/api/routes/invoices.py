@@ -131,12 +131,21 @@ async def list_invoices(
     technician_id: uuid.UUID | None = None,
     status_: Annotated[InvoiceStatus | None, Query(alias="status")] = None,
     month: str | None = None,
+    # Até o maior INTEGER do Postgres (acima disso o banco recusaria o OFFSET).
+    offset: Annotated[int, Query(ge=0, le=2_147_483_647)] = 0,
 ) -> InvoiceList:
-    """As notas de todos os técnicos (não segue a fila: a nota é do técnico, não da OS), as mais
-    novas primeiro (até 500). `month` (AAAA-MM) é a competência. `summary` conta e soma por
-    situação só com os filtros de técnico e mês; `total_count` usa todos."""
+    """As notas de todos os técnicos (não segue a fila: a nota é do técnico, não da OS), até 500
+    por vez. `status=pending` vem na ordem da fila (as mais antigas primeiro); sem `status` e nas
+    outras situações, as mais novas primeiro. `offset` pula as primeiras (as próximas páginas).
+    `month` (AAAA-MM) é a competência. `summary` conta e soma por situação só com os filtros de
+    técnico e mês; `total_count` usa todos (o total do filtro, sem o offset)."""
     return await svc.list_invoices(
-        db, user, technician_id=technician_id, status=status_, month=svc.parse_month(month)
+        db,
+        user,
+        technician_id=technician_id,
+        status=status_,
+        month=svc.parse_month(month),
+        offset=offset,
     )
 
 

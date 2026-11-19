@@ -119,7 +119,7 @@ const plural = (n: number, one: string, many: string) => `${n.toLocaleString("pt
 /**
  * A resposta da Mia, sempre o trabalho à vista: o que virou filtro, o que foi procurado como texto e
  * quantas OS deu. "understood": entendeu algum filtro; "partial": entendeu filtros, mas o texto que
- * sobrou zerou a busca; "text": só procurou o texto.
+ * sobrou zerou a busca; "text": só procurou o texto (achando OS ou nenhuma).
  */
 export interface AgentAnswer {
   mode: "understood" | "partial" | "text";
@@ -144,13 +144,15 @@ export interface SearchController {
   activeId: string | undefined;
   optionId: (index: number) => string;
   listId: string;
-  /** O que está na tela ainda é da busca anterior (o texto mudou e a nova não voltou). */
+  /** O que está na tela não é a resposta do texto atual: digitando, buscando ou esperando a internet. */
   stale: boolean;
-  /** A Mia está procurando o texto atual (os brilhos piscam e a linha corre). */
+  /** Um pedido da Mia está em andamento (os brilhos piscam e a linha corre); sem internet, nada se mexe. */
   thinking: boolean;
-  /** O que a Mia entendeu da última busca que voltou (null sem busca, com erro ou sem nada a dizer). */
+  /** Sem internet: a busca do texto atual espera a conexão voltar. */
+  paused: boolean;
+  /** O que a Mia entendeu da última busca que voltou (null antes da 1ª resposta, sem texto que dê busca ou com erro). */
   reply: AgentAnswer | null;
-  fetching: boolean;
+  /** A busca falhou e não há outra tentativa em andamento: o alerta com "Tentar de novo". */
   failed: boolean;
   retry: () => void;
   /** Setas e Enter no campo; devolve true quando a tecla foi usada. */
@@ -196,10 +198,12 @@ export function useSearchController({
   const searching = isSearchable(q);
   const smart = useSmartSearch(q, searching);
   const data = searching ? smart.data : undefined;
-  const fetching = searching && smart.isFetching;
-  const stale = asked !== q || (searching && (smart.isFetching || smart.isPlaceholderData));
-  const failed = searching && smart.isError;
-  const thinking = isSearchable(asked) && stale && !failed;
+  // Sem internet o pedido fica parado (não sai), com a resposta anterior na tela: a Mia não "pensa".
+  const paused = isSearchable(asked) && searching && smart.isPaused;
+  const stale = asked !== q || (searching && (smart.isFetching || smart.isPlaceholderData || smart.isPaused));
+  // "Tentar de novo" em andamento (ou esperando a internet) não é erro: o alerta sai e volta se falhar de novo.
+  const failed = searching && smart.isError && !smart.isFetching && !smart.isPaused;
+  const thinking = isSearchable(asked) && stale && !failed && !paused;
 
   // O que a Mia diz da busca que voltou: os filtros que entendeu, ou só o texto que procurou.
   const reply = ((): AgentAnswer | null => {
@@ -208,9 +212,10 @@ export function useSearchController({
     if (data.chips.some((c) => c.kind !== "text")) {
       return { mode: data.total === 0 && text ? "partial" : "understood", chips: data.chips, text, total: data.total };
     }
-    // Sem filtro entendido: só vale dizer o que procurou quando achou OS (a busca antiga não manda chips).
-    if (data.total > 0) return { mode: "text", chips: data.chips, text: text ?? (data.query || asked), total: data.total };
-    return null;
+    // Sem filtro entendido: o texto que procurou (a busca antiga não manda chips) e quantas OS deu, mesmo
+    // nenhuma. Assim a caixa passa de "Procurando…" para "Procurei “mapa” · nenhuma OS" sem sumir, e a
+    // lista não pula quando a busca volta.
+    return { mode: "text", chips: data.chips, text: text ?? (data.query || asked), total: data.total };
   })();
 
   const setQuery = (value: string) => {
@@ -410,6 +415,14 @@ export function useSearchController({
     if (enterReady) runPending();
   }, [enterReady]);
 
+  // Sem internet o Enter não espera: senão a OS abriria sozinha, sabe-se lá quando, ao voltar a conexão.
+  const dropPending = useEffectEvent(() => {
+    if (pendingEnter) ranEnter.current = pendingEnter.seq;
+  });
+  useEffect(() => {
+    if (paused) dropPending();
+  }, [paused]);
+
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): boolean => {
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
@@ -422,10 +435,12 @@ export function useSearchController({
     if (e.key === "Enter") {
       e.preventDefault();
       const mods = modsOf(e);
-      // O que está na tela ainda é da busca anterior: espera a do texto digitado.
+      // O que está na tela ainda é da busca anterior: espera a do texto digitado (sem internet, não espera).
       if (asked && stale && isSearchable(asked)) {
-        enterSeq.current += 1;
-        setPendingEnter({ text: asked, mods, seq: enterSeq.current });
+        if (!paused) {
+          enterSeq.current += 1;
+          setPendingEnter({ text: asked, mods, seq: enterSeq.current });
+        }
       } else entries[current]?.run(mods);
       return true;
     }
@@ -446,8 +461,8 @@ export function useSearchController({
     listId,
     stale,
     thinking,
+    paused,
     reply,
-    fetching,
     failed,
     retry: () => void smart.refetch(),
     onKeyDown,
@@ -489,24 +504,31 @@ function TextChip({ label }: { label: string }) {
 
 const osCount = (total: number) => (total === 0 ? "nenhuma OS" : `${total.toLocaleString("pt-BR")} OS`);
 
+/** Sem internet: a busca do texto atual fica esperando a conexão. */
+const OFFLINE = `Sem internet: a ${AGENT_NAME} busca quando a conexão voltar.`;
+
 /**
  * A resposta da Mia, entre o campo e a lista, fora da área que rola: "Entendi:" com os filtros (e o
- * texto, tracejado) ou "Procurei" com o texto, e quantas OS deu. Enquanto ela procura, a resposta
- * anterior fica esmaecida; sem resposta anterior, "Procurando…".
+ * texto, tracejado) ou "Procurei" com o texto, e quantas OS deu (mesmo nenhuma, para a caixa não sumir
+ * quando a busca volta). Enquanto ela procura, a resposta anterior fica esmaecida; sem resposta
+ * anterior, "Procurando…". Sem internet, uma linha parada no lugar da resposta.
  */
 export function AgentReply({ ctl }: { ctl: SearchController }) {
-  const { reply, thinking } = ctl;
-  if (!reply && !thinking) return null;
+  const { thinking, stale, paused } = ctl;
+  const reply = paused ? null : ctl.reply;
+  if (!reply && !thinking && !paused) return null;
   return (
     <div className="px-2 pt-2">
       <div
         className={clsx(
           "mx-1 flex items-start gap-2 rounded-lg bg-brand-soft/50 px-2 py-1.5 text-xs leading-5 text-ink transition-opacity duration-150",
-          reply && thinking && "opacity-60",
+          reply && stale && "opacity-60",
         )}
       >
         <AgentMark size="xs" thinking={thinking} />
-        {reply ? (
+        {paused ? (
+          <p className="text-ink-muted">{OFFLINE}</p>
+        ) : reply ? (
           <div className="min-w-0 flex-1">
             <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
               <strong className="font-semibold">{reply.mode === "text" ? "Procurei" : "Entendi:"}</strong>
@@ -555,9 +577,15 @@ function spokenSummary(ctl: SearchController): string {
  */
 export function SearchResults({ ctl, onLeave }: { ctl: SearchController; onLeave?: () => void }) {
   const groups = groupEntries(ctl.entries);
-  // Com algum filtro entendido, a resposta da Mia já diz "nenhuma OS".
+  // Nada na lista: a dica do que a Mia entende. Com algum filtro entendido, a resposta dela já diz o que
+  // faltou; sem internet, ela ainda não buscou.
   const empty =
-    ctl.asked !== "" && !ctl.thinking && !ctl.failed && ctl.entries.length === 0 && !ctl.chips.some((c) => c.kind !== "text");
+    ctl.asked !== "" &&
+    !ctl.thinking &&
+    !ctl.paused &&
+    !ctl.failed &&
+    ctl.entries.length === 0 &&
+    !ctl.chips.some((c) => c.kind !== "text");
   return (
     <>
       {ctl.failed ? (
@@ -635,9 +663,9 @@ export function SearchResults({ ctl, onLeave }: { ctl: SearchController; onLeave
           </p>
         </div>
       ) : null}
-      {/* Uma fala por busca, só com o resultado do texto atual (digitando, fica quieta). */}
+      {/* Uma fala por busca, só com o resultado do texto atual (digitando, fica quieta); sem internet, avisa uma vez. */}
       <p className="sr-only" aria-live="polite" aria-atomic="true">
-        {ctl.asked && !ctl.stale ? spokenSummary(ctl) : ""}
+        {ctl.asked && !ctl.stale ? spokenSummary(ctl) : ctl.paused ? OFFLINE : ""}
       </p>
     </>
   );

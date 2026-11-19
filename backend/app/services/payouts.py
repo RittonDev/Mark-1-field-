@@ -116,13 +116,17 @@ def works_on(ticket: Ticket, technician_id: uuid.UUID) -> bool:
 
 
 async def _find(
-    db: AsyncSession, ticket_id: uuid.UUID, technician_id: uuid.UUID
+    db: AsyncSession, ticket_id: uuid.UUID, technician_id: uuid.UUID, *, lock: bool = False
 ) -> TicketPayout | None:
-    return await db.scalar(
-        select(TicketPayout).where(
-            TicketPayout.ticket_id == ticket_id, TicketPayout.technician_id == technician_id
-        )
+    """O valor do técnico na OS. Com `lock`, travado (FOR UPDATE) e lido de novo do banco: a OS
+    carregada já traz os valores (Ticket.payouts é selectin), e o objeto da sessão pode estar
+    desatualizado."""
+    stmt = select(TicketPayout).where(
+        TicketPayout.ticket_id == ticket_id, TicketPayout.technician_id == technician_id
     )
+    if lock:
+        stmt = stmt.with_for_update().execution_options(populate_existing=True)
+    return await db.scalar(stmt)
 
 
 async def default_fee(db: AsyncSession, ticket: Ticket) -> Decimal | None:
@@ -223,7 +227,10 @@ async def on_assignee_changed(
     """
     newcomer = await db.get(User, new_id) if new_id else None
     paid_per_ticket = newcomer is not None and newcomer.role == UserRole.TECHNICIAN
-    previous = await _find(db, ticket.id, previous_id) if previous_id else None
+    # O valor de quem sai, travado e relido: o envio de uma nota dele pode ter ligado o valor
+    # depois de a OS ser carregada (ou estar ligando agora). Sem isso, "invoice_id = None" não
+    # mudaria nada para o ORM e o valor passaria ao novo técnico ligado à nota do anterior.
+    previous = await _find(db, ticket.id, previous_id, lock=True) if previous_id else None
     if previous is not None and previous.status == PayoutStatus.PAID:
         previous = None
     current = await _find(db, ticket.id, new_id) if new_id and paid_per_ticket else None

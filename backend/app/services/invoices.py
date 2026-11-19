@@ -278,7 +278,8 @@ async def _lock_payouts(
     db: AsyncSession, technician_id: uuid.UUID, ids: list[uuid.UUID]
 ) -> list[TicketPayout]:
     """Os valores escolhidos, travados (FOR UPDATE): do técnico, com a OS concluída (ou já pagos)
-    e sem outra nota."""
+    e sem outra nota dele. A ligação com nota de outro técnico (a troca de técnico solta a ligação,
+    então não devia existir) conta como livre e é sobrescrita: o número dessa nota nunca aparece."""
     if not ids:
         return []
     # Trava só as linhas dos valores; a leitura vem depois, já com as linhas travadas.
@@ -295,13 +296,15 @@ async def _lock_payouts(
     if len(found) != len(ids) or any(p.technician_id != technician_id for p, _, _ in rows):
         raise WorkflowError(NOT_YOURS)
     linked = {p.invoice_id for p, _, _ in rows if p.invoice_id is not None}
+    # Só as notas do próprio técnico ocupam o valor.
     numbers: dict[uuid.UUID, str] = {}
     if linked:
         numbers = {
             invoice_id: number
             for invoice_id, number in await db.execute(
                 select(TechnicianInvoice.id, TechnicianInvoice.number).where(
-                    TechnicianInvoice.id.in_(linked)
+                    TechnicianInvoice.id.in_(linked),
+                    TechnicianInvoice.technician_id == technician_id,
                 )
             )
         }
@@ -310,8 +313,8 @@ async def _lock_payouts(
         code = format_ticket_code(ticket_number)
         if ticket_status not in CONCLUDED and payout.status != PayoutStatus.PAID:
             raise WorkflowError(NOT_CONCLUDED.format(code=code))
-        if payout.invoice_id is not None:
-            number = numbers.get(payout.invoice_id, "")
+        if payout.invoice_id in numbers:
+            number = numbers[payout.invoice_id]
             raise WorkflowError(IN_OTHER_INVOICE.format(code=code, number=number))
     return [found[payout_id][0] for payout_id in ids]
 
@@ -665,11 +668,13 @@ async def payout_candidates(
     when = func.coalesce(Ticket.resolved_at, TicketPayout.created_at)
     concluded = Ticket.status.in_(CONCLUDED)
     in_month = and_(when >= start, when < end)
+    # "Sem nota" é sem nota dele: o join abaixo só traz a nota do próprio técnico, e a ligação com
+    # nota de outro técnico conta como livre (como no envio).
     earlier = and_(
         when < start,
         TicketPayout.status == PayoutStatus.PENDING,
         concluded,
-        TicketPayout.invoice_id.is_(None),
+        TechnicianInvoice.id.is_(None),
     )
     rows = await db.execute(
         select(
@@ -741,9 +746,12 @@ async def list_invoices(
     technician_id: uuid.UUID | None = None,
     status: InvoiceStatus | None = None,
     month: date | None = None,
+    offset: int = 0,
 ) -> InvoiceList:
-    """Central (Pagamentos): as notas de todos os técnicos, as mais novas primeiro (até 500). O
-    resumo usa só os filtros de técnico e mês (os contadores das abas); total_count, todos."""
+    """Central (Pagamentos): as notas de todos os técnicos, até LIST_LIMIT a partir de `offset`.
+    As que aguardam conferência (status pending) vêm na ordem da fila, as mais antigas primeiro;
+    sem status e nas outras situações, as mais novas primeiro. O resumo usa só os filtros de
+    técnico e mês (os contadores das abas); total_count, todos (sem contar o offset)."""
     base: list[Any] = []
     if technician_id is not None:
         base.append(TechnicianInvoice.technician_id == technician_id)
@@ -752,11 +760,17 @@ async def list_invoices(
     conds = [*base]
     if status is not None:
         conds.append(TechnicianInvoice.status == status)
+    sent = (
+        TechnicianInvoice.created_at.asc()
+        if status == InvoiceStatus.PENDING
+        else TechnicianInvoice.created_at.desc()
+    )
     invoices = list(
         await db.scalars(
             select(TechnicianInvoice)
             .where(*conds)
-            .order_by(TechnicianInvoice.created_at.desc(), TechnicianInvoice.id)
+            .order_by(sent, TechnicianInvoice.id)
+            .offset(offset)
             .limit(LIST_LIMIT)
         )
     )

@@ -73,7 +73,7 @@ class InvoiceSummary(BaseModel):
 class InvoiceList(BaseModel):
     items: list[InvoiceOut]
     summary: InvoiceSummary
-    # Quantas notas batem com todos os filtros (a lista vem até o limite).
+    # Quantas notas batem com todos os filtros (a lista vem até o limite, a partir do offset).
     total_count: int = 0
 
 

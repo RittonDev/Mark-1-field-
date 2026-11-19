@@ -13,8 +13,31 @@ describe("stripAgentName", () => {
     assert.equal(stripAgentName("e aí Mia, pendente pgto"), "pendente pgto");
   });
 
+  it("aceita a pontuação colada no texto, menos o ponto", () => {
+    assert.equal(stripAgentName("Mia,16976"), "16976");
+    assert.equal(stripAgentName("Mia,atrasadas"), "atrasadas");
+    assert.equal(stripAgentName("Mia , atrasadas"), "atrasadas");
+    assert.equal(stripAgentName("ei, mia: sem técnico"), "sem técnico");
+    assert.equal(stripAgentName("Mia. atrasadas"), "atrasadas");
+    assert.equal(stripAgentName("Mia... atrasadas"), "atrasadas");
+    assert.equal(stripAgentName("oi mia. agendadas"), "agendadas");
+    assert.equal(stripAgentName("mia!"), "");
+  });
+
   it("deixa a frase igual quando o nome é parte do que se procura", () => {
-    for (const text of ["mia", "mia atrasadas", "Miami", "Miami, loja 41", "técnico mia"]) {
+    for (const text of [
+      "mia",
+      "mia atrasadas",
+      "Miami",
+      "Miami, loja 41",
+      "técnico mia",
+      "oi miami",
+      "mia.com.br",
+      "mia.silva@exemplo.com",
+      "MIA.01",
+      "Mia.01 centro",
+      "oi mia.com.br",
+    ]) {
       assert.equal(stripAgentName(text), text);
     }
   });
