@@ -331,6 +331,58 @@ const EXTRA_BY_FIELD: Record<string, string[]> = {
 };
 
 /**
+ * O elo do técnico na central (components/technicians/LevelSection). Fica fora de ["technicians"], que quase todo
+ * evento de OS relê: cada leitura recalcula e grava o elo no servidor.
+ */
+export function technicianLevelKey(technicianId: UUID) {
+  return ["technician-level", technicianId] as const;
+}
+
+// Eventos de OS que não mexem em visita, conclusão, técnico, agenda nem horários: o elo de ninguém muda.
+const LEVEL_QUIET_EVENTS = new Set([
+  "ticket.comment_added",
+  "ticket.attachment_added",
+  "ticket.attachment_updated",
+  "ticket.attachment_removed",
+  "ticket.worklog_added",
+  "ticket.part_request_decided",
+]);
+const LEVEL_QUIET_FIELDS = new Set([
+  "forms",
+  "signature",
+  "expenses",
+  "part_requests",
+  "payouts",
+  "quotes",
+  "offers",
+  "repairs",
+  "tags",
+]);
+
+/**
+ * De quem o evento de OS pode ter mudado o elo: o responsável (`assignee_id`) e quem entrou na visita
+ * (`data.added_ids`). Quem saiu e os outros técnicos da visita não vêm no evento: o elo deles fica como está até a
+ * próxima leitura (passado 1 min, ao voltar para a janela ou abrir o cadastro).
+ */
+function levelTechnicians(event: RealtimeEvent): string[] {
+  if (LEVEL_QUIET_EVENTS.has(event.type)) return [];
+  const fields = event.data?.fields;
+  if (
+    event.type === "ticket.updated" &&
+    Array.isArray(fields) &&
+    fields.length > 0 &&
+    fields.every((field) => LEVEL_QUIET_FIELDS.has(String(field)))
+  ) {
+    return [];
+  }
+  const ids = new Set<string>();
+  if (typeof event.assignee_id === "string" && event.assignee_id) ids.add(event.assignee_id);
+  const added = event.data?.added_ids;
+  if (Array.isArray(added)) for (const id of added) if (typeof id === "string" && id) ids.add(id);
+  return [...ids];
+}
+
+/**
  * Só a oferta com preço mudou (enviada, vista, respondida ou cancelada): nada das listas de OS, do Início nem
  * da lista de atribuição muda. O aceite também chega como ticket.assigned, que recarrega tudo isso.
  */
@@ -718,6 +770,8 @@ export function RealtimeProvider({
         if (!offersOnly(event)) {
           for (const key of ["tickets", "solicitacoes", "dashboard", "assignable", "portal", ...extraKeysFor(event)]) invalidate([key]);
           invalidate(["tracking", "live"]);
+          // O elo só do técnico do evento (só o cadastro aberto dele busca de novo).
+          for (const id of levelTechnicians(event)) invalidate(technicianLevelKey(id));
         }
       } else {
         return;

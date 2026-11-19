@@ -21,6 +21,19 @@ const EMPTY: Partial<Record<UserChangeField, string>> = {
   work_schedule: "sem jornada",
 };
 
+/** A senha, pelo `to` da API: redefinida em Técnicos, definida em Usuários ou trocada pelo técnico no app. */
+const PASSWORD_LINE: Record<string, string> = {
+  "provisória": "Senha redefinida (provisória)",
+  "definida pela central": "Senha definida pela central",
+  "criada no app": "Senha criada no app",
+  "trocada no app": "Senha trocada no app",
+};
+
+/** A chave PIX para quem não tem Pagamentos: a API manda "***" no lugar da chave mascarada e não manda o titular. */
+const PIX_HIDDEN = "***";
+
+const pixHidden = (item: UserChangeItem) => item.from === PIX_HIDDEN || item.to === PIX_HIDDEN;
+
 interface ChangeLine {
   label: string;
   /** O de → para; sem ele, o rótulo já diz tudo ("Foto trocada"). */
@@ -29,7 +42,8 @@ interface ChangeLine {
 
 /**
  * Uma mudança como a central lê: "Cidade: Santos → Guarujá". Foto, senha e chave PIX têm frase própria; o
- * titular entra na chave cadastrada e sai junto com a chave removida.
+ * titular entra na chave cadastrada e sai junto com a chave removida. Sem Pagamentos, a chave vem sem valor
+ * ("Chave PIX alterada") e sem titular.
  */
 function lineOf(item: UserChangeItem, all: UserChangeItem[]): ChangeLine | null {
   const empty = EMPTY[item.field] ?? "vazio";
@@ -37,17 +51,19 @@ function lineOf(item: UserChangeItem, all: UserChangeItem[]): ChangeLine | null 
     case "avatar":
       return { label: item.to ? "Foto trocada" : "Foto removida" };
     case "password":
-      return { label: item.to === "provisória" ? "Senha redefinida (provisória)" : item.to ? `Senha ${item.to}` : "Senha alterada" };
+      return { label: (item.to && PASSWORD_LINE[item.to]) || (item.to ? `Senha ${item.to}` : "Senha alterada") };
     case "pix": {
       if (!item.to) return { label: "Chave PIX removida" };
       if (!item.from) {
+        if (pixHidden(item)) return { label: "Chave PIX cadastrada" };
         const holder = all.find((c) => c.field === "pix_holder" && !c.from)?.to;
         return { label: "Chave PIX cadastrada", text: holder ? `${item.to} · titular ${holder}` : item.to };
       }
+      if (pixHidden(item)) return { label: "Chave PIX alterada" };
       break;
     }
     case "pix_holder":
-      if (all.some((c) => c.field === "pix" && (!c.to || !c.from))) return null;
+      if (all.some((c) => c.field === "pix" && (!c.to || !c.from || pixHidden(c)))) return null;
       break;
   }
   return { label: USER_CHANGE_LABEL[item.field] ?? item.field, text: `${item.from ?? empty} → ${item.to ?? empty}` };
@@ -60,7 +76,8 @@ function whoOf(row: UserChange): string {
 
 /**
  * "Histórico do cadastro": o que mudou, quando, por quem e por onde (o técnico no app ou a central). A chave
- * PIX vem mascarada pela API; e-mail e celular, em claro (para desfazer uma troca indevida).
+ * PIX vem mascarada pela API (sem Pagamentos, nem isso); e-mail e celular, em claro (para desfazer uma troca
+ * indevida).
  */
 export function ProfileHistory({ technicianId }: { technicianId: UUID }) {
   const [shown, setShown] = useState(FIRST);
