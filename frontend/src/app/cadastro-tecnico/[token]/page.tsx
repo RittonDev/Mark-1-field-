@@ -337,16 +337,19 @@ function loadDraft(token: string): Draft | null {
   }
 }
 
-function saveDraft(form: FormState, step: number, token: string) {
+/** Grava o rascunho e diz se ele ficou guardado (sem conteúdo, não há o que guardar). */
+function saveDraft(form: FormState, step: number, token: string): boolean {
   try {
     if (!hasContent(form)) {
       window.localStorage.removeItem(DRAFT_KEY);
-      return;
+      return true;
     }
     const data = Object.fromEntries(DRAFT_FIELDS.map((key) => [key, form[key]]));
     window.localStorage.setItem(DRAFT_KEY, JSON.stringify({ savedAt: Date.now(), step, form: data, token }));
+    return true;
   } catch {
-    // Sem armazenamento (aba anônima, bloqueio): a ficha funciona, só sem rascunho.
+    // Sem armazenamento (aba anônima, bloqueio, cota cheia): a ficha funciona, só sem rascunho.
+    return false;
   }
 }
 
@@ -392,11 +395,16 @@ function reloadKeeping(form: FormState, step: number, token: string, saveForm: b
   window.location.reload();
 }
 
-/** A linha do painel: o que o técnico informa de novo depois do recarregar (testa as gravações quando o painel aparece). */
-function reloadNote(form: FormState, token: string): string {
-  if (hasContent(form) && !fits("localStorage", `${DRAFT_KEY}:teste`, "1")) return "A ficha volta em branco.";
-  if (form.photo && !fits("sessionStorage", PHOTO_KEY + token, form.photo)) return "A senha e a foto você informa de novo.";
-  return "A senha você digita de novo.";
+/**
+ * A linha do painel: o que o técnico informa de novo depois do recarregar. A ficha some quando o painel aparece e não
+ * muda mais, então o rascunho já é gravado aqui (o "Recarregar" grava de novo) e a foto é testada com o próprio valor:
+ * a linha diz o que de fato volta, também com a cota quase cheia.
+ */
+function reloadNote(form: FormState, step: number, token: string, saveForm: boolean): string {
+  const formKept = !hasContent(form) || (saveForm && saveDraft(form, step, token));
+  const photoKept = !form.photo || fits("sessionStorage", PHOTO_KEY + token, form.photo);
+  if (formKept) return photoKept ? "A senha você digita de novo." : "A senha e a foto você informa de novo.";
+  return form.photo && photoKept ? "Os dados e a senha você informa de novo." : "A ficha volta em branco.";
 }
 
 /** A ficha ao abrir, com a foto que este link guardou para o recarregar. Só lê: quem apaga é dropKeptPhotos. */
@@ -790,7 +798,7 @@ export default function TechnicianSignupPage() {
             }
           />
         ) : outdated ? (
-          <OutdatedPanel form={form} token={token} onReload={reload} />
+          <OutdatedPanel form={form} step={step} token={token} saveForm={!pendingForeign} onReload={reload} />
         ) : (
           <form
             ref={formRef}
@@ -1251,8 +1259,20 @@ export default function TechnicianSignupPage() {
  * O aviso desta página ficou para trás do servidor: só recarregando dá para ler o texto novo e enviar. A linha de baixo
  * é decidida quando o painel aparece (a ficha some e não muda mais).
  */
-function OutdatedPanel({ form, token, onReload }: { form: FormState; token: string; onReload: () => void }) {
-  const [note] = useState(() => reloadNote(form, token));
+function OutdatedPanel({
+  form,
+  step,
+  token,
+  saveForm,
+  onReload,
+}: {
+  form: FormState;
+  step: number;
+  token: string;
+  saveForm: boolean;
+  onReload: () => void;
+}) {
+  const [note] = useState(() => reloadNote(form, step, token, saveForm));
   const textId = useId();
   return (
     <Panel
@@ -1263,7 +1283,7 @@ function OutdatedPanel({ form, token, onReload }: { form: FormState; token: stri
       textId={textId}
       action={
         // No envio, o painel toma o lugar da ficha: o foco vai para a única ação, que lê o texto junto, e não se perde.
-        <Button variant="primary" onClick={onReload} autoFocus aria-describedby={textId}>
+        <Button variant="primary" onClick={onReload} autoFocus aria-describedby={`${textId}-titulo ${textId}`}>
           Recarregar
         </Button>
       }
@@ -1291,7 +1311,9 @@ function Panel({
   return (
     <Card className="flex flex-col items-center gap-3 px-6 py-10 text-center">
       {icon}
-      <h1 className="text-lg font-bold tracking-[-0.02em] text-ink">{title}</h1>
+      <h1 id={textId ? `${textId}-titulo` : undefined} className="text-lg font-bold tracking-[-0.02em] text-ink">
+        {title}
+      </h1>
       <div id={textId} className="max-w-md space-y-1 text-sm text-ink-muted">
         <p>{text}</p>
         {note ? <p>{note}</p> : null}
