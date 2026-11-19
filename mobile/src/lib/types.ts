@@ -816,7 +816,8 @@ export interface DayActivities {
 
 /** Motivos de violação de SLA (cadastro) e o relatório que os transforma em estatística. */
 export type ViolationScope = "response" | "resolution" | "both";
-export type Responsibility = "internal" | "customer" | "third_party";
+/** "technician": motivo de responsabilidade do técnico (a improdutiva com ele pesa no elo do técnico). */
+export type Responsibility = "internal" | "customer" | "third_party" | "technician";
 
 export interface ViolationReasonRef {
   id: UUID;
@@ -1087,6 +1088,8 @@ export interface Technician {
   has_pix?: boolean;
   /** Quando a chave mudou ("Chave nova" por PIX_RECENT_DAYS); null sem chave. */
   pix_updated_at?: ISODate | null;
+  /** Elo (o selo da lista): a conta guardada, de até 6 h atrás. Sem conta ainda: bronze, since null. */
+  level?: LevelSummary;
 }
 
 export interface TemporaryPassword {
@@ -1530,6 +1533,8 @@ export interface TechnicianSuggestion {
   /** Favorito na cidade da loja: pela regra ("auto") ou fixado pela central ("manual"). */
   favorite?: "auto" | "manual" | null;
   favorite_note?: string | null;
+  /** Elo do técnico: só o selo (não muda a pontuação nem a ordem). */
+  level?: LevelSummary;
 }
 
 // ---- Fila do analista ----
@@ -2389,4 +2394,161 @@ export interface InvoicePayoutCandidate {
   in_month: boolean;
   /** Já está numa nota ("Na nota nº 1200"). */
   invoice: PayoutInvoiceRef | null;
+}
+
+// --------------------------------------------------------------------------- elo dos técnicos
+
+/** Faixa do elo do técnico (LEVEL_TIER), da mais baixa à mais alta (LEVEL_TIER_ORDER). */
+export type LevelTier = "bronze" | "silver" | "gold" | "diamond";
+
+/** O que pesou no elo (LEVEL_OCCURRENCE): chegada fora do horário, retorno ou visita perdida. */
+export type LevelOccurrenceKind = "late" | "rework" | "unproductive";
+
+export type LevelCriterionKey = "services" | "measured" | "on_time" | "rework" | "lost";
+
+/** O selo nas listas (Technician.level, TechnicianSuggestion.level). Sem conta ainda: bronze, since null. */
+export interface LevelSummary {
+  tier: LevelTier;
+  since: ISODate | null;
+  /** Abaixo do critério da faixa: desce se não voltar a cumprir em 30 dias. */
+  at_risk: boolean;
+}
+
+/** Um critério da faixa, com os textos prontos do servidor (as telas não repetem os números). */
+export interface LevelCriterion {
+  key: LevelCriterionKey;
+  label: string;
+  met: boolean;
+  /** Taxas: false com menos de 5 casos ("Ainda sem dados suficientes"; o critério conta como cumprido). */
+  enough_data: boolean;
+  /** Contagem (atendimentos) ou os casos da taxa (chegadas no horário, retornos, visitas perdidas). */
+  value: number;
+  /** Base da taxa (chegadas, atendimentos medidos, visitas); null nas contagens. */
+  base: number | null;
+  /** Mínimo da contagem, meta (%) da chegada no horário ou limite (%) das taxas. */
+  target: number;
+  /** "38 de 50", "92% (23 de 25) · meta 90% ou mais", "3% (1 em 40) · limite 5%". */
+  text: string;
+  /** O que falta ("Faltam 12 atendimentos"); null quando cumprido. */
+  missing: string | null;
+}
+
+/** Abaixo do critério da faixa em vigor: desce para `falls_to` em `until` se não voltar a cumprir. */
+export interface LevelRisk {
+  since: ISODate;
+  until: ISODate;
+  falls_to: LevelTier;
+  /** Rótulos dos critérios não cumpridos. */
+  failing: string[];
+  text: string;
+}
+
+export interface LevelNext {
+  tier: LevelTier;
+  criteria: LevelCriterion[];
+}
+
+/** Uma faixa e o que ela pede (taxas em %; null no Bronze), com o resumo pronto. */
+export interface LevelTierRule {
+  tier: LevelTier;
+  services: number;
+  measured: number;
+  on_time_pct: number | null;
+  rework_pct: number | null;
+  lost_pct: number | null;
+  summary: string;
+}
+
+/** Os números dos últimos 12 meses. As taxas ficam null com menos de 5 casos. */
+export interface LevelMetrics {
+  window_start: ISODate;
+  window_end: ISODate;
+  services: number;
+  as_assignee: number;
+  as_helper: number;
+  measured: number;
+  arrivals: number;
+  on_time: number;
+  late: number;
+  reworks: number;
+  lost: number;
+  visits: number;
+  on_time_pct: number | null;
+  rework_pct: number | null;
+  lost_pct: number | null;
+}
+
+export interface LevelTicketRef {
+  id: UUID;
+  /** "OS-000123". */
+  code: string;
+  title: string;
+}
+
+/** O que pesou. `ref_id`: a OS no atraso; o evento do histórico no retorno e na visita perdida. */
+export interface LevelOccurrence {
+  kind: LevelOccurrenceKind;
+  ref_id: UUID;
+  ticket: LevelTicketRef;
+  at: ISODate;
+  detail: string;
+}
+
+/** A ocorrência desconsiderada pela central (só a central vê). */
+export interface LevelWaiver {
+  id: UUID;
+  note: string;
+  created_by: Ref | null;
+  created_at: ISODate;
+}
+
+export interface CentralLevelOccurrence extends LevelOccurrence {
+  waiver: LevelWaiver | null;
+}
+
+/** GET /me/level: o elo do próprio técnico, recalculado na hora. */
+export interface MyLevel {
+  tier: LevelTier;
+  since: ISODate;
+  at_risk: LevelRisk | null;
+  computed_at: ISODate;
+  metrics: LevelMetrics;
+  /** Os critérios da faixa em vigor (vazio no Bronze). */
+  criteria: LevelCriterion[];
+  /** A próxima faixa (null no Diamante). */
+  next: LevelNext | null;
+  tiers: LevelTierRule[];
+  /** "Como funciona". */
+  rules: string[];
+  /** As que contam, as mais recentes primeiro, até 30 (o total em occurrences_total). */
+  occurrences: LevelOccurrence[];
+  occurrences_total: number;
+}
+
+/** GET /technicians/{id}/level e a resposta de desconsiderar e de voltar a contar. */
+export interface TechnicianLevelDetail extends Omit<MyLevel, "occurrences"> {
+  technician: Ref;
+  computed_tier: LevelTier;
+  waived: number;
+  /** Motivos de improdutiva ativos com responsabilidade "Técnico" (0: visitas perdidas não contam). */
+  technician_reasons: number;
+  /** Também as desconsideradas, as mais recentes primeiro, até 200 (o total em occurrences_total). */
+  occurrences: CentralLevelOccurrence[];
+}
+
+/** POST /technicians/{id}/level/waivers. `note`: o motivo, de 1 a 300 caracteres. */
+export interface LevelWaiverCreate {
+  kind: LevelOccurrenceKind;
+  ref_id: UUID;
+  note: string;
+}
+
+/** POST /technicians/levels/refresh: quantos técnicos ficaram em cada faixa. */
+export interface LevelRefreshResult {
+  technicians: number;
+  bronze: number;
+  silver: number;
+  gold: number;
+  diamond: number;
+  at_risk: number;
 }

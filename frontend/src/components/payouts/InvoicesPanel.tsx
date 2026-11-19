@@ -22,6 +22,8 @@ const FILTERS: { key: Filter; label: string; empty: string }[] = [
 
 /** Na faixa do técnico (aba Fechamento), quantas notas aparecem antes do "+N". */
 const STRIP_MAX = 4;
+/** Na faixa, as que valem vêm antes da recusada (o técnico ainda vai mandar outra). */
+const STRIP_RANK: Record<TechnicianInvoice["status"], number> = { pending: 0, checked: 1, rejected: 2 };
 
 const intFmt = (n: number) => n.toLocaleString("pt-BR");
 
@@ -177,12 +179,14 @@ function InvoiceRow({
 }) {
   const status = INVOICE_STATUS[invoice.status];
   const difference = invoiceDifference(invoice);
+  // Numa linha só a partir de telas largas, com colunas de largura fixa (valor, situação e botões alinhados
+  // de uma nota para outra); antes disso, os botões descem para a linha de baixo.
   return (
     <li
-      className="flex cursor-pointer flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3 transition-colors hover:bg-surface-2/60 sm:flex-nowrap"
+      className="flex cursor-pointer flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3 transition-colors hover:bg-surface-2/60 xl:flex-nowrap"
       onClick={() => onOpen(invoice)}
     >
-      <div className="min-w-0 flex-1 basis-64">
+      <div className="min-w-0 flex-1 basis-72">
         <p className="truncate text-sm text-ink">
           {/* O nome é o alvo do teclado; o clique em qualquer ponto da linha também abre a nota. */}
           <button
@@ -197,7 +201,7 @@ function InvoiceRow({
           </button>
           <span className="font-medium"> · Nota {invoiceNo(invoice)}</span>
         </p>
-        <p className="truncate text-xs text-ink-muted">
+        <p className="text-xs text-pretty text-ink-muted">
           Competência {competenceLabel(invoice.competence)} · emitida em {formatDate(invoice.issue_date)} · {invoicePayoutsText(invoice)}
           {difference ? (
             <span className="font-medium text-amber-700 dark:text-amber-400"> · diferença de {formatMoney(difference)}</span>
@@ -206,12 +210,14 @@ function InvoiceRow({
       </div>
       {/* Os botões valem sozinhos: o clique neles não abre a nota. */}
       <div
-        className="flex w-full flex-wrap items-center justify-end gap-x-3 gap-y-1.5 sm:w-auto sm:flex-nowrap"
+        className="flex w-full flex-wrap items-center justify-end gap-x-3 gap-y-1.5 xl:w-auto xl:flex-nowrap"
         onClick={(e) => e.stopPropagation()}
       >
-        <span className="text-right text-sm font-semibold text-ink tabular-nums">{formatMoney(invoice.amount)}</span>
-        <Pill color={status.color}>{status.label}</Pill>
-        <span className="flex items-center gap-1">
+        <span className="text-right text-sm font-semibold text-ink tabular-nums xl:w-28">{formatMoney(invoice.amount)}</span>
+        <span className="flex xl:w-40">
+          <Pill color={status.color}>{status.label}</Pill>
+        </span>
+        <span className={clsx("flex items-center justify-end gap-1", canEdit && "xl:w-[17.75rem]")}>
           <Button size="sm" variant="ghost" disabled={stale} onClick={() => onOpenFile(invoice)} title={`Abrir ${invoice.filename}`}>
             <FileText className="size-4" />
             Arquivo
@@ -254,7 +260,8 @@ export function InvoiceStrip({
   onOpen: (invoice: TechnicianInvoice) => void;
   onMore: () => void;
 }) {
-  const shown = invoices.slice(0, STRIP_MAX);
+  // A ordenação é estável: dentro de cada situação, segue a ordem recebida (a da conferência).
+  const shown = [...invoices].sort((a, b) => STRIP_RANK[a.status] - STRIP_RANK[b.status]).slice(0, STRIP_MAX);
   const more = invoices.length - shown.length;
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-line bg-surface-2/50 px-5 py-2 text-xs">

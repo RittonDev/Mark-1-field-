@@ -7,6 +7,8 @@ import type {
   InvoiceFileKind,
   InvoiceStatus,
   Level,
+  LevelOccurrenceKind,
+  LevelTier,
   OfferCancelReason,
   OfferState,
   PixKeyType,
@@ -221,6 +223,7 @@ export const RESPONSIBILITY: Record<Responsibility, { label: string; color: stri
   internal: { label: "Interna", color: "#dc2626" },
   customer: { label: "Cliente", color: "#2563eb" },
   third_party: { label: "Terceiro / fornecedor", color: "#d97706" },
+  technician: { label: "Técnico", color: "#be185d" },
 };
 
 export const VIOLATION_SCOPE: Record<ViolationScope, string> = {
@@ -350,3 +353,52 @@ export function competenceLabel(month: string): string {
   const name = match ? COMPETENCE_MONTHS[Number(match[2]) - 1] : undefined;
   return match && name ? `${name} de ${match[1]}` : month;
 }
+
+// --------------------------------------------------------------------------- elo dos técnicos
+
+/** As faixas do elo, da mais baixa à mais alta. */
+export const LEVEL_TIER_ORDER: LevelTier[] = ["bronze", "silver", "gold", "diamond"];
+
+export interface LevelTierInfo {
+  label: string;
+  /** "Para chegar à Prata", "Você chegou ao Ouro!". */
+  to: string;
+  /** "Para continuar no Diamante". */
+  at: string;
+  /** Cor do brasão no claro e no escuro (3:1 ou mais contra a superfície e contra as marcas). */
+  color: { light: string; dark: string };
+  /** Token da web (globals.css), com a mesma cor. */
+  cssVar: string;
+}
+
+/** Faixa do elo do técnico: o nome vai sempre escrito junto do brasão (a cor fica só no escudo). */
+export const LEVEL_TIER: Record<LevelTier, LevelTierInfo> = {
+  bronze: { label: "Bronze", to: "ao Bronze", at: "no Bronze", color: { light: "#A9622B", dark: "#D08A52" }, cssVar: "--tier-bronze" },
+  silver: { label: "Prata", to: "à Prata", at: "na Prata", color: { light: "#6E7B8C", dark: "#AEB8C6" }, cssVar: "--tier-silver" },
+  gold: { label: "Ouro", to: "ao Ouro", at: "no Ouro", color: { light: "#A87A00", dark: "#E2B33C" }, cssVar: "--tier-gold" },
+  diamond: { label: "Diamante", to: "ao Diamante", at: "no Diamante", color: { light: "#5B4BDB", dark: "#9D8CFF" }, cssVar: "--tier-diamond" },
+};
+
+/** O escudo do brasão (viewBox 24x24), preenchido com a cor da faixa. */
+export const LEVEL_SHIELD_PATH = "M12 2.5 19.5 5.3v6.1c0 4.6-3.1 8.6-7.5 10.1-4.4-1.5-7.5-5.5-7.5-10.1V5.3z";
+
+/**
+ * As marcas do brasão, em traço (1,7, pontas redondas) na cor da superfície (LEVEL_MARK_COLOR): 1, 2 e 3 divisas e a
+ * pedra do Diamante. A forma diferencia as faixas sem depender da cor.
+ */
+export const LEVEL_MARKS: Record<LevelTier, string[]> = {
+  bronze: ["M8.5 11.5 12 13.6l3.5-2.1"],
+  silver: ["M8.5 9.6 12 11.7l3.5-2.1", "M8.5 13.2 12 15.3l3.5-2.1"],
+  gold: ["M8.5 8 12 10.1 15.5 8", "M8.5 11.3 12 13.4l3.5-2.1", "M8.5 14.6 12 16.7l3.5-2.1"],
+  diamond: ["M9.2 10.2 10.6 8h2.8l1.4 2.2L12 15.5z", "M9.2 10.2h5.6"],
+};
+
+/** Cor das marcas do brasão: a superfície no claro e no escuro. */
+export const LEVEL_MARK_COLOR = { light: "#FFFFFF", dark: "#141519" } as const;
+
+/** O que pesou no elo, como a central e o app mostram. */
+export const LEVEL_OCCURRENCE: Record<LevelOccurrenceKind, string> = {
+  late: "Chegada fora do horário",
+  rework: "Retorno",
+  unproductive: "Visita perdida",
+};

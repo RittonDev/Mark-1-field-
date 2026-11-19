@@ -15,7 +15,7 @@ import { Icon } from "../components/Icon";
 import { Skeleton } from "../components/Skeleton";
 import { Text } from "../components/Text";
 import { capturePhotos, recoverCapture } from "../components/ticket/photoCapture";
-import { Badge, Button, ErrorBox, Field, Input } from "../components/ui";
+import { Badge, Button, Card, ErrorBox, Field, Input } from "../components/ui";
 import { ApiError, errorMessage } from "../lib/api";
 import { competenceLabel, INVOICE_FILE_KIND, INVOICE_LIMITS } from "../lib/constants";
 import { confirmAction } from "../lib/dialogs";
@@ -315,7 +315,7 @@ export default function InvoiceScreen() {
         setSubmitError(OFFLINE);
         return;
       }
-      uploadId.current ??= randomUUID();
+      const clientUploadId = (uploadId.current ??= randomUUID());
       const invoice = await sendTracked({
         file,
         number,
@@ -324,7 +324,7 @@ export default function InvoiceScreen() {
         competence,
         note,
         payoutIds: chosen.map((item) => item.payout_id),
-        clientUploadId: uploadId.current,
+        clientUploadId,
       });
       haptic.success();
       showToast("Nota enviada", { tone: "success", description: `Nota nº ${invoice.number} · ${formatBRL(invoice.amount)}` });
@@ -386,7 +386,7 @@ export default function InvoiceScreen() {
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
       >
-        <View style={styles.card}>
+        <Card style={styles.card}>
           <Field label="Arquivo da nota" required error={errors.file}>
             {file ? (
               <View style={styles.fileRow}>
@@ -492,9 +492,9 @@ export default function InvoiceScreen() {
               </Pressable>
             </View>
           </Field>
-        </View>
+        </Card>
 
-        <View style={styles.card}>
+        <Card style={styles.card}>
           <View style={styles.payoutsHead}>
             <Text style={styles.label} accessibilityRole="header">
               OS desta nota
@@ -525,19 +525,13 @@ export default function InvoiceScreen() {
             </View>
           )}
           {errors.payouts ? <Text style={styles.fieldError}>{errors.payouts}</Text> : null}
-        </View>
+        </Card>
 
-        <View style={styles.card}>
+        <Card style={styles.card}>
           <Field label="Observação">
-            <Input
-              value={note}
-              onChangeText={setNote}
-              accessibilityLabel="Observação"
-              multiline
-              maxLength={INVOICE_LIMITS.noteMax}
-            />
+            <Input value={note} onChangeText={setNote} accessibilityLabel="Observação" multiline maxLength={INVOICE_LIMITS.noteMax} />
           </Field>
-        </View>
+        </Card>
       </ScrollView>
 
       <View style={[styles.footer, { paddingBottom: insets.bottom + 12 }]}>
@@ -554,15 +548,7 @@ const makeStyles = (c: Palette) =>
   StyleSheet.create({
     screen: { flex: 1, backgroundColor: c.canvas },
     content: { padding: 16, gap: 14 },
-    card: {
-      gap: 16,
-      backgroundColor: c.surface,
-      borderRadius: RADIUS.card,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: c.line,
-      padding: 16,
-      boxShadow: c.elevation,
-    },
+    card: { gap: 16 },
     label: { fontSize: 13, fontWeight: "600", color: c.ink },
     muted: { fontSize: 13, color: c.inkMuted, lineHeight: 18 },
     fieldError: { fontSize: 12, color: c.danger },

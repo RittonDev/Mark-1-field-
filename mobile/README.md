@@ -87,6 +87,7 @@ ou atrás de `Platform.OS === "web"`.
 | Tokens no Keychain/Keystore (`secureStorage.ts`) | `localStorage` (`secureStorage.web.ts`) |
 | SQLite nativo, transação exclusiva | SQLite do próprio SDK em WebAssembly (OPFS), transação comum; `metro.config.js` registra o `.wasm` |
 | Fotos copiadas para a pasta do app, upload nativo | Foto guardada como data URL, upload por `fetch` + `FormData` (`photoFiles.web.ts`, `fileUpload.web.ts`) |
+| Arquivo da nota fiscal pelo seletor do sistema (`File.pickFileAsync`), copiado para o cache | `<input type="file">` e `blob:` (`invoiceFile.web.ts`) |
 | Seletor nativo de data/hora | `<input type="datetime-local">` (`DateTimeField.web.tsx`) |
 | GPS do expo-location, app de mapas | `navigator.geolocation`, Google Maps numa nova aba |
 | Confirmações com `Alert` | `window.confirm` (o `Alert` do react-native-web não faz nada) |
@@ -185,6 +186,8 @@ Requisitos:
   aceita pelo valor ou recusa, e quem aceitar primeiro fica com ela.
 - **Meu cadastro** (detalhes abaixo): o técnico mantém a foto, os dados de contato, o endereço e a chave PIX em
   que recebe pelos chamados; e-mail e chave PIX pedem a senha atual, e a central é avisada na hora.
+- **Notas fiscais (aba Ganhos)** (detalhes abaixo): o técnico envia a nota do mês (PDF, XML ou foto), marca as OS
+  que ela cobre e acompanha a conferência da central; a nota é opcional e nunca trava o pagamento.
 
 ## Ofertas de OS com preço
 
@@ -429,6 +432,35 @@ PIX em Ganhos. Contrato em [docs/API.md](../docs/API.md), "Meu cadastro do técn
 - O `expo-image-manipulator` é nativo e já vem no Expo Go; um development build feito antes dele precisa ser
   refeito.
 
+## Notas fiscais (aba Ganhos)
+
+Contrato em [docs/API.md](../docs/API.md), "Notas fiscais dos técnicos". Código: [src/lib/invoices.ts](src/lib/invoices.ts)
+(API, cópia no aparelho e versão), [src/lib/invoiceFile.ts](src/lib/invoiceFile.ts) (escolha do arquivo),
+[src/components/InvoicesCard.tsx](src/components/InvoicesCard.tsx) e a tela `src/app/nota-fiscal.tsx`.
+
+- **Cartão "Notas fiscais de <mês>"** em Ganhos, logo abaixo do resumo do mês (também com os valores carregando ou
+  com erro): uma linha por nota com o número, o valor, a situação (Aguardando conferência, Conferida, Recusada), "Emitida
+  em 05/11/2026 · 3 OS" (e "conferida em …") e, na recusada, o motivo da central. A lista do mês fica no aparelho (kv
+  `invoices:AAAA-MM`; sem rede, "Sem internet · notas de …") e é relida ao voltar para a tela, ao trocar de mês, ao
+  puxar para atualizar e quando uma nota entra ou sai. Tocar na nota: **Abrir arquivo** (link assinado de 30 min no
+  navegador; a lista é relida antes se tiver mais de 20 min) e **Apagar nota** (só a que a central ainda não conferiu).
+- **Enviar nota fiscal** (`/nota-fiscal?mes=AAAA-MM`): arquivo (**Escolher PDF ou XML** pelo seletor do sistema,
+  `File.pickFileAsync` do expo-file-system, ou **Tirar foto**/**Da galeria** pelo `photoCapture`, alvo `invoice`),
+  número, data de emissão, valor (aceita "1.234,56", "1234.56" ou "R$ 900"; com OS marcadas, mostra a soma e **Usar a
+  soma**), competência (mês com setas, até o atual) e as OS da competência (as concluídas no mês e sem nota vêm marcadas;
+  as que já estão em outra nota ficam bloqueadas; as de meses anteriores ainda a receber aparecem desmarcadas) e uma
+  observação. O app confere antes com as regras do servidor; sair com algo preenchido pergunta "Descartar a nota?".
+- **Arquivo**: PDF, XML, JPG, PNG ou WebP, até 10 MB (o servidor confere pelo conteúdo). O escolhido é copiado para
+  `cache/notas-fiscais/<uuid>/` (o `content://` do Android vira arquivo que o envio nativo lê) e sobe com o nome do
+  aparelho sem acentos ou "nota-AAAA-MM-DD"; a cópia sai ao trocar o arquivo, ao fechar a tela e, se o sistema fechou
+  o app no meio, na próxima abertura da tela. O original do técnico nunca é apagado. Foto com qualidade 0,8 (o texto
+  precisa ser lido); no Android, a foto tirada antes de o sistema fechar o app volta quando a tela abre de novo.
+- **Só online**: a nota não entra na fila offline. Sem rede, o rodapé mostra "Sem internet. A nota só é enviada com
+  conexão…" e o formulário continua preenchido. Cada abertura da tela gera um `client_upload_id` repetido em todas as
+  tentativas: a resposta perdida, mandada de novo, devolve a mesma nota (200) em vez de criar outra.
+- **Depois de enviar ou apagar**: Ganhos relê as notas e os valores, e cada OS coberta mostra "NF 1234" na linha.
+  A recusa é final: o técnico apaga a recusada e envia outra. A conversa sobre a nota continua no grupo de WhatsApp.
+
 ## Como a sincronização funciona
 
 ```
@@ -470,6 +502,7 @@ src/
     termo-rastreamento.tsx  termo de ciência do rastreamento (LGPD)
     conta.tsx          técnico (foto, Meu cadastro, senha), sincronização, fila, avisos, rastreamento, notificações, aparência, sair
     meu-cadastro.tsx   Meu cadastro: foto, dados, endereço e chave PIX (e-mail e PIX com a senha atual)
+    nota-fiscal.tsx    Enviar nota fiscal: arquivo, número, emissão, valor, competência e as OS que a nota cobre
   components/          UI (marca, cartões, calendário, jornada, diálogo de transição, abas da OS)
     Text.tsx           Text do app: aplica a Manrope no peso do estilo (use este, não o do react-native)
     motion.tsx         entrada em cascata, transição de layout, PressableScale (0,97 com mola), Pulse
@@ -477,6 +510,7 @@ src/
     NotificationsCard.tsx  Conta > Notificações (lembretes, permissão, alarme exato) e "Em segundo plano"
     Avatar.tsx         foto do técnico ou as iniciais (topo da tela inicial, Conta, Meu cadastro)
     PixCard.tsx        Ganhos > Recebimento por PIX (atalho para o Meu cadastro)
+    InvoicesCard.tsx   Ganhos > Notas fiscais do mês (situação, motivo da recusa, abrir arquivo, apagar, enviar)
   theme/theme.ts       paleta Maxx Field, claro/escuro, preferência do técnico
   theme/fonts.ts       Manrope (pesos 400–700) e o mapeamento de fontWeight para a família
   lib/
@@ -496,6 +530,8 @@ src/
     backgroundSync.ts  sincronização fora da tela (jornada e tarefa periódica); .web.ts sem efeito
     sync.ts            motor de sync, fila, fotos, gatilhos
     offers.ts          ofertas de OS: lista guardada, prazo pelo relógio do servidor, "Escopo lido" e avisos
+    invoices.ts        notas fiscais: /me/invoices (lista guardada por competência, envio, exclusão, abrir arquivo) e a versão que relê Ganhos
+    invoiceFile.ts     arquivo da nota: seletor do sistema ou foto, cópia no cache; .web.ts com <input type="file">
     realtime.ts        WebSocket
     sla.ts             porta de backend/app/services/sla.py::compute_sla_status
     device.ts          POST/DELETE /devices (o servidor diz se o push chega: live ou simulated)
