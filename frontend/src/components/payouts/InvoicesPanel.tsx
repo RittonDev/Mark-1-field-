@@ -103,7 +103,7 @@ export function InvoicesPanel({
       {cut && list ? (
         <p className="mb-3 text-xs text-ink-muted">
           {filter === "pending"
-            ? `A lista mostra as ${intFmt(list.items.length)} notas mais antigas de ${intFmt(list.total_count)} a conferir: as seguintes entram conforme estas forem conferidas.`
+            ? `A lista mostra as ${intFmt(list.items.length)} notas mais antigas de ${intFmt(list.total_count)} a conferir: as seguintes aparecem conforme estas forem conferidas.`
             : `A lista mostra as ${intFmt(list.items.length)} notas mais recentes de ${intFmt(list.total_count)}: escolha um mês ou um técnico para ver todas.`}
         </p>
       ) : null}

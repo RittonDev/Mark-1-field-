@@ -1705,6 +1705,9 @@ function NewTicket() {
                   <FormsPicker
                     templates={templates.data}
                     loading={templates.isLoading}
+                    failed={templates.isError}
+                    retrying={templates.isFetching}
+                    onRetry={() => void templates.refetch()}
                     serviceType={st}
                     categoryId={formsCategoryId}
                     categories={categories.data}

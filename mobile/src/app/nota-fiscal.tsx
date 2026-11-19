@@ -219,20 +219,23 @@ export default function InvoiceScreen() {
   }, [file]);
 
   /** Busca as OS do mês e volta as marcações ao padrão. "stale": outra busca começou depois, ou a tela fechou. */
-  const fetchList = useCallback(async (month: string): Promise<"ok" | "error" | "stale"> => {
+  const fetchList = useCallback((month: string): Promise<"ok" | "error" | "stale"> => {
     const seq = ++listSeq.current;
-    try {
-      const items = await loadInvoicePayouts(month);
-      if (seq !== listSeq.current || !mounted.current) return "stale";
-      setPayouts({ month, items });
-      setChecked(defaultChecked(items));
-      setPayoutsError(null);
-      return "ok";
-    } catch (error) {
-      if (seq !== listSeq.current || !mounted.current) return "stale";
-      setPayoutsError({ month, message: listFailure(error) });
-      return "error";
-    }
+    const latest = () => seq === listSeq.current && mounted.current;
+    return loadInvoicePayouts(month).then(
+      (items) => {
+        if (!latest()) return "stale" as const;
+        setPayouts({ month, items });
+        setChecked(defaultChecked(items));
+        setPayoutsError(null);
+        return "ok" as const;
+      },
+      (error: unknown) => {
+        if (!latest()) return "stale" as const;
+        setPayoutsError({ month, message: listFailure(error) });
+        return "error" as const;
+      },
+    );
   }, []);
 
   // OS da competência: ao abrir, ao trocar de mês, em "Tentar de novo" e quando a conexão volta (as marcações voltam

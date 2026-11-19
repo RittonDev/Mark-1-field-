@@ -34,6 +34,9 @@ function RequiredToggle({ name, required, onChange }: { name: string; required: 
 export function FormsPicker({
   templates,
   loading,
+  failed,
+  retrying,
+  onRetry,
   serviceType,
   categoryId,
   categories,
@@ -44,6 +47,10 @@ export function FormsPicker({
 }: {
   templates: FormTemplate[] | undefined;
   loading: boolean;
+  /** A lista de modelos não carregou: a OS vai sem a lista e a API põe os ligados ao tipo e à categoria. */
+  failed: boolean;
+  retrying: boolean;
+  onRetry: () => void;
   serviceType: ServiceType | null;
   /** A categoria com que a OS nasce (a escolhida ou a do tipo). */
   categoryId: string;
@@ -59,6 +66,25 @@ export function FormsPicker({
       <div className="flex flex-col gap-2" role="status" aria-label="Carregando formulários">
         <Skeleton className="h-9 w-full" />
         <Skeleton className="h-4 w-1/2" />
+      </div>
+    );
+  }
+  if (failed && !templates) {
+    // Sem os modelos não há como mostrar os ligados nem incluir outros: a API põe os ligados ao criar.
+    return (
+      <div
+        role="status"
+        className="flex min-h-10 flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-line bg-surface-2 px-3 py-2 text-sm text-ink-muted"
+      >
+        <span>Os formulários do tipo de OS e da categoria entram ao criar.</span>
+        <button
+          type="button"
+          onClick={onRetry}
+          disabled={retrying}
+          className="font-semibold text-brand-ink hover:underline disabled:cursor-wait disabled:opacity-60"
+        >
+          {retrying ? "Carregando..." : "Mostrar os formulários"}
+        </button>
       </div>
     );
   }

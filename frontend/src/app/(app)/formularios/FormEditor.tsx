@@ -184,7 +184,7 @@ export function FormEditor({
         // A tela desistiu de esperar, mas o servidor segue levando a mudança às OS e grava no fim: salvar de novo na
         // hora daria "Outra pessoa salvou".
         if (apply && e instanceof ApiError && (e.status === 408 || e.status === 504)) {
-          throw new ApiError(e.status, "O servidor ainda pode estar levando a mudança às OS. Confira a lista antes de salvar de novo.");
+          throw new ApiError(e.status, "O servidor ainda pode estar levando a mudança às OS. Confira a lista de formulários antes de salvar de novo.");
         }
         throw e;
       }
