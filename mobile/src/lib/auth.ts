@@ -6,6 +6,7 @@ import { notifyDataChanged } from "./changes";
 import { getKv, setKv } from "./db";
 import { deviceRegistration, registerDevice, unregisterDevice } from "./device";
 import { askNotificationPermission, ensureNotificationsReady, syncLocalAlerts } from "./notifications";
+import { loadPrivacySeen, waitPrivacySeen } from "./privacySeen";
 import { loadProfile } from "./profile";
 import { session } from "./session";
 import { applyPendingEnd, finishSessionEnd, forgetDisabledAccess, revokeAccess, sessionEndSettled } from "./sessionEnd";
@@ -120,12 +121,17 @@ export async function login(email: string, password: string, apiUrl: string) {
   }
   // Defesa extra caso a API não aplique o canal (versão antiga do backend).
   if (!canUseMobile(data.user.role)) throw new Error(MOBILE_DENIED_MESSAGE);
+  // Versão vista do aviso de privacidade (lib/privacySeen.ts): a leitura corre junto com o resto do login.
+  void loadPrivacySeen(data.user.id);
   // Outro técnico no mesmo aparelho: os dados locais (e a fila) eram do anterior.
   const owner = await getKv(OWNER_KEY);
   if (owner && owner !== data.user.id) await wipeLocalData();
   await setKv(OWNER_KEY, data.user.id);
   // Sessão nova: o aparelho é registrado de novo para o push, mesmo sem reabrir o app.
   pushRequestedFor = null;
+  // Hoje já desenha com o cartão "Aviso de privacidade atualizado" ou sem ele: espera a leitura no máximo
+  // PRIVACY_SEEN_WAIT_MS. Se passar disso, entra assim mesmo, e o cartão aparece depois.
+  await waitPrivacySeen(data.user.id);
   await session.signIn(data);
 }
 

@@ -1,7 +1,7 @@
 import { useFonts } from "expo-font";
 import { SplashScreen, Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 // As tarefas de segundo plano (rastreamento e sincronização) são definidas na entrada (index.ts), antes das
@@ -12,6 +12,7 @@ import { SuccessHost } from "../components/SuccessHost";
 import { ToastHost } from "../components/ToastHost";
 import { mustChangePassword } from "../lib/account";
 import { restoreSession, startSession } from "../lib/auth";
+import { waitPrivacySeen } from "../lib/privacySeen";
 import { session, useSession } from "../lib/session";
 import { stopSync } from "../lib/sync";
 import { stopTracking } from "../lib/tracking";
@@ -27,6 +28,7 @@ export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts(BRAND_FONTS);
   const fontsSettled = fontsLoaded || Boolean(fontError);
   const signedIn = status === "signedIn";
+  const userId = signedIn ? user?.id : undefined;
   // Técnico importado nasce com senha provisória: troca antes de entrar no app.
   const mustChange = signedIn && mustChangePassword(user);
 
@@ -41,8 +43,24 @@ export default function RootLayout() {
     if (fontError) console.warn("Falha ao carregar a fonte Manrope", fontError);
   }, [fontError]);
 
-  // A splash só sai quando a sessão foi lida e a fonte resolvida, para não piscar texto sem estilo.
-  const ready = status !== "loading" && fontsSettled;
+  // Abertura com técnico salvo: espera a versão vista do aviso de privacidade (lib/privacySeen.ts), no máximo
+  // PRIVACY_SEEN_WAIT_MS, para Hoje já desenhar com o cartão "Aviso de privacidade atualizado" ou sem ele. Só na
+  // abertura: depois, fica pronto de vez (o login espera a sua leitura em auth.login).
+  const [privacyChecked, setPrivacyChecked] = useState(false);
+  useEffect(() => {
+    if (privacyChecked || status === "loading") return;
+    let current = true;
+    void (userId ? waitPrivacySeen(userId) : Promise.resolve()).then(() => {
+      if (current) setPrivacyChecked(true);
+    });
+    return () => {
+      current = false;
+    };
+  }, [privacyChecked, status, userId]);
+
+  // A splash só sai quando a sessão foi lida, a fonte resolvida e a versão vista do aviso lida (ou o teto passou): nada
+  // de texto sem estilo piscando nem o cartão de Hoje empurrando a tela depois.
+  const ready = status !== "loading" && fontsSettled && privacyChecked;
   useEffect(() => {
     if (ready) void SplashScreen.hideAsync();
   }, [ready]);
