@@ -165,6 +165,24 @@ class Responsibility(StrEnum):
     INTERNAL = "internal"
     CUSTOMER = "customer"
     THIRD_PARTY = "third_party"
+    TECHNICIAN = "technician"  # o técnico (pesa no elo dele: services/technician_levels.py)
+
+
+class LevelTier(StrEnum):
+    """Elo do técnico (services/technician_levels.py), do mais baixo ao mais alto."""
+
+    BRONZE = "bronze"
+    SILVER = "silver"
+    GOLD = "gold"
+    DIAMOND = "diamond"
+
+
+class LevelOccurrenceKind(StrEnum):
+    """O que pesou no elo do técnico (a central pode desconsiderar cada uma)."""
+
+    LATE = "late"  # chegou mais de 30 min depois do horário combinado
+    REWORK = "rework"  # OS concluída reaberta em até 30 dias
+    UNPRODUCTIVE = "unproductive"  # visita improdutiva com motivo de responsabilidade do técnico
 
 
 class ApplicationStatus(StrEnum):

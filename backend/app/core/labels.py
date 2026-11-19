@@ -5,6 +5,7 @@ from enum import StrEnum
 from app.core.enums import (
     AssetType,
     Impact,
+    LevelTier,
     Responsibility,
     TicketSource,
     TicketType,
@@ -57,6 +58,15 @@ RESPONSIBILITY_LABELS = {
     Responsibility.INTERNAL: "Interna",
     Responsibility.CUSTOMER: "Cliente",
     Responsibility.THIRD_PARTY: "Terceiro / fornecedor",
+    Responsibility.TECHNICIAN: "Técnico",
+}
+
+# Elo do técnico (os textos que o servidor monta em services/technician_levels.py).
+LEVEL_TIER_LABELS = {
+    LevelTier.BRONZE: "Bronze",
+    LevelTier.SILVER: "Prata",
+    LevelTier.GOLD: "Ouro",
+    LevelTier.DIAMOND: "Diamante",
 }
 
 VIOLATION_SCOPE_LABELS = {

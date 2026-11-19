@@ -15,6 +15,7 @@ from sqlalchemy import (
     Table,
     Text,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -266,6 +267,15 @@ class TicketEvent(UUIDPrimaryKey, Base):
     """Histórico / trilha de auditoria imutável da OS."""
 
     __tablename__ = "ticket_events"
+    __table_args__ = (
+        # Reaberturas (o retorno no elo do técnico, services/technician_levels.py). A consulta usa
+        # este mesmo predicado escrito por extenso: com parâmetro, o plano genérico não usa o índice.
+        Index(
+            "ix_ticket_events_reopened",
+            "created_at",
+            postgresql_where=text("event_type = 'status_changed' AND to_value = 'reopened'"),
+        ),
+    )
 
     ticket_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("tickets.id", ondelete="CASCADE"), index=True
