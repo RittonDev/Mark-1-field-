@@ -5,11 +5,13 @@ import { api, ApiError } from "../lib/api";
 import { getKv, getTicket, setKv } from "../lib/db";
 import { formatBRL } from "../lib/expenses";
 import { formatDate, formatDateTime } from "../lib/format";
+import { useInvoicesVersion } from "../lib/invoices";
 import { useSyncStatus } from "../lib/sync";
 import { showToast } from "../lib/toast";
 import type { MyEarnings, PayoutLine } from "../lib/types";
 import { RADIUS, useStyles, useTheme, type Palette } from "../theme/theme";
 import { Icon } from "./Icon";
+import { InvoicesCard } from "./InvoicesCard";
 import { PixCard } from "./PixCard";
 import { Skeleton } from "./Skeleton";
 import { Text } from "./Text";
@@ -95,7 +97,8 @@ async function openTicket(id: string) {
  * cadastro) e o total a receber de todos os meses;
  * por mês, o que as OS concluídas no mês têm a receber, o que já foi pago e o previsto das que estão em
  * andamento, além dos reembolsos. Os valores são da central; sem internet, mostra o último resultado
- * guardado com a hora em que foi atualizado.
+ * guardado com a hora em que foi atualizado. Logo abaixo do resumo, as notas fiscais do mês (InvoicesCard), e cada
+ * OS coberta por uma nota mostra "NF 1234".
  *
  * `refreshKey` muda a cada "puxar para atualizar" na aba; `onSettled` avisa quando essa atualização terminou.
  */
@@ -103,6 +106,8 @@ export function EarningsView({ refreshKey = 0, onSettled }: { refreshKey?: numbe
   const c = useTheme();
   const styles = useStyles(makeStyles);
   const { lastSyncAt } = useSyncStatus();
+  // Nota fiscal enviada ou apagada neste aparelho: os valores voltam com o "NF" de cada OS em dia.
+  const invoicesVersion = useInvoicesVersion();
   const [currentKey] = useState(() => monthKey(new Date()));
   const [month, setMonth] = useState(() => {
     const today = new Date();
@@ -117,7 +122,7 @@ export function EarningsView({ refreshKey = 0, onSettled }: { refreshKey?: numbe
   const lastFetchAt = useRef(0);
   const allFor = useRef<string | null>(null);
   const settledRefresh = useRef(0);
-  const token = `${key}#${refreshKey}#${retry}`;
+  const token = `${key}#${refreshKey}#${retry}#${invoicesVersion}`;
 
   const notifySettled = useEffectEvent((round: number) => {
     if (round > settledRefresh.current) {
@@ -126,9 +131,10 @@ export function EarningsView({ refreshKey = 0, onSettled }: { refreshKey?: numbe
     }
   });
 
-  // Mês na tela: ao abrir, ao trocar de mês, ao puxar para atualizar e em "Tentar de novo".
+  // Mês na tela: ao abrir, ao trocar de mês, ao puxar para atualizar, em "Tentar de novo" e quando uma nota fiscal
+  // entra ou sai (o "NF" das OS).
   useEffect(() => {
-    const request = `${key}#${refreshKey}#${retry}`;
+    const request = `${key}#${refreshKey}#${retry}#${invoicesVersion}`;
     const jobs = [loadInto(key, { setEntries, setErrors })];
     // O total de todos os meses não muda com o mês na tela: só ao abrir e ao atualizar.
     const allRound = `${refreshKey}#${retry}`;
@@ -141,7 +147,7 @@ export function EarningsView({ refreshKey = 0, onSettled }: { refreshKey?: numbe
       setSettled((prev) => ({ ...prev, [key]: request }));
       if (refreshKey > 0) notifySettled(refreshKey);
     });
-  }, [key, refreshKey, retry]);
+  }, [key, refreshKey, retry, invoicesVersion]);
 
   // A central marcou como pago e o app sincronizou: confere de novo (no máximo a cada 2 min).
   useEffect(() => {
@@ -262,53 +268,59 @@ export function EarningsView({ refreshKey = 0, onSettled }: { refreshKey?: numbe
               </View>
             ) : null}
           </Card>
-
-          {entry.data.items.length ? (
-            <Card style={{ paddingVertical: 4 }}>
-              {entry.data.items.map((line, i) => {
-                const status = lineStatus(line);
-                const place = [line.ticket.customer, line.ticket.location, line.ticket.city].filter(Boolean).join(" · ");
-                return (
-                  <Pressable
-                    key={line.id}
-                    onPress={() => void openTicket(line.ticket.id)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`${line.ticket.code}, ${line.ticket.title}, ${formatBRL(line.amount)}, ${status.label}`}
-                    accessibilityHint="Abre a OS"
-                    style={({ pressed }) => [styles.line, i > 0 && styles.lineBorder, pressed && { backgroundColor: c.surface2 }]}
-                  >
-                    <View style={{ flex: 1, gap: 2 }}>
-                      <Text style={styles.code}>
-                        {line.ticket.code}
-                        {line.ticket.resolved_at ? ` · concluída ${formatDate(line.ticket.resolved_at)}` : ""}
-                      </Text>
-                      <Text style={styles.title} numberOfLines={2}>
-                        {line.ticket.title}
-                      </Text>
-                      {place ? (
-                        <Text style={styles.meta} numberOfLines={1}>
-                          {place}
-                        </Text>
-                      ) : null}
-                      {line.note ? <Text style={styles.note}>{line.note}</Text> : null}
-                    </View>
-                    <View style={{ alignItems: "flex-end", gap: 6 }}>
-                      <Text style={styles.amount}>{formatBRL(line.amount)}</Text>
-                      <Badge label={status.label} color={toneColor[status.tone]} />
-                    </View>
-                  </Pressable>
-                );
-              })}
-            </Card>
-          ) : (
-            <EmptyState
-              icon="wallet"
-              title="Nenhum chamado neste mês"
-              description="O valor de cada OS aparece aqui assim que a central te coloca nela."
-            />
-          )}
         </>
       )}
+
+      {/* Notas fiscais do mês: no mesmo lugar com os valores, carregando ou com erro (o cartão não é refeito). */}
+      <InvoicesCard month={key} monthName={MONTHS[month.getMonth()]} refreshKey={refreshKey} />
+
+      {entry ? (
+        entry.data.items.length ? (
+          <Card style={{ paddingVertical: 4 }}>
+            {entry.data.items.map((line, i) => {
+              const status = lineStatus(line);
+              const place = [line.ticket.customer, line.ticket.location, line.ticket.city].filter(Boolean).join(" · ");
+              return (
+                <Pressable
+                  key={line.id}
+                  onPress={() => void openTicket(line.ticket.id)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${line.ticket.code}, ${line.ticket.title}, ${formatBRL(line.amount)}, ${status.label}${line.invoice ? `, nota fiscal ${line.invoice.number}` : ""}`}
+                  accessibilityHint="Abre a OS"
+                  style={({ pressed }) => [styles.line, i > 0 && styles.lineBorder, pressed && { backgroundColor: c.surface2 }]}
+                >
+                  <View style={{ flex: 1, gap: 2 }}>
+                    <Text style={styles.code}>
+                      {line.ticket.code}
+                      {line.ticket.resolved_at ? ` · concluída ${formatDate(line.ticket.resolved_at)}` : ""}
+                      {line.invoice ? ` · NF ${line.invoice.number}` : ""}
+                    </Text>
+                    <Text style={styles.title} numberOfLines={2}>
+                      {line.ticket.title}
+                    </Text>
+                    {place ? (
+                      <Text style={styles.meta} numberOfLines={1}>
+                        {place}
+                      </Text>
+                    ) : null}
+                    {line.note ? <Text style={styles.note}>{line.note}</Text> : null}
+                  </View>
+                  <View style={{ alignItems: "flex-end", gap: 6 }}>
+                    <Text style={styles.amount}>{formatBRL(line.amount)}</Text>
+                    <Badge label={status.label} color={toneColor[status.tone]} />
+                  </View>
+                </Pressable>
+              );
+            })}
+          </Card>
+        ) : (
+          <EmptyState
+            icon="wallet"
+            title="Nenhum chamado neste mês"
+            description="O valor de cada OS aparece aqui assim que a central te coloca nela."
+          />
+        )
+      ) : null}
     </View>
   );
 }
