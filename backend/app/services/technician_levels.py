@@ -30,7 +30,6 @@ technicians, suggestions nem tickets (eles importam este).
 from __future__ import annotations
 
 import logging
-import math
 import uuid
 from collections import Counter, defaultdict
 from collections.abc import Iterable
@@ -401,7 +400,9 @@ def risk(
         f"{head}. Se não voltar a cumprir até {_day(until)}, passa para "
         f"{LEVEL_TIER_LABELS[computed]}."
     )
-    return LevelRisk(since=at_risk_since, until=until, falls_to=computed, failing=failing, text=text_)
+    return LevelRisk(
+        since=at_risk_since, until=until, falls_to=computed, failing=failing, text=text_
+    )
 
 
 def tier_summary(rule: TierRule) -> str:

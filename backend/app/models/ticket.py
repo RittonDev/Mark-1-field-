@@ -269,7 +269,7 @@ class TicketEvent(UUIDPrimaryKey, Base):
     __tablename__ = "ticket_events"
     __table_args__ = (
         # Reaberturas (o retorno no elo do técnico, services/technician_levels.py). A consulta usa
-        # este mesmo predicado escrito por extenso: com parâmetro, o plano genérico não usa o índice.
+        # este mesmo predicado por extenso: com parâmetro, o plano genérico não usa o índice.
         Index(
             "ix_ticket_events_reopened",
             "created_at",

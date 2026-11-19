@@ -46,9 +46,7 @@ async def refresh_levels(db: DB, _: TechniciansEdit) -> dict:
 
 
 @router.get("/technicians/{user_id}/level", response_model=TechnicianLevelDetail)
-async def technician_level(
-    user_id: uuid.UUID, db: DB, _: TechniciansView
-) -> TechnicianLevelDetail:
+async def technician_level(user_id: uuid.UUID, db: DB, _: TechniciansView) -> TechnicianLevelDetail:
     """O elo do técnico, recalculado agora, com as ocorrências (também as desconsideradas)."""
     technician = await technicians_svc.get_technician(db, user_id)
     out = await svc.central_detail(db, technician)
