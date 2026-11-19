@@ -1003,3 +1003,86 @@ async def test_refresh_route_and_job(
     async with maker() as db:
         total = await db.scalar(select(func.count()).select_from(TechnicianLevel))
         assert total == 3
+
+
+@requires_db
+async def test_ensure_computed_with_loose_row(
+    engine: AsyncEngine, client: AsyncClient, world: World
+) -> None:
+    """A conta solta que o app grava (GET /me/level antes de qualquer lista) não impede a lista de
+    calcular os outros. Um cálculo por vez: quem chega junto não espera nem refaz."""
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def rows() -> int:
+        async with maker() as db:
+            return await db.scalar(select(func.count()).select_from(TechnicianLevel)) or 0
+
+    r = await client.get(f"{API}/me/level", headers=world.tech.headers)
+    assert r.status_code == 200, r.text
+    assert await rows() == 1
+    r = await client.get(f"{API}/technicians", headers=world.analyst.headers)
+    assert r.status_code == 200, r.text
+    listed = {t["id"]: t["level"] for t in r.json()}
+    assert set(listed) == {str(world.tech.user.id), str(world.tech_other.user.id)}
+    assert all(level["since"] for level in listed.values()), listed
+    assert await rows() == 2
+    async with maker() as db:
+        assert await levels.ensure_computed(db) is False  # ninguém faltando: só lê
+
+    # Técnico novo enquanto outra requisição calcula todos (ela está com a trava).
+    async with maker() as db:
+        charlie = _tech("Charlie")
+        db.add(charlie)
+        await db.commit()
+    async with engine.connect() as other, other.begin():
+        await other.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": levels.ENSURE_LOCK},
+        )
+        async with maker() as db:
+            assert await levels.ensure_computed(db) is False
+    assert await rows() == 2
+    # Trava solta: calcula.
+    async with maker() as db:
+        assert await levels.ensure_computed(db) is True
+        await db.commit()
+    assert await rows() == 3
+
+
+@requires_db
+async def test_refresh_one_keeps_unchanged_row(engine: AsyncEngine, world: World) -> None:
+    """Recalcular sem novidade (abrir o cadastro, a rodada do app) não regrava a linha; com
+    novidade, grava."""
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    now = utcnow()
+    later = now + timedelta(hours=1)
+    async with maker() as db:
+        alfa = _tech("Alfa")
+        db.add(alfa)
+        await db.flush()
+        db.add_all(
+            _done(world, alfa, now=now, days_ago=5 + i, visited=False, legacy=FC)
+            for i in range(3)
+        )
+        await db.commit()
+    async with maker() as db:
+        await levels.refresh_one(db, alfa.id, now)
+        await db.commit()
+    async with maker() as db:
+        again = await levels.refresh_one(db, alfa.id, later)
+        # A resposta diz quando calculou; a linha guardada não muda.
+        assert (again.computed_at, again.counts.services) == (later, 3)
+        await db.commit()
+    async with maker() as db:
+        row = await db.get(TechnicianLevel, alfa.id)
+        assert row is not None
+        assert (row.computed_at, row.updated_at, row.metrics["services"]) == (now, now, 3)
+        db.add(_done(world, alfa, now=now, days_ago=1, visited=False, legacy=FC))
+        await db.commit()
+    async with maker() as db:
+        await levels.refresh_one(db, alfa.id, later)
+        await db.commit()
+    async with maker() as db:
+        row = await db.get(TechnicianLevel, alfa.id)
+        assert row is not None
+        assert (row.computed_at, row.metrics["services"]) == (later, 4)

@@ -4,6 +4,7 @@ cadastro e o aviso à central.
 Só dados fictícios: CPF 12345678909, "Tecnico Alfa", @exemplo.com.
 """
 
+import asyncio
 import base64
 import uuid
 from datetime import UTC, datetime
@@ -11,12 +12,14 @@ from pathlib import Path
 
 import pytest
 from httpx import AsyncClient, Response
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from app.core.config import settings
 from app.core.enums import ApplicationStatus
 from app.models import TechnicianApplication, User
-from app.services import login_guard, my_profile, realtime
+from app.schemas.my_profile import NAME_LETTERS
+from app.services import login_guard, my_profile, onboarding, realtime
 from tests.conftest import World, requires_db
 from tests.test_access import restrict_analyst
 from tests.test_api import create
@@ -55,6 +58,51 @@ async def stored(engine: AsyncEngine, user_id: uuid.UUID) -> User:
 def messages(r: Response) -> list[str]:
     detail = r.json()["detail"]
     return [detail] if isinstance(detail, str) else [d["msg"] for d in detail]
+
+
+def bearer(tokens: dict) -> dict[str, str]:
+    return {"Authorization": f"Bearer {tokens['access_token']}"}
+
+
+async def login_mobile(client: AsyncClient, email: str, password: str) -> dict[str, str]:
+    r = await client.post(
+        f"{API}/auth/login", json={"email": email, "password": password, "channel": "mobile"}
+    )
+    assert r.status_code == 200, r.text
+    return bearer(r.json())
+
+
+async def reset_by_central(client: AsyncClient, world: World) -> str:
+    """Técnicos › Redefinir senha (pelo analista): devolve a provisória."""
+    r = await client.post(
+        f"{API}/technicians/{world.tech.user.id}/reset-password", headers=world.analyst.headers
+    )
+    assert r.status_code == 200, r.text
+    return r.json()["temporary_password"]
+
+
+async def change_password(
+    client: AsyncClient, headers: dict[str, str], current: str, new: str
+) -> dict[str, str]:
+    r = await client.post(
+        f"{API}/auth/change-password",
+        json={"current_password": current, "new_password": new},
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    return bearer(r.json())
+
+
+def capture_events(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
+    """O `data` de cada profile.changed publicado (na ordem)."""
+    published: list[dict] = []
+
+    async def capture(event: dict) -> None:
+        if event["type"] == "profile.changed":
+            published.append(event["data"])
+
+    monkeypatch.setattr(realtime.bus, "publish", capture)
+    return published
 
 
 async def test_only_technicians_have_my_profile(client: AsyncClient, world: World) -> None:

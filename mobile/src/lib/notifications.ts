@@ -335,6 +335,7 @@ async function reconcileVisitReminders({ N, user, tickets, granted, force, alive
     if (!n.identifier.startsWith(VISIT_PREFIX)) continue;
     const want = byId.get(n.identifier);
     const same = !!want && n.content.data?.at === want.at && n.content.title === want.title && n.content.body === want.body;
+    // force: agenda de novo o que ainda dá tempo; o que vence em menos de 1 min fica como está.
     if (same && !(force && want.fireAt >= now + VISIT_MIN_LEAD_MS)) kept.add(n.identifier);
     else await N.cancelScheduledNotificationAsync(n.identifier);
   }

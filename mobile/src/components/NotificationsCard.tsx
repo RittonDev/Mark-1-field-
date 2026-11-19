@@ -3,6 +3,7 @@
 // plano" do cartão Sincronização. O estado é relido ao abrir a tela, quando as OS mudam e quando o app volta à
 // tela (a permissão pode ter mudado nas configurações do celular).
 
+import { isRunningInExpoGo } from "expo";
 import { useEffect, useRef, useState } from "react";
 import { AppState, Linking, StyleSheet, View } from "react-native";
 import { refreshPushRegistration } from "../lib/auth";
@@ -162,11 +163,16 @@ const BACKGROUND_LABEL: Record<BackgroundSyncStatus, string> = {
   unavailable: "Indisponível nesta versão do app",
 };
 
-/** Cartão Sincronização: a sincronização com o app fora da tela (tarefa periódica do sistema). */
+/**
+ * Cartão Sincronização: a sincronização com o app fora da tela (tarefa periódica do sistema). No Expo Go ela não
+ * existe: OS nova e oferta só chegam com o app aberto.
+ */
 export function BackgroundSyncRow() {
   const [status, setStatus] = useState<BackgroundSyncStatus | null>(null);
+  const expoGo = isRunningInExpoGo();
 
   useEffect(() => {
+    if (expoGo) return;
     let alive = true;
     const load = () => {
       void backgroundSyncStatus().then((next) => {
@@ -182,9 +188,10 @@ export function BackgroundSyncRow() {
       alive = false;
       sub.remove();
     };
-  }, []);
+  }, [expoGo]);
 
-  return <InfoRow label="Em segundo plano" value={status ? BACKGROUND_LABEL[status] : "Verificando…"} />;
+  const value = expoGo ? "Só com o app aberto" : status ? BACKGROUND_LABEL[status] : "Verificando…";
+  return <InfoRow label="Em segundo plano" value={value} />;
 }
 
 const styles = StyleSheet.create({
