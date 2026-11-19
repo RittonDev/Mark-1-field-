@@ -57,10 +57,7 @@ function syncLevelCaches(queryClient: QueryClient, technicianId: UUID, detail: T
   ]) {
     for (const [key, list] of queryClient.getQueriesData<Technician[]>({ queryKey: prefix })) {
       if (!Array.isArray(list) || !list.some((t) => withLevel(t, technicianId, level) !== t)) continue;
-      write(
-        key,
-        list.map((t) => withLevel(t, technicianId, level)),
-      );
+      write(key, list.map((t) => withLevel(t, technicianId, level)));
     }
   }
   const oneKey = ["technicians", "one", technicianId];
