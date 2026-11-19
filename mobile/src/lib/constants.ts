@@ -402,3 +402,51 @@ export const LEVEL_OCCURRENCE: Record<LevelOccurrenceKind, string> = {
   rework: "Retorno",
   unproductive: "Visita perdida",
 };
+
+// --------------------------------------------------------------------------- aviso de privacidade (LGPD)
+
+/**
+ * Versão do aviso: a mesma de PRIVACY_VERSION em backend/app/schemas/onboarding.py (a ficha grava a do servidor no
+ * aceite). Mudou o texto de PRIVACY_NOTICE? Mude a versão aqui e lá, no mesmo dia.
+ */
+export const PRIVACY_VERSION = "2026-11-19";
+
+/** O aviso de privacidade do técnico: a ficha da homologação mostra junto do aceite, e o app, para consulta. */
+export const PRIVACY_NOTICE: { title: string; body: string }[] = [
+  {
+    title: "Quem trata seus dados",
+    body: "A Maxx Field, como controladora, para avaliar seu cadastro como técnico parceiro e, se aprovado, para a gestão dos atendimentos.",
+  },
+  {
+    title: "Quais dados",
+    body: "Os do seu cadastro: identificação (nome, CPF, nascimento e foto), contato, endereço, CNPJ ou MEI (se tiver), região de atendimento, experiência, skills, veículo e CNH, disponibilidade, a senha do app (que ninguém da equipe consegue ver) e a chave PIX que você cadastrar no app para receber pelos chamados.",
+  },
+  {
+    title: "Para quê",
+    body: "Homologação técnica, cadastro na base de técnicos, distribuição de ordens de serviço, contato sobre os atendimentos e pagamento dos chamados por PIX. Não vendemos nem compartilhamos seus dados para marketing.",
+  },
+  {
+    title: "Com quem compartilhamos",
+    body: "O cliente atendido vê o seu nome e os horários da visita (saída, chegada e conclusão) no relatório e no portal do atendimento. Os demais dados ficam só com a equipe da Maxx Field.",
+  },
+  {
+    title: "Localização (GPS)",
+    body: "Se aprovado, o app coleta sua localização somente durante a jornada que você mesmo inicia e encerra, para acompanhar o deslocamento até o cliente. O app pede sua autorização antes da primeira jornada.",
+  },
+  {
+    title: "Notas fiscais",
+    body: "As que você envia pelo app: número, valor, datas e o arquivo, que pode trazer seu CPF ou CNPJ e endereço. Servem para conferir os pagamentos e ficam guardadas pelo prazo da legislação fiscal.",
+  },
+  {
+    title: "Elo",
+    body: "Classificação pelos seus atendimentos dos últimos 12 meses: quantidade, chegada no horário, retornos e visitas perdidas. Você acompanha em Meu elo, no app, e pode pedir à central a revisão de uma ocorrência.",
+  },
+  {
+    title: "Por quanto tempo",
+    body: "Enquanto você fizer parte da base técnica e pelo prazo exigido em lei. Fichas reprovadas são excluídas após a análise e o prazo legal aplicável.",
+  },
+  {
+    title: "Seus direitos",
+    body: "Você pode pedir acesso, correção, portabilidade ou exclusão dos seus dados e revogar consentimentos a qualquer momento, falando com a equipe da Maxx Field.",
+  },
+];

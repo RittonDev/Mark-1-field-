@@ -679,10 +679,16 @@ export interface TicketCreatePayload {
    * Uma lista, mesmo vazia, vale como está (até 20). Repetido, inexistente ou inativo: 422, sem gastar número.
    */
   forms?: { template_id: UUID; required: boolean }[] | null;
+  /**
+   * Só com `forms`: os ligados ao tipo de OS ou à categoria que o analista desmarcou (até 20). Ficam de fora e não entram
+   * sozinhos depois; os ligados que não vieram em nenhuma das duas listas entram como automáticos. Omitido, com `forms`:
+   * todos os ligados fora da lista ficam de fora (regra anterior).
+   */
+  forms_left_out?: UUID[];
 }
 
 export type TicketUpdatePayload = Partial<
-  Omit<TicketCreatePayload, "source" | "requester_id" | "assignee_id" | "tags" | "forms">
+  Omit<TicketCreatePayload, "source" | "requester_id" | "assignee_id" | "tags" | "forms" | "forms_left_out">
 > & {
   expected_version?: number;
   /** Só a gestão, a qualquer momento (inclusive OS fechada). */
@@ -1153,7 +1159,10 @@ export interface FormField {
   options: string[];
   min_photos: number;
   max_photos: number;
-  /** Resposta automática (null: a pergunta é do técnico). Combinação que o tipo não aceita volta null. */
+  /**
+   * Resposta automática (null: a pergunta é do técnico). Combinação que o tipo não aceita volta null. No PUT do modelo,
+   * sem a chave a pergunta mantém a fonte gravada (mesmo id, se o tipo aceitar); mande null para limpar.
+   */
   prefill?: FormPrefill | null;
 }
 
@@ -1219,7 +1228,9 @@ export interface TicketForm {
   auto_attached?: boolean;
   /**
    * Resposta automática das perguntas ainda sem resposta: {campo: valor}, ao vivo até a conclusão, que grava o valor
-   * nas respostas (concluído, vem vazio). Vale como resposta do servidor: `{...prefill, ...answers}`.
+   * nas respostas (concluído, vem vazio). Vale como resposta do servidor: `{...prefill, ...answers}`. Data da visita:
+   * em atendimento, o dia do trecho atual; antes da chegada, o da agenda; fora de atendimento depois de uma chegada, não
+   * vem (a conclusão grava o dia da última ida).
    */
   prefill?: Record<string, FormAnswer>;
 }
@@ -1984,10 +1995,14 @@ export interface MyProfile {
 
 /**
  * PATCH /me/profile: mande só o que mudou. E-mail e chave PIX (cadastrar, trocar tipo, chave ou titular, remover)
- * pedem `current_password`: sem ela, 422 "Confirme com a sua senha atual para mudar o e-mail ou a chave PIX"; errada,
- * 422 "Senha atual incorreta"; 5 erros em 15 min (somando os da troca de senha), 429 com Retry-After.
+ * pedem `current_password`. Recusas, nesta ordem (422): com a senha provisória, "Crie sua senha no app antes de mudar o
+ * e-mail ou a chave PIX"; e-mail da empresa, "Use um e-mail que não seja da empresa"; sem a senha, "Confirme com a sua
+ * senha atual para mudar o e-mail ou a chave PIX"; errada, "Senha atual incorreta"; só então "E-mail já cadastrado".
+ * 429 com Retry-After: 5 senhas erradas em 15 min (somando as da troca de senha) ou mais de 10 pedidos de troca de
+ * e-mail na hora.
  */
 export interface MyProfileUpdate {
+  /** Só letras (com acento), espaço, apóstrofo, hífen e ponto; sem link (422 "Use só letras no nome"). */
   name?: string;
   /** 10 a 13 dígitos (aceita +55); volta "(11) 98888-7777". */
   phone?: string;
@@ -2031,13 +2046,16 @@ export type UserChangeField =
   | "address_zip"
   | "work_schedule"
   | "services"
-  /** A chave mascarada ("CPF ***.456.789-**"); null sem chave. */
+  /** A chave mascarada ("CPF ***.456.789-**"); null sem chave. Para quem não tem Pagamentos, "***" (null continua null). */
   | "pix"
-  /** Titular da conta da chave PIX. */
+  /** Titular da conta da chave PIX. Não vem para quem não tem Pagamentos. */
   | "pix_holder"
   /** to "nova" na troca, null na remoção. */
   | "avatar"
-  /** to "provisória" (redefinição em Técnicos) ou "definida pela central" (Usuários). */
+  /**
+   * to "provisória" (redefinição em Técnicos), "definida pela central" (Usuários), "criada no app" (o técnico trocou
+   * a provisória) ou "trocada no app".
+   */
   | "password";
 
 /** Uma mudança, com o texto pronto para a tela (team: o nome do grupo; is_active: "Liberado" ou "Bloqueado"). */
@@ -2064,6 +2082,11 @@ export interface UserChange {
 export interface ProfileChangedData {
   fields: UserChangeField[];
   via: "app" | "central";
+  /**
+   * Só na troca de e-mail ou de chave PIX pelo app até 72 h depois de a central redefinir a senha (Técnicos ou
+   * Usuários): quem redefiniu ("Sistema" sem autor) e quando. Ausente nos outros casos.
+   */
+  after_reset?: { by: string; at: ISODate } | null;
 }
 
 // --------------------------------------------------------------------------- ofertas de OS
@@ -2494,15 +2517,32 @@ export interface LevelOccurrence {
   detail: string;
 }
 
-/** A ocorrência desconsiderada pela central (só a central vê). */
+/**
+ * A OS da ocorrência na central. `hidden`: OS de outra fila (quem pede vê só a própria fila): vem sem id e sem código,
+ * com o título "OS de outra fila"; sem link e sem desconsiderar (o servidor responde 403 QUEUE_FORBIDDEN).
+ */
+export interface CentralLevelTicketRef {
+  id: UUID | null;
+  /** "OS-000123"; null na OS de outra fila. */
+  code: string | null;
+  title: string;
+  hidden: boolean;
+}
+
+/**
+ * A ocorrência desconsiderada pela central (só a central vê). `note` vem null na OS de outra fila (ficam quem
+ * desconsiderou e quando).
+ */
 export interface LevelWaiver {
   id: UUID;
-  note: string;
+  note: string | null;
   created_by: Ref | null;
   created_at: ISODate;
 }
 
-export interface CentralLevelOccurrence extends LevelOccurrence {
+/** Na central, também as desconsideradas. Na OS de outra fila, `detail` vem sem a nota da reabertura. */
+export interface CentralLevelOccurrence extends Omit<LevelOccurrence, "ticket"> {
+  ticket: CentralLevelTicketRef;
   waiver: LevelWaiver | null;
 }
 

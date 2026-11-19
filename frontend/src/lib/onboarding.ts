@@ -1,11 +1,14 @@
 "use client";
 
-// Homologação: catálogo (rótulos vêm da API), o aviso de privacidade (LGPD) da ficha e as
-// validações e máscaras dos documentos (as mesmas da API).
+// Homologação: catálogo (rótulos vêm da API), o aviso de privacidade (LGPD) da ficha (de
+// constants.ts) e as validações e máscaras dos documentos (as mesmas da API).
 
 import { useQuery } from "@tanstack/react-query";
 import { request } from "./api";
 import type { OnboardingCatalog } from "./types";
+
+// O aviso de privacidade (texto e versão) fica em constants.ts, igual ao do app.
+export { PRIVACY_NOTICE, PRIVACY_VERSION } from "./constants";
 
 /** As 27 UFs (a API recusa outra sigla). */
 export const UFS = [
@@ -62,38 +65,6 @@ export function shareableInviteUrl(invite: { token?: string; url?: string | null
   if (local && invite.url && isInternalUrl(local) && !isInternalUrl(invite.url)) return invite.url;
   return local ?? invite.url ?? null;
 }
-
-// Mudou o texto? Mude também PRIVACY_VERSION em backend/app/schemas/onboarding.py (hoje "2026-11-18": a chave PIX).
-export const PRIVACY_NOTICE: { title: string; body: string }[] = [
-  {
-    title: "Quem trata seus dados",
-    body: "A Maxx Field, como controladora, para avaliar seu cadastro como técnico parceiro e, se aprovado, para a gestão dos atendimentos.",
-  },
-  {
-    title: "Quais dados",
-    body: "Os desta ficha: identificação (nome, CPF, nascimento e foto), contato, endereço, CNPJ ou MEI (se tiver), região de atendimento, experiência, skills, veículo e CNH, disponibilidade, a senha do app (que ninguém da equipe consegue ver) e a chave PIX que você cadastrar no app para receber pelos chamados.",
-  },
-  {
-    title: "Para quê",
-    body: "Homologação técnica, cadastro na base de técnicos, distribuição de ordens de serviço e contato sobre os atendimentos. Não vendemos nem compartilhamos seus dados para marketing.",
-  },
-  {
-    title: "Com quem compartilhamos",
-    body: "O cliente atendido vê o seu nome e os horários da visita (saída, chegada e conclusão) no relatório e no portal do atendimento. Os demais dados ficam só com a equipe da Maxx Field.",
-  },
-  {
-    title: "Localização (GPS)",
-    body: "Se aprovado, o app coleta sua localização somente durante a jornada que você mesmo inicia e encerra, para acompanhar o deslocamento até o cliente. O app pede sua autorização antes da primeira jornada.",
-  },
-  {
-    title: "Por quanto tempo",
-    body: "Enquanto você fizer parte da base técnica e pelo prazo exigido em lei. Fichas reprovadas são excluídas após a análise e o prazo legal aplicável.",
-  },
-  {
-    title: "Seus direitos",
-    body: "Você pode pedir acesso, correção, portabilidade ou exclusão dos seus dados e revogar consentimentos a qualquer momento, falando com a equipe da Maxx Field que enviou este link.",
-  },
-];
 
 export function isValidCpf(value: string): boolean {
   const d = value.replace(/\D/g, "");
