@@ -193,7 +193,8 @@ Requisitos:
   aceita pelo valor ou recusa, e quem aceitar primeiro fica com ela.
 - **Meu cadastro** (detalhes abaixo): o técnico mantém a foto, os dados de contato, o endereço e a chave PIX em
   que recebe pelos chamados; e-mail e chave PIX pedem a senha atual, e a central é avisada na hora.
-- **Aviso de privacidade** (detalhes abaixo): o texto da LGPD da homologação, só para leitura.
+- **Aviso de privacidade** (detalhes abaixo): o texto da LGPD da homologação, só para leitura, com um cartão em Hoje
+  quando o texto muda.
 - **Notas fiscais (aba Ganhos)** (detalhes abaixo): o técnico envia a nota do mês (PDF, XML ou foto), marca as OS
   que ela cobre e acompanha a conferência da central; a nota é opcional e nunca trava o pagamento.
 - **Meu elo** (detalhes abaixo): o brasão do técnico (Bronze, Prata, Ouro ou Diamante) pelos atendimentos dos
@@ -223,12 +224,13 @@ A central manda uma OS ainda sem técnico, com o valor, para alguns técnicos (c
   destaque, o serviço, bairro · cidade/UF, a janela da visita (ou "Data a combinar"), "Responder até 15:30" e o
   selo **Nova** enquanto o técnico não abriu. O prazo é contado pelo relógio do servidor (`serverNow`): a oferta
   vencida sai da lista sozinha.
-- **Avisos**: oferta nova → "Nova oferta de OS" com valor, serviço, bairro e o prazo ("responder até 15:30");
-  tocar abre a oferta, nunca a OS, que ainda não é dele. Com o app fora da tela, vira notificação do sistema
-  quando a sincronização roda em segundo plano, o que exige um app instalado (seção Notificações; no Expo Go, só com o
-  app aberto), e sai da bandeja quando a oferta fecha. A que fecha sem resposta → "Outro técnico aceitou a OS-…", "A
-  central cancelou a oferta da OS-…" (só com o app na tela). Não há push real: com o app fechado, o técnico fica sabendo
-  pelo texto que a central cola no grupo.
+- **Avisos**: oferta nova → "Nova oferta de OS" com valor, serviço, bairro e o prazo. O toast na hora diz o prazo
+  relativo ("responder até 15:30", "responder até amanhã 09:00"); a notificação e o aviso guardado sem a permissão, que
+  ficam até a oferta fechar, levam a data ("responder até sáb 21/11 09:00"). Tocar abre a oferta, nunca a OS, que
+  ainda não é dele. Com o app fora da tela, vira notificação do sistema quando a sincronização roda em segundo plano, o
+  que exige um app instalado (seção Notificações; no Expo Go, só com o app aberto), e sai da bandeja quando a oferta
+  fecha. A que fecha sem resposta → "Outro técnico aceitou a OS-…", "A central cancelou a oferta da OS-…" (só com o app
+  na tela). Não há push real: com o app fechado, o técnico fica sabendo pelo texto que a central cola no grupo.
 - **Tela da oferta** (`/oferta/<id>`): abrir chama `GET /me/offers/{id}`, que grava a leitura no servidor.
   Mostra nº e título, tipo de serviço, bairro · cidade/UF, janela da visita, o recado da central, os
   formulários (nome e se é obrigatório) e o cartão **Escopo** recolhido: abrir o escopo marca **Escopo lido**
@@ -406,7 +408,10 @@ lembretes da visita são locais e funcionam também no Expo Go, mas só depois q
   - Sem a permissão de notificações, o que a rodada fora da tela apura fica guardado no aparelho (kv
     `deferred_notices`, até 20 avisos, por 6 h) e vira toast quando o app volta à tela. Com mais de 3, aparecem "Mais N
     avisos · Veja em Hoje." e os 2 mais importantes. O aviso de OS que saiu do aparelho e o de oferta que fechou são
-    descartados.
+    descartados. O que a rodada apura depois do fim da sessão (Sair, sessão encerrada pelo servidor, outro técnico) não
+    é guardado: a limpeza do fim de sessão já esvaziou a fila (`deferNews` confere a sessão na mesma fila de gravação).
+  - O texto que fica na bandeja e na fila leva a data, nunca "amanhã": "Visita sex 20/11 às 08:00 · …" e, na oferta,
+    "responder até sáb 21/11 09:00". O dia relativo fica só no toast na hora.
 - **Sincronização em segundo plano** (só num app instalado): na jornada, a localização mantém o app vivo e sai uma
   rodada a cada ~3 min; fora dela, a tarefa periódica do sistema (`expo-background-task`, 15 min ou mais:
   WorkManager no Android; no iOS o sistema decide e roda pouco). Com o app fechado à força pelo técnico, nada roda. A
@@ -426,8 +431,8 @@ lembretes da visita são locais e funcionam também no Expo Go, mas só depois q
   quando a central responder `live`, o app para de repetir o aviso (kv `push_live`). O cartão **Aparelho** mostra
   o estado ("Ainda não ligado na central"; no Expo Go, "Indisponível nesta versão do app").
 - **Saiu da conta**: nada agendado, a bandeja limpa (loja e endereço aparecem na tela bloqueada) e os avisos guardados
-  somem. As chaves `visit_reminders`, `notifications_asked`, `push_live` e `deferred_notices` (cada aviso leva o id do
-  técnico) ficam no kv e somem na troca de técnico.
+  somem (a rodada que termina depois não guarda outros). As chaves `visit_reminders`, `notifications_asked`,
+  `push_live` e `deferred_notices` (cada aviso leva o id do técnico) ficam no kv e somem na troca de técnico.
 
 ## Meu cadastro
 
@@ -551,8 +556,15 @@ Tela `/privacidade` ([src/app/privacidade.tsx](src/app/privacidade.tsx)), só de
   idêntica da web), com "Atualizado em" pela data de `PRIVACY_VERSION`. Cita os dados do cadastro e a chave PIX, o
   pagamento por PIX, a localização na jornada, as notas fiscais e o Elo.
 - **Onde abre**: na Conta (cartão Rastreamento da jornada, abaixo do Termo de uso da localização), no cartão Pagamento
-  do Meu cadastro, no fim da tela Enviar nota fiscal e no fim do "Como funciona" do Meu elo.
-- **Não grava ciência**: o aceite continua sendo o da ficha da homologação; a tela é só para consulta.
+  do Meu cadastro, no fim da tela Enviar nota fiscal, no fim do "Como funciona" do Meu elo e no cartão de Hoje.
+- **Cartão em Hoje** ([src/components/PrivacyUpdateCard.tsx](src/components/PrivacyUpdateCard.tsx)): quando o texto
+  muda (`PRIVACY_VERSION` diferente da versão que este técnico abriu), a aba Hoje mostra, depois da jornada e das
+  ofertas, "Aviso de privacidade atualizado" · "Agora ele fala da chave PIX, das notas fiscais e do Elo." com **Ler
+  aviso**. É discreto e não bloqueia nada. Abrir o aviso por qualquer caminho grava a versão como vista, e o cartão some.
+- **Versão vista**: só no aparelho, por técnico, no Keychain/Keystore (`mc_privacy_seen_<id do técnico>`, como a
+  preferência de tema). Vale offline e sobrevive ao Sair e à troca de técnico. A leitura começa quando a sessão abre,
+  antes de Hoje desenhar: o cartão entra junto com a tela (se a leitura atrasar, aparece com um fade curto).
+- **Não grava ciência no servidor**: o aceite continua sendo o da ficha da homologação.
 
 ## Como a sincronização funciona
 
@@ -595,7 +607,7 @@ src/
     termo-rastreamento.tsx  termo de ciência do rastreamento (LGPD)
     conta.tsx          técnico (foto, Meu cadastro, elo, senha), sincronização, fila, avisos, rastreamento e aviso de privacidade, notificações, aparência, sair
     meu-cadastro.tsx   Meu cadastro: foto, dados, endereço e chave PIX (e-mail e PIX com a senha atual)
-    privacidade.tsx    Aviso de privacidade (LGPD), só leitura
+    privacidade.tsx    Aviso de privacidade (LGPD), só leitura; abrir grava a versão vista pelo técnico
     elo.tsx            Meu elo: brasão, risco, o que falta para a próxima faixa, números, o que pesou e "Como funciona"
     nota-fiscal.tsx    Enviar nota fiscal: arquivo, número, emissão, valor, competência e as OS que a nota cobre
   components/          UI (marca, cartões, calendário, jornada, diálogo de transição, abas da OS)
@@ -605,6 +617,7 @@ src/
     NotificationsCard.tsx  Conta > Notificações (lembretes, permissão, alarme exato) e "Em segundo plano"
     Avatar.tsx         foto do técnico ou as iniciais (topo da tela inicial, Conta, Meu cadastro)
     PixCard.tsx        Ganhos > Recebimento por PIX (atalho para o Meu cadastro)
+    PrivacyUpdateCard.tsx  Hoje > "Aviso de privacidade atualizado" e a versão vista por técnico (Keychain/Keystore)
     InvoicesCard.tsx   Ganhos > Notas fiscais do mês (situação, motivo da recusa, abrir arquivo, apagar, enviar)
     LevelBadge.tsx     brasão do elo (escudo com as marcas da faixa), selo e o chip do topo de Hoje
   theme/theme.ts       paleta Maxx Field, claro/escuro, preferência do técnico

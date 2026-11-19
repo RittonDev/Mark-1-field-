@@ -26,6 +26,10 @@ Este documento é o contrato que o app do técnico (`mobile/`, Expo; ver [mobile
    ele não repete o aviso do push (§5). `DELETE /devices/{token}` no logout.
 4. `GET /meta` (público) traz status, rótulos, cores e transições para montar a interface.
 
+Aviso de privacidade: não há rota de ciência. A versão que o técnico abriu (`PRIVACY_VERSION`) fica só no aparelho, no
+Keychain/Keystore e por técnico; com versão nova, Hoje mostra o cartão "Aviso de privacidade atualizado" até ele abrir
+o aviso (vale offline e sobrevive ao Sair).
+
 ## 2. Download (pull)
 
 ```
@@ -118,9 +122,12 @@ credencial por variável de ambiente e mande a mensagem no canal `default` do An
 **Avisos do próprio app.** Enquanto o push não chega, o app compara a OS guardada com a do pull (só no delta,
 nunca no download completo) e a lista de ofertas com a anterior, e avisa: com o app na tela, toast; fora dela
 (rodada em segundo plano: jornada aberta ou tarefa periódica do sistema), notificação do sistema. Sem a permissão de
-notificações, o aviso fica guardado no aparelho e vira toast quando o app volta à tela (até 20, por 6 h). **Não
-repetir**: com `push: live` o app não apresenta a notificação dele (o push já avisou), e o push que chega com o app na
-tela não aparece (o toast do pull já avisa).
+notificações, o aviso fica guardado no aparelho e vira toast quando o app volta à tela (até 20, por 6 h); o que a rodada
+apura depois do fim da sessão (Sair, sessão encerrada pelo servidor, outro técnico) não é guardado, porque a limpeza
+do fim de sessão já esvaziou a fila. O texto que fica (notificação e aviso guardado) leva a data, nunca "amanhã":
+"Visita sáb 21/11 às 08:00 · …" e, na oferta, "responder até sáb 21/11 09:00"; o dia relativo fica só no toast na
+hora. **Não repetir**: com `push: live` o app não apresenta a notificação dele (o push já avisou), e o push que chega
+com o app na tela não aparece (o toast do pull já avisa).
 
 **Onde isso chega hoje.** Fora da tela, o aviso depende de uma rodada em segundo plano, e o Expo Go não roda nenhuma:
 **no Expo Go, OS nova e oferta só aparecem com o app aberto**. Num app instalado (development build), a tarefa
