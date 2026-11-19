@@ -233,7 +233,6 @@ export const EXAMPLES: { name: string; build: () => Draft }[] = [
 
 function cleanField(f: FormField): FormField {
   const photo = f.type === "photo";
-  const prefill = prefillOf(f);
   return {
     id: f.id,
     type: f.type,
@@ -244,8 +243,9 @@ function cleanField(f: FormField): FormField {
     options: isChoice(f.type) ? f.options.map((o) => o.trim()).filter(Boolean) : [],
     min_photos: photo ? photoNeed(f) : 0,
     max_photos: f.max_photos,
-    // Só quando há resposta automática (como a API grava): a pergunta sem fonte não muda de forma.
-    ...(prefill ? { prefill } : {}),
+    // Sempre com a chave: a fonte, ou null em "Resposta do técnico" (e no tipo que não aceita). Sem a chave, a API
+    // mantém a fonte gravada na pergunta, para uma aba aberta antes da resposta automática não apagá-la.
+    prefill: prefillOf(f),
   };
 }
 

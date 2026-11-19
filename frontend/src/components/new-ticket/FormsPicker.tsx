@@ -5,10 +5,7 @@ import { ClipboardList, X } from "lucide-react";
 import Link from "next/link";
 import { Checkbox, Select, Skeleton } from "@/components/ui";
 import type { Category, FormTemplate, ServiceType, UUID } from "@/lib/types";
-import { matchedForms } from "./draft";
-
-/** Limite de formulários na abertura (o mesmo da API). */
-const MAX_FORMS = 20;
+import { matchedForms, MAX_FORMS } from "./draft";
 
 /** Obrigatório ou opcional na OS, com o mesmo botão da aba Formulários da OS. */
 function RequiredToggle({ name, required, onChange }: { name: string; required: boolean; onChange: (required: boolean) => void }) {
@@ -31,8 +28,8 @@ function RequiredToggle({ name, required, onChange }: { name: string; required: 
 
 /**
  * Formulários (checklists) que o técnico preenche no app. Os ligados ao tipo de OS e à categoria vêm
- * marcados; os demais entram pelo seletor. Cada um entra obrigatório ou opcional (obrigatório trava a
- * conclusão da OS até ser preenchido).
+ * marcados (desmarcado, fica de fora da OS); os demais entram pelo seletor. Cada um entra obrigatório ou
+ * opcional (obrigatório trava a conclusão da OS até ser preenchido).
  */
 export function FormsPicker({
   templates,

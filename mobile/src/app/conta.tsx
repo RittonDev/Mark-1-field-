@@ -22,7 +22,7 @@ import { stopTracking, useTracking } from "../lib/tracking";
 import { useDataVersion, useLiveQuery } from "../lib/changes";
 import { APP_VERSION } from "../lib/config";
 import { confirmAction } from "../lib/dialogs";
-import { LEVEL_TIER, ROLE } from "../lib/constants";
+import { LEVEL_TIER, PRIVACY_VERSION, ROLE } from "../lib/constants";
 import { countPending, dismissNotice, listNotices, listPendingOps, type PendingOp } from "../lib/db";
 import type { DeviceRegistration } from "../lib/device";
 import { formatDateTime, formatTime } from "../lib/format";
@@ -47,6 +47,9 @@ function networkLabel(s: SyncStatus): string {
 }
 
 const REALTIME_LABEL = { off: "Desligada", connecting: "Conectando…", online: "Ativa" } as const;
+
+/** A versão do aviso de privacidade é a data do texto: "2026-11-19" → "19/11/2026" (sem fuso). */
+const PRIVACY_DATE = PRIVACY_VERSION.split("-").reverse().join("/");
 
 /** Push da central neste aparelho (as notificações locais, lembretes e avisos, ficam no cartão Notificações). */
 function pushLabel(registration: DeviceRegistration | null): string {
@@ -361,6 +364,7 @@ export default function AccountScreen() {
           value={consentAt ? `Aceito em ${formatDateTime(consentAt)}` : "Ainda não aceito"}
           onPress={() => router.push("/termo-rastreamento")}
         />
+        <InfoRow label="Aviso de privacidade" value={`Atualizado em ${PRIVACY_DATE}`} onPress={() => router.push("/privacidade")} />
         <InfoRow label="Situação" value={situation} />
         {tracking.shift ? (
           <InfoRow

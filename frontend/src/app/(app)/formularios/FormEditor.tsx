@@ -42,6 +42,9 @@ const FOCUS_TARGETS: readonly string[] = ["label", "help", "options", "up", "dow
 /** "1 OS que ainda não começou", "3 OS que ainda não começaram". */
 const notStarted = (n: number) => `${n.toLocaleString("pt-BR")} OS que ainda não ${n === 1 ? "começou" : "começaram"}`;
 
+/** Com "Levar também...", o servidor passa por cada OS que ainda não começou: com muitas, leva mais que os 30 s de sempre. */
+const APPLY_TIMEOUT_MS = 120_000;
+
 /**
  * Aviso depois de salvar: a versão nova e, quando pedido ("Levar também..."), as OS que receberam a mudança
  * das perguntas (`fields`) e aquelas em que o formulário entrou ou de que saiu pelos vínculos (`links`).
@@ -165,15 +168,26 @@ export function FormEditor({
       const body = payload(draft);
       const apply = applyPending && offerApply;
       const asked = { fields: apply && reachesTickets, links: apply && linksMoved };
-      const saved = draft.id
-        ? await request<FormTemplate>(`/form-templates/${draft.id}`, {
-            method: "PUT",
-            // A API recusa (409) se o modelo mudou depois da versão de onde o rascunho saiu.
-            body: { ...body, base_updated_at: overwrite ? null : (draft.updated_at ?? null) },
-            query: { apply_to_pending: apply },
-          })
-        : await request<FormTemplate>("/form-templates", { method: "POST", body, query: { apply_to_pending: apply } });
-      return { saved, asked };
+      const timeoutMs = apply ? APPLY_TIMEOUT_MS : undefined;
+      try {
+        const saved = draft.id
+          ? await request<FormTemplate>(`/form-templates/${draft.id}`, {
+              method: "PUT",
+              // A API recusa (409) se o modelo mudou depois da versão de onde o rascunho saiu.
+              body: { ...body, base_updated_at: overwrite ? null : (draft.updated_at ?? null) },
+              query: { apply_to_pending: apply },
+              timeoutMs,
+            })
+          : await request<FormTemplate>("/form-templates", { method: "POST", body, query: { apply_to_pending: apply }, timeoutMs });
+        return { saved, asked };
+      } catch (e) {
+        // A tela desistiu de esperar, mas o servidor segue levando a mudança às OS e grava no fim: salvar de novo na
+        // hora daria "Outra pessoa salvou".
+        if (apply && e instanceof ApiError && (e.status === 408 || e.status === 504)) {
+          throw new ApiError(e.status, "O servidor ainda pode estar levando a mudança às OS. Confira a lista antes de salvar de novo.");
+        }
+        throw e;
+      }
     },
     onSuccess: ({ saved, asked }) => {
       invalidateForms(queryClient);

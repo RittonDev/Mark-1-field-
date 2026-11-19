@@ -39,10 +39,14 @@ import {
   isFilled,
   locationLabel,
   matchedForms,
+  openingForms,
   ORIGIN_KEY,
+  restoredDraft,
   syncForms,
   withCategory,
   withCustomer,
+  withFormToggled,
+  withLinkedForms,
   withLocation,
   withServiceType,
   type NewTicketDraft,
@@ -94,6 +98,7 @@ import { useAssignable, useCategories, useCityFavorites, useCustomers } from "@/
 import { tagRulesQuery } from "@/lib/tagRules";
 import type {
   AssignableUser,
+  Category,
   ConflictItem,
   FormTemplate,
   IntakeContext,
@@ -249,7 +254,7 @@ function NewTicket() {
     const stored = readStored<Origin>("local", ORIGIN_KEY);
     const fresh = blankDraft(isOrigin(stored) ? stored : "whatsapp");
     const saved = userId ? readStored<StoredDraft>("session", draftKey(userId)) : null;
-    if (saved?.v === DRAFT_VERSION && saved.draft?.form && isFilled(saved.draft)) return { draft: saved.draft, savedAt: saved.savedAt };
+    if (saved?.v === DRAFT_VERSION && saved.draft?.form && isFilled(saved.draft)) return { draft: restoredDraft(saved.draft), savedAt: saved.savedAt };
     return { draft: { ...fresh, form: { ...fresh.form, customer_id: prefill.customerId } }, savedAt: null };
   });
   const restored = start.savedAt !== null;
@@ -336,6 +341,14 @@ function NewTicket() {
     queryFn: () => api.get<Location>(`/locations/${prefill.locationId}`),
     enabled: Boolean(prefill.locationId) && (Boolean(pendingLocationId) || offerPrefill),
   });
+
+  // Modelos ou categorias que chegam (ou voltam relidos): os ligados ao tipo e à categoria que a tela ainda não tinha
+  // posto entram marcados, como a API faria com eles. Assim a lista mostrada é a que a OS recebe.
+  const [formsBasis, setFormsBasis] = useState<[FormTemplate[] | undefined, Category[] | undefined]>([undefined, undefined]);
+  if (templates.data !== formsBasis[0] || categories.data !== formsBasis[1]) {
+    setFormsBasis([templates.data, categories.data]);
+    if (templates.data) setD((x) => withLinkedForms(x, templates.data, categories.data));
+  }
 
   // Pré-preenchimento: aplica a localização e o tipo de OS quando chegam (uma vez só). O tipo espera os
   // formulários e as categorias, para já entrar com os formulários dele.
@@ -518,6 +531,8 @@ function NewTicket() {
     mutationFn: async (input: {
       /** Os formulários vão junto (`forms`): a OS nasce com eles, numa gravação só. */
       payload: TicketCreatePayload;
+      /** Nome dos modelos de formulário (para dizer qual não entrou). */
+      formNames: Record<UUID, string>;
       /** A OS sai da fila de quem cria (o resumo não oferece o que daria "OS de outra fila"). */
       leavesQueue: boolean;
     }): Promise<CreatedResult> => {
@@ -527,6 +542,13 @@ function NewTicket() {
       const saved = ticket.tags ?? [];
       const lost = (input.payload.tags ?? []).filter((t) => !saved.some((s) => s.name.toLowerCase() === t.name.toLowerCase()));
       if (lost.length) problems.push(`Etiquetas que não entraram: ${lost.map((t) => t.name).join(", ")}`);
+      // A API anterior à lista na abertura ignora `forms` e cria a OS sem eles: o que foi e não voltou na OS vai para o
+      // resumo, para o analista incluir na aba Formulários.
+      const attached = new Set((ticket.forms ?? []).map((form) => form.template_id));
+      const formsLost = (input.payload.forms ?? []).filter((form) => !attached.has(form.template_id));
+      if (formsLost.length) {
+        problems.push(`Formulários que não entraram: ${formsLost.map((form) => input.formNames[form.template_id] ?? "Formulário").join(", ")}`);
+      }
       // Sem analista e sem ser quem executa, a OS ficou fora da fila de quem a criou.
       const hidden = input.leavesQueue && !ticket.owner && ticket.assignee?.id !== userId;
       return { ticket, problems, hidden };
@@ -598,19 +620,9 @@ function NewTicket() {
     setForm("source", source);
     writeStored("local", ORIGIN_KEY, source);
   };
-  // Marcar ou tirar um formulário é decisão do analista: ele deixa de seguir o tipo e a categoria.
-  const toggleForm = (id: UUID) =>
-    update((x) => {
-      const removing = x.formIds.includes(id);
-      const formRequired = { ...x.formRequired };
-      if (removing) delete formRequired[id];
-      return {
-        ...x,
-        formIds: removing ? x.formIds.filter((v) => v !== id) : [...x.formIds, id],
-        autoFormIds: x.autoFormIds.filter((v) => v !== id),
-        formRequired,
-      };
-    });
+  // Marcar ou tirar um formulário é decisão do analista: ele deixa de seguir o tipo e a categoria (o que ele tira não volta
+  // sozinho).
+  const toggleForm = (id: UUID) => update((x) => withFormToggled(x, id));
   const setFormRequired = (id: UUID, required: boolean) =>
     update((x) => ({ ...x, formRequired: { ...x.formRequired, [id]: required } }));
 
@@ -805,19 +817,19 @@ function NewTicket() {
     // "Assumir" é o padrão: sem owner_id, quem cria leva a OS para a própria fila.
     if (ownerMode === "none") payload.owner_id = null;
     else if (ownerMode === "other") payload.owner_id = d.ownerId;
-    // Os formulários que o analista vê, na ordem e com o obrigatório de cada um (mesmo nenhum). Sem os modelos
-    // (ou sem as categorias, com categoria na OS) a tela não sabe quais casam: vai sem a lista e a API põe os
-    // ligados ao tipo de OS e à categoria.
-    if (templates.data && (categories.data || !formsCategoryId)) {
-      const byId = new Map(templates.data.map((t) => [t.id, t]));
-      payload.forms = d.formIds.flatMap((id) => {
-        const template = byId.get(id);
-        return template ? [{ template_id: id, required: d.formRequired[id] ?? template.default_required ?? true }] : [];
-      });
+    // Os formulários que o analista vê (na ordem e com o obrigatório de cada um, mesmo nenhum) e os ligados que ele
+    // tirou. Os ligados que a tela não conhecia (vínculo novo, ou os da categoria de cima sem a lista de categorias) a API
+    // põe sozinha. Sem os modelos, vai sem as listas e a API põe os ligados ao tipo de OS e à categoria.
+    const formNames: Record<UUID, string> = {};
+    if (templates.data) {
+      const opening = openingForms(d, templates.data, categories.data);
+      payload.forms = opening.forms;
+      payload.forms_left_out = opening.forms_left_out;
+      for (const t of templates.data) formNames[t.id] = t.name;
     }
     // "Sem analista" sem ver essas OS: depois de criada, a OS é de outra fila para quem a abriu.
     const leavesQueue = ownerMode === "none" && ownOnly && !queueScope.unowned;
-    create.mutate({ payload, leavesQueue });
+    create.mutate({ payload, formNames, leavesQueue });
   }
 
   /** Volta ao formulário limpo com `next` (sem contar como mexida: nada é gravado até o analista agir). */

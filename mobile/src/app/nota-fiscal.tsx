@@ -2,12 +2,16 @@
 // prefeitura, ou uma foto), informa número, emissão, valor e competência e marca as OS que a nota cobre (as concluídas
 // no mês e ainda sem nota vêm marcadas). Só online: a nota não entra na fila; sem rede, o formulário fica preenchido
 // para tentar de novo. O mesmo `client_upload_id` vai em cada tentativa: a resposta perdida não vira nota repetida.
+// Com a lista de OS em erro, "Enviar nota" busca a lista de novo antes: se vier, as OS do mês ficam marcadas para o
+// técnico conferir e tocar de novo; se não vier, a nota só sai sem OS com a confirmação dele. A lista em erro também é
+// buscada de novo quando a conexão volta.
 
+import NetInfo from "@react-native-community/netinfo";
 import { randomUUID } from "expo-crypto";
 import { router, useLocalSearchParams, usePreventRemove } from "expo-router";
 import { HeaderHeightContext } from "expo-router/react-navigation";
-import { useContext, useEffect, useRef, useState } from "react";
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { useCallback, useContext, useEffect, useEffectEvent, useRef, useState } from "react";
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View, type ScrollViewInstance } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ActionSheet, type SheetAction } from "../components/ActionSheet";
 import { DateField } from "../components/forms/DateField";

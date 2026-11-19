@@ -344,6 +344,14 @@ function HowItWorksCard({ data }: { data: MyLevel }) {
         ))}
       </View>
       <Text style={styles.help}>Dúvida sobre o seu elo? Fale com a central no grupo.</Text>
+      <Pressable
+        onPress={() => router.push("/privacidade")}
+        hitSlop={14}
+        accessibilityRole="link"
+        style={({ pressed }) => [styles.privacy, pressed && styles.linkPressed]}
+      >
+        <Text style={styles.link}>Aviso de privacidade</Text>
+      </Pressable>
     </Card>
   );
 }
@@ -441,4 +449,7 @@ const makeStyles = (c: Palette) =>
     bullet: { width: 5, height: 5, borderRadius: 3, backgroundColor: c.inkSubtle, marginTop: 7 },
     ruleText: { flex: 1, fontSize: 13, lineHeight: 18, color: c.ink },
     help: { fontSize: 13, fontWeight: "600", color: c.inkMuted, marginTop: 14 },
+    privacy: { alignSelf: "flex-start", marginTop: 12 },
+    link: { fontSize: 13, fontWeight: "600", color: c.brandInk },
+    linkPressed: { opacity: 0.6 },
   });

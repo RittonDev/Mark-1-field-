@@ -56,11 +56,17 @@ export interface NewTicketDraft {
   formIds: UUID[];
   /** Entraram pelo tipo de OS ou pela categoria e o analista não mexeu: saem se deixarem de casar. */
   autoFormIds: UUID[];
+  /**
+   * Os que o analista tirou (desmarcou o ligado ou tirou o escolhido): não voltam sozinhos quando os modelos chegam ou
+   * mudam, e os ligados vão para a API como deixados de fora (`forms_left_out`).
+   */
+  uncheckedFormIds: UUID[];
   /** Obrigatório ou opcional que o analista escolheu; sem escolha, vale o padrão do modelo. */
   formRequired: Record<UUID, boolean>;
 }
 
-// Versão 3: formulários pelo tipo e pela categoria, cada um obrigatório ou opcional (rascunhos da 2 não voltam).
+// Versão 3: formulários pelo tipo e pela categoria, cada um obrigatório ou opcional (rascunhos da 2 não voltam). O da
+// versão 3 guardado antes de `uncheckedFormIds` volta com a lista vazia (restoredDraft).
 export const DRAFT_VERSION = 3;
 export const draftKey = (userId: string) => `maxx.novaOs.rascunho.${userId}`;
 export const ORIGIN_KEY = "maxx.novaOs.origem";
@@ -106,7 +112,17 @@ export function blankDraft(source: Origin, keep?: { location: Location | null; c
     categoryFromType: false,
     formIds: [],
     autoFormIds: [],
+    uncheckedFormIds: [],
     formRequired: {},
+  };
+}
+
+/** Rascunho lido da aba: o guardado antes de `uncheckedFormIds` existir volta sem nenhum formulário tirado. */
+export function restoredDraft(d: NewTicketDraft): NewTicketDraft {
+  const unchecked: unknown = (d as Partial<NewTicketDraft>).uncheckedFormIds;
+  return {
+    ...d,
+    uncheckedFormIds: Array.isArray(unchecked) ? unchecked.filter((id): id is UUID => typeof id === "string") : [],
   };
 }
 
@@ -282,8 +298,9 @@ export function matchedForms(
 
 /**
  * Os formulários acompanham o tipo de OS e a categoria (`prev` -> `next`): saem os que tinham entrado
- * sozinhos e deixaram de casar; entram, marcados, os que passaram a casar. O que o analista marcou ou
- * desmarcou e continua casando fica como ele deixou. Sem os modelos carregados, nada muda.
+ * sozinhos e deixaram de casar; entram, marcados, os que passaram a casar (mesmo um que o analista tinha
+ * tirado com outro tipo ou outra categoria). O que o analista marcou ou desmarcou e continua casando fica
+ * como ele deixou. Sem os modelos carregados, nada muda (withLinkedForms completa quando eles chegam).
  */
 export function syncForms(
   prev: NewTicketDraft,
@@ -306,6 +323,68 @@ export function syncForms(
     ...next,
     formIds: [...next.formIds.filter((id) => !leaving.includes(id)), ...entering],
     autoFormIds: [...next.autoFormIds.filter((id) => !leaving.includes(id)), ...entering],
+    uncheckedFormIds: next.uncheckedFormIds.filter((id) => !entering.includes(id)),
     formRequired,
   };
+}
+
+/**
+ * Os ligados ao tipo de OS e à categoria que a tela ainda não tinha posto (os modelos ou as categorias chegaram
+ * depois da escolha, ou a releitura trouxe um vínculo novo) entram marcados, como a API faria com eles ao criar. Os
+ * que o analista tirou ficam de fora. Nunca tira nada: sem a lista de categorias, as de cima só ficam desconhecidas.
+ */
+export function withLinkedForms(
+  d: NewTicketDraft,
+  templates: FormTemplate[] | undefined,
+  categories: Category[] | undefined,
+): NewTicketDraft {
+  if (!templates) return d;
+  const entering = matchedForms(templates, d.serviceType, effectiveCategory(d), categories)
+    .map((m) => m.id)
+    .filter((id) => !d.formIds.includes(id) && !d.uncheckedFormIds.includes(id));
+  if (!entering.length) return d;
+  return { ...d, formIds: [...d.formIds, ...entering], autoFormIds: [...d.autoFormIds, ...entering] };
+}
+
+/**
+ * Marcar ou tirar um formulário é decisão do analista: ele deixa de seguir o tipo e a categoria. O que ele tira fica
+ * guardado (não volta sozinho); marcar de novo desfaz.
+ */
+export function withFormToggled(d: NewTicketDraft, id: UUID): NewTicketDraft {
+  const removing = d.formIds.includes(id);
+  const formRequired = { ...d.formRequired };
+  if (removing) delete formRequired[id];
+  const unchecked = d.uncheckedFormIds.filter((v) => v !== id);
+  return {
+    ...d,
+    formIds: removing ? d.formIds.filter((v) => v !== id) : [...d.formIds, id],
+    autoFormIds: d.autoFormIds.filter((v) => v !== id),
+    uncheckedFormIds: removing ? [...unchecked, id] : unchecked,
+    formRequired,
+  };
+}
+
+/** Limite de cada lista de formulários na abertura (o mesmo da API). */
+export const MAX_FORMS = 20;
+
+/** Os formulários do POST /tickets (`forms` e `forms_left_out`). */
+export interface OpeningForms {
+  forms: { template_id: UUID; required: boolean }[];
+  forms_left_out: UUID[];
+}
+
+/**
+ * O que vai na criação: a lista que o analista vê, na ordem e com o obrigatório de cada um (sem escolha, o padrão do
+ * modelo), e os ligados que ele tirou, mesmo nenhum. Os ligados fora das duas listas (a tela não conhecia o vínculo)
+ * a API põe sozinha. Modelo que saiu dos ativos não vai.
+ */
+export function openingForms(d: NewTicketDraft, templates: FormTemplate[], categories: Category[] | undefined): OpeningForms {
+  const byId = new Map(templates.map((t) => [t.id, t]));
+  const forms = d.formIds.flatMap((id) => {
+    const template = byId.get(id);
+    return template ? [{ template_id: id, required: d.formRequired[id] ?? template.default_required ?? true }] : [];
+  });
+  const linked = new Set(matchedForms(templates, d.serviceType, effectiveCategory(d), categories).map((m) => m.id));
+  const leftOut = [...new Set(d.uncheckedFormIds)].filter((id) => linked.has(id) && !d.formIds.includes(id));
+  return { forms, forms_left_out: leftOut.slice(0, MAX_FORMS) };
 }

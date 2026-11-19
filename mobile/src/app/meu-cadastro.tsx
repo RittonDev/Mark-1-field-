@@ -42,6 +42,7 @@ import { RADIUS, useStyles, useTheme, type Palette } from "../theme/theme";
 // As mesmas regras do servidor (schemas/my_profile.py e core/pix.py), que confere de novo.
 const MSG = {
   name: "Informe seu nome completo.",
+  nameLetters: "Use só letras no nome.",
   phone: "Informe o celular com DDD.",
   email: "Informe um e-mail válido.",
   city: "Informe a cidade.",
@@ -93,6 +94,27 @@ type LoadState = { status: "loading" } | { status: "ok" } | { status: "error"; o
 
 const collapse = (text: string) => text.trim().replace(/\s+/g, " ");
 
+/** O nome como o servidor grava: espaços juntados e o acento digitado separado da letra virando uma letra só (NFC). */
+const nameOf = (text: string) => collapse(text).normalize("NFC");
+
+// O nome vai para os textos do grupo do cliente, o relatório e o portal. A regra é a do servidor (_letters_only em
+// schemas/my_profile.py) e só vale para o nome que muda: os antigos ficam como estão.
+/** Além das letras: espaço, apóstrofos (' ’ ‘ ´ ` ʼ, o do teclado e os que o celular põe sozinho), hífen e ponto. */
+const NAME_MARKS = new Set(Array.from(" '’‘´`ʼ-."));
+const LETTER = /\p{L}/u;
+/** Endereço colado ("site.com.br", "wa.me"): duas letras, ponto e letra. Iniciais ("J.R.") passam. */
+const NAME_ADDRESS = /\p{L}{2}\.\p{L}/u;
+
+/** Sem dígito, "@", "/", ":" nem link: o nome não leva contato para o cliente. */
+function lettersOnly(name: string): boolean {
+  for (const ch of name) {
+    if (!NAME_MARKS.has(ch) && !LETTER.test(ch)) return false;
+  }
+  // Letras de outra largura ("ｗｗｗ") contam como as comuns.
+  const folded = name.normalize("NFKC").toLowerCase();
+  return !folded.includes("www") && !folded.includes("http") && !NAME_ADDRESS.test(folded);
+}
+
 function formFrom(p: MyProfile): Form {
   return {
     name: p.name,
@@ -126,9 +148,13 @@ function review(form: Form, base: Form): Review {
   const body: MyProfileUpdate = {};
   const errors: Errors = {};
 
-  const name = collapse(form.name);
-  if (name.length < 3) errors.name = MSG.name;
-  if (name !== collapse(base.name)) body.name = name;
+  const name = nameOf(form.name);
+  // Em caracteres, como o servidor (um emoji ou letra rara ocupa duas posições no texto do JavaScript).
+  if (Array.from(name).length < 3) errors.name = MSG.name;
+  if (name !== nameOf(base.name)) {
+    body.name = name;
+    if (!errors.name && !lettersOnly(name)) errors.name = MSG.nameLetters;
+  }
 
   const phone = phoneDigits(form.phone);
   if (phone.length < 10) errors.phone = MSG.phone;
@@ -727,7 +753,21 @@ export default function MyProfileScreen() {
         </Card>
 
         <Card style={styles.card}>
-          <SectionTitle accent>Pagamento</SectionTitle>
+          <SectionTitle
+            accent
+            right={
+              <Pressable
+                onPress={() => router.push("/privacidade")}
+                hitSlop={14}
+                accessibilityRole="link"
+                style={({ pressed }) => pressed && styles.linkPressed}
+              >
+                <Text style={styles.link}>Aviso de privacidade</Text>
+              </Pressable>
+            }
+          >
+            Pagamento
+          </SectionTitle>
           {form.pixRemoved ? (
             <View style={styles.removed}>
               <InfoBox message="A chave PIX sai do cadastro quando você salvar." />
@@ -890,6 +930,8 @@ const makeStyles = (c: Palette) =>
     chipSelected: { borderColor: c.primary, backgroundColor: c.primarySoft },
     chipText: { fontSize: 15, fontWeight: "600", color: c.ink },
     paste: { fontSize: 14, fontWeight: "700", color: c.brandInk },
+    link: { fontSize: 13, fontWeight: "600", color: c.brandInk },
+    linkPressed: { opacity: 0.6 },
     removed: { gap: 6 },
     inlineButton: { alignSelf: "flex-start" },
     footer: {
