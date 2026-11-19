@@ -1378,10 +1378,10 @@ senha e do histórico: uma conta invadida não pode desviar o pagamento. Código
   `PixInfo = {key_type, key, holder_name, updated_at}`.
 - `PATCH /me/profile` `MyProfileUpdate` (campo fora da lista: 422 "Campo não aceito"). Só o que vier no corpo muda:
   - `name`: 3 a 160 caracteres, espaços colapsados e NFC (null: "Informe seu nome completo"). Só letras (com acento),
-    espaço, apóstrofo (' ’ ‘ ´ ` ʼ), hífen e ponto; recusa "www", "http" e endereço colado (duas letras, ponto e letra,
-    como "site.com" e "wa.me"; iniciais como "J.R." passam): 422 "Use só letras no nome". O nome vai para os textos do
-    grupo do cliente, o relatório e o portal. Vale só para o nome que vem no corpo: o app manda o nome só quando ele muda
-    (e confere antes com a mesma regra), e os nomes antigos ficam como estão;
+    espaço, apóstrofo (' ’ ‘ ´ ʼ e o acento grave solto), hífen e ponto; recusa "www", "http" e endereço colado (duas
+    letras, ponto e letra, como "site.com" e "wa.me"; iniciais como "J.R." passam): 422 "Use só letras no nome". O nome
+    vai para os textos do grupo do cliente, o relatório e o portal. Vale só para o nome que vem no corpo: o app manda o
+    nome só quando ele muda (e confere antes com a mesma regra), e os nomes antigos ficam como estão;
   - `phone`: 10 a 13 dígitos (aceita +55), volta "(11) 98888-7777" (null ou inválido: "Informe o celular com DDD");
   - `email`: em minúsculas, validado só quando vem (há logins de teste sem "@"; null: "Informe um e-mail válido");
   - `home_city`: 2 a 120, na grafia padrão da base (null: "Informe a cidade"); `home_state`: uma UF ("UF inválida");
