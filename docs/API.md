@@ -1358,7 +1358,7 @@ central vê a nota nova ao focar ou recarregar a tela, e o técnico vê a confer
 
 **Por quê.** O técnico mantém o próprio cadastro no app (Conta › Meu cadastro): foto, nome, celular (WhatsApp), e-mail
 de login, endereço, cidade/UF, região que atende e a chave PIX para receber por chamado. A central é avisada na hora
-quando mudam PIX, e-mail ou celular, e toda mudança, do app ou da central, fica no histórico do cadastro. Motivo da
+quando mudam PIX, e-mail, nome ou celular, e toda mudança, do app ou da central, fica no histórico do cadastro. Motivo da
 senha e do histórico: uma conta invadida não pode desviar o pagamento. Código: `services/my_profile.py`,
 `services/user_history.py`, `core/pix.py`, `api/routes/my_profile.py` e `models/user_change.py`.
 
@@ -1377,7 +1377,11 @@ senha e do histórico: uma conta invadida não pode desviar o pagamento. Código
   coverage_area, address_line, address_district, address_zip, avatar_url, pix: PixInfo|null}`, com
   `PixInfo = {key_type, key, holder_name, updated_at}`.
 - `PATCH /me/profile` `MyProfileUpdate` (campo fora da lista: 422 "Campo não aceito"). Só o que vier no corpo muda:
-  - `name`: 3 a 160, espaços colapsados (null: "Informe seu nome completo");
+  - `name`: 3 a 160 caracteres, espaços colapsados e NFC (null: "Informe seu nome completo"). Só letras (com acento),
+    espaço, apóstrofo (' ’ ‘ ´ ` ʼ), hífen e ponto; recusa "www", "http" e endereço colado (duas letras, ponto e letra,
+    como "site.com" e "wa.me"; iniciais como "J.R." passam): 422 "Use só letras no nome". O nome vai para os textos do
+    grupo do cliente, o relatório e o portal. Vale só para o nome que vem no corpo: o app manda o nome só quando ele muda
+    (e confere antes com a mesma regra), e os nomes antigos ficam como estão;
   - `phone`: 10 a 13 dígitos (aceita +55), volta "(11) 98888-7777" (null ou inválido: "Informe o celular com DDD");
   - `email`: em minúsculas, validado só quando vem (há logins de teste sem "@"; null: "Informe um e-mail válido");
   - `home_city`: 2 a 120, na grafia padrão da base (null: "Informe a cidade"); `home_state`: uma UF ("UF inválida");
@@ -1388,14 +1392,22 @@ senha e do histórico: uma conta invadida não pode desviar o pagamento. Código
 - Ordem do `PATCH`:
   1. Conta só o que muda de verdade (o mesmo celular ou a mesma cidade escritos de outro jeito não contam). Sem nada
      novo: 200, sem histórico e sem aviso.
-  2. E-mail de outro usuário ou de ficha pendente: 422 "E-mail já cadastrado".
-  3. E-mail ou PIX mudando: sem `current_password`, 422 "Confirme com a sua senha atual para mudar o e-mail ou a chave
-     PIX"; errada, 422 "Senha atual incorreta". O contador de erros é o da troca de senha (5 em 15 min, somando as
-     duas telas): bloqueado, 429 "Muitas tentativas de confirmar a senha. Tente de novo em N minutos." com
-     `Retry-After`, e o `POST /auth/change-password` também fica bloqueado.
-  4. Grava com o histórico. PIX mudou: `pix_updated_at` = agora. Mudou a cidade ou a UF (não só a grafia): as
+  2. E-mail ou PIX mudando com `must_change_password` (a senha provisória da central: "Redefinir senha" em Técnicos,
+     senha definida em Usuários ou ficha antiga sem senha): 422 "Crie sua senha no app antes de mudar o e-mail ou a
+     chave PIX". O app nem mostra o Meu cadastro nesse estado (pede a troca da senha antes).
+  3. E-mail novo de domínio da empresa (`ENTRA_ALLOWED_DOMAINS`, o domínio exato): 422 "Use um e-mail que não seja da
+     empresa". Não pede senha, porque é regra fixa. Quem já tem e-mail da empresa continua com ele, e a central pode
+     definir esse e-mail em Técnicos.
+  4. Senha atual (e-mail ou PIX mudando): sem `current_password`, 422 "Confirme com a sua senha atual para mudar o
+     e-mail ou a chave PIX"; errada, 422 "Senha atual incorreta". A tentativa conta antes de conferir, no contador da
+     troca de senha (5 em 15 min, somando as duas telas): passou disso, 429 "Muitas tentativas de confirmar a senha.
+     Tente de novo em N minutos." com `Retry-After`, e o `POST /auth/change-password` também fica bloqueado.
+  5. E-mail mudando, já com a senha certa: no máximo 10 conferências por hora por técnico (a 11ª: 429 "Muitas
+     tentativas. Tente mais tarde." com `Retry-After`); e-mail de outro usuário ou de ficha pendente: 422 "E-mail já
+     cadastrado". Sem a senha certa, ninguém descobre se um e-mail existe.
+  6. Grava com o histórico. PIX mudou: `pix_updated_at` = agora. Mudou a cidade ou a UF (não só a grafia): as
      coordenadas antigas de casa saem (vale também para o `PATCH /technicians/{id}` da central).
-  5. Depois do commit, o aviso `profile.changed`.
+  7. Depois do commit, o aviso `profile.changed`.
 - Trocar o e-mail não encerra as sessões (a senha é a mesma): o login passa a ser o e-mail novo.
 - `POST /me/profile/photo` (multipart `file`; JPG, PNG ou WebP pelo conteúdo, até 2 MB) → `MyProfile`. O app manda a
   foto já recortada (quadrada) e reduzida (512 px). A anterior sai do disco quando nenhum outro usuário nem ficha de
@@ -1422,22 +1434,34 @@ senha e do histórico: uma conta invadida não pode desviar o pagamento. Código
   "08:00–17:00, intervalo 12:00–13:00"; `services`: "12 serviços";
 - `pix`: a chave mascarada ("CPF ***.456.789-**"), null sem chave; `pix_holder`: o titular da conta;
 - `avatar`: `to` "nova" na troca e null na remoção (`from` "anterior"); `password`: `to` "provisória" (Redefinir senha
-  em Técnicos) ou "definida pela central" (Usuários).
+  em Técnicos), "definida pela central" (Usuários), "criada no app" (o técnico trocou a provisória) ou "trocada no app".
 
 E-mail e celular ficam em claro (a central desfaz uma troca indevida); a chave PIX, nunca. Gravam o histórico: o
-`PATCH /me/profile` e a foto (via app, autor o técnico); `PATCH /technicians/{id}`,
-`POST /technicians/{id}/reset-password`, `POST`/`DELETE /technicians/{id}/photo`, `DELETE /technicians/{id}/pix` e o
-`PATCH /users/{id}` de técnico (via central, com o autor). A importação por planilha e a do Field Control não entram.
+`PATCH /me/profile`, a foto e o `POST /auth/change-password` de técnico (via app, autor o técnico);
+`PATCH /technicians/{id}`, `POST /technicians/{id}/reset-password`, `POST`/`DELETE /technicians/{id}/photo`,
+`DELETE /technicians/{id}/pix` e o `PATCH /users/{id}` de técnico (via central, com o autor). A importação por planilha
+e a do Field Control não entram.
+
+Na web (cadastro do técnico), a senha aparece como "Senha redefinida (provisória)", "Senha definida pela central",
+"Senha criada no app" ou "Senha trocada no app".
 
 **Central.**
 - `GET /technicians/{id}` (Técnicos, ver) → `TechnicianOut`; 404 "Técnico não encontrado" (também para quem não é
   técnico). Declarada depois das rotas fixas (`/regions`, `/nearby`, `/suggest`).
 - `GET /technicians/{id}/changes?limit=50` (1 a 200; Técnicos, ver) → `UserChange[]`, do mais novo para o mais antigo.
+  - Com Pagamentos (Visualizar ou Editar), como acima.
+  - Com Técnicos e sem Pagamentos (`commercial.payouts` Sem acesso): os itens `pix_holder` não vêm e o `from`/`to` de
+    `pix` vira "***" (null continua null). A troca só do titular aparece como `{"field": "pix", "from": "***", "to":
+    "***"}`. Na web, a chave aparece como "Chave PIX cadastrada", "Chave PIX alterada" ou "Chave PIX removida", sem
+    valor e sem titular.
 - `DELETE /technicians/{id}/pix` (Pagamentos, editar) → 204: tira tipo, chave, titular e data, com o histórico via
   central e o aviso `["pix"]`; sem chave, 204 sem histórico.
 - `TechnicianOut` ganha `has_pix` e `pix_updated_at` (a chave não vai na base técnica).
 - `GET /payouts?with_pix=true` → `PayoutBoard = PayoutList + pix: {technician_id: PixInfo}`: os técnicos das linhas e o
   do `technician_id`, só os que têm chave. Sem `with_pix`, `pix: {}`. `GET /me/earnings` não muda.
+- Na web (Pagamentos), o extrato do WhatsApp (botão WhatsApp e "Copiar extrato") passa pelo endereço do wa.me: leva a
+  chave com CPF e CNPJ mascarados como `core/pix.mask` ("CPF ***.456.789-**", "CNPJ 12.345.678/****-**"); e-mail,
+  celular e chave aleatória vão inteiros. "Copiar PIX" copia a chave crua.
 - `POST /payouts/pay`: o `payout_set` do pagamento (`data.action: "paid"`) ganha `data.pix`, a chave mascarada daquele
   momento ("CPF ***.456.789-**"), quando o técnico tem chave.
 - Rótulos dos erros de validação (`main.py`): `pix` "Chave PIX", `key_type` "Tipo da chave PIX", `holder_name`
@@ -1445,12 +1469,26 @@ E-mail e celular ficam em claro (a central desfaz uma troca indevida); a chave P
   `address_district` "Bairro" e `address_zip` "CEP".
 
 **Tempo real.** Depois do commit sai `{"type": "profile.changed", "user_id", "name", "actor_id", "actor_name",
-"occurred_at", "data": {"fields": [...], "via": "app" | "central"}}` (`audience.managers_only`). Vai só para quem tem
-Técnicos ou Pagamentos; o técnico e o cliente não recebem. `fields` usa os nomes da API (o titular conta como "pix").
-O nome não começa com "technician." (a web mandaria o evento para o mapa).
+"occurred_at", "data": {"fields": [...], "via": "app" | "central", "after_reset"?: {"by", "at"}}}`
+(`audience.managers_only`). Vai só para quem tem Técnicos ou Pagamentos; o técnico e o cliente não recebem. `fields` usa
+os nomes da API (o titular conta como "pix"). O nome não começa com "technician." (a web mandaria o evento para o mapa).
+- `after_reset` vai só na troca de e-mail ou PIX pelo app quando houve redefinição de senha pela central (linha do
+  histórico via central com `password`) nas últimas 72 h: `by` é o nome de quem redefiniu ("Sistema" sem autor) e `at`,
+  a hora (ISO). É só sinal: não bloqueia (quem redefiniu também soube a senha).
+- Na web, o sino avisa a troca pelo app de chave PIX, e-mail, nome ou celular (foto, endereço e senha só atualizam as
+  listas). Com `after_reset`, o título termina em "logo depois de a senha ser redefinida por {by}" e o aviso fica
+  vermelho, também na troca só de e-mail.
 
-**Aviso de privacidade.** A ficha da homologação passa a citar a chave PIX que o técnico cadastrar no app para receber
-pelos chamados: `PRIVACY_VERSION` = "2026-11-18" (o `GET /public/onboarding/catalog` devolve a versão nova).
+**Aviso de privacidade.** `PRIVACY_VERSION` = "2026-11-19" (o `GET /public/onboarding/catalog` devolve a versão nova e a
+ficha grava a do servidor no aceite).
+- O texto (`PRIVACY_NOTICE`) e a versão (`PRIVACY_VERSION`) ficam em `frontend/src/lib/constants.ts` e
+  `mobile/src/lib/constants.ts`, cópias idênticas; `frontend/src/lib/onboarding.ts` só reexporta. Mudar o texto pede
+  mudar a versão nos dois lados (as duas cópias e `backend/app/schemas/onboarding.py`), no mesmo dia.
+- O aviso cita a chave PIX que o técnico cadastrar no app e o pagamento dos chamados por PIX; as notas fiscais (número,
+  valor, datas e o arquivo, que pode trazer CPF ou CNPJ e endereço, guardadas pelo prazo da legislação fiscal); e o Elo
+  (atendimentos dos últimos 12 meses: quantidade, chegada no horário, retornos e visitas perdidas, visto em Meu elo, com
+  revisão de uma ocorrência pela central).
+- No app, a tela Aviso de privacidade mostra o mesmo texto, só para leitura: não grava ciência nem pede aceite de novo.
 
 ## Elo dos técnicos (2026-11-18)
 
