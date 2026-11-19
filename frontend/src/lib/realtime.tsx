@@ -149,10 +149,14 @@ function offerNotice(event: RealtimeEvent, userId: string, byOther: boolean, oth
   return { ticketId: event.ticket_id, code, title: `${code}: ${who} recusou a oferta`, description: reason ? `Motivo: ${reason}` : undefined };
 }
 
-/** Campos do cadastro que, mudados pelo próprio técnico no app, viram aviso (o resto só atualiza as listas). */
+/**
+ * Campos do cadastro que, mudados pelo próprio técnico no app, viram aviso (o resto só atualiza as listas). O nome
+ * sai nos textos para o grupo do cliente, no relatório e no portal, e Pagamentos compara com ele o titular da chave.
+ */
 const PROFILE_NOTICE_PARTS: [UserChangeField, string][] = [
   ["pix", "a chave PIX"],
   ["email", "o e-mail de acesso"],
+  ["name", "o nome"],
   ["phone", "o celular"],
 ];
 
@@ -162,9 +166,20 @@ function joinParts(parts: string[]): string {
 }
 
 /**
- * profile.changed pelo app (Meu cadastro): a chave PIX, o e-mail de login ou o celular mudaram. Uma conta
+ * " logo depois de a senha ser redefinida por {quem}": a troca de e-mail ou de chave PIX veio até 72 h depois de a
+ * central redefinir a senha (`data.after_reset`, a API manda só nesse caso). Quem redefiniu também soube a senha.
+ */
+function afterResetText(data: Partial<ProfileChangedData>): string {
+  const reset: unknown = data.after_reset;
+  if (!reset || typeof reset !== "object") return "";
+  const by = text((reset as { by?: unknown }).by);
+  return ` logo depois de a senha ser redefinida${by ? ` por ${by}` : ""}`;
+}
+
+/**
+ * profile.changed pelo app (Meu cadastro): a chave PIX, o e-mail de login, o nome ou o celular mudaram. Uma conta
  * invadida desviaria o pagamento: a troca da chave pede confirmação no grupo antes do próximo pagamento.
- * O que a central muda e o que o técnico muda de foto, nome e endereço só atualizam as listas.
+ * O que a central muda e o que o técnico muda de foto e endereço só atualizam as listas.
  */
 function profileNotice(event: RealtimeEvent): NoticeDraft | null {
   const data = (event.data ?? {}) as Partial<ProfileChangedData>;
@@ -176,14 +191,15 @@ function profileNotice(event: RealtimeEvent): NoticeDraft | null {
   const technicians = sessionCan("base.technicians");
   if (!technicians && !sessionCan("commercial.payouts")) return null;
   const pix = fields.includes("pix");
+  const afterReset = afterResetText(data);
   return {
-    title: `${text(event.name) ?? "Um técnico"} alterou ${joinParts(parts)} pelo app`,
+    title: `${text(event.name) ?? "Um técnico"} alterou ${joinParts(parts)} pelo app${afterReset}`,
     description: pix
       ? "Confirme com ele no grupo antes do próximo pagamento."
       : fields.includes("phone")
         ? "Atualize o contato dele nos grupos do WhatsApp."
         : undefined,
-    tone: pix ? "error" : undefined,
+    tone: pix || afterReset ? "error" : undefined,
     href: technicians && event.user_id ? `/tecnicos?tecnico=${encodeURIComponent(event.user_id)}` : "/pagamentos",
   };
 }

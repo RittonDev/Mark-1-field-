@@ -12,6 +12,7 @@ import { ApiError, api, errorMessage } from "@/lib/api";
 import { LEVEL_OCCURRENCE, LEVEL_TIER } from "@/lib/constants";
 import { formatDate, formatShort } from "@/lib/format";
 import { useCan } from "@/lib/permissions";
+import { technicianLevelKey as levelKey } from "@/lib/realtime";
 import type {
   CentralLevelOccurrence,
   LevelCriterion,
@@ -29,8 +30,11 @@ const NOTE_MAX = 300;
 /** Ocorrências na primeira vista e a cada "Ver mais" (a API manda até 200, as mais recentes primeiro). */
 const FIRST = 10;
 const MORE = 20;
+/** A OS da ocorrência quando é de outra fila (quem pede vê só a própria): a API manda só o tipo, a data e o detalhe. */
+const HIDDEN_TICKET = "OS de outra fila";
 
-const levelKey = (technicianId: UUID) => ["technicians", "level", technicianId];
+/** OS de outra fila: sem link e sem desconsiderar nem voltar a contar (a API responde 403). */
+const isHidden = (o: CentralLevelOccurrence) => o.ticket.hidden || !o.ticket.id;
 
 /** O selo das listas (faixa, desde quando e risco) a partir do detalhe recalculado. */
 function summaryOf(detail: TechnicianLevelDetail): LevelSummary {
@@ -68,7 +72,8 @@ function syncLevelCaches(queryClient: QueryClient, technicianId: UUID, detail: T
 
 /**
  * O elo do técnico na central (GET /technicians/{id}/level): a API recalcula na hora. O selo das listas, que
- * pode ter até 6 h, acompanha o que veio.
+ * pode ter até 6 h, acompanha o que veio. A chave fica fora de ["technicians"], que quase todo evento de OS relê:
+ * o tempo real relê só o elo do técnico que está no evento (lib/realtime.tsx).
  */
 export function useTechnicianLevel(technicianId: UUID) {
   const queryClient = useQueryClient();
@@ -145,8 +150,8 @@ function CriteriaList({ title, criteria }: { title: string; criteria: LevelCrite
 /**
  * "Elo" no cadastro do técnico: a faixa e desde quando, o risco de descer, o que falta para a próxima faixa,
  * os números dos últimos 12 meses e as ocorrências que pesaram (com o link para a OS). Com Técnicos em Editar,
- * a central desconsidera uma ocorrência (com o motivo) e faz a desconsiderada voltar a contar. Os textos
- * chegam prontos da API. Fica fora do fieldset travado do cadastro: só com Visualizar, ainda dá para ver mais.
+ * a central desconsidera uma ocorrência (com o motivo) e faz a desconsiderada voltar a contar. A ocorrência de
+ * OS de outra fila (quem pede vê só a própria) fica sem link e sem essas ações. Os textos chegam prontos da API. Fica fora do fieldset travado do cadastro: só com Visualizar, ainda dá para ver mais.
  * `dirty`: o cadastro tem alteração não salva (o link para Configurações abre em outra aba).
  */
 export function LevelSection({
@@ -211,9 +216,10 @@ export function LevelSection({
       applied(next, "Ocorrência desconsiderada", occurrenceKey(body));
     },
     onError: (error, body) => {
-      // Já desconsiderada por outra pessoa (409) ou saiu dos 12 meses (422): o campo fecha e a lista volta como
-      // está agora. Falha de rede ou do servidor: o campo fica, com o motivo, para tentar de novo.
-      if (error instanceof ApiError && (error.status === 409 || error.status === 422)) {
+      // Já desconsiderada por outra pessoa (409), saiu dos 12 meses (422) ou a OS foi para outra fila (403): o campo
+      // fecha e a lista volta como está agora. Falha de rede ou do servidor: o campo fica, com o motivo, para tentar
+      // de novo.
+      if (error instanceof ApiError && (error.status === 403 || error.status === 409 || error.status === 422)) {
         toast({ title: errorMessage(error), tone: "error" });
         setWaiving(null);
         focusNext.current = occurrenceKey(body);
@@ -370,8 +376,9 @@ export function LevelSection({
               <tbody className="divide-y divide-line">
                 {occurrences.slice(0, shown).map((o) => {
                   const key = occurrenceKey(o);
-                  const open = !readOnly && !o.waiver && waiving?.key === key;
-                  const what = `${LEVEL_OCCURRENCE[o.kind].toLowerCase()} · ${o.ticket.code}`;
+                  const hidden = isHidden(o);
+                  const open = !readOnly && !hidden && !o.waiver && waiving?.key === key;
+                  const what = `${LEVEL_OCCURRENCE[o.kind].toLowerCase()} · ${o.ticket.code ?? HIDDEN_TICKET}`;
                   return (
                     <Fragment key={key}>
                       <tr className={clsx(o.waiver ? "bg-surface-2/50 text-ink-muted" : "text-ink")}>
@@ -379,17 +386,21 @@ export function LevelSection({
                           {LEVEL_OCCURRENCE[o.kind]}
                         </td>
                         <td className="px-2 py-1.5 align-top whitespace-nowrap">
-                          <Link
-                            href={`/chamados/${o.ticket.id}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            title={o.ticket.title}
-                            className="inline-flex items-center gap-1 rounded font-medium underline-offset-2 hover:text-brand-ink hover:underline focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
-                          >
-                            {o.ticket.code}
-                            <ExternalLink aria-hidden className="size-3" />
-                            <span className="sr-only"> (abre em outra aba)</span>
-                          </Link>
+                          {hidden ? (
+                            <span className="text-ink-muted">{HIDDEN_TICKET}</span>
+                          ) : (
+                            <Link
+                              href={`/chamados/${o.ticket.id}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              title={o.ticket.title}
+                              className="inline-flex items-center gap-1 rounded font-medium underline-offset-2 hover:text-brand-ink hover:underline focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+                            >
+                              {o.ticket.code}
+                              <ExternalLink aria-hidden className="size-3" />
+                              <span className="sr-only"> (abre em outra aba)</span>
+                            </Link>
+                          )}
                         </td>
                         <td className="px-2 py-1.5 align-top whitespace-nowrap tabular-nums">{formatDate(o.at)}</td>
                         <td className="min-w-40 px-2 py-1.5 align-top">
@@ -397,13 +408,14 @@ export function LevelSection({
                           {o.waiver ? (
                             <span className="mt-0.5 block break-words">
                               Desconsiderada{o.waiver.created_by ? ` por ${o.waiver.created_by.name}` : ""} em{" "}
-                              {formatDate(o.waiver.created_at)}: {o.waiver.note}
+                              {formatDate(o.waiver.created_at)}
+                              {o.waiver.note ? `: ${o.waiver.note}` : null}
                             </span>
                           ) : null}
                         </td>
                         {readOnly ? null : (
                           <td className="px-2 py-1 text-right align-top whitespace-nowrap">
-                            {o.waiver ? (
+                            {hidden ? null : o.waiver ? (
                               <Button
                                 id={actionId(key)}
                                 size="sm"
