@@ -65,6 +65,8 @@ def _totals(body: dict) -> dict:
 async def test_level_detail_follows_queue(
     engine: AsyncEngine, client: AsyncClient, world: World
 ) -> None:
+    """Analista com "Somente a própria fila" (sem e depois com as OS sem analista) contra quem vê
+    todas as filas, no detalhe, ao desconsiderar e ao voltar a contar."""
     maker = async_sessionmaker(engine, expire_on_commit=False)
     now = utcnow()
     sched = (now - timedelta(days=8)).replace(microsecond=0)
