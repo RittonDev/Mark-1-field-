@@ -2349,6 +2349,8 @@ export interface TicketOffer {
   cancel_reason: OfferCancelReason | null;
   /** O técnico abriu a oferta (só então ele pode aceitar). */
   viewed_at: ISODate | null;
+  /** Quando o técnico abriu o escopo no app, gravado no aceite (null: não aceita ou app antigo; servidor antigo não manda). */
+  scope_read_at?: ISODate | null;
   /** Aceite ou recusa do técnico. */
   responded_at: ISODate | null;
   created_by: Ref | null;
@@ -2372,6 +2374,18 @@ export interface OfferDecline {
   reason?: string | null;
 }
 
+/** POST /me/offers/{id}/accept (corpo opcional). */
+export interface OfferAccept {
+  /** Quando o técnico abriu o escopo, no relógio do servidor (serverNow). Valor inválido é ignorado. */
+  scope_read_at?: ISODate | null;
+}
+
+/** A oferta aceita na OS (TicketDetail.accepted_offer, só a gestão). */
+export interface AcceptedOffer {
+  accepted_at: ISODate;
+  scope_read_at: ISODate | null;
+}
+
 /**
  * O recorte da OS na oferta (o técnico ainda não está nela): serviço, escopo, formulários, bairro e cidade, data e
  * valor. Nunca cliente, loja, endereço ou contato. Na oferta que já fechou: sem escopo, formulários e bairro.
@@ -2390,6 +2404,8 @@ export interface FieldOfferTicket {
   /** Janela da visita; sem agenda, null ("data a combinar"). */
   scheduled_start: ISODate | null;
   scheduled_end: ISODate | null;
+  /** Duração estimada em minutos (a do tipo de serviço, copiada na abertura da OS); null sem estimativa. Servidor antigo não manda. */
+  estimated_minutes?: number | null;
 }
 
 /** A oferta no app do técnico (GET /me/offers e /me/offers/{id}). */
@@ -2402,6 +2418,8 @@ export interface FieldOffer {
   /** Na cancelada, por quê ("taken": outro técnico aceitou). */
   cancel_reason: OfferCancelReason | null;
   viewed_at: ISODate | null;
+  /** Quando abriu o escopo (só na aceita). */
+  scope_read_at?: ISODate | null;
   responded_at: ISODate | null;
   created_at: ISODate;
   ticket: FieldOfferTicket;
@@ -2824,4 +2842,97 @@ export interface LevelRefreshResult {
   gold: number;
   diamond: number;
   at_risk: number;
+}
+
+// --------------------------------------------------------------------------- patente, estatísticas e histórico
+
+/** A medalha do elo (LEVEL_MEDAL_*): a faixa, ou "none" sem elo guardado ainda (apagada, "SEM ELO"). */
+export type LevelMedalKind = LevelTier | "none";
+
+/**
+ * Um mês de calendário das Estatísticas, no fuso da operação. Atendimentos, medidos e chegadas pelo mês da conclusão;
+ * chegada fora do horário pelo da chegada; retorno pelo da reabertura; visita perdida pelo da visita. Sem o que a central
+ * desconsiderou.
+ */
+export interface StatsMonth {
+  /** "2026-11". */
+  month: string;
+  /** O mês de hoje, ainda em andamento. */
+  current: boolean;
+  services: number;
+  as_assignee: number;
+  as_helper: number;
+  /** Atendimentos do sistema antigo (Field Control). */
+  legacy: number;
+  /** Teve atendimento e todos vieram do sistema antigo: o mês não mede chegada, retorno nem visita perdida. */
+  legacy_only: boolean;
+  measured: number;
+  arrivals: number;
+  late: number;
+  reworks: number;
+  lost: number;
+}
+
+/** Desde sempre: o atendimento do elo sem a janela de 12 meses. */
+export interface StatsLifetime {
+  services: number;
+  as_assignee: number;
+  as_helper: number;
+  legacy: number;
+  /** "2019-03": o mês do primeiro atendimento; null sem atendimento. */
+  first_month: string | null;
+}
+
+/** GET /me/stats: só leitura; o total desde sempre, os 12 meses corridos do elo e 12 meses de calendário. */
+export interface MyStats {
+  computed_at: ISODate;
+  lifetime: StatsLifetime;
+  /** A mesma conta de Meu elo (365 dias corridos). */
+  metrics: LevelMetrics;
+  /** 12, do mais antigo ao atual. */
+  months: StatsMonth[];
+}
+
+/** GET /technicians/{id}/stats: o mesmo, na central. */
+export interface TechnicianStats extends MyStats {
+  technician: Ref;
+}
+
+export type HistoryRole = "assignee" | "helper";
+
+/** Uma OS do Histórico de atendimentos (GET /me/history): o recorte de campo. */
+export interface HistoryItem {
+  id: UUID;
+  /** "OS-000123". */
+  code: string;
+  /** O tipo de serviço; sem tipo, o título da OS. */
+  service: string;
+  location_code: string | null;
+  location_name: string | null;
+  city: string | null;
+  state: string | null;
+  /** A conclusão. */
+  resolved_at: ISODate;
+  /** "2026-11": o mês da conclusão no fuso da operação (as seções da lista). */
+  month: string;
+  /** Responsável ou junto (outro técnico da visita). */
+  role: HistoryRole;
+  /** OS do sistema antigo (Field Control). */
+  legacy: boolean;
+}
+
+export interface HistoryMonthCount {
+  month: string;
+  count: number;
+}
+
+/** GET /me/history: uma página, da mais recente para a mais antiga. */
+export interface MyHistoryPage {
+  items: HistoryItem[];
+  /** A próxima página (?cursor=); null no fim. */
+  next_cursor: string | null;
+  /** Total de atendimentos (igual a MyStats.lifetime.services): só na primeira página, null nas outras. */
+  total: number | null;
+  /** O total de cada mês desta página, mesmo quando o mês continua na próxima. */
+  months: HistoryMonthCount[];
 }

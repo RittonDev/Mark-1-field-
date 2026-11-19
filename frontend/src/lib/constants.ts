@@ -4,24 +4,35 @@
 
 import type {
   AssetType,
+  AvailabilitySlot,
+  DayPeriod,
+  EarningsMonth,
+  EarningsMonthState,
+  EducationLevel,
   InvoiceFileKind,
   InvoiceStatus,
   Level,
+  LevelMedalKind,
   LevelOccurrenceKind,
   LevelTier,
   OfferCancelReason,
   OfferState,
   PixKeyType,
   Responsibility,
+  SkillLevel,
   SlaStatus,
+  TechProfilePart,
   TicketEventType,
   TicketPriority,
   TicketSource,
   TicketStatus,
   TicketType,
+  TransportInfo,
+  TransportMode,
   UserChangeField,
   UserRole,
   ViolationScope,
+  Weekday,
 } from "./types";
 
 export type StatusGroup = "open" | "active" | "pending" | "done" | "final";
@@ -288,6 +299,22 @@ export function formatPixKey(type: PixKeyType, key: string): string {
     if (digits.length === 11) return `+55 (${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
   }
   return key;
+}
+
+/**
+ * A chave só o bastante para reconhecer, igual a core/pix.mask com "•" no lugar de "*": CPF "•••.456.789-••", CNPJ
+ * "12.345.678/••••-••", e-mail "t•••@exemplo.com", celular "+55 (11) •••••-7777", chave aleatória "…a1b2".
+ */
+export function maskPixKey(type: PixKeyType, key: string): string {
+  if (type === "cpf" && key.length === 11) return `•••.${key.slice(3, 6)}.${key.slice(6, 9)}-••`;
+  if (type === "cnpj" && key.length === 14) return `${key.slice(0, 2)}.${key.slice(2, 5)}.${key.slice(5, 8)}/••••-••`;
+  if (type === "email" && key.includes("@")) return `${key.slice(0, 1)}•••@${key.slice(key.indexOf("@") + 1)}`;
+  if (type === "phone") {
+    let digits = key.replace(/\D/g, "");
+    if (digits.length === 13 && digits.startsWith("55")) digits = digits.slice(2);
+    if (digits.length === 11) return `+55 (${digits.slice(0, 2)}) •••••-${digits.slice(7)}`;
+  }
+  return `…${key.slice(-4)}`;
 }
 
 /** Rótulo de cada campo do histórico do cadastro (GET /technicians/{id}/changes). */
