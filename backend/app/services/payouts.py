@@ -7,6 +7,7 @@ Com todos os técnicos da OS pagos, saem as etiquetas de pagamento pendente (ser
 """
 
 import uuid
+from collections.abc import Sequence
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any
@@ -18,7 +19,14 @@ from sqlalchemy.orm import raiseload
 
 from app.core import pix
 from app.core.config import settings
-from app.core.enums import ExpenseStatus, PayoutStatus, TicketEventType, TicketStatus, UserRole
+from app.core.enums import (
+    ExpenseStatus,
+    InvoiceStatus,
+    PayoutStatus,
+    TicketEventType,
+    TicketStatus,
+    UserRole,
+)
 from app.db.base import utcnow
 from app.models.catalog import ServiceType
 from app.models.customer import Customer, Location
@@ -30,6 +38,12 @@ from app.models.user import User
 from app.schemas.common import Ref
 from app.schemas.my_profile import PixInfo
 from app.schemas.payout import (
+    EarningsBucket,
+    EarningsMonth,
+    EarningsMonths,
+    EarningsMonthState,
+    EarningsRejection,
+    EarningsTotals,
     MyEarnings,
     MyPayout,
     PayoutIn,
@@ -631,6 +645,225 @@ async def my_earnings(db: AsyncSession, user: User, month: date | None = None) -
     return MyEarnings(
         items=base.items,
         summary=base.summary,
+        total_count=base.total_count,
         reimbursement_to_receive=Decimal(to_receive or 0),
         reimbursement_paid=Decimal(paid or 0),
+    )
+
+
+# --------------------------------------------------------------------------- faturamento do app
+
+# GET /me/earnings/months: quantos meses (até o atual) a aba Faturamento recebe.
+MONTHS_DEFAULT, MONTHS_MAX = 12, 24
+
+
+def shift_month(month: date, delta: int) -> date:
+    """O dia 1 do mês `delta` meses depois de `month` (antes, com `delta` negativo)."""
+    index = month.year * 12 + month.month - 1 + delta
+    return date(index // 12, index % 12 + 1, 1)
+
+
+def month_state(
+    *,
+    to_pay: int,
+    expected: int,
+    paid: int,
+    due_without_invoice: int,
+    due_in_review: int,
+    paid_without_invoice: int,
+    rejection_open: bool,
+) -> EarningsMonthState:
+    """Situação do mês pelas contagens de valores (R$ 0,00 também conta); a ordem é a prioridade.
+    A recusa em aberto só marca o mês enquanto alguma OS dele está sem nota (ou ele não tem OS). A
+    nota nunca trava o pagamento: "no_invoice" é só informativo."""
+    count = to_pay + expected + paid
+    if rejection_open and (count == 0 or due_without_invoice + paid_without_invoice > 0):
+        return "rejected"
+    if count == 0:
+        return "empty"
+    if to_pay == 0 and paid == 0:
+        return "in_progress"
+    if paid > 0 and (to_pay > 0 or expected > 0):
+        return "partial"
+    if to_pay > 0:
+        if due_without_invoice > 0:
+            return "no_invoice"
+        return "in_review" if due_in_review > 0 else "to_pay"
+    return "paid_no_invoice" if paid_without_invoice > 0 else "paid"
+
+
+def _open_rejections(invoices: Sequence[Any]) -> dict[str, EarningsRejection]:
+    """A recusa que ainda vale em cada competência ("AAAA-MM"): a nota recusada mais recente (pela
+    hora da recusa; sem ela, pelo envio), se nenhuma nota não recusada da mesma competência foi
+    enviada depois da recusa. A recusada que o técnico apagou não existe mais."""
+    by_month: dict[str, list[Any]] = {}
+    for invoice in invoices:
+        by_month.setdefault(f"{invoice.competence:%Y-%m}", []).append(invoice)
+    found: dict[str, EarningsRejection] = {}
+    for key, group in by_month.items():
+        rejected = [i for i in group if i.status == InvoiceStatus.REJECTED]
+        if not rejected:
+            continue
+        latest = max(rejected, key=lambda i: (i.reviewed_at or i.created_at, i.created_at))
+        at = latest.reviewed_at or latest.created_at
+        if any(i.status != InvoiceStatus.REJECTED and i.created_at > at for i in group):
+            continue
+        found[key] = EarningsRejection(
+            invoice_id=latest.id,
+            number=latest.number,
+            reason=latest.reject_reason,
+            rejected_at=latest.reviewed_at,
+        )
+    return found
+
+
+async def my_earnings_months(
+    db: AsyncSession, user: User, months: int = MONTHS_DEFAULT, now: datetime | None = None
+) -> EarningsMonths:
+    """Faturamento do app: os `months` meses até o atual (fuso da operação), o mais novo primeiro
+    (também os sem valor), com a situação de cada um, e os totais da vida toda.
+
+    As regras de my_earnings: o mês do valor é o da conclusão da OS (aberta: o do lançamento); o
+    pendente de OS cancelada não conta (o pago, sim); só vale a nota do próprio técnico. Três
+    consultas, todas pelo técnico: os valores agrupados por mês, as notas da janela (a recusa em
+    aberto de cada competência) e os reembolsos. Só leitura. `now` é para os testes."""
+    until = (now or utcnow()).astimezone(ZoneInfo(settings.TIMEZONE)).date().replace(day=1)
+    since = shift_month(until, 1 - months)
+    until_key, since_key = f"{until:%Y-%m}", f"{since:%Y-%m}"
+
+    pending = TicketPayout.status == PayoutStatus.PENDING
+    is_paid = TicketPayout.status == PayoutStatus.PAID
+    due = and_(pending, Ticket.status.in_(CONCLUDED))
+    without_invoice = TechnicianInvoice.id.is_(None)
+    # Os baldes de EarningsMonth (contagem e soma de cada um), nesta ordem nas colunas.
+    buckets = {
+        "to_pay": due,
+        "expected": and_(pending, Ticket.status.not_in((*CONCLUDED, CANCELLED))),
+        "paid": is_paid,
+        "due_without_invoice": and_(due, without_invoice),
+        "due_in_review": and_(due, TechnicianInvoice.status == InvoiceStatus.PENDING),
+        "due_checked": and_(due, TechnicianInvoice.status == InvoiceStatus.CHECKED),
+        "paid_without_invoice": and_(is_paid, without_invoice),
+    }
+    sums = [
+        column
+        for condition in buckets.values()
+        for column in (
+            func.count().filter(condition),
+            func.coalesce(func.sum(TicketPayout.amount).filter(condition), 0),
+        )
+    ]
+    when = func.coalesce(Ticket.resolved_at, TicketPayout.created_at)
+    # O mesmo objeto no SELECT e no GROUP BY (os parâmetros saem iguais). Horário corrigido para o
+    # futuro conta no mês atual.
+    month_key = func.least(
+        func.to_char(func.timezone(settings.TIMEZONE, when), "YYYY-MM"), until_key
+    )
+    rows = (
+        await db.execute(
+            select(month_key, func.max(TicketPayout.paid_at).filter(is_paid), *sums)
+            .select_from(TicketPayout)
+            .join(Ticket, Ticket.id == TicketPayout.ticket_id)
+            .outerjoin(
+                TechnicianInvoice,
+                and_(
+                    TechnicianInvoice.id == TicketPayout.invoice_id,
+                    TechnicianInvoice.technician_id == TicketPayout.technician_id,
+                    # A recusa solta as OS: ligada a uma recusada, a OS está sem nota.
+                    TechnicianInvoice.status != InvoiceStatus.REJECTED,
+                ),
+            )
+            .where(
+                TicketPayout.technician_id == user.id,
+                not_(and_(pending, Ticket.status == CANCELLED)),
+            )
+            .group_by(month_key)
+        )
+    ).all()
+    invoices = (
+        await db.execute(
+            select(
+                TechnicianInvoice.id,
+                TechnicianInvoice.number,
+                TechnicianInvoice.status,
+                TechnicianInvoice.competence,
+                TechnicianInvoice.reject_reason,
+                TechnicianInvoice.reviewed_at,
+                TechnicianInvoice.created_at,
+            ).where(
+                TechnicianInvoice.technician_id == user.id,
+                TechnicianInvoice.competence >= since,
+                TechnicianInvoice.competence <= until,
+            )
+        )
+    ).all()
+    # Reembolsos (custos extras): aprovados e ainda não pagos; pagos (todos os meses).
+    refund = func.sum(TicketExpense.total)
+    to_receive, reimbursed = (
+        await db.execute(
+            select(
+                func.coalesce(refund.filter(TicketExpense.status == ExpenseStatus.APPROVED), 0),
+                func.coalesce(refund.filter(TicketExpense.status == ExpenseStatus.PAID), 0),
+            ).where(TicketExpense.technician_id == user.id)
+        )
+    ).one()
+
+    # "AAAA-MM" → (último pagamento, baldes), só os meses com valor (a vida toda).
+    found: dict[str, tuple[datetime | None, dict[str, EarningsBucket]]] = {}
+    for key, last_paid_at, *numbers in rows:
+        found[key] = (
+            last_paid_at,
+            {
+                name: EarningsBucket(count=numbers[2 * i], amount=Decimal(numbers[2 * i + 1]))
+                for i, name in enumerate(buckets)
+            },
+        )
+
+    def lifetime(name: str, *, older: bool = False) -> Decimal:
+        """A soma do balde em todos os meses (`older`: só nos de antes da janela)."""
+        return sum(
+            (b[name].amount for key, (_, b) in found.items() if not older or key < since_key),
+            Decimal("0"),
+        )
+
+    rejections = _open_rejections(invoices)
+    blank = {name: EarningsBucket() for name in buckets}
+    window: list[EarningsMonth] = []
+    for back in range(months):
+        key = f"{shift_month(until, -back):%Y-%m}"
+        last_paid_at, values = found.get(key, (None, blank))
+        n = {name: bucket.count for name, bucket in values.items()}
+        rejection = rejections.get(key)
+        window.append(
+            EarningsMonth(
+                month=key,
+                state=month_state(
+                    to_pay=n["to_pay"],
+                    expected=n["expected"],
+                    paid=n["paid"],
+                    due_without_invoice=n["due_without_invoice"],
+                    due_in_review=n["due_in_review"],
+                    paid_without_invoice=n["paid_without_invoice"],
+                    rejection_open=rejection is not None,
+                ),
+                count=n["to_pay"] + n["expected"] + n["paid"],
+                total=values["to_pay"].amount + values["expected"].amount + values["paid"].amount,
+                **values,
+                last_paid_at=last_paid_at,
+                rejection=rejection,
+            )
+        )
+    return EarningsMonths(
+        since=since_key,
+        until=until_key,
+        totals=EarningsTotals(
+            paid=lifetime("paid"),
+            to_pay=lifetime("to_pay"),
+            expected=lifetime("expected"),
+            to_pay_older=lifetime("to_pay", older=True),
+            last_paid_at=max((p for p, _ in found.values() if p is not None), default=None),
+            reimbursement_to_receive=Decimal(to_receive or 0),
+            reimbursement_paid=Decimal(reimbursed or 0),
+        ),
+        months=window,
     )

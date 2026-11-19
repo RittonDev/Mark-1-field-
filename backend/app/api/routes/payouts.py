@@ -1,24 +1,35 @@
-"""Valor de cada técnico por OS, o fechamento dos pagamentos e os "Meus ganhos" do técnico."""
+"""Valor de cada técnico por OS, o fechamento dos pagamentos e os ganhos do técnico (o mês e o
+Faturamento do app)."""
 
 import uuid
 from datetime import date
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel
 
-from app.api.deps import DB, CurrentUser, access_user
+from app.api.deps import DB, CurrentUser, access_user, require_roles
 from app.core.enums import PayoutStatus, UserRole
-from app.schemas.payout import MyEarnings, PayoutBoard, PayoutIds, PayoutIn, PayoutOut
+from app.models import User
+from app.schemas.payout import (
+    EarningsMonths,
+    MyEarnings,
+    PayoutBoard,
+    PayoutIds,
+    PayoutIn,
+    PayoutOut,
+)
 from app.services import payouts as svc
 from app.services import tickets as tickets_svc
 from app.services.realtime import commit_and_publish
 
 router = APIRouter(tags=["payouts"])
 
-# Tela de Pagamentos (inclui o valor do técnico na OS). "Meus ganhos" é do técnico.
+# Tela de Pagamentos (inclui o valor do técnico na OS). "Meus ganhos" e o Faturamento são do
+# técnico.
 PayoutsView = access_user("commercial.payouts")
 PayoutsEdit = access_user("commercial.payouts", level="edit")
+TechnicianUser = Annotated[User, Depends(require_roles(UserRole.TECHNICIAN))]
 
 BAD_MONTH = "Mês inválido (use AAAA-MM)"
 BAD_PERIOD = "Escolha datas entre 2000 e 2100"
@@ -123,3 +134,15 @@ async def my_earnings(db: DB, user: CurrentUser, month: str | None = None) -> My
         if not 2000 <= when.year <= 2100:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, BAD_MONTH)
     return await svc.my_earnings(db, user, when)
+
+
+@router.get("/me/earnings/months", response_model=EarningsMonths)
+async def my_earnings_months(
+    db: DB,
+    user: TechnicianUser,
+    months: Annotated[int, Query(ge=1, le=svc.MONTHS_MAX)] = svc.MONTHS_DEFAULT,
+) -> EarningsMonths:
+    """Faturamento do app: os `months` meses até o atual (fuso da operação), o mais novo primeiro,
+    com a situação de cada mês (calculada aqui: o app não repete a regra) e os totais. Só
+    leitura."""
+    return await svc.my_earnings_months(db, user, months)

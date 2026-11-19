@@ -222,6 +222,14 @@ class TicketRecurrence(BaseModel):
     previous: list[RecurrenceItem]
 
 
+class AcceptedOffer(BaseModel):
+    """A oferta aceita pelo responsável atual da OS (só a gestão; sem o valor, que é de
+    Pagamentos): quando ele aceitou e quando abriu o escopo no app (null: app antigo)."""
+
+    accepted_at: datetime
+    scope_read_at: datetime | None
+
+
 class ReportLinkOut(BaseModel):
     """Link público do relatório da OS concluída (para o cliente)."""
 
@@ -279,6 +287,10 @@ class TicketDetail(TicketListItem):
     # O prazo mais próximo entre essas ofertas (null se nenhuma tem prazo): sem rotina de
     # vencimento, a web relê a OS nesse horário. O técnico recebe null.
     next_offer_expires_at: datetime | None = None
+    # A oferta aceita pelo responsável atual (toda a gestão vê; sem valor): a OS com técnico não
+    # mostra mais as ofertas, e "Escopo lido às HH:MM" fica aqui. Null sem ela; o técnico recebe
+    # null.
+    accepted_offer: AcceptedOffer | None = None
     # Só na tela da OS: outras OS no mesmo local nos últimos 30 dias.
     recurrence: TicketRecurrence | None = None
     # OS migrada (Field Control): valores, itens, solicitação original e arquivos. Só a equipe.

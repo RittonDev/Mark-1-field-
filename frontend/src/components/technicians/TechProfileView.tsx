@@ -134,7 +134,8 @@ export function TechProfileView({ technicianId, dirty }: { technicianId: UUID; d
   const detail = query.data;
 
   if (!detail) {
-    return query.isError ? (
+    // Tentando de novo depois do erro: o esqueleto volta enquanto busca.
+    return query.isError && !query.isFetching ? (
       <ErrorBox message="Não deu para carregar o perfil técnico." onRetry={() => void query.refetch()} />
     ) : (
       <div role="status" aria-live="polite" className="flex flex-col gap-3">

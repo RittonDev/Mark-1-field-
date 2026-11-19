@@ -1,7 +1,8 @@
-"""Meu cadastro (app do técnico): o próprio cadastro e a foto.
+"""Meu cadastro (app do técnico): o próprio cadastro, o perfil técnico e a foto.
 
-Só para o técnico (a gestão edita em Técnicos e em Usuários). Tudo pede internet: nada entra na fila
-offline, a senha não fica guardada e o aviso à central sai na hora (services/my_profile.py).
+Só para o técnico (a gestão edita em Técnicos e em Usuários; o perfil técnico, a central só vê).
+Tudo pede internet: nada entra na fila offline, a senha não fica guardada e o aviso à central sai
+na hora (services/my_profile.py).
 """
 
 from typing import Annotated
@@ -22,8 +23,8 @@ TechnicianUser = Annotated[User, Depends(require_roles(UserRole.TECHNICIAN))]
 
 
 @router.get("/me/profile", response_model=MyProfile)
-async def get_my_profile(user: TechnicianUser) -> MyProfile:
-    return svc.profile(user)
+async def get_my_profile(db: DB, user: TechnicianUser) -> MyProfile:
+    return await svc.profile(db, user)
 
 
 @router.patch("/me/profile", response_model=MyProfile)
@@ -32,7 +33,12 @@ async def update_my_profile(body: MyProfileUpdate, db: DB, user: TechnicianUser)
     errada, e com a senha provisória; 429 depois de 5 erros em 15 min, somando os da troca de
     senha). A senha é conferida antes de "E-mail já cadastrado". Sem nada novo: 200, sem histórico
     e sem aviso. A troca de e-mail ou PIX até 72 h depois de a central redefinir a senha vai no
-    aviso com `after_reset` (quem redefiniu e quando)."""
+    aviso com `after_reset` (quem redefiniu e quando).
+
+    Perfil técnico (`tool_ids`, `availability`, `transport`, `skills`, `education`): sem senha,
+    cada parte inteira (o app manda uma por vez); a resposta volta normalizada (ordem, "desde" das
+    aptidões, id dos cursos). 422 com as mensagens do app (ferramenta que não existe: "Ferramenta
+    não encontrada. Atualize a lista.")."""
     try:
         changes = await svc.update(db, user, body)
     except (login_guard.LoginBlocked, login_guard.RateLimited) as exc:
@@ -47,7 +53,7 @@ async def update_my_profile(body: MyProfileUpdate, db: DB, user: TechnicianUser)
         await user_history.publish_changed(
             user, changes, via=VIA_APP, actor=user, after_reset=after_reset
         )
-    return svc.profile(user)
+    return await svc.profile(db, user)
 
 
 @router.post("/me/profile/photo", response_model=MyProfile)
@@ -60,7 +66,7 @@ async def upload_my_photo(
     await db.commit()
     await technicians.drop_unused_photo(db, previous, user.id)
     await user_history.publish_changed(user, changes, via=VIA_APP, actor=user)
-    return svc.profile(user)
+    return await svc.profile(db, user)
 
 
 @router.delete("/me/profile/photo", response_model=MyProfile)
@@ -71,4 +77,4 @@ async def remove_my_photo(db: DB, user: TechnicianUser) -> MyProfile:
         await db.commit()
         await technicians.drop_unused_photo(db, previous, user.id)
         await user_history.publish_changed(user, changes, via=VIA_APP, actor=user)
-    return svc.profile(user)
+    return await svc.profile(db, user)

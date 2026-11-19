@@ -1,9 +1,14 @@
-"""Perfil técnico (services/tech_profile.py e schemas/tech_profile.py).
+"""Perfil técnico (services/tech_profile.py, schemas/tech_profile.py e o PATCH /me/profile).
 
 Sem banco: os textos curtos (os mesmos casos das sondas de lib/constants.ts), os turnos que uma
 visita toca e o sinal da disponibilidade na sugestão, as mensagens de cada item do PATCH
 /me/profile, a normalização e o "o que conta como mudança" de `wanted`/`apply`, o que a ficha da
-homologação traz na aprovação e a cópia desse mapa na migração f5a7c9e1b3d6. Dados fictícios.
+homologação traz na aprovação e a cópia desse mapa na migração f5a7c9e1b3d6.
+
+Com banco (requires_db): um PATCH por parte relido do banco (o PATCH só grava quando o histórico
+muda: "200 sem gravar" aparece aqui), as mensagens 422 com o rótulo, o "desde" pelo nome, o id dos
+cursos, a ferramenta desativada, os textos do histórico do cadastro e o aviso profile.changed.
+Dados fictícios (Tecnico Alfa, Escola Exemplo, @exemplo.com).
 """
 
 import importlib.util
@@ -17,10 +22,14 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
-from pydantic import BaseModel, ConfigDict, ValidationError
+from httpx import AsyncClient, Response
+from pydantic import BaseModel, ValidationError
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from app.core.config import settings
-from app.models import TechnicianApplication, User
+from app.models import TechnicianApplication, TechnicianTool, User
+from app.schemas.my_profile import MyProfileUpdate
 from app.schemas.onboarding import AVAILABILITY, SKILL_LEVELS, VEHICLE_TYPES
 from app.schemas.tech_profile import (
     EducationIn,
@@ -29,11 +38,13 @@ from app.schemas.tech_profile import (
     TechnicianToolUpdate,
     TransportIn,
 )
+from app.services import realtime, validation_messages
 from app.services import tech_profile as tp
-from app.services import validation_messages
 from app.services.errors import WorkflowError
+from tests.conftest import World, requires_db
 
 TZ = ZoneInfo(settings.TIMEZONE)
+API = settings.API_PREFIX
 MIGRATION = (
     Path(__file__).resolve().parents[1]
     / "alembic"
@@ -158,6 +169,19 @@ def test_short_texts() -> None:
     assert tp.clean(unicodedata.normalize("NFD", "  Fibra   óptica ")) == "Fibra óptica"
 
 
+def test_items_text_cuts_long_lists() -> None:
+    """Textos do histórico: até 10 itens inteiros; mais que isso, os 10 primeiros e "e mais N"."""
+    assert tp.items_text([]) is None
+    assert tp.items_text(["Escada"]) == "Escada"
+    assert tp.items_text(["Escada", "Multímetro"]) == "Escada, Multímetro"
+    ten = [f"Item {n:02d}" for n in range(1, 11)]
+    assert tp.items_text(ten) == ", ".join(ten)
+    twelve = [*ten, "Item 11", "Item 12"]
+    assert tp.items_text(twelve) == f"{', '.join(ten)} e mais 2"
+    assert tp.items_text(twelve, "; ") == f"{'; '.join(ten)} e mais 2"
+    assert tp.HISTORY_ITEMS == 10
+
+
 # ------------------------------------------------------- itens do PATCH /me/profile
 
 
@@ -259,20 +283,67 @@ def test_tool_name_is_cleaned_and_checked() -> None:
     ]
 
 
+def test_patch_limits_are_the_service_ones() -> None:
+    """Os limites do PATCH /me/profile e dos itens são os de services/tech_profile.py (os mesmos de
+    TECH_PROFILE_LIMITS em lib/constants.ts)."""
+
+    def max_length(model: type[BaseModel], field: str) -> int:
+        found = [m.max_length for m in model.model_fields[field].metadata if hasattr(m, "max_length")]
+        assert len(found) == 1, (model, field)
+        return found[0]
+
+    assert max_length(MyProfileUpdate, "tool_ids") == tp.MAX_TOOLS == 200
+    assert max_length(MyProfileUpdate, "availability") == tp.MAX_SLOTS == len(tp.ALL_SLOTS)
+    assert max_length(MyProfileUpdate, "skills") == tp.MAX_SKILLS == 30
+    assert max_length(MyProfileUpdate, "education") == tp.MAX_EDUCATION == 20
+    assert max_length(TransportIn, "modes") == tp.MAX_MODES == len(tp.TRANSPORT_MODES)
+    assert max_length(TechnicianSkillIn, "name") == tp.SKILL_NAME_MAX
+    assert max_length(EducationIn, "course") == tp.COURSE_MAX
+    assert max_length(EducationIn, "institution") == tp.INSTITUTION_MAX
+    assert max_length(TechnicianToolCreate, "name") == tp.TOOL_NAME_MAX
+
+
+def test_patch_lists_are_checked_whole() -> None:
+    """A lista inteira: turno desconhecido, transporte null e itens repetidos (os itens se
+    conferem um a um nos testes acima)."""
+    assert _problems(MyProfileUpdate, {"availability": ["sat:afternoon", "sat:lunch"]}) == [
+        (("availability",), "Turno desconhecido: sat:lunch")
+    ]
+    assert _problems(MyProfileUpdate, {"transport": None}) == [
+        (("transport",), "Informe os meios de transporte")
+    ]
+    linux = {"name": "linux", "level": "basico"}
+    assert _problems(MyProfileUpdate, {"skills": [linux, {**linux, "name": " LÍNUX "}]}) == [
+        (("skills",), "Aptidão repetida: LÍNUX")
+    ]
+    course = {
+        "course": "Técnico em redes",
+        "level": "technical",
+        "institution": "Escola Exemplo",
+        "start": "2024-02",
+    }
+    # O mesmo curso, instituição, nível e início, sem diferença de acento e maiúsculas.
+    same = {**course, "course": "TÉCNICO  em redes", "institution": "escola exemplo", "end": None}
+    assert _problems(MyProfileUpdate, {"education": [course, same]}) == [
+        (("education",), "Formação repetida: TÉCNICO em redes")
+    ]
+    # O mesmo id duas vezes.
+    twice = str(uuid.uuid4())
+    other = {**course, "id": twice, "start": "2020-01", "end": "2021-12"}
+    assert _problems(MyProfileUpdate, {"education": [{**course, "id": twice}, other]}) == [
+        (("education",), "Formação repetida: Técnico em redes")
+    ]
+    # Outro nível ou outro início não repete; null e [] limpam.
+    assert MyProfileUpdate.model_validate(
+        {"education": [course, {**course, "level": "certification"}, other]}
+    )
+    cleared = MyProfileUpdate.model_validate(
+        {"tool_ids": None, "availability": [], "skills": None, "education": None}
+    )
+    assert cleared.model_fields_set == {"tool_ids", "availability", "skills", "education"}
+
+
 # ------------------------------------------------------------ wanted e apply
-
-
-class _Body(BaseModel):
-    """O pedaço de MyProfileUpdate que `wanted` lê (o PATCH /me/profile de verdade fica em
-    schemas/my_profile.py)."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    tool_ids: list[uuid.UUID] | None = None
-    availability: list[str] | None = None
-    transport: TransportIn | None = None
-    skills: list[TechnicianSkillIn] | None = None
-    education: list[EducationIn] | None = None
 
 
 def _tech() -> User:
@@ -284,7 +355,8 @@ AT = datetime(2026, 11, 19, 14, 2, 11, tzinfo=UTC)
 
 async def _save(user: User, **body: Any) -> dict[str, Any]:
     """`wanted` e, com mudança, `apply` (como o PATCH faz); devolve as partes mudadas."""
-    new = await tp.wanted(None, user, _Body.model_validate(body))  # type: ignore[arg-type]
+    data = MyProfileUpdate.model_validate(body)
+    new = await tp.wanted(None, user, data)  # type: ignore[arg-type]
     tp.apply(user, new, via=tp.VIA_APP, at=AT)
     return new
 

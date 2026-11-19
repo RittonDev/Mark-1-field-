@@ -13,7 +13,7 @@ import uuid
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import date, datetime, time, timedelta
 from enum import Enum
-from typing import Any
+from typing import Any, NamedTuple
 from zoneinfo import ZoneInfo
 
 from fastapi import UploadFile
@@ -32,7 +32,7 @@ from sqlalchemy import (
     update,
 )
 from sqlalchemy import inspect as sa_inspect
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB, aggregate_order_by
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, noload, raiseload
 from sqlalchemy.orm.attributes import set_committed_value
@@ -381,6 +381,7 @@ def field_view(detail: TicketDetail) -> TicketDetail:
         # Ofertas da OS a outros técnicos: coisa da central (as dele vêm em /me/offers).
         "open_offers": 0,
         "next_offer_expires_at": None,
+        "accepted_offer": None,
     }
     for key, value in blank.items():
         setattr(detail, key, value)
@@ -733,20 +734,48 @@ def offer_live_clause(now: datetime) -> ColumnElement[bool]:
     )
 
 
-async def open_offers_summary(
-    db: AsyncSession, ticket_id: uuid.UUID, now: datetime | None = None
-) -> tuple[int, datetime | None]:
-    """Ofertas da OS esperando resposta, para toda a gestão (os valores ficam com Pagamentos): o
-    contador do detalhe e o prazo mais próximo entre elas (null se nenhuma tem prazo). Sem rotina
-    de vencimento, a web relê a OS nesse horário."""
-    count, next_expiry = (
+class OffersSummary(NamedTuple):
+    """As ofertas da OS no detalhe da gestão (offers_summary)."""
+
+    open_offers: int
+    next_offer_expires_at: datetime | None
+    # A oferta aceita pelo responsável atual: quando aceitou e quando abriu o escopo.
+    accepted_at: datetime | None
+    scope_read_at: datetime | None
+
+
+async def offers_summary(
+    db: AsyncSession, ticket: Ticket, now: datetime | None = None
+) -> OffersSummary:
+    """As ofertas da OS para toda a gestão (os valores ficam com Pagamentos), numa consulta só: as
+    que esperam resposta (o contador do detalhe e o prazo mais próximo entre elas, null se nenhuma
+    tem prazo: sem rotina de vencimento, a web relê a OS nesse horário) e a aceita pelo responsável
+    atual (a mais recente, se ele aceitou mais de uma vez), sem valor."""
+    live = offer_live_clause(now or utcnow())
+    mine = (
+        and_(
+            TicketOffer.status == OfferStatus.ACCEPTED,
+            TicketOffer.technician_id == ticket.assignee_id,
+        )
+        if ticket.assignee_id is not None
+        else false()
+    )
+    count, next_expiry, accepted_at, read_at = (
         await db.execute(
-            select(func.count(), func.min(TicketOffer.expires_at)).where(
-                TicketOffer.ticket_id == ticket_id, offer_live_clause(now or utcnow())
-            )
+            select(
+                func.count().filter(live),
+                func.min(TicketOffer.expires_at).filter(live),
+                func.max(TicketOffer.responded_at).filter(mine),
+                # A hora da leitura da mesma oferta (a do aceite mais recente).
+                func.array_agg(
+                    aggregate_order_by(
+                        TicketOffer.scope_read_at, TicketOffer.responded_at.desc().nulls_last()
+                    )
+                ).filter(mine),
+            ).where(TicketOffer.ticket_id == ticket.id)
         )
     ).one()
-    return count or 0, next_expiry
+    return OffersSummary(count or 0, next_expiry, accepted_at, read_at[0] if read_at else None)
 
 
 def queue_offer_events(

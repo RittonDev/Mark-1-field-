@@ -304,6 +304,21 @@ FIELD_LABELS: dict[str, str] = {
     "coverage_area": "Região que atende",
     "address_district": "Bairro",
     "address_zip": "CEP",
+    # Perfil técnico (PATCH /me/profile) e os filtros da lista de técnicos.
+    "tool_ids": "Ferramental",
+    "availability": "Disponibilidade",
+    "transport": "Transporte",
+    "modes": "Meios de transporte",
+    "driver_license": "CNH",
+    "skills": "Aptidões",
+    "education": "Formação",
+    "course": "Curso",
+    "institution": "Instituição",
+    "level": "Nível",
+    "start": "Início",
+    "end": "Fim",
+    "day": "Dia",
+    "period": "Turno",
 }
 
 
@@ -419,6 +434,9 @@ CONSTRAINT_MESSAGES: dict[str, str] = {
     "uq_technician_invoices_technician_upload": "Esta nota já foi recebida. Atualize a lista.",
     # A mesma ocorrência desconsiderada duas vezes (elo do técnico).
     "uq_technician_level_waivers_occurrence": "Esta ocorrência já foi desconsiderada",
+    # Ferramental dos técnicos (Configurações › Técnicos): o serviço já recusa sem acento e
+    # maiúsculas; o banco pega dois cadastros ao mesmo tempo.
+    "uq_tool_catalog_name": "Já existe uma ferramenta com este nome",
 }
 CONFLICT = "Conflito de dados: registro duplicado ou referência inválida"
 

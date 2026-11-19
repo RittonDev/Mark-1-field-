@@ -2,16 +2,23 @@
 
 Dois recortes: o da central (TicketOfferOut, só com Pagamentos, porque leva o valor) e o do técnico
 (FieldOfferOut), que vê a OS antes de estar nela e por isso recebe só o que o convite pelo WhatsApp
-diz: serviço, escopo, formulários, bairro e cidade, data e valor. Cliente, loja, endereço, contato,
-CNPJ, SLA, analista, etiquetas e projeto ficam de fora.
+diz: serviço, escopo, formulários, bairro e cidade, data, duração estimada e valor. Cliente, loja,
+endereço, contato, CNPJ, SLA, analista, etiquetas e projeto ficam de fora (nem no título nem no
+nome do serviço).
 """
 
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    ValidationError,
+    ValidatorFunctionWrapHandler,
+    field_validator,
+)
 from pydantic_core import PydanticCustomError
 
 from app.core.enums import OfferCancelReason
@@ -66,6 +73,23 @@ class OfferDecline(BaseModel):
     reason: str | None = Field(default=None, max_length=DECLINE_REASON_MAX)
 
 
+class OfferAccept(BaseModel):
+    """Aceite do técnico (corpo opcional): quando ele abriu o escopo no app, no relógio do
+    servidor. Sem fuso, vale a hora de Brasília."""
+
+    scope_read_at: LocalDatetime | None = None
+
+    @field_validator("scope_read_at", mode="wrap")
+    @classmethod
+    def _lenient(cls, value: Any, handler: ValidatorFunctionWrapHandler) -> datetime | None:
+        """Valor inválido vira null: a hora da leitura nunca recusa o aceite (data fora do que a
+        conversão para UTC aguenta também)."""
+        try:
+            return handler(value)
+        except (ValidationError, OverflowError):
+            return None
+
+
 class TicketOfferOut(BaseModel):
     """A oferta para a central (GET /tickets/{id}/offers)."""
 
@@ -79,6 +103,8 @@ class TicketOfferOut(BaseModel):
     decline_reason: str | None
     cancel_reason: OfferCancelReason | None
     viewed_at: datetime | None
+    # Quando o técnico abriu o escopo no app, gravado no aceite (null: não aceita ou app antigo).
+    scope_read_at: datetime | None
     responded_at: datetime | None
     created_by: Ref | None
     created_at: datetime
@@ -109,6 +135,9 @@ class FieldOfferTicket(BaseModel):
     # Janela da visita, se a central já agendou (sem ela, "data a combinar").
     scheduled_start: datetime | None
     scheduled_end: datetime | None
+    # Duração estimada em minutos (a do tipo de serviço, copiada na abertura da OS). Vem também no
+    # recorte mínimo: não é dado sensível.
+    estimated_minutes: int | None
 
 
 class FieldOfferOut(BaseModel):
@@ -123,6 +152,8 @@ class FieldOfferOut(BaseModel):
     # definiu o técnico) ou "ticket_closed" (a OS foi encerrada).
     cancel_reason: OfferCancelReason | None
     viewed_at: datetime | None
+    # Quando ele abriu o escopo (só na aceita).
+    scope_read_at: datetime | None
     responded_at: datetime | None
     created_at: datetime
     ticket: FieldOfferTicket

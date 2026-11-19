@@ -44,7 +44,8 @@ export function TechnicianStatsSection({ technicianId }: { technicianId: UUID })
         Atendimentos por mês
       </SectionTitle>
       {!data ? (
-        stats.isError ? (
+        // Tentando de novo depois do erro: o esqueleto volta enquanto busca.
+        stats.isError && !stats.isFetching ? (
           <ErrorBox message="Não foi possível carregar os atendimentos por mês." onRetry={() => void stats.refetch()} />
         ) : (
           <Skeleton className="h-[180px]" />

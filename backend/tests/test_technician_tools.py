@@ -44,7 +44,7 @@ async def _set_profile(engine: AsyncEngine, user_id: uuid.UUID, **values: Any) -
         await conn.execute(update(User).where(User.id == user_id).values(**values))
 
 
-async def _issue(response: Any) -> dict:
+def _issue(response: Any) -> dict:
     assert response.status_code == 422, response.text
     return response.json()["detail"][0]
 
@@ -72,11 +72,11 @@ async def test_central_keeps_the_tool_catalog(
     ladder, pliers = created["Escada"]["id"], created["Alicate de corte"]["id"]
 
     # Nome: limpo, de 2 a 80; repetido sem acento e sem maiúsculas é recusado antes do banco.
-    issue = await _issue(await client.post(TOOLS, json={"name": " a "}, headers=an))
+    issue = _issue(await client.post(TOOLS, json={"name": " a "}, headers=an))
     assert (issue["msg"], issue["label"]) == ("Informe o nome da ferramenta", "Nome")
-    issue = await _issue(await client.post(TOOLS, json={"name": "x" * 81}, headers=an))
+    issue = _issue(await client.post(TOOLS, json={"name": "x" * 81}, headers=an))
     assert issue["msg"] == "No máximo 80 caracteres"
-    issue = await _issue(await client.post(TOOLS, json={"name": "Trena", "ativa": 1}, headers=an))
+    issue = _issue(await client.post(TOOLS, json={"name": "Trena", "ativa": 1}, headers=an))
     assert issue["msg"] == "Campo não aceito"
     for name in ("MULTIMETRO  digital", "Escada"):
         r = await client.post(TOOLS, json={"name": name}, headers=an)
@@ -107,9 +107,9 @@ async def test_central_keeps_the_tool_catalog(
         f"{TOOLS}/{meter['id']}", json={"name": None, "is_active": None}, headers=an
     )
     assert (r.json()["name"], r.json()["is_active"]) == ("Multímetro", False)
-    issue = await _issue(await client.patch(f"{TOOLS}/{ladder}", json={"name": "x"}, headers=an))
+    issue = _issue(await client.patch(f"{TOOLS}/{ladder}", json={"name": "x"}, headers=an))
     assert issue["msg"] == "Informe o nome da ferramenta"
-    issue = await _issue(await client.patch(f"{TOOLS}/{ladder}", json={"ordem": 1}, headers=an))
+    issue = _issue(await client.patch(f"{TOOLS}/{ladder}", json={"ordem": 1}, headers=an))
     assert issue["msg"] == "Campo não aceito"
     r = await client.patch(f"{TOOLS}/{uuid.uuid4()}", json={"is_active": True}, headers=an)
     assert (r.status_code, r.json()["detail"]) == (404, "Ferramenta não encontrada")
@@ -418,21 +418,19 @@ async def test_central_filters_by_tool_and_availability(
     # Com os outros filtros e na página: o total é o dos filtros, não o da página.
     assert await found(day="sat", period="morning", tool_id=ids["ladder"]) == ({other}, "1")
     assert await found(day="sat", period="morning", tool_id=ids["meter"]) == (set(), "0")
-    assert await found(period="morning", limit=1) == ({tech}, "2")  # "Redes" < "Tecnico"? não:
+    assert await found(period="morning", limit=1) == ({other}, "2")  # por nome: Redes, Tecnico
     assert await found(period="morning", q="Redes") == ({other}, "1")
 
     # Valores fora da lista.
     r = await client.get(f"{API}/technicians", params={"day": "sab"}, headers=an)
-    issue = await _issue(r)
+    issue = _issue(r)
     assert issue["loc"] == ["query", "day"]
     assert issue["msg"] == "Escolha uma das opções: mon, tue, wed, thu, fri, sat ou sun"
     assert issue.get("label") == "Dia"
-    issue = await _issue(
+    issue = _issue(
         await client.get(f"{API}/technicians", params={"period": "madrugada"}, headers=an)
     )
     assert issue["msg"] == "Escolha uma das opções: morning, afternoon, evening ou night"
     assert issue.get("label") == "Turno"
-    issue = await _issue(
-        await client.get(f"{API}/technicians", params={"tool_id": "escada"}, headers=an)
-    )
+    issue = _issue(await client.get(f"{API}/technicians", params={"tool_id": "escada"}, headers=an))
     assert (issue["loc"], issue["msg"]) == (["query", "tool_id"], "Identificador inválido")

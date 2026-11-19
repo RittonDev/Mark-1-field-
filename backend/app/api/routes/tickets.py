@@ -28,6 +28,7 @@ from app.models import Ticket, TicketAttachment, TicketComment, TicketEvent, Tic
 from app.schemas.common import Page, TagOut
 from app.schemas.tag_rules import TicketTagRules
 from app.schemas.ticket import (
+    AcceptedOffer,
     AttachmentOut,
     AttachmentUpdate,
     BulkTagsResult,
@@ -90,12 +91,17 @@ _INTERNAL_EVENT_TYPES = {
 
 async def _with_recurrence(db: DB, ticket: Ticket, user: User) -> TicketDetail:
     detail = svc.to_detail(ticket, user)
-    # Reincidência (outras OS no local) e ofertas em aberto são da gestão; o técnico só vê a OS
-    # dele.
+    # Reincidência (outras OS no local) e ofertas (as em aberto e a aceita, sem valor) são da
+    # gestão; o técnico só vê a OS dele.
     if user.can_manage_tickets:
         detail.recurrence = await svc.recurrence_for(db, ticket, user)
-        summary = await svc.open_offers_summary(db, ticket.id)
-        detail.open_offers, detail.next_offer_expires_at = summary
+        offers = await svc.offers_summary(db, ticket)
+        detail.open_offers = offers.open_offers
+        detail.next_offer_expires_at = offers.next_offer_expires_at
+        if offers.accepted_at is not None:
+            detail.accepted_offer = AcceptedOffer(
+                accepted_at=offers.accepted_at, scope_read_at=offers.scope_read_at
+            )
     return detail
 
 

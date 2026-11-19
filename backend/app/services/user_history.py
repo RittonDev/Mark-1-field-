@@ -9,9 +9,17 @@ vira uma linha com quem fez, por onde e as mudanças [{field, from, to}] já com
 - pix: a chave MASCARADA ("CPF ***.456.789-**"), null sem chave; pix_holder: o titular da conta;
 - avatar: to "nova" na troca e null na remoção; password: to "provisória" (redefinição em Técnicos),
   "definida pela central" (Usuários), "criada no app" (o técnico trocou a provisória) ou "trocada
-  no app".
+  no app";
+- perfil técnico (o técnico muda no app; services/tech_profile.py): tools, availability, skills e
+  education (DELTA_FIELDS) gravam o que SAIU em "from" e o que ENTROU em "to" (null: nada), e não
+  o de → para: tools com os nomes em ordem alfabética ("Escada, Multímetro"), availability em
+  turnos ("sáb · tarde e noite"), skills "Linux (Básico)" em ordem alfabética, education "Técnico
+  em redes · Escola Exemplo · Técnico · desde 02/2024 (em andamento)" pelo início, separados por
+  "; " (listas com mais de 10 itens: os 10 primeiros e " e mais N"); transport segue de → para,
+  "Carro, Moto · com CNH", null quando não informado.
 E-mail e celular ficam em claro (a central desfaz uma troca indevida); a chave PIX nunca. Quem não
-tem Pagamentos lê o histórico sem o titular e com a chave como "***" (`hide_pix`).
+tem Pagamentos lê o histórico sem o titular e com a chave como "***" (`hide_pix`). As partes do
+perfil técnico comparam como tech_profile.wanted (a rota do app só grava com mudança no histórico).
 
 Uso: `before = await snapshot(db, user)`, aplica, `changes = await track(db, user, before, ...)`
 (ou `record` com as mudanças especiais) e, depois do commit, `publish_changed`.
@@ -19,6 +27,7 @@ Uso: `before = await snapshot(db, user)`, aplica, `changes = await track(db, use
 
 import logging
 import uuid
+from collections.abc import Callable, Iterable, Mapping
 from datetime import timedelta
 from typing import Any
 
@@ -32,6 +41,7 @@ from app.db.base import utcnow
 from app.models import Team, User, UserChange
 from app.models.user_change import VIA_CENTRAL
 from app.schemas.my_profile import UserChangeItem, UserChangeOut
+from app.services import tech_profile
 
 log = logging.getLogger(__name__)
 
@@ -58,8 +68,15 @@ _RESET_ALERT_FIELDS = frozenset({"pix", "email"})
 # A chave no histórico de quem não tem Pagamentos.
 PIX_HIDDEN = "***"
 
-# Campo -> (valor para comparar, texto da tela).
-Snapshot = dict[str, tuple[Any, str | None]]
+# Partes do perfil técnico em lista: "from" = o que saiu, "to" = o que entrou.
+DELTA_FIELDS = frozenset({"tools", "availability", "skills", "education"})
+# Ferramenta marcada que não está mais no catálogo (a API não exclui; só apagando no banco).
+TOOL_GONE = "Ferramenta removida"
+
+# Campo -> (valor para comparar, texto da tela). Nos DELTA_FIELDS, o valor é o conjunto dos itens e
+# o "texto" é a função que escreve um pedaço deles (o que saiu ou o que entrou).
+ItemsText = Callable[[Iterable[Any]], str | None]
+Snapshot = dict[str, tuple[Any, Any]]
 
 
 def _same(value: Any) -> tuple[Any, str | None]:
@@ -94,9 +111,47 @@ def _role(role: UserRole | str | None) -> tuple[Any, str | None]:
     return value.value, ROLE_LABELS.get(value, value.value)
 
 
+# ------------------------------------------------------------- perfil técnico
+# Os valores comparados são os de tech_profile (os mesmos de `wanted`).
+
+
+def _alphabetical(labels: Iterable[str]) -> list[str]:
+    return sorted(labels, key=lambda label: (tech_profile.fold(label), label))
+
+
+def _tools(user: User, catalog: Mapping[str, tech_profile.ToolInfo]) -> tuple[Any, ItemsText]:
+    def text(ids: Iterable[str]) -> str | None:
+        names = [catalog[key].name if key in catalog else TOOL_GONE for key in ids]
+        return tech_profile.items_text(_alphabetical(names))
+
+    return tech_profile.tool_set(user), text
+
+
+def _slots_text(slots: Iterable[str]) -> str | None:
+    return tech_profile.slots_text(slots) or None
+
+
+def _skills_text(items: Iterable[tuple[Any, Any]]) -> str | None:
+    labels = [tech_profile.skill_label({"name": name, "level": level}) for name, level in items]
+    return tech_profile.items_text(_alphabetical(labels))
+
+
+def _education_text(items: Iterable[tuple[Any, ...]]) -> str | None:
+    courses = [dict(zip(tech_profile.EDUCATION_KEYS, item[1:], strict=True)) for item in items]
+    courses.sort(key=lambda c: (str(c["start"] or ""), tech_profile.fold(str(c["course"] or ""))))
+    return tech_profile.items_text([tech_profile.education_label(c) for c in courses], "; ")
+
+
+def _transport(user: User) -> tuple[Any, str | None]:
+    value = tech_profile.transport_key(user)
+    return value, tech_profile.transport_text(*value) if value is not None else None
+
+
 async def snapshot(db: AsyncSession, user: User) -> Snapshot:
-    """O cadastro agora, campo a campo (sem ir ao banco a não ser pelo nome do grupo)."""
+    """O cadastro agora, campo a campo (sem ir ao banco a não ser pelo nome do grupo e, com
+    ferramenta marcada, pelos nomes delas)."""
     team = await db.get(Team, user.team_id) if user.team_id else None
+    tools = await tech_profile.user_tools(db, user)
     key_type, key = user.pix_key_type, user.pix_key
     has_pix = bool(key_type and key)
     return {
@@ -120,16 +175,27 @@ async def snapshot(db: AsyncSession, user: User) -> Snapshot:
             pix.describe(key_type, key) if key_type and key else None,
         ),
         "pix_holder": _same(user.pix_holder_name if has_pix else None),
+        "tools": _tools(user, tools),
+        "availability": (tech_profile.slot_set(user), _slots_text),
+        "transport": _transport(user),
+        "skills": (tech_profile.skill_set(user.skills or []), _skills_text),
+        "education": (tech_profile.education_set(user.education or []), _education_text),
     }
 
 
 def diff(before: Snapshot, after: Snapshot) -> list[dict[str, Any]]:
-    """As mudanças entre duas fotos do cadastro, na ordem dos campos."""
-    return [
-        {"field": key, "from": before[key][1], "to": value[1]}
-        for key, value in after.items()
-        if key in before and before[key][0] != value[0]
-    ]
+    """As mudanças entre duas fotos do cadastro, na ordem dos campos. Nos DELTA_FIELDS, "from" é
+    o que saiu e "to" o que entrou."""
+    changes: list[dict[str, Any]] = []
+    for key, (value, text) in after.items():
+        if key not in before or before[key][0] == value:
+            continue
+        old, old_text = before[key]
+        if key in DELTA_FIELDS:
+            changes.append({"field": key, "from": old_text(old - value), "to": text(value - old)})
+        else:
+            changes.append({"field": key, "from": old_text, "to": text})
+    return changes
 
 
 def record(

@@ -1,5 +1,5 @@
-"""Meu cadastro: o técnico mantém no app a foto, o nome, o celular, o e-mail, o endereço e a chave
-PIX para receber por chamado.
+"""Meu cadastro: o técnico mantém no app a foto, o nome, o celular, o e-mail, o endereço, a chave
+PIX para receber por chamado e o perfil técnico.
 
 Segurança (conta invadida desviando pagamento): e-mail e chave PIX, inclusive remover a chave, pedem
 a senha atual, com o mesmo limite de tentativas da troca de senha (login_guard, "pwd:{id}": 5 erros
@@ -11,8 +11,13 @@ entra (services/onboarding.company_email). Toda mudança fica no histórico do c
 72 h depois de a central redefinir a senha vai com quem redefiniu (user_history.after_reset).
 Trocar o e-mail não encerra as sessões (a senha é a mesma): o login passa a ser o e-mail novo.
 
+Perfil técnico (ferramental, disponibilidade, transporte e CNH, aptidões e formação;
+services/tech_profile.py): sem senha, nem a provisória trava; cada parte vem inteira e só grava
+quando muda de verdade, com a data e "app" na parte (tech_profile_stamps). Entra no histórico do
+cadastro e no aviso à central como as outras mudanças (sem aviso no sino da web).
+
 Grupo, cargo, acesso ao app, papel, serviços, jornada e senha provisória continuam com a central;
-CPF, CNPJ/MEI, nascimento, ferramentas, veículo e CNH continuam só na ficha da homologação.
+CPF, CNPJ/MEI e nascimento continuam só na ficha da homologação.
 """
 
 import re
@@ -26,7 +31,7 @@ from app.models import User
 from app.models.user_change import VIA_APP
 from app.schemas.common import Ref
 from app.schemas.my_profile import MyProfile, MyProfileUpdate, PixIn, PixInfo
-from app.services import login_guard, onboarding, technicians, user_history
+from app.services import login_guard, onboarding, tech_profile, technicians, user_history
 from app.services.errors import WorkflowError
 
 PASSWORD_REQUIRED = "Confirme com a sua senha atual para mudar o e-mail ou a chave PIX"
@@ -55,9 +60,11 @@ def pix_info(user: User) -> PixInfo | None:
     )
 
 
-def profile(user: User) -> MyProfile:
-    """O cadastro como o app mostra (o grupo já vem carregado com o usuário)."""
+async def profile(db: AsyncSession, user: User) -> MyProfile:
+    """O cadastro como o app mostra (o grupo já vem carregado com o usuário). Uma consulta a mais
+    só com ferramenta marcada: quais delas continuam ativas no catálogo."""
     team = user.team
+    tools = await tech_profile.user_tools(db, user)
     return MyProfile(
         id=user.id,
         name=user.name,
@@ -73,6 +80,12 @@ def profile(user: User) -> MyProfile:
         address_zip=user.address_zip,
         avatar_url=technicians.avatar_url(user),
         pix=pix_info(user),
+        tool_ids=tech_profile.active_tool_ids(user, tools),
+        availability=tech_profile.sort_slots(user.availability or []),
+        transport=tech_profile.transport_of(user),
+        skills=tech_profile.skills_of(user),
+        education=tech_profile.education_of(user),
+        tech_profile_updated=tech_profile.stamps_of(user),
     )
 
 
@@ -94,7 +107,9 @@ async def confirm_password(user: User, password: str | None) -> None:
 
 
 async def _wanted(db: AsyncSession, user: User, data: MyProfileUpdate) -> dict[str, Any]:
-    """Só o que muda de verdade (o mesmo valor escrito de outro jeito não conta)."""
+    """Só o que muda de verdade (o mesmo valor escrito de outro jeito não conta). As partes do
+    perfil técnico vêm de tech_profile.wanted, com as chaves de tech_profile.PARTS (levanta
+    WorkflowError na ferramenta que não existe)."""
     sent = data.model_fields_set
     new: dict[str, Any] = {}
     for key in _PLAIN:
@@ -130,6 +145,7 @@ async def _wanted(db: AsyncSession, user: User, data: MyProfileUpdate) -> dict[s
             user.pix_holder_name,
         ):
             new["pix"] = wanted
+    new.update(await tech_profile.wanted(db, user, data))
     return new
 
 
@@ -150,8 +166,10 @@ async def update(db: AsyncSession, user: User, data: MyProfileUpdate) -> list[di
     Ordem, quando o e-mail ou a chave PIX mudam: senha provisória (TEMPORARY_PASSWORD), e-mail da
     empresa (onboarding.COMPANY_EMAIL), senha atual (PASSWORD_REQUIRED, WRONG_PASSWORD; conta a
     tentativa) e só então e-mail já cadastrado (EMAIL_TAKEN). Levanta WorkflowError (422) nesses
-    casos, login_guard.LoginBlocked (429) depois de muitas senhas erradas e login_guard.RateLimited
-    (429) depois de MAX_EMAIL_CHECKS_PER_HOUR trocas de e-mail na hora."""
+    casos e na ferramenta que não existe (tech_profile.TOOL_NOT_FOUND),
+    login_guard.LoginBlocked (429) depois de muitas senhas erradas e login_guard.RateLimited
+    (429) depois de MAX_EMAIL_CHECKS_PER_HOUR trocas de e-mail na hora. O perfil técnico grava
+    com tech_profile.apply entre as duas fotos do histórico."""
     new = await _wanted(db, user, data)
     if not new:
         return []
@@ -174,4 +192,5 @@ async def update(db: AsyncSession, user: User, data: MyProfileUpdate) -> list[di
         technicians.set_home(user, *new["home"])
     if "pix" in new:
         _set_pix(user, new["pix"])
+    tech_profile.apply(user, new, via=tech_profile.VIA_APP, at=utcnow())
     return await user_history.track(db, user, before, via=VIA_APP, actor=user)

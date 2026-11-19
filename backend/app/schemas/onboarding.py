@@ -75,7 +75,10 @@ UFS = frozenset(
 # antes da API (ou junto): com a API na frente, a ficha da web pede para recarregar e não envia até
 # a web nova entrar. 2026-11-18: o aviso passa a citar a chave PIX que o técnico cadastra no app
 # para receber pelos chamados. 2026-11-19: texto revisto na revisão de segurança.
-PRIVACY_VERSION = "2026-11-19"
+# 2026-11-19.2: o aviso passa a citar o perfil técnico (ferramental, disponibilidade por turno,
+# transporte e CNH, aptidões e formação). Versões "AAAA-MM-DD" ou "AAAA-MM-DD.N" (a segunda do
+# mesmo dia), comparadas como texto.
+PRIVACY_VERSION = "2026-11-19.2"
 
 
 class CatalogItem(BaseModel):

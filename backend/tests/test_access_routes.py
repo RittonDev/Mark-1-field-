@@ -109,6 +109,8 @@ GUARDED: dict[tuple[str, str], tuple[tuple[str, ...], str] | tuple[tuple[str, ..
     ("DELETE", "/technicians/favorites/{technician_id}"): (("base.technicians",), E),
     # Elo dos técnicos: o detalhe no cadastro; desconsiderar, voltar a contar e recalcular.
     ("GET", "/technicians/{user_id}/level"): (("base.technicians",), V),
+    # Atendimentos por mês (aba Elo da ficha): só contagens.
+    ("GET", "/technicians/{user_id}/stats"): (("base.technicians",), V),
     ("POST", "/technicians/{user_id}/level/waivers"): (("base.technicians",), E),
     ("DELETE", "/technicians/{user_id}/level/waivers/{waiver_id}"): (("base.technicians",), E),
     ("POST", "/technicians/levels/refresh"): (("base.technicians",), E),
@@ -151,6 +153,9 @@ GUARDED: dict[tuple[str, str], tuple[tuple[str, ...], str] | tuple[tuple[str, ..
     ("PUT", "/settings/expenses"): (("setup.settings",), E),
     ("PUT", "/settings/field"): (("setup.settings",), E),
     ("PUT", "/ticket-tag-rules"): (("setup.settings",), E),
+    # Ferramental dos técnicos (Configurações › Técnicos): incluir, renomear e desativar.
+    ("POST", "/technician-tools"): (("setup.settings",), E),
+    ("PATCH", "/technician-tools/{tool_id}"): (("setup.settings",), E),
 }
 
 # Consultas compartilhadas: toda a gestão (nunca por tela).
@@ -241,6 +246,8 @@ OTHER: dict[tuple[str, str], str] = {
     # Equipe (gestão e técnico)
     ("GET", "/settings/field"): "SU",
     ("GET", "/unproductive-reasons"): "SU",
+    # O catálogo do ferramental: o técnico recebe só as ativas (o app marca no perfil técnico).
+    ("GET", "/technician-tools"): "SU",
     ("POST", "/tickets/{ticket_id}/take"): "SU",
     ("GET", "/tickets/{ticket_id}/worklogs"): "SU",
     ("POST", "/tickets/{ticket_id}/worklogs"): "SU",
@@ -273,13 +280,16 @@ OTHER: dict[tuple[str, str], str] = {
     ("PATCH", "/me/profile"): "TECHNICIAN",
     ("POST", "/me/profile/photo"): "TECHNICIAN",
     ("DELETE", "/me/profile/photo"): "TECHNICIAN",
-    # Notas fiscais (o próprio técnico, na aba Ganhos)
+    # Notas fiscais (o próprio técnico, na aba Faturamento)
     ("GET", "/me/invoices"): "TECHNICIAN",
     ("GET", "/me/invoices/payouts"): "TECHNICIAN",
     ("POST", "/me/invoices"): "TECHNICIAN",
     ("DELETE", "/me/invoices/{invoice_id}"): "TECHNICIAN",
-    # Elo (só o do próprio técnico)
+    ("GET", "/me/earnings/months"): "TECHNICIAN",
+    # Elo, estatísticas e histórico (só os do próprio técnico)
     ("GET", "/me/level"): "TECHNICIAN",
+    ("GET", "/me/stats"): "TECHNICIAN",
+    ("GET", "/me/history"): "TECHNICIAN",
     # Sem login (ou link assinado)
     ("POST", "/auth/login"): "PUB",
     ("POST", "/auth/refresh"): "PUB",

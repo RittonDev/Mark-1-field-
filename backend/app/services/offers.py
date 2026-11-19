@@ -3,12 +3,13 @@
 A central (quem atribui técnico e tem Pagamentos em Editar) manda uma OS sem técnico e em aberto
 para 1 a 10 técnicos ativos, com o valor que o técnico recebe, um prazo para responder (opcional) e
 um recado. O técnico vê a oferta no app antes de estar na OS, só com o recorte do convite pelo
-WhatsApp (serviço, escopo, formulários, bairro e cidade, data e valor; nada de cliente, loja,
-endereço, contato, SLA, analista, etiquetas ou projeto, nem no título), e responde "Aceitar por
-R$ X" ou "Recusar". Não existe contraproposta.
+WhatsApp (serviço, escopo, formulários, bairro e cidade, data, duração estimada e valor; nada de
+cliente, loja, endereço, contato, SLA, analista, etiquetas ou projeto, nem no título nem no nome do
+serviço), e responde "Aceitar por R$ X" ou "Recusar". Não existe contraproposta.
 
 - Para aceitar, ele precisa ter aberto a oferta: o detalhe grava `viewed_at` (e o app pede o
-  "Escopo lido").
+  "Escopo lido"). O app guarda a hora em que ele abriu o escopo e manda no aceite
+  (`scope_read_at`, opcional: o app antigo aceita sem ela); a central vê "Escopo lido às HH:MM".
 - Quem aceita primeiro leva. O aceite trava a OS, confere a oferta (pendente e no prazo) e a OS (em
   aberto e sem técnico) e faz a atribuição normal (`tickets._assign`, com o técnico como autor e
   `data.via = "offer"`): o status final é o mesmo de quando a central coloca o técnico pela tela.
@@ -54,7 +55,7 @@ from app.schemas.offer import (
     TicketOfferOut,
 )
 from app.schemas.payout import PayoutIn
-from app.schemas.ticket import format_ticket_code
+from app.schemas.ticket import assume_local, format_ticket_code
 from app.services import payouts as payouts_svc
 from app.services import tickets as tickets_svc
 from app.services.errors import NotFound, OfferError, PermissionDenied, WorkflowError
@@ -137,6 +138,7 @@ def offer_out(offer: TicketOffer, now: datetime) -> TicketOfferOut:
         decline_reason=offer.decline_reason,
         cancel_reason=offer.cancel_reason,
         viewed_at=offer.viewed_at,
+        scope_read_at=offer.scope_read_at,
         responded_at=offer.responded_at,
         created_by=Ref(id=creator.id, name=creator.name) if creator is not None else None,
         created_at=offer.created_at,
@@ -292,16 +294,23 @@ def _scrub(text: str, names: list[str]) -> str:
     return original if cut == original else _tidy(cut)
 
 
-def _offer_title(ticket: Ticket) -> str:
-    """O título da OS na oferta sem os nomes de `_hidden_names` e o que sobra deles (" · ", " - ",
-    "na"...). Se sobrar menos de 3 caracteres: o tipo de serviço ou "Atendimento técnico"."""
-    names = _hidden_names(ticket)
+def _service_name(name: str, names: list[str]) -> str:
+    """O nome do tipo de serviço na oferta, com o mesmo corte do título (tipo de serviço próprio de
+    um cliente pode trazer o nome dele). Se sobrar menos de 3 caracteres: "Atendimento técnico"."""
+    cut = _scrub(name, names)
+    return cut if len(cut) >= TITLE_MIN else TITLE_FALLBACK
+
+
+def _offer_title(ticket: Ticket, names: list[str] | None = None) -> str:
+    """O título da OS na oferta sem os nomes de `_hidden_names` (`names`, se já calculados) e o
+    que sobra deles (" · ", " - ", "na"...). Se sobrar menos de 3 caracteres: o tipo de serviço
+    (com o mesmo corte) ou "Atendimento técnico"."""
+    names = _hidden_names(ticket) if names is None else names
     title = _scrub(ticket.title, names)
     if len(title) >= TITLE_MIN:
         return title
     service = ticket.service_type
-    fallback = _scrub(service.name, names) if service is not None else ""
-    return fallback if len(fallback) >= TITLE_MIN else TITLE_FALLBACK
+    return _service_name(service.name, names) if service is not None else TITLE_FALLBACK
 
 
 def _field_ticket(ticket: Ticket, *, full: bool) -> FieldOfferTicket:
@@ -309,18 +318,24 @@ def _field_ticket(ticket: Ticket, *, full: bool) -> FieldOfferTicket:
     fechou): sem escopo, formulários e bairro."""
     store = ticket.location
     service = ticket.service_type
+    names = _hidden_names(ticket)
     return FieldOfferTicket(
         id=ticket.id,
         code=format_ticket_code(ticket.number),
-        title=_offer_title(ticket),
+        title=_offer_title(ticket, names),
         description=((ticket.description or "").strip() or None) if full else None,
-        service_type=Ref(id=service.id, name=service.name) if service is not None else None,
+        service_type=(
+            Ref(id=service.id, name=_service_name(service.name, names))
+            if service is not None
+            else None
+        ),
         forms=[OfferForm(name=f.name, required=f.required) for f in ticket.forms] if full else [],
         district=store.district if full and store is not None else None,
         city=store.city if store is not None else None,
         state=store.state if store is not None else None,
         scheduled_start=ticket.scheduled_start,
         scheduled_end=ticket.scheduled_end,
+        estimated_minutes=ticket.estimated_minutes,
     )
 
 
@@ -335,6 +350,7 @@ def field_out(offer: TicketOffer, ticket: Ticket, now: datetime) -> FieldOfferOu
         note=offer.note,
         cancel_reason=offer.cancel_reason,
         viewed_at=offer.viewed_at,
+        scope_read_at=offer.scope_read_at,
         responded_at=offer.responded_at,
         created_at=offer.created_at,
         ticket=_field_ticket(ticket, full=state == "pending"),
@@ -690,13 +706,22 @@ async def _set_offer_payout(
     )
 
 
-async def accept(db: AsyncSession, offer_id: uuid.UUID, technician: User) -> Ticket:
+async def accept(
+    db: AsyncSession,
+    offer_id: uuid.UUID,
+    technician: User,
+    scope_read_at: datetime | None = None,
+) -> Ticket:
     """ "Aceitar por R$ X": quem aceita primeiro fica com a OS (ver o docstring do módulo).
+
+    `scope_read_at`: quando ele abriu o escopo no app (sem fuso: Brasília). Gravado na passagem
+    para aceita, preso entre a criação da oferta e agora (relógio do aparelho errado); sem ela
+    (app antigo), fica null. Não é exigida: o "Escopo lido" continua travando o botão no app.
 
     409 OFFER_TAKEN (outro técnico aceitou), OFFER_EXPIRED, OFFER_CANCELLED (a central cancelou ou
     trocou a oferta), OFFER_UNAVAILABLE (a OS foi encerrada ou já tem técnico, ou ele tem valor
     pago nesta OS), OFFER_ANSWERED (ele recusou); 422 OFFER_NOT_VIEWED (não abriu a oferta). Aceite
-    repetido da oferta que já é dele: devolve a OS como está."""
+    repetido da oferta que já é dele: devolve a OS como está (a hora da leitura não muda)."""
     offer = await _own_offer(db, offer_id, technician)
     ticket = await _locked_ticket(db, offer.ticket_id)
     # Relida com a OS travada: o aceite que chegou antes já gravou o que fez.
@@ -716,8 +741,12 @@ async def accept(db: AsyncSession, offer_id: uuid.UUID, technician: User) -> Tic
     if await _paid_technicians(db, ticket.id, [technician.id]):
         raise _error(UNAVAILABLE)
 
+    read_at = None
+    if scope_read_at is not None:
+        read_at = min(max(assume_local(scope_read_at), offer.created_at), now)
     offer.status = OfferStatus.ACCEPTED
     offer.responded_at = now
+    offer.scope_read_at = read_at
     offer.updated_at = now
     tickets_svc.record_event(
         db,
@@ -730,6 +759,7 @@ async def accept(db: AsyncSession, offer_id: uuid.UUID, technician: User) -> Tic
             "technician_id": str(technician.id),
             "technician": technician.name,
             "amount": payouts_svc.money_text(offer.amount),
+            "scope_read_at": read_at.isoformat() if read_at is not None else None,
         },
         now=now,
     )

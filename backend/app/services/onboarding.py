@@ -27,7 +27,7 @@ from app.schemas.onboarding import (
     InviteCreate,
     InviteState,
 )
-from app.services import storage
+from app.services import storage, tech_profile
 from app.services.errors import NotFound, WorkflowError
 from app.services.realtime import bus
 
@@ -227,6 +227,10 @@ def _ensure_pending(application: TechnicianApplication) -> None:
 async def approve(
     db: AsyncSession, application: TechnicianApplication, data: ApplicationApprove, actor: User
 ) -> User:
+    """Cria o técnico com o cadastro da ficha e o perfil técnico que ela já traz (disponibilidade,
+    transporte e CNH, aptidões; tech_profile.from_ficha, via "ficha"), sem histórico do cadastro:
+    o histórico do técnico começa vazio. Ferramentas e certificações (texto livre) ficam só na
+    ficha."""
     _ensure_pending(application)
     if await db.scalar(select(User.id).where(func.lower(User.email) == application.email)):
         raise WorkflowError("Já existe um usuário com este e-mail")
@@ -254,6 +258,7 @@ async def approve(
         # Endereço e CEP da ficha: a distância casa → loja usa mais que só a cidade.
         address_line=application.address,
         address_zip=f"{zip_digits[:5]}-{zip_digits[5:]}" if len(zip_digits) == 8 else None,
+        **tech_profile.from_ficha(application),
     )
     db.add(user)
     application.status = ApplicationStatus.APPROVED

@@ -17,7 +17,13 @@ from app.api.deps import DB, access_user, require_roles
 from app.api.routes.tickets import _detail
 from app.core.enums import UserRole
 from app.models import User
-from app.schemas.offer import FieldOfferOut, OfferCreate, OfferDecline, TicketOfferOut
+from app.schemas.offer import (
+    FieldOfferOut,
+    OfferAccept,
+    OfferCreate,
+    OfferDecline,
+    TicketOfferOut,
+)
 from app.schemas.ticket import TicketDetail
 from app.services import offers as svc
 from app.services import tickets as tickets_svc
@@ -87,9 +93,13 @@ async def open_offer(offer_id: uuid.UUID, db: DB, user: TechnicianUser) -> Field
 
 
 @router.post("/me/offers/{offer_id}/accept", response_model=TicketDetail)
-async def accept_offer(offer_id: uuid.UUID, db: DB, user: TechnicianUser) -> TicketDetail:
-    """Aceita pelo valor da oferta: a OS passa a ser dele (a resposta é a OS como o app a vê)."""
-    ticket = await svc.accept(db, offer_id, user)
+async def accept_offer(
+    offer_id: uuid.UUID, db: DB, user: TechnicianUser, body: OfferAccept | None = None
+) -> TicketDetail:
+    """Aceita pelo valor da oferta: a OS passa a ser dele (a resposta é a OS como o app a vê).
+    Corpo opcional `{scope_read_at}`: quando ele abriu o escopo (valor inválido é ignorado)."""
+    read_at = body.scope_read_at if body is not None else None
+    ticket = await svc.accept(db, offer_id, user, scope_read_at=read_at)
     await commit_and_publish(db)
     return await _detail(db, ticket.id, user)
 
