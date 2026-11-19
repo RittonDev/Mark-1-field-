@@ -14,7 +14,7 @@
 import { getKv, getTicket, setKv, type DB } from "./db";
 import { formatBRL } from "./expenses";
 import { whenLabel } from "./field";
-import { formatMinutes } from "./format";
+import { formatMinutes, formatTime, formatWeekdayDate } from "./format";
 import type { NewsItem } from "./notifications";
 import { showToast } from "./toast";
 import type { FieldOffer, FieldOfferTicket, OfferState, UUID } from "./types";
@@ -266,22 +266,28 @@ function closedText(offer: FieldOffer): { title: string; description: string } {
   }
 }
 
+/** Aviso de oferta nova: `body` vai para a notificação do sistema e para o aviso guardado; `toast`, só para o toast na hora. */
+export type OfferNews = NewsItem & { toast?: string };
+
 /**
- * Aviso de oferta nova (o mesmo texto no toast, com o app na tela, e na notificação do sistema, fora dela): uma
- * oferta abre a oferta (a OS ainda não é do técnico); mais de uma vira um resumo que abre Hoje. `at`: agora pelo
- * relógio do servidor (prazo para responder).
+ * Aviso de oferta nova: uma oferta abre a oferta (a OS ainda não é do técnico); mais de uma vira um resumo que abre
+ * Hoje. O prazo para responder vai com a data na notificação, que fica na bandeja até a oferta fechar, e no aviso
+ * guardado sem a permissão ("responder até sáb 21/11 09:00"); só o toast na hora usa o dia relativo ("responder até
+ * amanhã 09:00"), que mais tarde apontaria o dia errado. `at`: agora pelo relógio do servidor.
  */
-export function offerNewsItems(news: FieldOffer[], at: number): NewsItem[] {
+export function offerNewsItems(news: FieldOffer[], at: number): OfferNews[] {
   if (news.length > 1) {
     return [{ id: "news-offer-many", title: `${news.length} novas ofertas de OS`, body: "Veja em Hoje e responda.", home: true }];
   }
   return news.map((offer) => {
     const deadline = deadlineInfo(offer, at);
     const summary = offerSummary(offer);
+    const due = offer.expires_at ? `${formatWeekdayDate(offer.expires_at)} ${formatTime(offer.expires_at)}` : null;
     return {
       id: `news-offer-${offer.id}`,
       title: "Nova oferta de OS",
-      body: deadline ? `${summary} · responder até ${deadline.due}` : summary,
+      body: due ? `${summary} · responder até ${due}` : summary,
+      toast: deadline ? `${summary} · responder até ${deadline.due}` : undefined,
       offerId: offer.id,
     };
   });

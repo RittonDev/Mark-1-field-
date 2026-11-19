@@ -6,7 +6,7 @@
 //   ligado (device.ts); quando estiver, o POST /devices responde "live" e a sincronização para de repetir o aviso.
 // - Permissão: um único pedido automático, uma vez por técnico (auth.ts, depois do termo de localização). Depois
 //   disso, só pelos botões da Conta. Sem ela, a novidade de fora da tela fica guardada (deferNews) e vira toast
-//   quando o app volta à tela.
+//   quando o app volta à tela; a apurada depois do fim da sessão não fica.
 // - Toque: aviso de OS abre a OS, de oferta abre a oferta, resumo abre Hoje.
 //
 // Não importa sync, auth nem device: eles importam este módulo.
@@ -481,10 +481,15 @@ function writeDeferred<T extends NewsItem>(list: readonly Deferred<T>[]): Promis
 
 /**
  * Guarda as novidades para a volta à tela. Como na bandeja, o mesmo id troca o anterior e `replaces` tira os que
- * ficaram velhos (a OS cancelada tira o "Nova OS" dela).
+ * ficaram velhos (a OS cancelada tira o "Nova OS" dela). Não grava nada quando a sessão de `userId` já terminou (Sair,
+ * sessão encerrada pelo servidor, outro técnico): a limpeza do fim de sessão já esvaziou a fila, e o aviso gravado
+ * depois dela deixaria código e loja no aparelho de quem saiu.
  */
 export function deferNews<T extends NewsItem>(userId: string, items: readonly T[]): Promise<void> {
   return oneAtATime(async () => {
+    // Conferido dentro da fila: a sessão sai antes de a limpeza (clearNotificationsOnSignOut) entrar nesta mesma fila.
+    // Ou este aviso já vê a sessão encerrada, ou é gravado antes e a limpeza o apaga.
+    if (session.get().user?.id !== userId) return;
     const now = Date.now();
     let list = (await readDeferred<T>()).filter((entry) => entry.userId === userId && now - entry.at < DEFERRED_TTL_MS);
     for (const item of items) {

@@ -8,7 +8,7 @@ from datetime import UTC, date, datetime
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
-from httpx import AsyncClient
+from httpx import AsyncClient, Response
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -625,6 +625,8 @@ def test_prefill_values_of_each_source() -> None:
         work_started_at=datetime(2026, 12, 4, 2, 30, tzinfo=UTC),
         arrived_at=datetime(2026, 11, 24, 13, 0, tzinfo=UTC),
         scheduled_start=datetime(2026, 12, 1, 13, 0, tzinfo=UTC),
+        resolved_at=None,
+        closed_at=None,
     )
     sources = [
         "location_name",
@@ -655,53 +657,47 @@ def test_prefill_values_of_each_source() -> None:
     }
 
     def visit(**changes: object) -> tuple[str | None, str | None]:
-        """(ao vivo, na conclusão sem o momento apurado) da pergunta de data."""
+        """A data da visita nas perguntas de data e de texto (a mesma ao vivo e na conclusão)."""
         for key, value in changes.items():
             setattr(ticket, key, value)
-        live = prefill_for(ticket, fields, {})  # type: ignore[arg-type]
-        final = prefill_for(ticket, fields, {}, final=True)  # type: ignore[arg-type]
-        return live.get("dia"), final.get("dia")
+        got = prefill_for(ticket, fields, {})  # type: ignore[arg-type]
+        return got.get("dia"), got.get("visit_date")
 
-    today = datetime.now(UTC).astimezone(ZoneInfo(settings.TIMEZONE)).date().isoformat()
     # A OS migrada do Field Control em atendimento não tem o início do trecho: vale a chegada.
-    assert visit(work_started_at=None) == ("2026-11-24", "2026-11-24")
-    # Fora de atendimento depois de uma chegada (pausada, improdutiva, reaberta, concluída), a
-    # data seria a de uma ida anterior: não vem. Antes da primeira chegada, a da agenda.
-    for status in (TicketStatus.ON_HOLD_VENDOR, TicketStatus.SCHEDULED, TicketStatus.RESOLVED):
-        assert visit(status=status) == (None, today)
-    assert visit(status=TicketStatus.SCHEDULED, arrived_at=None) == ("2026-12-01", "2026-12-01")
-    # Na conclusão vale o momento que ela apurou (form_prefill.visit_moment).
-    moment = datetime(2026, 11, 30, 12, 0, tzinfo=UTC)
-    final = prefill_for(ticket, fields, {}, final=True, visit_at=moment)  # type: ignore[arg-type]
-    assert (final["dia"], final["visit_date"]) == ("2026-11-30", "30/11/2026")
+    assert visit(work_started_at=None) == ("2026-11-24", "24/11/2026")
+    # Resolvida ou fechada: o dia local da conclusão (23h50 de 05/12 em Brasília); sem ela, o do
+    # fechamento.
+    finished = datetime(2026, 12, 6, 2, 50, tzinfo=UTC)
+    assert visit(status=TicketStatus.RESOLVED, resolved_at=finished) == ("2026-12-05", "05/12/2026")
+    assert visit(status=TicketStatus.CLOSED) == ("2026-12-05", "05/12/2026")
+    closed = datetime(2026, 12, 8, 12, 0, tzinfo=UTC)
+    assert visit(resolved_at=None, closed_at=closed) == ("2026-12-08", "08/12/2026")
+    # Fora disso, depois de uma chegada (pausada, a caminho de novo, reaberta, de volta à agenda
+    # depois de uma improdutiva), a data seria a de uma ida anterior: não vem.
+    for status in (
+        TicketStatus.ON_HOLD_CUSTOMER,
+        TicketStatus.ON_HOLD_VENDOR,
+        TicketStatus.EN_ROUTE,
+        TicketStatus.REOPENED,
+        TicketStatus.SCHEDULED,
+        TicketStatus.ASSIGNED,
+    ):
+        assert visit(status=status) == (None, None), status
+    # Antes da primeira chegada, a da agenda; sem agenda, nada.
+    assert visit(status=TicketStatus.SCHEDULED, arrived_at=None) == ("2026-12-01", "01/12/2026")
+    assert visit(status=TicketStatus.NEW, scheduled_start=None) == (None, None)
 
-    # O endereço do atendimento vence o da loja; sem chegada nem agenda, a data só sai na
-    # conclusão (o dia de hoje).
+    # O endereço do atendimento vence o da loja.
     ticket.service_address = "Av. Exemplo, 200"
-    live = prefill_for(ticket, fields, {})  # type: ignore[arg-type]
-    assert live["address"] == "Av. Exemplo, 200"
-    assert visit(status=TicketStatus.NEW, scheduled_start=None) == (None, today)
-    assert "visit_date" not in prefill_for(ticket, fields, {})  # type: ignore[arg-type]
+    assert prefill_for(ticket, fields, {})["address"] == "Av. Exemplo, 200"  # type: ignore[arg-type]
 
 
-async def _move_back(engine: AsyncEngine, ticket_id: str, days: int, *, first: bool) -> None:
-    """Recua o atendimento da OS em `days` dias: o início do trecho atual e, com `first`, a
-    chegada e o primeiro "Em atendimento"; sem `first`, o último "Em atendimento"."""
-    columns = ["work_started_at", *(["arrived_at"] if first else [])]
+async def _shift(engine: AsyncEngine, ticket_id: str, days: int, *columns: str) -> None:
+    """Recua as datas da OS em `days` dias: a visita que aconteceu em outro dia."""
     moved = ", ".join(f"{c} = {c} - make_interval(days => :days)" for c in columns)
-    order = "ASC" if first else "DESC"
     async with engine.begin() as conn:
         await conn.execute(
             text(f"UPDATE tickets SET {moved} WHERE id = :id"), {"id": ticket_id, "days": days}
-        )
-        await conn.execute(
-            text(
-                "UPDATE ticket_events SET created_at = created_at - make_interval(days => :days) "
-                "WHERE id = (SELECT id FROM ticket_events WHERE ticket_id = :id "
-                "AND event_type = 'status_changed' AND to_value = 'in_progress' "
-                f"ORDER BY created_at {order} LIMIT 1)"
-            ),
-            {"id": ticket_id, "days": days},
         )
 
 
@@ -713,73 +709,119 @@ async def _local_day(engine: AsyncEngine, ticket_id: str, column: str) -> date:
     return moment.astimezone(ZoneInfo(settings.TIMEZONE)).date()
 
 
+def _shown(day: date) -> dict[str, str]:
+    """A data da visita nas perguntas de data e de texto."""
+    return {"data": day.isoformat(), "dia": day.strftime("%d/%m/%Y")}
+
+
 async def test_visit_date_follows_the_current_visit(
     client: AsyncClient, world: World, engine: AsyncEngine
 ) -> None:
-    an, th = world.analyst.headers, world.tech.headers
-    fields = [
+    """Uma regra só para o valor ao vivo e para a conclusão: a resposta gravada é a que a pergunta
+    mostrava, também quando a central conclui."""
+    an, th, sup = world.analyst.headers, world.tech.headers, world.supervisor.headers
+    asked = [
         {"id": "data", "type": "date", "label": "Data", "required": True, "prefill": "visit_date"},
         {"id": "dia", "type": "text", "label": "Dia", "prefill": "visit_date"},
     ]
-    report = await template(client, world, "Relatório da visita", fields=fields)
-    store = await template(client, world, "Checklist da loja", fields=fields[:1])
-    later = await template(client, world, "Checklist do retorno", fields=fields[:1])
+    optional = [{**asked[0], "required": False}, asked[1]]
+    report = await template(client, world, "Relatório da visita", fields=asked)
+    paused = await template(client, world, "Checklist da pausa", fields=optional)
+    typed = await template(client, world, "Checklist digitado", fields=asked)
+    finished = await template(client, world, "Checklist da conclusão", fields=asked)
+    reopened = await template(client, world, "Checklist da reabertura", fields=optional)
+    returned = await template(client, world, "Checklist do retorno", fields=asked)
+    agenda = datetime(2026, 12, 3, 13, 0, tzinfo=UTC)  # 10h em Brasília
     t = await create(
         client,
         world,
         assignee_id=str(world.tech.user.id),
+        scheduled_start=agenda.isoformat(),
         forms=[
             {"template_id": report["id"], "required": True},
-            {"template_id": store["id"], "required": False},
-            {"template_id": later["id"], "required": False},
+            *(
+                {"template_id": x["id"], "required": False}
+                for x in (paused, typed, finished, reopened, returned)
+            ),
         ],
     )
 
-    async def forms() -> dict[str, dict]:
+    async def form_of(tpl: dict) -> dict:
         d = (await client.get(f"{API}/tickets/{t['id']}", headers=th)).json()
-        return {f["template_id"]: f for f in d["forms"]}
+        return next(f for f in d["forms"] if f["template_id"] == tpl["id"])
 
-    async def complete(form: dict, headers: dict) -> dict:
-        r = await client.put(
-            f"{API}/tickets/{t['id']}/forms/{form['id']}/answers",
-            json={"answers": {}, "complete": True},
+    async def prefill(tpl: dict) -> dict:
+        return (await form_of(tpl))["prefill"]
+
+    async def complete(tpl: dict, headers: dict, answers: dict | None = None) -> Response:
+        return await client.put(
+            f"{API}/tickets/{t['id']}/forms/{(await form_of(tpl))['id']}/answers",
+            json={"answers": answers or {}, "complete": True},
             headers=headers,
         )
-        assert r.status_code == 200, r.text
-        return r.json()
 
-    # A primeira ida foi há 10 dias; a central pausou (aguardando peça).
+    # Antes da chegada: o dia da agenda.
+    assert await prefill(report) == _shown(date(2026, 12, 3))
+
+    # A primeira ida foi há 10 dias: em atendimento, o dia do início do trecho.
     t = await transition(client, th, t, "en_route")
     t = await transition(client, th, t, "in_progress")
-    await _move_back(engine, t["id"], 10, first=True)
+    await _shift(engine, t["id"], 10, "arrived_at", "work_started_at")
     first_day = await _local_day(engine, t["id"], "arrived_at")
-    t = await transition(client, world.supervisor.headers, t, "on_hold_vendor", note="Peça")
-    assert (await forms())[report["id"]]["prefill"] == {}
+    assert await prefill(report) == _shown(first_day)
 
-    # O técnico voltou há 3 dias e retomou: vale o dia da volta, não o da primeira ida.
+    # Pausada pela central (aguardando peça): a data seria a da ida anterior e não vem, nem na
+    # conclusão. A pergunta opcional fica sem resposta; a obrigatória precisa ser digitada.
+    t = await transition(client, sup, t, "on_hold_vendor", note="Peça")
+    assert await prefill(report) == {}
+    r = await complete(paused, th)
+    assert r.status_code == 200, r.text
+    assert r.json()["answers"] == {}
+    r = await complete(typed, th)
+    assert (r.status_code, r.json()["detail"]) == (422, "Falta preencher: Data")
+    r = await complete(typed, th, {"data": "2026-11-10"})
+    assert r.status_code == 200, r.text
+    assert r.json()["answers"] == {"data": "2026-11-10"}
+
+    # O técnico voltou há 6 dias e retomou: vale o dia da volta, não o da primeira ida.
     t = await transition(client, th, t, "in_progress")
-    await _move_back(engine, t["id"], 3, first=False)
+    await _shift(engine, t["id"], 6, "work_started_at")
     back = await _local_day(engine, t["id"], "work_started_at")
     assert back != first_day
-    expected = {"data": back.isoformat(), "dia": back.strftime("%d/%m/%Y")}
-    assert (await forms())[report["id"]]["prefill"] == expected
-    assert (await complete((await forms())[report["id"]], th))["answers"] == expected
+    assert await prefill(report) == _shown(back)
+    r = await complete(report, th)
+    assert r.status_code == 200, r.text
+    assert r.json()["answers"] == _shown(back)
 
-    # Concluída a OS, o formulário que sobrou não mostra data; a central conclui depois e vale
-    # o dia da última ida.
+    # Resolvida (há 5 dias): ao vivo e na conclusão, o dia da conclusão, também quando a central
+    # conclui depois.
     t = await transition(client, th, t, "resolved", resolution_notes="Peça trocada")
-    assert (await forms())[store["id"]]["prefill"] == {}
-    done = await complete((await forms())[store["id"]], an)
-    assert done["answers"] == {"data": back.isoformat()}
+    await _shift(engine, t["id"], 5, "resolved_at")
+    resolved = await _local_day(engine, t["id"], "resolved_at")
+    assert resolved not in (first_day, back)
+    assert await prefill(finished) == _shown(resolved)
+    r = await complete(finished, an)
+    assert r.status_code == 200, r.text
+    assert r.json()["answers"] == _shown(resolved)
 
-    # Reaberta, ainda sem a nova ida: a data é a de hoje (a ida anterior era do atendimento que
-    # terminou).
+    # Reaberta, ainda sem a nova ida (e a caminho de novo): nada, nem na conclusão.
     t = await transition(client, an, t, "reopened", note="Voltou a falhar")
-    before = datetime.now(UTC).astimezone(ZoneInfo(settings.TIMEZONE)).date()
-    done = await complete((await forms())[later["id"]], an)
-    after = datetime.now(UTC).astimezone(ZoneInfo(settings.TIMEZONE)).date()
-    assert done["answers"]["data"] in {before.isoformat(), after.isoformat()}
-    assert done["answers"]["data"] != back.isoformat()
+    assert await prefill(reopened) == {}
+    r = await complete(reopened, th)
+    assert r.status_code == 200, r.text
+    assert r.json()["answers"] == {}
+    t = await transition(client, th, t, "en_route")
+    assert await prefill(returned) == {}
+
+    # Voltou em outro dia (ontem): o dia da volta.
+    t = await transition(client, th, t, "in_progress")
+    await _shift(engine, t["id"], 1, "work_started_at")
+    again = await _local_day(engine, t["id"], "work_started_at")
+    assert again not in (first_day, back, resolved)
+    assert await prefill(returned) == _shown(again)
+    r = await complete(returned, th)
+    assert r.status_code == 200, r.text
+    assert r.json()["answers"] == _shown(again)
 
 
 async def test_usage_lists_types_from_history(client: AsyncClient, world: World) -> None:
