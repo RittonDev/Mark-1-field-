@@ -89,6 +89,10 @@ function SectionNav() {
       const el = document.getElementById(s.id);
       if (el) observer.observe(el);
     }
+    // Aberta por um link com a seção (ex.: "Configurar motivos" no Elo do técnico): o navegador não acha a
+    // seção sozinho, porque ela só aparece depois de carregar a sessão.
+    const target = SECTIONS.find((s) => `#${s.id}` === window.location.hash);
+    if (target) document.getElementById(target.id)?.scrollIntoView();
     return () => observer.disconnect();
   }, []);
   return (

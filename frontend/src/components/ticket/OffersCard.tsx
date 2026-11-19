@@ -8,6 +8,7 @@ import { useConfirm } from "@/components/Confirm";
 import { searchText } from "@/components/new-ticket/Combobox";
 import { offerText } from "@/components/new-ticket/invite";
 import { isOpenStatus } from "@/components/operacao/hooks";
+import { LevelBadge } from "@/components/technicians/LevelBadge";
 import { useToast } from "@/components/Toaster";
 import { useNow } from "@/components/useNow";
 import { Button, buttonClassName, Dialog, ErrorBox, Field, Input, Pill, SectionTitle, Select, Skeleton, Textarea } from "@/components/ui";
@@ -21,6 +22,7 @@ import { readDecimal } from "@/lib/quotes";
 import type {
   AssignableUser,
   IntakeContext,
+  LevelTier,
   OfferCancelReason,
   OfferCreate,
   OfferState,
@@ -233,6 +235,8 @@ interface Candidate {
   busy?: boolean;
   /** Desativado: não entra no app, então não recebe a oferta. */
   inactive?: boolean;
+  /** Faixa do elo (só o selo; sem ela na lista de atribuição). */
+  level?: LevelTier;
 }
 
 function km(value: number | null): string | null {
@@ -250,12 +254,19 @@ function fromSuggestion(t: TechnicianSuggestion, scheduled: boolean): Candidate 
     detail: [km(t.distance_km), cityOf(t.home_city, t.home_state) || null, load].filter(Boolean).join(" · "),
     favorite: Boolean(t.favorite),
     busy: scheduled && t.busy === true,
+    level: t.level?.tier,
   };
 }
 
 function fromTechnician(t: Technician): Candidate {
   const region = cityOf(t.base_city, t.base_state) || cityOf(t.home_city, t.home_state) || "Sem região";
-  return { id: t.id, name: t.name, detail: `${region} · ${t.open_tickets} em aberto`, inactive: !t.is_active };
+  return {
+    id: t.id,
+    name: t.name,
+    detail: `${region} · ${t.open_tickets} em aberto`,
+    inactive: !t.is_active,
+    level: t.level?.tier,
+  };
 }
 
 function fromAssignable(u: AssignableUser): Candidate {
@@ -358,6 +369,7 @@ function PickRow({
           <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
             <span className="truncate text-sm font-semibold text-ink">{candidate.name}</span>
             {candidate.favorite ? <span className="sr-only">(favorito na cidade da loja)</span> : null}
+            {candidate.level ? <LevelBadge tier={candidate.level} size="sm" /> : null}
             {chips}
           </span>
           {candidate.detail ? <span className="block truncate text-xs text-ink-muted">{candidate.detail}</span> : null}

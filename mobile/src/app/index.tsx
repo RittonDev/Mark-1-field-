@@ -10,6 +10,7 @@ import { Calendar } from "../components/Calendar";
 import { ConnectionBar } from "../components/ConnectionBar";
 import { EarningsView } from "../components/EarningsView";
 import { Icon } from "../components/Icon";
+import { LevelChip } from "../components/LevelBadge";
 import { PressableScale, useListMotion } from "../components/motion";
 import { OffersSection } from "../components/Offers";
 import { ShiftCard } from "../components/ShiftCard";
@@ -277,15 +278,19 @@ export default function MyTicketsScreen() {
     <View style={styles.header}>
       <View style={styles.topBar}>
         <BrandLogo size="sm" underline={false} />
-        <PressableScale
-          onPress={() => router.push("/conta")}
-          accessibilityRole="button"
-          accessibilityLabel="Conta e sincronização"
-          hitSlop={8}
-          style={styles.avatar}
-        >
-          <Avatar name={user.name} uri={profile?.avatar_url} size={36} />
-        </PressableScale>
+        <View style={styles.topActions}>
+          {/* O elo guardado (some sem ele): abre Meu elo. */}
+          <LevelChip />
+          <PressableScale
+            onPress={() => router.push("/conta")}
+            accessibilityRole="button"
+            accessibilityLabel="Conta e sincronização"
+            hitSlop={8}
+            style={styles.avatar}
+          >
+            <Avatar name={user.name} uri={profile?.avatar_url} size={36} />
+          </PressableScale>
+        </View>
       </View>
       <View style={styles.titleBlock}>
         <Text style={styles.pageTitle} accessibilityRole="header" numberOfLines={2}>
@@ -482,7 +487,8 @@ const makeStyles = (c: Palette) =>
     screen: { flex: 1, backgroundColor: c.canvas },
     list: { paddingBottom: 24 },
     header: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 4, gap: 14 },
-    topBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+    topBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+    topActions: { flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 10, flexShrink: 1 },
     avatar: { borderRadius: 18 },
     titleBlock: { gap: 6 },
     pageTitle: { fontSize: 22, fontWeight: "700", color: c.ink, letterSpacing: -0.3 },

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { favoritesHref } from "@/components/technicians/FavoritesView";
 import { GrantAccessDialog } from "@/components/technicians/GrantAccessDialog";
+import { LevelBadge } from "@/components/technicians/LevelBadge";
 import { Button, ErrorBox, Skeleton } from "@/components/ui";
 import { errorMessage } from "@/lib/api";
 import { formatDate, initials } from "@/lib/format";
@@ -228,6 +229,8 @@ function SuggestionList({
                 <div className="min-w-0 flex-1">
                   <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                     <span className="truncate text-sm font-semibold text-ink">{t.name}</span>
+                    {/* O elo é só o selo: não muda a pontuação nem a ordem das sugestões. */}
+                    {t.level ? <LevelBadge tier={t.level.tier} size="sm" /> : null}
                     {scheduled && t.busy != null ? (
                       <span
                         className={clsx(

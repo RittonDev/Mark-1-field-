@@ -1298,48 +1298,53 @@ function EditDialog({ tech, readOnly = false, onClose }: { tech: Technician; rea
         {/* A foto (os botões só aparecem com Editar) e o Elo ficam fora do fieldset travado: só com Visualizar, o
             "Ver mais" das ocorrências continua; desconsiderar pede Editar. */}
         <div className="flex items-center gap-4">
-            <Avatar tech={current} size="lg" />
-            {readOnly ? null : (
-              <div className="flex flex-col gap-1.5">
-                <label
-                  className={clsx(
-                    buttonClassName("secondary", "sm"),
-                    "cursor-pointer self-start has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-brand/45",
-                    photo.isPending && "pointer-events-none opacity-60",
-                  )}
+          <Avatar tech={current} size="lg" />
+          {readOnly ? null : (
+            <div className="flex flex-col gap-1.5">
+              <label
+                className={clsx(
+                  buttonClassName("secondary", "sm"),
+                  "cursor-pointer self-start has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-brand/45",
+                  photo.isPending && "pointer-events-none opacity-60",
+                )}
+              >
+                {photo.isPending ? <Loader2 className="size-4 animate-spin" /> : <Camera className="size-4" />}
+                {photo.isPending ? "Enviando foto…" : current.avatar_url ? "Trocar foto" : "Adicionar foto"}
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="sr-only"
+                  disabled={photo.isPending}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = "";
+                    if (file) photo.mutate(file);
+                  }}
+                />
+              </label>
+              {current.avatar_url && !photo.isPending ? (
+                <button
+                  type="button"
+                  className="self-start rounded text-xs text-red-700 hover:underline focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none dark:text-red-400"
+                  onClick={async () => {
+                    if (await confirm({ tone: "danger", title: "Remover a foto?", description: "O técnico fica com as iniciais no lugar da foto.", confirmLabel: "Remover" })) {
+                      photo.mutate(null);
+                    }
+                  }}
                 >
-                  {photo.isPending ? <Loader2 className="size-4 animate-spin" /> : <Camera className="size-4" />}
-                  {photo.isPending ? "Enviando foto…" : current.avatar_url ? "Trocar foto" : "Adicionar foto"}
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="sr-only"
-                    disabled={photo.isPending}
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      e.target.value = "";
-                      if (file) photo.mutate(file);
-                    }}
-                  />
-                </label>
-                {current.avatar_url && !photo.isPending ? (
-                  <button
-                    type="button"
-                    className="self-start rounded text-xs text-red-700 hover:underline focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none dark:text-red-400"
-                    onClick={async () => {
-                      if (await confirm({ tone: "danger", title: "Remover a foto?", description: "O técnico fica com as iniciais no lugar da foto.", confirmLabel: "Remover" })) {
-                        photo.mutate(null);
-                      }
-                    }}
-                  >
-                    Remover foto
-                  </button>
-                ) : null}
-                <span className="text-xs text-ink-muted">Foto do rosto. A foto é reduzida antes de enviar.</span>
-              </div>
-            )}
-          </div>
+                  Remover foto
+                </button>
+              ) : null}
+              <span className="text-xs text-ink-muted">Foto do rosto. A foto é reduzida antes de enviar.</span>
+            </div>
+          )}
+        </div>
 
+        <LevelSection tech={current} readOnly={readOnly} dirty={dirty} onDraftChange={setLevelDraft} />
+
+        {/* Só com Visualizar, o fieldset trava todos os campos de uma vez (os links continuam abrindo). O
+            Pagamento e o Histórico do cadastro ficam fora: seguem as permissões deles (Pagamentos). */}
+        <fieldset disabled={readOnly} className="flex min-w-0 flex-col gap-5">
           <TechnicianFields
             value={form}
             onChange={setForm}

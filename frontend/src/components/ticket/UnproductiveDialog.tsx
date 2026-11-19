@@ -98,7 +98,13 @@ export function UnproductiveDialog({
         </Field>
         {reasons.error ? <ErrorBox message={`Não foi possível carregar os motivos: ${errorMessage(reasons.error)}`} /> : null}
         {selected ? (
-          <p className="-mt-2 text-xs text-ink-muted">Responsabilidade: {RESPONSIBILITY[selected.responsibility].label}</p>
+          <p className="-mt-2 text-xs text-ink-muted">
+            Responsabilidade: {RESPONSIBILITY[selected.responsibility].label}
+            {/* Visita perdida: pesa no elo do responsável pela OS (o técnico não vê a responsabilidade no app). */}
+            {selected.responsibility === "technician"
+              ? ` · conta no elo ${ticket.assignee ? `de ${ticket.assignee.name}` : "do técnico"}`
+              : null}
+          </p>
         ) : null}
         <Field label="Observação" hint="Fica no histórico da OS.">
           <Textarea

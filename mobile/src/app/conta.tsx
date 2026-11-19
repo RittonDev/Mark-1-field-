@@ -22,10 +22,11 @@ import { stopTracking, useTracking } from "../lib/tracking";
 import { useDataVersion, useLiveQuery } from "../lib/changes";
 import { APP_VERSION } from "../lib/config";
 import { confirmAction } from "../lib/dialogs";
-import { ROLE } from "../lib/constants";
+import { LEVEL_TIER, ROLE } from "../lib/constants";
 import { countPending, dismissNotice, listNotices, listPendingOps, type PendingOp } from "../lib/db";
 import type { DeviceRegistration } from "../lib/device";
 import { formatDateTime, formatTime } from "../lib/format";
+import { useMyLevel } from "../lib/level";
 import { ensureProfile, useProfile } from "../lib/profile";
 import { canEditServer, useSession } from "../lib/session";
 import { describeOp, discardOp, isOnline, requestSync, resetCursor, useSyncStatus, type SyncStatus } from "../lib/sync";
@@ -124,6 +125,8 @@ export default function AccountScreen() {
   useEffect(() => {
     ensureProfile();
   }, []);
+  // O elo guardado no aparelho (Meu elo); antes da primeira busca, a linha só leva à tela.
+  const level = useMyLevel();
 
   if (!user) return null;
 
@@ -251,6 +254,17 @@ export default function AccountScreen() {
         </View>
         <Button title="Meu cadastro" icon="user" onPress={() => router.push("/meu-cadastro")} disabled={leaving} style={styles.profileButton} />
         <View style={styles.divider} />
+        <InfoRow
+          label="Elo"
+          value={
+            level
+              ? `${LEVEL_TIER[level.data.tier].label}${level.data.at_risk ? " · em risco" : ""}`
+              : level === null
+                ? "Ver meu elo"
+                : "…"
+          }
+          onPress={() => router.push("/elo")}
+        />
         <InfoRow label="Senha" value="Trocar senha" onPress={() => router.push("/trocar-senha")} />
       </Card>
 

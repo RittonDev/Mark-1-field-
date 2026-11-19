@@ -214,9 +214,15 @@ function ReasonDialog({
         <Field
           label="Responsabilidade"
           hint={
+            // O elo dos técnicos lê a classificação atual do motivo: entrar ou sair de "Técnico" muda também as
+            // visitas dos últimos 12 meses.
             reason && form.responsibility !== reason.responsibility
-              ? "Vale para as próximas visitas; as já registradas guardam a da época."
-              : "Separa no relatório o que é do cliente, nosso ou de terceiro."
+              ? form.responsibility === "technician" || reason.responsibility === "technician"
+                ? "No relatório, vale para as próximas visitas. No elo dos técnicos, vale também para as visitas dos últimos 12 meses."
+                : "Vale para as próximas visitas; as já registradas guardam a da época."
+              : form.responsibility === "technician"
+                ? "Visita improdutiva com este motivo conta como visita perdida no elo do técnico."
+                : "Separa no relatório o que é do cliente, nosso ou de terceiro."
           }
         >
           <Select
