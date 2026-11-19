@@ -3,6 +3,11 @@
 Ex.: caiu uma OS em Santos-SP: aparecem os 5 técnicos da base que moram em Santos (ou atendem
 a região), com o motivo de cada um: mora na cidade, está a X km agora, livre no horário,
 tem a skill, carga atual. A decisão continua com o analista.
+
+A disponibilidade informada no app (os turnos do perfil técnico) é um sinal pequeno, só com o
+horário da visita: dentro, poucos pontos a mais e sem motivo; fora, poucos pontos a menos e o
+motivo "Fora da disponibilidade (sáb · tarde)"; sem disponibilidade informada, nada muda. Nunca
+tira ninguém da lista.
 """
 
 import math

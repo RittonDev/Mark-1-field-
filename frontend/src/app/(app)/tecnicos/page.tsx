@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useConfirm } from "@/components/Confirm";
 import { NoAccess } from "@/components/NoAccess";
 import { fold, replaceSearch, useSearchChange } from "@/components/operacao/hooks";
@@ -1235,23 +1235,21 @@ type FichaTab = "cadastro" | "perfil" | "elo" | "historico";
 const TABS_BAR_PULL = 16;
 
 /**
- * Prende a barra de abas logo abaixo do cabeçalho do diálogo (preso no topo quando o corpo rola). O cabeçalho muda de
- * altura com o nome e a largura da tela: a barra acompanha. Sem achar o cabeçalho, a barra só não prende.
+ * A barra de abas presa logo abaixo do cabeçalho do diálogo (que fica preso no topo quando o corpo rola): devolve a ref
+ * da barra e a altura do cabeçalho, que muda com o nome e a largura da tela. Sem achar o cabeçalho (null), a barra
+ * só não prende.
  */
-function useStickyBelowDialogHeader(bar: React.RefObject<HTMLDivElement | null>) {
-  useLayoutEffect(() => {
-    const node = bar.current;
-    const header = node?.closest('[role="dialog"]')?.firstElementChild;
-    if (!node || !(header instanceof HTMLElement) || header.contains(node)) return;
-    const place = () => {
-      node.style.top = `${header.offsetHeight}px`;
-    };
-    place();
-    node.style.position = "sticky";
-    const observer = new ResizeObserver(place);
+function useStickyBelowDialogHeader() {
+  const bar = useRef<HTMLDivElement>(null);
+  const [top, setTop] = useState<number | null>(null);
+  useEffect(() => {
+    const header = bar.current?.closest('[role="dialog"]')?.firstElementChild;
+    if (!(header instanceof HTMLElement) || header.contains(bar.current)) return;
+    const observer = new ResizeObserver(() => setTop(header.offsetHeight));
     observer.observe(header);
     return () => observer.disconnect();
-  }, [bar]);
+  }, []);
+  return [bar, top] as const;
 }
 
 /**
@@ -1303,8 +1301,7 @@ function EditDialog({ tech, readOnly = false, onClose }: { tech: Technician; rea
   const [tab, setTab] = useState<FichaTab>("cadastro");
   const [opened, setOpened] = useState<ReadonlySet<FichaTab>>(() => new Set<FichaTab>(["cadastro"]));
   const formRef = useRef<HTMLFormElement>(null);
-  const tabsBar = useRef<HTMLDivElement>(null);
-  useStickyBelowDialogHeader(tabsBar);
+  const [tabsBar, tabsTop] = useStickyBelowDialogHeader();
   const changeTab = (next: FichaTab) => {
     // Com o corpo rolado (as abas presas no topo), a aba nova abre do começo, logo abaixo delas.
     const bar = tabsBar.current;
@@ -1467,7 +1464,14 @@ function EditDialog({ tech, readOnly = false, onClose }: { tech: Technician; rea
       >
         {/* As abas encostam no cabeçalho e vão de borda a borda (-mt-4 = TABS_BAR_PULL); presas logo abaixo dele quando
             o corpo rola. O rodapé (Cancelar/Salvar ou Fechar) é o mesmo em todas e salva o Cadastro. */}
-        <div ref={tabsBar} className="relative z-10 -mx-5 -mt-4 border-b border-line bg-surface px-5 pt-2">
+        <div
+          ref={tabsBar}
+          className={clsx(
+            "z-10 -mx-5 -mt-4 border-b border-line bg-surface px-5 pt-2",
+            tabsTop === null ? "relative" : "sticky",
+          )}
+          style={tabsTop === null ? undefined : { top: tabsTop }}
+        >
           <Tabs
             items={fichaTabs}
             value={tab}

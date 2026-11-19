@@ -12,6 +12,7 @@ from app.core.security import InvalidToken, decode_token
 from app.models import Category, Location, Project, ServiceType, User, UserChange
 from app.models.user_change import VIA_CENTRAL
 from app.schemas.my_profile import UserChangeOut
+from app.schemas.tech_profile import DayPeriod, Weekday
 from app.schemas.technician import (
     ImportResult,
     NearbyOut,
@@ -44,8 +45,9 @@ PixEdit = access_user("commercial.payouts", level="edit")
 
 
 async def _one(db: DB, user: User) -> TechnicianOut:
+    """Um técnico com o detalhe do perfil técnico (ferramentas, formação e a data de cada parte)."""
     await db.refresh(user, ["team"])
-    return (await svc.to_out(db, [user]))[0]
+    return (await svc.to_out(db, [user], detail=True))[0]
 
 
 async def _ensure_regions(db: DB) -> None:
@@ -77,15 +79,31 @@ async def list_technicians(
     active: bool | None = None,
     state: str | None = None,
     city: str | None = None,
+    tool_id: uuid.UUID | None = None,
+    day: Weekday | None = None,
+    period: DayPeriod | None = None,
     limit: Annotated[int, Query(ge=1, le=5000)] = 2000,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[TechnicianOut]:
-    """Base técnica. `state`/`city` filtram pela região de atuação (histórico) ou pelo endereço.
-    O total que bate com os filtros vai no cabeçalho X-Total-Count (a lista é paginada)."""
+    """Base técnica. `state`/`city` filtram pela região de atuação (histórico) ou pelo endereço;
+    `tool_id`, pela ferramenta marcada no app; `day` e `period` (cada um opcional), pela
+    disponibilidade informada no app (quem nunca informou não entra). O total que bate com os
+    filtros vai no cabeçalho X-Total-Count (a lista é paginada). Cada técnico traz o resumo do
+    perfil técnico; o detalhe (ferramentas, formação, datas) fica em GET /technicians/{id}."""
     await _ensure_regions(db)
     await _ensure_levels(db)
     items, total = await svc.list_technicians(
-        db, q, team_id, active, state, city, limit=limit, offset=offset
+        db,
+        q,
+        team_id,
+        active,
+        state,
+        city,
+        tool_id=tool_id,
+        day=day,
+        period=period,
+        limit=limit,
+        offset=offset,
     )
     response.headers["X-Total-Count"] = str(total)
     return items
@@ -147,7 +165,8 @@ async def update_technician(
     user_id: uuid.UUID, body: TechnicianUpdate, db: DB, actor: TechniciansEdit
 ) -> TechnicianOut:
     """Desativar fecha as ofertas em aberto dele (o tempo real das OS sai no commit). O que mudou
-    fica no histórico do cadastro (via central)."""
+    fica no histórico do cadastro (via central). O perfil técnico não muda por aqui (o técnico
+    mantém no app; campo que a ficha não tem é ignorado)."""
     user = await svc.get_technician(db, user_id)
     before = await user_history.snapshot(db, user)
     await svc.update(db, user, body, actor)
@@ -231,7 +250,8 @@ async def avatar(user_id: uuid.UUID, token: str, db: DB) -> Response:
     "/tickets/{ticket_id}/technician-suggestions", response_model=list[TechnicianSuggestion]
 )
 async def ticket_suggestions(ticket_id: uuid.UUID, db: DB, user: TicketManagerUser) -> list[dict]:
-    """Os 5 técnicos mais indicados para a OS (cidade, distância, agenda, skill, carga)."""
+    """Os 5 técnicos mais indicados para a OS (cidade, distância, agenda, skill, carga e a
+    disponibilidade informada no app, um sinal pequeno que não tira ninguém da lista)."""
     await _ensure_regions(db)
     await _ensure_levels(db)
     ticket = await tickets_svc.get_visible_ticket(db, user, ticket_id)
@@ -259,8 +279,9 @@ async def suggest_for_place(
     exclude_ticket_id: uuid.UUID | None = None,
 ) -> list[dict]:
     """Para quem ainda está abrindo a OS: a loja (ou o lugar), o serviço e o horário da visita
-    dão o mesmo ranking de uma OS já aberta (distância, histórico na loja, skill, agenda).
-    No editor de uma OS aberta, `exclude_ticket_id` tira a própria OS da agenda e da carga."""
+    dão o mesmo ranking de uma OS já aberta (distância, histórico na loja, skill, agenda e a
+    disponibilidade informada no app). No editor de uma OS aberta, `exclude_ticket_id` tira a
+    própria OS da agenda e da carga."""
     if any(t is not None and t.tzinfo is None for t in (start, end)):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Informe o fuso do horário")
     if start is not None and end is not None and end <= start:

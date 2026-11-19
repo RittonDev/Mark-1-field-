@@ -6,7 +6,7 @@ from sqlalchemy import func, or_, select
 
 from app.api.deps import DB, AdminUser, StaffUser, TicketManagerUser, access_user
 from app.core.access import channel_metadata
-from app.core.enums import TicketPriority
+from app.core.enums import TicketPriority, UserRole
 from app.core.labels import enum_options
 from app.models import (
     Category,
@@ -14,6 +14,7 @@ from app.models import (
     ServiceType,
     SlaPolicy,
     Team,
+    TechnicianTool,
     UnproductiveReason,
     ViolationReason,
 )
@@ -33,14 +34,20 @@ from app.schemas.catalog import (
     ViolationReasonOut,
     ViolationReasonUpdate,
 )
-from app.services import durations, technician_levels
+from app.schemas.tech_profile import (
+    TechnicianToolCreate,
+    TechnicianToolOut,
+    TechnicianToolUpdate,
+)
+from app.services import durations, tech_profile, technician_levels
 from app.services.sla import DEFAULT_SLA_MINUTES
 from app.services.workflow import workflow_metadata
 
 router = APIRouter(tags=["catalog"])
 
-# Categorias e motivos de violação ficam em Configurações; tipos de serviço têm tela própria. O
-# SLA continua só com o administrador; os motivos de improdutiva, com toda a gestão.
+# Categorias, motivos de violação e o ferramental dos técnicos ficam em Configurações; tipos de
+# serviço têm tela própria. O SLA continua só com o administrador; os motivos de improdutiva, com
+# toda a gestão.
 SettingsEdit = access_user("setup.settings", level="edit")
 ServiceTypesEdit = access_user("setup.service_types", level="edit")
 
@@ -395,3 +402,86 @@ async def update_unproductive_reason(
         await technician_levels.mark_stale(db)
     await db.commit()
     return reason
+
+
+# ------------------------------------------------------------ ferramental dos técnicos
+# O técnico marca no app as ferramentas que tem (users.tool_ids guarda os ids); a central inclui,
+# renomeia e desativa em Configurações › Técnicos, sem excluir e sem ordem manual.
+
+TOOL_NAME_TAKEN = "Já existe uma ferramenta com este nome"
+TOOL_MISSING = "Ferramenta não encontrada"
+
+
+def _tool_out(tool: TechnicianTool, counts: dict[str, int] | None) -> TechnicianToolOut:
+    """`counts` None: quem pediu é o técnico (sem a contagem)."""
+    return TechnicianToolOut(
+        id=tool.id,
+        name=tool.name,
+        is_active=tool.is_active,
+        technicians=None if counts is None else counts.get(str(tool.id), 0),
+    )
+
+
+async def _check_tool_name(db: DB, name: str, self_id: uuid.UUID | None) -> None:
+    """Nome repetido sem acento e sem maiúsculas ("Multimetro" = "Multímetro"). O banco só recusa
+    o nome exato (uq_tool_catalog_name); o catálogo tem no máximo MAX_TOOLS nomes."""
+    wanted = tech_profile.fold(name)
+    for tool_id, other in await db.execute(select(TechnicianTool.id, TechnicianTool.name)):
+        if tool_id != self_id and tech_profile.fold(other) == wanted:
+            raise HTTPException(status.HTTP_409_CONFLICT, TOOL_NAME_TAKEN)
+
+
+@router.get("/technician-tools", response_model=list[TechnicianToolOut])
+async def list_technician_tools(
+    db: DB, user: StaffUser, active: bool | None = None
+) -> list[TechnicianToolOut]:
+    """O ferramental em ordem alfabética (sem acento e sem maiúsculas). O técnico (o app) recebe
+    só as ativas, com `technicians` null, e o `active` é ignorado. A gestão filtra por `active` e
+    vê em `technicians` quantos técnicos marcaram cada uma: os do papel técnico, ativos ou não, a
+    mesma regra do filtro `tool_id` de GET /technicians."""
+    technician = user.role == UserRole.TECHNICIAN
+    stmt = select(TechnicianTool)
+    if technician:
+        stmt = stmt.where(TechnicianTool.is_active.is_(True))
+    elif active is not None:
+        stmt = stmt.where(TechnicianTool.is_active.is_(active))
+    tools = sorted(await db.scalars(stmt), key=lambda t: (tech_profile.fold(t.name), t.name))
+    counts = None if technician else await tech_profile.tool_counts(db)
+    return [_tool_out(tool, counts) for tool in tools]
+
+
+@router.post(
+    "/technician-tools", response_model=TechnicianToolOut, status_code=status.HTTP_201_CREATED
+)
+async def create_technician_tool(
+    body: TechnicianToolCreate, db: DB, _: SettingsEdit
+) -> TechnicianToolOut:
+    """Ferramenta nova, já ativa. O catálogo aceita até MAX_TOOLS ferramentas (ativas e
+    inativas: não há excluir)."""
+    await _check_tool_name(db, body.name, None)
+    total = await db.scalar(select(func.count()).select_from(TechnicianTool)) or 0
+    if total >= tech_profile.MAX_TOOLS:
+        raise HTTPException(422, f"O catálogo aceita até {tech_profile.MAX_TOOLS} ferramentas")
+    tool = TechnicianTool(name=body.name, is_active=True)
+    db.add(tool)
+    await db.commit()
+    return _tool_out(tool, {})
+
+
+@router.patch("/technician-tools/{tool_id}", response_model=TechnicianToolOut)
+async def update_technician_tool(
+    tool_id: uuid.UUID, body: TechnicianToolUpdate, db: DB, _: SettingsEdit
+) -> TechnicianToolOut:
+    """Só o que vier muda (null é ignorado). Renomear muda para todos (o técnico guarda o id).
+    Desativar não mexe nos técnicos: a ferramenta some do app, da ficha e do filtro da central, e
+    volta para quem tinha marcado quando reativada."""
+    tool = await db.get(TechnicianTool, tool_id)
+    if tool is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, TOOL_MISSING)
+    fields = body.model_dump(exclude_none=True)
+    if "name" in fields:
+        await _check_tool_name(db, fields["name"], tool.id)
+    for key, value in fields.items():
+        setattr(tool, key, value)
+    await db.commit()
+    return _tool_out(tool, await tech_profile.tool_counts(db))
