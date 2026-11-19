@@ -33,7 +33,7 @@ import logging
 import math
 import uuid
 from collections import Counter, defaultdict
-from collections.abc import Collection, Iterable
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, NamedTuple
@@ -97,7 +97,9 @@ _CONCLUDED = (TicketStatus.RESOLVED, TicketStatus.CLOSED)
 # O mesmo predicado do índice parcial ix_ticket_events_reopened (models/ticket.py), escrito por
 # extenso: o asyncpg prepara a consulta com parâmetros e o plano genérico só usa o índice parcial
 # com o predicado literal.
-_REOPENED = text("ticket_events.event_type = 'status_changed' AND ticket_events.to_value = 'reopened'")
+_REOPENED = text(
+    "ticket_events.event_type = 'status_changed' AND ticket_events.to_value = 'reopened'"
+)
 
 LABELS: dict[str, str] = {
     "services": "Atendimentos nos últimos 12 meses",
@@ -286,10 +288,10 @@ def _on_time_criterion(c: Counts, goal: int) -> LevelCriterion:
         # x chegadas no horário seguidas: 100 * (on_time + x) >= meta * (chegadas + x).
         x = _ceil_div(goal * c.arrivals - 100 * c.on_time, max(100 - goal, 1))
         missing = (
-            "Falta 1 chegada no horário"
-            if x == 1
-            else f"Faltam {x} chegadas no horário seguidas"
+            "Falta 1 chegada no horário" if x == 1 else f"Faltam {x} chegadas no horário seguidas"
         )
+    # Para baixo: o número mostrado nunca passa da meta sem cumprir.
+    pct = 100 * c.on_time // c.arrivals
     return LevelCriterion(
         key="on_time",
         label=LABELS["on_time"],
@@ -298,8 +300,7 @@ def _on_time_criterion(c: Counts, goal: int) -> LevelCriterion:
         value=c.on_time,
         base=c.arrivals,
         target=goal,
-        # Para baixo: o número mostrado nunca passa da meta sem cumprir.
-        text=f"{100 * c.on_time // c.arrivals}% ({c.on_time} de {c.arrivals}) · meta {goal}% ou mais",
+        text=f"{pct}% ({c.on_time} de {c.arrivals}) · meta {goal}% ou mais",
         missing=missing,
     )
 
@@ -406,7 +407,9 @@ def risk(
 def tier_summary(rule: TierRule) -> str:
     if rule.on_time_pct is None:
         return "Todo técnico começa aqui."
-    amount = f"{rule.services} atendimentos" + (f", {rule.measured} medidos" if rule.measured else "")
+    amount = f"{rule.services} atendimentos"
+    if rule.measured:
+        amount += f", {rule.measured} medidos"
     return " · ".join(
         (
             amount,
@@ -1171,9 +1174,3 @@ async def remove_waiver(
     await db.delete(waiver)
     await db.flush()
     return await central_detail(db, technician, now)
-
-
-def tiers_count(levels: Collection[LevelSummary]) -> dict[str, int]:
-    """Quantos em cada faixa (para conferências e testes)."""
-    tally = Counter(level.tier.value for level in levels)
-    return {tier.value: tally[tier.value] for tier in LevelTier}

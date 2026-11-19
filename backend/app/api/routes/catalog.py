@@ -33,7 +33,7 @@ from app.schemas.catalog import (
     ViolationReasonOut,
     ViolationReasonUpdate,
 )
-from app.services import durations
+from app.services import durations, technician_levels
 from app.services.sla import DEFAULT_SLA_MINUTES
 from app.services.workflow import workflow_metadata
 
@@ -386,7 +386,12 @@ async def update_unproductive_reason(
     if reason is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Motivo não encontrado")
     fields = _clean(body.model_dump(exclude_unset=True), ("name", "responsibility", "is_active"))
+    # Vale a classificação atual: as visitas antigas com este motivo passam a contar (ou deixam
+    # de contar) no elo dos técnicos, recalculado na próxima rodada da rotina.
+    reclassified = fields.get("responsibility", reason.responsibility) != reason.responsibility
     for key, value in fields.items():
         setattr(reason, key, value)
+    if reclassified:
+        await technician_levels.mark_stale(db)
     await db.commit()
     return reason

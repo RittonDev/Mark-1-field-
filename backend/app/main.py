@@ -21,7 +21,7 @@ from app.core.enums import QuoteStatus
 from app.db.session import SessionLocal
 from app.models import Quote
 from app.services import onboarding as onboarding_svc
-from app.services import technician_regions, validation_messages
+from app.services import technician_levels, technician_regions, validation_messages
 from app.services.activities import local_today
 from app.services.errors import (
     AccessDenied,
@@ -93,10 +93,16 @@ async def _refresh_regions(db: AsyncSession) -> int:
     return 1 if await technician_regions.refresh_if_stale(db) else 0
 
 
+async def _refresh_levels(db: AsyncSession) -> int:
+    """Elo dos técnicos: todos de novo quando a conta mais antiga tem 6 h (ou falta alguém)."""
+    return 1 if await technician_levels.refresh_if_stale(db) else 0
+
+
 _JOBS: tuple[tuple[str, Callable[[AsyncSession], Awaitable[int]]], ...] = (
     ("Fechamento automático", _close_and_purge),
     ("Orçamentos vencidos", _expire_quotes),
     ("Regiões dos técnicos", _refresh_regions),
+    ("Elos dos técnicos", _refresh_levels),
     ("Retenção das fichas de técnico (LGPD)", onboarding_svc.purge_expired),
 )
 
@@ -411,6 +417,8 @@ CONSTRAINT_MESSAGES: dict[str, str] = {
     "uq_access_profiles_name": "Já existe um perfil com este nome",
     # O mesmo envio de nota fiscal chegou duas vezes ao mesmo tempo (o app reenvia).
     "uq_technician_invoices_technician_upload": "Esta nota já foi recebida. Atualize a lista.",
+    # A mesma ocorrência desconsiderada duas vezes (elo do técnico).
+    "uq_technician_level_waivers_occurrence": "Esta ocorrência já foi desconsiderada",
 }
 CONFLICT = "Conflito de dados: registro duplicado ou referência inválida"
 

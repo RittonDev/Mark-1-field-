@@ -678,6 +678,11 @@ def _change_status(
 
     ticket.status = to
     payload = {"from": from_status.value, "to": to.value, **(data or {})}
+    event_data = data
+    if to == S.REOPENED and from_status in (S.RESOLVED, S.CLOSED) and ticket.assignee_id:
+        # O técnico da conclusão reaberta: o retorno conta no elo dele, mesmo que a OS troque de
+        # técnico depois (services/technician_levels.py). Só no histórico, não no tempo real.
+        event_data = {**(data or {}), "technician_id": str(ticket.assignee_id)}
     record_event(
         db,
         ticket,
@@ -686,7 +691,7 @@ def _change_status(
         from_value=from_status.value,
         to_value=to.value,
         note=note,
-        data=data,
+        data=event_data,
         now=now,
     )
     queue_event(db, "status_changed", ticket, actor, payload)
@@ -3065,6 +3070,10 @@ async def register_unproductive(
         "responsibility": reason.responsibility.value,
         "from_status": ticket.status.value,
     }
+    if ticket.assignee_id:
+        # Quem perdeu a visita (o elo dele conta com motivo de responsabilidade do técnico),
+        # também quando a central registra por ele.
+        data["technician_id"] = str(ticket.assignee_id)
     if ticket.scheduled_start is not None and not keep_schedule:
         data["previous_schedule"] = ticket.scheduled_start.isoformat()  # a agenda que saiu
     if payload.latitude is not None and payload.longitude is not None:

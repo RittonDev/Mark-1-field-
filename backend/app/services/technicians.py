@@ -28,7 +28,14 @@ from app.schemas.technician import (
     TechnicianOut,
     TechnicianUpdate,
 )
-from app.services import cities, search, storage, technician_regions, user_history
+from app.services import (
+    cities,
+    search,
+    storage,
+    technician_levels,
+    technician_regions,
+    user_history,
+)
 from app.services.errors import NotFound, WorkflowError
 from app.services.spreadsheet import read_table
 from app.services.technician_regions import fold_text
@@ -179,6 +186,8 @@ async def to_out(db: AsyncSession, users: list[User]) -> list[TechnicianOut]:
                     select(ServiceType.id, ServiceType.name).where(ServiceType.id.in_(valid))
                 )
             }
+    # Elo: a conta guardada (a rotina refaz a cada 6 h; o cadastro recalcula na hora).
+    levels = await technician_levels.summaries(db, ids)
     out = []
     for u in users:
         profile = profiles.get(u.id)
@@ -221,6 +230,7 @@ async def to_out(db: AsyncSession, users: list[User]) -> list[TechnicianOut]:
                 legacy=u.legacy,
                 has_pix=has_pix(u),
                 pix_updated_at=u.pix_updated_at if has_pix(u) else None,
+                level=technician_levels.summary_of(levels, u.id),
             )
         )
     return out

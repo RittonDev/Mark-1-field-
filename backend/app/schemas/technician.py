@@ -7,6 +7,7 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 from app.schemas.common import Ref
 from app.schemas.onboarding import SkillOut
 from app.schemas.records import WorkSchedule, WorkScheduleOut
+from app.schemas.technician_level import LevelSummary
 
 
 class TechnicianOut(BaseModel):
@@ -48,6 +49,8 @@ class TechnicianOut(BaseModel):
     # Pagamentos (GET /payouts?with_pix=true), não na base técnica.
     has_pix: bool = False
     pix_updated_at: dt.datetime | None = None
+    # Elo (o selo da lista): a conta guardada, de até 6 h atrás; sem conta ainda, Bronze.
+    level: LevelSummary = Field(default_factory=LevelSummary)
 
 
 class TechnicianCreate(BaseModel):
@@ -142,6 +145,8 @@ class TechnicianSuggestion(BaseModel):
     # Favorito na cidade da loja: pela regra ("auto") ou fixado pela central ("manual").
     favorite: Literal["auto", "manual"] | None = None
     favorite_note: str | None = None
+    # Elo do técnico: só o selo (não muda a pontuação nem a ordem).
+    level: LevelSummary = Field(default_factory=LevelSummary)
 
 
 class RegionCity(BaseModel):

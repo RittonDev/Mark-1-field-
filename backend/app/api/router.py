@@ -29,6 +29,7 @@ from app.api.routes import (
     schedule,
     sync,
     technician_favorites,
+    technician_levels,
     technicians,
     tickets,
     tracking,
@@ -44,6 +45,8 @@ for module in (
     catalog,
     users,
     technician_favorites,  # antes de technicians: /technicians/favorites/...
+    # Elo dos técnicos: /technicians/{id}/level, /technicians/levels/refresh e /me/level.
+    technician_levels,
     technicians,
     customers,
     tickets,

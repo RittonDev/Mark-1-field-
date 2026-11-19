@@ -25,7 +25,7 @@ from app.models import (
     User,
 )
 from app.models.ticket import ticket_helpers
-from app.services import geo, technician_favorites, technician_regions
+from app.services import geo, technician_favorites, technician_levels, technician_regions
 from app.services.schedule import busy_people, visit_end
 from app.services.workflow import OPEN_STATUSES
 
@@ -352,4 +352,8 @@ async def suggest(db: AsyncSession, target: Target, limit: int = 5) -> list[dict
     others = [r for r in ranked if not r["favorite"]]
     picked = favorites + others[: limit - len(favorites)]
     picked.sort(key=_order)
+    # O elo vai só como selo, depois do ranking: não muda a pontuação nem a ordem.
+    levels = await technician_levels.summaries(db, [row["id"] for row in picked])
+    for row in picked:
+        row["level"] = technician_levels.summary_of(levels, row["id"])
     return picked

@@ -24,6 +24,7 @@ from app.schemas.technician import (
     TemporaryPassword,
 )
 from app.services import suggestions, user_history
+from app.services import technician_levels as levels_svc
 from app.services import technician_regions as regions_svc
 from app.services import technicians as svc
 from app.services import tickets as tickets_svc
@@ -59,6 +60,13 @@ async def _ensure_regions(db: DB) -> None:
         await db.commit()
 
 
+async def _ensure_levels(db: DB) -> None:
+    """Elo dos técnicos calculado ao menos uma vez antes de responder (a lista e as sugestões só
+    leem a conta guardada; a rotina periódica mantém em dia)."""
+    if await levels_svc.ensure_computed(db):
+        await db.commit()
+
+
 @router.get("/technicians", response_model=list[TechnicianOut])
 async def list_technicians(
     db: DB,
@@ -75,6 +83,7 @@ async def list_technicians(
     """Base técnica. `state`/`city` filtram pela região de atuação (histórico) ou pelo endereço.
     O total que bate com os filtros vai no cabeçalho X-Total-Count (a lista é paginada)."""
     await _ensure_regions(db)
+    await _ensure_levels(db)
     items, total = await svc.list_technicians(
         db, q, team_id, active, state, city, limit=limit, offset=offset
     )
@@ -224,6 +233,7 @@ async def avatar(user_id: uuid.UUID, token: str, db: DB) -> Response:
 async def ticket_suggestions(ticket_id: uuid.UUID, db: DB, user: TicketManagerUser) -> list[dict]:
     """Os 5 técnicos mais indicados para a OS (cidade, distância, agenda, skill, carga)."""
     await _ensure_regions(db)
+    await _ensure_levels(db)
     ticket = await tickets_svc.get_visible_ticket(db, user, ticket_id)
     project = await db.get(Project, ticket.project_id) if ticket.project_id else None
     return await suggestions.suggest(db, suggestions.target_for(ticket, project))
@@ -258,6 +268,7 @@ async def suggest_for_place(
             status.HTTP_422_UNPROCESSABLE_CONTENT, "O fim da visita precisa ser depois do início"
         )
     await _ensure_regions(db)
+    await _ensure_levels(db)
     location = await db.get(Location, location_id) if location_id else None
     service_type = await db.get(ServiceType, service_type_id) if service_type_id else None
     category = await db.get(Category, category_id) if category_id else None
