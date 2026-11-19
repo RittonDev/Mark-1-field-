@@ -74,9 +74,10 @@ export function InvoicesPanel({
   return (
     <div>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        {/* No celular as quatro não cabem: a fileira rola de lado (sem barra; a aba escolhida vem para a vista). */}
         <Tabs<Filter>
           variant="segmented"
-          className="max-w-full overflow-x-auto"
+          className="max-w-full overflow-x-auto [scrollbar-width:none]"
           items={FILTERS.map((f) => ({ key: f.key, label: f.label, count: counts[f.key] }))}
           value={filter}
           onChange={setFilter}
