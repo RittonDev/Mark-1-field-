@@ -305,7 +305,8 @@ Regras de [src/lib/field.ts](src/lib/field.ts), espelhando `backend/app/services
   abrir o formulário não conta como alteração. O técnico corrige se precisar; ao salvar, todas as respostas vão
   (a preenchida vira resposta). Na conclusão o servidor grava o valor do momento, e trocar o técnico ou remarcar
   depois não muda nada. A data da visita é a do atendimento em curso (na volta ao local, o dia da volta); com a OS
-  pausada ou reaberta depois de uma chegada, a data não vem preenchida.
+  concluída, o dia da conclusão; pausada ou reaberta depois de uma chegada, a data não vem preenchida. A conclusão
+  grava só a data que a pergunta mostrava: sem ela, a pergunta obrigatória é digitada.
 - **Preenchimento** (`/formulario/<OS>/<form>`): texto, número, Sim/Não em botões grandes, opções, data,
   "Confirmo" e fotos por campo (câmera/galeria, com a contagem contra o mínimo e o máximo).
 - **Uma pergunta por tela** (padrão, como o passo a passo do Field Control): "Pergunta 3 de 12", um traço

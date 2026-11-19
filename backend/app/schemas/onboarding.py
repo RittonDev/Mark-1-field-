@@ -71,9 +71,10 @@ UFS = frozenset(
 
 # Versão do aviso de privacidade exibido no formulário: muda quando o texto mudar. O texto
 # (PRIVACY_NOTICE) fica em frontend/src/lib/constants.ts e em mobile/src/lib/constants.ts, cópias
-# idênticas, cada uma com o próprio PRIVACY_VERSION: mude os três no mesmo dia. 2026-11-18: o aviso
-# passa a citar a chave PIX que o técnico cadastra no app para receber pelos chamados. 2026-11-19:
-# texto revisto na revisão de segurança.
+# idênticas, cada uma com o próprio PRIVACY_VERSION: mude os três no mesmo dia e publique a web
+# antes da API (ou junto): com a API na frente, a ficha da web pede para recarregar e não envia até
+# a web nova entrar. 2026-11-18: o aviso passa a citar a chave PIX que o técnico cadastra no app
+# para receber pelos chamados. 2026-11-19: texto revisto na revisão de segurança.
 PRIVACY_VERSION = "2026-11-19"
 
 

@@ -123,7 +123,8 @@ Equivale ao "Tipo de OS" do Field Control. Sem `customer_id`, o tipo vale para t
     agendamento; datas fora de 2000–2100 → 422), `tag` (repetível, até 20: OS com qualquer uma dessas etiquetas, sem
     diferenciar maiúsculas nem espaços sobrando), `technician_id` (técnico que atuou: o responsável atual, quem foi junto
     ou quem já foi o responsável antes de uma troca, inclusive no histórico importado do FC, pelo `data.technician_id` do
-    evento; o nome só vale no evento sem esse id, e trocar o nome do técnico não tira a OS da busca; `assignee_id` continua
+    evento; o nome só vale no evento sem esse id; trocar o nome do técnico não tira a OS da busca, salvo nas atribuições
+    antigas do FC que ficaram sem o id: nome repetido, também entre papéis, ou sem casamento; `assignee_id` continua
     sendo só o atual)
   - `page` (1..), `page_size` (1..500, padrão 25), `order_by` ∈ `updated_at, created_at, priority, resolution_due_at, number, scheduled_start, customer` (nome do cliente) com `-` para desc (padrão `-updated_at`); vazios (sem agenda, sem cliente) por último nas duas direções
 - `GET /tickets/export` (gestão) → `text/csv; charset=utf-8` com BOM, separado por `;`, `Content-Disposition: attachment;
@@ -1493,6 +1494,9 @@ ficha grava a do servidor no aceite).
 - O texto (`PRIVACY_NOTICE`) e a versão (`PRIVACY_VERSION`) ficam em `frontend/src/lib/constants.ts` e
   `mobile/src/lib/constants.ts`, cópias idênticas; `frontend/src/lib/onboarding.ts` só reexporta. Mudar o texto pede
   mudar a versão nos dois lados (as duas cópias e `backend/app/schemas/onboarding.py`), no mesmo dia.
+- A ficha da web compara a versão do servidor com a do pacote ao abrir, na última etapa e no envio: se a do servidor
+  for mais nova, a página está velha, mostra "O aviso de privacidade mudou" com **Recarregar** e não envia. Por isso,
+  publique a web antes da API, ou junto: com a API na frente, nenhuma ficha envia até a web nova entrar.
 - O aviso cita a chave PIX que o técnico cadastrar no app e o pagamento dos chamados por PIX; as notas fiscais (número,
   valor, datas e o arquivo, que pode trazer CPF ou CNPJ e endereço, guardadas pelo prazo da legislação fiscal); e o Elo
   (atendimentos dos últimos 12 meses: quantidade, chegada no horário, retornos e visitas perdidas, visto em Meu elo, com

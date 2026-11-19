@@ -407,7 +407,8 @@ export const LEVEL_OCCURRENCE: Record<LevelOccurrenceKind, string> = {
 
 /**
  * Versão do aviso: a mesma de PRIVACY_VERSION em backend/app/schemas/onboarding.py (a ficha grava a do servidor no
- * aceite). Mudou o texto de PRIVACY_NOTICE? Mude a versão aqui e lá, no mesmo dia.
+ * aceite). Mudou o texto de PRIVACY_NOTICE? Mude a versão aqui e lá, no mesmo dia, e publique a web antes da API (ou
+ * junto): com a API na frente, a ficha da web pede para recarregar e não envia até a web nova entrar.
  */
 export const PRIVACY_VERSION = "2026-11-19";
 

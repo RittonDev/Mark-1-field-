@@ -1228,9 +1228,9 @@ export interface TicketForm {
   auto_attached?: boolean;
   /**
    * Resposta automática das perguntas ainda sem resposta: {campo: valor}, ao vivo até a conclusão, que grava o valor
-   * nas respostas (concluído, vem vazio). Vale como resposta do servidor: `{...prefill, ...answers}`. Data da visita:
-   * em atendimento, o dia do trecho atual; antes da chegada, o da agenda; fora de atendimento depois de uma chegada, não
-   * vem (a conclusão grava o dia da última ida).
+   * nas respostas (concluído, vem vazio). Vale como resposta do servidor: `{...prefill, ...answers}`. Data da visita,
+   * a mesma ao vivo e na conclusão: em atendimento, o dia do trecho atual; resolvida ou fechada, o da conclusão; antes
+   * da chegada, o da agenda; depois de uma chegada, pausada, a caminho ou reaberta, não vem (nem na conclusão).
    */
   prefill?: Record<string, FormAnswer>;
 }
