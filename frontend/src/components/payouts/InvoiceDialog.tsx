@@ -263,7 +263,7 @@ export function InvoiceDialog({
                       )}
                       {payout.title}
                     </p>
-                    <span className="flex items-center gap-3">
+                    <span className="ml-auto flex items-center gap-3">
                       <PayoutPill payout={payout} />
                       <span className="w-24 text-right text-sm font-medium text-ink tabular-nums">{formatMoney(payout.amount)}</span>
                     </span>
