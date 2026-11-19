@@ -48,12 +48,14 @@ function cleanUp(fresh = false): Promise<boolean> {
   return cleaning;
 }
 
+/** Já entrou outra sessão: nada mais da anterior a limpar (a jornada e a tarefa já são da nova). */
+const signedInAgain = () => session.get().status === "signedIn";
+
 async function cleanOnce(): Promise<boolean> {
   try {
-    // Já entrou de novo: nada da sessão anterior a limpar.
-    if (session.get().status === "signedIn") return true;
-    const ending = await session.pendingEnd().catch(() => null);
+    if (signedInAgain()) return true;
     stopSync();
+    const ending = await session.pendingEnd().catch(() => null);
     await clearNotificationsOnSignOut();
     let done = true;
     if (ending?.wipe) {
@@ -69,8 +71,9 @@ async function cleanOnce(): Promise<boolean> {
     }
     // Por último: parar a jornada (fim do serviço de localização) e desligar a tarefa periódica podem encerrar o
     // processo que roda sem tela. Com os dados ainda por apagar, a tarefa fica ligada para a próxima rodada tentar de novo.
+    if (signedInAgain()) return done;
     await stopTracking({ endOnServer: false }).catch(() => undefined);
-    if (done) await unregisterBackgroundSync();
+    if (done && !signedInAgain()) await unregisterBackgroundSync();
     return done;
   } catch (error) {
     console.warn("Falha ao encerrar a sessão no aparelho", error);

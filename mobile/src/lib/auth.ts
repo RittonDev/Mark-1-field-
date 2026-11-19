@@ -20,6 +20,8 @@ const OWNER_KEY = "owner_user_id";
 /** No logout com sinal ruim, quanto esperar o fim da jornada e o descadastro do push antes de sair. */
 const LOGOUT_TRACKING_WAIT_MS = 8_000;
 const LOGOUT_DEVICE_WAIT_MS = 5_000;
+/** No login, quanto esperar a limpeza da sessão anterior (ex.: a jornada ainda encerrando com sinal ruim). */
+const LOGIN_CLEANUP_WAIT_MS = 10_000;
 
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -92,7 +94,7 @@ export async function refreshPushRegistration() {
  */
 export async function login(email: string, password: string, apiUrl: string) {
   // A limpeza da sessão anterior (dados do técnico desativado, tarefa em segundo plano) termina antes de outra começar.
-  await sessionEndSettled();
+  await Promise.race([sessionEndSettled(), delay(LOGIN_CLEANUP_WAIT_MS)]);
   await session.setApiUrl(apiUrl);
   let data: TokenResponse;
   try {
