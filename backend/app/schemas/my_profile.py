@@ -1,8 +1,10 @@
 """Meu cadastro do técnico (app) e o histórico do cadastro (central).
 
 O técnico mantém no app a foto, o nome, o celular (WhatsApp), o e-mail de login, o endereço, a
-cidade/UF, a região que atende e a chave PIX. E-mail e chave PIX pedem a senha atual
-(services/my_profile.py). As mensagens são as mesmas do app (mobile/src/lib/pix.ts e a tela).
+cidade/UF, a região que atende, a chave PIX e o perfil técnico (ferramental, disponibilidade,
+transporte e CNH, aptidões e formação: os itens em schemas/tech_profile.py, as regras em
+services/tech_profile.py). E-mail e chave PIX pedem a senha atual (services/my_profile.py); o
+perfil técnico não. As mensagens são as mesmas do app (mobile/src/lib/pix.ts e as telas).
 
 O nome vai para os textos do grupo do cliente, o relatório e o portal: pelo app, só letras (com
 acento), espaço, apóstrofo, hífen e ponto, sem "www", "http" nem endereço colado ("site.com"). Vale
@@ -22,6 +24,16 @@ from app.core.enums import PixKeyType
 from app.schemas.common import ORMModel, Ref
 from app.schemas.onboarding import UFS
 from app.schemas.records import format_phone
+from app.schemas.tech_profile import (
+    EducationIn,
+    EducationOut,
+    TechnicianSkillIn,
+    TechnicianSkillOut,
+    TechProfileStamps,
+    TransportIn,
+    TransportOut,
+)
+from app.services import tech_profile
 
 NAME_REQUIRED = "Informe seu nome completo"
 NAME_LETTERS = "Use só letras no nome"
@@ -32,6 +44,11 @@ BAD_UF = "UF inválida"
 BAD_ZIP = "CEP com 8 dígitos"
 PIX_KEY_REQUIRED = "Informe a chave PIX"
 HOLDER_REQUIRED = "Informe o nome do titular da conta"
+# Perfil técnico: a lista inteira (os itens se validam em schemas/tech_profile.py).
+SLOT_UNKNOWN = "Turno desconhecido: {}"
+TRANSPORT_REQUIRED = "Informe os meios de transporte"
+SKILL_REPEATED = "Aptidão repetida: {}"
+EDUCATION_REPEATED = "Formação repetida: {}"
 
 
 def _spaces(value: str | None) -> str:
@@ -89,7 +106,14 @@ class PixIn(BaseModel):
 
 
 class MyProfileUpdate(BaseModel):
-    """PATCH /me/profile: só o que vier no corpo muda. E-mail e PIX pedem `current_password`.
+    """PATCH /me/profile: só o que vier no corpo muda.
+
+    Quem muda o quê: o técnico muda aqui o nome, o contato, o e-mail de login, o endereço, a chave
+    PIX e o perfil técnico. E-mail e PIX pedem `current_password`; o perfil técnico não pede senha
+    (nem a provisória trava) e cada parte vem inteira: a lista substitui a gravada, [] ou null
+    limpa (services/tech_profile.py normaliza e põe o "desde" das aptidões e o id dos cursos). CPF,
+    nascimento e CNPJ/MEI continuam só na ficha da homologação; grupo, cargo, serviços e jornada,
+    com a central.
 
     O e-mail só é validado quando vem: há logins de teste sem "@"."""
 
@@ -106,6 +130,16 @@ class MyProfileUpdate(BaseModel):
     address_zip: str | None = Field(default=None, max_length=20)
     # null remove a chave.
     pix: PixIn | None = None
+    # Perfil técnico. Ferramental: ids de GET /technician-tools (desativado é ignorado; id que não
+    # existe: "Ferramenta não encontrada. Atualize a lista.", WorkflowError do serviço).
+    tool_ids: list[uuid.UUID] | None = Field(default=None, max_length=tech_profile.MAX_TOOLS)
+    # "dia:turno" ("sat:afternoon"); repetidos contam uma vez.
+    availability: list[str] | None = Field(default=None, max_length=tech_profile.MAX_SLOTS)
+    # Meios e CNH juntos; null não vale (TRANSPORT_REQUIRED).
+    transport: TransportIn | None = None
+    # Sem "desde": o servidor mantém o de quem já estava, pelo nome.
+    skills: list[TechnicianSkillIn] | None = Field(default=None, max_length=tech_profile.MAX_SKILLS)
+    education: list[EducationIn] | None = Field(default=None, max_length=tech_profile.MAX_EDUCATION)
     current_password: str | None = Field(default=None, max_length=256)
 
     @field_validator("name")
@@ -165,6 +199,54 @@ class MyProfileUpdate(BaseModel):
             raise ValueError(BAD_ZIP)
         return f"{digits[:5]}-{digits[5:]}"
 
+    @field_validator("availability")
+    @classmethod
+    def _availability(cls, value: list[str] | None) -> list[str] | None:
+        for slot in value or []:
+            if slot not in tech_profile.ALL_SLOTS:
+                raise ValueError(SLOT_UNKNOWN.format(slot))
+        return value
+
+    @field_validator("transport")
+    @classmethod
+    def _transport(cls, value: TransportIn | None) -> TransportIn:
+        if value is None:
+            raise ValueError(TRANSPORT_REQUIRED)
+        return value
+
+    @field_validator("skills")
+    @classmethod
+    def _skills(cls, value: list[TechnicianSkillIn] | None) -> list[TechnicianSkillIn] | None:
+        """O mesmo nome sem diferença de acento e maiúsculas (o nome do item que repete, limpo)."""
+        seen: set[str] = set()
+        for item in value or []:
+            key = tech_profile.fold(item.name)
+            if key in seen:
+                raise ValueError(SKILL_REPEATED.format(item.name))
+            seen.add(key)
+        return value
+
+    @field_validator("education")
+    @classmethod
+    def _education(cls, value: list[EducationIn] | None) -> list[EducationIn] | None:
+        """O mesmo id duas vezes, ou o mesmo curso, instituição (sem acento e maiúsculas), nível e
+        início."""
+        ids: set[uuid.UUID] = set()
+        seen: set[tuple[str, str, str, str]] = set()
+        for item in value or []:
+            key = (
+                tech_profile.fold(item.course),
+                tech_profile.fold(item.institution),
+                item.level,
+                item.start,
+            )
+            if key in seen or (item.id is not None and item.id in ids):
+                raise ValueError(EDUCATION_REPEATED.format(item.course))
+            seen.add(key)
+            if item.id is not None:
+                ids.add(item.id)
+        return value
+
 
 class MyProfile(BaseModel):
     """GET /me/profile (só o técnico). Endereço e PIX não vão no /auth/me nem no UserOut."""
@@ -184,6 +266,16 @@ class MyProfile(BaseModel):
     # Link assinado de 12 h (ou a foto que veio do Field Control).
     avatar_url: str | None
     pix: PixInfo | None
+    # Perfil técnico (Configurações › Atendimento). Ferramentas: só as ativas do catálogo, na ordem
+    # do nome. Disponibilidade na ordem da grade. transport null: nunca informou. Aptidões: o
+    # "desde" mais novo primeiro, depois o nome. Formação: em andamento primeiro, depois o fim e o
+    # início mais novos. tech_profile_updated: quando cada parte mudou e por onde (app ou ficha).
+    tool_ids: list[uuid.UUID]
+    availability: list[str]
+    transport: TransportOut | None
+    skills: list[TechnicianSkillOut]
+    education: list[EducationOut]
+    tech_profile_updated: TechProfileStamps
 
 
 class UserChangeItem(BaseModel):

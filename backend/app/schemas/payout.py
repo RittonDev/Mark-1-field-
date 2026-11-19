@@ -3,6 +3,7 @@
 import uuid
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -102,3 +103,82 @@ class MyEarnings(PayoutList):
 
 class PayoutIds(BaseModel):
     ids: list[uuid.UUID] = Field(min_length=1, max_length=500)
+
+
+# --------------------------------------------------------------------------- faturamento do app
+
+# Situação de um mês no Faturamento (services/payouts.month_state, nesta prioridade): "rejected",
+# "empty" (mês sem OS), "in_progress", "partial", "no_invoice", "in_review", "to_pay",
+# "paid_no_invoice" e "paid". A nota nunca trava o pagamento: "no_invoice" é só informativo.
+EarningsMonthState = Literal[
+    "empty",
+    "in_progress",
+    "no_invoice",
+    "in_review",
+    "rejected",
+    "to_pay",
+    "partial",
+    "paid_no_invoice",
+    "paid",
+]
+
+
+class EarningsBucket(BaseModel):
+    """Quantos valores (OS) e a soma deles."""
+
+    count: int = 0
+    amount: Money = Decimal("0")
+
+
+class EarningsRejection(BaseModel):
+    """A recusa que ainda vale no mês: a nota recusada mais recente da competência, sem nota
+    enviada depois da recusa."""
+
+    invoice_id: uuid.UUID
+    number: str
+    reason: str | None
+    rejected_at: datetime | None
+
+
+class EarningsMonth(BaseModel):
+    """Um mês de conclusão (OS aberta: o mês do lançamento do valor) no fuso da operação."""
+
+    month: str  # "AAAA-MM"
+    state: EarningsMonthState
+    # Valores (OS) do mês; o pendente de OS cancelada não conta.
+    count: int
+    # to_pay + expected + paid: o "Valor total" do cartão.
+    total: Money
+    to_pay: EarningsBucket
+    expected: EarningsBucket
+    paid: EarningsBucket
+    # Partes do a receber (sem nota do técnico, nota em conferência, nota conferida) e do pago.
+    due_without_invoice: EarningsBucket
+    due_in_review: EarningsBucket
+    due_checked: EarningsBucket
+    paid_without_invoice: EarningsBucket
+    last_paid_at: datetime | None
+    rejection: EarningsRejection | None
+
+
+class EarningsTotals(BaseModel):
+    """Valores das OS de todos os meses (não só os da janela); os reembolsos ficam à parte."""
+
+    paid: Money
+    to_pay: Money
+    expected: Money
+    # Parte de to_pay de meses anteriores à janela (já somada em to_pay).
+    to_pay_older: Money
+    last_paid_at: datetime | None
+    # Reembolsos de custos extras: aprovados e ainda não pagos; já pagos (todos os meses).
+    reimbursement_to_receive: Money
+    reimbursement_paid: Money
+
+
+class EarningsMonths(BaseModel):
+    """GET /me/earnings/months: os meses da janela, o mais novo primeiro (também os vazios)."""
+
+    since: str  # primeiro mês da janela, "AAAA-MM"
+    until: str  # mês atual no fuso da operação
+    totals: EarningsTotals
+    months: list[EarningsMonth]
