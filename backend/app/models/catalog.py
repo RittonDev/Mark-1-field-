@@ -110,3 +110,20 @@ class UnproductiveReason(UUIDPrimaryKey, Timestamps, Base):
     description: Mapped[str | None] = mapped_column(Text)
     responsibility: Mapped[Responsibility] = mapped_column(str_enum(Responsibility))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+
+
+class TechnicianTool(UUIDPrimaryKey, Timestamps, Base):
+    """Ferramenta do catálogo do ferramental dos técnicos (Configurações › Técnicos).
+
+    O técnico marca no app as que tem (users.tool_ids guarda os ids). A central inclui, renomeia e
+    desativa, sem excluir e sem ordem manual: a lista sai em ordem alfabética. Desativada, some do
+    app, da ficha e do filtro, e volta para quem tinha quando reativada (services/tech_profile.py).
+    O banco recusa o nome exato repetido; o serviço também recusa o repetido sem acento e sem
+    maiúsculas.
+    """
+
+    __tablename__ = "tool_catalog"
+    __table_args__ = (UniqueConstraint("name", name="uq_tool_catalog_name"),)
+
+    name: Mapped[str] = mapped_column(String(80))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")

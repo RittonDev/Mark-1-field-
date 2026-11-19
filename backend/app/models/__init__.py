@@ -6,6 +6,7 @@ from app.models.catalog import (
     Category,
     ServiceType,
     SlaPolicy,
+    TechnicianTool,
     UnproductiveReason,
     ViolationReason,
 )
@@ -70,6 +71,7 @@ __all__ = [
     "TechnicianInvoice",
     "TechnicianLevel",
     "TechnicianLevelWaiver",
+    "TechnicianTool",
     "UnproductiveReason",
     "TechnicianApplication",
     "TechnicianShift",

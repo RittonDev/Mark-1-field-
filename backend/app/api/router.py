@@ -45,7 +45,8 @@ for module in (
     catalog,
     users,
     technician_favorites,  # antes de technicians: /technicians/favorites/...
-    # Elo dos técnicos: /technicians/{id}/level, /technicians/levels/refresh e /me/level.
+    # Elo dos técnicos: /technicians/{id}/level, /technicians/{id}/stats,
+    # /technicians/levels/refresh, /me/level, /me/stats e /me/history.
     technician_levels,
     technicians,
     customers,

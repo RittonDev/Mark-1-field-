@@ -105,6 +105,28 @@ class User(UUIDPrimaryKey, Timestamps, Base):
     pix_key: Mapped[str | None] = mapped_column(String(80))
     pix_holder_name: Mapped[str | None] = mapped_column(String(160))
     pix_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Perfil técnico: o técnico mantém no app; a central só vê (services/tech_profile.py). Sem
+    # índice: os filtros varrem só os técnicos; GIN em tool_ids/availability se a base passar de
+    # dezenas de milhares de técnicos. Ferramentas: ids (texto) do tool_catalog, inclusive as
+    # desativadas que já estavam marcadas; turnos "dia:turno" ("sat:afternoon"); meios de transporte
+    # e CNH (valem com a parte "transport" carimbada); aptidões [{name, level, since}]; formação
+    # [{id, course, level, institution, start, end}]; e o carimbo de cada parte informada
+    # {parte: {at, via: "app"|"ficha"}}. Grave sempre objetos novos (user.skills = [...],
+    # user.tech_profile_stamps = {**antigo, parte: carimbo}): mudar a lista ou o dicionário no
+    # lugar não é detectado e não grava.
+    tool_ids: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default="[]")
+    availability: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default="[]")
+    transport_modes: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default="[]")
+    has_driver_license: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
+    skills: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list, server_default="[]")
+    education: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, default=list, server_default="[]"
+    )
+    tech_profile_stamps: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, default=dict, server_default="{}"
+    )
     legacy: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     # Conta Microsoft (Entra ID) vinculada no primeiro login: "oid" do token.
     entra_oid: Mapped[str | None] = mapped_column(String(64), unique=True)

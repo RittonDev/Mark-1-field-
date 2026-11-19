@@ -56,6 +56,9 @@ class TicketOffer(UUIDPrimaryKey, Timestamps, Base):
     viewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Aceite ou recusa do técnico.
     responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Quando o técnico abriu o escopo no app; gravado no aceite (null: oferta não aceita ou app
+    # antigo).
+    scope_read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_by_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL")
     )
