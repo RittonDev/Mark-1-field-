@@ -336,9 +336,183 @@ export const USER_CHANGE_LABEL: Record<UserChangeField, string> = {
   services: "Serviços que faz",
   pix: "Chave PIX",
   pix_holder: "Titular da conta",
+  tools: "Ferramental",
+  availability: "Disponibilidade",
+  transport: "Transporte",
+  skills: "Aptidões",
+  education: "Formação",
   avatar: "Foto",
   password: "Senha",
 };
+
+// --------------------------------------------------------------------------- perfil técnico (o técnico mantém no app; a central vê)
+
+/** Os dias da grade, de segunda a domingo. */
+export const WEEKDAY_ORDER: Weekday[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+
+/** Segunda a sexta ("Copiar para os dias úteis"). */
+export const WORKDAYS: Weekday[] = ["mon", "tue", "wed", "thu", "fri"];
+
+export const WEEKDAY: Record<Weekday, { label: string; short: string }> = {
+  mon: { label: "Segunda-feira", short: "seg" },
+  tue: { label: "Terça-feira", short: "ter" },
+  wed: { label: "Quarta-feira", short: "qua" },
+  thu: { label: "Quinta-feira", short: "qui" },
+  fri: { label: "Sexta-feira", short: "sex" },
+  sat: { label: "Sábado", short: "sáb" },
+  sun: { label: "Domingo", short: "dom" },
+};
+
+/**
+ * Os turnos da disponibilidade, nesta ordem (a madrugada por último). `from`/`to`: horas locais (o fim não entra);
+ * `spoken`: como o leitor de tela fala. Não é a jornada (o turno com GPS).
+ */
+export const DAY_PERIOD_ORDER: DayPeriod[] = ["morning", "afternoon", "evening", "night"];
+
+export const DAY_PERIOD: Record<DayPeriod, { label: string; hours: string; spoken: string; from: number; to: number }> = {
+  morning: { label: "Manhã", hours: "06h–12h", spoken: "das 6h ao meio-dia", from: 6, to: 12 },
+  afternoon: { label: "Tarde", hours: "12h–18h", spoken: "do meio-dia às 18h", from: 12, to: 18 },
+  evening: { label: "Noite", hours: "18h–24h", spoken: "das 18h à meia-noite", from: 18, to: 24 },
+  night: { label: "Madrugada", hours: "00h–06h", spoken: "da meia-noite às 6h", from: 0, to: 6 },
+};
+
+/** Os 28 turnos da semana, na ordem da grade. */
+export const ALL_SLOTS: AvailabilitySlot[] = WEEKDAY_ORDER.flatMap((day) =>
+  DAY_PERIOD_ORDER.map((period): AvailabilitySlot => `${day}:${period}`),
+);
+
+/** Sem repetidos nem códigos desconhecidos, na ordem da grade. */
+export function sortSlots(slots: readonly string[]): AvailabilitySlot[] {
+  const wanted = new Set(slots);
+  return ALL_SLOTS.filter((slot) => wanted.has(slot));
+}
+
+/** Os turnos marcados de um dia, na ordem. */
+export function slotPeriods(slots: readonly string[], day: Weekday): DayPeriod[] {
+  const wanted = new Set(slots);
+  return DAY_PERIOD_ORDER.filter((period) => wanted.has(`${day}:${period}`));
+}
+
+/** "a", "a e b", "a, b e c". */
+function joinWords(words: readonly string[]): string {
+  return words.length > 1 ? `${words.slice(0, -1).join(", ")} e ${words[words.length - 1]}` : (words[0] ?? "");
+}
+
+/** "manhã e tarde", "manhã, tarde, noite e madrugada" (na ordem; "" sem turno). */
+export function periodsPhrase(periods: readonly DayPeriod[]): string {
+  return joinWords(DAY_PERIOD_ORDER.filter((p) => periods.includes(p)).map((p) => DAY_PERIOD[p].label.toLowerCase()));
+}
+
+/** Os turnos de um dia no cartão: "Manhã · Tarde" ("" sem turno). */
+export function dayPeriodsText(periods: readonly DayPeriod[]): string {
+  return DAY_PERIOD_ORDER.filter((p) => periods.includes(p))
+    .map((p) => DAY_PERIOD[p].label)
+    .join(" · ");
+}
+
+/**
+ * Turnos em texto curto, igual ao servidor (services/tech_profile.slots_text): "sáb · tarde", "sáb · tarde e noite",
+ * "sex · noite; sáb · madrugada", "seg a sex · manhã e tarde; sáb · manhã", "sáb e dom · manhã". Dias seguidos com os
+ * mesmos turnos se juntam. Vazio: "".
+ */
+export function slotsText(slots: readonly string[]): string {
+  const days = WEEKDAY_ORDER.map((day) => ({ day, periods: slotPeriods(slots, day) }));
+  const parts: string[] = [];
+  let i = 0;
+  while (i < days.length) {
+    const periods = days[i].periods;
+    if (!periods.length) {
+      i += 1;
+      continue;
+    }
+    let j = i;
+    while (j + 1 < days.length && days[j + 1].periods.join() === periods.join()) j += 1;
+    const first = WEEKDAY[days[i].day].short;
+    const last = WEEKDAY[days[j].day].short;
+    const span = j === i ? first : j === i + 1 ? `${first} e ${last}` : `${first} a ${last}`;
+    parts.push(`${span} · ${periodsPhrase(periods)}`);
+    i = j + 1;
+  }
+  return parts.join("; ");
+}
+
+/**
+ * Resumo da linha Disponibilidade (Configurações do app): "Seg a sex · manhã e tarde", "Sáb e dom · noite"; os 28:
+ * "Todos os dias · todos os turnos"; dias com turnos diferentes: "6 dias · turnos variados"; nada: "Não informada".
+ */
+export function availabilitySummary(slots: readonly string[]): string {
+  const list = sortSlots(slots);
+  if (!list.length) return "Não informada";
+  if (list.length === ALL_SLOTS.length) return "Todos os dias · todos os turnos";
+  const text = slotsText(list);
+  if (!text.includes(";")) return text.charAt(0).toUpperCase() + text.slice(1);
+  const days = WEEKDAY_ORDER.filter((day) => slotPeriods(list, day).length > 0).length;
+  return `${days} dias · turnos variados`;
+}
+
+export const TRANSPORT_MODE_ORDER: TransportMode[] = ["car", "motorcycle", "bicycle", "public_transport", "ride_app", "on_foot"];
+
+export const TRANSPORT_MODE: Record<TransportMode, string> = {
+  car: "Carro",
+  motorcycle: "Moto",
+  bicycle: "Bicicleta",
+  public_transport: "Transporte público",
+  ride_app: "Carro de aplicativo",
+  on_foot: "A pé",
+};
+
+/** "Carro, Moto · com CNH", "Nenhum · sem CNH"; null sem a parte informada (o mesmo texto do histórico). */
+export function transportText(transport: TransportInfo | null | undefined): string | null {
+  if (!transport) return null;
+  const modes = TRANSPORT_MODE_ORDER.filter((m) => transport.modes.includes(m)).map((m) => TRANSPORT_MODE[m]);
+  return `${modes.length ? modes.join(", ") : "Nenhum"} · ${transport.driver_license ? "com CNH" : "sem CNH"}`;
+}
+
+export const SKILL_LEVEL_ORDER: SkillLevel[] = ["basico", "intermediario", "avancado"];
+
+export const SKILL_LEVEL: Record<SkillLevel, string> = { basico: "Básico", intermediario: "Intermediário", avancado: "Avançado" };
+
+export const EDUCATION_LEVEL_ORDER: EducationLevel[] = [
+  "high_school",
+  "technical",
+  "undergraduate",
+  "postgraduate",
+  "certification",
+  "free_course",
+];
+
+export const EDUCATION_LEVEL: Record<EducationLevel, string> = {
+  high_school: "Ensino médio",
+  technical: "Técnico",
+  undergraduate: "Graduação",
+  postgraduate: "Pós-graduação",
+  certification: "Certificação",
+  free_course: "Curso livre",
+};
+
+export const TECH_PROFILE_PART: Record<TechProfilePart, string> = {
+  tools: "Ferramental",
+  availability: "Disponibilidade",
+  transport: "Transporte",
+  skills: "Aptidões",
+  education: "Formação",
+};
+
+/** Limites do perfil técnico (os mesmos de backend/app/services/tech_profile.py). */
+export const TECH_PROFILE_LIMITS = {
+  tools: 200,
+  toolName: 80,
+  slots: 28,
+  modes: 6,
+  skills: 30,
+  skillName: 80,
+  education: 20,
+  course: 120,
+  institution: 120,
+  textMin: 2,
+  /** Primeiro mês aceito na formação (o último é o mês atual). */
+  firstMonth: "1950-01",
+} as const;
 
 // --------------------------------------------------------------------------- notas fiscais dos técnicos
 
@@ -379,6 +553,140 @@ export function competenceLabel(month: string): string {
   const match = /^(\d{4})-(\d{2})$/.exec(month);
   const name = match ? COMPETENCE_MONTHS[Number(match[2]) - 1] : undefined;
   return match && name ? `${name} de ${match[1]}` : month;
+}
+
+// --------------------------------------------------------------------------- meses (gráficos, histórico, formação, faturamento)
+
+/** Meses abreviados do eixo dos gráficos, sem ponto. */
+export const MONTH_ABBR = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"] as const;
+
+/** "2026-11" → "nov"; com o ano, "nov/26" (fora do formato, volta como veio). */
+export function monthAbbr(month: string, withYear = false): string {
+  const match = /^(\d{4})-(\d{2})$/.exec(month);
+  const name = match ? MONTH_ABBR[Number(match[2]) - 1] : undefined;
+  if (!match || !name) return month;
+  return withYear ? `${name}/${match[1].slice(2)}` : name;
+}
+
+/** "2026-11" → "Novembro de 2026" (seções do histórico e meses do faturamento): competenceLabel com a inicial maiúscula. */
+export function monthTitle(month: string): string {
+  const label = competenceLabel(month);
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+/** "2024-02" ou "2024-02-19" → "02/2024" (fora do formato, volta como veio). */
+export function monthText(value: string): string {
+  const match = /^(\d{4})-(\d{2})(?:-\d{2})?$/.exec(value);
+  return match ? `${match[2]}/${match[1]}` : value;
+}
+
+/** Período da formação: "02/2022 a 12/2023"; sem fim, "desde 02/2024 (em andamento)". Igual ao servidor. */
+export function educationPeriodText(start: string, end: string | null | undefined): string {
+  return end ? `${monthText(start)} a ${monthText(end)}` : `desde ${monthText(start)} (em andamento)`;
+}
+
+/** O "desde" da aptidão: "2026-11-19" → "desde 11/2026". */
+export function sinceText(since: string): string {
+  return `desde ${monthText(since)}`;
+}
+
+// --------------------------------------------------------------------------- faturamento do técnico
+
+/** Os valores por OS existem desde aqui (o Field Control não trazia valores): os meses antes vêm vazios. */
+export const EARNINGS_HISTORY_SINCE = "2026-11-13";
+
+/**
+ * Situação do mês no Faturamento (GET /me/earnings/months): o selo e a cor do ícone redondo (o desenho do ícone fica
+ * no app). Mesmas cores de Pagamentos e das notas: âmbar = esperando a central, verde-água = pago, vermelho = recusa,
+ * azul = informativo (a nota nunca trava o pagamento), cinza = nada a fazer.
+ */
+export const EARNINGS_MONTH_STATE: Record<EarningsMonthState, { label: string; color: string }> = {
+  empty: { label: "Sem valores", color: "#667085" },
+  in_progress: { label: "Em andamento", color: "#667085" },
+  no_invoice: { label: "Sem nota", color: "#0086C9" },
+  in_review: { label: "Nota em conferência", color: "#DC6803" },
+  rejected: { label: "Nota recusada", color: "#D92D20" },
+  to_pay: { label: "A pagar", color: "#DC6803" },
+  partial: { label: "Pago em parte", color: "#DC6803" },
+  paid_no_invoice: { label: "Pago sem nota", color: "#0E9384" },
+  paid: { label: "Pago", color: "#0E9384" },
+};
+
+/** "nenhuma OS", "1 OS", "12 OS". */
+export function osCount(n: number): string {
+  return n === 0 ? "nenhuma OS" : `${n} OS`;
+}
+
+/** Formatação vinda de quem mostra: `money` pode ocultar o valor (olho do app); `day` dá "18/11". */
+export interface EarningsFormat {
+  money: (value: number) => string;
+  day: (iso: string) => string;
+}
+
+/** Linha curta do cartão do mês (só dados). */
+export function earningsMonthLine(m: EarningsMonth, { money, day }: EarningsFormat): string | null {
+  switch (m.state) {
+    case "in_progress":
+      return `${osCount(m.expected.count)} em andamento`;
+    case "no_invoice":
+      return `${osCount(m.due_without_invoice.count)} sem nota · ${money(m.due_without_invoice.amount)}`;
+    case "in_review":
+      return `${osCount(m.due_in_review.count)} com nota em conferência`;
+    case "rejected":
+      return `${m.rejection ? `Nota nº ${m.rejection.number}` : "Nota"} recusada · ver motivo`;
+    case "to_pay":
+      return `${money(m.to_pay.amount)} a receber`;
+    case "partial":
+      return [
+        `${money(m.paid.amount)} pago`,
+        m.to_pay.count ? `${money(m.to_pay.amount)} a receber` : null,
+        m.expected.count ? `${money(m.expected.amount)} previsto` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+    case "paid_no_invoice":
+      return m.last_paid_at ? `Pago em ${day(m.last_paid_at)} · sem nota` : "Pago · sem nota";
+    case "paid":
+      return m.last_paid_at ? `Pago em ${day(m.last_paid_at)}` : null;
+    default:
+      return null;
+  }
+}
+
+/** O texto da situação no topo do mês: o que aconteceu e o que o técnico pode fazer. */
+export function earningsSituation(m: EarningsMonth, { money, day }: EarningsFormat): string | null {
+  const paidOn = m.last_paid_at ? ` em ${day(m.last_paid_at)}` : "";
+  switch (m.state) {
+    case "in_progress":
+      return "Nenhuma OS concluída ainda. O valor fica previsto até a conclusão.";
+    case "no_invoice":
+      return `${osCount(m.due_without_invoice.count)} sem nota fiscal (${money(m.due_without_invoice.amount)}). A central paga com ou sem nota; se quiser, envie a nota abaixo.`;
+    case "in_review":
+      return `A central está conferindo a nota de ${osCount(m.due_in_review.count)}. Nota errada? Apague e envie outra.`;
+    case "rejected": {
+      const reason = m.rejection?.reason?.trim();
+      const head = m.rejection ? `A central recusou a nota nº ${m.rejection.number}.` : "A central recusou a nota.";
+      const why = reason ? ` Motivo: ${/[.!?]$/.test(reason) ? reason : `${reason}.`}` : "";
+      return `${head}${why} Apague a nota recusada e envie outra.`;
+    }
+    case "to_pay":
+      return `Nota conferida. Falta a central pagar ${money(m.to_pay.amount)}.`;
+    case "partial": {
+      const parts = [
+        `${money(m.paid.amount)} pago`,
+        m.to_pay.count ? `${money(m.to_pay.amount)} a receber` : null,
+        m.expected.count ? `${money(m.expected.amount)} previsto` : null,
+      ].filter(Boolean);
+      const missing = m.due_without_invoice.count + m.paid_without_invoice.count;
+      return `${parts.join(", ")}.${missing ? ` ${osCount(missing)} sem nota.` : ""}`;
+    }
+    case "paid_no_invoice":
+      return `Tudo pago${paidOn}. Se quiser, envie a nota fiscal destas OS.`;
+    case "paid":
+      return `Tudo pago${paidOn}.`;
+    default:
+      return null;
+  }
 }
 
 // --------------------------------------------------------------------------- elo dos técnicos
