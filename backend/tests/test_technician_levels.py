@@ -623,8 +623,8 @@ async def test_me_level_privacy(engine: AsyncEngine, client: AsyncClient, world:
         assert secret not in mine.text, secret
 
     # Quem vê o quê.
-    assert (await client.get(f"{API}/me/level", headers=an)).status_code == 403
-    assert (await client.get(f"{API}/me/level", headers=world.requester.headers)).status_code == 403
+    for headers in (an, world.requester.headers):
+        assert (await client.get(f"{API}/me/level", headers=headers)).status_code == 403
     url = f"{API}/technicians/{tech_id}/level"
     assert (await client.get(url, headers=th)).status_code == 403
     assert (await client.get(url, headers=world.requester.headers)).status_code == 403
@@ -707,7 +707,8 @@ async def test_waivers(engine: AsyncEngine, client: AsyncClient, world: World) -
         assert r.status_code == 422, wrong
         assert r.json()["detail"] == "Ocorrência não encontrada nos últimos 12 meses"
     for note in ("", "   ", "x" * 301):
-        r = await client.post(waivers, json={**body, "ref_id": late_ids[1], "note": note}, headers=an)
+        bad = {**body, "ref_id": late_ids[1], "note": note}
+        r = await client.post(waivers, json=bad, headers=an)
         assert r.status_code == 422, note
         assert r.json()["detail"][0]["label"] == "Motivo"
     # O técnico não desconsidera.
@@ -770,7 +771,8 @@ async def test_grace_through_refresh(engine: AsyncEngine, world: World) -> None:
         detail = await levels.my_level(db, alfa, now + timedelta(days=29))
         assert (detail.tier, detail.at_risk is not None) == (G, True)
         assert detail.at_risk.falls_to == S
-        assert [c.key for c in detail.criteria if not c.met] == ["measured"]
+        assert [c.key for c in detail.criteria if not c.met] == ["services", "measured"]
+        assert detail.at_risk.failing == ["Atendimentos nos últimos 12 meses", "Atendimentos medidos"]
         later = now + timedelta(days=30)
         fell = await levels.refresh_one(db, alfa.id, later)
         assert fell.standing == Standing(S, later, None)

@@ -177,7 +177,6 @@ export default function InvoiceScreen() {
   const errors: Errors = attempted ? check.errors : {};
   const footerError = submitError ?? (attempted ? firstError(check.errors) : null);
   const differs = check.amount !== null && check.amount > 0 && sum > 0 && Math.abs(check.amount - sum) > 0.005;
-  const sumHint = sum > 0 ? `Soma das OS marcadas: ${formatBRL(sum)}${differs ? " · diferente do valor da nota" : ""}` : undefined;
   const dirty = Boolean(file || number.trim() || issueDate || amountText.trim() || note.trim());
 
   const allowLeave = usePreventRemove(dirty && !done, ({ repeat }) => {
@@ -441,7 +440,7 @@ export default function InvoiceScreen() {
             />
           </Field>
 
-          <Field label="Valor da nota" required hint={sumHint} error={errors.amount}>
+          <Field label="Valor da nota" required error={errors.amount}>
             <Input
               value={amountText}
               onChangeText={(text) => {
@@ -451,12 +450,19 @@ export default function InvoiceScreen() {
               accessibilityLabel="Valor da nota em reais"
               keyboardType="decimal-pad"
               maxLength={20}
-              right={
-                !amountText.trim() && sum > 0 ? (
-                  <Button compact variant="ghost" title="Usar a soma" onPress={() => setAmountText(plainBRL.format(sum))} />
-                ) : undefined
-              }
             />
+            {/* Fora do campo: o botão aparecendo e sumindo não refaz o campo (o teclado não fecha ao digitar). */}
+            {sum > 0 ? (
+              <View style={styles.sumRow}>
+                <Text style={[styles.sumText, differs && { color: c.warningInk }]}>
+                  Soma das OS marcadas: {formatBRL(sum)}
+                  {differs ? " · diferente do valor da nota" : ""}
+                </Text>
+                {!amountText.trim() ? (
+                  <Button compact variant="ghost" title="Usar a soma" onPress={() => setAmountText(plainBRL.format(sum))} />
+                ) : null}
+              </View>
+            ) : null}
           </Field>
 
           <Field label="Competência" required>
@@ -506,7 +512,14 @@ export default function InvoiceScreen() {
           {listError ? (
             <View style={styles.listState}>
               <ErrorBox message={listError} />
-              <Button title="Tentar de novo" icon="repeat" onPress={() => setPayoutsAttempt((n) => n + 1)} />
+              <Button
+                title="Tentar de novo"
+                icon="repeat"
+                onPress={() => {
+                  setPayoutsError(null);
+                  setPayoutsAttempt((n) => n + 1);
+                }}
+              />
             </View>
           ) : !list ? (
             <View style={styles.listState}>
@@ -575,6 +588,8 @@ const makeStyles = (c: Palette) =>
     },
     fileText: { flex: 1, gap: 2 },
     fileName: { fontSize: 15, fontWeight: "600", color: c.ink },
+    sumRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, minHeight: 36 },
+    sumText: { flex: 1, fontSize: 12, color: c.inkMuted, lineHeight: 17 },
     monthNav: {
       flexDirection: "row",
       alignItems: "center",

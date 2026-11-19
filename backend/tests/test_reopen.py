@@ -45,6 +45,8 @@ async def test_office_reopens_a_closed_os(client: AsyncClient, world: World) -> 
     )
     assert (reopen["from_value"], reopen["note"]) == ("closed", "Voltou a apitar")
     assert reopen["actor"]["id"] == str(world.analyst.user.id)
+    # Quem concluiu fica no evento: o retorno conta no elo dele, mesmo se a OS trocar de técnico.
+    assert reopen["data"]["technician_id"] == str(world.tech.user.id)
 
     # Volta ao fluxo normal: o técnico atende de novo e a central fecha outra vez.
     t = await transition(client, th, t, "in_progress")

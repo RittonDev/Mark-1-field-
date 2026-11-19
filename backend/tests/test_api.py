@@ -882,7 +882,12 @@ async def test_violation_reasons(client: AsyncClient, world: World, engine: Asyn
     report = (await client.get(f"{API}/reports/sla-violations", headers=an)).json()
     assert (report["response"]["breached"], report["response"]["justified"]) == (1, 1)
     assert report["resolution"]["by_reason"][0]["name"] == "Peça em falta no fornecedor"
-    assert report["by_responsibility"] == {"internal": 1, "customer": 0, "third_party": 1}
+    assert report["by_responsibility"] == {
+        "internal": 1,
+        "customer": 0,
+        "third_party": 1,
+        "technician": 0,
+    }
     assert report["pending_justification"] == 0
 
     # Técnico de outro grupo não justifica OS que não é dele.

@@ -52,6 +52,8 @@ async def test_unproductive_visit(client: AsyncClient, world: World) -> None:
     visit = next(e for e in events if e["event_type"] == "unproductive_visit")
     assert visit["to_value"] == "Cliente ausente" and visit["data"]["latitude"] == -23.6
     assert visit["data"]["previous_schedule"].startswith("2030-01-10")
+    # O técnico da OS fica no evento (o elo dele conta a visita perdida por motivo dele).
+    assert visit["data"]["technician_id"] == str(world.tech.user.id)
 
     # Outro técnico não registra na OS que não é dele; OS concluída não tem visita improdutiva.
     other = await client.post(

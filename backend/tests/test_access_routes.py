@@ -107,6 +107,11 @@ GUARDED: dict[tuple[str, str], tuple[tuple[str, ...], str] | tuple[tuple[str, ..
     ("POST", "/technicians/import"): (("base.technicians",), E),
     ("PUT", "/technicians/favorites/{technician_id}"): (("base.technicians",), E),
     ("DELETE", "/technicians/favorites/{technician_id}"): (("base.technicians",), E),
+    # Elo dos técnicos: o detalhe no cadastro; desconsiderar, voltar a contar e recalcular.
+    ("GET", "/technicians/{user_id}/level"): (("base.technicians",), V),
+    ("POST", "/technicians/{user_id}/level/waivers"): (("base.technicians",), E),
+    ("DELETE", "/technicians/{user_id}/level/waivers/{waiver_id}"): (("base.technicians",), E),
+    ("POST", "/technicians/levels/refresh"): (("base.technicians",), E),
     ("GET", "/onboarding/invites"): (("base.onboarding",), V),
     ("GET", "/onboarding/applications"): (("base.onboarding",), V),
     ("GET", "/onboarding/applications/pending-count"): (("base.onboarding",), V),
@@ -273,6 +278,8 @@ OTHER: dict[tuple[str, str], str] = {
     ("GET", "/me/invoices/payouts"): "TECHNICIAN",
     ("POST", "/me/invoices"): "TECHNICIAN",
     ("DELETE", "/me/invoices/{invoice_id}"): "TECHNICIAN",
+    # Elo (só o do próprio técnico)
+    ("GET", "/me/level"): "TECHNICIAN",
     # Sem login (ou link assinado)
     ("POST", "/auth/login"): "PUB",
     ("POST", "/auth/refresh"): "PUB",

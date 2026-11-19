@@ -53,6 +53,21 @@ function staleText(error: string, at: string) {
   return `${error === OFFLINE_TEXT ? "Sem internet" : "Não deu para atualizar"} · notas de ${formatDateTime(at)}`;
 }
 
+function dropError(month: string, setErrors: Setters["setErrors"]) {
+  setErrors((prev) => {
+    if (!(month in prev)) return prev;
+    const next = { ...prev };
+    delete next[month];
+    return next;
+  });
+}
+
+/** A lista que acabou de chegar do servidor (e o aviso de falha do mês sai). */
+function keepEntry(month: string, entry: InvoicesEntry, { setEntries, setErrors }: Pick<Setters, "setEntries" | "setErrors">) {
+  setEntries((prev) => ({ ...prev, [month]: entry }));
+  dropError(month, setErrors);
+}
+
 /**
  * Busca as notas da competência e guarda POR MÊS (um mês nunca aparece com as notas de outro). A cópia do aparelho
  * aparece enquanto isso; a resposta do servidor substitui. `round` diz qual atualização terminou (o indicador some).
@@ -66,13 +81,7 @@ async function loadInto(month: string, round: string, { setEntries, setErrors, s
   try {
     const entry = await loadMyInvoices(month);
     if (latest.get(month) !== seq) return;
-    setEntries((prev) => ({ ...prev, [month]: entry }));
-    setErrors((prev) => {
-      if (!(month in prev)) return prev;
-      const next = { ...prev };
-      delete next[month];
-      return next;
-    });
+    keepEntry(month, entry, { setEntries, setErrors });
   } catch (error) {
     if (latest.get(month) !== seq) return;
     setErrors((prev) => ({ ...prev, [month]: failureText(error) }));
@@ -135,7 +144,7 @@ export function InvoicesCard({ month, monthName, refreshKey = 0 }: { month: stri
     if (!listed || !linksFresh(listed, Date.now())) {
       try {
         const fresh = await loadMyInvoices(invoice.competence);
-        setEntries((prev) => ({ ...prev, [invoice.competence]: fresh }));
+        keepEntry(invoice.competence, fresh, { setEntries, setErrors });
         target = fresh.items.find((item) => item.id === invoice.id);
       } catch (e) {
         if (e instanceof ApiError && e.status === 0) showToast("Sem internet", { description: OPEN_OFFLINE });
@@ -206,7 +215,15 @@ export function InvoicesCard({ month, monthName, refreshKey = 0 }: { month: stri
       {!entry && error ? (
         <View style={styles.block}>
           <ErrorBox message={error} />
-          <Button title="Tentar de novo" icon="repeat" onPress={() => setRetry((r) => r + 1)} />
+          <Button
+            title="Tentar de novo"
+            icon="repeat"
+            onPress={() => {
+              // O esqueleto volta enquanto busca de novo.
+              dropError(month, setErrors);
+              setRetry((r) => r + 1);
+            }}
+          />
         </View>
       ) : !entry ? (
         <View style={styles.block} accessibilityLabel="Carregando as notas">
