@@ -332,6 +332,25 @@ async def tool_catalog(db: AsyncSession) -> dict[str, ToolInfo]:
     return {str(tool_id): ToolInfo(name, bool(active)) for tool_id, name, active in rows.all()}
 
 
+async def user_tools(db: AsyncSession, user: User) -> dict[str, ToolInfo]:
+    """Só as ferramentas que o técnico marcou (ativas ou não), pela chave str(id): 1 consulta
+    pequena, nenhuma sem ferramenta marcada (GET /me/profile e o histórico do cadastro)."""
+    ids: list[uuid.UUID] = []
+    for raw in user.tool_ids or []:
+        try:
+            ids.append(uuid.UUID(str(raw)))
+        except ValueError:
+            continue
+    if not ids:
+        return {}
+    rows = await db.execute(
+        select(TechnicianTool.id, TechnicianTool.name, TechnicianTool.is_active).where(
+            TechnicianTool.id.in_(ids)
+        )
+    )
+    return {str(tool_id): ToolInfo(name, bool(active)) for tool_id, name, active in rows.all()}
+
+
 async def tool_counts(db: AsyncSession) -> dict[str, int]:
     """Quantos técnicos (papel technician, ativos ou não) marcaram cada id, a mesma regra do
     filtro `tool_id` da lista de técnicos."""
@@ -469,21 +488,48 @@ def _sorted_education(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return ordered
 
 
-def _skill_set(items: Iterable[Any]) -> set[tuple[Any, Any]]:
-    """O que o histórico compara nas aptidões: (nome gravado, nível)."""
-    return {(item.get("name"), item.get("level")) for item in items if isinstance(item, Mapping)}
+# ----------------------------------------------- o que conta como mudança
+# Uma comparação por parte, a mesma em `wanted` e no histórico do cadastro
+# (services/user_history.snapshot): a rota só grava quando o histórico tem mudança, então qualquer
+# diferença entre os dois devolveria 200 sem gravar.
 
 
-_EDUCATION_KEYS = ("course", "level", "institution", "start", "end")
+def tool_set(user: User) -> frozenset[str]:
+    """Ferramental: os ids gravados, também os desativados (ficam guardados)."""
+    return frozenset(str(raw) for raw in user.tool_ids or [])
 
 
-def _education_set(items: Iterable[Any]) -> set[tuple[Any, ...]]:
-    """O que o histórico compara na formação: (id, curso, nível, instituição, início, fim)."""
-    return {
-        (str(item.get("id")), *(item.get(key) for key in _EDUCATION_KEYS))
+def slot_set(user: User) -> frozenset[str]:
+    """Disponibilidade: os turnos gravados (reordenar não é mudança)."""
+    return frozenset(str(slot) for slot in user.availability or [])
+
+
+def transport_key(user: User) -> tuple[tuple[str, ...], bool] | None:
+    """Transporte: None sem a parte informada; senão (meios na ordem de TRANSPORT_MODES, CNH)."""
+    if not _informed(user, "transport"):
+        return None
+    return tuple(_modes(user.transport_modes or [])), bool(user.has_driver_license)
+
+
+def skill_set(items: Iterable[Any]) -> frozenset[tuple[Any, Any]]:
+    """Aptidões: (nome gravado, nível) de cada uma ("linux" → "Linux" é mudança; o "desde" não
+    conta)."""
+    return frozenset(
+        (item.get("name"), item.get("level")) for item in items if isinstance(item, Mapping)
+    )
+
+
+# A formação no histórico: (id, *EDUCATION_KEYS).
+EDUCATION_KEYS = ("course", "level", "institution", "start", "end")
+
+
+def education_set(items: Iterable[Any]) -> frozenset[tuple[Any, ...]]:
+    """Formação: (id, curso, nível, instituição, início, fim) de cada curso."""
+    return frozenset(
+        (str(item.get("id")), *(item.get(key) for key in EDUCATION_KEYS))
         for item in items
         if isinstance(item, Mapping)
-    }
+    )
 
 
 async def _wanted_tools(
@@ -500,7 +546,7 @@ async def _wanted_tools(
             raise WorkflowError(TOOL_NOT_FOUND)
         if info.is_active:
             chosen.add(key)
-    stored = {str(raw) for raw in user.tool_ids or []}
+    stored = tool_set(user)
     kept = {key for key in stored if not (key in catalog and catalog[key].is_active)}
     final = chosen | kept
     return None if final == stored else sorted(final)
@@ -545,13 +591,13 @@ def _wanted_education(user: User, sent: Iterable[Any]) -> list[dict[str, Any]]:
         }
         key = str(item.id) if item.id is not None else None
         if key is None or key not in stored_ids or key in assigned:
-            same = tuple(values[k] for k in _EDUCATION_KEYS)
+            same = tuple(values[k] for k in EDUCATION_KEYS)
             key = next(
                 (
                     str(old["id"])
                     for old in stored
                     if str(old["id"]) not in taken
-                    and tuple(old.get(k) for k in _EDUCATION_KEYS) == same
+                    and tuple(old.get(k) for k in EDUCATION_KEYS) == same
                 ),
                 None,
             ) or str(uuid.uuid4())
@@ -569,7 +615,8 @@ async def wanted(db: AsyncSession, user: User, data: "MyProfileUpdate") -> dict[
     partes mudadas, prontas para `apply`: "tools" (ids em texto, ordenados), "availability" (turnos
     na ordem da grade), "transport" ({"modes", "driver_license"}), "skills" ([{name, level, since}])
     e "education" ([{id, course, level, institution, start, end}]). As comparações são as do
-    histórico (user_history.snapshot), senão a rota responderia 200 sem gravar: conjuntos de ids,
+    histórico (tool_set, slot_set, transport_key, skill_set e education_set, que
+    user_history.snapshot também usa), senão a rota responderia 200 sem gravar: conjuntos de ids,
     de turnos, de (nome, nível) e de (id, curso, nível, instituição, início, fim); o transporte
     muda na 1ª vez (mesmo "Nenhum · sem CNH") ou quando (meios, CNH) muda. Reordenar não muda nada.
     """
@@ -581,25 +628,20 @@ async def wanted(db: AsyncSession, user: User, data: "MyProfileUpdate") -> dict[
             new["tools"] = tools
     if "availability" in sent:
         slots = sort_slots(data.availability or [])
-        if set(slots) != set(user.availability or []):
+        if frozenset(slots) != slot_set(user):
             new["availability"] = slots
     if "transport" in sent and data.transport is not None:
         modes = _modes(data.transport.modes)
         driver_license = bool(data.transport.driver_license)
-        before = (
-            (tuple(_modes(user.transport_modes or [])), bool(user.has_driver_license))
-            if _informed(user, "transport")
-            else None
-        )
-        if before != (tuple(modes), driver_license):
+        if transport_key(user) != (tuple(modes), driver_license):
             new["transport"] = {"modes": modes, "driver_license": driver_license}
     if "skills" in sent:
         skills = _wanted_skills(user, data.skills or [])
-        if _skill_set(skills) != _skill_set(user.skills or []):
+        if skill_set(skills) != skill_set(user.skills or []):
             new["skills"] = skills
     if "education" in sent:
         education = _wanted_education(user, data.education or [])
-        if _education_set(education) != _education_set(user.education or []):
+        if education_set(education) != education_set(user.education or []):
             new["education"] = education
     return new
 
