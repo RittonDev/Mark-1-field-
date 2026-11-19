@@ -1,7 +1,7 @@
 # Sincronização com os apps iOS e Android
 
 A API já está pronta para o app do técnico funcionar **offline-first** e em **tempo real**.
-Os apps ainda não foram construídos. Este documento é o contrato que eles devem seguir.
+Este documento é o contrato que o app do técnico (`mobile/`, Expo; ver [mobile/README.md](../mobile/README.md)) segue.
 
 ## Visão geral
 
@@ -38,7 +38,9 @@ Resposta: `{server_time, has_more, tickets[], comments[], worklogs[], revoked_ti
 - Faça **upsert** por `id` (pode vir repetido; é seguro).
 - Apague do aparelho os ids de `revoked_ticket_ids` (OS reatribuída a outro técnico).
 - Se `has_more = true`, chame de novo com o novo `server_time` até vir `false`.
-- O técnico de campo recebe as OS atribuídas a ele, as do grupo dele e a fila sem grupo. Analistas e supervisores recebem todas (como na web).
+- O técnico de campo recebe só as OS em que é o responsável ou outro técnico da visita (auxiliar): grupo e fila não
+  bastam (`services/tickets.py::visibility_clause` → `schedule.works_on`). Analistas e supervisores recebem as que veem
+  na web (a visibilidade de filas do perfil de acesso).
 - Elo do técnico (`GET /me/level`, docs/API.md "Elo dos técnicos"): na mesma rodada, a cada 30 min e no "puxar para
   atualizar", só com o app na tela (a rodada em segundo plano não busca), e quando o técnico abre (se o guardado tem
   mais de 2 min) ou puxa a tela "Meu elo". O app guarda a resposta no kv do aparelho com a hora (offline, mostra a
@@ -115,15 +117,28 @@ credencial por variável de ambiente e mande a mensagem no canal `default` do An
 
 **Avisos do próprio app.** Enquanto o push não chega, o app compara a OS guardada com a do pull (só no delta,
 nunca no download completo) e a lista de ofertas com a anterior, e avisa: com o app na tela, toast; fora dela
-(rodada em segundo plano: jornada aberta ou tarefa periódica do sistema), notificação do sistema com o mesmo
-texto. **Não repetir**: com `push: live` o app não apresenta a notificação dele (o push já avisou), e o push que
-chega com o app na tela não aparece (o toast do pull já avisa).
+(rodada em segundo plano: jornada aberta ou tarefa periódica do sistema), notificação do sistema. Sem a permissão de
+notificações, o aviso fica guardado no aparelho e vira toast quando o app volta à tela (até 20, por 6 h). **Não
+repetir**: com `push: live` o app não apresenta a notificação dele (o push já avisou), e o push que chega com o app na
+tela não aparece (o toast do pull já avisa).
+
+**Onde isso chega hoje.** Fora da tela, o aviso depende de uma rodada em segundo plano, e o Expo Go não roda nenhuma:
+**no Expo Go, OS nova e oferta só aparecem com o app aberto**. Num app instalado (development build), a tarefa
+periódica avisa a cada 15 min ou mais (WorkManager no Android; no iOS, raramente) e a jornada aberta, a cada ~3 min. O
+aviso na hora, com o app fechado, precisa do push real (FCM), ainda desligado. Os lembretes da visita são locais e
+funcionam (também no Expo Go), mas só depois que o app sincronizou a OS.
+
+**Fim de sessão na rodada em segundo plano.** Se a sessão termina durante a rodada (401 do `/auth/refresh`), ou já
+estava encerrada com limpeza pendente, a rodada conclui a limpeza do fim de sessão (`sessionEnd.ts`: notificações,
+jornada e, com o técnico desativado ou sem acesso ao app, os dados do aparelho) antes de terminar e desliga a tarefa.
 
 **Lembretes da visita.** Sempre locais, agendados no aparelho a partir das OS guardadas: 1 dia (24 h), 1h40 e
 10 min antes do `scheduled_start`, para o responsável e os auxiliares, só na visita ainda não iniciada
 (atribuída, agendada, reaberta ou pausada pela central com visita marcada). Refeitos a cada pull e a cada ação
-(o deslocamento cancela, também offline); nunca disparam atrasados; até 48, nos próximos 7 dias. O servidor não
-agenda nada.
+(o deslocamento cancela, também offline); até 48, nos próximos 7 dias. Lembrete novo só é agendado com 1 min de
+antecedência ou mais; o que já está agendado não é cancelado no último minuto nem até 15 min depois da hora (o
+Android sem alarme exato dispara com atraso), enquanto a visita não começa. A bandeja também é limpa: o de 1 dia sai
+na hora do de 1h40, o de 1h40 na do de 10 min e todos no início da visita. O servidor não agenda nada.
 
 ## Stack sugerida para os apps
 

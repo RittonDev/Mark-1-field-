@@ -137,7 +137,7 @@ Requisitos:
   e tenta de novo, e a abertura seguinte também tenta. Quem já tinha saído antes tem os dados apagados ao entrar com a
   senha certa (o login dá o mesmo motivo).
 - **Só as OS atribuídas ao técnico**: o cliente abre a OS, o analista escolhe o técnico, e o técnico vê só
-  as OS em que é o responsável (sem fila de grupo e sem "assumir"). Tela inicial com "Bom dia, {nome}",
+  as OS em que é o responsável ou vai junto (sem fila de grupo e sem "assumir"). Tela inicial com "Bom dia, {nome}",
   a data, o cartão da jornada e três abas na barra inferior (pílula animada na aba ativa):
   - **Hoje**: resumo "Hoje: X OS · Y em atendimento" (e chegadas atrasadas, em vermelho) e linha do tempo
     (horário, cliente, endereço, status) com as em campo, agendadas para hoje (ou atrasadas) e as sem agenda,
