@@ -116,6 +116,7 @@ import {
   offersHeld,
   putOffer,
   resetOffersState,
+  scopeReadAt,
   setOfferAccepted,
   setScopeRead,
   type OfferListOutcome,
@@ -146,6 +147,7 @@ import type {
   FieldRules,
   LevelTier,
   MyLevel,
+  OfferAccept,
   OfferDecline,
   RealtimeEvent,
   TicketDetail,
@@ -1353,14 +1355,18 @@ export async function forgetOffer(offerId: UUID) {
 }
 
 /**
- * "Aceitar por R$ X" (só online). A OS volta já atribuída ao técnico, agora com cliente, loja e endereço, e
- * entra no aparelho com a própria resposta: o download seguinte não a anuncia como "Nova OS para você".
+ * "Aceitar por R$ X" (só online). Leva a hora em que o técnico abriu o escopo (a central vê "escopo lido às"); a
+ * oferta lida numa versão antiga do app vai sem ela, e o servidor antigo ignora o corpo. A OS volta já atribuída ao
+ * técnico, agora com cliente, loja e endereço, e entra no aparelho com a própria resposta: o download seguinte não a
+ * anuncia como "Nova OS para você".
  */
 export async function acceptOffer(offerId: UUID, ticketId: UUID): Promise<TicketDetail> {
   const ctx = sessionCtx();
   acceptingTickets.add(ticketId);
   try {
-    const ticket = await api.post<TicketDetail>(`/me/offers/${offerId}/accept`);
+    const readAt = await scopeReadAt(offerId).catch(() => null);
+    const body: OfferAccept | undefined = readAt ? { scope_read_at: readAt } : undefined;
+    const ticket = await api.post<TicketDetail>(`/me/offers/${offerId}/accept`, body);
     await write(ctx, async (db) => {
       await saveServerTicket(db, ticket, ctx.user);
       await setOfferAccepted(db, offerId, new Date().toISOString());
@@ -1380,10 +1386,14 @@ export async function declineOffer(offerId: UUID, reason: string | null): Promis
   return offer;
 }
 
-/** O técnico abriu o escopo da oferta ("Escopo lido"): só então o app libera o aceite. */
+/**
+ * O técnico abriu o escopo da oferta ("Escopo lido"): só então o app libera o aceite. A hora vai no relógio do servidor
+ * (o do aparelho pode ter sido acertado à mão).
+ */
 export async function markOfferScopeRead(offerId: UUID) {
   const ctx = sessionCtx();
-  await write(ctx, (db) => setScopeRead(db, offerId));
+  const at = new Date(serverNow()).toISOString();
+  await write(ctx, (db) => setScopeRead(db, offerId, at));
 }
 
 // ───────────────────────────── fotos ─────────────────────────────

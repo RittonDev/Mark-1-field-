@@ -6,6 +6,7 @@ import json
 import uuid
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 import pytest
 from httpx import AsyncClient
@@ -156,10 +157,12 @@ async def test_technician_sees_only_the_invitation_cut(
         "decline_reason",
         "cancel_reason",
         "viewed_at",
+        "scope_read_at",
         "responded_at",
         "created_by",
         "created_at",
     }
+    assert sent[0]["scope_read_at"] is None
     summary = {(o["state"], o["amount"], o["note"]) for o in sent}
     assert summary == {("pending", 90.0, "Levar escada")}
     assert sent[0]["created_by"]["name"] == "Super"
@@ -179,6 +182,7 @@ async def test_technician_sees_only_the_invitation_cut(
         "note",
         "cancel_reason",
         "viewed_at",
+        "scope_read_at",
         "responded_at",
         "created_at",
         "ticket",
@@ -195,6 +199,7 @@ async def test_technician_sees_only_the_invitation_cut(
         "state",
         "scheduled_start",
         "scheduled_end",
+        "estimated_minutes",
     }
     seen = offer["ticket"]
     assert (seen["code"], seen["title"], seen["description"]) == (
@@ -203,6 +208,8 @@ async def test_technician_sees_only_the_invitation_cut(
         "Trocar a fonte do PDV 3",
     )
     assert seen["service_type"]["name"] == "Troca de PDV"
+    # A duração estimada do tipo de serviço, copiada na abertura da OS.
+    assert (seen["estimated_minutes"], offer["scope_read_at"]) == (60, None)
     assert seen["forms"] == [{"name": "Preventiva de rack", "required": True}]
     assert (seen["district"], seen["city"], seen["state"]) == ("Centro", "Cidade Teste", "SP")
     assert datetime.fromisoformat(seen["scheduled_start"]) == start
@@ -395,6 +402,7 @@ async def test_first_to_accept_takes_the_os(
     assert taken["customer"]["name"] == "Cliente Teste" and taken["location"]["name"] == "Matriz"
     assert taken["my_payout"]["amount"] == 90.0
     assert taken["payouts"] == [] and taken["open_offers"] == 0
+    assert taken["accepted_offer"] is None  # o resumo da oferta aceita é da gestão
     assert taken["first_response_at"] is None  # SLA é da gestão (o app não recebe)
 
     # O segundo aceite perde: 409 OFFER_TAKEN (a recusa também).
@@ -427,6 +435,13 @@ async def test_first_to_accept_takes_the_os(
         (tech_id, 90.0, "Valor da oferta aceita")
     ]
     assert full["open_offers"] == 0 and full["first_response_at"] is not None
+    # Aceite sem corpo (app antigo): a central vê quando ele aceitou, sem a hora da leitura.
+    accepted_at = next(
+        o["responded_at"]
+        for o in await central_offers(client, sup, t["id"])
+        if o["state"] == "accepted"
+    )
+    assert full["accepted_offer"] == {"accepted_at": accepted_at, "scope_read_at": None}
     # O mesmo status da central colocando o técnico pela tela numa OS igual (com agenda).
     twin = await create(client, world, service_type_id=service.json()["id"], scheduled_start=start)
     r = await client.post(
@@ -1224,3 +1239,227 @@ async def test_accept_and_decline_say_who_sent_the_offer(
     }
     analyst_id = str(world.analyst.user.id)
     assert senders == {"sent": None, "declined": analyst_id, "viewed": None, "accepted": analyst_id}
+
+
+# ------------------------------------------------------------------ detalhe da oferta (2026-11-19)
+
+
+def at(value: str | None) -> datetime | None:
+    """A data e hora ISO da resposta, para comparar instantes (null fica None)."""
+    return datetime.fromisoformat(value) if value else None
+
+
+async def test_accept_records_when_the_scope_was_read(
+    client: AsyncClient, world: World, engine: AsyncEngine
+) -> None:
+    """O app manda no aceite a hora em que o técnico abriu o escopo: a central vê na oferta, no
+    histórico e na OS ("Escopo lido às HH:MM", sem valor). O técnico não recebe o resumo."""
+    sup = world.supervisor.headers
+    tech_id, other_id = str(world.tech.user.id), str(world.tech_other.user.id)
+    t = await create(client, world)
+    by_tech = {
+        o["technician"]["id"]: o
+        for o in await send(client, sup, t["id"], [world.tech, world.tech_other])
+    }
+    mine, other = by_tech[tech_id], by_tech[other_id]
+    # A oferta saiu há 10 minutos; ele abriu o escopo há 2.
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "UPDATE ticket_offers SET created_at = now() - interval '10 minutes'"
+                " WHERE ticket_id = :t"
+            ),
+            {"t": t["id"]},
+        )
+    read_at = datetime.now(UTC) - timedelta(minutes=2)
+
+    # A recusa não grava a hora (o corpo da recusa é só o motivo).
+    r = await client.post(
+        f"{API}/me/offers/{other['id']}/decline",
+        json={"scope_read_at": read_at.isoformat()},
+        headers=world.tech_other.headers,
+    )
+    assert r.status_code == 200 and r.json()["scope_read_at"] is None, r.text
+
+    await open_offer(client, world.tech, mine["id"])
+    url = f"{API}/me/offers/{mine['id']}/accept"
+    r = await client.post(url, json={"scope_read_at": read_at.isoformat()}, headers=world.tech.headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["accepted_offer"] is None  # a resposta é a OS como o app vê
+
+    listed = {o["id"]: o for o in await central_offers(client, sup, t["id"])}
+    accepted = listed[mine["id"]]
+    assert accepted["state"] == "accepted" and at(accepted["scope_read_at"]) == read_at
+    assert listed[other["id"]]["scope_read_at"] is None
+    event = next(
+        e for e in await history(client, sup, t["id"]) if e["event_type"] == "offer_accepted"
+    )
+    assert at(event["data"]["scope_read_at"]) == read_at
+    full = (await client.get(f"{API}/tickets/{t['id']}", headers=sup)).json()
+    assert full["accepted_offer"] == {
+        "accepted_at": accepted["responded_at"],
+        "scope_read_at": accepted["scope_read_at"],
+    }
+    seen = (await client.get(f"{API}/tickets/{t['id']}", headers=world.tech.headers)).json()
+    assert seen["accepted_offer"] is None
+    # No app (a oferta aceita ainda aparece por 24 h), a hora gravada.
+    (in_app,) = (await client.get(f"{API}/me/offers", headers=world.tech.headers)).json()
+    assert (in_app["state"], at(in_app["scope_read_at"])) == ("accepted", read_at)
+
+    # Aceite repetido com outra hora: nada muda.
+    r = await client.post(
+        url, json={"scope_read_at": datetime.now(UTC).isoformat()}, headers=world.tech.headers
+    )
+    assert r.status_code == 200, r.text
+    again = {o["id"]: o for o in await central_offers(client, sup, t["id"])}[mine["id"]]
+    assert again["scope_read_at"] == accepted["scope_read_at"]
+    assert again["responded_at"] == accepted["responded_at"]
+
+    # Outro técnico assume a OS: a oferta aceita não é do responsável atual.
+    r = await client.post(
+        f"{API}/tickets/{t['id']}/assign",
+        json={"assignee_id": other_id, "expected_version": full["version"]},
+        headers=sup,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["accepted_offer"] is None
+
+
+async def test_scope_read_at_is_clamped_and_optional(
+    client: AsyncClient, world: World, engine: AsyncEngine
+) -> None:
+    """A hora vem do relógio do aparelho: fica presa entre a criação da oferta e o aceite. Valor
+    inválido ou sem corpo (app antigo): aceita do mesmo jeito, sem a hora."""
+    sup, th = world.supervisor.headers, world.tech.headers
+
+    async def accept_with(**request: object) -> dict:
+        t = await create(client, world)
+        offer = (await send(client, sup, t["id"], [world.tech]))[0]
+        async with engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE ticket_offers SET created_at = now() - interval '1 hour' WHERE id = :o"),
+                {"o": offer["id"]},
+            )
+        await open_offer(client, world.tech, offer["id"])
+        r = await client.post(f"{API}/me/offers/{offer['id']}/accept", headers=th, **request)
+        assert r.status_code == 200, r.text
+        (seen,) = await central_offers(client, sup, t["id"])
+        assert seen["state"] == "accepted"
+        return seen
+
+    # No futuro: a hora do aceite.
+    future = await accept_with(json={"scope_read_at": later(5)})
+    assert at(future["scope_read_at"]) == at(future["responded_at"])
+    # Antes da oferta existir: a criação da oferta.
+    early = (datetime.now(UTC) - timedelta(days=3)).isoformat()
+    before = await accept_with(json={"scope_read_at": early})
+    assert at(before["scope_read_at"]) == at(before["created_at"])
+    # Sem fuso: hora de Brasília.
+    local = datetime.now(ZoneInfo(settings.TIMEZONE)) - timedelta(minutes=5)
+    naive = await accept_with(json={"scope_read_at": local.replace(tzinfo=None).isoformat()})
+    assert at(naive["scope_read_at"]) == local
+    # Inválido (também a data que não cabe em UTC), null, vazio ou sem corpo: sem a hora.
+    for body in (
+        {"scope_read_at": "ontem"},
+        {"scope_read_at": "2026-02-30T10:00:00"},
+        {"scope_read_at": 10**20},
+        {"scope_read_at": "9999-12-31T23:59:59"},
+        {"scope_read_at": None},
+        {},
+    ):
+        assert (await accept_with(json=body))["scope_read_at"] is None, body
+    assert (await accept_with())["scope_read_at"] is None
+
+
+async def test_offer_service_name_hides_the_customer(client: AsyncClient, world: World) -> None:
+    """O nome do serviço é o destaque do cartão "Serviços" da oferta: tipo de serviço próprio de
+    um cliente não mostra o nome dele (o mesmo corte do título), nem no recorte mínimo."""
+    sup, th = world.supervisor.headers, world.tech.headers
+    expected: dict[str, str] = {}
+    for name, shown in (
+        ("Troca de PDV Cliente Teste", "Troca de PDV"),
+        ("Cliente Teste", "Atendimento técnico"),
+        ("Matriz - Preventiva", "Preventiva"),
+    ):
+        service = await client.post(
+            f"{API}/service-types", json={"name": name, "estimated_minutes": 45}, headers=sup
+        )
+        assert service.status_code == 201, service.text
+        t = await create(client, world, title="PDV parado", service_type_id=service.json()["id"])
+        offer = (await send(client, sup, t["id"], [world.tech]))[0]
+        expected[offer["id"]] = shown
+
+    def check(body: str) -> None:
+        assert "cliente teste" not in body.lower() and "matriz" not in body.lower(), body
+
+    r = await client.get(f"{API}/me/offers", headers=th)
+    check(r.text)
+    assert {o["id"]: o["ticket"]["service_type"]["name"] for o in r.json()} == expected
+    assert {o["ticket"]["title"] for o in r.json()} == {"PDV parado"}
+    first = next(iter(expected))
+    r = await client.get(f"{API}/me/offers/{first}", headers=th)
+    check(r.text)
+    # A oferta fechada (recorte mínimo) também.
+    r = await client.post(f"{API}/me/offers/{first}/decline", headers=th)
+    assert r.status_code == 200, r.text
+    check(r.text)
+    assert r.json()["ticket"]["service_type"]["name"] == "Troca de PDV"
+    # A central vê a OS como gravou.
+    full = (await client.get(f"{API}/tickets/{t['id']}", headers=sup)).json()
+    assert full["service_type"]["name"] == "Matriz - Preventiva"
+
+
+async def test_closed_offer_keeps_the_estimate(client: AsyncClient, world: World) -> None:
+    """A duração estimada vem também no recorte mínimo da oferta que fechou (não é dado
+    sensível); OS sem estimativa: null."""
+    sup, th = world.supervisor.headers, world.tech.headers
+    t = await create(client, world, estimated_minutes=90)
+    offer = (await send(client, sup, t["id"], [world.tech]))[0]
+    (pending,) = (await client.get(f"{API}/me/offers", headers=th)).json()
+    assert pending["ticket"]["estimated_minutes"] == 90
+    r = await client.post(f"{API}/me/offers/{offer['id']}/decline", headers=th)
+    assert r.status_code == 200, r.text
+    (closed,) = (await client.get(f"{API}/me/offers", headers=th)).json()
+    cut = closed["ticket"]
+    assert (closed["state"], cut["description"], cut["forms"], cut["district"]) == (
+        "declined",
+        None,
+        [],
+        None,
+    )
+    assert cut["estimated_minutes"] == 90
+
+    u = await create(client, world)
+    other = (await send(client, sup, u["id"], [world.tech]))[0]
+    assert (await open_offer(client, world.tech, other["id"]))["ticket"]["estimated_minutes"] is None
+
+
+async def test_accepted_offer_without_payouts_screen(client: AsyncClient, world: World) -> None:
+    """Com o técnico na OS, a aba Geral troca as ofertas pelo valor do técnico: toda a gestão vê
+    quando ele aceitou e quando abriu o escopo (sem valor), também quem não tem Pagamentos."""
+    sup, an = world.supervisor.headers, world.analyst.headers
+    t = await create(client, world)
+    offer = (await send(client, sup, t["id"], [world.tech]))[0]
+    await open_offer(client, world.tech, offer["id"])
+    read_at = datetime.now(UTC) - timedelta(seconds=1)
+    r = await client.post(
+        f"{API}/me/offers/{offer['id']}/accept",
+        json={"scope_read_at": read_at.isoformat()},
+        headers=world.tech.headers,
+    )
+    assert r.status_code == 200, r.text
+    await restrict_analyst(client, world, **{"commercial.payouts": "none"})
+
+    r = await client.get(f"{API}/tickets/{t['id']}", headers=an)
+    assert r.status_code == 200, r.text
+    seen = r.json()
+    assert set(seen["accepted_offer"]) == {"accepted_at", "scope_read_at"}
+    assert seen["accepted_offer"]["accepted_at"] is not None
+    assert at(seen["accepted_offer"]["scope_read_at"]) is not None
+    assert seen["payouts"] == []
+    assert (await client.get(f"{API}/tickets/{t['id']}/offers", headers=an)).status_code == 403
+    # OS sem oferta aceita: null.
+    plain = await create(client, world)
+    assert (await client.get(f"{API}/tickets/{plain['id']}", headers=an)).json()[
+        "accepted_offer"
+    ] is None

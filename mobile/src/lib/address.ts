@@ -22,6 +22,20 @@ export function serviceAddressQuery(serviceAddress: string, location: LocationRe
   return [text, ...extra].join(", ");
 }
 
+/**
+ * A área da oferta para o app de mapas: "Centro, Cidade Exemplo - SP"; sem bairro, "Cidade Exemplo - SP"; sem UF,
+ * "Centro, Cidade Exemplo". Sem cidade, null (a tela não mostra o botão do mapa). Só bairro e cidade: o endereço e o
+ * pino exato chegam com a OS, depois do aceite.
+ */
+export function areaQuery(area: { district?: string | null; city?: string | null; state?: string | null }): string | null {
+  const city = area.city?.trim();
+  if (!city) return null;
+  const district = area.district?.trim();
+  const uf = area.state?.trim();
+  const town = uf ? `${city} - ${uf}` : city;
+  return district ? `${district}, ${town}` : town;
+}
+
 export interface Coords {
   latitude: number;
   longitude: number;

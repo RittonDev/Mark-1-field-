@@ -63,6 +63,71 @@ export function formatMinutes(totalMinutes: number | null | undefined): string {
   return `${mins}min`;
 }
 
+/** "3 horas", "1 hora e 30 minutos", "45 minutos", "1 dia e 2 horas": formatMinutes por extenso, para o leitor de tela. */
+export function formatMinutesLong(totalMinutes: number): string {
+  const minutes = Math.round(Math.abs(totalMinutes));
+  const days = Math.floor(minutes / 1440);
+  const hours = Math.floor((minutes % 1440) / 60);
+  const mins = minutes % 60;
+  const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  if (days > 0) return hours ? `${count(days, "dia", "dias")} e ${count(hours, "hora", "horas")}` : count(days, "dia", "dias");
+  if (hours > 0) return mins ? `${count(hours, "hora", "horas")} e ${count(mins, "minuto", "minutos")}` : count(hours, "hora", "horas");
+  return count(mins, "minuto", "minutos");
+}
+
+const WEEKDAYS_LONG = ["domingo", "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado"];
+const MONTHS_LONG = [
+  "janeiro",
+  "fevereiro",
+  "março",
+  "abril",
+  "maio",
+  "junho",
+  "julho",
+  "agosto",
+  "setembro",
+  "outubro",
+  "novembro",
+  "dezembro",
+];
+const DAY_MS = 86_400_000;
+
+/**
+ * Data da visita por extenso, no fuso do aparelho (como o resto das datas da OS): "Hoje, 19 de novembro", "Amanhã, 20
+ * de novembro", "Ontem, 18 de novembro", "Sexta-feira, 27 de novembro", "Terça-feira, 1º de dezembro" e, em outro ano,
+ * "Sexta-feira, 1º de janeiro de 2027". `now`: agora pelo relógio do servidor, como o prazo da oferta.
+ */
+export function formatLongDate(value: string | Date, now: number = Date.now()): string {
+  const date = typeof value === "string" ? new Date(value) : value;
+  const today = startOfDay(new Date(now));
+  // Arredondado: o dia de 23 ou 25 h do horário de verão não muda a conta.
+  const offset = Math.round((startOfDay(date).getTime() - today.getTime()) / DAY_MS);
+  const weekday = WEEKDAYS_LONG[date.getDay()];
+  const head = offset === 0 ? "Hoje" : offset === 1 ? "Amanhã" : offset === -1 ? "Ontem" : weekday.charAt(0).toUpperCase() + weekday.slice(1);
+  const day = date.getDate() === 1 ? "1º" : String(date.getDate());
+  const year = date.getFullYear() === today.getFullYear() ? "" : ` de ${date.getFullYear()}`;
+  return `${head}, ${day} de ${MONTHS_LONG[date.getMonth()]}${year}`;
+}
+
+const pad2 = (n: number) => String(n).padStart(2, "0");
+/** "09:00" no fuso do aparelho (sem o Intl: igual em qualquer aparelho). */
+const clockTime = (date: Date) => `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+
+/**
+ * Hora da visita na oferta: só o início ("09:00") quando não há fim, o fim é em outro dia, não vem depois do início ou é
+ * o início mais a duração estimada (±1 min, a duração já aparece ao lado); senão a janela, "09:00 às 18:00".
+ */
+export function visitTimeText(start: string, end: string | null | undefined, estimatedMinutes?: number | null): string {
+  const from = new Date(start);
+  const time = clockTime(from);
+  if (!end) return time;
+  const to = new Date(end);
+  const minutes = (to.getTime() - from.getTime()) / 60_000;
+  if (minutes <= 0 || !isSameDay(from, to)) return time;
+  if (estimatedMinutes && estimatedMinutes > 0 && Math.abs(minutes - estimatedMinutes) <= 1) return time;
+  return `${time} às ${clockTime(to)}`;
+}
+
 /** Tempo relativo até/desde uma data, ex.: "em 2h 10min" / "há 35min". */
 export function formatRelative(value: string | null | undefined, now: number): string {
   if (!value) return "—";

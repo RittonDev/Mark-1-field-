@@ -1,4 +1,5 @@
-// Recursos do aparelho usados nas telas: GPS para check-in, links de mapa e o WhatsApp do relatório.
+// Recursos do aparelho usados nas telas: GPS para check-in, links de mapa (da OS e da área da oferta) e o WhatsApp do
+// relatório e da dúvida na oferta.
 
 import * as Clipboard from "expo-clipboard";
 import * as Location from "expo-location";
@@ -142,6 +143,24 @@ export async function openInMaps(location: LocationRef | null, serviceAddress: s
   }
   try {
     await Linking.openURL(native);
+  } catch {
+    await Linking.openURL(web);
+  }
+}
+
+/**
+ * Abre o app de mapas na área da oferta (bairro e cidade, `areaQuery`): nunca coordenadas nem o endereço, que só chegam
+ * com a OS. Mesmo padrão de `openInMaps`: no aparelho, o app de mapas; na web ou sem ele, a busca do Google Maps.
+ */
+export async function openAreaInMaps(query: string) {
+  const q = encodeURIComponent(query);
+  const web = `https://www.google.com/maps/search/?api=1&query=${q}`;
+  if (Platform.OS === "web") {
+    await Linking.openURL(web);
+    return;
+  }
+  try {
+    await Linking.openURL(Platform.OS === "ios" ? `maps:0,0?q=${q}` : `geo:0,0?q=${q}`);
   } catch {
     await Linking.openURL(web);
   }

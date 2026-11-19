@@ -9,7 +9,7 @@
 //   dados (resetLocalData) na troca de técnico e quando o acesso é retirado.
 // - Responder é só online: quem aceita primeiro leva, e o servidor diz na hora se a OS ainda está livre.
 // - Para aceitar, o técnico abre a oferta (o servidor grava a leitura) e lê o escopo ("Escopo lido", guardado
-//   aqui por oferta).
+//   aqui por oferta, com a hora no relógio do servidor: o aceite leva essa hora e a central vê "escopo lido às").
 
 import { getKv, getTicket, setKv, type DB } from "./db";
 import { formatBRL } from "./expenses";
@@ -17,7 +17,7 @@ import { whenLabel } from "./field";
 import { formatMinutes, formatTime, formatWeekdayDate } from "./format";
 import type { NewsItem } from "./notifications";
 import { showToast } from "./toast";
-import type { FieldOffer, FieldOfferTicket, OfferState, UUID } from "./types";
+import type { FieldOffer, FieldOfferTicket, ISODate, OfferState, UUID } from "./types";
 
 const STORE_KEY = "field_offers";
 
@@ -31,9 +31,25 @@ export interface OfferStore {
   seen: UUID[];
   /** Ofertas em que o técnico abriu o escopo ("Escopo lido"): só então o app libera o aceite. */
   scope: UUID[];
+  /**
+   * Quando ele abriu o escopo pela primeira vez (relógio do servidor), por oferta: vai no aceite. A oferta lida antes
+   * desta versão do app não tem a hora e o aceite sai sem ela.
+   */
+  scope_at: Record<UUID, ISODate>;
 }
 
-const EMPTY: OfferStore = { listed: false, offers: [], seen: [], scope: [] };
+const EMPTY: OfferStore = { listed: false, offers: [], seen: [], scope: [], scope_at: {} };
+
+/** Só as horas em texto (o guardado por uma versão antiga não tem o campo). */
+function scopeTimes(value: unknown): Record<UUID, ISODate> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+}
+
+/** As horas das ofertas que continuam guardadas (a que saiu leva a dela junto). */
+function keepTimes(times: Record<UUID, ISODate>, ids: Set<UUID>): Record<UUID, ISODate> {
+  return Object.fromEntries(Object.entries(times).filter(([id]) => ids.has(id)));
+}
 
 async function readStore(db?: DB): Promise<OfferStore | null> {
   const raw = await getKv(STORE_KEY, db);
@@ -46,6 +62,7 @@ async function readStore(db?: DB): Promise<OfferStore | null> {
       offers: data.offers,
       seen: Array.isArray(data.seen) ? data.seen : [],
       scope: Array.isArray(data.scope) ? data.scope : [],
+      scope_at: scopeTimes(data.scope_at),
     };
   } catch {
     return null;
@@ -113,6 +130,16 @@ export function offerSummary(offer: FieldOffer): string {
   return [formatBRL(offer.amount), ticket.service_type?.name ?? ticket.title, ticket.district ?? ticket.city]
     .filter(Boolean)
     .join(" · ");
+}
+
+/**
+ * Começo da mensagem do WhatsApp para tirar a dúvida no escopo com a central (o técnico escolhe o grupo e completa):
+ * "Dúvida na oferta OS-000123 · Troca de PDV · Centro · Cidade Exemplo/SP: ". Sem o valor (o grupo é da equipe).
+ */
+export function offerQuestionText(offer: FieldOffer): string {
+  const ticket = offer.ticket;
+  const parts = [ticket.code, ticket.service_type?.name ?? ticket.title, placeLine(ticket)].filter(Boolean);
+  return `Dúvida na oferta ${parts.join(" · ")}: `;
 }
 
 // ───────────────────────────── gravação ─────────────────────────────
@@ -188,6 +215,7 @@ export async function applyOfferList(
     offers,
     seen: [...ids],
     scope: (current?.scope ?? []).filter((id) => ids.has(id)),
+    scope_at: keepTimes(current?.scope_at ?? {}, ids),
   };
   const changed = JSON.stringify(next) !== JSON.stringify(current);
   if (changed) await writeStore(db, next);
@@ -230,21 +258,31 @@ export async function setOfferAccepted(db: DB, offerId: UUID, at: string): Promi
   });
 }
 
-/** O técnico abriu o escopo da oferta ("Escopo lido"). */
-export async function setScopeRead(db: DB, offerId: UUID): Promise<void> {
+/**
+ * O técnico abriu o escopo da oferta ("Escopo lido"), em `at` (relógio do servidor). Só a primeira leitura conta: abrir
+ * de novo não muda a hora que vai no aceite.
+ */
+export async function setScopeRead(db: DB, offerId: UUID, at: ISODate): Promise<void> {
   const current = (await readStore(db)) ?? EMPTY;
   if (current.scope.includes(offerId)) return;
-  await writeStore(db, { ...current, scope: [...current.scope, offerId] });
+  await writeStore(db, { ...current, scope: [...current.scope, offerId], scope_at: { ...current.scope_at, [offerId]: at } });
+}
+
+/** Quando o técnico abriu o escopo da oferta (relógio do servidor); null sem leitura ou lida numa versão antiga. */
+export async function scopeReadAt(offerId: UUID): Promise<ISODate | null> {
+  return (await readStore())?.scope_at[offerId] ?? null;
 }
 
 /** Oferta que o servidor não reconhece mais para este técnico (404): sai do aparelho. */
 export async function dropOffer(db: DB, offerId: UUID): Promise<void> {
   const current = await readStore(db);
   if (!current) return;
+  const offers = current.offers.filter((offer) => offer.id !== offerId);
   await writeStore(db, {
     ...current,
-    offers: current.offers.filter((offer) => offer.id !== offerId),
+    offers,
     scope: current.scope.filter((id) => id !== offerId),
+    scope_at: keepTimes(current.scope_at, new Set(offers.map((offer) => offer.id))),
   });
 }
 

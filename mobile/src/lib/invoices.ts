@@ -1,7 +1,8 @@
-// Notas fiscais do técnico, na aba Ganhos (contrato em docs/API.md, "Notas fiscais dos técnicos"). Tudo pede internet:
-// a nota não entra na fila offline (a fila de fotos é presa à OS, e o servidor confere na hora as OS escolhidas e o
-// número repetido). A lista de cada competência fica no aparelho (kv `invoices:AAAA-MM`) para abrir sem rede. O envio
-// leva um `client_upload_id`: mandado de novo depois de uma resposta perdida, devolve a mesma nota em vez de duplicar.
+// Notas fiscais do técnico, no mês da aba Faturamento (contrato em docs/API.md, "Notas fiscais dos técnicos"). Tudo
+// pede internet: a nota não entra na fila offline (a fila de fotos é presa à OS, e o servidor confere na hora as OS
+// escolhidas e o número repetido). A lista de cada competência fica no aparelho (kv `invoices:AAAA-MM`) para abrir sem
+// rede. O envio leva um `client_upload_id`: mandado de novo depois de uma resposta perdida, devolve a mesma nota em vez
+// de duplicar.
 // O arquivo é escolhido em invoiceFile.ts (na pré-visualização web, invoiceFile.web.ts), com os tipos e o nome daqui.
 
 import NetInfo from "@react-native-community/netinfo";
@@ -19,7 +20,7 @@ import type { InvoiceFileKind, InvoicePayoutCandidate, MyInvoice } from "./types
 let version = 0;
 const listeners = new Set<() => void>();
 
-/** Uma nota entrou ou saiu: Ganhos relê as notas e os valores (o "NF" de cada OS). */
+/** Uma nota entrou ou saiu: o Faturamento relê as notas, os valores (o "NF" de cada OS) e a situação dos meses. */
 export function bumpInvoices(): void {
   version += 1;
   listeners.forEach((listener) => listener());

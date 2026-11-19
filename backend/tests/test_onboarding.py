@@ -1,6 +1,7 @@
 """Homologação: link de convite, ficha pública do técnico e análise pela gestão."""
 
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 import pytest
 from httpx import AsyncClient
@@ -141,6 +142,68 @@ async def test_invite_form_and_approval(
         f"{API}/onboarding/applications/{app_id}/reject", json={"reason": "x" * 5}, headers=an
     )
     assert again.status_code == 422  # já analisada
+
+
+async def test_approval_prefills_the_tech_profile(
+    client: AsyncClient, world: World, engine: AsyncEngine
+) -> None:
+    """Aprovada, a ficha já entra no perfil técnico (disponibilidade, transporte e CNH, aptidões),
+    marcada "ficha" com a data da ficha e sem linha no histórico do cadastro. Ferramentas e
+    certificações são texto livre e ficam só na ficha."""
+    an = world.analyst.headers
+    token = await new_invite(client, world)
+    body = ficha(
+        full_name="Tecnico Alfa",
+        email="tecnico.alfa@exemplo.com",
+        document="123.456.789-09",
+        has_driver_license=True,
+        tools="Multímetro e escada",
+        photo=None,
+    )
+    r = await client.post(f"{API}/public/onboarding/{token}", json=body)
+    assert r.status_code == 201, r.text
+    [pending] = (await client.get(f"{API}/onboarding/applications", headers=an)).json()
+    r = await client.post(
+        f"{API}/onboarding/applications/{pending['id']}/approve", json={}, headers=an
+    )
+    assert r.status_code == 200, r.text
+    technician_id = r.json()["id"]
+    async with engine.connect() as conn:
+        created = await conn.scalar(
+            text("SELECT created_at FROM technician_applications WHERE id = :i"),
+            {"i": pending["id"]},
+        )
+
+    login = await client.post(
+        f"{API}/auth/login",
+        json={
+            "email": "tecnico.alfa@exemplo.com",
+            "password": "minha-senha-forte",
+            "channel": "mobile",
+        },
+    )
+    assert login.status_code == 200, login.text
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    me = (await client.get(f"{API}/me/profile", headers=headers)).json()
+    # Dias úteis de manhã e o sábado (manhã, tarde e noite): 8 turnos, na ordem da grade.
+    workdays = ("mon", "tue", "wed", "thu", "fri")
+    assert me["availability"] == [f"{day}:morning" for day in workdays] + [
+        "sat:morning",
+        "sat:afternoon",
+        "sat:evening",
+    ]
+    assert me["transport"] == {"modes": ["motorcycle"], "driver_license": True}
+    since = created.astimezone(ZoneInfo(settings.TIMEZONE)).date().isoformat()
+    assert me["skills"] == [{"name": "DVR/NVR Intelbras", "level": "avancado", "since": since}]
+    assert (me["tool_ids"], me["education"]) == ([], [])
+    stamps = me["tech_profile_updated"]
+    assert (stamps["tools"], stamps["education"]) == (None, None)
+    for part in ("availability", "transport", "skills"):
+        assert stamps[part]["via"] == "ficha", part
+        assert datetime.fromisoformat(stamps[part]["at"]) == created, part
+
+    history = await client.get(f"{API}/technicians/{technician_id}/changes", headers=an)
+    assert history.status_code == 200 and history.json() == []
 
 
 async def test_reject_and_revoke(client: AsyncClient, world: World) -> None:

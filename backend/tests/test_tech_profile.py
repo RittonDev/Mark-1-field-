@@ -288,7 +288,9 @@ def test_patch_limits_are_the_service_ones() -> None:
     TECH_PROFILE_LIMITS em lib/constants.ts)."""
 
     def max_length(model: type[BaseModel], field: str) -> int:
-        found = [m.max_length for m in model.model_fields[field].metadata if hasattr(m, "max_length")]
+        found = [
+            m.max_length for m in model.model_fields[field].metadata if hasattr(m, "max_length")
+        ]
         assert len(found) == 1, (model, field)
         return found[0]
 
@@ -668,3 +670,482 @@ def test_migration_backfill_is_the_same_as_the_approval(fields: dict[str, Any]) 
     assert migration._ficha_profile(row) == expected
     as_lists = {**row, "availability": application.availability, "skills": application.skills}
     assert migration._ficha_profile(as_lists) == expected
+
+
+# ------------------------------------------------- PATCH /me/profile (com banco)
+
+COURSE: dict[str, Any] = {
+    "course": "Técnico em redes",
+    "level": "technical",
+    "institution": "Escola Exemplo",
+    "start": "2024-02",
+    "end": None,
+}
+COURSE_TEXT = "Técnico em redes · Escola Exemplo · Técnico · desde 02/2024 (em andamento)"
+
+
+async def _patch(client: AsyncClient, world: World, **body: Any) -> Response:
+    return await client.patch(f"{API}/me/profile", json=body, headers=world.tech.headers)
+
+
+async def _me(client: AsyncClient, world: World) -> dict[str, Any]:
+    r = await client.get(f"{API}/me/profile", headers=world.tech.headers)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+async def _history(client: AsyncClient, world: World) -> list[dict[str, Any]]:
+    """O histórico do cadastro como a central lê (o mais novo primeiro)."""
+    r = await client.get(
+        f"{API}/technicians/{world.tech.user.id}/changes", headers=world.analyst.headers
+    )
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+async def _stored(engine: AsyncEngine, world: World) -> User:
+    """O técnico relido do banco, numa sessão nova."""
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as db:
+        user = await db.get(User, world.tech.user.id)
+        assert user is not None
+        return user
+
+
+async def _new_tools(engine: AsyncEngine, *names: str) -> list[str]:
+    """Ferramentas no catálogo (a suíte monta o banco pelos models: começa sem as 20 da
+    migração)."""
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as db:
+        tools = [TechnicianTool(name=name) for name in names]
+        db.add_all(tools)
+        await db.commit()
+        return [str(tool.id) for tool in tools]
+
+
+async def _set_active(engine: AsyncEngine, tool_id: str, active: bool) -> None:
+    """A central desativa ou reativa (direto no banco: as rotas do catálogo têm os testes delas,
+    em test_technician_tools.py)."""
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("UPDATE tool_catalog SET is_active = :active WHERE id = :id"),
+            {"active": active, "id": uuid.UUID(tool_id)},
+        )
+
+
+def _profile_events(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    """Os profile.changed publicados, inteiros, na ordem."""
+    published: list[dict[str, Any]] = []
+
+    async def capture(event: dict[str, Any]) -> None:
+        if event["type"] == "profile.changed":
+            published.append(event)
+
+    monkeypatch.setattr(realtime.bus, "publish", capture)
+    return published
+
+
+def _issues(r: Response) -> list[tuple[str | None, str]]:
+    """(rótulo, mensagem) de cada recusa, como o app e a web mostram."""
+    detail = r.json()["detail"]
+    if isinstance(detail, str):
+        return [(None, detail)]
+    return [(item.get("label"), item["msg"]) for item in detail]
+
+
+@requires_db
+async def test_each_part_is_saved_and_read_back(
+    client: AsyncClient, world: World, engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Um PATCH por parte: a resposta volta normalizada, com a data e "app" na parte, e o banco
+    guardou de verdade. O mesmo PATCH de novo (reordenado, escrito de outro jeito): 200, sem
+    histórico nem aviso."""
+    events = _profile_events(monkeypatch)
+    trena, escada = await _new_tools(engine, "Trena", "Escada")
+    today = datetime.now(TZ).date().isoformat()
+    done = {**COURSE, "course": " Técnico  em redes ", "start": "2022-02", "end": "2023-12"}
+    ongoing = {**COURSE, "course": "Graduação em TI", "level": "undergraduate"}
+    bodies: dict[str, dict[str, Any]] = {
+        "tools": {"tool_ids": [trena, escada, trena]},
+        "availability": {"availability": ["sat:afternoon", "mon:morning", "sat:afternoon"]},
+        "transport": {"transport": {"modes": ["motorcycle", "car"], "driver_license": True}},
+        "skills": {
+            "skills": [
+                {"name": " linux ", "level": "basico"},
+                {"name": "Câmeras  Hikvision", "level": "avancado"},
+            ]
+        },
+        "education": {"education": [done, ongoing]},
+    }
+    for part, body in bodies.items():
+        r = await _patch(client, world, **body)
+        assert r.status_code == 200, r.text
+        stamp = r.json()["tech_profile_updated"][part]
+        assert stamp is not None and stamp["via"] == "app", part
+        assert datetime.fromisoformat(stamp["at"]).tzinfo is not None
+    me = r.json()
+    assert me["tool_ids"] == [escada, trena]  # pelo nome
+    assert me["availability"] == ["mon:morning", "sat:afternoon"]
+    assert me["transport"] == {"modes": ["car", "motorcycle"], "driver_license": True}
+    assert me["skills"] == [
+        {"name": "Câmeras Hikvision", "level": "avancado", "since": today},
+        {"name": "linux", "level": "basico", "since": today},
+    ]
+    first, second = me["education"]  # em andamento primeiro
+    assert (first["course"], first["end"]) == ("Graduação em TI", None)
+    assert (second["course"], second["start"], second["end"]) == (
+        "Técnico em redes",
+        "2022-02",
+        "2023-12",
+    )
+    assert len({uuid.UUID(first["id"]), uuid.UUID(second["id"])}) == 2
+
+    # Relido do banco: cada parte gravou (o PATCH só faz commit quando o histórico muda).
+    user = await _stored(engine, world)
+    assert user.tool_ids == sorted([trena, escada])
+    assert user.availability == ["mon:morning", "sat:afternoon"]
+    assert (user.transport_modes, user.has_driver_license) == (["car", "motorcycle"], True)
+    assert user.skills == me["skills"]
+    assert user.education == me["education"]
+    stamps = {part: stamp["via"] for part, stamp in user.tech_profile_stamps.items()}
+    assert stamps == dict.fromkeys(tp.PARTS, "app")
+    assert await _me(client, world) == me
+
+    rows = await _history(client, world)
+    assert [c["field"] for row in reversed(rows) for c in row["changes"]] == list(tp.PARTS)
+    assert {row["via"] for row in rows} == {"app"}
+    assert [e["data"] for e in events] == [{"fields": [part], "via": "app"} for part in tp.PARTS]
+
+    events.clear()
+    again: list[dict[str, Any]] = [
+        {"tool_ids": [escada, trena]},
+        {"availability": ["sat:afternoon", "mon:morning"]},
+        {"transport": {"modes": ["car", "motorcycle", "car"], "driver_license": True}},
+        {
+            "skills": [
+                {"name": "Câmeras Hikvision", "level": "avancado"},
+                {"name": "linux", "level": "basico"},
+            ]
+        },
+        {"education": [ongoing, done]},
+    ]
+    for body in again:
+        r = await _patch(client, world, **body)
+        assert r.status_code == 200 and r.json() == me, body
+    assert len(await _history(client, world)) == len(rows)
+    assert events == []
+
+
+@requires_db
+async def test_validation_messages_and_no_password(
+    client: AsyncClient, world: World, engine: AsyncEngine
+) -> None:
+    """Cada recusa com a mensagem e o rótulo que o app mostra, sem gravar nada. Nenhuma parte pede
+    senha, nem com a senha provisória (só e-mail e PIX travam)."""
+    skill = {"name": "Linux", "level": "basico"}
+    course = {key: value for key, value in COURSE.items() if key != "end"}
+    twice = str(uuid.uuid4())
+    modes = "car, motorcycle, bicycle, public_transport, ride_app ou on_foot"
+    cases: list[tuple[dict[str, Any], list[tuple[str | None, str]]]] = [
+        (
+            {"tool_ids": [str(uuid.uuid4())]},
+            [(None, "Ferramenta não encontrada. Atualize a lista.")],
+        ),
+        (
+            {"tool_ids": [str(uuid.uuid4()) for _ in range(201)]},
+            [("Ferramental", "No máximo 200 itens")],
+        ),
+        ({"tool_ids": ["x"]}, [("Ferramental", "Identificador inválido")]),
+        (
+            {"availability": [*tp.ALL_SLOTS, "mon:morning"]},
+            [("Disponibilidade", "No máximo 28 itens")],
+        ),
+        ({"availability": ["sat:lunch"]}, [("Disponibilidade", "Turno desconhecido: sat:lunch")]),
+        ({"transport": None}, [("Transporte", "Informe os meios de transporte")]),
+        (
+            {"transport": {"modes": ["car"] * 7, "driver_license": True}},
+            [("Meios de transporte", "No máximo 6 itens")],
+        ),
+        (
+            {"transport": {"modes": ["bus"], "driver_license": True}},
+            [("Meios de transporte", f"Escolha uma das opções: {modes}")],
+        ),
+        ({"transport": {"modes": ["car"]}}, [("CNH", "Campo obrigatório")]),
+        (
+            {"transport": {"modes": ["car"], "driver_license": None}},
+            [("CNH", "Informe sim ou não")],
+        ),
+        (
+            {"transport": {"modes": [], "driver_license": False, "car": True}},
+            [(None, "Campo não aceito")],
+        ),
+        ({"skills": [{**skill, "name": " a "}]}, [("Nome", "Informe o nome da aptidão")]),
+        ({"skills": [{**skill, "name": "a" * 81}]}, [("Nome", "No máximo 80 caracteres")]),
+        (
+            {"skills": [{**skill, "level": "expert"}]},
+            [("Nível", "Escolha uma das opções: basico, intermediario ou avancado")],
+        ),
+        (
+            {"skills": [{**skill, "name": "linux"}, {**skill, "name": "Linux "}]},
+            [("Aptidões", "Aptidão repetida: Linux")],
+        ),
+        (
+            {"skills": [{**skill, "name": f"Aptidão {n:02d}"} for n in range(31)]},
+            [("Aptidões", "No máximo 30 itens")],
+        ),
+        ({"skills": [{**skill, "since": "2026-01-01"}]}, [(None, "Campo não aceito")]),
+        ({"education": [{**course, "course": "x"}]}, [("Curso", "Informe o curso")]),
+        (
+            {"education": [{**course, "institution": " "}]},
+            [("Instituição", "Informe a instituição")],
+        ),
+        ({"education": [{**course, "course": "a" * 121}]}, [("Curso", "No máximo 120 caracteres")]),
+        (
+            {"education": [{**course, "institution": "a" * 121}]},
+            [("Instituição", "No máximo 120 caracteres")],
+        ),
+        (
+            {"education": [{**course, "start": "2024-13"}]},
+            [("Início", "Mês inválido: use AAAA-MM")],
+        ),
+        ({"education": [{**course, "start": "1949-12"}]}, [("Início", "Confira o ano")]),
+        (
+            {"education": [{**course, "end": _month_from_now(2)}]},
+            [("Fim", "Use um mês até o atual")],
+        ),
+        (
+            {"education": [{**course, "end": "2023-12"}]},
+            [("Formação", "O fim não pode ser antes do início")],
+        ),
+        (
+            {"education": [{**course, "id": twice}, {**course, "id": twice, "start": "2020-01"}]},
+            [("Formação", "Formação repetida: Técnico em redes")],
+        ),
+        (
+            {"education": [course, {**course, "course": "técnico EM redes"}]},
+            [("Formação", "Formação repetida: técnico EM redes")],
+        ),
+        (
+            {"education": [{**course, "start": f"{2000 + n}-01"} for n in range(21)]},
+            [("Formação", "No máximo 20 itens")],
+        ),
+        ({"education": [{**course, "added_at": "2026-11"}]}, [(None, "Campo não aceito")]),
+    ]
+    for body, expected in cases:
+        r = await _patch(client, world, **body)
+        assert r.status_code == 422, (body, r.text)
+        assert _issues(r) == expected, body
+    assert await _history(client, world) == []
+    user = await _stored(engine, world)
+    assert (user.tool_ids, user.availability, user.skills, user.education) == ([], [], [], [])
+    assert user.tech_profile_stamps == {}
+
+    # Nenhuma parte pede senha, nem com a provisória (a central redefiniu).
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("UPDATE users SET must_change_password = true WHERE id = :id"),
+            {"id": world.tech.user.id},
+        )
+    r = await _patch(
+        client,
+        world,
+        availability=["sat:morning"],
+        transport={"modes": [], "driver_license": False},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["transport"] == {"modes": [], "driver_license": False}
+    assert (await _history(client, world))[0]["changes"] == [
+        {"field": "availability", "from": None, "to": "sáb · manhã"},
+        {"field": "transport", "from": None, "to": "Nenhum · sem CNH"},
+    ]
+
+
+@requires_db
+async def test_skill_since_is_kept_by_name(
+    client: AsyncClient, world: World, engine: AsyncEngine
+) -> None:
+    """O "desde" fica pelo nome (outro nível, outra caixa); a aptidão nova ganha hoje; trocar só a
+    grafia grava (e entra no histórico); renomear de verdade recomeça."""
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as db:
+        user = await db.get(User, world.tech.user.id)
+        assert user is not None
+        user.skills = [{"name": "Linux", "level": "basico", "since": "2025-03-10"}]
+        await db.commit()
+    today = datetime.now(TZ).date().isoformat()
+    printer = {"name": "Impressoras HP", "level": "basico"}
+
+    r = await _patch(client, world, skills=[{"name": "LINUX", "level": "avancado"}, printer])
+    assert r.status_code == 200, r.text
+    assert r.json()["skills"] == [
+        {"name": "Impressoras HP", "level": "basico", "since": today},
+        {"name": "LINUX", "level": "avancado", "since": "2025-03-10"},
+    ]
+    r = await _patch(client, world, skills=[printer, {"name": "Linux", "level": "avancado"}])
+    assert r.status_code == 200, r.text
+    assert r.json()["skills"][1] == {"name": "Linux", "level": "avancado", "since": "2025-03-10"}
+    assert (await _stored(engine, world)).skills == r.json()["skills"]
+    r = await _patch(client, world, skills=[printer, {"name": "Linux Debian", "level": "avancado"}])
+    assert r.status_code == 200, r.text
+    assert {s["name"]: s["since"] for s in r.json()["skills"]} == {
+        "Impressoras HP": today,
+        "Linux Debian": today,
+    }
+
+    rows = await _history(client, world)
+    assert [row["changes"] for row in rows] == [
+        [{"field": "skills", "from": "Linux (Avançado)", "to": "Linux Debian (Avançado)"}],
+        [{"field": "skills", "from": "LINUX (Avançado)", "to": "Linux (Avançado)"}],
+        [
+            {
+                "field": "skills",
+                "from": "Linux (Básico)",
+                "to": "Impressoras HP (Básico), LINUX (Avançado)",
+            }
+        ],
+    ]
+
+
+@requires_db
+async def test_education_keeps_the_ids(
+    client: AsyncClient, world: World, engine: AsyncEngine
+) -> None:
+    """Curso novo ganha id; reenviado igual sem id mantém o id (nada muda); com o id, mantém mesmo
+    mudando; id desconhecido vira curso novo; o mesmo id duas vezes no corpo: 422."""
+    r = await _patch(client, world, education=[COURSE])
+    assert r.status_code == 200, r.text
+    [first] = r.json()["education"]
+    course_id = first["id"]
+    assert uuid.UUID(course_id)
+    without_id = {key: value for key, value in COURSE.items() if key != "end"}
+    r = await _patch(client, world, education=[without_id])
+    assert r.status_code == 200 and r.json()["education"] == [first]
+    finished = {**COURSE, "id": course_id, "end": "2025-12"}
+    r = await _patch(client, world, education=[finished])
+    assert r.status_code == 200 and r.json()["education"] == [{**first, "end": "2025-12"}]
+    unknown = {
+        **COURSE,
+        "id": str(uuid.uuid4()),
+        "course": "Certificação Exemplo",
+        "level": "certification",
+    }
+    r = await _patch(client, world, education=[finished, unknown])
+    assert r.status_code == 200, r.text
+    ids = {item["course"]: item["id"] for item in r.json()["education"]}
+    assert ids["Técnico em redes"] == course_id
+    assert ids["Certificação Exemplo"] not in (course_id, unknown["id"])
+    saved = r.json()["education"]
+    r = await _patch(client, world, education=[finished, {**finished, "start": "2020-01"}])
+    assert r.status_code == 422
+    assert _issues(r) == [("Formação", "Formação repetida: Técnico em redes")]
+    assert (await _stored(engine, world)).education == saved
+
+    certification = (
+        "Certificação Exemplo · Escola Exemplo · Certificação · desde 02/2024 (em andamento)"
+    )
+    finished_text = "Técnico em redes · Escola Exemplo · Técnico · 02/2024 a 12/2025"
+    rows = await _history(client, world)
+    assert [row["changes"] for row in rows] == [
+        [{"field": "education", "from": None, "to": certification}],
+        [{"field": "education", "from": COURSE_TEXT, "to": finished_text}],
+        [{"field": "education", "from": None, "to": COURSE_TEXT}],
+    ]
+
+
+@requires_db
+async def test_inactive_tool_is_hidden_and_kept(
+    client: AsyncClient, world: World, engine: AsyncEngine
+) -> None:
+    """Desativada pela central: some do GET, fica guardada no banco e volta quando reativam;
+    mandar a desativada é ignorado (200, nada muda)."""
+    alicate, escada, trena = await _new_tools(engine, "Alicate de corte", "Escada", "Trena")
+    r = await _patch(client, world, tool_ids=[escada, alicate])
+    assert r.status_code == 200 and r.json()["tool_ids"] == [alicate, escada]
+    await _set_active(engine, escada, False)
+    assert (await _me(client, world))["tool_ids"] == [alicate]
+    assert set((await _stored(engine, world)).tool_ids) == {alicate, escada}
+
+    r = await _patch(client, world, tool_ids=[alicate, trena])
+    assert r.status_code == 200 and r.json()["tool_ids"] == [alicate, trena]
+    assert set((await _stored(engine, world)).tool_ids) == {alicate, escada, trena}
+    rows = await _history(client, world)
+    assert rows[0]["changes"] == [{"field": "tools", "from": None, "to": "Trena"}]
+    r = await _patch(client, world, tool_ids=[trena, escada, alicate])
+    assert r.status_code == 200 and r.json()["tool_ids"] == [alicate, trena]
+    assert len(await _history(client, world)) == len(rows)
+
+    # Limpar tira as ativas; a desativada continua guardada e volta quando reativam.
+    r = await _patch(client, world, tool_ids=None)
+    assert r.status_code == 200 and r.json()["tool_ids"] == []
+    assert (await _stored(engine, world)).tool_ids == [escada]
+    assert (await _history(client, world))[0]["changes"] == [
+        {"field": "tools", "from": "Alicate de corte, Trena", "to": None}
+    ]
+    await _set_active(engine, escada, True)
+    assert (await _me(client, world))["tool_ids"] == [escada]
+
+
+@requires_db
+async def test_history_texts_and_the_event(
+    client: AsyncClient, world: World, engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Histórico: nas listas, "from" é o que saiu e "to" o que entrou (mais de 10 itens: os 10
+    primeiros e "e mais N"); o transporte vai de → para. O aviso profile.changed leva só as partes
+    e "app", para a gestão (sem PIX, sem after_reset)."""
+    ids = dict(zip(tp.DEFAULT_TOOLS, await _new_tools(engine, *tp.DEFAULT_TOOLS), strict=True))
+    for body in (
+        {"tool_ids": [ids["Furadeira"]]},
+        {"availability": ["mon:night"]},
+        {"skills": [{"name": "Linux", "level": "basico"}]},
+    ):
+        assert (await _patch(client, world, **body)).status_code == 200
+    events = _profile_events(monkeypatch)
+    steps: list[tuple[dict[str, Any], dict[str, Any]]] = [
+        (
+            {"tool_ids": [ids["Multímetro"], ids["Escada"]]},
+            {"field": "tools", "from": "Furadeira", "to": "Escada, Multímetro"},
+        ),
+        (
+            {"availability": ["sat:evening", "sat:afternoon"]},
+            {"field": "availability", "from": "seg · madrugada", "to": "sáb · tarde e noite"},
+        ),
+        (
+            {"transport": {"modes": ["motorcycle", "car"], "driver_license": True}},
+            {"field": "transport", "from": None, "to": "Carro, Moto · com CNH"},
+        ),
+        (
+            {"transport": {"modes": [], "driver_license": False}},
+            {"field": "transport", "from": "Carro, Moto · com CNH", "to": "Nenhum · sem CNH"},
+        ),
+        (
+            {"skills": [{"name": "Linux", "level": "intermediario"}]},
+            {"field": "skills", "from": "Linux (Básico)", "to": "Linux (Intermediário)"},
+        ),
+        ({"education": [COURSE]}, {"field": "education", "from": None, "to": COURSE_TEXT}),
+        (
+            {"availability": []},
+            {"field": "availability", "from": "sáb · tarde e noite", "to": None},
+        ),
+    ]
+    for body, change in steps:
+        r = await _patch(client, world, **body)
+        assert r.status_code == 200, r.text
+        assert (await _history(client, world))[0]["changes"] == [change], body
+
+    r = await _patch(client, world, tool_ids=list(ids.values()))
+    assert r.status_code == 200, r.text
+    added = sorted(
+        (name for name in tp.DEFAULT_TOOLS if name not in ("Escada", "Multímetro")),
+        key=lambda name: (tp.fold(name), name),
+    )
+    assert (await _history(client, world))[0]["changes"] == [
+        {"field": "tools", "from": None, "to": f"{', '.join(added[:10])} e mais {len(added) - 10}"}
+    ]
+
+    expected = [{"fields": [change["field"]], "via": "app"} for _, change in steps]
+    assert [event["data"] for event in events] == [*expected, {"fields": ["tools"], "via": "app"}]
+    first = events[0]
+    assert first["data"] == {"fields": ["tools"], "via": "app"}
+    assert first["audience"] == {"managers_only": True}
+    assert first["user_id"] == first["actor_id"] == str(world.tech.user.id)
+    assert not any("pix" in str(event) for event in events)
