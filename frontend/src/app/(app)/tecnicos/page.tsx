@@ -51,6 +51,7 @@ import {
 } from "@/components/ui";
 import { useNow } from "@/components/useNow";
 import { absoluteApiUrl, api, errorMessage } from "@/lib/api";
+import { LEVEL_TIER, LEVEL_TIER_ORDER } from "@/lib/constants";
 import { downloadCsv } from "@/lib/download";
 import { formatDate, formatRelative, initials } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
@@ -61,12 +62,15 @@ import { Tabs } from "@/components/motion";
 import { favoritesHref, FavoritesView } from "@/components/technicians/FavoritesView";
 import { TempPasswordPanel } from "@/components/technicians/GrantAccessDialog";
 import { InviteDialog } from "@/components/technicians/InviteDialog";
+import { LevelBadge, LevelShield } from "@/components/technicians/LevelBadge";
+import { LevelSection, useTechnicianLevel } from "@/components/technicians/LevelSection";
 import { NearbyFinder } from "@/components/technicians/NearbyFinder";
 import { ProfileHistory } from "@/components/technicians/ProfileHistory";
 import { refreshTechnicianViews } from "@/components/technicians/refresh";
 import { TechnicianPayment } from "@/components/technicians/TechnicianPayment";
 import type {
   ImportResult,
+  LevelTier,
   Technician,
   TechnicianRegion,
   TemporaryPassword,
@@ -113,8 +117,46 @@ const GAPS: { key: Gap; label: string; hint: string; test: (t: Technician) => bo
   },
 ];
 
+/** Filtro rápido do elo (sobre a lista carregada): uma faixa ou quem está em risco de descer. */
+type LevelFilter = LevelTier | "at_risk";
+/** As faixas nos chips do filtro, da mais alta à mais baixa. */
+const LEVEL_CHIPS = [...LEVEL_TIER_ORDER].reverse();
+const AT_RISK_HINT = "Abaixo do critério: desce se não voltar a cumprir em 30 dias";
+
+/** Ordem da lista: por nome (com os ativos primeiro), pela última OS ou pelo elo (da faixa mais alta). */
+type Sort = "name" | "visit" | "level";
+/** Posição da faixa para ordenar; sem o elo na resposta, por último. */
+const levelRank = (t: Technician) => (t.level ? LEVEL_TIER_ORDER.indexOf(t.level.tier) : -1);
+const byName = new Intl.Collator("pt-BR", { sensitivity: "base" }).compare;
+
 function regionText(city: string | null | undefined, state: string | null | undefined): string {
   return [city, state].filter(Boolean).join("-");
+}
+
+/** Cabeçalho de coluna que ordena a lista (de novo, volta à ordem por nome). */
+function SortHeader({
+  active,
+  onClick,
+  title,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      title={active ? "Voltar à ordem por nome" : title}
+      className="inline-flex items-center gap-1 rounded uppercase hover:text-ink focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
+    >
+      {children}
+      <ArrowDown className={clsx("size-3", active ? "text-ink" : "opacity-40")} />
+    </button>
+  );
 }
 
 function Avatar({ tech, size = "md" }: { tech: Pick<Technician, "name" | "avatar_url">; size?: "md" | "lg" }) {
@@ -184,7 +226,8 @@ function TechniciansView() {
   const [uf, setUf] = useState("");
   const [city, setCity] = useState("");
   const [gap, setGap] = useState<Gap | null>(null);
-  const [sortByVisit, setSortByVisit] = useState(false);
+  const [levelFilter, setLevelFilter] = useState<LevelFilter | null>(null);
+  const [sort, setSort] = useState<Sort>("name");
   const [editing, setEditing] = useState<Technician | null>(null);
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -228,18 +271,37 @@ function TechniciansView() {
     const all = list.data ?? [];
     return Object.fromEntries(GAPS.map((g) => [g.key, all.filter(g.test).length])) as Record<Gap, number>;
   }, [list.data]);
+  // Quantos em cada faixa do elo e em risco (null: a API ainda não manda o elo).
+  const levelCounts = useMemo(() => {
+    const counts: Record<LevelFilter, number> = { bronze: 0, silver: 0, gold: 0, diamond: 0, at_risk: 0 };
+    let known = false;
+    for (const t of list.data ?? []) {
+      if (!t.level) continue;
+      known = true;
+      counts[t.level.tier] += 1;
+      if (t.level.at_risk) counts.at_risk += 1;
+    }
+    return known ? counts : null;
+  }, [list.data]);
   const rows = useMemo(() => {
     const test = GAPS.find((g) => g.key === gap)?.test;
-    const all = (list.data ?? []).filter((t) => !test || test(t));
-    // Por padrão os ativos primeiro (a API já ordena por nome ou pela busca); ou pela última OS.
-    if (sortByVisit) return all.sort((a, b) => (b.last_visit_at ?? "").localeCompare(a.last_visit_at ?? ""));
+    const all = (list.data ?? []).filter(
+      (t) =>
+        (!test || test(t)) &&
+        (!levelFilter || (levelFilter === "at_risk" ? t.level?.at_risk : t.level?.tier === levelFilter)),
+    );
+    // Por padrão os ativos primeiro (a API já ordena por nome ou pela busca); ou pela última OS; ou pelo elo,
+    // da faixa mais alta para a mais baixa e, na mesma faixa, por nome.
+    if (sort === "visit") return all.sort((a, b) => (b.last_visit_at ?? "").localeCompare(a.last_visit_at ?? ""));
+    if (sort === "level") return all.sort((a, b) => levelRank(b) - levelRank(a) || byName(a.name, b.name));
     return all.sort((a, b) => Number(b.is_active) - Number(a.is_active));
-  }, [list.data, gap, sortByVisit]);
+  }, [list.data, gap, levelFilter, sort]);
   // Quantas linhas mostrar; volta ao começo quando a lista muda (outro filtro).
-  const listKey = JSON.stringify([q, teamId, active, uf, city, gap, sortByVisit]);
+  const listKey = JSON.stringify([q, teamId, active, uf, city, gap, levelFilter, sort]);
   const [shown, setShown] = useState({ key: listKey, count: PAGE });
   const shownCount = shown.key === listKey ? shown.count : PAGE;
-  const filtered = !!(q || teamId || active || uf || city || gap);
+  const filtered = !!(q || teamId || active || uf || city || gap || levelFilter);
+  const toggleSort = (next: Sort) => setSort((current) => (current === next ? "name" : next));
 
   const clearFilters = () => {
     setQInput("");
@@ -248,10 +310,25 @@ function TechniciansView() {
     setUf("");
     setCity("");
     setGap(null);
+    setLevelFilter(null);
   };
   const exportCsv = () =>
     downloadCsv("tecnicos.csv", [
-      ["nome", "email", "celular", "grupo", "cidade", "uf", "regiao_atuacao", "situacao", "ultimo_acesso", "ultima_os", "os_abertas"],
+      [
+        "nome",
+        "email",
+        "celular",
+        "grupo",
+        "cidade",
+        "uf",
+        "regiao_atuacao",
+        "situacao",
+        "ultimo_acesso",
+        "ultima_os",
+        "os_abertas",
+        "elo",
+        "elo_em_risco",
+      ],
       ...rows.map((t) => [
         t.name,
         t.email,
@@ -264,6 +341,8 @@ function TechniciansView() {
         t.last_login_at ? formatDate(t.last_login_at) : "",
         t.last_visit_at ? formatDate(t.last_visit_at) : "",
         t.open_tickets,
+        t.level ? LEVEL_TIER[t.level.tier].label : "",
+        t.level?.at_risk ? "sim" : "",
       ]),
     ]);
   // Trocar de aba: a URL acompanha (mantém o ?os= do painel); UF e cidade são só dos favoritos.

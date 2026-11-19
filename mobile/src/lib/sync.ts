@@ -19,7 +19,8 @@
 // o app na tela e notificação do sistema fora dela (announce, notifications.ts).
 //
 // A rodada também confere as ofertas de OS com preço (GET /me/offers, lib/offers.ts): antes do upload das fotos,
-// entre uma foto e outra, depois do download e quando o download falha por erro do servidor.
+// entre uma foto e outra, depois do download e quando o download falha por erro do servidor. E, com o app na tela,
+// busca o elo do técnico (GET /me/level, lib/level.ts) a cada 30 min e no "puxar para atualizar".
 
 import NetInfo from "@react-native-community/netinfo";
 import { randomUUID } from "expo-crypto";
@@ -90,6 +91,7 @@ import { setFieldRules } from "./field";
 import { formatShort } from "./format";
 import { pendingRequiredForms } from "./forms";
 import { haptic } from "./haptics";
+import { celebrateLevel, levelStored, saveLevel, type LevelRefreshResult, type LevelSaved } from "./level";
 import { isDone, isHelper } from "./lists";
 import { dismissNews, dismissNewsExcept, inForeground, presentNews, syncLocalAlerts, type NewsItem } from "./notifications";
 import {
@@ -132,6 +134,8 @@ import type {
   Attachment,
   FieldOffer,
   FieldRules,
+  LevelTier,
+  MyLevel,
   OfferDecline,
   RealtimeEvent,
   TicketDetail,
@@ -412,6 +416,7 @@ async function runOnce(myEpoch: number, manual: boolean) {
     await refreshOffers(round, false);
     await revalidateHelperTickets(round);
     await refreshFieldRules(round);
+    await refreshLevel(round, manual);
     await refreshReasons(round);
     // Alertas locais: tempo na loja (aviso e estouro) e lembretes da visita (1 dia, 1h40 e 10 min antes).
     void syncLocalAlerts();
@@ -1055,6 +1060,84 @@ export async function loadFieldRules() {
     if (raw) setFieldRules(JSON.parse(raw) as FieldRules);
   } catch {
     // padrão da promessa
+  }
+}
+
+// ───────────────────────────── elo do técnico ─────────────────────────────
+
+/** A rodada busca o elo de 30 em 30 min (e no "puxar para atualizar"). */
+const LEVEL_EVERY_MS = 30 * 60_000;
+let levelAt = 0;
+/** Subida de faixa que chegou com o app saindo da tela: a comemoração espera ele voltar. */
+let levelRise: LevelTier | null = null;
+/** Busca em andamento (rodada e tela Meu elo ao mesmo tempo dividem a mesma). */
+let levelFetch: { epoch: number; promise: Promise<void> } | null = null;
+
+/**
+ * Elo do técnico (GET /me/level, lib/level.ts): a cada 30 min e com `manual`, só com o app na tela (é para ver: a
+ * rodada em segundo plano não gasta bateria e dados com ele, e a subida tem quem veja a comemoração). Falta de rede
+ * para a rodada; servidor antigo sem a rota (404) ou outro erro só adia 30 min, com o elo guardado valendo.
+ */
+async function refreshLevel(round: Round, manual: boolean) {
+  if (!inForeground()) return;
+  if (levelRise) {
+    celebrateLevel(levelRise);
+    levelRise = null;
+  }
+  if (!manual && Date.now() - levelAt < LEVEL_EVERY_MS) return;
+  try {
+    await fetchLevel(round);
+  } catch (error) {
+    if (error instanceof WriteCancelled || (error instanceof ApiError && error.status === 0)) throw error;
+    if (!(error instanceof ApiError && error.status === 404)) console.warn("Não foi possível atualizar o elo", error);
+    levelAt = Date.now();
+  }
+}
+
+/** Busca e guarda o elo. As telas do elo releem sempre; o resto do app só quando ele mudou. */
+function fetchLevel(ctx: Ctx): Promise<void> {
+  if (levelFetch && levelFetch.epoch === ctx.epoch) return levelFetch.promise;
+  const promise = (async () => {
+    ensureAlive(ctx);
+    const data = await api.get<MyLevel>("/me/level");
+    let saved = null as LevelSaved | null;
+    await write(
+      ctx,
+      async (db) => {
+        saved = await saveLevel(db, data, ctx.user.id);
+      },
+      false,
+    );
+    // A sessão mudou enquanto gravava: a hora da busca e a comemoração não passam para a sessão nova.
+    ensureAlive(ctx);
+    levelAt = Date.now();
+    if (!saved) return;
+    levelStored();
+    if (saved.changed) notifyDataChanged();
+    if (saved.rise) {
+      if (inForeground()) celebrateLevel(saved.rise);
+      else levelRise = saved.rise;
+    }
+  })();
+  levelFetch = { epoch: ctx.epoch, promise };
+  const settle = () => {
+    if (levelFetch?.promise === promise) levelFetch = null;
+  };
+  promise.then(settle, settle);
+  return promise;
+}
+
+/** Busca o elo agora, fora da rodada (tela Meu elo: ao abrir, puxar para atualizar e "Tentar de novo"). */
+export async function refreshLevelNow(): Promise<LevelRefreshResult> {
+  try {
+    await fetchLevel(sessionCtx());
+    return { ok: true };
+  } catch (error) {
+    const offline = error instanceof ApiError && error.status === 0;
+    if (error instanceof ApiError && error.status === 404) {
+      return { ok: false, offline, message: "O servidor ainda não tem o elo dos técnicos. Tente de novo mais tarde." };
+    }
+    return { ok: false, offline, message: errorMessage(error) };
   }
 }
 
@@ -1762,6 +1845,8 @@ function resetSessionState() {
   pendingManual = false;
   lastRoundAt = 0;
   fieldRulesAt = 0;
+  levelAt = 0;
+  levelRise = null;
   helpersCheckedAt = 0;
   forceReasons = false;
   fullRequested = 0;
@@ -1879,6 +1964,7 @@ export async function resetCursor() {
   fullRequested += 1;
   forceReasons = true;
   fieldRulesAt = 0;
+  levelAt = 0;
   await requestSync({ manual: true });
 }
 
