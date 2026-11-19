@@ -7,7 +7,10 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { StatTile } from "@/components/charts";
 import { useConfirm } from "@/components/Confirm";
+import { Tabs } from "@/components/motion";
 import { NoAccess } from "@/components/NoAccess";
+import { InvoiceDialog } from "@/components/payouts/InvoiceDialog";
+import { InvoicesPanel, InvoiceStrip } from "@/components/payouts/InvoicesPanel";
 import { PayoutPixLine } from "@/components/payouts/PayoutPixLine";
 import { TicketLink } from "@/components/ticket/TicketLink";
 import { useToast } from "@/components/Toaster";
@@ -17,11 +20,23 @@ import { api, errorMessage } from "@/lib/api";
 import { PAYOUT_STATUS, STATUS } from "@/lib/constants";
 import { downloadCsv } from "@/lib/download";
 import { formatDate, formatMoney } from "@/lib/format";
+import {
+  invoiceCsvRows,
+  invoicesByTechnician,
+  payInvoiceNote,
+  reviewOrder,
+  statementInvoiceLines,
+  useInvoiceReview,
+  useOpenInvoiceFile,
+  useTechnicianInvoices,
+} from "@/lib/invoices";
 import { useCan } from "@/lib/permissions";
 import { pixDay, pixRecent, pixText } from "@/lib/pix";
-import type { ExpenseReport, PayoutBoard, PayoutLine, PayoutList, PixInfo, User, UUID } from "@/lib/types";
+import type { ExpenseReport, PayoutBoard, PayoutLine, PayoutList, PixInfo, TechnicianInvoice, User, UUID } from "@/lib/types";
 import { copyText, WHATSAPP_TEXT_LIMIT, whatsappUrl } from "@/lib/whatsapp";
 
+/** Abas da tela: o fechamento dos valores e as notas fiscais que os técnicos enviam pelo app. */
+type Tab = "closing" | "invoices";
 type View = "to_pay" | "expected" | "paid" | "all";
 type Bucket = Exclude<View, "all">;
 /** Onde cada valor está no fechamento: pago; OS concluída = a pagar; aberta = previsto; cancelada, à parte. */
@@ -123,26 +138,46 @@ function usePayouts(source: Source, month: string, technicianId: string, enabled
   });
 }
 
-/** Cliente, loja, cidade e onde a OS está (concluída em tal dia, ou o status). */
+/** A aba fica na URL (?aba=notas-fiscais), sem navegar e mantendo a OS aberta no painel (?os=). */
+function setParams(patch: Record<string, string | null>) {
+  const url = new URL(window.location.href);
+  for (const [key, value] of Object.entries(patch)) {
+    if (value) url.searchParams.set(key, value);
+    else url.searchParams.delete(key);
+  }
+  const state = window.history.state as { mfPanel?: string } | null;
+  window.history.replaceState(state?.mfPanel ? { mfPanel: state.mfPanel } : null, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
+/** Cliente, loja, cidade, onde a OS está (concluída em tal dia, ou o status) e a nota fiscal que cobre o valor. */
 function subtitle(line: PayoutLine): string {
   const t = line.ticket;
   const concluded = (t.status === "resolved" || t.status === "closed") && t.resolved_at;
   const when = concluded ? `concluída em ${formatDate(t.resolved_at)}` : STATUS[t.status].label.toLowerCase();
-  return [t.customer, t.location, t.city, when, line.note].filter(Boolean).join(" · ");
+  const invoice = line.invoice ? `NF ${line.invoice.number}` : null;
+  return [t.customer, t.location, t.city, when, invoice, line.note].filter(Boolean).join(" · ");
 }
 
 /**
  * Extrato para mandar ao técnico no WhatsApp: as OS de cada situação, com o dia da conclusão e o
  * valor. No "a pagar" entram os reembolsos aprovados (custos extras), pagos no mesmo acerto. A chave PIX
  * vai junto, para ele ver onde vai receber (`pix` undefined: a API não mandou a chave, a linha fica de fora).
+ * Depois do período, as notas fiscais dele que valem (a recusada fica de fora).
  */
-function statement(name: string, lines: PayoutLine[], period: string, reimbursement: number, pix: PixInfo | null | undefined): string {
+function statement(
+  name: string,
+  lines: PayoutLine[],
+  period: string,
+  reimbursement: number,
+  pix: PixInfo | null | undefined,
+  invoices: TechnicianInvoice[],
+): string {
   const row = (l: PayoutLine) =>
     `• ${l.ticket.code}${l.ticket.resolved_at ? ` · ${shortDate(l.ticket.resolved_at)}` : ""} · ${l.ticket.location ?? l.ticket.customer ?? l.ticket.title} · ${formatMoney(l.amount)}`;
   const sections = (["to_pay", "paid", "expected"] as const)
     .map((key) => ({ key, lines: lines.filter((l) => stateOf(l) === key) }))
     .filter((s) => s.lines.length > 0);
-  const out = ["*Maxx Field · pagamento*", name, `Período: ${period}`];
+  const out = ["*Maxx Field · pagamento*", name, `Período: ${period}`, ...statementInvoiceLines(invoices)];
   if (pix) out.push(`Chave PIX: ${pixText(pix)}`);
   else if (pix === null) out.push("Chave PIX: não cadastrada (cadastre no app, em Conta › Meu cadastro)");
   for (const s of sections) {
