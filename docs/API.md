@@ -720,6 +720,11 @@ python -m app.importers.fieldcontrol /tmp/fc_export --wipe-demo --report /tmp/fc
   - etiquetas, assinatura (anexo externo) e solicitação do portal (`source = portal`, mensagem e anexos);
   - `legacy`: valores, itens, arquivos e situação dos prazos no Field Control.
 - Histórico:
+  - a atribuição de cada atividade vira `assigned` com `to_value` = nome do colaborador e
+    `data {source: "fieldcontrol", task, technician_id}` (`technician_id` quando o colaborador veio no export). A migração
+    `e4b6d8f0a2c3` (só dados) preencheu o `technician_id` das atribuições antigas quando o nome é de um técnico só, e o
+    `template_id` dos `form_removed` antigos (só com `form_id`) quando o nome é de um modelo só. A busca "técnico que
+    atuou" usa o id; o nome só vale no evento sem ele;
   - cada atividade concluída vira apontamento e eventos (em atendimento, resolvida);
   - improdutivas viram `unproductive_visit`; canceladas viram evento de status;
   - comentários entram como notas internas;
@@ -1259,8 +1264,9 @@ offline (`docs/MOBILE_SYNC.md`).
 - `GET /me/invoices/payouts?month=AAAA-MM` (obrigatório) → `InvoicePayoutCandidate[] = {payout_id, ticket_id, code,
   title, amount, status, resolved_at, in_month, invoice: {id, number, status}|null}`. Primeiro os valores do mês (OS
   resolvida ou fechada, ou valor já pago; a data é a da conclusão, sem ela a do lançamento, no fuso da operação), com
-  qualquer situação de nota; depois os de meses anteriores ainda a receber, de OS concluída e sem nota (`in_month`
-  false). Por data, até 300.
+  qualquer situação de nota; depois os de meses anteriores ainda a receber, de OS concluída e sem nota dele (`in_month`
+  false). Por data, até 300. A ligação com nota de outro técnico conta como livre: no mês vem com `invoice` null, e
+  entre as anteriores também aparece.
 - `POST /me/invoices` (multipart): `file`, `number`, `issue_date` (AAAA-MM-DD), `amount` ("1234.56"), `competence`
   (AAAA-MM), `note`, `payout_ids` (UUIDs separados por vírgula) e `client_upload_id` (UUID do app, um por abertura da
   tela, repetido nas novas tentativas) → 201 `MyInvoice`. A mesma `client_upload_id` de novo (resposta perdida): 200 com
@@ -1291,7 +1297,9 @@ depois, o arquivo sai do disco. Um envio de cada técnico por vez (trava por té
    ("01 234" = "1234"): "A nota nº 1234 já foi enviada". Outro técnico pode ter o mesmo número.
 5. As OS escolhidas, travadas (`FOR UPDATE`): do técnico ("Uma das OS escolhidas não é sua", também para id inválido
    ou valor que não existe mais), com a OS resolvida ou fechada ou o valor já pago ("A OS-000123 ainda não foi
-   concluída") e sem outra nota ("A OS-000123 já está na nota nº 1200").
+   concluída") e sem outra nota dele ("A OS-000123 já está na nota nº 1200" só cita nota do próprio técnico). Ligação
+   com nota de outro técnico (não devia existir) conta como livre e é sobrescrita pelo envio, sem mostrar o número da
+   nota do outro.
 6. O tipo pelo conteúdo (`storage.sniff_document`, os primeiros 1024 bytes): PDF (`%PDF-`), XML (começa com `<` depois
    do BOM e dos espaços, sem ser HTML, SVG ou script) ou foto JPG, PNG ou WebP. Vazio: "O arquivo da nota está vazio";
    outro tipo: "Envie a nota em PDF, XML ou foto (JPG, PNG ou WebP)".
@@ -1300,11 +1308,20 @@ depois, o arquivo sai do disco. Um envio de cada técnico por vez (trava por té
 **Rotas da central** (Pagamentos: Visualizar para ver e baixar, Editar para conferir, desfazer e recusar; nenhum item
 novo na matriz). A lista não segue a fila do analista: a nota é do técnico, não de uma OS (abrir a OS continua
 obedecendo a visibilidade de cada um).
-- `GET /technician-invoices?technician_id=&status=pending|checked|rejected&month=AAAA-MM` → `TechnicianInvoiceList =
-  {items, summary, total_count}`. `items`: `TechnicianInvoice` (`MyInvoice` + `technician: Ref` + `reviewed_by:
-  Ref|null`), as mais novas primeiro, até 500; `month` é a competência. `summary = {pending, checked, rejected,
-  pending_amount, checked_amount}` só com os filtros de técnico e mês (os contadores das abas); `total_count` com
-  todos.
+- `GET /technician-invoices?technician_id=&status=pending|checked|rejected&month=AAAA-MM&offset=` →
+  `TechnicianInvoiceList = {items, summary, total_count}`. `month` é a competência.
+  - `items`: `TechnicianInvoice` (`MyInvoice` + `technician: Ref` + `reviewed_by: Ref|null`), até 500 por vez, a partir
+    de `offset` (inteiro ≥ 0, padrão 0; negativo ou acima de 2^63−1: 422).
+  - Com `status=pending`, na ordem da fila: as mais antigas primeiro (pela data de envio, desempate por id). É o que a
+    aba "A conferir" pede.
+  - Sem `status`, ou com `checked` ou `rejected`: as mais novas primeiro.
+  - `total_count` é o total do filtro (técnico, mês e situação), sem o offset: há outra página enquanto
+    `offset + items.length < total_count`.
+  - `summary = {pending, checked, rejected, pending_amount, checked_amount}` continua só com os filtros de técnico e mês
+    (os contadores das abas).
+  - Na web (Pagamentos › Notas fiscais), a aba "A conferir" pede `status=pending` e avisa quando `total_count` passa dos
+    itens que vieram; as outras abas usam a lista sem `status` (as 500 mais novas). O CSV da aba junta as páginas pelo
+    `offset`, uma depois da outra, até o `total_count`.
 - `POST /technician-invoices/{id}/check` → `TechnicianInvoice`: aguardando vira conferida (`reviewed_at`,
   `reviewed_by`); já conferida fica como está; recusada, 422 "Nota recusada: o técnico envia outra".
 - `POST /technician-invoices/{id}/uncheck` → volta a aguardar, sem `reviewed_*`; aguardando fica como está; recusada,
@@ -1324,9 +1341,12 @@ foto abre na tela; PDF e XML baixam (`attachment`), sempre com `nosniff` e CSP `
 
 **Valores.** `PayoutLine.invoice = {id, number, status} | null` em `GET /payouts` e `GET /me/earnings` (só a nota do
 próprio técnico do valor). Trocar o responsável da OS leva o valor não pago para o novo técnico sem a nota
-(`invoice_id` volta a null; a nota fica com o técnico, sem aquela OS). Remover o valor ou tirar o técnico da visita
-apaga a linha e a ligação. Mudar o valor de um pagamento ligado continua permitido (a central vê a diferença). Pagar
-não depende da nota.
+(`invoice_id` volta a null; a nota fica com o técnico, sem aquela OS). A troca trava a OS e depois o valor de quem sai
+(`FOR UPDATE`) e relê o valor do banco antes de passá-lo ao novo técnico: se o técnico que sai estiver enviando uma nota
+com essa OS, a troca espera o envio terminar e a ligação sai do mesmo jeito; o envio que chega depois da troca recebe
+422 "Uma das OS escolhidas não é sua". Ligação com nota de outro técnico nunca aparece (`GET /payouts`,
+`GET /me/earnings`, candidatas) e não ocupa o valor. Remover o valor ou tirar o técnico da visita apaga a linha e a
+ligação. Mudar o valor de um pagamento ligado continua permitido (a central vê a diferença). Pagar não depende da nota.
 
 **Privacidade (LGPD).** A nota traz CPF/CNPJ e endereço do técnico. Só o próprio técnico (as rotas `/me` sempre
 filtram por ele) e quem tem Pagamentos veem; nada vai para o portal do cliente nem para outros técnicos. A nota
