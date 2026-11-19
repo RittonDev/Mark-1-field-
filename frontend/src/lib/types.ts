@@ -522,7 +522,12 @@ export interface TicketDetail extends TicketListItem {
    * nesse horário. O técnico recebe null; servidor antigo não manda.
    */
   next_offer_expires_at?: ISODate | null;
-  recurrence?: { count_30d: number; previous: { id: UUID; code: string; title: string; status: TicketStatus; created_at: ISODate }[] } | null;
+  /**
+   * A oferta aceita pelo responsável atual (só a gestão; sem valor): quando aceitou e quando abriu o escopo. null sem
+   * oferta aceita; o técnico recebe null; servidor antigo não manda.
+   */
+  accepted_offer?: AcceptedOffer | null;
+  recurrence?:{ count_30d: number; previous: { id: UUID; code: string; title: string; status: TicketStatus; created_at: ISODate }[] } | null;
   /** Dados de origem da OS migrada do Field Control (valores, itens, solicitação, arquivos). */
   legacy?: LegacyOrder | null;
   allowed_transitions: TicketStatus[];
@@ -1088,9 +1093,21 @@ export interface Technician {
   on_shift: boolean;
   open_tickets: number;
   service_areas: string[];
-  skills: { name: string; level: string }[];
+  /** Aptidões do perfil técnico (as da ficha aprovada foram copiadas na migração), com o "desde". */
+  skills: TechnicianSkill[];
   application_id: UUID | null;
-  /** Tem chave PIX (ele cadastra no app, em Conta › Meu cadastro). A chave fica em Pagamentos (PayoutBoard.pix). */
+  /** Perfil técnico (o técnico mantém no app; a central só vê). Lista e detalhe; servidor antigo não manda. */
+  tool_ids?: UUID[];
+  availability?: AvailabilitySlot[];
+  transport?: TransportInfo | null;
+  education_count?: number;
+  /** A parte mais recente (app ou ficha); null: nada informado. */
+  tech_profile_updated_at?: ISODate | null;
+  /** Só no detalhe (GET /technicians/{id} e as respostas de um técnico); null na lista. */
+  tools?: Ref[] | null;
+  education?: EducationItem[] | null;
+  tech_profile_updated?: TechProfileStamps | null;
+  /** Tem chave PIX (ele cadastra no app, em Perfil › Configurações › Chave PIX). A chave fica em Pagamentos (PayoutBoard.pix). */
   has_pix?: boolean;
   /** Quando a chave mudou ("Chave nova" por PIX_RECENT_DAYS); null sem chave. */
   pix_updated_at?: ISODate | null;
@@ -1546,6 +1563,10 @@ export interface TechnicianSuggestion {
   favorite_note?: string | null;
   /** Elo do técnico: só o selo (não muda a pontuação nem a ordem). */
   level?: LevelSummary;
+  /** Disponibilidade informada × horário da visita; null: sem horário ou sem disponibilidade informada (neutro). */
+  availability?: "inside" | "outside" | null;
+  /** Com "outside": os turnos da visita fora da disponibilidade, na ordem da grade. */
+  availability_gaps?: AvailabilitySlot[];
 }
 
 // ---- Fila do analista ----
@@ -1955,6 +1976,89 @@ export interface PayoutBoard extends PayoutList {
   pix: Record<UUID, PixInfo>;
 }
 
+/**
+ * Situação de um mês no Faturamento do app (GET /me/earnings/months), calculada no servidor nesta ordem: "rejected"
+ * (recusa da competência sem nota nova depois, com OS do mês sem nota ou mês sem OS), "empty" (mês sem OS: o app não
+ * mostra), "in_progress" (só OS em andamento), "partial" (algo pago e algo a receber ou previsto), "no_invoice",
+ * "in_review", "to_pay", "paid_no_invoice" e "paid". A nota nunca trava o pagamento: "no_invoice" é só informativo.
+ */
+export type EarningsMonthState =
+  | "empty"
+  | "in_progress"
+  | "no_invoice"
+  | "in_review"
+  | "rejected"
+  | "to_pay"
+  | "partial"
+  | "paid_no_invoice"
+  | "paid";
+
+/** Quantos valores (OS) e a soma deles. */
+export interface EarningsBucket {
+  count: number;
+  amount: number;
+}
+
+/** A recusa que ainda vale no mês: a nota recusada mais recente da competência, sem nota enviada depois dela. */
+export interface EarningsRejection {
+  invoice_id: UUID;
+  number: string;
+  /** O motivo da central (3 a 300 caracteres). */
+  reason: string | null;
+  rejected_at: ISODate | null;
+}
+
+/** Um mês de conclusão (OS aberta: o mês do lançamento do valor) no fuso da operação, com as regras de GET /me/earnings. */
+export interface EarningsMonth {
+  /** "AAAA-MM". */
+  month: string;
+  state: EarningsMonthState;
+  /** Valores (OS) do mês; o pendente de OS cancelada não conta. */
+  count: number;
+  /** to_pay + expected + paid: o "Valor total" do cartão. */
+  total: number;
+  /** A receber: OS concluídas e ainda não pagas. */
+  to_pay: EarningsBucket;
+  /** Previsto: OS em andamento. */
+  expected: EarningsBucket;
+  /** Pago (também o de OS cancelada que a central pagou). */
+  paid: EarningsBucket;
+  /** Partes do a receber: sem nota do técnico, com nota em conferência e com nota conferida. */
+  due_without_invoice: EarningsBucket;
+  due_in_review: EarningsBucket;
+  due_checked: EarningsBucket;
+  /** Parte do pago sem nota do técnico. */
+  paid_without_invoice: EarningsBucket;
+  /** Último pagamento das OS do mês. */
+  last_paid_at: ISODate | null;
+  rejection: EarningsRejection | null;
+}
+
+/** Totais do topo do Faturamento: valores das OS de todos os meses; os reembolsos ficam à parte. */
+export interface EarningsTotals {
+  paid: number;
+  to_pay: number;
+  expected: number;
+  /** Parte de to_pay de meses anteriores à janela (já somada em to_pay). */
+  to_pay_older: number;
+  last_paid_at: ISODate | null;
+  /** Reembolsos de custos extras aprovados e ainda não pagos. */
+  reimbursement_to_receive: number;
+  /** Reembolsos já pagos (todos os meses). */
+  reimbursement_paid: number;
+}
+
+/** GET /me/earnings/months?months=12 (só o técnico; months de 1 a 24). */
+export interface EarningsMonths {
+  /** Primeiro mês da janela ("AAAA-MM"). */
+  since: string;
+  /** Mês atual no fuso da operação ("AAAA-MM"). */
+  until: string;
+  totals: EarningsTotals;
+  /** Todos os meses da janela, o mais novo primeiro (também os "empty"). */
+  months: EarningsMonth[];
+}
+
 // --------------------------------------------------------------------------- meu cadastro do técnico
 
 /** Tipo da chave PIX: só o técnico cadastra (app, com a senha); a central vê em Pagamentos e só remove. */
@@ -1991,6 +2095,17 @@ export interface MyProfile {
   /** Link assinado de 12 h (ou a foto do Field Control). */
   avatar_url: string | null;
   pix: PixInfo | null;
+  /** Perfil técnico (Configurações › Atendimento). Ferramentas: só as ativas do catálogo, na ordem do nome. */
+  tool_ids: UUID[];
+  /** Na ordem da grade (seg a dom; manhã, tarde, noite, madrugada). */
+  availability: AvailabilitySlot[];
+  /** null: nunca informou. */
+  transport: TransportInfo | null;
+  /** Mais novas primeiro (since), depois pelo nome. */
+  skills: TechnicianSkill[];
+  /** Em andamento primeiro, depois pelo fim e pelo início, das mais novas para as mais antigas. */
+  education: EducationItem[];
+  tech_profile_updated: TechProfileStamps;
 }
 
 /**
@@ -1999,7 +2114,7 @@ export interface MyProfile {
  * e-mail ou a chave PIX"; e-mail da empresa, "Use um e-mail que não seja da empresa"; sem a senha, "Confirme com a sua
  * senha atual para mudar o e-mail ou a chave PIX"; errada, "Senha atual incorreta"; só então "E-mail já cadastrado".
  * 429 com Retry-After: 5 senhas erradas em 15 min (somando as da troca de senha) ou mais de 10 pedidos de troca de
- * e-mail na hora.
+ * e-mail na hora. Os campos do perfil técnico não pedem senha e valem inteiros (a lista substitui a gravada).
  */
 export interface MyProfileUpdate {
   /** Só letras (com acento), espaço, apóstrofo, hífen e ponto; sem link (422 "Use só letras no nome"). */
@@ -2018,6 +2133,19 @@ export interface MyProfileUpdate {
   address_zip?: string | null;
   /** null tira a chave. */
   pix?: PixIn | null;
+  /**
+   * Ids ativos de GET /technician-tools, a lista inteira (até 200). Desativado é ignorado; id que não existe: 422
+   * "Ferramenta não encontrada. Atualize a lista.". [] ou null limpa.
+   */
+  tool_ids?: UUID[] | null;
+  /** Até 28 turnos; [] ou null limpa. Turno inválido: 422 "Turno desconhecido: …". */
+  availability?: AvailabilitySlot[] | null;
+  /** Meios (até 6, sem repetir) e CNH juntos. null: 422 "Informe os meios de transporte". */
+  transport?: TransportInfo;
+  /** A lista inteira (até 30), sem `since`: o servidor mantém o de quem já estava, pelo nome. [] ou null limpa. */
+  skills?: TechnicianSkillIn[] | null;
+  /** A lista inteira (até 20); o fim não pode ser antes do início. [] ou null limpa. */
+  education?: EducationItemIn[] | null;
   current_password?: string;
 }
 
@@ -2027,6 +2155,101 @@ export interface PixIn {
   key: string;
   /** 3 a 160 caracteres. */
   holder_name: string;
+}
+
+// --------------------------------------------------------------------------- perfil técnico (o técnico mantém no app; a central vê)
+
+/** Dia da semana da disponibilidade, de segunda a domingo (WEEKDAY_ORDER). */
+export type Weekday = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+
+/**
+ * Turno da disponibilidade (DAY_PERIOD): manhã 06h–12h, tarde 12h–18h, noite 18h–24h e madrugada 00h–06h do próprio dia
+ * ("sat:night" é sábado das 00h às 06h). Não é a jornada (o turno com GPS) nem o work_schedule da central.
+ */
+export type DayPeriod = "morning" | "afternoon" | "evening" | "night";
+
+/** Um turno de um dia: "sat:afternoon" é sábado à tarde. */
+export type AvailabilitySlot = `${Weekday}:${DayPeriod}`;
+
+/** Meio de transporte (TRANSPORT_MODE). */
+export type TransportMode = "car" | "motorcycle" | "bicycle" | "public_transport" | "ride_app" | "on_foot";
+
+/** Nível da aptidão: os mesmos códigos da ficha da homologação (SKILL_LEVEL). */
+export type SkillLevel = "basico" | "intermediario" | "avancado";
+
+/** Nível da formação (EDUCATION_LEVEL). */
+export type EducationLevel = "high_school" | "technical" | "undergraduate" | "postgraduate" | "certification" | "free_course";
+
+/** As cinco partes do perfil técnico, cada uma com a própria data (TECH_PROFILE_PART). */
+export type TechProfilePart = "tools" | "availability" | "transport" | "skills" | "education";
+
+/** Meios de transporte e CNH, informados juntos. */
+export interface TransportInfo {
+  modes: TransportMode[];
+  driver_license: boolean;
+}
+
+/** Uma aptidão. `since` ("AAAA-MM-DD") é o dia em que entrou no perfil: o servidor grava e mantém pelo nome. */
+export interface TechnicianSkill {
+  name: string;
+  level: SkillLevel;
+  since: string;
+}
+
+/** Aptidão no PATCH /me/profile: 2 a 80 caracteres, sem repetir o nome (sem diferença de maiúsculas e acentos). */
+export interface TechnicianSkillIn {
+  name: string;
+  level: SkillLevel;
+}
+
+/** Um curso. Meses em "AAAA-MM"; `end` null: em andamento. */
+export interface EducationItem {
+  id: UUID;
+  course: string;
+  level: EducationLevel;
+  institution: string;
+  start: string;
+  end: string | null;
+}
+
+/** Curso no PATCH: sem `id` (ou com um que não está na lista gravada) é novo. Curso e instituição: 2 a 120. */
+export interface EducationItemIn {
+  id?: UUID | null;
+  course: string;
+  level: EducationLevel;
+  institution: string;
+  start: string;
+  end?: string | null;
+}
+
+/** Quando a parte mudou e por onde: o técnico no app ou a ficha da homologação (na aprovação). */
+export interface TechProfileStamp {
+  at: ISODate;
+  via: "app" | "ficha";
+}
+
+/** Uma data por parte; null: nunca informada. */
+export type TechProfileStamps = Record<TechProfilePart, TechProfileStamp | null>;
+
+/** GET /technician-tools: o catálogo de ferramentas (a central mantém em Configurações › Técnicos). */
+export interface TechnicianTool {
+  id: UUID;
+  name: string;
+  is_active: boolean;
+  /** Só para a gestão: quantos técnicos marcaram. null para o técnico. */
+  technicians: number | null;
+}
+
+/** POST /technician-tools. */
+export interface TechnicianToolCreate {
+  /** 2 a 80 caracteres; nome repetido (sem acento e maiúsculas): 409. */
+  name: string;
+}
+
+/** PATCH /technician-tools/{id}: só o que mudou. */
+export interface TechnicianToolUpdate {
+  name?: string;
+  is_active?: boolean;
 }
 
 /** Campos do histórico do cadastro (USER_CHANGE_LABEL). */
@@ -2050,6 +2273,13 @@ export type UserChangeField =
   | "pix"
   /** Titular da conta da chave PIX. Não vem para quem não tem Pagamentos. */
   | "pix_holder"
+  /** Perfil técnico. Em tools, availability, skills e education, `to` é o que entrou e `from` o que saiu (null: nada). */
+  | "tools"
+  | "availability"
+  | "skills"
+  | "education"
+  /** "Carro, Moto · com CNH"; null: não informado. */
+  | "transport"
   /** to "nova" na troca, null na remoção. */
   | "avatar"
   /**
