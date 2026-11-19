@@ -1277,18 +1277,18 @@ async def stats(db: AsyncSession, technician_id: uuid.UUID, now: datetime | None
     for key in keys:
         row = by_month.get(key)
         happened = events.get(key) or Counter()
-        done = row.services if row is not None else 0
-        own = row.as_assignee if row is not None else 0
+        served = row.services if row is not None else 0
+        assigned = row.as_assignee if row is not None else 0
         legacy = row.legacy if row is not None else 0
         months.append(
             StatsMonth(
                 month=key,
                 current=key == keys[-1],
-                services=done,
-                as_assignee=own,
-                as_helper=done - own,
+                services=served,
+                as_assignee=assigned,
+                as_helper=served - assigned,
                 legacy=legacy,
-                legacy_only=done > 0 and legacy == done,
+                legacy_only=served > 0 and legacy == served,
                 measured=row.measured if row is not None else 0,
                 arrivals=row.arrivals if row is not None else 0,
                 late=happened[LevelOccurrenceKind.LATE],
