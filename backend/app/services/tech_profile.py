@@ -144,7 +144,8 @@ _MONTH_TEXT = re.compile(r"([0-9]{4})-([0-9]{2})(?:-[0-9]{2})?")
 
 
 def fold(text: str) -> str:
-    """NFKD sem marcas, casefold, espaços colapsados (comparar nomes sem acento e sem maiúsculas)."""
+    """NFKD sem marcas, casefold, espaços colapsados (comparar nomes sem acento e sem
+    maiúsculas)."""
     decomposed = unicodedata.normalize("NFKD", text or "")
     plain = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
     return " ".join(plain.casefold().split())
@@ -177,13 +178,15 @@ def _join(words: list[str]) -> str:
 
 
 def periods_phrase(periods: Iterable[str]) -> str:
-    """"manhã e tarde", "manhã, tarde, noite e madrugada" (na ordem da grade; "" sem turno)."""
+    """Os turnos na ordem da grade: "manhã e tarde", "manhã, tarde, noite e madrugada" ("" sem
+    turno)."""
     wanted = set(periods)
     return _join([PERIOD_LABEL[p] for p in PERIODS if p in wanted])
 
 
 def slots_text(slots: Iterable[str]) -> str:
-    """Igual a slotsText do TS: "sáb · tarde", "seg a sex · manhã e tarde; sáb · manhã"; vazio: ""."""
+    """Igual a slotsText do TS: "sáb · tarde", "seg a sex · manhã e tarde; sáb · manhã"; vazio:
+    "". Dias seguidos com os mesmos turnos se juntam."""
     wanted = set(slots)
     days = [(d, [p for p in PERIODS if f"{d}:{p}" in wanted]) for d in WEEKDAYS]
     parts: list[str] = []
@@ -216,8 +219,8 @@ def period_at(hour: int) -> str:
 
 
 def visit_slots(start: datetime, end: datetime | None, tz: ZoneInfo) -> list[str]:
-    """Turnos tocados por [start, end) no fuso local; end ausente ou ≤ start: o turno do início; teto
-    de 7 dias. Anda de fronteira em fronteira (00h, 06h, 12h, 18h)."""
+    """Turnos tocados por [start, end) no fuso local; end ausente ou ≤ start: o turno do início;
+    teto de 7 dias. Anda de fronteira em fronteira (00h, 06h, 12h, 18h)."""
     local, stop = start.astimezone(tz), (end or start).astimezone(tz)
     if stop <= local:
         stop = local + timedelta(minutes=1)
@@ -230,7 +233,11 @@ def visit_slots(start: datetime, end: datetime | None, tz: ZoneInfo) -> list[str
             out.append(slot)
         base = cursor.replace(minute=0, second=0, microsecond=0)
         boundary = (cursor.hour // 6 + 1) * 6
-        cursor = base.replace(hour=0) + timedelta(days=1) if boundary == 24 else base.replace(hour=boundary)
+        cursor = (
+            base.replace(hour=0) + timedelta(days=1)
+            if boundary == 24
+            else base.replace(hour=boundary)
+        )
     return sort_slots(out)
 
 
@@ -258,32 +265,34 @@ def _modes(modes: Iterable[str]) -> list[str]:
 
 
 def transport_text(modes: Iterable[str], driver_license: bool) -> str:
-    """"Carro, Moto · com CNH" (rótulos na ordem de TRANSPORT_MODES), "Nenhum · sem CNH"."""
+    """Meios e CNH em texto: "Carro, Moto · com CNH" (rótulos na ordem de TRANSPORT_MODES),
+    "Nenhum · sem CNH"."""
     labels = [TRANSPORT_MODES[mode] for mode in _modes(modes)]
     return f"{', '.join(labels) or 'Nenhum'} · {'com CNH' if driver_license else 'sem CNH'}"
 
 
 def month_text(value: str) -> str:
-    """"2024-02" ou "2024-02-19" → "02/2024" (fora do formato, volta como veio)."""
+    """Mês em texto: "2024-02" ou "2024-02-19" → "02/2024" (fora do formato, volta como veio)."""
     match = _MONTH_TEXT.fullmatch(value or "")
     return f"{match.group(2)}/{match.group(1)}" if match else value
 
 
 def education_period_text(start: str, end: str | None) -> str:
-    """"02/2022 a 12/2023"; sem fim: "desde 02/2024 (em andamento)"."""
+    """Período da formação: "02/2022 a 12/2023"; sem fim, "desde 02/2024 (em andamento)"."""
     if end:
         return f"{month_text(start)} a {month_text(end)}"
     return f"desde {month_text(start)} (em andamento)"
 
 
 def skill_label(item: Mapping[str, Any]) -> str:
-    """"Linux (Básico)"."""
+    """A aptidão no histórico: "Linux (Básico)"."""
     level = str(item.get("level") or "")
     return f"{item.get('name') or ''} ({SKILL_LEVELS.get(level, level)})"
 
 
 def education_label(item: Mapping[str, Any]) -> str:
-    """"Técnico em redes · Escola Exemplo · Técnico · desde 02/2024 (em andamento)"."""
+    """O curso no histórico: "Técnico em redes · Escola Exemplo · Técnico · desde 02/2024 (em
+    andamento)"."""
     level = str(item.get("level") or "")
     period = education_period_text(str(item.get("start") or ""), item.get("end"))
     return " · ".join(
@@ -446,7 +455,7 @@ def _stamp(at: datetime, via: str) -> dict[str, str]:
 
 
 def _sorted_skills(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """"Desde" mais novo primeiro, depois o nome (sem acento e sem maiúsculas)."""
+    """O "desde" mais novo primeiro, depois o nome (sem acento e sem maiúsculas)."""
     ordered = sorted(items, key=lambda item: _name_key(item["name"]))
     return sorted(ordered, key=lambda item: item["since"], reverse=True)
 
@@ -477,7 +486,9 @@ def _education_set(items: Iterable[Any]) -> set[tuple[Any, ...]]:
     }
 
 
-async def _wanted_tools(db: AsyncSession, user: User, sent: Iterable[Any] | None) -> list[str] | None:
+async def _wanted_tools(
+    db: AsyncSession, user: User, sent: Iterable[Any] | None
+) -> list[str] | None:
     """Os ids a gravar (texto, em ordem), ou None sem mudança. A desativada enviada é ignorada e as
     guardadas que não estão ativas ficam (voltam se a central reativar)."""
     catalog = await tool_catalog(db)
@@ -519,9 +530,7 @@ def _wanted_education(user: User, sent: Iterable[Any]) -> list[dict[str, Any]]:
     """Os cursos a gravar. Com o id de um gravado, mantém o id; sem id (ou com um desconhecido),
     reaproveita o de um gravado igual que nenhum outro item citou, senão ganha um novo."""
     items = list(sent)
-    stored = [
-        item for item in user.education or [] if isinstance(item, Mapping) and item.get("id")
-    ]
+    stored = [item for item in user.education or [] if isinstance(item, Mapping) and item.get("id")]
     stored_ids = {str(item["id"]) for item in stored}
     taken = {str(item.id) for item in items if item.id is not None and str(item.id) in stored_ids}
     assigned: set[str] = set()

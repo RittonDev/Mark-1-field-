@@ -1,14 +1,15 @@
 """Perfil técnico, catálogo de ferramentas e escopo lido na oferta
 
-- Tabela tool_catalog: o ferramental dos técnicos (a central inclui, renomeia e desativa; sem excluir), com 20
-  ferramentas iniciais de TI de campo.
-- users ganha o perfil técnico, que o técnico mantém no app: tool_ids, availability ("dia:turno"), transport_modes,
-  has_driver_license, skills ([{name, level, since}]), education ([{id, course, level, institution, start, end}]) e
-  tech_profile_stamps ({parte: {at, via}}). Todas NOT NULL com default: a importação do Field Control e os INSERT em
-  lote não passam por elas.
-- Técnicos com ficha de homologação aprovada recebem a disponibilidade, o transporte e as aptidões da ficha (via
-  "ficha"), com o mesmo mapa de services/tech_profile.py, copiado aqui (tests/test_tech_profile.py confere a cópia).
-  Rodar de novo não muda nada: só preenche quem ainda tem tech_profile_stamps vazio.
+- Tabela tool_catalog: o ferramental dos técnicos (a central inclui, renomeia e desativa; sem
+  excluir), com 20 ferramentas iniciais de TI de campo.
+- users ganha o perfil técnico, que o técnico mantém no app: tool_ids, availability ("dia:turno"),
+  transport_modes, has_driver_license, skills ([{name, level, since}]), education ([{id, course,
+  level, institution, start, end}]) e tech_profile_stamps ({parte: {at, via}}). Todas NOT NULL com
+  default: a importação do Field Control e os INSERT em lote não passam por elas.
+- Técnicos com ficha de homologação aprovada recebem a disponibilidade, o transporte e as aptidões
+  da ficha (via "ficha"), com o mesmo mapa de services/tech_profile.py, copiado aqui
+  (tests/test_tech_profile.py confere a cópia). Rodar de novo não muda nada: só preenche quem ainda
+  tem tech_profile_stamps vazio.
 - ticket_offers.scope_read_at: quando o técnico abriu o escopo no app (gravado no aceite).
 
 O downgrade apaga o perfil técnico informado e o catálogo.
@@ -79,7 +80,8 @@ TEXT_MIN, SKILL_NAME_MAX = 2, 80
 
 APPROVED = sa.text(
     """
-    SELECT a.user_id, a.availability, a.has_vehicle, a.vehicle_type, a.has_driver_license, a.skills, a.created_at
+    SELECT a.user_id, a.availability, a.has_vehicle, a.vehicle_type, a.has_driver_license,
+           a.skills, a.created_at
       FROM technician_applications a
       JOIN users u ON u.id = a.user_id
      WHERE CAST(a.status AS text) = 'approved'
@@ -194,11 +196,17 @@ def upgrade() -> None:
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
         sa.Column("name", sa.String(length=80), nullable=False),
         sa.Column("is_active", sa.Boolean(), server_default=sa.true(), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
         sa.UniqueConstraint("name", name="uq_tool_catalog_name"),
     )
-    op.bulk_insert(tools, [{"id": uuid.uuid4(), "name": name, "is_active": True} for name in DEFAULT_TOOLS])
+    op.bulk_insert(
+        tools, [{"id": uuid.uuid4(), "name": name, "is_active": True} for name in DEFAULT_TOOLS]
+    )
     for name, default in (
         ("tool_ids", "[]"),
         ("availability", "[]"),
@@ -209,9 +217,12 @@ def upgrade() -> None:
     ):
         op.add_column("users", sa.Column(name, JSONB, server_default=default, nullable=False))
     op.add_column(
-        "users", sa.Column("has_driver_license", sa.Boolean(), server_default=sa.false(), nullable=False)
+        "users",
+        sa.Column("has_driver_license", sa.Boolean(), server_default=sa.false(), nullable=False),
     )
-    op.add_column("ticket_offers", sa.Column("scope_read_at", sa.DateTime(timezone=True), nullable=True))
+    op.add_column(
+        "ticket_offers", sa.Column("scope_read_at", sa.DateTime(timezone=True), nullable=True)
+    )
     _backfill()
 
 

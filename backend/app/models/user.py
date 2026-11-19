@@ -117,9 +117,7 @@ class User(UUIDPrimaryKey, Timestamps, Base):
     tool_ids: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default="[]")
     availability: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default="[]")
     transport_modes: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default="[]")
-    has_driver_license: Mapped[bool] = mapped_column(
-        Boolean, default=False, server_default="false"
-    )
+    has_driver_license: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     skills: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list, server_default="[]")
     education: Mapped[list[dict[str, Any]]] = mapped_column(
         JSONB, default=list, server_default="[]"

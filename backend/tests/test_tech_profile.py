@@ -1,9 +1,9 @@
 """Perfil técnico (services/tech_profile.py e schemas/tech_profile.py).
 
-Sem banco: os textos curtos (os mesmos casos das sondas de lib/constants.ts), os turnos que uma visita
-toca e o sinal da disponibilidade na sugestão, as mensagens de cada item do PATCH /me/profile, a
-normalização e o "o que conta como mudança" de `wanted`/`apply`, o que a ficha da homologação traz na
-aprovação e a cópia desse mapa na migração f5a7c9e1b3d6. Dados fictícios.
+Sem banco: os textos curtos (os mesmos casos das sondas de lib/constants.ts), os turnos que uma
+visita toca e o sinal da disponibilidade na sugestão, as mensagens de cada item do PATCH
+/me/profile, a normalização e o "o que conta como mudança" de `wanted`/`apply`, o que a ficha da
+homologação traz na aprovação e a cópia desse mapa na migração f5a7c9e1b3d6. Dados fictícios.
 """
 
 import importlib.util
@@ -301,7 +301,9 @@ async def test_availability_and_transport_change_only_for_real() -> None:
     }
     assert tp.transport_of(user) is not None
     assert await _save(user, transport={"modes": [], "driver_license": False}) == {}
-    new = await _save(user, transport={"modes": ["motorcycle", "car", "car"], "driver_license": True})
+    new = await _save(
+        user, transport={"modes": ["motorcycle", "car", "car"], "driver_license": True}
+    )
     assert new == {"transport": {"modes": ["car", "motorcycle"], "driver_license": True}}
     assert (user.transport_modes, user.has_driver_license) == (["car", "motorcycle"], True)
     assert set(user.tech_profile_stamps) == {"availability", "transport"}
@@ -330,7 +332,10 @@ async def test_skills_keep_since_by_name() -> None:
     ]
     assert user.skills == new["skills"]
     # Reordenar não é mudança.
-    same = [{"name": "linux", "level": "avancado"}, {"name": "Fibra óptica (fusão)", "level": "basico"}]
+    same = [
+        {"name": "linux", "level": "avancado"},
+        {"name": "Fibra óptica (fusão)", "level": "basico"},
+    ]
     assert await _save(user, skills=same) == {}
     # Trocar só a grafia é mudança e grava; o "desde" fica.
     new = await _save(user, skills=[{"name": "Linux", "level": "avancado"}])
@@ -397,7 +402,11 @@ async def test_tools_hide_inactive_and_keep_them(monkeypatch: pytest.MonkeyPatch
     # Só as ativas aparecem, em ordem alfabética; reativada, volta.
     assert tp.active_tool_ids(user, catalog) == [uuid.UUID(alicate), uuid.UUID(trena)]
     catalog[escada] = tp.ToolInfo("escada", True)
-    assert [ref.name for ref in tp.tool_refs(user, catalog)] == ["Alicate de corte", "escada", "Trena"]
+    assert [ref.name for ref in tp.tool_refs(user, catalog)] == [
+        "Alicate de corte",
+        "escada",
+        "Trena",
+    ]
 
 
 def test_apply_writes_new_objects_and_stamps() -> None:
@@ -527,7 +536,7 @@ def test_migration_copies_the_service_rules() -> None:
     assert migration.FICHA_VEHICLE == tp.FICHA_VEHICLE
     assert (migration.WEEKDAYS, migration.PERIODS) == (tp.WEEKDAYS, tp.PERIODS)
     assert migration.ALL_SLOTS == tp.ALL_SLOTS
-    assert migration.SKILL_LEVELS == tuple(SKILL_LEVELS)
+    assert tuple(SKILL_LEVELS) == migration.SKILL_LEVELS
     assert (migration.MAX_SKILLS, migration.TEXT_MIN, migration.SKILL_NAME_MAX) == (
         tp.MAX_SKILLS,
         tp.TEXT_MIN,
@@ -540,7 +549,11 @@ def test_migration_copies_the_service_rules() -> None:
     "fields",
     [
         {},
-        {"availability": ["dias_uteis_manha", "sabado"], "has_vehicle": True, "vehicle_type": "moto"},
+        {
+            "availability": ["dias_uteis_manha", "sabado"],
+            "has_vehicle": True,
+            "vehicle_type": "moto",
+        },
         {"availability": ["plantao", "x"], "has_driver_license": True},
         {"has_vehicle": True, "vehicle_type": "outro"},
         {
