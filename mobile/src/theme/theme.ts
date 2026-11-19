@@ -67,6 +67,10 @@ export interface Palette {
   shadow: string;
   /** Sombra muito leve (y1, blur 3, ~5%); vazia no modo escuro, onde a borda basta. */
   elevation: string | undefined;
+  /** Série única dos gráficos (Estatísticas): a mesma --viz-1 da web. Nunca cor de status. */
+  viz1: string;
+  /** Linhas de grade dos gráficos: a mesma --viz-grid da web. */
+  vizGrid: string;
 }
 
 export const LIGHT: Palette = {
@@ -108,6 +112,8 @@ export const LIGHT: Palette = {
   toastMuted: "#C4C9D1",
   shadow: "#000000",
   elevation: "0px 1px 3px rgba(0, 0, 0, 0.05)",
+  viz1: "#2447FF",
+  vizGrid: "#ECEEF1",
 };
 
 export const DARK: Palette = {
@@ -148,6 +154,8 @@ export const DARK: Palette = {
   toastMuted: "#9BA1AC",
   shadow: "#000000",
   elevation: undefined,
+  viz1: "#5470FF",
+  vizGrid: "#23262C",
 };
 
 // ─────────────────────────── preferência ───────────────────────────

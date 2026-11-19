@@ -89,7 +89,9 @@ async def _cancel(client: AsyncClient, world: World, ticket_id: str) -> None:
     await transition(client, sup, t, "cancelled", note="Cliente desistiu")
 
 
-async def _invoice(client: AsyncClient, tech: Actor, offset: int, number: str, *payouts: str) -> str:
+async def _invoice(
+    client: AsyncClient, tech: Actor, offset: int, number: str, *payouts: str
+) -> str:
     """Nota do técnico com a competência do mês `offset` (e as OS dadas)."""
     fields = {"number": number, "amount": "100.00", "competence": _key(offset)}
     if payouts:
@@ -368,12 +370,9 @@ async def test_same_rules_as_my_earnings(
         r = await client.get(f"{API}/me/earnings", params={"month": month["month"]}, headers=th)
         assert r.status_code == 200, r.text
         mine = r.json()
+        sums = tuple(month[name]["amount"] for name in ("to_pay", "expected", "paid"))
         summary = mine["summary"]
-        assert (month["to_pay"]["amount"], month["expected"]["amount"], month["paid"]["amount"]) == (
-            summary["to_pay"],
-            summary["expected"],
-            summary["paid"],
-        ), month["month"]
+        assert sums == (summary["to_pay"], summary["expected"], summary["paid"]), month["month"]
         assert month["count"] == mine["total_count"] == len(mine["items"]), month["month"]
         seen.append((month["month"], month["count"], month["total"]))
     assert seen == [(_key(0), 3, 240.0), (_key(-1), 3, 120.0), (_key(-2), 1, 40.0)]

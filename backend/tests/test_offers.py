@@ -1283,7 +1283,8 @@ async def test_accept_records_when_the_scope_was_read(
 
     await open_offer(client, world.tech, mine["id"])
     url = f"{API}/me/offers/{mine['id']}/accept"
-    r = await client.post(url, json={"scope_read_at": read_at.isoformat()}, headers=world.tech.headers)
+    body = {"scope_read_at": read_at.isoformat()}
+    r = await client.post(url, json=body, headers=world.tech.headers)
     assert r.status_code == 200, r.text
     assert r.json()["accepted_offer"] is None  # a resposta é a OS como o app vê
 
@@ -1337,7 +1338,9 @@ async def test_scope_read_at_is_clamped_and_optional(
         offer = (await send(client, sup, t["id"], [world.tech]))[0]
         async with engine.begin() as conn:
             await conn.execute(
-                text("UPDATE ticket_offers SET created_at = now() - interval '1 hour' WHERE id = :o"),
+                text(
+                    "UPDATE ticket_offers SET created_at = now() - interval '1 hour' WHERE id = :o"
+                ),
                 {"o": offer["id"]},
             )
         await open_offer(client, world.tech, offer["id"])
@@ -1431,7 +1434,8 @@ async def test_closed_offer_keeps_the_estimate(client: AsyncClient, world: World
 
     u = await create(client, world)
     other = (await send(client, sup, u["id"], [world.tech]))[0]
-    assert (await open_offer(client, world.tech, other["id"]))["ticket"]["estimated_minutes"] is None
+    opened = await open_offer(client, world.tech, other["id"])
+    assert opened["ticket"]["estimated_minutes"] is None
 
 
 async def test_accepted_offer_without_payouts_screen(client: AsyncClient, world: World) -> None:
@@ -1460,6 +1464,5 @@ async def test_accepted_offer_without_payouts_screen(client: AsyncClient, world:
     assert (await client.get(f"{API}/tickets/{t['id']}/offers", headers=an)).status_code == 403
     # OS sem oferta aceita: null.
     plain = await create(client, world)
-    assert (await client.get(f"{API}/tickets/{plain['id']}", headers=an)).json()[
-        "accepted_offer"
-    ] is None
+    plain = (await client.get(f"{API}/tickets/{plain['id']}", headers=an)).json()
+    assert plain["accepted_offer"] is None
