@@ -523,7 +523,7 @@ export default function TechnicianSignupPage() {
   }, [form, step, protocol, pendingForeign, token]);
 
   // A foto guardada para o "Recarregar" vale só para esta abertura: sai da aba logo depois de a ficha montar. Num efeito,
-  // e não na leitura: um render descartado (hidratação refeita) leria de novo e não a acharia mais.
+  // e não na leitura: um render descartado (suspensão, hidratação refeita) leria de novo e não a acharia mais.
   useEffect(() => {
     dropKeptPhotos();
   }, []);
