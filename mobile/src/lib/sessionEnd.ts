@@ -59,8 +59,9 @@ async function cleanOnce(): Promise<boolean> {
     if (ending?.wipe) {
       try {
         await wipeLocalData();
-        // Apagados: o motivo continua gravado para o login da próxima abertura.
-        if (session.get().status !== "signedIn") await session.setPendingEnd({ ...ending, wipe: false });
+        // Apagados: o motivo continua gravado para o login da próxima abertura (se nesse meio-tempo não entrou outro
+        // fim nem outra sessão).
+        if ((await session.pendingEnd().catch(() => null)) === ending) await session.setPendingEnd({ ...ending, wipe: false });
       } catch (error) {
         done = false;
         console.warn("Falha ao apagar os dados do aparelho", error);
