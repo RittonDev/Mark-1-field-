@@ -30,7 +30,13 @@ from app.models import (
     User,
 )
 from app.models.ticket import ticket_helpers
-from app.services import geo, technician_favorites, technician_levels, technician_regions
+from app.services import (
+    geo,
+    tech_profile,
+    technician_favorites,
+    technician_levels,
+    technician_regions,
+)
 from app.services.schedule import busy_people, visit_end
 from app.services.workflow import OPEN_STATUSES
 
@@ -199,7 +205,8 @@ async def suggest(db: AsyncSession, target: Target, limit: int = 5) -> list[dict
 
     Só técnicos ativos (a OS só pode ir para quem está no app). A distância e as visitas a
     esta mesma loja vêm do mesmo cálculo de "técnicos mais próximos". Os favoritos da cidade da
-    loja ganham pontos e vaga garantida entre os `limit`.
+    loja ganham pontos e vaga garantida entre os `limit`. Com horário, a disponibilidade
+    informada no app soma ou tira poucos pontos (tech_profile.AVAILABILITY_*_POINTS).
     """
     techs = list(
         await db.scalars(
@@ -254,6 +261,12 @@ async def suggest(db: AsyncSession, target: Target, limit: int = 5) -> list[dict
     )
     # Favoritos da cidade da loja (pela regra ou fixados pela central). Sem UF, nenhum.
     marks = await technician_favorites.marks_for_place(db, target.state, target.city)
+    # Os turnos que a visita toca, no fuso da operação (sem horário, nenhum: sinal neutro).
+    visit = (
+        tech_profile.visit_slots(target.start, target.end, ZoneInfo(settings.TIMEZONE))
+        if target.start
+        else []
+    )
 
     ranked = []
     for tech in techs:
@@ -314,6 +327,14 @@ async def suggest(db: AsyncSession, target: Target, limit: int = 5) -> list[dict
             else:
                 score += 5
                 reasons.append("Livre no horário")
+        # Disponibilidade informada no app: dentro, sem motivo (não disputa com "Livre no
+        # horário"); fora, o motivo com os turnos que faltam.
+        signal, gaps = tech_profile.availability_signal(tech.availability or [], visit)
+        if signal == "inside":
+            score += tech_profile.AVAILABILITY_INSIDE_POINTS
+        elif signal == "outside":
+            score += tech_profile.AVAILABILITY_OUTSIDE_POINTS
+            reasons.append(f"Fora da disponibilidade ({tech_profile.slots_text(gaps)})")
         day_load = day_loads.get(tech.id, 0) if target.start else None
         if day_load is not None:
             # Agenda do dia equilibrada: quem já está cheio no dia perde um pouco de pontos.
@@ -348,6 +369,8 @@ async def suggest(db: AsyncSession, target: Target, limit: int = 5) -> list[dict
                 "reasons": reasons,
                 "favorite": mark.kind if mark is not None else None,
                 "favorite_note": mark.note if mark is not None else None,
+                "availability": signal,
+                "availability_gaps": gaps,
             }
         )
     ranked.sort(key=_order)
