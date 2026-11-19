@@ -2517,15 +2517,32 @@ export interface LevelOccurrence {
   detail: string;
 }
 
-/** A ocorrência desconsiderada pela central (só a central vê). */
+/**
+ * A OS da ocorrência na central. `hidden`: OS de outra fila (quem pede vê só a própria fila): vem sem id e sem código,
+ * com o título "OS de outra fila"; sem link e sem desconsiderar (o servidor responde 403 QUEUE_FORBIDDEN).
+ */
+export interface CentralLevelTicketRef {
+  id: UUID | null;
+  /** "OS-000123"; null na OS de outra fila. */
+  code: string | null;
+  title: string;
+  hidden: boolean;
+}
+
+/**
+ * A ocorrência desconsiderada pela central (só a central vê). `note` vem null na OS de outra fila (ficam quem
+ * desconsiderou e quando).
+ */
 export interface LevelWaiver {
   id: UUID;
-  note: string;
+  note: string | null;
   created_by: Ref | null;
   created_at: ISODate;
 }
 
-export interface CentralLevelOccurrence extends LevelOccurrence {
+/** Na central, também as desconsideradas. Na OS de outra fila, `detail` vem sem a nota da reabertura. */
+export interface CentralLevelOccurrence extends Omit<LevelOccurrence, "ticket"> {
+  ticket: CentralLevelTicketRef;
   waiver: LevelWaiver | null;
 }
 
