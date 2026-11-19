@@ -1,6 +1,9 @@
 """Base técnica: analistas e gestores cuidam do acesso dos técnicos ao app.
 
-Só mexe em usuários técnicos (analistas e clientes do portal ficam em Usuários).
+Só mexe em usuários técnicos (analistas e clientes do portal ficam em Usuários). O perfil técnico
+(ferramental, disponibilidade, transporte, aptidões e formação) o técnico mantém no app: aqui a
+central só lê (to_out) e filtra a base por ferramenta e por dia/turno (list_technicians); o
+PATCH da ficha não mexe nele.
 """
 
 import asyncio
@@ -11,7 +14,7 @@ from datetime import timedelta
 from typing import Any
 
 from fastapi import UploadFile
-from sqlalchemy import func, select
+from sqlalchemy import ColumnElement, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -19,7 +22,7 @@ from app.core.enums import ApplicationStatus, UserRole
 from app.core.security import create_token, hash_password_async
 from app.db.base import utcnow
 from app.models import ServiceType, Team, TechnicianApplication, Ticket, User
-from app.schemas.onboarding import SkillOut
+from app.schemas.tech_profile import DayPeriod, Weekday
 from app.schemas.technician import (
     Credential,
     ImportResult,
@@ -32,6 +35,7 @@ from app.services import (
     cities,
     search,
     storage,
+    tech_profile,
     technician_levels,
     technician_regions,
     user_history,
@@ -142,7 +146,12 @@ async def _check_team(db: AsyncSession, team_id: uuid.UUID | None) -> None:
         raise WorkflowError("Grupo não encontrado")
 
 
-async def to_out(db: AsyncSession, users: list[User]) -> list[TechnicianOut]:
+async def to_out(
+    db: AsyncSession, users: list[User], *, detail: bool = False
+) -> list[TechnicianOut]:
+    """A ficha dos técnicos para a central. `detail` (um técnico: GET /technicians/{id} e as
+    respostas do cadastro) traz também os nomes das ferramentas, a formação e a data de cada
+    parte do perfil técnico; na lista esses três vão null."""
     from app.services import tracking  # import tardio, como nas sugestões (tracking puxa tickets)
 
     ids = [u.id for u in users]
@@ -160,15 +169,22 @@ async def to_out(db: AsyncSession, users: list[User]) -> list[TechnicianOut]:
             )
         ).all()
     )
+    # Da ficha aprovada, só as áreas e o link (as aptidões agora são do perfil técnico).
     profiles = {
-        a.user_id: a
-        for a in await db.scalars(
-            select(TechnicianApplication).where(
+        user_id: (application_id, areas)
+        for user_id, application_id, areas in await db.execute(
+            select(
+                TechnicianApplication.user_id,
+                TechnicianApplication.id,
+                TechnicianApplication.service_areas,
+            ).where(
                 TechnicianApplication.user_id.in_(ids),
                 TechnicianApplication.status == ApplicationStatus.APPROVED,
             )
         )
     }
+    # Ferramental: o catálogo (ativas e desativadas; ≤ 200 linhas), só se alguém marcou alguma.
+    catalog = await tech_profile.tool_catalog(db) if any(u.tool_ids for u in users) else {}
     # Serviços que faz (ids gravados na ficha), com o nome atual do tipo de serviço.
     wanted = {sid for u in users for sid in (u.service_type_ids or [])}
     service_names: dict[str, str] = {}
@@ -190,7 +206,8 @@ async def to_out(db: AsyncSession, users: list[User]) -> list[TechnicianOut]:
     levels = await technician_levels.summaries(db, ids)
     out = []
     for u in users:
-        profile = profiles.get(u.id)
+        application_id, areas = profiles.get(u.id, (None, None))
+        education = tech_profile.education_of(u)
         out.append(
             TechnicianOut(
                 id=u.id,
@@ -210,9 +227,9 @@ async def to_out(db: AsyncSession, users: list[User]) -> list[TechnicianOut]:
                 avatar_url=avatar_url(u),
                 on_shift=u.id in on_shift,
                 open_tickets=open_counts.get(u.id, 0),
-                service_areas=profile.service_areas if profile else [],
-                skills=[SkillOut(**s) for s in profile.skills] if profile else [],
-                application_id=profile.id if profile else None,
+                service_areas=list(areas or []),
+                skills=tech_profile.skills_of(u),
+                application_id=application_id,
                 base_city=u.base_city,
                 base_state=u.base_state,
                 base_source=u.base_source,  # type: ignore[arg-type]
@@ -231,9 +248,30 @@ async def to_out(db: AsyncSession, users: list[User]) -> list[TechnicianOut]:
                 has_pix=has_pix(u),
                 pix_updated_at=u.pix_updated_at if has_pix(u) else None,
                 level=technician_levels.summary_of(levels, u.id),
+                tool_ids=tech_profile.active_tool_ids(u, catalog),
+                availability=tech_profile.sort_slots(u.availability or []),
+                transport=tech_profile.transport_of(u),
+                education_count=len(education),
+                tech_profile_updated_at=tech_profile.latest_stamp(u),
+                tools=tech_profile.tool_refs(u, catalog) if detail else None,
+                education=education if detail else None,
+                tech_profile_updated=tech_profile.stamps_of(u) if detail else None,
             )
         )
     return out
+
+
+def availability_filter(
+    day: Weekday | None, period: DayPeriod | None
+) -> ColumnElement[bool] | None:
+    """Disponível no dia e/ou no turno, pelo que o técnico informou no app: os dois, aquele turno
+    daquele dia; só o dia, qualquer turno dele; só o turno, em qualquer dia. Quem nunca informou
+    não entra. Sem os dois, None (sem filtro)."""
+    if day is None and period is None:
+        return None
+    days = (day,) if day is not None else tech_profile.WEEKDAYS
+    periods = (period,) if period is not None else tech_profile.PERIODS
+    return or_(*(User.availability.contains([f"{d}:{p}"]) for d in days for p in periods))
 
 
 async def list_technicians(
@@ -244,14 +282,23 @@ async def list_technicians(
     state: str | None = None,
     city: str | None = None,
     *,
+    tool_id: uuid.UUID | None = None,
+    day: Weekday | None = None,
+    period: DayPeriod | None = None,
     limit: int = 2000,
     offset: int = 0,
 ) -> tuple[list[TechnicianOut], int]:
-    """Uma página da base técnica e o total que bate com os filtros."""
+    """Uma página da base técnica e o total que bate com os filtros. `tool_id`: quem marcou a
+    ferramenta (a mesma regra da contagem do catálogo); `day`/`period`: availability_filter."""
     conds = [User.role == UserRole.TECHNICIAN]
     region = technician_regions.region_filter(state, city)
     if region is not None:
         conds.append(region)
+    if tool_id is not None:
+        conds.append(User.tool_ids.contains([str(tool_id)]))
+    available = availability_filter(day, period)
+    if available is not None:
+        conds.append(available)
     # Busca por palavras: cada uma em nome, e-mail ou telefone, em qualquer ordem e sem acento.
     matched = search.all_words(q, [User.name, User.email], digit_columns=[User.phone])
     if matched is not None:

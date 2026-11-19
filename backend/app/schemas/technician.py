@@ -5,8 +5,13 @@ from typing import Any, Literal
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from app.schemas.common import Ref
-from app.schemas.onboarding import SkillOut
 from app.schemas.records import WorkSchedule, WorkScheduleOut
+from app.schemas.tech_profile import (
+    EducationOut,
+    TechnicianSkillOut,
+    TechProfileStamps,
+    TransportOut,
+)
 from app.schemas.technician_level import LevelSummary
 
 
@@ -28,10 +33,25 @@ class TechnicianOut(BaseModel):
     avatar_url: str | None = None
     on_shift: bool = False
     open_tickets: int = 0
-    # Perfil da homologação (quando o técnico entrou pela ficha).
+    # Perfil da homologação (quando o técnico entrou pela ficha): áreas e o link da ficha.
     service_areas: list[str] = []
-    skills: list[SkillOut] = []
+    # Aptidões do perfil técnico (users.skills; as da ficha aprovada foram copiadas na migração),
+    # com o "desde".
+    skills: list[TechnicianSkillOut] = []
     application_id: uuid.UUID | None = None
+    # Perfil técnico: o técnico mantém no app; a central só vê (services/tech_profile.py). Na
+    # lista e no detalhe: as ferramentas ativas (ordem do nome; a web dá o nome pelo catálogo), os
+    # turnos (ordem da grade), o transporte (null: nunca informou), quantos cursos e a data da
+    # parte mudada por último.
+    tool_ids: list[uuid.UUID] = []
+    availability: list[str] = []
+    transport: TransportOut | None = None
+    education_count: int = 0
+    tech_profile_updated_at: dt.datetime | None = None
+    # Só no detalhe (GET /technicians/{id} e as respostas de um técnico); null na lista.
+    tools: list[Ref] | None = None
+    education: list[EducationOut] | None = None
+    tech_profile_updated: TechProfileStamps | None = None
     # Região de atuação: a cidade onde mais atendeu (history) ou o endereço (home).
     base_city: str | None = None
     base_state: str | None = None
@@ -147,6 +167,11 @@ class TechnicianSuggestion(BaseModel):
     favorite_note: str | None = None
     # Elo do técnico: só o selo (não muda a pontuação nem a ordem).
     level: LevelSummary = Field(default_factory=LevelSummary)
+    # Disponibilidade informada no app × horário da visita: "inside" ou "outside"; null sem
+    # horário ou sem disponibilidade informada (neutro). Sinal pequeno: nunca tira ninguém da lista.
+    availability: Literal["inside", "outside"] | None = None
+    # Com "outside": os turnos da visita fora da disponibilidade, na ordem da grade.
+    availability_gaps: list[str] = []
 
 
 class RegionCity(BaseModel):

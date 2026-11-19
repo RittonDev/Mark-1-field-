@@ -69,7 +69,7 @@ import { useDebounced } from "@/lib/hooks";
 import { maskCep, maskPhone, resizePhotoBlob, UFS } from "@/lib/onboarding";
 import { useCan } from "@/lib/permissions";
 import { useFavorites, useServiceTypes, useTeams, useTechnicianTools } from "@/lib/queries";
-import { Tabs } from "@/components/motion";
+import { type TabItem, Tabs } from "@/components/motion";
 import { favoritesHref, FavoritesView } from "@/components/technicians/FavoritesView";
 import { TempPasswordPanel } from "@/components/technicians/GrantAccessDialog";
 import { InviteDialog } from "@/components/technicians/InviteDialog";
@@ -1228,9 +1228,36 @@ function bodyOf({ form, address, schedule, serviceIds, isActive }: Editable): Re
   };
 }
 
+/** Abas da ficha do técnico: "Cadastro", "Perfil técnico", "Elo" e "Histórico" (ids tecnico-tab-* e tecnico-panel-*). */
+type FichaTab = "cadastro" | "perfil" | "elo" | "historico";
+
+/** Quanto a barra de abas sobe por cima do respiro de cima do corpo do diálogo (o -mt-4 dela) para encostar no cabeçalho. */
+const TABS_BAR_PULL = 16;
+
 /**
- * Cadastro do técnico. `readOnly` (Técnicos só com Visualizar): a mesma ficha para consulta, com os campos
- * travados e sem foto, senha nem salvar.
+ * Prende a barra de abas logo abaixo do cabeçalho do diálogo (preso no topo quando o corpo rola). O cabeçalho muda de
+ * altura com o nome e a largura da tela: a barra acompanha. Sem achar o cabeçalho, a barra só não prende.
+ */
+function useStickyBelowDialogHeader(bar: React.RefObject<HTMLDivElement | null>) {
+  useLayoutEffect(() => {
+    const node = bar.current;
+    const header = node?.closest('[role="dialog"]')?.firstElementChild;
+    if (!node || !(header instanceof HTMLElement) || header.contains(node)) return;
+    const place = () => {
+      node.style.top = `${header.offsetHeight}px`;
+    };
+    place();
+    node.style.position = "sticky";
+    const observer = new ResizeObserver(place);
+    observer.observe(header);
+    return () => observer.disconnect();
+  }, [bar]);
+}
+
+/**
+ * Ficha do técnico, em abas: Cadastro, Perfil técnico (o que ele informa no app), Elo (com os atendimentos por mês) e
+ * Histórico. `readOnly` (Técnicos só com Visualizar): a mesma ficha para consulta, com os campos travados e sem foto,
+ * senha nem salvar.
  */
 function EditDialog({ tech, readOnly = false, onClose }: { tech: Technician; readOnly?: boolean; onClose: () => void }) {
   const queryClient = useQueryClient();
@@ -1458,230 +1485,216 @@ function EditDialog({ tech, readOnly = false, onClose }: { tech: Technician; rea
           hidden={tab !== "cadastro"}
           className="flex min-w-0 flex-col gap-5"
         >
-        {/* A foto: os botões só aparecem com Editar. */}
-        <div className="flex items-center gap-4">
-          <Avatar tech={current} size="lg" />
-          {readOnly ? null : (
-            <div className="flex flex-col gap-1.5">
-              <label
-                className={clsx(
-                  buttonClassName("secondary", "sm"),
-                  "cursor-pointer self-start has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-brand/45",
-                  photo.isPending && "pointer-events-none opacity-60",
-                )}
-              >
-                {photo.isPending ? <Loader2 className="size-4 animate-spin" /> : <Camera className="size-4" />}
-                {photo.isPending ? "Enviando foto…" : current.avatar_url ? "Trocar foto" : "Adicionar foto"}
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="sr-only"
-                  disabled={photo.isPending}
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    e.target.value = "";
-                    if (file) photo.mutate(file);
-                  }}
-                />
-              </label>
-              {current.avatar_url && !photo.isPending ? (
-                <button
-                  type="button"
-                  className="self-start rounded text-xs text-red-700 hover:underline focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none dark:text-red-400"
-                  onClick={async () => {
-                    if (await confirm({ tone: "danger", title: "Remover a foto?", description: "O técnico fica com as iniciais no lugar da foto.", confirmLabel: "Remover" })) {
-                      photo.mutate(null);
-                    }
-                  }}
+          {/* A foto: os botões só aparecem com Editar. */}
+          <div className="flex items-center gap-4">
+            <Avatar tech={current} size="lg" />
+            {readOnly ? null : (
+              <div className="flex flex-col gap-1.5">
+                <label
+                  className={clsx(
+                    buttonClassName("secondary", "sm"),
+                    "cursor-pointer self-start has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-brand/45",
+                    photo.isPending && "pointer-events-none opacity-60",
+                  )}
                 >
-                  Remover foto
-                </button>
-              ) : null}
-              <span className="text-xs text-ink-muted">Foto do rosto. A foto é reduzida antes de enviar.</span>
-            </div>
-          )}
-        </div>
-
-        <LevelSection tech={current} readOnly={readOnly} dirty={dirty} onDraftChange={setLevelDraft} />
-
-        {/* Só com Visualizar, o fieldset trava todos os campos de uma vez (os links continuam abrindo). O
-            Pagamento e o Histórico do cadastro ficam fora: seguem as permissões deles (Pagamentos). */}
-        <fieldset disabled={readOnly} className="flex min-w-0 flex-col gap-5">
-          <TechnicianFields
-            value={form}
-            onChange={setForm}
-            emailHint={emailChanged ? "O técnico passa a entrar no app com este e-mail." : undefined}
-          />
-          <div className="flex flex-col gap-1">
-            <Checkbox label="Acesso ao app liberado" checked={isActive} onChange={setIsActive} />
-            <p className="pl-6 text-xs text-ink-muted">
-              {isActive
-                ? readOnly
-                  ? "Entra no app e aparece no mapa e nas sugestões."
-                  : "Ao desativar, ele sai do app na hora e some do mapa e das sugestões."
-                : tech.is_active
-                  ? "Ao salvar, ele sai do app na hora."
-                  : "Sem acesso: não entra no app nem recebe OS novas."}
-              {!isActive && current.open_tickets ? (
-                <>
-                  {" "}
-                  <Link
-                    href={`/chamados?assignee_id=${tech.id}&open_only=true`}
-                    target="_blank"
-                    className="font-medium text-ink underline underline-offset-2 hover:text-brand"
+                  {photo.isPending ? <Loader2 className="size-4 animate-spin" /> : <Camera className="size-4" />}
+                  {photo.isPending ? "Enviando foto…" : current.avatar_url ? "Trocar foto" : "Adicionar foto"}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="sr-only"
+                    disabled={photo.isPending}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      e.target.value = "";
+                      if (file) photo.mutate(file);
+                    }}
+                  />
+                </label>
+                {current.avatar_url && !photo.isPending ? (
+                  <button
+                    type="button"
+                    className="self-start rounded text-xs text-red-700 hover:underline focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none dark:text-red-400"
+                    onClick={async () => {
+                      if (await confirm({ tone: "danger", title: "Remover a foto?", description: "O técnico fica com as iniciais no lugar da foto.", confirmLabel: "Remover" })) {
+                        photo.mutate(null);
+                      }
+                    }}
                   >
-                    {current.open_tickets === 1 ? "Ver a OS aberta dele" : `Ver as ${current.open_tickets} OS abertas dele`}
-                  </Link>
-                </>
-              ) : null}
-            </p>
+                    Remover foto
+                  </button>
+                ) : null}
+                <span className="text-xs text-ink-muted">Foto do rosto. A foto é reduzida antes de enviar.</span>
+              </div>
+            )}
           </div>
 
-          <section className="flex flex-col gap-3 rounded-lg border border-line p-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <SectionTitle>Ficha completa</SectionTitle>
-              <p className="text-xs text-ink-muted">
-                {current.base_city
-                  ? `Atua em ${regionText(current.base_city, current.base_state)} ${current.base_source === "history" ? `(pelo histórico, ${current.base_visits ?? 0} OS)` : "(pelo endereço)"}`
-                  : "Região de atuação ainda não identificada"}
-                {current.last_visit_at ? ` · última visita ${formatDate(current.last_visit_at)}` : ""}
-              </p>
-            </div>
-            {favoriteIn.length ? (
-              <p className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-ink-muted">
-                <Star aria-hidden className="size-3.5 shrink-0 fill-current text-brand" />
-                Favorito em
-                {favoriteIn.map(({ city, me }, i) => (
-                  <span key={`${city.state}-${city.key}`}>
-                    <Link
-                      href={favoritesHref(city.state, city.city)}
-                      // Sem alteração pendente, o cadastro fecha e a aba de favoritos aparece já na cidade.
-                      onClick={() => {
-                        if (!dirty) onClose();
-                      }}
-                      className="rounded font-medium text-ink underline-offset-2 hover:text-brand-ink hover:underline focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
-                    >
-                      {city.city}-{city.state}
-                    </Link>{" "}
-                    ({me.pinned ? "fixado" : `${me.visits} OS`}){i < favoriteIn.length - 1 ? " ·" : ""}
-                  </span>
-                ))}
-              </p>
-            ) : null}
-            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem_8rem]">
-              <Field label="Endereço (rua, número, complemento)">
-                <Input value={address.line} onChange={(e) => setAddress((a) => ({ ...a, line: e.target.value }))} maxLength={255} />
-              </Field>
-              <Field label="Bairro">
-                <Input value={address.district} onChange={(e) => setAddress((a) => ({ ...a, district: e.target.value }))} maxLength={120} />
-              </Field>
-              <Field label="CEP">
-                <Input
-                  value={address.zip}
-                  onChange={(e) => setAddress((a) => ({ ...a, zip: maskCep(e.target.value) }))}
-                  inputMode="numeric"
-                  placeholder="00000-000"
-                  maxLength={9}
-                />
-              </Field>
-            </div>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              {(
-                [
-                  ["start", "Jornada: início"],
-                  ["end", "Jornada: fim"],
-                  ["break_start", "Intervalo: de"],
-                  ["break_end", "Intervalo: até"],
-                ] as const
-              ).map(([key, label]) => (
-                <Field key={key} label={label}>
-                  <Input type="time" value={schedule[key]} onChange={(e) => setSchedule((s) => ({ ...s, [key]: e.target.value }))} />
-                </Field>
-              ))}
-            </div>
-            <ServicePicker
-              value={serviceIds}
-              onChange={setServiceIds}
-              options={serviceTypes.data ?? []}
-              saved={current.services ?? []}
-              loading={serviceTypes.isLoading}
-              readOnly={readOnly}
+          {/* Só com Visualizar, o fieldset trava todos os campos de uma vez (os links continuam abrindo). O
+              Pagamento fica fora: segue as permissões de Pagamentos. */}
+          <fieldset disabled={readOnly} className="flex min-w-0 flex-col gap-5">
+            <TechnicianFields
+              value={form}
+              onChange={setForm}
+              emailHint={emailChanged ? "O técnico passa a entrar no app com este e-mail." : undefined}
             />
-            {current.legacy ? (
-              <p className="text-xs text-ink-muted">
-                Importado do Field Control{current.legacy.id ? ` · ID ${current.legacy.id}` : ""}
-                {current.legacy.territories?.length ? ` · territórios: ${current.legacy.territories.join(", ")}` : ""}
-              </p>
-            ) : null}
-          </section>
-
-          {current.service_areas.length || current.skills.length || current.application_id ? (
-            <section>
-              <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-xs font-bold tracking-wide text-ink-muted uppercase">Perfil da homologação</h3>
-                {current.application_id && canOnboarding ? (
-                  // Com alteração não salva, abre em outra aba: sair daqui descartaria o cadastro.
-                  <Link
-                    href={`/homologacao?ficha=${current.application_id}`}
-                    className={buttonClassName("ghost", "sm")}
-                    target={dirty ? "_blank" : undefined}
-                    rel={dirty ? "noreferrer" : undefined}
-                  >
-                    <BadgeCheck className="size-3.5" />
-                    Ver ficha da homologação
-                  </Link>
+            <div className="flex flex-col gap-1">
+              <Checkbox label="Acesso ao app liberado" checked={isActive} onChange={setIsActive} />
+              <p className="pl-6 text-xs text-ink-muted">
+                {isActive
+                  ? readOnly
+                    ? "Entra no app e aparece no mapa e nas sugestões."
+                    : "Ao desativar, ele sai do app na hora e some do mapa e das sugestões."
+                  : tech.is_active
+                    ? "Ao salvar, ele sai do app na hora."
+                    : "Sem acesso: não entra no app nem recebe OS novas."}
+                {!isActive && current.open_tickets ? (
+                  <>
+                    {" "}
+                    <Link
+                      href={`/chamados?assignee_id=${tech.id}&open_only=true`}
+                      target="_blank"
+                      className="font-medium text-ink underline underline-offset-2 hover:text-brand"
+                    >
+                      {current.open_tickets === 1 ? "Ver a OS aberta dele" : `Ver as ${current.open_tickets} OS abertas dele`}
+                    </Link>
+                  </>
                 ) : null}
+              </p>
+            </div>
+
+            <section className="flex flex-col gap-3 rounded-lg border border-line p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <SectionTitle>Ficha completa</SectionTitle>
+                <p className="text-xs text-ink-muted">
+                  {current.base_city
+                    ? `Atua em ${regionText(current.base_city, current.base_state)} ${current.base_source === "history" ? `(pelo histórico, ${current.base_visits ?? 0} OS)` : "(pelo endereço)"}`
+                    : "Região de atuação ainda não identificada"}
+                  {current.last_visit_at ? ` · última visita ${formatDate(current.last_visit_at)}` : ""}
+                </p>
               </div>
-              <div className="flex flex-wrap gap-1.5">
-                {current.service_areas.map((k) => (
-                  <span key={k} className="rounded-full bg-nav-active px-2.5 py-0.5 text-xs font-medium text-brand-ink">
-                    {areas[k] ?? k}
-                  </span>
-                ))}
-                {current.skills.map((s) => (
-                  <span key={s.name} className="rounded-full border border-line px-2.5 py-0.5 text-xs text-ink">
-                    {s.name} · {levels[s.level] ?? s.level}
-                  </span>
+              {favoriteIn.length ? (
+                <p className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-ink-muted">
+                  <Star aria-hidden className="size-3.5 shrink-0 fill-current text-brand" />
+                  Favorito em
+                  {favoriteIn.map(({ city, me }, i) => (
+                    <span key={`${city.state}-${city.key}`}>
+                      <Link
+                        href={favoritesHref(city.state, city.city)}
+                        // Sem alteração pendente, o cadastro fecha e a aba de favoritos aparece já na cidade.
+                        onClick={() => {
+                          if (!dirty) onClose();
+                        }}
+                        className="rounded font-medium text-ink underline-offset-2 hover:text-brand-ink hover:underline focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+                      >
+                        {city.city}-{city.state}
+                      </Link>{" "}
+                      ({me.pinned ? "fixado" : `${me.visits} OS`}){i < favoriteIn.length - 1 ? " ·" : ""}
+                    </span>
+                  ))}
+                </p>
+              ) : null}
+              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem_8rem]">
+                <Field label="Endereço (rua, número, complemento)">
+                  <Input value={address.line} onChange={(e) => setAddress((a) => ({ ...a, line: e.target.value }))} maxLength={255} />
+                </Field>
+                <Field label="Bairro">
+                  <Input value={address.district} onChange={(e) => setAddress((a) => ({ ...a, district: e.target.value }))} maxLength={120} />
+                </Field>
+                <Field label="CEP">
+                  <Input
+                    value={address.zip}
+                    onChange={(e) => setAddress((a) => ({ ...a, zip: maskCep(e.target.value) }))}
+                    inputMode="numeric"
+                    placeholder="00000-000"
+                    maxLength={9}
+                  />
+                </Field>
+              </div>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                {(
+                  [
+                    ["start", "Jornada: início"],
+                    ["end", "Jornada: fim"],
+                    ["break_start", "Intervalo: de"],
+                    ["break_end", "Intervalo: até"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <Field key={key} label={label}>
+                    <Input type="time" value={schedule[key]} onChange={(e) => setSchedule((s) => ({ ...s, [key]: e.target.value }))} />
+                  </Field>
                 ))}
               </div>
+              <ServicePicker
+                value={serviceIds}
+                onChange={setServiceIds}
+                options={serviceTypes.data ?? []}
+                saved={current.services ?? []}
+                loading={serviceTypes.isLoading}
+                readOnly={readOnly}
+              />
+              {current.legacy ? (
+                <p className="text-xs text-ink-muted">
+                  Importado do Field Control{current.legacy.id ? ` · ID ${current.legacy.id}` : ""}
+                  {current.legacy.territories?.length ? ` · territórios: ${current.legacy.territories.join(", ")}` : ""}
+                </p>
+              ) : null}
             </section>
-          ) : null}
-        </fieldset>
+          </fieldset>
 
-        {canPayouts ? <TechnicianPayment tech={current} dirty={dirty} /> : null}
+          {canPayouts ? <TechnicianPayment tech={current} dirty={dirty} /> : null}
 
-        {/* Com Visualizar, sem os botões da senha. */}
-        <section className="rounded-lg border border-line p-3">
-          <SectionTitle>Acesso ao app</SectionTitle>
-          <p className="mt-1 text-xs text-ink-muted">
-            {current.location_consent_at ? (
-              <span className="inline-flex items-center gap-1">
-                <MapPinned className="size-3.5" /> Autorizou o GPS durante a jornada
-              </span>
+          {/* Com Visualizar, sem os botões da senha. */}
+          <section className="rounded-lg border border-line p-3">
+            <SectionTitle>Acesso ao app</SectionTitle>
+            <p className="mt-1 text-xs text-ink-muted">
+              {current.location_consent_at ? (
+                <span className="inline-flex items-center gap-1">
+                  <MapPinned className="size-3.5" /> Autorizou o GPS durante a jornada
+                </span>
+              ) : (
+                "Ainda não autorizou o GPS (o app pede antes da primeira jornada; sem o aceite, não inicia a jornada)."
+              )}
+            </p>
+            {readOnly ? null : confirmReset ? (
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <span className="text-sm text-ink">Gerar senha provisória e encerrar as sessões abertas?</span>
+                <Button onClick={() => setConfirmReset(false)}>Não</Button>
+                <Button variant="danger" loading={reset.isPending} onClick={() => reset.mutate()}>
+                  Sim, redefinir
+                </Button>
+              </div>
             ) : (
-              "Ainda não autorizou o GPS (o app pede antes da primeira jornada; sem o aceite, não inicia a jornada)."
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <Button onClick={() => setConfirmReset(true)} disabled={dirty}>
+                  <KeyRound className="size-4" />
+                  Redefinir senha
+                </Button>
+                {dirty ? <span className="text-xs text-ink-muted">Salve as alterações antes de redefinir a senha.</span> : null}
+              </div>
             )}
-          </p>
-          {readOnly ? null : confirmReset ? (
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <span className="text-sm text-ink">Gerar senha provisória e encerrar as sessões abertas?</span>
-              <Button onClick={() => setConfirmReset(false)}>Não</Button>
-              <Button variant="danger" loading={reset.isPending} onClick={() => reset.mutate()}>
-                Sim, redefinir
-              </Button>
-            </div>
-          ) : (
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <Button onClick={() => setConfirmReset(true)} disabled={dirty}>
-                <KeyRound className="size-4" />
-                Redefinir senha
-              </Button>
-              {dirty ? <span className="text-xs text-ink-muted">Salve as alterações antes de redefinir a senha.</span> : null}
-            </div>
-          )}
-        </section>
+          </section>
+        </div>
 
-        <ProfileHistory technicianId={tech.id} />
+        {/* Só leitura: o técnico mantém no app. Fica fora do fieldset, como o Elo e o Histórico. */}
+        <div role="tabpanel" id="tecnico-panel-perfil" aria-labelledby="tecnico-tab-perfil" hidden={tab !== "perfil"}>
+          {opened.has("perfil") ? <TechProfileView technicianId={tech.id} dirty={dirty} /> : null}
+        </div>
+
+        {/* Só com Visualizar, o "Ver mais" das ocorrências continua; desconsiderar pede Editar. */}
+        <div
+          role="tabpanel"
+          id="tecnico-panel-elo"
+          aria-labelledby="tecnico-tab-elo"
+          hidden={tab !== "elo"}
+          className="flex min-w-0 flex-col gap-5"
+        >
+          <LevelSection tech={current} readOnly={readOnly} dirty={dirty} onDraftChange={setLevelDraft} />
+          {opened.has("elo") ? <TechnicianStatsSection technicianId={tech.id} /> : null}
+        </div>
+
+        <div role="tabpanel" id="tecnico-panel-historico" aria-labelledby="tecnico-tab-historico" hidden={tab !== "historico"}>
+          {opened.has("historico") ? <ProfileHistory technicianId={tech.id} /> : null}
+        </div>
 
         {problem || save.error || reset.error ? <ErrorBox message={problem ?? errorMessage(save.error ?? reset.error)} /> : null}
       </form>
