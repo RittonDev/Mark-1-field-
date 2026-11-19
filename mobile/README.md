@@ -414,7 +414,7 @@ lembretes da visita são locais e funcionam também no Expo Go, mas só depois q
   só aparecem com o app aberto (o aviso na hora com o app fora da tela depende do push real).
 - **Fim de sessão na rodada**: se a sessão termina durante a rodada em segundo plano (401 do `/auth/refresh`), ou já
   estava encerrada com limpeza pendente, a rodada conclui a limpeza do fim de sessão (`sessionEnd.ts`) antes de
-  terminar e desliga a tarefa.
+  terminar e desliga a tarefa (se apagar os dados do técnico desativado falhar, ela fica ligada para tentar de novo).
 - **Conta > Notificações**: a chave **Lembretes das visitas** (ligada; desliga os três de uma vez), o próximo
   lembrete, a permissão do celular (**Permitir notificações** ou **Abrir configurações**) e, no Android 12 ou mais
   novo sem o alarme exato, **Horário exato · Pode atrasar alguns minutos** com **Liberar** (`SCHEDULE_EXACT_ALARM`
@@ -425,8 +425,9 @@ lembretes da visita são locais e funcionam também no Expo Go, mas só depois q
 - **Push da central**: ainda não ligado. O `POST /devices` responde `{"push": "simulated"}` e o próprio app avisa;
   quando a central responder `live`, o app para de repetir o aviso (kv `push_live`). O cartão **Aparelho** mostra
   o estado ("Ainda não ligado na central"; no Expo Go, "Indisponível nesta versão do app").
-- **Saiu da conta**: nada agendado e a bandeja limpa (loja e endereço aparecem na tela bloqueada). As chaves
-  `visit_reminders`, `notifications_asked` e `push_live` ficam no kv e somem na troca de técnico.
+- **Saiu da conta**: nada agendado, a bandeja limpa (loja e endereço aparecem na tela bloqueada) e os avisos guardados
+  somem. As chaves `visit_reminders`, `notifications_asked`, `push_live` e `deferred_notices` (cada aviso leva o id do
+  técnico) ficam no kv e somem na troca de técnico.
 
 ## Meu cadastro
 
@@ -441,10 +442,18 @@ PIX em Ganhos. Contrato em [docs/API.md](../docs/API.md), "Meu cadastro do técn
   O app confere antes, com as regras e as mensagens do servidor (nome, celular com DDD, e-mail quando muda,
   cidade, UF, CEP com 8 números e a chave por tipo, em [src/lib/pix.ts](src/lib/pix.ts)); o servidor confere de
   novo. Sair com alteração não salva pergunta "Descartar as alterações?".
+  - O nome, quando muda, segue a regra do servidor: só letras (com acento), espaço, apóstrofo, hífen e ponto, sem
+    "www", "http" nem endereço colado ("site.com"). A mensagem é "Use só letras no nome.". Os nomes antigos ficam como
+    estão.
 - **E-mail e chave PIX pedem a senha atual** (folha "Confirme com sua senha"): cadastrar a chave, trocar tipo,
   chave ou titular e remover. Senha errada e o bloqueio depois de 5 erros em 15 min (o mesmo contador de
-  "Trocar senha") aparecem na folha. A central é avisada na hora quando mudam PIX, e-mail ou celular, e toda
+  "Trocar senha") aparecem na folha. A central é avisada na hora quando mudam PIX, e-mail, nome ou celular, e toda
   mudança fica no histórico do cadastro.
+  - Com a senha provisória, o servidor recusa e-mail e PIX ("Crie sua senha no app antes de mudar o e-mail ou a chave
+    PIX"); o app já esconde a tela nesse estado (só "Trocar senha" abre).
+  - E-mail da empresa é recusado com "Use um e-mail que não seja da empresa".
+  - A troca de e-mail tem limite de 10 por hora (429 "Muitas tentativas. Tente mais tarde.").
+- **Aviso de privacidade**: o cartão Pagamento tem o link **Aviso de privacidade** (seção abaixo).
 - **Chave PIX**: chips CPF, CNPJ, E-mail, Celular e Chave aleatória; a chave tem o teclado e a máscara do tipo
   ("Colar" na chave aleatória); trocar o tipo limpa a chave; o titular começa com o nome. "Remover chave PIX" só
   vale ao salvar (dá para desfazer). Celular do PIX: DDD sem zero e o número com o 9, como no servidor.
@@ -496,6 +505,13 @@ Contrato em [docs/API.md](../docs/API.md), "Notas fiscais dos técnicos". Códig
 - **Só online**: a nota não entra na fila offline. Sem rede, o rodapé mostra "Sem internet. A nota só é enviada com
   conexão…" e o formulário continua preenchido. Cada abertura da tela gera um `client_upload_id` repetido em todas as
   tentativas: a resposta perdida, mandada de novo, devolve a mesma nota (200) em vez de criar outra.
+- **Lista de OS em erro**: "Enviar nota" busca a lista de novo antes de enviar.
+  - Se vier, as OS do mês voltam marcadas, a tela rola até elas ("Confira as OS desta nota") e a nota não sai: o
+    técnico confere e toca de novo.
+  - Se não vier, pergunta "Enviar a nota sem OS?" / "A lista de OS não carregou.", com **Enviar sem OS**; sem rede,
+    mostra o aviso de sem internet.
+  - A lista em erro também é buscada de novo quando a conexão volta (NetInfo).
+- **Aviso de privacidade**: o link fica no fim da tela (seção abaixo).
 - **Depois de enviar ou apagar**: Ganhos relê as notas e os valores, e cada OS coberta mostra "NF 1234" na linha.
   A recusa é final: o técnico apaga a recusada e envia outra. A conversa sobre a nota continua no grupo de WhatsApp.
 
@@ -515,8 +531,8 @@ tela `src/app/elo.tsx`.
   hora da atualização; em risco, a caixa "Elo Ouro em risco" com o texto do servidor; o que falta para a próxima faixa
   ("Para chegar ao Diamante", com barra nos atendimentos) e, em risco ou no Diamante, o que a faixa atual pede ("Para
   continuar no Ouro"); os números dos últimos 12 meses; o que pesou (as 30 mais recentes; tocar abre a OS se ela está
-  no aparelho) e "Como funciona" (as quatro faixas e as regras). Dúvida sobre o elo é com a central, no grupo de
-  WhatsApp.
+  no aparelho) e "Como funciona" (as quatro faixas e as regras, com o link **Aviso de privacidade** no fim). Dúvida
+  sobre o elo é com a central, no grupo de WhatsApp.
 - **Dados**: a rodada do sync busca `GET /me/level` a cada 30 min e no "puxar para atualizar", só com o app na tela
   (fora dela não gasta bateria e dados com isso), e a tela Meu elo busca ao abrir (se o guardado tem mais de 2 min) e
   ao puxar para baixo. Fica no kv `my_level` com a hora e o técnico; offline (ou com erro), a tela mostra o último
@@ -526,6 +542,17 @@ tela `src/app/elo.tsx`.
   mais alto."), dentro do app. A primeira carga não comemora; a subida que chega com o app saindo da tela espera ele
   voltar; não há push.
 - **O que o técnico não vê**: outros técnicos, ranking, notas da central nem o que ela desconsiderou.
+
+## Aviso de privacidade
+
+Tela `/privacidade` ([src/app/privacidade.tsx](src/app/privacidade.tsx)), só de leitura.
+
+- **Texto**: `PRIVACY_NOTICE` de [src/lib/constants.ts](src/lib/constants.ts), o mesmo da ficha da homologação (cópia
+  idêntica da web), com "Atualizado em" pela data de `PRIVACY_VERSION`. Cita os dados do cadastro e a chave PIX, o
+  pagamento por PIX, a localização na jornada, as notas fiscais e o Elo.
+- **Onde abre**: na Conta (linha abaixo do Termo de uso da localização), no cartão Pagamento do Meu cadastro, no fim
+  da tela Enviar nota fiscal e no fim do "Como funciona" do Meu elo.
+- **Não grava ciência**: o aceite continua sendo o da ficha da homologação; a tela é só para consulta.
 
 ## Como a sincronização funciona
 
