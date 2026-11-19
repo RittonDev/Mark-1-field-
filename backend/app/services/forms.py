@@ -52,7 +52,7 @@ from app.schemas.forms import (
 )
 from app.services import storage
 from app.services.errors import NotFound, PermissionDenied, WorkflowError
-from app.services.form_prefill import prefill_for, visit_moment
+from app.services.form_prefill import prefill_for
 from app.services.realtime import queue_event
 from app.services.tickets import _touch, add_attachment, can_work, get_ticket, record_event
 
@@ -1041,12 +1041,12 @@ async def save_partial(
 
 async def complete(db: AsyncSession, ticket: Ticket, form: TicketForm, actor: User) -> TicketForm:
     _ensure_can_fill(ticket, actor)
-    # A resposta automática congela na conclusão: o valor de agora vira resposta (trocar o técnico
-    # ou remarcar depois não muda nada) e conta para os obrigatórios. Faltando algo, a exceção
-    # desfaz a transação e nada fica congelado. A data da visita é a do atendimento em curso ou do
-    # último (form_prefill.visit_moment), não a da primeira chegada.
-    visit_at = await visit_moment(db, ticket)
-    auto = prefill_for(ticket, form.fields, form.answers, final=True, visit_at=visit_at)
+    # A resposta automática congela na conclusão: o valor que a pergunta mostrava vira resposta
+    # (trocar o técnico ou remarcar depois não muda nada) e conta para os obrigatórios. Faltando
+    # algo, a exceção desfaz a transação e nada fica congelado. Sem data da visita (pausada ou
+    # reaberta depois de uma chegada: form_prefill.visit_moment), a pergunta de data fica sem
+    # resposta; a obrigatória falta e precisa ser digitada.
+    auto = prefill_for(ticket, form.fields, form.answers)
     if auto:  # só as perguntas ainda sem resposta
         form.answers = {**(form.answers or {}), **auto}
     missing = await missing_items(db, form)
