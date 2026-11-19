@@ -635,6 +635,11 @@ function PayoutsView() {
   const selectable = (line: PayoutLine) =>
     canEdit && view !== "expected" && (stateOf(line) === "to_pay" || stateOf(line) === "paid");
 
+  // A nota do diálogo na versão mais nova da lista (depois de conferir, desfazer ou recusar).
+  const dialogInvoice = shownInvoice ? (invoiceItems.find((i) => i.id === shownInvoice.invoice.id) ?? shownInvoice.invoice) : null;
+  const openInvoice = (invoice: TechnicianInvoice, rejecting = false) => setShownInvoice({ invoice, rejecting });
+  const pendingInvoices = invoices.data?.summary.pending ?? 0;
+
   if (!canView) return <NoAccess kind="module" item="commercial.payouts" />;
 
   return (
@@ -677,7 +682,7 @@ function PayoutsView() {
                 </option>
               ))}
             </Select>
-            <Button disabled={!groups.length} onClick={exportCsv}>
+            <Button disabled={tab === "invoices" ? !invoiceItems.length : !groups.length} onClick={exportCsv}>
               <Download className="size-4" />
               Exportar CSV
             </Button>
@@ -685,260 +690,310 @@ function PayoutsView() {
         }
       />
 
-      <div
-        className={clsx("grid grid-cols-2 gap-3 transition-opacity duration-150 lg:grid-cols-4", stale && "opacity-60")}
-        role="group"
-        aria-label="Situação dos pagamentos"
-      >
-        <StatTile
-          label="A pagar"
-          value={sums.to_pay}
-          display={formatMoney(sums.to_pay)}
-          loading={pendingQuery.isLoading}
-          hint={countText(byState.to_pay.length, "OS concluída", "OS concluídas", pendingCut)}
-          onSelect={() => changeView("to_pay")}
-          selected={view === "to_pay"}
-        />
-        <StatTile
-          label="Previsto"
-          value={sums.expected}
-          display={formatMoney(sums.expected)}
-          loading={pendingQuery.isLoading}
-          hint={
-            <>
-              {countText(byState.expected.length, "OS em andamento", "OS em andamento", pendingCut)}
-              {sums.cancelled > 0 ? (
-                <span className="font-medium text-amber-700 dark:text-amber-400"> · {formatMoney(sums.cancelled)} em OS canceladas</span>
-              ) : null}
-            </>
-          }
-          onSelect={() => changeView("expected")}
-          selected={view === "expected"}
-        />
-        <StatTile
-          label="Pago"
-          value={sums.paid}
-          display={formatMoney(sums.paid)}
-          loading={paidQuery.isLoading}
-          hint={month ? "OS concluídas no mês" : "até hoje"}
-          onSelect={() => changeView("paid")}
-          selected={view === "paid"}
-        />
-        <StatTile
-          label="Todos"
-          value={sumAll}
-          display={formatMoney(sumAll)}
-          loading={loading}
-          hint={countText(lines.length, "lançamento", "lançamentos", truncated)}
-          onSelect={() => changeView("all")}
-          selected={view === "all"}
+      <div className="mb-4 border-b border-line">
+        <Tabs<Tab>
+          className="-mb-px"
+          items={[
+            { key: "closing", label: "Fechamento" },
+            { key: "invoices", label: "Notas fiscais", count: pendingInvoices > 0 ? pendingInvoices : null },
+          ]}
+          value={tab}
+          onChange={changeTab}
+          ariaLabel="Pagamentos"
+          idPrefix="pagamentos"
         />
       </div>
-      {month || truncated ? (
-        <p className="mt-2 text-xs text-ink-muted">
-          {month ? "O mês vale pela conclusão da OS; a OS ainda aberta entra pela data em que o valor foi lançado." : ""}
-          {truncated
-            ? ` A lista traz até ${intFmt(LIMIT)} lançamentos a pagar e ${intFmt(LIMIT)} pagos (os mais recentes); os valores dos cartões somam todos: escolha um mês para ver a lista inteira.`
-            : ""}
-        </p>
-      ) : null}
-
-      <div className="mt-5">
-        {loading ? (
-          <LoadingBlock rows={4} />
-        ) : error && !all.length ? (
-          <ErrorBox message={errorMessage(error)} onRetry={retry} />
+      <div role="tabpanel" id={`pagamentos-panel-${tab}`} aria-labelledby={`pagamentos-tab-${tab}`}>
+        {tab === "invoices" ? (
+          <InvoicesPanel
+            list={invoices.data}
+            loading={invoices.isLoading}
+            error={invoices.error}
+            stale={invoices.isPlaceholderData}
+            onRetry={() => void invoices.refetch()}
+            month={month}
+            canEdit={canEdit}
+            review={review}
+            onOpen={openInvoice}
+            onOpenFile={(invoice) => void openInvoiceFile(invoice)}
+            onClearTechnician={technician ? () => setTechnician(null) : undefined}
+          />
         ) : (
           <>
-            {error ? (
-              <div className="mb-3">
-                <ErrorBox message={errorMessage(error)} onRetry={retry} />
-              </div>
+            <div
+              className={clsx("grid grid-cols-2 gap-3 transition-opacity duration-150 lg:grid-cols-4", stale && "opacity-60")}
+              role="group"
+              aria-label="Situação dos pagamentos"
+            >
+              <StatTile
+                label="A pagar"
+                value={sums.to_pay}
+                display={formatMoney(sums.to_pay)}
+                loading={pendingQuery.isLoading}
+                hint={countText(byState.to_pay.length, "OS concluída", "OS concluídas", pendingCut)}
+                onSelect={() => changeView("to_pay")}
+                selected={view === "to_pay"}
+              />
+              <StatTile
+                label="Previsto"
+                value={sums.expected}
+                display={formatMoney(sums.expected)}
+                loading={pendingQuery.isLoading}
+                hint={
+                  <>
+                    {countText(byState.expected.length, "OS em andamento", "OS em andamento", pendingCut)}
+                    {sums.cancelled > 0 ? (
+                      <span className="font-medium text-amber-700 dark:text-amber-400"> · {formatMoney(sums.cancelled)} em OS canceladas</span>
+                    ) : null}
+                  </>
+                }
+                onSelect={() => changeView("expected")}
+                selected={view === "expected"}
+              />
+              <StatTile
+                label="Pago"
+                value={sums.paid}
+                display={formatMoney(sums.paid)}
+                loading={paidQuery.isLoading}
+                hint={month ? "OS concluídas no mês" : "até hoje"}
+                onSelect={() => changeView("paid")}
+                selected={view === "paid"}
+              />
+              <StatTile
+                label="Todos"
+                value={sumAll}
+                display={formatMoney(sumAll)}
+                loading={loading}
+                hint={countText(lines.length, "lançamento", "lançamentos", truncated)}
+                onSelect={() => changeView("all")}
+                selected={view === "all"}
+              />
+            </div>
+            {month || truncated ? (
+              <p className="mt-2 text-xs text-ink-muted">
+                {month ? "O mês vale pela conclusão da OS; a OS ainda aberta entra pela data em que o valor foi lançado." : ""}
+                {truncated
+                  ? ` A lista traz até ${intFmt(LIMIT)} lançamentos a pagar e ${intFmt(LIMIT)} pagos (os mais recentes); os valores dos cartões somam todos: escolha um mês para ver a lista inteira.`
+                  : ""}
+              </p>
             ) : null}
-            {!groups.length ? (
-              <Card>
-                <EmptyState
-                  icon={<Wallet />}
-                  title={EMPTY[view].title}
-                  description={EMPTY[view].description}
-                  action={
-                    technician ? (
-                      <Button
-                        onClick={() => {
-                          setTechnician(null);
-                          setSelected(new Set());
-                        }}
-                      >
-                        Ver todos os técnicos
-                      </Button>
-                    ) : undefined
-                  }
-                />
-              </Card>
-            ) : (
-              <div className={clsx("flex flex-col gap-4 transition-opacity duration-150", stale && "opacity-60")} aria-busy={stale}>
-                {groups.map((group) => {
-                  const pickable = group.lines.filter(selectable);
-                  const chosen = pickable.filter((l) => selected.has(l.id));
-                  const payable = group.lines.filter((l) => stateOf(l) === "to_pay");
-                  const chosenPayable = chosen.filter((l) => stateOf(l) === "to_pay");
-                  const chosenPaid = chosen.filter((l) => stateOf(l) === "paid");
-                  const mine = pay.isPending && pay.variables?.groupId === group.id;
-                  // Pagamento em lote deste técnico (o de uma linha só gira o botão da própria linha).
-                  const batch = mine && !pay.variables?.lineId;
-                  const phone = personOf(group.id)?.phone ?? null;
-                  const pix = pixOf(group.id);
-                  const parts = (["to_pay", "paid", "expected", "cancelled"] as const)
-                    .map((state) => ({ state, lines: group.lines.filter((l) => stateOf(l) === state) }))
-                    .filter((p) => p.lines.length > 0)
-                    .map((p) => `${STATE_LABEL[p.state].toLowerCase()} ${formatMoney(total(p.lines))}`);
-                  return (
-                    <Card key={group.id} className="overflow-hidden">
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-line px-5 py-3">
-                        {pickable.length ? (
-                          <SelectAll
-                            checked={chosen.length === pickable.length}
-                            partial={chosen.length > 0 && chosen.length < pickable.length}
-                            label={`Selecionar todas de ${group.name}`}
-                            onChange={(on) =>
-                              setSelected((s) => {
-                                const next = new Set(s);
-                                for (const l of pickable) {
-                                  if (on) next.add(l.id);
-                                  else next.delete(l.id);
-                                }
-                                return next;
-                              })
-                            }
-                          />
-                        ) : null}
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate font-bold text-ink">{labelOf(group)}</p>
-                          <p className="text-xs text-ink-muted">
-                            {plural(group.lines.length, "OS", "OS")} · {parts.join(" · ")}
-                          </p>
-                          {pix !== undefined ? <PayoutPixLine name={group.name} pix={pix} phone={phone} now={now} /> : null}
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Button size="sm" variant="ghost" onClick={() => void copyStatement(group)}>
-                            <Copy className="size-4" />
-                            Copiar extrato
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            disabled={!phone}
-                            title={whatsappTitle(group, phone)}
-                            onClick={() => phone && void openWhatsApp(group, phone)}
-                          >
-                            <MessageCircle className="size-4" />
-                            WhatsApp
-                          </Button>
-                          {canEdit && (chosenPaid.length || view === "paid") ? (
+
+            <div className="mt-5">
+              {loading ? (
+                <LoadingBlock rows={4} />
+              ) : error && !all.length ? (
+                <ErrorBox message={errorMessage(error)} onRetry={retry} />
+              ) : (
+                <>
+                  {error ? (
+                    <div className="mb-3">
+                      <ErrorBox message={errorMessage(error)} onRetry={retry} />
+                    </div>
+                  ) : null}
+                  {!groups.length ? (
+                    <Card>
+                      <EmptyState
+                        icon={<Wallet />}
+                        title={EMPTY[view].title}
+                        description={EMPTY[view].description}
+                        action={
+                          technician ? (
                             <Button
-                              size="sm"
-                              disabled={!chosenPaid.length || stale || (busy && !batch)}
-                              loading={batch && pay.variables?.paid === false}
-                              title={chosenPaid.length ? undefined : "Selecione os pagamentos que quer desfazer"}
-                              onClick={() => void confirmUndo(group, chosenPaid)}
+                              onClick={() => {
+                                setTechnician(null);
+                                setSelected(new Set());
+                              }}
                             >
-                              <RotateCcw className="size-4" />
-                              {chosenPaid.length > 1 ? `Desfazer ${chosenPaid.length} pagamentos` : "Desfazer pagamento"}
+                              Ver todos os técnicos
                             </Button>
-                          ) : null}
-                          {canEdit && (view === "to_pay" || view === "all") && payable.length ? (
-                            <Button
-                              size="sm"
-                              variant="primary"
-                              disabled={stale || (busy && !batch)}
-                              loading={batch && pay.variables?.paid === true}
-                              onClick={() => void confirmPay(group, chosenPayable.length ? chosenPayable : payable, !chosenPayable.length)}
-                            >
-                              <CheckCheck className="size-4" />
-                              {chosenPayable.length
-                                ? `Pagar ${plural(chosenPayable.length, "selecionada", "selecionadas")}`
-                                : `Pagar tudo (${formatMoney(total(payable))})`}
-                            </Button>
-                          ) : null}
-                        </div>
-                      </div>
-                      <ul className="divide-y divide-line">
-                        {group.lines.map((line) => {
-                          const state = stateOf(line);
-                          const canPick = selectable(line);
-                          return (
-                            <li key={line.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-5 py-2.5 sm:flex-nowrap">
-                              {canEdit && view !== "expected" ? (
-                                <label
-                                  className={clsx("-m-2 flex shrink-0 p-2", canPick ? "cursor-pointer" : "cursor-not-allowed")}
-                                  title={
-                                    canPick
-                                      ? undefined
-                                      : state === "cancelled"
-                                        ? "OS cancelada: pague ou tire o valor pelos botões da linha"
-                                        : "Paga quando a OS for concluída"
-                                  }
-                                >
-                                  <input
-                                    type="checkbox"
-                                    disabled={!canPick}
-                                    checked={selected.has(line.id)}
-                                    onChange={() => toggle(line.id)}
-                                    className="size-4 accent-[var(--brand)]"
-                                    aria-label={`Selecionar ${line.ticket.code}`}
-                                  />
-                                </label>
-                              ) : null}
-                              <div className="min-w-0 flex-1 basis-56">
-                                <p className="truncate text-sm font-semibold text-ink" title={line.ticket.title}>
-                                  <TicketLink
-                                    ticketId={line.ticket.id}
-                                    className="mr-1.5 font-mono text-xs font-normal text-ink-subtle hover:text-brand hover:underline"
-                                  >
-                                    {line.ticket.code}
-                                  </TicketLink>
-                                  {line.ticket.title}
-                                </p>
-                                <p className="truncate text-xs text-ink-muted">{subtitle(line)}</p>
-                              </div>
-                              <div className="flex w-full flex-wrap items-center justify-end gap-x-3 gap-y-1.5 sm:w-auto sm:flex-nowrap">
-                                <StatePill line={line} />
-                                {canEdit && state === "cancelled" ? (
-                                  <span className="flex items-center gap-1">
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      disabled={stale || (busy && pay.variables?.lineId !== line.id)}
-                                      loading={pay.isPending && pay.variables?.lineId === line.id}
-                                      onClick={() => void confirmPayCancelled(group, line)}
-                                    >
-                                      Pagar
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      disabled={stale || (busy && remove.variables?.id !== line.id)}
-                                      loading={remove.isPending && remove.variables?.id === line.id}
-                                      onClick={() => void confirmRemove(line)}
-                                    >
-                                      Tirar valor
-                                    </Button>
-                                  </span>
-                                ) : null}
-                                <span className="text-right text-sm font-medium text-ink tabular-nums sm:w-28">{formatMoney(line.amount)}</span>
-                              </div>
-                            </li>
-                          );
-                        })}
-                      </ul>
+                          ) : undefined
+                        }
+                      />
                     </Card>
-                  );
-                })}
-              </div>
-            )}
+                  ) : (
+                    <div className={clsx("flex flex-col gap-4 transition-opacity duration-150", stale && "opacity-60")} aria-busy={stale}>
+                      {groups.map((group) => {
+                        const pickable = group.lines.filter(selectable);
+                        const chosen = pickable.filter((l) => selected.has(l.id));
+                        const payable = group.lines.filter((l) => stateOf(l) === "to_pay");
+                        const chosenPayable = chosen.filter((l) => stateOf(l) === "to_pay");
+                        const chosenPaid = chosen.filter((l) => stateOf(l) === "paid");
+                        const mine = pay.isPending && pay.variables?.groupId === group.id;
+                        // Pagamento em lote deste técnico (o de uma linha só gira o botão da própria linha).
+                        const batch = mine && !pay.variables?.lineId;
+                        const phone = personOf(group.id)?.phone ?? null;
+                        const pix = pixOf(group.id);
+                        const groupInvoices = invoicesOfGroup(group);
+                        const parts = (["to_pay", "paid", "expected", "cancelled"] as const)
+                          .map((state) => ({ state, lines: group.lines.filter((l) => stateOf(l) === state) }))
+                          .filter((p) => p.lines.length > 0)
+                          .map((p) => `${STATE_LABEL[p.state].toLowerCase()} ${formatMoney(total(p.lines))}`);
+                        return (
+                          <Card key={group.id} className="overflow-hidden">
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-line px-5 py-3">
+                              {pickable.length ? (
+                                <SelectAll
+                                  checked={chosen.length === pickable.length}
+                                  partial={chosen.length > 0 && chosen.length < pickable.length}
+                                  label={`Selecionar todas de ${group.name}`}
+                                  onChange={(on) =>
+                                    setSelected((s) => {
+                                      const next = new Set(s);
+                                      for (const l of pickable) {
+                                        if (on) next.add(l.id);
+                                        else next.delete(l.id);
+                                      }
+                                      return next;
+                                    })
+                                  }
+                                />
+                              ) : null}
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate font-bold text-ink">{labelOf(group)}</p>
+                                <p className="text-xs text-ink-muted">
+                                  {plural(group.lines.length, "OS", "OS")} · {parts.join(" · ")}
+                                </p>
+                                {pix !== undefined ? <PayoutPixLine name={group.name} pix={pix} phone={phone} now={now} /> : null}
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Button size="sm" variant="ghost" onClick={() => void copyStatement(group)}>
+                                  <Copy className="size-4" />
+                                  Copiar extrato
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  disabled={!phone}
+                                  title={whatsappTitle(group, phone)}
+                                  onClick={() => phone && void openWhatsApp(group, phone)}
+                                >
+                                  <MessageCircle className="size-4" />
+                                  WhatsApp
+                                </Button>
+                                {canEdit && (chosenPaid.length || view === "paid") ? (
+                                  <Button
+                                    size="sm"
+                                    disabled={!chosenPaid.length || stale || (busy && !batch)}
+                                    loading={batch && pay.variables?.paid === false}
+                                    title={chosenPaid.length ? undefined : "Selecione os pagamentos que quer desfazer"}
+                                    onClick={() => void confirmUndo(group, chosenPaid)}
+                                  >
+                                    <RotateCcw className="size-4" />
+                                    {chosenPaid.length > 1 ? `Desfazer ${chosenPaid.length} pagamentos` : "Desfazer pagamento"}
+                                  </Button>
+                                ) : null}
+                                {canEdit && (view === "to_pay" || view === "all") && payable.length ? (
+                                  <Button
+                                    size="sm"
+                                    variant="primary"
+                                    disabled={stale || (busy && !batch)}
+                                    loading={batch && pay.variables?.paid === true}
+                                    onClick={() => void confirmPay(group, chosenPayable.length ? chosenPayable : payable, !chosenPayable.length)}
+                                  >
+                                    <CheckCheck className="size-4" />
+                                    {chosenPayable.length
+                                      ? `Pagar ${plural(chosenPayable.length, "selecionada", "selecionadas")}`
+                                      : `Pagar tudo (${formatMoney(total(payable))})`}
+                                  </Button>
+                                ) : null}
+                              </div>
+                            </div>
+                            {groupInvoices.length ? (
+                              <InvoiceStrip invoices={groupInvoices} onOpen={(invoice) => openInvoice(invoice)} onMore={() => showInvoicesOf(group)} />
+                            ) : null}
+                            <ul className="divide-y divide-line">
+                              {group.lines.map((line) => {
+                                const state = stateOf(line);
+                                const canPick = selectable(line);
+                                return (
+                                  <li key={line.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-5 py-2.5 sm:flex-nowrap">
+                                    {canEdit && view !== "expected" ? (
+                                      <label
+                                        className={clsx("-m-2 flex shrink-0 p-2", canPick ? "cursor-pointer" : "cursor-not-allowed")}
+                                        title={
+                                          canPick
+                                            ? undefined
+                                            : state === "cancelled"
+                                              ? "OS cancelada: pague ou tire o valor pelos botões da linha"
+                                              : "Paga quando a OS for concluída"
+                                        }
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          disabled={!canPick}
+                                          checked={selected.has(line.id)}
+                                          onChange={() => toggle(line.id)}
+                                          className="size-4 accent-[var(--brand)]"
+                                          aria-label={`Selecionar ${line.ticket.code}`}
+                                        />
+                                      </label>
+                                    ) : null}
+                                    <div className="min-w-0 flex-1 basis-56">
+                                      <p className="truncate text-sm font-semibold text-ink" title={line.ticket.title}>
+                                        <TicketLink
+                                          ticketId={line.ticket.id}
+                                          className="mr-1.5 font-mono text-xs font-normal text-ink-subtle hover:text-brand hover:underline"
+                                        >
+                                          {line.ticket.code}
+                                        </TicketLink>
+                                        {line.ticket.title}
+                                      </p>
+                                      <p className="truncate text-xs text-ink-muted">{subtitle(line)}</p>
+                                    </div>
+                                    <div className="flex w-full flex-wrap items-center justify-end gap-x-3 gap-y-1.5 sm:w-auto sm:flex-nowrap">
+                                      <StatePill line={line} />
+                                      {canEdit && state === "cancelled" ? (
+                                        <span className="flex items-center gap-1">
+                                          <Button
+                                            size="sm"
+                                            variant="ghost"
+                                            disabled={stale || (busy && pay.variables?.lineId !== line.id)}
+                                            loading={pay.isPending && pay.variables?.lineId === line.id}
+                                            onClick={() => void confirmPayCancelled(group, line)}
+                                          >
+                                            Pagar
+                                          </Button>
+                                          <Button
+                                            size="sm"
+                                            variant="ghost"
+                                            disabled={stale || (busy && remove.variables?.id !== line.id)}
+                                            loading={remove.isPending && remove.variables?.id === line.id}
+                                            onClick={() => void confirmRemove(line)}
+                                          >
+                                            Tirar valor
+                                          </Button>
+                                        </span>
+                                      ) : null}
+                                      <span className="text-right text-sm font-medium text-ink tabular-nums sm:w-28">{formatMoney(line.amount)}</span>
+                                    </div>
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          </Card>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
           </>
         )}
       </div>
+
+      {dialogInvoice && shownInvoice ? (
+        <InvoiceDialog
+          key={dialogInvoice.id}
+          invoice={dialogInvoice}
+          startRejecting={shownInvoice.rejecting}
+          canEdit={canEdit}
+          phone={personOf(dialogInvoice.technician.id)?.phone ?? null}
+          review={review}
+          onOpenFile={(invoice) => void openInvoiceFile(invoice)}
+          onClose={() => setShownInvoice(null)}
+        />
+      ) : null}
     </div>
   );
 }
