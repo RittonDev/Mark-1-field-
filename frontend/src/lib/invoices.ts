@@ -18,21 +18,62 @@ import type { InvoiceStatus, TechnicianInvoice, TechnicianInvoiceList, UUID } fr
  */
 export const INVOICE_LINK_FRESH_MS = 20 * 60_000;
 
-/** As notas com os filtros do cabeçalho de Pagamentos (técnico e mês, que aqui é a competência), sem o da situação. */
-export function invoicesQuery(month: string, technicianId: string) {
+/**
+ * As notas com os filtros do cabeçalho de Pagamentos (técnico e mês, que aqui é a competência). Sem `status`, a
+ * lista geral: as 500 mais novas, de qualquer situação. Com "pending", a do "A conferir": as que aguardam, na
+ * ordem da fila (as mais antigas primeiro), para a nota antiga não ficar de fora das 500 mais novas.
+ */
+export function invoicesQuery(month: string, technicianId: string, status?: InvoiceStatus) {
   return {
-    queryKey: ["technician-invoices", month, technicianId] as const,
+    queryKey: ["technician-invoices", month, technicianId, status ?? "all"] as const,
     queryFn: ({ signal }: { signal: AbortSignal }) =>
       api.get<TechnicianInvoiceList>(
         "/technician-invoices",
-        { month: month || undefined, technician_id: technicianId || undefined },
+        { month: month || undefined, technician_id: technicianId || undefined, status },
         { signal },
       ),
   };
 }
 
-export function useTechnicianInvoices(month: string, technicianId: string, enabled: boolean) {
-  return useQuery({ ...invoicesQuery(month, technicianId), placeholderData: keepPreviousData, enabled });
+export function useTechnicianInvoices(month: string, technicianId: string, enabled: boolean, status?: InvoiceStatus) {
+  return useQuery({ ...invoicesQuery(month, technicianId, status), placeholderData: keepPreviousData, enabled });
+}
+
+/**
+ * Na exportação, cada página começa um pouco antes do fim da anterior: se uma nota sair da lista no meio (o
+ * técnico apagou), a que vinha depois dela não fica de fora. As repetidas entram uma vez.
+ */
+const EXPORT_OVERLAP = 10;
+/** Teto de páginas de uma exportação (a API manda até 500 notas por vez). */
+const EXPORT_MAX_PAGES = 1000;
+
+/**
+ * Todas as notas dos filtros (técnico e competência, de qualquer situação), para o CSV: a API manda até 500 por
+ * vez, as mais novas primeiro, e as páginas vêm uma depois da outra pelo `offset` até o total do filtro.
+ * `onProgress`: quantas já vieram e o total.
+ */
+export async function fetchAllInvoices(
+  month: string,
+  technicianId: string,
+  onProgress?: (loaded: number, total: number) => void,
+): Promise<TechnicianInvoice[]> {
+  const byId = new Map<UUID, TechnicianInvoice>();
+  let offset = 0;
+  for (let page = 0; page < EXPORT_MAX_PAGES; page += 1) {
+    const chunk = await api.get<TechnicianInvoiceList>("/technician-invoices", {
+      month: month || undefined,
+      technician_id: technicianId || undefined,
+      offset: offset || undefined,
+    });
+    const before = byId.size;
+    for (const invoice of chunk.items) byId.set(invoice.id, invoice);
+    onProgress?.(Math.min(byId.size, chunk.total_count), chunk.total_count);
+    const end = offset + chunk.items.length;
+    // Para no fim do filtro, numa página só com o trecho repetido ou sem nota nova (API que ignore o offset).
+    if (end >= chunk.total_count || chunk.items.length <= EXPORT_OVERLAP || byId.size === before) break;
+    offset = end - EXPORT_OVERLAP;
+  }
+  return [...byId.values()];
 }
 
 /** "nº 1234". */
@@ -150,7 +191,10 @@ export function invoiceCsvRows(items: TechnicianInvoice[]): string[][] {
   ];
 }
 
-/** A nota que a API devolveu entra nas listas já carregadas, antes de a lista voltar do servidor. */
+/**
+ * A nota que a API devolveu entra nas listas já carregadas (a geral e a do "A conferir", de qualquer filtro),
+ * antes de elas voltarem do servidor.
+ */
 function patchLists(queryClient: QueryClient, invoice: TechnicianInvoice) {
   queryClient.setQueriesData<TechnicianInvoiceList>({ queryKey: ["technician-invoices"] }, (list) =>
     list ? { ...list, items: list.items.map((i) => (i.id === invoice.id ? invoice : i)) } : list,
@@ -158,10 +202,12 @@ function patchLists(queryClient: QueryClient, invoice: TechnicianInvoice) {
 }
 
 /**
- * Conferir, desfazer a conferência e recusar (Pagamentos: Editar). Depois, as notas e o fechamento são
- * buscados de novo: a recusa solta as OS da nota, e o "NF" das linhas de pagamento muda junto.
+ * Conferir, desfazer a conferência e recusar (Pagamentos: Editar). A nota que volta da API entra nas duas listas
+ * e vai para `onChanged` (o diálogo aberto: a nota antiga do "A conferir", depois de recusada, não está em
+ * nenhuma lista). Depois, as notas e o fechamento são buscados de novo: a recusa solta as OS da nota, e o "NF"
+ * das linhas de pagamento muda junto.
  */
-export function useInvoiceReview() {
+export function useInvoiceReview(onChanged?: (invoice: TechnicianInvoice) => void) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const settle = () => {
@@ -170,6 +216,7 @@ export function useInvoiceReview() {
   };
   const done = (invoice: TechnicianInvoice, title: string) => {
     patchLists(queryClient, invoice);
+    onChanged?.(invoice);
     toast({ title, tone: "success" });
   };
   const check = useMutation({
@@ -197,14 +244,33 @@ export function useInvoiceReview() {
 export type InvoiceReview = ReturnType<typeof useInvoiceReview>;
 
 /**
+ * O link da nota numa das listas dos filtros (buscada de novo quando tem mais de 20 min): primeiro a que já
+ * mostra a nota, a de onde ela veio (a antiga do "A conferir" não está entre as 500 mais novas da geral); depois
+ * a outra.
+ */
+async function listedDownloadUrl(queryClient: QueryClient, month: string, technicianId: string, id: UUID): Promise<string | null> {
+  const queries = [invoicesQuery(month, technicianId), invoicesQuery(month, technicianId, "pending")];
+  const shows = (query: (typeof queries)[number]) =>
+    Boolean(queryClient.getQueryData<TechnicianInvoiceList>(query.queryKey)?.items.some((i) => i.id === id));
+  queries.sort((a, b) => Number(shows(b)) - Number(shows(a)));
+  for (const query of queries) {
+    const list = await queryClient.fetchQuery({ ...query, staleTime: INVOICE_LINK_FRESH_MS });
+    const url = absoluteApiUrl(list.items.find((i) => i.id === id)?.download_url);
+    if (url) return url;
+  }
+  return null;
+}
+
+/**
  * Abre o arquivo da nota em outra aba (a foto aparece na tela; PDF e XML baixam). A aba abre já no clique
- * (senão o navegador bloqueia) e recebe o link assinado depois, da lista dos mesmos filtros: buscada de
- * novo quando tem mais de 20 min.
+ * (senão o navegador bloqueia) e recebe o link assinado depois, da lista dos mesmos filtros que tem a nota.
+ * `ownLinkAt`: quando a própria `invoice` veio da API (conferir, desfazer ou recusar no diálogo); o link dela vale
+ * por 20 min a partir daí (a antiga do "A conferir", recusada há pouco, não está em nenhuma lista).
  */
 export function useOpenInvoiceFile(month: string, technicianId: string) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  return async (invoice: TechnicianInvoice) => {
+  return async (invoice: TechnicianInvoice, ownLinkAt?: number) => {
     const tab = window.open("", "_blank");
     if (!tab) {
       toast({ title: "O navegador bloqueou a nova aba", description: "Libere as janelas pop-up deste site para ver a nota.", tone: "error" });
@@ -212,8 +278,8 @@ export function useOpenInvoiceFile(month: string, technicianId: string) {
     }
     tab.opener = null;
     try {
-      const list = await queryClient.fetchQuery({ ...invoicesQuery(month, technicianId), staleTime: INVOICE_LINK_FRESH_MS });
-      const url = absoluteApiUrl(list.items.find((i) => i.id === invoice.id)?.download_url);
+      const own = ownLinkAt !== undefined && Date.now() - ownLinkAt < INVOICE_LINK_FRESH_MS ? absoluteApiUrl(invoice.download_url) : null;
+      const url = own ?? (await listedDownloadUrl(queryClient, month, technicianId, invoice.id));
       if (!url) throw new Error("A nota não está mais na lista. Atualize a tela.");
       tab.location.href = url;
     } catch (e) {

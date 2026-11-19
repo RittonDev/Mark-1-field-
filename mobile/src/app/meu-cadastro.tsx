@@ -757,10 +757,13 @@ export default function MyProfileScreen() {
             accent
             right={
               <Pressable
+                // Salvando, não sai da tela: ao terminar, o "voltar" fecharia o aviso em vez do cadastro.
                 onPress={() => router.push("/privacidade")}
+                disabled={saving}
                 hitSlop={14}
                 accessibilityRole="link"
-                style={({ pressed }) => pressed && styles.linkPressed}
+                accessibilityState={{ disabled: saving }}
+                style={({ pressed }) => (pressed || saving) && styles.linkPressed}
               >
                 <Text style={styles.link}>Aviso de privacidade</Text>
               </Pressable>

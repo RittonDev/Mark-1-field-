@@ -163,6 +163,12 @@ export default function InvoiceScreen() {
   const picking = useRef(false);
   // Uma por abertura da tela, repetida em cada tentativa (criada no primeiro envio).
   const uploadId = useRef<string | null>(null);
+  const scrollRef = useRef<ScrollViewInstance>(null);
+  // Onde começa o cartão das OS: o envio leva a tela até a lista que acabou de chegar (`reveal` muda).
+  const listTop = useRef(0);
+  const [reveal, setReveal] = useState(0);
+  // Cada busca da lista ganha um número e só a mais nova vale (troca de mês, "Tentar de novo", conexão de volta, envio).
+  const listSeq = useRef(0);
 
   const list = payouts?.month === competence ? payouts.items : null;
   const listError = !list && payoutsError?.month === competence ? payoutsError.message : null;
@@ -212,23 +218,53 @@ export default function InvoiceScreen() {
     return () => releaseFile(file);
   }, [file]);
 
-  // OS da competência: ao abrir, ao trocar de mês e em "Tentar de novo" (as marcações voltam ao padrão).
+  /** Busca as OS do mês e volta as marcações ao padrão. "stale": outra busca começou depois, ou a tela fechou. */
+  const fetchList = useCallback(async (month: string): Promise<"ok" | "error" | "stale"> => {
+    const seq = ++listSeq.current;
+    try {
+      const items = await loadInvoicePayouts(month);
+      if (seq !== listSeq.current || !mounted.current) return "stale";
+      setPayouts({ month, items });
+      setChecked(defaultChecked(items));
+      setPayoutsError(null);
+      return "ok";
+    } catch (error) {
+      if (seq !== listSeq.current || !mounted.current) return "stale";
+      setPayoutsError({ month, message: listFailure(error) });
+      return "error";
+    }
+  }, []);
+
+  // OS da competência: ao abrir, ao trocar de mês, em "Tentar de novo" e quando a conexão volta (as marcações voltam
+  // ao padrão).
   useEffect(() => {
-    let alive = true;
-    loadInvoicePayouts(competence)
-      .then((items) => {
-        if (!alive) return;
-        setPayouts({ month: competence, items });
-        setChecked(defaultChecked(items));
-        setPayoutsError(null);
-      })
-      .catch((error: unknown) => {
-        if (alive) setPayoutsError({ month: competence, message: listFailure(error) });
-      });
-    return () => {
-      alive = false;
-    };
-  }, [competence, payoutsAttempt]);
+    void fetchList(competence);
+  }, [competence, payoutsAttempt, fetchList]);
+
+  function retryList() {
+    setPayoutsError(null);
+    setPayoutsAttempt((n) => n + 1);
+  }
+
+  // A conexão voltou com a lista em erro: busca de novo (o aviso de sem internet promete as OS nessa hora). Durante o
+  // envio, quem busca é o próprio envio.
+  const onReconnect = useEffectEvent(() => {
+    if (listError && !busy.current) retryList();
+  });
+  useEffect(() => {
+    // null até o primeiro estado (que chega logo na inscrição): a conexão só "volta" depois de ter caído.
+    let usable: boolean | null = null;
+    return NetInfo.addEventListener((net) => {
+      const now = net.isConnected !== false && net.isInternetReachable !== false;
+      if (usable === false && now) onReconnect();
+      usable = now;
+    });
+  }, []);
+
+  // A lista chegou no toque de "Enviar nota": a tela vai até ela para o técnico conferir as marcações.
+  useEffect(() => {
+    if (reveal) scrollRef.current?.scrollTo({ y: Math.max(0, listTop.current - 12), animated: true });
+  }, [reveal]);
 
   // Android: a foto tirada antes de o sistema fechar o app com a câmera aberta volta para a nota.
   useEffect(() => {
@@ -318,6 +354,26 @@ export default function InvoiceScreen() {
         setSubmitError(OFFLINE);
         return;
       }
+      let payoutIds = chosen.map((item) => item.payout_id);
+      // A lista de OS não veio: busca de novo antes de a nota sair sem nenhuma OS.
+      if (!list) {
+        setPayoutsError(null);
+        const loaded = await fetchList(competence);
+        if (loaded === "stale") return;
+        if (loaded === "ok") {
+          // As OS do mês vieram marcadas: o técnico confere e toca de novo.
+          setReveal((n) => n + 1);
+          showToast("Confira as OS desta nota", { description: "Depois, toque em Enviar nota de novo." });
+          return;
+        }
+        if (await isOffline()) {
+          setSubmitError(OFFLINE);
+          return;
+        }
+        const ok = await confirmAction("Enviar a nota sem OS?", "A lista de OS não carregou.", { confirmText: "Enviar sem OS" });
+        if (!ok || !mounted.current) return;
+        payoutIds = [];
+      }
       const clientUploadId = (uploadId.current ??= randomUUID());
       const invoice = await sendTracked({
         file,
@@ -326,7 +382,7 @@ export default function InvoiceScreen() {
         amount: check.amount,
         competence,
         note,
-        payoutIds: chosen.map((item) => item.payout_id),
+        payoutIds,
         clientUploadId,
       });
       haptic.success();
@@ -385,6 +441,7 @@ export default function InvoiceScreen() {
   return (
     <KeyboardAvoidingView style={styles.screen} behavior="padding" keyboardVerticalOffset={headerHeight}>
       <ScrollView
+        ref={scrollRef}
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
@@ -504,51 +561,62 @@ export default function InvoiceScreen() {
           </Field>
         </Card>
 
-        <Card style={styles.card}>
-          <View style={styles.payoutsHead}>
-            <Text style={styles.label} accessibilityRole="header">
-              OS desta nota
-            </Text>
-            {selectable.length ? (
-              <Button compact variant="ghost" title={allChecked ? "Desmarcar todas" : "Marcar todas"} onPress={toggleAll} disabled={sending} />
-            ) : null}
-          </View>
-          {listError ? (
-            <View style={styles.listState}>
-              <ErrorBox message={listError} />
-              <Button
-                title="Tentar de novo"
-                icon="repeat"
-                onPress={() => {
-                  setPayoutsError(null);
-                  setPayoutsAttempt((n) => n + 1);
-                }}
-              />
-            </View>
-          ) : !list ? (
-            <View style={styles.listState}>
-              <Skeleton height={44} radius={RADIUS.control} />
-              <Skeleton height={44} radius={RADIUS.control} />
-            </View>
-          ) : (
-            <View>
-              {inMonth.length ? inMonth.map(renderPayout) : <Text style={styles.muted}>Nenhuma OS concluída em {monthWord}.</Text>}
-              {earlier.length ? (
-                <>
-                  <Text style={styles.groupLabel}>De meses anteriores, a receber</Text>
-                  {earlier.map(renderPayout)}
-                </>
+        <View
+          onLayout={(e) => {
+            listTop.current = e.nativeEvent.layout.y;
+          }}
+        >
+          <Card style={styles.card}>
+            <View style={styles.payoutsHead}>
+              <Text style={styles.label} accessibilityRole="header">
+                OS desta nota
+              </Text>
+              {selectable.length ? (
+                <Button compact variant="ghost" title={allChecked ? "Desmarcar todas" : "Marcar todas"} onPress={toggleAll} disabled={sending} />
               ) : null}
             </View>
-          )}
-          {errors.payouts ? <Text style={styles.fieldError}>{errors.payouts}</Text> : null}
-        </Card>
+            {listError ? (
+              <View style={styles.listState}>
+                <ErrorBox message={listError} />
+                <Button title="Tentar de novo" icon="repeat" onPress={retryList} />
+              </View>
+            ) : !list ? (
+              <View style={styles.listState}>
+                <Skeleton height={44} radius={RADIUS.control} />
+                <Skeleton height={44} radius={RADIUS.control} />
+              </View>
+            ) : (
+              <View>
+                {inMonth.length ? inMonth.map(renderPayout) : <Text style={styles.muted}>Nenhuma OS concluída em {monthWord}.</Text>}
+                {earlier.length ? (
+                  <>
+                    <Text style={styles.groupLabel}>De meses anteriores, a receber</Text>
+                    {earlier.map(renderPayout)}
+                  </>
+                ) : null}
+              </View>
+            )}
+            {errors.payouts ? <Text style={styles.fieldError}>{errors.payouts}</Text> : null}
+          </Card>
+        </View>
 
         <Card style={styles.card}>
           <Field label="Observação">
             <Input value={note} onChangeText={setNote} accessibilityLabel="Observação" multiline maxLength={INVOICE_LIMITS.noteMax} />
           </Field>
         </Card>
+
+        <Pressable
+          // Enviando, não sai da tela: ao terminar, o "voltar" fecharia o aviso em vez da nota.
+          onPress={() => router.push("/privacidade")}
+          disabled={sending}
+          hitSlop={14}
+          accessibilityRole="link"
+          accessibilityState={{ disabled: sending }}
+          style={({ pressed }) => [styles.privacy, (pressed || sending) && styles.linkPressed]}
+        >
+          <Text style={styles.link}>Aviso de privacidade</Text>
+        </Pressable>
       </ScrollView>
 
       <View style={[styles.footer, { paddingBottom: insets.bottom + 12 }]}>
@@ -644,4 +712,7 @@ const makeStyles = (c: Palette) =>
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: c.line,
     },
+    privacy: { alignSelf: "center", paddingVertical: 4 },
+    link: { fontSize: 13, fontWeight: "600", color: c.brandInk },
+    linkPressed: { opacity: 0.6 },
   });

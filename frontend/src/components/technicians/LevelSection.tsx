@@ -151,7 +151,8 @@ function CriteriaList({ title, criteria }: { title: string; criteria: LevelCrite
  * "Elo" no cadastro do técnico: a faixa e desde quando, o risco de descer, o que falta para a próxima faixa,
  * os números dos últimos 12 meses e as ocorrências que pesaram (com o link para a OS). Com Técnicos em Editar,
  * a central desconsidera uma ocorrência (com o motivo) e faz a desconsiderada voltar a contar. A ocorrência de
- * OS de outra fila (quem pede vê só a própria) fica sem link e sem essas ações. Os textos chegam prontos da API. Fica fora do fieldset travado do cadastro: só com Visualizar, ainda dá para ver mais.
+ * OS de outra fila (quem pede vê só a própria) fica sem link e sem essas ações. Os textos chegam prontos da API.
+ * Fica fora do fieldset travado do cadastro: só com Visualizar, ainda dá para ver mais.
  * `dirty`: o cadastro tem alteração não salva (o link para Configurações abre em outra aba).
  */
 export function LevelSection({

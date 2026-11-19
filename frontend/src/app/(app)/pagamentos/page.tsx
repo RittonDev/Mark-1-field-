@@ -1,6 +1,6 @@
 "use client";
 
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, type UseQueryResult, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 import { CheckCheck, Copy, Download, MessageCircle, RotateCcw, Wallet } from "lucide-react";
 import { useSearchParams } from "next/navigation";
@@ -10,7 +10,7 @@ import { useConfirm } from "@/components/Confirm";
 import { Tabs } from "@/components/motion";
 import { NoAccess } from "@/components/NoAccess";
 import { InvoiceDialog } from "@/components/payouts/InvoiceDialog";
-import { InvoicesPanel, InvoiceStrip } from "@/components/payouts/InvoicesPanel";
+import { type InvoiceListState, InvoicesPanel, InvoiceStrip } from "@/components/payouts/InvoicesPanel";
 import { PayoutPixLine } from "@/components/payouts/PayoutPixLine";
 import { TicketLink } from "@/components/ticket/TicketLink";
 import { useToast } from "@/components/Toaster";
@@ -21,6 +21,7 @@ import { PAYOUT_STATUS, STATUS } from "@/lib/constants";
 import { downloadCsv } from "@/lib/download";
 import { formatDate, formatMoney } from "@/lib/format";
 import {
+  fetchAllInvoices,
   invoiceCsvRows,
   invoicesByTechnician,
   payInvoiceNote,
@@ -31,8 +32,18 @@ import {
   useTechnicianInvoices,
 } from "@/lib/invoices";
 import { useCan } from "@/lib/permissions";
-import { pixDay, pixRecent, pixText } from "@/lib/pix";
-import type { ExpenseReport, PayoutBoard, PayoutLine, PayoutList, PixInfo, TechnicianInvoice, User, UUID } from "@/lib/types";
+import { pixDay, pixRecent, pixStatementText } from "@/lib/pix";
+import type {
+  ExpenseReport,
+  PayoutBoard,
+  PayoutLine,
+  PayoutList,
+  PixInfo,
+  TechnicianInvoice,
+  TechnicianInvoiceList,
+  User,
+  UUID,
+} from "@/lib/types";
 import { copyText, WHATSAPP_TEXT_LIMIT, whatsappUrl } from "@/lib/whatsapp";
 
 /** Abas da tela: o fechamento dos valores e as notas fiscais que os técnicos enviam pelo app. */
@@ -138,6 +149,17 @@ function usePayouts(source: Source, month: string, technicianId: string, enabled
   });
 }
 
+/** Uma consulta de notas fiscais como o painel da aba recebe. */
+function invoiceListState(query: UseQueryResult<TechnicianInvoiceList>): InvoiceListState {
+  return {
+    list: query.data,
+    loading: query.isLoading,
+    error: query.error,
+    stale: query.isPlaceholderData,
+    onRetry: () => void query.refetch(),
+  };
+}
+
 /** A aba fica na URL (?aba=notas-fiscais), sem navegar e mantendo a OS aberta no painel (?os=). */
 function setParams(patch: Record<string, string | null>) {
   const url = new URL(window.location.href);
@@ -161,8 +183,9 @@ function subtitle(line: PayoutLine): string {
 /**
  * Extrato para mandar ao técnico no WhatsApp: as OS de cada situação, com o dia da conclusão e o
  * valor. No "a pagar" entram os reembolsos aprovados (custos extras), pagos no mesmo acerto. A chave PIX
- * vai junto, para ele ver onde vai receber (`pix` undefined: a API não mandou a chave, a linha fica de fora).
- * Depois do período, as notas fiscais dele que valem (a recusada fica de fora).
+ * vai junto, para ele ver onde vai receber, com CPF e CNPJ mascarados: o texto passa pelo endereço do wa.me
+ * (`pix` undefined: a API não mandou a chave, a linha fica de fora). Depois do período, as notas fiscais
+ * dele que valem (a recusada fica de fora).
  */
 function statement(
   name: string,
@@ -178,7 +201,7 @@ function statement(
     .map((key) => ({ key, lines: lines.filter((l) => stateOf(l) === key) }))
     .filter((s) => s.lines.length > 0);
   const out = ["*Maxx Field · pagamento*", name, `Período: ${period}`, ...statementInvoiceLines(invoices)];
-  if (pix) out.push(`Chave PIX: ${pixText(pix)}`);
+  if (pix) out.push(`Chave PIX: ${pixStatementText(pix)}`);
   else if (pix === null) out.push("Chave PIX: não cadastrada (cadastre no app, em Conta › Meu cadastro)");
   for (const s of sections) {
     out.push("", `*${SECTION[s.key]}*`, ...s.lines.map(row));
@@ -262,13 +285,22 @@ function PayoutsView() {
   const paidQuery = usePayouts("paid", month, technicianId, canView);
   const queries = [pendingQuery, paidQuery];
   // Notas fiscais dos técnicos, com os mesmos filtros (o mês é a competência): a aba Notas fiscais e, no
-  // fechamento, a faixa de cada técnico, o aviso do Pagar, o extrato e o CSV.
+  // fechamento, a faixa de cada técnico, o aviso do Pagar e o extrato.
   const invoices = useTechnicianInvoices(month, technicianId, canView);
-  const review = useInvoiceReview();
+  // O "A conferir", com a aba aberta: consulta própria, na ordem da fila. A lista geral traz só as 500 mais
+  // novas, e a nota antiga que aguarda ficaria de fora.
+  const pendingInvoices = useTechnicianInvoices(month, technicianId, canView && tab === "invoices", "pending");
+  // A nota aberta no diálogo (`rejecting`: aberta pelo "Recusar" da lista, já no motivo; `changedAt`: quando
+  // ela voltou da API depois de conferir, desfazer ou recusar).
+  const [shownInvoice, setShownInvoice] = useState<{ invoice: TechnicianInvoice; rejecting: boolean; changedAt?: number } | null>(null);
+  const review = useInvoiceReview((invoice) =>
+    setShownInvoice((shown) => (shown?.invoice.id === invoice.id ? { ...shown, invoice, changedAt: Date.now() } : shown)),
+  );
   const openInvoiceFile = useOpenInvoiceFile(month, technicianId);
-  // A nota aberta no diálogo (`rejecting`: aberta pelo "Recusar" da lista, já no motivo).
-  const [shownInvoice, setShownInvoice] = useState<{ invoice: TechnicianInvoice; rejecting: boolean } | null>(null);
+  // Exportando as notas: quantas já vieram e o total (que chega com a primeira página).
+  const [exporting, setExporting] = useState<{ loaded: number; total: number } | null>(null);
   const invoiceItems = useMemo(() => invoices.data?.items ?? [], [invoices.data]);
+  const pendingItems = useMemo(() => pendingInvoices.data?.items ?? [], [pendingInvoices.data]);
   const invoicesOf = useMemo(() => invoicesByTechnician(reviewOrder(invoiceItems)), [invoiceItems]);
   // O que vai no extrato e no aviso do Pagar só vale com a lista do filtro atual (não a do anterior);
   // "sem nota" só se afirma com a lista inteira (sem o corte das 500 mais novas).
@@ -346,7 +378,7 @@ function PayoutsView() {
     for (const person of people.data ?? []) map.set(person.id, person.name);
     for (const [id, name] of Object.entries(seen)) map.set(id, name);
     for (const line of all) map.set(line.technician.id, line.technician.name);
-    for (const invoice of invoiceItems) map.set(invoice.technician.id, invoice.technician.name);
+    for (const invoice of [...invoiceItems, ...pendingItems]) map.set(invoice.technician.id, invoice.technician.name);
     if (technician && !map.has(technician.id)) map.set(technician.id, technician.name);
     const repeated = new Map<string, number>();
     for (const name of map.values()) repeated.set(name, (repeated.get(name) ?? 0) + 1);
@@ -357,7 +389,7 @@ function PayoutsView() {
         return { id, name, label: (repeated.get(name) ?? 0) > 1 && email ? `${name} · ${email}` : name };
       })
       .sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
-  }, [all, invoiceItems, technician, seen, people.data]);
+  }, [all, invoiceItems, pendingItems, technician, seen, people.data]);
 
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ["payouts"] });
@@ -568,11 +600,23 @@ function PayoutsView() {
         : { title: "Não foi possível copiar o extrato", description: "Use o Copiar extrato e cole na conversa.", tone: "error" },
     );
   };
+  /** Todas as notas do filtro, de qualquer situação, na ordem da aba Todas (a API manda 500 por vez). */
+  const exportInvoices = async () => {
+    setExporting({ loaded: 0, total: 0 });
+    try {
+      const items = await fetchAllInvoices(month, technicianId, (loaded, all) => setExporting({ loaded, total: all }));
+      downloadCsv(`notas-fiscais-${month || "todos"}.csv`, invoiceCsvRows(reviewOrder(items)));
+    } catch (error) {
+      toast({ title: "Não foi possível exportar as notas", description: errorMessage(error), tone: "error" });
+    } finally {
+      setExporting(null);
+    }
+  };
   // O Exportar CSV do cabeçalho exporta a aba aberta: no fechamento, as linhas da visão; nas notas, todas
-  // as notas do filtro (de qualquer situação), na ordem da aba Todas.
+  // as notas do filtro.
   const exportCsv = () => {
     if (tab === "invoices") {
-      downloadCsv(`notas-fiscais-${month || "todos"}.csv`, invoiceCsvRows(reviewOrder(invoiceItems)));
+      void exportInvoices();
       return;
     }
     downloadCsv(`pagamentos-${month || "todos"}-${VIEW_SLUG[view]}.csv`, [
@@ -636,10 +680,14 @@ function PayoutsView() {
   const selectable = (line: PayoutLine) =>
     canEdit && view !== "expected" && (stateOf(line) === "to_pay" || stateOf(line) === "paid");
 
-  // A nota do diálogo na versão mais nova da lista (depois de conferir, desfazer ou recusar).
-  const dialogInvoice = shownInvoice ? (invoiceItems.find((i) => i.id === shownInvoice.invoice.id) ?? shownInvoice.invoice) : null;
+  // A nota do diálogo na versão mais nova: a das listas (a geral ou a do "A conferir"; a ação no diálogo também
+  // entra nelas) ou, fora das duas (a antiga do "A conferir", recusada há pouco), a que voltou da API.
+  const shownId = shownInvoice?.invoice.id;
+  const dialogInvoice = shownInvoice
+    ? (invoiceItems.find((i) => i.id === shownId) ?? pendingItems.find((i) => i.id === shownId) ?? shownInvoice.invoice)
+    : null;
   const openInvoice = (invoice: TechnicianInvoice, rejecting = false) => setShownInvoice({ invoice, rejecting });
-  const pendingInvoices = invoices.data?.summary.pending ?? 0;
+  const pendingCount = (invoices.data ?? pendingInvoices.data)?.summary.pending ?? 0;
 
   if (!canView) return <NoAccess kind="module" item="commercial.payouts" />;
 

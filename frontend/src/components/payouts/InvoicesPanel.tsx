@@ -27,17 +27,25 @@ const STRIP_RANK: Record<TechnicianInvoice["status"], number> = { pending: 0, ch
 
 const intFmt = (n: number) => n.toLocaleString("pt-BR");
 
+/** Uma lista de notas da aba, como a consulta está. */
+export interface InvoiceListState {
+  list: TechnicianInvoiceList | undefined;
+  loading: boolean;
+  error: unknown;
+  /** Lista do filtro anterior enquanto a nova não chega. */
+  stale: boolean;
+  onRetry: () => void;
+}
+
 /**
  * Aba Notas fiscais de Pagamentos: as notas que os técnicos enviaram pelo app, com os filtros do cabeçalho
- * (técnico e competência). A conferir vem primeiro, da mais antiga para a mais nova. Com Editar: conferir,
- * recusar (abre o diálogo com o motivo) e desfazer a conferência. A linha abre o diálogo da nota.
+ * (técnico e competência). "A conferir" tem lista própria, na ordem da fila (da mais antiga para a mais nova): a
+ * lista geral, das outras abas, traz só as 500 mais novas. Com Editar: conferir, recusar (abre o diálogo com o
+ * motivo) e desfazer a conferência. A linha abre o diálogo da nota.
  */
 export function InvoicesPanel({
-  list,
-  loading,
-  error,
-  stale,
-  onRetry,
+  all,
+  pending,
   month,
   canEdit,
   review,
@@ -45,12 +53,10 @@ export function InvoicesPanel({
   onOpenFile,
   onClearTechnician,
 }: {
-  list: TechnicianInvoiceList | undefined;
-  loading: boolean;
-  error: unknown;
-  /** Lista do filtro anterior enquanto a nova não chega. */
-  stale: boolean;
-  onRetry: () => void;
+  /** A lista geral (as mais novas, de qualquer situação): Conferidas, Recusadas, Todas e os contadores. */
+  all: InvoiceListState;
+  /** A do "A conferir" (só as que aguardam), as mais antigas primeiro. */
+  pending: InvoiceListState;
   /** Competência escolhida no cabeçalho ("2026-11"), ou vazio. */
   month: string;
   canEdit: boolean;
@@ -61,9 +67,12 @@ export function InvoicesPanel({
   onClearTechnician?: () => void;
 }) {
   const [filter, setFilter] = useState<Filter>("pending");
+  const { list, loading, error, stale, onRetry } = filter === "pending" ? pending : all;
   const ordered = useMemo(() => reviewOrder(list?.items ?? []), [list]);
+  // Também na lista do "A conferir": a nota conferida agora sai antes de a lista voltar do servidor.
   const visible = filter === "all" ? ordered : ordered.filter((i) => i.status === filter);
-  const summary = list?.summary;
+  // O resumo não depende da situação: é o mesmo nas duas listas.
+  const summary = (all.list ?? pending.list)?.summary;
   const counts: Record<Filter, number | undefined> = summary
     ? { pending: summary.pending, checked: summary.checked, rejected: summary.rejected, all: summary.pending + summary.checked + summary.rejected }
     : { pending: undefined, checked: undefined, rejected: undefined, all: undefined };
@@ -93,8 +102,9 @@ export function InvoicesPanel({
       </div>
       {cut && list ? (
         <p className="mb-3 text-xs text-ink-muted">
-          A lista mostra as {intFmt(list.items.length)} notas mais recentes de {intFmt(list.total_count)}: escolha um mês ou um técnico para ver
-          todas.
+          {filter === "pending"
+            ? `A lista mostra as ${intFmt(list.items.length)} notas mais antigas de ${intFmt(list.total_count)} a conferir: as seguintes entram conforme estas forem conferidas.`
+            : `A lista mostra as ${intFmt(list.items.length)} notas mais recentes de ${intFmt(list.total_count)}: escolha um mês ou um técnico para ver todas.`}
         </p>
       ) : null}
 
