@@ -9,12 +9,13 @@ import { GrantAccessDialog } from "@/components/technicians/GrantAccessDialog";
 import { LevelBadge } from "@/components/technicians/LevelBadge";
 import { Button, ErrorBox, Skeleton } from "@/components/ui";
 import { errorMessage } from "@/lib/api";
+import { slotsText } from "@/lib/constants";
 import { formatDate, initials } from "@/lib/format";
 import { useCan } from "@/lib/permissions";
 import { whatsappUrl } from "@/lib/whatsapp";
 import type { FavoriteCityDetail, FavoriteTechnician, TechnicianSuggestion, UUID } from "@/lib/types";
 
-// Motivos que já aparecem nos números do cartão ou na estrela de favorito (não repetir como etiqueta).
+// Motivos que já aparecem nos números, nas etiquetas do cartão ou na estrela de favorito (não repetir como etiqueta).
 const SHOWN_AS_NUMBERS = [
   /^Livre no horário$/,
   /^Ocupado no horário$/,
@@ -23,7 +24,24 @@ const SHOWN_AS_NUMBERS = [
   /OS em aberto$/,
   /^Atendeu esta loja/,
   /^Favorito em /,
+  /^Fora da disponibilidade/,
 ];
+
+/**
+ * A visita cai em turnos que o técnico não marcou na disponibilidade do app (`gaps`: esses turnos em texto, "sáb ·
+ * tarde"). Âmbar: é aviso (o vermelho fica para "Ocupado"); dentro da disponibilidade ou sem ela informada, nada
+ * aparece. Também na oferta com preço.
+ */
+export function OutsideAvailabilityChip({ gaps }: { gaps: string }) {
+  return (
+    <span
+      className="inline-flex max-w-full items-center rounded-full bg-amber-50 px-1.5 py-px text-[11px] font-medium text-amber-800 dark:bg-amber-500/10 dark:text-amber-300"
+      title="Pela disponibilidade que o técnico informou no app"
+    >
+      {gaps ? `Fora da disponibilidade (${gaps})` : "Fora da disponibilidade"}
+    </span>
+  );
+}
 
 /** Title da estrela: "Favorito em Santos-SP · 12 OS em 12 meses" ou "... · fixado por {analista}". */
 function favoriteTitle(t: TechnicianSuggestion, city: FavoriteCityDetail | null | undefined): string {
@@ -241,6 +259,9 @@ function SuggestionList({
                       >
                         {t.busy ? "Ocupado no horário" : "Livre no horário"}
                       </span>
+                    ) : null}
+                    {scheduled && t.availability === "outside" ? (
+                      <OutsideAvailabilityChip gaps={slotsText(t.availability_gaps ?? [])} />
                     ) : null}
                     {t.on_shift ? (
                       <span className="inline-flex items-center gap-1 text-[11px] font-medium text-ink-muted">

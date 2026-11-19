@@ -432,8 +432,8 @@ function dropKeptPhotos() {
 
 /**
  * O servidor tem um aviso de privacidade mais novo que o texto desta página (aberta antes de uma atualização): o aceite
- * gravaria a versão nova sobre o texto antigo. Versões AAAA-MM-DD, comparadas como texto. Igual, mais antiga ou sem
- * versão (API anterior a ela): segue normal.
+ * gravaria a versão nova sobre o texto antigo. Versões AAAA-MM-DD ou AAAA-MM-DD.N, comparadas como texto. Igual, mais
+ * antiga ou sem versão (API anterior a ela): segue normal.
  */
 function privacyOutdated(server: unknown): boolean {
   return typeof server === "string" && server > PRIVACY_VERSION;

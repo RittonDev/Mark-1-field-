@@ -36,7 +36,7 @@ import { StatusBadge } from "@/components/badges";
 import { EmptyState, ErrorBox, Skeleton } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { EVENT_TYPE, LEVEL, PRIORITY, RESPONSIBILITY, STATUS, TICKET_TYPE } from "@/lib/constants";
-import { formatDateTime, formatMinutes, formatMoney } from "@/lib/format";
+import { dayKey, formatDateTime, formatMinutes, formatMoney, formatTime, OPERATION_TZ } from "@/lib/format";
 import type {
   Level,
   OfferCancelReason,
@@ -252,6 +252,20 @@ function str(value: unknown): string | null {
   return typeof value === "string" && value ? value : null;
 }
 
+const dayMonthFmt = new Intl.DateTimeFormat("pt-BR", { timeZone: OPERATION_TZ, day: "2-digit", month: "2-digit" });
+
+/**
+ * Quando o técnico abriu o escopo, ao lado do aceite: "escopo lido às 14:45"; lido noutro dia (oferta sem prazo),
+ * "escopo lido em 18/11 às 18:10". Sem a leitura (app antigo) ou com data malformada, nada.
+ */
+function scopeReadText(value: unknown, acceptedAt: string): string | null {
+  const iso = str(value);
+  const day = iso ? dayKey(iso) : "";
+  if (!iso || !day) return null;
+  const time = `às ${formatTime(iso)}`;
+  return `escopo lido ${day === dayKey(acceptedAt) ? time : `em ${dayMonthFmt.format(new Date(iso))} ${time}`}`;
+}
+
 function isStatus(value: string | null): value is TicketStatus {
   return value !== null && value in STATUS;
 }
@@ -414,6 +428,8 @@ function Detail({ event }: { event: TicketEvent }) {
       );
     }
     case "offer_accepted":
+      // O técnico é o autor; aqui, o valor e quando ele abriu o escopo no app.
+      return <Joined parts={[money(data.amount) ?? money(event.to_value), scopeReadText(data.scope_read_at, event.created_at)]} />;
     case "offer_declined":
       // O técnico é o autor; aqui, o valor.
       return <Joined parts={[money(data.amount) ?? money(event.to_value)]} />;

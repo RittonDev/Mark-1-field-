@@ -8,6 +8,7 @@ homologação traz na aprovação e a cópia desse mapa na migração f5a7c9e1b3
 
 import importlib.util
 import json
+import unicodedata
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -20,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from app.core.config import settings
 from app.models import TechnicianApplication, User
-from app.schemas.onboarding import SKILL_LEVELS
+from app.schemas.onboarding import AVAILABILITY, SKILL_LEVELS, VEHICLE_TYPES
 from app.schemas.tech_profile import (
     EducationIn,
     TechnicianSkillIn,
@@ -154,7 +155,7 @@ def test_short_texts() -> None:
         "Técnico em redes · Escola Exemplo · Técnico · desde 02/2024 (em andamento)"
     )
     assert tp.fold("  Câmeras   HIKVISION ") == "cameras hikvision"
-    assert tp.clean("  Fibra   óptica ") == "Fibra óptica"
+    assert tp.clean(unicodedata.normalize("NFD", "  Fibra   óptica ")) == "Fibra óptica"
 
 
 # ------------------------------------------------------- itens do PATCH /me/profile
@@ -200,6 +201,8 @@ def test_education_item_is_cleaned_and_checked() -> None:
     assert _problems(EducationIn, {**base, "institution": "a" * (tp.INSTITUTION_MAX + 1)}) == [
         (("institution",), "no máximo 120 caracteres")
     ]
+    longest = {**base, "course": "a" * tp.COURSE_MAX, "institution": "b" * tp.INSTITUTION_MAX}
+    assert EducationIn.model_validate(longest)
     assert _problems(EducationIn, {**base, "start": "2024-13"}) == [
         (("start",), "Mês inválido: use AAAA-MM")
     ]
@@ -221,6 +224,7 @@ def test_education_item_is_cleaned_and_checked() -> None:
 
 def test_transport_item_is_checked() -> None:
     assert TransportIn.model_validate({"modes": [], "driver_license": False})
+    assert TransportIn.model_validate({"modes": ["car"] * tp.MAX_MODES, "driver_license": True})
     too_many = {"modes": ["car"] * (tp.MAX_MODES + 1), "driver_license": True}
     assert _problems(TransportIn, too_many) == [(("modes",), "no máximo 6 itens")]
     [(loc, text)] = _problems(TransportIn, {"modes": ["bus"], "driver_license": True})
@@ -244,6 +248,7 @@ def test_tool_name_is_cleaned_and_checked() -> None:
     assert _problems(TechnicianToolCreate, {"name": "a" * (tp.TOOL_NAME_MAX + 1)}) == [
         (("name",), "no máximo 80 caracteres")
     ]
+    assert TechnicianToolCreate(name="a" * tp.TOOL_NAME_MAX)
     update = TechnicianToolUpdate.model_validate({"name": None, "is_active": None})
     assert (update.name, update.is_active) == (None, None)
     assert _problems(TechnicianToolUpdate, {"name": ""}) == [
@@ -520,6 +525,13 @@ def test_ficha_since_is_the_local_day() -> None:
     if settings.TIMEZONE == "America/Sao_Paulo":
         assert profile["skills"][0]["since"] == "2026-11-19"
     assert profile["skills"][0]["since"] == CREATED.astimezone(TZ).date().isoformat()
+
+
+def test_ficha_map_covers_the_ficha_codes() -> None:
+    """Todo código da ficha pública tem um mapa (um código novo lá pede um turno aqui)."""
+    assert set(tp.FICHA_AVAILABILITY) == set(AVAILABILITY)
+    assert set(tp.FICHA_VEHICLE) | {"outro"} == set(VEHICLE_TYPES)
+    assert all(set(slots) <= set(tp.ALL_SLOTS) for slots in tp.FICHA_AVAILABILITY.values())
 
 
 # -------------------------------------------------------------- a migração

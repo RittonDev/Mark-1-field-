@@ -11,6 +11,7 @@ import { FieldRulesCard } from "@/components/FieldRulesCard";
 import { NoAccess } from "@/components/NoAccess";
 import { ActiveState, FieldError, fold, RowEditButton, useLeaveGuard } from "@/components/settings/shared";
 import { TagRulesCard } from "@/components/settings/TagRulesCard";
+import { ToolCatalogCard } from "@/components/settings/ToolCatalogCard";
 import { useToast } from "@/components/Toaster";
 import { UnproductiveReasonsCard } from "@/components/UnproductiveReasonsCard";
 import { ViolationReasonsCard } from "@/components/ViolationReasonsCard";
@@ -47,6 +48,7 @@ const MAX_RESOLUTION = 60 * 24 * 120;
 const SECTIONS = [
   { id: "empresa", label: "Empresa" },
   { id: "campo", label: "Campo" },
+  { id: "tecnicos", label: "Técnicos" },
   { id: "sla", label: "SLA" },
   { id: "categorias", label: "Categorias" },
   { id: "etiquetas", label: "Etiquetas" },
@@ -687,7 +689,7 @@ export default function SettingsPage() {
     <div className="mx-auto max-w-6xl">
       <PageHeader
         title="Configurações"
-        description="Dados da empresa, regras de campo, SLA, categorias, etiquetas automáticas, motivos e fluxo de status."
+        description="Dados da empresa, regras de campo, ferramental dos técnicos, SLA, categorias, etiquetas automáticas, motivos e fluxo de status."
       />
       {!canEdit ? (
         <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-line bg-surface px-4 py-3 text-sm text-ink-muted shadow-elev-1">
@@ -707,6 +709,9 @@ export default function SettingsPage() {
         <section id="campo" className="flex scroll-mt-28 flex-col gap-2">
           <FieldRulesCard readOnly={!canEdit} />
           <KmRateNote />
+        </section>
+        <section id="tecnicos" className="scroll-mt-28">
+          <ToolCatalogCard readOnly={!canEdit} />
         </section>
         <section id="sla" className="scroll-mt-28">
           <SlaCard editable={isAdmin} />

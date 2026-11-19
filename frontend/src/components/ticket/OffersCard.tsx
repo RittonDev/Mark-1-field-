@@ -2,18 +2,19 @@
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { AlertTriangle, Search, Send, Star, X } from "lucide-react";
+import { AlertTriangle, Handshake, Search, Send, Star, X } from "lucide-react";
 import { useId, useRef, useState } from "react";
 import { useConfirm } from "@/components/Confirm";
 import { searchText } from "@/components/new-ticket/Combobox";
 import { offerText } from "@/components/new-ticket/invite";
+import { OutsideAvailabilityChip } from "@/components/new-ticket/SuggestedTechnicians";
 import { isOpenStatus } from "@/components/operacao/hooks";
 import { LevelBadge } from "@/components/technicians/LevelBadge";
 import { useToast } from "@/components/Toaster";
 import { useNow } from "@/components/useNow";
 import { Button, buttonClassName, Dialog, ErrorBox, Field, Input, Pill, SectionTitle, Select, Skeleton, Textarea } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
-import { OFFER_STATE } from "@/lib/constants";
+import { OFFER_STATE, slotsText } from "@/lib/constants";
 import { dayKey, formatDateTime, formatMoney, formatTime, fromLocalInput, initials, moneyInput, OPERATION_TZ } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
 import { useCan } from "@/lib/permissions";
@@ -129,8 +130,11 @@ function offerDetail(offer: TicketOffer, state: OfferState, now: number): string
     }
     case "expired":
       return offer.expires_at ? `Venceu ${atText(offer.expires_at, now)}${offer.viewed_at ? "" : " sem abrir"}` : "Prazo encerrado";
-    case "accepted":
-      return offer.responded_at ? `Aceitou ${atText(offer.responded_at, now)}` : "Aceitou a oferta";
+    case "accepted": {
+      // "Aceitou às 14:50 · escopo lido às 14:45" (app que registra a leitura; o antigo aceita sem a hora).
+      const when = offer.responded_at ? `Aceitou ${atText(offer.responded_at, now)}` : "Aceitou a oferta";
+      return offer.scope_read_at ? `${when} · escopo lido ${atText(offer.scope_read_at, now)}` : when;
+    }
     case "declined": {
       const when = offer.responded_at ? `Recusou ${atText(offer.responded_at, now)}` : "Recusou";
       return offer.decline_reason ? `${when}: ${offer.decline_reason}` : when;
@@ -233,6 +237,8 @@ interface Candidate {
   favorite?: boolean;
   /** Ocupado no horário da visita (só com a OS agendada). */
   busy?: boolean;
+  /** Turnos fora da disponibilidade, em texto ("sáb · tarde"; só com a OS agendada e a visita fora dela). */
+  outside?: string;
   /** Desativado: não entra no app, então não recebe a oferta. */
   inactive?: boolean;
   /** Faixa do elo (só o selo; sem ela na lista de atribuição). */
@@ -254,6 +260,7 @@ function fromSuggestion(t: TechnicianSuggestion, scheduled: boolean): Candidate 
     detail: [km(t.distance_km), cityOf(t.home_city, t.home_state) || null, load].filter(Boolean).join(" · "),
     favorite: Boolean(t.favorite),
     busy: scheduled && t.busy === true,
+    outside: scheduled && t.availability === "outside" ? slotsText(t.availability_gaps ?? []) : undefined,
     level: t.level?.tier,
   };
 }
@@ -572,6 +579,7 @@ export function OfferDialog({
     return (
       <>
         {c.busy ? <span className={BUSY_CHIP}>Ocupado no horário</span> : null}
+        {c.outside !== undefined ? <OutsideAvailabilityChip gaps={c.outside} /> : null}
         {c.inactive ? <span className={CHIP}>Sem acesso ao app</span> : null}
         {helperIds.has(c.id) ? <span className={CHIP}>Já está na OS</span> : null}
         {before === "pending" ? (
@@ -1021,6 +1029,24 @@ export function OffersBlock({
         </button>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Aba Geral da OS com técnico, embaixo do valor: o responsável entrou aceitando a oferta pelo app e, com o app que
+ * registra, quando abriu o escopo. Sem valor: toda a gestão vê. Com o técnico na OS, o bloco "Ofertas" sai da aba e
+ * a oferta aceita só aparece aqui. Some sem oferta aceita pelo responsável atual (e com o servidor antigo).
+ */
+export function AcceptedOfferLine({ ticket }: { ticket: TicketDetail }) {
+  const now = useNow(60_000);
+  const accepted = ticket.accepted_offer;
+  if (!accepted) return null;
+  return (
+    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 text-xs text-ink-muted">
+      <Handshake aria-hidden className="size-3.5 shrink-0 text-ink-subtle" />
+      <span>Aceitou a oferta pelo app {atText(accepted.accepted_at, now)}</span>
+      {accepted.scope_read_at ? <span className={CHIP}>Escopo lido {atText(accepted.scope_read_at, now)}</span> : null}
+    </p>
   );
 }
 

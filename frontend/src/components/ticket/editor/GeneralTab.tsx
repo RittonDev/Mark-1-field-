@@ -15,7 +15,7 @@ import { Combobox, searchText, type ComboItem } from "@/components/new-ticket/Co
 import { serviceTypeTiming } from "@/components/new-ticket/ServiceTypePicker";
 import { readStored, writeStored } from "@/components/new-ticket/storage";
 import { HelpersField, SuggestedTechnicians } from "@/components/new-ticket/SuggestedTechnicians";
-import { OfferDialog, OffersBlock } from "@/components/ticket/OffersCard";
+import { AcceptedOfferLine, OfferDialog, OffersBlock } from "@/components/ticket/OffersCard";
 import { PayoutLine } from "@/components/ticket/PayoutsCard";
 import { busyTitle, isVersionConflict } from "@/components/ticket/useConflictHandler";
 import { useNow } from "@/components/useNow";
@@ -1154,8 +1154,10 @@ export function GeneralTab({
             </Caution>
           ) : null}
           {server.assignee ? (
-            <div className="col-span-12">
+            // O valor (com Pagamentos) e, se o técnico entrou pela oferta, quando aceitou e leu o escopo (toda a gestão).
+            <div className="col-span-12 flex flex-col gap-2">
               <PayoutLine ticket={server} />
+              <AcceptedOfferLine ticket={server} />
             </div>
           ) : (
             // Sem técnico: as ofertas com preço (quem aceitar primeiro pelo app fica com a OS). Cada ação
