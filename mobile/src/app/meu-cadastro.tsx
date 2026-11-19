@@ -265,6 +265,8 @@ export default function MyProfileScreen() {
   const [photoMenu, setPhotoMenu] = useState(false);
   const [photoBusy, setPhotoBusy] = useState<"upload" | "remove" | null>(null);
   const mounted = useRef(true);
+  const busy = useRef(false);
+  const picking = useRef(false);
   const leaveAfterSheet = useRef(false);
   const phoneRef = useRef<TextInputInstance>(null);
   const emailRef = useRef<TextInputInstance>(null);
@@ -361,12 +363,19 @@ export default function MyProfileScreen() {
   }
 
   async function pickPhoto(source: "camera" | "library") {
-    if (await noNetwork()) {
-      showToast(NO_INTERNET, { description: OFFLINE_PHOTO });
-      return;
+    // Um seletor por vez (o botão só mostra "Enviando foto…" depois da escolha).
+    if (picking.current) return;
+    picking.current = true;
+    try {
+      if (await noNetwork()) {
+        showToast(NO_INTERNET, { description: OFFLINE_PHOTO });
+        return;
+      }
+      const [photo] = await capturePhotos(source, { kind: "avatar" });
+      if (photo) await sendPhoto(photo);
+    } finally {
+      picking.current = false;
     }
-    const [photo] = await capturePhotos(source, { kind: "avatar" });
-    if (photo) await sendPhoto(photo);
   }
 
   async function removePhoto() {
@@ -445,7 +454,8 @@ export default function MyProfileScreen() {
   }
 
   async function save() {
-    if (!check || saving) return;
+    // Dois toques seguidos não mandam dois pedidos (a conferência da rede já é assíncrona).
+    if (!check || busy.current) return;
     setAttempted(true);
     setSaveError(null);
     if (firstError(check.errors)) {
@@ -453,28 +463,38 @@ export default function MyProfileScreen() {
       return;
     }
     if (!hasChanges(check)) return;
-    if (await noNetwork()) {
-      showToast(NO_INTERNET, { description: OFFLINE_SAVE });
-      return;
+    busy.current = true;
+    try {
+      if (await noNetwork()) {
+        showToast(NO_INTERNET, { description: OFFLINE_SAVE });
+        return;
+      }
+      if (check.emailChanged || check.pixChange) {
+        setPassword("");
+        setPasswordError(null);
+        setShowPassword(false);
+        setAsking(true);
+        return;
+      }
+      await submit(check);
+    } finally {
+      busy.current = false;
     }
-    if (check.emailChanged || check.pixChange) {
-      setPassword("");
-      setPasswordError(null);
-      setShowPassword(false);
-      setAsking(true);
-      return;
-    }
-    await submit(check);
   }
 
   async function confirmWithPassword() {
-    if (!check || saving) return;
+    if (!check || busy.current) return;
     if (!password) {
       setPasswordError("Informe a senha atual.");
       return;
     }
     setPasswordError(null);
-    await submit(check, password);
+    busy.current = true;
+    try {
+      await submit(check, password);
+    } finally {
+      busy.current = false;
+    }
   }
 
   function closeSheet() {
