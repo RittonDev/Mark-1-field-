@@ -133,6 +133,14 @@ function regionText(city: string | null | undefined, state: string | null | unde
   return [city, state].filter(Boolean).join("-");
 }
 
+/** Chip de filtro rápido (Cadastro incompleto, Elo): o marcado fica com a borda da marca. */
+function chipClass(on: boolean) {
+  return clsx(
+    "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none",
+    on ? "border-brand bg-nav-active text-ink" : "border-line bg-surface text-ink-muted hover:text-ink",
+  );
+}
+
 /** Cabeçalho de coluna que ordena a lista (de novo, volta à ordem por nome). */
 function SortHeader({
   active,
@@ -564,25 +572,63 @@ function TechniciansView() {
             </div>
           </div>
 
-          {GAPS.some((g) => gapCounts[g.key] > 0) || gap ? (
-            <div className="mb-4 flex flex-wrap items-center gap-2" role="group" aria-label="Cadastros incompletos">
-              <span className="text-xs font-semibold text-ink/80">Cadastro incompleto:</span>
-              {GAPS.filter((g) => gapCounts[g.key] > 0 || gap === g.key).map((g) => (
-                <button
-                  key={g.key}
-                  type="button"
-                  aria-pressed={gap === g.key}
-                  title={g.hint}
-                  onClick={() => setGap(gap === g.key ? null : g.key)}
-                  className={clsx(
-                    "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs transition-colors focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none",
-                    gap === g.key ? "border-brand bg-nav-active text-ink" : "border-line bg-surface text-ink-muted hover:text-ink",
-                  )}
-                >
-                  {g.label}
-                  <span className="font-semibold text-ink tabular-nums">{gapCounts[g.key]}</span>
-                </button>
-              ))}
+          {GAPS.some((g) => gapCounts[g.key] > 0) || gap || levelCounts || levelFilter ? (
+            <div className="mb-4 flex flex-col gap-2">
+              {GAPS.some((g) => gapCounts[g.key] > 0) || gap ? (
+                <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Cadastros incompletos">
+                  <span className="text-xs font-semibold text-ink/80">Cadastro incompleto:</span>
+                  {GAPS.filter((g) => gapCounts[g.key] > 0 || gap === g.key).map((g) => (
+                    <button
+                      key={g.key}
+                      type="button"
+                      aria-pressed={gap === g.key}
+                      title={g.hint}
+                      onClick={() => setGap(gap === g.key ? null : g.key)}
+                      className={chipClass(gap === g.key)}
+                    >
+                      {g.label}
+                      <span className="font-semibold text-ink tabular-nums">{gapCounts[g.key]}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              {/* Elo: as quatro faixas sempre (a distribuição da base), a vazia sem clique; "Em risco" só com alguém. */}
+              {levelCounts || levelFilter ? (
+                <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Elo">
+                  <span className="text-xs font-semibold text-ink/80">Elo:</span>
+                  {LEVEL_CHIPS.map((tier) => {
+                    const count = levelCounts?.[tier] ?? 0;
+                    const on = levelFilter === tier;
+                    return (
+                      <button
+                        key={tier}
+                        type="button"
+                        aria-pressed={on}
+                        disabled={!count && !on}
+                        onClick={() => setLevelFilter(on ? null : tier)}
+                        className={clsx(chipClass(on), "disabled:pointer-events-none disabled:opacity-50")}
+                      >
+                        <LevelShield tier={tier} size={14} />
+                        {LEVEL_TIER[tier].label}
+                        <span className="font-semibold text-ink tabular-nums">{count}</span>
+                      </button>
+                    );
+                  })}
+                  {(levelCounts?.at_risk ?? 0) > 0 || levelFilter === "at_risk" ? (
+                    <button
+                      type="button"
+                      aria-pressed={levelFilter === "at_risk"}
+                      title={AT_RISK_HINT}
+                      onClick={() => setLevelFilter(levelFilter === "at_risk" ? null : "at_risk")}
+                      className={chipClass(levelFilter === "at_risk")}
+                    >
+                      <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-amber-500 dark:bg-amber-400" />
+                      Em risco
+                      <span className="font-semibold text-ink tabular-nums">{levelCounts?.at_risk ?? 0}</span>
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           ) : null}
 
@@ -657,21 +703,19 @@ function TechniciansView() {
                   <thead>
                     <tr>
                       <Th>Técnico</Th>
+                      <Th className="hidden sm:table-cell">
+                        <SortHeader active={sort === "level"} onClick={() => toggleSort("level")} title="Ordenar pelo elo">
+                          Elo
+                        </SortHeader>
+                      </Th>
                       <Th className="hidden md:table-cell">Grupo</Th>
                       <Th className="hidden lg:table-cell">Região de atuação</Th>
                       <Th className="hidden lg:table-cell">Celular</Th>
                       <Th>App</Th>
                       <Th className="hidden xl:table-cell">
-                        <button
-                          type="button"
-                          onClick={() => setSortByVisit((v) => !v)}
-                          aria-pressed={sortByVisit}
-                          title={sortByVisit ? "Voltar à ordem por nome" : "Ordenar pela última OS"}
-                          className="inline-flex items-center gap-1 rounded uppercase hover:text-ink focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
-                        >
+                        <SortHeader active={sort === "visit"} onClick={() => toggleSort("visit")} title="Ordenar pela última OS">
                           Última OS
-                          <ArrowDown className={clsx("size-3", sortByVisit ? "text-ink" : "opacity-40")} />
-                        </button>
+                        </SortHeader>
                       </Th>
                       <Th className="hidden sm:table-cell">OS abertas</Th>
                       <Th className="edit-col">{canEdit ? "Editar" : "Ver"}</Th>
@@ -695,6 +739,20 @@ function TechniciansView() {
                               <span className="block truncate text-xs text-ink-muted">{t.email}</span>
                             </span>
                           </span>
+                        </Td>
+                        <Td className="hidden sm:table-cell">
+                          {t.level ? (
+                            <span className="flex flex-col items-start gap-0.5">
+                              <LevelBadge tier={t.level.tier} size="sm" />
+                              {t.level.at_risk ? (
+                                <span className="text-xs text-amber-800 dark:text-amber-300" title={AT_RISK_HINT}>
+                                  em risco
+                                </span>
+                              ) : null}
+                            </span>
+                          ) : (
+                            <span className="text-ink-muted">—</span>
+                          )}
                         </Td>
                         <Td className="hidden md:table-cell">{t.team?.name ?? <span className="text-ink-muted">—</span>}</Td>
                         <Td className="hidden lg:table-cell">
@@ -1089,7 +1147,16 @@ function EditDialog({ tech, readOnly = false, onClose }: { tech: Technician; rea
   const [serviceIds, setServiceIds] = useState(baseline.serviceIds);
   const [confirmReset, setConfirmReset] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  // Motivo de desconsiderar uma ocorrência do elo digitado e ainda não enviado (fechar pergunta antes).
+  const [levelDraft, setLevelDraft] = useState(false);
   const serviceTypes = useServiceTypes({ active: true });
+  // O elo recalculado agora (a mesma busca da seção Elo); enquanto chega, o selo guardado da lista.
+  const levelDetail = useTechnicianLevel(tech.id).data;
+  const badge = levelDetail
+    ? { tier: levelDetail.tier, atRisk: levelDetail.at_risk !== null }
+    : current.level
+      ? { tier: current.level.tier, atRisk: current.level.at_risk }
+      : null;
   // Cidades em que ele é favorito (pela regra ou fixado pela central).
   const favorites = useFavorites({ technicianId: tech.id });
   const favoriteIn = (favorites.data?.cities ?? []).flatMap((c) => {
@@ -1190,13 +1257,18 @@ function EditDialog({ tech, readOnly = false, onClose }: { tech: Technician; rea
       open
       size="lg"
       onClose={onClose}
-      // Com alterações (campos, endereço, jornada, até 200 serviços), clique fora, Esc e o X perguntam
-      // antes de descartar, e fechar a aba também.
-      dirty={dirty}
+      // Com alterações (campos, endereço, jornada, até 200 serviços, o motivo de desconsiderar no Elo), clique
+      // fora, Esc e o X perguntam antes de descartar, e fechar a aba também.
+      dirty={dirty || levelDraft}
       // Salvando ou gerando a senha provisória (que só aparece uma vez): o diálogo espera terminar.
       busy={save.isPending || reset.isPending}
       title={current.name}
-      description={current.job_title ?? "Técnico"}
+      description={
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          {current.job_title ?? "Técnico"}
+          {badge ? <LevelBadge tier={badge.tier} atRisk={badge.atRisk} size="sm" /> : null}
+        </span>
+      }
       footer={
         readOnly ? (
           <Button variant="primary" onClick={onClose}>
@@ -1223,10 +1295,9 @@ function EditDialog({ tech, readOnly = false, onClose }: { tech: Technician; rea
           if (!readOnly) void submit();
         }}
       >
-        {/* Só com Visualizar, o fieldset trava todos os campos de uma vez (os links continuam abrindo). O
-            Pagamento e o Histórico do cadastro ficam fora: seguem as permissões deles (Pagamentos). */}
-        <fieldset disabled={readOnly} className="flex min-w-0 flex-col gap-5">
-          <div className="flex items-center gap-4">
+        {/* A foto (os botões só aparecem com Editar) e o Elo ficam fora do fieldset travado: só com Visualizar, o
+            "Ver mais" das ocorrências continua; desconsiderar pede Editar. */}
+        <div className="flex items-center gap-4">
             <Avatar tech={current} size="lg" />
             {readOnly ? null : (
               <div className="flex flex-col gap-1.5">
