@@ -55,7 +55,7 @@ export function LevelChip() {
       onPress={() => router.push("/elo")}
       accessibilityRole="button"
       accessibilityLabel={`Elo ${LEVEL_TIER[tier].label}${risk ? ", em risco" : ""}. Abre Meu elo`}
-      hitSlop={8}
+      hitSlop={CHIP_HIT_SLOP}
       style={chipStyle}
     >
       <LevelBadge tier={tier} atRisk={Boolean(risk)} />
@@ -64,6 +64,8 @@ export function LevelChip() {
 }
 
 const chipStyle = { borderRadius: RADIUS.chip, flexShrink: 1 } as const;
+/** 28 pt de altura: o toque cresce até 44 pt sem invadir o da foto ao lado (10 pt de distância, 8 pt de folga nela). */
+const CHIP_HIT_SLOP = { top: 8, bottom: 8, left: 8, right: 2 } as const;
 
 const makeStyles = (c: Palette) =>
   StyleSheet.create({
