@@ -604,7 +604,7 @@ function PayoutsView() {
   const exportInvoices = async () => {
     setExporting({ loaded: 0, total: 0 });
     try {
-      const items = await fetchAllInvoices(month, technicianId, (loaded, all) => setExporting({ loaded, total: all }));
+      const items = await fetchAllInvoices(month, technicianId, (loaded, count) => setExporting({ loaded, total: count }));
       downloadCsv(`notas-fiscais-${month || "todos"}.csv`, invoiceCsvRows(reviewOrder(items)));
     } catch (error) {
       toast({ title: "Não foi possível exportar as notas", description: errorMessage(error), tone: "error" });
@@ -731,9 +731,13 @@ function PayoutsView() {
                 </option>
               ))}
             </Select>
-            <Button disabled={tab === "invoices" ? !invoiceItems.length : !groups.length} onClick={exportCsv}>
-              <Download className="size-4" />
-              Exportar CSV
+            <Button disabled={tab === "invoices" ? !invoiceItems.length : !groups.length} loading={exporting !== null} onClick={exportCsv}>
+              {exporting ? null : <Download className="size-4" />}
+              {!exporting
+                ? "Exportar CSV"
+                : exporting.total
+                  ? `Exportando ${intFmt(exporting.loaded)} de ${intFmt(exporting.total)}`
+                  : "Exportando…"}
             </Button>
           </div>
         }
@@ -744,7 +748,7 @@ function PayoutsView() {
           className="-mb-px"
           items={[
             { key: "closing", label: "Fechamento" },
-            { key: "invoices", label: "Notas fiscais", count: pendingInvoices > 0 ? pendingInvoices : null },
+            { key: "invoices", label: "Notas fiscais", count: pendingCount > 0 ? pendingCount : null },
           ]}
           value={tab}
           onChange={changeTab}
@@ -755,11 +759,8 @@ function PayoutsView() {
       <div role="tabpanel" id={`pagamentos-panel-${tab}`} aria-labelledby={`pagamentos-tab-${tab}`}>
         {tab === "invoices" ? (
           <InvoicesPanel
-            list={invoices.data}
-            loading={invoices.isLoading}
-            error={invoices.error}
-            stale={invoices.isPlaceholderData}
-            onRetry={() => void invoices.refetch()}
+            all={invoiceListState(invoices)}
+            pending={invoiceListState(pendingInvoices)}
             month={month}
             canEdit={canEdit}
             review={review}
@@ -1043,7 +1044,7 @@ function PayoutsView() {
           canEdit={canEdit}
           phone={personOf(dialogInvoice.technician.id)?.phone ?? null}
           review={review}
-          onOpenFile={(invoice) => void openInvoiceFile(invoice)}
+          onOpenFile={(invoice) => void openInvoiceFile(invoice, shownInvoice.changedAt)}
           onClose={() => setShownInvoice(null)}
         />
       ) : null}
