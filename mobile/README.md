@@ -550,8 +550,8 @@ Tela `/privacidade` ([src/app/privacidade.tsx](src/app/privacidade.tsx)), só de
 - **Texto**: `PRIVACY_NOTICE` de [src/lib/constants.ts](src/lib/constants.ts), o mesmo da ficha da homologação (cópia
   idêntica da web), com "Atualizado em" pela data de `PRIVACY_VERSION`. Cita os dados do cadastro e a chave PIX, o
   pagamento por PIX, a localização na jornada, as notas fiscais e o Elo.
-- **Onde abre**: na Conta (linha abaixo do Termo de uso da localização), no cartão Pagamento do Meu cadastro, no fim
-  da tela Enviar nota fiscal e no fim do "Como funciona" do Meu elo.
+- **Onde abre**: na Conta (cartão Rastreamento da jornada, abaixo do Termo de uso da localização), no cartão Pagamento
+  do Meu cadastro, no fim da tela Enviar nota fiscal e no fim do "Como funciona" do Meu elo.
 - **Não grava ciência**: o aceite continua sendo o da ficha da homologação; a tela é só para consulta.
 
 ## Como a sincronização funciona
@@ -576,14 +576,14 @@ WebSocket /api/v1/ws?token= ── evento ticket.* ──► nova rodada de sync
   trocados pelo registro oficial no pull seguinte.
 - Rodadas de sync nunca correm em paralelo. Gatilhos: abertura/login, rede voltando, app voltando ao
   primeiro plano, cada ação, cada evento do WebSocket, puxar a lista para baixo e um intervalo de 90 s; com o
-  app fora da tela, a jornada e a tarefa periódica do sistema (seção Notificações).
+  app fora da tela, a jornada e a tarefa periódica do sistema, só num app instalado (seção Notificações).
 - Todas as escritas no SQLite passam por uma fila de transações exclusivas em JS.
 - OS fechadas/canceladas há mais de 30 dias e sem pendências saem do aparelho.
 
 ## Estrutura
 
 ```
-index.ts               entrada: expo-router + tarefas de segundo plano (rastreamento e sincronização, definidas antes das rotas, para o relançamento sem tela do Android)
+index.ts               entrada: expo-router + tarefas de segundo plano (rastreamento e sincronização, definidas antes das rotas, para o relançamento sem tela do Android) e, depois delas, o fim de sessão (sessionEnd.ts)
 src/
   app/                 rotas (expo-router)
     _layout.tsx        sessão, tema, Stack com rotas protegidas, toasts
@@ -593,8 +593,9 @@ src/
     ticket/[id].tsx    detalhe, ações e abas
     oferta/[id].tsx    oferta de OS com preço: escopo, "Aceitar por R$ X" ou "Recusar"
     termo-rastreamento.tsx  termo de ciência do rastreamento (LGPD)
-    conta.tsx          técnico (foto, Meu cadastro, elo, senha), sincronização, fila, avisos, rastreamento, notificações, aparência, sair
+    conta.tsx          técnico (foto, Meu cadastro, elo, senha), sincronização, fila, avisos, rastreamento e aviso de privacidade, notificações, aparência, sair
     meu-cadastro.tsx   Meu cadastro: foto, dados, endereço e chave PIX (e-mail e PIX com a senha atual)
+    privacidade.tsx    Aviso de privacidade (LGPD), só leitura
     elo.tsx            Meu elo: brasão, risco, o que falta para a próxima faixa, números, o que pesou e "Como funciona"
     nota-fiscal.tsx    Enviar nota fiscal: arquivo, número, emissão, valor, competência e as OS que a nota cobre
   components/          UI (marca, cartões, calendário, jornada, diálogo de transição, abas da OS)
@@ -615,11 +616,12 @@ src/
     pix.ts masks.ts    chave PIX por tipo (regras e mensagens de backend/app/core/pix.py) e máscaras de CPF, CNPJ, CEP e celular
     types.ts constants.ts workflow.ts   copiados de frontend/src/lib (manter iguais)
     syncTypes.ts       contrato de /sync/pull e /sync/push
-    api.ts session.ts  HTTP com refresh + tokens no SecureStore
+    api.ts session.ts  HTTP com refresh + tokens e o fim de sessão pendente no SecureStore
+    sessionEnd.ts      fim de sessão (Sair, expirada, acesso desativado ou retirado): limpeza com ou sem tela; carregado pelo index.ts
     db.ts              schema SQLite e consultas
     ops.ts             aplicação otimista e rebase; user_can_transition e allowed_transitions iguais ao backend
     field.ts           promessa de campo: relógios de chegada e de loja, rótulos de peças
-    notifications.ts   notificações: handler, canais, permissão, toque, alertas locais e novidades fora da tela
+    notifications.ts   notificações: handler, canais, permissão, toque, alertas locais, novidades fora da tela e os avisos guardados sem permissão
     visitReminders.ts  lembretes da visita (1 dia, 1h40 e 10 min antes): plano e textos, sem import nativo
     onsiteAlerts.ts    notificações locais do tempo na loja
     backgroundSync.ts  sincronização fora da tela (jornada e tarefa periódica); .web.ts sem efeito
@@ -676,10 +678,13 @@ docker start -a mc-mobile-check
   novo (o Expo Go já traz os módulos, mas não roda a tarefa periódica).
 - **HTTP sem TLS**: o Expo Go aceita `http://` na rede local. Builds de produção devem apontar para
   `https://`/`wss://` (Android bloqueia texto puro por padrão e o iOS exige ATS).
-- **Segundo plano limitado**: só na jornada (build instalado) e na tarefa periódica do sistema (15 min ou mais;
-  no iOS, rara). Com o app fechado pelo técnico, ou no iPhone fora da jornada, OS nova e oferta só aparecem
-  quando o app abre (avisar na hora exige o push real). Um lembrete de uma OS mudada enquanto o aparelho não
-  sincronizou ainda sai com o horário antigo.
+- **No Expo Go, OS nova e oferta só aparecem com o app aberto**: ele não roda a tarefa periódica nem a jornada em
+  segundo plano, e o push real está desligado. Os lembretes da visita (locais) funcionam, mas só para as OS que o app
+  já sincronizou: a OS atribuída com o app fechado só ganha lembrete quando o técnico abre o app.
+- **Segundo plano limitado** (app instalado): só na jornada (~3 min) e na tarefa periódica do sistema (15 min ou
+  mais; no iOS, rara). Com o app fechado à força pelo técnico, ou no iPhone fora da jornada, OS nova e oferta só
+  aparecem quando o app abre. Avisar na hora exige o push real (FCM, ver Push acima), ainda desligado. Um lembrete de
+  uma OS mudada enquanto o aparelho não sincronizou ainda sai com o horário antigo.
 - Rótulos e transições vêm das constantes copiadas da web, não de `GET /meta`; as ações exibidas vêm de
   `allowed_transitions` do servidor (recalculadas no aparelho só depois de uma ação offline).
 - Sem assinatura do cliente, edição dos dados da OS (`update`) ou abertura de OS pelo app.
