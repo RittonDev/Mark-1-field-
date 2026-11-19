@@ -5,7 +5,7 @@
 //
 // - Limpeza: sync parado, nenhuma notificação agendada nem na bandeja (loja e endereço aparecem na tela bloqueada),
 //   jornada parada e tarefa periódica desligada. Com técnico desativado ou sem acesso ao app, apaga também as OS, os
-//   dados de clientes, as fotos e a fila (LGPD).
+//   dados de clientes, as fotos e a fila (LGPD); se apagar falhar, a tarefa fica ligada para tentar de novo.
 // - O fim fica gravado (session.ts) antes de os tokens saírem: se o app morrer no meio, a próxima rodada sem tela ou a
 //   abertura seguinte (restoreSession) conclui a limpeza, e o login mostra o motivo.
 //
@@ -68,9 +68,9 @@ async function cleanOnce(): Promise<boolean> {
       }
     }
     // Por último: parar a jornada (fim do serviço de localização) e desligar a tarefa periódica podem encerrar o
-    // processo que roda sem tela.
+    // processo que roda sem tela. Com os dados ainda por apagar, a tarefa fica ligada para a próxima rodada tentar de novo.
     await stopTracking({ endOnServer: false }).catch(() => undefined);
-    await unregisterBackgroundSync();
+    if (done) await unregisterBackgroundSync();
     return done;
   } catch (error) {
     console.warn("Falha ao encerrar a sessão no aparelho", error);
