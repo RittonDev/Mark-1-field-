@@ -895,10 +895,7 @@ function announce(notices: Notice[], vibrate?: () => void) {
     if (await presentNews(notices)) return;
     if (!userId) return;
     // Guardado com o texto da bandeja: o relativo ("amanhã") pode virar outro dia até o técnico voltar.
-    await deferNews(
-      userId,
-      notices.map((notice) => ({ ...notice, toast: undefined })),
-    );
+    await deferNews(userId, notices.map((notice) => ({ ...notice, toast: undefined })));
     // O app voltou à tela enquanto guardava: mostra já.
     if (inForeground()) await showDeferredNotices();
   })().catch((error: unknown) => console.warn("Não foi possível guardar os avisos", error));
@@ -953,6 +950,13 @@ function grouped<T extends TicketRef>(refs: T[], one: (ref: T) => Notice, many: 
   return refs.length > 2 ? [{ ...many(refs), home: true }] : refs.map(one);
 }
 
+/** "Fonte ATX", "Fonte ATX e Memória 8 GB", "Fonte ATX, Memória 8 GB e SSD"; mais de 3: "…, SSD e mais 2". */
+function namesLine(names: readonly string[]): string {
+  if (names.length <= 1) return names[0] ?? "";
+  if (names.length <= 3) return `${names.slice(0, -1).join(", ")} e ${names[names.length - 1]}`;
+  return `${names.slice(0, 3).join(", ")} e mais ${names.length - 3}`;
+}
+
 /** OS que saíram da lista: tiradas do técnico (o código vem do aparelho) ou que sumiram no download completo. */
 function announceRemoved(refs: TicketRef[], removed: number) {
   const body = "A central mudou quem atende.";
@@ -976,11 +980,12 @@ function announceRemoved(refs: TicketRef[], removed: number) {
 }
 
 /**
- * Novidade de uma OS. `line` (OS nova, auxiliar): "Visita amanhã às 08:00 · LJ001 · Loja Exemplo". `place`
+ * Novidade de uma OS. `line` (OS nova, auxiliar): "Visita sex 21/11 às 08:00 · LJ001 · Loja Exemplo", o texto da
+ * bandeja; `toast`: o mesmo com o dia relativo ("Visita amanhã às 08:00 · …"), para o toast na hora. `place`
  * (agendada ou reagendada): a loja.
  */
 type FieldNews =
-  | { kind: "assigned" | "helper"; id: UUID; code: string; line: string }
+  | { kind: "assigned" | "helper"; id: UUID; code: string; line: string; toast: string }
   | { kind: "cancelled"; id: UUID; code: string }
   | { kind: "rescheduled"; id: UUID; code: string; at: string; first: boolean; place: string | null }
   | { kind: "part_approved" | "part_rejected"; id: UUID; code: string; description: string };
@@ -994,7 +999,8 @@ function fieldNews(before: TicketDetail | null, after: TicketDetail, user: User)
   if (!mine && !isHelper(after, user)) return [];
   const ref = { id: after.id, code: after.code };
   if (!before) {
-    return isDone(after.status) ? [] : [{ kind: mine ? "assigned" : "helper", ...ref, line: visitLine(after, Date.now()) }];
+    if (isDone(after.status)) return [];
+    return [{ kind: mine ? "assigned" : "helper", ...ref, line: visitLine(after), toast: visitLine(after, Date.now()) }];
   }
   const news: FieldNews[] = [];
   if (before.status !== "cancelled" && after.status === "cancelled") {
@@ -1027,12 +1033,12 @@ function announceFieldNews(news: FieldNews[]) {
   const notices: Notice[] = [
     ...grouped(
       visits.filter((n) => n.kind === "assigned"),
-      (n) => ({ id: `news-new-${n.id}`, title: `Nova OS para você: ${n.code}`, body: n.line, ticketId: n.id }),
+      (n) => ({ id: `news-new-${n.id}`, title: `Nova OS para você: ${n.code}`, body: n.line, toast: n.toast, ticketId: n.id }),
       (all) => ({ id: "news-new-many", title: `${all.length} OS novas para você`, body: codes(all) }),
     ),
     ...grouped(
       visits.filter((n) => n.kind === "helper"),
-      (n) => ({ id: `news-helper-${n.id}`, title: `Você vai na visita da ${n.code}`, body: n.line, ticketId: n.id }),
+      (n) => ({ id: `news-helper-${n.id}`, title: `Você vai na visita da ${n.code}`, body: n.line, toast: n.toast, ticketId: n.id }),
       (all) => ({ id: "news-helper-many", title: `Você entrou em ${all.length} visitas`, body: codes(all) }),
     ),
     ...grouped(
@@ -1076,13 +1082,18 @@ function announceFieldNews(news: FieldNews[]) {
       success: true,
     });
   }
-  for (const n of rejected) {
+  // Recusadas: um aviso por OS, com as peças juntas (o cliente recusa o orçamento inteiro de uma vez). Um aviso por
+  // peça teria o mesmo id na bandeja e o mesmo título no toast: só a última apareceria.
+  const rejectedByTicket = new Map<UUID, typeof rejected>();
+  for (const n of rejected) rejectedByTicket.set(n.id, [...(rejectedByTicket.get(n.id) ?? []), n]);
+  for (const [id, items] of rejectedByTicket) {
+    const { code } = items[0];
     notices.push({
-      id: `news-part-rejected-${n.id}`,
-      title: `${n.code}: peça recusada`,
-      body: `${n.description}: o cliente não aprovou o orçamento. Não instale; fale com a central no grupo.`,
+      id: `news-part-rejected-${id}`,
+      title: items.length === 1 ? `${code}: peça recusada` : `${code}: ${items.length} peças recusadas`,
+      body: `${namesLine(items.map((n) => n.description))}: o cliente não aprovou o orçamento. Não instale; fale com a central no grupo.`,
       tone: "error",
-      ticketId: n.id,
+      ticketId: id,
     });
   }
   announce(notices, () => {
@@ -1966,6 +1977,8 @@ export function startSync() {
       void resumeTracking();
       // A permissão pode ter mudado nas configurações do celular, e a janela de 7 dias dos lembretes anda.
       void syncLocalAlerts();
+      // Avisos das rodadas fora da tela que não viraram notificação (sem a permissão).
+      void showDeferredNotices().catch((error: unknown) => console.warn("Não foi possível mostrar os avisos guardados", error));
     } else if (next !== "active" && wasActive) {
       realtime?.stop();
     }
@@ -2005,6 +2018,8 @@ export function startSync() {
     await loadFieldRules();
     // Alertas e lembretes a partir das OS guardadas, antes da primeira rodada (que pode demorar ou estar sem rede).
     void syncLocalAlerts();
+    // Avisos de rodadas sem tela (o sistema acordou o app fechado), antes dos da primeira rodada.
+    await showDeferredNotices().catch((error: unknown) => console.warn("Não foi possível mostrar os avisos guardados", error));
     await requestSync();
   })().catch((error: unknown) => console.warn("Falha ao abrir o banco local", error));
 }

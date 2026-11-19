@@ -1,5 +1,6 @@
 """Elo dos técnicos (Bronze, Prata, Ouro e Diamante): as faixas, a carência, as contas no banco, as
-desconsiderações da central e o que cada papel vê.
+desconsiderações da central e o que cada papel vê. A fila de quem pede, na central, fica em
+test_level_queue_visibility.py.
 
 Dados fictícios: Tecnico Alfa, Tecnico Bravo e Tecnico Charlie (e-mails @exemplo.com), com as OS
 na loja do cliente de teste.
@@ -13,15 +14,22 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from app import main as app_main
 from app.core.config import settings
-from app.core.enums import LevelOccurrenceKind, LevelTier, TicketEventType, TicketStatus, UserRole
+from app.core.enums import (
+    LevelOccurrenceKind,
+    LevelTier,
+    Responsibility,
+    TicketEventType,
+    TicketStatus,
+    UserRole,
+)
 from app.core.security import create_access_token
 from app.db.base import utcnow
-from app.models import Ticket, TicketEvent, User
+from app.models import Ticket, TicketEvent, UnproductiveReason, User
 from app.models.technician_level import TechnicianLevel
 from app.models.ticket import ticket_helpers
 from app.schemas.ticket import format_ticket_code
@@ -393,6 +401,7 @@ async def test_counts_and_attribution(
         "id": str(late.id),
         "code": format_ticket_code(late.number),
         "title": "Visita na Loja Exemplo",
+        "hidden": False,
     }
     assert body["technician"] == {"id": str(alfa.id), "name": "Tecnico Alfa"}
     assert [t["tier"] for t in body["tiers"]] == ["bronze", "silver", "gold", "diamond"]
@@ -566,6 +575,108 @@ async def test_lost_visits(engine: AsyncEngine, client: AsyncClient, world: Worl
 
 
 @requires_db
+async def test_quality_only_native(
+    engine: AsyncEngine, client: AsyncClient, world: World
+) -> None:
+    """Retorno e visita perdida só contam em OS deste sistema: a base das taxas (os atendimentos
+    medidos) não tem as OS migradas do Field Control, nem as concluídas aqui depois da migração."""
+    an = world.analyst.headers
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    now = utcnow()
+    async with maker() as db:
+        alfa, bravo = _tech("Alfa"), _tech("Bravo")
+        fault = UnproductiveReason(
+            name="Atraso do técnico", responsibility=Responsibility.TECHNICIAN, is_active=True
+        )
+        db.add_all([alfa, bravo, fault])
+        await db.flush()
+        # Os dois com números de Prata: 15 OS do Field Control e 5 medidas (deste sistema).
+        for tech in (alfa, bravo):
+            db.add_all(
+                _done(world, tech, now=now, days_ago=40 + i, visited=False, legacy=FC)
+                for i in range(15)
+            )
+            db.add_all(_done(world, tech, now=now, days_ago=3 + i) for i in range(5))
+        # Concluída no Field Control há 12 dias e fechada há 11 (os eventos como o importador
+        # grava: a conclusão com o técnico como autor).
+        fc_closed = _done(
+            world, alfa, now=now, days_ago=12, visited=False, legacy=FC, title="OS migrada"
+        )
+        fc_closed.closed_at = now - timedelta(days=11)
+        # Aberta na migração e concluída já aqui, há 5 dias.
+        fc_here = _done(
+            world, alfa, now=now, days_ago=5, status=TicketStatus.RESOLVED, legacy=FC
+        )
+        # Controle: a mesma história numa OS deste sistema, de Bravo.
+        native = _done(world, bravo, now=now, days_ago=5, status=TicketStatus.RESOLVED)
+        db.add_all([fc_closed, fc_here, native])
+        await db.flush()
+        db.add_all(
+            [
+                _status_event(fc_closed, alfa, to="resolved", at=now - timedelta(days=12), data=FC),
+                _status_event(
+                    fc_closed, None, to="closed", frm="resolved", at=now - timedelta(days=11)
+                ),
+                _status_event(
+                    fc_here, alfa, to="resolved", frm="in_progress", at=now - timedelta(days=5)
+                ),
+                _status_event(
+                    native, bravo, to="resolved", frm="in_progress", at=now - timedelta(days=5)
+                ),
+            ]
+        )
+        # Improdutiva com motivo do técnico, registrada aqui: na OS migrada não conta.
+        for ticket, tech in ((fc_here, alfa), (native, bravo)):
+            db.add(
+                TicketEvent(
+                    ticket_id=ticket.id,
+                    actor_id=tech.id,
+                    event_type=TicketEventType.UNPRODUCTIVE_VISIT,
+                    data={"reason_id": str(fault.id), "technician_id": str(tech.id)},
+                    created_at=now - timedelta(days=6),
+                )
+            )
+        await db.commit()
+
+    # A central reabre as três pela rota de verdade (o evento leva o técnico).
+    for ticket in (fc_closed, fc_here, native):
+        r = await client.post(
+            f"{API}/tickets/{ticket.id}/transition",
+            json={"to_status": "reopened", "note": "Cliente ligou de novo"},
+            headers=an,
+        )
+        assert r.status_code == 200, r.text
+    async with maker() as db:
+        reopen_data = list(
+            await db.scalars(
+                select(TicketEvent.data).where(
+                    TicketEvent.ticket_id.in_([fc_closed.id, fc_here.id]),
+                    TicketEvent.to_value == "reopened",
+                )
+            )
+        )
+        found = await levels.collect(db, utcnow())
+    assert [(d or {}).get("technician_id") for d in reopen_data] == [str(alfa.id)] * 2
+    a, b = found.counts[alfa.id], found.counts[bravo.id]
+    assert (a.services, a.measured, a.reworks, a.lost) == (20, 5, 0, 0)
+    assert alfa.id not in found.occurrences
+    assert (b.services, b.measured, b.reworks, b.lost) == (20, 5, 1, 1)
+    assert sorted(o.kind for o in found.occurrences[bravo.id]) == [
+        LevelOccurrenceKind.REWORK,
+        LevelOccurrenceKind.UNPRODUCTIVE,
+    ]
+
+    # O veterano continua na Prata (0 em 5); o controle cai para o Bronze.
+    vet = (await client.get(f"{API}/technicians/{alfa.id}/level", headers=an)).json()
+    assert (vet["tier"], vet["occurrences"]) == ("silver", [])
+    rework = _by_key(vet["criteria"])["rework"]
+    assert (rework["met"], rework["text"]) == (True, "0% (0 em 5) · limite 10%")
+    ctl = (await client.get(f"{API}/technicians/{bravo.id}/level", headers=an)).json()
+    assert ctl["tier"] == "bronze"
+    assert (ctl["metrics"]["reworks"], ctl["metrics"]["lost"]) == (1, 1)
+
+
+@requires_db
 async def test_me_level_privacy(engine: AsyncEngine, client: AsyncClient, world: World) -> None:
     an, th = world.analyst.headers, world.tech.headers
     tech_id = str(world.tech.user.id)
@@ -614,6 +725,8 @@ async def test_me_level_privacy(engine: AsyncEngine, client: AsyncClient, world:
     assert [o["kind"] for o in body["occurrences"]] == ["rework"]
     assert body["occurrences_total"] == 1
     assert set(body["occurrences"][0]) == {"kind", "ref_id", "ticket", "at", "detail"}
+    # Sempre a OS dele, com id e código (o mascaramento de fila é só da central).
+    assert set(body["occurrences"][0]["ticket"]) == {"id", "code", "title"}
     for secret in (
         "Nota reservada da central",
         "Agenda trocada pela central",
@@ -812,14 +925,15 @@ async def test_lists_and_suggestions(
         assert item["level"]["tier"] == "bronze" and item["level"]["since"]
         assert item["level"]["at_risk"] is False
 
-    # Técnico novo, ainda sem conta: Bronze sem data (a rotina calcula depois).
+    # Técnico novo, ainda sem conta: a próxima lista calcula todos (não espera a rotina).
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as db:
         charlie = _tech("Charlie")
         db.add(charlie)
         await db.commit()
     by_id = {t["id"]: t for t in (await client.get(f"{API}/technicians", headers=an)).json()}
-    assert by_id[str(charlie.id)]["level"] == {"tier": "bronze", "since": None, "at_risk": False}
+    level = by_id[str(charlie.id)]["level"]
+    assert (level["tier"], level["at_risk"]) == ("bronze", False) and level["since"]
 
     async def ranking(path: str) -> list[tuple[str, float, dict]]:
         r = await client.get(f"{API}{path}", headers=an)
