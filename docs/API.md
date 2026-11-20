@@ -27,8 +27,9 @@ quem fala com a loja é a central), reincidência e dados migrados (`services/ti
 lançou custos também sai. Anexos: só fotos, fotos dos formulários, assinatura e o que ele mesmo enviou
 (documentos do escritório ficam fora). Horas: não aponta (só a gestão) e vê só as dele. Comentários: nem lê nem escreve (403; no sync, `comments` vem vazio e a
 operação `comment` é recusada). Rotas de cadastro, usuários, grupos, painel, relatórios de SLA,
-atividades do dia, catálogo (exceto motivos de violação e de visita improdutiva), listagem de OS e
-histórico da OS respondem 403 para ele (`NoTechnicianUser` / `TicketManagerUser`). No WebSocket ele
+atividades do dia, catálogo (exceto motivos de violação e de visita improdutiva e o ferramental,
+`GET /technician-tools`, que ele recebe só com as ferramentas ativas), listagem de OS e histórico da OS respondem 403
+para ele (`NoTechnicianUser` / `TicketManagerUser`). No WebSocket ele
 recebe só que a OS mudou (tipo, OS, status, versão e, na equipe da visita, `added_ids`).
 
 ## Status da OS
@@ -195,11 +196,12 @@ migrada em que o Field Control deu o prazo como cumprido; o relógio de soluçã
 `work_started_at`: a entrada na loja da visita em curso, só em `in_progress`, null fora dela; o tempo na loja das
 listas conta daí, e não da 1ª chegada, `arrived_at`)
 
-`TicketDetail = TicketListItem + {description, impact, urgency, asset:{id,name,asset_type,brand,model,serial_number,asset_tag,ip_address}|null, requester:UserRef|null, requester_contact, service_address, service_type:{id,name,estimated_minutes}|null, estimated_minutes, work_seconds, work_started_at, actual_minutes, created_by:UserRef|null, closed_at, cancelled_at, reopen_count, resolution_notes, open_offers, next_offer_expires_at, allowed_transitions:[status], can_edit, can_assign}`
+`TicketDetail = TicketListItem + {description, impact, urgency, asset:{id,name,asset_type,brand,model,serial_number,asset_tag,ip_address}|null, requester:UserRef|null, requester_contact, service_address, service_type:{id,name,estimated_minutes}|null, estimated_minutes, work_seconds, work_started_at, actual_minutes, created_by:UserRef|null, closed_at, cancelled_at, reopen_count, resolution_notes, open_offers, next_offer_expires_at, accepted_offer, allowed_transitions:[status], can_edit, can_assign}`
 (`open_offers`: ofertas da OS esperando o técnico responder, pendentes e no prazo; toda a gestão recebe o número,
 e o técnico recebe 0. `next_offer_expires_at`: o menor `expires_at` entre essas ofertas, null se nenhuma tem prazo;
-sem valor, para toda a gestão; o técnico recebe null. Sem rotina de vencimento, a web relê a OS nesse horário. Ver
-[Ofertas de OS](#ofertas-de-os-2026-11-18).)
+sem valor, para toda a gestão; o técnico recebe null. Sem rotina de vencimento, a web relê a OS nesse horário.
+`accepted_offer`: `{accepted_at, scope_read_at|null}` da oferta aceita pelo responsável atual, sem valor, para toda a
+gestão; null sem ela, e o técnico recebe null. Ver [Ofertas de OS](#ofertas-de-os-2026-11-18).)
 
 `CommentOut = {id, ticket_id, author:UserRef|null, body, is_internal, created_at}`
 `EventOut = {id, ticket_id, actor:UserRef|null, event_type, from_value, to_value, note, data, created_at}` — `event_type` ∈ `created, updated, status_changed, assigned, comment_added, worklog_added, attachment_added`
@@ -276,7 +278,7 @@ não duplica (reenvio seguro do lote). Histórico apagado após `TRACKING_RETENT
 
 ### Homologação de técnicos
 Público (sem login, pelo link): `GET /public/onboarding/catalog` (áreas, disponibilidade, níveis, sugestões de skill,
-versão do aviso de privacidade) · `GET /public/onboarding/{token}` → `{valid, expires_at}` ·
+versão do aviso de privacidade; o app usa as `skill_suggestions` nas sugestões das Aptidões) · `GET /public/onboarding/{token}` → `{valid, expires_at}` ·
 `POST /public/onboarding/{token}` (ficha + `password` + `privacy_consent: true` + `photo` em data URL) → `{protocol}`;
 410 se o link expirou, foi cancelado ou já usado; 422 com CPF/UF/e-mail inválido ou e-mail já cadastrado. E-mail de
 domínio da empresa (`ENTRA_ALLOWED_DOMAINS`, o domínio exato): 422 "Use um e-mail que não seja da empresa", antes da
@@ -284,12 +286,16 @@ checagem de e-mail já usado, e o link não é gasto.
 Gestão: `GET|POST /onboarding/invites` (`{label?, reusable, days_valid}`; o `token` só aparece na criação) ·
 `DELETE /onboarding/invites/{id}` · `GET /onboarding/applications?status=` · `GET /onboarding/applications/pending-count` ·
 `GET /onboarding/applications/{id}` (com `photo_url` assinado) · `POST .../{id}/approve {team_id?, job_title?}` → `UserOut`
-(o técnico entra com o e-mail e a senha da ficha) · `POST .../{id}/reject {reason}`.
+(o técnico entra com o e-mail e a senha da ficha, e o perfil técnico já vem com a disponibilidade, o transporte e as
+aptidões da ficha, sem histórico: ver [Perfil técnico](#perfil-técnico-2026-11-19)) · `POST .../{id}/reject {reason}`.
 
 ### Técnicos (gestão do acesso)
-Analistas e gestores, e só sobre usuários técnicos: `GET /technicians?q=&team_id=&active=` (com jornada, OS abertas,
-foto e o perfil da homologação; `q` busca por palavras em nome, e-mail e telefone; `on_shift` é a jornada aberta e
-dentro do limite de 14 h, a mesma regra do mapa: a esquecida aberta não fica "em jornada") · `POST /technicians` →
+Analistas e gestores, e só sobre usuários técnicos: `GET /technicians?q=&team_id=&active=&state=&city=&tool_id=&day=&period=`
+(com jornada, OS abertas, foto, as áreas da ficha aprovada e o resumo do perfil técnico; `q` busca por palavras em
+nome, e-mail e telefone; `on_shift` é a jornada aberta e dentro do limite de 14 h, a mesma regra do mapa: a esquecida
+aberta não fica "em jornada"; `tool_id`, `day` e `period` filtram pelo perfil técnico, ver
+[Perfil técnico](#perfil-técnico-2026-11-19); paginada por `limit`, 1 a 5000, padrão 2000, e `offset`, com o total
+do filtro no cabeçalho `X-Total-Count`) · `POST /technicians` →
 `{technician, temporary_password}` · `PATCH /technicians/{id}` (nome, e-mail, telefone, grupo, cargo, `is_active`;
 desativar encerra as sessões e fecha as ofertas de OS em aberto dele; e a ficha completa: endereço, jornada e
 serviços, ver "Fichas completas") ·
@@ -300,8 +306,12 @@ quando ninguém mais usa; o DELETE tira também a foto do Field Control) ·
 `{rows:[{line, action: create|update|error, errors}], created, updated, errors, credentials}` (senhas provisórias só na gravação).
 Um técnico, o histórico do cadastro e a chave PIX (`GET /technicians/{id}`, `GET /technicians/{id}/changes`,
 `DELETE /technicians/{id}/pix`): ver [Meu cadastro do técnico](#meu-cadastro-do-técnico-2026-11-18).
-`TechnicianOut.level` (o selo do elo) e as rotas `/technicians/{id}/level`: ver
-[Elo dos técnicos](#elo-dos-técnicos-2026-11-18).
+`TechnicianOut.skills` passou a vir do perfil técnico (`users.skills`, com o "desde"; as da ficha aprovada foram
+copiadas na migração), e a lista traz o resumo do perfil técnico; `GET /technicians/{id}` e as outras respostas de
+um técnico trazem também o detalhe (ferramentas, formação e a data de cada parte): ver
+[Perfil técnico](#perfil-técnico-2026-11-19). `TechnicianOut.level` (o selo do elo) e as rotas
+`/technicians/{id}/level` e `/technicians/{id}/stats`: ver [Elo dos técnicos](#elo-dos-técnicos-2026-11-18) e
+[Perfil do técnico: estatísticas e histórico](#perfil-do-técnico-estatísticas-e-histórico-2026-11-19).
 
 ### Importação de locais
 `POST /locations/import?dry_run=true|false&customer_id=` (CSV/XLSX) → `{rows, created, updated, errors, customers_created}`.
@@ -344,8 +354,8 @@ Só para a gestão (analistas, supervisores, admin): `technician.location` `{use
 accuracy_m, speed_mps, heading, battery_pct, is_mock}` (o ponto mais novo do lote, inteiro: o que não veio do app vai null),
 `technician.shift` `{user_id, name, on_shift}` (esses dois só com o Mapa ao vivo), `onboarding.submitted` `{application_id, name}`
 (ficha nova na homologação) e `profile.changed` `{user_id, name, actor_id, actor_name, occurred_at, data: {fields, via,
-after_reset?}}` (cadastro do técnico alterado no app ou pela central; só com Técnicos ou Pagamentos: ver
-[Meu cadastro do técnico](#meu-cadastro-do-técnico-2026-11-18)).
+after_reset?}}` (cadastro do técnico alterado no app ou pela central, inclusive o perfil técnico; só com Técnicos ou
+Pagamentos: ver [Meu cadastro do técnico](#meu-cadastro-do-técnico-2026-11-18)).
 O cliente pode mandar `{"type":"ping"}` e recebe `{"type":"pong"}`.
 Ao receber um evento, recarregue a OS/lista (o evento não carrega o objeto inteiro).
 
