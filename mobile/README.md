@@ -587,7 +587,8 @@ O elo do técnico aparece como uma medalha, a patente ([src/components/LevelBadg
   decorativa para o leitor de tela, que diz "Elo Ouro".
 - **Detalhe pelo tamanho**: abaixo de 28 pt (`LEVEL_MEDAL_FLAT_BELOW`), lisa (aro cheio, face e emblema); de 28 para
   cima, com o relevo do metal (degradê no aro e na face, brilho e sombra no aro, a linha da face e as facetas da pedra).
-  `LEVEL_MEDAL_GRADIENT = false` troca os degradês por cores chapadas e mantém o resto. Nada animado.
+  `LEVEL_MEDAL_GRADIENT = false` troca os degradês por cores chapadas e mantém o resto. Sem brilho animado nem reflexo:
+  na comemoração, a medalha só entra como o check (cresce de leve; com "Reduzir movimento", aparece parada).
 - **Onde aparece** (`LEVEL_MEDAL_SIZE`): o chip do topo da tela inicial (18, nas abas Hoje, Agenda e Faturamento), a
   metade direita do cartão do Perfil (64), a tela Meu elo (96), as faixas do "Como funciona" (24) e a comemoração da
   subida de faixa (72). No Perfil e no Meu elo, o nome da faixa vai embaixo, em maiúsculas.
@@ -877,7 +878,11 @@ WebSocket /api/v1/ws?token= ── evento ticket.* ──► nova rodada de sync
   primeiro plano, cada ação, cada evento do WebSocket, puxar a lista para baixo e um intervalo de 90 s; com o
   app fora da tela, a jornada e a tarefa periódica do sistema, só num app instalado (seção Notificações).
 - Todas as escritas no SQLite passam por uma fila de transações exclusivas em JS.
-- OS fechadas/canceladas há mais de 30 dias e sem pendências saem do aparelho.
+- OS fechadas/canceladas há mais de 30 dias e sem pendências saem do aparelho (o Histórico de atendimentos vem da
+  central e mostra todas).
+- Fora do pull e da fila: o elo, as Estatísticas, o Histórico e o Faturamento são só leitura, guardados no kv com a hora
+  ([docs/MOBILE_SYNC.md](../docs/MOBILE_SYNC.md) §2); o cadastro e o perfil técnico são só online e ficam na memória
+  (§1); a resposta à oferta e a nota fiscal são só online (§3).
 
 ## Estrutura
 
