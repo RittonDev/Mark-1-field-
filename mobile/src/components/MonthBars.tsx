@@ -42,8 +42,6 @@ const LEGACY_LABEL_MIN = 64;
 const DIMMED = 0.35;
 /** Teto da fonte ampliada nos textos do eixo. */
 const AXIS_FONT_MAX = 1.3;
-/** Teto da fonte ampliada na linha de leitura: em 2 linhas, o mês tocado aparece inteiro (com o ano) até em 320 dp. */
-const READOUT_FONT_MAX = 1.3;
 
 export interface MonthBarsProps {
   title: string;
@@ -106,10 +104,8 @@ export function MonthBars({ title, subtitle, noun, months, value, quality }: Mon
       {/* O leitor de tela ouve o mesmo pelo valor do gráfico. A frase vai até 2 linhas (o mês tocado não some no
           corte); duas linhas invisíveis guardam a altura, para o gráfico não pular ao tocar. */}
       <View style={styles.readoutRow} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-        <Text style={[styles.readout, styles.readoutStrong, styles.readoutHold]} maxFontSizeMultiplier={READOUT_FONT_MAX}>
-          {"0\n0"}
-        </Text>
-        <Text style={[styles.readout, styles.readoutText]} numberOfLines={2} maxFontSizeMultiplier={READOUT_FONT_MAX}>
+        <Text style={[styles.readout, styles.readoutStrong, styles.readoutHold]}>{"0\n0"}</Text>
+        <Text style={[styles.readout, styles.readoutText]} numberOfLines={2}>
           <Text style={styles.readoutStrong}>{readout.strong}</Text>
           {readout.rest}
         </Text>
