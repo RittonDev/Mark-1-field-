@@ -1545,13 +1545,15 @@ não pode desviar o pagamento. Código: `services/my_profile.py`, `services/user
   "08:00–17:00, intervalo 12:00–13:00"; `services`: "12 serviços";
 - `pix`: a chave mascarada (`"CPF ***.456.789-**"`), null sem chave; `pix_holder`: o titular da conta;
 - `avatar`: `to` "nova" na troca e null na remoção (`from` "anterior"); `password`: `to` "provisória" (Redefinir senha
-  em Técnicos), "definida pela central" (Usuários), "criada no app" (o técnico trocou a provisória) ou "trocada no app".
+  em Técnicos), "definida pela central" (Usuários), "criada no app" (o técnico trocou a provisória) ou "trocada no app";
+- perfil técnico: `tools`, `availability`, `skills` e `education` com o que **saiu** em `from` e o que **entrou** em
+  `to`, e `transport` de → para (ver [Perfil técnico](#perfil-técnico-2026-11-19)).
 
 E-mail e celular ficam em claro (a central desfaz uma troca indevida); a chave PIX, nunca. Gravam o histórico: o
 `PATCH /me/profile`, a foto e o `POST /auth/change-password` de técnico (via app, autor o técnico);
 `PATCH /technicians/{id}`, `POST /technicians/{id}/reset-password`, `POST`/`DELETE /technicians/{id}/photo`,
 `DELETE /technicians/{id}/pix` e o `PATCH /users/{id}` de técnico (via central, com o autor). A importação por planilha
-e a do Field Control não entram.
+e a do Field Control não entram, nem a aprovação da ficha (o perfil técnico que vem da ficha entra sem histórico).
 
 Na web (cadastro do técnico), a senha aparece como "Senha redefinida (provisória)", "Senha definida pela central",
 "Senha criada no app" ou "Senha trocada no app".
@@ -1577,7 +1579,8 @@ Na web (cadastro do técnico), a senha aparece como "Senha redefinida (provisór
   momento (`"CPF ***.456.789-**"`), quando o técnico tem chave.
 - Rótulos dos erros de validação (`main.py`): `pix` "Chave PIX", `key_type` "Tipo da chave PIX", `holder_name`
   "Titular da conta", `home_city` "Cidade", `home_state` "UF", `coverage_area` "Região que atende",
-  `address_district` "Bairro" e `address_zip` "CEP".
+  `address_district` "Bairro" e `address_zip` "CEP" (os do perfil técnico: ver
+  [Perfil técnico](#perfil-técnico-2026-11-19)).
 
 **Tempo real.** Depois do commit sai `{"type": "profile.changed", "user_id", "name", "actor_id", "actor_name",
 "occurred_at", "data": {"fields": [...], "via": "app" | "central", "after_reset"?: {"by", "at"}}}`
@@ -1586,23 +1589,31 @@ os nomes da API (o titular conta como "pix"). O nome não começa com "technicia
 - `after_reset` vai só na troca de e-mail ou PIX pelo app quando houve redefinição de senha pela central (linha do
   histórico via central com `password`) nas últimas 72 h: `by` é o nome de quem redefiniu ("Sistema" sem autor) e `at`,
   a hora (ISO). É só sinal: não bloqueia (quem redefiniu também soube a senha).
-- Na web, o sino avisa a troca pelo app de chave PIX, e-mail, nome ou celular (foto, endereço e senha só atualizam as
-  listas). Com `after_reset`, o título termina em "logo depois de a senha ser redefinida por {by}" e o aviso fica
-  vermelho, também na troca só de e-mail.
+- Na web, o sino avisa a troca pelo app de chave PIX, e-mail, nome ou celular (foto, endereço, senha e o perfil
+  técnico só atualizam as listas). Com `after_reset`, o título termina em "logo depois de a senha ser redefinida por
+  {by}" e o aviso fica vermelho, também na troca só de e-mail.
+- `fields` traz também as partes do perfil técnico (`tools`, `availability`, `transport`, `skills`, `education`): ver
+  [Perfil técnico](#perfil-técnico-2026-11-19).
 
-**Aviso de privacidade.** `PRIVACY_VERSION` = "2026-11-19" (o `GET /public/onboarding/catalog` devolve a versão nova e a
-ficha grava a do servidor no aceite).
+**Aviso de privacidade.** `PRIVACY_VERSION` = "2026-11-19.2" (o `GET /public/onboarding/catalog` devolve a versão nova
+e a ficha grava a do servidor no aceite).
 - O texto (`PRIVACY_NOTICE`) e a versão (`PRIVACY_VERSION`) ficam em `frontend/src/lib/constants.ts` e
   `mobile/src/lib/constants.ts`, cópias idênticas; `frontend/src/lib/onboarding.ts` só reexporta. Mudar o texto pede
   mudar a versão nos dois lados (as duas cópias e `backend/app/schemas/onboarding.py`), no mesmo dia.
+- Formato "AAAA-MM-DD"; uma segunda versão no mesmo dia ganha ".2" ("AAAA-MM-DD.N"). As versões se comparam como texto.
+  Para mostrar, `PRIVACY_DATE` = os 10 primeiros caracteres em "DD/MM/AAAA" ("19/11/2026", sem o ".2").
 - A ficha da web compara a versão do servidor com a do pacote ao abrir, na última etapa e no envio: se a do servidor
   for mais nova, a página está velha, mostra "O aviso de privacidade mudou" com **Recarregar** e não envia. Por isso,
   publique a web antes da API, ou junto: com a API na frente, nenhuma ficha envia até a web nova entrar.
 - O aviso cita a chave PIX que o técnico cadastrar no app e o pagamento dos chamados por PIX; as notas fiscais (número,
-  valor, datas e o arquivo, que pode trazer CPF ou CNPJ e endereço, guardadas pelo prazo da legislação fiscal); e o Elo
+  valor, datas e o arquivo, que pode trazer CPF ou CNPJ e endereço, guardadas pelo prazo da legislação fiscal); o Elo
   (atendimentos dos últimos 12 meses: quantidade, chegada no horário, retornos e visitas perdidas, visto em Meu elo, com
-  revisão de uma ocorrência pela central).
-- No app, a tela Aviso de privacidade mostra o mesmo texto, só para leitura: não grava ciência nem pede aceite de novo.
+  revisão de uma ocorrência pela central); e, desde a "2026-11-19.2", o perfil técnico, informado na ficha ou no app
+  (aptidões, formação, ferramental, meios de transporte e CNH, e os dias e turnos disponíveis), que ajuda a central a
+  escolher quem convidar para cada OS e que o técnico atualiza no app, em Configurações.
+- No app (Perfil › Aviso de privacidade), a tela mostra o mesmo texto, só para leitura, com "Atualizado em
+  {PRIVACY_DATE}": não grava ciência nem pede aceite de novo. Na versão nova, o cartão de Hoje avisa "Agora ele fala do
+  seu perfil técnico: ferramental, disponibilidade, transporte, aptidões e formação."
 
 ## Elo dos técnicos (2026-11-18)
 
