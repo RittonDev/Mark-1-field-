@@ -12,8 +12,8 @@ ao banco como está) responde 422 em qualquer rota, com um aviso no log (o SQLST
 `{"detail": "Algum valor está fora do tamanho ou do formato aceito. Confira os campos."}`. O asyncpg entrega esses
 erros como `DBAPIError` genérico, e o handler de `main.py` decide pelo SQLSTATE. Os outros erros do banco seguem como
 erro não tratado: 500 `{"detail": "Erro interno. Tente de novo; se continuar, avise a central."}` e o log "Erro não
-tratado em …". O erro do banco vai para o log sem os valores do SQL (`hide_parameters` em `db/session.py`, também no
-`DB_ECHO`): nome, contato, formação e chave PIX não aparecem no log.
+tratado em …". O erro do banco vai para o log com o SQL sem os valores (`hide_parameters` em `db/session.py`, também
+no `DB_ECHO`), que levariam dados pessoais (nome, contato, formação, chave PIX).
 
 ## Papéis
 
@@ -1082,9 +1082,9 @@ os que não têm cartão). Código: `services/payouts.py` (`MONTHS_DEFAULT`, `MO
   aberto e o `invoices`, e os reembolsos). Sem tempo real e sem histórico: o app relê ao abrir a aba, ao puxar, depois
   de enviar ou apagar uma nota e depois de uma sincronização (`docs/MOBILE_SYNC.md`).
 - A API desta entrega está publicada desde 20/11/2026. Com uma API anterior (sem esta rota: 404), a aba mostra "Não foi
-  possível carregar o faturamento." e "Tentar de novo", sem cartões e sem o "Outro mês": o mês (`GET /me/earnings?month=`,
-  que a API anterior tem) e o "Enviar nota fiscal" só abrem com meses já guardados no aparelho, pelo cartão ou pelo
-  "Outro mês".
+  possível carregar o faturamento." e "Tentar de novo", sem cartões e sem o "Outro mês": o mês
+  (`GET /me/earnings?month=`, que a API anterior tem) e o "Enviar nota fiscal" só abrem com meses já guardados no
+  aparelho, pelo cartão ou pelo "Outro mês".
 
 ## Orçamentos: cobrança, aberturas e preço do cliente (2026-11-17)
 
@@ -1720,9 +1720,9 @@ itens e o catálogo), `schemas/my_profile.py` (as listas inteiras), `services/my
   controle (categoria Cc, como U+0000) e de formatação (Cf: espaço de largura zero, BOM, marcas de direção como
   U+202E), e tab, LF, VT, FF e CR viram espaço; depois, NFC e espaços colapsados. O tamanho conta depois de limpar:
   nome só de invisíveis recebe a mensagem de vazio do campo ("Informe o nome da aptidão", "Informe o curso"…), e um
-  U+0000 no curso sai do texto (200). A comparação sem acento e sem maiúsculas (`fold`: aptidão e formação repetidas, nome repetido no catálogo)
-  limpa do mesmo jeito: "Lin<U+200B>ux" repete "Linux". A aprovação da ficha e a cópia da migração limpam igual, e o
-  app também (`cleanText` e `foldName` em `mobile/src/lib/techProfileForm.ts`).
+  U+0000 no curso sai do texto (200). A comparação sem acento e sem maiúsculas (`fold`: aptidão e formação repetidas,
+  nome repetido no catálogo) limpa do mesmo jeito: "Lin<U+200B>ux" repete "Linux". A aprovação da ficha e a cópia da
+  migração limpam igual, e o app também (`cleanText` e `foldName` em `mobile/src/lib/techProfileForm.ts`).
 - Textos curtos, iguais na API e nas telas: "sáb · tarde", "seg a sex · manhã e tarde; sáb · manhã" (`slots_text` e
   `slotsText`), "Carro, Moto · com CNH" e "Nenhum · sem CNH" (`transport_text`), "02/2022 a 12/2023" e "desde 02/2024
   (em andamento)" (`education_period_text`).
