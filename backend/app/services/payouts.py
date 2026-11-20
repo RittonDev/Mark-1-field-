@@ -2,8 +2,9 @@
 
 Os técnicos são parceiros sem vínculo: pegam a demanda e recebem por chamado. A central define o
 valor ao colocar o técnico na OS (o padrão vem do tipo de serviço), paga na web ("Pagamentos") e o
-técnico acompanha no app ("Meus ganhos"). Reembolsos (km, material) seguem nos custos extras.
-Com todos os técnicos da OS pagos, saem as etiquetas de pagamento pendente (services/tag_rules).
+técnico acompanha no app (aba "Faturamento": os meses em my_earnings_months, o mês em
+my_earnings). Reembolsos (km, material) seguem nos custos extras. Com todos os técnicos da OS
+pagos, saem as etiquetas de pagamento pendente (services/tag_rules).
 """
 
 import uuid
@@ -615,8 +616,9 @@ async def _drop_paid_tags(db: AsyncSession, tickets: list[Ticket], actor: User) 
 
 
 async def my_earnings(db: AsyncSession, user: User, month: date | None = None) -> MyEarnings:
-    """Meus ganhos do técnico: os chamados dele (a receber, previsto, recebido) e os reembolsos.
-    Valor pendente de OS cancelada não aparece (ele não vai receber, salvo se a central pagar)."""
+    """Os ganhos do técnico (o mês do Faturamento do app): os chamados dele (a receber, previsto,
+    recebido) e os reembolsos. Valor pendente de OS cancelada não aparece (ele não vai receber,
+    salvo se a central pagar)."""
     date_from = date_to = None
     if month is not None:
         date_from = month.replace(day=1)

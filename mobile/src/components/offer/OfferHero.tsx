@@ -20,11 +20,13 @@ export function OfferHero({ ticket }: { ticket: Pick<FieldOfferTicket, "district
     <View style={styles.hero} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
       <RouteMapPattern height={HEIGHT} variant="area" />
       {place ? (
-        <View style={styles.chip}>
-          <Icon name="pin" size={14} color={c.brandInk} />
-          <Text style={styles.chipText} numberOfLines={1} maxFontSizeMultiplier={1.3}>
-            {place}
-          </Text>
+        <View style={styles.chipRow}>
+          <View style={styles.chip}>
+            <Icon name="pin" size={14} color={c.brandInk} />
+            <Text style={styles.chipText} numberOfLines={1} maxFontSizeMultiplier={1.3}>
+              {place}
+            </Text>
+          </View>
         </View>
       ) : null}
     </View>
@@ -33,11 +35,10 @@ export function OfferHero({ ticket }: { ticket: Pick<FieldOfferTicket, "district
 
 const makeStyles = (c: Palette) =>
   StyleSheet.create({
-    hero: { height: HEIGHT, overflow: "hidden", alignItems: "center", pointerEvents: "none" },
+    hero: { height: HEIGHT, overflow: "hidden", pointerEvents: "none" },
+    chipRow: { position: "absolute", left: 16, right: 16, bottom: 14, alignItems: "center" },
     chip: {
-      position: "absolute",
-      bottom: 14,
-      maxWidth: "88%",
+      maxWidth: "100%",
       flexDirection: "row",
       alignItems: "center",
       gap: 6,

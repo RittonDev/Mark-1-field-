@@ -30,6 +30,15 @@ import { Badge, Button, Card, EmptyState, ErrorBox, SectionTitle } from "../ui";
 
 /** Dois toques rápidos não abrem a mesma OS duas vezes. */
 const DOUBLE_TAP_MS = 600;
+let lastOpenAt = 0;
+
+/** Abre a OS da linha (no aparelho ou, com internet, buscando na central). */
+function openTicket(id: string) {
+  const now = Date.now();
+  if (now - lastOpenAt < DOUBLE_TAP_MS) return;
+  lastOpenAt = now;
+  void openTicketAnywhere(id);
+}
 
 function lineStatus(line: PayoutLine): { label: string; tone: "paid" | "due" | "expected" } {
   if (line.status === "paid") return { label: line.paid_at ? `Pago ${formatDate(line.paid_at)}` : "Pago", tone: "paid" };
@@ -55,7 +64,6 @@ export function MonthEarnings({ month, refreshKey = 0, onSettled }: { month: str
   const [retry, setRetry] = useState(0);
   const latest = useRef(0);
   const lastFetchAt = useRef(0);
-  const lastOpen = useRef(0);
   const round = `${refreshKey}#${retry}#${invoicesVersion}`;
 
   /** Busca o mês. A resposta que chega atrasada não passa por cima da mais nova. */
@@ -95,13 +103,6 @@ export function MonthEarnings({ month, refreshKey = 0, onSettled }: { month: str
     if (!lastSyncAt || Date.now() - lastFetchAt.current < SYNC_REFRESH_MS) return;
     load(false);
   }, [lastSyncAt]);
-
-  function openTicket(id: string) {
-    const now = Date.now();
-    if (now - lastOpen.current < DOUBLE_TAP_MS) return;
-    lastOpen.current = now;
-    void openTicketAnywhere(id);
-  }
 
   // "novembro de 2026" → "novembro" ("Chamados de novembro", "Notas fiscais de novembro").
   const monthName = competenceLabel(month).replace(/ de \d{4}$/, "");

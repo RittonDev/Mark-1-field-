@@ -1,0 +1,222 @@
+// Perfil técnico em Configurações › Atendimento (Disponibilidade, Transporte, Aptidões, Formação e Ferramental): o
+// estado de cada tela (o cadastro da memória e a releitura do servidor) e os catálogos, só na memória:
+// - o ferramental: GET /technician-tools (o técnico recebe só as ativas, em ordem alfabética);
+// - as sugestões de aptidão: as mesmas da ficha da homologação, de GET /public/onboarding/catalog.
+// Nada vai para o SQLite, o kv nem o SecureStore. Um catálogo lido vale 10 min (abrir a tela depois disso relê), puxar a
+// tela relê na hora, e a troca de sessão (Sair ou outro técnico) apaga.
+
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import type { ProfileLoad } from "../components/settings/ProfileGate";
+import { api, ApiError, errorMessage, request } from "./api";
+import { offlineFailure } from "./net";
+import { hasTechnicalProfile, loadProfile, useProfile } from "./profile";
+import { session } from "./session";
+import type { MyProfile, OnboardingCatalog, TechnicianTool } from "./types";
+
+/** Servidor antigo (o cadastro vem sem o perfil técnico): o que as telas de Atendimento mostram no lugar. */
+export const UNAVAILABLE = {
+  title: "Indisponível no momento",
+  description: "O servidor ainda não tem esta parte do cadastro. Tente de novo mais tarde.",
+} as const;
+
+/** "Sem internet" ao gravar uma lista (dentro da folha). */
+export const OFFLINE_SAVE = "Sem internet. Conecte o aparelho para salvar.";
+
+// --------------------------------------------------------------------------- a tela
+
+/**
+ * O que a tela mostra: o cadastro com o perfil técnico ("ready"); o servidor antigo, sem ele ("unavailable"); ou, sem
+ * cadastro que sirva, a carga e o erro do ProfileGate.
+ */
+export type TechProfileGate =
+  | { status: "ready"; profile: MyProfile }
+  | { status: "unavailable" }
+  | Exclude<ProfileLoad, { status: "ok" }>;
+
+export interface TechProfileScreen {
+  gate: TechProfileGate;
+  /** Abriu com o cadastro da memória e a releitura falhou por erro do servidor (sem rede, o aviso de rede já fala). */
+  stale: boolean;
+  /** "Tentar de novo": volta a carregar. */
+  retry: () => void;
+  /** Puxar para atualizar: relê sem esconder o que está na tela. */
+  refresh: () => void;
+  refreshing: boolean;
+}
+
+/** Abre com o cadastro da memória e relê do servidor (a leitura em andamento é compartilhada com as outras telas). */
+export function useTechProfileScreen(): TechProfileScreen {
+  const profile = useProfile();
+  const [load, setLoad] = useState<ProfileLoad>({ status: "loading" });
+  const [round, setRound] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    loadProfile().then(
+      () => {
+        if (!alive) return;
+        setLoad({ status: "ok" });
+        setRefreshing(false);
+      },
+      async (error: unknown) => {
+        const offline = await offlineFailure(error);
+        if (!alive) return;
+        setLoad({ status: "error", offline, message: errorMessage(error) });
+        setRefreshing(false);
+      },
+    );
+    return () => {
+      alive = false;
+    };
+  }, [round]);
+
+  const retry = useCallback(() => {
+    setLoad({ status: "loading" });
+    setRound((n) => n + 1);
+  }, []);
+
+  const refresh = useCallback(() => {
+    setRefreshing(true);
+    setRound((n) => n + 1);
+  }, []);
+
+  let gate: TechProfileGate;
+  if (hasTechnicalProfile(profile)) gate = { status: "ready", profile };
+  else if (load.status === "error") gate = load;
+  else if (profile && load.status === "ok") gate = { status: "unavailable" };
+  else gate = { status: "loading" };
+
+  const stale = gate.status === "ready" && load.status === "error" && !load.offline;
+  return { gate, stale, retry, refresh, refreshing };
+}
+
+// --------------------------------------------------------------------------- catálogos na memória
+
+/** Um catálogo lido vale este tempo: abrir a tela depois disso relê. */
+const FRESH_MS = 10 * 60_000;
+
+export interface CatalogError {
+  offline: boolean;
+  /** 404: o servidor ainda não tem a rota (API antiga). */
+  missing: boolean;
+  message: string;
+}
+
+export interface CatalogState<T> {
+  /** null: ainda não leu (ou a leitura falhou sem nada guardado). */
+  data: T | null;
+  loading: boolean;
+  /** A última leitura falhou; com `data`, a tela segue com o que tinha. */
+  error: CatalogError | null;
+}
+
+interface Catalog<T> {
+  subscribe: (listener: () => void) => () => void;
+  get: () => CatalogState<T>;
+  load: (options?: { force?: boolean }) => Promise<void>;
+}
+
+const NOTHING: CatalogState<never> = { data: null, loading: false, error: null };
+
+function createCatalog<T>(read: () => Promise<T>): Catalog<T> {
+  let current: CatalogState<T> = NOTHING;
+  /** Quando foi lido (ms) e para quem: a troca de sessão apaga. */
+  let at = 0;
+  let owner: string | null = null;
+  let inflight: Promise<void> | null = null;
+  /** Sobe na troca de sessão: a resposta de uma leitura de antes não entra. */
+  let generation = 0;
+  const listeners = new Set<() => void>();
+
+  function publish(next: CatalogState<T>) {
+    current = next;
+    listeners.forEach((listener) => listener());
+  }
+
+  session.subscribe(() => {
+    if (owner === null) return;
+    const { status, user } = session.get();
+    if (status === "signedIn" && user?.id === owner) return;
+    owner = null;
+    at = 0;
+    inflight = null;
+    generation += 1;
+    publish(NOTHING);
+  });
+
+  function load({ force = false }: { force?: boolean } = {}): Promise<void> {
+    if (inflight) return inflight;
+    if (!force && current.data !== null && Date.now() - at < FRESH_MS) return Promise.resolve();
+    owner = session.get().user?.id ?? null;
+    const mine = generation;
+    publish({ data: current.data, loading: true, error: null });
+    const run = read()
+      .then(
+        (data) => {
+          if (mine !== generation) return;
+          at = Date.now();
+          publish({ data, loading: false, error: null });
+        },
+        async (error: unknown) => {
+          const offline = await offlineFailure(error);
+          if (mine !== generation) return;
+          const missing = error instanceof ApiError && error.status === 404;
+          publish({ data: current.data, loading: false, error: { offline, missing, message: errorMessage(error) } });
+        },
+      )
+      .finally(() => {
+        if (inflight === run) inflight = null;
+      });
+    inflight = run;
+    return run;
+  }
+
+  return {
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    get: () => current,
+    load,
+  };
+}
+
+/** O catálogo na tela: lê ao abrir quando ainda não leu ou quando passou de 10 min. */
+function useCatalog<T>(catalog: Catalog<T>): CatalogState<T> {
+  const state = useSyncExternalStore(catalog.subscribe, catalog.get, catalog.get);
+  useEffect(() => {
+    void catalog.load();
+  }, [catalog]);
+  return state;
+}
+
+const toolCatalog = createCatalog(() => api.get<TechnicianTool[]>("/technician-tools"));
+
+const skillCatalog = createCatalog(() =>
+  request<OnboardingCatalog>("/public/onboarding/catalog", { auth: false }).then((catalog) =>
+    Array.isArray(catalog?.skill_suggestions) ? catalog.skill_suggestions : [],
+  ),
+);
+
+/** O ferramental (só as ativas), para a tela Ferramental. */
+export function useToolCatalog(): CatalogState<TechnicianTool[]> {
+  return useCatalog(toolCatalog);
+}
+
+/** Relê o ferramental agora: puxar a tela, "Tentar de novo" ou uma ferramenta que a central desativou. */
+export function reloadToolCatalog(): Promise<void> {
+  return toolCatalog.load({ force: true });
+}
+
+/** As sugestões de aptidão (null sem catálogo: a folha segue só com o texto livre). */
+export function useSkillSuggestions(): string[] | null {
+  return useCatalog(skillCatalog).data;
+}
+
+/** Relê as sugestões de aptidão agora (puxar a tela). */
+export function reloadSkillSuggestions(): Promise<void> {
+  return skillCatalog.load({ force: true });
+}

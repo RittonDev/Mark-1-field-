@@ -4,8 +4,9 @@ Central: o preço é dado de Pagamentos. Ver as ofertas com os valores pede Paga
 Visualizar; mandar e cancelar, em Editar (mandar também pede poder atribuir técnico). Sempre
 dentro da fila de quem pede. Quem não tem a tela vê só o contador `open_offers` da OS.
 
-Técnico (app): as ofertas dele, abrir (grava a leitura), aceitar pelo valor ou recusar. Ele vê a OS
-da oferta antes de estar nela, só com o recorte do convite (sem cliente, loja, endereço e contato).
+Técnico (app): as ofertas dele, abrir (grava a leitura), aceitar pelo valor (com a hora em que ele
+abriu o escopo, opcional) ou recusar. Ele vê a OS da oferta antes de estar nela, só com o recorte
+do convite (sem cliente, loja, endereço e contato, nem no título nem no nome do serviço).
 """
 
 import uuid
