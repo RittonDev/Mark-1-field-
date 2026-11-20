@@ -1719,8 +1719,8 @@ itens e o catálogo), `schemas/my_profile.py` (as listas inteiras), `services/my
 - Textos (nome da aptidão, curso, instituição e nome da ferramenta) se gravam limpos (`clean`): saem os caracteres de
   controle (categoria Cc, como U+0000) e de formatação (Cf: espaço de largura zero, BOM, marcas de direção como
   U+202E), e tab, LF, VT, FF e CR viram espaço; depois, NFC e espaços colapsados. O tamanho conta depois de limpar:
-  nome só de invisíveis recebe a mensagem de vazio ("Informe o nome da aptidão"), e um U+0000 no curso sai do texto
-  (200). A comparação sem acento e sem maiúsculas (`fold`: aptidão e formação repetidas, nome repetido no catálogo)
+  nome só de invisíveis recebe a mensagem de vazio do campo ("Informe o nome da aptidão", "Informe o curso"…), e um
+  U+0000 no curso sai do texto (200). A comparação sem acento e sem maiúsculas (`fold`: aptidão e formação repetidas, nome repetido no catálogo)
   limpa do mesmo jeito: "Lin<U+200B>ux" repete "Linux". A aprovação da ficha e a cópia da migração limpam igual, e o
   app também (`cleanText` e `foldName` em `mobile/src/lib/techProfileForm.ts`).
 - Textos curtos, iguais na API e nas telas: "sáb · tarde", "seg a sex · manhã e tarde; sáb · manhã" (`slots_text` e
@@ -1763,6 +1763,9 @@ itens e o catálogo), `schemas/my_profile.py` (as listas inteiras), `services/my
   corpo; o app manda uma parte por vez.
 - A resposta é o `MyProfile` normalizado. Sem nada novo: 200, sem histórico, sem carimbo e sem aviso. A parte que muda
   de verdade ganha o carimbo `{at: agora, via: "app"}`.
+- Uma gravação por vez por técnico (a trava da linha: ver "Ordem do `PATCH`" em
+  [Meu cadastro do técnico](#meu-cadastro-do-técnico-2026-11-18)): duas partes gravadas juntas ficam as duas
+  carimbadas (o transporte não volta null no `GET`), e o histórico de cada gravação sai do que a outra já gravou.
 
 | Parte | Normaliza | Muda quando |
 |---|---|---|
@@ -1794,6 +1797,7 @@ quando o histórico tem mudança, e uma comparação diferente devolveria 200 se
 | id que não é UUID | "Identificador inválido" | Ferramental |
 | mais de 200 ferramentas, 28 turnos, 6 meios, 30 aptidões ou 20 cursos | "No máximo N itens" | Ferramental, Disponibilidade, Meios de transporte, Aptidões, Formação |
 | turno fora da grade | "Turno desconhecido: sat:lunch" (o primeiro da lista) | Disponibilidade |
+| turno com mais de 16 caracteres (recusado antes, sem o valor na resposta) | "No máximo 16 caracteres" | Disponibilidade |
 | `transport: null` | "Informe os meios de transporte" | Transporte |
 | meio fora da lista | "Escolha uma das opções: …" | Meios de transporte |
 | `driver_license` ausente / null | "Campo obrigatório" / "Informe sim ou não" | CNH |
@@ -1821,8 +1825,11 @@ quando o histórico tem mudança, e uma comparação diferente devolveria 200 se
 - O técnico recebe só as ativas, com `technicians: null`, e o `active` é ignorado para ele. A gestão recebe em
   `technicians` quantos técnicos (papel técnico, ativos ou não) marcaram cada uma: a mesma regra do filtro `tool_id` de
   `GET /technicians`, cuja lista padrão mostra todas as situações (o número bate com o que o link abre).
-- O nome repetido é conferido sem acento e sem maiúsculas ("Multimetro" = "Multímetro") antes de gravar; o banco
-  (`uq_tool_catalog_name`) pega o nome exato de dois cadastros ao mesmo tempo, com a mesma mensagem.
+- Cadastrar e renomear travam o catálogo até o fim da transação (`_lock_tool_catalog`, `pg_advisory_xact_lock`) e só
+  então conferem o nome repetido sem acento e sem maiúsculas ("Multimetro" = "Multímetro") e, no cadastro, o limite de
+  200: dois pedidos juntos com "Multímetro" e "multimetro" dão 201 e 409, e o catálogo com 199 recebe só mais uma. Só
+  ativar ou desativar não trava. O índice único (`uq_tool_catalog_name`) fica de reserva para o nome exato, com a mesma
+  mensagem.
 - Sem excluir e sem ordem manual. Renomear muda para todos (o técnico guarda o id). Desativar não mexe nos técnicos: a
   ferramenta some do app, da ficha (`tool_ids`/`tools` só trazem as ativas) e do filtro da web (que lista só as
   ativas), e volta para quem tinha marcado quando reativada. O `tool_id` de uma desativada, mandado direto na API (ou
@@ -1858,6 +1865,8 @@ quando o histórico tem mudança, e uma comparação diferente devolveria 200 se
   com o link para a ficha. A lista ganha os filtros "Ferramenta", "Disponível no dia" e "Disponível no turno" (com dia
   ou turno, o aviso "Só quem informou a disponibilidade no app."; a ferramenta fica na URL, `?ferramenta={id}`) e, no
   CSV, as colunas `ferramental`, `disponibilidade`, `transporte`, `cnh`, `aptidoes` e `perfil_tecnico_atualizado_em`.
+  Os nomes do ferramental vêm do catálogo (a lista só traz os ids): enquanto ele carrega, o Exportar fica desligado;
+  com erro, avisa "Não deu para carregar o ferramental", busca de novo e não baixa.
 
 **Histórico do cadastro** (`services/user_history.py`).
 - `tools`, `availability`, `skills` e `education` (`DELTA_FIELDS`) gravam o que **saiu** em `from` e o que **entrou**
@@ -1876,6 +1885,8 @@ quando o histórico tem mudança, e uma comparação diferente devolveria 200 se
 - A aprovação da ficha não grava histórico. Na web: "Ferramental: incluiu Escada, Multímetro" e "Ferramental: tirou
   Furadeira" (uma linha cada); "Transporte: não informado → Carro, Moto · com CNH". Rótulos: Ferramental,
   Disponibilidade, Transporte, Aptidões e Formação (`USER_CHANGE_LABEL`).
+- Cada envio do salvar ao tocar é uma linha (os toques de 0,6 s vão juntos), e o histórico cresce rápido: a central lê
+  todas as páginas pelo `before` (ver "Central" em [Meu cadastro do técnico](#meu-cadastro-do-técnico-2026-11-18)).
 
 **Tempo real.** O `profile.changed` de sempre (só para quem tem Técnicos ou Pagamentos), com as partes em `data.fields`
 (`"tools"`, `"availability"`, `"transport"`, `"skills"`, `"education"`) e `via: "app"`. **Sem aviso no sino** para
@@ -1917,6 +1928,7 @@ ficha mostram erro). O app sobe depois da API: `MyProfileUpdate` recusa campo de
 receberia 422 "Campo não aceito"; nas telas, ele trata o servidor antigo ("Indisponível no momento" / "O servidor
 ainda não tem esta parte do cadastro. Tente de novo mais tarde."). A API nova com o app velho funciona. Publicado
 noutro dia que não 19/11/2026, a versão do aviso vira a data do dia ("AAAA-MM-DD"), nos três lugares, no mesmo dia.
+Subiu em 20/11/2026 (a versão do aviso é "2026-11-20").
 
 **Privacidade (LGPD).** Só o próprio técnico e a gestão com Técnicos veem o perfil técnico (o aviso `profile.changed`
 vai também a quem tem Pagamentos, só com os nomes das partes); o cliente, o portal e os outros técnicos nunca. O aviso
@@ -2045,7 +2057,9 @@ quando a central registra) e a reabertura de OS resolvida ou fechada (`status_ch
   `CentralLevelOccurrence` = o mesmo com `ticket: {id|null, code|null, title, hidden}` e `waiver`.
 
 **Na central (web).** A ocorrência de OS de outra fila (`ticket.hidden`) aparece como "OS de outra fila", sem link e sem
-Desconsiderar ou Voltar a contar; a desconsiderada mostra só quem e quando. O cadastro do técnico relê
+Desconsiderar ou Voltar a contar; a desconsiderada mostra só quem e quando. O motivo de Desconsiderar digitado e não
+enviado põe o ponto âmbar na aba Elo da ficha; fechar a ficha e o Salvar (que grava o Cadastro e fecha) perguntam antes
+"Descartar o motivo não enviado?", e "Voltar" fica na aba Elo, sem salvar. O cadastro do técnico relê
 `GET /technicians/{id}/level` em evento de OS só quando o técnico é o responsável (`assignee_id`) ou entrou na visita
 (`data.added_ids`). Não relê em comentário, anexo, apontamento, decisão de pedido de peça, nem em `ticket.updated` só de
 `forms`, `signature`, `expenses`, `part_requests`, `payouts`, `quotes`, `offers`, `repairs` ou `tags`. Fora isso, relê ao
@@ -2115,7 +2129,10 @@ para esta ação") → `TechnicianStats` = `MyStats` + `technician: Ref`. 404 "T
 não é técnico). Só contagens, sem OS nenhuma: a fila de quem pede não muda nada, como nas contagens do elo. Na web, o
 gráfico "Atendimentos por mês" da aba Elo ("143 nos últimos 12 meses · 1.284 no total"), com as séries "Maxx Field" e
 "Field Control" (a segunda só quando algum mês tem atendimento do Field Control), o mês atual tracejado e a tabela "Ver
-em tabela"; a resposta fica guardada por 60 s e é relida junto com o elo do técnico.
+em tabela"; a resposta fica guardada por 60 s e é relida junto com o elo do técnico. O "143 nos últimos 12 meses" é o
+`metrics.services` (365 dias corridos), o mesmo número da linha "Últimos 12 meses" do Elo, logo acima; a soma das barras
+pode ser menor. Sem atendimento nas duas contas, "Sem atendimentos nos últimos 12 meses."; com atendimento só na ponta
+do 13º mês, o gráfico sai zerado.
 
 **`GET /me/history?limit=&cursor=`** (papel `technician`; gestão e cliente: 403) → `MyHistoryPage {items, next_cursor,
 total, months}`:
@@ -2132,8 +2149,10 @@ total, months}`:
   diferem só numa conclusão no futuro, que a lista mostra e o total das Estatísticas ainda não conta). `months`:
   `[{month, count}]` dos meses que aparecem na página, do mais novo para o mais antigo, cada um com o total do mês
   inteiro (mesmo quando o mês continua na próxima página).
-- Cursor estragado (base64, separador, data sem fuso ou id): 422 `{"detail": "Página do histórico inválida. Puxe a
-  lista para recarregar."}`.
+- Cursor estragado (base64, separador, data sem fuso ou fora da faixa, id): 422 `{"detail": "Página do histórico
+  inválida. Puxe a lista para recarregar."}`. Fora da faixa é a data que não cabe em UTC (o ano 1 com +14:00, o
+  9999-12-31 com -14:00): o servidor passa a data do cursor para UTC antes de consultar, e ela não chega ao banco. Não
+  há limite de ano: o `next_cursor` sai da conclusão gravada, mesmo antiga.
 
 **Custo.**
 - `/me/stats`: as consultas do elo (`collect()`) só para o técnico (responsável, junto, atrasos, reaberturas e as
