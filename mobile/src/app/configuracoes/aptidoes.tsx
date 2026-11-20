@@ -1,7 +1,9 @@
 // Aptidões (Configurações › Atendimento): o que o técnico sabe fazer, com o nível e o "desde" (o dia em que entrou no
 // perfil; quem guarda é o servidor). Incluir e mudar o nível numa folha; excluir pela lixeira, com confirmação. Uma
-// gravação por vez: enquanto uma está no ar, as outras ações da lista ficam desligadas, e o corpo sai sempre da lista
-// que voltou do servidor (duas exclusões seguidas não devolvem um item apagado).
+// gravação por vez: enquanto uma está no ar, as outras ações da lista ficam desligadas, também depois de sair e voltar
+// à tela (o estado fica em lib/technicalProfile.ts). O corpo é montado quando a gravação sai da fila (saveProfileWith),
+// com a lista que a anterior devolveu: duas exclusões seguidas não devolvem um item apagado, e mudar o nível de uma
+// aptidão que já saiu mostra o erro na folha.
 
 import { useState } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
@@ -19,9 +21,17 @@ import { TECH_PROFILE_LIMITS } from "../../lib/constants";
 import { confirmAction } from "../../lib/dialogs";
 import { haptic } from "../../lib/haptics";
 import { noNetwork, offlineFailure } from "../../lib/net";
-import { getProfile, hasTechnicalProfile, saveProfile } from "../../lib/profile";
-import { OFFLINE_SAVE, reloadSkillSuggestions, UNAVAILABLE, useSkillSuggestions, useTechProfileScreen } from "../../lib/technicalProfile";
-import { foldName, skillLine, skillsBody, skillSpoken } from "../../lib/techProfileForm";
+import { saveProfileWith } from "../../lib/profile";
+import {
+  OFFLINE_SAVE,
+  reloadSkillSuggestions,
+  trackListWrite,
+  UNAVAILABLE,
+  useListWrite,
+  useSkillSuggestions,
+  useTechProfileScreen,
+} from "../../lib/technicalProfile";
+import { foldName, SKILL_MSG, skillLine, skillSpoken, skillsWith, skillsWithout } from "../../lib/techProfileForm";
 import { showToast } from "../../lib/toast";
 import type { TechnicianSkill, TechnicianSkillIn } from "../../lib/types";
 import { RADIUS, useStyles, useTheme, type Palette } from "../../theme/theme";
@@ -36,12 +46,6 @@ interface SheetState {
 const NO_INTERNET = "Sem internet";
 const OFFLINE_DELETE = "Conecte o aparelho para excluir.";
 
-/** A lista gravada agora: a do cadastro na memória (ou a da tela, se ele saiu da memória no meio). */
-function currentSkills(shown: TechnicianSkill[]): TechnicianSkill[] {
-  const profile = getProfile();
-  return hasTechnicalProfile(profile) ? profile.skills : shown;
-}
-
 export default function SkillsScreen() {
   const c = useTheme();
   const styles = useStyles(makeStyles);
@@ -49,10 +53,9 @@ export default function SkillsScreen() {
   const { gate, stale, retry, refresh, refreshing } = useTechProfileScreen();
   const suggestions = useSkillSuggestions();
   const [sheet, setSheet] = useState<SheetState | null>(null);
-  // Uma gravação da lista no ar: incluir, editar e excluir ficam desligados.
-  const [writing, setWriting] = useState(false);
-  // A aptidão que está saindo (pelo nome sem acento e maiúsculas).
-  const [removing, setRemoving] = useState<string | null>(null);
+  // Uma gravação da lista no ar (`writing`): incluir, editar e excluir ficam desligados. `removing`: as aptidões que
+  // estão saindo, pelo nome sem acento e maiúsculas.
+  const { busy: writing, removing } = useListWrite("skills");
 
   if (gate.status === "unavailable") {
     return (
@@ -88,21 +91,20 @@ export default function SkillsScreen() {
 
   async function submit(target: SkillSheetTarget, skill: TechnicianSkillIn): Promise<string | null> {
     if (await noNetwork()) return OFFLINE_SAVE;
-    const list = currentSkills(skills);
-    const next =
-      target.kind === "add"
-        ? [...list, skill]
-        : list.map((item) => (foldName(item.name) === foldName(target.skill.name) ? { name: item.name, level: skill.level } : item));
-    setWriting(true);
+    const editing = target.kind === "edit" ? target.skill.name : null;
     try {
-      await saveProfile({ skills: skillsBody(next) });
+      await trackListWrite("skills", null, () =>
+        saveProfileWith((profile) => {
+          const next = skillsWith(profile.skills, skill, editing);
+          if (!next) throw new Error(SKILL_MSG.gone);
+          return { skills: next };
+        }),
+      );
       haptic.success();
       closeSheet();
       return null;
     } catch (error) {
       return (await offlineFailure(error)) ? OFFLINE_SAVE : errorMessage(error);
-    } finally {
-      setWriting(false);
     }
   }
 
@@ -114,18 +116,14 @@ export default function SkillsScreen() {
       showToast(NO_INTERNET, { description: OFFLINE_DELETE });
       return;
     }
-    const key = foldName(skill.name);
-    setWriting(true);
-    setRemoving(key);
     try {
-      await saveProfile({ skills: skillsBody(currentSkills(skills).filter((item) => foldName(item.name) !== key)) });
+      await trackListWrite("skills", foldName(skill.name), () =>
+        saveProfileWith((profile) => ({ skills: skillsWithout(profile.skills, skill.name) })),
+      );
       haptic.success();
     } catch (error) {
       if (await offlineFailure(error)) showToast(NO_INTERNET, { description: OFFLINE_DELETE });
       else showToast("Não foi possível excluir", { tone: "error", description: errorMessage(error) });
-    } finally {
-      setRemoving(null);
-      setWriting(false);
     }
   }
 
@@ -141,7 +139,7 @@ export default function SkillsScreen() {
         {skills.length ? (
           skills.map((skill, index) => {
             const key = foldName(skill.name);
-            const leaving = removing === key;
+            const leaving = removing.includes(key);
             return (
               <Animated.View
                 key={key}

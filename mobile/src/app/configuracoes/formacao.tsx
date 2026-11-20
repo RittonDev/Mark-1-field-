@@ -1,6 +1,9 @@
 // Formação (Configurações › Atendimento): cursos, certificações e escolaridade, com o nível, a instituição e o período
 // (o fim vazio é "em andamento"). Incluir e editar numa folha; excluir com confirmação. A lista vem na ordem do servidor
-// (em andamento primeiro, depois as mais recentes). Uma gravação por vez, como em Aptidões.
+// (em andamento primeiro, depois as mais recentes). Uma gravação por vez, como em Aptidões: a trava vale também depois
+// de sair e voltar à tela (lib/technicalProfile.ts), e o corpo é montado quando a gravação sai da fila
+// (saveProfileWith), com a lista que a anterior devolveu; salvar a edição de uma formação que já saiu mostra o erro na
+// folha.
 
 import { useState } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
@@ -18,9 +21,9 @@ import { EDUCATION_LEVEL, educationPeriodText, TECH_PROFILE_LIMITS } from "../..
 import { confirmAction } from "../../lib/dialogs";
 import { haptic } from "../../lib/haptics";
 import { noNetwork, offlineFailure } from "../../lib/net";
-import { getProfile, hasTechnicalProfile, saveProfile } from "../../lib/profile";
-import { OFFLINE_SAVE, UNAVAILABLE, useTechProfileScreen } from "../../lib/technicalProfile";
-import { educationBody, educationSpoken, type EducationEntry } from "../../lib/techProfileForm";
+import { saveProfileWith } from "../../lib/profile";
+import { OFFLINE_SAVE, trackListWrite, UNAVAILABLE, useListWrite, useTechProfileScreen } from "../../lib/technicalProfile";
+import { EDUCATION_MSG, educationSpoken, educationWith, educationWithout, type EducationEntry } from "../../lib/techProfileForm";
 import { showToast } from "../../lib/toast";
 import type { EducationItem } from "../../lib/types";
 import { RADIUS, useStyles, useTheme, type Palette } from "../../theme/theme";
@@ -36,22 +39,15 @@ const NO_INTERNET = "Sem internet";
 const OFFLINE_DELETE = "Conecte o aparelho para excluir.";
 const NO_EDUCATION: EducationItem[] = [];
 
-/** A lista gravada agora: a do cadastro na memória (ou a da tela, se ele saiu da memória no meio). */
-function currentEducation(shown: EducationItem[]): EducationItem[] {
-  const profile = getProfile();
-  return hasTechnicalProfile(profile) ? (profile.education ?? NO_EDUCATION) : shown;
-}
-
 export default function EducationScreen() {
   const c = useTheme();
   const styles = useStyles(makeStyles);
   const motion = useListMotion();
   const { gate, stale, retry, refresh, refreshing } = useTechProfileScreen();
   const [sheet, setSheet] = useState<SheetState | null>(null);
-  // Uma gravação da lista no ar: incluir, editar e excluir ficam desligados.
-  const [writing, setWriting] = useState(false);
-  // O curso que está saindo (pelo id).
-  const [removing, setRemoving] = useState<string | null>(null);
+  // Uma gravação da lista no ar (`writing`): incluir, editar e excluir ficam desligados. `removing`: os cursos que estão
+  // saindo, pelo id.
+  const { busy: writing, removing } = useListWrite("education");
 
   if (gate.status === "unavailable") {
     return (
@@ -80,18 +76,19 @@ export default function EducationScreen() {
 
   async function submit(entry: EducationEntry): Promise<string | null> {
     if (await noNetwork()) return OFFLINE_SAVE;
-    const list = currentEducation(items);
-    const next: EducationEntry[] = entry.id ? list.map((item) => (item.id === entry.id ? entry : item)) : [...list, entry];
-    setWriting(true);
     try {
-      await saveProfile({ education: educationBody(next) });
+      await trackListWrite("education", null, () =>
+        saveProfileWith((profile) => {
+          const next = educationWith(profile.education ?? NO_EDUCATION, entry);
+          if (!next) throw new Error(EDUCATION_MSG.gone);
+          return { education: next };
+        }),
+      );
       haptic.success();
       closeSheet();
       return null;
     } catch (error) {
       return (await offlineFailure(error)) ? OFFLINE_SAVE : errorMessage(error);
-    } finally {
-      setWriting(false);
     }
   }
 
@@ -103,17 +100,14 @@ export default function EducationScreen() {
       showToast(NO_INTERNET, { description: OFFLINE_DELETE });
       return;
     }
-    setWriting(true);
-    setRemoving(item.id);
     try {
-      await saveProfile({ education: educationBody(currentEducation(items).filter((other) => other.id !== item.id)) });
+      await trackListWrite("education", item.id, () =>
+        saveProfileWith((profile) => ({ education: educationWithout(profile.education ?? NO_EDUCATION, item.id) })),
+      );
       haptic.success();
     } catch (error) {
       if (await offlineFailure(error)) showToast(NO_INTERNET, { description: OFFLINE_DELETE });
       else showToast("Não foi possível excluir", { tone: "error", description: errorMessage(error) });
-    } finally {
-      setRemoving(null);
-      setWriting(false);
     }
   }
 
@@ -128,7 +122,7 @@ export default function EducationScreen() {
         {stale ? <InfoBox message="Não foi possível atualizar agora. Os dados podem estar desatualizados." /> : null}
         {items.length ? (
           items.map((item, index) => {
-            const leaving = removing === item.id;
+            const leaving = removing.includes(item.id);
             return (
               <Animated.View
                 key={item.id}

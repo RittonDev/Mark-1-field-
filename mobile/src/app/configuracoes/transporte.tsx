@@ -1,5 +1,8 @@
 // Transporte (Configurações › Atendimento): os meios com que o técnico chega ao atendimento e se tem CNH, que a central
-// vê na ficha. Salva ao tocar, sem botão (os meios e a CNH vão juntos); sem rede, avisa e não muda.
+// vê na ficha. Salva ao tocar, sem botão (os meios e a CNH vão juntos); sem rede, avisa e não muda. "Nenhum", no fim
+// dos meios, fica marcado quando o transporte foi informado sem meio: tocar nele grava sem meio e mantém a CNH, e tocar
+// num meio o desmarca. Nunca informado (TRANSPORT_UNSET), a tela começa sem nada marcado e qualquer toque grava, mesmo
+// voltando a tudo desmarcado antes do envio ("Nenhum · sem CNH").
 
 import { Stack } from "expo-router";
 import { RefreshControl, ScrollView, StyleSheet, View } from "react-native";
@@ -13,13 +16,13 @@ import { EmptyState, InfoBox } from "../../components/ui";
 import { createAutoSave, useAutoSave } from "../../lib/autoSave";
 import { TRANSPORT_MODE, TRANSPORT_MODE_ORDER } from "../../lib/constants";
 import { UNAVAILABLE, useTechProfileScreen } from "../../lib/technicalProfile";
-import { NO_TRANSPORT, sameTransport, toggleMode, transportBody } from "../../lib/techProfileForm";
+import { markNone, noneMarked, sameSavedTransport, toggleMode, TRANSPORT_UNSET, transportBody } from "../../lib/techProfileForm";
 import type { TransportInfo } from "../../lib/types";
 import { useStyles, useTheme, type Palette } from "../../theme/theme";
 
 const transportSaver = createAutoSave<TransportInfo>({
-  select: (profile) => profile.transport ?? NO_TRANSPORT,
-  equals: sameTransport,
+  select: (profile) => profile.transport ?? TRANSPORT_UNSET,
+  equals: sameSavedTransport,
   body: (transport) => ({ transport: transportBody(transport) }),
   offlineHint: "Conecte o aparelho para mudar o transporte.",
   errorTitle: "Não foi possível salvar o transporte",
@@ -30,8 +33,9 @@ export default function TransportScreen() {
   const styles = useStyles(makeStyles);
   const insets = useSafeAreaInsets();
   const { gate, stale, retry, refresh, refreshing } = useTechProfileScreen();
-  const saved = gate.status === "ready" ? (gate.profile.transport ?? NO_TRANSPORT) : NO_TRANSPORT;
+  const saved = gate.status === "ready" ? (gate.profile.transport ?? TRANSPORT_UNSET) : TRANSPORT_UNSET;
   const { value, change, status } = useAutoSave(transportSaver, saved);
+  const none = noneMarked(value);
 
   const header = <Stack.Screen options={{ headerRight: () => <SavingStatus status={status} /> }} />;
 
@@ -76,6 +80,14 @@ export default function TransportScreen() {
               onPress={() => change((current) => toggleMode(current, mode))}
             />
           ))}
+          {/* Marcado, o toque não muda nada: sai dele marcando um meio. */}
+          <CheckCard
+            label="Nenhum"
+            checked={none}
+            onPress={() => {
+              if (!none) change(markNone);
+            }}
+          />
         </View>
         <View style={styles.section}>
           <Text style={styles.title} accessibilityRole="header">
