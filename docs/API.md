@@ -1064,6 +1064,8 @@ mês de conclusão com a situação, calculada aqui para o app não repetir a re
 - Custo: 3 consultas, todas pelo técnico (os valores agrupados por mês, as notas da janela e os reembolsos). Sem
   tempo real e sem histórico: o app relê ao abrir a aba, ao puxar, depois de enviar ou apagar uma nota e depois de
   uma sincronização (`docs/MOBILE_SYNC.md`).
+- A API sobe antes do app: com a API velha (404), a aba mostra "Não foi possível carregar o faturamento." e "Tentar de
+  novo"; o mês (`GET /me/earnings?month=`) continua funcionando.
 
 ## Orçamentos: cobrança, aberturas e preço do cliente (2026-11-17)
 
@@ -1299,9 +1301,9 @@ técnico) e, só no aceite, a leitura e o valor pago do técnico nesta OS.
   tom neutro, "Esta oferta já tinha sido encerrada: <motivo>" e, na `replaced`, que a oferta nova para o técnico
   continua como estava. A aceita mostra "Aceitou às 14:50 · escopo lido às 14:45" (sem a leitura, só o aceite).
 - Aba Geral da OS com técnico (toda a gestão, sem valor, pelo `TicketDetail.accepted_offer`): embaixo do valor do
-  técnico (`PayoutLine`), a linha `AcceptedOfferLine` "Aceitou a oferta pelo app às 14:50" com o chip "Escopo lido às
-  14:45" (noutro dia: "ontem às 18:10", "em 17/11 às 18:10"). Sem oferta aceita, a linha não aparece. Precisa do
-  `accepted_offer` porque, com técnico, a Geral troca o bloco "Ofertas" pelo valor do técnico.
+  técnico (`PayoutLine`, para quem tem Pagamentos), a linha `AcceptedOfferLine` "Aceitou a oferta pelo app às 14:50"
+  com o chip "Escopo lido às 14:45" (noutro dia: "ontem às 18:10", "em 17/11 às 18:10"). Sem oferta aceita, a linha
+  não aparece. Precisa do `accepted_offer` porque, com técnico, a Geral troca o bloco "Ofertas" pelo valor do técnico.
 - Diálogo "Ofertar a OS com preço" (também no resumo da OS recém-criada): de 1 a 10 técnicos (`GET
   /technicians/suggest` com `exclude_ticket_id` e `limit=10`, mais a busca: `GET /technicians` com a tela Técnicos,
   senão os técnicos de `GET /users/assignable`; sem acesso ao app e já na OS aparecem travados; o sugerido fora da
@@ -1774,8 +1776,8 @@ quando o histórico tem mudança, e uma comparação diferente devolveria 200 se
   (`uq_tool_catalog_name`) pega o nome exato de dois cadastros ao mesmo tempo, com a mesma mensagem.
 - Sem excluir e sem ordem manual. Renomear muda para todos (o técnico guarda o id). Desativar não mexe nos técnicos: a
   ferramenta some do app, da ficha e das listas da central e volta para quem tinha marcado quando reativada.
-- Sem evento em tempo real: outra aba da central vê a mudança na próxima busca (até 1 min), e o app relê o catálogo
-  ao abrir o Ferramental (guarda na memória por 10 min).
+- Sem evento em tempo real: outra aba da central vê a mudança na próxima busca (até 1 min), e o app busca o catálogo
+  ao abrir o Ferramental e guarda na memória por 10 min (puxar a tela busca de novo).
 - Ferramenta que sumiu do banco (a API não exclui; só apagando direto no banco) fica guardada nos técnicos como as
   desativadas, e o histórico do cadastro a mostra como "Ferramenta removida".
 - Na web, Configurações › seção **Técnicos** › cartão **Ferramental**: a lista com Ferramenta, Técnicos ("{n}

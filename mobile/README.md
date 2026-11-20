@@ -549,6 +549,229 @@ Contrato em [docs/API.md](../docs/API.md), "Notas fiscais dos técnicos". Códig
   de dezembro de 2026"), para o técnico achar a nota no mês certo. A recusa é final: o técnico apaga a recusada e envia
   outra. A conversa sobre a nota continua no grupo de WhatsApp.
 
+## Perfil
+
+A aba **Perfil** ([src/components/ProfileView.tsx](src/components/ProfileView.tsx)): quem é o técnico, os números dele
+e o resto da conta. Só os números do próprio técnico.
+
+- **No topo**: a foto (64), o nome e "Técnico parceiro · {grupo}" (sem grupo, "Técnico parceiro"). Embaixo, o cartão de
+  duas metades ([src/components/HeroPair.tsx](src/components/HeroPair.tsx)), cada uma um botão: à esquerda, o **Total de
+  atendimentos** desde sempre ("1.284", de `GET /me/stats`), que abre Estatísticas; à direita, a patente: a medalha (64)
+  com o nome da faixa embaixo, em maiúsculas ("OURO"), e o ponto âmbar em risco, que abre Meu elo.
+- **Sem nada guardado**: esqueleto enquanto a busca pode correr; sem internet ou com a busca falhada, "—" no total e a
+  medalha cinza com "SEM ELO" (todo técnico tem faixa no servidor: "SEM ELO" só aparece sem o elo no aparelho).
+- **Lista** ([src/components/MenuRow.tsx](src/components/MenuRow.tsx), `MenuGroup` e `MenuRow`): Configurações,
+  Histórico de atendimentos, Estatísticas, Meu elo ("Ouro", ou "Em risco" em âmbar), Sincronização, Aviso de
+  privacidade, Termo de uso da localização ("Aceito" ou "Não aceito") e **Sair**, em vermelho. Embaixo, "Versão x.y.z".
+  A linha Sincronização (a mesma de Configurações, [src/lib/syncSummary.ts](src/lib/syncSummary.ts)) mostra "1 ação
+  recusada" ou "N ações recusadas" em vermelho, a pílula neutra com os itens para enviar, "Sem internet" ou "Tudo
+  enviado".
+- **Sair** ([src/lib/logout.ts](src/lib/logout.ts), antes na Conta): "Sair da conta?"; com itens para enviar e
+  internet, **Enviar e sair** (se ainda sobrar, "Ainda há itens para enviar") ou **Sair mesmo assim**. Enquanto sai, a
+  linha mostra o indicador e o texto embaixo diz o que acontece ("Enviando os itens antes de sair…", "Encerrando a
+  jornada e saindo…", "Saindo…"). Os itens não enviados ficam no aparelho para o mesmo técnico; se outro técnico
+  entrar, são apagados.
+- **Dados**: no foco da aba e quando a internet volta, o total é buscado se nada está guardado ou se o guardado passou
+  de 10 min, e o elo, se nada está guardado (depois, a rodada do sync cuida dele). "Puxar para atualizar" busca os dois
+  (as estatísticas e a rodada manual, que traz o elo), com teto de 25 s.
+
+## Patente (a medalha do elo)
+
+O elo do técnico aparece como uma medalha, a patente ([src/components/LevelBadge.tsx](src/components/LevelBadge.tsx),
+`LevelMedal`). Na tela, sempre "Elo" e o nome da faixa ("Ouro"); "patente" é só o nome no código.
+
+- **Desenho** (nosso, viewBox 48×48): hexágono de ponta para cima, com aro, face e o emblema que cresce com a faixa:
+  **Bronze**, 1 divisa; **Prata**, 2; **Ouro**, 3; **Diamante**, a pedra lapidada. Sem elo, um traço numa medalha cinza
+  apagada. A forma e o emblema diferenciam a faixa sem depender da cor, e o nome vai sempre escrito junto: a medalha é
+  decorativa para o leitor de tela, que diz "Elo Ouro".
+- **Detalhe pelo tamanho**: abaixo de 28 pt (`LEVEL_MEDAL_FLAT_BELOW`), lisa (aro cheio, face e emblema); de 28 para
+  cima, com o relevo do metal (degradê no aro e na face, brilho e sombra no aro, a linha da face e as facetas da pedra).
+  `LEVEL_MEDAL_GRADIENT = false` troca os degradês por cores chapadas e mantém o resto. Nada animado.
+- **Onde aparece** (`LEVEL_MEDAL_SIZE`): o chip do topo da tela inicial (18, nas abas Hoje, Agenda e Faturamento), a
+  metade direita do cartão do Perfil (64), a tela Meu elo (96), as faixas do "Como funciona" (24) e a comemoração da
+  subida de faixa (72). No Perfil e no Meu elo, o nome da faixa vai embaixo, em maiúsculas.
+- **Paths e cores**: `LEVEL_MEDAL_*` em [src/lib/constants.ts](src/lib/constants.ts), cópia da web: a central desenha a
+  mesma medalha. As cores são por faixa e por tema (claro e escuro), com contraste medido contra os fundos do app.
+
+## Configurações
+
+**Perfil › Configurações** ([src/app/configuracoes/index.tsx](src/app/configuracoes/index.tsx)): o cadastro do técnico
+em quatro grupos, cada linha com o resumo à direita. Contratos em [docs/API.md](../docs/API.md), "Meu cadastro do
+técnico" e "Perfil técnico". O antigo Meu cadastro foi dividido nas telas abaixo; `/meu-cadastro` só redireciona para
+`/configuracoes` (links antigos).
+
+- **Perfil**: Foto do perfil (a foto à direita; enviando ou removendo, o andamento), Dados pessoais (o nome), Contato
+  ("(11) 98888-7777", ou "Sem celular" em âmbar), Endereço ("Cidade Exemplo/SP" ou "Não informado") e Senha (abre
+  "Trocar senha").
+- **Pagamento**: Chave PIX ("CPF •••.456.789-••"; sem chave, "Não cadastrada" em âmbar). O leitor de tela fala só o
+  tipo.
+- **Atendimento** (o perfil técnico): Disponibilidade ("Seg a sex · manhã e tarde", "Todos os dias · todos os turnos",
+  "6 dias · turnos variados"; nada, "Não informada"), Transporte ("Carro, Moto · com CNH", ou "Não informado"),
+  Aptidões, Formação e Ferramental ("3 aptidões", "1 formação", "Nenhuma"). Com a API antiga, "Indisponível".
+- **App**: Aparência (folha com Sistema, "Acompanha o modo do celular", Claro e Escuro), Notificações ("Ligadas",
+  "Desligadas", "Bloqueadas" em âmbar ou "Indisponíveis") e Sincronização (o mesmo resumo do Perfil).
+- A tela abre sempre, até sem internet: lendo, os resumos são esqueletos; sem rede, "Sem internet: para mudar o
+  cadastro, conecte o aparelho."; com erro, "Não foi possível carregar seu cadastro." com **Tentar de novo**. Puxar para
+  atualizar relê o cadastro e o resumo das notificações.
+- Grupo, cargo, acesso ao app, serviços e jornada ficam com a central; CPF, CNPJ/MEI e nascimento continuam na ficha da
+  homologação.
+
+### Cadastro: foto, dados pessoais, contato, endereço e chave PIX
+
+Dados pessoais, Contato, Endereço e Chave PIX ([src/lib/useProfileForm.ts](src/lib/useProfileForm.ts), a moldura
+`ProfileFormScreen` e as regras puras de [src/lib/profileForm.ts](src/lib/profileForm.ts)): cada tela salva só a sua
+parte em `PATCH /me/profile`, pelo **Salvar** do rodapé fixo. O app confere antes, com as regras e as mensagens do
+servidor (que confere de novo); os erros aparecem depois do primeiro "Salvar", e o primeiro vai também para o rodapé.
+Sair com alteração não salva pergunta "Descartar as alterações?". Salvou: avisa e volta.
+
+- **Dados pessoais**: o nome completo. Quando muda, segue a regra do servidor: só letras (com acento), espaço,
+  apóstrofo, hífen e ponto, sem "www", "http" nem endereço colado ("site.com"); a mensagem é "Use só letras no nome.".
+  Os nomes antigos ficam como estão.
+- **Contato**: o celular (WhatsApp), sempre com DDD, e o e-mail de login, conferido só quando muda. Trocar o e-mail
+  pede a senha e não tira ninguém do app (a senha é a mesma): o login passa a ser o novo, já preenchido na tela de login
+  (`session.updateUser` grava também o `mc_last_email`), e o aviso diz "Use o novo e-mail para entrar no app.". E-mail
+  da empresa é recusado ("Use um e-mail que não seja da empresa"), e a troca de e-mail tem limite de 10 por hora (429
+  "Muitas tentativas. Tente mais tarde.").
+- **Endereço**: CEP (8 números), endereço, bairro, cidade e UF (obrigatórias só aqui) e a região que atende.
+- **Chave PIX**: fichas CPF, CNPJ, E-mail, Celular e Chave aleatória; a chave tem o teclado e a máscara do tipo
+  ("Colar" na chave aleatória) e, embaixo, a data da última troca; trocar o tipo limpa a chave; o titular começa com o
+  nome. "Remover chave PIX" só vale ao salvar (dá para desfazer). Celular do PIX: DDD sem zero e o número com o 9, como
+  no servidor. No fim, o link **Aviso de privacidade**.
+- **Senha atual** (folha "Confirme com sua senha"): mudar o e-mail e cadastrar, trocar ou remover a chave PIX (conta
+  invadida não desvia o pagamento). A senha não fica guardada. Senha errada e o bloqueio depois de 5 erros em 15 min (o
+  mesmo contador de "Trocar senha") aparecem na folha. Com a senha provisória, o app só abre "Trocar senha" (o servidor
+  também recusa e-mail e PIX: "Crie sua senha no app antes de mudar o e-mail ou a chave PIX").
+- **A central** é avisada na hora quando mudam PIX, e-mail, nome ou celular; toda mudança, também a do perfil técnico,
+  fica no histórico do cadastro, que a central vê na ficha do técnico.
+- **Foto do perfil** (`/configuracoes/foto`, [src/lib/avatarFlow.ts](src/lib/avatarFlow.ts)): **Tirar foto** (câmera
+  frontal), **Escolher da galeria** ou **Remover foto** (com confirmação), um toque cada. O `photoCapture` (alvo
+  `avatar`) recorta quadrado na hora; o app reduz para 512 px em JPEG (compressão 0,85) com o `expo-image-manipulator` e
+  envia em `POST /me/profile/photo`. "Remover foto" tira também a que veio do Field Control; no lugar ficam as
+  iniciais. O andamento (enviando ou removendo) é o mesmo na tela e na linha de Configurações, e o envio continua se a
+  tela sair. No Android, a foto tirada antes de o sistema fechar o app com a câmera aberta é enviada quando
+  Configurações ou a Foto do perfil abrem (até 30 min).
+- **Onde a foto aparece**: no topo da tela inicial, no Perfil, em Configurações e na Foto do perfil
+  ([src/components/Avatar.tsx](src/components/Avatar.tsx)). Sem foto, sem o cadastro carregado ou com o link vencido
+  (12 h), aparecem as iniciais.
+- O `expo-image-manipulator` é nativo e já vem no Expo Go; um development build feito antes dele precisa ser refeito.
+
+### Perfil técnico: disponibilidade, transporte, aptidões, formação e ferramental
+
+O que a central vê na aba **Perfil técnico** da ficha do técnico e usa para escolher quem convidar (a disponibilidade é
+um sinal pequeno na sugestão de técnicos). Não pede senha. Cada parte vai inteira em `PATCH /me/profile`, e o servidor
+devolve a parte como gravou: turnos e meios na ordem, o "desde" de cada aptidão, o id de cada formação e as listas na
+ordem dele. A ficha aprovada na homologação já entra com a disponibilidade, o veículo, a CNH e as aptidões. As telas
+não têm texto de explicação no topo: só os vazios, os limites e os avisos de rede. Código: `src/app/configuracoes/`,
+[src/lib/technicalProfile.ts](src/lib/technicalProfile.ts) (o estado das telas e os catálogos),
+[src/lib/autoSave.ts](src/lib/autoSave.ts) e as regras puras de [src/lib/techProfileForm.ts](src/lib/techProfileForm.ts).
+
+- **Disponibilidade**: os 7 dias, cada um num cartão que abre os 4 turnos (Manhã 06h–12h, Tarde 12h–18h, Noite 18h–24h
+  e Madrugada 00h–06h) em fichas de duas colunas; todos começam fechados e mais de um pode ficar aberto. Não é a
+  jornada. Num dia útil com turno, quando outro dia útil está diferente, aparece **Copiar para os dias úteis** (pergunta
+  antes só quando muda um dia útil que já tinha turnos).
+- **Transporte**: os meios (Carro, Moto, Bicicleta, Transporte público, Carro de aplicativo, A pé) e **Tenho CNH**, que
+  vão juntos. Nunca informado, a tela começa sem nada marcado e nada é enviado antes do primeiro toque.
+- **Ferramental**: o catálogo que a central mantém (Configurações › Técnicos, na central), em ordem alfabética, com
+  caixa de marcar; com mais de 15 ferramentas, aparece a busca. Ferramenta desativada pela central some da lista e do
+  cadastro (fica guardada no servidor e volta se for reativada).
+- **Salvar ao tocar** (essas três): sem botão. O toque muda a tela na hora, e os toques de perto vão juntos num envio
+  só, 0,6 s depois do último (uma linha no histórico da central), com "Salvando…" e "Salvo" no cabeçalho (o TalkBack
+  fala; o VoiceOver não). Um envio por vez: o que mudar durante o envio vai logo depois, com o valor final. Sem rede,
+  vibra, avisa "Sem internet" e não muda nada; se o envio falhar, a tela volta ao que está gravado e mostra o erro. Sair
+  da tela com o envio agendado manda na hora (o pedido continua com a tela fechada); o Sair ou outro técnico descarta o
+  pendente em silêncio.
+- **Aptidões**: até 30, a mais nova primeiro, com o nível e o "desde" ("Avançado · desde 11/2026", o mês em que entrou
+  no perfil; quem guarda é o servidor). **Adicionar aptidão** abre a folha com o nome (texto livre ou uma das sugestões
+  da ficha da homologação: até 12, sem as que ele já tem) e o nível (Básico, Intermediário ou Avançado). Tocar numa
+  aptidão muda só o nível, que mantém o "desde" (para trocar o nome, exclui e inclui de novo); a lixeira exclui, com
+  confirmação.
+- **Formação**: até 20, as em andamento primeiro e depois as mais recentes, com o curso, o nível (Ensino médio, Técnico,
+  Graduação, Pós-graduação, Certificação ou Curso livre), a instituição e o período ("02/2022 a 12/2023", "desde 02/2024
+  (em andamento)"). **Adicionar formação** e o lápis abrem a folha; o início e o fim saem de uma folha de meses (de
+  01/1950 ao mês atual; o fim não vem antes do início), e **Em andamento** limpa o fim. A lixeira exclui, com
+  confirmação.
+- **Aptidões e Formação**: uma gravação por vez; enquanto uma está no ar, incluir, editar e excluir ficam desligados, e
+  a lista enviada sai sempre da que voltou do servidor. A folha mostra o erro do servidor no fim, não fecha enquanto
+  salva e pergunta antes de descartar o que foi digitado; sem rede, avisa e fica preenchida. No limite, "Limite de 30
+  aptidões. Exclua uma para incluir outra." (e o mesmo com 20 formações).
+- **Catálogos**: o ferramental de `GET /technician-tools` (o técnico recebe só as ativas) e as sugestões de aptidão de
+  `GET /public/onboarding/catalog`, só na memória: valem 10 min (abrir a tela depois disso relê), puxar a tela relê na
+  hora, e a troca de sessão apaga.
+- **Servidor antigo** (o cadastro vem sem o perfil técnico): as cinco telas mostram "Indisponível no momento" / "O
+  servidor ainda não tem esta parte do cadastro. Tente de novo mais tarde." e as linhas de Configurações,
+  "Indisponível". Com o perfil técnico, mas sem a rota do ferramental (404): "O servidor ainda não tem o ferramental.
+  Tente de novo mais tarde.".
+
+### Sem internet e o que fica no aparelho
+
+- **Tudo pede internet**: abrir as telas, salvar, marcar e trocar a foto. Nada entra na fila offline: a senha não fica
+  guardada e o aviso à central tem de sair na hora. Sem rede e sem o cadastro na memória, as telas dizem "Sem internet"
+  / "Conecte o aparelho para abrir e salvar seu cadastro."; com ele na memória, mostram os dados com "Sem internet:
+  conecte o aparelho para salvar.". Se a releitura falhar por erro do servidor: "Não foi possível atualizar agora. Os
+  dados podem estar desatualizados.".
+- **No aparelho**: nome, e-mail e celular no usuário da sessão (`mc_user`, SecureStore). Endereço, chave PIX, o perfil
+  técnico e os catálogos ficam só na memória ([src/lib/profile.ts](src/lib/profile.ts) e
+  [src/lib/technicalProfile.ts](src/lib/technicalProfile.ts)), nunca no SQLite, no kv ou no SecureStore, e somem ao
+  sair da conta. O cadastro é lido ao entrar (sem aviso se falhar), ao abrir cada tela de Configurações, ao puxar o
+  Faturamento e, na tela inicial e no Faturamento, quando falta ou passou de 6 h (o link da foto vale 12 h).
+- **Gravações em fila** ([src/lib/profile.ts](src/lib/profile.ts)): salvar, enviar e tirar a foto saem uma por vez (a
+  seguinte espera a anterior responder), e uma leitura durante a qual uma gravação saiu, voltou ou ficou no ar não
+  desfaz a tela (fica o que a gravação devolveu).
+
+## Histórico de atendimentos
+
+Tela `src/app/historico.tsx` (Perfil › Histórico de atendimentos): as OS concluídas em que o técnico atuou, como
+responsável ou junto, também as do sistema antigo (Field Control), das mais recentes para as mais antigas. Contrato em
+[docs/API.md](../docs/API.md), "Perfil do técnico: estatísticas e histórico". Substitui a aba "Concluídas", que só
+mostrava os últimos 7 dias guardados no aparelho.
+
+- **Lista**: no topo, o total ("1.284 atendimentos", o mesmo do Perfil) e "como responsável ou junto"; depois, seções
+  por mês da conclusão ("Novembro de 2026", com o total do mês), com o cabeçalho preso no alto ao rolar. Cada OS mostra
+  o código, a data, o serviço e "0123 · Loja Exemplo · Cidade Exemplo/SP", com os selos **Junto** e **Sistema antigo**
+  quando é o caso. Só o recorte de campo: nada de cliente, endereço, contato ou valores.
+- **Tocar** abre a OS: na hora, se está no aparelho; senão, com internet, a tela da OS busca na central; sem internet,
+  "Sem internet" / "Esta OS não está no aparelho. Ela abre quando a conexão voltar.". Dois toques rápidos não abrem
+  duas vezes.
+- **Páginas** ([src/lib/history.ts](src/lib/history.ts)): `GET /me/history?limit=30` e, ao chegar perto do fim da
+  lista, as seguintes pelo `cursor` da anterior, juntas sem repetir ([src/lib/historySections.ts](src/lib/historySections.ts),
+  puro, com sonda). No rodapé: "Carregando mais…", "Não deu para carregar mais." com **Tentar de novo**, "Conecte-se à
+  internet para ver os mais antigos." (a busca segue sozinha quando a conexão volta) ou "Fim do histórico".
+- **Guardado**: só a primeira página, no kv `my_history`, com a hora e o técnico. Ao abrir, a tela mostra a guardada e
+  busca de novo se nada está guardado ou se a guardada tem 2 min ou mais; puxar para atualizar busca na hora (uma página
+  pedida antes não entra na lista nova). Sem internet: "Sem internet · mostrando os N mais recentes, de 19/11 às 10:00"
+  (ou "dados de …", quando a lista já está toda); com erro, "Não deu para atualizar · dados de …". Sem nada guardado:
+  "Sem internet" / "O histórico aparece quando a conexão voltar." ou o erro com **Tentar de novo**. Vazio: "Nenhum
+  atendimento ainda". Servidor sem a rota (404): "O servidor ainda não tem o histórico. Tente de novo mais tarde.".
+
+## Estatísticas
+
+Tela `src/app/estatisticas.tsx` (Perfil › Estatísticas, o total do cartão do Perfil e "Ver mês a mês em Estatísticas"
+do Meu elo). Contrato em [docs/API.md](../docs/API.md), "Perfil do técnico: estatísticas e histórico". Só os números
+do próprio técnico: sem meta, sem comparação e sem cor de status. As regras são as do elo.
+
+- **Topo**: **Total de atendimentos** desde sempre ("desde mar/2019", o primeiro mês) e **Chegada no horário** dos
+  últimos 12 meses (a mesma conta do Meu elo; sem dados suficientes, "—"). Embaixo, "Atualizado em 19/11 às 10:00".
+- **Últimos 12 meses** ("dez/25 a nov/26"): quatro gráficos de colunas, um por cartão
+  ([src/components/MonthBars.tsx](src/components/MonthBars.tsx)): **Atendimentos** (como responsável ou junto, pelo
+  mês da conclusão), **Chegadas fora do horário** (pelo mês da chegada, só nas OS com horário combinado), **Retornos**
+  (OS concluída e reaberta, pelo mês da reabertura) e **Visitas perdidas** (visita improdutiva por motivo do técnico,
+  pelo mês da visita). O mês atual conta até hoje. Meses só do sistema antigo ganham uma faixa cinza "Sistema antigo":
+  contam nos atendimentos e ficam sem barra nos outros três (sem medição), com a legenda acima dos gráficos.
+- **Ler um mês**: tocar numa coluna mostra o número dela na linha de leitura acima do gráfico (sem mês escolhido, o
+  total dos 12 meses); o leitor de tela trata o gráfico como ajustável (deslizar para cima ou para baixo passa os
+  meses). O gráfico não tem texto dentro do SVG: os rótulos são o `Text` do app (Manrope e fonte ampliada). As contas
+  ficam em [src/lib/monthBars.ts](src/lib/monthBars.ts), puro, com sonda.
+- **Ver mês a mês**: os 12 meses em texto, do atual para o mais antigo (o equivalente completo dos gráficos), com "X
+  como responsável, Y junto". No fim, "Os números seguem as regras do elo.", o link **Como funciona o elo** e "Dúvida?
+  Fale com a central no grupo.".
+- **Dados** ([src/lib/stats.ts](src/lib/stats.ts)): `GET /me/stats`, guardado no kv `my_stats` com a hora e o técnico
+  (o Perfil lê o mesmo). A tela busca ao abrir e ao voltar a ela, se nada está guardado ou o guardado tem 2 min ou mais,
+  e ao puxar para atualizar; pedidos ao mesmo tempo dividem a mesma busca. Só leitura, fora da rodada do sync e da fila.
+- **Sem internet ou erro**: com o guardado, os números aparecem com "Sem internet · dados de …" ou "Não deu para
+  atualizar · dados de …"; sem nada guardado, "Sem internet: as estatísticas aparecem quando a conexão voltar." (ou o
+  erro) com **Tentar de novo**. Servidor sem a rota (404): "O servidor ainda não tem as estatísticas. Tente de novo mais
+  tarde.".
+
 ## Meu elo
 
 O elo do técnico (Bronze, Prata, Ouro ou Diamante) sai dos atendimentos dos últimos 12 meses: quantos (como
@@ -556,25 +779,29 @@ responsável ou junto, também os do Field Control) e como (chegada no horário 
 visita perdida por motivo do técnico). Regras, faixas e textos vêm prontos do servidor em `GET /me/level`
 ([docs/API.md](../docs/API.md), "Elo dos técnicos"): o app não repete números. Código:
 [src/lib/level.ts](src/lib/level.ts) (guardado, leitura nas telas e comemoração), `refreshLevel`/`refreshLevelNow` em
-[src/lib/sync.ts](src/lib/sync.ts), o brasão em [src/components/LevelBadge.tsx](src/components/LevelBadge.tsx) e a
-tela `src/app/elo.tsx`.
+[src/lib/sync.ts](src/lib/sync.ts), a medalha em [src/components/LevelBadge.tsx](src/components/LevelBadge.tsx) (seção
+Patente) e a tela `src/app/elo.tsx`.
 
-- **Onde aparece**: o chip com o brasão no topo do Hoje, ao lado da foto (some sem elo guardado; ponto âmbar em
-  risco; o leitor de tela diz "Elo Ouro. Abre Meu elo"), a linha "Elo" no cartão do técnico na Conta ("Ouro" ou "Ouro
-  · em risco"; antes da primeira busca, "Ver meu elo") e a tela **Meu elo**: o brasão, "Elo Ouro", desde quando e a
-  hora da atualização; em risco, a caixa "Elo Ouro em risco" com o texto do servidor; o que falta para a próxima faixa
-  ("Para chegar ao Diamante", com barra nos atendimentos) e, em risco ou no Diamante, o que a faixa atual pede ("Para
-  continuar no Ouro"); os números dos últimos 12 meses; o que pesou (as 30 mais recentes; tocar abre a OS se ela está
-  no aparelho) e "Como funciona" (as quatro faixas e as regras, com o link **Aviso de privacidade** no fim). Dúvida
-  sobre o elo é com a central, no grupo de WhatsApp.
+- **Onde aparece**: o chip com a medalha no topo da tela inicial, ao lado da foto (nas abas Hoje, Agenda e
+  Faturamento; some sem elo guardado; ponto âmbar em risco; o leitor de tela diz "Elo Ouro. Abre Meu elo"); a metade
+  direita do cartão do Perfil (a medalha com o nome em maiúsculas, ou "SEM ELO"); a linha **Meu elo** do Perfil
+  ("Ouro", ou "Em risco" em âmbar); e a tela **Meu elo**: a medalha grande com o nome da faixa em maiúsculas ("OURO"; o
+  leitor de tela diz "Elo Ouro"), desde quando e a hora da atualização; em risco, a caixa "Elo Ouro em risco" com o
+  texto do servidor; o que falta para a próxima faixa ("Para chegar ao Diamante", com barra nos atendimentos) e, em
+  risco ou no Diamante, o que a faixa atual pede ("Para continuar no Ouro"); os números dos últimos 12 meses, com
+  **Ver mês a mês em Estatísticas**; o que pesou (as 30 mais recentes; tocar abre a OS: na hora, se está no aparelho;
+  senão, com internet, a tela da OS busca na central; sem internet, avisa) e "Como funciona" (as quatro faixas com a
+  medalha e as regras, com o link **Aviso de privacidade** no fim). Dúvida sobre o elo é com a central, no grupo de
+  WhatsApp.
 - **Dados**: a rodada do sync busca `GET /me/level` a cada 30 min e no "puxar para atualizar", só com o app na tela
-  (fora dela não gasta bateria e dados com isso), e a tela Meu elo busca ao abrir (se o guardado tem mais de 2 min) e
-  ao puxar para baixo. Fica no kv `my_level` com a hora e o técnico; offline (ou com erro), a tela mostra o último
-  guardado com "Sem internet · dados de 18/11 às 10:00". Só leitura, fora da fila de operações; sai do aparelho na
-  troca de técnico. As telas do elo releem a cada busca, o resto do app só quando o elo mudou.
-- **Subiu de faixa**: "Você chegou ao Ouro!" com "Veja em Meu elo o que conta para o próximo." (no Diamante, "É o elo
-  mais alto."), dentro do app. A primeira carga não comemora; a subida que chega com o app saindo da tela espera ele
-  voltar; não há push.
+  (fora dela não gasta bateria e dados com isso); a tela Meu elo busca ao abrir (se o guardado tem mais de 2 min) e ao
+  puxar para baixo; e a aba Perfil busca uma vez por foco enquanto nada está guardado. Fica no kv `my_level` com a hora
+  e o técnico; offline (ou com erro), a tela mostra o último guardado com "Sem internet · dados de 18/11 às 10:00". Só
+  leitura, fora da fila de operações; sai do aparelho na troca de técnico. As telas do elo releem a cada busca, o resto
+  do app só quando o elo mudou.
+- **Subiu de faixa**: a comemoração mostra a medalha da faixa nova no lugar do check, com "Você chegou ao Ouro!" e "Veja
+  em Meu elo o que conta para o próximo." (no Diamante, "É o elo mais alto."), dentro do app. A primeira carga não
+  comemora; a subida que chega com o app saindo da tela espera ele voltar; não há push.
 - **O que o técnico não vê**: outros técnicos, ranking, notas da central nem o que ela desconsiderou.
 
 ## Aviso de privacidade
