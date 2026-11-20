@@ -1,9 +1,10 @@
 // Gráfico de colunas de 12 meses das Estatísticas (um por cartão, uma série só, na cor viz1 dos dois temas). As contas
 // ficam em lib/monthBars.ts (puro, com sonda em Node). Meses só do sistema antigo ganham uma faixa cinza rotulada
 // "Sistema antigo"; nos gráficos de qualidade eles ficam sem barra ("sem medição"). Nada de texto dentro do SVG: os
-// rótulos são o Text do app (Manrope e fonte ampliada). Tocar num mês mostra o número dele na linha de leitura; o
-// leitor de tela trata o gráfico como um elemento ajustável, mês a mês, e a lista "Ver mês a mês" da tela é o
-// equivalente completo.
+// rótulos são o Text do app (Manrope e fonte ampliada); os nomes dos meses que aparecem vão cada um na sua caixa
+// (axisLabelBoxes), inteiros e sem encostar no vizinho. Tocar num mês mostra o número dele na linha de leitura (até 2
+// linhas, com a altura guardada); o leitor de tela trata o gráfico como um elemento ajustável, mês a mês, e a lista
+// "Ver mês a mês" da tela é o equivalente completo.
 
 import { useState } from "react";
 import { Pressable, StyleSheet, useWindowDimensions, View, type AccessibilityActionEvent } from "react-native";
@@ -11,7 +12,7 @@ import Svg, { Path, Rect } from "react-native-svg";
 import { competenceLabel, monthAbbr } from "../lib/constants";
 import { haptic } from "../lib/haptics";
 import {
-  axisLabelsShown,
+  axisLabelBoxes,
   axisTicks,
   barPath,
   barRects,
@@ -41,6 +42,8 @@ const LEGACY_LABEL_MIN = 64;
 const DIMMED = 0.35;
 /** Teto da fonte ampliada nos textos do eixo. */
 const AXIS_FONT_MAX = 1.3;
+/** Teto da fonte ampliada na linha de leitura: em 2 linhas, o mês tocado aparece inteiro (com o ano) até em 320 dp. */
+const READOUT_FONT_MAX = 1.3;
 
 export interface MonthBarsProps {
   title: string;
@@ -76,7 +79,8 @@ export function MonthBars({ title, subtitle, noun, months, value, quality }: Mon
   const base = band + PLOT_HEIGHT;
   const bars = barRects(values, gutter, plotWidth, band, PLOT_HEIGHT, ticks[2]);
   const runs = legacyRuns(legacy);
-  const labels = axisLabelsShown(months.length, slot, labelWidth);
+  // Sem a medida do rótulo (o primeiro desenho), nenhum nome: entram na volta seguinte, já nas caixas certas.
+  const axisBoxes = labelWidth > 0 ? axisLabelBoxes(months.length, slot, labelWidth) : [];
   const tickY = (tick: number) => base - (ticks[2] > 0 ? (tick / ticks[2]) * PLOT_HEIGHT : 0);
 
   const readout =
@@ -99,9 +103,13 @@ export function MonthBars({ title, subtitle, noun, months, value, quality }: Mon
     <Card>
       <SectionTitle accent>{title}</SectionTitle>
       <Text style={styles.subtitle}>{subtitle}</Text>
-      {/* O leitor de tela ouve o mesmo pelo valor do gráfico. */}
+      {/* O leitor de tela ouve o mesmo pelo valor do gráfico. A frase vai até 2 linhas (o mês tocado não some no
+          corte); duas linhas invisíveis guardam a altura, para o gráfico não pular ao tocar. */}
       <View style={styles.readoutRow} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-        <Text style={styles.readout} numberOfLines={1}>
+        <Text style={[styles.readout, styles.readoutStrong, styles.readoutHold]} maxFontSizeMultiplier={READOUT_FONT_MAX}>
+          {"0\n0"}
+        </Text>
+        <Text style={[styles.readout, styles.readoutText]} numberOfLines={2} maxFontSizeMultiplier={READOUT_FONT_MAX}>
           <Text style={styles.readoutStrong}>{readout.strong}</Text>
           {readout.rest}
         </Text>
@@ -169,26 +177,34 @@ export function MonthBars({ title, subtitle, noun, months, value, quality }: Mon
             </>
           ) : null}
         </View>
-        <View style={[styles.axis, { paddingLeft: gutter }]}>
-          {months.map((month, index) => (
-            <Text
-              key={month.month}
-              style={[styles.month, month.current && styles.monthCurrent]}
-              numberOfLines={1}
-              maxFontSizeMultiplier={AXIS_FONT_MAX}
-            >
-              {labels[index] ? monthAbbr(month.month) : ""}
-            </Text>
-          ))}
+        <View style={[styles.axis, { marginLeft: gutter }]}>
+          {/* A largura de um rótulo ("dez", no peso do mês atual), medida com a fonte do aparelho. Invisível, ele também
+              dá a altura da linha dos meses: os nomes ficam por cima, cada um na sua caixa. */}
+          <Text
+            style={[styles.month, styles.monthCurrent, styles.measure]}
+            maxFontSizeMultiplier={AXIS_FONT_MAX}
+            onLayout={(event) => setLabelWidth(event.nativeEvent.layout.width)}
+          >
+            dez
+          </Text>
+          {axisBoxes.map((box) => {
+            const month = months[box.index];
+            return (
+              <Text
+                key={month.month}
+                style={[
+                  styles.month,
+                  styles.monthLabel,
+                  month.current && styles.monthCurrent,
+                  { left: box.left, width: box.width, textAlign: box.align },
+                ]}
+                maxFontSizeMultiplier={AXIS_FONT_MAX}
+              >
+                {monthAbbr(month.month)}
+              </Text>
+            );
+          })}
         </View>
-        {/* A largura de um rótulo ("dez", no peso do mês atual), medida com a fonte do aparelho. */}
-        <Text
-          style={[styles.month, styles.monthCurrent, styles.measure]}
-          maxFontSizeMultiplier={AXIS_FONT_MAX}
-          onLayout={(event) => setLabelWidth(event.nativeEvent.layout.width)}
-        >
-          dez
-        </Text>
         {/* Um toque por mês, do tamanho da faixa pela altura toda (o leitor de tela usa o ajustável). */}
         <View
           style={[styles.touch, { left: gutter }]}
@@ -207,9 +223,11 @@ export function MonthBars({ title, subtitle, noun, months, value, quality }: Mon
 const makeStyles = (c: Palette) =>
   StyleSheet.create({
     subtitle: { fontSize: 13, lineHeight: 18, color: c.inkMuted, marginTop: -4 },
-    readoutRow: { minHeight: 20, justifyContent: "center", marginTop: 10 },
+    readoutRow: { marginTop: 10 },
     readout: { fontSize: 14, color: c.inkMuted, fontVariant: ["tabular-nums"] },
     readoutStrong: { fontWeight: "700", color: c.ink },
+    readoutHold: { opacity: 0 },
+    readoutText: { position: "absolute", top: 0, left: 0, right: 0 },
     chart: { marginTop: 10 },
     // Uma caixa de altura zero na linha: o rótulo fica centrado nela, qualquer que seja a fonte.
     tick: { position: "absolute", left: 0, height: 0, justifyContent: "center" },
@@ -223,10 +241,11 @@ const makeStyles = (c: Palette) =>
       color: c.inkMuted,
       textAlign: "center",
     },
-    axis: { flexDirection: "row", marginTop: AXIS_GAP },
-    month: { flex: 1, fontSize: 11, color: c.inkMuted, textAlign: "center" },
+    axis: { marginTop: AXIS_GAP },
+    month: { fontSize: 11, color: c.inkMuted },
+    monthLabel: { position: "absolute", top: 0 },
     monthCurrent: { fontWeight: "700", color: c.ink },
-    measure: { position: "absolute", left: 0, top: 0, flex: 0, opacity: 0 },
+    measure: { alignSelf: "flex-start", opacity: 0 },
     touch: { position: "absolute", top: 0, right: 0, bottom: 0, flexDirection: "row" },
     touchSlot: { flex: 1 },
   });
