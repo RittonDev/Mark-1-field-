@@ -1,7 +1,7 @@
-// Ganhos > "Notas fiscais de <mês>": as notas que o técnico enviou com competência no mês da tela, a situação na central
-// (aguardando conferência, conferida, recusada com o motivo) e o botão para enviar outra (/nota-fiscal). A lista fica no
-// aparelho para abrir sem internet. Tocar numa nota abre o arquivo ou apaga a nota (só a que a central ainda não
-// conferiu).
+// Faturamento > mês > "Notas fiscais de <mês>": as notas que o técnico enviou com competência no mês da tela, a situação
+// na central (aguardando conferência, conferida, recusada com o motivo) e o botão para enviar outra (/nota-fiscal). A
+// lista fica no aparelho para abrir sem internet. Tocar numa nota abre o arquivo ou apaga a nota (só a que a central
+// ainda não conferiu). Com os valores ocultos (o olho do Faturamento), o valor da nota vira "R$ •••••".
 
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useRef, useState, type Dispatch, type SetStateAction } from "react";
@@ -12,6 +12,7 @@ import { confirmAction } from "../lib/dialogs";
 import { formatBRL } from "../lib/expenses";
 import { formatDateTime } from "../lib/format";
 import { haptic } from "../lib/haptics";
+import { HIDDEN_MONEY } from "../lib/hideValues";
 import {
   deleteInvoice,
   formatDayOf,
@@ -98,10 +99,20 @@ function metaText(invoice: MyInvoice): string {
 }
 
 /**
- * `month` é "AAAA-MM" (a competência), `monthName` o mês por extenso em minúsculas e `refreshKey` muda a cada "puxar
- * para atualizar" em Ganhos.
+ * `month` é "AAAA-MM" (a competência), `monthName` o mês por extenso em minúsculas, `refreshKey` muda a cada "puxar
+ * para atualizar" no mês do Faturamento e `hidden` oculta os valores.
  */
-export function InvoicesCard({ month, monthName, refreshKey = 0 }: { month: string; monthName: string; refreshKey?: number }) {
+export function InvoicesCard({
+  month,
+  monthName,
+  refreshKey = 0,
+  hidden = false,
+}: {
+  month: string;
+  monthName: string;
+  refreshKey?: number;
+  hidden?: boolean;
+}) {
   const c = useTheme();
   const styles = useStyles(makeStyles);
   const version = useInvoicesVersion();
@@ -116,8 +127,8 @@ export function InvoicesCard({ month, monthName, refreshKey = 0 }: { month: stri
   const deleting = useRef(false);
   const round = `${refreshKey}#${version}#${retry}`;
 
-  // Ao abrir Ganhos e ao voltar para a tela (da tela de envio, por exemplo), ao trocar de mês, ao puxar para
-  // atualizar, em "Tentar de novo" e quando uma nota entra ou sai.
+  // Ao abrir o mês e ao voltar para a tela (da tela de envio, por exemplo), ao puxar para atualizar, em "Tentar de
+  // novo" e quando uma nota entra ou sai.
   useFocusEffect(
     useCallback(() => {
       void loadInto(month, round, { setEntries, setErrors, setSettled });
@@ -239,7 +250,7 @@ export function InvoicesCard({ month, monthName, refreshKey = 0 }: { month: stri
                 key={invoice.id}
                 onPress={() => openMenu(invoice)}
                 accessibilityRole="button"
-                accessibilityLabel={`Nota nº ${invoice.number}, ${formatBRL(invoice.amount)}, ${status.label}`}
+                accessibilityLabel={`Nota nº ${invoice.number}, ${hidden ? "valor oculto" : formatBRL(invoice.amount)}, ${status.label}`}
                 accessibilityHint={invoice.status === "checked" ? "Abre o arquivo da nota" : "Abre o arquivo ou apaga a nota"}
                 style={({ pressed }) => [styles.line, i > 0 && styles.lineBorder, pressed && { backgroundColor: c.surface2 }]}
               >
@@ -247,7 +258,7 @@ export function InvoicesCard({ month, monthName, refreshKey = 0 }: { month: stri
                   <Text style={styles.number} numberOfLines={1}>
                     Nota nº {invoice.number}
                   </Text>
-                  <Text style={styles.amount}>{formatBRL(invoice.amount)}</Text>
+                  <Text style={styles.amount}>{hidden ? HIDDEN_MONEY : formatBRL(invoice.amount)}</Text>
                 </View>
                 <Badge label={status.label} color={status.color} />
                 <Text style={styles.meta}>{metaText(invoice)}</Text>

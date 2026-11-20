@@ -64,7 +64,7 @@ const SECTIONS: { title: string; items: string[] }[] = [
     title: "Seus controles",
     items: [
       "Você inicia e encerra a jornada quando quiser, pelo botão na tela inicial.",
-      "Fechar o app não encerra a jornada: encerre pelo botão. Sair da conta (Conta → Sair) também encerra.",
+      "Fechar o app não encerra a jornada: encerre pelo botão. Sair da conta (Perfil › Sair) também encerra.",
       "Jornada esquecida aberta: o app avisa depois de 10 horas e encerra sozinho depois de 14 horas.",
       "Nas etapas da OS, a posição só é registrada se o celular permitir a localização para o Maxx Field. Sem essa permissão, a etapa vai para a central sem a posição.",
     ],
@@ -72,7 +72,7 @@ const SECTIONS: { title: string; items: string[] }[] = [
   {
     title: "Seus direitos",
     items: [
-      "Você pode retirar este aceite quando quiser, em Conta → Rastreamento da jornada. A jornada aberta é encerrada na hora.",
+      "Você pode retirar este aceite quando quiser, em Perfil › Sincronização › Rastreamento da jornada. A jornada aberta é encerrada na hora.",
       "Para pedir acesso, correção ou exclusão dos seus dados de localização, fale com a central.",
       "Sem o aceite você usa o app normalmente, mas não consegue iniciar a jornada.",
     ],

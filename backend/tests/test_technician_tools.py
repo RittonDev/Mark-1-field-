@@ -203,7 +203,7 @@ async def _seed_profiles(engine: AsyncEngine, world: World) -> dict[str, Any]:
         application = TechnicianApplication(
             status=ApplicationStatus.APPROVED,
             full_name="Redes Exemplo",
-            email="redes@teste.com.br",
+            email="redes@exemplo.com",
             phone="(11) 98888-7777",
             document="12345678909",
             city="Cidade Exemplo",

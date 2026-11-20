@@ -1,8 +1,8 @@
-import { router } from "expo-router";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, View } from "react-native";
 import { Text } from "./Text";
 import { formatTime } from "../lib/format";
+import { openSync } from "../lib/navigation";
 import { useSyncStatus, type SyncStatus } from "../lib/sync";
 import { useStyles, useTheme, type Palette } from "../theme/theme";
 import { Icon } from "./Icon";
@@ -30,7 +30,7 @@ function describe(s: SyncStatus, slow: boolean): { text: string; tone: Tone } {
 /**
  * Estado da conexão e dos itens para enviar. Tudo certo: faixa discreta (fundo da tela, texto neutro,
  * ponto verde). Só ganha cor quando pede atenção (sem internet, servidor fora, falha). A altura não muda
- * entre os estados. Toque abre a tela Conta.
+ * entre os estados. Toque abre a tela Sincronização.
  */
 export function ConnectionBar() {
   const status = useSyncStatus();
@@ -55,9 +55,9 @@ export function ConnectionBar() {
   const { bg, fg, dot } = colors[tone];
   return (
     <Pressable
-      onPress={() => router.push("/conta")}
+      onPress={() => openSync()}
       accessibilityRole="button"
-      accessibilityLabel={`${text}. Abre a conta e a sincronização`}
+      accessibilityLabel={`${text}. Abre a sincronização`}
       style={({ pressed }) => [styles.bar, { backgroundColor: bg }, pressed && { opacity: 0.75 }]}
     >
       <View style={styles.mark}>

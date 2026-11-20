@@ -5,15 +5,17 @@ import { BackHandler, Pressable, RefreshControl, StyleSheet, View, type FlatList
 import Animated from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Avatar } from "../components/Avatar";
+import { BillingView } from "../components/billing/BillingView";
+import { HideValuesButton } from "../components/billing/HideValuesButton";
 import { BrandLogo, BrandRule } from "../components/Brand";
 import { Calendar } from "../components/Calendar";
 import { ConnectionBar } from "../components/ConnectionBar";
-import { EarningsView } from "../components/EarningsView";
 import { Icon } from "../components/Icon";
 import { LevelChip } from "../components/LevelBadge";
 import { PressableScale, useListMotion } from "../components/motion";
 import { OffersSection } from "../components/Offers";
 import { PrivacyUpdateCard } from "../components/PrivacyUpdateCard";
+import { ProfileView } from "../components/ProfileView";
 import { ShiftCard } from "../components/ShiftCard";
 import { TicketListSkeleton } from "../components/Skeleton";
 import { TabBar } from "../components/TabBar";
@@ -27,27 +29,31 @@ import { listNotices, listTickets } from "../lib/db";
 import { arrivalUrgency } from "../lib/field";
 import { addDays, formatDay, formatTime, startOfDay } from "../lib/format";
 import { buildLists, ticketsOnDay, waitingReason } from "../lib/lists";
+import { openSync } from "../lib/navigation";
 import { ensureProfile, useProfile } from "../lib/profile";
 import { useSession } from "../lib/session";
+import { refreshStatsNow } from "../lib/stats";
 import { requestSync, useSyncStatus } from "../lib/sync";
 import type { LocalTicket } from "../lib/syncTypes";
 import { showToast } from "../lib/toast";
 import { hasConsent, shouldPromptConsent } from "../lib/tracking";
 import { RADIUS, tint, useStyles, useTheme, type Palette } from "../theme/theme";
 
-type Tab = "today" | "agenda" | "done" | "earnings";
+type Tab = "today" | "agenda" | "earnings" | "profile";
 
 // Título das abas que não são a do dia (a de Hoje é a saudação). Uma aba nova sem título não compila.
 const TAB_TITLE: Record<Exclude<Tab, "today">, string> = {
   agenda: "Agenda",
-  done: "Concluídas",
-  earnings: "Meus ganhos",
+  earnings: "Faturamento",
+  profile: "Perfil",
 };
 
 /** A lista do dia volta no máximo 7 dias: antes disso o aparelho pode não ter as OS (pull inicial de 7 dias). */
 const MIN_DAY_OFFSET = -7;
-/** Tempo máximo esperando os ganhos no "puxar para atualizar". */
+/** Tempo máximo esperando o faturamento no "puxar para atualizar". */
 const EARNINGS_REFRESH_TIMEOUT_MS = 25_000;
+/** Tempo máximo esperando as estatísticas (o total do Perfil) no "puxar para atualizar". */
+const PROFILE_REFRESH_TIMEOUT_MS = 25_000;
 
 const countLabel = (n: number) => (n === 1 ? "1 OS" : `${n} OS`);
 
@@ -57,27 +63,17 @@ function greetingFor(date: Date) {
 }
 
 /**
- * Vazio de Hoje e de Concluídas. Fica num componente próprio porque depende do estado do sync: só ele
- * redesenha a cada mudança do sync, não a tela inteira.
+ * Vazio de Hoje. Fica num componente próprio porque depende do estado do sync: só ele redesenha a cada mudança do
+ * sync, não a tela inteira.
  */
-function HomeEmpty({
-  variant,
-  hasTickets,
-  next,
-  onAgenda,
-}: {
-  variant: "today" | "done";
-  hasTickets: boolean;
-  next?: LocalTicket;
-  onAgenda: () => void;
-}) {
+function HomeEmpty({ hasTickets, next, onAgenda }: { hasTickets: boolean; next?: LocalTicket; onAgenda: () => void }) {
   const sync = useSyncStatus();
   const offline = sync.network === "offline";
   const neverSynced = !hasTickets && !sync.lastSyncAt;
   const serverTrouble = !offline && (sync.server === "unreachable" || Boolean(sync.lastError));
   // Primeira carga: o banco local responde vazio na hora enquanto a rodada (silenciosa, sem a faixa
   // acesa) ainda baixa as OS. O esqueleto fica até ela terminar, dar erro ou faltar internet.
-  if (variant === "today" && neverSynced && !offline && !serverTrouble) return <TicketListSkeleton />;
+  if (neverSynced && !offline && !serverTrouble) return <TicketListSkeleton />;
   const syncText =
     neverSynced && offline
       ? "Sem internet. Conecte o aparelho para baixar suas OS."
@@ -86,9 +82,6 @@ function HomeEmpty({
         : neverSynced
           ? "Baixando suas OS…"
           : null;
-  if (variant === "done") {
-    return <EmptyState icon="checkCircle" title="Nada concluído nos últimos 7 dias" description={syncText ?? undefined} />;
-  }
   const site = next?.location ? [next.location.code, next.location.name].filter(Boolean).join(" · ") : null;
   const nextText =
     next?.scheduled_start
@@ -106,7 +99,7 @@ function HomeEmpty({
 
 export default function MyTicketsScreen() {
   const { user } = useSession();
-  // Foto do topo: vem do Meu cadastro (na memória); sem ele, as iniciais.
+  // Foto do topo: vem do cadastro (na memória); sem ele, as iniciais.
   const profile = useProfile();
   const c = useTheme();
   const styles = useStyles(makeStyles);
@@ -202,8 +195,8 @@ export default function MyTicketsScreen() {
 
   const timeline = tab === "today" && dayOffset === 0;
   const dayList = dayOffset === 0 ? (lists?.today ?? []) : (otherDay ?? []);
-  // Agenda e Ganhos não são listas de OS: a lista fica vazia e o conteúdo vem no cabeçalho.
-  const data = tab === "today" ? dayList : tab === "done" ? (lists?.done ?? []) : [];
+  // Agenda, Faturamento e Perfil não são listas de OS: a lista fica vazia e o conteúdo vem no cabeçalho.
+  const data = tab === "today" ? dayList : [];
   const count = data.length;
 
   const renderItem = useCallback(
@@ -213,12 +206,12 @@ export default function MyTicketsScreen() {
           <TimelineRow ticket={item} now={now} last={index === count - 1} userId={userId} showRoute={routeIds.has(item.id)} />
         ) : (
           <View style={styles.cardGap}>
-            <TicketCard ticket={item} now={now} userId={userId} variant={tab === "done" ? "done" : "default"} />
+            <TicketCard ticket={item} now={now} userId={userId} />
           </View>
         )}
       </Animated.View>
     ),
-    [intro, motion, styles, timeline, now, count, userId, routeIds, tab],
+    [intro, motion, styles, timeline, now, count, userId, routeIds],
   );
 
   const settleEarnings = useCallback(() => {
@@ -239,13 +232,20 @@ export default function MyTicketsScreen() {
         return;
       }
       if (tab === "earnings") {
-        // Ganhos vêm da central: o indicador espera a consulta terminar, não só o sync das OS.
+        // O faturamento vem da central: o indicador espera a consulta terminar, não só o sync das OS.
         const settled = new Promise<void>((resolve) => {
           earningsSettled.current = resolve;
           setTimeout(resolve, EARNINGS_REFRESH_TIMEOUT_MS);
         });
         setEarningsKey((k) => k + 1);
         await Promise.all([requestSync({ manual: true }), settled]);
+      } else if (tab === "profile") {
+        // O total do Perfil vem de /me/stats (fora da rodada); o elo vem na rodada manual.
+        const stats = Promise.race([
+          refreshStatsNow(),
+          new Promise<void>((resolve) => setTimeout(resolve, PROFILE_REFRESH_TIMEOUT_MS)),
+        ]);
+        await Promise.all([requestSync({ manual: true }), stats]);
       } else {
         await requestSync({ manual: true });
       }
@@ -255,7 +255,7 @@ export default function MyTicketsScreen() {
   }
 
   function changeTab(next: Tab) {
-    // Saiu de Ganhos no meio do "puxar para atualizar": o indicador não fica girando nas outras abas.
+    // Saiu do Faturamento no meio do "puxar para atualizar": o indicador não fica girando nas outras abas.
     settleEarnings();
     setTab(next);
     listRef.current?.scrollToOffset({ offset: 0, animated: false });
@@ -279,34 +279,44 @@ export default function MyTicketsScreen() {
     <View style={styles.header}>
       <View style={styles.topBar}>
         <BrandLogo size="sm" underline={false} />
-        <View style={styles.topActions}>
-          {/* O elo guardado (some sem ele): abre Meu elo. */}
-          <LevelChip />
-          <PressableScale
-            onPress={() => router.push("/conta")}
-            accessibilityRole="button"
-            accessibilityLabel="Conta e sincronização"
-            hitSlop={8}
-            style={styles.avatar}
-          >
-            <Avatar name={user.name} uri={profile?.avatar_url} size={36} />
-          </PressableScale>
-        </View>
+        {/* No Perfil, a foto e a patente já aparecem grandes: o chip e o avatar do topo saem. */}
+        {tab === "profile" ? null : (
+          <View style={styles.topActions}>
+            {/* O elo guardado (some sem ele): abre Meu elo. */}
+            <LevelChip />
+            <PressableScale
+              onPress={() => changeTab("profile")}
+              accessibilityRole="button"
+              accessibilityLabel="Perfil"
+              hitSlop={8}
+              style={styles.avatar}
+            >
+              <Avatar name={user.name} uri={profile?.avatar_url} size={36} />
+            </PressableScale>
+          </View>
+        )}
       </View>
       <View style={styles.titleBlock}>
-        <Text style={styles.pageTitle} accessibilityRole="header" numberOfLines={2}>
-          {tab === "today" ? `${greetingFor(today)}, ${firstName}` : TAB_TITLE[tab]}
-        </Text>
+        <View style={styles.titleRow}>
+          <Text style={styles.pageTitle} accessibilityRole="header" numberOfLines={2}>
+            {tab === "today" ? `${greetingFor(today)}, ${firstName}` : TAB_TITLE[tab]}
+          </Text>
+          {/* O olho do Faturamento: oculta ou mostra os valores neste aparelho. */}
+          {tab === "earnings" ? (
+            <View style={styles.titleAction}>
+              <HideValuesButton />
+            </View>
+          ) : null}
+        </View>
         <BrandRule width={28} />
-        {tab === "done" ? <Text style={styles.pageSubtitle}>Últimos 7 dias · {countLabel(lists.done.length)}</Text> : null}
       </View>
       {tab === "today" ? <ShiftCard /> : null}
       {notices && notices.length > 0 ? (
         <Pressable
-          onPress={() => router.push("/conta")}
+          onPress={() => openSync("avisos")}
           style={({ pressed }) => [styles.notice, pressed && { opacity: 0.8 }]}
           accessibilityRole="button"
-          accessibilityHint="Abre a conta para ver os avisos"
+          accessibilityHint="Abre a sincronização para ver os avisos"
         >
           <Icon name="alert" size={16} color={c.danger} />
           <Text style={styles.noticeText}>
@@ -387,22 +397,18 @@ export default function MyTicketsScreen() {
   );
 
   const empty =
-    tab === "today" ? (
-      dayOffset === 0 ? (
-        <HomeEmpty variant="today" hasTickets={Boolean(tickets?.length)} next={lists.upcoming[0]} onAgenda={() => changeTab("agenda")} />
-      ) : (
-        <EmptyState
-          icon="calendar"
-          title={
-            dayOffset > 0
-              ? `Nenhuma OS agendada para ${relativeDay ? relativeDay.toLowerCase() : formatDay(selectedDay)}`
-              : `Nenhuma OS ${relativeDay ? relativeDay.toLowerCase() : `em ${formatDay(selectedDay)}`}`
-          }
-          description={dayOffset > 0 ? "Quando a central agendar uma visita para este dia, ela aparece aqui." : undefined}
-        />
-      )
+    dayOffset === 0 ? (
+      <HomeEmpty hasTickets={Boolean(tickets?.length)} next={lists.upcoming[0]} onAgenda={() => changeTab("agenda")} />
     ) : (
-      <HomeEmpty variant="done" hasTickets={Boolean(tickets?.length)} onAgenda={() => changeTab("agenda")} />
+      <EmptyState
+        icon="calendar"
+        title={
+          dayOffset > 0
+            ? `Nenhuma OS agendada para ${relativeDay ? relativeDay.toLowerCase() : formatDay(selectedDay)}`
+            : `Nenhuma OS ${relativeDay ? relativeDay.toLowerCase() : `em ${formatDay(selectedDay)}`}`
+        }
+        description={dayOffset > 0 ? "Quando a central agendar uma visita para este dia, ela aparece aqui." : undefined}
+      />
     );
 
   const footer =
@@ -461,10 +467,11 @@ export default function MyTicketsScreen() {
                   <Calendar tickets={tickets} user={user} now={now} />
                 </View>
               ) : null}
-              {tab === "earnings" ? <EarningsView refreshKey={earningsKey} onSettled={settleEarnings} /> : null}
+              {tab === "earnings" ? <BillingView refreshKey={earningsKey} onSettled={settleEarnings} /> : null}
+              {tab === "profile" ? <ProfileView /> : null}
             </>
           }
-          ListEmptyComponent={tab === "agenda" || tab === "earnings" ? undefined : empty}
+          ListEmptyComponent={tab === "today" ? empty : undefined}
           ListFooterComponent={footer}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} colors={[c.primary]} tintColor={c.primary} />}
           contentContainerStyle={styles.list}
@@ -477,8 +484,8 @@ export default function MyTicketsScreen() {
         items={[
           { value: "today", label: "Hoje", icon: "today", count: lists.today.length },
           { value: "agenda", label: "Agenda", icon: "calendar" },
-          { value: "done", label: "Concluídas", icon: "checkCircle" },
-          { value: "earnings", label: "Ganhos", icon: "wallet" },
+          { value: "earnings", label: "Faturamento", icon: "receipt" },
+          { value: "profile", label: "Perfil", icon: "user" },
         ]}
       />
     </View>
@@ -490,12 +497,15 @@ const makeStyles = (c: Palette) =>
     screen: { flex: 1, backgroundColor: c.canvas },
     list: { paddingBottom: 24 },
     header: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 4, gap: 14 },
-    topBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+    // A altura do avatar: o cabeçalho não muda de altura quando o Perfil tira o chip e o avatar.
+    topBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, minHeight: 36 },
     topActions: { flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 10, flexShrink: 1 },
     avatar: { borderRadius: 18 },
     titleBlock: { gap: 6 },
-    pageTitle: { fontSize: 22, fontWeight: "700", color: c.ink, letterSpacing: -0.3 },
-    pageSubtitle: { fontSize: 13, color: c.inkMuted, marginTop: 2 },
+    titleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+    pageTitle: { flex: 1, fontSize: 22, fontWeight: "700", color: c.ink, letterSpacing: -0.3 },
+    // O botão tem 44 pt de toque sem aumentar a linha do título (nem a altura do cabeçalho entre as abas).
+    titleAction: { marginVertical: -8, marginRight: -11 },
     notice: {
       flexDirection: "row",
       alignItems: "center",

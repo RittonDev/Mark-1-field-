@@ -32,6 +32,7 @@ import { notify } from "../../lib/dialogs";
 import { concludeBlock, missingForConclusion, signatureBlock } from "../../lib/forms";
 import { haptic } from "../../lib/haptics";
 import { awaitingReschedule, isDone, isHelper } from "../../lib/lists";
+import { openSync } from "../../lib/navigation";
 import { UNPRODUCTIVE_FROM, userCanTransition } from "../../lib/ops";
 import { fieldActionLabel, takeConcludeIntent } from "../../lib/progress";
 import { useSession } from "../../lib/session";
@@ -430,9 +431,9 @@ function TicketView({ ticket: current, user }: { ticket: LocalTicket; user: User
             ) : null}
             {pending ? (
               <Pressable
-                onPress={() => router.push("/conta")}
+                onPress={() => openSync("pendencias")}
                 accessibilityRole="button"
-                accessibilityHint="Abre as pendências na tela Conta"
+                accessibilityHint="Abre as pendências na tela Sincronização"
                 hitSlop={6}
                 style={styles.statusLine}
               >

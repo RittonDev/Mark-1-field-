@@ -74,7 +74,7 @@ export const InfoPanel = memo(function InfoPanel({ ticket, userId }: { ticket: L
   const registeredAddress = addressOf(location);
   const when = visitWindow(ticket);
 
-  // Valor pendente de OS cancelada não aparece, como em Ganhos (payouts.my_earnings): ele só é pago
+  // Valor pendente de OS cancelada não aparece, como no Faturamento (payouts.my_earnings): ele só é pago
   // se a central decidir. O já pago continua aparecendo.
   const mine = ticket.my_payout ?? null;
   const payout = mine && (ticket.status !== "cancelled" || mine.status === "paid") ? mine : null;
@@ -88,8 +88,8 @@ export const InfoPanel = memo(function InfoPanel({ ticket, userId }: { ticket: L
           <Text style={styles.strong}>{formatBRL(payout.amount)}</Text>
           <Text style={styles.label}>
             {payout.status === "paid"
-              ? `Pago${payout.paid_at ? ` em ${dayMonth(payout.paid_at)}` : ""}. Veja em Ganhos.`
-              : "A central paga depois que a OS for concluída. Acompanhe em Ganhos."}
+              ? `Pago${payout.paid_at ? ` em ${dayMonth(payout.paid_at)}` : ""}. Veja em Faturamento.`
+              : "A central paga depois que a OS for concluída. Acompanhe em Faturamento."}
           </Text>
         </Card>
       ) : null}

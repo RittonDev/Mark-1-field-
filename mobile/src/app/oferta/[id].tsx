@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams, useNavigation } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import Animated from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -7,19 +7,21 @@ import { ActionSheet, type SheetAction } from "../../components/ActionSheet";
 import { ConnectionBar } from "../../components/ConnectionBar";
 import { Icon, type IconName } from "../../components/Icon";
 import { useListMotion } from "../../components/motion";
-import { OfferLine } from "../../components/Offers";
+import { OfferHero } from "../../components/offer/OfferHero";
+import { OfferArea, OfferLine, OfferMeta, OfferServices } from "../../components/Offers";
+import { RoundBackButton } from "../../components/RoundBackButton";
 import { DetailSkeleton } from "../../components/Skeleton";
 import { Text } from "../../components/Text";
-import { visitWindow } from "../../components/ticket/InfoPanel";
 import { Badge, Button, Card, EmptyState, ErrorBox, InfoBox, SectionTitle } from "../../components/ui";
 import { ApiError, errorMessage, getServerOffsetMs } from "../../lib/api";
 import { useLiveQuery, useNow } from "../../lib/changes";
 import { OFFER_CANCEL_REASON, OFFER_STATE } from "../../lib/constants";
 import { getTicket } from "../../lib/db";
+import { openWhatsApp } from "../../lib/device-actions";
 import { confirmAction } from "../../lib/dialogs";
 import { formatBRL } from "../../lib/expenses";
 import { haptic } from "../../lib/haptics";
-import { deadlineInfo, loadOfferStore, offerState, placeLine } from "../../lib/offers";
+import { deadlineInfo, loadOfferStore, offerQuestionText, offerState } from "../../lib/offers";
 import { useSession } from "../../lib/session";
 import { showSuccess } from "../../lib/success";
 import {
@@ -105,9 +107,29 @@ function situation(offer: FieldOffer, state: OfferState, mine: boolean, hasNext:
 }
 
 /**
+ * Moldura de todos os estados da oferta (carregando, não encontrada, sem conexão e a própria oferta). A tela não tem o
+ * cabeçalho nativo: o voltar redondo fica fixo por cima do conteúdo e nunca some com a rolagem nem nos erros (o voltar
+ * do Android e o gesto do iOS continuam).
+ */
+function OfferFrame({ children }: { children: ReactNode }) {
+  const styles = useStyles(makeStyles);
+  const insets = useSafeAreaInsets();
+  return (
+    <View style={[styles.screen, { paddingTop: insets.top }]}>
+      <ConnectionBar />
+      <View style={styles.frame}>
+        {children}
+        <RoundBackButton style={styles.back} />
+      </View>
+    </View>
+  );
+}
+
+/**
  * Oferta de OS com preço: o técnico vê o recorte do convite (serviço, escopo, formulários, bairro e cidade,
- * data e valor; cliente, loja e endereço só depois de estar na OS) e responde "Aceitar por R$ X" ou "Recusar".
- * Não existe contraproposta. Abrir grava a leitura no servidor; o aceite pede também o escopo lido.
+ * duração, data e valor; cliente, loja e endereço só depois de estar na OS) e responde "Aceitar por R$ X" ou
+ * "Recusar". Não existe contraproposta. Abrir grava a leitura no servidor; o aceite pede também o escopo lido (a hora
+ * em que ele abriu o escopo vai no aceite e a central vê "escopo lido às"). A dúvida vai para a central no WhatsApp.
  */
 export default function OfferRoute() {
   const params = useLocalSearchParams<{ id: string }>();
@@ -173,8 +195,7 @@ function OfferScreen({ id }: { id: string }) {
   if (!user) return null;
   if (current?.status === "missing") {
     return (
-      <View style={styles.screen}>
-        <ConnectionBar />
+      <OfferFrame>
         <View style={styles.missing}>
           <EmptyState
             icon="alert"
@@ -183,14 +204,21 @@ function OfferScreen({ id }: { id: string }) {
           />
           <Button title="Voltar" onPress={leave} />
         </View>
-      </View>
+      </OfferFrame>
     );
   }
   if (!offer) {
-    if (store === undefined || opening) return <DetailSkeleton />;
+    if (store === undefined || opening) {
+      return (
+        <OfferFrame>
+          <View style={styles.loading}>
+            <DetailSkeleton />
+          </View>
+        </OfferFrame>
+      );
+    }
     return (
-      <View style={styles.screen}>
-        <ConnectionBar />
+      <OfferFrame>
         <View style={styles.missing}>
           {!online || current?.status === "offline" ? (
             <EmptyState icon="wifiOff" title="Sem conexão" description="A oferta abre quando a conexão voltar." />
@@ -202,7 +230,7 @@ function OfferScreen({ id }: { id: string }) {
             <Button title="Voltar" onPress={leave} />
           </View>
         </View>
-      </View>
+      </OfferFrame>
     );
   }
 
@@ -281,18 +309,19 @@ function OfferView({
   // Esta fechou e a central mandou outra da mesma OS (valor trocado, envio de novo): o próximo passo é a nova.
   const next = !answerable && !goesToTicket && replacement && offerState(replacement, at) === "pending" ? replacement : null;
   const amount = formatBRL(offer.amount);
+  const amountLabel = answerable ? "Você recebe" : "Valor da oferta";
   const acceptTitle = `Aceitar por ${amount}`;
-  const place = placeLine(ticket);
-  const when = visitWindow(ticket, at) ?? "Data a combinar";
   const deadline = state === "pending" ? deadlineInfo(offer, at) : null;
   const note = offer.note?.trim() || null;
-  const description = ticket.description?.trim() || null;
-  const badge =
-    state === "pending"
+  // Esperando a resposta: "Aguardando resposta". Fechada: o motivo. Recusada pelo servidor e ainda pendente na lista
+  // guardada (a lista nova chega logo): sem selo, o aviso da situação diz o que houve.
+  const badge = answerable
+    ? OFFER_STATE.pending
+    : state === "pending"
       ? null
       : state === "cancelled" && offer.cancel_reason
         ? { label: OFFER_CANCEL_REASON[offer.cancel_reason], color: OFFER_STATE.cancelled.color }
-        : { label: OFFER_STATE[state].label, color: OFFER_STATE[state].color };
+        : OFFER_STATE[state];
   // O texto do servidor vale enquanto a oferta guardada ainda não diz como ela fechou (a lista vem logo depois).
   const situationText = answerable
     ? null
@@ -396,6 +425,15 @@ function OfferView({
     }
   }
 
+  /** A dúvida vai para a central no WhatsApp (o técnico escolhe o grupo): nada de chat no app. */
+  async function ask() {
+    try {
+      await openWhatsApp(offerQuestionText(offer));
+    } catch {
+      showToast("Não foi possível abrir o WhatsApp", { tone: "error" });
+    }
+  }
+
   function openTicket() {
     router.replace({ pathname: "/ticket/[id]", params: { id: ticketId } });
   }
@@ -411,115 +449,89 @@ function OfferView({
   }));
 
   return (
-    <View style={styles.screen}>
-      <ConnectionBar />
+    <OfferFrame>
       <ScrollView
-        contentContainerStyle={[styles.content, { paddingBottom: showBar ? (barHeight || 140 + insets.bottom) + 16 : insets.bottom + 24 }]}
+        contentContainerStyle={{ paddingBottom: showBar ? (barHeight || 160 + insets.bottom) + 16 : insets.bottom + 24 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} colors={[c.primary]} tintColor={c.primary} />}
       >
-        <Animated.View entering={motion.entering(0)}>
-          <Card style={{ gap: 12 }}>
-            <View style={styles.topRow}>
-              <Text style={styles.code} numberOfLines={1}>
-                {ticket.code}
-              </Text>
-              {badge ? <Badge label={badge.label} color={badge.color} /> : null}
-            </View>
-            <View style={{ gap: 4 }}>
-              <Text style={styles.title} selectable accessibilityRole="header">
+        <OfferHero ticket={ticket} />
+        <View style={styles.body}>
+          <Animated.View entering={motion.entering(0)}>
+            <Card style={styles.top}>
+              <View style={styles.topRow} accessible accessibilityRole="header" accessibilityLabel={[ticket.code, badge?.label].filter(Boolean).join(", ")}>
+                <Text style={styles.code} selectable numberOfLines={1}>
+                  {ticket.code}
+                </Text>
+                {badge ? <Badge label={badge.label} color={badge.color} /> : null}
+              </View>
+              <Text style={styles.title} selectable numberOfLines={3}>
                 {ticket.title}
               </Text>
-              {ticket.service_type ? <Text style={styles.service}>{ticket.service_type.name}</Text> : null}
-            </View>
-            <View style={styles.amountBox} accessible accessibilityLabel={`${answerable ? "Você recebe se aceitar" : "Valor da oferta"}: ${amount}`}>
-              <Text style={styles.amountLabel}>{answerable ? "Você recebe se aceitar" : "Valor da oferta"}</Text>
-              <Text style={styles.amount}>{amount}</Text>
-            </View>
-            {deadline ? (
-              <OfferLine
-                icon="hourglass"
-                text={`Responder até ${deadline.due} · faltam ${deadline.left}`}
-                tone={deadline.urgent ? "warning" : "muted"}
-                strong
-              />
-            ) : null}
-            <View style={styles.divider} />
-            <View style={{ gap: 6 }}>
-              {place ? <OfferLine icon="pin" text={place} /> : null}
-              <OfferLine icon="calendar" text={when} />
-            </View>
-          </Card>
-        </Animated.View>
-
-        {situationText ? <InfoBox icon={situationIcon} message={situationText} /> : null}
-
-        {note ? (
-          <View style={styles.note} accessibilityRole="summary">
-            <View style={styles.noteHead}>
-              <Icon name="note" size={18} color={c.brandInk} strokeWidth={2} />
-              <Text style={styles.noteTitle}>Recado da central</Text>
-            </View>
-            <Text style={styles.noteText} selectable>
-              {note}
-            </Text>
-          </View>
-        ) : null}
-
-        {/* O escopo começa recolhido: abrir é o "Escopo lido" que libera o aceite (guardado por oferta). */}
-        {answerable ? (
-          <Animated.View entering={motion.entering(1)}>
-            <Card style={{ gap: 10 }}>
-              <Pressable
-                onPress={toggleScope}
-                accessibilityRole="button"
-                accessibilityLabel={`Escopo do serviço${scopeRead ? ", lido" : ""}`}
-                accessibilityHint={scopeOpen ? "Esconde o escopo" : "Mostra o que deve ser feito na visita"}
-                accessibilityState={{ expanded: scopeOpen }}
-                style={({ pressed }) => [styles.scopeHead, pressed && { opacity: 0.7 }]}
-              >
-                <SectionTitle
-                  accent
-                  right={
-                    <View style={styles.scopeRight}>
-                      {scopeRead ? <Badge label="Escopo lido" color={c.success} /> : null}
-                      <Icon name={scopeOpen ? "chevronUp" : "chevronDown"} size={20} color={c.inkMuted} />
-                    </View>
-                  }
-                >
-                  Escopo do serviço
-                </SectionTitle>
-                {!scopeOpen ? (
-                  <Text style={styles.scopeHint}>
-                    {scopeRead ? "Toque para ler de novo." : "Toque para ler o que deve ser feito. O aceite libera depois da leitura."}
-                  </Text>
-                ) : null}
-              </Pressable>
-              {scopeOpen ? (
-                <Text style={styles.scopeText} selectable>
-                  {description ?? "A central não escreveu o escopo. Tire as dúvidas no grupo antes de aceitar."}
-                </Text>
+              <View style={styles.amountBox} accessible accessibilityLabel={`${amountLabel}: ${amount}`}>
+                <Text style={styles.amountLabel}>{amountLabel}</Text>
+                <Text style={styles.amount}>{amount}</Text>
+              </View>
+              <OfferMeta ticket={ticket} at={at} />
+              {deadline ? (
+                <OfferLine
+                  icon="hourglass"
+                  text={`Responder até ${deadline.due} · faltam ${deadline.left}`}
+                  tone={deadline.urgent ? "warning" : "muted"}
+                  strong
+                />
               ) : null}
             </Card>
           </Animated.View>
-        ) : null}
 
-        {ticket.forms.length ? (
-          <Animated.View entering={motion.entering(2)}>
-            <Card style={{ gap: 8 }}>
-              <SectionTitle accent>Formulários da OS</SectionTitle>
-              <Text style={styles.cardHint}>Você preenche no app durante a visita.</Text>
-              {ticket.forms.map((form, index) => (
-                <View key={`${index}-${form.name}`} style={styles.formRow}>
-                  <Icon name="note" size={16} color={c.inkMuted} />
-                  <Text style={styles.formName}>{form.name}</Text>
-                  <Badge label={form.required ? "Obrigatório" : "Opcional"} color={c.inkMuted} />
-                </View>
-              ))}
-            </Card>
+          {situationText ? <InfoBox icon={situationIcon} message={situationText} /> : null}
+
+          {note ? (
+            <View style={styles.note} accessibilityRole="summary">
+              <View style={styles.noteHead}>
+                <Icon name="note" size={18} color={c.brandInk} strokeWidth={2} />
+                <Text style={styles.noteTitle}>Recado da central</Text>
+              </View>
+              <Text style={styles.noteText} selectable>
+                {note}
+              </Text>
+            </View>
+          ) : null}
+
+          <OfferArea ticket={ticket} answerable={answerable} />
+
+          {/* O escopo começa recolhido: abrir é o "Escopo lido" que libera o aceite (guardado por oferta, com a hora). */}
+          <Animated.View entering={motion.entering(1)}>
+            <OfferServices ticket={ticket} answerable={answerable} scopeRead={scopeRead} open={scopeOpen} onToggle={toggleScope} />
           </Animated.View>
-        ) : null}
 
-        {answerable ? <Text style={styles.help}>Dúvida no escopo? Fale com a central no grupo.</Text> : null}
+          {ticket.forms.length ? (
+            <Animated.View entering={motion.entering(2)}>
+              <Card style={{ gap: 8 }}>
+                <SectionTitle accent>Formulários da OS</SectionTitle>
+                <Text style={styles.cardHint}>Você preenche no app durante a visita.</Text>
+                {ticket.forms.map((form, index) => (
+                  <View key={`${index}-${form.name}`} style={styles.formRow}>
+                    <Icon name="note" size={16} color={c.inkMuted} />
+                    <Text style={styles.formName}>{form.name}</Text>
+                    <Badge label={form.required ? "Obrigatório" : "Opcional"} color={c.inkMuted} />
+                  </View>
+                ))}
+              </Card>
+            </Animated.View>
+          ) : null}
+
+          {answerable ? (
+            <Pressable
+              onPress={() => void ask()}
+              accessibilityRole="link"
+              accessibilityHint="Abre o WhatsApp"
+              style={({ pressed }) => [styles.ask, pressed && { opacity: 0.7 }]}
+            >
+              <Icon name="message" size={16} color={c.brandInk} />
+              <Text style={styles.askText}>Dúvida no escopo? Fale com a central no WhatsApp</Text>
+            </Pressable>
+          ) : null}
+        </View>
       </ScrollView>
 
       {showBar ? (
@@ -533,58 +545,63 @@ function OfferView({
                   <Text style={styles.barNoteText}>{acceptBlock}</Text>
                 </View>
               ) : null}
-              <View style={styles.barRow}>
+              {/* Travado: o leitor de tela anuncia o motivo junto com o botão. */}
+              <View
+                accessible={acceptBlock ? true : undefined}
+                accessibilityRole={acceptBlock ? "button" : undefined}
+                accessibilityLabel={acceptBlock ? acceptTitle : undefined}
+                accessibilityHint={acceptBlock ?? undefined}
+                accessibilityState={acceptBlock ? { disabled: true } : undefined}
+              >
                 <Button
-                  title="Recusar"
-                  variant="ghost"
-                  onPress={() => setDeclineOpen(true)}
-                  disabled={!online || busy !== null}
-                  loading={busy === "decline"}
+                  title={acceptTitle}
+                  variant="strong"
+                  onPress={() => void accept()}
+                  disabled={Boolean(acceptBlock) || busy !== null}
+                  loading={busy === "accept"}
+                  style={styles.mainButton}
                 />
-                {/* Travado: o leitor de tela anuncia o motivo junto com o botão. */}
-                <View
-                  style={{ flex: 1 }}
-                  accessible={acceptBlock ? true : undefined}
-                  accessibilityRole={acceptBlock ? "button" : undefined}
-                  accessibilityLabel={acceptBlock ? acceptTitle : undefined}
-                  accessibilityHint={acceptBlock ?? undefined}
-                  accessibilityState={acceptBlock ? { disabled: true } : undefined}
-                >
-                  <Button
-                    title={acceptTitle}
-                    variant="primary"
-                    onPress={() => void accept()}
-                    disabled={Boolean(acceptBlock) || busy !== null}
-                    loading={busy === "accept"}
-                  />
-                </View>
               </View>
+              <Button
+                title="Recusar"
+                variant="ghost"
+                onPress={() => setDeclineOpen(true)}
+                disabled={!online || busy !== null}
+                loading={busy === "decline"}
+              />
             </>
           ) : goesToTicket ? (
-            <Button title="Abrir a OS" variant="primary" onPress={openTicket} />
+            <Button title="Abrir a OS" variant="strong" onPress={openTicket} style={styles.mainButton} />
           ) : next ? (
-            <Button title={`Ver a oferta nova · ${formatBRL(next.amount)}`} variant="primary" onPress={() => openNext(next.id)} />
+            <Button
+              title={`Ver a oferta nova · ${formatBRL(next.amount)}`}
+              variant="strong"
+              onPress={() => openNext(next.id)}
+              style={styles.mainButton}
+            />
           ) : null}
         </View>
       ) : null}
 
       <ActionSheet visible={declineOpen} title="Por que recusar?" actions={declineActions} onClose={() => setDeclineOpen(false)} />
-    </View>
+    </OfferFrame>
   );
 }
 
 const makeStyles = (c: Palette) =>
   StyleSheet.create({
     screen: { flex: 1, backgroundColor: c.canvas },
-    content: { padding: 16, gap: 12 },
+    frame: { flex: 1 },
+    // Fixo sobre o mapa e sobre os estados de erro.
+    back: { position: "absolute", top: 12, left: 16 },
+    body: { paddingHorizontal: 16, paddingTop: 4, gap: 12 },
+    top: { gap: 12 },
     topRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
-    code: { flexShrink: 1, fontSize: 13, fontWeight: "700", color: c.inkMuted, fontVariant: ["tabular-nums"], letterSpacing: 0.3 },
-    title: { fontSize: 20, fontWeight: "700", color: c.ink, lineHeight: 26, letterSpacing: -0.2 },
-    service: { fontSize: 15, fontWeight: "600", color: c.inkMuted, lineHeight: 20 },
+    code: { flexShrink: 1, fontSize: 26, fontWeight: "700", color: c.ink, fontVariant: ["tabular-nums"], letterSpacing: -0.3 },
+    title: { fontSize: 16, fontWeight: "600", color: c.ink, lineHeight: 22 },
     amountBox: { backgroundColor: c.surface2, borderRadius: RADIUS.control, paddingHorizontal: 14, paddingVertical: 12, gap: 2 },
     amountLabel: { fontSize: 12, fontWeight: "700", color: c.inkMuted, textTransform: "uppercase", letterSpacing: 0.6 },
-    amount: { fontSize: 30, fontWeight: "700", color: c.ink, letterSpacing: -0.5, fontVariant: ["tabular-nums"] },
-    divider: { height: StyleSheet.hairlineWidth, backgroundColor: c.line },
+    amount: { fontSize: 32, fontWeight: "700", color: c.ink, letterSpacing: -0.5, fontVariant: ["tabular-nums"] },
     note: {
       gap: 6,
       padding: 14,
@@ -596,10 +613,6 @@ const makeStyles = (c: Palette) =>
     noteHead: { flexDirection: "row", alignItems: "center", gap: 8 },
     noteTitle: { fontSize: 13, fontWeight: "700", color: c.brandInk, letterSpacing: 0.2 },
     noteText: { fontSize: 15, color: c.ink, lineHeight: 21 },
-    scopeHead: { borderRadius: RADIUS.control, minHeight: 44 },
-    scopeRight: { flexDirection: "row", alignItems: "center", gap: 8 },
-    scopeHint: { fontSize: 13, color: c.inkMuted, lineHeight: 18 },
-    scopeText: { fontSize: 15, color: c.ink, lineHeight: 21 },
     cardHint: { fontSize: 13, color: c.inkMuted, lineHeight: 18, marginTop: -4 },
     formRow: {
       flexDirection: "row",
@@ -612,7 +625,16 @@ const makeStyles = (c: Palette) =>
       backgroundColor: c.surface2,
     },
     formName: { flex: 1, fontSize: 15, fontWeight: "600", color: c.ink },
-    help: { fontSize: 13, color: c.inkMuted, lineHeight: 18, textAlign: "center", paddingVertical: 4 },
+    ask: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      alignSelf: "center",
+      gap: 6,
+      minHeight: 44,
+      paddingHorizontal: 8,
+    },
+    askText: { flexShrink: 1, fontSize: 14, fontWeight: "600", color: c.brandInk, textAlign: "center" },
     bar: {
       position: "absolute",
       left: 0,
@@ -626,9 +648,11 @@ const makeStyles = (c: Palette) =>
       borderTopColor: c.line,
       boxShadow: c.scheme === "dark" ? undefined : "0px -1px 3px rgba(0, 0, 0, 0.04)",
     },
-    barRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+    mainButton: { minHeight: 52 },
     barNote: { flexDirection: "row", gap: 6, alignItems: "flex-start" },
     barNoteText: { fontSize: 13, color: c.inkMuted, lineHeight: 18, flex: 1 },
     missing: { flex: 1, justifyContent: "center", paddingHorizontal: 16, paddingVertical: 24, gap: 8 },
     missingActions: { gap: 10 },
+    // O esqueleto começa abaixo do voltar redondo.
+    loading: { paddingTop: 52 },
   });

@@ -2,28 +2,37 @@
 // (tests/tech-profile-form.test.mjs). Só importa valores de ./constants (que só tem `import type`).
 //
 // - Nomes: `foldName` compara como o servidor (services/tech_profile.fold) e `cleanText` limpa como ele grava.
-// - Disponibilidade: `toggleSlot`, `sameSlots` e `copyToWorkdays` (a lista "dia:turno" da API).
-// - Transporte: `toggleMode`, `sameTransport` e `transportBody`. Ferramental: `sameSet`.
+// - Disponibilidade: `toggleSlot`, `sameSlots`, `copyToWorkdays` e `canCopyToWorkdays` (a lista "dia:turno" da API).
+// - Transporte: `toggleMode`, `sameTransport` e `transportBody`. Ferramental: `toggleId`, `sameSet`, `sortTools` e
+//   `filterTools`.
 // - Aptidões e Formação: os erros das folhas (`skillProblem`, `educationProblem`, com ponto final, como os do Meu
-//   cadastro; os do servidor vêm sem ponto) e os corpos do PATCH (`skillsBody`, `educationBody`).
+//   cadastro; os do servidor vêm sem ponto), os corpos do PATCH (`skillsBody`, `educationBody`) e o que o leitor de tela
+//   fala de cada item.
 // - Folha do mês: `thisMonth` e `monthGrid`.
-// - Salvar ao tocar: o redutor `autoSaveStep`, que decide o que o hook useAutoSave (lib/autoSave.ts) faz.
+// - Salvar ao tocar: o redutor `autoSaveStep`, que decide o que lib/autoSave.ts faz.
 
 import {
   competenceLabel,
+  EDUCATION_LEVEL,
   MONTH_ABBR,
+  periodsPhrase,
+  sinceText,
+  SKILL_LEVEL,
   slotPeriods,
   sortSlots,
   TECH_PROFILE_LIMITS,
   TRANSPORT_MODE_ORDER,
+  WEEKDAY,
   WORKDAYS,
 } from "./constants";
 import type {
   AvailabilitySlot,
+  DayPeriod,
   EducationItem,
   EducationItemIn,
   EducationLevel,
   SkillLevel,
+  TechnicianSkill,
   TechnicianSkillIn,
   TransportInfo,
   TransportMode,
@@ -77,6 +86,18 @@ export function copyToWorkdays(slots: readonly string[], from: Weekday): { next:
   return { next: sortSlots([...weekend, ...copied]), overwrites };
 }
 
+/** O botão "Copiar para os dias úteis": só num dia útil com turno, quando outro dia útil está diferente dele. */
+export function canCopyToWorkdays(slots: readonly string[], day: Weekday): boolean {
+  if (!WORKDAYS.includes(day)) return false;
+  const periods = slotPeriods(slots, day);
+  return periods.length > 0 && WORKDAYS.some((other) => other !== day && slotPeriods(slots, other).join() !== periods.join());
+}
+
+/** O cabeçalho do dia para o leitor de tela: "Segunda-feira, manhã e tarde"; sem turno, "Segunda-feira, sem turnos". */
+export function daySpoken(day: Weekday, periods: readonly DayPeriod[]): string {
+  return `${WEEKDAY[day].label}, ${periods.length ? periodsPhrase(periods) : "sem turnos"}`;
+}
+
 // --------------------------------------------------------------------------- transporte e ferramental
 
 /** O mesmo conjunto (a ordem e os repetidos não contam): ids do ferramental, meios de transporte. */
@@ -102,6 +123,25 @@ export function toggleMode(transport: TransportInfo, mode: TransportMode): Trans
 /** O corpo do PATCH: os meios na ordem da lista, sem repetir, e a CNH, sempre juntos. */
 export function transportBody(transport: TransportInfo): TransportInfo {
   return { modes: TRANSPORT_MODE_ORDER.filter((mode) => transport.modes.includes(mode)), driver_license: transport.driver_license };
+}
+
+/** Marca ou desmarca uma ferramenta (pelo id), sem repetir. */
+export function toggleId(ids: readonly string[], id: string): string[] {
+  return ids.includes(id) ? ids.filter((other) => other !== id) : [...ids, id];
+}
+
+/** A busca do Ferramental aparece com mais ferramentas do que isto no catálogo. */
+export const TOOL_SEARCH_AFTER = 15;
+
+/** O catálogo em ordem alfabética, sem diferença de acento e maiúsculas (o servidor já manda assim; é por garantia). */
+export function sortTools<T extends { name: string }>(tools: readonly T[]): T[] {
+  return [...tools].sort((a, b) => a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" }));
+}
+
+/** A busca do Ferramental: o texto em qualquer parte do nome, sem acento e sem maiúsculas. */
+export function filterTools<T extends { name: string }>(tools: readonly T[], query: string): T[] {
+  const wanted = foldName(query);
+  return wanted ? tools.filter((tool) => foldName(tool.name).includes(wanted)) : [...tools];
 }
 
 // --------------------------------------------------------------------------- aptidões
@@ -155,6 +195,16 @@ export function suggestionsFor(query: string, suggestions: readonly string[], ta
   return out;
 }
 
+/** A linha de baixo da aptidão: "Avançado · desde 11/2026". */
+export function skillLine(skill: Pick<TechnicianSkill, "level" | "since">): string {
+  return `${SKILL_LEVEL[skill.level] ?? skill.level} · ${sinceText(skill.since)}`;
+}
+
+/** A aptidão para o leitor de tela: "Impressoras HP, Avançado, desde novembro de 2026". */
+export function skillSpoken(skill: TechnicianSkill): string {
+  return `${skill.name}, ${SKILL_LEVEL[skill.level] ?? skill.level}, desde ${competenceLabel(skill.since.slice(0, 7))}`;
+}
+
 // --------------------------------------------------------------------------- formação
 
 /** A folha da formação: meses "AAAA-MM"; `ongoing` ("Em andamento") quer dizer sem fim. */
@@ -194,7 +244,7 @@ export function educationDraftOf(item: EducationItem | null): EducationDraft {
   };
 }
 
-/** Mudou alguma coisa na folha (para perguntar antes de descartar). */
+/** Mudou alguma coisa na folha (para perguntar antes de descartar e para liberar o "Salvar" da edição). */
 export function educationChanged(draft: EducationDraft, base: EducationDraft): boolean {
   return (
     cleanText(draft.course) !== cleanText(base.course) ||
@@ -246,6 +296,14 @@ export function educationBody(list: readonly EducationEntry[]): EducationItemIn[
     start: item.start,
     end: item.end ?? null,
   }));
+}
+
+/** O curso para o leitor de tela: "Técnico em redes, Técnico, Escola Exemplo, de fevereiro de 2022 a dezembro de 2023". */
+export function educationSpoken(item: EducationItem): string {
+  const period = item.end
+    ? `de ${competenceLabel(item.start)} a ${competenceLabel(item.end)}`
+    : `desde ${competenceLabel(item.start)}, em andamento`;
+  return `${item.course}, ${EDUCATION_LEVEL[item.level] ?? item.level}, ${item.institution}, ${period}`;
 }
 
 // --------------------------------------------------------------------------- folha do mês
@@ -304,8 +362,8 @@ export type AutoSaveEvent<T> =
   | { type: "change"; value: T }
   /** A espera acabou (ou a tela saiu com o envio agendado); `saved`: o que está gravado agora. */
   | { type: "due"; saved: T }
-  /** O servidor gravou o envio desta sessão. */
-  | { type: "done"; epoch: number }
+  /** O servidor gravou o envio desta sessão; `saved`: o que ele guardou (pode ter ignorado algo). */
+  | { type: "done"; epoch: number; saved: T }
   /** O envio desta sessão falhou. */
   | { type: "failed"; epoch: number }
   /** Passaram os 2 s do "Salvo". */
@@ -326,9 +384,10 @@ export type AutoSaveEffect<T> =
 
 /**
  * O passo do salvar ao tocar. Toques de perto vão juntos: cada um reinicia a espera e, quando ela acaba, sai um envio
- * com o último valor. Tocou durante o envio: manda de novo assim que ele voltar, com o valor final. Gravou: a tela volta
- * a seguir o servidor (que pode ter ignorado algo, como uma ferramenta desativada). Falhou: idem, sem o "Salvo". A
- * sessão mudou: descarta em silêncio, e a resposta de um envio de antes não conta.
+ * com o último valor. Tocou durante o envio: quando ele volta, manda de novo na hora com o valor final (se ainda for
+ * diferente do que o servidor gravou). Gravou: a tela volta a seguir o servidor (que pode ter ignorado algo, como uma
+ * ferramenta desativada). Falhou: idem, sem o "Salvo". A sessão mudou: descarta em silêncio, e a resposta de um envio
+ * de antes não conta.
  */
 export function autoSaveStep<T>(
   state: AutoSaveState<T>,
@@ -348,7 +407,7 @@ export function autoSaveStep<T>(
       return { state: { ...state, phase: "sending", again: false }, effect: { kind: "send", value: state.desired, epoch: state.epoch } };
     case "done":
       if (event.epoch !== state.epoch || state.phase !== "sending") return { state, effect: null };
-      if (state.again && state.desired !== null) {
+      if (state.again && state.desired !== null && !equals(state.desired, event.saved)) {
         return { state: { ...state, again: false }, effect: { kind: "send", value: state.desired, epoch: state.epoch } };
       }
       return { state: { ...state, desired: null, phase: "idle", again: false, status: "saved" }, effect: { kind: "saved" } };

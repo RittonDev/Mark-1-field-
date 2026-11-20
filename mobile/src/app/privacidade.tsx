@@ -1,8 +1,9 @@
 // Aviso de privacidade do técnico (LGPD), só para leitura: o mesmo texto da ficha da homologação (PRIVACY_NOTICE em
-// lib/constants.ts, cópia idêntica da web, com a versão em PRIVACY_VERSION). Abre pela Conta, pelo cartão Pagamento do
-// Meu cadastro, pela tela Enviar nota fiscal, pelo "Como funciona" do Meu elo e pelo cartão de Hoje quando o texto muda.
-// Aberta por qualquer caminho, grava a versão como vista para o técnico (só no aparelho, lib/privacySeen.ts) quando
-// termina de entrar: o cartão de Hoje some sem mexer na tela que ainda aparece por baixo da transição.
+// lib/constants.ts, cópia idêntica da web, com a versão em PRIVACY_VERSION e a data em PRIVACY_DATE). Abre pelo Perfil,
+// pela Chave PIX das Configurações, pela tela Enviar nota fiscal, pelo "Como funciona" do Meu elo e pelo cartão de Hoje
+// quando o texto muda. Aberta por qualquer caminho, grava a versão como vista para o técnico (só no aparelho,
+// lib/privacySeen.ts) quando termina de entrar: o cartão de Hoje some sem mexer na tela que ainda aparece por baixo da
+// transição.
 
 import { useNavigation, type NativeStackNavigationProp } from "expo-router";
 import type { ParamListBase } from "expo-router/react-navigation";
@@ -11,13 +12,10 @@ import { ScrollView, StyleSheet } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Text } from "../components/Text";
 import { Card, SectionTitle } from "../components/ui";
-import { PRIVACY_NOTICE, PRIVACY_VERSION } from "../lib/constants";
+import { PRIVACY_DATE, PRIVACY_NOTICE } from "../lib/constants";
 import { markPrivacyNoticeSeen } from "../lib/privacySeen";
 import { session, useSession } from "../lib/session";
 import { useStyles, type Palette } from "../theme/theme";
-
-/** A versão é a data do texto: "2026-11-19" → "19/11/2026" (sem fuso). */
-const VERSION_DATE = PRIVACY_VERSION.split("-").reverse().join("/");
 
 /**
  * Reserva quando o fim da entrada não chega: na web a pilha não avisa as transições. Conta da montagem, ou do início
@@ -65,7 +63,7 @@ export default function PrivacyNoticeScreen() {
 
   return (
     <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}>
-      <Text style={styles.version}>Atualizado em {VERSION_DATE}</Text>
+      <Text style={styles.version}>Atualizado em {PRIVACY_DATE}</Text>
       {PRIVACY_NOTICE.map((section) => (
         <Card key={section.title}>
           <SectionTitle accent>{section.title}</SectionTitle>

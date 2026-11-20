@@ -350,5 +350,6 @@ async def remove_technician_pix(user_id: uuid.UUID, db: DB, actor: PixEdit) -> R
 
 @router.get("/technicians/{user_id}", response_model=TechnicianOut)
 async def get_technician(user_id: uuid.UUID, db: DB, _: TechniciansView) -> TechnicianOut:
-    """Um técnico (o cadastro aberto por link, ?tecnico= na web). 404 se não for técnico."""
+    """Um técnico (o cadastro aberto por link, ?tecnico= na web), com o detalhe do perfil técnico:
+    os nomes das ferramentas ativas, a formação e a data de cada parte. 404 se não for técnico."""
     return await _one(db, await svc.get_technician(db, user_id))

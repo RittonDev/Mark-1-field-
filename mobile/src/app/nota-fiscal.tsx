@@ -1,10 +1,10 @@
-// Enviar nota fiscal (cartão "Notas fiscais de <mês>" em Ganhos). O técnico escolhe o arquivo (PDF ou XML do portal da
-// prefeitura, ou uma foto), informa número, emissão, valor e competência e marca as OS que a nota cobre (as concluídas
-// no mês e ainda sem nota vêm marcadas). Só online: a nota não entra na fila; sem rede, o formulário fica preenchido
-// para tentar de novo. O mesmo `client_upload_id` vai em cada tentativa: a resposta perdida não vira nota repetida.
-// Com a lista de OS em erro, "Enviar nota" busca a lista de novo antes: se vier, as OS do mês ficam marcadas para o
-// técnico conferir e tocar de novo; se não vier, a nota só sai sem OS com a confirmação dele. A lista em erro também é
-// buscada de novo quando a conexão volta.
+// Enviar nota fiscal (cartão "Notas fiscais de <mês>" no mês do Faturamento). O técnico escolhe o arquivo (PDF ou XML
+// do portal da prefeitura, ou uma foto), informa número, emissão, valor e competência e marca as OS que a nota cobre (as
+// concluídas no mês e ainda sem nota vêm marcadas). Só online: a nota não entra na fila; sem rede, o formulário fica
+// preenchido para tentar de novo. O mesmo `client_upload_id` vai em cada tentativa: a resposta perdida não vira nota
+// repetida. Com a lista de OS em erro, "Enviar nota" busca a lista de novo antes: se vier, as OS do mês ficam marcadas
+// para o técnico conferir e tocar de novo; se não vier, a nota só sai sem OS com a confirmação dele. A lista em erro
+// também é buscada de novo quando a conexão volta. Enviada noutra competência, o aviso diz qual (é lá que ela aparece).
 
 import NetInfo from "@react-native-community/netinfo";
 import { randomUUID } from "expo-crypto";
@@ -88,7 +88,7 @@ function review(draft: Draft, today: string): { errors: Errors; amount: number |
 
 const firstError = (errors: Errors) => FIELD_ORDER.map((key) => errors[key]).find(Boolean) ?? null;
 
-/** A competência pedida pelo cartão (o mês de Ganhos), se for um mês válido e que já chegou; senão, o mês atual. */
+/** A competência pedida pelo cartão (o mês do Faturamento), se for um mês válido e que já chegou; senão, o mês atual. */
 function initialCompetence(param: unknown, current: string): string {
   const value = typeof param === "string" ? param : "";
   return /^\d{4}-(0[1-9]|1[0-2])$/.test(value) && value >= FIRST_MONTH && value <= current ? value : current;
@@ -142,6 +142,8 @@ export default function InvoiceScreen() {
   const [today] = useState(() => isoDay(new Date()));
   const [current] = useState(() => monthKeyOf(new Date()));
   const [competence, setCompetence] = useState(() => initialCompetence(params.mes, current));
+  // O mês com que a tela abriu (o do cartão): a nota enviada noutra competência aparece no mês dela.
+  const [requested] = useState(() => initialCompetence(params.mes, current));
   const [file, setFile] = useState<PickedInvoiceFile | null>(null);
   const [number, setNumber] = useState("");
   const [issueDate, setIssueDate] = useState<string | null>(null);
@@ -389,7 +391,12 @@ export default function InvoiceScreen() {
         clientUploadId,
       });
       haptic.success();
-      showToast("Nota enviada", { tone: "success", description: `Nota nº ${invoice.number} · ${formatBRL(invoice.amount)}` });
+      // Outra competência: o aviso diz qual, para o técnico achar a nota no mês certo do Faturamento.
+      const elsewhere = invoice.competence !== requested ? ` · competência de ${competenceLabel(invoice.competence)}` : "";
+      showToast("Nota enviada", {
+        tone: "success",
+        description: `Nota nº ${invoice.number} · ${formatBRL(invoice.amount)}${elsewhere}`,
+      });
       if (!mounted.current) return;
       setDone(true);
       allowLeave();
