@@ -842,8 +842,8 @@ Tela `/privacidade` ([src/app/privacidade.tsx](src/app/privacidade.tsx)), só de
   fiscal, no fim do "Como funciona" do Meu elo e no cartão de Hoje.
 - **Cartão em Hoje** ([src/components/PrivacyUpdateCard.tsx](src/components/PrivacyUpdateCard.tsx)): quando o texto
   muda (`PRIVACY_VERSION` diferente da versão que este técnico abriu), a aba Hoje mostra, depois da jornada e das
-  ofertas, "Aviso de privacidade atualizado" · "Agora ele fala do seu perfil técnico: ferramental, disponibilidade,
-  transporte, aptidões e formação." com **Ler aviso**. É discreto e não bloqueia nada. Abrir o aviso por qualquer
+  ofertas, "Aviso de privacidade atualizado" · "Agora ele fala do seu perfil técnico e dos registros das ofertas de OS."
+  com **Ler aviso**. É discreto e não bloqueia nada. Abrir o aviso por qualquer
   caminho grava a versão como vista quando a tela termina de entrar (evento `transitionEnd` da pilha; sem ele, como na
   web, 600 ms depois de abrir): o cartão some com Hoje já coberto, sem mexer na tela durante a transição.
 - **Versão vista** ([src/lib/privacySeen.ts](src/lib/privacySeen.ts)): só no aparelho, por técnico, no

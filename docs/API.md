@@ -1602,25 +1602,27 @@ os nomes da API (o titular conta como "pix"). O nome não começa com "technicia
 - `fields` traz também as partes do perfil técnico (`tools`, `availability`, `transport`, `skills`, `education`): ver
   [Perfil técnico](#perfil-técnico-2026-11-19).
 
-**Aviso de privacidade.** `PRIVACY_VERSION` = "2026-11-19.2" (o `GET /public/onboarding/catalog` devolve a versão nova
+**Aviso de privacidade.** `PRIVACY_VERSION` = "2026-11-20" (o `GET /public/onboarding/catalog` devolve a versão nova
 e a ficha grava a do servidor no aceite).
 - O texto (`PRIVACY_NOTICE`) e a versão (`PRIVACY_VERSION`) ficam em `frontend/src/lib/constants.ts` e
   `mobile/src/lib/constants.ts`, cópias idênticas; `frontend/src/lib/onboarding.ts` só reexporta. Mudar o texto pede
   mudar a versão nos dois lados (as duas cópias e `backend/app/schemas/onboarding.py`), no mesmo dia.
 - Formato "AAAA-MM-DD"; uma segunda versão no mesmo dia ganha ".2" ("AAAA-MM-DD.N"). As versões se comparam como texto.
-  Para mostrar, `PRIVACY_DATE` = os 10 primeiros caracteres em "DD/MM/AAAA" ("19/11/2026", sem o ".2").
+  Para mostrar, `PRIVACY_DATE` = os 10 primeiros caracteres em "DD/MM/AAAA" ("20/11/2026"; um ".2" não aparece).
 - A ficha da web compara a versão do servidor com a do pacote ao abrir, na última etapa e no envio: se a do servidor
   for mais nova, a página está velha, mostra "O aviso de privacidade mudou" com **Recarregar** e não envia. Por isso,
   publique a web antes da API, ou junto: com a API na frente, nenhuma ficha envia até a web nova entrar.
 - O aviso cita a chave PIX que o técnico cadastrar no app e o pagamento dos chamados por PIX; as notas fiscais (número,
   valor, datas e o arquivo, que pode trazer CPF ou CNPJ e endereço, guardadas pelo prazo da legislação fiscal); o Elo
   (atendimentos dos últimos 12 meses: quantidade, chegada no horário, retornos e visitas perdidas, visto em Meu elo, com
-  revisão de uma ocorrência pela central); e, desde a "2026-11-19.2", o perfil técnico, informado na ficha ou no app
+  revisão de uma ocorrência pela central); e, desde a "2026-11-20", o perfil técnico, informado na ficha ou no app
   (aptidões, formação, ferramental, meios de transporte e CNH, e os dias e turnos disponíveis), que ajuda a central a
-  escolher quem convidar para cada OS e que o técnico atualiza no app, em Configurações.
+  escolher quem convidar para cada OS e que o técnico atualiza no app, em Configurações, e os registros das ofertas de
+  OS no app (quando o técnico vê a oferta, abre o escopo e aceita ou recusa: `viewed_at`, `scope_read_at`,
+  `responded_at`).
 - No app (Perfil › Aviso de privacidade), a tela mostra o mesmo texto, só para leitura, com "Atualizado em
   {PRIVACY_DATE}": não grava ciência nem pede aceite de novo. Na versão nova, o cartão de Hoje avisa "Agora ele fala do
-  seu perfil técnico: ferramental, disponibilidade, transporte, aptidões e formação."
+  seu perfil técnico e dos registros das ofertas de OS."
 
 ## Perfil técnico (2026-11-19)
 
@@ -1872,7 +1874,7 @@ noutro dia que não 19/11/2026, a versão do aviso vira a data do dia ("AAAA-MM-
 
 **Privacidade (LGPD).** Só o próprio técnico e a gestão com Técnicos veem o perfil técnico (o aviso `profile.changed`
 vai também a quem tem Pagamentos, só com os nomes das partes); o cliente, o portal e os outros técnicos nunca. O aviso
-de privacidade cita o perfil técnico desde a versão "2026-11-19.2".
+de privacidade cita o perfil técnico desde a versão "2026-11-20".
 
 ## Elo dos técnicos (2026-11-18)
 
