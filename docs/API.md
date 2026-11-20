@@ -1542,6 +1542,10 @@ não pode desviar o pagamento. Código: `services/my_profile.py`, `services/user
      coordenadas antigas de casa saem (vale também para o `PATCH /technicians/{id}` da central). Parte do perfil
      técnico que mudou: as colunas e o carimbo `{at, via: "app"}` dela.
   7. Depois do commit, o aviso `profile.changed`.
+- Uma gravação por vez por técnico: antes do passo 1, o `PATCH` trava a linha do técnico (`SELECT … FOR UPDATE`, até o
+  fim da transação) e relê o cadastro do banco. Outro `PATCH` do mesmo técnico que chega junto (a gravação seguinte do
+  app quando a anterior passou dos 20 s, o técnico em dois aparelhos) espera e compara, carimba e monta o histórico
+  sobre o que o primeiro gravou: um não apaga o carimbo nem o histórico do outro.
 - Trocar o e-mail não encerra as sessões (a senha é a mesma): o login passa a ser o e-mail novo.
 - `POST /me/profile/photo` (multipart `file`; JPG, PNG ou WebP pelo conteúdo, até 2 MB) → `MyProfile`. O app manda a
   foto já recortada (quadrada) e reduzida (512 px). A anterior sai do disco quando nenhum outro usuário nem ficha de
@@ -1587,12 +1591,24 @@ Na web (cadastro do técnico), a senha aparece como "Senha redefinida (provisór
 **Central.**
 - `GET /technicians/{id}` (Técnicos, ver) → `TechnicianOut`; 404 "Técnico não encontrado" (também para quem não é
   técnico). Declarada depois das rotas fixas (`/regions`, `/nearby`, `/suggest`).
-- `GET /technicians/{id}/changes?limit=50` (1 a 200; Técnicos, ver) → `UserChange[]`, do mais novo para o mais antigo.
+- `GET /technicians/{id}/changes?limit=50&before=` (`limit` de 1 a 200; Técnicos, ver) → `UserChange[]`, do mais novo
+  para o mais antigo (`created_at DESC, id DESC`).
+  - Páginas (desde 2026-11-20): `before` = `"{created_at}|{id}"` da última linha recebida (o `created_at` como veio,
+    ISO com fuso) traz as `limit` linhas seguintes, mais antigas, sem repetir nem pular (o id desempata as do mesmo
+    instante). Sem `before`, ou vazio, as mais novas. Estragado (mais de 100 caracteres, separador errado, data sem
+    fuso ou fora da faixa, id que não é UUID): 422 `{"detail": "Página do histórico inválida. Recarregue a ficha."}`.
+    A API sem o parâmetro o ignora e devolve as mais novas de novo.
   - Com Pagamentos (Visualizar ou Editar), como acima.
   - Com Técnicos e sem Pagamentos (`commercial.payouts` Sem acesso): os itens `pix_holder` não vêm e o `from`/`to` de
     `pix` vira `"***"` (null continua null). A troca só do titular aparece como
     `{"field": "pix", "from": "***", "to": "***"}`. Na web, a chave aparece como "Chave PIX cadastrada", "Chave PIX
-    alterada" ou "Chave PIX removida", sem valor e sem titular.
+    alterada" ou "Chave PIX removida", sem valor e sem titular. A máscara vale em todas as páginas.
+  - Na web (aba Histórico da ficha), páginas de 50: a vista começa com 10 linhas e cada "Ver mais" mostra mais 20,
+    buscando a página seguinte quando as carregadas acabam, até a primeira linha (a troca antiga de PIX ou de e-mail
+    continua ao alcance, mesmo com muitas linhas do salvar ao tocar). As páginas se juntam sem repetir linha, e o "Ver
+    mais" some quando a página vem incompleta ou sem linha nova (com a API sem o `before`, nas 50 mais novas). Com a
+    página seguinte em erro, o aviso com "Tentar de novo" fica no lugar do botão. O tempo real e o salvar da ficha
+    releem as páginas já abertas.
 - `DELETE /technicians/{id}/pix` (Pagamentos, editar) → 204: tira tipo, chave, titular e data, com o histórico via
   central e o aviso `["pix"]`; sem chave, 204 sem histórico.
 - `TechnicianOut` ganha `has_pix` e `pix_updated_at` (a chave não vai na base técnica).
@@ -1601,6 +1617,10 @@ Na web (cadastro do técnico), a senha aparece como "Senha redefinida (provisór
 - Na web (Pagamentos), o extrato do WhatsApp (botão WhatsApp e "Copiar extrato") passa pelo endereço do wa.me: leva a
   chave com CPF e CNPJ mascarados como `core/pix.mask` (`CPF ***.456.789-**`, `CNPJ 12.345.678/****-**`); e-mail,
   celular e chave aleatória vão inteiros. "Copiar PIX" copia a chave crua.
+- Na web, os textos que mandam o técnico cadastrar a chave citam o caminho do app, Perfil › Configurações › Chave PIX: a
+  mensagem de "Pedir a chave" (Pagamentos) e de "Pedir no WhatsApp" (ficha do técnico), a linha "Chave PIX: não
+  cadastrada (cadastre no app, em Perfil › Configurações › Chave PIX)" do extrato, a dica do filtro "Sem chave PIX" em
+  Técnicos e a confirmação de "Remover chave".
 - `POST /payouts/pay`: o `payout_set` do pagamento (`data.action: "paid"`) ganha `data.pix`, a chave mascarada daquele
   momento (`"CPF ***.456.789-**"`), quando o técnico tem chave.
 - Rótulos dos erros de validação (`main.py`): `pix` "Chave PIX", `key_type` "Tipo da chave PIX", `holder_name`
@@ -1676,8 +1696,9 @@ itens e o catálogo), `schemas/my_profile.py` (as listas inteiras), `services/my
 - `ticket_offers.scope_read_at` (ver [Ofertas de OS](#ofertas-de-os-2026-11-18)).
 - Backfill: os técnicos com ficha aprovada recebem a disponibilidade, o transporte e as aptidões da ficha, via "ficha"
   (o mapa de "Aprovação da ficha", abaixo, copiado na migração; `tests/test_tech_profile.py` confere a cópia). Só
-  preenche quem ainda tem `tech_profile_stamps` vazio: rodar de novo não muda nada. O downgrade apaga o perfil técnico
-  e o catálogo.
+  preenche quem ainda tem `tech_profile_stamps` vazio: rodar de novo não muda nada. Disponibilidade ou aptidões da
+  ficha que não são lista (um texto JSON, um objeto, null) viram nada, como na aprovação. O downgrade apaga o perfil
+  técnico e o catálogo.
 - Sem índice novo: os filtros varrem só os técnicos (GIN em `tool_ids`/`availability` se a base passar de dezenas de
   milhares de técnicos). As colunas JSONB se gravam sempre com objetos novos (`user.skills = [...]`): mudar a lista
   no lugar não grava.
@@ -1692,10 +1713,16 @@ itens e o catálogo), `schemas/my_profile.py` (as listas inteiras), `services/my
 - Nível da aptidão (`SkillLevel`): os da ficha, `basico` Básico, `intermediario` Intermediário, `avancado` Avançado.
 - Nível da formação (`EducationLevel`): `high_school` Ensino médio, `technical` Técnico, `undergraduate` Graduação,
   `postgraduate` Pós-graduação, `certification` Certificação, `free_course` Curso livre.
-- Limites: 200 ferramentas (também o tamanho do catálogo), 28 turnos, 6 meios, 30 aptidões (nome de 2 a 80), 20
-  cursos (curso e instituição de 2 a 120), meses de "1950-01" até o mês atual (o servidor aceita até o atual + 1:
-  folga de fuso entre o aparelho e Brasília). Os textos se gravam limpos (NFC e espaços colapsados), e o tamanho conta
-  depois de limpar.
+- Limites: 200 ferramentas (também o tamanho do catálogo), 28 turnos (cada um com até 16 caracteres), 6 meios, 30
+  aptidões (nome de 2 a 80), 20 cursos (curso e instituição de 2 a 120), meses de "1950-01" até o mês atual (o servidor
+  aceita até o atual + 1: folga de fuso entre o aparelho e Brasília).
+- Textos (nome da aptidão, curso, instituição e nome da ferramenta) se gravam limpos (`clean`): saem os caracteres de
+  controle (categoria Cc, como U+0000) e de formatação (Cf: espaço de largura zero, BOM, marcas de direção como
+  U+202E), e tab, LF, VT, FF e CR viram espaço; depois, NFC e espaços colapsados. O tamanho conta depois de limpar:
+  nome só de invisíveis recebe a mensagem de vazio ("Informe o nome da aptidão"), e um U+0000 no curso sai do texto
+  (200). A comparação sem acento e sem maiúsculas (`fold`: aptidão e formação repetidas, nome repetido no catálogo)
+  limpa do mesmo jeito: "Lin<U+200B>ux" repete "Linux". A aprovação da ficha e a cópia da migração limpam igual, e o
+  app também (`cleanText` e `foldName` em `mobile/src/lib/techProfileForm.ts`).
 - Textos curtos, iguais na API e nas telas: "sáb · tarde", "seg a sex · manhã e tarde; sáb · manhã" (`slots_text` e
   `slotsText`), "Carro, Moto · com CNH" e "Nenhum · sem CNH" (`transport_text`), "02/2022 a 12/2023" e "desde 02/2024
   (em andamento)" (`education_period_text`).
