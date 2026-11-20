@@ -16,9 +16,9 @@ services/tech_profile.py): sem senha, nem a provisória trava; cada parte vem in
 quando muda de verdade, com a data e "app" na parte (tech_profile_stamps). Entra no histórico do
 cadastro e no aviso à central como as outras mudanças (sem aviso no sino da web).
 
-Uma gravação por vez por técnico: `update` trava a linha do usuário (SELECT ... FOR UPDATE) até o
-commit da rota e relê o cadastro do banco. Duas gravações juntas (o app que reenvia depois do tempo
-esgotado, o técnico em dois aparelhos) não apagam o carimbo nem o histórico uma da outra.
+Uma gravação por vez por técnico: `update` trava a linha do usuário (SELECT ... FOR UPDATE, até o
+fim da transação) e relê o cadastro do banco. Duas gravações juntas (o app que reenvia depois do
+tempo esgotado, o técnico em dois aparelhos) não apagam o carimbo nem o histórico uma da outra.
 
 Grupo, cargo, acesso ao app, papel, serviços, jornada e senha provisória continuam com a central;
 CPF, CNPJ/MEI e nascimento continuam só na ficha da homologação.
