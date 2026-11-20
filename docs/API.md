@@ -200,8 +200,9 @@ listas conta daí, e não da 1ª chegada, `arrived_at`)
 (`open_offers`: ofertas da OS esperando o técnico responder, pendentes e no prazo; toda a gestão recebe o número,
 e o técnico recebe 0. `next_offer_expires_at`: o menor `expires_at` entre essas ofertas, null se nenhuma tem prazo;
 sem valor, para toda a gestão; o técnico recebe null. Sem rotina de vencimento, a web relê a OS nesse horário.
-`accepted_offer`: `{accepted_at, scope_read_at|null}` da oferta aceita pelo responsável atual, sem valor, para toda a
-gestão; null sem ela, e o técnico recebe null. Ver [Ofertas de OS](#ofertas-de-os-2026-11-18).)
+`accepted_offer`: `{accepted_at, scope_read_at|null}` da oferta aceita pelo responsável atual (a mais recente, se ele
+aceitou mais de uma vez; a mesma consulta do `open_offers`), sem valor, para toda a gestão; null sem ela, e o técnico
+recebe null. Ver [Ofertas de OS](#ofertas-de-os-2026-11-18).)
 
 `CommentOut = {id, ticket_id, author:UserRef|null, body, is_internal, created_at}`
 `EventOut = {id, ticket_id, actor:UserRef|null, event_type, from_value, to_value, note, data, created_at}` — `event_type` ∈ `created, updated, status_changed, assigned, comment_added, worklog_added, attachment_added`
@@ -1775,7 +1776,9 @@ quando o histórico tem mudança, e uma comparação diferente devolveria 200 se
 - O nome repetido é conferido sem acento e sem maiúsculas ("Multimetro" = "Multímetro") antes de gravar; o banco
   (`uq_tool_catalog_name`) pega o nome exato de dois cadastros ao mesmo tempo, com a mesma mensagem.
 - Sem excluir e sem ordem manual. Renomear muda para todos (o técnico guarda o id). Desativar não mexe nos técnicos: a
-  ferramenta some do app, da ficha e das listas da central e volta para quem tinha marcado quando reativada.
+  ferramenta some do app, da ficha (`tool_ids`/`tools` só trazem as ativas) e do filtro da web (que lista só as
+  ativas), e volta para quem tinha marcado quando reativada. O `tool_id` de uma desativada, mandado direto na API (ou
+  num link `?ferramenta=` antigo), ainda acha quem a tem guardada.
 - Sem evento em tempo real: outra aba da central vê a mudança na próxima busca (até 1 min), e o app busca o catálogo
   ao abrir o Ferramental e guarda na memória por 10 min (puxar a tela busca de novo).
 - Ferramenta que sumiu do banco (a API não exclui; só apagando direto no banco) fica guardada nos técnicos como as

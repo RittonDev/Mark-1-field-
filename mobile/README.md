@@ -804,19 +804,42 @@ Patente) e a tela `src/app/elo.tsx`.
   comemora; a subida que chega com o app saindo da tela espera ele voltar; não há push.
 - **O que o técnico não vê**: outros técnicos, ranking, notas da central nem o que ela desconsiderou.
 
+## Sincronização (antiga Conta)
+
+Tela `src/app/conta.tsx`: a rota continua `/conta`, e o título é "Sincronização". Abre pela linha Sincronização do
+Perfil e de Configurações, pela faixa de conexão do topo, pela linha de pendências da OS e pela faixa vermelha de ações
+recusadas de Hoje (`openSync`, em [src/lib/navigation.ts](src/lib/navigation.ts)). `?secao=pendencias`, `avisos` ou
+`rastreamento` abre a tela já rolada até o cartão (a OS abre as pendências; a faixa de Hoje, os avisos), e o cartão fica
+no topo até o técnico mexer na tela.
+
+- **Sincronização**: conexão, atualização automática (o tempo real), última sincronização, ações e fotos para enviar,
+  **Em segundo plano**, o último erro, **Sincronizar agora** e **Baixar tudo de novo**.
+- **Itens para enviar**: a fila; a ação que o servidor falhou em processar 3 vezes pode ser descartada (falta de rede e
+  falha do envio inteiro não contam).
+- **Ações que a central não aceitou**: o motivo, **Abrir OS** e **OK**.
+- **Rastreamento da jornada**: o Termo de uso da localização, com a data do aceite, a situação, a última posição, as
+  posições aguardando envio e **Retirar aceite**.
+- **Notificações** (o mesmo cartão de Configurações › Notificações) e **Aparelho** (Push da central, o servidor da API
+  quando dá para trocar e a versão do app).
+- Saíram daqui o cartão Técnico (foto, nome, elo, Meu cadastro e senha), a Aparência, o Sair e a linha Aviso de
+  privacidade: a identidade e o Sair estão no Perfil; o cadastro, a senha e a Aparência, em Configurações.
+
 ## Aviso de privacidade
 
 Tela `/privacidade` ([src/app/privacidade.tsx](src/app/privacidade.tsx)), só de leitura.
 
 - **Texto**: `PRIVACY_NOTICE` de [src/lib/constants.ts](src/lib/constants.ts), o mesmo da ficha da homologação (cópia
-  idêntica da web), com "Atualizado em" pela data de `PRIVACY_VERSION`. Cita os dados do cadastro e a chave PIX, o
-  pagamento por PIX, a localização na jornada, as notas fiscais e o Elo.
-- **Onde abre**: na Conta (cartão Rastreamento da jornada, abaixo do Termo de uso da localização), no cartão Pagamento
-  do Meu cadastro, no fim da tela Enviar nota fiscal, no fim do "Como funciona" do Meu elo e no cartão de Hoje.
+  idêntica da web), com "Atualizado em 19/11/2026" (`PRIVACY_DATE`: a data de `PRIVACY_VERSION`, sem o ".2" de uma
+  segunda versão no mesmo dia). Cita os dados do cadastro e a chave PIX, o perfil técnico (aptidões, formação,
+  ferramental, meios de transporte e CNH, dias e turnos disponíveis, informado na ficha ou no app, que ajuda a central a
+  escolher quem convidar), o pagamento por PIX, a localização na jornada, as notas fiscais e o Elo; em "Seus direitos",
+  que o técnico aprovado atualiza o perfil técnico em Configurações.
+- **Onde abre**: no Perfil (linha Aviso de privacidade), no fim de Configurações › Chave PIX, no fim da tela Enviar nota
+  fiscal, no fim do "Como funciona" do Meu elo e no cartão de Hoje.
 - **Cartão em Hoje** ([src/components/PrivacyUpdateCard.tsx](src/components/PrivacyUpdateCard.tsx)): quando o texto
   muda (`PRIVACY_VERSION` diferente da versão que este técnico abriu), a aba Hoje mostra, depois da jornada e das
-  ofertas, "Aviso de privacidade atualizado" · "Agora ele fala da chave PIX, das notas fiscais e do Elo." com **Ler
-  aviso**. É discreto e não bloqueia nada. Abrir o aviso por qualquer caminho grava a versão como vista quando a tela
+  ofertas, "Aviso de privacidade atualizado" · "Agora ele fala do seu perfil técnico: ferramental, disponibilidade,
+  transporte, aptidões e formação." com **Ler aviso**. É discreto e não bloqueia nada. Abrir o aviso por qualquer caminho grava a versão como vista quando a tela
   termina de entrar (evento `transitionEnd` da pilha; sem ele, como na web, 600 ms depois de abrir): o cartão some com
   Hoje já coberto, sem mexer na tela durante a transição.
 - **Versão vista** ([src/lib/privacySeen.ts](src/lib/privacySeen.ts)): só no aparelho, por técnico, no
@@ -859,34 +882,60 @@ WebSocket /api/v1/ws?token= ── evento ticket.* ──► nova rodada de sync
 index.ts               entrada: expo-router + tarefas de segundo plano (rastreamento e sincronização, definidas antes das rotas, para o relançamento sem tela do Android) e, depois delas, o fim de sessão (sessionEnd.ts)
 src/
   app/                 rotas (expo-router)
-    _layout.tsx        sessão, tema, Stack com rotas protegidas, toasts
+    _layout.tsx        sessão, tema e "ocultar valores" (a splash espera os dois), Stack com rotas protegidas, toasts
     login.tsx          login + servidor da API
-    trocar-senha.tsx   primeiro acesso (senha provisória)
-    index.tsx          tela inicial: jornada + Hoje / Agenda (calendário) / Concluídas
+    trocar-senha.tsx   primeiro acesso (senha provisória) e Configurações › Senha
+    index.tsx          tela inicial: jornada + Hoje / Agenda (calendário) / Faturamento / Perfil
     ticket/[id].tsx    detalhe, ações e abas
-    oferta/[id].tsx    oferta de OS com preço: escopo, "Aceitar por R$ X" ou "Recusar"
+    oferta/[id].tsx    oferta de OS com preço (sem o cabeçalho nativo: voltar redondo): mapa da área, valor, duração e data, "Serviços 1/1 lido", WhatsApp, "Aceitar por R$ X" ou "Recusar"
+    faturamento/[mes].tsx  um mês do Faturamento: a situação, os valores, as notas fiscais e as OS
+    historico.tsx      Histórico de atendimentos: as OS concluídas por mês, com rolagem infinita (/me/history)
+    estatisticas.tsx   Estatísticas: o total, a chegada no horário e os quatro gráficos de 12 meses (/me/stats)
+    elo.tsx            Meu elo: a medalha, risco, o que falta para a próxima faixa, números, o que pesou e "Como funciona"
+    conta.tsx          Sincronização (a rota continua /conta): sincronização, fila, avisos recusados, rastreamento, notificações e aparelho (?secao=)
+    configuracoes/     Configurações: index.tsx (o menu em 4 grupos); o cadastro (foto, dados-pessoais, contato, endereco, pix); o perfil técnico (disponibilidade, transporte, aptidoes, formacao, ferramental); notificacoes
+    meu-cadastro.tsx   só redireciona para /configuracoes (links antigos)
     termo-rastreamento.tsx  termo de ciência do rastreamento (LGPD)
-    conta.tsx          técnico (foto, Meu cadastro, elo, senha), sincronização, fila, avisos, rastreamento e aviso de privacidade, notificações, aparência, sair
-    meu-cadastro.tsx   Meu cadastro: foto, dados, endereço e chave PIX (e-mail e PIX com a senha atual)
     privacidade.tsx    Aviso de privacidade (LGPD), só leitura; abrir grava a versão vista pelo técnico
-    elo.tsx            Meu elo: brasão, risco, o que falta para a próxima faixa, números, o que pesou e "Como funciona"
     nota-fiscal.tsx    Enviar nota fiscal: arquivo, número, emissão, valor, competência e as OS que a nota cobre
   components/          UI (marca, cartões, calendário, jornada, diálogo de transição, abas da OS)
     Text.tsx           Text do app: aplica a Manrope no peso do estilo (use este, não o do react-native)
     motion.tsx         entrada em cascata, transição de layout, PressableScale (0,97 com mola), Pulse
     Skeleton.tsx FieldStepper.tsx SuccessHost.tsx TabBar.tsx ActionSheet.tsx Icon.tsx RouteMapPattern.tsx
-    NotificationsCard.tsx  Conta > Notificações (lembretes, permissão, alarme exato) e "Em segundo plano"
-    Avatar.tsx         foto do técnico ou as iniciais (topo da tela inicial, Conta, Meu cadastro)
-    PixCard.tsx        Ganhos > Recebimento por PIX (atalho para o Meu cadastro)
+    ProfileView.tsx    aba Perfil: identidade, o cartão com o total e a patente, a lista e a versão
+    HeroPair.tsx       cartão de duas metades do Perfil e das Estatísticas
+    MenuRow.tsx        linhas e grupos das listas do Perfil e de Configurações (resumo à direita, pílula, Sair em vermelho)
+    MonthBars.tsx      gráfico de colunas de 12 meses das Estatísticas (as contas em lib/monthBars.ts)
+    NotificationsCard.tsx  cartão Notificações (lembretes, permissão, alarme exato), a linha Push da central, o resumo da linha de Configurações e "Em segundo plano"
+    Avatar.tsx         foto do técnico ou as iniciais (topo da tela inicial, Perfil, Configurações)
     PrivacyUpdateCard.tsx  Hoje > "Aviso de privacidade atualizado" (lê a versão vista de lib/privacySeen.ts)
-    InvoicesCard.tsx   Ganhos > Notas fiscais do mês (situação, motivo da recusa, abrir arquivo, apagar, enviar)
-    LevelBadge.tsx     brasão do elo (escudo com as marcas da faixa), selo e o chip do topo de Hoje
-  theme/theme.ts       paleta Maxx Field, claro/escuro, preferência do técnico
+    InvoicesCard.tsx   Faturamento > mês > Notas fiscais (situação, motivo da recusa, abrir arquivo, apagar, enviar)
+    LevelBadge.tsx     a patente (medalha do elo), o selo e o chip do topo de Hoje
+    Offers.tsx         "Ofertas para você" em Hoje e os blocos da tela da oferta (duração e data, área, serviços)
+    offer/OfferHero.tsx  topo da oferta: o desenho de mapa da área com o chip bairro · cidade
+    RoundBackButton.tsx  voltar redondo das telas sem o cabeçalho nativo (a oferta)
+    billing/           aba Faturamento: BillingView (a aba), BillingTotals, PixRow, BillingMonthCard, StateIcon, SituationBox, MonthEarnings (o mês) e HideValuesButton (o olho)
+    settings/          peças de Configurações: ChoiceChips, CheckCard, Checkbox, DayCard, SkillSheet, EducationSheet, MonthField, FormSheet, FixedFooter, OfflineNotice, ProfileGate, ProfileFormScreen, PasswordSheet e SavingStatus
+  theme/theme.ts       paleta Maxx Field, claro/escuro, preferência do técnico (viz1 e vizGrid: os gráficos)
   theme/fonts.ts       Manrope (pesos 400–700) e o mapeamento de fontWeight para a família
   lib/
     tracking.ts trackingTask.ts  jornada, coleta, fila de pontos e tarefa de segundo plano
     account.ts         /auth/me e troca de senha
-    profile.ts         Meu cadastro só na memória (GET/PATCH /me/profile) e a foto reduzida no aparelho (expo-image-manipulator)
+    profile.ts         o cadastro só na memória (GET/PATCH /me/profile, com o perfil técnico), as gravações em fila e a foto reduzida no aparelho (expo-image-manipulator)
+    profileForm.ts useProfileForm.ts  telas do cadastro em Configurações: as regras e os resumos (puro, com sonda) e o estado do formulário
+    avatarFlow.ts      Foto do perfil: tirar, escolher, remover, o andamento e a recuperação no Android
+    technicalProfile.ts  perfil técnico: o estado das telas de Atendimento e os catálogos na memória (ferramental e sugestões de aptidão)
+    techProfileForm.ts  regras do perfil técnico e o redutor do salvar ao tocar (puro, com sonda)
+    autoSave.ts        salvar ao tocar de Disponibilidade, Transporte e Ferramental (0,6 s, um envio por vez)
+    logout.ts          o Sair do Perfil: confirmação, "Enviar e sair" e o andamento
+    navigation.ts      openSync (a Sincronização com ?secao=) e openTicketAnywhere (a OS do aparelho ou da central)
+    syncSummary.ts     o resumo da linha Sincronização (Perfil e Configurações)
+    net.ts             sem rede ou erro do servidor, na hora de salvar
+    stats.ts           Estatísticas: /me/stats guardado (kv my_stats) e a busca
+    history.ts historySections.ts  Histórico: /me/history (primeira página no kv my_history) e as seções por mês (puro, com sonda)
+    monthBars.ts       contas do gráfico das Estatísticas (puro, com sonda)
+    earnings.ts        Faturamento: os meses (kv earnings:months) e o mês (kv earnings:AAAA-MM)
+    hideValues.ts      "ocultar valores" do Faturamento, por aparelho (SecureStore mc_hide_values)
     privacySeen.ts     versão do aviso de privacidade vista por técnico (Keychain/Keystore), lida na abertura e no login
     pix.ts masks.ts    chave PIX por tipo (regras e mensagens de backend/app/core/pix.py) e máscaras de CPF, CNPJ, CEP e celular
     types.ts constants.ts workflow.ts   copiados de frontend/src/lib (manter iguais)
@@ -901,17 +950,20 @@ src/
     onsiteAlerts.ts    notificações locais do tempo na loja
     backgroundSync.ts  sincronização fora da tela (jornada e tarefa periódica); .web.ts sem efeito
     sync.ts            motor de sync, fila, fotos, gatilhos
-    offers.ts          ofertas de OS: lista guardada, prazo pelo relógio do servidor, "Escopo lido" e avisos
-    invoices.ts        notas fiscais: /me/invoices (lista guardada por competência, envio, exclusão, abrir arquivo) e a versão que relê Ganhos
+    offers.ts          ofertas de OS: lista guardada, prazo pelo relógio do servidor, "Escopo lido" (com a hora que vai no aceite) e avisos
+    invoices.ts        notas fiscais: /me/invoices (lista guardada por competência, envio, exclusão, abrir arquivo) e a versão que relê o Faturamento
     invoiceFile.ts     arquivo da nota: seletor do sistema ou foto, cópia no cache; .web.ts com <input type="file">
-    level.ts           Meu elo: o elo guardado (kv my_level), leitura nas telas, comemoração da subida e datas
+    level.ts           Meu elo: o elo guardado (kv my_level), leitura nas telas, comemoração da subida (com a medalha) e datas
     realtime.ts        WebSocket
     sla.ts             porta de backend/app/services/sla.py::compute_sla_status
     device.ts          POST/DELETE /devices (o servidor diz se o push chega: live ou simulated)
+tests/                 sondas das regras puras (node:test); resolve-ts.mjs registra o gancho que resolve "./masks" para "./masks.ts"
 ```
 
 `types.ts`, `constants.ts` e `workflow.ts` são cópias exatas dos arquivos da web. Ao mudar regras de
 status ou tipos no backend, atualize os três lugares (backend, `frontend/src/lib`, `mobile/src/lib`).
+Saíram nesta versão: `components/EarningsView.tsx` (virou `components/billing/`), `components/PixCard.tsx` (virou
+`billing/PixRow.tsx`) e o formulário de `app/meu-cadastro.tsx` (virou `app/configuracoes/`).
 
 ## Verificações
 
@@ -927,10 +979,26 @@ npm run lint
 npx expo export --platform android
 ```
 
+As **sondas** (`tests/*.test.mjs`) testam as regras puras com o `node:test` (Node 22.6 ou mais, que tira os tipos do
+TypeScript): a chave PIX, as telas do cadastro, o perfil técnico e o salvar ao tocar, o gráfico das Estatísticas, as
+seções do Histórico e as datas e a área da oferta. O módulo testado não importa React nem React Native (só `import
+type`), e o gancho `tests/resolve-ts.mjs` resolve os imports relativos sem extensão (`./masks` → `./masks.ts`):
+
+```bash
+node --experimental-strip-types --import ./tests/resolve-ts.mjs --test "tests/*.test.mjs"
+```
+
+`types.ts`, `constants.ts` e `workflow.ts` iguais aos da web (sem saída; a sonda `frontend/tests/mirror.test.mjs`
+confere o mesmo):
+
+```bash
+for f in types constants workflow; do cmp ../frontend/src/lib/$f.ts src/lib/$f.ts; done
+```
+
 Sem Node na máquina, rode tudo num container (o drive D: não monta no Docker Desktop daqui):
 
 ```bash
-docker create --name mc-mobile-check -w /app node:22-alpine sh -c "npm ci && npx tsc --noEmit && npx expo lint && npx expo export --platform android"
+docker create --name mc-mobile-check -w /app node:22-alpine sh -c "npm ci && npx tsc --noEmit && npx expo lint && npx expo export --platform android && node --experimental-strip-types --import ./tests/resolve-ts.mjs --test 'tests/*.test.mjs'"
 ```
 
 ```bash
@@ -960,6 +1028,11 @@ docker start -a mc-mobile-check
   mais; no iOS, rara). Com o app fechado à força pelo técnico, ou no iPhone fora da jornada, OS nova e oferta só
   aparecem quando o app abre. Avisar na hora exige o push real (FCM, ver Push acima), ainda desligado. Um lembrete de
   uma OS mudada enquanto o aparelho não sincronizou ainda sai com o horário antigo.
+- **A API sobe antes do app.** O perfil técnico, o ferramental, as Estatísticas, o Histórico e os meses do
+  Faturamento precisam da API nova. Com a antiga, o app novo mostra "Indisponível no momento" nas telas de Atendimento
+  (e "Indisponível" nas linhas de Configurações), as mensagens de servidor antigo nas Estatísticas e no Histórico, "—"
+  no total do Perfil e "Não foi possível carregar o faturamento." na aba Faturamento. A API nova com o app antigo
+  funciona.
 - Rótulos e transições vêm das constantes copiadas da web, não de `GET /meta`; as ações exibidas vêm de
   `allowed_transitions` do servidor (recalculadas no aparelho só depois de uma ação offline).
 - Sem assinatura do cliente, edição dos dados da OS (`update`) ou abertura de OS pelo app.
