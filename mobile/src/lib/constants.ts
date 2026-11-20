@@ -702,31 +702,15 @@ export interface LevelTierInfo {
   at: string;
   /** Cor da faixa (barra de progresso do Meu elo). */
   color: { light: string; dark: string };
-  /** @deprecated Sai no fechamento desta construção: a medalha (LEVEL_MEDAL_*) substitui. */
-  cssVar: string;
 }
 
 /** Faixa do elo do técnico: o nome vai sempre escrito junto da medalha. */
 export const LEVEL_TIER: Record<LevelTier, LevelTierInfo> = {
-  bronze: { label: "Bronze", to: "ao Bronze", at: "no Bronze", color: { light: "#A9622B", dark: "#D08A52" }, cssVar: "--tier-bronze" },
-  silver: { label: "Prata", to: "à Prata", at: "na Prata", color: { light: "#6E7B8C", dark: "#AEB8C6" }, cssVar: "--tier-silver" },
-  gold: { label: "Ouro", to: "ao Ouro", at: "no Ouro", color: { light: "#A87A00", dark: "#E2B33C" }, cssVar: "--tier-gold" },
-  diamond: { label: "Diamante", to: "ao Diamante", at: "no Diamante", color: { light: "#5B4BDB", dark: "#9D8CFF" }, cssVar: "--tier-diamond" },
+  bronze: { label: "Bronze", to: "ao Bronze", at: "no Bronze", color: { light: "#A9622B", dark: "#D08A52" } },
+  silver: { label: "Prata", to: "à Prata", at: "na Prata", color: { light: "#6E7B8C", dark: "#AEB8C6" } },
+  gold: { label: "Ouro", to: "ao Ouro", at: "no Ouro", color: { light: "#A87A00", dark: "#E2B33C" } },
+  diamond: { label: "Diamante", to: "ao Diamante", at: "no Diamante", color: { light: "#5B4BDB", dark: "#9D8CFF" } },
 };
-
-/** @deprecated Sai no fechamento desta construção: a medalha (LEVEL_MEDAL_*) substitui. */
-export const LEVEL_SHIELD_PATH = "M12 2.5 19.5 5.3v6.1c0 4.6-3.1 8.6-7.5 10.1-4.4-1.5-7.5-5.5-7.5-10.1V5.3z";
-
-/** @deprecated Sai no fechamento desta construção: a medalha (LEVEL_MEDAL_*) substitui. */
-export const LEVEL_MARKS: Record<LevelTier, string[]> = {
-  bronze: ["M8.5 11.5 12 13.6l3.5-2.1"],
-  silver: ["M8.5 9.6 12 11.7l3.5-2.1", "M8.5 13.2 12 15.3l3.5-2.1"],
-  gold: ["M8.5 8 12 10.1 15.5 8", "M8.5 11.3 12 13.4l3.5-2.1", "M8.5 14.6 12 16.7l3.5-2.1"],
-  diamond: ["M9.2 10.2 10.6 8h2.8l1.4 2.2L12 15.5z", "M9.2 10.2h5.6"],
-};
-
-/** @deprecated Sai no fechamento desta construção: a medalha (LEVEL_MEDAL_*) substitui. */
-export const LEVEL_MARK_COLOR = { light: "#FFFFFF", dark: "#141519" } as const;
 
 // --------------------------------------------------------------------------- patente: a medalha do elo
 
