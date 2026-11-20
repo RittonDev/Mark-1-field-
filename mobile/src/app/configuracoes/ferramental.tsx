@@ -76,7 +76,9 @@ export default function ToolsScreen() {
     void reloadToolCatalog();
   }
 
-  const search = query.trim();
+  // A busca só vale com a caixa à vista (a lista relida pode ficar curta e a caixa sumir).
+  const searchable = Boolean(tools && tools.length > TOOL_SEARCH_AFTER);
+  const search = searchable ? query.trim() : "";
   const shown = tools ? filterTools(tools, search) : [];
 
   let list: ReactNode;
@@ -95,7 +97,7 @@ export default function ToolsScreen() {
   } else {
     list = (
       <>
-        {tools.length > TOOL_SEARCH_AFTER ? (
+        {searchable ? (
           <Input
             icon="search"
             value={query}
