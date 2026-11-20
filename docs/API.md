@@ -1615,9 +1615,260 @@ e a ficha grava a do servidor no aceite).
   {PRIVACY_DATE}": não grava ciência nem pede aceite de novo. Na versão nova, o cartão de Hoje avisa "Agora ele fala do
   seu perfil técnico: ferramental, disponibilidade, transporte, aptidões e formação."
 
+## Perfil técnico (2026-11-19)
+
+**Por quê.** O técnico informa no app (Perfil › Configurações, grupo Atendimento) o que ajuda a central a escolher quem
+chamar: o ferramental que tem, os dias e turnos em que está disponível, o transporte e a CNH, as aptidões e a formação.
+Só ele muda; a central vê na aba **Perfil técnico** da ficha em Técnicos, filtra a base e mantém o catálogo de
+ferramentas. Código: `services/tech_profile.py` (regras, textos e o sinal da sugestão), `schemas/tech_profile.py` (os
+itens e o catálogo), `schemas/my_profile.py` (as listas inteiras), `services/my_profile.py`, `services/user_history.py`,
+`api/routes/catalog.py` (seção "ferramental dos técnicos"), `services/technicians.py`, `services/suggestions.py` e
+`services/onboarding.py`.
+
+**Dados** (migração `f5a7c9e1b3d6`, depois de `e4b6d8f0a2c3`).
+- `users` ganha colunas, todas NOT NULL com default (a importação do Field Control e os INSERT em lote não passam por
+  elas):
+
+  | Coluna | Default | Conteúdo |
+  |---|---|---|
+  | `tool_ids` | `[]` | ids (texto) do catálogo, ordenados pelo texto; inclui os desativados que já estavam marcados (ficam guardados) |
+  | `availability` | `[]` | turnos `"dia:turno"` (`"sat:afternoon"`), sem repetir, na ordem da grade |
+  | `transport_modes` | `[]` | meios de transporte, na ordem da lista |
+  | `has_driver_license` | `false` | CNH (só vale com a parte `transport` informada) |
+  | `skills` | `[]` | `[{name, level, since}]`, já ordenadas |
+  | `education` | `[]` | `[{id, course, level, institution, start, end}]`, já ordenadas |
+  | `tech_profile_stamps` | `{}` | `{parte: {at, via}}`, só das partes já informadas |
+
+- Tabela `tool_catalog` (modelo `TechnicianTool`, em `models/catalog.py`): `id`, `name` (até 80, único exato:
+  `uq_tool_catalog_name`), `is_active` (padrão true), `created_at` e `updated_at`. Começa com 20 ferramentas de TI de
+  campo (`DEFAULT_TOOLS`): Alicate de corte, Alicate de crimpar, Alicate de inserção (punch down), Caneta óptica (VFL),
+  Escada, Etiquetadora, Ferro de solda, Furadeira, HD externo, Jogo de chaves Phillips e fenda, Kit de limpeza,
+  Lanterna, Localizador de cabos, Máquina de fusão de fibra óptica, Multímetro, Notebook com cabo console,
+  Parafusadeira, Pendrive de instalação, Testador de cabo de rede e Trena.
+- `ticket_offers.scope_read_at` (ver [Ofertas de OS](#ofertas-de-os-2026-11-18)).
+- Backfill: os técnicos com ficha aprovada recebem a disponibilidade, o transporte e as aptidões da ficha, via "ficha"
+  (o mapa de "Aprovação da ficha", abaixo, copiado na migração; `tests/test_tech_profile.py` confere a cópia). Só
+  preenche quem ainda tem `tech_profile_stamps` vazio: rodar de novo não muda nada. O downgrade apaga o perfil técnico
+  e o catálogo.
+- Sem índice novo: os filtros varrem só os técnicos (GIN em `tool_ids`/`availability` se a base passar de dezenas de
+  milhares de técnicos). As colunas JSONB se gravam sempre com objetos novos (`user.skills = [...]`): mudar a lista
+  no lugar não grava.
+
+**Valores e limites** (`services/tech_profile.py`; os rótulos e os limites são os mesmos de `lib/constants.ts`).
+- Dias (`Weekday`): `mon` a `sun`. Turnos (`DayPeriod`), em horas do fuso da operação, sem o fim: `morning` manhã
+  06h–12h, `afternoon` tarde 12h–18h, `evening` noite 18h–24h e `night` madrugada 00h–06h **do próprio dia**
+  (`sat:night` é sábado das 00h às 06h). São 28 turnos (`ALL_SLOTS`), na ordem da grade: de segunda a domingo; manhã,
+  tarde, noite, madrugada. Não é a jornada (o turno com GPS) nem o `work_schedule` da central.
+- Meios (`TransportMode`): `car` Carro, `motorcycle` Moto, `bicycle` Bicicleta, `public_transport` Transporte público,
+  `ride_app` Carro de aplicativo, `on_foot` A pé.
+- Nível da aptidão (`SkillLevel`): os da ficha, `basico` Básico, `intermediario` Intermediário, `avancado` Avançado.
+- Nível da formação (`EducationLevel`): `high_school` Ensino médio, `technical` Técnico, `undergraduate` Graduação,
+  `postgraduate` Pós-graduação, `certification` Certificação, `free_course` Curso livre.
+- Limites: 200 ferramentas (também o tamanho do catálogo), 28 turnos, 6 meios, 30 aptidões (nome de 2 a 80), 20
+  cursos (curso e instituição de 2 a 120), meses de "1950-01" até o mês atual (o servidor aceita até o atual + 1:
+  folga de fuso entre o aparelho e Brasília). Os textos se gravam limpos (NFC e espaços colapsados), e o tamanho conta
+  depois de limpar.
+- Textos curtos, iguais na API e nas telas: "sáb · tarde", "seg a sex · manhã e tarde; sáb · manhã" (`slots_text` e
+  `slotsText`), "Carro, Moto · com CNH" e "Nenhum · sem CNH" (`transport_text`), "02/2022 a 12/2023" e "desde 02/2024
+  (em andamento)" (`education_period_text`).
+
+**`GET /me/profile`** (papel `technician`) → `MyProfile` com o perfil técnico:
+- `tool_ids`: só as ferramentas **ativas** do catálogo, na ordem do nome;
+- `availability`: na ordem da grade;
+- `transport: {modes, driver_license} | null` (null: nunca informou);
+- `skills: [{name, level, since}]`, com `since` "AAAA-MM-DD" (o dia, em Brasília, em que a aptidão entrou no perfil): o
+  "desde" mais novo primeiro, depois o nome;
+- `education: [{id, course, level, institution, start, end}]`, meses "AAAA-MM", `end` null em andamento: os em
+  andamento primeiro, depois o fim e o início mais novos, depois o curso;
+- `tech_profile_updated: {tools, availability, transport, skills, education}`, cada uma `{at, via: "app" | "ficha"} |
+  null` (null: nunca informada).
+
+```json
+{
+  "id": "…", "name": "Tecnico Alfa", "email": "tecnico.alfa@exemplo.com", "...": "...",
+  "tool_ids": ["5b1e…", "9c40…"],
+  "availability": ["mon:morning", "mon:afternoon", "sat:morning"],
+  "transport": {"modes": ["car"], "driver_license": true},
+  "skills": [{"name": "Windows 10/11", "level": "intermediario", "since": "2026-11-12"}],
+  "education": [{"id": "1f0c…", "course": "Técnico em redes", "level": "technical",
+                 "institution": "Escola Exemplo", "start": "2024-02", "end": null}],
+  "tech_profile_updated": {
+    "tools": {"at": "2026-11-19T14:02:11Z", "via": "app"},
+    "availability": {"at": "2026-11-12T10:00:00Z", "via": "ficha"},
+    "transport": {"at": "2026-11-12T10:00:00Z", "via": "ficha"},
+    "skills": {"at": "2026-11-12T10:00:00Z", "via": "ficha"},
+    "education": null
+  }
+}
+```
+
+**`PATCH /me/profile`** com `tool_ids`, `availability`, `transport`, `skills` ou `education` (`MyProfileUpdate`):
+- Nenhuma parte pede `current_password`, e a senha provisória não trava (só e-mail e PIX, como antes).
+- Cada parte vem **inteira** e substitui a gravada: `[]` ou null limpa (menos `transport`). Só conta o que veio no
+  corpo; o app manda uma parte por vez.
+- A resposta é o `MyProfile` normalizado. Sem nada novo: 200, sem histórico, sem carimbo e sem aviso. A parte que muda
+  de verdade ganha o carimbo `{at: agora, via: "app"}`.
+
+| Parte | Normaliza | Muda quando |
+|---|---|---|
+| `tool_ids` (ids de `GET /technician-tools`, até 200) | repetidos contam uma vez; id **desativado** é ignorado; os desativados já gravados ficam guardados (voltam se a central reativar) | o conjunto final (os enviados ativos mais os guardados desativados) é outro |
+| `availability` (até 28) | sem repetir, na ordem da grade | o conjunto é outro; `[]` sem a parte informada não muda nada |
+| `transport` (`{modes, driver_license}`, até 6 meios) | meios sem repetir, na ordem da lista | a parte nunca foi informada, ou (meios, CNH) mudou. `{modes: [], driver_license: false}` na 1ª vez é informação ("Nenhum · sem CNH") |
+| `skills` (`[{name, level}]`, até 30) | nome limpo; o servidor põe o `since`: o de uma aptidão gravada com o mesmo nome (sem acento e sem maiúsculas) fica, e a nova ganha hoje (dia de Brasília) | o conjunto de (nome, nível) é outro: trocar só a grafia ("linux" → "Linux") grava, e o "desde" fica |
+| `education` (`[{id?, course, level, institution, start, end?}]`, até 20) | textos limpos; `end` vazio = null; item com o `id` de um curso gravado mantém o id; sem `id` (ou com um desconhecido), reaproveita o id de um gravado igual (curso, nível, instituição, início e fim) que nenhum outro item citou, senão ganha um novo | o conjunto de (id, curso, nível, instituição, início, fim) é outro |
+
+Reordenar não é mudança. As comparações são as mesmas do histórico do cadastro (`tech_profile.wanted` e
+`user_history.snapshot` usam `tool_set`, `slot_set`, `transport_key`, `skill_set` e `education_set`): a rota só grava
+quando o histórico tem mudança, e uma comparação diferente devolveria 200 sem gravar.
+
+```json
+{"tool_ids": ["5b1e…", "9c40…"]}
+{"availability": ["mon:morning", "mon:afternoon", "sat:morning"]}
+{"transport": {"modes": ["car", "motorcycle"], "driver_license": true}}
+{"skills": [{"name": "Windows 10/11", "level": "avancado"}, {"name": "Fibra óptica", "level": "basico"}]}
+{"education": [{"id": null, "course": "Técnico em redes", "level": "technical", "institution": "Escola Exemplo",
+                "start": "2024-02", "end": null}]}
+```
+
+**Erros (422).** Os de validação vêm em `detail` como lista, com `msg` e `label`; a ferramenta que não existe vem como
+`{"detail": "..."}`.
+
+| Situação | Mensagem | `label` |
+|---|---|---|
+| id que não existe no catálogo | `{"detail": "Ferramenta não encontrada. Atualize a lista."}` | — |
+| id que não é UUID | "Identificador inválido" | Ferramental |
+| mais de 200 ferramentas, 28 turnos, 6 meios, 30 aptidões ou 20 cursos | "No máximo N itens" | Ferramental, Disponibilidade, Meios de transporte, Aptidões, Formação |
+| turno fora da grade | "Turno desconhecido: sat:lunch" (o primeiro da lista) | Disponibilidade |
+| `transport: null` | "Informe os meios de transporte" | Transporte |
+| meio fora da lista | "Escolha uma das opções: …" | Meios de transporte |
+| `driver_license` ausente / null | "Campo obrigatório" / "Informe sim ou não" | CNH |
+| nome da aptidão com menos de 2 caracteres, depois de limpo | "Informe o nome da aptidão" | Nome |
+| nome da aptidão com mais de 80 | "No máximo 80 caracteres" | Nome |
+| nível fora da lista | "Escolha uma das opções: basico, intermediario ou avancado" (na formação, os 6 códigos) | Nível |
+| aptidão repetida (sem acento e sem maiúsculas) | "Aptidão repetida: Linux" (o nome do item que repete, limpo) | Aptidões |
+| curso / instituição com menos de 2 | "Informe o curso" / "Informe a instituição" | Curso / Instituição |
+| curso ou instituição com mais de 120 | "No máximo 120 caracteres" | Curso / Instituição |
+| mês fora de AAAA-MM (mês de 01 a 12) | "Mês inválido: use AAAA-MM" | Início / Fim |
+| mês antes de 1950-01 | "Confira o ano" | Início / Fim |
+| mês depois do atual + 1 (Brasília) | "Use um mês até o atual" | Início / Fim |
+| fim antes do início (início igual ao fim vale: curso de um mês) | "O fim não pode ser antes do início" | Formação |
+| o mesmo `id` duas vezes, ou o mesmo curso, instituição (sem acento e sem maiúsculas), nível e início | "Formação repetida: Técnico em redes" | Formação |
+| chave a mais num item (`since`, `added_at`…) ou no `transport` | "Campo não aceito" | — |
+
+**Ferramental: o catálogo** (`api/routes/catalog.py`, seção "ferramental dos técnicos").
+
+| Rota | Quem | Entrada | Resposta | Erros |
+|---|---|---|---|---|
+| `GET /technician-tools?active=` | a gestão e o técnico (`StaffUser`) | `active` (só a gestão: true as ativas, false as inativas; sem ele, todas) | 200 `TechnicianTool[] = [{id, name, is_active, technicians}]`, em ordem alfabética (sem acento e sem maiúsculas) | 401; 403 (cliente) |
+| `POST /technician-tools` | Configurações em Editar (`setup.settings`) | `{name}` (limpo, 2 a 80) | 201 `TechnicianTool`, já ativa, com `technicians: 0` | 422 "Informe o nome da ferramenta" / "No máximo 80 caracteres" (`label` "Nome"); 409 "Já existe uma ferramenta com este nome"; 422 "O catálogo aceita até 200 ferramentas" (ativas e inativas); 403 `MODULE_FORBIDDEN` |
+| `PATCH /technician-tools/{tool_id}` | Configurações em Editar | `{name?, is_active?}` (null é ignorado; chave a mais: "Campo não aceito") | 200 `TechnicianTool` | 404 "Ferramenta não encontrada"; 409 nome repetido (a própria não conta); 422 nome; 403 `MODULE_FORBIDDEN` |
+
+- O técnico recebe só as ativas, com `technicians: null`, e o `active` é ignorado para ele. A gestão recebe em
+  `technicians` quantos técnicos (papel técnico, ativos ou não) marcaram cada uma: a mesma regra do filtro `tool_id` de
+  `GET /technicians`, cuja lista padrão mostra todas as situações (o número bate com o que o link abre).
+- O nome repetido é conferido sem acento e sem maiúsculas ("Multimetro" = "Multímetro") antes de gravar; o banco
+  (`uq_tool_catalog_name`) pega o nome exato de dois cadastros ao mesmo tempo, com a mesma mensagem.
+- Sem excluir e sem ordem manual. Renomear muda para todos (o técnico guarda o id). Desativar não mexe nos técnicos: a
+  ferramenta some do app, da ficha e das listas da central e volta para quem tinha marcado quando reativada.
+- Sem evento em tempo real: outra aba da central vê a mudança na próxima busca (até 1 min), e o app relê o catálogo
+  ao abrir o Ferramental (guarda na memória por 10 min).
+- Ferramenta que sumiu do banco (a API não exclui; só apagando direto no banco) fica guardada nos técnicos como as
+  desativadas, e o histórico do cadastro a mostra como "Ferramenta removida".
+- Na web, Configurações › seção **Técnicos** › cartão **Ferramental**: a lista com Ferramenta, Técnicos ("{n}
+  técnicos" abre `/tecnicos?ferramenta={id}`), Situação e Editar, a busca a partir de 13 ferramentas, "Nova ferramenta"
+  e o diálogo com "Nome" e "Ativa". Com Configurações só em Visualizar, a lista fica sem os botões. Contra uma API sem
+  estas rotas (404), o cartão mostra "O servidor ainda não tem o ferramental. Tente de novo mais tarde.".
+
+**Central** (Técnicos, ver).
+- `TechnicianOut`, na lista e no detalhe: `tool_ids` (só as ativas, na ordem do nome), `availability`, `transport`
+  (null: nunca informou), `skills` (agora do perfil técnico, com o `since`), `education_count` e
+  `tech_profile_updated_at` (a parte mudada por último; null: nada informado). `service_areas` e `application_id`
+  continuam da ficha aprovada.
+- Só no detalhe (`GET /technicians/{id}` e as respostas de um técnico: `PATCH`, foto, redefinição de senha e criação;
+  null na lista): `tools: Ref[]` (as ativas, em ordem alfabética), `education` e `tech_profile_updated` (as cinco
+  datas).
+- `GET /technicians` filtra por `tool_id` (quem marcou a ferramenta; id inválido: 422 "Identificador inválido"), `day`
+  (`mon` a `sun`) e `period` (`morning`, `afternoon`, `evening`, `night`), cada um opcional: os dois juntos, aquele
+  turno daquele dia; só o dia, qualquer turno dele; só o turno, em qualquer dia. Quem nunca informou a disponibilidade
+  não entra quando há `day` ou `period`. Valor fora da lista: 422 "Escolha uma das opções: …" (`label` "Dia" /
+  "Turno"). Os filtros entram no `X-Total-Count`.
+- `PATCH /technicians/{id}` não edita o perfil técnico (ignora esses campos, como qualquer campo desconhecido).
+- Custo: +1 consulta (o catálogo, até 200 linhas) por chamada, e só quando algum técnico da página marcou ferramenta.
+- Na web (Técnicos), a ficha abre em abas: **Cadastro**, **Perfil técnico**, **Elo** e **Histórico**. A aba Perfil
+  técnico mostra cada parte com a data ("Informado pelo técnico em 19/11/2026", "Da ficha da homologação,
+  12/11/2026" ou "Não informado"), a grade de 7 dias × 4 turnos ("{n} de 28 turnos"), o ferramental, o transporte com
+  "Com CNH" ou "Sem CNH", as aptidões com o nível e "desde 11/2026", a formação com o período e as áreas da homologação
+  com o link para a ficha. A lista ganha os filtros "Ferramenta", "Disponível no dia" e "Disponível no turno" (com dia
+  ou turno, o aviso "Só quem informou a disponibilidade no app."; a ferramenta fica na URL, `?ferramenta={id}`) e, no
+  CSV, as colunas `ferramental`, `disponibilidade`, `transporte`, `cnh`, `aptidoes` e `perfil_tecnico_atualizado_em`.
+
+**Histórico do cadastro** (`services/user_history.py`).
+- `tools`, `availability`, `skills` e `education` (`DELTA_FIELDS`) gravam o que **saiu** em `from` e o que **entrou**
+  em `to` (null: nada), e não o de → para:
+  - `tools`: os nomes, em ordem alfabética, separados por ", ";
+  - `availability`: os turnos em texto curto (`slots_text`);
+  - `skills`: "Linux (Básico)", em ordem alfabética, separados por ", ";
+  - `education`: "Técnico em redes · Escola Exemplo · Técnico · desde 02/2024 (em andamento)", pelo início, separados
+    por "; ";
+  - lista com mais de 10 itens: os 10 primeiros e " e mais N" (a disponibilidade já sai curta, sem esse corte).
+- `transport` segue de → para: "Carro, Moto · com CNH"; null: não informado.
+- Exemplos: `{"field": "tools", "from": "Furadeira", "to": "Escada, Multímetro"}`,
+  `{"field": "availability", "from": "seg · madrugada", "to": "sáb · tarde e noite"}`,
+  `{"field": "transport", "from": null, "to": "Carro, Moto · com CNH"}`,
+  `{"field": "skills", "from": "Linux (Básico)", "to": "Linux (Intermediário)"}`.
+- A aprovação da ficha não grava histórico. Na web: "Ferramental: incluiu Escada, Multímetro" e "Ferramental: tirou
+  Furadeira" (uma linha cada); "Transporte: não informado → Carro, Moto · com CNH". Rótulos: Ferramental,
+  Disponibilidade, Transporte, Aptidões e Formação (`USER_CHANGE_LABEL`).
+
+**Tempo real.** O `profile.changed` de sempre (só para quem tem Técnicos ou Pagamentos), com as partes em `data.fields`
+(`"tools"`, `"availability"`, `"transport"`, `"skills"`, `"education"`) e `via: "app"`. **Sem aviso no sino** para
+essas partes. Com um evento só de partes do perfil técnico, a web relê a base técnica (`["technicians"]`: a lista, a
+ficha aberta e o histórico), as sugestões quando mudou a disponibilidade e as contagens do catálogo quando mudou o
+ferramental; os outros eventos continuam relendo tudo o que depende do cadastro.
+
+**Aprovação da ficha** (`services/onboarding.approve`, com `tech_profile.from_ficha`). O técnico criado já vem com o
+perfil técnico da ficha, carimbado "ficha" com a hora em que a ficha chegou, sem histórico (o mesmo mapa da migração):
+
+| Parte | Da ficha |
+|---|---|
+| Disponibilidade | a união dos códigos: `dias_uteis_manha`, `dias_uteis_tarde` e `dias_uteis_noite` → de segunda a sexta naquele turno; `sabado` e `domingo_feriado` → manhã, tarde e noite do dia; `plantao` → os 28 turnos. Código desconhecido é ignorado, e o feriado (sem equivalente) se perde |
+| Transporte | com veículo, `carro` → `car` e `moto` → `motorcycle` (`outro` ou sem tipo: nenhum meio); a CNH da ficha. Só conta como informado com algum meio ou com CNH |
+| Aptidões | as de nível válido, com o nome limpo (de 2 a 80), sem repetir o nome (fica a primeira), até 30; `since` = o dia (Brasília) em que a ficha chegou |
+
+Parte vazia fica sem carimbo (não informada). O ferramental e a formação começam vazios: os textos livres de
+ferramentas e de certificações da ficha não viram lista. A ficha pública (`cadastro-tecnico`) não muda.
+
+**Sugestão de técnicos** (`services/suggestions.py`). Com horário na OS, a API calcula uma vez os turnos que a visita
+toca (`visit_slots`: `[início, fim)` no fuso da operação, com o fim informado, a estimativa ou 60 min; fim igual ou
+antes do início: o turno do início; até 7 dias). Para cada técnico com disponibilidade informada:
+- todos os turnos da visita dentro dela: +2 pontos (`AVAILABILITY_INSIDE_POINTS`), sem motivo (não disputa espaço com
+  "Livre no horário");
+- algum fora: −6 (`AVAILABILITY_OUTSIDE_POINTS`, um peso bem menor que os −40 de "Ocupado no horário") e o motivo "Fora da
+  disponibilidade (sáb · tarde)", com os turnos que faltam (sexta das 23h à 01h, com só "sex · noite" informado: "Fora
+  da disponibilidade (sáb · madrugada)");
+- sem disponibilidade informada (também quem desmarcou tudo) ou OS sem horário: neutro (0, sem motivo).
+
+Nunca tira ninguém da lista; a vaga dos favoritos continua e o elo continua fora da conta. `TechnicianSuggestion` ganha
+`availability: "inside" | "outside" | null` e `availability_gaps` (os turnos fora, na ordem da grade), em
+`GET /technicians/suggest` e `GET /tickets/{id}/technician-suggestions`. Zero consulta a mais. Os pesos são um palpite
+inicial, como os limites do elo. Na web, o chip âmbar "Fora da disponibilidade (…)", com o título "Pela disponibilidade
+que o técnico informou no app", aparece nas sugestões e no diálogo de oferta.
+
+**Publicação.** A migração roda antes de a API nova atender. A web e a API sobem juntas, a web segundos antes (a regra
+do `PRIVACY_VERSION`; nesses segundos, a API velha ignora os filtros novos, e o cartão do Ferramental e o gráfico da
+ficha mostram erro). O app sobe depois da API: `MyProfileUpdate` recusa campo desconhecido, e o app novo com a API velha
+receberia 422 "Campo não aceito"; nas telas, ele trata o servidor antigo ("Indisponível no momento" / "O servidor
+ainda não tem esta parte do cadastro. Tente de novo mais tarde."). A API nova com o app velho funciona. Publicado
+noutro dia que não 19/11/2026, a versão do aviso vira a data do dia ("AAAA-MM-DD"), nos três lugares, no mesmo dia.
+
+**Privacidade (LGPD).** Só o próprio técnico e a gestão com Técnicos veem o perfil técnico (o aviso `profile.changed`
+vai também a quem tem Pagamentos, só com os nomes das partes); o cliente, o portal e os outros técnicos nunca. O aviso
+de privacidade cita o perfil técnico desde a versão "2026-11-19.2".
+
 ## Elo dos técnicos (2026-11-18)
 
-**Por quê.** O técnico ganha um elo (na interface, "Elo" com o brasão) pela quantidade e pela qualidade dos
+**Por quê.** O técnico ganha um elo (na interface, "Elo" com a medalha: um hexágono com o emblema da faixa, a mesma
+arte na web e no app, em `LEVEL_MEDAL_*` de `lib/constants.ts`) pela quantidade e pela qualidade dos
 atendimentos: Bronze, Prata, Ouro e Diamante. É só reconhecimento: o elo não muda a pontuação nem a ordem das
 sugestões. Código: `services/technician_levels.py`, `api/routes/technician_levels.py`,
 `models/technician_level.py` e `schemas/technician_level.py`. Na API os valores ficam em inglês

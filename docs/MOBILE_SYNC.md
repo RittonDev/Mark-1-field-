@@ -82,10 +82,10 @@ Resposta: `{server_time, has_more, tickets[], comments[], worklogs[], revoked_ti
 ### Leituras guardadas (fora do pull)
 
 Só leitura e fora da fila de operações: cada uma fica no kv do aparelho (a tabela de chave e valor do SQLite) com a hora
-em que chegou, e a tela abre offline com o guardado e a data ("dados de…", "valores de…"). `my_level`, `my_stats`, `my_history` e
-`earnings:months` levam também o id do técnico (o de um nunca aparece para outro); nada é gravado se o técnico da sessão
-mudou durante a busca, e o kv inteiro sai na troca de técnico. Servidor sem a rota (404): a tela mostra uma mensagem
-própria.
+em que chegou, e a tela abre offline com o guardado e a data ("dados de…", "valores de…"). `my_level`, `my_stats`,
+`my_history` e `earnings:months` levam também o id do técnico (o de um nunca aparece para outro); nada é gravado se o
+técnico da sessão mudou durante a busca, e o kv inteiro sai na troca de técnico. Servidor sem a rota (404): a tela
+mostra uma mensagem própria.
 
 - **Elo** (`GET /me/level`, docs/API.md "Elo dos técnicos"; kv `my_level`): na mesma rodada, a cada 30 min e no "puxar
   para atualizar", só com o app na tela (a rodada em segundo plano não busca); quando o técnico abre (se o guardado tem

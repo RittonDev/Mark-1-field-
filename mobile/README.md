@@ -91,8 +91,8 @@ ou atrás de `Platform.OS === "web"`.
 | Seletor nativo de data/hora | `<input type="datetime-local">` (`DateTimeField.web.tsx`) |
 | GPS do expo-location, app de mapas | `navigator.geolocation`, Google Maps numa nova aba |
 | Confirmações com `Alert` | `window.confirm` (o `Alert` do react-native-web não faz nada) |
-| Registro do aparelho para push | não existe (aparece como indisponível na tela Conta) |
-| Notificações (lembretes da visita, avisos) e sincronização em segundo plano | não existem (`backgroundSync.web.ts`; a Conta mostra "Indisponível nesta versão do app"); os avisos ficam nos toasts |
+| Registro do aparelho para push | não existe (aparece como indisponível na Sincronização e em Configurações › Notificações) |
+| Notificações (lembretes da visita, avisos) e sincronização em segundo plano | não existem (`backgroundSync.web.ts`; a Sincronização mostra "Indisponível nesta versão do app"); os avisos ficam nos toasts |
 
 Requisitos:
 
@@ -137,21 +137,27 @@ Requisitos:
   e tenta de novo, e a abertura seguinte também tenta. Quem já tinha saído antes tem os dados apagados ao entrar com a
   senha certa (o login dá o mesmo motivo).
 - **Só as OS atribuídas ao técnico**: o cliente abre a OS, o analista escolhe o técnico, e o técnico vê só
-  as OS em que é o responsável ou vai junto (sem fila de grupo e sem "assumir"). Tela inicial com "Bom dia, {nome}",
-  a data, o cartão da jornada e três abas na barra inferior (pílula animada na aba ativa):
+  as OS em que é o responsável ou vai junto (sem fila de grupo e sem "assumir"). Tela inicial com quatro abas na barra
+  inferior (pílula animada na aba ativa) e, no topo, o chip do elo e a foto, que abre o Perfil (os dois saem na aba
+  Perfil); Hoje abre com "Bom dia, {nome}", a data e o cartão da jornada (o voltar do Android, noutra aba, volta
+  para Hoje):
   - **Hoje**: resumo "Hoje: X OS · Y em atendimento" (e chegadas atrasadas, em vermelho) e linha do tempo
     (horário, cliente, endereço, status) com as em campo, agendadas para hoje (ou atrasadas) e as sem agenda,
     **por urgência**: chegada atrasada primeiro, depois chegada em risco, depois em campo, horário,
     prioridade e prazo de SLA.
   - **Agenda**: calendário com visão de **mês** (grade com marcadores por dia; tocar no dia lista as OS)
     e de **semana** (dia a dia, com horário das visitas). Tocar na OS abre o detalhe.
-  - **Concluídas**: resolvidas/fechadas nos últimos 7 dias.
+  - **Faturamento**: o que o técnico recebe por OS, mês a mês, com o olho que oculta os valores (seção Faturamento).
+  - **Perfil**: o total de atendimentos e a patente (a medalha do elo), Configurações, Histórico de atendimentos,
+    Estatísticas, Meu elo, Sincronização, os avisos legais e Sair (seção Perfil). As OS concluídas ficam no Histórico
+    de atendimentos, que vem da central: a aba "Concluídas", com os últimos 7 dias do aparelho, saiu.
   - Cada cartão mostra status, horário da visita (até que horas; em atendimento, o tempo correndo), o relógio
     de campo ("Chegar até 14:35 · faltam 52 min" ou "Na loja 1h 20min · restam 2h 40min") e quantas ações
     aguardam envio.
 - **Jornada e rastreamento** (cartão no topo da tela inicial): termo de ciência (LGPD) aceito uma vez,
   **Iniciar/Encerrar jornada**, indicador "Rastreamento ativo" e a última posição enviada. Detalhes abaixo.
-- **Aparência**: modo claro/escuro segue o sistema; dá para fixar em Conta → Aparência.
+- **Aparência**: modo claro/escuro segue o sistema; dá para fixar em Perfil › Configurações › Aparência (Sistema,
+  Claro ou Escuro).
 - **Detalhe da OS**: cartão de cabeçalho (código, status, cliente, endereço), stepper Deslocamento →
   Chegada → Atendimento → Concluir e barra fixa no rodapé com o próximo passo; as demais ações de
   `allowed_transitions` (e a visita improdutiva) ficam em "Mais ações", com os mesmos diálogos da web (agendar com
@@ -166,7 +172,7 @@ Requisitos:
 - **Observação da visita** (`visit_note`): o recado do analista aparece em destaque logo abaixo do cabeçalho
   da OS.
 - **Equipe da visita** (`helpers`): cartão com o responsável e quem vai junto. Quem vai junto recebe a OS em
-  Hoje/Agenda/Concluídas com o selo "Você vai junto" e manda fotos, mas não vê os botões de
+  Hoje e na Agenda com o selo "Você vai junto" e manda fotos, mas não vê os botões de
   status, formulários, assinatura, visita improdutiva nem "Pedir peça" (a API devolve `allowed_transitions: []`).
   O evento `ticket.helpers_changed` avisa "Você vai na visita da OS-…"; quem sai da visita tem a OS conferida
   em `GET /tickets/{id}` e, sem acesso, ela sai do aparelho (o `revoked_ticket_ids` do pull não cobre esse caso;
@@ -185,28 +191,35 @@ Requisitos:
   convertida para JPEG (o servidor não aceita HEIC como foto); foto em formato que a central não abre fica de
   fora, com aviso. OS fechada ou cancelada não recebe foto do técnico (a aba Fotos diz que só a central anexa).
 - **Indicador de conexão** no topo: offline, servidor inacessível, sincronizando, online com tempo real,
-  e o número de itens pendentes. Tocar abre a tela **Conta**, com a fila de envio (dá para descartar a
-  operação que o servidor falhou em processar 3 vezes; falta de rede e falha do envio inteiro não contam), os
-  avisos de operações recusadas, "Sincronizar agora", "Baixar tudo", as notificações (lembretes das visitas e
-  permissão) e o estado do push.
+  e o número de itens pendentes. Tocar abre a tela **Sincronização** (seção abaixo), com a fila de envio (dá para
+  descartar a operação que o servidor falhou em processar 3 vezes; falta de rede e falha do envio inteiro não contam),
+  os avisos de operações recusadas, "Sincronizar agora", "Baixar tudo de novo", as notificações (lembretes das visitas
+  e permissão) e o estado do push.
 - **Ofertas de OS com preço** (detalhes abaixo): a central manda uma OS sem técnico com o valor; o técnico
   aceita pelo valor ou recusa, e quem aceitar primeiro fica com ela.
-- **Meu cadastro** (detalhes abaixo): o técnico mantém a foto, os dados de contato, o endereço e a chave PIX em
-  que recebe pelos chamados; e-mail e chave PIX pedem a senha atual, e a central é avisada na hora.
+- **Configurações** (detalhes abaixo; Perfil › Configurações): o técnico mantém a foto, o nome, o contato, o
+  endereço e a chave PIX em que recebe pelos chamados (e-mail e chave PIX pedem a senha atual) e o **perfil técnico**
+  que a central vê na ficha e usa para escolher quem convidar: disponibilidade, transporte e CNH, aptidões, formação e
+  ferramental. A central é avisada na hora quando mudam PIX, e-mail, nome ou celular.
 - **Aviso de privacidade** (detalhes abaixo): o texto da LGPD da homologação, só para leitura, com um cartão em Hoje
   quando o texto muda.
-- **Notas fiscais (aba Ganhos)** (detalhes abaixo): o técnico envia a nota do mês (PDF, XML ou foto), marca as OS
-  que ela cobre e acompanha a conferência da central; a nota é opcional e nunca trava o pagamento.
-- **Meu elo** (detalhes abaixo): o brasão do técnico (Bronze, Prata, Ouro ou Diamante) pelos atendimentos dos
-  últimos 12 meses, com o que falta para a próxima faixa e o que pesou; só o dele, sem ranking.
+- **Faturamento** (detalhes abaixo): o total pago e o que falta receber, a chave PIX e um cartão por mês com a situação
+  (sem nota, nota em conferência, a pagar, pago…); o mês abre com as OS, os reembolsos e as notas fiscais.
+- **Notas fiscais (aba Faturamento › mês)** (detalhes abaixo): o técnico envia a nota do mês (PDF, XML ou foto), marca
+  as OS que ela cobre e acompanha a conferência da central; a nota é opcional e nunca trava o pagamento.
+- **Patente e Meu elo** (detalhes abaixo): o elo do técnico (Bronze, Prata, Ouro ou Diamante) pelos atendimentos dos
+  últimos 12 meses, desenhado como uma medalha, com o que falta para a próxima faixa e o que pesou; só o dele, sem
+  ranking. **Estatísticas** e **Histórico de atendimentos** (detalhes abaixo) mostram os números de cada mês e as OS
+  concluídas, também só dele.
 
 ## Ofertas de OS com preço
 
 A central manda uma OS ainda sem técnico, com o valor, para alguns técnicos (contrato em
 [docs/API.md](../docs/API.md), "Ofertas de OS"). **Não existe contraproposta nem chat**: a conversa com a central
 é pelo grupo de WhatsApp. Código: [src/lib/offers.ts](src/lib/offers.ts) (dados, regras e avisos),
-`refreshOffers`/`acceptOffer`/`declineOffer` em [src/lib/sync.ts](src/lib/sync.ts), a seção
-[src/components/Offers.tsx](src/components/Offers.tsx) e a tela `src/app/oferta/[id].tsx`.
+`refreshOffers`/`acceptOffer`/`declineOffer` em [src/lib/sync.ts](src/lib/sync.ts), a seção de Hoje e os blocos da tela
+em [src/components/Offers.tsx](src/components/Offers.tsx), o topo em
+[src/components/offer/OfferHero.tsx](src/components/offer/OfferHero.tsx) e a tela `src/app/oferta/[id].tsx`.
 
 - **Lista**: `GET /me/offers` na rodada de sincronização, guardada no aparelho (kv `field_offers`) para abrir sem
   rede. Quem aceita primeiro fica com a OS, então a lista não espera o upload das fotos (minutos em rede lenta): a
@@ -231,14 +244,31 @@ A central manda uma OS ainda sem técnico, com o valor, para alguns técnicos (c
   que exige um app instalado (seção Notificações; no Expo Go, só com o app aberto), e sai da bandeja quando a oferta
   fecha. A que fecha sem resposta → "Outro técnico aceitou a OS-…", "A central cancelou a oferta da OS-…" (só com o app
   na tela). Não há push real: com o app fechado, o técnico fica sabendo pelo texto que a central cola no grupo.
-- **Tela da oferta** (`/oferta/<id>`): abrir chama `GET /me/offers/{id}`, que grava a leitura no servidor.
-  Mostra nº e título, tipo de serviço, bairro · cidade/UF, janela da visita, o recado da central, os
-  formulários (nome e se é obrigatório) e o cartão **Escopo** recolhido: abrir o escopo marca **Escopo lido**
-  (guardado por oferta). Rodapé fixo: **Aceitar por R$ X** (liberado com a leitura gravada e o escopo lido) e
-  **Recusar** (motivo: Agenda cheia, Muito longe, Valor não compensa, Outro motivo).
-- **Aceitar** (confirmação "Aceitar esta OS por R$ X? Ela vai para a sua agenda.") → `POST /me/offers/{id}/accept`;
-  a OS volta já atribuída e entra no aparelho com a própria resposta (sem o aviso duplicado "Nova OS para
-  você"), e a tela da oferta vira a da OS. O valor aparece em Detalhes e em Ganhos (`my_payout`).
+- **Tela da oferta** (`/oferta/<id>`): abrir chama `GET /me/offers/{id}`, que grava a leitura no servidor. Sem o
+  cabeçalho nativo: o voltar redondo ([src/components/RoundBackButton.tsx](src/components/RoundBackButton.tsx)) fica
+  fixo por cima em todos os estados (carregando, não encontrada, sem conexão, a oferta), e o voltar do Android e o gesto
+  do iOS continuam; aberta por uma notificação, sem tela anterior, ele leva a Hoje. De cima para baixo:
+  - o desenho de mapa da área com o chip "bairro · cidade/UF" (ilustração: nunca o endereço nem o pino);
+  - o nº da OS grande com o selo **Aguardando resposta**, o título, **Você recebe** com o valor e a linha com a duração
+    estimada (cronômetro), a data por extenso ("Amanhã, 20 de novembro") e a hora, ou "Data a combinar"; depois,
+    "Responder até 15:30 · faltam 25min" (a ampulheta continua sendo o prazo);
+  - o recado da central;
+  - **Área do atendimento**: bairro e cidade, "O endereço completo aparece depois do aceite." e o botão de mapa, que
+    busca "bairro, cidade - UF" no app de mapas;
+  - **Serviços** com "0/1 lido": o cartão do serviço (o tipo, ou o título) começa recolhido; abrir mostra o escopo e
+    marca **Escopo lido** ("1/1 lido"), guardado por oferta com a hora em que ele abriu pela primeira vez (relógio do
+    servidor);
+  - os formulários da OS (nome e se é obrigatório);
+  - "Dúvida no escopo? Fale com a central no WhatsApp": abre o WhatsApp com o começo da mensagem ("Dúvida na oferta
+    OS-000123 · Troca de PDV · Centro · Cidade Exemplo/SP: "), sem o valor; o técnico escolhe o grupo;
+  - no rodapé fixo, os botões empilhados: **Aceitar por R$ X** (liberado com a leitura gravada e o escopo lido; o
+    motivo da trava aparece em cima) e **Recusar**, em texto (motivo: Agenda cheia, Muito longe, Valor não compensa,
+    Outro motivo).
+- **Aceitar** (confirmação "Aceitar esta OS por R$ X? Ela vai para a sua agenda.") → `POST /me/offers/{id}/accept`
+  com `{scope_read_at}`, a hora em que ele abriu o escopo (a central vê "Aceitou às 14:50 · escopo lido às 14:45"; a
+  oferta cujo escopo foi aberto numa versão antiga do app vai sem a hora). A OS volta já atribuída e entra no aparelho
+  com a própria resposta (sem o aviso duplicado "Nova OS para você"), e a tela da oferta vira a da OS. O valor aparece
+  em Detalhes ("Valor desta OS") e no Faturamento (`my_payout`).
 - **Saiu da tela durante o envio**: a tela só navega se ainda estiver à frente (`useNavigation().isFocused()`).
   Fora dela, fica só o aviso: "OS aceita" (tocar abre a OS) ou "Oferta recusada", sem mexer na tela em que o
   técnico está.
@@ -345,7 +375,8 @@ Regras de [src/lib/field.ts](src/lib/field.ts), espelhando `backend/app/services
   cliente), quando (só durante a jornada que o técnico inicia e encerra), o que é coletado (posição,
   precisão, velocidade, direção, bateria, GPS falso) e a retenção (**90 dias**). O aceite vai para
   `POST /tracking/consent` e na mesma tela o app pede a permissão de localização do sistema ("Permitir o
-  tempo todo"/"Sempre"). A data do aceite aparece em Conta.
+  tempo todo"/"Sempre"). A data do aceite aparece em Perfil › Sincronização (cartão Rastreamento da jornada, onde
+  também se retira o aceite); no Perfil, a linha Termo de uso da localização diz "Aceito" ou "Não aceito".
 - **GPS nas mudanças de status**: deslocamento, atendimento e resolução levam latitude/longitude (mapa de
   histórico do gestor).
 - **Jornada**: `POST /tracking/shift/start` / `POST /tracking/shift/end` (com a posição do momento).
@@ -416,21 +447,23 @@ lembretes da visita são locais e funcionam também no Expo Go, mas só depois q
 - **Sincronização em segundo plano** (só num app instalado): na jornada, a localização mantém o app vivo e sai uma
   rodada a cada ~3 min; fora dela, a tarefa periódica do sistema (`expo-background-task`, 15 min ou mais:
   WorkManager no Android; no iOS o sistema decide e roda pouco). Com o app fechado à força pelo técnico, nada roda. A
-  Conta mostra a situação em **Sincronização > Em segundo plano**; no Expo Go, "Só com o app aberto": OS nova e oferta
-  só aparecem com o app aberto (o aviso na hora com o app fora da tela depende do push real).
+  tela Sincronização mostra a situação na linha **Em segundo plano**; no Expo Go, "Só com o app aberto": OS nova e
+  oferta só aparecem com o app aberto (o aviso na hora com o app fora da tela depende do push real).
 - **Fim de sessão na rodada**: se a sessão termina durante a rodada em segundo plano (401 do `/auth/refresh`), ou já
   estava encerrada com limpeza pendente, a rodada conclui a limpeza do fim de sessão (`sessionEnd.ts`) antes de
   terminar e desliga a tarefa (se apagar os dados do técnico desativado falhar, ela fica ligada para tentar de novo).
-- **Conta > Notificações**: a chave **Lembretes das visitas** (ligada; desliga os três de uma vez), o próximo
+- **Configurações › Notificações** (cartão "Neste celular"; o mesmo cartão, "Notificações", fica na Sincronização):
+  a chave **Lembretes das visitas** (ligada; desliga os três de uma vez), o próximo
   lembrete, a permissão do celular (**Permitir notificações** ou **Abrir configurações**) e, no Android 12 ou mais
   novo sem o alarme exato, **Horário exato · Pode atrasar alguns minutos** com **Liberar** (`SCHEDULE_EXACT_ALARM`
   no `app.json`). No Android cada tipo tem canal próprio, que dá para silenciar no sistema: Ordens de serviço,
   Lembretes das visitas, Tempo na loja e Jornada.
 - **Permissão**: um pedido automático só, uma vez por técnico, depois do termo de localização (nunca junto com o
-  pedido de localização); depois, só pelos botões da Conta.
+  pedido de localização); depois, só pelos botões do cartão Notificações.
 - **Push da central**: ainda não ligado. O `POST /devices` responde `{"push": "simulated"}` e o próprio app avisa;
-  quando a central responder `live`, o app para de repetir o aviso (kv `push_live`). O cartão **Aparelho** mostra
-  o estado ("Ainda não ligado na central"; no Expo Go, "Indisponível nesta versão do app").
+  quando a central responder `live`, o app para de repetir o aviso (kv `push_live`). A linha **Push da central**
+  (cartão Aparelho da Sincronização e "Avisos da central" em Configurações › Notificações) mostra o estado ("Ainda não
+  ligado na central"; no Expo Go, "Indisponível nesta versão do app").
 - **Saiu da conta**: nada agendado, a bandeja limpa (loja e endereço aparecem na tela bloqueada) e os avisos guardados
   somem (a rodada que termina depois não guarda outros). As chaves `visit_reminders`, `notifications_asked`,
   `push_live` e `deferred_notices` (cada aviso leva o id do técnico) ficam no kv e somem na troca de técnico.
