@@ -91,11 +91,12 @@ export default function SkillsScreen() {
 
   async function submit(target: SkillSheetTarget, skill: TechnicianSkillIn): Promise<string | null> {
     if (await noNetwork()) return OFFLINE_SAVE;
-    const editing = target.kind === "edit" ? target.skill.name : null;
+    // Na edição, o nome da aptidão (a lista gravada na hora do envio pode não ter mais ela).
+    const edited = target.kind === "edit" ? target.skill.name : null;
     try {
       await trackListWrite("skills", null, () =>
         saveProfileWith((profile) => {
-          const next = skillsWith(profile.skills, skill, editing);
+          const next = skillsWith(profile.skills, skill, edited);
           if (!next) throw new Error(SKILL_MSG.gone);
           return { skills: next };
         }),

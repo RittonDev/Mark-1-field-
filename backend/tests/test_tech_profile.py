@@ -178,26 +178,26 @@ def test_control_and_format_characters_are_dropped() -> None:
     """Controles (Cc) e formatação (Cf: largura zero, BOM, direção) saem antes de contar e de
     comparar; tab, LF, VT, FF e CR viram espaço. Nome só de invisíveis cai na mensagem do tamanho,
     e a mesma aptidão com um espaço de largura zero repete."""
-    assert tp.clean("Lin​ux") == "Linux"
-    assert tp.clean("﻿‮Redes‬ ") == "Redes"
+    assert tp.clean("Lin\u200bux") == "Linux"
+    assert tp.clean("\ufeff\u202eRedes\u202c ") == "Redes"
     assert tp.clean("Curso\u0000 Exemplo\u0007") == "Curso Exemplo"
     assert tp.clean("Fibra\tóptica\r\n(fusão)\v\f") == "Fibra óptica (fusão)"
     # Os outros controles saem em vez de virar espaço (como no app).
     assert tp.clean("Re\x1cdes\x85") == "Redes"
     # Antes do NFC: o acento separado da letra por um invisível volta a ser uma letra só.
-    assert tp.clean("Cafe‍́") == "Café"
+    assert tp.clean("Cafe\u200d\u0301") == "Café"
     # O que não é controle nem formatação fica: espaço sem quebra (vira espaço), acentos.
-    assert tp.clean("Windows 10/11") == "Windows 10/11"
-    assert tp.fold("LIN​UX⁦") == tp.fold("linux") == "linux"
-    assert tp.clean("​​​") == tp.fold("\u0001‮") == ""
-    assert _problems(TechnicianSkillIn, {"name": "​​​", "level": "basico"}) == [
+    assert tp.clean("Windows\u00a010/11") == "Windows 10/11"
+    assert tp.fold("LIN\u200bUX\u2066") == tp.fold("linux") == "linux"
+    assert tp.clean("\u200b\u200b\u200b") == tp.fold("\u0001\u202e") == ""
+    assert _problems(TechnicianSkillIn, {"name": "\u200b\u200b\u200b", "level": "basico"}) == [
         (("name",), "Informe o nome da aptidão")
     ]
-    assert _problems(TechnicianToolCreate, {"name": "\u0000­"}) == [
+    assert _problems(TechnicianToolCreate, {"name": "\u0000\u00ad"}) == [
         (("name",), "Informe o nome da ferramenta")
     ]
     linux = {"name": "Linux", "level": "basico"}
-    assert _problems(MyProfileUpdate, {"skills": [linux, {**linux, "name": "Lin​ux"}]}) == [
+    assert _problems(MyProfileUpdate, {"skills": [linux, {**linux, "name": "Lin\u200bux"}]}) == [
         (("skills",), "Aptidão repetida: Linux")
     ]
 
@@ -668,10 +668,10 @@ def test_migration_copies_the_service_rules() -> None:
     for sample in (
         "  Câmeras   HIKVISION ",
         unicodedata.normalize("NFD", "Fibra óptica"),
-        "Lin​ux‮",
-        "﻿Curso\u0000\tExemplo\x85\x1c",
-        "Cafe‍́",
-        "ﬁbra óptica",
+        "Lin\u200bux\u202e",
+        "\ufeffCurso\u0000\tExemplo\x85\x1c",
+        "Cafe\u200d\u0301",
+        "\ufb01bra óptica",
     ):
         assert migration._clean(sample) == tp.clean(sample), repr(sample)
         assert migration._fold(sample) == tp.fold(sample), repr(sample)
@@ -704,9 +704,9 @@ def test_migration_copies_the_service_rules() -> None:
         # Nomes com controles e formatação: a mesma limpeza do serviço.
         {
             "skills": [
-                {"name": "Lin​ux", "level": "basico"},
+                {"name": "Lin\u200bux", "level": "basico"},
                 {"name": "linux", "level": "avancado"},
-                {"name": "​‮", "level": "basico"},
+                {"name": "\u200b\u202e", "level": "basico"},
             ]
         },
     ],
@@ -1011,7 +1011,7 @@ async def test_validation_messages_and_no_password(
         ({"skills": [{**skill, "name": " a "}]}, [("Nome", "Informe o nome da aptidão")]),
         # Só invisíveis (largura zero, direção): saem, e o nome fica vazio.
         (
-            {"skills": [{**skill, "name": "​‮​"}]},
+            {"skills": [{**skill, "name": "\u200b\u202e\u200b"}]},
             [("Nome", "Informe o nome da aptidão")],
         ),
         ({"skills": [{**skill, "name": "a" * 81}]}, [("Nome", "No máximo 80 caracteres")]),
@@ -1024,7 +1024,7 @@ async def test_validation_messages_and_no_password(
             [("Aptidões", "Aptidão repetida: Linux")],
         ),
         (
-            {"skills": [skill, {**skill, "name": "Lin​ux"}]},
+            {"skills": [skill, {**skill, "name": "Lin\u200bux"}]},
             [("Aptidões", "Aptidão repetida: Linux")],
         ),
         (
@@ -1033,7 +1033,7 @@ async def test_validation_messages_and_no_password(
         ),
         ({"skills": [{**skill, "since": "2026-01-01"}]}, [(None, "Campo não aceito")]),
         ({"education": [{**course, "course": "x"}]}, [("Curso", "Informe o curso")]),
-        ({"education": [{**course, "course": "\u0000\u0001﻿"}]}, [("Curso", "Informe o curso")]),
+        ({"education": [{**course, "course": "\u0000\u0001\ufeff"}]}, [("Curso", "Informe o curso")]),
         (
             {"education": [{**course, "institution": " "}]},
             [("Instituição", "Informe a instituição")],
@@ -1302,11 +1302,11 @@ async def test_invisible_characters_are_dropped_before_saving(
     reenviado com os invisíveis não muda nada."""
     course = {
         **COURSE,
-        "course": "Técnico\u0000 em​ redes",
-        "institution": "‮Escola\tExemplo",
+        "course": "Técnico\u0000 em\u200b redes",
+        "institution": "\u202eEscola\tExemplo",
     }
     r = await _patch(
-        client, world, education=[course], skills=[{"name": "Lin​ux", "level": "basico"}]
+        client, world, education=[course], skills=[{"name": "Lin\u200bux", "level": "basico"}]
     )
     assert r.status_code == 200, r.text
     [saved] = r.json()["education"]
