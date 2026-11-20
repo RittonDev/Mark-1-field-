@@ -1,8 +1,8 @@
-// Cartão de um mês no Faturamento: a situação (ícone redondo e selo), o valor total, a linha curta do que falta ou
-// aconteceu e, no rodapé, o mês e quantas OS. O mês é o da conclusão das OS (a régua de Pagamentos); não há número de
-// fatura. Tocar abre o mês (/faturamento/AAAA-MM).
+// Cartão de um mês no Faturamento: a situação (ícone redondo e selo, que desce para baixo do valor quando não cabe ao
+// lado), o valor total, a linha curta do que falta ou aconteceu e, no rodapé, o mês e quantas OS. O mês é o da
+// conclusão das OS (a régua de Pagamentos); não há número de fatura. Tocar abre o mês (/faturamento/AAAA-MM).
 
-import { StyleSheet, useWindowDimensions, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import { EARNINGS_MONTH_STATE, earningsMonthLine, monthTitle, osCount } from "../../lib/constants";
 import { formatBRL } from "../../lib/expenses";
 import { formatDate } from "../../lib/format";
@@ -20,7 +20,6 @@ export function BillingMonthCard({ month, onPress }: { month: EarningsMonth; onP
   const styles = useStyles(makeStyles);
   const money = useMoney();
   const hidden = useHideValues();
-  const { fontScale } = useWindowDimensions();
   const state = EARNINGS_MONTH_STATE[month.state];
   const rejected = month.state === "rejected";
   const title = monthTitle(month.month);
@@ -31,9 +30,6 @@ export function BillingMonthCard({ month, onPress }: { month: EarningsMonth; onP
   const label = [title, `valor total ${hidden ? "oculto" : formatBRL(month.total)}`, count, state.label, spokenLine]
     .filter(Boolean)
     .join(", ");
-  // Fonte grande: o selo desce para baixo do valor.
-  const badgeBelow = fontScale > 1.3;
-  const badge = <Badge label={state.label} color={state.color} />;
 
   return (
     <PressableScale
@@ -46,14 +42,19 @@ export function BillingMonthCard({ month, onPress }: { month: EarningsMonth; onP
     >
       <View style={styles.head}>
         <StateIcon state={month.state} size={40} />
-        <View style={styles.amount}>
-          <Text style={styles.amountLabel}>Valor total</Text>
-          <Text style={styles.amountValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-            {money(month.total)}
-          </Text>
-          {badgeBelow ? <View style={styles.badgeBelow}>{badge}</View> : null}
+        {/* O selo fica à direita do valor quando os dois cabem na linha e desce para baixo dele quando não cabem (selo
+            longo, fonte grande, tela estreita): quem decide é a largura do valor, que nunca é espremido. */}
+        <View style={styles.headMain}>
+          <View style={styles.amount}>
+            <Text style={styles.amountLabel}>Valor total</Text>
+            {/* Encolher é a última defesa (valor maior que a linha inteira): no RN 0.88 não há piso (minimumFontScale
+                não vale). */}
+            <Text style={styles.amountValue} numberOfLines={1} adjustsFontSizeToFit>
+              {money(month.total)}
+            </Text>
+          </View>
+          <Badge label={state.label} color={state.color} />
         </View>
-        {badgeBelow ? null : badge}
       </View>
       {line ? (
         <Text style={[styles.line, rejected && { color: c.dangerInk, fontWeight: "600" }]} numberOfLines={2}>
@@ -84,10 +85,11 @@ const makeStyles = (c: Palette) =>
       boxShadow: c.elevation,
     },
     head: { flexDirection: "row", alignItems: "center", gap: 12 },
-    amount: { flex: 1, gap: 2 },
+    // Quebra a linha pelo tamanho natural do valor e do selo (a base do valor é a largura dele, sem `flex: 1`).
+    headMain: { flex: 1, flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: 8, rowGap: 6 },
+    amount: { flexGrow: 1, gap: 2 },
     amountLabel: { fontSize: 12, fontWeight: "600", color: c.inkMuted },
     amountValue: { fontSize: 22, fontWeight: "700", color: c.ink, letterSpacing: -0.3, fontVariant: ["tabular-nums"] },
-    badgeBelow: { marginTop: 4 },
     line: { fontSize: 13, color: c.inkMuted, lineHeight: 18 },
     divider: { height: StyleSheet.hairlineWidth, backgroundColor: c.line },
     footer: { flexDirection: "row", alignItems: "center", gap: 8 },

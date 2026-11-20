@@ -1,8 +1,9 @@
 // Aba Faturamento (substitui Ganhos): o técnico é parceiro e recebe por OS. No topo, o total pago e o que falta receber
 // (com o previsto das OS em andamento), a chave PIX em que recebe e um cartão por mês de conclusão com a situação
 // calculada no servidor (Em andamento, Sem nota, Nota em conferência, Nota recusada, A pagar, Pago em parte, Pago sem
-// nota, Pago). A nota nunca trava o pagamento: "Sem nota" é só informativo. Tocar num mês abre as OS, os reembolsos e
-// as notas dele (/faturamento/AAAA-MM). Sem internet, mostra os valores guardados com a hora em que chegaram.
+// nota, Pago). A nota nunca trava o pagamento: "Sem nota" é só informativo. O mês sem valores só tem cartão com nota da
+// competência. Tocar num mês abre as OS, os reembolsos e as notas dele (/faturamento/AAAA-MM); "Outro mês", depois dos
+// cartões ou sob o vazio, abre qualquer mês. Sem internet, mostra os valores guardados com a hora em que chegaram.
 
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useEffectEvent, useRef } from "react";
@@ -28,6 +29,7 @@ import { Text } from "../Text";
 import { Button, Card, EmptyState, ErrorBox, SectionTitle } from "../ui";
 import { BillingMonthCard } from "./BillingMonthCard";
 import { BillingTotals } from "./BillingTotals";
+import { OtherMonth } from "./OtherMonth";
 import { PixRow } from "./PixRow";
 
 /** Dois toques rápidos não abrem o mês duas vezes. */
@@ -117,7 +119,9 @@ export function BillingView({ refreshKey = 0, onSettled }: { refreshKey?: number
   }
 
   const { totals, months, since } = stored.data;
-  const shown = months.filter((month) => month.state !== "empty");
+  // O mês sem valores só aparece com nota da competência (a nota enviada nele fica à vista); a API antiga não manda
+  // `invoices`, e ausente vale 0.
+  const shown = months.filter((month) => month.state !== "empty" || (month.invoices ?? 0) > 0);
   const stale = error ? earningsStaleText(error, stored.at) : null;
 
   return (
@@ -136,13 +140,19 @@ export function BillingView({ refreshKey = 0, onSettled }: { refreshKey?: number
               <BillingMonthCard month={month} onPress={openMonth} />
             </Animated.View>
           ))}
+          <Animated.View entering={motion.entering(shown.length)}>
+            <OtherMonth onOpen={openMonth} />
+          </Animated.View>
         </View>
       ) : (
-        <EmptyState
-          icon="receipt"
-          title="Nenhum valor ainda"
-          description="O valor de cada OS aparece aqui quando a central coloca você nela."
-        />
+        <>
+          <EmptyState
+            icon="receipt"
+            title="Nenhum valor ainda"
+            description="O valor de cada OS aparece aqui quando a central coloca você nela."
+          />
+          <OtherMonth onOpen={openMonth} />
+        </>
       )}
       {since && since < HISTORY_SINCE_MONTH ? (
         <Text style={styles.footnote}>{`Valores registrados no app desde ${HISTORY_SINCE_TEXT}.`}</Text>

@@ -4,7 +4,8 @@
 // preenchido para tentar de novo. O mesmo `client_upload_id` vai em cada tentativa: a resposta perdida não vira nota
 // repetida. Com a lista de OS em erro, "Enviar nota" busca a lista de novo antes: se vier, as OS do mês ficam marcadas
 // para o técnico conferir e tocar de novo; se não vier, a nota só sai sem OS com a confirmação dele. A lista em erro
-// também é buscada de novo quando a conexão volta. Enviada noutra competência, o aviso diz qual (é lá que ela aparece).
+// também é buscada de novo quando a conexão volta. Enviada noutra competência, o aviso diz qual e a tela vai para o mês
+// dela no Faturamento (é lá que a nota aparece); senão, volta para o mês de onde veio.
 
 import NetInfo from "@react-native-community/netinfo";
 import { randomUUID } from "expo-crypto";
@@ -23,6 +24,7 @@ import { Badge, Button, Card, ErrorBox, Field, Input } from "../components/ui";
 import { ApiError, errorMessage } from "../lib/api";
 import { competenceLabel, INVOICE_FILE_KIND, INVOICE_LIMITS } from "../lib/constants";
 import { confirmAction } from "../lib/dialogs";
+import { FIRST_MONTH } from "../lib/earnings";
 import { formatBRL, parseBRL } from "../lib/expenses";
 import { formatBytes } from "../lib/format";
 import { haptic } from "../lib/haptics";
@@ -32,10 +34,11 @@ import { showToast } from "../lib/toast";
 import type { InvoicePayoutCandidate, MyInvoice } from "../lib/types";
 import { RADIUS, useStyles, useTheme, type Palette } from "../theme/theme";
 
-/** Os mesmos limites do servidor (backend/app/services/invoices.py), que confere de novo. */
+/** Os mesmos limites do servidor (backend/app/services/invoices.py), que confere de novo; o primeiro mês, FIRST_MONTH. */
 const MAX_PAYOUTS = 200;
 const MAX_AMOUNT = 10_000_000_000;
-const FIRST_MONTH = "2000-01";
+/** "AAAA-MM". */
+const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
 
 const MSG = {
   file: "Escolha o arquivo da nota.",
@@ -91,7 +94,7 @@ const firstError = (errors: Errors) => FIELD_ORDER.map((key) => errors[key]).fin
 /** A competência pedida pelo cartão (o mês do Faturamento), se for um mês válido e que já chegou; senão, o mês atual. */
 function initialCompetence(param: unknown, current: string): string {
   const value = typeof param === "string" ? param : "";
-  return /^\d{4}-(0[1-9]|1[0-2])$/.test(value) && value >= FIRST_MONTH && value <= current ? value : current;
+  return MONTH.test(value) && value >= FIRST_MONTH && value <= current ? value : current;
 }
 
 /** "novembro de 2026" → "Novembro de 2026". */
@@ -391,8 +394,10 @@ export default function InvoiceScreen() {
         clientUploadId,
       });
       haptic.success();
-      // Outra competência: o aviso diz qual, para o técnico achar a nota no mês certo do Faturamento.
-      const elsewhere = invoice.competence !== requested ? ` · competência de ${competenceLabel(invoice.competence)}` : "";
+      // Outra competência: o aviso diz qual, e a tela vai para o mês dela no Faturamento (é lá que a nota aparece, para
+      // abrir ou apagar), em vez de voltar ao mês de onde veio.
+      const other = invoice.competence !== requested ? invoice.competence : null;
+      const elsewhere = other ? ` · competência de ${competenceLabel(other)}` : "";
       showToast("Nota enviada", {
         tone: "success",
         description: `Nota nº ${invoice.number} · ${formatBRL(invoice.amount)}${elsewhere}`,
@@ -400,7 +405,8 @@ export default function InvoiceScreen() {
       if (!mounted.current) return;
       setDone(true);
       allowLeave();
-      if (router.canGoBack()) router.back();
+      if (other && MONTH.test(other)) router.replace({ pathname: "/faturamento/[mes]", params: { mes: other } });
+      else if (router.canGoBack()) router.back();
       else router.replace("/");
     } catch (error) {
       const message = await sendFailure(error);

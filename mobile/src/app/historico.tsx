@@ -273,11 +273,10 @@ function MonthHeader({ month, count }: { month: string; count: number }) {
   const styles = useStyles(makeStyles);
   const title = monthTitle(month);
   const label = countText(count, SERVICES);
+  // O título (com o ano, que separa as seções do sistema antigo) vai sempre inteiro: sem espaço, a contagem desce.
   return (
     <View style={styles.monthHeader} accessible accessibilityRole="header" accessibilityLabel={`${title}, ${label}`}>
-      <Text style={styles.monthTitle} numberOfLines={1}>
-        {title}
-      </Text>
+      <Text style={styles.monthTitle}>{title}</Text>
       <Text style={styles.monthCount}>{label}</Text>
     </View>
   );
@@ -375,13 +374,15 @@ const makeStyles = (c: Palette) =>
     totalNote: { fontSize: 13, color: c.inkMuted, marginTop: 2 },
     monthHeader: {
       flexDirection: "row",
+      flexWrap: "wrap",
       alignItems: "center",
       justifyContent: "space-between",
-      gap: 8,
+      columnGap: 8,
+      rowGap: 2,
       paddingVertical: 8,
       backgroundColor: c.canvas,
     },
-    monthTitle: { flexShrink: 1, fontSize: 14, fontWeight: "700", color: c.ink },
+    monthTitle: { fontSize: 14, fontWeight: "700", color: c.ink },
     monthCount: { fontSize: 12, fontWeight: "600", color: c.inkMuted, fontVariant: ["tabular-nums"] },
     row: {
       flexDirection: "row",

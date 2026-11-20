@@ -1,6 +1,17 @@
-import { router, useLocalSearchParams, useNavigation } from "expo-router";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
+import { router, useLocalSearchParams, useNavigation, type NativeStackNavigationProp } from "expo-router";
+import type { ParamListBase } from "expo-router/react-navigation";
+import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import {
+  AccessibilityInfo,
+  Platform,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  View,
+  type HostInstance,
+  type ViewInstance,
+} from "react-native";
 import Animated from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ActionSheet, type SheetAction } from "../../components/ActionSheet";
@@ -44,6 +55,11 @@ const DECLINE_REASONS = ["Agenda cheia", "Muito longe", "Valor não compensa", "
 const OFFLINE_TEXT = "Sem conexão. Conecte para responder a oferta.";
 /** O prazo anda a cada 10 s: os botões somem quando ele vence. */
 const TICK_MS = 10_000;
+/**
+ * Reserva quando o fim da entrada não chega (a moldura trocou depois da entrada, de carregando para a oferta): conta da
+ * montagem, ou do início da transição quando ele chega.
+ */
+const BACK_FOCUS_FALLBACK_MS = 600;
 /**
  * Respostas do servidor que fecham a oferta para este técnico: outro aceitou, o prazo acabou, a central
  * cancelou, a OS não está mais livre ou ele já respondeu. Vale o texto do servidor, sem "Tentar de novo".
@@ -107,6 +123,51 @@ function situation(offer: FieldOffer, state: OfferState, mine: boolean, hasNext:
 }
 
 /**
+ * Leitor de tela ligado: o voltar redondo recebe o foco quando a moldura aparece (ao abrir a oferta e quando ela troca
+ * de estado, como de carregando para a oferta). Sem o cabeçalho nativo, a ordem do TalkBack segue a posição e o voltar,
+ * por cima do conteúdo, viria depois dele. Sem leitor de tela, nada muda. `holder` é o invólucro do botão: o
+ * RoundBackButton não repassa a referência, e o botão é o primeiro filho dele.
+ */
+function useBackFocus(holder: RefObject<ViewInstance | null>) {
+  const navigation = useNavigation<NativeStackNavigationProp<ParamListBase>>();
+  useEffect(() => {
+    // Na web não há o evento de foco do leitor de tela.
+    if (Platform.OS === "web") return;
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const focus = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      void AccessibilityInfo.isScreenReaderEnabled()
+        .then((on) => {
+          const button = holder.current?.firstElementChild;
+          if (on && button) AccessibilityInfo.sendAccessibilityEvent(button as HostInstance, "focus");
+        })
+        .catch(() => undefined);
+    };
+    // A tela entrando: o foco espera o fim da transição (senão o sistema pode tirá-lo do botão).
+    const wait = () => {
+      clearTimeout(timer);
+      timer = setTimeout(focus, BACK_FOCUS_FALLBACK_MS);
+    };
+    const offStart = navigation.addListener("transitionStart", (event) => {
+      if (!event.data.closing) wait();
+    });
+    const offEnd = navigation.addListener("transitionEnd", (event) => {
+      if (!event.data.closing) focus();
+    });
+    wait();
+    return () => {
+      settled = true;
+      clearTimeout(timer);
+      offStart();
+      offEnd();
+    };
+  }, [navigation, holder]);
+}
+
+/**
  * Moldura de todos os estados da oferta (carregando, não encontrada, sem conexão e a própria oferta). A tela não tem o
  * cabeçalho nativo: o voltar redondo fica fixo por cima do conteúdo e nunca some com a rolagem nem nos erros (o voltar
  * do Android e o gesto do iOS continuam).
@@ -114,12 +175,17 @@ function situation(offer: FieldOffer, state: OfferState, mine: boolean, hasNext:
 function OfferFrame({ children }: { children: ReactNode }) {
   const styles = useStyles(makeStyles);
   const insets = useSafeAreaInsets();
+  const back = useRef<ViewInstance>(null);
+  useBackFocus(back);
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
       <ConnectionBar />
       <View style={styles.frame}>
         {children}
-        <RoundBackButton style={styles.back} />
+        {/* O invólucro guarda a posição e dá a referência do botão (o foco do leitor de tela). */}
+        <View ref={back} style={styles.back}>
+          <RoundBackButton />
+        </View>
       </View>
     </View>
   );
@@ -596,8 +662,10 @@ const makeStyles = (c: Palette) =>
     back: { position: "absolute", top: 12, left: 16 },
     body: { paddingHorizontal: 16, paddingTop: 4, gap: 12 },
     top: { gap: 12 },
-    topRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
-    code: { flexShrink: 1, fontSize: 26, fontWeight: "700", color: c.ink, fontVariant: ["tabular-nums"], letterSpacing: -0.3 },
+    // O selo fica à direita do código quando os dois cabem e desce para a linha de baixo quando não cabem: o número da
+    // OS nunca é cortado (sozinho, cabe até com a fonte em 1,6 num celular de 360 dp).
+    topRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", columnGap: 8, rowGap: 6 },
+    code: { fontSize: 26, fontWeight: "700", color: c.ink, fontVariant: ["tabular-nums"], letterSpacing: -0.3 },
     title: { fontSize: 16, fontWeight: "600", color: c.ink, lineHeight: 22 },
     amountBox: { backgroundColor: c.surface2, borderRadius: RADIUS.control, paddingHorizontal: 14, paddingVertical: 12, gap: 2 },
     amountLabel: { fontSize: 12, fontWeight: "700", color: c.inkMuted, textTransform: "uppercase", letterSpacing: 0.6 },

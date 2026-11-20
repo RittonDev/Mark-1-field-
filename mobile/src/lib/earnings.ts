@@ -26,6 +26,11 @@ export const SYNC_REFRESH_MS = 2 * 60_000;
 export const EARNINGS_FRESH_MS = 30_000;
 /** Meses da aba: o atual e os 11 anteriores. */
 const WINDOW_MONTHS = 12;
+/**
+ * O primeiro mês que o servidor aceita (o mês do Faturamento e a competência da nota): o "Outro mês" da aba e a
+ * competência da nota vão daqui até o mês atual.
+ */
+export const FIRST_MONTH = "2000-01";
 
 /** Nenhuma tela lê estas chaves pelo aviso do banco: a escrita não recarrega as listas de OS à toa. */
 const QUIET = { notify: false } as const;
