@@ -453,11 +453,11 @@ lembretes da visita são locais e funcionam também no Expo Go, mas só depois q
   estava encerrada com limpeza pendente, a rodada conclui a limpeza do fim de sessão (`sessionEnd.ts`) antes de
   terminar e desliga a tarefa (se apagar os dados do técnico desativado falhar, ela fica ligada para tentar de novo).
 - **Configurações › Notificações** (cartão "Neste celular"; o mesmo cartão, "Notificações", fica na Sincronização):
-  a chave **Lembretes das visitas** (ligada; desliga os três de uma vez), o próximo
-  lembrete, a permissão do celular (**Permitir notificações** ou **Abrir configurações**) e, no Android 12 ou mais
-  novo sem o alarme exato, **Horário exato · Pode atrasar alguns minutos** com **Liberar** (`SCHEDULE_EXACT_ALARM`
-  no `app.json`). No Android cada tipo tem canal próprio, que dá para silenciar no sistema: Ordens de serviço,
-  Lembretes das visitas, Tempo na loja e Jornada.
+  a chave **Lembretes das visitas** (ligada; desliga os três de uma vez), o próximo lembrete, a permissão do celular
+  (**Permitir notificações** ou **Abrir configurações**) e, no Android 12 ou mais novo sem o alarme exato, **Horário
+  exato · Pode atrasar alguns minutos** com **Liberar** (`SCHEDULE_EXACT_ALARM` no `app.json`). No Android cada tipo
+  tem canal próprio, que dá para silenciar no sistema: Ordens de serviço, Lembretes das visitas, Tempo na loja e
+  Jornada.
 - **Permissão**: um pedido automático só, uma vez por técnico, depois do termo de localização (nunca junto com o
   pedido de localização); depois, só pelos botões do cartão Notificações.
 - **Push da central**: ainda não ligado. O `POST /devices` responde `{"push": "simulated"}` e o próprio app avisa;
@@ -663,7 +663,8 @@ devolve a parte como gravou: turnos e meios na ordem, o "desde" de cada aptidão
 ordem dele. A ficha aprovada na homologação já entra com a disponibilidade, o veículo, a CNH e as aptidões. As telas
 não têm texto de explicação no topo: só os vazios, os limites e os avisos de rede. Código: `src/app/configuracoes/`,
 [src/lib/technicalProfile.ts](src/lib/technicalProfile.ts) (o estado das telas e os catálogos),
-[src/lib/autoSave.ts](src/lib/autoSave.ts) e as regras puras de [src/lib/techProfileForm.ts](src/lib/techProfileForm.ts).
+[src/lib/autoSave.ts](src/lib/autoSave.ts) e as regras puras de
+[src/lib/techProfileForm.ts](src/lib/techProfileForm.ts).
 
 - **Disponibilidade**: os 7 dias, cada um num cartão que abre os 4 turnos (Manhã 06h–12h, Tarde 12h–18h, Noite 18h–24h
   e Madrugada 00h–06h) em fichas de duas colunas; todos começam fechados e mais de um pode ficar aberto. Não é a
@@ -704,19 +705,19 @@ não têm texto de explicação no topo: só os vazios, os limites e os avisos d
 
 ### Sem internet e o que fica no aparelho
 
-- **Tudo pede internet**: abrir as telas, salvar, marcar e trocar a foto. Nada entra na fila offline: a senha não fica
-  guardada e o aviso à central tem de sair na hora. Sem rede e sem o cadastro na memória, as telas dizem "Sem internet"
-  / "Conecte o aparelho para abrir e salvar seu cadastro."; com ele na memória, mostram os dados com "Sem internet:
-  conecte o aparelho para salvar.". Se a releitura falhar por erro do servidor: "Não foi possível atualizar agora. Os
-  dados podem estar desatualizados.".
+- **Tudo pede internet**: ler o cadastro do servidor, salvar, marcar e trocar a foto. Nada entra na fila offline: a
+  senha não fica guardada e o aviso à central tem de sair na hora. Sem rede e sem o cadastro na memória, as telas dizem
+  "Sem internet" / "Conecte o aparelho para abrir e salvar seu cadastro."; com ele na memória, mostram os dados com "Sem
+  internet: conecte o aparelho para salvar.". Se a releitura falhar por erro do servidor: "Não foi possível atualizar
+  agora. Os dados podem estar desatualizados.".
 - **No aparelho**: nome, e-mail e celular no usuário da sessão (`mc_user`, SecureStore). Endereço, chave PIX, o perfil
   técnico e os catálogos ficam só na memória ([src/lib/profile.ts](src/lib/profile.ts) e
   [src/lib/technicalProfile.ts](src/lib/technicalProfile.ts)), nunca no SQLite, no kv ou no SecureStore, e somem ao
   sair da conta. O cadastro é lido ao entrar (sem aviso se falhar), ao abrir cada tela de Configurações, ao puxar o
   Faturamento e, na tela inicial e no Faturamento, quando falta ou passou de 6 h (o link da foto vale 12 h).
-- **Gravações em fila** ([src/lib/profile.ts](src/lib/profile.ts)): salvar, enviar e tirar a foto saem uma por vez (a
-  seguinte espera a anterior responder), e uma leitura durante a qual uma gravação saiu, voltou ou ficou no ar não
-  desfaz a tela (fica o que a gravação devolveu).
+- **Gravações em fila** ([src/lib/profile.ts](src/lib/profile.ts)): salvar, enviar a foto e removê-la saem uma por vez
+  (a seguinte espera a anterior responder, e não sai se a sessão mudou na espera), e uma leitura durante a qual uma
+  gravação saiu, voltou ou ficou no ar não desfaz a tela (fica o que a gravação devolveu).
 
 ## Histórico de atendimentos
 
@@ -733,9 +734,10 @@ mostrava os últimos 7 dias guardados no aparelho.
   "Sem internet" / "Esta OS não está no aparelho. Ela abre quando a conexão voltar.". Dois toques rápidos não abrem
   duas vezes.
 - **Páginas** ([src/lib/history.ts](src/lib/history.ts)): `GET /me/history?limit=30` e, ao chegar perto do fim da
-  lista, as seguintes pelo `cursor` da anterior, juntas sem repetir ([src/lib/historySections.ts](src/lib/historySections.ts),
-  puro, com sonda). No rodapé: "Carregando mais…", "Não deu para carregar mais." com **Tentar de novo**, "Conecte-se à
-  internet para ver os mais antigos." (a busca segue sozinha quando a conexão volta) ou "Fim do histórico".
+  lista, as seguintes pelo `cursor` da anterior, juntas sem repetir
+  ([src/lib/historySections.ts](src/lib/historySections.ts), puro, com sonda). No rodapé: "Carregando mais…", "Não deu
+  para carregar mais." com **Tentar de novo**, "Conecte-se à internet para ver os mais antigos." (a busca segue sozinha
+  quando a conexão volta) ou "Fim do histórico".
 - **Guardado**: só a primeira página, no kv `my_history`, com a hora e o técnico. Ao abrir, a tela mostra a guardada e
   busca de novo se nada está guardado ou se a guardada tem 2 min ou mais; puxar para atualizar busca na hora (uma página
   pedida antes não entra na lista nova). Sem internet: "Sem internet · mostrando os N mais recentes, de 19/11 às 10:00"
@@ -839,9 +841,9 @@ Tela `/privacidade` ([src/app/privacidade.tsx](src/app/privacidade.tsx)), só de
 - **Cartão em Hoje** ([src/components/PrivacyUpdateCard.tsx](src/components/PrivacyUpdateCard.tsx)): quando o texto
   muda (`PRIVACY_VERSION` diferente da versão que este técnico abriu), a aba Hoje mostra, depois da jornada e das
   ofertas, "Aviso de privacidade atualizado" · "Agora ele fala do seu perfil técnico: ferramental, disponibilidade,
-  transporte, aptidões e formação." com **Ler aviso**. É discreto e não bloqueia nada. Abrir o aviso por qualquer caminho grava a versão como vista quando a tela
-  termina de entrar (evento `transitionEnd` da pilha; sem ele, como na web, 600 ms depois de abrir): o cartão some com
-  Hoje já coberto, sem mexer na tela durante a transição.
+  transporte, aptidões e formação." com **Ler aviso**. É discreto e não bloqueia nada. Abrir o aviso por qualquer
+  caminho grava a versão como vista quando a tela termina de entrar (evento `transitionEnd` da pilha; sem ele, como na
+  web, 600 ms depois de abrir): o cartão some com Hoje já coberto, sem mexer na tela durante a transição.
 - **Versão vista** ([src/lib/privacySeen.ts](src/lib/privacySeen.ts)): só no aparelho, por técnico, no
   Keychain/Keystore (`mc_privacy_seen_<id do técnico>`, como a preferência de tema). Vale offline e sobrevive ao
   Sair e à troca de técnico. O cartão só lê a memória desse módulo, carregado com o `_layout.tsx`. A abertura do

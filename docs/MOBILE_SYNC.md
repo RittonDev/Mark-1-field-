@@ -37,7 +37,7 @@ o aviso (vale offline e sobrevive ao Sair).
 lote e da fila. Nada vai para o SQLite nem para o kv: o cadastro fica na memória do app (`lib/profile.ts`) e sai no
 Sair e na troca de técnico (nome, e-mail e celular vão também para o usuário da sessão). É lido ao entrar, ao abrir cada
 tela de Configurações, ao puxar a aba Faturamento e, quando falta ou passou de 6 h (o link da foto vale 12 h), ao voltar
-à tela inicial e ao abrir o Faturamento. As gravações (salvar, enviar e tirar a foto) saem uma por vez: a seguinte
+à tela inicial e ao abrir o Faturamento. As gravações (salvar, enviar a foto e removê-la) saem uma por vez: a seguinte
 espera a resposta da anterior e não sai se a sessão mudou na espera. Uma leitura durante a qual uma gravação saiu,
 voltou ou ficou no ar não é publicada: fica o que a gravação devolveu.
 
@@ -104,9 +104,9 @@ mostra uma mensagem própria.
   abrir o mês (a busca de até 30 s atrás vale), ao puxar, quando uma nota entra ou sai neste aparelho e, depois de uma
   rodada do sync, se a última busca tem 2 min ou mais (pagar marca a OS como alterada e a rodada traz). Um pedido dos
   meses por vez. O "ocultar valores" esconde só a tela: os valores guardados continuam no kv.
-- **Ofertas** (`GET /me/offers`, quando busca em §4; kv `field_offers`): junto da lista, por oferta, se o aviso já saiu
-  (`seen`), se o técnico abriu o escopo (`scope`, que libera o aceite) e quando abriu pela primeira vez (`scope_at`, no
-  relógio do servidor, `serverNow`), que vai no aceite (§3). A oferta que sai da lista leva as marcas dela junto.
+- **Ofertas** (`GET /me/offers`, buscada como diz o §4; kv `field_offers`): junto da lista, por oferta, se o aviso já
+  saiu (`seen`), se o técnico abriu o escopo (`scope`, que libera o aceite) e quando abriu pela primeira vez (`scope_at`,
+  no relógio do servidor, `serverNow`), que vai no aceite (§3). A oferta que sai da lista leva as marcas dela junto.
 
 ## 3. Envio (push) de operações feitas offline
 
