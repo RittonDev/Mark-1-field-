@@ -278,7 +278,8 @@ não duplica (reenvio seguro do lote). Histórico apagado após `TRACKING_RETENT
 
 ### Homologação de técnicos
 Público (sem login, pelo link): `GET /public/onboarding/catalog` (áreas, disponibilidade, níveis, sugestões de skill,
-versão do aviso de privacidade; o app usa as `skill_suggestions` nas sugestões das Aptidões) · `GET /public/onboarding/{token}` → `{valid, expires_at}` ·
+versão do aviso de privacidade; o app usa as `skill_suggestions` nas sugestões das Aptidões) ·
+`GET /public/onboarding/{token}` → `{valid, expires_at}` ·
 `POST /public/onboarding/{token}` (ficha + `password` + `privacy_consent: true` + `photo` em data URL) → `{protocol}`;
 410 se o link expirou, foi cancelado ou já usado; 422 com CPF/UF/e-mail inválido ou e-mail já cadastrado. E-mail de
 domínio da empresa (`ENTRA_ALLOWED_DOMAINS`, o domínio exato): 422 "Use um e-mail que não seja da empresa", antes da
@@ -1214,10 +1215,10 @@ técnico abriu o escopo no app, gravado no aceite; null na oferta não aceita e 
   com o valor da oferta. Aceite repetido da oferta que já é dele (toque duplo, outro aparelho): 200 com a OS, sem
   mudar nada (a hora da leitura também não muda).
   - `scope_read_at`: quando o técnico abriu o escopo, no relógio do servidor (o app usa `serverNow`: o relógio do
-    aparelho mais a diferença medida para o servidor); sem fuso, vale a hora de Brasília. Valor inválido vira null: a hora nunca recusa o aceite, e o corpo
-    sem ela (app antigo) aceita como antes. Só na passagem para aceita, a API grava
-    `offer.scope_read_at = min(max(scope_read_at, criação da oferta), agora)` (relógio errado não põe a leitura antes
-    da oferta nem no futuro). Nenhum erro novo.
+    aparelho mais a diferença medida para o servidor); sem fuso, vale a hora de Brasília. Valor inválido vira null:
+    a hora nunca recusa o aceite, e o aceite sem ela (app antigo) continua como antes. Só na passagem para aceita, a
+    API grava `offer.scope_read_at = min(max(scope_read_at, criação da oferta), agora)` (relógio errado não põe a
+    leitura antes da oferta nem no futuro). Nenhum erro novo.
 - `POST /me/offers/{id}/decline` `{reason?: até 300}` (corpo opcional) → `FieldOfferOut` (`declined`). Recusa repetida:
   200 como está. Recusar não exige abrir a oferta.
 
@@ -1527,7 +1528,10 @@ não pode desviar o pagamento. Código: `services/my_profile.py`, `services/user
   (`avatar_external_url`); sem foto, 200 sem histórico.
 
 **Chave PIX** (`core/pix.py`; os mesmos formatos em `formatPixKey` de `constants.ts`). Erro na chave: 422 com `label`
-"Chave PIX"; titular vazio: "Informe o nome do titular da conta" (`label` "Titular da conta").
+"Chave PIX"; titular vazio: "Informe o nome do titular da conta" (`label` "Titular da conta"). No app (Configurações ›
+Chave PIX e a linha "Recebe no PIX" do Faturamento), a chave aparece mascarada por `maskPixKey` de `constants.ts`, a
+mesma regra da coluna "Mascarada" com "•" no lugar de "*" ("CPF •••.456.789-••"); a web segue com a de
+`frontend/src/lib/pix.ts` (com "*") no extrato do WhatsApp.
 
 | Tipo | Fica gravada | Mostra | Mascarada | Erro |
 |---|---|---|---|---|
@@ -2079,7 +2083,7 @@ total, months}`:
   lista para recarregar."}`.
 
 **Custo.**
-- `/me/stats`: o `collect()` do elo só para o técnico (7 idas ao banco: responsável, junto, atrasos, reaberturas e as
+- `/me/stats`: as consultas do elo (`collect()`) só para o técnico (responsável, junto, atrasos, reaberturas e as
   conclusões delas, improdutivas e desconsiderações) mais 1 consulta agrupada por mês. Não chama `refresh_one`: sem
   trava, sem gravar a conta e sem commit.
 - `/me/history`: no máximo 3 idas por página (a página com `limit + 1`, o `count` só na primeira e a contagem dos meses
