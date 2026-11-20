@@ -1244,6 +1244,16 @@ type FichaTab = "cadastro" | "perfil" | "elo" | "historico";
 /** Quanto a barra de abas sobe por cima do respiro de cima do corpo do diálogo (o -mt-4 dela) para encostar no cabeçalho. */
 const TABS_BAR_PULL = 16;
 
+/** O ponto âmbar no rótulo da aba com algo ainda não salvo; `text` é para o leitor de tela. */
+function PendingDot({ text }: { text: string }) {
+  return (
+    <>
+      <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-amber-500 dark:bg-amber-400" />
+      <span className="sr-only"> ({text})</span>
+    </>
+  );
+}
+
 /**
  * A barra de abas presa logo abaixo do cabeçalho do diálogo (que fica preso no topo quando o corpo rola): devolve a ref
  * da barra e a altura do cabeçalho, que muda com o nome e a largura da tela. Sem achar o cabeçalho (null), a barra
@@ -1282,7 +1292,7 @@ function EditDialog({ tech, readOnly = false, onClose }: { tech: Technician; rea
   const [serviceIds, setServiceIds] = useState(baseline.serviceIds);
   const [confirmReset, setConfirmReset] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  // Motivo de desconsiderar uma ocorrência do elo digitado e ainda não enviado (fechar pergunta antes).
+  // Motivo de desconsiderar uma ocorrência do elo digitado e ainda não enviado (fechar e o Salvar perguntam antes).
   const [levelDraft, setLevelDraft] = useState(false);
   const serviceTypes = useServiceTypes({ active: true });
   // O elo recalculado agora (a mesma busca da seção Elo); enquanto chega, o selo guardado da lista.
@@ -1330,17 +1340,20 @@ function EditDialog({ tech, readOnly = false, onClose }: { tech: Technician; rea
       label: (
         <>
           Cadastro
-          {dirty ? (
-            <>
-              <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-amber-500 dark:bg-amber-400" />
-              <span className="sr-only"> (alterações não salvas)</span>
-            </>
-          ) : null}
+          {dirty ? <PendingDot text="alterações não salvas" /> : null}
         </>
       ),
     },
     { key: "perfil", label: "Perfil técnico" },
-    { key: "elo", label: "Elo" },
+    {
+      key: "elo",
+      label: (
+        <>
+          Elo
+          {levelDraft ? <PendingDot text="motivo não enviado" /> : null}
+        </>
+      ),
+    },
     { key: "historico", label: "Histórico" },
   ];
 
@@ -1387,7 +1400,22 @@ function EditDialog({ tech, readOnly = false, onClose }: { tech: Technician; rea
         ([key, value]) => JSON.stringify(value) !== JSON.stringify(before[key]),
       ),
     );
-    if (!Object.keys(changed).length) {
+    const hasChanges = Object.keys(changed).length > 0;
+    // O Salvar fecha a ficha: o motivo de "Desconsiderar" digitado no Elo e ainda não enviado se perderia. Mostra a aba
+    // e pergunta antes; "Voltar" fica nela, sem salvar.
+    if (levelDraft) {
+      if (tab !== "elo") changeTab("elo");
+      const ok = await confirm({
+        tone: "danger",
+        title: "Descartar o motivo não enviado?",
+        description: hasChanges
+          ? "O cadastro é salvo e a ocorrência continua contando no elo."
+          : "A ocorrência continua contando no elo.",
+        confirmLabel: "Descartar",
+      });
+      if (!ok) return;
+    }
+    if (!hasChanges) {
       onClose();
       return;
     }
@@ -1594,9 +1622,10 @@ function EditDialog({ tech, readOnly = false, onClose }: { tech: Technician; rea
                     <span key={`${city.state}-${city.key}`}>
                       <Link
                         href={favoritesHref(city.state, city.city)}
-                        // Sem alteração pendente, o cadastro fecha e a aba de favoritos aparece já na cidade.
+                        // Sem alteração pendente (nem motivo não enviado no Elo), o cadastro fecha e a aba de favoritos
+                        // aparece já na cidade.
                         onClick={() => {
-                          if (!dirty) onClose();
+                          if (!dirty && !levelDraft) onClose();
                         }}
                         className="rounded font-medium text-ink underline-offset-2 hover:text-brand-ink hover:underline focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
                       >

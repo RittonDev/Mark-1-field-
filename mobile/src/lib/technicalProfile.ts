@@ -1,5 +1,6 @@
 // Perfil técnico em Configurações › Atendimento (Disponibilidade, Transporte, Aptidões, Formação e Ferramental): o
-// estado de cada tela (o cadastro da memória e a releitura do servidor) e os catálogos, só na memória:
+// estado de cada tela (o cadastro da memória e a releitura do servidor), a gravação no ar de Aptidões e Formação e os
+// catálogos, só na memória:
 // - o ferramental: GET /technician-tools (o técnico recebe só as ativas, em ordem alfabética);
 // - as sugestões de aptidão: as mesmas da ficha da homologação, de GET /public/onboarding/catalog.
 // Nada vai para o SQLite, o kv nem o SecureStore. Um catálogo lido vale 10 min (abrir a tela depois disso relê), puxar a
@@ -89,6 +90,82 @@ export function useTechProfileScreen(): TechProfileScreen {
 
   const stale = gate.status === "ready" && load.status === "error" && !load.offline;
   return { gate, stale, retry, refresh, refreshing };
+}
+
+// --------------------------------------------------------------------------- gravação das listas
+
+/** As listas que gravam pela folha e pela lixeira (o corpo sai de saveProfileWith, na fila). */
+export type ListPart = "skills" | "education";
+
+/**
+ * A gravação de uma lista: enquanto está no ar, incluir, editar e excluir ficam desligados e o item que sai mostra o
+ * carregando. Fica no módulo, e não na tela, para valer também depois de sair e voltar à tela no meio da gravação.
+ */
+export interface ListWrite {
+  busy: boolean;
+  /** Os itens saindo: a aptidão pelo nome sem acento e maiúsculas (foldName), a formação pelo id. */
+  removing: readonly string[];
+}
+
+const LIST_IDLE: ListWrite = { busy: false, removing: [] };
+let listWrites: Record<ListPart, ListWrite> = { skills: LIST_IDLE, education: LIST_IDLE };
+/** Gravações no ar por lista (mais de uma só quando um toque passou antes de a tela desligar as ações). */
+const listCount: Record<ListPart, number> = { skills: 0, education: 0 };
+/** Quem gravou: a troca de sessão apaga, e o fim de uma gravação de antes dela não mexe mais em nada. */
+let listOwner: string | null = null;
+let listGeneration = 0;
+const listListeners = new Set<() => void>();
+
+function publishList(next: Record<ListPart, ListWrite>) {
+  listWrites = next;
+  listListeners.forEach((listener) => listener());
+}
+
+function subscribeList(listener: () => void) {
+  listListeners.add(listener);
+  return () => {
+    listListeners.delete(listener);
+  };
+}
+
+session.subscribe(() => {
+  if (listOwner === null) return;
+  const { status, user } = session.get();
+  if (status === "signedIn" && user?.id === listOwner) return;
+  listOwner = null;
+  listGeneration += 1;
+  listCount.skills = 0;
+  listCount.education = 0;
+  publishList({ skills: LIST_IDLE, education: LIST_IDLE });
+});
+
+/**
+ * Marca a lista como gravando enquanto `write` está no ar e devolve o que ele devolver. `removing`: o item que está
+ * saindo (null ao incluir e ao editar).
+ */
+export async function trackListWrite<T>(part: ListPart, removing: string | null, write: () => Promise<T>): Promise<T> {
+  const mine = listGeneration;
+  listOwner = session.get().user?.id ?? null;
+  listCount[part] += 1;
+  const before = listWrites[part].removing;
+  publishList({ ...listWrites, [part]: { busy: true, removing: removing === null ? before : [...before, removing] } });
+  try {
+    return await write();
+  } finally {
+    if (mine === listGeneration) {
+      listCount[part] -= 1;
+      const left = [...listWrites[part].removing];
+      const at = removing === null ? -1 : left.indexOf(removing);
+      if (at >= 0) left.splice(at, 1);
+      publishList({ ...listWrites, [part]: listCount[part] > 0 ? { busy: true, removing: left } : LIST_IDLE });
+    }
+  }
+}
+
+/** A gravação no ar da lista, na tela (Aptidões ou Formação). */
+export function useListWrite(part: ListPart): ListWrite {
+  const get = useCallback(() => listWrites[part], [part]);
+  return useSyncExternalStore(subscribeList, get, get);
 }
 
 // --------------------------------------------------------------------------- catálogos na memória

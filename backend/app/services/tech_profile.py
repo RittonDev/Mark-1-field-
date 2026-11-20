@@ -142,18 +142,34 @@ _MONTH_TEXT = re.compile(r"([0-9]{4})-([0-9]{2})(?:-[0-9]{2})?")
 
 # ------------------------------------------------------------------------- texto
 
+# Os únicos controles que viram espaço (os outros saem do texto).
+_SPACE_CONTROLS = frozenset("\t\n\v\f\r")
+
+
+def _visible(text: str) -> str:
+    """Sem os caracteres das categorias Cc (controles: U+0000, ...) e Cf (formatação: espaço de
+    largura zero, BOM, marcas de direção como U+202E); tab, LF, VT, FF e CR viram espaço. O mesmo
+    do app (cleanText e foldName em lib/techProfileForm.ts)."""
+    return "".join(
+        " " if ch in _SPACE_CONTROLS else ch
+        for ch in text
+        if ch in _SPACE_CONTROLS or unicodedata.category(ch) not in ("Cc", "Cf")
+    )
+
 
 def fold(text: str) -> str:
-    """NFKD sem marcas, casefold, espaços colapsados (comparar nomes sem acento e sem
-    maiúsculas)."""
-    decomposed = unicodedata.normalize("NFKD", text or "")
+    """Sem controles nem formatação (`_visible`), NFKD sem marcas, casefold, espaços colapsados
+    (comparar nomes sem acento e sem maiúsculas)."""
+    decomposed = unicodedata.normalize("NFKD", _visible(text or ""))
     plain = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
     return " ".join(plain.casefold().split())
 
 
 def clean(text: str) -> str:
-    """NFC e espaços colapsados nas pontas e no meio (o que se grava)."""
-    return " ".join(unicodedata.normalize("NFC", text or "").split())
+    """Sem controles nem formatação (`_visible`, antes do NFC: o acento separado da letra por um
+    invisível volta a ser uma letra só), NFC e espaços colapsados nas pontas e no meio (o que se
+    grava)."""
+    return " ".join(unicodedata.normalize("NFC", _visible(text or "")).split())
 
 
 @lru_cache(maxsize=4096)

@@ -10,7 +10,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import func, select, text, update
-from sqlalchemy.exc import DataError, IntegrityError
+from sqlalchemy.exc import DataError, DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -366,10 +366,37 @@ async def _validation(_: Request, exc: RequestValidationError) -> JSONResponse:
     )
 
 
+DATA_ERROR = "Algum valor está fora do tamanho ou do formato aceito. Confira os campos."
+
+
 @app.exception_handler(DataError)
 async def _data_error(_: Request, exc: DataError) -> JSONResponse:
     log.warning("DataError: %s", exc.orig)
-    return _error(422, "Algum valor está fora do tamanho ou do formato aceito. Confira os campos.")
+    return _error(422, DATA_ERROR)
+
+
+def db_sqlstate(exc: DBAPIError) -> str:
+    """O SQLSTATE do erro original do banco ("" sem ele): o adaptador do asyncpg o copia em
+    `sqlstate`, e o erro do asyncpg fica em __cause__."""
+    orig = exc.orig
+    for source in (orig, getattr(orig, "__cause__", None)):
+        code = getattr(source, "sqlstate", None)
+        if code:
+            return str(code)
+    return ""
+
+
+@app.exception_handler(DBAPIError)
+async def _dbapi_error(_: Request, exc: DBAPIError) -> JSONResponse:
+    """Erro do banco da classe 22 ("data exception": U+0000 num texto, texto maior que a coluna):
+    o mesmo 422 do DataError (o asyncpg não o entrega como DataError, e sim como DBAPIError
+    genérico). Qualquer outro segue como erro não tratado (500 "Erro interno" e o log do
+    RequestGuard). IntegrityError e DataError têm os handlers deles."""
+    sqlstate = db_sqlstate(exc)
+    if not sqlstate.startswith("22"):
+        raise exc
+    log.warning("DBAPIError %s: %s", sqlstate, exc.orig)
+    return _error(422, DATA_ERROR)
 
 
 @app.exception_handler(NotFound)
@@ -434,8 +461,9 @@ CONSTRAINT_MESSAGES: dict[str, str] = {
     "uq_technician_invoices_technician_upload": "Esta nota já foi recebida. Atualize a lista.",
     # A mesma ocorrência desconsiderada duas vezes (elo do técnico).
     "uq_technician_level_waivers_occurrence": "Esta ocorrência já foi desconsiderada",
-    # Ferramental dos técnicos (Configurações › Técnicos): o serviço já recusa sem acento e
-    # maiúsculas; o banco pega dois cadastros ao mesmo tempo.
+    # Ferramental dos técnicos (Configurações › Técnicos): o serviço trava o catálogo e recusa o
+    # mesmo nome com outra grafia (acento, maiúsculas); o índice único fica de reserva para o nome
+    # exato.
     "uq_tool_catalog_name": "Já existe uma ferramenta com este nome",
 }
 CONFLICT = "Conflito de dados: registro duplicado ou referência inválida"

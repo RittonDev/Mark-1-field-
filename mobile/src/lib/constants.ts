@@ -453,9 +453,9 @@ export function slotsText(slots: readonly string[]): string {
 }
 
 /**
- * Resumo da linha Disponibilidade (Configurações do app). Todos os dias marcados com os mesmos turnos, seguidos ou não:
- * "Seg a sex · manhã e tarde", "Sáb e dom · noite", "Seg, qua e sex · manhã", "Seg a qua e sex · manhã"; os 28: "Todos
- * os dias · todos os turnos"; dias com turnos diferentes: "6 dias · turnos variados"; nada: "Não informada".
+ * Resumo da linha Disponibilidade (Configurações do app). Dias com os mesmos turnos, seguidos ou não:
+ * "Seg a sex · manhã e tarde", "Sáb e dom · noite", "Seg, qua e sex · manhã", "Seg a qua e sex · manhã"; os 28:
+ * "Todos os dias · todos os turnos"; dias com turnos diferentes: "6 dias · turnos variados"; nada: "Não informada".
  */
 export function availabilitySummary(slots: readonly string[]): string {
   const list = sortSlots(slots);

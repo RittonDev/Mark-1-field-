@@ -16,6 +16,10 @@ services/tech_profile.py): sem senha, nem a provisória trava; cada parte vem in
 quando muda de verdade, com a data e "app" na parte (tech_profile_stamps). Entra no histórico do
 cadastro e no aviso à central como as outras mudanças (sem aviso no sino da web).
 
+Uma gravação por vez por técnico: `update` trava a linha do usuário (SELECT ... FOR UPDATE) até o
+commit da rota e relê o cadastro do banco. Duas gravações juntas (o app que reenvia depois do tempo
+esgotado, o técnico em dois aparelhos) não apagam o carimbo nem o histórico uma da outra.
+
 Grupo, cargo, acesso ao app, papel, serviços, jornada e senha provisória continuam com a central;
 CPF, CNPJ/MEI e nascimento continuam só na ficha da homologação.
 """
@@ -23,6 +27,7 @@ CPF, CNPJ/MEI e nascimento continuam só na ficha da homologação.
 import re
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import verify_password_async
@@ -169,7 +174,17 @@ async def update(db: AsyncSession, user: User, data: MyProfileUpdate) -> list[di
     casos e na ferramenta que não existe (tech_profile.TOOL_NOT_FOUND),
     login_guard.LoginBlocked (429) depois de muitas senhas erradas e login_guard.RateLimited
     (429) depois de MAX_EMAIL_CHECKS_PER_HOUR trocas de e-mail na hora. O perfil técnico grava
-    com tech_profile.apply entre as duas fotos do histórico."""
+    com tech_profile.apply entre as duas fotos do histórico.
+
+    Uma gravação por vez por técnico: antes de tudo, a linha do usuário fica travada (FOR UPDATE,
+    até o commit ou o fim da sessão) e o cadastro é relido do banco (populate_existing). A segunda
+    gravação espera a primeira e compara, carimba e monta o histórico sobre o que ela gravou."""
+    await db.execute(
+        select(User)
+        .where(User.id == user.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     new = await _wanted(db, user, data)
     if not new:
         return []

@@ -28,10 +28,10 @@ Uso: `before = await snapshot(db, user)`, aplica, `changes = await track(db, use
 import logging
 import uuid
 from collections.abc import Callable, Iterable, Mapping
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import DateTime, Uuid, literal, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import permissions, pix
@@ -42,10 +42,15 @@ from app.models import Team, User, UserChange
 from app.models.user_change import VIA_CENTRAL
 from app.schemas.my_profile import UserChangeItem, UserChangeOut
 from app.services import tech_profile
+from app.services.errors import WorkflowError
 
 log = logging.getLogger(__name__)
 
 EVENT = "profile.changed"
+
+# GET /technicians/{id}/changes em páginas: `before` estragado (o nosso tem uns 70 caracteres).
+CHANGES_PAGE_ERROR = "Página do histórico inválida. Recarregue a ficha."
+CHANGES_BEFORE_MAX = 100
 
 # Mudanças que não saem da comparação dos dados.
 PHOTO_ADDED: dict[str, Any] = {"field": "avatar", "from": None, "to": "nova"}
@@ -248,15 +253,45 @@ def event_fields(changes: list[dict[str, Any]]) -> list[str]:
     return fields
 
 
-async def list_changes(db: AsyncSession, user_id: uuid.UUID, limit: int = 50) -> list[UserChange]:
-    """O histórico do cadastro, do mais novo para o mais antigo."""
-    rows = await db.scalars(
+def parse_before(before: str) -> tuple[datetime, uuid.UUID]:
+    """O `before` de GET /technicians/{id}/changes: "{created_at ISO 8601 com fuso}|{id}" da última
+    linha recebida, com a data em UTC. Estragado (tamanho, separador, data sem fuso ou fora da
+    faixa, id): 422 com CHANGES_PAGE_ERROR."""
+    if len(before) > CHANGES_BEFORE_MAX:
+        raise WorkflowError(CHANGES_PAGE_ERROR)
+    try:
+        at_text, id_text = before.split("|")
+        parsed = datetime.fromisoformat(at_text)
+        row_id = uuid.UUID(id_text)
+        # Sem fuso a conversão usaria o do servidor: fica None e vira erro logo abaixo.
+        at = parsed.astimezone(UTC) if parsed.tzinfo is not None else None
+    # A data que não cabe em UTC (o ano 1 com +14:00, o 9999 com -14:00) é OverflowError.
+    except (ValueError, OverflowError) as exc:
+        raise WorkflowError(CHANGES_PAGE_ERROR) from exc
+    if at is None:
+        raise WorkflowError(CHANGES_PAGE_ERROR)
+    return at, row_id
+
+
+async def list_changes(
+    db: AsyncSession, user_id: uuid.UUID, limit: int = 50, before: str | None = None
+) -> list[UserChange]:
+    """O histórico do cadastro, do mais novo para o mais antigo, `limit` linhas por vez. Com
+    `before` (parse_before), só as linhas mais antigas que a última recebida: a página seguinte,
+    sem repetir nem pular linha, também com várias no mesmo instante (o id desempata)."""
+    stmt = (
         select(UserChange)
         .where(UserChange.user_id == user_id)
         .order_by(UserChange.created_at.desc(), UserChange.id.desc())
         .limit(limit)
     )
-    return list(rows)
+    if before:
+        at, row_id = parse_before(before)
+        stmt = stmt.where(
+            tuple_(UserChange.created_at, UserChange.id)
+            < tuple_(literal(at, DateTime(timezone=True)), literal(row_id, Uuid()))
+        )
+    return list(await db.scalars(stmt))
 
 
 def _hidden(value: str | None) -> str | None:

@@ -1,18 +1,45 @@
 "use client";
 
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useInfiniteQuery } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
 import { Button, ErrorBox, SectionTitle, Skeleton } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { USER_CHANGE_LABEL } from "@/lib/constants";
 import { formatShort } from "@/lib/format";
 import type { UserChange, UserChangeField, UserChangeItem, UUID } from "@/lib/types";
 
-/** Linhas na primeira vista e a cada "Ver mais". A API manda até 200, das mais recentes. */
+/** Linhas na primeira vista e a cada "Ver mais". */
 const FIRST = 10;
 const MORE = 20;
-const FETCH = 50;
-const FETCH_MAX = 200;
+/** Linhas por página da API, das mais recentes para as mais antigas. */
+const PAGE = 50;
+
+/** As páginas numa lista só, sem repetir linha (a API que ainda ignora o `before` manda a primeira página de novo). */
+function joinPages(pages: UserChange[][]): UserChange[] {
+  const seen = new Set<UUID>();
+  const rows: UserChange[] = [];
+  for (const page of pages) {
+    for (const row of page) {
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      rows.push(row);
+    }
+  }
+  return rows;
+}
+
+/**
+ * O `before` da página seguinte: a hora e o id da última linha recebida ("<created_at>|<id>"). Sem página seguinte
+ * quando a última veio incompleta (o histórico acabou) ou sem nenhuma linha nova (a API que ainda ignora o `before`
+ * devolve a primeira página de novo).
+ */
+function nextBefore(last: UserChange[], pages: UserChange[][]): string | undefined {
+  if (last.length < PAGE) return undefined;
+  const earlier = new Set(pages.slice(0, -1).flatMap((page) => page.map((row) => row.id)));
+  if (last.every((row) => earlier.has(row.id))) return undefined;
+  const tail = last[last.length - 1];
+  return `${tail.created_at}|${tail.id}`;
+}
 
 /** Valor vazio de cada campo ("Grupo: Campo → sem grupo"); os demais ficam "vazio". */
 const EMPTY: Partial<Record<UserChangeField, string>> = {
@@ -89,31 +116,42 @@ function whoOf(row: UserChange): string {
 /**
  * "Histórico do cadastro": o que mudou, quando, por quem e por onde (o técnico no app ou a central). A chave
  * PIX vem mascarada pela API (sem Pagamentos, nem isso); e-mail e celular, em claro (para desfazer uma troca
- * indevida).
+ * indevida). Vem da API em páginas de PAGE pelo `before`, até a primeira linha: a troca antiga de PIX ou de e-mail
+ * continua ao alcance do "Ver mais". A chave fica sob ["technicians"], que o tempo real e o salvar da ficha mandam
+ * buscar de novo (todas as páginas já abertas).
  */
 export function ProfileHistory({ technicianId }: { technicianId: UUID }) {
   const [shown, setShown] = useState(FIRST);
-  const limit = shown > FETCH ? FETCH_MAX : FETCH;
-  const changes = useQuery({
-    queryKey: ["technicians", "changes", technicianId, limit],
-    queryFn: ({ signal }) => api.get<UserChange[]>(`/technicians/${technicianId}/changes`, { limit }, { signal }),
-    placeholderData: keepPreviousData,
+  const changes = useInfiniteQuery({
+    queryKey: ["technicians", "changes", technicianId],
+    queryFn: ({ pageParam, signal }) =>
+      api.get<UserChange[]>(`/technicians/${technicianId}/changes`, { limit: PAGE, before: pageParam || undefined }, { signal }),
+    initialPageParam: "",
+    getNextPageParam: (last, pages) => nextBefore(last, pages),
   });
-  const rows = changes.data ?? [];
-  // Buscando as próximas (de 50 para 200): o botão fica, girando, até chegarem.
-  const more = changes.isPlaceholderData || rows.length > shown || (rows.length >= limit && limit < FETCH_MAX);
+  const rows = useMemo(() => joinPages(changes.data?.pages ?? []), [changes.data]);
+  const { hasNextPage, isFetchingNextPage, fetchNextPage } = changes;
+  // A página seguinte falhou: o aviso, com "Tentar de novo", fica no lugar do "Ver mais".
+  const moreFailed = changes.isFetchNextPageError && !isFetchingNextPage;
+  const more = rows.length > shown || hasNextPage;
+  const showMore = () => {
+    const next = shown + MORE;
+    setShown(next);
+    // As linhas já carregadas não enchem a vista: busca a página seguinte (o botão gira até ela chegar).
+    if (next > rows.length && hasNextPage && !isFetchingNextPage) void fetchNextPage();
+  };
 
   return (
     <section className="flex flex-col gap-2 rounded-lg border border-line p-3">
       <SectionTitle>Histórico do cadastro</SectionTitle>
       {changes.isLoading ? (
         <Skeleton className="h-10 w-full" />
-      ) : changes.error && !rows.length ? (
+      ) : changes.isError && !rows.length ? (
         <ErrorBox message={errorMessage(changes.error)} onRetry={() => void changes.refetch()} />
       ) : !rows.length ? (
         <p className="text-xs text-ink-muted">Nenhuma alteração registrada.</p>
       ) : (
-        <ol className="divide-y divide-line" aria-busy={changes.isPlaceholderData || undefined}>
+        <ol className="divide-y divide-line" aria-busy={isFetchingNextPage || undefined}>
           {rows.slice(0, shown).map((row) => {
             const lines = row.changes.flatMap((item) => linesOf(item, row.changes));
             return (
@@ -139,8 +177,10 @@ export function ProfileHistory({ technicianId }: { technicianId: UUID }) {
           })}
         </ol>
       )}
-      {more ? (
-        <Button size="sm" variant="ghost" className="self-start" loading={changes.isPlaceholderData} onClick={() => setShown((n) => n + MORE)}>
+      {moreFailed ? (
+        <ErrorBox message={errorMessage(changes.error)} onRetry={() => void fetchNextPage()} />
+      ) : more ? (
+        <Button size="sm" variant="ghost" className="self-start" loading={isFetchingNextPage} onClick={showMore}>
           Ver mais
         </Button>
       ) : null}

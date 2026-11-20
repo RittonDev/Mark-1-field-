@@ -1978,9 +1978,10 @@ export interface PayoutBoard extends PayoutList {
 
 /**
  * Situação de um mês no Faturamento do app (GET /me/earnings/months), calculada no servidor nesta ordem: "rejected"
- * (recusa da competência sem nota nova depois, com OS do mês sem nota ou mês sem OS), "empty" (mês sem OS: o app não
- * mostra), "in_progress" (só OS em andamento), "partial" (algo pago e algo a receber ou previsto), "no_invoice",
- * "in_review", "to_pay", "paid_no_invoice" e "paid". A nota nunca trava o pagamento: "no_invoice" é só informativo.
+ * (recusa da competência sem nota nova depois, com OS do mês sem nota ou mês sem OS), "empty" (mês sem OS: o app só
+ * mostra com nota da competência, `invoices`), "in_progress" (só OS em andamento), "partial" (algo pago e algo a
+ * receber ou previsto), "no_invoice", "in_review", "to_pay", "paid_no_invoice" e "paid". A nota nunca trava o
+ * pagamento: "no_invoice" é só informativo.
  */
 export type EarningsMonthState =
   | "empty"

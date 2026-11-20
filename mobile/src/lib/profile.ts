@@ -7,9 +7,11 @@
 // (session.updateUser grava o e-mail novo para preencher o login).
 //
 // Gravações em fila (salvar, trocar e tirar a foto): uma só sai depois de a anterior responder. O "salvar ao tocar"
-// do perfil técnico nunca corre junto de outra gravação, e cada resposta já inclui a anterior. Uma leitura durante a
-// qual uma gravação saiu, voltou ou ficou no ar não é publicada: ela pode ser de antes da gravação e desfaria a
-// mudança na tela (fica o que a gravação devolveu).
+// do perfil técnico nunca corre junto de outra gravação, e cada resposta já inclui a anterior. As listas do perfil
+// técnico (Aptidões e Formação, que vão inteiras) montam o corpo na hora em que a gravação sai da fila
+// (saveProfileWith), com o cadastro que a anterior devolveu: uma exclusão que esperou outra não devolve o item que a
+// outra tirou. Uma leitura durante a qual uma gravação saiu, voltou ou ficou no ar não é publicada: ela pode ser de
+// antes da gravação e desfaria a mudança na tela (fica o que a gravação devolveu).
 
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import { useSyncExternalStore } from "react";
@@ -151,6 +153,20 @@ export function ensureProfile(): void {
 export function saveProfile(body: MyProfileUpdate): Promise<MyProfile> {
   const userId = session.get().user?.id ?? null;
   return queueWrite(userId, async () => keep(await api.patch<MyProfile>("/me/profile", body), userId));
+}
+
+/**
+ * PATCH /me/profile com o corpo montado na hora em que a gravação sai da fila, com o cadastro da memória (que já tem o
+ * que a gravação anterior devolveu): as listas do perfil técnico, que vão inteiras. `build` pode recusar lançando um
+ * erro, que volta para quem pediu (e nada sai). Sem o cadastro na memória (a sessão acabou no meio), nada sai.
+ */
+export function saveProfileWith(build: (profile: MyProfile) => MyProfileUpdate): Promise<MyProfile> {
+  const userId = session.get().user?.id ?? null;
+  return queueWrite(userId, async () => {
+    const profile = current.profile;
+    if (!hasTechnicalProfile(profile) || profile.id !== userId) throw new Error("Sessão encerrada");
+    return keep(await api.patch<MyProfile>("/me/profile", build(profile)), userId);
+  });
 }
 
 export interface AvatarPhoto {

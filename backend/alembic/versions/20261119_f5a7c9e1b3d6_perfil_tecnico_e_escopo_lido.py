@@ -14,6 +14,10 @@
 
 O downgrade apaga o perfil técnico informado e o catálogo.
 
+Rodou em produção em 2026-11-20 sem fichas aprovadas; as mudanças depois disso só deixam o backfill
+robusto (o JSONB da ficha lido como texto, e os nomes sem controles nem formatação, como no
+serviço), sem mexer no schema.
+
 Revision ID: f5a7c9e1b3d6
 Revises: e4b6d8f0a2c3
 Create Date: 2026-11-19
@@ -77,11 +81,15 @@ FICHA_VEHICLE = {"carro": "car", "moto": "motorcycle"}
 SKILL_LEVELS = ("basico", "intermediario", "avancado")
 MAX_SKILLS = 30
 TEXT_MIN, SKILL_NAME_MAX = 2, 80
+SPACE_CONTROLS = frozenset("\t\n\v\f\r")  # os únicos controles que viram espaço
 
+# availability e skills como texto (::text): sem isso o dialeto asyncpg do SQLAlchemy já entrega o
+# JSONB decodificado, e um texto JSON no topo ("plantao") chegaria como str e quebraria o
+# json.loads de _loaded.
 APPROVED = sa.text(
     """
-    SELECT a.user_id, a.availability, a.has_vehicle, a.vehicle_type, a.has_driver_license,
-           a.skills, a.created_at
+    SELECT a.user_id, a.availability::text AS availability, a.has_vehicle, a.vehicle_type,
+           a.has_driver_license, a.skills::text AS skills, a.created_at
       FROM technician_applications a
       JOIN users u ON u.id = a.user_id
      WHERE CAST(a.status AS text) = 'approved'
@@ -100,20 +108,32 @@ FILL = sa.text(
 )
 
 
+def _visible(text: str) -> str:
+    """Sem controles (Cc) nem formatação (Cf); tab, LF, VT, FF e CR viram espaço (como
+    tech_profile._visible)."""
+    return "".join(
+        " " if ch in SPACE_CONTROLS else ch
+        for ch in text
+        if ch in SPACE_CONTROLS or unicodedata.category(ch) not in ("Cc", "Cf")
+    )
+
+
 def _fold(text: str) -> str:
-    """NFKD sem marcas, casefold, espaços colapsados (como tech_profile.fold)."""
-    decomposed = unicodedata.normalize("NFKD", text or "")
+    """Sem controles nem formatação, NFKD sem marcas, casefold, espaços colapsados (como
+    tech_profile.fold)."""
+    decomposed = unicodedata.normalize("NFKD", _visible(text or ""))
     plain = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
     return " ".join(plain.casefold().split())
 
 
 def _clean(text: str) -> str:
-    """NFC e espaços colapsados (como tech_profile.clean)."""
-    return " ".join(unicodedata.normalize("NFC", text or "").split())
+    """Sem controles nem formatação, NFC e espaços colapsados (como tech_profile.clean)."""
+    return " ".join(unicodedata.normalize("NFC", _visible(text or "")).split())
 
 
 def _loaded(value: Any) -> Any:
-    """JSONB de uma consulta em texto puro: o asyncpg entrega o texto do JSON."""
+    """O JSONB lido como texto (o ::text de APPROVED): o asyncpg entrega o texto do JSON. Um
+    texto JSON no topo vira str, que _ficha_profile e _skills ignoram (não é lista)."""
     return json.loads(value) if isinstance(value, str) else value
 
 

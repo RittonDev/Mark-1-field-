@@ -8,6 +8,7 @@ pagos, saem as etiquetas de pagamento pendente (services/tag_rules).
 """
 
 import uuid
+from collections import Counter
 from collections.abc import Sequence
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
@@ -728,7 +729,8 @@ async def my_earnings_months(
     As regras de my_earnings: o mês do valor é o da conclusão da OS (aberta: o do lançamento); o
     pendente de OS cancelada não conta (o pago, sim); só vale a nota do próprio técnico. Três
     consultas, todas pelo técnico: os valores agrupados por mês, as notas da janela (a recusa em
-    aberto de cada competência) e os reembolsos. Só leitura. `now` é para os testes."""
+    aberto e as notas não recusadas de cada competência) e os reembolsos. Só leitura. `now` é para
+    os testes."""
     until = (now or utcnow()).astimezone(ZoneInfo(settings.TIMEZONE)).date().replace(day=1)
     since = shift_month(until, 1 - months)
     until_key, since_key = f"{until:%Y-%m}", f"{since:%Y-%m}"
@@ -829,6 +831,8 @@ async def my_earnings_months(
         )
 
     rejections = _open_rejections(invoices)
+    # Notas não recusadas (aguardando conferência ou conferidas) de cada competência.
+    sent = Counter(f"{i.competence:%Y-%m}" for i in invoices if i.status != InvoiceStatus.REJECTED)
     blank = {name: EarningsBucket() for name in buckets}
     window: list[EarningsMonth] = []
     for back in range(months):
@@ -853,6 +857,7 @@ async def my_earnings_months(
                 **values,
                 last_paid_at=last_paid_at,
                 rejection=rejection,
+                invoices=sent[key],
             )
         )
     return EarningsMonths(

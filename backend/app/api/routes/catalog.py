@@ -2,7 +2,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, text
 
 from app.api.deps import DB, AdminUser, StaffUser, TicketManagerUser, access_user
 from app.core.access import channel_metadata
@@ -422,9 +422,20 @@ def _tool_out(tool: TechnicianTool, counts: dict[str, int] | None) -> Technician
     )
 
 
+async def _lock_tool_catalog(db: DB) -> None:
+    """Um cadastro ou renomeação por vez no catálogo, até o fim da transação: o nome repetido sem
+    acento e sem maiúsculas e o limite de MAX_TOOLS são conferidos lendo o catálogo antes de gravar,
+    e dois pedidos juntos ("Multímetro" e "multimetro") passariam os dois. Em READ COMMITTED, a
+    leitura feita depois da trava já vê o que o outro pedido gravou."""
+    await db.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"), {"key": "tool_catalog"}
+    )
+
+
 async def _check_tool_name(db: DB, name: str, self_id: uuid.UUID | None) -> None:
-    """Nome repetido sem acento e sem maiúsculas ("Multimetro" = "Multímetro"). O banco só recusa
-    o nome exato (uq_tool_catalog_name); o catálogo tem no máximo MAX_TOOLS nomes."""
+    """Nome repetido sem acento e sem maiúsculas ("Multimetro" = "Multímetro"), com o catálogo
+    travado antes (_lock_tool_catalog). O banco só recusa o nome exato (uq_tool_catalog_name, a
+    reserva); o catálogo tem no máximo MAX_TOOLS nomes."""
     wanted = tech_profile.fold(name)
     for tool_id, other in await db.execute(select(TechnicianTool.id, TechnicianTool.name)):
         if tool_id != self_id and tech_profile.fold(other) == wanted:
@@ -458,6 +469,7 @@ async def create_technician_tool(
 ) -> TechnicianToolOut:
     """Ferramenta nova, já ativa. O catálogo aceita até MAX_TOOLS ferramentas (ativas e
     inativas: não há excluir)."""
+    await _lock_tool_catalog(db)
     await _check_tool_name(db, body.name, None)
     total = await db.scalar(select(func.count()).select_from(TechnicianTool)) or 0
     if total >= tech_profile.MAX_TOOLS:
@@ -479,7 +491,8 @@ async def update_technician_tool(
     if tool is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, TOOL_MISSING)
     fields = body.model_dump(exclude_none=True)
-    if "name" in fields:
+    if "name" in fields:  # só desativar ou reativar não precisa da trava
+        await _lock_tool_catalog(db)
         await _check_tool_name(db, fields["name"], tool.id)
     for key, value in fields.items():
         setattr(tool, key, value)

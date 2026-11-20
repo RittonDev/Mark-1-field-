@@ -326,12 +326,16 @@ async def technician_changes(
     db: DB,
     viewer: TechniciansView,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    before: str | None = None,
 ) -> list[UserChange] | list[UserChangeOut]:
     """Histórico do cadastro, do mais novo para o mais antigo: pelo técnico (app) e pela central,
     com quem fez. A chave PIX vem só mascarada; para quem não tem Pagamentos, nem isso: a chave
-    vira "***" e o titular não vem (user_history.for_viewer)."""
+    vira "***" e o titular não vem (user_history.for_viewer). Páginas: `before` =
+    "{created_at}|{id}" da última linha recebida traz as `limit` linhas seguintes (mais antigas);
+    estragado, 422 "Página do histórico inválida. Recarregue a ficha.". Sem ele, as mais novas."""
     user = await svc.get_technician(db, user_id)
-    return user_history.for_viewer(await user_history.list_changes(db, user.id, limit), viewer)
+    rows = await user_history.list_changes(db, user.id, limit, before)
+    return user_history.for_viewer(rows, viewer)
 
 
 @router.delete("/technicians/{user_id}/pix", status_code=status.HTTP_204_NO_CONTENT)

@@ -48,7 +48,12 @@ async def _seed(engine: AsyncEngine, world: World) -> tuple[list[str], str]:
         changes = PIX_CHANGES if i == 0 else [{"field": "tools", "from": None, "to": f"Item {i}"}]
         rows.append(
             UserChange(
-                id=uuid.uuid4(), user_id=tech, actor_id=tech, via=VIA_APP, changes=changes, created_at=at
+                id=uuid.uuid4(),
+                user_id=tech,
+                actor_id=tech,
+                via=VIA_APP,
+                changes=changes,
+                created_at=at,
             )
         )
         if i % 20 == 0:

@@ -1,13 +1,16 @@
 // Perfil técnico (Configurações › Atendimento): as regras das telas sem React nem React Native, para a sonda
 // (tests/tech-profile-form.test.mjs). Só importa valores de ./constants (que só tem `import type`).
 //
-// - Nomes: `foldName` compara como o servidor (services/tech_profile.fold) e `cleanText` limpa como ele grava.
+// - Nomes: `foldName` compara como o servidor (services/tech_profile.fold) e `cleanText` limpa como ele grava. Os dois
+//   tiram os caracteres de controle e de formatação (invisíveis, BOM, direção), como o servidor, para contarem igual.
 // - Disponibilidade: `toggleSlot`, `sameSlots`, `copyToWorkdays` e `canCopyToWorkdays` (a lista "dia:turno" da API).
-// - Transporte: `toggleMode`, `sameTransport` e `transportBody`. Ferramental: `toggleId`, `sameSet`, `sortTools` e
-//   `filterTools`.
+// - Transporte: `toggleMode`, `sameTransport`, `transportBody`, o nunca informado (`TRANSPORT_UNSET`, com
+//   `sameSavedTransport`) e o item "Nenhum" (`noneMarked`, `markNone`). Ferramental: `toggleId`, `sameSet`, `sortTools`
+//   e `filterTools`.
 // - Aptidões e Formação: os erros das folhas (`skillProblem`, `educationProblem`, com ponto final, como os do Meu
-//   cadastro; os do servidor vêm sem ponto), os corpos do PATCH (`skillsBody`, `educationBody`) e o que o leitor de tela
-//   fala de cada item.
+//   cadastro; os do servidor vêm sem ponto), os corpos do PATCH (`skillsBody`, `educationBody`; montados com a lista
+//   gravada na hora em que a gravação sai da fila: `skillsWith`, `skillsWithout`, `educationWith`, `educationWithout`)
+//   e o que o leitor de tela fala de cada item.
 // - Folha do mês: `thisMonth` e `monthGrid`.
 // - Salvar ao tocar: o redutor `autoSaveStep`, que decide o que lib/autoSave.ts faz.
 
@@ -41,17 +44,30 @@ import type {
 
 // --------------------------------------------------------------------------- textos
 
-/**
- * Para comparar nomes como o servidor (services/tech_profile.fold): sem acento, sem maiúsculas e com os espaços
- * juntados. "Impressoras  HP" e "impressoras hp" são a mesma aptidão.
- */
-export function foldName(text: string): string {
-  return text.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().trim().replace(/\s+/g, " ");
+/** Tab, LF, VT, FF e CR: viram espaço (e se juntam aos outros). */
+const CONTROL_SPACE = /[\t\n\v\f\r]/g;
+/** Os outros caracteres de controle (Cc, como o NUL) e de formatação (Cf: invisíveis, BOM, direção): saem. */
+const CONTROL = /[\p{Cc}\p{Cf}]/gu;
+
+/** Sem caracteres de controle e de formatação, como o servidor (antes de juntar os espaços). */
+function withoutControls(text: string): string {
+  return text.replace(CONTROL_SPACE, " ").replace(CONTROL, "");
 }
 
-/** O texto como o servidor grava (services/tech_profile.clean): NFC e espaços juntados. */
+/**
+ * Para comparar nomes como o servidor (services/tech_profile.fold): sem acento, sem maiúsculas, sem caracteres de
+ * controle e de formatação e com os espaços juntados. "Impressoras  HP" e "impressoras hp" são a mesma aptidão.
+ */
+export function foldName(text: string): string {
+  return withoutControls(text).normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().trim().replace(/\s+/g, " ");
+}
+
+/**
+ * O texto como o servidor grava (services/tech_profile.clean): NFC, sem caracteres de controle e de formatação e com os
+ * espaços juntados. Um nome só de invisíveis fica vazio.
+ */
 export function cleanText(text: string): string {
-  return text.normalize("NFC").trim().replace(/\s+/g, " ");
+  return withoutControls(text).normalize("NFC").trim().replace(/\s+/g, " ");
 }
 
 /** Tamanho em caracteres, como o servidor conta (um emoji ocupa duas posições no texto do JavaScript). */
@@ -110,8 +126,31 @@ export function sameSet(a: readonly string[], b: readonly string[]): boolean {
 /** Nada marcado ainda (o transporte que nunca foi informado começa assim na tela). */
 export const NO_TRANSPORT: TransportInfo = { modes: [], driver_license: false };
 
+/**
+ * O transporte nunca informado (`transport` null no cadastro): a tela começa sem nada marcado. Vale pela identidade,
+ * não pelo valor (sameSavedTransport): sem meio e sem CNH informado é outra coisa ("Nenhum · sem CNH") e grava, mesmo
+ * quando o técnico marca e desmarca um meio antes do envio. Não é null porque o salvar ao tocar usa null para "sem
+ * cadastro na memória".
+ */
+export const TRANSPORT_UNSET: TransportInfo = Object.freeze({ modes: [], driver_license: false });
+
 export function sameTransport(a: TransportInfo, b: TransportInfo): boolean {
   return a.driver_license === b.driver_license && sameSet(a.modes, b.modes);
+}
+
+/** A comparação do salvar ao tocar do Transporte: o nunca informado (TRANSPORT_UNSET) só é igual a ele mesmo. */
+export function sameSavedTransport(a: TransportInfo, b: TransportInfo): boolean {
+  return a === TRANSPORT_UNSET || b === TRANSPORT_UNSET ? a === b : sameTransport(a, b);
+}
+
+/** O item "Nenhum" (no fim dos meios) fica marcado: o transporte foi informado, sem meio. */
+export function noneMarked(transport: TransportInfo): boolean {
+  return transport !== TRANSPORT_UNSET && transport.modes.length === 0;
+}
+
+/** Tocar em "Nenhum": sem meio, com a mesma CNH (um valor novo, nunca o TRANSPORT_UNSET). */
+export function markNone(transport: TransportInfo): TransportInfo {
+  return { modes: [], driver_license: transport.driver_license };
 }
 
 /** Marca ou desmarca um meio de transporte. */
@@ -157,6 +196,8 @@ export const SKILL_MSG = {
   name: "Informe a aptidão.",
   repeated: "Você já tem esta aptidão.",
   level: "Escolha o nível.",
+  /** Mudou o nível de uma aptidão que uma gravação anterior excluiu. */
+  gone: "Esta aptidão foi excluída.",
 } as const;
 
 /**
@@ -175,6 +216,27 @@ export function skillProblem(draft: SkillDraft, others: readonly { name: string 
 /** O corpo do PATCH: a lista inteira, só nome e nível (o "desde" é do servidor, que o mantém pelo nome). */
 export function skillsBody(list: readonly { name: string; level: SkillLevel }[]): TechnicianSkillIn[] {
   return list.map(({ name, level }) => ({ name: cleanText(name), level }));
+}
+
+/** Excluir: o corpo com a lista gravada agora, sem a aptidão `name` (pelo nome sem acento e maiúsculas). */
+export function skillsWithout(list: readonly TechnicianSkill[], name: string): TechnicianSkillIn[] {
+  const key = foldName(name);
+  return skillsBody(list.filter((item) => foldName(item.name) !== key));
+}
+
+/**
+ * Incluir (no fim) ou, com `editing` (o nome da editada), mudar só o nível, com o nome como está gravado: o corpo com a
+ * lista gravada agora. null: a editada já saiu da lista (uma gravação anterior a excluiu).
+ */
+export function skillsWith(
+  list: readonly TechnicianSkill[],
+  skill: TechnicianSkillIn,
+  editing: string | null = null,
+): TechnicianSkillIn[] | null {
+  if (editing === null) return skillsBody([...list, skill]);
+  const key = foldName(editing);
+  if (!list.some((item) => foldName(item.name) === key)) return null;
+  return skillsBody(list.map((item) => (foldName(item.name) === key ? { name: item.name, level: skill.level } : item)));
 }
 
 /**
@@ -229,6 +291,8 @@ export const EDUCATION_MSG = {
   start: "Informe o início.",
   end: "Informe o fim ou marque Em andamento.",
   endBeforeStart: "O fim não pode ser antes do início.",
+  /** Salvou a edição de uma formação que uma gravação anterior excluiu. */
+  gone: "Esta formação foi excluída.",
 } as const;
 
 /** A folha vazia (nova formação) ou com o curso gravado (edição). */
@@ -296,6 +360,21 @@ export function educationBody(list: readonly EducationEntry[]): EducationItemIn[
     start: item.start,
     end: item.end ?? null,
   }));
+}
+
+/** Excluir: o corpo com a lista gravada agora, sem a formação `id`. */
+export function educationWithout(list: readonly EducationItem[], id: string): EducationItemIn[] {
+  return educationBody(list.filter((item) => item.id !== id));
+}
+
+/**
+ * Incluir (sem `id`, no fim) ou salvar a editada (com o `id`, no lugar dela): o corpo com a lista gravada agora. null: a
+ * editada já saiu da lista (uma gravação anterior a excluiu).
+ */
+export function educationWith(list: readonly EducationItem[], entry: EducationEntry): EducationItemIn[] | null {
+  if (!entry.id) return educationBody([...list, entry]);
+  if (!list.some((item) => item.id === entry.id)) return null;
+  return educationBody(list.map((item) => (item.id === entry.id ? entry : item)));
 }
 
 /** O curso para o leitor de tela: "Técnico em redes, Técnico, Escola Exemplo, de fevereiro de 2022 a dezembro de 2023". */

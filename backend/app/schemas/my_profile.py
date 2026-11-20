@@ -15,7 +15,7 @@ import re
 import unicodedata
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
@@ -46,6 +46,7 @@ PIX_KEY_REQUIRED = "Informe a chave PIX"
 HOLDER_REQUIRED = "Informe o nome do titular da conta"
 # Perfil técnico: a lista inteira (os itens se validam em schemas/tech_profile.py).
 SLOT_UNKNOWN = "Turno desconhecido: {}"
+SLOT_MAX = 16  # caracteres por turno ("thu:afternoon", o maior, tem 13)
 TRANSPORT_REQUIRED = "Informe os meios de transporte"
 SKILL_REPEATED = "Aptidão repetida: {}"
 EDUCATION_REPEATED = "Formação repetida: {}"
@@ -133,8 +134,11 @@ class MyProfileUpdate(BaseModel):
     # Perfil técnico. Ferramental: ids de GET /technician-tools (desativado é ignorado; id que não
     # existe: "Ferramenta não encontrada. Atualize a lista.", WorkflowError do serviço).
     tool_ids: list[uuid.UUID] | None = Field(default=None, max_length=tech_profile.MAX_TOOLS)
-    # "dia:turno" ("sat:afternoon"); repetidos contam uma vez.
-    availability: list[str] | None = Field(default=None, max_length=tech_profile.MAX_SLOTS)
+    # "dia:turno" ("sat:afternoon"); repetidos contam uma vez. Até SLOT_MAX caracteres por item: o
+    # turno desconhecido volta na mensagem, e o item enorme recusa antes, sem ecoar o valor.
+    availability: list[Annotated[str, Field(max_length=SLOT_MAX)]] | None = Field(
+        default=None, max_length=tech_profile.MAX_SLOTS
+    )
     # Meios e CNH juntos; null não vale (TRANSPORT_REQUIRED).
     transport: TransportIn | None = None
     # Sem "desde": o servidor mantém o de quem já estava, pelo nome.

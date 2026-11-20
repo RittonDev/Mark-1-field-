@@ -14,7 +14,7 @@ lista). Só leitura: nada é gravado e não há evento.
 
 import base64
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import DateTime, Uuid, func, literal, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,17 +39,21 @@ def encode_cursor(at: datetime, ticket_id: uuid.UUID) -> str:
 
 
 def decode_cursor(cursor: str) -> tuple[datetime, uuid.UUID]:
-    """O contrário de encode_cursor. Cursor estragado (base64, separador, data sem fuso ou id):
-    422 com CURSOR_ERROR."""
+    """O contrário de encode_cursor, com a data em UTC. Cursor estragado (base64, separador, data
+    sem fuso ou fora da faixa, id): 422 com CURSOR_ERROR. Fora da faixa é a data que não cabe em
+    UTC (o ano 1 com +14:00, o 9999 com -14:00): sem a conversão aqui, o banco falhava (500)."""
     try:
         padded = cursor + "=" * (-len(cursor) % 4)
         raw = base64.b64decode(padded, altchars=b"-_", validate=True).decode("utf-8")
         at_text, id_text = raw.split("|")
-        at = datetime.fromisoformat(at_text)
+        parsed = datetime.fromisoformat(at_text)
         ticket_id = uuid.UUID(id_text)
-    except ValueError as exc:  # binascii.Error e UnicodeError são ValueError
+        # Sem fuso a conversão usaria o do servidor: fica None e vira erro logo abaixo.
+        at = parsed.astimezone(UTC) if parsed.tzinfo is not None else None
+    # binascii.Error e UnicodeError são ValueError; a data fora da faixa é OverflowError.
+    except (ValueError, OverflowError) as exc:
         raise WorkflowError(CURSOR_ERROR) from exc
-    if at.tzinfo is None:
+    if at is None:
         raise WorkflowError(CURSOR_ERROR)
     return at, ticket_id
 

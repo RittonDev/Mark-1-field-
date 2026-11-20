@@ -159,6 +159,10 @@ class EarningsMonth(BaseModel):
     paid_without_invoice: EarningsBucket
     last_paid_at: datetime | None
     rejection: EarningsRejection | None
+    # Notas do técnico com esta competência que não foram recusadas (aguardando conferência ou
+    # conferidas). A nota pode cobrir OS de meses anteriores: o mês sem valores ("empty") com nota
+    # aparece no app por aqui. Não muda a situação.
+    invoices: int = 0
 
 
 class EarningsTotals(BaseModel):

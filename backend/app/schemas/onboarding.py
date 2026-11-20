@@ -1,7 +1,7 @@
 import datetime as dt
 import re
 import uuid
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
@@ -151,6 +151,12 @@ class InviteCheck(BaseModel):
 
 # ---------------------------------------------------------------- ficha pública
 
+# Um código das listas da ficha (áreas e disponibilidade). O código desconhecido volta na mensagem
+# ("Área desconhecida: ..."): o item enorme recusa antes, sem ecoar o valor. Os de hoje têm até 16
+# caracteres.
+CODE_MAX = 32
+Code = Annotated[str, Field(max_length=CODE_MAX)]
+
 
 class SkillIn(BaseModel):
     name: str = Field(min_length=2, max_length=80)
@@ -169,7 +175,7 @@ class ApplicationIn(BaseModel):
     state: str = Field(min_length=2, max_length=2)
     company_document: str | None = Field(default=None, description="CNPJ/MEI, se tiver")
     years_experience: int | None = Field(default=None, ge=0, le=60)
-    service_areas: list[str] = Field(min_length=1, max_length=len(SERVICE_AREAS))
+    service_areas: list[Code] = Field(min_length=1, max_length=len(SERVICE_AREAS))
     skills: list[SkillIn] = Field(default_factory=list, max_length=30)
     certifications: str | None = Field(default=None, max_length=2000)
     tools: str | None = Field(default=None, max_length=2000)
@@ -177,7 +183,7 @@ class ApplicationIn(BaseModel):
     vehicle_type: Literal["carro", "moto", "outro"] | None = None
     has_driver_license: bool = False
     coverage_area: str = Field(min_length=2, max_length=1000)
-    availability: list[str] = Field(default_factory=list, max_length=len(AVAILABILITY))
+    availability: list[Code] = Field(default_factory=list, max_length=len(AVAILABILITY))
     notes: str | None = Field(default=None, max_length=2000)
     # Foto do rosto (data URL JPEG/PNG/WebP), já reduzida no navegador.
     photo: str | None = Field(default=None, max_length=3_000_000)
