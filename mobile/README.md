@@ -878,8 +878,8 @@ WebSocket /api/v1/ws?token= ── evento ticket.* ──► nova rodada de sync
   primeiro plano, cada ação, cada evento do WebSocket, puxar a lista para baixo e um intervalo de 90 s; com o
   app fora da tela, a jornada e a tarefa periódica do sistema, só num app instalado (seção Notificações).
 - Todas as escritas no SQLite passam por uma fila de transações exclusivas em JS.
-- OS fechadas/canceladas há mais de 30 dias e sem pendências saem do aparelho (o Histórico de atendimentos vem da
-  central e mostra todas).
+- OS fechadas/canceladas há mais de 30 dias e sem pendências saem do aparelho (as concluídas continuam no Histórico de
+  atendimentos, que vem da central).
 - Fora do pull e da fila: o elo, as Estatísticas, o Histórico e o Faturamento são só leitura, guardados no kv com a hora
   ([docs/MOBILE_SYNC.md](../docs/MOBILE_SYNC.md) §2); o cadastro e o perfil técnico são só online e ficam na memória
   (§1); a resposta à oferta e a nota fiscal são só online (§3).
