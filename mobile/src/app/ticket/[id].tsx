@@ -27,7 +27,7 @@ import { Button, Card, EmptyState, Segmented } from "../../components/ui";
 import { UnproductiveModal } from "../../components/UnproductiveModal";
 import { api, ApiError, errorMessage } from "../../lib/api";
 import { useLiveQuery } from "../../lib/changes";
-import { dismissNotice, getAttachmentsCache, getTicket, listNotices, listPhotos, listSignatures, type Notice } from "../../lib/db";
+import { dismissNotice, getAttachmentsCache, getTicket, holdTicket, listNotices, listPhotos, listSignatures, type Notice } from "../../lib/db";
 import { notify } from "../../lib/dialogs";
 import { concludeBlock, missingForConclusion, signatureBlock } from "../../lib/forms";
 import { haptic } from "../../lib/haptics";
@@ -99,6 +99,9 @@ export default function TicketScreen() {
   const { user } = useSession();
   const load = useCallback(() => getTicket(id), [id]);
   const ticket = useLiveQuery(load);
+  // A OS fica no aparelho enquanto a tela está aberta (também buscando e lendo): o pruneOld do fim do pull não apaga
+  // a fechada há mais de 30 dias que veio da central pelo Histórico, pelo Meu elo ou pelo Faturamento.
+  useEffect(() => holdTicket(id), [id]);
   if (!user) return null;
   if (ticket === undefined) return <DetailSkeleton />;
   if (ticket === null) return <MissingTicket id={id} />;

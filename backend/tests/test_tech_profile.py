@@ -1033,7 +1033,10 @@ async def test_validation_messages_and_no_password(
         ),
         ({"skills": [{**skill, "since": "2026-01-01"}]}, [(None, "Campo não aceito")]),
         ({"education": [{**course, "course": "x"}]}, [("Curso", "Informe o curso")]),
-        ({"education": [{**course, "course": "\u0000\u0001\ufeff"}]}, [("Curso", "Informe o curso")]),
+        (
+            {"education": [{**course, "course": "\u0000\u0001\ufeff"}]},
+            [("Curso", "Informe o curso")],
+        ),
         (
             {"education": [{**course, "institution": " "}]},
             [("Instituição", "Informe a instituição")],

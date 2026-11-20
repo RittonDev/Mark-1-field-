@@ -1007,16 +1007,40 @@ export async function oldestPingAt(): Promise<string | null> {
 
 // ─────────────────────────── geral ────────────────────────────
 
+/** OS abertas na tela agora: id → quantas telas a seguram (holdTicket). */
+const heldTickets = new Map<UUID, number>();
+
+/**
+ * Segura a OS no aparelho enquanto a tela dela está aberta: o pruneOld não apaga a fechada há mais de 30 dias que o
+ * técnico está lendo (as do Histórico, do "O que pesou" do Meu elo e do mês do Faturamento vêm da central e são
+ * assim). Devolve a função que solta; soltar de novo não faz nada. Fica só na memória: depois de a tela fechar (ou
+ * de o app reiniciar), a OS sai no próximo pull, como as outras.
+ */
+export function holdTicket(id: UUID): () => void {
+  heldTickets.set(id, (heldTickets.get(id) ?? 0) + 1);
+  let holding = true;
+  return () => {
+    if (!holding) return;
+    holding = false;
+    const left = (heldTickets.get(id) ?? 1) - 1;
+    if (left > 0) heldTickets.set(id, left);
+    else heldTickets.delete(id);
+  };
+}
+
 /**
  * OS fechadas/canceladas há mais de 30 dias saem do aparelho (o servidor continua com elas), junto
- * com o que sobrou delas: cache de anexos, motivo de formulário recusado e avisos antigos.
+ * com o que sobrou delas: cache de anexos, motivo de formulário recusado e avisos antigos. Ficam as
+ * que têm algo na fila e as abertas na tela (holdTicket), com o que é delas.
  */
 export async function pruneOld(db: DB): Promise<void> {
   const cutoff = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
   await db.runAsync(
     `DELETE FROM tickets WHERE status IN ('closed', 'cancelled') AND updated_at < ?
-       AND id NOT IN (SELECT ticket_id FROM outbox)`,
+       AND id NOT IN (SELECT ticket_id FROM outbox)
+       AND id NOT IN (SELECT value FROM json_each(?))`,
     cutoff,
+    JSON.stringify([...heldTickets.keys()]),
   );
   await db.runAsync("DELETE FROM comments WHERE ticket_id NOT IN (SELECT id FROM tickets) AND local_state IS NULL");
   await db.runAsync("DELETE FROM worklogs WHERE ticket_id NOT IN (SELECT id FROM tickets) AND local_state IS NULL");
