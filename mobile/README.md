@@ -471,9 +471,10 @@ lembretes da visita são locais e funcionam também no Expo Go, mas só depois q
 ## Faturamento
 
 Aba **Faturamento** (ícone de recibo; substitui Ganhos): o técnico é parceiro e recebe por OS. Contrato em
-[docs/API.md](../docs/API.md), "Valor por chamado". Código: [src/lib/earnings.ts](src/lib/earnings.ts) (dados e
-cópia no aparelho), [src/lib/hideValues.ts](src/lib/hideValues.ts) (o olho), `src/components/billing/` (`BillingView`
-é a aba; `MonthEarnings`, o mês) e a tela `src/app/faturamento/[mes].tsx`.
+[docs/API.md](../docs/API.md), "Valor por chamado" e "Faturamento do app". Código:
+[src/lib/earnings.ts](src/lib/earnings.ts) (dados e cópia no aparelho), [src/lib/hideValues.ts](src/lib/hideValues.ts)
+(o olho), `src/components/billing/` (`BillingView` é a aba; `MonthEarnings`, o mês) e a tela
+`src/app/faturamento/[mes].tsx`.
 
 - **Topo**: **Total pago** (com "Último pagamento em 18/11") e **A receber** (com "+ R$ 90,00 previsto" das OS em
   andamento e "Inclui R$ 30,00 de meses anteriores"); embaixo, só com reembolso, "Reembolsos · R$ 45,00 a receber ·

@@ -98,15 +98,17 @@ mostra uma mensagem própria.
   seção do docs/API.md; kv `my_history`, só a primeira página): fora da rodada. A tela busca a primeira página ao abrir
   (se a guardada tem 2 min ou mais) e ao puxar, e as outras ao rolar; sem rede no fim da lista, segue quando a conexão
   volta.
-- **Faturamento** (docs/API.md "Valor por chamado"): os meses, `GET /me/earnings/months?months=12` (os totais e a
-  situação de cada mês; kv `earnings:months`), e o mês, `GET /me/earnings?month=AAAA-MM` (kv `earnings:AAAA-MM`), com as
-  notas do mês, `GET /me/invoices?month=AAAA-MM` (kv `invoices:AAAA-MM`). Busca ao abrir a aba, ao voltar a ela e ao
-  abrir o mês (a busca de até 30 s atrás vale), ao puxar, quando uma nota entra ou sai neste aparelho e, depois de uma
-  rodada do sync, se a última busca tem 2 min ou mais (pagar marca a OS como alterada e a rodada traz). Um pedido dos
-  meses por vez. O "ocultar valores" esconde só a tela: os valores guardados continuam no kv.
+- **Faturamento** (docs/API.md "Valor por chamado" e "Faturamento do app"): os meses,
+  `GET /me/earnings/months?months=12` (os totais e a situação de cada mês; kv `earnings:months`), e o mês,
+  `GET /me/earnings?month=AAAA-MM` (kv `earnings:AAAA-MM`), com as notas do mês, `GET /me/invoices?month=AAAA-MM` (kv
+  `invoices:AAAA-MM`). Busca ao abrir a aba, ao voltar a ela e ao abrir o mês (a busca de até 30 s atrás vale), ao
+  puxar, quando uma nota entra ou sai neste aparelho e, depois de uma rodada do sync, se a última busca tem 2 min ou
+  mais (pagar marca a OS como alterada e a rodada traz). Um pedido dos meses por vez. O "ocultar valores" esconde só a
+  tela: os valores guardados continuam no kv.
 - **Ofertas** (`GET /me/offers`, buscada como diz o §4; kv `field_offers`): junto da lista, por oferta, se o aviso já
-  saiu (`seen`), se o técnico abriu o escopo (`scope`, que libera o aceite) e quando abriu pela primeira vez (`scope_at`,
-  no relógio do servidor, `serverNow`), que vai no aceite (§3). A oferta que sai da lista leva as marcas dela junto.
+  saiu (`seen`), se o técnico abriu o escopo (`scope`, que libera o aceite) e quando abriu pela primeira vez
+  (`scope_at`, no relógio do servidor, `serverNow`), que vai no aceite (§3). A oferta que sai da lista leva as marcas
+  dela junto.
 
 ## 3. Envio (push) de operações feitas offline
 
