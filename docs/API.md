@@ -7,6 +7,14 @@ Autenticação: `Authorization: Bearer <access_token>`. Erros seguem `{"detail":
 (422 de validação do FastAPI traz `detail` como lista). Códigos: 401 sem token/expirado,
 403 sem permissão, 404 não encontrado, 409 conflito de versão, 422 regra de negócio/validação.
 
+Valor que o banco recusa (SQLSTATE da classe 22, "data exception": texto maior que a coluna, U+0000 num texto que vai
+ao banco como está) responde 422 em qualquer rota, com um aviso no log (o SQLSTATE, sem traceback):
+`{"detail": "Algum valor está fora do tamanho ou do formato aceito. Confira os campos."}`. O asyncpg entrega esses
+erros como `DBAPIError` genérico, e o handler de `main.py` decide pelo SQLSTATE. Os outros erros do banco seguem como
+erro não tratado: 500 `{"detail": "Erro interno. Tente de novo; se continuar, avise a central."}` e o log "Erro não
+tratado em …". O erro do banco vai para o log sem os valores do SQL (`hide_parameters` em `db/session.py`, também no
+`DB_ECHO`): nome, contato, formação e chave PIX não aparecem no log.
+
 ## Papéis
 
 | Papel | Valor | Vê | Pode |
@@ -284,7 +292,9 @@ versão do aviso de privacidade; o app usa as `skill_suggestions` nas sugestões
 `POST /public/onboarding/{token}` (ficha + `password` + `privacy_consent: true` + `photo` em data URL) → `{protocol}`;
 410 se o link expirou, foi cancelado ou já usado; 422 com CPF/UF/e-mail inválido ou e-mail já cadastrado. E-mail de
 domínio da empresa (`ENTRA_ALLOWED_DOMAINS`, o domínio exato): 422 "Use um e-mail que não seja da empresa", antes da
-checagem de e-mail já usado, e o link não é gasto.
+checagem de e-mail já usado, e o link não é gasto. Cada código de `service_areas` e de `availability` tem até 32
+caracteres (os de hoje têm até 16): maior, 422 "No máximo 32 caracteres", sem o valor na resposta, e o link não é gasto;
+o código desconhecido mais curto volta na mensagem ("Área desconhecida: …", "Disponibilidade desconhecida: …").
 Gestão: `GET|POST /onboarding/invites` (`{label?, reusable, days_valid}`; o `token` só aparece na criação) ·
 `DELETE /onboarding/invites/{id}` · `GET /onboarding/applications?status=` · `GET /onboarding/applications/pending-count` ·
 `GET /onboarding/applications/{id}` (com `photo_url` assinado) · `POST .../{id}/approve {team_id?, job_title?}` → `UserOut`
@@ -1017,15 +1027,17 @@ computador" no portal: vira app com ícone na área de trabalho e no menu Inicia
 
 **Por quê.** A aba Faturamento do app (substitui o Ganhos) mostra o total pago, o que falta receber e um cartão por
 mês de conclusão com a situação, calculada aqui para o app não repetir a regra. Tocar no mês abre o mês de
-`GET /me/earnings?month=` com as notas fiscais dele. Código: `services/payouts.py` (`MONTHS_DEFAULT`, `MONTHS_MAX`,
+`GET /me/earnings?month=` com as notas fiscais dele; o "Outro mês" da aba abre qualquer mês, de 2000-01 ao atual (também
+os que não têm cartão). Código: `services/payouts.py` (`MONTHS_DEFAULT`, `MONTHS_MAX`,
 `shift_month`, `month_state`, `my_earnings_months`), `schemas/payout.py` e `api/routes/payouts.py`. Só leitura.
 
 **`GET /me/earnings/months?months=12`** (papel `technician`; gestão e cliente: 403 "Sem permissão para esta ação").
 `months` de 1 a 24 (padrão 12; fora: 422 de validação) → `EarningsMonths {since, until, totals, months}`:
 - `until` = o mês atual no fuso da operação e `since` = o primeiro mês da janela ("AAAA-MM"). `months` traz **todos**
-  os meses da janela, o mais novo primeiro, também os sem valor (`empty`, que o app não mostra).
+  os meses da janela, o mais novo primeiro, também os sem valor (`empty`: o app só mostra o que tem nota da
+  competência, `invoices` maior que 0).
 - `EarningsMonth {month, state, count, total, to_pay, expected, paid, due_without_invoice, due_in_review, due_checked,
-  paid_without_invoice, last_paid_at, rejection}`. Cada balde é `{count, amount}` (quantos valores e a soma):
+  paid_without_invoice, last_paid_at, rejection, invoices}`. Cada balde é `{count, amount}` (quantos valores e a soma):
 
   | Balde | Valores do técnico no mês |
   |---|---|
@@ -1037,6 +1049,10 @@ mês de conclusão com a situação, calculada aqui para o app não repetir a re
 
   `count` = `to_pay.count + expected.count + paid.count`; `total` = a soma dos três (o "Valor total" do cartão);
   `last_paid_at` = o último pagamento das OS do mês.
+- `invoices` (desde 2026-11-20; a API sem o campo conta como 0) = quantas notas do técnico com a competência do mês
+  não foram recusadas (aguardando conferência ou conferidas). Não muda o `state`. A nota pode cobrir OS de meses
+  anteriores, então o mês da competência pode vir `empty` com nota: o app mostra o cartão dele ("Sem valores", R$ 0,00
+  e "1 nota fiscal"), e é por ele que o técnico abre, apaga ou acompanha a nota.
 - **Mês de um valor:** a conclusão da OS (aberta: o lançamento do valor), no fuso da operação: a régua de
   `list_payouts` e do `GET /me/earnings`. A data do pagamento não muda o mês; horário corrigido para o futuro conta no
   mês atual. O pendente de OS cancelada não conta (o pago, sim).
@@ -1062,11 +1078,13 @@ mês de conclusão com a situação, calculada aqui para o app não repetir a re
   das OS de todos os meses, não só da janela; `to_pay_older` é a parte de `to_pay` de meses antes da janela (já
   somada em `to_pay`). Os reembolsos de custos extras ficam à parte: aprovados e não pagos, e pagos.
 - Os valores por OS existem desde 13/11/2026 (o Field Control não trazia valores): os meses de antes vêm `empty`.
-- Custo: 3 consultas, todas pelo técnico (os valores agrupados por mês, as notas da janela e os reembolsos). Sem
-  tempo real e sem histórico: o app relê ao abrir a aba, ao puxar, depois de enviar ou apagar uma nota e depois de
-  uma sincronização (`docs/MOBILE_SYNC.md`).
-- A API sobe antes do app: com a API velha (404), a aba mostra "Não foi possível carregar o faturamento." e "Tentar de
-  novo"; o mês (`GET /me/earnings?month=`) continua funcionando.
+- Custo: 3 consultas, todas pelo técnico (os valores agrupados por mês, as notas da janela, de onde saem a recusa em
+  aberto e o `invoices`, e os reembolsos). Sem tempo real e sem histórico: o app relê ao abrir a aba, ao puxar, depois
+  de enviar ou apagar uma nota e depois de uma sincronização (`docs/MOBILE_SYNC.md`).
+- A API desta entrega está publicada desde 20/11/2026. Com uma API anterior (sem esta rota: 404), a aba mostra "Não foi
+  possível carregar o faturamento." e "Tentar de novo", sem cartões e sem o "Outro mês": o mês (`GET /me/earnings?month=`,
+  que a API anterior tem) e o "Enviar nota fiscal" só abrem com meses já guardados no aparelho, pelo cartão ou pelo
+  "Outro mês".
 
 ## Orçamentos: cobrança, aberturas e preço do cliente (2026-11-17)
 
@@ -1432,7 +1450,8 @@ obedecendo a visibilidade de cada um).
 - `POST /technician-invoices/{id}/reject` `{reason}` (3 a 300 caracteres, sem os espaços das pontas) → recusada, com o
   motivo e `reviewed_*`, e as OS ficam livres. Só a que aguarda: conferida, 422 "Desfaça a conferência antes de
   recusar"; recusada, 422 "Esta nota já foi recusada". A recusa é final: o técnico apaga e envia outra (o número da
-  recusada pode ser usado de novo).
+  recusada pode ser usado de novo). Na web, o "Avisar no WhatsApp" da recusada leva o motivo e termina em "Envie a nota
+  corrigida pelo app, em Faturamento.".
 - 404 "Nota fiscal não encontrada". A central nunca apaga nem edita a nota ou a ligação com as OS (ligação errada:
   recusa com o motivo) e não envia nota em nome do técnico.
 
