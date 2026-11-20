@@ -228,7 +228,7 @@ export default function HistoryScreen() {
     </View>
   );
 
-  const footer = !list.items.length ? null : more === "loading" ? (
+  const footer = !list.items.length ? undefined : more === "loading" ? (
     <View style={styles.footerRow} accessibilityLiveRegion="polite">
       <ActivityIndicator size="small" color={c.inkMuted} />
       <Text style={styles.footerText}>Carregando mais…</Text>
@@ -240,7 +240,7 @@ export default function HistoryScreen() {
       <Text style={styles.footerText}>Não deu para carregar mais.</Text>
       <Button compact variant="ghost" title="Tentar de novo" onPress={() => void loadMore(true)} />
     </View>
-  ) : list.next ? null : (
+  ) : list.next ? undefined : (
     <Text style={[styles.end, styles.footerAlone]}>Fim do histórico</Text>
   );
 
