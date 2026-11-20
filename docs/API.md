@@ -1197,8 +1197,9 @@ mesma OS).
   respondeu esta oferta. Recarregue a OS."; oferta de outra OS: 404 "Oferta não encontrada".
 
 `TicketOfferOut = {id, ticket_id, technician: {id, name}, amount: number, state, expires_at|null, note|null,
-decline_reason|null, cancel_reason|null, viewed_at|null, responded_at|null, created_by: {id, name}|null, created_at}`
-(`amount` sai como número, como os outros valores da API: `90.0`).
+decline_reason|null, cancel_reason|null, viewed_at|null, scope_read_at|null, responded_at|null, created_by: {id,
+name}|null, created_at}` (`amount` sai como número, como os outros valores da API: `90.0`; `scope_read_at`: quando o
+técnico abriu o escopo no app, gravado no aceite; null na oferta não aceita e no aceite de app antigo).
 
 **Técnico** (só papel `technician`; os outros: 403 "Sem permissão para esta ação"):
 - `GET /me/offers` → `FieldOfferOut[]`, a mais nova primeiro: **todas** as pendentes no prazo e até 50 das que
@@ -1208,18 +1209,27 @@ decline_reason|null, cancel_reason|null, viewed_at|null, responded_at|null, crea
   mínimo: sem escopo (`description: null`), sem formulários (`forms: []`) e sem bairro (`district: null`).
 - `GET /me/offers/{id}` → `FieldOfferOut`; grava `viewed_at` na primeira vez (só a pendente no prazo) e a gestão
   recebe o `ticket.updated` com `offer.action: "viewed"`. Oferta de outro técnico: 404.
-- `POST /me/offers/{id}/accept` (sem corpo) → `TicketDetail` da OS na visão do técnico (como o `GET /tickets/{id}`
-  devolve a ele), já atribuída: agora vêm cliente, loja e endereço, e `my_payout` com o valor da oferta. Aceite
-  repetido da oferta que já é dele (toque duplo, outro aparelho): 200 com a OS, sem mudar nada.
+- `POST /me/offers/{id}/accept` (corpo opcional `OfferAccept {scope_read_at?}`) → `TicketDetail` da OS na visão do
+  técnico (como o `GET /tickets/{id}` devolve a ele), já atribuída: agora vêm cliente, loja e endereço, e `my_payout`
+  com o valor da oferta. Aceite repetido da oferta que já é dele (toque duplo, outro aparelho): 200 com a OS, sem
+  mudar nada (a hora da leitura também não muda).
+  - `scope_read_at`: quando o técnico abriu o escopo, no relógio do servidor (o app usa `serverNow`: o relógio do
+    aparelho mais a diferença medida para o servidor); sem fuso, vale a hora de Brasília. Valor inválido vira null: a hora nunca recusa o aceite, e o corpo
+    sem ela (app antigo) aceita como antes. Só na passagem para aceita, a API grava
+    `offer.scope_read_at = min(max(scope_read_at, criação da oferta), agora)` (relógio errado não põe a leitura antes
+    da oferta nem no futuro). Nenhum erro novo.
 - `POST /me/offers/{id}/decline` `{reason?: até 300}` (corpo opcional) → `FieldOfferOut` (`declined`). Recusa repetida:
   200 como está. Recusar não exige abrir a oferta.
 
 `FieldOfferOut = {id, state, amount: number, expires_at|null, note|null, cancel_reason|null, viewed_at|null,
-responded_at|null, created_at, ticket: {id, code, title, description|null, service_type: {id, name}|null,
-forms: [{name, required}], district|null, city|null, state|null, scheduled_start|null, scheduled_end|null}}`.
+scope_read_at|null, responded_at|null, created_at, ticket: {id, code, title, description|null, service_type: {id,
+name}|null, forms: [{name, required}], district|null, city|null, state|null, scheduled_start|null, scheduled_end|null,
+estimated_minutes|null}}`.
 Sem cliente, loja (nome, código, CNPJ), endereço, contato, recado da visita (`visit_note`), SLA, analista, etiquetas,
 projeto nem valores de outros técnicos (a regra do convite: "só serviço, bairro e cidade, data e valor"). Sem agenda,
 `scheduled_start` vem null ("data a combinar"); bairro, cidade e UF são os da loja (OS sem loja: null).
+`ticket.estimated_minutes` (desde 2026-11-19, também no recorte mínimo): a duração estimada da OS (a do tipo de
+serviço, copiada na abertura), null sem estimativa; o app mostra a duração ao lado da data e da hora.
 `ticket.title` (também no recorte mínimo) sai sem o nome da loja, o código da loja (a partir de 3 caracteres), o nome
 do cliente (também sem o sufixo da razão social: "Cliente Exemplo Ltda" tira "Cliente Exemplo"; Ltda, S.A., S/A,
 EIRELI, ME, EPP), o nome do projeto e o nº do chamado do cliente (a partir de 3 caracteres), sem diferença de caixa ou
@@ -1227,7 +1237,9 @@ acento e só palavra inteira, junto com a preposição logo antes ("na Matriz"),
 "–", "|", ":", ","...), os parênteses e aspas que ficam vazios e o sinal solto nas pontas ("&", "+"): o
 título automático da Nova OS é "<Tipo de OS> · <Localização>", e "Troca de PDV · Matriz" chega como "Troca de PDV".
 Se sobrar menos de 3 caracteres, vem o nome do tipo de serviço (com o mesmo corte) ou "Atendimento técnico". O
-título da OS em si não muda.
+título da OS em si não muda. `ticket.service_type.name` passa pelo mesmo corte (desde 2026-11-19: é o destaque do
+cartão "Serviços" do app, e um tipo de serviço próprio de um cliente pode trazer o nome dele); se sobrar menos de 3
+caracteres, "Atendimento técnico". O cadastro do tipo de serviço e o texto do grupo da web (`offerText`) não mudam.
 `cancel_reason` (acréscimo ao contrato inicial) diz ao app por que fechou ("outro técnico aceitou" = `taken`).
 
 **Erros do aceite e da recusa** (`{"detail": "...", "code": "..."}`):
@@ -1247,7 +1259,8 @@ técnico) e, só no aceite, a leitura e o valor pago do técnico nesta OS.
 **Histórico** (eventos novos, só para quem tem Pagamentos: levam o valor; `HISTORY_ITEMS`):
 - `offer_sent` (autor: quem mandou): `to_value` "90.00", `note` = recado, `data {amount: "R$ 90,00", expires_at,
   offers: [{id, technician_id, technician}], replaced?: [nomes]}`.
-- `offer_accepted` (autor: o técnico): `to_value` "90.00", `data {offer_id, technician_id, technician, amount}`.
+- `offer_accepted` (autor: o técnico): `to_value` "90.00", `data {offer_id, technician_id, technician, amount,
+  scope_read_at}` (`scope_read_at`: a hora gravada na oferta, ISO, ou null; desde 2026-11-19).
 - `offer_declined` (autor: o técnico): `to_value` "90.00", `note` = motivo, `data {offer_id, technician_id,
   technician, amount}`.
 - `offer_cancelled` (autor: quem cancelou, definiu o técnico, incluiu o técnico na visita, desativou o técnico ou
@@ -1283,10 +1296,15 @@ técnico) e, só no aceite, a leitura e o valor pago do técnico nesta OS.
   Escolher o técnico na mão com ofertas em aberto mostra o aviso de que elas serão canceladas ao salvar. O
   "Cancelar" de uma oferta que já tinha fechado por outro motivo (lista velha; a API devolve como estava) avisa, em
   tom neutro, "Esta oferta já tinha sido encerrada: <motivo>" e, na `replaced`, que a oferta nova para o técnico
-  continua como estava.
+  continua como estava. A aceita mostra "Aceitou às 14:50 · escopo lido às 14:45" (sem a leitura, só o aceite).
+- Aba Geral da OS com técnico (toda a gestão, sem valor, pelo `TicketDetail.accepted_offer`): embaixo do valor do
+  técnico (`PayoutLine`), a linha `AcceptedOfferLine` "Aceitou a oferta pelo app às 14:50" com o chip "Escopo lido às
+  14:45" (noutro dia: "ontem às 18:10", "em 17/11 às 18:10"). Sem oferta aceita, a linha não aparece. Precisa do
+  `accepted_offer` porque, com técnico, a Geral troca o bloco "Ofertas" pelo valor do técnico.
 - Diálogo "Ofertar a OS com preço" (também no resumo da OS recém-criada): de 1 a 10 técnicos (`GET
   /technicians/suggest` com `exclude_ticket_id` e `limit=10`, mais a busca: `GET /technicians` com a tela Técnicos,
-  senão os técnicos de `GET /users/assignable`; sem acesso ao app e já na OS aparecem travados), o valor (começa no
+  senão os técnicos de `GET /users/assignable`; sem acesso ao app e já na OS aparecem travados; o sugerido fora da
+  disponibilidade informada ganha o chip âmbar "Fora da disponibilidade (sáb · tarde)"), o valor (começa no
   `technician_fee` do tipo de serviço), o prazo (sem prazo, 30 min, 1 h, 2 h, 4 h ou até o fim do dia; o `expires_at` é
   calculado no clique) e o recado. Depois do envio, o aviso "Oferta enviada" com "Copiar texto para o grupo". Sem
   texto de exemplo nem explicação fixa nos campos. Escopo ou recado que cita o cliente ou a loja (os nomes que a API
@@ -1306,8 +1324,9 @@ técnico) e, só no aceite, a leitura e o valor pago do técnico nesta OS.
   id]`, exato) e a lista de ofertas 1 s depois do `next_offer_expires_at`, em etapas quando passa do teto do
   `setTimeout`; se a resposta ainda traz o mesmo prazo (relógio do computador adiantado), tenta de novo até 4 vezes,
   a cada 15 s. Trocar de OS ou fechar desarma.
-- Histórico: os quatro `offer_*` (técnicos e valor no envio, valor no aceite, motivo na recusa, motivo no
-  encerramento) e o `assigned` com `via: "offer"` ("assumiu a OS pela oferta"). No `offer_cancelled`, as notas
+- Histórico: os quatro `offer_*` (técnicos e valor no envio, valor e "escopo lido às HH:MM" no aceite, ou "escopo
+  lido em 18/11 às 18:10" quando a leitura foi noutro dia, motivo na recusa, motivo no encerramento) e o `assigned`
+  com `via: "offer"` ("assumiu a OS pela oferta"). No `offer_cancelled`, as notas
   "A central incluiu o técnico na visita" e "Técnico sem acesso ao app" viram "encerrou a oferta ao incluir o técnico
   na visita" e "encerrou a oferta: técnico sem acesso ao app".
 - Tempo real: o `ticket.updated` com `fields` exatamente `["offers"]` (inclusive o `viewed`) recarrega só a OS
