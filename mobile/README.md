@@ -468,68 +468,61 @@ lembretes da visita são locais e funcionam também no Expo Go, mas só depois q
   somem (a rodada que termina depois não guarda outros). As chaves `visit_reminders`, `notifications_asked`,
   `push_live` e `deferred_notices` (cada aviso leva o id do técnico) ficam no kv e somem na troca de técnico.
 
-## Meu cadastro
+## Faturamento
 
-**Conta › Meu cadastro** ([src/app/meu-cadastro.tsx](src/app/meu-cadastro.tsx)), aberto também pelo cartão de
-PIX em Ganhos. Contrato em [docs/API.md](../docs/API.md), "Meu cadastro do técnico".
+Aba **Faturamento** (ícone de recibo; substitui Ganhos): o técnico é parceiro e recebe por OS. Contrato em
+[docs/API.md](../docs/API.md), "Valor por chamado". Código: [src/lib/earnings.ts](src/lib/earnings.ts) (dados e
+cópia no aparelho), [src/lib/hideValues.ts](src/lib/hideValues.ts) (o olho), `src/components/billing/` (`BillingView`
+é a aba; `MonthEarnings`, o mês) e a tela `src/app/faturamento/[mes].tsx`.
 
-- **O que o técnico muda**: foto, nome, celular (WhatsApp), e-mail de login, endereço (CEP, rua e número, bairro),
-  cidade/UF, região que atende e a chave PIX (tipo, chave e titular). Grupo, cargo, acesso ao app, serviços e
-  jornada ficam com a central; CPF, CNPJ/MEI, nascimento, ferramentas, veículo e CNH continuam na ficha da
-  homologação.
-- **Um formulário só**: "Salvar alterações" (desativado sem mudança) manda em `PATCH /me/profile` só o que mudou.
-  O app confere antes, com as regras e as mensagens do servidor (nome, celular com DDD, e-mail quando muda,
-  cidade, UF, CEP com 8 números e a chave por tipo, em [src/lib/pix.ts](src/lib/pix.ts)); o servidor confere de
-  novo. Sair com alteração não salva pergunta "Descartar as alterações?".
-  - O nome, quando muda, segue a regra do servidor: só letras (com acento), espaço, apóstrofo, hífen e ponto, sem
-    "www", "http" nem endereço colado ("site.com"). A mensagem é "Use só letras no nome.". Os nomes antigos ficam como
-    estão.
-- **E-mail e chave PIX pedem a senha atual** (folha "Confirme com sua senha"): cadastrar a chave, trocar tipo,
-  chave ou titular e remover. Senha errada e o bloqueio depois de 5 erros em 15 min (o mesmo contador de
-  "Trocar senha") aparecem na folha. A central é avisada na hora quando mudam PIX, e-mail, nome ou celular, e toda
-  mudança fica no histórico do cadastro.
-  - Com a senha provisória, o servidor recusa e-mail e PIX ("Crie sua senha no app antes de mudar o e-mail ou a chave
-    PIX"); o app já esconde a tela nesse estado (só "Trocar senha" abre).
-  - E-mail da empresa é recusado com "Use um e-mail que não seja da empresa".
-  - A troca de e-mail tem limite de 10 por hora (429 "Muitas tentativas. Tente mais tarde.").
-- **Aviso de privacidade**: o cartão Pagamento tem o link **Aviso de privacidade** (seção abaixo).
-- **Chave PIX**: chips CPF, CNPJ, E-mail, Celular e Chave aleatória; a chave tem o teclado e a máscara do tipo
-  ("Colar" na chave aleatória); trocar o tipo limpa a chave; o titular começa com o nome. "Remover chave PIX" só
-  vale ao salvar (dá para desfazer). Celular do PIX: DDD sem zero e o número com o 9, como no servidor.
-- **Trocar o e-mail** não tira ninguém do app (a senha é a mesma): o login passa a ser o novo, já preenchido na
-  tela de login (`session.updateUser` grava também o `mc_last_email`).
-- **Foto**: câmera (a frontal) ou galeria pelo `photoCapture` (alvo `avatar`), com recorte quadrado na hora; o app
-  reduz para 512 px em JPEG (compressão 0,85) com o `expo-image-manipulator` e envia em `POST /me/profile/photo`.
-  "Remover foto" tira também a que veio do Field Control; no lugar ficam as iniciais. No Android, a foto tirada
-  antes de o sistema fechar o app com a câmera aberta é enviada quando o Meu cadastro abre de novo (até 30 min).
-- **Onde a foto aparece**: no Meu cadastro, no 1º cartão da Conta e no topo da tela inicial
-  ([src/components/Avatar.tsx](src/components/Avatar.tsx)). Sem foto, sem o cadastro carregado ou com o link
-  vencido (12 h), aparecem as iniciais.
-- **Ganhos**: no topo, "Recebimento por PIX" com o tipo e a chave (abre o Meu cadastro) ou "Sem chave PIX
-  cadastrada" com **Cadastrar chave PIX**. Só aparece com o cadastro carregado; puxar a tela para baixo relê o
-  cadastro junto.
-- **Sem internet**: abrir, salvar e trocar a foto pedem internet. Nada entra na fila offline: a senha não fica
-  guardada e o aviso à central tem de sair na hora. Sem rede e sem o cadastro na memória, a tela diz "Sem
-  internet"; com ele na memória, mostra os dados e avisa que não dá para salvar.
-- **O que fica no aparelho**: nome, e-mail e celular no usuário da sessão (`mc_user`, SecureStore). Endereço e
-  chave PIX ficam só na memória ([src/lib/profile.ts](src/lib/profile.ts)), nunca no SQLite, e somem ao sair da
-  conta. O cadastro é lido ao entrar (sem aviso se falhar), ao abrir o Meu cadastro, ao puxar Ganhos para baixo e,
-  na tela inicial, na Conta e em Ganhos, quando falta ou passou de 6 h (o link da foto vale 12 h).
-- O `expo-image-manipulator` é nativo e já vem no Expo Go; um development build feito antes dele precisa ser
-  refeito.
+- **Topo**: **Total pago** (com "Último pagamento em 18/11") e **A receber** (com "+ R$ 90,00 previsto" das OS em
+  andamento e "Inclui R$ 30,00 de meses anteriores"); embaixo, só com reembolso, "Reembolsos · R$ 45,00 a receber ·
+  R$ 120,00 pagos". Lado a lado; empilhados com a fonte grande ou em tela estreita.
+- **Recebe no PIX**: o tipo e a chave mascarada ("CPF •••.456.789-••"); sem chave, **Cadastrar chave PIX** e "Sem
+  chave PIX cadastrada". Tocar abre Configurações › Chave PIX. Só aparece com o cadastro na memória (a chave nunca fica
+  no aparelho), e o leitor de tela fala só o tipo.
+- **Por mês**: um cartão por mês de conclusão das OS, o mais novo primeiro (o mês sem valor não aparece), com o ícone
+  e o selo da situação, o valor total, uma linha curta ("3 OS sem nota · R$ 300,00", "Nota nº 1234 recusada · ver
+  motivo") e, no rodapé, "Novembro de 2026 · 12 OS". A situação vem calculada do servidor: Em andamento, Sem nota, Nota
+  em conferência, Nota recusada, A pagar, Pago em parte, Pago sem nota e Pago (as cores da central, só no ícone e no
+  selo; a linha da nota recusada em vermelho). A nota nunca trava o pagamento: "Sem nota" é só informativo.
+- **O mês** (tocar no cartão; `/faturamento/AAAA-MM`): o título é o mês por extenso, com o olho no cabeçalho. No topo,
+  a situação e o que o técnico pode fazer ("3 OS sem nota fiscal (R$ 300,00). A central paga com ou sem nota; se
+  quiser, envie a nota abaixo."), neutro, e só a nota recusada ganha cor, com o motivo. Depois, "Chamados de novembro"
+  (A receber, Já pago, Previsto e os reembolsos), as notas fiscais do mês (seção abaixo) e as OS com o valor de cada
+  uma ("NF 1234" na coberta por uma nota). Tocar numa OS abre a OS: na hora, se está no aparelho; senão, com
+  internet, a tela da OS busca na central. Mês fora do formato: "Mês inválido".
+- **Ocultar valores** (o olho, à direita do título da aba e no cabeçalho do mês): "R$ •••••" no lugar dos valores, e
+  o leitor de tela diz "valor oculto". É do aparelho (Keychain/Keystore, `mc_hide_values`, como o tema): fica no Sair e
+  na troca de técnico, e enquanto não leu conta como oculto. Esconde só a tela (os valores guardados continuam no
+  aparelho) e não vale na OS ("Valor desta OS") nem na oferta.
+- **Vazio**: "Nenhum valor ainda" / "O valor de cada OS aparece aqui quando a central coloca você nela.". Os valores
+  por OS existem desde 13/11/2026: com meses anteriores na janela, o rodapé diz "Valores registrados no app desde
+  13/11/2026.".
+- **Dados**: `GET /me/earnings/months?months=12` (os totais e os 12 meses, com a situação) e, no mês,
+  `GET /me/earnings?month=AAAA-MM`. Ficam no aparelho para abrir sem rede (kv `earnings:months`, com a hora e o técnico,
+  e `earnings:AAAA-MM`); só leitura, nada entra na fila. Busca ao abrir a aba, ao voltar a ela e ao abrir o mês (a busca
+  de até 30 s atrás vale), no "puxar para atualizar" (que relê também o cadastro, pela chave PIX), em "Tentar de novo",
+  quando uma nota entra ou sai neste aparelho e, depois de uma sincronização, se a última busca tem 2 min ou mais (pagar
+  marca a OS como alterada e a rodada traz).
+- **Sem internet ou erro**: com valores guardados, tudo aparece com "Sem internet · valores de …" ou "Não deu para
+  atualizar · valores de …"; sem nada guardado, "Sem internet" / "O faturamento aparece quando a conexão voltar." ou a
+  mensagem do servidor com **Tentar de novo**. Com a API antiga (sem a rota dos meses): "Não foi possível carregar o
+  faturamento.".
 
-## Notas fiscais (aba Ganhos)
+## Notas fiscais (aba Faturamento › mês)
 
 Contrato em [docs/API.md](../docs/API.md), "Notas fiscais dos técnicos". Código: [src/lib/invoices.ts](src/lib/invoices.ts)
 (API, cópia no aparelho e versão), [src/lib/invoiceFile.ts](src/lib/invoiceFile.ts) (escolha do arquivo),
 [src/components/InvoicesCard.tsx](src/components/InvoicesCard.tsx) e a tela `src/app/nota-fiscal.tsx`.
 
-- **Cartão "Notas fiscais de <mês>"** em Ganhos, logo abaixo do resumo do mês (também com os valores carregando ou
-  com erro): uma linha por nota com o número, o valor, a situação (Aguardando conferência, Conferida, Recusada), "Emitida
-  em 05/11/2026 · 3 OS" (e "conferida em …") e, na recusada, o motivo da central. A lista do mês fica no aparelho (kv
-  `invoices:AAAA-MM`; sem rede, "Sem internet · notas de …") e é relida ao voltar para a tela, ao trocar de mês, ao
-  puxar para atualizar e quando uma nota entra ou sai. Tocar na nota: **Abrir arquivo** (link assinado de 30 min no
-  navegador; a lista é relida antes se tiver mais de 20 min) e **Apagar nota** (só a que a central ainda não conferiu).
+- **Cartão "Notas fiscais de <mês>"** no mês do Faturamento, logo abaixo de "Chamados de <mês>" (também com os valores
+  carregando ou com erro): uma linha por nota com o número, o valor ("R$ •••••" com os valores ocultos), a situação
+  (Aguardando conferência, Conferida, Recusada), "Emitida em 05/11/2026 · 3 OS" (e "conferida em …") e, na recusada, o
+  motivo da central. A lista do mês fica no aparelho (kv `invoices:AAAA-MM`; sem rede, "Sem internet · notas de …") e é
+  relida ao abrir e ao voltar para a tela, ao puxar para atualizar e quando uma nota entra ou sai. Tocar na nota:
+  **Abrir arquivo** (link assinado de 30 min no navegador; a lista é relida antes se tiver mais de 20 min) e **Apagar
+  nota** (só a que a central ainda não conferiu).
 - **Enviar nota fiscal** (`/nota-fiscal?mes=AAAA-MM`): arquivo (**Escolher PDF ou XML** pelo seletor do sistema,
   `File.pickFileAsync` do expo-file-system, ou **Tirar foto**/**Da galeria** pelo `photoCapture`, alvo `invoice`),
   número, data de emissão, valor (aceita "1.234,56", "1234.56" ou "R$ 900"; com OS marcadas, mostra a soma e **Usar a
@@ -551,8 +544,10 @@ Contrato em [docs/API.md](../docs/API.md), "Notas fiscais dos técnicos". Códig
     mostra o aviso de sem internet.
   - A lista em erro também é buscada de novo quando a conexão volta (NetInfo).
 - **Aviso de privacidade**: o link fica no fim da tela (seção abaixo).
-- **Depois de enviar ou apagar**: Ganhos relê as notas e os valores, e cada OS coberta mostra "NF 1234" na linha.
-  A recusa é final: o técnico apaga a recusada e envia outra. A conversa sobre a nota continua no grupo de WhatsApp.
+- **Depois de enviar ou apagar**: o mês relê as notas e os valores, a aba relê a situação dos meses, e cada OS coberta
+  mostra "NF 1234" na linha. Enviada noutra competência, o aviso diz qual ("Nota nº 1234 · R$ 1.000,00 · competência
+  de dezembro de 2026"), para o técnico achar a nota no mês certo. A recusa é final: o técnico apaga a recusada e envia
+  outra. A conversa sobre a nota continua no grupo de WhatsApp.
 
 ## Meu elo
 

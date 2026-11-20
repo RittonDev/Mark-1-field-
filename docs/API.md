@@ -1655,10 +1655,10 @@ itens e o catálogo), `schemas/my_profile.py` (as listas inteiras), `services/my
   no lugar não grava.
 
 **Valores e limites** (`services/tech_profile.py`; os rótulos e os limites são os mesmos de `lib/constants.ts`).
-- Dias (`Weekday`): `mon` a `sun`. Turnos (`DayPeriod`), em horas do fuso da operação, sem o fim: `morning` manhã
-  06h–12h, `afternoon` tarde 12h–18h, `evening` noite 18h–24h e `night` madrugada 00h–06h **do próprio dia**
-  (`sat:night` é sábado das 00h às 06h). São 28 turnos (`ALL_SLOTS`), na ordem da grade: de segunda a domingo; manhã,
-  tarde, noite, madrugada. Não é a jornada (o turno com GPS) nem o `work_schedule` da central.
+- Dias (`Weekday`): `mon` a `sun`. Turnos (`DayPeriod`), em horas do fuso da operação (a hora do fim não entra):
+  `morning` manhã 06h–12h, `afternoon` tarde 12h–18h, `evening` noite 18h–24h e `night` madrugada 00h–06h **do
+  próprio dia** (`sat:night` é sábado das 00h às 06h). São 28 turnos (`ALL_SLOTS`), na ordem da grade: de segunda a
+  domingo; manhã, tarde, noite, madrugada. Não é a jornada (o turno com GPS) nem o `work_schedule` da central.
 - Meios (`TransportMode`): `car` Carro, `motorcycle` Moto, `bicycle` Bicicleta, `public_transport` Transporte público,
   `ride_app` Carro de aplicativo, `on_foot` A pé.
 - Nível da aptidão (`SkillLevel`): os da ficha, `basico` Básico, `intermediario` Intermediário, `avancado` Avançado.
@@ -1843,9 +1843,9 @@ toca (`visit_slots`: `[início, fim)` no fuso da operação, com o fim informado
 antes do início: o turno do início; até 7 dias). Para cada técnico com disponibilidade informada:
 - todos os turnos da visita dentro dela: +2 pontos (`AVAILABILITY_INSIDE_POINTS`), sem motivo (não disputa espaço com
   "Livre no horário");
-- algum fora: −6 (`AVAILABILITY_OUTSIDE_POINTS`, um peso bem menor que os −40 de "Ocupado no horário") e o motivo "Fora da
-  disponibilidade (sáb · tarde)", com os turnos que faltam (sexta das 23h à 01h, com só "sex · noite" informado: "Fora
-  da disponibilidade (sáb · madrugada)");
+- algum fora: −6 (`AVAILABILITY_OUTSIDE_POINTS`, um peso bem menor que os −40 de "Ocupado no horário") e o motivo
+  "Fora da disponibilidade (sáb · tarde)", com os turnos que faltam (sexta das 23h à 01h, com só "sex · noite"
+  informado: "Fora da disponibilidade (sáb · madrugada)");
 - sem disponibilidade informada (também quem desmarcou tudo) ou OS sem horário: neutro (0, sem motivo).
 
 Nunca tira ninguém da lista; a vaga dos favoritos continua e o elo continua fora da conta. `TechnicianSuggestion` ganha
@@ -1965,7 +1965,9 @@ quando a central registra) e a reabertura de OS resolvida ou fechada (`status_ch
 - `TechnicianOut.level` (`GET /technicians` e as respostas de um técnico) e `TechnicianSuggestion.level`
   (`GET /technicians/suggest`, `GET /tickets/{id}/technician-suggestions`): `LevelSummary {tier, since, at_risk}`,
   sempre presente (sem conta ainda: `bronze`, `since` null). Nas sugestões, só o selo: a pontuação e a ordem não
-  mudam. `TicketOfferOut` não muda.
+  mudam. `TicketOfferOut` não traz o selo.
+- Estatísticas e Histórico de atendimentos (`GET /me/stats`, `GET /me/history` e `GET /technicians/{id}/stats`): ver
+  [Perfil do técnico: estatísticas e histórico](#perfil-do-técnico-estatísticas-e-histórico-2026-11-19).
 
 **Formatos.**
 - `LevelCriterion {key: "services"|"measured"|"on_time"|"rework"|"lost", label, met, enough_data, value, base,
@@ -1991,6 +1993,9 @@ Desconsiderar ou Voltar a contar; a desconsiderada mostra só quem e quando. O c
 (`data.added_ids`). Não relê em comentário, anexo, apontamento, decisão de pedido de peça, nem em `ticket.updated` só de
 `forms`, `signature`, `expenses`, `part_requests`, `payouts`, `quotes`, `offers`, `repairs` ou `tags`. Fora isso, relê ao
 voltar para a janela ou ao abrir o cadastro, quando a leitura tem mais de 1 min (cada leitura recalcula no servidor).
+Os atendimentos por mês da ficha (`GET /technicians/{id}/stats`) são relidos junto com o elo. A medalha
+(`LevelMedal`, a mesma arte do app) aparece no selo das listas e das sugestões, nos chips do filtro de Elo e no
+cabeçalho da aba Elo da ficha.
 
 **Responsabilidade `technician`.** Valor novo de `Responsibility` (rótulo "Técnico" em `/meta`), para motivos de
 improdutiva e de violação. Nenhum motivo foi reclassificado: enquanto a gestão não marcar algum motivo de improdutiva
@@ -1998,7 +2003,95 @@ como "Técnico", visitas perdidas não pesam (o cadastro na central avisa). No a
 responsabilidade ao escolher o motivo.
 
 **Privacidade (LGPD).** É dado de desempenho de um terceiro: só a gestão com Técnicos e o próprio técnico veem;
-cliente e portal nunca. A conta lê só 12 meses; as linhas caem junto com o usuário ou a OS.
+cliente e portal nunca. O elo lê só 12 meses; as Estatísticas e o Histórico do técnico leem todas as OS concluídas
+dele, sem gravar nada (seção seguinte). As linhas caem junto com o usuário ou a OS.
+
+## Perfil do técnico: estatísticas e histórico (2026-11-19)
+
+**Por quê.** A aba Perfil do app mostra o total de atendimentos desde sempre e a medalha do elo; as telas Estatísticas
+e Histórico de atendimentos detalham. A central vê o gráfico "Atendimentos por mês" na aba Elo da ficha do técnico.
+Código: `services/technician_levels.py` (`attended_clause`, `month_key`, `local_month`, `last_months`, `metrics_of` e
+`stats`), `services/my_history.py`, `api/routes/technician_levels.py`, `schemas/technician_level.py` e
+`schemas/my_history.py`. Só leitura: nada é gravado, não há evento e não há migração.
+
+**Atendimento** (`attended_clause`): OS resolvida ou fechada, com a conclusão (`resolved_at`) e com visita (chegada
+registrada ou OS migrada do Field Control), em que o técnico é **hoje** o responsável ou outro técnico da visita
+(`schedule.works_on`, a mesma regra de quem vê a OS no app). É o atendimento do elo sem a janela de 12 meses. O total,
+as Estatísticas e o Histórico usam o mesmo predicado, então a lista e o número batem. A busca "técnico que atuou" da
+central continua com `tickets.acted_by_clause`, que também acha quem foi o responsável antes de uma troca (inclusive
+pelo nome nas OS do Field Control): essas OS ficam fora daqui, porque não são atendimento dele e ele não as abre no
+app.
+
+**`GET /me/stats`** (papel `technician`; gestão e cliente: 403 "Sem permissão para esta ação") → `MyStats {computed_at,
+lifetime, metrics, months}`:
+- `lifetime {services, as_assignee, as_helper, legacy, first_month}`, desde sempre: `as_helper` = `services` −
+  `as_assignee` (responsável e junto ao mesmo tempo conta como responsável); `legacy` = OS do Field Control;
+  `first_month` = o mês ("AAAA-MM") da conclusão mais antiga, null sem atendimento.
+- `metrics`: o `LevelMetrics` do elo (365 dias corridos, com as desconsiderações), a mesma conta de Meu elo. A tela
+  usa `on_time_pct`, `on_time` e `arrivals` ("Chegada no horário").
+- `months`: 12 meses de calendário no fuso da operação, do mais antigo ao atual (`current` true só no último), cada um
+  `StatsMonth {month, current, services, as_assignee, as_helper, legacy, legacy_only, measured, arrivals, late,
+  reworks, lost}`. Atendimentos, medidos e chegadas contam pelo mês da conclusão; `late`, pelo mês da chegada;
+  `reworks`, pelo da reabertura; `lost`, pelo da visita improdutiva. Ocorrências desconsideradas pela central não
+  contam. `legacy_only` = teve atendimento e todos vieram do Field Control: o mês não mede chegada, retorno nem visita
+  perdida.
+- A soma das barras pode ser menor que `metrics`: o elo conta 365 dias corridos, com a ponta do 13º mês, e o atraso
+  conta pelo mês da chegada. A série não é congelada: muda com reabertura, "Corrigir horários", desconsideração e
+  reclassificação de motivo. Só contam conclusões até agora (relógio errado no futuro fica de fora até a hora chegar).
+
+```json
+{
+  "computed_at": "2026-11-19T13:00:00Z",
+  "lifetime": {"services": 1284, "as_assignee": 1250, "as_helper": 34, "legacy": 1190, "first_month": "2019-03"},
+  "metrics": {"window_start": "…", "window_end": "…", "services": 143, "...": "..."},
+  "months": [
+    {"month": "2025-12", "current": false, "services": 14, "as_assignee": 14, "as_helper": 0, "legacy": 14,
+     "legacy_only": true, "measured": 0, "arrivals": 0, "late": 0, "reworks": 0, "lost": 0},
+    {"month": "2026-11", "current": true, "services": 6, "as_assignee": 6, "as_helper": 0, "legacy": 0,
+     "legacy_only": false, "measured": 6, "arrivals": 5, "late": 1, "reworks": 0, "lost": 0}
+  ]
+}
+```
+
+**`GET /technicians/{id}/stats`** (Técnicos, ver; sem a tela: 403 `MODULE_FORBIDDEN`; técnico: 403 "Sem permissão
+para esta ação") → `TechnicianStats` = `MyStats` + `technician: Ref`. 404 "Técnico não encontrado" (também para quem
+não é técnico). Só contagens, sem OS nenhuma: a fila de quem pede não muda nada, como nas contagens do elo. Na web, o
+gráfico "Atendimentos por mês" da aba Elo ("143 nos últimos 12 meses · 1.284 no total"), com as séries "Maxx Field" e
+"Field Control" (a segunda só quando algum mês tem atendimento do Field Control), o mês atual tracejado e a tabela "Ver
+em tabela"; a resposta fica guardada por 60 s e é relida junto com o elo do técnico.
+
+**`GET /me/history?limit=&cursor=`** (papel `technician`; gestão e cliente: 403) → `MyHistoryPage {items, next_cursor,
+total, months}`:
+- `limit` de 1 a 50 (padrão 30; fora: 422 de validação). `cursor`: o `next_cursor` da página anterior (até 200
+  caracteres), opaco (base64url sem "=" de `"{resolved_at ISO com fuso}|{id}"`); null no fim.
+- Ordem `resolved_at DESC, id DESC`, com paginação por chave: OS concluída enquanto o técnico rola não repete nem pula
+  itens nas páginas seguintes.
+- `HistoryItem {id, code, service, location_code, location_name, city, state, resolved_at, month, role, legacy}`, o
+  recorte de campo: `service` = o nome do tipo de serviço ou, sem tipo, o título da OS; `location_*`, `city` e `state` =
+  os da loja; `month` = o mês da conclusão no fuso da operação (as seções da lista); `role` = `assignee` (responsável)
+  ou `helper` (junto); `legacy` = OS do Field Control. Nunca vêm cliente, endereço, contato, valores, etiquetas, SLA,
+  analista, solicitante nem descrição.
+- `total`: só na primeira página (sem `cursor`), null nas outras; é o `lifetime.services` de `/me/stats` (as duas
+  diferem só numa conclusão no futuro, que a lista mostra e o total das Estatísticas ainda não conta). `months`:
+  `[{month, count}]` dos meses que aparecem na página, do mais novo para o mais antigo, cada um com o total do mês
+  inteiro (mesmo quando o mês continua na próxima página).
+- Cursor estragado (base64, separador, data sem fuso ou id): 422 `{"detail": "Página do histórico inválida. Puxe a
+  lista para recarregar."}`.
+
+**Custo.**
+- `/me/stats`: o `collect()` do elo só para o técnico (7 idas ao banco: responsável, junto, atrasos, reaberturas e as
+  conclusões delas, improdutivas e desconsiderações) mais 1 consulta agrupada por mês. Não chama `refresh_one`: sem
+  trava, sem gravar a conta e sem commit.
+- `/me/history`: no máximo 3 idas por página (a página com `limit + 1`, o `count` só na primeira e a contagem dos meses
+  da página).
+- Sem índice novo: rápido na base de hoje (cerca de 15 mil OS). Se um técnico passar de uns 20 mil atendimentos, vale um
+  índice parcial `(assignee_id, resolved_at DESC)` nas concluídas.
+- O app guarda as duas (kv `my_stats` e a primeira página em `my_history`, com a hora e o técnico) e busca fora da
+  rodada de sincronização: ver `docs/MOBILE_SYNC.md`. Servidor sem estas rotas (404): o app mostra "O servidor ainda
+  não tem as estatísticas. Tente de novo mais tarde." (ou "… o histórico …").
+
+**Privacidade (LGPD).** São dados do próprio técnico: só ele e a gestão com Técnicos veem; o cliente e o portal nunca. O
+histórico traz só o recorte de campo, e a central vê só contagens.
 
 ## Acesso: perfis por tela e visibilidade de filas
 
@@ -2192,7 +2285,7 @@ V = Visualizar, E = Editar; "a \| b" = basta uma das telas.
 | `commercial.payouts` | V: `GET /payouts`, `GET /tickets/{id}/offers`, `GET /technician-invoices`. E: `PUT`/`DELETE /tickets/{id}/payouts/{tech}`, `POST /payouts/pay`, `/payouts/unpay`, `POST /tickets/{id}/offers`, `POST /tickets/{id}/offers/{offer_id}/cancel`, `DELETE /technicians/{id}/pix`, `POST /technician-invoices/{id}/check`, `/uncheck`, `/reject` |
 | `base.customers` | V: `GET /customers/{id}`, `GET /assets`, `/assets/{id}`. E: `POST /customers`, `PATCH /customers/{id}`, `POST`/`PATCH /assets` |
 | `base.locations` | E: `POST /customers/{id}/locations`, `PATCH /locations/{id}`, `POST /locations/import` |
-| `base.technicians` | V: `GET /technicians`, `/technicians/favorites`, `/technicians/{id}`, `/technicians/{id}/changes`, `/technicians/{id}/level`. E: `POST /technicians`, `PATCH /technicians/{id}`, `POST /technicians/{id}/reset-password`, `POST`/`DELETE /technicians/{id}/photo`, `POST /technicians/import`, `POST /technicians/regions/refresh`, `PUT`/`DELETE /technicians/favorites/{id}`, `POST /technicians/{id}/level/waivers`, `DELETE /technicians/{id}/level/waivers/{waiver_id}`, `POST /technicians/levels/refresh` |
+| `base.technicians` | V: `GET /technicians`, `/technicians/favorites`, `/technicians/{id}`, `/technicians/{id}/changes`, `/technicians/{id}/level`, `/technicians/{id}/stats`. E: `POST /technicians`, `PATCH /technicians/{id}`, `POST /technicians/{id}/reset-password`, `POST`/`DELETE /technicians/{id}/photo`, `POST /technicians/import`, `POST /technicians/regions/refresh`, `PUT`/`DELETE /technicians/favorites/{id}`, `POST /technicians/{id}/level/waivers`, `DELETE /technicians/{id}/level/waivers/{waiver_id}`, `POST /technicians/levels/refresh` |
 | `base.technicians` \| `base.onboarding` | V: `GET /technicians/regions` |
 | `base.technicians` \| `base.locations` | V: `GET /technicians/nearby` |
 | `base.onboarding` | V: `GET /onboarding/invites`, `/onboarding/applications`, `/applications/pending-count`, `/applications/{id}`. E: `POST`/`DELETE /onboarding/invites`, `POST .../approve`, `.../reject`; `DELETE /onboarding/applications/{id}` (E e só admin e supervisor) |
@@ -2203,7 +2296,7 @@ V = Visualizar, E = Editar; "a \| b" = basta uma das telas.
 | `setup.messages` | V: `GET /message-templates`. E: `PUT /message-templates`, `POST /message-templates/reset` |
 | `setup.service_types` | E: `POST /service-types`, `PATCH /service-types/{id}`, `POST /service-types/{id}/apply-observed` |
 | `setup.users` | V: `GET /access/profiles`. E: `POST /users`, `PATCH /users/{id}` (admin e supervisor), `POST`/`PATCH /teams` |
-| `setup.settings` | E: `PUT /settings/company`, `/settings/expenses`, `/settings/field`, `/ticket-tag-rules`, `POST`/`PATCH /categories`, `POST`/`PATCH /violation-reasons` |
+| `setup.settings` | E: `PUT /settings/company`, `/settings/expenses`, `/settings/field`, `/ticket-tag-rules`, `POST`/`PATCH /categories`, `POST`/`PATCH /violation-reasons`, `POST /technician-tools`, `PATCH /technician-tools/{id}` |
 
 Sem tela (toda a gestão): as leituras que a Nova OS, o editor, a OS, os filtros, a Minha fila e o Início usam
 (`/customers`, `/customers/{id}/locations`, `/locations`, `/locations/{id}`, `/intake/context`,
@@ -2211,6 +2304,10 @@ Sem tela (toda a gestão): as leituras que a Nova OS, o editor, a OS, os filtros
 `/ticket-tags`, `/ticket-tag-rules`, `/form-templates`, `/users`, `/users/assignable`, `/users/{id}`,
 `/teams`, `/technicians/suggest`, `/technicians/favorites/city`, `/tickets/{id}/technician-suggestions`,
 `/calendar/conflicts`, `/projects`, `/queues`, `/settings/company`, `/settings/expenses`, `/settings/field`,
-`/portal/inbox-count`, `/access/catalog`) e o núcleo da OS. `PUT /sla-policies` continua só do administrador
-e os motivos de visita improdutiva continuam com toda a gestão. O inventário completo está em
-`backend/tests/test_access_routes.py` (rota nova sem classificação faz o teste falhar).
+`/portal/inbox-count`, `/access/catalog`, `/technician-tools`) e o núcleo da OS. `GET /technician-tools` também
+responde ao técnico (só as ferramentas ativas). `PUT /sla-policies` continua só do administrador e os motivos de visita
+improdutiva continuam com toda a gestão.
+
+Só do técnico (o papel; fora da matriz, gestão e cliente recebem 403): as rotas `/me/*` de sempre (ofertas, cadastro
+e foto, notas fiscais, elo) e, desde 2026-11-19, `GET /me/stats`, `GET /me/history` e `GET /me/earnings/months`. O
+inventário completo está em `backend/tests/test_access_routes.py` (rota nova sem classificação faz o teste falhar).
