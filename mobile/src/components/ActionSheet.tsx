@@ -14,6 +14,10 @@ export interface SheetAction {
   icon?: IconName;
   tone?: "default" | "danger";
   disabledReason?: string | null;
+  /** Texto curto sob o rótulo, sem esmaecer ("Acompanha o modo do celular"). */
+  description?: string;
+  /** A opção em uso numa escolha (Aparência): check à direita, quando não há `right`, e o estado "selecionado". */
+  selected?: boolean;
   right?: ReactNode;
   onPress: () => void;
 }
@@ -131,7 +135,7 @@ export function ActionSheet({
             key={action.key}
             scaleTo={0.98}
             accessibilityRole="button"
-            accessibilityState={{ disabled }}
+            accessibilityState={{ disabled, selected: action.selected }}
             accessibilityHint={action.disabledReason ?? undefined}
             onPress={() => {
               // Indisponível: avisa com a vibração e deixa o motivo à vista.
@@ -149,9 +153,10 @@ export function ActionSheet({
             ) : null}
             <View style={{ flex: 1, gap: 2 }}>
               <Text style={[styles.label, { color }, disabled && styles.dimmed]}>{action.label}</Text>
+              {action.description ? <Text style={styles.reason}>{action.description}</Text> : null}
               {action.disabledReason ? <Text style={styles.reason}>{action.disabledReason}</Text> : null}
             </View>
-            {action.right}
+            {action.right ?? (action.selected ? <Icon name="check" size={20} color={c.brandInk} /> : null)}
           </PressableScale>
         );
       })}

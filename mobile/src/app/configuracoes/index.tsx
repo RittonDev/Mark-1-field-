@@ -100,7 +100,7 @@ export default function SettingsScreen() {
         <SettingsNotice failed={!profile && load.status === "error"} onRetry={retry} />
 
         <MenuGroup title="Perfil">
-          <PhotoRow profile={profile} loading={loading} />
+          <PhotoRow profile={profile} loading={loading} fallbackName={user?.name ?? null} />
           <MenuRow
             icon="user"
             label="Dados pessoais"
@@ -180,8 +180,11 @@ function SettingsNotice({ failed, onRetry }: { failed: boolean; onRetry: () => v
   );
 }
 
-/** A foto à direita (as iniciais sem foto); enviando ou removendo, o andamento, igual ao da tela Foto do perfil. */
-function PhotoRow({ profile, loading }: { profile: MyProfile | null; loading: boolean }) {
+/**
+ * A foto à direita (as iniciais sem foto; sem o cadastro na memória, as do nome da sessão, como no topo de Hoje);
+ * enviando ou removendo, o andamento, igual ao da tela Foto do perfil.
+ */
+function PhotoRow({ profile, loading, fallbackName }: { profile: MyProfile | null; loading: boolean; fallbackName: string | null }) {
   const c = useTheme();
   const styles = useStyles(makeStyles);
   const task = useAvatarTask();
@@ -197,7 +200,9 @@ function PhotoRow({ profile, loading }: { profile: MyProfile | null; loading: bo
     <Avatar name={profile.name} uri={profile.avatar_url} size={28} />
   ) : loading ? (
     <Skeleton width={28} height={28} radius={14} />
-  ) : undefined;
+  ) : (
+    <Avatar name={fallbackName} size={28} />
+  );
   return (
     <MenuRow
       icon="camera"
