@@ -121,6 +121,36 @@ describe("aptidões", () => {
     assert.ok(body.every((item) => !("since" in item) && !("added_at" in item)));
   });
 
+  const SKILLS = [
+    { name: "Impressoras HP", level: "avancado", since: "2025-03-01" },
+    { name: "Linux", level: "intermediario", since: "2025-02-01" },
+    { name: "Redes", level: "basico", since: "2025-01-10" },
+  ];
+
+  it("skillsWithout: tira pelo nome sem acento e maiúsculas, sem o `since`; a que já saiu não muda nada", () => {
+    assert.deepEqual(skillsWithout(SKILLS, "impressoras  hp"), [
+      { name: "Linux", level: "intermediario" },
+      { name: "Redes", level: "basico" },
+    ]);
+    assert.deepEqual(skillsWithout(SKILLS, "Fibra óptica"), skillsBody(SKILLS));
+  });
+
+  it("skillsWith: inclui no fim; na edição muda só o nível, com o nome gravado; null se a editada já saiu", () => {
+    assert.deepEqual(skillsWith(SKILLS, { name: " Fibra  óptica ", level: "basico" }), [
+      { name: "Impressoras HP", level: "avancado" },
+      { name: "Linux", level: "intermediario" },
+      { name: "Redes", level: "basico" },
+      { name: "Fibra óptica", level: "basico" },
+    ]);
+    assert.deepEqual(skillsWith(SKILLS, { name: "LINUX", level: "avancado" }, "linux"), [
+      { name: "Impressoras HP", level: "avancado" },
+      { name: "Linux", level: "avancado" },
+      { name: "Redes", level: "basico" },
+    ]);
+    assert.equal(skillsWith(SKILLS.slice(0, 1), { name: "Linux", level: "avancado" }, "Linux"), null);
+    assert.equal(SKILL_MSG.gone, "Esta aptidão foi excluída.");
+  });
+
   it("suggestionsFor: no máximo 12, sem as que o técnico já tem, filtrando pelo texto", () => {
     const catalog = Array.from({ length: 16 }, (_, i) => `Sugestão ${i + 1}`);
     assert.equal(suggestionsFor("", catalog, []).length, 12);
@@ -183,6 +213,34 @@ describe("formação", () => {
     assert.equal(educationEntry({ ...base, level: null }), null);
   });
 
+  const COURSES = [
+    { id: "e-1", course: "Curso Alfa", level: "technical", institution: "Escola Exemplo", start: "2019-02", end: "2020-12" },
+    { id: "e-2", course: "Curso Beta", level: "certification", institution: "Escola Exemplo", start: "2021-03", end: null },
+  ];
+
+  it("educationWithout e educationWith: pelo id; a nova vai no fim e sem id; null se a editada já saiu", () => {
+    assert.deepEqual(
+      educationWithout(COURSES, "e-1").map((item) => item.id),
+      ["e-2"],
+    );
+    const fresh = { course: "Curso Gama", level: "free_course", institution: "Escola Exemplo", start: "2022-01", end: "2022-02" };
+    assert.deepEqual(educationWith(COURSES, fresh).at(-1), fresh);
+    const edited = { ...COURSES[0], course: "Curso Alfa Dois" };
+    assert.deepEqual(
+      educationWith(COURSES, edited).map((item) => `${item.id}:${item.course}`),
+      ["e-1:Curso Alfa Dois", "e-2:Curso Beta"],
+    );
+    assert.equal(educationWith(COURSES.slice(1), edited), null);
+    assert.equal(EDUCATION_MSG.gone, "Esta formação foi excluída.");
+  });
+
+  it("educationProblem: curso e instituição só de caracteres de controle contam como vazios", () => {
+    assert.deepEqual(educationProblem({ ...base, course: "\u0001\u0002\u0003", institution: "\u0000\u0000" }), {
+      course: EDUCATION_MSG.course,
+      institution: EDUCATION_MSG.institution,
+    });
+  });
+
   it("educationChanged: o fim não conta com Em andamento marcado", () => {
     const item = { id: "x", course: "Técnico em redes", level: "technical", institution: "Escola Exemplo", start: "2024-02", end: null };
     const draft = educationDraftOf(item);
@@ -200,6 +258,38 @@ describe("formação", () => {
       educationSpoken({ ...item, start: "2024-02", end: null }),
       "Técnico em redes, Técnico, Escola Exemplo, desde fevereiro de 2024, em andamento",
     );
+  });
+});
+
+describe("listas: o corpo montado quando a gravação sai da fila (saveProfileWith)", () => {
+  const SKILLS = [
+    { name: "Impressoras HP", level: "avancado", since: "2025-03-01" },
+    { name: "Linux", level: "intermediario", since: "2025-02-01" },
+    { name: "Redes", level: "basico", since: "2025-01-10" },
+  ];
+  /** O servidor (services/tech_profile): grava a lista enviada; quem já estava mantém o "desde", a nova ganha o dia. */
+  const apply = (stored, body) =>
+    body.map((item) => ({ ...item, since: stored.find((old) => foldName(old.name) === foldName(item.name))?.since ?? "2026-11-20" }));
+
+  it("duas exclusões em fila terminam sem as duas: cada corpo sai do que a anterior gravou", () => {
+    let stored = SKILLS;
+    for (const build of [(list) => skillsWithout(list, "Impressoras HP"), (list) => skillsWithout(list, "Linux")]) {
+      stored = apply(stored, build(stored));
+    }
+    assert.deepEqual(stored, [{ name: "Redes", level: "basico", since: "2025-01-10" }]);
+
+    // O defeito corrigido: com os dois corpos montados da mesma lista, a 2ª exclusão devolvia a 1ª, com o "desde" do dia.
+    let early = SKILLS;
+    for (const body of [skillsWithout(SKILLS, "Impressoras HP"), skillsWithout(SKILLS, "Linux")]) early = apply(early, body);
+    assert.deepEqual(
+      early.map((item) => `${item.name}@${item.since}`),
+      ["Impressoras HP@2026-11-20", "Redes@2025-01-10"],
+    );
+  });
+
+  it("mudar o nível de uma aptidão que a gravação anterior excluiu não monta corpo (a folha mostra o erro)", () => {
+    const afterRemoval = apply(SKILLS, skillsWithout(SKILLS, "Linux"));
+    assert.equal(skillsWith(afterRemoval, { name: "Linux", level: "avancado" }, "Linux"), null);
   });
 });
 
@@ -245,7 +335,7 @@ describe("disponibilidade", () => {
 
 describe("transporte e ferramental", () => {
   it("toggleMode, transportBody (na ordem da lista) e sameTransport", () => {
-    const start = NO_TRANSPORT;
+    const start = TRANSPORT_UNSET;
     const withMoto = toggleMode(start, "motorcycle");
     const both = toggleMode(withMoto, "car");
     assert.deepEqual(both.modes, ["motorcycle", "car"]);
@@ -253,7 +343,34 @@ describe("transporte e ferramental", () => {
     assert.equal(sameTransport(both, { modes: ["car", "motorcycle"], driver_license: false }), true);
     assert.equal(sameTransport(both, { modes: ["car", "motorcycle"], driver_license: true }), false);
     assert.deepEqual(toggleMode(both, "car").modes, ["motorcycle"]);
-    assert.deepEqual(NO_TRANSPORT, { modes: [], driver_license: false });
+    assert.deepEqual(TRANSPORT_UNSET, { modes: [], driver_license: false });
+  });
+
+  it("TRANSPORT_UNSET (nunca informado) vale pela identidade: sameSavedTransport", () => {
+    const informed = { modes: [], driver_license: false };
+    assert.ok(Object.isFrozen(TRANSPORT_UNSET));
+    assert.equal(sameSavedTransport(TRANSPORT_UNSET, TRANSPORT_UNSET), true);
+    assert.equal(sameSavedTransport(informed, TRANSPORT_UNSET), false);
+    assert.equal(sameSavedTransport(TRANSPORT_UNSET, informed), false);
+    assert.equal(sameSavedTransport(informed, { modes: [], driver_license: false }), true);
+    assert.equal(
+      sameSavedTransport({ modes: ["car", "motorcycle"], driver_license: true }, { modes: ["motorcycle", "car"], driver_license: true }),
+      true,
+    );
+    // Marcar e desmarcar devolve um valor novo, nunca o nunca informado.
+    assert.notEqual(toggleMode(toggleMode(TRANSPORT_UNSET, "car"), "car"), TRANSPORT_UNSET);
+  });
+
+  it("Nenhum: marcado com o transporte informado sem meio; tocar tira os meios e mantém a CNH; um meio o desmarca", () => {
+    assert.equal(noneMarked(TRANSPORT_UNSET), false);
+    assert.equal(noneMarked({ modes: [], driver_license: false }), true);
+    assert.equal(noneMarked({ modes: [], driver_license: true }), true);
+    assert.equal(noneMarked({ modes: ["on_foot"], driver_license: false }), false);
+    assert.deepEqual(markNone({ modes: ["car", "motorcycle"], driver_license: true }), { modes: [], driver_license: true });
+    const first = markNone(TRANSPORT_UNSET);
+    assert.notEqual(first, TRANSPORT_UNSET);
+    assert.equal(noneMarked(first), true);
+    assert.equal(noneMarked(toggleMode(first, "car")), false);
   });
 
   it("toggleId e sameSet", () => {
@@ -408,5 +525,34 @@ describe("salvar ao tocar (autoSaveStep)", () => {
     assert.equal(late.effect, null);
     assert.equal(late.state, s.state);
     assert.equal(step(s.state, { type: "failed", epoch: 0 }).state, s.state);
+  });
+});
+
+describe("salvar ao tocar do Transporte (sameSavedTransport)", () => {
+  const step = (state, event) => autoSaveStep(state, event, sameSavedTransport);
+  const NONE = { modes: [], driver_license: false };
+
+  it("nunca informado: marcar e desmarcar um meio antes do envio grava Nenhum · sem CNH", () => {
+    let r = step(AUTO_SAVE_START, { type: "change", value: toggleMode(TRANSPORT_UNSET, "car") });
+    r = step(r.state, { type: "change", value: toggleMode(r.state.desired, "car") });
+    r = step(r.state, { type: "due", saved: TRANSPORT_UNSET });
+    assert.deepEqual(r.effect, { kind: "send", value: NONE, epoch: 0 });
+    r = step(r.state, { type: "done", epoch: 0, saved: { modes: [], driver_license: false } });
+    assert.deepEqual(r.effect, { kind: "saved" });
+    assert.equal(r.state.desired, null);
+  });
+
+  it("nunca informado: tocar em Nenhum envia sem meio e sem CNH", () => {
+    let r = step(AUTO_SAVE_START, { type: "change", value: markNone(TRANSPORT_UNSET) });
+    r = step(r.state, { type: "due", saved: TRANSPORT_UNSET });
+    assert.deepEqual(r.effect, { kind: "send", value: NONE, epoch: 0 });
+  });
+
+  it("já informado sem meio e sem CNH: marcar e desmarcar não envia", () => {
+    let r = step(AUTO_SAVE_START, { type: "change", value: toggleMode(NONE, "car") });
+    r = step(r.state, { type: "change", value: toggleMode(r.state.desired, "car") });
+    r = step(r.state, { type: "due", saved: { modes: [], driver_license: false } });
+    assert.equal(r.effect, null);
+    assert.equal(r.state.status, "idle");
   });
 });

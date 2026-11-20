@@ -1,13 +1,17 @@
 // Fichas de escolha das Configurações: tipo da chave PIX, nível da aptidão e da formação, turnos do dia. "pill" são
-// fichas em linha que quebram; "tile" é uma grade de 2 colunas com rótulo e sub-rótulo (os turnos: "Manhã", "06h–12h").
-// Sem `multi`, um grupo de rádio (o toque devolve o valor tocado); com `multi`, caixas de marcar (o toque devolve a
-// lista nova, na ordem das opções). O estado não depende só da cor: a ficha marcada ganha o check.
+// fichas em linha que quebram; "tile" é uma grade de 2 colunas com rótulo e sub-rótulo (os turnos: "Manhã", "06h–12h"),
+// que vira uma coluna só com a fonte do sistema acima de 1,2 (a fonte continua crescendo e "Madrugada" não quebra no
+// meio). Sem `multi`, um grupo de rádio (o toque devolve o valor tocado); com `multi`, caixas de marcar (o toque devolve
+// a lista nova, na ordem das opções). O estado não depende só da cor: a ficha marcada ganha o check.
 
 import type { ReactNode } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { Pressable, StyleSheet, useWindowDimensions, View } from "react-native";
 import { RADIUS, useStyles, useTheme, type Palette } from "../../theme/theme";
 import { Icon } from "../Icon";
 import { Text } from "../Text";
+
+/** Acima desta escala da fonte, as fichas "tile" ficam uma por linha (em meia largura, o rótulo quebraria no meio). */
+const TILE_ONE_COLUMN_SCALE = 1.2;
 
 export interface ChoiceOption<T extends string> {
   value: T;
@@ -44,6 +48,7 @@ export function ChoiceChips<T extends string>({
 }) {
   const c = useTheme();
   const styles = useStyles(makeStyles);
+  const { fontScale } = useWindowDimensions();
   const current = selectedOf(value);
   const chosen = new Set<T>(current);
 
@@ -101,15 +106,16 @@ export function ChoiceChips<T extends string>({
   const groupProps = { accessibilityRole: multi ? undefined : ("radiogroup" as const), accessibilityLabel };
 
   if (shape === "tile") {
+    const perRow = fontScale > TILE_ONE_COLUMN_SCALE ? 1 : 2;
     const rows: ChoiceOption<T>[][] = [];
-    for (let i = 0; i < options.length; i += 2) rows.push(options.slice(i, i + 2));
+    for (let i = 0; i < options.length; i += perRow) rows.push(options.slice(i, i + perRow));
     return (
       <View style={styles.tiles} {...groupProps}>
         {rows.map((row) => (
           <View key={row.map((o) => o.value).join("|")} style={styles.tileRow}>
             {row.map(chip)}
-            {/* Linha com uma ficha só: a ficha fica com meia largura, como as outras. */}
-            {row.length === 1 ? <View style={styles.tileSpacer} /> : null}
+            {/* Linha incompleta (a última, em 2 colunas): a ficha fica com meia largura, como as outras. */}
+            {row.length < perRow ? <View style={styles.tileSpacer} /> : null}
           </View>
         ))}
       </View>

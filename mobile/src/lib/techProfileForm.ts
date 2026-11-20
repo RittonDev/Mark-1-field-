@@ -123,9 +123,6 @@ export function sameSet(a: readonly string[], b: readonly string[]): boolean {
   return left.size === right.size && [...left].every((item) => right.has(item));
 }
 
-/** Nada marcado ainda (o transporte que nunca foi informado começa assim na tela). */
-export const NO_TRANSPORT: TransportInfo = { modes: [], driver_license: false };
-
 /**
  * O transporte nunca informado (`transport` null no cadastro): a tela começa sem nada marcado. Vale pela identidade,
  * não pelo valor (sameSavedTransport): sem meio e sem CNH informado é outra coisa ("Nenhum · sem CNH") e grava, mesmo
