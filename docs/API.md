@@ -803,7 +803,9 @@ colaboradores.
   mesmo cálculo (distância pelo histórico/endereço/ao vivo, visitas a esta mesma loja e a base na
   cidade), somado a agenda livre, skill, equipe do projeto e carga. Só técnicos **ativos**.
   `home_city`/`home_state` trazem a região efetiva (a base, senão o endereço). Os favoritos da cidade da loja
-  ganham pontos e vaga garantida (ver "Técnicos favoritos por cidade").
+  ganham pontos e vaga garantida (ver "Técnicos favoritos por cidade"). Com horário na OS, a disponibilidade que o
+  técnico informou no app soma ou tira poucos pontos (`availability`, `availability_gaps` e o motivo "Fora da
+  disponibilidade (sáb · tarde)"): ver [Perfil técnico](#perfil-técnico-2026-11-19).
 - **Coordenadas de loja inválidas** (`app/services/geo.py`): não valem para distância nem mapa o
   `(0, 0)`, o centro do Brasil (`-14,2350, -51,9253`, ponto padrão do geocodificador quando o endereço
   não foi achado) e qualquer ponto repetido em lojas de **2 ou mais UFs** (lojas do mesmo shopping, na
@@ -1000,11 +1002,67 @@ computador" no portal: vira app com ícone na área de trabalho e no menu Inicia
   sem ele, `{}`.
 - `POST /payouts/pay` e `POST /payouts/unpay` `{ids}` → `{changed}`. Pagar o último valor pendente de uma OS tira dela as
   etiquetas `remove_on_payout_paid` (ex.: "Pendente Envio PGTO"); desfazer o pagamento não traz de volta.
-- `GET /me/earnings?month=AAAA-MM` (técnico) → os chamados dele, o resumo e os reembolsos (custos extras
-  aprovados a receber e pagos no mês).
+- `GET /me/earnings?month=AAAA-MM` (técnico; os outros papéis: 403 "Só para técnicos") → os chamados dele (até 1.000,
+  com `total_count` = quantos batem com o filtro), o resumo e os reembolsos (custos extras aprovados a receber e
+  pagos no mês). É o mês do Faturamento do app (`/faturamento/AAAA-MM`). Mês fora de AAAA-MM ou de 2000–2100: 422
+  "Mês inválido (use AAAA-MM)".
+- `GET /me/earnings/months` (técnico): os meses do Faturamento, ver [Faturamento do app](#faturamento-do-app-2026-11-19).
 - `PayoutLine.invoice` (`{id, number, status}` ou null), em `GET /payouts` e `GET /me/earnings`: a nota fiscal do
   técnico que cobre o valor (ver [Notas fiscais dos técnicos](#notas-fiscais-dos-técnicos-2026-11-18)).
 - Mudar o valor ou pagar marca a OS como alterada (`updated_at`), para o app do técnico baixar de novo.
+
+### Faturamento do app (2026-11-19)
+
+**Por quê.** A aba Faturamento do app (substitui o Ganhos) mostra o total pago, o que falta receber e um cartão por
+mês de conclusão com a situação, calculada aqui para o app não repetir a regra. Tocar no mês abre o mês de
+`GET /me/earnings?month=` com as notas fiscais dele. Código: `services/payouts.py` (`MONTHS_DEFAULT`, `MONTHS_MAX`,
+`shift_month`, `month_state`, `my_earnings_months`), `schemas/payout.py` e `api/routes/payouts.py`. Só leitura.
+
+**`GET /me/earnings/months?months=12`** (papel `technician`; gestão e cliente: 403 "Sem permissão para esta ação").
+`months` de 1 a 24 (padrão 12; fora: 422 de validação) → `EarningsMonths {since, until, totals, months}`:
+- `until` = o mês atual no fuso da operação e `since` = o primeiro mês da janela ("AAAA-MM"). `months` traz **todos**
+  os meses da janela, o mais novo primeiro, também os sem valor (`empty`, que o app não mostra).
+- `EarningsMonth {month, state, count, total, to_pay, expected, paid, due_without_invoice, due_in_review, due_checked,
+  paid_without_invoice, last_paid_at, rejection}`. Cada balde é `{count, amount}` (quantos valores e a soma):
+
+  | Balde | Valores do técnico no mês |
+  |---|---|
+  | `to_pay` (a receber) | pendentes de OS resolvida ou fechada |
+  | `expected` (previsto) | pendentes de OS em andamento |
+  | `paid` (pago) | pagos (também os de OS cancelada que a central pagou) |
+  | `due_without_invoice`, `due_in_review`, `due_checked` | partes do `to_pay`: sem nota dele, com a nota aguardando conferência e com a nota conferida |
+  | `paid_without_invoice` | parte do `paid` sem nota dele |
+
+  `count` = `to_pay.count + expected.count + paid.count`; `total` = a soma dos três (o "Valor total" do cartão);
+  `last_paid_at` = o último pagamento das OS do mês.
+- **Mês de um valor:** a conclusão da OS (aberta: o lançamento do valor), no fuso da operação: a régua de
+  `list_payouts` e do `GET /me/earnings`. A data do pagamento não muda o mês; horário corrigido para o futuro conta no
+  mês atual. O pendente de OS cancelada não conta (o pago, sim).
+- **Nota de um valor:** só a nota do próprio técnico; a recusada não cobre nada (a recusa solta as OS), e a ligação com
+  nota de outro técnico conta como "sem nota".
+- **Recusa em aberto** (`rejection {invoice_id, number, reason, rejected_at}`): entre as notas do técnico com a
+  competência do mês, a recusada mais recente (pela hora da recusa; sem ela, pelo envio), se nenhuma nota não recusada
+  da mesma competência foi enviada depois. A recusada que o técnico apagou não existe mais.
+- **Situação** (`state`), a primeira que vale, pelas contagens (valor de R$ 0,00 também conta):
+  1. `rejected`: recusa em aberto, e o mês sem valor ou com algum valor sem nota;
+  2. `empty`: sem valor;
+  3. `in_progress`: só previsto;
+  4. `partial`: algo pago e algo a receber ou previsto;
+  5. `no_invoice`: nada pago, algo a receber sem nota (só informativo: a central paga com ou sem nota);
+  6. `in_review`: nada pago, a receber com nota, alguma aguardando conferência;
+  7. `to_pay`: nada pago, a receber com as notas conferidas;
+  8. `paid_no_invoice`: tudo pago, algum sem nota;
+  9. `paid`: tudo pago, com nota.
+
+  `rejection` pode vir preenchida também quando a situação não é `rejected` (a recusa continua em aberto, mas todas
+  as OS do mês têm outra nota): o app decide pelo `state`.
+- `totals {paid, to_pay, expected, to_pay_older, last_paid_at, reimbursement_to_receive, reimbursement_paid}`: valores
+  das OS de todos os meses, não só da janela; `to_pay_older` é a parte de `to_pay` de meses antes da janela (já
+  somada em `to_pay`). Os reembolsos de custos extras ficam à parte: aprovados e não pagos, e pagos.
+- Os valores por OS existem desde 13/11/2026 (o Field Control não trazia valores): os meses de antes vêm `empty`.
+- Custo: 3 consultas, todas pelo técnico (os valores agrupados por mês, as notas da janela e os reembolsos). Sem
+  tempo real e sem histórico: o app relê ao abrir a aba, ao puxar, depois de enviar ou apagar uma nota e depois de
+  uma sincronização (`docs/MOBILE_SYNC.md`).
 
 ## Orçamentos: cobrança, aberturas e preço do cliente (2026-11-17)
 
@@ -1076,7 +1134,9 @@ ganchos na OS em `services/tickets.py` (`close_pending_offers`, `close_technicia
 - O técnico responde "Aceitar por R$ X" ou "Recusar" (motivo opcional, até 300). Não há contraproposta nem chat (a
   conversa é pelo WhatsApp).
 - Para aceitar, ele precisa ter aberto a oferta: `GET /me/offers/{id}` grava `viewed_at` (sem ele, 422
-  `OFFER_NOT_VIEWED`). O "Escopo lido" é do app.
+  `OFFER_NOT_VIEWED`). O "Escopo lido" é do app (abrir o escopo libera o botão de aceitar); o app guarda a hora em que
+  o técnico abriu o escopo e manda no aceite (`scope_read_at`, desde 2026-11-19), e a central vê "escopo lido às
+  HH:MM". A hora prova que ele abriu o escopo, não que leu, e vem do relógio do aparelho acertado pelo do servidor.
 - **Quem aceita primeiro leva.** O aceite trava a OS (`SELECT ... FOR UPDATE`), confere que a oferta está pendente e
   no prazo e que a OS continua em aberto e sem técnico, e faz a atribuição normal (`tickets._assign`, a mesma do
   `POST /tickets/{id}/assign`, com o técnico como autor e `data.via = "offer"` no evento `assigned`). Depois dela, o
