@@ -75,7 +75,7 @@ export default function SkillsScreen() {
 
   function openSheet(target: SkillSheetTarget) {
     if (writing) return;
-    setSheet({ key: Date.now(), open: true, target });
+    setSheet((current) => ({ key: (current?.key ?? 0) + 1, open: true, target }));
   }
 
   function closeSheet() {

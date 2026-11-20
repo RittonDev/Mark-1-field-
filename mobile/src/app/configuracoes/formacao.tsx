@@ -67,7 +67,7 @@ export default function EducationScreen() {
 
   function openSheet(target: EducationSheetTarget) {
     if (writing) return;
-    setSheet({ key: Date.now(), open: true, target });
+    setSheet((current) => ({ key: (current?.key ?? 0) + 1, open: true, target }));
   }
 
   function closeSheet() {
