@@ -1,33 +1,26 @@
-import NetInfo from "@react-native-community/netinfo";
-import { router } from "expo-router";
-import { useEffect, useState } from "react";
-import { Alert, Platform, ScrollView, StyleSheet, View } from "react-native";
+// Sincronização (a rota continua /conta; o título vem do _layout): a conversa com a central, os itens para enviar, as
+// ações que a central não aceitou, o rastreamento da jornada, as notificações e o aparelho. `?secao=` abre a tela já
+// rolada até um cartão (lib/navigation.ts, openSync): a OS abre as pendências e a faixa de Hoje, os avisos. A
+// identidade e o Sair ficam no Perfil; a Aparência, nas Configurações.
+
+import { router, useLocalSearchParams } from "expo-router";
+import { useRef, useState } from "react";
+import { ScrollView, StyleSheet, View, type LayoutChangeEvent, type ScrollViewInstance } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Avatar } from "../components/Avatar";
-import { BackgroundSyncRow, NotificationsCard } from "../components/NotificationsCard";
+import { BackgroundSyncRow, NotificationsCard, PushRow } from "../components/NotificationsCard";
 import { Text } from "../components/Text";
-import { Badge, Button, Card, EmptyState, InfoRow, SectionTitle, Segmented } from "../components/ui";
-import {
-  setThemePreference,
-  useStyles,
-  useTheme,
-  useThemePreference,
-  type Palette,
-  type ThemePreference,
-} from "../theme/theme";
+import { Badge, Button, Card, EmptyState, InfoRow, SectionTitle } from "../components/ui";
+import { useStyles, useTheme, type Palette } from "../theme/theme";
 import { locationConsentAt, revokeLocationConsent } from "../lib/account";
 import { ApiError, errorMessage } from "../lib/api";
-import { getDeviceRegistration, logout } from "../lib/auth";
 import { stopTracking, useTracking } from "../lib/tracking";
-import { useDataVersion, useLiveQuery } from "../lib/changes";
+import { useLiveQuery } from "../lib/changes";
 import { APP_VERSION } from "../lib/config";
 import { confirmAction } from "../lib/dialogs";
-import { LEVEL_TIER, PRIVACY_VERSION, ROLE } from "../lib/constants";
 import { countPending, dismissNotice, listNotices, listPendingOps, type PendingOp } from "../lib/db";
-import type { DeviceRegistration } from "../lib/device";
 import { formatDateTime, formatTime } from "../lib/format";
-import { useMyLevel } from "../lib/level";
-import { ensureProfile, useProfile } from "../lib/profile";
+import type { SyncSection } from "../lib/navigation";
+import { noNetwork } from "../lib/net";
 import { canEditServer, useSession } from "../lib/session";
 import { describeOp, discardOp, isOnline, requestSync, resetCursor, useSyncStatus, type SyncStatus } from "../lib/sync";
 import { showToast } from "../lib/toast";
@@ -39,6 +32,10 @@ import { showToast } from "../lib/toast";
  */
 const DISCARD_AFTER_ATTEMPTS = 3;
 
+/** Os cartões que abrem direto (`?secao=`). */
+const SECTIONS: readonly string[] = ["pendencias", "avisos", "rastreamento"] satisfies SyncSection[];
+const isSection = (value: unknown): value is SyncSection => typeof value === "string" && SECTIONS.includes(value);
+
 function networkLabel(s: SyncStatus): string {
   if (s.network === "offline") return "Sem internet";
   if (s.server === "unreachable") return "Internet ok, mas sem conexão com o servidor";
@@ -48,62 +45,7 @@ function networkLabel(s: SyncStatus): string {
 
 const REALTIME_LABEL = { off: "Desligada", connecting: "Conectando…", online: "Ativa" } as const;
 
-/** A versão do aviso de privacidade é a data do texto: "2026-11-19" → "19/11/2026" (sem fuso). */
-const PRIVACY_DATE = PRIVACY_VERSION.split("-").reverse().join("/");
-
-/** Push da central neste aparelho (as notificações locais, lembretes e avisos, ficam no cartão Notificações). */
-function pushLabel(registration: DeviceRegistration | null): string {
-  if (!registration) return "Verificando…";
-  switch (registration.state) {
-    case "registered":
-      return registration.push === "live" ? "Ativo neste aparelho" : "Ainda não ligado na central";
-    case "unsupported":
-      return "Indisponível nesta versão do app";
-    case "blocked":
-      return "Bloqueado nas notificações do celular";
-    case "undetermined":
-      return "Notificações ainda não permitidas";
-    case "error":
-      return "Não foi possível ativar agora";
-  }
-}
-
-const itemsLabel = (n: number) => (n === 1 ? "1 item não enviado" : `${n} itens não enviados`);
-
-type LogoutChoice = "send" | "leave" | "cancel";
-
-/**
- * Confirmação do Sair. Com itens para enviar e internet, oferece mandar antes de sair. No navegador
- * (pré-visualização) o Alert de três botões não existe: fica só sair ou cancelar.
- */
-function askLogout(pending: number, canSend: boolean): Promise<LogoutChoice> {
-  const message = pending
-    ? `Há ${itemsLabel(pending)}. Eles ficam guardados neste aparelho e vão quando você entrar de novo. Se outro técnico entrar aqui, serão apagados.`
-    : "Você vai precisar da senha para entrar de novo. Se a jornada estiver aberta, ela é encerrada.";
-  if (!pending || !canSend || Platform.OS === "web") {
-    return confirmAction("Sair da conta?", message, { confirmText: "Sair", destructive: true }).then((ok) => (ok ? "leave" : "cancel"));
-  }
-  return new Promise((resolve) => {
-    Alert.alert(
-      "Sair da conta?",
-      message,
-      [
-        { text: "Cancelar", style: "cancel", onPress: () => resolve("cancel") },
-        { text: "Sair mesmo assim", style: "destructive", onPress: () => resolve("leave") },
-        { text: "Enviar e sair", onPress: () => resolve("send") },
-      ],
-      { cancelable: true, onDismiss: () => resolve("cancel") },
-    );
-  });
-}
-
-/** Sem Wi-Fi e sem dados. Alcance incerto (teste de internet do sistema falhando) ainda vale tentar. */
-async function noNetwork() {
-  const net = await NetInfo.fetch();
-  return net.isConnected === false;
-}
-
-export default function AccountScreen() {
+export default function SyncScreen() {
   const c = useTheme();
   const styles = useStyles(makeStyles);
   const insets = useSafeAreaInsets();
@@ -111,27 +53,31 @@ export default function AccountScreen() {
   const sync = useSyncStatus();
   const pending = useLiveQuery(listPendingOps);
   const notices = useLiveQuery(listNotices);
-  useDataVersion(); // re-renderiza quando o registro do aparelho termina
-  const registration = getDeviceRegistration();
   const [syncing, setSyncing] = useState(false);
-  const [leaving, setLeaving] = useState(false);
-  // O que a tela diz durante o Sair: enviando os itens primeiro ("Enviar e sair") ou saindo.
-  const [leavingText, setLeavingText] = useState("");
   const [revoking, setRevoking] = useState(false);
-  const themePreference = useThemePreference();
   const tracking = useTracking();
   const consentAt = locationConsentAt(user);
   // A última rodada falou com o servidor: uma ação que segue na fila depois disso não está só esperando sinal.
   const serverUp = sync.network !== "offline" && sync.server === "reachable";
-  // A foto do cartão Técnico vem do Meu cadastro (na memória; relido quando falta ou o link da foto venceu).
-  const profile = useProfile();
-  useEffect(() => {
-    ensureProfile();
-  }, []);
-  // O elo guardado no aparelho (Meu elo); antes da primeira busca, a linha só leva à tela.
-  const level = useMyLevel();
+  // `?secao=`: o cartão pedido fica no topo até o técnico mexer na tela, mesmo se o que vem antes dele crescer ao
+  // carregar (as listas chegam do banco local depois do primeiro quadro).
+  const { secao } = useLocalSearchParams<{ secao?: string }>();
+  const target = isSection(secao) ? secao : null;
+  const scrollRef = useRef<ScrollViewInstance>(null);
+  const touched = useRef(false);
 
   if (!user) return null;
+
+  /** onLayout do cartão de destino: rola até ele (8 pt de folga em cima). */
+  function anchor(section: SyncSection) {
+    if (section !== target) return undefined;
+    return (event: LayoutChangeEvent) => {
+      const y = Math.max(0, event.nativeEvent.layout.y - 8);
+      requestAnimationFrame(() => {
+        if (!touched.current) scrollRef.current?.scrollTo({ y, animated: false });
+      });
+    };
+  }
 
   async function syncNow(full = false) {
     setSyncing(true);
@@ -164,39 +110,6 @@ export default function AccountScreen() {
     ).then((ok) => {
       if (ok) void discardOp(op);
     });
-  }
-
-  async function confirmLogout() {
-    if (leaving) return;
-    const count = sync.pendingOps + sync.pendingPhotos;
-    const choice = await askLogout(count, sync.network !== "offline");
-    if (choice === "cancel") return;
-    setLeaving(true);
-    if (choice === "send") {
-      setLeavingText("Enviando os itens antes de sair…");
-      await requestSync({ manual: true });
-      // Sem conseguir conferir, vale o que havia antes: pergunta de novo em vez de sair calado.
-      const { ops, photos } = await countPending().catch(() => ({ ops: count, photos: 0 }));
-      const left = ops + photos;
-      if (left > 0) {
-        setLeaving(false);
-        const again = await confirmAction(
-          "Ainda há itens para enviar",
-          `${itemsLabel(left)} não ${left === 1 ? "foi enviado" : "foram enviados"} agora. Eles ficam guardados neste aparelho e vão quando você entrar de novo.`,
-          { confirmText: "Sair mesmo assim", destructive: true },
-        );
-        if (!again) return;
-        setLeaving(true);
-      }
-    }
-    // Com a sessão encerrada, o Stack.Protected do layout leva para o login.
-    setLeavingText(tracking.shift ? "Encerrando a jornada e saindo…" : "Saindo…");
-    try {
-      await logout();
-    } catch (e) {
-      setLeaving(false);
-      showToast("Não foi possível sair agora", { tone: "error", description: errorMessage(e) });
-    }
   }
 
   /** LGPD: o aceite do termo sai quando o técnico quiser, pelo app, e a jornada aberta termina junto. */
@@ -241,36 +154,13 @@ export default function AccountScreen() {
         : "Iniciando o rastreamento…";
 
   return (
-    <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}>
-      <Card style={{ gap: 4 }}>
-        <SectionTitle accent>Técnico</SectionTitle>
-        <View style={styles.identity}>
-          <Avatar name={user.name} uri={profile?.avatar_url} size={56} />
-          <View style={styles.identityText}>
-            <Text style={styles.name}>{user.name}</Text>
-            <Text style={styles.muted}>{user.email}</Text>
-            <Text style={styles.muted}>
-              {ROLE[user.role]}
-              {user.team ? ` · ${user.team.name}` : ""}
-            </Text>
-          </View>
-        </View>
-        <Button title="Meu cadastro" icon="user" onPress={() => router.push("/meu-cadastro")} disabled={leaving} style={styles.profileButton} />
-        <View style={styles.divider} />
-        <InfoRow
-          label="Elo"
-          value={
-            level
-              ? `${LEVEL_TIER[level.data.tier].label}${level.data.at_risk ? " · em risco" : ""}`
-              : level === null
-                ? "Ver meu elo"
-                : "…"
-          }
-          onPress={() => router.push("/elo")}
-        />
-        <InfoRow label="Senha" value="Trocar senha" onPress={() => router.push("/trocar-senha")} />
-      </Card>
-
+    <ScrollView
+      ref={scrollRef}
+      onScrollBeginDrag={() => {
+        touched.current = true;
+      }}
+      contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}
+    >
       <Card style={{ gap: 4 }}>
         <SectionTitle accent>Sincronização</SectionTitle>
         <InfoRow label="Conexão" value={networkLabel(sync)} />
@@ -281,149 +171,119 @@ export default function AccountScreen() {
         <BackgroundSyncRow />
         {sync.lastError ? <InfoRow label="Último erro" value={sync.lastError} /> : null}
         <View style={styles.buttons}>
-          <Button
-            title="Sincronizar agora"
-            variant="primary"
-            onPress={() => void syncNow()}
-            loading={syncing}
-            disabled={leaving}
-            style={styles.buttonGrow}
-          />
-          <Button title="Baixar tudo de novo" onPress={() => void syncNow(true)} disabled={syncing || leaving} style={styles.buttonGrow} />
+          <Button title="Sincronizar agora" variant="primary" onPress={() => void syncNow()} loading={syncing} style={styles.buttonGrow} />
+          <Button title="Baixar tudo de novo" onPress={() => void syncNow(true)} disabled={syncing} style={styles.buttonGrow} />
         </View>
         <Text style={styles.hint}>“Baixar tudo de novo”: use se alguma OS estiver faltando no aparelho.</Text>
       </Card>
 
-      <Card style={{ gap: 8 }}>
-        <SectionTitle accent>Itens para enviar</SectionTitle>
-        {pending === undefined ? null : pending.length === 0 ? (
-          <Text style={styles.muted}>Nada pendente: tudo foi enviado à central.</Text>
-        ) : (
-          pending.map((op) => {
-            const stuck = serverUp && op.attempts >= DISCARD_AFTER_ATTEMPTS;
-            return (
-              <View key={op.client_op_id} style={styles.op}>
-                <View style={{ flex: 1, gap: 2 }}>
-                  <Text style={styles.opTitle}>
-                    {op.ticket_code ?? "OS"} · {describeOp(op)}
-                  </Text>
-                  <Text style={styles.muted}>
-                    Feita em {formatDateTime(op.client_timestamp)}
-                    {op.attempts ? ` · ${op.attempts === 1 ? "1 tentativa" : `${op.attempts} tentativas`}` : " · na fila"}
-                  </Text>
-                  {/* Erro em vermelho só quando a ação está travada; esperando sinal, é informação. */}
-                  {op.last_error ? <Text style={stuck ? styles.error : styles.muted}>{op.last_error}</Text> : null}
+      <View onLayout={anchor("pendencias")}>
+        <Card style={{ gap: 8 }}>
+          <SectionTitle accent>Itens para enviar</SectionTitle>
+          {pending === undefined ? null : pending.length === 0 ? (
+            <Text style={styles.muted}>Nada pendente: tudo foi enviado à central.</Text>
+          ) : (
+            pending.map((op) => {
+              const stuck = serverUp && op.attempts >= DISCARD_AFTER_ATTEMPTS;
+              return (
+                <View key={op.client_op_id} style={styles.op}>
+                  <View style={{ flex: 1, gap: 2 }}>
+                    <Text style={styles.opTitle}>
+                      {op.ticket_code ?? "OS"} · {describeOp(op)}
+                    </Text>
+                    <Text style={styles.muted}>
+                      Feita em {formatDateTime(op.client_timestamp)}
+                      {op.attempts ? ` · ${op.attempts === 1 ? "1 tentativa" : `${op.attempts} tentativas`}` : " · na fila"}
+                    </Text>
+                    {/* Erro em vermelho só quando a ação está travada; esperando sinal, é informação. */}
+                    {op.last_error ? <Text style={stuck ? styles.error : styles.muted}>{op.last_error}</Text> : null}
+                  </View>
+                  {/* Só esperando sinal não se descarta: um toque errado apagaria uma conclusão ou um formulário. */}
+                  {stuck ? <Button compact variant="ghost" title="Descartar" onPress={() => confirmDiscard(op)} /> : null}
                 </View>
-                {/* Só esperando sinal não se descarta: um toque errado apagaria uma conclusão ou um formulário. */}
-                {stuck ? <Button compact variant="ghost" title="Descartar" onPress={() => confirmDiscard(op)} disabled={leaving} /> : null}
-              </View>
-            );
-          })
-        )}
-      </Card>
+              );
+            })
+          )}
+        </Card>
+      </View>
 
-      <Card style={{ gap: 8 }}>
-        <SectionTitle accent>Ações que a central não aceitou</SectionTitle>
-        {notices === undefined ? null : notices.length === 0 ? (
-          <EmptyState title="Nenhum aviso" description="Quando a central não aceitar uma ação sua, o motivo aparece aqui." />
-        ) : (
-          notices.map((notice) => (
-            <View key={notice.id} style={styles.op}>
-              <View style={{ flex: 1, gap: 4 }}>
-                <View style={styles.noticeHead}>
-                  <Badge
-                    label={notice.kind === "conflict" ? "Conflito" : notice.kind === "photo" ? "Foto" : "Recusada"}
-                    color={notice.kind === "conflict" ? c.warning : c.danger}
-                  />
-                  <Text style={styles.muted}>
-                    {notice.ticket_code ? `${notice.ticket_code} · ` : ""}
-                    {formatDateTime(notice.created_at)}
-                  </Text>
+      <View onLayout={anchor("avisos")}>
+        <Card style={{ gap: 8 }}>
+          <SectionTitle accent>Ações que a central não aceitou</SectionTitle>
+          {notices === undefined ? null : notices.length === 0 ? (
+            <EmptyState title="Nenhum aviso" description="Quando a central não aceitar uma ação sua, o motivo aparece aqui." />
+          ) : (
+            notices.map((notice) => (
+              <View key={notice.id} style={styles.op}>
+                <View style={{ flex: 1, gap: 4 }}>
+                  <View style={styles.noticeHead}>
+                    <Badge
+                      label={notice.kind === "conflict" ? "Conflito" : notice.kind === "photo" ? "Foto" : "Recusada"}
+                      color={notice.kind === "conflict" ? c.warning : c.danger}
+                    />
+                    <Text style={styles.muted}>
+                      {notice.ticket_code ? `${notice.ticket_code} · ` : ""}
+                      {formatDateTime(notice.created_at)}
+                    </Text>
+                  </View>
+                  <Text style={styles.opTitle}>{notice.message}</Text>
+                  {notice.ticket_id ? (
+                    <Button
+                      compact
+                      variant="ghost"
+                      title="Abrir OS"
+                      onPress={() => router.push({ pathname: "/ticket/[id]", params: { id: notice.ticket_id! } })}
+                      style={{ alignSelf: "flex-start", paddingHorizontal: 0 }}
+                    />
+                  ) : null}
                 </View>
-                <Text style={styles.opTitle}>{notice.message}</Text>
-                {notice.ticket_id ? (
-                  <Button
-                    compact
-                    variant="ghost"
-                    title="Abrir OS"
-                    onPress={() => router.push({ pathname: "/ticket/[id]", params: { id: notice.ticket_id! } })}
-                    style={{ alignSelf: "flex-start", paddingHorizontal: 0 }}
-                  />
-                ) : null}
+                <Button compact variant="ghost" title="OK" onPress={() => void dismissNotice(notice.id)} />
               </View>
-              <Button compact variant="ghost" title="OK" onPress={() => void dismissNotice(notice.id)} />
-            </View>
-          ))
-        )}
-      </Card>
+            ))
+          )}
+        </Card>
+      </View>
 
-      <Card style={{ gap: 4 }}>
-        <SectionTitle accent>Rastreamento da jornada</SectionTitle>
-        <InfoRow
-          label="Termo de uso da localização"
-          value={consentAt ? `Aceito em ${formatDateTime(consentAt)}` : "Ainda não aceito"}
-          onPress={() => router.push("/termo-rastreamento")}
-        />
-        <InfoRow label="Aviso de privacidade" value={`Atualizado em ${PRIVACY_DATE}`} onPress={() => router.push("/privacidade")} />
-        <InfoRow label="Situação" value={situation} />
-        {tracking.shift ? (
+      <View onLayout={anchor("rastreamento")}>
+        <Card style={{ gap: 4 }}>
+          <SectionTitle accent>Rastreamento da jornada</SectionTitle>
           <InfoRow
-            label="Última posição"
-            value={
-              tracking.lastSentAt
-                ? `Enviada às ${formatTime(tracking.lastSentAt)}`
-                : tracking.lastFixAt
-                  ? `Registrada às ${formatTime(tracking.lastFixAt)}`
-                  : "Aguardando o GPS"
-            }
+            label="Termo de uso da localização"
+            value={consentAt ? `Aceito em ${formatDateTime(consentAt)}` : "Ainda não aceito"}
+            onPress={() => router.push("/termo-rastreamento")}
           />
-        ) : null}
-        <InfoRow label="Posições aguardando envio" value={String(tracking.queued)} />
-        {tracking.error ? <InfoRow label="Último erro" value={tracking.error} /> : null}
-        {consentAt ? (
-          <View style={styles.revoke}>
-            <Button
-              compact
-              title="Retirar aceite"
-              onPress={() => void confirmRevoke()}
-              loading={revoking}
-              disabled={leaving}
-              style={{ alignSelf: "flex-start" }}
+          <InfoRow label="Situação" value={situation} />
+          {tracking.shift ? (
+            <InfoRow
+              label="Última posição"
+              value={
+                tracking.lastSentAt
+                  ? `Enviada às ${formatTime(tracking.lastSentAt)}`
+                  : tracking.lastFixAt
+                    ? `Registrada às ${formatTime(tracking.lastFixAt)}`
+                    : "Aguardando o GPS"
+              }
             />
-            <Text style={styles.hint}>Encerra a jornada e para o rastreamento. Para iniciar outra jornada, é preciso aceitar de novo.</Text>
-          </View>
-        ) : null}
-      </Card>
+          ) : null}
+          <InfoRow label="Posições aguardando envio" value={String(tracking.queued)} />
+          {tracking.error ? <InfoRow label="Último erro" value={tracking.error} /> : null}
+          {consentAt ? (
+            <View style={styles.revoke}>
+              <Button compact title="Retirar aceite" onPress={() => void confirmRevoke()} loading={revoking} style={{ alignSelf: "flex-start" }} />
+              <Text style={styles.hint}>Encerra a jornada e para o rastreamento. Para iniciar outra jornada, é preciso aceitar de novo.</Text>
+            </View>
+          ) : null}
+        </Card>
+      </View>
 
       <NotificationsCard />
 
-      <Card style={{ gap: 10 }}>
-        <SectionTitle accent>Aparência</SectionTitle>
-        <Segmented<ThemePreference>
-          value={themePreference}
-          onChange={(value) => void setThemePreference(value)}
-          options={[
-            { value: "system", label: "Sistema" },
-            { value: "light", label: "Claro" },
-            { value: "dark", label: "Escuro" },
-          ]}
-        />
-        <Text style={styles.muted}>Em “Sistema”, o app acompanha o modo claro ou escuro do celular.</Text>
-      </Card>
-
       <Card style={{ gap: 4 }}>
         <SectionTitle accent>Aparelho</SectionTitle>
-        <InfoRow label="Push da central" value={pushLabel(registration)} />
+        <PushRow />
         {canEditServer ? <InfoRow label="Servidor" value={apiUrl} /> : null}
         <InfoRow label="Versão do app" value={APP_VERSION} />
       </Card>
-
-      {leaving ? (
-        <Text style={styles.leaving} accessibilityLiveRegion="polite">
-          {leavingText}
-        </Text>
-      ) : null}
-      <Button title="Sair da conta" variant="danger" onPress={() => void confirmLogout()} loading={leaving} disabled={revoking} />
     </ScrollView>
   );
 }
@@ -431,13 +291,8 @@ export default function AccountScreen() {
 const makeStyles = (c: Palette) =>
   StyleSheet.create({
     content: { padding: 16, gap: 14 },
-    identity: { flexDirection: "row", alignItems: "center", gap: 14 },
-    identityText: { flex: 1, gap: 2 },
-    profileButton: { marginTop: 12 },
-    name: { fontSize: 18, fontWeight: "700", color: c.ink },
     muted: { fontSize: 13, color: c.inkMuted },
     hint: { fontSize: 12, color: c.inkMuted, lineHeight: 17, marginTop: 4 },
-    divider: { height: StyleSheet.hairlineWidth, backgroundColor: c.line, marginTop: 10, marginBottom: 2 },
     buttons: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 8 },
     buttonGrow: { flexGrow: 1, flexBasis: 140 },
     op: {
@@ -452,5 +307,4 @@ const makeStyles = (c: Palette) =>
     opTitle: { fontSize: 14, color: c.ink },
     error: { fontSize: 12, color: c.danger },
     revoke: { gap: 6, marginTop: 8, paddingTop: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.line },
-    leaving: { fontSize: 13, fontWeight: "600", color: c.inkMuted, textAlign: "center" },
   });

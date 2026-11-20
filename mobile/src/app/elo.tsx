@@ -1,7 +1,8 @@
-// Meu elo (lib/level.ts): o brasão do técnico, o que falta para a próxima faixa, os números dos últimos 12 meses, o que
-// pesou e "Como funciona". Mostra o elo guardado no aparelho (offline, com a hora em que chegou) e busca de novo ao
-// abrir, se o guardado não é recente, e ao puxar para atualizar. Textos e regras vêm prontos do servidor; dúvida sobre
-// o elo é com a central, no grupo de WhatsApp.
+// Meu elo (lib/level.ts): a patente do técnico (a medalha grande, com o nome da faixa em maiúsculas), o que falta para
+// a próxima faixa, os números dos últimos 12 meses (e o caminho para vê-los mês a mês em Estatísticas), o que pesou e
+// "Como funciona". Mostra o elo guardado no aparelho (offline, com a hora em que chegou) e busca de novo ao abrir, se o
+// guardado não é recente, e ao puxar para atualizar. Textos e regras vêm prontos do servidor; dúvida sobre o elo é com
+// a central, no grupo de WhatsApp.
 
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
@@ -10,16 +11,15 @@ import Animated from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Circle } from "react-native-svg";
 import { Icon, SVG_HIDDEN } from "../components/Icon";
-import { LevelShield } from "../components/LevelBadge";
+import { LevelMedal } from "../components/LevelBadge";
 import { useListMotion } from "../components/motion";
 import { Skeleton } from "../components/Skeleton";
 import { Text } from "../components/Text";
 import { Button, Card, ErrorBox, SectionTitle } from "../components/ui";
-import { LEVEL_OCCURRENCE, LEVEL_TIER } from "../lib/constants";
-import { getTicket } from "../lib/db";
+import { LEVEL_MEDAL_SIZE, LEVEL_OCCURRENCE, LEVEL_TIER } from "../lib/constants";
 import { isLevelTier, levelDate, levelMoment, notEnoughText, storedAfter, useMyLevel, type StoredLevel } from "../lib/level";
+import { openTicketAnywhere } from "../lib/navigation";
 import { refreshLevelNow } from "../lib/sync";
-import { showToast } from "../lib/toast";
 import type { LevelCriterion, LevelOccurrence, LevelTier, MyLevel } from "../lib/types";
 import { RADIUS, tint, useStyles, useTheme, type Palette } from "../theme/theme";
 
@@ -65,12 +65,6 @@ const reworkText = (n: number) =>
   n === 0 ? "Nenhuma OS reaberta em até 30 dias" : n === 1 ? "1 OS reaberta em até 30 dias" : `${n} OS reabertas em até 30 dias`;
 
 const lostText = (n: number) => (n === 0 ? "Nenhuma por motivo do técnico" : `${n} por motivo do técnico`);
-
-/** Abre a OS se ela ainda está no aparelho (as encerradas saem depois de 30 dias). */
-async function openTicket(id: string) {
-  if (await getTicket(id)) router.push({ pathname: "/ticket/[id]", params: { id } });
-  else showToast("Esta OS não está mais no aparelho", { description: "O histórico completo fica com a central." });
-}
 
 export default function MyLevelScreen() {
   const c = useTheme();
@@ -139,9 +133,10 @@ function LevelContent({ stored, failed }: { stored: StoredLevel; failed: Failure
     <>
       <Animated.View entering={motion.entering(0)}>
         <Card style={styles.hero}>
-          <LevelShield tier={data.tier} size={72} />
-          <Text style={styles.heroTitle} accessibilityRole="header">
-            Elo {label}
+          <LevelMedal tier={data.tier} size={LEVEL_MEDAL_SIZE.hero} />
+          {/* O nome da faixa em maiúsculas pelo estilo ("OURO"): o leitor de tela lê "Elo Ouro", sem soletrar. */}
+          <Text style={styles.heroTitle} accessibilityRole="header" accessibilityLabel={`Elo ${label}`}>
+            {label}
           </Text>
           <Text style={styles.heroMeta}>Desde {levelDate(data.since)}</Text>
           <Text style={failed ? styles.heroStale : styles.heroUpdated}>{updated}</Text>
@@ -258,6 +253,15 @@ function NumbersCard({ data }: { data: MyLevel }) {
           <Text style={styles.numberValue}>{line.value}</Text>
         </View>
       ))}
+      <View style={styles.rowBorder}>
+        <Button
+          compact
+          variant="ghost"
+          title="Ver mês a mês em Estatísticas"
+          onPress={() => router.push("/estatisticas")}
+          style={styles.monthly}
+        />
+      </View>
     </Card>
   );
 }
@@ -287,7 +291,7 @@ function OccurrenceRow({ occurrence, first }: { occurrence: LevelOccurrence; fir
   const when = levelDate(occurrence.at);
   return (
     <Pressable
-      onPress={() => void openTicket(occurrence.ticket.id)}
+      onPress={() => void openTicketAnywhere(occurrence.ticket.id)}
       accessibilityRole="button"
       accessibilityLabel={`${kind}, ${occurrence.ticket.code}, ${occurrence.ticket.title}. ${occurrence.detail}. ${when}`}
       accessibilityHint="Abre a OS"
@@ -323,7 +327,7 @@ function HowItWorksCard({ data }: { data: MyLevel }) {
             const name = LEVEL_TIER[rule.tier].label;
             return (
               <View key={rule.tier} style={styles.tier} accessible accessibilityLabel={`${name}${mine ? ", o seu elo" : ""}. ${rule.summary}`}>
-                <LevelShield tier={rule.tier} size={22} />
+                <LevelMedal tier={rule.tier} size={LEVEL_MEDAL_SIZE.list} />
                 <View style={styles.tierBody}>
                   <Text style={styles.tierName}>
                     {name}
@@ -362,8 +366,8 @@ function LevelSkeleton() {
   return (
     <View style={styles.skeleton} accessibilityLabel="Carregando o seu elo" accessibilityRole="progressbar">
       <Card style={styles.hero}>
-        <Skeleton width={72} height={72} radius={20} />
-        <Skeleton width={150} height={22} style={{ marginTop: 6 }} />
+        <Skeleton width={LEVEL_MEDAL_SIZE.hero} height={LEVEL_MEDAL_SIZE.hero} radius={24} />
+        <Skeleton width={110} height={22} style={{ marginTop: 6 }} />
         <Skeleton width={120} height={12} />
       </Card>
       <Card style={styles.skeletonCard}>
@@ -383,7 +387,15 @@ const makeStyles = (c: Palette) =>
     skeleton: { gap: 14 },
     skeletonCard: { gap: 12 },
     hero: { alignItems: "center", gap: 6, paddingVertical: 20 },
-    heroTitle: { fontSize: 24, fontWeight: "700", color: c.ink, letterSpacing: -0.3, marginTop: 6, textAlign: "center" },
+    heroTitle: {
+      fontSize: 22,
+      fontWeight: "700",
+      color: c.ink,
+      letterSpacing: 1.6,
+      textTransform: "uppercase",
+      marginTop: 6,
+      textAlign: "center",
+    },
     heroMeta: { fontSize: 13, color: c.inkMuted, textAlign: "center" },
     heroUpdated: { fontSize: 12, color: c.inkMuted, textAlign: "center" },
     heroStale: { fontSize: 12, fontWeight: "600", color: c.inkMuted, textAlign: "center" },
@@ -414,6 +426,7 @@ const makeStyles = (c: Palette) =>
     numberLabel: { fontSize: 14, fontWeight: "600", color: c.ink },
     numberDetail: { fontSize: 12, lineHeight: 17, color: c.inkMuted },
     numberValue: { fontSize: 17, fontWeight: "700", color: c.ink, fontVariant: ["tabular-nums"] },
+    monthly: { alignSelf: "flex-start", marginTop: 6, paddingHorizontal: 0 },
     occurrence: {
       flexDirection: "row",
       alignItems: "center",

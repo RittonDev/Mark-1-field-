@@ -1,7 +1,9 @@
 // Sonda de lib/profileForm.ts (as telas do cadastro em Configurações e os resumos do menu). Dados fictícios.
 // Na pasta mobile: node --experimental-strip-types --import ./tests/resolve-ts.mjs --test "tests/*.test.mjs"
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
+import { URL } from "node:url";
 import { PIX_INVALID } from "../src/lib/pix.ts";
 import {
   ADDRESS_SECTION,
@@ -56,6 +58,12 @@ const contactReview = check(reviewContact, CONTACT_SECTION);
 const addressReview = check(reviewAddress, ADDRESS_SECTION);
 const pixReview = check(reviewPix, PIX_SECTION);
 const UNCHANGED = { body: {}, errors: {}, needsPassword: false };
+
+it("lib/profileForm.ts é puro: além dos tipos, só ./constants, ./masks e ./pix", () => {
+  const source = readFileSync(new URL("../src/lib/profileForm.ts", import.meta.url), "utf8");
+  const values = [...source.matchAll(/^import (?!type )[^;]*? from "([^"]+)";/gm)].map((m) => m[1]);
+  assert.deepEqual(values.sort(), ["./constants", "./masks", "./pix"]);
+});
 
 it("cada tela usa o seu revisor", () => {
   assert.equal(NAME_SECTION.review, reviewName);
