@@ -832,9 +832,9 @@ export const LEVEL_OCCURRENCE: Record<LevelOccurrenceKind, string> = {
  * junto): com a API na frente, a ficha da web pede para recarregar e não envia até a web nova entrar. Formato
  * "AAAA-MM-DD"; uma segunda versão no mesmo dia ganha ".2" (as versões se comparam como texto).
  */
-export const PRIVACY_VERSION = "2026-11-19.2";
+export const PRIVACY_VERSION = "2026-11-20";
 
-/** A data da versão para mostrar ("19/11/2026"): os 10 primeiros caracteres, sem o ".2". */
+/** A data da versão para mostrar ("20/11/2026"): os 10 primeiros caracteres, sem um ".2". */
 export const PRIVACY_DATE = PRIVACY_VERSION.slice(0, 10).split("-").reverse().join("/");
 
 /** O aviso de privacidade do técnico: a ficha da homologação mostra junto do aceite, e o app, para consulta. */
@@ -845,7 +845,7 @@ export const PRIVACY_NOTICE: { title: string; body: string }[] = [
   },
   {
     title: "Quais dados",
-    body: "Os do seu cadastro: identificação (nome, CPF, nascimento e foto), contato, endereço, CNPJ ou MEI (se tiver), região de atendimento, experiência, a senha do app (que ninguém da equipe consegue ver) e a chave PIX que você cadastrar no app para receber pelos chamados. E o seu perfil técnico, informado na ficha ou no app: aptidões, formação (curso, nível, instituição e período), ferramental, meios de transporte e CNH, e os dias e turnos em que você está disponível.",
+    body: "Os do seu cadastro: identificação (nome, CPF, nascimento e foto), contato, endereço, CNPJ ou MEI (se tiver), região de atendimento, experiência, a senha do app (que ninguém da equipe consegue ver) e a chave PIX que você cadastrar no app para receber pelos chamados. E o seu perfil técnico, informado na ficha ou no app: aptidões, formação (curso, nível, instituição e período), ferramental, meios de transporte e CNH, e os dias e turnos em que você está disponível. E os registros das ofertas de OS no app: quando você vê a oferta, abre o escopo e aceita ou recusa.",
   },
   {
     title: "Para quê",
