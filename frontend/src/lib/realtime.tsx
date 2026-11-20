@@ -772,7 +772,8 @@ export function RealtimeProvider({
         const raw: unknown = event.data?.fields;
         const fields: string[] = Array.isArray(raw) ? raw.map(String) : [];
         if (fields.length && fields.every((f) => TECH_PROFILE_FIELDS.includes(f))) {
-          // ["technicians"] cobre a lista, o cadastro aberto (["technicians", "one", id]) e o histórico dele.
+          // ["technicians"] cobre a lista, o cadastro aberto (["technicians", "one", id]) e o histórico dele
+          // (["technicians", "changes", id], com as páginas já abertas).
           invalidate(["technicians"]);
           if (fields.includes("availability")) invalidate(["technician-suggest"]);
         } else {

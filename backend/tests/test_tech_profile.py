@@ -989,6 +989,7 @@ async def test_validation_messages_and_no_password(
             [("Disponibilidade", "No máximo 28 itens")],
         ),
         ({"availability": ["sat:lunch"]}, [("Disponibilidade", "Turno desconhecido: sat:lunch")]),
+        ({"availability": ["x" * 200]}, [("Disponibilidade", "No máximo 16 caracteres")]),
         ({"transport": None}, [("Transporte", "Informe os meios de transporte")]),
         (
             {"transport": {"modes": ["car"] * 7, "driver_license": True}},
@@ -1008,6 +1009,11 @@ async def test_validation_messages_and_no_password(
             [(None, "Campo não aceito")],
         ),
         ({"skills": [{**skill, "name": " a "}]}, [("Nome", "Informe o nome da aptidão")]),
+        # Só invisíveis (largura zero, direção): saem, e o nome fica vazio.
+        (
+            {"skills": [{**skill, "name": "​‮​"}]},
+            [("Nome", "Informe o nome da aptidão")],
+        ),
         ({"skills": [{**skill, "name": "a" * 81}]}, [("Nome", "No máximo 80 caracteres")]),
         (
             {"skills": [{**skill, "level": "expert"}]},
@@ -1018,11 +1024,16 @@ async def test_validation_messages_and_no_password(
             [("Aptidões", "Aptidão repetida: Linux")],
         ),
         (
+            {"skills": [skill, {**skill, "name": "Lin​ux"}]},
+            [("Aptidões", "Aptidão repetida: Linux")],
+        ),
+        (
             {"skills": [{**skill, "name": f"Aptidão {n:02d}"} for n in range(31)]},
             [("Aptidões", "No máximo 30 itens")],
         ),
         ({"skills": [{**skill, "since": "2026-01-01"}]}, [(None, "Campo não aceito")]),
         ({"education": [{**course, "course": "x"}]}, [("Curso", "Informe o curso")]),
+        ({"education": [{**course, "course": "\u0000\u0001﻿"}]}, [("Curso", "Informe o curso")]),
         (
             {"education": [{**course, "institution": " "}]},
             [("Instituição", "Informe a instituição")],
@@ -1063,6 +1074,9 @@ async def test_validation_messages_and_no_password(
         r = await _patch(client, world, **body)
         assert r.status_code == 422, (body, r.text)
         assert _issues(r) == expected, body
+    # O turno enorme recusa sem ecoar o valor (antes, voltava duas vezes na resposta).
+    r = await _patch(client, world, availability=["x" * 200])
+    assert r.status_code == 422 and "x" * (SLOT_MAX + 1) not in r.text
     assert await _history(client, world) == []
     user = await _stored(engine, world)
     assert (user.tool_ids, user.availability, user.skills, user.education) == ([], [], [], [])
@@ -1277,3 +1291,80 @@ async def test_history_texts_and_the_event(
     assert first["audience"] == {"managers_only": True}
     assert first["user_id"] == first["actor_id"] == str(world.tech.user.id)
     assert not any("pix" in str(event) for event in events)
+
+
+@requires_db
+async def test_invisible_characters_are_dropped_before_saving(
+    client: AsyncClient, world: World, engine: AsyncEngine
+) -> None:
+    """Controles e formatação saem antes de gravar: o U+0000 no curso (que o banco recusa: era um
+    500) grava sem ele, e a largura zero e a marca de direção não sobram nos nomes. O mesmo curso
+    reenviado com os invisíveis não muda nada."""
+    course = {
+        **COURSE,
+        "course": "Técnico\u0000 em​ redes",
+        "institution": "‮Escola\tExemplo",
+    }
+    r = await _patch(
+        client, world, education=[course], skills=[{"name": "Lin​ux", "level": "basico"}]
+    )
+    assert r.status_code == 200, r.text
+    [saved] = r.json()["education"]
+    assert (saved["course"], saved["institution"]) == ("Técnico em redes", "Escola Exemplo")
+    assert [skill["name"] for skill in r.json()["skills"]] == ["Linux"]
+    user = await _stored(engine, world)
+    assert (user.education, user.skills) == (r.json()["education"], r.json()["skills"])
+    rows = await _history(client, world)
+    assert rows[0]["changes"][1] == {"field": "education", "from": None, "to": COURSE_TEXT}
+    r = await _patch(client, world, education=[{**course, "id": saved["id"]}])
+    assert r.status_code == 200 and r.json()["education"] == [saved]
+    assert len(await _history(client, world)) == len(rows)
+
+
+@requires_db
+async def test_two_parts_saved_together_keep_both_stamps(
+    client: AsyncClient, world: World, engine: AsyncEngine
+) -> None:
+    """Duas partes gravadas ao mesmo tempo (o app que reenvia depois do tempo esgotado, o técnico
+    em dois aparelhos): uma gravação por vez por técnico, e nenhuma apaga o carimbo da outra (sem o
+    carimbo, o transporte gravado voltava "não informado")."""
+    [escada] = await _new_tools(engine, "Escada")
+    transport = {"modes": ["car"], "driver_license": True}
+    responses = await asyncio.gather(
+        _patch(client, world, transport=transport), _patch(client, world, tool_ids=[escada])
+    )
+    assert [r.status_code for r in responses] == [200, 200], [r.text for r in responses]
+    assert set((await _stored(engine, world)).tech_profile_stamps) == {"transport", "tools"}
+    me = await _me(client, world)
+    assert (me["transport"], me["tool_ids"]) == (transport, [escada])
+    # A resposta de quem gravou por último (a que o app guarda) já traz as duas partes.
+    assert any(r.json() == me for r in responses)
+    rows = await _history(client, world)
+    assert sorted(change["field"] for row in rows for change in row["changes"]) == [
+        "tools",
+        "transport",
+    ]
+
+
+@requires_db
+async def test_one_part_saved_twice_together_keeps_the_history_right(
+    client: AsyncClient, world: World, engine: AsyncEngine
+) -> None:
+    """A mesma parte duas vezes ao mesmo tempo: a segunda gravação espera a primeira e compara com
+    o que ela gravou, e o histórico fecha com o valor final do banco (em qualquer ordem)."""
+    one, two = ["mon:morning"], ["mon:morning", "tue:morning"]
+    responses = await asyncio.gather(
+        _patch(client, world, availability=one), _patch(client, world, availability=two)
+    )
+    assert [r.status_code for r in responses] == [200, 200], [r.text for r in responses]
+    final = (await _stored(engine, world)).availability
+    assert (await _me(client, world))["availability"] == final
+    if final == two:  # [seg] gravou primeiro
+        expected = [(None, "seg · manhã"), (None, "ter · manhã")]
+    else:  # [seg e ter] gravou primeiro
+        assert final == one
+        expected = [(None, "seg e ter · manhã"), ("ter · manhã", None)]
+    rows = await _history(client, world)
+    assert [row["changes"] for row in reversed(rows)] == [
+        [{"field": "availability", "from": old, "to": new}] for old, new in expected
+    ]

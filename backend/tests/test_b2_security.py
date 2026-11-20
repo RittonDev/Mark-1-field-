@@ -1,5 +1,6 @@
-"""Respostas de erro e endurecimento HTTP: 500 com CORS e em JSON, erro de banco legível,
-validação em português, registro repetido com motivo, limite de corpo, cabeçalhos e logs."""
+"""Respostas de erro e endurecimento HTTP: 500 com CORS e em JSON, erro de banco legível (pelo
+SQLSTATE, sem os valores no log), validação em português, registro repetido com motivo, limite de
+corpo, cabeçalhos e logs."""
 
 import logging
 import re
@@ -7,14 +8,23 @@ import re
 import pytest
 from httpx import AsyncClient
 from pydantic import ValidationError
-from sqlalchemy.exc import DataError
+from sqlalchemy.exc import DataError, DBAPIError, IntegrityError
 
 from app.core.config import Settings, settings
-from app.main import INTERNAL_ERROR, RedactTokens
+from app.db.session import engine as app_engine
+from app.main import DATA_ERROR, INTERNAL_ERROR, RedactTokens
 from app.services import company as company_svc
 from tests.conftest import World, requires_db
 
 API = settings.API_PREFIX
+
+
+class _DriverError(Exception):
+    """O erro do driver como o adaptador do asyncpg entrega: com o SQLSTATE em `sqlstate`."""
+
+    def __init__(self, message: str, sqlstate: str | None) -> None:
+        super().__init__(message)
+        self.sqlstate = sqlstate
 
 
 @requires_db
@@ -47,6 +57,71 @@ async def test_database_value_errors_are_422(
     r = await client.get(f"{API}/settings/company", headers=world.analyst.headers)
     assert r.status_code == 422
     assert "fora do tamanho ou do formato" in r.json()["detail"]
+
+
+@requires_db
+async def test_database_errors_by_sqlstate(
+    client: AsyncClient,
+    world: World,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """O asyncpg entrega os erros de valor do banco (SQLSTATE da classe 22) como DBAPIError
+    genérico: o mesmo 422 do DataError. Outro SQLSTATE (ou nenhum) segue como erro não tratado:
+    500 "Erro interno" com CORS e o mesmo log. IntegrityError e DataError seguem nos deles."""
+    origin = settings.cors_origin_list[0]
+    headers = {**world.analyst.headers, "Origin": origin}
+    url = f"{API}/settings/company"
+    raised: list[Exception] = []
+
+    async def broken(*_: object) -> None:
+        raise raised[-1]
+
+    monkeypatch.setattr(company_svc, "profile", broken)
+
+    for sqlstate in ("22001", "22P05"):
+        raised.append(DBAPIError("UPDATE x", {}, _DriverError("valor recusado", sqlstate)))
+        r = await client.get(url, headers=headers)
+        assert (r.status_code, r.json()) == (422, {"detail": DATA_ERROR}), sqlstate
+        assert r.headers["access-control-allow-origin"] == origin
+
+    for sqlstate in ("57014", "23505", None):
+        raised.append(DBAPIError("SELECT x", {}, _DriverError("outro erro", sqlstate)))
+        caplog.clear()
+        with caplog.at_level(logging.INFO):
+            r = await client.get(url, headers=headers)
+        assert (r.status_code, r.json()) == (500, {"detail": INTERNAL_ERROR}), sqlstate
+        assert r.headers["access-control-allow-origin"] == origin
+        [record] = [rec for rec in caplog.records if rec.name == "maxxchamados"]
+        assert (record.levelno, record.getMessage()) == (
+            logging.ERROR,
+            f"Erro não tratado em GET {url}",
+        )
+        assert record.exc_info is not None and record.exc_info[1] is raised[-1]
+
+    duplicate = Exception('duplicate key value violates unique constraint "uq_teams_name"')
+    raised.append(IntegrityError("INSERT x", {}, duplicate))
+    r = await client.get(url, headers=headers)
+    assert (r.status_code, r.json()) == (409, {"detail": "Já existe um grupo com este nome"})
+    raised.append(DataError("UPDATE x", {}, _DriverError("valor recusado", "57014")))
+    r = await client.get(url, headers=headers)
+    assert (r.status_code, r.json()) == (422, {"detail": DATA_ERROR})
+
+
+@requires_db
+async def test_nul_in_a_text_is_422_and_saves_nothing(client: AsyncClient, world: World) -> None:
+    """U+0000 num texto que vai ao banco como está (a região que atende): o Postgres recusa
+    (SQLSTATE 22021, DBAPIError genérico no asyncpg) e a resposta é o 422 de valor fora do
+    formato, não o 500, sem gravar nada."""
+    me = f"{API}/me/profile"
+    r = await client.patch(me, json={"coverage_area": "Zona\u0000Sul"}, headers=world.tech.headers)
+    assert (r.status_code, r.json()) == (422, {"detail": DATA_ERROR})
+    assert (await client.get(me, headers=world.tech.headers)).json()["coverage_area"] is None
+
+
+def test_database_errors_hide_the_values() -> None:
+    """O erro do banco (e o log dele) não leva os valores do SQL: nome, contato, formação, PIX."""
+    assert app_engine.sync_engine.hide_parameters is True
 
 
 @requires_db

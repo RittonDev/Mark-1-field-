@@ -366,7 +366,7 @@ function TechniciansView() {
     setLevelFilter(null);
   };
   // A coluna "ferramental" sai com os nomes do catálogo (a lista só traz os ids). Enquanto ele carrega, os botões
-  // Exportar ficam desativados; com erro, avisa e busca de novo, sem baixar: a coluna em branco pareceria "não marcou".
+  // Exportar ficam desativados; com erro, avisa e busca de novo, sem baixar (a coluna em branco pareceria "nada marcado").
   const exportCsv = () => {
     if (!tools.data) {
       if (tools.isError) {

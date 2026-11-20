@@ -10,7 +10,13 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.config import settings
-from app.schemas.onboarding import PRIVACY_VERSION, ApplicationIn
+from app.schemas.onboarding import (
+    AVAILABILITY,
+    CODE_MAX,
+    PRIVACY_VERSION,
+    SERVICE_AREAS,
+    ApplicationIn,
+)
 from app.services import activities, onboarding
 from tests.conftest import World, requires_db
 
@@ -237,6 +243,28 @@ async def test_reject_and_revoke(client: AsyncClient, world: World) -> None:
         i["state"] for i in (await client.get(f"{API}/onboarding/invites", headers=an)).json()
     }
     assert states == {"revoked"}
+
+
+async def test_long_codes_are_refused_without_echo(client: AsyncClient, world: World) -> None:
+    """Código enorme nas áreas ou na disponibilidade da ficha pública: 422 sem o valor na resposta
+    (o código desconhecido volta na mensagem, então cada item tem limite) e o link não é gasto. O
+    código desconhecido curto continua dizendo qual é."""
+    assert max(len(code) for code in (*SERVICE_AREAS, *AVAILABILITY)) <= CODE_MAX
+    token = await new_invite(client, world)
+    url = f"{API}/public/onboarding/{token}"
+    for field in ("service_areas", "availability"):
+        r = await client.post(url, json=ficha(photo=None, **{field: ["x" * 200]}))
+        assert r.status_code == 422, r.text
+        assert "x" * (CODE_MAX + 1) not in r.text
+        [issue] = r.json()["detail"]
+        assert (issue["loc"], issue["msg"]) == (
+            ["body", field, 0],
+            f"No máximo {CODE_MAX} caracteres",
+        )
+    r = await client.post(url, json=ficha(photo=None, availability=["madrugada"]))
+    assert r.status_code == 422
+    assert r.json()["detail"][0]["msg"] == "Disponibilidade desconhecida: madrugada"
+    assert (await client.get(url)).json()["valid"] is True
 
 
 async def test_company_email_is_refused_on_the_form(

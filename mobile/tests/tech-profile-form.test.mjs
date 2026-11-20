@@ -73,14 +73,14 @@ describe("nomes", () => {
   });
 
   it("cleanText e foldName tiram os caracteres de controle e de formatação; tab, LF, VT, FF e CR viram espaço", () => {
-    assert.equal(cleanText("Lin​ux"), "Linux");
-    assert.equal(cleanText("‮Redes‬"), "Redes");
+    assert.equal(cleanText("Lin\u200Bux"), "Linux");
+    assert.equal(cleanText("\u202ERedes\u202C"), "Redes");
     assert.equal(cleanText("Curso\u0000Exemplo"), "CursoExemplo");
-    assert.equal(cleanText("﻿Redes\tde\r\ndados\u000B\u000C"), "Redes de dados");
+    assert.equal(cleanText("\uFEFFRedes\tde\r\ndados\u000B\u000C"), "Redes de dados");
     assert.equal(cleanText("A\u0007\u007F\u009FB"), "AB");
-    assert.equal(cleanText("​⁠­"), "");
-    assert.equal(foldName("LIN​UX"), "linux");
-    assert.equal(foldName("⁦Impressóras⁩\nHP"), "impressoras hp");
+    assert.equal(cleanText("\u200B\u2060\u00AD"), "");
+    assert.equal(foldName("LIN\u200BUX"), "linux");
+    assert.equal(foldName("\u2066Impressóras\u2069\nHP"), "impressoras hp");
   });
 });
 
@@ -104,9 +104,9 @@ describe("aptidões", () => {
   });
 
   it("skillProblem e skillsBody com invisíveis: só invisíveis é vazio, com um invisível no meio é repetida (como o servidor)", () => {
-    assert.deepEqual(skillProblem({ name: "​​​", level: "basico" }, mine), { name: SKILL_MSG.name });
-    assert.deepEqual(skillProblem({ name: "Lin​ux", level: "basico" }, mine), { name: SKILL_MSG.repeated });
-    assert.deepEqual(skillsBody([{ name: "‮Lin​ux", level: "basico" }]), [{ name: "Linux", level: "basico" }]);
+    assert.deepEqual(skillProblem({ name: "\u200B\u200B\u200B", level: "basico" }, mine), { name: SKILL_MSG.name });
+    assert.deepEqual(skillProblem({ name: "Lin\u200Bux", level: "basico" }, mine), { name: SKILL_MSG.repeated });
+    assert.deepEqual(skillsBody([{ name: "\u202ELin\u200Bux", level: "basico" }]), [{ name: "Linux", level: "basico" }]);
   });
 
   it("skillsBody leva só nome (limpo) e nível, sem o `since`", () => {
