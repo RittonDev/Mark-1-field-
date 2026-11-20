@@ -68,15 +68,12 @@ export default function SyncScreen() {
 
   if (!user) return null;
 
-  /** onLayout do cartão de destino: rola até ele (8 pt de folga em cima). */
-  function anchor(section: SyncSection) {
-    if (section !== target) return undefined;
-    return (event: LayoutChangeEvent) => {
-      const y = Math.max(0, event.nativeEvent.layout.y - 8);
-      requestAnimationFrame(() => {
-        if (!touched.current) scrollRef.current?.scrollTo({ y, animated: false });
-      });
-    };
+  /** onLayout do cartão pedido em `?secao=`: rola até ele (8 pt de folga em cima). */
+  function onTargetLayout(event: LayoutChangeEvent) {
+    const y = Math.max(0, event.nativeEvent.layout.y - 8);
+    requestAnimationFrame(() => {
+      if (!touched.current) scrollRef.current?.scrollTo({ y, animated: false });
+    });
   }
 
   async function syncNow(full = false) {
@@ -177,7 +174,7 @@ export default function SyncScreen() {
         <Text style={styles.hint}>“Baixar tudo de novo”: use se alguma OS estiver faltando no aparelho.</Text>
       </Card>
 
-      <View onLayout={anchor("pendencias")}>
+      <View onLayout={target === "pendencias" ? onTargetLayout : undefined}>
         <Card style={{ gap: 8 }}>
           <SectionTitle accent>Itens para enviar</SectionTitle>
           {pending === undefined ? null : pending.length === 0 ? (
@@ -207,7 +204,7 @@ export default function SyncScreen() {
         </Card>
       </View>
 
-      <View onLayout={anchor("avisos")}>
+      <View onLayout={target === "avisos" ? onTargetLayout : undefined}>
         <Card style={{ gap: 8 }}>
           <SectionTitle accent>Ações que a central não aceitou</SectionTitle>
           {notices === undefined ? null : notices.length === 0 ? (
@@ -244,7 +241,7 @@ export default function SyncScreen() {
         </Card>
       </View>
 
-      <View onLayout={anchor("rastreamento")}>
+      <View onLayout={target === "rastreamento" ? onTargetLayout : undefined}>
         <Card style={{ gap: 4 }}>
           <SectionTitle accent>Rastreamento da jornada</SectionTitle>
           <InfoRow
