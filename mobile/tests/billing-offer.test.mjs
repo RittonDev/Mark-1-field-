@@ -22,8 +22,13 @@ describe("Faturamento: mês sem valores e Outro mês", () => {
     assert.match(view, /month\.state !== "empty" \|\| \(month\.invoices \?\? 0\) > 0/);
   });
 
-  it("Outro mês aparece depois dos cartões e sob o vazio", () => {
-    assert.equal(view.match(/<OtherMonth\b/g)?.length, 2);
+  it("Outro mês aparece depois dos cartões e sob o vazio (uma vez, fora da troca entre os dois)", () => {
+    assert.equal(view.match(/<OtherMonth\b/g)?.length, 1);
+    const at = view.indexOf("<OtherMonth");
+    assert.ok(at > view.indexOf("<BillingMonthCard"), "depois dos cartões");
+    assert.ok(at > view.indexOf('title="Nenhum valor ainda"'), "sob o vazio");
+    // Depois do fim do `shown.length ? (...) : (...)`: vale para os dois casos.
+    assert.match(view.slice(view.indexOf('title="Nenhum valor ainda"'), at), /\)\}/);
   });
 
   it("o seletor e a competência da nota vão do mesmo primeiro mês (FIRST_MONTH de lib/earnings) até o atual", () => {

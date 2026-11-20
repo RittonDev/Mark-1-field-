@@ -140,20 +140,19 @@ export function BillingView({ refreshKey = 0, onSettled }: { refreshKey?: number
               <BillingMonthCard month={month} onPress={openMonth} />
             </Animated.View>
           ))}
-          <Animated.View entering={motion.entering(shown.length)}>
-            <OtherMonth onOpen={openMonth} />
-          </Animated.View>
         </View>
       ) : (
-        <>
-          <EmptyState
-            icon="receipt"
-            title="Nenhum valor ainda"
-            description="O valor de cada OS aparece aqui quando a central coloca você nela."
-          />
-          <OtherMonth onOpen={openMonth} />
-        </>
+        <EmptyState
+          icon="receipt"
+          title="Nenhum valor ainda"
+          description="O valor de cada OS aparece aqui quando a central coloca você nela."
+        />
       )}
+      {/* Depois dos cartões ou sob o vazio. Fora da troca entre os dois: a folha aberta não fecha quando chega o
+          primeiro cartão. */}
+      <Animated.View entering={motion.entering(shown.length)}>
+        <OtherMonth onOpen={openMonth} />
+      </Animated.View>
       {since && since < HISTORY_SINCE_MONTH ? (
         <Text style={styles.footnote}>{`Valores registrados no app desde ${HISTORY_SINCE_TEXT}.`}</Text>
       ) : null}
