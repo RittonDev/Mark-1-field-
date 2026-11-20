@@ -135,6 +135,32 @@ describe("availabilitySummary (linha Disponibilidade das Configurações)", () =
       "6 dias · turnos variados",
     );
   });
+
+  it("dias não seguidos com os mesmos turnos: os dias juntados e os turnos", () => {
+    const allPeriods = (day) => PERIODS.map((period) => `${day}:${period}`);
+    const cases = [
+      [["mon:morning", "wed:morning", "fri:morning"], "Seg, qua e sex · manhã"],
+      [["sat:evening", "mon:evening"], "Seg e sáb · noite"],
+      [["mon:morning", "tue:morning", "wed:morning", "fri:morning"], "Seg a qua e sex · manhã"],
+      [["mon:morning", "tue:morning", "thu:morning"], "Seg, ter e qui · manhã"],
+      [["sun:morning", "sat:morning", "mon:morning"], "Seg, sáb e dom · manhã"],
+      [["wed:afternoon", "mon:morning", "mon:afternoon", "wed:morning"], "Seg e qua · manhã e tarde"],
+      [[...allPeriods("tue"), ...allPeriods("thu")], "Ter e qui · manhã, tarde, noite e madrugada"],
+      [["mon:night", "tue:night", "wed:night", "fri:night", "sat:night", "sun:night"], "Seg a qua e sex a dom · madrugada"],
+    ];
+    for (const [slots, text] of cases) {
+      assert.equal(availabilitySummary(slots), text, JSON.stringify(slots));
+      assert.equal(availabilitySummary([...slots].reverse()), text, `${JSON.stringify(slots)} ao contrário`);
+    }
+  });
+
+  it("dias seguidos continuam como antes; turnos diferentes entre os dias: turnos variados", () => {
+    assert.equal(availabilitySummary(["sat:afternoon"]), "Sáb · tarde");
+    assert.equal(availabilitySummary(DAYS.map((day) => `${day}:morning`)), "Seg a dom · manhã");
+    assert.equal(availabilitySummary(["mon:morning", "wed:afternoon"]), "2 dias · turnos variados");
+    assert.equal(availabilitySummary(["mon:morning", "wed:morning", "fri:morning", "fri:afternoon"]), "3 dias · turnos variados");
+    assert.equal(availabilitySummary(["mon:morning", "mon:afternoon", "wed:morning", "xyz"]), "2 dias · turnos variados");
+  });
 });
 
 describe("transportText", () => {

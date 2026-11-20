@@ -753,6 +753,9 @@ async def test_history_errors(engine: AsyncEngine, client: AsyncClient, world: W
     assert "=" not in cursor and len(cursor) <= my_history.CURSOR_MAX
     assert cursor == _b64(f"{at.isoformat()}|{ticket_id}")
     assert my_history.decode_cursor(cursor) == (at, ticket_id)
+    # Outro fuso vira o mesmo instante em UTC.
+    local = my_history.decode_cursor(_b64(f"2026-11-18T16:40:00.123456-03:00|{ticket_id}"))
+    assert local == (at, ticket_id) and local[0].utcoffset() == timedelta(0)
 
     th, url = world.tech.headers, f"{API}/me/history"
     for wrong in (
@@ -764,6 +767,9 @@ async def test_history_errors(engine: AsyncEngine, client: AsyncClient, world: W
         _b64("2026-11-18T19:40:00+00:00|nao-e-id"),
         _b64(f"ontem|{ticket_id}"),
         _b64(f"2026-11-18T19:40:00+00:00|{ticket_id}|extra"),
+        # Fora da faixa em UTC (antes do ano 1 e depois do 9999): 422, não 500.
+        _b64(f"0001-01-01T00:00:00+14:00|{ticket_id}"),
+        _b64(f"9999-12-31T23:59:59-14:00|{ticket_id}"),
     ):
         r = await client.get(url, params={"cursor": wrong}, headers=th)
         assert (r.status_code, r.json()) == (422, CURSOR_ERROR), wrong

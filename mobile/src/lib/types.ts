@@ -2032,6 +2032,11 @@ export interface EarningsMonth {
   /** Último pagamento das OS do mês. */
   last_paid_at: ISODate | null;
   rejection: EarningsRejection | null;
+  /**
+   * Notas do técnico com esta competência que não foram recusadas (aguardando conferência ou conferidas). A API antiga
+   * não manda: ausente vale 0.
+   */
+  invoices: number;
 }
 
 /** Totais do topo do Faturamento: valores das OS de todos os meses; os reembolsos ficam à parte. */
@@ -2299,7 +2304,7 @@ export interface UserChangeItem {
 export interface UserChange {
   id: UUID;
   created_at: ISODate;
-  /** "app": o próprio técnico, no Meu cadastro; "central": Técnicos, Usuários ou Pagamentos. */
+  /** "app": o próprio técnico, em Perfil › Configurações; "central": Técnicos, Usuários ou Pagamentos. */
   via: "app" | "central";
   actor: Ref | null;
   changes: UserChangeItem[];

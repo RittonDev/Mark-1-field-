@@ -37,8 +37,16 @@ function month(state, extra = {}) {
     paid_without_invoice: bucket(),
     last_paid_at: null,
     rejection: null,
+    invoices: 0,
     ...extra,
   };
+}
+
+/** O mesmo mês como a API antiga manda, sem `invoices`. */
+function oldApiMonth(state, extra = {}) {
+  const m = month(state, extra);
+  delete m.invoices;
+  return m;
 }
 
 const rejection = (reason) => ({ invoice_id: "nota-1", number: "1200", reason, rejected_at: PAID_AT });
@@ -89,6 +97,27 @@ describe("earningsMonthLine (linha do cartão do mês)", () => {
     it(`${i + 1}. ${m.state} → ${JSON.stringify(text)}`, () => {
       assert.equal(earningsMonthLine(m, fmt), text);
     });
+  });
+
+  it("mês sem valores com nota da competência (não recusada): quantas notas", () => {
+    assert.equal(earningsMonthLine(month("empty", { invoices: 1 }), fmt), "1 nota fiscal");
+    assert.equal(earningsMonthLine(month("empty", { invoices: 3 }), fmt), "3 notas fiscais");
+    assert.equal(earningsMonthLine(month("empty", { invoices: 0 }), fmt), null);
+  });
+
+  it("API antiga, sem invoices: o mês sem valores fica sem linha", () => {
+    const empty = oldApiMonth("empty");
+    assert.ok(!("invoices" in empty));
+    assert.equal(earningsMonthLine(empty, fmt), null);
+    assert.equal(earningsMonthLine(oldApiMonth("to_pay", { to_pay: bucket(2, 300) }), fmt), "R$ 300 a receber");
+  });
+
+  it("as notas só mudam a linha do mês sem valores", () => {
+    assert.equal(
+      earningsMonthLine(month("in_review", { due_in_review: bucket(3, 450), invoices: 2 }), fmt),
+      "3 OS com nota em conferência",
+    );
+    assert.equal(earningsMonthLine(month("paid", { invoices: 1 }), fmt), null);
   });
 });
 

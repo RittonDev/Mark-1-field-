@@ -7,6 +7,7 @@ nas colunas (quem grava pelo app é PATCH /me/profile, em tests/test_tech_profil
 fictícios.
 """
 
+import asyncio
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -175,6 +176,60 @@ async def test_central_keeps_the_tool_catalog(
     async with maker() as db:
         names = set(await db.scalars(select(TechnicianTool.name)))
     assert names == {"Alicate de corte", "Escada", "Multímetro", "Trena"}
+
+
+async def test_tool_catalog_holds_when_two_arrive_together(
+    client: AsyncClient, engine: AsyncEngine, world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Dois pedidos ao mesmo tempo (dois analistas em Configurações): a trava do catálogo deixa um
+    passar por vez, então o nome repetido em outra grafia e o limite valem também aí (sem ela, os
+    dois liam o catálogo antes de gravar e os dois gravavam)."""
+    await restrict_analyst(client, world, **{"setup.settings": "edit"})
+    an = world.analyst.headers
+    full = "O catálogo aceita até 3 ferramentas"
+
+    async def post(name: str) -> tuple[int, str | None]:
+        r = await client.post(TOOLS, json={"name": name}, headers=an)
+        return r.status_code, r.json().get("detail")
+
+    async def rename(tool_id: str, name: str) -> tuple[int, str | None]:
+        r = await client.patch(f"{TOOLS}/{tool_id}", json={"name": name}, headers=an)
+        return r.status_code, r.json().get("detail")
+
+    async def catalog() -> dict[str, str]:
+        """Nome -> id, lido do banco."""
+        async with engine.connect() as conn:
+            rows = await conn.execute(select(TechnicianTool.name, TechnicianTool.id))
+            return {name: str(tool_id) for name, tool_id in rows}
+
+    def same(name: str, names: dict[str, str]) -> list[str]:
+        return [n for n in names if tech_profile.fold(n) == tech_profile.fold(name)]
+
+    # Cadastro: a mesma ferramenta em duas grafias.
+    both = await asyncio.gather(post("Multímetro"), post("multimetro"))
+    assert sorted(both) == [(201, None), (409, TAKEN)]
+    assert len(await catalog()) == 1
+
+    # Limite: com 2 de 3 no catálogo, só um dos dois entra.
+    assert (await post("Escada"))[0] == 201
+    monkeypatch.setattr(tech_profile, "MAX_TOOLS", 3)
+    both = await asyncio.gather(post("Trena"), post("Alicate de corte"))
+    assert sorted(both) == [(201, None), (422, full)]
+    monkeypatch.undo()
+    tools = await catalog()
+    assert len(tools) == 3
+
+    # Renomeação: duas ferramentas para o mesmo nome em grafias diferentes.
+    meter, ladder = tools[same("Multímetro", tools)[0]], tools["Escada"]
+    both = await asyncio.gather(rename(meter, "Lanterna"), rename(ladder, "LANTERNA"))
+    assert sorted(both) == [(200, None), (409, TAKEN)]
+    assert len(same("Lanterna", await catalog())) == 1
+
+    # Cadastro e renomeação juntos: só um dos dois fica com o nome.
+    third = next(i for n, i in tools.items() if n in ("Trena", "Alicate de corte"))
+    created, renamed = await asyncio.gather(post("Fita isolante"), rename(third, "FITA ISOLANTE"))
+    assert (created, renamed) in (((201, None), (409, TAKEN)), ((409, TAKEN), (200, None)))
+    assert len(same("Fita isolante", await catalog())) == 1
 
 
 # ---------------------------------------------------------- perfil técnico na central

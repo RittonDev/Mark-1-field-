@@ -398,6 +398,22 @@ function joinWords(words: readonly string[]): string {
   return words.length > 1 ? `${words.slice(0, -1).join(", ")} e ${words[words.length - 1]}` : (words[0] ?? "");
 }
 
+/** Os dias, na ordem: "seg a sex", "sáb e dom", "seg, qua e sex", "seg a qua e sex" (três ou mais seguidos: "a"). */
+function weekdaysText(days: readonly Weekday[]): string {
+  const runs: number[][] = [];
+  WEEKDAY_ORDER.forEach((day, i) => {
+    if (!days.includes(day)) return;
+    const run = runs[runs.length - 1];
+    if (run && run[run.length - 1] === i - 1) run.push(i);
+    else runs.push([i]);
+  });
+  const short = (i: number) => WEEKDAY[WEEKDAY_ORDER[i]].short;
+  const parts = runs.flatMap((run) =>
+    run.length >= 3 ? [`${short(run[0])} a ${short(run[run.length - 1])}`] : run.map(short),
+  );
+  return joinWords(parts);
+}
+
 /** "manhã e tarde", "manhã, tarde, noite e madrugada" (na ordem; "" sem turno). */
 export function periodsPhrase(periods: readonly DayPeriod[]): string {
   return joinWords(DAY_PERIOD_ORDER.filter((p) => periods.includes(p)).map((p) => DAY_PERIOD[p].label.toLowerCase()));
@@ -437,17 +453,20 @@ export function slotsText(slots: readonly string[]): string {
 }
 
 /**
- * Resumo da linha Disponibilidade (Configurações do app): "Seg a sex · manhã e tarde", "Sáb e dom · noite"; os 28:
- * "Todos os dias · todos os turnos"; dias com turnos diferentes: "6 dias · turnos variados"; nada: "Não informada".
+ * Resumo da linha Disponibilidade (Configurações do app). Todos os dias marcados com os mesmos turnos, seguidos ou não:
+ * "Seg a sex · manhã e tarde", "Sáb e dom · noite", "Seg, qua e sex · manhã", "Seg a qua e sex · manhã"; os 28: "Todos
+ * os dias · todos os turnos"; dias com turnos diferentes: "6 dias · turnos variados"; nada: "Não informada".
  */
 export function availabilitySummary(slots: readonly string[]): string {
   const list = sortSlots(slots);
   if (!list.length) return "Não informada";
   if (list.length === ALL_SLOTS.length) return "Todos os dias · todos os turnos";
-  const text = slotsText(list);
-  if (!text.includes(";")) return text.charAt(0).toUpperCase() + text.slice(1);
-  const days = WEEKDAY_ORDER.filter((day) => slotPeriods(list, day).length > 0).length;
-  return `${days} dias · turnos variados`;
+  const days = WEEKDAY_ORDER.filter((day) => slotPeriods(list, day).length > 0);
+  const periods = slotPeriods(list, days[0]);
+  const same = days.every((day) => slotPeriods(list, day).join() === periods.join());
+  if (!same) return `${days.length} dias · turnos variados`;
+  const text = `${weekdaysText(days)} · ${periodsPhrase(periods)}`;
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 export const TRANSPORT_MODE_ORDER: TransportMode[] = ["car", "motorcycle", "bicycle", "public_transport", "ride_app", "on_foot"];
@@ -626,6 +645,12 @@ export interface EarningsFormat {
 /** Linha curta do cartão do mês (só dados). */
 export function earningsMonthLine(m: EarningsMonth, { money, day }: EarningsFormat): string | null {
   switch (m.state) {
+    case "empty": {
+      // Mês sem valores, mas com nota da competência ("1 nota fiscal"); a API antiga não manda invoices.
+      const invoices = m.invoices ?? 0;
+      if (invoices <= 0) return null;
+      return invoices === 1 ? "1 nota fiscal" : `${invoices} notas fiscais`;
+    }
     case "in_progress":
       return `${osCount(m.expected.count)} em andamento`;
     case "no_invoice":
