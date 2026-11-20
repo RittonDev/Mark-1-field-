@@ -4,6 +4,7 @@ calculada no servidor (a nota fiscal nunca trava o pagamento) e os totais do top
 Só dados fictícios ("Tecnico", "Redes", números de nota inventados).
 """
 
+import uuid
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
@@ -165,7 +166,7 @@ def test_open_rejection_per_competence() -> None:
 
     def invoice(number: str, month: int, status: InvoiceStatus, sent: int, reviewed: int | None):
         return SimpleNamespace(
-            id=number,
+            id=uuid.UUID(int=int(number)),
             number=number,
             status=status,
             competence=date(2026, month, 1),
@@ -195,6 +196,7 @@ def test_open_rejection_per_competence() -> None:
         "2026-08": ("13", "Motivo 13"),
     }
     assert found["2026-10"].rejected_at == at + timedelta(hours=5)
+    assert found["2026-10"].invoice_id == uuid.UUID(int=10)
 
 
 # --------------------------------------------------------------------------- API

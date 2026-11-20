@@ -24,6 +24,8 @@ let removals = 0;
 let task: AvatarTask = null;
 /** Um seletor por vez (câmera ou galeria abertos, ou a foto escolhida ainda indo). */
 let picking = false;
+/** A pergunta "Remover a foto?" na tela. */
+let confirming = false;
 const listeners = new Set<() => void>();
 
 function publish() {
@@ -55,10 +57,11 @@ async function sendAvatar(photo: AvatarPhoto): Promise<void> {
   publish();
   try {
     await uploadAvatar(photo);
+    // Saiu da conta no meio do envio: nada de aviso para quem entrar depois.
+    if (currentUserId() !== userId) return;
     haptic.success();
     showToast("Foto atualizada", { tone: "success" });
   } catch (error) {
-    // Saiu da conta no meio do envio: nada de aviso para quem entrar depois.
     if (currentUserId() !== userId) return;
     if (await offlineFailure(error)) showToast(NO_INTERNET, { description: OFFLINE_PHOTO });
     else showToast("Não foi possível enviar a foto", { tone: "error", description: errorMessage(error) });
@@ -70,7 +73,7 @@ async function sendAvatar(photo: AvatarPhoto): Promise<void> {
 
 /** Tira (câmera) ou escolhe (galeria) a foto e envia. Sem rede, avisa antes de abrir o seletor. */
 export async function changeAvatar(source: "camera" | "library"): Promise<void> {
-  if (picking || removals > 0) return;
+  if (picking || confirming || removals > 0) return;
   picking = true;
   try {
     if (await noNetwork()) {
@@ -86,8 +89,15 @@ export async function changeAvatar(source: "camera" | "library"): Promise<void> 
 
 /** Tira a foto (também a que veio do Field Control), depois de confirmar: no lugar ficam as iniciais. */
 export async function deleteAvatar(): Promise<void> {
-  if (picking || task !== null) return;
-  const ok = await confirmAction("Remover a foto?", "No lugar dela ficam as suas iniciais.", { confirmText: "Remover", destructive: true });
+  // Dois toques seguidos não abrem duas perguntas.
+  if (picking || confirming || task !== null) return;
+  confirming = true;
+  let ok = false;
+  try {
+    ok = await confirmAction("Remover a foto?", "No lugar dela ficam as suas iniciais.", { confirmText: "Remover", destructive: true });
+  } finally {
+    confirming = false;
+  }
   if (!ok) return;
   if (await noNetwork()) {
     showToast(NO_INTERNET, { description: OFFLINE_PHOTO });
@@ -98,6 +108,7 @@ export async function deleteAvatar(): Promise<void> {
   publish();
   try {
     await removeAvatar();
+    if (currentUserId() !== userId) return;
     showToast("Foto removida", { tone: "success" });
   } catch (error) {
     if (currentUserId() !== userId) return;

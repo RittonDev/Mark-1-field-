@@ -15,7 +15,7 @@ import { Skeleton } from "../../components/Skeleton";
 import { Text } from "../../components/Text";
 import { Button, InfoBox } from "../../components/ui";
 import { useAvatarRecovery, useAvatarTask } from "../../lib/avatarFlow";
-import { availabilitySummary, transportText } from "../../lib/constants";
+import { availabilitySummary, PIX_KEY_TYPE, transportText } from "../../lib/constants";
 import { haptic } from "../../lib/haptics";
 import { openSync } from "../../lib/navigation";
 import { hasTechnicalProfile } from "../../lib/profile";
@@ -35,14 +35,18 @@ const THEME_OPTIONS: { value: ThemePreference; label: string; description?: stri
 
 const THEME_LABEL: Record<ThemePreference, string> = { system: "Sistema", light: "Claro", dark: "Escuro" };
 
-/** O que vai à direita de uma linha. */
+/** O que vai à direita de uma linha (e, quando o resumo não se lê bem em voz alta, o que o leitor de tela fala). */
 interface RowSummary {
   value?: string | null;
   valueTone?: "muted" | "warning";
   trailing?: ReactNode;
+  accessibilityLabel?: string;
 }
 
-/** Itens de uma lista do perfil técnico (servidor antigo: a lista não vem). */
+/** Linhas de Atendimento quando o servidor ainda não manda o perfil técnico (a tela de cada uma explica). */
+const NO_TECHNICAL_PROFILE: RowSummary = { value: "Indisponível" };
+
+/** Itens de uma lista do perfil técnico. */
 const size = (list: readonly unknown[] | null | undefined) => (Array.isArray(list) ? list.length : 0);
 
 function phoneRow(p: MyProfile): RowSummary {
@@ -50,8 +54,10 @@ function phoneRow(p: MyProfile): RowSummary {
   return phone ? { value: phone } : { value: NO_PHONE, valueTone: "warning" };
 }
 
+/** A chave aparece mascarada; o leitor de tela fala só o tipo (como a linha do PIX no Faturamento). */
 function pixRow(p: MyProfile): RowSummary {
-  return p.pix ? { value: pixSummary(p.pix) } : { value: NO_PIX, valueTone: "warning" };
+  if (!p.pix) return { value: NO_PIX, valueTone: "warning" };
+  return { value: pixSummary(p.pix), accessibilityLabel: `Chave PIX, ${PIX_KEY_TYPE[p.pix.key_type]}` };
 }
 
 export default function SettingsScreen() {
@@ -70,9 +76,9 @@ export default function SettingsScreen() {
   const placeholder: RowSummary = loading ? { trailing: <Skeleton width={64} height={12} /> } : {};
   /** Resumo que depende do cadastro: lendo, o esqueleto; sem cadastro (sem rede ou erro), nada. A linha abre sempre. */
   const fromProfile = (summary: (p: MyProfile) => RowSummary): RowSummary => (profile ? summary(profile) : placeholder);
-  /** Servidor ainda sem o perfil técnico: as linhas de Atendimento ficam sem resumo (a tela de cada uma avisa). */
+  /** Servidor ainda sem o perfil técnico (API antiga): "Indisponível"; a tela de cada linha explica. */
   const fromTechnical = (summary: (p: MyProfile) => RowSummary): RowSummary =>
-    hasTechnicalProfile(profile) ? summary(profile) : profile ? {} : placeholder;
+    hasTechnicalProfile(profile) ? summary(profile) : profile ? NO_TECHNICAL_PROFILE : placeholder;
 
   function pull() {
     refresh();

@@ -11,13 +11,18 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import Svg, { Path } from "react-native-svg";
+import { LEVEL_MEDAL_SIZE } from "../lib/constants";
 import { dismissSuccess, useSuccess, type SuccessMoment } from "../lib/success";
 import { RADIUS, useStyles, useTheme, type Palette } from "../theme/theme";
+import { LevelMedal } from "./LevelBadge";
 import { Text } from "./Text";
 
 const CHECK = 52;
 
-/** Camada do "deu certo": círculo e check desenhado da esquerda para a direita. */
+/**
+ * Camada do "deu certo": círculo e check desenhado da esquerda para a direita. Na subida de faixa do elo, a medalha da
+ * faixa nova no lugar do círculo, com a mesma entrada.
+ */
 export function SuccessHost() {
   const moment = useSuccess();
   if (!moment) return null;
@@ -54,15 +59,21 @@ function SuccessOverlay({ moment }: { moment: SuccessMoment }) {
         accessibilityLabel="Fechar"
       />
       <View style={styles.card} accessibilityRole="alert" accessibilityLiveRegion="polite">
-        <Animated.View style={[styles.circle, ringStyle]}>
-          <View style={{ width: CHECK, height: CHECK }}>
-            <Animated.View style={[styles.clip, drawStyle]}>
-              <Svg width={CHECK} height={CHECK} viewBox="0 0 24 24" fill="none">
-                <Path d="M5 12.5l4.5 4.5L19 7.5" stroke={c.success} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" />
-              </Svg>
-            </Animated.View>
-          </View>
-        </Animated.View>
+        {moment.medal ? (
+          <Animated.View style={[styles.medal, ringStyle]}>
+            <LevelMedal tier={moment.medal} size={LEVEL_MEDAL_SIZE.celebrate} />
+          </Animated.View>
+        ) : (
+          <Animated.View style={[styles.circle, ringStyle]}>
+            <View style={{ width: CHECK, height: CHECK }}>
+              <Animated.View style={[styles.clip, drawStyle]}>
+                <Svg width={CHECK} height={CHECK} viewBox="0 0 24 24" fill="none">
+                  <Path d="M5 12.5l4.5 4.5L19 7.5" stroke={c.success} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" />
+                </Svg>
+              </Animated.View>
+            </View>
+          </Animated.View>
+        )}
         <Text style={styles.title}>{moment.title}</Text>
         {moment.description ? <Text style={styles.description}>{moment.description}</Text> : null}
       </View>
@@ -105,6 +116,7 @@ const makeStyles = (c: Palette) =>
       backgroundColor: c.successSoft,
       marginBottom: 8,
     },
+    medal: { width: 88, height: 88, alignItems: "center", justifyContent: "center", marginBottom: 8 },
     clip: { height: CHECK, overflow: "hidden" },
     title: { fontSize: 17, fontWeight: "700", color: c.ink, textAlign: "center" },
     description: { fontSize: 13, color: c.inkMuted, textAlign: "center", lineHeight: 18 },

@@ -18,14 +18,18 @@ import {
 import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withSpring } from "react-native-reanimated";
 import { haptic } from "../lib/haptics";
 import { brandFont } from "../theme/fonts";
-import { BRAND, RADIUS, readable, statusFill, tint, useStyles, useTheme, type Palette } from "../theme/theme";
+import { BRAND, mix, RADIUS, readable, statusFill, tint, useStyles, useTheme, type Palette } from "../theme/theme";
 import { Icon, type IconName } from "./Icon";
 import { PressableScale, SPRING } from "./motion";
 import { MAX_FONT_SCALE, Text } from "./Text";
 
 export { tint };
 
-type ButtonVariant = "primary" | "secondary" | "danger" | "ghost";
+/**
+ * `strong`: o botão escuro da ação principal da oferta ("Aceitar por R$ X"). No claro, grafite com texto branco
+ * (16:1); no escuro, o azul do primário (o grafite sumiria no fundo escuro).
+ */
+type ButtonVariant = "primary" | "secondary" | "danger" | "ghost" | "strong";
 
 /** Botão compacto tem 36 pt de altura: a área de toque cresce até 44+ sem mudar o desenho. */
 const COMPACT_HIT_SLOP = { top: 6, bottom: 6, left: 4, right: 4 } as const;
@@ -56,6 +60,10 @@ export function Button({
     secondary: { bg: c.surface, pressed: c.surface2, fg: c.ink, border: c.lineStrong },
     danger: { bg: c.surface, pressed: c.dangerSoft, fg: c.danger, border: tint(c.danger, "55") },
     ghost: { bg: "transparent", pressed: c.primarySoft, fg: c.brandInk, border: "transparent" },
+    strong:
+      c.scheme === "dark"
+        ? { bg: c.primaryFill, pressed: c.primaryFillPressed, fg: c.onPrimary, border: c.primaryFill }
+        : { bg: c.ink, pressed: mix(c.ink, "#FFFFFF", 0.14), fg: "#FFFFFF", border: c.ink },
   }[variant];
   const inactive = disabled || loading;
   return (
@@ -69,7 +77,7 @@ export function Button({
         styles.button,
         compact && styles.buttonCompact,
         { backgroundColor: palette.bg, borderColor: palette.border, opacity: inactive ? 0.5 : 1 },
-        variant === "primary" && c.elevation ? { boxShadow: c.elevation } : null,
+        (variant === "primary" || variant === "strong") && c.elevation ? { boxShadow: c.elevation } : null,
         style,
       ]}
       pressedStyle={{ backgroundColor: palette.pressed }}

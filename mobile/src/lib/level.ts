@@ -1,14 +1,16 @@
-// Meu elo: o brasão do técnico (Bronze, Prata, Ouro ou Diamante) pelos atendimentos dos últimos 12 meses
-// (GET /me/level, docs/API.md "Elo dos técnicos"). Regras, faixas e textos vêm prontos do servidor: o app não repete
-// números. Só o elo do próprio técnico: nada de outros técnicos, notas da central nem o que ela desconsiderou.
+// Meu elo: a patente do técnico (Bronze, Prata, Ouro ou Diamante, desenhada como medalha em components/LevelBadge.tsx)
+// pelos atendimentos dos últimos 12 meses (GET /me/level, docs/API.md "Elo dos técnicos"). Regras, faixas e textos vêm
+// prontos do servidor: o app não repete números. Só o elo do próprio técnico: nada de outros técnicos, notas da central
+// nem o que ela desconsiderou.
 //
 // - Fica no aparelho (kv `my_level`, com a hora em que chegou) para abrir sem internet. Quem busca é a rodada do sync
-//   (sync.ts, refreshLevel: a cada 30 min com o app na tela e no "puxar para atualizar") e a tela Meu elo
-//   (refreshLevelNow: ao abrir, se o guardado não é recente, e ao puxar). Sai do aparelho com o resto dos dados na
-//   troca de técnico (resetLocalData).
+//   (sync.ts, refreshLevel: a cada 30 min com o app na tela e no "puxar para atualizar"), a tela Meu elo
+//   (refreshLevelNow: ao abrir, se o guardado não é recente, e ao puxar) e a aba Perfil (uma vez por foco, enquanto
+//   nada está guardado). Sai do aparelho com o resto dos dados na troca de técnico (resetLocalData).
 // - As telas do elo releem a cada gravação (useMyLevel); o resto do app só acorda quando o elo mudou de fato (a hora
 //   do cálculo muda a cada busca e não conta).
-// - Subiu de faixa: a comemoração dentro do app ("Você chegou ao Ouro!"). A primeira carga não comemora; sem push.
+// - Subiu de faixa: a comemoração dentro do app, com a medalha da faixa nova ("Você chegou ao Ouro!"). A primeira carga
+//   não comemora; sem push.
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { LEVEL_TIER, LEVEL_TIER_ORDER } from "./constants";
@@ -149,11 +151,15 @@ export function useMyLevel(): StoredLevel | null | undefined {
   return state && state.user === userId ? state.entry : undefined;
 }
 
-/** "Você chegou ao Ouro!": a subida de faixa, com o app na tela. */
+/** "Você chegou ao Ouro!": a subida de faixa, com o app na tela e a medalha da faixa nova. */
 export function celebrateLevel(tier: LevelTier) {
   const highest = tier === LEVEL_TIER_ORDER[LEVEL_TIER_ORDER.length - 1];
   haptic.success();
-  showSuccess(`Você chegou ${LEVEL_TIER[tier].to}!`, highest ? "É o elo mais alto." : "Veja em Meu elo o que conta para o próximo.");
+  showSuccess(
+    `Você chegou ${LEVEL_TIER[tier].to}!`,
+    highest ? "É o elo mais alto." : "Veja em Meu elo o que conta para o próximo.",
+    { medal: tier },
+  );
 }
 
 const fullDate = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });

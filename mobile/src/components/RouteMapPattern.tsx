@@ -3,15 +3,21 @@ import { StyleSheet, View } from "react-native";
 import Svg, { Circle, G, Path } from "react-native-svg";
 import { tint, useTheme } from "../theme/theme";
 
+/** O pino da marca, com a ponta na origem (o grupo leva a ponta até o lugar). */
+const PIN = "M0 0 C -9 -10, -12 -16, -12 -22 A 12 12 0 1 1 12 -22 C 12 -16, 9 -10, 0 0 Z";
+
 /**
- * Fundo do login: ruas em traço fino, uma rota tracejada e dois pinos, em tons da marca bem
- * suaves. Some em direção ao conteúdo (sem manchas de degradê).
+ * Ruas em traço fino em tons da marca bem suaves, que somem em direção ao conteúdo (sem manchas de degradê).
+ * - "route" (login): uma rota tracejada entre dois pinos.
+ * - "area" (topo da oferta): a área do atendimento, um círculo tracejado com o pino no centro. Ilustração: nunca o
+ *   endereço nem o lugar exato (antes do aceite o técnico só sabe o bairro e a cidade).
  */
-export function RouteMapPattern({ height = 300 }: { height?: number }) {
+export function RouteMapPattern({ height = 300, variant = "route" }: { height?: number; variant?: "route" | "area" }) {
   const c = useTheme();
-  const street = tint(c.primary, c.scheme === "dark" ? "24" : "1c");
-  const avenue = tint(c.primary, c.scheme === "dark" ? "33" : "26");
-  const route = tint(c.primary, c.scheme === "dark" ? "99" : "80");
+  const dark = c.scheme === "dark";
+  const street = tint(c.primary, dark ? "24" : "1c");
+  const avenue = tint(c.primary, dark ? "33" : "26");
+  const route = tint(c.primary, dark ? "99" : "80");
   return (
     <View style={[styles.wrap, { height }]} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
       <Svg width="100%" height="100%" viewBox="0 0 400 300" preserveAspectRatio="xMidYMid slice">
@@ -26,13 +32,36 @@ export function RouteMapPattern({ height = 300 }: { height?: number }) {
           <Path d="M338 -10 C 330 100, 346 200, 334 310" stroke={street} strokeWidth={1.2} />
           <Path d="M-10 280 L 120 170 L 210 96 L 300 20 L 360 -10" stroke={street} strokeWidth={1.2} />
           {/* rota entre os dois pinos */}
-          <Path d="M262 246 C 282 214, 300 196, 322 176 S 352 128, 344 66" stroke={route} strokeWidth={2} strokeDasharray="5 6" />
+          {variant === "route" ? (
+            <Path d="M262 246 C 282 214, 300 196, 322 176 S 352 128, 344 66" stroke={route} strokeWidth={2} strokeDasharray="5 6" />
+          ) : null}
         </G>
-        <Circle cx={262} cy={246} r={5} fill={c.surface} stroke={c.primary} strokeWidth={2.5} />
-        <G transform="translate(344 66)">
-          <Path d="M0 0 C -9 -10, -12 -16, -12 -22 A 12 12 0 1 1 12 -22 C 12 -16, 9 -10, 0 0 Z" fill={c.primary} />
-          <Circle cx={0} cy={-22} r={4.5} fill={c.surface} />
-        </G>
+        {variant === "route" ? (
+          <>
+            <Circle cx={262} cy={246} r={5} fill={c.surface} stroke={c.primary} strokeWidth={2.5} />
+            <G transform="translate(344 66)">
+              <Path d={PIN} fill={c.primary} />
+              <Circle cx={0} cy={-22} r={4.5} fill={c.surface} />
+            </G>
+          </>
+        ) : (
+          <>
+            {/* a área (bairro e cidade), com o pino no centro */}
+            <Circle
+              cx={200}
+              cy={150}
+              r={64}
+              fill={tint(c.primary, dark ? "1f" : "14")}
+              stroke={tint(c.primary, dark ? "66" : "4d")}
+              strokeWidth={1.5}
+              strokeDasharray="4 5"
+            />
+            <G transform="translate(200 150)">
+              <Path d={PIN} fill={c.primary} />
+              <Circle cx={0} cy={-22} r={4.5} fill={c.surface} />
+            </G>
+          </>
+        )}
       </Svg>
       <LinearGradient
         colors={[tint(c.canvas, "00"), c.canvas]}

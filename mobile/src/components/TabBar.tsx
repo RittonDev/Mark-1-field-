@@ -69,7 +69,14 @@ export function TabBar<T extends string>({
                   </View>
                 ) : null}
               </View>
-              <Text style={[styles.label, { color }, active && styles.labelActive]} numberOfLines={1} maxFontSizeMultiplier={1.3}>
+              {/* "Faturamento" passa da largura da aba em 320 dp com a fonte grande: encolhe até 80%. */}
+              <Text
+                style={[styles.label, { color }, active && styles.labelActive]}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.8}
+                maxFontSizeMultiplier={1.3}
+              >
                 {item.label}
               </Text>
             </Pressable>

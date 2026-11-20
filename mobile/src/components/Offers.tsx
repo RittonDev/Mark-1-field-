@@ -1,25 +1,29 @@
 import { router } from "expo-router";
 import { useMemo, useRef } from "react";
-import { StyleSheet, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
+import { areaQuery } from "../lib/address";
 import { getServerOffsetMs } from "../lib/api";
 import { useLiveQuery, useNow } from "../lib/changes";
 import { OFFER_STATE } from "../lib/constants";
+import { openAreaInMaps } from "../lib/device-actions";
 import { formatBRL } from "../lib/expenses";
+import { formatLongDate, formatMinutes, formatMinutesLong, visitTimeText } from "../lib/format";
 import { deadlineInfo, loadOfferStore, pendingOffers, placeLine } from "../lib/offers";
-import type { FieldOffer } from "../lib/types";
+import { showToast } from "../lib/toast";
+import type { FieldOffer, FieldOfferTicket } from "../lib/types";
 import { RADIUS, statusFill, useStyles, useTheme, type Palette } from "../theme/theme";
 import { Icon, type IconName } from "./Icon";
 import { PressableScale } from "./motion";
 import { Text } from "./Text";
 import { visitWindow } from "./ticket/InfoPanel";
-import { Badge, SectionTitle } from "./ui";
+import { Badge, Card, SectionTitle } from "./ui";
 
 /** Dois toques rápidos não abrem a mesma oferta duas vezes. */
 const DOUBLE_TAP_MS = 600;
 /** O prazo para responder anda a cada 15 s: a oferta vencida sai da lista sozinha. */
 const TICK_MS = 15_000;
 
-/** Linha com ícone dos cartões e da tela da oferta (bairro, data, prazo). `warning`: prazo curto. */
+/** Linha com ícone dos cartões (bairro, data, prazo) e da tela da oferta (prazo). `warning`: prazo curto. */
 export function OfferLine({
   icon,
   text,
@@ -40,6 +44,181 @@ export function OfferLine({
     <View style={styles.line}>
       <Icon name={icon} size={size + 1} color={color} strokeWidth={tone === "warning" ? 2 : 1.8} />
       <Text style={[styles.lineText, { fontSize: size, color }, (strong || tone === "warning") && styles.lineStrong]}>{text}</Text>
+    </View>
+  );
+}
+
+/**
+ * Linha da tela da oferta com a duração estimada (cronômetro; a ampulheta é o prazo para responder), a data por
+ * extenso e a hora, numa linha que quebra. `at`: agora pelo relógio do servidor ("Hoje", "Amanhã"). Sem a duração (OS
+ * sem estimativa, oferta guardada por uma versão antiga), o item some; sem agenda, "Data a combinar".
+ */
+export function OfferMeta({
+  ticket,
+  at,
+}: {
+  ticket: Pick<FieldOfferTicket, "scheduled_start" | "scheduled_end" | "estimated_minutes">;
+  at: number;
+}) {
+  const c = useTheme();
+  const styles = useStyles(makeStyles);
+  const minutes = ticket.estimated_minutes ?? null;
+  const start = ticket.scheduled_start;
+  const items: { icon: IconName; text: string; spoken: string }[] = [];
+  if (minutes !== null && minutes > 0) {
+    items.push({ icon: "timer", text: formatMinutes(minutes), spoken: `Duração estimada: ${formatMinutesLong(minutes)}` });
+  }
+  if (start) {
+    const day = formatLongDate(start, at);
+    const time = visitTimeText(start, ticket.scheduled_end, minutes);
+    items.push({ icon: "calendar", text: day, spoken: `Data: ${day}` }, { icon: "clock", text: time, spoken: `Horário: ${time}` });
+  } else {
+    items.push({ icon: "calendar", text: "Data a combinar", spoken: "Data a combinar" });
+  }
+  return (
+    <View style={styles.meta}>
+      {items.map((item) => (
+        <View key={item.icon} style={styles.metaItem} accessible accessibilityLabel={item.spoken}>
+          <Icon name={item.icon} size={16} color={c.inkMuted} />
+          <Text style={styles.metaText}>{item.text}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+/**
+ * "Área do atendimento" na oferta: o bairro e a cidade (o endereço completo só depois do aceite) e o botão que busca a
+ * área no app de mapas. Sem cidade, não aparece. `answerable`: a oferta ainda espera a resposta.
+ */
+export function OfferArea({
+  ticket,
+  answerable,
+}: {
+  ticket: Pick<FieldOfferTicket, "district" | "city" | "state">;
+  answerable: boolean;
+}) {
+  const c = useTheme();
+  const styles = useStyles(makeStyles);
+  const query = areaQuery(ticket);
+  const city = ticket.city?.trim();
+  if (!query || !city) return null;
+  const district = ticket.district?.trim() || null;
+  const uf = ticket.state?.trim();
+  const town = uf ? `${city} - ${uf}` : city;
+
+  async function openMap(target: string) {
+    try {
+      await openAreaInMaps(target);
+    } catch {
+      showToast("Não foi possível abrir o mapa", { tone: "error" });
+    }
+  }
+
+  return (
+    <Card style={styles.area}>
+      <View style={styles.areaText}>
+        <SectionTitle>Área do atendimento</SectionTitle>
+        <Text style={styles.areaMain}>{district ?? town}</Text>
+        {district ? <Text style={styles.areaTown}>{town}</Text> : null}
+        {answerable ? <Text style={styles.areaNote}>O endereço completo aparece depois do aceite.</Text> : null}
+      </View>
+      <Pressable
+        onPress={() => void openMap(query)}
+        accessibilityRole="button"
+        accessibilityLabel="Ver a área no mapa"
+        accessibilityHint="Abre o app de mapas com o bairro e a cidade"
+        hitSlop={4}
+        style={({ pressed }) => [styles.mapButton, pressed && { backgroundColor: c.surface3 }]}
+      >
+        <Icon name="map" size={20} color={c.brandInk} />
+      </Pressable>
+    </Card>
+  );
+}
+
+/**
+ * "Serviços" da oferta: uma OS tem um serviço. O cartão começa recolhido; abrir é o "Escopo lido" que libera o aceite
+ * (guardado por oferta, com a hora). Na fechada, só o nome (o recorte mínimo não traz o escopo). Sem tipo de serviço,
+ * o título da oferta.
+ */
+export function OfferServices({
+  ticket,
+  answerable,
+  scopeRead,
+  open,
+  onToggle,
+}: {
+  ticket: Pick<FieldOfferTicket, "title" | "description" | "service_type">;
+  answerable: boolean;
+  scopeRead: boolean;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const c = useTheme();
+  const styles = useStyles(makeStyles);
+  const name = ticket.service_type?.name.trim() || ticket.title;
+  const description = ticket.description?.trim() || null;
+  const icon = (
+    <View style={styles.serviceIcon}>
+      <Icon name="wrench" size={18} color={c.inkMuted} />
+    </View>
+  );
+
+  return (
+    <View>
+      <SectionTitle
+        accent
+        right={
+          answerable ? (
+            <Text style={styles.count} accessibilityLabel={scopeRead ? "1 de 1 escopo lido" : "0 de 1 escopo lido"}>
+              {scopeRead ? "1/1 lido" : "0/1 lido"}
+            </Text>
+          ) : undefined
+        }
+      >
+        Serviços
+      </SectionTitle>
+      <Card style={styles.serviceCard}>
+        {answerable ? (
+          <>
+            <Pressable
+              onPress={onToggle}
+              accessibilityRole="button"
+              accessibilityLabel={`${name}, ${scopeRead ? "escopo lido" : "escopo não lido"}`}
+              accessibilityHint={open ? "Esconde o escopo" : "Mostra o que deve ser feito na visita"}
+              accessibilityState={{ expanded: open }}
+              style={({ pressed }) => [styles.serviceHead, pressed && { opacity: 0.7 }]}
+            >
+              <View style={styles.serviceRow}>
+                {icon}
+                <Text style={styles.serviceName} numberOfLines={2}>
+                  {name}
+                </Text>
+                {scopeRead ? <Badge label="Escopo lido" color={c.success} /> : null}
+                <Icon name={open ? "chevronUp" : "chevronDown"} size={20} color={c.inkMuted} />
+              </View>
+              {!open ? (
+                <Text style={styles.serviceHint}>
+                  {scopeRead ? "Toque para ler de novo." : "Toque para ler o escopo. O aceite libera depois da leitura."}
+                </Text>
+              ) : null}
+            </Pressable>
+            {open ? (
+              <Text style={styles.scope} selectable>
+                {description ?? "A central não escreveu o escopo. Tire as dúvidas no grupo antes de aceitar."}
+              </Text>
+            ) : null}
+          </>
+        ) : (
+          <View style={styles.serviceRow}>
+            {icon}
+            <Text style={styles.serviceName} numberOfLines={2}>
+              {name}
+            </Text>
+          </View>
+        )}
+      </Card>
     </View>
   );
 }
@@ -164,4 +343,35 @@ const makeStyles = (c: Palette) =>
     line: { flexDirection: "row", alignItems: "flex-start", gap: 6 },
     lineText: { flex: 1, color: c.inkMuted, lineHeight: 19 },
     lineStrong: { fontWeight: "600" },
+    // tela da oferta
+    meta: { flexDirection: "row", flexWrap: "wrap", columnGap: 14, rowGap: 6 },
+    metaItem: { flexDirection: "row", alignItems: "center", gap: 6 },
+    metaText: { fontSize: 14, fontWeight: "600", color: c.ink },
+    area: { flexDirection: "row", alignItems: "center", gap: 12 },
+    areaText: { flex: 1, gap: 2 },
+    areaMain: { fontSize: 16, fontWeight: "700", color: c.ink },
+    areaTown: { fontSize: 14, color: c.inkMuted },
+    areaNote: { fontSize: 12, color: c.inkMuted, lineHeight: 17, marginTop: 4 },
+    mapButton: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.primarySoft,
+    },
+    serviceCard: { gap: 10 },
+    serviceHead: { minHeight: 44, gap: 8, borderRadius: RADIUS.control },
+    serviceRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+    serviceIcon: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.surface2,
+    },
+    serviceName: { flex: 1, fontSize: 15, fontWeight: "700", color: c.ink },
+    serviceHint: { fontSize: 13, color: c.inkMuted, lineHeight: 18 },
+    scope: { fontSize: 15, color: c.ink, lineHeight: 21 },
   });

@@ -26,7 +26,7 @@ export const isDone = (status: TicketStatus) => {
   return info ? info.group === "done" || info.final : false;
 };
 
-/** Quando a OS foi concluída/encerrada: a data que vale para "Concluídas" (não a última edição). */
+/** Quando a OS foi concluída/encerrada (não a última edição). */
 export const finishedAt = (ticket: Pick<LocalTicket, "resolved_at" | "closed_at" | "cancelled_at" | "updated_at">) =>
   ticket.resolved_at ?? ticket.closed_at ?? ticket.cancelled_at ?? ticket.updated_at;
 
@@ -37,7 +37,7 @@ export const isMine = (ticket: LocalTicket, user: User) => ticket.assignee?.id =
 export const isHelper = (ticket: Pick<LocalTicket, "assignee" | "helpers">, user: Pick<User, "id">) =>
   ticket.assignee?.id !== user.id && (ticket.helpers ?? []).some((h) => h.id === user.id);
 
-/** Na visita: responsável ou auxiliar. É o que entra em Hoje, Agenda e Concluídas. */
+/** Na visita: responsável ou auxiliar. É o que entra em Hoje e na Agenda. */
 export const onVisit = (ticket: LocalTicket, user: User) => isMine(ticket, user) || isHelper(ticket, user);
 
 /**
@@ -86,8 +86,6 @@ export interface TicketLists {
   today: LocalTicket[];
   /** Agendadas para os próximos dias. */
   upcoming: LocalTicket[];
-  /** Resolvidas/fechadas nos últimos 7 dias (pela data da conclusão). */
-  done: LocalTicket[];
   /** Paradas esperando a central: improdutiva sem nova agenda ou aguardando peça/cliente. */
   waiting: LocalTicket[];
   /** Canceladas pela central hoje ou com visita marcada para hoje: o técnico não deve ir. */
@@ -110,12 +108,10 @@ function belongsToToday(ticket: LocalTicket, todayStart: number, tomorrowStart: 
 export function buildLists(tickets: LocalTicket[], user: User, now: Date = new Date()): TicketLists {
   const today: LocalTicket[] = [];
   const upcoming: LocalTicket[] = [];
-  const done: LocalTicket[] = [];
   const waiting: LocalTicket[] = [];
   const cancelledToday: LocalTicket[] = [];
   const todayStart = startOfDay(now).getTime();
   const tomorrowStart = addDays(startOfDay(now), 1).getTime();
-  const weekAgo = addDays(startOfDay(now), -7).getTime();
 
   for (const ticket of tickets) {
     if (!onVisit(ticket, user)) continue;
@@ -126,10 +122,8 @@ export function buildLists(tickets: LocalTicket[], user: User, now: Date = new D
       }
       continue;
     }
-    if (isDone(ticket.status)) {
-      if (time(finishedAt(ticket)) >= weekAgo) done.push(ticket);
-      continue;
-    }
+    // As concluídas ficam no Histórico de atendimentos (Perfil), que vem da central.
+    if (isDone(ticket.status)) continue;
     if (awaitingCentral(ticket, todayStart)) {
       waiting.push(ticket);
       continue;
@@ -140,10 +134,9 @@ export function buildLists(tickets: LocalTicket[], user: User, now: Date = new D
 
   today.sort(compareForToday);
   upcoming.sort((a, b) => time(a.scheduled_start) - time(b.scheduled_start));
-  done.sort((a, b) => time(finishedAt(b)) - time(finishedAt(a)));
   waiting.sort((a, b) => time(b.last_unproductive_at ?? b.updated_at) - time(a.last_unproductive_at ?? a.updated_at));
   cancelledToday.sort((a, b) => time(a.scheduled_start) - time(b.scheduled_start));
-  return { today, upcoming, done, waiting, cancelledToday };
+  return { today, upcoming, waiting, cancelledToday };
 }
 
 /** A OS ocupa o dia pela agenda (início/fim da visita)? Canceladas saem dos dias de hoje em diante. */

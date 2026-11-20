@@ -1,10 +1,14 @@
 import { useSyncExternalStore } from "react";
+import type { LevelTier } from "./types";
 
-// Momento de sucesso (check desenhado) depois de concluir a OS ou salvar a assinatura.
+// Momento de sucesso (check desenhado) depois de concluir a OS ou salvar a assinatura; na subida de faixa do elo, a
+// medalha da faixa nova no lugar do check (lib/level.ts, celebrateLevel).
 export interface SuccessMoment {
   id: number;
   title: string;
   description?: string;
+  /** Subiu de faixa: a medalha desta faixa no lugar do check. */
+  medal?: LevelTier;
 }
 
 let current: SuccessMoment | null = null;
@@ -12,8 +16,8 @@ let nextId = 1;
 const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((listener) => listener());
 
-export function showSuccess(title: string, description?: string) {
-  const moment = { id: nextId++, title, description };
+export function showSuccess(title: string, description?: string, options: { medal?: LevelTier } = {}) {
+  const moment: SuccessMoment = { id: nextId++, title, description, medal: options.medal };
   current = moment;
   emit();
   setTimeout(() => dismissSuccess(moment.id), 1800);
