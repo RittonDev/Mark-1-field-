@@ -7,7 +7,7 @@ várias linhas no mesmo instante). Sem `before`, igual a antes. Dados fictícios
 """
 
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
 from httpx import AsyncClient
@@ -24,6 +24,7 @@ pytestmark = requires_db
 API = settings.API_PREFIX
 PAGE_ERROR = {"detail": "Página do histórico inválida. Recarregue a ficha."}
 START = datetime(2026, 9, 1, 12, 0, 0, 250000, tzinfo=UTC)
+BRASILIA = timezone(timedelta(hours=-3))
 PIX_CHANGES = [
     {"field": "pix", "from": None, "to": "CPF ***.456.789-**"},
     {"field": "pix_holder", "from": None, "to": "Tecnico Alfa"},
@@ -47,12 +48,7 @@ async def _seed(engine: AsyncEngine, world: World) -> tuple[list[str], str]:
         changes = PIX_CHANGES if i == 0 else [{"field": "tools", "from": None, "to": f"Item {i}"}]
         rows.append(
             UserChange(
-                id=uuid.uuid4(),
-                user_id=tech,
-                actor_id=tech,
-                via=VIA_APP,
-                changes=changes,
-                created_at=at,
+                id=uuid.uuid4(), user_id=tech, actor_id=tech, via=VIA_APP, changes=changes, created_at=at
             )
         )
         if i % 20 == 0:
@@ -90,13 +86,14 @@ async def test_changes_pages_reach_the_old_pix_line(
     url = f"{API}/technicians/{world.tech.user.id}/changes"
     sup = world.supervisor.headers
 
-    # Sem `before`: como antes (as 50 mais novas; no máximo 200).
+    # Sem `before` (ou vazio): como antes, as 50 mais novas; no máximo 200.
     first = await _page(client, url, sup)
     assert [row["id"] for row in first] == expected[:50]
+    assert await _page(client, url, sup, before="") == first
     top = await _page(client, url, sup, limit=200)
     assert [row["id"] for row in top] == expected[:200] and pix_id not in str(top)
 
-    # A página seguinte às 200: as 30 mais antigas, com a troca de PIX completa.
+    # A página seguinte às 200: as 30 mais antigas, com a troca de PIX inteira.
     rest = await _page(client, url, sup, limit=200, before=_before(top[-1]))
     assert [row["id"] for row in rest] == expected[200:]
     pix_row = next(row for row in rest if row["id"] == pix_id)
@@ -106,7 +103,7 @@ async def test_changes_pages_reach_the_old_pix_line(
     # De 50 em 50 até o fim: tudo, na ordem, sem repetir nem pular (a última página é menor).
     seen: list[str] = []
     page = first
-    while page:
+    while page and len(seen) <= TOTAL:
         seen += [row["id"] for row in page]
         page = await _page(client, url, sup, before=_before(page[-1]))
     assert seen == expected and len(set(seen)) == TOTAL
@@ -114,7 +111,7 @@ async def test_changes_pages_reach_the_old_pix_line(
     # O mesmo instante escrito com outro fuso dá a mesma página.
     last = first[-1]
     at = datetime.fromisoformat(last["created_at"])
-    for written in (at.isoformat(), at.astimezone(timedelta(hours=-3)).isoformat()):
+    for written in (at.isoformat(), at.astimezone(BRASILIA).isoformat()):
         again = await _page(client, url, sup, before=f"{written}|{last['id']}")
         assert [row["id"] for row in again] == expected[50:100], written
 
@@ -137,7 +134,6 @@ async def test_changes_page_errors(client: AsyncClient, world: World) -> None:
     an = world.analyst.headers
     row_id = uuid.uuid4()
     for wrong in (
-        "",
         "sem separador",
         f"2026-11-18T19:40:00|{row_id}",  # sem fuso
         "2026-11-18T19:40:00+00:00|nao-e-id",
@@ -146,19 +142,16 @@ async def test_changes_page_errors(client: AsyncClient, world: World) -> None:
         # Fora da faixa em UTC (antes do ano 1 e depois do 9999).
         f"0001-01-01T00:00:00+14:00|{row_id}",
         f"9999-12-31T23:59:59-14:00|{row_id}",
-        f"2026-11-18T19:40:00+00:00|{row_id}" + " " * 200,
+        # Longo demais, mesmo que o id ainda fosse lido ("{{id}}").
+        "2026-11-18T19:40:00+00:00|" + "{" * 40 + str(row_id) + "}" * 40,
     ):
         r = await client.get(url, params={"before": wrong}, headers=an)
         assert (r.status_code, r.json()) == (422, PAGE_ERROR), wrong
-    # Cursor certo sem linhas mais antigas; técnico que não existe continua 404.
-    r = await client.get(url, params={"before": f"2026-11-18T19:40:00Z|{row_id}"}, headers=an)
+    # Cursor certo sem linhas mais antigas: lista vazia; técnico que não existe continua 404.
+    fine = {"before": f"2026-11-18T19:40:00Z|{row_id}"}
+    r = await client.get(url, params=fine, headers=an)
     assert (r.status_code, r.json()) == (200, [])
-    r = await client.get(
-        f"{API}/technicians/{uuid.uuid4()}/changes",
-        params={"before": f"2026-11-18T19:40:00Z|{row_id}"},
-        headers=an,
-    )
+    r = await client.get(f"{API}/technicians/{uuid.uuid4()}/changes", params=fine, headers=an)
     assert r.status_code == 404
     # O técnico não lê o histórico da central.
-    r = await client.get(url, params={"before": f"2026-11-18T19:40:00Z|{row_id}"}, headers=world.tech.headers)
-    assert r.status_code == 403
+    assert (await client.get(url, params=fine, headers=world.tech.headers)).status_code == 403

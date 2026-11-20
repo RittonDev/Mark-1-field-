@@ -15,6 +15,9 @@ const intFmt = (n: number) => n.toLocaleString("pt-BR");
  * "Atendimentos por mês" na ficha do técnico (aba Elo): os 12 meses de calendário, do mais antigo ao atual, pelo mês da
  * conclusão, separando os deste sistema (Maxx Field) dos que vieram do Field Control. Só contagens (nenhuma OS), com o
  * mesmo critério do elo: responsável ou junto. As ocorrências (atrasos, retornos, perdidas) ficam no Elo, logo acima.
+ * O "nos últimos 12 meses" do cabeçalho é a conta do elo (`metrics`, 365 dias corridos), o mesmo número da linha
+ * "Últimos 12 meses" do Elo; a soma das barras pode ser menor (o começo da janela cai no mês antes do gráfico). Sem
+ * atendimento nas duas contas, o texto de vazio; com atendimento só nesse começo, o gráfico sai zerado.
  */
 export function TechnicianStatsSection({ technicianId }: { technicianId: UUID }) {
   const canView = useCan("base.technicians");
@@ -27,7 +30,8 @@ export function TechnicianStatsSection({ technicianId }: { technicianId: UUID })
   if (!canView) return null;
   const data = stats.data;
   const months = data?.months ?? [];
-  const lastYear = months.reduce((sum, m) => sum + m.services, 0);
+  // A soma das barras (os 12 meses de calendário).
+  const inMonths = months.reduce((sum, m) => sum + m.services, 0);
 
   return (
     <section className="flex flex-col gap-3 rounded-lg border border-line p-3">
@@ -36,7 +40,7 @@ export function TechnicianStatsSection({ technicianId }: { technicianId: UUID })
         aside={
           data ? (
             <span className="text-xs text-ink-muted tabular-nums">
-              {intFmt(lastYear)} nos últimos 12 meses · {intFmt(data.lifetime.services)} no total
+              {intFmt(data.metrics.services)} nos últimos 12 meses · {intFmt(data.lifetime.services)} no total
             </span>
           ) : undefined
         }
@@ -50,7 +54,7 @@ export function TechnicianStatsSection({ technicianId }: { technicianId: UUID })
         ) : (
           <Skeleton className="h-[180px]" />
         )
-      ) : lastYear === 0 ? (
+      ) : inMonths === 0 && data.metrics.services === 0 ? (
         <p className="py-8 text-center text-sm text-ink-muted">Sem atendimentos nos últimos 12 meses.</p>
       ) : (
         <MonthsChart data={data} />

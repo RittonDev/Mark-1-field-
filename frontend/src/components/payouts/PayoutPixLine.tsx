@@ -10,7 +10,7 @@ import { whatsappUrl } from "@/lib/whatsapp";
 /**
  * Para onde pagar, embaixo do nome do técnico em Pagamentos: a chave PIX, com "Copiar PIX" e o selo "Chave
  * nova" (mudou há menos de PIX_RECENT_DAYS dias), ou "Sem chave PIX" com o pedido pelo WhatsApp. Só o técnico
- * cadastra a chave (app, Conta › Meu cadastro); o titular aparece quando não é ele.
+ * cadastra a chave (app, Perfil › Configurações › Chave PIX); o titular aparece quando não é ele.
  */
 export function PayoutPixLine({ name, pix, phone, now }: { name: string; pix: PixInfo | null; phone: string | null; now: number }) {
   const copyPix = useCopyPix();

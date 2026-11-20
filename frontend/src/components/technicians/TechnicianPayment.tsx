@@ -49,7 +49,7 @@ export function TechnicianPayment({ tech, dirty }: { tech: Pick<Technician, "id"
     const ok = await confirm({
       tone: "danger",
       title: `Remover a chave PIX de ${tech.name}?`,
-      description: "Ele precisa cadastrar uma chave nova no app (Conta › Meu cadastro) para receber.",
+      description: "Ele precisa cadastrar uma chave nova no app (Perfil › Configurações › Chave PIX) para receber.",
       confirmLabel: "Remover chave",
     });
     if (ok) remove.mutate();

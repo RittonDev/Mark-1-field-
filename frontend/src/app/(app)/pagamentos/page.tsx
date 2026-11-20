@@ -202,7 +202,7 @@ function statement(
     .filter((s) => s.lines.length > 0);
   const out = ["*Maxx Field · pagamento*", name, `Período: ${period}`, ...statementInvoiceLines(invoices)];
   if (pix) out.push(`Chave PIX: ${pixStatementText(pix)}`);
-  else if (pix === null) out.push("Chave PIX: não cadastrada (cadastre no app, em Conta › Meu cadastro)");
+  else if (pix === null) out.push("Chave PIX: não cadastrada (cadastre no app, em Perfil › Configurações › Chave PIX)");
   for (const s of sections) {
     out.push("", `*${SECTION[s.key]}*`, ...s.lines.map(row));
     out.push(sections.length === 1 ? `*Total: ${formatMoney(total(s.lines))}*` : `Subtotal: ${formatMoney(total(s.lines))}`);

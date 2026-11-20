@@ -1,8 +1,8 @@
 "use client";
 
 // Notas fiscais dos técnicos na central (Pagamentos › Notas fiscais). O técnico envia pelo app (aba
-// Ganhos); a central confere, desfaz a conferência ou recusa com motivo e nunca apaga: é documento
-// fiscal (backend/app/services/invoices.py). A nota não é obrigatória e nunca trava pagamento: o
+// Faturamento, no mês da nota); a central confere, desfaz a conferência ou recusa com motivo e nunca apaga: é
+// documento fiscal (backend/app/services/invoices.py). A nota não é obrigatória e nunca trava pagamento: o
 // "Pagar" e o extrato do WhatsApp só informam se há nota.
 
 import { keepPreviousData, type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -159,7 +159,7 @@ export function rejectedInvoiceText(invoice: TechnicianInvoice): string {
   const tail = !reason ? "." : /[.!?…]$/.test(reason) ? `: ${reason}` : `: ${reason}.`;
   return (
     `Olá, ${firstName(invoice.technician.name)}. A nota fiscal ${invoiceNo(invoice)} (${formatMoney(invoice.amount)}) ` +
-    `foi recusada${tail} Envie a nota corrigida pelo app, em Ganhos.`
+    `foi recusada${tail} Envie a nota corrigida pelo app, em Faturamento.`
   );
 }
 

@@ -1,8 +1,8 @@
 "use client";
 
-// Chave PIX do técnico na central. Só ele cadastra e troca (app, Conta › Meu cadastro, com a senha); a
-// central vê em Pagamentos e no cadastro em Técnicos, copia para pagar e só remove. Os formatos são os de
-// backend/app/core/pix.py (PIX_KEY_TYPE e formatPixKey em constants.ts; a máscara, maskPixKey, aqui).
+// Chave PIX do técnico na central. Só ele cadastra e troca (app, Perfil › Configurações › Chave PIX, com a
+// senha); a central vê em Pagamentos e no cadastro em Técnicos, copia para pagar e só remove. Os formatos são os
+// de backend/app/core/pix.py (PIX_KEY_TYPE e formatPixKey em constants.ts; a máscara, maskPixKey, aqui).
 
 import { useToast } from "@/components/Toaster";
 import { formatPixKey, PIX_KEY_TYPE, PIX_RECENT_DAYS } from "./constants";
@@ -88,7 +88,7 @@ function firstName(name: string): string {
 
 /** Mensagem do "Pedir a chave" (conversa do técnico no WhatsApp). */
 export function askPixText(name: string): string {
-  return `Olá, ${firstName(name)}! Cadastre sua chave PIX no app Maxx Field, em Conta › Meu cadastro, para receber pelos chamados.`;
+  return `Olá, ${firstName(name)}! Cadastre sua chave PIX no app Maxx Field, em Perfil › Configurações › Chave PIX, para receber pelos chamados.`;
 }
 
 /**

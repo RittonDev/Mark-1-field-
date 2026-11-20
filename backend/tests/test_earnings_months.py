@@ -337,6 +337,46 @@ async def test_states_across_months(client: AsyncClient, world: World, engine: A
 
 
 @requires_db
+@pytest.mark.usefixtures("media")
+async def test_invoices_per_competence(
+    client: AsyncClient, world: World, engine: AsyncEngine
+) -> None:
+    """`invoices`: as notas do técnico com a competência do mês que não foram recusadas (aguardando
+    conferência ou conferidas). O app mostra por ele o mês que só tem nota (sem valores, "empty"),
+    para abrir, apagar ou ver a conferência; a situação não muda."""
+    tech = world.tech
+    # A nota da competência atual cobre a OS concluída no mês anterior.
+    ticket, payout = await concluded(client, world, "Do mês passado", 100)
+    await _resolved_at(engine, ticket["id"], _mid(-1))
+    await _invoice(client, tech, 0, "101", payout)
+    # -2: recusada (não conta); -3: conferida; -4: recusada e reenviada (só a nova conta).
+    await _review(client, world, await _invoice(client, tech, -2, "201"), "Arquivo ilegível")
+    await _review(client, world, await _invoice(client, tech, -3, "301"))
+    await _review(client, world, await _invoice(client, tech, -4, "401"), "Número errado")
+    await _invoice(client, tech, -4, "402")
+    # A nota do colega não conta para ele.
+    await _invoice(client, world.tech_other, 0, "5555")
+
+    months = _by_month(await _months(client, tech))
+
+    def seen(back: int) -> tuple[str, int]:
+        month = months[_key(-back)]
+        return month["state"], month["invoices"]
+
+    assert {back: seen(back) for back in range(12)} == {
+        0: ("empty", 1),
+        1: ("in_review", 0),
+        2: ("rejected", 0),
+        3: ("empty", 1),
+        4: ("empty", 1),
+        **{back: ("empty", 0) for back in range(5, 12)},
+    }
+    assert months[_key(-1)]["due_in_review"] == _bucket(1, 100.0)
+    theirs = (await _months(client, world.tech_other))["months"][0]
+    assert (theirs["state"], theirs["invoices"]) == ("empty", 1)
+
+
+@requires_db
 async def test_same_rules_as_my_earnings(
     client: AsyncClient, world: World, engine: AsyncEngine
 ) -> None:

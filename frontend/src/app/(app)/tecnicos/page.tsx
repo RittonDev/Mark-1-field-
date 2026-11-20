@@ -126,7 +126,7 @@ const GAPS: { key: Gap; label: string; hint: string; test: (t: Technician) => bo
   {
     key: "pix",
     label: "Sem chave PIX",
-    hint: "Sem a chave, não há para onde pagar: ele cadastra no app, em Conta › Meu cadastro",
+    hint: "Sem a chave, não há para onde pagar: ele cadastra no app, em Perfil › Configurações › Chave PIX",
     // Só quando a API diz que não tem (sem o campo, não conta ninguém).
     test: (t) => t.is_active && t.has_pix === false,
   },
@@ -365,7 +365,16 @@ function TechniciansView() {
     setGap(null);
     setLevelFilter(null);
   };
-  const exportCsv = () =>
+  // A coluna "ferramental" sai com os nomes do catálogo (a lista só traz os ids). Enquanto ele carrega, os botões
+  // Exportar ficam desativados; com erro, avisa e busca de novo, sem baixar: a coluna em branco pareceria "não marcou".
+  const exportCsv = () => {
+    if (!tools.data) {
+      if (tools.isError) {
+        toast({ title: "Não deu para carregar o ferramental", tone: "error" });
+        void tools.refetch();
+      }
+      return;
+    }
     downloadCsv("tecnicos.csv", [
       [
         "nome",
@@ -421,6 +430,7 @@ function TechniciansView() {
         ];
       }),
     ]);
+  };
   // Trocar de aba: a URL acompanha (mantém o ?os= do painel); UF e cidade são só dos favoritos.
   const changeView = (next: View) => {
     setView(next);
@@ -559,7 +569,7 @@ function TechniciansView() {
               {rows.length} {rows.length === 1 ? "técnico" : "técnicos"}
             </span>
             {rows.length ? (
-              <Button size="sm" variant="ghost" onClick={exportCsv}>
+              <Button size="sm" variant="ghost" onClick={exportCsv} disabled={tools.isPending}>
                 <Download className="size-3.5" />
                 Exportar
               </Button>
@@ -746,7 +756,7 @@ function TechniciansView() {
                 técnico e nada muda antes da prévia.
               </p>
               <div className="flex flex-wrap gap-2">
-                <Button size="sm" variant="ghost" onClick={exportCsv}>
+                <Button size="sm" variant="ghost" onClick={exportCsv} disabled={tools.isPending}>
                   <Download className="size-3.5" />
                   Exportar
                 </Button>

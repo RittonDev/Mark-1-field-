@@ -177,8 +177,8 @@ function afterResetText(data: Partial<ProfileChangedData>): string {
 }
 
 /**
- * profile.changed pelo app (Meu cadastro): a chave PIX, o e-mail de login, o nome ou o celular mudaram. Uma conta
- * invadida desviaria o pagamento: a troca da chave pede confirmação no grupo antes do próximo pagamento.
+ * profile.changed pelo app (Perfil › Configurações): a chave PIX, o e-mail de login, o nome ou o celular mudaram.
+ * Uma conta invadida desviaria o pagamento: a troca da chave pede confirmação no grupo antes do próximo pagamento.
  * O que a central muda e o que o técnico muda de foto e endereço só atualizam as listas.
  */
 function profileNotice(event: RealtimeEvent): NoticeDraft | null {
