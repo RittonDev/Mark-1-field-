@@ -138,10 +138,10 @@ const EPSILON = 1e-6;
 
 /**
  * Onde vai cada rótulo de mês que aparece (axisLabelsShown): só esses, cada um numa caixa com pelo menos a largura do
- * rótulo + 2, sem sair do gráfico (0 a count × slot) e sem encostar na do vizinho. O rótulo fica no meio da faixa do
+ * rótulo + 2, sem sair do gráfico (0 a count × slot) e sem sobrepor a do vizinho. O rótulo fica no meio da faixa do
  * mês; nas pontas, quando o meio passaria da borda, encosta na borda (o do mês atual, à direita). Cada caixa ainda
- * ganha metade do vão até a vizinha: entre dois do meio, a caixa tem `every` faixas. Se o mais antigo não couber sem
- * encostar, ele sai; o do mês atual sempre aparece.
+ * ganha metade do vão até a vizinha: entre dois do meio, a caixa tem `every` faixas. Se o mais antigo não couber, ele
+ * sai; o do mês atual sempre aparece.
  */
 export function axisLabelBoxes(count: number, slot: number, labelWidth: number): AxisLabelBox[] {
   if (count <= 0 || !(slot > 0)) return [];
@@ -157,8 +157,8 @@ export function axisLabelBoxes(count: number, slot: number, labelWidth: number):
     const ideal = (index + 0.5) * slot - need / 2;
     const left = Math.min(Math.max(ideal, 0), limit - need);
     if (left < -EPSILON) break;
-    spots.unshift({ index, left: Math.max(left, 0), ideal });
-    limit = left;
+    limit = Math.max(left, 0);
+    spots.unshift({ index, left: limit, ideal });
   }
   // 2) A caixa: o lugar mais metade do vão de cada lado (a borda do gráfico nas pontas).
   return spots.map((spot, i) => {
