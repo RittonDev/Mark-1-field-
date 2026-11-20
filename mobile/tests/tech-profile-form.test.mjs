@@ -18,10 +18,14 @@ import {
   educationEntry,
   educationProblem,
   educationSpoken,
+  educationWith,
+  educationWithout,
   filterTools,
   foldName,
+  markNone,
   monthGrid,
-  NO_TRANSPORT,
+  noneMarked,
+  sameSavedTransport,
   sameSet,
   sameSlots,
   sameTransport,
@@ -30,12 +34,15 @@ import {
   skillProblem,
   skillsBody,
   skillSpoken,
+  skillsWith,
+  skillsWithout,
   sortTools,
   suggestionsFor,
   thisMonth,
   toggleId,
   toggleMode,
   toggleSlot,
+  TRANSPORT_UNSET,
   transportBody,
 } from "../src/lib/techProfileForm.ts";
 
@@ -61,7 +68,19 @@ describe("nomes", () => {
 
   it("cleanText junta os espaços e grava em NFC", () => {
     assert.equal(cleanText("  Redes \n de   dados "), "Redes de dados");
+    assert.equal(cleanText("Curso\tde\r\nredes"), "Curso de redes");
     assert.equal(cleanText("Técnico"), "Técnico");
+  });
+
+  it("cleanText e foldName tiram os caracteres de controle e de formatação; tab, LF, VT, FF e CR viram espaço", () => {
+    assert.equal(cleanText("Lin​ux"), "Linux");
+    assert.equal(cleanText("‮Redes‬"), "Redes");
+    assert.equal(cleanText("Curso\u0000Exemplo"), "CursoExemplo");
+    assert.equal(cleanText("﻿Redes\tde\r\ndados\u000B\u000C"), "Redes de dados");
+    assert.equal(cleanText("A\u0007\u007F\u009FB"), "AB");
+    assert.equal(cleanText("​⁠­"), "");
+    assert.equal(foldName("LIN​UX"), "linux");
+    assert.equal(foldName("⁦Impressóras⁩\nHP"), "impressoras hp");
   });
 });
 
@@ -82,6 +101,12 @@ describe("aptidões", () => {
   it("skillProblem: válido (na edição, a própria aptidão fica fora de `others`)", () => {
     assert.deepEqual(skillProblem({ name: "Active Directory", level: "intermediario" }, mine), {});
     assert.deepEqual(skillProblem({ name: "Linux", level: "avancado" }, [{ name: "Impressoras HP" }]), {});
+  });
+
+  it("skillProblem e skillsBody com invisíveis: só invisíveis é vazio, com um invisível no meio é repetida (como o servidor)", () => {
+    assert.deepEqual(skillProblem({ name: "​​​", level: "basico" }, mine), { name: SKILL_MSG.name });
+    assert.deepEqual(skillProblem({ name: "Lin​ux", level: "basico" }, mine), { name: SKILL_MSG.repeated });
+    assert.deepEqual(skillsBody([{ name: "‮Lin​ux", level: "basico" }]), [{ name: "Linux", level: "basico" }]);
   });
 
   it("skillsBody leva só nome (limpo) e nível, sem o `since`", () => {

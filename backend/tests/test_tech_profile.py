@@ -7,10 +7,12 @@ homologação traz na aprovação e a cópia desse mapa na migração f5a7c9e1b3
 
 Com banco (requires_db): um PATCH por parte relido do banco (o PATCH só grava quando o histórico
 muda: "200 sem gravar" aparece aqui), as mensagens 422 com o rótulo, o "desde" pelo nome, o id dos
-cursos, a ferramenta desativada, os textos do histórico do cadastro e o aviso profile.changed.
+cursos, a ferramenta desativada, os textos do histórico do cadastro, o aviso profile.changed, os
+caracteres invisíveis, duas gravações ao mesmo tempo e o backfill da migração pelo driver.
 Dados fictícios (Tecnico Alfa, Escola Exemplo, @exemplo.com).
 """
 
+import asyncio
 import importlib.util
 import json
 import unicodedata
@@ -22,14 +24,17 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
 from httpx import AsyncClient, Response
 from pydantic import BaseModel, ValidationError
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from app.core.config import settings
+from app.core.enums import ApplicationStatus
 from app.models import TechnicianApplication, TechnicianTool, User
-from app.schemas.my_profile import MyProfileUpdate
+from app.schemas.my_profile import SLOT_MAX, MyProfileUpdate
 from app.schemas.onboarding import AVAILABILITY, SKILL_LEVELS, VEHICLE_TYPES
 from app.schemas.tech_profile import (
     EducationIn,
@@ -169,6 +174,34 @@ def test_short_texts() -> None:
     assert tp.clean(unicodedata.normalize("NFD", "  Fibra   óptica ")) == "Fibra óptica"
 
 
+def test_control_and_format_characters_are_dropped() -> None:
+    """Controles (Cc) e formatação (Cf: largura zero, BOM, direção) saem antes de contar e de
+    comparar; tab, LF, VT, FF e CR viram espaço. Nome só de invisíveis cai na mensagem do tamanho,
+    e a mesma aptidão com um espaço de largura zero repete."""
+    assert tp.clean("Lin​ux") == "Linux"
+    assert tp.clean("﻿‮Redes‬ ") == "Redes"
+    assert tp.clean("Curso\u0000 Exemplo\u0007") == "Curso Exemplo"
+    assert tp.clean("Fibra\tóptica\r\n(fusão)\v\f") == "Fibra óptica (fusão)"
+    # Os outros controles saem em vez de virar espaço (como no app).
+    assert tp.clean("Re\x1cdes\x85") == "Redes"
+    # Antes do NFC: o acento separado da letra por um invisível volta a ser uma letra só.
+    assert tp.clean("Cafe‍́") == "Café"
+    # O que não é controle nem formatação fica: espaço sem quebra (vira espaço), acentos.
+    assert tp.clean("Windows 10/11") == "Windows 10/11"
+    assert tp.fold("LIN​UX⁦") == tp.fold("linux") == "linux"
+    assert tp.clean("​​​") == tp.fold("\u0001‮") == ""
+    assert _problems(TechnicianSkillIn, {"name": "​​​", "level": "basico"}) == [
+        (("name",), "Informe o nome da aptidão")
+    ]
+    assert _problems(TechnicianToolCreate, {"name": "\u0000­"}) == [
+        (("name",), "Informe o nome da ferramenta")
+    ]
+    linux = {"name": "Linux", "level": "basico"}
+    assert _problems(MyProfileUpdate, {"skills": [linux, {**linux, "name": "Lin​ux"}]}) == [
+        (("skills",), "Aptidão repetida: Linux")
+    ]
+
+
 def test_items_text_cuts_long_lists() -> None:
     """Textos do histórico: até 10 itens inteiros; mais que isso, os 10 primeiros e "e mais N"."""
     assert tp.items_text([]) is None
@@ -303,6 +336,8 @@ def test_patch_limits_are_the_service_ones() -> None:
     assert max_length(EducationIn, "course") == tp.COURSE_MAX
     assert max_length(EducationIn, "institution") == tp.INSTITUTION_MAX
     assert max_length(TechnicianToolCreate, "name") == tp.TOOL_NAME_MAX
+    # Cada turno cabe no limite por item (o item enorme recusa sem ecoar o valor).
+    assert max(len(slot) for slot in tp.ALL_SLOTS) <= SLOT_MAX == 16
 
 
 def test_patch_lists_are_checked_whole() -> None:
@@ -629,6 +664,17 @@ def test_migration_copies_the_service_rules() -> None:
         tp.SKILL_NAME_MAX,
     )
     assert migration.TIMEZONE == settings.TIMEZONE
+    # O texto: a mesma limpeza e a mesma comparação do serviço (controles e formatação saem).
+    for sample in (
+        "  Câmeras   HIKVISION ",
+        unicodedata.normalize("NFD", "Fibra óptica"),
+        "Lin​ux‮",
+        "﻿Curso\u0000\tExemplo\x85\x1c",
+        "Cafe‍́",
+        "ﬁbra óptica",
+    ):
+        assert migration._clean(sample) == tp.clean(sample), repr(sample)
+        assert migration._fold(sample) == tp.fold(sample), repr(sample)
 
 
 @pytest.mark.parametrize(
@@ -650,11 +696,24 @@ def test_migration_copies_the_service_rules() -> None:
                 {"name": "Windows 10/11", "level": "intermediario"},
             ]
         },
+        # O que não é lista não traz nada: texto JSON no topo (só com SQL feito à mão; a API grava
+        # listas), texto com uma lista dentro, objeto e null.
+        {"availability": "plantao", "skills": "Redes"},
+        {"availability": '["sabado"]', "skills": '[{"name": "Linux", "level": "basico"}]'},
+        {"availability": {"plantao": True}, "skills": None, "has_driver_license": True},
+        # Nomes com controles e formatação: a mesma limpeza do serviço.
+        {
+            "skills": [
+                {"name": "Lin​ux", "level": "basico"},
+                {"name": "linux", "level": "avancado"},
+                {"name": "​‮", "level": "basico"},
+            ]
+        },
     ],
 )
 def test_migration_backfill_is_the_same_as_the_approval(fields: dict[str, Any]) -> None:
-    """A migração recebe o JSONB em texto (consulta em texto puro no asyncpg) e chega no mesmo
-    perfil que a aprovação da ficha."""
+    """A migração lê availability e skills como texto (o ::text de APPROVED; o json.loads é dela)
+    e chega no mesmo perfil que a aprovação da ficha, também quando o JSONB não é lista."""
     application = _ficha(**fields)
     row = {
         "user_id": uuid.uuid4(),
@@ -665,11 +724,80 @@ def test_migration_backfill_is_the_same_as_the_approval(fields: dict[str, Any]) 
         "skills": json.dumps(application.skills),
         "created_at": application.created_at,
     }
-    expected = tp.from_ficha(application)
+    assert _migration()._ficha_profile(row) == tp.from_ficha(application)
+
+
+def _approved(user_id: uuid.UUID, **fields: Any) -> TechnicianApplication:
+    """Uma ficha aprovada para gravar no banco (os campos obrigatórios com dados fictícios)."""
+    application = _ficha(**fields)
+    application.status = ApplicationStatus.APPROVED
+    application.user_id = user_id
+    application.phone = "(11) 99999-0000"
+    application.document = "12345678909"
+    application.city = "Cidade Exemplo"
+    application.state = "SP"
+    application.coverage_area = "Cidade Exemplo"
+    application.privacy_consent_at = CREATED
+    application.privacy_version = "2026-11-20"
+    return application
+
+
+@requires_db
+async def test_migration_backfill_runs_on_the_driver(world: World, engine: AsyncEngine) -> None:
+    """O _backfill de verdade, com o driver do alembic (asyncpg, que já entrega o JSONB
+    decodificado: daí o ::text). A ficha com availability e skills em texto JSON no topo não
+    derruba o upgrade e não traz nada (perfil vazio, como na aprovação); a ficha com listas traz o
+    mesmo perfil da aprovação; rodar de novo não muda nada."""
     migration = _migration()
-    assert migration._ficha_profile(row) == expected
-    as_lists = {**row, "availability": application.availability, "skills": application.skills}
-    assert migration._ficha_profile(as_lists) == expected
+    lists = {
+        "availability": ["sabado"],
+        "has_vehicle": True,
+        "vehicle_type": "moto",
+        "skills": [{"name": "Redes", "level": "basico"}],
+    }
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as db:
+        db.add(_approved(world.tech.user.id, availability="dias_uteis_manha", skills="Redes"))
+        db.add(_approved(world.tech_other.user.id, **lists))
+        await db.commit()
+    async with engine.connect() as conn:
+        kinds = await conn.execute(
+            text(
+                "SELECT jsonb_typeof(availability), jsonb_typeof(skills)"
+                " FROM technician_applications WHERE user_id = :id"
+            ),
+            {"id": world.tech.user.id},
+        )
+        assert tuple(kinds.one()) == ("string", "string")
+
+    def backfill(sync_conn: Any) -> None:
+        with Operations.context(MigrationContext.configure(sync_conn)):
+            migration._backfill()
+
+    empty = {
+        "availability": [],
+        "transport_modes": [],
+        "has_driver_license": False,
+        "skills": [],
+        "tech_profile_stamps": {},
+    }
+    for _ in range(2):
+        async with engine.begin() as conn:
+            await conn.run_sync(backfill)
+        async with maker() as db:
+            for application in (await db.scalars(select(TechnicianApplication))).all():
+                user = await db.get(User, application.user_id)
+                assert user is not None
+                expected = tp.from_ficha(application)
+                assert {key: getattr(user, key) for key in expected} == expected
+                if user.id == world.tech.user.id:
+                    assert expected == empty
+                else:
+                    assert set(expected["tech_profile_stamps"]) == {
+                        "availability",
+                        "transport",
+                        "skills",
+                    }
 
 
 # ------------------------------------------------- PATCH /me/profile (com banco)
