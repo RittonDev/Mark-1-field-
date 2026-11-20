@@ -14,6 +14,8 @@ Este documento é o contrato que o app do técnico (`mobile/`, Expo; ver [mobile
  WebSocket /ws ◄──────────────── evento ticket.* ───────────────────────────┘
  push (FCM/APNs) ◄────────────── OS nova, oferta, visita, peça (app fechado; ainda não ligado, §5)
  lembretes locais ◄───────────── agendados no próprio aparelho: 1 dia, 1h40 e 10 min antes da visita
+ leituras guardadas (kv) ◄────── elo, estatísticas, histórico, faturamento e ofertas: só leitura, fora da fila (§2)
+ cadastro (só na memória) ◄────► GET/PATCH /me/profile e catálogos: só online, fora da fila (§1)
 ```
 
 ## 1. Login e aparelho
@@ -30,6 +32,37 @@ Aviso de privacidade: não há rota de ciência. A versão que o técnico abriu 
 Keychain/Keystore e por técnico; com versão nova, Hoje mostra o cartão "Aviso de privacidade atualizado" até ele abrir
 o aviso (vale offline e sobrevive ao Sair).
 
+**Cadastro (Configurações).** `GET /me/profile`, `PATCH /me/profile` (só o que mudou; e-mail e chave PIX com
+`current_password`) e `POST`/`DELETE /me/profile/photo` (docs/API.md, "Meu cadastro do técnico"): só online, fora do
+lote e da fila. Nada vai para o SQLite nem para o kv: o cadastro fica na memória do app (`lib/profile.ts`) e sai no
+Sair e na troca de técnico (nome, e-mail e celular vão também para o usuário da sessão). É lido ao entrar, ao abrir cada
+tela de Configurações, ao puxar a aba Faturamento e, quando falta ou passou de 6 h (o link da foto vale 12 h), ao voltar
+à tela inicial e ao abrir o Faturamento. As gravações (salvar, enviar e tirar a foto) saem uma por vez: a seguinte
+espera a resposta da anterior e não sai se a sessão mudou na espera. Uma leitura durante a qual uma gravação saiu,
+voltou ou ficou no ar não é publicada: fica o que a gravação devolveu.
+
+**Perfil técnico** (Configurações › Atendimento; docs/API.md, "Perfil técnico"): `PATCH /me/profile` com uma parte
+inteira por vez (`tool_ids`, `availability`, `transport`, `skills` ou `education`), sem senha. A lista enviada substitui
+a anterior; o servidor normaliza e ordena, põe o "desde" das aptidões e o `id` das formações e devolve o cadastro como
+ficou, que a tela passa a mostrar. Como o cadastro: só online, fora da fila, nada no SQLite nem no kv. O ferramental vem
+de `GET /technician-tools` (o técnico recebe só as ferramentas ativas, em ordem alfabética) e as sugestões de aptidão,
+de `skill_suggestions` em `GET /public/onboarding/catalog`. Os dois catálogos ficam só na memória
+(`lib/technicalProfile.ts`): valem 10 min (puxar a tela relê na hora) e somem na troca de sessão.
+
+- **Salvar ao tocar** (Disponibilidade, Transporte e Ferramental; `lib/autoSave.ts`): o toque muda a tela na hora e
+  reinicia uma espera de 0,6 s; ao fim dela sai um `PATCH` só, com o valor final (os toques de perto viram uma linha no
+  histórico da central). Uma gravação por vez: o que mudar durante o envio vai num segundo envio quando o primeiro
+  volta, se ainda for diferente do gravado. Sem rede, o app avisa e não muda nada; se o envio falhar, a tela volta ao
+  que está gravado e avisa. Sair da tela com o envio agendado manda na hora; o Sair ou outro técnico descarta o que
+  estava pendente.
+- **Aptidões e Formação** gravam a lista inteira (incluir e mudar pela folha, excluir pela lixeira), montada a partir da
+  que voltou do servidor; enquanto uma gravação está no ar, as outras ações da lista ficam desligadas.
+- **Ferramenta desativada pela central**: o servidor ignora a marcação (200) e o app relê o catálogo (ela some). Id que
+  não existe no catálogo: 422 "Ferramenta não encontrada. Atualize a lista." (o app também relê).
+- **A API sobe antes do app.** A API antiga não tem essas partes: o `GET /me/profile` vem sem elas, e o app mostra
+  "Indisponível no momento" nas telas de Atendimento sem mandar o `PATCH` (que ela recusaria com 422 "campo não aceito":
+  `MyProfileUpdate` não aceita chave a mais). A API nova com o app antigo funciona.
+
 ## 2. Download (pull)
 
 ```
@@ -45,11 +78,35 @@ Resposta: `{server_time, has_more, tickets[], comments[], worklogs[], revoked_ti
 - O técnico de campo recebe só as OS em que é o responsável ou outro técnico da visita (auxiliar): grupo e fila não
   bastam (`services/tickets.py::visibility_clause` → `schedule.works_on`). Analistas e supervisores recebem as que veem
   na web (a visibilidade de filas do perfil de acesso).
-- Elo do técnico (`GET /me/level`, docs/API.md "Elo dos técnicos"): na mesma rodada, a cada 30 min e no "puxar para
-  atualizar", só com o app na tela (a rodada em segundo plano não busca), e quando o técnico abre (se o guardado tem
-  mais de 2 min) ou puxa a tela "Meu elo". O app guarda a resposta no kv do aparelho com a hora (offline, mostra a
-  última com a data). Só leitura: fora da fila de operações. Servidor antigo sem a rota (404) só adia a próxima
-  tentativa em 30 min.
+
+### Leituras guardadas (fora do pull)
+
+Só leitura e fora da fila de operações: cada uma fica no kv do aparelho (a tabela de chave e valor do SQLite) com a hora
+em que chegou, e a tela abre offline com o guardado e a data ("dados de…", "valores de…"). `my_level`, `my_stats`, `my_history` e
+`earnings:months` levam também o id do técnico (o de um nunca aparece para outro); nada é gravado se o técnico da sessão
+mudou durante a busca, e o kv inteiro sai na troca de técnico. Servidor sem a rota (404): a tela mostra uma mensagem
+própria.
+
+- **Elo** (`GET /me/level`, docs/API.md "Elo dos técnicos"; kv `my_level`): na mesma rodada, a cada 30 min e no "puxar
+  para atualizar", só com o app na tela (a rodada em segundo plano não busca); quando o técnico abre (se o guardado tem
+  mais de 2 min) ou puxa a tela "Meu elo"; e na aba Perfil, uma vez por foco, enquanto nada está guardado. Servidor
+  antigo sem a rota (404) só adia a próxima tentativa em 30 min.
+- **Estatísticas** (`GET /me/stats`, docs/API.md "Perfil do técnico: estatísticas e histórico"; kv `my_stats`): fora da
+  rodada. A tela Estatísticas busca ao abrir e ao voltar a ela (se o guardado tem 2 min ou mais) e ao puxar; a aba
+  Perfil, no foco (se o guardado tem mais de 10 min) e ao puxar. Pedidos ao mesmo tempo dividem a mesma busca.
+- **Histórico de atendimentos** (`GET /me/history?limit=30`, as páginas seguintes com o `cursor` da anterior; mesma
+  seção do docs/API.md; kv `my_history`, só a primeira página): fora da rodada. A tela busca a primeira página ao abrir
+  (se a guardada tem 2 min ou mais) e ao puxar, e as outras ao rolar; sem rede no fim da lista, segue quando a conexão
+  volta.
+- **Faturamento** (docs/API.md "Valor por chamado"): os meses, `GET /me/earnings/months?months=12` (os totais e a
+  situação de cada mês; kv `earnings:months`), e o mês, `GET /me/earnings?month=AAAA-MM` (kv `earnings:AAAA-MM`), com as
+  notas do mês, `GET /me/invoices?month=AAAA-MM` (kv `invoices:AAAA-MM`). Busca ao abrir a aba, ao voltar a ela e ao
+  abrir o mês (a busca de até 30 s atrás vale), ao puxar, quando uma nota entra ou sai neste aparelho e, depois de uma
+  rodada do sync, se a última busca tem 2 min ou mais (pagar marca a OS como alterada e a rodada traz). Um pedido dos
+  meses por vez. O "ocultar valores" esconde só a tela: os valores guardados continuam no kv.
+- **Ofertas** (`GET /me/offers`, quando busca em §4; kv `field_offers`): junto da lista, por oferta, se o aviso já saiu
+  (`seen`), se o técnico abriu o escopo (`scope`, que libera o aceite) e quando abriu pela primeira vez (`scope_at`, no
+  relógio do servidor, `serverNow`), que vai no aceite (§3). A oferta que sai da lista leva as marcas dela junto.
 
 ## 3. Envio (push) de operações feitas offline
 
@@ -88,9 +145,16 @@ Resultado por operação:
   Para mudanças de status do próprio técnico, omitir costuma ser o desejado (última ação vale).
 - Fotos/assinaturas: `POST /tickets/{id}/attachments` (multipart, `kind=photo|signature`)
   quando houver conexão, fora do lote.
-- Nota fiscal do técnico (`POST /me/invoices`, aba Ganhos): só online, fora do lote e da fila de fotos (não é de
-  uma OS). Sem rede, o app avisa e o formulário fica preenchido; a `client_upload_id` repetida nas novas tentativas
-  evita nota duplicada quando a resposta se perde (docs/API.md, "Notas fiscais dos técnicos").
+- Nota fiscal do técnico (`POST /me/invoices`, no mês da aba Faturamento): só online, fora do lote e da fila de fotos
+  (não é de uma OS). Sem rede, o app avisa e o formulário fica preenchido; a `client_upload_id` repetida nas novas
+  tentativas evita nota duplicada quando a resposta se perde (docs/API.md, "Notas fiscais dos técnicos").
+- Resposta à oferta (`POST /me/offers/{id}/accept` e `/decline`, docs/API.md "Ofertas de OS"): só online, fora do
+  lote (quem aceita primeiro leva, e o servidor diz na hora se a OS ainda está livre). O aceite leva o corpo opcional
+  `{"scope_read_at": "…"}`, a hora guardada em `field_offers.scope_at` (§2); a oferta cujo escopo foi aberto numa
+  versão antiga do app vai sem corpo. O servidor prende a hora entre a criação da oferta e o aceite, ignora valor
+  inválido e só grava na passagem para aceita; a central vê "Aceitou às 14:50 · escopo lido às 14:45". A API antiga
+  ignora o corpo.
+- Cadastro e perfil técnico (Configurações, §1): só online, fora do lote e da fila.
 
 ## 4. Tempo real
 
