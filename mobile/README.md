@@ -248,11 +248,13 @@ em [src/components/Offers.tsx](src/components/Offers.tsx), o topo em
 - **Tela da oferta** (`/oferta/<id>`): abrir chama `GET /me/offers/{id}`, que grava a leitura no servidor. Sem o
   cabeçalho nativo: o voltar redondo ([src/components/RoundBackButton.tsx](src/components/RoundBackButton.tsx)) fica
   fixo por cima em todos os estados (carregando, não encontrada, sem conexão, a oferta), e o voltar do Android e o gesto
-  do iOS continuam; aberta por uma notificação, sem tela anterior, ele leva a Hoje. De cima para baixo:
+  do iOS continuam; aberta por uma notificação, sem tela anterior, ele leva a Hoje. Com o leitor de tela ligado, o foco
+  vai para esse voltar quando a tela termina de entrar. De cima para baixo:
   - o desenho de mapa da área com o chip "bairro · cidade/UF" (ilustração: nunca o endereço nem o pino);
-  - o nº da OS grande com o selo **Aguardando resposta**, o título, **Você recebe** com o valor e a linha com a duração
-    estimada (cronômetro), a data por extenso ("Amanhã, 20 de novembro") e a hora, ou "Data a combinar"; depois,
-    "Responder até 15:30 · faltam 25min" (a ampulheta continua sendo o prazo);
+  - o nº da OS grande com o selo **Aguardando resposta** ao lado (ou embaixo, quando os dois não cabem na linha), o
+    título, **Você recebe** com o valor e a linha com a duração estimada (cronômetro), a data por extenso
+    ("Amanhã, 20 de novembro") e a hora, ou "Data a combinar"; depois, "Responder até 15:30 · faltam 25min" (a
+    ampulheta continua sendo o prazo);
   - o recado da central;
   - **Área do atendimento**: bairro e cidade, "O endereço completo aparece depois do aceite." e o botão de mapa, que
     busca "bairro, cidade - UF" no app de mapas;
@@ -1082,9 +1084,9 @@ docker start -a mc-mobile-check
   servidor antigo nas Estatísticas e no Histórico, "—" no total do Perfil e "Não foi possível carregar o faturamento."
   na aba Faturamento. Ali, o mês (`GET /me/earnings?month=`, que a API anterior tem) abre pelo **Outro mês** (ou por um
   cartão) só com os meses guardados de uma busca anterior que deu certo; sem nada guardado, a aba fica sem cartões e
-  sem o Outro mês, e o mês e o "Enviar nota fiscal" ficam fora de alcance. A API publicada em 20/11/2026 ainda não
-  manda o `invoices` dos meses: o mês sem valores e com nota fica sem cartão e abre pelo Outro mês. A API nova com o app
-  antigo funciona.
+  sem o Outro mês, e o mês e o "Enviar nota fiscal" ficam fora de alcance. A API publicada em 20/11/2026 não manda o
+  `invoices` dos meses: com ela, o mês sem valores e com nota fica sem cartão e abre pelo Outro mês. A API nova com o
+  app antigo funciona.
 - Rótulos e transições vêm das constantes copiadas da web, não de `GET /meta`; as ações exibidas vêm de
   `allowed_transitions` do servidor (recalculadas no aparelho só depois de uma ação offline).
 - Sem assinatura do cliente, edição dos dados da OS (`update`) ou abertura de OS pelo app.
