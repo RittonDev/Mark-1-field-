@@ -1,12 +1,9 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
-import { BadgeCheck, CalendarDays, Check, Wrench } from "lucide-react";
-import Link from "next/link";
+import { CalendarDays, Check, Wrench } from "lucide-react";
 import { useMemo } from "react";
-import { buttonClassName, EmptyState, ErrorBox, Skeleton } from "@/components/ui";
-import { api } from "@/lib/api";
+import { EmptyState } from "@/components/ui";
 import {
   ALL_SLOTS,
   DAY_PERIOD,
@@ -25,12 +22,11 @@ import {
 } from "@/lib/constants";
 import { formatDate } from "@/lib/format";
 import { labelMap, useOnboardingCatalog } from "@/lib/onboarding";
-import { useCan } from "@/lib/permissions";
-import type { Technician, TechProfilePart, TechProfileStamp, TechProfileStamps, UUID } from "@/lib/types";
+import type { Technician, TechProfilePart, TechProfileStamp, TechProfileStamps } from "@/lib/types";
 
 // O perfil técnico (o técnico mantém no app; a central só vê) em peças: a ficha do técnico (/tecnicos/[id]) mostra
 // cada uma na sua seção (Dias e horários, Transporte, Formação, Aptidões, Ferramental), com o carimbo de quando e por
-// onde chegou. TechProfileView, a vista de tudo junto da ficha antiga da lista, monta as mesmas peças.
+// onde chegou. As peças leem o detalhe (GET /technicians/{id}) que a ficha já tem.
 
 /** Etiqueta neutra (ferramentas, meios de transporte, CNH e o nível da aptidão). */
 const CHIP = "rounded-full border border-line px-2.5 py-0.5 text-xs text-ink";
@@ -230,174 +226,22 @@ export function EducationPart({ tech }: { tech: Technician }) {
   );
 }
 
-/** As áreas da ficha aprovada (rótulos do catálogo da homologação); `action` à direita do título. Sem áreas nem ação: nada. */
-export function HomologationAreas({ tech, action }: { tech: Technician; action?: React.ReactNode }) {
+/** As áreas da ficha aprovada (rótulos do catálogo da homologação); sem áreas, nada. */
+export function HomologationAreas({ tech }: { tech: Technician }) {
   const catalog = useOnboardingCatalog();
   const areas = useMemo(() => labelMap(catalog.data?.service_areas), [catalog.data]);
   const list = tech.service_areas ?? [];
-  if (!list.length && !action) return null;
+  if (!list.length) return null;
   return (
-    <section className="flex min-w-0 flex-col gap-2">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-xs font-bold tracking-wide text-ink-muted uppercase">Áreas da homologação</h3>
-        {action}
+    <section className="flex min-w-0 flex-col gap-2 border-t border-line pt-5">
+      <h3 className="text-xs font-bold tracking-wide text-ink-muted uppercase">Áreas da homologação</h3>
+      <div className="flex flex-wrap gap-1.5">
+        {list.map((k) => (
+          <span key={k} className="rounded-full bg-nav-active px-2.5 py-0.5 text-xs font-medium text-brand-ink">
+            {areas[k] ?? k}
+          </span>
+        ))}
       </div>
-      {list.length ? (
-        <div className="flex flex-wrap gap-1.5">
-          {list.map((k) => (
-            <span key={k} className="rounded-full bg-nav-active px-2.5 py-0.5 text-xs font-medium text-brand-ink">
-              {areas[k] ?? k}
-            </span>
-          ))}
-        </div>
-      ) : null}
     </section>
-  );
-}
-
-/** Cabeçalho de uma parte na vista de tudo junto: o título e, à direita, quando chegou ("Não informado" sem a parte). */
-function Part({
-  title,
-  stamp,
-  informed,
-  children,
-}: {
-  title: string;
-  stamp: TechProfileStamp | null | undefined;
-  /** A parte já foi informada (com data ou, sem ela, com dado): sem isso, só o "Não informado". */
-  informed: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="flex min-w-0 flex-col gap-2">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
-        <h3 className="text-xs font-bold tracking-wide text-ink-muted uppercase">{title}</h3>
-        {stamp || !informed ? <p className="text-xs text-ink-muted">{stampText(stamp)}</p> : null}
-      </div>
-      {informed ? children : null}
-    </section>
-  );
-}
-
-/**
- * "Perfil técnico" de tudo junto (só leitura), da ficha antiga em diálogo na lista de Técnicos: disponibilidade,
- * ferramental, transporte, aptidões e formação, cada parte com a data e a origem, e as áreas da homologação. Lê o
- * detalhe (GET /technicians/{id}); o tempo real (profile.changed) relê sozinho. `dirty`: o cadastro tem alteração não
- * salva (o link da ficha da homologação abre em outra aba). A ficha em página própria usa as peças acima.
- */
-export function TechProfileView({ technicianId, dirty }: { technicianId: UUID; dirty: boolean }) {
-  const canOnboarding = useCan("base.onboarding");
-  const query = useQuery({
-    queryKey: ["technicians", "one", technicianId],
-    queryFn: ({ signal }) => api.get<Technician>(`/technicians/${technicianId}`, undefined, { signal }),
-    staleTime: 30_000,
-  });
-  const detail = query.data;
-
-  if (!detail) {
-    // Tentando de novo depois do erro: o esqueleto volta enquanto busca.
-    return query.isError && !query.isFetching ? (
-      <ErrorBox message="Não deu para carregar o perfil técnico." onRetry={() => void query.refetch()} />
-    ) : (
-      <div role="status" aria-live="polite" className="flex flex-col gap-3">
-        <span className="sr-only">Carregando o perfil técnico</span>
-        <Skeleton className="h-48 w-full max-w-md" />
-        <div className="grid gap-3 lg:grid-cols-2">
-          {[0, 1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-16 w-full" />
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  // Áreas da homologação: as da ficha aprovada e o link para ela (com Homologação).
-  const homologation =
-    detail.service_areas.length || (detail.application_id && canOnboarding) ? (
-      <HomologationAreas
-        tech={detail}
-        action={
-          detail.application_id && canOnboarding ? (
-            // Com alteração não salva, abre em outra aba: sair daqui descartaria o cadastro.
-            <Link
-              href={`/homologacao?ficha=${detail.application_id}`}
-              className={buttonClassName("ghost", "sm")}
-              target={dirty ? "_blank" : undefined}
-              rel={dirty ? "noreferrer" : undefined}
-            >
-              <BadgeCheck className="size-3.5" />
-              Ver ficha da homologação
-            </Link>
-          ) : undefined
-        }
-      />
-    ) : null;
-
-  const info = profileInfo(detail);
-  // Servidor sem o perfil técnico (antes de a API nova subir): o detalhe vem sem as partes.
-  if (!info) {
-    return (
-      <div className="flex flex-col gap-5">
-        <ProfileUnavailable />
-        {homologation}
-      </div>
-    );
-  }
-  const { stamps, informed } = info;
-
-  if (!Object.values(informed).some(Boolean) && !homologation) {
-    return (
-      <EmptyState
-        icon={<Wrench />}
-        title="Perfil técnico ainda não informado"
-        description="O técnico preenche no app, em Configurações."
-      />
-    );
-  }
-
-  const toolsCount = (detail.tools ?? []).length;
-  return (
-    <div className="flex flex-col gap-5">
-      {query.isRefetchError ? (
-        <p className="flex flex-wrap items-center gap-x-2 text-xs text-ink-muted">
-          Não deu para atualizar agora.
-          <button
-            type="button"
-            onClick={() => void query.refetch()}
-            disabled={query.isFetching}
-            className="rounded font-semibold text-ink underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none disabled:opacity-60"
-          >
-            Tentar de novo
-          </button>
-        </p>
-      ) : null}
-      <p className="text-xs text-ink-muted">O técnico mantém estes dados no app.</p>
-
-      <Part title="Disponibilidade" stamp={stamps.availability} informed={informed.availability}>
-        <AvailabilityPart tech={detail} />
-      </Part>
-
-      <div className="grid gap-5 lg:grid-cols-2">
-        <Part title={toolsCount ? `Ferramental · ${toolsCount}` : "Ferramental"} stamp={stamps.tools} informed={informed.tools}>
-          <ToolsPart tech={detail} />
-        </Part>
-
-        <Part title="Transporte" stamp={stamps.transport} informed={informed.transport}>
-          <TransportPart tech={detail} />
-        </Part>
-      </div>
-
-      <div className="grid gap-5 lg:grid-cols-2">
-        <Part title="Aptidões" stamp={stamps.skills} informed={informed.skills}>
-          <SkillsPart tech={detail} />
-        </Part>
-
-        <Part title="Formação" stamp={stamps.education} informed={informed.education}>
-          <EducationPart tech={detail} />
-        </Part>
-      </div>
-
-      {homologation}
-    </div>
   );
 }
