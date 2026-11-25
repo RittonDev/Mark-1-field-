@@ -10,7 +10,7 @@ Autenticação: `Authorization: Bearer <access_token>`. Erros seguem `{"detail":
 Valor que o banco recusa (SQLSTATE da classe 22, "data exception": texto maior que a coluna, U+0000 num texto que vai
 ao banco como está) responde 422 em qualquer rota, com um aviso no log (o SQLSTATE, sem traceback):
 `{"detail": "Algum valor está fora do tamanho ou do formato aceito. Confira os campos."}`. O asyncpg entrega esses
-erros como `DBAPIError` genérico, e o handler de `main.py` decide pelo SQLSTATE (a API publicada em 20/11/2026 responde
+erros como `DBAPIError` genérico, e o handler de `main.py` decide pelo SQLSTATE (desde 24/11/2026; antes, a API respondia
 500 nesses casos). Registro repetido e referência que não existe (`IntegrityError`) continuam 409 com a mensagem da
 restrição; os outros erros do banco seguem como erro não tratado: 500 `{"detail": "Erro interno. Tente de novo; se
 continuar, avise a central."}` e o log "Erro não tratado em …". O erro do banco vai para o log com o SQL sem os
@@ -1053,7 +1053,7 @@ os que não têm cartão). Código: `services/payouts.py` (`MONTHS_DEFAULT`, `MO
   `count` = `to_pay.count + expected.count + paid.count`; `total` = a soma dos três (o "Valor total" do cartão);
   `last_paid_at` = o último pagamento das OS do mês.
 - `invoices` = quantas notas do técnico com a competência do mês não foram recusadas (aguardando conferência ou
-  conferidas). A API publicada em 20/11/2026 não manda o campo: ausente, o app conta 0. Não muda o `state`. A nota
+  conferidas), desde 24/11/2026; a API de antes não manda o campo: ausente, o app conta 0. Não muda o `state`. A nota
   pode cobrir OS de meses anteriores, então o mês da competência pode vir `empty` com nota: o app mostra o cartão dele
   ("Sem valores", R$ 0,00 e "1 nota fiscal"), e é por ele que o técnico abre, apaga ou acompanha a nota. Enviada noutra
   competência, o app vai do envio direto para o mês dela (o aviso diz qual), em vez de voltar ao mês de onde veio.
@@ -1601,8 +1601,8 @@ Na web (cadastro do técnico), a senha aparece como "Senha redefinida (provisór
   - Páginas: `before` = `"{created_at}|{id}"` da última linha recebida (o `created_at` como veio, ISO com fuso) traz
     as `limit` linhas seguintes, mais antigas, sem repetir nem pular (o id desempata as do mesmo instante). Sem
     `before`, ou vazio, as mais novas. Estragado (mais de 100 caracteres, separador errado, data sem fuso ou fora da
-    faixa, id que não é UUID): 422 `{"detail": "Página do histórico inválida. Recarregue a ficha."}`. A API publicada
-    em 20/11/2026 não tem o parâmetro: ignora e devolve as mais novas de novo.
+    faixa, id que não é UUID): 422 `{"detail": "Página do histórico inválida. Recarregue a ficha."}`. Desde 24/11/2026; a API
+    de antes não tem o parâmetro: ignora e devolve as mais novas de novo.
   - Com Pagamentos (Visualizar ou Editar), como acima.
   - Com Técnicos e sem Pagamentos (`commercial.payouts` Sem acesso): os itens `pix_holder` não vêm e o `from`/`to` de
     `pix` vira `"***"` (null continua null). A troca só do titular aparece como
@@ -1936,8 +1936,8 @@ ficha mostram erro). O app sobe depois da API: `MyProfileUpdate` recusa campo de
 receberia 422 "Campo não aceito"; nas telas, ele trata o servidor antigo ("Indisponível no momento" / "O servidor
 ainda não tem esta parte do cadastro. Tente de novo mais tarde."). A API nova com o app velho funciona. Publicado
 noutro dia que não 19/11/2026, a versão do aviso vira a data do dia ("AAAA-MM-DD"), nos três lugares, no mesmo dia.
-Subiu em 20/11/2026 (a versão do aviso é "2026-11-20"). As correções que vieram depois são só código, sem migração
-nova: o `before` do histórico do cadastro, o `invoices` dos meses do Faturamento, o cursor "fora da faixa" do
+Subiu em 20/11/2026 (a versão do aviso é "2026-11-20"). As correções que vieram depois (24/11/2026) são só
+código, sem migração nova: o `before` do histórico do cadastro, o `invoices` dos meses do Faturamento, o cursor "fora da faixa" do
 `/me/history`, as travas do `PATCH /me/profile` e do catálogo, o 422 dos erros do banco da classe 22, os limites por
 item e a limpeza dos invisíveis. A web e o app novos funcionam com a API de 20/11/2026 (sem o `before`, a ficha mostra
 as 50 linhas mais novas do histórico; sem o `invoices`, o mês sem valores fica sem cartão e abre pelo "Outro mês"), e

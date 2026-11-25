@@ -120,7 +120,7 @@ mostra uma mensagem própria.
   puxar, quando uma nota entra ou sai neste aparelho e, depois de uma rodada do sync, se a última busca tem 2 min ou
   mais (pagar marca a OS como alterada e a rodada traz). Um pedido dos meses por vez. O "ocultar valores" esconde só a
   tela: os valores guardados continuam no kv. O mês abre pelo cartão (o mês sem valores só tem cartão com nota da
-  competência, `invoices` maior que 0; a API publicada em 20/11/2026 não manda o campo, e ausente vale 0) ou pelo
+  competência, `invoices` maior que 0, desde 24/11/2026; sem o campo, vale 0) ou pelo
   "Outro mês", que abre qualquer mês de 2000-01 ao atual e só aparece com os meses guardados. A nota enviada noutra
   competência leva o app ao mês dela.
 - **Ofertas** (`GET /me/offers`, buscada como diz o §4; kv `field_offers`): junto da lista, por oferta, se o aviso já
