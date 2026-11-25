@@ -249,6 +249,11 @@ export interface AssignableUser {
   team_id: UUID | null;
   team_name: string | null;
   open_tickets: number;
+  /** Técnico: Inativo e Bloqueado vêm com o motivo e não podem ser escolhidos. A API antiga não manda. */
+  operational_status?: OperationalStatus;
+  operational_reason?: string | null;
+  /** Os períodos que não terminaram (escolhível, com aviso). */
+  unavailability?: UnavailabilityPeriod[];
 }
 
 export interface Team {
@@ -1036,14 +1041,31 @@ export interface ApplicationSummary {
   created_at: ISODate;
   reviewed_at: ISODate | null;
   user_id: UUID | null;
+  /** null: o candidato ainda não abriu o link de validação. */
+  email_verified_at: ISODate | null;
+  /** Ficha reprovada que voltou para análise (Pendentes, chip "Reaberta"). */
+  reopened_at: ISODate | null;
 }
 
 export interface ApplicationDetail extends ApplicationSummary {
   document: string;
   birth_date: string | null;
   postal_code: string | null;
+  /** O logradouro (fichas antigas: a linha inteira do endereço). */
   address: string | null;
+  address_number: string | null;
+  address_complement: string | null;
+  address_district: string | null;
+  phone_secondary: string | null;
+  rg_number: string | null;
+  rg_issuer: string | null;
+  rg_state: string | null;
+  bio: string | null;
   company_document: string | null;
+  company_name: string | null;
+  company_trade_name: string | null;
+  vehicle_model: string | null;
+  vehicle_plate: string | null;
   skills: { name: string; level: string }[];
   certifications: string | null;
   tools: string | null;
@@ -1058,6 +1080,13 @@ export interface ApplicationDetail extends ApplicationSummary {
   review_note: string | null;
   invite_label: string | null;
   photo_url: string | null;
+  /** O candidato criou a senha na ficha (sem ela, a boas-vindas leva o link para criar). */
+  has_password: boolean;
+  /** As análises, na ordem em que aconteceram. */
+  reviews: ApplicationReview[];
+  reopened_by: Ref | null;
+  /** Reprovada: quando a exclusão automática apaga a ficha. */
+  purge_at: ISODate | null;
 }
 
 // Base técnica (gestão de acesso dos técnicos)
@@ -1074,7 +1103,7 @@ export interface Technician {
   base_source?: "history" | "home" | null;
   base_visits?: number;
   last_visit_at?: ISODate | null;
-  /** Ficha completa: endereço, jornada e serviços que faz. */
+  /** Ficha completa: endereço (address_line é o logradouro), jornada e serviços que faz. */
   address_line?: string | null;
   address_district?: string | null;
   address_zip?: string | null;
@@ -1107,12 +1136,51 @@ export interface Technician {
   tools?: Ref[] | null;
   education?: EducationItem[] | null;
   tech_profile_updated?: TechProfileStamps | null;
-  /** Tem chave PIX (ele cadastra no app, em Perfil › Configurações › Chave PIX). A chave fica em Pagamentos (PayoutBoard.pix). */
+  /**
+   * @deprecated Sai no fechamento da Entrega 1 (V1). API antiga: tem chave PIX. A nova manda payout_methods_count.
+   */
   has_pix?: boolean;
-  /** Quando a chave mudou ("Chave nova" por PIX_RECENT_DAYS); null sem chave. */
+  /** @deprecated Sai no fechamento da Entrega 1 (V1). API antiga: quando a chave PIX mudou. A nova manda payout_changed_at. */
   pix_updated_at?: ISODate | null;
   /** Elo (o selo da lista): a conta guardada, de até 6 h atrás. Sem conta ainda: bronze, since null. */
   level?: LevelSummary;
+  /** Situação na operação (só a central vê). Lista e detalhe; a API antiga não manda (vale "active"). */
+  operational_status?: OperationalStatus;
+  operational_reason?: string | null;
+  operational_changed_at?: ISODate | null;
+  operational_changed_by?: Ref | null;
+  /** Os períodos que não terminaram, pelo início. */
+  unavailability?: UnavailabilityPeriod[];
+  /** null: o e-mail de login nunca foi validado. */
+  email_verified_at?: ISODate | null;
+  /** E-mail novo pedido no app, esperando o link: o login continua `email` até lá. */
+  email_pending?: string | null;
+  /** Formas de recebimento cadastradas (0: "Sem forma de recebimento"); a lista fica com Pagamentos. */
+  payout_methods_count?: number;
+  /** Última troca do destino do pagamento ("Nova" por PAYOUT_RECENT_DAYS); null sem forma. */
+  payout_changed_at?: ISODate | null;
+  // Só no detalhe (GET /technicians/{id} e as respostas de um técnico): dados pessoais, empresa e veículo.
+  /** 11 números. */
+  cpf?: string | null;
+  rg_number?: string | null;
+  rg_issuer?: string | null;
+  /** UF do órgão emissor. */
+  rg_state?: string | null;
+  /** "AAAA-MM-DD". */
+  birth_date?: string | null;
+  phone_secondary?: string | null;
+  bio?: string | null;
+  address_number?: string | null;
+  address_complement?: string | null;
+  /** CNPJ, 14 caracteres (pode ter letras), sem pontuação. */
+  company_document?: string | null;
+  /** Razão social. */
+  company_name?: string | null;
+  /** Nome fantasia. */
+  company_trade_name?: string | null;
+  vehicle_model?: string | null;
+  /** 7 caracteres, sem hífen ("ABC1234", "ABC1D23"). */
+  vehicle_plate?: string | null;
 }
 
 export interface TemporaryPassword {
@@ -1801,6 +1869,8 @@ export interface NearbyTechnician {
   open_tickets: number;
   on_shift: boolean;
   reasons: string[];
+  /** A API antiga não manda (vale "active"). */
+  operational_status?: OperationalStatus;
 }
 
 export interface NearbyResult {
@@ -1832,6 +1902,8 @@ export interface FavoriteTechnician {
   note: string | null;
   set_by: Ref | null;
   set_at: ISODate | null;
+  /** Fora de "active", não entra no automático. A API antiga não manda (vale "active"). */
+  operational_status?: OperationalStatus;
 }
 
 export interface FavoriteCity {
@@ -1969,11 +2041,14 @@ export interface MyEarnings extends PayoutList {
 }
 
 /**
- * GET /payouts da central. Com `with_pix=true`, `pix` traz a chave de cada técnico das linhas (e do filtro
- * `technician_id`) que tem chave; sem ele, `{}`. Relatórios não pede.
+ * GET /payouts da central. Com `with_payout_methods=true`, `payout_methods` traz a preferencial e o total de formas de
+ * cada técnico das linhas (e do filtro `technician_id`) que tem forma de recebimento (sem forma, fora do mapa); sem o
+ * parâmetro, `{}`. Relatórios não pede.
  */
 export interface PayoutBoard extends PayoutList {
-  pix: Record<UUID, PixInfo>;
+  payout_methods: Record<UUID, PayoutMethodSummary>;
+  /** @deprecated Sai no fechamento da Entrega 1 (V1). API antiga, com `with_pix=true`: a chave PIX de cada técnico. */
+  pix?: Record<UUID, PixInfo>;
 }
 
 /**
@@ -2073,18 +2148,18 @@ export type PixKeyType = "cpf" | "cnpj" | "email" | "phone" | "random";
 /**
  * A chave PIX como está gravada (normalizada; formatPixKey para mostrar; copiar leva a chave crua): CPF com 11
  * dígitos, CNPJ com 14 caracteres em maiúsculas, e-mail em minúsculas, celular "+55" e 11 dígitos, chave aleatória
- * 8-4-4-4-12.
+ * 8-4-4-4-12. Só em MyProfile.pix (o app antigo); o resto usa PayoutMethod.
  */
 export interface PixInfo {
   key_type: PixKeyType;
   key: string;
   /** Titular da conta: quem paga compara com o nome que o banco mostra. */
   holder_name: string | null;
-  /** Quando a chave mudou ("Chave nova" por PIX_RECENT_DAYS). */
+  /** Quando a chave mudou (o changed_at da forma de recebimento). */
   updated_at: ISODate | null;
 }
 
-/** GET /me/profile (só o técnico). Endereço e PIX não vão no /auth/me. */
+/** GET /me/profile (só o técnico). Endereço e formas de recebimento não vão no /auth/me. Nada da situação na operação. */
 export interface MyProfile {
   id: UUID;
   name: string;
@@ -2095,12 +2170,48 @@ export interface MyProfile {
   home_city: string | null;
   home_state: string | null;
   coverage_area: string | null;
+  /** O logradouro (endereços antigos: a linha inteira). */
   address_line: string | null;
+  address_number: string | null;
+  address_complement: string | null;
   address_district: string | null;
   address_zip: string | null;
   /** Link assinado de 12 h (ou a foto do Field Control). */
   avatar_url: string | null;
+  /** @deprecated app antigo: a preferencial quando é PIX (null se a preferencial for conta ou sem forma). */
   pix: PixInfo | null;
+  /** 11 números; null: não informado (o técnico informa uma vez; depois, só a central corrige). */
+  cpf: string | null;
+  rg_number: string | null;
+  rg_issuer: string | null;
+  /** UF do órgão emissor. */
+  rg_state: string | null;
+  /** "AAAA-MM-DD". */
+  birth_date: string | null;
+  /** "(11) 3333-4444". */
+  phone_secondary: string | null;
+  bio: string | null;
+  /** CNPJ, 14 caracteres (pode ter letras). */
+  company_document: string | null;
+  /** Razão social. */
+  company_name: string | null;
+  /** Nome fantasia. */
+  company_trade_name: string | null;
+  vehicle_model: string | null;
+  /** 7 caracteres, sem hífen ("ABC1234", "ABC1D23"). */
+  vehicle_plate: string | null;
+  /** E-mail novo esperando o link: o login continua `email` até lá. */
+  email_pending: string | null;
+  /** null: o e-mail de login nunca foi validado. */
+  email_verified_at: ISODate | null;
+  /** Último link de validação pedido (para o pendente ou para o atual). */
+  email_link_sent_at: ISODate | null;
+  /** Envio de e-mail ligado no servidor: sem ele, o e-mail fica só leitura e a troca é pela central. */
+  mail_enabled: boolean;
+  /** A preferencial primeiro, depois as mais novas. */
+  payout_methods: PayoutMethod[];
+  /** Os períodos que não terminaram, pelo início. */
+  unavailability: UnavailabilityPeriod[];
   /** Perfil técnico (Configurações › Atendimento). Ferramentas: só as ativas do catálogo, na ordem do nome. */
   tool_ids: UUID[];
   /** Na ordem da grade (seg a dom; manhã, tarde, noite, madrugada). */
@@ -2115,12 +2226,16 @@ export interface MyProfile {
 }
 
 /**
- * PATCH /me/profile: mande só o que mudou. E-mail e chave PIX (cadastrar, trocar tipo, chave ou titular, remover)
- * pedem `current_password`. Recusas, nesta ordem (422): com a senha provisória, "Crie sua senha no app antes de mudar o
- * e-mail ou a chave PIX"; e-mail da empresa, "Use um e-mail que não seja da empresa"; sem a senha, "Confirme com a sua
- * senha atual para mudar o e-mail ou a chave PIX"; errada, "Senha atual incorreta"; só então "E-mail já cadastrado".
- * 429 com Retry-After: 5 senhas erradas em 15 min (somando as da troca de senha) ou mais de 10 pedidos de troca de
- * e-mail na hora. Os campos do perfil técnico não pedem senha e valem inteiros (a lista substitui a gravada).
+ * PATCH /me/profile: mande só o que mudou (campo desconhecido: 422). E-mail e dados da empresa pedem `current_password`.
+ * Recusas, nesta ordem (422): com a senha provisória, "Crie sua senha no app antes de mudar o e-mail, os dados da
+ * empresa ou as formas de recebimento"; e-mail da empresa, "Use um e-mail que não seja da empresa"; sem a senha,
+ * "Confirme com a sua senha atual para mudar o e-mail, os dados da empresa ou as formas de recebimento"; errada, "Senha
+ * atual incorreta"; só então "E-mail já cadastrado". E-mail novo não troca o login: vira `email_pending` e recebe o link
+ * de validação (envio desligado: 422 "O envio de e-mail está desligado: para trocar o e-mail, fale com a central pelo
+ * WhatsApp"; endereço que não recebe: 422 "Este e-mail não recebe mensagens"); o mesmo do login com troca pendente
+ * cancela a troca (sem senha). `pix`: 422 "Atualize o app: a chave PIX agora fica em Configurações › Formas de
+ * recebimento". 429 com Retry-After: 5 senhas erradas em 15 min (somando as da troca de senha) ou mais de 10 pedidos de
+ * troca de e-mail na hora. Os campos do perfil técnico não pedem senha e valem inteiros (a lista substitui a gravada).
  */
 export interface MyProfileUpdate {
   /** Só letras (com acento), espaço, apóstrofo, hífen e ponto; sem link (422 "Use só letras no nome"). */
@@ -2133,12 +2248,37 @@ export interface MyProfileUpdate {
   /** UF em maiúsculas. */
   home_state?: string;
   coverage_area?: string | null;
+  /** O logradouro. Sem address_number no corpo (app antigo): grava a linha como logradouro e limpa número e complemento. */
   address_line?: string | null;
   address_district?: string | null;
   /** 8 dígitos; volta "00000-000". Vazio ou null tira o CEP. */
   address_zip?: string | null;
-  /** null tira a chave. */
+  /** @deprecated Sai no fechamento da Entrega 1 (V1). A API nova recusa (422): as chaves ficam em payout-methods. */
   pix?: PixIn | null;
+  /**
+   * Só com o CPF gravado vazio (de outro cadastro: 409 "Este CPF já está em outro cadastro"); gravado e diferente: 422
+   * "O CPF já foi informado. Para corrigir, fale com a central pelo WhatsApp".
+   */
+  cpf?: string;
+  /** Os três ou nenhum ("Informe o número, o órgão emissor e a UF do RG"); número vazio limpa os três. */
+  rg_number?: string | null;
+  rg_issuer?: string | null;
+  rg_state?: string | null;
+  /** "AAAA-MM-DD", de 18 a 90 anos no dia de Brasília; null limpa. */
+  birth_date?: string | null;
+  phone_secondary?: string | null;
+  address_number?: string | null;
+  address_complement?: string | null;
+  /** Até 500 caracteres; null limpa. */
+  bio?: string | null;
+  /** Pedem a senha. Razão social ou nome fantasia sem CNPJ: 422 "Informe o CNPJ". */
+  company_document?: string | null;
+  company_name?: string | null;
+  company_trade_name?: string | null;
+  vehicle_model?: string | null;
+  vehicle_plate?: string | null;
+  /** A lista inteira dos que não terminaram (até 10); [] ou null limpa. */
+  unavailability?: UnavailabilityIn[] | null;
   /**
    * Ids ativos de GET /technician-tools, a lista inteira (até 200). Desativado é ignorado; id que não existe: 422
    * "Ferramenta não encontrada. Atualize a lista.". [] ou null limpa.
@@ -2155,12 +2295,140 @@ export interface MyProfileUpdate {
   current_password?: string;
 }
 
+/** @deprecated Sai no fechamento da Entrega 1 (V1). O `pix` do PATCH /me/profile da API antiga; a nova usa PayoutMethodIn. */
 export interface PixIn {
   key_type: PixKeyType;
   /** Como a pessoa digitou: o servidor normaliza (e valida CPF, CNPJ, e-mail, celular com o 9 e chave aleatória). */
   key: string;
   /** 3 a 160 caracteres. */
   holder_name: string;
+}
+
+// --------------------------------------------------------------------------- cadastro V2 (Entrega 1)
+
+/** Situação na operação: só a central vê. Receber OS pede "active" e o acesso liberado. */
+export type OperationalStatus = "active" | "inactive" | "blocked";
+export type PayoutMethodKind = "pix" | "bank";
+export type BankAccountType = "checking" | "savings" | "payment";
+
+interface PayoutMethodBase {
+  id: UUID;
+  /** Uma só no conjunto (com a lista não vazia, sempre uma): onde a central paga. */
+  preferred: boolean;
+  holder_name: string;
+  /** CPF (11) ou CNPJ (14, pode ter letras), sem pontuação; na chave CPF/CNPJ, a própria chave. null: chave antiga. */
+  holder_document: string | null;
+  created_at: ISODate;
+  /** Última troca da chave, da conta ou do titular. */
+  changed_at: ISODate;
+}
+
+export interface PixPayoutMethod extends PayoutMethodBase {
+  kind: "pix";
+  pix_key_type: PixKeyType;
+  pix_key: string;
+}
+
+export interface BankPayoutMethod extends PayoutMethodBase {
+  kind: "bank";
+  /** 3 números. */
+  bank_code: string;
+  bank_name: string;
+  /** 4 números. */
+  branch: string;
+  account_number: string;
+  /** Um número ou "X". */
+  account_digit: string;
+  account_type: BankAccountType;
+}
+
+/** A preferencial primeiro, depois as mais novas. O JSON traz os campos dos dois tipos (null nos do outro). */
+export type PayoutMethod = PixPayoutMethod | BankPayoutMethod;
+
+/** Na central (Pagamentos Ver). */
+export type PayoutMethodAdmin = PayoutMethod & {
+  /** O titular não é o técnico nem a empresa dele. */
+  holder_differs: boolean;
+  /** max(changed_at, quando virou a preferencial): "Nova" por PAYOUT_RECENT_DAYS. */
+  destination_changed_at: ISODate;
+};
+
+export interface PayoutMethodSummary {
+  preferred: PayoutMethodAdmin;
+  total: number;
+}
+
+/** POST e PUT /me/profile/payout-methods (o tipo não muda na edição). */
+export type PayoutMethodIn =
+  | { kind: "pix"; pix_key_type: PixKeyType; pix_key: string; holder_name: string; holder_document?: string | null }
+  | {
+      kind: "bank";
+      bank_code: string;
+      bank_name: string;
+      branch: string;
+      account_number: string;
+      account_digit: string;
+      account_type: BankAccountType;
+      holder_name: string;
+      holder_document: string;
+    };
+
+export type PayoutMethodCreate = PayoutMethodIn & { preferred?: boolean; current_password: string };
+export type PayoutMethodUpdate = PayoutMethodIn & { current_password: string };
+export interface PasswordConfirm { current_password: string }
+
+/** "AAAA-MM-DD", os dois dias inclusive. Sem motivo (LGPD). */
+export interface UnavailabilityPeriod { id: UUID; start: string; end: string }
+/** No PATCH /me/profile: sem id (ou com um que não está gravado) é novo. */
+export interface UnavailabilityIn { id?: UUID | null; start: string; end: string }
+
+/** GET /public/cep/{cep}: cep "01001-000"; CEP geral da cidade: street e district null. */
+export interface CepAddress { cep: string; street: string | null; district: string | null; city: string; state: string }
+
+export type EmailTemplate = "verify_email" | "welcome" | "password_reset";
+export type EmailLogStatus = "pending" | "sent" | "failed" | "expired";
+/** E-mail pedido agora: na fila, envio desligado (entra e vence) ou sem endereço que recebe. */
+export interface EmailQueued { status: "queued" | "not_configured" | "not_sendable"; to: string | null }
+/** GET /technicians/{id}/emails, o mais novo primeiro. */
+export interface EmailLog {
+  id: UUID;
+  template: EmailTemplate;
+  to_email: string;
+  status: EmailLogStatus;
+  attempts: number;
+  created_at: ISODate;
+  sent_at: ISODate | null;
+  created_by: Ref | null;
+}
+
+/** Motivo de 3 a 500 caracteres; cut_access só fora de "active" e com o acesso liberado. */
+export interface OperationalStatusIn { status: OperationalStatus; reason: string; cut_access?: boolean }
+
+export interface ApplicationReview { action: "approved" | "rejected" | "reopened" | "expired"; at: ISODate; by: Ref | null; note: string | null }
+export interface ApplicationApproved { technician: User; welcome: EmailQueued }
+
+/** signup: a ficha; change: o login passou a ser `email`; check: o login de sempre. */
+export interface VerifyEmailResult { email: string; kind: "signup" | "change" | "check" }
+/** Não gasta o link. email mascarado ("t***@exemplo.com"); create: o link da boas-vindas. */
+export interface PasswordResetCheck { email: string; name: string; kind: "reset" | "create"; app_url: string | null }
+export interface PasswordResetDone { email: string; app_url: string | null }
+
+/** `?secao=` da ficha na central e linha das Configurações do app (TECH_SECTION_GROUPS). */
+export type TechSectionKey =
+  | "foto" | "dados-pessoais" | "endereco" | "contato" | "credenciais" | "documentos" | "mini-biografia"
+  | "dados-empresariais" | "recebimento"
+  | "dias-e-horarios" | "transporte" | "curriculo" | "formacao" | "aptidoes" | "ferramental";
+
+/** app: o técnico; central; ficha: a aprovação na Homologação; link: o técnico pelo link do e-mail. */
+export type UserChangeVia = "app" | "central" | "ficha" | "link";
+
+/**
+ * GET /meta (público): o app e a central leem os rótulos e o fluxo das OS de lib/constants.ts; daqui só o que a tela
+ * usa. A API antiga não manda `mail_enabled`: vale desligado.
+ */
+export interface ApiMeta {
+  /** Envio de e-mail ligado (SMTP configurado no servidor). */
+  mail_enabled?: boolean;
 }
 
 // --------------------------------------------------------------------------- perfil técnico (o técnico mantém no app; a central vê)
@@ -2290,11 +2558,43 @@ export type UserChangeField =
   | "avatar"
   /**
    * to "provisória" (redefinição em Técnicos), "definida pela central" (Usuários), "criada no app" (o técnico trocou
-   * a provisória) ou "trocada no app".
+   * a provisória), "trocada no app", "criada pelo link do e-mail" ou "redefinida pelo link do e-mail".
    */
-  | "password";
+  | "password"
+  /** "123.456.789-09". */
+  | "cpf"
+  /** "12.345.678-9 · SSP/SP". */
+  | "rg"
+  /** "25/11/1990". */
+  | "birth_date"
+  | "phone_secondary"
+  | "address_number"
+  | "address_complement"
+  | "bio"
+  /** "12.345.678/0001-95". */
+  | "company_document"
+  | "company_name"
+  | "company_trade_name"
+  /** "Modelo Exemplo · ABC-1234". */
+  | "vehicle"
+  /** `to` as que entraram e `from` as que saíram ("; "). Para quem não tem Pagamentos, "***". */
+  | "payout_methods"
+  /** A preferencial mascarada. Para quem não tem Pagamentos, "***". */
+  | "payout_preferred"
+  /** "Ativo", "Inativo" ou "Bloqueado"; o motivo vai em UserChange.note. */
+  | "operational_status"
+  /** `to` os períodos que entraram e `from` os que saíram ("; "). */
+  | "unavailability"
+  /** O e-mail pedido no app (to no pedido, from no cancelamento ou na troca). */
+  | "email_pending"
+  /** "validado" ou "pendente". */
+  | "email_verified"
+  /** "enviado para {email}". */
+  | "password_link"
+  /** "Aprovado na homologação (HOM-XXXXXXXX)". */
+  | "application";
 
-/** Uma mudança, com o texto pronto para a tela (team: o nome do grupo; is_active: "Liberado" ou "Bloqueado"). */
+/** Uma mudança, com o texto pronto para a tela (team: o nome do grupo; is_active: "Liberado" ou "Sem acesso"). */
 export interface UserChangeItem {
   field: UserChangeField;
   from: string | null;
@@ -2305,9 +2605,14 @@ export interface UserChangeItem {
 export interface UserChange {
   id: UUID;
   created_at: ISODate;
-  /** "app": o próprio técnico, em Perfil › Configurações; "central": Técnicos, Usuários ou Pagamentos. */
-  via: "app" | "central";
+  /**
+   * "app": o próprio técnico, em Perfil › Configurações; "central": Técnicos, Usuários ou Pagamentos; "ficha": a
+   * aprovação na Homologação; "link": o técnico, pelo link do e-mail.
+   */
+  via: UserChangeVia;
   actor: Ref | null;
+  /** O motivo da mudança (a situação na operação pede um); null sem motivo. */
+  note: string | null;
   changes: UserChangeItem[];
 }
 
@@ -2317,7 +2622,7 @@ export interface UserChange {
  */
 export interface ProfileChangedData {
   fields: UserChangeField[];
-  via: "app" | "central";
+  via: UserChangeVia;
   /**
    * Só na troca de e-mail ou de chave PIX pelo app até 72 h depois de a central redefinir a senha (Técnicos ou
    * Usuários): quem redefiniu ("Sistema" sem autor) e quando. Ausente nos outros casos.
