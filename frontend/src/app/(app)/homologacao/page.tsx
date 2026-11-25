@@ -367,6 +367,7 @@ function OnboardingView() {
                                   waitingDays > WAITING_DAYS_ALERT ? "font-medium text-red-700 dark:text-red-400" : undefined
                                 }
                               >
+                                {a.reopened_at ? "reaberta " : ""}
                                 {waitingDays < 1 ? "hoje" : `há ${waitingDays} ${waitingDays === 1 ? "dia" : "dias"}`}
                               </span>
                             </>

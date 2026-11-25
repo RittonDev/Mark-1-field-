@@ -4,7 +4,8 @@
 // (vazio, igual ao aberto ou preenchido pela busca anterior) recebe o valor; o digitado fica e, se difere, a tela mostra
 // "CEP de {cepSummary}." + "Usar este endereço".
 // Sem import de valor: a sonda tests/address.test.mjs roda direto no Node.
-import type { CepAddress, CepSlots } from "./constants";
+import type { CepSlots } from "./constants";
+import type { CepAddress } from "./types";
 
 /** Logradouro, bairro, cidade e UF na tela; no modo "line", `street` é a linha "rua, número e complemento". */
 export type AddressSlots = CepSlots;
