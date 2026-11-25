@@ -686,11 +686,15 @@ não têm texto de explicação no topo: só os vazios, os limites e os avisos d
 [src/lib/techProfileForm.ts](src/lib/techProfileForm.ts).
 
 - **Disponibilidade**: os 7 dias, cada um num cartão que abre os 4 turnos (Manhã 06h–12h, Tarde 12h–18h, Noite 18h–24h
-  e Madrugada 00h–06h) em fichas de duas colunas; todos começam fechados e mais de um pode ficar aberto. Não é a
-  jornada. Num dia útil com turno, quando outro dia útil está diferente, aparece **Copiar para os dias úteis** (pergunta
-  antes só quando muda um dia útil que já tinha turnos).
-- **Transporte**: os meios (Carro, Moto, Bicicleta, Transporte público, Carro de aplicativo, A pé) e **Tenho CNH**, que
-  vão juntos. Nunca informado, a tela começa sem nada marcado e nada é enviado antes do primeiro toque.
+  e Madrugada 00h–06h) em fichas de duas colunas (uma por linha com a fonte do aparelho acima de 1,2×, para
+  "Madrugada" não quebrar); todos começam fechados e mais de um pode ficar aberto. Não é a jornada. Num dia útil com
+  turno, quando outro dia útil está diferente, aparece **Copiar para os dias úteis** (pergunta antes só quando muda um
+  dia útil que já tinha turnos).
+- **Transporte**: os meios (Carro, Moto, Bicicleta, Transporte público, Carro de aplicativo, A pé), **Nenhum** no fim
+  dos meios e **Tenho CNH**, que vão juntos. "Nenhum" fica marcado quando o transporte foi informado sem meio; tocar
+  nele grava sem meio e mantém a CNH ("Nenhum · sem CNH" ou "Nenhum · com CNH"), tocar num meio o desmarca, e tocar
+  nele já marcado não faz nada. Nunca informado (`TRANSPORT_UNSET`), a tela começa sem nada marcado, nada é enviado
+  antes do primeiro toque, e qualquer toque grava, mesmo voltando a tudo desmarcado antes do envio.
 - **Ferramental**: o catálogo que a central mantém (Configurações › Técnicos, na central), em ordem alfabética, com
   caixa de marcar; com mais de 15 ferramentas, aparece a busca. Ferramenta desativada pela central some da lista e do
   cadastro (fica guardada no servidor e volta se for reativada).
@@ -710,10 +714,17 @@ não têm texto de explicação no topo: só os vazios, os limites e os avisos d
   (em andamento)"). **Adicionar formação** e o lápis abrem a folha; o início e o fim saem de uma folha de meses (de
   01/1950 ao mês atual; o fim não vem antes do início), e **Em andamento** limpa o fim. A lixeira exclui, com
   confirmação.
-- **Aptidões e Formação**: uma gravação por vez; enquanto uma está no ar, incluir, editar e excluir ficam desligados, e
-  a lista enviada sai sempre da que voltou do servidor. A folha mostra o erro do servidor no fim, não fecha enquanto
-  salva e pergunta antes de descartar o que foi digitado; sem rede, avisa e fica preenchida. No limite, "Limite de 30
-  aptidões. Exclua uma para incluir outra." (e o mesmo com 20 formações).
+- **Aptidões e Formação**: uma gravação por vez; enquanto uma está no ar, incluir, editar e excluir ficam desligados (o
+  item que sai mostra o indicador), também depois de sair e voltar à tela: o estado fica no módulo
+  (`trackListWrite`/`useListWrite` em `technicalProfile.ts`) e zera na troca de sessão. A lista enviada é montada na hora
+  em que a gravação sai da fila (`saveProfileWith` em `profile.ts`), com a que a gravação anterior devolveu: duas
+  exclusões seguidas não devolvem o item apagado. Mudar um item que a anterior já tirou mostra "Esta aptidão foi
+  excluída." (ou "Esta formação foi excluída.") na folha, sem enviar nada. A folha mostra o erro do servidor no fim, não
+  fecha enquanto salva e pergunta antes de descartar o que foi digitado; sem rede, avisa e fica preenchida. No limite,
+  "Limite de 30 aptidões. Exclua uma para incluir outra." (e o mesmo com 20 formações).
+- **Textos** (nome da aptidão, curso e instituição): conferidos como o servidor grava (`cleanText` e `foldName`): saem
+  os caracteres de controle e os invisíveis (espaço de largura zero, BOM, marcas de direção), tab, LF, VT, FF e CR
+  viram espaço, e os espaços se juntam. Nome só de invisíveis conta como vazio, e "Lin<U+200B>ux" repete "Linux".
 - **Catálogos**: o ferramental de `GET /technician-tools` (o técnico recebe só as ativas) e as sugestões de aptidão de
   `GET /public/onboarding/catalog`, só na memória: valem 10 min (abrir a tela depois disso relê), puxar a tela relê na
   hora, e a troca de sessão apaga.
@@ -736,7 +747,9 @@ não têm texto de explicação no topo: só os vazios, os limites e os avisos d
   Faturamento e, na tela inicial e no Faturamento, quando falta ou passou de 6 h (o link da foto vale 12 h).
 - **Gravações em fila** ([src/lib/profile.ts](src/lib/profile.ts)): salvar, enviar a foto e removê-la saem uma por vez
   (a seguinte espera a anterior responder, e não sai se a sessão mudou na espera), e uma leitura durante a qual uma
-  gravação saiu, voltou ou ficou no ar não desfaz a tela (fica o que a gravação devolveu).
+  gravação saiu, voltou ou ficou no ar não desfaz a tela (fica o que a gravação devolveu). O servidor também grava uma
+  por vez por técnico: a gravação seguinte que a fila solta quando a anterior passou dos 20 s sem resposta (ou a de
+  outro aparelho) espera a anterior terminar no servidor e não apaga o que ela gravou.
 
 ## Histórico de atendimentos
 
@@ -746,12 +759,15 @@ responsável ou junto, também as do sistema antigo (Field Control), das mais re
 mostrava os últimos 7 dias guardados no aparelho.
 
 - **Lista**: no topo, o total ("1.284 atendimentos", o mesmo do Perfil) e "como responsável ou junto"; depois, seções
-  por mês da conclusão ("Novembro de 2026", com o total do mês), com o cabeçalho preso no alto ao rolar. Cada OS mostra
-  o código, a data, o serviço e "0123 · Loja Exemplo · Cidade Exemplo/SP", com os selos **Junto** e **Sistema antigo**
-  quando é o caso. Só o recorte de campo: nada de cliente, endereço, contato ou valores.
+  por mês da conclusão ("Novembro de 2026", com o total do mês), com o cabeçalho preso no alto ao rolar (o mês e o ano
+  ficam sempre inteiros: com a fonte grande, o total desce para a linha de baixo). Cada OS mostra o código, a data, o
+  serviço e "0123 · Loja Exemplo · Cidade Exemplo/SP", com os selos **Junto** e **Sistema antigo** quando é o caso. Só
+  o recorte de campo: nada de cliente, endereço, contato ou valores.
 - **Tocar** abre a OS: na hora, se está no aparelho; senão, com internet, a tela da OS busca na central; sem internet,
   "Sem internet" / "Esta OS não está no aparelho. Ela abre quando a conexão voltar.". Dois toques rápidos não abrem
-  duas vezes.
+  duas vezes. Enquanto a tela da OS está aberta, ela fica no aparelho (`holdTicket` em `db.ts`): a limpeza do fim do
+  pull, que apaga as fechadas há mais de 30 dias, não tira a OS antiga que o técnico está lendo (vale também para as do
+  Meu elo e do mês do Faturamento). Fechada a tela, ou reiniciado o app, ela sai no pull seguinte.
 - **Páginas** ([src/lib/history.ts](src/lib/history.ts)): `GET /me/history?limit=30` e, ao chegar perto do fim da
   lista, as seguintes pelo `cursor` da anterior, juntas sem repetir
   ([src/lib/historySections.ts](src/lib/historySections.ts), puro, com sonda). No rodapé: "Carregando mais…", "Não deu
@@ -778,10 +794,12 @@ do próprio técnico: sem meta, sem comparação e sem cor de status. As regras 
   (OS concluída e reaberta, pelo mês da reabertura) e **Visitas perdidas** (visita improdutiva por motivo do técnico,
   pelo mês da visita). O mês atual conta até hoje. Meses só do sistema antigo ganham uma faixa cinza "Sistema antigo":
   contam nos atendimentos e ficam sem barra nos outros três (sem medição), com a legenda acima dos gráficos.
-- **Ler um mês**: tocar numa coluna mostra o número dela na linha de leitura acima do gráfico (sem mês escolhido, o
-  total dos 12 meses); o leitor de tela trata o gráfico como ajustável (deslizar para cima ou para baixo passa os
-  meses). O gráfico não tem texto dentro do SVG: os rótulos são o `Text` do app (Manrope e fonte ampliada). As contas
-  ficam em [src/lib/monthBars.ts](src/lib/monthBars.ts), puro, com sonda.
+- **Ler um mês**: tocar numa coluna mostra o número dela na linha de leitura acima do gráfico, em até duas linhas (a
+  altura das duas fica reservada: o gráfico não pula ao tocar); sem mês escolhido, o total dos 12 meses. O leitor de
+  tela trata o gráfico como ajustável (deslizar para cima ou para baixo passa os meses). O gráfico não tem texto dentro
+  do SVG: os rótulos são o `Text` do app (Manrope e fonte ampliada). O eixo mostra todos os meses quando cabem; senão,
+  um sim e um não (ou mais espaçados), contando do atual, que sempre aparece, cada nome inteiro, sem "…". As contas
+  ficam em [src/lib/monthBars.ts](src/lib/monthBars.ts) (`axisLabelBoxes` para o eixo), puro, com sonda.
 - **Ver mês a mês**: os 12 meses em texto, do atual para o mais antigo (o equivalente completo dos gráficos), com "X
   como responsável, Y junto". No fim, "Os números seguem as regras do elo.", o link **Como funciona o elo** e "Dúvida?
   Fale com a central no grupo.".
