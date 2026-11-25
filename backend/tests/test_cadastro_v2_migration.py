@@ -213,9 +213,8 @@ def test_first_review_entries() -> None:
         "by": {"id": str(by), "name": "Analista Exemplo"},
         "note": None,
     }
-    assert M._review_entry("rejected", at, by, "Analista Exemplo", "Sem experiência")[
-        "action"
-    ] == ("rejected")
+    rejected = M._review_entry("rejected", at, by, "Analista Exemplo", "Sem experiência")
+    assert rejected["action"] == "rejected" and rejected["note"] == "Sem experiência"
     expired = M._review_entry("rejected", at, None, None, "Expirada sem análise")
     assert expired == {
         "action": "expired",
@@ -411,8 +410,8 @@ async def test_data_steps_run_on_the_driver(engine: AsyncEngine) -> None:
                 )
 
             counts = await _on_driver(conn, *M.DATA_STEPS)
-            # alfa e gama separados; os 2 PIX; alfa e delta (só o nascimento? não: nada) da ficha;
-            # 4 fichas analisadas; 1 linha do histórico.
+            # Endereços de alfa e gama; os 2 PIX; a ficha de alfa (a de delta não traz nada: o CPF
+            # já é de alfa); 4 fichas analisadas; 1 linha do histórico.
             assert counts == [2, 2, 1, 4, 1]
 
             alfa_row = await _row(
@@ -422,6 +421,8 @@ async def test_data_steps_run_on_the_driver(engine: AsyncEngine) -> None:
                 " unavailability::text AS unavailability FROM users WHERE id = :id",
                 id=alfa,
             )
+            assert json.loads(alfa_row.pop("areas")) == ["redes", "cftv"]
+            assert json.loads(alfa_row.pop("unavailability")) == []
             assert alfa_row == {
                 "address_line": "Rua das Flores",
                 "address_number": "123",
@@ -429,9 +430,7 @@ async def test_data_steps_run_on_the_driver(engine: AsyncEngine) -> None:
                 "cpf": CPF,
                 "birth_date": date(1990, 11, 25),
                 "company_document": CNPJ,
-                "areas": json.dumps(["redes", "cftv"]),
                 "operational_status": "active",
-                "unavailability": "[]",
             }
             beta_row = await _row(
                 conn,
@@ -452,33 +451,15 @@ async def test_data_steps_run_on_the_driver(engine: AsyncEngine) -> None:
             delta_row = await _row(conn, "SELECT cpf FROM users WHERE id = :id", id=delta)
             assert delta_row == {"cpf": None}
 
-            methods = (
-                (
-                    await conn.execute(
-                        text(
-                            "SELECT user_id, kind, pix_key_type, pix_key, holder_name,"
-                            " holder_document, preferred, preferred_since, changed_at"
-                            " FROM technician_payout_methods ORDER BY holder_name"
-                        )
-                    )
+            result = await conn.execute(
+                text(
+                    "SELECT user_id, kind, pix_key_type, pix_key, holder_name, holder_document,"
+                    " preferred, preferred_since, changed_at FROM technician_payout_methods"
                 )
-                .mappings()
-                .all()
             )
-            assert [dict(m) for m in methods][:1] == [
-                {
-                    "user_id": beta,
-                    "kind": "pix",
-                    "pix_key_type": "email",
-                    "pix_key": "beta@exemplo.com",
-                    "holder_name": "Empresa Exemplo",
-                    "holder_document": None,
-                    "preferred": True,
-                    "preferred_since": methods[0]["changed_at"],
-                    "changed_at": methods[0]["changed_at"],
-                }
-            ]
-            assert dict(methods[1]) == {
+            methods = {row["user_id"]: dict(row) for row in result.mappings()}
+            assert set(methods) == {alfa, beta}
+            assert methods[alfa] == {
                 "user_id": alfa,
                 "kind": "pix",
                 "pix_key_type": "cpf",
@@ -489,6 +470,13 @@ async def test_data_steps_run_on_the_driver(engine: AsyncEngine) -> None:
                 "preferred_since": pix_at,
                 "changed_at": pix_at,
             }
+            beta_method = methods[beta]
+            assert (beta_method["pix_key_type"], beta_method["holder_name"]) == (
+                "email",
+                "Empresa Exemplo",
+            )
+            assert beta_method["holder_document"] is None and beta_method["preferred"] is True
+            assert beta_method["preferred_since"] == beta_method["changed_at"] is not None
 
             reviews = {
                 row["id"]: json.loads(row["reviews"])
