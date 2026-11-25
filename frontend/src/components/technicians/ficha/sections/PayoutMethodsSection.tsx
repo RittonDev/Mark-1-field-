@@ -7,7 +7,7 @@ import { useConfirm } from "@/components/Confirm";
 import { useToast } from "@/components/Toaster";
 import { Button, buttonClassName, ErrorBox, Pill, Skeleton } from "@/components/ui";
 import { useNow } from "@/components/useNow";
-import { api, ApiError, apiErrorCode, errorMessage } from "@/lib/api";
+import { api, apiErrorCode } from "@/lib/api";
 import { bankAccountText, formatPixKey, PAYOUT_KIND, PAYOUT_RECENT_DAYS, PIX_KEY_TYPE } from "@/lib/constants";
 import { formatDate, formatDocument, formatMoney } from "@/lib/format";
 import { useCan } from "@/lib/permissions";
@@ -17,7 +17,7 @@ import { whatsappUrl } from "@/lib/whatsapp";
 import { refreshTechnicianViews } from "../../refresh";
 import { useCopy } from "../../useCopy";
 import { fichaLabel } from "../FichaNav";
-import { SectionCard } from "../SectionCard";
+import { apiErrorText, SectionCard } from "../SectionCard";
 
 const DAY_MS = 86_400_000;
 /** "Nova" e "Titular diferente": âmbar (pede conferir com ele antes de pagar). */
@@ -59,11 +59,13 @@ export function PayoutMethodsSection({ tech }: { tech: Technician }) {
   const remove = useMutation({
     mutationFn: (methodId: UUID) => api.delete<void>(`/technicians/${tech.id}/payout-methods/${methodId}`),
     onSuccess: () => toast({ title: "Forma de recebimento removida", tone: "success" }),
-    onError: (error) => {
-      // Já removida (outra tela, o próprio técnico): a lista relê.
-      const gone = apiErrorCode(error) === "PAYOUT_METHOD_NOT_FOUND" || (error instanceof ApiError && error.status === 404);
-      toast({ title: gone ? errorMessage(error) : "A forma de recebimento continua no cadastro", description: gone ? undefined : errorMessage(error), tone: "error" });
-    },
+    onError: (error) =>
+      // Já removida (outra tela, o próprio técnico): o aviso da API, e a lista relê.
+      toast(
+        apiErrorCode(error) === "PAYOUT_METHOD_NOT_FOUND"
+          ? { title: apiErrorText(error), tone: "error" }
+          : { title: "A forma de recebimento continua no cadastro", description: apiErrorText(error), tone: "error" },
+      ),
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: ["payouts"] });
       refreshTechnicianViews(queryClient);
@@ -94,7 +96,7 @@ export function PayoutMethodsSection({ tech }: { tech: Technician }) {
       {methods.isLoading ? (
         <Skeleton className="h-16 w-full" />
       ) : methods.error ? (
-        <ErrorBox message={errorMessage(methods.error)} onRetry={() => void methods.refetch()} />
+        <ErrorBox message={apiErrorText(methods.error)} onRetry={() => void methods.refetch()} />
       ) : !list.length ? (
         <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-ink-muted">
           Nenhuma forma de recebimento.

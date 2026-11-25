@@ -1,15 +1,7 @@
 "use client";
 
-import { FieldError } from "@/components/settings/shared";
 import { Field, Input, Select } from "@/components/ui";
-import {
-  ageAt,
-  BIRTH_AGE,
-  isValidRg,
-  normalizeIssuer,
-  normalizeRg,
-  PROFILE_LIMITS,
-} from "@/lib/constants";
+import { ageAt, BIRTH_AGE, isValidRg, normalizeIssuer, normalizeRg, PROFILE_LIMITS } from "@/lib/constants";
 import { todayISO } from "@/lib/format";
 import { isValidCpf, maskCpf, UFS } from "@/lib/onboarding";
 import type { Technician } from "@/lib/types";
@@ -135,7 +127,11 @@ export function PersonalDataSection({ tech, canEdit }: { tech: Technician; canEd
               </Select>
             </Field>
           </div>
-          {errors.rg ? <FieldError>{errors.rg}</FieldError> : null}
+          {errors.rg ? (
+            <span role="alert" className="text-xs font-medium text-red-600 dark:text-red-400">
+              {errors.rg}
+            </span>
+          ) : null}
         </div>
         <Field label="Data de nascimento" hint="É preciso ter 18 anos ou mais." error={errors.birth} className="sm:max-w-xs">
           <Input

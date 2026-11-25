@@ -4,14 +4,14 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
 import { Button, ErrorBox, Pill, Skeleton } from "@/components/ui";
-import { api, errorMessage } from "@/lib/api";
+import { api } from "@/lib/api";
 import { APP_ACCESS, OPERATIONAL_STATUS } from "@/lib/constants";
 import { formatDateTime } from "@/lib/format";
 import { OPERATIONAL_STATUS_COLOR, technicianHref } from "@/lib/technicians";
 import type { OperationalStatus, Technician, UserChange } from "@/lib/types";
 import { StatusDialog } from "../../StatusDialog";
 import { fichaLabel } from "../FichaNav";
-import { SectionCard, SubTitle } from "../SectionCard";
+import { apiErrorText, SectionCard, SubTitle } from "../SectionCard";
 
 /** Cor neutra do selo "Ativo" (cor só para problema). */
 const NEUTRAL = "#64748b";
@@ -97,7 +97,7 @@ export function StatusSection({ tech, canEdit }: { tech: Technician; canEdit: bo
         {history.isLoading ? (
           <Skeleton className="h-10 w-full" />
         ) : history.error ? (
-          <ErrorBox message={errorMessage(history.error)} onRetry={() => void history.refetch()} />
+          <ErrorBox message={apiErrorText(history.error)} onRetry={() => void history.refetch()} />
         ) : !rows.length ? (
           <p className="text-sm text-ink-muted">Sem mudanças de situação.</p>
         ) : (

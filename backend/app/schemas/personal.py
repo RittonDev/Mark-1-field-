@@ -49,7 +49,8 @@ COMPANY_WITHOUT_CNPJ = "Informe o CNPJ"
 _CPF_TEXT = re.compile(r"[\d.\-\s]+")
 _RG_DROP = re.compile(r"[^0-9A-Z./ -]")
 _ISSUER_DROP = re.compile(r"[^A-Z ]")
-_MARKS = re.compile(r"[̀-ͯ]")
+# Os acentos soltos depois do NFD (U+0300 a U+036F), o mesmo intervalo de normalizeIssuer.
+_MARKS = re.compile(f"[{chr(0x300)}-{chr(0x36F)}]")
 _PLATE = re.compile(r"[A-Z]{3}[0-9][A-Z0-9][0-9]{2}")
 _OLD_PLATE = re.compile(r"[A-Z]{3}[0-9]{4}")
 _ISO_DAY = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")

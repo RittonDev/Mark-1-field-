@@ -191,7 +191,10 @@ async def enqueue(
     mensagens: nada entra ("not_sendable"). O mesmo e-mail ainda na fila (modelo, alvo e endereço):
     devolve a mesma linha, sem duplicar, e a próxima tentativa passa a ser agora. Sem envio
     configurado a linha entra assim mesmo e o status é "not_configured" (ela vence sem sair).
-    `user`, `application` e `created_by`: o objeto ou o id."""
+    `user`, `application` e `created_by`: o objeto ou o id. `context` (nunca o token):
+    - VERIFY_EMAIL: {"name", "reason": "signup" (a ficha: application=) | "change" | "check"};
+    - WELCOME: {"name", "email"} (o link de criar a senha ou de validar sai no envio);
+    - PASSWORD_RESET: {"name", "origin": "self" | "central"}."""
     address = (to_email or "").strip().lower()
     if not sendable(address):
         return None, "not_sendable"

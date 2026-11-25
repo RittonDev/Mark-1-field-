@@ -62,7 +62,9 @@ export function AddressSection({ tech, canEdit }: { tech: Technician; canEdit: b
   const label = fichaLabel("endereco");
   const form = useSectionForm({ tech, label, read, body, validate, savedTitle: "Endereço salvo" });
   const { value, base, set, patch, errors } = form;
+  // O CEP achado leva o foco ao Número (CEP geral, sem logradouro: ao Logradouro).
   const numberRef = useRef<HTMLInputElement>(null);
+  const streetRef = useRef<HTMLInputElement>(null);
   const states = UFS.includes(value.state) || !value.state ? UFS : [value.state, ...UFS];
 
   return (
@@ -75,27 +77,35 @@ export function AddressSection({ tech, canEdit }: { tech: Technician; canEdit: b
           onChange={(masked) => set("zip", masked)}
           mode="parts"
           address={{ street: value.street, district: value.district, city: value.city, state: value.state }}
+          // O endereço gravado: campo igual a ele é livre para o CEP.
+          opened={{ street: base.street, district: base.district, city: base.city, state: base.state }}
           onApply={(next) => {
-            if (!("street" in next)) return;
             const changes: Partial<AddressForm> = {
               street: next.street,
               district: next.district,
               city: next.city,
               state: next.state,
             };
-            // Outro logradouro: número e complemento que não foram digitados agora (os de antes) saem.
+            // Outro logradouro: número e complemento que não foram digitados agora (os gravados) saem.
             if (next.street !== value.street) {
               if (value.number === base.number) changes.number = "";
               if (value.complement === base.complement) changes.complement = "";
             }
             patch(changes);
-            window.requestAnimationFrame(() => numberRef.current?.focus());
           }}
+          focusRef={numberRef}
+          streetRef={streetRef}
           error={errors.zip}
         />
         <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_7rem_12rem]">
           <Field label="Logradouro">
-            <Input value={value.street} onChange={(e) => set("street", e.target.value)} maxLength={255} autoComplete="off" />
+            <Input
+              ref={streetRef}
+              value={value.street}
+              onChange={(e) => set("street", e.target.value)}
+              maxLength={255}
+              autoComplete="off"
+            />
           </Field>
           <Field label="Número">
             <Input

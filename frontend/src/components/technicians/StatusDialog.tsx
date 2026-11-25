@@ -5,8 +5,9 @@ import Link from "next/link";
 import { useState } from "react";
 import { useToast } from "@/components/Toaster";
 import { Button, Checkbox, Dialog, ErrorBox, Field, Textarea } from "@/components/ui";
-import { api, errorMessage } from "@/lib/api";
+import { api } from "@/lib/api";
 import type { OperationalStatus, OperationalStatusIn, Technician } from "@/lib/types";
+import { apiErrorText } from "./ficha/SectionCard";
 import { refreshTechnicianViews } from "./refresh";
 
 /** Motivo: de 3 a 500 caracteres (a API recusa fora disso). */
@@ -142,7 +143,7 @@ export function StatusDialog({
             aria-invalid={tried && reasonProblem ? true : undefined}
           />
         </Field>
-        {change.error ? <ErrorBox message={errorMessage(change.error)} /> : null}
+        {change.error ? <ErrorBox message={apiErrorText(change.error)} /> : null}
       </form>
     </Dialog>
   );

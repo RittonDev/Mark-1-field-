@@ -2,11 +2,22 @@
 
 import { useRef } from "react";
 import { Button, Card, ErrorBox } from "@/components/ui";
-import { errorMessage } from "@/lib/api";
+import { ApiError, errorMessage } from "@/lib/api";
 import type { SectionFormState } from "./useSectionForm";
 
 /** O título da seção na tela: recebe o foco ao trocar de seção (a ficha mostra uma seção por vez). */
 export const FICHA_HEADING_ID = "ficha-secao-titulo";
+
+/**
+ * A mensagem de um erro da API, com a rota que o servidor ainda não tem (o 404 genérico, "Not Found", antes de a API
+ * nova subir) em português.
+ */
+export function apiErrorText(error: unknown): string {
+  if (error instanceof ApiError && error.status === 404 && error.detail === "Not Found") {
+    return "Indisponível no momento. Tente de novo mais tarde.";
+  }
+  return errorMessage(error);
+}
 
 /**
  * Uma seção da ficha: o cartão com o título (h2, como o CardHeader) e, à direita, `aside` (o carimbo do perfil técnico,
@@ -96,7 +107,7 @@ export function SectionForm<V extends object>({
       <fieldset disabled={!canEdit} className="flex min-w-0 flex-col gap-4">
         {children}
       </fieldset>
-      {form.error ? <ErrorBox message={errorMessage(form.error)} /> : null}
+      {form.error ? <ErrorBox message={apiErrorText(form.error)} /> : null}
       {canEdit ? <SectionActions dirty={form.dirty} saving={form.saving} onDiscard={form.discard} /> : null}
     </form>
   );

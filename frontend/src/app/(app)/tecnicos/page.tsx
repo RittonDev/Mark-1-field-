@@ -79,6 +79,7 @@ import { useCan } from "@/lib/permissions";
 import { useTeams, useTechnicianTools } from "@/lib/queries";
 import {
   type GapKey,
+  listCityOf,
   listQueryFrom,
   listQueryPatch,
   OPERATIONAL_STATUS_COLOR,
@@ -155,17 +156,10 @@ function regionText(city: string | null | undefined, state: string | null | unde
   return [city, state].filter(Boolean).join("-");
 }
 
-/**
- * Os filtros da lista na URL (lib/technicians). A cidade só vale com a UF e pode chegar como a busca da aba Favoritos
- * (o link "Favorito em" manda "Santos-SP"): sem o "-UF" do fim, ela é a cidade da lista.
- */
+/** Os filtros da lista na URL; a cidade, só com a UF (e sem o "-UF" da busca da aba Favoritos). */
 function readFilters(params: Pick<URLSearchParams, "get">): TechListQuery {
   const query = listQueryFrom(params);
-  if (!query.uf) return { ...query, cidade: "" };
-  const suffix = `-${query.uf}`;
-  return query.cidade.toUpperCase().endsWith(suffix)
-    ? { ...query, cidade: query.cidade.slice(0, -suffix.length).trim() }
-    : query;
+  return { ...query, cidade: listCityOf(query.cidade, query.uf) };
 }
 
 const sameQuery = (a: TechListQuery, b: TechListQuery) =>

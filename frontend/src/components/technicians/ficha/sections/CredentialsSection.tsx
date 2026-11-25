@@ -18,7 +18,7 @@ import type { EmailLog, EmailQueued, Technician } from "@/lib/types";
 import { GrantAccessDialog, ResetPasswordDialog } from "../../GrantAccessDialog";
 import { refreshTechnicianViews } from "../../refresh";
 import { fichaLabel } from "../FichaNav";
-import { SectionCard, SubTitle } from "../SectionCard";
+import { apiErrorText, SectionCard, SubTitle } from "../SectionCard";
 
 const AMBER_TEXT = "text-amber-800 dark:text-amber-300";
 /** Quantos e-mails a seção mostra (os mais novos). */
@@ -63,7 +63,7 @@ function SentEmails({ tech, mailEnabled }: { tech: Technician; mailEnabled: bool
       {emails.isLoading ? (
         <Skeleton className="h-10 w-full" />
       ) : emails.error ? (
-        <ErrorBox message={errorMessage(emails.error)} onRetry={() => void emails.refetch()} />
+        <ErrorBox message={apiErrorText(emails.error)} onRetry={() => void emails.refetch()} />
       ) : !emails.data?.length ? (
         <p className="text-sm text-ink-muted">Nenhum e-mail enviado.</p>
       ) : (
@@ -113,7 +113,7 @@ export function CredentialsSection({ tech, canEdit }: { tech: Technician; canEdi
       else if (queued.status === "not_configured") toast({ title: "E-mail não enviado: envio de e-mail desligado", tone: "error" });
       else toast({ title: "E-mail não enviado: sem e-mail válido", description: "Corrija em Contato.", tone: "error" });
     },
-    onError: (error) => toast({ title: errorMessage(error), tone: "error" }),
+    onError: (error) => toast({ title: apiErrorText(error), tone: "error" }),
     onSettled: () => refreshTechnicianViews(queryClient),
   });
 

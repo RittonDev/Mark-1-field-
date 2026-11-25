@@ -11,6 +11,7 @@ import {
   emailStatusLabel,
   FICHA_DEFAULT,
   GESTAO_GROUP,
+  listCityOf,
   listQueryFrom,
   listQueryPatch,
   OPERATIONAL_STATUS_COLOR,
@@ -208,6 +209,19 @@ describe("filtros da lista na URL", () => {
     assert.equal(q.dia, "sat");
     assert.equal(q.turno, "morning");
     assert.equal(q.uf, "SP");
+  });
+
+  it("listCityOf: a cidade da lista só com a UF; a busca dos Favoritos chega com o -UF", () => {
+    assert.equal(listCityOf("Cidade Exemplo-SP", "SP"), "Cidade Exemplo");
+    assert.equal(listCityOf("Cidade Exemplo-sp", "SP"), "Cidade Exemplo");
+    assert.equal(listCityOf("São Paulo-SP", "SP"), "São Paulo");
+    assert.equal(listCityOf("Cidade Exemplo", "SP"), "Cidade Exemplo");
+    assert.equal(listCityOf("Cidade Exemplo-RJ", "SP"), "Cidade Exemplo-RJ");
+    assert.equal(listCityOf("Cidade Exemplo-SP", ""), "");
+    assert.equal(listCityOf("", "SP"), "");
+    // O link "Favorito em" da ficha (favoritesHref) chega na lista como a cidade.
+    const q = listQueryFrom(new URLSearchParams("aba=favoritos&uf=SP&cidade=Cidade%20Exemplo-SP"));
+    assert.equal(listCityOf(q.cidade, q.uf), "Cidade Exemplo");
   });
 });
 

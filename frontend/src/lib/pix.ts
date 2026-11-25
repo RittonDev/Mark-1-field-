@@ -27,11 +27,11 @@ export function askPayoutText(name: string): string {
 }
 
 /** CPF ou CNPJ do titular com o nome do documento: "CPF 123.456.789-09" | "CNPJ 12.345.678/0001-95". */
-export function holderDocumentText(document: string | null | undefined): string {
-  if (!document) return "";
-  if (document.length === 11) return `CPF ${formatDocument(document)}`;
-  if (document.length === 14) return `CNPJ ${formatDocument(document)}`;
-  return document;
+export function holderDocumentText(doc: string | null | undefined): string {
+  if (!doc) return "";
+  if (doc.length === 11) return `CPF ${formatDocument(doc)}`;
+  if (doc.length === 14) return `CNPJ ${formatDocument(doc)}`;
+  return doc;
 }
 
 /** Para quem paga, com tudo à vista: PIX "PIX CPF · 123.456.789-09"; conta, bankAccountText. */
@@ -47,8 +47,8 @@ export function payoutDestinationText(method: PayoutMethod): string {
  */
 export function payoutCopyText(method: PayoutMethod): string {
   if (method.kind === "pix") return method.pix_key;
-  const document = holderDocumentText(method.holder_document);
-  return `${bankAccountText(method)} · Titular: ${method.holder_name}${document ? ` · ${document}` : ""}`;
+  const holderDoc = holderDocumentText(method.holder_document);
+  return `${bankAccountText(method)} · Titular: ${method.holder_name}${holderDoc ? ` · ${holderDoc}` : ""}`;
 }
 
 /**

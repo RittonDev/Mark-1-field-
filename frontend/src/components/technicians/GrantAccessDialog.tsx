@@ -11,6 +11,7 @@ import { isSendableEmail, OPERATIONAL_STATUS, PASSWORD_RESET_HOURS } from "@/lib
 import { useMailEnabled } from "@/lib/queries";
 import type { EmailQueued, Technician, TemporaryPassword, UUID } from "@/lib/types";
 import { whatsappUrl } from "@/lib/whatsapp";
+import { apiErrorText } from "./ficha/SectionCard";
 import { refreshTechnicianViews } from "./refresh";
 import { useCopy } from "./useCopy";
 
@@ -221,7 +222,7 @@ export function GrantAccessDialog({
         return { kind: "temp", result: await api.post<TemporaryPassword>(`/technicians/${technician.id}/reset-password`) };
       } catch (error) {
         const what = picked === "link" ? "o link não saiu" : "a senha provisória não saiu";
-        throw new Error(`O acesso foi liberado, mas ${what}: ${errorMessage(error)}`);
+        throw new Error(`O acesso foi liberado, mas ${what}: ${apiErrorText(error)}`);
       }
     },
     onSuccess: (outcome) => {
@@ -437,7 +438,7 @@ export function ResetPasswordDialog({ tech, onClose }: { tech: Technician; onClo
       <div className="flex flex-col gap-3">
         <PasswordChoice value={choice} onChange={setChoice} tech={tech} keep={false} lock={lock} disabled={reset.isPending} />
         {notSent ? <p className="text-sm text-ink">{notSent}</p> : null}
-        {reset.error ? <ErrorBox message={errorMessage(reset.error)} /> : null}
+        {reset.error ? <ErrorBox message={apiErrorText(reset.error)} /> : null}
       </div>
     </Dialog>
   );

@@ -199,7 +199,7 @@ interface SuggestedProps {
   favorites?: FavoriteCityDetail | null;
 }
 
-/** Técnicos mais indicados para a loja (distância, histórico, skill, agenda do dia). Um clique
+/** Técnicos mais indicados para a loja (distância, histórico, aptidão, agenda do dia). Um clique
  *  põe como responsável; "Junto" inclui como outro técnico da visita. A estrela marca os favoritos
  *  da cidade da loja; os favoritos sem acesso ao app aparecem embaixo, com o "Liberar acesso". */
 export function SuggestedTechnicians(props: SuggestedProps) {

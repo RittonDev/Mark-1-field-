@@ -196,3 +196,13 @@ export function listQueryPatch(q: TechListQuery): Record<string, string | null> 
     ordem: q.ordem === "name" ? null : ORDEM_PARAM[q.ordem],
   };
 }
+
+/**
+ * A cidade que a lista filtra, a partir do `cidade` da URL (o mesmo parâmetro da aba Favoritos): só vale com a UF, e a
+ * busca dos Favoritos chega como "Santos-SP" (o link "Favorito em"), que sem o "-UF" do fim é a cidade.
+ */
+export function listCityOf(cidade: string, uf: string): string {
+  if (!uf) return "";
+  const suffix = `-${uf}`;
+  return cidade.toUpperCase().endsWith(suffix.toUpperCase()) ? cidade.slice(0, -suffix.length).trim() : cidade;
+}

@@ -63,7 +63,7 @@ RESET_SUBJECT = "Criar uma nova senha"
 RESET_BUTTON = "Criar nova senha"
 RESET_INTRO = {
     "self": "Recebemos um pedido para criar uma nova senha do app da {company}. Use este link:",
-    "central": ("A central da {company} enviou este link para você criar uma nova senha do app:"),
+    "central": "A central da {company} enviou este link para você criar uma nova senha do app:",
 }
 RESET_NOTE = (
     "O link vale por 2 horas e só pode ser usado uma vez. Ao criar a nova senha, o app pede para "
