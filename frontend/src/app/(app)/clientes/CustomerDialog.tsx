@@ -3,7 +3,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { CepField } from "@/components/CepField";
 import {
   ContactsEditor,
   contactDrafts,
@@ -12,7 +13,7 @@ import {
   sameContacts,
   type ContactDraft,
 } from "@/components/ContactList";
-import { cleanDocument, documentError, UFS } from "@/components/LocationDialog";
+import { cleanDocument, documentError, UFS, zipError } from "@/components/LocationDialog";
 import { useToast } from "@/components/Toaster";
 import { Button, Checkbox, Dialog, ErrorBox, Field, Input, SectionTitle, Select, Textarea } from "@/components/ui";
 import { ApiError, api, errorMessage } from "@/lib/api";
@@ -91,6 +92,7 @@ export function CustomerDialog({ customer, onClose }: { customer: Customer | nul
   const [contacts, setContacts] = useState<ContactDraft[]>(initialContacts);
   const [tried, setTried] = useState(false);
   const [docTouched, setDocTouched] = useState(false);
+  const addressRef = useRef<HTMLInputElement>(null);
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm((f) => ({ ...f, [key]: value }));
 
   // O CPF/CNPJ é único: avisa enquanto digita que o cliente já existe (e leva até ele).
@@ -108,6 +110,7 @@ export function CustomerDialog({ customer, onClose }: { customer: Customer | nul
   const errors = {
     name: form.name.trim().length < 2 ? "Dê um nome com pelo menos 2 letras." : null,
     document: docError ?? (twin ? "Já existe um cliente com este documento." : null),
+    zip: zipError(form.zip_code, initial.zip_code),
   };
   const invalid = Object.values(errors).some(Boolean) || contactsInvalid(contacts);
   const dirty = JSON.stringify(form) !== JSON.stringify(initial) || !sameContacts(contacts, initialContacts);
@@ -235,8 +238,23 @@ export function CustomerDialog({ customer, onClose }: { customer: Customer | nul
         <section className="flex flex-col gap-3">
           <SectionTitle>Endereço da matriz</SectionTitle>
           <div className="grid gap-4 sm:grid-cols-6">
+            {/* CEP primeiro: achado, preenche o que está livre e leva o cursor para o número, no fim do endereço. */}
+            <CepField
+              className="sm:col-span-2"
+              mode="line"
+              value={form.zip_code}
+              onChange={(v) => set("zip_code", v)}
+              address={{ street: form.address_line, district: form.district, city: form.city, state: form.state }}
+              opened={{ street: initial.address_line, district: initial.district, city: initial.city, state: initial.state }}
+              onApply={(next) =>
+                setForm((f) => ({ ...f, address_line: next.street, district: next.district, city: next.city, state: next.state }))
+              }
+              focusRef={addressRef}
+              error={tried ? errors.zip : null}
+            />
             <Field label="Endereço" className="sm:col-span-4">
               <Input
+                ref={addressRef}
                 value={form.address_line}
                 onChange={(e) => set("address_line", e.target.value)}
                 placeholder="Rua, número e complemento"
@@ -259,15 +277,6 @@ export function CustomerDialog({ customer, onClose }: { customer: Customer | nul
                 ))}
                 {form.state && !UFS.includes(form.state) ? <option value={form.state}>{form.state}</option> : null}
               </Select>
-            </Field>
-            <Field label="CEP" className="sm:col-span-2">
-              <Input
-                value={form.zip_code}
-                onChange={(e) => set("zip_code", maskCep(e.target.value))}
-                inputMode="numeric"
-                placeholder="00000-000"
-                maxLength={9}
-              />
             </Field>
           </div>
         </section>

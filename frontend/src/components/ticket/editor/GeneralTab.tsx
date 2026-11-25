@@ -492,12 +492,12 @@ export function GeneralTab({
   const offTechs = people.filter((p) => p.role === "technician" && offStatus(p));
   const internal = people.filter((p) => p.role !== "technician");
   // A indisponibilidade vale no dia da visita (sem data, hoje); o "até 30/11" conta de hoje. No fuso da operação.
-  const today = dayKey(now);
-  const visitDay = form.date || today;
+  const todayKey = dayKey(now);
+  const visitDay = form.date || todayKey;
   const awayOn = (p: AssignableUser | undefined) => (p && !offStatus(p) ? unavailableOn(p.unavailability, visitDay) : null);
   const awaySuffix = (p: AssignableUser) => {
     const away = awayOn(p);
-    return away ? ` · indisponível ${periodShort(away, today)}` : "";
+    return away ? ` · indisponível ${periodShort(away, todayKey)}` : "";
   };
   const offText = (p: AssignableUser) => {
     const off = offStatus(p);
@@ -510,7 +510,7 @@ export function GeneralTab({
     const off = person ? offStatus(person) : null;
     if (person && off) return offStatusCaution(person.name, off, person.operational_reason);
     const away = awayOn(person);
-    return person && away ? unavailableCaution(person.name, away, today) : null;
+    return person && away ? unavailableCaution(person.name, away, todayKey) : null;
   };
   const receiveCautions = FINISHED.includes(server.status)
     ? []
@@ -1198,7 +1198,7 @@ export function GeneralTab({
               hideLabel
               options={technicians.map((p) => {
                 const away = awayOn(p);
-                return { id: p.id, name: p.name, unavailable: away ? `indisponível ${periodShort(away, today)}` : undefined };
+                return { id: p.id, name: p.name, unavailable: away ? `indisponível ${periodShort(away, todayKey)}` : undefined };
               })}
               assigneeId={form.assigneeId as UUID | ""}
               helperIds={form.helperIds}

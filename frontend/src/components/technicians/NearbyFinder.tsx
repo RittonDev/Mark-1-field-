@@ -7,14 +7,17 @@ import Link from "next/link";
 import { useId, useState } from "react";
 import { LocationPicker } from "@/components/LocationPicker";
 import { Tabs } from "@/components/motion";
-import { buttonClassName, Card, Checkbox, EmptyState, ErrorBox, Input, LoadingBlock, Select } from "@/components/ui";
+import { buttonClassName, Card, Checkbox, EmptyState, ErrorBox, Input, LoadingBlock, Pill, Select } from "@/components/ui";
 import { absoluteApiUrl, api, errorMessage } from "@/lib/api";
+import { OPERATIONAL_STATUS } from "@/lib/constants";
 import { formatDate, formatMinutes, initials } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
 import { UFS } from "@/lib/onboarding";
+import { OPERATIONAL_STATUS_COLOR } from "@/lib/technicians";
 import { estimateDrive, formatKm } from "@/lib/tracking";
 import type { Location, NearbyResult, NearbyTechnician, TechnicianRegion } from "@/lib/types";
 import { whatsappUrl } from "@/lib/whatsapp";
+import { TechnicianLink } from "./TechnicianLink";
 import { useCopy } from "./useCopy";
 
 type Mode = "store" | "city" | "coords";
@@ -59,23 +62,18 @@ const KIND: Record<NearbyTechnician["nearest_kind"], { label: string; icon: type
 const ICON_LINK =
   "inline-flex size-8 items-center justify-center rounded-lg border border-line bg-surface text-ink-muted shadow-elev-1 transition-colors hover:text-ink focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none";
 
-function ResultRow({
-  tech,
-  rank,
-  placeLabel,
-  onOpen,
-}: {
-  tech: NearbyTechnician;
-  rank: number;
-  placeLabel: string;
-  onOpen?: (tech: NearbyTechnician) => void;
-}) {
+/** Motivos da API que repetem o selo "Sem acesso ao app" (o texto antigo era "Inativo no app"). */
+const ACCESS_REASON = /^(inativo|sem acesso)/i;
+
+/** A ficha abre em outra aba: a busca desta aba (loja, cidade ou coordenadas) não fica na URL. */
+function ResultRow({ tech, rank, placeLabel }: { tech: NearbyTechnician; rank: number; placeLabel: string }) {
   const copy = useCopy();
   const kind = KIND[tech.nearest_kind];
   const KindIcon = kind.icon;
   const avatar = absoluteApiUrl(tech.avatar_url);
   const drive = estimateDrive(tech.distance_km);
   const first = tech.name.trim().split(/\s+/)[0];
+  const status = tech.operational_status ?? "active";
   // Convite pronto: os parceiros são chamados por atendimento, pelo WhatsApp (sem telefone, o WhatsApp
   // abre para escolher o contato).
   const invite = whatsappUrl(
@@ -88,21 +86,21 @@ function ResultRow({
       <Avatar name={tech.name} src={avatar} />
       <div className="min-w-0 flex-1">
         <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-ink">
-          {onOpen ? (
-            <button
-              type="button"
-              onClick={() => onOpen(tech)}
-              className="rounded text-left underline-offset-2 hover:text-brand hover:underline focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
-              title="Abrir o cadastro do técnico"
-            >
-              {tech.name}
-            </button>
-          ) : (
-            tech.name
-          )}
+          <TechnicianLink
+            id={tech.id}
+            target="_blank"
+            className="rounded underline-offset-2 hover:text-brand hover:underline focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
+          >
+            {tech.name}
+          </TechnicianLink>
+          {status !== "active" ? (
+            <span title="Não recebe OS" className="inline-flex">
+              <Pill color={OPERATIONAL_STATUS_COLOR[status]}>{OPERATIONAL_STATUS[status]}</Pill>
+            </span>
+          ) : null}
           {tech.is_active ? null : (
             <span className="rounded-md bg-surface-2 px-1.5 py-0.5 text-[11px] font-medium text-ink-muted ring-1 ring-line ring-inset">
-              sem acesso ao app
+              Sem acesso ao app
             </span>
           )}
           {tech.on_shift ? (
@@ -135,7 +133,7 @@ function ResultRow({
         {tech.reasons.length ? (
           <div className="mt-1.5 flex flex-wrap gap-1">
             {tech.reasons
-              .filter((r) => !/^inativo/i.test(r))
+              .filter((r) => !ACCESS_REASON.test(r))
               .slice(0, 4)
               .map((r) => (
                 <span key={r} className="rounded-md bg-surface-2 px-1.5 py-0.5 text-[11px] text-ink-muted ring-1 ring-line ring-inset">
@@ -216,15 +214,15 @@ function Avatar({ name, src }: { name: string; src: string | null }) {
   );
 }
 
-/** Joga a localização da loja e vê quem está mais perto (histórico de atendimentos, endereço e jornada ao vivo). */
+/**
+ * Joga a localização da loja e vê quem está mais perto (histórico de atendimentos, endereço e jornada ao vivo). O nome
+ * abre a ficha do técnico em outra aba.
+ */
 export function NearbyFinder({
   regions,
-  onOpenTechnician,
 }: {
   /** Estados e cidades da base técnica (sugestões de cidade). */
   regions?: TechnicianRegion[];
-  /** Abre o cadastro do técnico (o nome vira botão). */
-  onOpenTechnician?: (tech: NearbyTechnician) => void;
 } = {}) {
   const cityListId = useId();
   const tabsId = useId();
@@ -309,7 +307,7 @@ export function NearbyFinder({
               <Input
                 value={city}
                 onChange={(e) => setCity(e.target.value)}
-                placeholder={uf ? "Cidade da loja (ex.: Santos)" : "Escolha a UF e digite a cidade"}
+                placeholder={uf ? "Cidade da loja" : "Escolha a UF e digite a cidade"}
                 aria-label="Cidade"
                 list={knownCities.length ? cityListId : undefined}
                 autoComplete="off"
@@ -380,7 +378,7 @@ export function NearbyFinder({
           ) : (
             <ul className="divide-y divide-line">
               {result.data.technicians.map((t, i) => (
-                <ResultRow key={t.id} tech={t} rank={i} placeLabel={result.data.point.label} onOpen={onOpenTechnician} />
+                <ResultRow key={t.id} tech={t} rank={i} placeLabel={result.data.point.label} />
               ))}
             </ul>
           )}

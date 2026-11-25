@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { type UseMutationResult, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BadgeCheck,
   Building2,
@@ -554,24 +554,38 @@ function ApplicantPhoto({ name, url }: { name: string; url: string | null }) {
   );
 }
 
-/** Resultado da análise: o diálogo fica aberto para avisar o candidato pelo WhatsApp. */
-type Outcome = { kind: "approved"; name: string } | { kind: "rejected" };
+/**
+ * Resultado da análise: o diálogo fica aberto para avisar o candidato pelo WhatsApp. Aprovada: o técnico criado e o
+ * e-mail de boas-vindas (`welcome` null com a API antiga, que não manda).
+ */
+type Outcome = { kind: "approved"; technician: User; welcome: EmailQueued | null } | { kind: "rejected" };
 
-/** Ficha do candidato. Sem `canEdit` (Homologação só com Visualizar): consulta, sem aprovar, reprovar nem excluir. */
+/** A resposta do Aprovar: a API nova manda o técnico e a boas-vindas (ApplicationApproved); a antiga, só o usuário. */
+function approvedOf(body: ApplicationApproved | User): { technician: User; welcome: EmailQueued | null } {
+  if ("technician" in body) return { technician: body.technician, welcome: body.welcome ?? null };
+  return { technician: body, welcome: null };
+}
+
+/** "Reprovada · 20/11/2026 14:32 · por Ana"; a expirada, sem autor. */
+function reviewLine(review: ApplicationReview): string {
+  const by = review.action !== "expired" && review.by ? ` · por ${review.by.name}` : "";
+  return `${REVIEW_ACTION_LABEL[review.action] ?? review.action} · ${formatDateTime(review.at)}${by}`;
+}
+
+/** Ficha do candidato. Sem `canEdit` (Homologação só com Visualizar): consulta, sem aprovar, reprovar, reabrir nem excluir. */
 function ApplicationDialog({ id, canEdit, onClose }: { id: string; canEdit: boolean; onClose: () => void }) {
   const queryClient = useQueryClient();
   const { user } = useAuth();
-  // "Ver na base técnica" leva a Técnicos: só com acesso a essa tela.
+  // "Abrir ficha do técnico" leva a Técnicos: só com acesso a essa tela.
   const canTechnicians = useCan("base.technicians");
   const { toast } = useToast();
   const confirm = useConfirm();
   const catalog = useOnboardingCatalog();
-  const teams = useTeams();
-  const [mode, setMode] = useState<"view" | "approve" | "reject">("view");
-  const [teamId, setTeamId] = useState("");
-  const [jobTitle, setJobTitle] = useState("Técnico de campo");
-  const [note, setNote] = useState("");
+  // Envio de e-mail ligado no servidor: undefined enquanto não se sabe; false desligado (ou API antiga).
+  const mailEnabled = useMailEnabled();
+  const [mode, setMode] = useState<"view" | "reject" | "reopen">("view");
   const [reason, setReason] = useState("");
+  const [reopenReason, setReopenReason] = useState("");
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const detail = useQuery({
     queryKey: ["onboarding", "application", id],
@@ -587,16 +601,12 @@ function ApplicationDialog({ id, canEdit, onClose }: { id: string; canEdit: bool
     void queryClient.invalidateQueries({ queryKey: ["onboarding"] });
     refreshTechnicianViews(queryClient);
   };
+  // Aprovar é um passo só (a confirmação diz o que acontece com o e-mail): grupo e cargo ficam para a ficha do técnico.
   const approve = useMutation({
-    mutationFn: () =>
-      api.post<User>(`/onboarding/applications/${id}/approve`, {
-        team_id: teamId || null,
-        job_title: jobTitle.trim() || null,
-        note: note.trim() || null,
-      }),
-    onSuccess: (u) => {
+    mutationFn: () => api.post<ApplicationApproved | User>(`/onboarding/applications/${id}/approve`, {}),
+    onSuccess: (body) => {
       decided();
-      setOutcome({ kind: "approved", name: u.name });
+      setOutcome({ kind: "approved", ...approvedOf(body) });
     },
   });
   const reject = useMutation({
@@ -605,6 +615,33 @@ function ApplicationDialog({ id, canEdit, onClose }: { id: string; canEdit: bool
       decided();
       setOutcome({ kind: "rejected" });
     },
+  });
+  // A reprovada (ou expirada) volta para Pendentes: o diálogo segue com ela, já pendente.
+  const reopen = useMutation({
+    mutationFn: () => api.post<ApplicationDetail>(`/onboarding/applications/${id}/reopen`, { reason: reopenReason.trim() }),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(["onboarding", "application", id], updated);
+      void queryClient.invalidateQueries({ queryKey: ["onboarding"] });
+      setMode("view");
+      setReopenReason("");
+      toast({ title: "Ficha reaberta: está em Pendentes", tone: "success" });
+    },
+  });
+  const resend = useMutation({
+    mutationFn: () => api.post<EmailQueued>(`/onboarding/applications/${id}/email-verification`),
+    onSuccess: (sent) => {
+      const to = sent.to ?? detail.data?.email ?? "";
+      if (sent.status === "queued") toast({ title: `Validação enviada para ${to}`, tone: "success" });
+      else if (sent.status === "not_configured") toast({ title: "E-mail não enviado: envio de e-mail desligado", tone: "error" });
+      else toast({ title: "E-mail não enviado: este endereço não recebe mensagens", tone: "error" });
+    },
+    onError: (e) => toast({ title: errorMessage(e), tone: "error" }),
+  });
+  // Aprovada sem senha e sem o link por e-mail: a senha provisória para mandar pelo WhatsApp (fica aqui para o
+  // diálogo não fechar no meio e perder a senha).
+  const temp = useMutation({
+    mutationFn: (userId: string) => api.post<TemporaryPassword>(`/technicians/${userId}/reset-password`),
+    onSettled: () => refreshTechnicianViews(queryClient),
   });
   // Pedido do candidato (LGPD): só gestores apagam a ficha pendente ou reprovada, com a foto.
   const remove = useMutation({
@@ -625,7 +662,9 @@ function ApplicationDialog({ id, canEdit, onClose }: { id: string; canEdit: bool
   const levels = labelMap(catalog.data?.skill_levels);
   const vehicles = labelMap(catalog.data?.vehicle_types);
   const pending = a?.status === "pending";
-  const error = approve.error ?? reject.error;
+  // Os modos só valem enquanto a ficha está no estado deles (o tempo real pode mudar a ficha com o diálogo aberto).
+  const rejecting = mode === "reject" && pending && canEdit;
+  const reopening = mode === "reopen" && a?.status === "rejected" && canEdit;
   const coverage = (() => {
     if (!a || !regions.data) return null;
     const state = regions.data.find((r) => r.state === a.state);
@@ -642,6 +681,26 @@ function ApplicationDialog({ id, canEdit, onClose }: { id: string; canEdit: bool
       confirmLabel: "Excluir ficha",
     });
     if (ok) remove.mutate();
+  };
+  const askApprove = async () => {
+    if (!a) return;
+    const sendable = isSendableEmail(a.email);
+    const sends = mailEnabled === true && sendable;
+    const parts = ["Entra na base técnica e já pode entrar no app."];
+    if (sends) parts.push(`O e-mail de boas-vindas vai para ${a.email}.`);
+    if (a.has_password === false) {
+      parts.push(
+        sends
+          ? "A ficha está sem senha: o e-mail leva o link para criar a senha."
+          : mailEnabled === undefined
+            ? "A ficha está sem senha."
+            : "A ficha está sem senha: depois de aprovar, gere uma senha provisória.",
+      );
+    }
+    if (mailEnabled === false) parts.push("Envio de e-mail desligado: avise pelo WhatsApp.");
+    else if (mailEnabled && !sendable) parts.push("Sem e-mail válido: avise pelo WhatsApp.");
+    const ok = await confirm({ title: `Aprovar ${a.full_name}?`, description: parts.join(" "), confirmLabel: "Aprovar" });
+    if (ok) approve.mutate();
   };
   // A aprovada virou o cadastro do técnico: sai pela base técnica, não por aqui. Excluir (pedido do
   // candidato, LGPD) pede Editar e continua só com supervisores e administradores.
@@ -666,26 +725,37 @@ function ApplicationDialog({ id, canEdit, onClose }: { id: string; canEdit: bool
     <Button variant="primary" onClick={onClose}>
       Concluir
     </Button>
+  ) : reopening ? (
+    <>
+      <Button onClick={() => setMode("view")}>Voltar</Button>
+      <Button variant="primary" loading={reopen.isPending} disabled={reopenReason.trim().length < 3} onClick={() => reopen.mutate()}>
+        <RotateCcw className="size-4" />
+        Reabrir ficha
+      </Button>
+    </>
   ) : !pending || !canEdit ? (
     <>
       {removeButton}
+      {a.status === "rejected" && canEdit ? (
+        <Button
+          onClick={() => {
+            reopen.reset();
+            setMode("reopen");
+          }}
+        >
+          <RotateCcw className="size-4" />
+          Reabrir para análise
+        </Button>
+      ) : null}
       {a.user_id && canTechnicians ? (
-        <Link href={`/tecnicos?q=${encodeURIComponent(a.email)}`} className={buttonClassName()}>
+        <Link href={technicianHref(a.user_id)} className={buttonClassName()}>
           <Users className="size-4" />
-          Ver na base técnica
+          Abrir ficha do técnico
         </Link>
       ) : null}
       <Button onClick={onClose}>Fechar</Button>
     </>
-  ) : mode === "approve" ? (
-    <>
-      <Button onClick={() => setMode("view")}>Voltar</Button>
-      <Button variant="primary" loading={approve.isPending} onClick={() => approve.mutate()}>
-        <UserCheck className="size-4" />
-        Aprovar e incluir na base
-      </Button>
-    </>
-  ) : mode === "reject" ? (
+  ) : rejecting ? (
     <>
       <Button onClick={() => setMode("view")}>Voltar</Button>
       <Button variant="danger" loading={reject.isPending} disabled={reason.trim().length < 3} onClick={() => reject.mutate()}>
@@ -700,7 +770,7 @@ function ApplicationDialog({ id, canEdit, onClose }: { id: string; canEdit: bool
         <UserX className="size-4" />
         Reprovar
       </Button>
-      <Button variant="primary" onClick={() => setMode("approve")}>
+      <Button variant="primary" loading={approve.isPending} onClick={() => void askApprove()}>
         <UserCheck className="size-4" />
         Aprovar
       </Button>
@@ -712,9 +782,9 @@ function ApplicationDialog({ id, canEdit, onClose }: { id: string; canEdit: bool
       open
       size="lg"
       onClose={onClose}
-      busy={approve.isPending || reject.isPending || remove.isPending}
-      // Motivo ou observação escritos e ainda não enviados: fechar pergunta antes de descartar.
-      dirty={!outcome && ((mode === "reject" && reason.trim() !== "") || (mode === "approve" && note.trim() !== ""))}
+      busy={approve.isPending || reject.isPending || reopen.isPending || remove.isPending || temp.isPending}
+      // Motivo escrito e ainda não enviado: fechar pergunta antes de descartar.
+      dirty={!outcome && ((rejecting && reason.trim() !== "") || (reopening && reopenReason.trim() !== ""))}
       title={a ? a.full_name : "Ficha de homologação"}
       description={a ? `Enviada em ${formatDateTime(a.created_at)}${a.invite_label ? ` · link: ${a.invite_label}` : ""}` : undefined}
       footer={footer}
@@ -724,173 +794,323 @@ function ApplicationDialog({ id, canEdit, onClose }: { id: string; canEdit: bool
       ) : !a ? (
         <LoadingBlock />
       ) : outcome ? (
-        <OutcomePanel application={a} outcome={outcome} />
-      ) : mode === "approve" ? (
+        <OutcomePanel application={a} outcome={outcome} temp={temp} />
+      ) : rejecting ? (
         <div className="flex flex-col gap-4">
-          <p className="text-sm text-ink">
-            {a.full_name} passa a ser técnico da base e entra no app com <strong>{a.email}</strong> e a senha que cadastrou na
-            ficha.
-          </p>
-          <Field label="Grupo técnico">
-            <Select value={teamId} onChange={(e) => setTeamId(e.target.value)}>
-              <option value="">Sem grupo</option>
-              {(teams.data ?? [])
-                .filter((t) => t.is_active)
-                .map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-            </Select>
-          </Field>
-          <Field label="Cargo">
-            <Input value={jobTitle} onChange={(e) => setJobTitle(e.target.value)} maxLength={120} />
-          </Field>
-          <Field label="Observação (opcional)" hint="Fica registrada na ficha. Ex.: combinado o valor por chamado.">
-            <Textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)} maxLength={2000} />
-          </Field>
-          {error ? <ErrorBox message={errorMessage(error)} /> : null}
-        </div>
-      ) : mode === "reject" ? (
-        <div className="flex flex-col gap-4">
-          <Field label="Motivo" required hint="Fica registrado na ficha (o candidato não vê).">
+          <Field label="Motivo" required hint="O candidato não vê.">
             <Textarea rows={4} value={reason} onChange={(e) => setReason(e.target.value)} maxLength={2000} autoFocus />
           </Field>
-          {error ? <ErrorBox message={errorMessage(error)} /> : null}
+          {reject.error ? <ErrorBox message={errorMessage(reject.error)} /> : null}
+        </div>
+      ) : reopening ? (
+        <div className="flex flex-col gap-4">
+          <Field label="Motivo" required>
+            <Textarea rows={3} value={reopenReason} onChange={(e) => setReopenReason(e.target.value)} maxLength={REOPEN_MAX} autoFocus />
+          </Field>
+          {reopen.error ? <ErrorBox message={errorMessage(reopen.error)} /> : null}
         </div>
       ) : (
-        <div className="flex flex-col gap-5">
-          <div className="flex items-center gap-4">
-            <ApplicantPhoto name={a.full_name} url={a.photo_url} />
-            <div className="min-w-0 text-sm">
-              <Pill color={APPLICATION_STATE[a.status].color}>{APPLICATION_STATE[a.status].label}</Pill>
-              {a.review_note ? <p className="mt-1.5 text-ink-muted">“{a.review_note}”</p> : null}
-              {a.reviewed_by ? (
-                <p className="mt-0.5 text-xs text-ink-muted">
-                  por {a.reviewed_by.name} em {formatDateTime(a.reviewed_at)}
-                </p>
-              ) : null}
-            </div>
-          </div>
-          <div className="grid gap-5 sm:grid-cols-2">
-            <Section title="Contato e identificação">
-              <Line icon={<Mail className="size-4" />}>{a.email}</Line>
-              <Line icon={<Phone className="size-4" />}>
-                <a
-                  href={whatsappUrl(a.phone, `Olá, ${firstName(a.full_name)}!`)}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1 underline-offset-2 hover:text-brand hover:underline"
-                  title="Conversar no WhatsApp"
-                >
-                  {a.phone}
-                  <MessageCircle className="size-3.5 text-ink-muted" />
-                </a>
-              </Line>
-              <Line icon={<IdCard className="size-4" />}>
-                CPF {formatDocument(a.document)}
-                {a.birth_date ? ` · nasc. ${formatDate(a.birth_date)}` : ""}
-              </Line>
-              {a.company_document ? <Line icon={<IdCard className="size-4" />}>CNPJ {formatDocument(a.company_document)}</Line> : null}
-              <Line icon={<MapPin className="size-4" />}>
-                {[a.address, `${a.city}-${a.state}`, a.postal_code].filter(Boolean).join(" · ")}
-              </Line>
-            </Section>
-            <Section title="Região e disponibilidade">
-              <p>{a.coverage_area}</p>
-              {coverage ? (
-                <p className="text-ink-muted">
-                  {coverage.inCity
-                    ? `Já temos ${coverage.inCity} ${coverage.inCity === 1 ? "técnico ativo" : "técnicos ativos"} em ${a.city}-${a.state}`
-                    : `Nenhum técnico ativo em ${a.city}-${a.state} ainda`}{" "}
-                  ({coverage.inState} na UF).
-                </p>
-              ) : null}
-              <p className="text-ink-muted">{a.availability.map((k) => availability[k] ?? k).join(" · ") || "Disponibilidade não informada"}</p>
-              <Line icon={<Car className="size-4" />}>
-                {a.has_vehicle ? `Veículo próprio (${vehicles[a.vehicle_type ?? ""] ?? a.vehicle_type})` : "Sem veículo"}
-                {a.has_driver_license ? " · CNH" : ""}
-              </Line>
-            </Section>
-          </div>
-          <Section title="Atuação">
-            <div className="flex flex-wrap gap-1.5">
-              {a.service_areas.map((k) => (
-                <span key={k} className="rounded-full bg-nav-active px-2.5 py-0.5 text-xs font-medium text-brand-ink">
-                  {areas[k] ?? k}
-                </span>
-              ))}
-            </div>
-            <p className="text-ink-muted">
-              {a.years_experience != null ? `${years(a.years_experience)} de experiência` : "Experiência não informada"}
-            </p>
-          </Section>
-          {a.skills.length ? (
-            <Section title="Skills">
-              <ul className="grid gap-1 sm:grid-cols-2">
-                {a.skills.map((s) => (
-                  <li key={s.name} className="flex items-center justify-between gap-2 rounded-md border border-line px-2.5 py-1">
-                    <span className="truncate">{s.name}</span>
-                    <span className="shrink-0 text-xs text-ink-muted">{levels[s.level] ?? s.level}</span>
-                  </li>
-                ))}
-              </ul>
-            </Section>
-          ) : null}
-          {a.certifications || a.tools || a.notes ? (
-            <Section title="Mais informações">
-              {a.certifications ? <Line icon={<BadgeCheck className="size-4" />}>{a.certifications}</Line> : null}
-              {a.tools ? <Line icon={<Wrench className="size-4" />}>{a.tools}</Line> : null}
-              {a.notes ? <p className="text-ink-muted">{a.notes}</p> : null}
-            </Section>
-          ) : null}
-          <p className="flex items-center gap-1.5 text-xs text-ink-muted">
-            <ShieldCheck className="size-3.5" />
-            Aceitou o aviso de privacidade (versão {a.privacy_version}) em {formatDateTime(a.privacy_consent_at)}.
-          </p>
-        </div>
+        <ApplicationView
+          application={a}
+          labels={{ areas, availability, levels, vehicles }}
+          coverage={coverage}
+          approveError={pending ? approve.error : null}
+          resend={
+            canEdit && pending && a.email_verified_at === null
+              ? { onClick: () => resend.mutate(), loading: resend.isPending, off: mailEnabled === false }
+              : null
+          }
+        />
       )}
     </Dialog>
   );
 }
 
-/** Depois de aprovar ou reprovar: a mensagem pronta para avisar o candidato pelo WhatsApp. */
-function OutcomePanel({ application: a, outcome }: { application: ApplicationDetail; outcome: Outcome }) {
+/** O que o candidato mandou na ficha, as análises e o aviso de privacidade aceito. */
+function ApplicationView({
+  application: a,
+  labels,
+  coverage,
+  approveError,
+  resend,
+}: {
+  application: ApplicationDetail;
+  labels: Record<"areas" | "availability" | "levels" | "vehicles", Record<string, string>>;
+  coverage: { inCity: number; inState: number } | null;
+  approveError: unknown;
+  /** "Reenviar validação" (ficha pendente com o e-mail sem validar, com Editar); `off`: envio de e-mail desligado. */
+  resend: { onClick: () => void; loading: boolean; off: boolean } | null;
+}) {
+  const { areas, availability, levels, vehicles } = labels;
+  // A API antiga não manda as análises: a nota da última fica no topo, como era.
+  const reviews = [...(a.reviews ?? [])].sort((x, y) => Date.parse(y.at) - Date.parse(x.at));
+  const street = a.address && a.address_number ? `${a.address}, ${a.address_number}` : a.address;
+  const address = [street, a.address_complement, a.address_district, `${a.city}-${a.state}`, a.postal_code].filter(Boolean).join(" · ");
+  const rg = a.rg_number ? [a.rg_number, [a.rg_issuer, a.rg_state].filter(Boolean).join("/")].filter(Boolean).join(" · ") : null;
+  const vehicleType = a.vehicle_type ? (vehicles[a.vehicle_type] ?? a.vehicle_type) : null;
+  const vehicle = a.has_vehicle
+    ? [
+        vehicleType ? `Veículo próprio (${vehicleType})` : "Veículo próprio",
+        a.vehicle_model,
+        a.vehicle_plate ? formatPlate(a.vehicle_plate) : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : "Sem veículo";
+  const company = [
+    a.company_document ? `CNPJ ${formatDocument(a.company_document)}` : null,
+    a.company_name ? `Razão social ${a.company_name}` : null,
+    a.company_trade_name ? `Nome fantasia ${a.company_trade_name}` : null,
+  ].filter((line): line is string => Boolean(line));
+  return (
+    <div className="flex flex-col gap-5">
+      {approveError ? <ErrorBox title="Não foi possível aprovar" message={errorMessage(approveError)} /> : null}
+      <div className="flex items-center gap-4">
+        <ApplicantPhoto name={a.full_name} url={a.photo_url} />
+        <div className="min-w-0 text-sm">
+          <Pill color={APPLICATION_STATE[a.status].color}>{APPLICATION_STATE[a.status].label}</Pill>
+          {!reviews.length && a.review_note ? <p className="mt-1.5 text-ink-muted">“{a.review_note}”</p> : null}
+          {!reviews.length && a.reviewed_by ? (
+            <p className="mt-0.5 text-xs text-ink-muted">
+              por {a.reviewed_by.name} em {formatDateTime(a.reviewed_at)}
+            </p>
+          ) : null}
+          {a.status === "rejected" && a.purge_at ? (
+            <p className="mt-1.5 text-xs text-ink-muted">Excluída automaticamente em {formatDate(a.purge_at)}.</p>
+          ) : null}
+        </div>
+      </div>
+      <div className="grid gap-5 sm:grid-cols-2">
+        <Section title="Contato e identificação">
+          <Line icon={<Mail className="size-4" />}>
+            <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="break-all">
+                {a.email}
+                {/* Sem o campo (API antiga), só o e-mail. */}
+                {a.email_verified_at ? ` · validado em ${formatDate(a.email_verified_at)}` : a.email_verified_at === null ? " · validação pendente" : ""}
+              </span>
+              {resend ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2"
+                  loading={resend.loading}
+                  disabled={resend.off}
+                  title={resend.off ? "Envio de e-mail desligado" : undefined}
+                  onClick={resend.onClick}
+                >
+                  Reenviar validação
+                </Button>
+              ) : null}
+            </span>
+          </Line>
+          <Line icon={<Phone className="size-4" />}>
+            <a
+              href={whatsappUrl(a.phone, `Olá, ${firstName(a.full_name)}!`)}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 underline-offset-2 hover:text-brand hover:underline"
+              title="Conversar no WhatsApp"
+            >
+              {a.phone}
+              <MessageCircle className="size-3.5 text-ink-muted" />
+            </a>
+          </Line>
+          {a.phone_secondary ? <Line icon={<Phone className="size-4" />}>Telefone secundário {a.phone_secondary}</Line> : null}
+          <Line icon={<IdCard className="size-4" />}>
+            CPF {formatDocument(a.document)}
+            {a.birth_date ? ` · nasc. ${formatDate(a.birth_date)}` : ""}
+          </Line>
+          {rg ? <Line icon={<IdCard className="size-4" />}>RG {rg}</Line> : null}
+          <Line icon={<MapPin className="size-4" />}>{address}</Line>
+        </Section>
+        <Section title="Região e disponibilidade">
+          <p>{a.coverage_area}</p>
+          {coverage ? (
+            <p className="text-ink-muted">
+              {coverage.inCity
+                ? `Já temos ${coverage.inCity} ${coverage.inCity === 1 ? "técnico ativo" : "técnicos ativos"} em ${a.city}-${a.state}`
+                : `Nenhum técnico ativo em ${a.city}-${a.state} ainda`}{" "}
+              ({coverage.inState} na UF).
+            </p>
+          ) : null}
+          <p className="text-ink-muted">{a.availability.map((k) => availability[k] ?? k).join(" · ") || "Disponibilidade não informada"}</p>
+          <Line icon={<Car className="size-4" />}>
+            {vehicle}
+            {a.has_driver_license ? " · CNH" : ""}
+          </Line>
+        </Section>
+      </div>
+      {company.length ? (
+        <Section title="Empresa">
+          {company.map((line, i) => (
+            <Line key={line} icon={i === 0 ? <Building2 className="size-4" /> : <span className="block size-4" />}>
+              {line}
+            </Line>
+          ))}
+        </Section>
+      ) : null}
+      <Section title="Atuação">
+        <div className="flex flex-wrap gap-1.5">
+          {a.service_areas.map((k) => (
+            <span key={k} className="rounded-full bg-nav-active px-2.5 py-0.5 text-xs font-medium text-brand-ink">
+              {areas[k] ?? k}
+            </span>
+          ))}
+        </div>
+        <p className="text-ink-muted">
+          {a.years_experience != null ? `${years(a.years_experience)} de experiência` : "Experiência não informada"}
+        </p>
+      </Section>
+      {a.skills.length ? (
+        <Section title="Aptidões">
+          <ul className="grid gap-1 sm:grid-cols-2">
+            {a.skills.map((s) => (
+              <li key={s.name} className="flex items-center justify-between gap-2 rounded-md border border-line px-2.5 py-1">
+                <span className="truncate">{s.name}</span>
+                <span className="shrink-0 text-xs text-ink-muted">{levels[s.level] ?? s.level}</span>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      ) : null}
+      {a.bio ? (
+        <Section title="Mini biografia">
+          <p className="whitespace-pre-line">{a.bio}</p>
+        </Section>
+      ) : null}
+      {a.certifications || a.tools || a.notes ? (
+        <Section title="Mais informações">
+          {a.certifications ? <Line icon={<BadgeCheck className="size-4" />}>{a.certifications}</Line> : null}
+          {a.tools ? <Line icon={<Wrench className="size-4" />}>{a.tools}</Line> : null}
+          {a.notes ? <p className="text-ink-muted">{a.notes}</p> : null}
+        </Section>
+      ) : null}
+      {reviews.length ? (
+        <Section title="Análises">
+          <ul className="flex flex-col gap-1.5">
+            {reviews.map((r, i) => (
+              <li key={`${r.at}-${i}`}>
+                {reviewLine(r)}
+                {/* A expirada já diz o motivo no rótulo. */}
+                {r.note && fold(r.note) !== fold(REVIEW_ACTION_LABEL[r.action] ?? "") ? (
+                  <span className="block text-ink-muted">“{r.note}”</span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </Section>
+      ) : null}
+      <p className="flex items-center gap-1.5 text-xs text-ink-muted">
+        <ShieldCheck className="size-3.5" />
+        Aceitou o aviso de privacidade (versão {a.privacy_version}) em {formatDateTime(a.privacy_consent_at)}.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Depois de aprovar ou reprovar: a mensagem pronta para avisar o candidato pelo WhatsApp. Aprovada: o que aconteceu
+ * com o e-mail de boas-vindas e, sem senha e sem o link por e-mail, a senha provisória (com Técnicos em Editar).
+ */
+function OutcomePanel({
+  application: a,
+  outcome,
+  temp,
+}: {
+  application: ApplicationDetail;
+  outcome: Outcome;
+  temp: UseMutationResult<TemporaryPassword, Error, string>;
+}) {
   const canTechnicians = useCan("base.technicians");
+  const canResetPassword = useCan("base.technicians", "edit");
   const first = firstName(a.full_name);
-  const approved = outcome.kind === "approved";
-  const message = approved
-    ? `Olá, ${first}! Seu cadastro de técnico parceiro na Maxx Field foi aprovado. No app, entre com ${a.email} e a senha que você criou na ficha.`
-    : `Olá, ${first}! Obrigado pelo interesse em ser técnico parceiro da Maxx Field. No momento não vamos seguir com o seu cadastro.`;
+  if (outcome.kind === "rejected") {
+    const message = `Olá, ${first}! Obrigado pelo interesse em ser técnico parceiro da Maxx Field. No momento não vamos seguir com o seu cadastro.`;
+    return (
+      <div className="flex flex-col gap-4">
+        <div className="flex items-start gap-3">
+          <UserX className="mt-0.5 size-5 shrink-0 text-ink-muted" />
+          <div className="min-w-0 text-sm">
+            <p className="font-semibold text-ink">Ficha reprovada</p>
+            <p className="mt-0.5 text-ink-muted">Se quiser, avise o candidato com uma mensagem educada.</p>
+          </div>
+        </div>
+        <p className="rounded-lg border border-line bg-surface-2 px-3 py-2 text-sm text-ink">{message}</p>
+        <div className="flex flex-wrap gap-2">
+          <a href={whatsappUrl(a.phone, message)} target="_blank" rel="noreferrer" className={buttonClassName("secondary")}>
+            <MessageCircle className="size-4" />
+            Avisar pelo WhatsApp
+          </a>
+        </div>
+      </div>
+    );
+  }
+  const { technician, welcome } = outcome;
+  const email = welcome?.to ?? technician.email;
+  // Sem senha na ficha, a API cria o usuário com uma senha que ninguém sabe e pede a troca no primeiro acesso.
+  const noPassword = technician.must_change_password;
+  const linkSent = welcome?.status === "queued";
+  const mailLine =
+    welcome?.status === "queued"
+      ? `E-mail de boas-vindas enviado para ${email}.`
+      : welcome?.status === "not_configured"
+        ? "E-mail de boas-vindas não enviado: envio de e-mail desligado."
+        : welcome?.status === "not_sendable"
+          ? "Sem e-mail válido: avise pelo WhatsApp."
+          : null;
+  // Sem senha e sem o link do e-mail: ele só entra com uma senha provisória (o painel dela tem o próprio WhatsApp).
+  const needsTemp = noPassword && !linkSent;
+  const message = !noPassword
+    ? `Olá, ${first}! Seu cadastro de técnico parceiro na Maxx Field foi aprovado. No app, entre com ${email} e a senha que você criou na ficha.`
+    : linkSent
+      ? `Olá, ${first}! Seu cadastro de técnico parceiro na Maxx Field foi aprovado. Enviamos para ${email} o link para você criar a senha do app.`
+      : null;
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-start gap-3">
-        {approved ? (
-          <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-brand" />
-        ) : (
-          <UserX className="mt-0.5 size-5 shrink-0 text-ink-muted" />
-        )}
+        <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-brand" />
         <div className="min-w-0 text-sm">
-          <p className="font-semibold text-ink">
-            {outcome.kind === "approved" ? `${outcome.name} está na base técnica` : "Ficha reprovada"}
-          </p>
+          <p className="font-semibold text-ink">{technician.name} está na base técnica</p>
           <p className="mt-0.5 text-ink-muted">
-            {approved
-              ? "Avise o técnico: ele já pode entrar no app com o e-mail e a senha da ficha."
-              : "Se quiser, avise o candidato com uma mensagem educada."}
+            {needsTemp
+              ? "A ficha está sem senha: gere uma senha provisória e mande pelo WhatsApp."
+              : noPassword
+                ? "Avise o técnico: ele cria a senha pelo link do e-mail e já pode entrar no app."
+                : "Avise o técnico: ele já pode entrar no app com o e-mail e a senha da ficha."}
           </p>
+          {mailLine ? <p className="mt-0.5 text-ink-muted">{mailLine}</p> : null}
         </div>
       </div>
-      <p className="rounded-lg border border-line bg-surface-2 px-3 py-2 text-sm text-ink">{message}</p>
+      {temp.data ? (
+        <TempPasswordPanel result={temp.data} />
+      ) : message ? (
+        <p className="rounded-lg border border-line bg-surface-2 px-3 py-2 text-sm text-ink">{message}</p>
+      ) : null}
+      {needsTemp && !temp.data ? (
+        canResetPassword ? (
+          <div className="flex flex-col items-start gap-2">
+            <Button variant="primary" loading={temp.isPending} onClick={() => temp.mutate(technician.id)}>
+              {temp.isPending ? null : <KeyRound className="size-4" />}
+              {temp.error ? "Tentar de novo" : "Gerar senha provisória"}
+            </Button>
+            {temp.error ? <ErrorBox message={errorMessage(temp.error)} /> : null}
+          </div>
+        ) : (
+          <p className="text-xs text-ink-muted">A senha provisória sai na ficha do técnico, por quem tem Técnicos em Editar.</p>
+        )
+      ) : null}
       <div className="flex flex-wrap gap-2">
-        <a href={whatsappUrl(a.phone, message)} target="_blank" rel="noreferrer" className={buttonClassName("secondary")}>
-          <MessageCircle className="size-4" />
-          Avisar pelo WhatsApp
-        </a>
-        {approved && canTechnicians ? (
-          <Link href={`/tecnicos?q=${encodeURIComponent(a.email)}`} className={buttonClassName("ghost")}>
+        {message ? (
+          <a href={whatsappUrl(a.phone, message)} target="_blank" rel="noreferrer" className={buttonClassName("secondary")}>
+            <MessageCircle className="size-4" />
+            Avisar pelo WhatsApp
+          </a>
+        ) : null}
+        {canTechnicians ? (
+          <Link href={technicianHref(technician.id)} className={buttonClassName("ghost")}>
             <Users className="size-4" />
-            Ver na base técnica
+            Abrir ficha do técnico
           </Link>
         ) : null}
       </div>

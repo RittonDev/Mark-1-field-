@@ -5,37 +5,40 @@ import clsx from "clsx";
 import {
   ArrowDown,
   BadgeCheck,
-  Camera,
   Check,
   Download,
   Eye,
   FileSpreadsheet,
   HardHat,
-  KeyRound,
   Loader2,
-  MapPinned,
   MessageCircle,
   Phone,
   Plus,
   Search,
   SquarePen,
-  Star,
   Upload,
   UserPlus,
-  X,
 } from "lucide-react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useConfirm } from "@/components/Confirm";
+import { Tabs } from "@/components/motion";
 import { NoAccess } from "@/components/NoAccess";
-import { fold, replaceSearch, useSearchChange } from "@/components/operacao/hooks";
+import { fold, isUuid, replaceSearch, useSearchChange } from "@/components/operacao/hooks";
+import { FavoritesView } from "@/components/technicians/FavoritesView";
+import { TempPasswordPanel } from "@/components/technicians/GrantAccessDialog";
+import { InviteDialog } from "@/components/technicians/InviteDialog";
+import { LevelBadge, LevelMedal } from "@/components/technicians/LevelBadge";
+import { NearbyFinder } from "@/components/technicians/NearbyFinder";
+import { refreshTechnicianViews } from "@/components/technicians/refresh";
+import { TechAvatar } from "@/components/technicians/TechAvatar";
+import { TechnicianLink } from "@/components/technicians/TechnicianLink";
 import { useToast } from "@/components/Toaster";
 import {
   Button,
   buttonClassName,
   Card,
-  Checkbox,
   Dialog,
   EmptyState,
   ErrorBox,
@@ -43,44 +46,46 @@ import {
   Input,
   LoadingBlock,
   PageHeader,
-  SectionTitle,
+  Pill,
   Select,
   Table,
   Td,
   Th,
 } from "@/components/ui";
 import { useNow } from "@/components/useNow";
-import { absoluteApiUrl, api, errorMessage } from "@/lib/api";
+import { api, errorMessage } from "@/lib/api";
 import {
+  APP_ACCESS,
   DAY_PERIOD,
   DAY_PERIOD_ORDER,
   LEVEL_TIER,
   LEVEL_TIER_ORDER,
+  OPERATIONAL_STATUS,
+  periodShort,
+  periodText,
   SKILL_LEVEL,
   slotsText,
   TRANSPORT_MODE,
   TRANSPORT_MODE_ORDER,
+  unavailableOn,
   WEEKDAY,
   WEEKDAY_ORDER,
 } from "@/lib/constants";
 import { downloadCsv } from "@/lib/download";
-import { formatDate, formatRelative, initials } from "@/lib/format";
+import { dayKey, formatDate, formatRelative } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
-import { maskCep, maskPhone, resizePhotoBlob, UFS } from "@/lib/onboarding";
+import { maskPhone, UFS } from "@/lib/onboarding";
 import { useCan } from "@/lib/permissions";
-import { useFavorites, useServiceTypes, useTeams, useTechnicianTools } from "@/lib/queries";
-import { type TabItem, Tabs } from "@/components/motion";
-import { favoritesHref, FavoritesView } from "@/components/technicians/FavoritesView";
-import { TempPasswordPanel } from "@/components/technicians/GrantAccessDialog";
-import { InviteDialog } from "@/components/technicians/InviteDialog";
-import { LevelBadge, LevelMedal } from "@/components/technicians/LevelBadge";
-import { LevelSection, useTechnicianLevel } from "@/components/technicians/LevelSection";
-import { NearbyFinder } from "@/components/technicians/NearbyFinder";
-import { ProfileHistory } from "@/components/technicians/ProfileHistory";
-import { refreshTechnicianViews } from "@/components/technicians/refresh";
-import { TechnicianPayment } from "@/components/technicians/TechnicianPayment";
-import { TechnicianStatsSection } from "@/components/technicians/TechnicianStats";
-import { TechProfileView } from "@/components/technicians/TechProfileView";
+import { useTeams, useTechnicianTools } from "@/lib/queries";
+import {
+  type GapKey,
+  listQueryFrom,
+  listQueryPatch,
+  OPERATIONAL_STATUS_COLOR,
+  operationalRank,
+  type TechListQuery,
+  technicianHref,
+} from "@/lib/technicians";
 import type {
   DayPeriod,
   ImportResult,
@@ -88,12 +93,9 @@ import type {
   Technician,
   TechnicianRegion,
   TemporaryPassword,
-  UUID,
   Weekday,
 } from "@/lib/types";
 import { whatsappUrl } from "@/lib/whatsapp";
-
-type Active = "true" | "false" | "";
 
 /** Abas da tela; a de favoritos (e a dos mais próximos) fica na URL: ?aba=favoritos&uf=SP&cidade=Santos. */
 type View = "list" | "favorites" | "nearby";
@@ -106,9 +108,16 @@ const PAGE = 150;
 // Ao chegar nele, a lista avisa que há mais.
 const API_LIMIT = 2000;
 
-/** Cadastros incompletos que atrapalham a operação (filtro rápido sobre a lista carregada). */
-type Gap = "phone" | "region" | "services" | "gps" | "pix";
-const GAPS: { key: Gap; label: string; hint: string; test: (t: Technician) => boolean }[] = [
+/** A lista com os filtros, para o "← Técnicos" da ficha voltar a ela (a ficha lê). */
+const LIST_URL_KEY = "mf-tecnicos-lista";
+/** Quantas linhas o "Mostrar mais" abriu nesta lista ({ key, count }): voltar da ficha não fecha de novo. */
+const SHOWN_KEY = "mf-tecnicos-mostrar";
+
+/** Cor do selo "Indisponível" (a mesma da ficha). */
+const UNAVAILABLE_COLOR = "#d97706";
+
+/** Cadastros incompletos que atrapalham a operação (filtro rápido sobre a lista carregada; ?incompleto=). */
+const GAPS: { key: GapKey; label: string; hint: string; test: (t: Technician) => boolean }[] = [
   { key: "phone", label: "Sem celular", hint: "Sem celular, o WhatsApp não abre direto na conversa", test: (t) => !t.phone },
   {
     key: "region",
@@ -116,7 +125,7 @@ const GAPS: { key: Gap; label: string; hint: string; test: (t: Technician) => bo
     hint: "Sem cidade de casa nem histórico de atendimento: fica fora das sugestões por cidade",
     test: (t) => !t.base_city && !t.home_city,
   },
-  { key: "services", label: "Sem serviços", hint: "Sem os serviços que faz: não aparece na busca por serviço", test: (t) => !(t.services ?? []).length },
+  { key: "services", label: "Sem serviços", hint: "Sem os serviços que faz", test: (t) => !(t.services ?? []).length },
   {
     key: "gps",
     label: "Sem aceite do GPS",
@@ -124,11 +133,11 @@ const GAPS: { key: Gap; label: string; hint: string; test: (t: Technician) => bo
     test: (t) => t.is_active && !t.location_consent_at,
   },
   {
-    key: "pix",
-    label: "Sem chave PIX",
-    hint: "Sem a chave, não há para onde pagar: ele cadastra no app, em Perfil › Configurações › Chave PIX",
+    key: "payout",
+    label: "Sem forma de recebimento",
+    hint: "Sem forma de recebimento, não há para onde pagar: ele cadastra no app",
     // Só quando a API diz que não tem (sem o campo, não conta ninguém).
-    test: (t) => t.is_active && t.has_pix === false,
+    test: (t) => t.is_active && t.payout_methods_count === 0,
   },
 ];
 
@@ -138,8 +147,6 @@ type LevelFilter = LevelTier | "at_risk";
 const LEVEL_CHIPS = [...LEVEL_TIER_ORDER].reverse();
 const AT_RISK_HINT = "Abaixo do critério: desce se não voltar a cumprir em 30 dias";
 
-/** Ordem da lista: por nome (com os ativos primeiro), pela última OS ou pelo elo (da faixa mais alta). */
-type Sort = "name" | "visit" | "level";
 /** Posição da faixa para ordenar; sem o elo na resposta, por último. */
 const levelRank = (t: Technician) => (t.level ? LEVEL_TIER_ORDER.indexOf(t.level.tier) : -1);
 const byName = new Intl.Collator("pt-BR", { sensitivity: "base" }).compare;
@@ -148,9 +155,33 @@ function regionText(city: string | null | undefined, state: string | null | unde
   return [city, state].filter(Boolean).join("-");
 }
 
-const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-/** O filtro de ferramenta da URL (?ferramenta=, o link de Configurações › Técnicos): outro texto não vale. */
-const toolParam = (value: string | null): string => (value && UUID_TEXT.test(value) ? value : "");
+/**
+ * Os filtros da lista na URL (lib/technicians). A cidade só vale com a UF e pode chegar como a busca da aba Favoritos
+ * (o link "Favorito em" manda "Santos-SP"): sem o "-UF" do fim, ela é a cidade da lista.
+ */
+function readFilters(params: Pick<URLSearchParams, "get">): TechListQuery {
+  const query = listQueryFrom(params);
+  if (!query.uf) return { ...query, cidade: "" };
+  const suffix = `-${query.uf}`;
+  return query.cidade.toUpperCase().endsWith(suffix)
+    ? { ...query, cidade: query.cidade.slice(0, -suffix.length).trim() }
+    : query;
+}
+
+const sameQuery = (a: TechListQuery, b: TechListQuery) =>
+  JSON.stringify(listQueryPatch(a)) === JSON.stringify(listQueryPatch(b));
+
+/** As linhas que o "Mostrar mais" já tinha aberto nesta mesma lista (a volta da ficha); sem nada guardado, PAGE. */
+function storedCount(key: string): number {
+  try {
+    const raw = window.sessionStorage.getItem(SHOWN_KEY);
+    const saved = raw ? (JSON.parse(raw) as { key?: unknown; count?: unknown }) : null;
+    if (saved?.key === key && typeof saved.count === "number" && saved.count > PAGE) return saved.count;
+  } catch {
+    // Sem storage (ou valor estragado): a lista abre com as primeiras linhas.
+  }
+  return PAGE;
+}
 
 /** Chip de filtro rápido (Cadastro incompleto, Elo): o marcado fica com a borda da marca. */
 function chipClass(on: boolean) {
@@ -160,7 +191,7 @@ function chipClass(on: boolean) {
   );
 }
 
-/** Cabeçalho de coluna que ordena a lista (de novo, volta à ordem por nome). */
+/** Cabeçalho de coluna que ordena a lista (de novo, volta à ordem padrão). */
 function SortHeader({
   active,
   onClick,
@@ -177,7 +208,7 @@ function SortHeader({
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      title={active ? "Voltar à ordem por nome" : title}
+      title={active ? "Voltar à ordem padrão" : title}
       className="inline-flex items-center gap-1 rounded uppercase hover:text-ink focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
     >
       {children}
@@ -186,36 +217,8 @@ function SortHeader({
   );
 }
 
-function Avatar({ tech, size = "md" }: { tech: Pick<Technician, "name" | "avatar_url">; size?: "md" | "lg" }) {
-  const src = absoluteApiUrl(tech.avatar_url);
-  // Foto que não abre (ex.: link antigo do Field Control): ficam as iniciais.
-  const [broken, setBroken] = useState<string | null>(null);
-  return (
-    <span
-      className={clsx(
-        "flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-brand-soft font-semibold text-brand-ink",
-        size === "lg" ? "size-16 text-lg" : "size-8 text-xs",
-      )}
-    >
-      {src && broken !== src ? (
-        // eslint-disable-next-line @next/next/no-img-element -- link assinado da API
-        <img
-          src={src}
-          alt=""
-          loading="lazy"
-          decoding="async"
-          onError={() => setBroken(src)}
-          className="size-full object-cover"
-        />
-      ) : (
-        initials(tech.name)
-      )}
-    </span>
-  );
-}
-
 export default function TechniciansPage() {
-  // A busca pode chegar pela URL (?q=, ex.: "Ver na base técnica" da Homologação).
+  // Os filtros chegam pela URL (?q= do "Ver na base técnica" da Homologação, ?ferramenta= de Configurações › Técnicos).
   return (
     <Suspense fallback={<LoadingBlock />}>
       <TechniciansView />
@@ -224,85 +227,118 @@ export default function TechniciansPage() {
 }
 
 function TechniciansView() {
-  // Visualizar: a base, os favoritos, os mais próximos e o cadastro só para consulta. Editar: cadastrar,
-  // importar, alterar, foto, senha e liberar o acesso. Convidar segue a Homologação (Editar lá).
+  // Visualizar: a base, os favoritos e os mais próximos (a ficha abre para consulta). Editar: cadastrar e importar (o
+  // resto fica na ficha do técnico). Convidar segue a Homologação (Editar lá).
   const canView = useCan("base.technicians");
   const canEdit = useCan("base.technicians", "edit");
   const canOnboarding = useCan("base.onboarding");
   const canInvite = useCan("base.onboarding", "edit");
   const { toast } = useToast();
-  const queryClient = useQueryClient();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const now = useNow(60_000);
-  const [qInput, setQInput] = useState(() => searchParams.get("q") ?? "");
-  // O Ctrl+K com a tela aberta troca só o ?q=: a busca acompanha. Só um q novo na URL troca o que foi
-  // digitado (abrir uma OS, trocar de aba ou de UF não apaga a busca).
-  const urlQ = searchParams.get("q") ?? "";
-  const [syncedQ, setSyncedQ] = useState(urlQ);
-  if (urlQ !== syncedQ) {
-    setSyncedQ(urlQ);
-    setQInput(urlQ);
-  }
-  const [teamId, setTeamId] = useState("");
-  // Depois da migração, quem está "inativo" no Field Control continua na rede (só sem licença): mostra todos.
-  const [active, setActive] = useState<Active>("");
-  // Perfil técnico (o técnico informa no app): a ferramenta fica na URL (?ferramenta=, o link "N técnicos" de
-  // Configurações › Técnicos); um ?ferramenta= novo na URL (Voltar, o menu) troca o filtro, como a busca.
-  const urlTool = toolParam(searchParams.get("ferramenta"));
-  const [syncedTool, setSyncedTool] = useState(urlTool);
-  const [toolId, setToolId] = useState(urlTool);
-  if (urlTool !== syncedTool) {
-    setSyncedTool(urlTool);
-    setToolId(urlTool);
-  }
-  const [day, setDay] = useState<Weekday | "">("");
-  const [period, setPeriod] = useState<DayPeriod | "">("");
-  const tools = useTechnicianTools(true);
+  const today = dayKey(now);
+
+  // Link de antes da ficha (?tecnico={id}: avisos antigos, favoritos): abre a ficha no lugar da lista, levando a OS
+  // aberta no painel (?os=). Um id que não é de técnico só sai da URL.
+  const linked = canView ? searchParams.get("tecnico") : null;
+  const redirecting = isUuid(linked);
+  useEffect(() => {
+    if (linked === null) return;
+    if (!isUuid(linked)) {
+      replaceSearch({ tecnico: null });
+      return;
+    }
+    const os = new URLSearchParams(window.location.search).get("os");
+    const href = technicianHref(linked);
+    router.replace(os ? `${href}?os=${encodeURIComponent(os)}` : href);
+  }, [linked, router]);
+
+  // Os filtros ficam na URL: recarregar, mandar o link e voltar da ficha mantêm a lista. A busca vai depois da pausa
+  // na digitação (apagar vale na hora).
+  const [filters, setFilters] = useState(() => readFilters(searchParams));
+  const [qInput, setQInput] = useState(filters.q);
+  const typed = useDebounced(qInput.trim());
+  const q = qInput.trim() ? typed : "";
+  const { uf, cidade: city, grupo: teamId, acesso: active, ferramenta: toolId, dia: day, turno: period } = filters;
+  const { incompleto: gap, elo: levelFilter, ordem: sort } = filters;
+  const query: TechListQuery = { ...filters, q };
   const [view, setView] = useState<View>(() => viewOf(searchParams.get("aba")));
-  // A URL mudou com a tela aberta (o menu, Voltar, o "Favorito em ..." do cadastro): mostra a aba dela.
+  // A URL mudou com a tela aberta (o menu, Voltar, a aba Favoritos com a UF e a busca dela): a tela segue a URL. A volta
+  // da própria gravação traz a busca que já está na tela; outra busca (o menu, um link) troca o que foi digitado.
   const urlChange = useSearchChange();
-  if (urlChange && viewOf(urlChange.get("aba")) !== view) setView(viewOf(urlChange.get("aba")));
-  const [uf, setUf] = useState("");
-  const [city, setCity] = useState("");
-  const [gap, setGap] = useState<Gap | null>(null);
-  const [levelFilter, setLevelFilter] = useState<LevelFilter | null>(null);
-  const [sort, setSort] = useState<Sort>("name");
-  const [editing, setEditing] = useState<Technician | null>(null);
+  if (urlChange) {
+    const nextView = viewOf(urlChange.get("aba"));
+    if (nextView !== view) setView(nextView);
+    const next = readFilters(urlChange);
+    if (!sameQuery(next, filters)) setFilters(next);
+    if (next.q.trim() !== q) setQInput(next.q);
+  }
+  useEffect(() => {
+    if (!redirecting) replaceSearch({ q: q || null });
+  }, [q, redirecting]);
+  /** Troca filtros: a tela na hora e a URL junto (só os parâmetros trocados, sem entrada no histórico). */
+  const update = (patch: Partial<TechListQuery>) => {
+    const next = { ...query, ...patch };
+    setFilters(next);
+    const url = listQueryPatch(next);
+    replaceSearch(Object.fromEntries(Object.keys(patch).map((key) => [key, url[key] ?? null])));
+  };
+
+  // O endereço da lista (com os filtros e a aba) para o "← Técnicos" da ficha, sem a OS aberta no painel.
+  const search = searchParams.toString();
+  useEffect(() => {
+    if (redirecting) return;
+    const params = new URLSearchParams(search);
+    params.delete("os");
+    const text = params.toString();
+    try {
+      window.sessionStorage.setItem(LIST_URL_KEY, `/tecnicos${text ? `?${text}` : ""}`);
+    } catch {
+      // Sem storage: o "← Técnicos" da ficha abre a lista sem os filtros.
+    }
+  }, [search, redirecting]);
+
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
   const [inviting, setInviting] = useState(false);
-  const q = useDebounced(qInput.trim());
   const teams = useTeams();
+  const tools = useTechnicianTools(true);
 
   const list = useQuery({
     queryKey: ["technicians", "list", { q, teamId, active, uf, city, toolId, day, period }],
-    queryFn: () =>
-      api.get<Technician[]>("/technicians", {
-        q: q || undefined,
-        team_id: teamId || undefined,
-        active: active || undefined,
-        state: uf || undefined,
-        city: city || undefined,
-        tool_id: toolId || undefined,
-        day: day || undefined,
-        period: period || undefined,
-        limit: API_LIMIT,
-      }),
+    queryFn: ({ signal }) =>
+      api.get<Technician[]>(
+        "/technicians",
+        {
+          q: q || undefined,
+          team_id: teamId || undefined,
+          active: active || undefined,
+          state: uf || undefined,
+          city: city || undefined,
+          tool_id: toolId || undefined,
+          day: day || undefined,
+          period: period || undefined,
+          limit: API_LIMIT,
+        },
+        { signal },
+      ),
     placeholderData: (previous) => previous,
     // A lista é pesada (a base inteira com os serviços): não recarrega a cada volta para a aba.
     staleTime: 60_000,
     refetchOnWindowFocus: false,
-    enabled: canView,
+    // Só a aba da lista busca: a dos favoritos mexe na UF e na cidade da URL enquanto a pessoa digita.
+    enabled: canView && view === "list" && !redirecting,
   });
   // Estados e cidades onde a base técnica está (pela região de atuação).
   const regions = useQuery({
     queryKey: ["technicians", "regions", active],
     queryFn: () => api.get<TechnicianRegion[]>("/technicians/regions", { active: active || undefined }),
     staleTime: 60_000,
-    enabled: canView,
+    enabled: canView && !redirecting,
   });
   const cities = regions.data?.find((r) => r.state === uf)?.cities ?? [];
-  // O UF e a cidade escolhidos continuam na lista mesmo quando a situação muda e eles somem das opções.
+  // O UF e a cidade escolhidos continuam na lista mesmo quando o acesso muda e eles somem das opções.
   const ufOptions = useMemo(() => {
     const states = regions.data?.length ? regions.data.map((r) => r.state) : UFS;
     return uf && !states.includes(uf) ? [uf, ...states] : states;
@@ -311,7 +347,7 @@ function TechniciansView() {
 
   const gapCounts = useMemo(() => {
     const all = list.data ?? [];
-    return Object.fromEntries(GAPS.map((g) => [g.key, all.filter(g.test).length])) as Record<Gap, number>;
+    return Object.fromEntries(GAPS.map((g) => [g.key, all.filter(g.test).length])) as Record<GapKey, number>;
   }, [list.data]);
   // Quantos em cada faixa do elo e em risco (null: a API ainda não manda o elo).
   const levelCounts = useMemo(() => {
@@ -332,41 +368,40 @@ function TechniciansView() {
         (!test || test(t)) &&
         (!levelFilter || (levelFilter === "at_risk" ? t.level?.at_risk : t.level?.tier === levelFilter)),
     );
-    // Por padrão os ativos primeiro (a API já ordena por nome ou pela busca); ou pela última OS; ou pelo elo,
-    // da faixa mais alta para a mais baixa e, na mesma faixa, por nome.
+    // Pela última OS; pelo elo, da faixa mais alta para a mais baixa e, na mesma faixa, por nome; ou a padrão: Ativo
+    // com acesso, Ativo sem acesso, Inativo e Bloqueado, cada grupo na ordem da API (o nome ou a busca).
     if (sort === "visit") return all.sort((a, b) => (b.last_visit_at ?? "").localeCompare(a.last_visit_at ?? ""));
     if (sort === "level") return all.sort((a, b) => levelRank(b) - levelRank(a) || byName(a.name, b.name));
-    return all.sort((a, b) => Number(b.is_active) - Number(a.is_active));
+    return all.sort((a, b) => operationalRank(a) - operationalRank(b));
   }, [list.data, gap, levelFilter, sort]);
-  // Quantas linhas mostrar; volta ao começo quando a lista muda (outro filtro).
-  const listKey = JSON.stringify([q, teamId, active, uf, city, toolId, day, period, gap, levelFilter, sort]);
-  const [shown, setShown] = useState({ key: listKey, count: PAGE });
+  // Quantas linhas mostrar; volta ao começo quando a lista muda (outro filtro). A volta da ficha reabre as mesmas.
+  const listKey = JSON.stringify(listQueryPatch(query));
+  const [shown, setShown] = useState(() => ({ key: listKey, count: storedCount(listKey) }));
   const shownCount = shown.key === listKey ? shown.count : PAGE;
+  const showMore = () => {
+    const next = { key: listKey, count: shownCount + PAGE };
+    setShown(next);
+    try {
+      window.sessionStorage.setItem(SHOWN_KEY, JSON.stringify(next));
+    } catch {
+      // Sem storage: a volta da ficha mostra as primeiras linhas.
+    }
+  };
   const filtered = !!(q || teamId || active || uf || city || toolId || day || period || gap || levelFilter);
-  const toggleSort = (next: Sort) => setSort((current) => (current === next ? "name" : next));
+  const toggleSort = (next: "visit" | "level") => update({ ordem: sort === next ? "name" : next });
   // As ferramentas ativas do catálogo (o filtro e o nome no CSV). A escolhida que não está nele (ainda carregando,
   // ou desativada depois do link) continua no filtro.
   const toolOptions = tools.data ?? [];
   const toolNames = useMemo(() => new Map((tools.data ?? []).map((tool) => [tool.id, tool.name])), [tools.data]);
-  const changeTool = (next: string) => {
-    setToolId(next);
-    replaceSearch({ ferramenta: next || null });
-  };
 
+  // "Limpar filtros" apaga todos os filtros da URL (a aba e a ordem ficam).
   const clearFilters = () => {
     setQInput("");
-    setTeamId("");
-    setActive("");
-    setUf("");
-    setCity("");
-    changeTool("");
-    setDay("");
-    setPeriod("");
-    setGap(null);
-    setLevelFilter(null);
+    update({ q: "", uf: "", cidade: "", grupo: "", acesso: "", ferramenta: "", dia: "", turno: "", incompleto: "", elo: "" });
   };
   // A coluna "ferramental" sai com os nomes do catálogo (a lista só traz os ids). Enquanto ele carrega, os botões
   // Exportar ficam desativados; com erro, avisa e busca de novo, sem baixar (a coluna em branco pareceria "nada marcado").
+  // Sem CPF, RG, nascimento nem dados de recebimento: a planilha circula fora do sistema.
   const exportCsv = () => {
     if (!tools.data) {
       if (tools.isError) {
@@ -385,6 +420,10 @@ function TechniciansView() {
         "uf",
         "regiao_atuacao",
         "situacao",
+        "situacao_motivo",
+        "acesso_app",
+        "email_validado",
+        "forma_recebimento",
         "ultimo_acesso",
         "ultima_os",
         "os_abertas",
@@ -399,6 +438,7 @@ function TechniciansView() {
       ],
       ...rows.map((t) => {
         const transport = t.transport;
+        const status = t.operational_status ?? "active";
         return [
           t.name,
           t.email,
@@ -407,7 +447,12 @@ function TechniciansView() {
           t.home_city,
           t.home_state,
           regionText(t.base_city, t.base_state),
-          t.is_active ? "Ativo" : "Desativado",
+          OPERATIONAL_STATUS[status],
+          status === "active" ? "" : (t.operational_reason ?? ""),
+          t.is_active ? APP_ACCESS.on : APP_ACCESS.off,
+          // Vazio quando a API ainda não manda o campo.
+          t.email_verified_at === undefined ? "" : t.email_verified_at ? "sim" : "não",
+          t.payout_methods_count === undefined ? "" : t.payout_methods_count > 0 ? "sim" : "não",
           t.last_login_at ? formatDate(t.last_login_at) : "",
           t.last_visit_at ? formatDate(t.last_visit_at) : "",
           t.open_tickets,
@@ -431,66 +476,32 @@ function TechniciansView() {
       }),
     ]);
   };
-  // Trocar de aba: a URL acompanha (mantém o ?os= do painel); UF e cidade são só dos favoritos.
+  // Trocar de aba: a URL acompanha (mantém o ?os= do painel); UF e cidade ficam para a outra aba. A busca da aba
+  // Favoritos ("Santos-SP", ou o nome de um técnico) só vira a cidade da lista quando é uma cidade da UF.
   const changeView = (next: View) => {
     setView(next);
-    replaceSearch({ aba: VIEW_PARAM[next], ...(next === "favorites" ? {} : { uf: null, cidade: null }) });
-  };
-  // Nome clicado em "Favoritos por cidade" ou "Mais próximos": abre o cadastro (da lista carregada ou
-  // buscado pelo e-mail).
-  const openTechnician = async (tech: { id: UUID; email: string }) => {
-    const known = list.data?.find((t) => t.id === tech.id);
-    if (known) {
-      setEditing(known);
-      return;
+    const patch: Record<string, string | null> = { aba: VIEW_PARAM[next] };
+    if (next === "list" && city && regions.data) {
+      const known = regions.data.find((r) => r.state === uf)?.cities.some((c) => fold(c.city) === fold(city));
+      if (!known) {
+        patch.cidade = null;
+        setFilters((current) => ({ ...current, cidade: "" }));
+      }
     }
-    try {
-      const found = await queryClient.fetchQuery({
-        queryKey: ["technicians", "list", { q: tech.email, teamId: "", active: "", uf: "", city: "", toolId: "", day: "", period: "" }],
-        queryFn: () => api.get<Technician[]>("/technicians", { q: tech.email }),
-        staleTime: 60_000,
-      });
-      const match = found.find((t) => t.id === tech.id);
-      if (match) setEditing(match);
-      else toast({ title: "Não achei este técnico na base", tone: "error" });
-    } catch (error) {
-      toast({ title: errorMessage(error), tone: "error" });
-    }
+    replaceSearch(patch);
   };
-
-  // ?tecnico={id} (o aviso "alterou a chave PIX pelo app", um link): abre o cadastro, da lista carregada ou
-  // buscado na API. Aberto, vira um cadastro como o do clique: sair da URL (ex.: "Favorito em" com alteração
-  // não salva) não fecha. Fechar tira o parâmetro.
-  const linkedId = canView ? searchParams.get("tecnico") : null;
-  const [adoptedId, setAdoptedId] = useState<string | null>(null);
-  const linkedInList = linkedId ? list.data?.find((t) => t.id === linkedId) : undefined;
-  const pendingLink = !!linkedId && adoptedId !== linkedId;
-  const linked = useQuery({
-    queryKey: ["technicians", "one", linkedId],
-    queryFn: ({ signal }) => api.get<Technician>(`/technicians/${linkedId}`, undefined, { signal }),
-    enabled: pendingLink && !linkedInList,
-    staleTime: 30_000,
-  });
-  const fromLink = pendingLink ? (linkedInList ?? linked.data ?? null) : null;
-  if (fromLink && linkedId) {
-    setAdoptedId(linkedId);
-    setEditing(fromLink);
-  } else if (!linkedId && adoptedId) {
-    // O parâmetro saiu: o mesmo link, de novo, abre de novo.
-    setAdoptedId(null);
-  }
-  const linkError = pendingLink && !linkedInList ? linked.error : null;
-  useEffect(() => {
-    if (!linkError) return;
-    toast({ title: "Não foi possível abrir o cadastro do link", description: errorMessage(linkError), tone: "error" });
-    replaceSearch({ tecnico: null });
-  }, [linkError, toast]);
-  const closeEditing = () => {
-    setEditing(null);
-    if (linkedId) replaceSearch({ tecnico: null });
+  // A linha abre a ficha: Ctrl/⌘+clique e o botão do meio, em outra aba. Arrastar para copiar um texto não abre nada.
+  const openRow = (e: React.MouseEvent<HTMLTableRowElement>, t: Technician) => {
+    // Só o clique na própria linha (não o que vem de uma janela aberta a partir dela).
+    if (!e.currentTarget.contains(e.target as Node)) return;
+    if (window.getSelection()?.toString()) return;
+    const href = technicianHref(t.id);
+    if (e.ctrlKey || e.metaKey) window.open(href, "_blank", "noopener");
+    else router.push(href);
   };
 
   if (!canView) return <NoAccess kind="module" item="base.technicians" />;
+  if (redirecting) return <LoadingBlock />;
 
   return (
     <div>
@@ -580,28 +591,17 @@ function TechniciansView() {
 
       {view === "nearby" ? (
         <div role="tabpanel" id="tecnicos-panel-nearby" aria-labelledby="tecnicos-tab-nearby">
-          <NearbyFinder regions={regions.data} onOpenTechnician={openTechnician} />
+          <NearbyFinder regions={regions.data} />
         </div>
       ) : view === "favorites" ? (
         <div role="tabpanel" id="tecnicos-panel-favorites" aria-labelledby="tecnicos-tab-favorites">
-          <FavoritesView
-            initialUf={searchParams.get("uf") ?? ""}
-            initialCity={searchParams.get("cidade") ?? ""}
-            onOpenTechnician={openTechnician}
-          />
+          <FavoritesView initialUf={searchParams.get("uf") ?? ""} initialCity={searchParams.get("cidade") ?? ""} />
         </div>
       ) : (
         <div role="tabpanel" id="tecnicos-panel-list" aria-labelledby="tecnicos-tab-list">
           <div className="mb-3 flex flex-wrap gap-2">
             <div className="w-full sm:w-40">
-              <Select
-                value={uf}
-                onChange={(e) => {
-                  setUf(e.target.value);
-                  setCity("");
-                }}
-                aria-label="Estado"
-              >
+              <Select value={uf} onChange={(e) => update({ uf: e.target.value, cidade: "" })} aria-label="Estado">
                 <option value="">Todas as UFs</option>
                 {ufOptions.map((s) => (
                   <option key={s} value={s}>
@@ -612,7 +612,7 @@ function TechniciansView() {
               </Select>
             </div>
             <div className="w-full sm:w-56">
-              <Select value={city} onChange={(e) => setCity(e.target.value)} disabled={!uf} aria-label="Cidade">
+              <Select value={city} onChange={(e) => update({ cidade: e.target.value })} disabled={!uf} aria-label="Cidade">
                 <option value="">{uf ? "Todas as cidades" : "Escolha a UF"}</option>
                 {cityOptions.map((c) => (
                   <option key={c.city} value={c.city}>
@@ -632,8 +632,11 @@ function TechniciansView() {
               />
             </div>
             <div className="w-full sm:w-52">
-              <Select value={teamId} onChange={(e) => setTeamId(e.target.value)} aria-label="Grupo">
+              <Select value={teamId} onChange={(e) => update({ grupo: e.target.value })} aria-label="Grupo">
                 <option value="">Todos os grupos</option>
+                {teamId && teams.data && !teams.data.some((t) => t.id === teamId) ? (
+                  <option value={teamId}>Grupo escolhido</option>
+                ) : null}
                 {(teams.data ?? []).map((t) => (
                   <option key={t.id} value={t.id}>
                     {t.name}
@@ -641,15 +644,19 @@ function TechniciansView() {
                 ))}
               </Select>
             </div>
-            <div className="w-full sm:w-36">
-              <Select value={active} onChange={(e) => setActive(e.target.value as Active)} aria-label="Situação">
-                <option value="true">Ativos</option>
-                <option value="false">Inativos</option>
+            <div className="w-full sm:w-40">
+              <Select
+                value={active}
+                onChange={(e) => update({ acesso: e.target.value as TechListQuery["acesso"] })}
+                aria-label="Acesso ao app"
+              >
                 <option value="">Todos</option>
+                <option value="true">{APP_ACCESS.on}</option>
+                <option value="false">{APP_ACCESS.off}</option>
               </Select>
             </div>
             <div className="w-full sm:w-56">
-              <Select value={toolId} onChange={(e) => changeTool(e.target.value)} aria-label="Ferramenta">
+              <Select value={toolId} onChange={(e) => update({ ferramenta: e.target.value })} aria-label="Ferramenta">
                 <option value="">Todas as ferramentas</option>
                 {toolId && !toolNames.has(toolId) ? <option value={toolId}>Ferramenta escolhida</option> : null}
                 {toolOptions.map((tool) => (
@@ -660,7 +667,7 @@ function TechniciansView() {
               </Select>
             </div>
             <div className="w-full sm:w-40">
-              <Select value={day} onChange={(e) => setDay(e.target.value as Weekday | "")} aria-label="Disponível no dia">
+              <Select value={day} onChange={(e) => update({ dia: e.target.value as Weekday | "" })} aria-label="Disponível no dia">
                 <option value="">Qualquer dia</option>
                 {WEEKDAY_ORDER.map((d) => (
                   <option key={d} value={d}>
@@ -672,7 +679,7 @@ function TechniciansView() {
             <div className="w-full sm:w-44">
               <Select
                 value={period}
-                onChange={(e) => setPeriod(e.target.value as DayPeriod | "")}
+                onChange={(e) => update({ turno: e.target.value as DayPeriod | "" })}
                 aria-label="Disponível no turno"
               >
                 <option value="">Qualquer turno</option>
@@ -697,7 +704,7 @@ function TechniciansView() {
                       type="button"
                       aria-pressed={gap === g.key}
                       title={g.hint}
-                      onClick={() => setGap(gap === g.key ? null : g.key)}
+                      onClick={() => update({ incompleto: gap === g.key ? "" : g.key })}
                       className={chipClass(gap === g.key)}
                     >
                       {g.label}
@@ -719,7 +726,7 @@ function TechniciansView() {
                         type="button"
                         aria-pressed={on}
                         disabled={!count && !on}
-                        onClick={() => setLevelFilter(on ? null : tier)}
+                        onClick={() => update({ elo: on ? "" : tier })}
                         className={clsx(chipClass(on), "disabled:pointer-events-none disabled:opacity-50")}
                       >
                         <LevelMedal tier={tier} size={14} />
@@ -733,7 +740,7 @@ function TechniciansView() {
                       type="button"
                       aria-pressed={levelFilter === "at_risk"}
                       title={AT_RISK_HINT}
-                      onClick={() => setLevelFilter(levelFilter === "at_risk" ? null : "at_risk")}
+                      onClick={() => update({ elo: levelFilter === "at_risk" ? "" : "at_risk" })}
                       className={chipClass(levelFilter === "at_risk")}
                     >
                       <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-amber-500 dark:bg-amber-400" />
@@ -773,7 +780,7 @@ function TechniciansView() {
               <LoadingBlock />
             ) : list.error ? (
               <div className="p-4">
-                <ErrorBox message={errorMessage(list.error)} />
+                <ErrorBox message={errorMessage(list.error)} onRetry={() => void list.refetch()} />
               </div>
             ) : rows.length === 0 ? (
               filtered ? (
@@ -836,117 +843,145 @@ function TechniciansView() {
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.slice(0, shownCount).map((t) => (
-                      <tr
-                        key={t.id}
-                        className="cursor-pointer transition-colors hover:bg-[var(--row-hover)]"
-                        onClick={(e) => {
-                          // Só o clique na própria linha (não o que vem de um diálogo aberto a partir dela).
-                          if (e.currentTarget.contains(e.target as Node)) setEditing(t);
-                        }}
-                      >
-                        <Td>
-                          <span className="flex items-center gap-2.5">
-                            <Avatar tech={t} />
-                            <span className="min-w-0">
-                              <span className="block truncate font-semibold text-ink">{t.name}</span>
-                              <span className="block truncate text-xs text-ink-muted">{t.email}</span>
+                    {rows.slice(0, shownCount).map((t) => {
+                      const status = t.operational_status ?? "active";
+                      const away = unavailableOn(t.unavailability, today);
+                      return (
+                        <tr
+                          key={t.id}
+                          className="cursor-pointer transition-colors hover:bg-[var(--row-hover)]"
+                          onClick={(e) => openRow(e, t)}
+                          onMouseDown={(e) => {
+                            // Botão do meio fora de um link: sem a rolagem automática do navegador.
+                            if (e.button === 1 && !(e.target as Element).closest("a")) e.preventDefault();
+                          }}
+                          onAuxClick={(e) => {
+                            // Botão do meio num link já abre a aba sozinho.
+                            if (e.button !== 1 || !e.currentTarget.contains(e.target as Node) || (e.target as Element).closest("a")) {
+                              return;
+                            }
+                            e.preventDefault();
+                            window.open(technicianHref(t.id), "_blank", "noopener");
+                          }}
+                        >
+                          <Td>
+                            <span className="flex items-center gap-2.5">
+                              <TechAvatar tech={t} />
+                              <span className="min-w-0">
+                                <TechnicianLink
+                                  id={t.id}
+                                  className="block truncate rounded font-semibold text-ink underline-offset-2 hover:text-brand hover:underline focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
+                                >
+                                  {t.name}
+                                </TechnicianLink>
+                                <span className="block truncate text-xs text-ink-muted">{t.email}</span>
+                                {status !== "active" || away ? (
+                                  <span className="mt-1 flex flex-wrap gap-1">
+                                    {status !== "active" ? (
+                                      <span title={t.operational_reason ?? undefined} className="inline-flex">
+                                        <Pill color={OPERATIONAL_STATUS_COLOR[status]}>{OPERATIONAL_STATUS[status]}</Pill>
+                                      </span>
+                                    ) : null}
+                                    {away ? (
+                                      <span title={periodText(away)} className="inline-flex">
+                                        <Pill color={UNAVAILABLE_COLOR}>Indisponível {periodShort(away, today)}</Pill>
+                                      </span>
+                                    ) : null}
+                                  </span>
+                                ) : null}
+                              </span>
                             </span>
-                          </span>
-                        </Td>
-                        <Td className="hidden sm:table-cell">
-                          {t.level ? (
-                            <span className="flex flex-col items-start gap-0.5">
-                              <LevelBadge tier={t.level.tier} size="sm" />
-                              {t.level.at_risk ? (
-                                <span className="text-xs text-amber-800 dark:text-amber-300" title={AT_RISK_HINT}>
-                                  em risco
+                          </Td>
+                          <Td className="hidden sm:table-cell">
+                            {t.level ? (
+                              <span className="flex flex-col items-start gap-0.5">
+                                <LevelBadge tier={t.level.tier} size="sm" />
+                                {t.level.at_risk ? (
+                                  <span className="text-xs text-amber-800 dark:text-amber-300" title={AT_RISK_HINT}>
+                                    em risco
+                                  </span>
+                                ) : null}
+                              </span>
+                            ) : (
+                              <span className="text-ink-muted">—</span>
+                            )}
+                          </Td>
+                          <Td className="hidden md:table-cell">{t.team?.name ?? <span className="text-ink-muted">—</span>}</Td>
+                          <Td className="hidden lg:table-cell">
+                            {t.base_city || t.home_city ? (
+                              <span className="block">
+                                <span className="whitespace-nowrap text-ink">
+                                  {t.base_city ? regionText(t.base_city, t.base_state) : regionText(t.home_city, t.home_state)}
                                 </span>
-                              ) : null}
-                            </span>
-                          ) : (
-                            <span className="text-ink-muted">—</span>
-                          )}
-                        </Td>
-                        <Td className="hidden md:table-cell">{t.team?.name ?? <span className="text-ink-muted">—</span>}</Td>
-                        <Td className="hidden lg:table-cell">
-                          {t.base_city || t.home_city ? (
-                            <span className="block">
-                              <span className="whitespace-nowrap text-ink">
-                                {t.base_city ? regionText(t.base_city, t.base_state) : regionText(t.home_city, t.home_state)}
+                                <span className="block text-xs text-ink-muted">
+                                  {t.base_source === "history" ? `pelo histórico · ${t.base_visits ?? 0} OS` : "pelo endereço"}
+                                </span>
                               </span>
-                              <span className="block text-xs text-ink-muted">
-                                {t.base_source === "history" ? `pelo histórico · ${t.base_visits ?? 0} OS` : "pelo endereço"}
+                            ) : (
+                              <span className="text-xs text-ink-muted">Sem região</span>
+                            )}
+                          </Td>
+                          <Td className="hidden lg:table-cell">
+                            {t.phone ? (
+                              <span className="flex items-center gap-1">
+                                <a
+                                  href={whatsappUrl(t.phone, `Olá, ${t.name.trim().split(/\s+/)[0]}!`)}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="inline-flex items-center gap-1 rounded text-ink underline-offset-2 hover:text-brand hover:underline"
+                                  title={`Conversar com ${t.name} no WhatsApp`}
+                                >
+                                  <MessageCircle className="size-3.5 shrink-0 text-ink-muted" />
+                                  <span className="whitespace-nowrap">{t.phone}</span>
+                                </a>
+                                <a
+                                  href={`tel:${t.phone.replace(/[^\d+]/g, "")}`}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="rounded p-1 text-ink-muted hover:text-ink"
+                                  aria-label={`Ligar para ${t.name}`}
+                                  title="Ligar"
+                                >
+                                  <Phone className="size-3.5" />
+                                </a>
                               </span>
-                            </span>
-                          ) : (
-                            <span className="text-xs text-ink-muted">Sem região</span>
-                          )}
-                        </Td>
-                        <Td className="hidden lg:table-cell">
-                          {t.phone ? (
-                            <span className="flex items-center gap-1">
-                              <a
-                                href={whatsappUrl(t.phone, `Olá, ${t.name.trim().split(/\s+/)[0]}!`)}
-                                target="_blank"
-                                rel="noreferrer"
+                            ) : (
+                              <span className="text-ink-muted">—</span>
+                            )}
+                          </Td>
+                          <Td>
+                            <AppStatus tech={t} now={now} />
+                          </Td>
+                          <Td className="hidden text-xs whitespace-nowrap text-ink-muted xl:table-cell">
+                            {t.last_visit_at ? formatDate(t.last_visit_at) : "—"}
+                          </Td>
+                          <Td className="hidden tabular-nums sm:table-cell">
+                            {t.open_tickets ? (
+                              <Link
+                                href={`/chamados?assignee_id=${t.id}&open_only=true`}
                                 onClick={(e) => e.stopPropagation()}
-                                className="inline-flex items-center gap-1 rounded text-ink underline-offset-2 hover:text-brand hover:underline"
-                                title={`Conversar com ${t.name} no WhatsApp`}
+                                className="font-medium text-ink underline-offset-2 hover:text-brand hover:underline"
+                                title={`OS abertas de ${t.name}`}
                               >
-                                <MessageCircle className="size-3.5 shrink-0 text-ink-muted" />
-                                <span className="whitespace-nowrap">{t.phone}</span>
-                              </a>
-                              <a
-                                href={`tel:${t.phone.replace(/[^\d+]/g, "")}`}
-                                onClick={(e) => e.stopPropagation()}
-                                className="rounded p-1 text-ink-muted hover:text-ink"
-                                aria-label={`Ligar para ${t.name}`}
-                                title="Ligar"
-                              >
-                                <Phone className="size-3.5" />
-                              </a>
-                            </span>
-                          ) : (
-                            <span className="text-ink-muted">—</span>
-                          )}
-                        </Td>
-                        <Td>
-                          <AppStatus tech={t} now={now} />
-                        </Td>
-                        <Td className="hidden text-xs whitespace-nowrap text-ink-muted xl:table-cell">
-                          {t.last_visit_at ? formatDate(t.last_visit_at) : "—"}
-                        </Td>
-                        <Td className="hidden tabular-nums sm:table-cell">
-                          {t.open_tickets ? (
-                            <Link
-                              href={`/chamados?assignee_id=${t.id}&open_only=true`}
-                              onClick={(e) => e.stopPropagation()}
-                              className="font-medium text-ink underline-offset-2 hover:text-brand hover:underline"
-                              title={`OS abertas de ${t.name}`}
+                                {t.open_tickets}
+                              </Link>
+                            ) : (
+                              <span className="text-ink-muted">0</span>
+                            )}
+                          </Td>
+                          <Td className="edit-col">
+                            <TechnicianLink
+                              id={t.id}
+                              className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg border border-line bg-surface text-brand shadow-elev-1 transition-[border-color,background-color] duration-150 hover:border-brand/40 hover:bg-brand-soft focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
+                              label={`${canEdit ? "Editar" : "Ver"} ${t.name}`}
+                              title={`${canEdit ? "Editar" : "Ver"} ${t.name}`}
                             >
-                              {t.open_tickets}
-                            </Link>
-                          ) : (
-                            <span className="text-ink-muted">0</span>
-                          )}
-                        </Td>
-                        <Td className="edit-col">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setEditing(t);
-                            }}
-                            className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg border border-line bg-surface text-brand shadow-elev-1 transition-[border-color,background-color] duration-150 hover:border-brand/40 hover:bg-brand-soft focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
-                            aria-label={`${canEdit ? "Editar" : "Ver"} ${t.name}`}
-                            title={`${canEdit ? "Editar" : "Ver o cadastro de"} ${t.name}`}
-                          >
-                            {canEdit ? <SquarePen className="size-4" /> : <Eye className="size-4" />}
-                          </button>
-                        </Td>
-                      </tr>
-                    ))}
+                              {canEdit ? <SquarePen className="size-4" /> : <Eye className="size-4" />}
+                            </TechnicianLink>
+                          </Td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </Table>
                 {rows.length > shownCount ? (
@@ -954,7 +989,7 @@ function TechniciansView() {
                     <span className="tabular-nums">
                       Mostrando {shownCount} de {rows.length}
                     </span>
-                    <Button size="sm" onClick={() => setShown({ key: listKey, count: shownCount + PAGE })}>
+                    <Button size="sm" onClick={showMore}>
                       Mostrar mais
                     </Button>
                   </div>
@@ -965,7 +1000,6 @@ function TechniciansView() {
         </div>
       )}
 
-      {editing ? <EditDialog key={editing.id} tech={editing} readOnly={!canEdit} onClose={closeEditing} /> : null}
       {creating ? <CreateDialog onClose={() => setCreating(false)} /> : null}
       {importing ? <ImportDialog onClose={() => setImporting(false)} /> : null}
       {inviting ? <InviteDialog onClose={() => setInviting(false)} /> : null}
@@ -978,8 +1012,8 @@ function AppStatus({ tech, now }: { tech: Technician; now: number }) {
   const canMap = useCan("operation.map");
   if (!tech.is_active) {
     return (
-      <span className="inline-flex rounded-full border border-line bg-surface-2 px-2 py-0.5 text-xs font-medium text-ink-muted">
-        Desativado
+      <span className="inline-flex rounded-full border border-line bg-surface-2 px-2 py-0.5 text-xs font-medium whitespace-nowrap text-ink-muted">
+        {APP_ACCESS.off}
       </span>
     );
   }
@@ -1036,15 +1070,8 @@ function validateTechnician(v: TechnicianForm): string | null {
   return null;
 }
 
-function TechnicianFields({
-  value,
-  onChange,
-  emailHint,
-}: {
-  value: TechnicianForm;
-  onChange: (v: TechnicianForm) => void;
-  emailHint?: string;
-}) {
+/** O cadastro direto (Novo técnico); o resto (endereço, dados pessoais, jornada) fica na ficha. */
+function TechnicianFields({ value, onChange }: { value: TechnicianForm; onChange: (v: TechnicianForm) => void }) {
   const teams = useTeams();
   const set = (k: keyof TechnicianForm, v: string) => onChange({ ...value, [k]: v });
   return (
@@ -1052,7 +1079,7 @@ function TechnicianFields({
       <Field label="Nome" required className="sm:col-span-2">
         <Input value={value.name} onChange={(e) => set("name", e.target.value)} maxLength={160} autoComplete="off" />
       </Field>
-      <Field label="E-mail (login no app)" required hint={emailHint}>
+      <Field label="E-mail (login no app)" required>
         <Input type="email" value={value.email} onChange={(e) => set("email", e.target.value)} autoComplete="off" />
       </Field>
       <Field label="Celular (WhatsApp)">
@@ -1080,7 +1107,7 @@ function TechnicianFields({
         <Input value={value.job_title} onChange={(e) => set("job_title", e.target.value)} maxLength={120} />
       </Field>
       <div className="grid grid-cols-[1fr_6rem] gap-4 sm:col-span-2">
-        <Field label="Cidade onde mora" hint="Base das sugestões de técnico por cidade">
+        <Field label="Cidade onde mora">
           <Input value={value.home_city} onChange={(e) => set("home_city", e.target.value)} maxLength={120} />
         </Field>
         <Field label="UF">
@@ -1142,9 +1169,15 @@ function CreateDialog({ onClose }: { onClose: () => void }) {
       description="Cadastro direto, sem ficha de homologação. O técnico recebe uma senha provisória."
       footer={
         create.data ? (
-          <Button variant="primary" onClick={onClose}>
-            Concluir
-          </Button>
+          <>
+            {/* O resto do cadastro (endereço, dados pessoais, jornada e serviços) fica na ficha. */}
+            <Link href={technicianHref(create.data.technician.id)} className={buttonClassName()}>
+              Abrir ficha
+            </Link>
+            <Button variant="primary" onClick={onClose}>
+              Concluir
+            </Button>
+          </>
         ) : (
           <>
             {/* Cadastrando: sair agora perderia a senha provisória da resposta. */}
@@ -1178,707 +1211,6 @@ function CreateDialog({ onClose }: { onClose: () => void }) {
         </form>
       )}
     </Dialog>
-  );
-}
-
-/** O que o diálogo edita, para saber se algo mudou antes de fechar sem salvar. */
-function editableOf(tech: Technician) {
-  const time = (value: string | null | undefined) => value?.slice(0, 5) ?? "";
-  return {
-    form: {
-      name: tech.name,
-      email: tech.email,
-      phone: tech.phone ?? "",
-      team_id: tech.team?.id ?? "",
-      job_title: tech.job_title ?? "",
-      home_city: tech.home_city ?? "",
-      home_state: tech.home_state ?? "",
-      coverage_area: tech.coverage_area ?? "",
-    } satisfies TechnicianForm,
-    // Ficha completa (endereço, jornada e serviços), como veio do Field Control.
-    address: { line: tech.address_line ?? "", district: tech.address_district ?? "", zip: tech.address_zip ?? "" },
-    schedule: {
-      start: time(tech.work_schedule?.start),
-      end: time(tech.work_schedule?.end),
-      break_start: time(tech.work_schedule?.break_start),
-      break_end: time(tech.work_schedule?.break_end),
-    },
-    serviceIds: (tech.services ?? []).map((s) => s.id),
-    isActive: tech.is_active,
-  };
-}
-type Editable = ReturnType<typeof editableOf>;
-const snapshot = (value: Editable) => JSON.stringify({ ...value, serviceIds: [...value.serviceIds].sort() });
-
-/** O corpo do PATCH a partir do que o diálogo edita (o mesmo cálculo para a abertura e para a tela). */
-function bodyOf({ form, address, schedule, serviceIds, isActive }: Editable): Record<string, unknown> {
-  return {
-    name: form.name.trim(),
-    email: form.email.trim(),
-    phone: form.phone || null,
-    team_id: form.team_id || null,
-    job_title: form.job_title || null,
-    home_city: form.home_city || null,
-    home_state: form.home_state || null,
-    coverage_area: form.coverage_area || null,
-    is_active: isActive,
-    address_line: address.line.trim() || null,
-    address_district: address.district.trim() || null,
-    address_zip: address.zip.replace(/\D/g, "") || null,
-    work_schedule:
-      schedule.start || schedule.end
-        ? {
-            start: schedule.start || null,
-            end: schedule.end || null,
-            break_start: schedule.break_start || null,
-            break_end: schedule.break_end || null,
-          }
-        : null,
-    service_type_ids: [...serviceIds].sort(),
-  };
-}
-
-/** Abas da ficha do técnico: "Cadastro", "Perfil técnico", "Elo" e "Histórico" (ids tecnico-tab-* e tecnico-panel-*). */
-type FichaTab = "cadastro" | "perfil" | "elo" | "historico";
-
-/** Quanto a barra de abas sobe por cima do respiro de cima do corpo do diálogo (o -mt-4 dela) para encostar no cabeçalho. */
-const TABS_BAR_PULL = 16;
-
-/** O ponto âmbar no rótulo da aba com algo ainda não salvo; `text` é para o leitor de tela. */
-function PendingDot({ text }: { text: string }) {
-  return (
-    <>
-      <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-amber-500 dark:bg-amber-400" />
-      <span className="sr-only"> ({text})</span>
-    </>
-  );
-}
-
-/**
- * A barra de abas presa logo abaixo do cabeçalho do diálogo (que fica preso no topo quando o corpo rola): devolve a ref
- * da barra e a altura do cabeçalho, que muda com o nome e a largura da tela. Sem achar o cabeçalho (null), a barra
- * só não prende.
- */
-function useStickyBelowDialogHeader() {
-  const bar = useRef<HTMLDivElement>(null);
-  const [top, setTop] = useState<number | null>(null);
-  useEffect(() => {
-    const header = bar.current?.closest('[role="dialog"]')?.firstElementChild;
-    if (!(header instanceof HTMLElement) || header.contains(bar.current)) return;
-    const observer = new ResizeObserver(() => setTop(header.offsetHeight));
-    observer.observe(header);
-    return () => observer.disconnect();
-  }, []);
-  return [bar, top] as const;
-}
-
-/**
- * Ficha do técnico, em abas: Cadastro, Perfil técnico (o que ele informa no app), Elo (com os atendimentos por mês) e
- * Histórico. `readOnly` (Técnicos só com Visualizar): a mesma ficha para consulta, com os campos travados e sem foto,
- * senha nem salvar.
- */
-function EditDialog({ tech, readOnly = false, onClose }: { tech: Technician; readOnly?: boolean; onClose: () => void }) {
-  const queryClient = useQueryClient();
-  const { toast } = useToast();
-  const confirm = useConfirm();
-  // A chave PIX e o resumo de pagamentos são de Pagamentos (a ficha da homologação fica na aba Perfil técnico).
-  const canPayouts = useCan("commercial.payouts");
-  const [baseline] = useState(() => editableOf(tech));
-  const [current, setCurrent] = useState(tech);
-  const [form, setForm] = useState(baseline.form);
-  const [isActive, setIsActive] = useState(baseline.isActive);
-  const [address, setAddress] = useState(baseline.address);
-  const [schedule, setSchedule] = useState(baseline.schedule);
-  const [serviceIds, setServiceIds] = useState(baseline.serviceIds);
-  const [confirmReset, setConfirmReset] = useState(false);
-  const [problem, setProblem] = useState<string | null>(null);
-  // Motivo de desconsiderar uma ocorrência do elo digitado e ainda não enviado (fechar e o Salvar perguntam antes).
-  const [levelDraft, setLevelDraft] = useState(false);
-  const serviceTypes = useServiceTypes({ active: true });
-  // O elo recalculado agora (a mesma busca da seção Elo); enquanto chega, o selo guardado da lista.
-  const levelDetail = useTechnicianLevel(tech.id).data;
-  const badge = levelDetail
-    ? { tier: levelDetail.tier, atRisk: levelDetail.at_risk !== null }
-    : current.level
-      ? { tier: current.level.tier, atRisk: current.level.at_risk }
-      : null;
-  // Cidades em que ele é favorito (pela regra ou fixado pela central).
-  const favorites = useFavorites({ technicianId: tech.id });
-  const favoriteIn = (favorites.data?.cities ?? []).flatMap((c) => {
-    const me = c.favorites.find((f) => f.id === tech.id);
-    return me ? [{ city: c, me }] : [];
-  });
-  const dirty = snapshot({ form, address, schedule, serviceIds, isActive }) !== snapshot(baseline);
-  const emailChanged = form.email.trim().toLowerCase() !== tech.email.toLowerCase();
-  const refresh = (t: Technician) => {
-    setCurrent(t);
-    refreshTechnicianViews(queryClient);
-  };
-
-  // Abas da ficha. Cadastro (o padrão, também pelo ?tecnico=) e Elo ficam montados: o Elo guarda o motivo digitado de
-  // "Desconsiderar". Perfil técnico, Histórico e os atendimentos por mês montam na primeira vez que a aba abre e depois
-  // só se escondem (sem perder o estado nem buscar de novo).
-  const [tab, setTab] = useState<FichaTab>("cadastro");
-  const [opened, setOpened] = useState<ReadonlySet<FichaTab>>(() => new Set<FichaTab>(["cadastro"]));
-  const formRef = useRef<HTMLFormElement>(null);
-  const [tabsBar, tabsTop] = useStickyBelowDialogHeader();
-  const changeTab = (next: FichaTab) => {
-    // Com o corpo rolado (as abas presas no topo), a aba nova abre do começo, logo abaixo delas.
-    const bar = tabsBar.current;
-    const formNode = formRef.current;
-    const scroller = bar?.closest('[role="dialog"]')?.parentElement;
-    if (bar && formNode && scroller) {
-      const shift = bar.getBoundingClientRect().top - (formNode.getBoundingClientRect().top - TABS_BAR_PULL);
-      if (shift > 1) scroller.scrollTop -= shift;
-    }
-    setTab(next);
-    setOpened((seen) => (seen.has(next) ? seen : new Set(seen).add(next)));
-  };
-  const fichaTabs: TabItem<FichaTab>[] = [
-    {
-      key: "cadastro",
-      label: (
-        <>
-          Cadastro
-          {dirty ? <PendingDot text="alterações não salvas" /> : null}
-        </>
-      ),
-    },
-    { key: "perfil", label: "Perfil técnico" },
-    {
-      key: "elo",
-      label: (
-        <>
-          Elo
-          {levelDraft ? <PendingDot text="motivo não enviado" /> : null}
-        </>
-      ),
-    },
-    { key: "historico", label: "Histórico" },
-  ];
-
-  const save = useMutation({
-    mutationFn: (body: Record<string, unknown>) => api.patch<Technician>(`/technicians/${tech.id}`, body),
-    onSuccess: (t) => {
-      refresh(t);
-      toast({ title: "Técnico atualizado", tone: "success" });
-      onClose();
-    },
-  });
-  const reset = useMutation({
-    mutationFn: () => api.post<TemporaryPassword>(`/technicians/${tech.id}/reset-password`),
-    onSuccess: (r) => refresh(r.technician),
-  });
-  const photo = useMutation({
-    mutationFn: async (file: File | null) => {
-      if (!file) return api.delete<Technician>(`/technicians/${tech.id}/photo`);
-      // A foto do celular (4 a 10 MB) é reduzida aqui mesmo: chega com poucos KB e passa no limite de 2 MB.
-      const blob = await resizePhotoBlob(file);
-      const body = new FormData();
-      body.append("file", new File([blob], "foto.jpg", { type: "image/jpeg" }));
-      return api.upload<Technician>(`/technicians/${tech.id}/photo`, body);
-    },
-    onSuccess: (t, file) => {
-      refresh(t);
-      // Remover tira também a foto que veio do Field Control.
-      toast({ title: file ? "Foto atualizada" : "Foto removida", tone: "success" });
-    },
-    onError: (e) => toast({ title: errorMessage(e), tone: "error" }),
-  });
-
-  const submit = async () => {
-    const found = validateTechnician(form);
-    setProblem(found);
-    // O Salvar fica em todas as abas e salva o Cadastro: o campo a corrigir está nele.
-    if (found && tab !== "cadastro") changeTab("cadastro");
-    if (found || save.isPending) return;
-    // Só o que mudou: quem mexeu em outro campo enquanto o cadastro estava aberto (ou liberou o acesso do
-    // técnico) não perde a alteração. Sem nada mudado, fecha sem gravar.
-    const before = bodyOf(baseline);
-    const changed = Object.fromEntries(
-      Object.entries(bodyOf({ form, address, schedule, serviceIds, isActive })).filter(
-        ([key, value]) => JSON.stringify(value) !== JSON.stringify(before[key]),
-      ),
-    );
-    const hasChanges = Object.keys(changed).length > 0;
-    // O Salvar fecha a ficha: o motivo de "Desconsiderar" digitado no Elo e ainda não enviado se perderia. Mostra a aba
-    // e pergunta antes; "Voltar" fica nela, sem salvar.
-    if (levelDraft) {
-      if (tab !== "elo") changeTab("elo");
-      const ok = await confirm({
-        tone: "danger",
-        title: "Descartar o motivo não enviado?",
-        description: hasChanges
-          ? "O cadastro é salvo e a ocorrência continua contando no elo."
-          : "A ocorrência continua contando no elo.",
-        confirmLabel: "Descartar",
-      });
-      if (!ok) return;
-    }
-    if (!hasChanges) {
-      onClose();
-      return;
-    }
-    if (tech.is_active && !isActive) {
-      const open = current.open_tickets;
-      const ok = await confirm({
-        tone: "danger",
-        title: `Desativar ${tech.name}?`,
-        description: `Ele sai do app na hora e some do mapa e das sugestões.${
-          open === 1
-            ? " A OS aberta dele continua com ele: reatribua em Chamados."
-            : open
-              ? ` As ${open} OS abertas dele continuam com ele: reatribua em Chamados.`
-              : ""
-        } As ofertas em aberto para ele são canceladas.`,
-        confirmLabel: "Desativar",
-      });
-      if (!ok) return;
-    }
-    save.mutate(changed);
-  };
-
-  if (reset.data) {
-    return (
-      <Dialog
-        open
-        onClose={onClose}
-        title="Senha redefinida"
-        description="As sessões abertas do técnico foram encerradas."
-        footer={
-          <Button variant="primary" onClick={onClose}>
-            Concluir
-          </Button>
-        }
-      >
-        <TempPasswordPanel result={reset.data} />
-      </Dialog>
-    );
-  }
-
-  return (
-    <Dialog
-      open
-      size="lg"
-      onClose={onClose}
-      // Com alterações (campos, endereço, jornada, até 200 serviços, o motivo de desconsiderar no Elo), clique
-      // fora, Esc e o X perguntam antes de descartar, e fechar a aba também.
-      dirty={dirty || levelDraft}
-      // Salvando ou gerando a senha provisória (que só aparece uma vez): o diálogo espera terminar.
-      busy={save.isPending || reset.isPending}
-      title={current.name}
-      description={
-        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          {current.job_title ?? "Técnico"}
-          {badge ? <LevelBadge tier={badge.tier} atRisk={badge.atRisk} size="sm" /> : null}
-        </span>
-      }
-      footer={
-        readOnly ? (
-          <Button variant="primary" onClick={onClose}>
-            Fechar
-          </Button>
-        ) : (
-          <>
-            <Button onClick={onClose} disabled={save.isPending || reset.isPending}>
-              Cancelar
-            </Button>
-            <Button variant="primary" type="submit" form="tech-edit-form" loading={save.isPending}>
-              Salvar
-            </Button>
-          </>
-        )
-      }
-    >
-      <form
-        ref={formRef}
-        id="tech-edit-form"
-        noValidate
-        className="flex min-w-0 flex-col gap-5"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (!readOnly) void submit();
-        }}
-      >
-        {/* As abas encostam no cabeçalho e vão de borda a borda (-mt-4 = TABS_BAR_PULL); presas logo abaixo dele quando
-            o corpo rola. O rodapé (Cancelar/Salvar ou Fechar) é o mesmo em todas e salva o Cadastro. */}
-        <div
-          ref={tabsBar}
-          className={clsx(
-            "z-10 -mx-5 -mt-4 border-b border-line bg-surface px-5 pt-2",
-            tabsTop === null ? "relative" : "sticky",
-          )}
-          style={tabsTop === null ? undefined : { top: tabsTop }}
-        >
-          <Tabs
-            items={fichaTabs}
-            value={tab}
-            onChange={changeTab}
-            ariaLabel="Ficha do técnico"
-            idPrefix="tecnico"
-            className="-mb-px"
-          />
-        </div>
-
-        <div
-          role="tabpanel"
-          id="tecnico-panel-cadastro"
-          aria-labelledby="tecnico-tab-cadastro"
-          hidden={tab !== "cadastro"}
-          className="flex min-w-0 flex-col gap-5"
-        >
-          {/* A foto: os botões só aparecem com Editar. */}
-          <div className="flex items-center gap-4">
-            <Avatar tech={current} size="lg" />
-            {readOnly ? null : (
-              <div className="flex flex-col gap-1.5">
-                <label
-                  className={clsx(
-                    buttonClassName("secondary", "sm"),
-                    "cursor-pointer self-start has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-brand/45",
-                    photo.isPending && "pointer-events-none opacity-60",
-                  )}
-                >
-                  {photo.isPending ? <Loader2 className="size-4 animate-spin" /> : <Camera className="size-4" />}
-                  {photo.isPending ? "Enviando foto…" : current.avatar_url ? "Trocar foto" : "Adicionar foto"}
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="sr-only"
-                    disabled={photo.isPending}
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      e.target.value = "";
-                      if (file) photo.mutate(file);
-                    }}
-                  />
-                </label>
-                {current.avatar_url && !photo.isPending ? (
-                  <button
-                    type="button"
-                    className="self-start rounded text-xs text-red-700 hover:underline focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none dark:text-red-400"
-                    onClick={async () => {
-                      if (await confirm({ tone: "danger", title: "Remover a foto?", description: "O técnico fica com as iniciais no lugar da foto.", confirmLabel: "Remover" })) {
-                        photo.mutate(null);
-                      }
-                    }}
-                  >
-                    Remover foto
-                  </button>
-                ) : null}
-                <span className="text-xs text-ink-muted">Foto do rosto. A foto é reduzida antes de enviar.</span>
-              </div>
-            )}
-          </div>
-
-          {/* Só com Visualizar, o fieldset trava todos os campos de uma vez (os links continuam abrindo). O
-              Pagamento fica fora: segue as permissões de Pagamentos. */}
-          <fieldset disabled={readOnly} className="flex min-w-0 flex-col gap-5">
-            <TechnicianFields
-              value={form}
-              onChange={setForm}
-              emailHint={emailChanged ? "O técnico passa a entrar no app com este e-mail." : undefined}
-            />
-            <div className="flex flex-col gap-1">
-              <Checkbox label="Acesso ao app liberado" checked={isActive} onChange={setIsActive} />
-              <p className="pl-6 text-xs text-ink-muted">
-                {isActive
-                  ? readOnly
-                    ? "Entra no app e aparece no mapa e nas sugestões."
-                    : "Ao desativar, ele sai do app na hora e some do mapa e das sugestões."
-                  : tech.is_active
-                    ? "Ao salvar, ele sai do app na hora."
-                    : "Sem acesso: não entra no app nem recebe OS novas."}
-                {!isActive && current.open_tickets ? (
-                  <>
-                    {" "}
-                    <Link
-                      href={`/chamados?assignee_id=${tech.id}&open_only=true`}
-                      target="_blank"
-                      className="font-medium text-ink underline underline-offset-2 hover:text-brand"
-                    >
-                      {current.open_tickets === 1 ? "Ver a OS aberta dele" : `Ver as ${current.open_tickets} OS abertas dele`}
-                    </Link>
-                  </>
-                ) : null}
-              </p>
-            </div>
-
-            <section className="flex flex-col gap-3 rounded-lg border border-line p-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <SectionTitle>Ficha completa</SectionTitle>
-                <p className="text-xs text-ink-muted">
-                  {current.base_city
-                    ? `Atua em ${regionText(current.base_city, current.base_state)} ${current.base_source === "history" ? `(pelo histórico, ${current.base_visits ?? 0} OS)` : "(pelo endereço)"}`
-                    : "Região de atuação ainda não identificada"}
-                  {current.last_visit_at ? ` · última visita ${formatDate(current.last_visit_at)}` : ""}
-                </p>
-              </div>
-              {favoriteIn.length ? (
-                <p className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-ink-muted">
-                  <Star aria-hidden className="size-3.5 shrink-0 fill-current text-brand" />
-                  Favorito em
-                  {favoriteIn.map(({ city, me }, i) => (
-                    <span key={`${city.state}-${city.key}`}>
-                      <Link
-                        href={favoritesHref(city.state, city.city)}
-                        // Sem alteração pendente (nem motivo não enviado no Elo), o cadastro fecha e a aba de favoritos
-                        // aparece já na cidade.
-                        onClick={() => {
-                          if (!dirty && !levelDraft) onClose();
-                        }}
-                        className="rounded font-medium text-ink underline-offset-2 hover:text-brand-ink hover:underline focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
-                      >
-                        {city.city}-{city.state}
-                      </Link>{" "}
-                      ({me.pinned ? "fixado" : `${me.visits} OS`}){i < favoriteIn.length - 1 ? " ·" : ""}
-                    </span>
-                  ))}
-                </p>
-              ) : null}
-              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem_8rem]">
-                <Field label="Endereço (rua, número, complemento)">
-                  <Input value={address.line} onChange={(e) => setAddress((a) => ({ ...a, line: e.target.value }))} maxLength={255} />
-                </Field>
-                <Field label="Bairro">
-                  <Input value={address.district} onChange={(e) => setAddress((a) => ({ ...a, district: e.target.value }))} maxLength={120} />
-                </Field>
-                <Field label="CEP">
-                  <Input
-                    value={address.zip}
-                    onChange={(e) => setAddress((a) => ({ ...a, zip: maskCep(e.target.value) }))}
-                    inputMode="numeric"
-                    placeholder="00000-000"
-                    maxLength={9}
-                  />
-                </Field>
-              </div>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                {(
-                  [
-                    ["start", "Jornada: início"],
-                    ["end", "Jornada: fim"],
-                    ["break_start", "Intervalo: de"],
-                    ["break_end", "Intervalo: até"],
-                  ] as const
-                ).map(([key, label]) => (
-                  <Field key={key} label={label}>
-                    <Input type="time" value={schedule[key]} onChange={(e) => setSchedule((s) => ({ ...s, [key]: e.target.value }))} />
-                  </Field>
-                ))}
-              </div>
-              <ServicePicker
-                value={serviceIds}
-                onChange={setServiceIds}
-                options={serviceTypes.data ?? []}
-                saved={current.services ?? []}
-                loading={serviceTypes.isLoading}
-                readOnly={readOnly}
-              />
-              {current.legacy ? (
-                <p className="text-xs text-ink-muted">
-                  Importado do Field Control{current.legacy.id ? ` · ID ${current.legacy.id}` : ""}
-                  {current.legacy.territories?.length ? ` · territórios: ${current.legacy.territories.join(", ")}` : ""}
-                </p>
-              ) : null}
-            </section>
-          </fieldset>
-
-          {canPayouts ? <TechnicianPayment tech={current} dirty={dirty} /> : null}
-
-          {/* Com Visualizar, sem os botões da senha. */}
-          <section className="rounded-lg border border-line p-3">
-            <SectionTitle>Acesso ao app</SectionTitle>
-            <p className="mt-1 text-xs text-ink-muted">
-              {current.location_consent_at ? (
-                <span className="inline-flex items-center gap-1">
-                  <MapPinned className="size-3.5" /> Autorizou o GPS durante a jornada
-                </span>
-              ) : (
-                "Ainda não autorizou o GPS (o app pede antes da primeira jornada; sem o aceite, não inicia a jornada)."
-              )}
-            </p>
-            {readOnly ? null : confirmReset ? (
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <span className="text-sm text-ink">Gerar senha provisória e encerrar as sessões abertas?</span>
-                <Button onClick={() => setConfirmReset(false)}>Não</Button>
-                <Button variant="danger" loading={reset.isPending} onClick={() => reset.mutate()}>
-                  Sim, redefinir
-                </Button>
-              </div>
-            ) : (
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <Button onClick={() => setConfirmReset(true)} disabled={dirty}>
-                  <KeyRound className="size-4" />
-                  Redefinir senha
-                </Button>
-                {dirty ? <span className="text-xs text-ink-muted">Salve as alterações antes de redefinir a senha.</span> : null}
-              </div>
-            )}
-          </section>
-        </div>
-
-        {/* Só leitura: o técnico mantém no app. Fica fora do fieldset, como o Elo e o Histórico. */}
-        <div role="tabpanel" id="tecnico-panel-perfil" aria-labelledby="tecnico-tab-perfil" hidden={tab !== "perfil"}>
-          {opened.has("perfil") ? <TechProfileView technicianId={tech.id} dirty={dirty} /> : null}
-        </div>
-
-        {/* Só com Visualizar, o "Ver mais" das ocorrências continua; desconsiderar pede Editar. */}
-        <div
-          role="tabpanel"
-          id="tecnico-panel-elo"
-          aria-labelledby="tecnico-tab-elo"
-          hidden={tab !== "elo"}
-          className="flex min-w-0 flex-col gap-5"
-        >
-          <LevelSection tech={current} readOnly={readOnly} dirty={dirty} onDraftChange={setLevelDraft} />
-          {opened.has("elo") ? <TechnicianStatsSection technicianId={tech.id} /> : null}
-        </div>
-
-        <div role="tabpanel" id="tecnico-panel-historico" aria-labelledby="tecnico-tab-historico" hidden={tab !== "historico"}>
-          {opened.has("historico") ? <ProfileHistory technicianId={tech.id} /> : null}
-        </div>
-
-        {problem || save.error || reset.error ? <ErrorBox message={problem ?? errorMessage(save.error ?? reset.error)} /> : null}
-      </form>
-    </Dialog>
-  );
-}
-
-// Etiquetas dos serviços marcados: acima disso, só a contagem (há técnico com quase 200 serviços).
-const SERVICE_CHIPS = 24;
-
-/**
- * "Serviços que faz": busca, marcar os filtrados e etiquetas do que está marcado agora (não do que foi
- * salvo). `readOnly`: só as etiquetas do que está marcado, sem busca nem lista.
- */
-function ServicePicker({
-  value,
-  onChange,
-  options,
-  saved,
-  loading,
-  readOnly = false,
-}: {
-  value: string[];
-  onChange: (ids: string[]) => void;
-  options: { id: string; name: string }[];
-  /** Serviços salvos no cadastro (inclui tipos que foram desativados, para poder desmarcar). */
-  saved: { id: string; name: string }[];
-  loading: boolean;
-  readOnly?: boolean;
-}) {
-  const [term, setTerm] = useState("");
-  const all = useMemo(() => {
-    const known = new Set(options.map((o) => o.id));
-    return [...options, ...saved.filter((s) => !known.has(s.id))];
-  }, [options, saved]);
-  const names = useMemo(() => new Map(all.map((o) => [o.id, o.name])), [all]);
-  const visible = useMemo(() => {
-    const t = fold(term.trim());
-    return t ? all.filter((o) => fold(o.name).includes(t)) : all;
-  }, [all, term]);
-  const selected = new Set(value);
-  const toggle = (id: string) => onChange(selected.has(id) ? value.filter((v) => v !== id) : [...value, id]);
-  const markVisible = () => onChange([...new Set([...value, ...visible.map((o) => o.id)])]);
-  if (readOnly) {
-    return (
-      <div className="flex flex-col gap-2">
-        <p className="text-xs font-semibold text-ink/80">
-          Serviços que faz <span className="font-normal text-ink-muted tabular-nums">({value.length})</span>
-        </p>
-        {value.length ? (
-          <ul className="flex flex-wrap gap-1" aria-label="Serviços que faz">
-            {value.slice(0, SERVICE_CHIPS).map((id) => (
-              <li key={id} className="rounded-md bg-surface-2 px-1.5 py-0.5 text-[11px] text-ink-muted ring-1 ring-line ring-inset">
-                {names.get(id) ?? "Serviço"}
-              </li>
-            ))}
-            {value.length > SERVICE_CHIPS ? (
-              <li className="self-center text-[11px] text-ink-muted">+{value.length - SERVICE_CHIPS}</li>
-            ) : null}
-          </ul>
-        ) : (
-          <p className="text-xs text-ink-muted">Nenhum serviço marcado.</p>
-        )}
-      </div>
-    );
-  }
-  return (
-    <fieldset className="flex flex-col gap-2">
-      <legend className="mb-1.5 text-xs font-semibold text-ink/80">
-        Serviços que faz <span className="font-normal text-ink-muted tabular-nums">({value.length})</span>
-      </legend>
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-48 flex-1">
-          <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-muted" />
-          <Input
-            value={term}
-            onChange={(e) => setTerm(e.target.value)}
-            onKeyDown={(e) => {
-              // Enter na busca não salva o cadastro.
-              if (e.key === "Enter") e.preventDefault();
-            }}
-            placeholder="Buscar serviço"
-            className="pl-9"
-            aria-label="Buscar serviço"
-          />
-        </div>
-        <Button size="sm" variant="ghost" onClick={markVisible} disabled={!visible.length}>
-          {term.trim() ? "Marcar os filtrados" : "Marcar todos"}
-        </Button>
-        <Button size="sm" variant="ghost" onClick={() => onChange([])} disabled={!value.length}>
-          Limpar
-        </Button>
-      </div>
-      <div className="max-h-56 overflow-y-auto rounded-lg border border-line p-1">
-        {loading ? (
-          <p className="px-2 py-1.5 text-xs text-ink-muted">Carregando os serviços…</p>
-        ) : visible.length ? (
-          visible.map((o) => (
-            <label key={o.id} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-sm text-ink hover:bg-surface-2">
-              <input
-                type="checkbox"
-                checked={selected.has(o.id)}
-                onChange={() => toggle(o.id)}
-                className="size-4 shrink-0 rounded border-line accent-[var(--brand)]"
-              />
-              <span className="min-w-0 truncate">{o.name}</span>
-            </label>
-          ))
-        ) : (
-          <p className="px-2 py-1.5 text-xs text-ink-muted">Nenhum serviço com “{term.trim()}”.</p>
-        )}
-      </div>
-      {value.length ? (
-        <div className="flex flex-wrap gap-1">
-          {value.slice(0, SERVICE_CHIPS).map((id) => {
-            const name = names.get(id) ?? "Serviço";
-            return (
-              <span
-                key={id}
-                className="inline-flex items-center gap-1 rounded-md bg-surface-2 py-0.5 pr-0.5 pl-1.5 text-[11px] text-ink-muted ring-1 ring-line ring-inset"
-              >
-                {name}
-                <button
-                  type="button"
-                  onClick={() => toggle(id)}
-                  className="rounded p-0.5 hover:bg-surface-3 hover:text-ink focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
-                  aria-label={`Tirar ${name}`}
-                >
-                  <X className="size-3" />
-                </button>
-              </span>
-            );
-          })}
-          {value.length > SERVICE_CHIPS ? (
-            <span className="self-center text-[11px] text-ink-muted">+{value.length - SERVICE_CHIPS}</span>
-          ) : null}
-        </div>
-      ) : (
-        <p className="text-xs text-ink-muted">Nenhum serviço marcado.</p>
-      )}
-    </fieldset>
   );
 }
 

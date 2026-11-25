@@ -4,6 +4,7 @@ import { Copy, MessageCircle } from "lucide-react";
 import { TechnicianLink } from "@/components/technicians/TechnicianLink";
 import { Pill } from "@/components/ui";
 import { bankAccountText, formatPixKey, PIX_KEY_TYPE } from "@/lib/constants";
+import { useCan } from "@/lib/permissions";
 import { askPayoutText, holderDocumentText, PAYOUT_NEW_COLOR, payoutDay, payoutRecent, useCopyPayout } from "@/lib/pix";
 import type { PayoutMethodSummary, UUID } from "@/lib/types";
 import { whatsappUrl } from "@/lib/whatsapp";
@@ -32,6 +33,8 @@ export function PayoutMethodLine({
   now: number;
 }) {
   const copy = useCopyPayout();
+  // A ficha do técnico é da tela Técnicos: sem ela, o "+1 outra" fica só como texto.
+  const canTechnicians = useCan("base.technicians");
   if (!summary) {
     return (
       <p className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-ink-muted">
@@ -53,6 +56,7 @@ export function PayoutMethodLine({
   }
   const method = summary.preferred;
   const others = summary.total - 1;
+  const othersText = others === 1 ? "+1 outra" : `+${others} outras`;
   const holder = [method.holder_name, holderDocumentText(method.holder_document)].filter(Boolean).join(" · ");
   return (
     <p className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-ink-muted">
@@ -87,15 +91,20 @@ export function PayoutMethodLine({
         {method.kind === "pix" ? "Copiar PIX" : "Copiar dados"}
       </button>
       {others > 0 ? (
-        <TechnicianLink
-          id={technicianId}
-          section="recebimento"
-          target="_blank"
-          title={`Ver as formas de recebimento de ${name}`}
-          className={linkClass}
-        >
-          {others === 1 ? "+1 outra" : `+${others} outras`}
-        </TechnicianLink>
+        canTechnicians ? (
+          // Em outra aba: o fechamento (filtros e seleção) continua aqui.
+          <TechnicianLink
+            id={technicianId}
+            section="recebimento"
+            target="_blank"
+            title={`Ver as formas de recebimento de ${name}`}
+            className={linkClass}
+          >
+            {othersText}
+          </TechnicianLink>
+        ) : (
+          <span title="As outras formas ficam na ficha do técnico, em Técnicos">{othersText}</span>
+        )
       ) : null}
     </p>
   );

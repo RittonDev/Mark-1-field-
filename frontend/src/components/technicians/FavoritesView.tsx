@@ -32,20 +32,32 @@ import {
   Field,
   Input,
   LoadingBlock,
+  Pill,
   SectionTitle,
   Select,
   Skeleton,
   Textarea,
 } from "@/components/ui";
 import { absoluteApiUrl, api, buildQuery, errorMessage } from "@/lib/api";
+import { APP_ACCESS, OPERATIONAL_STATUS } from "@/lib/constants";
 import { downloadCsv } from "@/lib/download";
 import { formatDate, initials } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
 import { useCan } from "@/lib/permissions";
 import { useFavorites } from "@/lib/queries";
-import type { FavoriteCity, FavoriteCityDetail, FavoritesOut, FavoriteTechnician, Technician, UUID } from "@/lib/types";
+import { OPERATIONAL_STATUS_COLOR } from "@/lib/technicians";
+import type {
+  FavoriteCity,
+  FavoriteCityDetail,
+  FavoritesOut,
+  FavoriteTechnician,
+  OperationalStatus,
+  Technician,
+  UUID,
+} from "@/lib/types";
 import { whatsappUrl } from "@/lib/whatsapp";
 import { GrantAccessDialog } from "./GrantAccessDialog";
+import { TechnicianLink } from "./TechnicianLink";
 
 /** Cartões por vez (o resto vem no "Mostrar mais"). */
 const PAGE = 30;
@@ -62,7 +74,20 @@ const ICON_BORDERED = "border border-line bg-surface text-ink-muted shadow-elev-
 const TEXT_LINK =
   "rounded text-ink underline-offset-2 hover:text-brand-ink hover:underline focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none";
 
-/** Endereço da aba já filtrada na cidade (a OS e o cadastro do técnico levam até ela). */
+/**
+ * "Inativo" / "Bloqueado" (cor só para problema; Ativo não tem selo). Fora de Ativo, não recebe OS nem entra no
+ * automático; o fixado continua na lista.
+ */
+function StatusPill({ status }: { status: OperationalStatus | undefined }) {
+  if (!status || status === "active") return null;
+  return (
+    <span title="Não recebe OS" className="inline-flex">
+      <Pill color={OPERATIONAL_STATUS_COLOR[status]}>{OPERATIONAL_STATUS[status]}</Pill>
+    </span>
+  );
+}
+
+/** Endereço da aba já filtrada na cidade (a OS e a ficha do técnico levam até ela). */
 export function favoritesHref(state: string, city: string): string {
   // "Cidade-UF" na busca acha só a cidade (o nome solto também casaria com o sobrenome de um técnico).
   return `/tecnicos?${new URLSearchParams({ aba: "favoritos", uf: state, cidade: `${city}-${state}` }).toString()}`;
@@ -242,18 +267,9 @@ function useCityDetail(city: FavoriteCity, enabled: boolean) {
 /**
  * Técnicos favoritos por cidade: até 3 automáticos por cidade (quem mais atendeu nas lojas dela) e os
  * fixados pela central. A estrela tira ou põe, o alfinete fixa e o rodapé de cada cidade traz os
- * tirados e os outros que atenderam. UF e busca ficam na URL (?uf=&cidade=).
+ * tirados e os outros que atenderam. UF e busca ficam na URL (?uf=&cidade=); o nome é o link da ficha.
  */
-export function FavoritesView({
-  initialUf = "",
-  initialCity = "",
-  onOpenTechnician,
-}: {
-  initialUf?: string;
-  initialCity?: string;
-  /** Abre o cadastro do técnico (o nome vira botão). */
-  onOpenTechnician: (t: { id: UUID; email: string }) => void;
-}) {
+export function FavoritesView({ initialUf = "", initialCity = "" }: { initialUf?: string; initialCity?: string }) {
   const favorites = useFavorites();
   const actions = useFavoriteActions();
   // Favoritar, fixar, tirar da lista, incluir e liberar acesso gravam em Técnicos: só com Editar.
@@ -326,10 +342,10 @@ export function FavoritesView({
   };
   const exportCsv = () =>
     downloadCsv("favoritos-por-cidade.csv", [
-      ["uf", "cidade", "tecnico", "email", "origem", "os_12_meses", "ultima_visita", "acesso_app", "nota"],
+      ["uf", "cidade", "tecnico", "email", "origem", "os_12_meses", "ultima_visita", "situacao", "acesso_app", "nota"],
       ...cards.flatMap((c) => {
         const rows = rowsOf(c);
-        if (!rows.length) return [[c.state, c.city, "", "", "", "", "", "", ""]];
+        if (!rows.length) return [[c.state, c.city, "", "", "", "", "", "", "", ""]];
         return rows.map((f) => [
           c.state,
           c.city,
@@ -338,7 +354,8 @@ export function FavoritesView({
           originOf(f),
           f.visits,
           f.last_visit_at ? formatDate(f.last_visit_at) : "",
-          f.is_active ? "Sim" : "Não",
+          OPERATIONAL_STATUS[f.operational_status ?? "active"],
+          f.is_active ? APP_ACCESS.on : APP_ACCESS.off,
           f.note ?? "",
         ]);
       }),
@@ -457,7 +474,6 @@ export function FavoritesView({
                 top={out?.top ?? 3}
                 actions={actions}
                 canEdit={canEdit}
-                onOpenTechnician={onOpenTechnician}
                 onInclude={() => setIncluding(c)}
                 onEditNote={(tech) => setEditing({ tech, city: c })}
                 onGrant={setGranting}
@@ -500,7 +516,6 @@ function CityCard({
   top,
   actions,
   canEdit,
-  onOpenTechnician,
   onInclude,
   onEditNote,
   onGrant,
@@ -512,7 +527,6 @@ function CityCard({
   actions: FavoriteActions;
   /** Técnicos: Editar (sem ele, a lista é só de consulta). */
   canEdit: boolean;
-  onOpenTechnician: (t: { id: UUID; email: string }) => void;
   onInclude: () => void;
   onEditNote: (t: FavoriteTechnician) => void;
   onGrant: (t: FavoriteTechnician) => void;
@@ -530,7 +544,6 @@ function CityCard({
       top={top}
       actions={actions}
       canEdit={canEdit}
-      onOpen={onOpenTechnician}
       onNote={onEditNote}
       onGrant={onGrant}
     />
@@ -647,7 +660,6 @@ function FavoriteRow({
   top,
   actions,
   canEdit,
-  onOpen,
   onNote,
   onGrant,
 }: {
@@ -659,7 +671,6 @@ function FavoriteRow({
   actions: FavoriteActions;
   /** Técnicos: Editar. Sem ele, a estrela é só indicação e as ações da linha somem. */
   canEdit: boolean;
-  onOpen: (t: { id: UUID; email: string }) => void;
   onNote: (t: FavoriteTechnician) => void;
   onGrant: (t: FavoriteTechnician) => void;
 }) {
@@ -788,19 +799,16 @@ function FavoriteRow({
       </span>
       <div className="min-w-0">
         <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <button
-            type="button"
-            onClick={() => onOpen(t)}
-            title="Abrir o cadastro do técnico"
-            className={clsx(TEXT_LINK, "max-w-full truncate text-left text-sm font-semibold")}
-          >
+          {/* A ficha na mesma aba (a cidade e a busca ficam na URL: o Voltar retorna aqui). */}
+          <TechnicianLink id={t.id} className={clsx(TEXT_LINK, "max-w-full truncate text-sm font-semibold")}>
             {t.name}
-          </button>
+          </TechnicianLink>
           {kind === "favorite" && t.pinned ? (
             <span className={CHIP} title={decisionTitle("Fixado", t)}>
               Fixado
             </span>
           ) : null}
+          <StatusPill status={t.operational_status} />
           {t.is_active ? null : (
             <span className={CHIP} title="Não recebe OS até liberar o acesso">
               Sem acesso ao app
@@ -1079,6 +1087,7 @@ function IncludeDialog({
                       <span className="block truncate text-sm font-medium">{t.name}</span>
                       <span className="block truncate text-xs text-ink-muted">{regionOf(t)}</span>
                     </span>
+                    <StatusPill status={t.operational_status} />
                     {t.is_active ? null : <span className={CHIP}>Sem acesso ao app</span>}
                   </button>
                 </li>

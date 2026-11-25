@@ -46,10 +46,13 @@ export function OutsideAvailabilityChip({ gaps }: { gaps: string }) {
 
 // --------------------------------------------------------------------------- quem recebe OS (Colaborador e ofertas)
 
-/** Fora de Ativo na operação (Inativo ou Bloqueado): não recebe OS. Ativo ou sem o campo (API antiga): null. */
+/** Fora de Ativo na operação (Inativo ou Bloqueado): não recebe OS. */
 export type OffStatus = "inactive" | "blocked";
 
-/** A situação que tira o técnico das OS: a escolha mostra com o motivo e não deixa escolher (a API recusa). */
+/**
+ * A situação que tira o técnico das OS: a escolha mostra com o motivo e não deixa escolher (a API recusa). Ativo ou sem
+ * o campo (API antiga): null.
+ */
 export function offStatus(person: { operational_status?: OperationalStatus | null }): OffStatus | null {
   const status = person.operational_status;
   return status === "inactive" || status === "blocked" ? status : null;

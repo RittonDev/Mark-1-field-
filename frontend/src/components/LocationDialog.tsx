@@ -2,7 +2,8 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeftRight, ExternalLink } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { CepField } from "@/components/CepField";
 import {
   ContactsEditor,
   contactDrafts,
@@ -14,7 +15,9 @@ import {
 } from "@/components/ContactList";
 import { useToast } from "@/components/Toaster";
 import { Button, Checkbox, Dialog, ErrorBox, Field, Input, SectionTitle, Select, Textarea } from "@/components/ui";
+import { cepDigits } from "@/lib/address";
 import { api, errorMessage } from "@/lib/api";
+import { CEP_TEXT } from "@/lib/constants";
 import { formatDocument } from "@/lib/format";
 import { isValidCnpj, isValidCpf, maskCep } from "@/lib/onboarding";
 import { useCustomers } from "@/lib/queries";
@@ -48,6 +51,15 @@ export function documentError(value: string): string | null {
 /** "CPF" ou "CNPJ", pelo tamanho do documento. */
 export function documentKind(document: string | null | undefined): "CPF" | "CNPJ" {
   return document && cleanDocument(document).length === 11 ? "CPF" : "CNPJ";
+}
+
+/**
+ * CEP mexido e incompleto ("CEP inválido: use os 8 números."). O gravado fora do formato (planilha antiga sem o zero da
+ * frente) não trava a edição de outro campo.
+ */
+export function zipError(value: string, before: string): string | null {
+  const digits = cepDigits(value);
+  return digits && digits.length !== 8 && value !== before ? CEP_TEXT.invalid : null;
 }
 
 // O retângulo do Brasil e o ponto padrão do geocodificador antigo: os mesmos de backend/app/services/geo.py.
@@ -235,6 +247,7 @@ export function LocationDialog({
   const [docTouched, setDocTouched] = useState(false);
   const [checked, setChecked] = useState({ code: "", document: "" });
   const [pasteError, setPasteError] = useState<string | null>(null);
+  const addressRef = useRef<HTMLInputElement>(null);
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm((f) => ({ ...f, [key]: value }));
   const editing = location !== null;
 
@@ -246,6 +259,7 @@ export function LocationDialog({
     customer: !editing && !form.customer_id ? "Escolha o cliente." : null,
     name: form.name.trim().length < 2 ? "Dê um nome com pelo menos 2 letras." : null,
     document: documentError(form.document),
+    zip: zipError(form.zip_code, initial.zip_code),
     coords: coordsChanged ? coords.error : null,
   };
   const invalid = Object.values(errors).some(Boolean) || contactsInvalid(contacts);
@@ -371,7 +385,6 @@ export function LocationDialog({
               <Input
                 value={form.name}
                 onChange={(e) => set("name", e.target.value)}
-                placeholder="Ex.: Loja 41 - Outlet Brasília"
                 maxLength={200}
                 aria-invalid={tried && errors.name ? true : undefined}
               />
@@ -416,8 +429,23 @@ export function LocationDialog({
         <section className="flex flex-col gap-3">
           <SectionTitle>Endereço</SectionTitle>
           <div className="grid gap-4 sm:grid-cols-6">
+            {/* Latitude e longitude não vêm do CEP (o CEP é de uma rua ou da cidade inteira, não da loja). */}
+            <CepField
+              className="sm:col-span-2"
+              mode="line"
+              value={form.zip_code}
+              onChange={(v) => set("zip_code", v)}
+              address={{ street: form.address_line, district: form.district, city: form.city, state: form.state }}
+              opened={{ street: initial.address_line, district: initial.district, city: initial.city, state: initial.state }}
+              onApply={(next) =>
+                setForm((f) => ({ ...f, address_line: next.street, district: next.district, city: next.city, state: next.state }))
+              }
+              focusRef={addressRef}
+              error={tried ? errors.zip : null}
+            />
             <Field label="Endereço" className="sm:col-span-4">
               <Input
+                ref={addressRef}
                 value={form.address_line}
                 onChange={(e) => set("address_line", e.target.value)}
                 placeholder="Rua, número e complemento"
@@ -440,15 +468,6 @@ export function LocationDialog({
                 ))}
                 {form.state && !UFS.includes(form.state) ? <option value={form.state}>{form.state}</option> : null}
               </Select>
-            </Field>
-            <Field label="CEP" className="sm:col-span-2">
-              <Input
-                value={form.zip_code}
-                onChange={(e) => set("zip_code", maskCep(e.target.value))}
-                inputMode="numeric"
-                placeholder="00000-000"
-                maxLength={9}
-              />
             </Field>
             <Field label="Latitude" className="sm:col-span-2">
               <Input

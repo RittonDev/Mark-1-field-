@@ -28,6 +28,7 @@ import { useConfirmLeave } from "@/components/Confirm";
 import { useTicketPanel } from "@/components/ticket/TicketPanel";
 import { formatDocument, formatShort } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
+import { technicianHref } from "@/lib/technicians";
 import type { User } from "@/lib/types";
 import { AgentMark } from "./agent";
 import { openChangePassword } from "./events";
@@ -364,8 +365,8 @@ export function useSearchController({
         });
       }
       for (const t of data.technicians) {
-        // A base técnica abre já filtrada pelo nome.
-        const href = `/tecnicos?q=${encodeURIComponent(t.name)}`;
+        // A ficha do técnico.
+        const href = technicianHref(t.id);
         const detail = [t.city, t.active ? null : "inativo"].filter(Boolean).join(" · ");
         found.push({
           id: `tc-${t.id}`,

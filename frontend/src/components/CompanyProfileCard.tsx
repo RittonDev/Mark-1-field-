@@ -3,10 +3,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Save } from "lucide-react";
 import Image from "next/image";
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
+import { CepField } from "@/components/CepField";
 import { FieldError, useLeaveGuard } from "@/components/settings/shared";
 import { useToast } from "@/components/Toaster";
 import { Button, Card, CardHeader, ErrorBox, Field, Input, LoadingBlock } from "@/components/ui";
+import { cepFromLine } from "@/lib/address";
 import { api, errorMessage } from "@/lib/api";
 import { formatDocument } from "@/lib/format";
 import type { CompanyProfile } from "@/lib/types";
@@ -76,6 +78,9 @@ function ProfileForm({ initial, readOnly }: { initial: CompanyProfile; readOnly:
     website: initial.website ?? "",
   }));
   const [form, setForm] = useState(start);
+  // O CEP não é gravado à parte: ajuda a montar a linha do endereço (e vai para o fim dela). Começa com o que está nela.
+  const [cep, setCep] = useState(() => cepFromLine(start.address));
+  const addressRef = useRef<HTMLInputElement>(null);
   const [showDocumentError, setShowDocumentError] = useState(false);
   const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [key]: e.target.value }));
@@ -149,15 +154,27 @@ function ProfileForm({ initial, readOnly }: { initial: CompanyProfile; readOnly:
         <Field label="Telefone">
           <Input value={form.phone} onChange={set("phone")} maxLength={40} inputMode="tel" disabled={readOnly} />
         </Field>
-        <Field label="Endereço" className="sm:col-span-2">
-          <Input
-            value={form.address}
-            onChange={set("address")}
-            maxLength={300}
-            placeholder="Rua, número - bairro - cidade - UF, CEP"
+        <div className="grid gap-4 sm:col-span-2 sm:grid-cols-[9rem_minmax(0,1fr)]">
+          <CepField
+            mode="company"
+            value={cep}
+            onChange={setCep}
+            address={{ line: form.address }}
+            onApply={(next) => setForm((f) => ({ ...f, address: next.line }))}
+            focusRef={addressRef}
             disabled={readOnly}
           />
-        </Field>
+          <Field label="Endereço">
+            <Input
+              ref={addressRef}
+              value={form.address}
+              onChange={set("address")}
+              maxLength={300}
+              placeholder="Rua, número - bairro - cidade - UF"
+              disabled={readOnly}
+            />
+          </Field>
+        </div>
         <Field label="Site" hint="Fica guardado para referência; não sai no orçamento nem no relatório.">
           <Input value={form.website} onChange={set("website")} maxLength={200} placeholder="https://" disabled={readOnly} />
         </Field>

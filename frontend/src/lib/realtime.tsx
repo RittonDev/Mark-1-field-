@@ -10,6 +10,7 @@ import { STATUS } from "./constants";
 import { formatMoney, todayISO } from "./format";
 import { accessOf, can } from "./permissions";
 import { sessionStore } from "./session";
+import { type FichaSectionKey, technicianHref } from "./technicians";
 import type {
   AccessItemKey,
   LiveTechnician,
@@ -151,14 +152,23 @@ function offerNotice(event: RealtimeEvent, userId: string, byOther: boolean, oth
 
 /**
  * Campos do cadastro que, mudados pelo próprio técnico no app, viram aviso (o resto só atualiza as listas). O nome
- * sai nos textos para o grupo do cliente, no relatório e no portal, e Pagamentos compara com ele o titular da chave.
+ * sai nos textos para o grupo do cliente, no relatório e no portal, e Pagamentos compara com ele (e com o CNPJ) o
+ * titular da forma de recebimento. A troca de e-mail fica pendente até o link (`email_pending`); "pix" e "email" são do
+ * servidor antigo.
  */
 const PROFILE_NOTICE_PARTS: [UserChangeField, string][] = [
+  ["payout_methods", "as formas de recebimento"],
+  ["payout_preferred", "a forma de recebimento preferencial"],
   ["pix", "a chave PIX"],
+  ["email_pending", "o e-mail de acesso"],
   ["email", "o e-mail de acesso"],
+  ["company_document", "o CNPJ"],
   ["name", "o nome"],
   ["phone", "o celular"],
 ];
+
+/** O destino do pagamento mudou: o aviso pede confirmação no grupo e Pagamentos relê. */
+const PAYOUT_FIELDS: readonly string[] = ["payout_methods", "payout_preferred", "pix"];
 
 /** "a chave PIX", "a chave PIX e o celular", "a chave PIX, o e-mail de acesso e o celular". */
 function joinParts(parts: string[]): string {
@@ -166,8 +176,9 @@ function joinParts(parts: string[]): string {
 }
 
 /**
- * " logo depois de a senha ser redefinida por {quem}": a troca de e-mail ou de chave PIX veio até 72 h depois de a
- * central redefinir a senha (`data.after_reset`, a API manda só nesse caso). Quem redefiniu também soube a senha.
+ * " logo depois de a senha ser redefinida por {quem}": a troca de e-mail, de forma de recebimento ou do CNPJ veio até
+ * 72 h depois de a central redefinir a senha (`data.after_reset`, a API manda só nesse caso). Quem redefiniu também
+ * soube a senha.
  */
 function afterResetText(data: Partial<ProfileChangedData>): string {
   const reset: unknown = data.after_reset;
@@ -177,30 +188,40 @@ function afterResetText(data: Partial<ProfileChangedData>): string {
 }
 
 /**
- * profile.changed pelo app (Perfil › Configurações): a chave PIX, o e-mail de login, o nome ou o celular mudaram.
- * Uma conta invadida desviaria o pagamento: a troca da chave pede confirmação no grupo antes do próximo pagamento.
- * O que a central muda e o que o técnico muda de foto e endereço só atualizam as listas.
+ * profile.changed pelo app (Perfil › Configurações): as formas de recebimento, o e-mail de login, o CNPJ, o nome ou o
+ * celular mudaram. Uma conta invadida desviaria o pagamento: a troca do destino do pagamento pede confirmação no grupo
+ * antes do próximo pagamento. O que a central muda e o resto do que o técnico muda só atualizam as listas. "Ver" abre a
+ * ficha já na seção do que mudou (sem Técnicos, Pagamentos).
  */
 function profileNotice(event: RealtimeEvent): NoticeDraft | null {
   const data = (event.data ?? {}) as Partial<ProfileChangedData>;
   const fields: unknown[] = Array.isArray(data.fields) ? data.fields : [];
   if (data.via !== "app") return null;
-  const parts = PROFILE_NOTICE_PARTS.filter(([field]) => fields.includes(field)).map(([, part]) => part);
+  // A preferencial que mudou junto com a lista (a primeira forma, a removida) já está em "as formas de recebimento".
+  const notified = PROFILE_NOTICE_PARTS.filter(
+    ([field]) => fields.includes(field) && !(field === "payout_preferred" && fields.includes("payout_methods")),
+  );
+  const parts = [...new Set(notified.map(([, part]) => part))];
   if (!parts.length) return null;
   // A API manda só para quem tem Técnicos ou Pagamentos (a sessão aberta antes de mudar o perfil pode receber).
   const technicians = sessionCan("base.technicians");
-  if (!technicians && !sessionCan("commercial.payouts")) return null;
-  const pix = fields.includes("pix");
+  const payouts = sessionCan("commercial.payouts");
+  if (!technicians && !payouts) return null;
+  const payout = fields.some((field) => PAYOUT_FIELDS.includes(String(field)));
+  const contact = fields.includes("email_pending") || fields.includes("email") || fields.includes("phone");
+  // Formas de recebimento só aparecem na ficha com Pagamentos.
+  const section: FichaSectionKey | null =
+    payout && payouts ? "recebimento" : contact ? "contato" : fields.includes("company_document") ? "dados-empresariais" : null;
   const afterReset = afterResetText(data);
   return {
     title: `${text(event.name) ?? "Um técnico"} alterou ${joinParts(parts)} pelo app${afterReset}`,
-    description: pix
+    description: payout
       ? "Confirme com ele no grupo antes do próximo pagamento."
       : fields.includes("phone")
         ? "Atualize o contato dele nos grupos do WhatsApp."
         : undefined,
-    tone: pix || afterReset ? "error" : undefined,
-    href: technicians && event.user_id ? `/tecnicos?tecnico=${encodeURIComponent(event.user_id)}` : "/pagamentos",
+    tone: payout || afterReset ? "error" : undefined,
+    href: technicians && event.user_id ? technicianHref(event.user_id, section) : "/pagamentos",
   };
 }
 
@@ -307,8 +328,9 @@ function noticeFor(event: RealtimeEvent, userId: string): NoticeDraft | null {
 // ------------------------------------------------------------------ o que cada evento desatualiza
 
 /**
- * Cadastro do técnico mudou (profile.changed, pelo app ou pela central): o que mostra nome, contato, foto,
- * região ou acesso dele. A chave PIX também em Pagamentos (e no cadastro em Técnicos, sob ["payouts"]).
+ * Cadastro do técnico mudou (profile.changed, pelo app, pela central, pela aprovação da ficha ou pelo link do e-mail):
+ * o que mostra nome, contato, foto, região, situação ou acesso dele. As formas de recebimento também em Pagamentos
+ * (["payouts"]); na ficha, ficam sob ["technicians"].
  */
 const PROFILE_KEYS = ["technicians", "users", "technician-favorites", "technician-suggest", "assignable", "tracking"];
 
@@ -763,7 +785,8 @@ export function RealtimeProvider({
       }
       if (type === "quote.decided") {
         invalidate(["quotes"]);
-      } else if (type === "onboarding.submitted") {
+      } else if (type === "onboarding.submitted" || type === "onboarding.updated") {
+        // Ficha nova, e-mail da ficha validado, aprovada, reprovada ou reaberta: a Homologação relê (só a gestão recebe).
         invalidate(["onboarding"]);
       } else if (type === "profile.changed") {
         // O que eu mesmo mudei (Técnicos, Usuários, Pagamentos) a própria tela já atualizou: buscar de novo a
@@ -781,7 +804,8 @@ export function RealtimeProvider({
         }
         // Quantos técnicos marcaram cada ferramenta (filtro de Técnicos e Configurações › Técnicos).
         if (fields.includes("tools")) invalidate(["technician-tools"]);
-        if (fields.includes("pix")) invalidate(["payouts"]);
+        // O destino do pagamento (a linha de recebimento e o "Nova" em Pagamentos).
+        if (fields.some((field) => PAYOUT_FIELDS.includes(field))) invalidate(["payouts"]);
       } else if (type === "part_request.created") {
         invalidate(["tickets"]);
         invalidate(["quotes"]);

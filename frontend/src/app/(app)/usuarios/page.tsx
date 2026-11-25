@@ -46,6 +46,7 @@ import { hasUnsavedChanges, useDebounced } from "@/lib/hooks";
 import { useCan, useQueueScope } from "@/lib/permissions";
 import { useAccessProfiles, useAssignable, useCustomers, useTeams } from "@/lib/queries";
 import { sessionStore } from "@/lib/session";
+import { technicianHref } from "@/lib/technicians";
 import type { QueuesOut, TemporaryPassword, Team, User, UserRole } from "@/lib/types";
 import { copyText, whatsappUrl } from "@/lib/whatsapp";
 
@@ -1147,8 +1148,8 @@ function UsersTab({
                         {canManageRole(me?.role, u.role) ? (
                           <RowEditButton label={`Editar ${u.name}`} onClick={() => onEditUser(u)} />
                         ) : u.role === "technician" && canOpenTechnicians ? (
-                          // O cadastro do técnico (cidade, área, senha provisória) fica em Técnicos.
-                          <RowEditLink label={`Editar ${u.name} em Técnicos`} href={`/tecnicos?q=${encodeURIComponent(u.email)}`} />
+                          // O cadastro do técnico (dados, endereço, acesso, senha) fica na ficha, em Técnicos.
+                          <RowEditLink label={`Editar ${u.name} em Técnicos`} href={technicianHref(u.id)} />
                         ) : (
                           <span className="inline-flex size-8 items-center justify-center text-ink-subtle" title={noEditReason(u.role)}>
                             <span aria-hidden>—</span>

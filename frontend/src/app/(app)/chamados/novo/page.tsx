@@ -481,8 +481,8 @@ function NewTicket() {
   const visitDay = f.date || today;
   const awayOn = (u: AssignableUser | undefined) => (u && !offStatus(u) ? unavailableOn(u.unavailability, visitDay) : null);
   const personOf = (id: UUID | "") => (id ? people.find((u) => u.id === id) : undefined);
-  // O técnico escolhido (ou do rascunho), o responsável e os que vão junto, que saiu de Ativo ou avisou que não atende no
-  // dia: o aviso embaixo do Colaborador (sempre à vista; os que vão junto ficam em "Mais detalhes").
+  // O responsável e os que vão junto (escolhidos agora ou vindos do rascunho) que saíram de Ativo ou avisaram que não
+  // atendem no dia: o aviso embaixo do Colaborador (sempre à vista; os que vão junto ficam em "Mais detalhes").
   const receiveCaution = (id: UUID | "") => {
     const person = personOf(id);
     const off = person ? offStatus(person) : null;

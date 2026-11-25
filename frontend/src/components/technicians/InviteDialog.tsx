@@ -114,7 +114,7 @@ export function InviteDialog({ onClose, preset }: { onClose: () => void; preset?
             submit();
           }}
         >
-          <Field label="Para quem" hint="Para achar o link na lista. Ex.: nome do técnico ou da região.">
+          <Field label="Para quem" hint="Nome do técnico ou da região, para achar o link na lista.">
             <Input value={label} onChange={(e) => setLabel(e.target.value)} maxLength={160} autoFocus />
           </Field>
           <Field label="Celular (opcional)" hint="Com o número, o WhatsApp abre direto na conversa dele. O número não fica salvo.">
@@ -136,7 +136,7 @@ export function InviteDialog({ onClose, preset }: { onClose: () => void; preset?
             </Select>
           </Field>
           <Checkbox
-            label="Reutilizável (várias pessoas podem usar o mesmo link, ex.: grupo de técnicos)"
+            label="Reutilizável (várias pessoas podem usar o mesmo link)"
             checked={reusable}
             onChange={setReusable}
           />

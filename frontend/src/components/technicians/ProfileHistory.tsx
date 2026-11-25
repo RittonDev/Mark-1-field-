@@ -4,7 +4,7 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Button, ErrorBox, SectionTitle, Skeleton } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
-import { USER_CHANGE_LABEL } from "@/lib/constants";
+import { APP_ACCESS, USER_CHANGE_LABEL } from "@/lib/constants";
 import { formatShort } from "@/lib/format";
 import type { UserChange, UserChangeField, UserChangeItem, UUID } from "@/lib/types";
 
@@ -47,23 +47,43 @@ const EMPTY: Partial<Record<UserChangeField, string>> = {
   services: "nenhum",
   work_schedule: "sem jornada",
   transport: "não informado",
+  vehicle: "não informado",
+  payout_preferred: "nenhuma",
 };
 
-/** Partes do perfil técnico em que a API grava o que entrou (`to`) e o que saiu (`from`), não o de → para. */
-const DELTA_FIELDS: ReadonlySet<UserChangeField> = new Set<UserChangeField>(["tools", "availability", "skills", "education"]);
+/**
+ * Listas em que a API grava o que entrou (`to`) e o que saiu (`from`), não o de → para: o perfil técnico, os períodos
+ * de indisponibilidade e as formas de recebimento (itens separados por "; ").
+ */
+const DELTA_FIELDS: ReadonlySet<UserChangeField> = new Set<UserChangeField>([
+  "tools",
+  "availability",
+  "skills",
+  "education",
+  "unavailability",
+  "payout_methods",
+]);
 
-/** A senha, pelo `to` da API: redefinida em Técnicos, definida em Usuários ou trocada pelo técnico no app. */
+/** A senha, pelo `to` da API: redefinida em Técnicos, definida em Usuários, trocada no app ou criada pelo link do e-mail. */
 const PASSWORD_LINE: Record<string, string> = {
   "provisória": "Senha redefinida (provisória)",
   "definida pela central": "Senha definida pela central",
   "criada no app": "Senha criada no app",
   "trocada no app": "Senha trocada no app",
+  "criada pelo link do e-mail": "Senha criada pelo link do e-mail",
+  "redefinida pelo link do e-mail": "Senha redefinida pelo link do e-mail",
 };
 
-/** A chave PIX para quem não tem Pagamentos: a API manda "***" no lugar da chave mascarada e não manda o titular. */
-const PIX_HIDDEN = "***";
+/**
+ * O dado de recebimento para quem não tem Pagamentos: a API manda "***" no lugar da chave (ou da forma) mascarada e não
+ * manda o titular (null continua null).
+ */
+const PAYOUT_HIDDEN = "***";
 
-const pixHidden = (item: UserChangeItem) => item.from === PIX_HIDDEN || item.to === PIX_HIDDEN;
+const payoutHidden = (item: UserChangeItem) => item.from === PAYOUT_HIDDEN || item.to === PAYOUT_HIDDEN;
+
+/** Acesso ao app: as linhas antigas dizem "Bloqueado", que hoje é a situação na operação. */
+const accessText = (value: string | null) => (value === "Bloqueado" ? APP_ACCESS.off : value);
 
 interface ChangeLine {
   label: string;
@@ -72,13 +92,16 @@ interface ChangeLine {
 }
 
 /**
- * Uma mudança como a central lê: "Cidade: Santos → Guarujá". Foto, senha e chave PIX têm frase própria; o
- * titular entra na chave cadastrada e sai junto com a chave removida. Sem Pagamentos, a chave vem sem valor
- * ("Chave PIX alterada") e sem titular. Ferramental, disponibilidade, aptidões e formação dizem o que entrou e o
- * que saiu, uma linha cada: "Ferramental: incluiu Escada, Multímetro" e "Ferramental: tirou Furadeira".
+ * Uma mudança como a central lê: "Cidade: Santos → Guarujá". Foto, senha, link de senha, aprovação e chave PIX têm
+ * frase própria; o titular entra na chave cadastrada e sai junto com a chave removida. Sem Pagamentos, o recebimento vem
+ * sem valor ("Formas de recebimento alteradas") e sem titular. As listas dizem o que entrou e o que saiu, uma linha cada:
+ * "Ferramental: incluiu Escada, Multímetro" e "Indisponibilidade: tirou 20/12/2026 a 05/01/2027".
  */
 function linesOf(item: UserChangeItem, all: UserChangeItem[]): ChangeLine[] {
-  const label = USER_CHANGE_LABEL[item.field] ?? item.field;
+  // Campo que esta tela ainda não conhece (API mais nova): fica como "Cadastro".
+  const label = USER_CHANGE_LABEL[item.field] ?? "Cadastro";
+  if (item.field === "payout_methods" && payoutHidden(item)) return [{ label: "Formas de recebimento alteradas" }];
+  if (item.field === "payout_preferred" && payoutHidden(item)) return [{ label: "Forma preferencial alterada" }];
   if (DELTA_FIELDS.has(item.field)) {
     const lines: ChangeLine[] = [];
     if (item.to) lines.push({ label, text: `incluiu ${item.to}` });
@@ -91,36 +114,69 @@ function linesOf(item: UserChangeItem, all: UserChangeItem[]): ChangeLine[] {
       return [{ label: item.to ? "Foto trocada" : "Foto removida" }];
     case "password":
       return [{ label: (item.to && PASSWORD_LINE[item.to]) || (item.to ? `Senha ${item.to}` : "Senha alterada") }];
+    case "password_link":
+      // "enviado para alfa@exemplo.com".
+      return [{ label, text: item.to ?? undefined }];
+    case "application":
+      // "Aprovado na homologação (HOM-…)".
+      return [{ label: item.to ?? label }];
+    case "is_active":
+      return [{ label, text: `${accessText(item.from) ?? empty} → ${accessText(item.to) ?? empty}` }];
+    case "email_verified":
+      if (item.to === "validado") return [{ label: "E-mail validado" }];
+      break;
+    case "email_pending": {
+      // Pedido no app: o e-mail novo espera o link. Saiu sem virar o login: a troca foi cancelada (pelo técnico, ou a
+      // central trocou o e-mail). Virou o login: a linha do E-mail já conta.
+      if (item.to && !item.from) return [{ label: "Troca de e-mail pedida", text: item.to }];
+      if (item.from && !item.to) {
+        if (all.some((c) => c.field === "email" && c.to === item.from)) return [];
+        return [{ label: "Troca de e-mail cancelada", text: item.from }];
+      }
+      break;
+    }
     case "pix": {
       if (!item.to) return [{ label: "Chave PIX removida" }];
       if (!item.from) {
-        if (pixHidden(item)) return [{ label: "Chave PIX cadastrada" }];
+        if (payoutHidden(item)) return [{ label: "Chave PIX cadastrada" }];
         const holder = all.find((c) => c.field === "pix_holder" && !c.from)?.to;
         return [{ label: "Chave PIX cadastrada", text: holder ? `${item.to} · titular ${holder}` : item.to }];
       }
-      if (pixHidden(item)) return [{ label: "Chave PIX alterada" }];
+      if (payoutHidden(item)) return [{ label: "Chave PIX alterada" }];
       break;
     }
     case "pix_holder":
-      if (all.some((c) => c.field === "pix" && (!c.to || !c.from || pixHidden(c)))) return [];
+      if (all.some((c) => c.field === "pix" && (!c.to || !c.from || payoutHidden(c)))) return [];
+      // Sem Pagamentos, a troca só do titular (linha antiga) vem sem o nome.
+      if (payoutHidden(item)) return [{ label: "Titular da conta alterado" }];
       break;
   }
   return [{ label, text: `${item.from ?? empty} → ${item.to ?? empty}` }];
 }
 
+/** Por onde a mudança veio: o técnico (no app ou pelo link do e-mail), a central ou a aprovação da ficha. */
 function whoOf(row: UserChange): string {
-  if (row.via === "app") return "pelo técnico, no app";
-  return row.actor ? `por ${row.actor.name} na central` : "pela central";
+  switch (row.via) {
+    case "app":
+      return "pelo técnico, no app";
+    case "link":
+      return "pelo técnico, pelo link do e-mail";
+    case "ficha":
+      return row.actor ? `por ${row.actor.name}, na aprovação da ficha` : "na aprovação da ficha";
+    default:
+      return row.actor ? `por ${row.actor.name} na central` : "pela central";
+  }
 }
 
 /**
- * "Histórico do cadastro": o que mudou, quando, por quem e por onde (o técnico no app ou a central). A chave
- * PIX vem mascarada pela API (sem Pagamentos, nem isso); e-mail e celular, em claro (para desfazer uma troca
- * indevida). Vem da API em páginas de PAGE pelo `before`, até a primeira linha: a troca antiga de PIX ou de e-mail
- * continua ao alcance do "Ver mais". A chave fica sob ["technicians"], que o tempo real e o salvar da ficha mandam
- * buscar de novo (todas as páginas já abertas).
+ * "Histórico do cadastro": o que mudou, quando, por quem e por onde (o técnico no app ou pelo link do e-mail, a
+ * central ou a aprovação da ficha), com o motivo quando a mudança pede um (a situação na operação). O recebimento vem
+ * mascarado pela API (sem Pagamentos, nem isso); e-mail e celular, em claro (para desfazer uma troca indevida). Vem da
+ * API em páginas de PAGE pelo `before`, até a primeira linha: a troca antiga de PIX ou de e-mail continua ao alcance do
+ * "Ver mais". A chave fica sob ["technicians"], que o tempo real e o salvar da ficha mandam buscar de novo (todas as
+ * páginas já abertas). `bare`: sem a borda e o título (a seção Histórico da ficha já tem os dela).
  */
-export function ProfileHistory({ technicianId }: { technicianId: UUID }) {
+export function ProfileHistory({ technicianId, bare = false }: { technicianId: UUID; bare?: boolean }) {
   const [shown, setShown] = useState(FIRST);
   const changes = useInfiniteQuery({
     queryKey: ["technicians", "changes", technicianId],
@@ -141,9 +197,8 @@ export function ProfileHistory({ technicianId }: { technicianId: UUID }) {
     if (next > rows.length && hasNextPage && !isFetchingNextPage) void fetchNextPage();
   };
 
-  return (
-    <section className="flex flex-col gap-2 rounded-lg border border-line p-3">
-      <SectionTitle>Histórico do cadastro</SectionTitle>
+  const body = (
+    <>
       {changes.isLoading ? (
         <Skeleton className="h-10 w-full" />
       ) : changes.isError && !rows.length ? (
@@ -172,6 +227,7 @@ export function ProfileHistory({ technicianId }: { technicianId: UUID }) {
                     </li>
                   ))}
                 </ul>
+                {row.note ? <p className="mt-0.5 text-xs break-words text-ink-muted">Motivo: {row.note}</p> : null}
               </li>
             );
           })}
@@ -184,6 +240,14 @@ export function ProfileHistory({ technicianId }: { technicianId: UUID }) {
           Ver mais
         </Button>
       ) : null}
+    </>
+  );
+
+  if (bare) return <div className="flex flex-col gap-2">{body}</div>;
+  return (
+    <section className="flex flex-col gap-2 rounded-lg border border-line p-3">
+      <SectionTitle>Histórico do cadastro</SectionTitle>
+      {body}
     </section>
   );
 }

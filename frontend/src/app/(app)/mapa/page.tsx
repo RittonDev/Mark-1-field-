@@ -54,6 +54,7 @@ import { formatMinutes, formatShort, formatTime, initials } from "@/lib/format";
 import { useCan } from "@/lib/permissions";
 import { useDayActivities, useLiveTechnicians, useMapDistances, useTeams, useTrackingHistory } from "@/lib/queries";
 import { useConnectionState } from "@/lib/realtime";
+import { technicianHref } from "@/lib/technicians";
 import {
   DAY_STATE,
   formatAgo,
@@ -748,13 +749,13 @@ function LegRow({ icon, label, leg }: { icon: React.ReactNode; label: string; le
   );
 }
 
-/** Leva à base técnica já buscando o técnico, para completar o cadastro (só com acesso a Técnicos). */
-function CompleteLink({ name }: { name: string }) {
+/** Leva à ficha do técnico já na seção a completar (só com acesso a Técnicos). */
+function CompleteLink({ id, section }: { id: string; section: "contato" | "endereco" }) {
   const canTechnicians = useCan("base.technicians");
   if (!canTechnicians) return null;
   return (
     <Link
-      href={`/tecnicos?q=${encodeURIComponent(name)}`}
+      href={technicianHref(id, section)}
       className="font-medium text-ink underline underline-offset-2 hover:text-brand"
     >
       Completar em Técnicos
@@ -893,7 +894,7 @@ function TechnicianDetail({
         </div>
       ) : (
         <p className="text-xs text-ink-muted">
-          Sem celular no cadastro. <CompleteLink name={tech.name} />
+          Sem celular no cadastro. <CompleteLink id={tech.id} section="contato" />
         </p>
       )}
 
@@ -987,7 +988,7 @@ function TechnicianDetail({
               distance.home.label
             ) : (
               <span>
-                Sem endereço de casa no cadastro. <CompleteLink name={tech.name} />
+                Sem endereço de casa no cadastro. <CompleteLink id={tech.id} section="endereco" />
               </span>
             )}
           </p>
