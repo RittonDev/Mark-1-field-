@@ -557,9 +557,11 @@ Contrato em [docs/API.md](../docs/API.md), "Notas fiscais dos técnicos". Códig
   - A lista em erro também é buscada de novo quando a conexão volta (NetInfo).
 - **Aviso de privacidade**: o link fica no fim da tela (seção abaixo).
 - **Depois de enviar ou apagar**: o mês relê as notas e os valores, a aba relê a situação dos meses, e cada OS coberta
-  mostra "NF 1234" na linha. Enviada noutra competência, o aviso diz qual ("Nota nº 1234 · R$ 1.000,00 · competência
-  de dezembro de 2026"), para o técnico achar a nota no mês certo. A recusa é final: o técnico apaga a recusada e envia
-  outra. A conversa sobre a nota continua no grupo de WhatsApp.
+  mostra "NF 1234" na linha. Enviada na competência do mês de onde a tela abriu, a tela volta para ele. Enviada noutra
+  competência, o aviso diz qual ("Nota nº 1234 · R$ 1.000,00 · competência de dezembro de 2026") e a tela vai para o
+  mês dela no Faturamento (`router.replace`: o voltar leva ao mês de onde veio), onde a nota aparece para abrir ou
+  apagar; sem valores, esse mês passa a ter cartão na aba pela nota (`invoices`). A recusa é final: o técnico apaga a
+  recusada e envia outra. A conversa sobre a nota continua no grupo de WhatsApp.
 
 ## Perfil
 
@@ -609,18 +611,22 @@ O elo do técnico aparece como uma medalha, a patente ([src/components/LevelBadg
 ## Configurações
 
 **Perfil › Configurações** ([src/app/configuracoes/index.tsx](src/app/configuracoes/index.tsx)): o cadastro do técnico
-em quatro grupos, cada linha com o resumo à direita. Contratos em [docs/API.md](../docs/API.md), "Meu cadastro do
-técnico" e "Perfil técnico". O antigo Meu cadastro foi dividido nas telas abaixo; `/meu-cadastro` só redireciona para
-`/configuracoes` (links antigos).
+em quatro grupos, cada linha com o resumo à direita (o rótulo fica inteiro, quebrando só entre palavras, e o resumo é
+que corta com "…"; com a fonte do aparelho acima de 1,3×, o resumo desce para baixo do rótulo). Contratos em
+[docs/API.md](../docs/API.md), "Meu cadastro do técnico" e "Perfil técnico". O antigo Meu cadastro foi dividido nas
+telas abaixo; `/meu-cadastro` só redireciona para `/configuracoes` (links antigos).
 
 - **Perfil**: Foto do perfil (a foto à direita; enviando ou removendo, o andamento), Dados pessoais (o nome), Contato
   ("(11) 98888-7777", ou "Sem celular" em âmbar), Endereço ("Cidade Exemplo/SP" ou "Não informado") e Senha (abre
   "Trocar senha").
 - **Pagamento**: Chave PIX ("CPF •••.456.789-••"; sem chave, "Não cadastrada" em âmbar). O leitor de tela fala só o
   tipo.
-- **Atendimento** (o perfil técnico): Disponibilidade ("Seg a sex · manhã e tarde", "Todos os dias · todos os turnos",
-  "6 dias · turnos variados"; nada, "Não informada"), Transporte ("Carro, Moto · com CNH", ou "Não informado"),
-  Aptidões, Formação e Ferramental ("3 aptidões", "1 formação", "Nenhuma"). Com a API antiga, "Indisponível".
+- **Atendimento** (o perfil técnico): Disponibilidade (`availabilitySummary` em `lib/constants.ts`: os dias com os
+  mesmos turnos, seguidos ou não, como "Seg a sex · manhã e tarde", "Seg, qua e sex · manhã" e
+  "Seg a qua e sex · manhã"; os 28 turnos, "Todos os dias · todos os turnos"; dias com turnos diferentes,
+  "6 dias · turnos variados"; nada, "Não informada"), Transporte ("Carro, Moto · com CNH", "Nenhum · sem CNH" ou "Não
+  informado"), Aptidões, Formação e Ferramental ("3 aptidões", "1 formação", "Nenhuma"). Com a API antiga,
+  "Indisponível".
 - **App**: Aparência (folha com Sistema, "Acompanha o modo do celular", Claro e Escuro), Notificações ("Ligadas",
   "Desligadas", "Bloqueadas" em âmbar ou "Indisponíveis") e Sincronização (o mesmo resumo do Perfil).
 - A tela abre sempre, até sem internet: lendo, os resumos são esqueletos; sem rede, "Sem internet: para mudar o
