@@ -476,8 +476,8 @@ lembretes da visita são locais e funcionam também no Expo Go, mas só depois q
 Aba **Faturamento** (ícone de recibo; substitui Ganhos): o técnico é parceiro e recebe por OS. Contrato em
 [docs/API.md](../docs/API.md), "Valor por chamado" e "Faturamento do app". Código:
 [src/lib/earnings.ts](src/lib/earnings.ts) (dados e cópia no aparelho), [src/lib/hideValues.ts](src/lib/hideValues.ts)
-(o olho), `src/components/billing/` (`BillingView` é a aba; `MonthEarnings`, o mês) e a tela
-`src/app/faturamento/[mes].tsx`.
+(o olho), `src/components/billing/` (`BillingView` é a aba; `OtherMonth`, o Outro mês; `MonthEarnings`, o mês) e a
+tela `src/app/faturamento/[mes].tsx`.
 
 - **Topo**: **Total pago** (com "Último pagamento em 18/11") e **A receber** (com "+ R$ 90,00 previsto" das OS em
   andamento e "Inclui R$ 30,00 de meses anteriores"); embaixo, só com reembolso, "Reembolsos · R$ 45,00 a receber ·
@@ -488,8 +488,8 @@ Aba **Faturamento** (ícone de recibo; substitui Ganhos): o técnico é parceiro
 - **Por mês**: um cartão por mês de conclusão das OS, o mais novo primeiro, com o ícone e o selo da situação (ao lado
   do valor, ou embaixo dele quando os dois não cabem na linha), o valor total, uma linha curta
   ("3 OS sem nota · R$ 300,00", "Nota nº 1234 recusada · ver motivo") e, no rodapé, "Novembro de 2026 · 12 OS". O mês
-  sem valor só aparece com nota daquela competência que não foi recusada (`invoices`): "Sem valores", R$ 0,00 e "1
-  nota fiscal" (ou "N notas fiscais"); é por ele que o técnico abre, apaga ou acompanha a nota que cobre OS de meses
+  sem valor só aparece com nota daquela competência que não foi recusada (`invoices`): "Sem valores", R$ 0,00 e
+  "1 nota fiscal" (ou "N notas fiscais"); é por ele que o técnico abre, apaga ou acompanha a nota que cobre OS de meses
   anteriores. A API publicada em 20/11/2026 não manda o `invoices` (ausente vale 0: o mês sem valor fica de fora). A
   situação vem calculada do servidor: Em andamento, Sem nota, Nota em conferência, Nota recusada, A pagar, Pago em
   parte, Pago sem nota e Pago (as cores da central, só no ícone e no selo; a linha da nota recusada em vermelho). A
