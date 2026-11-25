@@ -770,7 +770,8 @@ export const LEVEL_MEDAL_RELIEF = {
 
 /**
  * Relevo com degradê (aro em diagonal, face de cima para baixo) a partir de LEVEL_MEDAL_FLAT_BELOW. false: aro e face
- * chapados (rim[0] e face[0]), com o brilho, a sombra, a linha da face e as facetas. Decisão do dono.
+ * chapados (rim[0] e face[0]), com o brilho, a sombra, a linha da face e as facetas. O dono escolheu o relevo
+ * (24/11/2026).
  */
 export const LEVEL_MEDAL_GRADIENT: boolean = true;
 
