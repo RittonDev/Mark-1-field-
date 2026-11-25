@@ -249,6 +249,11 @@ export interface AssignableUser {
   team_id: UUID | null;
   team_name: string | null;
   open_tickets: number;
+  /** Técnico: Inativo e Bloqueado vêm com o motivo e não podem ser escolhidos. A API antiga não manda. */
+  operational_status?: OperationalStatus;
+  operational_reason?: string | null;
+  /** Os períodos que não terminaram (escolhível, com aviso). */
+  unavailability?: UnavailabilityPeriod[];
 }
 
 export interface Team {
@@ -1036,14 +1041,31 @@ export interface ApplicationSummary {
   created_at: ISODate;
   reviewed_at: ISODate | null;
   user_id: UUID | null;
+  /** null: o candidato ainda não abriu o link de validação. */
+  email_verified_at: ISODate | null;
+  /** Ficha reprovada que voltou para análise (Pendentes, chip "Reaberta"). */
+  reopened_at: ISODate | null;
 }
 
 export interface ApplicationDetail extends ApplicationSummary {
   document: string;
   birth_date: string | null;
   postal_code: string | null;
+  /** O logradouro (fichas antigas: a linha inteira do endereço). */
   address: string | null;
+  address_number: string | null;
+  address_complement: string | null;
+  address_district: string | null;
+  phone_secondary: string | null;
+  rg_number: string | null;
+  rg_issuer: string | null;
+  rg_state: string | null;
+  bio: string | null;
   company_document: string | null;
+  company_name: string | null;
+  company_trade_name: string | null;
+  vehicle_model: string | null;
+  vehicle_plate: string | null;
   skills: { name: string; level: string }[];
   certifications: string | null;
   tools: string | null;
@@ -1058,6 +1080,13 @@ export interface ApplicationDetail extends ApplicationSummary {
   review_note: string | null;
   invite_label: string | null;
   photo_url: string | null;
+  /** O candidato criou a senha na ficha (sem ela, a boas-vindas leva o link para criar). */
+  has_password: boolean;
+  /** As análises, na ordem em que aconteceram. */
+  reviews: ApplicationReview[];
+  reopened_by: Ref | null;
+  /** Reprovada: quando a exclusão automática apaga a ficha. */
+  purge_at: ISODate | null;
 }
 
 // Base técnica (gestão de acesso dos técnicos)
@@ -1074,7 +1103,7 @@ export interface Technician {
   base_source?: "history" | "home" | null;
   base_visits?: number;
   last_visit_at?: ISODate | null;
-  /** Ficha completa: endereço, jornada e serviços que faz. */
+  /** Ficha completa: endereço (address_line é o logradouro), jornada e serviços que faz. */
   address_line?: string | null;
   address_district?: string | null;
   address_zip?: string | null;
@@ -1107,12 +1136,51 @@ export interface Technician {
   tools?: Ref[] | null;
   education?: EducationItem[] | null;
   tech_profile_updated?: TechProfileStamps | null;
-  /** Tem chave PIX (ele cadastra no app, em Perfil › Configurações › Chave PIX). A chave fica em Pagamentos (PayoutBoard.pix). */
+  /**
+   * @deprecated Sai no fechamento da Entrega 1 (V1). API antiga: tem chave PIX. A nova manda payout_methods_count.
+   */
   has_pix?: boolean;
-  /** Quando a chave mudou ("Chave nova" por PIX_RECENT_DAYS); null sem chave. */
+  /** @deprecated Sai no fechamento da Entrega 1 (V1). API antiga: quando a chave PIX mudou. A nova manda payout_changed_at. */
   pix_updated_at?: ISODate | null;
   /** Elo (o selo da lista): a conta guardada, de até 6 h atrás. Sem conta ainda: bronze, since null. */
   level?: LevelSummary;
+  /** Situação na operação (só a central vê). Lista e detalhe; a API antiga não manda (vale "active"). */
+  operational_status?: OperationalStatus;
+  operational_reason?: string | null;
+  operational_changed_at?: ISODate | null;
+  operational_changed_by?: Ref | null;
+  /** Os períodos que não terminaram, pelo início. */
+  unavailability?: UnavailabilityPeriod[];
+  /** null: o e-mail de login nunca foi validado. */
+  email_verified_at?: ISODate | null;
+  /** E-mail novo pedido no app, esperando o link: o login continua `email` até lá. */
+  email_pending?: string | null;
+  /** Formas de recebimento cadastradas (0: "Sem forma de recebimento"); a lista fica com Pagamentos. */
+  payout_methods_count?: number;
+  /** Última troca do destino do pagamento ("Nova" por PAYOUT_RECENT_DAYS); null sem forma. */
+  payout_changed_at?: ISODate | null;
+  /** Só no detalhe (GET /technicians/{id} e as respostas de um técnico): dados pessoais, empresa e veículo. */
+  /** 11 números. */
+  cpf?: string | null;
+  rg_number?: string | null;
+  rg_issuer?: string | null;
+  /** UF do órgão emissor. */
+  rg_state?: string | null;
+  /** "AAAA-MM-DD". */
+  birth_date?: string | null;
+  phone_secondary?: string | null;
+  bio?: string | null;
+  address_number?: string | null;
+  address_complement?: string | null;
+  /** CNPJ, 14 caracteres (pode ter letras), sem pontuação. */
+  company_document?: string | null;
+  /** Razão social. */
+  company_name?: string | null;
+  /** Nome fantasia. */
+  company_trade_name?: string | null;
+  vehicle_model?: string | null;
+  /** 7 caracteres, sem hífen ("ABC1234", "ABC1D23"). */
+  vehicle_plate?: string | null;
 }
 
 export interface TemporaryPassword {
