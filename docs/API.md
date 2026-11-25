@@ -10,11 +10,11 @@ Autenticação: `Authorization: Bearer <access_token>`. Erros seguem `{"detail":
 Valor que o banco recusa (SQLSTATE da classe 22, "data exception": texto maior que a coluna, U+0000 num texto que vai
 ao banco como está) responde 422 em qualquer rota, com um aviso no log (o SQLSTATE, sem traceback):
 `{"detail": "Algum valor está fora do tamanho ou do formato aceito. Confira os campos."}`. O asyncpg entrega esses
-erros como `DBAPIError` genérico, e o handler de `main.py` decide pelo SQLSTATE (a API publicada em 20/11/2026 ainda
-responde 500 nesses casos). Registro repetido e referência que não existe (`IntegrityError`) continuam 409 com a
-mensagem da restrição; os outros erros do banco seguem como erro não tratado: 500 `{"detail": "Erro interno. Tente de
-novo; se continuar, avise a central."}` e o log "Erro não tratado em …". O erro do banco vai para o log com o SQL sem
-os valores (`hide_parameters` em `db/session.py`, também no `DB_ECHO`), que levariam dados pessoais (nome, contato,
+erros como `DBAPIError` genérico, e o handler de `main.py` decide pelo SQLSTATE (a API publicada em 20/11/2026 responde
+500 nesses casos). Registro repetido e referência que não existe (`IntegrityError`) continuam 409 com a mensagem da
+restrição; os outros erros do banco seguem como erro não tratado: 500 `{"detail": "Erro interno. Tente de novo; se
+continuar, avise a central."}` e o log "Erro não tratado em …". O erro do banco vai para o log com o SQL sem os
+valores (`hide_parameters` em `db/session.py`, também no `DB_ECHO`), que levariam dados pessoais (nome, contato,
 formação, chave PIX).
 
 ## Papéis

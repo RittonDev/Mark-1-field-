@@ -48,10 +48,11 @@ o histórico dela.
 inteira por vez (`tool_ids`, `availability`, `transport`, `skills` ou `education`), sem senha. A lista enviada substitui
 a anterior; o servidor normaliza e ordena, limpa os textos (sem caracteres de controle nem invisíveis, como espaço de
 largura zero e marcas de direção; o app confere do mesmo jeito, com `cleanText` e `foldName`), põe o "desde" das
-aptidões e o `id` das formações e devolve o cadastro como ficou, que a tela passa a mostrar. Como o cadastro: só online, fora da fila, nada no SQLite nem no kv. O ferramental vem
-de `GET /technician-tools` (o técnico recebe só as ferramentas ativas, em ordem alfabética) e as sugestões de aptidão,
-de `skill_suggestions` em `GET /public/onboarding/catalog`. Os dois catálogos ficam só na memória
-(`lib/technicalProfile.ts`): valem 10 min (puxar a tela relê na hora) e somem na troca de sessão.
+aptidões e o `id` das formações e devolve o cadastro como ficou, que a tela passa a mostrar. Como o cadastro: só
+online, fora da fila, nada no SQLite nem no kv. O ferramental vem de `GET /technician-tools` (o técnico recebe só as
+ferramentas ativas, em ordem alfabética) e as sugestões de aptidão, de `skill_suggestions` em
+`GET /public/onboarding/catalog`. Os dois catálogos ficam só na memória (`lib/technicalProfile.ts`): valem 10 min
+(puxar a tela relê na hora) e somem na troca de sessão.
 
 - **Salvar ao tocar** (Disponibilidade, Transporte e Ferramental; `lib/autoSave.ts`): o toque muda a tela na hora e
   reinicia uma espera de 0,6 s; ao fim dela sai um `PATCH` só, com o valor final (os toques de perto viram uma linha no

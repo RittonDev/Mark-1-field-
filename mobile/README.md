@@ -514,11 +514,11 @@ Aba **Faturamento** (ícone de recibo; substitui Ganhos): o técnico é parceiro
   **Outro mês** embaixo. Os valores por OS existem desde 13/11/2026: com meses anteriores na janela, o rodapé diz
   "Valores registrados no app desde 13/11/2026.".
 - **Dados**: `GET /me/earnings/months?months=12` (os totais e os 12 meses, com a situação e as notas de cada
-  competência) e, no mês, `GET /me/earnings?month=AAAA-MM`. Ficam no aparelho para abrir sem rede (kv `earnings:months`, com a hora e o técnico,
-  e `earnings:AAAA-MM`); só leitura, nada entra na fila. Busca ao abrir a aba, ao voltar a ela e ao abrir o mês (a busca
-  de até 30 s atrás vale), no "puxar para atualizar" (que relê também o cadastro, pela chave PIX), em "Tentar de novo",
-  quando uma nota entra ou sai neste aparelho e, depois de uma sincronização, se a última busca tem 2 min ou mais (pagar
-  marca a OS como alterada e a rodada traz).
+  competência) e, no mês, `GET /me/earnings?month=AAAA-MM`. Ficam no aparelho para abrir sem rede (kv
+  `earnings:months`, com a hora e o técnico, e `earnings:AAAA-MM`); só leitura, nada entra na fila. Busca ao abrir a
+  aba, ao voltar a ela e ao abrir o mês (a busca de até 30 s atrás vale), no "puxar para atualizar" (que relê também o
+  cadastro, pela chave PIX), em "Tentar de novo", quando uma nota entra ou sai neste aparelho e, depois de uma
+  sincronização, se a última busca tem 2 min ou mais (pagar marca a OS como alterada e a rodada traz).
 - **Sem internet ou erro**: com valores guardados, tudo aparece com "Sem internet · valores de …" ou "Não deu para
   atualizar · valores de …"; sem nada guardado, "Sem internet" / "O faturamento aparece quando a conexão voltar." ou a
   mensagem do servidor com **Tentar de novo**. Com a API antiga (sem a rota dos meses): "Não foi possível carregar o
@@ -613,10 +613,11 @@ O elo do técnico aparece como uma medalha, a patente ([src/components/LevelBadg
 ## Configurações
 
 **Perfil › Configurações** ([src/app/configuracoes/index.tsx](src/app/configuracoes/index.tsx)): o cadastro do técnico
-em quatro grupos, cada linha com o resumo à direita (o rótulo fica inteiro, quebrando só entre palavras, e o resumo é
-que corta com "…"; com a fonte do aparelho acima de 1,3×, o resumo desce para baixo do rótulo). Contratos em
-[docs/API.md](../docs/API.md), "Meu cadastro do técnico" e "Perfil técnico". O antigo Meu cadastro foi dividido nas
-telas abaixo; `/meu-cadastro` só redireciona para `/configuracoes` (links antigos).
+em quatro grupos, cada linha com o resumo à direita (o rótulo fica com a largura dele, até metade da linha, quebrando
+entre palavras, e o resumo fica com o resto, cortado com "…"; com a fonte do aparelho acima de 1,3×, o resumo desce
+para baixo do rótulo; [src/components/MenuRow.tsx](src/components/MenuRow.tsx), o mesmo da lista do Perfil). Contratos
+em [docs/API.md](../docs/API.md), "Meu cadastro do técnico" e "Perfil técnico". O antigo Meu cadastro foi dividido
+nas telas abaixo; `/meu-cadastro` só redireciona para `/configuracoes` (links antigos).
 
 - **Perfil**: Foto do perfil (a foto à direita; enviando ou removendo, o andamento), Dados pessoais (o nome), Contato
   ("(11) 98888-7777", ou "Sem celular" em âmbar), Endereço ("Cidade Exemplo/SP" ou "Não informado") e Senha (abre
@@ -718,8 +719,8 @@ não têm texto de explicação no topo: só os vazios, os limites e os avisos d
   confirmação.
 - **Aptidões e Formação**: uma gravação por vez; enquanto uma está no ar, incluir, editar e excluir ficam desligados (o
   item que sai mostra o indicador), também depois de sair e voltar à tela: o estado fica no módulo
-  (`trackListWrite`/`useListWrite` em `technicalProfile.ts`) e zera na troca de sessão. A lista enviada é montada na hora
-  em que a gravação sai da fila (`saveProfileWith` em `profile.ts`), com a que a gravação anterior devolveu: duas
+  (`trackListWrite`/`useListWrite` em `technicalProfile.ts`) e zera na troca de sessão. A lista enviada é montada na
+  hora em que a gravação sai da fila (`saveProfileWith` em `profile.ts`), com a que a gravação anterior devolveu: duas
   exclusões seguidas não devolvem o item apagado. Mudar um item que a anterior já tirou mostra "Esta aptidão foi
   excluída." (ou "Esta formação foi excluída.") na folha, sem enviar nada. A folha mostra o erro do servidor no fim, não
   fecha enquanto salva e pergunta antes de descartar o que foi digitado; sem rede, avisa e fica preenchida. No limite,
