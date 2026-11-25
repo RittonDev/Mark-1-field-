@@ -1,104 +1,125 @@
 "use client";
 
-// Chave PIX do técnico na central. Só ele cadastra e troca (app, Perfil › Configurações › Chave PIX, com a
-// senha); a central vê em Pagamentos e no cadastro em Técnicos, copia para pagar e só remove. Os formatos são os
-// de backend/app/core/pix.py (PIX_KEY_TYPE e formatPixKey em constants.ts; a máscara, maskPixKey, aqui).
+// Formas de recebimento do técnico na central (chaves PIX e contas, uma preferencial). Só ele cadastra e troca (app,
+// Perfil › Configurações › Formas de recebimento, com a senha); a central vê com Pagamentos (em Pagamentos e na ficha do
+// técnico), copia para pagar e só remove. O texto mascarado (payoutMethodText), a conta inteira (bankAccountText) e os
+// formatos da chave (formatPixKey, maskPixKey) ficam em constants.ts, iguais no app.
 
 import { useToast } from "@/components/Toaster";
-import { formatPixKey, PIX_KEY_TYPE, PIX_RECENT_DAYS } from "./constants";
-import { OPERATION_TZ } from "./format";
-import type { PixInfo, PixKeyType } from "./types";
+import { bankAccountText, formatPixKey, PAYOUT_RECENT_DAYS, payoutMethodText, PIX_KEY_TYPE } from "./constants";
+import { formatDocument, OPERATION_TZ } from "./format";
+import type { PayoutMethod, PixInfo } from "./types";
 import { copyText } from "./whatsapp";
 
 const DAY_MS = 86_400_000;
 const dayFmt = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", timeZone: OPERATION_TZ });
 
-/** Cor do selo "Chave nova" (âmbar, a mesma de "Em risco"). */
-export const PIX_NEW_COLOR = "#d97706";
-
-/** Tipo e chave para conferir com o que o banco mostra: "CPF 123.456.789-09". */
-export function pixText(pix: Pick<PixInfo, "key_type" | "key">): string {
-  return `${PIX_KEY_TYPE[pix.key_type] ?? pix.key_type} ${formatPixKey(pix.key_type, pix.key)}`;
-}
-
-/** Os caracteres da ponta, contados como no Python (um emoji é um só). */
-const head = (text: string, n: number) => Array.from(text).slice(0, n).join("");
-const tail = (text: string, n: number) => Array.from(text).slice(-n).join("");
-
-/**
- * Só o bastante para reconhecer a chave, igual a core/pix.mask (o histórico e o registro do pagamento): CPF
- * "***.456.789-**", CNPJ "12.345.678/****-**", e-mail "t***@exemplo.com", celular "+55 (11) *****-7777" e o resto
- * "…4000".
- */
-export function maskPixKey(type: PixKeyType, key: string): string {
-  if (type === "cpf" && key.length === 11) return `***.${key.slice(3, 6)}.${key.slice(6, 9)}-**`;
-  if (type === "cnpj" && key.length === 14) return `${key.slice(0, 2)}.${key.slice(2, 5)}.${key.slice(5, 8)}/****-**`;
-  if (type === "email" && key.includes("@")) {
-    const at = key.indexOf("@");
-    return `${head(key.slice(0, at), 1)}***@${key.slice(at + 1)}`;
-  }
-  if (type === "phone") {
-    let digits = key.replace(/\D/g, "");
-    if (digits.length === 13 && digits.startsWith("55")) digits = digits.slice(2);
-    if (digits.length === 11) return `+55 (${digits.slice(0, 2)}) *****-${digits.slice(7)}`;
-  }
-  return `…${tail(key, 4)}`;
-}
-
-/**
- * Tipo e chave no extrato do WhatsApp, que passa pelo endereço do wa.me e pela área de transferência: CPF e CNPJ
- * mascarados ("CPF ***.456.789-**"); e-mail, celular e chave aleatória inteiros, para o técnico ver onde vai
- * receber (com máscara, uma chave parecida passaria). O "Copiar PIX" continua com a chave crua.
- */
-export function pixStatementText(pix: Pick<PixInfo, "key_type" | "key">): string {
-  const shown = pix.key_type === "cpf" || pix.key_type === "cnpj" ? maskPixKey(pix.key_type, pix.key) : formatPixKey(pix.key_type, pix.key);
-  return `${PIX_KEY_TYPE[pix.key_type] ?? pix.key_type} ${shown}`;
-}
-
-/** A chave mudou há menos de PIX_RECENT_DAYS dias: "Chave nova", confirmar com ele no grupo antes de pagar. */
-export function pixRecent(updatedAt: string | null | undefined, now: number): boolean {
-  const at = updatedAt ? Date.parse(updatedAt) : Number.NaN;
-  return Number.isFinite(at) && now - at < PIX_RECENT_DAYS * DAY_MS;
-}
-
-/** Dia da troca da chave ("18/11"), no fuso da operação. */
-export function pixDay(updatedAt: string | null | undefined): string {
-  const at = updatedAt ? new Date(updatedAt) : null;
-  return at && !Number.isNaN(at.getTime()) ? dayFmt.format(at) : "";
-}
-
-const plain = (text: string) =>
-  text
-    .normalize("NFD")
-    // Sem acento: o NFD separa a letra da marca, e as marcas (Unicode M) saem.
-    .replace(/\p{M}/gu, "")
-    .toLowerCase()
-    .split(/\s+/)
-    .filter(Boolean)
-    .join(" ");
-
-/** O titular da conta não é o próprio técnico (acento, maiúsculas e espaços não contam). */
-export function holderDiffers(pix: Pick<PixInfo, "holder_name">, name: string): boolean {
-  return !!pix.holder_name && plain(pix.holder_name) !== plain(name);
-}
+/** Cor dos selos "Nova" e "Titular diferente" (âmbar, a mesma de "Em risco"). */
+export const PAYOUT_NEW_COLOR = "#d97706";
 
 function firstName(name: string): string {
   return name.trim().split(/\s+/)[0] || name;
 }
 
-/** Mensagem do "Pedir a chave" (conversa do técnico no WhatsApp). */
-export function askPixText(name: string): string {
-  return `Olá, ${firstName(name)}! Cadastre sua chave PIX no app Maxx Field, em Perfil › Configurações › Chave PIX, para receber pelos chamados.`;
+/** Mensagem do "Pedir no WhatsApp" (conversa do técnico): onde ele cadastra a forma de recebimento. */
+export function askPayoutText(name: string): string {
+  return `Olá, ${firstName(name)}! Cadastre onde quer receber no app Maxx Field, em Perfil › Configurações › Formas de recebimento, para receber pelos chamados.`;
+}
+
+/** CPF ou CNPJ do titular com o nome do documento: "CPF 123.456.789-09" | "CNPJ 12.345.678/0001-95". */
+export function holderDocumentText(document: string | null | undefined): string {
+  if (!document) return "";
+  if (document.length === 11) return `CPF ${formatDocument(document)}`;
+  if (document.length === 14) return `CNPJ ${formatDocument(document)}`;
+  return document;
+}
+
+/** Para quem paga, com tudo à vista: PIX "PIX CPF · 123.456.789-09"; conta, bankAccountText. */
+export function payoutDestinationText(method: PayoutMethod): string {
+  return method.kind === "pix"
+    ? `PIX ${PIX_KEY_TYPE[method.pix_key_type] ?? method.pix_key_type} · ${formatPixKey(method.pix_key_type, method.pix_key)}`
+    : bankAccountText(method);
 }
 
 /**
- * Copia a chave crua, como o app do banco pede, e avisa com o tipo, a chave formatada e o titular, para
- * conferir com o nome que o banco mostra antes de confirmar o pagamento.
+ * O que o "Copiar" leva para pagar: PIX, a chave crua (como o app do banco pede); conta, bankAccountText com o titular
+ * ("Banco Exemplo (999) · Ag. 0001 · Conta 12345-6 · Conta corrente · Titular: Tecnico Alfa · CPF 123.456.789-09").
  */
+export function payoutCopyText(method: PayoutMethod): string {
+  if (method.kind === "pix") return method.pix_key;
+  const document = holderDocumentText(method.holder_document);
+  return `${bankAccountText(method)} · Titular: ${method.holder_name}${document ? ` · ${document}` : ""}`;
+}
+
+/**
+ * A linha do extrato do WhatsApp: a preferencial mascarada (payoutMethodText, com "•": o "*" vira negrito no WhatsApp),
+ * ou o pedido para cadastrar no app quando ele não tem nenhuma.
+ */
+export function payoutStatementText(method: PayoutMethod | null): string {
+  return method
+    ? `Forma de recebimento: ${payoutMethodText(method)}`
+    : "Forma de recebimento: não cadastrada (cadastre no app, em Perfil › Configurações › Formas de recebimento)";
+}
+
+/** O destino do pagamento mudou há menos de PAYOUT_RECENT_DAYS dias (`destination_changed_at`): "Nova". */
+export function payoutRecent(changedAt: string | null | undefined, now: number): boolean {
+  const at = changedAt ? Date.parse(changedAt) : Number.NaN;
+  return Number.isFinite(at) && now - at < PAYOUT_RECENT_DAYS * DAY_MS;
+}
+
+/** Dia da troca ("18/11"), no fuso da operação. */
+export function payoutDay(changedAt: string | null | undefined): string {
+  const at = changedAt ? new Date(changedAt) : null;
+  return at && !Number.isNaN(at.getTime()) ? dayFmt.format(at) : "";
+}
+
+/**
+ * Copia o que vai para o banco (payoutCopyText) e avisa com o destino e o titular, para conferir com o nome que o banco
+ * mostra antes de confirmar o pagamento.
+ */
+export function useCopyPayout() {
+  const { toast } = useToast();
+  return async (name: string, method: PayoutMethod): Promise<boolean> => {
+    const shown = payoutDestinationText(method);
+    const copied = await copyText(payoutCopyText(method));
+    const pix = method.kind === "pix";
+    toast(
+      copied
+        ? {
+            title: pix ? `Chave PIX de ${name} copiada` : `Dados da conta de ${name} copiados`,
+            description: `${shown} · titular ${method.holder_name}`,
+            tone: "success",
+          }
+        : {
+            title: pix ? "Não foi possível copiar a chave PIX" : "Não foi possível copiar os dados da conta",
+            description: `${shown}: copie à mão.`,
+            tone: "error",
+          },
+    );
+    return copied;
+  };
+}
+
+// --------------------------------------------------------------------------- chave PIX única (V1 apaga)
+
+/** @deprecated Sai no fechamento da Entrega 1 (V1): use PAYOUT_NEW_COLOR. Só o TechnicianPayment.tsx (o W1 apaga) usa. */
+export const PIX_NEW_COLOR = PAYOUT_NEW_COLOR;
+
+/** @deprecated Sai no fechamento da Entrega 1 (V1): use askPayoutText. Só o TechnicianPayment.tsx (o W1 apaga) usa. */
+export function askPixText(name: string): string {
+  return askPayoutText(name);
+}
+
+/** @deprecated Sai no fechamento da Entrega 1 (V1): use payoutRecent. Só o TechnicianPayment.tsx (o W1 apaga) usa. */
+export function pixRecent(updatedAt: string | null | undefined, now: number): boolean {
+  return payoutRecent(updatedAt, now);
+}
+
+/** @deprecated Sai no fechamento da Entrega 1 (V1): use useCopyPayout. Só o TechnicianPayment.tsx (o W1 apaga) usa. */
 export function useCopyPix() {
   const { toast } = useToast();
   return async (name: string, pix: PixInfo): Promise<boolean> => {
-    const shown = pixText(pix);
+    const shown = `${PIX_KEY_TYPE[pix.key_type] ?? pix.key_type} ${formatPixKey(pix.key_type, pix.key)}`;
     const copied = await copyText(pix.key);
     toast(
       copied

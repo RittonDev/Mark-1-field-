@@ -2,12 +2,21 @@
 
 Os testes de API rodam só com TEST_DATABASE_URL definido (o docker-compose já define,
 apontando para o banco `chamados_test`). Os testes unitários rodam sem banco.
+
+E-mail: nenhum teste fala com a rede. Por padrão (`_mail_off`) o envio está desligado: a fila
+recebe as linhas como "not_configured" e nada sai. Com a fixture `mail_box` o envio fica ligado num
+provedor de mentira: `mail_box.soon` guarda os ids que as rotas mandaram para `mail.deliver_soon`
+e, depois de `await mail.deliver_pending(session)`, `mail_box.messages` tem as mensagens
+(`mail_box.texts()`, `mail_box.tokens()` para pegar o token do link).
 """
 
 import asyncio
 import os
+import re
+import uuid
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from email.message import EmailMessage
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -16,23 +25,89 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async
 from sqlalchemy.pool import NullPool
 
 import app.models  # noqa: F401
+from app.core.config import settings
 from app.core.enums import UserRole
 from app.core.security import create_access_token, hash_password
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
 from app.models import Customer, Location, Team, User
-from app.services import login_guard
+from app.services import login_guard, mail
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 
 requires_db = pytest.mark.skipif(not TEST_DATABASE_URL, reason="TEST_DATABASE_URL não definido")
+
+# O token no fragmento dos links dos e-mails (…/validar-email#token=… e …/definir-senha#token=…).
+_LINK_TOKEN = re.compile(r"#token=([A-Za-z0-9_-]+)")
 
 
 @pytest.fixture(autouse=True)
 def _fresh_login_guard() -> None:
     """Cada teste começa sem senhas erradas contadas (o controle de login fica na memória)."""
     login_guard.reset_memory()
+
+
+@pytest.fixture(autouse=True)
+def _mail_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Envio de e-mail desligado em todo teste (settings.mail_enabled falso, a fila fica
+    "not_configured" e nada sai). A fixture `mail_box` liga num provedor de mentira."""
+    monkeypatch.setattr(settings, "SMTP_HOST", None)
+    monkeypatch.setattr(mail, "get_provider", lambda: mail.DisabledProvider())
+
+
+class FakeProvider:
+    """Provedor de e-mail de mentira: guarda as mensagens. `fail` faz o próximo envio falhar com
+    esse erro (mail.MailError(..., permanent=...)) e volta a None."""
+
+    configured = True
+
+    def __init__(self) -> None:
+        self.messages: list[EmailMessage] = []
+        self.fail: Exception | None = None
+
+    async def send(self, message: EmailMessage) -> None:
+        if self.fail is not None:
+            error, self.fail = self.fail, None
+            raise error
+        self.messages.append(message)
+
+
+@dataclass
+class MailBox:
+    provider: FakeProvider
+    # Os ids que as rotas mandaram para mail.deliver_soon (depois do commit).
+    soon: list[uuid.UUID] = field(default_factory=list)
+
+    @property
+    def messages(self) -> list[EmailMessage]:
+        return self.provider.messages
+
+    def texts(self) -> list[str]:
+        """O texto simples de cada mensagem, na ordem do envio."""
+        out: list[str] = []
+        for message in self.messages:
+            part = message.get_body(preferencelist=("plain",))
+            out.append(part.get_content() if part is not None else "")
+        return out
+
+    def tokens(self) -> list[str]:
+        """Os tokens crus dos links (#token=...), na ordem do envio."""
+        return [m.group(1) for body in self.texts() for m in _LINK_TOKEN.finditer(body)]
+
+
+@pytest.fixture
+def mail_box(monkeypatch: pytest.MonkeyPatch) -> MailBox:
+    """Envio de e-mail ligado (settings.mail_enabled verdadeiro) num provedor de mentira
+    (`mail_box.messages`), `mail.deliver_soon` gravado em `mail_box.soon` (nada sai sozinho: o teste
+    chama `await mail.deliver_pending(session)`) e um remetente de exemplo."""
+    provider = FakeProvider()
+    box = MailBox(provider=provider)
+    monkeypatch.setattr(settings, "SMTP_HOST", "smtp.exemplo.com")
+    monkeypatch.setattr(settings, "MAIL_FROM", "nao-responda@exemplo.com")
+    monkeypatch.setattr(mail, "get_provider", lambda: provider)
+    monkeypatch.setattr(mail, "deliver_soon", lambda ids: box.soon.extend(ids))
+    return box
 
 
 async def _ensure_database(url: str) -> None:

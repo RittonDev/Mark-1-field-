@@ -20,11 +20,12 @@ from app.core.config import settings
 from app.core.enums import QuoteStatus
 from app.db.session import SessionLocal
 from app.models import Quote
+from app.services import mail, technician_levels, technician_regions, validation_messages
 from app.services import onboarding as onboarding_svc
-from app.services import technician_levels, technician_regions, validation_messages
 from app.services.activities import local_today
 from app.services.errors import (
     AccessDenied,
+    CodedError,
     DomainError,
     NotFound,
     OfferError,
@@ -44,10 +45,13 @@ log = logging.getLogger("maxxchamados")
 class RedactTokens(logging.Filter):
     """Tira tokens dos logs: o WebSocket e os links de anexo levam o token na URL, e o log de
     acesso do uvicorn gravaria a sessão de quem acessou. Os links públicos (relatório, orçamento,
-    ficha de técnico) levam o token no caminho: ele também sai do log."""
+    ficha de técnico) levam o token no caminho: ele também sai do log. O CEP buscado (dado do
+    endereço de alguém) também não fica no log."""
 
     _pattern = re.compile(r"((?:token|access_token|refresh_token)=)[^&\s\"']+")
-    _public = re.compile(r"(/public/(?:reports|quotes|onboarding)/)(?!catalog\b)[^/?\s\"']+")
+    _public = re.compile(
+        r"(/public/(?:reports|quotes|onboarding|cep)/)(?!catalog\b)[^/?\s\"']+"
+    )
 
     def _clean(self, value: object) -> object:
         if not isinstance(value, str):
@@ -104,6 +108,7 @@ _JOBS: tuple[tuple[str, Callable[[AsyncSession], Awaitable[int]]], ...] = (
     ("Regiões dos técnicos", _refresh_regions),
     ("Elos dos técnicos", _refresh_levels),
     ("Retenção das fichas de técnico (LGPD)", onboarding_svc.purge_expired),
+    ("Fila de e-mails (retenção)", mail.purge_old),
 )
 
 
@@ -128,14 +133,30 @@ async def _auto_close_loop() -> None:
             await _run_job(name, job)
 
 
+async def _mail_loop() -> None:
+    """Fila de e-mails: a cada MAIL_RETRY_SECONDS vence o que passou do prazo e manda o que está
+    pendente (o e-mail novo já sai na hora, por mail.deliver_soon; aqui ficam as novas tentativas).
+    Várias instâncias da API não mandam o mesmo e-mail (FOR UPDATE SKIP LOCKED)."""
+    while True:
+        await asyncio.sleep(settings.MAIL_RETRY_SECONDS)
+        try:
+            async with SessionLocal() as db:
+                sent = await mail.deliver_pending(db)
+            if sent:
+                log.info("Fila de e-mails: %d enviado(s)", sent)
+        except Exception:
+            log.exception("Falha na fila de e-mails")
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     await bus.start()
-    task = asyncio.create_task(_auto_close_loop())
+    tasks = [asyncio.create_task(_auto_close_loop()), asyncio.create_task(_mail_loop())]
     try:
         yield
     finally:
-        task.cancel()
+        for task in tasks:
+            task.cancel()
         await bus.stop()
 
 
@@ -319,6 +340,36 @@ FIELD_LABELS: dict[str, str] = {
     "end": "Fim",
     "day": "Dia",
     "period": "Turno",
+    # Cadastro V2: dados pessoais, empresa, veículo, endereço em partes e indisponibilidade
+    # (ficha, app e central).
+    "cpf": "CPF",
+    "rg_number": "RG",
+    "rg_issuer": "Órgão emissor",
+    "rg_state": "UF do RG",
+    "phone_secondary": "Telefone secundário",
+    "address_number": "Número",
+    "address_complement": "Complemento",
+    "bio": "Mini biografia",
+    "company_name": "Razão social",
+    "company_trade_name": "Nome fantasia",
+    "vehicle_model": "Modelo do veículo",
+    "vehicle_plate": "Placa",
+    "unavailability": "Indisponibilidade",
+    # Formas de recebimento (app) e a situação na operação (central).
+    "kind": "Tipo",
+    "pix_key_type": "Tipo da chave",
+    "pix_key": "Chave PIX",
+    "holder_document": "CPF ou CNPJ do titular",
+    "bank_code": "Código do banco",
+    "bank_name": "Banco",
+    "branch": "Agência",
+    "account_number": "Conta",
+    "account_digit": "Dígito",
+    "account_type": "Tipo de conta",
+    "status": "Situação",
+    "reason": "Motivo",
+    # Links por e-mail (validar o e-mail, nova senha).
+    "token": "Link",
 }
 
 
@@ -431,6 +482,13 @@ async def _schedule_conflict(_: Request, exc: ScheduleConflict) -> JSONResponse:
     return _error(409, str(exc), code="SCHEDULE_CONFLICT", conflicts=exc.conflicts)
 
 
+@app.exception_handler(CodedError)
+async def _coded_error(_: Request, exc: CodedError) -> JSONResponse:
+    """Erro de regra com código (link vencido, e-mail em uso, envio de e-mail desligado, CEP, forma
+    de recebimento...): o status dele e {"detail", "code"}."""
+    return _error(exc.status_code, str(exc), code=exc.code)
+
+
 @app.exception_handler(OfferError)
 async def _offer_error(_: Request, exc: OfferError) -> JSONResponse:
     """Oferta de OS: 409 (outro técnico aceitou, prazo vencido, cancelada, OS indisponível, já
@@ -465,6 +523,14 @@ CONSTRAINT_MESSAGES: dict[str, str] = {
     # mesmo nome com outra grafia (acento, maiúsculas); o índice único fica de reserva para o nome
     # exato.
     "uq_tool_catalog_name": "Já existe uma ferramenta com este nome",
+    # Cadastro V2: o CPF é único entre os usuários; formas de recebimento (o serviço trava o técnico
+    # e recusa antes; os índices ficam de reserva para a gravação simultânea).
+    "uq_users_cpf": "Este CPF já está em outro cadastro",
+    "uq_technician_payout_methods_preferred": (
+        "Só uma forma de recebimento pode ser a preferencial. Atualize a lista"
+    ),
+    "uq_technician_payout_methods_pix": "Esta chave PIX já está na lista",
+    "uq_technician_payout_methods_bank": "Esta conta já está na lista",
 }
 CONFLICT = "Conflito de dados: registro duplicado ou referência inválida"
 
