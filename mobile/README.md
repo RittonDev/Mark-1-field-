@@ -614,7 +614,7 @@ O elo do técnico aparece como uma medalha, a patente ([src/components/LevelBadg
 
 **Perfil › Configurações** ([src/app/configuracoes/index.tsx](src/app/configuracoes/index.tsx)): o cadastro do técnico
 em quatro grupos, cada linha com o resumo à direita (o rótulo fica com a largura dele, até metade da linha, quebrando
-entre palavras, e o resumo fica com o resto, cortado com "…"; com a fonte do aparelho acima de 1,3×, o resumo desce
+entre palavras, e o resumo fica com o resto, cortado com "…"; com a fonte do aparelho a partir de 1,3×, o resumo desce
 para baixo do rótulo; [src/components/MenuRow.tsx](src/components/MenuRow.tsx), o mesmo da lista do Perfil). Contratos
 em [docs/API.md](../docs/API.md), "Meu cadastro do técnico" e "Perfil técnico". O antigo Meu cadastro foi dividido
 nas telas abaixo; `/meu-cadastro` só redireciona para `/configuracoes` (links antigos).

@@ -156,7 +156,8 @@ describe("availabilitySummary (linha Disponibilidade das Configurações)", () =
 
   it("dias seguidos continuam como antes; turnos diferentes entre os dias: turnos variados", () => {
     assert.equal(availabilitySummary(["sat:afternoon"]), "Sáb · tarde");
-    assert.equal(availabilitySummary(DAYS.map((day) => `${day}:morning`)), "Seg a dom · manhã");
+    assert.equal(availabilitySummary(DAYS.map((day) => `${day}:morning`)), "Todos os dias · manhã");
+    assert.equal(availabilitySummary(DAYS.flatMap((day) => [`${day}:morning`, `${day}:afternoon`])), "Todos os dias · manhã e tarde");
     assert.equal(availabilitySummary(["mon:morning", "wed:afternoon"]), "2 dias · turnos variados");
     assert.equal(availabilitySummary(["mon:morning", "wed:morning", "fri:morning", "fri:afternoon"]), "3 dias · turnos variados");
     assert.equal(availabilitySummary(["mon:morning", "mon:afternoon", "wed:morning", "xyz"]), "2 dias · turnos variados");

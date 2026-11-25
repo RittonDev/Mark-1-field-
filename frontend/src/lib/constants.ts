@@ -398,8 +398,12 @@ function joinWords(words: readonly string[]): string {
   return words.length > 1 ? `${words.slice(0, -1).join(", ")} e ${words[words.length - 1]}` : (words[0] ?? "");
 }
 
-/** Os dias, na ordem: "seg a sex", "sáb e dom", "seg, qua e sex", "seg a qua e sex" (três ou mais seguidos: "a"). */
+/**
+ * Os dias, na ordem: "seg a sex", "sáb e dom", "seg, qua e sex", "seg a qua e sex" (três ou mais seguidos: "a"); os
+ * sete: "todos os dias".
+ */
 function weekdaysText(days: readonly Weekday[]): string {
+  if (WEEKDAY_ORDER.every((day) => days.includes(day))) return "todos os dias";
   const runs: number[][] = [];
   WEEKDAY_ORDER.forEach((day, i) => {
     if (!days.includes(day)) return;

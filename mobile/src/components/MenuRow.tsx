@@ -39,7 +39,10 @@ export interface MenuRowProps {
 /** Da margem esquerda ao texto: padding 16 + ícone 20 + espaço 12 (onde começa o traço entre as linhas). */
 const TEXT_INSET = 48;
 
-/** Com a fonte do aparelho acima disto, o resumo desce para baixo do rótulo: os dois numa linha só não cabem. */
+/**
+ * Com a fonte do aparelho a partir disto (o "Grande" do Android é 1,3), o resumo desce para baixo do rótulo: os dois
+ * numa linha só não cabem.
+ */
 const STACK_FONT_SCALE = 1.3;
 
 const pillText = (n: number) => (n > 99 ? "99+" : String(n));
@@ -74,7 +77,7 @@ export function MenuRow({
   const inactive = disabled || loading;
   // O resumo em texto (o `trailing` fica sempre à direita): com a fonte grande, desce para baixo do rótulo.
   const textValue = trailing ? null : shownValue;
-  const stacked = textValue !== null && fontScale > STACK_FONT_SCALE;
+  const stacked = textValue !== null && fontScale >= STACK_FONT_SCALE;
   const labelText = (
     <Text
       style={[styles.label, stacked ? null : textValue ? styles.labelFirst : styles.labelFill, danger && { color: c.danger }]}

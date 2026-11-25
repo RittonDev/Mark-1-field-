@@ -31,10 +31,10 @@ PNG_1PX = (
 
 def ficha(**extra: object) -> dict:
     return {
-        "full_name": "  Marcos   Pereira da Silva ",
-        "email": "Marcos.Tecnico@Gmail.com",
+        "full_name": "  Tecnico   Alfa da Silva ",
+        "email": "Ficha.Tecnico@Exemplo.com",
         "phone": "(11) 98888-7777",
-        "document": "529.982.247-25",
+        "document": "111.444.777-35",
         "city": "Guarulhos",
         "state": "sp",
         "years_experience": 6,
@@ -62,7 +62,7 @@ async def test_invite_form_and_approval(
     client: AsyncClient, world: World, engine: AsyncEngine
 ) -> None:
     an = world.analyst.headers
-    token = await new_invite(client, world, label="Marcos (indicação)")
+    token = await new_invite(client, world, label="Tecnico Alfa (indicação)")
     assert (await client.get(f"{API}/public/onboarding/{token}")).json()["valid"] is True
     catalog = (await client.get(f"{API}/public/onboarding/catalog")).json()
     assert {"cftv", "impressoras"} <= {a["key"] for a in catalog["service_areas"]}
@@ -86,7 +86,7 @@ async def test_invite_form_and_approval(
     # Mesmo e-mail com ficha pendente, por outro link: recusado.
     other = await new_invite(client, world, reusable=True, days_valid=30)
     dup = await client.post(
-        f"{API}/public/onboarding/{other}", json=ficha(email="marcos.tecnico@gmail.com")
+        f"{API}/public/onboarding/{other}", json=ficha(email="ficha.tecnico@exemplo.com")
     )
     assert dup.status_code == 422
 
@@ -103,13 +103,13 @@ async def test_invite_form_and_approval(
         await client.get(f"{API}/onboarding/applications/pending-count", headers=an)
     ).json() == {"pending": 1}
     detail = (await client.get(f"{API}/onboarding/applications/{app_id}", headers=an)).json()
-    assert detail["full_name"] == "Marcos Pereira da Silva"
+    assert detail["full_name"] == "Tecnico Alfa da Silva"
     assert (detail["email"], detail["state"], detail["document"]) == (
-        "marcos.tecnico@gmail.com",
+        "ficha.tecnico@exemplo.com",
         "SP",
-        "52998224725",
+        "11144477735",
     )
-    assert detail["invite_label"] == "Marcos (indicação)"
+    assert detail["invite_label"] == "Tecnico Alfa (indicação)"
     # A ficha guarda a versão do aviso que o formulário mostrou.
     assert detail["privacy_version"] == catalog["privacy_version"] == PRIVACY_VERSION
     assert "password" not in str(detail)
@@ -131,7 +131,7 @@ async def test_invite_form_and_approval(
     login = await client.post(
         f"{API}/auth/login",
         json={
-            "email": "marcos.tecnico@gmail.com",
+            "email": "ficha.tecnico@exemplo.com",
             "password": "minha-senha-forte",
             "channel": "mobile",
         },
