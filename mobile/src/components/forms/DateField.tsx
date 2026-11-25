@@ -44,7 +44,7 @@ export function DateField({
   const [iosOpen, setIosOpen] = useState(false);
   const today = toIso(new Date());
   const first = isDay(min) ? min : undefined;
-  // Limites trocados derrubariam o seletor (ele exige min <= max): fica só o primeiro dia.
+  // Limites trocados (max antes de min) derrubariam o seletor, que exige min <= max: aí vale só o `min`.
   const last = isDay(max) && !(first && max < first) ? max : undefined;
   // O seletor abre no dia do campo (vazio: `initial` ou hoje), puxado para dentro dos limites.
   let opensAt = isDay(value) ? value : isDay(initial) ? initial : today;

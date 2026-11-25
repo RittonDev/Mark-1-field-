@@ -3,16 +3,20 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BadgeCheck,
+  Building2,
   Car,
   CheckCircle2,
   CopyPlus,
   Eye,
   IdCard,
+  KeyRound,
   Link2,
   Mail,
+  MailCheck,
   MapPin,
   MessageCircle,
   Phone,
+  RotateCcw,
   Search,
   Send,
   ShieldCheck,
@@ -31,6 +35,7 @@ import { MultiSelect } from "@/components/MultiSelect";
 import { Tabs } from "@/components/motion";
 import { NoAccess } from "@/components/NoAccess";
 import { fold, replaceSearch } from "@/components/operacao/hooks";
+import { TempPasswordPanel } from "@/components/technicians/GrantAccessDialog";
 import {
   InviteDialog,
   type InvitePreset,
@@ -61,18 +66,23 @@ import {
 import { useNow } from "@/components/useNow";
 import { absoluteApiUrl, api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { isManager } from "@/lib/constants";
+import { formatPlate, isManager, isSendableEmail } from "@/lib/constants";
 import { formatDate, formatDateTime, formatDocument, initials } from "@/lib/format";
 import { labelMap, useOnboardingCatalog } from "@/lib/onboarding";
 import { useCan } from "@/lib/permissions";
-import { useTeams } from "@/lib/queries";
+import { useMailEnabled } from "@/lib/queries";
+import { REVIEW_ACTION_LABEL, technicianHref } from "@/lib/technicians";
 import type {
+  ApplicationApproved,
   ApplicationDetail,
+  ApplicationReview,
   ApplicationStatus,
   ApplicationSummary,
+  EmailQueued,
   InviteState,
   OnboardingInvite,
   TechnicianRegion,
+  TemporaryPassword,
   User,
 } from "@/lib/types";
 import { whatsappUrl } from "@/lib/whatsapp";
@@ -109,6 +119,11 @@ const WAITING_DAYS_ALERT = 7;
 
 const firstName = (name: string) => name.trim().split(/\s+/)[0];
 const years = (n: number) => `${n} ${n === 1 ? "ano" : "anos"}`;
+/** Desde quando a ficha espera análise: a reaberta conta da reabertura (como a exclusão automática). */
+const waitingSince = (a: ApplicationSummary) => a.reopened_at ?? a.created_at;
+
+/** Motivo de reabrir: de 3 a 500 caracteres (o mesmo da API). */
+const REOPEN_MAX = 500;
 
 export default function OnboardingPage() {
   // A ficha pode chegar aberta pela URL (?ficha=, ex.: "Ver ficha da homologação" no cadastro do técnico).
@@ -162,9 +177,9 @@ function OnboardingView() {
         (!areaFilter.length || areaFilter.some((k) => a.service_areas.includes(k))) &&
         (!withVehicle || a.has_vehicle),
     );
-    // Pendentes: quem chegou primeiro é analisado primeiro. Analisadas: as mais recentes em cima.
+    // Pendentes: quem espera há mais tempo é analisado primeiro. Analisadas: as mais recentes em cima.
     return tab === "pending"
-      ? list.sort((a, b) => a.created_at.localeCompare(b.created_at))
+      ? list.sort((a, b) => waitingSince(a).localeCompare(waitingSince(b)))
       : list.sort((a, b) => (b.reviewed_at ?? b.created_at).localeCompare(a.reviewed_at ?? a.created_at));
   }, [all, q, uf, areaFilter, withVehicle, tab]);
   const filtering = !!(q.trim() || uf || areaFilter.length || withVehicle);
@@ -292,7 +307,7 @@ function OnboardingView() {
                 </thead>
                 <tbody>
                   {rows.map((a) => {
-                    const waitingDays = Math.floor((now - new Date(a.created_at).getTime()) / 86_400_000);
+                    const waitingDays = Math.floor((now - new Date(waitingSince(a)).getTime()) / 86_400_000);
                     return (
                       <tr
                         key={a.id}
@@ -307,8 +322,25 @@ function OnboardingView() {
                               {initials(a.full_name)}
                             </span>
                             <span className="min-w-0">
-                              <span className="block truncate font-semibold text-ink">{a.full_name}</span>
-                              <span className="block truncate text-xs text-ink-muted">{a.email}</span>
+                              <span className="flex min-w-0 items-center gap-1.5">
+                                <span className="truncate font-semibold text-ink">{a.full_name}</span>
+                                {a.status === "pending" && a.reopened_at ? (
+                                  <span title={`Reaberta em ${formatDateTime(a.reopened_at)}`} className="inline-flex shrink-0">
+                                    <Pill color={NEUTRAL}>Reaberta</Pill>
+                                  </span>
+                                ) : null}
+                              </span>
+                              <span className="flex min-w-0 items-center gap-1 text-xs text-ink-muted">
+                                <span className="truncate">{a.email}</span>
+                                {/* Sem o campo (API antiga), nada: não dá para dizer se validou. */}
+                                {a.email_verified_at ? (
+                                  <span role="img" aria-label="E-mail validado" title="E-mail validado" className="inline-flex shrink-0">
+                                    <MailCheck aria-hidden className="size-3.5 text-ink-muted" />
+                                  </span>
+                                ) : a.email_verified_at === null ? (
+                                  <span className="shrink-0">· e-mail pendente</span>
+                                ) : null}
+                              </span>
                             </span>
                           </span>
                         </Td>

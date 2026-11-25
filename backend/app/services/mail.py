@@ -294,7 +294,9 @@ async def deliver_pending(
 ) -> int:
     """Vence os atrasados (mesmo sem envio configurado) e manda os pendentes, um por transação (com
     commit), até `limit`; com `ids`, só esses. Várias instâncias da API não pegam a mesma linha
-    (FOR UPDATE SKIP LOCKED). Devolve quantos saíram."""
+    (FOR UPDATE SKIP LOCKED). Só faz commit (nunca rollback): numa sessão com
+    expire_on_commit=False, como a da API e a dos testes, os objetos de quem chamou continuam
+    carregados. Devolve quantos saíram."""
     now = utcnow()
     await db.execute(
         update(EmailOutbox)
@@ -322,7 +324,7 @@ async def deliver_pending(
             .with_for_update(skip_locked=True)
         )
         if row_id is None:
-            await db.rollback()
+            await db.commit()  # só a consulta: nada a gravar
             break
         row = await db.get(EmailOutbox, row_id, populate_existing=True)
         if row is not None and await _deliver_one(db, provider, row):
