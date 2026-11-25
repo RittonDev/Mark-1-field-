@@ -913,8 +913,8 @@ WebSocket /api/v1/ws?token= ── evento ticket.* ──► nova rodada de sync
   primeiro plano, cada ação, cada evento do WebSocket, puxar a lista para baixo e um intervalo de 90 s; com o
   app fora da tela, a jornada e a tarefa periódica do sistema, só num app instalado (seção Notificações).
 - Todas as escritas no SQLite passam por uma fila de transações exclusivas em JS.
-- OS fechadas/canceladas há mais de 30 dias e sem pendências saem do aparelho (as concluídas continuam no Histórico de
-  atendimentos, que vem da central).
+- OS fechadas/canceladas há mais de 30 dias e sem pendências saem do aparelho no fim do pull (as concluídas continuam no
+  Histórico de atendimentos, que vem da central), menos a que está aberta na tela (`holdTicket`, só na memória).
 - Fora do pull e da fila: o elo, as Estatísticas, o Histórico e o Faturamento são só leitura, guardados no kv com a hora
   ([docs/MOBILE_SYNC.md](../docs/MOBILE_SYNC.md) §2); o cadastro e o perfil técnico são só online e ficam na memória
   (§1); a resposta à oferta e a nota fiscal são só online (§3).
@@ -957,7 +957,7 @@ src/
     Offers.tsx         "Ofertas para você" em Hoje e os blocos da tela da oferta (duração e data, área, serviços)
     offer/OfferHero.tsx  topo da oferta: o desenho de mapa da área com o chip bairro · cidade
     RoundBackButton.tsx  voltar redondo das telas sem o cabeçalho nativo (a oferta)
-    billing/           aba Faturamento: BillingView (a aba), BillingTotals, PixRow, BillingMonthCard, StateIcon, SituationBox, MonthEarnings (o mês) e HideValuesButton (o olho)
+    billing/           aba Faturamento: BillingView (a aba), BillingTotals, PixRow, BillingMonthCard, StateIcon, SituationBox, OtherMonth ("Outro mês"), MonthEarnings (o mês) e HideValuesButton (o olho)
     settings/          peças de Configurações: ChoiceChips, CheckCard, Checkbox, DayCard, SkillSheet, EducationSheet, MonthField, FormSheet, FixedFooter, OfflineNotice, ProfileGate, ProfileFormScreen, PasswordSheet e SavingStatus
   theme/theme.ts       paleta Maxx Field, claro/escuro, preferência do técnico (viz1 e vizGrid: os gráficos)
   theme/fonts.ts       Manrope (pesos 400–700) e o mapeamento de fontWeight para a família
@@ -967,7 +967,7 @@ src/
     profile.ts         o cadastro só na memória (GET/PATCH /me/profile, com o perfil técnico), as gravações em fila e a foto reduzida no aparelho (expo-image-manipulator)
     profileForm.ts useProfileForm.ts  telas do cadastro em Configurações: as regras e os resumos (puro, com sonda) e o estado do formulário
     avatarFlow.ts      Foto do perfil: tirar, escolher, remover, o andamento e a recuperação no Android
-    technicalProfile.ts  perfil técnico: o estado das telas de Atendimento e os catálogos na memória (ferramental e sugestões de aptidão)
+    technicalProfile.ts  perfil técnico: o estado das telas de Atendimento, a trava das listas (Aptidões e Formação) e os catálogos na memória (ferramental e sugestões de aptidão)
     techProfileForm.ts  regras do perfil técnico e o redutor do salvar ao tocar (puro, com sonda)
     autoSave.ts        salvar ao tocar de Disponibilidade, Transporte e Ferramental (0,6 s, um envio por vez)
     logout.ts          o Sair do Perfil: confirmação, "Enviar e sair" e o andamento
@@ -977,7 +977,7 @@ src/
     stats.ts           Estatísticas: /me/stats guardado (kv my_stats) e a busca
     history.ts historySections.ts  Histórico: /me/history (primeira página no kv my_history) e as seções por mês (puro, com sonda)
     monthBars.ts       contas do gráfico das Estatísticas (puro, com sonda)
-    earnings.ts        Faturamento: os meses (kv earnings:months) e o mês (kv earnings:AAAA-MM)
+    earnings.ts        Faturamento: os meses (kv earnings:months), o mês (kv earnings:AAAA-MM) e o primeiro mês aceito (FIRST_MONTH, 2000-01)
     hideValues.ts      "ocultar valores" do Faturamento, por aparelho (SecureStore mc_hide_values)
     privacySeen.ts     versão do aviso de privacidade vista por técnico (Keychain/Keystore), lida na abertura e no login
     pix.ts masks.ts    chave PIX por tipo (regras e mensagens de backend/app/core/pix.py) e máscaras de CPF, CNPJ, CEP e celular
@@ -985,7 +985,7 @@ src/
     syncTypes.ts       contrato de /sync/pull e /sync/push
     api.ts session.ts  HTTP com refresh + tokens e o fim de sessão pendente no SecureStore
     sessionEnd.ts      fim de sessão (Sair, expirada, acesso desativado ou retirado): limpeza com ou sem tela; carregado pelo index.ts
-    db.ts              schema SQLite e consultas
+    db.ts              schema SQLite e consultas; a limpeza do fim do pull (pruneOld) e a OS segura na tela (holdTicket)
     ops.ts             aplicação otimista e rebase; user_can_transition e allowed_transitions iguais ao backend
     field.ts           promessa de campo: relógios de chegada e de loja, rótulos de peças
     notifications.ts   notificações: handler, canais, permissão, toque, alertas locais, novidades fora da tela e os avisos guardados sem permissão
@@ -1023,9 +1023,14 @@ npx expo export --platform android
 ```
 
 As **sondas** (`tests/*.test.mjs`) testam as regras puras com o `node:test` (Node 22.6 ou mais, que tira os tipos do
-TypeScript): a chave PIX, as telas do cadastro, o perfil técnico e o salvar ao tocar, o gráfico das Estatísticas, as
-seções do Histórico e as datas e a área da oferta. O módulo testado não importa React nem React Native (só `import
-type`), e o gancho `tests/resolve-ts.mjs` resolve os imports relativos sem extensão (`./masks` → `./masks.ts`):
+TypeScript): a chave PIX, as telas do cadastro, o perfil técnico e o salvar ao tocar, o gráfico das Estatísticas (com
+as caixas do eixo), as seções do Histórico e as datas e a área da oferta. O módulo testado não importa React nem React
+Native (só `import type`), e o gancho `tests/resolve-ts.mjs` resolve os imports relativos sem extensão (`./masks` →
+`./masks.ts`). Duas fogem disso: `ticket-hold.test.mjs` roda o `db.ts` de verdade (a OS segura na tela e o
+`pruneOld`) sobre o `node:sqlite` (Node 22.13 ou mais), com dublês de `expo-sqlite`, `react-native`, `./changes` e
+`./ops` registrados nela mesma; e `billing-offer.test.mjs` lê o código das telas do Faturamento e da oferta (que
+importam o React Native) e confere as regras que não podem voltar (o mês com nota, o Outro mês, a nota noutra
+competência, o selo que desce e o foco do leitor de tela no voltar):
 
 ```bash
 node --experimental-strip-types --import ./tests/resolve-ts.mjs --test "tests/*.test.mjs"
@@ -1071,11 +1076,15 @@ docker start -a mc-mobile-check
   mais; no iOS, rara). Com o app fechado à força pelo técnico, ou no iPhone fora da jornada, OS nova e oferta só
   aparecem quando o app abre. Avisar na hora exige o push real (FCM, ver Push acima), ainda desligado. Um lembrete de
   uma OS mudada enquanto o aparelho não sincronizou ainda sai com o horário antigo.
-- **A API sobe antes do app.** O perfil técnico, o ferramental, as Estatísticas, o Histórico e os meses do
-  Faturamento precisam da API nova. Com a antiga, o app novo mostra "Indisponível no momento" nas telas de Atendimento
-  (e "Indisponível" nas linhas de Configurações), as mensagens de servidor antigo nas Estatísticas e no Histórico, "—"
-  no total do Perfil e "Não foi possível carregar o faturamento." na aba Faturamento. A API nova com o app antigo
-  funciona.
+- **A API sobe antes do app.** A API desta entrega está publicada desde 20/11/2026. O perfil técnico, o ferramental,
+  as Estatísticas, o Histórico e os meses do Faturamento precisam dela. Com uma API anterior, o app novo mostra
+  "Indisponível no momento" nas telas de Atendimento (e "Indisponível" nas linhas de Configurações), as mensagens de
+  servidor antigo nas Estatísticas e no Histórico, "—" no total do Perfil e "Não foi possível carregar o faturamento."
+  na aba Faturamento. Ali, o mês (`GET /me/earnings?month=`, que a API anterior tem) abre pelo **Outro mês** (ou por um
+  cartão) só com os meses guardados de uma busca anterior que deu certo; sem nada guardado, a aba fica sem cartões e
+  sem o Outro mês, e o mês e o "Enviar nota fiscal" ficam fora de alcance. A API publicada em 20/11/2026 ainda não
+  manda o `invoices` dos meses: o mês sem valores e com nota fica sem cartão e abre pelo Outro mês. A API nova com o app
+  antigo funciona.
 - Rótulos e transições vêm das constantes copiadas da web, não de `GET /meta`; as ações exibidas vêm de
   `allowed_transitions` do servidor (recalculadas no aparelho só depois de uma ação offline).
 - Sem assinatura do cliente, edição dos dados da OS (`update`) ou abertura de OS pelo app.
