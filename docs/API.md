@@ -1776,7 +1776,7 @@ itens e o catálogo), `schemas/my_profile.py` (as listas inteiras), `services/my
 |---|---|---|
 | `tool_ids` (ids de `GET /technician-tools`, até 200) | repetidos contam uma vez; id **desativado** é ignorado; os desativados já gravados ficam guardados (voltam se a central reativar) | o conjunto final (os enviados ativos mais os guardados desativados) é outro |
 | `availability` (até 28) | sem repetir, na ordem da grade | o conjunto é outro; `[]` sem a parte informada não muda nada |
-| `transport` (`{modes, driver_license}`, até 6 meios) | meios sem repetir, na ordem da lista | a parte nunca foi informada, ou (meios, CNH) mudou. `{modes: [], driver_license: false}` na 1ª vez é informação ("Nenhum · sem CNH") |
+| `transport` (`{modes, driver_license}`, até 6 meios) | meios sem repetir, na ordem da lista | a parte nunca foi informada, ou (meios, CNH) mudou. `{modes: [], driver_license: false}` na 1ª vez é informação ("Nenhum · sem CNH"; no app, o "Nenhum" no fim dos meios) |
 | `skills` (`[{name, level}]`, até 30) | nome limpo; o servidor põe o `since`: o de uma aptidão gravada com o mesmo nome (sem acento e sem maiúsculas) fica, e a nova ganha hoje (dia de Brasília) | o conjunto de (nome, nível) é outro: trocar só a grafia ("linux" → "Linux") grava, e o "desde" fica |
 | `education` (`[{id?, course, level, institution, start, end?}]`, até 20) | textos limpos; `end` vazio = null; item com o `id` de um curso gravado mantém o id; sem `id` (ou com um desconhecido), reaproveita o id de um gravado igual (curso, nível, instituição, início e fim) que nenhum outro item citou, senão ganha um novo | o conjunto de (id, curso, nível, instituição, início, fim) é outro |
 
@@ -1890,8 +1890,9 @@ quando o histórico tem mudança, e uma comparação diferente devolveria 200 se
 - A aprovação da ficha não grava histórico. Na web: "Ferramental: incluiu Escada, Multímetro" e "Ferramental: tirou
   Furadeira" (uma linha cada); "Transporte: não informado → Carro, Moto · com CNH". Rótulos: Ferramental,
   Disponibilidade, Transporte, Aptidões e Formação (`USER_CHANGE_LABEL`).
-- Cada envio do salvar ao tocar é uma linha (os toques de 0,6 s vão juntos), e o histórico cresce rápido: a central lê
-  todas as páginas pelo `before` (ver "Central" em [Meu cadastro do técnico](#meu-cadastro-do-técnico-2026-11-18)).
+- Cada envio do salvar ao tocar é uma linha (os toques de 0,6 s vão juntos), e o histórico cresce rápido: a central
+  chega até a primeira linha pelo `before`, no "Ver mais" da aba Histórico (ver "Central" em
+  [Meu cadastro do técnico](#meu-cadastro-do-técnico-2026-11-18)).
 
 **Tempo real.** O `profile.changed` de sempre (só para quem tem Técnicos ou Pagamentos), com as partes em `data.fields`
 (`"tools"`, `"availability"`, `"transport"`, `"skills"`, `"education"`) e `via: "app"`. **Sem aviso no sino** para
@@ -2063,8 +2064,11 @@ quando a central registra) e a reabertura de OS resolvida ou fechada (`status_ch
 
 **Na central (web).** A ocorrência de OS de outra fila (`ticket.hidden`) aparece como "OS de outra fila", sem link e sem
 Desconsiderar ou Voltar a contar; a desconsiderada mostra só quem e quando. O motivo de Desconsiderar digitado e não
-enviado põe o ponto âmbar na aba Elo da ficha; fechar a ficha e o Salvar (que grava o Cadastro e fecha) perguntam antes
-"Descartar o motivo não enviado?", e "Voltar" fica na aba Elo, sem salvar. O cadastro do técnico relê
+enviado põe o ponto âmbar na aba Elo da ficha (para o leitor de tela, "motivo não enviado"). Fechar a ficha (X, Esc ou
+clique fora) pergunta antes, como com o Cadastro alterado ("Há alterações não salvas."). O Salvar (que grava o
+Cadastro e fecha) mostra a aba Elo e pergunta "Descartar o motivo não enviado?" ("O cadastro é salvo e a ocorrência
+continua contando no elo."; sem mudança no Cadastro, só "A ocorrência continua contando no elo."): "Voltar" fica na aba
+Elo, sem salvar; "Descartar" segue com o Salvar. O cadastro do técnico relê
 `GET /technicians/{id}/level` em evento de OS só quando o técnico é o responsável (`assignee_id`) ou entrou na visita
 (`data.added_ids`). Não relê em comentário, anexo, apontamento, decisão de pedido de peça, nem em `ticket.updated` só de
 `forms`, `signature`, `expenses`, `part_requests`, `payouts`, `quotes`, `offers`, `repairs` ou `tags`. Fora isso, relê ao
@@ -2169,7 +2173,9 @@ total, months}`:
   índice parcial `(assignee_id, resolved_at DESC)` nas concluídas.
 - O app guarda as duas (kv `my_stats` e a primeira página em `my_history`, com a hora e o técnico) e busca fora da
   rodada de sincronização: ver `docs/MOBILE_SYNC.md`. Servidor sem estas rotas (404): o app mostra "O servidor ainda
-  não tem as estatísticas. Tente de novo mais tarde." (ou "… o histórico …").
+  não tem as estatísticas. Tente de novo mais tarde." (ou "… o histórico …"). A OS do Histórico que não está no
+  aparelho abre pela tela da OS, que a busca na central; enquanto a tela está aberta, a limpeza do fim do pull não a
+  apaga, mesmo fechada há mais de 30 dias (`docs/MOBILE_SYNC.md` §2).
 
 **Privacidade (LGPD).** São dados do próprio técnico: só ele e a gestão com Técnicos veem; o cliente e o portal nunca. O
 histórico traz só o recorte de campo, e a central vê só contagens.
