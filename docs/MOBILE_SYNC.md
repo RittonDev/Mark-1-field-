@@ -112,7 +112,7 @@ mostra uma mensagem própria.
   seção do docs/API.md; kv `my_history`, só a primeira página): fora da rodada. A tela busca a primeira página ao abrir
   (se a guardada tem 2 min ou mais) e ao puxar, e as outras ao rolar; sem rede no fim da lista, segue quando a conexão
   volta. A OS tocada que não está no aparelho abre pela tela da OS, que sincroniza e, se ainda faltar, busca a OS na
-  central (`GET /tickets/{id}`) e grava no aparelho; com a tela aberta, o pull não a apaga (§2).
+  central (`GET /tickets/{id}`) e grava no aparelho; com a tela aberta, a limpeza do fim do pull não a apaga (acima).
 - **Faturamento** (docs/API.md "Valor por chamado" e "Faturamento do app"): os meses,
   `GET /me/earnings/months?months=12` (os totais e a situação de cada mês; kv `earnings:months`), e o mês,
   `GET /me/earnings?month=AAAA-MM` (kv `earnings:AAAA-MM`), com as notas do mês, `GET /me/invoices?month=AAAA-MM` (kv

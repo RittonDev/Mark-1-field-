@@ -1702,8 +1702,10 @@ itens e o catálogo), `schemas/my_profile.py` (as listas inteiras), `services/my
 - Backfill: os técnicos com ficha aprovada recebem a disponibilidade, o transporte e as aptidões da ficha, via "ficha"
   (o mapa de "Aprovação da ficha", abaixo, copiado na migração; `tests/test_tech_profile.py` confere a cópia). Só
   preenche quem ainda tem `tech_profile_stamps` vazio: rodar de novo não muda nada. Disponibilidade ou aptidões da
-  ficha que não são lista (um texto JSON, um objeto, null) viram nada, como na aprovação. O downgrade apaga o perfil
-  técnico e o catálogo.
+  ficha que não são lista (um texto JSON, um objeto, null) viram nada, como na aprovação (a migração lê o JSONB da
+  ficha como texto, `::text`, e decodifica), e os nomes saem limpos como no serviço. O downgrade apaga o perfil técnico
+  e o catálogo. O arquivo mudou depois de rodar em produção (20/11/2026) só nisso, no backfill e nas docstrings, sem
+  schema: um banco que já está em `f5a7c9e1b3d6` não roda a migração de novo.
 - Sem índice novo: os filtros varrem só os técnicos (GIN em `tool_ids`/`availability` se a base passar de dezenas de
   milhares de técnicos). As colunas JSONB se gravam sempre com objetos novos (`user.skills = [...]`): mudar a lista
   no lugar não grava.
@@ -1934,7 +1936,12 @@ ficha mostram erro). O app sobe depois da API: `MyProfileUpdate` recusa campo de
 receberia 422 "Campo não aceito"; nas telas, ele trata o servidor antigo ("Indisponível no momento" / "O servidor
 ainda não tem esta parte do cadastro. Tente de novo mais tarde."). A API nova com o app velho funciona. Publicado
 noutro dia que não 19/11/2026, a versão do aviso vira a data do dia ("AAAA-MM-DD"), nos três lugares, no mesmo dia.
-Subiu em 20/11/2026 (a versão do aviso é "2026-11-20").
+Subiu em 20/11/2026 (a versão do aviso é "2026-11-20"). As correções que vieram depois são só código, sem migração: o
+`before` do histórico do cadastro, o `invoices` dos meses do Faturamento, o cursor "fora da faixa" do `/me/history`,
+as travas do `PATCH /me/profile` e do catálogo, o 422 dos erros do banco da classe 22, os limites por item e a limpeza
+dos invisíveis. A web e o app novos funcionam com a API de 20/11/2026 (sem o `before`, a ficha mostra as 50 linhas
+mais novas do histórico; sem o `invoices`, o mês sem valores fica sem cartão e abre pelo "Outro mês"), e a API nova
+funciona com a web e o app de antes (o campo novo é ignorado; o parâmetro novo é opcional).
 
 **Privacidade (LGPD).** Só o próprio técnico e a gestão com Técnicos veem o perfil técnico (o aviso `profile.changed`
 vai também a quem tem Pagamentos, só com os nomes das partes); o cliente, o portal e os outros técnicos nunca. O aviso
