@@ -2611,7 +2611,7 @@ export interface UserChange {
    */
   via: UserChangeVia;
   actor: Ref | null;
-  /** O motivo (situação na operação); null nas outras. */
+  /** O motivo da mudança (a situação na operação pede um); null sem motivo. */
   note: string | null;
   changes: UserChangeItem[];
 }
