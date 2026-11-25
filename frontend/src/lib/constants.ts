@@ -1102,9 +1102,11 @@ export const LEVEL_OCCURRENCE: Record<LevelOccurrenceKind, string> = {
  * Versão do aviso: a mesma de PRIVACY_VERSION em backend/app/schemas/onboarding.py (a ficha grava a do servidor no
  * aceite). Mudou o texto de PRIVACY_NOTICE? Mude a versão aqui e lá, no mesmo dia, e publique a web antes da API (ou
  * junto): com a API na frente, a ficha da web pede para recarregar e não envia até a web nova entrar. Formato
- * "AAAA-MM-DD"; uma segunda versão no mesmo dia ganha ".2" (as versões se comparam como texto).
+ * "AAAA-MM-DD"; uma segunda versão no mesmo dia ganha ".2" (as versões se comparam como texto). 2026-11-25: RG,
+ * nascimento e CPF no cadastro, veículo, dados da empresa, formas de recebimento, biografia, e-mail validado,
+ * indisponibilidade, situação na operação, e-mails do cadastro e a reabertura da ficha reprovada.
  */
-export const PRIVACY_VERSION = "2026-11-20";
+export const PRIVACY_VERSION = "2026-11-25";
 
 /** A data da versão para mostrar ("20/11/2026"): os 10 primeiros caracteres, sem um ".2". */
 export const PRIVACY_DATE = PRIVACY_VERSION.slice(0, 10).split("-").reverse().join("/");
@@ -1117,15 +1119,23 @@ export const PRIVACY_NOTICE: { title: string; body: string }[] = [
   },
   {
     title: "Quais dados",
-    body: "Os do seu cadastro: identificação (nome, CPF, nascimento e foto), contato, endereço, CNPJ ou MEI (se tiver), região de atendimento, experiência, a senha do app (que ninguém da equipe consegue ver) e a chave PIX que você cadastrar no app para receber pelos chamados. E o seu perfil técnico, informado na ficha ou no app: aptidões, formação (curso, nível, instituição e período), ferramental, meios de transporte e CNH, e os dias e turnos em que você está disponível. E os registros das ofertas de OS no app: quando você vê a oferta, abre o escopo e aceita ou recusa.",
+    body: "Os do seu cadastro: identificação (nome, CPF, RG com órgão emissor e UF, nascimento e foto), contato (celular, telefone secundário e e-mail, com a validação de que o e-mail é seu), endereço, região de atendimento, mini biografia (se escrever), experiência, veículo (modelo e placa, se informar), dados da sua empresa (CNPJ, razão social e nome fantasia, se tiver), as formas de recebimento que você cadastrar no app (chaves PIX e contas bancárias, com o nome e o CPF ou CNPJ do titular) e a senha do app (que ninguém da equipe consegue ver). O seu perfil técnico, informado na ficha ou no app: áreas de atuação, aptidões, formação (curso, nível, instituição e período), ferramental, meios de transporte e CNH, os dias e turnos em que você atende e os períodos em que avisar que está indisponível. E os registros das ofertas de OS no app: quando você vê a oferta, abre o escopo e aceita ou recusa.",
   },
   {
     title: "Para quê",
-    body: "Homologação técnica, cadastro na base de técnicos, distribuição de ordens de serviço (o perfil técnico e a disponibilidade ajudam a central a escolher quem convidar para cada OS), contato sobre os atendimentos e pagamento dos chamados por PIX. Não vendemos nem compartilhamos seus dados para marketing.",
+    body: "Homologação técnica, conferência da sua identidade, cadastro na base de técnicos, distribuição de ordens de serviço (o perfil técnico, a disponibilidade e a indisponibilidade ajudam a central a escolher quem convidar para cada OS), contato sobre os atendimentos e pagamento dos chamados na forma de recebimento que você marcar como preferencial. Não vendemos nem compartilhamos seus dados para marketing.",
+  },
+  {
+    title: "Situação na operação",
+    body: "A equipe registra a sua situação na operação (ativo, inativo ou bloqueado), com o motivo, quem mudou e quando. Só quem está ativo recebe novas OS. A situação, sozinha, não tira o seu acesso ao app. Você pode pedir à central a revisão.",
   },
   {
     title: "Com quem compartilhamos",
-    body: "O cliente atendido vê o seu nome e os horários da visita (saída, chegada e conclusão) no relatório e no portal do atendimento. Os demais dados ficam só com a equipe da Maxx Field.",
+    body: "O cliente atendido vê o seu nome e os horários da visita (saída, chegada e conclusão) no relatório e no portal do atendimento. Prestadores que operam o sistema para a Maxx Field tratam os dados só para isso: hospedagem, envio dos e-mails do cadastro e consulta de CEP (vai só o CEP). No pagamento, a instituição financeira recebe os dados da forma de recebimento. Os demais dados ficam só com a equipe da Maxx Field.",
+  },
+  {
+    title: "E-mails",
+    body: "Usamos o seu e-mail só para mensagens do cadastro: confirmar o endereço, avisar a aprovação e criar uma nova senha. São automáticas e não recebem resposta; a conversa sobre o trabalho continua pelo WhatsApp.",
   },
   {
     title: "Localização (GPS)",
@@ -1141,10 +1151,10 @@ export const PRIVACY_NOTICE: { title: string; body: string }[] = [
   },
   {
     title: "Por quanto tempo",
-    body: "Enquanto você fizer parte da base técnica e pelo prazo exigido em lei. Fichas reprovadas são excluídas após a análise e o prazo legal aplicável.",
+    body: "Enquanto você fizer parte da base técnica e pelo prazo exigido em lei (os dados de pagamento, pelo prazo da legislação fiscal). A ficha reprovada fica guardada por 180 dias contados da última análise: nesse prazo, a equipe pode reabri-la para uma nova análise; depois, ela é excluída com a foto. O registro dos e-mails enviados fica 180 dias.",
   },
   {
     title: "Seus direitos",
-    body: "Você pode pedir acesso, correção, portabilidade ou exclusão dos seus dados e revogar consentimentos a qualquer momento, falando com a equipe da Maxx Field. Se aprovado, você mesmo atualiza o seu perfil técnico no app, em Configurações.",
+    body: "Você pode pedir acesso, correção, portabilidade ou exclusão dos seus dados e revogar consentimentos a qualquer momento, falando com a equipe da Maxx Field. Se aprovado, você mesmo atualiza no app, em Configurações, os seus dados, o perfil técnico e as formas de recebimento (o CPF, depois de informado, só a central corrige).",
   },
 ];
