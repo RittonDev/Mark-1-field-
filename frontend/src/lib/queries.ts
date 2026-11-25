@@ -1,10 +1,11 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { api, ApiError, type Query } from "./api";
+import { api, ApiError, type Query, request } from "./api";
 import type {
   AccessCatalog,
   AccessProfile,
+  ApiMeta,
   AssignableUser,
   CalendarEvent,
   Category,
@@ -31,6 +32,20 @@ const LOOKUP_STALE = 60_000;
 
 // Todas as buscas repassam o `signal` do React Query: a busca que ficou obsoleta (texto digitado mudou,
 // filtro trocado, tela fechada) é cancelada em vez de ocupar a API até o fim.
+
+/**
+ * Envio de e-mail ligado no servidor (GET /meta, público): undefined enquanto carrega (ou se a busca falhou); false sem
+ * SMTP ou com a API antiga, que não manda o campo. Desligado, a central segue pelo WhatsApp e pela senha provisória.
+ */
+export function useMailEnabled(): boolean | undefined {
+  const meta = useQuery({
+    queryKey: ["meta"],
+    queryFn: ({ signal }) => request<ApiMeta>("/meta", { auth: false, signal }),
+    staleTime: 5 * 60_000,
+    select: (data) => data?.mail_enabled === true,
+  });
+  return meta.data;
+}
 
 export function useTeams() {
   return useQuery({
