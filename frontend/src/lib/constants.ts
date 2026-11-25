@@ -328,6 +328,218 @@ export function maskPixKey(type: PixKeyType, key: string): string {
   return `…${key.slice(-4)}`;
 }
 
+// --------------------------------------------------------------------------- cadastro V2 (Entrega 1)
+
+export const OPERATIONAL_STATUS: Record<OperationalStatus, string> = { active: "Ativo", inactive: "Inativo", blocked: "Bloqueado" };
+/** "Acesso ao app" (users.is_active). */
+export const APP_ACCESS = { on: "Liberado", off: "Sem acesso" } as const;
+export const PAYOUT_KIND: Record<PayoutMethodKind, string> = { pix: "Chave PIX", bank: "Conta bancária" };
+export const BANK_ACCOUNT_TYPES: BankAccountType[] = ["checking", "savings", "payment"];
+export const BANK_ACCOUNT_TYPE: Record<BankAccountType, string> = {
+  checking: "Conta corrente",
+  savings: "Conta poupança",
+  payment: "Conta de pagamento",
+};
+export const PAYOUT_LIMITS = { methods: 10, holderName: 160, bankName: 80, accountNumber: 20 } as const;
+
+/** "••••5678-9"; com até 4 números, os 2 últimos ("••34-4"). */
+export function maskAccount(number: string, digit: string | null): string {
+  const tail = number.length > 4 ? `••••${number.slice(-4)}` : `••${number.slice(-2)}`;
+  return digit ? `${tail}-${digit}` : tail;
+}
+
+/** "PIX CPF •••.456.789-••" | "Banco Exemplo ••••5678-9" (= core/payout.describe com "•"). */
+export function payoutMethodText(method: PayoutMethod): string {
+  return method.kind === "pix"
+    ? `PIX ${PIX_KEY_TYPE[method.pix_key_type]} ${maskPixKey(method.pix_key_type, method.pix_key)}`
+    : `${method.bank_name} ${maskAccount(method.account_number, method.account_digit)}`;
+}
+
+/** Para quem paga: "Banco Exemplo (999) · Ag. 0001 · Conta 12345-6 · Conta corrente". */
+export function bankAccountText(method: BankPayoutMethod): string {
+  return `${method.bank_name} (${method.bank_code}) · Ag. ${method.branch} · Conta ${method.account_number}-${method.account_digit} · ${BANK_ACCOUNT_TYPE[method.account_type]}`;
+}
+
+export const PROFILE_LIMITS = {
+  bio: 500,
+  rgNumber: 20,
+  rgIssuer: 20,
+  addressNumber: 10,
+  addressComplement: 60,
+  companyName: 160,
+  vehicleModel: 60,
+} as const;
+export const BIRTH_AGE = { min: 18, max: 90 } as const;
+
+/** Idade completa em `today` (os dois "AAAA-MM-DD"); null com data inválida. */
+export function ageAt(birth: string, today: string): number | null {
+  const b = /^(\d{4})-(\d{2})-(\d{2})$/.exec(birth);
+  const t = /^(\d{4})-(\d{2})-(\d{2})$/.exec(today);
+  if (!b || !t) return null;
+  const [by, bm, bd] = [Number(b[1]), Number(b[2]), Number(b[3])];
+  const real = new Date(Date.UTC(by, bm - 1, bd));
+  if (real.getUTCFullYear() !== by || real.getUTCMonth() !== bm - 1 || real.getUTCDate() !== bd) return null;
+  const [ty, tm, td] = [Number(t[1]), Number(t[2]), Number(t[3])];
+  return ty - by - (tm < bm || (tm === bm && td < bd) ? 1 : 0);
+}
+
+export function normalizePlate(text: string): string {
+  return text.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 7);
+}
+/** Antiga (ABC1234) ou Mercosul (ABC1D23). */
+export function isValidPlate(text: string): boolean {
+  return /^[A-Z]{3}\d[A-Z0-9]\d{2}$/.test(normalizePlate(text));
+}
+/** "ABC-1234" (antiga) | "ABC1D23" (Mercosul). */
+export function formatPlate(plate: string): string {
+  const p = normalizePlate(plate);
+  return /^[A-Z]{3}\d{4}$/.test(p) ? `${p.slice(0, 3)}-${p.slice(3)}` : p;
+}
+export function normalizeRg(text: string): string {
+  return text.toUpperCase().replace(/[^0-9A-Z./ -]/g, "").replace(/\s+/g, " ").slice(0, PROFILE_LIMITS.rgNumber);
+}
+/** 5 a 20 caracteres com pelo menos 4 números. */
+export function isValidRg(text: string): boolean {
+  const rg = normalizeRg(text).trim();
+  return rg.length >= 5 && (rg.match(/\d/g) ?? []).length >= 4;
+}
+/** Letras sem acento e espaço, maiúsculas ("SSP"). */
+export function normalizeIssuer(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z ]/g, "")
+    .replace(/\s+/g, " ")
+    .slice(0, PROFILE_LIMITS.rgIssuer);
+}
+
+/** Recebe e-mail (= mail.sendable): "@", domínio com ponto, não termina em .invalid/.local (importados). */
+export function isSendableEmail(email: string | null | undefined): boolean {
+  const value = (email ?? "").trim().toLowerCase();
+  return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value) && !/\.(invalid|local)$/.test(value);
+}
+
+export const PASSWORD_RESET_HOURS = 2;
+
+export const CEP_TEXT = {
+  searching: "Buscando o CEP…",
+  notFound: "CEP não encontrado.",
+  unavailable: "Busca de CEP indisponível. Preencha o endereço.",
+  invalid: "CEP inválido: use os 8 números.",
+  use: "Usar este endereço",
+} as const;
+
+/** "Praça da Sé, Sé - São Paulo-SP"; CEP geral "Cidade Exemplo-SP" (linha "CEP de {resumo}."). */
+export function cepSummary(address: CepAddress): string {
+  const place = [address.street, address.district].filter(Boolean).join(", ");
+  return `${place ? `${place} - ` : ""}${address.city}-${address.state}`;
+}
+
+export interface CepSlots { street: string; district: string; city: string; state: string }
+
+const cepFold = (text: string) =>
+  text.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim().toUpperCase();
+
+/**
+ * O CEP sobre o formulário (6 lugares): campo livre (vazio, igual ao aberto ou de busca anterior: `auto`) recebe o valor;
+ * o digitado fica e, se difere, `differs` ("CEP de {cepSummary}." + "Usar este endereço"). Logradouro trocado: a tela
+ * esvazia número e complemento livres.
+ */
+export function cepFill(
+  current: CepSlots,
+  opened: CepSlots,
+  auto: ReadonlySet<keyof CepSlots>,
+  found: CepAddress,
+): { next: CepSlots; filled: (keyof CepSlots)[]; differs: boolean } {
+  const values: CepSlots = { street: found.street ?? "", district: found.district ?? "", city: found.city, state: found.state };
+  const next = { ...current };
+  const filled: (keyof CepSlots)[] = [];
+  let differs = false;
+  for (const key of ["street", "district", "city", "state"] as const) {
+    const value = values[key];
+    if (!value) continue;
+    const free = !current[key].trim() || current[key] === opened[key] || auto.has(key);
+    if (free) {
+      if (current[key] !== value) {
+        next[key] = value;
+        filled.push(key);
+      }
+    } else if (cepFold(current[key]) !== cepFold(value)) {
+      differs = true;
+    }
+  }
+  return { next, filled, differs };
+}
+
+export const UNAVAILABILITY_LIMITS = { periods: 10, horizonDays: 365 } as const;
+
+const isoDayText = (iso: string) => iso.slice(0, 10).split("-").reverse().join("/");
+
+/** "20/12/2026 a 05/01/2027"; um dia, "20/12/2026" (= unavailability.period_text). */
+export function periodText(period: { start: string; end: string }): string {
+  return period.start === period.end ? isoDayText(period.start) : `${isoDayText(period.start)} a ${isoDayText(period.end)}`;
+}
+
+/** Chips e avisos (= unavailability.period_short): "até 30/11" (já começou), "em 20/12", "de 20/12 a 05/01/2027". */
+export function periodShort(period: { start: string; end: string }, today: string): string {
+  const short = (iso: string) => {
+    const [y, m, d] = iso.slice(0, 10).split("-");
+    return y === today.slice(0, 4) ? `${d}/${m}` : `${d}/${m}/${y}`;
+  };
+  if (period.start <= today) return `até ${short(period.end)}`;
+  return period.start === period.end ? `em ${short(period.start)}` : `de ${short(period.start)} a ${short(period.end)}`;
+}
+
+/** O período que contém `day`, os dois dias inclusive. */
+export function unavailableOn(periods: readonly UnavailabilityPeriod[] | null | undefined, day: string): UnavailabilityPeriod | null {
+  return (periods ?? []).find((p) => p.start <= day && day <= p.end) ?? null;
+}
+
+/** Grupos e seções com os mesmos nomes na central e no app; `app`: o nome no app quando difere. */
+export const TECH_SECTION_GROUPS: readonly {
+  key: "pessoais" | "financeiros" | "profissional";
+  label: string;
+  sections: readonly { key: TechSectionKey; label: string; app?: string; delivery: 1 | 2 }[];
+}[] = [
+  {
+    key: "pessoais",
+    label: "Dados pessoais e cadastrais",
+    sections: [
+      { key: "foto", label: "Foto do perfil", delivery: 1 },
+      { key: "dados-pessoais", label: "Dados pessoais", delivery: 1 },
+      { key: "endereco", label: "Endereço", delivery: 1 },
+      { key: "contato", label: "Contato", delivery: 1 },
+      { key: "credenciais", label: "Credenciais", app: "Senha", delivery: 1 },
+      { key: "documentos", label: "Documentos", delivery: 2 },
+      { key: "mini-biografia", label: "Mini biografia", delivery: 1 },
+    ],
+  },
+  {
+    key: "financeiros",
+    label: "Dados financeiros e empresariais",
+    sections: [
+      { key: "dados-empresariais", label: "Dados empresariais", delivery: 1 },
+      { key: "recebimento", label: "Formas de recebimento", delivery: 1 },
+    ],
+  },
+  {
+    key: "profissional",
+    label: "Perfil profissional",
+    sections: [
+      { key: "dias-e-horarios", label: "Dias e horários", delivery: 1 },
+      { key: "transporte", label: "Transporte", delivery: 1 },
+      { key: "curriculo", label: "Currículo", delivery: 2 },
+      { key: "formacao", label: "Formação", delivery: 1 },
+      { key: "aptidoes", label: "Aptidões", delivery: 1 },
+      { key: "ferramental", label: "Ferramental", delivery: 1 },
+    ],
+  },
+];
+
+/** A entrega no ar: seções com `delivery` maior ficam fora dos menus (a E2 sobe para 2). */
+export const CADASTRO_DELIVERY = 1;
+
 /** Rótulo de cada campo do histórico do cadastro (GET /technicians/{id}/changes). */
 export const USER_CHANGE_LABEL: Record<UserChangeField, string> = {
   name: "Nome",
@@ -340,7 +552,7 @@ export const USER_CHANGE_LABEL: Record<UserChangeField, string> = {
   home_city: "Cidade",
   home_state: "UF",
   coverage_area: "Região que atende",
-  address_line: "Endereço",
+  address_line: "Logradouro",
   address_district: "Bairro",
   address_zip: "CEP",
   work_schedule: "Jornada",
@@ -354,6 +566,25 @@ export const USER_CHANGE_LABEL: Record<UserChangeField, string> = {
   education: "Formação",
   avatar: "Foto",
   password: "Senha",
+  cpf: "CPF",
+  rg: "RG",
+  birth_date: "Nascimento",
+  phone_secondary: "Telefone secundário",
+  address_number: "Número",
+  address_complement: "Complemento",
+  bio: "Mini biografia",
+  company_document: "CNPJ",
+  company_name: "Razão social",
+  company_trade_name: "Nome fantasia",
+  vehicle: "Veículo",
+  payout_methods: "Formas de recebimento",
+  payout_preferred: "Forma preferencial",
+  operational_status: "Situação",
+  unavailability: "Indisponibilidade",
+  email_pending: "E-mail novo",
+  email_verified: "Validação do e-mail",
+  password_link: "Link para nova senha",
+  application: "Homologação",
 };
 
 // --------------------------------------------------------------------------- perfil técnico (o técnico mantém no app; a central vê)
