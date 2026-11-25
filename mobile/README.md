@@ -627,8 +627,8 @@ nas telas abaixo; `/meu-cadastro` só redireciona para `/configuracoes` (links a
 - **Atendimento** (o perfil técnico): Disponibilidade (`availabilitySummary` em `lib/constants.ts`: os dias com os
   mesmos turnos, seguidos ou não, como "Seg a sex · manhã e tarde", "Seg, qua e sex · manhã" e
   "Seg a qua e sex · manhã"; os 28 turnos, "Todos os dias · todos os turnos"; dias com turnos diferentes,
-  "6 dias · turnos variados"; nada, "Não informada"), Transporte ("Carro, Moto · com CNH", "Nenhum · sem CNH" ou "Não
-  informado"), Aptidões, Formação e Ferramental ("3 aptidões", "1 formação", "Nenhuma"). Com a API antiga,
+  "6 dias · turnos variados"; nada, "Não informada"), Transporte ("Carro, Moto · com CNH", "Nenhum · sem CNH" ou
+  "Não informado"), Aptidões, Formação e Ferramental ("3 aptidões", "1 formação", "Nenhuma"). Com a API antiga,
   "Indisponível".
 - **App**: Aparência (folha com Sistema, "Acompanha o modo do celular", Claro e Escuro), Notificações ("Ligadas",
   "Desligadas", "Bloqueadas" em âmbar ou "Indisponíveis") e Sincronização (o mesmo resumo do Perfil).
