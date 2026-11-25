@@ -419,9 +419,9 @@ describe("aviso de privacidade", () => {
   const body = (title) => C.PRIVACY_NOTICE.find((item) => item.title === title)?.body ?? "";
   const all = C.PRIVACY_NOTICE.map((item) => `${item.title} ${item.body}`).join(" ");
 
-  it("versão do dia da Entrega 1", () => {
-    assert.equal(C.PRIVACY_VERSION, "2026-11-25");
-    assert.equal(C.PRIVACY_DATE, "25/11/2026");
+  it("versão nova, da Entrega 1 (a publicação põe a data do dia, igual no backend)", () => {
+    assert.ok(C.PRIVACY_VERSION >= "2026-11-25", C.PRIVACY_VERSION);
+    assert.equal(C.PRIVACY_DATE, C.PRIVACY_VERSION.slice(0, 10).split("-").reverse().join("/"));
   });
 
   it("as seções, nesta ordem", () => {
