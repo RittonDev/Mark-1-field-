@@ -128,10 +128,7 @@ function TechnicianFicha() {
   const param = searchParams.get("secao");
   // Formas de recebimento pedida sem Pagamentos: o aviso no lugar da seção (o item não está no menu).
   const paymentsDenied = param === "recebimento" && !canPayouts;
-  const section = sectionFromParam(
-    param,
-    groups.flatMap((g) => g.sections.map((s) => s.key)),
-  );
+  const section = sectionFromParam(param, groups.flatMap((g) => g.sections.map((s) => s.key)));
   const shown = paymentsDenied ? "recebimento" : section;
 
   // Trocar de seção leva o foco ao título da seção nova (e a tela até ele, se ficou para cima).

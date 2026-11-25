@@ -144,7 +144,8 @@ export function CredentialsSection({ tech, canEdit }: { tech: Technician; canEdi
       <section className="flex flex-col gap-2">
         <SubTitle>Acesso ao app</SubTitle>
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm font-semibold text-ink">Acesso ao app: {tech.is_active ? APP_ACCESS.on : APP_ACCESS.off}</p>
+          {/* O título do bloco já diz "Acesso ao app": aqui, só "Liberado" ou "Sem acesso". */}
+          <p className="text-sm font-semibold text-ink">{tech.is_active ? APP_ACCESS.on : APP_ACCESS.off}</p>
           {canEdit ? (
             tech.is_active ? (
               <Button
