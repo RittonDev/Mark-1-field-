@@ -204,7 +204,8 @@ Requisitos:
 - **Aviso de privacidade** (detalhes abaixo): o texto da LGPD da homologação, só para leitura, com um cartão em Hoje
   quando o texto muda.
 - **Faturamento** (detalhes abaixo): o total pago e o que falta receber, a chave PIX e um cartão por mês com a situação
-  (sem nota, nota em conferência, a pagar, pago…); o mês abre com as OS, os reembolsos e as notas fiscais.
+  (sem nota, nota em conferência, a pagar, pago…); o mês abre pelo cartão ou pelo **Outro mês**, com as OS, os
+  reembolsos e as notas fiscais.
 - **Notas fiscais (aba Faturamento › mês)** (detalhes abaixo): o técnico envia a nota do mês (PDF, XML ou foto), marca
   as OS que ela cobre e acompanha a conferência da central; a nota é opcional e nunca trava o pagamento.
 - **Patente e Meu elo** (detalhes abaixo): o elo do técnico (Bronze, Prata, Ouro ou Diamante) pelos atendimentos dos
@@ -482,26 +483,36 @@ Aba **Faturamento** (ícone de recibo; substitui Ganhos): o técnico é parceiro
 - **Recebe no PIX**: o tipo e a chave mascarada ("CPF •••.456.789-••"); sem chave, **Cadastrar chave PIX** e "Sem
   chave PIX cadastrada". Tocar abre Configurações › Chave PIX. Só aparece com o cadastro na memória (a chave nunca fica
   no aparelho), e o leitor de tela fala só o tipo.
-- **Por mês**: um cartão por mês de conclusão das OS, o mais novo primeiro (o mês sem valor não aparece), com o ícone
-  e o selo da situação, o valor total, uma linha curta ("3 OS sem nota · R$ 300,00", "Nota nº 1234 recusada · ver
-  motivo") e, no rodapé, "Novembro de 2026 · 12 OS". A situação vem calculada do servidor: Em andamento, Sem nota, Nota
-  em conferência, Nota recusada, A pagar, Pago em parte, Pago sem nota e Pago (as cores da central, só no ícone e no
-  selo; a linha da nota recusada em vermelho). A nota nunca trava o pagamento: "Sem nota" é só informativo.
-- **O mês** (tocar no cartão; `/faturamento/AAAA-MM`): o título é o mês por extenso, com o olho no cabeçalho. No topo,
-  a situação e o que o técnico pode fazer ("3 OS sem nota fiscal (R$ 300,00). A central paga com ou sem nota; se
-  quiser, envie a nota abaixo."), neutro, e só a nota recusada ganha cor, com o motivo. Depois, "Chamados de novembro"
-  (A receber, Já pago, Previsto e os reembolsos), as notas fiscais do mês (seção abaixo) e as OS com o valor de cada
-  uma ("NF 1234" na coberta por uma nota). Tocar numa OS abre a OS: na hora, se está no aparelho; senão, com
-  internet, a tela da OS busca na central. Mês fora do formato: "Mês inválido".
+- **Por mês**: um cartão por mês de conclusão das OS, o mais novo primeiro, com o ícone e o selo da situação (ao lado
+  do valor, ou embaixo dele quando os dois não cabem na linha), o valor total, uma linha curta
+  ("3 OS sem nota · R$ 300,00", "Nota nº 1234 recusada · ver motivo") e, no rodapé, "Novembro de 2026 · 12 OS". O mês
+  sem valor só aparece com nota daquela competência que não foi recusada (`invoices`): "Sem valores", R$ 0,00 e "1
+  nota fiscal" (ou "N notas fiscais"); é por ele que o técnico abre, apaga ou acompanha a nota que cobre OS de meses
+  anteriores. A API publicada em 20/11/2026 não manda o `invoices` (ausente vale 0: o mês sem valor fica de fora). A
+  situação vem calculada do servidor: Em andamento, Sem nota, Nota em conferência, Nota recusada, A pagar, Pago em
+  parte, Pago sem nota e Pago (as cores da central, só no ícone e no selo; a linha da nota recusada em vermelho). A
+  nota nunca trava o pagamento: "Sem nota" é só informativo.
+- **Outro mês** ([src/components/billing/OtherMonth.tsx](src/components/billing/OtherMonth.tsx)): a linha depois dos
+  cartões (ou sob "Nenhum valor ainda") abre a folha com ‹ Novembro de 2026 ›, de janeiro de 2000 (`FIRST_MONTH`, o
+  primeiro que o servidor aceita) até o mês atual, e **Abrir novembro de 2026**; o mês abre quando a folha termina de
+  sair. Serve para qualquer mês, também os sem cartão (sem valores ou fora dos 12 meses). Só aparece com os meses
+  guardados: sem nada guardado, a aba mostra o esqueleto ou o aviso (sem internet, erro ou API sem a rota dos meses).
+- **O mês** (tocar no cartão ou abrir pelo Outro mês; `/faturamento/AAAA-MM`): o título é o mês por extenso, com o olho
+  no cabeçalho. No topo, a situação e o que o técnico pode fazer ("3 OS sem nota fiscal (R$ 300,00). A central paga com
+  ou sem nota; se quiser, envie a nota abaixo."), neutro, e só a nota recusada ganha cor, com o motivo; o mês sem
+  valores ou fora dos 12 meses abre sem essa caixa. Depois, "Chamados de novembro" (A receber, Já pago, Previsto e os
+  reembolsos), as notas fiscais do mês (seção abaixo) e as OS com o valor de cada uma ("NF 1234" na coberta por uma
+  nota). Tocar numa OS abre a OS: na hora, se está no aparelho; senão, com internet, a tela da OS busca na central.
+  Mês fora do formato: "Mês inválido".
 - **Ocultar valores** (o olho, à direita do título da aba e no cabeçalho do mês): "R$ •••••" no lugar dos valores, e
   o leitor de tela diz "valor oculto". É do aparelho (Keychain/Keystore, `mc_hide_values`, como o tema): fica no Sair e
   na troca de técnico, e enquanto não leu conta como oculto. Esconde só a tela (os valores guardados continuam no
   aparelho) e não vale na OS ("Valor desta OS") nem na oferta.
-- **Vazio**: "Nenhum valor ainda" / "O valor de cada OS aparece aqui quando a central coloca você nela.". Os valores
-  por OS existem desde 13/11/2026: com meses anteriores na janela, o rodapé diz "Valores registrados no app desde
-  13/11/2026.".
-- **Dados**: `GET /me/earnings/months?months=12` (os totais e os 12 meses, com a situação) e, no mês,
-  `GET /me/earnings?month=AAAA-MM`. Ficam no aparelho para abrir sem rede (kv `earnings:months`, com a hora e o técnico,
+- **Vazio**: "Nenhum valor ainda" / "O valor de cada OS aparece aqui quando a central coloca você nela.", com o
+  **Outro mês** embaixo. Os valores por OS existem desde 13/11/2026: com meses anteriores na janela, o rodapé diz
+  "Valores registrados no app desde 13/11/2026.".
+- **Dados**: `GET /me/earnings/months?months=12` (os totais e os 12 meses, com a situação e as notas de cada
+  competência) e, no mês, `GET /me/earnings?month=AAAA-MM`. Ficam no aparelho para abrir sem rede (kv `earnings:months`, com a hora e o técnico,
   e `earnings:AAAA-MM`); só leitura, nada entra na fila. Busca ao abrir a aba, ao voltar a ela e ao abrir o mês (a busca
   de até 30 s atrás vale), no "puxar para atualizar" (que relê também o cadastro, pela chave PIX), em "Tentar de novo",
   quando uma nota entra ou sai neste aparelho e, depois de uma sincronização, se a última busca tem 2 min ou mais (pagar
@@ -509,7 +520,7 @@ Aba **Faturamento** (ícone de recibo; substitui Ganhos): o técnico é parceiro
 - **Sem internet ou erro**: com valores guardados, tudo aparece com "Sem internet · valores de …" ou "Não deu para
   atualizar · valores de …"; sem nada guardado, "Sem internet" / "O faturamento aparece quando a conexão voltar." ou a
   mensagem do servidor com **Tentar de novo**. Com a API antiga (sem a rota dos meses): "Não foi possível carregar o
-  faturamento.".
+  faturamento.", sem cartões e sem o **Outro mês** (com meses guardados antes, os guardados e o Outro mês continuam).
 
 ## Notas fiscais (aba Faturamento › mês)
 

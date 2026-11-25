@@ -39,12 +39,16 @@ Sair e na troca de técnico (nome, e-mail e celular vão também para o usuário
 tela de Configurações, ao puxar a aba Faturamento e, quando falta ou passou de 6 h (o link da foto vale 12 h), ao voltar
 à tela inicial e ao abrir o Faturamento. As gravações (salvar, enviar a foto e removê-la) saem uma por vez: a seguinte
 espera a resposta da anterior e não sai se a sessão mudou na espera. Uma leitura durante a qual uma gravação saiu,
-voltou ou ficou no ar não é publicada: fica o que a gravação devolveu.
+voltou ou ficou no ar não é publicada: fica o que a gravação devolveu. O servidor também grava uma por vez por
+técnico (o `PATCH /me/profile` trava a linha dele até o fim da transação): a gravação seguinte que o app solta quando
+a anterior passou dos 20 s sem resposta, ou a de outro aparelho, espera a anterior terminar e não apaga o carimbo nem
+o histórico dela.
 
 **Perfil técnico** (Configurações › Atendimento; docs/API.md, "Perfil técnico"): `PATCH /me/profile` com uma parte
 inteira por vez (`tool_ids`, `availability`, `transport`, `skills` ou `education`), sem senha. A lista enviada substitui
-a anterior; o servidor normaliza e ordena, põe o "desde" das aptidões e o `id` das formações e devolve o cadastro como
-ficou, que a tela passa a mostrar. Como o cadastro: só online, fora da fila, nada no SQLite nem no kv. O ferramental vem
+a anterior; o servidor normaliza e ordena, limpa os textos (sem caracteres de controle nem invisíveis, como espaço de
+largura zero e marcas de direção; o app confere do mesmo jeito, com `cleanText` e `foldName`), põe o "desde" das
+aptidões e o `id` das formações e devolve o cadastro como ficou, que a tela passa a mostrar. Como o cadastro: só online, fora da fila, nada no SQLite nem no kv. O ferramental vem
 de `GET /technician-tools` (o técnico recebe só as ferramentas ativas, em ordem alfabética) e as sugestões de aptidão,
 de `skill_suggestions` em `GET /public/onboarding/catalog`. Os dois catálogos ficam só na memória
 (`lib/technicalProfile.ts`): valem 10 min (puxar a tela relê na hora) e somem na troca de sessão.
@@ -54,9 +58,14 @@ de `skill_suggestions` em `GET /public/onboarding/catalog`. Os dois catálogos f
   histórico da central). Uma gravação por vez: o que mudar durante o envio vai num segundo envio quando o primeiro
   volta, se ainda for diferente do gravado. Sem rede, o app avisa e não muda nada; se o envio falhar, a tela volta ao
   que está gravado e avisa. Sair da tela com o envio agendado manda na hora; o Sair ou outro técnico descarta o que
-  estava pendente.
-- **Aptidões e Formação** gravam a lista inteira (incluir e mudar pela folha, excluir pela lixeira), montada a partir da
-  que voltou do servidor; enquanto uma gravação está no ar, as outras ações da lista ficam desligadas.
+  estava pendente. No Transporte nunca informado, qualquer toque grava, mesmo voltando a tudo desmarcado antes do envio
+  ("Nenhum · sem CNH"); o "Nenhum", no fim dos meios, grava sem meio e mantém a CNH.
+- **Aptidões e Formação** gravam a lista inteira (incluir e mudar pela folha, excluir pela lixeira). O corpo é montado
+  na hora em que a gravação sai da fila (`saveProfileWith`), com o cadastro que a anterior devolveu: duas exclusões
+  seguidas não devolvem o item apagado, e mudar um item que a anterior tirou mostra "Esta aptidão foi excluída." (ou
+  "Esta formação foi excluída.") sem enviar nada. Enquanto uma gravação está no ar, as outras ações da lista ficam
+  desligadas, também depois de sair e voltar à tela (o estado fica em `lib/technicalProfile.ts` e zera na troca de
+  sessão).
 - **Ferramenta desativada pela central**: o servidor ignora a marcação (200) e o app relê o catálogo (ela some). Id que
   não existe no catálogo: 422 "Ferramenta não encontrada. Atualize a lista." (o app também relê).
 - **A API sobe antes do app.** A API antiga não tem essas partes: o `GET /me/profile` vem sem elas, e o app mostra
@@ -78,6 +87,10 @@ Resposta: `{server_time, has_more, tickets[], comments[], worklogs[], revoked_ti
 - O técnico de campo recebe só as OS em que é o responsável ou outro técnico da visita (auxiliar): grupo e fila não
   bastam (`services/tickets.py::visibility_clause` → `schedule.works_on`). Analistas e supervisores recebem as que veem
   na web (a visibilidade de filas do perfil de acesso).
+- No fim de cada pull, o app apaga as OS fechadas ou canceladas há mais de 30 dias (`pruneOld`, com o cache de anexos e
+  o que mais for delas). Ficam as que têm algo na fila e as abertas na tela agora (`holdTicket`, chamado pela tela da
+  OS): a OS antiga que o técnico abriu pelo Histórico, pelo Meu elo ou pelo mês do Faturamento veio da central e não
+  some com ele lendo. A retenção fica só na memória: fechada a tela, ou reiniciado o app, a OS sai no pull seguinte.
 
 ### Leituras guardadas (fora do pull)
 
@@ -97,14 +110,18 @@ mostra uma mensagem própria.
 - **Histórico de atendimentos** (`GET /me/history?limit=30`, as páginas seguintes com o `cursor` da anterior; mesma
   seção do docs/API.md; kv `my_history`, só a primeira página): fora da rodada. A tela busca a primeira página ao abrir
   (se a guardada tem 2 min ou mais) e ao puxar, e as outras ao rolar; sem rede no fim da lista, segue quando a conexão
-  volta.
+  volta. A OS tocada que não está no aparelho abre pela tela da OS, que sincroniza e, se ainda faltar, busca a OS na
+  central (`GET /tickets/{id}`) e grava no aparelho; com a tela aberta, o pull não a apaga (§2).
 - **Faturamento** (docs/API.md "Valor por chamado" e "Faturamento do app"): os meses,
   `GET /me/earnings/months?months=12` (os totais e a situação de cada mês; kv `earnings:months`), e o mês,
   `GET /me/earnings?month=AAAA-MM` (kv `earnings:AAAA-MM`), com as notas do mês, `GET /me/invoices?month=AAAA-MM` (kv
   `invoices:AAAA-MM`). Busca ao abrir a aba, ao voltar a ela e ao abrir o mês (a busca de até 30 s atrás vale), ao
   puxar, quando uma nota entra ou sai neste aparelho e, depois de uma rodada do sync, se a última busca tem 2 min ou
   mais (pagar marca a OS como alterada e a rodada traz). Um pedido dos meses por vez. O "ocultar valores" esconde só a
-  tela: os valores guardados continuam no kv.
+  tela: os valores guardados continuam no kv. O mês abre pelo cartão (o mês sem valores só tem cartão com nota da
+  competência, `invoices` maior que 0; a API publicada em 20/11/2026 não manda o campo, e ausente vale 0) ou pelo
+  "Outro mês", que abre qualquer mês de 2000-01 ao atual e só aparece com os meses guardados. A nota enviada noutra
+  competência leva o app ao mês dela.
 - **Ofertas** (`GET /me/offers`, buscada como diz o §4; kv `field_offers`): junto da lista, por oferta, se o aviso já
   saiu (`seen`), se o técnico abriu o escopo (`scope`, que libera o aceite) e quando abriu pela primeira vez
   (`scope_at`, no relógio do servidor, `serverNow`), que vai no aceite (§3). A oferta que sai da lista leva as marcas
