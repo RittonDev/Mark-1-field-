@@ -7,13 +7,14 @@ import { useState } from "react";
 import { favoritesHref } from "@/components/technicians/FavoritesView";
 import { GrantAccessDialog } from "@/components/technicians/GrantAccessDialog";
 import { LevelBadge } from "@/components/technicians/LevelBadge";
-import { Button, ErrorBox, Skeleton } from "@/components/ui";
+import { Button, ErrorBox, Pill, Skeleton } from "@/components/ui";
 import { errorMessage } from "@/lib/api";
-import { slotsText } from "@/lib/constants";
+import { OPERATIONAL_STATUS, periodShort, periodText, slotsText } from "@/lib/constants";
 import { formatDate, initials } from "@/lib/format";
 import { useCan } from "@/lib/permissions";
+import { OPERATIONAL_STATUS_COLOR } from "@/lib/technicians";
 import { whatsappUrl } from "@/lib/whatsapp";
-import type { FavoriteCityDetail, FavoriteTechnician, TechnicianSuggestion, UUID } from "@/lib/types";
+import type { FavoriteCityDetail, FavoriteTechnician, OperationalStatus, TechnicianSuggestion, UUID } from "@/lib/types";
 
 // Motivos que já aparecem nos números, nas etiquetas do cartão ou na estrela de favorito (não repetir como etiqueta).
 const SHOWN_AS_NUMBERS = [
@@ -39,6 +40,66 @@ export function OutsideAvailabilityChip({ gaps }: { gaps: string }) {
       title="Pela disponibilidade que o técnico informou no app"
     >
       {gaps ? `Fora da disponibilidade (${gaps})` : "Fora da disponibilidade"}
+    </span>
+  );
+}
+
+// --------------------------------------------------------------------------- quem recebe OS (Colaborador e ofertas)
+
+/** Fora de Ativo na operação (Inativo ou Bloqueado): não recebe OS. Ativo ou sem o campo (API antiga): null. */
+export type OffStatus = "inactive" | "blocked";
+
+/** A situação que tira o técnico das OS: a escolha mostra com o motivo e não deixa escolher (a API recusa). */
+export function offStatus(person: { operational_status?: OperationalStatus | null }): OffStatus | null {
+  const status = person.operational_status;
+  return status === "inactive" || status === "blocked" ? status : null;
+}
+
+/** O motivo numa linha, até `max` caracteres (o inteiro vai no `title`). */
+export function shortReason(reason: string | null | undefined, max = 60): string {
+  const text = (reason ?? "").replace(/\s+/g, " ").trim();
+  return text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
+}
+
+/** A 2ª linha do Colaborador: "Inativo · {motivo}" | "Bloqueado · {motivo}" (motivo até 60 caracteres). */
+export function offStatusLine(status: OffStatus, reason: string | null | undefined): string {
+  const short = shortReason(reason);
+  return short ? `${OPERATIONAL_STATUS[status]} · ${short}` : OPERATIONAL_STATUS[status];
+}
+
+/** O técnico escolhido (ou já na OS) saiu de Ativo: "{Nome} está inativo: {motivo}. Escolha outro técnico." */
+export function offStatusCaution(name: string, status: OffStatus, reason: string | null | undefined): string {
+  const why = (reason ?? "").replace(/\s+/g, " ").trim().replace(/[.!…]+$/, "");
+  return `${name} está ${OPERATIONAL_STATUS[status].toLowerCase()}${why ? `: ${why}` : ""}. Escolha outro técnico.`;
+}
+
+/** O período inteiro, para o `title`: "De 20/11/2026 a 30/11/2026" | "Em 20/12/2026". */
+export function periodTitle(period: { start: string; end: string }): string {
+  return `${period.start === period.end ? "Em" : "De"} ${periodText(period)}`;
+}
+
+/** O técnico escolhido avisou que não atende no dia da visita: "{Nome} está indisponível até 30/11." (`today`: hoje). */
+export function unavailableCaution(name: string, period: { start: string; end: string }, today: string): string {
+  return `${name} está indisponível ${periodShort(period, today)}.`;
+}
+
+/** Selo "Inativo" | "Bloqueado" na cor da situação, com o motivo no `title`. */
+export function OffStatusChip({ status, reason }: { status: OffStatus; reason?: string | null }) {
+  return (
+    <span title={reason?.trim() || undefined} className="inline-flex">
+      <Pill color={OPERATIONAL_STATUS_COLOR[status]}>{OPERATIONAL_STATUS[status]}</Pill>
+    </span>
+  );
+}
+
+/** "Indisponível até 30/11" (âmbar, como o "Fora da disponibilidade"), com o período inteiro no `title`. `today`: hoje. */
+export function UnavailableChip({ period, today }: { period: { start: string; end: string }; today: string }) {
+  return (
+    <span
+      className="inline-flex max-w-full items-center rounded-full bg-amber-50 px-1.5 py-px text-[11px] font-medium text-amber-800 dark:bg-amber-500/10 dark:text-amber-300"
+      title={periodTitle(period)}
+    >
+      Indisponível {periodShort(period, today)}
     </span>
   );
 }
@@ -161,7 +222,8 @@ function SuggestionList({
   favorites,
   onGrant,
 }: SuggestedProps & { onGrant: (t: FavoriteTechnician) => void }) {
-  const noAccess = favorites?.favorites.filter((f) => !f.is_active) ?? [];
+  // Só os Ativos na operação: Inativo e Bloqueado não recebem OS mesmo com o acesso liberado.
+  const noAccess = favorites?.favorites.filter((f) => !f.is_active && !offStatus(f)) ?? [];
   const extras = favorites && noAccess.length ? <NoAccessLine city={favorites} people={noAccess} onGrant={onGrant} /> : null;
 
   if (!hasPlace) {
@@ -358,7 +420,11 @@ function SuggestionList({
   );
 }
 
-/** Outros técnicos da visita: etiquetas removíveis e um seletor para incluir mais. */
+/**
+ * Outros técnicos da visita: etiquetas removíveis e um seletor para incluir mais. `options`: só quem pode receber OS
+ * (Inativo e Bloqueado ficam de fora); `unavailable`, o sufixo de quem avisou que não atende no dia da visita
+ * ("indisponível até 30/11"): escolhível, com o aviso.
+ */
 export function HelpersField({
   options,
   assigneeId,
@@ -367,7 +433,7 @@ export function HelpersField({
   onChange,
   hideLabel = false,
 }: {
-  options: { id: UUID; name: string; detail?: string }[];
+  options: { id: UUID; name: string; detail?: string; unavailable?: string }[];
   assigneeId: UUID | "";
   helperIds: UUID[];
   names: Record<UUID, string>;
@@ -410,6 +476,7 @@ export function HelpersField({
               <option key={o.id} value={o.id}>
                 {o.name}
                 {o.detail ? ` — ${o.detail}` : ""}
+                {o.unavailable ? ` · ${o.unavailable}` : ""}
               </option>
             ))}
           </select>

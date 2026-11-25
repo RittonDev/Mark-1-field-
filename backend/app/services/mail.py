@@ -1,7 +1,7 @@
 """E-mails transacionais: fila no banco (email_outbox), envio por SMTP e o registro do que saiu.
 
-Três modelos (services/mail_templates.py): validar o e-mail, boas-vindas e nova senha. Quem pede chama
-`enqueue` na transação dele e, depois do commit, `mail.deliver_soon([row.id])` (ou
+Três modelos (services/mail_templates.py): validar o e-mail, boas-vindas e nova senha. Quem pede
+chama `enqueue` na transação dele e, depois do commit, `mail.deliver_soon([row.id])` (ou
 `mail.deliver_after_commit(db, ids)` antes do commit): a entrega sai logo, numa sessão própria; o
 que falhar fica para a rotina da fila (main._mail_loop, a cada MAIL_RETRY_SECONDS:
 `deliver_pending`). Chame pelo módulo (`mail.deliver_soon`, `mail.get_provider`): os testes trocam
@@ -134,7 +134,9 @@ class SmtpProvider:
         except smtplib.SMTPRecipientsRefused as exc:
             codes = [code for code, _ in exc.recipients.values()]
             permanent = bool(codes) and all(code >= 500 for code in codes)
-            raise MailError(f"Destinatário recusado ({_codes(codes)})", permanent=permanent) from None
+            raise MailError(
+                f"Destinatário recusado ({_codes(codes)})", permanent=permanent
+            ) from None
         except (smtplib.SMTPSenderRefused, smtplib.SMTPDataError) as exc:
             name = exc.__class__.__name__
             raise MailError(f"{name} {exc.smtp_code}", permanent=exc.smtp_code >= 500) from None
@@ -205,9 +207,7 @@ async def enqueue(
             EmailOutbox.status == EmailStatus.PENDING,
             EmailOutbox.to_email == address,
             EmailOutbox.send_by >= now,
-            EmailOutbox.user_id.is_(None)
-            if user_id is None
-            else EmailOutbox.user_id == user_id,
+            EmailOutbox.user_id.is_(None) if user_id is None else EmailOutbox.user_id == user_id,
             EmailOutbox.application_id.is_(None)
             if application_id is None
             else EmailOutbox.application_id == application_id,
@@ -340,9 +340,7 @@ async def _deliver_one(db: AsyncSession, provider: MailProvider, row: EmailOutbo
     except MailError as exc:
         await db.refresh(row)
         _failed(row, str(exc), permanent=exc.permanent)
-        log.warning(
-            "E-mail %s (%s) não saiu: %s", row.id, row.template.value, _safe_reason(exc)
-        )
+        log.warning("E-mail %s (%s) não saiu: %s", row.id, row.template.value, _safe_reason(exc))
         return False
     except Exception as exc:
         await db.refresh(row)
@@ -445,7 +443,8 @@ async def _render(db: AsyncSession, row: EmailOutbox) -> Rendered:
 
 
 def build_message(rendered: Rendered, to_email: str) -> EmailMessage:
-    """A mensagem: remetente que não recebe resposta (sem Reply-To), Auto-Submitted, texto e HTML."""
+    """A mensagem: remetente que não recebe resposta (sem Reply-To), Auto-Submitted, texto e
+    HTML."""
     sender = (settings.MAIL_FROM or "").strip()
     if not sender:
         raise MailError("MAIL_FROM não configurado")
@@ -468,8 +467,8 @@ def build_message(rendered: Rendered, to_email: str) -> EmailMessage:
 
 
 async def purge_old(db: AsyncSession) -> int:
-    """Rotina (main._JOBS): apaga o registro dos e-mails com mais de 180 dias e os tokens vencidos há
-    mais de 30. Sem commit (a rotina grava). Devolve quantas linhas saíram."""
+    """Rotina (main._JOBS): apaga o registro dos e-mails com mais de 180 dias e os tokens vencidos
+    há mais de 30. Sem commit (a rotina grava). Devolve quantas linhas saíram."""
     now = utcnow()
     mails = await db.execute(
         delete(EmailOutbox)

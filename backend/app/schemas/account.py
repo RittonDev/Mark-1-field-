@@ -28,7 +28,8 @@ class EmailQueued(BaseModel):
 
 
 class EmailLogOut(ORMModel):
-    """GET /technicians/{id}/emails: o registro do que foi pedido e enviado, o mais novo primeiro."""
+    """GET /technicians/{id}/emails: o registro do que foi pedido e enviado, o mais novo
+    primeiro."""
 
     id: uuid.UUID
     template: EmailTemplate

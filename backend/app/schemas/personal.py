@@ -60,8 +60,8 @@ def too_long(max_len: int) -> str:
 
 
 def clean_text(value: str | None, max_len: int | None = None) -> str | None:
-    """Sem controles nem formatação, NFC e espaços juntados (services/tech_profile.clean); vazio vira
-    None; passou de `max_len`: "No máximo N caracteres"."""
+    """Sem controles nem formatação, NFC e espaços juntados (services/tech_profile.clean); vazio
+    vira None; passou de `max_len`: "No máximo N caracteres"."""
     from app.services.tech_profile import clean
 
     text = clean(value or "")
@@ -102,7 +102,8 @@ def normalize_rg(text: str | None) -> str:
 
 
 def rg_number(value: str | None) -> str | None:
-    """Número do RG: 5 a 20 caracteres com pelo menos 4 números ("12.345.678-X", "MG-12.345.678")."""
+    """Número do RG: 5 a 20 caracteres com pelo menos 4 números ("12.345.678-X",
+    "MG-12.345.678")."""
     if not (value or "").strip():
         return None
     rg = normalize_rg(value).strip()

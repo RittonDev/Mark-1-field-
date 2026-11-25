@@ -63,9 +63,7 @@ RESET_SUBJECT = "Criar uma nova senha"
 RESET_BUTTON = "Criar nova senha"
 RESET_INTRO = {
     "self": "Recebemos um pedido para criar uma nova senha do app da {company}. Use este link:",
-    "central": (
-        "A central da {company} enviou este link para você criar uma nova senha do app:"
-    ),
+    "central": ("A central da {company} enviou este link para você criar uma nova senha do app:"),
 }
 RESET_NOTE = (
     "O link vale por 2 horas e só pode ser usado uma vez. Ao criar a nova senha, o app pede para "
@@ -201,9 +199,8 @@ def _as_html(subject: str, blocks: Sequence[_Block]) -> str:
                 f"{_anchor(block.url)}</p>"
             )
         elif isinstance(block, _Section):
-            body.append(
-                f'<p style="margin:0 0 8px;font-size:15px;font-weight:bold">{escape(block.title)}</p>'
-            )
+            title = escape(block.title)
+            body.append(f'<p style="margin:0 0 8px;font-size:15px;font-weight:bold">{title}</p>')
             if block.items:
                 tag = "ol" if block.ordered else "ul"
                 items = "".join(

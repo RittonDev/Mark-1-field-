@@ -49,9 +49,7 @@ VERIFY_LINK_GONE = (
 )
 # POST /auth/password-reset com o acesso ao app cortado (410, como o link que não vale mais).
 ACCESS_CUT = "Seu acesso ao app está desativado. Fale com a central pelo WhatsApp"
-EMAIL_IN_USE_TEXT = (
-    "Este e-mail já está em uso em outro cadastro. Fale com a central pelo WhatsApp"
-)
+EMAIL_IN_USE_TEXT = "Este e-mail já está em uso em outro cadastro. Fale com a central pelo WhatsApp"
 
 # Bem mais que o token de verdade (43 caracteres) não é nosso: nem vai ao banco.
 _RAW_MAX = 200
@@ -74,9 +72,7 @@ class EmailInUse(CodedError):
 
 
 def gone_text(purpose: AccountTokenPurpose | str) -> str:
-    return (
-        VERIFY_LINK_GONE if purpose == AccountTokenPurpose.VERIFY_EMAIL else RESET_LINK_GONE
-    )
+    return VERIFY_LINK_GONE if purpose == AccountTokenPurpose.VERIFY_EMAIL else RESET_LINK_GONE
 
 
 def hash_token(raw: str) -> str:
@@ -153,9 +149,7 @@ def usable(token: AccountToken | None, now: datetime | None = None) -> bool:
     if token is None:
         return False
     return (
-        token.used_at is None
-        and token.revoked_at is None
-        and token.expires_at > (now or utcnow())
+        token.used_at is None and token.revoked_at is None and token.expires_at > (now or utcnow())
     )
 
 
@@ -201,9 +195,7 @@ async def revoke(
         stmt = stmt.where(AccountToken.purpose == purpose)
     if email:
         stmt = stmt.where(func.lower(AccountToken.email) == email.strip().lower())
-    await db.execute(
-        stmt.values(revoked_at=utcnow()).execution_options(synchronize_session=False)
-    )
+    await db.execute(stmt.values(revoked_at=utcnow()).execution_options(synchronize_session=False))
 
 
 async def central_email_changed(

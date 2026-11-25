@@ -1,4 +1,5 @@
-"""Histórico do cadastro do técnico: o que mudou, quem mudou e por onde (app, central, ficha ou link).
+"""Histórico do cadastro do técnico: o que mudou, quem mudou e por onde (app, central, ficha ou
+link).
 
 Cada linha guarda as mudanças de uma gravação, já com o texto da tela
 (services/user_history.py): [{field, from, to}], e o motivo dela quando há (`note`: a situação na

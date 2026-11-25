@@ -100,8 +100,8 @@ class User(UUIDPrimaryKey, Timestamps, Base):
     avatar_external_url: Mapped[str | None] = mapped_column(String(1000))
     # Dados pessoais do técnico (schemas/personal.py valida e formata). CPF só com os 11 números,
     # único entre os usuários (vários vazios valem); o técnico informa uma vez, depois só a central
-    # muda. RG com os três ou nenhum (número, órgão emissor e UF). Telefone secundário formatado como
-    # o celular; mini biografia até 500.
+    # muda. RG com os três ou nenhum (número, órgão emissor e UF). Telefone secundário formatado
+    # como o celular; mini biografia até 500.
     cpf: Mapped[str | None] = mapped_column(String(11), unique=True)
     rg_number: Mapped[str | None] = mapped_column(String(20))
     rg_issuer: Mapped[str | None] = mapped_column(String(20))

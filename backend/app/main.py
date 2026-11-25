@@ -49,9 +49,7 @@ class RedactTokens(logging.Filter):
     endereço de alguém) também não fica no log."""
 
     _pattern = re.compile(r"((?:token|access_token|refresh_token)=)[^&\s\"']+")
-    _public = re.compile(
-        r"(/public/(?:reports|quotes|onboarding|cep)/)(?!catalog\b)[^/?\s\"']+"
-    )
+    _public = re.compile(r"(/public/(?:reports|quotes|onboarding|cep)/)(?!catalog\b)[^/?\s\"']+")
 
     def _clean(self, value: object) -> object:
         if not isinstance(value, str):

@@ -1,10 +1,10 @@
 """Formas de recebimento do técnico parceiro (pago por chamado): chaves PIX e contas bancárias.
 
-Só o próprio técnico cadastra e muda, no app e com a senha (services/payout_methods.py); a central vê
-e remove em Pagamentos. Com a lista não vazia, sempre uma é a preferencial (onde a central paga): o
-índice único parcial garante no máximo uma, e o serviço promove outra quando a preferencial sai. A
-chave fica normalizada (core/pix.py); a agência com 4 números; o documento do titular (CPF ou CNPJ)
-sem pontuação. `changed_at` marca a última troca da chave, da conta ou do titular e, com
+Só o próprio técnico cadastra e muda, no app e com a senha (services/payout_methods.py); a central
+vê e remove em Pagamentos. Com a lista não vazia, sempre uma é a preferencial (onde a central
+paga): o índice único parcial garante no máximo uma, e o serviço promove outra quando a preferencial
+sai. A chave fica normalizada (core/pix.py); a agência com 4 números; o documento do titular (CPF
+ou CNPJ) sem pontuação. `changed_at` marca a última troca da chave, da conta ou do titular e, com
 `preferred_since`, o "Nova" da central. O histórico e o registro do pagamento guardam só o texto
 mascarado (core/payout.py).
 """

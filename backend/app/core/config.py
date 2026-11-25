@@ -83,9 +83,9 @@ class Settings(BaseSettings):
     # Vazio: só entra quem já está cadastrado em Usuários. "analyst": o primeiro login cria.
     ENTRA_AUTO_PROVISION_ROLE: str | None = None
 
-    # E-mails do cadastro dos técnicos (validação do e-mail, boas-vindas e nova senha): fila no banco
-    # e envio por SMTP (services/mail.py). Sem SMTP_HOST e MAIL_FROM o envio fica desligado: os
-    # e-mails ficam "não enviados" e a central segue com o WhatsApp e a senha provisória.
+    # E-mails do cadastro dos técnicos (validação do e-mail, boas-vindas e nova senha): fila no
+    # banco e envio por SMTP (services/mail.py). Sem SMTP_HOST e MAIL_FROM o envio fica desligado:
+    # os e-mails ficam "não enviados" e a central segue com o WhatsApp e a senha provisória.
     SMTP_HOST: str | None = None
     SMTP_PORT: int = 587
     SMTP_USERNAME: str | None = None

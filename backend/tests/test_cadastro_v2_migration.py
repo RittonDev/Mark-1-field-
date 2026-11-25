@@ -1,5 +1,5 @@
-"""Migração do cadastro V2 (b7e2d4f6a8c1): a cadeia, as funções puras dos passos de dados e os passos
-de verdade no banco de teste.
+"""Migração do cadastro V2 (b7e2d4f6a8c1): a cadeia, as funções puras dos passos de dados e os
+passos de verdade no banco de teste.
 
 O banco de teste nasce dos modelos (sem as colunas pix_* de antes): o teste com banco as recria numa
 transação, roda os passos com o driver do alembic e desfaz tudo no fim.
@@ -24,9 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 from tests.conftest import requires_db
 
 BACKEND = Path(__file__).resolve().parents[1]
-MIGRATION = (
-    BACKEND / "alembic" / "versions" / "20261125_b7e2d4f6a8c1_cadastro_v2_dos_tecnicos.py"
-)
+MIGRATION = BACKEND / "alembic" / "versions" / "20261125_b7e2d4f6a8c1_cadastro_v2_dos_tecnicos.py"
 NOW = datetime(2026, 11, 25, 12, 0, tzinfo=UTC)
 CPF = "12345678909"
 CNPJ = "12345678000195"
@@ -47,7 +45,7 @@ M = _migration()
 
 
 def test_revision_follows_the_head() -> None:
-    config = Config(str(BACKEND / "alembic.ini"))
+    config = Config()
     config.set_main_option("script_location", str(BACKEND / "alembic"))
     script = ScriptDirectory.from_config(config)
     assert script.get_heads() == ["b7e2d4f6a8c1"]
@@ -301,9 +299,7 @@ async def _application(conn: AsyncConnection, **fields: Any) -> uuid.UUID:
     }
     jsonb = {"service_areas", "skills", "availability"}
     columns = ", ".join(values)
-    params = ", ".join(
-        f"CAST(:{key} AS jsonb)" if key in jsonb else f":{key}" for key in values
-    )
+    params = ", ".join(f"CAST(:{key} AS jsonb)" if key in jsonb else f":{key}" for key in values)
     await conn.execute(
         text(f"INSERT INTO technician_applications ({columns}) VALUES ({params})"), values
     )
@@ -491,7 +487,12 @@ async def test_data_steps_run_on_the_driver(engine: AsyncEngine) -> None:
                 {"action": "approved", "at": pix_at.isoformat(), "by": by, "note": None}
             ]
             assert reviews[rejected] == [
-                {"action": "rejected", "at": pix_at.isoformat(), "by": by, "note": "Sem experiência"}
+                {
+                    "action": "rejected",
+                    "at": pix_at.isoformat(),
+                    "by": by,
+                    "note": "Sem experiência",
+                }
             ]
             assert reviews[expired][0]["action"] == "expired" and reviews[expired][0]["by"] is None
             assert reviews[pending] == []
@@ -535,9 +536,7 @@ async def test_data_steps_run_on_the_driver(engine: AsyncEngine) -> None:
                 "pix_updated_at": pix_at,
                 "address_line": "Rua das Flores, 123 - Apto 4",
             }
-            gama_back = await _row(
-                conn, "SELECT address_line FROM users WHERE id = :id", id=gama
-            )
+            gama_back = await _row(conn, "SELECT address_line FROM users WHERE id = :id", id=gama)
             assert gama_back == {"address_line": "Av. Exemplo, 1000"}
             history = await _row(
                 conn, "SELECT changes::text AS changes FROM user_changes WHERE id = :id", id=change
@@ -545,9 +544,7 @@ async def test_data_steps_run_on_the_driver(engine: AsyncEngine) -> None:
             assert json.loads(history["changes"])[0]["to"] == "Bloqueado"
             vias = {
                 row["id"]: row["via"]
-                for row in (
-                    await conn.execute(text("SELECT id, via FROM user_changes"))
-                ).mappings()
+                for row in (await conn.execute(text("SELECT id, via FROM user_changes"))).mappings()
             }
             assert (vias[ficha_change], vias[link_change]) == ("central", "app")
         finally:

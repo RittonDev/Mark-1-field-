@@ -1,5 +1,5 @@
-"""Forma de recebimento do técnico em texto mascarado: histórico do cadastro, registro do pagamento e
-extrato do WhatsApp.
+"""Forma de recebimento do técnico em texto mascarado: histórico do cadastro, registro do
+pagamento e extrato do WhatsApp.
 
 - PIX: "PIX " + core/pix.describe ("PIX CPF ***.456.789-**").
 - Conta: "{banco} ****5678-9" (os 4 últimos números da conta; com até 4 números, os 2 últimos:
@@ -29,7 +29,8 @@ def _get(method: Any, key: str) -> Any:
 
 
 def mask_account(number: str | None, digit: str | None) -> str:
-    """A conta mascarada (= maskAccount): "****5678-9"; com até 4 números, os 2 últimos ("**34-4")."""
+    """A conta mascarada (= maskAccount): "****5678-9"; com até 4 números, os 2 últimos
+    ("**34-4")."""
     value = number or ""
     tail = f"****{value[-4:]}" if len(value) > 4 else f"**{value[-2:]}"
     return f"{tail}-{digit}" if digit else tail

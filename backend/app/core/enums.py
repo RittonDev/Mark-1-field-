@@ -323,8 +323,9 @@ class PartRequestStatus(StrEnum):
 
 
 class OperationalStatus(StrEnum):
-    """Situação do técnico na operação (só a central vê). Receber OS pede "active" e o acesso ao app
-    liberado (users.is_active), que continua separado: Inativo e Bloqueado seguem entrando no app."""
+    """Situação do técnico na operação (só a central vê). Receber OS pede "active" e o acesso ao
+    app liberado (users.is_active), que continua separado: Inativo e Bloqueado seguem entrando no
+    app."""
 
     ACTIVE = "active"
     INACTIVE = "inactive"

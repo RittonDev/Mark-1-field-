@@ -1,10 +1,10 @@
 """Fila e registro dos e-mails transacionais (services/mail.py).
 
-Cada e-mail pedido vira uma linha "pending"; a entrega (logo depois do commit e, de novo, pela rotina
-da fila) monta o texto, cria o link de uso único e manda. `context` guarda só o nome e as opções do
-modelo, nunca o token. Sem envio configurado a linha fica "pending" até `send_by` e vence ("Não
-enviado"); o servidor que recusa de vez ou as tentativas esgotadas dão "failed". A central vê o
-registro na ficha do técnico; a rotina apaga as linhas depois de 180 dias.
+Cada e-mail pedido vira uma linha "pending"; a entrega (logo depois do commit e, de novo, pela
+rotina da fila) monta o texto, cria o link de uso único e manda. `context` guarda só o nome e as
+opções do modelo, nunca o token. Sem envio configurado a linha fica "pending" até `send_by` e vence
+("Não enviado"); o servidor que recusa de vez ou as tentativas esgotadas dão "failed". A central vê
+o registro na ficha do técnico; a rotina apaga as linhas depois de 180 dias.
 """
 
 import uuid

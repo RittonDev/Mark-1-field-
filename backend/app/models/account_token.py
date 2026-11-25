@@ -1,11 +1,11 @@
 """Links de uso único mandados por e-mail: validar o e-mail e criar uma senha nova.
 
-Só o SHA-256 do token fica no banco (services/account.py); o token cru nasce na hora do envio, dentro
-do e-mail (nem a fila guarda o link), e vai no fragmento da URL (#token=), que não chega a servidor
-nem a log. Cada token tem um alvo só: o usuário ou a ficha da homologação (apagar a ficha apaga os
-tokens dela). `reason`: na validação "signup" (a ficha), "change" (o e-mail novo pedido no app) ou
-"check" (o login de sempre); na senha "self" (Esqueci minha senha), "central" (link mandado pela
-central) ou "welcome" (criar a primeira senha, na boas-vindas).
+Só o SHA-256 do token fica no banco (services/account.py); o token cru nasce na hora do envio,
+dentro do e-mail (nem a fila guarda o link), e vai no fragmento da URL (#token=), que não chega a
+servidor nem a log. Cada token tem um alvo só: o usuário ou a ficha da homologação (apagar a ficha
+apaga os tokens dela). `reason`: na validação "signup" (a ficha), "change" (o e-mail novo pedido
+no app) ou "check" (o login de sempre); na senha "self" (Esqueci minha senha), "central" (link
+mandado pela central) ou "welcome" (criar a primeira senha, na boas-vindas).
 """
 
 import uuid
