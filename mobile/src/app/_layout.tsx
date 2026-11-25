@@ -116,9 +116,13 @@ export default function RootLayout() {
             <Stack.Screen name="configuracoes/dados-pessoais" options={{ title: "Dados pessoais" }} />
             <Stack.Screen name="configuracoes/contato" options={{ title: "Contato" }} />
             <Stack.Screen name="configuracoes/endereco" options={{ title: "Endereço" }} />
-            <Stack.Screen name="configuracoes/pix" options={{ title: "Chave PIX" }} />
+            <Stack.Screen name="configuracoes/biografia" options={{ title: "Mini biografia" }} />
+            <Stack.Screen name="configuracoes/empresa" options={{ title: "Dados empresariais" }} />
+            <Stack.Screen name="configuracoes/recebimento" options={{ title: "Formas de recebimento" }} />
+            {/* Links antigos da Chave PIX: a tela só redireciona para Formas de recebimento. */}
+            <Stack.Screen name="configuracoes/pix" options={{ headerShown: false }} />
             <Stack.Screen name="configuracoes/notificacoes" options={{ title: "Notificações" }} />
-            <Stack.Screen name="configuracoes/disponibilidade" options={{ title: "Disponibilidade" }} />
+            <Stack.Screen name="configuracoes/disponibilidade" options={{ title: "Dias e horários" }} />
             <Stack.Screen name="configuracoes/transporte" options={{ title: "Transporte" }} />
             <Stack.Screen name="configuracoes/aptidoes" options={{ title: "Aptidões" }} />
             <Stack.Screen name="configuracoes/formacao" options={{ title: "Formação" }} />
@@ -139,6 +143,8 @@ export default function RootLayout() {
           </Stack.Protected>
           <Stack.Protected guard={!signedIn}>
             <Stack.Screen name="login" options={{ headerShown: false }} />
+            {/* Pede o link por e-mail; a senha nova é criada na página web "Definir nova senha". */}
+            <Stack.Screen name="esqueci-senha" options={{ title: "Esqueci minha senha" }} />
           </Stack.Protected>
         </Stack>
         <ToastHost />

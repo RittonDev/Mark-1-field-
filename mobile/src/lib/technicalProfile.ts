@@ -1,6 +1,6 @@
-// Perfil técnico em Configurações › Atendimento (Disponibilidade, Transporte, Aptidões, Formação e Ferramental): o
-// estado de cada tela (o cadastro da memória e a releitura do servidor), a gravação no ar de Aptidões e Formação e os
-// catálogos, só na memória:
+// Perfil profissional em Configurações (Dias e horários, Transporte, Aptidões, Formação e Ferramental): o estado de cada
+// tela (o cadastro da memória e a releitura do servidor), a gravação no ar das listas (Aptidões, Formação, Formas de
+// recebimento e Indisponibilidade) e os catálogos, só na memória:
 // - o ferramental: GET /technician-tools (o técnico recebe só as ativas, em ordem alfabética);
 // - as sugestões de aptidão: as mesmas da ficha da homologação, de GET /public/onboarding/catalog.
 // Nada vai para o SQLite, o kv nem o SecureStore. Um catálogo lido vale 10 min (abrir a tela depois disso relê), puxar a
@@ -94,8 +94,11 @@ export function useTechProfileScreen(): TechProfileScreen {
 
 // --------------------------------------------------------------------------- gravação das listas
 
-/** As listas que gravam pela folha e pela lixeira (o corpo sai de saveProfileWith, na fila). */
-export type ListPart = "skills" | "education";
+/**
+ * As listas que gravam pela folha e pela lixeira, na fila das gravações: Aptidões, Formação e Indisponibilidade montam
+ * o corpo do PATCH em saveProfileWith; Formas de recebimento ("payout") têm rotas próprias (writeProfile).
+ */
+export type ListPart = "skills" | "education" | "payout" | "unavailability";
 
 /**
  * A gravação de uma lista: enquanto está no ar, incluir, editar e excluir ficam desligados e o item que sai mostra o
@@ -103,14 +106,23 @@ export type ListPart = "skills" | "education";
  */
 export interface ListWrite {
   busy: boolean;
-  /** Os itens saindo: a aptidão pelo nome sem acento e maiúsculas (foldName), a formação pelo id. */
+  /**
+   * Os itens saindo: a aptidão pelo nome sem acento e maiúsculas (foldName); a formação, a forma de recebimento e o
+   * período pelo id.
+   */
   removing: readonly string[];
 }
 
 const LIST_IDLE: ListWrite = { busy: false, removing: [] };
-let listWrites: Record<ListPart, ListWrite> = { skills: LIST_IDLE, education: LIST_IDLE };
+const ALL_IDLE: Record<ListPart, ListWrite> = {
+  skills: LIST_IDLE,
+  education: LIST_IDLE,
+  payout: LIST_IDLE,
+  unavailability: LIST_IDLE,
+};
+let listWrites: Record<ListPart, ListWrite> = ALL_IDLE;
 /** Gravações no ar por lista (mais de uma só quando um toque passou antes de a tela desligar as ações). */
-const listCount: Record<ListPart, number> = { skills: 0, education: 0 };
+const listCount: Record<ListPart, number> = { skills: 0, education: 0, payout: 0, unavailability: 0 };
 /** Quem gravou: a troca de sessão apaga, e o fim de uma gravação de antes dela não mexe mais em nada. */
 let listOwner: string | null = null;
 let listGeneration = 0;
@@ -134,9 +146,8 @@ session.subscribe(() => {
   if (status === "signedIn" && user?.id === listOwner) return;
   listOwner = null;
   listGeneration += 1;
-  listCount.skills = 0;
-  listCount.education = 0;
-  publishList({ skills: LIST_IDLE, education: LIST_IDLE });
+  for (const part of Object.keys(listCount) as ListPart[]) listCount[part] = 0;
+  publishList(ALL_IDLE);
 });
 
 /**
@@ -162,7 +173,7 @@ export async function trackListWrite<T>(part: ListPart, removing: string | null,
   }
 }
 
-/** A gravação no ar da lista, na tela (Aptidões ou Formação). */
+/** A gravação no ar da lista, na tela (Aptidões, Formação, Formas de recebimento ou Dias e horários). */
 export function useListWrite(part: ListPart): ListWrite {
   const get = useCallback(() => listWrites[part], [part]);
   return useSyncExternalStore(subscribeList, get, get);

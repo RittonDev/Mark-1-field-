@@ -7,35 +7,61 @@ import { Button } from "../ui";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 const toIso = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-const fromIso = (s: string | null) => (s && /^\d{4}-\d{2}-\d{2}$/.test(s) ? new Date(`${s}T12:00:00`) : null);
+const isDay = (s: string | null | undefined): s is string => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s);
 const label = (s: string) => s.split("-").reverse().join("/");
 
 /**
- * Data sem hora ("YYYY-MM-DD"), para campos de formulário. Quase sempre é o dia da visita: o atalho
- * "Hoje" preenche com um toque. Na web: DateField.web.tsx.
+ * Data sem hora ("YYYY-MM-DD"), para campos de formulário. Quase sempre é o dia da visita: o atalho "Hoje" preenche
+ * com um toque (`todayShortcut`; só aparece com hoje entre `min` e `max`). `min` e `max` limitam o seletor; `initial` é
+ * onde ele abre com o campo vazio (nascimento: 30 anos atrás). Na web: DateField.web.tsx.
  */
 export function DateField({
   value,
   onChange,
   disabled = false,
   label: fieldLabel,
+  min,
+  max,
+  todayShortcut = true,
+  initial,
 }: {
   value: string | null;
   onChange: (value: string | null) => void;
   disabled?: boolean;
   /** Pergunta do campo, para o leitor de tela. */
   label?: string;
+  /** Primeiro dia que o seletor deixa escolher ("YYYY-MM-DD"). */
+  min?: string;
+  /** Último dia que o seletor deixa escolher ("YYYY-MM-DD"). */
+  max?: string;
+  /** O atalho "Hoje" (padrão: sim). */
+  todayShortcut?: boolean;
+  /** O dia em que o seletor abre com o campo vazio ("YYYY-MM-DD"; padrão: hoje). */
+  initial?: string;
 }) {
   const c = useTheme();
   const styles = useStyles(makeStyles);
   const [iosOpen, setIosOpen] = useState(false);
-  const current = fromIso(value);
   const today = toIso(new Date());
+  const first = isDay(min) ? min : undefined;
+  // Limites trocados derrubariam o seletor (ele exige min <= max): fica só o primeiro dia.
+  const last = isDay(max) && !(first && max < first) ? max : undefined;
+  // O seletor abre no dia do campo (vazio: `initial` ou hoje), puxado para dentro dos limites.
+  let opensAt = isDay(value) ? value : isDay(initial) ? initial : today;
+  if (first && opensAt < first) opensAt = first;
+  if (last && opensAt > last) opensAt = last;
+  // Meio-dia: o horário de verão não muda o dia. Os limites cobrem os dias inteiros.
+  const pickerValue = new Date(`${opensAt}T12:00:00`);
+  const limits = {
+    minimumDate: first ? new Date(`${first}T00:00:00`) : undefined,
+    maximumDate: last ? new Date(`${last}T23:59:59`) : undefined,
+  };
+  const todayFits = (!first || today >= first) && (!last || today <= last);
 
   function open() {
     if (disabled) return;
     if (Platform.OS === "android") {
-      DateTimePickerAndroid.open({ mode: "date", value: current ?? new Date(), onValueChange: (_e, d) => onChange(toIso(d)) });
+      DateTimePickerAndroid.open({ mode: "date", value: pickerValue, ...limits, onValueChange: (_e, d) => onChange(toIso(d)) });
     } else {
       setIosOpen((o) => !o);
     }
@@ -55,7 +81,7 @@ export function DateField({
         >
           <Text style={[styles.text, !value && { color: c.placeholder }]}>{value ? label(value) : "Selecionar data"}</Text>
         </Pressable>
-        {!disabled && value !== today ? (
+        {todayShortcut && todayFits && !disabled && value !== today ? (
           <Button
             compact
             title="Hoje"
@@ -74,7 +100,8 @@ export function DateField({
           locale="pt-BR"
           themeVariant={c.scheme}
           accentColor={c.primary}
-          value={current ?? new Date()}
+          value={pickerValue}
+          {...limits}
           onValueChange={(_e, d) => {
             onChange(toIso(d));
             setIosOpen(false);

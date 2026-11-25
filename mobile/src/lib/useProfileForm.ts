@@ -1,8 +1,9 @@
 // Estado das telas do cadastro em Configurações. `useProfileLoad`: o cadastro da memória e a releitura do servidor ao
 // abrir (o menu, a Foto do perfil e os formulários). `useProfileForm`: um formulário que salva só a sua parte, com o
 // comportamento que o Meu cadastro já tinha: abre com o cadastro da memória e relê sem apagar o que foi digitado; os
-// erros aparecem depois do primeiro "Salvar" (o primeiro vai para o rodapé); sem rede, avisa antes de enviar; e-mail e
-// PIX pedem a senha numa folha; salvou, avisa e sai; sair com alteração pergunta. Tudo só online (lib/profile.ts).
+// erros aparecem depois do primeiro "Salvar" (o primeiro vai para o rodapé); sem rede, avisa antes de enviar; a tela
+// pode perguntar antes de enviar ("Confira o CPF"); e-mail e dados da empresa pedem a senha numa folha; salvou, avisa e
+// sai; sair com alteração pergunta. Tudo só online (lib/profile.ts).
 
 import { router, usePreventRemove } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -19,6 +20,23 @@ import type { MyProfile } from "./types";
 
 const NO_INTERNET = "Sem internet";
 const OFFLINE_SAVE = "Conecte o aparelho para salvar seu cadastro.";
+
+/** A pergunta da tela antes de enviar ("Confira o CPF"); o outro botão é "Voltar", que não envia nada. */
+export interface SaveConfirm {
+  title: string;
+  message: string;
+  confirmText: string;
+}
+
+/**
+ * A tela do cadastro: a SectionSpec de lib/profileForm.ts com o que o cadastro V2 acrescenta. `saved` recebe também o
+ * formulário gravado (o aviso do e-mail novo cita o de hoje) e `confirm`, quando devolve uma pergunta, roda antes da
+ * senha e do envio. Uma SectionSpec sem os dois também serve.
+ */
+export type ProfileFormSpec<F extends object, K extends string> = SectionSpec<F, K> & {
+  saved: (review: SectionReview<K>, base: F) => { title: string; description?: string };
+  confirm?: (review: SectionReview<K>, base: F) => SaveConfirm | null;
+};
 
 export interface ProfileLoadState {
   /** O cadastro na memória (null até a primeira leitura, sem internet ou depois de sair da conta). */
@@ -99,7 +117,7 @@ function leaveScreen() {
 }
 
 /** Um formulário do cadastro. `spec` é uma constante do módulo (lib/profileForm.ts). */
-export function useProfileForm<F extends object, K extends string>(spec: SectionSpec<F, K>): ProfileFormState<F, K> {
+export function useProfileForm<F extends object, K extends string>(spec: ProfileFormSpec<F, K>): ProfileFormState<F, K> {
   const { profile, load, retry } = useProfileLoad();
   // O cadastro de que o formulário partiu (para acompanhar uma releitura sem perder o que foi digitado).
   const [shown, setShown] = useState<MyProfile | null>(profile);
@@ -151,13 +169,14 @@ export function useProfileForm<F extends object, K extends string>(spec: Section
     setSaveError(null);
   }
 
-  async function submit(changes: SectionReview<K>, currentPassword?: string) {
+  /** Envia o que mudou; `from` é o formulário gravado de quando tocou em "Salvar" (para o aviso de salvo). */
+  async function submit(changes: SectionReview<K>, from: F, currentPassword?: string) {
     const inSheet = currentPassword !== undefined;
     setSaving(true);
     try {
       await saveProfile(inSheet ? { ...changes.body, current_password: currentPassword } : changes.body);
       haptic.success();
-      const { title, description } = spec.saved(changes);
+      const { title, description } = spec.saved(changes, from);
       showToast(title, { tone: "success", description });
       // Saiu da tela enquanto salvava (descartou): o aviso basta, sem voltar mais uma tela.
       if (!mounted.current) return;
@@ -190,7 +209,7 @@ export function useProfileForm<F extends object, K extends string>(spec: Section
 
   async function save() {
     // Dois toques seguidos não mandam dois pedidos (a conferência da rede já é assíncrona).
-    if (!review || busy.current) return;
+    if (!review || !base || busy.current) return;
     setAttempted(true);
     setSaveError(null);
     if (firstError(review.errors, spec.order)) {
@@ -204,20 +223,26 @@ export function useProfileForm<F extends object, K extends string>(spec: Section
         showToast(NO_INTERNET, { description: OFFLINE_SAVE });
         return;
       }
+      // A pergunta da tela (CPF, que depois só a central muda): "Voltar" não envia nem pede a senha.
+      const ask = spec.confirm?.(review, base) ?? null;
+      if (ask) {
+        const ok = await confirmAction(ask.title, ask.message, { confirmText: ask.confirmText, cancelText: "Voltar" });
+        if (!ok || !mounted.current) return;
+      }
       if (review.needsPassword) {
         setPassword("");
         setPasswordError(null);
         setAsking(true);
         return;
       }
-      await submit(review);
+      await submit(review, base);
     } finally {
       busy.current = false;
     }
   }
 
   async function confirmWithPassword() {
-    if (!review || busy.current) return;
+    if (!review || !base || busy.current) return;
     if (!password) {
       setPasswordError("Informe a senha atual.");
       return;
@@ -225,7 +250,7 @@ export function useProfileForm<F extends object, K extends string>(spec: Section
     setPasswordError(null);
     busy.current = true;
     try {
-      await submit(review, password);
+      await submit(review, base, password);
     } finally {
       busy.current = false;
     }

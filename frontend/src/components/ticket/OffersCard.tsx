@@ -7,14 +7,20 @@ import { useId, useRef, useState } from "react";
 import { useConfirm } from "@/components/Confirm";
 import { searchText } from "@/components/new-ticket/Combobox";
 import { offerText } from "@/components/new-ticket/invite";
-import { OutsideAvailabilityChip } from "@/components/new-ticket/SuggestedTechnicians";
+import {
+  type OffStatus,
+  OffStatusChip,
+  offStatus,
+  OutsideAvailabilityChip,
+  UnavailableChip,
+} from "@/components/new-ticket/SuggestedTechnicians";
 import { isOpenStatus } from "@/components/operacao/hooks";
 import { LevelBadge } from "@/components/technicians/LevelBadge";
 import { useToast } from "@/components/Toaster";
 import { useNow } from "@/components/useNow";
 import { Button, buttonClassName, Dialog, ErrorBox, Field, Input, Pill, SectionTitle, Select, Skeleton, Textarea } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
-import { OFFER_STATE, slotsText } from "@/lib/constants";
+import { OFFER_STATE, slotsText, unavailableOn } from "@/lib/constants";
 import { dayKey, formatDateTime, formatMoney, formatTime, fromLocalInput, initials, moneyInput, OPERATION_TZ } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
 import { useCan } from "@/lib/permissions";
@@ -31,6 +37,7 @@ import type {
   TechnicianSuggestion,
   TicketDetail,
   TicketOffer,
+  UnavailabilityPeriod,
   UUID,
 } from "@/lib/types";
 import { copyText, GROUP_TEXT_COPIED, groupShareUrl } from "@/lib/whatsapp";
@@ -239,8 +246,13 @@ interface Candidate {
   busy?: boolean;
   /** Turnos fora da disponibilidade, em texto ("sáb · tarde"; só com a OS agendada e a visita fora dela). */
   outside?: string;
-  /** Desativado: não entra no app, então não recebe a oferta. */
+  /** Sem acesso ao app: não entra no app, então não recebe a oferta. */
   inactive?: boolean;
+  /** Fora de Ativo na operação (Inativo ou Bloqueado): não recebe OS (a API recusa a oferta). */
+  status?: OffStatus;
+  statusReason?: string | null;
+  /** Avisou que não atende no dia da visita (a API recusa a oferta). */
+  unavailable?: UnavailabilityPeriod;
   /** Faixa do elo (só o selo; sem ela na lista de atribuição). */
   level?: LevelTier;
 }
@@ -265,19 +277,41 @@ function fromSuggestion(t: TechnicianSuggestion, scheduled: boolean): Candidate 
   };
 }
 
-function fromTechnician(t: Technician): Candidate {
+/**
+ * A situação na operação e a indisponibilidade no dia da visita (`day`, "AAAA-MM-DD"): quem está fora de Ativo ou
+ * avisou que não atende no dia aparece travado, com o motivo ou o período (a API recusa a oferta).
+ */
+function receiving(
+  person: Pick<Technician, "operational_status" | "operational_reason" | "unavailability">,
+  day: string,
+): Pick<Candidate, "status" | "statusReason" | "unavailable"> {
+  const status = offStatus(person) ?? undefined;
+  return {
+    status,
+    statusReason: status ? (person.operational_reason ?? null) : undefined,
+    unavailable: status ? undefined : (unavailableOn(person.unavailability, day) ?? undefined),
+  };
+}
+
+function fromTechnician(t: Technician, day: string): Candidate {
   const region = cityOf(t.base_city, t.base_state) || cityOf(t.home_city, t.home_state) || "Sem região";
   return {
     id: t.id,
     name: t.name,
     detail: `${region} · ${t.open_tickets} em aberto`,
     inactive: !t.is_active,
+    ...receiving(t, day),
     level: t.level?.tier,
   };
 }
 
-function fromAssignable(u: AssignableUser): Candidate {
-  return { id: u.id, name: u.name, detail: [u.team_name, `${u.open_tickets} em aberto`].filter(Boolean).join(" · ") };
+function fromAssignable(u: AssignableUser, day: string): Candidate {
+  return {
+    id: u.id,
+    name: u.name,
+    detail: [u.team_name, `${u.open_tickets} em aberto`].filter(Boolean).join(" · "),
+    ...receiving(u, day),
+  };
 }
 
 const noop = () => undefined;
@@ -293,9 +327,10 @@ interface TechnicianSearch {
 
 /**
  * "Incluir outro técnico": com a tela Técnicos, a base inteira (como o "Incluir favorito"; os sem acesso
- * ao app aparecem travados); sem ela, os técnicos ativos da lista de atribuição.
+ * ao app, os Inativos e Bloqueados e os indisponíveis no dia da visita, `day`, aparecem travados); sem ela,
+ * os técnicos com acesso da lista de atribuição (com as mesmas travas).
  */
-function useTechnicianSearch(term: string): TechnicianSearch {
+function useTechnicianSearch(term: string, day: string): TechnicianSearch {
   const canBase = useCan("base.technicians");
   const typed = term.trim();
   const q = useDebounced(typed, 300);
@@ -313,7 +348,7 @@ function useTechnicianSearch(term: string): TechnicianSearch {
   if (canBase) {
     return {
       q,
-      items: (base.data ?? []).map(fromTechnician),
+      items: (base.data ?? []).map((t) => fromTechnician(t, day)),
       loading: waiting || base.isLoading,
       error: base.error,
       retry: () => void base.refetch(),
@@ -323,7 +358,7 @@ function useTechnicianSearch(term: string): TechnicianSearch {
   const items = (assignable.data ?? [])
     .filter((u) => u.role === "technician" && words.every((w) => searchText(u.name).includes(w)))
     .slice(0, 20)
-    .map(fromAssignable);
+    .map((u) => fromAssignable(u, day));
   return { q, items, loading: waiting || assignable.isLoading, error: assignable.error, retry: () => void assignable.refetch() };
 }
 
@@ -481,7 +516,10 @@ export function OfferDialog({
   const [term, setTerm] = useState("");
   const [tried, setTried] = useState(false);
   const errorRef = useRef<HTMLDivElement>(null);
-  const search = useTechnicianSearch(term);
+  // O dia da visita no fuso da operação (sem agenda, hoje): quem avisou que não atende nele fica travado.
+  const today = dayKey(now);
+  const visitDay = ticket.scheduled_start ? dayKey(ticket.scheduled_start) || today : today;
+  const search = useTechnicianSearch(term, visitDay);
 
   // Os mais indicados para a OS (o mesmo ranking da aba Geral, com até 10). A própria OS não conta como
   // "ocupado" para ninguém (exclude_ticket_id).
@@ -565,7 +603,8 @@ export function OfferDialog({
   );
   const pickedIds = new Set(picked.map((p) => p.id));
   const full = picked.length >= MAX_TECHNICIANS;
-  const isDisabled = (c: Candidate) => Boolean(c.inactive) || helperIds.has(c.id) || (full && !pickedIds.has(c.id));
+  const isDisabled = (c: Candidate) =>
+    Boolean(c.inactive || c.status || c.unavailable) || helperIds.has(c.id) || (full && !pickedIds.has(c.id));
   const toggle = (c: Candidate) =>
     setPicked((list) =>
       list.some((p) => p.id === c.id)
@@ -580,6 +619,8 @@ export function OfferDialog({
       <>
         {c.busy ? <span className={BUSY_CHIP}>Ocupado no horário</span> : null}
         {c.outside !== undefined ? <OutsideAvailabilityChip gaps={c.outside} /> : null}
+        {c.status ? <OffStatusChip status={c.status} reason={c.statusReason} /> : null}
+        {c.unavailable ? <UnavailableChip period={c.unavailable} today={today} /> : null}
         {c.inactive ? <span className={CHIP}>Sem acesso ao app</span> : null}
         {helperIds.has(c.id) ? <span className={CHIP}>Já está na OS</span> : null}
         {before === "pending" ? (

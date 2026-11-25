@@ -407,13 +407,12 @@ function CategoryDialog({
             required
             minLength={2}
             maxLength={120}
-            placeholder="Ex.: Toner / suprimentos"
             aria-invalid={duplicate ? true : undefined}
             aria-describedby={duplicate ? nameErrorId : undefined}
           />
           {duplicate ? <FieldError id={nameErrorId}>Já existe uma categoria com este nome neste nível.</FieldError> : null}
         </Field>
-        <Field label="Categoria pai" hint="Vazio: categoria raiz (ex.: Impressoras).">
+        <Field label="Categoria pai" hint="Vazio: categoria raiz.">
           <Select value={form.parent_id} onChange={(e) => set("parent_id", e.target.value)}>
             <option value="">Nenhuma (raiz)</option>
             {parentOptions.map((c) => (

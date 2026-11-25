@@ -1,17 +1,20 @@
-// O cadastro do técnico (Configurações): GET/PATCH /me/profile, com o perfil técnico, e a foto (POST/DELETE
-// /me/profile/photo).
+// O cadastro do técnico (Configurações): GET/PATCH /me/profile, com o perfil técnico, a foto (POST/DELETE
+// /me/profile/photo), as formas de recebimento (/me/profile/payout-methods, em lib/payoutMethods.ts) e o link de
+// validação do e-mail (POST /me/profile/email/verification e DELETE /me/profile/email/pending). Toda rota do cadastro
+// devolve o MyProfile inteiro: writeProfile põe o pedido na fila e guarda o que voltar.
 //
-// Fica só na memória: endereço e chave PIX nunca vão para o SQLite nem para o SecureStore, e somem ao sair da conta.
-// Nada entra na fila offline (a senha pedida para e-mail e PIX não fica guardada, e o aviso à central sai na hora):
-// abrir, salvar e trocar a foto pedem internet. Nome, e-mail e celular atualizam também o usuário da sessão
-// (session.updateUser grava o e-mail novo para preencher o login).
+// Fica só na memória: endereço, documentos, chaves e contas nunca vão para o SQLite nem para o SecureStore, e somem ao
+// sair da conta. Nada entra na fila offline (a senha pedida para o e-mail, os dados da empresa e as formas de
+// recebimento não fica guardada, e o aviso à central sai na hora): abrir, salvar e trocar a foto pedem internet. Nome,
+// e-mail e celular atualizam também o usuário da sessão (session.updateUser grava o e-mail de login para preencher o
+// login; o e-mail novo só vira login depois do link).
 //
-// Gravações em fila (salvar, trocar e tirar a foto): uma só sai depois de a anterior responder. O "salvar ao tocar"
-// do perfil técnico nunca corre junto de outra gravação, e cada resposta já inclui a anterior. As listas do perfil
-// técnico (Aptidões e Formação, que vão inteiras) montam o corpo na hora em que a gravação sai da fila
-// (saveProfileWith), com o cadastro que a anterior devolveu: uma exclusão que esperou outra não devolve o item que a
-// outra tirou. Uma leitura durante a qual uma gravação saiu, voltou ou ficou no ar não é publicada: ela pode ser de
-// antes da gravação e desfaria a mudança na tela (fica o que a gravação devolveu).
+// Gravações em fila (salvar, foto, formas de recebimento e e-mail): uma só sai depois de a anterior responder. O
+// "salvar ao tocar" do perfil técnico nunca corre junto de outra gravação, e cada resposta já inclui a anterior. As
+// listas que vão inteiras no PATCH (Aptidões, Formação e Indisponibilidade) montam o corpo na hora em que a gravação sai
+// da fila (saveProfileWith), com o cadastro que a anterior devolveu: uma exclusão que esperou outra não devolve o item
+// que a outra tirou. Uma leitura durante a qual uma gravação saiu, voltou ou ficou no ar não é publicada: ela pode ser
+// de antes da gravação e desfaria a mudança na tela (fica o que a gravação devolveu).
 
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import { useSyncExternalStore } from "react";
@@ -92,6 +95,24 @@ export function hasTechnicalProfile(p: MyProfile | null | undefined): p is MyPro
   );
 }
 
+/**
+ * O servidor já tem o cadastro V2 (documentos, endereço em partes, empresa, veículo, formas de recebimento,
+ * indisponibilidade e validação do e-mail). O app novo pede a API nova, que sobe antes: sem ela, as telas do cadastro,
+ * menos Foto e Senha, mostram UNAVAILABLE (lib/technicalProfile.ts) e não gravam nada. Não estreita o tipo: o cadastro
+ * da API antiga também é um MyProfile, só sem os campos novos.
+ */
+export function hasCadastroV2(p: MyProfile | null | undefined): boolean {
+  return (
+    !!p &&
+    p.cpf !== undefined &&
+    p.address_number !== undefined &&
+    p.email_pending !== undefined &&
+    typeof p.mail_enabled === "boolean" &&
+    Array.isArray(p.payout_methods) &&
+    Array.isArray(p.unavailability)
+  );
+}
+
 /** Sobe quando uma gravação sai e quando ela volta (com ou sem erro): ímpar = gravação no ar. */
 let writes = 0;
 /** A última gravação da fila (nunca rejeita: a falha de uma não trava a seguinte). */
@@ -147,12 +168,34 @@ export function ensureProfile(): void {
 }
 
 /**
- * PATCH /me/profile: só o que mudou (e-mail e PIX com `current_password`; as partes do perfil técnico inteiras). Sai
- * depois da gravação anterior. Devolve o cadastro como ficou.
+ * Uma rota do cadastro que devolve o MyProfile (PATCH, foto, formas de recebimento, e-mail): sai na fila das gravações,
+ * depois da anterior, e guarda o que voltar. `send` só roda quando chega a vez (com a sessão de quem pediu).
+ */
+export function writeProfile(send: () => Promise<MyProfile>): Promise<MyProfile> {
+  const userId = session.get().user?.id ?? null;
+  return queueWrite(userId, async () => keep(await send(), userId));
+}
+
+/**
+ * PATCH /me/profile: só o que mudou (e-mail e dados da empresa com `current_password`; as partes do perfil técnico
+ * inteiras). Sai depois da gravação anterior. Devolve o cadastro como ficou.
  */
 export function saveProfile(body: MyProfileUpdate): Promise<MyProfile> {
-  const userId = session.get().user?.id ?? null;
-  return queueWrite(userId, async () => keep(await api.patch<MyProfile>("/me/profile", body), userId));
+  return writeProfile(() => api.patch<MyProfile>("/me/profile", body));
+}
+
+/**
+ * Envia (ou reenvia) o link de validação: para o e-mail novo pendente ou, sem ele, para o de login ainda não validado.
+ * Devolve o cadastro com o `email_link_sent_at` novo. Recusas do servidor: e-mail já validado (409), endereço que não
+ * recebe (422), envio desligado (503) e pedidos demais na hora (429).
+ */
+export function sendEmailLink(): Promise<MyProfile> {
+  return writeProfile(() => api.post<MyProfile>("/me/profile/email/verification"));
+}
+
+/** Cancela a troca de e-mail: o pendente sai, o link enviado para ele deixa de valer e o login continua o de hoje. */
+export function cancelEmailChange(): Promise<MyProfile> {
+  return writeProfile(() => api.delete<MyProfile>("/me/profile/email/pending"));
 }
 
 /**
@@ -229,6 +272,7 @@ export async function uploadAvatar(photo: AvatarPhoto): Promise<MyProfile> {
     throw new Error("Não foi possível preparar a foto. Escolha outra ou tire de novo.");
   }
   try {
+    // Quem pediu é quem tocou (antes de reduzir a foto), não quem estiver na sessão quando a redução acabar.
     return await queueWrite(userId, async () =>
       keep(await uploadFile<MyProfile>("/me/profile/photo", reduced, {}, "image/jpeg", "foto.jpg"), userId),
     );
@@ -239,6 +283,5 @@ export async function uploadAvatar(photo: AvatarPhoto): Promise<MyProfile> {
 
 /** Tira a foto (também a que veio do Field Control): no lugar ficam as iniciais. Sai na fila das gravações. */
 export function removeAvatar(): Promise<MyProfile> {
-  const userId = session.get().user?.id ?? null;
-  return queueWrite(userId, async () => keep(await api.delete<MyProfile>("/me/profile/photo"), userId));
+  return writeProfile(() => api.delete<MyProfile>("/me/profile/photo"));
 }

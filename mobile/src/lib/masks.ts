@@ -1,5 +1,8 @@
-// Máscaras e validações de documentos e contatos (sem import nativo). Portadas de frontend/src/lib/onboarding.ts,
-// com as mesmas regras da API (backend/app/core/documents.py e schemas/onboarding.py).
+// Máscaras e validações de documentos, contatos e contas (sem import nativo). Portadas de frontend/src/lib/onboarding.ts,
+// com as mesmas regras da API (backend/app/core/documents.py e schemas/onboarding.py). RG, órgão emissor e placa ficam
+// em ./constants (normalizeRg, isValidRg, normalizeIssuer, normalizePlate, isValidPlate), iguais na central e no app.
+
+import { PAYOUT_LIMITS } from "./constants";
 
 /** As 27 UFs (a API recusa outra sigla). */
 export const UFS = [
@@ -86,4 +89,45 @@ export function maskPhone(value: string): string {
   if (d.length <= 6) return `(${d.slice(0, 2)}) ${d.slice(2)}`;
   if (d.length <= 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
   return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+}
+
+// --------------------------------------------------------------------------- formas de recebimento
+
+/** Agência: até 4 números (o servidor grava com 4: "1" vira "0001"). */
+export const maskBranch = (value: string) => onlyDigits(value).slice(0, 4);
+
+/** Conta sem o dígito: só números, até 20. */
+export const maskAccountNumber = (value: string) => onlyDigits(value).slice(0, PAYOUT_LIMITS.accountNumber);
+
+/** Dígito da conta: o último número ou X digitado ("x" vira "X"). */
+export const maskAccountDigit = (value: string) => value.toUpperCase().replace(/[^0-9X]/g, "").slice(-1);
+
+const ACCOUNT_DIGIT = /^[0-9X]$/;
+
+/**
+ * Conta colada com o dígito ("12.345-x"): o número e o dígito separados ({ number: "12345", digit: "X" }). Sem "-", ou
+ * sem número antes dele, ou com mais de um caractere depois: null (o campo fica só com os números).
+ */
+export function splitAccount(value: string): { number: string; digit: string } | null {
+  const at = value.lastIndexOf("-");
+  if (at < 0) return null;
+  const number = maskAccountNumber(value.slice(0, at));
+  const digit = value.slice(at + 1).replace(/\s/g, "").toUpperCase();
+  return number && ACCOUNT_DIGIT.test(digit) ? { number, digit } : null;
+}
+
+/** Só letras e números ("12.ABC.345/01DE-35" vira "12ABC34501DE35"). */
+const documentChars = (value: string) => value.replace(/[^0-9A-Za-z]/g, "");
+
+/** CPF ou CNPJ do titular: com letra ou mais de 11 caracteres, a máscara do CNPJ; senão, a do CPF. */
+export function maskDocument(value: string): string {
+  const chars = documentChars(value);
+  return /[A-Za-z]/.test(chars) || chars.length > 11 ? maskCnpj(chars) : maskCpf(chars);
+}
+
+/** CPF de 11 números ou CNPJ de 14 caracteres (inclusive o alfanumérico), válidos. */
+export function isValidDocument(value: string): boolean {
+  const chars = documentChars(value);
+  if (chars.length === 11) return isValidCpf(chars);
+  return chars.length === 14 && isValidCnpj(chars);
 }

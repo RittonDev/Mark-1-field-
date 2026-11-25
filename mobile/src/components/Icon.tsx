@@ -43,6 +43,9 @@ export type IconName =
   | "note"
   | "users"
   | "wallet"
+  // Formas de recebimento: chave PIX e conta bancária.
+  | "key"
+  | "bank"
   // Perfil, Configurações, Faturamento e oferta.
   | "settings"
   | "history"
@@ -245,6 +248,15 @@ function Shape({ name, color }: { name: IconName; color: string }) {
           <Path d="M21 11.5h-4a1.75 1.75 0 0 0 0 3.5h4" />
         </>
       );
+    case "key": // chave PIX
+      return (
+        <>
+          <Circle cx={8} cy={15} r={4.5} />
+          <Path d="M11.2 11.8 20 3M16.5 6.5l2.5 2.5M14 9l2 2" />
+        </>
+      );
+    case "bank": // conta bancária
+      return <Path d="M3.5 9.5 12 4.5l8.5 5zM5.5 10v7M10 10v7M14 10v7M18.5 10v7M3.5 19.5h17" />;
     case "settings": // ajustes: três controles deslizantes (não engrenagem)
       return (
         <>

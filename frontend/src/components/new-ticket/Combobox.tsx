@@ -25,6 +25,22 @@ export interface ComboItem<T> {
   label: string;
   /** Onde a busca procura, já com searchText (nome, cliente, CNPJ só com dígitos...). */
   haystack: string;
+  /**
+   * Aparece na lista mas não pode ser escolhido (técnico Inativo ou Bloqueado no Colaborador): o clique e o Enter não
+   * escolhem e as setas pulam. O motivo vai no renderItem.
+   */
+  disabled?: boolean;
+}
+
+/** A próxima opção livre a partir de `from`, andando `step` e dando a volta (`self`: conta a própria); -1 sem nenhuma. */
+function nextEnabled<T>(list: ComboItem<T>[], from: number, step: 1 | -1, self = false): number {
+  const n = list.length;
+  if (!n) return -1;
+  for (let k = self ? 0 : 1; k <= n; k++) {
+    const i = (((from + step * k) % n) + n) % n;
+    if (!list[i].disabled) return i;
+  }
+  return -1;
 }
 
 /**
@@ -86,7 +102,9 @@ export function Combobox<T>({
     return words.length ? items.filter((i) => words.every((w) => i.haystack.includes(w))) : items;
   }, [items, query]);
   const visible = matches.slice(0, limit);
-  const activeIndex = Math.max(0, Math.min(active, visible.length - 1));
+  // A destacada é a pedida (setas, mouse, a escolhida ao abrir) ou, se ela está travada, a próxima livre (-1: nenhuma).
+  const wanted = Math.max(0, Math.min(active, visible.length - 1));
+  const activeIndex = visible[wanted]?.disabled ? nextEnabled(visible, wanted, 1, true) : visible.length ? wanted : -1;
   const optionId = (i: number) => `${listId}-o${i}`;
 
   // A opção destacada pelas setas fica sempre à vista na lista.
@@ -101,6 +119,7 @@ export function Combobox<T>({
     setActive(index >= 0 && index < limit ? index : 0);
   };
   const pick = (entry: ComboItem<T>) => {
+    if (entry.disabled) return;
     onChange(entry.item);
     setQuery(null);
   };
@@ -114,7 +133,7 @@ export function Combobox<T>({
         aria-expanded={open}
         aria-controls={listId}
         aria-autocomplete="list"
-        aria-activedescendant={open && visible.length ? optionId(activeIndex) : undefined}
+        aria-activedescendant={open && activeIndex >= 0 ? optionId(activeIndex) : undefined}
         aria-labelledby={labelledBy}
         aria-label={labelledBy ? undefined : ariaLabel}
         aria-invalid={invalid || undefined}
@@ -134,13 +153,14 @@ export function Combobox<T>({
           if (e.key === "ArrowDown" || e.key === "ArrowUp") {
             e.preventDefault();
             if (!open) return openList();
-            if (!visible.length) return;
-            const step = e.key === "ArrowDown" ? 1 : -1;
-            setActive((activeIndex + step + visible.length) % visible.length);
+            if (activeIndex < 0) return;
+            // As travadas ficam de fora do caminho das setas.
+            const next = nextEnabled(visible, activeIndex, e.key === "ArrowDown" ? 1 : -1);
+            if (next >= 0) setActive(next);
           } else if (e.key === "Enter" && !e.ctrlKey && !e.metaKey) {
             // Enter escolhe; nunca envia o formulário.
             e.preventDefault();
-            if (open && visible[activeIndex]) pick(visible[activeIndex]);
+            if (open && activeIndex >= 0 && visible[activeIndex]) pick(visible[activeIndex]);
           } else if (e.key === "Escape" && open) {
             e.preventDefault();
             setQuery(null);
@@ -188,14 +208,16 @@ export function Combobox<T>({
                 id={optionId(i)}
                 role="option"
                 aria-selected={i === activeIndex}
-                // mousedown antes do blur do campo: a lista continua aberta até o clique.
+                aria-disabled={entry.disabled || undefined}
+                // mousedown antes do blur do campo: a lista continua aberta até o clique (também na travada).
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => pick(entry)}
                 onMouseMove={() => {
-                  if (i !== activeIndex) setActive(i);
+                  if (i !== activeIndex && !entry.disabled) setActive(i);
                 }}
                 className={clsx(
-                  "flex cursor-pointer items-start gap-2 px-3 py-2 text-sm text-ink",
+                  "flex items-start gap-2 px-3 py-2 text-sm",
+                  entry.disabled ? "cursor-not-allowed text-ink-muted" : "cursor-pointer text-ink",
                   i === activeIndex && "bg-surface-2",
                 )}
               >

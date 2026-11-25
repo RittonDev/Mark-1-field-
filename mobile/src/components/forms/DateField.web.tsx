@@ -1,4 +1,6 @@
-// Pré-visualização no navegador: <input type="date">. Mesmas props do DateField.tsx.
+// Pré-visualização no navegador: <input type="date">. Mesmas props do DateField.tsx; `min` e `max` vão para o campo
+// (o seletor do navegador não deixa escolher fora deles). `todayShortcut` e `initial` não mudam nada aqui: o seletor é
+// o do navegador.
 
 import { brandFont } from "../../theme/fonts";
 import { useTheme } from "../../theme/theme";
@@ -8,11 +10,19 @@ export function DateField({
   onChange,
   disabled = false,
   label,
+  min,
+  max,
 }: {
   value: string | null;
   onChange: (value: string | null) => void;
   disabled?: boolean;
   label?: string;
+  /** Primeiro dia que o seletor deixa escolher ("YYYY-MM-DD"). */
+  min?: string;
+  /** Último dia que o seletor deixa escolher ("YYYY-MM-DD"). */
+  max?: string;
+  todayShortcut?: boolean;
+  initial?: string;
 }) {
   const c = useTheme();
   return (
@@ -20,6 +30,8 @@ export function DateField({
       type="date"
       aria-label={label ?? "Data"}
       value={value ?? ""}
+      min={min}
+      max={max}
       disabled={disabled}
       onChange={(event) => onChange(event.target.value || null)}
       style={{

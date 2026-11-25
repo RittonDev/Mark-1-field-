@@ -66,7 +66,15 @@ import { SegmentedRadio } from "@/components/new-ticket/SegmentedRadio";
 import { ServiceTypePicker } from "@/components/new-ticket/ServiceTypePicker";
 import { Caution, FieldError, Step, stepHintId } from "@/components/new-ticket/Step";
 import { readStored, writeStored } from "@/components/new-ticket/storage";
-import { HelpersField, SuggestedTechnicians } from "@/components/new-ticket/SuggestedTechnicians";
+import {
+  HelpersField,
+  OFF_STATUS_TEXT,
+  offStatus,
+  offStatusCaution,
+  offStatusLine,
+  SuggestedTechnicians,
+  unavailableCaution,
+} from "@/components/new-ticket/SuggestedTechnicians";
 import { ConflictHint, ConflictList, scheduleConflicts } from "@/components/ScheduleConflict";
 import { TagsInput } from "@/components/TagChips";
 import { useTicketPanel } from "@/components/ticket/TicketPanel";
@@ -89,7 +97,7 @@ import {
 import { useNow } from "@/components/useNow";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { PRIORITY, PRIORITY_ORDER, ROLE, TICKET_TYPE } from "@/lib/constants";
+import { OPERATIONAL_STATUS, periodShort, PRIORITY, PRIORITY_ORDER, ROLE, TICKET_TYPE, unavailableOn } from "@/lib/constants";
 import { dayKey, formatMinutes, formatMoney, formatTime, fromLocalInput, toLocalInput } from "@/lib/format";
 import { useUnsavedChanges } from "@/lib/hooks";
 import { useCan, useQueueScope } from "@/lib/permissions";
@@ -447,20 +455,45 @@ function NewTicket() {
   const favoriteCity = cityFavorites.data ?? null;
   const favoriteRank = useMemo(() => {
     const rank = new Map<UUID, number>();
-    for (const fav of favoriteCity?.favorites ?? []) if (fav.is_active) rank.set(fav.id, rank.size);
+    for (const fav of favoriteCity?.favorites ?? []) if (fav.is_active && !offStatus(fav)) rank.set(fav.id, rank.size);
     return rank;
   }, [favoriteCity]);
   const assigneeItems = useMemo<ComboItem<AssignableUser>[]>(() => {
-    // Os favoritos na ordem deles; o resto continua na ordem de antes (a ordenação é estável).
-    const order = (u: AssignableUser) => favoriteRank.get(u.id) ?? favoriteRank.size;
-    const ranked = favoriteRank.size ? [...people].sort((a, b) => order(a) - order(b)) : people;
-    return ranked.map((u) => ({
-      key: u.id,
-      item: u,
-      label: u.name,
-      haystack: searchText(`${u.name} ${u.team_name ?? ""} ${ROLE[u.role]}${favoriteRank.has(u.id) ? " favorito" : ""}`),
-    }));
+    // Os favoritos na ordem deles; o resto continua na ordem de antes (a ordenação é estável). Inativo e Bloqueado
+    // vêm no fim, travados, com o motivo: a API recusa como responsável.
+    const order = (u: AssignableUser) => (offStatus(u) ? favoriteRank.size + 1 : (favoriteRank.get(u.id) ?? favoriteRank.size));
+    const ranked = [...people].sort((a, b) => order(a) - order(b));
+    return ranked.map((u) => {
+      const off = offStatus(u);
+      return {
+        key: u.id,
+        item: u,
+        label: u.name,
+        haystack: searchText(
+          `${u.name} ${u.team_name ?? ""} ${ROLE[u.role]}${favoriteRank.has(u.id) ? " favorito" : ""}${off ? ` ${OPERATIONAL_STATUS[off]}` : ""}`,
+        ),
+        disabled: Boolean(off),
+      };
+    });
   }, [people, favoriteRank]);
+  // A indisponibilidade vale no dia da visita (sem data, hoje); o "até 30/11" conta de hoje. No fuso da operação.
+  const today = dayKey(now);
+  const visitDay = f.date || today;
+  const awayOn = (u: AssignableUser | undefined) => (u && !offStatus(u) ? unavailableOn(u.unavailability, visitDay) : null);
+  const personOf = (id: UUID | "") => (id ? people.find((u) => u.id === id) : undefined);
+  // O técnico escolhido (ou do rascunho), o responsável e os que vão junto, que saiu de Ativo ou avisou que não atende no
+  // dia: o aviso embaixo do Colaborador (sempre à vista; os que vão junto ficam em "Mais detalhes").
+  const receiveCaution = (id: UUID | "") => {
+    const person = personOf(id);
+    const off = person ? offStatus(person) : null;
+    if (person && off) return offStatusCaution(person.name, off, person.operational_reason);
+    const away = awayOn(person);
+    return person && away ? unavailableCaution(person.name, away, today) : null;
+  };
+  const cautions = [f.assignee_id, ...d.helperIds].flatMap((id) => {
+    const text = id ? receiveCaution(id) : null;
+    return text ? [{ id, text }] : [];
+  });
   const names = useMemo(() => {
     const map: Record<UUID, string> = {};
     for (const u of assignable.data ?? []) map[u.id] = u.name;
@@ -1340,6 +1373,15 @@ function NewTicket() {
                 title="Colaborador"
                 titleId={ids.assignee}
                 done={Boolean(f.assignee_id)}
+                extra={
+                  cautions.length ? (
+                    <div className="flex flex-col gap-1.5">
+                      {cautions.map((c) => (
+                        <Caution key={c.id}>{c.text}</Caution>
+                      ))}
+                    </div>
+                  ) : undefined
+                }
               >
                 <Combobox<AssignableUser>
                   items={assigneeItems}
@@ -1353,26 +1395,39 @@ function NewTicket() {
                   placeholder="Buscar colaborador por nome ou equipe"
                   emptyText="Nenhum colaborador com esse nome"
                   clearLabel="Tirar o colaborador"
-                  renderItem={(u) =>
-                    favoriteCity && favoriteRank.has(u.id) ? (
+                  renderItem={(u) => {
+                    const off = offStatus(u);
+                    if (off) {
+                      // Travado na lista: o motivo inteiro no title.
+                      return (
+                        <span className="flex flex-col" title={u.operational_reason?.trim() || undefined}>
+                          <span className="font-medium">{u.name}</span>
+                          <span className={clsx("text-xs", OFF_STATUS_TEXT[off])}>{offStatusLine(off, u.operational_reason)}</span>
+                        </span>
+                      );
+                    }
+                    const away = awayOn(u);
+                    const favorite = favoriteCity && favoriteRank.has(u.id) ? favoriteCity : null;
+                    return (
                       <span className="flex flex-col">
                         <span className="flex items-center gap-1 font-medium">
-                          <Star aria-hidden className="size-3 shrink-0 fill-current text-brand" />
+                          {favorite ? <Star aria-hidden className="size-3 shrink-0 fill-current text-brand" /> : null}
                           {u.name}
                         </span>
                         <span className="text-xs text-ink-muted">
-                          Favorito em {favoriteCity.city}-{favoriteCity.state} · {u.open_tickets} em aberto
+                          {away ? (
+                            <span className="font-medium text-amber-800 dark:text-amber-300">Indisponível {periodShort(away, today)} · </span>
+                          ) : null}
+                          {favorite
+                            ? `Favorito em ${favorite.city}-${favorite.state}`
+                            : u.role === "technician"
+                              ? (u.team_name ?? "Técnico")
+                              : ROLE[u.role]}{" "}
+                          · {u.open_tickets} em aberto
                         </span>
                       </span>
-                    ) : (
-                      <span className="flex flex-col">
-                        <span className="font-medium">{u.name}</span>
-                        <span className="text-xs text-ink-muted">
-                          {u.role === "technician" ? (u.team_name ?? "Técnico") : ROLE[u.role]} · {u.open_tickets} em aberto
-                        </span>
-                      </span>
-                    )
-                  }
+                    );
+                  }}
                 />
               </Step>
 
@@ -1656,8 +1711,16 @@ function NewTicket() {
                 <div className="@2xl:col-span-2">
                   <HelpersField
                     options={people
-                      .filter((u) => u.role === "technician")
-                      .map((u) => ({ id: u.id, name: u.name, detail: u.team_name ?? undefined }))}
+                      .filter((u) => u.role === "technician" && !offStatus(u))
+                      .map((u) => {
+                        const away = awayOn(u);
+                        return {
+                          id: u.id,
+                          name: u.name,
+                          detail: u.team_name ?? undefined,
+                          unavailable: away ? `indisponível ${periodShort(away, today)}` : undefined,
+                        };
+                      })}
                     assigneeId={f.assignee_id}
                     helperIds={d.helperIds}
                     names={names}

@@ -14,7 +14,14 @@ import { useToast } from "@/components/Toaster";
 import { Combobox, searchText, type ComboItem } from "@/components/new-ticket/Combobox";
 import { serviceTypeTiming } from "@/components/new-ticket/ServiceTypePicker";
 import { readStored, writeStored } from "@/components/new-ticket/storage";
-import { HelpersField, SuggestedTechnicians } from "@/components/new-ticket/SuggestedTechnicians";
+import {
+  HelpersField,
+  offStatus,
+  offStatusCaution,
+  shortReason,
+  SuggestedTechnicians,
+  unavailableCaution,
+} from "@/components/new-ticket/SuggestedTechnicians";
 import { AcceptedOfferLine, OfferDialog, OffersBlock } from "@/components/ticket/OffersCard";
 import { PayoutLine } from "@/components/ticket/PayoutsCard";
 import { busyTitle, isVersionConflict } from "@/components/ticket/useConflictHandler";
@@ -22,14 +29,25 @@ import { useNow } from "@/components/useNow";
 import { Button, buttonClassName, Card, CardHeader, ErrorBox, Field, Input, SectionTitle, Select, Textarea } from "@/components/ui";
 import { api, errorMessage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { PRIORITY, PRIORITY_ORDER, ROLE, STATUS, STATUS_ORDER, TICKET_SOURCE } from "@/lib/constants";
-import { formatDateTime, formatDocument, formatMinutes, formatMoney, fromLocalInput, toLocalInput } from "@/lib/format";
+import {
+  OPERATIONAL_STATUS,
+  periodShort,
+  PRIORITY,
+  PRIORITY_ORDER,
+  ROLE,
+  STATUS,
+  STATUS_ORDER,
+  TICKET_SOURCE,
+  unavailableOn,
+} from "@/lib/constants";
+import { dayKey, formatDateTime, formatDocument, formatMinutes, formatMoney, fromLocalInput, toLocalInput } from "@/lib/format";
 import { useDebounced } from "@/lib/hooks";
 import { useCan } from "@/lib/permissions";
 import { useProjects } from "@/lib/projects";
 import { useAssignable, useCategories, useCityFavorites, useCustomers, useServiceTypes } from "@/lib/queries";
 import { type TicketTagRules, useTagRules } from "@/lib/tagRules";
 import type {
+  AssignableUser,
   ConflictItem,
   Customer,
   IntakeContext,
@@ -468,8 +486,38 @@ export function GeneralTab({
       ),
     [assignable.data],
   );
-  const technicians = people.filter((p) => p.role === "technician");
+  // Inativo e Bloqueado (o /users/assignable manda com o motivo) ficam num grupo à parte, travados: a API recusa
+  // quem entra na OS fora de Ativo. Os que vão junto também só entre os que recebem OS.
+  const technicians = people.filter((p) => p.role === "technician" && !offStatus(p));
+  const offTechs = people.filter((p) => p.role === "technician" && offStatus(p));
   const internal = people.filter((p) => p.role !== "technician");
+  // A indisponibilidade vale no dia da visita (sem data, hoje); o "até 30/11" conta de hoje. No fuso da operação.
+  const today = dayKey(now);
+  const visitDay = form.date || today;
+  const awayOn = (p: AssignableUser | undefined) => (p && !offStatus(p) ? unavailableOn(p.unavailability, visitDay) : null);
+  const awaySuffix = (p: AssignableUser) => {
+    const away = awayOn(p);
+    return away ? ` · indisponível ${periodShort(away, today)}` : "";
+  };
+  const offText = (p: AssignableUser) => {
+    const off = offStatus(p);
+    const reason = shortReason(p.operational_reason);
+    return off ? `${p.name} · ${OPERATIONAL_STATUS[off].toLowerCase()}${reason ? `: ${reason}` : ""}` : p.name;
+  };
+  // O responsável e os que vão junto que saíram de Ativo ou avisaram que não atendem no dia (só com a OS em andamento).
+  const receiveCaution = (id: UUID | "") => {
+    const person = id ? people.find((p) => p.id === id) : undefined;
+    const off = person ? offStatus(person) : null;
+    if (person && off) return offStatusCaution(person.name, off, person.operational_reason);
+    const away = awayOn(person);
+    return person && away ? unavailableCaution(person.name, away, today) : null;
+  };
+  const receiveCautions = FINISHED.includes(server.status)
+    ? []
+    : [form.assigneeId, ...form.helperIds].flatMap((id) => {
+        const text = receiveCaution(id);
+        return text ? [{ id, text }] : [];
+      });
   // Favoritos da cidade da loja: a estrela nos sugeridos e um grupo próprio no Colaborador (os ativos
   // que estão na lista, na ordem dos favoritos; eles saem do grupo "Técnicos" para não repetir).
   const cityFavorites = useCityFavorites(form.locationId || null);
@@ -1108,7 +1156,7 @@ export function GeneralTab({
                 <optgroup label={`Favoritos em ${favoriteCity.city}-${favoriteCity.state}`}>
                   {favoriteTechs.map((p) => (
                     <option key={p.id} value={p.id}>
-                      {p.name} · {p.open_tickets} em aberto
+                      {p.name} · {p.open_tickets} em aberto{awaySuffix(p)}
                     </option>
                   ))}
                 </optgroup>
@@ -1117,7 +1165,7 @@ export function GeneralTab({
                 <optgroup label="Técnicos">
                   {otherTechs.map((p) => (
                     <option key={p.id} value={p.id}>
-                      {p.name} · {p.open_tickets} em aberto
+                      {p.name} · {p.open_tickets} em aberto{awaySuffix(p)}
                     </option>
                   ))}
                 </optgroup>
@@ -1131,6 +1179,16 @@ export function GeneralTab({
                   ))}
                 </optgroup>
               ) : null}
+              {offTechs.length ? (
+                // À vista com o motivo, sem poder escolher (o técnico já na OS continua aparecendo como escolhido).
+                <optgroup label="Inativos e bloqueados">
+                  {offTechs.map((p) => (
+                    <option key={p.id} value={p.id} disabled>
+                      {offText(p)}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null}
               {form.assigneeId && !assigneeListed ? <option value={form.assigneeId}>{assigneeName ?? "Técnico atual"}</option> : null}
             </Select>
           </Field>
@@ -1138,7 +1196,10 @@ export function GeneralTab({
             <span className="text-xs font-semibold text-ink/80">Outros colaboradores</span>
             <HelpersField
               hideLabel
-              options={technicians.map((p) => ({ id: p.id, name: p.name }))}
+              options={technicians.map((p) => {
+                const away = awayOn(p);
+                return { id: p.id, name: p.name, unavailable: away ? `indisponível ${periodShort(away, today)}` : undefined };
+              })}
               assigneeId={form.assigneeId as UUID | ""}
               helperIds={form.helperIds}
               names={names}
@@ -1146,6 +1207,11 @@ export function GeneralTab({
             />
           </div>
           {assigneeWarning ? <Caution className="col-span-12">{assigneeWarning.text}</Caution> : null}
+          {receiveCautions.map((c) => (
+            <Caution key={c.id} className="col-span-12">
+              {c.text}
+            </Caution>
+          ))}
           {offersClosing ? (
             <Caution className="col-span-12">
               {openOffers === 1
@@ -1359,7 +1425,6 @@ export function GeneralTab({
                   value={form.clientReference}
                   onChange={(e) => set("clientReference", e.target.value)}
                   maxLength={80}
-                  placeholder="Ex.: INC0012345"
                 />
               </Field>
               <Field label="Quem pediu" className="col-span-12 @xl:col-span-4">
@@ -1404,7 +1469,7 @@ export function GeneralTab({
                 <Input
                   value={form.serviceAddress}
                   onChange={(e) => set("serviceAddress", e.target.value)}
-                  placeholder="Outro lugar para este atendimento (ex.: doca 3, entrada pelos fundos)"
+                  placeholder="Outro lugar para este atendimento"
                   maxLength={255}
                 />
               </Field>
@@ -1491,7 +1556,6 @@ export function GeneralTab({
                   <Input
                     value={form.timesReason}
                     onChange={(e) => set("timesReason", e.target.value)}
-                    placeholder="Ex.: técnico esqueceu de concluir no app; confirmado com a loja"
                     maxLength={500}
                     aria-required="true"
                     aria-invalid={errors.reason ? true : undefined}

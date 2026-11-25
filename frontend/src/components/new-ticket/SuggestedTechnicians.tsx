@@ -55,6 +55,12 @@ export function offStatus(person: { operational_status?: OperationalStatus | nul
   return status === "inactive" || status === "blocked" ? status : null;
 }
 
+/** Cor do texto da situação, a mesma dos selos (âmbar no Inativo, vermelho no Bloqueado). */
+export const OFF_STATUS_TEXT: Record<OffStatus, string> = {
+  inactive: "text-amber-800 dark:text-amber-300",
+  blocked: "text-red-700 dark:text-red-400",
+};
+
 /** O motivo numa linha, até `max` caracteres (o inteiro vai no `title`). */
 export function shortReason(reason: string | null | undefined, max = 60): string {
   const text = (reason ?? "").replace(/\s+/g, " ").trim();
