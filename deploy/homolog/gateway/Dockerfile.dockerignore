@@ -1,0 +1,12 @@
+# Contexto do build do gateway = raiz do repositório. Entra só o app dos técnicos e a config do gateway.
+*
+!mobile
+!deploy/homolog/gateway
+mobile/node_modules
+mobile/.expo
+mobile/dist
+mobile/web-build
+mobile/android
+mobile/ios
+mobile/.env
+mobile/.env.*
