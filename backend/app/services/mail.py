@@ -43,28 +43,6 @@ from app.schemas.account import EmailQueued, EmailQueuedStatus
 from app.services import mail_templates
 from app.services.mail_templates import Rendered
 
-__all__ = [
-    "BACKOFF_MINUTES",
-    "LOG_RETENTION_DAYS",
-    "MAX_ATTEMPTS",
-    "SEND_BY",
-    "TOKEN_RETENTION_DAYS",
-    "DisabledProvider",
-    "EmailQueuedStatus",
-    "MailError",
-    "MailProvider",
-    "SmtpProvider",
-    "build_message",
-    "deliver_after_commit",
-    "deliver_pending",
-    "deliver_soon",
-    "enqueue",
-    "get_provider",
-    "purge_old",
-    "queued",
-    "sendable",
-]
-
 log = logging.getLogger(__name__)
 
 # Prazo para sair: depois disso o e-mail vence (um link de 2 h que chega um dia depois não serve).
