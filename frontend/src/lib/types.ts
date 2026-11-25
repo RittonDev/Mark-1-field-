@@ -1159,7 +1159,7 @@ export interface Technician {
   payout_methods_count?: number;
   /** Última troca do destino do pagamento ("Nova" por PAYOUT_RECENT_DAYS); null sem forma. */
   payout_changed_at?: ISODate | null;
-  /** Só no detalhe (GET /technicians/{id} e as respostas de um técnico): dados pessoais, empresa e veículo. */
+  // Só no detalhe (GET /technicians/{id} e as respostas de um técnico): dados pessoais, empresa e veículo.
   /** 11 números. */
   cpf?: string | null;
   rg_number?: string | null;
@@ -1869,6 +1869,8 @@ export interface NearbyTechnician {
   open_tickets: number;
   on_shift: boolean;
   reasons: string[];
+  /** A API antiga não manda (vale "active"). */
+  operational_status?: OperationalStatus;
 }
 
 export interface NearbyResult {
@@ -1900,6 +1902,8 @@ export interface FavoriteTechnician {
   note: string | null;
   set_by: Ref | null;
   set_at: ISODate | null;
+  /** Fora de "active", não entra no automático. A API antiga não manda (vale "active"). */
+  operational_status?: OperationalStatus;
 }
 
 export interface FavoriteCity {
@@ -2037,11 +2041,14 @@ export interface MyEarnings extends PayoutList {
 }
 
 /**
- * GET /payouts da central. Com `with_pix=true`, `pix` traz a chave de cada técnico das linhas (e do filtro
- * `technician_id`) que tem chave; sem ele, `{}`. Relatórios não pede.
+ * GET /payouts da central. Com `with_payout_methods=true`, `payout_methods` traz a preferencial e o total de formas de
+ * cada técnico das linhas (e do filtro `technician_id`) que tem forma de recebimento (sem forma, fora do mapa); sem o
+ * parâmetro, `{}`. Relatórios não pede.
  */
 export interface PayoutBoard extends PayoutList {
-  pix: Record<UUID, PixInfo>;
+  payout_methods: Record<UUID, PayoutMethodSummary>;
+  /** @deprecated Sai no fechamento da Entrega 1 (V1). API antiga, com `with_pix=true`: a chave PIX de cada técnico. */
+  pix?: Record<UUID, PixInfo>;
 }
 
 /**
@@ -2141,18 +2148,18 @@ export type PixKeyType = "cpf" | "cnpj" | "email" | "phone" | "random";
 /**
  * A chave PIX como está gravada (normalizada; formatPixKey para mostrar; copiar leva a chave crua): CPF com 11
  * dígitos, CNPJ com 14 caracteres em maiúsculas, e-mail em minúsculas, celular "+55" e 11 dígitos, chave aleatória
- * 8-4-4-4-12.
+ * 8-4-4-4-12. Só em MyProfile.pix (o app antigo); o resto usa PayoutMethod.
  */
 export interface PixInfo {
   key_type: PixKeyType;
   key: string;
   /** Titular da conta: quem paga compara com o nome que o banco mostra. */
   holder_name: string | null;
-  /** Quando a chave mudou ("Chave nova" por PIX_RECENT_DAYS). */
+  /** Quando a chave mudou (o changed_at da forma de recebimento). */
   updated_at: ISODate | null;
 }
 
-/** GET /me/profile (só o técnico). Endereço e PIX não vão no /auth/me. */
+/** GET /me/profile (só o técnico). Endereço e formas de recebimento não vão no /auth/me. Nada da situação na operação. */
 export interface MyProfile {
   id: UUID;
   name: string;
@@ -2163,12 +2170,48 @@ export interface MyProfile {
   home_city: string | null;
   home_state: string | null;
   coverage_area: string | null;
+  /** O logradouro (endereços antigos: a linha inteira). */
   address_line: string | null;
+  address_number: string | null;
+  address_complement: string | null;
   address_district: string | null;
   address_zip: string | null;
   /** Link assinado de 12 h (ou a foto do Field Control). */
   avatar_url: string | null;
+  /** @deprecated app antigo: a preferencial quando é PIX (null se a preferencial for conta ou sem forma). */
   pix: PixInfo | null;
+  /** 11 números; null: não informado (o técnico informa uma vez; depois, só a central corrige). */
+  cpf: string | null;
+  rg_number: string | null;
+  rg_issuer: string | null;
+  /** UF do órgão emissor. */
+  rg_state: string | null;
+  /** "AAAA-MM-DD". */
+  birth_date: string | null;
+  /** "(11) 3333-4444". */
+  phone_secondary: string | null;
+  bio: string | null;
+  /** CNPJ, 14 caracteres (pode ter letras). */
+  company_document: string | null;
+  /** Razão social. */
+  company_name: string | null;
+  /** Nome fantasia. */
+  company_trade_name: string | null;
+  vehicle_model: string | null;
+  /** 7 caracteres, sem hífen ("ABC1234", "ABC1D23"). */
+  vehicle_plate: string | null;
+  /** E-mail novo esperando o link: o login continua `email` até lá. */
+  email_pending: string | null;
+  /** null: o e-mail de login nunca foi validado. */
+  email_verified_at: ISODate | null;
+  /** Último link de validação pedido (para o pendente ou para o atual). */
+  email_link_sent_at: ISODate | null;
+  /** Envio de e-mail ligado no servidor: sem ele, o e-mail fica só leitura e a troca é pela central. */
+  mail_enabled: boolean;
+  /** A preferencial primeiro, depois as mais novas. */
+  payout_methods: PayoutMethod[];
+  /** Os períodos que não terminaram, pelo início. */
+  unavailability: UnavailabilityPeriod[];
   /** Perfil técnico (Configurações › Atendimento). Ferramentas: só as ativas do catálogo, na ordem do nome. */
   tool_ids: UUID[];
   /** Na ordem da grade (seg a dom; manhã, tarde, noite, madrugada). */
