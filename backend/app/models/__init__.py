@@ -1,6 +1,7 @@
 """Importa todos os modelos para registrar as tabelas no metadata (usado pelo Alembic)."""
 
 from app.models.access import AccessProfile
+from app.models.account_token import AccountToken
 from app.models.asset import Asset
 from app.models.catalog import (
     Category,
@@ -11,6 +12,7 @@ from app.models.catalog import (
     ViolationReason,
 )
 from app.models.customer import Customer, Location
+from app.models.email_outbox import EmailOutbox
 from app.models.expense import SystemSetting, TicketExpense
 from app.models.forms import FormTemplate, TicketForm
 from app.models.invoice import TechnicianInvoice
@@ -19,6 +21,7 @@ from app.models.offer import TicketOffer
 from app.models.onboarding import OnboardingInvite, TechnicianApplication
 from app.models.part_request import TicketPartRequest
 from app.models.payout import TicketPayout
+from app.models.payout_method import TechnicianPayoutMethod
 from app.models.project import Project
 from app.models.quote import Quote, QuoteItemCatalog
 from app.models.repair import RepairEvent, RepairOrder, RepairPhoto
@@ -38,10 +41,12 @@ from app.models.user_change import UserChange
 
 __all__ = [
     "AccessProfile",
+    "AccountToken",
     "Asset",
     "Category",
     "Customer",
     "DeviceToken",
+    "EmailOutbox",
     "FormTemplate",
     "LegacyRef",
     "Location",
@@ -71,6 +76,7 @@ __all__ = [
     "TechnicianInvoice",
     "TechnicianLevel",
     "TechnicianLevelWaiver",
+    "TechnicianPayoutMethod",
     "TechnicianTool",
     "UnproductiveReason",
     "TechnicianApplication",

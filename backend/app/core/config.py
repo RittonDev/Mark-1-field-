@@ -1,9 +1,13 @@
+import re
 from functools import lru_cache
+from typing import Literal
 
-from pydantic import model_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _DEV_SECRET = "dev-only-secret-troque-em-producao"
+# Remetente dos e-mails: um endereço só (sem nome nem "<>"), conferido ao subir a API.
+_MAIL_FROM = re.compile(r"[^@\s<>\"]+@[^@\s<>\"]+\.[^@\s<>\"]+")
 # Desenvolvimento: localhost e a rede local (qualquer porta). Assim o app dos técnicos aberto no
 # navegador do celular, pelo IP do notebook, fala com a API. Em produção vale só a CORS_ORIGINS.
 _DEV_ORIGIN_REGEX = (
@@ -79,6 +83,42 @@ class Settings(BaseSettings):
     # Vazio: só entra quem já está cadastrado em Usuários. "analyst": o primeiro login cria.
     ENTRA_AUTO_PROVISION_ROLE: str | None = None
 
+    # E-mails do cadastro dos técnicos (validação do e-mail, boas-vindas e nova senha): fila no banco
+    # e envio por SMTP (services/mail.py). Sem SMTP_HOST e MAIL_FROM o envio fica desligado: os
+    # e-mails ficam "não enviados" e a central segue com o WhatsApp e a senha provisória.
+    SMTP_HOST: str | None = None
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str | None = None
+    SMTP_PASSWORD: str | None = None
+    # starttls (porta 587) | ssl (porta 465) | none (texto puro: só desenvolvimento, recusado em
+    # produção).
+    SMTP_SECURITY: Literal["starttls", "ssl", "none"] = "starttls"
+    SMTP_TIMEOUT_SECONDS: int = 20
+    # Remetente que não recebe resposta; o nome dele, vazio = COMPANY_NAME.
+    MAIL_FROM: str | None = None
+    MAIL_FROM_NAME: str | None = None
+    # Intervalo da fila de e-mails: novas tentativas e o que venceu sem sair.
+    MAIL_RETRY_SECONDS: int = 60
+    # Link do app dos técnicos (a PWA da homologação) na boas-vindas e nas páginas dos links. Vazio:
+    # a boas-vindas manda pedir o link à central.
+    TECH_APP_URL: str | None = None
+
+    @field_validator("SMTP_SECURITY", mode="before")
+    @classmethod
+    def _smtp_security(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip().lower() or "starttls"
+        return value
+
+    @property
+    def mail_enabled(self) -> bool:
+        """Envio de e-mail ligado: servidor e remetente definidos."""
+        return bool(self.SMTP_HOST and self.MAIL_FROM)
+
+    @property
+    def tech_app_url(self) -> str | None:
+        return (self.TECH_APP_URL or "").strip() or None
+
     @property
     def entra_enabled(self) -> bool:
         return bool(self.ENTRA_TENANT_ID and self.ENTRA_CLIENT_ID and self.ENTRA_CLIENT_SECRET)
@@ -112,6 +152,10 @@ class Settings(BaseSettings):
             raise ValueError("JWT_SECRET precisa ser definido (>= 32 caracteres) em produção")
         if self.is_production and "*" in self.cors_origin_list:
             raise ValueError("CORS_ORIGINS não aceita '*' em produção: liste os endereços do site")
+        if self.is_production and self.SMTP_SECURITY == "none":
+            raise ValueError("SMTP_SECURITY=none não é aceito em produção: use starttls ou ssl")
+        if self.MAIL_FROM and not _MAIL_FROM.fullmatch(self.MAIL_FROM.strip()):
+            raise ValueError("MAIL_FROM precisa ser só um endereço de e-mail")
         return self
 
 

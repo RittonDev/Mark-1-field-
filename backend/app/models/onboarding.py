@@ -1,9 +1,10 @@
 """Homologação de técnicos: convite por link e ficha preenchida pelo próprio técnico.
 
 O analista gera o link e envia ao técnico; ele preenche a ficha (dados pessoais, atuação,
-skills, região e o acesso ao app) e aceita o aviso de privacidade (LGPD). A ficha chega em
+aptidões, região e o acesso ao app) e aceita o aviso de privacidade (LGPD). A ficha chega em
 "Homologação" para análise; aprovada, vira o usuário técnico com o e-mail e a senha que ele
-mesmo cadastrou.
+mesmo cadastrou. A reprovada pode ser reaberta para uma nova análise; cada análise fica em
+`reviews` (aprovada, reprovada, reaberta, expirada).
 """
 
 import uuid
@@ -53,16 +54,29 @@ class TechnicianApplication(UUIDPrimaryKey, Timestamps, Base):
     # Dados pessoais
     full_name: Mapped[str] = mapped_column(String(160))
     email: Mapped[str] = mapped_column(String(255), index=True)
+    # E-mail da ficha validado pelo link que vai no envio (services/account.py).
+    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     phone: Mapped[str] = mapped_column(String(40))
+    phone_secondary: Mapped[str | None] = mapped_column(String(40))
     document: Mapped[str] = mapped_column(String(20))  # CPF
+    rg_number: Mapped[str | None] = mapped_column(String(20))
+    rg_issuer: Mapped[str | None] = mapped_column(String(20))
+    rg_state: Mapped[str | None] = mapped_column(String(2))
     birth_date: Mapped[date | None] = mapped_column(Date)
+    bio: Mapped[str | None] = mapped_column(Text)
     postal_code: Mapped[str | None] = mapped_column(String(12))
+    # Endereço em partes: `address` é o logradouro (nas fichas de antes, a linha inteira).
     address: Mapped[str | None] = mapped_column(String(255))
+    address_number: Mapped[str | None] = mapped_column(String(10))
+    address_complement: Mapped[str | None] = mapped_column(String(60))
+    address_district: Mapped[str | None] = mapped_column(String(120))
     city: Mapped[str] = mapped_column(String(120))
     state: Mapped[str] = mapped_column(String(2))
 
     # Atuação
     company_document: Mapped[str | None] = mapped_column(String(20))  # CNPJ/MEI
+    company_name: Mapped[str | None] = mapped_column(String(160))  # razão social
+    company_trade_name: Mapped[str | None] = mapped_column(String(160))  # nome fantasia
     years_experience: Mapped[int | None] = mapped_column(Integer)
     service_areas: Mapped[list[str]] = mapped_column(JSONB, default=list)
     skills: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
@@ -70,6 +84,8 @@ class TechnicianApplication(UUIDPrimaryKey, Timestamps, Base):
     tools: Mapped[str | None] = mapped_column(Text)
     has_vehicle: Mapped[bool] = mapped_column(Boolean, default=False)
     vehicle_type: Mapped[str | None] = mapped_column(String(20))
+    vehicle_model: Mapped[str | None] = mapped_column(String(60))
+    vehicle_plate: Mapped[str | None] = mapped_column(String(7))  # "ABC1234" ou "ABC1D23"
     has_driver_license: Mapped[bool] = mapped_column(Boolean, default=False)
     coverage_area: Mapped[str] = mapped_column(Text)
     availability: Mapped[list[str]] = mapped_column(JSONB, default=list)
@@ -83,7 +99,7 @@ class TechnicianApplication(UUIDPrimaryKey, Timestamps, Base):
     privacy_consent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     privacy_version: Mapped[str] = mapped_column(String(20))
 
-    # Análise
+    # Análise (a última; todas ficam em `reviews`)
     reviewed_by_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL")
     )
@@ -92,6 +108,15 @@ class TechnicianApplication(UUIDPrimaryKey, Timestamps, Base):
     user_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), index=True
     )
+    # Reprovada e reaberta para uma nova análise: quando e quem (a retenção conta daqui).
+    reopened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reopened_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    # As análises, da mais antiga para a mais nova: [{action: "approved" | "rejected" | "reopened" |
+    # "expired", at (ISO), by: {id, name} | null, note}]. Grave sempre uma lista nova.
+    reviews: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list, server_default="[]")
 
     invite: Mapped[OnboardingInvite | None] = relationship(lazy="selectin")
     reviewed_by: Mapped[User | None] = relationship(foreign_keys=[reviewed_by_id], lazy="selectin")
+    reopened_by: Mapped[User | None] = relationship(foreign_keys=[reopened_by_id], lazy="selectin")

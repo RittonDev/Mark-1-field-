@@ -1,10 +1,10 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import (
     Boolean,
-    CheckConstraint,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -17,7 +17,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core import permissions
-from app.core.enums import PixKeyType, UserRole
+from app.core.enums import OperationalStatus, UserRole
 from app.db.base import Base, Timestamps, UUIDPrimaryKey
 from app.models._types import str_enum
 from app.models.access import AccessProfile
@@ -41,11 +41,7 @@ class Team(UUIDPrimaryKey, Timestamps, Base):
 
 class User(UUIDPrimaryKey, Timestamps, Base):
     __tablename__ = "users"
-    __table_args__ = (
-        Index("ix_users_base_state_city", "base_state", "base_city"),
-        # Chave PIX: tipo e chave andam juntos (os dois preenchidos ou os dois vazios).
-        CheckConstraint("(pix_key IS NULL) = (pix_key_type IS NULL)", name="pix_pair"),
-    )
+    __table_args__ = (Index("ix_users_base_state_city", "base_state", "base_city"),)
 
     name: Mapped[str] = mapped_column(String(160))
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
@@ -89,22 +85,63 @@ class User(UUIDPrimaryKey, Timestamps, Base):
     last_visit_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     base_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     coverage_area: Mapped[str | None] = mapped_column(Text)
-    # Ficha completa: endereço (rua, número, complemento; bairro; CEP), jornada de trabalho
-    # {start, end, break_start, break_end} ("HH:MM:SS"), serviços que faz (ids de service_types),
-    # foto que veio de fora (Field Control) e dados de origem.
+    # Ficha completa: endereço em partes (address_line é o logradouro; número, complemento, bairro e
+    # CEP; a migração b7e2d4f6a8c1 separou as linhas "rua, número - complemento"), jornada de
+    # trabalho {start, end, break_start, break_end} ("HH:MM:SS"), serviços que faz (ids de
+    # service_types), foto que veio de fora (Field Control) e dados de origem.
     address_line: Mapped[str | None] = mapped_column(String(255))
+    address_number: Mapped[str | None] = mapped_column(String(10))  # "S/N" vale
+    address_complement: Mapped[str | None] = mapped_column(String(60))
     address_district: Mapped[str | None] = mapped_column(String(120))
     address_zip: Mapped[str | None] = mapped_column(String(10))
     # Sem jornada fica NULL de verdade (não o "null" do JSON).
     work_schedule: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
     service_type_ids: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default="[]")
     avatar_external_url: Mapped[str | None] = mapped_column(String(1000))
-    # Chave PIX para receber por chamado: só o próprio técnico cadastra e troca (app, com a senha);
-    # a central vê em Pagamentos e pode remover. A chave fica normalizada (core/pix.py).
-    pix_key_type: Mapped[PixKeyType | None] = mapped_column(str_enum(PixKeyType))
-    pix_key: Mapped[str | None] = mapped_column(String(80))
-    pix_holder_name: Mapped[str | None] = mapped_column(String(160))
-    pix_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Dados pessoais do técnico (schemas/personal.py valida e formata). CPF só com os 11 números,
+    # único entre os usuários (vários vazios valem); o técnico informa uma vez, depois só a central
+    # muda. RG com os três ou nenhum (número, órgão emissor e UF). Telefone secundário formatado como
+    # o celular; mini biografia até 500.
+    cpf: Mapped[str | None] = mapped_column(String(11), unique=True)
+    rg_number: Mapped[str | None] = mapped_column(String(20))
+    rg_issuer: Mapped[str | None] = mapped_column(String(20))
+    rg_state: Mapped[str | None] = mapped_column(String(2))
+    birth_date: Mapped[date | None] = mapped_column(Date)
+    phone_secondary: Mapped[str | None] = mapped_column(String(40))
+    bio: Mapped[str | None] = mapped_column(Text)
+    # Veículo (Transporte): modelo e placa "ABC1234" ou "ABC1D23", sem hífen.
+    vehicle_model: Mapped[str | None] = mapped_column(String(60))
+    vehicle_plate: Mapped[str | None] = mapped_column(String(7))
+    # Empresa do técnico: CNPJ normalizado (aceita o alfanumérico), razão social e nome fantasia.
+    company_document: Mapped[str | None] = mapped_column(String(14))
+    company_name: Mapped[str | None] = mapped_column(String(160))
+    company_trade_name: Mapped[str | None] = mapped_column(String(160))
+    # Áreas de atuação (os códigos de schemas/onboarding.SERVICE_AREAS), copiadas da ficha na
+    # aprovação.
+    service_areas: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default="[]")
+    # E-mail de login validado pelo link (services/account.py). O e-mail novo pedido pelo app fica
+    # em email_pending até o link: o login só muda quando ele é validado.
+    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    email_pending: Mapped[str | None] = mapped_column(String(255))
+    email_pending_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Situação na operação (só a central vê): ativo, inativo ou bloqueado, com o motivo, quem e
+    # quando. Separada do acesso ao app (is_active): receber OS pede os dois.
+    operational_status: Mapped[OperationalStatus] = mapped_column(
+        str_enum(OperationalStatus),
+        default=OperationalStatus.ACTIVE,
+        server_default=OperationalStatus.ACTIVE.value,
+    )
+    operational_reason: Mapped[str | None] = mapped_column(Text)
+    operational_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Sem relação para users: o nome sai de uma consulta (as telas pedem só às vezes).
+    operational_changed_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    # Indisponibilidade (services/unavailability.py): [{"id", "start", "end"}] com as datas locais
+    # "AAAA-MM-DD", os dois dias inclusive, sem motivo (LGPD); o que acabou sai na gravação.
+    unavailability: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, default=list, server_default="[]"
+    )
     # Perfil técnico: o técnico mantém no app; a central só vê (services/tech_profile.py). Sem
     # índice: os filtros varrem só os técnicos; GIN em tool_ids/availability se a base passar de
     # dezenas de milhares de técnicos. Ferramentas: ids (texto) do tool_catalog, inclusive as

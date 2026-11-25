@@ -1108,7 +1108,7 @@ export const LEVEL_OCCURRENCE: Record<LevelOccurrenceKind, string> = {
  */
 export const PRIVACY_VERSION = "2026-11-25";
 
-/** A data da versão para mostrar ("20/11/2026"): os 10 primeiros caracteres, sem um ".2". */
+/** A data da versão para mostrar ("25/11/2026"): os 10 primeiros caracteres, sem um ".2". */
 export const PRIVACY_DATE = PRIVACY_VERSION.slice(0, 10).split("-").reverse().join("/");
 
 /** O aviso de privacidade do técnico: a ficha da homologação mostra junto do aceite, e o app, para consulta. */

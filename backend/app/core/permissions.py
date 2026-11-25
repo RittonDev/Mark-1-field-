@@ -141,6 +141,8 @@ DEFAULT_QUEUE: tuple[QueueScope, bool] = ("all", True)
 EVENT_ITEMS: dict[str, tuple[str, ...]] = {
     "quote.decided": ("commercial.quotes",),
     "onboarding.submitted": ("base.onboarding",),
+    # Ficha da homologação mudou (e-mail validado, reaberta, aprovada, reprovada).
+    "onboarding.updated": ("base.onboarding",),
     # Posição e jornada dos técnicos: só o Mapa ao vivo usa (e /tracking/* já pede o item).
     "technician.location": ("operation.map",),
     "technician.shift": ("operation.map",),

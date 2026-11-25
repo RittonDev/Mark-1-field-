@@ -1136,9 +1136,7 @@ export interface Technician {
   tools?: Ref[] | null;
   education?: EducationItem[] | null;
   tech_profile_updated?: TechProfileStamps | null;
-  /**
-   * @deprecated Sai no fechamento da Entrega 1 (V1). API antiga: tem chave PIX. A nova manda payout_methods_count.
-   */
+  /** @deprecated Sai no fechamento da Entrega 1 (V1). API antiga: tem chave PIX. A nova manda payout_methods_count. */
   has_pix?: boolean;
   /** @deprecated Sai no fechamento da Entrega 1 (V1). API antiga: quando a chave PIX mudou. A nova manda payout_changed_at. */
   pix_updated_at?: ISODate | null;

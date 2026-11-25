@@ -317,3 +317,52 @@ class PartRequestStatus(StrEnum):
     APPROVED = "approved"  # cliente aprovou o orçamento: pode trocar
     REJECTED = "rejected"
     CANCELLED = "cancelled"
+
+
+# --------------------------------------------------------------- cadastro V2 dos técnicos
+
+
+class OperationalStatus(StrEnum):
+    """Situação do técnico na operação (só a central vê). Receber OS pede "active" e o acesso ao app
+    liberado (users.is_active), que continua separado: Inativo e Bloqueado seguem entrando no app."""
+
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+    BLOCKED = "blocked"
+
+
+class PayoutMethodKind(StrEnum):
+    """Forma de recebimento do técnico (models/payout_method.py)."""
+
+    PIX = "pix"
+    BANK = "bank"  # conta bancária
+
+
+class BankAccountType(StrEnum):
+    CHECKING = "checking"  # conta corrente
+    SAVINGS = "savings"  # conta poupança
+    PAYMENT = "payment"  # conta de pagamento
+
+
+class AccountTokenPurpose(StrEnum):
+    """Link de uso único mandado por e-mail (models/account_token.py)."""
+
+    VERIFY_EMAIL = "verify_email"  # validar o e-mail
+    RESET_PASSWORD = "reset_password"  # criar uma senha nova (ou a primeira, na boas-vindas)
+
+
+class EmailTemplate(StrEnum):
+    """E-mail transacional (services/mail_templates.py)."""
+
+    VERIFY_EMAIL = "verify_email"
+    WELCOME = "welcome"
+    PASSWORD_RESET = "password_reset"
+
+
+class EmailStatus(StrEnum):
+    """Linha da fila de e-mails (models/email_outbox.py)."""
+
+    PENDING = "pending"  # na fila (com o envio desligado, fica assim até vencer)
+    SENT = "sent"
+    FAILED = "failed"  # recusado pelo servidor ou sem sucesso depois das tentativas
+    EXPIRED = "expired"  # passou do prazo sem sair: "Não enviado"
