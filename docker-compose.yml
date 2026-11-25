@@ -59,6 +59,17 @@ services:
       ENTRA_ALLOWED_DOMAINS: ${ENTRA_ALLOWED_DOMAINS:-maxxgroup.com.br}
       ENTRA_ENFORCE_FOR_STAFF: ${ENTRA_ENFORCE_FOR_STAFF:-false}
       ENTRA_AUTO_PROVISION_ROLE: ${ENTRA_AUTO_PROVISION_ROLE:-}
+      # E-mails do cadastro dos técnicos (vazio = envio desligado; ver .env.example).
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_SECURITY: ${SMTP_SECURITY:-starttls}
+      SMTP_TIMEOUT_SECONDS: ${SMTP_TIMEOUT_SECONDS:-20}
+      MAIL_FROM: ${MAIL_FROM:-}
+      MAIL_FROM_NAME: ${MAIL_FROM_NAME:-}
+      MAIL_RETRY_SECONDS: ${MAIL_RETRY_SECONDS:-60}
+      TECH_APP_URL: ${TECH_APP_URL:-}
     ports:
       - "8000:8000"
     volumes:

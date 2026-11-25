@@ -11,7 +11,7 @@ import { Tabs } from "@/components/motion";
 import { NoAccess } from "@/components/NoAccess";
 import { InvoiceDialog } from "@/components/payouts/InvoiceDialog";
 import { type InvoiceListState, InvoicesPanel, InvoiceStrip } from "@/components/payouts/InvoicesPanel";
-import { PayoutPixLine } from "@/components/payouts/PayoutPixLine";
+import { PayoutMethodLine } from "@/components/payouts/PayoutMethodLine";
 import { TicketLink } from "@/components/ticket/TicketLink";
 import { useToast } from "@/components/Toaster";
 import { Button, Card, EmptyState, ErrorBox, LoadingBlock, PageHeader, Pill, Select } from "@/components/ui";
@@ -32,13 +32,13 @@ import {
   useTechnicianInvoices,
 } from "@/lib/invoices";
 import { useCan } from "@/lib/permissions";
-import { pixDay, pixRecent, pixStatementText } from "@/lib/pix";
+import { payoutDay, payoutRecent, payoutStatementText } from "@/lib/pix";
 import type {
   ExpenseReport,
   PayoutBoard,
   PayoutLine,
   PayoutList,
-  PixInfo,
+  PayoutMethodSummary,
   TechnicianInvoice,
   TechnicianInvoiceList,
   User,
@@ -133,7 +133,8 @@ function monthRange(month: string): { date_from?: string; date_to?: string } {
 
 /**
  * Com o técnico escolhido, a API filtra (a lista e o resumo dos cartões ficam inteiros, sem o corte em 1.000).
- * `with_pix`: a chave PIX de cada técnico das linhas (e do escolhido), para pagar daqui.
+ * `with_payout_methods`: a forma de recebimento preferencial de cada técnico das linhas (e do escolhido) e quantas ele
+ * tem, para pagar daqui (sem nenhuma, ele fica fora do mapa).
  */
 function usePayouts(source: Source, month: string, technicianId: string, enabled: boolean) {
   return useQuery({
@@ -141,7 +142,7 @@ function usePayouts(source: Source, month: string, technicianId: string, enabled
     queryFn: ({ signal }) =>
       api.get<PayoutBoard>(
         "/payouts",
-        { ...SOURCE_QUERY[source], ...monthRange(month), technician_id: technicianId || undefined, with_pix: true },
+        { ...SOURCE_QUERY[source], ...monthRange(month), technician_id: technicianId || undefined, with_payout_methods: true },
         { signal },
       ),
     placeholderData: keepPreviousData,
@@ -182,17 +183,17 @@ function subtitle(line: PayoutLine): string {
 
 /**
  * Extrato para mandar ao técnico no WhatsApp: as OS de cada situação, com o dia da conclusão e o
- * valor. No "a pagar" entram os reembolsos aprovados (custos extras), pagos no mesmo acerto. A chave PIX
- * vai junto, para ele ver onde vai receber, com CPF e CNPJ mascarados: o texto passa pelo endereço do wa.me
- * (`pix` undefined: a API não mandou a chave, a linha fica de fora). Depois do período, as notas fiscais
- * dele que valem (a recusada fica de fora).
+ * valor. No "a pagar" entram os reembolsos aprovados (custos extras), pagos no mesmo acerto. A forma de
+ * recebimento preferencial vai junto, mascarada, para ele ver onde vai receber: o texto passa pelo endereço do
+ * wa.me (`method` undefined: a API não mandou as formas, a linha fica de fora; null: ele não cadastrou nenhuma).
+ * Depois do período, as notas fiscais dele que valem (a recusada fica de fora).
  */
 function statement(
   name: string,
   lines: PayoutLine[],
   period: string,
   reimbursement: number,
-  pix: PixInfo | null | undefined,
+  method: PayoutMethodSummary | null | undefined,
   invoices: TechnicianInvoice[],
 ): string {
   const row = (l: PayoutLine) =>
@@ -201,8 +202,7 @@ function statement(
     .map((key) => ({ key, lines: lines.filter((l) => stateOf(l) === key) }))
     .filter((s) => s.lines.length > 0);
   const out = ["*Maxx Field · pagamento*", name, `Período: ${period}`, ...statementInvoiceLines(invoices)];
-  if (pix) out.push(`Chave PIX: ${pixStatementText(pix)}`);
-  else if (pix === null) out.push("Chave PIX: não cadastrada (cadastre no app, em Perfil › Configurações › Chave PIX)");
+  if (method !== undefined) out.push(payoutStatementText(method?.preferred ?? null));
   for (const s of sections) {
     out.push("", `*${SECTION[s.key]}*`, ...s.lines.map(row));
     out.push(sections.length === 1 ? `*Total: ${formatMoney(total(s.lines))}*` : `Subtotal: ${formatMoney(total(s.lines))}`);
@@ -306,12 +306,12 @@ function PayoutsView() {
   // "sem nota" só se afirma com a lista inteira (sem o corte das 500 mais novas).
   const invoicesFresh = Boolean(invoices.data) && !invoices.isPlaceholderData;
   const invoicesComplete = invoicesFresh && (invoices.data?.total_count ?? 0) <= invoiceItems.length;
-  // "Chave nova" (a chave PIX mudou há menos de 7 dias) muda com o tempo.
+  // "Nova" (a forma de recebimento mudou há menos de 7 dias) muda com o tempo.
   const now = useNow(60_000);
-  // Chave PIX de cada técnico, das duas consultas. Sem o mapa (API sem a chave), nada aparece.
-  const pixMap = useMemo(() => {
-    const pending = pendingQuery.data?.pix;
-    const paid = paidQuery.data?.pix;
+  // A forma de recebimento preferencial de cada técnico, das duas consultas. Sem o mapa (API antiga), nada aparece.
+  const methodMap = useMemo(() => {
+    const pending: Record<UUID, PayoutMethodSummary> | undefined = pendingQuery.data?.payout_methods;
+    const paid: Record<UUID, PayoutMethodSummary> | undefined = paidQuery.data?.payout_methods;
     return pending || paid ? { ...paid, ...pending } : null;
   }, [pendingQuery.data, paidQuery.data]);
   // Telefone (botão do WhatsApp) e e-mail (separa técnicos com o mesmo nome).
@@ -450,16 +450,16 @@ function PayoutsView() {
     });
   const labelOf = (group: Group) => options.find((o) => o.id === group.id)?.label ?? group.name;
   const personOf = (id: UUID) => people.data?.find((u) => u.id === id);
-  /** A chave PIX do técnico; null sem chave; undefined quando a API não mandou as chaves. */
-  const pixOf = (id: UUID): PixInfo | null | undefined => (pixMap ? (pixMap[id] ?? null) : undefined);
-  /** "Chave nova": o aviso que vai junto da confirmação do pagamento (confirmar no grupo antes de pagar). */
-  const pixWarning = (group: Group) => {
-    const pix = pixOf(group.id);
-    if (!pix || !pixRecent(pix.updated_at, now)) return null;
+  /** A forma de recebimento preferencial do técnico; null sem nenhuma; undefined quando a API não mandou as formas. */
+  const methodOf = (id: UUID): PayoutMethodSummary | null | undefined => (methodMap ? (methodMap[id] ?? null) : undefined);
+  /** "Nova": o aviso que vai junto da confirmação do pagamento (confirmar no grupo antes de pagar). */
+  const methodWarning = (group: Group) => {
+    const changedAt = methodOf(group.id)?.preferred.destination_changed_at;
+    if (!changedAt || !payoutRecent(changedAt, now)) return null;
     return (
       <strong className="font-semibold text-amber-800 dark:text-amber-300">
         {" "}
-        A chave PIX dele mudou em {pixDay(pix.updated_at)}: confirme com ele no grupo antes de pagar.
+        A forma de recebimento dele mudou em {payoutDay(changedAt)}: confirme com ele no grupo antes de pagar.
       </strong>
     );
   };
@@ -476,7 +476,7 @@ function PayoutsView() {
   /** As notas fiscais do técnico no período (a competência é o mês escolhido). */
   const invoicesOfGroup = (group: Group) => invoicesOf.get(group.id) ?? [];
   const textFor = (group: Group) =>
-    statement(group.name, group.lines, period, reimbursementOf(group), pixOf(group.id), invoicesFresh ? invoicesOfGroup(group) : []);
+    statement(group.name, group.lines, period, reimbursementOf(group), methodOf(group.id), invoicesFresh ? invoicesOfGroup(group) : []);
   /** No Pagar: a nota do técnico no período, ou a falta dela com um mês escolhido. Só informa, nunca trava. */
   const invoiceNote = (group: Group) => (invoicesFresh ? payInvoiceNote(invoicesOfGroup(group), month, invoicesComplete) : null);
 
@@ -516,7 +516,7 @@ function PayoutsView() {
           {reimbursement > 0
             ? ` Os reembolsos aprovados (${formatMoney(reimbursement)}) não entram aqui: continuam a reembolsar em Custos extras.`
             : ""}
-          {pixWarning(group)}
+          {methodWarning(group)}
         </>
       ),
       confirmLabel: "Marcar como pago",
@@ -547,7 +547,7 @@ function PayoutsView() {
         <>
           A OS foi cancelada: pague só se o técnico chegou a trabalhar nela. Ele passa a ver{" "}
           <strong className="font-semibold text-ink">{formatMoney(line.amount)}</strong> como pago no app.
-          {pixWarning(group)}
+          {methodWarning(group)}
         </>
       ),
       confirmLabel: "Marcar como pago",
@@ -872,7 +872,7 @@ function PayoutsView() {
                         // Pagamento em lote deste técnico (o de uma linha só gira o botão da própria linha).
                         const batch = mine && !pay.variables?.lineId;
                         const phone = personOf(group.id)?.phone ?? null;
-                        const pix = pixOf(group.id);
+                        const method = methodOf(group.id);
                         const groupInvoices = invoicesOfGroup(group);
                         const parts = (["to_pay", "paid", "expected", "cancelled"] as const)
                           .map((state) => ({ state, lines: group.lines.filter((l) => stateOf(l) === state) }))
@@ -903,7 +903,9 @@ function PayoutsView() {
                                 <p className="text-xs text-ink-muted">
                                   {plural(group.lines.length, "OS", "OS")} · {parts.join(" · ")}
                                 </p>
-                                {pix !== undefined ? <PayoutPixLine name={group.name} pix={pix} phone={phone} now={now} /> : null}
+                                {method !== undefined ? (
+                                  <PayoutMethodLine name={group.name} technicianId={group.id} summary={method} phone={phone} now={now} />
+                                ) : null}
                               </div>
                               <div className="flex flex-wrap items-center gap-2">
                                 <Button size="sm" variant="ghost" onClick={() => void copyStatement(group)}>

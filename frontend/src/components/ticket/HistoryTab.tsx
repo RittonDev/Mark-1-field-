@@ -405,9 +405,11 @@ function Detail({ event }: { event: TicketEvent }) {
     case "expense_removed":
       return <Joined parts={[str(data.description), money(data.total)]} />;
     case "payout_set": {
-      // Pagamento registrado: a chave PIX dele naquele momento, mascarada ("PIX CPF ***.456.789-**").
+      // Pagamento registrado: a forma de recebimento preferencial dele naquele momento, mascarada ("PIX CPF
+      // ***.456.789-**", "Banco Exemplo ****5678-9"); nos eventos antigos, só a chave PIX ("CPF ***.456.789-**").
       const pix = str(data.pix);
-      return <Joined parts={[str(data.technician), money(data.amount), pix ? `PIX ${pix}` : null]} />;
+      const method = str(data.payout_method) ?? (pix ? `PIX ${pix}` : null);
+      return <Joined parts={[str(data.technician), money(data.amount), method]} />;
     }
     case "payout_removed":
       return <Joined parts={[str(data.technician), money(data.amount)]} />;
