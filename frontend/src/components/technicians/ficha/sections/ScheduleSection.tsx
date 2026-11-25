@@ -4,7 +4,7 @@ import { NeutralChip } from "@/components/settings/shared";
 import { periodText, unavailableOn } from "@/lib/constants";
 import { todayISO } from "@/lib/format";
 import type { Technician } from "@/lib/types";
-import { AvailabilityPart, ProfileUnavailable, profileInfo, stampText } from "../../TechProfileView";
+import { AvailabilityPart, partStamp, ProfileUnavailable, profileInfo } from "../../TechProfileView";
 import { fichaLabel } from "../FichaNav";
 import { SectionCard, SubTitle } from "../SectionCard";
 
@@ -20,7 +20,7 @@ export function ScheduleSection({ tech }: { tech: Technician }) {
   const now = unavailableOn(periods, today);
 
   return (
-    <SectionCard title={fichaLabel("dias-e-horarios")} aside={info ? stampText(info.stamps.availability) : undefined}>
+    <SectionCard title={fichaLabel("dias-e-horarios")} aside={partStamp(info, "availability")}>
       {!info ? (
         <ProfileUnavailable />
       ) : info.informed.availability ? (

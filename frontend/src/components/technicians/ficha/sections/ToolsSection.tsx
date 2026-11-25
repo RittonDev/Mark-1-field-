@@ -1,7 +1,7 @@
 "use client";
 
 import type { Technician } from "@/lib/types";
-import { ProfileUnavailable, profileInfo, stampText, ToolsPart } from "../../TechProfileView";
+import { partStamp, ProfileUnavailable, profileInfo, ToolsPart } from "../../TechProfileView";
 import { fichaLabel } from "../FichaNav";
 import { SectionCard } from "../SectionCard";
 
@@ -9,7 +9,7 @@ import { SectionCard } from "../SectionCard";
 export function ToolsSection({ tech }: { tech: Technician }) {
   const info = profileInfo(tech);
   return (
-    <SectionCard title={fichaLabel("ferramental")} aside={info ? stampText(info.stamps.tools) : undefined}>
+    <SectionCard title={fichaLabel("ferramental")} aside={partStamp(info, "tools")}>
       {!info ? (
         <ProfileUnavailable />
       ) : info.informed.tools ? (

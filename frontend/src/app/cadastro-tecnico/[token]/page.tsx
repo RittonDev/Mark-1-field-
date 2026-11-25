@@ -8,6 +8,7 @@ import {
   ChevronLeft,
   ChevronRight,
   History,
+  ImageIcon,
   Loader2,
   Plus,
   RefreshCw,
@@ -18,15 +19,28 @@ import {
 } from "lucide-react";
 import { useParams } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
-import { Logo, ThemeToggle } from "@/components/Brand";
+import { CepField } from "@/components/CepField";
 import { useConfirm } from "@/components/Confirm";
+import { PublicPanel, PublicShell } from "@/components/PublicPage";
 import { Button, buttonClassName, Card, Checkbox, ErrorBox, Field, Input, LoadingBlock, Select, Textarea } from "@/components/ui";
+import { NO_ADDRESS } from "@/lib/address";
 import { ApiError, errorMessage, request } from "@/lib/api";
-import { formatDate } from "@/lib/format";
+import {
+  ageAt,
+  BIRTH_AGE,
+  CEP_TEXT,
+  formatPlate,
+  isValidPlate,
+  isValidRg,
+  normalizeIssuer,
+  normalizePlate,
+  normalizeRg,
+  PROFILE_LIMITS,
+} from "@/lib/constants";
+import { formatDate, todayISO } from "@/lib/format";
 import {
   isValidCnpj,
   isValidCpf,
-  maskCep,
   maskCnpj,
   maskCpf,
   maskPhone,
@@ -36,57 +50,82 @@ import {
   UFS,
   useOnboardingCatalog,
 } from "@/lib/onboarding";
+import type { CatalogItem, EmailQueued } from "@/lib/types";
 
-const STEPS = ["Seus dados", "Atuação", "Região e disponibilidade", "Acesso e privacidade"];
+const STEPS = ["Seus dados", "Endereço", "Atuação", "Disponibilidade e transporte", "Acesso e privacidade"];
 
 /** Nome de cada campo para o técnico (a API devolve o nome técnico) e a etapa em que ele está. */
 const FIELDS: Record<string, { label: string; step: number }> = {
   full_name: { label: "Nome completo", step: 0 },
   email: { label: "E-mail", step: 0 },
   phone: { label: "Celular", step: 0 },
+  phone_secondary: { label: "Telefone secundário", step: 0 },
   document: { label: "CPF", step: 0 },
   birth_date: { label: "Data de nascimento", step: 0 },
-  postal_code: { label: "CEP", step: 0 },
-  address: { label: "Endereço", step: 0 },
-  city: { label: "Cidade", step: 0 },
-  state: { label: "UF", step: 0 },
+  rg_number: { label: "RG", step: 0 },
+  rg_issuer: { label: "Órgão emissor", step: 0 },
+  rg_state: { label: "UF do RG", step: 0 },
   photo: { label: "Foto", step: 0 },
-  service_areas: { label: "Áreas de atuação", step: 1 },
-  years_experience: { label: "Anos de experiência", step: 1 },
-  company_document: { label: "CNPJ / MEI", step: 1 },
-  skills: { label: "Skills", step: 1 },
-  certifications: { label: "Certificações e cursos", step: 1 },
-  tools: { label: "Ferramentas próprias", step: 1 },
-  coverage_area: { label: "Região que você atende", step: 2 },
-  availability: { label: "Disponibilidade", step: 2 },
-  has_vehicle: { label: "Veículo", step: 2 },
-  vehicle_type: { label: "Tipo de veículo", step: 2 },
-  has_driver_license: { label: "CNH", step: 2 },
-  notes: { label: "Observações", step: 2 },
-  password: { label: "Senha", step: 3 },
-  password2: { label: "Confirme a senha", step: 3 },
-  privacy_consent: { label: "Aviso de privacidade", step: 3 },
+  postal_code: { label: "CEP", step: 1 },
+  address: { label: "Logradouro", step: 1 },
+  address_number: { label: "Número", step: 1 },
+  address_complement: { label: "Complemento", step: 1 },
+  address_district: { label: "Bairro", step: 1 },
+  city: { label: "Cidade", step: 1 },
+  state: { label: "UF", step: 1 },
+  coverage_area: { label: "Região que você atende", step: 1 },
+  service_areas: { label: "Áreas de atuação", step: 2 },
+  years_experience: { label: "Anos de experiência", step: 2 },
+  skills: { label: "Aptidões", step: 2 },
+  certifications: { label: "Certificações e cursos", step: 2 },
+  tools: { label: "Ferramentas próprias", step: 2 },
+  bio: { label: "Mini biografia", step: 2 },
+  company_document: { label: "CNPJ / MEI", step: 2 },
+  company_name: { label: "Razão social", step: 2 },
+  company_trade_name: { label: "Nome fantasia", step: 2 },
+  availability: { label: "Disponibilidade", step: 3 },
+  has_vehicle: { label: "Veículo", step: 3 },
+  vehicle_type: { label: "Tipo de veículo", step: 3 },
+  vehicle_model: { label: "Modelo do veículo", step: 3 },
+  vehicle_plate: { label: "Placa", step: 3 },
+  has_driver_license: { label: "CNH", step: 3 },
+  notes: { label: "Observações", step: 3 },
+  password: { label: "Senha", step: 4 },
+  password2: { label: "Confirme a senha", step: 4 },
+  privacy_consent: { label: "Aviso de privacidade", step: 4 },
 };
 
-/** Campos que mostram o problema logo abaixo deles; nos demais (foto, veículo, CNH), ele vai no fim da etapa. */
+/** Campos que mostram o problema logo abaixo deles (o RG, abaixo da linha dos três); nos demais, ele vai no fim da etapa. */
 const INLINE_FIELDS = new Set([
   "full_name",
   "email",
   "phone",
+  "phone_secondary",
   "document",
   "birth_date",
+  "rg_number",
+  "rg_issuer",
+  "rg_state",
   "postal_code",
   "address",
+  "address_number",
+  "address_complement",
+  "address_district",
   "city",
   "state",
+  "coverage_area",
   "service_areas",
   "years_experience",
-  "company_document",
   "skills",
   "certifications",
   "tools",
-  "coverage_area",
+  "bio",
+  "company_document",
+  "company_name",
+  "company_trade_name",
   "availability",
+  "vehicle_model",
+  "vehicle_plate",
   "notes",
   "password",
   "password2",
@@ -99,6 +138,8 @@ interface Problem {
   message: string;
   /** A mensagem fala só deste campo: aparece logo abaixo dele (senão, no fim da etapa). */
   inline?: boolean;
+  /** `name` do campo que recebe o foco, quando não é o próprio (o nome de uma das aptidões). */
+  target?: string;
 }
 
 /** Primeira letra maiúscula e ponto final ("mínimo de 3 caracteres" -> "Mínimo de 3 caracteres."). */
@@ -176,7 +217,7 @@ function apiProblem(error: unknown): Problem {
     if (typeof error.detail === "string" && error.detail) {
       // E-mail ou CPF de um cadastro que já existe: o recado vai junto do campo.
       const field = /e-mail/i.test(error.detail) ? "email" : /\bCPF\b/.test(error.detail) ? "document" : null;
-      return { field, message: error.detail, inline: !!field };
+      return { field, message: field ? sentence(error.detail) : error.detail, inline: !!field };
     }
     if (error.status >= 500) {
       return { field: null, message: "O servidor não respondeu agora. Espere um pouco e toque em “Enviar ficha” de novo." };
@@ -185,30 +226,56 @@ function apiProblem(error: unknown): Problem {
   return { field: null, message: errorMessage(error) };
 }
 
-/** Idade completa na data de hoje (null quando a data não é válida). */
-function ageToday(birth: string): number | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(birth);
-  if (!m) return null;
-  const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];
-  const today = new Date();
-  let age = today.getFullYear() - year;
-  if (today.getMonth() + 1 < month || (today.getMonth() + 1 === month && today.getDate() < day)) age -= 1;
-  return age;
-}
-
 interface Skill {
   name: string;
   level: string;
+}
+
+/** Até 30 aptidões (a API recusa mais). */
+const MAX_SKILLS = 30;
+const SKILL_LEVELS = ["basico", "intermediario", "avancado"];
+const DEFAULT_SKILL_LEVEL = "intermediario";
+
+/** Nome sem acento, maiúsculas e espaços extras: "Câmeras  hikvision" e "CAMERAS HIKVISION" são a mesma aptidão. */
+function foldName(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toUpperCase();
+}
+
+/** Aptidão de 1 letra ou repetida; o cartão em branco não conta (sai sem aviso). */
+function skillProblem(skills: Skill[]): { index: number; message: string } | null {
+  const seen = new Set<string>();
+  for (let index = 0; index < skills.length; index++) {
+    const name = skills[index].name.trim();
+    if (!name) continue;
+    if (name.length < 2) return { index, message: "Use 2 letras ou mais." };
+    const key = foldName(name);
+    if (seen.has(key)) return { index, message: "Esta aptidão já está na lista." };
+    seen.add(key);
+  }
+  return null;
 }
 
 interface FormState {
   full_name: string;
   email: string;
   phone: string;
+  phone_secondary: string;
   document: string;
   birth_date: string;
+  rg_number: string;
+  rg_issuer: string;
+  rg_state: string;
   postal_code: string;
+  /** O logradouro. */
   address: string;
+  address_number: string;
+  address_complement: string;
+  address_district: string;
   city: string;
   state: string;
   photo: string | null;
@@ -217,11 +284,16 @@ interface FormState {
   skills: Skill[];
   certifications: string;
   tools: string;
+  bio: string;
   company_document: string;
+  company_name: string;
+  company_trade_name: string;
   coverage_area: string;
   availability: string[];
   has_vehicle: boolean;
   vehicle_type: string;
+  vehicle_model: string;
+  vehicle_plate: string;
   has_driver_license: boolean;
   notes: string;
   password: string;
@@ -233,23 +305,35 @@ const EMPTY: FormState = {
   full_name: "",
   email: "",
   phone: "",
+  phone_secondary: "",
   document: "",
   birth_date: "",
+  rg_number: "",
+  rg_issuer: "",
+  rg_state: "",
   postal_code: "",
   address: "",
+  address_number: "",
+  address_complement: "",
+  address_district: "",
   city: "",
   state: "",
   photo: null,
   service_areas: [],
   years_experience: "",
-  skills: [{ name: "", level: "intermediario" }],
+  skills: [],
   certifications: "",
   tools: "",
+  bio: "",
   company_document: "",
+  company_name: "",
+  company_trade_name: "",
   coverage_area: "",
   availability: [],
   has_vehicle: false,
   vehicle_type: "carro",
+  vehicle_model: "",
+  vehicle_plate: "",
   has_driver_license: false,
   notes: "",
   password: "",
@@ -265,14 +349,25 @@ const EMPTY: FormState = {
  */
 const DRAFT_KEY = "mf-cadastro-tecnico";
 const DRAFT_TTL_MS = 24 * 3_600_000;
+/** Versão 2: as 5 etapas (Endereço numa etapa própria) e os campos novos. */
+const DRAFT_VERSION = 2;
+/** Etapa do rascunho sem versão (4 etapas: dados, atuação, região e disponibilidade, acesso) nas 5 de hoje. */
+const OLD_DRAFT_STEP = [0, 2, 3, 4];
 const DRAFT_FIELDS = [
   "full_name",
   "email",
   "phone",
+  "phone_secondary",
   "document",
   "birth_date",
+  "rg_number",
+  "rg_issuer",
+  "rg_state",
   "postal_code",
   "address",
+  "address_number",
+  "address_complement",
+  "address_district",
   "city",
   "state",
   "service_areas",
@@ -280,15 +375,19 @@ const DRAFT_FIELDS = [
   "skills",
   "certifications",
   "tools",
+  "bio",
   "company_document",
+  "company_name",
+  "company_trade_name",
   "coverage_area",
   "availability",
   "has_vehicle",
   "vehicle_type",
+  "vehicle_model",
+  "vehicle_plate",
   "has_driver_license",
   "notes",
 ] as const satisfies readonly (keyof FormState)[];
-const SKILL_LEVELS = ["basico", "intermediario", "avancado"];
 
 function hasContent(form: FormState): boolean {
   return DRAFT_FIELDS.some((key) => JSON.stringify(form[key]) !== JSON.stringify(EMPTY[key]));
@@ -306,7 +405,13 @@ function loadDraft(token: string): Draft | null {
   try {
     const raw = window.localStorage.getItem(DRAFT_KEY);
     if (!raw) return null;
-    const saved = JSON.parse(raw) as { savedAt?: number; step?: number; form?: Record<string, unknown>; token?: unknown };
+    const saved = JSON.parse(raw) as {
+      v?: unknown;
+      savedAt?: number;
+      step?: number;
+      form?: Record<string, unknown>;
+      token?: unknown;
+    };
     if (!saved.savedAt || Date.now() - saved.savedAt > DRAFT_TTL_MS || !saved.form) {
       window.localStorage.removeItem(DRAFT_KEY);
       return null;
@@ -318,20 +423,28 @@ function loadDraft(token: string): Draft | null {
       const base = EMPTY[key];
       if (key === "skills") {
         if (Array.isArray(value)) {
+          // O cartão em branco (a ficha antiga já abria com um) não volta.
           form.skills = value
             .filter((s): s is { name?: unknown; level?: unknown } => !!s && typeof s === "object")
-            .slice(0, 30)
+            .slice(0, MAX_SKILLS)
             .map((s) => ({
               name: typeof s.name === "string" ? s.name : "",
-              level: typeof s.level === "string" && SKILL_LEVELS.includes(s.level) ? s.level : "intermediario",
-            }));
+              level: typeof s.level === "string" && SKILL_LEVELS.includes(s.level) ? s.level : DEFAULT_SKILL_LEVEL,
+            }))
+            .filter((s) => s.name.trim());
         }
       } else if (Array.isArray(base) ? Array.isArray(value) && value.every((v) => typeof v === "string") : typeof value === typeof base) {
         target[key] = value;
       }
     }
-    const step = Math.min(Math.max(Math.trunc(Number(saved.step) || 0), 0), STEPS.length - 1);
-    return { form, step, sameLink: typeof saved.token === "string" && saved.token === token };
+    // Rascunho de antes das 5 etapas: a etapa dele na ficha de hoje ("address" continua o mesmo campo, agora o logradouro).
+    const savedStep = Math.trunc(Number(saved.step) || 0);
+    const step = saved.v === DRAFT_VERSION ? savedStep : (OLD_DRAFT_STEP[savedStep] ?? 0);
+    return {
+      form,
+      step: Math.min(Math.max(step, 0), STEPS.length - 1),
+      sameLink: typeof saved.token === "string" && saved.token === token,
+    };
   } catch {
     return null;
   }
@@ -345,7 +458,7 @@ function saveDraft(form: FormState, step: number, token: string): boolean {
       return true;
     }
     const data = Object.fromEntries(DRAFT_FIELDS.map((key) => [key, form[key]]));
-    window.localStorage.setItem(DRAFT_KEY, JSON.stringify({ savedAt: Date.now(), step, form: data, token }));
+    window.localStorage.setItem(DRAFT_KEY, JSON.stringify({ v: DRAFT_VERSION, savedAt: Date.now(), step, form: data, token }));
     return true;
   } catch {
     // Sem armazenamento (aba anônima, bloqueio, cota cheia): a ficha funciona, só sem rascunho.
@@ -452,6 +565,12 @@ async function serverPrivacyVersion(): Promise<string | null> {
   }
 }
 
+/** Escolha marcada no estilo do Chip ativo (áreas, disponibilidade, nível da aptidão). */
+const CHOSEN = "border-brand bg-brand text-white dark:border-brand-strong dark:bg-brand-strong";
+const UNCHOSEN = "border-line bg-surface text-ink hover:border-brand";
+const FOCUS_RING =
+  "focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:ring-offset-2 focus-visible:ring-offset-surface focus-visible:outline-none";
+
 function Chip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button
@@ -459,9 +578,11 @@ function Chip({ active, onClick, children }: { active: boolean; onClick: () => v
       onClick={onClick}
       aria-pressed={active}
       className={clsx(
-        "inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-colors focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:ring-offset-2 focus-visible:ring-offset-surface focus-visible:outline-none",
+        // Alvo de toque de 44 px no celular.
+        "inline-flex min-h-11 items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-colors sm:min-h-9",
+        FOCUS_RING,
         // No escuro, o azul forte: o branco sobre o azul da marca ficava abaixo de 4,5:1.
-        active ? "border-brand bg-brand text-white dark:border-brand-strong dark:bg-brand-strong" : "border-line bg-surface text-ink hover:border-brand",
+        active ? CHOSEN : UNCHOSEN,
       )}
     >
       {active ? <Check className="size-3.5" /> : null}
@@ -475,6 +596,12 @@ type LinkCheck = "loading" | "valid" | "invalid" | "error";
 function scrollTop() {
   const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   window.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" });
+}
+
+/** Resposta do envio: a validação do e-mail vem da API nova (a de antes manda só o protocolo). */
+interface SubmitResult {
+  protocol: string;
+  email_verification?: EmailQueued["status"];
 }
 
 export default function TechnicianSignupPage() {
@@ -496,10 +623,13 @@ export default function TechnicianSignupPage() {
   const [form, setForm] = useState<FormState>(() => withKeptPhoto(own?.form ?? EMPTY, token));
   const [problem, setProblem] = useState<Problem | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [protocol, setProtocol] = useState<string | null>(null);
+  const [sent, setSent] = useState<SubmitResult | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const stepRef = useRef<HTMLParagraphElement>(null);
   const focusStepRef = useRef(false);
+  const streetRef = useRef<HTMLInputElement>(null);
+  const numberRef = useRef<HTMLInputElement>(null);
+  const companyTitleId = useId();
   // A versão do aviso relida no servidor (ao chegar à última etapa e no envio); antes disso, vale a do catálogo.
   const [latestPrivacy, setLatestPrivacy] = useState<string | null>(null);
   const last = step === STEPS.length - 1;
@@ -525,10 +655,10 @@ export default function TechnicianSignupPage() {
   // esperando a resposta, a ficha vazia não a apaga; a pessoa digitando, o rascunho passa a ser o dela.
   const pendingForeign = foreign !== null && !hasContent(form);
   useEffect(() => {
-    if (protocol || pendingForeign) return;
+    if (sent || pendingForeign) return;
     const id = window.setTimeout(() => saveDraft(form, step, token), 600);
     return () => window.clearTimeout(id);
-  }, [form, step, protocol, pendingForeign, token]);
+  }, [form, step, sent, pendingForeign, token]);
 
   // A foto guardada para o "Recarregar" vale só para esta abertura: sai da aba logo depois de a ficha montar. Num efeito,
   // e não na leitura: um render descartado (suspensão, hidratação refeita) leria de novo e não a acharia mais.
@@ -557,11 +687,11 @@ export default function TechnicianSignupPage() {
 
   // Problema num campo: marca, leva até ele e põe o foco ali.
   useEffect(() => {
-    const field = problem?.field;
     const root = formRef.current;
-    if (!field || !root) return;
+    if (!problem?.field || !root) return;
+    const { field } = problem;
     const target =
-      root.querySelector<HTMLElement>(`[name="${field}"]`) ??
+      root.querySelector<HTMLElement>(`[name="${problem.target ?? field}"]`) ??
       root.querySelector<HTMLElement>(`[data-field="${field}"] input, [data-field="${field}"] button`);
     target?.focus();
   }, [problem]);
@@ -580,34 +710,54 @@ export default function TechnicianSignupPage() {
       ...f,
       [key]: f[key].includes(value) ? f[key].filter((v) => v !== value) : [...f[key], value],
     }));
-  // A mensagem que fala de um campo só aparece abaixo dele; as demais, no fim da etapa.
+  // A mensagem que fala de um campo só aparece abaixo dele; as demais, no fim da etapa. O RG (três campos numa linha
+  // estreita) tem o recado abaixo da linha.
   const inlineProblem = !!problem?.inline && !!problem.field && INLINE_FIELDS.has(problem.field);
-  const fieldError = (field: string) => (inlineProblem && problem?.field === field ? problem.message : null);
-  /** Marca o campo com problema para o leitor de tela (com a mensagem no fim da etapa, aponta para ela). */
+  const rgProblem = inlineProblem && problem?.field?.startsWith("rg_") ? problem.message : null;
+  const fieldError = (field: string) => (inlineProblem && problem?.field === field && !rgProblem ? problem.message : null);
+  /** Marca o campo com problema para o leitor de tela (com a mensagem fora do campo, aponta para ela). */
   const invalid = (field: string) =>
     problem?.field === field
-      ? { "aria-invalid": true as const, ...(inlineProblem ? {} : { "aria-describedby": "form-problem" }) }
+      ? {
+          "aria-invalid": true as const,
+          ...(rgProblem ? { "aria-describedby": "rg-problem" } : inlineProblem ? {} : { "aria-describedby": "form-problem" }),
+        }
       : {};
 
   function validate(index: number): Problem | null {
-    const fail = (field: string, message: string): Problem => ({ field, message, inline: true });
+    const fail = (field: string, message: string, target?: string): Problem => ({ field, message, inline: true, target });
     if (index === 0) {
       const name = form.full_name.trim();
       if (name.length < 5 || name.split(/\s+/).length < 2) return fail("full_name", "Informe seu nome completo (nome e sobrenome).");
       if (!/^\S+@\S+\.\S+$/.test(form.email.trim())) return fail("email", "Informe um e-mail válido: ele será o seu login no app.");
       if (form.phone.replace(/\D/g, "").length < 10) return fail("phone", "Informe o celular com DDD.");
+      const second = form.phone_secondary.replace(/\D/g, "");
+      if (second && second.length < 10) return fail("phone_secondary", "Informe o telefone com DDD.");
       if (!isValidCpf(form.document)) return fail("document", "CPF inválido: confira os números.");
       if (form.birth_date) {
-        const age = ageToday(form.birth_date);
-        if (age === null || age > 100 || age < 0) return fail("birth_date", "Confira a data de nascimento.");
-        if (age < 18) return fail("birth_date", "É preciso ter 18 anos ou mais para se cadastrar.");
+        // A mesma conta da API: idade completa no dia de hoje em Brasília.
+        const age = ageAt(form.birth_date, todayISO());
+        if (age === null || age < 0 || age > BIRTH_AGE.max) return fail("birth_date", "Confira a data de nascimento.");
+        if (age < BIRTH_AGE.min) {
+          return fail("birth_date", `O cadastro é para maiores de ${BIRTH_AGE.min} anos: confira a data de nascimento.`);
+        }
       }
-      const cep = form.postal_code.replace(/\D/g, "");
-      if (cep && cep.length !== 8) return fail("postal_code", "CEP inválido: use os 8 números.");
-      if (form.city.trim().length < 2) return fail("city", "Informe a cidade.");
-      if (!form.state) return fail("state", "Escolha a UF.");
+      const rg = { rg_number: form.rg_number.trim(), rg_issuer: normalizeIssuer(form.rg_issuer).trim(), rg_state: form.rg_state };
+      if (rg.rg_number || rg.rg_issuer || rg.rg_state) {
+        const missing = (Object.keys(rg) as (keyof typeof rg)[]).find((key) => !rg[key]);
+        if (missing) return fail(missing, "Informe o número, o órgão emissor e a UF do RG.");
+        if (!isValidRg(rg.rg_number)) return fail("rg_number", "Confira o número do RG.");
+        if (rg.rg_issuer.length < 2) return fail("rg_issuer", "Confira o órgão emissor.");
+      }
     }
     if (index === 1) {
+      const cep = form.postal_code.replace(/\D/g, "");
+      if (cep && cep.length !== 8) return fail("postal_code", CEP_TEXT.invalid);
+      if (form.city.trim().length < 2) return fail("city", "Informe a cidade.");
+      if (!form.state) return fail("state", "Escolha a UF.");
+      if (form.coverage_area.trim().length < 2) return fail("coverage_area", "Informe a região que você atende.");
+    }
+    if (index === 2) {
       if (form.service_areas.length === 0) return fail("service_areas", "Escolha pelo menos uma área de atuação.");
       const yearsText = form.years_experience.trim();
       if (yearsText) {
@@ -616,12 +766,16 @@ export default function TechnicianSignupPage() {
           return fail("years_experience", "Anos de experiência: use um número de 0 a 60.");
         }
       }
+      const skill = skillProblem(form.skills);
+      if (skill) return fail("skills", skill.message, `skill_${skill.index}`);
       if (form.company_document.trim() && !isValidCnpj(form.company_document)) {
         return fail("company_document", "CNPJ inválido: confira os números (ou deixe em branco).");
       }
     }
-    if (index === 2 && form.coverage_area.trim().length < 2) return fail("coverage_area", "Informe a região que você atende.");
-    if (index === 3) {
+    if (index === 3 && form.has_vehicle && form.vehicle_plate.trim() && !isValidPlate(form.vehicle_plate)) {
+      return fail("vehicle_plate", "Placa inválida: confira as letras e os números.");
+    }
+    if (index === 4) {
       if (form.password.length < 8) return fail("password", "A senha precisa ter pelo menos 8 caracteres.");
       if (form.password !== form.password2) return fail("password2", "As senhas não conferem.");
       if (!form.privacy_consent) return fail("privacy_consent", "Para enviar, aceite o aviso de privacidade.");
@@ -638,7 +792,10 @@ export default function TechnicianSignupPage() {
   function next() {
     const found = validate(step);
     setProblem(found);
-    if (!found) goTo(step + 1);
+    if (found) return;
+    // Cartão de aptidão em branco sai sem aviso.
+    if (step === 2 && form.skills.some((s) => !s.name.trim())) set("skills", form.skills.filter((s) => s.name.trim()));
+    goTo(step + 1);
   }
 
   function back() {
@@ -667,38 +824,53 @@ export default function TechnicianSignupPage() {
         window.scrollTo({ top: 0 });
         return;
       }
-      const res = await request<{ protocol: string }>(`/public/onboarding/${encodeURIComponent(token)}`, {
+      const text = (value: string) => value.trim() || null;
+      // Razão social e nome fantasia só aparecem com o CNPJ válido: sem ele, não vão.
+      const company = isValidCnpj(form.company_document);
+      const res = await request<SubmitResult>(`/public/onboarding/${encodeURIComponent(token)}`, {
         method: "POST",
         auth: false,
         body: {
           full_name: form.full_name.trim(),
           email: form.email.trim(),
           phone: form.phone,
+          phone_secondary: text(form.phone_secondary),
           document: form.document,
           birth_date: form.birth_date || null,
-          postal_code: form.postal_code.trim() || null,
-          address: form.address.trim() || null,
+          rg_number: text(normalizeRg(form.rg_number)),
+          rg_issuer: text(normalizeIssuer(form.rg_issuer)),
+          rg_state: form.rg_state || null,
+          postal_code: text(form.postal_code),
+          address: text(form.address),
+          address_number: text(form.address_number),
+          address_complement: text(form.address_complement),
+          address_district: text(form.address_district),
           city: form.city.trim(),
           state: form.state,
           photo: form.photo,
           service_areas: form.service_areas,
           years_experience: form.years_experience.trim() ? Number(form.years_experience) : null,
           skills: form.skills.filter((s) => s.name.trim().length >= 2).map((s) => ({ ...s, name: s.name.trim() })),
-          certifications: form.certifications.trim() || null,
-          tools: form.tools.trim() || null,
-          company_document: form.company_document.trim() || null,
+          certifications: text(form.certifications),
+          tools: text(form.tools),
+          bio: text(form.bio),
+          company_document: text(form.company_document),
+          company_name: company ? text(form.company_name) : null,
+          company_trade_name: company ? text(form.company_trade_name) : null,
           coverage_area: form.coverage_area.trim(),
           availability: form.availability,
           has_vehicle: form.has_vehicle,
           vehicle_type: form.has_vehicle ? form.vehicle_type : null,
+          vehicle_model: form.has_vehicle ? text(form.vehicle_model) : null,
+          vehicle_plate: form.has_vehicle && form.vehicle_plate.trim() ? normalizePlate(form.vehicle_plate) : null,
           has_driver_license: form.has_driver_license,
-          notes: form.notes.trim() || null,
+          notes: text(form.notes),
           password: form.password,
           privacy_consent: form.privacy_consent,
         },
       });
       clearDraft();
-      setProtocol(res.protocol);
+      setSent(res);
       window.scrollTo({ top: 0 });
     } catch (error) {
       if (error instanceof ApiError && error.status === 410) {
@@ -738,112 +910,108 @@ export default function TechnicianSignupPage() {
   const cat = catalog.data;
   // O texto do aviso desta página ficou para trás do servidor: só recarregando dá para ler o novo e enviar.
   const outdated = privacyOutdated(latestPrivacy ?? cat?.privacy_version);
+  const login = form.email.trim().toLowerCase();
 
   return (
-    <div className="min-h-screen bg-canvas">
-      <header className="mx-auto flex max-w-2xl items-center justify-between px-4 pt-6">
-        <Logo />
-        <ThemeToggle />
-      </header>
-      <div className="brand-gradient mx-auto mt-3 h-1 max-w-2xl rounded-full" />
-      <main className="mx-auto max-w-2xl px-4 py-6">
-        {protocol ? (
-          <Panel
-            icon={<CheckCircle2 className="size-10 text-brand" />}
-            title="Ficha enviada!"
-            text={`Protocolo ${protocol}. A equipe analisa o seu cadastro e te avisa pelo WhatsApp como instalar o app. Seu login será ${form.email.trim().toLowerCase()}, com a senha que você criou.`}
+    <PublicShell wide footer="Maxx Field · seus dados são protegidos conforme a LGPD">
+      {sent ? (
+        <PublicPanel
+          icon={<CheckCircle2 className="size-10 text-brand" />}
+          title="Ficha enviada!"
+          text={`Protocolo ${sent.protocol}. A equipe analisa o seu cadastro e te avisa pelo WhatsApp como instalar o app. Seu login será ${login}, com a senha que você criou.`}
+          note={sent.email_verification === "queued" ? `Enviamos um link para ${login}. Abra para validar o seu e-mail.` : undefined}
+        />
+      ) : check === "loading" || (catalog.isLoading && check === "valid") ? (
+        <LoadingBlock />
+      ) : check === "invalid" ? (
+        expiredWhileFilling ? (
+          <PublicPanel
+            icon={<XCircle className="size-10 text-red-600 dark:text-red-400" />}
+            title="O link expirou enquanto você preenchia"
+            text="Peça um novo link à equipe da Maxx Field. Seus dados ficam salvos neste aparelho por 24 horas: ao abrir o link novo, escolha continuar a ficha começada (só a senha e a foto você informa de novo)."
           />
-        ) : check === "loading" || (catalog.isLoading && check === "valid") ? (
-          <LoadingBlock />
-        ) : check === "invalid" ? (
-          expiredWhileFilling ? (
-            <Panel
-              icon={<XCircle className="size-10 text-red-600 dark:text-red-400" />}
-              title="O link expirou enquanto você preenchia"
-              text="Peça um novo link à equipe da Maxx Field. Seus dados ficam salvos neste aparelho por 24 horas: ao abrir o link novo, escolha continuar a ficha começada (só a senha e a foto você informa de novo)."
-            />
-          ) : (
-            <Panel
-              icon={<XCircle className="size-10 text-red-600 dark:text-red-400" />}
-              title="Link indisponível"
-              text="Este link de cadastro expirou, foi cancelado ou já foi usado. Peça um novo link à equipe da Maxx Field."
-            />
-          )
-        ) : check === "error" ? (
-          <Panel
-            icon={<WifiOff className="size-10 text-ink-muted" />}
-            title="Sem conexão"
-            text="Não conseguimos abrir a ficha agora. Confira a internet do celular e tente de novo."
-            action={
-              <Button
-                variant="primary"
-                onClick={() => {
-                  setCheck("loading");
-                  setAttempt((n) => n + 1);
-                }}
-              >
-                Tentar de novo
-              </Button>
-            }
-          />
-        ) : catalog.error && !cat ? (
-          <Panel
-            icon={<WifiOff className="size-10 text-ink-muted" />}
-            title="Não foi possível carregar a ficha"
-            text="Confira a internet do celular e tente de novo."
-            action={
-              <Button variant="primary" loading={catalog.isFetching} onClick={() => void catalog.refetch()}>
-                Tentar de novo
-              </Button>
-            }
-          />
-        ) : outdated ? (
-          <OutdatedPanel form={form} step={step} token={token} saveForm={!pendingForeign} onReload={reload} />
         ) : (
-          <form
-            ref={formRef}
-            noValidate
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (submitting) return;
-              if (last) void submit();
-              else next();
-            }}
-          >
-            {/* Sem nome, CPF nem e-mail da outra ficha: pode ser de outra pessoa no mesmo aparelho. */}
-            {pendingForeign ? (
-              <div
-                role="status"
-                className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-line bg-surface px-4 py-3 text-sm shadow-elev-1"
-              >
-                <History aria-hidden className="size-4 shrink-0 text-ink-subtle" />
-                <p className="min-w-0 flex-1 text-ink">Há uma ficha começada neste aparelho.</p>
-                <div className="flex gap-2">
-                  <Button size="sm" onClick={discardForeign}>
-                    Descartar
-                  </Button>
-                  <Button size="sm" variant="primary" onClick={resumeForeign}>
-                    Continuar com ela
-                  </Button>
-                </div>
+          <PublicPanel
+            icon={<XCircle className="size-10 text-red-600 dark:text-red-400" />}
+            title="Link indisponível"
+            text="Este link de cadastro expirou, foi cancelado ou já foi usado. Peça um novo link à equipe da Maxx Field."
+          />
+        )
+      ) : check === "error" ? (
+        <PublicPanel
+          icon={<WifiOff className="size-10 text-ink-muted" />}
+          title="Sem conexão"
+          text="Não conseguimos abrir a ficha agora. Confira a internet do celular e tente de novo."
+          action={
+            <Button
+              variant="primary"
+              onClick={() => {
+                setCheck("loading");
+                setAttempt((n) => n + 1);
+              }}
+            >
+              Tentar de novo
+            </Button>
+          }
+        />
+      ) : catalog.error && !cat ? (
+        <PublicPanel
+          icon={<WifiOff className="size-10 text-ink-muted" />}
+          title="Não foi possível carregar a ficha"
+          text="Confira a internet do celular e tente de novo."
+          action={
+            <Button variant="primary" loading={catalog.isFetching} onClick={() => void catalog.refetch()}>
+              Tentar de novo
+            </Button>
+          }
+        />
+      ) : outdated ? (
+        <OutdatedPanel form={form} step={step} token={token} saveForm={!pendingForeign} onReload={reload} />
+      ) : (
+        <form
+          ref={formRef}
+          noValidate
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (submitting) return;
+            if (last) void submit();
+            else next();
+          }}
+        >
+          {/* Sem nome, CPF nem e-mail da outra ficha: pode ser de outra pessoa no mesmo aparelho. */}
+          {pendingForeign ? (
+            <div
+              role="status"
+              className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-line bg-surface px-4 py-3 text-sm shadow-elev-1"
+            >
+              <History aria-hidden className="size-4 shrink-0 text-ink-subtle" />
+              <p className="min-w-0 flex-1 text-ink">Há uma ficha começada neste aparelho.</p>
+              <div className="flex gap-2">
+                <Button size="sm" onClick={discardForeign}>
+                  Descartar
+                </Button>
+                <Button size="sm" variant="primary" onClick={resumeForeign}>
+                  Continuar com ela
+                </Button>
               </div>
-            ) : null}
-            <Card className="overflow-hidden">
-              <div className="border-b border-line px-5 py-4">
-                <h1 className="text-lg font-bold tracking-[-0.02em] text-ink">Cadastro de técnico parceiro</h1>
-                <p ref={stepRef} tabIndex={-1} className="mt-0.5 text-sm text-ink-muted outline-none">
-                  Etapa {step + 1} de {STEPS.length}: {STEPS[step]}
-                </p>
-                {expiresAt ? <p className="mt-0.5 text-xs text-ink-muted">Link válido até {formatDate(expiresAt)}.</p> : null}
-                <div className="mt-3 flex gap-1.5" aria-hidden>
-                  {STEPS.map((s, i) => (
-                    <span key={s} className={clsx("h-1.5 flex-1 rounded-full", i <= step ? "brand-gradient" : "bg-surface-3")} />
-                  ))}
-                </div>
+            </div>
+          ) : null}
+          <Card className="overflow-hidden">
+            <div className="border-b border-line px-5 py-4">
+              <h1 className="text-lg font-bold tracking-[-0.02em] text-ink">Cadastro de técnico parceiro</h1>
+              <p ref={stepRef} tabIndex={-1} className="mt-0.5 text-sm text-ink-muted outline-none">
+                Etapa {step + 1} de {STEPS.length}: {STEPS[step]}
+              </p>
+              {expiresAt ? <p className="mt-0.5 text-xs text-ink-muted">Link válido até {formatDate(expiresAt)}.</p> : null}
+              <div className="mt-3 flex gap-1.5" aria-hidden>
+                {STEPS.map((s, i) => (
+                  <span key={s} className={clsx("h-1.5 flex-1 rounded-full", i <= step ? "brand-gradient" : "bg-surface-3")} />
+                ))}
               </div>
+            </div>
 
-              {/* No celular, campos com letra de 16 px e mais altos: abaixo disso o iPhone dá zoom em cada campo. */}
-              <div className="flex flex-col gap-4 px-5 py-5 [&_input:not([type=checkbox])]:h-11 [&_input]:text-base [&_select]:h-11 [&_select]:text-base [&_textarea]:text-base sm:[&_input:not([type=checkbox])]:h-9 sm:[&_input]:text-sm sm:[&_select]:h-9 sm:[&_select]:text-sm sm:[&_textarea]:text-sm">
+            {/* No celular, campos com letra de 16 px e mais altos: abaixo disso o iPhone dá zoom em cada campo. */}
+            <div className="flex flex-col gap-4 px-5 py-5 [&_input:not([type=checkbox])]:h-11 [&_input]:text-base [&_select]:h-11 [&_select]:text-base [&_textarea]:text-base sm:[&_input:not([type=checkbox])]:h-9 sm:[&_input]:text-sm sm:[&_select]:h-9 sm:[&_select]:text-sm sm:[&_textarea]:text-sm">
               {step === 0 ? (
                 <>
                   <div className="rounded-lg bg-surface-2 px-3 py-2.5 text-sm">
@@ -894,6 +1062,15 @@ export default function TechnicianSignupPage() {
                         {...invalid("phone")}
                       />
                     </Field>
+                    <Field label="Telefone secundário" error={fieldError("phone_secondary")}>
+                      <Input
+                        name="phone_secondary"
+                        value={form.phone_secondary}
+                        onChange={(e) => set("phone_secondary", maskPhone(e.target.value))}
+                        inputMode="tel"
+                        {...invalid("phone_secondary")}
+                      />
+                    </Field>
                     <Field label="CPF" required error={fieldError("document")}>
                       <Input
                         name="document"
@@ -908,7 +1085,7 @@ export default function TechnicianSignupPage() {
                     </Field>
                     <Field
                       label="Data de nascimento"
-                      hint="É preciso ter 18 anos ou mais."
+                      hint={`É preciso ter ${BIRTH_AGE.min} anos ou mais.`}
                       error={fieldError("birth_date")}
                     >
                       <Input
@@ -920,29 +1097,130 @@ export default function TechnicianSignupPage() {
                         {...invalid("birth_date")}
                       />
                     </Field>
-                    <Field label="CEP" error={fieldError("postal_code")}>
+                  </div>
+                  {/* Os três ou nenhum: no celular, o número numa linha e o órgão com a UF na de baixo. */}
+                  <div>
+                    <div className="grid grid-cols-[minmax(0,1fr)_6rem] gap-4 sm:grid-cols-[minmax(0,1fr)_7rem_6rem]">
+                      <Field label="RG" className="col-span-2 sm:col-span-1">
+                        <Input
+                          name="rg_number"
+                          value={form.rg_number}
+                          onChange={(e) => set("rg_number", normalizeRg(e.target.value))}
+                          autoCapitalize="characters"
+                          autoCorrect="off"
+                          spellCheck={false}
+                          maxLength={PROFILE_LIMITS.rgNumber}
+                          {...invalid("rg_number")}
+                        />
+                      </Field>
+                      <Field label="Órgão emissor">
+                        <Input
+                          name="rg_issuer"
+                          value={form.rg_issuer}
+                          onChange={(e) => set("rg_issuer", normalizeIssuer(e.target.value))}
+                          autoCapitalize="characters"
+                          autoCorrect="off"
+                          spellCheck={false}
+                          maxLength={PROFILE_LIMITS.rgIssuer}
+                          {...invalid("rg_issuer")}
+                        />
+                      </Field>
+                      <Field label="UF do RG">
+                        <Select
+                          name="rg_state"
+                          value={form.rg_state}
+                          onChange={(e) => set("rg_state", e.target.value)}
+                          {...invalid("rg_state")}
+                        >
+                          <option value="">—</option>
+                          {UFS.map((uf) => (
+                            <option key={uf} value={uf}>
+                              {uf}
+                            </option>
+                          ))}
+                        </Select>
+                      </Field>
+                    </div>
+                    {rgProblem ? (
+                      <p id="rg-problem" role="alert" className="mt-1.5 text-xs font-medium text-red-600 dark:text-red-400">
+                        {rgProblem}
+                      </p>
+                    ) : null}
+                  </div>
+                </>
+              ) : null}
+
+              {step === 1 ? (
+                <>
+                  <div className="grid gap-4 sm:grid-cols-[12rem_minmax(0,1fr)]">
+                    {/* CEP primeiro: achado, preenche logradouro, bairro, cidade e UF e leva o cursor para o Número. */}
+                    <CepField
+                      mode="parts"
+                      name="postal_code"
+                      value={form.postal_code}
+                      onChange={(v) => set("postal_code", v)}
+                      address={{ street: form.address, district: form.address_district, city: form.city, state: form.state }}
+                      // Nada aqui foi gravado: tudo o que está na ficha foi a pessoa que digitou (ou a busca anterior).
+                      opened={NO_ADDRESS}
+                      onApply={(found) =>
+                        setForm((f) => ({
+                          ...f,
+                          address: found.street,
+                          address_district: found.district,
+                          city: found.city,
+                          state: found.state,
+                        }))
+                      }
+                      auth={false}
+                      focusRef={numberRef}
+                      streetRef={streetRef}
+                      error={fieldError("postal_code")}
+                      inputProps={invalid("postal_code")}
+                    />
+                    <Field label="Logradouro" error={fieldError("address")}>
                       <Input
-                        name="postal_code"
-                        value={form.postal_code}
-                        onChange={(e) => set("postal_code", maskCep(e.target.value))}
-                        inputMode="numeric"
-                        autoComplete="postal-code"
-                        placeholder="00000-000"
-                        {...invalid("postal_code")}
-                      />
-                    </Field>
-                    <Field label="Endereço" error={fieldError("address")}>
-                      <Input
+                        ref={streetRef}
                         name="address"
                         value={form.address}
                         onChange={(e) => set("address", e.target.value)}
-                        autoComplete="street-address"
+                        autoComplete="address-line1"
                         maxLength={255}
                         {...invalid("address")}
                       />
                     </Field>
                   </div>
-                  <div className="grid grid-cols-[1fr_6rem] gap-4">
+                  <div className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-4 sm:grid-cols-[12rem_minmax(0,1fr)]">
+                    <Field label="Número" error={fieldError("address_number")}>
+                      <Input
+                        ref={numberRef}
+                        name="address_number"
+                        value={form.address_number}
+                        onChange={(e) => set("address_number", e.target.value)}
+                        maxLength={PROFILE_LIMITS.addressNumber}
+                        {...invalid("address_number")}
+                      />
+                    </Field>
+                    <Field label="Complemento" error={fieldError("address_complement")}>
+                      <Input
+                        name="address_complement"
+                        value={form.address_complement}
+                        onChange={(e) => set("address_complement", e.target.value)}
+                        autoComplete="address-line2"
+                        maxLength={PROFILE_LIMITS.addressComplement}
+                        {...invalid("address_complement")}
+                      />
+                    </Field>
+                  </div>
+                  <div className="grid grid-cols-[minmax(0,1fr)_6rem] gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_6rem]">
+                    <Field label="Bairro" className="col-span-2 sm:col-span-1" error={fieldError("address_district")}>
+                      <Input
+                        name="address_district"
+                        value={form.address_district}
+                        onChange={(e) => set("address_district", e.target.value)}
+                        maxLength={120}
+                        {...invalid("address_district")}
+                      />
+                    </Field>
                     <Field label="Cidade" required error={fieldError("city")}>
                       <Input
                         name="city"
@@ -970,18 +1248,22 @@ export default function TechnicianSignupPage() {
                       </Select>
                     </Field>
                   </div>
+                  <Field label="Região que você atende" required error={fieldError("coverage_area")}>
+                    <Textarea
+                      name="coverage_area"
+                      rows={2}
+                      value={form.coverage_area}
+                      onChange={(e) => set("coverage_area", e.target.value)}
+                      maxLength={1000}
+                      {...invalid("coverage_area")}
+                    />
+                  </Field>
                 </>
               ) : null}
 
-              {step === 1 && cat ? (
+              {step === 2 && cat ? (
                 <>
-                  <Group
-                    label="Em que você atende?"
-                    required
-                    hint="Escolha todas as áreas em que tem experiência."
-                    field="service_areas"
-                    error={fieldError("service_areas")}
-                  >
+                  <Group label="Em que você atende?" required field="service_areas" error={fieldError("service_areas")}>
                     <div className="flex flex-wrap gap-2">
                       {cat.service_areas.map((a) => (
                         <Chip key={a.key} active={form.service_areas.includes(a.key)} onClick={() => toggle("service_areas", a.key)}>
@@ -1004,80 +1286,15 @@ export default function TechnicianSignupPage() {
                         {...invalid("years_experience")}
                       />
                     </Field>
-                    <Field label="CNPJ / MEI" hint="Se você emite nota." error={fieldError("company_document")}>
-                      <Input
-                        name="company_document"
-                        value={form.company_document}
-                        onChange={(e) => set("company_document", maskCnpj(e.target.value))}
-                        placeholder="00.000.000/0000-00"
-                        autoCapitalize="characters"
-                        {...invalid("company_document")}
-                      />
-                    </Field>
                   </div>
-                  <Group
-                    label="Skills"
-                    hint="Equipamentos, marcas e sistemas que você domina."
-                    field="skills"
-                    error={fieldError("skills")}
-                  >
-                    <div className="flex flex-col gap-2">
-                      <datalist id="skill-suggestions">
-                        {cat.skill_suggestions.map((s) => (
-                          <option key={s} value={s} />
-                        ))}
-                      </datalist>
-                      {form.skills.map((skill, i) => (
-                        <div key={i} className="grid grid-cols-[1fr_auto] gap-2 sm:grid-cols-[1fr_10rem_auto]">
-                          <Input
-                            className="col-span-2 sm:col-span-1"
-                            list="skill-suggestions"
-                            value={skill.name}
-                            placeholder="Ex.: DVR/NVR Intelbras"
-                            aria-label={`Skill ${i + 1}`}
-                            onChange={(e) =>
-                              set(
-                                "skills",
-                                form.skills.map((s, j) => (j === i ? { ...s, name: e.target.value } : s)),
-                              )
-                            }
-                          />
-                          <Select
-                            value={skill.level}
-                            aria-label={`Nível da skill ${i + 1}`}
-                            onChange={(e) =>
-                              set(
-                                "skills",
-                                form.skills.map((s, j) => (j === i ? { ...s, level: e.target.value } : s)),
-                              )
-                            }
-                          >
-                            {cat.skill_levels.map((l) => (
-                              <option key={l.key} value={l.key}>
-                                {l.label}
-                              </option>
-                            ))}
-                          </Select>
-                          <button
-                            type="button"
-                            onClick={() => set("skills", form.skills.filter((_, j) => j !== i))}
-                            className="shrink-0 rounded-md p-2.5 text-ink-muted hover:bg-surface-2 hover:text-red-700 focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none dark:hover:text-red-400"
-                            aria-label={`Remover skill ${i + 1}`}
-                          >
-                            <Trash2 className="size-4" />
-                          </button>
-                        </div>
-                      ))}
-                      {form.skills.length < 30 ? (
-                        <Button
-                          className="self-start"
-                          onClick={() => set("skills", [...form.skills, { name: "", level: "intermediario" }])}
-                        >
-                          <Plus className="size-4" />
-                          Adicionar skill
-                        </Button>
-                      ) : null}
-                    </div>
+                  <Group label="Aptidões" field="skills" error={fieldError("skills")}>
+                    <SkillCards
+                      skills={form.skills}
+                      levels={cat.skill_levels}
+                      suggestions={cat.skill_suggestions}
+                      onChange={(skills) => set("skills", skills)}
+                      invalidName={problem?.field === "skills" ? (problem.target ?? null) : null}
+                    />
                   </Group>
                   <Field label="Certificações e cursos" error={fieldError("certifications")}>
                     <Textarea
@@ -1088,11 +1305,7 @@ export default function TechnicianSignupPage() {
                       {...invalid("certifications")}
                     />
                   </Field>
-                  <Field
-                    label="Ferramentas próprias"
-                    hint="Ex.: alicate de crimpagem, testador de cabos, máquina de fusão."
-                    error={fieldError("tools")}
-                  >
+                  <Field label="Ferramentas próprias" error={fieldError("tools")}>
                     <Textarea
                       name="tools"
                       rows={2}
@@ -1101,27 +1314,64 @@ export default function TechnicianSignupPage() {
                       {...invalid("tools")}
                     />
                   </Field>
+                  <Field label="Mini biografia" error={fieldError("bio")}>
+                    <Textarea
+                      name="bio"
+                      rows={4}
+                      value={form.bio}
+                      onChange={(e) => set("bio", e.target.value)}
+                      maxLength={PROFILE_LIMITS.bio}
+                      {...invalid("bio")}
+                    />
+                    <span aria-hidden className="self-end text-xs text-ink-muted tabular-nums">
+                      {form.bio.length}/{PROFILE_LIMITS.bio}
+                    </span>
+                  </Field>
+                  <section aria-labelledby={companyTitleId} className="flex flex-col gap-4 border-t border-line pt-4">
+                    <h2 id={companyTitleId} className="text-sm font-bold text-ink">
+                      Empresa
+                    </h2>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <Field label="CNPJ / MEI" error={fieldError("company_document")}>
+                        <Input
+                          name="company_document"
+                          value={form.company_document}
+                          onChange={(e) => set("company_document", maskCnpj(e.target.value))}
+                          placeholder="00.000.000/0000-00"
+                          autoCapitalize="characters"
+                          {...invalid("company_document")}
+                        />
+                      </Field>
+                    </div>
+                    {isValidCnpj(form.company_document) ? (
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <Field label="Razão social" error={fieldError("company_name")}>
+                          <Input
+                            name="company_name"
+                            value={form.company_name}
+                            onChange={(e) => set("company_name", e.target.value)}
+                            autoComplete="organization"
+                            maxLength={PROFILE_LIMITS.companyName}
+                            {...invalid("company_name")}
+                          />
+                        </Field>
+                        <Field label="Nome fantasia" error={fieldError("company_trade_name")}>
+                          <Input
+                            name="company_trade_name"
+                            value={form.company_trade_name}
+                            onChange={(e) => set("company_trade_name", e.target.value)}
+                            maxLength={PROFILE_LIMITS.companyName}
+                            {...invalid("company_trade_name")}
+                          />
+                        </Field>
+                      </div>
+                    ) : null}
+                  </section>
                 </>
               ) : null}
 
-              {step === 2 && cat ? (
+              {step === 3 && cat ? (
                 <>
-                  <Field
-                    label="Região que você atende"
-                    required
-                    hint="Cidades, bairros ou zonas."
-                    error={fieldError("coverage_area")}
-                  >
-                    <Textarea
-                      name="coverage_area"
-                      rows={2}
-                      value={form.coverage_area}
-                      onChange={(e) => set("coverage_area", e.target.value)}
-                      placeholder="Ex.: Guarulhos, Zona Leste e Centro de São Paulo"
-                      maxLength={1000}
-                      {...invalid("coverage_area")}
-                    />
-                  </Field>
                   <Group label="Disponibilidade" field="availability" error={fieldError("availability")}>
                     <div className="flex flex-wrap gap-2">
                       {cat.availability.map((a) => (
@@ -1134,13 +1384,42 @@ export default function TechnicianSignupPage() {
                   <div className="flex flex-col gap-3 rounded-lg border border-line p-3">
                     <Checkbox label="Tenho veículo próprio para os atendimentos" checked={form.has_vehicle} onChange={(v) => set("has_vehicle", v)} />
                     {form.has_vehicle ? (
-                      <Select value={form.vehicle_type} onChange={(e) => set("vehicle_type", e.target.value)} aria-label="Tipo de veículo">
-                        {cat.vehicle_types.map((v) => (
-                          <option key={v.key} value={v.key}>
-                            {v.label}
-                          </option>
-                        ))}
-                      </Select>
+                      <div className="grid grid-cols-2 gap-4 sm:grid-cols-[10rem_minmax(0,1fr)_9rem]">
+                        <Field label="Tipo de veículo" className="col-span-2 sm:col-span-1">
+                          <Select name="vehicle_type" value={form.vehicle_type} onChange={(e) => set("vehicle_type", e.target.value)}>
+                            {cat.vehicle_types.map((v) => (
+                              <option key={v.key} value={v.key}>
+                                {v.label}
+                              </option>
+                            ))}
+                          </Select>
+                        </Field>
+                        <Field label="Modelo" error={fieldError("vehicle_model")}>
+                          <Input
+                            name="vehicle_model"
+                            value={form.vehicle_model}
+                            onChange={(e) => set("vehicle_model", e.target.value)}
+                            maxLength={PROFILE_LIMITS.vehicleModel}
+                            {...invalid("vehicle_model")}
+                          />
+                        </Field>
+                        <Field label="Placa" error={fieldError("vehicle_plate")}>
+                          <Input
+                            name="vehicle_plate"
+                            value={form.vehicle_plate}
+                            onChange={(e) => set("vehicle_plate", e.target.value.toUpperCase())}
+                            // Antiga com hífen (ABC-1234) ou Mercosul (ABC1D23), em maiúsculas.
+                            onBlur={() => {
+                              if (form.vehicle_plate.trim()) set("vehicle_plate", formatPlate(form.vehicle_plate));
+                            }}
+                            autoCapitalize="characters"
+                            autoCorrect="off"
+                            spellCheck={false}
+                            maxLength={8}
+                            {...invalid("vehicle_plate")}
+                          />
+                        </Field>
+                      </div>
                     ) : null}
                     <Checkbox label="Tenho CNH válida" checked={form.has_driver_license} onChange={(v) => set("has_driver_license", v)} />
                   </div>
@@ -1156,11 +1435,10 @@ export default function TechnicianSignupPage() {
                 </>
               ) : null}
 
-              {step === 3 ? (
+              {step === 4 ? (
                 <>
                   <p className="rounded-lg bg-surface-2 px-3 py-2 text-sm text-ink">
-                    Seu login no app será <strong>{form.email.trim().toLowerCase() || "o e-mail informado"}</strong>. Crie uma
-                    senha:
+                    Seu login no app será <strong>{login || "o e-mail informado"}</strong>. Crie uma senha:
                   </p>
                   <div className="grid gap-4 sm:grid-cols-2">
                     <Field label="Senha" required hint="Mínimo de 8 caracteres." error={fieldError("password")}>
@@ -1215,43 +1493,41 @@ export default function TechnicianSignupPage() {
                   <ErrorBox message={problem.message} />
                 </div>
               ) : null}
-              </div>
+            </div>
 
-              {/* Botões mais altos no celular (alvo de toque de 44 px). */}
-              <div className="flex items-center justify-between gap-2 border-t border-line px-5 py-3 [&>button]:h-11 sm:[&>button]:h-9">
-                <Button onClick={back} disabled={step === 0 || submitting} className={step === 0 ? "invisible" : ""}>
-                  <ChevronLeft className="size-4" />
-                  Voltar
+            {/* Botões mais altos no celular (alvo de toque de 44 px). */}
+            <div className="flex items-center justify-between gap-2 border-t border-line px-5 py-3 [&>button]:h-11 sm:[&>button]:h-9">
+              <Button onClick={back} disabled={step === 0 || submitting} className={step === 0 ? "invisible" : ""}>
+                <ChevronLeft className="size-4" />
+                Voltar
+              </Button>
+              {last ? (
+                <Button variant="primary" type="submit" loading={submitting}>
+                  Enviar ficha
                 </Button>
-                {last ? (
-                  <Button variant="primary" type="submit" loading={submitting}>
-                    Enviar ficha
-                  </Button>
-                ) : (
-                  <Button variant="primary" type="submit">
-                    Continuar
-                    <ChevronRight className="size-4" />
-                  </Button>
-                )}
-              </div>
-            </Card>
-            {hasContent(form) ? (
-              <p className="mt-3 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-center text-xs text-ink-muted">
-                Rascunho salvo neste aparelho por 24 horas (sem a senha e a foto).
-                <button
-                  type="button"
-                  onClick={restart}
-                  className="rounded font-medium text-ink underline underline-offset-2 hover:text-brand focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
-                >
-                  Apagar e recomeçar
-                </button>
-              </p>
-            ) : null}
-          </form>
-        )}
-        <p className="mt-6 text-center text-xs text-ink-muted">Maxx Field · seus dados são protegidos conforme a LGPD</p>
-      </main>
-    </div>
+              ) : (
+                <Button variant="primary" type="submit">
+                  Continuar
+                  <ChevronRight className="size-4" />
+                </Button>
+              )}
+            </div>
+          </Card>
+          {hasContent(form) ? (
+            <p className="mt-3 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-center text-xs text-ink-muted">
+              Rascunho salvo neste aparelho por 24 horas (sem a senha e a foto).
+              <button
+                type="button"
+                onClick={restart}
+                className="rounded font-medium text-ink underline underline-offset-2 hover:text-brand focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none"
+              >
+                Apagar e recomeçar
+              </button>
+            </p>
+          ) : null}
+        </form>
+      )}
+    </PublicShell>
   );
 }
 
@@ -1275,7 +1551,7 @@ function OutdatedPanel({
   const [note] = useState(() => reloadNote(form, step, token, saveForm));
   const textId = useId();
   return (
-    <Panel
+    <PublicPanel
       icon={<RefreshCw className="size-10 text-ink-muted" />}
       title="O aviso de privacidade mudou"
       text="Recarregue a página para ler o texto novo."
@@ -1288,38 +1564,6 @@ function OutdatedPanel({
         </Button>
       }
     />
-  );
-}
-
-function Panel({
-  icon,
-  title,
-  text,
-  note,
-  textId,
-  action,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  text: string;
-  /** Uma linha curta abaixo do texto. */
-  note?: string;
-  /** id do texto e da linha (para a ação apontar para eles com aria-describedby). */
-  textId?: string;
-  action?: React.ReactNode;
-}) {
-  return (
-    <Card className="flex flex-col items-center gap-3 px-6 py-10 text-center">
-      {icon}
-      <h1 id={textId ? `${textId}-titulo` : undefined} className="text-lg font-bold tracking-[-0.02em] text-ink">
-        {title}
-      </h1>
-      <div id={textId} className="max-w-md space-y-1 text-sm text-ink-muted">
-        <p>{text}</p>
-        {note ? <p>{note}</p> : null}
-      </div>
-      {action ? <div className="mt-2">{action}</div> : null}
-    </Card>
   );
 }
 
@@ -1337,16 +1581,59 @@ function PrivacyNotice({ className }: { className?: string }) {
   );
 }
 
+/** Foto do rosto: a câmera (a da frente, no celular) ou a galeria. Reduzida no próprio aparelho antes de ir. */
 function PhotoPicker({ value, onChange, name }: { value: string | null; onChange: (v: string | null) => void; name: string }) {
   const [error, setError] = useState<string | null>(null);
-  // Reduzir uma foto de 12 MP leva um instante: o botão avisa e não aceita outro toque.
-  const [preparing, setPreparing] = useState(false);
+  // Reduzir uma foto de 12 MP leva um instante: o botão avisa e nenhum dos dois aceita outro toque.
+  const [preparing, setPreparing] = useState<"camera" | "gallery" | null>(null);
   const initialsText = name
     .trim()
     .split(/\s+/)
     .slice(0, 2)
     .map((p) => p[0]?.toUpperCase() ?? "")
     .join("");
+
+  async function use(file: File | undefined, source: "camera" | "gallery") {
+    if (!file) return;
+    setError(null);
+    setPreparing(source);
+    try {
+      onChange(await resizePhoto(file));
+    } catch {
+      setError("Não foi possível usar esta imagem. Tente outra foto.");
+    } finally {
+      setPreparing(null);
+    }
+  }
+
+  const picker = (source: "camera" | "gallery", icon: React.ReactNode, text: string) => (
+    <label
+      className={clsx(
+        // 44 px de altura no celular.
+        buttonClassName("secondary", "lg"),
+        "cursor-pointer has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-brand/45 sm:h-9 sm:px-3.5",
+        preparing && "pointer-events-none opacity-60",
+      )}
+    >
+      {preparing === source ? <Loader2 className="size-4 animate-spin" /> : icon}
+      {preparing === source ? "Preparando foto…" : text}
+      <input
+        type="file"
+        accept="image/*"
+        // "user": a câmera da frente no celular; sem `capture`, o celular abre a galeria (no computador, os dois abrem os
+        // arquivos).
+        capture={source === "camera" ? "user" : undefined}
+        className="sr-only"
+        disabled={preparing !== null}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          void use(file, source);
+        }}
+      />
+    </label>
+  );
+
   return (
     <div className="flex items-center gap-4">
       <div className="flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-full border border-line bg-surface-2 text-xl font-semibold text-ink-muted">
@@ -1357,43 +1644,16 @@ function PhotoPicker({ value, onChange, name }: { value: string | null; onChange
           initialsText || <Camera className="size-6" />
         )}
       </div>
-      <div className="flex flex-col gap-1.5">
-        {/* Sem "capture": o celular oferece câmera ou galeria (antes abria direto a câmera da frente). */}
-        <label
-          className={clsx(
-            buttonClassName("secondary"),
-            "cursor-pointer self-start has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-brand/45",
-            preparing && "pointer-events-none opacity-60",
-          )}
-        >
-          {preparing ? <Loader2 className="size-4 animate-spin" /> : <Camera className="size-4" />}
-          {preparing ? "Preparando foto…" : value ? "Trocar foto" : "Adicionar foto"}
-          <input
-            type="file"
-            accept="image/*"
-            className="sr-only"
-            disabled={preparing}
-            onChange={async (e) => {
-              const file = e.target.files?.[0];
-              e.target.value = "";
-              if (!file) return;
-              setError(null);
-              setPreparing(true);
-              try {
-                onChange(await resizePhoto(file));
-              } catch {
-                setError("Não foi possível usar esta imagem. Tente outra foto.");
-              } finally {
-                setPreparing(false);
-              }
-            }}
-          />
-        </label>
-        <span className="text-xs text-ink-muted">Foto do rosto, de frente (opcional). Fica no seu cadastro de técnico.</span>
+      <div className="flex min-w-0 flex-col gap-1.5">
+        <div className="flex flex-wrap gap-2">
+          {picker("camera", <Camera className="size-4" />, "Tirar foto")}
+          {picker("gallery", <ImageIcon className="size-4" />, "Escolher da galeria")}
+        </div>
+        <span className="text-xs text-ink-muted">Foto do rosto, de frente.</span>
         {value ? (
           <button
             type="button"
-            className="self-start rounded text-xs text-red-700 hover:underline focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none dark:text-red-400"
+            className="self-start rounded text-xs text-red-700 hover:underline focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none pointer-coarse:min-h-11 dark:text-red-400"
             onClick={() => onChange(null)}
           >
             Remover foto
@@ -1405,6 +1665,185 @@ function PhotoPicker({ value, onChange, name }: { value: string | null; onChange
           </span>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Aptidões no celular: um cartão por aptidão (nome e nível em botões de 44 px), as sugestões numa lista própria e
+ * "Adicionar aptidão". Começa sem cartão; com 30, somem o botão e as sugestões.
+ */
+function SkillCards({
+  skills,
+  levels,
+  suggestions,
+  onChange,
+  invalidName,
+}: {
+  skills: Skill[];
+  levels: CatalogItem[];
+  suggestions: string[];
+  onChange: (skills: Skill[]) => void;
+  /** `name` do nome com problema (o recado aparece no fim do grupo). */
+  invalidName: string | null;
+}) {
+  const listRef = useRef<HTMLDivElement>(null);
+  const addRef = useRef<HTMLButtonElement>(null);
+  const suggestionsId = useId();
+  // Depois de criar ou tirar um cartão, para onde vai o foco.
+  const [focusRequest, setFocusRequest] = useState<{ index: number; part: "name" | "level" } | { part: "add" } | null>(null);
+  useEffect(() => {
+    if (!focusRequest) return;
+    if (focusRequest.part === "add") {
+      addRef.current?.focus();
+      return;
+    }
+    const card = listRef.current?.querySelector<HTMLElement>(`[data-skill="${focusRequest.index}"]`);
+    const target =
+      focusRequest.part === "name"
+        ? card?.querySelector<HTMLElement>("input")
+        : (card?.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]') ?? card?.querySelector<HTMLElement>('[role="radio"]'));
+    target?.focus();
+  }, [focusRequest]);
+
+  const full = skills.length >= MAX_SKILLS;
+  const taken = new Set(skills.map((s) => foldName(s.name)));
+  const open = suggestions.filter((s) => !taken.has(foldName(s)));
+  const update = (index: number, patch: Partial<Skill>) => onChange(skills.map((s, i) => (i === index ? { ...s, ...patch } : s)));
+  const add = (name: string) => {
+    onChange([...skills, { name, level: DEFAULT_SKILL_LEVEL }]);
+    // Pela sugestão, o nome já está: falta o nível. Cartão vazio: o nome.
+    setFocusRequest({ index: skills.length, part: name ? "level" : "name" });
+  };
+  const remove = (index: number) => {
+    onChange(skills.filter((_, i) => i !== index));
+    // O botão sumiu com o cartão: o foco vai para o cartão que ficou no lugar (ou o de cima), ou para "Adicionar".
+    const left = skills.length - 1;
+    setFocusRequest(left > 0 ? { index: Math.min(index, left - 1), part: "name" } : { part: "add" });
+  };
+
+  return (
+    <div className="flex flex-col gap-3">
+      {skills.length ? (
+        <div ref={listRef} className="flex flex-col gap-2">
+          {skills.map((skill, i) => {
+            const n = i + 1;
+            return (
+              <div key={i} data-skill={i} className="rounded-lg border border-line p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs text-ink-muted">Aptidão {n}</span>
+                  <button
+                    type="button"
+                    onClick={() => remove(i)}
+                    className="-my-2.5 -mr-2.5 inline-flex size-11 shrink-0 items-center justify-center rounded-md text-ink-muted hover:bg-surface-2 hover:text-red-700 focus-visible:ring-2 focus-visible:ring-brand/45 focus-visible:outline-none dark:hover:text-red-400"
+                    aria-label={`Remover aptidão ${n}`}
+                  >
+                    <Trash2 className="size-4" />
+                  </button>
+                </div>
+                <div className="mt-1.5 flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <Input
+                    name={`skill_${i}`}
+                    className="sm:min-w-0 sm:flex-1"
+                    value={skill.name}
+                    maxLength={80}
+                    aria-label={`Nome da aptidão ${n}`}
+                    aria-invalid={invalidName === `skill_${i}` ? true : undefined}
+                    onChange={(e) => update(i, { name: e.target.value })}
+                  />
+                  <LevelPicker
+                    label={`Nível da aptidão ${n}`}
+                    levels={levels}
+                    value={skill.level}
+                    onChange={(level) => update(i, { level })}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+      {full ? null : (
+        <>
+          <Button ref={addRef} size="lg" className="self-start sm:h-9 sm:px-3.5" onClick={() => add("")}>
+            <Plus className="size-4" />
+            Adicionar aptidão
+          </Button>
+          {open.length ? (
+            <div className="flex flex-col gap-1.5">
+              <p id={suggestionsId} className="text-xs font-semibold text-ink/80">
+                Sugestões
+              </p>
+              <div role="group" aria-labelledby={suggestionsId} className="flex flex-wrap gap-2">
+                {open.map((name) => (
+                  <button
+                    key={name}
+                    type="button"
+                    onClick={() => add(name)}
+                    className={clsx(
+                      "inline-flex min-h-11 items-center gap-1 rounded-full border px-3 py-1.5 text-sm transition-colors",
+                      FOCUS_RING,
+                      UNCHOSEN,
+                    )}
+                  >
+                    <Plus aria-hidden className="size-3.5" />
+                    <span className="sr-only">Adicionar </span>
+                    {name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Nível da aptidão em 3 botões (um grupo de opções: setas trocam, Tab entra só no marcado). */
+function LevelPicker({
+  label,
+  levels,
+  value,
+  onChange,
+}: {
+  label: string;
+  levels: CatalogItem[];
+  value: string;
+  onChange: (level: string) => void;
+}) {
+  // Sem nível marcado (não acontece pela ficha), o primeiro recebe o Tab.
+  const focusable = levels.some((l) => l.key === value) ? value : levels[0]?.key;
+  return (
+    <div role="radiogroup" aria-label={label} className="flex gap-1.5">
+      {levels.map((level, i) => {
+        const checked = level.key === value;
+        return (
+          <button
+            key={level.key}
+            type="button"
+            role="radio"
+            aria-checked={checked}
+            tabIndex={level.key === focusable ? 0 : -1}
+            onClick={() => onChange(level.key)}
+            onKeyDown={(e) => {
+              const move = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
+              if (!move) return;
+              e.preventDefault();
+              const next = (i + move + levels.length) % levels.length;
+              onChange(levels[next].key);
+              e.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[next]?.focus();
+            }}
+            className={clsx(
+              "min-h-11 flex-1 rounded-lg border px-2 text-sm transition-colors sm:min-h-9 sm:flex-none sm:px-3",
+              FOCUS_RING,
+              checked ? CHOSEN : UNCHOSEN,
+            )}
+          >
+            {level.label}
+          </button>
+        );
+      })}
     </div>
   );
 }

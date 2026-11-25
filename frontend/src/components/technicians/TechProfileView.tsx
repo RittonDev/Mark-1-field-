@@ -60,6 +60,16 @@ export function profileInfo(
   };
 }
 
+/**
+ * O carimbo da parte ao lado do título: quando e por onde chegou, ou "Não informado". A parte com dado e sem data (de
+ * antes dos carimbos) fica sem carimbo.
+ */
+export function partStamp(info: ReturnType<typeof profileInfo>, part: TechProfilePart): string | undefined {
+  if (!info) return undefined;
+  const stamp = info.stamps[part];
+  return stamp || !info.informed[part] ? stampText(stamp) : undefined;
+}
+
 /** O servidor ainda não tem esta parte do cadastro (antes de a API nova subir). */
 export function ProfileUnavailable() {
   return (
