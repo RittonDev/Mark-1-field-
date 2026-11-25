@@ -10,10 +10,12 @@ Autenticação: `Authorization: Bearer <access_token>`. Erros seguem `{"detail":
 Valor que o banco recusa (SQLSTATE da classe 22, "data exception": texto maior que a coluna, U+0000 num texto que vai
 ao banco como está) responde 422 em qualquer rota, com um aviso no log (o SQLSTATE, sem traceback):
 `{"detail": "Algum valor está fora do tamanho ou do formato aceito. Confira os campos."}`. O asyncpg entrega esses
-erros como `DBAPIError` genérico, e o handler de `main.py` decide pelo SQLSTATE. Os outros erros do banco seguem como
-erro não tratado: 500 `{"detail": "Erro interno. Tente de novo; se continuar, avise a central."}` e o log "Erro não
-tratado em …". O erro do banco vai para o log com o SQL sem os valores (`hide_parameters` em `db/session.py`, também
-no `DB_ECHO`), que levariam dados pessoais (nome, contato, formação, chave PIX).
+erros como `DBAPIError` genérico, e o handler de `main.py` decide pelo SQLSTATE (a API publicada em 20/11/2026 ainda
+responde 500 nesses casos). Registro repetido e referência que não existe (`IntegrityError`) continuam 409 com a
+mensagem da restrição; os outros erros do banco seguem como erro não tratado: 500 `{"detail": "Erro interno. Tente de
+novo; se continuar, avise a central."}` e o log "Erro não tratado em …". O erro do banco vai para o log com o SQL sem
+os valores (`hide_parameters` em `db/session.py`, também no `DB_ECHO`), que levariam dados pessoais (nome, contato,
+formação, chave PIX).
 
 ## Papéis
 
@@ -294,7 +296,7 @@ versão do aviso de privacidade; o app usa as `skill_suggestions` nas sugestões
 domínio da empresa (`ENTRA_ALLOWED_DOMAINS`, o domínio exato): 422 "Use um e-mail que não seja da empresa", antes da
 checagem de e-mail já usado, e o link não é gasto. Cada código de `service_areas` e de `availability` tem até 32
 caracteres (os de hoje têm até 16): maior, 422 "No máximo 32 caracteres", sem o valor na resposta, e o link não é gasto;
-o código desconhecido mais curto volta na mensagem ("Área desconhecida: …", "Disponibilidade desconhecida: …").
+o código desconhecido dentro do limite continua na mensagem ("Área desconhecida: …", "Disponibilidade desconhecida: …").
 Gestão: `GET|POST /onboarding/invites` (`{label?, reusable, days_valid}`; o `token` só aparece na criação) ·
 `DELETE /onboarding/invites/{id}` · `GET /onboarding/applications?status=` · `GET /onboarding/applications/pending-count` ·
 `GET /onboarding/applications/{id}` (com `photo_url` assinado) · `POST .../{id}/approve {team_id?, job_title?}` → `UserOut`
@@ -316,8 +318,9 @@ serviços, ver "Fichas completas") ·
 quando ninguém mais usa; o DELETE tira também a foto do Field Control) ·
 `POST /technicians/import?dry_run=true|false` (CSV/XLSX: nome, email, telefone, grupo, cargo) →
 `{rows:[{line, action: create|update|error, errors}], created, updated, errors, credentials}` (senhas provisórias só na gravação).
-Um técnico, o histórico do cadastro e a chave PIX (`GET /technicians/{id}`, `GET /technicians/{id}/changes`,
-`DELETE /technicians/{id}/pix`): ver [Meu cadastro do técnico](#meu-cadastro-do-técnico-2026-11-18).
+Um técnico, o histórico do cadastro (em páginas, pelo `before`) e a chave PIX (`GET /technicians/{id}`,
+`GET /technicians/{id}/changes`, `DELETE /technicians/{id}/pix`): ver
+[Meu cadastro do técnico](#meu-cadastro-do-técnico-2026-11-18).
 `TechnicianOut.skills` passou a vir do perfil técnico (`users.skills`, com o "desde"; as da ficha aprovada foram
 copiadas na migração), e a lista traz o resumo do perfil técnico; `GET /technicians/{id}` e as outras respostas de
 um técnico trazem também o detalhe (ferramentas, formação e a data de cada parte): ver
@@ -1049,10 +1052,11 @@ os que não têm cartão). Código: `services/payouts.py` (`MONTHS_DEFAULT`, `MO
 
   `count` = `to_pay.count + expected.count + paid.count`; `total` = a soma dos três (o "Valor total" do cartão);
   `last_paid_at` = o último pagamento das OS do mês.
-- `invoices` (desde 2026-11-20; a API sem o campo conta como 0) = quantas notas do técnico com a competência do mês
-  não foram recusadas (aguardando conferência ou conferidas). Não muda o `state`. A nota pode cobrir OS de meses
-  anteriores, então o mês da competência pode vir `empty` com nota: o app mostra o cartão dele ("Sem valores", R$ 0,00
-  e "1 nota fiscal"), e é por ele que o técnico abre, apaga ou acompanha a nota.
+- `invoices` = quantas notas do técnico com a competência do mês não foram recusadas (aguardando conferência ou
+  conferidas). A API publicada em 20/11/2026 não manda o campo: ausente, o app conta 0. Não muda o `state`. A nota
+  pode cobrir OS de meses anteriores, então o mês da competência pode vir `empty` com nota: o app mostra o cartão dele
+  ("Sem valores", R$ 0,00 e "1 nota fiscal"), e é por ele que o técnico abre, apaga ou acompanha a nota. Enviada noutra
+  competência, o app vai do envio direto para o mês dela (o aviso diz qual), em vez de voltar ao mês de onde veio.
 - **Mês de um valor:** a conclusão da OS (aberta: o lançamento do valor), no fuso da operação: a régua de
   `list_payouts` e do `GET /me/earnings`. A data do pagamento não muda o mês; horário corrigido para o futuro conta no
   mês atual. O pendente de OS cancelada não conta (o pago, sim).
@@ -1081,10 +1085,11 @@ os que não têm cartão). Código: `services/payouts.py` (`MONTHS_DEFAULT`, `MO
 - Custo: 3 consultas, todas pelo técnico (os valores agrupados por mês, as notas da janela, de onde saem a recusa em
   aberto e o `invoices`, e os reembolsos). Sem tempo real e sem histórico: o app relê ao abrir a aba, ao puxar, depois
   de enviar ou apagar uma nota e depois de uma sincronização (`docs/MOBILE_SYNC.md`).
-- A API desta entrega está publicada desde 20/11/2026. Com uma API anterior (sem esta rota: 404), a aba mostra "Não foi
-  possível carregar o faturamento." e "Tentar de novo", sem cartões e sem o "Outro mês": o mês
-  (`GET /me/earnings?month=`, que a API anterior tem) e o "Enviar nota fiscal" só abrem com meses já guardados no
-  aparelho, pelo cartão ou pelo "Outro mês".
+- A API desta entrega está publicada desde 20/11/2026. Com uma API anterior (sem esta rota: 404), o mês
+  (`GET /me/earnings?month=`, que a API anterior tem) abre pelo "Outro mês" (ou por um cartão), mas a linha e os
+  cartões só aparecem com os meses guardados no aparelho de uma busca que deu certo antes ("Não deu para atualizar ·
+  valores de …"). Sem nada guardado, a aba mostra só "Não foi possível carregar o faturamento." e "Tentar de novo", sem
+  cartões e sem o "Outro mês", e o mês e o "Enviar nota fiscal" ficam fora de alcance.
 
 ## Orçamentos: cobrança, aberturas e preço do cliente (2026-11-17)
 
@@ -1593,11 +1598,11 @@ Na web (cadastro do técnico), a senha aparece como "Senha redefinida (provisór
   técnico). Declarada depois das rotas fixas (`/regions`, `/nearby`, `/suggest`).
 - `GET /technicians/{id}/changes?limit=50&before=` (`limit` de 1 a 200; Técnicos, ver) → `UserChange[]`, do mais novo
   para o mais antigo (`created_at DESC, id DESC`).
-  - Páginas (desde 2026-11-20): `before` = `"{created_at}|{id}"` da última linha recebida (o `created_at` como veio,
-    ISO com fuso) traz as `limit` linhas seguintes, mais antigas, sem repetir nem pular (o id desempata as do mesmo
-    instante). Sem `before`, ou vazio, as mais novas. Estragado (mais de 100 caracteres, separador errado, data sem
-    fuso ou fora da faixa, id que não é UUID): 422 `{"detail": "Página do histórico inválida. Recarregue a ficha."}`.
-    A API sem o parâmetro o ignora e devolve as mais novas de novo.
+  - Páginas: `before` = `"{created_at}|{id}"` da última linha recebida (o `created_at` como veio, ISO com fuso) traz
+    as `limit` linhas seguintes, mais antigas, sem repetir nem pular (o id desempata as do mesmo instante). Sem
+    `before`, ou vazio, as mais novas. Estragado (mais de 100 caracteres, separador errado, data sem fuso ou fora da
+    faixa, id que não é UUID): 422 `{"detail": "Página do histórico inválida. Recarregue a ficha."}`. A API publicada
+    em 20/11/2026 não tem o parâmetro: ignora e devolve as mais novas de novo.
   - Com Pagamentos (Visualizar ou Editar), como acima.
   - Com Técnicos e sem Pagamentos (`commercial.payouts` Sem acesso): os itens `pix_holder` não vêm e o `from`/`to` de
     `pix` vira `"***"` (null continua null). A troca só do titular aparece como
