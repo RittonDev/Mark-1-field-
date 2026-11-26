@@ -8,6 +8,11 @@ recebe as linhas como "not_configured" e nada sai. Com a fixture `mail_box` o en
 provedor de mentira: `mail_box.soon` guarda os ids que as rotas mandaram para `mail.deliver_soon`
 e, depois de `await mail.deliver_pending(session)`, `mail_box.messages` tem as mensagens
 (`mail_box.texts()`, `mail_box.tokens()` para pegar o token do link).
+
+Catálogos de Configurações › Técnicos: o banco dos testes nasce dos modelos (sem a migração que
+grava as áreas e as aptidões iniciais). O `world` grava os de `technician_catalogs.seed_defaults` e
+expõe `world.area_ids` (código antigo → id: "redes") e `world.skill_ids` (nome → id: "Linux"); o
+teste sem `world` (a ficha pública) chama `seed_catalogs(session)`. O Ferramental começa vazio.
 """
 
 import asyncio
@@ -20,8 +25,13 @@ from email.message import EmailMessage
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import make_url, text
-from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
+from sqlalchemy import make_url, select, text
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 from sqlalchemy.pool import NullPool
 
 import app.models  # noqa: F401
@@ -31,8 +41,8 @@ from app.core.security import create_access_token, hash_password
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
-from app.models import Customer, Location, Team, User
-from app.services import login_guard, mail
+from app.models import Customer, Location, ServiceArea, Skill, Team, User
+from app.services import login_guard, mail, technician_catalogs
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
 
@@ -180,12 +190,30 @@ class World:
     team_net_id: str
     customer_id: str
     location_id: str
+    # Os catálogos iniciais (seed_catalogs): código antigo da área → id e nome da aptidão → id.
+    area_ids: dict[str, str] = field(default_factory=dict)
+    skill_ids: dict[str, str] = field(default_factory=dict)
+
+
+async def seed_catalogs(db: AsyncSession) -> tuple[dict[str, str], dict[str, str]]:
+    """As 10 áreas e as 16 aptidões iniciais (technician_catalogs.seed_defaults; quem chama faz o
+    commit) e os ids: ({código antigo: id}, {nome: id})."""
+    await technician_catalogs.seed_defaults(db)
+    areas = await db.execute(
+        select(ServiceArea.code, ServiceArea.id).where(ServiceArea.code.is_not(None))
+    )
+    skills = await db.execute(select(Skill.name, Skill.id))
+    return (
+        {str(code): str(area_id) for code, area_id in areas.all()},
+        {str(name): str(skill_id) for name, skill_id in skills.all()},
+    )
 
 
 @pytest.fixture
 async def world(engine: AsyncEngine) -> World:
     maker = async_sessionmaker(engine, expire_on_commit=False)
     async with maker() as db:
+        area_ids, skill_ids = await seed_catalogs(db)
         field = Team(name="Campo", is_active=True)
         net = Team(name="Redes", is_active=True)
         db.add_all([field, net])
@@ -230,4 +258,6 @@ async def world(engine: AsyncEngine) -> World:
         team_net_id=str(net.id),
         customer_id=str(customer.id),
         location_id=str(location.id),
+        area_ids=area_ids,
+        skill_ids=skill_ids,
     )

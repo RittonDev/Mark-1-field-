@@ -242,9 +242,7 @@ async def picked(db: AsyncSession, kind: Kind, ids: Iterable[Any]) -> dict[str, 
 
 def _elements_sql(table: str, column: str, item_key: str | None, where: str) -> str:
     """Contagem por item de uma coluna JSONB em lista (o valor que não é lista conta como vazio)."""
-    source = (
-        f"CASE WHEN jsonb_typeof(t.{column}) = 'array' THEN t.{column} ELSE '[]'::jsonb END"
-    )
+    source = f"CASE WHEN jsonb_typeof(t.{column}) = 'array' THEN t.{column} ELSE '[]'::jsonb END"
     if item_key is None:
         element = "lower(e.value)"
         lateral = f"jsonb_array_elements_text({source}) AS e(value)"
@@ -332,13 +330,18 @@ def refs(
 ) -> list[Ref]:
     """O mesmo de `active_ids` como {id, name}; com `inactive`, também os desativados (a ficha da
     homologação mostra todas as áreas gravadas)."""
-    return [Ref(id=uuid.UUID(key), name=found.name) for key, found in _stored(stored, info, inactive=inactive)]
+    return [
+        Ref(id=uuid.UUID(key), name=found.name)
+        for key, found in _stored(stored, info, inactive=inactive)
+    ]
 
 
 def _sorted_skills(items: list[dict[str, Any]], names: Mapping[str, str]) -> list[dict[str, Any]]:
     """O "desde" mais novo primeiro, depois o nome (sem acento e sem maiúsculas); sem "desde" (a
     ficha), só o nome."""
-    ordered = sorted(items, key=lambda item: (*_order(names.get(item["skill_id"], "")), item["skill_id"]))
+    ordered = sorted(
+        items, key=lambda item: (*_order(names.get(item["skill_id"], "")), item["skill_id"])
+    )
     return sorted(ordered, key=lambda item: str(item.get("since") or ""), reverse=True)
 
 
@@ -415,7 +418,9 @@ async def seed_defaults(db: AsyncSession) -> None:
     )
     await db.execute(
         pg_insert(Skill)
-        .values([{"id": uuid.uuid4(), "name": name, "name_key": fold(name)} for name in DEFAULT_SKILLS])
+        .values(
+            [{"id": uuid.uuid4(), "name": name, "name_key": fold(name)} for name in DEFAULT_SKILLS]
+        )
         .on_conflict_do_nothing()
     )
 
@@ -494,9 +499,7 @@ async def create(db: AsyncSession, kind: Kind, name: str) -> TechCatalogItemOut:
     await _check_name(db, spec, name, None)
     total = await db.scalar(select(func.count()).select_from(spec.model)) or 0
     if total >= MAX_ITEMS[kind]:
-        raise WorkflowError(
-            CATALOG_FULL.format(limit=MAX_ITEMS[kind], plural=spec.plural)
-        )
+        raise WorkflowError(CATALOG_FULL.format(limit=MAX_ITEMS[kind], plural=spec.plural))
     item = spec.model(name=name, is_active=True)
     db.add(item)
     await db.flush()
@@ -635,7 +638,8 @@ async def resolve_skills(
             kept.append({"skill_id": key, "level": item.get("level"), "since": since})
     chosen: dict[str, str] = {}
     for item in sent:
-        skill_id, name, level = _field(item, "skill_id"), _field(item, "name"), _field(item, "level")
+        skill_id, name = _field(item, "skill_id"), _field(item, "name")
+        level = _field(item, "level")
         if skill_id is not None:
             key = _canonical(skill_id)
             if key is None or key not in info:

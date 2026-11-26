@@ -32,8 +32,8 @@ EducationLevel = Literal[
 ]
 # Por onde a parte mudou: o técnico no app, a ficha da homologação ou a central (Técnicos).
 StampVia = Literal["app", "ficha", "central"]
-# Uma área na ficha da homologação: o id do catálogo ou, na ficha aberta antes da Entrega 2, o código
-# antigo ("redes"). O item enorme recusa antes, sem ecoar o valor.
+# Uma área na ficha da homologação: o id do catálogo ou, na ficha aberta antes da Entrega 2, o
+# código antigo ("redes"). O item enorme recusa antes, sem ecoar o valor.
 AREA_VALUE_MAX = 40
 AreaValue = Annotated[str, Field(max_length=AREA_VALUE_MAX)]
 

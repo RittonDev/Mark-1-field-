@@ -124,13 +124,14 @@ class UnproductiveReason(UUIDPrimaryKey, Timestamps, Base):
 
 
 # ------------------------------------------- catálogos de Configurações › Técnicos (Entrega 2)
-# Ferramental, Áreas de atuação e Aptidões: uma regra só (services/technician_catalogs.py). A central
-# inclui, renomeia e desativa; exclui só o que nunca foi usado. Sem ordem manual: as listas saem em
-# ordem alfabética (name_key). Desativado, o item some das escolhas (app, ficha, filtros) e fica
-# guardado com quem já tinha; reativado, volta. `name_key` = core.text.fold(name), gravado sozinho
-# quando o nome muda (@validates): o banco recusa o nome repetido sem acento e sem maiúsculas
-# (uq_*_name_key), de reserva para a trava do serviço. `used_at`: o 1º uso (o item entrou no perfil
-# de alguém pelo app, pela central ou pela ficha); com ele, o item não sai mais (desativa).
+# Ferramental, Áreas de atuação e Aptidões: uma regra só (services/technician_catalogs.py). A
+# central inclui, renomeia e desativa; exclui só o que nunca foi usado. Sem ordem manual: as listas
+# saem em ordem alfabética (name_key). Desativado, o item some das escolhas (app, ficha, filtros) e
+# fica guardado com quem já tinha; reativado, volta. `name_key` = core.text.fold(name), gravado
+# sozinho quando o nome muda (@validates): o banco recusa o nome repetido sem acento e sem
+# maiúsculas (uq_*_name_key), de reserva para a trava do serviço. `used_at`: o 1º uso (o item
+# entrou no perfil de alguém pelo app, pela central ou pela ficha); com ele, o item não sai mais
+# (desativa).
 
 
 class TechnicianTool(UUIDPrimaryKey, Timestamps, Base):
@@ -157,9 +158,9 @@ class TechnicianTool(UUIDPrimaryKey, Timestamps, Base):
 
 class ServiceArea(UUIDPrimaryKey, Timestamps, Base):
     """Área de atuação (users.service_areas e technician_applications.service_areas guardam os
-    ids, em texto). `code`: o código das 10 áreas fixas de antes ("redes"): a ficha aberta antes da
-    Entrega 2 ainda manda o código, e a sugestão de técnicos (services/suggestions.py) segue por ele;
-    as áreas novas ficam sem código."""
+    ids, em texto). `code`: o código das 10 áreas fixas de antes ("redes"): a ficha aberta antes
+    da Entrega 2 ainda manda o código, e a sugestão de técnicos (services/suggestions.py) segue
+    por ele; as áreas novas ficam sem código."""
 
     __tablename__ = "area_catalog"
     __table_args__ = (

@@ -45,10 +45,14 @@ M = _migration()
 
 
 def test_revision_follows_the_head() -> None:
+    """A cadeia: b7e2d4f6a8c1 vem depois de f5a7c9e1b3d6 e está no caminho do head único (as
+    migrações seguintes vêm depois dela)."""
     config = Config()
     config.set_main_option("script_location", str(BACKEND / "alembic"))
     script = ScriptDirectory.from_config(config)
-    assert script.get_heads() == ["b7e2d4f6a8c1"]
+    [head] = script.get_heads()
+    chain = [revision.revision for revision in script.walk_revisions("base", head)]
+    assert "b7e2d4f6a8c1" in chain
     revision = script.get_revision("b7e2d4f6a8c1")
     assert revision is not None and revision.down_revision == "f5a7c9e1b3d6"
     assert (M.revision, M.down_revision) == ("b7e2d4f6a8c1", "f5a7c9e1b3d6")
