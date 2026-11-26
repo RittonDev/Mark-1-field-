@@ -633,30 +633,37 @@ O elo do técnico aparece como uma medalha, a patente ([src/components/LevelBadg
 ## Configurações
 
 **Perfil › Configurações** ([src/app/configuracoes/index.tsx](src/app/configuracoes/index.tsx)): o cadastro do técnico
-em quatro grupos, cada linha com o resumo à direita (o rótulo fica com a largura dele, até metade da linha, quebrando
-entre palavras, e o resumo fica com o resto, cortado com "…"; com a fonte do aparelho a partir de 1,3×, o resumo desce
-para baixo do rótulo; [src/components/MenuRow.tsx](src/components/MenuRow.tsx), o mesmo da lista do Perfil). Contratos
-em [docs/API.md](../docs/API.md), "Meu cadastro do técnico" e "Perfil técnico". O antigo Meu cadastro foi dividido
-nas telas abaixo; `/meu-cadastro` só redireciona para `/configuracoes` (links antigos).
+nos três grupos de seções que a central usa na ficha do técnico, com os mesmos nomes (`TECH_SECTION_GROUPS` em
+`lib/constants.ts`, cópia da web; só as seções desta entrega, `CADASTRO_DELIVERY`; "Credenciais" aqui é a linha
+"Senha"), mais o grupo App. Cada linha tem o resumo à direita (o rótulo fica com a largura dele, até metade da linha,
+quebrando entre palavras, e o resumo fica com o resto, cortado com "…"; com a fonte do aparelho a partir de 1,3×, o
+resumo desce para baixo do rótulo; [src/components/MenuRow.tsx](src/components/MenuRow.tsx), o mesmo da lista do
+Perfil). Contratos em [docs/API.md](../docs/API.md), "Meu cadastro do técnico", "Perfil técnico" e "Cadastro V2
+(2026-11-25)". O antigo Meu cadastro foi dividido nas telas abaixo; `/meu-cadastro` só redireciona para
+`/configuracoes`, e `/configuracoes/pix` (a antiga Chave PIX), para `/configuracoes/recebimento` (links antigos).
 
-- **Perfil**: Foto do perfil (a foto à direita; enviando ou removendo, o andamento), Dados pessoais (o nome), Contato
-  ("(11) 98888-7777", ou "Sem celular" em âmbar), Endereço ("Cidade Exemplo/SP" ou "Não informado") e Senha (abre
-  "Trocar senha").
-- **Pagamento**: Chave PIX ("CPF •••.456.789-••"; sem chave, "Não cadastrada" em âmbar). O leitor de tela fala só o
-  tipo.
-- **Atendimento** (o perfil técnico): Disponibilidade (`availabilitySummary` em `lib/constants.ts`: os dias com os
-  mesmos turnos, seguidos ou não, como "Seg a sex · manhã e tarde", "Seg, qua e sex · manhã" e
-  "Seg a qua e sex · manhã"; os 28 turnos, "Todos os dias · todos os turnos"; dias com turnos diferentes,
-  "6 dias · turnos variados"; nada, "Não informada"), Transporte ("Carro, Moto · com CNH", "Nenhum · sem CNH" ou
-  "Não informado"), Aptidões, Formação e Ferramental ("3 aptidões", "1 formação", "Nenhuma"). Com a API antiga,
-  "Indisponível".
+- **Dados pessoais e cadastrais**: Foto do perfil (a foto à direita; enviando ou removendo, o andamento), Dados
+  pessoais (o nome), Endereço ("Cidade Exemplo/SP" ou "Não informado"), Contato ("(11) 98888-7777"; "Sem celular" ou,
+  com a troca de e-mail esperando o link, "E-mail pendente", em âmbar), Senha (abre "Trocar senha") e Mini biografia
+  (o texto numa linha ou "Não informada"; o leitor de tela fala só o começo).
+- **Dados financeiros e empresariais**: Dados empresariais (o nome fantasia, senão a razão social, senão o CNPJ; nada,
+  "Não informados") e Formas de recebimento (a preferencial mascarada, "PIX CPF •••.456.789-••" ou "Banco Exemplo
+  ••••5678-9"; sem nenhuma, "Nenhuma" em âmbar; o leitor de tela fala só o tipo da chave ou o banco).
+- **Perfil profissional** (o perfil técnico): Dias e horários (no período de indisponibilidade de hoje, "Indisponível
+  até 05/12"; senão os turnos, por `availabilitySummary` em `lib/constants.ts`: os dias com os mesmos turnos, seguidos
+  ou não, como "Seg a sex · manhã e tarde", "Seg, qua e sex · manhã" e "Seg a qua e sex · manhã"; os 28 turnos, "Todos
+  os dias · todos os turnos"; dias com turnos diferentes, "6 dias · turnos variados"; nada, "Não informados"),
+  Transporte ("Carro, Moto · com CNH", "Nenhum · sem CNH" ou "Não informado"), Formação, Aptidões e Ferramental
+  ("3 aptidões", "1 formação", "Nenhuma"). Com a API antiga, "Indisponível".
 - **App**: Aparência (folha com Sistema, "Acompanha o modo do celular", Claro e Escuro), Notificações ("Ligadas",
   "Desligadas", "Bloqueadas" em âmbar ou "Indisponíveis") e Sincronização (o mesmo resumo do Perfil).
 - A tela abre sempre, até sem internet: lendo, os resumos são esqueletos; sem rede, "Sem internet: para mudar o
   cadastro, conecte o aparelho."; com erro, "Não foi possível carregar seu cadastro." com **Tentar de novo**. Puxar para
-  atualizar relê o cadastro e o resumo das notificações.
-- Grupo, cargo, acesso ao app, serviços e jornada ficam com a central; CPF, CNPJ/MEI e nascimento continuam na ficha da
-  homologação.
+  atualizar relê o cadastro e o resumo das notificações. Com a API de antes do cadastro V2 (`hasCadastroV2` em
+  `lib/profile.ts`), Dados pessoais, Endereço, Contato, Mini biografia, Dados empresariais e Formas de recebimento dizem
+  "Indisponível"; Foto, Senha e o Perfil profissional seguem como antes.
+- Grupo, cargo, acesso ao app, situação na operação, serviços e jornada ficam com a central; o CPF, depois de
+  informado, só a central corrige.
 
 ### Cadastro: foto, dados pessoais, contato, endereço e chave PIX
 
