@@ -131,9 +131,7 @@ async def test_ficha_new_fields_are_saved(
     # Relido do banco, coluna a coluna (campo com nome errado sumiria calado).
     columns = [getattr(TechnicianApplication, key) for key in expected]
     async with engine.connect() as conn:
-        row = (
-            await conn.execute(select(*columns).where(TechnicianApplication.id == app_id))
-        ).one()
+        row = (await conn.execute(select(*columns).where(TechnicianApplication.id == app_id))).one()
     stored = dict(zip(expected, row, strict=True))
     stored["birth_date"] = stored["birth_date"].isoformat()
     assert stored == expected
@@ -160,17 +158,21 @@ async def test_ficha_new_fields_are_saved(
     assert {key: plain[key] for key in keys} == dict.fromkeys(keys)
 
 
-async def test_ficha_validations(
-    client: AsyncClient, world: World, engine: AsyncEngine
-) -> None:
+async def test_ficha_validations(client: AsyncClient, world: World, engine: AsyncEngine) -> None:
     token = await new_invite(client, world, reusable=True, days_valid=30)
     url = f"{API}/public/onboarding/{token}"
     incomplete = personal.RG_INCOMPLETE
     cases: list[tuple[dict, tuple[str, str]]] = [
-        ({"rg_number": "12.345.678-9", "rg_issuer": "", "rg_state": "SP"}, ("rg_issuer", incomplete)),
+        (
+            {"rg_number": "12.345.678-9", "rg_issuer": "", "rg_state": "SP"},
+            ("rg_issuer", incomplete),
+        ),
         ({"rg_number": "12.345.678-9", "rg_issuer": "SSP"}, ("rg_state", incomplete)),
         ({"rg_number": "123"}, ("rg_number", "Confira o número do RG")),
-        ({"rg_number": "12.345.678-9", "rg_issuer": "SSP", "rg_state": "XX"}, ("rg_state", "UF inválida")),
+        (
+            {"rg_number": "12.345.678-9", "rg_issuer": "SSP", "rg_state": "XX"},
+            ("rg_state", "UF inválida"),
+        ),
         ({"company_name": "Alfa Servicos"}, ("company_document", "Informe o CNPJ")),
         ({"company_trade_name": "Alfa"}, ("company_document", "Informe o CNPJ")),
         (
@@ -424,7 +426,11 @@ async def test_reopened_approval_without_password_sends_create_link(
     # A senha da ficha não vale mais.
     login = await client.post(
         f"{API}/auth/login",
-        json={"email": "sem.senha@exemplo.com", "password": "minha-senha-forte", "channel": "mobile"},
+        json={
+            "email": "sem.senha@exemplo.com",
+            "password": "minha-senha-forte",
+            "channel": "mobile",
+        },
     )
     assert login.status_code == 401
 

@@ -209,9 +209,7 @@ async def test_password_link_records_history_without_72h_alert(
     assert r.status_code == 410, r.text
 
 
-async def test_password_link_rules(
-    client: AsyncClient, world: World, engine: AsyncEngine
-) -> None:
+async def test_password_link_rules(client: AsyncClient, world: World, engine: AsyncEngine) -> None:
     """Sem acesso ao app: 409; sem endereço que recebe mensagens: 422; com o envio desligado,
     "not_configured" e nada no histórico (nada saiu); até 5 por hora."""
     an = world.analyst.headers
@@ -261,7 +259,10 @@ async def test_verification_rules(
     }
     await set_user(engine, tech_id, email_pending="novo.pedido@exemplo.com")
     r = await client.post(url, headers=an)
-    assert r.status_code == 202 and r.json() == {"status": "queued", "to": "novo.pedido@exemplo.com"}
+    assert r.status_code == 202 and r.json() == {
+        "status": "queued",
+        "to": "novo.pedido@exemplo.com",
+    }
     assert await deliver(engine) == 2
     check, change = mail_box.texts()
     assert "Confirme que este e-mail é seu" in check
@@ -295,9 +296,7 @@ async def test_verification_rules(
     assert r.status_code == 404
 
 
-async def test_emails_newest_first(
-    client: AsyncClient, world: World, engine: AsyncEngine
-) -> None:
+async def test_emails_newest_first(client: AsyncClient, world: World, engine: AsyncEngine) -> None:
     """O registro dos e-mails do técnico, o mais novo primeiro, com quem pediu; o pendente que
     passou do prazo de envio sai como "expired" (não saiu)."""
     tech_id = world.tech.user.id
@@ -322,7 +321,9 @@ async def test_emails_newest_first(
 
     rows = [
         row(EmailTemplate.WELCOME, EmailStatus.SENT, 90, sent_at=now - timedelta(minutes=89)),
-        row(EmailTemplate.VERIFY_EMAIL, EmailStatus.PENDING, 60, send_by=now - timedelta(minutes=1)),
+        row(
+            EmailTemplate.VERIFY_EMAIL, EmailStatus.PENDING, 60, send_by=now - timedelta(minutes=1)
+        ),
         row(
             EmailTemplate.PASSWORD_RESET,
             EmailStatus.PENDING,
@@ -442,7 +443,12 @@ async def test_central_patch_rereads_every_column(
     assert r.status_code == 422  # a empresa ainda tem razão social e nome fantasia
     r = await client.patch(
         url,
-        json={"rg_number": None, "company_document": None, "company_name": "", "company_trade_name": None},
+        json={
+            "rg_number": None,
+            "company_document": None,
+            "company_name": "",
+            "company_trade_name": None,
+        },
         headers=an,
     )
     assert r.status_code == 200, r.text
@@ -573,7 +579,9 @@ async def test_cutting_access_or_setting_a_password_revokes_password_links(
 
     admin = world.admin.headers
     link = await add_reset_link(engine, other_id, "redes@teste.com.br")
-    r = await client.patch(f"{API}/users/{other_id}", json={"password": "nova-senha-123"}, headers=admin)
+    r = await client.patch(
+        f"{API}/users/{other_id}", json={"password": "nova-senha-123"}, headers=admin
+    )
     assert r.status_code == 200, r.text
     assert await revoked(engine, link)
     link = await add_reset_link(engine, other_id, "redes@teste.com.br")

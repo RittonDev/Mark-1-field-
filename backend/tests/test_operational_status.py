@@ -45,7 +45,9 @@ async def set_status(
     return r.json()
 
 
-async def set_periods(engine: AsyncEngine, user_id: object, periods: list[tuple[date, date]]) -> None:
+async def set_periods(
+    engine: AsyncEngine, user_id: object, periods: list[tuple[date, date]]
+) -> None:
     """Indisponibilidade direto na coluna (o técnico grava pelo app, em PATCH /me/profile)."""
     stored = [
         {"id": str(uuid.uuid4()), "start": start.isoformat(), "end": end.isoformat()}
@@ -200,9 +202,7 @@ async def test_change_needs_reason_and_goes_to_history(client: AsyncClient, worl
         headers=an,
     )
     assert r.status_code == 200, r.text
-    lines = [
-        (row["via"], row["actor"]["name"], row["note"], row["changes"]) for row in r.json()
-    ]
+    lines = [(row["via"], row["actor"]["name"], row["note"], row["changes"]) for row in r.json()]
     assert lines == [
         (
             "central",
@@ -254,9 +254,14 @@ async def test_not_active_leaves_suggestions_offers_and_new_assignments(
 
     await set_status(client, an, tech, "inactive", "Férias coletivas")
     assert set(await suggested(client, world)) == {other}
-    states = {o["technician"]["name"]: o["state"] for o in await central_offers(client, sup, open_os["id"])}
+    states = {
+        o["technician"]["name"]: o["state"]
+        for o in await central_offers(client, sup, open_os["id"])
+    }
     assert states == {"Tecnico": "cancelled"}
-    [closed] = [e for e in await history(client, sup, open_os["id"]) if e["event_type"] == "offer_cancelled"]
+    [closed] = [
+        e for e in await history(client, sup, open_os["id"]) if e["event_type"] == "offer_cancelled"
+    ]
     assert closed["note"] == "Técnico inativo na operação"
     # O técnico vê só que a central cancelou (nada da situação).
     r = await client.post(f"{API}/me/offers/{offer['id']}/accept", headers=world.tech.headers)
@@ -341,7 +346,11 @@ async def test_not_active_leaves_suggestions_offers_and_new_assignments(
     both = (await client.get(f"{API}/tickets/{both['id']}", headers=sup)).json()
     r = await client.patch(
         f"{API}/tickets/{both['id']}",
-        json={"title": "Troca de toner", "helper_ids": [other], "expected_version": both["version"]},
+        json={
+            "title": "Troca de toner",
+            "helper_ids": [other],
+            "expected_version": both["version"],
+        },
         headers=sup,
     )
     assert r.status_code == 200, r.text
@@ -416,7 +425,9 @@ async def test_inactive_keeps_using_the_app_and_never_sees_the_status(
     """Inativo (sem cortar o acesso) continua entrando no app, e nada de /me/* nem do login conta
     a situação ou o motivo."""
     th = world.tech.headers
-    await set_status(client, world.analyst.headers, world.tech.user.id, "inactive", "Motivo Secreto")
+    await set_status(
+        client, world.analyst.headers, world.tech.user.id, "inactive", "Motivo Secreto"
+    )
     login = await client.post(
         f"{API}/auth/login",
         json={"email": "tecnico@teste.com.br", "password": "senha-teste-123", "channel": "mobile"},
@@ -473,7 +484,11 @@ async def test_unavailable_leaves_suggestions_and_offers_but_not_assignment(
     await set_periods(
         engine,
         world.tech.user.id,
-        [(today - timedelta(days=9), today - timedelta(days=2)), (today, today + timedelta(days=1)), away],
+        [
+            (today - timedelta(days=9), today - timedelta(days=2)),
+            (today, today + timedelta(days=1)),
+            away,
+        ],
     )
 
     # Sem horário: conta hoje.
