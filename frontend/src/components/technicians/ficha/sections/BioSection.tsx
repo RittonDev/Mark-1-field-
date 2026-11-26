@@ -38,7 +38,8 @@ export function BioSection({ tech, canEdit }: { tech: Technician; canEdit: boole
             rows={5}
             value={value.bio}
             onChange={(e) => set("bio", e.target.value)}
-            maxLength={PROFILE_LIMITS.bio}
+            // O corte cru é folgado: o limite de verdade conta depois de normalizeBio (o contador e a validação).
+            maxLength={PROFILE_LIMITS.bio * 2}
             aria-labelledby={FICHA_HEADING_ID}
             aria-invalid={errors.bio ? true : undefined}
           />

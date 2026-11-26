@@ -29,7 +29,8 @@ export default function BioScreen() {
               accessibilityHint={`Até ${PROFILE_LIMITS.bio} caracteres`}
               multiline
               autoCapitalize="sentences"
-              maxLength={PROFILE_LIMITS.bio}
+              // Corte cru folgado: o limite conta depois de normalizeBio (o contador e a revisão do formulário).
+              maxLength={PROFILE_LIMITS.bio * 2}
               style={styles.bio}
             />
           </Field>

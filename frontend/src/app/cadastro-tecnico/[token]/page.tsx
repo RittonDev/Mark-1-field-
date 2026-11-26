@@ -782,6 +782,8 @@ export default function TechnicianSignupPage() {
       }
       const skill = skillProblem(form.skills);
       if (skill) return fail("skills", skill.message, `skill_${skill.index}`);
+      // O limite conta como a API grava (normalizeBio: sem as linhas em branco repetidas).
+      if (normalizeBio(form.bio).length > PROFILE_LIMITS.bio) return fail("bio", `No máximo ${PROFILE_LIMITS.bio} caracteres.`);
       if (form.company_document.trim() && !isValidCnpj(form.company_document)) {
         return fail("company_document", "CNPJ inválido: confira os números (ou deixe em branco).");
       }
@@ -1352,11 +1354,11 @@ export default function TechnicianSignupPage() {
                       rows={4}
                       value={form.bio}
                       onChange={(e) => set("bio", e.target.value)}
-                      maxLength={PROFILE_LIMITS.bio}
+                      maxLength={PROFILE_LIMITS.bio * 2}
                       {...invalid("bio")}
                     />
                     <span aria-hidden className="self-end text-xs text-ink-muted tabular-nums">
-                      {form.bio.length}/{PROFILE_LIMITS.bio}
+                      {normalizeBio(form.bio).length}/{PROFILE_LIMITS.bio}
                     </span>
                   </Field>
                   <section aria-labelledby={companyTitleId} className="flex flex-col gap-4 border-t border-line pt-4">
