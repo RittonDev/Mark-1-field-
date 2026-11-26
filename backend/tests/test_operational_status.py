@@ -119,6 +119,32 @@ def test_unavailable_between_counts_both_ends() -> None:
     assert between(stored, date(2026, 12, 21), date(2027, 1, 5)) is None
 
 
+def test_offer_checks_every_visit_day_and_only_periods_not_over(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A oferta confere todos os dias da visita (a que vira a noite entra no período do dia
+    seguinte) e só os períodos que não acabaram, os mesmos que a central recebe para avisar."""
+    monkeypatch.setattr(technician_status, "today", lambda: date(2026, 11, 25))
+    tz = ZoneInfo(settings.TIMEZONE)
+    user = _user(
+        unavailability=[
+            {"id": "a", "start": "2026-11-10", "end": "2026-11-20"},
+            {"id": "b", "start": "2026-12-01", "end": "2026-12-05"},
+        ]
+    )
+    night = datetime(2026, 11, 30, 22, tzinfo=tz)
+    with pytest.raises(WorkflowError, match="^Tecnico Alfa está indisponível de 01/12 a 05/12$"):
+        technician_status.ensure_available(user, night, night + timedelta(hours=4))  # type: ignore[arg-type]
+    technician_status.ensure_available(user, night, None)  # type: ignore[arg-type]
+    # Visita que já passou, num período que acabou antes de hoje: não recusa.
+    past = datetime(2026, 11, 15, 9, tzinfo=tz)
+    technician_status.ensure_available(user, past, past + timedelta(hours=1))  # type: ignore[arg-type]
+    # O período que ainda não acabou e pega a visita que já passou continua recusando.
+    running = _user(unavailability=[{"id": "c", "start": "2026-11-14", "end": "2026-11-28"}])
+    with pytest.raises(WorkflowError, match="^Tecnico Alfa está indisponível até 28/11$"):
+        technician_status.ensure_available(running, past, past + timedelta(hours=1))  # type: ignore[arg-type]
+
+
 def test_automatic_favorites_only_for_active() -> None:
     """Inativo e Bloqueado ficam no ranking da cidade, mas fora do automático (o próximo sobe); o
     sem acesso ao app continua no automático (a central libera por ali)."""
@@ -369,6 +395,75 @@ async def test_not_active_leaves_suggestions_offers_and_new_assignments(
 
 
 @requires_db
+async def test_without_app_access_who_stays_and_who_enters(
+    client: AsyncClient, world: World, engine: AsyncEngine
+) -> None:
+    """Auxiliar bloqueado com o acesso cortado continua na visita, e dá para incluir outro (a web
+    manda a lista inteira). Quem entra sem acesso ao app, auxiliar ou responsável, é recusado com
+    o nome (na abertura, sem gastar número de OS); o responsável que perdeu o acesso fica. Quem não
+    existe é "inválido"."""
+    an, sup = world.analyst.headers, world.supervisor.headers
+    other = str(world.tech_other.user.id)
+    gama = str((await make_technician(engine, "Tecnico Gama")).user.id)
+    delta = str((await make_technician(engine, "Tecnico Delta", active=False)).user.id)
+
+    visit = await create(client, world, helper_ids=[other])
+    await set_status(client, an, other, "blocked", "Documentação vencida", cut_access=True)
+    visit = (await client.get(f"{API}/tickets/{visit['id']}", headers=sup)).json()
+    assert [h["id"] for h in visit["helpers"]] == [other]
+    url = f"{API}/tickets/{visit['id']}"
+    r = await client.patch(
+        url, json={"helper_ids": [other, gama], "expected_version": visit["version"]}, headers=sup
+    )
+    assert r.status_code == 200, r.text
+    visit = r.json()
+    assert sorted(h["id"] for h in visit["helpers"]) == sorted([other, gama])
+
+    message = "Tecnico Delta está sem acesso ao app: libere o acesso em Técnicos"
+    version = visit["version"]
+    for body in ({"helper_ids": [other, gama, delta]}, {"assignee_id": delta}):
+        r = await client.patch(url, json={**body, "expected_version": version}, headers=sup)
+        assert r.status_code == 422, (body, r.text)
+        assert r.json()["detail"] == message, body
+    r = await client.post(
+        f"{url}/assign", json={"assignee_id": delta, "expected_version": version}, headers=sup
+    )
+    assert r.status_code == 422 and r.json()["detail"] == message
+    opening = {
+        "title": "Impressora atolando",
+        "customer_id": world.customer_id,
+        "location_id": world.location_id,
+    }
+    for extra in ({"assignee_id": delta}, {"helper_ids": [delta]}):
+        r = await client.post(f"{API}/tickets", json={**opening, **extra}, headers=sup)
+        assert r.status_code == 422, (extra, r.text)
+        assert r.json()["detail"] == message, extra
+    # Quem não existe (ou não é da equipe): inválido, sem falar em acesso.
+    nobody = str(uuid.uuid4())
+    r = await client.patch(
+        url, json={"assignee_id": nobody, "expected_version": version}, headers=sup
+    )
+    assert r.status_code == 422 and r.json()["detail"] == "Responsável inválido"
+    r = await client.patch(
+        url, json={"helper_ids": [other, nobody], "expected_version": version}, headers=sup
+    )
+    assert r.status_code == 422 and r.json()["detail"] == "Técnico auxiliar inválido"
+
+    # O responsável que perdeu o acesso fica: salvar a OS com ele passa.
+    kept = await create(client, world, assignee_id=gama)
+    assert kept["number"] == visit["number"] + 1  # as recusas na abertura não gastaram número
+    async with engine.begin() as conn:
+        await conn.execute(update(User).where(User.id == uuid.UUID(gama)).values(is_active=False))
+    r = await client.patch(
+        f"{API}/tickets/{kept['id']}",
+        json={"title": "Troca de toner", "assignee_id": gama, "expected_version": kept["version"]},
+        headers=sup,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["assignee"]["id"] == gama
+
+
+@requires_db
 async def test_block_with_access_cut(
     client: AsyncClient, world: World, engine: AsyncEngine
 ) -> None:
@@ -517,6 +612,28 @@ async def test_unavailable_leaves_suggestions_and_offers_but_not_assignment(
     )
     assert r.status_code == 422, r.text
     assert r.json()["detail"] == f"Tecnico está indisponível {period}"
+    # A visita que vira a noite e entra no período também é recusada (o fim vem dos minutos
+    # estimados, como na Nova OS: 22:00 + 4 h).
+    night = await create(
+        client, world, scheduled_start=at(away[0] - timedelta(days=1), 22), estimated_minutes=240
+    )
+    r = await client.post(
+        f"{API}/tickets/{night['id']}/offers",
+        json={"technician_ids": [tech], "amount": "80.00"},
+        headers=sup,
+    )
+    assert r.status_code == 422, r.text
+    away_text = unavailability.period_short(
+        {"start": away[0].isoformat(), "end": away[1].isoformat()}, today
+    )
+    assert r.json()["detail"] == f"Tecnico está indisponível {away_text}"
+    # Visita que já passou, num período que acabou antes de hoje (a central nem o recebe): a
+    # oferta sai.
+    past_day = today - timedelta(days=5)
+    past = await create(
+        client, world, scheduled_start=at(past_day, 9), scheduled_end=at(past_day, 10)
+    )
+    await send(client, sup, past["id"], [world.tech])
     # Com a visita num dia livre, a oferta sai.
     scheduled = await create(
         client,

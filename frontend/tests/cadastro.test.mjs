@@ -133,7 +133,7 @@ describe("indisponibilidade (os casos do pytest)", () => {
     const P = { id: "00000000-0000-4000-8000-0000000000b1", start: "2026-12-01", end: "2026-12-05" };
     const LATER = { id: "00000000-0000-4000-8000-0000000000b2", start: "2026-12-10", end: "2026-12-12" };
 
-    it("as pontas contam: o 1º dia do intervalo no fim do período e o último no início", () => {
+    it("as pontas contam: o intervalo que termina no 1º dia do período ou começa no último", () => {
       assert.equal(C.unavailableBetween([P], "2026-11-28", "2026-12-01"), P);
       assert.equal(C.unavailableBetween([P], "2026-12-05", "2026-12-07"), P);
       assert.equal(C.unavailableBetween([P], "2026-11-28", "2026-11-30"), null);

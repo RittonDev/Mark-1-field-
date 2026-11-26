@@ -8,8 +8,13 @@ ou números do Elo; a conversa sobre o trabalho é pelo WhatsApp.
 
 Links: {WEB_URL}/validar-email#token={token} e {WEB_URL}/definir-senha#token={token} (o token no
 fragmento não chega a servidor nem a log).
+
+A saudação ("Olá, {primeiro nome}.") usa a primeira palavra do nome só quando ela é um nome: o nome
+da ficha pública é livre e a validação vai para o endereço digitado (um "nome" com site viraria
+link dentro de um e-mail legítimo da empresa).
 """
 
+import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
 from html import escape
@@ -44,6 +49,11 @@ WELCOME_INTRO = (
     "Seu cadastro de técnico parceiro da {company} foi aprovado. A partir de agora, você pode "
     "receber atendimentos pelo app."
 )
+# "Como entrar", a linha da senha: o link de criar (sem senha, e-mail validado), a da ficha, ou a
+# provisória que a central manda (sem senha e sem o link).
+WELCOME_PASSWORD_LINK = "Senha: crie a sua neste link, que vale por 72 horas:"
+WELCOME_PASSWORD_FICHA = "Senha: a que você criou na ficha de cadastro."
+WELCOME_PASSWORD_TEMPORARY = "Senha: a central manda uma senha provisória pelo WhatsApp."
 WELCOME_STEPS = (
     "Entre no app e confira seus dados em Perfil › Configurações.",
     "Cadastre como quer receber em Configurações › Formas de recebimento.",
@@ -99,10 +109,29 @@ def password_url(raw: str) -> str:
     return f"{_base_url()}/definir-senha#token={raw}"
 
 
+# O primeiro nome na saudação: letras (de qualquer língua), apóstrofo ou hífen, até 30 caracteres.
+FIRST_NAME_MAX = 30
+_NAME_JOINERS = frozenset("'’‐-")
+
+
+def _name_char(char: str) -> bool:
+    # Letra, sinal que acompanha a letra (acento que não se juntou no NFC), apóstrofo ou hífen.
+    return char.isalpha() or char in _NAME_JOINERS or unicodedata.category(char).startswith("M")
+
+
 def first_name(name: str | None) -> str:
-    """A primeira palavra do nome ("" sem nome)."""
-    parts = (name or "").split()
-    return parts[0] if parts else ""
+    """A primeira palavra do nome quando ela é um nome (letras, apóstrofo ou hífen, até 30
+    caracteres, com pelo menos uma letra); "" sem nome ou quando não é (um site, um e-mail, um
+    número): a saudação fica só "Olá."."""
+    parts = unicodedata.normalize("NFC", name or "").split()
+    word = parts[0] if parts else ""
+    if (
+        len(word) > FIRST_NAME_MAX
+        or not any(char.isalpha() for char in word)
+        or not all(_name_char(char) for char in word)
+    ):
+        return ""
+    return word
 
 
 def _greeting(name: str | None) -> str:
@@ -263,18 +292,22 @@ def welcome(
     email: str,
     password_link: str | None = None,
     verify_link: str | None = None,
+    temporary_password: bool = False,
     app_url: str | None = None,
 ) -> Rendered:
-    """Cadastro aprovado. `password_link`: o técnico ainda não tem senha (crie a sua neste link, 72
-    h); `verify_link`: tem a senha e o e-mail não está validado (só sem `password_link`);
-    `app_url`: o TECH_APP_URL (sem ele, pedir o link à central)."""
+    """Cadastro aprovado. `password_link`: o técnico ainda não tem senha e o e-mail dele está
+    validado (crie a sua neste link, 72 h); `temporary_password`: não tem senha e o link não vai (o
+    e-mail não está validado, ou a senha mudou depois da aprovação): a central manda a senha
+    provisória pelo WhatsApp; sem os dois, a senha que ele criou na ficha. `verify_link`: tem a
+    senha da ficha e o e-mail não está validado (só nesse caso). `app_url`: o TECH_APP_URL (sem
+    ele, pedir o link à central)."""
+    password: tuple[str, str | None]
     if password_link:
-        password: tuple[str, str | None] = (
-            "Senha: crie a sua neste link, que vale por 72 horas:",
-            password_link,
-        )
+        password = (WELCOME_PASSWORD_LINK, password_link)
+    elif temporary_password:
+        password = (WELCOME_PASSWORD_TEMPORARY, None)
     else:
-        password = ("Senha: a que você criou na ficha de cadastro.", None)
+        password = (WELCOME_PASSWORD_FICHA, None)
     app: tuple[str, str | None] = (
         ("App:", app_url) if app_url else ("App: peça o link à central pelo WhatsApp.", None)
     )
@@ -283,7 +316,7 @@ def welcome(
         _Paragraph(WELCOME_INTRO.format(company=company)),
         _Section("Como entrar", ((f"E-mail: {email}", None), password, app)),
     ]
-    if verify_link and not password_link:
+    if verify_link and not password_link and not temporary_password:
         blocks.append(_Paragraph("Confirme também o seu e-mail:", verify_link))
     blocks += [
         _Section("Primeiros passos", tuple((step, None) for step in WELCOME_STEPS), ordered=True),

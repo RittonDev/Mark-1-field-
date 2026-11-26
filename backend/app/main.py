@@ -18,6 +18,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from app.api.router import api_router
 from app.core.config import settings
 from app.core.enums import QuoteStatus
+from app.db.errors import RETRY_SQLSTATES, constraint_name, db_sqlstate
 from app.db.session import SessionLocal
 from app.models import Quote
 from app.services import mail, technician_levels, technician_regions, validation_messages
@@ -429,35 +430,45 @@ async def _validation(_: Request, exc: RequestValidationError) -> JSONResponse:
 
 
 DATA_ERROR = "Algum valor está fora do tamanho ou do formato aceito. Confira os campos."
+# Impasse com outra gravação (SQLSTATE 40P01) ou falha de serialização (40001): o banco desfez esta.
+CONCURRENT_WRITE = "Outra gravação ao mesmo tempo. Tente de novo"
+
+# Os logs dos erros do banco levam só o SQLSTATE e o nome da restrição (app/db/errors.py): o texto
+# do erro (str(exc.orig)) traz os valores, como o CPF no DETAIL do índice único.
 
 
 @app.exception_handler(DataError)
 async def _data_error(_: Request, exc: DataError) -> JSONResponse:
-    log.warning("DataError: %s", exc.orig)
+    log.warning("DataError (SQLSTATE %s)", db_sqlstate(exc) or "?")
     return _error(422, DATA_ERROR)
 
 
-def db_sqlstate(exc: DBAPIError) -> str:
-    """O SQLSTATE do erro original do banco ("" sem ele): o adaptador do asyncpg o copia em
-    `sqlstate`, e o erro do asyncpg fica em __cause__."""
-    orig = exc.orig
-    for source in (orig, getattr(orig, "__cause__", None)):
-        code = getattr(source, "sqlstate", None)
-        if code:
-            return str(code)
-    return ""
+def _route_path(request: Request) -> str:
+    """O caminho da rota com os parâmetros por nome ("/public/onboarding/{token}"): o caminho
+    pedido pode levar o token de um link público."""
+    return str(getattr(request.scope.get("route"), "path", "") or "?")
 
 
 @app.exception_handler(DBAPIError)
-async def _dbapi_error(_: Request, exc: DBAPIError) -> JSONResponse:
+async def _dbapi_error(request: Request, exc: DBAPIError) -> JSONResponse:
     """Erro do banco da classe 22 ("data exception": U+0000 num texto, texto maior que a coluna):
     o mesmo 422 do DataError (o asyncpg não o entrega como DataError, e sim como DBAPIError
-    genérico). Qualquer outro segue como erro não tratado (500 "Erro interno" e o log do
-    RequestGuard). IntegrityError e DataError têm os handlers deles."""
+    genérico). Impasse com outra gravação ou falha de serialização (40P01, 40001): 503
+    CONCURRENT_WRITE, sem o traceback (nada quebrou; as rotas dos links do e-mail já repetem uma
+    vez). Qualquer outro segue como erro não tratado (500 "Erro interno" e o log do RequestGuard).
+    IntegrityError e DataError têm os handlers deles."""
     sqlstate = db_sqlstate(exc)
+    if sqlstate in RETRY_SQLSTATES:
+        log.warning(
+            "Gravação desfeita pelo banco (SQLSTATE %s) em %s %s",
+            sqlstate,
+            request.method,
+            _route_path(request),
+        )
+        return _error(503, CONCURRENT_WRITE)
     if not sqlstate.startswith("22"):
         raise exc
-    log.warning("DBAPIError %s: %s", sqlstate, exc.orig)
+    log.warning("DBAPIError (SQLSTATE %s)", sqlstate)
     return _error(422, DATA_ERROR)
 
 
@@ -546,24 +557,29 @@ CONSTRAINT_MESSAGES: dict[str, str] = {
 CONFLICT = "Conflito de dados: registro duplicado ou referência inválida"
 
 
-def integrity_message(exc: IntegrityError) -> str:
-    orig = exc.orig
-    cause = getattr(orig, "__cause__", None)
-    name = getattr(cause, "constraint_name", None) or getattr(orig, "constraint_name", None)
-    text_ = str(orig)
+def _integrity_parts(exc: IntegrityError) -> tuple[str | None, str]:
+    """O nome da restrição (o do erro do asyncpg ou, sem ele, uma das conhecidas achada no texto
+    do erro) e o SQLSTATE ("" sem ele)."""
+    name = constraint_name(exc)
     if name is None:
+        text_ = str(exc.orig)
         name = next((c for c in CONSTRAINT_MESSAGES if c in text_), None)
+    return name, db_sqlstate(exc)
+
+
+def integrity_message(exc: IntegrityError) -> str:
+    name, sqlstate = _integrity_parts(exc)
     if name in CONSTRAINT_MESSAGES:
         return CONSTRAINT_MESSAGES[name]
-    sqlstate = getattr(cause, "sqlstate", None) or getattr(orig, "sqlstate", None)
-    if sqlstate == "23503" or "foreign key" in text_.lower():
+    if sqlstate == "23503" or "foreign key" in str(exc.orig).lower():
         return "Registro ligado a outro que não existe mais. Recarregue e tente de novo."
     return CONFLICT
 
 
 @app.exception_handler(IntegrityError)
 async def _integrity(_: Request, exc: IntegrityError) -> JSONResponse:
-    log.warning("IntegrityError: %s", exc.orig)
+    name, sqlstate = _integrity_parts(exc)
+    log.warning("IntegrityError: %s (SQLSTATE %s)", name or "?", sqlstate or "?")
     return _error(409, integrity_message(exc))
 
 

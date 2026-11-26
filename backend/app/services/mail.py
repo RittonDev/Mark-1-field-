@@ -9,6 +9,11 @@ os dois (tests/conftest.py: `_mail_off` e `mail_box`).
 
 - O link de uso único nasce na hora do envio (services/account.mint): nem a fila guarda o token.
   Falhou o envio, o link criado é desfeito junto (SAVEPOINT), inclusive a revogação dos anteriores.
+- Os e-mails com link de senha (nova senha e boas-vindas) conferem o técnico antes de criar o link
+  (`_render`): sem acesso ao app, a linha vence sem sair; a senha mudou ou o acesso caiu depois do
+  pedido (`sessions_revoked_at` depois de `created_at`), a nova senha vence e a boas-vindas sai sem
+  o link de criar senha. O link de criar senha da boas-vindas só vai para e-mail validado
+  (`password_link`); sem ele, a central manda a senha provisória pelo WhatsApp.
 - Sem SMTP configurado (settings.mail_enabled falso) nada sai: a linha entra "pending" e vence em
   `send_by` ("Não enviado"); a central segue com o WhatsApp e a senha provisória.
 - Erro temporário (conexão, tempo, 4xx, autenticação): nova tentativa em 1, 5, 15 e 60 minutos;
@@ -73,6 +78,33 @@ class MailError(Exception):
     def __init__(self, message: str, *, permanent: bool = False) -> None:
         super().__init__(message)
         self.permanent = permanent
+
+
+class _Expired(Exception):
+    """O e-mail não sai mais (a linha vence sem contar tentativa). A mensagem fica em `last_error`
+    e no log: sem endereço nem link."""
+
+
+# Os modelos que levam link de senha: só saem para quem tem acesso ao app, e o pedido feito antes
+# da última troca de senha (ou do corte do acesso) não cria link.
+_PASSWORD_TEMPLATES = frozenset({EmailTemplate.PASSWORD_RESET, EmailTemplate.WELCOME})
+NO_ACCESS = "Sem acesso ao app"
+REVOKED_AFTER = "A senha mudou ou o acesso caiu depois do pedido"
+
+
+def _revoked_after(user: User, row: EmailOutbox) -> bool:
+    """A senha mudou, o acesso caiu ou a central trocou a senha, o e-mail ou o papel depois do
+    pedido (user.sessions_revoked_at): o link de senha pedido antes não vale mais."""
+    revoked = user.sessions_revoked_at
+    return revoked is not None and row.created_at is not None and revoked > row.created_at
+
+
+def sends_password_link(user: User) -> bool:
+    """A boas-vindas leva o link de criar a senha: o técnico ainda não tem senha
+    (must_change_password) e o e-mail dele está validado (o link prova a posse da caixa; e-mail
+    digitado errado não vira porta de entrada). Sem validação, a central manda a senha provisória
+    pelo WhatsApp. É a regra do `password_link` do ApplicationApproved."""
+    return bool(user.must_change_password) and user.email_verified_at is not None
 
 
 class MailProvider(Protocol):
@@ -197,7 +229,9 @@ async def enqueue(
     `user`, `application` e `created_by`: o objeto ou o id. `context` (nunca o token):
     - VERIFY_EMAIL: {"name", "reason": "signup" (a ficha: application=) | "change" | "check"};
     - WELCOME: {"name", "email"} (o link de criar a senha ou de validar sai no envio);
-    - PASSWORD_RESET: {"name", "origin": "self" | "central"}."""
+    - PASSWORD_RESET: {"name", "origin": "self" | "central"}.
+    A linha igual na fila de um link de senha pedido antes da última troca de senha (ou do corte do
+    acesso) não serve: vence, e este pedido vira uma linha nova (a velha não sairia mais)."""
     address = (to_email or "").strip().lower()
     if not sendable(address):
         return None, "not_sendable"
@@ -221,6 +255,13 @@ async def enqueue(
         .order_by(EmailOutbox.created_at.desc())
         .limit(1)
     )
+    if existing is not None and template in _PASSWORD_TEMPLATES and user_id is not None:
+        # O objeto de quem chama (com o que ele já mudou nesta transação) ou o do banco.
+        owner = user if isinstance(user, User) else await db.get(User, user_id)
+        if owner is not None and _revoked_after(owner, existing):
+            existing.status = EmailStatus.EXPIRED
+            existing.last_error = REVOKED_AFTER
+            existing = None
     if existing is not None:
         if existing.next_attempt_at > now:
             existing.next_attempt_at = now
@@ -340,11 +381,18 @@ async def deliver_pending(
 
 
 async def _deliver_one(db: AsyncSession, provider: MailProvider, row: EmailOutbox) -> bool:
-    """Monta (cria o link), manda e anota. True quando saiu."""
+    """Monta (cria o link), manda e anota. True quando saiu. O e-mail que não deve mais sair
+    (`_Expired`) vence sem contar tentativa."""
     try:
         async with db.begin_nested():
             rendered = await _render(db, row)
             await provider.send(build_message(rendered, row.to_email))
+    except _Expired as exc:
+        await db.refresh(row)
+        row.status = EmailStatus.EXPIRED
+        row.last_error = str(exc)[:ERROR_MAX]
+        log.info("E-mail %s (%s) não sai mais: %s", row.id, row.template.value, exc)
+        return False
     except MailError as exc:
         await db.refresh(row)
         _failed(row, str(exc), permanent=exc.permanent)
@@ -379,7 +427,10 @@ def _failed(row: EmailOutbox, reason: str, *, permanent: bool) -> None:
 
 
 async def _render(db: AsyncSession, row: EmailOutbox) -> Rendered:
-    """O texto do e-mail, com o link de uso único criado agora (só o hash fica no banco)."""
+    """O texto do e-mail, com o link de uso único criado agora (só o hash fica no banco). Nova
+    senha e boas-vindas conferem o técnico antes de criar qualquer link de senha: sem acesso ao
+    app, `_Expired`; senha trocada ou acesso cortado depois do pedido, a nova senha dá `_Expired` e
+    a boas-vindas sai sem o link (a provisória pelo WhatsApp)."""
     from app.services import account, company  # account usa este módulo: import tardio
 
     company_name = (await company.profile(db)).name
@@ -400,10 +451,25 @@ async def _render(db: AsyncSession, row: EmailOutbox) -> Rendered:
         return mail_templates.verify_email(
             name=name, company=company_name, reason=reason, link=mail_templates.verify_url(raw)
         )
-    user = await db.get(User, row.user_id) if row.user_id is not None else None
+    # O técnico como está agora no banco (o acesso, a senha e a validação podem ter mudado depois
+    # do pedido).
+    user = (
+        await db.get(User, row.user_id, populate_existing=True)
+        if row.user_id is not None
+        else None
+    )
     if user is None:
         raise MailError("E-mail sem o técnico", permanent=True)
+    # Nova senha e boas-vindas: nada sai para quem está sem acesso ao app (o link responderia 410
+    # e a boas-vindas diria que ele já pode entrar).
+    if not user.is_active:
+        raise _Expired(NO_ACCESS)
+    revoked = _revoked_after(user, row)
     if row.template == EmailTemplate.PASSWORD_RESET:
+        if revoked:
+            # Pedido de antes da troca de senha (ou do corte do acesso): o link desfaria a senha
+            # nova. Vence sem sair.
+            raise _Expired(REVOKED_AFTER)
         origin = str(ctx.get("origin") or "self")
         raw = await account.mint(
             db,
@@ -418,17 +484,24 @@ async def _render(db: AsyncSession, row: EmailOutbox) -> Rendered:
             name=name, company=company_name, origin=origin, link=mail_templates.password_url(raw)
         )
     password_link = verify_link = None
+    temporary_password = False
     if user.must_change_password:
-        raw = await account.mint(
-            db,
-            purpose=AccountTokenPurpose.RESET_PASSWORD,
-            email=row.to_email,
-            user=user,
-            reason="welcome",
-            hours=account.WELCOME_PASSWORD_HOURS,
-            created_by=row.created_by_id,
-        )
-        password_link = mail_templates.password_url(raw)
+        # Sem senha: o link de criar só para e-mail validado e se a senha não mudou depois da
+        # aprovação (a central gerou a provisória, por exemplo); senão, a provisória pelo WhatsApp.
+        # Nem a validação vai: validar e pedir "Esqueci minha senha" daria a conta do mesmo jeito.
+        if sends_password_link(user) and not revoked:
+            raw = await account.mint(
+                db,
+                purpose=AccountTokenPurpose.RESET_PASSWORD,
+                email=row.to_email,
+                user=user,
+                reason="welcome",
+                hours=account.WELCOME_PASSWORD_HOURS,
+                created_by=row.created_by_id,
+            )
+            password_link = mail_templates.password_url(raw)
+        else:
+            temporary_password = True
     elif user.email_verified_at is None:
         raw = await account.mint(
             db,
@@ -448,6 +521,7 @@ async def _render(db: AsyncSession, row: EmailOutbox) -> Rendered:
         email=user.email or str(ctx.get("email") or row.to_email),
         password_link=password_link,
         verify_link=verify_link,
+        temporary_password=temporary_password,
         app_url=settings.tech_app_url,
     )
 

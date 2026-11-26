@@ -2,9 +2,14 @@
 
 Puro: cada função devolve o valor como se grava (None quando vazio) ou levanta ValueError com a
 mensagem da tela (sem ponto final; os validadores do pydantic usam direto). As regras são as de
-lib/constants.ts (normalizeRg, isValidRg, normalizeIssuer, normalizePlate, isValidPlate,
-formatPlate, ageAt, PROFILE_LIMITS, BIRTH_AGE). Os tamanhos dos campos livres ficam no pydantic
-(Field(max_length=...), com o rótulo de app.main.FIELD_LABELS): use as constantes daqui.
+lib/constants.ts (normalizeRg, isValidRg, normalizeIssuer, splitIssuer, normalizeBio,
+normalizePlate, isValidPlate, formatPlate, ageAt, PROFILE_LIMITS, BIRTH_AGE). Os tamanhos dos
+campos livres ficam no pydantic (Field(max_length=...), com o rótulo de app.main.FIELD_LABELS): use
+as constantes daqui.
+
+O nome que a pessoa escreve (o app e a ficha pública) sai do sistema (os textos do grupo do
+cliente, o relatório, o portal, os e-mails): só letras (com acento), espaço, apóstrofo, hífen e
+ponto, sem "www", "http" nem endereço colado ("site.com"): `_letters_only`.
 
 Sem importar services.* nem schemas.onboarding no topo (ciclo onboarding → personal → tech_profile
 → onboarding): `clean` e `UFS` por import tardio, dentro das funções.
@@ -45,19 +50,51 @@ PHONE_INVALID = "Informe o telefone com DDD"
 BIRTH_UNDERAGE = "O cadastro é para maiores de 18 anos: confira a data de nascimento"
 BIRTH_INVALID = "Confira a data de nascimento"
 COMPANY_WITHOUT_CNPJ = "Informe o CNPJ"
+NAME_LETTERS = "Use só letras no nome"
 
 _CPF_TEXT = re.compile(r"[\d.\-\s]+")
 _RG_DROP = re.compile(r"[^0-9A-Z./ -]")
-_ISSUER_DROP = re.compile(r"[^A-Z ]")
+# Órgão emissor: letras, espaço, "/" e "-" (a UF pode vir no fim: "SSP/SP", "SSP-SP").
+_ISSUER_DROP = re.compile(r"[^A-Z /-]")
+_ISSUER_STATE = re.compile(r"(?P<issuer>.*?)\s*[/-]\s*(?P<state>[A-Z]{2})")
+_ISSUER_SEPARATORS = re.compile(r"[/-]")
 # Os acentos soltos depois do NFD (U+0300 a U+036F), o mesmo intervalo de normalizeIssuer.
 _MARKS = re.compile(f"[{chr(0x300)}-{chr(0x36F)}]")
 _PLATE = re.compile(r"[A-Z]{3}[0-9][A-Z0-9][0-9]{2}")
 _OLD_PLATE = re.compile(r"[A-Z]{3}[0-9]{4}")
 _ISO_DAY = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+# O número sem número ("SN", "S/N", "S / N"), depois das maiúsculas.
+_NO_NUMBER = re.compile(r"S\s*/\s*N|SN")
+# Endereço numa linha ("Rua Exemplo, 123 - Apto 4"): a mesma regra da migração b7e2d4f6a8c1
+# (split_address_line; ela tem a cópia dela, porque não importa app.*).
+_LINE_NUMBER = r"(?:\d{1,6}[A-Za-z]?|[Ss]\s*/\s*[Nn]|[Ss][Nn])"
+_ADDRESS_LINE = re.compile(
+    r"^(?P<street>[^,]+?)\s*,\s*(?:n[º°o]?\.?\s*)?"
+    rf"(?P<number>{_LINE_NUMBER})\s*(?:[-–,]\s*(?P<complement>.*?))?\s*$",
+    re.IGNORECASE,
+)
+# Mini biografia: dos controles, a quebra de linha e o tab ficam; estes viram espaço.
+_BIO_SPACES = frozenset("\v\f")
+# Nome: além das letras, espaço, apóstrofo (o do teclado e os que o celular põe sozinho), hífen e
+# ponto.
+_NAME_MARKS = frozenset(" '’‘´`ʼ-.")
+# Endereço colado ao nome ("site.com.br", "wa.me"): duas letras, ponto e letra. Iniciais ("J.R.")
+# passam.
+_NAME_ADDRESS = re.compile(r"[^\W\d_]{2}\.[^\W\d_]")
 
 
 def too_long(max_len: int) -> str:
     return f"No máximo {max_len} caracteres"
+
+
+def _letters_only(name: str) -> bool:
+    """Sem dígito, "@", "/", ":" nem link: o nome não leva contato para o cliente nem para os
+    e-mails (o nome da ficha pública entra na saudação do e-mail de validação)."""
+    if not all(ch.isalpha() or ch in _NAME_MARKS for ch in name):
+        return False
+    # Letras de outra largura ("ｗｗｗ") contam como as comuns.
+    folded = unicodedata.normalize("NFKC", name).casefold()
+    return "www" not in folded and "http" not in folded and not _NAME_ADDRESS.search(folded)
 
 
 def clean_text(value: str | None, max_len: int | None = None) -> str | None:
@@ -114,19 +151,40 @@ def rg_number(value: str | None) -> str | None:
 
 
 def normalize_issuer(text: str | None) -> str:
-    """= normalizeIssuer sem o corte: letras sem acento e espaço, em maiúsculas ("SSP")."""
+    """= normalizeIssuer sem o corte: letras sem acento, espaço, "/" e "-", em maiúsculas
+    ("SSP/SP")."""
     plain = _MARKS.sub("", unicodedata.normalize("NFD", text or ""))
     return re.sub(r"\s+", " ", _ISSUER_DROP.sub("", plain.upper()))
 
 
+def _tidy_issuer(text: str) -> str:
+    return " ".join(_ISSUER_SEPARATORS.sub(" ", text).split())
+
+
+def split_issuer(value: str | None) -> tuple[str | None, str | None]:
+    """= splitIssuer: o órgão emissor e a UF que veio no fim dele, depois de "/" ou "-" ("SSP/SP",
+    "ssp-sp", "SSP / SP": ("SSP", "SP")). Sem UF válida no fim (ou sem o órgão antes dela), "/" e
+    "-" viram espaço ("SSP/XX": ("SSP XX", None)). Quem junta com a UF do RG (rg_group) usa a do
+    fim só quando a do campo está vazia."""
+    from app.schemas.onboarding import UFS
+
+    text = normalize_issuer(value).strip()
+    match = _ISSUER_STATE.fullmatch(text)
+    issuer = _tidy_issuer(match["issuer"]) if match else ""
+    if match and issuer and match["state"] in UFS:
+        return issuer, match["state"]
+    return _tidy_issuer(text) or None, None
+
+
 def rg_issuer(value: str | None) -> str | None:
-    """Órgão emissor do RG: 2 a 20 letras."""
+    """Órgão emissor do RG: 2 a 20 letras ("SSP"). Com a UF no fim ("SSP/SP", "SSP-SP"), devolve
+    "SSP/SP": quem grava separa com rg_group (ou split_issuer), onde a UF do campo vence."""
     if not (value or "").strip():
         return None
-    issuer = normalize_issuer(value).strip()
-    if not ISSUER_MIN <= len(issuer) <= RG_ISSUER_MAX:
+    issuer, state = split_issuer(value)
+    if issuer is None or not ISSUER_MIN <= len(issuer) <= RG_ISSUER_MAX:
         raise ValueError(ISSUER_INVALID)
-    return issuer
+    return f"{issuer}/{state}" if state else issuer
 
 
 def uf(value: str | None) -> str | None:
@@ -145,11 +203,14 @@ def rg_group(
     number: str | None, issuer: str | None, state: str | None
 ) -> tuple[str | None, str | None, str | None]:
     """O RG vai com os três ou nenhum: sem o número, os três ficam vazios; com ele, órgão e UF são
-    obrigatórios. Devolve (número, órgão, UF) normalizados."""
+    obrigatórios. Devolve (número, órgão, UF) normalizados, com o órgão e a UF separados: a UF que
+    veio no fim do órgão ("SSP/SP") vale quando a do campo está vazia; com outra no campo, fica a do
+    campo e o fim sai."""
     rg = rg_number(number)
     if rg is None:
         return None, None, None
-    issuer_value, state_value = rg_issuer(issuer), uf(state)
+    issuer_value, issuer_state = split_issuer(rg_issuer(issuer))
+    state_value = uf(state) or issuer_state
     if issuer_value is None or state_value is None:
         raise ValueError(RG_INCOMPLETE)
     return rg, issuer_value, state_value
@@ -166,6 +227,43 @@ def company_group(
     if (name_value or trade_value) and document_value is None:
         raise ValueError(COMPANY_WITHOUT_CNPJ)
     return document_value, name_value, trade_value
+
+
+# ------------------------------------------------------------------ endereço
+
+
+def normalize_address_number(value: str | None) -> str:
+    """O número do endereço como se grava, sem conferir o tamanho: texto limpo (clean_text), em
+    maiúsculas ("100a" → "100A"); "SN" e "S / N" viram "S/N"."""
+    from app.services.tech_profile import clean
+
+    text = clean(value or "").upper()
+    return "S/N" if _NO_NUMBER.fullmatch(text) else text
+
+
+def address_number(value: str | None) -> str | None:
+    """Número do endereço (ficha, app e central iguais): normalize_address_number, até 10."""
+    text = normalize_address_number(value)
+    if not text:
+        return None
+    if len(text) > ADDRESS_NUMBER_MAX:
+        raise ValueError(too_long(ADDRESS_NUMBER_MAX))
+    return text
+
+
+def split_address_line(line: str | None) -> tuple[str, str, str | None] | None:
+    """(logradouro, número, complemento) de "Rua Exemplo, 123 - Apto 4"; None quando não dá com
+    segurança. = split_address_line da migração b7e2d4f6a8c1 (a ficha de antes, aprovada depois da
+    publicação, tem o endereço numa linha)."""
+    m = _ADDRESS_LINE.match((line or "").strip())
+    if not m or len(m["street"].strip()) < 2:
+        return None
+    number = re.sub(r"\s", "", m["number"]).upper()
+    number = "S/N" if number in ("S/N", "SN") else number
+    complement = " ".join((m["complement"] or "").split()) or None
+    if complement and len(complement) > ADDRESS_COMPLEMENT_MAX:
+        return None
+    return " ".join(m["street"].split())[:255], number, complement
 
 
 # ------------------------------------------------------------------ contato e veículo
@@ -231,8 +329,24 @@ def birth_date(value: date | str | None, today: date | None = None) -> date | No
 
 
 def bio(value: str | None) -> str | None:
-    """Mini biografia: texto limpo, até 500 caracteres."""
-    return clean_text(value, BIO_MAX)
+    """Mini biografia com os parágrafos (= normalizeBio): "\\r\\n" vira "\\n", sem espaços no fim das
+    linhas, três ou mais quebras viram duas (uma linha em branco entre os parágrafos) e sem quebras
+    nem espaços nas pontas; os 500 caracteres contam depois disso. Os espaços do meio da linha
+    ficam. Como em clean_text, saem os controles e a formatação (menos a quebra e o tab), antes do
+    NFC."""
+    text = (value or "").replace("\r\n", "\n").replace("\r", "\n")
+    text = "".join(
+        " " if ch in _BIO_SPACES else ch
+        for ch in text
+        if ch in "\n\t" or ch in _BIO_SPACES or unicodedata.category(ch) not in ("Cc", "Cf")
+    )
+    lines = unicodedata.normalize("NFC", text).split("\n")
+    text = re.sub(r"\n{3,}", "\n\n", "\n".join(line.rstrip() for line in lines)).strip()
+    if not text:
+        return None
+    if len(text) > BIO_MAX:
+        raise ValueError(too_long(BIO_MAX))
+    return text
 
 
 # ------------------------------------------------------------------ exibição (histórico)
