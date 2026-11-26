@@ -11,8 +11,9 @@ o resto não. As validações dos dados pessoais são as de schemas/personal.py;
 app.
 
 O nome vai para os textos do grupo do cliente, o relatório e o portal: pelo app, só letras (com
-acento), espaço, apóstrofo, hífen e ponto, sem "www", "http" nem endereço colado ("site.com"). Vale
-para o nome que o app manda (só quando muda): os nomes antigos ficam como estão.
+acento), espaço, apóstrofo, hífen e ponto, sem "www", "http" nem endereço colado ("site.com")
+(personal._letters_only, a mesma regra da ficha pública). Vale para o nome que o app manda (só
+quando muda): os nomes antigos ficam como estão.
 """
 
 import re
@@ -41,7 +42,7 @@ from app.schemas.tech_profile import (
 from app.services import tech_profile
 
 NAME_REQUIRED = "Informe seu nome completo"
-NAME_LETTERS = "Use só letras no nome"
+NAME_LETTERS = personal.NAME_LETTERS
 PHONE_REQUIRED = "Informe o celular com DDD"
 EMAIL_REQUIRED = "Informe um e-mail válido"
 CITY_REQUIRED = "Informe a cidade"
@@ -61,21 +62,6 @@ EDUCATION_REPEATED = "Formação repetida: {}"
 
 def _spaces(value: str | None) -> str:
     return " ".join((value or "").split())
-
-
-# Além das letras: espaço, apóstrofo (o do teclado e os que o celular põe sozinho), hífen e ponto.
-_NAME_MARKS = frozenset(" '’‘´`ʼ-.")
-# Endereço colado ("site.com.br", "wa.me"): duas letras, ponto e letra. Iniciais ("J.R.") passam.
-_NAME_ADDRESS = re.compile(r"[^\W\d_]{2}\.[^\W\d_]")
-
-
-def _letters_only(name: str) -> bool:
-    """Sem dígito, "@", "/", ":" nem link: o nome não leva contato para o cliente."""
-    if not all(ch.isalpha() or ch in _NAME_MARKS for ch in name):
-        return False
-    # Letras de outra largura ("ｗｗｗ") contam como as comuns.
-    folded = unicodedata.normalize("NFKC", name).casefold()
-    return "www" not in folded and "http" not in folded and not _NAME_ADDRESS.search(folded)
 
 
 class PixInfo(BaseModel):
@@ -108,9 +94,8 @@ class UnavailabilityPeriod(BaseModel):
     end: date
 
 
-def _optional_text(value: str | None, upper: bool = False) -> str | None:
-    text = personal.clean_text(value)
-    return text.upper() if text and upper else text
+def _optional_text(value: str | None) -> str | None:
+    return personal.clean_text(value)
 
 
 class MyProfileUpdate(BaseModel):
@@ -187,7 +172,7 @@ class MyProfileUpdate(BaseModel):
         name = unicodedata.normalize("NFC", _spaces(value))
         if len(name) < 3:
             raise ValueError(NAME_REQUIRED)
-        if not _letters_only(name):
+        if not personal._letters_only(name):
             raise ValueError(NAME_LETTERS)
         return name
 
@@ -230,8 +215,9 @@ class MyProfileUpdate(BaseModel):
     @field_validator("address_number")
     @classmethod
     def _address_number(cls, value: str | None) -> str | None:
-        """O número da casa: "S/N" e "100A" valem (em maiúsculas)."""
-        return _optional_text(value, upper=True)
+        """O número da casa em maiúsculas ("100A"; "SN" e "S / N" viram "S/N"), como a ficha e a
+        central."""
+        return personal.address_number(value)
 
     @field_validator("address_complement", "company_name", "company_trade_name", "vehicle_model")
     @classmethod

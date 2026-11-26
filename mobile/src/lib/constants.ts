@@ -437,9 +437,9 @@ export function splitIssuer(text: string): { issuer: string; state: string | nul
 }
 
 /**
- * A mini biografia como se grava (= personal.bio): "\r\n" vira "\n", sem espaços no fim das linhas, três ou mais
- * quebras viram duas (uma linha em branco entre os parágrafos) e sem quebras nem espaços nas pontas. O limite de
- * PROFILE_LIMITS.bio conta depois disso.
+ * A mini biografia como se grava: "\r\n" vira "\n", sem espaços no fim das linhas, três ou mais quebras viram duas (uma
+ * linha em branco entre os parágrafos) e sem quebras nem espaços nas pontas. O limite de PROFILE_LIMITS.bio conta
+ * depois disso. O servidor (personal.bio) faz o mesmo e ainda tira os caracteres de controle e aplica o NFC.
  */
 export function normalizeBio(text: string): string {
   return text

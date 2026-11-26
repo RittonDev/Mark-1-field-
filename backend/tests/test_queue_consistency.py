@@ -24,7 +24,7 @@ from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.routes import dashboard
-from app.core.enums import TicketEventType, UserRole
+from app.core.enums import OperationalStatus, TicketEventType, UserRole
 from app.models import Ticket, TicketEvent
 from app.services import activities, home, queues, reports
 from tests.conftest import World, requires_db
@@ -196,6 +196,55 @@ async def test_card_and_panel_count_the_same(
     load = next(a for a in summary["by_assignee"] if a["user_id"] == str(world.tech.user.id))
     # As 8 abertas do técnico; em campo, só a de agora.
     assert (load["open"], load["in_progress"]) == (8, 1)
+
+
+@pytest.mark.usefixtures("frozen_clock")
+async def test_technician_out_of_active_asks_to_swap(
+    client: AsyncClient,
+    world: World,
+    db: AsyncSession,  # noqa: F811
+) -> None:
+    """Técnico responsável Inativo ou Bloqueado na operação: "Técnico inativo: troque" (aviso) ou
+    "Técnico bloqueado: troque" (problema), sem o "sem acesso" junto (com o acesso cortado,
+    liberar não resolve). A OS pede atenção na fila e no painel; o sem acesso que está Ativo segue
+    com o motivo de antes."""
+    inactive = await add_user(db, "Tecnico Inativo", UserRole.TECHNICIAN)
+    blocked = await add_user(db, "Tecnico Bloqueado", UserRole.TECHNICIAN, active=False)
+    no_access = await add_user(db, "Tecnico Sem Acesso", UserRole.TECHNICIAN, active=False)
+    inactive.operational_status = OperationalStatus.INACTIVE
+    inactive.operational_reason = "Férias coletivas"
+    blocked.operational_status = OperationalStatus.BLOCKED
+    blocked.operational_reason = "Documentação vencida"
+    await add_ticket(db, world, title="Com técnico inativo", assignee_id=inactive.id)
+    await add_ticket(db, world, title="Com técnico bloqueado", assignee_id=blocked.id)
+    await add_ticket(db, world, title="Com técnico sem acesso", assignee_id=no_access.id)
+    await add_ticket(db, world, title="Tudo certo")
+    await db.commit()
+
+    queue = await _my_queue(client, world)
+    items = {i["title"]: i for i in queue["items"]}
+    assert items["Com técnico inativo"]["reasons"] == [
+        {"code": "technician_inactive", "label": "Técnico inativo: troque", "tone": "warning"}
+    ]
+    assert items["Com técnico bloqueado"]["reasons"] == [
+        {"code": "technician_blocked", "label": "Técnico bloqueado: troque", "tone": "danger"}
+    ]
+    assert [r["code"] for r in items["Com técnico sem acesso"]["reasons"]] == [
+        "inactive_technician"
+    ]
+    assert items["Tudo certo"]["reasons"] == []
+    assert {title: i["section"] for title, i in items.items()} == {
+        "Com técnico inativo": "attention",
+        "Com técnico bloqueado": "attention",
+        "Com técnico sem acesso": "attention",
+        "Tudo certo": "upcoming",
+    }
+    # Problema antes de aviso, como nos outros motivos.
+    titles = [i["title"] for i in queue["items"]]
+    assert titles.index("Com técnico bloqueado") < titles.index("Com técnico inativo")
+    assert queue["counts"]["attention"] == 3
+    row = await _panel_row(client, world, world.analyst.user.id)
+    assert row["attention"] == 3
 
 
 async def test_executing_only_and_scope_of_another_owner(

@@ -247,10 +247,13 @@ def _wanted_address(data: MyProfileUpdate, user: User) -> tuple | None:
 
 def _wanted_rg(data: MyProfileUpdate, user: User) -> tuple | None:
     """Os três ou nenhum: sem o número, os três ficam vazios; com ele, órgão e UF são obrigatórios
-    (o que veio já foi conferido pelo schema; o gravado fica como está)."""
+    (o que veio já foi conferido pelo schema; o gravado fica como está). O órgão com a UF no fim
+    ("SSP/SP") grava separado: a UF do fim vale quando a do RG está vazia (personal.rg_group)."""
     if not data.model_fields_set.intersection(_RG):
         return None
     number, issuer, state = _sent_or_stored(data, user, _RG)
+    issuer, issuer_state = personal.split_issuer(issuer)
+    state = state or issuer_state
     if number is None:
         wanted: tuple = (None, None, None)
     elif issuer is None or state is None:

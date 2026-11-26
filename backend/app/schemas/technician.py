@@ -186,11 +186,12 @@ class TechnicianUpdate(BaseModel):
 
     @field_validator("birth_date", mode="before")
     @classmethod
-    def _birth_date(cls, v: object) -> object:
-        # Antes do tipo: a data que não existe ("2026-02-30") dá a mensagem da tela.
-        if v is None or isinstance(v, str | dt.date):
-            return personal.birth_date(v)
-        return v
+    def _birth_date(cls, v: object) -> dt.date | None:
+        # Antes do tipo: a data que não existe ("2026-02-30") dá a mensagem da tela. Só texto ou
+        # data: o número viraria data (segundos desde 1970) sem passar pela regra dos 18 a 90 anos.
+        if v is not None and not isinstance(v, str | dt.date):
+            raise ValueError(personal.BIRTH_INVALID)
+        return personal.birth_date(v)
 
     @field_validator("phone_secondary")
     @classmethod
@@ -205,7 +206,8 @@ class TechnicianUpdate(BaseModel):
     @field_validator("address_number")
     @classmethod
     def _address_number(cls, v: str | None) -> str | None:
-        return personal.clean_text(v, personal.ADDRESS_NUMBER_MAX)
+        # Em maiúsculas ("s/n" vira "S/N"), como o app e a ficha: a mesma grafia nos três.
+        return personal.address_number(v)
 
     @field_validator("address_complement")
     @classmethod
@@ -229,14 +231,17 @@ class OperationalStatusIn(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    status: OperationalStatus
+    # Sem valor padrão de verdade: o None conferido (validate_default) cai no validador, que
+    # responde com o rótulo da tela também quando a situação não vem.
+    status: OperationalStatus = Field(default=None, validate_default=True)
     reason: str
     cut_access: bool = False
 
     @field_validator("status", mode="before")
     @classmethod
     def _status(cls, v: object) -> object:
-        # O rótulo da tela ("Situação"): o nome técnico "status" é "Status" nas telas da OS.
+        # O rótulo da tela ("Situação") vai no erro (ctx["label"]): o nome técnico "status" é
+        # "Status" nas telas da OS (services/validation_messages), e lá ele continua assim.
         if not isinstance(v, str) or v not in {s.value for s in OperationalStatus}:
             raise PydanticCustomError("value_error", "Escolha a situação", {"label": "Situação"})
         return v
@@ -343,8 +348,9 @@ class NearbyTechnician(BaseModel):
     email: str
     phone: str | None
     is_active: bool
-    # Situação na operação: Inativo e Bloqueado aparecem (com o selo) e não recebem OS.
+    # Situação na operação: Inativo e Bloqueado aparecem (com o selo e o motivo) e não recebem OS.
     operational_status: OperationalStatus = OperationalStatus.ACTIVE
+    operational_reason: str | None = None
     avatar_url: str | None
     base_city: str | None
     base_state: str | None

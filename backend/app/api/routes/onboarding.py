@@ -212,8 +212,9 @@ async def approve_application(
     body: ApplicationApprove | None = None,
 ) -> ApplicationApproved:
     """Aprova num passo (corpo opcional): o técnico entra na base com tudo o que a ficha coletou e
-    já acessa o app com o e-mail e a senha da ficha (sem senha, a boas-vindas leva o link para
-    criar). CPF já de outro usuário: 409. `welcome` diz se a boas-vindas foi para a fila."""
+    já acessa o app com o e-mail e a senha da ficha. Sem senha, a boas-vindas leva o link para
+    criar só com o e-mail validado (`password_link`); sem a validação, a central gera a senha
+    provisória. CPF já de outro usuário: 409. `welcome` diz se a boas-vindas foi para a fila."""
     application = await svc.get_application(db, application_id, lock=True)
     approval = await svc.approve(db, application, body or ApplicationApprove(), user)
     await db.commit()
@@ -227,6 +228,7 @@ async def approve_application(
     return ApplicationApproved(
         technician=UserOut.model_validate(technician),
         welcome=mail.queued(welcome, approval.welcome_status),
+        password_link=svc.welcome_password_link(technician),
     )
 
 

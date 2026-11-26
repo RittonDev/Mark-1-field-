@@ -8,8 +8,9 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from app.core.config import settings
+from app.core.enums import OperationalStatus, UserRole
 from app.models import User
-from app.services.map_distances import travel_minutes
+from app.services.map_distances import street_text, travel_minutes
 from tests.conftest import World, requires_db
 
 API = settings.API_PREFIX
@@ -47,7 +48,10 @@ async def test_distances_from_now_and_from_home(
         other = await db.get(User, uuid.UUID(str(world.tech_other.user.id)))
         assert tech is not None and other is not None
         tech.home_latitude, tech.home_longitude = -23.6000, -46.7000
-        tech.home_city, tech.home_state, tech.address_line = "São Paulo", "SP", "Rua das Flores, 10"
+        tech.home_city, tech.home_state = "São Paulo", "SP"
+        # Endereço em partes (Cadastro V2): o rótulo junta rua, número e complemento.
+        tech.address_line, tech.address_number = "Rua das Flores", "10"
+        tech.address_complement, tech.address_district = "Casa 2", "Bairro Exemplo"
         # Técnico 2: sem casa no cadastro, só a base (Campinas, onde mais atende).
         other.base_city, other.base_state = "Campinas", "SP"
         other.base_latitude, other.base_longitude = -22.9056, -47.0608
@@ -66,9 +70,9 @@ async def test_distances_from_now_and_from_home(
     assert 2 < first["live_to_place"]["km"] < 3.5
     assert 6 < first["home_to_place"]["km"] < 9
     assert first["live_to_home"]["km"] > 0
-    assert first["home"]["kind"] == "home" and first["home"]["label"].startswith(
-        "Casa · Rua das Flores"
-    )
+    assert first["home"]["kind"] == "home"
+    label = first["home"]["label"]
+    assert label == "Casa · Rua das Flores, 10 - Casa 2, Bairro Exemplo, São Paulo-SP"
     assert first["live_to_place"]["road_km"] > first["live_to_place"]["km"]
     assert first["live_at"] is not None
 
@@ -97,6 +101,68 @@ async def test_distances_from_now_and_from_home(
     # Só a gestão vê o mapa (e a casa dos técnicos).
     r = await client.get(f"{API}/tracking/distances", headers=th)
     assert r.status_code == 403
+
+
+@requires_db
+async def test_map_shows_the_operational_status(
+    client: AsyncClient, engine: AsyncEngine, world: World
+) -> None:
+    """Medir técnicos (distâncias) e o mapa ao vivo: Inativo e Bloqueado sem o acesso cortado
+    continuam no mapa, com a situação e o motivo para o selo (não recebem OS); o Ativo vem sem
+    motivo, mesmo o reativado."""
+    an = world.analyst.headers
+    store = await _store(client, world, "Loja Paulista", latitude=-23.5614, longitude=-46.6559)
+    tech_id = uuid.UUID(str(world.tech.user.id))
+    other_id = uuid.UUID(str(world.tech_other.user.id))
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with maker() as db:
+        gama = User(
+            name="Tecnico Gama",
+            email="tecnico.gama@exemplo.com",
+            password_hash="x",
+            role=UserRole.TECHNICIAN,
+            is_active=True,
+            operational_status=OperationalStatus.INACTIVE,
+            operational_reason="Férias coletivas",
+        )
+        db.add(gama)
+        blocked = await db.get(User, other_id)
+        reactivated = await db.get(User, tech_id)
+        assert blocked is not None and reactivated is not None
+        blocked.operational_status = OperationalStatus.BLOCKED
+        blocked.operational_reason = "Documentação vencida"
+        reactivated.operational_reason = "Voltou das férias"  # Ativo de novo
+        await db.commit()
+    expected = {
+        str(tech_id): ("active", None),
+        str(other_id): ("blocked", "Documentação vencida"),
+        str(gama.id): ("inactive", "Férias coletivas"),
+    }
+
+    def badges(rows: list[dict]) -> dict[str, tuple[str, str | None]]:
+        return {
+            row["id"]: (row["operational_status"], row["operational_reason"])
+            for row in rows
+            if row["id"] in expected
+        }
+
+    r = await client.get(
+        f"{API}/tracking/distances", params={"location_id": store["id"]}, headers=an
+    )
+    assert r.status_code == 200, r.text
+    assert badges(r.json()["technicians"]) == expected
+    r = await client.get(f"{API}/tracking/live", headers=an)
+    assert r.status_code == 200, r.text
+    assert badges(r.json()) == expected
+
+
+def test_street_text_joins_the_parts() -> None:
+    assert street_text("Rua Exemplo", "123", "Apto 4") == "Rua Exemplo, 123 - Apto 4"
+    assert street_text("Rua Exemplo", "S/N", None) == "Rua Exemplo, S/N"
+    assert street_text("Rua Exemplo", None, " Fundos ") == "Rua Exemplo - Fundos"
+    # A linha inteira de antes da separação (sem número à parte) fica como está.
+    assert street_text("Rua Exemplo, 123 - Apto 4", None, None) == "Rua Exemplo, 123 - Apto 4"
+    assert street_text(None, "", None) == ""
 
 
 def test_travel_minutes() -> None:

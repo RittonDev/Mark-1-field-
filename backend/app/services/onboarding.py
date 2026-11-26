@@ -4,9 +4,13 @@
   reenvia enquanto ela está em análise.
 - Aprovar é um passo só: cria o técnico com tudo o que a ficha coletou (dados pessoais, endereço em
   partes, empresa, veículo, áreas, a validação do e-mail e o perfil técnico), grava a linha
-  "Aprovado na homologação" no histórico do cadastro (via ficha) e põe a boas-vindas na fila.
+  "Aprovado na homologação" no histórico do cadastro (via ficha) e põe a boas-vindas na fila. A
+  ficha de antes (endereço numa linha, sem o número) tem o endereço separado com a regra da
+  migração (personal.split_address_line).
 - Reprovar guarda o motivo e apaga a senha da ficha. A reprovada pode ser reaberta (com motivo) e
-  analisada de novo; aprovada sem senha, o técnico cria a dele pelo link da boas-vindas.
+  analisada de novo. Aprovada sem senha: com o e-mail validado, a boas-vindas leva o link para
+  criar a senha; sem a validação, não (o link entregaria a conta a quem tem o endereço digitado
+  errado): a central gera a senha provisória e manda pelo WhatsApp (`password_link`).
 - Cada análise fica em `reviews` (aprovada, reprovada, reaberta, expirada), com quem e quando.
 
 LGPD: a ficha reprovada (ou pendente sem análise) não fica guardada para sempre. Depois de
@@ -34,6 +38,7 @@ from app.core.security import hash_password_async
 from app.db.base import utcnow
 from app.models import EmailOutbox, OnboardingInvite, Team, TechnicianApplication, User
 from app.models.user_change import VIA_FICHA
+from app.schemas import personal
 from app.schemas.account import EmailQueuedStatus
 from app.schemas.onboarding import (
     PRIVACY_VERSION,
@@ -194,6 +199,35 @@ def _ficha_cnpj(application: TechnicianApplication) -> str | None:
         return None
     normalized = normalize_document(value)
     return normalized if normalized and len(normalized) == 14 else None
+
+
+def ficha_address(
+    application: TechnicianApplication,
+) -> tuple[str | None, str | None, str | None]:
+    """Logradouro, número e complemento que a aprovação grava. Ficha com o logradouro e sem o
+    número (a de antes, com a linha inteira "Rua Exemplo, 123 - Apto 4", ou o número digitado no
+    logradouro): separado com a regra da migração (personal.split_address_line), com o complemento
+    da ficha depois do que veio na linha. O que não separa com segurança (ou os dois complementos
+    juntos passariam de 60) fica como está."""
+    street = application.address
+    number = application.address_number
+    complement = application.address_complement
+    if not street or number:
+        return street, number, complement
+    parts = personal.split_address_line(street)
+    if parts is None:
+        return street, number, complement
+    split_street, split_number, split_complement = parts
+    joined = " - ".join(dict.fromkeys(p for p in (split_complement, complement) if p)) or None
+    if joined and len(joined) > personal.ADDRESS_COMPLEMENT_MAX:
+        return street, number, complement
+    return split_street, split_number, joined
+
+
+def welcome_password_link(user: User) -> bool:
+    """A boas-vindas leva o link para criar a senha: o técnico está sem senha e o e-mail dele está
+    validado (a mesma regra de services/mail ao montar a boas-vindas)."""
+    return bool(user.must_change_password) and user.email_verified_at is not None
 
 
 def review_entry(
@@ -372,13 +406,14 @@ async def approve(
     db: AsyncSession, application: TechnicianApplication, data: ApplicationApprove, actor: User
 ) -> Approval:
     """Aprovação num passo (trave a ficha antes: get_application(lock=True)). Cria o técnico com
-    tudo o que a ficha coletou: contato, a senha (sem ela, uma aleatória e a troca obrigatória: a
-    boas-vindas leva o link para criar a dele), a foto, a cidade na grafia padrão, o endereço em
-    partes, CPF, nascimento, RG, empresa, veículo, mini biografia, as áreas, a validação do
-    e-mail e o perfil técnico (disponibilidade, transporte e CNH, aptidões; tech_profile.from_ficha,
-    via "ficha"). Ferramentas e certificações (texto livre) ficam só na ficha. O histórico do
-    cadastro começa com "Aprovado na homologação (HOM-…)" (via ficha, ator = quem aprovou) e a
-    boas-vindas vai para a fila (o commit, o `deliver_soon` e os avisos são da rota)."""
+    tudo o que a ficha coletou: contato, a senha (sem ela, uma aleatória e a troca obrigatória: com
+    o e-mail validado, a boas-vindas leva o link para criar a dele; sem a validação, a central
+    manda a provisória), a foto, a cidade na grafia padrão, o endereço em partes (ficha_address),
+    CPF, nascimento, RG, empresa, veículo, mini biografia, as áreas, a validação do e-mail e o
+    perfil técnico (disponibilidade, transporte e CNH, aptidões; tech_profile.from_ficha, via
+    "ficha"). Ferramentas e certificações (texto livre) ficam só na ficha. O histórico do cadastro
+    começa com "Aprovado na homologação (HOM-…)" (via ficha, ator = quem aprovou) e a boas-vindas
+    vai para a fila (o commit, o `deliver_soon` e os avisos são da rota)."""
     _ensure_pending(application)
     if await db.scalar(select(User.id).where(func.lower(User.email) == application.email)):
         raise WorkflowError(USER_EMAIL_TAKEN)
@@ -389,6 +424,7 @@ async def approve(
         raise WorkflowError("Grupo não encontrado")
     zip_digits = re.sub(r"\D", "", application.postal_code or "")
     company_document = _ficha_cnpj(application)
+    street, number, complement = ficha_address(application)
     now = utcnow()
     user = User(
         id=uuid.uuid4(),
@@ -410,9 +446,9 @@ async def approve(
         home_state=application.state,
         coverage_area=application.coverage_area,
         # Endereço em partes e CEP da ficha: a distância casa → loja usa mais que só a cidade.
-        address_line=application.address,
-        address_number=application.address_number,
-        address_complement=application.address_complement,
+        address_line=street,
+        address_number=number,
+        address_complement=complement,
         address_district=application.address_district,
         address_zip=f"{zip_digits[:5]}-{zip_digits[5:]}" if len(zip_digits) == 8 else None,
         cpf=cpf,

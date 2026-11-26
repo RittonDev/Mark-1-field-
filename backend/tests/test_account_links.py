@@ -301,8 +301,9 @@ async def test_password_reset_sets_password_and_ends_sessions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(settings, "TECH_APP_URL", "https://app.exemplo.com")
-    # Aprovado sem senha na ficha: a boas-vindas leva o link de criar a senha (72 h).
-    tech = await _add_user(engine, must_change_password=True)
+    # Aprovado sem senha na ficha e com o e-mail validado: a boas-vindas leva o link de criar a
+    # senha (72 h).
+    tech = await _add_user(engine, must_change_password=True, email_verified_at=datetime.now(UTC))
     raw = await _send(
         engine,
         mail_box,
@@ -333,19 +334,15 @@ async def test_password_reset_sets_password_and_ends_sessions(
     assert r.json() == {"email": ALFA, "app_url": "https://app.exemplo.com"}
     saved = await _reload(engine, tech.id)
     assert saved.must_change_password is False
-    assert saved.email_verified_at is not None, "o link chegou no e-mail de login"
     assert saved.sessions_revoked_at is not None
     assert (await client.get(f"{API}/auth/me", headers=old_session)).status_code == 401
     assert await _login(client, ALFA, NEW_PASSWORD) == 200, "a senha nova destrava o login"
     assert await _login(client, ALFA, PASSWORD) == 401
     [line] = await _history(engine, tech.id)
     assert (line.via, line.actor_id, line.note) == ("link", tech.id, None)
-    assert line.changes == [
-        {"field": "email_verified", "from": "pendente", "to": "validado"},
-        {"field": "password", "from": None, "to": "criada pelo link do e-mail"},
-    ]
+    assert line.changes == [{"field": "password", "from": None, "to": "criada pelo link do e-mail"}]
     [event] = [e for e in events if e["type"] == "profile.changed"]
-    assert event["data"] == {"fields": ["email_verified", "password"], "via": "link"}
+    assert event["data"] == {"fields": ["password"], "via": "link"}
     assert event["actor_id"] == str(tech.id)
 
     # Um link de senha mandado depois (pela central): "redefinida", sem validar de novo.
@@ -367,13 +364,37 @@ async def test_password_reset_sets_password_and_ends_sessions(
         {"field": "password", "from": None, "to": "redefinida pelo link do e-mail"}
     ]
 
+    # A central mandou o link para um login ainda não validado (ela decide): o link chegou nele,
+    # então criar a senha também valida o e-mail.
+    beta = await _add_user(engine, email="beta@exemplo.com")
+    raw3 = await _send(
+        engine,
+        mail_box,
+        EmailTemplate.PASSWORD_RESET,
+        to="beta@exemplo.com",
+        user=beta,
+        name=beta.name,
+        origin="central",
+    )
+    r = await client.post(
+        f"{API}/auth/password-reset", json={"token": raw3, "password": NEW_PASSWORD}
+    )
+    assert r.status_code == 200, r.text
+    assert (await _reload(engine, beta.id)).email_verified_at is not None
+    [line] = await _history(engine, beta.id)
+    assert line.changes == [
+        {"field": "email_verified", "from": "pendente", "to": "validado"},
+        {"field": "password", "from": None, "to": "redefinida pelo link do e-mail"},
+    ]
+
 
 async def test_password_reset_refused_without_app_access(
     client: AsyncClient, engine: AsyncEngine
 ) -> None:
     tech = await _add_user(engine, email_verified_at=datetime.now(UTC), is_active=False)
     raw = await _mint_reset(engine, tech, "central")
-    cut = {"detail": account.ACCESS_CUT, "code": "LINK_GONE"}
+    # O código próprio: a página mostra "Acesso ao app desativado" (e não "Link vencido").
+    cut = {"detail": account.ACCESS_CUT_TEXT, "code": "ACCESS_CUT"}
     r = await client.post(f"{API}/auth/password-reset/check", json={"token": raw})
     assert (r.status_code, r.json()) == (410, cut)
     r = await client.post(

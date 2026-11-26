@@ -4,7 +4,8 @@
   `mint` ao montar o e-mail) e vai no fragmento da URL (#token=): nem a fila nem o log o veem.
 - Uso único: `take` trava a linha (FOR UPDATE), confere e marca o uso; `peek` só confere (a página
   "Definir nova senha" mostra a conta antes de gastar o link). Ausente, usado, revogado ou vencido:
-  `LinkGone` (410, code LINK_GONE).
+  `LinkGone` (410, code LINK_GONE). Link de senha que vale, com o acesso ao app cortado:
+  `AccessCut` (410, code ACCESS_CUT).
 - Prazos: validação 72 h; nova senha 2 h; a primeira senha, pela boas-vindas, 72 h. Um link de senha
   novo revoga os anteriores ainda não usados; os de validação não (qualquer um válido serve).
 - Revogar (`revoke`): os de senha ao concluir, ao trocar a senha por qualquer caminho e ao cortar o
@@ -46,6 +47,7 @@ WELCOME_PASSWORD_HOURS = 72
 
 LINK_GONE = "LINK_GONE"
 EMAIL_IN_USE = "EMAIL_IN_USE"
+ACCESS_CUT = "ACCESS_CUT"
 RESET_LINK_GONE = (
     "Este link expirou ou já foi usado. Peça outro em “Esqueci minha senha”, no app, ou fale com "
     "a central pelo WhatsApp"
@@ -54,8 +56,9 @@ VERIFY_LINK_GONE = (
     "Este link de validação expirou ou já foi usado. Peça um novo no app, em Configurações › "
     "Contato, ou à central pelo WhatsApp"
 )
-# POST /auth/password-reset com o acesso ao app cortado (410, como o link que não vale mais).
-ACCESS_CUT = "Seu acesso ao app está desativado. Fale com a central pelo WhatsApp"
+# O link de senha com o acesso ao app cortado (410 ACCESS_CUT: a página mostra "Acesso ao app
+# desativado").
+ACCESS_CUT_TEXT = "Seu acesso ao app está desativado. Fale com a central pelo WhatsApp"
 EMAIL_IN_USE_TEXT = "Este e-mail já está em uso em outro cadastro. Fale com a central pelo WhatsApp"
 
 # "Esqueci minha senha": links por e-mail por hora (o excesso não sai e a resposta é a mesma).
@@ -91,6 +94,14 @@ class EmailInUse(CodedError):
 
     def __init__(self, message: str = EMAIL_IN_USE_TEXT) -> None:
         super().__init__(message, EMAIL_IN_USE, 409)
+
+
+class AccessCut(CodedError):
+    """410: o link de senha vale, mas o acesso ao app está cortado (nada muda e o link continua
+    como estava: com o acesso de volta, ele vale)."""
+
+    def __init__(self) -> None:
+        super().__init__(ACCESS_CUT_TEXT, ACCESS_CUT, 410)
 
 
 def gone_text(purpose: AccountTokenPurpose | str) -> str:
@@ -371,7 +382,7 @@ def _password_kind(token: AccountToken) -> Literal["reset", "create"]:
 
 async def _reset_user(db: AsyncSession, token: AccountToken, *, lock: bool) -> User:
     """O dono do link de senha. O login mudou depois do envio (o link foi para o endereço antigo):
-    o link não vale. Sem acesso ao app: 410 com ACCESS_CUT."""
+    o link não vale (LinkGone). Sem acesso ao app: AccessCut (410 ACCESS_CUT)."""
     user = (
         await _locked_user(db, token.user_id)
         if lock
@@ -380,7 +391,7 @@ async def _reset_user(db: AsyncSession, token: AccountToken, *, lock: bool) -> U
     if user is None or not _same(user.email, token.email):
         raise LinkGone(RESET_LINK_GONE)
     if not user.is_active:
-        raise LinkGone(ACCESS_CUT)
+        raise AccessCut()
     return user
 
 

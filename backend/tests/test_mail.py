@@ -92,6 +92,19 @@ def test_templates_texts(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "- Senha: a que você criou na ficha de cadastro." in w2.text
     assert "- App: https://app.exemplo.com" in w2.text
     assert f"Confirme também o seu e-mail: {link}" in w2.text
+    # Sem senha e sem o link (e-mail não validado): a central manda a provisória pelo WhatsApp; nem
+    # a validação vai.
+    w3 = mail_templates.welcome(
+        name="Tecnico Alfa",
+        company=COMPANY,
+        email="alfa@exemplo.com",
+        verify_link=link,
+        temporary_password=True,
+    )
+    assert "- Senha: a central manda uma senha provisória pelo WhatsApp." in w3.text
+    assert "a central manda uma senha provisória pelo WhatsApp." in w3.html
+    assert "#token=" not in w3.text and "#token=" not in w3.html
+    assert "criou na ficha" not in w3.text and "Confirme também" not in w3.text
 
     for origin, intro in (
         (
@@ -119,6 +132,46 @@ def test_templates_texts(monkeypatch: pytest.MonkeyPatch) -> None:
         name="<script>alert(1)</script>", company=COMPANY, reason="check", link="https://x/#t=1"
     )
     assert "<script>" not in evil.html
+
+
+def test_greeting_uses_the_first_name_only_when_it_is_a_name() -> None:
+    """O nome da ficha é livre e a validação vai para o endereço digitado: a saudação só usa a
+    primeira palavra quando ela é um nome (letras, apóstrofo ou hífen, até 30 caracteres)."""
+    for name, first in (
+        ("Tecnico Alfa", "Tecnico"),
+        ("  Érica   Exemplo ", "Érica"),
+        ("D'Ávila Exemplo", "D'Ávila"),
+        ("D’Ávila Exemplo", "D’Ávila"),
+        ("Ana-Maria Exemplo", "Ana-Maria"),
+        ("José Exemplo", "José"),  # acento separado (NFD) vira o composto
+        ("A" * 30, "A" * 30),
+    ):
+        assert mail_templates.first_name(name) == first, name
+    for name in (
+        "https://golpe.exemplo/entrar Silva",
+        "www.golpe.exemplo Silva",
+        "golpe.exemplo",
+        "tecnico@exemplo.com",
+        "Tecnico1 Alfa",
+        "<script>alert(1)</script>",
+        "-",
+        "'",
+        "A" * 31,
+        "",
+        "   ",
+        None,
+    ):
+        assert mail_templates.first_name(name) == "", name
+
+    evil = "https://golpe.exemplo/entrar Silva"
+    rendered = [
+        mail_templates.verify_email(name=evil, company=COMPANY, reason="signup", link="https://x"),
+        mail_templates.welcome(name=evil, company=COMPANY, email="alfa@exemplo.com"),
+        mail_templates.password_reset(name=evil, company=COMPANY, origin="self", link="https://x"),
+    ]
+    for r in rendered:
+        assert r.text.startswith("Olá.\n\n"), r.subject
+        assert "golpe" not in r.text and "golpe" not in r.html, r.subject
 
 
 def test_smtp_message_headers(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -367,7 +420,7 @@ async def test_retry_backoff_then_failed(engine: AsyncEngine, mail_box: MailBox)
 @requires_db
 async def test_permanent_error_fails_at_once(engine: AsyncEngine, mail_box: MailBox) -> None:
     async with _maker(engine)() as db:
-        user = await _tech(db, must_change_password=True)
+        user = await _tech(db, must_change_password=True, email_verified_at=datetime.now(UTC))
         await mail.enqueue(
             db,
             template=EmailTemplate.WELCOME,
@@ -416,10 +469,17 @@ async def test_welcome_variants_and_the_current_login(
     engine: AsyncEngine, mail_box: MailBox
 ) -> None:
     async with _maker(engine)() as db:
-        no_password = await _tech(db, must_change_password=True)
+        now = datetime.now(UTC)
+        # Sem senha (ficha reprovada e reaberta) e com o e-mail validado: o link de criar a senha.
+        no_password = await _tech(db, must_change_password=True, email_verified_at=now)
+        # Sem senha e com o e-mail nunca validado: nem o link de criar a senha nem a validação (o
+        # endereço pode ser de outra pessoa); a central manda a provisória pelo WhatsApp.
+        no_password_unverified = await _tech(
+            db, email="delta@exemplo.com", must_change_password=True
+        )
         unverified = await _tech(db, email="beta@exemplo.com")
-        verified = await _tech(db, email="gama@exemplo.com", email_verified_at=datetime.now(UTC))
-        for user in (no_password, unverified, verified):
+        verified = await _tech(db, email="gama@exemplo.com", email_verified_at=now)
+        for user in (no_password, no_password_unverified, unverified, verified):
             await mail.enqueue(
                 db,
                 template=EmailTemplate.WELCOME,
@@ -428,19 +488,27 @@ async def test_welcome_variants_and_the_current_login(
                 context={"name": user.name, "email": user.email},
             )
         await db.commit()
+        assert mail.sends_password_link(no_password)
+        assert not mail.sends_password_link(no_password_unverified)
+        assert not mail.sends_password_link(verified)
         # A central trocou o e-mail depois da aprovação: a boas-vindas vai para o login novo e
         # mostra ele em "Como entrar".
         unverified.email = "beta.nova@exemplo.com"
         await account.central_email_changed(db, unverified, None)
         await db.commit()
-        # As 3 boas-vindas e a validação do e-mail novo.
-        assert await mail.deliver_pending(db) == 4
+        # As 4 boas-vindas e a validação do e-mail novo.
+        assert await mail.deliver_pending(db) == 5
         sent = {
             (m["To"], str(m["Subject"]).split(":")[0]): text
             for m, text in zip(mail_box.messages, mail_box.texts(), strict=True)
         }
         alfa = sent[("tecnico.alfa@exemplo.com", "Cadastro aprovado")]
+        assert "- Senha: crie a sua neste link, que vale por 72 horas: " in alfa
         assert "/definir-senha#token=" in alfa and "Confirme também" not in alfa
+        delta = sent[("delta@exemplo.com", "Cadastro aprovado")]
+        assert "- Senha: a central manda uma senha provisória pelo WhatsApp." in delta
+        assert "#token=" not in delta and "/definir-senha" not in delta
+        assert "/validar-email" not in delta and "Confirme também" not in delta
         beta = sent[("beta.nova@exemplo.com", "Cadastro aprovado")]
         assert "- E-mail: beta.nova@exemplo.com" in beta and "beta@exemplo.com" not in beta
         assert "- Senha: a que você criou na ficha de cadastro." in beta

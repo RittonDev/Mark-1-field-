@@ -1,9 +1,18 @@
 import datetime as dt
 import re
+import unicodedata
 import uuid
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, ValidationInfo, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 from app.core.documents import is_valid_cnpj, is_valid_cpf, normalize_document
 from app.core.enums import ApplicationStatus
@@ -82,9 +91,10 @@ UFS = frozenset(
 # transporte e CNH, aptidões e formação) e os registros das ofertas de OS no app (quando o técnico
 # vê a oferta, abre o escopo e responde). 2026-11-25: RG, nascimento e CPF no cadastro, veículo,
 # dados da empresa, formas de recebimento, biografia, e-mail validado, indisponibilidade, situação
-# na operação, e-mails do cadastro e a reabertura da ficha reprovada. Versões "AAAA-MM-DD" ou
-# "AAAA-MM-DD.N" (a segunda do mesmo dia), comparadas como texto.
-PRIVACY_VERSION = "2026-11-25"
+# na operação, e-mails do cadastro e a reabertura da ficha reprovada. 2026-11-26: o dia da
+# publicação do cadastro V2 (a versão é a data do dia em que sai, igual na web e no app). Versões
+# "AAAA-MM-DD" ou "AAAA-MM-DD.N" (a segunda do mesmo dia), comparadas como texto.
+PRIVACY_VERSION = "2026-11-26"
 
 
 class CatalogItem(BaseModel):
@@ -173,8 +183,9 @@ class SkillIn(BaseModel):
 class ApplicationIn(BaseModel):
     """A ficha pública. Os campos do cadastro V2 são opcionais e usam as regras de
     schemas/personal.py (as mesmas do app e da central). A ordem dos campos importa para os grupos:
-    o RG (número, órgão emissor e UF) vem junto ou nada; razão social e nome fantasia pedem o
-    CNPJ."""
+    o RG (número, órgão emissor e UF) vem junto ou nada, e a UF que veio no fim do órgão ("SSP/SP")
+    vale quando a do RG está vazia; razão social e nome fantasia pedem o CNPJ. O nome sai no e-mail
+    de validação (que vai para qualquer endereço digitado): só letras, como no app."""
 
     full_name: str = Field(min_length=5, max_length=160)
     email: EmailStr
@@ -224,6 +235,15 @@ class ApplicationIn(BaseModel):
     def _strip(cls, v: str) -> str:
         return " ".join(v.split())
 
+    @field_validator("full_name")
+    @classmethod
+    def _name_letters(cls, v: str) -> str:
+        # NFC: o acento digitado separado da letra vira uma letra só (depois do _strip).
+        name = unicodedata.normalize("NFC", v)
+        if not personal._letters_only(name):
+            raise ValueError(personal.NAME_LETTERS)
+        return name
+
     @field_validator("email")
     @classmethod
     def _lower(cls, v: str) -> str:
@@ -250,21 +270,37 @@ class ApplicationIn(BaseModel):
     @field_validator("rg_issuer", "rg_state")
     @classmethod
     def _rg_rest(cls, v: str | None, info: ValidationInfo) -> str | None:
-        """Sem o número do RG, órgão e UF ficam vazios; com ele, são obrigatórios."""
+        """Sem o número do RG, órgão e UF ficam vazios; com ele, são obrigatórios. A UF vazia
+        aceita a que veio no fim do órgão ("SSP/SP"); com outra UF, vale a do campo."""
         if not info.data.get("rg_number"):
             return None
-        value = personal.rg_issuer(v) if info.field_name == "rg_issuer" else personal.uf(v)
+        if info.field_name == "rg_issuer":
+            value = personal.rg_issuer(v)
+        else:
+            _, issuer_state = personal.split_issuer(info.data.get("rg_issuer"))
+            value = personal.uf(v) or issuer_state
         if value is None:
             raise ValueError(personal.RG_INCOMPLETE)
         return value
 
+    @model_validator(mode="after")
+    def _issuer_without_state(self) -> Self:
+        """O órgão emissor gravado sem a UF do fim ("SSP/SP" fica "SSP"; a UF já foi para
+        rg_state quando ela estava vazia)."""
+        if self.rg_issuer:
+            self.rg_issuer, _ = personal.split_issuer(self.rg_issuer)
+        return self
+
     @field_validator("birth_date", mode="before")
     @classmethod
-    def _age(cls, v: object) -> object:
+    def _age(cls, v: object) -> dt.date | None:
         """De 18 a 90 anos no dia da operação (Brasília): o servidor roda em UTC, e entre 21h e 24h
-        o dia UTC já é o seguinte. A data que não existe: "Confira a data de nascimento"."""
-        if v is None or not isinstance(v, str | dt.date):
-            return v
+        o dia UTC já é o seguinte. A data que não existe: "Confira a data de nascimento". Só texto
+        ou data: o número viraria data (segundos desde 1970) sem passar pela regra da idade."""
+        if v is None:
+            return None
+        if not isinstance(v, str | dt.date):
+            raise ValueError(personal.BIRTH_INVALID)
         # Importado aqui para o schema não depender dos serviços ao carregar (ciclo).
         from app.services.activities import local_today
 
@@ -273,7 +309,8 @@ class ApplicationIn(BaseModel):
     @field_validator("address_number")
     @classmethod
     def _address_number(cls, v: str | None) -> str | None:
-        return personal.clean_text(v, personal.ADDRESS_NUMBER_MAX)
+        # Em maiúsculas ("s/n" vira "S/N"): a aprovação copia como o app e a central gravam.
+        return personal.address_number(v)
 
     @field_validator("address_complement")
     @classmethod
@@ -465,6 +502,11 @@ class ApplicationApproved(BaseModel):
 
     technician: UserOut
     welcome: EmailQueued
+    # A boas-vindas leva o link para criar a senha: o técnico está sem senha (a ficha não tinha) e o
+    # e-mail dele está validado. Sem senha e sem a validação, ela diz que a central manda uma senha
+    # provisória pelo WhatsApp (e a central gera a provisória). Com `welcome.status` diferente de
+    # "queued", nada sai.
+    password_link: bool = False
 
 
 class ApplicationReject(BaseModel):

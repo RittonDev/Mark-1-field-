@@ -1,10 +1,13 @@
 import logging
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy import func, select
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import DB, SESSION_ENDED, CurrentUser
 from app.core import sessions
@@ -22,6 +25,7 @@ from app.core.security import (
     verify_password_async,
 )
 from app.db.base import utcnow
+from app.db.errors import retryable
 from app.models.user import TICKET_MANAGER_ROLES, User
 from app.models.user_change import VIA_APP, VIA_LINK
 from app.schemas.account import (
@@ -250,6 +254,29 @@ async def _link_attempt(request: Request) -> None:
         raise _blocked(exc) from exc
 
 
+async def _apply_link(
+    db: AsyncSession, apply: Callable[[], Awaitable[account.LinkOutcome]]
+) -> account.LinkOutcome:
+    """Faz o que o link pede e grava (commit). O link trava o token e depois o técnico; o app, a
+    central e a fila travam o técnico e depois os tokens. Quando os dois se cruzam, o banco desfaz
+    um lado (impasse, SQLSTATE 40P01; ou falha de serialização, 40001): aqui a rota desfaz e
+    repete uma vez, já com o que a outra gravação deixou (o limite do IP não conta de novo). Se
+    acontecer de novo, o erro segue para o main (503 "Outra gravação ao mesmo tempo. Tente de
+    novo")."""
+    try:
+        outcome = await apply()
+        await db.commit()
+        return outcome
+    except DBAPIError as exc:
+        if not retryable(exc):
+            raise
+        log.info("Link do e-mail: outra gravação ao mesmo tempo, repetindo uma vez")
+    await db.rollback()
+    outcome = await apply()
+    await db.commit()
+    return outcome
+
+
 @router.post("/forgot-password", response_model=Message, status_code=status.HTTP_202_ACCEPTED)
 async def forgot_password(body: ForgotPasswordIn, db: DB, request: Request) -> Message:
     """Esqueci minha senha (app, sem login): 202 com o mesmo texto, exista ou não o e-mail. O link
@@ -272,8 +299,9 @@ async def forgot_password(body: ForgotPasswordIn, db: DB, request: Request) -> M
 @router.post("/password-reset/check", response_model=PasswordResetCheck)
 async def password_reset_check(body: TokenIn, db: DB, request: Request) -> PasswordResetCheck:
     """A página "Definir nova senha" ao abrir: confere o link sem gastá-lo e mostra a conta
-    (e-mail mascarado, primeiro nome), o tipo ("create": a primeira senha, pela boas-vindas) e o
-    link do app. 410 LINK_GONE: vencido, usado ou sem acesso ao app."""
+    (e-mail mascarado, primeiro nome; "" quando a primeira palavra do nome não é um nome), o tipo
+    ("create": a primeira senha, pela boas-vindas) e o link do app. 410 LINK_GONE: vencido ou
+    usado; 410 ACCESS_CUT: sem acesso ao app."""
     await _link_attempt(request)
     return await account.check_reset(db, body.token)
 
@@ -281,11 +309,11 @@ async def password_reset_check(body: TokenIn, db: DB, request: Request) -> Passw
 @router.post("/password-reset", response_model=PasswordResetDone)
 async def password_reset(body: PasswordResetIn, db: DB, request: Request) -> PasswordResetDone:
     """Grava a senha nova pelo link (uso único): encerra os acessos abertos, revoga os outros
-    links de senha e valida o e-mail de login (o link chegou nele). 410 LINK_GONE: vencido, usado
-    ou sem acesso ao app (nada muda e o link continua como estava)."""
+    links de senha e valida o e-mail de login (o link chegou nele). 410 LINK_GONE: vencido ou
+    usado; 410 ACCESS_CUT: sem acesso ao app (nada muda e o link continua como estava). Outra
+    gravação ao mesmo tempo no cadastro: repete uma vez (`_apply_link`)."""
     await _link_attempt(request)
-    outcome = await account.reset_password(db, body.token, body.password)
-    await db.commit()
+    outcome = await _apply_link(db, lambda: account.reset_password(db, body.token, body.password))
     user = outcome.user
     if user is not None:
         # A senha nova destrava o login e a senha pedida no app (as erradas de antes não contam).
@@ -300,10 +328,10 @@ async def verify_email(body: TokenIn, db: DB, request: Request) -> VerifyEmailRe
     """A página /validar-email ao abrir: valida o e-mail da ficha ("signup"), o e-mail novo
     pedido no app, que passa a ser o login ("change"), ou o login de sempre ("check"). O mesmo
     link aberto de novo com o e-mail já validado responde igual. 410 LINK_GONE; 409 EMAIL_IN_USE
-    quando o e-mail pedido virou o login de outro cadastro (o pedido sai)."""
+    quando o e-mail pedido virou o login de outro cadastro (o pedido sai). Outra gravação ao mesmo
+    tempo no cadastro: repete uma vez (`_apply_link`)."""
     await _link_attempt(request)
-    outcome = await account.verify_email(db, body.token)
-    await db.commit()
+    outcome = await _apply_link(db, lambda: account.verify_email(db, body.token))
     if outcome.user is not None and outcome.changes:
         await user_history.publish_changed(
             outcome.user,

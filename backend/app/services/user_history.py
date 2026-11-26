@@ -15,13 +15,19 @@ na operação) e as mudanças [{field, from, to}] já com o texto da tela:
   email_verified: "validado" ou "pendente";
 - work_schedule: "08:00–17:00, intervalo 12:00–13:00"; services: "12 serviços";
 - payout_preferred: a forma de recebimento preferencial MASCARADA ("PIX CPF ***.456.789-**",
-  "Banco Exemplo ****5678-9"; core/payout.describe); muda quando outra forma vira a preferencial;
+  "Banco Exemplo ****5678-9"; core/payout.describe); muda quando outra forma vira a preferencial.
+  Com a mesma máscara dos dois lados, vão também o titular e o documento dele mascarado e, se ainda
+  sair igual, " (outra forma)" no "to";
 - avatar: to "nova" na troca e null na remoção; password: to "provisória" (redefinição em Técnicos),
   "definida pela central" (Usuários), "criada no app" (o técnico trocou a provisória) ou "trocada
   no app"; as linhas especiais de `record` (application, password pelo link, password_link) vêm de
   quem grava;
 - DELTA_FIELDS gravam o que SAIU em "from" e o que ENTROU em "to" (null: nada), e não o de → para:
-  payout_methods ("PIX CPF ***.456.789-** · Tecnico Alfa"; core/payout.describe_with_holder),
+  payout_methods ("PIX CPF ***.456.789-** · Tecnico Alfa"; core/payout.describe_with_holder; quando
+  o destino muda sem mudar a máscara, o texto diz o que mudou sem abrir o dado: o documento do
+  titular mascarado, o tipo de conta e a agência pelo rótulo ("Conta corrente" → "Conta poupança",
+  "Ag. 0001" → "Ag. 0002"), o código do banco ("banco 999") e "outra conta", "outra chave" ou
+  "outro documento" só no "to"; `_methods_delta`),
   unavailability ("20/12/2026 a 05/01/2027"; só os períodos que não acabaram) e o perfil técnico
   (o técnico muda no app; services/tech_profile.py): tools com os nomes em ordem alfabética
   ("Escada, Multímetro"), availability em turnos ("sáb · tarde e noite"), skills "Linux (Básico)"

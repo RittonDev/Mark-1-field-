@@ -286,12 +286,12 @@ async def test_not_active_leaves_the_automatic_but_a_pinned_one_stays(
     client: AsyncClient, engine: AsyncEngine, world: World
 ) -> None:
     """Inativo e Bloqueado (situação na operação) ficam no ranking, mas fora do automático, e o
-    próximo sobe; fixado pela central, continua, com a situação (a web mostra o selo). Nas
-    sugestões não entram."""
+    próximo sobe; fixado pela central, continua, com a situação e o motivo (o selo da web e o
+    title dele). O Ativo vem sem motivo, mesmo o reativado. Nas sugestões não entram."""
     ids = await _seed(engine, world)
     an = world.analyst.headers
     async with engine.begin() as conn:
-        for letter, status in (("A", "inactive"), ("B", "blocked")):
+        for letter, status in (("A", "inactive"), ("B", "blocked"), ("C", "active")):
             await conn.execute(
                 update(User)
                 .where(User.id == uuid.UUID(ids[letter]))
@@ -303,19 +303,24 @@ async def test_not_active_leaves_the_automatic_but_a_pinned_one_stays(
     body = r.json()
     assert _ids(body["favorites"]) == [ids["H"], ids["C"], ids["D"]]
     assert all(f["operational_status"] == "active" for f in body["favorites"])
+    assert all(f["operational_reason"] is None for f in body["favorites"])  # C: reativado
     others = {o["id"]: o for o in body["others"]}
     assert _ids(body["others"]) == [ids["A"], ids["B"], ids["I"], ids["E"]]
     assert (others[ids["A"]]["rank"], others[ids["A"]]["operational_status"]) == (1, "inactive")
     assert others[ids["B"]]["operational_status"] == "blocked"
+    for letter in "AB":
+        assert others[ids[letter]]["operational_reason"] == "Motivo de exemplo"
 
     r = await client.put(f"{FAV}/{ids['A']}", json=SANTOS, headers=an)
     assert r.status_code == 200, r.text
     favorites = r.json()["favorites"]
     assert _ids(favorites) == [ids["A"], ids["H"], ids["C"], ids["D"]]
     assert (favorites[0]["pinned"], favorites[0]["operational_status"]) == (True, "inactive")
+    assert favorites[0]["operational_reason"] == "Motivo de exemplo"
     listed = (await client.get(FAV, params={"state": "SP"}, headers=an)).json()
     santos = next(c for c in listed["cities"] if c["key"] == "santos")
     assert santos["favorites"][0]["operational_status"] == "inactive"
+    assert santos["favorites"][0]["operational_reason"] == "Motivo de exemplo"
 
     r = await client.get(
         f"{API}/technicians/suggest", params={"location_id": ids["centro"], "limit": 10}, headers=an

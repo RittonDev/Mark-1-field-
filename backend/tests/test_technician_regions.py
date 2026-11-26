@@ -9,6 +9,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from httpx import AsyncClient
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from app.core.config import settings
@@ -209,6 +210,13 @@ async def test_nearby_orders_by_history_live_and_home(
 ) -> None:
     ids = await _seed(engine, world)
     an = world.analyst.headers
+    # Bloqueado (sem cortar o acesso) continua na lista, no mesmo lugar, com o selo e o motivo.
+    async with engine.begin() as conn:
+        await conn.execute(
+            update(User)
+            .where(User.id == uuid.UUID(ids["other"]))
+            .values(operational_status="blocked", operational_reason="Documentação vencida")
+        )
     r = await client.get(
         f"{API}/technicians/nearby", params={"location_id": ids["fort1"]}, headers=an
     )
@@ -234,8 +242,16 @@ async def test_nearby_orders_by_history_live_and_home(
     assert other["nearest_kind"] == "store_history" and other["distance_km"] < 5
     assert any(reason.startswith("Já atendeu a ") for reason in other["reasons"])
     assert any(reason.startswith("Mora a 14") for reason in other["reasons"])
+    assert (other["operational_status"], other["operational_reason"]) == (
+        "blocked",
+        "Documentação vencida",
+    )
+    assert (first["operational_status"], first["operational_reason"]) == ("active", None)
 
-    assert rows[3]["is_active"] is False and "Inativo no app" in rows[3]["reasons"]
+    # Sem acesso ao app: o motivo com o texto de hoje ("Inativo" agora é a situação).
+    assert rows[3]["is_active"] is False and "Sem acesso ao app" in rows[3]["reasons"]
+    assert (rows[3]["operational_status"], rows[3]["operational_reason"]) == ("active", None)
+    assert not any("Inativo" in reason for row in rows for reason in row["reasons"])
 
     only_active = (
         await client.get(
