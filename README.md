@@ -287,7 +287,7 @@ O site recebe só um código de uso único (60 s) e troca pelos tokens, que nunc
   (SHA-256) e o token vai no fragmento da URL (`#token=`), que não chega a servidor nem a log. A validação vale 72 h e
   a senha nova 2 h (a primeira senha, pela boas-vindas, 72 h). O "Esqueci minha senha" responde igual exista ou não o
   e-mail e só manda o link ao técnico com acesso e o e-mail validado; os pedidos e as aberturas de link têm limite por
-  IP e por e-mail. Trocar a senha, gerar a provisória ou cortar o acesso invalida os links de senha.
+  IP e por e-mail. Trocar a senha, gerar a provisória ou cortar o acesso invalidam os links de senha.
 - **E-mails sem resposta e sem dados no log:** o remetente não recebe resposta (sem Reply-To, com `Auto-Submitted`), o
   log leva só o id e o modelo do e-mail, as credenciais do SMTP ficam só no `.env` e, em produção, a API não sobe com
   `SMTP_SECURITY=none`. O CEP buscado também não fica no log (nem nas URLs do ViaCEP e da BrasilAPI).
@@ -306,12 +306,8 @@ deslocamento" anda até o cliente, quem está "em atendimento" fica parado. Não
 - Rastreamento em segundo plano no app (exige build de desenvolvimento do Expo, não o Expo Go).
 - Envio real de push: `LogPushProvider` só registra no log; falta ligar o Firebase Cloud Messaging (e gerar o app instalado). Até lá, no Expo Go, OS nova e oferta só aparecem com o app aberto.
 - SLA em horário comercial e feriados (hoje 24x7), SLA por contrato e escalonamento automático.
-- Envio de e-mail ligado em produção: falta o provedor SMTP e o remetente que não recebe resposta (com SPF e DKIM do
-  domínio). Até lá, o envio fica desligado: o "Esqueci minha senha" manda falar com a central, e a central usa o
-  WhatsApp e a senha provisória.
-- Cadastro do técnico, Entrega 2: documentos e certificações (com validade), currículo, avaliações, anexos internos,
-  catálogos de áreas de atuação e de aptidões, a central editando o perfil profissional e os filtros novos da lista.
-  Entrega 3: Elo por pontos e Desempenho (as seções aparecem na ficha quando cada entrega subir).
+- Envio de e-mail ligado em produção: falta o provedor SMTP e o remetente que não recebe resposta (com SPF e DKIM do domínio). Até lá, o envio fica desligado: o "Esqueci minha senha" manda falar com a central, e a central usa o WhatsApp e a senha provisória.
+- Cadastro do técnico, Entrega 2: documentos e certificações (com validade), currículo, avaliações, anexos internos, catálogos de áreas de atuação e de aptidões, a central editando o perfil profissional e os filtros novos da lista. Entrega 3: Elo por pontos e Desempenho (as seções aparecem na ficha quando cada entrega subir).
 - Mapa base contratado para produção (`NEXT_PUBLIC_MAP_TILES_URL`; o padrão OpenStreetMap é para uso moderado).
 - Armazenamento de anexos em S3/R2 (hoje em disco, no volume `media`).
 - Abertura de OS por e-mail/WhatsApp, base de conhecimento, pesquisa de satisfação e relatórios exportáveis.
